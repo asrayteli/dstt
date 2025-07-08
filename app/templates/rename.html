@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-xl mx-auto mt-10 bg-white rounded-xl shadow p-6">
+  <h2 class="text-xl font-bold mb-4">🔄 ファイル名一括変換ツール</h2>
+
+  <form action="/tools/rename" method="POST" enctype="multipart/form-data" id="renameForm">
+    <div class="mb-4">
+      <label class="block mb-1">ファイルを複数選択:</label>
+      <input type="file" name="files" multiple class="w-full" id="fileInput">
+    </div>
+
+    <div class="mb-4">
+      <label class="block mb-1">変換方法:</label>
+      <select name="mode" class="w-full border rounded px-2 py-1">
+        <option value="sequential">連番（prefix_001.ext）</option>
+        <option value="date">日付＋連番（20250706_001.ext）</option>
+        <option value="replace">文字列置換</option>
+        <option value="append-sequential">元名_連番</option>
+        <option value="append-date">元名_日付</option>
+      </select>
+    </div>
+
+    <div class="mb-4" id="replace-options" style="display: none;">
+      <label class="block mb-1">置換元:</label>
+      <input type="text" name="search" class="w-full border rounded px-2 py-1">
+      <label class="block mb-1 mt-2">置換先:</label>
+      <input type="text" name="replace" class="w-full border rounded px-2 py-1">
+    </div>
+
+    <div class="mb-4">
+      <label class="block mb-1">接頭語（prefix）:</label>
+      <input type="text" name="prefix" class="w-full border rounded px-2 py-1" placeholder="例: file_">
+    </div>
+
+    <div class="mb-4">
+      <label class="block mb-1">選択中のファイル:</label>
+      <ul id="fileList" class="list-disc pl-4 text-sm text-gray-700">
+        <!-- 選択されたファイルがここに表示されます -->
+      </ul>
+    </div>
+
+    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">変換＆ダウンロード</button>
+  </form>
+</div>
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const fileList = document.getElementById('fileList');
+  const form = document.getElementById('renameForm');
+  let filesArray = [];
+
+  // ファイル追加時の処理
+  fileInput.addEventListener('change', function () {
+    const newFiles = Array.from(fileInput.files);
+    filesArray = [...filesArray, ...newFiles]; // 既存のファイルと新しいファイルを結合
+    updateFileList(); // ファイルリストを更新
+  });
+
+  // ファイルリスト更新
+  function updateFileList() {
+    fileList.innerHTML = ''; // リストをリセット
+    filesArray.forEach((file, index) => {
+      const li = document.createElement('li');
+      li.textContent = file.name;
+      const removeButton = document.createElement('button');
+      removeButton.textContent = '削除';
+      removeButton.className = 'ml-2 text-red-500';
+      removeButton.onclick = function () {
+        removeFile(index); // インデックスでファイルを削除
+      };
+      li.appendChild(removeButton);
+      fileList.appendChild(li);
+    });
+  }
+
+  // ファイル削除
+  function removeFile(index) {
+    filesArray.splice(index, 1); // 指定されたインデックスのファイルを削除
+    updateFileList(); // リストを更新
+    // フォームの入力内容を再設定
+    const dataTransfer = new DataTransfer();
+    filesArray.forEach(file => dataTransfer.items.add(file));
+    fileInput.files = dataTransfer.files;
+  }
+
+  // フォーム送信時にファイルを送信対象として反映
+  form.addEventListener('submit', function(event) {
+    const dataTransfer = new DataTransfer();
+    filesArray.forEach(file => dataTransfer.items.add(file));
+    fileInput.files = dataTransfer.files; // 送信対象として反映
+  });
+
+  document.querySelector('select[name="mode"]').addEventListener('change', function () {
+    document.getElementById('replace-options').style.display =
+      this.value === 'replace' ? 'block' : 'none';
+  });
+</script>
+{% endblock %}

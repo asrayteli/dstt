@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto bg-white p-8 rounded-2xl shadow-md mt-6">
+  <h2 class="text-xl font-bold mb-4">📅 日時加算・減算</h2>
+  <form method="POST" class="space-y-4">
+    <input type="hidden" name="mode" value="addsub">
+    <label class="block">
+      基準日時:
+      <input type="datetime-local" name="base_datetime" class="w-full border rounded px-2 py-1 mt-1" required>
+    </label>
+    <div class="grid grid-cols-3 gap-4">
+      <label>日: <input type="number" name="days" class="w-full border rounded px-2 py-1" value="0"></label>
+      <label>時: <input type="number" name="hours" class="w-full border rounded px-2 py-1" value="0"></label>
+      <label>分: <input type="number" name="minutes" class="w-full border rounded px-2 py-1" value="0"></label>
+    </div>
+    <label class="block mt-2">
+      操作:
+      <select name="operation" class="w-full border rounded px-2 py-1 mt-1">
+        <option value="add">加算</option>
+        <option value="sub">減算</option>
+      </select>
+    </label>
+    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">計算</button>
+  </form>
+</div>
+
+<div class="max-w-3xl mx-auto bg-white p-8 rounded-2xl shadow-md mt-6">
+  <h2 class="text-xl font-bold mb-4">🕓 日時差分</h2>
+  <form method="POST" class="space-y-4">
+    <input type="hidden" name="mode" value="diff">
+    <label class="block">
+      日時1:
+      <input type="datetime-local" name="datetime1" class="w-full border rounded px-2 py-1 mt-1" required>
+    </label>
+    <label class="block">
+      日時2:
+      <input type="datetime-local" name="datetime2" class="w-full border rounded px-2 py-1 mt-1" required>
+    </label>
+    <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">差分計算</button>
+  </form>
+</div>
+
+{% if result %}
+<div class="max-w-3xl mx-auto mt-6 text-center text-lg font-semibold text-blue-700">
+  ✅ 結果: {{ result }}
+</div>
+{% endif %}
+{% endblock %}

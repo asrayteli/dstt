@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h1 class="text-2xl font-bold mb-6">ようこそ、DaiShinToTools ダッシュボードへ</h1>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+    <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
+      <h2 class="text-lg font-semibold mb-2">📆 日時計算</h2>
+      <p class="text-sm text-gray-600 mb-4">日時の加算・減算や差分を計算できます</p>
+      <a href="/tools/datecalc" class="text-blue-600 hover:underline">開く →</a>
+    </div>
+
+
+    <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
+      <h2 class="text-lg font-semibold mb-2">🧮 電卓</h2>
+      <p class="text-sm text-gray-600 mb-4">最もシンプルな電卓</p>
+      <a href="/tools/calc" class="text-blue-600 hover:underline">開く →</a>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
+      <h2 class="text-lg font-semibold mb-2">🔄 一括リネーム</h2>
+      <p class="text-sm text-gray-600 mb-4">アップロードしたファイル名を一括で変換</p>
+      <a href="/tools/rename" class="text-blue-600 hover:underline">開く →</a>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
+      <h2 class="text-lg font-semibold mb-2">📦 ファイル圧縮</h2>
+      <p class="text-sm text-gray-600 mb-4">アップロードしたファイルを圧縮</p>
+      <a href="/tools/compress" class="text-blue-600 hover:underline">開く →</a>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
+      <h2 class="text-lg font-semibold mb-2">📊 CSV整形・検証ツール</h2>
+      <p class="text-sm text-gray-600 mb-4">CSVの操作 検証を行います。</p>
+      <a href="/tools/csvtool" class="text-blue-600 hover:underline">開く →</a>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
+      <h2 class="text-lg font-semibold mb-2">🔐 パスワード生成・管理ツール</h2>
+      <p class="text-sm text-gray-600 mb-4">強固なパスワードを生成 管理することができます。</p>
+      <a href="/tools/password_tool" class="text-blue-600 hover:underline">開く →</a>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
+      <h2 class="text-lg font-semibold mb-2">📅 営業日計算ツール</h2>
+      <p class="text-sm text-gray-600 mb-4">指定営業日を計算できます。</p>
+      <a href="/tools/workday" class="text-blue-600 hover:underline">開く →</a>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
+      <h2 class="text-lg font-semibold mb-2">📚 PDF Power</h2>
+      <p class="text-sm text-gray-600 mb-4">PDFを操作する汎用ツール</p>
+      <a href="/tools/pdf_power" class="text-blue-600 hover:underline">開く →</a>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    // ここに必要なJavaScriptを追加できます
+    console.log("DSTT Dashboard loaded");
+  </script>
+{% endblock %}

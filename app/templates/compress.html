@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-xl mx-auto mt-10 bg-white rounded-xl shadow p-6">
+  <h2 class="text-xl font-bold mb-4">📦 圧縮ファイル生成ツール</h2>
+
+  <form action="/tools/compress" method="POST" enctype="multipart/form-data" id="compressForm">
+    <div class="mb-4">
+      <label class="block mb-1">ファイルを複数選択:</label>
+      <input type="file" name="files" multiple class="w-full" id="fileInput">
+    </div>
+
+    <div class="mb-4">
+      <label class="block mb-1">選択中のファイル:</label>
+      <ul id="fileList" class="list-disc pl-4 text-sm text-gray-700">
+        <!-- 選択されたファイルがここに表示されます -->
+      </ul>
+    </div>
+
+    <div class="mb-4">
+      <label class="block mb-1">圧縮形式を選択:</label>
+      <select name="format" class="w-full border rounded px-2 py-1">
+        <option value="zip">ZIP</option>
+        <option value="tar">TAR</option>
+        <option value="tar.gz">TAR.GZ</option>
+      </select>
+    </div>
+
+    <div class="mb-4">
+      <label class="block mb-1">パスワード（任意・ZIPのみ）:</label>
+      <input type="password" name="password" class="w-full border rounded px-2 py-1" placeholder="パスワードを設定（任意）">
+    </div>
+
+    <div class="mb-4">
+      <label class="block mb-1">圧縮ファイル名（任意）:</label>
+      <input type="text" name="archive_name" class="w-full border rounded px-2 py-1" placeholder="例: archive_name">
+    </div>
+
+    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">圧縮＆ダウンロード</button>
+  </form>
+</div>
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const fileList = document.getElementById('fileList');
+  const form = document.getElementById('compressForm');
+  let filesArray = [];
+
+  fileInput.addEventListener('change', function () {
+    const newFiles = Array.from(fileInput.files);
+    filesArray = [...filesArray, ...newFiles];
+    updateFileList();
+  });
+
+  function updateFileList() {
+    fileList.innerHTML = '';
+    filesArray.forEach((file, index) => {
+      const li = document.createElement('li');
+      li.textContent = file.name;
+      const removeButton = document.createElement('button');
+      removeButton.textContent = '削除';
+      removeButton.className = 'ml-2 text-red-500';
+      removeButton.onclick = function () {
+        removeFile(index);
+      };
+      li.appendChild(removeButton);
+      fileList.appendChild(li);
+    });
+  }
+
+  function removeFile(index) {
+    filesArray.splice(index, 1);
+    updateFileList();
+    const dataTransfer = new DataTransfer();
+    filesArray.forEach(file => dataTransfer.items.add(file));
+    fileInput.files = dataTransfer.files;
+  }
+
+  form.addEventListener('submit', function(event) {
+    const dataTransfer = new DataTransfer();
+    filesArray.forEach(file => dataTransfer.items.add(file));
+    fileInput.files = dataTransfer.files;
+  });
+</script>
+{% endblock %}

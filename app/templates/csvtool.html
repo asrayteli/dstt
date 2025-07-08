@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-4xl mx-auto mt-10 bg-white rounded-xl shadow p-6">
+  <h2 class="text-xl font-bold mb-4">📊 CSV整形・検証ツール</h2>
+
+  <form action="/tools/csvtool" method="POST" enctype="multipart/form-data">
+    <div class="mb-4">
+      <label class="block mb-1">CSVファイルを選択:</label>
+      <input type="file" name="csvfile" accept=".csv" required class="w-full">
+    </div>
+    <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">アップロード</button>
+  </form>
+
+  {% if headers %}
+  <form action="/tools/csvtool/process" method="POST" id="processForm">
+    <div class="mt-6">
+      <label class="block font-semibold mb-2">✅ オプション:</label>
+      <label><input type="checkbox" name="trim" checked> セルの前後空白を削除</label><br>
+      <label><input type="checkbox" name="check_missing" checked> 欠損チェック</label><br>
+      <label><input type="checkbox" name="check_duplicate"> 重複行チェック</label><br>
+    </div>
+
+    <div class="mt-4">
+      <label class="block font-semibold mb-2">🔀 並び順を変更（ドラッグして並び替え）:</label>
+      <ul id="sortableHeaders" class="flex flex-wrap gap-2 bg-gray-50 p-2 rounded border">
+        {% for h in headers %}
+          <li class="draggable-header bg-gray-200 px-3 py-1 rounded cursor-move" data-header="{{ h }}">{{ h }}</li>
+        {% endfor %}
+      </ul>
+      <input type="hidden" name="headers_order" id="headersOrder">
+    </div>
+
+    <div class="mt-4">
+      <label class="block font-semibold mb-2">✂ 抽出する列:</label>
+      {% for h in headers %}
+        <label class="mr-2"><input type="checkbox" name="selected_columns" value="{{ h }}" checked> {{ h }}</label>
+      {% endfor %}
+    </div>
+
+    <div class="mt-4">
+      <label class="block font-semibold mb-1">🔍 フィルタ条件:</label>
+      <input type="text" name="filter" class="w-full border rounded px-2 py-1" placeholder="例: 山田">
+    </div>
+
+    <button type="submit" class="bg-blue-600 text-white px-4 py-2 mt-4 rounded hover:bg-blue-700">操作を確定</button>
+  </form>
+
+  <div class="mt-6">
+    <h3 class="font-semibold mb-2">📋 プレビュー（最大20行）:</h3>
+    <div class="overflow-x-auto max-h-80 border rounded">
+      <table class="table-auto border-collapse w-full text-sm">
+        <thead>
+          <tr>
+            {% for h in headers %}
+              <th class="border px-2 py-1 bg-gray-100">{{ h }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in preview %}
+            <tr>
+              {% for cell in row %}
+                <td class="border px-2 py-1">{{ cell }}</td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if issues %}
+    <div class="mt-4 text-red-600">
+      <h4 class="font-semibold mb-1">⚠ 検出された問題:</h4>
+      <ul class="list-disc pl-5 text-sm">
+        {% for issue in issues %}
+          <li>{{ issue }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <div class="mt-6">
+    <a href="{{ url_for('csvtool.download') }}" class="text-blue-600 underline">📥 修正済みCSVをダウンロード</a>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+  .draggable-header {
+    user-select: none;
+  }
+</style>
+
+<script>
+  // 並び順を取得してフォームに埋め込む
+  const headersOrderInput = document.getElementById("headersOrder");
+  const sortableHeaders = document.getElementById("sortableHeaders");
+
+  let dragSrcEl = null;
+
+  function handleDragStart(e) {
+    dragSrcEl = this;
+    this.classList.add("opacity-50");
+  }
+
+  function handleDragEnd() {
+    this.classList.remove("opacity-50");
+    updateHeadersOrderInput();
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    const target = e.target.closest(".draggable-header");
+    if (target && target !== dragSrcEl) {
+      const rect = target.getBoundingClientRect();
+      const next = (e.clientX - rect.left) / rect.width > 0.5;
+      sortableHeaders.insertBefore(dragSrcEl, next ? target.nextSibling : target);
+    }
+  }
+
+  function updateHeadersOrderInput() {
+    const order = Array.from(sortableHeaders.children).map(el => el.dataset.header);
+    headersOrderInput.value = JSON.stringify(order);
+  }
+
+  document.querySelectorAll(".draggable-header").forEach(el => {
+    el.setAttribute("draggable", true);
+    el.addEventListener("dragstart", handleDragStart);
+    el.addEventListener("dragend", handleDragEnd);
+  });
+
+  sortableHeaders.addEventListener("dragover", handleDragOver);
+  updateHeadersOrderInput(); // 初期値設定
+</script>
+{% endblock %}

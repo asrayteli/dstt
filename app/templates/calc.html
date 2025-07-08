@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-md mx-auto mt-10 bg-white rounded-xl shadow p-6">
+  <h2 class="text-xl font-bold mb-4 text-center">🧮 電卓</h2>
+
+  <!-- 表示領域 -->
+  <input id="display" type="text" readonly class="w-full mb-4 text-right text-2xl p-2 border rounded bg-gray-50" />
+
+  <!-- ボタン -->
+  <div class="grid grid-cols-4 gap-2 mb-4">
+    {% for row in [
+      ['7','8','9','/'],
+      ['4','5','6','*'],
+      ['1','2','3','-'],
+      ['0','.','','+']
+    ] %}
+      {% for item in row %}
+        <button onclick="press('{{ item }}')" class="bg-blue-600 text-white p-4 rounded hover:bg-blue-700 text-xl">{{ item }}</button>
+      {% endfor %}
+    {% endfor %}
+    <button onclick="clearDisplay()" class="col-span-2 bg-red-600 text-white p-4 rounded hover:bg-red-700 text-xl">C</button>
+    <button onclick="press('(')" class="bg-gray-300 p-4 rounded hover:bg-gray-400 text-xl">(</button>
+    <button onclick="press(')')" class="bg-gray-300 p-4 rounded hover:bg-gray-400 text-xl">)</button>
+    <button onclick="press('=')" class="col-span-4 bg-green-600 text-white p-4 rounded hover:bg-green-700 text-xl">Enter</button>
+  </div>
+
+  <!-- 計算履歴 -->
+  <div>
+    <h3 class="text-lg font-semibold mb-2">📜 履歴</h3>
+    <ul id="history" class="text-sm text-gray-700 list-disc pl-4 max-h-40 overflow-y-auto">
+      <!-- 履歴がここに追加されます -->
+    </ul>
+  </div>
+</div>
+
+<script>
+  const display = document.getElementById('display');
+  const history = document.getElementById('history');
+
+  function press(val) {
+    if (val === '=') {
+      try {
+        const expression = display.value;
+        const result = eval(expression);
+        display.value = result;
+        appendHistory(expression, result);
+      } catch (e) {
+        display.value = 'エラー';
+      }
+    } else {
+      display.value += val;
+    }
+  }
+
+  function clearDisplay() {
+    display.value = '';
+  }
+
+  function appendHistory(expression, result) {
+    const li = document.createElement('li');
+    li.textContent = `${expression} = ${result}`;
+    history.prepend(li);  // 新しい履歴は上に追加
+  }
+
+  // キーボード入力対応
+  document.addEventListener('keydown', function (e) {
+    const key = e.key;
+
+    // 有効なキー
+    if ('0123456789+-*/().'.includes(key)) {
+      display.value += key;
+    } else if (key === 'Enter') {
+      e.preventDefault();  // Enterキーのデフォルト動作を防ぐ
+      press('=');
+    } else if (key === 'Backspace') {
+      display.value = display.value.slice(0, -1);
+    } else if (key === 'Escape') {
+      clearDisplay();
+    }
+  });
+</script>
+{% endblock %}

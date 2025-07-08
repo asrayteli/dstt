@@ -1,0 +1,342 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto mt-10 bg-white rounded-xl shadow-lg p-8">
+  <h2 class="text-3xl font-bold mb-8 text-center text-gray-800">📚 PDF Power</h2>
+
+  <!-- タブ -->
+  <div class="flex justify-center space-x-4 mb-8">
+    <button onclick="switchTab('convert')" class="tab-button">PDF変換</button>
+    <button onclick="switchTab('splitmerge')" class="tab-button">分割・結合</button>
+    <button onclick="switchTab('compress')" class="tab-button">圧縮</button>
+    <button onclick="switchTab('extract')" class="tab-button">テキスト抽出</button>
+  </div>
+
+  <!-- タブ内容 -->
+
+  <!-- 1. PDF変換 -->
+  <div id="convert" class="tab-content hidden">
+    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg border-l-4 border-blue-500">
+      <h3 class="font-semibold mb-4 text-xl text-gray-700">🖼 PDF変換</h3>
+      <p class="text-gray-600 mb-4">画像、テキスト、Wordファイルを高品質PDFに変換します。</p>
+      <form action="/tools/pdf_power/convert" method="POST" enctype="multipart/form-data">
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-600 mb-2">ファイル選択 (PNG, JPG, JPEG, BMP, GIF, TXT, DOCX)</label>
+          <input type="file" name="files" multiple required 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+        </div>
+        <button type="submit" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition duration-200 font-medium">
+          PDFに変換
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. 分割・結合 -->
+  <div id="splitmerge" class="tab-content hidden">
+    <div class="bg-gradient-to-r from-green-50 to-emerald-50 p-6 rounded-lg border-l-4 border-green-500">
+      <h3 class="font-semibold mb-4 text-xl text-gray-700">🔗 分割・結合</h3>
+      <p class="text-gray-600 mb-4">PDFファイルを分割したり、複数のPDFを結合します。</p>
+      <form action="/tools/pdf_power/split_merge" method="POST" enctype="multipart/form-data">
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-600 mb-2">PDFファイル選択</label>
+          <input type="file" name="pdfs" multiple required accept=".pdf"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-transparent">
+        </div>
+        
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-600 mb-2">操作を選択</label>
+          <div class="flex space-x-6">
+            <label class="flex items-center">
+              <input type="radio" name="mode" value="split" checked class="mr-2">
+              <span>分割</span>
+            </label>
+            <label class="flex items-center">
+              <input type="radio" name="mode" value="merge" class="mr-2">
+              <span>結合</span>
+            </label>
+          </div>
+        </div>
+        
+        <div class="mb-4" id="range-group">
+          <label class="block text-sm font-medium text-gray-600 mb-2">ページ範囲（分割時のみ）</label>
+          <input type="text" name="range" placeholder="例: 1-3, 5-7" 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-transparent">
+          <div class="text-sm text-gray-500 mt-2">
+            ※ 分割時：抽出したいページ範囲を指定（例：1-2, 3-3）<br>
+            ※ 結合時：アップロード順で結合されます
+          </div>
+        </div>
+        
+        <button type="submit" class="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition duration-200 font-medium">
+          実行
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3. 圧縮 -->
+  <div id="compress" class="tab-content hidden">
+    <div class="bg-gradient-to-r from-purple-50 to-pink-50 p-6 rounded-lg border-l-4 border-purple-500">
+      <h3 class="font-semibold mb-4 text-xl text-gray-700">📉 PDF圧縮</h3>
+      
+      <form action="/tools/pdf_power/compress" method="POST" enctype="multipart/form-data">
+        <div class="mb-6">
+          <label class="block text-sm font-medium text-gray-600 mb-2">PDFファイルを選択</label>
+          <input type="file" name="pdf" accept=".pdf" required 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+        </div>
+        
+        <div class="mb-6">
+          <label class="block text-sm font-medium text-gray-600 mb-4">圧縮レベルを選択</label>
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            
+            <div class="compression-option" onclick="selectCompression(this, 'low')">
+              <input type="radio" name="compression_level" value="low" class="hidden">
+              <div class="text-center">
+                <div class="text-lg font-semibold text-green-600 mb-2">軽度圧縮</div>
+                <div class="text-sm text-gray-600">
+                  画質優先<br>
+                  圧縮率: 10-30%<br>
+                  推奨: 印刷用
+                </div>
+              </div>
+            </div>
+            
+            <div class="compression-option selected" onclick="selectCompression(this, 'medium')">
+              <input type="radio" name="compression_level" value="medium" checked class="hidden">
+              <div class="text-center">
+                <div class="text-lg font-semibold text-blue-600 mb-2">標準圧縮</div>
+                <div class="text-sm text-gray-600">
+                  バランス重視<br>
+                  圧縮率: 30-60%<br>
+                  推奨: 一般用途
+                </div>
+              </div>
+            </div>
+            
+            <div class="compression-option" onclick="selectCompression(this, 'high')">
+              <input type="radio" name="compression_level" value="high" class="hidden">
+              <div class="text-center">
+                <div class="text-lg font-semibold text-orange-600 mb-2">高圧縮</div>
+                <div class="text-sm text-gray-600">
+                  サイズ優先<br>
+                  圧縮率: 60-80%<br>
+                  推奨: Web用
+                </div>
+              </div>
+            </div>
+            
+            <div class="compression-option" onclick="selectCompression(this, 'maximum')">
+              <input type="radio" name="compression_level" value="maximum" class="hidden">
+              <div class="text-center">
+                <div class="text-lg font-semibold text-red-600 mb-2">最大圧縮</div>
+                <div class="text-sm text-gray-600">
+                  極限サイズ<br>
+                  圧縮率: 80-95%<br>
+                  推奨: 保存用
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        
+        <button type="submit" class="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition duration-200 font-medium">
+          圧縮してダウンロード
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 5. テキスト抽出 -->
+  <div id="extract" class="tab-content hidden">
+    <div class="bg-gradient-to-r from-teal-50 to-cyan-50 p-6 rounded-lg border-l-4 border-teal-500">
+      <h3 class="font-semibold mb-4 text-xl text-gray-700">🔍 テキスト抽出</h3>
+      <p class="text-gray-600 mb-4">PDFからテキストを抽出し、キーワード検索も可能です。</p>
+      <form action="/tools/pdf_power/extract" method="POST" enctype="multipart/form-data">
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-600 mb-2">PDFファイル選択</label>
+          <input type="file" name="pdf" required accept=".pdf"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent">
+        </div>
+        
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-600 mb-2">検索ワード（任意）</label>
+          <input type="text" name="keyword" placeholder="抽出したい特定のワードを入力" 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent">
+        </div>
+        
+        <button type="submit" class="bg-teal-600 text-white px-6 py-3 rounded-lg hover:bg-teal-700 transition duration-200 font-medium">
+          テキスト抽出
+        </button>
+      </form>
+      
+      {% if extracted_text %}
+        <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+          <h4 class="font-semibold text-gray-700 mb-2">抽出結果:</h4>
+          <pre class="bg-white p-4 rounded border text-sm overflow-auto max-h-96">{{ extracted_text }}</pre>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<style>
+  .tab-button {
+    padding: 12px 24px;
+    background-color: #f1f5f9;
+    border-radius: 8px;
+    font-weight: 600;
+    color: #64748b;
+    transition: all 0.2s;
+    border: 2px solid transparent;
+  }
+  
+  .tab-button:hover {
+    background-color: #e2e8f0;
+    color: #475569;
+  }
+  
+  .tab-button.active {
+    background-color: #3b82f6;
+    color: white;
+    border-color: #2563eb;
+  }
+  
+  .tab-content {
+    display: none;
+  }
+  
+  .tab-content.active {
+    display: block;
+  }
+  
+  .compression-option, .compression-option-batch {
+    background: white;
+    border: 2px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  
+  .compression-option:hover, .compression-option-batch:hover {
+    border-color: #3b82f6;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+  
+  .compression-option.selected, .compression-option-batch.selected {
+    border-color: #3b82f6;
+    background: #eff6ff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+  }
+  
+  .progress-bar {
+    width: 100%;
+    height: 20px;
+    background: #f3f4f6;
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 20px 0;
+    display: none;
+  }
+  
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+    width: 0%;
+    transition: width 0.3s;
+  }
+  
+  @media (max-width: 768px) {
+    .tab-button {
+      padding: 8px 16px;
+      font-size: 14px;
+    }
+    
+    .grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  function switchTab(tabId) {
+    // すべてのタブボタンからactiveクラスを削除
+    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+    
+    // すべてのタブコンテンツを非表示
+    document.querySelectorAll('.tab-content').forEach(content => {
+      content.classList.remove('active');
+      content.style.display = 'none';
+    });
+    
+    // 選択されたタブを表示
+    const selectedTab = document.getElementById(tabId);
+    if (selectedTab) {
+      selectedTab.classList.add('active');
+      selectedTab.style.display = 'block';
+    }
+    
+    // 対応するタブボタンをアクティブに
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabOrder = ['convert', 'splitmerge', 'compress', 'batch-compress', 'extract'];
+    const tabIndex = tabOrder.indexOf(tabId);
+    if (tabIndex !== -1 && tabButtons[tabIndex]) {
+      tabButtons[tabIndex].classList.add('active');
+    }
+  }
+  
+  function selectCompression(element, level) {
+    // 他の選択を解除
+    document.querySelectorAll('.compression-option').forEach(opt => opt.classList.remove('selected'));
+    
+    // 選択されたオプションをアクティブに
+    element.classList.add('selected');
+    
+    // ラジオボタンを選択
+    const radio = element.querySelector('input[type="radio"]');
+    if (radio) {
+      radio.checked = true;
+    }
+  }
+  
+  function selectCompressionBatch(element, level) {
+    // 他の選択を解除
+    document.querySelectorAll('.compression-option-batch').forEach(opt => opt.classList.remove('selected'));
+    
+    // 選択されたオプションをアクティブに
+    element.classList.add('selected');
+    
+    // ラジオボタンを選択
+    const radio = element.querySelector('input[type="radio"]');
+    if (radio) {
+      radio.checked = true;
+    }
+  }
+  
+  // 分割・結合の操作に応じてページ範囲フィールドの表示/非表示を切り替え
+  document.addEventListener('DOMContentLoaded', function() {
+    const modeRadios = document.querySelectorAll('input[name="mode"]');
+    const rangeGroup = document.getElementById('range-group');
+    
+    if (modeRadios.length > 0 && rangeGroup) {
+      modeRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+          if (this.value === 'split') {
+            rangeGroup.style.display = 'block';
+          } else {
+            rangeGroup.style.display = 'none';
+          }
+        });
+      });
+    }
+  });
+  
+  // 初期表示
+  switchTab('convert');
+</script>
+{% endblock %}

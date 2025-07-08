@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DSTT - DaishintoTools</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/flowbite@2.2.1/dist/flowbite.min.js"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+
+  <div class="flex min-h-screen">
+    <!-- サイドバーなど固定部分 -->
+    <aside class="w-64 bg-white shadow-lg">
+      <div class="p-4">
+        <a href="/" class="block">
+          <img src="{{ url_for('static', filename='img/head.png') }}" alt="DSTT Logo">
+        </a>
+      </div>
+      <nav class="px-4">
+        <ul>
+          <li class="my-2">
+            <a href="/" class="block px-4 py-2 rounded hover:bg-blue-100">🏠 ダッシュボード</a>
+          </li>
+          <li class="my-2">
+            <a href="/tools/datecalc" class="block px-4 py-2 rounded hover:bg-blue-100">📆 日時計算</a>
+          </li>
+          <li class="my-2">
+            <a href="/tools/calc" class="block px-4 py-2 rounded hover:bg-blue-100">🧮 電卓</a>
+          </li>
+          <li class="my-2">
+            <a href="/tools/rename" class="block px-4 py-2 rounded hover:bg-blue-100">🔄 ファイル名一括変換</a>
+          </li>
+          <li class="my-2">
+            <a href="/tools/compress" class="block px-4 py-2 rounded hover:bg-blue-100">📦 圧縮ファイル生成</a>
+          </li>
+          <li class="my-2">
+            <a href="/tools/csvtool" class="block px-4 py-2 rounded hover:bg-blue-100">📊 CSV整形・検証ツール</a>
+          </li>
+          <li class="my-2">
+            <a href="/tools/password_tool" class="block px-4 py-2 rounded hover:bg-blue-100">🔐 パスワード生成管理ツール</a>
+          </li>
+          <li class="my-2">
+            <a href="/tools/workday" class="block px-4 py-2 rounded hover:bg-blue-100">📅 営業日計算ツール</a>
+          </li>
+          <li class="my-2">
+            <a href="/tools/pdf_power" class="block px-4 py-2 rounded hover:bg-blue-100">📚 PDF Power</a>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    <!-- メインコンテンツ -->
+    <main class="flex-1 p-8">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+</body>
+</html>
