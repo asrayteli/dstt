@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-xl mx-auto bg-white p-6 mt-10 rounded shadow">
+  <h2 class="text-2xl font-bold mb-4">📤 ファイル共有ツール</h2>
+
+  <form method="POST" enctype="multipart/form-data">
+    <div class="mb-4">
+      <label class="block mb-1 font-semibold">共有ファイル:</label>
+      <input type="file" name="file" required class="w-full border rounded px-2 py-1">
+      <p class="text-sm text-gray-500 mt-1">※ 最大 10GB までアップロード可能</p>
+    </div>
+
+    <div class="mb-4">
+      <label class="block mb-1 font-semibold">パスワード（任意）:</label>
+      <input type="text" name="password" class="w-full border rounded px-2 py-1" placeholder="未設定の場合は空欄のままでOK">
+    </div>
+
+    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full">
+      アップロードして共有URL生成
+    </button>
+  </form>
+
+  {% if download_url %}
+  <div class="mt-8 border-t pt-6">
+    <h3 class="text-lg font-semibold mb-2">✅ アップロード完了！</h3>
+
+    <label class="block mb-1 font-semibold">共有URL:</label>
+    <input type="text" readonly value="{{ download_url }}" class="w-full border px-2 py-1 text-blue-800 mb-4 bg-gray-50">
+
+    <label class="block mb-2 font-semibold">QRコード:</label>
+    <img src="data:image/png;base64,{{ qr_data }}" alt="QRコード" class="mx-auto w-48 h-48 border p-2 rounded">
+
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -56,7 +56,15 @@ def create_app():
     from .tools.pdf_power import pdf_power_bp
     app.register_blueprint(pdf_power_bp)
 
+    from .tools.share import share_bp
+    app.register_blueprint(share_bp)
+
+    from .tools.car_inspe import car_inspe_bp
+    app.register_blueprint(car_inspe_bp)
+
     return app
+
+
 
 
 
