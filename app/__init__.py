@@ -7,7 +7,7 @@ from .models import db
 login_manager = LoginManager()
 
 def create_app():
-    app = Flask(__name__, static_folder='static/')
+    app = Flask(__name__, static_folder='./static/')
     app.config['SECRET_KEY'] = 'your_secret_key'
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'  # SQLiteデータベース
     db.init_app(app)
