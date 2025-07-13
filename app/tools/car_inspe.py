@@ -35,14 +35,18 @@ def setup_tesseract():
         else:
             return False
     else:
-        if shutil.which("tesseract") is None:
+        # Linuxなどでは明示的に絶対パスを指定
+        pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
+        if not os.path.exists(pytesseract.pytesseract.tesseract_cmd):
             return False
 
+    # 共通処理（tessdata_dirがあるなら優先して指定）
     tessdata_dir = os.path.join(app_root, "tessdata")
     if os.path.exists(tessdata_dir):
         os.environ['TESSDATA_PREFIX'] = tessdata_dir
 
     return True
+
 
 def send_text_file(text, filename="error.txt"):
     fd, path = tempfile.mkstemp(suffix=".txt")
