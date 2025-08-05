@@ -2,6 +2,7 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from .models import User
+from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 
 from .models import db
@@ -15,6 +16,7 @@ def create_app():
     db.init_app(app)
     login_manager.login_view = "auth.login"  # ログインページのエンドポイント
     login_manager.init_app(app)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
     
     # ユーザーログインの管理
     login_manager.login_view = "auth.login"
@@ -64,9 +66,10 @@ def create_app():
     from .tools.car_inspe import car_inspe_bp
     app.register_blueprint(car_inspe_bp)
 
+    from .tools.shiftersync import shiftersync_bp
+    app.register_blueprint(shiftersync_bp)
+
     return app
-
-
 
 
 

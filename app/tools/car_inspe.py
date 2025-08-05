@@ -237,7 +237,7 @@ def car_inspection():
                 return send_text_file("Tesseractが利用できません。")
             pdf_files = request.files.getlist("pdf_files")
             csv_file = request.files.get("csv_file")
-            preset = request.form.get("preset", "旧車検証_電子PDF")  # ユーザーが選択したプリセット
+            preset = request.form.get("preset", "旧車検証_電子PDF")
             if not pdf_files or not csv_file:
                 return send_text_file("PDFとCSVの両方をアップロードしてください。")
             temp_dir = tempfile.mkdtemp()
