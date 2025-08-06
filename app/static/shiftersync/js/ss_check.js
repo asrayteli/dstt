@@ -22,6 +22,7 @@ $(document).ready(function () {
       contentType: false,
       processData: false,
       success: function (response) {
+        console.log("AJAX success:", response);
         renderCheckResult(response);
       },
       error: function () {
@@ -31,6 +32,7 @@ $(document).ready(function () {
   });
 
   function renderCheckResult(data) {
+    console.log("renderCheckResult called with:", data);
     const container = document.getElementById("result-table");
     container.innerHTML = ""; // リセット
 
