@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 
 {% block content %}
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -12,25 +11,23 @@
 </head>
 
 <body>
-
 <div class="min-h-screen bg-blue-100 flex items-center justify-center px-4">
   <div class="container bg-white rounded-2xl shadow-2xl p-8 w-full max-w-4xl animate-fade-in">
 
     <h2 class="text-3xl font-bold text-center text-blue-600 mb-6 tracking-wide">
-      Shifter-Sync
+      Shifter‑Sync
     </h2>
     <h2 class="text-xl font-semibold text-center text-gray-700 mb-8">
       シフトチェックツール
     </h2>
 
-    <!-- アップロードフォーム -->
     <form id="checkForm" method="POST" enctype="multipart/form-data">
       <div class="mb-6 text-center">
         <label class="block text-lg font-medium text-gray-700 mb-2">
-          チェックしたいCSVファイルを最大6件まで選択してください
+          チェックしたいCSVを最大6件まで選択
         </label>
         <input type="file" name="csv_files" id="csv_files" accept=".csv" multiple required class="form-input">
-        <p class="text-sm text-gray-500 mt-1">同じ年月・モードのCSVのみ比較可能です</p>
+        <p class="text-sm text-gray-500 mt-1">同じ年月・モードのCSVのみ比較対象</p>
       </div>
 
       <div class="text-center mt-4">
@@ -40,14 +37,10 @@
       </div>
     </form>
 
-    <!-- 結果表示 -->
-    <div class="container">
-      <h2>シフト重複チェック結果</h2>
-      <table id="result-table"></table>
-    </div>
+    <div id="result-table" class="mt-10 overflow-x-auto"></div>
 
     <div class="text-center mt-6">
-      <button type="button" onclick="history.back()" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-100">
+      <button type="button" onclick="history.back()" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-5 rounded-lg">
         戻る
       </button>
     </div>
@@ -56,8 +49,6 @@
 </div>
 
 <script src="{{ url_for('static', filename='shiftersync/js/ss_check.js') }}"></script>
-
 </body>
 </html>
-
 {% endblock %}
