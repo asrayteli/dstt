@@ -24,7 +24,7 @@ $('#startBtn').click(function() {
       <div class="container bg-white rounded-2xl shadow-2xl p-8 w-full max-w-3xl animate-fade-in">
 
         <h2 id="entryHeader" class="text-2xl font-bold text-center text-blue-600 mb-6">
-          出勤者
+          ${mode === 'scene' ? '出勤者' : '現場'}
         </h2>
 
         <!-- 曜日ヘッダー -->
@@ -98,13 +98,16 @@ $('#startBtn').click(function() {
     }
   });
 
-  // 右クリックで削除
+  // 右クリックで削除 - sceneとperson両方で動作するように修正
   $(document).on('contextmenu', '.entry-select option', function(e) {
     e.preventDefault();
     const opt = $(this);
     if (confirm(`「${opt.text()}」を削除しますか？`)) {
       const day = opt.parent().attr('data-day');
-      entriesPerDay[day] = entriesPerDay[day].filter(v => v !== opt.val());
+      const valueToRemove = opt.val();
+      
+      // entriesPerDay配列から該当の値を削除
+      entriesPerDay[day] = entriesPerDay[day].filter(v => v !== valueToRemove);
       updateDropdown(day);
     }
   });
@@ -121,16 +124,26 @@ $('#startBtn').click(function() {
     updateDropdown(target);
   });
 
-  // プルダウンを再描画
+  // プルダウンを再描画 - sceneとperson両方で複数表示対応
   function updateDropdown(day) {
     const select = $(`.entry-select[data-day='${day}']`);
     const prev   = select.val() || [];
     select.empty();
+    
     entriesPerDay[day].forEach(val => {
       const opt = $('<option>').val(val).text(val);
-      if (prev.includes(val)) opt.prop('selected', true);
+      // 常に選択状態にして表示する（sceneとperson両方で）
+      opt.prop('selected', true);
       select.append(opt);
     });
+    
+    // selectのサイズを動的に調整（複数項目を表示するため）
+    const itemCount = entriesPerDay[day].length;
+    if (itemCount > 0) {
+      select.attr('size', Math.min(itemCount, 5)); // 最大5行まで表示
+    } else {
+      select.attr('size', 1);
+    }
   }
 
   // CSVビルド
@@ -140,7 +153,9 @@ $('#startBtn').click(function() {
       mode === 'scene' ? '日付,出勤者' : '日付,現場'
     ];
     Object.keys(entriesPerDay).forEach(d => {
-      lines.push(`${d},${entriesPerDay[d].join(',')}`);
+      if (entriesPerDay[d].length > 0) {
+        lines.push(`${d},${entriesPerDay[d].join(',')}`);
+      }
     });
     return lines.join("\n");
   }
@@ -154,9 +169,6 @@ $('#startBtn').click(function() {
     // getDay(): 0(日)…6(土) → 月曜始まり(0)に変換
     const rawDow = new Date(year, month - 1, 1).getDay();
     const firstDow = (rawDow + 6) % 7;  // 月曜=0, 日曜=6
-
-    // CSSで7列グリッドを設定しているので、行数の設定は不要
-    // grid.css() での grid-template-rows 設定を削除
 
     entriesPerDay = {};
 
@@ -174,49 +186,84 @@ $('#startBtn').click(function() {
       // 日付ラベル
       dayBox.append(`<div class="date-label">${d}日</div>`);
 
-      // 出勤者／現場プルダウン
+      // 出勤者／現場プルダウン - sceneとperson両方で複数表示対応
       const select = $('<select>')
         .addClass('entry-select')
-        .attr('data-day', d);
-      if (mode === 'scene') select.attr('multiple', true);
+        .attr('data-day', d)
+        .attr('multiple', true)  // sceneとperson両方でmultiple属性を付与
+        .attr('size', 1);        // 初期は1行表示
+      
       dayBox.append(select);
+
+      // 操作説明テキストを追加
+      const helpText = $('<div>')
+        .addClass('help-text')
+        .css({
+          'font-size': '11px',
+          'color': '#666',
+          'margin-bottom': '5px',
+          'text-align': 'center'
+        })
+        .text('右クリックで削除');
+      dayBox.append(helpText);
 
       // 追加用インプット＆ボタンを横並びにするためのコンテナ
       const addContainer = $('<div>').css({
         'display': 'flex',
-        'margin-bottom': '5px'
+        'margin-bottom': '5px',
+        'gap': '2px'
       });
       
       const input = $('<input>')
         .attr('type', 'text')
         .addClass('entry-input')
-        .attr('placeholder', '追加')
-        .attr('data-day', d);
+        .attr('placeholder', mode === 'scene' ? '人物名' : '現場名')
+        .attr('data-day', d)
+        .css({
+          'flex': '1',
+          'padding': '3px',
+          'font-size': '12px'
+        });
       const btn = $('<button>')
         .attr('type', 'button')
         .addClass('add-entry-btn')
         .text('追加')
-        .attr('data-day', d);
+        .attr('data-day', d)
+        .css({
+          'padding': '3px 8px',
+          'font-size': '12px'
+        });
       
       addContainer.append(input, btn);
       dayBox.append(addContainer);
 
       // コピー用インプット＆ボタンを横並びにするためのコンテナ
       const copyContainer = $('<div>').css({
-        'display': 'flex'
+        'display': 'flex',
+        'gap': '2px'
       });
       
       const copyInput = $('<input>')
         .attr('type', 'number')
         .addClass('copy-input')
-        .attr('placeholder', 'コピー元')
+        .attr('placeholder', '日')
         .attr('min', 1)
-        .attr('data-day', d);
+        .attr('max', daysInMonth)
+        .attr('data-day', d)
+        .css({
+          'flex': '1',
+          'padding': '3px',
+          'font-size': '12px'
+        });
       const copyBtn = $('<button>')
         .attr('type', 'button')
         .addClass('copy-btn')
         .text('コピー')
-        .attr('data-day', d);
+        .attr('data-day', d)
+        .css({
+          'padding': '3px 8px',
+          'font-size': '12px'
+        });
       
       copyContainer.append(copyInput, copyBtn);
       dayBox.append(copyContainer);

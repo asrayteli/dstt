@@ -33,9 +33,19 @@
               <option value="png">PNG</option>
           </select>
       </div>
-
-      <button type="submit" class="generate-btn">カレンダー生成</button>
+      <div>
+        <button type="submit" class="generate-btn">カレンダー生成</button>
+      </div>
+  
+      
   </form>
+  
+  <div class="md:col-span-2 text-center mt-4">
+    <button type="button" id="backBtn" onclick="history.back()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-5 rounded-lg shadow-lg transition duration-100">
+      戻る
+    </button>
+  </div>
+
 
   {% if image_file %}
   <div class="generated-result">
