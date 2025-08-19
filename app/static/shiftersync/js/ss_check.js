@@ -32,21 +32,29 @@ $(document).ready(function () {
     const container = document.getElementById("result-table");
     container.innerHTML = ""; // リセット
 
-    const { targets, dates, matrix, conflicts } = data;
-    const conflictSet = new Set(conflicts.map(c => `${c.date}-${c.name}`));
+    const { targets, capacities, dates, matrix, conflicts, option_mappings } = data;
+    
+    // 重複セットを作成（エントリー全体ベース）
+    const conflictSet = new Set(conflicts.map(c => `${c.date}-${c.entry}`));
 
     // メインコンテナ作成
     const resultContainer = document.createElement("div");
     resultContainer.className = "shift-result-container";
 
-    // ファイルヘッダー（現場名）を横並びで表示
+    // ファイルヘッダー（現場名と台数設定）を横並びで表示
     const fileHeaders = document.createElement("div");
     fileHeaders.className = "file-headers";
 
-    targets.forEach(target => {
+    targets.forEach((target, index) => {
       const header = document.createElement("div");
       header.className = "file-header";
-      header.textContent = target;
+      
+      let headerText = target;
+      if (capacities[index] !== null && capacities[index] !== undefined) {
+        headerText += ` (必要: ${capacities[index]}人/日)`;
+      }
+      
+      header.textContent = headerText;
       fileHeaders.appendChild(header);
     });
 
@@ -61,6 +69,15 @@ $(document).ready(function () {
         const siteSection = document.createElement("div");
         siteSection.className = "site-section";
 
+        // 台数不足の場合は背景色を変更
+        const entries = matrix[date][targetIdx] || [];
+        const currentCount = entries.length;
+        const requiredCapacity = capacities[targetIdx];
+        
+        if (requiredCapacity !== null && requiredCapacity !== undefined && currentCount < requiredCapacity) {
+          siteSection.classList.add("capacity-warning");
+        }
+
         // 日付ラベル
         const dateLabel = document.createElement("div");
         dateLabel.className = "date-label";
@@ -71,28 +88,29 @@ $(document).ready(function () {
         const namesList = document.createElement("div");
         namesList.className = "names-list";
 
-        const names = matrix[date][targetIdx] || [];
-
-        if (names.length === 0) {
-          // 空白の場合
-          const emptyItem = document.createElement("div");
-          emptyItem.className = "name-item empty";
-          emptyItem.textContent = "（空白）";
-          namesList.appendChild(emptyItem);
+        if (entries.length === 0) {
+          // データがない場合は「未定」表示
+          const undefinedItem = document.createElement("div");
+          undefinedItem.className = "name-item undefined";
+          undefinedItem.textContent = "未定";
+          namesList.appendChild(undefinedItem);
         } else {
-          // 自己重複の検出用セット（名前 → 件数）
-          const nameCount = {};
-          names.forEach(name => {
-            nameCount[name] = (nameCount[name] || 0) + 1;
+          // 自己重複の検出用セット（表示名 → 件数）
+          const displayNameCount = {};
+          entries.forEach(entry => {
+            const displayName = entry.display;
+            displayNameCount[displayName] = (displayNameCount[displayName] || 0) + 1;
           });
 
-          names.forEach(name => {
+          entries.forEach(entry => {
             const nameItem = document.createElement("div");
             nameItem.className = "name-item";
-            nameItem.textContent = name;
+            nameItem.textContent = entry.display; // オプション付きの表示名
 
-            const isConflict = conflictSet.has(`${date}-${name}`);
-            const isSelfDuplicate = nameCount[name] > 1;
+            // 他現場との重複チェック（エントリー全体でチェック）
+            const isConflict = conflictSet.has(`${date}-${entry.original}`);
+            // 同一現場内重複チェック（表示名でチェック）
+            const isSelfDuplicate = displayNameCount[entry.display] > 1;
 
             if (isConflict) {
               nameItem.classList.add("duplicate"); // 赤系
@@ -131,7 +149,11 @@ $(document).ready(function () {
       </div>
       <div class="legend-item">
         <span class="legend-color" style="background-color: #fef3c7; border: 1px solid #fcd34d;"></span>
-        シフト未登録
+        未定
+      </div>
+      <div class="legend-item">
+        <span class="legend-color" style="background-color: #fef3c7; border: 1px solid #f59e0b;"></span>
+        台数不足
       </div>
     `;
     resultContainer.appendChild(legend);

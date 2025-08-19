@@ -1,0 +1,438 @@
+/* static/shiftersync/css/ss_style.css */
+
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background-color: #f8f9fc;
+    color: #333;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 1200px; /* 7列に対応するため幅を拡大 */
+    margin: 40px auto;
+    background: #fff;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+/* メインタイトルのスタイリング */
+h2 {
+    text-align: center;
+    color: #1e293b;
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 30px;
+    background: linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: 0.5px;
+}
+
+/* フォーム全体のスタイリング */
+#shiftMetaForm {
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border: 1px solid #e2e8f0;
+    border-top: 4px solid #2563eb;
+    border-radius: 12px;
+    padding: 25px;
+    margin-bottom: 30px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    justify-content: center;
+    align-items: center;
+}
+
+/* フォーム内のラベルスタイリング */
+#shiftMetaForm label {
+    font-weight: 600;
+    color: #334155;
+    font-size: 14px;
+    margin-right: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+}
+
+/* フォーム内の入力フィールドスタイリング */
+#shiftMetaForm input[type="number"],
+#shiftMetaForm input[type="text"],
+#shiftMetaForm select {
+    padding: 10px 14px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 14px;
+    background-color: #ffffff;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    min-width: 120px;
+}
+
+#shiftMetaForm input[type="number"]:focus,
+#shiftMetaForm input[type="text"]:focus,
+#shiftMetaForm select:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* チェックボックススタイリング */
+.form-checkbox {
+    width: 16px;
+    height: 16px;
+    accent-color: #2563eb;
+}
+
+/* 作成開始ボタンのスタイリング */
+#startBtn {
+    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+    color: #ffffff;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 14px 0 rgba(37, 99, 235, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+#startBtn:hover {
+    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px 0 rgba(37, 99, 235, 0.4);
+}
+
+#startBtn:active {
+    transform: translateY(0);
+}
+
+/* その他のh2要素（影響を受けないよう個別指定） */
+h2 {
+    text-align: center;
+    color: #1e3a8a;
+}
+
+#inputArea {
+    margin-top: 30px;
+}
+
+/* カレンダーグリッド - 7列レイアウト */
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr); /* 7列に変更 */
+    gap: 12px; /* 間隔を少し狭めて7列に対応 */
+    margin-bottom: 20px;
+}
+
+/* 曜日ヘッダー（オプション - 必要に応じて追加） */
+.weekday-header {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 12px;
+    margin-bottom: 10px;
+    font-weight: bold;
+    text-align: center;
+    color: #1e3a8a;
+}
+
+.weekday-header div {
+    padding: 8px;
+    background-color: #f1f5f9;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.day-box {
+    background-color: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 10px;
+    padding: 12px; /* パディングを少し小さく */
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+    min-height: 200px; /* 最小高さを設定して統一感を出す */
+    display: flex;
+    flex-direction: column;
+}
+
+.day-box.empty {
+    background-color: transparent;
+    border: none;
+    min-height: 0;
+}
+
+.day-box:not(.empty):hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 10px rgba(30, 58, 138, 0.1);
+}
+
+/* 台数不足警告のスタイル */
+.day-box.capacity-warning {
+    background-color: #fef3c7; /* 黄色の背景 */
+    border-color: #f59e0b;
+}
+
+.day-box.capacity-warning:hover {
+    background-color: #fde68a;
+}
+
+/* 変更された日付のスタイル */
+.day-box.changed-day {
+    border: 2px solid #3b82f6; /* 青色のボーダー */
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+}
+
+/* 差分表示時の変更箇所ハイライト */
+.day-box.has-changes {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); /* グラデーション背景 */
+    border: 2px solid #f59e0b;
+    position: relative;
+}
+
+.day-box.has-changes::before {
+    content: "変更";
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    background: #f59e0b;
+    color: white;
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-weight: bold;
+}
+
+/* 編集ツールパネルのボタンスタイル */
+#replaceBtn:hover {
+    background-color: #047857 !important;
+}
+
+#resetChangesBtn:hover {
+    background-color: #b91c1c !important;
+}
+
+#toggleDiff:hover {
+    opacity: 0.8;
+}
+
+.date-label {
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: #1e3a8a;
+    font-size: 16px;
+    text-align: center;
+}
+
+.entry-select {
+    width: 100%;
+    height: 60px; /* 高さを少し小さく */
+    margin-bottom: 8px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 13px; /* フォントサイズを少し小さく */
+    flex-grow: 1;
+}
+
+.entry-input {
+    width: calc(100% - 55px); /* ボタン幅に合わせて調整 */
+    padding: 5px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    margin-right: 5px;
+    font-size: 12px;
+    height: 20px;
+}
+
+.add-entry-btn {
+    padding: 5px 8px;
+    background-color: #2563eb;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: background-color 0.2s ease;
+    width: 50px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+}
+
+.add-entry-btn:hover {
+    background-color: #1d4ed8;
+}
+
+.copy-input {
+    width: calc(100% - 55px);
+    padding: 4px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    margin-right: 5px;
+    font-size: 12px;
+    height: 20px;
+}
+
+.copy-btn {
+    padding: 5px 8px;
+    background-color: #059669; /* 緑色でコピー機能を区別 */
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 10px;
+    transition: background-color 0.2s ease;
+    width: 50px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+}
+
+.copy-btn:hover {
+    background-color: #047857;
+}
+
+#saveBtn {
+    margin-top: 20px;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 8px 16px;
+    background-color: #dc2626;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s ease;
+}
+
+#saveBtn:hover {
+    background-color: #b91c1c;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 1024px) {
+    .container {
+        max-width: 95%;
+        padding: 20px;
+    }
+    
+    .calendar-grid {
+        gap: 8px;
+    }
+    
+    .day-box {
+        padding: 8px;
+        min-height: 180px;
+    }
+    
+    .entry-select {
+        height: 50px;
+    }
+}
+
+@media (max-width: 768px) {
+    .calendar-grid {
+        grid-template-columns: repeat(7, 1fr);
+        gap: 4px;
+    }
+    
+    .day-box {
+        padding: 6px;
+        min-height: 160px;
+    }
+    
+    .date-label {
+        font-size: 14px;
+    }
+    
+    .entry-input, .copy-input {
+        font-size: 11px;
+    }
+    
+    .add-entry-btn, .copy-btn {
+        font-size: 11px;
+        padding: 3px 6px;
+    }
+}
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.6s ease-out both;
+}
+
+/* ファイルアップロード欄 - フォームと一貫性あるビジネスライクなスタイル */
+.file-upload-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 1rem;
+}
+
+.file-upload-label {
+  font-weight: 600;
+  color: #334155; /* slate-700 */
+  font-size: 14px;
+  letter-spacing: 0.03em;
+}
+
+.file-upload-input {
+  padding: 10px 14px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  background-color: #ffffff;
+  color: #1e293b;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.file-upload-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+/* Webkit系ブラウザのデフォルトファイルボタン調整 */
+.file-upload-input::-webkit-file-upload-button {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  margin-right: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.file-upload-input::-webkit-file-upload-button:hover {
+  background: #1d4ed8;
+}
+
+.file-upload-input::file-selector-button {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  margin-right: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.file-upload-input::file-selector-button:hover {
+  background: #1d4ed8;
+}

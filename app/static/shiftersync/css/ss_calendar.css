@@ -1,166 +1,312 @@
-/* カレンダー生成ページ専用のスタイル */
+/* カレンダー生成ページ専用のモダンスタイル */
 
 /* ベーススタイル */
 body {
-    font-family: 'Segoe UI', sans-serif;
-    background-color: #f8f9fc;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #3b82f6 100%);
     color: #1e293b;
     margin: 0;
     padding: 0;
+    min-height: 100vh;
 }
 
-/* カレンダー生成コンテナ */
-.calendar-generator-container {
-    max-width: 1000px;
-    margin: 40px auto;
-    background: #ffffff;
-    padding: 30px;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-    animation: fade-in 0.6s ease-out both;
+/* コンテナスタイル */
+.container {
+    backdrop-filter: blur(10px);
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
 }
 
-/* タイトル */
-h1.title {
-    font-size: 2.25rem;
-    font-weight: 700;
-    text-align: center;
-    color: #1e293b;
-    margin-bottom: 20px;
-    background: linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%);
+/* タイトルスタイル */
+h2 {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-/* カレンダー生成オプション（ラベル・入力） */
+/* フォームオプション */
 .generator-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 32px;
+    padding: 24px;
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border-radius: 16px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.form-group {
     display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-    margin-bottom: 30px;
-    justify-content: center;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.form-group:last-child {
+    grid-column: 1 / -1;
+    justify-self: center;
 }
 
 .generator-options label {
     font-weight: 600;
     font-size: 14px;
-    color: #334155;
+    color: #374151;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
 }
 
-.generator-options input,
+.generator-options input[type="file"],
 .generator-options select {
-    padding: 10px 14px;
-    border: 2px solid #e2e8f0;
-    border-radius: 8px;
+    padding: 12px 16px;
+    border: 2px solid #e5e7eb;
+    border-radius: 12px;
     font-size: 14px;
-    background-color: #ffffff;
-    transition: all 0.2s ease;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    min-width: 140px;
+    background: white;
+    transition: all 0.3s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    position: relative;
 }
 
-.generator-options input:focus,
+.generator-options input[type="file"]:focus,
 .generator-options select:focus {
     outline: none;
-    border-color: #2563eb;
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    transform: translateY(-1px);
+}
+
+.generator-options input[type="file"]:hover,
+.generator-options select:hover {
+    border-color: #9ca3af;
+    transform: translateY(-1px);
 }
 
 /* カレンダー生成ボタン */
 .generate-btn {
-    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
-    color: #ffffff;
+    background: linear-gradient(135deg, #667eea 0%, #1366ff 100%);
+    color: white;
     border: none;
-    padding: 12px 24px;
-    border-radius: 8px;
+    padding: 16px 32px;
+    border-radius: 12px;
     font-size: 16px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s ease;
     text-transform: uppercase;
-    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
-    margin-top: 10px;
+    letter-spacing: 0.05em;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    position: relative;
+    overflow: hidden;
 }
 
 .generate-btn:hover {
-    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
     transform: translateY(-2px);
-    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.6);
 }
 
-/* 出力形式選択 */
-.output-options {
-    margin-top: 25px;
-    text-align: center;
+.generate-btn:active {
+    transform: translateY(0);
 }
 
-.output-options label {
-    font-weight: 600;
-    font-size: 14px;
-    color: #475569;
-    margin-right: 12px;
+.generate-btn span {
+    margin-right: 8px;
+    font-size: 18px;
 }
 
-.output-options input[type="radio"] {
-    margin-right: 6px;
-}
-
-/* 生成結果の表示（画像やPDFのリンク） */
-.generated-result {
-    margin-top: 30px;
-    text-align: center;
-}
-
-.generated-result img {
-    max-width: 100%;
+/* 戻るボタン */
+.back-btn {
+    background: linear-gradient(135deg, #6b7280 0%, #374151 100%);
+    color: white;
+    border: none;
+    padding: 12px 24px;
     border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.back-btn:hover {
+    background: linear-gradient(135deg, #374151 0%, #1f2937 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* 生成結果セクション */
+.generated-result {
+    margin-top: 40px;
+    padding: 32px;
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border-radius: 20px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+    animation: slideInUp 0.6s ease-out;
+}
+
+.result-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #374151;
+    text-align: center;
+    margin-bottom: 24px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* 画像コンテナ */
+.image-container {
+    text-align: center;
+    margin-bottom: 24px;
+}
+
+.calendar-image {
+    max-width: 100%;
+    height: auto;
+    border-radius: 16px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+    transition: transform 0.3s ease;
+}
+
+.calendar-image:hover {
+    transform: scale(1.02);
+}
+
+/* PDF コンテナ */
+.pdf-container {
+    margin-bottom: 24px;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.pdf-viewer {
+    border: none;
+    border-radius: 12px;
+}
+
+/* ダウンロードセクション */
+.download-section {
+    text-align: center;
 }
 
 .download-link {
-    display: inline-block;
-    margin-top: 16px;
-    padding: 10px 20px;
-    background-color: #059669;
-    color: #fff;
-    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 28px;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: white;
+    border-radius: 12px;
     text-decoration: none;
     font-weight: 600;
-    transition: background-color 0.2s ease;
+    font-size: 16px;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
 }
 
 .download-link:hover {
-    background-color: #047857;
+    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(16, 185, 129, 0.6);
+    text-decoration: none;
+    color: white;
 }
 
 /* アニメーション */
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .animate-fade-in {
-  animation: fade-in 0.6s ease-out both;
+    animation: fade-in 0.8s ease-out both;
 }
 
 /* レスポンシブ対応 */
 @media (max-width: 768px) {
     .generator-options {
-        flex-direction: column;
-        align-items: center;
+        grid-template-columns: 1fr;
+        gap: 16px;
+        padding: 20px;
     }
 
-    .generator-options input,
+    .generator-options input[type="file"],
     .generator-options select {
         width: 100%;
-        max-width: 300px;
     }
 
     .generate-btn {
         width: 100%;
-        max-width: 300px;
+        padding: 14px 24px;
+    }
+
+    .generated-result {
+        padding: 20px;
+        margin-top: 30px;
+    }
+
+    .result-title {
+        font-size: 18px;
+    }
+
+    .download-link {
+        padding: 12px 20px;
+        font-size: 14px;
+    }
+}
+
+@media (max-width: 480px) {
+    .container {
+        margin: 20px;
+        padding: 20px;
+    }
+
+    h2 {
+        font-size: 1.5rem;
+    }
+
+    .generator-options {
+        padding: 16px;
+    }
+}
+
+/* ダークモード対応のヒント */
+@media (prefers-color-scheme: dark) {
+    .container {
+        background: rgba(30, 41, 59, 0.95);
+        color: #f1f5f9;
+    }
+
+    .generator-options {
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+    }
+
+    .generated-result {
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
     }
 }

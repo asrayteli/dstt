@@ -2,12 +2,9 @@
 
 {% block content %}
 
-<!-- HTMLヘッダ部は base.html に含まれているので不要です -->
-
 <!-- カスタムCSS読み込み -->
 <link rel="stylesheet" href="{{ url_for('static', filename='shiftersync/css/ss_calendar.css') }}">
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-
 
 <div class="min-h-screen bg-blue-100 flex items-center justify-center px-4">
   <div class="container bg-white rounded-2xl shadow-2xl p-8 w-full max-w-4xl animate-fade-in">
@@ -19,51 +16,59 @@
       カレンダー生成
     </h2>
 
-  <form method="POST" enctype="multipart/form-data" class="generator-options">
-      <div>
-          <label for="csvfile">CSVファイルを選択:</label>
-          <input type="file" name="csvfile" id="csvfile" accept=".csv" required>
+    <form method="POST" enctype="multipart/form-data" class="generator-options">
+      <div class="form-group">
+        <label for="csvfile">CSVファイルを選択:</label>
+        <input type="file" name="csvfile" id="csvfile" accept=".csv" required>
       </div>
 
-      <div>
-          <label for="format">出力形式を選択:</label>
-          <select name="format" id="format" required>
-              <option value="">選択してください</option>
-              <option value="pdf">PDF</option>
-              <option value="png">PNG</option>
-          </select>
+      <div class="form-group">
+        <label for="format">出力形式を選択:</label>
+        <select name="format" id="format" required>
+          <option value="">選択してください</option>
+          <option value="pdf">PDF (印刷用)</option>
+          <option value="png">PNG (画像)</option>
+        </select>
       </div>
-      <div>
-        <button type="submit" class="generate-btn">カレンダー生成</button>
-      </div>
-  
       
-  </form>
-  
-  <div class="md:col-span-2 text-center mt-4">
-    <button type="button" id="backBtn" onclick="history.back()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-5 rounded-lg shadow-lg transition duration-100">
-      戻る
-    </button>
-  </div>
-
-
-  {% if image_file %}
-  <div class="generated-result">
-      <h2 class="text-xl font-semibold mb-2">生成されたカレンダー（PNG）:</h2>
-      <img src="{{ url_for('static', filename='calendar_outputs/' + image_file) }}" alt="カレンダー画像">
-      <div>
-          <a href="{{ url_for('static', filename='calendar_outputs/' + image_file) }}" download class="download-link">PNGファイルをダウンロード</a>
+      <div class="form-group">
+        <button type="submit" class="generate-btn">
+          <span>📅</span> カレンダー生成
+        </button>
       </div>
-  </div>
-  {% elif pdf_file %}
-  <div class="generated-result">
-      <h2 class="text-xl font-semibold mb-2">生成されたカレンダー（PDF）:</h2>
-      <embed src="{{ url_for('static', filename='calendar_outputs/' + pdf_file) }}" type="application/pdf" width="100%" height="600px">
-      <div>
-          <a href="{{ url_for('static', filename='calendar_outputs/' + pdf_file) }}" download class="download-link">PDFファイルをダウンロード</a>
+    </form>
+    
+    <div class="text-center mt-6">
+      <button type="button" id="backBtn" onclick="history.back()" class="back-btn">
+        ← 戻る
+      </button>
+    </div>
+
+    {% if image_file %}
+    <div class="generated-result">
+      <h3 class="result-title">✨ 生成されたカレンダー（PNG）</h3>
+      <div class="image-container">
+        <img src="{{ url_for('static', filename='calendar_outputs/' + image_file) }}" alt="カレンダー画像" class="calendar-image">
       </div>
-  </div>
-  {% endif %}
+      <div class="download-section">
+        <a href="{{ url_for('static', filename='calendar_outputs/' + image_file) }}" download class="download-link">
+          📥 PNGファイルをダウンロード
+        </a>
+      </div>
+    </div>
+    {% elif pdf_file %}
+    <div class="generated-result">
+      <h3 class="result-title">✨ 生成されたカレンダー（PDF）</h3>
+      <div class="pdf-container">
+        <embed src="{{ url_for('static', filename='calendar_outputs/' + pdf_file) }}" type="application/pdf" width="100%" height="600px" class="pdf-viewer">
+      </div>
+      <div class="download-section">
+        <a href="{{ url_for('static', filename='calendar_outputs/' + pdf_file) }}" download class="download-link">
+          📥 PDFファイルをダウンロード
+        </a>
+      </div>
+    </div>
+    {% endif %}
 
   </div>
 </div>

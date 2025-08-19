@@ -79,6 +79,13 @@ h2 {
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
+/* チェックボックススタイリング */
+.form-checkbox {
+    width: 16px;
+    height: 16px;
+    accent-color: #2563eb;
+}
+
 /* 作成開始ボタンのスタイリング */
 #startBtn {
     background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
@@ -146,7 +153,7 @@ h2 {
     border: 1px solid #c7d2fe;
     border-radius: 10px;
     padding: 12px; /* パディングを少し小さく */
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
     min-height: 200px; /* 最小高さを設定して統一感を出す */
     display: flex;
     flex-direction: column;
@@ -161,6 +168,16 @@ h2 {
 .day-box:not(.empty):hover {
     transform: translateY(-3px);
     box-shadow: 0 4px 10px rgba(30, 58, 138, 0.1);
+}
+
+/* 台数不足警告のスタイル */
+.day-box.capacity-warning {
+    background-color: #fef3c7; /* 黄色の背景 */
+    border-color: #f59e0b;
+}
+
+.day-box.capacity-warning:hover {
+    background-color: #fde68a;
 }
 
 .date-label {

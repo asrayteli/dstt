@@ -1,0 +1,10 @@
+# すべてのテキストファイルを LF に統一
+* text=auto eol=lf
+
+# Pythonファイルは特にLFに固定
+*.py text eol=lf
+
+# バイナリファイルは改行コードの変換をしない
+*.png binary
+*.jpg binary
+*.exe binary

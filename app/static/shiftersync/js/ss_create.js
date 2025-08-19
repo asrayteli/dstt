@@ -1,6 +1,22 @@
 $(document).ready(function() {
   let mode = "scene";
   let entriesPerDay = {};
+  let capacityEnabled = false;
+  let requiredCapacity = 0;
+
+  // オプションマッピング定義
+  const optionMappings = {
+    'A': '午前',
+    'P': '午後',
+    'E': '早番',
+    'L': '遅番',
+    'N1': '1号車',
+    'N2': '2号車',
+    'N3': '3号車',
+    'N4': '4号車',
+    'N5': '5号車'
+    
+  };
 
   // モード切替
   $('#mode').change(function() {
@@ -9,59 +25,107 @@ $(document).ready(function() {
     $('#entryHeader').text(mode === 'scene' ? '出勤者' : '現場');
   });
 
-$('#startBtn').click(function() {
-  const year  = parseInt($('#year').val(), 10);
-  const month = parseInt($('#month').val(), 10);
-  const name  = $('#target_name').val().trim();
-  if (!year || !month || !name) {
-    alert('全てのフィールドを入力してください');
-    return;
-  }
+  // 台数設定チェックボックスの制御
+  $('#enableCapacity').change(function() {
+    capacityEnabled = $(this).is(':checked');
+    if (capacityEnabled) {
+      $('#capacityInputGroup').show();
+      $('#capacity').attr('required', true);
+    } else {
+      $('#capacityInputGroup').hide();
+      $('#capacity').attr('required', false);
+      // すでにカレンダーが表示されている場合は背景色をリセット
+      if ($('#shiftGrid').children().length > 0) {
+        $('.day-box').removeClass('capacity-warning');
+      }
+    }
+  });
 
-  // HTML構築してから buildGrid を呼ぶ
-  const inputHTML = `
-    <div class="min-h-screen bg-blue-100 flex items-center justify-center px-4">
-      <div class="container bg-white rounded-2xl shadow-2xl p-8 w-full max-w-3xl animate-fade-in">
+  // オプション使用チェックボックスの制御
+  $(document).on('change', '.option-checkbox', function() {
+    const day = $(this).attr('data-day');
+    const isChecked = $(this).is(':checked');
+    const optionContainer = $(`.option-input-container[data-day='${day}']`);
+    
+    if (isChecked) {
+      optionContainer.css('display', 'flex');
+    } else {
+      optionContainer.css('display', 'none');
+      // オプション選択をリセット
+      $(`.option-select[data-day='${day}']`).val('');
+    }
+  });
 
-        <h2 id="entryHeader" class="text-2xl font-bold text-center text-blue-600 mb-6">
-          ${mode === 'scene' ? '出勤者' : '現場'}
-        </h2>
+  // モード切替
+  $('#mode').change(function() {
+    mode = $(this).val();
+    $('#nameLabel').text(mode === 'scene' ? '現場名:' : '人物名:');
+    $('#entryHeader').text(mode === 'scene' ? '出勤者' : '現場');
+  });
 
-        <!-- 曜日ヘッダー -->
-        <div class="weekday-header">
-          <div>月</div>
-          <div>火</div>
-          <div>水</div>
-          <div>木</div>
-          <div>金</div>
-          <div>土</div>
-          <div>日</div>
+  $('#startBtn').click(function() {
+    const year  = parseInt($('#year').val(), 10);
+    const month = parseInt($('#month').val(), 10);
+    const name  = $('#target_name').val().trim();
+    
+    // 台数設定が有効な場合の追加バリデーション
+    if (capacityEnabled) {
+      requiredCapacity = parseInt($('#capacity').val()) || 0;
+      if (requiredCapacity <= 0) {
+        alert('台数設定を使用する場合は、必要人数を1以上で入力してください');
+        return;
+      }
+    }
+    
+    if (!year || !month || !name) {
+      alert('全てのフィールドを入力してください');
+      return;
+    }
+
+    // HTML構築してから buildGrid を呼ぶ
+    const inputHTML = `
+      <div class="min-h-screen bg-blue-100 flex items-center justify-center px-4">
+        <div class="container bg-white rounded-2xl shadow-2xl p-8 w-full max-w-3xl animate-fade-in">
+
+          <h2 id="entryHeader" class="text-2xl font-bold text-center text-blue-600 mb-6">
+            ${mode === 'scene' ? '出勤者' : '現場'}
+          </h2>
+
+          <!-- 曜日ヘッダー -->
+          <div class="weekday-header">
+            <div>月</div>
+            <div>火</div>
+            <div>水</div>
+            <div>木</div>
+            <div>金</div>
+            <div>土</div>
+            <div>日</div>
+          </div>
+
+          <!-- カレンダー -->
+          <div id="shiftGrid" class="calendar-grid"></div>
+
+          <!-- 保存ボタン -->
+          <div class="text-center mt-6">
+            <button type="button" id="saveBtn" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-6 rounded-lg shadow transition duration-300">
+              保存
+            </button>
+          </div>
+
         </div>
-
-        <!-- カレンダー -->
-        <div id="shiftGrid" class="calendar-grid"></div>
-
-        <!-- 保存ボタン -->
-        <div class="text-center mt-6">
-          <button type="button" id="saveBtn" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-6 rounded-lg shadow transition duration-300">
-            保存
-          </button>
-        </div>
-
       </div>
-    </div>
-  `;
+    `;
 
-  $('#inputArea').html(inputHTML).show();
+    $('#inputArea').html(inputHTML).show();
 
-  // ✅ DOMが描画された後にカレンダーを生成＋スクロール
-  setTimeout(function() {
-    buildGrid(year, month);
-    $('html, body').animate({
-      scrollTop: $('#inputArea').offset().top
-    }, 600);
-  }, 0);
-});
+    // ✅ DOMが描画された後にカレンダーを生成＋スクロール
+    setTimeout(function() {
+      buildGrid(year, month);
+      $('html, body').animate({
+        scrollTop: $('#inputArea').offset().top
+      }, 600);
+    }, 0);
+  });
 
   // 保存ボタン
   $(document).on('click', '#saveBtn', function() {
@@ -87,30 +151,140 @@ $('#startBtn').click(function() {
     }
   });
 
-  // 追加ボタン
-  $(document).on('click', '.add-entry-btn', function() {
-    const day   = $(this).attr('data-day');
-    const input = $(`.entry-input[data-day='${day}']`).val().trim();
-    if (input && !entriesPerDay[day].includes(input)) {
-      entriesPerDay[day].push(input);
-      updateDropdown(day);
-      $(`.entry-input[data-day='${day}']`).val('');
+  // 台数入力時のリアルタイム更新
+  $('#capacity').on('input', function() {
+    requiredCapacity = parseInt($(this).val()) || 0;
+    // すでにカレンダーが表示されている場合は背景色を更新
+    if ($('#shiftGrid').children().length > 0) {
+      updateCapacityWarnings();
     }
   });
 
-  // 右クリックで削除 - sceneとperson両方で動作するように修正
-  $(document).on('contextmenu', '.entry-select option', function(e) {
-    e.preventDefault();
-    const opt = $(this);
-    if (confirm(`「${opt.text()}」を削除しますか？`)) {
-      const day = opt.parent().attr('data-day');
-      const valueToRemove = opt.val();
+  // 追加ボタン - オプション対応
+  $(document).on('click', '.add-entry-btn', function() {
+    const day = $(this).attr('data-day');
+    const input = $(`.entry-input[data-day='${day}']`).val().trim();
+    const optionValue = $(`.option-select[data-day='${day}']`).val();
+    
+    if (input) {
+      let finalValue = input;
       
-      // entriesPerDay配列から該当の値を削除
-      entriesPerDay[day] = entriesPerDay[day].filter(v => v !== valueToRemove);
+      // オプションが選択されている場合は内部形式で保存
+      if (optionValue) {
+        finalValue = `!${optionValue}!${input}`;
+      }
+      
+      entriesPerDay[day].push(finalValue);
       updateDropdown(day);
+      updateCapacityWarning(day);
+      $(`.entry-input[data-day='${day}']`).val('');
+      $(`.option-select[data-day='${day}']`).val('');
     }
   });
+
+  // 右クリックで削除
+  $(document).on('contextmenu', '.entry-item', function(e) {
+    e.preventDefault();
+    const $item = $(this);
+    if (confirm(`「${$item.text()}」を削除しますか？`)) {
+      const day = $item.data('day');
+      const valueToRemove = $item.data('value');
+      const index = entriesPerDay[day].indexOf(valueToRemove);
+      
+      if (index !== -1) {
+        entriesPerDay[day].splice(index, 1);
+        updateDropdown(day);
+        updateCapacityWarning(day);
+      }
+    }
+  });
+
+  // ダブルクリックでインライン編集開始
+  $(document).on('dblclick', '.entry-item', function(e) {
+    e.preventDefault();
+    startInlineEdit($(this));
+  });
+
+  // インライン編集開始 - オプション対応
+  function startInlineEdit($item) {
+    const day = $item.data('day');
+    const currentValue = $item.data('value'); // 内部形式
+    const currentName = parseEntryForEdit(currentValue); // 編集用（名前のみ）
+    const index = entriesPerDay[day].indexOf(currentValue);
+    
+    if (index === -1) return;
+
+    // 編集用inputを作成 - サイズを大きく調整
+    const $editInput = $('<input>')
+      .attr('type', 'text')
+      .val(currentName)
+      .addClass('inline-edit-input')
+      .css({
+        'position': 'absolute',
+        'z-index': '1000',
+        'background': 'white',
+        'border': '2px solid #2563eb',
+        'border-radius': '4px',
+        'padding': '6px 10px',
+        'font-size': '13px',
+        'min-width': Math.max($item.outerWidth() + 20, currentName.length * 8 + 40) + 'px',
+        'height': '32px'
+      })
+      .data('day', day)
+      .data('index', index)
+      .data('original-value', currentValue);
+
+    // 元の要素の位置に合わせて配置
+    const itemOffset = $item.offset();
+    
+    $editInput.css({
+      'position': 'absolute',
+      'top': itemOffset.top - 2 + 'px',
+      'left': itemOffset.left - 5 + 'px'
+    });
+
+    // bodyに追加
+    $('body').append($editInput);
+    $editInput.focus().select();
+
+    // 編集完了のイベントハンドラ
+    $editInput.on('keydown', function(e) {
+      if (e.key === 'Enter') {
+        finishInlineEdit($(this), true);
+      } else if (e.key === 'Escape') {
+        finishInlineEdit($(this), false);
+      }
+    });
+
+    $editInput.on('blur', function() {
+      finishInlineEdit($(this), true);
+    });
+  }
+
+  // インライン編集完了 - オプション対応
+  function finishInlineEdit($input, save) {
+    const day = $input.data('day');
+    const index = $input.data('index');
+    const originalValue = $input.data('original-value'); // 内部形式
+    const newName = $input.val().trim();
+
+    if (save && newName && newName !== parseEntryForEdit(originalValue)) {
+      // 元のオプション部分を保持して新しい名前と結合
+      const optionMatch = originalValue.match(/^!([^!]+)!(.+)$/);
+      let newValue = newName;
+      
+      if (optionMatch) {
+        const optionKey = optionMatch[1];
+        newValue = `!${optionKey}!${newName}`;
+      }
+      
+      entriesPerDay[day][index] = newValue;
+      updateDropdown(day);
+      updateCapacityWarning(day);
+    }
+
+    $input.remove();
+  }
 
   // コピー機能
   $(document).on('click', '.copy-btn', function() {
@@ -122,34 +296,99 @@ $('#startBtn').click(function() {
     }
     entriesPerDay[target] = entriesPerDay[src].slice();
     updateDropdown(target);
+    updateCapacityWarning(target);
   });
 
-  // プルダウンを再描画 - sceneとperson両方で複数表示対応
+  // エントリーリストを再描画 - オプション表示対応
   function updateDropdown(day) {
-    const select = $(`.entry-select[data-day='${day}']`);
-    const prev   = select.val() || [];
-    select.empty();
+    const container = $(`.entry-list-container[data-day='${day}']`);
+    container.empty();
     
-    entriesPerDay[day].forEach(val => {
-      const opt = $('<option>').val(val).text(val);
-      // 常に選択状態にして表示する（sceneとperson両方で）
-      opt.prop('selected', true);
-      select.append(opt);
+    entriesPerDay[day].forEach((val, index) => {
+      // 内部形式を表示用に変換
+      const displayText = parseEntryForDisplay(val);
+      
+      const entryItem = $('<div>')
+        .addClass('entry-item')
+        .attr('data-day', day)
+        .attr('data-value', val) // 内部形式で保存
+        .text(displayText) // 表示用テキスト
+        .css({
+          'background-color': '#ffffff',
+          'border': '1px solid #d1d5db',
+          'border-radius': '4px',
+          'padding': '4px 8px',
+          'margin': '2px',
+          'cursor': 'pointer',
+          'font-size': '12px',
+          'display': 'inline-block',
+          'user-select': 'none'
+        })
+        .hover(
+          function() { $(this).css('background-color', '#e5e7eb'); },
+          function() { $(this).css('background-color', '#ffffff'); }
+        );
+      
+      container.append(entryItem);
     });
+  }
+
+  // エントリーを表示用に変換
+  function parseEntryForDisplay(entry) {
+    const optionMatch = entry.match(/^!([^!]+)!(.+)$/);
+    if (optionMatch) {
+      const optionKey = optionMatch[1];
+      const name = optionMatch[2];
+      const optionText = optionMappings[optionKey] || optionKey;
+      return `${optionText} ${name}`;
+    }
+    return entry;
+  }
+
+  // エントリーを編集用に変換（名前部分のみ）
+  function parseEntryForEdit(entry) {
+    const optionMatch = entry.match(/^!([^!]+)!(.+)$/);
+    if (optionMatch) {
+      return optionMatch[2]; // 名前部分のみ
+    }
+    return entry;
+  }
+
+  // 台数警告の更新（個別の日付）
+  function updateCapacityWarning(day) {
+    if (!capacityEnabled || requiredCapacity <= 0) return;
     
-    // selectのサイズを動的に調整（複数項目を表示するため）
-    const itemCount = entriesPerDay[day].length;
-    if (itemCount > 0) {
-      select.attr('size', Math.min(itemCount, 5)); // 最大5行まで表示
+    const $dayBox = $(`.day-box[data-day='${day}']`);
+    const currentCount = entriesPerDay[day].length;
+    
+    if (currentCount < requiredCapacity) {
+      $dayBox.addClass('capacity-warning');
     } else {
-      select.attr('size', 1);
+      $dayBox.removeClass('capacity-warning');
     }
   }
 
-  // CSVビルド
+  // 台数警告の更新（全日付）
+  function updateCapacityWarnings() {
+    if (!capacityEnabled || requiredCapacity <= 0) {
+      $('.day-box').removeClass('capacity-warning');
+      return;
+    }
+    
+    Object.keys(entriesPerDay).forEach(day => {
+      updateCapacityWarning(day);
+    });
+  }
+
+  // CSVビルド - 台数設定を含める
   function buildCSV() {
+    let headerLine = `${mode},${$('#year').val()},${$('#month').val()},${$('#target_name').val()}`;
+    if (capacityEnabled) {
+      headerLine += `,${requiredCapacity}`;
+    }
+    
     const lines = [
-      `${mode},${$('#year').val()},${$('#month').val()},${$('#target_name').val()}`,
+      headerLine,
       mode === 'scene' ? '日付,出勤者' : '日付,現場'
     ];
     Object.keys(entriesPerDay).forEach(d => {
@@ -186,14 +425,52 @@ $('#startBtn').click(function() {
       // 日付ラベル
       dayBox.append(`<div class="date-label">${d}日</div>`);
 
-      // 出勤者／現場プルダウン - sceneとperson両方で複数表示対応
-      const select = $('<select>')
-        .addClass('entry-select')
-        .attr('data-day', d)
-        .attr('multiple', true)  // sceneとperson両方でmultiple属性を付与
-        .attr('size', 1);        // 初期は1行表示
+      // オプション使用チェックボックス
+      const optionCheckContainer = $('<div>').css({
+        'display': 'flex',
+        'align-items': 'center',
+        'margin-bottom': '8px',
+        'justify-content': 'center'
+      });
       
-      dayBox.append(select);
+      const optionCheckbox = $('<input>')
+        .attr('type', 'checkbox')
+        .addClass('option-checkbox')
+        .attr('data-day', d)
+        .css({
+          'margin-right': '4px',
+          'width': '14px',
+          'height': '14px'
+        });
+      
+      const optionLabel = $('<label>')
+        .text('オプション使用')
+        .css({
+          'font-size': '11px',
+          'color': '#666',
+          'cursor': 'pointer'
+        })
+        .click(function() {
+          optionCheckbox.prop('checked', !optionCheckbox.prop('checked')).trigger('change');
+        });
+      
+      optionCheckContainer.append(optionCheckbox, optionLabel);
+      dayBox.append(optionCheckContainer);
+
+      // 出勤者／現場リスト表示エリア
+      const entryListContainer = $('<div>')
+        .addClass('entry-list-container')
+        .attr('data-day', d)
+        .css({
+          'min-height': '60px',
+          'border': '1px solid #ccc',
+          'border-radius': '6px',
+          'padding': '4px',
+          'margin-bottom': '8px',
+          'background-color': '#f9f9f9'
+        });
+      
+      dayBox.append(entryListContainer);
 
       // 操作説明テキストを追加
       const helpText = $('<div>')
@@ -204,13 +481,20 @@ $('#startBtn').click(function() {
           'margin-bottom': '5px',
           'text-align': 'center'
         })
-        .text('右クリックで削除');
+        .text('右クリック:削除 / ダブルクリック:編集');
       dayBox.append(helpText);
 
       // 追加用インプット＆ボタンを横並びにするためのコンテナ
       const addContainer = $('<div>').css({
         'display': 'flex',
         'margin-bottom': '5px',
+        'gap': '2px',
+        'flex-direction': 'column'
+      });
+      
+      // 名前入力欄
+      const nameInputContainer = $('<div>').css({
+        'display': 'flex',
         'gap': '2px'
       });
       
@@ -224,6 +508,7 @@ $('#startBtn').click(function() {
           'padding': '3px',
           'font-size': '12px'
         });
+      
       const btn = $('<button>')
         .attr('type', 'button')
         .addClass('add-entry-btn')
@@ -234,7 +519,42 @@ $('#startBtn').click(function() {
           'font-size': '12px'
         });
       
-      addContainer.append(input, btn);
+      nameInputContainer.append(input, btn);
+      
+      // オプション選択欄（初期は非表示）
+      const optionInputContainer = $('<div>').css({
+        'display': 'none',
+        'gap': '2px',
+        'align-items': 'center',
+        'margin-top': '3px'
+      }).addClass('option-input-container').attr('data-day', d);
+      
+      const optionLabel2 = $('<label>').text('オプション:').css({
+        'font-size': '11px',
+        'color': '#666',
+        'min-width': '55px'
+      });
+      
+      const optionSelect = $('<select>')
+        .addClass('option-select')
+        .attr('data-day', d)
+        .css({
+          'flex': '1',
+          'padding': '2px',
+          'font-size': '11px',
+          'border': '1px solid #ccc',
+          'border-radius': '4px'
+        });
+      
+      // オプション選択肢を追加
+      optionSelect.append('<option value="">なし</option>');
+      Object.keys(optionMappings).forEach(key => {
+        optionSelect.append(`<option value="${key}">${optionMappings[key]}</option>`);
+      });
+      
+      optionInputContainer.append(optionLabel2, optionSelect);
+      
+      addContainer.append(nameInputContainer, optionInputContainer);
       dayBox.append(addContainer);
 
       // コピー用インプット＆ボタンを横並びにするためのコンテナ

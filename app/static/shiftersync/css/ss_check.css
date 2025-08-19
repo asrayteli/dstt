@@ -195,6 +195,13 @@ h1.title {
     padding: 12px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     border: 1px solid #e2e8f0;
+    transition: background-color 0.2s ease;
+}
+
+/* 台数不足警告 */
+.site-section.capacity-warning {
+    background-color: #fef3c7;
+    border-color: #f59e0b;
 }
 
 /* 日付ラベル */
@@ -231,6 +238,14 @@ h1.title {
     background: #fef3c7;
     color: #92400e;
     font-style: italic;
+}
+
+/* 未定の場合 */
+.name-item.undefined {
+    background: #fef3c7;
+    color: #92400e;
+    font-style: italic;
+    font-weight: 600;
 }
 
 /* 重複関連のスタイル */
