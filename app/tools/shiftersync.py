@@ -276,85 +276,89 @@ def calendar_view():
         filepath = os.path.join(UPLOAD_FOLDER, filename)
         file.save(filepath)
 
-        # === CSVパースと情報抽出 ===
-        with open(filepath, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f)
-
-            try:
-                # 1行目：メタ情報（モード、年、月、対象名、台数設定）
-                header = next(reader)
-                mode = header[0].strip().lower()
-                year = int(header[1])
-                month = int(header[2])
-                target_name = header[3]
-                
-                # 台数設定の読み込み（5番目の要素があれば）
-                capacity = None
-                if len(header) >= 5:
-                    try:
-                        capacity = int(header[4])
-                    except ValueError:
-                        capacity = None
-
-                # 2行目：カラムヘッダー（例：日付, 内容）をスキップ
-                next(reader)
-
-                # オプションマッピング定義
-                option_mappings = {
-                    'A': '午前',
-                    'P': '午後',
-                    '1': '1号車',
-                    '2': '2号車',
-                    'E': '早番',
-                    'L': '遅番'
-                }
-
-                def parse_entry_for_display(entry):
-                    """エントリーを表示用に変換"""
-                    import re
-                    option_match = re.match(r'^!([^!]+)!(.+)$', entry)
-                    if option_match:
-                        option_key = option_match.group(1)
-                        name = option_match.group(2)
-                        option_text = option_mappings.get(option_key, option_key)
-                        return f"{option_text} {name}"
-                    return entry
-
-                # 残りのデータ処理
-                day_map = {}  # day(int): content(list)
-                for row in reader:
-                    if len(row) >= 2:
-                        try:
-                            day = int(row[0])
-                            raw_entries = [v.strip() for v in row[1:] if v.strip()]
-                            # オプション付きエントリーを表示用に変換
-                            display_entries = [parse_entry_for_display(entry) for entry in raw_entries]
-                            day_map[day] = display_entries
-                        except ValueError:
-                            continue  # 無効な行はスキップ（例：空行や誤入力）
-
-            except Exception as e:
-                flash(f"CSVの読み込み中にエラーが発生しました: {e}")
-                return render_template('ss_calendar.html')
-
-        # === 出力ファイル名生成 ===
-        output_filename = f"{year}-{str(month).zfill(2)}_カレンダー_{target_name}.{format_type}"
-        output_path = os.path.join(UPLOAD_FOLDER, output_filename)
-
         try:
+            # === CSVパースと情報抽出 ===
+            with open(filepath, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+
+                try:
+                    # 既存のCSV解析コード（変更なし）
+                    header = next(reader)
+                    mode = header[0].strip().lower()
+                    year = int(header[1])
+                    month = int(header[2])
+                    target_name = header[3]
+                    
+                    capacity = None
+                    if len(header) >= 5:
+                        try:
+                            capacity = int(header[4])
+                        except ValueError:
+                            capacity = None
+
+                    next(reader)
+
+                    option_mappings = {
+                        'A': '午前',
+                        'P': '午後',
+                        '1': '1号車',
+                        '2': '2号車',
+                        'E': '早番',
+                        'L': '遅番'
+                    }
+
+                    def parse_entry_for_display(entry):
+                        import re
+                        option_match = re.match(r'^!([^!]+)!(.+)$', entry)
+                        if option_match:
+                            option_key = option_match.group(1)
+                            name = option_match.group(2)
+                            option_text = option_mappings.get(option_key, option_key)
+                            return f"{option_text} {name}"
+                        return entry
+
+                    day_map = {}
+                    for row in reader:
+                        if len(row) >= 2:
+                            try:
+                                day = int(row[0])
+                                raw_entries = [v.strip() for v in row[1:] if v.strip()]
+                                display_entries = [parse_entry_for_display(entry) for entry in raw_entries]
+                                day_map[day] = display_entries
+                            except ValueError:
+                                continue
+
+                except Exception as e:
+                    flash(f"CSVの読み込み中にエラーが発生しました: {e}")
+                    return render_template('ss_calendar.html')
+
+            # === 出力ファイル名生成 ===
+            output_filename = f"{year}-{str(month).zfill(2)}_カレンダー_{target_name}.{format_type}"
+            output_path = os.path.join(UPLOAD_FOLDER, output_filename)
+
+            # === カレンダー生成 ===
             if format_type == 'pdf':
                 generate_pdf_calendar(output_path, year, month, mode, target_name, day_map, capacity)
             elif format_type == 'png':
                 generate_png_calendar(output_path, year, month, mode, target_name, day_map, capacity)
+
+            return render_template(
+                'ss_calendar.html',
+                image_file=output_filename if format_type == 'png' else None,
+                pdf_file=output_filename if format_type == 'pdf' else None
+            )
+
         except Exception as e:
             flash(f"カレンダー出力時にエラーが発生しました: {e}")
             return render_template('ss_calendar.html')
-
-        return render_template(
-            'ss_calendar.html',
-            image_file=output_filename if format_type == 'png' else None,
-            pdf_file=output_filename if format_type == 'pdf' else None
-        )
+        
+        finally:
+            # === アップロードされたCSVファイルを削除 ===
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except Exception as e:
+                print(f"アップロードファイルの削除に失敗しました: {e}")
 
     return render_template('ss_calendar.html')
 
