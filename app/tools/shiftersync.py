@@ -80,8 +80,13 @@ def check():
         return render_template("ss_check.html")
 
     files = request.files.getlist('csv_files')
-    if not files or len(files) > 6:
-        return jsonify({"error": "1～6件のCSVファイルをアップロードしてください"})
+    if not files:
+        return jsonify({"error": "CSVファイルをアップロードしてください"})
+
+    # ファイル数制限を撤廃（20ファイル想定だが制限なし）
+    max_files = 50  # 安全のため上限は設定するが大幅に緩和
+    if len(files) > max_files:
+        return jsonify({"error": f"ファイル数が多すぎます。最大{max_files}件まで対応しています"})
 
     mode, year, month = None, None, None
     file_targets = []  # 各ファイルの対象名
@@ -90,22 +95,21 @@ def check():
 
     # オプションマッピング定義
     option_mappings = {
-                            'A': '午前',
-                            'P': '午後',
-                            'E': '早番',
-                            'L': '遅番',
-                            'M': 'マイクロ',
-                            'C': '中型',
-                            'O': '大型',
-                            'W': 'ワゴン',
-                            'V': '役員車両',
-                            'N1': '1号車',
-                            'N2': '2号車',
-                            'N3': '3号車',
-                            'N4': '4号車',
-                            'N5': '5号車'
-                            
-                        }
+        'A': '午前',
+        'P': '午後',
+        'E': '早番',
+        'L': '遅番',
+        'M': 'マイクロ',
+        'C': '中型',
+        'O': '大型',
+        'W': 'ワゴン',
+        'V': '役員車両',
+        'N1': '1号車',
+        'N2': '2号車',
+        'N3': '3号車',
+        'N4': '4号車',
+        'N5': '5号車'
+    }
 
     def parse_entry_for_display(entry):
         """エントリーを表示用に変換"""
@@ -126,6 +130,76 @@ def check():
             return option_match.group(2)  # 名前部分のみ
         return entry
 
+    def extract_option_and_name(entry):
+        """エントリーからオプションと名前を分離"""
+        import re
+        option_match = re.match(r'^!([^!]+)!(.+)$', entry)
+        if option_match:
+            return option_match.group(1), option_match.group(2)
+        return None, entry
+
+    def is_duplicate_by_rules(option1, option2):
+        """新しい重複判定ルールに基づいて重複を判定"""
+        # オプションなし同士またはどちらかがオプションなしの場合は重複
+        if option1 is None or option2 is None:
+            return True
+        
+        # 号車オプション（N1-N5）が含まれる場合は常に重複
+        number_car_options = ['N1', 'N2', 'N3', 'N4', 'N5']
+        if option1 in number_car_options or option2 in number_car_options:
+            return True
+        
+        # 時間オプションの定義と判定
+        time_options = {
+            'A': '午前',
+            'P': '午後', 
+            'E': '早番',
+            'L': '遅番'
+        }
+        
+        # どちらかに時間オプションが含まれる場合は時間ルールで判定
+        if option1 in time_options or option2 in time_options:
+            # 時間オプション以外は時間との重複なしとして扱う
+            if option1 not in time_options or option2 not in time_options:
+                return False
+            
+            # 時間オプション同士の重複判定
+            time_conflict_rules = {
+                ('A', 'P'): False,  # 午前 vs 午後 → 重複なし
+                ('A', 'E'): True,   # 午前 vs 早番 → 重複あり
+                ('A', 'L'): False,  # 午前 vs 遅番 → 重複なし
+                ('P', 'E'): False,  # 午後 vs 早番 → 重複なし
+                ('P', 'L'): True,   # 午後 vs 遅番 → 重複あり
+                ('E', 'L'): False,  # 早番 vs 遅番 → 重複なし（念のため）
+            }
+            
+            # 順序を正規化して判定
+            key = tuple(sorted([option1, option2]))
+            return time_conflict_rules.get(key, option1 == option2)
+        
+        # 車両オプションの判定
+        vehicle_options = {
+            'M': 'マイクロ',
+            'C': '中型',
+            'O': '大型', 
+            'W': 'ワゴン',
+            'V': '役員車両'
+        }
+        
+        if option1 in vehicle_options and option2 in vehicle_options:
+            # 役員車両 vs その他車両 → 重複あり
+            if option1 == 'V' or option2 == 'V':
+                return True
+            # 同じ車両オプション → 重複あり
+            if option1 == option2:
+                return True
+            # 異なる車両オプション（役員車両以外） → 重複なし
+            return False
+        
+        # その他の場合は同じオプションのみ重複
+        return option1 == option2
+
+    # CSVファイル処理部分（変更なし）
     for file_index, file in enumerate(files):
         filename = secure_filename(file.filename)
 
@@ -187,60 +261,78 @@ def check():
             for entry in entries:
                 display_entry = parse_entry_for_display(entry)
                 comparison_name = parse_entry_for_comparison(entry)
+                option, name = extract_option_and_name(entry)
                 processed_entries.append({
                     'original': entry,
                     'display': display_entry,
-                    'comparison': comparison_name
+                    'comparison': comparison_name,
+                    'option': option,
+                    'name': name
                 })
             
             shift_data[day][file_index].extend(processed_entries)
 
-    # 重複検出：同じオプション+名前 または オプションなしとの重複
-    conflict_set = set()
-    for day in shift_data.keys():
-        # ファイル別のエントリーを収集 {(オプション, 名前): [ファイルインデックス]}
-        entry_to_files = defaultdict(set)
-        
-        for f_index, entries in enumerate(shift_data[day]):
-            for entry in entries:
-                original = entry['original']
-                comparison_name = entry['comparison']
-                
-                # オプション部分を取得
-                import re
-                option_match = re.match(r'^!([^!]+)!(.+)$', original)
-                if option_match:
-                    option_key = option_match.group(1)
-                    entry_key = (option_key, comparison_name)
-                else:
-                    # オプションなしの場合は特別なキー
-                    entry_key = (None, comparison_name)
-                
-                entry_to_files[entry_key].add(f_index)
-
-        # 重複判定
-        for (option, name), f_indexes in entry_to_files.items():
-            if len(f_indexes) > 1:
-                # 同じオプション+名前で複数ファイルに存在
-                conflict_set.add((day, option, name))
-            
-            # オプションなしの場合は、同じ名前の他のオプションとも競合
-            if option is None:
-                for other_entry_key, other_f_indexes in entry_to_files.items():
-                    other_option, other_name = other_entry_key
-                    if other_option is not None and other_name == name and len(other_f_indexes.intersection(f_indexes)) == 0:
-                        # 異なるファイルで同じ名前のオプション付きエントリーがある
-                        if len(other_f_indexes) > 0:
-                            conflict_set.add((day, other_option, other_name))
-                            conflict_set.add((day, None, name))
-
-    # JavaScriptで使いやすい形式に変換
+    # 新しい重複検出アルゴリズム
     conflicts = []
-    for (day, option, name) in conflict_set:
-        if option is None:
-            conflicts.append({"date": day, "entry": name})
-        else:
-            conflicts.append({"date": day, "entry": f"!{option}!{name}"})
+    same_site_conflicts = []  # 同一現場内重複を追加
+    
+    for day in shift_data.keys():
+        # 各ファイル内での同一現場重複をチェック
+        for file_index, entries in enumerate(shift_data[day]):
+            name_count = defaultdict(list)
+            for entry in entries:
+                name_count[entry['name']].append(entry)
+            
+            # 同一現場内で同じ名前が複数回出現する場合
+            for name, entry_list in name_count.items():
+                if len(entry_list) > 1:
+                    for entry in entry_list:
+                        same_site_conflicts.append({
+                            "date": day,
+                            "entry": entry['original'],
+                            "file_index": file_index
+                        })
+        
+        # 異なるファイル間での重複をチェック
+        # 名前ごとにエントリーをグループ化
+        name_to_entries = defaultdict(list)
+        for file_index, entries in enumerate(shift_data[day]):
+            for entry in entries:
+                name_to_entries[entry['name']].append({
+                    'file_index': file_index,
+                    'entry': entry
+                })
+        
+        # 各名前について、異なるファイル間での重複をチェック
+        for name, entry_info_list in name_to_entries.items():
+            if len(entry_info_list) < 2:
+                continue
+            
+            # 異なるファイル間でのペアをチェック
+            for i in range(len(entry_info_list)):
+                for j in range(i + 1, len(entry_info_list)):
+                    entry_info1 = entry_info_list[i]
+                    entry_info2 = entry_info_list[j]
+                    
+                    # 異なるファイルかチェック
+                    if entry_info1['file_index'] != entry_info2['file_index']:
+                        option1 = entry_info1['entry']['option']
+                        option2 = entry_info2['entry']['option']
+                        
+                        # 新しいルールで重複判定
+                        if is_duplicate_by_rules(option1, option2):
+                            conflicts.append({
+                                "date": day,
+                                "entry": entry_info1['entry']['original']
+                            })
+                            conflicts.append({
+                                "date": day,
+                                "entry": entry_info2['entry']['original']
+                            })
+
+    # 重複を除去
+    conflicts = list({f"{c['date']}-{c['entry']}": c for c in conflicts}.values())
+    same_site_conflicts = list({f"{c['date']}-{c['entry']}-{c['file_index']}": c for c in same_site_conflicts}.values())
 
     # 全日付を生成（1日から月末まで）
     import calendar
@@ -265,7 +357,9 @@ def check():
         "dates": all_possible_dates,
         "matrix": complete_matrix,
         "conflicts": conflicts,
-        "option_mappings": option_mappings
+        "same_site_conflicts": same_site_conflicts,  # 同一現場内重複を追加
+        "option_mappings": option_mappings,
+        "total_files": len(files)
     })
 
 

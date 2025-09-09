@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-xl mx-auto bg-white p-6 rounded-2xl shadow mt-6">
+  <h2 class="text-xl font-bold mb-4">🛠️ leave_mgr Tool</h2>
+  <form method="POST">
+    <!-- 入力フォーム -->
+    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">送信</button>
+  </form>
+
+  {% if result %}
+  <div class="mt-4 text-green-700 font-semibold">
+    ✅ 結果: { '{ result }' }
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
