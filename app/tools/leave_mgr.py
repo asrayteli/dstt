@@ -1,11 +1,352 @@
-from flask import Blueprint, render_template, request
+from flask import Blueprint, render_template, request, jsonify, current_app
+from flask_login import login_required, current_user
+import os
+import json
+from datetime import datetime
+import re
+from pathlib import Path
 
 leave_mgr_bp = Blueprint("leave_mgr", __name__, url_prefix="/tools/leave_mgr")
 
-@leave_mgr_bp.route("/", methods=["GET", "POST"])
-def leave_mgr():
-    result = None
-    if request.method == "POST":
-        # ここにロジックを追加
-        pass
-    return render_template("leave_mgr.html", result=result)
+# 初期管理者ID（ハードコーディング）
+INITIAL_ADMIN_ID = "1"
+
+# 休暇種類と色の定義
+LEAVE_TYPES = {
+    "有休": "#DC2626",        # 赤系
+    "代休": "#10B981",        # 緑系
+    "慶弔休暇": "#8B5CF6",    # 紫系
+    "介護休暇": "#F97316",    # オレンジ系
+    "リフレッシュ休暇": "#EC4899",  # ピンク系
+    "その他": "#0EA5E9"       # 青系
+}
+
+def get_data_path():
+    """データディレクトリのパスを取得"""
+    return os.path.join(current_app.root_path, 'static', 'leave_mgr')
+
+def ensure_data_directories():
+    """必要なディレクトリとファイルを作成"""
+    data_path = get_data_path()
+    calendars_path = os.path.join(data_path, 'calendars')
+    
+    # ディレクトリ作成
+    os.makedirs(calendars_path, exist_ok=True)
+    
+    # permissions.jsonの初期化
+    permissions_file = os.path.join(data_path, 'permissions.json')
+    if not os.path.exists(permissions_file):
+        initial_permissions = {
+            "admins": [INITIAL_ADMIN_ID],
+            "user_calendars": {
+                INITIAL_ADMIN_ID: []
+            }
+        }
+        with open(permissions_file, 'w', encoding='utf-8') as f:
+            json.dump(initial_permissions, f, ensure_ascii=False, indent=2)
+    
+    # calendar_meta.jsonの初期化
+    meta_file = os.path.join(data_path, 'calendar_meta.json')
+    if not os.path.exists(meta_file):
+        with open(meta_file, 'w', encoding='utf-8') as f:
+            json.dump({}, f, ensure_ascii=False, indent=2)
+
+def load_permissions():
+    """権限情報を読み込み"""
+    permissions_file = os.path.join(get_data_path(), 'permissions.json')
+    try:
+        with open(permissions_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {"admins": [INITIAL_ADMIN_ID], "user_calendars": {}}
+
+def save_permissions(permissions):
+    """権限情報を保存"""
+    permissions_file = os.path.join(get_data_path(), 'permissions.json')
+    with open(permissions_file, 'w', encoding='utf-8') as f:
+        json.dump(permissions, f, ensure_ascii=False, indent=2)
+
+def load_calendar_meta():
+    """カレンダーメタ情報を読み込み"""
+    meta_file = os.path.join(get_data_path(), 'calendar_meta.json')
+    try:
+        with open(meta_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_calendar_meta(meta):
+    """カレンダーメタ情報を保存"""
+    meta_file = os.path.join(get_data_path(), 'calendar_meta.json')
+    with open(meta_file, 'w', encoding='utf-8') as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+def is_admin(user_id):
+    """管理者権限チェック"""
+    permissions = load_permissions()
+    return user_id in permissions.get('admins', [])
+
+def get_user_calendars(user_id):
+    """ユーザーがアクセス可能なカレンダーIDリストを取得"""
+    permissions = load_permissions()
+    return permissions.get('user_calendars', {}).get(user_id, [])
+
+def validate_calendar_id(calendar_id):
+    """カレンダーIDのバリデーション"""
+    # 英数字とアンダースコアのみ、最大20文字
+    if not re.match(r'^[a-zA-Z0-9_]+$', calendar_id):
+        return False, "カレンダーIDは英数字とアンダースコアのみ使用可能です"
+    if len(calendar_id) > 20:
+        return False, "カレンダーIDは20文字以内にしてください"
+    
+    # 数値のみの場合はアンダースコアを追加
+    if calendar_id.isdigit():
+        calendar_id = calendar_id + "_"
+    
+    return True, calendar_id
+
+def load_calendar_data(calendar_id, year_month):
+    """カレンダーデータを読み込み"""
+    file_path = os.path.join(get_data_path(), 'calendars', f"{calendar_id}_{year_month}.json")
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {"leaves": []}
+
+def save_calendar_data(calendar_id, year_month, data):
+    """カレンダーデータを保存"""
+    calendars_path = os.path.join(get_data_path(), 'calendars')
+    os.makedirs(calendars_path, exist_ok=True)
+    
+    file_path = os.path.join(calendars_path, f"{calendar_id}_{year_month}.json")
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+@leave_mgr_bp.route("/")
+@login_required
+def index():
+    """メインページ"""
+    ensure_data_directories()
+    
+    # 現在のユーザーID
+    user_id = str(current_user.id)
+    
+    # ユーザーの権限情報
+    is_admin_user = is_admin(user_id)
+    user_calendars = get_user_calendars(user_id)
+    
+    # カレンダーメタ情報
+    calendar_meta = load_calendar_meta()
+    
+    return render_template(
+        "leave_mgr.html",
+        user_id=user_id,
+        is_admin=is_admin_user,
+        user_calendars=user_calendars,
+        calendar_meta=calendar_meta,
+        leave_types=LEAVE_TYPES
+    )
+
+@leave_mgr_bp.route("/api/calendar/<calendar_id>/<year_month>")
+@login_required
+def get_calendar(calendar_id, year_month):
+    """カレンダーデータを取得"""
+    user_id = str(current_user.id)
+    
+    # アクセス権限チェック
+    if calendar_id not in get_user_calendars(user_id) and not is_admin(user_id):
+        return jsonify({"error": "アクセス権限がありません"}), 403
+    
+    data = load_calendar_data(calendar_id, year_month)
+    return jsonify(data)
+
+@leave_mgr_bp.route("/api/leave", methods=["POST"])
+@login_required
+def add_leave():
+    """休暇を追加"""
+    user_id = str(current_user.id)
+    data = request.json
+    
+    calendar_id = data.get('calendar_id')
+    year_month = data.get('year_month')
+    
+    # アクセス権限チェック
+    if calendar_id not in get_user_calendars(user_id) and not is_admin(user_id):
+        return jsonify({"error": "アクセス権限がありません"}), 403
+    
+    # カレンダーデータを読み込み
+    calendar_data = load_calendar_data(calendar_id, year_month)
+    
+    # 重複チェック
+    date = data.get('date')
+    name = data.get('name')
+    existing = [l for l in calendar_data['leaves'] if l['date'] == date and l['name'] == name]
+    
+    if existing:
+        return jsonify({"warning": "同じ名前で同日に登録されています", "existing": existing}), 409
+    
+    # 新しい休暇を追加
+    new_leave = {
+        "id": datetime.now().isoformat(),
+        "date": date,
+        "name": name,
+        "leave_type": data.get('leave_type'),
+        "deputies": data.get('deputies', []),
+        "remarks": data.get('remarks', ''),
+        "created_by": user_id,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    calendar_data['leaves'].append(new_leave)
+    
+    # 保存
+    save_calendar_data(calendar_id, year_month, calendar_data)
+    
+    return jsonify({"success": True, "leave": new_leave})
+
+@leave_mgr_bp.route("/api/leave/<leave_id>", methods=["PUT", "DELETE"])
+@login_required
+def modify_leave(leave_id):
+    """休暇を編集または削除"""
+    user_id = str(current_user.id)
+    data = request.json
+    
+    calendar_id = data.get('calendar_id')
+    year_month = data.get('year_month')
+    
+    # アクセス権限チェック
+    if calendar_id not in get_user_calendars(user_id) and not is_admin(user_id):
+        return jsonify({"error": "アクセス権限がありません"}), 403
+    
+    # カレンダーデータを読み込み
+    calendar_data = load_calendar_data(calendar_id, year_month)
+    
+    if request.method == "DELETE":
+        # 削除
+        calendar_data['leaves'] = [l for l in calendar_data['leaves'] if l['id'] != leave_id]
+    else:
+        # 編集
+        for leave in calendar_data['leaves']:
+            if leave['id'] == leave_id:
+                leave.update({
+                    "name": data.get('name', leave['name']),
+                    "leave_type": data.get('leave_type', leave['leave_type']),
+                    "deputies": data.get('deputies', leave['deputies']),
+                    "remarks": data.get('remarks', leave['remarks']),
+                    "updated_by": user_id,
+                    "updated_at": datetime.now().isoformat()
+                })
+                break
+    
+    # 保存
+    save_calendar_data(calendar_id, year_month, calendar_data)
+    
+    return jsonify({"success": True})
+
+@leave_mgr_bp.route("/api/admin/calendar", methods=["POST"])
+@login_required
+def create_calendar():
+    """新しいカレンダーを作成（管理者のみ）"""
+    user_id = str(current_user.id)
+    
+    if not is_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    
+    data = request.json
+    calendar_id = data.get('calendar_id')
+    
+    # バリデーション
+    valid, processed_id = validate_calendar_id(calendar_id)
+    if not valid:
+        return jsonify({"error": processed_id}), 400
+    
+    calendar_id = processed_id
+    
+    # 既存チェック
+    meta = load_calendar_meta()
+    if calendar_id in meta:
+        return jsonify({"error": "このカレンダーIDは既に存在します"}), 400
+    
+    # メタ情報を保存
+    meta[calendar_id] = {
+        "created_by": user_id,
+        "created_at": datetime.now().isoformat(),
+        "name": data.get('name', calendar_id)
+    }
+    save_calendar_meta(meta)
+    
+    # 作成者に権限を付与
+    permissions = load_permissions()
+    if user_id not in permissions['user_calendars']:
+        permissions['user_calendars'][user_id] = []
+    if calendar_id not in permissions['user_calendars'][user_id]:
+        permissions['user_calendars'][user_id].append(calendar_id)
+    save_permissions(permissions)
+    
+    return jsonify({"success": True, "calendar_id": calendar_id})
+
+@leave_mgr_bp.route("/api/admin/grant", methods=["POST"])
+@login_required
+def grant_permission():
+    """ユーザーに権限を付与（管理者のみ）"""
+    user_id = str(current_user.id)
+    
+    if not is_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    
+    data = request.json
+    target_user_id = data.get('user_id')
+    calendar_id = data.get('calendar_id')
+    grant_type = data.get('grant_type', 'calendar')  # 'calendar' or 'admin'
+    
+    permissions = load_permissions()
+    
+    if grant_type == 'admin':
+        # 管理者権限を付与
+        if target_user_id not in permissions['admins']:
+            permissions['admins'].append(target_user_id)
+    else:
+        # カレンダーアクセス権限を付与
+        if target_user_id not in permissions['user_calendars']:
+            permissions['user_calendars'][target_user_id] = []
+        if calendar_id not in permissions['user_calendars'][target_user_id]:
+            permissions['user_calendars'][target_user_id].append(calendar_id)
+    
+    save_permissions(permissions)
+    
+    return jsonify({"success": True})
+
+@leave_mgr_bp.route("/api/admin/users")
+@login_required
+def get_users_permissions():
+    """全ユーザーの権限一覧を取得（管理者のみ）"""
+    user_id = current_user.username
+    
+    if not is_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    
+    permissions = load_permissions()
+    calendar_meta = load_calendar_meta()
+    
+    # ユーザー権限情報を整形
+    users_info = []
+    all_users = set(permissions.get('user_calendars', {}).keys()) | set(permissions.get('admins', []))
+    
+    for uid in all_users:
+        user_info = {
+            "user_id": uid,
+            "is_admin": uid in permissions.get('admins', []),
+            "calendars": []
+        }
+        
+        for cal_id in permissions.get('user_calendars', {}).get(uid, []):
+            cal_name = calendar_meta.get(cal_id, {}).get('name', cal_id)
+            user_info['calendars'].append({
+                "id": cal_id,
+                "name": cal_name
+            })
+        
+        users_info.append(user_info)
+    
+    return jsonify(users_info)
