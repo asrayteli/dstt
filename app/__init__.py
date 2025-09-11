@@ -71,6 +71,9 @@ def create_app():
     from .tools.leave_mgr import leave_mgr_bp
     app.register_blueprint(leave_mgr_bp)
 
+    from .tools.user_management import user_management_bp
+    app.register_blueprint(user_management_bp)
+
     return app
 
 

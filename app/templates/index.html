@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <h1 class="text-2xl font-bold mb-6" id="welcome-message">ようこそ、DaiShinToTools ダッシュボードへ</h1>
+  <h1 class="text-2xl font-bold mb-6" id="welcome-message">ようこそ、{{ user_name }}様 DaiShinToTools ダッシュボードへ</h1>
 
   <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
     <div class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition">
@@ -76,5 +76,282 @@
       <a href="/tools/leave_mgr" class="text-blue-600 hover:underline">開く →</a>
     </div>
   </div>
+
+
+
+
+
+
+  {% if is_admin %}
+  <div class="mt-12 border-t pt-8">
+    <h2 class="text-2xl font-bold mb-4 text-red-600">🔧 管理者メニュー</h2>
+    <div class="bg-red-50 border border-red-200 rounded-2xl p-6">
+      <div class="flex flex-wrap gap-4">
+        <button onclick="showCreateUserModal()" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition">
+          👤 ユーザー作成
+        </button>
+        <button onclick="showUserListModal()" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition">
+          📝 ユーザー管理
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ユーザー作成モーダル -->
+  <div id="createUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
+      <h3 class="text-xl font-bold mb-4">👤 新規ユーザー作成</h3>
+      <form id="createUserForm">
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">ユーザーID（英数字のみ）</label>
+          <input type="text" id="newUsername" class="w-full border rounded px-3 py-2" required>
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">日本語名</label>
+          <input type="text" id="newName" class="w-full border rounded px-3 py-2" required>
+        </div>
+        <div class="mb-6">
+          <label class="block text-sm font-medium text-gray-700 mb-2">パスワード</label>
+          <input type="password" id="newPassword" class="w-full border rounded px-3 py-2" required>
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex-1">
+            作成
+          </button>
+          <button type="button" onclick="hideCreateUserModal()" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
+            キャンセル
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ユーザー管理モーダル -->
+  <div id="userListModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-2xl mx-4 max-h-96 overflow-y-auto">
+      <h3 class="text-xl font-bold mb-4">📝 ユーザー管理</h3>
+      <div id="userList">
+        <!-- ユーザーリストがここに表示される -->
+      </div>
+      <div class="mt-4 text-center">
+        <button onclick="hideUserListModal()" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
+          閉じる
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- パスワード変更モーダル -->
+  <div id="changePasswordModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
+      <h3 class="text-xl font-bold mb-4">🔐 パスワード変更</h3>
+      <form id="changePasswordForm">
+        <input type="hidden" id="changePasswordUserId">
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">対象ユーザー</label>
+          <input type="text" id="changePasswordUserInfo" class="w-full border rounded px-3 py-2 bg-gray-100" readonly>
+        </div>
+        <div class="mb-6">
+          <label class="block text-sm font-medium text-gray-700 mb-2">新しいパスワード</label>
+          <input type="password" id="changePasswordNew" class="w-full border rounded px-3 py-2" required>
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex-1">
+            変更
+          </button>
+          <button type="button" onclick="hideChangePasswordModal()" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
+            キャンセル
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // ユーザー作成モーダル表示
+    function showCreateUserModal() {
+      document.getElementById('createUserModal').classList.remove('hidden');
+    }
+
+    // ユーザー作成モーダル非表示
+    function hideCreateUserModal() {
+      document.getElementById('createUserModal').classList.add('hidden');
+      document.getElementById('createUserForm').reset();
+    }
+
+    // ユーザー管理モーダル表示
+    function showUserListModal() {
+      document.getElementById('userListModal').classList.remove('hidden');
+      loadUserList();
+    }
+
+    // ユーザー管理モーダル非表示
+    function hideUserListModal() {
+      document.getElementById('userListModal').classList.add('hidden');
+    }
+
+    // パスワード変更モーダル表示
+    function showChangePasswordModal(userId, username, name) {
+      document.getElementById('changePasswordUserId').value = userId;
+      document.getElementById('changePasswordUserInfo').value = `${username} (${name})`;
+      document.getElementById('changePasswordModal').classList.remove('hidden');
+    }
+
+    // パスワード変更モーダル非表示
+    function hideChangePasswordModal() {
+      document.getElementById('changePasswordModal').classList.add('hidden');
+      document.getElementById('changePasswordForm').reset();
+    }
+
+    // ユーザー作成フォーム送信
+    document.getElementById('createUserForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const username = document.getElementById('newUsername').value;
+      const name = document.getElementById('newName').value;
+      const password = document.getElementById('newPassword').value;
+
+      try {
+        const response = await fetch('/tools/user_management/api/users', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ username, name, password })
+        });
+
+        const result = await response.json();
+        
+        if (result.success) {
+          alert(result.message);
+          hideCreateUserModal();
+          if (document.getElementById('userListModal').classList.contains('hidden') === false) {
+            loadUserList(); // ユーザーリストが開いている場合は更新
+          }
+        } else {
+          alert(`エラー: ${result.error}`);
+        }
+      } catch (error) {
+        alert(`エラー: ${error.message}`);
+      }
+    });
+
+    // パスワード変更フォーム送信
+    document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const userId = document.getElementById('changePasswordUserId').value;
+      const password = document.getElementById('changePasswordNew').value;
+
+      try {
+        const response = await fetch(`/tools/user_management/api/users/${userId}/password`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ password })
+        });
+
+        const result = await response.json();
+        
+        if (result.success) {
+          alert(result.message);
+          hideChangePasswordModal();
+        } else {
+          alert(`エラー: ${result.error}`);
+        }
+      } catch (error) {
+        alert(`エラー: ${error.message}`);
+      }
+    });
+
+    // ユーザーリスト読み込み
+    async function loadUserList() {
+      try {
+        const response = await fetch('/tools/user_management/api/users');
+        const result = await response.json();
+        
+        if (result.users) {
+          const userListHTML = result.users.map(user => `
+            <div class="border rounded p-3 mb-2 flex justify-between items-center">
+              <div>
+                <span class="font-semibold">${user.username}</span>
+                <span class="text-gray-600">(${user.name})</span>
+              </div>
+              <div class="flex gap-2">
+                <button onclick="showChangePasswordModal(${user.id}, '${user.username}', '${user.name}')" 
+                        class="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600">
+                  パスワード変更
+                </button>
+                <button onclick="deleteUser(${user.id}, '${user.username}', '${user.name}')" 
+                        class="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600">
+                  削除
+                </button>
+              </div>
+            </div>
+          `).join('');
+          
+          document.getElementById('userList').innerHTML = userListHTML;
+        } else {
+          alert(`エラー: ${result.error}`);
+        }
+      } catch (error) {
+        alert(`エラー: ${error.message}`);
+      }
+    }
+
+    // ユーザー削除
+    async function deleteUser(userId, username, name) {
+      if (!confirm(`ユーザー「${username}」（${name}）を削除してもよろしいですか？\nこの操作は取り消せません。`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/tools/user_management/api/users/${userId}`, {
+          method: 'DELETE'
+        });
+
+        const result = await response.json();
+        
+        if (result.success) {
+          alert(result.message);
+          loadUserList(); // ユーザーリストを再読み込み
+        } else {
+          alert(`エラー: ${result.error}`);
+        }
+      } catch (error) {
+        alert(`エラー: ${error.message}`);
+      }
+    }
+
+    // ESCキーでモーダルを閉じる
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hideCreateUserModal();
+        hideUserListModal();
+        hideChangePasswordModal();
+      }
+    });
+
+    // モーダル外クリックで閉じる
+    document.getElementById('createUserModal').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        hideCreateUserModal();
+      }
+    });
+
+    document.getElementById('userListModal').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        hideUserListModal();
+      }
+    });
+
+    document.getElementById('changePasswordModal').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        hideChangePasswordModal();
+      }
+    });
+  </script>
+  {% endif %}
 
 {% endblock %}
