@@ -9,7 +9,7 @@
     <!-- 上部コントロール（幅制限） -->
     <div class="top-controls-container">
         <!-- ユーザー情報表示 -->
-        <div class="user-info-box">
+        <div class="user-info-box" data-user-id="{{ user_id }}">
             <p class="text-sm">
                 ログインID: <span class="font-semibold">{{ user_id }}</span>
                 {% if is_admin %}
@@ -91,9 +91,7 @@
             <div class="form-group">
                 <label class="form-label">休暇種類 *</label>
                 <select id="leave-type" class="form-input" required>
-                    {% for type_name in leave_types.keys() %}
-                    <option value="{{ type_name }}">{{ type_name }}</option>
-                    {% endfor %}
+                    <!-- 休暇種類のオプションは動的に挿入 -->
                 </select>
             </div>
             
@@ -107,13 +105,36 @@
                 <textarea id="leave-remarks" class="form-input" rows="2"></textarea>
             </div>
             
-            <div class="flex justify-end gap-2">
-                <button type="button" onclick="closeLeaveModal()" class="btn btn-outline">
-                    キャンセル
+            <!-- 記入者・確認者情報表示セクション（修正版） -->
+            <div id="leave-info-section" class="form-group">
+                <div class="p-3 bg-gray-50 rounded">
+                    <p><strong>記入者:</strong> <span id="leave-creator">-</span></p>
+                    <p><strong>確認者:</strong> <span id="leave-confirmer">未確認</span></p>
+                    <p><strong>確認日時:</strong> <span id="leave-confirmed-at">-</span></p>
+                </div>
+            </div>
+            <!-- 確認ボタンセクション（新規追加） -->
+            <div id="leave-confirm-section" class="form-group hidden">
+                <button type="button" id="confirm-leave-btn" onclick="confirmLeave()" class="btn btn-success">
+                    この休暇を確認する
                 </button>
-                <button type="submit" class="btn btn-primary">
-                    保存
-                </button>
+            </div>
+            
+            <div class="flex justify-between">
+                <div>
+                    <!-- 削除ボタン（権限チェック追加） -->
+                    <button type="button" id="delete-leave-btn" onclick="deleteLeaveFromModal()" class="btn btn-danger hidden">
+                        削除
+                    </button>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" onclick="closeLeaveModal()" class="btn btn-outline">
+                        キャンセル
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        保存
+                    </button>
+                </div>
             </div>
         </form>
     </div>
@@ -221,7 +242,7 @@
 {% endif %}
 
 <!-- 確認ダイアログ -->
-<div id="confirm-dialog" class="hidden modal-overlay">
+<div id="confirm-dialog" class="modal-overlay hidden">
     <div class="modal-content">
         <h3 class="text-lg font-bold mb-4">確認</h3>
         <p id="confirm-message" class="mb-4" style="white-space: pre-line;"></p>
@@ -235,6 +256,70 @@
         </div>
     </div>
 </div>
+
+<!-- 権限剥奪モーダル -->
+<div id="revoke-permission-modal" class="hidden modal-overlay">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4 text-red-600">権限剥奪</h3>
+        
+        <div id="revoke-user-info" class="mb-4 p-3 bg-gray-50 rounded">
+            <!-- ユーザー情報が動的に挿入されます -->
+        </div>
+        
+        <!-- 管理者権限剥奪オプション -->
+        <div id="revoke-admin-section" class="mb-4 p-3 bg-red-50 rounded">
+            <h4 class="font-semibold mb-2 text-red-600">管理者権限の剥奪</h4>
+            <div class="space-y-2">
+                <label class="flex items-center">
+                    <input type="radio" name="admin-revoke-type" value="admin_only" class="mr-2">
+                    管理者権限のみ剥奪（カレンダーアクセス権限は維持）
+                </label>
+                <label class="flex items-center">
+                    <input type="radio" name="admin-revoke-type" value="admin_and_calendars" class="mr-2">
+                    管理者権限 + 全カレンダーアクセス権限を剥奪
+                </label>
+            </div>
+            <button onclick="revokeAdminPermission()" class="btn btn-danger mt-2">
+                管理者権限を剥奪
+            </button>
+        </div>
+        
+        <!-- カレンダー権限剥奪オプション -->
+        <div id="revoke-calendar-section" class="mb-4 p-3 bg-yellow-50 rounded">
+            <h4 class="font-semibold mb-2">カレンダーアクセス権限の剥奪</h4>
+            <div id="revoke-calendar-list">
+                <!-- カレンダーリストが動的に挿入されます -->
+            </div>
+        </div>
+        
+        <div class="flex justify-end gap-2">
+            <button onclick="closeRevokePermissionModal()" class="btn btn-outline">
+                キャンセル
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- カレンダー削除確認モーダル -->
+<div id="delete-calendar-modal" class="hidden modal-overlay">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4 text-red-600">カレンダー削除確認</h3>
+        
+        <div id="delete-calendar-info" class="mb-4">
+            <!-- カレンダー情報が動的に挿入されます -->
+        </div>
+        
+        <div class="flex justify-end gap-2">
+            <button onclick="closeDeleteCalendarModal()" class="btn btn-outline">
+                キャンセル
+            </button>
+            <button onclick="confirmDeleteCalendar()" class="btn btn-danger">
+                削除実行
+            </button>
+        </div>
+    </div>
+</div>
+
 
 <script>
     // 休暇種類の色定義をJavaScriptに渡す
