@@ -1,40 +1,666 @@
 {
   "leaves": [
     {
-      "id": "2025-09-11T21:56:37.631354",
-      "date": "2025-09-11",
-      "name": "保永",
+      "id": "2025-09-12T00:26:20.557155",
+      "date": "2025-09-02",
+      "name": "山田",
       "leave_type": "有休",
-      "deputies": [],
-      "remarks": "",
+      "deputies": [
+        "無し"
+      ],
+      "remarks": "みずほ銀行船橋",
       "created_by": "3243012",
-      "created_at": "2025-09-11T21:56:37.631354",
-      "confirmed_by": "2133395",
-      "confirmed_at": "2025-09-12T02:58:53.436090",
-      "updated_by": "3243012",
-      "updated_at": "2025-09-12T02:56:32.653870"
-    },
-    {
-      "id": "2025-09-11T21:56:41.404386",
-      "date": "2025-09-11",
-      "name": "保永２",
-      "leave_type": "有休",
-      "deputies": [],
-      "remarks": "",
-      "created_by": "3243012",
-      "created_at": "2025-09-11T21:56:41.404386",
+      "created_at": "2025-09-12T00:26:20.557164",
       "confirmed_by": null,
       "confirmed_at": null
     },
     {
-      "id": "2025-09-11T21:56:45.493194",
-      "date": "2025-09-11",
-      "name": "保永３",
+      "id": "2025-09-12T00:26:47.413720",
+      "date": "2025-09-03",
+      "name": "山田",
       "leave_type": "有休",
-      "deputies": [],
-      "remarks": "",
+      "deputies": [
+        "無し"
+      ],
+      "remarks": "みずほ銀行船橋",
       "created_by": "3243012",
-      "created_at": "2025-09-11T21:56:45.493194",
+      "created_at": "2025-09-12T00:26:47.413731",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:27:23.722315",
+      "date": "2025-09-03",
+      "name": "染谷",
+      "leave_type": "代休",
+      "deputies": [
+        "工藤"
+      ],
+      "remarks": "第一生命千葉",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:27:23.722326",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:27:38.163258",
+      "date": "2025-09-04",
+      "name": "山田",
+      "leave_type": "有休",
+      "deputies": [
+        "無し"
+      ],
+      "remarks": "みずほ銀行船橋",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:27:38.163273",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:27:49.438706",
+      "date": "2025-09-05",
+      "name": "山田",
+      "leave_type": "有休",
+      "deputies": [
+        "塚本"
+      ],
+      "remarks": "みずほ銀行船橋",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:27:49.438715",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:28:14.568471",
+      "date": "2025-09-08",
+      "name": "渡邊",
+      "leave_type": "慶弔休暇",
+      "deputies": [
+        "工藤"
+      ],
+      "remarks": "北老人",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:28:14.568480",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:29:19.546266",
+      "date": "2025-09-09",
+      "name": "渡邊",
+      "leave_type": "慶弔休暇",
+      "deputies": [
+        "仲川"
+      ],
+      "remarks": "北老人",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:29:19.546280",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:29:35.164229",
+      "date": "2025-09-12",
+      "name": "渡部",
+      "leave_type": "有休",
+      "deputies": [
+        "染谷"
+      ],
+      "remarks": "中央老人",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:29:35.164266",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:30:17.006880",
+      "date": "2025-09-16",
+      "name": "渡部",
+      "leave_type": "有休",
+      "deputies": [
+        "工藤"
+      ],
+      "remarks": "中央老人",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:30:17.006888",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:30:33.164026",
+      "date": "2025-09-16",
+      "name": "川島",
+      "leave_type": "有休",
+      "deputies": [
+        "下林"
+      ],
+      "remarks": "ポート",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:30:33.164034",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:30:45.164264",
+      "date": "2025-09-17",
+      "name": "渡部",
+      "leave_type": "有休",
+      "deputies": [
+        "石井"
+      ],
+      "remarks": "中央老人",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:30:45.164272",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:31:17.462296",
+      "date": "2025-09-18",
+      "name": "渡部",
+      "leave_type": "有休",
+      "deputies": [
+        "工藤"
+      ],
+      "remarks": "中央老人",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:31:17.462305",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:31:35.898498",
+      "date": "2025-09-19",
+      "name": "渡部",
+      "leave_type": "有休",
+      "deputies": [
+        "染谷"
+      ],
+      "remarks": "中央老人",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:31:35.898524",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:32:18.766901",
+      "date": "2025-09-22",
+      "name": "中原",
+      "leave_type": "有休",
+      "deputies": [
+        "塚本"
+      ],
+      "remarks": "昭和産業",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:32:18.766908",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:32:35.292883",
+      "date": "2025-09-22",
+      "name": "一ノ瀬",
+      "leave_type": "有休",
+      "deputies": [
+        "仲川"
+      ],
+      "remarks": "ポート",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:32:35.292891",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-12T00:35:33.510599",
+      "date": "2025-09-17",
+      "name": "染谷",
+      "leave_type": "代休",
+      "deputies": [
+        "無し"
+      ],
+      "remarks": "休暇種類未定（代休予定）",
+      "created_by": "3243012",
+      "created_at": "2025-09-12T00:35:33.510606",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "updated_by": "3243012",
+      "updated_at": "2025-09-18T00:29:36.233671"
+    },
+    {
+      "id": "2025-09-16T08:14:41.565219",
+      "date": "2025-09-25",
+      "name": "黒田",
+      "leave_type": "代休",
+      "deputies": [
+        "吉田（大町不二）"
+      ],
+      "remarks": "光風みどり園\n吉田運転士試乗のため9/22もみどり園出勤",
+      "created_by": "3243012",
+      "created_at": "2025-09-16T08:14:41.565228",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:37:00.198528",
+      "date": "2025-09-27",
+      "name": "渡邊　克己",
+      "leave_type": "有休",
+      "deputies": [
+        "染谷"
+      ],
+      "remarks": "シノブフーズ",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:37:00.198536",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "updated_by": "2133395",
+      "updated_at": "2025-09-18T23:37:34.536435"
+    },
+    {
+      "id": "2025-09-18T23:38:17.218147",
+      "date": "2025-09-28",
+      "name": "渡邊　克己",
+      "leave_type": "有休",
+      "deputies": [
+        "染谷"
+      ],
+      "remarks": "シノブフーズ",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:38:17.218173",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:39:58.293143",
+      "date": "2025-09-08",
+      "name": "谷島",
+      "leave_type": "有休",
+      "deputies": [
+        "永田"
+      ],
+      "remarks": "エスフーズ",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:39:58.293172",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:40:24.940170",
+      "date": "2025-09-08",
+      "name": "長岡",
+      "leave_type": "有休",
+      "deputies": [
+        "石田"
+      ],
+      "remarks": "エスフーズ",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:40:24.940195",
+      "confirmed_by": "0089830",
+      "confirmed_at": "2025-09-25T06:47:56.464028"
+    },
+    {
+      "id": "2025-09-18T23:40:55.165343",
+      "date": "2025-09-16",
+      "name": "長岡",
+      "leave_type": "有休",
+      "deputies": [
+        "塚本"
+      ],
+      "remarks": "エスフーズ",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:40:55.165367",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:41:26.766842",
+      "date": "2025-09-18",
+      "name": "谷島",
+      "leave_type": "有休",
+      "deputies": [
+        "田中、手塚"
+      ],
+      "remarks": "エスフーズ",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:41:26.766850",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:42:06.382761",
+      "date": "2025-09-26",
+      "name": "畠中",
+      "leave_type": "有休",
+      "deputies": [
+        "谷島"
+      ],
+      "remarks": "ヨドコウ",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:42:06.382785",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:43:16.650907",
+      "date": "2025-09-02",
+      "name": "山岸",
+      "leave_type": "慶弔休暇",
+      "deputies": [
+        "渡邊"
+      ],
+      "remarks": "シノブフーズ",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:43:16.650925",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:43:35.285249",
+      "date": "2025-09-03",
+      "name": "山岸",
+      "leave_type": "慶弔休暇",
+      "deputies": [
+        "渡邊"
+      ],
+      "remarks": "シノブフーズ",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:43:35.285261",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:45:20.320738",
+      "date": "2025-09-02",
+      "name": "野首",
+      "leave_type": "有休",
+      "deputies": [
+        "塚本"
+      ],
+      "remarks": "セイコー",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:45:20.320748",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:45:54.288974",
+      "date": "2025-09-03",
+      "name": "野首",
+      "leave_type": "有休",
+      "deputies": [
+        "須藤"
+      ],
+      "remarks": "セイコー",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:45:54.288982",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:46:30.122840",
+      "date": "2025-09-22",
+      "name": "中井",
+      "leave_type": "有休",
+      "deputies": [
+        "田中"
+      ],
+      "remarks": "セイコー",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:46:30.122865",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "updated_by": "2133395",
+      "updated_at": "2025-09-19T00:40:24.862566"
+    },
+    {
+      "id": "2025-09-18T23:46:59.982550",
+      "date": "2025-09-26",
+      "name": "松浦",
+      "leave_type": "有休",
+      "deputies": [
+        "塚本"
+      ],
+      "remarks": "セイコー",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:46:59.982571",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:47:38.406584",
+      "date": "2025-09-03",
+      "name": "米井",
+      "leave_type": "有休",
+      "deputies": [
+        "折居"
+      ],
+      "remarks": "柏厚生",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:47:38.406592",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:48:09.358487",
+      "date": "2025-09-26",
+      "name": "米井",
+      "leave_type": "有休",
+      "deputies": [
+        "折居"
+      ],
+      "remarks": "柏厚生",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:48:09.358496",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:48:37.340104",
+      "date": "2025-09-04",
+      "name": "篠部",
+      "leave_type": "有休",
+      "deputies": [
+        "折居"
+      ],
+      "remarks": "グリコ",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:48:37.340114",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:49:47.811689",
+      "date": "2025-09-04",
+      "name": "山田　誠",
+      "leave_type": "有休",
+      "deputies": [
+        "仲川"
+      ],
+      "remarks": "UD柏",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:49:47.811698",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:52:57.624866",
+      "date": "2025-09-16",
+      "name": "渡辺　聡子",
+      "leave_type": "有休",
+      "deputies": [
+        "石田"
+      ],
+      "remarks": "はーとふる",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:52:57.624874",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:54:46.814596",
+      "date": "2025-09-16",
+      "name": "川島　博幸",
+      "leave_type": "有休",
+      "deputies": [
+        "池田"
+      ],
+      "remarks": "柏厚生",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:54:46.814604",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:55:16.716442",
+      "date": "2025-09-17",
+      "name": "川島　博幸",
+      "leave_type": "有休",
+      "deputies": [
+        "仲川"
+      ],
+      "remarks": "柏厚生",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:55:16.716450",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:55:48.432555",
+      "date": "2025-09-18",
+      "name": "川島　博幸",
+      "leave_type": "有休",
+      "deputies": [
+        "仲川"
+      ],
+      "remarks": "柏厚生",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:55:48.432563",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:57:11.446076",
+      "date": "2025-09-22",
+      "name": "坂本　重智",
+      "leave_type": "有休",
+      "deputies": [
+        "笹本"
+      ],
+      "remarks": "みずほ証券柏",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:57:11.446084",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-18T23:58:30.582052",
+      "date": "2025-09-29",
+      "name": "川島　博幸",
+      "leave_type": "有休",
+      "deputies": [
+        "染谷"
+      ],
+      "remarks": "柏厚生",
+      "created_by": "2133395",
+      "created_at": "2025-09-18T23:58:30.582061",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-19T00:09:10.601635",
+      "date": "2025-09-19",
+      "name": "松山",
+      "leave_type": "有休",
+      "deputies": [
+        "無し"
+      ],
+      "remarks": "野村証券",
+      "created_by": "2133395",
+      "created_at": "2025-09-19T00:09:10.601661",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-19T00:38:34.378000",
+      "date": "2025-09-22",
+      "name": "渡部",
+      "leave_type": "有休",
+      "deputies": [
+        "染谷"
+      ],
+      "remarks": "中央老人",
+      "created_by": "3243012",
+      "created_at": "2025-09-19T00:38:34.378009",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-24T06:31:35.811753",
+      "date": "2025-09-25",
+      "name": "渡辺聡子",
+      "leave_type": "有休",
+      "deputies": [
+        "無し"
+      ],
+      "remarks": "代務",
+      "created_by": "3243012",
+      "created_at": "2025-09-24T06:31:35.811762",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-24T06:31:59.666634",
+      "date": "2025-09-26",
+      "name": "渡辺聡子",
+      "leave_type": "有休",
+      "deputies": [
+        "無し"
+      ],
+      "remarks": "代務",
+      "created_by": "3243012",
+      "created_at": "2025-09-24T06:31:59.666642",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-24T06:50:45.056282",
+      "date": "2025-09-18",
+      "name": "渡辺聡子",
+      "leave_type": "有休",
+      "deputies": [
+        "岡田"
+      ],
+      "remarks": "代務（前日まではーとふる）",
+      "created_by": "3243012",
+      "created_at": "2025-09-24T06:50:45.056291",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-29T02:02:52.652979",
+      "date": "2025-09-25",
+      "name": "小林　勝利",
+      "leave_type": "有休",
+      "deputies": [
+        "無し"
+      ],
+      "remarks": "住友生命柏",
+      "created_by": "2133395",
+      "created_at": "2025-09-29T02:02:52.652988",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-29T02:03:33.028915",
+      "date": "2025-09-26",
+      "name": "小林　勝利",
+      "leave_type": "有休",
+      "deputies": [
+        "無し"
+      ],
+      "remarks": "住友生命柏",
+      "created_by": "2133395",
+      "created_at": "2025-09-29T02:03:33.028939",
       "confirmed_by": null,
       "confirmed_at": null
     }

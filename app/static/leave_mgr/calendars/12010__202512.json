@@ -1,0 +1,56 @@
+{
+  "leaves": [
+    {
+      "id": "2025-09-19T00:38:55.875995",
+      "date": "2025-12-06",
+      "name": "渡邊　克己",
+      "leave_type": "有休",
+      "deputies": [],
+      "remarks": "シノブフース",
+      "created_by": "2133395",
+      "created_at": "2025-09-19T00:38:55.876019",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-09-19T00:40:47.307453",
+      "date": "2025-12-07",
+      "name": "渡邊　克己",
+      "leave_type": "有休",
+      "deputies": [],
+      "remarks": "シノブフース",
+      "created_by": "2133395",
+      "created_at": "2025-09-19T00:40:47.307477",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-10-02T06:54:43.278560",
+      "date": "2025-12-15",
+      "name": "山田　昌克",
+      "leave_type": "有休",
+      "deputies": [
+        "未定（工藤の可能性有）"
+      ],
+      "remarks": "みずほ銀行船橋法人部",
+      "created_by": "3243012",
+      "created_at": "2025-10-02T06:54:43.278587",
+      "confirmed_by": null,
+      "confirmed_at": null
+    },
+    {
+      "id": "2025-10-14T06:05:03.505580",
+      "date": "2025-12-15",
+      "name": "川島　健資",
+      "leave_type": "有休",
+      "deputies": [
+        "染谷　宏明"
+      ],
+      "remarks": "千葉ポートB",
+      "created_by": "3243012",
+      "created_at": "2025-10-14T06:05:03.505606",
+      "confirmed_by": null,
+      "confirmed_at": null
+    }
+  ]
+}

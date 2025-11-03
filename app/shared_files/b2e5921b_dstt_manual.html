@@ -1,0 +1,1655 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DSTT 完全マニュアル - DaiShinTo Tools</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            min-height: 100vh;
+            display: flex;
+        }
+
+        /* サイドバー */
+        .sidebar {
+            width: 300px;
+            background: #1e293b;
+            color: white;
+            padding: 20px 0;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        .sidebar h2 {
+            padding: 0 20px;
+            margin-bottom: 20px;
+            color: #60a5fa;
+            border-bottom: 2px solid #334155;
+            padding-bottom: 10px;
+        }
+
+        .nav-menu {
+            list-style: none;
+        }
+
+        .nav-menu li {
+            margin: 5px 0;
+        }
+
+        .nav-menu a {
+            display: block;
+            padding: 10px 20px;
+            color: #cbd5e1;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .nav-menu a:hover,
+        .nav-menu a.active {
+            background: #334155;
+            color: white;
+            border-left: 3px solid #60a5fa;
+        }
+
+        .sub-menu {
+            list-style: none;
+            margin-left: 20px;
+            display: none;
+        }
+
+        .sub-menu.active {
+            display: block;
+        }
+
+        .sub-menu a {
+            padding: 5px 20px;
+            font-size: 14px;
+            color: #94a3b8;
+        }
+
+        /* メインコンテンツ */
+        .main-content {
+            flex: 1;
+            padding: 40px;
+            overflow-y: auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 30px;
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.3);
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        /* 検索ボックス */
+        .search-container {
+            position: relative;
+            margin-bottom: 30px;
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 15px 50px 15px 20px;
+            border: 2px solid #e2e8f0;
+            border-radius: 25px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #64748b;
+        }
+
+        /* セクション */
+        .section {
+            margin-bottom: 50px;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.5s ease;
+        }
+
+        .section.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .section h2 {
+            font-size: 2.5rem;
+            color: #1e293b;
+            margin-bottom: 20px;
+            padding: 20px 0;
+            border-bottom: 3px solid #3b82f6;
+            position: relative;
+        }
+
+        .section h2::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            bottom: -3px;
+            width: 60px;
+            height: 3px;
+            background: #60a5fa;
+        }
+
+        .section h3 {
+            font-size: 1.8rem;
+            color: #374151;
+            margin: 30px 0 15px 0;
+            padding: 15px 20px;
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            border-radius: 10px;
+            border-left: 5px solid #3b82f6;
+        }
+
+        .section h4 {
+            font-size: 1.3rem;
+            color: #4b5563;
+            margin: 20px 0 10px 0;
+            padding: 10px 15px;
+            background: #f1f5f9;
+            border-radius: 8px;
+            border-left: 3px solid #10b981;
+        }
+
+        /* ツールカード */
+        .tool-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin: 20px 0;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            border: 1px solid #e2e8f0;
+            transition: all 0.3s ease;
+        }
+
+        .tool-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.15);
+        }
+
+        .tool-icon {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .tool-title {
+            font-size: 1.4rem;
+            font-weight: bold;
+            color: #1e293b;
+            margin-bottom: 10px;
+        }
+
+        .tool-description {
+            color: #64748b;
+            margin-bottom: 20px;
+        }
+
+        /* 手順リスト */
+        .step-list {
+            counter-reset: step-counter;
+            list-style: none;
+            padding: 0;
+        }
+
+        .step-list li {
+            counter-increment: step-counter;
+            margin: 15px 0;
+            padding: 20px 25px 20px 60px;
+            background: #f8fafc;
+            border-radius: 10px;
+            border-left: 4px solid #3b82f6;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .step-list li:hover {
+            background: #eff6ff;
+            transform: translateX(5px);
+        }
+
+        .step-list li::before {
+            content: counter(step-counter);
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 30px;
+            height: 30px;
+            background: #3b82f6;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        /* 注意事項ボックス */
+        .note {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 5px solid #f59e0b;
+        }
+
+        .note.warning {
+            background: #fee2e2;
+            border-color: #dc2626;
+            border-left-color: #dc2626;
+        }
+
+        .note.info {
+            background: #dbeafe;
+            border-color: #2563eb;
+            border-left-color: #2563eb;
+        }
+
+        .note.success {
+            background: #d1fae5;
+            border-color: #10b981;
+            border-left-color: #10b981;
+        }
+
+        .note-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Q&Aセクション */
+        .qa-item {
+            margin: 20px 0;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .qa-question {
+            background: #f8fafc;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            color: #1e293b;
+        }
+
+        .qa-question:hover {
+            background: #eff6ff;
+        }
+
+        .qa-answer {
+            padding: 20px;
+            background: white;
+            display: none;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .qa-answer.active {
+            display: block;
+            animation: slideDown 0.3s ease;
+        }
+
+        .qa-toggle {
+            font-size: 1.2rem;
+            transition: transform 0.3s ease;
+        }
+
+        .qa-toggle.rotated {
+            transform: rotate(180deg);
+        }
+
+        /* コードブロック */
+        code {
+            background: #f1f5f9;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9em;
+            color: #dc2626;
+        }
+
+        pre {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 10px;
+            overflow-x: auto;
+            margin: 15px 0;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+        }
+
+        /* ボタン */
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #3b82f6;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn:hover {
+            background: #2563eb;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn.secondary {
+            background: #64748b;
+        }
+
+        .btn.secondary:hover {
+            background: #475569;
+        }
+
+        /* テーブル */
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.1);
+        }
+
+        .table th {
+            background: #3b82f6;
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        .table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .table tr:hover {
+            background: #f8fafc;
+        }
+
+        /* レスポンシブ */
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: static;
+            }
+
+            .main-content {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .section h2 {
+                font-size: 2rem;
+            }
+
+            .tool-card {
+                padding: 20px;
+            }
+        }
+
+        /* アニメーション */
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                max-height: 0;
+            }
+            to {
+                opacity: 1;
+                max-height: 500px;
+            }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        /* ハイライト表示 */
+        .highlight {
+            background: #fef3c7 !important;
+            transition: all 0.3s ease;
+        }
+
+        /* 印刷用スタイル */
+        @media print {
+            .sidebar {
+                display: none;
+            }
+            .container {
+                max-width: 100%;
+            }
+            .main-content {
+                padding: 20px;
+            }
+            .search-container {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- サイドバー -->
+        <nav class="sidebar">
+            <h2>📚 DSTT マニュアル</h2>
+            <ul class="nav-menu">
+                <li><a href="#overview" class="nav-link">🏠 概要</a></li>
+                <li><a href="#getting-started" class="nav-link">🚀 はじめに</a></li>
+                <li>
+                    <a href="#tools" class="nav-link" onclick="toggleSubmenu('tools-submenu')">🛠️ ツール一覧</a>
+                    <ul class="sub-menu" id="tools-submenu">
+                        <li><a href="#datecalc" class="nav-link">📆 日時計算</a></li>
+                        <li><a href="#calc" class="nav-link">🧮 電卓</a></li>
+                        <li><a href="#rename" class="nav-link">🔄 一括リネーム</a></li>
+                        <li><a href="#compress" class="nav-link">📦 ファイル圧縮</a></li>
+                        <li><a href="#csvtool" class="nav-link">📊 CSV整形・検証</a></li>
+                        <li><a href="#password" class="nav-link">🔐 パスワード生成</a></li>
+                        <li><a href="#workday" class="nav-link">📅 営業日計算</a></li>
+                        <li><a href="#pdf-power" class="nav-link">📚 PDF Power</a></li>
+                        <li><a href="#share" class="nav-link">📪 FILE POST</a></li>
+                        <li><a href="#car-inspe" class="nav-link">📄 車検証ツール</a></li>
+                        <li><a href="#shiftersync" class="nav-link">👥 ShifterSync</a></li>
+                    </ul>
+                </li>
+                <li><a href="#qa" class="nav-link">❓ Q&A</a></li>
+                <li><a href="#troubleshooting" class="nav-link">🔧 トラブルシューティング</a></li>
+                <li><a href="#contact" class="nav-link">📞 お問い合わせ</a></li>
+            </ul>
+        </nav>
+
+        <!-- メインコンテンツ -->
+        <main class="main-content">
+            <!-- ヘッダー -->
+            <div class="header fade-in">
+                <h1>DSTT 完全マニュアル</h1>
+                <p>DaiShinTo Tools - 業務効率化ツール集</p>
+            </div>
+
+            <!-- 検索ボックス -->
+            <div class="search-container">
+                <input type="text" class="search-box" id="searchBox" placeholder="マニュアル内を検索...">
+                <span class="search-icon">🔍</span>
+            </div>
+
+            <!-- 概要セクション -->
+            <section id="overview" class="section">
+                <h2>🏠 概要</h2>
+                <div class="tool-card">
+                    <p><strong>DSTT (DaiShinTo Tools)</strong> は、日常業務を効率化するためのWebベースツール集です。</p>
+                    
+                    <h4>主な特徴</h4>
+                    <ul style="margin-left: 20px; margin-top: 10px;">
+                        <li>📱 <strong>ブラウザベース</strong> - インストール不要、どの端末からでもアクセス可能</li>
+                        <li>🔐 <strong>セキュア</strong> - ユーザー認証システムで安全にアクセス</li>
+                        <li>🌐 <strong>レスポンシブ</strong> - PC・タブレット・スマートフォン対応</li>
+                        <li>🇯🇵 <strong>日本語完全対応</strong> - UI・ファイル処理ともに日本語対応</li>
+                        <li>⚡ <strong>高速処理</strong> - 最適化されたアルゴリズムで快適な動作</li>
+                    </ul>
+
+                    <div class="note info">
+                        <div class="note-title">💡 使用前の準備</div>
+                        <p>初回利用時は管理者からユーザーIDとパスワードの発行を受けてください。</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- はじめに -->
+            <section id="getting-started" class="section">
+                <h2>🚀 はじめに</h2>
+                <div class="tool-card">
+                    <h4>ログイン手順</h4>
+                    <ol class="step-list">
+                        <li>ブラウザでDSTTのURLにアクセス</li>
+                        <li>管理者から発行されたユーザーIDとパスワードを入力</li>
+                        <li>「ログイン」ボタンをクリック</li>
+                        <li>ダッシュボードが表示されれば完了</li>
+                    </ol>
+
+                    <h4>基本的な操作</h4>
+                    <ul style="margin-left: 20px;">
+                        <li>左サイドバーまたはダッシュボードから使いたいツールを選択</li>
+                        <li>各ツールの画面で必要な操作を実行</li>
+                        <li>結果ファイルは自動でダウンロードされます</li>
+                        <li>ログアウトは画面右上のメニューから</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- ツール一覧 -->
+            <section id="tools" class="section">
+                <h2>🛠️ ツール一覧</h2>
+
+                <!-- 日時計算 -->
+                <div id="datecalc" class="tool-card">
+                    <span class="tool-icon">📆</span>
+                    <div class="tool-title">日時計算ツール</div>
+                    <div class="tool-description">日時の加算・減算や、2つの日時間の差分を計算できます。</div>
+
+                    <h4>使い方</h4>
+                    <ol class="step-list">
+                        <li>基準日時を入力（日時加算・減算の場合）</li>
+                        <li>加算・減算したい日数、時間、分を入力</li>
+                        <li>「加算」または「減算」を選択</li>
+                        <li>「計算」ボタンをクリックして結果を確認</li>
+                    </ol>
+
+                    <h4>日時差分の計算</h4>
+                    <ol class="step-list">
+                        <li>比較したい2つの日時をそれぞれ入力</li>
+                        <li>「差分計算」ボタンをクリック</li>
+                        <li>日数・時間・分の差分が表示されます</li>
+                    </ol>
+
+                    <div class="note">
+                        <div class="note-title">💡 活用例</div>
+                        <p>プロジェクトの納期計算、シフトの時間計算、作業時間の算出など。</p>
+                    </div>
+                </div>
+
+                <!-- 電卓 -->
+                <div id="calc" class="tool-card">
+                    <span class="tool-icon">🧮</span>
+                    <div class="tool-title">電卓</div>
+                    <div class="tool-description">ブラウザ上で動作するシンプルな電卓です。</div>
+
+                    <h4>使い方</h4>
+                    <ol class="step-list">
+                        <li>画面のボタンをクリックして数式を入力</li>
+                        <li>「Enter」ボタンまたはキーボードのEnterキーで計算実行</li>
+                        <li>「C」ボタンで表示をクリア</li>
+                        <li>計算履歴は画面下部に自動保存されます</li>
+                    </ol>
+
+                    <h4>対応する計算</h4>
+                    <ul style="margin-left: 20px;">
+                        <li>四則演算（+、-、×、÷）</li>
+                        <li>括弧を使った計算</li>
+                        <li>小数点計算</li>
+                    </ul>
+
+                    <div class="note info">
+                        <div class="note-title">⌨️ キーボードショートカット</div>
+                        <p>数字キー、演算子キー、Enter（計算実行）、Escape（クリア）、Backspace（一文字削除）</p>
+                    </div>
+                </div>
+
+                <!-- ファイル名一括変換 -->
+                <div id="rename" class="tool-card">
+                    <span class="tool-icon">🔄</span>
+                    <div class="tool-title">ファイル名一括変換ツール</div>
+                    <div class="tool-description">複数ファイルのファイル名を一括で変換できます。</div>
+
+                    <h4>変換方法</h4>
+                    <table class="table">
+                        <thead>
+                            <tr><th>変換方法</th><th>出力例</th><th>説明</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>連番</td><td>file_001.txt</td><td>プレフィックス + 連番</td></tr>
+                            <tr><td>日付＋連番</td><td>20250904_001.txt</td><td>日付 + 連番</td></tr>
+                            <tr><td>文字列置換</td><td>（指定による）</td><td>指定文字列を置換</td></tr>
+                            <tr><td>元名_連番</td><td>original_001.txt</td><td>元ファイル名 + 連番</td></tr>
+                            <tr><td>元名_日付</td><td>original_20250904.txt</td><td>元ファイル名 + 日付</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4>使い方</h4>
+                    <ol class="step-list">
+                        <li>「ファイルを複数選択」からリネームしたいファイルを選択</li>
+                        <li>変換方法を選択</li>
+                        <li>文字列置換の場合は、置換元・置換先を入力</li>
+                        <li>プレフィックス（接頭語）を必要に応じて入力</li>
+                        <li>「変換＆ダウンロード」ボタンをクリック</li>
+                        <li>リネームされたファイルがZIP形式でダウンロードされます</li>
+                    </ol>
+
+                    <div class="note">
+                        <div class="note-title">📝 ヒント</div>
+                        <p>ファイル選択後、個別にファイルを削除することも可能です。不要なファイルは「削除」ボタンで除外してください。</p>
+                    </div>
+                </div>
+
+                <!-- ファイル圧縮 -->
+                <div id="compress" class="tool-card">
+                    <span class="tool-icon">📦</span>
+                    <div class="tool-title">圧縮ファイル生成ツール</div>
+                    <div class="tool-description">複数ファイルをZIP・TAR・TAR.GZ形式で圧縮できます。</div>
+
+                    <h4>対応形式</h4>
+                    <table class="table">
+                        <thead>
+                            <tr><th>形式</th><th>特徴</th><th>用途</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>ZIP</td><td>Windows標準対応、パスワード設定可能</td><td>一般的なファイル送付</td></tr>
+                            <tr><td>TAR</td><td>Unix/Linux標準、高い互換性</td><td>サーバー間でのファイル転送</td></tr>
+                            <tr><td>TAR.GZ</td><td>TAR + gzip圧縮、高圧縮率</td><td>サイズを抑えたい場合</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4>使い方</h4>
+                    <ol class="step-list">
+                        <li>「ファイルを複数選択」から圧縮したいファイルを選択</li>
+                        <li>圧縮形式（ZIP/TAR/TAR.GZ）を選択</li>
+                        <li>ZIPの場合、必要に応じてパスワードを設定</li>
+                        <li>圧縮ファイル名を指定（省略可）</li>
+                        <li>「圧縮＆ダウンロード」ボタンをクリック</li>
+                    </ol>
+
+                    <div class="note warning">
+                        <div class="note-title">⚠️ パスワード付きZIP</div>
+                        <p>パスワードは別途安全な方法で共有してください。パスワードを忘れると解凍できません。</p>
+                    </div>
+                </div>
+
+                <!-- CSV整形・検証 -->
+                <div id="csvtool" class="tool-card">
+                    <span class="tool-icon">📊</span>
+                    <div class="tool-title">CSV整形・検証ツール</div>
+                    <div class="tool-description">CSVファイルの整形、検証、列の並び替えや抽出ができます。</div>
+
+                    <h4>主な機能</h4>
+                    <ul style="margin-left: 20px;">
+                        <li>🔧 <strong>セルの前後空白削除</strong> - データのクリーンアップ</li>
+                        <li>🔍 <strong>欠損チェック</strong> - 空欄セルの検出</li>
+                        <li>🔄 <strong>重複行チェック</strong> - 重複データの検出</li>
+                        <li>📋 <strong>列の並び替え</strong> - ドラッグ&ドロップで簡単操作</li>
+                        <li>✂️ <strong>列の抽出</strong> - 必要な列のみを選択</li>
+                        <li>🔍 <strong>フィルタ機能</strong> - 条件に合致する行のみ抽出</li>
+                    </ul>
+
+                    <h4>使い方</h4>
+                    <ol class="step-list">
+                        <li>CSVファイルをアップロード</li>
+                        <li>プレビューでデータを確認</li>
+                        <li>必要なオプション（整形・検証）を選択</li>
+                        <li>列の並び替えが必要な場合はドラッグ&ドロップで操作</li>
+                        <li>抽出したい列にチェックを入れる</li>
+                        <li>フィルタ条件を入力（必要な場合）</li>
+                        <li>「操作を確定」ボタンをクリック</li>
+                        <li>処理結果を確認後、「修正済みCSVをダウンロード」をクリック</li>
+                    </ol>
+
+                    <div class="note info">
+                        <div class="note-title">📊 対応エンコーディング</div>
+                        <p>UTF-8、Shift-JIS、CP932など主要な日本語エンコーディングに対応しています。</p>
+                    </div>
+                </div>
+
+                <!-- パスワード生成 -->
+                <div id="password" class="tool-card">
+                    <span class="tool-icon">🔐</span>
+                    <div class="tool-title">パスワード生成・管理ツール</div>
+                    <div class="tool-description">強固なパスワードを生成し、セッション中に管理できます。</div>
+
+                    <h4>パスワード設定オプション</h4>
+                    <table class="table">
+                        <thead>
+                            <tr><th>オプション</th><th>説明</th><th>推奨設定</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>文字数</td><td>4～64文字</td><td>12文字以上</td></tr>
+                            <tr><td>英大文字</td><td>A-Z</td><td>含める</td></tr>
+                            <tr><td>数字</td><td>0-9</td><td>含める</td></tr>
+                            <tr><td>記号</td><td>!@#$%&*等</td><td>セキュリティレベルに応じて</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4>使い方</h4>
+                    <ol class="step-list">
+                        <li>サービス名を入力（任意）</li>
+                        <li>文字数を設定（推奨：12文字以上）</li>
+                        <li>含める文字種を選択</li>
+                        <li>「パスワード生成＆保存」ボタンをクリック</li>
+                        <li>生成されたパスワードが一覧に表示されます</li>
+                        <li>CSVファイルとしてダウンロード可能</li>
+                    </ol>
+
+                    <div class="note warning">
+                        <div class="note-title">🔒 セキュリティ注意事項</div>
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>生成されたパスワードはセッション中のみ保存されます</li>
+                            <li>ログアウトすると履歴は消去されます</li>
+                            <li>重要なパスワードは必ずダウンロードして安全に保管してください</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 営業日計算 -->
+                <div id="workday" class="tool-card">
+                    <span class="tool-icon">📅</span>
+                    <div class="tool-title">営業日計算ツール</div>
+                    <div class="tool-description">指定期間の営業日数を計算し、カレンダーを生成できます。</div>
+
+                    <h4>機能</h4>
+                    <ul style="margin-left: 20px;">
+                        <li>📊 <strong>営業日数計算</strong> - 指定期間の営業日数を自動計算</li>
+                        <li>📅 <strong>カレンダー表示</strong> - 営業日・休日が一目でわかる</li>
+                        <li>📋 <strong>Excel出力</strong> - 印刷可能なExcelカレンダー生成</li>
+                        <li>🏖️ <strong>祝日対応</strong> - 日本の祝日を自動考慮</li>
+                        <li>⚙️ <strong>柔軟な設定</strong> - 営業曜日・特別除外日の設定可能</li>
+                    </ul>
+
+                    <h4>使い方</h4>
+                    <ol class="step-list">
+                        <li>開始日と終了日を設定</li>
+                        <li>営業日とする曜日にチェックを入れる</li>
+                        <li>祝日の扱いを設定（営業日とするか休日とするか）</li>
+                        <li>特別除外日があれば入力（YYYY-MM-DD形式、カンマ区切り）</li>
+                        <li>「営業日計算」ボタンをクリック</li>
+                        <li>結果確認後、「エクセルでダウンロード」で印刷用カレンダーを取得</li>
+                    </ol>
+
+                    <div class="note">
+                        <div class="note-title">🗓️ 活用例</div>
+                        <p>プロジェクトスケジューling、契約期限の確認、勤務日数の計算、休暇計画の立案など。</p>
+                    </div>
+                </div>
+
+                <!-- PDF Power -->
+                <div id="pdf-power" class="tool-card">
+                    <span class="tool-icon">📚</span>
+                    <div class="tool-title">PDF Power</div>
+                    <div class="tool-description">PDF操作の万能ツール。変換・分割・結合・圧縮・テキスト抽出が可能です。</div>
+
+                    <h4>主要機能</h4>
+                    <table class="table">
+                        <thead>
+                            <tr><th>機能</th><th>対応ファイル</th><th>説明</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>PDF変換</td><td>PNG, JPG, TXT, DOCX</td><td>各種ファイルをPDFに変換</td></tr>
+                            <tr><td>分割・結合</td><td>PDF</td><td>PDFページの分割や複数PDF結合</td></tr>
+                            <tr><td>圧縮</td><td>PDF</td><td>ファイルサイズを削減</td></tr>
+                            <tr><td>テキスト抽出</td><td>PDF</td><td>文字データの抽出・検索</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4>PDF変換の使い方</h4>
+                    <ol class="step-list">
+                        <li>「PDF変換」タブを選択</li>
+                        <li>変換したいファイル（画像・文書）を選択</li>
+                        <li>「PDFに変換」ボタンをクリック</li>
+                        <li>変換されたPDFがダウンロードされます</li>
+                    </ol>
+
+                    <h4>分割・結合の使い方</h4>
+                    <ol class="step-list">
+                        <li>「分割・結合」タブを選択</li>
+                        <li>操作したいPDFファイルを選択</li>
+                        <li>「分割」または「結合」を選択</li>
+                        <li>分割の場合：ページ範囲を指定（例：1-3, 5-7）</li>
+                        <li>「実行」ボタンをクリック</li>
+                    </ol>
+
+                    <h4>圧縮の使い方</h4>
+                    <ol class="step-list">
+                        <li>「圧縮」タブを選択</li>
+                        <li>圧縮したいPDFファイルを選択</li>
+                        <li>圧縮レベルを選択（軽度・標準・高・最大）</li>
+                        <li>「圧縮してダウンロード」ボタンをクリック</li>
+                    </ol>
+
+                    <h4>テキスト抽出の使い方</h4>
+                    <ol class="step-list">
+                        <li>「テキスト抽出」タブを選択</li>
+                        <li>テキストを抽出したいPDFを選択</li>
+                        <li>検索ワードを入力（特定キーワードを検索する場合）</li>
+                        <li>「テキスト抽出」ボタンをクリック</li>
+                        <li>抽出されたテキストファイルがダウンロードされます</li>
+                    </ol>
+
+                    <div class="note info">
+                        <div class="note-title">💡 圧縮レベルの選択</div>
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li><strong>軽度</strong>：画質重視、印刷用途</li>
+                            <li><strong>標準</strong>：バランス重視、一般用途</li>
+                            <li><strong>高</strong>：サイズ重視、Web用途</li>
+                            <li><strong>最大</strong>：極限サイズ、保存用途</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- FILE POST -->
+                <div id="share" class="tool-card">
+                    <span class="tool-icon">📪</span>
+                    <div class="tool-title">FILE POST - ファイル共有ツール</div>
+                    <div class="tool-description">大容量ファイルを安全に共有できます。QRコード生成機能付き。</div>
+
+                    <h4>機能・制限</h4>
+                    <table class="table">
+                        <thead>
+                            <tr><th>項目</th><th>仕様</th><th>備考</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>最大ファイルサイズ</td><td>10GB</td><td>大容量ファイル対応</td></tr>
+                            <tr><td>保存期間</td><td>7日間</td><td>自動削除</td></tr>
+                            <tr><td>パスワード保護</td><td>対応</td><td>任意設定</td></tr>
+                            <tr><td>QRコード</td><td>自動生成</td><td>モバイル端末での共有に便利</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4>使い方</h4>
+                    <ol class="step-list">
+                        <li>共有したいファイルを選択</li>
+                        <li>必要に応じてパスワードを設定</li>
+                        <li>「アップロードして共有URL生成」ボタンをクリック</li>
+                        <li>生成された共有URLをコピー</li>
+                        <li>QRコードを使ってモバイル端末と共有も可能</li>
+                        <li>ファイル受け取り側は共有URLにアクセス</li>
+                        <li>パスワードが設定されている場合は入力してダウンロード</li>
+                    </ol>
+
+                    <div class="note warning">
+                        <div class="note-title">🔒 セキュリティ注意事項</div>
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>共有URLは第三者に知られないよう注意してください</li>
+                            <li>機密ファイルは必ずパスワードを設定してください</li>
+                            <li>パスワードは共有URL とは別の方法で伝達してください</li>
+                            <li>ファイルは7日後に自動削除されます</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 車検証ツール -->
+                <div id="car-inspe" class="tool-card">
+                    <span class="tool-icon">📄</span>
+                    <div class="tool-title">車検証ツール</div>
+                    <div class="tool-description">車検証PDFからOCRで情報を読み取り、自動的にファイル名を変更します。</div>
+
+                    <h4>対応形式</h4>
+                    <ul style="margin-left: 20px;">
+                        <li>📄 <strong>入力</strong>：車検証PDF（電子版）</li>
+                        <li>📊 <strong>設定ファイル</strong>：CSV（ID, 登録番号末尾4桁, 保管場所）</li>
+                        <li>📁 <strong>出力</strong>：リネーム済みPDF またはエラーログ</li>
+                    </ul>
+
+                    <h4>CSVファイル形式</h4>
+                    <pre><code>ID,登録番号末尾4桁,保管場所
+001,1234,東京都
+002,5678,大阪府
+003,9012,愛知県</code></pre>
+
+                    <h4>使い方</h4>
+                    <ol class="step-list">
+                        <li>車検証のPDFファイルを選択（複数選択可能）</li>
+                        <li>設定ファイル（CSV）をアップロード</li>
+                        <li>OCRプリセットを選択（新車検証 or 旧車検証）</li>
+                        <li>「実行＆ダウンロード」ボタンをクリック</li>
+                        <li>処理結果に応じてファイルまたはZIPがダウンロードされます</li>
+                    </ol>
+
+                    <h4>出力ファイル名形式</h4>
+                    <code>車検満了日_ID_保管場所_登録番号.pdf</code>
+                    <br><br>
+                    <strong>例：</strong> <code>20270315_001_東京都_品川500あ1234.pdf</code>
+
+                    <div class="note warning">
+                        <div class="note-title">⚠️ 使用上の注意</div>
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>電子車検証PDFのみ対応（スキャン画像は非対応）</li>
+                            <li>1ページ目のみ処理されます</li>
+                            <li>OCR精度により読み取りエラーが発生する場合があります</li>
+                            <li>失敗時はエラーログファイルがダウンロードされます</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- ShifterSync -->
+                <div id="shiftersync" class="tool-card">
+                    <span class="tool-icon">👥</span>
+                    <div class="tool-title">ShifterSync - シフト管理システム</div>
+                    <div class="tool-description">シフト作成・編集・重複チェック・カレンダー出力の統合システムです。</div>
+
+                    <h4>主要機能</h4>
+                    <table class="table">
+                        <thead>
+                            <tr><th>機能</th><th>説明</th><th>出力形式</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>新規シフト作成</td><td>カレンダー形式でシフト作成</td><td>CSV</td></tr>
+                            <tr><td>既存シフト編集</td><td>CSVファイルの編集・更新</td><td>CSV</td></tr>
+                            <tr><td>重複チェック</td><td>複数シフト間の人員重複検出</td><td>Web表示</td></tr>
+                            <tr><td>カレンダー出力</td><td>印刷用カレンダー生成</td><td>PDF / PNG</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4>新規シフト作成</h4>
+                    <ol class="step-list">
+                        <li>「新規シフト作成」を選択</li>
+                        <li>モード選択（現場 or 人物）</li>
+                        <li>年・月・対象名を入力</li>
+                        <li>必要に応じて台数設定を有効化</li>
+                        <li>「作成開始」ボタンでカレンダー表示</li>
+                        <li>各日付に人員・現場を入力</li>
+                        <li>オプション機能（午前/午後、車両種別など）を活用</li>
+                        <li>「保存」ボタンでCSVファイルをダウンロード</li>
+                    </ol>
+
+                    <h4>オプション機能</h4>
+                    <table class="table">
+                        <thead>
+                            <tr><th>オプション</th><th>表示例</th><th>用途</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>A (午前)</td><td>午前 田中</td><td>時間帯指定</td></tr>
+                            <tr><td>P (午後)</td><td>午後 鈴木</td><td>時間帯指定</td></tr>
+                            <tr><td>M (マイクロ)</td><td>マイクロ 佐藤</td><td>車両種別</td></tr>
+                            <tr><td>N1 (1号車)</td><td>1号車 山田</td><td>車両番号</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4>重複チェック機能</h4>
+                    <ol class="step-list">
+                        <li>「シフト重複チェック」を選択</li>
+                        <li>比較したいCSVファイルを選択（最大6件）</li>
+                        <li>「チェック開始」ボタンをクリック</li>
+                        <li>重複状況が色分けで表示されます</li>
+                    </ol>
+
+                    <h4>カレンダー出力機能</h4>
+                    <ol class="step-list">
+                        <li>「シフトカレンダー出力」を選択</li>
+                        <li>出力したいシフトCSVを選択</li>
+                        <li>出力形式（PDF / PNG）を選択</li>
+                        <li>「カレンダー生成」ボタンをクリック</li>
+                        <li>生成されたカレンダーをダウンロード</li>
+                    </ol>
+
+                    <h4>便利機能</h4>
+                    <ul style="margin-left: 20px;">
+                        <li>🖱️ <strong>右クリック削除</strong> - エントリーを右クリックで削除</li>
+                        <li>✏️ <strong>ダブルクリック編集</strong> - エントリーをダブルクリックで編集</li>
+                        <li>📋 <strong>コピー機能</strong> - 他の日からエントリーをコピー</li>
+                        <li>⚠️ <strong>台数警告</strong> - 必要人数に達していない日を色分け表示</li>
+                        <li>🏷️ <strong>オプション表示</strong> - 午前/午後、車両種別等を視覚的に区別</li>
+                    </ul>
+
+                    <div class="note info">
+                        <div class="note-title">💡 効率的な使い方</div>
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>定期的なシフトパターンは、一度作成してからコピー機能を活用</li>
+                            <li>台数設定を使用して人数不足を防止</li>
+                            <li>重複チェックで複数現場の人員調整を効率化</li>
+                            <li>カレンダー出力で現場での確認・掲示に活用</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Q&A セクション -->
+            <section id="qa" class="section">
+                <h2>❓ よくある質問（Q&A）</h2>
+
+                <div class="qa-item">
+                    <div class="qa-question" onclick="toggleQA(this)">
+                        <span>ログインができません</span>
+                        <span class="qa-toggle">▼</span>
+                    </div>
+                    <div class="qa-answer">
+                        <strong>A:</strong> 以下を確認してください：
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>ユーザーIDとパスワードが正しく入力されているか</li>
+                            <li>大文字・小文字が区別されているため、正確に入力</li>
+                            <li>不明な場合は管理者にお問い合わせください</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="qa-item">
+                    <div class="qa-question" onclick="toggleQA(this)">
+                        <span>ファイルのアップロードができません</span>
+                        <span class="qa-toggle">▼</span>
+                    </div>
+                    <div class="qa-answer">
+                        <strong>A:</strong> 以下を確認してください：
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>ファイルサイズが制限以内か確認（ツールによって異なります）</li>
+                            <li>対応ファイル形式か確認</li>
+                            <li>ブラウザを再読み込みして再試行</li>
+                            <li>インターネット接続が安定しているか確認</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="qa-item">
+                    <div class="qa-question" onclick="toggleQA(this)">
+                        <span>CSVファイルが文字化けします</span>
+                        <span class="qa-toggle">▼</span>
+                    </div>
+                    <div class="qa-answer">
+                        <strong>A:</strong> 文字エンコーディングの問題です：
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>CSV保存時にUTF-8（BOM付き）を選択</li>
+                            <li>Excel で開く場合は、「データ」→「外部データの取り込み」を使用</li>
+                            <li>DSTT内のツールは自動で文字コードを判定します</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="qa-item">
+                    <div class="qa-question" onclick="toggleQA(this)">
+                        <span>PDFの圧縮効果が少ないです</span>
+                        <span class="qa-toggle">▼</span>
+                    </div>
+                    <div class="qa-answer">
+                        <strong>A:</strong> PDFの内容によって圧縮効果は変わります：
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>画像が多いPDFは圧縮効果が高い</li>
+                            <li>テキストのみのPDFは圧縮効果が限定的</li>
+                            <li>すでに圧縮されているPDFは効果が少ない</li>
+                            <li>「最大圧縮」レベルを試してください</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="qa-item">
+                    <div class="qa-question" onclick="toggleQA(this)">
+                        <span>ShifterSyncで重複が検出されません</span>
+                        <span class="qa-toggle">▼</span>
+                    </div>
+                    <div class="qa-answer">
+                        <strong>A:</strong> 以下を確認してください：
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>CSVファイルのモード・年月が同じか確認</li>
+                            <li>人物名の表記が完全一致しているか（スペース・漢字等）</li>
+                            <li>オプション付きエントリーは別人として扱われます</li>
+                            <li>最大6ファイルまでの制限があります</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="qa-item">
+                    <div class="qa-question" onclick="toggleQA(this)">
+                        <span>生成されたファイルが開けません</span>
+                        <span class="qa-toggle">▼</span>
+                    </div>
+                    <div class="qa-answer">
+                        <strong>A:</strong> ダウンロードとファイル形式を確認：
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>ダウンロードが完了するまで待機</li>
+                            <li>ファイル拡張子が正しいか確認</li>
+                            <li>対応アプリケーションがインストールされているか確認</li>
+                            <li>ウイルス対策ソフトによるブロックを確認</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="qa-item">
+                    <div class="qa-question" onclick="toggleQA(this)">
+                        <span>パスワード付きZIPが解凍できません</span>
+                        <span class="qa-toggle">▼</span>
+                    </div>
+                    <div class="qa-answer">
+                        <strong>A:</strong> パスワードとZIPファイルを確認：
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>設定したパスワードが正確に入力されているか</li>
+                            <li>大文字・小文字を区別</li>
+                            <li>使用している解凍ソフトがAES暗号化に対応しているか</li>
+                            <li>7-ZipやWinRARなどの対応ソフトを使用</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="qa-item">
+                    <div class="qa-question" onclick="toggleQA(this)">
+                        <span>営業日計算の結果がおかしいです</span>
+                        <span class="qa-toggle">▼</span>
+                    </div>
+                    <div class="qa-answer">
+                        <strong>A:</strong> 設定を再確認してください：
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>営業曜日の選択が正しいか確認</li>
+                            <li>祝日の扱い設定（営業日とするか休日とするか）</li>
+                            <li>特別除外日の入力形式（YYYY-MM-DD）</li>
+                            <li>期間設定が正しいか確認</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- トラブルシューティング -->
+            <section id="troubleshooting" class="section">
+                <h2>🔧 トラブルシューティング</h2>
+
+                <div class="tool-card">
+                    <h4>🌐 ブラウザ関連の問題</h4>
+                    
+                    <div class="note warning">
+                        <div class="note-title">⚠️ 対応ブラウザ</div>
+                        <p>Chrome、Firefox、Edge、Safari の最新版を推奨します。Internet Explorer は対応していません。</p>
+                    </div>
+
+                    <h4>よくあるブラウザ問題と解決方法</h4>
+                    <table class="table">
+                        <thead>
+                            <tr><th>問題</th><th>原因</th><th>解決方法</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>ページが表示されない</td><td>キャッシュ問題</td><td>Ctrl+F5で強制更新</td></tr>
+                            <tr><td>ファイルダウンロードできない</td><td>ポップアップブロック</td><td>ブラウザの設定でポップアップを許可</td></tr>
+                            <tr><td>画面レイアウトが崩れる</td><td>古いブラウザ</td><td>最新版にアップデート</td></tr>
+                            <tr><td>アップロードが途中で止まる</td><td>タイムアウト</td><td>ファイルサイズを確認、分割して処理</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4>📱 モバイル端末での使用</h4>
+                    <ul style="margin-left: 20px;">
+                        <li>基本機能はスマートフォン・タブレット対応</li>
+                        <li>大容量ファイル処理はPC推奨</li>
+                        <li>PDF Power等の高機能ツールはPC環境を推奨</li>
+                        <li>ShifterSyncのカレンダー編集はPC推奨</li>
+                    </ul>
+
+                    <h4>🔄 ブラウザキャッシュクリア方法</h4>
+                    <div class="step-list" style="list-style: none;">
+                        <li><strong>Chrome:</strong> Ctrl+Shift+Delete → 「キャッシュされた画像とファイル」をチェック → 削除</li>
+                        <li><strong>Firefox:</strong> Ctrl+Shift+Delete → 「キャッシュ」をチェック → 今すぐ消去</li>
+                        <li><strong>Edge:</strong> Ctrl+Shift+Delete → 「キャッシュされた画像とファイル」をチェック → クリア</li>
+                        <li><strong>Safari:</strong> 開発メニュー → キャッシュを空にする</li>
+                    </div>
+                </div>
+
+                <div class="tool-card">
+                    <h4>💾 ファイル処理の問題</h4>
+                    
+                    <h4>ファイルサイズ制限</h4>
+                    <table class="table">
+                        <thead>
+                            <tr><th>ツール</th><th>制限サイズ</th><th>対処方法</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>FILE POST</td><td>10GB</td><td>-</td></tr>
+                            <tr><td>PDF Power</td><td>100MB (圧縮)</td><td>事前に分割</td></tr>
+                            <tr><td>その他ツール</td><td>一般的制限</td><td>50MB程度を目安</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4>対応ファイル形式</h4>
+                    <ul style="margin-left: 20px;">
+                        <li><strong>画像:</strong> PNG, JPG, JPEG, BMP, GIF</li>
+                        <li><strong>文書:</strong> PDF, TXT, DOCX, CSV</li>
+                        <li><strong>圧縮:</strong> ZIP, TAR, TAR.GZ</li>
+                        <li><strong>その他:</strong> 各ツールの仕様に準拠</li>
+                    </ul>
+
+                    <div class="note info">
+                        <div class="note-title">💡 ファイル処理のコツ</div>
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>大容量ファイルは処理時間がかかります</li>
+                            <li>複数ファイル処理時は、一度に選択せず分割処理を推奨</li>
+                            <li>ネットワーク環境により処理速度が変動します</li>
+                            <li>エラー時はファイル形式と容量を再確認してください</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="tool-card">
+                    <h4>🔧 システムエラー対応</h4>
+
+                    <h4>エラーコードと対処方法</h4>
+                    <table class="table">
+                        <thead>
+                            <tr><th>エラー</th><th>原因</th><th>対処方法</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>413 Payload Too Large</td><td>ファイルサイズ超過</td><td>ファイルサイズを削減</td></tr>
+                            <tr><td>500 Internal Server Error</td><td>サーバー処理エラー</td><td>時間をおいて再実行</td></tr>
+                            <tr><td>404 Not Found</td><td>ページが見つからない</td><td>URLを確認、再ログイン</td></tr>
+                            <tr><td>403 Forbidden</td><td>アクセス権限なし</td><td>ログイン状態を確認</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4>一般的なエラー対処手順</h4>
+                    <ol class="step-list">
+                        <li>ページを再読み込み（F5）</li>
+                        <li>別のブラウザで試行</li>
+                        <li>ログアウト→再ログイン</li>
+                        <li>ブラウザキャッシュをクリア</li>
+                        <li>時間をおいて再実行</li>
+                        <li>それでも解決しない場合は管理者に連絡</li>
+                    </ol>
+                </div>
+
+                <div class="tool-card">
+                    <h4>🖨️ 印刷・表示の問題</h4>
+
+                    <h4>印刷時の注意事項</h4>
+                    <ul style="margin-left: 20px;">
+                        <li>営業日カレンダーは印刷用に最適化済み</li>
+                        <li>ShifterSyncカレンダーはPDF出力を推奨</li>
+                        <li>ブラウザの印刷プレビューで事前確認</li>
+                        <li>用紙サイズに応じて倍率を調整</li>
+                    </ul>
+
+                    <h4>PDF表示の問題</h4>
+                    <div class="note">
+                        <div class="note-title">📄 PDF表示トラブル</div>
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>ブラウザ内蔵PDFビューアで表示できない場合は、ダウンロードして外部アプリで開く</li>
+                            <li>Adobe Reader、Foxit Reader等の使用を推奨</li>
+                            <li>パスワード付きPDFは対応アプリケーションで開く</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- お問い合わせ -->
+            <section id="contact" class="section">
+                <h2>📞 お問い合わせ・サポート</h2>
+
+                <div class="tool-card">
+                    <h4>🆘 サポート体制</h4>
+                    
+                    <table class="table">
+                        <thead>
+                            <tr><th>サポート内容</th><th>対応方法</th><th>対応時間</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>システム障害</td><td>システム管理者へ連絡</td><td>24時間対応</td></tr>
+                            <tr><td>使用方法の質問</td><td>このマニュアル参照 or メール</td><td>営業時間内</td></tr>
+                            <tr><td>新機能要望</td><td>フィードバックフォーム</td><td>随時受付</td></tr>
+                            <tr><td>アカウント関連</td><td>管理者へ直接連絡</td><td>営業時間内</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4>📋 問い合わせ時の情報</h4>
+                    <p>効率的なサポートのため、以下の情報をお伝えください：</p>
+                    <ul style="margin-left: 20px;">
+                        <li>🆔 <strong>ユーザーID</strong></li>
+                        <li>🕒 <strong>発生日時</strong></li>
+                        <li>🛠️ <strong>使用していたツール名</strong></li>
+                        <li>📝 <strong>操作手順</strong>（エラーが再現する場合）</li>
+                        <li>💻 <strong>使用ブラウザとバージョン</strong></li>
+                        <li>❗ <strong>エラーメッセージ</strong>（表示された場合）</li>
+                        <li>📎 <strong>スクリーンショット</strong>（可能な場合）</li>
+                    </ul>
+
+                    <div class="note info">
+                        <div class="note-title">💡 よくある質問を先にチェック</div>
+                        <p>お問い合わせ前に、このマニュアルのQ&A・トラブルシューティングセクションをご確認ください。多くの問題はセルフ解決が可能です。</p>
+                    </div>
+                </div>
+
+                <div class="tool-card">
+                    <h4>🔄 システム更新・メンテナンス</h4>
+                    
+                    <h4>定期メンテナンス</h4>
+                    <ul style="margin-left: 20px;">
+                        <li>🕐 <strong>時間:</strong> 毎月第1日曜日 02:00-04:00</li>
+                        <li>⏱️ <strong>所要時間:</strong> 約2時間</li>
+                        <li>📢 <strong>事前通知:</strong> 1週間前にお知らせ</li>
+                        <li>🚫 <strong>影響:</strong> この時間はシステム利用不可</li>
+                    </ul>
+
+                    <h4>緊急メンテナンス</h4>
+                    <ul style="margin-left: 20px;">
+                        <li>重大な障害発生時に実施</li>
+                        <li>可能な限り事前通知を行います</li>
+                        <li>復旧状況は管理者より随時連絡</li>
+                    </ul>
+
+                    <div class="note warning">
+                        <div class="note-title">⚠️ メンテナンス中の注意事項</div>
+                        <ul style="margin-left: 20px; margin-top: 10px;">
+                            <li>処理中の作業は保存されません</li>
+                            <li>事前に重要な作業は完了させてください</li>
+                            <li>メンテナンス明けは一度ログインし直してください</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="tool-card">
+                    <h4>📈 システム改善・フィードバック</h4>
+                    
+                    <p>DSTTをより良いシステムにするため、皆様のフィードバックをお聞かせください：</p>
+                    
+                    <h4>フィードバック項目例</h4>
+                    <ul style="margin-left: 20px;">
+                        <li>🚀 <strong>新機能要望</strong> - 「こんな機能があったら便利」</li>
+                        <li>🔧 <strong>改善提案</strong> - 「この操作をもっと簡単にしたい」</li>
+                        <li>🐛 <strong>不具合報告</strong> - 「予想と違う動作をする」</li>
+                        <li>💡 <strong>使い勝手</strong> - 「ここが分かりにくい」</li>
+                        <li>📚 <strong>マニュアル</strong> - 「説明が不足している箇所」</li>
+                    </ul>
+
+                    <div class="note success">
+                        <div class="note-title">🎯 継続的改善</div>
+                        <p>皆様からのフィードバックを基に、定期的にシステム改善を行っています。小さな改善でも大きな効果につながりますので、お気軽にご提案ください。</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- フッター -->
+            <div style="margin-top: 60px; padding: 40px; background: linear-gradient(135deg, #1e293b 0%, #334155 100%); border-radius: 15px; color: white; text-align: center;">
+                <h3 style="margin-bottom: 20px; color: #60a5fa;">📚 DSTT マニュアル</h3>
+                <p>DaiShinTo Tools - 業務効率化ツール集</p>
+                <p style="margin-top: 20px; opacity: 0.8;">このマニュアルは定期的に更新されます。最新情報はシステム内でご確認ください。</p>
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #475569;">
+                    <p style="font-size: 14px; opacity: 0.7;">© 2025 DaiShinTo Tools. All rights reserved.</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // サイドバーナビゲーション
+        document.addEventListener('DOMContentLoaded', function() {
+            const navLinks = document.querySelectorAll('.nav-link');
+            const sections = document.querySelectorAll('.section');
+            
+            // ナビゲーションクリック処理
+            navLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    if (this.getAttribute('href').startsWith('#')) {
+                        e.preventDefault();
+                        const targetId = this.getAttribute('href').substring(1);
+                        const targetElement = document.getElementById(targetId);
+                        
+                        if (targetElement) {
+                            targetElement.scrollIntoView({ behavior: 'smooth' });
+                            
+                            // アクティブ状態更新
+                            navLinks.forEach(l => l.classList.remove('active'));
+                            this.classList.add('active');
+                        }
+                    }
+                });
+            });
+
+            // スクロール時のアクティブ状態更新
+            const observerOptions = {
+                rootMargin: '-20% 0px -70% 0px',
+                threshold: 0
+            };
+
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        navLinks.forEach(link => link.classList.remove('active'));
+                        const activeLink = document.querySelector(`a[href="#${entry.target.id}"]`);
+                        if (activeLink) {
+                            activeLink.classList.add('active');
+                        }
+                    }
+                });
+            }, observerOptions);
+
+            sections.forEach(section => {
+                observer.observe(section);
+            });
+
+            // セクションの表示アニメーション
+            const sectionObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('visible');
+                    }
+                });
+            }, { threshold: 0.1 });
+
+            sections.forEach(section => {
+                sectionObserver.observe(section);
+            });
+
+            // 初期表示時の最初のセクション
+            if (sections.length > 0) {
+                sections[0].classList.add('visible');
+            }
+        });
+
+        // サブメニュー切り替え
+        function toggleSubmenu(submenuId) {
+            const submenu = document.getElementById(submenuId);
+            submenu.classList.toggle('active');
+        }
+
+        // Q&A切り替え
+        function toggleQA(element) {
+            const answer = element.nextElementSibling;
+            const toggle = element.querySelector('.qa-toggle');
+            
+            answer.classList.toggle('active');
+            toggle.classList.toggle('rotated');
+        }
+
+        // 検索機能
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchBox = document.getElementById('searchBox');
+            let searchTimeout;
+
+            searchBox.addEventListener('input', function() {
+                clearTimeout(searchTimeout);
+                const query = this.value.toLowerCase().trim();
+                
+                searchTimeout = setTimeout(() => {
+                    performSearch(query);
+                }, 300);
+            });
+
+            function performSearch(query) {
+                const allElements = document.querySelectorAll('h2, h3, h4, p, li, td, th');
+                
+                // 既存のハイライトをクリア
+                allElements.forEach(el => {
+                    el.classList.remove('highlight');
+                    el.innerHTML = el.innerHTML.replace(/<mark[^>]*>([^<]*)<\/mark>/gi, '$1');
+                });
+
+                if (query === '') return;
+
+                let foundElements = [];
+
+                allElements.forEach(element => {
+                    const text = element.textContent.toLowerCase();
+                    if (text.includes(query) && element.textContent.trim() !== '') {
+                        foundElements.push(element);
+                        
+                        // ハイライト追加
+                        element.classList.add('highlight');
+                        
+                        // テキスト内の検索語をマーク
+                        const regex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
+                        element.innerHTML = element.innerHTML.replace(regex, '<mark style="background: #fbbf24; color: #000;">$1</mark>');
+                    }
+                });
+
+                // 最初の検索結果にスクロール
+                if (foundElements.length > 0) {
+                    foundElements[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+
+            function escapeRegExp(string) {
+                return string.replace(/[.*+?^${}()|[\]\\]/g, '\\                    <div class="note warning">
+                        <div class="note-title">⚠️ 対応ブラウザ</div>
+                        <p>Chrome、Firefox、Edge、Safari');
+            }
+        });
+
+        // ユーティリティ関数
+        function escapeRegExp(string) {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\                    <div class="note warning">
+                        <div class="note-title">⚠️ 対応ブラウザ</div>
+                        <p>Chrome、Firefox、Edge、Safari');
+        }
+
+        // ページ上部へ戻るボタン（スクロール時表示）
+        document.addEventListener('DOMContentLoaded', function() {
+            const scrollTopBtn = document.createElement('button');
+            scrollTopBtn.innerHTML = '↑';
+            scrollTopBtn.className = 'scroll-top-btn';
+            scrollTopBtn.style.cssText = `
+                position: fixed;
+                bottom: 30px;
+                right: 30px;
+                width: 50px;
+                height: 50px;
+                background: #3b82f6;
+                color: white;
+                border: none;
+                border-radius: 50%;
+                font-size: 20px;
+                cursor: pointer;
+                display: none;
+                z-index: 1000;
+                box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+                transition: all 0.3s ease;
+            `;
+
+            scrollTopBtn.onmouseover = () => {
+                scrollTopBtn.style.background = '#2563eb';
+                scrollTopBtn.style.transform = 'translateY(-2px)';
+            };
+
+            scrollTopBtn.onmouseout = () => {
+                scrollTopBtn.style.background = '#3b82f6';
+                scrollTopBtn.style.transform = 'translateY(0)';
+            };
+
+            scrollTopBtn.onclick = () => {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+
+            document.body.appendChild(scrollTopBtn);
+
+            window.onscroll = () => {
+                if (document.body.scrollTop > 300 || document.documentElement.scrollTop > 300) {
+                    scrollTopBtn.style.display = 'block';
+                } else {
+                    scrollTopBtn.style.display = 'none';
+                }
+            };
+        });
+
+        // 印刷用スタイル調整
+        window.addEventListener('beforeprint', function() {
+            // 印刷時にサイドバーを非表示
+            document.querySelector('.sidebar').style.display = 'none';
+            document.querySelector('.main-content').style.margin = '0';
+            document.querySelector('.main-content').style.padding = '20px';
+        });
+
+        window.addEventListener('afterprint', function() {
+            // 印刷後に元に戻す
+            document.querySelector('.sidebar').style.display = 'block';
+            document.querySelector('.main-content').style.margin = '';
+            document.querySelector('.main-content').style.padding = '40px';
+        });
+
+        // ショートカットキー
+        document.addEventListener('keydown', function(e) {
+            // Ctrl + F でページ内検索ボックスにフォーカス
+            if (e.ctrlKey && e.key === 'f') {
+                e.preventDefault();
+                document.getElementById('searchBox').focus();
+            }
+            
+            // Escapeキーで検索をクリア
+            if (e.key === 'Escape') {
+                const searchBox = document.getElementById('searchBox');
+                if (document.activeElement === searchBox) {
+                    searchBox.value = '';
+                    searchBox.dispatchEvent(new Event('input'));
+                    searchBox.blur();
+                }
+            }
+        });
+
+        // ツールチップ（今後の拡張用）
+        document.addEventListener('DOMContentLoaded', function() {
+            // code要素にホバー時のツールチップを追加可能
+            const codeElements = document.querySelectorAll('code');
+            codeElements.forEach(code => {
+                if (code.textContent.includes('.')) {
+                    code.style.cursor = 'help';
+                    code.title = 'ファイル拡張子またはパス';
+                }
+            });
+        });
+
+        console.log('DSTT Manual loaded successfully! 📚');
+    </script>
+</body>
+</html>
