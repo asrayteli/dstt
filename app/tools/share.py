@@ -218,7 +218,7 @@ def download_file(uid):
         return send_file(file_path, as_attachment=True, download_name=file_info.get("filename", "download"))
 
 
-@share_bp.route("/download/<uid>/<int:file_index>", methods=["GET"])
+@share_bp.route("/download/<uid>/<int:file_index>", methods=["GET", "POST"])
 def download_single_file(uid, file_index):
     """個別ファイルのダウンロード"""
     meta = load_meta()
@@ -231,10 +231,17 @@ def download_single_file(uid, file_index):
 
     # パスワード認証チェック
     if file_info.get("password_hash"):
-        # セッションで認証済みかチェック
-        verified_uids = session.get('verified_uids', [])
-        if uid not in verified_uids:
-            return "認証が必要です", 403
+        # POSTリクエストの場合、パスワードを検証
+        if request.method == "POST":
+            password = request.form.get("password", "")
+            input_hash = hashlib.sha256(password.encode()).hexdigest()
+            if input_hash != file_info["password_hash"]:
+                return "パスワードが違います", 403
+        else:
+            # GETリクエストの場合、セッションで認証済みかチェック
+            verified_uids = session.get('verified_uids', [])
+            if uid not in verified_uids:
+                return "認証が必要です", 403
 
     if "files" not in file_info or file_index >= len(file_info["files"]):
         return "ファイルが見つかりません", 404

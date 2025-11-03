@@ -202,6 +202,14 @@ async function submitPassword() {
   const password = document.getElementById('passwordInput').value;
   const errorDiv = document.getElementById('passwordModalError');
 
+  // パスワードが空の場合
+  if (!password) {
+    errorDiv.textContent = 'パスワードを入力してください';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  // パスワードハッシュを計算して検証（簡易チェック）
   try {
     const response = await fetch(`/tools/share/api/verify_password/${currentUid}`, {
       method: 'POST',
@@ -216,12 +224,27 @@ async function submitPassword() {
     if (result.success) {
       closePasswordModal();
 
-      // パスワード検証成功後、ダウンロード実行
+      // フォームを作成してPOST送信（パスワードを含む）
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.style.display = 'none';
+
+      const passwordField = document.createElement('input');
+      passwordField.type = 'hidden';
+      passwordField.name = 'password';
+      passwordField.value = password;
+      form.appendChild(passwordField);
+
+      // ダウンロードURL設定
       if (currentAction === 'download_single') {
-        window.location.href = `/tools/share/download/${currentUid}/${currentFileIndex}`;
+        form.action = `/tools/share/download/${currentUid}/${currentFileIndex}`;
       } else if (currentAction === 'download_all') {
-        window.location.href = `/tools/share/download/${currentUid}`;
+        form.action = `/tools/share/download/${currentUid}`;
       }
+
+      document.body.appendChild(form);
+      form.submit();
+      document.body.removeChild(form);
     } else {
       errorDiv.textContent = result.error || 'パスワードが違います';
       errorDiv.classList.remove('hidden');
