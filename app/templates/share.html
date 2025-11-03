@@ -91,8 +91,9 @@ async function loadFileList() {
     let html = '<div class="space-y-4">';
 
     files.forEach(file => {
-      const expiresAt = new Date(file.expires_at);
-      const createdAt = new Date(file.created_at);
+      // ISO文字列にZを付けてUTC時刻であることを明示
+      const expiresAt = new Date(file.expires_at.endsWith('Z') ? file.expires_at : file.expires_at + 'Z');
+      const createdAt = new Date(file.created_at.endsWith('Z') ? file.created_at : file.created_at + 'Z');
       const currentUsername = '{{ current_user.username if current_user.is_authenticated else "" }}';
       const isOwner = file.uploader === currentUsername;
 

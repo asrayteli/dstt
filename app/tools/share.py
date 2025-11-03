@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, send_file, redirect, url_for, abort, jsonify
+from flask import Blueprint, render_template, request, send_file, redirect, url_for, abort, jsonify, session
 import os, uuid, hashlib, json, io, base64, zipfile, string, random
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
@@ -171,12 +171,21 @@ def download_file(uid):
 
     # パスワード認証
     if file_info.get("password_hash"):
-        if request.method == "GET":
-            return render_template("share_password.html", uid=uid)
-        input_pass = request.form.get("password", "")
-        input_hash = hashlib.sha256(input_pass.encode()).hexdigest()
-        if input_hash != file_info["password_hash"]:
-            return render_template("share_password.html", uid=uid, error="パスワードが違います")
+        # セッションで認証済みかチェック
+        verified_uids = session.get('verified_uids', [])
+        if uid not in verified_uids:
+            # 未認証の場合
+            if request.method == "GET":
+                return render_template("share_password.html", uid=uid)
+            input_pass = request.form.get("password", "")
+            input_hash = hashlib.sha256(input_pass.encode()).hexdigest()
+            if input_hash != file_info["password_hash"]:
+                return render_template("share_password.html", uid=uid, error="パスワードが違います")
+            # 認証成功 - セッションに保存
+            if 'verified_uids' not in session:
+                session['verified_uids'] = []
+            session['verified_uids'].append(uid)
+            session.modified = True
 
     # 新形式（複数ファイル対応）
     if "files" in file_info:
@@ -220,8 +229,12 @@ def download_single_file(uid, file_index):
     if datetime.utcnow() > datetime.fromisoformat(file_info["expires_at"]):
         return "このファイルのダウンロード期限は過ぎています", 410
 
-    # パスワード認証はJavaScript側で事前にチェック済みと想定
-    # （APIとして使う場合はクエリパラメータでパスワード渡すなど別途実装）
+    # パスワード認証チェック
+    if file_info.get("password_hash"):
+        # セッションで認証済みかチェック
+        verified_uids = session.get('verified_uids', [])
+        if uid not in verified_uids:
+            return "認証が必要です", 403
 
     if "files" not in file_info or file_index >= len(file_info["files"]):
         return "ファイルが見つかりません", 404
@@ -338,6 +351,12 @@ def verify_password(uid):
     input_hash = hashlib.sha256(password.encode()).hexdigest()
 
     if input_hash == file_info["password_hash"]:
+        # セッションに認証済みUIDを保存
+        if 'verified_uids' not in session:
+            session['verified_uids'] = []
+        if uid not in session['verified_uids']:
+            session['verified_uids'].append(uid)
+        session.modified = True
         return jsonify({"success": True})
     else:
         return jsonify({"success": False, "error": "パスワードが違います"})
