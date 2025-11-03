@@ -222,6 +222,18 @@ async function submitPassword() {
     const result = await response.json();
 
     if (result.success) {
+      // トークンの確認
+      console.log('Token received:', result.token);
+      console.log('Current UID:', currentUid);
+      console.log('File index:', currentFileIndex);
+      console.log('Action:', currentAction);
+
+      if (!result.token) {
+        errorDiv.textContent = 'トークンの取得に失敗しました';
+        errorDiv.classList.remove('hidden');
+        return;
+      }
+
       closePasswordModal();
 
       // トークンを使ってダウンロードURLにアクセス
@@ -231,6 +243,8 @@ async function submitPassword() {
       } else if (currentAction === 'download_all') {
         downloadUrl = `/tools/share/download/${currentUid}?token=${result.token}`;
       }
+
+      console.log('Download URL:', downloadUrl);
 
       // ダウンロード実行
       window.location.href = downloadUrl;

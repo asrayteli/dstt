@@ -226,39 +226,62 @@ def download_file(uid):
 @share_bp.route("/download/<uid>/<int:file_index>", methods=["GET"])
 def download_single_file(uid, file_index):
     """個別ファイルのダウンロード"""
+    print(f"[DEBUG] download_single_file called: uid={uid}, file_index={file_index}")
+    print(f"[DEBUG] Query params: {request.args}")
+
     meta = load_meta()
     file_info = meta.get(uid)
     if not file_info:
+        print(f"[DEBUG] UID not found in meta: {uid}")
         return "無効なURLです", 404
 
     if datetime.utcnow() > datetime.fromisoformat(file_info["expires_at"]):
+        print(f"[DEBUG] File expired: {uid}")
         return "このファイルのダウンロード期限は過ぎています", 410
+
+    print(f"[DEBUG] File info: has_password={bool(file_info.get('password_hash'))}, files_count={len(file_info.get('files', []))}")
 
     # パスワード認証チェック（トークン方式）
     if file_info.get("password_hash"):
         token = request.args.get("token")
+        print(f"[DEBUG] Token from request: {token}")
+
         if not token:
+            print("[DEBUG] No token provided")
             return "認証が必要です", 403
 
         # トークン検証
         download_tokens = session.get('download_tokens', {})
+        print(f"[DEBUG] Session tokens: {list(download_tokens.keys())}")
+
         if token not in download_tokens or download_tokens[token] != uid:
+            print(f"[DEBUG] Token validation failed: token={token}, expected_uid={uid}, actual_uid={download_tokens.get(token)}")
             return "無効なトークンです", 403
 
+        print("[DEBUG] Token validated successfully")
         # トークンを使用後削除（ワンタイム）
         del download_tokens[token]
         session['download_tokens'] = download_tokens
         session.modified = True
 
-    if "files" not in file_info or file_index >= len(file_info["files"]):
+    if "files" not in file_info:
+        print(f"[DEBUG] 'files' key not in file_info (old format?)")
+        return "ファイルが見つかりません", 404
+
+    if file_index >= len(file_info["files"]):
+        print(f"[DEBUG] file_index {file_index} out of range (total: {len(file_info['files'])})")
         return "ファイルが見つかりません", 404
 
     file_data = file_info["files"][file_index]
     file_path = os.path.join(UPLOAD_DIR, file_data["stored_name"])
 
+    print(f"[DEBUG] File path: {file_path}, exists: {os.path.exists(file_path)}")
+
     if not os.path.exists(file_path):
+        print(f"[DEBUG] File not found on disk: {file_path}")
         return "ファイルが見つかりません", 404
 
+    print(f"[DEBUG] Sending file: {file_data['original_name']}")
     return send_file(file_path, as_attachment=True, download_name=file_data["original_name"])
 
 
@@ -352,11 +375,17 @@ def delete_file(uid):
 @share_bp.route("/api/verify_password/<uid>", methods=["POST"])
 def verify_password(uid):
     """パスワード検証API（JavaScript用）"""
+    print(f"[DEBUG] verify_password called: uid={uid}")
+
     meta = load_meta()
     file_info = meta.get(uid)
 
     if not file_info:
+        print(f"[DEBUG] UID not found: {uid}")
         return jsonify({"success": False, "error": "無効なUID"}), 404
+
+    has_password = bool(file_info.get("password_hash"))
+    print(f"[DEBUG] File has password: {has_password}")
 
     if not file_info.get("password_hash"):
         # パスワード不要の場合も一時トークン発行
@@ -365,6 +394,7 @@ def verify_password(uid):
             session['download_tokens'] = {}
         session['download_tokens'][token] = uid
         session.modified = True
+        print(f"[DEBUG] Token generated (no password): {token}")
         return jsonify({"success": True, "token": token})
 
     password = request.json.get("password", "")
@@ -377,6 +407,9 @@ def verify_password(uid):
             session['download_tokens'] = {}
         session['download_tokens'][token] = uid
         session.modified = True
+        print(f"[DEBUG] Token generated (password correct): {token}, stored for uid: {uid}")
+        print(f"[DEBUG] Session tokens after generation: {list(session['download_tokens'].keys())}")
         return jsonify({"success": True, "token": token})
     else:
+        print(f"[DEBUG] Password incorrect")
         return jsonify({"success": False, "error": "パスワードが違います"})
