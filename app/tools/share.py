@@ -169,22 +169,27 @@ def download_file(uid):
     if datetime.utcnow() > datetime.fromisoformat(file_info["expires_at"]):
         return "このファイルのダウンロード期限は過ぎています", 410
 
-    # パスワード認証
+    # パスワード認証（トークン方式）
     if file_info.get("password_hash"):
-        # セッションで認証済みかチェック
-        verified_uids = session.get('verified_uids', [])
-        if uid not in verified_uids:
-            # 未認証の場合
+        token = request.args.get("token")
+
+        if not token:
+            # トークンがない場合は従来のフォーム認証
             if request.method == "GET":
                 return render_template("share_password.html", uid=uid)
             input_pass = request.form.get("password", "")
             input_hash = hashlib.sha256(input_pass.encode()).hexdigest()
             if input_hash != file_info["password_hash"]:
                 return render_template("share_password.html", uid=uid, error="パスワードが違います")
-            # 認証成功 - セッションに保存
-            if 'verified_uids' not in session:
-                session['verified_uids'] = []
-            session['verified_uids'].append(uid)
+        else:
+            # トークン検証
+            download_tokens = session.get('download_tokens', {})
+            if token not in download_tokens or download_tokens[token] != uid:
+                return "無効なトークンです", 403
+
+            # トークンを使用後削除（ワンタイム）
+            del download_tokens[token]
+            session['download_tokens'] = download_tokens
             session.modified = True
 
     # 新形式（複数ファイル対応）
@@ -218,7 +223,7 @@ def download_file(uid):
         return send_file(file_path, as_attachment=True, download_name=file_info.get("filename", "download"))
 
 
-@share_bp.route("/download/<uid>/<int:file_index>", methods=["GET", "POST"])
+@share_bp.route("/download/<uid>/<int:file_index>", methods=["GET"])
 def download_single_file(uid, file_index):
     """個別ファイルのダウンロード"""
     meta = load_meta()
@@ -229,19 +234,21 @@ def download_single_file(uid, file_index):
     if datetime.utcnow() > datetime.fromisoformat(file_info["expires_at"]):
         return "このファイルのダウンロード期限は過ぎています", 410
 
-    # パスワード認証チェック
+    # パスワード認証チェック（トークン方式）
     if file_info.get("password_hash"):
-        # POSTリクエストの場合、パスワードを検証
-        if request.method == "POST":
-            password = request.form.get("password", "")
-            input_hash = hashlib.sha256(password.encode()).hexdigest()
-            if input_hash != file_info["password_hash"]:
-                return "パスワードが違います", 403
-        else:
-            # GETリクエストの場合、セッションで認証済みかチェック
-            verified_uids = session.get('verified_uids', [])
-            if uid not in verified_uids:
-                return "認証が必要です", 403
+        token = request.args.get("token")
+        if not token:
+            return "認証が必要です", 403
+
+        # トークン検証
+        download_tokens = session.get('download_tokens', {})
+        if token not in download_tokens or download_tokens[token] != uid:
+            return "無効なトークンです", 403
+
+        # トークンを使用後削除（ワンタイム）
+        del download_tokens[token]
+        session['download_tokens'] = download_tokens
+        session.modified = True
 
     if "files" not in file_info or file_index >= len(file_info["files"]):
         return "ファイルが見つかりません", 404
@@ -352,18 +359,24 @@ def verify_password(uid):
         return jsonify({"success": False, "error": "無効なUID"}), 404
 
     if not file_info.get("password_hash"):
-        return jsonify({"success": True})  # パスワード不要
+        # パスワード不要の場合も一時トークン発行
+        token = uuid.uuid4().hex
+        if 'download_tokens' not in session:
+            session['download_tokens'] = {}
+        session['download_tokens'][token] = uid
+        session.modified = True
+        return jsonify({"success": True, "token": token})
 
     password = request.json.get("password", "")
     input_hash = hashlib.sha256(password.encode()).hexdigest()
 
     if input_hash == file_info["password_hash"]:
-        # セッションに認証済みUIDを保存
-        if 'verified_uids' not in session:
-            session['verified_uids'] = []
-        if uid not in session['verified_uids']:
-            session['verified_uids'].append(uid)
+        # 一時ダウンロードトークンを発行（ワンタイム）
+        token = uuid.uuid4().hex
+        if 'download_tokens' not in session:
+            session['download_tokens'] = {}
+        session['download_tokens'][token] = uid
         session.modified = True
-        return jsonify({"success": True})
+        return jsonify({"success": True, "token": token})
     else:
         return jsonify({"success": False, "error": "パスワードが違います"})

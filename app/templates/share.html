@@ -209,7 +209,7 @@ async function submitPassword() {
     return;
   }
 
-  // パスワードハッシュを計算して検証（簡易チェック）
+  // パスワード検証してトークン取得
   try {
     const response = await fetch(`/tools/share/api/verify_password/${currentUid}`, {
       method: 'POST',
@@ -224,27 +224,16 @@ async function submitPassword() {
     if (result.success) {
       closePasswordModal();
 
-      // フォームを作成してPOST送信（パスワードを含む）
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.style.display = 'none';
-
-      const passwordField = document.createElement('input');
-      passwordField.type = 'hidden';
-      passwordField.name = 'password';
-      passwordField.value = password;
-      form.appendChild(passwordField);
-
-      // ダウンロードURL設定
+      // トークンを使ってダウンロードURLにアクセス
+      let downloadUrl;
       if (currentAction === 'download_single') {
-        form.action = `/tools/share/download/${currentUid}/${currentFileIndex}`;
+        downloadUrl = `/tools/share/download/${currentUid}/${currentFileIndex}?token=${result.token}`;
       } else if (currentAction === 'download_all') {
-        form.action = `/tools/share/download/${currentUid}`;
+        downloadUrl = `/tools/share/download/${currentUid}?token=${result.token}`;
       }
 
-      document.body.appendChild(form);
-      form.submit();
-      document.body.removeChild(form);
+      // ダウンロード実行
+      window.location.href = downloadUrl;
     } else {
       errorDiv.textContent = result.error || 'パスワードが違います';
       errorDiv.classList.remove('hidden');
