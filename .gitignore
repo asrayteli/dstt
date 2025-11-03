@@ -11,3 +11,4 @@ instance/
 *.log
 instance/users.db
 app/shared_files/
+shared_files/
