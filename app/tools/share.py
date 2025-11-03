@@ -115,14 +115,24 @@ def upload_share():
             if file.filename == "":
                 continue
 
-            filename = secure_filename(file.filename)
-            stored_filename = f"{uid}_{idx}_{filename}"
+            # オリジナルのファイル名を保持（日本語対応）
+            original_filename = file.filename
+
+            # パストラバーサル攻撃を防ぐため、危険な文字を除去
+            # ただし日本語は保持する
+            safe_original = original_filename.replace("..", "").replace("/", "").replace("\\", "")
+
+            # 拡張子を取得
+            _, ext = os.path.splitext(original_filename)
+
+            # 保存時のファイル名は安全なUID+インデックス+拡張子
+            stored_filename = f"{uid}_{idx}{ext}"
             save_path = os.path.join(UPLOAD_DIR, stored_filename)
             file.save(save_path)
 
             file_size = os.path.getsize(save_path)
             file_list.append({
-                "original_name": filename,
+                "original_name": safe_original,  # 日本語を含むオリジナル名
                 "stored_name": stored_filename,
                 "size": file_size
             })
