@@ -74,6 +74,9 @@ def create_app():
     from .tools.user_management import user_management_bp
     app.register_blueprint(user_management_bp)
 
+    from .tools.monthly_generator import monthly_generator_bp
+    app.register_blueprint(monthly_generator_bp)
+
     return app
 
 

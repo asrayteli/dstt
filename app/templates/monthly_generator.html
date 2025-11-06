@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='monthly_generator/css/monthly_generator.css') }}">
+
+<div class="max-w-4xl mx-auto mt-6 bg-white rounded-xl shadow-lg p-6">
+    <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">📊 月次ジェネレーター</h2>
+
+    <div class="mb-6 p-4 bg-blue-50 rounded-lg">
+        <h3 class="font-semibold mb-2 text-blue-800">使い方</h3>
+        <ol class="list-decimal list-inside space-y-1 text-sm text-gray-700">
+            <li>科目別推移表（CSV）、現場表（CSV）、月次報告書（Excel）をアップロード</li>
+            <li>対象月（1-12月）と出力先シート名を入力</li>
+            <li>「処理開始」ボタンをクリック</li>
+            <li>処理完了後、自動でダウンロードが開始されます</li>
+        </ol>
+    </div>
+
+    <!-- ファイルアップロードフォーム -->
+    <form id="upload-form" class="space-y-4">
+        <div class="form-group">
+            <label class="form-label">科目別推移表（CSV） *</label>
+            <input type="file" id="subject-file" accept=".csv" class="form-input" required>
+            <p class="text-xs text-gray-500 mt-1">法人名称、現場名称、科目名称、月別金額を含むCSVファイル</p>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">現場表（CSV） *</label>
+            <input type="file" id="site-file" accept=".csv" class="form-input" required>
+            <p class="text-xs text-gray-500 mt-1">法人名称、現場名称、セグメント（役員/一般/旅客）を含むCSVファイル</p>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">月次報告書（Excel） *</label>
+            <input type="file" id="report-file" accept=".xlsx,.xls" class="form-input" required>
+            <p class="text-xs text-gray-500 mt-1">データを出力するExcelファイル</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div class="form-group">
+                <label class="form-label">対象月 *</label>
+                <select id="target-month" class="form-input" required>
+                    <option value="">選択してください</option>
+                    <option value="1">1月</option>
+                    <option value="2">2月</option>
+                    <option value="3">3月</option>
+                    <option value="4">4月</option>
+                    <option value="5">5月</option>
+                    <option value="6">6月</option>
+                    <option value="7">7月</option>
+                    <option value="8">8月</option>
+                    <option value="9">9月</option>
+                    <option value="10">10月</option>
+                    <option value="11">11月</option>
+                    <option value="12">12月</option>
+                </select>
+                <p class="text-xs text-gray-500 mt-1">処理対象の月を選択</p>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">出力先シート名 *</label>
+                <input type="text" id="sheet-name" class="form-input" placeholder="例: Sheet1" required>
+                <p class="text-xs text-gray-500 mt-1">Excelファイル内のシート名</p>
+            </div>
+        </div>
+
+        <div class="text-center">
+            <button type="submit" class="btn btn-primary btn-lg">
+                処理開始
+            </button>
+        </div>
+    </form>
+
+    <!-- 進捗インジケーター -->
+    <div id="progress-container" class="hidden mt-6">
+        <div class="progress-box">
+            <h3 class="text-lg font-semibold mb-4 text-center">処理中...</h3>
+
+            <!-- プログレスバー -->
+            <div class="progress-bar-container">
+                <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            <p id="progress-percentage" class="text-center text-sm font-semibold mt-2">0%</p>
+
+            <!-- ステップ表示 -->
+            <div class="steps-container mt-6">
+                <div class="step-item" data-step="1">
+                    <div class="step-number">1</div>
+                    <div class="step-text">ファイルアップロード中</div>
+                </div>
+                <div class="step-item" data-step="2">
+                    <div class="step-number">2</div>
+                    <div class="step-text">データ抽出中</div>
+                </div>
+                <div class="step-item" data-step="3">
+                    <div class="step-number">3</div>
+                    <div class="step-text">セグメント分類中</div>
+                </div>
+                <div class="step-item" data-step="4">
+                    <div class="step-number">4</div>
+                    <div class="step-text">経費ジャンル分け中</div>
+                </div>
+                <div class="step-item" data-step="5">
+                    <div class="step-number">5</div>
+                    <div class="step-text">合算計算中</div>
+                </div>
+                <div class="step-item" data-step="6">
+                    <div class="step-number">6</div>
+                    <div class="step-text">データ検証中</div>
+                </div>
+                <div class="step-item" data-step="7">
+                    <div class="step-number">7</div>
+                    <div class="step-text">Excel出力中</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 結果表示エリア -->
+    <div id="result-container" class="hidden mt-6">
+        <div id="result-content"></div>
+    </div>
+</div>
+
+<!-- エラーモーダル -->
+<div id="error-modal" class="hidden modal-overlay">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4 text-red-600">エラー</h3>
+        <div id="error-content" class="mb-4"></div>
+        <div class="text-right">
+            <button onclick="closeErrorModal()" class="btn btn-outline">
+                閉じる
+            </button>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='monthly_generator/js/monthly_generator.js') }}"></script>
+{% endblock %}
