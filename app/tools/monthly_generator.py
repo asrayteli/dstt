@@ -168,10 +168,15 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
 
         corp_name = row[9].strip() if len(row) > 9 else ""
         site_name = row[10].strip() if len(row) > 10 else ""
+        subject_code = row[11].strip() if len(row) > 11 else ""
         subject_name = row[12].strip() if len(row) > 12 else ""
 
-        # 科目名称が空の場合はスキップ
-        if not subject_name:
+        # 科目コードが「販売費」の場合はスキップ
+        if subject_code == "販売費":
+            continue
+
+        # 科目名称が空の場合は、間接原価以外はスキップ
+        if not subject_name and subject_code != "間接原価":
             continue
 
         # 現場表と照合
@@ -191,9 +196,6 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                     amounts.append(amount)
                 except:
                     amounts.append(0)
-
-            # 科目コード取得（間接原価判定用）
-            subject_code = row[11].strip() if len(row) > 11 else ""
 
             extracted_data.append({
                 "法人名称": corp_name,
