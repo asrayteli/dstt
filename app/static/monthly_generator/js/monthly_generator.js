@@ -140,8 +140,9 @@ function showSuccess(result) {
 
     // 集計データ表示
     if (result.data) {
+        // 単月データ
         html += '<div class="mt-4 p-3 bg-white rounded border border-gray-200">';
-        html += '<h4 class="font-semibold mb-2">集計結果</h4>';
+        html += '<h4 class="font-semibold mb-2">集計結果（単月）</h4>';
         html += '<table class="min-w-full text-sm">';
         html += '<thead><tr class="border-b">';
         html += '<th class="text-left py-2 px-2">セグメント</th>';
@@ -160,6 +161,33 @@ function showSuccess(result) {
             html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        html += '</div>';
+
+        // 累計データ
+        html += '<div class="mt-4 p-3 bg-white rounded border border-gray-200">';
+        html += '<h4 class="font-semibold mb-2">集計結果（累計 - 4月から）</h4>';
+        html += '<table class="min-w-full text-sm">';
+        html += '<thead><tr class="border-b">';
+        html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">材料</th>';
+        html += '<th class="text-right py-2 px-2">労務</th>';
+        html += '<th class="text-right py-2 px-2">経費</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const [segment, values] of Object.entries(result.data)) {
+            html += '<tr class="border-b">';
+            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料合算'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務合算'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費合算'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上合算'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上合算'])}</td>`;
             html += '</tr>';
         }
 
