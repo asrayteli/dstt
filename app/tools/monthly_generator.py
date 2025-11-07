@@ -170,6 +170,10 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         site_name = row[10].strip() if len(row) > 10 else ""
         subject_name = row[12].strip() if len(row) > 12 else ""
 
+        # 科目名称が空の場合はスキップ
+        if not subject_name:
+            continue
+
         # 現場表と照合
         matching_site = None
         for site in site_list:
