@@ -144,9 +144,11 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
     except Exception as e:
         return {"error": f"CSVファイルの読み込みエラー: {str(e)}"}
 
-    # ステップ2: 現場表の解析
+    # ステップ2: 現場表の解析（ヘッダー行をスキップ）
     site_list = []
-    for row in site_data:
+    for i, row in enumerate(site_data):
+        if i == 0:  # ヘッダー行をスキップ
+            continue
         if len(row) >= 3:
             site_list.append({
                 "法人名称": row[0].strip(),
@@ -154,11 +156,13 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                 "セグメント": row[2].strip()
             })
 
-    # ステップ3: 科目別推移表から対象現場のデータを抽出
+    # ステップ3: 科目別推移表から対象現場のデータを抽出（ヘッダー行をスキップ）
     extracted_data = []
     found_sites = set()
 
-    for row in subject_data:
+    for i, row in enumerate(subject_data):
+        if i == 0:  # ヘッダー行をスキップ
+            continue
         if len(row) < 13:
             continue
 
