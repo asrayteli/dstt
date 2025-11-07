@@ -293,10 +293,18 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         wb.save(output_path)
         wb.close()
 
+        # ファイル名のみを抽出
+        output_filename = os.path.basename(output_path)
+
         return {
             "success": True,
-            "output_file": output_path,
-            "data": aggregated
+            "output_file": output_filename,
+            "data": aggregated,
+            "debug": {
+                "extracted_count": len(extracted_data),
+                "found_sites_count": len(found_sites),
+                "site_list_count": len(site_list)
+            }
         }
 
     except Exception as e:

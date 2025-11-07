@@ -167,6 +167,18 @@ function showSuccess(result) {
         html += '</div>';
     }
 
+    // デバッグ情報表示
+    if (result.debug) {
+        html += '<div class="mt-4 p-3 bg-yellow-50 rounded border border-yellow-200">';
+        html += '<h4 class="font-semibold mb-2 text-sm">デバッグ情報</h4>';
+        html += '<div class="text-xs text-gray-700">';
+        html += `<p>現場表の現場数: ${result.debug.site_list_count}</p>`;
+        html += `<p>一致した現場数: ${result.debug.found_sites_count}</p>`;
+        html += `<p>抽出されたデータ行数: ${result.debug.extracted_count}</p>`;
+        html += '</div>';
+        html += '</div>';
+    }
+
     html += '<div class="mt-4 text-center">';
     html += '<button onclick="resetForm()" class="btn btn-primary">新しい処理を開始</button>';
     html += '</div>';
