@@ -10,8 +10,8 @@ import traceback
 monthly_generator_bp = Blueprint("monthly_generator", __name__, url_prefix="/tools/monthly_generator")
 
 # 経費対照表（システムに組み込み）
+# 注：自動車売上は請負形態名称で判別するため、ここには含めない
 EXPENSE_MAPPING = {
-    "自動車売上": ["基本売上", "その他売上"],
     "外注費": "材料",
     "消耗品費": "材料",
     "保健衛生費": "材料",
@@ -170,6 +170,7 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         site_name = row[10].strip() if len(row) > 10 else ""
         subject_code = row[11].strip() if len(row) > 11 else ""
         subject_name = row[12].strip() if len(row) > 12 else ""
+        contract_type = row[5].strip() if len(row) > 5 else ""  # 請負形態名称
 
         # 科目コードが「販売費」の場合はスキップ
         if subject_code == "販売費":
@@ -188,7 +189,7 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                 break
 
         if matching_site:
-            # 金額データ抽出（列13以降が各月のデータ）
+            # 金額データ抽出（列13以降が各月のデータ、4月から開始）
             amounts = []
             for i in range(13, len(row)):
                 try:
@@ -203,6 +204,7 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                 "セグメント": matching_site["セグメント"],
                 "科目名称": subject_name,
                 "科目コード": subject_code,
+                "請負形態名称": contract_type,  # 追加
                 "金額データ": amounts
             })
 
@@ -226,20 +228,33 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         subject = item["科目名称"]
         amounts = item["金額データ"]
         subject_code = item["科目コード"]
+        contract_type = item["請負形態名称"]
 
         if segment not in aggregated:
             continue
 
-        # 当月金額（target_month - 1はインデックスなので）
-        month_amount = amounts[target_month - 1] if target_month - 1 < len(amounts) else 0
+        # 月のインデックス計算（4月が基準月、列13がamounts[0]）
+        # target_month=4 → amounts[0]、target_month=9 → amounts[5]
+        month_index = target_month - 4
+        month_amount = amounts[month_index] if 0 <= month_index < len(amounts) else 0
 
-        # 累計金額（1月からtarget_monthまで）
-        cumulative_amount = sum(amounts[:target_month])
+        # 累計金額（4月からtarget_monthまで）
+        cumulative_amount = sum(amounts[:month_index + 1]) if month_index >= 0 else 0
 
         # 間接原価の場合は労務に合算
         if subject_code == "間接原価":
             aggregated[segment]["労務"] += month_amount
             aggregated[segment]["労務合算"] += cumulative_amount
+            continue
+
+        # 自動車売上の場合は請負形態名称で判別
+        if subject == "自動車売上":
+            if contract_type == "基本請負料":
+                aggregated[segment]["基本売上"] += month_amount
+                aggregated[segment]["基本売上合算"] += cumulative_amount
+            elif contract_type == "その他請負料":
+                aggregated[segment]["その他売上"] += month_amount
+                aggregated[segment]["その他売上合算"] += cumulative_amount
             continue
 
         # 経費対照表から原価科目を取得
@@ -249,15 +264,9 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             unknown_subjects.add(subject)
             continue
 
-        # 自動車売上は特殊（基本売上とその他売上の両方）
-        if isinstance(expense_category, list):
-            # 基本売上とその他売上に振り分け（ここでは均等に分割）
-            for cat in expense_category:
-                aggregated[segment][cat] += month_amount / len(expense_category)
-                aggregated[segment][f"{cat}合算"] += cumulative_amount / len(expense_category)
-        else:
-            aggregated[segment][expense_category] += month_amount
-            aggregated[segment][f"{expense_category}合算"] += cumulative_amount
+        # 通常の経費
+        aggregated[segment][expense_category] += month_amount
+        aggregated[segment][f"{expense_category}合算"] += cumulative_amount
 
     # エラーチェック - 経費対照表に見つからない科目
     for subject in unknown_subjects:
