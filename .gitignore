@@ -12,3 +12,13 @@ instance/
 instance/users.db
 app/shared_files/
 shared_files/
+
+# leave_mgrのデータファイル（各環境で独立管理）
+app/static/leave_mgr/calendars/*
+!app/static/leave_mgr/calendars/.gitkeep
+app/static/leave_mgr/permissions.json
+app/static/leave_mgr/calendar_meta.json
+
+# monthly_generatorの一時ファイル
+app/static/monthly_generator/uploads/*
+!app/static/monthly_generator/uploads/.gitkeep
