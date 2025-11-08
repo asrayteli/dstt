@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify, send_file, current_app
+from flask import Blueprint, render_template, request, jsonify, send_file, current_app, after_this_request
 from flask_login import login_required, current_user
 import os
 import csv
@@ -111,10 +111,11 @@ def process_files():
         if result.get("error"):
             return jsonify(result), 400
 
-        # 一時ファイル削除
+        # 一時ファイル削除（入力ファイル全て）
         try:
             os.remove(subject_path)
             os.remove(site_path)
+            os.remove(report_path)  # 入力Excelファイルも削除
         except:
             pass
 
@@ -347,6 +348,15 @@ def download_file(filename):
 
         if not os.path.exists(file_path):
             return jsonify({"error": "ファイルが見つかりません"}), 404
+
+        # ダウンロード後にファイルを削除する処理を登録
+        @after_this_request
+        def remove_file(response):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"一時ファイル削除エラー: {e}")
+            return response
 
         return send_file(
             file_path,
