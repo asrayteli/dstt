@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify, send_file, current_app, after_this_request
+from flask import Blueprint, render_template, request, jsonify, send_file, current_app
 from flask_login import login_required, current_user
 import os
 import csv
@@ -349,17 +349,20 @@ def download_file(filename):
         if not os.path.exists(file_path):
             return jsonify({"error": "ファイルが見つかりません"}), 404
 
-        # ダウンロード後にファイルを削除する処理を登録
-        @after_this_request
-        def remove_file(response):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                print(f"一時ファイル削除エラー: {e}")
-            return response
+        # ファイルをメモリに読み込む
+        with open(file_path, 'rb') as f:
+            file_data = io.BytesIO(f.read())
 
+        # ファイルを削除（メモリに読み込んだ後なので削除可能）
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            print(f"一時ファイル削除エラー: {e}")
+
+        # メモリ上のデータを送信
+        file_data.seek(0)
         return send_file(
-            file_path,
+            file_data,
             as_attachment=True,
             download_name="月次報告書_出力.xlsx",
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
