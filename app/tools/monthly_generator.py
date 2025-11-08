@@ -111,10 +111,11 @@ def process_files():
         if result.get("error"):
             return jsonify(result), 400
 
-        # 一時ファイル削除
+        # 一時ファイル削除（入力ファイル全て）
         try:
             os.remove(subject_path)
             os.remove(site_path)
+            os.remove(report_path)  # 入力Excelファイルも削除
         except:
             pass
 
@@ -348,8 +349,20 @@ def download_file(filename):
         if not os.path.exists(file_path):
             return jsonify({"error": "ファイルが見つかりません"}), 404
 
+        # ファイルをメモリに読み込む
+        with open(file_path, 'rb') as f:
+            file_data = io.BytesIO(f.read())
+
+        # ファイルを削除（メモリに読み込んだ後なので削除可能）
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            print(f"一時ファイル削除エラー: {e}")
+
+        # メモリ上のデータを送信
+        file_data.seek(0)
         return send_file(
-            file_path,
+            file_data,
             as_attachment=True,
             download_name="月次報告書_出力.xlsx",
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
