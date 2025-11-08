@@ -12,3 +12,11 @@ instance/
 instance/users.db
 app/shared_files/
 shared_files/
+
+app/static/leave_mgr/calendars/*
+!app/static/leave_mgr/calendars/.gitkeep
+app/static/leave_mgr/permissions.json
+app/static/leave_mgr/calendar_meta.json
+
+app/static/monthly_generator/uploads/*
+!app/static/monthly_generator/uploads/.gitkeep
