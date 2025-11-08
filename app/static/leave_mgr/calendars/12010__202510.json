@@ -545,6 +545,18 @@
       "created_at": "2025-10-22T00:18:43.853009",
       "confirmed_by": null,
       "confirmed_at": null
+    },
+    {
+      "id": "2025-11-08T11:06:33.724639",
+      "date": "2025-10-05",
+      "name": "テスト有給",
+      "leave_type": "有休",
+      "deputies": [],
+      "remarks": "",
+      "created_by": "3243012",
+      "created_at": "2025-11-08T11:06:33.724648",
+      "confirmed_by": null,
+      "confirmed_at": null
     }
   ]
 }
