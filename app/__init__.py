@@ -78,10 +78,3 @@ def create_app():
     app.register_blueprint(monthly_generator_bp)
 
     return app
-
-
-
-
-
-
-
