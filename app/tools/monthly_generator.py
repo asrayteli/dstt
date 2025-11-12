@@ -147,8 +147,7 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
 
     # ステップ2: 現場表の解析（ヘッダー行をスキップ）
     # 新フォーマット: 契約コード,セグメント
-    site_dict = {}  # 契約コードをキーとした辞書
-    duplicate_contracts = []
+    site_dict = {}  # 契約コードをキーとした辞書（8桁完全一致）
 
     for i, row in enumerate(site_data):
         if i == 0:  # ヘッダー行をスキップ
@@ -161,11 +160,8 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             if not contract_code:
                 continue
 
-            # 重複チェック
-            if contract_code in site_dict:
-                duplicate_contracts.append(contract_code)
-            else:
-                site_dict[contract_code] = segment
+            # 8桁完全一致で辞書に登録（重複時は上書き）
+            site_dict[contract_code] = segment
 
     # ステップ3: 科目別推移表から対象現場のデータを抽出（ヘッダー行をスキップ）
     extracted_data = []
@@ -229,10 +225,6 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                 missing_contracts.add(f"{contract_code} ({corp_name} - {site_name})")
 
     # ステップ4: エラーチェック
-    # 重複する契約コードがある場合は警告
-    if duplicate_contracts:
-        errors.append(f"現場表に重複する契約コードがあります: {', '.join(set(duplicate_contracts))}")
-
     # 現場表にあるが科目別推移表に見つからない契約コード
     for contract_code in site_dict.keys():
         if contract_code not in found_contracts:
