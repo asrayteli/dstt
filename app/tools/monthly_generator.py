@@ -146,20 +146,31 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         return {"error": f"CSVファイルの読み込みエラー: {str(e)}"}
 
     # ステップ2: 現場表の解析（ヘッダー行をスキップ）
-    site_list = []
+    # 新フォーマット: 契約コード,セグメント
+    site_dict = {}  # 契約コードをキーとした辞書
+    duplicate_contracts = []
+
     for i, row in enumerate(site_data):
         if i == 0:  # ヘッダー行をスキップ
             continue
-        if len(row) >= 3:
-            site_list.append({
-                "法人名称": row[0].strip(),
-                "現場名称": row[1].strip(),
-                "セグメント": row[2].strip()
-            })
+        if len(row) >= 2:
+            contract_code = row[0].strip()
+            segment = row[1].strip()
+
+            # 契約コードが空の場合はスキップ
+            if not contract_code:
+                continue
+
+            # 重複チェック
+            if contract_code in site_dict:
+                duplicate_contracts.append(contract_code)
+            else:
+                site_dict[contract_code] = segment
 
     # ステップ3: 科目別推移表から対象現場のデータを抽出（ヘッダー行をスキップ）
     extracted_data = []
-    found_sites = set()
+    found_contracts = set()
+    missing_contracts = set()  # 現場表に存在しない契約コード
 
     for i, row in enumerate(subject_data):
         if i == 0:  # ヘッダー行をスキップ
@@ -167,6 +178,7 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         if len(row) < 13:
             continue
 
+        contract_code = row[8].strip() if len(row) > 8 else ""  # 契約コード
         corp_name = row[9].strip() if len(row) > 9 else ""
         site_name = row[10].strip() if len(row) > 10 else ""
         subject_code = row[11].strip() if len(row) > 11 else ""
@@ -181,15 +193,17 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         if not subject_name and subject_code != "間接原価":
             continue
 
-        # 現場表と照合
-        matching_site = None
-        for site in site_list:
-            if site["法人名称"] == corp_name and site["現場名称"] == site_name:
-                matching_site = site
-                found_sites.add(f"{corp_name}|{site_name}")
-                break
+        # 契約コードが空の場合はスキップ
+        if not contract_code:
+            continue
 
-        if matching_site:
+        # 現場表と照合（契約コードベース）
+        segment = site_dict.get(contract_code)
+
+        if segment:
+            # 契約コードが見つかった
+            found_contracts.add(contract_code)
+
             # 金額データ抽出（列13以降が各月のデータ、4月から開始）
             amounts = []
             for i in range(13, len(row)):
@@ -200,20 +214,29 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                     amounts.append(0)
 
             extracted_data.append({
+                "契約コード": contract_code,
                 "法人名称": corp_name,
                 "現場名称": site_name,
-                "セグメント": matching_site["セグメント"],
+                "セグメント": segment,
                 "科目名称": subject_name,
                 "科目コード": subject_code,
-                "請負形態名称": contract_type,  # 追加
+                "請負形態名称": contract_type,
                 "金額データ": amounts
             })
+        else:
+            # 現場表に存在しない契約コード（情報として記録するが、エラーにはしない）
+            if contract_code:
+                missing_contracts.add(f"{contract_code} ({corp_name} - {site_name})")
 
-    # ステップ4: エラーチェック - 現場表にあるが科目別推移表に見つからない現場
-    for site in site_list:
-        site_key = f"{site['法人名称']}|{site['現場名称']}"
-        if site_key not in found_sites:
-            errors.append(f"現場が科目別推移表に見つかりません: {site['法人名称']} - {site['現場名称']}")
+    # ステップ4: エラーチェック
+    # 重複する契約コードがある場合は警告
+    if duplicate_contracts:
+        errors.append(f"現場表に重複する契約コードがあります: {', '.join(set(duplicate_contracts))}")
+
+    # 現場表にあるが科目別推移表に見つからない契約コード
+    for contract_code in site_dict.keys():
+        if contract_code not in found_contracts:
+            errors.append(f"契約コードが科目別推移表に見つかりません: {contract_code}")
 
     # ステップ5: 経費ジャンル分けと合算
     aggregated = {
@@ -312,8 +335,9 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             "data": aggregated,
             "debug": {
                 "extracted_count": len(extracted_data),
-                "found_sites_count": len(found_sites),
-                "site_list_count": len(site_list)
+                "found_contracts_count": len(found_contracts),
+                "site_dict_count": len(site_dict),
+                "missing_contracts": list(missing_contracts) if missing_contracts else []
             }
         }
 
