@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ファイル処理のメイン関数
 async function processFiles() {
-    // バリデーション
+    // 必須項目バリデーション
     const subjectFile = document.getElementById('subject-file').files[0];
     const siteFile = document.getElementById('site-file').files[0];
     const reportFile = document.getElementById('report-file').files[0];
@@ -21,9 +21,14 @@ async function processFiles() {
     const sheetName = document.getElementById('sheet-name').value;
 
     if (!subjectFile || !siteFile || !reportFile || !targetMonth || !sheetName) {
-        alert('全ての項目を入力してください');
+        alert('必須項目を全て入力してください');
         return;
     }
+
+    // オプションファイル取得
+    const prevYearSubjectFile = document.getElementById('prev-year-subject-file').files[0];
+    const prevYearSiteFile = document.getElementById('prev-year-site-file').files[0];
+    const forecastFile = document.getElementById('forecast-file').files[0];
 
     // フォームを非表示、進捗を表示
     document.getElementById('upload-form').style.display = 'none';
@@ -40,6 +45,17 @@ async function processFiles() {
     formData.append('report_file', reportFile);
     formData.append('target_month', targetMonth);
     formData.append('sheet_name', sheetName);
+
+    // オプションファイル追加
+    if (prevYearSubjectFile) {
+        formData.append('prev_year_subject_file', prevYearSubjectFile);
+    }
+    if (prevYearSiteFile) {
+        formData.append('prev_year_site_file', prevYearSiteFile);
+    }
+    if (forecastFile) {
+        formData.append('forecast_file', forecastFile);
+    }
 
     try {
         // APIリクエスト

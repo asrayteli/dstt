@@ -54,11 +54,41 @@ EXPENSE_MAPPING = {
 
 # セル位置マッピング
 CELL_MAPPING = {
+    # 当期（単月）
     "材料": {"役員": "F9", "一般": "F17", "旅客": "F25", "役員合算": "N9", "一般合算": "N17", "旅客合算": "N25"},
     "労務": {"役員": "F10", "一般": "F18", "旅客": "F26", "役員合算": "N10", "一般合算": "N18", "旅客合算": "N26"},
     "経費": {"役員": "F11", "一般": "F19", "旅客": "F27", "役員合算": "N11", "一般合算": "N19", "旅客合算": "N27"},
     "基本売上": {"役員": "F6", "一般": "F14", "旅客": "F22", "役員合算": "N6", "一般合算": "N14", "旅客合算": "N22"},
     "その他売上": {"役員": "F7", "一般": "F15", "旅客": "F23", "役員合算": "N7", "一般合算": "N15", "旅客合算": "N23"},
+}
+
+# 前期セル位置マッピング
+PREV_YEAR_CELL_MAPPING = {
+    # 前期（単月）
+    "材料": {"役員": "C9", "一般": "C17", "旅客": "C25", "役員合算": "L9", "一般合算": "L17", "旅客合算": "L25"},
+    "労務": {"役員": "C10", "一般": "C18", "旅客": "C26", "役員合算": "L10", "一般合算": "L18", "旅客合算": "L26"},
+    "経費": {"役員": "C11", "一般": "C19", "旅客": "C27", "役員合算": "L11", "一般合算": "L19", "旅客合算": "L27"},
+    "基本売上": {"役員": "C6", "一般": "C14", "旅客": "C22", "役員合算": "L6", "一般合算": "L14", "旅客合算": "L22"},
+    "その他売上": {"役員": "C7", "一般": "C15", "旅客": "C23", "役員合算": "L7", "一般合算": "L15", "旅客合算": "L23"},
+}
+
+# 見込セル位置マッピング（読み取り元）
+FORECAST_SOURCE_MAPPING = {
+    # 行番号のみ（列は対象月で決定: 4月=F, 5月=G, ..., 3月=Q）
+    "基本売上": {"役員": 4, "一般": 15, "旅客": 26},
+    "その他売上": {"役員": 5, "一般": 16, "旅客": 27},
+    "材料": {"役員": 7, "一般": 18, "旅客": 29},
+    "労務": {"役員": 8, "一般": 19, "旅客": 30},
+    "経費": {"役員": 9, "一般": 20, "旅客": 31},
+}
+
+# 見込セル位置マッピング（書き込み先）
+FORECAST_TARGET_MAPPING = {
+    "基本売上": {"役員": "E6", "一般": "E14", "旅客": "E22"},
+    "その他売上": {"役員": "E7", "一般": "E15", "旅客": "E23"},
+    "材料": {"役員": "E9", "一般": "E17", "旅客": "E25"},
+    "労務": {"役員": "E10", "一般": "E18", "旅客": "E26"},
+    "経費": {"役員": "E11", "一般": "E19", "旅客": "E27"},
 }
 
 def get_upload_folder():
@@ -80,10 +110,15 @@ def index():
 def process_files():
     """ファイル処理のメインエンドポイント"""
     try:
-        # ファイル取得
+        # 必須ファイル取得
         subject_file = request.files.get('subject_file')  # 科目別推移表
         site_file = request.files.get('site_file')  # 現場表
         report_file = request.files.get('report_file')  # 月次報告書
+
+        # オプションファイル取得
+        prev_year_subject_file = request.files.get('prev_year_subject_file')  # 前年科目別推移表
+        prev_year_site_file = request.files.get('prev_year_site_file')  # 前年現場表
+        forecast_file = request.files.get('forecast_file')  # 見込ファイル
 
         # パラメータ取得
         target_month = int(request.form.get('target_month'))  # 対象月（1-12）
@@ -105,8 +140,28 @@ def process_files():
         site_file.save(site_path)
         report_file.save(report_path)
 
+        # オプションファイル保存
+        prev_year_subject_path = None
+        prev_year_site_path = None
+        forecast_path = None
+
+        if prev_year_subject_file and prev_year_subject_file.filename:
+            prev_year_subject_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_prev_subject.csv")
+            prev_year_subject_file.save(prev_year_subject_path)
+
+        if prev_year_site_file and prev_year_site_file.filename:
+            prev_year_site_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_prev_site.csv")
+            prev_year_site_file.save(prev_year_site_path)
+
+        if forecast_file and forecast_file.filename:
+            forecast_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_forecast.xlsx")
+            forecast_file.save(forecast_path)
+
         # 処理実行
-        result = process_monthly_data(subject_path, site_path, report_path, target_month, sheet_name)
+        result = process_monthly_data(
+            subject_path, site_path, report_path, target_month, sheet_name,
+            prev_year_subject_path, prev_year_site_path, forecast_path
+        )
 
         if result.get("error"):
             return jsonify(result), 400
@@ -115,7 +170,13 @@ def process_files():
         try:
             os.remove(subject_path)
             os.remove(site_path)
-            os.remove(report_path)  # 入力Excelファイルも削除
+            os.remove(report_path)
+            if prev_year_subject_path:
+                os.remove(prev_year_subject_path)
+            if prev_year_site_path:
+                os.remove(prev_year_site_path)
+            if forecast_path:
+                os.remove(forecast_path)
         except:
             pass
 
@@ -126,7 +187,8 @@ def process_files():
         return jsonify({"error": f"処理中にエラーが発生しました: {str(e)}"}), 500
 
 
-def process_monthly_data(subject_path, site_path, report_path, target_month, sheet_name):
+def process_monthly_data(subject_path, site_path, report_path, target_month, sheet_name,
+                         prev_year_subject_path=None, prev_year_site_path=None, forecast_path=None):
     """月次データ処理のメインロジック"""
     errors = []
 
@@ -141,6 +203,17 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         site_data = read_csv_with_encoding(site_path)
         if not site_data:
             return {"error": "現場表の読み込みに失敗しました"}
+
+        # 前年データ読み込み（オプション）
+        prev_year_subject_data = None
+        prev_year_site_data = None
+        if prev_year_subject_path and prev_year_site_path:
+            prev_year_subject_data = read_csv_with_encoding(prev_year_subject_path)
+            prev_year_site_data = read_csv_with_encoding(prev_year_site_path)
+            if not prev_year_subject_data or not prev_year_site_data:
+                errors.append("前年データの読み込みに失敗しました（スキップします）")
+                prev_year_subject_data = None
+                prev_year_site_data = None
 
     except Exception as e:
         return {"error": f"CSVファイルの読み込みエラー: {str(e)}"}
@@ -288,10 +361,27 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
     for subject in unknown_subjects:
         errors.append(f"科目が経費対照表に見つかりません: {subject}")
 
+    # ステップ6: 前年データ処理（オプション）
+    prev_year_aggregated = None
+    if prev_year_subject_data and prev_year_site_data:
+        try:
+            prev_year_aggregated = process_prev_year_data(
+                prev_year_subject_data, prev_year_site_data, target_month
+            )
+        except Exception as e:
+            errors.append(f"前年データ処理エラー: {str(e)}")
+
+    # ステップ7: 見込データ抽出（オプション）
+    forecast_data = None
+    if forecast_path:
+        forecast_data = extract_forecast_data(forecast_path, target_month, sheet_name)
+        if forecast_data is None:
+            errors.append("見込ファイルの読み込みに失敗しました（スキップします）")
+
     if errors:
         return {"error": "データ検証エラー", "details": errors}
 
-    # ステップ6: Excelファイルへの書き込み
+    # ステップ8: Excelファイルへの書き込み
     try:
         wb = load_workbook(report_path)
 
@@ -300,7 +390,7 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
 
         ws = wb[sheet_name]
 
-        # セルに値を書き込み
+        # 当期データ書き込み
         for expense_type, cells in CELL_MAPPING.items():
             for segment in ["役員", "一般", "旅客"]:
                 # 当月データ
@@ -312,6 +402,28 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                 cell_addr_cumulative = cells[f"{segment}合算"]
                 value_cumulative = aggregated[segment][f"{expense_type}合算"]
                 ws[cell_addr_cumulative] = value_cumulative
+
+        # 前年データ書き込み
+        if prev_year_aggregated:
+            for expense_type, cells in PREV_YEAR_CELL_MAPPING.items():
+                for segment in ["役員", "一般", "旅客"]:
+                    # 前期単月データ
+                    cell_addr = cells[segment]
+                    value = prev_year_aggregated[segment][expense_type]
+                    ws[cell_addr] = value
+
+                    # 前期累計データ
+                    cell_addr_cumulative = cells[f"{segment}合算"]
+                    value_cumulative = prev_year_aggregated[segment][f"{expense_type}合算"]
+                    ws[cell_addr_cumulative] = value_cumulative
+
+        # 見込データ書き込み
+        if forecast_data:
+            for expense_type, cells in FORECAST_TARGET_MAPPING.items():
+                for segment in ["役員", "一般", "旅客"]:
+                    cell_addr = cells[segment]
+                    value = forecast_data[segment].get(expense_type, 0)
+                    ws[cell_addr] = value
 
         # 保存
         output_path = report_path.replace('.xlsx', '_output.xlsx')
@@ -352,6 +464,170 @@ def read_csv_with_encoding(file_path):
             continue
 
     return None
+
+
+def extract_forecast_data(forecast_path, target_month, sheet_name):
+    """見込ファイルからデータを抽出する
+
+    Args:
+        forecast_path: 見込ファイルのパス
+        target_month: 対象月（1-12）
+        sheet_name: シート名
+
+    Returns:
+        dict: セグメントごとの見込データ
+    """
+    try:
+        wb = load_workbook(forecast_path, data_only=True)
+
+        if sheet_name not in wb.sheetnames:
+            return None
+
+        ws = wb[sheet_name]
+
+        # 対象月から列を決定（4月=F=6列目, 5月=G=7列目, ..., 3月=Q=17列目）
+        # 4月=4, 5月=5, ..., 12月=12, 1月=1, 2月=2, 3月=3
+        if target_month >= 4:
+            col_index = target_month - 4 + 6  # 4月→6, 5月→7, ..., 12月→14
+        else:
+            col_index = target_month + 8 + 6  # 1月→15, 2月→16, 3月→17
+
+        # 列文字を取得
+        col_letter = chr(ord('A') + col_index - 1)
+
+        forecast_data = {
+            "役員": {},
+            "一般": {},
+            "旅客": {}
+        }
+
+        # 各項目のデータを抽出
+        for expense_type, rows in FORECAST_SOURCE_MAPPING.items():
+            for segment, row_num in rows.items():
+                cell_addr = f"{col_letter}{row_num}"
+                value = ws[cell_addr].value
+
+                # 空白の場合は0
+                if value is None or value == "":
+                    value = 0
+                else:
+                    try:
+                        value = float(value)
+                    except:
+                        value = 0
+
+                forecast_data[segment][expense_type] = value
+
+        wb.close()
+        return forecast_data
+
+    except Exception as e:
+        traceback.print_exc()
+        return None
+
+
+def process_prev_year_data(subject_data, site_data, target_month):
+    """前年データを処理する（現在のデータ処理と同じロジック）
+
+    Args:
+        subject_data: 前年科目別推移表データ
+        site_data: 前年現場表データ
+        target_month: 対象月（1-12）
+
+    Returns:
+        dict: セグメントごとの集計データ
+    """
+    # 現場表の解析
+    site_dict = {}
+    for i, row in enumerate(site_data):
+        if i == 0:
+            continue
+        if len(row) >= 2:
+            contract_code = row[0].strip()
+            segment = row[1].strip()
+            if not contract_code:
+                continue
+            site_dict[contract_code] = segment
+
+    # データ抽出
+    extracted_data = []
+    for i, row in enumerate(subject_data):
+        if i == 0:
+            continue
+        if len(row) < 13:
+            continue
+
+        contract_code = row[8].strip() if len(row) > 8 else ""
+        subject_code = row[11].strip() if len(row) > 11 else ""
+        subject_name = row[12].strip() if len(row) > 12 else ""
+        contract_type = row[5].strip() if len(row) > 5 else ""
+
+        if subject_code == "販売費":
+            continue
+        if not subject_name and subject_code != "間接原価":
+            continue
+        if not contract_code:
+            continue
+
+        segment = site_dict.get(contract_code)
+        if segment:
+            amounts = []
+            for j in range(13, len(row)):
+                try:
+                    amount = float(row[j]) if row[j] else 0
+                    amounts.append(amount)
+                except:
+                    amounts.append(0)
+
+            extracted_data.append({
+                "セグメント": segment,
+                "科目名称": subject_name,
+                "科目コード": subject_code,
+                "請負形態名称": contract_type,
+                "金額データ": amounts
+            })
+
+    # 集計
+    aggregated = {
+        "役員": {"材料": 0, "労務": 0, "経費": 0, "基本売上": 0, "その他売上": 0, "材料合算": 0, "労務合算": 0, "経費合算": 0, "基本売上合算": 0, "その他売上合算": 0},
+        "一般": {"材料": 0, "労務": 0, "経費": 0, "基本売上": 0, "その他売上": 0, "材料合算": 0, "労務合算": 0, "経費合算": 0, "基本売上合算": 0, "その他売上合算": 0},
+        "旅客": {"材料": 0, "労務": 0, "経費": 0, "基本売上": 0, "その他売上": 0, "材料合算": 0, "労務合算": 0, "経費合算": 0, "基本売上合算": 0, "その他売上合算": 0},
+    }
+
+    for item in extracted_data:
+        segment = item["セグメント"]
+        subject = item["科目名称"]
+        amounts = item["金額データ"]
+        subject_code = item["科目コード"]
+        contract_type = item["請負形態名称"]
+
+        if segment not in aggregated:
+            continue
+
+        month_index = target_month - 4
+        month_amount = amounts[month_index] if 0 <= month_index < len(amounts) else 0
+        cumulative_amount = sum(amounts[:month_index + 1]) if month_index >= 0 else 0
+
+        if subject_code == "間接原価":
+            aggregated[segment]["労務"] += month_amount
+            aggregated[segment]["労務合算"] += cumulative_amount
+            continue
+
+        if subject == "自動車売上":
+            if contract_type == "基本請負料":
+                aggregated[segment]["基本売上"] += month_amount
+                aggregated[segment]["基本売上合算"] += cumulative_amount
+            elif contract_type == "その他請負料":
+                aggregated[segment]["その他売上"] += month_amount
+                aggregated[segment]["その他売上合算"] += cumulative_amount
+            continue
+
+        expense_category = EXPENSE_MAPPING.get(subject)
+        if expense_category:
+            aggregated[segment][expense_category] += month_amount
+            aggregated[segment][f"{expense_category}合算"] += cumulative_amount
+
+    return aggregated
 
 
 @monthly_generator_bp.route("/api/download/<filename>")
