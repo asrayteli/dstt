@@ -438,6 +438,8 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             "success": True,
             "output_file": output_filename,
             "data": aggregated,
+            "prev_year_data": prev_year_aggregated,  # 前期データ追加
+            "forecast_data": forecast_data,  # 見込データ追加
             "debug": {
                 "extracted_count": len(extracted_data),
                 "found_contracts_count": len(found_contracts),

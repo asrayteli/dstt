@@ -211,6 +211,103 @@ function showSuccess(result) {
         html += '</div>';
     }
 
+    // 前期データ表示
+    if (result.prev_year_data) {
+        html += '<div class="mt-4 p-3 bg-blue-50 rounded border border-blue-200">';
+        html += '<h4 class="font-semibold mb-2 text-blue-800">前期データ（単月）</h4>';
+        html += '<table class="min-w-full text-sm">';
+        html += '<thead><tr class="border-b">';
+        html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">材料</th>';
+        html += '<th class="text-right py-2 px-2">労務</th>';
+        html += '<th class="text-right py-2 px-2">経費</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const [segment, values] of Object.entries(result.prev_year_data)) {
+            html += '<tr class="border-b">';
+            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        html += '</div>';
+
+        // 前期累計データ
+        html += '<div class="mt-4 p-3 bg-blue-50 rounded border border-blue-200">';
+        html += '<h4 class="font-semibold mb-2 text-blue-800">前期データ（累計）</h4>';
+        html += '<table class="min-w-full text-sm">';
+        html += '<thead><tr class="border-b">';
+        html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">材料</th>';
+        html += '<th class="text-right py-2 px-2">労務</th>';
+        html += '<th class="text-right py-2 px-2">経費</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const [segment, values] of Object.entries(result.prev_year_data)) {
+            html += '<tr class="border-b">';
+            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料合算'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務合算'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費合算'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上合算'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上合算'])}</td>`;
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        html += '</div>';
+    }
+
+    // 見込データ表示
+    if (result.forecast_data) {
+        html += '<div class="mt-4 p-3 bg-purple-50 rounded border border-purple-200">';
+        html += '<h4 class="font-semibold mb-2 text-purple-800">見込データ</h4>';
+        html += '<table class="min-w-full text-sm">';
+        html += '<thead><tr class="border-b">';
+        html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">材料</th>';
+        html += '<th class="text-right py-2 px-2">労務</th>';
+        html += '<th class="text-right py-2 px-2">経費</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const [segment, values] of Object.entries(result.forecast_data)) {
+            html += '<tr class="border-b">';
+            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        html += '</div>';
+    }
+
+    // 警告表示
+    if (result.warnings && result.warnings.length > 0) {
+        html += '<div class="mt-4 p-3 bg-yellow-50 rounded border border-yellow-200">';
+        html += '<h4 class="font-semibold mb-2 text-yellow-800">⚠ 警告</h4>';
+        html += '<ul class="text-sm text-yellow-800 list-disc list-inside">';
+        for (const warning of result.warnings) {
+            html += `<li>${warning}</li>`;
+        }
+        html += '</ul>';
+        html += '</div>';
+    }
+
     // デバッグ情報表示
     if (result.debug) {
         html += '<div class="mt-4 p-3 bg-yellow-50 rounded border border-yellow-200">';
