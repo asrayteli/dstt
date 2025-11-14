@@ -9,7 +9,8 @@
     <div class="mb-6 p-4 bg-blue-50 rounded-lg">
         <h3 class="font-semibold mb-2 text-blue-800">使い方</h3>
         <ol class="list-decimal list-inside space-y-1 text-sm text-gray-700">
-            <li>科目別推移表（CSV）、現場表（CSV）、月次報告書（Excel）をアップロード</li>
+            <li>必須：科目別推移表（CSV）、現場表（CSV）、月次報告書（Excel）をアップロード</li>
+            <li>オプション：前年科目別推移表（CSV）、前年現場表（CSV）、見込ファイル（Excel）をアップロード</li>
             <li>対象月（1-12月）と出力先シート名を入力</li>
             <li>「処理開始」ボタンをクリック</li>
             <li>処理完了後、自動でダウンロードが開始されます</li>
@@ -34,6 +35,29 @@
             <label class="form-label">月次報告書（Excel） *</label>
             <input type="file" id="report-file" accept=".xlsx,.xls" class="form-input" required>
             <p class="text-xs text-gray-500 mt-1">データを出力するExcelファイル</p>
+        </div>
+
+        <!-- オプションファイル -->
+        <div class="mt-4 p-4 bg-gray-50 rounded-lg">
+            <h3 class="font-semibold mb-3 text-gray-700">オプションファイル（任意）</h3>
+
+            <div class="form-group">
+                <label class="form-label">前年科目別推移表（CSV）</label>
+                <input type="file" id="prev-year-subject-file" accept=".csv" class="form-input">
+                <p class="text-xs text-gray-500 mt-1">前年度の科目別推移表</p>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">前年現場表（CSV）</label>
+                <input type="file" id="prev-year-site-file" accept=".csv" class="form-input">
+                <p class="text-xs text-gray-500 mt-1">前年度の現場表（契約コード、セグメント）</p>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">見込ファイル（Excel）</label>
+                <input type="file" id="forecast-file" accept=".xlsx,.xls" class="form-input">
+                <p class="text-xs text-gray-500 mt-1">見込データを含むExcelファイル</p>
+            </div>
         </div>
 
         <div class="grid grid-cols-2 gap-4">
