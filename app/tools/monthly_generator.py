@@ -191,6 +191,7 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                          prev_year_subject_path=None, prev_year_site_path=None, forecast_path=None):
     """月次データ処理のメインロジック"""
     errors = []
+    warnings = []  # オプションデータの警告用
 
     # ステップ1: CSVファイル読み込み
     try:
@@ -211,7 +212,7 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             prev_year_subject_data = read_csv_with_encoding(prev_year_subject_path)
             prev_year_site_data = read_csv_with_encoding(prev_year_site_path)
             if not prev_year_subject_data or not prev_year_site_data:
-                errors.append("前年データの読み込みに失敗しました（スキップします）")
+                warnings.append("前年データの読み込みに失敗しました（スキップします）")
                 prev_year_subject_data = None
                 prev_year_site_data = None
 
@@ -369,14 +370,14 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                 prev_year_subject_data, prev_year_site_data, target_month
             )
         except Exception as e:
-            errors.append(f"前年データ処理エラー: {str(e)}")
+            warnings.append(f"前年データ処理エラー: {str(e)}")
 
     # ステップ7: 見込データ抽出（オプション）
     forecast_data = None
     if forecast_path:
         forecast_data = extract_forecast_data(forecast_path, target_month, sheet_name)
         if forecast_data is None:
-            errors.append("見込ファイルの読み込みに失敗しました（スキップします）")
+            warnings.append("見込ファイルの読み込みに失敗しました（スキップします）")
 
     if errors:
         return {"error": "データ検証エラー", "details": errors}
@@ -433,10 +434,12 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         # ファイル名のみを抽出
         output_filename = os.path.basename(output_path)
 
-        return {
+        result = {
             "success": True,
             "output_file": output_filename,
             "data": aggregated,
+            "prev_year_data": prev_year_aggregated,  # 前期データ追加
+            "forecast_data": forecast_data,  # 見込データ追加
             "debug": {
                 "extracted_count": len(extracted_data),
                 "found_contracts_count": len(found_contracts),
@@ -444,6 +447,12 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                 "missing_contracts": list(missing_contracts) if missing_contracts else []
             }
         }
+
+        # 警告がある場合は結果に含める
+        if warnings:
+            result["warnings"] = warnings
+
+        return result
 
     except Exception as e:
         traceback.print_exc()
