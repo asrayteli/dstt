@@ -166,21 +166,21 @@ function showSuccess(result) {
         html += '<table class="min-w-full text-sm">';
         html += '<thead><tr class="border-b">';
         html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '<th class="text-right py-2 px-2">材料</th>';
         html += '<th class="text-right py-2 px-2">労務</th>';
         html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '</tr></thead><tbody>';
 
         for (const [segment, values] of Object.entries(result.data)) {
             html += '<tr class="border-b">';
             html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
             html += '</tr>';
         }
 
@@ -193,21 +193,21 @@ function showSuccess(result) {
         html += '<table class="min-w-full text-sm">';
         html += '<thead><tr class="border-b">';
         html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '<th class="text-right py-2 px-2">材料</th>';
         html += '<th class="text-right py-2 px-2">労務</th>';
         html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '</tr></thead><tbody>';
 
         for (const [segment, values] of Object.entries(result.data)) {
             html += '<tr class="border-b">';
             html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上合算'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上合算'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['材料合算'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['労務合算'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['経費合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上合算'])}</td>`;
             html += '</tr>';
         }
 
@@ -222,21 +222,21 @@ function showSuccess(result) {
         html += '<table class="min-w-full text-sm">';
         html += '<thead><tr class="border-b">';
         html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '<th class="text-right py-2 px-2">材料</th>';
         html += '<th class="text-right py-2 px-2">労務</th>';
         html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '</tr></thead><tbody>';
 
         for (const [segment, values] of Object.entries(result.prev_year_data)) {
             html += '<tr class="border-b">';
             html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
             html += '</tr>';
         }
 
@@ -249,21 +249,21 @@ function showSuccess(result) {
         html += '<table class="min-w-full text-sm">';
         html += '<thead><tr class="border-b">';
         html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '<th class="text-right py-2 px-2">材料</th>';
         html += '<th class="text-right py-2 px-2">労務</th>';
         html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '</tr></thead><tbody>';
 
         for (const [segment, values] of Object.entries(result.prev_year_data)) {
             html += '<tr class="border-b">';
             html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上合算'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上合算'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['材料合算'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['労務合算'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['経費合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上合算'])}</td>`;
             html += '</tr>';
         }
 
@@ -278,21 +278,21 @@ function showSuccess(result) {
         html += '<table class="min-w-full text-sm">';
         html += '<thead><tr class="border-b">';
         html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '<th class="text-right py-2 px-2">材料</th>';
         html += '<th class="text-right py-2 px-2">労務</th>';
         html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '</tr></thead><tbody>';
 
         for (const [segment, values] of Object.entries(result.forecast_data)) {
             html += '<tr class="border-b">';
             html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
             html += '</tr>';
         }
 
@@ -308,21 +308,21 @@ function showSuccess(result) {
         html += '<table class="min-w-full text-sm">';
         html += '<thead><tr class="border-b">';
         html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '<th class="text-right py-2 px-2">材料</th>';
         html += '<th class="text-right py-2 px-2">労務</th>';
         html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '</tr></thead><tbody>';
 
         for (const [segment, values] of Object.entries(result.budget_data['単月'])) {
             html += '<tr class="border-b">';
             html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
             html += '</tr>';
         }
 
@@ -335,21 +335,21 @@ function showSuccess(result) {
         html += '<table class="min-w-full text-sm">';
         html += '<thead><tr class="border-b">';
         html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '<th class="text-right py-2 px-2">材料</th>';
         html += '<th class="text-right py-2 px-2">労務</th>';
         html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
         html += '</tr></thead><tbody>';
 
         for (const [segment, values] of Object.entries(result.budget_data['累計'])) {
             html += '<tr class="border-b">';
             html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
             html += '</tr>';
         }
 
