@@ -189,7 +189,7 @@ h1.title {
 /* ファイルヘッダー（現場名）の横並び - 動的幅対応 */
 .file-headers {
     display: flex;
-    gap: 20px;
+    gap: 12px;
     margin-bottom: 20px;
     padding: 15px 20px;
     border-bottom: 3px solid #e2e8f0;
@@ -198,14 +198,14 @@ h1.title {
 }
 
 .file-header {
-    flex: 0 0 280px; /* 固定幅で統一 */
+    flex: 0 0 195px; /* 6ファイル表示対応のため幅を縮小 */
     text-align: center;
     font-weight: 700;
-    font-size: 16px;
+    font-size: 15px;
     color: #1e293b;
     background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
     color: white;
-    padding: 12px 8px;
+    padding: 12px 6px;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
     white-space: nowrap;
@@ -386,7 +386,7 @@ h1.title {
 /* 日付別の行 - 動的幅対応 */
 .date-row {
     display: flex;
-    gap: 20px;
+    gap: 12px;
     margin-bottom: 25px;
     padding: 15px 20px;
     background: #f8fafc;
@@ -397,10 +397,10 @@ h1.title {
 
 /* 各現場の日付セクション */
 .site-section {
-    flex: 0 0 280px; /* file-headerと同じ固定幅 */
+    flex: 0 0 195px; /* file-headerと同じ固定幅 (6ファイル表示対応) */
     background: white;
     border-radius: 6px;
-    padding: 12px;
+    padding: 10px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     border: 1px solid #e2e8f0;
     transition: background-color 0.2s ease;
@@ -516,7 +516,12 @@ h1.title {
 @media (max-width: 1200px) {
     .file-header,
     .site-section {
-        flex: 0 0 250px; /* 中サイズ画面では少し狭く */
+        flex: 0 0 165px; /* 中サイズ画面では少し狭く */
+    }
+
+    .file-headers,
+    .date-row {
+        gap: 10px;
     }
 }
 
@@ -539,27 +544,27 @@ h1.title {
 
     .file-header,
     .site-section {
-        flex: 0 0 200px; /* モバイルでは更に狭く */
-        font-size: 14px;
+        flex: 0 0 145px; /* モバイルでは更に狭く */
+        font-size: 13px;
     }
 
     .file-header {
         margin-bottom: 5px;
-        padding: 10px 6px;
+        padding: 10px 4px;
     }
 
     .site-section {
         margin-bottom: 10px;
-        padding: 10px;
+        padding: 8px;
     }
 
     .date-label {
-        font-size: 14px;
+        font-size: 13px;
     }
 
     .name-item {
-        font-size: 12px;
-        padding: 4px 6px;
+        font-size: 11px;
+        padding: 4px 5px;
     }
 
     .scrollable-container {
@@ -569,7 +574,7 @@ h1.title {
     .file-headers,
     .date-row {
         padding: 10px 15px;
-        gap: 15px;
+        gap: 8px;
     }
 }
 
@@ -577,14 +582,14 @@ h1.title {
 @media (max-width: 480px) {
     .file-header,
     .site-section {
-        flex: 0 0 180px; /* 最小幅 */
-        font-size: 12px;
+        flex: 0 0 130px; /* 最小幅 */
+        font-size: 11px;
     }
 
     .file-headers,
     .date-row {
         padding: 8px 12px;
-        gap: 12px;
+        gap: 6px;
     }
 
     .shift-result-container {
