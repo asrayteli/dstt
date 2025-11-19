@@ -60,6 +60,174 @@ def pdf_power_home():
 # ========================================
 # 1. PDF変換機能
 # ========================================
+
+def convert_from_pdf():
+    """
+    PDF→画像/TXT/DOCXの逆変換
+    """
+    temp_dir = None
+    try:
+        file = request.files.get("pdf_file")
+        if not file or not file.filename:
+            return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
+
+        filename = secure_filename(file.filename)
+        if not filename.endswith('.pdf'):
+            return jsonify({"error": "PDFファイルのみ対応しています"}), 400
+
+        output_format = request.form.get("output_format", "png")
+        if output_format not in ["png", "jpg", "txt", "docx"]:
+            return jsonify({"error": "対応していない出力形式です"}), 400
+
+        temp_dir = tempfile.mkdtemp()
+        input_path = os.path.join(temp_dir, filename)
+        file.save(input_path)
+
+        # ファイルサイズチェック
+        if os.path.getsize(input_path) > MAX_FILE_SIZE:
+            return jsonify({"error": "ファイルサイズが大きすぎます（100MB以下にしてください）"}), 400
+
+        # PDFの有効性確認
+        try:
+            doc = fitz.open(input_path)
+            total_pages = len(doc)
+            if total_pages == 0:
+                return jsonify({"error": "PDFファイルが空です"}), 400
+        except Exception as e:
+            return jsonify({"error": f"PDFファイルが破損しています: {str(e)}"}), 400
+
+        # 出力形式に応じた変換処理
+        if output_format in ["png", "jpg"]:
+            # PDF→画像変換
+            output_files = []
+            for page_num in range(total_pages):
+                page = doc[page_num]
+                # 高解像度でレンダリング（DPI 150）
+                zoom = 2.0  # 150 DPI相当
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat)
+
+                image_ext = output_format
+                image_filename = f"page_{page_num + 1:03d}.{image_ext}"
+                image_path = os.path.join(temp_dir, image_filename)
+
+                if output_format == "png":
+                    pix.save(image_path)
+                else:  # jpg
+                    # PNGで保存してからJPEGに変換
+                    temp_png = image_path + ".png"
+                    pix.save(temp_png)
+                    img = Image.open(temp_png)
+                    img = img.convert("RGB")
+                    img.save(image_path, "JPEG", quality=95)
+                    os.remove(temp_png)
+
+                output_files.append({"path": image_path, "name": image_filename})
+
+            doc.close()
+
+            # 複数ファイルをZIPにまとめる
+            if len(output_files) > 1:
+                zip_path = os.path.join(temp_dir, f"pdf_to_{output_format}.zip")
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for file_info in output_files:
+                        zipf.write(file_info["path"], file_info["name"])
+
+                @after_this_request
+                def cleanup(response):
+                    try:
+                        if temp_dir and os.path.exists(temp_dir):
+                            shutil.rmtree(temp_dir)
+                    except Exception as e:
+                        logger.error(f"一時ディレクトリの削除に失敗: {e}")
+                    return response
+
+                return send_file(zip_path, as_attachment=True, download_name=f"pdf_to_{output_format}.zip")
+            else:
+                # 1ページのみの場合は単一ファイルを返す
+                @after_this_request
+                def cleanup(response):
+                    try:
+                        if temp_dir and os.path.exists(temp_dir):
+                            shutil.rmtree(temp_dir)
+                    except Exception as e:
+                        logger.error(f"一時ディレクトリの削除に失敗: {e}")
+                    return response
+
+                return send_file(output_files[0]["path"], as_attachment=True, download_name=output_files[0]["name"])
+
+        elif output_format == "txt":
+            # PDF→TXT変換
+            all_text = []
+            for page_num in range(total_pages):
+                page = doc[page_num]
+                page_text = page.get_text()
+                all_text.append(f"========== ページ {page_num + 1} ==========\n")
+                all_text.append(page_text)
+                all_text.append("\n\n")
+
+            doc.close()
+
+            txt_path = os.path.join(temp_dir, "converted_output.txt")
+            with open(txt_path, 'w', encoding='utf-8') as f:
+                f.write("".join(all_text))
+
+            @after_this_request
+            def cleanup(response):
+                try:
+                    if temp_dir and os.path.exists(temp_dir):
+                        shutil.rmtree(temp_dir)
+                except Exception as e:
+                    logger.error(f"一時ディレクトリの削除に失敗: {e}")
+                return response
+
+            return send_file(txt_path, as_attachment=True, download_name="converted_output.txt")
+
+        elif output_format == "docx":
+            # PDF→DOCX変換
+            docx_doc = Document()
+
+            for page_num in range(total_pages):
+                page = doc[page_num]
+                page_text = page.get_text()
+
+                # ページ見出しを追加
+                docx_doc.add_heading(f"ページ {page_num + 1}", level=2)
+
+                # テキストを段落として追加
+                paragraphs = page_text.split('\n')
+                for para_text in paragraphs:
+                    if para_text.strip():
+                        docx_doc.add_paragraph(para_text)
+
+                # ページの区切り（最後のページ以外）
+                if page_num < total_pages - 1:
+                    docx_doc.add_page_break()
+
+            doc.close()
+
+            docx_path = os.path.join(temp_dir, "converted_output.docx")
+            docx_doc.save(docx_path)
+
+            @after_this_request
+            def cleanup(response):
+                try:
+                    if temp_dir and os.path.exists(temp_dir):
+                        shutil.rmtree(temp_dir)
+                except Exception as e:
+                    logger.error(f"一時ディレクトリの削除に失敗: {e}")
+                return response
+
+            return send_file(docx_path, as_attachment=True, download_name="converted_output.docx")
+
+    except Exception as e:
+        logger.error(f"PDF変換処理中にエラーが発生しました: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"error": f"変換処理中にエラーが発生しました: {str(e)}"}), 500
+    finally:
+        pass
+
+
 @pdf_power_bp.route("/convert", methods=["POST"])
 @login_required
 def convert_pdf():
@@ -67,6 +235,14 @@ def convert_pdf():
     output_path = None
 
     try:
+        # 変換方向の取得
+        direction = request.form.get("direction", "to_pdf")
+
+        # PDF→ファイル変換の場合
+        if direction == "from_pdf":
+            return convert_from_pdf()
+
+        # ファイル→PDF変換（既存の処理）
         files = request.files.getlist("files")
         if not files or not files[0].filename:
             return jsonify({"error": "ファイルがアップロードされていません"}), 400

@@ -22,17 +22,74 @@
   <!-- 1. PDF変換 -->
   <div id="convert" class="tab-content hidden">
     <div class="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg border-l-4 border-blue-500">
-      <h3 class="font-semibold mb-4 text-xl text-gray-700">🖼 PDF変換</h3>
-      <p class="text-gray-600 mb-4">画像、テキスト、Wordファイルを高品質PDFに変換します。</p>
-      <form action="/tools/pdf_power/convert" method="POST" enctype="multipart/form-data">
+      <h3 class="font-semibold mb-4 text-xl text-gray-700">🖼 PDF変換（双方向）</h3>
+      <p class="text-gray-600 mb-4">ファイル⇄PDFの相互変換が可能です。</p>
+      <form action="/tools/pdf_power/convert" method="POST" enctype="multipart/form-data" id="convertForm">
+
+        <!-- 変換方向の選択 -->
         <div class="mb-4">
-          <label class="block text-sm font-medium text-gray-600 mb-2">ファイル選択 (PNG, JPG, JPEG, BMP, GIF, TXT, DOCX)</label>
-          <input type="file" name="files" multiple required
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <label class="block text-sm font-medium text-gray-600 mb-2">変換方向</label>
+          <div class="flex space-x-6">
+            <label class="flex items-center">
+              <input type="radio" name="direction" value="to_pdf" checked class="mr-2" onchange="toggleConvertDirection()">
+              <span>ファイル → PDF</span>
+            </label>
+            <label class="flex items-center">
+              <input type="radio" name="direction" value="from_pdf" class="mr-2" onchange="toggleConvertDirection()">
+              <span>PDF → ファイル</span>
+            </label>
+          </div>
         </div>
-        <button type="submit" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition duration-200 font-medium">
-          PDFに変換
-        </button>
+
+        <!-- ファイル→PDF（デフォルト表示） -->
+        <div id="toPdfSection">
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-600 mb-2">ファイル選択 (PNG, JPG, JPEG, BMP, GIF, TXT, DOCX)</label>
+            <input type="file" name="files" multiple id="filesToPdf"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          </div>
+          <button type="submit" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition duration-200 font-medium">
+            PDFに変換
+          </button>
+        </div>
+
+        <!-- PDF→ファイル（非表示） -->
+        <div id="fromPdfSection" style="display: none;">
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-600 mb-2">PDFファイル選択</label>
+            <input type="file" name="pdf_file" accept=".pdf" id="pdfFile"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          </div>
+
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-600 mb-2">出力形式</label>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <label class="flex items-center p-3 border border-gray-300 rounded-md hover:border-blue-500 cursor-pointer">
+                <input type="radio" name="output_format" value="png" checked class="mr-2">
+                <span>PNG画像</span>
+              </label>
+              <label class="flex items-center p-3 border border-gray-300 rounded-md hover:border-blue-500 cursor-pointer">
+                <input type="radio" name="output_format" value="jpg" class="mr-2">
+                <span>JPG画像</span>
+              </label>
+              <label class="flex items-center p-3 border border-gray-300 rounded-md hover:border-blue-500 cursor-pointer">
+                <input type="radio" name="output_format" value="txt" class="mr-2">
+                <span>テキスト</span>
+              </label>
+              <label class="flex items-center p-3 border border-gray-300 rounded-md hover:border-blue-500 cursor-pointer">
+                <input type="radio" name="output_format" value="docx" class="mr-2">
+                <span>Word</span>
+              </label>
+            </div>
+            <div class="text-sm text-gray-500 mt-2">
+              ※ 複数ページのPDFは、画像の場合ZIPファイルで返却されます
+            </div>
+          </div>
+
+          <button type="submit" class="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition duration-200 font-medium">
+            ファイルに変換
+          </button>
+        </div>
       </form>
     </div>
   </div>
@@ -485,6 +542,27 @@
     const radio = element.querySelector('input[type="radio"]');
     if (radio) {
       radio.checked = true;
+    }
+  }
+
+  // PDF変換の方向切り替え
+  function toggleConvertDirection() {
+    const direction = document.querySelector('input[name="direction"]:checked').value;
+    const toPdfSection = document.getElementById('toPdfSection');
+    const fromPdfSection = document.getElementById('fromPdfSection');
+    const filesToPdf = document.getElementById('filesToPdf');
+    const pdfFile = document.getElementById('pdfFile');
+
+    if (direction === 'to_pdf') {
+      toPdfSection.style.display = 'block';
+      fromPdfSection.style.display = 'none';
+      filesToPdf.required = true;
+      pdfFile.required = false;
+    } else {
+      toPdfSection.style.display = 'none';
+      fromPdfSection.style.display = 'block';
+      filesToPdf.required = false;
+      pdfFile.required = true;
     }
   }
 
