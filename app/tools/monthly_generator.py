@@ -91,6 +91,26 @@ FORECAST_TARGET_MAPPING = {
     "経費": {"役員": "E11", "一般": "E19", "旅客": "E27"},
 }
 
+# 予算セル位置マッピング（書き込み先）
+BUDGET_TARGET_MAPPING = {
+    # 単月: D列
+    "単月": {
+        "基本売上": {"役員": "D6", "一般": "D14", "旅客": "D22"},
+        "その他売上": {"役員": "D7", "一般": "D15", "旅客": "D23"},
+        "材料": {"役員": "D9", "一般": "D17", "旅客": "D25"},
+        "労務": {"役員": "D10", "一般": "D18", "旅客": "D26"},
+        "経費": {"役員": "D11", "一般": "D19", "旅客": "D27"},
+    },
+    # 累計: M列
+    "累計": {
+        "基本売上": {"役員": "M6", "一般": "M14", "旅客": "M22"},
+        "その他売上": {"役員": "M7", "一般": "M15", "旅客": "M23"},
+        "材料": {"役員": "M9", "一般": "M17", "旅客": "M25"},
+        "労務": {"役員": "M10", "一般": "M18", "旅客": "M26"},
+        "経費": {"役員": "M11", "一般": "M19", "旅客": "M27"},
+    }
+}
+
 def get_upload_folder():
     """一時アップロードフォルダのパスを取得"""
     folder = os.path.join(current_app.root_path, 'static', 'monthly_generator', 'uploads')
@@ -119,6 +139,7 @@ def process_files():
         prev_year_subject_file = request.files.get('prev_year_subject_file')  # 前年科目別推移表
         prev_year_site_file = request.files.get('prev_year_site_file')  # 前年現場表
         forecast_file = request.files.get('forecast_file')  # 見込ファイル
+        budget_file = request.files.get('budget_file')  # 予算ファイル
 
         # パラメータ取得
         target_month = int(request.form.get('target_month'))  # 対象月（1-12）
@@ -144,6 +165,7 @@ def process_files():
         prev_year_subject_path = None
         prev_year_site_path = None
         forecast_path = None
+        budget_path = None
 
         if prev_year_subject_file and prev_year_subject_file.filename:
             prev_year_subject_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_prev_subject.csv")
@@ -157,10 +179,14 @@ def process_files():
             forecast_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_forecast.xlsx")
             forecast_file.save(forecast_path)
 
+        if budget_file and budget_file.filename:
+            budget_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_budget.csv")
+            budget_file.save(budget_path)
+
         # 処理実行
         result = process_monthly_data(
             subject_path, site_path, report_path, target_month, sheet_name,
-            prev_year_subject_path, prev_year_site_path, forecast_path
+            prev_year_subject_path, prev_year_site_path, forecast_path, budget_path
         )
 
         if result.get("error"):
@@ -177,6 +203,8 @@ def process_files():
                 os.remove(prev_year_site_path)
             if forecast_path:
                 os.remove(forecast_path)
+            if budget_path:
+                os.remove(budget_path)
         except:
             pass
 
@@ -188,7 +216,7 @@ def process_files():
 
 
 def process_monthly_data(subject_path, site_path, report_path, target_month, sheet_name,
-                         prev_year_subject_path=None, prev_year_site_path=None, forecast_path=None):
+                         prev_year_subject_path=None, prev_year_site_path=None, forecast_path=None, budget_path=None):
     """月次データ処理のメインロジック"""
     errors = []
     warnings = []  # オプションデータの警告用
@@ -379,6 +407,15 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         if forecast_data is None:
             warnings.append("見込ファイルの読み込みに失敗しました（スキップします）")
 
+    # ステップ8: 予算データ抽出（オプション）
+    budget_data = None
+    if budget_path:
+        budget_result = extract_budget_data(budget_path, target_month)
+        if "error" in budget_result:
+            warnings.append(f"予算ファイル処理エラー: {budget_result['error']}")
+        else:
+            budget_data = budget_result
+
     if errors:
         return {"error": "データ検証エラー", "details": errors}
 
@@ -426,6 +463,22 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                     value = forecast_data[segment].get(expense_type, 0)
                     ws[cell_addr] = value
 
+        # 予算データ書き込み
+        if budget_data:
+            # 単月データ書き込み
+            for expense_type, cells in BUDGET_TARGET_MAPPING["単月"].items():
+                for segment in ["役員", "一般", "旅客"]:
+                    cell_addr = cells[segment]
+                    value = budget_data["単月"][segment].get(expense_type, 0)
+                    ws[cell_addr] = value
+
+            # 累計データ書き込み
+            for expense_type, cells in BUDGET_TARGET_MAPPING["累計"].items():
+                for segment in ["役員", "一般", "旅客"]:
+                    cell_addr = cells[segment]
+                    value = budget_data["累計"][segment].get(expense_type, 0)
+                    ws[cell_addr] = value
+
         # 保存
         output_path = report_path.replace('.xlsx', '_output.xlsx')
         wb.save(output_path)
@@ -440,6 +493,7 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             "data": aggregated,
             "prev_year_data": prev_year_aggregated,  # 前期データ追加
             "forecast_data": forecast_data,  # 見込データ追加
+            "budget_data": budget_data,  # 予算データ追加
             "debug": {
                 "extracted_count": len(extracted_data),
                 "found_contracts_count": len(found_contracts),
@@ -533,6 +587,164 @@ def extract_forecast_data(forecast_path, target_month, sheet_name):
     except Exception as e:
         traceback.print_exc()
         return None
+
+
+def extract_budget_data(budget_path, target_month):
+    """予算ファイル（CSV）からデータを抽出する
+
+    CSVフォーマット:
+    - 1-3行目: ヘッダー情報
+    - 4行目: 列ヘッダー（セグメント,項目,4月,5月,...,3月,累計）
+    - 5-9行目: 役員データ（基本売上、その他売上、材料原価、労務間接、経費原価）
+    - 10行目: 空行
+    - 11-15行目: 一般データ
+    - 16行目: 空行
+    - 17-21行目: 旅客データ
+
+    Args:
+        budget_path: 予算CSVファイルのパス
+        target_month: 対象月（1-12）
+
+    Returns:
+        dict: {
+            "単月": {"役員": {...}, "一般": {...}, "旅客": {...}},
+            "累計": {"役員": {...}, "一般": {...}, "旅客": {...}}
+        }
+        エラー時: {"error": "エラーメッセージ"}
+    """
+    try:
+        # CSVファイル読み込み
+        csv_data = read_csv_with_encoding(budget_path)
+        if not csv_data:
+            return {"error": "CSVファイルの読み込みに失敗しました（文字コードが不正です）"}
+
+        # 最低限の行数チェック（ヘッダー4行 + 役員5行 + 空行1行 + 一般5行 + 空行1行 + 旅客5行 = 21行）
+        if len(csv_data) < 21:
+            return {"error": f"CSVファイルの行数が不足しています（期待: 21行以上、実際: {len(csv_data)}行）"}
+
+        # ヘッダー行（4行目、インデックス3）から列位置を取得
+        header_row = csv_data[3]
+        if len(header_row) < 15:  # セグメント,項目,4-3月(12ヶ月),累計 = 最低15列
+            return {"error": f"CSVヘッダーの列数が不足しています（期待: 15列以上、実際: {len(header_row)}列）"}
+
+        # 対象月の列インデックスを計算（4月=列2、5月=列3、...、3月=列13）
+        # target_month: 4=4月, 5=5月, ..., 12=12月, 1=1月, 2=2月, 3=3月
+        if target_month >= 4:
+            month_col_index = target_month - 4 + 2  # 4月→2, 5月→3, ..., 12月→10
+        else:
+            month_col_index = target_month + 8 + 2  # 1月→11, 2月→12, 3月→13
+
+        # 項目名マッピング（CSVの項目名 → システムの項目名）
+        item_mapping = {
+            "基本売上": "基本売上",
+            "その他売上": "その他売上",
+            "材料原価": "材料",
+            "労務間接": "労務",
+            "経費原価": "経費"
+        }
+
+        # データ構造初期化
+        budget_data = {
+            "単月": {
+                "役員": {},
+                "一般": {},
+                "旅客": {}
+            },
+            "累計": {
+                "役員": {},
+                "一般": {},
+                "旅客": {}
+            }
+        }
+
+        # セグメントごとのデータ抽出
+        # 役員: 5-9行目（インデックス4-8）
+        # 一般: 11-15行目（インデックス10-14）
+        # 旅客: 17-21行目（インデックス16-20）
+        segment_rows = {
+            "役員": (4, 9),   # 5行目から9行目まで
+            "一般": (10, 15),  # 11行目から15行目まで
+            "旅客": (16, 21)   # 17行目から21行目まで
+        }
+
+        for segment, (start_idx, end_idx) in segment_rows.items():
+            for row_idx in range(start_idx, end_idx):
+                if row_idx >= len(csv_data):
+                    return {"error": f"{segment}セグメントのデータ行が見つかりません（行{row_idx + 1}）"}
+
+                row = csv_data[row_idx]
+                if len(row) < 2:
+                    continue  # 空行をスキップ
+
+                # 項目名を取得（列1）
+                csv_item_name = row[1].strip() if len(row) > 1 else ""
+                if not csv_item_name:
+                    continue
+
+                # 項目名をマッピング
+                system_item_name = item_mapping.get(csv_item_name)
+                if not system_item_name:
+                    return {"error": f"不明な項目名: '{csv_item_name}' (行{row_idx + 1})"}
+
+                # 単月データ取得
+                if month_col_index >= len(row):
+                    return {"error": f"{segment}セグメントの{csv_item_name}の対象月データが見つかりません（行{row_idx + 1}、列{month_col_index + 1}）"}
+
+                month_value_str = row[month_col_index].strip() if row[month_col_index] else "0"
+                try:
+                    month_value = float(month_value_str) if month_value_str else 0
+                except ValueError:
+                    return {"error": f"{segment}セグメントの{csv_item_name}の単月データが数値ではありません: '{month_value_str}' (行{row_idx + 1})"}
+
+                budget_data["単月"][segment][system_item_name] = month_value
+
+                # 累計データを計算（4月から対象月まで）
+                cumulative_value = 0
+                # 4月から対象月までループ
+                if target_month >= 4:
+                    # 4月から対象月まで（同じ年度内）
+                    for month in range(4, target_month + 1):
+                        col_idx = month - 4 + 2  # 4月→2, 5月→3, ...
+                        if col_idx >= len(row):
+                            return {"error": f"{segment}セグメントの{csv_item_name}の{month}月データが見つかりません（行{row_idx + 1}）"}
+                        value_str = row[col_idx].strip() if row[col_idx] else "0"
+                        try:
+                            value = float(value_str) if value_str else 0
+                            cumulative_value += value
+                        except ValueError:
+                            return {"error": f"{segment}セグメントの{csv_item_name}の{month}月データが数値ではありません: '{value_str}' (行{row_idx + 1})"}
+                else:
+                    # 4月から12月まで + 1月から対象月まで（年度をまたぐ）
+                    # 4月から12月
+                    for month in range(4, 13):
+                        col_idx = month - 4 + 2
+                        if col_idx >= len(row):
+                            return {"error": f"{segment}セグメントの{csv_item_name}の{month}月データが見つかりません（行{row_idx + 1}）"}
+                        value_str = row[col_idx].strip() if row[col_idx] else "0"
+                        try:
+                            value = float(value_str) if value_str else 0
+                            cumulative_value += value
+                        except ValueError:
+                            return {"error": f"{segment}セグメントの{csv_item_name}の{month}月データが数値ではありません: '{value_str}' (行{row_idx + 1})"}
+                    # 1月から対象月
+                    for month in range(1, target_month + 1):
+                        col_idx = month + 8 + 2  # 1月→11, 2月→12, 3月→13
+                        if col_idx >= len(row):
+                            return {"error": f"{segment}セグメントの{csv_item_name}の{month}月データが見つかりません（行{row_idx + 1}）"}
+                        value_str = row[col_idx].strip() if row[col_idx] else "0"
+                        try:
+                            value = float(value_str) if value_str else 0
+                            cumulative_value += value
+                        except ValueError:
+                            return {"error": f"{segment}セグメントの{csv_item_name}の{month}月データが数値ではありません: '{value_str}' (行{row_idx + 1})"}
+
+                budget_data["累計"][segment][system_item_name] = cumulative_value
+
+        return budget_data
+
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": f"予算ファイル処理中に予期しないエラーが発生しました: {str(e)}"}
 
 
 def process_prev_year_data(subject_data, site_data, target_month):
