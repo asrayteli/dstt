@@ -29,6 +29,7 @@ async function processFiles() {
     const prevYearSubjectFile = document.getElementById('prev-year-subject-file').files[0];
     const prevYearSiteFile = document.getElementById('prev-year-site-file').files[0];
     const forecastFile = document.getElementById('forecast-file').files[0];
+    const budgetFile = document.getElementById('budget-file').files[0];
 
     // フォームを非表示、進捗を表示
     document.getElementById('upload-form').style.display = 'none';
@@ -55,6 +56,9 @@ async function processFiles() {
     }
     if (forecastFile) {
         formData.append('forecast_file', forecastFile);
+    }
+    if (budgetFile) {
+        formData.append('budget_file', budgetFile);
     }
 
     try {
@@ -282,6 +286,63 @@ function showSuccess(result) {
         html += '</tr></thead><tbody>';
 
         for (const [segment, values] of Object.entries(result.forecast_data)) {
+            html += '<tr class="border-b">';
+            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        html += '</div>';
+    }
+
+    // 予算データ表示
+    if (result.budget_data) {
+        // 単月予算データ
+        html += '<div class="mt-4 p-3 bg-green-50 rounded border border-green-200">';
+        html += '<h4 class="font-semibold mb-2 text-green-800">予算データ（単月）</h4>';
+        html += '<table class="min-w-full text-sm">';
+        html += '<thead><tr class="border-b">';
+        html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">材料</th>';
+        html += '<th class="text-right py-2 px-2">労務</th>';
+        html += '<th class="text-right py-2 px-2">経費</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const [segment, values] of Object.entries(result.budget_data['単月'])) {
+            html += '<tr class="border-b">';
+            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
+            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        html += '</div>';
+
+        // 累計予算データ
+        html += '<div class="mt-4 p-3 bg-green-50 rounded border border-green-200">';
+        html += '<h4 class="font-semibold mb-2 text-green-800">予算データ（累計）</h4>';
+        html += '<table class="min-w-full text-sm">';
+        html += '<thead><tr class="border-b">';
+        html += '<th class="text-left py-2 px-2">セグメント</th>';
+        html += '<th class="text-right py-2 px-2">材料</th>';
+        html += '<th class="text-right py-2 px-2">労務</th>';
+        html += '<th class="text-right py-2 px-2">経費</th>';
+        html += '<th class="text-right py-2 px-2">基本売上</th>';
+        html += '<th class="text-right py-2 px-2">その他売上</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const [segment, values] of Object.entries(result.budget_data['累計'])) {
             html += '<tr class="border-b">';
             html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
             html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
