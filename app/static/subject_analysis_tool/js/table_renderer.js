@@ -744,15 +744,15 @@ class TableRenderer {
         }
 
         // サマリー統計を計算
-        // 注: costは負の値（支出）として扱われる
+        // 注: costは符号反転済みの正の値として扱われる
         const totalRevenue = profitData.reduce((sum, item) => sum + item.revenue, 0);
-        const totalCost = profitData.reduce((sum, item) => sum + item.cost, 0);  // 負の値
-        const totalProfit = totalRevenue + totalCost;  // cost が負なので、実質 revenue - |cost|
+        const totalCost = profitData.reduce((sum, item) => sum + item.cost, 0);
+        const totalProfit = totalRevenue - totalCost;  // 引き算
         const avgProfitRate = totalRevenue > 0 ? (totalProfit / totalRevenue * 100) : 0;
 
         const totalRevenueComparison = profitData.reduce((sum, item) => sum + item.revenueComparison, 0);
-        const totalCostComparison = profitData.reduce((sum, item) => sum + item.costComparison, 0);  // 負の値
-        const totalProfitComparison = totalRevenueComparison + totalCostComparison;  // cost が負
+        const totalCostComparison = profitData.reduce((sum, item) => sum + item.costComparison, 0);
+        const totalProfitComparison = totalRevenueComparison - totalCostComparison;  // 引き算
         const avgProfitRateComparison = totalRevenueComparison > 0 ? (totalProfitComparison / totalRevenueComparison * 100) : 0;
 
         const profitDiff = totalProfit - totalProfitComparison;
@@ -761,19 +761,19 @@ class TableRenderer {
         let html = `
             <div class="bg-blue-50 border border-blue-200 rounded p-4 mb-4">
                 <p class="text-sm text-blue-800">
-                    💡 <strong>利益の計算:</strong> 利益 = 売上 + 原価（原価は支出なので負の値）= 売上 - |原価|
+                    💡 <strong>利益の計算:</strong> 利益 = 売上 - 原価（引き算）
                 </p>
             </div>
             <div class="stats-grid mb-6">
                 <div class="stat-card">
-                    <div class="stat-label">総売上（収入）</div>
+                    <div class="stat-label">総売上</div>
                     <div class="stat-value text-green-600">${this.formatNumber(totalRevenue)}</div>
                     <div class="text-xs text-gray-500 mt-1">比較: ${this.formatNumber(totalRevenueComparison)}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">総原価（支出）</div>
-                    <div class="stat-value text-orange-600">${this.formatNumber(totalCost, true)}</div>
-                    <div class="text-xs text-gray-500 mt-1">比較: ${this.formatNumber(totalCostComparison, true)}</div>
+                    <div class="stat-label">総原価</div>
+                    <div class="stat-value text-orange-600">${this.formatNumber(totalCost)}</div>
+                    <div class="text-xs text-gray-500 mt-1">比較: ${this.formatNumber(totalCostComparison)}</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">総利益</div>
@@ -847,7 +847,7 @@ class TableRenderer {
                     <td>${item.corpName}</td>
                     <td>${item.month}月</td>
                     <td class="text-right text-green-600">${this.formatNumber(item.revenue)}</td>
-                    <td class="text-right text-orange-600">${this.formatNumber(item.cost, true)}</td>
+                    <td class="text-right text-orange-600">${this.formatNumber(item.cost)}</td>
                     <td class="text-right font-semibold ${item.profit >= 0 ? 'text-blue-600' : 'text-red-600'}">
                         ${this.formatNumber(item.profit, true)}
                     </td>
@@ -911,8 +911,8 @@ class TableRenderer {
                                 <span class="tooltip-value">${this.formatNumber(data.revenue)}円</span>
                             </div>
                             <div class="tooltip-row">
-                                <span class="tooltip-key">当期原価（支出）:</span>
-                                <span class="tooltip-value">${this.formatNumber(data.cost, true)}円</span>
+                                <span class="tooltip-key">当期原価:</span>
+                                <span class="tooltip-value">${this.formatNumber(data.cost)}円</span>
                             </div>
                             <div class="tooltip-row">
                                 <span class="tooltip-key">当期利益:</span>
@@ -931,8 +931,8 @@ class TableRenderer {
                                 <span class="tooltip-value">${this.formatNumber(data.revenueComparison)}円</span>
                             </div>
                             <div class="tooltip-row">
-                                <span class="tooltip-key">  原価（支出）:</span>
-                                <span class="tooltip-value">${this.formatNumber(data.costComparison, true)}円</span>
+                                <span class="tooltip-key">  原価:</span>
+                                <span class="tooltip-value">${this.formatNumber(data.costComparison)}円</span>
                             </div>
                             <div class="tooltip-row">
                                 <span class="tooltip-key">  利益:</span>

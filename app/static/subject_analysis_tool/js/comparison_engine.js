@@ -129,8 +129,8 @@ class ComparisonEngine {
      * 重要: 利益の定義について
      * - CSV上: 売上=正（収入）, 原価=負（支出）
      * - 符号反転処理: 表示用に原価を正に変換済み
-     * - 利益計算: 売上 + 原価（原価が負なので、実質 売上 - |原価|）
-     * - このメソッドでは原価を元の負の値に戻して正しく計算
+     * - 利益計算: 利益 = 売上 - 原価（引き算）
+     * - 原価は符号反転済みの正の値として扱う
      */
     getProfitAnalysis() {
         if (this.comparisonResults.length === 0) {
@@ -160,8 +160,8 @@ class ComparisonEngine {
                     month: result.month,
                     revenue: 0,  // 売上（正）
                     revenueComparison: 0,  // 売上（正）
-                    cost: 0,  // 原価（負として扱う）
-                    costComparison: 0,  // 原価（負として扱う）
+                    cost: 0,  // 原価（符号反転済みの正）
+                    costComparison: 0,  // 原価（符号反転済みの正）
                     comparisonLabel: result.comparisonLabel
                 };
             }
@@ -169,24 +169,23 @@ class ComparisonEngine {
             grouped[key].revenueComparison += result.comparisonValue;  // 売上（正）を加算
         });
 
-        // 原価を集計（符号を元に戻して負の値として扱う）
+        // 原価を集計（符号反転済みの正の値として扱う）
         costResults.forEach(result => {
             const key = `${result.item.contract_code}|${result.month}`;
             if (!grouped[key]) {
                 // 売上がない現場はスキップ
                 return;
             }
-            // 原価は表示用に符号反転済み（正）なので、元に戻す（負）
-            // CSV上の原価は支出を表すマイナス値だったため、元に戻す
-            grouped[key].cost += -result.currentValue;  // 符号を反転して元の負の値に
-            grouped[key].costComparison += -result.comparisonValue;  // 符号を反転して元の負の値に
+            // 原価は既に符号反転済み（正の値）
+            grouped[key].cost += result.currentValue;
+            grouped[key].costComparison += result.comparisonValue;
         });
 
         // 利益と利益率を計算
-        // 利益 = 売上（正） + 原価（負） = 売上 - |原価|
+        // 利益 = 売上 - 原価（引き算）
         const profitData = Object.values(grouped).map(item => {
-            const profit = item.revenue + item.cost;  // costが負なので、実質 revenue - |cost|
-            const profitComparison = item.revenueComparison + item.costComparison;
+            const profit = item.revenue - item.cost;
+            const profitComparison = item.revenueComparison - item.costComparison;
             const profitRate = item.revenue !== 0 ? (profit / item.revenue) * 100 : 0;
             const profitRateComparison = item.revenueComparison !== 0 ? (profitComparison / item.revenueComparison) * 100 : 0;
 
