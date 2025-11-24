@@ -181,6 +181,17 @@ class ComparisonEngine {
             const profitRate = item.revenue !== 0 ? (profit / item.revenue) * 100 : 0;
             const profitRateComparison = item.revenueComparison !== 0 ? (profitComparison / item.revenueComparison) * 100 : 0;
 
+            // デバッグ用ログ（最初の1件のみ）
+            if (Object.values(grouped).indexOf(item) === 0) {
+                console.log('[利益計算デバッグ]', {
+                    現場: item.siteName,
+                    売上: item.revenue,
+                    原価: item.cost,
+                    利益計算式: `${item.revenue} - ${item.cost}`,
+                    利益結果: profit
+                });
+            }
+
             return {
                 ...item,
                 profit: profit,
@@ -298,6 +309,8 @@ class ComparisonEngine {
 
         let currentValues, comparisonValues, diffs, diffRates;
         let revenueValues, costValues;
+        let revenueCount = 0;
+        let costCount = 0;
 
         // 累計比較モードの場合、累計値で統計を計算
         if (filters && filters.comparisonMode === 'cumulative') {
@@ -312,6 +325,8 @@ class ComparisonEngine {
             const costResults = cumulativeResults.filter(r => !r.item.is_revenue);
             revenueValues = revenueResults.map(r => r.currentValue);
             costValues = costResults.map(r => r.currentValue);
+            revenueCount = revenueResults.length;
+            costCount = costResults.length;
         } else {
             // 通常モード：月別の値で統計を計算
             currentValues = this.comparisonResults.map(r => r.currentValue);
@@ -324,6 +339,8 @@ class ComparisonEngine {
             const costResults = this.comparisonResults.filter(r => !r.item.is_revenue);
             revenueValues = revenueResults.map(r => r.currentValue);
             costValues = costResults.map(r => r.currentValue);
+            revenueCount = revenueResults.length;
+            costCount = costResults.length;
         }
 
         // 四分位数を計算
@@ -334,8 +351,8 @@ class ComparisonEngine {
         return {
             count: this.comparisonResults.length,
             anomalyCount: this.comparisonResults.filter(r => r.isAnomaly).length,
-            revenueCount: revenueResults.length,
-            costCount: costResults.length,
+            revenueCount: revenueCount,
+            costCount: costCount,
             currentValue: {
                 sum: this.sum(currentValues),
                 avg: this.average(currentValues),
