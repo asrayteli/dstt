@@ -125,6 +125,12 @@ class ComparisonEngine {
 
     /**
      * 利益分析データを生成
+     *
+     * 重要: 利益の定義について
+     * - CSV上: 売上=正（収入）, 原価=負（支出）
+     * - 符号反転処理: 表示用に原価を正に変換済み
+     * - 利益計算: 売上 + 原価（原価が負なので、実質 売上 - |原価|）
+     * - このメソッドでは原価を元の負の値に戻して正しく計算
      */
     getProfitAnalysis() {
         if (this.comparisonResults.length === 0) {
@@ -142,7 +148,7 @@ class ComparisonEngine {
         // 月別・現場別にグループ化
         const grouped = {};
 
-        // 売上を集計
+        // 売上を集計（正の値）
         revenueResults.forEach(result => {
             const key = `${result.item.contract_code}|${result.month}`;
             if (!grouped[key]) {
@@ -152,33 +158,35 @@ class ComparisonEngine {
                     corpName: result.item.corp_name,
                     segment: dataManager.rawData.siteMapping[result.item.contract_code] || '未分類',
                     month: result.month,
-                    revenue: 0,
-                    revenueComparison: 0,
-                    cost: 0,
-                    costComparison: 0,
+                    revenue: 0,  // 売上（正）
+                    revenueComparison: 0,  // 売上（正）
+                    cost: 0,  // 原価（負として扱う）
+                    costComparison: 0,  // 原価（負として扱う）
                     comparisonLabel: result.comparisonLabel
                 };
             }
-            grouped[key].revenue += result.currentValue;
-            grouped[key].revenueComparison += result.comparisonValue;
+            grouped[key].revenue += result.currentValue;  // 売上（正）を加算
+            grouped[key].revenueComparison += result.comparisonValue;  // 売上（正）を加算
         });
 
-        // 原価を集計
+        // 原価を集計（符号を元に戻して負の値として扱う）
         costResults.forEach(result => {
             const key = `${result.item.contract_code}|${result.month}`;
             if (!grouped[key]) {
-                // 売上がない現場（エラーケース）
+                // 売上がない現場はスキップ
                 return;
             }
-            // 原価は既に符号反転済みなので、そのまま加算（プラス値として扱う）
-            grouped[key].cost += result.currentValue;
-            grouped[key].costComparison += result.comparisonValue;
+            // 原価は表示用に符号反転済み（正）なので、元に戻す（負）
+            // CSV上の原価は支出を表すマイナス値だったため、元に戻す
+            grouped[key].cost += -result.currentValue;  // 符号を反転して元の負の値に
+            grouped[key].costComparison += -result.comparisonValue;  // 符号を反転して元の負の値に
         });
 
         // 利益と利益率を計算
+        // 利益 = 売上（正） + 原価（負） = 売上 - |原価|
         const profitData = Object.values(grouped).map(item => {
-            const profit = item.revenue - item.cost;
-            const profitComparison = item.revenueComparison - item.costComparison;
+            const profit = item.revenue + item.cost;  // costが負なので、実質 revenue - |cost|
+            const profitComparison = item.revenueComparison + item.costComparison;
             const profitRate = item.revenue !== 0 ? (profit / item.revenue) * 100 : 0;
             const profitRateComparison = item.revenueComparison !== 0 ? (profitComparison / item.revenueComparison) * 100 : 0;
 
