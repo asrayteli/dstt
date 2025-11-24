@@ -228,7 +228,7 @@ function updateAllTabs(results, filters) {
     chartRenderer.renderHeatmap(results, filters);
 
     // 統計分析
-    const stats = comparisonEngine.getStatistics();
+    const stats = comparisonEngine.getStatistics(filters);
     tableRenderer.renderStatistics(stats);
 }
 

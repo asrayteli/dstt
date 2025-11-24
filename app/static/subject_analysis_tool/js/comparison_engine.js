@@ -58,24 +58,16 @@ class ComparisonEngine {
                         comparisonLabel = `${baseMonth}月`;
                     }
                 } else if (comparisonMode === 'cumulative') {
-                    // 累計比較
-                    const currentCumulative = dataManager.calculateCumulative(item.amounts, month);
+                    // 累計比較モード
+                    // 詳細一覧では月別の値を表示するため、前年同月比較と同じ処理
                     const prevYearItem = dataManager.getPrevYearData(
                         item.contract_code,
                         item.subject_name
                     );
-                    if (prevYearItem) {
-                        comparisonValue = dataManager.calculateCumulative(prevYearItem.amounts, month);
-                        comparisonLabel = `前年累計（4月～${month}月）`;
+                    if (prevYearItem && prevYearItem.amounts[monthIndex] !== undefined) {
+                        comparisonValue = prevYearItem.amounts[monthIndex];
+                        comparisonLabel = `前年${month}月`;
                     }
-                    // 累計モードでは現在値も累計に変更
-                    const result = this.calculateDifference(currentCumulative, comparisonValue);
-                    result.month = month;
-                    result.item = item;
-                    result.comparisonLabel = comparisonLabel;
-                    result.isAnomaly = this.checkAnomaly(result, thresholdRate, thresholdAmount, thresholdCondition);
-                    this.comparisonResults.push(result);
-                    return;
                 }
 
                 // 差異計算
@@ -299,22 +291,40 @@ class ComparisonEngine {
     /**
      * 統計情報を生成
      */
-    getStatistics() {
+    getStatistics(filters) {
         if (this.comparisonResults.length === 0) {
             return null;
         }
 
-        const currentValues = this.comparisonResults.map(r => r.currentValue);
-        const comparisonValues = this.comparisonResults.map(r => r.comparisonValue);
-        const diffs = this.comparisonResults.map(r => r.diff);
-        const diffRates = this.comparisonResults.map(r => r.diffRate);
+        let currentValues, comparisonValues, diffs, diffRates;
+        let revenueValues, costValues;
 
-        // 売上と原価を分離
-        const revenueResults = this.comparisonResults.filter(r => r.item.is_revenue);
-        const costResults = this.comparisonResults.filter(r => !r.item.is_revenue);
+        // 累計比較モードの場合、累計値で統計を計算
+        if (filters && filters.comparisonMode === 'cumulative') {
+            // 現場・科目ごとに累計を計算
+            const cumulativeResults = this.calculateCumulativeStatistics(filters);
+            currentValues = cumulativeResults.map(r => r.currentValue);
+            comparisonValues = cumulativeResults.map(r => r.comparisonValue);
+            diffs = cumulativeResults.map(r => r.diff);
+            diffRates = cumulativeResults.map(r => r.diffRate);
 
-        const revenueValues = revenueResults.map(r => r.currentValue);
-        const costValues = costResults.map(r => r.currentValue);
+            const revenueResults = cumulativeResults.filter(r => r.item.is_revenue);
+            const costResults = cumulativeResults.filter(r => !r.item.is_revenue);
+            revenueValues = revenueResults.map(r => r.currentValue);
+            costValues = costResults.map(r => r.currentValue);
+        } else {
+            // 通常モード：月別の値で統計を計算
+            currentValues = this.comparisonResults.map(r => r.currentValue);
+            comparisonValues = this.comparisonResults.map(r => r.comparisonValue);
+            diffs = this.comparisonResults.map(r => r.diff);
+            diffRates = this.comparisonResults.map(r => r.diffRate);
+
+            // 売上と原価を分離
+            const revenueResults = this.comparisonResults.filter(r => r.item.is_revenue);
+            const costResults = this.comparisonResults.filter(r => !r.item.is_revenue);
+            revenueValues = revenueResults.map(r => r.currentValue);
+            costValues = costResults.map(r => r.currentValue);
+        }
 
         // 四分位数を計算
         const q1 = this.percentile(currentValues, 25);
@@ -376,6 +386,51 @@ class ComparisonEngine {
                 count: costValues.length
             } : null
         };
+    }
+
+    /**
+     * 累計比較モード用の統計データを計算
+     */
+    calculateCumulativeStatistics(filters) {
+        const { months, sites, subjects, segments } = filters;
+        const currentData = dataManager.getData({ sites, subjects, months, segments });
+        const cumulativeResults = [];
+
+        // 選択された最大月を特定（累計の対象月）
+        const selectedMonths = months.map(m => parseInt(m)).sort((a, b) => {
+            // 4月始まりでソート
+            const aIdx = dataManager.getMonthIndex(a);
+            const bIdx = dataManager.getMonthIndex(b);
+            return aIdx - bIdx;
+        });
+        const maxMonth = selectedMonths[selectedMonths.length - 1];
+
+        // 現場・科目ごとに累計を計算
+        currentData.forEach(item => {
+            // 当期の累計値を計算
+            const currentCumulative = dataManager.calculateCumulative(item.amounts, maxMonth);
+
+            // 前年の累計値を計算
+            const prevYearItem = dataManager.getPrevYearData(item.contract_code, item.subject_name);
+            let comparisonCumulative = 0;
+            if (prevYearItem) {
+                comparisonCumulative = dataManager.calculateCumulative(prevYearItem.amounts, maxMonth);
+            }
+
+            // 差異を計算
+            const diff = currentCumulative - comparisonCumulative;
+            const diffRate = comparisonCumulative !== 0 ? (diff / comparisonCumulative) * 100 : 0;
+
+            cumulativeResults.push({
+                item: item,
+                currentValue: currentCumulative,
+                comparisonValue: comparisonCumulative,
+                diff: diff,
+                diffRate: diffRate
+            });
+        });
+
+        return cumulativeResults;
     }
 
     /**
