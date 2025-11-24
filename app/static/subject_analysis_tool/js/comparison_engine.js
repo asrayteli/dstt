@@ -48,6 +48,10 @@ class ComparisonEngine {
                     }
                 } else if (comparisonMode === 'same_year') {
                     // 同年度内指定月比較
+                    // 基準月と同じ月はスキップ（差異0なので意味がない）
+                    if (parseInt(month) === parseInt(baseMonth)) {
+                        return;
+                    }
                     const baseMonthIndex = dataManager.getMonthIndex(parseInt(baseMonth));
                     if (baseMonthIndex >= 0 && baseMonthIndex < item.amounts.length) {
                         comparisonValue = item.amounts[baseMonthIndex];

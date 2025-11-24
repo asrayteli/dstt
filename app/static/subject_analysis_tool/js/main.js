@@ -123,6 +123,11 @@ async function handleFileUpload() {
         // データをDataManagerに設定
         dataManager.setData(result.data);
 
+        // デバッグ情報
+        console.log('Loaded data:', result.data);
+        console.log('Sites:', dataManager.getSites());
+        console.log('Subjects:', dataManager.getSubjects());
+
         // UI初期化
         filterController.initUI();
 
@@ -174,6 +179,17 @@ function applyFilters() {
     try {
         // 比較実行
         const results = comparisonEngine.executeComparison(filters);
+
+        // デバッグ情報
+        console.log('Filters:', filters);
+        console.log('Results count:', results.length);
+
+        // 結果が空の場合の警告
+        if (results.length === 0) {
+            hideLoading();
+            alert('条件に一致するデータが見つかりませんでした。\n\n確認事項：\n- 対象月、現場、科目が選択されているか\n- 前年比較の場合、前年データがアップロードされているか\n- 同年度内比較の場合、基準月以外の月が選択されているか');
+            return;
+        }
 
         // 各タブを更新
         updateAllTabs(results, filters);
