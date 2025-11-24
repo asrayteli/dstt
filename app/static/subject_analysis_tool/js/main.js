@@ -48,6 +48,18 @@ function setupEventListeners() {
             }
         });
     }
+
+    // 詳細一覧テーブルの検索機能
+    const detailSearch = document.getElementById('detail-search');
+    if (detailSearch) {
+        detailSearch.addEventListener('input', (e) => {
+            tableRenderer.searchQuery = e.target.value;
+            if (currentFilters) {
+                const results = comparisonEngine.executeComparison(currentFilters);
+                tableRenderer.renderDetailTable(results, currentFilters);
+            }
+        });
+    }
 }
 
 /**

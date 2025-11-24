@@ -7,6 +7,16 @@ class TableRenderer {
         this.sortColumn = null;
         this.sortDirection = 'asc';
         this.currentData = [];
+        this.searchQuery = '';
+
+        // 各テーブル用の検索・ソート状態
+        this.siteSummarySearch = '';
+        this.subjectSummarySearch = '';
+        this.subjectSummarySortColumn = null;
+        this.subjectSummarySortDirection = 'asc';
+        this.profitSearch = '';
+        this.profitSortColumn = null;
+        this.profitSortDirection = 'asc';
     }
 
     /**
@@ -25,10 +35,13 @@ class TableRenderer {
             return;
         }
 
-        countEl.textContent = results.length.toLocaleString();
+        // 検索フィルタリング適用
+        const filteredResults = this.applySearch(results, this.searchQuery);
+
+        countEl.textContent = filteredResults.length.toLocaleString();
 
         // ソート適用
-        const sortedResults = this.applySorting([...results]);
+        const sortedResults = this.applySorting([...filteredResults]);
 
         // ページネーション適用
         const paginatedResults = this.applyPagination(sortedResults);
@@ -271,13 +284,9 @@ class TableRenderer {
                     document.body.appendChild(tooltipEl);
 
                     const updatePosition = (e) => {
-                        const x = e.clientX + 10;
-                        const y = e.clientY + 10;
-                        const tooltipRect = tooltipEl.getBoundingClientRect();
-                        const maxX = window.innerWidth - tooltipRect.width - 10;
-                        const maxY = window.innerHeight - tooltipRect.height - 10;
-                        tooltipEl.style.left = Math.min(x, maxX) + 'px';
-                        tooltipEl.style.top = Math.min(y, maxY) + 'px';
+                        const pos = this.calculateTooltipPosition(e.clientX, e.clientY, tooltipEl);
+                        tooltipEl.style.left = pos.x + 'px';
+                        tooltipEl.style.top = pos.y + 'px';
                     };
 
                     updatePosition(e);
@@ -309,23 +318,40 @@ class TableRenderer {
             return;
         }
 
+        // 検索フィルタリング
+        let filteredSummary = summary;
+        if (this.subjectSummarySearch && this.subjectSummarySearch.trim() !== '') {
+            const query = this.subjectSummarySearch.toLowerCase();
+            filteredSummary = summary.filter(subject =>
+                subject.subjectName.toLowerCase().includes(query)
+            );
+        }
+
+        // ソート適用
+        if (this.subjectSummarySortColumn) {
+            filteredSummary = this.sortSubjectSummary([...filteredSummary]);
+        }
+
         let html = `
+            <div class="mb-4">
+                <input type="text" id="subject-summary-search" placeholder="科目名で検索..." class="form-input" style="max-width: 300px;" value="${this.subjectSummarySearch}">
+            </div>
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>科目名</th>
-                        <th>現場数</th>
-                        <th>異常値件数</th>
-                        <th>当期合計</th>
-                        <th>比較合計</th>
-                        <th>差異</th>
-                        <th>差異率</th>
+                        <th class="sortable-subject" data-column="subjectName">科目名 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject" data-column="siteCount">現場数 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject" data-column="anomalyCount">異常値件数 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject" data-column="totalCurrent">当期合計 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject" data-column="totalComparison">比較合計 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject" data-column="totalDiff">差異 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject" data-column="totalDiffRate">差異率 <span class="sort-indicator"></span></th>
                     </tr>
                 </thead>
                 <tbody>
         `;
 
-        summary.forEach(subject => {
+        filteredSummary.forEach(subject => {
             const highlightClass = filters.highlightEnabled &&
                 (subject.anomalyCount > 0 ||
                     Math.abs(subject.totalDiffRate) > filters.thresholdRate)
@@ -368,6 +394,9 @@ class TableRenderer {
 
         // ツールチップ設定
         this.setupSubjectSummaryTooltipListeners();
+
+        // 検索とソートのリスナー設定
+        this.setupSubjectSummaryListeners(summary, filters);
     }
 
     /**
@@ -436,13 +465,9 @@ class TableRenderer {
                     document.body.appendChild(tooltipEl);
 
                     const updatePosition = (e) => {
-                        const x = e.clientX + 10;
-                        const y = e.clientY + 10;
-                        const tooltipRect = tooltipEl.getBoundingClientRect();
-                        const maxX = window.innerWidth - tooltipRect.width - 10;
-                        const maxY = window.innerHeight - tooltipRect.height - 10;
-                        tooltipEl.style.left = Math.min(x, maxX) + 'px';
-                        tooltipEl.style.top = Math.min(y, maxY) + 'px';
+                        const pos = this.calculateTooltipPosition(e.clientX, e.clientY, tooltipEl);
+                        tooltipEl.style.left = pos.x + 'px';
+                        tooltipEl.style.top = pos.y + 'px';
                     };
 
                     updatePosition(e);
@@ -694,13 +719,9 @@ class TableRenderer {
                 document.body.appendChild(tooltipEl);
 
                 const updatePosition = (e) => {
-                    const x = e.clientX + 10;
-                    const y = e.clientY + 10;
-                    const tooltipRect = tooltipEl.getBoundingClientRect();
-                    const maxX = window.innerWidth - tooltipRect.width - 10;
-                    const maxY = window.innerHeight - tooltipRect.height - 10;
-                    tooltipEl.style.left = Math.min(x, maxX) + 'px';
-                    tooltipEl.style.top = Math.min(y, maxY) + 'px';
+                    const pos = this.calculateTooltipPosition(e.clientX, e.clientY, tooltipEl);
+                    tooltipEl.style.left = pos.x + 'px';
+                    tooltipEl.style.top = pos.y + 'px';
                 };
 
                 updatePosition(e);
@@ -758,11 +779,30 @@ class TableRenderer {
         const profitDiff = totalProfit - totalProfitComparison;
         const profitRateDiff = avgProfitRate - avgProfitRateComparison;
 
+        // 検索フィルタリング
+        let filteredProfitData = profitData;
+        if (this.profitSearch && this.profitSearch.trim() !== '') {
+            const query = this.profitSearch.toLowerCase();
+            filteredProfitData = profitData.filter(item =>
+                item.siteName.toLowerCase().includes(query) ||
+                item.corpName.toLowerCase().includes(query) ||
+                String(item.month).includes(query)
+            );
+        }
+
+        // ソート適用
+        if (this.profitSortColumn) {
+            filteredProfitData = this.sortProfitData([...filteredProfitData]);
+        }
+
         let html = `
             <div class="bg-blue-50 border border-blue-200 rounded p-4 mb-4">
                 <p class="text-sm text-blue-800">
                     💡 <strong>利益の計算:</strong> 利益 = 売上 + 原価（原価は負の値）
                 </p>
+            </div>
+            <div class="mb-4">
+                <input type="text" id="profit-search" placeholder="現場名・法人名・月で検索..." class="form-input" style="max-width: 300px;" value="${this.profitSearch}">
             </div>
             <div class="stats-grid mb-6">
                 <div class="stat-card">
@@ -799,23 +839,23 @@ class TableRenderer {
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>現場名</th>
-                            <th>法人名</th>
-                            <th>月</th>
-                            <th>売上</th>
-                            <th>原価</th>
-                            <th>利益</th>
-                            <th>利益率(%)</th>
-                            <th>比較利益</th>
-                            <th>比較利益率(%)</th>
-                            <th>利益差異</th>
-                            <th>利益率差異</th>
+                            <th class="sortable-profit" data-column="siteName">現場名 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="corpName">法人名 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="month">月 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="revenue">売上 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="cost">原価 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="profit">利益 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="profitRate">利益率(%) <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="profitComparison">比較利益 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="profitRateComparison">比較利益率(%) <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="profitDiff">利益差異 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="profitRateDiff">利益率差異 <span class="sort-indicator"></span></th>
                         </tr>
                     </thead>
                     <tbody>
         `;
 
-        profitData.forEach(item => {
+        filteredProfitData.forEach(item => {
             const profitDiffItem = item.profit - item.profitComparison;
             const profitRateDiffItem = item.profitRate - item.profitRateComparison;
 
@@ -874,6 +914,9 @@ class TableRenderer {
 
         // ツールチップ設定
         this.setupProfitTooltipListeners();
+
+        // 検索とソートのリスナー設定
+        this.setupProfitListeners(profitData, filters);
     }
 
     /**
@@ -948,13 +991,9 @@ class TableRenderer {
                     document.body.appendChild(tooltipEl);
 
                     const updatePosition = (e) => {
-                        const x = e.clientX + 10;
-                        const y = e.clientY + 10;
-                        const tooltipRect = tooltipEl.getBoundingClientRect();
-                        const maxX = window.innerWidth - tooltipRect.width - 10;
-                        const maxY = window.innerHeight - tooltipRect.height - 10;
-                        tooltipEl.style.left = Math.min(x, maxX) + 'px';
-                        tooltipEl.style.top = Math.min(y, maxY) + 'px';
+                        const pos = this.calculateTooltipPosition(e.clientX, e.clientY, tooltipEl);
+                        tooltipEl.style.left = pos.x + 'px';
+                        tooltipEl.style.top = pos.y + 'px';
                     };
 
                     updatePosition(e);
@@ -971,6 +1010,27 @@ class TableRenderer {
                     tooltipEl = null;
                 }
             });
+        });
+    }
+
+    /**
+     * 検索フィルタリングを適用
+     */
+    applySearch(data, query) {
+        if (!query || query.trim() === '') return data;
+
+        const lowerQuery = query.toLowerCase();
+        return data.filter(result => {
+            const item = result.item;
+            const segment = dataManager.rawData.siteMapping[item.contract_code] || '未分類';
+
+            return (
+                item.site_name.toLowerCase().includes(lowerQuery) ||
+                item.corp_name.toLowerCase().includes(lowerQuery) ||
+                segment.toLowerCase().includes(lowerQuery) ||
+                item.subject_name.toLowerCase().includes(lowerQuery) ||
+                String(result.month).includes(lowerQuery)
+            );
         });
     }
 
@@ -1181,18 +1241,11 @@ class TableRenderer {
 
                     document.body.appendChild(tooltipEl);
 
-                    // 位置調整
+                    // 位置調整（4方向から最適な位置を選択）
                     const updatePosition = (e) => {
-                        const x = e.clientX + 10;
-                        const y = e.clientY + 10;
-
-                        // 画面外に出ないように調整
-                        const tooltipRect = tooltipEl.getBoundingClientRect();
-                        const maxX = window.innerWidth - tooltipRect.width - 10;
-                        const maxY = window.innerHeight - tooltipRect.height - 10;
-
-                        tooltipEl.style.left = Math.min(x, maxX) + 'px';
-                        tooltipEl.style.top = Math.min(y, maxY) + 'px';
+                        const pos = this.calculateTooltipPosition(e.clientX, e.clientY, tooltipEl);
+                        tooltipEl.style.left = pos.x + 'px';
+                        tooltipEl.style.top = pos.y + 'px';
                     };
 
                     updatePosition(e);
@@ -1211,6 +1264,208 @@ class TableRenderer {
                     tooltipEl = null;
                 }
             });
+        });
+    }
+
+    /**
+     * ツールチップの最適な位置を計算（4方向から選択）
+     */
+    calculateTooltipPosition(mouseX, mouseY, tooltipEl) {
+        const offset = 15; // マウスカーソルからの距離
+        const padding = 10; // 画面端からの余白
+        const tooltipRect = tooltipEl.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        // 4つの候補位置を計算
+        const positions = [
+            // 右下
+            {
+                x: mouseX + offset,
+                y: mouseY + offset,
+                score: 0
+            },
+            // 右上
+            {
+                x: mouseX + offset,
+                y: mouseY - tooltipRect.height - offset,
+                score: 0
+            },
+            // 左下
+            {
+                x: mouseX - tooltipRect.width - offset,
+                y: mouseY + offset,
+                score: 0
+            },
+            // 左上
+            {
+                x: mouseX - tooltipRect.width - offset,
+                y: mouseY - tooltipRect.height - offset,
+                score: 0
+            }
+        ];
+
+        // 各位置のスコアを計算（画面内に収まるかどうか）
+        positions.forEach(pos => {
+            // 横方向のスコア
+            if (pos.x >= padding && pos.x + tooltipRect.width <= viewportWidth - padding) {
+                pos.score += 10; // 完全に収まる
+            } else if (pos.x >= 0 && pos.x + tooltipRect.width <= viewportWidth) {
+                pos.score += 5; // ギリギリ収まる
+            }
+
+            // 縦方向のスコア
+            if (pos.y >= padding && pos.y + tooltipRect.height <= viewportHeight - padding) {
+                pos.score += 10; // 完全に収まる
+            } else if (pos.y >= 0 && pos.y + tooltipRect.height <= viewportHeight) {
+                pos.score += 5; // ギリギリ収まる
+            }
+
+            // 右下を優先（同じスコアなら）
+            if (pos.x === mouseX + offset && pos.y === mouseY + offset) {
+                pos.score += 1;
+            }
+        });
+
+        // 最高スコアの位置を選択
+        const bestPosition = positions.reduce((best, current) =>
+            current.score > best.score ? current : best
+        );
+
+        // 画面外に出ないように最終調整
+        let finalX = bestPosition.x;
+        let finalY = bestPosition.y;
+
+        if (finalX + tooltipRect.width > viewportWidth - padding) {
+            finalX = viewportWidth - tooltipRect.width - padding;
+        }
+        if (finalX < padding) {
+            finalX = padding;
+        }
+        if (finalY + tooltipRect.height > viewportHeight - padding) {
+            finalY = viewportHeight - tooltipRect.height - padding;
+        }
+        if (finalY < padding) {
+            finalY = padding;
+        }
+
+        return { x: finalX, y: finalY };
+    }
+
+    /**
+     * 科目別サマリーのリスナー設定
+     */
+    setupSubjectSummaryListeners(summary, filters) {
+        // 検索ボックス
+        const searchInput = document.getElementById('subject-summary-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                this.subjectSummarySearch = e.target.value;
+                this.renderSubjectSummary(summary, filters);
+            });
+        }
+
+        // ソートヘッダー
+        document.querySelectorAll('.sortable-subject').forEach(th => {
+            th.addEventListener('click', () => {
+                const column = th.dataset.column;
+                if (this.subjectSummarySortColumn === column) {
+                    this.subjectSummarySortDirection = this.subjectSummarySortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.subjectSummarySortColumn = column;
+                    this.subjectSummarySortDirection = 'asc';
+                }
+
+                // ソートインジケーター更新
+                document.querySelectorAll('.sortable-subject .sort-indicator').forEach(indicator => {
+                    indicator.textContent = '';
+                });
+                const indicator = th.querySelector('.sort-indicator');
+                indicator.textContent = this.subjectSummarySortDirection === 'asc' ? ' ▲' : ' ▼';
+
+                this.renderSubjectSummary(summary, filters);
+            });
+        });
+    }
+
+    /**
+     * 科目別サマリーのソート
+     */
+    sortSubjectSummary(data) {
+        return data.sort((a, b) => {
+            let aVal = a[this.subjectSummarySortColumn];
+            let bVal = b[this.subjectSummarySortColumn];
+
+            if (typeof aVal === 'string') {
+                const result = aVal.localeCompare(bVal, 'ja');
+                return this.subjectSummarySortDirection === 'asc' ? result : -result;
+            } else {
+                const result = aVal - bVal;
+                return this.subjectSummarySortDirection === 'asc' ? result : -result;
+            }
+        });
+    }
+
+    /**
+     * 利益分析のリスナー設定
+     */
+    setupProfitListeners(profitData, filters) {
+        // 検索ボックス
+        const searchInput = document.getElementById('profit-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                this.profitSearch = e.target.value;
+                this.renderProfitAnalysis(profitData, filters);
+            });
+        }
+
+        // ソートヘッダー
+        document.querySelectorAll('.sortable-profit').forEach(th => {
+            th.addEventListener('click', () => {
+                const column = th.dataset.column;
+                if (this.profitSortColumn === column) {
+                    this.profitSortDirection = this.profitSortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.profitSortColumn = column;
+                    this.profitSortDirection = 'asc';
+                }
+
+                // ソートインジケーター更新
+                document.querySelectorAll('.sortable-profit .sort-indicator').forEach(indicator => {
+                    indicator.textContent = '';
+                });
+                const indicator = th.querySelector('.sort-indicator');
+                indicator.textContent = this.profitSortDirection === 'asc' ? ' ▲' : ' ▼';
+
+                this.renderProfitAnalysis(profitData, filters);
+            });
+        });
+    }
+
+    /**
+     * 利益分析データのソート
+     */
+    sortProfitData(data) {
+        return data.sort((a, b) => {
+            let aVal = a[this.profitSortColumn];
+            let bVal = b[this.profitSortColumn];
+
+            // profitDiff と profitRateDiff は計算する必要がある
+            if (this.profitSortColumn === 'profitDiff') {
+                aVal = a.profit - a.profitComparison;
+                bVal = b.profit - b.profitComparison;
+            } else if (this.profitSortColumn === 'profitRateDiff') {
+                aVal = a.profitRate - a.profitRateComparison;
+                bVal = b.profitRate - b.profitRateComparison;
+            }
+
+            if (typeof aVal === 'string') {
+                const result = aVal.localeCompare(bVal, 'ja');
+                return this.profitSortDirection === 'asc' ? result : -result;
+            } else {
+                const result = aVal - bVal;
+                return this.profitSortDirection === 'asc' ? result : -result;
+            }
         });
     }
 
