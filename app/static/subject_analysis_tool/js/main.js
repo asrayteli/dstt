@@ -217,6 +217,10 @@ function updateAllTabs(results, filters) {
     const subjectSummary = comparisonEngine.getSubjectSummary();
     tableRenderer.renderSubjectSummary(subjectSummary, filters);
 
+    // 利益分析
+    const profitData = comparisonEngine.getProfitAnalysis();
+    tableRenderer.renderProfitAnalysis(profitData, filters);
+
     // グラフ
     chartRenderer.renderChart(filters);
 

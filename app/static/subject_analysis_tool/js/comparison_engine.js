@@ -124,6 +124,79 @@ class ComparisonEngine {
     }
 
     /**
+     * 利益分析データを生成
+     */
+    getProfitAnalysis() {
+        if (this.comparisonResults.length === 0) {
+            return null;
+        }
+
+        // 売上と原価を分離
+        const revenueResults = this.comparisonResults.filter(r => r.item.is_revenue);
+        const costResults = this.comparisonResults.filter(r => !r.item.is_revenue);
+
+        if (revenueResults.length === 0) {
+            return { error: '売上データが選択されていません。科目選択で「売上」グループを選択してください。' };
+        }
+
+        // 月別・現場別にグループ化
+        const grouped = {};
+
+        // 売上を集計
+        revenueResults.forEach(result => {
+            const key = `${result.item.contract_code}|${result.month}`;
+            if (!grouped[key]) {
+                grouped[key] = {
+                    contractCode: result.item.contract_code,
+                    siteName: result.item.site_name,
+                    corpName: result.item.corp_name,
+                    segment: dataManager.rawData.siteMapping[result.item.contract_code] || '未分類',
+                    month: result.month,
+                    revenue: 0,
+                    revenueComparison: 0,
+                    cost: 0,
+                    costComparison: 0,
+                    comparisonLabel: result.comparisonLabel
+                };
+            }
+            grouped[key].revenue += result.currentValue;
+            grouped[key].revenueComparison += result.comparisonValue;
+        });
+
+        // 原価を集計
+        costResults.forEach(result => {
+            const key = `${result.item.contract_code}|${result.month}`;
+            if (!grouped[key]) {
+                // 売上がない現場（エラーケース）
+                return;
+            }
+            // 原価は既に符号反転済みなので、そのまま加算（プラス値として扱う）
+            grouped[key].cost += result.currentValue;
+            grouped[key].costComparison += result.comparisonValue;
+        });
+
+        // 利益と利益率を計算
+        const profitData = Object.values(grouped).map(item => {
+            const profit = item.revenue - item.cost;
+            const profitComparison = item.revenueComparison - item.costComparison;
+            const profitRate = item.revenue !== 0 ? (profit / item.revenue) * 100 : 0;
+            const profitRateComparison = item.revenueComparison !== 0 ? (profitComparison / item.revenueComparison) * 100 : 0;
+
+            return {
+                ...item,
+                profit: profit,
+                profitComparison: profitComparison,
+                profitDiff: profit - profitComparison,
+                profitRate: profitRate,
+                profitRateComparison: profitRateComparison,
+                profitRateDiff: profitRate - profitRateComparison
+            };
+        });
+
+        return profitData;
+    }
+
+    /**
      * 結果を取得
      */
     getResults() {
@@ -225,19 +298,47 @@ class ComparisonEngine {
         }
 
         const currentValues = this.comparisonResults.map(r => r.currentValue);
+        const comparisonValues = this.comparisonResults.map(r => r.comparisonValue);
         const diffs = this.comparisonResults.map(r => r.diff);
         const diffRates = this.comparisonResults.map(r => r.diffRate);
+
+        // 売上と原価を分離
+        const revenueResults = this.comparisonResults.filter(r => r.item.is_revenue);
+        const costResults = this.comparisonResults.filter(r => !r.item.is_revenue);
+
+        const revenueValues = revenueResults.map(r => r.currentValue);
+        const costValues = costResults.map(r => r.currentValue);
+
+        // 四分位数を計算
+        const q1 = this.percentile(currentValues, 25);
+        const q3 = this.percentile(currentValues, 75);
+        const iqr = q3 - q1;
 
         return {
             count: this.comparisonResults.length,
             anomalyCount: this.comparisonResults.filter(r => r.isAnomaly).length,
+            revenueCount: revenueResults.length,
+            costCount: costResults.length,
             currentValue: {
                 sum: this.sum(currentValues),
                 avg: this.average(currentValues),
                 median: this.median(currentValues),
                 max: Math.max(...currentValues),
                 min: Math.min(...currentValues),
-                stdDev: this.standardDeviation(currentValues)
+                stdDev: this.standardDeviation(currentValues),
+                q1: q1,
+                q3: q3,
+                iqr: iqr,
+                range: Math.max(...currentValues) - Math.min(...currentValues),
+                variance: this.variance(currentValues)
+            },
+            comparisonValue: {
+                sum: this.sum(comparisonValues),
+                avg: this.average(comparisonValues),
+                median: this.median(comparisonValues),
+                max: Math.max(...comparisonValues),
+                min: Math.min(...comparisonValues),
+                stdDev: this.standardDeviation(comparisonValues)
             },
             diff: {
                 sum: this.sum(diffs),
@@ -245,7 +346,10 @@ class ComparisonEngine {
                 median: this.median(diffs),
                 max: Math.max(...diffs),
                 min: Math.min(...diffs),
-                stdDev: this.standardDeviation(diffs)
+                stdDev: this.standardDeviation(diffs),
+                positiveCount: diffs.filter(d => d > 0).length,
+                negativeCount: diffs.filter(d => d < 0).length,
+                zeroCount: diffs.filter(d => d === 0).length
             },
             diffRate: {
                 avg: this.average(diffRates),
@@ -253,7 +357,17 @@ class ComparisonEngine {
                 max: Math.max(...diffRates),
                 min: Math.min(...diffRates),
                 stdDev: this.standardDeviation(diffRates)
-            }
+            },
+            revenue: revenueValues.length > 0 ? {
+                sum: this.sum(revenueValues),
+                avg: this.average(revenueValues),
+                count: revenueValues.length
+            } : null,
+            cost: costValues.length > 0 ? {
+                sum: this.sum(costValues),
+                avg: this.average(costValues),
+                count: costValues.length
+            } : null
         };
     }
 
@@ -317,6 +431,28 @@ class ComparisonEngine {
         const squareDiffs = arr.map(val => Math.pow(val - avg, 2));
         const avgSquareDiff = this.average(squareDiffs);
         return Math.sqrt(avgSquareDiff);
+    }
+
+    variance(arr) {
+        if (arr.length === 0) return 0;
+        const avg = this.average(arr);
+        const squareDiffs = arr.map(val => Math.pow(val - avg, 2));
+        return this.average(squareDiffs);
+    }
+
+    percentile(arr, p) {
+        if (arr.length === 0) return 0;
+        const sorted = [...arr].sort((a, b) => a - b);
+        const index = (p / 100) * (sorted.length - 1);
+        const lower = Math.floor(index);
+        const upper = Math.ceil(index);
+        const weight = index % 1;
+
+        if (lower === upper) {
+            return sorted[lower];
+        }
+
+        return sorted[lower] * (1 - weight) + sorted[upper] * weight;
     }
 }
 
