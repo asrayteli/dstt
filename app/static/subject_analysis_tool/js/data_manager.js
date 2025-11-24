@@ -117,29 +117,44 @@ class DataManager {
         };
 
         const groups = {
+            "売上": [],
             "材料": [],
             "労務": [],
             "経費": [],
-            "売上": [],
             "その他": []
         };
 
         this.metadata.subjects.forEach(subject => {
-            const category = expenseMapping[subject];
-            if (category) {
-                groups[category].push(subject);
-            } else if (subject.includes("売上")) {
+            // 売上（基本請負料、その他請負料）を優先的に売上グループに
+            if (subject === "基本請負料" || subject === "その他請負料") {
                 groups["売上"].push(subject);
             } else if (subject === "間接原価") {
                 groups["労務"].push(subject);
             } else {
-                groups["その他"].push(subject);
+                const category = expenseMapping[subject];
+                if (category) {
+                    groups[category].push(subject);
+                } else if (subject.includes("売上")) {
+                    groups["売上"].push(subject);
+                } else {
+                    groups["その他"].push(subject);
+                }
             }
         });
 
-        // 各グループをソート
+        // 各グループをソート（売上グループは基本請負料を先頭に）
         Object.keys(groups).forEach(key => {
-            groups[key].sort((a, b) => a.localeCompare(b, 'ja'));
+            if (key === "売上") {
+                groups[key].sort((a, b) => {
+                    if (a === "基本請負料") return -1;
+                    if (b === "基本請負料") return 1;
+                    if (a === "その他請負料") return -1;
+                    if (b === "その他請負料") return 1;
+                    return a.localeCompare(b, 'ja');
+                });
+            } else {
+                groups[key].sort((a, b) => a.localeCompare(b, 'ja'));
+            }
         });
 
         return groups;

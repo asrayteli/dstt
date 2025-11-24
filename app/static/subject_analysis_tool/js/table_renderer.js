@@ -35,7 +35,7 @@ class TableRenderer {
 
         // テーブル描画
         let html = '';
-        paginatedResults.forEach(result => {
+        paginatedResults.forEach((result, index) => {
             const item = result.item;
             const segment = dataManager.rawData.siteMapping[item.contract_code] || '未分類';
 
@@ -75,8 +75,23 @@ class TableRenderer {
                 diffDisplay = '-';
             }
 
+            // ツールチップ用のデータ属性を追加
+            const tooltipData = JSON.stringify({
+                siteName: item.site_name,
+                corpName: item.corp_name,
+                segment: segment,
+                subject: item.subject_name,
+                month: result.month,
+                currentValue: result.currentValue,
+                comparisonValue: result.comparisonValue,
+                comparisonLabel: result.comparisonLabel,
+                diff: result.diff,
+                diffRate: result.diffRate,
+                isRevenue: item.is_revenue
+            }).replace(/"/g, '&quot;');
+
             html += `
-                <tr class="${highlightClass}">
+                <tr class="${highlightClass}" data-tooltip='${tooltipData}' data-row-index="${index}">
                     <td>${item.site_name}</td>
                     <td>${item.corp_name}</td>
                     <td>${segment}</td>
@@ -97,6 +112,9 @@ class TableRenderer {
 
         // ソートイベント設定
         this.setupSortListeners();
+
+        // ツールチップイベント設定
+        this.setupTooltipListeners();
     }
 
     /**
@@ -494,6 +512,98 @@ class TableRenderer {
 
                 const filters = filterController.getFilters();
                 this.renderDetailTable(this.currentData, filters);
+            });
+        });
+    }
+
+    /**
+     * ツールチップリスナー設定
+     */
+    setupTooltipListeners() {
+        const rows = document.querySelectorAll('#detail-tbody tr[data-tooltip]');
+        let tooltipEl = null;
+
+        rows.forEach(row => {
+            row.addEventListener('mouseenter', (e) => {
+                const tooltipDataStr = row.getAttribute('data-tooltip');
+                if (!tooltipDataStr) return;
+
+                try {
+                    const data = JSON.parse(tooltipDataStr.replace(/&quot;/g, '"'));
+
+                    // ツールチップ作成
+                    tooltipEl = document.createElement('div');
+                    tooltipEl.className = 'tooltip';
+
+                    const typeLabel = data.isRevenue ? '売上' : '原価';
+                    const signNote = data.isRevenue ? '' : '（符号反転済み）';
+
+                    tooltipEl.innerHTML = `
+                        <div class="tooltip-content">
+                            <div class="tooltip-label">📊 比較情報 ${signNote}</div>
+                            <div class="tooltip-row">
+                                <span class="tooltip-key">現場:</span>
+                                <span class="tooltip-value">${data.siteName}</span>
+                            </div>
+                            <div class="tooltip-row">
+                                <span class="tooltip-key">科目:</span>
+                                <span class="tooltip-value">${data.subject} (${typeLabel})</span>
+                            </div>
+                            <div class="tooltip-row">
+                                <span class="tooltip-key">対象月:</span>
+                                <span class="tooltip-value">${data.month}月</span>
+                            </div>
+                            <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
+                            <div class="tooltip-row">
+                                <span class="tooltip-key">当期値:</span>
+                                <span class="tooltip-value">${this.formatNumber(data.currentValue)}円</span>
+                            </div>
+                            <div class="tooltip-row">
+                                <span class="tooltip-key">比較元 (${data.comparisonLabel}):</span>
+                                <span class="tooltip-value">${this.formatNumber(data.comparisonValue)}円</span>
+                            </div>
+                            <div class="tooltip-row">
+                                <span class="tooltip-key">差異:</span>
+                                <span class="tooltip-value" style="color: ${data.diff >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diff, true)}円</span>
+                            </div>
+                            <div class="tooltip-row">
+                                <span class="tooltip-key">差異率:</span>
+                                <span class="tooltip-value" style="color: ${data.diffRate >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diffRate, true)}%</span>
+                            </div>
+                        </div>
+                    `;
+
+                    document.body.appendChild(tooltipEl);
+
+                    // 位置調整
+                    const updatePosition = (e) => {
+                        const x = e.clientX + 10;
+                        const y = e.clientY + 10;
+
+                        // 画面外に出ないように調整
+                        const tooltipRect = tooltipEl.getBoundingClientRect();
+                        const maxX = window.innerWidth - tooltipRect.width - 10;
+                        const maxY = window.innerHeight - tooltipRect.height - 10;
+
+                        tooltipEl.style.left = Math.min(x, maxX) + 'px';
+                        tooltipEl.style.top = Math.min(y, maxY) + 'px';
+                    };
+
+                    updatePosition(e);
+
+                    // マウス移動に追従
+                    row.addEventListener('mousemove', updatePosition);
+
+                } catch (error) {
+                    console.error('Tooltip error:', error);
+                }
+            });
+
+            row.addEventListener('mouseleave', () => {
+                if (tooltipEl) {
+                    tooltipEl.remove();
+                    tooltipEl = null;
+                }
             });
         });
     }

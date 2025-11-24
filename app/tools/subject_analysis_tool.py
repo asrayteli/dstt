@@ -167,6 +167,16 @@ def parse_subject_data(csv_data):
         if not contract_code:
             continue
 
+        # 自動車売上の場合は、契約形態名称を科目名称として使用
+        # （基本請負料とその他請負料を別々に扱うため）
+        display_subject_name = subject_name
+        if subject_name == "自動車売上":
+            if contract_type in ["基本請負料", "その他請負料"]:
+                display_subject_name = contract_type
+            else:
+                # 想定外の契約形態の場合は元の名前を使用
+                display_subject_name = f"自動車売上({contract_type})"
+
         # 金額データ抽出（列13以降が各月のデータ、4月から開始）
         amounts = []
         for j in range(13, len(row)):
@@ -180,13 +190,23 @@ def parse_subject_data(csv_data):
         while len(amounts) < 12:
             amounts.append(0)
 
+        # 原価の符号を反転（売上以外はマイナス→プラス、プラス→マイナス）
+        # 売上は「基本請負料」「その他請負料」のみ
+        is_revenue = display_subject_name in ["基本請負料", "その他請負料"]
+
+        if not is_revenue:
+            # 原価の場合は符号を反転
+            amounts = [-amount for amount in amounts]
+
         parsed.append({
             "contract_code": contract_code,
             "corp_name": corp_name,
             "site_name": site_name,
             "subject_code": subject_code,
-            "subject_name": subject_name,
+            "subject_name": display_subject_name,  # 表示用の科目名
+            "original_subject_name": subject_name,  # 元の科目名（参照用）
             "contract_type": contract_type,
+            "is_revenue": is_revenue,  # 売上かどうかのフラグ
             "amounts": amounts[:12]  # 12ヶ月分のみ
         })
 

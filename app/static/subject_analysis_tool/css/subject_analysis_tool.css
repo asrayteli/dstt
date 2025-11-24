@@ -486,6 +486,53 @@
     display: none !important;
 }
 
+/* ツールチップ */
+.tooltip {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 0.75rem;
+    border-radius: 0.375rem;
+    font-size: 0.75rem;
+    z-index: 1000;
+    pointer-events: none;
+    max-width: 300px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.tooltip-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.tooltip-label {
+    font-weight: 600;
+    color: #93c5fd;
+    margin-bottom: 0.25rem;
+}
+
+.tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.tooltip-key {
+    color: #d1d5db;
+}
+
+.tooltip-value {
+    font-weight: 600;
+    color: #fff;
+}
+
+/* テーブルのセルにホバー効果を追加 */
+.data-table tbody tr td {
+    position: relative;
+    cursor: help;
+}
+
 /* レスポンシブ */
 @media (max-width: 1024px) {
     .sat-layout {
