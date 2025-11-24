@@ -744,15 +744,15 @@ class TableRenderer {
         }
 
         // サマリー統計を計算
-        // 注: costは符号反転済みの正の値として扱われる
+        // 注: costは負の値（支出を表す）
         const totalRevenue = profitData.reduce((sum, item) => sum + item.revenue, 0);
         const totalCost = profitData.reduce((sum, item) => sum + item.cost, 0);
-        const totalProfit = totalRevenue - totalCost;  // 引き算
+        const totalProfit = totalRevenue + totalCost;  // costが負なので足し算
         const avgProfitRate = totalRevenue > 0 ? (totalProfit / totalRevenue * 100) : 0;
 
         const totalRevenueComparison = profitData.reduce((sum, item) => sum + item.revenueComparison, 0);
         const totalCostComparison = profitData.reduce((sum, item) => sum + item.costComparison, 0);
-        const totalProfitComparison = totalRevenueComparison - totalCostComparison;  // 引き算
+        const totalProfitComparison = totalRevenueComparison + totalCostComparison;  // costが負なので足し算
         const avgProfitRateComparison = totalRevenueComparison > 0 ? (totalProfitComparison / totalRevenueComparison * 100) : 0;
 
         const profitDiff = totalProfit - totalProfitComparison;
@@ -761,7 +761,7 @@ class TableRenderer {
         let html = `
             <div class="bg-blue-50 border border-blue-200 rounded p-4 mb-4">
                 <p class="text-sm text-blue-800">
-                    💡 <strong>利益の計算:</strong> 利益 = 売上 - 原価（引き算）
+                    💡 <strong>利益の計算:</strong> 利益 = 売上 + 原価（原価は負の値）
                 </p>
             </div>
             <div class="stats-grid mb-6">

@@ -174,10 +174,10 @@ class ComparisonEngine {
         });
 
         // 利益と利益率を計算
-        // 利益 = 売上 - 原価（引き算）
+        // 原価は負の値なので、利益 = 売上 + 原価（足し算）
         const profitData = Object.values(grouped).map(item => {
-            const profit = item.revenue - item.cost;
-            const profitComparison = item.revenueComparison - item.costComparison;
+            const profit = item.revenue + item.cost;  // costが負なので足し算
+            const profitComparison = item.revenueComparison + item.costComparison;
             const profitRate = item.revenue !== 0 ? (profit / item.revenue) * 100 : 0;
             const profitRateComparison = item.revenueComparison !== 0 ? (profitComparison / item.revenueComparison) * 100 : 0;
 
@@ -187,7 +187,7 @@ class ComparisonEngine {
                     現場: item.siteName,
                     売上: item.revenue,
                     原価: item.cost,
-                    利益計算式: `${item.revenue} - ${item.cost}`,
+                    利益計算式: `${item.revenue} + (${item.cost})`,
                     利益結果: profit
                 });
             }
