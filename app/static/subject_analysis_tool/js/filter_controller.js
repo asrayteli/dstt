@@ -23,49 +23,116 @@ class FilterController {
     renderSiteList() {
         const sites = dataManager.getSites();
         const container = document.getElementById('site-list');
+        const siteGroupMode = document.getElementById('site-group-mode')?.value || '5digit';
 
         if (sites.length === 0) {
             container.innerHTML = '<p class="text-sm text-gray-500">現場データがありません</p>';
             return;
         }
 
-        // セグメント別にグループ化
-        const groupedSites = {};
-        sites.forEach(site => {
-            if (!groupedSites[site.segment]) {
-                groupedSites[site.segment] = [];
-            }
-            groupedSites[site.segment].push(site);
-        });
-
         let html = '';
-        Object.keys(groupedSites).sort().forEach(segment => {
-            html += `
-                <div class="subject-group">
-                    <div class="subject-group-title" onclick="toggleGroup(this)">
-                        ${segment} (${groupedSites[segment].length})
-                    </div>
-                    <div class="subject-group-items">
-            `;
 
-            groupedSites[segment].forEach(site => {
-                const siteKey = `${site.contractCode}|${site.siteName}|${site.corpName}`;
+        if (siteGroupMode === '5digit') {
+            // 5桁グループ化モード：ツリー構造で表示
+            const grouped5Digit = dataManager.getSites5DigitGrouped();
+
+            Object.keys(grouped5Digit).sort().forEach(segment => {
                 html += `
-                    <div class="site-item">
-                        <input type="checkbox"
-                               class="site-checkbox"
-                               value="${siteKey}"
-                               data-segment="${site.segment}">
-                        <span>${site.displayName}</span>
+                    <div class="subject-group">
+                        <div class="subject-group-title" onclick="toggleGroup(this)">
+                            ${segment} (${grouped5Digit[segment].length})
+                        </div>
+                        <div class="subject-group-items">
+                `;
+
+                grouped5Digit[segment].forEach((group, groupIndex) => {
+                    const code5 = group.code5;
+                    const groupKey = `5digit:${code5}`;
+                    const allChecked = this.selectedSites.some(s => s.startsWith(`5digit:${code5}`));
+
+                    html += `
+                        <div class="site-item site-group-5digit">
+                            <input type="checkbox"
+                                   class="site-checkbox site-checkbox-5digit"
+                                   value="${groupKey}"
+                                   data-segment="${segment}"
+                                   data-code5="${code5}"
+                                   ${allChecked ? 'checked' : ''}
+                                   onchange="filterController.handle5DigitCheckboxChange(this)">
+                            <span onclick="filterController.toggle8DigitChildren('${code5}')" style="cursor: pointer;">
+                                <span id="expand-icon-${code5}">▶</span> ${group.siteName} (${group.children.length}拠点)
+                            </span>
+                        </div>
+                        <div id="children-${code5}" class="site-8digit-children" style="display: none; margin-left: 20px;">
+                    `;
+
+                    group.children.forEach(site => {
+                        const siteKey = `${site.contractCode}|${site.siteName}|${site.corpName}`;
+                        const checked = this.selectedSites.includes(siteKey) || allChecked;
+                        html += `
+                            <div class="site-item">
+                                <input type="checkbox"
+                                       class="site-checkbox site-checkbox-8digit"
+                                       value="${siteKey}"
+                                       data-segment="${segment}"
+                                       data-code5="${code5}"
+                                       ${checked ? 'checked' : ''}
+                                       onchange="filterController.handle8DigitCheckboxChange(this)">
+                                <span>${site.displayName}</span>
+                            </div>
+                        `;
+                    });
+
+                    html += `
+                        </div>
+                    `;
+                });
+
+                html += `
+                        </div>
                     </div>
                 `;
             });
+        } else {
+            // 8桁個別表示モード：従来の表示
+            const groupedSites = {};
+            sites.forEach(site => {
+                if (!groupedSites[site.segment]) {
+                    groupedSites[site.segment] = [];
+                }
+                groupedSites[site.segment].push(site);
+            });
 
-            html += `
+            Object.keys(groupedSites).sort().forEach(segment => {
+                html += `
+                    <div class="subject-group">
+                        <div class="subject-group-title" onclick="toggleGroup(this)">
+                            ${segment} (${groupedSites[segment].length})
+                        </div>
+                        <div class="subject-group-items">
+                `;
+
+                groupedSites[segment].forEach(site => {
+                    const siteKey = `${site.contractCode}|${site.siteName}|${site.corpName}`;
+                    const checked = this.selectedSites.includes(siteKey);
+                    html += `
+                        <div class="site-item">
+                            <input type="checkbox"
+                                   class="site-checkbox"
+                                   value="${siteKey}"
+                                   data-segment="${site.segment}"
+                                   ${checked ? 'checked' : ''}>
+                            <span>${site.displayName}</span>
+                        </div>
+                    `;
+                });
+
+                html += `
+                        </div>
                     </div>
-                </div>
-            `;
-        });
+                `;
+            });
+        }
 
         container.innerHTML = html;
 
@@ -170,6 +237,14 @@ class FilterController {
                 this.updateComparisonModeUI();
             });
         }
+
+        // 現場グループ化モード変更
+        const siteGroupMode = document.getElementById('site-group-mode');
+        if (siteGroupMode) {
+            siteGroupMode.addEventListener('change', () => {
+                this.renderSiteList();
+            });
+        }
     }
 
     /**
@@ -234,6 +309,7 @@ class FilterController {
             sites: this.selectedSites,
             subjects: this.selectedSubjects,
             segments: this.selectedSegments,
+            siteGroupMode: document.getElementById('site-group-mode').value,
             comparisonMode: document.getElementById('comparison-mode').value,
             baseMonth: document.getElementById('base-month').value,
             displayMode: document.getElementById('display-mode').value,
@@ -257,6 +333,67 @@ class FilterController {
         document.querySelectorAll('.month-checkbox').forEach(cb => cb.checked = false);
         document.querySelectorAll('.site-checkbox').forEach(cb => cb.checked = false);
         document.querySelectorAll('.subject-checkbox').forEach(cb => cb.checked = false);
+    }
+
+    /**
+     * 8桁の子要素を展開/折りたたみ
+     */
+    toggle8DigitChildren(code5) {
+        const childrenDiv = document.getElementById(`children-${code5}`);
+        const iconSpan = document.getElementById(`expand-icon-${code5}`);
+
+        if (childrenDiv.style.display === 'none') {
+            childrenDiv.style.display = 'block';
+            iconSpan.textContent = '▼';
+        } else {
+            childrenDiv.style.display = 'none';
+            iconSpan.textContent = '▶';
+        }
+    }
+
+    /**
+     * 5桁チェックボックスの変更ハンドラー
+     */
+    handle5DigitCheckboxChange(checkbox) {
+        const code5 = checkbox.dataset.code5;
+        const isChecked = checkbox.checked;
+
+        // 配下の8桁チェックボックスを全て同じ状態にする
+        const children = document.querySelectorAll(`.site-checkbox-8digit[data-code5="${code5}"]`);
+        children.forEach(child => {
+            child.checked = isChecked;
+        });
+
+        this.updateSelectedSites();
+    }
+
+    /**
+     * 8桁チェックボックスの変更ハンドラー
+     */
+    handle8DigitCheckboxChange(checkbox) {
+        const code5 = checkbox.dataset.code5;
+
+        // 同じグループの8桁チェックボックスの状態を確認
+        const children = document.querySelectorAll(`.site-checkbox-8digit[data-code5="${code5}"]`);
+        const allChecked = Array.from(children).every(cb => cb.checked);
+        const noneChecked = Array.from(children).every(cb => !cb.checked);
+
+        // 5桁チェックボックスの状態を更新
+        const parent5Digit = document.querySelector(`.site-checkbox-5digit[data-code5="${code5}"]`);
+        if (parent5Digit) {
+            if (allChecked) {
+                parent5Digit.checked = true;
+                parent5Digit.indeterminate = false;
+            } else if (noneChecked) {
+                parent5Digit.checked = false;
+                parent5Digit.indeterminate = false;
+            } else {
+                parent5Digit.checked = false;
+                parent5Digit.indeterminate = true;
+            }
+        }
+
+        this.updateSelectedSites();
     }
 }
 
