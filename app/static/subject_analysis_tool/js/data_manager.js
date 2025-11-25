@@ -71,7 +71,7 @@ class DataManager {
                 siteName,
                 corpName,
                 segment: this.rawData.siteMapping[contractCode] || '未分類',
-                displayName: `${siteName} (${corpName})`
+                displayName: `${corpName} (${siteName})`
             });
         });
         return sites.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ja'));
@@ -136,7 +136,7 @@ class DataManager {
                 siteName,
                 corpName,
                 segment: this.rawData.siteMapping[contractCode] || '未分類',
-                displayName: `${siteName} (${corpName})`
+                displayName: `${corpName} (${siteName})`
             });
         });
 
@@ -155,14 +155,19 @@ class DataManager {
             grouped[segment].push({
                 code5: code5,
                 siteName: representativeSite.siteName,
+                corpName: representativeSite.corpName,
                 segment: segment,
                 children: sites.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ja'))
             });
         });
 
-        // 各セグメント内でソート
+        // 各セグメント内でソート（法人名→現場名の順）
         Object.keys(grouped).forEach(segment => {
-            grouped[segment].sort((a, b) => a.siteName.localeCompare(b.siteName, 'ja'));
+            grouped[segment].sort((a, b) => {
+                const corpCompare = a.corpName.localeCompare(b.corpName, 'ja');
+                if (corpCompare !== 0) return corpCompare;
+                return a.siteName.localeCompare(b.siteName, 'ja');
+            });
         });
 
         return grouped;
