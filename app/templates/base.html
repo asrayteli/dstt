@@ -9,9 +9,9 @@
 </head>
 <body class="bg-gray-100 font-sans">
 
-  <div class="flex min-h-screen">
+  <div class="flex min-h-screen overflow-x-hidden">
     <!-- サイドバーなど固定部分 -->
-    <aside id="app-sidebar" class="w-64 bg-white shadow-lg transition-all duration-300 ease-in-out">
+    <aside id="app-sidebar" class="w-64 bg-white shadow-lg transition-transform duration-300 ease-in-out flex-shrink-0">
       <div class="p-4">
         <a href="/" class="block">
           <img src="{{ url_for('static', filename='img/head.png') }}" alt="DSTT Logo">
@@ -71,7 +71,7 @@
     <!-- メインコンテンツ -->
     <main id="main-content" class="flex-1 p-8 transition-all duration-300 ease-in-out">
       <!-- サイドバー切り替えボタン -->
-      <button id="sidebar-toggle" class="fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-lg hover:bg-gray-100 transition-colors duration-200" title="サイドバーを切り替え">
+      <button id="sidebar-toggle" class="fixed top-4 z-50 p-2 bg-white rounded-lg shadow-lg hover:bg-gray-100 transition-all duration-300" title="サイドバーを切り替え" style="left: 16px;">
         <svg id="toggle-icon" class="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
         </svg>
@@ -85,9 +85,7 @@
     // サイドバーの表示状態を管理
     (function() {
       const sidebar = document.getElementById('app-sidebar');
-      const mainContent = document.getElementById('main-content');
       const toggleButton = document.getElementById('sidebar-toggle');
-      const toggleIcon = document.getElementById('toggle-icon');
 
       // localStorageから前回の状態を読み込む
       const sidebarVisible = localStorage.getItem('sidebarVisible') !== 'false';
@@ -95,30 +93,24 @@
       // 初期状態を設定
       function setSidebarState(visible) {
         if (visible) {
-          sidebar.classList.remove('-ml-64');
-          sidebar.classList.add('w-64');
-          toggleButton.classList.remove('left-4');
-          toggleButton.classList.add('left-4');
-          mainContent.classList.remove('ml-0');
+          // サイドバーを表示
+          sidebar.style.transform = 'translateX(0)';
+          toggleButton.style.left = '16px';
         } else {
-          sidebar.classList.add('-ml-64');
-          sidebar.classList.remove('w-64');
-          toggleButton.classList.remove('left-4');
-          toggleButton.classList.add('left-4');
-          mainContent.classList.add('ml-0');
+          // サイドバーを完全に隠す（左に256px移動）
+          sidebar.style.transform = 'translateX(-256px)';
+          toggleButton.style.left = '16px';
         }
         localStorage.setItem('sidebarVisible', visible);
       }
 
       // ページ読み込み時に前回の状態を適用
-      if (!sidebarVisible) {
-        setSidebarState(false);
-      }
+      setSidebarState(sidebarVisible);
 
       // トグルボタンのクリックイベント
       toggleButton.addEventListener('click', function() {
-        const isVisible = !sidebar.classList.contains('-ml-64');
-        setSidebarState(!isVisible);
+        const currentlyVisible = localStorage.getItem('sidebarVisible') !== 'false';
+        setSidebarState(!currentlyVisible);
       });
     })();
   </script>
