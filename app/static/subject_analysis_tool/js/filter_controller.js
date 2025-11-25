@@ -60,7 +60,7 @@ class FilterController {
                                    ${allChecked ? 'checked' : ''}
                                    onchange="filterController.handle5DigitCheckboxChange(this)">
                             <span onclick="filterController.toggle8DigitChildren('${code5}')" style="cursor: pointer;">
-                                <span id="expand-icon-${code5}">▶</span> ${group.corpName} - ${group.siteName} (${group.children.length}拠点)
+                                <span id="expand-icon-${code5}">▶</span> ${group.corpName}（${group.children.length}拠点）
                             </span>
                         </div>
                         <div id="children-${code5}" class="site-8digit-children" style="display: none; margin-left: 20px;">
