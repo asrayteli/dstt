@@ -14,6 +14,7 @@ class ComparisonEngine {
             sites,
             subjects,
             segments,
+            siteGroupMode,
             comparisonMode,
             baseMonth,
             thresholdRate,
@@ -22,7 +23,12 @@ class ComparisonEngine {
         } = filters;
 
         // データ取得
-        const currentData = dataManager.getData({ sites, subjects, months, segments });
+        let currentData = dataManager.getData({ sites, subjects, months, segments });
+
+        // 5桁グループ化モードの場合はデータを合算
+        if (siteGroupMode === '5digit') {
+            currentData = dataManager.groupDataBy5Digit(currentData);
+        }
 
         this.comparisonResults = [];
 
@@ -38,10 +44,20 @@ class ComparisonEngine {
                 // 比較モード別の処理
                 if (comparisonMode === 'prev_year') {
                     // 前年同月比較
-                    const prevYearItem = dataManager.getPrevYearData(
-                        item.contract_code,
-                        item.subject_name
-                    );
+                    let prevYearItem;
+                    if (siteGroupMode === '5digit') {
+                        // 5桁モードの場合は5桁でグループ化した前年データを取得
+                        prevYearItem = dataManager.getPrevYearData5Digit(
+                            item.contract_code,
+                            item.subject_name
+                        );
+                    } else {
+                        // 8桁モードの場合は通常の前年データ取得
+                        prevYearItem = dataManager.getPrevYearData(
+                            item.contract_code,
+                            item.subject_name
+                        );
+                    }
                     if (prevYearItem && prevYearItem.amounts[monthIndex] !== undefined) {
                         comparisonValue = prevYearItem.amounts[monthIndex];
                         comparisonLabel = `前年${month}月`;
@@ -60,10 +76,18 @@ class ComparisonEngine {
                 } else if (comparisonMode === 'cumulative') {
                     // 累計比較モード
                     // 詳細一覧では月別の値を表示するため、前年同月比較と同じ処理
-                    const prevYearItem = dataManager.getPrevYearData(
-                        item.contract_code,
-                        item.subject_name
-                    );
+                    let prevYearItem;
+                    if (siteGroupMode === '5digit') {
+                        prevYearItem = dataManager.getPrevYearData5Digit(
+                            item.contract_code,
+                            item.subject_name
+                        );
+                    } else {
+                        prevYearItem = dataManager.getPrevYearData(
+                            item.contract_code,
+                            item.subject_name
+                        );
+                    }
                     if (prevYearItem && prevYearItem.amounts[monthIndex] !== undefined) {
                         comparisonValue = prevYearItem.amounts[monthIndex];
                         comparisonLabel = `前年${month}月`;

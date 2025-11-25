@@ -53,6 +53,13 @@ class DataManager {
     }
 
     /**
+     * 8桁コードから5桁コードを抽出
+     */
+    get5DigitCode(contractCode) {
+        return contractCode.substring(0, 5);
+    }
+
+    /**
      * 現場リストを取得
      */
     getSites() {
@@ -64,10 +71,106 @@ class DataManager {
                 siteName,
                 corpName,
                 segment: this.rawData.siteMapping[contractCode] || '未分類',
-                displayName: `${siteName} (${corpName})`
+                displayName: `${corpName} (${siteName})`
             });
         });
         return sites.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ja'));
+    }
+
+    /**
+     * 5桁コードのセグメントを多数決で決定
+     */
+    getSegmentFor5Digit(code5) {
+        const segmentCounts = {};
+
+        // 同じ5桁コードの8桁コードのセグメントをカウント
+        this.metadata.sites.forEach(siteKey => {
+            const [contractCode] = siteKey.split('|');
+            if (this.get5DigitCode(contractCode) === code5) {
+                const segment = this.rawData.siteMapping[contractCode] || '未分類';
+                segmentCounts[segment] = (segmentCounts[segment] || 0) + 1;
+            }
+        });
+
+        // 最も多いセグメントを取得
+        const segments = Object.keys(segmentCounts);
+        if (segments.length === 0) return '未分類';
+        if (segments.length === 1) return segments[0];
+
+        // 複数あり、同数の場合はユーザーに質問
+        const sortedSegments = segments.sort((a, b) => segmentCounts[b] - segmentCounts[a]);
+        const maxCount = segmentCounts[sortedSegments[0]];
+        const tiedSegments = sortedSegments.filter(s => segmentCounts[s] === maxCount);
+
+        if (tiedSegments.length > 1) {
+            // 同数の場合はアラートで質問
+            const message = `現場コード${code5}は以下のセグメントが同数です:\n${
+                tiedSegments.map(s => `${s}: ${segmentCounts[s]}件`).join('\n')
+            }\nどちらを使用しますか？`;
+
+            const selected = confirm(`${message}\n\nOK = ${tiedSegments[0]} / キャンセル = ${tiedSegments[1]}`);
+            return selected ? tiedSegments[0] : tiedSegments[1];
+        }
+
+        return sortedSegments[0];
+    }
+
+    /**
+     * 5桁グループ化された現場リストを取得
+     */
+    getSites5DigitGrouped() {
+        const grouped = {};
+
+        // まず5桁コードでグループ化
+        const code5Groups = {};
+        this.metadata.sites.forEach(siteKey => {
+            const [contractCode, siteName, corpName] = siteKey.split('|');
+            const code5 = this.get5DigitCode(contractCode);
+
+            if (!code5Groups[code5]) {
+                code5Groups[code5] = [];
+            }
+
+            code5Groups[code5].push({
+                contractCode,
+                siteName,
+                corpName,
+                segment: this.rawData.siteMapping[contractCode] || '未分類',
+                displayName: `${corpName} (${siteName})`
+            });
+        });
+
+        // セグメント別に整理
+        Object.keys(code5Groups).forEach(code5 => {
+            const sites = code5Groups[code5];
+            const segment = this.getSegmentFor5Digit(code5);
+
+            if (!grouped[segment]) {
+                grouped[segment] = [];
+            }
+
+            // 代表の現場名（最初の1件）
+            const representativeSite = sites[0];
+
+            grouped[segment].push({
+                code5: code5,
+                siteName: representativeSite.siteName,
+                corpName: representativeSite.corpName,
+                segment: segment,
+                children: sites.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ja'))
+            });
+        });
+
+        // 各セグメント内でソート（法人名→現場名の順）
+        Object.keys(grouped).forEach(segment => {
+            grouped[segment].sort((a, b) => {
+                const corpCompare = a.corpName.localeCompare(b.corpName, 'ja');
+                if (corpCompare !== 0) return corpCompare;
+                return a.siteName.localeCompare(b.siteName, 'ja');
+            });
+        });
+
+        return grouped;
     }
 
     /**
@@ -193,6 +296,76 @@ class DataManager {
         });
 
         return filteredData;
+    }
+
+    /**
+     * データを5桁コードでグループ化（金額合算）
+     */
+    groupDataBy5Digit(data) {
+        const grouped = {};
+
+        data.forEach(item => {
+            const code5 = this.get5DigitCode(item.contract_code);
+            const key = `${code5}|${item.subject_name}`;
+
+            if (!grouped[key]) {
+                // 新しいグループを作成
+                grouped[key] = {
+                    contract_code: code5,
+                    site_name: item.site_name, // 代表の現場名
+                    corp_name: item.corp_name,
+                    subject_name: item.subject_name,
+                    is_revenue: item.is_revenue,
+                    amounts: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // 12ヶ月分
+                    original_codes: [] // 元の8桁コードのリスト
+                };
+            }
+
+            // 金額を合算
+            for (let i = 0; i < 12; i++) {
+                grouped[key].amounts[i] += item.amounts[i];
+            }
+
+            // 元の8桁コードを記録
+            if (!grouped[key].original_codes.includes(item.contract_code)) {
+                grouped[key].original_codes.push(item.contract_code);
+            }
+        });
+
+        return Object.values(grouped);
+    }
+
+    /**
+     * 前年データを5桁コードでグループ化して取得
+     */
+    getPrevYearData5Digit(code5, subjectName) {
+        if (!this.rawData.prevYear) return null;
+
+        // 同じ5桁コードの前年データを全て取得
+        const matchingData = this.rawData.prevYear.filter(item =>
+            this.get5DigitCode(item.contract_code) === code5 &&
+            item.subject_name === subjectName
+        );
+
+        if (matchingData.length === 0) return null;
+
+        // 金額を合算
+        const result = {
+            contract_code: code5,
+            site_name: matchingData[0].site_name,
+            corp_name: matchingData[0].corp_name,
+            subject_name: subjectName,
+            is_revenue: matchingData[0].is_revenue,
+            amounts: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        };
+
+        matchingData.forEach(item => {
+            for (let i = 0; i < 12; i++) {
+                result.amounts[i] += item.amounts[i];
+            }
+        });
+
+        return result;
     }
 
     /**
