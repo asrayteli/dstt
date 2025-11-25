@@ -5,12 +5,20 @@ from flask_login import login_required, current_user
 from werkzeug.security import generate_password_hash
 from app.models import db, User
 import re
+import secrets
+import string
 
 user_management_bp = Blueprint("user_management", __name__, url_prefix="/tools/user_management")
 
 def is_admin():
     """管理者権限チェック - ログインID 3243012 のみ管理者"""
     return current_user.is_authenticated and current_user.username == "3243012"
+
+def generate_random_password(length=12):
+    """安全なランダムパスワードを生成"""
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    password = ''.join(secrets.choice(alphabet) for i in range(length))
+    return password
 
 @user_management_bp.route("/api/users", methods=["GET"])
 @login_required
@@ -124,26 +132,42 @@ def change_password(user_id):
     """パスワード変更（管理者のみ）"""
     if not is_admin():
         return jsonify({"error": "管理者権限が必要です"}), 403
-    
+
     user = User.query.get(user_id)
     if not user:
         return jsonify({"error": "ユーザーが見つかりません"}), 404
-    
+
     data = request.json
     new_password = data.get('password', '').strip()
-    
+    generate_auto = data.get('generate_auto', False)
+
+    # 自動生成の場合
+    if generate_auto:
+        new_password = generate_random_password()
+
     if not new_password:
         return jsonify({"error": "パスワードは空にできません"}), 400
-    
+
     try:
         user.password_hash = generate_password_hash(new_password)
         db.session.commit()
-        
+
         return jsonify({
             "success": True,
-            "message": f"ユーザー「{user.username}」のパスワードを変更しました"
+            "message": f"ユーザー「{user.username}」のパスワードを変更しました",
+            "new_password": new_password  # 新しいパスワードを返す
         })
-        
+
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": f"パスワード変更に失敗しました: {str(e)}"}), 500
+
+@user_management_bp.route("/api/generate-password", methods=["GET"])
+@login_required
+def api_generate_password():
+    """ランダムパスワード生成（管理者のみ）"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    password = generate_random_password()
+    return jsonify({"password": password})
