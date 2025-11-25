@@ -11,7 +11,7 @@
 
   <div class="flex min-h-screen">
     <!-- サイドバーなど固定部分 -->
-    <aside class="w-64 bg-white shadow-lg">
+    <aside id="app-sidebar" class="w-64 bg-white shadow-lg transition-all duration-300 ease-in-out flex-shrink-0">
       <div class="p-4">
         <a href="/" class="block">
           <img src="{{ url_for('static', filename='img/head.png') }}" alt="DSTT Logo">
@@ -69,10 +69,49 @@
     </aside>
 
     <!-- メインコンテンツ -->
-    <main class="flex-1 p-8">
+    <main id="app-main-content" class="flex-1 p-8">
+      <!-- サイドバー切り替えボタン -->
+      <button id="sidebar-toggle" class="fixed top-4 z-50 p-2 bg-white rounded-lg shadow-lg hover:bg-gray-100 transition-all duration-200" title="サイドバーを切り替え" style="left: 16px;">
+        <svg id="toggle-icon" class="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+        </svg>
+      </button>
+
       {% block content %}{% endblock %}
     </main>
   </div>
+
+  <script>
+    // サイドバーの表示状態を管理
+    (function() {
+      const sidebar = document.getElementById('app-sidebar');
+      const toggleButton = document.getElementById('sidebar-toggle');
+
+      // localStorageから前回の状態を読み込む
+      const sidebarVisible = localStorage.getItem('sidebarVisible') !== 'false';
+
+      // 初期状態を設定
+      function setSidebarState(visible) {
+        if (visible) {
+          // サイドバーを表示
+          sidebar.style.display = 'block';
+        } else {
+          // サイドバーを完全に隠す
+          sidebar.style.display = 'none';
+        }
+        localStorage.setItem('sidebarVisible', visible);
+      }
+
+      // ページ読み込み時に前回の状態を適用
+      setSidebarState(sidebarVisible);
+
+      // トグルボタンのクリックイベント
+      toggleButton.addEventListener('click', function() {
+        const currentlyVisible = localStorage.getItem('sidebarVisible') !== 'false';
+        setSidebarState(!currentlyVisible);
+      });
+    })();
+  </script>
 
 </body>
 </html>
