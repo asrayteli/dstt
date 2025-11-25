@@ -1,0 +1,325 @@
+{% extends "base.html" %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='subject_analysis_tool/css/subject_analysis_tool.css') }}">
+
+<div class="sat-container">
+    <!-- ヘッダー -->
+    <div class="sat-header">
+        <h2 class="sat-title">📊 科目別分析ツール SAT</h2>
+        <div class="sat-header-actions">
+            <button id="upload-btn" class="btn btn-primary">
+                📁 ファイルアップロード
+            </button>
+            <button id="reset-btn" class="btn btn-outline" style="display: none;">
+                🔄 リセット
+            </button>
+        </div>
+    </div>
+
+    <!-- アップロードモーダル -->
+    <div id="upload-modal" class="modal-overlay hidden">
+        <div class="modal-content" style="max-width: 600px;">
+            <h3 class="text-lg font-bold mb-4">ファイルアップロード</h3>
+            <form id="upload-form" class="space-y-4">
+                <div class="form-group">
+                    <label class="form-label">科目別推移表（CSV） *</label>
+                    <input type="file" id="subject-file" accept=".csv" class="form-input" required>
+                    <p class="text-xs text-gray-500 mt-1">契約コード、法人名、現場名、科目名、月別金額を含むCSVファイル</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">前年科目別推移表（CSV）</label>
+                    <input type="file" id="prev-year-subject-file" accept=".csv" class="form-input">
+                    <p class="text-xs text-gray-500 mt-1">前年度の科目別推移表（前年比較を行う場合）</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">現場表（CSV）</label>
+                    <input type="file" id="site-file" accept=".csv" class="form-input">
+                    <p class="text-xs text-gray-500 mt-1">契約コード、セグメント（役員/一般/旅客）を含むCSVファイル</p>
+                </div>
+
+                <div class="flex justify-end space-x-2 mt-6">
+                    <button type="button" onclick="closeUploadModal()" class="btn btn-outline">
+                        キャンセル
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        アップロード
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- メインコンテンツ -->
+    <div id="main-content" class="hidden">
+        <div class="sat-layout">
+            <!-- 左サイドバー -->
+            <div class="sat-sidebar">
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">📅 対象月選択</h3>
+                    <div class="month-selector">
+                        <button class="btn btn-sm btn-outline mb-2" onclick="selectAllMonths()">全選択</button>
+                        <button class="btn btn-sm btn-outline mb-2 ml-2" onclick="deselectAllMonths()">全解除</button>
+                        <div class="month-checkboxes">
+                            <label><input type="checkbox" value="4" class="month-checkbox"> 4月</label>
+                            <label><input type="checkbox" value="5" class="month-checkbox"> 5月</label>
+                            <label><input type="checkbox" value="6" class="month-checkbox"> 6月</label>
+                            <label><input type="checkbox" value="7" class="month-checkbox"> 7月</label>
+                            <label><input type="checkbox" value="8" class="month-checkbox"> 8月</label>
+                            <label><input type="checkbox" value="9" class="month-checkbox"> 9月</label>
+                            <label><input type="checkbox" value="10" class="month-checkbox"> 10月</label>
+                            <label><input type="checkbox" value="11" class="month-checkbox"> 11月</label>
+                            <label><input type="checkbox" value="12" class="month-checkbox"> 12月</label>
+                            <label><input type="checkbox" value="1" class="month-checkbox"> 1月</label>
+                            <label><input type="checkbox" value="2" class="month-checkbox"> 2月</label>
+                            <label><input type="checkbox" value="3" class="month-checkbox"> 3月</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">🏢 現場選択</h3>
+                    <input type="text" id="site-search" placeholder="現場検索..." class="form-input mb-2">
+                    <button class="btn btn-sm btn-outline mb-2" onclick="selectAllSites()">全選択</button>
+                    <button class="btn btn-sm btn-outline mb-2 ml-2" onclick="deselectAllSites()">全解除</button>
+                    <div id="site-list" class="site-list"></div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">📋 科目選択</h3>
+                    <input type="text" id="subject-search" placeholder="科目検索..." class="form-input mb-2">
+                    <button class="btn btn-sm btn-outline mb-2" onclick="selectAllSubjects()">全選択</button>
+                    <button class="btn btn-sm btn-outline mb-2 ml-2" onclick="deselectAllSubjects()">全解除</button>
+                    <div id="subject-list" class="subject-list"></div>
+                </div>
+
+                <div class="sidebar-section">
+                    <button class="btn btn-primary w-full" onclick="applyFilters()">
+                        🔍 分析実行
+                    </button>
+                </div>
+            </div>
+
+            <!-- 右側メインエリア -->
+            <div class="sat-main">
+                <!-- コントロールパネル -->
+                <div class="control-panel">
+                    <div class="control-row">
+                        <div class="control-group">
+                            <label class="control-label">比較モード</label>
+                            <select id="comparison-mode" class="form-input">
+                                <option value="prev_year">前年同月比較</option>
+                                <option value="same_year">同年度内指定月比較</option>
+                                <option value="cumulative">累計比較</option>
+                            </select>
+                        </div>
+                        <div class="control-group" id="base-month-group" style="display: none;">
+                            <label class="control-label">基準月</label>
+                            <select id="base-month" class="form-input">
+                                <option value="4">4月</option>
+                                <option value="5">5月</option>
+                                <option value="6">6月</option>
+                                <option value="7">7月</option>
+                                <option value="8">8月</option>
+                                <option value="9">9月</option>
+                                <option value="10">10月</option>
+                                <option value="11">11月</option>
+                                <option value="12">12月</option>
+                                <option value="1">1月</option>
+                                <option value="2">2月</option>
+                                <option value="3">3月</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">表示値</label>
+                            <select id="display-mode" class="form-input">
+                                <option value="all">すべて表示</option>
+                                <option value="value_diff">実数値 + 差異</option>
+                                <option value="value_rate">実数値 + 差異率</option>
+                                <option value="value_only">実数値のみ</option>
+                                <option value="diff_only">差異のみ</option>
+                                <option value="rate_only">差異率のみ</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <div class="control-group">
+                            <label class="control-label">異常値検出（差異率%）</label>
+                            <input type="number" id="threshold-rate" class="form-input" value="5" step="0.1">
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">異常値検出（差異金額）</label>
+                            <input type="number" id="threshold-amount" class="form-input" value="10000" step="1000">
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">条件</label>
+                            <select id="threshold-condition" class="form-input">
+                                <option value="or">OR条件（いずれか）</option>
+                                <option value="and">AND条件（両方）</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">ハイライト</label>
+                            <label class="inline-flex items-center">
+                                <input type="checkbox" id="highlight-enabled" checked class="mr-2">
+                                <span>有効</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- タブ -->
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="detail">詳細一覧</button>
+                    <button class="tab-btn" data-tab="site-summary">現場別サマリー</button>
+                    <button class="tab-btn" data-tab="subject-summary">科目別サマリー</button>
+                    <button class="tab-btn" data-tab="profit">利益分析</button>
+                    <button class="tab-btn" data-tab="chart">推移グラフ</button>
+                    <button class="tab-btn" data-tab="heatmap">ヒートマップ</button>
+                    <button class="tab-btn" data-tab="statistics">統計分析</button>
+                </div>
+
+                <!-- タブコンテンツ -->
+                <div class="tab-content">
+                    <!-- 詳細一覧タブ -->
+                    <div id="tab-detail" class="tab-pane active">
+                        <div class="flex justify-between items-center mb-4">
+                            <div class="flex items-center space-x-4">
+                                <input type="text" id="detail-search" placeholder="現場名・法人名・科目名・月で検索..." class="form-input" style="width: 300px;">
+                                <span class="text-sm text-gray-600">表示件数: <span id="detail-count">0</span>件</span>
+                            </div>
+                            <div>
+                                <button class="btn btn-sm btn-outline" onclick="exportToExcel()">📊 Excelエクスポート</button>
+                                <button class="btn btn-sm btn-outline ml-2" onclick="exportToCSV()">📄 CSVエクスポート</button>
+                            </div>
+                        </div>
+                        <div class="table-container">
+                            <table id="detail-table" class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable" data-column="site_name">現場名</th>
+                                        <th class="sortable" data-column="corp_name">法人名</th>
+                                        <th class="sortable" data-column="segment">セグメント</th>
+                                        <th class="sortable" data-column="subject_name">科目名</th>
+                                        <th class="sortable" data-column="month">月</th>
+                                        <th class="sortable" data-column="current_value">当期値</th>
+                                        <th class="sortable" data-column="comparison_value">比較値</th>
+                                        <th class="sortable" data-column="diff">差異</th>
+                                        <th class="sortable" data-column="diff_rate">差異率(%)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="detail-tbody"></tbody>
+                            </table>
+                        </div>
+                        <div id="detail-pagination" class="pagination"></div>
+                    </div>
+
+                    <!-- 現場別サマリータブ -->
+                    <div id="tab-site-summary" class="tab-pane">
+                        <div id="site-summary-content"></div>
+                    </div>
+
+                    <!-- 科目別サマリータブ -->
+                    <div id="tab-subject-summary" class="tab-pane">
+                        <div id="subject-summary-content"></div>
+                    </div>
+
+                    <!-- 利益分析タブ -->
+                    <div id="tab-profit" class="tab-pane">
+                        <div id="profit-content"></div>
+                    </div>
+
+                    <!-- 推移グラフタブ -->
+                    <div id="tab-chart" class="tab-pane">
+                        <div class="mb-4">
+                            <label class="control-label">グラフタイプ</label>
+                            <select id="chart-type" class="form-input" onchange="renderChart()">
+                                <option value="line">折れ線グラフ</option>
+                                <option value="bar">棒グラフ</option>
+                                <option value="stacked">積み上げグラフ</option>
+                            </select>
+                        </div>
+                        <canvas id="main-chart"></canvas>
+                    </div>
+
+                    <!-- ヒートマップタブ -->
+                    <div id="tab-heatmap" class="tab-pane">
+                        <div id="heatmap-content"></div>
+                    </div>
+
+                    <!-- 統計分析タブ -->
+                    <div id="tab-statistics" class="tab-pane">
+                        <div id="statistics-content"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ローディング -->
+    <div id="loading" class="hidden">
+        <div class="loading-spinner"></div>
+        <p class="mt-4 text-gray-600">処理中...</p>
+    </div>
+
+    <!-- ウェルカム画面 -->
+    <div id="welcome-screen" class="welcome-screen">
+        <div class="welcome-content">
+            <h3 class="text-2xl font-bold mb-4">科目別分析ツール SAT へようこそ</h3>
+            <p class="mb-6 text-gray-600">まずはファイルをアップロードして分析を開始しましょう</p>
+            <div class="space-y-4 text-left max-w-2xl mx-auto">
+                <div class="bg-blue-50 p-4 rounded">
+                    <h4 class="font-semibold mb-2">✨ 主な機能</h4>
+                    <ul class="list-disc list-inside space-y-1 text-sm">
+                        <li>前年同月比較・同年度内指定月比較</li>
+                        <li>複数現場・複数科目の同時分析</li>
+                        <li>異常値の自動検出とハイライト</li>
+                        <li>詳細一覧、サマリー、グラフ、ヒートマップ表示</li>
+                        <li>Excel/CSVエクスポート</li>
+                    </ul>
+                </div>
+                <div class="bg-green-50 p-4 rounded">
+                    <h4 class="font-semibold mb-2">📁 必要なファイル</h4>
+                    <ul class="list-disc list-inside space-y-1 text-sm">
+                        <li><strong>必須:</strong> 科目別推移表（CSV）</li>
+                        <li><strong>オプション:</strong> 前年科目別推移表（CSV）、現場表（CSV）</li>
+                    </ul>
+                </div>
+                <div class="bg-yellow-50 p-4 rounded">
+                    <h4 class="font-semibold mb-2">📖 使い方の例</h4>
+                    <div class="text-sm space-y-2">
+                        <p><strong>例: 現場Aの4月と5月の人件費を比較</strong></p>
+                        <ol class="list-decimal list-inside ml-2 space-y-1 text-xs">
+                            <li>左サイドバーで「対象月」: 4月と5月にチェック</li>
+                            <li>「現場選択」: 現場Aにチェック</li>
+                            <li>「科目選択」: 給料、賞与、法定福利費など人件費関連にチェック</li>
+                            <li>上部コントロールパネルで「比較モード」: 同年度内指定月比較</li>
+                            <li>「基準月」: 4月を選択</li>
+                            <li>「🔍 分析実行」ボタンをクリック</li>
+                        </ol>
+                        <p class="text-xs text-gray-600 mt-2">→ 5月のデータが4月との差異として表示されます</p>
+                    </div>
+                </div>
+            </div>
+            <button onclick="document.getElementById('upload-btn').click()" class="btn btn-primary btn-lg mt-6">
+                📁 ファイルをアップロード
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<!-- JavaScriptファイル -->
+<script src="{{ url_for('static', filename='subject_analysis_tool/js/data_manager.js') }}"></script>
+<script src="{{ url_for('static', filename='subject_analysis_tool/js/filter_controller.js') }}"></script>
+<script src="{{ url_for('static', filename='subject_analysis_tool/js/comparison_engine.js') }}"></script>
+<script src="{{ url_for('static', filename='subject_analysis_tool/js/table_renderer.js') }}"></script>
+<script src="{{ url_for('static', filename='subject_analysis_tool/js/chart_renderer.js') }}"></script>
+<script src="{{ url_for('static', filename='subject_analysis_tool/js/export_handler.js') }}"></script>
+<script src="{{ url_for('static', filename='subject_analysis_tool/js/main.js') }}"></script>
+
+{% endblock %}

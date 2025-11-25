@@ -77,4 +77,7 @@ def create_app():
     from .tools.monthly_generator import monthly_generator_bp
     app.register_blueprint(monthly_generator_bp)
 
+    from .tools.subject_analysis_tool import subject_analysis_tool_bp
+    app.register_blueprint(subject_analysis_tool_bp)
+
     return app
