@@ -74,9 +74,9 @@ async function processFiles() {
         completeProgress();
 
         if (result.error) {
-            // エラー表示
+            // エラー表示（ファイル選択は維持）
             showError(result.error, result.details);
-            resetForm();
+            restoreFormWithFiles();
         } else {
             // 成功時
             showSuccess(result);
@@ -87,7 +87,7 @@ async function processFiles() {
         console.error('Error:', error);
         completeProgress();
         showError('処理中にエラーが発生しました', [error.message]);
-        resetForm();
+        restoreFormWithFiles();
     }
 }
 
@@ -434,7 +434,15 @@ function downloadFile(filePath) {
     document.body.removeChild(link);
 }
 
-// フォームリセット
+// フォームをファイル選択を維持して再表示
+function restoreFormWithFiles() {
+    // フォームを再表示するが、ファイル選択はクリアしない
+    document.getElementById('upload-form').style.display = 'block';
+    document.getElementById('progress-container').classList.add('hidden');
+    document.getElementById('result-container').classList.add('hidden');
+}
+
+// フォームリセット（ファイル選択も含めて全てクリア）
 function resetForm() {
     document.getElementById('upload-form').reset();
     document.getElementById('upload-form').style.display = 'block';

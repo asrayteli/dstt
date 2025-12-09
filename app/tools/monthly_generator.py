@@ -365,8 +365,8 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             aggregated[segment]["労務合算"] += cumulative_amount
             continue
 
-        # 自動車売上の場合は請負形態名称で判別
-        if subject == "自動車売上":
+        # 自動車売上、または旅客セグメントの旅客運送売上の場合は請負形態名称で判別
+        if subject == "自動車売上" or (subject == "旅客運送売上" and segment == "旅客"):
             if contract_type == "基本請負料":
                 aggregated[segment]["基本売上"] += month_amount
                 aggregated[segment]["基本売上合算"] += cumulative_amount
@@ -834,7 +834,7 @@ def process_prev_year_data(subject_data, site_data, target_month):
             aggregated[segment]["労務合算"] += cumulative_amount
             continue
 
-        if subject == "自動車売上":
+        if subject == "自動車売上" or (subject == "旅客運送売上" and segment == "旅客"):
             if contract_type == "基本請負料":
                 aggregated[segment]["基本売上"] += month_amount
                 aggregated[segment]["基本売上合算"] += cumulative_amount
