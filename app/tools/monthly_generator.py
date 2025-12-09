@@ -262,6 +262,11 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             if not contract_code:
                 continue
 
+            # セグメント値のバリデーション
+            if segment not in ["役員", "一般", "旅客"]:
+                warnings.append(f"不正なセグメント値: '{segment}' (契約コード: {contract_code}) - スキップします")
+                continue
+
             # 8桁完全一致で辞書に登録（重複時は上書き）
             site_dict[contract_code] = segment
 
@@ -304,12 +309,22 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
 
             # 金額データ抽出（列13以降が各月のデータ、4月から開始）
             amounts = []
-            for i in range(13, len(row)):
+            for col_idx in range(13, len(row)):
                 try:
-                    amount = float(row[i]) if row[i] else 0
+                    amount = float(row[col_idx]) if row[col_idx] else 0
                     amounts.append(amount)
-                except:
+                except (ValueError, TypeError):
                     amounts.append(0)
+
+            # 対象月に応じた必要データ数を計算
+            if target_month >= 4:
+                required_months = target_month - 4 + 1  # 4月選択→1, 5月選択→2, ..., 12月選択→9
+            else:
+                required_months = target_month + 8 + 1  # 1月選択→10, 2月選択→11, 3月選択→12
+
+            # データ数チェック（警告のみ、処理は継続）
+            if len(amounts) < required_months:
+                warnings.append(f"データ不足: {contract_code} - {corp_name} (必要: {required_months}ヶ月分, 実際: {len(amounts)}ヶ月分)")
 
             extracted_data.append({
                 "契約コード": contract_code,
@@ -352,12 +367,17 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             continue
 
         # 月のインデックス計算（4月が基準月、列13がamounts[0]）
-        # target_month=4 → amounts[0]、target_month=9 → amounts[5]
-        month_index = target_month - 4
+        # 4-12月: month_index = target_month - 4 (0-8)
+        # 1-3月: month_index = target_month + 8 (9-11)
+        if target_month >= 4:
+            month_index = target_month - 4
+        else:
+            month_index = target_month + 8
+
         month_amount = amounts[month_index] if 0 <= month_index < len(amounts) else 0
 
         # 累計金額（4月からtarget_monthまで）
-        cumulative_amount = sum(amounts[:month_index + 1]) if month_index >= 0 else 0
+        cumulative_amount = sum(amounts[:month_index + 1]) if 0 <= month_index < len(amounts) else 0
 
         # 間接原価の場合は労務に合算
         if subject_code == "間接原価":
@@ -365,8 +385,8 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             aggregated[segment]["労務合算"] += cumulative_amount
             continue
 
-        # 自動車売上の場合は請負形態名称で判別
-        if subject == "自動車売上":
+        # 自動車売上、または旅客セグメントの旅客運送売上の場合は請負形態名称で判別
+        if subject == "自動車売上" or (subject == "旅客運送売上" and segment == "旅客"):
             if contract_type == "基本請負料":
                 aggregated[segment]["基本売上"] += month_amount
                 aggregated[segment]["基本売上合算"] += cumulative_amount
@@ -793,11 +813,11 @@ def process_prev_year_data(subject_data, site_data, target_month):
         segment = site_dict.get(contract_code)
         if segment:
             amounts = []
-            for j in range(13, len(row)):
+            for col_idx in range(13, len(row)):
                 try:
-                    amount = float(row[j]) if row[j] else 0
+                    amount = float(row[col_idx]) if row[col_idx] else 0
                     amounts.append(amount)
-                except:
+                except (ValueError, TypeError):
                     amounts.append(0)
 
             extracted_data.append({
@@ -825,16 +845,23 @@ def process_prev_year_data(subject_data, site_data, target_month):
         if segment not in aggregated:
             continue
 
-        month_index = target_month - 4
+        # 月のインデックス計算（4月が基準月）
+        # 4-12月: month_index = target_month - 4 (0-8)
+        # 1-3月: month_index = target_month + 8 (9-11)
+        if target_month >= 4:
+            month_index = target_month - 4
+        else:
+            month_index = target_month + 8
+
         month_amount = amounts[month_index] if 0 <= month_index < len(amounts) else 0
-        cumulative_amount = sum(amounts[:month_index + 1]) if month_index >= 0 else 0
+        cumulative_amount = sum(amounts[:month_index + 1]) if 0 <= month_index < len(amounts) else 0
 
         if subject_code == "間接原価":
             aggregated[segment]["労務"] += month_amount
             aggregated[segment]["労務合算"] += cumulative_amount
             continue
 
-        if subject == "自動車売上":
+        if subject == "自動車売上" or (subject == "旅客運送売上" and segment == "旅客"):
             if contract_type == "基本請負料":
                 aggregated[segment]["基本売上"] += month_amount
                 aggregated[segment]["基本売上合算"] += cumulative_amount
