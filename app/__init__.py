@@ -80,4 +80,8 @@ def create_app():
     from .tools.subject_analysis_tool import subject_analysis_tool_bp
     app.register_blueprint(subject_analysis_tool_bp)
 
+    from .tools.pluslist import pluslist_bp
+    app.register_blueprint(pluslist_bp)
+
     return app
+
