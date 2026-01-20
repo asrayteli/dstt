@@ -74,28 +74,140 @@
                     </button>
                 </div>
             </div>
-            <div class="mt-3 flex items-center">
-                <input type="checkbox" id="show-deleted" class="mr-2">
-                <label for="show-deleted" class="text-sm text-gray-700">退職者を表示</label>
+            <div class="mt-3 flex items-center justify-between">
+                <div>
+                    <input type="checkbox" id="show-deleted" class="mr-2">
+                    <label for="show-deleted" class="text-sm text-gray-700">退職者を表示</label>
+                </div>
+                <button onclick="toggleColumnSelector()" class="text-sm text-blue-600 hover:text-blue-800 font-medium">
+                    ⚙ 表示列を選択
+                </button>
+            </div>
+        </div>
+
+        <!-- 表示列選択パネル -->
+        <div id="column-selector" class="bg-white p-4 rounded-lg shadow mb-4 hidden">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="font-semibold text-gray-900">表示する列を選択</h3>
+                <button onclick="toggleColumnSelector()" class="text-gray-500 hover:text-gray-700">✕</button>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="employee_number" checked>
+                    社員番号
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="employee_name" checked>
+                    氏名
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="employee_kana">
+                    カナ名称
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="office_name" checked>
+                    営業所
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="office_code">
+                    所属コード
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="employee_type">
+                    社員区分
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="gender">
+                    性別
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="job_title" checked>
+                    職種
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="cost_code">
+                    原価コード
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="cost_name">
+                    原価名称
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="manager_number">
+                    管理担当社員番号
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="manager_name">
+                    管理担当社員名
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="postal_code">
+                    郵便番号
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="address1">
+                    住所１
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="address2">
+                    住所２
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="mansion_name">
+                    マンション名
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="contract_code">
+                    契約コード
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="company_name">
+                    法人名
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="site_name">
+                    現場名
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="birth_date">
+                    生年月日
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="hire_date">
+                    入社日付
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="retirement_date">
+                    退職日付
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="phone_number">
+                    電話番号
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="mobile_phone" checked>
+                    携帯電話
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="health_insurance">
+                    健康保険加入区分
+                </label>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="applyColumnSelection()" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                    適用
+                </button>
+                <button onclick="resetColumnSelection()" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-100">
+                    デフォルトに戻す
+                </button>
             </div>
         </div>
 
         <!-- 社員一覧テーブル -->
         <div class="bg-white rounded-lg shadow overflow-x-auto">
             <table class="min-w-full divide-y divide-gray-200" id="employees-table">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable('employee_number')">
-                            社員番号 <span id="sort-employee_number">↕</span>
-                        </th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable('employee_name')">
-                            氏名 <span id="sort-employee_name">↕</span>
-                        </th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">営業所</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">職種</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">携帯電話</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">アクション</th>
-                    </tr>
+                <thead class="bg-gray-50" id="employees-thead">
+                    <!-- JavaScriptで動的に生成 -->
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200" id="employees-tbody">
                     <!-- JavaScriptで動的に生成 -->
@@ -317,6 +429,38 @@ let sortOrder = 'asc';
 let uploadSessionKey = null;
 let currentEmployeeNumber = null;
 
+// 表示列設定（デフォルト）
+let visibleColumns = ['employee_number', 'employee_name', 'office_name', 'job_title', 'mobile_phone'];
+
+// 全フィールドの定義（フィールド名: 表示名）
+const allColumns = {
+    'employee_number': '社員番号',
+    'employee_name': '氏名',
+    'employee_kana': 'カナ名称',
+    'office_name': '営業所',
+    'office_code': '所属コード',
+    'employee_type': '社員区分',
+    'gender': '性別',
+    'job_title': '職種',
+    'cost_code': '原価コード',
+    'cost_name': '原価名称',
+    'manager_number': '管理担当社員番号',
+    'manager_name': '管理担当社員名',
+    'postal_code': '郵便番号',
+    'address1': '住所１',
+    'address2': '住所２',
+    'mansion_name': 'マンション名',
+    'contract_code': '契約コード',
+    'company_name': '法人名',
+    'site_name': '現場名',
+    'birth_date': '生年月日',
+    'hire_date': '入社日付',
+    'retirement_date': '退職日付',
+    'phone_number': '電話番号',
+    'mobile_phone': '携帯電話',
+    'health_insurance': '健康保険加入区分'
+};
+
 // タブ切り替え
 function switchTab(tabName) {
     // タブボタンの状態を更新
@@ -376,32 +520,82 @@ async function searchEmployees(page = 1) {
     }
 }
 
+// テーブルヘッダーを描画
+function renderTableHeader() {
+    const thead = document.getElementById('employees-thead');
+    const tr = document.createElement('tr');
+
+    visibleColumns.forEach(col => {
+        const th = document.createElement('th');
+        th.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
+
+        // ソート可能な列の場合
+        if (['employee_number', 'employee_name', 'hire_date', 'birth_date'].includes(col)) {
+            th.className += ' cursor-pointer';
+            th.onclick = () => sortTable(col);
+            th.innerHTML = `${allColumns[col]} <span id="sort-${col}">↕</span>`;
+        } else {
+            th.textContent = allColumns[col];
+        }
+
+        tr.appendChild(th);
+    });
+
+    // アクション列を追加
+    const actionTh = document.createElement('th');
+    actionTh.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
+    actionTh.textContent = 'アクション';
+    tr.appendChild(actionTh);
+
+    thead.innerHTML = '';
+    thead.appendChild(tr);
+}
+
 // 社員テーブルを描画
 function renderEmployeeTable(employees) {
+    // ヘッダーを再描画
+    renderTableHeader();
+
     const tbody = document.getElementById('employees-tbody');
     tbody.innerHTML = '';
 
     if (employees.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">データがありません</td></tr>';
+        const colspan = visibleColumns.length + 1;
+        tbody.innerHTML = `<tr><td colspan="${colspan}" class="px-4 py-8 text-center text-gray-500">データがありません</td></tr>`;
         return;
     }
 
     employees.forEach(emp => {
         const row = document.createElement('tr');
         row.className = emp.is_deleted ? 'bg-gray-100' : 'hover:bg-gray-50';
-        row.innerHTML = `
-            <td class="px-4 py-3 whitespace-nowrap text-sm">${emp.employee_number}</td>
-            <td class="px-4 py-3 whitespace-nowrap">
-                <div class="text-sm font-medium text-gray-900">${emp.employee_name}</div>
-                <div class="text-sm text-gray-500">${emp.employee_kana || ''}</div>
-            </td>
-            <td class="px-4 py-3 whitespace-nowrap text-sm">${emp.office_name || ''}</td>
-            <td class="px-4 py-3 whitespace-nowrap text-sm">${emp.job_title || ''}</td>
-            <td class="px-4 py-3 whitespace-nowrap text-sm">${emp.mobile_phone || ''}</td>
-            <td class="px-4 py-3 whitespace-nowrap text-sm">
-                <button onclick="viewEmployee('${emp.employee_number}')" class="text-blue-600 hover:text-blue-900">詳細</button>
-            </td>
+
+        // 選択された列のみ表示
+        visibleColumns.forEach(col => {
+            const td = document.createElement('td');
+            td.className = 'px-4 py-3 whitespace-nowrap text-sm';
+
+            // 氏名列の場合はカナも表示
+            if (col === 'employee_name') {
+                td.innerHTML = `
+                    <div class="text-sm font-medium text-gray-900">${emp.employee_name || ''}</div>
+                    ${emp.employee_kana ? `<div class="text-sm text-gray-500">${emp.employee_kana}</div>` : ''}
+                `;
+            } else {
+                td.textContent = emp[col] || '';
+            }
+
+            row.appendChild(td);
+        });
+
+        // アクション列
+        const actionTd = document.createElement('td');
+        actionTd.className = 'px-4 py-3 whitespace-nowrap text-sm';
+        actionTd.innerHTML = `
+            <button onclick="viewEmployee('${emp.employee_number}')" class="text-blue-600 hover:text-blue-900 mr-2">詳細</button>
+            <button onclick="editEmployeeQuick('${emp.employee_number}')" class="text-green-600 hover:text-green-900">編集</button>
         `;
+        row.appendChild(actionTd);
+
         tbody.appendChild(row);
     });
 }
@@ -495,6 +689,125 @@ async function viewEmployee(employeeNumber) {
 function closeModal() {
     document.getElementById('employee-modal').classList.add('hidden');
     currentEmployeeNumber = null;
+}
+
+// 編集モードに切り替え
+async function editEmployee() {
+    if (!currentEmployeeNumber) return;
+
+    try {
+        const response = await fetch(`/tools/pluslist/api/employee/${currentEmployeeNumber}`);
+        const emp = await response.json();
+
+        if (response.ok) {
+            const content = document.getElementById('modal-content');
+            content.innerHTML = `
+                <form id="edit-form" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">社員番号 *</label>
+                            <input type="text" name="employee_number" value="${emp.employee_number}" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">氏名 *</label>
+                            <input type="text" name="employee_name" value="${emp.employee_name || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">カナ</label>
+                            <input type="text" name="employee_kana" value="${emp.employee_kana || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">性別</label>
+                            <input type="text" name="gender" value="${emp.gender || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">職種</label>
+                            <input type="text" name="job_title" value="${emp.job_title || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">生年月日</label>
+                            <input type="date" name="birth_date" value="${emp.birth_date || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">入社日</label>
+                            <input type="date" name="hire_date" value="${emp.hire_date || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">携帯電話</label>
+                            <input type="text" name="mobile_phone" value="${emp.mobile_phone || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">電話番号</label>
+                            <input type="text" name="phone_number" value="${emp.phone_number || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">郵便番号</label>
+                            <input type="text" name="postal_code" value="${emp.postal_code || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="block text-sm font-medium text-gray-700">住所１ *</label>
+                            <input type="text" name="address1" value="${emp.address1 || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                        </div>
+                        <div class="col-span-2">
+                            <label class="block text-sm font-medium text-gray-700">住所２</label>
+                            <input type="text" name="address2" value="${emp.address2 || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">マンション名</label>
+                            <input type="text" name="mansion_name" value="${emp.mansion_name || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">法人名</label>
+                            <input type="text" name="company_name" value="${emp.company_name || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="block text-sm font-medium text-gray-700">現場名</label>
+                            <input type="text" name="site_name" value="${emp.site_name || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                    </div>
+                    <div class="flex gap-2 mt-6">
+                        <button type="button" onclick="saveEmployee()" class="flex-1 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700">保存</button>
+                        <button type="button" onclick="viewEmployee('${emp.employee_number}')" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-100">キャンセル</button>
+                    </div>
+                </form>
+            `;
+        } else {
+            alert('エラー: ' + emp.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// 社員情報を保存
+async function saveEmployee() {
+    const form = document.getElementById('edit-form');
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+
+    try {
+        const response = await fetch(`/tools/pluslist/api/employee/${currentEmployeeNumber}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert('保存しました');
+            closeModal();
+            searchEmployees(currentPage);
+        } else {
+            alert('エラー: ' + result.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
 }
 
 // エクスポート
@@ -763,6 +1076,84 @@ document.addEventListener('DOMContentLoaded', function() {
             uploadFile(file);
         }
     });
+});
+
+// 表示列選択パネルの表示切り替え
+function toggleColumnSelector() {
+    const panel = document.getElementById('column-selector');
+    panel.classList.toggle('hidden');
+}
+
+// 列選択の適用
+function applyColumnSelection() {
+    visibleColumns = [];
+    document.querySelectorAll('.column-toggle:checked').forEach(checkbox => {
+        visibleColumns.push(checkbox.dataset.column);
+    });
+
+    if (visibleColumns.length === 0) {
+        alert('少なくとも1つの列を選択してください');
+        return;
+    }
+
+    // 設定をローカルストレージに保存
+    localStorage.setItem('pluslist_visible_columns', JSON.stringify(visibleColumns));
+
+    // テーブルを再描画
+    searchEmployees(currentPage);
+
+    // パネルを閉じる
+    toggleColumnSelector();
+}
+
+// デフォルト列選択に戻す
+function resetColumnSelection() {
+    visibleColumns = ['employee_number', 'employee_name', 'office_name', 'job_title', 'mobile_phone'];
+
+    // チェックボックスをデフォルトに戻す
+    document.querySelectorAll('.column-toggle').forEach(checkbox => {
+        checkbox.checked = visibleColumns.includes(checkbox.dataset.column);
+    });
+
+    // 設定をローカルストレージに保存
+    localStorage.setItem('pluslist_visible_columns', JSON.stringify(visibleColumns));
+
+    // テーブルを再描画
+    searchEmployees(currentPage);
+
+    // パネルを閉じる
+    toggleColumnSelector();
+}
+
+// ページ読み込み時に保存された列設定を復元
+function loadColumnSettings() {
+    const saved = localStorage.getItem('pluslist_visible_columns');
+    if (saved) {
+        visibleColumns = JSON.parse(saved);
+        // チェックボックスの状態を復元
+        document.querySelectorAll('.column-toggle').forEach(checkbox => {
+            checkbox.checked = visibleColumns.includes(checkbox.dataset.column);
+        });
+    }
+}
+
+// 簡易編集機能（詳細モーダルから編集）
+async function editEmployeeQuick(employeeNumber) {
+    // 詳細モーダルを開く
+    await viewEmployee(employeeNumber);
+
+    // 編集ボタンをクリック
+    setTimeout(() => {
+        const editBtn = document.getElementById('edit-btn');
+        if (editBtn) {
+            editBtn.click();
+        }
+    }, 100);
+}
+
+// ページ初期化時に列設定を読み込む
+document.addEventListener('DOMContentLoaded', () => {
+    loadColumnSettings();
 });
 </script>
 {% endblock %}
