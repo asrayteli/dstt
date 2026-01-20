@@ -117,15 +117,22 @@ def parse_date(date_str):
 
 def read_excel_file(file_path):
     """
-    Excelファイル(.xls, .xlsx)を読み込む
+    Excelファイル(.xls, .xlsx)またはCSVファイルを読み込む
     暫定会社略称が「DST」の行のみをフィルタリング
     """
     try:
-        # xlrdで.xlsファイルを読み込む（古い形式）
-        if file_path.endswith('.xls'):
-            df = pd.read_excel(file_path, engine='xlrd')
-        else:
+        # ファイル拡張子を小文字で取得
+        file_ext = os.path.splitext(file_path)[1].lower()
+
+        # ファイル形式に応じて適切なエンジンを使用
+        if file_ext == '.xlsx':
             df = pd.read_excel(file_path, engine='openpyxl')
+        elif file_ext == '.xls':
+            df = pd.read_excel(file_path, engine='xlrd')
+        elif file_ext == '.csv':
+            df = pd.read_csv(file_path, encoding='utf-8-sig')
+        else:
+            raise ValueError(f"サポートされていないファイル形式: {file_ext}")
 
         # カラム名を確認（CSVサンプルと同じ構造を想定）
         # 暫定会社略称でフィルタリング
