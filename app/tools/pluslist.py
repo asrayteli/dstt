@@ -386,6 +386,16 @@ def get_employees():
     office_filter = request.args.get('office', '')
     show_deleted = request.args.get('show_deleted', 'false') == 'true'
 
+    # 新しい検索パラメータ
+    search_scope = request.args.get('search_scope', 'all')
+    search_mode = request.args.get('search_mode', 'partial')
+    search_operator = request.args.get('search_operator', 'and')
+    search_columns_str = request.args.get('search_columns', '')
+    hire_date_from = request.args.get('hire_date_from', '')
+    hire_date_to = request.args.get('hire_date_to', '')
+    birth_date_from = request.args.get('birth_date_from', '')
+    birth_date_to = request.args.get('birth_date_to', '')
+
     # ベースクエリ
     query = Employee.query.filter(Employee.office_code.in_(user_offices))
 
@@ -397,18 +407,62 @@ def get_employees():
     if office_filter:
         query = query.filter(Employee.office_code == office_filter)
 
-    # 検索
+    # 検索（高度な検索機能）
     if search:
-        search_pattern = f"%{search}%"
-        query = query.filter(
-            or_(
-                Employee.employee_number.like(search_pattern),
-                Employee.employee_name.like(search_pattern),
-                Employee.employee_kana.like(search_pattern),
-                Employee.office_name.like(search_pattern),
-                Employee.job_title.like(search_pattern)
-            )
-        )
+        # 複数キーワード対応（スペース区切り）
+        keywords = search.split()
+
+        # 検索対象列の決定
+        if search_scope == 'specific' and search_columns_str:
+            search_columns = search_columns_str.split(',')
+        else:
+            # デフォルトは全主要列
+            search_columns = [
+                'employee_number', 'employee_name', 'employee_kana',
+                'office_name', 'job_title', 'mobile_phone', 'phone_number',
+                'address1', 'address2', 'postal_code', 'company_name', 'site_name'
+            ]
+
+        # 検索条件を構築
+        def build_keyword_conditions(keyword):
+            conditions = []
+            for col_name in search_columns:
+                if hasattr(Employee, col_name):
+                    col = getattr(Employee, col_name)
+                    if search_mode == 'exact':
+                        conditions.append(col == keyword)
+                    elif search_mode == 'prefix':
+                        conditions.append(col.like(f"{keyword}%"))
+                    else:  # partial
+                        conditions.append(col.like(f"%{keyword}%"))
+            return or_(*conditions) if conditions else None
+
+        # AND/OR検索
+        if search_operator == 'or':
+            # OR検索：いずれかのキーワードに一致
+            all_conditions = []
+            for keyword in keywords:
+                cond = build_keyword_conditions(keyword)
+                if cond is not None:
+                    all_conditions.append(cond)
+            if all_conditions:
+                query = query.filter(or_(*all_conditions))
+        else:
+            # AND検索：全てのキーワードに一致
+            for keyword in keywords:
+                cond = build_keyword_conditions(keyword)
+                if cond is not None:
+                    query = query.filter(cond)
+
+    # 日付範囲検索
+    if hire_date_from:
+        query = query.filter(Employee.hire_date >= hire_date_from)
+    if hire_date_to:
+        query = query.filter(Employee.hire_date <= hire_date_to)
+    if birth_date_from:
+        query = query.filter(Employee.birth_date >= birth_date_from)
+    if birth_date_to:
+        query = query.filter(Employee.birth_date <= birth_date_to)
 
     # ソート
     if hasattr(Employee, sort_by):
