@@ -1,17 +1,768 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-xl mx-auto bg-white p-6 rounded-2xl shadow mt-6">
-  <h2 class="text-xl font-bold mb-4">🛠️ pluslist Tool</h2>
-  <form method="POST">
-    <!-- 入力フォーム -->
-    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">送信</button>
-  </form>
+<div class="container mx-auto px-4 py-6 max-w-7xl">
+    <!-- ヘッダー -->
+    <div class="bg-gradient-to-r from-blue-600 to-blue-800 text-white p-6 rounded-lg shadow-lg mb-6">
+        <h1 class="text-3xl font-bold mb-2">📋 社員名簿PLUS</h1>
+        <p class="text-blue-100">高機能社員データ管理システム</p>
+        <div class="mt-4 flex flex-wrap gap-2">
+            <span class="bg-blue-700 px-3 py-1 rounded-full text-sm">ユーザー: {{ user_id }}</span>
+            {% if is_admin %}
+            <span class="bg-yellow-500 px-3 py-1 rounded-full text-sm font-semibold">管理者</span>
+            {% endif %}
+            <span class="bg-blue-700 px-3 py-1 rounded-full text-sm">アクセス可能営業所: {{ user_offices|length }}件</span>
+        </div>
+    </div>
 
-  {% if result %}
-  <div class="mt-4 text-green-700 font-semibold">
-    ✅ 結果: { '{ result }' }
-  </div>
-  {% endif %}
+    <!-- タブナビゲーション -->
+    <div class="mb-6 border-b border-gray-200">
+        <nav class="-mb-px flex space-x-4 overflow-x-auto" role="tablist">
+            <button onclick="switchTab('list')" id="tab-list" class="tab-button active px-4 py-2 font-medium text-sm border-b-2 border-transparent hover:border-gray-300 whitespace-nowrap">
+                社員一覧
+            </button>
+            <button onclick="switchTab('upload')" id="tab-upload" class="tab-button px-4 py-2 font-medium text-sm border-b-2 border-transparent hover:border-gray-300 whitespace-nowrap">
+                ファイルアップロード
+            </button>
+            <button onclick="switchTab('history')" id="tab-history" class="tab-button px-4 py-2 font-medium text-sm border-b-2 border-transparent hover:border-gray-300 whitespace-nowrap">
+                履歴
+            </button>
+            {% if is_admin %}
+            <button onclick="switchTab('admin')" id="tab-admin" class="tab-button px-4 py-2 font-medium text-sm border-b-2 border-transparent hover:border-gray-300 whitespace-nowrap">
+                管理者設定
+            </button>
+            {% endif %}
+        </nav>
+    </div>
+
+    <!-- 社員一覧タブ -->
+    <div id="content-list" class="tab-content">
+        <!-- 検索・フィルタエリア -->
+        <div class="bg-white p-4 rounded-lg shadow mb-4">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">検索</label>
+                    <input type="text" id="search-input" placeholder="社員番号、名前、カナ..." class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">営業所</label>
+                    <select id="office-filter" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">全て</option>
+                        {% for office in offices %}
+                        <option value="{{ office.code }}">{{ office.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">表示件数</label>
+                    <select id="per-page" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="30" selected>30件</option>
+                        <option value="50">50件</option>
+                        <option value="100">100件</option>
+                        <option value="200">200件</option>
+                    </select>
+                </div>
+                <div class="flex items-end gap-2">
+                    <button onclick="searchEmployees()" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition">
+                        🔍 検索
+                    </button>
+                    <button onclick="exportData('excel')" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition" title="Excelエクスポート">
+                        📊
+                    </button>
+                    <button onclick="exportData('csv')" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition" title="CSVエクスポート">
+                        📄
+                    </button>
+                </div>
+            </div>
+            <div class="mt-3 flex items-center">
+                <input type="checkbox" id="show-deleted" class="mr-2">
+                <label for="show-deleted" class="text-sm text-gray-700">退職者を表示</label>
+            </div>
+        </div>
+
+        <!-- 社員一覧テーブル -->
+        <div class="bg-white rounded-lg shadow overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200" id="employees-table">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable('employee_number')">
+                            社員番号 <span id="sort-employee_number">↕</span>
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onclick="sortTable('employee_name')">
+                            氏名 <span id="sort-employee_name">↕</span>
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">営業所</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">職種</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">携帯電話</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">アクション</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200" id="employees-tbody">
+                    <!-- JavaScriptで動的に生成 -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ページネーション -->
+        <div class="mt-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="text-sm text-gray-700">
+                <span id="showing-info">表示: 0 - 0 / 全 0 件</span>
+            </div>
+            <div class="flex gap-2" id="pagination">
+                <!-- JavaScriptで動的に生成 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ファイルアップロードタブ -->
+    <div id="content-upload" class="tab-content hidden">
+        <div class="bg-white p-6 rounded-lg shadow max-w-3xl mx-auto">
+            <h3 class="text-xl font-bold mb-4">📤 Excelファイルアップロード</h3>
+            <p class="text-gray-600 mb-4">社員データ（.xls, .xlsx, .csv形式）をアップロードして一括更新します。</p>
+
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center mb-4" id="drop-zone">
+                <input type="file" id="file-input" accept=".xls,.xlsx,.csv" class="hidden" onchange="handleFileSelect(event)">
+                <div class="mb-4">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                    </svg>
+                </div>
+                <p class="text-lg mb-2">ファイルをドラッグ&ドロップ</p>
+                <p class="text-sm text-gray-500 mb-4">または</p>
+                <button onclick="document.getElementById('file-input').click()" class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700">
+                    ファイルを選択
+                </button>
+                <p class="text-xs text-gray-500 mt-4">対応形式: .xls, .xlsx, .csv (最大10MB)</p>
+            </div>
+
+            <div id="upload-progress" class="hidden mb-4">
+                <div class="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded">
+                    <p class="font-semibold">処理中...</p>
+                    <div class="w-full bg-gray-200 rounded-full h-2 mt-2">
+                        <div class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%" id="progress-bar"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="preview-area" class="hidden">
+                <div class="bg-yellow-50 border border-yellow-400 rounded-lg p-4 mb-4">
+                    <h4 class="font-bold text-lg mb-2">⚠️ 差分プレビュー</h4>
+                    <p class="text-sm text-gray-700 mb-3">以下の変更が反映されます。確認後、「インポート実行」ボタンをクリックしてください。</p>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center mb-4">
+                        <div class="bg-green-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-green-700" id="add-count">0</p>
+                            <p class="text-sm text-green-600">追加</p>
+                        </div>
+                        <div class="bg-blue-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-blue-700" id="update-count">0</p>
+                            <p class="text-sm text-blue-600">更新</p>
+                        </div>
+                        <div class="bg-red-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-red-700" id="delete-count">0</p>
+                            <p class="text-sm text-red-600">削除</p>
+                        </div>
+                        <div class="bg-gray-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-gray-700" id="total-count">0</p>
+                            <p class="text-sm text-gray-600">総件数</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <button onclick="executeImport()" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-md hover:bg-blue-700 font-semibold">
+                            ✅ インポート実行
+                        </button>
+                        <button onclick="cancelUpload()" class="flex-1 bg-gray-400 text-white px-6 py-3 rounded-md hover:bg-gray-500">
+                            ❌ キャンセル
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 履歴タブ -->
+    <div id="content-history" class="tab-content hidden">
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h3 class="text-xl font-bold mb-4">📜 アップロード履歴</h3>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">日時</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ユーザー</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">営業所</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ファイル名</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">追加</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">更新</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">削除</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200" id="history-tbody">
+                        <!-- JavaScriptで動的に生成 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 管理者設定タブ -->
+    {% if is_admin %}
+    <div id="content-admin" class="tab-content hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- 営業所管理 -->
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-xl font-bold mb-4">🏢 営業所管理</h3>
+
+                <div class="mb-4">
+                    <h4 class="font-semibold mb-2">新規営業所登録</h4>
+                    <div class="flex gap-2 mb-4">
+                        <input type="text" id="new-office-code" placeholder="営業所コード (例: 112010)" class="flex-1 px-3 py-2 border border-gray-300 rounded-md">
+                        <input type="text" id="new-office-name" placeholder="営業所名 (例: 千葉営業所)" class="flex-1 px-3 py-2 border border-gray-300 rounded-md">
+                        <button onclick="createOffice()" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 whitespace-nowrap">
+                            追加
+                        </button>
+                    </div>
+                </div>
+
+                <h4 class="font-semibold mb-2">登録済み営業所</h4>
+                <div id="offices-list" class="space-y-2 max-h-96 overflow-y-auto">
+                    <!-- JavaScriptで動的に生成 -->
+                </div>
+            </div>
+
+            <!-- 権限管理 -->
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-xl font-bold mb-4">👥 ユーザー権限管理</h3>
+
+                <div class="mb-4">
+                    <h4 class="font-semibold mb-2">権限付与</h4>
+                    <div class="flex gap-2 mb-4">
+                        <input type="text" id="grant-user-id" placeholder="ユーザーID" class="flex-1 px-3 py-2 border border-gray-300 rounded-md">
+                        <select id="grant-office-code" class="flex-1 px-3 py-2 border border-gray-300 rounded-md">
+                            <option value="">営業所を選択</option>
+                            {% for office in offices %}
+                            <option value="{{ office.code }}">{{ office.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <button onclick="grantPermission()" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 whitespace-nowrap">
+                            付与
+                        </button>
+                    </div>
+                </div>
+
+                <h4 class="font-semibold mb-2">ユーザー権限一覧</h4>
+                <div id="permissions-list" class="space-y-2 max-h-96 overflow-y-auto">
+                    <!-- JavaScriptで動的に生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
+
+<!-- 社員詳細モーダル -->
+<div id="employee-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+    <div class="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold" id="modal-title">社員詳細</h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+        </div>
+        <div id="modal-content" class="max-h-96 overflow-y-auto">
+            <!-- JavaScriptで動的に生成 -->
+        </div>
+        <div class="mt-4 flex gap-2">
+            <button onclick="editEmployee()" id="edit-btn" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">編集</button>
+            <button onclick="closeModal()" class="flex-1 bg-gray-400 text-white px-4 py-2 rounded-md hover:bg-gray-500">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.tab-button.active {
+    border-bottom-color: #2563eb;
+    color: #2563eb;
+}
+
+.tab-content {
+    animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@media (max-width: 375px) {
+    /* iPhone SE2 対応 */
+    .container {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+
+    table {
+        font-size: 0.875rem;
+    }
+
+    th, td {
+        padding: 0.5rem 0.25rem;
+    }
+}
+</style>
+
+<script>
+// グローバル変数
+let currentPage = 1;
+let perPage = 30;
+let sortBy = 'employee_number';
+let sortOrder = 'asc';
+let uploadSessionKey = null;
+let currentEmployeeNumber = null;
+
+// タブ切り替え
+function switchTab(tabName) {
+    // タブボタンの状態を更新
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.getElementById(`tab-${tabName}`).classList.add('active');
+
+    // コンテンツの表示切り替え
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.add('hidden');
+    });
+    document.getElementById(`content-${tabName}`).classList.remove('hidden');
+
+    // タブごとの初期化処理
+    if (tabName === 'list') {
+        searchEmployees();
+    } else if (tabName === 'history') {
+        loadUploadHistory();
+    } else if (tabName === 'admin') {
+        loadOffices();
+        loadPermissions();
+    }
+}
+
+// 社員検索
+async function searchEmployees(page = 1) {
+    currentPage = page;
+    const search = document.getElementById('search-input').value;
+    const office = document.getElementById('office-filter').value;
+    const showDeleted = document.getElementById('show-deleted').checked;
+    perPage = parseInt(document.getElementById('per-page').value);
+
+    const params = new URLSearchParams({
+        page: currentPage,
+        per_page: perPage,
+        search: search,
+        office: office,
+        sort_by: sortBy,
+        sort_order: sortOrder,
+        show_deleted: showDeleted
+    });
+
+    try {
+        const response = await fetch(`/tools/pluslist/api/employees?${params}`);
+        const data = await response.json();
+
+        if (response.ok) {
+            renderEmployeeTable(data.employees);
+            renderPagination(data.total, data.pages, data.current_page);
+        } else {
+            alert('エラー: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// 社員テーブルを描画
+function renderEmployeeTable(employees) {
+    const tbody = document.getElementById('employees-tbody');
+    tbody.innerHTML = '';
+
+    if (employees.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">データがありません</td></tr>';
+        return;
+    }
+
+    employees.forEach(emp => {
+        const row = document.createElement('tr');
+        row.className = emp.is_deleted ? 'bg-gray-100' : 'hover:bg-gray-50';
+        row.innerHTML = `
+            <td class="px-4 py-3 whitespace-nowrap text-sm">${emp.employee_number}</td>
+            <td class="px-4 py-3 whitespace-nowrap">
+                <div class="text-sm font-medium text-gray-900">${emp.employee_name}</div>
+                <div class="text-sm text-gray-500">${emp.employee_kana || ''}</div>
+            </td>
+            <td class="px-4 py-3 whitespace-nowrap text-sm">${emp.office_name || ''}</td>
+            <td class="px-4 py-3 whitespace-nowrap text-sm">${emp.job_title || ''}</td>
+            <td class="px-4 py-3 whitespace-nowrap text-sm">${emp.mobile_phone || ''}</td>
+            <td class="px-4 py-3 whitespace-nowrap text-sm">
+                <button onclick="viewEmployee('${emp.employee_number}')" class="text-blue-600 hover:text-blue-900">詳細</button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+// ページネーション描画
+function renderPagination(total, pages, current) {
+    const start = (current - 1) * perPage + 1;
+    const end = Math.min(current * perPage, total);
+    document.getElementById('showing-info').textContent = `表示: ${start} - ${end} / 全 ${total} 件`;
+
+    const pagination = document.getElementById('pagination');
+    pagination.innerHTML = '';
+
+    if (pages <= 1) return;
+
+    // 前へ
+    if (current > 1) {
+        pagination.innerHTML += `<button onclick="searchEmployees(${current - 1})" class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-100">前へ</button>`;
+    }
+
+    // ページ番号
+    for (let i = Math.max(1, current - 2); i <= Math.min(pages, current + 2); i++) {
+        const activeClass = i === current ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-100';
+        pagination.innerHTML += `<button onclick="searchEmployees(${i})" class="px-3 py-1 border border-gray-300 rounded ${activeClass}">${i}</button>`;
+    }
+
+    // 次へ
+    if (current < pages) {
+        pagination.innerHTML += `<button onclick="searchEmployees(${current + 1})" class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-100">次へ</button>`;
+    }
+}
+
+// ソート
+function sortTable(column) {
+    if (sortBy === column) {
+        sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+        sortBy = column;
+        sortOrder = 'asc';
+    }
+
+    // ソートアイコンを更新
+    document.querySelectorAll('[id^="sort-"]').forEach(span => {
+        span.textContent = '↕';
+    });
+    document.getElementById(`sort-${column}`).textContent = sortOrder === 'asc' ? '↑' : '↓';
+
+    searchEmployees(1);
+}
+
+// 社員詳細表示
+async function viewEmployee(employeeNumber) {
+    currentEmployeeNumber = employeeNumber;
+    try {
+        const response = await fetch(`/tools/pluslist/api/employee/${employeeNumber}`);
+        const emp = await response.json();
+
+        if (response.ok) {
+            const content = document.getElementById('modal-content');
+            content.innerHTML = `
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div><strong>社員番号:</strong> ${emp.employee_number}</div>
+                    <div><strong>氏名:</strong> ${emp.employee_name}</div>
+                    <div><strong>カナ:</strong> ${emp.employee_kana || ''}</div>
+                    <div><strong>性別:</strong> ${emp.gender || ''}</div>
+                    <div><strong>営業所:</strong> ${emp.office_name || ''}</div>
+                    <div><strong>職種:</strong> ${emp.job_title || ''}</div>
+                    <div><strong>生年月日:</strong> ${emp.birth_date || ''}</div>
+                    <div><strong>入社日:</strong> ${emp.hire_date || ''}</div>
+                    <div><strong>退職日:</strong> ${emp.retirement_date || ''}</div>
+                    <div><strong>携帯電話:</strong> ${emp.mobile_phone || ''}</div>
+                    <div><strong>電話番号:</strong> ${emp.phone_number || ''}</div>
+                    <div><strong>郵便番号:</strong> ${emp.postal_code || ''}</div>
+                    <div class="col-span-2"><strong>住所1:</strong> ${emp.address1 || ''}</div>
+                    <div class="col-span-2"><strong>住所2:</strong> ${emp.address2 || ''}</div>
+                    <div class="col-span-2"><strong>法人名:</strong> ${emp.company_name || ''}</div>
+                    <div class="col-span-2"><strong>現場名:</strong> ${emp.site_name || ''}</div>
+                </div>
+            `;
+            document.getElementById('employee-modal').classList.remove('hidden');
+        } else {
+            alert('エラー: ' + emp.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// モーダルを閉じる
+function closeModal() {
+    document.getElementById('employee-modal').classList.add('hidden');
+    currentEmployeeNumber = null;
+}
+
+// エクスポート
+function exportData(format) {
+    const search = document.getElementById('search-input').value;
+    const office = document.getElementById('office-filter').value;
+    const showDeleted = document.getElementById('show-deleted').checked;
+
+    const params = new URLSearchParams({
+        search: search,
+        office: office,
+        show_deleted: showDeleted
+    });
+
+    window.location.href = `/tools/pluslist/api/export/${format}?${params}`;
+}
+
+// ファイル選択
+function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (file) {
+        uploadFile(file);
+    }
+}
+
+// ファイルアップロード
+async function uploadFile(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    document.getElementById('upload-progress').classList.remove('hidden');
+    document.getElementById('progress-bar').style.width = '50%';
+
+    try {
+        const response = await fetch('/tools/pluslist/api/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            uploadSessionKey = data.session_key;
+            document.getElementById('add-count').textContent = data.stats.add_count;
+            document.getElementById('update-count').textContent = data.stats.update_count;
+            document.getElementById('delete-count').textContent = data.stats.delete_count;
+            document.getElementById('total-count').textContent = data.stats.total_count;
+
+            document.getElementById('upload-progress').classList.add('hidden');
+            document.getElementById('preview-area').classList.remove('hidden');
+        } else {
+            alert('エラー: ' + data.error);
+            document.getElementById('upload-progress').classList.add('hidden');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+        document.getElementById('upload-progress').classList.add('hidden');
+    }
+}
+
+// インポート実行
+async function executeImport() {
+    if (!uploadSessionKey) return;
+
+    if (!confirm('データベースに反映します。よろしいですか？')) return;
+
+    try {
+        const response = await fetch('/tools/pluslist/api/import', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session_key: uploadSessionKey})
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            alert(`インポート完了！\n追加: ${data.added}件\n更新: ${data.updated}件\n削除: ${data.deleted}件`);
+            cancelUpload();
+            switchTab('list');
+        } else {
+            alert('エラー: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// アップロードキャンセル
+function cancelUpload() {
+    document.getElementById('preview-area').classList.add('hidden');
+    document.getElementById('file-input').value = '';
+    uploadSessionKey = null;
+}
+
+// アップロード履歴読み込み
+async function loadUploadHistory() {
+    try {
+        const response = await fetch('/tools/pluslist/api/histories/upload');
+        const histories = await response.json();
+
+        const tbody = document.getElementById('history-tbody');
+        tbody.innerHTML = '';
+
+        histories.forEach(h => {
+            const row = document.createElement('tr');
+            const date = new Date(h.uploaded_at).toLocaleString('ja-JP');
+            row.innerHTML = `
+                <td class="px-4 py-3 text-sm">${date}</td>
+                <td class="px-4 py-3 text-sm">${h.uploaded_by}</td>
+                <td class="px-4 py-3 text-sm">${h.office_code}</td>
+                <td class="px-4 py-3 text-sm">${h.filename}</td>
+                <td class="px-4 py-3 text-sm text-green-600">${h.added_count}</td>
+                <td class="px-4 py-3 text-sm text-blue-600">${h.updated_count}</td>
+                <td class="px-4 py-3 text-sm text-red-600">${h.deleted_count}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+
+// 営業所一覧読み込み（管理者のみ）
+async function loadOffices() {
+    try {
+        const response = await fetch('/tools/pluslist/api/admin/offices');
+        const offices = await response.json();
+
+        const list = document.getElementById('offices-list');
+        list.innerHTML = '';
+
+        offices.forEach(office => {
+            const div = document.createElement('div');
+            div.className = 'flex justify-between items-center p-3 bg-gray-50 rounded';
+            div.innerHTML = `
+                <div>
+                    <span class="font-semibold">${office.office_code}</span> - ${office.office_name}
+                </div>
+                <button onclick="deleteOffice('${office.office_code}')" class="text-red-600 hover:text-red-800 text-sm">削除</button>
+            `;
+            list.appendChild(div);
+        });
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+
+// 営業所作成
+async function createOffice() {
+    const code = document.getElementById('new-office-code').value;
+    const name = document.getElementById('new-office-name').value;
+
+    if (!code || !name) {
+        alert('営業所コードと名称を入力してください');
+        return;
+    }
+
+    try {
+        const response = await fetch('/tools/pluslist/api/admin/office', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({office_code: code, office_name: name})
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            alert('営業所を作成しました');
+            document.getElementById('new-office-code').value = '';
+            document.getElementById('new-office-name').value = '';
+            loadOffices();
+        } else {
+            alert('エラー: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// 権限一覧読み込み
+async function loadPermissions() {
+    try {
+        const response = await fetch('/tools/pluslist/api/admin/permissions');
+        const users = await response.json();
+
+        const list = document.getElementById('permissions-list');
+        list.innerHTML = '';
+
+        users.forEach(user => {
+            const div = document.createElement('div');
+            div.className = 'p-3 bg-gray-50 rounded';
+            const adminBadge = user.is_admin ? '<span class="bg-yellow-500 text-white px-2 py-1 rounded text-xs ml-2">管理者</span>' : '';
+            const officesList = user.offices.map(o => `${o.name} (${o.code})`).join(', ') || 'なし';
+            div.innerHTML = `
+                <div class="font-semibold mb-1">${user.user_id}${adminBadge}</div>
+                <div class="text-sm text-gray-600">営業所: ${officesList}</div>
+            `;
+            list.appendChild(div);
+        });
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+
+// 権限付与
+async function grantPermission() {
+    const userId = document.getElementById('grant-user-id').value;
+    const officeCode = document.getElementById('grant-office-code').value;
+
+    if (!userId || !officeCode) {
+        alert('ユーザーIDと営業所を選択してください');
+        return;
+    }
+
+    try {
+        const response = await fetch('/tools/pluslist/api/admin/grant', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_id: userId, office_code: officeCode})
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            alert('権限を付与しました');
+            loadPermissions();
+        } else {
+            alert('エラー: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// 初期化
+document.addEventListener('DOMContentLoaded', function() {
+    searchEmployees();
+
+    // Enter キーで検索
+    document.getElementById('search-input').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            searchEmployees();
+        }
+    });
+
+    // ドラッグ&ドロップ
+    const dropZone = document.getElementById('drop-zone');
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('border-blue-500', 'bg-blue-50');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            uploadFile(file);
+        }
+    });
+});
+</script>
 {% endblock %}
