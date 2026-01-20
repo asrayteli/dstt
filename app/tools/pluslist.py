@@ -115,33 +115,65 @@ def parse_date(date_str):
     return None
 
 
-def read_excel_file(file_path):
+def read_excel_file(file_path, original_filename=None):
     """
     Excelファイル(.xls, .xlsx)またはCSVファイルを読み込む
     暫定会社略称が「DST」の行のみをフィルタリング
     """
-    try:
-        # ファイル拡張子を小文字で取得
+    # 元のファイル名がある場合はそこから拡張子を取得（より確実）
+    if original_filename:
+        file_ext = os.path.splitext(original_filename)[1].lower()
+    else:
         file_ext = os.path.splitext(file_path)[1].lower()
 
+    try:
         # ファイル形式に応じて適切なエンジンを使用
         if file_ext == '.xlsx':
-            df = pd.read_excel(file_path, engine='openpyxl')
+            try:
+                df = pd.read_excel(file_path, engine='openpyxl')
+            except Exception as e:
+                raise ValueError(f".xlsxファイルの読み込みに失敗しました（openpyxl使用）: {str(e)}")
+
         elif file_ext == '.xls':
-            df = pd.read_excel(file_path, engine='xlrd')
+            try:
+                df = pd.read_excel(file_path, engine='xlrd')
+            except Exception as e:
+                raise ValueError(f".xlsファイルの読み込みに失敗しました（xlrd使用）: {str(e)}")
+
         elif file_ext == '.csv':
-            df = pd.read_csv(file_path, encoding='utf-8-sig')
+            try:
+                # まずUTF-8 with BOMで試行
+                df = pd.read_csv(file_path, encoding='utf-8-sig')
+            except:
+                try:
+                    # UTF-8で試行
+                    df = pd.read_csv(file_path, encoding='utf-8')
+                except:
+                    try:
+                        # Shift-JISで試行（日本語ファイルの場合）
+                        df = pd.read_csv(file_path, encoding='shift-jis')
+                    except Exception as e:
+                        raise ValueError(f"CSVファイルの読み込みに失敗しました: {str(e)}")
         else:
-            raise ValueError(f"サポートされていないファイル形式: {file_ext}")
+            # エラーメッセージに詳細情報を追加
+            raise ValueError(f"サポートされていないファイル形式: '{file_ext}' (元のファイル名: {original_filename}, 保存先: {file_path})")
 
         # カラム名を確認（CSVサンプルと同じ構造を想定）
         # 暫定会社略称でフィルタリング
         if '暫定会社略称' in df.columns:
             df = df[df['暫定会社略称'] == 'DST']
+        else:
+            # カラム名一覧をログに出力（デバッグ用）
+            available_columns = ', '.join(df.columns.tolist()[:10])  # 最初の10列
+            raise ValueError(f"'暫定会社略称'列が見つかりません。利用可能な列: {available_columns}...")
 
         return df
+
+    except ValueError:
+        # ValueErrorはそのまま再送出
+        raise
     except Exception as e:
-        raise ValueError(f"ファイル読み込みエラー: {str(e)}")
+        raise ValueError(f"予期しないエラー: {str(e)}")
 
 
 def parse_employee_data(row):
@@ -413,6 +445,9 @@ def upload_file():
         return jsonify({"error": "許可されていないファイル形式です（.xls, .xlsx, .csv のみ）"}), 400
 
     try:
+        # 元のファイル名を保存（拡張子判定用）
+        original_filename = file.filename
+
         # 一時ファイルとして保存
         filename = secure_filename(file.filename)
         uploads_path = os.path.join(get_data_path(), 'uploads')
@@ -420,8 +455,8 @@ def upload_file():
         temp_path = os.path.join(uploads_path, f"temp_{user_id}_{filename}")
         file.save(temp_path)
 
-        # Excelファイルを読み込み
-        df = read_excel_file(temp_path)
+        # Excelファイルを読み込み（元のファイル名も渡して拡張子判定を確実にする）
+        df = read_excel_file(temp_path, original_filename)
 
         # データをパース
         uploaded_data = []
