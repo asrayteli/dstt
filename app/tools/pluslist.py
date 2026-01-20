@@ -176,6 +176,32 @@ def read_excel_file(file_path, original_filename=None):
         raise ValueError(f"予期しないエラー: {str(e)}")
 
 
+def serialize_employee_data(data):
+    """
+    社員データをJSON化可能な形式に変換（日付型を文字列に）
+    """
+    serialized = data.copy()
+    # datetime.date型を文字列に変換
+    if serialized.get('birth_date') and isinstance(serialized['birth_date'], date):
+        serialized['birth_date'] = serialized['birth_date'].isoformat()
+    if serialized.get('hire_date') and isinstance(serialized['hire_date'], date):
+        serialized['hire_date'] = serialized['hire_date'].isoformat()
+    return serialized
+
+
+def deserialize_employee_data(data):
+    """
+    JSON化された社員データを元に戻す（文字列を日付型に）
+    """
+    deserialized = data.copy()
+    # 文字列をdatetime.date型に変換
+    if deserialized.get('birth_date') and isinstance(deserialized['birth_date'], str):
+        deserialized['birth_date'] = parse_date(deserialized['birth_date'])
+    if deserialized.get('hire_date') and isinstance(deserialized['hire_date'], str):
+        deserialized['hire_date'] = parse_date(deserialized['hire_date'])
+    return deserialized
+
+
 def parse_employee_data(row):
     """
     DataFrameの1行を社員データに変換
@@ -511,8 +537,9 @@ def upload_file():
         temp_data = {
             'file_path': temp_path,
             'diff_result': {
-                'to_add': [d for d in diff_result['to_add']],
-                'to_update': [{'employee_number': u['employee'].employee_number, 'new_data': u['new_data']}
+                'to_add': [serialize_employee_data(d) for d in diff_result['to_add']],
+                'to_update': [{'employee_number': u['employee'].employee_number,
+                               'new_data': serialize_employee_data(u['new_data'])}
                              for u in diff_result['to_update']],
                 'to_delete': [e.employee_number for e in diff_result['to_delete']],
                 'stats': diff_result['stats']
@@ -572,7 +599,9 @@ def import_data():
 
         # 追加
         for emp_data in diff_result['to_add']:
-            employee = Employee(**emp_data)
+            # JSON化されたデータをデシリアライズ（日付を復元）
+            deserialized = deserialize_employee_data(emp_data)
+            employee = Employee(**deserialized)
             db.session.add(employee)
             added_count += 1
 
@@ -580,7 +609,9 @@ def import_data():
         for update_info in diff_result['to_update']:
             employee = Employee.query.filter_by(employee_number=update_info['employee_number']).first()
             if employee:
-                for key, value in update_info['new_data'].items():
+                # JSON化されたデータをデシリアライズ（日付を復元）
+                deserialized = deserialize_employee_data(update_info['new_data'])
+                for key, value in deserialized.items():
                     setattr(employee, key, value)
                 employee.updated_at = datetime.utcnow()
                 updated_count += 1
