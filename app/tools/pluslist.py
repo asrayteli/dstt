@@ -464,6 +464,36 @@ def get_employees():
     if birth_date_to:
         query = query.filter(Employee.birth_date <= birth_date_to)
 
+    # 複数フィールド条件（フィールドごとの個別検索）
+    field_employee_number = request.args.get('field_employee_number', '')
+    field_employee_name = request.args.get('field_employee_name', '')
+    field_employee_kana = request.args.get('field_employee_kana', '')
+    field_gender = request.args.get('field_gender', '')
+    field_job_title = request.args.get('field_job_title', '')
+    field_mobile_phone = request.args.get('field_mobile_phone', '')
+    field_address = request.args.get('field_address', '')
+    field_company_name = request.args.get('field_company_name', '')
+
+    if field_employee_number:
+        query = query.filter(Employee.employee_number.like(f"%{field_employee_number}%"))
+    if field_employee_name:
+        query = query.filter(Employee.employee_name.like(f"%{field_employee_name}%"))
+    if field_employee_kana:
+        query = query.filter(Employee.employee_kana.like(f"%{field_employee_kana}%"))
+    if field_gender:
+        query = query.filter(Employee.gender == field_gender)
+    if field_job_title:
+        query = query.filter(Employee.job_title.like(f"%{field_job_title}%"))
+    if field_mobile_phone:
+        query = query.filter(Employee.mobile_phone.like(f"%{field_mobile_phone}%"))
+    if field_address:
+        query = query.filter(or_(
+            Employee.address1.like(f"%{field_address}%"),
+            Employee.address2.like(f"%{field_address}%")
+        ))
+    if field_company_name:
+        query = query.filter(Employee.company_name.like(f"%{field_company_name}%"))
+
     # ソート
     if hasattr(Employee, sort_by):
         sort_column = getattr(Employee, sort_by)
