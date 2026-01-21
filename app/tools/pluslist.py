@@ -129,6 +129,7 @@ def read_excel_file(file_path, original_filename=None):
     try:
         # ファイル形式に応じて適切なエンジンを使用
         # 数値列を文字列として読み込むための設定（前ゼロを保持）
+        # dtypeを使用して、指定した列を文字列型として読み込む
         str_columns = {
             '社員番号': str,
             '所属コード［＊］': str,
@@ -142,28 +143,28 @@ def read_excel_file(file_path, original_filename=None):
 
         if file_ext == '.xlsx':
             try:
-                df = pd.read_excel(file_path, engine='openpyxl', dtype=str_columns, converters=str_columns)
+                df = pd.read_excel(file_path, engine='openpyxl', dtype=str_columns)
             except Exception as e:
                 raise ValueError(f".xlsxファイルの読み込みに失敗しました（openpyxl使用）: {str(e)}")
 
         elif file_ext == '.xls':
             try:
-                df = pd.read_excel(file_path, engine='xlrd', dtype=str_columns, converters=str_columns)
+                df = pd.read_excel(file_path, engine='xlrd', dtype=str_columns)
             except Exception as e:
                 raise ValueError(f".xlsファイルの読み込みに失敗しました（xlrd使用）: {str(e)}")
 
         elif file_ext == '.csv':
             try:
                 # まずUTF-8 with BOMで試行
-                df = pd.read_csv(file_path, encoding='utf-8-sig', dtype=str_columns, converters=str_columns)
+                df = pd.read_csv(file_path, encoding='utf-8-sig', dtype=str_columns)
             except:
                 try:
                     # UTF-8で試行
-                    df = pd.read_csv(file_path, encoding='utf-8', dtype=str_columns, converters=str_columns)
+                    df = pd.read_csv(file_path, encoding='utf-8', dtype=str_columns)
                 except:
                     try:
                         # Shift-JISで試行（日本語ファイルの場合）
-                        df = pd.read_csv(file_path, encoding='shift-jis', dtype=str_columns, converters=str_columns)
+                        df = pd.read_csv(file_path, encoding='shift-jis', dtype=str_columns)
                     except Exception as e:
                         raise ValueError(f"CSVファイルの読み込みに失敗しました: {str(e)}")
         else:
