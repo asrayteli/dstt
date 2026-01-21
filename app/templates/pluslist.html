@@ -1,17 +1,1817 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-xl mx-auto bg-white p-6 rounded-2xl shadow mt-6">
-  <h2 class="text-xl font-bold mb-4">🛠️ pluslist Tool</h2>
-  <form method="POST">
-    <!-- 入力フォーム -->
-    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">送信</button>
-  </form>
+<div class="container mx-auto px-4 py-6 max-w-7xl">
+    <!-- ヘッダー -->
+    <div class="bg-gradient-to-r from-blue-600 to-blue-800 text-white p-6 rounded-lg shadow-lg mb-6">
+        <h1 class="text-3xl font-bold mb-2">📋 社員名簿PLUS</h1>
+        <p class="text-blue-100">高機能社員データ管理システム</p>
+        <div class="mt-4 flex flex-wrap gap-2">
+            <span class="bg-blue-700 px-3 py-1 rounded-full text-sm">ユーザー: {{ user_id }}</span>
+            {% if is_admin %}
+            <span class="bg-yellow-500 px-3 py-1 rounded-full text-sm font-semibold">管理者</span>
+            {% endif %}
+            <span class="bg-blue-700 px-3 py-1 rounded-full text-sm">アクセス可能営業所: {{ user_offices|length }}件</span>
+        </div>
+    </div>
 
-  {% if result %}
-  <div class="mt-4 text-green-700 font-semibold">
-    ✅ 結果: { '{ result }' }
-  </div>
-  {% endif %}
+    <!-- タブナビゲーション -->
+    <div class="mb-6 border-b border-gray-200">
+        <nav class="-mb-px flex space-x-4 overflow-x-auto" role="tablist">
+            <button onclick="switchTab('list')" id="tab-list" class="tab-button active px-4 py-2 font-medium text-sm border-b-2 border-transparent hover:border-gray-300 whitespace-nowrap">
+                社員一覧
+            </button>
+            <button onclick="switchTab('upload')" id="tab-upload" class="tab-button px-4 py-2 font-medium text-sm border-b-2 border-transparent hover:border-gray-300 whitespace-nowrap">
+                ファイルアップロード
+            </button>
+            <button onclick="switchTab('history')" id="tab-history" class="tab-button px-4 py-2 font-medium text-sm border-b-2 border-transparent hover:border-gray-300 whitespace-nowrap">
+                履歴
+            </button>
+            {% if is_admin %}
+            <button onclick="switchTab('admin')" id="tab-admin" class="tab-button px-4 py-2 font-medium text-sm border-b-2 border-transparent hover:border-gray-300 whitespace-nowrap">
+                管理者設定
+            </button>
+            {% endif %}
+        </nav>
+    </div>
+
+    <!-- 社員一覧タブ -->
+    <div id="content-list" class="tab-content">
+        <!-- 検索・フィルタエリア -->
+        <div class="bg-white p-4 rounded-lg shadow mb-4">
+            <!-- 検索モード選択 -->
+            <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                <label class="block text-sm font-semibold text-gray-800 mb-2">検索方法を選んでください：</label>
+                <div class="flex gap-6">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="radio" name="search-type" value="simple" checked class="mr-2" onchange="toggleSearchType('simple')">
+                        <span class="font-medium">🔍 標準検索</span>
+                    </label>
+                    <label class="flex items-center cursor-pointer">
+                        <input type="radio" name="search-type" value="advanced" class="mr-2" onchange="toggleSearchType('advanced')">
+                        <span class="font-medium">⚙ 詳細検索</span>
+                        <span class="ml-2 text-xs text-gray-600">（多機能）</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- かんたん検索エリア -->
+            <div id="simple-search-area">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">検索キーワード</label>
+                        <input type="text" id="search-input" placeholder="社員番号、名前、営業所など... 複数のキーワードはスペースで区切ってください" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <p class="mt-1 text-xs text-gray-500">例: 「田中 千葉」と入力すると、「田中」と「千葉」の両方を含む社員が表示されます</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">営業所で絞り込み</label>
+                        <select id="office-filter" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">すべての営業所</option>
+                            {% for office in offices %}
+                            <option value="{{ office.code }}">{{ office.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 詳細検索エリア（デフォルトは非表示） -->
+            <div id="advanced-search-area" class="hidden">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">検索キーワード</label>
+                        <input type="text" id="search-input-advanced" placeholder="検索キーワード（スペース区切りで複数可）" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">営業所</label>
+                        <select id="office-filter-advanced" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">全て</option>
+                            {% for office in offices %}
+                            <option value="{{ office.code }}">{{ office.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">表示件数</label>
+                        <select id="per-page" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="30" selected>30件</option>
+                            <option value="50">50件</option>
+                            <option value="100">100件</option>
+                            <option value="200">200件</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 詳細検索オプション -->
+                <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">検索範囲</label>
+                        <select id="search-scope" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="visible">表示中の列のみ</option>
+                            <option value="all" selected>全ての列</option>
+                            <option value="specific">指定した列</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">検索モード</label>
+                        <select id="search-mode" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="partial" selected>あいまい検索（部分一致）</option>
+                            <option value="exact">完全一致</option>
+                            <option value="prefix">前方一致</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">複数キーワード</label>
+                        <select id="search-operator" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="and" selected>AND検索（全て含む）</option>
+                            <option value="or">OR検索（いずれか含む）</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 指定列選択（search-scope=specificの時のみ表示） -->
+                <div id="specific-columns-area" class="mt-3 hidden">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">検索対象の列を選択：</label>
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-2 max-h-32 overflow-y-auto border border-gray-200 rounded p-2">
+                        <label class="flex items-center text-sm">
+                            <input type="checkbox" class="search-column mr-1" data-column="employee_number" checked>
+                            社員番号
+                        </label>
+                        <label class="flex items-center text-sm">
+                            <input type="checkbox" class="search-column mr-1" data-column="employee_name" checked>
+                            氏名
+                        </label>
+                        <label class="flex items-center text-sm">
+                            <input type="checkbox" class="search-column mr-1" data-column="employee_kana" checked>
+                            カナ
+                        </label>
+                        <label class="flex items-center text-sm">
+                            <input type="checkbox" class="search-column mr-1" data-column="office_name">
+                            営業所
+                        </label>
+                        <label class="flex items-center text-sm">
+                            <input type="checkbox" class="search-column mr-1" data-column="job_title">
+                            職種
+                        </label>
+                        <label class="flex items-center text-sm">
+                            <input type="checkbox" class="search-column mr-1" data-column="mobile_phone">
+                            携帯電話
+                        </label>
+                        <label class="flex items-center text-sm">
+                            <input type="checkbox" class="search-column mr-1" data-column="phone_number">
+                            電話番号
+                        </label>
+                        <label class="flex items-center text-sm">
+                            <input type="checkbox" class="search-column mr-1" data-column="address1">
+                            住所１
+                        </label>
+                        <label class="flex items-center text-sm">
+                            <input type="checkbox" class="search-column mr-1" data-column="postal_code">
+                            郵便番号
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4 flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                    <div>
+                        <input type="checkbox" id="show-deleted" class="mr-2">
+                        <label for="show-deleted" class="text-sm text-gray-700">退職者を表示</label>
+                    </div>
+                    <button onclick="toggleAdvancedSearch()" class="text-sm text-blue-600 hover:text-blue-800 font-medium">
+                        ⚙ 高度な検索
+                    </button>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="searchEmployees()" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition">
+                        🔍 検索
+                    </button>
+                    <button onclick="copyTableData()" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 transition" title="表示データをコピー">
+                        📋 コピー
+                    </button>
+                    <button onclick="exportData('excel')" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition" title="Excelエクスポート">
+                        📊
+                    </button>
+                    <button onclick="exportData('csv')" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition" title="CSVエクスポート">
+                        📄
+                    </button>
+                    <button onclick="toggleColumnSelector()" class="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 transition" title="表示列選択">
+                        ⚙
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 高度な検索パネル -->
+        <div id="advanced-search" class="bg-white p-4 rounded-lg shadow mb-4 hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-semibold text-gray-900">🔍 高度な検索</h3>
+                <button onclick="toggleAdvancedSearch()" class="text-gray-500 hover:text-gray-700 text-2xl">✕</button>
+            </div>
+
+            <!-- 日付範囲検索 -->
+            <div class="mb-6">
+                <h4 class="text-sm font-semibold text-gray-800 mb-3 flex items-center">
+                    <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded mr-2">1</span>
+                    日付範囲で絞り込み
+                </h4>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">入社日（開始）</label>
+                        <input type="date" id="hire-date-from" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">入社日（終了）</label>
+                        <input type="date" id="hire-date-to" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">生年月日（開始）</label>
+                        <input type="date" id="birth-date-from" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">生年月日（終了）</label>
+                        <input type="date" id="birth-date-to" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 複数条件組み合わせ検索 -->
+            <div class="mb-6 border-t pt-4">
+                <h4 class="text-sm font-semibold text-gray-800 mb-3 flex items-center">
+                    <span class="bg-green-100 text-green-800 px-2 py-1 rounded mr-2">2</span>
+                    フィールドごとの条件指定
+                </h4>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">社員番号</label>
+                        <input type="text" id="field-employee-number" placeholder="例: 1234" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">氏名</label>
+                        <input type="text" id="field-employee-name" placeholder="例: 田中" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">カナ</label>
+                        <input type="text" id="field-employee-kana" placeholder="例: タナカ" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">性別</label>
+                        <select id="field-gender" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            <option value="">指定なし</option>
+                            <option value="男">男</option>
+                            <option value="女">女</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">職種</label>
+                        <input type="text" id="field-job-title" placeholder="例: 営業" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">携帯電話</label>
+                        <input type="text" id="field-mobile-phone" placeholder="例: 090" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">住所</label>
+                        <input type="text" id="field-address" placeholder="例: 千葉県" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">法人名</label>
+                        <input type="text" id="field-company-name" placeholder="例: 株式会社" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                </div>
+                <p class="mt-2 text-xs text-gray-500">
+                    💡 複数の条件を入力すると、すべての条件に一致するデータのみ表示されます（AND検索）
+                </p>
+            </div>
+
+            <div class="flex gap-2">
+                <button onclick="applyAdvancedSearch()" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-md hover:bg-blue-700 font-semibold">
+                    🔍 この条件で検索
+                </button>
+                <button onclick="clearAdvancedSearch()" class="px-6 py-3 border border-gray-300 rounded-md hover:bg-gray-100">
+                    クリア
+                </button>
+            </div>
+        </div>
+
+        <!-- 表示列選択パネル -->
+        <div id="column-selector" class="bg-white p-4 rounded-lg shadow mb-4 hidden">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="font-semibold text-gray-900">表示する列を選択</h3>
+                <button onclick="toggleColumnSelector()" class="text-gray-500 hover:text-gray-700">✕</button>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="employee_number" checked>
+                    社員番号
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="employee_name" checked>
+                    氏名
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="employee_kana">
+                    カナ名称
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="office_name" checked>
+                    営業所
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="office_code">
+                    所属コード
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="employee_type">
+                    社員区分
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="gender">
+                    性別
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="job_title" checked>
+                    職種
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="cost_code">
+                    原価コード
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="cost_name">
+                    原価名称
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="manager_number">
+                    管理担当社員番号
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="manager_name">
+                    管理担当社員名
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="postal_code">
+                    郵便番号
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="address1">
+                    住所１
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="address2">
+                    住所２
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="mansion_name">
+                    マンション名
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="contract_code">
+                    契約コード
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="company_name">
+                    法人名
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="site_name">
+                    現場名
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="birth_date">
+                    生年月日
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="hire_date">
+                    入社日付
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="retirement_date">
+                    退職日付
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="phone_number">
+                    電話番号
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="mobile_phone" checked>
+                    携帯電話
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="health_insurance">
+                    健康保険加入区分
+                </label>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="applyColumnSelection()" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                    適用
+                </button>
+                <button onclick="resetColumnSelection()" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-100">
+                    デフォルトに戻す
+                </button>
+            </div>
+        </div>
+
+        <!-- 社員一覧テーブル -->
+        <div class="bg-white rounded-lg shadow overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200" id="employees-table">
+                <thead class="bg-gray-50" id="employees-thead">
+                    <!-- JavaScriptで動的に生成 -->
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200" id="employees-tbody">
+                    <!-- JavaScriptで動的に生成 -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ページネーション -->
+        <div class="mt-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="text-sm text-gray-700">
+                <span id="showing-info">表示: 0 - 0 / 全 0 件</span>
+            </div>
+            <div class="flex gap-2" id="pagination">
+                <!-- JavaScriptで動的に生成 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ファイルアップロードタブ -->
+    <div id="content-upload" class="tab-content hidden">
+        <div class="bg-white p-6 rounded-lg shadow max-w-3xl mx-auto">
+            <h3 class="text-xl font-bold mb-4">📤 Excelファイルアップロード</h3>
+            <p class="text-gray-600 mb-4">社員データ（.xls, .xlsx, .csv形式）をアップロードして一括更新します。</p>
+
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center mb-4" id="drop-zone">
+                <input type="file" id="file-input" accept=".xls,.xlsx,.csv" class="hidden" onchange="handleFileSelect(event)">
+                <div class="mb-4">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                    </svg>
+                </div>
+                <p class="text-lg mb-2">ファイルをドラッグ&ドロップ</p>
+                <p class="text-sm text-gray-500 mb-4">または</p>
+                <button onclick="document.getElementById('file-input').click()" class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700">
+                    ファイルを選択
+                </button>
+                <p class="text-xs text-gray-500 mt-4">対応形式: .xls, .xlsx, .csv (最大10MB)</p>
+            </div>
+
+            <div id="upload-progress" class="hidden mb-4">
+                <div class="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded">
+                    <p class="font-semibold">処理中...</p>
+                    <div class="w-full bg-gray-200 rounded-full h-2 mt-2">
+                        <div class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%" id="progress-bar"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="preview-area" class="hidden">
+                <div class="bg-yellow-50 border border-yellow-400 rounded-lg p-4 mb-4">
+                    <h4 class="font-bold text-lg mb-2">⚠️ 差分プレビュー</h4>
+                    <p class="text-sm text-gray-700 mb-3">以下の変更が反映されます。確認後、「インポート実行」ボタンをクリックしてください。</p>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center mb-4">
+                        <div class="bg-green-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-green-700" id="add-count">0</p>
+                            <p class="text-sm text-green-600">追加</p>
+                        </div>
+                        <div class="bg-blue-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-blue-700" id="update-count">0</p>
+                            <p class="text-sm text-blue-600">更新</p>
+                        </div>
+                        <div class="bg-red-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-red-700" id="delete-count">0</p>
+                            <p class="text-sm text-red-600">削除</p>
+                        </div>
+                        <div class="bg-gray-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-gray-700" id="total-count">0</p>
+                            <p class="text-sm text-gray-600">総件数</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <button onclick="executeImport()" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-md hover:bg-blue-700 font-semibold">
+                            ✅ インポート実行
+                        </button>
+                        <button onclick="cancelUpload()" class="flex-1 bg-gray-400 text-white px-6 py-3 rounded-md hover:bg-gray-500">
+                            ❌ キャンセル
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 履歴タブ -->
+    <div id="content-history" class="tab-content hidden">
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h3 class="text-xl font-bold mb-4">📜 アップロード履歴</h3>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">日時</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ユーザー</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">営業所</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ファイル名</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">追加</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">更新</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">削除</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200" id="history-tbody">
+                        <!-- JavaScriptで動的に生成 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 管理者設定タブ -->
+    {% if is_admin %}
+    <div id="content-admin" class="tab-content hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- 営業所管理 -->
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-xl font-bold mb-4">🏢 営業所管理</h3>
+
+                <div class="mb-4">
+                    <h4 class="font-semibold mb-2">新規営業所登録</h4>
+                    <div class="flex gap-2 mb-4">
+                        <input type="text" id="new-office-code" placeholder="営業所コード (例: 112010)" class="flex-1 px-3 py-2 border border-gray-300 rounded-md">
+                        <input type="text" id="new-office-name" placeholder="営業所名 (例: 千葉営業所)" class="flex-1 px-3 py-2 border border-gray-300 rounded-md">
+                        <button onclick="createOffice()" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 whitespace-nowrap">
+                            追加
+                        </button>
+                    </div>
+                </div>
+
+                <h4 class="font-semibold mb-2">登録済み営業所</h4>
+                <div id="offices-list" class="space-y-2 max-h-96 overflow-y-auto">
+                    <!-- JavaScriptで動的に生成 -->
+                </div>
+            </div>
+
+            <!-- 権限管理 -->
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-xl font-bold mb-4">👥 ユーザー権限管理</h3>
+
+                <div class="mb-4">
+                    <h4 class="font-semibold mb-2">権限付与</h4>
+                    <div class="flex gap-2 mb-4">
+                        <input type="text" id="grant-user-id" placeholder="ユーザーID" class="flex-1 px-3 py-2 border border-gray-300 rounded-md">
+                        <select id="grant-office-code" class="flex-1 px-3 py-2 border border-gray-300 rounded-md">
+                            <option value="">営業所を選択</option>
+                            {% for office in offices %}
+                            <option value="{{ office.code }}">{{ office.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <button onclick="grantPermission()" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 whitespace-nowrap">
+                            付与
+                        </button>
+                    </div>
+                </div>
+
+                <h4 class="font-semibold mb-2">ユーザー権限一覧</h4>
+                <div id="permissions-list" class="space-y-2 max-h-96 overflow-y-auto">
+                    <!-- JavaScriptで動的に生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
+
+<!-- 社員詳細モーダル -->
+<div id="employee-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+    <div class="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold" id="modal-title">社員詳細</h3>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+        </div>
+        <div id="modal-content" class="max-h-96 overflow-y-auto">
+            <!-- JavaScriptで動的に生成 -->
+        </div>
+        <div class="mt-4 flex gap-2">
+            <button onclick="editEmployee()" id="edit-btn" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">編集</button>
+            <button onclick="closeModal()" class="flex-1 bg-gray-400 text-white px-4 py-2 rounded-md hover:bg-gray-500">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<!-- コピー設定モーダル -->
+<div id="copy-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+    <div class="relative top-10 mx-auto p-5 border w-11/12 md:w-4/5 lg:w-3/4 shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold">📋 コピー設定</h3>
+            <button onclick="closeCopyModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- 列選択 -->
+            <div class="border rounded-lg p-4">
+                <div class="flex justify-between items-center mb-3">
+                    <h4 class="font-semibold text-gray-900">コピーする列を選択</h4>
+                    <div class="flex gap-2 text-sm">
+                        <button onclick="toggleAllCopyColumns(true)" class="text-blue-600 hover:underline">全選択</button>
+                        <span class="text-gray-400">|</span>
+                        <button onclick="toggleAllCopyColumns(false)" class="text-blue-600 hover:underline">全解除</button>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-2 max-h-96 overflow-y-auto border border-gray-200 rounded p-3">
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="employee_number">
+                        社員番号
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="employee_name">
+                        氏名
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="employee_kana">
+                        カナ名称
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="office_name">
+                        営業所
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="office_code">
+                        所属コード
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="employee_type">
+                        社員区分
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="gender">
+                        性別
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="job_title">
+                        職種
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="cost_code">
+                        原価コード
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="cost_name">
+                        原価名称
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="manager_number">
+                        管理担当社員番号
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="manager_name">
+                        管理担当社員名
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="postal_code">
+                        郵便番号
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="address1">
+                        住所１
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="address2">
+                        住所２
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="mansion_name">
+                        マンション名
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="contract_code">
+                        契約コード
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="company_name">
+                        法人名
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="site_name">
+                        現場名
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="birth_date">
+                        生年月日
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="hire_date">
+                        入社日付
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="retirement_date">
+                        退職日付
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="phone_number">
+                        電話番号
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="mobile_phone">
+                        携帯電話
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" class="copy-column-toggle mr-2" data-column="health_insurance">
+                        健康保険加入区分
+                    </label>
+                </div>
+            </div>
+
+            <!-- 行選択 -->
+            <div class="border rounded-lg p-4">
+                <div class="flex justify-between items-center mb-3">
+                    <h4 class="font-semibold text-gray-900">コピーする行を選択</h4>
+                    <div class="flex gap-2 text-sm">
+                        <button onclick="toggleAllCopyRows(true)" class="text-blue-600 hover:underline">全選択</button>
+                        <span class="text-gray-400">|</span>
+                        <button onclick="toggleAllCopyRows(false)" class="text-blue-600 hover:underline">全解除</button>
+                    </div>
+                </div>
+                <div id="copy-row-selection" class="max-h-96 overflow-y-auto border border-gray-200 rounded p-3">
+                    <!-- JavaScriptで動的に生成 -->
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-6 flex gap-3">
+            <button onclick="executeCopy()" class="flex-1 bg-purple-600 text-white px-6 py-3 rounded-md hover:bg-purple-700 font-semibold">
+                📋 コピー実行
+            </button>
+            <button onclick="closeCopyModal()" class="px-6 py-3 border border-gray-300 rounded-md hover:bg-gray-100">
+                キャンセル
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+.tab-button.active {
+    border-bottom-color: #2563eb;
+    color: #2563eb;
+}
+
+.tab-content {
+    animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@media (max-width: 375px) {
+    /* iPhone SE2 対応 */
+    .container {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+
+    table {
+        font-size: 0.875rem;
+    }
+
+    th, td {
+        padding: 0.5rem 0.25rem;
+    }
+}
+</style>
+
+<script>
+// グローバル変数
+let currentPage = 1;
+let perPage = 30;
+let sortBy = 'employee_number';
+let sortOrder = 'asc';
+let uploadSessionKey = null;
+let currentEmployeeNumber = null;
+let currentEmployees = []; // 現在表示中の社員データを保存
+
+// 表示列設定（デフォルト）
+let visibleColumns = ['employee_number', 'employee_name', 'office_name', 'job_title', 'mobile_phone'];
+
+// 全フィールドの定義（フィールド名: 表示名）
+const allColumns = {
+    'employee_number': '社員番号',
+    'employee_name': '氏名',
+    'employee_kana': 'カナ名称',
+    'office_name': '営業所',
+    'office_code': '所属コード',
+    'employee_type': '社員区分',
+    'gender': '性別',
+    'job_title': '職種',
+    'cost_code': '原価コード',
+    'cost_name': '原価名称',
+    'manager_number': '管理担当社員番号',
+    'manager_name': '管理担当社員名',
+    'postal_code': '郵便番号',
+    'address1': '住所１',
+    'address2': '住所２',
+    'mansion_name': 'マンション名',
+    'contract_code': '契約コード',
+    'company_name': '法人名',
+    'site_name': '現場名',
+    'birth_date': '生年月日',
+    'hire_date': '入社日付',
+    'retirement_date': '退職日付',
+    'phone_number': '電話番号',
+    'mobile_phone': '携帯電話',
+    'health_insurance': '健康保険加入区分'
+};
+
+// タブ切り替え
+function switchTab(tabName) {
+    // タブボタンの状態を更新
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.getElementById(`tab-${tabName}`).classList.add('active');
+
+    // コンテンツの表示切り替え
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.add('hidden');
+    });
+    document.getElementById(`content-${tabName}`).classList.remove('hidden');
+
+    // タブごとの初期化処理
+    if (tabName === 'list') {
+        searchEmployees();
+    } else if (tabName === 'history') {
+        loadUploadHistory();
+    } else if (tabName === 'admin') {
+        loadOffices();
+        loadPermissions();
+    }
+}
+
+// 検索タイプ切り替え
+function toggleSearchType(type) {
+    const simpleArea = document.getElementById('simple-search-area');
+    const advancedArea = document.getElementById('advanced-search-area');
+
+    if (type === 'simple') {
+        simpleArea.classList.remove('hidden');
+        advancedArea.classList.add('hidden');
+    } else {
+        simpleArea.classList.add('hidden');
+        advancedArea.classList.remove('hidden');
+    }
+}
+
+// 社員検索
+async function searchEmployees(page = 1) {
+    currentPage = page;
+
+    // かんたん検索 or 詳細検索の判定
+    const isSimpleSearch = document.querySelector('input[name="search-type"]:checked').value === 'simple';
+
+    // 検索キーワードと営業所フィルタの取得
+    const search = isSimpleSearch
+        ? document.getElementById('search-input').value
+        : document.getElementById('search-input-advanced').value;
+    const office = isSimpleSearch
+        ? document.getElementById('office-filter').value
+        : document.getElementById('office-filter-advanced').value;
+
+    const showDeleted = document.getElementById('show-deleted').checked;
+
+    // 表示件数（詳細検索のみ）
+    const perPageElement = document.getElementById('per-page');
+    perPage = perPageElement ? parseInt(perPageElement.value) : 30;
+
+    // 新しい検索オプション（詳細検索のみ）
+    const searchScope = isSimpleSearch ? 'all' : document.getElementById('search-scope').value;
+    const searchMode = isSimpleSearch ? 'partial' : document.getElementById('search-mode').value;
+    const searchOperator = isSimpleSearch ? 'and' : document.getElementById('search-operator').value;
+
+    // 検索範囲の決定
+    let searchColumns = [];
+    if (searchScope === 'visible') {
+        searchColumns = visibleColumns;
+    } else if (searchScope === 'specific') {
+        document.querySelectorAll('.search-column:checked').forEach(cb => {
+            searchColumns.push(cb.dataset.column);
+        });
+    }
+    // 'all'の場合は空配列（全列検索）
+
+    // 高度な検索の日付範囲
+    const hireDateFrom = document.getElementById('hire-date-from')?.value || '';
+    const hireDateTo = document.getElementById('hire-date-to')?.value || '';
+    const birthDateFrom = document.getElementById('birth-date-from')?.value || '';
+    const birthDateTo = document.getElementById('birth-date-to')?.value || '';
+
+    // 複数フィールド条件（高度な検索）
+    const fieldEmployeeNumber = document.getElementById('field-employee-number')?.value || '';
+    const fieldEmployeeName = document.getElementById('field-employee-name')?.value || '';
+    const fieldEmployeeKana = document.getElementById('field-employee-kana')?.value || '';
+    const fieldGender = document.getElementById('field-gender')?.value || '';
+    const fieldJobTitle = document.getElementById('field-job-title')?.value || '';
+    const fieldMobilePhone = document.getElementById('field-mobile-phone')?.value || '';
+    const fieldAddress = document.getElementById('field-address')?.value || '';
+    const fieldCompanyName = document.getElementById('field-company-name')?.value || '';
+
+    const params = new URLSearchParams({
+        page: currentPage,
+        per_page: perPage,
+        search: search,
+        office: office,
+        sort_by: sortBy,
+        sort_order: sortOrder,
+        show_deleted: showDeleted,
+        search_scope: searchScope,
+        search_mode: searchMode,
+        search_operator: searchOperator,
+        search_columns: searchColumns.join(','),
+        hire_date_from: hireDateFrom,
+        hire_date_to: hireDateTo,
+        birth_date_from: birthDateFrom,
+        birth_date_to: birthDateTo,
+        field_employee_number: fieldEmployeeNumber,
+        field_employee_name: fieldEmployeeName,
+        field_employee_kana: fieldEmployeeKana,
+        field_gender: fieldGender,
+        field_job_title: fieldJobTitle,
+        field_mobile_phone: fieldMobilePhone,
+        field_address: fieldAddress,
+        field_company_name: fieldCompanyName
+    });
+
+    try {
+        const response = await fetch(`/tools/pluslist/api/employees?${params}`);
+        const data = await response.json();
+
+        if (response.ok) {
+            currentEmployees = data.employees; // 社員データを保存
+            renderEmployeeTable(data.employees);
+            renderPagination(data.total, data.pages, data.current_page);
+        } else {
+            alert('エラー: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// テーブルヘッダーを描画
+function renderTableHeader() {
+    const thead = document.getElementById('employees-thead');
+    const tr = document.createElement('tr');
+
+    visibleColumns.forEach(col => {
+        const th = document.createElement('th');
+        th.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
+
+        // ソート可能な列の場合
+        if (['employee_number', 'employee_name', 'hire_date', 'birth_date'].includes(col)) {
+            th.className += ' cursor-pointer';
+            th.onclick = () => sortTable(col);
+            th.innerHTML = `${allColumns[col]} <span id="sort-${col}">↕</span>`;
+        } else {
+            th.textContent = allColumns[col];
+        }
+
+        tr.appendChild(th);
+    });
+
+    // アクション列を追加
+    const actionTh = document.createElement('th');
+    actionTh.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
+    actionTh.textContent = 'アクション';
+    tr.appendChild(actionTh);
+
+    thead.innerHTML = '';
+    thead.appendChild(tr);
+}
+
+// 社員テーブルを描画
+function renderEmployeeTable(employees) {
+    // ヘッダーを再描画
+    renderTableHeader();
+
+    const tbody = document.getElementById('employees-tbody');
+    tbody.innerHTML = '';
+
+    if (employees.length === 0) {
+        const colspan = visibleColumns.length + 1;
+        tbody.innerHTML = `<tr><td colspan="${colspan}" class="px-4 py-8 text-center text-gray-500">データがありません</td></tr>`;
+        return;
+    }
+
+    employees.forEach(emp => {
+        const row = document.createElement('tr');
+        row.className = emp.is_deleted ? 'bg-gray-100' : 'hover:bg-gray-50';
+
+        // 選択された列のみ表示
+        visibleColumns.forEach(col => {
+            const td = document.createElement('td');
+            td.className = 'px-4 py-3 whitespace-nowrap text-sm';
+
+            // 氏名列の場合はカナも表示
+            if (col === 'employee_name') {
+                td.innerHTML = `
+                    <div class="text-sm font-medium text-gray-900">${emp.employee_name || ''}</div>
+                    ${emp.employee_kana ? `<div class="text-sm text-gray-500">${emp.employee_kana}</div>` : ''}
+                `;
+            } else {
+                td.textContent = emp[col] || '';
+            }
+
+            row.appendChild(td);
+        });
+
+        // アクション列
+        const actionTd = document.createElement('td');
+        actionTd.className = 'px-4 py-3 whitespace-nowrap text-sm';
+        actionTd.innerHTML = `
+            <button onclick="viewEmployee('${emp.employee_number}')" class="text-blue-600 hover:text-blue-900 mr-2">詳細</button>
+            <button onclick="editEmployeeQuick('${emp.employee_number}')" class="text-green-600 hover:text-green-900">編集</button>
+        `;
+        row.appendChild(actionTd);
+
+        tbody.appendChild(row);
+    });
+}
+
+// ページネーション描画
+function renderPagination(total, pages, current) {
+    const start = (current - 1) * perPage + 1;
+    const end = Math.min(current * perPage, total);
+    document.getElementById('showing-info').textContent = `表示: ${start} - ${end} / 全 ${total} 件`;
+
+    const pagination = document.getElementById('pagination');
+    pagination.innerHTML = '';
+
+    if (pages <= 1) return;
+
+    // 前へ
+    if (current > 1) {
+        pagination.innerHTML += `<button onclick="searchEmployees(${current - 1})" class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-100">前へ</button>`;
+    }
+
+    // ページ番号
+    for (let i = Math.max(1, current - 2); i <= Math.min(pages, current + 2); i++) {
+        const activeClass = i === current ? 'bg-blue-600 text-white' : 'bg-white hover:bg-gray-100';
+        pagination.innerHTML += `<button onclick="searchEmployees(${i})" class="px-3 py-1 border border-gray-300 rounded ${activeClass}">${i}</button>`;
+    }
+
+    // 次へ
+    if (current < pages) {
+        pagination.innerHTML += `<button onclick="searchEmployees(${current + 1})" class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-100">次へ</button>`;
+    }
+}
+
+// ソート
+function sortTable(column) {
+    if (sortBy === column) {
+        sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+        sortBy = column;
+        sortOrder = 'asc';
+    }
+
+    // ソートアイコンを更新
+    document.querySelectorAll('[id^="sort-"]').forEach(span => {
+        span.textContent = '↕';
+    });
+    document.getElementById(`sort-${column}`).textContent = sortOrder === 'asc' ? '↑' : '↓';
+
+    searchEmployees(1);
+}
+
+// 社員詳細表示
+async function viewEmployee(employeeNumber) {
+    currentEmployeeNumber = employeeNumber;
+    try {
+        const response = await fetch(`/tools/pluslist/api/employee/${employeeNumber}`);
+        const emp = await response.json();
+
+        if (response.ok) {
+            const content = document.getElementById('modal-content');
+            content.innerHTML = `
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div><strong>社員番号:</strong> ${emp.employee_number}</div>
+                    <div><strong>氏名:</strong> ${emp.employee_name}</div>
+                    <div><strong>カナ:</strong> ${emp.employee_kana || ''}</div>
+                    <div><strong>性別:</strong> ${emp.gender || ''}</div>
+                    <div><strong>営業所:</strong> ${emp.office_name || ''}</div>
+                    <div><strong>職種:</strong> ${emp.job_title || ''}</div>
+                    <div><strong>生年月日:</strong> ${emp.birth_date || ''}</div>
+                    <div><strong>入社日:</strong> ${emp.hire_date || ''}</div>
+                    <div><strong>退職日:</strong> ${emp.retirement_date || ''}</div>
+                    <div><strong>携帯電話:</strong> ${emp.mobile_phone || ''}</div>
+                    <div><strong>電話番号:</strong> ${emp.phone_number || ''}</div>
+                    <div><strong>郵便番号:</strong> ${emp.postal_code || ''}</div>
+                    <div class="col-span-2"><strong>住所1:</strong> ${emp.address1 || ''}</div>
+                    <div class="col-span-2"><strong>住所2:</strong> ${emp.address2 || ''}</div>
+                    <div class="col-span-2"><strong>法人名:</strong> ${emp.company_name || ''}</div>
+                    <div class="col-span-2"><strong>現場名:</strong> ${emp.site_name || ''}</div>
+                </div>
+            `;
+            document.getElementById('employee-modal').classList.remove('hidden');
+        } else {
+            alert('エラー: ' + emp.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// モーダルを閉じる
+function closeModal() {
+    document.getElementById('employee-modal').classList.add('hidden');
+    currentEmployeeNumber = null;
+}
+
+// 編集モードに切り替え
+async function editEmployee() {
+    if (!currentEmployeeNumber) return;
+
+    try {
+        const response = await fetch(`/tools/pluslist/api/employee/${currentEmployeeNumber}`);
+        const emp = await response.json();
+
+        if (response.ok) {
+            const content = document.getElementById('modal-content');
+            content.innerHTML = `
+                <form id="edit-form" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">社員番号 *</label>
+                            <input type="text" name="employee_number" value="${emp.employee_number}" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">氏名 *</label>
+                            <input type="text" name="employee_name" value="${emp.employee_name || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">カナ</label>
+                            <input type="text" name="employee_kana" value="${emp.employee_kana || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">性別</label>
+                            <input type="text" name="gender" value="${emp.gender || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">職種</label>
+                            <input type="text" name="job_title" value="${emp.job_title || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">生年月日</label>
+                            <input type="date" name="birth_date" value="${emp.birth_date || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">入社日</label>
+                            <input type="date" name="hire_date" value="${emp.hire_date || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">携帯電話</label>
+                            <input type="text" name="mobile_phone" value="${emp.mobile_phone || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">電話番号</label>
+                            <input type="text" name="phone_number" value="${emp.phone_number || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">郵便番号</label>
+                            <input type="text" name="postal_code" value="${emp.postal_code || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="block text-sm font-medium text-gray-700">住所１ *</label>
+                            <input type="text" name="address1" value="${emp.address1 || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                        </div>
+                        <div class="col-span-2">
+                            <label class="block text-sm font-medium text-gray-700">住所２</label>
+                            <input type="text" name="address2" value="${emp.address2 || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">マンション名</label>
+                            <input type="text" name="mansion_name" value="${emp.mansion_name || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">法人名</label>
+                            <input type="text" name="company_name" value="${emp.company_name || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="block text-sm font-medium text-gray-700">現場名</label>
+                            <input type="text" name="site_name" value="${emp.site_name || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                    </div>
+                    <div class="flex gap-2 mt-6">
+                        <button type="button" onclick="saveEmployee()" class="flex-1 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700">保存</button>
+                        <button type="button" onclick="viewEmployee('${emp.employee_number}')" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-100">キャンセル</button>
+                    </div>
+                </form>
+            `;
+        } else {
+            alert('エラー: ' + emp.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// 社員情報を保存
+async function saveEmployee() {
+    const form = document.getElementById('edit-form');
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+
+    try {
+        const response = await fetch(`/tools/pluslist/api/employee/${currentEmployeeNumber}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert('保存しました');
+            closeModal();
+            searchEmployees(currentPage);
+        } else {
+            alert('エラー: ' + result.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// エクスポート
+function exportData(format) {
+    const search = document.getElementById('search-input').value;
+    const office = document.getElementById('office-filter').value;
+    const showDeleted = document.getElementById('show-deleted').checked;
+
+    const params = new URLSearchParams({
+        search: search,
+        office: office,
+        show_deleted: showDeleted
+    });
+
+    window.location.href = `/tools/pluslist/api/export/${format}?${params}`;
+}
+
+// ファイル選択
+function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (file) {
+        uploadFile(file);
+    }
+}
+
+// ファイルアップロード
+async function uploadFile(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    document.getElementById('upload-progress').classList.remove('hidden');
+    document.getElementById('progress-bar').style.width = '50%';
+
+    try {
+        const response = await fetch('/tools/pluslist/api/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            uploadSessionKey = data.session_key;
+            document.getElementById('add-count').textContent = data.stats.add_count;
+            document.getElementById('update-count').textContent = data.stats.update_count;
+            document.getElementById('delete-count').textContent = data.stats.delete_count;
+            document.getElementById('total-count').textContent = data.stats.total_count;
+
+            document.getElementById('upload-progress').classList.add('hidden');
+            document.getElementById('preview-area').classList.remove('hidden');
+        } else {
+            alert('エラー: ' + data.error);
+            document.getElementById('upload-progress').classList.add('hidden');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+        document.getElementById('upload-progress').classList.add('hidden');
+    }
+}
+
+// インポート実行
+async function executeImport() {
+    if (!uploadSessionKey) return;
+
+    if (!confirm('データベースに反映します。よろしいですか？')) return;
+
+    try {
+        const response = await fetch('/tools/pluslist/api/import', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session_key: uploadSessionKey})
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            alert(`インポート完了！\n追加: ${data.added}件\n更新: ${data.updated}件\n削除: ${data.deleted}件`);
+            cancelUpload();
+            switchTab('list');
+        } else {
+            alert('エラー: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// アップロードキャンセル
+function cancelUpload() {
+    document.getElementById('preview-area').classList.add('hidden');
+    document.getElementById('file-input').value = '';
+    uploadSessionKey = null;
+}
+
+// アップロード履歴読み込み
+async function loadUploadHistory() {
+    try {
+        const response = await fetch('/tools/pluslist/api/histories/upload');
+        const histories = await response.json();
+
+        const tbody = document.getElementById('history-tbody');
+        tbody.innerHTML = '';
+
+        histories.forEach(h => {
+            const row = document.createElement('tr');
+            const date = new Date(h.uploaded_at).toLocaleString('ja-JP');
+            row.innerHTML = `
+                <td class="px-4 py-3 text-sm">${date}</td>
+                <td class="px-4 py-3 text-sm">${h.uploaded_by}</td>
+                <td class="px-4 py-3 text-sm">${h.office_code}</td>
+                <td class="px-4 py-3 text-sm">${h.filename}</td>
+                <td class="px-4 py-3 text-sm text-green-600">${h.added_count}</td>
+                <td class="px-4 py-3 text-sm text-blue-600">${h.updated_count}</td>
+                <td class="px-4 py-3 text-sm text-red-600">${h.deleted_count}</td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+
+// 営業所一覧読み込み（管理者のみ）
+async function loadOffices() {
+    try {
+        const response = await fetch('/tools/pluslist/api/admin/offices');
+        const offices = await response.json();
+
+        const list = document.getElementById('offices-list');
+        list.innerHTML = '';
+
+        offices.forEach(office => {
+            const div = document.createElement('div');
+            div.className = 'flex justify-between items-center p-3 bg-gray-50 rounded';
+            div.innerHTML = `
+                <div>
+                    <span class="font-semibold">${office.office_code}</span> - ${office.office_name}
+                </div>
+                <button onclick="deleteOffice('${office.office_code}')" class="text-red-600 hover:text-red-800 text-sm">削除</button>
+            `;
+            list.appendChild(div);
+        });
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+
+// 営業所作成
+async function createOffice() {
+    const code = document.getElementById('new-office-code').value;
+    const name = document.getElementById('new-office-name').value;
+
+    if (!code || !name) {
+        alert('営業所コードと名称を入力してください');
+        return;
+    }
+
+    try {
+        const response = await fetch('/tools/pluslist/api/admin/office', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({office_code: code, office_name: name})
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            alert('営業所を作成しました');
+            document.getElementById('new-office-code').value = '';
+            document.getElementById('new-office-name').value = '';
+            loadOffices();
+        } else {
+            alert('エラー: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// 権限一覧読み込み
+async function loadPermissions() {
+    try {
+        const response = await fetch('/tools/pluslist/api/admin/permissions');
+        const users = await response.json();
+
+        const list = document.getElementById('permissions-list');
+        list.innerHTML = '';
+
+        users.forEach(user => {
+            const div = document.createElement('div');
+            div.className = 'p-3 bg-gray-50 rounded';
+            const adminBadge = user.is_admin ? '<span class="bg-yellow-500 text-white px-2 py-1 rounded text-xs ml-2">管理者</span>' : '';
+            const officesList = user.offices.map(o => `${o.name} (${o.code})`).join(', ') || 'なし';
+            div.innerHTML = `
+                <div class="font-semibold mb-1">${user.user_id}${adminBadge}</div>
+                <div class="text-sm text-gray-600">営業所: ${officesList}</div>
+            `;
+            list.appendChild(div);
+        });
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+
+// 権限付与
+async function grantPermission() {
+    const userId = document.getElementById('grant-user-id').value;
+    const officeCode = document.getElementById('grant-office-code').value;
+
+    if (!userId || !officeCode) {
+        alert('ユーザーIDと営業所を選択してください');
+        return;
+    }
+
+    try {
+        const response = await fetch('/tools/pluslist/api/admin/grant', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_id: userId, office_code: officeCode})
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            alert('権限を付与しました');
+            loadPermissions();
+        } else {
+            alert('エラー: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// 初期化
+document.addEventListener('DOMContentLoaded', function() {
+    searchEmployees();
+
+    // Enter キーで検索
+    document.getElementById('search-input').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            searchEmployees();
+        }
+    });
+
+    // ドラッグ&ドロップ
+    const dropZone = document.getElementById('drop-zone');
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('border-blue-500', 'bg-blue-50');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            uploadFile(file);
+        }
+    });
+});
+
+// 高度な検索パネルの表示切り替え
+function toggleAdvancedSearch() {
+    const panel = document.getElementById('advanced-search');
+    panel.classList.toggle('hidden');
+}
+
+// 高度な検索の適用
+function applyAdvancedSearch() {
+    searchEmployees(1);
+    toggleAdvancedSearch();
+}
+
+// 高度な検索のクリア
+function clearAdvancedSearch() {
+    // 日付範囲
+    document.getElementById('hire-date-from').value = '';
+    document.getElementById('hire-date-to').value = '';
+    document.getElementById('birth-date-from').value = '';
+    document.getElementById('birth-date-to').value = '';
+
+    // 複数フィールド条件
+    const fieldIds = [
+        'field-employee-number', 'field-employee-name', 'field-employee-kana',
+        'field-gender', 'field-job-title', 'field-mobile-phone',
+        'field-address', 'field-company-name'
+    ];
+    fieldIds.forEach(id => {
+        const elem = document.getElementById(id);
+        if (elem) elem.value = '';
+    });
+
+    searchEmployees(1);
+}
+
+// 検索スコープ変更イベント
+document.addEventListener('DOMContentLoaded', () => {
+    const searchScope = document.getElementById('search-scope');
+    if (searchScope) {
+        searchScope.addEventListener('change', (e) => {
+            const specificArea = document.getElementById('specific-columns-area');
+            if (e.target.value === 'specific') {
+                specificArea.classList.remove('hidden');
+            } else {
+                specificArea.classList.add('hidden');
+            }
+        });
+    }
+});
+
+// テーブルデータをコピー - ポップアップで詳細設定
+function copyTableData() {
+    // コピー設定ダイアログを表示
+    document.getElementById('copy-modal').classList.remove('hidden');
+
+    // 列選択のチェックボックスを初期化（現在の表示列をチェック）
+    document.querySelectorAll('.copy-column-toggle').forEach(checkbox => {
+        checkbox.checked = visibleColumns.includes(checkbox.dataset.column);
+    });
+
+    // 行選択を初期化（全行チェック）
+    updateCopyRowSelection();
+}
+
+// コピー用の行選択を更新
+function updateCopyRowSelection() {
+    const tbody = document.getElementById('employees-tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const rowSelection = document.getElementById('copy-row-selection');
+
+    if (rows.length === 0 || rows[0].querySelector('td[colspan]')) {
+        rowSelection.innerHTML = '<p class="text-gray-500">コピーするデータがありません</p>';
+        return;
+    }
+
+    rowSelection.innerHTML = '';
+    rows.forEach((row, index) => {
+        const cells = Array.from(row.querySelectorAll('td'));
+        const dataCells = cells.slice(0, -1);
+
+        // 社員番号を取得（最初のセル）
+        const employeeNumber = dataCells[0]?.textContent.trim() || `行${index + 1}`;
+
+        // 氏名を取得（2番目のセル）
+        const employeeName = dataCells[1]?.textContent.trim().split('\n')[0] || '';
+
+        const label = document.createElement('label');
+        label.className = 'flex items-center text-sm py-1 hover:bg-gray-50 px-2 rounded';
+        label.innerHTML = `
+            <input type="checkbox" class="copy-row-toggle mr-2" data-row-index="${index}" checked>
+            ${employeeNumber} - ${employeeName}
+        `;
+        rowSelection.appendChild(label);
+    });
+}
+
+// コピー実行
+async function executeCopy() {
+    try {
+        // 選択された列を取得
+        const selectedColumns = [];
+        document.querySelectorAll('.copy-column-toggle:checked').forEach(checkbox => {
+            selectedColumns.push(checkbox.dataset.column);
+        });
+
+        if (selectedColumns.length === 0) {
+            alert('少なくとも1つの列を選択してください');
+            return;
+        }
+
+        // 選択された行のインデックスを取得
+        const selectedRowIndices = [];
+        document.querySelectorAll('.copy-row-toggle:checked').forEach(checkbox => {
+            selectedRowIndices.push(parseInt(checkbox.dataset.rowIndex));
+        });
+
+        if (selectedRowIndices.length === 0) {
+            alert('少なくとも1つの行を選択してください');
+            return;
+        }
+
+        // ヘッダー行を作成
+        const headers = selectedColumns.map(col => allColumns[col]);
+        const headerRow = headers.join('\t');
+
+        // データ行を作成
+        const tbody = document.getElementById('employees-tbody');
+        const allRows = Array.from(tbody.querySelectorAll('tr'));
+
+        const dataRows = selectedRowIndices.map(rowIndex => {
+            const row = allRows[rowIndex];
+            const cells = Array.from(row.querySelectorAll('td'));
+            const dataCells = cells.slice(0, -1); // アクション列を除外
+            const employee = currentEmployees[rowIndex]; // 対応する社員データを取得
+
+            // visibleColumnsのインデックスと対応させる
+            return selectedColumns.map(col => {
+                // employee_nameの場合は社員データから直接取得（カナを除外）
+                if (col === 'employee_name' && employee) {
+                    return employee.employee_name || '';
+                }
+
+                const colIndex = visibleColumns.indexOf(col);
+                if (colIndex >= 0 && colIndex < dataCells.length) {
+                    let text = dataCells[colIndex].textContent.trim().replace(/\s+/g, ' ');
+                    // タブや改行が含まれている場合はダブルクォートで囲む
+                    if (text.includes('\t') || text.includes('\n')) {
+                        text = `"${text}"`;
+                    }
+                    return text;
+                }
+                return '';
+            }).join('\t');
+        });
+
+        // TSV形式のテキストを作成
+        const tsvContent = [headerRow, ...dataRows].join('\n');
+
+        // クリップボードにコピー（フォールバック付き）
+        let copySuccess = false;
+
+        // 方法1: Clipboard API（モダンブラウザ）
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            try {
+                await navigator.clipboard.writeText(tsvContent);
+                copySuccess = true;
+            } catch (e) {
+                console.log('Clipboard API failed, trying fallback method');
+            }
+        }
+
+        // 方法2: 従来のexecCommand（フォールバック）
+        if (!copySuccess) {
+            const textarea = document.createElement('textarea');
+            textarea.value = tsvContent;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+
+            try {
+                copySuccess = document.execCommand('copy');
+            } catch (e) {
+                console.error('execCommand copy failed:', e);
+            }
+
+            document.body.removeChild(textarea);
+        }
+
+        if (copySuccess) {
+            // 成功メッセージ
+            alert(`${selectedRowIndices.length}行 × ${selectedColumns.length}列のデータをコピーしました`);
+            closeCopyModal();
+        } else {
+            throw new Error('コピーに失敗しました');
+        }
+
+    } catch (error) {
+        console.error('Copy error:', error);
+        alert('コピーに失敗しました。手動でテーブルを選択してコピーしてください。');
+    }
+}
+
+// コピーモーダルを閉じる
+function closeCopyModal() {
+    document.getElementById('copy-modal').classList.add('hidden');
+}
+
+// 列選択：全選択/全解除
+function toggleAllCopyColumns(checked) {
+    document.querySelectorAll('.copy-column-toggle').forEach(cb => {
+        cb.checked = checked;
+    });
+}
+
+// 行選択：全選択/全解除
+function toggleAllCopyRows(checked) {
+    document.querySelectorAll('.copy-row-toggle').forEach(cb => {
+        cb.checked = checked;
+    });
+}
+
+// 表示列選択パネルの表示切り替え
+function toggleColumnSelector() {
+    const panel = document.getElementById('column-selector');
+    panel.classList.toggle('hidden');
+}
+
+// 列選択の適用
+function applyColumnSelection() {
+    visibleColumns = [];
+    document.querySelectorAll('.column-toggle:checked').forEach(checkbox => {
+        visibleColumns.push(checkbox.dataset.column);
+    });
+
+    if (visibleColumns.length === 0) {
+        alert('少なくとも1つの列を選択してください');
+        return;
+    }
+
+    // 設定をローカルストレージに保存
+    localStorage.setItem('pluslist_visible_columns', JSON.stringify(visibleColumns));
+
+    // テーブルを再描画
+    searchEmployees(currentPage);
+
+    // パネルを閉じる
+    toggleColumnSelector();
+}
+
+// デフォルト列選択に戻す
+function resetColumnSelection() {
+    visibleColumns = ['employee_number', 'employee_name', 'office_name', 'job_title', 'mobile_phone'];
+
+    // チェックボックスをデフォルトに戻す
+    document.querySelectorAll('.column-toggle').forEach(checkbox => {
+        checkbox.checked = visibleColumns.includes(checkbox.dataset.column);
+    });
+
+    // 設定をローカルストレージに保存
+    localStorage.setItem('pluslist_visible_columns', JSON.stringify(visibleColumns));
+
+    // テーブルを再描画
+    searchEmployees(currentPage);
+
+    // パネルを閉じる
+    toggleColumnSelector();
+}
+
+// ページ読み込み時に保存された列設定を復元
+function loadColumnSettings() {
+    const saved = localStorage.getItem('pluslist_visible_columns');
+    if (saved) {
+        visibleColumns = JSON.parse(saved);
+        // チェックボックスの状態を復元
+        document.querySelectorAll('.column-toggle').forEach(checkbox => {
+            checkbox.checked = visibleColumns.includes(checkbox.dataset.column);
+        });
+    }
+}
+
+// 簡易編集機能（詳細モーダルから編集）
+async function editEmployeeQuick(employeeNumber) {
+    // 詳細モーダルを開く
+    await viewEmployee(employeeNumber);
+
+    // 編集ボタンをクリック
+    setTimeout(() => {
+        const editBtn = document.getElementById('edit-btn');
+        if (editBtn) {
+            editBtn.click();
+        }
+    }, 100);
+}
+
+// ページ初期化時に列設定を読み込む
+document.addEventListener('DOMContentLoaded', () => {
+    loadColumnSettings();
+});
+</script>
 {% endblock %}
