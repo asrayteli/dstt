@@ -45,8 +45,7 @@
                 <div class="flex gap-6">
                     <label class="flex items-center cursor-pointer">
                         <input type="radio" name="search-type" value="simple" checked class="mr-2" onchange="toggleSearchType('simple')">
-                        <span class="font-medium">🔍 かんたん検索</span>
-                        <span class="ml-2 text-xs text-gray-600">（初心者向け）</span>
+                        <span class="font-medium">🔍 標準検索</span>
                     </label>
                     <label class="flex items-center cursor-pointer">
                         <input type="radio" name="search-type" value="advanced" class="mr-2" onchange="toggleSearchType('advanced')">
@@ -618,7 +617,7 @@
                         <button onclick="toggleAllCopyColumns(false)" class="text-blue-600 hover:underline">全解除</button>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto border border-gray-200 rounded p-3">
+                <div class="grid grid-cols-2 gap-2 max-h-96 overflow-y-auto border border-gray-200 rounded p-3">
                     <label class="flex items-center text-sm">
                         <input type="checkbox" class="copy-column-toggle mr-2" data-column="employee_number">
                         社員番号
@@ -732,7 +731,7 @@
                         <button onclick="toggleAllCopyRows(false)" class="text-blue-600 hover:underline">全解除</button>
                     </div>
                 </div>
-                <div id="copy-row-selection" class="max-h-64 overflow-y-auto border border-gray-200 rounded p-3">
+                <div id="copy-row-selection" class="max-h-96 overflow-y-auto border border-gray-200 rounded p-3">
                     <!-- JavaScriptで動的に生成 -->
                 </div>
             </div>
@@ -789,6 +788,7 @@ let sortBy = 'employee_number';
 let sortOrder = 'asc';
 let uploadSessionKey = null;
 let currentEmployeeNumber = null;
+let currentEmployees = []; // 現在表示中の社員データを保存
 
 // 表示列設定（デフォルト）
 let visibleColumns = ['employee_number', 'employee_name', 'office_name', 'job_title', 'mobile_phone'];
@@ -945,6 +945,7 @@ async function searchEmployees(page = 1) {
         const data = await response.json();
 
         if (response.ok) {
+            currentEmployees = data.employees; // 社員データを保存
             renderEmployeeTable(data.employees);
             renderPagination(data.total, data.pages, data.current_page);
         } else {
@@ -1646,9 +1647,15 @@ async function executeCopy() {
             const row = allRows[rowIndex];
             const cells = Array.from(row.querySelectorAll('td'));
             const dataCells = cells.slice(0, -1); // アクション列を除外
+            const employee = currentEmployees[rowIndex]; // 対応する社員データを取得
 
             // visibleColumnsのインデックスと対応させる
             return selectedColumns.map(col => {
+                // employee_nameの場合は社員データから直接取得（カナを除外）
+                if (col === 'employee_name' && employee) {
+                    return employee.employee_name || '';
+                }
+
                 const colIndex = visibleColumns.indexOf(col);
                 if (colIndex >= 0 && colIndex < dataCells.length) {
                     let text = dataCells[colIndex].textContent.trim().replace(/\s+/g, ' ');
