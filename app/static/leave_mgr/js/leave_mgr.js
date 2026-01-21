@@ -30,9 +30,11 @@ document.addEventListener('DOMContentLoaded', function() {
             currentCalendarId = this.value;
             if (currentCalendarId) {
                 document.getElementById('add-leave-btn').disabled = false;
+                document.getElementById('bulk-register-btn').disabled = false;
                 loadCalendar();
             } else {
                 document.getElementById('add-leave-btn').disabled = true;
+                document.getElementById('bulk-register-btn').disabled = true;
                 document.getElementById('calendar-container').innerHTML = '<div class="text-center text-gray-500 py-8">カレンダーを選択してください</div>';
             }
         });
@@ -284,29 +286,30 @@ function showLeaveModal(date = null) {
         alert('カレンダーを選択してください');
         return;
     }
-    
+
     const modal = document.getElementById('leave-modal');
     if (modal) {
         // 表示前に他のモーダルを閉じる
         hideAllModals();
         currentEditingLeave = null;
-        
+
         modal.classList.remove('hidden');
         modal.style.display = 'flex'; // flexで中央揃え
-        
+
         document.getElementById('leave-modal-title').textContent = '休暇登録';
         document.getElementById('leave-form').reset();
         document.getElementById('leave-id').value = '';
-        
+
         // 記入者・確認者情報セクションを非表示
         document.getElementById('leave-info-section').style.display = 'none';
         document.getElementById('leave-confirm-section').classList.add('hidden');
         document.getElementById('delete-leave-btn').classList.add('hidden');
-        
+        document.getElementById('copy-leave-btn').classList.add('hidden'); // コピーボタンも非表示
+
         if (date) {
             document.getElementById('leave-date').value = date;
         }
-        
+
         // 休暇種類の選択肢を再初期化
         initializeLeaveTypeOptions();
     }
@@ -381,6 +384,10 @@ function editLeave(leaveId, event) {
         } else {
             deleteBtn.classList.add('hidden');
         }
+
+        // コピーボタンを常に表示（編集時）
+        const copyBtn = document.getElementById('copy-leave-btn');
+        copyBtn.classList.remove('hidden');
     }
 }
 
@@ -1100,4 +1107,330 @@ function closeDeleteCalendarModal() {
     const modal = document.getElementById('delete-calendar-modal');
     modal.classList.add('hidden');
     modal.style.display = 'none';
+}
+
+// ========== 一括登録機能 ==========
+
+// 一括登録モーダルを表示
+function showBulkRegisterModal() {
+    if (!currentCalendarId) {
+        alert('カレンダーを選択してください');
+        return;
+    }
+
+    hideAllModals();
+
+    const modal = document.getElementById('bulk-register-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+
+        // フォームをリセット
+        document.getElementById('bulk-register-data').value = '';
+        document.getElementById('bulk-register-preview').classList.add('hidden');
+    }
+}
+
+// 一括登録モーダルを閉じる
+function closeBulkRegisterModal() {
+    const modal = document.getElementById('bulk-register-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+    }
+}
+
+// 一括登録データを解析
+function parseBulkRegisterData(dataText) {
+    const lines = dataText.trim().split('\n');
+    const results = [];
+
+    lines.forEach((line, index) => {
+        if (!line.trim()) return; // 空行はスキップ
+
+        const parts = line.split(',').map(p => p.trim());
+
+        if (parts.length < 3) {
+            results.push({
+                success: false,
+                lineNumber: index + 1,
+                error: '必須項目が不足しています（日付、名前、休暇種類は必須）',
+                data: null
+            });
+            return;
+        }
+
+        const [date, name, leaveType, deputiesStr = '', remarks = ''] = parts;
+
+        // 日付チェック
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            results.push({
+                success: false,
+                lineNumber: index + 1,
+                error: '日付の形式が正しくありません（YYYY-MM-DD形式で入力してください）',
+                data: null
+            });
+            return;
+        }
+
+        // 休暇種類チェック
+        if (!window.leaveColors[leaveType]) {
+            results.push({
+                success: false,
+                lineNumber: index + 1,
+                error: `休暇種類「${leaveType}」は存在しません`,
+                data: null
+            });
+            return;
+        }
+
+        // 代務者を分割（・、カンマ、スペースで区切り）
+        const deputies = deputiesStr
+            ? deputiesStr.split(/[・、,，\s]+/).map(d => d.trim()).filter(d => d)
+            : [];
+
+        results.push({
+            success: true,
+            lineNumber: index + 1,
+            error: null,
+            data: {
+                date: date,
+                name: name,
+                leave_type: leaveType,
+                deputies: deputies,
+                remarks: remarks
+            }
+        });
+    });
+
+    return results;
+}
+
+// 一括登録のプレビュー
+function previewBulkRegister() {
+    const dataText = document.getElementById('bulk-register-data').value;
+
+    if (!dataText.trim()) {
+        alert('データを入力してください');
+        return;
+    }
+
+    const results = parseBulkRegisterData(dataText);
+
+    // プレビュー表示
+    const previewSection = document.getElementById('bulk-register-preview');
+    const previewContent = document.getElementById('bulk-register-preview-content');
+
+    let html = '<table class="data-table">';
+    html += '<thead><tr>';
+    html += '<th>行</th><th>状態</th><th>日付</th><th>名前</th><th>種類</th><th>代務者</th><th>備考</th>';
+    html += '</tr></thead><tbody>';
+
+    results.forEach(result => {
+        html += '<tr>';
+        html += `<td>${result.lineNumber}</td>`;
+
+        if (result.success) {
+            html += `<td><span class="text-green-600">✓ OK</span></td>`;
+            html += `<td>${result.data.date}</td>`;
+            html += `<td>${result.data.name}</td>`;
+            const color = window.leaveColors[result.data.leave_type];
+            html += `<td><span class="badge" style="background-color: ${color}; color: white">${result.data.leave_type}</span></td>`;
+            html += `<td>${result.data.deputies.join(', ') || '-'}</td>`;
+            html += `<td>${result.data.remarks || '-'}</td>`;
+        } else {
+            html += `<td colspan="6"><span class="text-red-600">✗ エラー: ${result.error}</span></td>`;
+        }
+
+        html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+
+    const successCount = results.filter(r => r.success).length;
+    const errorCount = results.filter(r => !r.success).length;
+
+    html = `<p class="mb-2"><strong>成功: ${successCount}件</strong> / <strong class="text-red-600">エラー: ${errorCount}件</strong></p>` + html;
+
+    previewContent.innerHTML = html;
+    previewSection.classList.remove('hidden');
+}
+
+// 一括登録を実行
+function executeBulkRegister() {
+    const dataText = document.getElementById('bulk-register-data').value;
+
+    if (!dataText.trim()) {
+        alert('データを入力してください');
+        return;
+    }
+
+    const results = parseBulkRegisterData(dataText);
+    const successData = results.filter(r => r.success).map(r => r.data);
+    const errorCount = results.filter(r => !r.success).length;
+
+    if (successData.length === 0) {
+        alert('登録可能なデータがありません。エラーを修正してください。');
+        return;
+    }
+
+    if (errorCount > 0) {
+        if (!confirm(`${errorCount}件のエラーがあります。正常なデータのみ登録しますか？`)) {
+            return;
+        }
+    }
+
+    // 各データを順次登録
+    let registeredCount = 0;
+    const promises = [];
+
+    successData.forEach(data => {
+        const formData = {
+            calendar_id: currentCalendarId,
+            year_month: data.date.substring(0, 7).replace('-', ''), // "2026-01" -> "202601"
+            date: data.date,
+            name: data.name,
+            leave_type: data.leave_type,
+            deputies: data.deputies,
+            remarks: data.remarks,
+            force: true // 重複チェックをスキップ
+        };
+
+        const promise = fetch('/tools/leave_mgr/api/leave', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(formData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                registeredCount++;
+            }
+        });
+
+        promises.push(promise);
+    });
+
+    Promise.all(promises)
+        .then(() => {
+            alert(`${registeredCount}件の休暇を登録しました`);
+            closeBulkRegisterModal();
+            loadCalendar();
+        })
+        .catch(error => {
+            console.error('Error in bulk register:', error);
+            alert('一括登録中にエラーが発生しました');
+        });
+}
+
+// ========== 休暇コピー機能 ==========
+
+// 休暇コピーモーダルを表示
+function showCopyLeaveModal() {
+    if (!currentEditingLeave) {
+        alert('コピー元の休暇が選択されていません');
+        return;
+    }
+
+    hideAllModals();
+
+    const modal = document.getElementById('copy-leave-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+
+        // コピー元情報を表示
+        const sourceInfo = document.getElementById('copy-source-info');
+        const color = window.leaveColors[currentEditingLeave.leave_type] || '#6b7280';
+
+        let html = `<p><strong>日付:</strong> ${currentEditingLeave.date}</p>`;
+        html += `<p><strong>名前:</strong> ${currentEditingLeave.name}</p>`;
+        html += `<p><strong>休暇種類:</strong> <span class="badge" style="background-color: ${color}; color: white">${currentEditingLeave.leave_type}</span></p>`;
+        html += `<p><strong>代務者:</strong> ${currentEditingLeave.deputies ? currentEditingLeave.deputies.join(', ') : '-'}</p>`;
+        html += `<p><strong>備考:</strong> ${currentEditingLeave.remarks || '-'}</p>`;
+
+        sourceInfo.innerHTML = html;
+
+        // 日付をクリア
+        document.getElementById('copy-target-date').value = '';
+    }
+}
+
+// 休暇コピーモーダルを閉じる
+function closeCopyLeaveModal() {
+    const modal = document.getElementById('copy-leave-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+    }
+}
+
+// 休暇コピーを実行
+function executeCopyLeave() {
+    if (!currentEditingLeave) {
+        alert('コピー元の休暇が選択されていません');
+        return;
+    }
+
+    const targetDate = document.getElementById('copy-target-date').value;
+
+    if (!targetDate) {
+        alert('コピー先の日付を選択してください');
+        return;
+    }
+
+    // コピー元のデータをコピー
+    const formData = {
+        calendar_id: currentCalendarId,
+        year_month: targetDate.substring(0, 7).replace('-', ''), // "2026-01" -> "202601"
+        date: targetDate,
+        name: currentEditingLeave.name,
+        leave_type: currentEditingLeave.leave_type,
+        deputies: currentEditingLeave.deputies || [],
+        remarks: currentEditingLeave.remarks || ''
+    };
+
+    fetch('/tools/leave_mgr/api/leave', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData)
+    })
+    .then(response => {
+        if (response.status === 409) {
+            // 重複警告
+            return response.json().then(data => {
+                const message = `同じ名前で同日に登録されています。\n\n既存の登録:\n${data.existing.map(e => `・${e.leave_type}`).join('\n')}\n\n続行しますか？`;
+                if (confirm(message)) {
+                    // 強制的に保存
+                    return fetch('/tools/leave_mgr/api/leave', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({...formData, force: true})
+                    }).then(r => r.json());
+                }
+                throw new Error('User cancelled');
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data && data.success) {
+            alert('休暇をコピーしました');
+            closeCopyLeaveModal();
+            closeLeaveModal();
+            loadCalendar();
+        }
+    })
+    .catch(error => {
+        if (error.message !== 'User cancelled') {
+            console.error('Error copying leave:', error);
+            alert('コピーに失敗しました');
+        }
+    });
 }

@@ -67,6 +67,9 @@
         <button onclick="showLeaveModal()" class="btn btn-success" disabled id="add-leave-btn">
             ➕ 休暇登録
         </button>
+        <button onclick="showBulkRegisterModal()" class="btn btn-primary" disabled id="bulk-register-btn" style="margin-left: 10px;">
+            📋 一括登録
+        </button>
     </div>
 </div>
 
@@ -125,6 +128,10 @@
                     <!-- 削除ボタン（権限チェック追加） -->
                     <button type="button" id="delete-leave-btn" onclick="deleteLeaveFromModal()" class="btn btn-danger hidden">
                         削除
+                    </button>
+                    <!-- コピーボタン（編集時のみ表示） -->
+                    <button type="button" id="copy-leave-btn" onclick="showCopyLeaveModal()" class="btn btn-secondary hidden" style="margin-left: 10px;">
+                        📋 コピー
                     </button>
                 </div>
                 <div class="flex gap-2">
@@ -304,17 +311,84 @@
 <div id="delete-calendar-modal" class="hidden modal-overlay">
     <div class="modal-content">
         <h3 class="text-lg font-bold mb-4 text-red-600">カレンダー削除確認</h3>
-        
+
         <div id="delete-calendar-info" class="mb-4">
             <!-- カレンダー情報が動的に挿入されます -->
         </div>
-        
+
         <div class="flex justify-end gap-2">
             <button onclick="closeDeleteCalendarModal()" class="btn btn-outline">
                 キャンセル
             </button>
             <button onclick="confirmDeleteCalendar()" class="btn btn-danger">
                 削除実行
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 一括登録モーダル -->
+<div id="bulk-register-modal" class="hidden modal-overlay">
+    <div class="modal-content modal-large">
+        <h3 class="text-lg font-bold mb-4">休暇一括登録</h3>
+
+        <div class="mb-4 p-3 bg-blue-50 rounded">
+            <p class="text-sm mb-2"><strong>入力形式:</strong></p>
+            <p class="text-sm">各行に1件ずつ、カンマ区切りで入力してください。</p>
+            <p class="text-sm text-gray-600">形式: 日付, 名前, 休暇種類, 代務者(カンマ区切り), 備考</p>
+            <p class="text-sm text-gray-600 mt-1">例: 2026-01-15, 山田太郎, 有休, 田中・佐藤, 出張予定</p>
+            <p class="text-sm text-gray-600">例: 2026-01-20, 佐藤花子, 代休, , 研修参加</p>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">休暇データ（複数行入力）</label>
+            <textarea id="bulk-register-data" class="form-input" rows="10" placeholder="2026-01-15, 山田太郎, 有休, 田中・佐藤, 出張予定&#10;2026-01-20, 佐藤花子, 代休, , 研修参加"></textarea>
+        </div>
+
+        <div id="bulk-register-preview" class="mb-4 hidden">
+            <h4 class="font-semibold mb-2">プレビュー:</h4>
+            <div id="bulk-register-preview-content" style="max-height: 200px; overflow-y: auto;">
+                <!-- プレビューが動的に挿入されます -->
+            </div>
+        </div>
+
+        <div class="flex justify-end gap-2">
+            <button onclick="closeBulkRegisterModal()" class="btn btn-outline">
+                キャンセル
+            </button>
+            <button onclick="previewBulkRegister()" class="btn btn-secondary">
+                プレビュー
+            </button>
+            <button onclick="executeBulkRegister()" class="btn btn-success">
+                一括登録実行
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 休暇コピーモーダル -->
+<div id="copy-leave-modal" class="hidden modal-overlay">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4">休暇をコピー</h3>
+
+        <div class="mb-4 p-3 bg-gray-50 rounded">
+            <p class="text-sm mb-2"><strong>コピー元の休暇情報:</strong></p>
+            <div id="copy-source-info">
+                <!-- コピー元情報が動的に挿入されます -->
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">コピー先の日付 *</label>
+            <input type="date" id="copy-target-date" class="form-input" required>
+        </div>
+
+        <div class="flex justify-end gap-2">
+            <button onclick="closeCopyLeaveModal()" class="btn btn-outline">
+                キャンセル
+            </button>
+            <button onclick="executeCopyLeave()" class="btn btn-success">
+                コピー実行
             </button>
         </div>
     </div>
