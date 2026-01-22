@@ -1,5 +1,10 @@
 /* Shifter-Sync 共通スタイル - 淡い青基調 */
 
+/* ========== グローバル設定 ========== */
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
 /* ========== 基本設定 ========== */
 body {
     font-family: 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
@@ -8,6 +13,7 @@ body {
     margin: 0;
     padding: 0;
     min-height: 100vh;
+    overflow-x: hidden;
 }
 
 /* ========== コンテナ ========== */
@@ -181,6 +187,8 @@ h2 {
     box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08);
     min-height: 12vw;
     height: 100%;
+    overflow-x: hidden;
+    overflow-y: visible;
 }
 
 .day-box.empty {

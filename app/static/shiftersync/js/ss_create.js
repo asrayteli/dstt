@@ -81,8 +81,8 @@ $(document).ready(function() {
 
     // カレンダーHTMLを構築
     const calendarHTML = `
-      <div style="min-height: 100vh; background: linear-gradient(135deg, #e0f2fe 0%, #dbeafe 50%, #e0e7ff 100%); padding: 1vh 0; box-sizing: border-box; overflow-x: hidden;">
-        <div class="container animate-fade-in" style="margin: 0 auto;">
+      <div style="min-height: 100vh; width: 100%; background: linear-gradient(135deg, #e0f2fe 0%, #dbeafe 50%, #e0e7ff 100%); padding: 1vh 0; box-sizing: border-box; overflow-x: hidden;">
+        <div class="container animate-fade-in" style="margin: 0 auto; max-width: 100%;">
           <h2>${mode === 'scene' ? '現場' : '人物'}: ${name} (${year}年${month}月)
             ${capacityEnabled ? ` - 必要人数: ${requiredCapacity}人/日` : ''}
           </h2>
