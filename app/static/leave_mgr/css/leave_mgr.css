@@ -74,6 +74,18 @@
     margin-left: 4px;
 }
 
+/* 候補リストのスクロール制御（3件まで表示） */
+.employee-suggestions-scroll {
+    max-height: 150px; /* 約3件分の高さ */
+    overflow-y: auto;
+}
+
+.employee-suggestions-count {
+    font-size: 11px;
+    color: #6b7280;
+    margin-left: 4px;
+}
+
 .leave-item:hover {
     opacity: 0.8;
 }
@@ -329,4 +341,9 @@
 /* ユーティリティクラス */
 .mr-2 {
     margin-right: 8px;
+}
+
+/* モーダル表示時の背景スクロールロック */
+body.modal-open {
+    overflow: hidden;
 }
