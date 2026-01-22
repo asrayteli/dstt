@@ -100,6 +100,10 @@ $(document).ready(function() {
             ${capacityEnabled ? ` - 必要人数: ${requiredCapacity}人/日` : ''}
           </h2>
 
+          <div style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); padding: 12px 20px; border-radius: 8px; margin-bottom: 16px; text-align: center; font-size: 13px; color: #1e40af; font-weight: 600; box-shadow: 0 2px 6px rgba(59, 130, 246, 0.1);">
+            📝 操作方法: エントリーをダブルクリックで編集 / [×]ボタンまたは右クリックで削除 / Enterキーで素早く追加
+          </div>
+
           <div class="weekday-header">
             <div>月</div>
             <div>火</div>

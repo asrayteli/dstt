@@ -90,12 +90,6 @@ const ShifterSync = (function() {
       .attr('data-day', day);
     dayBox.append(entryContainer);
 
-    // 操作説明
-    const helpText = $('<div>')
-      .addClass('help-text')
-      .text('ダブルクリック:編集 / ×:削除');
-    dayBox.append(helpText);
-
     // 入力グループ
     const inputGroup = $('<div>').addClass('input-group');
 
