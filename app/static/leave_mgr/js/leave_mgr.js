@@ -68,8 +68,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const leaveNameInput = document.getElementById('leave-name');
     if (leaveNameInput) {
         leaveNameInput.addEventListener('input', function() {
-            const inputMode = document.querySelector('input[name="input-mode"]:checked').value;
-            if (inputMode === 'auto') {
+            const inputModeElement = document.querySelector('input[name="input-mode"]:checked');
+            if (inputModeElement && inputModeElement.value === 'auto') {
                 searchEmployees(this.value);
             }
         });
@@ -1519,14 +1519,18 @@ function executeCopyLeave() {
 // 入力モード切り替え
 function toggleInputMode(mode) {
     const suggestionPanel = document.getElementById('employee-suggestions');
-    const employeeNumberInput = document.getElementById('leave-employee-number');
+
+    if (!suggestionPanel) {
+        console.warn('Employee suggestions panel not found');
+        return;
+    }
 
     if (mode === 'auto') {
         // 自動入力モード：候補パネルを表示
         suggestionPanel.style.display = 'block';
         // 現在の名前で検索を実行
         const nameInput = document.getElementById('leave-name');
-        if (nameInput.value) {
+        if (nameInput && nameInput.value) {
             searchEmployees(nameInput.value);
         }
     } else {
