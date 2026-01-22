@@ -49,6 +49,31 @@
     cursor: pointer;
 }
 
+/* 社員候補リスト */
+.employee-suggestion-item {
+    padding: 8px;
+    margin: 4px 0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-size: 14px;
+}
+
+.employee-suggestion-item:hover {
+    background-color: #e0f2fe;
+}
+
+.employee-suggestion-name {
+    font-weight: 500;
+    color: #1f2937;
+}
+
+.employee-suggestion-number {
+    color: #6b7280;
+    font-size: 12px;
+    margin-left: 4px;
+}
+
 .leave-item:hover {
     opacity: 0.8;
 }

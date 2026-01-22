@@ -85,10 +85,41 @@
                 <label class="form-label">日付 *</label>
                 <input type="date" id="leave-date" class="form-input" required>
             </div>
-            
+
+            <!-- 入力モード選択 -->
+            <div class="form-group">
+                <label class="form-label">入力モード</label>
+                <div class="flex gap-4">
+                    <label class="flex items-center">
+                        <input type="radio" name="input-mode" value="auto" id="input-mode-auto" checked class="mr-2">
+                        自動入力（社員名簿+連携）
+                    </label>
+                    <label class="flex items-center">
+                        <input type="radio" name="input-mode" value="manual" id="input-mode-manual" class="mr-2">
+                        手動入力
+                    </label>
+                </div>
+            </div>
+
+            <!-- 社員番号 -->
+            <div class="form-group">
+                <label class="form-label">社員番号</label>
+                <input type="text" id="leave-employee-number" class="form-input" placeholder="例: 1234">
+            </div>
+
+            <!-- 名前入力 + 候補パネル -->
             <div class="form-group">
                 <label class="form-label">休暇取得者名 *</label>
-                <input type="text" id="leave-name" class="form-input" required>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="leave-name" class="form-input" required style="flex: 1;">
+                    <!-- 候補パネル（自動入力モード時のみ表示） -->
+                    <div id="employee-suggestions" style="display: none; width: 300px; max-height: 300px; overflow-y: auto; border: 1px solid #d1d5db; border-radius: 4px; background: white; padding: 8px;">
+                        <div class="text-sm text-gray-500 mb-2">候補</div>
+                        <div id="employee-suggestions-list">
+                            <div class="text-sm text-gray-400">名前を入力してください</div>
+                        </div>
+                    </div>
+                </div>
             </div>
             
             <div class="form-group">
@@ -335,9 +366,10 @@
         <div class="mb-4 p-3 bg-blue-50 rounded">
             <p class="text-sm mb-2"><strong>入力形式:</strong></p>
             <p class="text-sm">各行に1件ずつ、カンマ区切りで入力してください。</p>
-            <p class="text-sm text-gray-600">形式: 日付, 名前, 休暇種類, 代務者(カンマ区切り), 備考</p>
-            <p class="text-sm text-gray-600 mt-1">例: 2026-01-15, 山田太郎, 有休, 田中・佐藤, 出張予定</p>
-            <p class="text-sm text-gray-600">例: 2026-01-20, 佐藤花子, 代休, , 研修参加</p>
+            <p class="text-sm text-gray-600">形式: 日付, 名前または社員番号, 休暇種類, 代務者(カンマ区切り), 備考</p>
+            <p class="text-sm text-gray-600 mt-1">例1: 2026-01-15, 山田太郎, 有休, 田中・佐藤, 出張予定</p>
+            <p class="text-sm text-gray-600">例2: 2026-01-20, 1234, 代休, , 研修参加 (社員番号で指定)</p>
+            <p class="text-sm text-gray-600 mt-2 text-blue-600"><strong>※社員番号を指定すると、社員名簿+から名前を自動取得します</strong></p>
         </div>
 
         <div class="form-group">

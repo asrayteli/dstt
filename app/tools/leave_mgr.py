@@ -192,6 +192,7 @@ def add_leave():
         "id": datetime.now().isoformat(),
         "date": data.get('date'),
         "name": data.get('name'),
+        "employee_number": data.get('employee_number', ''),  # 社員番号（任意）
         "leave_type": data.get('leave_type'),
         "deputies": data.get('deputies', []),
         "remarks": data.get('remarks', ''),
@@ -267,6 +268,7 @@ def modify_leave(leave_id):
                     leave.update({
                         "date": new_date,
                         "name": data.get('name', leave['name']),
+                        "employee_number": data.get('employee_number', leave.get('employee_number', '')),
                         "leave_type": data.get('leave_type', leave['leave_type']),
                         "deputies": data.get('deputies', leave['deputies']),
                         "remarks": data.get('remarks', leave['remarks']),
@@ -283,6 +285,7 @@ def modify_leave(leave_id):
                     leave.update({
                         "date": new_date,
                         "name": data.get('name', leave['name']),
+                        "employee_number": data.get('employee_number', leave.get('employee_number', '')),
                         "leave_type": data.get('leave_type', leave['leave_type']),
                         "deputies": data.get('deputies', leave['deputies']),
                         "remarks": data.get('remarks', leave['remarks']),
