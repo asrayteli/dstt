@@ -1,0 +1,682 @@
+/* Shifter-Sync 共通スタイル - 淡い青基調 */
+
+/* ========== 基本設定 ========== */
+body {
+    font-family: 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+    background: linear-gradient(135deg, #e0f2fe 0%, #dbeafe 50%, #e0e7ff 100%);
+    color: #1e293b;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+}
+
+/* ========== コンテナ ========== */
+.container {
+    max-width: 1400px;
+    margin: 40px auto;
+    background: #ffffff;
+    padding: 35px;
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(59, 130, 246, 0.12);
+}
+
+/* ========== タイトル ========== */
+h2 {
+    text-align: center;
+    color: #3b82f6;
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 30px;
+    letter-spacing: 0.5px;
+}
+
+/* ========== フォーム ========== */
+#shiftMetaForm, #shiftUploadForm {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border: 2px solid #bfdbfe;
+    border-radius: 12px;
+    padding: 30px;
+    margin-bottom: 30px;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.08);
+}
+
+.form-label {
+    font-weight: 600;
+    color: #475569;
+    font-size: 14px;
+    margin-bottom: 6px;
+    display: block;
+}
+
+.form-input, .form-select {
+    padding: 12px 16px;
+    border: 2px solid #bfdbfe;
+    border-radius: 8px;
+    font-size: 14px;
+    background-color: #ffffff;
+    transition: all 0.2s ease;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.form-input:focus, .form-select:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.form-checkbox {
+    width: 18px;
+    height: 18px;
+    accent-color: #3b82f6;
+    cursor: pointer;
+}
+
+/* ========== ボタン ========== */
+.btn-primary {
+    background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+    color: #ffffff;
+    border: none;
+    padding: 12px 28px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
+}
+
+.btn-primary:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+}
+
+.btn-secondary {
+    background: linear-gradient(135deg, #64748b 0%, #94a3b8 100%);
+    color: #ffffff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.btn-secondary:hover {
+    background: linear-gradient(135deg, #475569 0%, #64748b 100%);
+    transform: translateY(-1px);
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
+    color: #ffffff;
+    border: none;
+    padding: 12px 28px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+}
+
+.btn-danger:hover {
+    background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+    transform: translateY(-2px);
+}
+
+/* ========== 曜日ヘッダー ========== */
+.weekday-header {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+    font-weight: 700;
+    text-align: center;
+    color: #1e3a8a;
+    font-size: 15px;
+}
+
+.weekday-header div {
+    padding: 12px;
+    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.1);
+}
+
+.weekday-header div:nth-child(6) {
+    background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+    color: #0369a1;
+}
+
+.weekday-header div:nth-child(7) {
+    background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+    color: #dc2626;
+}
+
+/* ========== カレンダーグリッド ========== */
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+}
+
+/* ========== 日付セル ========== */
+.day-box {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border: 2px solid #bfdbfe;
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.3s ease;
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08);
+}
+
+.day-box.empty {
+    background: transparent;
+    border: none;
+    min-height: 0;
+    box-shadow: none;
+}
+
+.day-box:not(.empty):hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(59, 130, 246, 0.2);
+    border-color: #93c5fd;
+}
+
+/* 台数不足警告 */
+.day-box.capacity-warning {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    border-color: #fbbf24;
+    animation: pulse-warning 2s ease-in-out infinite;
+}
+
+@keyframes pulse-warning {
+    0%, 100% { box-shadow: 0 2px 8px rgba(251, 191, 36, 0.3); }
+    50% { box-shadow: 0 4px 16px rgba(251, 191, 36, 0.5); }
+}
+
+.day-box.capacity-warning .date-label::after {
+    content: " ⚠️";
+    color: #f59e0b;
+}
+
+/* ========== 日付ラベル ========== */
+.date-label {
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: #1e3a8a;
+    font-size: 18px;
+    text-align: center;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 6px;
+    box-shadow: 0 1px 4px rgba(59, 130, 246, 0.1);
+}
+
+/* ========== エントリー表示エリア ========== */
+.entry-list-container {
+    min-height: 70px;
+    border: 2px dashed #bfdbfe;
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 12px;
+    background: rgba(255, 255, 255, 0.8);
+    flex-grow: 1;
+    overflow-y: auto;
+    max-height: 150px;
+}
+
+/* エントリーカード */
+.entry-item {
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 4px 0;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.2s ease;
+    user-select: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.entry-item:hover {
+    background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+    border-color: #3b82f6;
+    transform: translateX(2px);
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.2);
+}
+
+.entry-item-text {
+    flex: 1;
+    font-weight: 500;
+    color: #1e293b;
+}
+
+.entry-item-delete {
+    background: #ef4444;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all 0.2s ease;
+    font-weight: bold;
+    line-height: 1;
+}
+
+.entry-item:hover .entry-item-delete {
+    opacity: 1;
+}
+
+.entry-item-delete:hover {
+    background: #dc2626;
+    transform: scale(1.1);
+}
+
+/* ========== 操作説明 ========== */
+.help-text {
+    font-size: 11px;
+    color: #64748b;
+    text-align: center;
+    margin-bottom: 8px;
+    padding: 4px;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 4px;
+}
+
+/* ========== 入力エリア ========== */
+.input-group {
+    margin-bottom: 8px;
+}
+
+.input-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.entry-input {
+    flex: 1;
+    padding: 8px 10px;
+    border: 2px solid #bfdbfe;
+    border-radius: 6px;
+    font-size: 13px;
+    transition: all 0.2s ease;
+    background: white;
+}
+
+.entry-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.add-entry-btn {
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.add-entry-btn:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+    transform: translateY(-1px);
+}
+
+/* オプション選択ボタン */
+.option-select-btn {
+    width: 100%;
+    padding: 8px 12px;
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border: 2px solid #bfdbfe;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    color: #1e40af;
+    transition: all 0.2s ease;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.option-select-btn:hover {
+    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+    border-color: #3b82f6;
+    transform: translateY(-1px);
+}
+
+.option-select-btn.has-options {
+    background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+    border-color: #2563eb;
+    color: white;
+}
+
+/* ========== コピー機能 ========== */
+.copy-input {
+    flex: 1;
+    padding: 6px 8px;
+    border: 2px solid #bfdbfe;
+    border-radius: 6px;
+    font-size: 12px;
+    text-align: center;
+    background: white;
+}
+
+.copy-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+.copy-btn {
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.copy-btn:hover {
+    background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+    transform: translateY(-1px);
+}
+
+/* ========== ポップアップオーバーレイ ========== */
+.popup-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(30, 58, 138, 0.5);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* ========== ポップアップコンテンツ ========== */
+.popup-content {
+    background: white;
+    border-radius: 16px;
+    padding: 28px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(59, 130, 246, 0.3);
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.popup-header {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1e3a8a;
+    margin-bottom: 20px;
+    text-align: center;
+    padding-bottom: 12px;
+    border-bottom: 3px solid #bfdbfe;
+}
+
+.popup-section {
+    margin-bottom: 24px;
+}
+
+.popup-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #475569;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.popup-section-title::before {
+    content: "";
+    width: 4px;
+    height: 18px;
+    background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+    border-radius: 2px;
+}
+
+/* オプションボタングリッド */
+.option-buttons {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 8px;
+}
+
+.option-btn {
+    padding: 10px 12px;
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border: 2px solid #bfdbfe;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e40af;
+    transition: all 0.2s ease;
+    text-align: center;
+}
+
+.option-btn:hover {
+    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+    border-color: #60a5fa;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+}
+
+.option-btn.selected {
+    background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+    border-color: #2563eb;
+    color: white;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.option-btn.selected:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+}
+
+/* ポップアップフッター */
+.popup-footer {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 2px solid #e2e8f0;
+}
+
+.popup-footer button {
+    padding: 10px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.popup-clear-btn {
+    background: linear-gradient(135deg, #94a3b8 0%, #cbd5e1 100%);
+    color: #1e293b;
+}
+
+.popup-clear-btn:hover {
+    background: linear-gradient(135deg, #64748b 0%, #94a3b8 100%);
+}
+
+.popup-confirm-btn {
+    background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+    color: white;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.popup-confirm-btn:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+    transform: translateY(-2px);
+}
+
+/* ========== インライン編集 ========== */
+.inline-edit-input {
+    position: absolute;
+    z-index: 10000;
+    background: white;
+    border: 3px solid #3b82f6;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 14px;
+    box-shadow: 0 8px 24px rgba(59, 130, 246, 0.3);
+}
+
+.inline-edit-input:focus {
+    outline: none;
+    border-color: #2563eb;
+}
+
+/* ========== ファイルアップロード ========== */
+.file-upload-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.file-upload-label {
+    font-weight: 600;
+    color: #475569;
+    font-size: 14px;
+}
+
+.file-upload-input {
+    padding: 12px 16px;
+    border: 2px dashed #bfdbfe;
+    border-radius: 8px;
+    font-size: 14px;
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    color: #1e293b;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.file-upload-input:hover {
+    border-color: #3b82f6;
+    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+}
+
+.file-upload-input::file-selector-button {
+    background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    margin-right: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.file-upload-input::file-selector-button:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+}
+
+/* ========== アニメーション ========== */
+.animate-fade-in {
+    animation: fadeInUp 0.6s ease-out;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ========== レスポンシブ ========== */
+@media (max-width: 1024px) {
+    .calendar-grid {
+        gap: 10px;
+    }
+
+    .day-box {
+        padding: 12px;
+        min-height: 200px;
+    }
+}
+
+@media (max-width: 768px) {
+    .container {
+        padding: 20px;
+    }
+
+    .calendar-grid {
+        gap: 8px;
+    }
+
+    .day-box {
+        padding: 10px;
+        min-height: 180px;
+    }
+
+    .popup-content {
+        padding: 20px;
+        width: 95%;
+    }
+
+    .option-buttons {
+        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    }
+}
