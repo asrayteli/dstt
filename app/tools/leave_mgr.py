@@ -192,6 +192,7 @@ def add_leave():
         "id": datetime.now().isoformat(),
         "date": data.get('date'),
         "name": data.get('name'),
+        "employee_number": data.get('employee_number', ''),  # 社員番号（任意）
         "leave_type": data.get('leave_type'),
         "deputies": data.get('deputies', []),
         "remarks": data.get('remarks', ''),
@@ -244,25 +245,62 @@ def modify_leave(leave_id):
         calendar_data['leaves'] = [l for l in calendar_data['leaves'] if l['id'] != leave_id]
     else:
         # 編集
+        leave_found = False
         for leave in calendar_data['leaves']:
             if leave['id'] == leave_id:
+                leave_found = True
                 # 編集権限チェック：管理者または作成者のみ編集可能
                 if not is_admin(user_id) and leave.get('created_by') != user_id:
                     return jsonify({"error": "自分が登録した休暇のみ編集できます"}), 403
-                
-                leave.update({
-                    "name": data.get('name', leave['name']),
-                    "leave_type": data.get('leave_type', leave['leave_type']),
-                    "deputies": data.get('deputies', leave['deputies']),
-                    "remarks": data.get('remarks', leave['remarks']),
-                    "updated_by": user_id,
-                    "updated_at": datetime.now().isoformat()
-                })
-                break
-    
-    # 保存
-    save_calendar_data(calendar_id, year_month, calendar_data)
-    
+
+                # 新しい日付を取得
+                new_date = data.get('date', leave['date'])
+                new_year_month = new_date[:7].replace('-', '')  # "2026-01-15" -> "202601"
+
+                # 月をまたぐ変更かチェック
+                if new_year_month != year_month:
+                    # 月をまたぐ場合：ファイル間で移動
+                    # 元のファイルから削除
+                    calendar_data['leaves'] = [l for l in calendar_data['leaves'] if l['id'] != leave_id]
+                    save_calendar_data(calendar_id, year_month, calendar_data)
+
+                    # データを更新
+                    leave.update({
+                        "date": new_date,
+                        "name": data.get('name', leave['name']),
+                        "employee_number": data.get('employee_number', leave.get('employee_number', '')),
+                        "leave_type": data.get('leave_type', leave['leave_type']),
+                        "deputies": data.get('deputies', leave['deputies']),
+                        "remarks": data.get('remarks', leave['remarks']),
+                        "updated_by": user_id,
+                        "updated_at": datetime.now().isoformat()
+                    })
+
+                    # 新しい月のファイルに追加
+                    new_calendar_data = load_calendar_data(calendar_id, new_year_month)
+                    new_calendar_data['leaves'].append(leave)
+                    save_calendar_data(calendar_id, new_year_month, new_calendar_data)
+                else:
+                    # 同月内の変更：通常の更新
+                    leave.update({
+                        "date": new_date,
+                        "name": data.get('name', leave['name']),
+                        "employee_number": data.get('employee_number', leave.get('employee_number', '')),
+                        "leave_type": data.get('leave_type', leave['leave_type']),
+                        "deputies": data.get('deputies', leave['deputies']),
+                        "remarks": data.get('remarks', leave['remarks']),
+                        "updated_by": user_id,
+                        "updated_at": datetime.now().isoformat()
+                    })
+                    # 保存
+                    save_calendar_data(calendar_id, year_month, calendar_data)
+
+                return jsonify({"success": True})
+
+        # 休暇が見つからなかった場合
+        if not leave_found:
+            return jsonify({"error": "休暇が見つかりません"}), 404
+
     return jsonify({"success": True})
 
 @leave_mgr_bp.route("/api/leave/<leave_id>/confirm", methods=["POST"])

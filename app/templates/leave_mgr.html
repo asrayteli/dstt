@@ -67,6 +67,9 @@
         <button onclick="showLeaveModal()" class="btn btn-success" disabled id="add-leave-btn">
             ➕ 休暇登録
         </button>
+        <button onclick="showBulkRegisterModal()" class="btn btn-primary" disabled id="bulk-register-btn" style="margin-left: 10px;">
+            📋 一括登録
+        </button>
     </div>
 </div>
 
@@ -82,12 +85,44 @@
                 <label class="form-label">日付 *</label>
                 <input type="date" id="leave-date" class="form-input" required>
             </div>
-            
+
+            <!-- 入力モード選択 -->
+            <div class="form-group">
+                <label class="form-label">入力モード</label>
+                <div class="flex gap-4">
+                    <label class="flex items-center">
+                        <input type="radio" name="input-mode" value="auto" id="input-mode-auto" checked class="mr-2">
+                        自動入力（社員名簿PLUS連携）
+                    </label>
+                    <label class="flex items-center">
+                        <input type="radio" name="input-mode" value="manual" id="input-mode-manual" class="mr-2">
+                        手動入力
+                    </label>
+                </div>
+            </div>
+
+            <!-- 名前入力 -->
             <div class="form-group">
                 <label class="form-label">休暇取得者名 *</label>
-                <input type="text" id="leave-name" class="form-input" required>
+                <input type="text" id="leave-name" class="form-input" required autocomplete="off">
             </div>
-            
+
+            <!-- 候補パネル（自動入力モード時のみ表示） -->
+            <div id="employee-suggestions" style="display: none; margin: -8px 0 12px 0;">
+                <div style="border: 1px solid #d1d5db; border-radius: 4px; background: white; padding: 8px;">
+                    <div class="text-sm text-gray-500 mb-2">候補</div>
+                    <div id="employee-suggestions-list">
+                        <div class="text-sm text-gray-400">名前を入力してください</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 社員番号 -->
+            <div class="form-group">
+                <label class="form-label">社員番号</label>
+                <input type="text" id="leave-employee-number" class="form-input" placeholder="例: 1234">
+            </div>
+
             <div class="form-group">
                 <label class="form-label">休暇種類 *</label>
                 <select id="leave-type" class="form-input" required>
@@ -125,6 +160,10 @@
                     <!-- 削除ボタン（権限チェック追加） -->
                     <button type="button" id="delete-leave-btn" onclick="deleteLeaveFromModal()" class="btn btn-danger hidden">
                         削除
+                    </button>
+                    <!-- コピーボタン（編集時のみ表示） -->
+                    <button type="button" id="copy-leave-btn" onclick="showCopyLeaveModal()" class="btn btn-secondary hidden" style="margin-left: 10px;">
+                        📋 コピー
                     </button>
                 </div>
                 <div class="flex gap-2">
@@ -304,17 +343,149 @@
 <div id="delete-calendar-modal" class="hidden modal-overlay">
     <div class="modal-content">
         <h3 class="text-lg font-bold mb-4 text-red-600">カレンダー削除確認</h3>
-        
+
         <div id="delete-calendar-info" class="mb-4">
             <!-- カレンダー情報が動的に挿入されます -->
         </div>
-        
+
         <div class="flex justify-end gap-2">
             <button onclick="closeDeleteCalendarModal()" class="btn btn-outline">
                 キャンセル
             </button>
             <button onclick="confirmDeleteCalendar()" class="btn btn-danger">
                 削除実行
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 一括登録モーダル -->
+<div id="bulk-register-modal" class="hidden modal-overlay">
+    <div class="modal-content modal-xlarge">
+        <h3 class="text-lg font-bold mb-4">休暇一括登録</h3>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <!-- 左側: 登録フォーム -->
+            <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px;">
+                <h4 class="font-semibold mb-3">休暇情報を入力</h4>
+
+                <!-- 入力モード選択 -->
+                <div class="form-group">
+                    <label class="form-label">入力モード</label>
+                    <div class="flex gap-4">
+                        <label class="flex items-center">
+                            <input type="radio" name="bulk-input-mode" value="auto" id="bulk-input-mode-auto" checked class="mr-2">
+                            自動入力（社員名簿PLUS連携）
+                        </label>
+                        <label class="flex items-center">
+                            <input type="radio" name="bulk-input-mode" value="manual" id="bulk-input-mode-manual" class="mr-2">
+                            手動入力
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">日付 *</label>
+                    <input type="date" id="bulk-leave-date" class="form-input" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">名前 *</label>
+                    <input type="text" id="bulk-leave-name" class="form-input" required autocomplete="off">
+                </div>
+
+                <!-- 候補パネル -->
+                <div id="bulk-employee-suggestions" style="display: none; margin: -8px 0 12px 0;">
+                    <div style="border: 1px solid #d1d5db; border-radius: 4px; background: white; padding: 8px;">
+                        <div class="text-sm text-gray-500 mb-2">候補</div>
+                        <div id="bulk-employee-suggestions-list">
+                            <div class="text-sm text-gray-400">名前を入力してください</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">社員番号</label>
+                    <input type="text" id="bulk-leave-employee-number" class="form-input">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">休暇種類 *</label>
+                    <select id="bulk-leave-type" class="form-input" required>
+                        <option value="">選択してください</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">代務者（カンマ区切り）</label>
+                    <input type="text" id="bulk-leave-deputies" class="form-input" placeholder="田中, 佐藤">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">備考</label>
+                    <textarea id="bulk-leave-remarks" class="form-input" rows="2"></textarea>
+                </div>
+
+                <button onclick="addToBulkList()" class="btn btn-primary w-full">
+                    追加
+                </button>
+            </div>
+
+            <!-- 右側: 登録リスト -->
+            <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px;">
+                <h4 class="font-semibold mb-3">登録待ちリスト</h4>
+                <div id="bulk-register-list" style="max-height: 500px; overflow-y: auto; min-height: 400px;">
+                    <div class="text-sm text-gray-400 text-center py-8">
+                        左のフォームから休暇情報を追加してください
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-end gap-2 mt-4">
+            <button onclick="closeBulkRegisterModal()" class="btn btn-outline">
+                キャンセル
+            </button>
+            <button onclick="executeBulkRegister()" class="btn btn-success">
+                一括登録実行
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 休暇コピーモーダル -->
+<div id="copy-leave-modal" class="hidden modal-overlay">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4">休暇をコピー</h3>
+
+        <div class="mb-4 p-3 bg-gray-50 rounded">
+            <p class="text-sm mb-2"><strong>コピー元の休暇情報:</strong></p>
+            <div id="copy-source-info">
+                <!-- コピー元情報が動的に挿入されます -->
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">コピー先の日付 *</label>
+            <div id="copy-target-dates-container">
+                <div class="flex gap-2 mb-2 copy-date-row">
+                    <input type="date" class="form-input copy-target-date" required style="flex: 1;">
+                    <button onclick="removeCopyDateField(event)" class="btn btn-outline" style="display: none;">
+                        削除
+                    </button>
+                </div>
+            </div>
+            <button onclick="addCopyDateField()" class="btn btn-outline mt-2">
+                + 日付を追加
+            </button>
+        </div>
+
+        <div class="flex justify-end gap-2">
+            <button onclick="closeCopyLeaveModal()" class="btn btn-outline">
+                キャンセル
+            </button>
+            <button onclick="executeCopyLeave()" class="btn btn-success">
+                コピー実行
             </button>
         </div>
     </div>

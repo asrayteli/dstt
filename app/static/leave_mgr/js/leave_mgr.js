@@ -6,6 +6,9 @@ let calendarData = null;
 let confirmCallback = null;
 let currentEditingLeave = null; // 編集中の休暇情報を保持
 let userNameCache = {}; // ユーザー名キャッシュ
+let employeeSearchTimeout = null; // 社員検索のデバウンス用
+let bulkRegisterList = []; // 一括登録待ちリスト
+let bulkEmployeeSearchTimeout = null; // 一括登録用社員検索のデバウンス用
 
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
@@ -30,9 +33,11 @@ document.addEventListener('DOMContentLoaded', function() {
             currentCalendarId = this.value;
             if (currentCalendarId) {
                 document.getElementById('add-leave-btn').disabled = false;
+                document.getElementById('bulk-register-btn').disabled = false;
                 loadCalendar();
             } else {
                 document.getElementById('add-leave-btn').disabled = true;
+                document.getElementById('bulk-register-btn').disabled = true;
                 document.getElementById('calendar-container').innerHTML = '<div class="text-center text-gray-500 py-8">カレンダーを選択してください</div>';
             }
         });
@@ -52,7 +57,45 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 休暇種類選択肢を初期化
     initializeLeaveTypeOptions();
-    
+
+    // 入力モード切り替え
+    const inputModeAuto = document.getElementById('input-mode-auto');
+    const inputModeManual = document.getElementById('input-mode-manual');
+    if (inputModeAuto && inputModeManual) {
+        inputModeAuto.addEventListener('change', () => toggleInputMode('auto'));
+        inputModeManual.addEventListener('change', () => toggleInputMode('manual'));
+    }
+
+    // 名前入力時のリアルタイム検索
+    const leaveNameInput = document.getElementById('leave-name');
+    if (leaveNameInput) {
+        leaveNameInput.addEventListener('input', function() {
+            const inputModeElement = document.querySelector('input[name="input-mode"]:checked');
+            if (inputModeElement && inputModeElement.value === 'auto') {
+                searchEmployees(this.value);
+            }
+        });
+    }
+
+    // 一括登録用: 入力モード切り替え
+    const bulkInputModeAuto = document.getElementById('bulk-input-mode-auto');
+    const bulkInputModeManual = document.getElementById('bulk-input-mode-manual');
+    if (bulkInputModeAuto && bulkInputModeManual) {
+        bulkInputModeAuto.addEventListener('change', () => toggleBulkInputMode('auto'));
+        bulkInputModeManual.addEventListener('change', () => toggleBulkInputMode('manual'));
+    }
+
+    // 一括登録用: 名前入力時のリアルタイム検索
+    const bulkLeaveNameInput = document.getElementById('bulk-leave-name');
+    if (bulkLeaveNameInput) {
+        bulkLeaveNameInput.addEventListener('input', function() {
+            const inputModeElement = document.querySelector('input[name="bulk-input-mode"]:checked');
+            if (inputModeElement && inputModeElement.value === 'auto') {
+                searchBulkEmployees(this.value);
+            }
+        });
+    }
+
     console.log('Leave manager initialized');
 });
 
@@ -284,29 +327,41 @@ function showLeaveModal(date = null) {
         alert('カレンダーを選択してください');
         return;
     }
-    
+
     const modal = document.getElementById('leave-modal');
     if (modal) {
         // 表示前に他のモーダルを閉じる
         hideAllModals();
         currentEditingLeave = null;
-        
+
         modal.classList.remove('hidden');
         modal.style.display = 'flex'; // flexで中央揃え
-        
+
+        // 背景スクロールをロック
+        document.body.classList.add('modal-open');
+
         document.getElementById('leave-modal-title').textContent = '休暇登録';
         document.getElementById('leave-form').reset();
         document.getElementById('leave-id').value = '';
-        
+
         // 記入者・確認者情報セクションを非表示
         document.getElementById('leave-info-section').style.display = 'none';
         document.getElementById('leave-confirm-section').classList.add('hidden');
         document.getElementById('delete-leave-btn').classList.add('hidden');
-        
+        document.getElementById('copy-leave-btn').classList.add('hidden'); // コピーボタンも非表示
+
+        // 入力モードをデフォルト（自動入力）に設定
+        document.getElementById('input-mode-auto').checked = true;
+        toggleInputMode('auto');
+
+        // 候補リストをリセット
+        document.getElementById('employee-suggestions-list').innerHTML =
+            '<div class="text-sm text-gray-400">名前を入力してください</div>';
+
         if (date) {
             document.getElementById('leave-date').value = date;
         }
-        
+
         // 休暇種類の選択肢を再初期化
         initializeLeaveTypeOptions();
     }
@@ -324,16 +379,24 @@ function editLeave(leaveId, event) {
         // 表示前に他のモーダルを閉じる
         hideAllModals();
         currentEditingLeave = leave;
-        
+
         modal.classList.remove('hidden');
         modal.style.display = 'flex';
-        
+
+        // 背景スクロールをロック
+        document.body.classList.add('modal-open');
+
         document.getElementById('leave-modal-title').textContent = '休暇編集';
         document.getElementById('leave-id').value = leave.id;
         document.getElementById('leave-date').value = leave.date;
         document.getElementById('leave-name').value = leave.name;
+        document.getElementById('leave-employee-number').value = leave.employee_number || '';
         document.getElementById('leave-deputies').value = leave.deputies ? leave.deputies.join(', ') : '';
         document.getElementById('leave-remarks').value = leave.remarks || '';
+
+        // 入力モードをデフォルト（自動入力）に設定
+        document.getElementById('input-mode-auto').checked = true;
+        toggleInputMode('auto');
         
         // 休暇種類の選択肢を初期化してから値を設定
         initializeLeaveTypeOptions();
@@ -381,6 +444,10 @@ function editLeave(leaveId, event) {
         } else {
             deleteBtn.classList.add('hidden');
         }
+
+        // コピーボタンを常に表示（編集時）
+        const copyBtn = document.getElementById('copy-leave-btn');
+        copyBtn.classList.remove('hidden');
     }
 }
 
@@ -424,6 +491,7 @@ function saveLeave() {
         year_month: `${currentYear}${String(currentMonth).padStart(2, '0')}`,
         date: document.getElementById('leave-date').value,
         name: document.getElementById('leave-name').value,
+        employee_number: document.getElementById('leave-employee-number').value,
         leave_type: document.getElementById('leave-type').value,
         deputies: document.getElementById('leave-deputies').value.split(',').map(d => d.trim()).filter(d => d),
         remarks: document.getElementById('leave-remarks').value
@@ -601,6 +669,8 @@ function showDateDetail(dateStr, event) {
         document.getElementById('date-detail-content').innerHTML = contentHtml;
         modal.classList.remove('hidden');
         modal.style.display = 'flex';
+        // 背景スクロールをロック
+        document.body.classList.add('modal-open');
     }
 }
 
@@ -642,6 +712,8 @@ function hideAllModals() {
         modal.classList.add('hidden');
         modal.style.display = 'none';
     });
+    // 背景スクロールのロックを解除
+    document.body.classList.remove('modal-open');
 }
 
 // モーダルを閉じる
@@ -651,6 +723,8 @@ function closeLeaveModal() {
         modal.classList.add('hidden');
         modal.style.display = 'none';
         currentEditingLeave = null;
+        // 背景スクロールのロックを解除
+        document.body.classList.remove('modal-open');
     }
 }
 
@@ -659,18 +733,22 @@ function closeDateDetailModal() {
     if (modal) {
         modal.classList.add('hidden');
         modal.style.display = 'none';
+        // 背景スクロールのロックを解除
+        document.body.classList.remove('modal-open');
     }
 }
 
 // 確認ダイアログ
 function showConfirmDialog(message, callback) {
     hideAllModals(); // 他のモーダルを閉じる
-    
+
     document.getElementById('confirm-message').textContent = message;
     const modal = document.getElementById('confirm-dialog');
     if (modal) {
         modal.classList.remove('hidden');
         modal.style.display = 'flex';
+        // 背景スクロールをロック
+        document.body.classList.add('modal-open');
     }
     confirmCallback = callback;
 }
@@ -680,6 +758,8 @@ function closeConfirmDialog() {
     if (modal) {
         modal.classList.add('hidden');
         modal.style.display = 'none';
+        // 背景スクロールのロックを解除
+        document.body.classList.remove('modal-open');
     }
     confirmCallback = null;
 }
@@ -693,11 +773,13 @@ function confirmAction() {
 // 管理者機能（isAdminがtrueの場合のみ使用）
 function showAdminModal() {
     hideAllModals(); // 他のモーダルを閉じる
-    
+
     const modal = document.getElementById('admin-modal');
     if (modal) {
         modal.classList.remove('hidden');
         modal.style.display = 'flex';
+        // 背景スクロールをロック
+        document.body.classList.add('modal-open');
         loadUsersList();
     }
 }
@@ -707,6 +789,8 @@ function closeAdminModal() {
     if (modal) {
         modal.classList.add('hidden');
         modal.style.display = 'none';
+        // 背景スクロールのロックを解除
+        document.body.classList.remove('modal-open');
     }
 }
 
@@ -1100,4 +1184,727 @@ function closeDeleteCalendarModal() {
     const modal = document.getElementById('delete-calendar-modal');
     modal.classList.add('hidden');
     modal.style.display = 'none';
+}
+
+// ========== 一括登録機能 ==========
+
+// 一括登録モーダルを表示
+function showBulkRegisterModal() {
+    if (!currentCalendarId) {
+        alert('カレンダーを選択してください');
+        return;
+    }
+
+    hideAllModals();
+
+    const modal = document.getElementById('bulk-register-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+
+        // 背景スクロールをロック
+        document.body.classList.add('modal-open');
+
+        // フォームをリセット
+        document.getElementById('bulk-leave-date').value = '';
+        document.getElementById('bulk-leave-name').value = '';
+        document.getElementById('bulk-leave-employee-number').value = '';
+        document.getElementById('bulk-leave-deputies').value = '';
+        document.getElementById('bulk-leave-remarks').value = '';
+
+        // 入力モードをデフォルト（自動入力）に設定
+        document.getElementById('bulk-input-mode-auto').checked = true;
+        toggleBulkInputMode('auto');
+
+        // 休暇種類の選択肢を初期化
+        initializeBulkLeaveTypeOptions();
+
+        // 候補リストをリセット
+        const suggestionsList = document.getElementById('bulk-employee-suggestions-list');
+        if (suggestionsList) {
+            suggestionsList.innerHTML = '<div class="text-sm text-gray-400">名前を入力してください</div>';
+        }
+
+        // 一括登録リストをクリア
+        bulkRegisterList = [];
+        renderBulkRegisterList();
+    }
+}
+
+// 一括登録モーダルを閉じる
+function closeBulkRegisterModal() {
+    const modal = document.getElementById('bulk-register-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        // 背景スクロールのロックを解除
+        document.body.classList.remove('modal-open');
+    }
+}
+
+// 一括登録用: 休暇種類選択肢を初期化
+function initializeBulkLeaveTypeOptions() {
+    const leaveTypeSelect = document.getElementById('bulk-leave-type');
+    if (leaveTypeSelect && window.leaveColors) {
+        leaveTypeSelect.innerHTML = '<option value="">選択してください</option>';
+        for (const [leaveType, color] of Object.entries(window.leaveColors)) {
+            const option = document.createElement('option');
+            option.value = leaveType;
+            option.textContent = leaveType;
+            leaveTypeSelect.appendChild(option);
+        }
+    }
+}
+
+// 一括登録用: 入力モード切り替え
+function toggleBulkInputMode(mode) {
+    const suggestionPanel = document.getElementById('bulk-employee-suggestions');
+
+    if (!suggestionPanel) {
+        console.warn('Bulk employee suggestions panel not found');
+        return;
+    }
+
+    if (mode === 'auto') {
+        suggestionPanel.style.display = 'block';
+    } else {
+        suggestionPanel.style.display = 'none';
+    }
+}
+
+// 一括登録用: 社員検索（デバウンス付き）
+function searchBulkEmployees(query) {
+    clearTimeout(bulkEmployeeSearchTimeout);
+
+    const suggestionsList = document.getElementById('bulk-employee-suggestions-list');
+    if (!suggestionsList) return;
+
+    if (!query || query.trim().length === 0) {
+        suggestionsList.innerHTML = '<div class="text-sm text-gray-400">名前を入力してください</div>';
+        return;
+    }
+
+    bulkEmployeeSearchTimeout = setTimeout(() => {
+        fetch(`/tools/pluslist/api/search_employee?q=${encodeURIComponent(query)}`)
+            .then(response => response.json())
+            .then(employees => displayBulkEmployeeSuggestions(employees))
+            .catch(error => {
+                console.error('Employee search error:', error);
+                suggestionsList.innerHTML = '<div class="text-sm text-red-500">検索エラー</div>';
+            });
+    }, 300);
+}
+
+// 一括登録用: 候補を表示
+function displayBulkEmployeeSuggestions(employees) {
+    const suggestionPanel = document.getElementById('bulk-employee-suggestions');
+    const suggestionsList = document.getElementById('bulk-employee-suggestions-list');
+    if (!suggestionsList || !suggestionPanel) return;
+
+    if (!employees || employees.length === 0) {
+        suggestionPanel.querySelector('.text-sm').innerHTML = '候補';
+        suggestionsList.innerHTML = '<div class="text-sm text-gray-400">該当する社員が見つかりません</div>';
+        return;
+    }
+
+    // 件数を表示
+    suggestionPanel.querySelector('.text-sm').innerHTML = `候補 <span class="employee-suggestions-count">(${employees.length}件)</span>`;
+
+    let html = '<div class="employee-suggestions-scroll">';
+    employees.forEach(emp => {
+        html += `<div class="employee-suggestion-item" onclick="selectBulkEmployee('${emp.employee_name}', '${emp.employee_number}')">
+            <span class="employee-suggestion-name">${emp.employee_name}</span>
+            <span class="employee-suggestion-number">(${emp.employee_number})</span>
+        </div>`;
+    });
+    html += '</div>';
+
+    suggestionsList.innerHTML = html;
+}
+
+// 一括登録用: 社員を選択
+function selectBulkEmployee(name, number) {
+    document.getElementById('bulk-leave-name').value = name;
+    document.getElementById('bulk-leave-employee-number').value = number;
+
+    const suggestionsList = document.getElementById('bulk-employee-suggestions-list');
+    if (suggestionsList) {
+        suggestionsList.innerHTML = '<div class="text-sm text-gray-400">名前を入力してください</div>';
+    }
+}
+
+// 一括登録リストに追加
+function addToBulkList() {
+    const date = document.getElementById('bulk-leave-date').value;
+    const name = document.getElementById('bulk-leave-name').value;
+    const employeeNumber = document.getElementById('bulk-leave-employee-number').value;
+    const leaveType = document.getElementById('bulk-leave-type').value;
+    const deputies = document.getElementById('bulk-leave-deputies').value;
+    const remarks = document.getElementById('bulk-leave-remarks').value;
+
+    // バリデーション
+    if (!date) {
+        alert('日付を入力してください');
+        return;
+    }
+    if (!name) {
+        alert('名前を入力してください');
+        return;
+    }
+    if (!leaveType) {
+        alert('休暇種類を選択してください');
+        return;
+    }
+
+    // リストに追加
+    const item = {
+        id: Date.now(), // 一時的なID
+        date: date,
+        name: name,
+        employee_number: employeeNumber,
+        leave_type: leaveType,
+        deputies: deputies ? deputies.split(/[,、]/).map(d => d.trim()).filter(d => d) : [],
+        remarks: remarks
+    };
+
+    bulkRegisterList.push(item);
+    renderBulkRegisterList();
+
+    // フォームをクリア
+    document.getElementById('bulk-leave-date').value = '';
+    document.getElementById('bulk-leave-name').value = '';
+    document.getElementById('bulk-leave-employee-number').value = '';
+    document.getElementById('bulk-leave-type').value = '';
+    document.getElementById('bulk-leave-deputies').value = '';
+    document.getElementById('bulk-leave-remarks').value = '';
+}
+
+// 一括登録リストを表示
+function renderBulkRegisterList() {
+    const listContainer = document.getElementById('bulk-register-list');
+    if (!listContainer) return;
+
+    if (bulkRegisterList.length === 0) {
+        listContainer.innerHTML = '<div class="text-sm text-gray-400 text-center py-8">左のフォームから休暇情報を追加してください</div>';
+        return;
+    }
+
+    let html = '<table class="data-table" style="font-size: 12px;">';
+    html += '<thead><tr>';
+    html += '<th>日付</th>';
+    html += '<th>名前</th>';
+    html += '<th>休暇種類</th>';
+    html += '<th>操作</th>';
+    html += '</tr></thead>';
+    html += '<tbody>';
+
+    bulkRegisterList.forEach(item => {
+        const color = window.leaveColors[item.leave_type] || '#6b7280';
+        html += '<tr>';
+        html += `<td>${item.date}</td>`;
+        html += `<td>${item.name}${item.employee_number ? ` (${item.employee_number})` : ''}</td>`;
+        html += `<td><span class="badge" style="background-color: ${color}; color: white">${item.leave_type}</span></td>`;
+        html += `<td><button onclick="removeBulkListItem(${item.id})" class="btn btn-danger btn-sm">削除</button></td>`;
+        html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+    listContainer.innerHTML = html;
+}
+
+// 一括登録リストから削除
+function removeBulkListItem(id) {
+    bulkRegisterList = bulkRegisterList.filter(item => item.id !== id);
+    renderBulkRegisterList();
+}
+
+// 一括登録データを解析（非同期対応）
+async function parseBulkRegisterData(dataText) {
+    const lines = dataText.trim().split('\n');
+    const results = [];
+
+    for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
+        if (!line.trim()) continue; // 空行はスキップ
+
+        const parts = line.split(',').map(p => p.trim());
+
+        if (parts.length < 3) {
+            results.push({
+                success: false,
+                lineNumber: index + 1,
+                error: '必須項目が不足しています（日付、名前または社員番号、休暇種類は必須）',
+                data: null
+            });
+            continue;
+        }
+
+        const [date, nameOrNumber, leaveType, deputiesStr = '', remarks = ''] = parts;
+
+        // 日付チェック
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            results.push({
+                success: false,
+                lineNumber: index + 1,
+                error: '日付の形式が正しくありません（YYYY-MM-DD形式で入力してください）',
+                data: null
+            });
+            continue;
+        }
+
+        // 休暇種類チェック
+        if (!window.leaveColors[leaveType]) {
+            results.push({
+                success: false,
+                lineNumber: index + 1,
+                error: `休暇種類「${leaveType}」は存在しません`,
+                data: null
+            });
+            continue;
+        }
+
+        // 代務者を分割（・、カンマ、スペースで区切り）
+        const deputies = deputiesStr
+            ? deputiesStr.split(/[・、,，\s]+/).map(d => d.trim()).filter(d => d)
+            : [];
+
+        // 名前または社員番号かを判定
+        let employeeName = nameOrNumber;
+        let employeeNumber = '';
+
+        // 数字のみの場合は社員番号として扱う
+        if (/^\d+$/.test(nameOrNumber)) {
+            try {
+                // 社員番号から名前を取得
+                const response = await fetch(`/tools/pluslist/api/search_employee?q=${nameOrNumber}`);
+                const employees = await response.json();
+
+                if (employees.length > 0 && employees[0].employee_number === nameOrNumber) {
+                    employeeName = employees[0].employee_name;
+                    employeeNumber = nameOrNumber;
+                } else {
+                    results.push({
+                        success: false,
+                        lineNumber: index + 1,
+                        error: `社員番号「${nameOrNumber}」が見つかりません`,
+                        data: null
+                    });
+                    continue;
+                }
+            } catch (error) {
+                results.push({
+                    success: false,
+                    lineNumber: index + 1,
+                    error: `社員番号「${nameOrNumber}」の検索に失敗しました`,
+                    data: null
+                });
+                continue;
+            }
+        }
+
+        results.push({
+            success: true,
+            lineNumber: index + 1,
+            error: null,
+            data: {
+                date: date,
+                name: employeeName,
+                employee_number: employeeNumber,
+                leave_type: leaveType,
+                deputies: deputies,
+                remarks: remarks
+            }
+        });
+    }
+
+    return results;
+}
+
+// 一括登録のプレビュー
+async function previewBulkRegister() {
+    const dataText = document.getElementById('bulk-register-data').value;
+
+    if (!dataText.trim()) {
+        alert('データを入力してください');
+        return;
+    }
+
+    // ローディング表示
+    const previewSection = document.getElementById('bulk-register-preview');
+    const previewContent = document.getElementById('bulk-register-preview-content');
+    previewContent.innerHTML = '<p class="text-gray-500">解析中...</p>';
+    previewSection.classList.remove('hidden');
+
+    const results = await parseBulkRegisterData(dataText);
+
+    // プレビュー表示
+    let html = '<table class="data-table">';
+    html += '<thead><tr>';
+    html += '<th>行</th><th>状態</th><th>日付</th><th>名前</th><th>社員番号</th><th>種類</th><th>代務者</th><th>備考</th>';
+    html += '</tr></thead><tbody>';
+
+    results.forEach(result => {
+        html += '<tr>';
+        html += `<td>${result.lineNumber}</td>`;
+
+        if (result.success) {
+            html += `<td><span class="text-green-600">✓ OK</span></td>`;
+            html += `<td>${result.data.date}</td>`;
+            html += `<td>${result.data.name}</td>`;
+            html += `<td>${result.data.employee_number || '-'}</td>`;
+            const color = window.leaveColors[result.data.leave_type];
+            html += `<td><span class="badge" style="background-color: ${color}; color: white">${result.data.leave_type}</span></td>`;
+            html += `<td>${result.data.deputies.join(', ') || '-'}</td>`;
+            html += `<td>${result.data.remarks || '-'}</td>`;
+        } else {
+            html += `<td colspan="7"><span class="text-red-600">✗ エラー: ${result.error}</span></td>`;
+        }
+
+        html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+
+    const successCount = results.filter(r => r.success).length;
+    const errorCount = results.filter(r => !r.success).length;
+
+    html = `<p class="mb-2"><strong>成功: ${successCount}件</strong> / <strong class="text-red-600">エラー: ${errorCount}件</strong></p>` + html;
+
+    previewContent.innerHTML = html;
+    previewSection.classList.remove('hidden');
+}
+
+// 一括登録を実行
+async function executeBulkRegister() {
+    if (bulkRegisterList.length === 0) {
+        alert('登録するデータがありません。左のフォームから追加してください。');
+        return;
+    }
+
+    if (!confirm(`${bulkRegisterList.length}件の休暇を一括登録しますか？`)) {
+        return;
+    }
+
+    // 各データを順次登録
+    let registeredCount = 0;
+    const promises = [];
+
+    bulkRegisterList.forEach(item => {
+        const formData = {
+            calendar_id: currentCalendarId,
+            year_month: item.date.substring(0, 7).replace('-', ''), // "2026-01" -> "202601"
+            date: item.date,
+            name: item.name,
+            employee_number: item.employee_number || '',
+            leave_type: item.leave_type,
+            deputies: item.deputies,
+            remarks: item.remarks,
+            force: true // 重複チェックをスキップ
+        };
+
+        const promise = fetch('/tools/leave_mgr/api/leave', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(formData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                registeredCount++;
+            }
+        });
+
+        promises.push(promise);
+    });
+
+    Promise.all(promises)
+        .then(() => {
+            alert(`${registeredCount}件の休暇を登録しました`);
+            closeBulkRegisterModal();
+            loadCalendar();
+        })
+        .catch(error => {
+            console.error('Error in bulk register:', error);
+            alert('一括登録中にエラーが発生しました');
+        });
+}
+
+// ========== 休暇コピー機能 ==========
+
+// 休暇コピーモーダルを表示
+function showCopyLeaveModal() {
+    if (!currentEditingLeave) {
+        alert('コピー元の休暇が選択されていません');
+        return;
+    }
+
+    hideAllModals();
+
+    const modal = document.getElementById('copy-leave-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+
+        // 背景スクロールをロック
+        document.body.classList.add('modal-open');
+
+        // コピー元情報を表示
+        const sourceInfo = document.getElementById('copy-source-info');
+        const color = window.leaveColors[currentEditingLeave.leave_type] || '#6b7280';
+
+        let html = `<p><strong>日付:</strong> ${currentEditingLeave.date}</p>`;
+        html += `<p><strong>名前:</strong> ${currentEditingLeave.name}</p>`;
+        html += `<p><strong>休暇種類:</strong> <span class="badge" style="background-color: ${color}; color: white">${currentEditingLeave.leave_type}</span></p>`;
+        html += `<p><strong>代務者:</strong> ${currentEditingLeave.deputies ? currentEditingLeave.deputies.join(', ') : '-'}</p>`;
+        html += `<p><strong>備考:</strong> ${currentEditingLeave.remarks || '-'}</p>`;
+
+        sourceInfo.innerHTML = html;
+
+        // 日付フィールドをリセット（1つだけに）
+        const container = document.getElementById('copy-target-dates-container');
+        container.innerHTML = `
+            <div class="flex gap-2 mb-2 copy-date-row">
+                <input type="date" class="form-input copy-target-date" required style="flex: 1;">
+                <button onclick="removeCopyDateField(event)" class="btn btn-outline" style="display: none;">
+                    削除
+                </button>
+            </div>
+        `;
+    }
+}
+
+// 休暇コピーモーダルを閉じる
+function closeCopyLeaveModal() {
+    const modal = document.getElementById('copy-leave-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        // 背景スクロールのロックを解除
+        document.body.classList.remove('modal-open');
+    }
+}
+
+// コピー先日付フィールドを追加
+function addCopyDateField() {
+    const container = document.getElementById('copy-target-dates-container');
+    const newRow = document.createElement('div');
+    newRow.className = 'flex gap-2 mb-2 copy-date-row';
+    newRow.innerHTML = `
+        <input type="date" class="form-input copy-target-date" required style="flex: 1;">
+        <button onclick="removeCopyDateField(event)" class="btn btn-outline">
+            削除
+        </button>
+    `;
+    container.appendChild(newRow);
+
+    // 2つ以上ある場合は削除ボタンを表示
+    updateCopyDateRemoveButtons();
+}
+
+// コピー先日付フィールドを削除
+function removeCopyDateField(event) {
+    event.preventDefault();
+    const row = event.target.closest('.copy-date-row');
+    if (row) {
+        row.remove();
+        // 削除ボタンの表示を更新
+        updateCopyDateRemoveButtons();
+    }
+}
+
+// 削除ボタンの表示を更新（1つだけの場合は非表示）
+function updateCopyDateRemoveButtons() {
+    const rows = document.querySelectorAll('.copy-date-row');
+    rows.forEach(row => {
+        const removeBtn = row.querySelector('button[onclick*="removeCopyDateField"]');
+        if (removeBtn) {
+            if (rows.length > 1) {
+                removeBtn.style.display = 'block';
+            } else {
+                removeBtn.style.display = 'none';
+            }
+        }
+    });
+}
+
+// 休暇コピーを実行
+async function executeCopyLeave() {
+    if (!currentEditingLeave) {
+        alert('コピー元の休暇が選択されていません');
+        return;
+    }
+
+    // 全ての日付入力を取得
+    const dateInputs = document.querySelectorAll('.copy-target-date');
+    const targetDates = Array.from(dateInputs).map(input => input.value).filter(v => v);
+
+    if (targetDates.length === 0) {
+        alert('コピー先の日付を選択してください');
+        return;
+    }
+
+    // 各日付に対してコピーを実行
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const targetDate of targetDates) {
+        try {
+            // コピー元のデータをコピー
+            const formData = {
+                calendar_id: currentCalendarId,
+                year_month: targetDate.substring(0, 7).replace('-', ''), // "2026-01" -> "202601"
+                date: targetDate,
+                name: currentEditingLeave.name,
+                employee_number: currentEditingLeave.employee_number || '',
+                leave_type: currentEditingLeave.leave_type,
+                deputies: currentEditingLeave.deputies || [],
+                remarks: currentEditingLeave.remarks || ''
+            };
+
+            const response = await fetch('/tools/leave_mgr/api/leave', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(formData)
+            });
+
+            if (response.status === 409) {
+                // 重複警告
+                const data = await response.json();
+                const message = `${targetDate}: 同じ名前で同日に登録されています。\n\n既存の登録:\n${data.existing.map(e => `・${e.leave_type}`).join('\n')}\n\n続行しますか？`;
+                if (confirm(message)) {
+                    // 強制的に保存
+                    const forceResponse = await fetch('/tools/leave_mgr/api/leave', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({...formData, force: true})
+                    });
+                    const forceData = await forceResponse.json();
+                    if (forceData.success) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } else {
+                    failCount++;
+                }
+            } else {
+                const data = await response.json();
+                if (data.success) {
+                    successCount++;
+                } else {
+                    failCount++;
+                }
+            }
+        } catch (error) {
+            console.error(`Error copying leave to ${targetDate}:`, error);
+            failCount++;
+        }
+    }
+
+    // 結果を表示
+    if (successCount > 0) {
+        alert(`${successCount}件の休暇をコピーしました${failCount > 0 ? `（${failCount}件は失敗）` : ''}`);
+        closeCopyLeaveModal();
+        closeLeaveModal();
+        loadCalendar();
+    } else {
+        alert('コピーに失敗しました');
+    }
+}
+
+// ========== 社員名簿PLUS連携機能 ==========
+
+// 入力モード切り替え
+function toggleInputMode(mode) {
+    const suggestionPanel = document.getElementById('employee-suggestions');
+
+    if (!suggestionPanel) {
+        console.warn('Employee suggestions panel not found');
+        return;
+    }
+
+    if (mode === 'auto') {
+        // 自動入力モード：候補パネルを表示
+        suggestionPanel.style.display = 'block';
+        // 現在の名前で検索を実行
+        const nameInput = document.getElementById('leave-name');
+        if (nameInput && nameInput.value) {
+            searchEmployees(nameInput.value);
+        }
+    } else {
+        // 手動入力モード：候補パネルを非表示
+        suggestionPanel.style.display = 'none';
+    }
+}
+
+// 社員検索（デバウンス付き）
+function searchEmployees(query) {
+    // デバウンス処理（300ms待機）
+    clearTimeout(employeeSearchTimeout);
+
+    if (!query || query.trim().length === 0) {
+        // 入力が空の場合
+        document.getElementById('employee-suggestions-list').innerHTML =
+            '<div class="text-sm text-gray-400">名前を入力してください</div>';
+        return;
+    }
+
+    employeeSearchTimeout = setTimeout(() => {
+        // 社員名簿PLUSのAPIを呼び出し
+        fetch(`/tools/pluslist/api/search_employee?q=${encodeURIComponent(query)}`)
+            .then(response => response.json())
+            .then(employees => {
+                displayEmployeeSuggestions(employees);
+            })
+            .catch(error => {
+                console.error('Employee search error:', error);
+                document.getElementById('employee-suggestions-list').innerHTML =
+                    '<div class="text-sm text-red-500">検索エラー</div>';
+            });
+    }, 300);
+}
+
+// 候補を表示
+function displayEmployeeSuggestions(employees) {
+    const suggestionPanel = document.getElementById('employee-suggestions');
+    const listContainer = document.getElementById('employee-suggestions-list');
+
+    if (employees.length === 0) {
+        suggestionPanel.querySelector('.text-sm').innerHTML = '候補';
+        listContainer.innerHTML = '<div class="text-sm text-gray-400">該当する社員が見つかりません</div>';
+        return;
+    }
+
+    // 件数を表示
+    suggestionPanel.querySelector('.text-sm').innerHTML = `候補 <span class="employee-suggestions-count">(${employees.length}件)</span>`;
+
+    let html = '<div class="employee-suggestions-scroll">';
+    employees.forEach(emp => {
+        html += `
+            <div class="employee-suggestion-item" onclick="selectEmployee('${emp.employee_number}', '${emp.employee_name.replace(/'/g, "\\'")}')">
+                <span class="employee-suggestion-name">${emp.employee_name}</span>
+                <span class="employee-suggestion-number">(${emp.employee_number})</span>
+            </div>
+        `;
+    });
+    html += '</div>';
+
+    listContainer.innerHTML = html;
+}
+
+// 候補を選択
+function selectEmployee(employeeNumber, employeeName) {
+    // 名前と社員番号を自動入力
+    document.getElementById('leave-name').value = employeeName;
+    document.getElementById('leave-employee-number').value = employeeNumber;
+
+    // 候補リストをクリア
+    document.getElementById('employee-suggestions-list').innerHTML =
+        '<div class="text-sm text-gray-400">選択されました</div>';
 }
