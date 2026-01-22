@@ -163,6 +163,7 @@ h2 {
 .calendar-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
+    grid-auto-rows: 1fr;
     gap: 0.8vw;
     margin-bottom: 20px;
     width: 100%;
@@ -178,8 +179,8 @@ h2 {
     display: flex;
     flex-direction: column;
     box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08);
-    aspect-ratio: 1 / 1.2;
-    overflow: hidden;
+    min-height: 12vw;
+    height: 100%;
 }
 
 .day-box.empty {
@@ -223,6 +224,7 @@ h2 {
     background: rgba(255, 255, 255, 0.7);
     border-radius: 4px;
     box-shadow: 0 1px 4px rgba(59, 130, 246, 0.1);
+    flex-shrink: 0;
 }
 
 /* ========== エントリー表示エリア ========== */
@@ -232,9 +234,11 @@ h2 {
     padding: 0.4vw;
     margin-bottom: 0.5vw;
     background: rgba(255, 255, 255, 0.8);
-    flex-grow: 1;
+    flex: 1 1 auto;
     overflow-y: auto;
-    min-height: 3vw;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2vw;
 }
 
 /* エントリーカード */
@@ -243,7 +247,6 @@ h2 {
     border: 1px solid #cbd5e1;
     border-radius: 4px;
     padding: 0.4vw 0.6vw;
-    margin: 0.2vw 0;
     cursor: pointer;
     font-size: 0.75vw;
     display: flex;
@@ -252,6 +255,7 @@ h2 {
     transition: all 0.2s ease;
     user-select: none;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    flex-shrink: 0;
 }
 
 .entry-item:hover {
@@ -272,12 +276,12 @@ h2 {
     color: white;
     border: none;
     border-radius: 3px;
-    width: 1.2vw;
-    height: 1.2vw;
-    min-width: 18px;
-    min-height: 18px;
+    width: 1.4vw;
+    height: 1.4vw;
+    min-width: 20px;
+    min-height: 20px;
     cursor: pointer;
-    font-size: 0.8vw;
+    font-size: 0.9vw;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -299,12 +303,14 @@ h2 {
 /* ========== 入力エリア ========== */
 .input-group {
     margin-bottom: 0.4vw;
+    flex-shrink: 0;
 }
 
 .input-row {
     display: flex;
     gap: 0.2vw;
     margin-bottom: 0.3vw;
+    flex-shrink: 0;
 }
 
 .entry-input {
@@ -646,12 +652,20 @@ h2 {
         padding: 1.5vh 1vw;
     }
 
+    h2 {
+        font-size: 2vw;
+    }
+
     .calendar-grid {
         gap: 0.6vw;
     }
 
     .weekday-header {
         font-size: 1.2vw;
+    }
+
+    .day-box {
+        min-height: 15vw;
     }
 
     .date-label {
@@ -676,6 +690,10 @@ h2 {
         padding: 1vh 0.5vw;
     }
 
+    h2 {
+        font-size: 2.5vw;
+    }
+
     .calendar-grid {
         gap: 0.5vw;
     }
@@ -692,6 +710,7 @@ h2 {
     .day-box {
         padding: 1vw;
         border-radius: 6px;
+        min-height: 20vw;
     }
 
     .date-label {
@@ -712,6 +731,10 @@ h2 {
     .entry-item {
         font-size: 1.4vw;
         padding: 0.6vw 0.8vw;
+    }
+
+    .entry-list-container {
+        gap: 0.3vw;
     }
 
     .popup-content {
