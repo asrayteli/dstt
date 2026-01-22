@@ -140,6 +140,11 @@
     z-index: 50;
 }
 
+/* hiddenクラスでモーダルを確実に非表示 */
+.modal-overlay.hidden {
+    display: none !important;
+}
+
 .modal-content {
     background-color: white;
     border-radius: 8px;
