@@ -1294,9 +1294,6 @@ async function previewBulkRegister() {
     const results = await parseBulkRegisterData(dataText);
 
     // プレビュー表示
-    const previewSection = document.getElementById('bulk-register-preview');
-    const previewContent = document.getElementById('bulk-register-preview-content');
-
     let html = '<table class="data-table">';
     html += '<thead><tr>';
     html += '<th>行</th><th>状態</th><th>日付</th><th>名前</th><th>社員番号</th><th>種類</th><th>代務者</th><th>備考</th>';
