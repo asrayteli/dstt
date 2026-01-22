@@ -101,27 +101,28 @@
                 </div>
             </div>
 
+            <!-- 名前入力 -->
+            <div class="form-group">
+                <label class="form-label">休暇取得者名 *</label>
+                <input type="text" id="leave-name" class="form-input" required autocomplete="off">
+            </div>
+
+            <!-- 候補パネル（自動入力モード時のみ表示） -->
+            <div id="employee-suggestions" style="display: none; margin: -8px 0 12px 0;">
+                <div style="border: 1px solid #d1d5db; border-radius: 4px; background: white; padding: 8px;">
+                    <div class="text-sm text-gray-500 mb-2">候補</div>
+                    <div id="employee-suggestions-list">
+                        <div class="text-sm text-gray-400">名前を入力してください</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- 社員番号 -->
             <div class="form-group">
                 <label class="form-label">社員番号</label>
                 <input type="text" id="leave-employee-number" class="form-input" placeholder="例: 1234">
             </div>
 
-            <!-- 名前入力 + 候補パネル -->
-            <div class="form-group">
-                <label class="form-label">休暇取得者名 *</label>
-                <div style="display: flex; gap: 10px;">
-                    <input type="text" id="leave-name" class="form-input" required style="flex: 1;">
-                    <!-- 候補パネル（自動入力モード時のみ表示） -->
-                    <div id="employee-suggestions" style="display: none; width: 300px; max-height: 300px; overflow-y: auto; border: 1px solid #d1d5db; border-radius: 4px; background: white; padding: 8px;">
-                        <div class="text-sm text-gray-500 mb-2">候補</div>
-                        <div id="employee-suggestions-list">
-                            <div class="text-sm text-gray-400">名前を入力してください</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
             <div class="form-group">
                 <label class="form-label">休暇種類 *</label>
                 <select id="leave-type" class="form-input" required>
@@ -388,16 +389,17 @@
                     <input type="date" id="bulk-leave-date" class="form-input" required>
                 </div>
 
-                <div class="form-group" style="position: relative;">
+                <div class="form-group">
                     <label class="form-label">名前 *</label>
-                    <div style="display: flex; gap: 10px;">
-                        <input type="text" id="bulk-leave-name" class="form-input" required autocomplete="off">
-                        <!-- 候補パネル -->
-                        <div id="bulk-employee-suggestions" style="display: none; position: absolute; top: 100%; left: 0; width: 300px; max-height: 300px; overflow-y: auto; border: 1px solid #d1d5db; border-radius: 4px; background: white; padding: 8px; z-index: 100; margin-top: 4px;">
-                            <div class="text-sm text-gray-500 mb-2">候補</div>
-                            <div id="bulk-employee-suggestions-list">
-                                <div class="text-sm text-gray-400">名前を入力してください</div>
-                            </div>
+                    <input type="text" id="bulk-leave-name" class="form-input" required autocomplete="off">
+                </div>
+
+                <!-- 候補パネル -->
+                <div id="bulk-employee-suggestions" style="display: none; margin: -8px 0 12px 0;">
+                    <div style="border: 1px solid #d1d5db; border-radius: 4px; background: white; padding: 8px;">
+                        <div class="text-sm text-gray-500 mb-2">候補</div>
+                        <div id="bulk-employee-suggestions-list">
+                            <div class="text-sm text-gray-400">名前を入力してください</div>
                         </div>
                     </div>
                 </div>
