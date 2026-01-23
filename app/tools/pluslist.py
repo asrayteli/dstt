@@ -5,6 +5,7 @@ import os
 import json
 from datetime import datetime, date
 import pandas as pd
+import numpy as np
 import xlrd
 from sqlalchemy import or_, and_
 from io import BytesIO
@@ -99,8 +100,16 @@ def allowed_file(filename):
 
 def parse_date(date_str):
     """日付文字列をdate型に変換"""
-    if pd.isna(date_str) or date_str == '' or date_str is None:
+    # None, NaN, NaT, 空文字列などをチェック
+    if date_str is None or date_str == '':
         return None
+
+    # pandasのNaやNaTをチェック
+    try:
+        if pd.isna(date_str):
+            return None
+    except (TypeError, ValueError):
+        pass
 
     # datetime.date型の場合はそのまま返す
     if isinstance(date_str, date) and not isinstance(date_str, datetime):
@@ -111,22 +120,29 @@ def parse_date(date_str):
         return date_str.date()
 
     # numpy.datetime64型の場合（pandasが使用することがある）
-    try:
-        import numpy as np
-        if isinstance(date_str, np.datetime64):
-            ts = pd.Timestamp(date_str)
-            return ts.date()
-    except (ImportError, AttributeError):
-        pass
+    if isinstance(date_str, np.datetime64):
+        # NaT（Not a Time）をチェック
+        if pd.isna(date_str):
+            return None
+        ts = pd.Timestamp(date_str)
+        return ts.date()
 
     # 数値の場合（Excelシリアル値）
     if isinstance(date_str, (int, float)):
+        # NaN, Infをチェック
+        if not np.isfinite(date_str):
+            return None
+        # 妥当な範囲をチェック（1900年～2100年 = シリアル値 0～73050程度）
+        if date_str < 0 or date_str > 100000:
+            return None
         try:
             # pandasでExcelシリアル値を日付に変換
             dt = pd.to_datetime(date_str, unit='D', origin='1899-12-30')
+            if pd.isna(dt):
+                return None
             return dt.date()
-        except:
-            pass
+        except Exception:
+            return None
 
     # 文字列の場合、様々な形式に対応
     date_str = str(date_str).strip()
@@ -143,9 +159,14 @@ def parse_date(date_str):
     # 数値文字列の場合（シリアル値が文字列化されている）
     try:
         serial_value = float(date_str)
+        # 妥当な範囲をチェック
+        if not np.isfinite(serial_value) or serial_value < 0 or serial_value > 100000:
+            return None
         dt = pd.to_datetime(serial_value, unit='D', origin='1899-12-30')
+        if pd.isna(dt):
+            return None
         return dt.date()
-    except:
+    except Exception:
         pass
 
     return None
