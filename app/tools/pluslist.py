@@ -138,7 +138,10 @@ def read_excel_file(file_path, original_filename=None):
             '郵便番号': str,
             '契約コード［＊］': str,
             '電話番号': str,
-            '携帯電話(個人)': str
+            '携帯電話(個人)': str,
+            '生年月日': str,
+            '入社日付': str,
+            '退職日付': str
         }
 
         if file_ext == '.xlsx':
