@@ -110,6 +110,15 @@ def parse_date(date_str):
     if isinstance(date_str, (datetime, pd.Timestamp)):
         return date_str.date()
 
+    # numpy.datetime64型の場合（pandasが使用することがある）
+    try:
+        import numpy as np
+        if isinstance(date_str, np.datetime64):
+            ts = pd.Timestamp(date_str)
+            return ts.date()
+    except (ImportError, AttributeError):
+        pass
+
     # 数値の場合（Excelシリアル値）
     if isinstance(date_str, (int, float)):
         try:
@@ -199,6 +208,9 @@ def read_excel_file(file_path, original_filename=None):
             # エラーメッセージに詳細情報を追加
             raise ValueError(f"サポートされていないファイル形式: '{file_ext}' (元のファイル名: {original_filename}, 保存先: {file_path})")
 
+        # 列名の前後の空白を削除（Excelでスペースが入る場合がある）
+        df.columns = df.columns.str.strip()
+
         # カラム名を確認（CSVサンプルと同じ構造を想定）
         # 暫定会社略称でフィルタリング
         if '暫定会社略称' in df.columns:
@@ -208,32 +220,8 @@ def read_excel_file(file_path, original_filename=None):
             available_columns = ', '.join(df.columns.tolist()[:10])  # 最初の10列
             raise ValueError(f"'暫定会社略称'列が見つかりません。利用可能な列: {available_columns}...")
 
-        # 日付列を文字列形式に変換（Excelのdatetimeオブジェクトやシリアル値を処理）
-        date_columns = ['生年月日', '入社日付', '退職日付']
-        for col in date_columns:
-            if col in df.columns:
-                def convert_date_to_string(x):
-                    if pd.isna(x) or x == '' or x is None:
-                        return None
-                    # datetimeオブジェクトまたはTimestampの場合
-                    if isinstance(x, (datetime, pd.Timestamp)):
-                        return x.strftime('%Y/%m/%d')
-                    # 数値の場合（Excelシリアル値）
-                    if isinstance(x, (int, float)):
-                        try:
-                            # pandasでExcelシリアル値を日付に変換
-                            dt = pd.to_datetime(x, unit='D', origin='1899-12-30')
-                            return dt.strftime('%Y/%m/%d')
-                        except:
-                            return None
-                    # 文字列の場合
-                    x_str = str(x).strip()
-                    if x_str and x_str != 'nan' and x_str != 'NaT':
-                        return x_str
-                    return None
-
-                df[col] = df[col].apply(convert_date_to_string)
-
+        # 日付列はpandasが自動パースした状態のまま返す
+        # parse_date()関数がすべての形式（datetime、数値、文字列）を処理する
         return df
 
     except ValueError:
@@ -249,10 +237,19 @@ def serialize_employee_data(data):
     """
     serialized = data.copy()
     # datetime.date型を文字列に変換
-    if serialized.get('birth_date') and isinstance(serialized['birth_date'], date):
-        serialized['birth_date'] = serialized['birth_date'].isoformat()
-    if serialized.get('hire_date') and isinstance(serialized['hire_date'], date):
-        serialized['hire_date'] = serialized['hire_date'].isoformat()
+    # datetimeはdateのサブクラスなので、先にdatetimeをチェック
+    if serialized.get('birth_date'):
+        if isinstance(serialized['birth_date'], datetime):
+            serialized['birth_date'] = serialized['birth_date'].date().isoformat()
+        elif isinstance(serialized['birth_date'], date):
+            serialized['birth_date'] = serialized['birth_date'].isoformat()
+
+    if serialized.get('hire_date'):
+        if isinstance(serialized['hire_date'], datetime):
+            serialized['hire_date'] = serialized['hire_date'].date().isoformat()
+        elif isinstance(serialized['hire_date'], date):
+            serialized['hire_date'] = serialized['hire_date'].isoformat()
+
     return serialized
 
 
@@ -262,10 +259,25 @@ def deserialize_employee_data(data):
     """
     deserialized = data.copy()
     # 文字列をdatetime.date型に変換
-    if deserialized.get('birth_date') and isinstance(deserialized['birth_date'], str):
-        deserialized['birth_date'] = parse_date(deserialized['birth_date'])
-    if deserialized.get('hire_date') and isinstance(deserialized['hire_date'], str):
-        deserialized['hire_date'] = parse_date(deserialized['hire_date'])
+    # 既にdate型の場合もあるので、そのケースも処理
+    if 'birth_date' in deserialized and deserialized['birth_date'] is not None:
+        if isinstance(deserialized['birth_date'], str):
+            deserialized['birth_date'] = parse_date(deserialized['birth_date'])
+        elif isinstance(deserialized['birth_date'], datetime):
+            deserialized['birth_date'] = deserialized['birth_date'].date()
+        elif isinstance(deserialized['birth_date'], date):
+            # 既にdate型の場合はそのまま
+            pass
+
+    if 'hire_date' in deserialized and deserialized['hire_date'] is not None:
+        if isinstance(deserialized['hire_date'], str):
+            deserialized['hire_date'] = parse_date(deserialized['hire_date'])
+        elif isinstance(deserialized['hire_date'], datetime):
+            deserialized['hire_date'] = deserialized['hire_date'].date()
+        elif isinstance(deserialized['hire_date'], date):
+            # 既にdate型の場合はそのまま
+            pass
+
     return deserialized
 
 
