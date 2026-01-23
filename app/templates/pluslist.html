@@ -1478,8 +1478,6 @@ async function clearOfficeData() {
         if (response.ok) {
             alert(`${data.deleted_count}件の社員データを削除しました`);
             document.getElementById('clear-office-code').value = '';
-            // 一覧をリロード
-            loadEmployees();
         } else {
             alert('エラー: ' + data.error);
         }
