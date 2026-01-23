@@ -102,16 +102,43 @@ def parse_date(date_str):
     if pd.isna(date_str) or date_str == '' or date_str is None:
         return None
 
-    if isinstance(date_str, (datetime, date)):
-        return date_str if isinstance(date_str, date) else date_str.date()
+    # datetime.date型の場合はそのまま返す
+    if isinstance(date_str, date) and not isinstance(date_str, datetime):
+        return date_str
+
+    # datetime型またはTimestamp型の場合
+    if isinstance(date_str, (datetime, pd.Timestamp)):
+        return date_str.date()
+
+    # 数値の場合（Excelシリアル値）
+    if isinstance(date_str, (int, float)):
+        try:
+            # pandasでExcelシリアル値を日付に変換
+            dt = pd.to_datetime(date_str, unit='D', origin='1899-12-30')
+            return dt.date()
+        except:
+            pass
 
     # 文字列の場合、様々な形式に対応
     date_str = str(date_str).strip()
-    for fmt in ['%Y/%m/%d', '%Y-%m-%d', '%Y%m%d']:
+    if not date_str or date_str == 'nan' or date_str == 'NaT':
+        return None
+
+    # 一般的な日付形式を試行
+    for fmt in ['%Y/%m/%d', '%Y-%m-%d', '%Y%m%d', '%Y年%m月%d日']:
         try:
             return datetime.strptime(date_str, fmt).date()
         except:
             continue
+
+    # 数値文字列の場合（シリアル値が文字列化されている）
+    try:
+        serial_value = float(date_str)
+        dt = pd.to_datetime(serial_value, unit='D', origin='1899-12-30')
+        return dt.date()
+    except:
+        pass
+
     return None
 
 
@@ -130,6 +157,7 @@ def read_excel_file(file_path, original_filename=None):
         # ファイル形式に応じて適切なエンジンを使用
         # 数値列を文字列として読み込むための設定（前ゼロを保持）
         # dtypeを使用して、指定した列を文字列型として読み込む
+        # 日付列は除外して自動パースさせる
         str_columns = {
             '社員番号': str,
             '所属コード［＊］': str,
@@ -138,10 +166,7 @@ def read_excel_file(file_path, original_filename=None):
             '郵便番号': str,
             '契約コード［＊］': str,
             '電話番号': str,
-            '携帯電話(個人)': str,
-            '生年月日': str,
-            '入社日付': str,
-            '退職日付': str
+            '携帯電話(個人)': str
         }
 
         if file_ext == '.xlsx':
@@ -187,11 +212,27 @@ def read_excel_file(file_path, original_filename=None):
         date_columns = ['生年月日', '入社日付', '退職日付']
         for col in date_columns:
             if col in df.columns:
-                # datetimeオブジェクトの場合は %Y/%m/%d 形式に変換
-                df[col] = df[col].apply(lambda x:
-                    x.strftime('%Y/%m/%d') if isinstance(x, (datetime, pd.Timestamp))
-                    else (str(x) if pd.notna(x) and x != '' else None)
-                )
+                def convert_date_to_string(x):
+                    if pd.isna(x) or x == '' or x is None:
+                        return None
+                    # datetimeオブジェクトまたはTimestampの場合
+                    if isinstance(x, (datetime, pd.Timestamp)):
+                        return x.strftime('%Y/%m/%d')
+                    # 数値の場合（Excelシリアル値）
+                    if isinstance(x, (int, float)):
+                        try:
+                            # pandasでExcelシリアル値を日付に変換
+                            dt = pd.to_datetime(x, unit='D', origin='1899-12-30')
+                            return dt.strftime('%Y/%m/%d')
+                        except:
+                            return None
+                    # 文字列の場合
+                    x_str = str(x).strip()
+                    if x_str and x_str != 'nan' and x_str != 'NaT':
+                        return x_str
+                    return None
+
+                df[col] = df[col].apply(convert_date_to_string)
 
         return df
 
