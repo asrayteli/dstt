@@ -549,6 +549,22 @@
                 <div id="offices-list" class="space-y-2 max-h-96 overflow-y-auto">
                     <!-- JavaScriptで動的に生成 -->
                 </div>
+
+                <div class="mt-6 pt-6 border-t border-gray-200">
+                    <h4 class="font-semibold mb-2 text-red-600">⚠️ 営業所データクリア</h4>
+                    <p class="text-sm text-gray-600 mb-3">指定した営業所の全社員データを削除します（論理削除）。この操作は取り消せません。</p>
+                    <div class="flex gap-2">
+                        <select id="clear-office-code" class="flex-1 px-3 py-2 border border-gray-300 rounded-md">
+                            <option value="">営業所を選択</option>
+                            {% for office in offices %}
+                            <option value="{{ office.code }}">{{ office.name }} ({{ office.code }})</option>
+                            {% endfor %}
+                        </select>
+                        <button onclick="clearOfficeData()" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 whitespace-nowrap">
+                            データクリア
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <!-- 権限管理 -->
@@ -1418,6 +1434,52 @@ async function createOffice() {
             document.getElementById('new-office-code').value = '';
             document.getElementById('new-office-name').value = '';
             loadOffices();
+        } else {
+            alert('エラー: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// 営業所データクリア
+async function clearOfficeData() {
+    const officeCode = document.getElementById('clear-office-code').value;
+
+    if (!officeCode) {
+        alert('営業所を選択してください');
+        return;
+    }
+
+    // 営業所名を取得して確認メッセージに表示
+    const selectElement = document.getElementById('clear-office-code');
+    const selectedOption = selectElement.options[selectElement.selectedIndex];
+    const officeName = selectedOption.text;
+
+    if (!confirm(`本当に「${officeName}」の全社員データを削除しますか？\n\nこの操作は取り消せません。`)) {
+        return;
+    }
+
+    // 二重確認
+    if (!confirm('最終確認：データを削除しますか？')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/tools/pluslist/api/admin/clear-office-data', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({office_code: officeCode})
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            alert(`${data.deleted_count}件の社員データを削除しました`);
+            document.getElementById('clear-office-code').value = '';
+            // 一覧をリロード
+            loadEmployees();
         } else {
             alert('エラー: ' + data.error);
         }

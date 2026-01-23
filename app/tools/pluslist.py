@@ -1210,6 +1210,52 @@ def revoke_permission():
     return jsonify({"success": True})
 
 
+@pluslist_bp.route("/api/admin/clear-office-data", methods=["POST"])
+@login_required
+def clear_office_data():
+    """指定した営業所の全社員データをクリア（管理者のみ）"""
+    user_id = str(current_user.username)
+
+    if not is_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    data = request.json
+    office_code = data.get('office_code')
+
+    if not office_code:
+        return jsonify({"error": "営業所コードが必要です"}), 400
+
+    try:
+        # 営業所の存在確認
+        office = Office.query.filter_by(office_code=office_code).first()
+        if not office:
+            return jsonify({"error": "営業所が見つかりません"}), 404
+
+        # 該当営業所の社員を論理削除
+        employees = Employee.query.filter_by(
+            office_code=office_code,
+            is_deleted=False
+        ).all()
+
+        deleted_count = len(employees)
+
+        for emp in employees:
+            emp.is_deleted = True
+            emp.updated_at = datetime.now()
+
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "office_name": office.office_name
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"データ削除エラー: {str(e)}"}), 500
+
+
 # ===== 他DSTTツール連携API =====
 
 @pluslist_bp.route("/api/search_employee")
