@@ -183,6 +183,16 @@ def read_excel_file(file_path, original_filename=None):
             available_columns = ', '.join(df.columns.tolist()[:10])  # 最初の10列
             raise ValueError(f"'暫定会社略称'列が見つかりません。利用可能な列: {available_columns}...")
 
+        # 日付列を文字列形式に変換（Excelのdatetimeオブジェクトやシリアル値を処理）
+        date_columns = ['生年月日', '入社日付', '退職日付']
+        for col in date_columns:
+            if col in df.columns:
+                # datetimeオブジェクトの場合は %Y/%m/%d 形式に変換
+                df[col] = df[col].apply(lambda x:
+                    x.strftime('%Y/%m/%d') if isinstance(x, (datetime, pd.Timestamp))
+                    else (str(x) if pd.notna(x) and x != '' else None)
+                )
+
         return df
 
     except ValueError:
