@@ -989,19 +989,45 @@ def delete_employee(employee_number):
 @pluslist_bp.route("/api/export/<format>")
 @login_required
 def export_data(format):
-    """データエクスポート（Excel/CSV）"""
+    """データエクスポート（Excel/CSV）- 現在の表示内容を反映"""
     user_id = str(current_user.username)
     user_offices = get_user_offices(user_id)
 
     if not user_offices:
         return jsonify({"error": "アクセス権限がありません"}), 403
 
-    # フィルタパラメータを取得
-    office_filter = request.args.get('office', '')
+    # 全パラメータを取得（get_employeesと同じ）
     search = request.args.get('search', '')
+    sort_by = request.args.get('sort_by', 'employee_number')
+    sort_order = request.args.get('sort_order', 'asc')
+    office_filter = request.args.get('office', '')
     show_deleted = request.args.get('show_deleted', 'false') == 'true'
 
-    # クエリ構築
+    # 詳細検索パラメータ
+    search_scope = request.args.get('search_scope', 'all')
+    search_mode = request.args.get('search_mode', 'partial')
+    search_operator = request.args.get('search_operator', 'and')
+    search_columns_str = request.args.get('search_columns', '')
+    hire_date_from = request.args.get('hire_date_from', '')
+    hire_date_to = request.args.get('hire_date_to', '')
+    birth_date_from = request.args.get('birth_date_from', '')
+    birth_date_to = request.args.get('birth_date_to', '')
+
+    # フィールド別検索
+    field_employee_number = request.args.get('field_employee_number', '')
+    field_employee_name = request.args.get('field_employee_name', '')
+    field_employee_kana = request.args.get('field_employee_kana', '')
+    field_gender = request.args.get('field_gender', '')
+    field_job_title = request.args.get('field_job_title', '')
+    field_mobile_phone = request.args.get('field_mobile_phone', '')
+    field_address = request.args.get('field_address', '')
+    field_company_name = request.args.get('field_company_name', '')
+
+    # 表示列の順序
+    visible_columns_str = request.args.get('visible_columns', '')
+    visible_columns = visible_columns_str.split(',') if visible_columns_str else []
+
+    # ベースクエリ（get_employeesと同じロジック）
     query = Employee.query.filter(Employee.office_code.in_(user_offices))
 
     if not show_deleted:
@@ -1010,48 +1036,146 @@ def export_data(format):
     if office_filter:
         query = query.filter(Employee.office_code == office_filter)
 
+    # 検索（get_employeesと同じロジック）
     if search:
-        search_pattern = f"%{search}%"
-        query = query.filter(
-            or_(
-                Employee.employee_number.like(search_pattern),
-                Employee.employee_name.like(search_pattern),
-                Employee.employee_kana.like(search_pattern)
-            )
-        )
+        keywords = search.split()
+
+        if search_scope == 'specific' and search_columns_str:
+            search_columns = search_columns_str.split(',')
+        else:
+            search_columns = [
+                'employee_number', 'employee_name', 'employee_kana',
+                'office_name', 'job_title', 'mobile_phone', 'phone_number',
+                'address1', 'address2', 'postal_code', 'company_name', 'site_name'
+            ]
+
+        def build_keyword_conditions(keyword):
+            conditions = []
+            for col_name in search_columns:
+                if hasattr(Employee, col_name):
+                    col = getattr(Employee, col_name)
+                    if search_mode == 'exact':
+                        conditions.append(col == keyword)
+                    elif search_mode == 'prefix':
+                        conditions.append(col.like(f"{keyword}%"))
+                    else:
+                        conditions.append(col.like(f"%{keyword}%"))
+            return or_(*conditions) if conditions else None
+
+        if search_operator == 'or':
+            all_conditions = []
+            for keyword in keywords:
+                cond = build_keyword_conditions(keyword)
+                if cond is not None:
+                    all_conditions.append(cond)
+            if all_conditions:
+                query = query.filter(or_(*all_conditions))
+        else:
+            for keyword in keywords:
+                cond = build_keyword_conditions(keyword)
+                if cond is not None:
+                    query = query.filter(cond)
+
+    # 日付範囲検索
+    if hire_date_from:
+        query = query.filter(Employee.hire_date >= hire_date_from)
+    if hire_date_to:
+        query = query.filter(Employee.hire_date <= hire_date_to)
+    if birth_date_from:
+        query = query.filter(Employee.birth_date >= birth_date_from)
+    if birth_date_to:
+        query = query.filter(Employee.birth_date <= birth_date_to)
+
+    # フィールド別検索
+    if field_employee_number:
+        query = query.filter(Employee.employee_number.like(f"%{field_employee_number}%"))
+    if field_employee_name:
+        query = query.filter(Employee.employee_name.like(f"%{field_employee_name}%"))
+    if field_employee_kana:
+        query = query.filter(Employee.employee_kana.like(f"%{field_employee_kana}%"))
+    if field_gender:
+        query = query.filter(Employee.gender == field_gender)
+    if field_job_title:
+        query = query.filter(Employee.job_title.like(f"%{field_job_title}%"))
+    if field_mobile_phone:
+        query = query.filter(Employee.mobile_phone.like(f"%{field_mobile_phone}%"))
+    if field_address:
+        query = query.filter(or_(
+            Employee.address1.like(f"%{field_address}%"),
+            Employee.address2.like(f"%{field_address}%")
+        ))
+    if field_company_name:
+        query = query.filter(Employee.company_name.like(f"%{field_company_name}%"))
+
+    # ソート
+    if hasattr(Employee, sort_by):
+        sort_column = getattr(Employee, sort_by)
+        if sort_order == 'desc':
+            query = query.order_by(sort_column.desc())
+        else:
+            query = query.order_by(sort_column.asc())
 
     employees = query.all()
 
-    # データフレームに変換
+    # 列名マッピング（日本語）
+    column_mapping = {
+        'employee_number': '社員番号',
+        'office_code': '所属コード',
+        'office_name': '所属名称',
+        'employee_name': '社員名称',
+        'employee_kana': '社員カナ名称',
+        'employee_type': '社員区分',
+        'gender': '性別',
+        'cost_code': '原価コード',
+        'cost_name': '原価名称',
+        'manager_number': '管理担当社員番号',
+        'manager_name': '管理担当社員名',
+        'postal_code': '郵便番号',
+        'address1': '住所1',
+        'address2': '住所2',
+        'mansion_name': 'マンション名',
+        'contract_code': '契約コード',
+        'company_name': '法人名',
+        'site_name': '現場名',
+        'job_title': '職種名称',
+        'birth_date': '生年月日',
+        'age': '年齢',
+        'hire_date': '入社日付',
+        'tenure': '入社年数',
+        'retirement_date': '退職日付',
+        'phone_number': '電話番号',
+        'mobile_phone': '携帯電話',
+        'health_insurance': '健康保険加入区分'
+    }
+
+    # 表示列が指定されていない場合はデフォルト
+    if not visible_columns:
+        visible_columns = [
+            'employee_number', 'employee_name', 'office_name', 'job_title',
+            'birth_date', 'hire_date', 'mobile_phone'
+        ]
+
+    # データを表示列の順序で構築
     data = []
     for emp in employees:
-        data.append({
-            '社員番号': emp.employee_number,
-            '所属コード': emp.office_code,
-            '所属名称': emp.office_name,
-            '社員名称': emp.employee_name,
-            '社員カナ名称': emp.employee_kana,
-            '社員区分': emp.employee_type,
-            '性別': emp.gender,
-            '原価コード': emp.cost_code,
-            '原価名称': emp.cost_name,
-            '管理担当社員番号': emp.manager_number,
-            '管理担当社員名': emp.manager_name,
-            '郵便番号': emp.postal_code,
-            '住所1': emp.address1,
-            '住所2': emp.address2,
-            'マンション名': emp.mansion_name,
-            '契約コード': emp.contract_code,
-            '法人名': emp.company_name,
-            '現場名': emp.site_name,
-            '職種名称': emp.job_title,
-            '生年月日': emp.birth_date.strftime('%Y/%m/%d') if emp.birth_date else '',
-            '入社日付': emp.hire_date.strftime('%Y/%m/%d') if emp.hire_date else '',
-            '退職日付': emp.retirement_date or '',
-            '電話番号': emp.phone_number,
-            '携帯電話': emp.mobile_phone,
-            '健康保険加入区分': emp.health_insurance
-        })
+        emp_dict = emp.to_dict()
+        row = {}
+        for col in visible_columns:
+            jp_col = column_mapping.get(col, col)
+
+            # 値の取得と整形
+            if col == 'birth_date':
+                row[jp_col] = emp.birth_date.strftime('%Y/%m/%d') if emp.birth_date else ''
+            elif col == 'age':
+                row[jp_col] = emp.calculate_age() or ''
+            elif col == 'hire_date':
+                row[jp_col] = emp.hire_date.strftime('%Y/%m/%d') if emp.hire_date else ''
+            elif col == 'tenure':
+                row[jp_col] = emp.calculate_tenure() or ''
+            else:
+                row[jp_col] = emp_dict.get(col) or ''
+
+        data.append(row)
 
     df = pd.DataFrame(data)
 

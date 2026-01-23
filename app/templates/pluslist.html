@@ -1291,14 +1291,72 @@ async function saveEmployee() {
 
 // エクスポート
 function exportData(format) {
-    const search = document.getElementById('search-input').value;
-    const office = document.getElementById('office-filter').value;
+    // searchEmployees()と同じ検索条件を構築
+    const isSimpleSearch = document.querySelector('input[name="search-type"]:checked').value === 'simple';
+
+    const search = isSimpleSearch
+        ? document.getElementById('search-input').value
+        : document.getElementById('search-input-advanced').value;
+    const office = isSimpleSearch
+        ? document.getElementById('office-filter').value
+        : document.getElementById('office-filter-advanced').value;
+
     const showDeleted = document.getElementById('show-deleted').checked;
+
+    const searchScope = isSimpleSearch ? 'all' : document.getElementById('search-scope').value;
+    const searchMode = isSimpleSearch ? 'partial' : document.getElementById('search-mode').value;
+    const searchOperator = isSimpleSearch ? 'and' : document.getElementById('search-operator').value;
+
+    // 検索範囲の決定
+    let searchColumns = [];
+    if (searchScope === 'visible') {
+        searchColumns = visibleColumns;
+    } else if (searchScope === 'specific') {
+        document.querySelectorAll('.search-column:checked').forEach(cb => {
+            searchColumns.push(cb.dataset.column);
+        });
+    }
+
+    const hireDateFrom = document.getElementById('hire-date-from')?.value || '';
+    const hireDateTo = document.getElementById('hire-date-to')?.value || '';
+    const birthDateFrom = document.getElementById('birth-date-from')?.value || '';
+    const birthDateTo = document.getElementById('birth-date-to')?.value || '';
+
+    const fieldEmployeeNumber = document.getElementById('field-employee-number')?.value || '';
+    const fieldEmployeeName = document.getElementById('field-employee-name')?.value || '';
+    const fieldEmployeeKana = document.getElementById('field-employee-kana')?.value || '';
+    const fieldGender = document.getElementById('field-gender')?.value || '';
+    const fieldJobTitle = document.getElementById('field-job-title')?.value || '';
+    const fieldMobilePhone = document.getElementById('field-mobile-phone')?.value || '';
+    const fieldAddress = document.getElementById('field-address')?.value || '';
+    const fieldCompanyName = document.getElementById('field-company-name')?.value || '';
+
+    // ソート列をバックエンド用に変換
+    const mappedSort = mapSortColumn(sortBy, sortOrder);
 
     const params = new URLSearchParams({
         search: search,
         office: office,
-        show_deleted: showDeleted
+        sort_by: mappedSort.column,
+        sort_order: mappedSort.order,
+        show_deleted: showDeleted,
+        search_scope: searchScope,
+        search_mode: searchMode,
+        search_operator: searchOperator,
+        search_columns: searchColumns.join(','),
+        hire_date_from: hireDateFrom,
+        hire_date_to: hireDateTo,
+        birth_date_from: birthDateFrom,
+        birth_date_to: birthDateTo,
+        field_employee_number: fieldEmployeeNumber,
+        field_employee_name: fieldEmployeeName,
+        field_employee_kana: fieldEmployeeKana,
+        field_gender: fieldGender,
+        field_job_title: fieldJobTitle,
+        field_mobile_phone: fieldMobilePhone,
+        field_address: fieldAddress,
+        field_company_name: fieldCompanyName,
+        visible_columns: visibleColumns.join(',')
     });
 
     window.location.href = `/tools/pluslist/api/export/${format}?${params}`;
