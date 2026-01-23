@@ -243,6 +243,9 @@ def modify_leave(leave_id):
         
         # 削除実行
         calendar_data['leaves'] = [l for l in calendar_data['leaves'] if l['id'] != leave_id]
+
+        # 保存
+        save_calendar_data(calendar_id, year_month, calendar_data)
     else:
         # 編集
         leave_found = False
