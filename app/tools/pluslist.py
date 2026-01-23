@@ -711,13 +711,27 @@ def import_data():
         for emp_data in diff_result['to_add']:
             # JSON化されたデータをデシリアライズ（日付を復元）
             deserialized = deserialize_employee_data(emp_data)
-            employee = Employee(**deserialized)
-            db.session.add(employee)
+
+            # 論理削除されたデータが存在する場合は復活させる
+            existing = Employee.query.filter_by(employee_number=deserialized['employee_number']).first()
+            if existing and existing.is_deleted:
+                # 既存の論理削除データを復活＋更新
+                for key, value in deserialized.items():
+                    setattr(existing, key, value)
+                existing.is_deleted = False
+                existing.updated_at = datetime.utcnow()
+            elif not existing:
+                # 完全に新規の場合のみ追加
+                employee = Employee(**deserialized)
+                db.session.add(employee)
             added_count += 1
 
         # 更新
         for update_info in diff_result['to_update']:
-            employee = Employee.query.filter_by(employee_number=update_info['employee_number']).first()
+            employee = Employee.query.filter_by(
+                employee_number=update_info['employee_number'],
+                is_deleted=False
+            ).first()
             if employee:
                 # JSON化されたデータをデシリアライズ（日付を復元）
                 deserialized = deserialize_employee_data(update_info['new_data'])
@@ -728,7 +742,10 @@ def import_data():
 
         # 削除（論理削除）
         for emp_number in diff_result['to_delete']:
-            employee = Employee.query.filter_by(employee_number=emp_number).first()
+            employee = Employee.query.filter_by(
+                employee_number=emp_number,
+                is_deleted=False
+            ).first()
             if employee:
                 employee.is_deleted = True
                 employee.retirement_date = "？退職？"
