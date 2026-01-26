@@ -1023,9 +1023,9 @@ def export_data(format):
     field_address = request.args.get('field_address', '')
     field_company_name = request.args.get('field_company_name', '')
 
-    # 表示列の順序
+    # 表示列の順序（空文字列を除外）
     visible_columns_str = request.args.get('visible_columns', '')
-    visible_columns = visible_columns_str.split(',') if visible_columns_str else []
+    visible_columns = [col.strip() for col in visible_columns_str.split(',') if col.strip()] if visible_columns_str else []
 
     # ベースクエリ（get_employeesと同じロジック）
     query = Employee.query.filter(Employee.office_code.in_(user_offices))
@@ -1041,7 +1041,7 @@ def export_data(format):
         keywords = search.split()
 
         if search_scope == 'specific' and search_columns_str:
-            search_columns = search_columns_str.split(',')
+            search_columns = [col.strip() for col in search_columns_str.split(',') if col.strip()]
         else:
             search_columns = [
                 'employee_number', 'employee_name', 'employee_kana',
@@ -1156,6 +1156,9 @@ def export_data(format):
         ]
 
     # データを表示列の順序で構築
+    # 列順序を保持するためにヘッダーリストを作成
+    column_headers = [column_mapping.get(col, col) for col in visible_columns]
+
     data = []
     for emp in employees:
         emp_dict = emp.to_dict()
@@ -1177,7 +1180,8 @@ def export_data(format):
 
         data.append(row)
 
-    df = pd.DataFrame(data)
+    # 列順序を明示的に指定してDataFrame作成
+    df = pd.DataFrame(data, columns=column_headers)
 
     # ファイル生成
     if format == 'excel':
