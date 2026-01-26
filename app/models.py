@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
-from datetime import datetime
+from datetime import datetime, date
+from dateutil.relativedelta import relativedelta
 
 db = SQLAlchemy()
 
@@ -97,6 +98,54 @@ class Employee(db.Model):
     def __repr__(self):
         return f'<Employee {self.employee_number}: {self.employee_name}>'
 
+    def calculate_age(self):
+        """年齢を計算（例: 「45歳3ヶ月」）"""
+        if not self.birth_date:
+            return None
+
+        today = date.today()
+        delta = relativedelta(today, self.birth_date)
+        years = delta.years
+        months = delta.months
+
+        if months > 0:
+            return f"{years}歳{months}ヶ月"
+        else:
+            return f"{years}歳"
+
+    def calculate_tenure(self):
+        """入社年数を計算（例: 「5年7ヶ月」）"""
+        if not self.hire_date:
+            return None
+
+        today = date.today()
+        delta = relativedelta(today, self.hire_date)
+        years = delta.years
+        months = delta.months
+
+        if months > 0:
+            return f"{years}年{months}ヶ月"
+        else:
+            return f"{years}年"
+
+    def calculate_age_months(self):
+        """年齢を月数で返す（ソート用）"""
+        if not self.birth_date:
+            return None
+
+        today = date.today()
+        delta = relativedelta(today, self.birth_date)
+        return delta.years * 12 + delta.months
+
+    def calculate_tenure_months(self):
+        """入社年数を月数で返す（ソート用）"""
+        if not self.hire_date:
+            return None
+
+        today = date.today()
+        delta = relativedelta(today, self.hire_date)
+        return delta.years * 12 + delta.months
+
     def to_dict(self):
         """辞書形式に変換"""
         return {
@@ -121,7 +170,11 @@ class Employee(db.Model):
             'site_name': self.site_name,
             'job_title': self.job_title,
             'birth_date': self.birth_date.isoformat() if self.birth_date else None,
+            'age': self.calculate_age(),
+            'age_months': self.calculate_age_months(),
             'hire_date': self.hire_date.isoformat() if self.hire_date else None,
+            'tenure': self.calculate_tenure(),
+            'tenure_months': self.calculate_tenure_months(),
             'retirement_date': self.retirement_date,
             'phone_number': self.phone_number,
             'mobile_phone': self.mobile_phone,

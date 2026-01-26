@@ -383,8 +383,16 @@
                     生年月日
                 </label>
                 <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="age">
+                    年齢
+                </label>
+                <label class="flex items-center text-sm">
                     <input type="checkbox" class="column-toggle mr-2" data-column="hire_date">
                     入社日付
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="tenure">
+                    入社年数
                 </label>
                 <label class="flex items-center text-sm">
                     <input type="checkbox" class="column-toggle mr-2" data-column="retirement_date">
@@ -831,7 +839,9 @@ const allColumns = {
     'company_name': '法人名',
     'site_name': '現場名',
     'birth_date': '生年月日',
+    'age': '年齢',
     'hire_date': '入社日付',
+    'tenure': '入社年数',
     'retirement_date': '退職日付',
     'phone_number': '電話番号',
     'mobile_phone': '携帯電話',
@@ -930,13 +940,16 @@ async function searchEmployees(page = 1) {
     const fieldAddress = document.getElementById('field-address')?.value || '';
     const fieldCompanyName = document.getElementById('field-company-name')?.value || '';
 
+    // ソート列をバックエンド用に変換
+    const mappedSort = mapSortColumn(sortBy, sortOrder);
+
     const params = new URLSearchParams({
         page: currentPage,
         per_page: perPage,
         search: search,
         office: office,
-        sort_by: sortBy,
-        sort_order: sortOrder,
+        sort_by: mappedSort.column,
+        sort_order: mappedSort.order,
         show_deleted: showDeleted,
         search_scope: searchScope,
         search_mode: searchMode,
@@ -983,7 +996,7 @@ function renderTableHeader() {
         th.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
 
         // ソート可能な列の場合
-        if (['employee_number', 'employee_name', 'hire_date', 'birth_date'].includes(col)) {
+        if (['employee_number', 'employee_name', 'hire_date', 'birth_date', 'age', 'tenure'].includes(col)) {
             th.className += ' cursor-pointer';
             th.onclick = () => sortTable(col);
             th.innerHTML = `${allColumns[col]} <span id="sort-${col}">↕</span>`;
@@ -1097,6 +1110,19 @@ function sortTable(column) {
     document.getElementById(`sort-${column}`).textContent = sortOrder === 'asc' ? '↑' : '↓';
 
     searchEmployees(1);
+}
+
+// ソート列をバックエンド用に変換
+function mapSortColumn(column, order) {
+    // 年齢でソート: 生年月日の逆順でソート
+    if (column === 'age') {
+        return { column: 'birth_date', order: order === 'asc' ? 'desc' : 'asc' };
+    }
+    // 入社年数でソート: 入社日付の逆順でソート
+    if (column === 'tenure') {
+        return { column: 'hire_date', order: order === 'asc' ? 'desc' : 'asc' };
+    }
+    return { column: column, order: order };
 }
 
 // 社員詳細表示
@@ -1265,14 +1291,72 @@ async function saveEmployee() {
 
 // エクスポート
 function exportData(format) {
-    const search = document.getElementById('search-input').value;
-    const office = document.getElementById('office-filter').value;
+    // searchEmployees()と同じ検索条件を構築
+    const isSimpleSearch = document.querySelector('input[name="search-type"]:checked').value === 'simple';
+
+    const search = isSimpleSearch
+        ? document.getElementById('search-input').value
+        : document.getElementById('search-input-advanced').value;
+    const office = isSimpleSearch
+        ? document.getElementById('office-filter').value
+        : document.getElementById('office-filter-advanced').value;
+
     const showDeleted = document.getElementById('show-deleted').checked;
+
+    const searchScope = isSimpleSearch ? 'all' : document.getElementById('search-scope').value;
+    const searchMode = isSimpleSearch ? 'partial' : document.getElementById('search-mode').value;
+    const searchOperator = isSimpleSearch ? 'and' : document.getElementById('search-operator').value;
+
+    // 検索範囲の決定
+    let searchColumns = [];
+    if (searchScope === 'visible') {
+        searchColumns = visibleColumns;
+    } else if (searchScope === 'specific') {
+        document.querySelectorAll('.search-column:checked').forEach(cb => {
+            searchColumns.push(cb.dataset.column);
+        });
+    }
+
+    const hireDateFrom = document.getElementById('hire-date-from')?.value || '';
+    const hireDateTo = document.getElementById('hire-date-to')?.value || '';
+    const birthDateFrom = document.getElementById('birth-date-from')?.value || '';
+    const birthDateTo = document.getElementById('birth-date-to')?.value || '';
+
+    const fieldEmployeeNumber = document.getElementById('field-employee-number')?.value || '';
+    const fieldEmployeeName = document.getElementById('field-employee-name')?.value || '';
+    const fieldEmployeeKana = document.getElementById('field-employee-kana')?.value || '';
+    const fieldGender = document.getElementById('field-gender')?.value || '';
+    const fieldJobTitle = document.getElementById('field-job-title')?.value || '';
+    const fieldMobilePhone = document.getElementById('field-mobile-phone')?.value || '';
+    const fieldAddress = document.getElementById('field-address')?.value || '';
+    const fieldCompanyName = document.getElementById('field-company-name')?.value || '';
+
+    // ソート列をバックエンド用に変換
+    const mappedSort = mapSortColumn(sortBy, sortOrder);
 
     const params = new URLSearchParams({
         search: search,
         office: office,
-        show_deleted: showDeleted
+        sort_by: mappedSort.column,
+        sort_order: mappedSort.order,
+        show_deleted: showDeleted,
+        search_scope: searchScope,
+        search_mode: searchMode,
+        search_operator: searchOperator,
+        search_columns: searchColumns.join(','),
+        hire_date_from: hireDateFrom,
+        hire_date_to: hireDateTo,
+        birth_date_from: birthDateFrom,
+        birth_date_to: birthDateTo,
+        field_employee_number: fieldEmployeeNumber,
+        field_employee_name: fieldEmployeeName,
+        field_employee_kana: fieldEmployeeKana,
+        field_gender: fieldGender,
+        field_job_title: fieldJobTitle,
+        field_mobile_phone: fieldMobilePhone,
+        field_address: fieldAddress,
+        field_company_name: fieldCompanyName,
+        visible_columns: visibleColumns.join(',')
     });
 
     window.location.href = `/tools/pluslist/api/export/${format}?${params}`;
