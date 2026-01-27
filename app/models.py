@@ -221,3 +221,73 @@ class EditHistory(db.Model):
 
     def __repr__(self):
         return f'<EditHistory {self.id}: {self.action} on {self.employee_number}>'
+
+
+class SalaryMapping(db.Model):
+    """賃金項目マッピング定義"""
+    __tablename__ = 'salary_mappings'
+
+    item_id = db.Column(db.String(20), primary_key=True)  # 項目ID（例: 115）
+    display_name = db.Column(db.String(100), nullable=False)  # 表示名（例: 基本給）
+    column_key = db.Column(db.String(50), nullable=False, unique=True)  # DBキー（例: base_salary）
+    sort_order = db.Column(db.Integer, default=0)  # 表示順
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<SalaryMapping {self.item_id}: {self.display_name}>'
+
+    def to_dict(self):
+        return {
+            'item_id': self.item_id,
+            'display_name': self.display_name,
+            'column_key': self.column_key,
+            'sort_order': self.sort_order,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class EmployeeSalary(db.Model):
+    """社員賃金データ"""
+    __tablename__ = 'employee_salaries'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    employee_number = db.Column(db.String(20), nullable=False, index=True)  # 社員番号
+    item_id = db.Column(db.String(20), db.ForeignKey('salary_mappings.item_id'), nullable=False)  # 項目ID
+    amount = db.Column(db.Integer, nullable=False)  # 金額
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)  # アップロード日時
+    uploaded_by = db.Column(db.String(80), nullable=False)  # アップロード者
+
+    # リレーション
+    mapping = db.relationship('SalaryMapping', backref='salaries')
+
+    def __repr__(self):
+        return f'<EmployeeSalary {self.employee_number}: {self.item_id}={self.amount}>'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'employee_number': self.employee_number,
+            'item_id': self.item_id,
+            'amount': self.amount,
+            'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
+            'uploaded_by': self.uploaded_by
+        }
+
+
+class SalaryUploadHistory(db.Model):
+    """賃金ファイルアップロード履歴"""
+    __tablename__ = 'salary_upload_histories'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    uploaded_by = db.Column(db.String(80), nullable=False)  # アップロードユーザーID
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    filename = db.Column(db.String(255))  # ファイル名
+    success_count = db.Column(db.Integer, default=0)  # 成功件数
+    skip_count = db.Column(db.Integer, default=0)  # スキップ件数
+    error_count = db.Column(db.Integer, default=0)  # エラー件数
+    total_rows = db.Column(db.Integer, default=0)  # 総行数
+
+    def __repr__(self):
+        return f'<SalaryUploadHistory {self.id}: {self.filename} by {self.uploaded_by}>'

@@ -411,7 +411,17 @@
                     健康保険加入区分
                 </label>
             </div>
-            <div class="flex gap-2">
+
+            <!-- 賃金項目セクション -->
+            <div class="mt-4 pt-4 border-t border-gray-200">
+                <h4 class="font-semibold text-gray-900 mb-2">💰 賃金項目（ファイルBデータ）</h4>
+                <div id="salary-columns-container" class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <!-- JavaScriptで動的に生成 -->
+                    <p class="text-sm text-gray-500 col-span-full" id="no-salary-mappings-msg">マッピングが登録されていません</p>
+                </div>
+            </div>
+
+            <div class="flex gap-2 mt-4">
                 <button onclick="applyColumnSelection()" class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
                     適用
                 </button>
@@ -448,21 +458,74 @@
     <div id="content-upload" class="tab-content hidden">
         <div class="bg-white p-6 rounded-lg shadow max-w-3xl mx-auto">
             <h3 class="text-xl font-bold mb-4">📤 Excelファイルアップロード</h3>
-            <p class="text-gray-600 mb-4">社員データ（.xls, .xlsx, .csv形式）をアップロードして一括更新します。</p>
 
-            <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center mb-4" id="drop-zone">
-                <input type="file" id="file-input" accept=".xls,.xlsx,.csv" class="hidden" onchange="handleFileSelect(event)">
-                <div class="mb-4">
-                    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-                    </svg>
+            <!-- ファイル種別選択 -->
+            <div class="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <label class="block text-sm font-semibold text-gray-800 mb-3">アップロードするファイルの種類を選択してください：</label>
+                <div class="flex flex-col gap-3">
+                    <label class="flex items-start cursor-pointer p-3 bg-white rounded border border-gray-200 hover:border-blue-400 transition">
+                        <input type="radio" name="file-type" value="employee" checked class="mt-1 mr-3" onchange="toggleFileType('employee')">
+                        <div>
+                            <span class="font-medium text-gray-900">📋 ファイルA（社員基本情報）</span>
+                            <p class="text-sm text-gray-600 mt-1">社員の基本データ（名前、住所、連絡先など）を更新します</p>
+                            <p class="text-xs text-gray-500 mt-1">対応形式: .xls, .xlsx, .csv</p>
+                        </div>
+                    </label>
+                    <label class="flex items-start cursor-pointer p-3 bg-white rounded border border-gray-200 hover:border-blue-400 transition">
+                        <input type="radio" name="file-type" value="salary" class="mt-1 mr-3" onchange="toggleFileType('salary')">
+                        <div>
+                            <span class="font-medium text-gray-900">💰 ファイルB（賃金情報）</span>
+                            <p class="text-sm text-gray-600 mt-1">社員の賃金データを更新します（既存データは置き換えられます）</p>
+                            <p class="text-xs text-gray-500 mt-1">対応形式: .xls のみ</p>
+                        </div>
+                    </label>
                 </div>
-                <p class="text-lg mb-2">ファイルをドラッグ&ドロップ</p>
-                <p class="text-sm text-gray-500 mb-4">または</p>
-                <button onclick="document.getElementById('file-input').click()" class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700">
-                    ファイルを選択
-                </button>
-                <p class="text-xs text-gray-500 mt-4">対応形式: .xls, .xlsx, .csv (最大10MB)</p>
+            </div>
+
+            <!-- ファイルA用アップロードエリア -->
+            <div id="upload-area-employee">
+                <p class="text-gray-600 mb-4">社員データ（.xls, .xlsx, .csv形式）をアップロードして一括更新します。</p>
+                <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center mb-4" id="drop-zone">
+                    <input type="file" id="file-input" accept=".xls,.xlsx,.csv" class="hidden" onchange="handleFileSelect(event)">
+                    <div class="mb-4">
+                        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                        </svg>
+                    </div>
+                    <p class="text-lg mb-2">ファイルをドラッグ&ドロップ</p>
+                    <p class="text-sm text-gray-500 mb-4">または</p>
+                    <button onclick="document.getElementById('file-input').click()" class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700">
+                        ファイルを選択
+                    </button>
+                    <p class="text-xs text-gray-500 mt-4">対応形式: .xls, .xlsx, .csv (最大10MB)</p>
+                </div>
+            </div>
+
+            <!-- ファイルB用アップロードエリア -->
+            <div id="upload-area-salary" class="hidden">
+                <p class="text-gray-600 mb-4">賃金情報ファイル（.xls形式）をアップロードして賃金データを更新します。</p>
+                <div class="border-2 border-dashed border-yellow-300 rounded-lg p-8 text-center mb-4 bg-yellow-50" id="drop-zone-salary">
+                    <input type="file" id="file-input-salary" accept=".xls" class="hidden" onchange="handleSalaryFileSelect(event)">
+                    <div class="mb-4">
+                        <svg class="mx-auto h-12 w-12 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <p class="text-lg mb-2 text-yellow-800">賃金ファイルをドラッグ&ドロップ</p>
+                    <p class="text-sm text-gray-500 mb-4">または</p>
+                    <button onclick="document.getElementById('file-input-salary').click()" class="bg-yellow-600 text-white px-6 py-2 rounded-md hover:bg-yellow-700">
+                        ファイルを選択
+                    </button>
+                    <p class="text-xs text-gray-500 mt-4">対応形式: .xls のみ (Excel 97-2003形式)</p>
+                </div>
+                <div class="bg-yellow-100 border border-yellow-400 rounded-lg p-3 text-sm text-yellow-800">
+                    <p class="font-semibold mb-1">⚠️ 注意事項</p>
+                    <ul class="list-disc list-inside space-y-1">
+                        <li>既存の賃金データは新しいデータで置き換えられます</li>
+                        <li>マッピングに登録されていない項目IDはスキップされます</li>
+                        <li>Employeeテーブルに存在しない社員のデータはスキップされます</li>
+                    </ul>
+                </div>
             </div>
 
             <div id="upload-progress" class="hidden mb-4">
@@ -506,6 +569,57 @@
                     </div>
                 </div>
             </div>
+
+            <!-- 賃金データプレビューエリア -->
+            <div id="salary-preview-area" class="hidden">
+                <div class="bg-orange-50 border border-orange-400 rounded-lg p-4 mb-4">
+                    <h4 class="font-bold text-lg mb-2">💰 賃金データプレビュー</h4>
+                    <p class="text-sm text-gray-700 mb-3">以下の賃金データがインポートされます。確認後、「インポート実行」ボタンをクリックしてください。</p>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center mb-4">
+                        <div class="bg-green-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-green-700" id="salary-success-count">0</p>
+                            <p class="text-sm text-green-600">登録予定</p>
+                        </div>
+                        <div class="bg-yellow-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-yellow-700" id="salary-skip-count">0</p>
+                            <p class="text-sm text-yellow-600">スキップ</p>
+                        </div>
+                        <div class="bg-red-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-red-700" id="salary-error-count">0</p>
+                            <p class="text-sm text-red-600">エラー</p>
+                        </div>
+                        <div class="bg-gray-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-gray-700" id="salary-total-count">0</p>
+                            <p class="text-sm text-gray-600">総行数</p>
+                        </div>
+                    </div>
+
+                    <!-- 警告メッセージ -->
+                    <div id="salary-warnings" class="hidden mb-4">
+                        <div class="bg-yellow-100 border border-yellow-400 rounded p-3">
+                            <p class="font-semibold text-yellow-800 mb-2">⚠️ 警告</p>
+                            <ul id="salary-warnings-list" class="list-disc list-inside text-sm text-yellow-700"></ul>
+                        </div>
+                    </div>
+
+                    <!-- エラーメッセージ -->
+                    <div id="salary-errors" class="hidden mb-4">
+                        <div class="bg-red-100 border border-red-400 rounded p-3">
+                            <p class="font-semibold text-red-800 mb-2">エラー詳細</p>
+                            <ul id="salary-errors-list" class="list-disc list-inside text-sm text-red-700 max-h-32 overflow-y-auto"></ul>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4">
+                        <button onclick="executeSalaryImport()" class="flex-1 bg-yellow-600 text-white px-6 py-3 rounded-md hover:bg-yellow-700 font-semibold">
+                            ✅ 賃金データをインポート
+                        </button>
+                        <button onclick="cancelSalaryUpload()" class="flex-1 bg-gray-400 text-white px-6 py-3 rounded-md hover:bg-gray-500">
+                            ❌ キャンセル
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -537,6 +651,44 @@
     <!-- 管理者設定タブ -->
     {% if is_admin %}
     <div id="content-admin" class="tab-content hidden">
+        <!-- 賃金項目マッピング設定（全幅） -->
+        <div class="bg-white p-6 rounded-lg shadow mb-6">
+            <h3 class="text-xl font-bold mb-4">💰 賃金項目マッピング設定</h3>
+            <p class="text-sm text-gray-600 mb-4">ファイルBの項目IDとデータベースカラムのマッピングを管理します。</p>
+
+            <div class="mb-4">
+                <h4 class="font-semibold mb-2">新規マッピング登録</h4>
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-2 mb-4">
+                    <input type="text" id="new-mapping-item-id" placeholder="項目ID (例: 115)" class="px-3 py-2 border border-gray-300 rounded-md">
+                    <input type="text" id="new-mapping-display-name" placeholder="表示名 (例: 基本給)" class="px-3 py-2 border border-gray-300 rounded-md">
+                    <input type="text" id="new-mapping-column-key" placeholder="DBキー (例: base_salary)" class="px-3 py-2 border border-gray-300 rounded-md">
+                    <input type="number" id="new-mapping-sort-order" placeholder="表示順 (例: 1)" class="px-3 py-2 border border-gray-300 rounded-md" value="0">
+                    <button onclick="createSalaryMapping()" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 whitespace-nowrap">
+                        追加
+                    </button>
+                </div>
+            </div>
+
+            <h4 class="font-semibold mb-2">登録済みマッピング</h4>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">項目ID</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">表示名</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">DBキー</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">表示順</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200" id="salary-mappings-tbody">
+                        <!-- JavaScriptで動的に生成 -->
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">※ マッピングを削除すると、そのマッピングに関連する賃金データも削除されます。</p>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <!-- 営業所管理 -->
             <div class="bg-white p-6 rounded-lg shadow">
@@ -943,6 +1095,9 @@ async function searchEmployees(page = 1) {
     // ソート列をバックエンド用に変換
     const mappedSort = mapSortColumn(sortBy, sortOrder);
 
+    // 賃金列が選択されているかチェック
+    const hasSalaryColumns = visibleColumns.some(col => col.startsWith('salary_'));
+
     const params = new URLSearchParams({
         page: currentPage,
         per_page: perPage,
@@ -966,7 +1121,8 @@ async function searchEmployees(page = 1) {
         field_job_title: fieldJobTitle,
         field_mobile_phone: fieldMobilePhone,
         field_address: fieldAddress,
-        field_company_name: fieldCompanyName
+        field_company_name: fieldCompanyName,
+        include_salary: hasSalaryColumns ? 'true' : 'false'
     });
 
     try {
@@ -1046,6 +1202,17 @@ function renderEmployeeTable(employees) {
                     <div class="text-sm font-medium text-gray-900">${emp.employee_name || ''}</div>
                     ${emp.employee_kana ? `<div class="text-sm text-gray-500">${emp.employee_kana}</div>` : ''}
                 `;
+            } else if (col.startsWith('salary_')) {
+                // 賃金列の場合
+                const salaryData = emp.salary_data || {};
+                const amount = salaryData[col];
+                if (amount !== undefined && amount !== null) {
+                    td.textContent = amount.toLocaleString() + '円';
+                    td.className += ' text-right';
+                } else {
+                    td.textContent = '-';
+                    td.className += ' text-gray-400 text-center';
+                }
             } else {
                 td.textContent = emp[col] || '';
             }
@@ -1956,6 +2123,361 @@ async function editEmployeeQuick(employeeNumber) {
 // ページ初期化時に列設定を読み込む
 document.addEventListener('DOMContentLoaded', () => {
     loadColumnSettings();
+    loadSalaryColumnsForSelector();
+});
+
+// ===== 賃金機能関連 =====
+
+// 賃金マッピング情報を保持
+let salaryMappings = [];
+let salarySessionKey = null;
+
+// ファイル種別の切り替え
+function toggleFileType(type) {
+    const employeeArea = document.getElementById('upload-area-employee');
+    const salaryArea = document.getElementById('upload-area-salary');
+    const previewArea = document.getElementById('preview-area');
+    const salaryPreviewArea = document.getElementById('salary-preview-area');
+
+    // プレビューをリセット
+    previewArea.classList.add('hidden');
+    salaryPreviewArea.classList.add('hidden');
+
+    if (type === 'employee') {
+        employeeArea.classList.remove('hidden');
+        salaryArea.classList.add('hidden');
+    } else {
+        employeeArea.classList.add('hidden');
+        salaryArea.classList.remove('hidden');
+    }
+}
+
+// 賃金ファイル選択時の処理
+function handleSalaryFileSelect(event) {
+    const file = event.target.files[0];
+    if (file) {
+        uploadSalaryFile(file);
+    }
+}
+
+// 賃金ファイルのアップロード
+async function uploadSalaryFile(file) {
+    const progressArea = document.getElementById('upload-progress');
+    const progressBar = document.getElementById('progress-bar');
+    const previewArea = document.getElementById('salary-preview-area');
+
+    progressArea.classList.remove('hidden');
+    progressBar.style.width = '30%';
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        progressBar.style.width = '60%';
+
+        const response = await fetch('/tools/pluslist/api/upload-salary', {
+            method: 'POST',
+            body: formData
+        });
+
+        progressBar.style.width = '90%';
+
+        const data = await response.json();
+
+        progressBar.style.width = '100%';
+
+        if (response.ok && data.success) {
+            salarySessionKey = data.session_key;
+
+            // 統計を表示
+            document.getElementById('salary-success-count').textContent = data.stats.success_count;
+            document.getElementById('salary-skip-count').textContent = data.stats.skip_count;
+            document.getElementById('salary-error-count').textContent = data.stats.error_count;
+            document.getElementById('salary-total-count').textContent = data.stats.total_rows;
+
+            // 警告を表示
+            const warningsArea = document.getElementById('salary-warnings');
+            const warningsList = document.getElementById('salary-warnings-list');
+            if (data.warnings && data.warnings.length > 0) {
+                warningsList.innerHTML = data.warnings.map(w => `<li>${w}</li>`).join('');
+                warningsArea.classList.remove('hidden');
+            } else {
+                warningsArea.classList.add('hidden');
+            }
+
+            // エラーを表示
+            const errorsArea = document.getElementById('salary-errors');
+            const errorsList = document.getElementById('salary-errors-list');
+            if (data.errors && data.errors.length > 0) {
+                errorsList.innerHTML = data.errors.map(e => `<li>${e}</li>`).join('');
+                errorsArea.classList.remove('hidden');
+            } else {
+                errorsArea.classList.add('hidden');
+            }
+
+            previewArea.classList.remove('hidden');
+        } else {
+            alert('エラー: ' + (data.error || '不明なエラー'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    } finally {
+        setTimeout(() => {
+            progressArea.classList.add('hidden');
+            progressBar.style.width = '0%';
+        }, 500);
+    }
+}
+
+// 賃金データのインポート実行
+async function executeSalaryImport() {
+    if (!salarySessionKey) {
+        alert('セッションが無効です');
+        return;
+    }
+
+    if (!confirm('賃金データをインポートしますか？\n\n既存の賃金データは新しいデータで置き換えられます。')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/tools/pluslist/api/import-salary', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session_key: salarySessionKey})
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            alert(`賃金データのインポートが完了しました！\n\n成功: ${data.stats.success_count}件\nスキップ: ${data.stats.skip_count}件\nエラー: ${data.stats.error_count}件`);
+            cancelSalaryUpload();
+            searchEmployees(currentPage);
+        } else {
+            alert('エラー: ' + (data.error || '不明なエラー'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// 賃金アップロードのキャンセル
+function cancelSalaryUpload() {
+    salarySessionKey = null;
+    document.getElementById('salary-preview-area').classList.add('hidden');
+    document.getElementById('file-input-salary').value = '';
+}
+
+// 賃金マッピング一覧の読み込み（管理者用）
+async function loadSalaryMappings() {
+    try {
+        const response = await fetch('/tools/pluslist/api/admin/salary-mappings');
+        const mappings = await response.json();
+
+        const tbody = document.getElementById('salary-mappings-tbody');
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+
+        if (mappings.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-3 text-center text-gray-500">マッピングが登録されていません</td></tr>';
+            return;
+        }
+
+        mappings.forEach(mapping => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="px-4 py-3 font-mono text-sm">${mapping.item_id}</td>
+                <td class="px-4 py-3">${mapping.display_name}</td>
+                <td class="px-4 py-3 font-mono text-sm text-gray-600">${mapping.column_key}</td>
+                <td class="px-4 py-3 text-center">${mapping.sort_order}</td>
+                <td class="px-4 py-3">
+                    <button onclick="deleteSalaryMapping('${mapping.item_id}')" class="text-red-600 hover:text-red-800 text-sm">
+                        削除
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+
+// マッピングの新規作成
+async function createSalaryMapping() {
+    const itemId = document.getElementById('new-mapping-item-id').value.trim();
+    const displayName = document.getElementById('new-mapping-display-name').value.trim();
+    const columnKey = document.getElementById('new-mapping-column-key').value.trim();
+    const sortOrder = parseInt(document.getElementById('new-mapping-sort-order').value) || 0;
+
+    if (!itemId || !displayName || !columnKey) {
+        alert('項目ID、表示名、DBキーは必須です');
+        return;
+    }
+
+    try {
+        const response = await fetch('/tools/pluslist/api/admin/salary-mapping', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                item_id: itemId,
+                display_name: displayName,
+                column_key: columnKey,
+                sort_order: sortOrder
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            alert('マッピングを作成しました');
+            document.getElementById('new-mapping-item-id').value = '';
+            document.getElementById('new-mapping-display-name').value = '';
+            document.getElementById('new-mapping-column-key').value = '';
+            document.getElementById('new-mapping-sort-order').value = '0';
+            loadSalaryMappings();
+            loadSalaryColumnsForSelector();
+        } else {
+            alert('エラー: ' + (data.error || '不明なエラー'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// マッピングの削除
+async function deleteSalaryMapping(itemId) {
+    if (!confirm(`項目ID「${itemId}」のマッピングを削除しますか？\n\n関連する賃金データも削除されます。`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/tools/pluslist/api/admin/salary-mapping/${itemId}`, {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            alert('マッピングを削除しました');
+            loadSalaryMappings();
+            loadSalaryColumnsForSelector();
+        } else {
+            alert('エラー: ' + (data.error || '不明なエラー'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// 列選択用の賃金項目を読み込む
+async function loadSalaryColumnsForSelector() {
+    try {
+        const response = await fetch('/tools/pluslist/api/salary-mappings-public');
+        salaryMappings = await response.json();
+
+        const container = document.getElementById('salary-columns-container');
+        const noMappingsMsg = document.getElementById('no-salary-mappings-msg');
+
+        if (!container) return;
+
+        // 既存の賃金列チェックボックスをクリア（メッセージ以外）
+        container.querySelectorAll('label').forEach(el => el.remove());
+
+        if (salaryMappings.length === 0) {
+            noMappingsMsg.classList.remove('hidden');
+            return;
+        }
+
+        noMappingsMsg.classList.add('hidden');
+
+        // 賃金項目をallColumnsに追加
+        salaryMappings.forEach(mapping => {
+            const key = `salary_${mapping.column_key}`;
+            allColumns[key] = mapping.display_name;
+
+            // チェックボックスを作成
+            const label = document.createElement('label');
+            label.className = 'flex items-center text-sm';
+            label.innerHTML = `
+                <input type="checkbox" class="column-toggle mr-2" data-column="${key}">
+                ${mapping.display_name}
+            `;
+            container.appendChild(label);
+        });
+
+        // 保存された設定を反映
+        const saved = localStorage.getItem('pluslist_visible_columns');
+        if (saved) {
+            const savedColumns = JSON.parse(saved);
+            document.querySelectorAll('.column-toggle').forEach(checkbox => {
+                if (checkbox.dataset.column.startsWith('salary_')) {
+                    checkbox.checked = savedColumns.includes(checkbox.dataset.column);
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error loading salary mappings:', error);
+    }
+}
+
+// 管理者タブの初期化を更新
+const originalSwitchTab = switchTab;
+switchTab = function(tabName) {
+    // タブボタンの状態を更新
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.getElementById(`tab-${tabName}`).classList.add('active');
+
+    // コンテンツの表示切り替え
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.add('hidden');
+    });
+    document.getElementById(`content-${tabName}`).classList.remove('hidden');
+
+    // タブごとの初期化処理
+    if (tabName === 'list') {
+        searchEmployees();
+    } else if (tabName === 'history') {
+        loadUploadHistory();
+    } else if (tabName === 'admin') {
+        loadOffices();
+        loadPermissions();
+        loadSalaryMappings();
+    }
+};
+
+// 賃金ファイル用ドラッグ&ドロップ
+document.addEventListener('DOMContentLoaded', () => {
+    const dropZoneSalary = document.getElementById('drop-zone-salary');
+    if (dropZoneSalary) {
+        dropZoneSalary.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZoneSalary.classList.add('border-yellow-500', 'bg-yellow-100');
+        });
+
+        dropZoneSalary.addEventListener('dragleave', () => {
+            dropZoneSalary.classList.remove('border-yellow-500', 'bg-yellow-100');
+        });
+
+        dropZoneSalary.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZoneSalary.classList.remove('border-yellow-500', 'bg-yellow-100');
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                // ファイル種別を賃金に変更
+                document.querySelector('input[name="file-type"][value="salary"]').checked = true;
+                toggleFileType('salary');
+                uploadSalaryFile(file);
+            }
+        });
+    }
 });
 </script>
 {% endblock %}
