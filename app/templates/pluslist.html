@@ -429,6 +429,17 @@
                     <!-- JavaScriptで動的に生成 -->
                     <p class="text-sm text-gray-500 col-span-full" id="no-salary-mappings-msg">マッピングが登録されていません</p>
                 </div>
+                <!-- 合計オプション -->
+                <div class="mt-3 pt-3 border-t border-gray-100 flex flex-wrap items-center gap-4">
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" id="show-salary-total" class="mr-2" checked>
+                        合計を表示
+                    </label>
+                    <label class="flex items-center text-sm">
+                        <input type="checkbox" id="total-visible-only" class="mr-2" checked>
+                        表示されている項目のみで合計
+                    </label>
+                </div>
             </div>
 
             <div class="flex gap-2 mt-4">
@@ -979,6 +990,10 @@ let currentEmployees = []; // 現在表示中の社員データを保存
 // 表示列設定（デフォルト）
 let visibleColumns = ['employee_number', 'employee_name', 'office_name', 'job_title', 'mobile_phone'];
 
+// 合計表示設定
+let showSalaryTotal = true;      // 合計列を表示するか
+let totalVisibleOnly = true;     // 表示項目のみで合計するか（false=全項目で合計）
+
 // 全フィールドの定義（フィールド名: 表示名）
 const allColumns = {
     'employee_number': '社員番号',
@@ -1107,6 +1122,8 @@ async function searchEmployees(page = 1) {
 
     // 賃金列が選択されているかチェック
     const hasSalaryColumns = visibleColumns.some(col => col.startsWith('salary_'));
+    // 賃金データが必要かどうか（表示列があるか、または全項目合計を表示する場合）
+    const needSalaryData = hasSalaryColumns || (showSalaryTotal && !totalVisibleOnly);
 
     const params = new URLSearchParams({
         page: currentPage,
@@ -1132,7 +1149,7 @@ async function searchEmployees(page = 1) {
         field_mobile_phone: fieldMobilePhone,
         field_address: fieldAddress,
         field_company_name: fieldCompanyName,
-        include_salary: hasSalaryColumns ? 'true' : 'false'
+        include_salary: needSalaryData ? 'true' : 'false'
     });
 
     try {
@@ -1179,12 +1196,13 @@ function renderTableHeader() {
         tr.appendChild(th);
     });
 
-    // 賃金列が表示されている場合、合計列を追加
+    // 合計列を追加（条件に応じて）
     const hasSalaryColumns = visibleColumns.some(col => col.startsWith('salary_'));
-    if (hasSalaryColumns) {
+    const shouldShowTotal = showSalaryTotal && (totalVisibleOnly ? hasSalaryColumns : salaryMappings.length > 0);
+    if (shouldShowTotal) {
         const totalTh = document.createElement('th');
         totalTh.className = 'px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider';
-        totalTh.textContent = '合計';
+        totalTh.textContent = totalVisibleOnly ? '合計' : '合計(全項目)';
         tr.appendChild(totalTh);
     }
 
@@ -1210,8 +1228,11 @@ function renderEmployeeTable(employees) {
     const visibleSalaryColumns = visibleColumns.filter(col => col.startsWith('salary_'));
     const hasSalaryColumns = visibleSalaryColumns.length > 0;
 
+    // 合計列を表示するか判定
+    const shouldShowTotal = showSalaryTotal && (totalVisibleOnly ? hasSalaryColumns : salaryMappings.length > 0);
+
     // 列数を計算（詳細 + データ列 + (合計) + 編集）
-    const colspan = 1 + visibleColumns.length + (hasSalaryColumns ? 1 : 0) + 1;
+    const colspan = 1 + visibleColumns.length + (shouldShowTotal ? 1 : 0) + 1;
 
     if (employees.length === 0) {
         tbody.innerHTML = `<tr><td colspan="${colspan}" class="px-4 py-8 text-center text-gray-500">データがありません</td></tr>`;
@@ -1257,8 +1278,8 @@ function renderEmployeeTable(employees) {
             row.appendChild(td);
         });
 
-        // 賃金合計列（表示中の賃金列のみを計算）
-        if (hasSalaryColumns) {
+        // 賃金合計列
+        if (shouldShowTotal) {
             const totalTd = document.createElement('td');
             totalTd.className = 'px-4 py-3 whitespace-nowrap text-sm text-right font-medium';
 
@@ -1266,7 +1287,12 @@ function renderEmployeeTable(employees) {
             let total = 0;
             let hasAnyData = false;
 
-            visibleSalaryColumns.forEach(col => {
+            // 計算対象の列を決定（表示項目のみ or 全項目）
+            const columnsToSum = totalVisibleOnly
+                ? visibleSalaryColumns
+                : salaryMappings.map(m => `salary_${m.column_key}`);
+
+            columnsToSum.forEach(col => {
                 const amount = salaryData[col];
                 if (amount !== undefined && amount !== null) {
                     hasAnyData = true;
@@ -2131,8 +2157,14 @@ function applyColumnSelection() {
         return;
     }
 
+    // 合計表示オプションを取得
+    showSalaryTotal = document.getElementById('show-salary-total')?.checked ?? true;
+    totalVisibleOnly = document.getElementById('total-visible-only')?.checked ?? true;
+
     // 設定をローカルストレージに保存
     localStorage.setItem('pluslist_visible_columns', JSON.stringify(visibleColumns));
+    localStorage.setItem('pluslist_show_salary_total', JSON.stringify(showSalaryTotal));
+    localStorage.setItem('pluslist_total_visible_only', JSON.stringify(totalVisibleOnly));
 
     // テーブルを再描画
     searchEmployees(currentPage);
@@ -2144,14 +2176,24 @@ function applyColumnSelection() {
 // デフォルト列選択に戻す
 function resetColumnSelection() {
     visibleColumns = ['employee_number', 'employee_name', 'office_name', 'job_title', 'mobile_phone'];
+    showSalaryTotal = true;
+    totalVisibleOnly = true;
 
     // チェックボックスをデフォルトに戻す
     document.querySelectorAll('.column-toggle').forEach(checkbox => {
         checkbox.checked = visibleColumns.includes(checkbox.dataset.column);
     });
 
+    // 合計オプションをデフォルトに戻す
+    const showTotalCheckbox = document.getElementById('show-salary-total');
+    const visibleOnlyCheckbox = document.getElementById('total-visible-only');
+    if (showTotalCheckbox) showTotalCheckbox.checked = true;
+    if (visibleOnlyCheckbox) visibleOnlyCheckbox.checked = true;
+
     // 設定をローカルストレージに保存
     localStorage.setItem('pluslist_visible_columns', JSON.stringify(visibleColumns));
+    localStorage.setItem('pluslist_show_salary_total', JSON.stringify(showSalaryTotal));
+    localStorage.setItem('pluslist_total_visible_only', JSON.stringify(totalVisibleOnly));
 
     // テーブルを再描画
     searchEmployees(currentPage);
@@ -2189,6 +2231,22 @@ function loadColumnSettings() {
         document.querySelectorAll('.column-toggle').forEach(checkbox => {
             checkbox.checked = visibleColumns.includes(checkbox.dataset.column);
         });
+    }
+
+    // 合計表示オプションを復元
+    const savedShowTotal = localStorage.getItem('pluslist_show_salary_total');
+    const savedVisibleOnly = localStorage.getItem('pluslist_total_visible_only');
+
+    if (savedShowTotal !== null) {
+        showSalaryTotal = JSON.parse(savedShowTotal);
+        const checkbox = document.getElementById('show-salary-total');
+        if (checkbox) checkbox.checked = showSalaryTotal;
+    }
+
+    if (savedVisibleOnly !== null) {
+        totalVisibleOnly = JSON.parse(savedVisibleOnly);
+        const checkbox = document.getElementById('total-visible-only');
+        if (checkbox) checkbox.checked = totalVisibleOnly;
     }
 }
 
