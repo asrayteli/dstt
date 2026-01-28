@@ -1405,6 +1405,42 @@ async function viewEmployee(employeeNumber) {
 
         if (response.ok) {
             const content = document.getElementById('modal-content');
+
+            // 賃金情報のHTMLを生成
+            let salaryHtml = '';
+            if (emp.salary_data && Object.keys(emp.salary_data).length > 0) {
+                const salaryItems = Object.values(emp.salary_data)
+                    .sort((a, b) => a.item_id.localeCompare(b.item_id));
+                let salaryTotal = 0;
+                let salaryRows = '';
+                for (const item of salaryItems) {
+                    salaryTotal += item.amount;
+                    salaryRows += `<div class="flex justify-between py-1 border-b border-gray-100">
+                        <span>${item.display_name}</span>
+                        <span class="font-mono">${item.amount.toLocaleString()}円</span>
+                    </div>`;
+                }
+                salaryHtml = `
+                    <div class="col-span-2 mt-4 pt-4 border-t border-gray-300">
+                        <h4 class="font-bold text-gray-700 mb-2">賃金情報</h4>
+                        <div class="bg-gray-50 rounded-lg p-3">
+                            ${salaryRows}
+                            <div class="flex justify-between py-2 mt-2 border-t-2 border-gray-300 font-bold">
+                                <span>合計</span>
+                                <span class="font-mono text-blue-600">${salaryTotal.toLocaleString()}円</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                salaryHtml = `
+                    <div class="col-span-2 mt-4 pt-4 border-t border-gray-300">
+                        <h4 class="font-bold text-gray-700 mb-2">賃金情報</h4>
+                        <p class="text-gray-500 text-sm">賃金データがありません</p>
+                    </div>
+                `;
+            }
+
             content.innerHTML = `
                 <div class="grid grid-cols-2 gap-4 text-sm">
                     <div><strong>社員番号:</strong> ${emp.employee_number}</div>
@@ -1412,7 +1448,9 @@ async function viewEmployee(employeeNumber) {
                     <div><strong>カナ:</strong> ${emp.employee_kana || ''}</div>
                     <div><strong>性別:</strong> ${emp.gender || ''}</div>
                     <div><strong>営業所:</strong> ${emp.office_name || ''}</div>
+                    <div><strong>社員区分:</strong> ${emp.employee_type || ''}</div>
                     <div><strong>職種:</strong> ${emp.job_title || ''}</div>
+                    <div><strong>管理担当者:</strong> ${emp.manager_name || ''}</div>
                     <div><strong>生年月日:</strong> ${emp.birth_date || ''}</div>
                     <div><strong>入社日:</strong> ${emp.hire_date || ''}</div>
                     <div><strong>退職日:</strong> ${emp.retirement_date || ''}</div>
@@ -1423,6 +1461,7 @@ async function viewEmployee(employeeNumber) {
                     <div class="col-span-2"><strong>住所2:</strong> ${emp.address2 || ''}</div>
                     <div class="col-span-2"><strong>法人名:</strong> ${emp.company_name || ''}</div>
                     <div class="col-span-2"><strong>現場名:</strong> ${emp.site_name || ''}</div>
+                    ${salaryHtml}
                 </div>
             `;
             document.getElementById('employee-modal').classList.remove('hidden');
@@ -1601,6 +1640,8 @@ function exportData(format) {
     const fieldMobilePhone = document.getElementById('field-mobile-phone')?.value || '';
     const fieldAddress = document.getElementById('field-address')?.value || '';
     const fieldCompanyName = document.getElementById('field-company-name')?.value || '';
+    const fieldManagerName = document.getElementById('field-manager-name')?.value || '';
+    const fieldEmployeeType = document.getElementById('field-employee-type')?.value || '';
 
     // ソート列をバックエンド用に変換
     const mappedSort = mapSortColumn(sortBy, sortOrder);
@@ -1631,6 +1672,8 @@ function exportData(format) {
         field_mobile_phone: fieldMobilePhone,
         field_address: fieldAddress,
         field_company_name: fieldCompanyName,
+        field_manager_name: fieldManagerName,
+        field_employee_type: fieldEmployeeType,
         visible_columns: visibleColumns.join(','),
         show_salary_total: shouldShowTotal ? 'true' : 'false',
         total_visible_only: totalVisibleOnly ? 'true' : 'false'
