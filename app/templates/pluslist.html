@@ -279,6 +279,14 @@
                         <label class="block text-sm font-medium text-gray-700 mb-1">法人名</label>
                         <input type="text" id="field-company-name" placeholder="例: 株式会社" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                     </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">管理担当者</label>
+                        <input type="text" id="field-manager-name" placeholder="例: 山田" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">雇用区分</label>
+                        <input type="text" id="field-employee-type" placeholder="例: 正社員" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
                 </div>
                 <p class="mt-2 text-xs text-gray-500">
                     💡 複数の条件を入力すると、すべての条件に一致するデータのみ表示されます（AND検索）
@@ -1116,6 +1124,8 @@ async function searchEmployees(page = 1) {
     const fieldMobilePhone = document.getElementById('field-mobile-phone')?.value || '';
     const fieldAddress = document.getElementById('field-address')?.value || '';
     const fieldCompanyName = document.getElementById('field-company-name')?.value || '';
+    const fieldManagerName = document.getElementById('field-manager-name')?.value || '';
+    const fieldEmployeeType = document.getElementById('field-employee-type')?.value || '';
 
     // ソート列をバックエンド用に変換
     const mappedSort = mapSortColumn(sortBy, sortOrder);
@@ -1149,6 +1159,8 @@ async function searchEmployees(page = 1) {
         field_mobile_phone: fieldMobilePhone,
         field_address: fieldAddress,
         field_company_name: fieldCompanyName,
+        field_manager_name: fieldManagerName,
+        field_employee_type: fieldEmployeeType,
         include_salary: needSalaryData ? 'true' : 'false'
     });
 
@@ -1948,7 +1960,7 @@ function clearAdvancedSearch() {
     const fieldIds = [
         'field-employee-number', 'field-employee-name', 'field-employee-kana',
         'field-gender', 'field-job-title', 'field-mobile-phone',
-        'field-address', 'field-company-name'
+        'field-address', 'field-company-name', 'field-manager-name', 'field-employee-type'
     ];
     fieldIds.forEach(id => {
         const elem = document.getElementById(id);

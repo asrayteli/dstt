@@ -573,6 +573,8 @@ def get_employees():
     field_mobile_phone = request.args.get('field_mobile_phone', '')
     field_address = request.args.get('field_address', '')
     field_company_name = request.args.get('field_company_name', '')
+    field_manager_name = request.args.get('field_manager_name', '')
+    field_employee_type = request.args.get('field_employee_type', '')
 
     if field_employee_number:
         query = query.filter(Employee.employee_number.like(f"%{field_employee_number}%"))
@@ -593,6 +595,10 @@ def get_employees():
         ))
     if field_company_name:
         query = query.filter(Employee.company_name.like(f"%{field_company_name}%"))
+    if field_manager_name:
+        query = query.filter(Employee.manager_name.like(f"%{field_manager_name}%"))
+    if field_employee_type:
+        query = query.filter(Employee.employee_type.like(f"%{field_employee_type}%"))
 
     # ソート
     if hasattr(Employee, sort_by):
@@ -1056,6 +1062,8 @@ def export_data(format):
     field_mobile_phone = request.args.get('field_mobile_phone', '')
     field_address = request.args.get('field_address', '')
     field_company_name = request.args.get('field_company_name', '')
+    field_manager_name = request.args.get('field_manager_name', '')
+    field_employee_type = request.args.get('field_employee_type', '')
 
     # 表示列の順序（空文字列を除外）
     visible_columns_str = request.args.get('visible_columns', '')
@@ -1140,6 +1148,10 @@ def export_data(format):
         ))
     if field_company_name:
         query = query.filter(Employee.company_name.like(f"%{field_company_name}%"))
+    if field_manager_name:
+        query = query.filter(Employee.manager_name.like(f"%{field_manager_name}%"))
+    if field_employee_type:
+        query = query.filter(Employee.employee_type.like(f"%{field_employee_type}%"))
 
     # ソート
     if hasattr(Employee, sort_by):
