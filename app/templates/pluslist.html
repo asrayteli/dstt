@@ -1593,6 +1593,10 @@ function exportData(format) {
     // ソート列をバックエンド用に変換
     const mappedSort = mapSortColumn(sortBy, sortOrder);
 
+    // 賃金列の判定
+    const hasSalaryColumns = visibleColumns.some(col => col.startsWith('salary_'));
+    const shouldShowTotal = showSalaryTotal && (totalVisibleOnly ? hasSalaryColumns : salaryMappings.length > 0);
+
     const params = new URLSearchParams({
         search: search,
         office: office,
@@ -1615,7 +1619,9 @@ function exportData(format) {
         field_mobile_phone: fieldMobilePhone,
         field_address: fieldAddress,
         field_company_name: fieldCompanyName,
-        visible_columns: visibleColumns.join(',')
+        visible_columns: visibleColumns.join(','),
+        show_salary_total: shouldShowTotal ? 'true' : 'false',
+        total_visible_only: totalVisibleOnly ? 'true' : 'false'
     });
 
     window.location.href = `/tools/pluslist/api/export/${format}?${params}`;

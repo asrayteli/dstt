@@ -1151,6 +1151,10 @@ def export_data(format):
 
     employees = query.all()
 
+    # 合計表示オプション
+    show_salary_total = request.args.get('show_salary_total', 'false') == 'true'
+    total_visible_only = request.args.get('total_visible_only', 'true') == 'true'
+
     # 列名マッピング（日本語）
     column_mapping = {
         'employee_number': '社員番号',
@@ -1182,6 +1186,14 @@ def export_data(format):
         'health_insurance': '健康保険加入区分'
     }
 
+    # 賃金マッピングを取得して列名マッピングに追加
+    salary_mappings = SalaryMapping.query.order_by(SalaryMapping.sort_order).all()
+    salary_mapping_dict = {}  # column_key -> mapping object
+    for mapping in salary_mappings:
+        col_key = f'salary_{mapping.column_key}'
+        column_mapping[col_key] = mapping.display_name
+        salary_mapping_dict[mapping.column_key] = mapping
+
     # 表示列が指定されていない場合はデフォルト
     if not visible_columns:
         visible_columns = [
@@ -1189,14 +1201,41 @@ def export_data(format):
             'birth_date', 'hire_date', 'mobile_phone'
         ]
 
+    # 賃金列の判定
+    visible_salary_columns = [col for col in visible_columns if col.startswith('salary_')]
+    has_salary_columns = len(visible_salary_columns) > 0
+
+    # 賃金データを事前に取得（社員番号をキーにした辞書）
+    salary_data_by_employee = {}
+    if has_salary_columns or (show_salary_total and not total_visible_only):
+        employee_numbers = [emp.employee_number for emp in employees]
+        if employee_numbers:
+            salary_records = EmployeeSalary.query.filter(
+                EmployeeSalary.employee_number.in_(employee_numbers)
+            ).all()
+            for record in salary_records:
+                if record.employee_number not in salary_data_by_employee:
+                    salary_data_by_employee[record.employee_number] = {}
+                # item_id -> column_keyのマッピング
+                mapping = SalaryMapping.query.filter_by(item_id=record.item_id).first()
+                if mapping:
+                    col_key = f'salary_{mapping.column_key}'
+                    salary_data_by_employee[record.employee_number][col_key] = record.amount
+
     # データを表示列の順序で構築
     # 列順序を保持するためにヘッダーリストを作成
     column_headers = [column_mapping.get(col, col) for col in visible_columns]
+
+    # 合計列を追加
+    if show_salary_total:
+        column_headers.append('合計' if total_visible_only else '合計(全項目)')
 
     data = []
     for emp in employees:
         emp_dict = emp.to_dict()
         row = {}
+        emp_salary_data = salary_data_by_employee.get(emp.employee_number, {})
+
         for col in visible_columns:
             jp_col = column_mapping.get(col, col)
 
@@ -1209,8 +1248,36 @@ def export_data(format):
                 row[jp_col] = emp.hire_date.strftime('%Y/%m/%d') if emp.hire_date else ''
             elif col == 'tenure':
                 row[jp_col] = emp.calculate_tenure() or ''
+            elif col.startswith('salary_'):
+                # 賃金列
+                amount = emp_salary_data.get(col)
+                row[jp_col] = amount if amount is not None else ''
             else:
                 row[jp_col] = emp_dict.get(col) or ''
+
+        # 合計計算
+        if show_salary_total:
+            total_header = '合計' if total_visible_only else '合計(全項目)'
+            total = 0
+            has_any_data = False
+
+            # 計算対象の列を決定
+            if total_visible_only:
+                columns_to_sum = visible_salary_columns
+            else:
+                columns_to_sum = [f'salary_{m.column_key}' for m in salary_mappings]
+
+            for col in columns_to_sum:
+                amount = emp_salary_data.get(col)
+                if amount is not None:
+                    has_any_data = True
+                    # membership_fee（社員会費）はマイナスとして扱う
+                    if col == 'salary_membership_fee':
+                        total -= amount
+                    else:
+                        total += amount
+
+            row[total_header] = total if has_any_data else ''
 
         data.append(row)
 
