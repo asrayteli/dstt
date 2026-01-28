@@ -11,7 +11,7 @@ from sqlalchemy import or_, and_
 from io import BytesIO
 import csv
 
-from app.models import db, Employee, Office, UploadHistory, EditHistory
+from app.models import db, Employee, Office, UploadHistory, EditHistory, SalaryMapping, EmployeeSalary, SalaryUploadHistory
 
 pluslist_bp = Blueprint("pluslist", __name__, url_prefix="/tools/pluslist")
 
@@ -605,7 +605,25 @@ def get_employees():
     # ページネーション
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
-    employees = [emp.to_dict() for emp in pagination.items]
+    # 賃金データを含めるかどうか
+    include_salary = request.args.get('include_salary', 'false') == 'true'
+
+    employees = []
+    for emp in pagination.items:
+        emp_dict = emp.to_dict()
+
+        # 賃金データを追加（オプション）
+        if include_salary:
+            salaries = EmployeeSalary.query.filter_by(employee_number=emp.employee_number).all()
+            mappings = {m.item_id: m for m in SalaryMapping.query.all()}
+            salary_data = {}
+            for s in salaries:
+                if s.item_id in mappings:
+                    mapping = mappings[s.item_id]
+                    salary_data[f'salary_{mapping.column_key}'] = s.amount
+            emp_dict['salary_data'] = salary_data
+
+        employees.append(emp_dict)
 
     return jsonify({
         'employees': employees,
@@ -630,7 +648,23 @@ def get_employee(employee_number):
     if not has_office_access(user_id, employee.office_code):
         return jsonify({"error": "アクセス権限がありません"}), 403
 
-    return jsonify(employee.to_dict())
+    emp_dict = employee.to_dict()
+
+    # 賃金データを追加
+    salaries = EmployeeSalary.query.filter_by(employee_number=employee_number).all()
+    mappings = {m.item_id: m for m in SalaryMapping.query.all()}
+    salary_data = {}
+    for s in salaries:
+        if s.item_id in mappings:
+            mapping = mappings[s.item_id]
+            salary_data[f'salary_{mapping.column_key}'] = {
+                'item_id': s.item_id,
+                'display_name': mapping.display_name,
+                'amount': s.amount
+            }
+    emp_dict['salary_data'] = salary_data
+
+    return jsonify(emp_dict)
 
 
 @pluslist_bp.route("/api/upload", methods=["POST"])
@@ -1117,6 +1151,10 @@ def export_data(format):
 
     employees = query.all()
 
+    # 合計表示オプション
+    show_salary_total = request.args.get('show_salary_total', 'false') == 'true'
+    total_visible_only = request.args.get('total_visible_only', 'true') == 'true'
+
     # 列名マッピング（日本語）
     column_mapping = {
         'employee_number': '社員番号',
@@ -1148,6 +1186,14 @@ def export_data(format):
         'health_insurance': '健康保険加入区分'
     }
 
+    # 賃金マッピングを取得して列名マッピングに追加
+    salary_mappings = SalaryMapping.query.order_by(SalaryMapping.sort_order).all()
+    salary_mapping_dict = {}  # column_key -> mapping object
+    for mapping in salary_mappings:
+        col_key = f'salary_{mapping.column_key}'
+        column_mapping[col_key] = mapping.display_name
+        salary_mapping_dict[mapping.column_key] = mapping
+
     # 表示列が指定されていない場合はデフォルト
     if not visible_columns:
         visible_columns = [
@@ -1155,14 +1201,41 @@ def export_data(format):
             'birth_date', 'hire_date', 'mobile_phone'
         ]
 
+    # 賃金列の判定
+    visible_salary_columns = [col for col in visible_columns if col.startswith('salary_')]
+    has_salary_columns = len(visible_salary_columns) > 0
+
+    # 賃金データを事前に取得（社員番号をキーにした辞書）
+    salary_data_by_employee = {}
+    if has_salary_columns or (show_salary_total and not total_visible_only):
+        employee_numbers = [emp.employee_number for emp in employees]
+        if employee_numbers:
+            salary_records = EmployeeSalary.query.filter(
+                EmployeeSalary.employee_number.in_(employee_numbers)
+            ).all()
+            for record in salary_records:
+                if record.employee_number not in salary_data_by_employee:
+                    salary_data_by_employee[record.employee_number] = {}
+                # item_id -> column_keyのマッピング
+                mapping = SalaryMapping.query.filter_by(item_id=record.item_id).first()
+                if mapping:
+                    col_key = f'salary_{mapping.column_key}'
+                    salary_data_by_employee[record.employee_number][col_key] = record.amount
+
     # データを表示列の順序で構築
     # 列順序を保持するためにヘッダーリストを作成
     column_headers = [column_mapping.get(col, col) for col in visible_columns]
+
+    # 合計列を追加
+    if show_salary_total:
+        column_headers.append('合計' if total_visible_only else '合計(全項目)')
 
     data = []
     for emp in employees:
         emp_dict = emp.to_dict()
         row = {}
+        emp_salary_data = salary_data_by_employee.get(emp.employee_number, {})
+
         for col in visible_columns:
             jp_col = column_mapping.get(col, col)
 
@@ -1175,8 +1248,36 @@ def export_data(format):
                 row[jp_col] = emp.hire_date.strftime('%Y/%m/%d') if emp.hire_date else ''
             elif col == 'tenure':
                 row[jp_col] = emp.calculate_tenure() or ''
+            elif col.startswith('salary_'):
+                # 賃金列
+                amount = emp_salary_data.get(col)
+                row[jp_col] = amount if amount is not None else ''
             else:
                 row[jp_col] = emp_dict.get(col) or ''
+
+        # 合計計算
+        if show_salary_total:
+            total_header = '合計' if total_visible_only else '合計(全項目)'
+            total = 0
+            has_any_data = False
+
+            # 計算対象の列を決定
+            if total_visible_only:
+                columns_to_sum = visible_salary_columns
+            else:
+                columns_to_sum = [f'salary_{m.column_key}' for m in salary_mappings]
+
+            for col in columns_to_sum:
+                amount = emp_salary_data.get(col)
+                if amount is not None:
+                    has_any_data = True
+                    # membership_fee（社員会費）はマイナスとして扱う
+                    if col == 'salary_membership_fee':
+                        total -= amount
+                    else:
+                        total += amount
+
+            row[total_header] = total if has_any_data else ''
 
         data.append(row)
 
@@ -1505,3 +1606,537 @@ def search_employee_api():
         'office_name': e.office_name,
         'job_title': e.job_title
     } for e in employees])
+
+
+# ===== 賃金情報機能 =====
+
+def get_salary_mapping_file_path():
+    """マッピング設定ファイルのパスを取得"""
+    return os.path.join(get_data_path(), 'salary_mapping.json')
+
+
+def load_salary_mappings_from_db():
+    """DBからマッピング情報を取得"""
+    mappings = SalaryMapping.query.order_by(SalaryMapping.sort_order).all()
+    return {m.item_id: m for m in mappings}
+
+
+def read_salary_file(file_path, original_filename=None):
+    """
+    賃金情報ファイル（ファイルB）を読み込む
+    .xls形式（Excel 97-2003）のみ対応
+    """
+    if original_filename:
+        file_ext = os.path.splitext(original_filename)[1].lower()
+    else:
+        file_ext = os.path.splitext(file_path)[1].lower()
+
+    if file_ext != '.xls':
+        raise ValueError(f"賃金情報ファイルは.xls形式のみ対応しています（現在: {file_ext}）")
+
+    try:
+        # xlrdで.xlsファイルを読み込み
+        df = pd.read_excel(file_path, engine='xlrd', dtype=str)
+    except Exception as e:
+        raise ValueError(f".xlsファイルの読み込みに失敗しました: {str(e)}")
+
+    # 列名の前後の空白を削除
+    df.columns = df.columns.str.strip()
+
+    return df
+
+
+def parse_salary_row(row, mappings):
+    """
+    賃金データ行をパースする
+    row: DataFrameの1行
+    mappings: {item_id: SalaryMapping} の辞書
+
+    Returns:
+        {
+            'employee_number': 社員番号,
+            'employee_name': 社員名,
+            'salary_items': [{item_id, amount}, ...],
+            'skipped_items': [item_id, ...],  # マッピングにない項目ID
+            'errors': [エラーメッセージ, ...]
+        }
+    """
+    result = {
+        'employee_number': None,
+        'employee_name': None,
+        'salary_items': [],
+        'skipped_items': [],
+        'errors': []
+    }
+
+    # A列: 社員番号、B列: 社員名名称
+    columns = row.index.tolist()
+
+    if len(columns) < 2:
+        result['errors'].append('列数が不足しています')
+        return result
+
+    # 社員番号を取得（A列）
+    emp_number = row.iloc[0]
+    if pd.isna(emp_number) or str(emp_number).strip() == '':
+        result['errors'].append('社員番号が空です')
+        return result
+
+    result['employee_number'] = str(emp_number).strip()
+
+    # 社員名を取得（B列）
+    emp_name = row.iloc[1]
+    result['employee_name'] = str(emp_name).strip() if pd.notna(emp_name) else ''
+
+    # C列以降: 項目ID, 項目名称, 金額 の3列セットで繰り返し
+    col_idx = 2  # C列から開始
+    while col_idx + 2 < len(columns):
+        item_id_val = row.iloc[col_idx]
+        # item_name_val = row.iloc[col_idx + 1]  # 項目名称（使用しない）
+        amount_val = row.iloc[col_idx + 2]
+
+        # 空欄チェック（項目IDが空なら終了）
+        if pd.isna(item_id_val) or str(item_id_val).strip() == '':
+            col_idx += 3
+            continue
+
+        item_id = str(int(float(item_id_val))) if isinstance(item_id_val, (int, float)) else str(item_id_val).strip()
+
+        # マッピング確認
+        if item_id not in mappings:
+            result['skipped_items'].append(item_id)
+            col_idx += 3
+            continue
+
+        # 金額を取得
+        try:
+            if pd.isna(amount_val) or str(amount_val).strip() == '':
+                amount = 0
+            else:
+                amount = int(float(amount_val))
+        except (ValueError, TypeError):
+            result['errors'].append(f'項目ID {item_id} の金額が不正です: {amount_val}')
+            col_idx += 3
+            continue
+
+        result['salary_items'].append({
+            'item_id': item_id,
+            'amount': amount
+        })
+
+        col_idx += 3
+
+    return result
+
+
+@pluslist_bp.route("/api/admin/salary-mappings", methods=["GET"])
+@login_required
+def get_salary_mappings():
+    """賃金項目マッピング一覧を取得（管理者のみ）"""
+    user_id = str(current_user.username)
+
+    if not is_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    mappings = SalaryMapping.query.order_by(SalaryMapping.sort_order).all()
+    return jsonify([m.to_dict() for m in mappings])
+
+
+@pluslist_bp.route("/api/admin/salary-mapping", methods=["POST"])
+@login_required
+def create_salary_mapping():
+    """賃金項目マッピングを新規作成（管理者のみ）"""
+    user_id = str(current_user.username)
+
+    if not is_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    data = request.json
+    item_id = data.get('item_id', '').strip()
+    display_name = data.get('display_name', '').strip()
+    column_key = data.get('column_key', '').strip()
+    sort_order = data.get('sort_order', 0)
+
+    if not item_id or not display_name or not column_key:
+        return jsonify({"error": "項目ID、表示名、DBキーは必須です"}), 400
+
+    # 重複チェック
+    existing_id = SalaryMapping.query.filter_by(item_id=item_id).first()
+    if existing_id:
+        return jsonify({"error": f"項目ID '{item_id}' は既に登録されています"}), 400
+
+    existing_key = SalaryMapping.query.filter_by(column_key=column_key).first()
+    if existing_key:
+        return jsonify({"error": f"DBキー '{column_key}' は既に使用されています"}), 400
+
+    try:
+        mapping = SalaryMapping(
+            item_id=item_id,
+            display_name=display_name,
+            column_key=column_key,
+            sort_order=sort_order
+        )
+        db.session.add(mapping)
+        db.session.commit()
+
+        return jsonify({"success": True, "mapping": mapping.to_dict()})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"作成エラー: {str(e)}"}), 500
+
+
+@pluslist_bp.route("/api/admin/salary-mapping/<item_id>", methods=["PUT"])
+@login_required
+def update_salary_mapping(item_id):
+    """賃金項目マッピングを更新（管理者のみ）"""
+    user_id = str(current_user.username)
+
+    if not is_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    mapping = SalaryMapping.query.filter_by(item_id=item_id).first()
+    if not mapping:
+        return jsonify({"error": "マッピングが見つかりません"}), 404
+
+    data = request.json
+    display_name = data.get('display_name', '').strip()
+    column_key = data.get('column_key', '').strip()
+    sort_order = data.get('sort_order')
+
+    if display_name:
+        mapping.display_name = display_name
+
+    if column_key:
+        # 重複チェック（自分以外）
+        existing = SalaryMapping.query.filter(
+            SalaryMapping.column_key == column_key,
+            SalaryMapping.item_id != item_id
+        ).first()
+        if existing:
+            return jsonify({"error": f"DBキー '{column_key}' は既に使用されています"}), 400
+        mapping.column_key = column_key
+
+    if sort_order is not None:
+        mapping.sort_order = sort_order
+
+    try:
+        db.session.commit()
+        return jsonify({"success": True, "mapping": mapping.to_dict()})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"更新エラー: {str(e)}"}), 500
+
+
+@pluslist_bp.route("/api/admin/salary-mapping/<item_id>", methods=["DELETE"])
+@login_required
+def delete_salary_mapping(item_id):
+    """賃金項目マッピングを削除（管理者のみ）"""
+    user_id = str(current_user.username)
+
+    if not is_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    mapping = SalaryMapping.query.filter_by(item_id=item_id).first()
+    if not mapping:
+        return jsonify({"error": "マッピングが見つかりません"}), 404
+
+    try:
+        # 関連する賃金データも削除
+        EmployeeSalary.query.filter_by(item_id=item_id).delete()
+        db.session.delete(mapping)
+        db.session.commit()
+
+        return jsonify({"success": True})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"削除エラー: {str(e)}"}), 500
+
+
+@pluslist_bp.route("/api/upload-salary", methods=["POST"])
+@login_required
+def upload_salary_file():
+    """賃金情報ファイル（ファイルB）のアップロード＆プレビュー"""
+    user_id = str(current_user.username)
+    user_offices = get_user_offices(user_id)
+
+    if not user_offices:
+        return jsonify({"error": "アクセス権限がありません"}), 403
+
+    # ファイルチェック
+    if 'file' not in request.files:
+        return jsonify({"error": "ファイルが選択されていません"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "ファイルが選択されていません"}), 400
+
+    original_filename = file.filename
+    file_ext = os.path.splitext(original_filename)[1].lower()
+
+    if file_ext != '.xls':
+        return jsonify({"error": "賃金情報ファイルは.xls形式のみ対応しています"}), 400
+
+    try:
+        # マッピング情報を取得
+        mappings = load_salary_mappings_from_db()
+
+        if not mappings:
+            return jsonify({
+                "error": "賃金項目マッピングが設定されていません。管理者設定から設定してください。"
+            }), 400
+
+        # 一時ファイルとして保存
+        filename = secure_filename(file.filename)
+        uploads_path = os.path.join(get_data_path(), 'uploads')
+        os.makedirs(uploads_path, exist_ok=True)
+        temp_path = os.path.join(uploads_path, f"salary_temp_{user_id}_{filename}")
+        file.save(temp_path)
+
+        # ファイル読み込み
+        df = read_salary_file(temp_path, original_filename)
+
+        # ヘッダー行をスキップ（1行目がヘッダー）
+        if len(df) == 0:
+            return jsonify({"error": "データがありません"}), 400
+
+        # 結果集計
+        preview_data = []
+        all_skipped_items = set()
+        errors = []
+        success_count = 0
+        skip_count = 0
+        error_count = 0
+
+        for idx, row in df.iterrows():
+            result = parse_salary_row(row, mappings)
+
+            if result['errors']:
+                errors.extend([f"行{idx+2}: {e}" for e in result['errors']])
+                error_count += 1
+                continue
+
+            if not result['employee_number']:
+                continue
+
+            # スキップされた項目を集計
+            all_skipped_items.update(result['skipped_items'])
+
+            if result['salary_items']:
+                # 社員の存在確認
+                employee = Employee.query.filter_by(
+                    employee_number=result['employee_number'],
+                    is_deleted=False
+                ).first()
+
+                employee_exists = employee is not None
+                has_access = employee_exists and employee.office_code in user_offices
+
+                preview_data.append({
+                    'row_number': idx + 2,
+                    'employee_number': result['employee_number'],
+                    'employee_name': result['employee_name'],
+                    'salary_items': result['salary_items'],
+                    'skipped_items': result['skipped_items'],
+                    'employee_exists': employee_exists,
+                    'has_access': has_access
+                })
+
+                if employee_exists and has_access:
+                    success_count += 1
+                else:
+                    skip_count += 1
+
+        # スキップされた項目IDに警告
+        skipped_warnings = []
+        if all_skipped_items:
+            skipped_warnings.append(
+                f"マッピングにない項目ID（スキップされました）: {', '.join(sorted(all_skipped_items))}"
+            )
+
+        # セッション情報を保存
+        session_key = f"salary_upload_{user_id}_{datetime.now().timestamp()}"
+        session_data = {
+            'file_path': temp_path,
+            'filename': original_filename,
+            'preview_data': preview_data
+        }
+
+        session_file = os.path.join(uploads_path, f"{session_key}.json")
+        with open(session_file, 'w', encoding='utf-8') as f:
+            json.dump(session_data, f, ensure_ascii=False, indent=2)
+
+        return jsonify({
+            "success": True,
+            "session_key": session_key,
+            "preview": preview_data[:50],  # プレビューは最大50件
+            "stats": {
+                "total_rows": len(df),
+                "success_count": success_count,
+                "skip_count": skip_count,
+                "error_count": error_count
+            },
+            "errors": errors[:20],  # エラーは最大20件
+            "warnings": skipped_warnings
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"ファイル処理エラー: {str(e)}"}), 500
+
+
+@pluslist_bp.route("/api/import-salary", methods=["POST"])
+@login_required
+def import_salary_data():
+    """賃金データのインポート実行"""
+    user_id = str(current_user.username)
+    user_offices = get_user_offices(user_id)
+
+    data = request.json
+    session_key = data.get('session_key')
+
+    if not session_key:
+        return jsonify({"error": "セッションキーが必要です"}), 400
+
+    try:
+        # セッション情報を読み込み
+        uploads_path = os.path.join(get_data_path(), 'uploads')
+        session_file = os.path.join(uploads_path, f"{session_key}.json")
+
+        if not os.path.exists(session_file):
+            return jsonify({"error": "セッションが期限切れです"}), 400
+
+        with open(session_file, 'r', encoding='utf-8') as f:
+            session_data = json.load(f)
+
+        preview_data = session_data['preview_data']
+
+        # データベースに反映
+        success_count = 0
+        skip_count = 0
+        errors = []
+
+        for item in preview_data:
+            if not item['employee_exists'] or not item['has_access']:
+                skip_count += 1
+                continue
+
+            employee_number = item['employee_number']
+
+            try:
+                # 既存の賃金データを削除（置き換え）
+                EmployeeSalary.query.filter_by(employee_number=employee_number).delete()
+
+                # 新しい賃金データを登録
+                for salary_item in item['salary_items']:
+                    salary = EmployeeSalary(
+                        employee_number=employee_number,
+                        item_id=salary_item['item_id'],
+                        amount=salary_item['amount'],
+                        uploaded_by=user_id
+                    )
+                    db.session.add(salary)
+
+                success_count += 1
+
+            except Exception as e:
+                errors.append(f"社員番号 {employee_number}: {str(e)}")
+                skip_count += 1
+
+        # アップロード履歴を記録
+        history = SalaryUploadHistory(
+            uploaded_by=user_id,
+            filename=session_data['filename'],
+            success_count=success_count,
+            skip_count=skip_count,
+            error_count=len(errors),
+            total_rows=len(preview_data)
+        )
+        db.session.add(history)
+
+        db.session.commit()
+
+        # 一時ファイルを削除
+        try:
+            os.remove(session_data['file_path'])
+            os.remove(session_file)
+        except:
+            pass
+
+        return jsonify({
+            "success": True,
+            "stats": {
+                "success_count": success_count,
+                "skip_count": skip_count,
+                "error_count": len(errors)
+            },
+            "errors": errors[:10]
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"インポートエラー: {str(e)}"}), 500
+
+
+@pluslist_bp.route("/api/salary-mappings-public", methods=["GET"])
+@login_required
+def get_salary_mappings_public():
+    """賃金項目マッピング一覧を取得（列選択用、全ユーザー可）"""
+    mappings = SalaryMapping.query.order_by(SalaryMapping.sort_order).all()
+    return jsonify([{
+        'item_id': m.item_id,
+        'display_name': m.display_name,
+        'column_key': m.column_key
+    } for m in mappings])
+
+
+@pluslist_bp.route("/api/employee-salaries/<employee_number>", methods=["GET"])
+@login_required
+def get_employee_salaries(employee_number):
+    """特定社員の賃金データを取得"""
+    user_id = str(current_user.username)
+
+    employee = Employee.query.filter_by(employee_number=employee_number).first()
+    if not employee:
+        return jsonify({"error": "社員が見つかりません"}), 404
+
+    if not has_office_access(user_id, employee.office_code):
+        return jsonify({"error": "アクセス権限がありません"}), 403
+
+    salaries = EmployeeSalary.query.filter_by(employee_number=employee_number).all()
+
+    # マッピング情報と結合
+    mappings = {m.item_id: m for m in SalaryMapping.query.all()}
+
+    result = {}
+    for s in salaries:
+        if s.item_id in mappings:
+            mapping = mappings[s.item_id]
+            result[mapping.column_key] = {
+                'item_id': s.item_id,
+                'display_name': mapping.display_name,
+                'amount': s.amount
+            }
+
+    return jsonify(result)
+
+
+@pluslist_bp.route("/api/histories/salary-upload")
+@login_required
+def get_salary_upload_histories():
+    """賃金ファイルアップロード履歴を取得"""
+    histories = SalaryUploadHistory.query.order_by(
+        SalaryUploadHistory.uploaded_at.desc()
+    ).limit(100).all()
+
+    return jsonify([{
+        'id': h.id,
+        'uploaded_by': h.uploaded_by,
+        'uploaded_at': h.uploaded_at.isoformat(),
+        'filename': h.filename,
+        'success_count': h.success_count,
+        'skip_count': h.skip_count,
+        'error_count': h.error_count,
+        'total_rows': h.total_rows
+    } for h in histories])
