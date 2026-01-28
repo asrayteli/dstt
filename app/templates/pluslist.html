@@ -1640,6 +1640,8 @@ function exportData(format) {
     const fieldMobilePhone = document.getElementById('field-mobile-phone')?.value || '';
     const fieldAddress = document.getElementById('field-address')?.value || '';
     const fieldCompanyName = document.getElementById('field-company-name')?.value || '';
+    const fieldManagerName = document.getElementById('field-manager-name')?.value || '';
+    const fieldEmployeeType = document.getElementById('field-employee-type')?.value || '';
 
     // ソート列をバックエンド用に変換
     const mappedSort = mapSortColumn(sortBy, sortOrder);
@@ -1670,6 +1672,8 @@ function exportData(format) {
         field_mobile_phone: fieldMobilePhone,
         field_address: fieldAddress,
         field_company_name: fieldCompanyName,
+        field_manager_name: fieldManagerName,
+        field_employee_type: fieldEmployeeType,
         visible_columns: visibleColumns.join(','),
         show_salary_total: shouldShowTotal ? 'true' : 'false',
         total_visible_only: totalVisibleOnly ? 'true' : 'false'
