@@ -301,7 +301,13 @@
                 <h3 class="font-semibold text-gray-900">表示する列を選択</h3>
                 <button onclick="toggleColumnSelector()" class="text-gray-500 hover:text-gray-700">✕</button>
             </div>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+            <!-- 社員データ用一括選択ボタン -->
+            <div class="flex gap-2 mb-2">
+                <span class="text-sm font-medium text-gray-700">社員データ:</span>
+                <button onclick="bulkSelectEmployeeColumns(true)" class="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200">一括選択</button>
+                <button onclick="bulkSelectEmployeeColumns(false)" class="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200">一括解除</button>
+            </div>
+            <div id="employee-columns-container" class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
                 <label class="flex items-center text-sm">
                     <input type="checkbox" class="column-toggle mr-2" data-column="employee_number" checked>
                     社員番号
@@ -414,7 +420,11 @@
 
             <!-- 賃金項目セクション -->
             <div class="mt-4 pt-4 border-t border-gray-200">
-                <h4 class="font-semibold text-gray-900 mb-2">💰 賃金項目（ファイルBデータ）</h4>
+                <div class="flex items-center gap-4 mb-2">
+                    <h4 class="font-semibold text-gray-900">💰 賃金項目（ファイルBデータ）</h4>
+                    <button onclick="bulkSelectSalaryColumns(true)" class="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200">一括選択</button>
+                    <button onclick="bulkSelectSalaryColumns(false)" class="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200">一括解除</button>
+                </div>
                 <div id="salary-columns-container" class="grid grid-cols-2 md:grid-cols-4 gap-2">
                     <!-- JavaScriptで動的に生成 -->
                     <p class="text-sm text-gray-500 col-span-full" id="no-salary-mappings-msg">マッピングが登録されていません</p>
@@ -1147,6 +1157,12 @@ function renderTableHeader() {
     const thead = document.getElementById('employees-thead');
     const tr = document.createElement('tr');
 
+    // 詳細列を先頭に追加
+    const detailTh = document.createElement('th');
+    detailTh.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
+    detailTh.textContent = '詳細';
+    tr.appendChild(detailTh);
+
     visibleColumns.forEach(col => {
         const th = document.createElement('th');
         th.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
@@ -1163,10 +1179,19 @@ function renderTableHeader() {
         tr.appendChild(th);
     });
 
-    // アクション列を追加
+    // 賃金列が表示されている場合、合計列を追加
+    const hasSalaryColumns = visibleColumns.some(col => col.startsWith('salary_'));
+    if (hasSalaryColumns) {
+        const totalTh = document.createElement('th');
+        totalTh.className = 'px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider';
+        totalTh.textContent = '合計';
+        tr.appendChild(totalTh);
+    }
+
+    // 編集列を最後に追加
     const actionTh = document.createElement('th');
     actionTh.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
-    actionTh.textContent = 'アクション';
+    actionTh.textContent = '編集';
     tr.appendChild(actionTh);
 
     thead.innerHTML = '';
@@ -1181,8 +1206,14 @@ function renderEmployeeTable(employees) {
     const tbody = document.getElementById('employees-tbody');
     tbody.innerHTML = '';
 
+    // 賃金列が表示されているかチェック
+    const visibleSalaryColumns = visibleColumns.filter(col => col.startsWith('salary_'));
+    const hasSalaryColumns = visibleSalaryColumns.length > 0;
+
+    // 列数を計算（詳細 + データ列 + (合計) + 編集）
+    const colspan = 1 + visibleColumns.length + (hasSalaryColumns ? 1 : 0) + 1;
+
     if (employees.length === 0) {
-        const colspan = visibleColumns.length + 1;
         tbody.innerHTML = `<tr><td colspan="${colspan}" class="px-4 py-8 text-center text-gray-500">データがありません</td></tr>`;
         return;
     }
@@ -1190,6 +1221,12 @@ function renderEmployeeTable(employees) {
     employees.forEach(emp => {
         const row = document.createElement('tr');
         row.className = emp.is_deleted ? 'bg-gray-100' : 'hover:bg-gray-50';
+
+        // 詳細ボタンを先頭に追加
+        const detailTd = document.createElement('td');
+        detailTd.className = 'px-4 py-3 whitespace-nowrap text-sm';
+        detailTd.innerHTML = `<button onclick="viewEmployee('${emp.employee_number}')" class="text-blue-600 hover:text-blue-900">詳細</button>`;
+        row.appendChild(detailTd);
 
         // 選択された列のみ表示
         visibleColumns.forEach(col => {
@@ -1220,13 +1257,42 @@ function renderEmployeeTable(employees) {
             row.appendChild(td);
         });
 
-        // アクション列
+        // 賃金合計列（表示中の賃金列のみを計算）
+        if (hasSalaryColumns) {
+            const totalTd = document.createElement('td');
+            totalTd.className = 'px-4 py-3 whitespace-nowrap text-sm text-right font-medium';
+
+            const salaryData = emp.salary_data || {};
+            let total = 0;
+            let hasAnyData = false;
+
+            visibleSalaryColumns.forEach(col => {
+                const amount = salaryData[col];
+                if (amount !== undefined && amount !== null) {
+                    hasAnyData = true;
+                    // membership_fee（社員会費）はマイナスとして扱う
+                    if (col === 'salary_membership_fee') {
+                        total -= amount;
+                    } else {
+                        total += amount;
+                    }
+                }
+            });
+
+            if (hasAnyData) {
+                totalTd.textContent = total.toLocaleString() + '円';
+                totalTd.className += total >= 0 ? ' text-gray-900' : ' text-red-600';
+            } else {
+                totalTd.textContent = '-';
+                totalTd.className += ' text-gray-400 text-center';
+            }
+            row.appendChild(totalTd);
+        }
+
+        // 編集ボタン（最後）
         const actionTd = document.createElement('td');
         actionTd.className = 'px-4 py-3 whitespace-nowrap text-sm';
-        actionTd.innerHTML = `
-            <button onclick="viewEmployee('${emp.employee_number}')" class="text-blue-600 hover:text-blue-900 mr-2">詳細</button>
-            <button onclick="editEmployeeQuick('${emp.employee_number}')" class="text-green-600 hover:text-green-900">編集</button>
-        `;
+        actionTd.innerHTML = `<button onclick="editEmployeeQuick('${emp.employee_number}')" class="text-green-600 hover:text-green-900">編集</button>`;
         row.appendChild(actionTd);
 
         tbody.appendChild(row);
@@ -2092,6 +2158,26 @@ function resetColumnSelection() {
 
     // パネルを閉じる
     toggleColumnSelector();
+}
+
+// 社員データ列の一括選択/解除
+function bulkSelectEmployeeColumns(select) {
+    const container = document.getElementById('employee-columns-container');
+    if (!container) return;
+
+    container.querySelectorAll('.column-toggle').forEach(checkbox => {
+        checkbox.checked = select;
+    });
+}
+
+// 賃金データ列の一括選択/解除
+function bulkSelectSalaryColumns(select) {
+    const container = document.getElementById('salary-columns-container');
+    if (!container) return;
+
+    container.querySelectorAll('.column-toggle').forEach(checkbox => {
+        checkbox.checked = select;
+    });
 }
 
 // ページ読み込み時に保存された列設定を復元
