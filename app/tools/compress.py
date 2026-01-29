@@ -62,11 +62,16 @@ def compress_tool():
     if fmt == "zip":
         if password:
             # パスワード付き ZIP（暗号化あり）
+            # ZIP AES暗号化はファイル名を暗号化しないため、
+            # まず通常ZIPにまとめてから、そのZIPを暗号化ZIPで包む（二重ZIP方式）
+            inner_zip_path = os.path.join(temp_dir, f"{archive_name}_inner.zip")
+            with zipfile.ZipFile(inner_zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as inner_zipf:
+                for file_path, filename in saved_files:
+                    inner_zipf.write(file_path, arcname=filename)
             with pyzipper.AESZipFile(archive_path, 'w', compression=pyzipper.ZIP_DEFLATED) as zipf:
                 zipf.setpassword(password.encode())
                 zipf.setencryption(pyzipper.WZ_AES, nbits=256)
-                for file_path, filename in saved_files:
-                    zipf.write(file_path, arcname=filename)
+                zipf.write(inner_zip_path, arcname=f"{archive_name}.zip")
         else:
             # パスワードなし ZIP（通常圧縮）
             with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
