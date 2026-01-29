@@ -635,11 +635,42 @@ def compress_pdf():
                 logger.error(f"一時ディレクトリの削除に失敗: {e}")
 
 
+def _is_scan_page(page, threshold=0.8):
+    """ページがスキャン画像かどうかを判定する。
+    ページ面積の80%以上を画像が占めている場合にTrueを返す。
+    """
+    try:
+        page_area = abs(page.rect)
+        if page_area == 0:
+            return False
+
+        image_list = page.get_images(full=True)
+        if not image_list:
+            return False
+
+        total_image_area = 0
+        for img in image_list:
+            xref = img[0]
+            try:
+                rects = page.get_image_rects(xref)
+                for rect in rects:
+                    if rect.is_empty or rect.is_infinite:
+                        continue
+                    total_image_area += abs(rect)
+            except Exception:
+                continue
+
+        return (total_image_area / page_area) >= threshold
+    except Exception:
+        return False
+
+
 def compress_pdf_advanced(input_path, output_path, compression_level="medium"):
     """
     PDF圧縮処理（pikepdf + PyMuPDFのハイブリッド）
     Step 1: PyMuPDFで構造最適化（メタデータ削除、ガベージコレクション）
-    Step 2: pikepdfで画像圧縮と追加最適化
+            スキャンページは指定DPIで再レンダリング
+    Step 2: pikepdfで非スキャンページの画像圧縮と追加最適化
     """
     try:
         # 圧縮レベル設定
@@ -652,18 +683,49 @@ def compress_pdf_advanced(input_path, output_path, compression_level="medium"):
 
         settings = compression_settings.get(compression_level, compression_settings["medium"])
 
-        # Step 1: PyMuPDFで構造最適化
+        # Step 1: PyMuPDFで構造最適化 + スキャンページ再レンダリング
         doc = fitz.open(input_path)
 
-        # メタデータ削除
-        doc.set_metadata({})
+        # スキャンページの判定
+        scan_page_indices = set()
+        for page_num in range(len(doc)):
+            if _is_scan_page(doc[page_num]):
+                scan_page_indices.add(page_num)
 
-        # 一時保存（ガベージコレクション、ストリーム圧縮、クリーン）
-        temp_output = output_path + ".tmp"
-        doc.save(temp_output, garbage=4, deflate=True, clean=True)
-        doc.close()
+        if scan_page_indices:
+            logger.info(
+                f"スキャンページ検出: {sorted(p + 1 for p in scan_page_indices)} "
+                f"({len(scan_page_indices)}/{len(doc)}ページ)"
+            )
+            # スキャンページを再レンダリングした新しいドキュメントを作成
+            new_doc = fitz.open()
+            for page_num in range(len(doc)):
+                if page_num in scan_page_indices:
+                    page = doc[page_num]
+                    # 指定DPIでページをラスタライズ
+                    pix = page.get_pixmap(dpi=settings["dpi"], alpha=False)
+                    img_data = pix.tobytes("jpeg", jpg_quality=settings["quality"])
+                    # 元のページと同じサイズで新しいページを作成
+                    new_page = new_doc.new_page(
+                        width=page.rect.width, height=page.rect.height
+                    )
+                    new_page.insert_image(new_page.rect, stream=img_data)
+                else:
+                    new_doc.insert_pdf(doc, from_page=page_num, to_page=page_num)
 
-        # Step 2: pikepdfで画像圧縮と追加最適化
+            new_doc.set_metadata({})
+            temp_output = output_path + ".tmp"
+            new_doc.save(temp_output, garbage=4, deflate=True, clean=True)
+            new_doc.close()
+            doc.close()
+        else:
+            # スキャンページなし - 構造最適化のみ
+            doc.set_metadata({})
+            temp_output = output_path + ".tmp"
+            doc.save(temp_output, garbage=4, deflate=True, clean=True)
+            doc.close()
+
+        # Step 2: pikepdfで非スキャンページの画像圧縮と追加最適化
         try:
             with pikepdf.open(temp_output) as pdf:
                 # 各ページから未使用リソースを削除
@@ -673,8 +735,11 @@ def compress_pdf_advanced(input_path, output_path, compression_level="medium"):
                     except Exception as e:
                         logger.warning(f"未使用リソース削除スキップ: {e}")
 
-                # 画像の再圧縮
-                for page in pdf.pages:
+                # 非スキャンページの画像を再圧縮
+                for page_num, page in enumerate(pdf.pages):
+                    if page_num in scan_page_indices:
+                        continue  # 再レンダリング済みページはスキップ
+
                     try:
                         image_keys = list(page.images.keys())
                     except Exception:
