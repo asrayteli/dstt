@@ -62,8 +62,7 @@ def compress_tool():
     if fmt == "zip":
         if password:
             # パスワード付き ZIP（暗号化あり）
-            mode = pyzipper.ZIP_DEFLATED
-            with pyzipper.AESZipFile(archive_path, 'w', compression=mode, encryption=pyzipper.WZ_AES) as zipf:
+            with pyzipper.AESZipFile(archive_path, 'w', compression=pyzipper.ZIP_DEFLATED) as zipf:
                 zipf.setpassword(password.encode())
                 zipf.setencryption(pyzipper.WZ_AES, nbits=256)
                 for file_path, filename in saved_files:
