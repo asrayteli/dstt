@@ -4,7 +4,7 @@
 <div class="max-w-xl mx-auto mt-10 bg-white rounded-xl shadow p-6">
   <h2 class="text-xl font-bold mb-4">📦 圧縮ファイル生成ツール</h2>
 
-  <form action="/tools/compress" method="POST" enctype="multipart/form-data" id="compressForm">
+  <form action="{{ url_for('compress.compress_tool') }}" method="POST" enctype="multipart/form-data" id="compressForm">
     <div class="mb-4">
       <label class="block mb-1">ファイルを複数選択:</label>
       <input type="file" name="files" multiple class="w-full" id="fileInput">
