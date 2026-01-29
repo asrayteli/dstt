@@ -554,7 +554,6 @@ def split_or_merge_pdf():
 @login_required
 def compress_pdf():
     temp_dir = None
-    cleanup_done = False
     try:
         file = request.files.get("pdf")
         if not file or not file.filename:
@@ -605,18 +604,11 @@ def compress_pdf():
 
             logger.info(f"PDF圧縮完了: {original_size} -> {os.path.getsize(send_path)} bytes ({compression_ratio:.1f}% 削減)")
 
-            @after_this_request
-            def cleanup(response):
-                nonlocal cleanup_done
-                cleanup_done = True
-                try:
-                    if temp_dir and os.path.exists(temp_dir):
-                        shutil.rmtree(temp_dir)
-                except Exception as e:
-                    logger.error(f"一時ディレクトリの削除に失敗: {e}")
-                return response
+            # ファイルをメモリに読み込んでから返す（Windowsでのファイルロック回避）
+            with open(send_path, 'rb') as f:
+                file_data = io.BytesIO(f.read())
 
-            return send_file(send_path, as_attachment=True, download_name="compressed_output.pdf")
+            return send_file(file_data, as_attachment=True, download_name="compressed_output.pdf", mimetype="application/pdf")
 
         except Exception as e:
             logger.error(f"PDF圧縮に失敗しました: {e}")
@@ -628,7 +620,7 @@ def compress_pdf():
         logger.error(traceback.format_exc())
         return jsonify({"error": f"圧縮処理中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        if not cleanup_done and temp_dir and os.path.exists(temp_dir):
+        if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
             except Exception as e:
@@ -782,7 +774,6 @@ def compress_pdf_advanced(input_path, output_path, compression_level="medium"):
                     compress_streams=True,
                     stream_decode_level=pikepdf.StreamDecodeLevel.generalized,
                     object_stream_mode=pikepdf.ObjectStreamMode.generate,
-                    normalize_content=True,
                     linearize=True
                 )
         except Exception as e:
