@@ -608,7 +608,11 @@ def compress_pdf():
             with open(send_path, 'rb') as f:
                 file_data = io.BytesIO(f.read())
 
-            return send_file(file_data, as_attachment=True, download_name="compressed_output.pdf", mimetype="application/pdf")
+            response = send_file(file_data, as_attachment=True, download_name="compressed_output.pdf", mimetype="application/pdf")
+            response.headers['X-Original-Size'] = str(original_size)
+            response.headers['X-Compressed-Size'] = str(os.path.getsize(send_path))
+            response.headers['X-Compression-Ratio'] = f"{compression_ratio:.1f}"
+            return response
 
         except Exception as e:
             logger.error(f"PDF圧縮に失敗しました: {e}")

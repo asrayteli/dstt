@@ -143,7 +143,7 @@
       <h3 class="font-semibold mb-4 text-xl text-gray-700">📉 PDF圧縮</h3>
       <p class="text-gray-600 mb-4">PDFファイルを効率的に圧縮してファイルサイズを削減します。</p>
 
-      <form action="/tools/pdf_power/compress" method="POST" enctype="multipart/form-data">
+      <form id="compressForm" enctype="multipart/form-data">
         <div class="mb-6">
           <label class="block text-sm font-medium text-gray-600 mb-2">PDFファイルを選択</label>
           <input type="file" name="pdf" accept=".pdf" required
@@ -204,10 +204,42 @@
           </div>
         </div>
 
-        <button type="submit" class="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition duration-200 font-medium">
+        <button type="submit" id="compressBtn" class="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition duration-200 font-medium">
           圧縮してダウンロード
         </button>
       </form>
+
+      <!-- 圧縮結果表示 -->
+      <div id="compressResult" class="mt-6 hidden">
+        <div class="bg-white border-2 border-purple-200 rounded-lg p-5">
+          <h4 class="font-semibold text-lg text-purple-700 mb-3">圧縮完了</h4>
+          <div class="grid grid-cols-3 gap-4 text-center">
+            <div>
+              <div class="text-sm text-gray-500">元のサイズ</div>
+              <div id="originalSize" class="text-xl font-bold text-gray-700">-</div>
+            </div>
+            <div>
+              <div class="text-sm text-gray-500">圧縮後サイズ</div>
+              <div id="compressedSize" class="text-xl font-bold text-gray-700">-</div>
+            </div>
+            <div>
+              <div class="text-sm text-gray-500">削減率</div>
+              <div id="compressionRatio" class="text-xl font-bold text-purple-600">-</div>
+            </div>
+          </div>
+          <div class="mt-4 bg-gray-100 rounded-full h-3">
+            <div id="compressionBar" class="bg-purple-500 h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- エラー表示 -->
+      <div id="compressError" class="mt-6 hidden">
+        <div class="bg-red-50 border-2 border-red-200 rounded-lg p-5">
+          <h4 class="font-semibold text-lg text-red-700 mb-1">圧縮に失敗しました</h4>
+          <p id="compressErrorMsg" class="text-red-600 text-sm"></p>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -583,6 +615,75 @@
       });
     }
   });
+
+  // 圧縮フォームのAJAX送信
+  document.getElementById('compressForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const form = e.target;
+    const btn = document.getElementById('compressBtn');
+    const resultDiv = document.getElementById('compressResult');
+    const errorDiv = document.getElementById('compressError');
+
+    // 前回の結果をリセット
+    resultDiv.classList.add('hidden');
+    errorDiv.classList.add('hidden');
+
+    // ボタンを処理中に変更
+    const originalText = btn.textContent;
+    btn.textContent = '圧縮中...';
+    btn.disabled = true;
+    btn.classList.add('opacity-50', 'cursor-not-allowed');
+
+    try {
+      const formData = new FormData(form);
+      const response = await fetch('/tools/pdf_power/compress', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || '圧縮に失敗しました');
+      }
+
+      // ヘッダーから圧縮統計を取得
+      const originalSize = parseInt(response.headers.get('X-Original-Size') || '0');
+      const compressedSize = parseInt(response.headers.get('X-Compressed-Size') || '0');
+      const ratio = parseFloat(response.headers.get('X-Compression-Ratio') || '0');
+
+      // ファイルをダウンロード
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'compressed_output.pdf';
+      a.click();
+      URL.revokeObjectURL(url);
+
+      // 結果を表示
+      document.getElementById('originalSize').textContent = formatFileSize(originalSize);
+      document.getElementById('compressedSize').textContent = formatFileSize(compressedSize);
+      document.getElementById('compressionRatio').textContent = ratio.toFixed(1) + '%';
+      document.getElementById('compressionBar').style.width = Math.min(ratio, 100) + '%';
+      resultDiv.classList.remove('hidden');
+
+    } catch (err) {
+      document.getElementById('compressErrorMsg').textContent = err.message;
+      errorDiv.classList.remove('hidden');
+    } finally {
+      btn.textContent = originalText;
+      btn.disabled = false;
+      btn.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+  });
+
+  function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+  }
 
   // 初期表示
   switchTab('convert');
