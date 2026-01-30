@@ -593,20 +593,26 @@ def compress_pdf():
             if compressed_size == 0:
                 return jsonify({"error": "PDF圧縮に失敗しました"}), 500
 
-            compression_ratio = (1 - compressed_size / original_size) * 100
+            # 圧縮後にサイズが増加した場合は元のファイルを返す
+            if compressed_size >= original_size:
+                logger.info(f"圧縮後のサイズが元のサイズ以上のため、元のファイルを返します: {original_size} -> {compressed_size} bytes")
+                send_path = input_path
+                compression_ratio = 0.0
+            else:
+                send_path = output_path
+                compression_ratio = (1 - compressed_size / original_size) * 100
 
-            logger.info(f"PDF圧縮完了: {original_size} -> {compressed_size} bytes ({compression_ratio:.1f}% 削減)")
+            logger.info(f"PDF圧縮完了: {original_size} -> {os.path.getsize(send_path)} bytes ({compression_ratio:.1f}% 削減)")
 
-            @after_this_request
-            def cleanup(response):
-                try:
-                    if temp_dir and os.path.exists(temp_dir):
-                        shutil.rmtree(temp_dir)
-                except Exception as e:
-                    logger.error(f"一時ディレクトリの削除に失敗: {e}")
-                return response
+            # ファイルをメモリに読み込んでから返す（Windowsでのファイルロック回避）
+            with open(send_path, 'rb') as f:
+                file_data = io.BytesIO(f.read())
 
-            return send_file(output_path, as_attachment=True, download_name="compressed_output.pdf")
+            response = send_file(file_data, as_attachment=True, download_name="compressed_output.pdf", mimetype="application/pdf")
+            response.headers['X-Original-Size'] = str(original_size)
+            response.headers['X-Compressed-Size'] = str(os.path.getsize(send_path))
+            response.headers['X-Compression-Ratio'] = f"{compression_ratio:.1f}"
+            return response
 
         except Exception as e:
             logger.error(f"PDF圧縮に失敗しました: {e}")
@@ -618,13 +624,49 @@ def compress_pdf():
         logger.error(traceback.format_exc())
         return jsonify({"error": f"圧縮処理中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        pass
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.error(f"一時ディレクトリの削除に失敗: {e}")
+
+
+def _is_scan_page(page, threshold=0.8):
+    """ページがスキャン画像かどうかを判定する。
+    ページ面積の80%以上を画像が占めている場合にTrueを返す。
+    """
+    try:
+        page_area = abs(page.rect)
+        if page_area == 0:
+            return False
+
+        image_list = page.get_images(full=True)
+        if not image_list:
+            return False
+
+        total_image_area = 0
+        for img in image_list:
+            xref = img[0]
+            try:
+                rects = page.get_image_rects(xref)
+                for rect in rects:
+                    if rect.is_empty or rect.is_infinite:
+                        continue
+                    total_image_area += abs(rect)
+            except Exception:
+                continue
+
+        return (total_image_area / page_area) >= threshold
+    except Exception:
+        return False
 
 
 def compress_pdf_advanced(input_path, output_path, compression_level="medium"):
     """
-    完全に書き直したPDF圧縮処理（pikepdf + PyMuPDFのハイブリッド）
-    画像を抽出・圧縮してPDFを再構築する方式
+    PDF圧縮処理（pikepdf + PyMuPDFのハイブリッド）
+    Step 1: PyMuPDFで構造最適化（メタデータ削除、ガベージコレクション）
+            スキャンページは指定DPIで再レンダリング
+    Step 2: pikepdfで非スキャンページの画像圧縮と追加最適化
     """
     try:
         # 圧縮レベル設定
@@ -637,77 +679,73 @@ def compress_pdf_advanced(input_path, output_path, compression_level="medium"):
 
         settings = compression_settings.get(compression_level, compression_settings["medium"])
 
-        # Step 1: PyMuPDFで画像を圧縮した新しいPDFを生成
+        # Step 1: PyMuPDFで構造最適化 + スキャンページ再レンダリング
         doc = fitz.open(input_path)
 
+        # スキャンページの判定
+        scan_page_indices = set()
         for page_num in range(len(doc)):
-            page = doc[page_num]
-            image_list = page.get_images(full=True)
+            if _is_scan_page(doc[page_num]):
+                scan_page_indices.add(page_num)
 
-            for img_index, img in enumerate(image_list):
-                try:
-                    xref = img[0]
-                    base_image = doc.extract_image(xref)
-                    image_bytes = base_image["image"]
-                    image_ext = base_image["ext"]
+        if scan_page_indices:
+            logger.info(
+                f"スキャンページ検出: {sorted(p + 1 for p in scan_page_indices)} "
+                f"({len(scan_page_indices)}/{len(doc)}ページ)"
+            )
+            # スキャンページを再レンダリングした新しいドキュメントを作成
+            new_doc = fitz.open()
+            for page_num in range(len(doc)):
+                if page_num in scan_page_indices:
+                    page = doc[page_num]
+                    # 指定DPIでページをラスタライズ
+                    pix = page.get_pixmap(dpi=settings["dpi"], alpha=False)
+                    img_data = pix.tobytes("jpeg", jpg_quality=settings["quality"])
+                    # 元のページと同じサイズで新しいページを作成
+                    new_page = new_doc.new_page(
+                        width=page.rect.width, height=page.rect.height
+                    )
+                    new_page.insert_image(new_page.rect, stream=img_data)
+                else:
+                    new_doc.insert_pdf(doc, from_page=page_num, to_page=page_num)
 
-                    # 画像を圧縮
-                    if image_ext.lower() in ["png", "jpg", "jpeg", "bmp", "tiff"]:
-                        img_obj = Image.open(io.BytesIO(image_bytes))
+            new_doc.set_metadata({})
+            temp_output = output_path + ".tmp"
+            new_doc.save(temp_output, garbage=4, deflate=True, clean=True)
+            new_doc.close()
+            doc.close()
+        else:
+            # スキャンページなし - 構造最適化のみ
+            doc.set_metadata({})
+            temp_output = output_path + ".tmp"
+            doc.save(temp_output, garbage=4, deflate=True, clean=True)
+            doc.close()
 
-                        # サイズ調整
-                        if img_obj.size[0] > settings["max_size"][0] or img_obj.size[1] > settings["max_size"][1]:
-                            img_obj.thumbnail(settings["max_size"], Image.Resampling.LANCZOS)
-
-                        # JPEG形式で圧縮
-                        img_buffer = io.BytesIO()
-                        if img_obj.mode in ("RGBA", "LA", "P"):
-                            # 透明度を持つ画像はRGBに変換
-                            background = Image.new("RGB", img_obj.size, (255, 255, 255))
-                            if img_obj.mode == "P":
-                                img_obj = img_obj.convert("RGBA")
-                            background.paste(img_obj, mask=img_obj.split()[-1] if img_obj.mode == "RGBA" else None)
-                            img_obj = background
-                        elif img_obj.mode != "RGB":
-                            img_obj = img_obj.convert("RGB")
-
-                        img_obj.save(img_buffer, format="JPEG", quality=settings["quality"], optimize=True)
-                        compressed_image_bytes = img_buffer.getvalue()
-
-                        # 圧縮効果が10%以上ある場合のみ置換
-                        if len(compressed_image_bytes) < len(image_bytes) * 0.9:
-                            # PyMuPDFで画像オブジェクトを置換（xrefベース）
-                            # 注: 直接置換は複雑なため、ストリームを更新
-                            try:
-                                # 画像のストリームを更新
-                                doc._deleteObject(xref)
-                            except:
-                                pass
-
-                except Exception as e:
-                    logger.warning(f"画像圧縮をスキップ (xref: {xref}): {e}")
-                    continue
-
-        # メタデータ削除
-        doc.set_metadata({})
-
-        # 一時保存
-        temp_output = output_path + ".tmp"
-        doc.save(temp_output, garbage=4, deflate=True, clean=True)
-        doc.close()
-
-        # Step 2: pikepdfで追加最適化
+        # Step 2: pikepdfで非スキャンページの画像圧縮と追加最適化
         try:
             with pikepdf.open(temp_output) as pdf:
-                # オブジェクトストリームの圧縮
-                pdf.remove_unreferenced_resources()
-
-                # 画像の再圧縮（pikepdfの機能）
+                # 各ページから未使用リソースを削除
                 for page in pdf.pages:
-                    for image_key in page.images.keys():
+                    try:
+                        page.remove_unreferenced_resources()
+                    except Exception as e:
+                        logger.warning(f"未使用リソース削除スキップ: {e}")
+
+                # 非スキャンページの画像を再圧縮
+                for page_num, page in enumerate(pdf.pages):
+                    if page_num in scan_page_indices:
+                        continue  # 再レンダリング済みページはスキップ
+
+                    try:
+                        image_keys = list(page.images.keys())
+                    except Exception:
+                        continue
+
+                    for image_key in image_keys:
                         try:
                             raw_image = page.images[image_key]
-                            pil_image = raw_image.as_pil_image()
+                            pdf_image = pikepdf.PdfImage(raw_image)
+                            pil_image = pdf_image.as_pil_image()
 
                             # 画像圧縮
                             if pil_image.size[0] > settings["max_size"][0] or pil_image.size[1] > settings["max_size"][1]:
@@ -740,11 +778,11 @@ def compress_pdf_advanced(input_path, output_path, compression_level="medium"):
                     compress_streams=True,
                     stream_decode_level=pikepdf.StreamDecodeLevel.generalized,
                     object_stream_mode=pikepdf.ObjectStreamMode.generate,
-                    normalize_content=True,
                     linearize=True
                 )
         except Exception as e:
             logger.warning(f"pikepdf最適化でエラー: {e}")
+            logger.warning(traceback.format_exc())
             # pikepdfが失敗した場合は一時ファイルをコピー
             shutil.copy(temp_output, output_path)
 
