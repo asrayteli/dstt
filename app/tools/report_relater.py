@@ -35,6 +35,50 @@ report_relater_bp = Blueprint(
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# ============================================================
+# Tesseract パス自動検出（Windows対応）
+# ============================================================
+def _configure_tesseract():
+    """Windowsでtesseractのパスを自動検出して設定する"""
+    if not TESSERACT_AVAILABLE:
+        return False
+
+    # まず現在の設定でテスト
+    try:
+        pytesseract.get_tesseract_version()
+        return True
+    except Exception:
+        pass
+
+    # Windows: よくあるインストール先を探索
+    if os.name == 'nt':
+        candidates = [
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+            os.path.expanduser(r"~\AppData\Local\Tesseract-OCR\tesseract.exe"),
+            os.path.expanduser(r"~\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"),
+        ]
+        for path in candidates:
+            if os.path.isfile(path):
+                pytesseract.pytesseract.tesseract_cmd = path
+                logger.info(f"Tesseract検出: {path}")
+                try:
+                    pytesseract.get_tesseract_version()
+                    return True
+                except Exception:
+                    continue
+
+    logger.error(
+        "Tesseractが見つかりません。"
+        "Windowsの場合: https://github.com/UB-Mannheim/tesseract/wiki から"
+        "インストーラーをダウンロードし、日本語言語パックも選択してインストールしてください。"
+    )
+    return False
+
+
+TESSERACT_CONFIGURED = _configure_tesseract()
+
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 PDF_RENDER_DPI = 300  # OCR用レンダリング解像度
 
@@ -134,9 +178,11 @@ def report_relater():
 def upload_and_ocr():
     """勤怠データPDFと日報PDFをアップロードし、OCR処理を行う"""
     if not CV2_AVAILABLE:
-        return jsonify({"error": "OpenCVがインストールされていません"}), 500
+        return jsonify({"error": "OpenCVがインストールされていません。pip install opencv-python-headless を実行してください。"}), 500
     if not TESSERACT_AVAILABLE:
-        return jsonify({"error": "pytesseractがインストールされていません"}), 500
+        return jsonify({"error": "pytesseractがインストールされていません。pip install pytesseract を実行してください。"}), 500
+    if not TESSERACT_CONFIGURED:
+        return jsonify({"error": "Tesseract OCRエンジンが見つかりません。https://github.com/UB-Mannheim/tesseract/wiki からインストールし、日本語言語パック(jpn)も選択してください。インストール後にサーバーを再起動してください。"}), 500
 
     temp_dir = None
     try:
