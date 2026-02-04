@@ -1,0 +1,683 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+  <h1 class="text-2xl font-bold mb-6">日報リレーター</h1>
+  <p class="text-gray-600 mb-6">勤怠データと日報を照合し、入力の整合性を確認します。</p>
+
+  <!-- ステップインジケーター -->
+  <div class="flex items-center mb-8" id="step-indicator">
+    <div id="step1-indicator" class="flex items-center">
+      <div class="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold">1</div>
+      <span class="ml-2 text-sm font-medium text-blue-600">アップロード</span>
+    </div>
+    <div class="flex-1 h-0.5 bg-gray-300 mx-4" id="step-line-1"></div>
+    <div id="step2-indicator" class="flex items-center">
+      <div class="w-8 h-8 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center text-sm font-bold" id="step2-circle">2</div>
+      <span class="ml-2 text-sm font-medium text-gray-400" id="step2-text">OCR確認・修正</span>
+    </div>
+    <div class="flex-1 h-0.5 bg-gray-300 mx-4" id="step-line-2"></div>
+    <div id="step3-indicator" class="flex items-center">
+      <div class="w-8 h-8 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center text-sm font-bold" id="step3-circle">3</div>
+      <span class="ml-2 text-sm font-medium text-gray-400" id="step3-text">照合結果</span>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Step 1: アップロード -->
+  <!-- ============================================================ -->
+  <div id="step1" class="space-y-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- 勤怠データ -->
+      <div class="bg-white rounded-xl shadow p-6">
+        <h2 class="text-lg font-semibold mb-4">勤怠データ PDF</h2>
+        <p class="text-sm text-gray-500 mb-4">勤怠データ確認表のPDFをアップロードしてください（1名分）</p>
+        <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition"
+             id="attendance-drop-zone">
+          <input type="file" id="attendance-file" accept=".pdf" class="hidden">
+          <label for="attendance-file" class="cursor-pointer">
+            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
+            <p class="mt-2 text-sm text-gray-600">クリックまたはドラッグ&ドロップ</p>
+            <p class="text-xs text-gray-400">PDF形式のみ</p>
+          </label>
+          <p id="attendance-filename" class="mt-2 text-sm text-blue-600 hidden"></p>
+        </div>
+      </div>
+
+      <!-- 日報データ -->
+      <div class="bg-white rounded-xl shadow p-6">
+        <h2 class="text-lg font-semibold mb-4">日報 PDF</h2>
+        <p class="text-sm text-gray-500 mb-4">運行管理報告書（日報）のPDFをアップロードしてください（1現場分）</p>
+        <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition"
+             id="report-drop-zone">
+          <input type="file" id="report-file" accept=".pdf" class="hidden">
+          <label for="report-file" class="cursor-pointer">
+            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
+            <p class="mt-2 text-sm text-gray-600">クリックまたはドラッグ&ドロップ</p>
+            <p class="text-xs text-gray-400">PDF形式のみ</p>
+          </label>
+          <p id="report-filename" class="mt-2 text-sm text-blue-600 hidden"></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-center">
+      <button id="upload-btn" onclick="uploadFiles()"
+              class="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled>
+        OCR処理を開始
+      </button>
+    </div>
+  </div>
+
+  <!-- ローディング -->
+  <div id="loading" class="hidden text-center py-12">
+    <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+    <p class="mt-4 text-gray-600" id="loading-text">OCR処理中...</p>
+    <p class="text-sm text-gray-400 mt-2">PDFのページ数によって時間がかかる場合があります</p>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Step 2: OCR結果確認・修正 -->
+  <!-- ============================================================ -->
+  <div id="step2" class="hidden space-y-6">
+    <!-- 勤怠データOCR結果 -->
+    <div class="bg-white rounded-xl shadow p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">勤怠データ OCR結果</h2>
+        <div class="text-sm text-gray-500">
+          社員番号: <span id="att-employee-id" class="font-mono font-bold"></span>
+          <span id="att-employee-name" class="ml-2"></span>
+          <span id="att-period" class="ml-4"></span>
+        </div>
+      </div>
+
+      <!-- ページ画像プレビュー -->
+      <div id="att-images" class="mb-4 flex gap-2 overflow-x-auto pb-2">
+      </div>
+
+      <!-- データテーブル -->
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm border-collapse" id="att-table">
+          <thead>
+            <tr class="bg-gray-100">
+              <th class="border px-2 py-1 text-left">日付</th>
+              <th class="border px-2 py-1 text-left">曜日</th>
+              <th class="border px-2 py-1 text-left">勤務種別</th>
+              <th class="border px-2 py-1 text-left">実績始業</th>
+              <th class="border px-2 py-1 text-left">実績終業</th>
+              <th class="border px-2 py-1 text-left">出庫メーター</th>
+              <th class="border px-2 py-1 text-left">入庫メーター</th>
+              <th class="border px-2 py-1 text-left">走行</th>
+              <th class="border px-2 py-1 text-left">車両番号</th>
+              <th class="border px-2 py-1 text-left">現場名</th>
+              <th class="border px-1 py-1 text-center w-8">削除</th>
+            </tr>
+          </thead>
+          <tbody id="att-tbody">
+          </tbody>
+        </table>
+      </div>
+      <button onclick="addAttendanceRow()" class="mt-2 text-sm text-blue-600 hover:text-blue-800">+ 行を追加</button>
+    </div>
+
+    <!-- 日報OCR結果 -->
+    <div class="bg-white rounded-xl shadow p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">日報 OCR結果</h2>
+        <span class="text-sm text-gray-500" id="report-page-count"></span>
+      </div>
+
+      <!-- ページ画像プレビュー -->
+      <div id="rep-images" class="mb-4 flex gap-2 overflow-x-auto pb-2">
+      </div>
+
+      <!-- データテーブル -->
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm border-collapse" id="rep-table">
+          <thead>
+            <tr class="bg-gray-100">
+              <th class="border px-2 py-1 text-left">ページ</th>
+              <th class="border px-2 py-1 text-left">日付</th>
+              <th class="border px-2 py-1 text-left">社員番号</th>
+              <th class="border px-2 py-1 text-left">始業時刻</th>
+              <th class="border px-2 py-1 text-left">終業時刻</th>
+              <th class="border px-2 py-1 text-left">出庫メーター</th>
+              <th class="border px-2 py-1 text-left">入庫メーター</th>
+              <th class="border px-2 py-1 text-left">粁数</th>
+              <th class="border px-2 py-1 text-left">車両番号(6桁)</th>
+              <th class="border px-1 py-1 text-center w-8">削除</th>
+            </tr>
+          </thead>
+          <tbody id="rep-tbody">
+          </tbody>
+        </table>
+      </div>
+      <button onclick="addReportRow()" class="mt-2 text-sm text-blue-600 hover:text-blue-800">+ 行を追加</button>
+    </div>
+
+    <div class="flex gap-4 justify-center">
+      <button onclick="goToStep(1)" class="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 transition">
+        戻る
+      </button>
+      <button onclick="runComparison()" class="bg-green-600 text-white px-8 py-3 rounded-lg hover:bg-green-700 transition">
+        照合を実行
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Step 3: 照合結果 -->
+  <!-- ============================================================ -->
+  <div id="step3" class="hidden space-y-6">
+    <!-- サマリー -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div class="bg-white rounded-xl shadow p-4 text-center">
+        <div class="text-2xl font-bold" id="stat-total">0</div>
+        <div class="text-sm text-gray-500">全体件数</div>
+      </div>
+      <div class="bg-green-50 border border-green-200 rounded-xl shadow p-4 text-center">
+        <div class="text-2xl font-bold text-green-600" id="stat-match">0</div>
+        <div class="text-sm text-green-600">一致</div>
+      </div>
+      <div class="bg-red-50 border border-red-200 rounded-xl shadow p-4 text-center">
+        <div class="text-2xl font-bold text-red-600" id="stat-mismatch">0</div>
+        <div class="text-sm text-red-600">不一致</div>
+      </div>
+      <div class="bg-yellow-50 border border-yellow-200 rounded-xl shadow p-4 text-center">
+        <div class="text-2xl font-bold text-yellow-600" id="stat-no-report">0</div>
+        <div class="text-sm text-yellow-600">日報なし</div>
+      </div>
+      <div class="bg-blue-50 border border-blue-200 rounded-xl shadow p-4 text-center">
+        <div class="text-2xl font-bold text-blue-600" id="stat-report-only">0</div>
+        <div class="text-sm text-blue-600">日報のみ</div>
+      </div>
+    </div>
+
+    <!-- 結果テーブル -->
+    <div class="bg-white rounded-xl shadow p-6">
+      <h2 class="text-lg font-semibold mb-4">照合結果詳細</h2>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm border-collapse" id="result-table">
+          <thead>
+            <tr class="bg-gray-100">
+              <th class="border px-3 py-2 text-left">日付</th>
+              <th class="border px-3 py-2 text-left">ステータス</th>
+              <th class="border px-3 py-2 text-left">項目</th>
+              <th class="border px-3 py-2 text-left">勤怠データ</th>
+              <th class="border px-3 py-2 text-left">日報</th>
+              <th class="border px-3 py-2 text-center">結果</th>
+            </tr>
+          </thead>
+          <tbody id="result-tbody">
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="flex gap-4 justify-center">
+      <button onclick="goToStep(2)" class="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 transition">
+        修正して再照合
+      </button>
+      <button onclick="downloadCSV()" class="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition">
+        CSV ダウンロード
+      </button>
+      <button onclick="goToStep(1)" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition">
+        新しいデータで開始
+      </button>
+    </div>
+  </div>
+
+  <!-- 画像拡大モーダル -->
+  <div id="image-modal" class="fixed inset-0 bg-black bg-opacity-75 hidden flex items-center justify-center z-50" onclick="closeImageModal()">
+    <div class="max-w-5xl max-h-screen p-4 overflow-auto">
+      <img id="modal-image" class="max-w-full" alt="拡大画像">
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 状態管理
+// ============================================================
+let ocrData = null;          // OCR結果データ
+let comparisonResult = null; // 照合結果データ
+
+// ============================================================
+// ファイルアップロード制御
+// ============================================================
+const attFileInput = document.getElementById('attendance-file');
+const repFileInput = document.getElementById('report-file');
+const uploadBtn = document.getElementById('upload-btn');
+
+attFileInput.addEventListener('change', () => {
+  const name = attFileInput.files[0]?.name || '';
+  const el = document.getElementById('attendance-filename');
+  el.textContent = name;
+  el.classList.toggle('hidden', !name);
+  checkUploadReady();
+});
+
+repFileInput.addEventListener('change', () => {
+  const name = repFileInput.files[0]?.name || '';
+  const el = document.getElementById('report-filename');
+  el.textContent = name;
+  el.classList.toggle('hidden', !name);
+  checkUploadReady();
+});
+
+function checkUploadReady() {
+  uploadBtn.disabled = !(attFileInput.files.length > 0 && repFileInput.files.length > 0);
+}
+
+// ドラッグ&ドロップ
+['attendance-drop-zone', 'report-drop-zone'].forEach(id => {
+  const zone = document.getElementById(id);
+  const input = id === 'attendance-drop-zone' ? attFileInput : repFileInput;
+
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('border-blue-400', 'bg-blue-50'); });
+  zone.addEventListener('dragleave', () => { zone.classList.remove('border-blue-400', 'bg-blue-50'); });
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('border-blue-400', 'bg-blue-50');
+    if (e.dataTransfer.files.length > 0 && e.dataTransfer.files[0].type === 'application/pdf') {
+      const dt = new DataTransfer();
+      dt.items.add(e.dataTransfer.files[0]);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change'));
+    }
+  });
+});
+
+// ============================================================
+// ステップ制御
+// ============================================================
+function goToStep(step) {
+  document.getElementById('step1').classList.toggle('hidden', step !== 1);
+  document.getElementById('step2').classList.toggle('hidden', step !== 2);
+  document.getElementById('step3').classList.toggle('hidden', step !== 3);
+
+  // インジケーター更新
+  const colors = [
+    [step >= 1, 'step1-indicator'],
+    [step >= 2, 'step2-indicator'],
+    [step >= 3, 'step3-indicator'],
+  ];
+
+  for (let s = 1; s <= 3; s++) {
+    const circle = document.getElementById(`step${s}-circle`) || document.querySelector(`#step${s}-indicator > div`);
+    const text = document.getElementById(`step${s}-text`) || document.querySelector(`#step${s}-indicator > span`);
+    if (circle) {
+      circle.className = `w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${s <= step ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-600'}`;
+    }
+    if (text) {
+      text.className = `ml-2 text-sm font-medium ${s <= step ? 'text-blue-600' : 'text-gray-400'}`;
+    }
+  }
+
+  const line1 = document.getElementById('step-line-1');
+  const line2 = document.getElementById('step-line-2');
+  if (line1) line1.className = `flex-1 h-0.5 mx-4 ${step >= 2 ? 'bg-blue-600' : 'bg-gray-300'}`;
+  if (line2) line2.className = `flex-1 h-0.5 mx-4 ${step >= 3 ? 'bg-blue-600' : 'bg-gray-300'}`;
+
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ============================================================
+// アップロード & OCR
+// ============================================================
+async function uploadFiles() {
+  const formData = new FormData();
+  formData.append('attendance_pdf', attFileInput.files[0]);
+  formData.append('report_pdf', repFileInput.files[0]);
+
+  document.getElementById('step1').classList.add('hidden');
+  document.getElementById('loading').classList.remove('hidden');
+
+  try {
+    const response = await fetch('/tools/report_relater/upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'OCR処理に失敗しました');
+    }
+
+    ocrData = data;
+    renderOCRResults(data);
+    document.getElementById('loading').classList.add('hidden');
+    goToStep(2);
+
+  } catch (error) {
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('step1').classList.remove('hidden');
+    alert('エラー: ' + error.message);
+  }
+}
+
+// ============================================================
+// OCR結果の表示
+// ============================================================
+function renderOCRResults(data) {
+  const att = data.attendance;
+  const rep = data.daily_reports;
+
+  // 勤怠データヘッダー情報
+  document.getElementById('att-employee-id').textContent = att.employee_id || '(未検出)';
+  document.getElementById('att-employee-name').textContent = att.employee_name || '';
+  document.getElementById('att-period').textContent = att.period || '';
+
+  // 勤怠ページ画像
+  const attImgContainer = document.getElementById('att-images');
+  attImgContainer.innerHTML = '';
+  (att.page_images || []).forEach((b64, i) => {
+    const img = document.createElement('img');
+    img.src = 'data:image/png;base64,' + b64;
+    img.className = 'h-32 border rounded cursor-pointer hover:opacity-80 flex-shrink-0';
+    img.title = `勤怠データ ページ${i + 1}`;
+    img.onclick = () => showImageModal(img.src);
+    attImgContainer.appendChild(img);
+  });
+
+  // 勤怠データテーブル
+  const attTbody = document.getElementById('att-tbody');
+  attTbody.innerHTML = '';
+  (att.rows || []).forEach((row, i) => {
+    attTbody.appendChild(createAttendanceRow(row, i));
+  });
+
+  // 日報ページ画像
+  const repImgContainer = document.getElementById('rep-images');
+  repImgContainer.innerHTML = '';
+  (rep.page_images || []).forEach((b64, i) => {
+    const img = document.createElement('img');
+    img.src = 'data:image/png;base64,' + b64;
+    img.className = 'h-32 border rounded cursor-pointer hover:opacity-80 flex-shrink-0';
+    img.title = `日報 ページ${i + 1}`;
+    img.onclick = () => showImageModal(img.src);
+    repImgContainer.appendChild(img);
+  });
+
+  document.getElementById('report-page-count').textContent = `${(rep.reports || []).length}ページ検出`;
+
+  // 日報データテーブル
+  const repTbody = document.getElementById('rep-tbody');
+  repTbody.innerHTML = '';
+  (rep.reports || []).forEach((row, i) => {
+    repTbody.appendChild(createReportRow(row, i));
+  });
+}
+
+function createAttendanceRow(row, idx) {
+  const tr = document.createElement('tr');
+  tr.className = 'hover:bg-gray-50';
+  const fields = ['date', 'day_of_week', 'work_type', 'actual_start', 'actual_end', 'meter_out', 'meter_in', 'mileage', 'vehicle_code', 'site_name'];
+  fields.forEach(f => {
+    const td = document.createElement('td');
+    td.className = 'border px-1 py-1';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'w-full px-1 py-0.5 text-sm border-0 bg-transparent focus:bg-yellow-50 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded';
+    input.value = row[f] || '';
+    input.dataset.field = f;
+    input.dataset.idx = idx;
+    input.dataset.type = 'attendance';
+    td.appendChild(input);
+    tr.appendChild(td);
+  });
+  // 削除ボタン
+  const delTd = document.createElement('td');
+  delTd.className = 'border px-1 py-1 text-center';
+  const delBtn = document.createElement('button');
+  delBtn.textContent = 'x';
+  delBtn.className = 'text-red-500 hover:text-red-700 font-bold';
+  delBtn.onclick = () => tr.remove();
+  delTd.appendChild(delBtn);
+  tr.appendChild(delTd);
+  return tr;
+}
+
+function createReportRow(row, idx) {
+  const tr = document.createElement('tr');
+  tr.className = 'hover:bg-gray-50';
+
+  // ページ番号（読み取り専用）
+  const pgTd = document.createElement('td');
+  pgTd.className = 'border px-2 py-1 text-center text-gray-500';
+  pgTd.textContent = row.page_number || (idx + 1);
+  tr.appendChild(pgTd);
+
+  const fields = ['date', 'employee_id', 'start_time', 'end_time', 'meter_out', 'meter_in', 'mileage', 'vehicle_code'];
+  fields.forEach(f => {
+    const td = document.createElement('td');
+    td.className = 'border px-1 py-1';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'w-full px-1 py-0.5 text-sm border-0 bg-transparent focus:bg-yellow-50 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded';
+    input.value = row[f] || '';
+    input.dataset.field = f;
+    input.dataset.idx = idx;
+    input.dataset.type = 'report';
+    td.appendChild(input);
+    tr.appendChild(td);
+  });
+  // 削除ボタン
+  const delTd = document.createElement('td');
+  delTd.className = 'border px-1 py-1 text-center';
+  const delBtn = document.createElement('button');
+  delBtn.textContent = 'x';
+  delBtn.className = 'text-red-500 hover:text-red-700 font-bold';
+  delBtn.onclick = () => tr.remove();
+  delTd.appendChild(delBtn);
+  tr.appendChild(delTd);
+  return tr;
+}
+
+function addAttendanceRow() {
+  const tbody = document.getElementById('att-tbody');
+  const idx = tbody.rows.length;
+  const emptyRow = { date: '', day_of_week: '', work_type: '', actual_start: '', actual_end: '', meter_out: '', meter_in: '', mileage: '', vehicle_code: '', site_name: '' };
+  tbody.appendChild(createAttendanceRow(emptyRow, idx));
+}
+
+function addReportRow() {
+  const tbody = document.getElementById('rep-tbody');
+  const idx = tbody.rows.length;
+  const emptyRow = { page_number: '', date: '', employee_id: '', start_time: '', end_time: '', meter_out: '', meter_in: '', mileage: '', vehicle_code: '' };
+  tbody.appendChild(createReportRow(emptyRow, idx));
+}
+
+// ============================================================
+// テーブルからデータを収集
+// ============================================================
+function collectTableData(tableId, fields) {
+  const rows = [];
+  const tbody = document.getElementById(tableId);
+  for (const tr of tbody.rows) {
+    const row = {};
+    const inputs = tr.querySelectorAll('input');
+    inputs.forEach(input => {
+      if (input.dataset.field) {
+        row[input.dataset.field] = input.value.trim();
+      }
+    });
+    // 空行スキップ
+    if (Object.values(row).some(v => v !== '')) {
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+// ============================================================
+// 照合実行
+// ============================================================
+async function runComparison() {
+  const attendanceRows = collectTableData('att-tbody', []);
+  const reportRows = collectTableData('rep-tbody', []);
+
+  if (attendanceRows.length === 0) {
+    alert('勤怠データが入力されていません。');
+    return;
+  }
+
+  const payload = {
+    attendance: attendanceRows,
+    daily_reports: reportRows,
+    employee_id_attendance: document.getElementById('att-employee-id').textContent,
+  };
+
+  document.getElementById('step2').classList.add('hidden');
+  document.getElementById('loading').classList.remove('hidden');
+  document.getElementById('loading-text').textContent = '照合処理中...';
+
+  try {
+    const response = await fetch('/tools/report_relater/compare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || '照合処理に失敗しました');
+    }
+
+    comparisonResult = data;
+    renderComparisonResults(data);
+    document.getElementById('loading').classList.add('hidden');
+    goToStep(3);
+
+  } catch (error) {
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('step2').classList.remove('hidden');
+    alert('エラー: ' + error.message);
+  }
+}
+
+// ============================================================
+// 照合結果の表示
+// ============================================================
+function renderComparisonResults(data) {
+  // サマリー
+  const total = (data.matched || 0) + (data.mismatched || 0) + (data.no_report || 0) + (data.report_only || 0);
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-match').textContent = data.matched || 0;
+  document.getElementById('stat-mismatch').textContent = data.mismatched || 0;
+  document.getElementById('stat-no-report').textContent = data.no_report || 0;
+  document.getElementById('stat-report-only').textContent = data.report_only || 0;
+
+  // 結果テーブル
+  const tbody = document.getElementById('result-tbody');
+  tbody.innerHTML = '';
+
+  (data.comparison || []).forEach(item => {
+    const statusColors = {
+      'match': 'bg-green-50',
+      'mismatch': 'bg-red-50',
+      'no_report': 'bg-yellow-50',
+      'report_only': 'bg-blue-50',
+    };
+    const statusBadges = {
+      'match': '<span class="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">一致</span>',
+      'mismatch': '<span class="px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">不一致</span>',
+      'no_report': '<span class="px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">日報なし</span>',
+      'report_only': '<span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">日報のみ</span>',
+    };
+
+    const bgColor = statusColors[item.status] || '';
+
+    if (item.details && item.details.length > 0) {
+      item.details.forEach((detail, di) => {
+        const tr = document.createElement('tr');
+        tr.className = `${bgColor} ${!detail.match ? 'font-semibold' : ''}`;
+        tr.innerHTML = `
+          <td class="border px-3 py-2">${di === 0 ? item.date : ''}</td>
+          <td class="border px-3 py-2">${di === 0 ? (statusBadges[item.status] || item.status_label) : ''}</td>
+          <td class="border px-3 py-2">${detail.field_label}</td>
+          <td class="border px-3 py-2 font-mono">${escapeHtml(detail.attendance_value || '-')}</td>
+          <td class="border px-3 py-2 font-mono">${escapeHtml(detail.report_value || '-')}</td>
+          <td class="border px-3 py-2 text-center">${detail.match
+            ? '<span class="text-green-600 font-bold">O</span>'
+            : '<span class="text-red-600 font-bold">X</span>'}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    } else {
+      const tr = document.createElement('tr');
+      tr.className = bgColor;
+      tr.innerHTML = `
+        <td class="border px-3 py-2">${item.date}</td>
+        <td class="border px-3 py-2">${statusBadges[item.status] || item.status_label}</td>
+        <td class="border px-3 py-2 text-gray-400" colspan="4">${item.status === 'no_report' ? '対応する日報がありません（別現場の可能性）' : '対応する勤怠データがありません'}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  });
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ============================================================
+// CSVダウンロード
+// ============================================================
+async function downloadCSV() {
+  if (!comparisonResult) {
+    alert('照合結果がありません');
+    return;
+  }
+
+  try {
+    const response = await fetch('/tools/report_relater/download_csv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comparison: comparisonResult.comparison }),
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'CSVダウンロードに失敗しました');
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'comparison_result.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+
+  } catch (error) {
+    alert('エラー: ' + error.message);
+  }
+}
+
+// ============================================================
+// 画像モーダル
+// ============================================================
+function showImageModal(src) {
+  document.getElementById('modal-image').src = src;
+  document.getElementById('image-modal').classList.remove('hidden');
+}
+
+function closeImageModal() {
+  document.getElementById('image-modal').classList.add('hidden');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeImageModal();
+});
+</script>
+{% endblock %}

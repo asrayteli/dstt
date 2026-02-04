@@ -83,5 +83,8 @@ def create_app():
     from .tools.pluslist import pluslist_bp
     app.register_blueprint(pluslist_bp)
 
+    from .tools.report_relater import report_relater_bp
+    app.register_blueprint(report_relater_bp)
+
     return app
 
