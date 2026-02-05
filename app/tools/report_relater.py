@@ -42,38 +42,48 @@ logger = logging.getLogger(__name__)
 def _configure_tesseract():
     """Windowsでtesseractのパスを自動検出して設定する"""
     if not TESSERACT_AVAILABLE:
+        logger.error("pytesseractモジュールがインストールされていません")
         return False
 
-    # まず現在の設定でテスト
-    try:
-        pytesseract.get_tesseract_version()
-        return True
-    except Exception:
-        pass
-
     # Windows: よくあるインストール先を探索
+    candidates = [
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    ]
+
+    # ユーザーディレクトリも追加
     if os.name == 'nt':
-        candidates = [
-            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        candidates.extend([
             os.path.expanduser(r"~\AppData\Local\Tesseract-OCR\tesseract.exe"),
             os.path.expanduser(r"~\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"),
-        ]
-        for path in candidates:
-            if os.path.isfile(path):
-                pytesseract.pytesseract.tesseract_cmd = path
-                logger.info(f"Tesseract検出: {path}")
-                try:
-                    pytesseract.get_tesseract_version()
-                    return True
-                except Exception:
-                    continue
+        ])
 
+    # PATHからも探す
+    import shutil
+    path_tesseract = shutil.which("tesseract")
+    if path_tesseract:
+        candidates.insert(0, path_tesseract)
+
+    # 候補を順番に試す
+    for path in candidates:
+        if path and os.path.isfile(path):
+            try:
+                # 明示的にパスを設定
+                pytesseract.pytesseract.tesseract_cmd = path
+                version = pytesseract.get_tesseract_version()
+                logger.info(f"Tesseract検出成功: {path} (version: {version})")
+                return True
+            except Exception as e:
+                logger.warning(f"Tesseract候補 {path} は使用不可: {e}")
+                continue
+
+    # どの候補も見つからなかった
     logger.error(
         "Tesseractが見つかりません。"
         "Windowsの場合: https://github.com/UB-Mannheim/tesseract/wiki から"
         "インストーラーをダウンロードし、日本語言語パックも選択してインストールしてください。"
     )
+    logger.error(f"検索したパス: {candidates}")
     return False
 
 
