@@ -105,9 +105,15 @@
 
               <!-- 画像コンテナ -->
               <div id="attendanceImageContainer"
-                   class="hidden mt-4 relative bg-gray-900 rounded-xl overflow-hidden">
+                   class="hidden mt-4 relative bg-gray-900 rounded-xl overflow-hidden cursor-pointer group"
+                   onclick="openAttendancePopup()">
                 <img id="attendanceImage" src="" class="w-full">
                 <div id="attendanceOverlay" class="absolute inset-0 pointer-events-none"></div>
+                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition flex items-center justify-center opacity-0 group-hover:opacity-100">
+                  <span class="bg-white text-gray-800 px-4 py-2 rounded-lg font-medium shadow-lg">
+                    クリックして領域を編集
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -194,9 +200,15 @@
 
               <!-- 画像コンテナ -->
               <div id="dailyReportImageContainer"
-                   class="hidden mt-4 relative bg-gray-900 rounded-xl overflow-hidden">
+                   class="hidden mt-4 relative bg-gray-900 rounded-xl overflow-hidden cursor-pointer group"
+                   onclick="openDailyReportPopup()">
                 <img id="dailyReportImage" src="" class="w-full">
                 <div id="dailyReportOverlay" class="absolute inset-0 pointer-events-none"></div>
+                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition flex items-center justify-center opacity-0 group-hover:opacity-100">
+                  <span class="bg-white text-gray-800 px-4 py-2 rounded-lg font-medium shadow-lg">
+                    クリックして領域を編集
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -291,16 +303,105 @@
   </div>
 </div>
 
-<!-- フィールド編集モーダル -->
-<div id="fieldModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+<!-- 勤怠データ プレビューポップアップ (中央表示) -->
+<div id="attendancePopup" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+  <div class="bg-white rounded-xl shadow-2xl max-w-4xl max-h-[90vh] mx-4 flex flex-col">
+    <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-xl flex justify-between items-center">
+      <h3 class="font-semibold text-lg">勤怠データ - ヘッダー領域を指定</h3>
+      <button onclick="closeAttendancePopup()" class="text-white/80 hover:text-white">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div class="p-4 bg-blue-50 text-blue-800 text-sm">
+      画像上でドラッグしてヘッダー領域を指定してください
+    </div>
+    <div class="flex-1 overflow-auto p-4">
+      <div id="attendancePopupImageContainer" class="relative inline-block cursor-crosshair">
+        <img id="attendancePopupImage" src="" class="max-w-full">
+        <div id="attendancePopupOverlay" class="absolute inset-0"></div>
+        <div id="attendanceDragRect" class="hidden absolute border-2 border-red-500 bg-red-500/20 pointer-events-none"></div>
+      </div>
+    </div>
+    <div class="bg-gray-50 px-6 py-4 rounded-b-xl flex justify-between items-center">
+      <div class="text-sm text-gray-600">
+        現在の領域: <span id="attendanceRegionInfo">X: 0, Y: 0, 幅: 1, 高さ: 0.15</span>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="closeAttendancePopup()"
+                class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition">
+          キャンセル
+        </button>
+        <button onclick="applyAttendanceRegion()"
+                class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition font-medium">
+          適用
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 日報 プレビューポップアップ (左寄り表示) -->
+<div id="dailyReportPopup" class="hidden fixed inset-0 bg-black/70 z-50">
+  <div class="flex h-full">
+    <!-- 左側: プレビュー画像 -->
+    <div class="flex-1 flex flex-col bg-white m-4 mr-2 rounded-xl shadow-2xl max-w-3xl">
+      <div class="bg-gradient-to-r from-green-600 to-green-700 text-white px-6 py-4 rounded-t-xl flex justify-between items-center">
+        <h3 class="font-semibold text-lg">日報 - フィールド領域を指定</h3>
+        <button onclick="closeDailyReportPopup()" class="text-white/80 hover:text-white">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div id="dailyReportPopupHint" class="p-4 bg-green-50 text-green-800 text-sm">
+        右側のフィールドをクリックしてから、画像上でドラッグして領域を指定
+      </div>
+      <div class="flex-1 overflow-auto p-4">
+        <div id="dailyReportPopupImageContainer" class="relative inline-block cursor-crosshair">
+          <img id="dailyReportPopupImage" src="" class="max-w-full">
+          <div id="dailyReportPopupOverlay" class="absolute inset-0 pointer-events-none"></div>
+          <div id="dailyReportDragRect" class="hidden absolute border-2 border-red-500 bg-red-500/20 pointer-events-none"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右側: フィールド一覧 -->
+    <div class="w-80 flex flex-col bg-white m-4 ml-2 rounded-xl shadow-2xl">
+      <div class="bg-gradient-to-r from-red-500 to-red-600 text-white px-6 py-4 rounded-t-xl">
+        <h3 class="font-semibold text-lg">フィールド一覧</h3>
+        <p class="text-sm text-white/80 mt-1">クリックして選択後、画像上でドラッグ</p>
+      </div>
+      <div id="popupFieldList" class="flex-1 overflow-y-auto divide-y divide-gray-100">
+        <!-- フィールド一覧がここに入る -->
+      </div>
+      <div class="p-4 border-t">
+        <button onclick="addFieldFromPopup()"
+                class="w-full bg-blue-100 text-blue-700 py-2 rounded-lg hover:bg-blue-200 transition text-sm font-medium">
+          + 新しいフィールドを追加
+        </button>
+      </div>
+      <div class="bg-gray-50 px-4 py-3 rounded-b-xl">
+        <button onclick="closeDailyReportPopup()"
+                class="w-full bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition font-medium">
+          完了
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- フィールド追加モーダル -->
+<div id="addFieldModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
   <div class="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
     <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-xl">
-      <h3 class="font-semibold text-lg">フィールド編集</h3>
+      <h3 class="font-semibold text-lg">新しいフィールドを追加</h3>
     </div>
     <div class="p-6 space-y-4">
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">フィールドタイプ</label>
-        <select id="fieldName" class="w-full border border-gray-300 rounded-lg px-4 py-2">
+        <select id="newFieldName" class="w-full border border-gray-300 rounded-lg px-4 py-2">
           <option value="employee_id">社員番号</option>
           <option value="date">日付</option>
           <option value="vehicle_code">車両番号</option>
@@ -313,38 +414,19 @@
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">ラベル（表示名）</label>
-        <input type="text" id="fieldLabel" class="w-full border border-gray-300 rounded-lg px-4 py-2"
+        <input type="text" id="newFieldLabel" class="w-full border border-gray-300 rounded-lg px-4 py-2"
                placeholder="例: 社員番号">
       </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-2">領域 (X, Y, 幅, 高さ)</label>
-        <div class="grid grid-cols-4 gap-2">
-          <input type="number" id="field_x" step="0.01" min="0" max="1" placeholder="X"
-                 class="border border-gray-300 rounded px-3 py-2 text-sm">
-          <input type="number" id="field_y" step="0.01" min="0" max="1" placeholder="Y"
-                 class="border border-gray-300 rounded px-3 py-2 text-sm">
-          <input type="number" id="field_w" step="0.01" min="0" max="1" placeholder="幅"
-                 class="border border-gray-300 rounded px-3 py-2 text-sm">
-          <input type="number" id="field_h" step="0.01" min="0" max="1" placeholder="高さ"
-                 class="border border-gray-300 rounded px-3 py-2 text-sm">
-        </div>
-      </div>
     </div>
-    <div class="bg-gray-50 px-6 py-4 rounded-b-xl flex justify-between">
-      <button id="deleteFieldBtn" onclick="deleteField()"
-              class="hidden text-red-600 hover:text-red-800 font-medium">
-        削除
+    <div class="bg-gray-50 px-6 py-4 rounded-b-xl flex justify-end gap-3">
+      <button onclick="closeAddFieldModal()"
+              class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition">
+        キャンセル
       </button>
-      <div class="flex gap-3 ml-auto">
-        <button onclick="closeFieldModal()"
-                class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition">
-          キャンセル
-        </button>
-        <button onclick="saveField()"
-                class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition font-medium">
-          保存
-        </button>
-      </div>
+      <button onclick="confirmAddField()"
+              class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition font-medium">
+        追加して領域指定へ
+      </button>
     </div>
   </div>
 </div>
@@ -366,6 +448,23 @@
     white-space: nowrap;
     border-radius: 4px;
   }
+  #attendancePopupImageContainer,
+  #dailyReportPopupImageContainer {
+    user-select: none;
+  }
+  #attendancePopupImageContainer img,
+  #dailyReportPopupImageContainer img {
+    pointer-events: none;
+  }
+  .drag-active {
+    cursor: crosshair !important;
+  }
+  .field-selected #dailyReportPopupImageContainer {
+    cursor: crosshair;
+  }
+  .no-field-selected #dailyReportPopupImageContainer {
+    cursor: not-allowed;
+  }
 </style>
 
 <script>
@@ -375,10 +474,19 @@ let currentTab = 'attendance';
 let dailyReportFields = [];
 let editingFieldIndex = -1;
 
+// ドラッグ用変数
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let currentDragType = null; // 'attendance' or 'daily_report'
+let selectedFieldIndex = -1; // 日報ポップアップで選択中のフィールド
+let tempAttendanceRegion = [0, 0, 1, 0.15]; // 勤怠データ用一時保存領域
+
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
   loadPresets();
   setupDropZones();
+  setupDragHandlers();
 });
 
 // ドロップゾーン設定
@@ -404,6 +512,306 @@ function setupDropZones() {
       }
     });
   });
+}
+
+// ドラッグハンドラー設定
+function setupDragHandlers() {
+  // 勤怠データポップアップ
+  const attContainer = document.getElementById('attendancePopupImageContainer');
+  attContainer.addEventListener('mousedown', (e) => startDrag(e, 'attendance'));
+  attContainer.addEventListener('mousemove', (e) => onDrag(e, 'attendance'));
+  attContainer.addEventListener('mouseup', (e) => endDrag(e, 'attendance'));
+  attContainer.addEventListener('mouseleave', (e) => endDrag(e, 'attendance'));
+
+  // 日報ポップアップ
+  const drContainer = document.getElementById('dailyReportPopupImageContainer');
+  drContainer.addEventListener('mousedown', (e) => startDrag(e, 'daily_report'));
+  drContainer.addEventListener('mousemove', (e) => onDrag(e, 'daily_report'));
+  drContainer.addEventListener('mouseup', (e) => endDrag(e, 'daily_report'));
+  drContainer.addEventListener('mouseleave', (e) => endDrag(e, 'daily_report'));
+}
+
+function startDrag(e, type) {
+  if (type === 'daily_report' && selectedFieldIndex < 0) {
+    return; // 日報の場合、フィールドが選択されていないとドラッグ不可
+  }
+
+  const container = e.currentTarget;
+  const rect = container.getBoundingClientRect();
+
+  isDragging = true;
+  currentDragType = type;
+  dragStartX = (e.clientX - rect.left) / rect.width;
+  dragStartY = (e.clientY - rect.top) / rect.height;
+
+  const dragRect = document.getElementById(type === 'attendance' ? 'attendanceDragRect' : 'dailyReportDragRect');
+  dragRect.classList.remove('hidden');
+  dragRect.style.left = (dragStartX * 100) + '%';
+  dragRect.style.top = (dragStartY * 100) + '%';
+  dragRect.style.width = '0%';
+  dragRect.style.height = '0%';
+}
+
+function onDrag(e, type) {
+  if (!isDragging || currentDragType !== type) return;
+
+  const container = e.currentTarget;
+  const rect = container.getBoundingClientRect();
+
+  let currentX = (e.clientX - rect.left) / rect.width;
+  let currentY = (e.clientY - rect.top) / rect.height;
+
+  // 範囲制限
+  currentX = Math.max(0, Math.min(1, currentX));
+  currentY = Math.max(0, Math.min(1, currentY));
+
+  const x = Math.min(dragStartX, currentX);
+  const y = Math.min(dragStartY, currentY);
+  const w = Math.abs(currentX - dragStartX);
+  const h = Math.abs(currentY - dragStartY);
+
+  const dragRect = document.getElementById(type === 'attendance' ? 'attendanceDragRect' : 'dailyReportDragRect');
+  dragRect.style.left = (x * 100) + '%';
+  dragRect.style.top = (y * 100) + '%';
+  dragRect.style.width = (w * 100) + '%';
+  dragRect.style.height = (h * 100) + '%';
+
+  // 領域情報を更新
+  if (type === 'attendance') {
+    tempAttendanceRegion = [x, y, w, h];
+    document.getElementById('attendanceRegionInfo').textContent =
+      `X: ${x.toFixed(2)}, Y: ${y.toFixed(2)}, 幅: ${w.toFixed(2)}, 高さ: ${h.toFixed(2)}`;
+  }
+}
+
+function endDrag(e, type) {
+  if (!isDragging || currentDragType !== type) return;
+
+  const container = document.getElementById(type === 'attendance' ? 'attendancePopupImageContainer' : 'dailyReportPopupImageContainer');
+  const rect = container.getBoundingClientRect();
+
+  let currentX = (e.clientX - rect.left) / rect.width;
+  let currentY = (e.clientY - rect.top) / rect.height;
+
+  currentX = Math.max(0, Math.min(1, currentX));
+  currentY = Math.max(0, Math.min(1, currentY));
+
+  const x = Math.min(dragStartX, currentX);
+  const y = Math.min(dragStartY, currentY);
+  const w = Math.abs(currentX - dragStartX);
+  const h = Math.abs(currentY - dragStartY);
+
+  isDragging = false;
+
+  // 最小サイズチェック
+  if (w < 0.01 || h < 0.01) {
+    const dragRect = document.getElementById(type === 'attendance' ? 'attendanceDragRect' : 'dailyReportDragRect');
+    dragRect.classList.add('hidden');
+    return;
+  }
+
+  if (type === 'attendance') {
+    tempAttendanceRegion = [x, y, w, h];
+    updateAttendancePopupOverlay();
+  } else if (type === 'daily_report' && selectedFieldIndex >= 0) {
+    // フィールドの領域を更新
+    dailyReportFields[selectedFieldIndex].region = [x, y, w, h];
+    updateDailyReportPopupOverlay();
+    renderPopupFieldList();
+  }
+
+  const dragRect = document.getElementById(type === 'attendance' ? 'attendanceDragRect' : 'dailyReportDragRect');
+  dragRect.classList.add('hidden');
+}
+
+// 勤怠データポップアップ
+function openAttendancePopup() {
+  const srcImg = document.getElementById('attendanceImage');
+  if (!srcImg.src) return;
+
+  // 現在の値を読み込み
+  tempAttendanceRegion = [
+    parseFloat(document.getElementById('att_header_x').value) || 0,
+    parseFloat(document.getElementById('att_header_y').value) || 0,
+    parseFloat(document.getElementById('att_header_w').value) || 1,
+    parseFloat(document.getElementById('att_header_h').value) || 0.15
+  ];
+
+  document.getElementById('attendancePopupImage').src = srcImg.src;
+  document.getElementById('attendancePopup').classList.remove('hidden');
+
+  updateAttendancePopupOverlay();
+  document.getElementById('attendanceRegionInfo').textContent =
+    `X: ${tempAttendanceRegion[0].toFixed(2)}, Y: ${tempAttendanceRegion[1].toFixed(2)}, 幅: ${tempAttendanceRegion[2].toFixed(2)}, 高さ: ${tempAttendanceRegion[3].toFixed(2)}`;
+}
+
+function closeAttendancePopup() {
+  document.getElementById('attendancePopup').classList.add('hidden');
+}
+
+function updateAttendancePopupOverlay() {
+  const overlay = document.getElementById('attendancePopupOverlay');
+  overlay.innerHTML = '';
+
+  const [x, y, w, h] = tempAttendanceRegion;
+  addRegionRect(overlay, x, y, w, h, 'Header', '#ef4444');
+}
+
+function applyAttendanceRegion() {
+  document.getElementById('att_header_x').value = tempAttendanceRegion[0].toFixed(2);
+  document.getElementById('att_header_y').value = tempAttendanceRegion[1].toFixed(2);
+  document.getElementById('att_header_w').value = tempAttendanceRegion[2].toFixed(2);
+  document.getElementById('att_header_h').value = tempAttendanceRegion[3].toFixed(2);
+
+  updateAttendancePreview();
+  closeAttendancePopup();
+}
+
+// 日報ポップアップ
+function openDailyReportPopup() {
+  const srcImg = document.getElementById('dailyReportImage');
+  if (!srcImg.src) return;
+
+  selectedFieldIndex = -1;
+  document.getElementById('dailyReportPopupImage').src = srcImg.src;
+  document.getElementById('dailyReportPopup').classList.remove('hidden');
+
+  renderPopupFieldList();
+  updateDailyReportPopupOverlay();
+  updateDailyReportPopupHint();
+}
+
+function closeDailyReportPopup() {
+  document.getElementById('dailyReportPopup').classList.add('hidden');
+  selectedFieldIndex = -1;
+
+  // メインのフィールドリストとプレビューを更新
+  renderFieldList();
+  updateDailyReportPreview();
+
+  // 入力フィールドも更新
+  if (dailyReportFields.length > 0) {
+    const mainRegion = [
+      parseFloat(document.getElementById('dr_main_x').value),
+      parseFloat(document.getElementById('dr_main_y').value),
+      parseFloat(document.getElementById('dr_main_w').value),
+      parseFloat(document.getElementById('dr_main_h').value)
+    ];
+  }
+}
+
+function updateDailyReportPopupHint() {
+  const hint = document.getElementById('dailyReportPopupHint');
+  const popup = document.getElementById('dailyReportPopup');
+
+  if (selectedFieldIndex >= 0) {
+    const field = dailyReportFields[selectedFieldIndex];
+    hint.className = 'p-4 bg-red-50 text-red-800 text-sm font-medium';
+    hint.innerHTML = `<strong>${escapeHtml(field.label || field.name)}</strong> の領域を画像上でドラッグして指定してください`;
+    popup.classList.remove('no-field-selected');
+    popup.classList.add('field-selected');
+  } else {
+    hint.className = 'p-4 bg-green-50 text-green-800 text-sm';
+    hint.textContent = '右側のフィールドをクリックしてから、画像上でドラッグして領域を指定';
+    popup.classList.remove('field-selected');
+    popup.classList.add('no-field-selected');
+  }
+}
+
+function renderPopupFieldList() {
+  const container = document.getElementById('popupFieldList');
+  if (dailyReportFields.length === 0) {
+    container.innerHTML = '<div class="p-4 text-center text-gray-400 text-sm">フィールドがありません</div>';
+    return;
+  }
+
+  container.innerHTML = dailyReportFields.map((field, index) => `
+    <div class="p-3 flex justify-between items-center cursor-pointer transition ${selectedFieldIndex === index ? 'bg-red-100 border-l-4 border-red-500' : 'hover:bg-gray-100'}"
+         onclick="selectFieldForDrag(${index})">
+      <div class="flex-1">
+        <span class="font-medium text-gray-800">${escapeHtml(field.label || field.name)}</span>
+        <div class="text-xs text-gray-400 mt-1">
+          ${field.region ? `X:${field.region[0].toFixed(2)} Y:${field.region[1].toFixed(2)} W:${field.region[2].toFixed(2)} H:${field.region[3].toFixed(2)}` : '未設定'}
+        </div>
+      </div>
+      <button onclick="event.stopPropagation(); removeFieldFromPopup(${index})" class="text-red-400 hover:text-red-600 p-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+        </svg>
+      </button>
+    </div>
+  `).join('');
+}
+
+function selectFieldForDrag(index) {
+  selectedFieldIndex = index;
+  renderPopupFieldList();
+  updateDailyReportPopupOverlay();
+  updateDailyReportPopupHint();
+}
+
+function removeFieldFromPopup(index) {
+  if (confirm('このフィールドを削除しますか？')) {
+    dailyReportFields.splice(index, 1);
+    if (selectedFieldIndex === index) {
+      selectedFieldIndex = -1;
+    } else if (selectedFieldIndex > index) {
+      selectedFieldIndex--;
+    }
+    renderPopupFieldList();
+    updateDailyReportPopupOverlay();
+    updateDailyReportPopupHint();
+  }
+}
+
+function updateDailyReportPopupOverlay() {
+  const overlay = document.getElementById('dailyReportPopupOverlay');
+  overlay.innerHTML = '';
+
+  // メイン領域（緑）
+  const mx = parseFloat(document.getElementById('dr_main_x').value) || 0.75;
+  const my = parseFloat(document.getElementById('dr_main_y').value) || 0;
+  const mw = parseFloat(document.getElementById('dr_main_w').value) || 0.25;
+  const mh = parseFloat(document.getElementById('dr_main_h').value) || 1;
+  addRegionRect(overlay, mx, my, mw, mh, 'Main Region', '#22c55e');
+
+  // フィールド領域
+  dailyReportFields.forEach((field, index) => {
+    if (field.region) {
+      const color = selectedFieldIndex === index ? '#ef4444' : '#3b82f6';
+      addRegionRect(overlay, field.region[0], field.region[1], field.region[2], field.region[3],
+                   field.label || field.name, color);
+    }
+  });
+}
+
+function addFieldFromPopup() {
+  document.getElementById('addFieldModal').classList.remove('hidden');
+  document.getElementById('newFieldName').value = 'employee_id';
+  document.getElementById('newFieldLabel').value = '';
+}
+
+function closeAddFieldModal() {
+  document.getElementById('addFieldModal').classList.add('hidden');
+}
+
+function confirmAddField() {
+  const nameSelect = document.getElementById('newFieldName');
+  const label = document.getElementById('newFieldLabel').value || nameSelect.options[nameSelect.selectedIndex].text;
+
+  const newField = {
+    name: nameSelect.value,
+    label: label,
+    region: [0.8, 0.4, 0.15, 0.05] // デフォルト領域
+  };
+
+  dailyReportFields.push(newField);
+  selectedFieldIndex = dailyReportFields.length - 1;
+
+  closeAddFieldModal();
+  renderPopupFieldList();
+  updateDailyReportPopupOverlay();
+  updateDailyReportPopupHint();
 }
 
 // プリセット一覧読み込み
@@ -682,68 +1090,36 @@ function renderFieldList() {
 
 // フィールド追加
 function addField() {
-  editingFieldIndex = -1;
-  document.getElementById('fieldName').value = 'employee_id';
-  document.getElementById('fieldLabel').value = '';
-  document.getElementById('field_x').value = 0.8;
-  document.getElementById('field_y').value = 0.4;
-  document.getElementById('field_w').value = 0.2;
-  document.getElementById('field_h').value = 0.05;
-  document.getElementById('deleteFieldBtn').classList.add('hidden');
-  document.getElementById('fieldModal').classList.remove('hidden');
+  // 画像が読み込まれていればポップアップを開く
+  const srcImg = document.getElementById('dailyReportImage');
+  if (srcImg.src && srcImg.src !== window.location.href) {
+    openDailyReportPopup();
+    setTimeout(() => addFieldFromPopup(), 100);
+  } else {
+    // 画像がない場合はシンプルに追加
+    const newField = {
+      name: 'employee_id',
+      label: '社員番号',
+      region: [0.8, 0.4, 0.15, 0.05]
+    };
+    dailyReportFields.push(newField);
+    renderFieldList();
+    updateDailyReportPreview();
+  }
 }
 
 // フィールド編集
 function editField(index) {
-  editingFieldIndex = index;
-  const field = dailyReportFields[index];
-
-  document.getElementById('fieldName').value = field.name;
-  document.getElementById('fieldLabel').value = field.label || '';
-  document.getElementById('field_x').value = field.region ? field.region[0] : 0;
-  document.getElementById('field_y').value = field.region ? field.region[1] : 0;
-  document.getElementById('field_w').value = field.region ? field.region[2] : 0.1;
-  document.getElementById('field_h').value = field.region ? field.region[3] : 0.05;
-  document.getElementById('deleteFieldBtn').classList.remove('hidden');
-  document.getElementById('fieldModal').classList.remove('hidden');
-}
-
-function closeFieldModal() {
-  document.getElementById('fieldModal').classList.add('hidden');
-}
-
-// フィールド保存
-function saveField() {
-  const fieldNameSelect = document.getElementById('fieldName');
-  const field = {
-    name: fieldNameSelect.value,
-    label: document.getElementById('fieldLabel').value || fieldNameSelect.options[fieldNameSelect.selectedIndex].text,
-    region: [
-      parseFloat(document.getElementById('field_x').value),
-      parseFloat(document.getElementById('field_y').value),
-      parseFloat(document.getElementById('field_w').value),
-      parseFloat(document.getElementById('field_h').value)
-    ]
-  };
-
-  if (editingFieldIndex >= 0) {
-    dailyReportFields[editingFieldIndex] = field;
+  // 画像が読み込まれていればポップアップを開いてそのフィールドを選択
+  const srcImg = document.getElementById('dailyReportImage');
+  if (srcImg.src && srcImg.src !== window.location.href) {
+    selectedFieldIndex = index;
+    openDailyReportPopup();
+    setTimeout(() => {
+      selectFieldForDrag(index);
+    }, 100);
   } else {
-    dailyReportFields.push(field);
-  }
-
-  closeFieldModal();
-  renderFieldList();
-  updateDailyReportPreview();
-}
-
-// フィールド削除
-function deleteField() {
-  if (editingFieldIndex >= 0) {
-    dailyReportFields.splice(editingFieldIndex, 1);
-    closeFieldModal();
-    renderFieldList();
-    updateDailyReportPreview();
+    alert('先にPDFをアップロードしてください');
   }
 }
 
