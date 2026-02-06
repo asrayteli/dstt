@@ -293,11 +293,35 @@ def process_attendance_pdf(pdf_path):
             pil_img = Image.open(io.BytesIO(img_data))
             cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
-            # サムネイル
-            thumb = pil_img.copy()
-            thumb.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
+            h, w = cv_img.shape[:2]
+
+            # OCR領域を収集
+            ocr_regions = []
+
+            # 全ページ領域（緑の細い枠で表示）
+            ocr_regions.append({
+                "rect": (5, 5, w - 10, h - 10),
+                "label": "Full Page OCR",
+                "color": (0, 255, 0)  # 緑
+            })
+
+            # 1ページ目はヘッダー領域も表示
+            if page_num == 0:
+                header_h = int(h * 0.15)
+                ocr_regions.append({
+                    "rect": (0, 0, w, header_h),
+                    "label": "Header (15%)",
+                    "color": (0, 0, 255)  # 赤
+                })
+
+            # 赤枠を描画
+            annotated = draw_ocr_regions_attendance(cv_img, ocr_regions)
+
+            # 赤枠付き画像をサムネイルとして保存
+            annotated_pil = Image.fromarray(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB))
+            annotated_pil.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
             buf = io.BytesIO()
-            thumb.save(buf, format="PNG")
+            annotated_pil.save(buf, format="PNG")
             result["page_images"].append(base64.b64encode(buf.getvalue()).decode("utf-8"))
 
             # 全ページOCR（数字と基本記号のみ）
@@ -327,6 +351,33 @@ def process_attendance_pdf(pdf_path):
         logger.error(traceback.format_exc())
 
     return result
+
+
+def draw_ocr_regions_attendance(cv_img, regions):
+    """勤怠データのOCR対象領域を描画"""
+    annotated = cv_img.copy()
+
+    for region in regions:
+        x, y, w, h = region["rect"]
+        label = region.get("label", "")
+        color = region.get("color", (0, 0, 255))  # デフォルト赤
+        thickness = 3
+
+        # 矩形を描画
+        cv2.rectangle(annotated, (x, y), (x + w, y + h), color, thickness)
+
+        # ラベルを描画（背景付き）
+        if label:
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.8
+            (text_w, text_h), _ = cv2.getTextSize(label, font, font_scale, 2)
+
+            # ラベル背景
+            cv2.rectangle(annotated, (x, y - text_h - 10), (x + text_w + 4, y), color, -1)
+            # ラベルテキスト
+            cv2.putText(annotated, label, (x + 2, y - 5), font, font_scale, (255, 255, 255), 2)
+
+    return annotated
 
 
 def extract_header_info(binary_img):
@@ -447,17 +498,20 @@ def process_daily_report_pdf(pdf_path):
             pil_img = Image.open(io.BytesIO(img_data))
             cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
-            # サムネイル
-            thumb = pil_img.copy()
-            thumb.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
-            buf = io.BytesIO()
-            thumb.save(buf, format="PNG")
-            result["page_images"].append(base64.b64encode(buf.getvalue()).decode("utf-8"))
-
-            # 日報ページを処理
-            report_data = process_daily_report_page(cv_img, page_num)
+            # 日報ページを処理（OCR領域情報も取得）
+            report_data, ocr_regions = process_daily_report_page(cv_img, page_num)
             report_data["page_number"] = page_num + 1
             result["reports"].append(report_data)
+
+            # OCR領域を赤枠で描画
+            annotated_img = draw_ocr_regions(cv_img, ocr_regions)
+
+            # 赤枠付き画像をサムネイルとして保存
+            annotated_pil = Image.fromarray(cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB))
+            annotated_pil.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            annotated_pil.save(buf, format="PNG")
+            result["page_images"].append(base64.b64encode(buf.getvalue()).decode("utf-8"))
 
         doc.close()
 
@@ -468,8 +522,35 @@ def process_daily_report_pdf(pdf_path):
     return result
 
 
+def draw_ocr_regions(cv_img, regions):
+    """OCR対象領域を赤枠で描画"""
+    annotated = cv_img.copy()
+
+    for region in regions:
+        x, y, w, h = region["rect"]
+        label = region.get("label", "")
+        color = (0, 0, 255)  # 赤 (BGR)
+        thickness = 3
+
+        # 矩形を描画
+        cv2.rectangle(annotated, (x, y), (x + w, y + h), color, thickness)
+
+        # ラベルを描画（背景付き）
+        if label:
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.6
+            (text_w, text_h), _ = cv2.getTextSize(label, font, font_scale, 1)
+
+            # ラベル背景
+            cv2.rectangle(annotated, (x, y - text_h - 10), (x + text_w + 4, y), (0, 0, 255), -1)
+            # ラベルテキスト
+            cv2.putText(annotated, label, (x + 2, y - 5), font, font_scale, (255, 255, 255), 1)
+
+    return annotated
+
+
 def process_daily_report_page(cv_img, page_num):
-    """日報1ページを処理"""
+    """日報1ページを処理。フィールド値とOCR領域情報を返す"""
     fields = {
         "date": "",
         "employee_id": "",
@@ -480,6 +561,7 @@ def process_daily_report_page(cv_img, page_num):
         "mileage": "",
         "vehicle_code": "",
     }
+    ocr_regions = []
 
     try:
         h, w = cv_img.shape[:2]
@@ -490,7 +572,14 @@ def process_daily_report_page(cv_img, page_num):
             h, w = cv_img.shape[:2]
 
         # 右側25%だけを処理（数字フィールドが集中）
-        right_region = cv_img[:, int(w * 0.75):]
+        right_x = int(w * 0.75)
+        right_region = cv_img[:, right_x:]
+
+        # 右側領域を赤枠で表示
+        ocr_regions.append({
+            "rect": (right_x, 0, w - right_x, h),
+            "label": "Right 25%"
+        })
 
         # グレースケール・二値化
         gray = cv2.cvtColor(right_region, cv2.COLOR_BGR2GRAY)
@@ -508,13 +597,14 @@ def process_daily_report_page(cv_img, page_num):
         fields = extract_daily_report_fields(text)
 
         # 各フィールドを個別領域からも試す（より正確に）
-        fields = extract_fields_by_region(cv_img, fields)
+        fields, field_regions = extract_fields_by_region(cv_img, fields)
+        ocr_regions.extend(field_regions)
 
     except Exception as e:
         logger.error(f"日報ページ処理エラー (ページ{page_num + 1}): {e}")
         logger.error(traceback.format_exc())
 
-    return fields
+    return fields, ocr_regions
 
 
 def extract_daily_report_fields(text):
@@ -582,8 +672,9 @@ def extract_daily_report_fields(text):
 
 
 def extract_fields_by_region(cv_img, fields):
-    """定義された領域から各フィールドを抽出"""
+    """定義された領域から各フィールドを抽出。フィールド値とOCR領域情報を返す"""
     h, w = cv_img.shape[:2]
+    ocr_regions = []
 
     for field_name, field_def in DAILY_REPORT_FIELDS.items():
         try:
@@ -601,6 +692,12 @@ def extract_fields_by_region(cv_img, fields):
 
             if region_w <= 10 or region_h <= 10:
                 continue
+
+            # OCR領域情報を記録
+            ocr_regions.append({
+                "rect": (x, y, region_w, region_h),
+                "label": field_def.get("label", field_name)
+            })
 
             region = cv_img[y:y + region_h, x:x + region_w]
 
@@ -655,7 +752,7 @@ def extract_fields_by_region(cv_img, fields):
         except Exception as e:
             logger.warning(f"フィールド {field_name} 抽出エラー: {e}")
 
-    return fields
+    return fields, ocr_regions
 
 
 # ============================================================
