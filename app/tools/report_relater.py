@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, request, jsonify, send_file
-from flask_login import login_required
+from flask_login import login_required, current_user
 import os
 import tempfile
 import shutil
@@ -9,6 +9,8 @@ import io
 import base64
 import csv
 import re
+import json
+from datetime import datetime
 
 import fitz  # PyMuPDF
 import numpy as np
@@ -79,9 +81,68 @@ TESSERACT_CONFIGURED = _configure_tesseract()
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 PDF_RENDER_DPI = 300
 
+# ============================================================
+# プリセット管理
+# ============================================================
+PRESETS_FILE = os.path.join(os.path.dirname(__file__), "report_relater_presets.json")
+
+
+def load_presets():
+    """プリセットをファイルから読み込む"""
+    if os.path.exists(PRESETS_FILE):
+        try:
+            with open(PRESETS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"プリセット読み込みエラー: {e}")
+    return {"presets": []}
+
+
+def save_presets(data):
+    """プリセットをファイルに保存"""
+    try:
+        with open(PRESETS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"プリセット保存エラー: {e}")
+        return False
+
+
+def get_preset_by_id(preset_id):
+    """IDでプリセットを取得"""
+    data = load_presets()
+    for preset in data.get("presets", []):
+        if preset.get("id") == preset_id:
+            return preset
+    return None
+
+
+def get_default_fields():
+    """デフォルトのフィールド定義を返す"""
+    return {
+        "attendance": {
+            "header_region": [0, 0, 1.0, 0.15],
+            "fields": []
+        },
+        "daily_report": {
+            "main_region": [0.75, 0, 0.25, 1.0],
+            "fields": [
+                {"name": "employee_id", "label": "社員番号", "region": [0.80, 0.00, 0.20, 0.06]},
+                {"name": "date", "label": "日付", "region": [0.80, 0.05, 0.20, 0.06]},
+                {"name": "vehicle_code", "label": "車両番号", "region": [0.80, 0.10, 0.20, 0.05]},
+                {"name": "start_time", "label": "始業時刻", "region": [0.88, 0.17, 0.12, 0.05]},
+                {"name": "end_time", "label": "終業時刻", "region": [0.88, 0.21, 0.12, 0.05]},
+                {"name": "meter_out", "label": "出庫メーター", "region": [0.80, 0.25, 0.20, 0.05]},
+                {"name": "meter_in", "label": "入庫メーター", "region": [0.80, 0.30, 0.20, 0.05]},
+                {"name": "mileage", "label": "走行粁", "region": [0.80, 0.35, 0.20, 0.05]},
+            ]
+        }
+    }
+
 
 # ============================================================
-# 日報フィールド定義（実際の画像から計測した座標）
+# 日報フィールド定義（デフォルト - プリセット未使用時）
 # フォーマット: (x%, y%, w%, h%) - フォーム右側に集中
 # ============================================================
 DAILY_REPORT_FIELDS = {
@@ -145,7 +206,190 @@ COMPARISON_FIELD_LABELS = {
 @report_relater_bp.route("/", methods=["GET"])
 @login_required
 def report_relater():
-    return render_template("report_relater.html")
+    presets = load_presets().get("presets", [])
+    return render_template("report_relater.html", presets=presets)
+
+
+# ============================================================
+# プリセット管理ルート
+# ============================================================
+
+@report_relater_bp.route("/presets", methods=["GET"])
+@login_required
+def presets_page():
+    """プリセット設定ページ"""
+    return render_template("report_relater_presets.html")
+
+
+@report_relater_bp.route("/api/presets", methods=["GET"])
+@login_required
+def get_presets():
+    """プリセット一覧を取得"""
+    data = load_presets()
+    return jsonify(data)
+
+
+@report_relater_bp.route("/api/presets", methods=["POST"])
+@login_required
+def create_preset():
+    """新規プリセットを作成"""
+    try:
+        req_data = request.get_json()
+        if not req_data:
+            return jsonify({"error": "データが送信されていません"}), 400
+
+        name = req_data.get("name", "").strip()
+        if not name:
+            return jsonify({"error": "プリセット名を入力してください"}), 400
+
+        data = load_presets()
+        presets = data.get("presets", [])
+
+        # 新しいIDを生成
+        max_id = 0
+        for p in presets:
+            try:
+                pid = int(p.get("id", 0))
+                if pid > max_id:
+                    max_id = pid
+            except:
+                pass
+
+        new_preset = {
+            "id": str(max_id + 1),
+            "name": name,
+            "created_by": getattr(current_user, 'username', 'unknown'),
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+            "attendance": req_data.get("attendance", get_default_fields()["attendance"]),
+            "daily_report": req_data.get("daily_report", get_default_fields()["daily_report"]),
+        }
+
+        presets.append(new_preset)
+        data["presets"] = presets
+
+        if save_presets(data):
+            return jsonify({"success": True, "preset": new_preset})
+        else:
+            return jsonify({"error": "保存に失敗しました"}), 500
+
+    except Exception as e:
+        logger.error(f"プリセット作成エラー: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@report_relater_bp.route("/api/presets/<preset_id>", methods=["GET"])
+@login_required
+def get_preset(preset_id):
+    """特定のプリセットを取得"""
+    preset = get_preset_by_id(preset_id)
+    if preset:
+        return jsonify(preset)
+    return jsonify({"error": "プリセットが見つかりません"}), 404
+
+
+@report_relater_bp.route("/api/presets/<preset_id>", methods=["PUT"])
+@login_required
+def update_preset(preset_id):
+    """プリセットを更新"""
+    try:
+        req_data = request.get_json()
+        if not req_data:
+            return jsonify({"error": "データが送信されていません"}), 400
+
+        data = load_presets()
+        presets = data.get("presets", [])
+
+        for i, preset in enumerate(presets):
+            if preset.get("id") == preset_id:
+                presets[i]["name"] = req_data.get("name", preset.get("name"))
+                presets[i]["updated_at"] = datetime.now().isoformat()
+                presets[i]["updated_by"] = getattr(current_user, 'username', 'unknown')
+                if "attendance" in req_data:
+                    presets[i]["attendance"] = req_data["attendance"]
+                if "daily_report" in req_data:
+                    presets[i]["daily_report"] = req_data["daily_report"]
+
+                data["presets"] = presets
+                if save_presets(data):
+                    return jsonify({"success": True, "preset": presets[i]})
+                else:
+                    return jsonify({"error": "保存に失敗しました"}), 500
+
+        return jsonify({"error": "プリセットが見つかりません"}), 404
+
+    except Exception as e:
+        logger.error(f"プリセット更新エラー: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@report_relater_bp.route("/api/presets/<preset_id>", methods=["DELETE"])
+@login_required
+def delete_preset(preset_id):
+    """プリセットを削除"""
+    try:
+        data = load_presets()
+        presets = data.get("presets", [])
+
+        new_presets = [p for p in presets if p.get("id") != preset_id]
+
+        if len(new_presets) == len(presets):
+            return jsonify({"error": "プリセットが見つかりません"}), 404
+
+        data["presets"] = new_presets
+        if save_presets(data):
+            return jsonify({"success": True})
+        else:
+            return jsonify({"error": "保存に失敗しました"}), 500
+
+    except Exception as e:
+        logger.error(f"プリセット削除エラー: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@report_relater_bp.route("/api/preview_image", methods=["POST"])
+@login_required
+def preview_image():
+    """PDFの最初のページを画像として返す（プリセット設定用）"""
+    try:
+        file = request.files.get("file")
+        if not file or not file.filename:
+            return jsonify({"error": "ファイルがアップロードされていません"}), 400
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            file_path = os.path.join(temp_dir, "temp.pdf")
+            file.save(file_path)
+
+            doc = fitz.open(file_path)
+            page = doc[0]
+            zoom = PDF_RENDER_DPI / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+
+            img_data = pix.tobytes("png")
+            pil_img = Image.open(io.BytesIO(img_data))
+
+            # サムネイル作成
+            pil_img.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            pil_img.save(buf, format="PNG")
+            img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+            doc.close()
+
+            return jsonify({
+                "image": img_base64,
+                "width": pil_img.width,
+                "height": pil_img.height,
+            })
+
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    except Exception as e:
+        logger.error(f"プレビュー画像エラー: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @report_relater_bp.route("/upload", methods=["POST"])
@@ -163,6 +407,14 @@ def upload_and_ocr():
     try:
         attendance_file = request.files.get("attendance_pdf")
         report_file = request.files.get("report_pdf")
+        preset_id = request.form.get("preset_id", "")
+
+        # プリセット取得
+        preset = None
+        if preset_id:
+            preset = get_preset_by_id(preset_id)
+            if not preset:
+                return jsonify({"error": f"プリセット (ID: {preset_id}) が見つかりません"}), 400
 
         if not attendance_file or not attendance_file.filename:
             return jsonify({"error": "勤怠データPDFがアップロードされていません"}), 400
@@ -181,12 +433,14 @@ def upload_and_ocr():
         if os.path.getsize(rep_path) > MAX_FILE_SIZE:
             return jsonify({"error": "日報PDFが大きすぎます"}), 400
 
-        attendance_result = process_attendance_pdf(att_path)
-        report_result = process_daily_report_pdf(rep_path)
+        # プリセット設定を渡す
+        attendance_result = process_attendance_pdf(att_path, preset)
+        report_result = process_daily_report_pdf(rep_path, preset)
 
         return jsonify({
             "attendance": attendance_result,
             "daily_reports": report_result,
+            "preset_used": preset.get("name") if preset else None,
         })
 
     except Exception as e:
@@ -269,7 +523,7 @@ def download_csv():
 # 勤怠データ OCR処理（シンプル版）
 # ============================================================
 
-def process_attendance_pdf(pdf_path):
+def process_attendance_pdf(pdf_path, preset=None):
     """勤怠データPDFを処理"""
     result = {
         "employee_id": "",
@@ -278,6 +532,16 @@ def process_attendance_pdf(pdf_path):
         "rows": [],
         "page_images": [],
     }
+
+    # プリセットからヘッダー領域を取得
+    header_region = [0, 0, 1.0, 0.15]  # デフォルト
+    attendance_fields = []
+    if preset and "attendance" in preset:
+        att_preset = preset["attendance"]
+        if "header_region" in att_preset:
+            header_region = att_preset["header_region"]
+        if "fields" in att_preset:
+            attendance_fields = att_preset["fields"]
 
     try:
         doc = fitz.open(pdf_path)
@@ -305,14 +569,28 @@ def process_attendance_pdf(pdf_path):
                 "color": (0, 255, 0)  # 緑
             })
 
-            # 1ページ目はヘッダー領域も表示
+            # 1ページ目はヘッダー領域も表示（プリセットから）
             if page_num == 0:
-                header_h = int(h * 0.15)
+                hx, hy, hw, hh = header_region
+                header_h = int(hh * h)
+                header_y = int(hy * h)
+                header_x = int(hx * w)
+                header_w = int(hw * w)
                 ocr_regions.append({
-                    "rect": (0, 0, w, header_h),
-                    "label": "Header (15%)",
+                    "rect": (header_x, header_y, header_w, header_h),
+                    "label": "Header",
                     "color": (0, 0, 255)  # 赤
                 })
+
+            # プリセットのフィールド領域も表示
+            for field in attendance_fields:
+                if "region" in field:
+                    fx, fy, fw, fh = field["region"]
+                    ocr_regions.append({
+                        "rect": (int(fx * w), int(fy * h), int(fw * w), int(fh * h)),
+                        "label": field.get("label", field.get("name", "")),
+                        "color": (255, 0, 0)  # 青
+                    })
 
             # 赤枠を描画
             annotated = draw_ocr_regions_attendance(cv_img, ocr_regions)
@@ -337,7 +615,7 @@ def process_attendance_pdf(pdf_path):
 
             # 1ページ目でヘッダー情報を取得
             if page_num == 0:
-                header_info = extract_header_info(binary)
+                header_info = extract_header_info(binary, header_region)
                 result["employee_id"] = header_info.get("employee_id", "")
                 result["period"] = header_info.get("period", "")
 
@@ -380,12 +658,22 @@ def draw_ocr_regions_attendance(cv_img, regions):
     return annotated
 
 
-def extract_header_info(binary_img):
+def extract_header_info(binary_img, header_region=None):
     """ヘッダーから社員番号・期間を抽出"""
     info = {"employee_id": "", "period": ""}
     try:
         h, w = binary_img.shape[:2]
-        header = binary_img[0:int(h * 0.15), :]
+
+        # プリセットのheader_regionを使用
+        if header_region:
+            hx, hy, hw, hh = header_region
+            y1 = int(hy * h)
+            y2 = int((hy + hh) * h)
+            x1 = int(hx * w)
+            x2 = int((hx + hw) * w)
+            header = binary_img[y1:y2, x1:x2]
+        else:
+            header = binary_img[0:int(h * 0.15), :]
 
         text = pytesseract.image_to_string(
             header,
@@ -478,12 +766,17 @@ def parse_attendance_text(text):
 # 日報 OCR処理（シンプル版 - 数字のみ）
 # ============================================================
 
-def process_daily_report_pdf(pdf_path):
+def process_daily_report_pdf(pdf_path, preset=None):
     """日報PDFを処理"""
     result = {
         "reports": [],
         "page_images": [],
     }
+
+    # プリセットから日報設定を取得
+    daily_report_preset = None
+    if preset and "daily_report" in preset:
+        daily_report_preset = preset["daily_report"]
 
     try:
         doc = fitz.open(pdf_path)
@@ -499,7 +792,7 @@ def process_daily_report_pdf(pdf_path):
             cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
             # 日報ページを処理（OCR領域情報も取得）
-            report_data, ocr_regions = process_daily_report_page(cv_img, page_num)
+            report_data, ocr_regions = process_daily_report_page(cv_img, page_num, daily_report_preset)
             report_data["page_number"] = page_num + 1
             result["reports"].append(report_data)
 
@@ -549,7 +842,7 @@ def draw_ocr_regions(cv_img, regions):
     return annotated
 
 
-def process_daily_report_page(cv_img, page_num):
+def process_daily_report_page(cv_img, page_num, preset=None):
     """日報1ページを処理。フィールド値とOCR領域情報を返す"""
     fields = {
         "date": "",
@@ -563,6 +856,15 @@ def process_daily_report_page(cv_img, page_num):
     }
     ocr_regions = []
 
+    # プリセットからメイン領域とフィールド定義を取得
+    main_region = [0.75, 0, 0.25, 1.0]  # デフォルト: 右25%
+    preset_fields = None
+    if preset:
+        if "main_region" in preset:
+            main_region = preset["main_region"]
+        if "fields" in preset:
+            preset_fields = preset["fields"]
+
     try:
         h, w = cv_img.shape[:2]
 
@@ -571,18 +873,23 @@ def process_daily_report_page(cv_img, page_num):
             cv_img = cv2.rotate(cv_img, cv2.ROTATE_90_CLOCKWISE)
             h, w = cv_img.shape[:2]
 
-        # 右側25%だけを処理（数字フィールドが集中）
-        right_x = int(w * 0.75)
-        right_region = cv_img[:, right_x:]
+        # メイン領域を処理（プリセットから）
+        mx, my, mw, mh = main_region
+        main_x = int(mx * w)
+        main_y = int(my * h)
+        main_w = int(mw * w)
+        main_h = int(mh * h)
 
-        # 右側領域を赤枠で表示
+        main_region_img = cv_img[main_y:main_y + main_h, main_x:main_x + main_w]
+
+        # メイン領域を赤枠で表示
         ocr_regions.append({
-            "rect": (right_x, 0, w - right_x, h),
-            "label": "Right 25%"
+            "rect": (main_x, main_y, main_w, main_h),
+            "label": "Main Region"
         })
 
         # グレースケール・二値化
-        gray = cv2.cvtColor(right_region, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(main_region_img, cv2.COLOR_BGR2GRAY)
         _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
         # 数字のみOCR
@@ -596,8 +903,8 @@ def process_daily_report_page(cv_img, page_num):
         # パターンマッチングで各フィールドを抽出
         fields = extract_daily_report_fields(text)
 
-        # 各フィールドを個別領域からも試す（より正確に）
-        fields, field_regions = extract_fields_by_region(cv_img, fields)
+        # 各フィールドを個別領域からも試す（プリセットのフィールドを使用）
+        fields, field_regions = extract_fields_by_region(cv_img, fields, preset_fields)
         ocr_regions.extend(field_regions)
 
     except Exception as e:
@@ -671,14 +978,29 @@ def extract_daily_report_fields(text):
     return fields
 
 
-def extract_fields_by_region(cv_img, fields):
+def extract_fields_by_region(cv_img, fields, preset_fields=None):
     """定義された領域から各フィールドを抽出。フィールド値とOCR領域情報を返す"""
     h, w = cv_img.shape[:2]
     ocr_regions = []
 
-    for field_name, field_def in DAILY_REPORT_FIELDS.items():
+    # プリセットのフィールドがある場合はそれを使用、なければデフォルト
+    if preset_fields:
+        field_defs = {f["name"]: f for f in preset_fields}
+    else:
+        field_defs = DAILY_REPORT_FIELDS
+
+    for field_name, field_def in field_defs.items():
         try:
-            rx, ry, rw, rh = field_def["region"]
+            # プリセット形式とデフォルト形式の両方に対応
+            if "region" in field_def:
+                region_data = field_def["region"]
+                if isinstance(region_data, (list, tuple)):
+                    rx, ry, rw, rh = region_data
+                else:
+                    continue
+            else:
+                continue
+
             x = int(rx * w)
             y = int(ry * h)
             region_w = int(rw * w)

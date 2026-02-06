@@ -2,8 +2,16 @@
 
 {% block content %}
 <div class="max-w-7xl mx-auto">
-  <h1 class="text-2xl font-bold mb-6">日報リレーター</h1>
-  <p class="text-gray-600 mb-6">勤怠データと日報を照合し、入力の整合性を確認します。</p>
+  <div class="flex justify-between items-center mb-6">
+    <div>
+      <h1 class="text-2xl font-bold">日報リレーター</h1>
+      <p class="text-gray-600">勤怠データと日報を照合し、入力の整合性を確認します。</p>
+    </div>
+    <a href="{{ url_for('report_relater.presets_page') }}"
+       class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-sm">
+      プリセット設定
+    </a>
+  </div>
 
   <!-- ステップインジケーター -->
   <div class="flex items-center mb-8" id="step-indicator">
@@ -63,6 +71,25 @@
           <p id="report-filename" class="mt-2 text-sm text-blue-600 hidden"></p>
         </div>
       </div>
+    </div>
+
+    <!-- プリセット選択 -->
+    <div class="bg-white rounded-xl shadow p-6 mb-6">
+      <h2 class="text-lg font-semibold mb-4">プリセット選択</h2>
+      <div class="flex items-center gap-4">
+        <select id="preset-select" class="flex-1 border border-gray-300 rounded-lg px-4 py-2">
+          <option value="">デフォルト設定を使用</option>
+          {% for preset in presets %}
+          <option value="{{ preset.id }}">{{ preset.name }}</option>
+          {% endfor %}
+        </select>
+        <a href="{{ url_for('report_relater.presets_page') }}" class="text-blue-600 hover:underline text-sm">
+          新規作成 / 編集
+        </a>
+      </div>
+      <p class="text-sm text-gray-500 mt-2">
+        プリセットでOCR読み取り領域をカスタマイズできます
+      </p>
     </div>
 
     <div class="text-center">
@@ -335,6 +362,12 @@ async function uploadFiles() {
   formData.append('attendance_pdf', attFileInput.files[0]);
   formData.append('report_pdf', repFileInput.files[0]);
 
+  // プリセットIDを追加
+  const presetSelect = document.getElementById('preset-select');
+  if (presetSelect && presetSelect.value) {
+    formData.append('preset_id', presetSelect.value);
+  }
+
   document.getElementById('step1').classList.add('hidden');
   document.getElementById('loading').classList.remove('hidden');
 
@@ -348,6 +381,11 @@ async function uploadFiles() {
 
     if (!response.ok) {
       throw new Error(data.error || 'OCR処理に失敗しました');
+    }
+
+    // 使用したプリセット名を表示
+    if (data.preset_used) {
+      console.log('使用プリセット:', data.preset_used);
     }
 
     ocrData = data;
