@@ -1,373 +1,372 @@
 {% extends "base.html" %}
 
-{% block title %}日報リレーター - プリセット設定{% endblock %}
-
-{% block head %}
-<style>
-    .preset-container {
-        display: flex;
-        gap: 20px;
-        flex-wrap: wrap;
-    }
-    .preset-list {
-        flex: 0 0 300px;
-    }
-    .preset-editor {
-        flex: 1;
-        min-width: 600px;
-    }
-    .preset-item {
-        padding: 10px 15px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        margin-bottom: 8px;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-    .preset-item:hover {
-        background-color: #f5f5f5;
-    }
-    .preset-item.active {
-        background-color: #e3f2fd;
-        border-color: #2196f3;
-    }
-    .preset-item .preset-name {
-        font-weight: bold;
-    }
-    .preset-item .preset-meta {
-        font-size: 0.85em;
-        color: #666;
-    }
-    .image-editor-container {
-        position: relative;
-        border: 2px solid #ddd;
-        border-radius: 4px;
-        overflow: hidden;
-        background: #f0f0f0;
-        min-height: 400px;
-    }
-    .image-editor-container img {
-        max-width: 100%;
-        display: block;
-    }
-    .region-overlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-    }
-    .region-rect {
-        position: absolute;
-        border: 2px solid red;
-        background: rgba(255, 0, 0, 0.1);
-        cursor: move;
-        pointer-events: all;
-    }
-    .region-rect.selected {
-        border-color: #2196f3;
-        background: rgba(33, 150, 243, 0.2);
-    }
-    .region-rect .region-label {
-        position: absolute;
-        top: -20px;
-        left: 0;
-        background: red;
-        color: white;
-        font-size: 11px;
-        padding: 2px 6px;
-        white-space: nowrap;
-    }
-    .region-rect.selected .region-label {
-        background: #2196f3;
-    }
-    .region-rect .resize-handle {
-        position: absolute;
-        width: 10px;
-        height: 10px;
-        background: white;
-        border: 1px solid red;
-        pointer-events: all;
-    }
-    .region-rect .resize-handle.se {
-        right: -5px;
-        bottom: -5px;
-        cursor: se-resize;
-    }
-    .tab-buttons {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 15px;
-    }
-    .tab-button {
-        padding: 10px 20px;
-        border: 1px solid #ddd;
-        background: #f5f5f5;
-        border-radius: 4px;
-        cursor: pointer;
-    }
-    .tab-button.active {
-        background: #2196f3;
-        color: white;
-        border-color: #2196f3;
-    }
-    .field-list {
-        max-height: 300px;
-        overflow-y: auto;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-    }
-    .field-item {
-        padding: 8px 12px;
-        border-bottom: 1px solid #eee;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    .field-item:last-child {
-        border-bottom: none;
-    }
-    .field-item.selected {
-        background: #e3f2fd;
-    }
-    .drop-zone {
-        border: 2px dashed #ccc;
-        border-radius: 8px;
-        padding: 40px;
-        text-align: center;
-        color: #666;
-        cursor: pointer;
-        transition: all 0.2s;
-    }
-    .drop-zone:hover, .drop-zone.dragover {
-        border-color: #2196f3;
-        background: #e3f2fd;
-    }
-    .btn-group {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-    }
-</style>
-{% endblock %}
-
 {% block content %}
-<div class="container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>日報リレーター - プリセット設定</h2>
-        <a href="{{ url_for('report_relater.report_relater') }}" class="btn btn-outline-secondary">
-            戻る
-        </a>
+<div class="max-w-7xl mx-auto">
+  <!-- ヘッダー -->
+  <div class="flex justify-between items-center mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-800">プリセット設定</h1>
+      <p class="text-gray-500">OCR読み取り領域を視覚的に設定できます</p>
+    </div>
+    <a href="{{ url_for('report_relater.report_relater') }}"
+       class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition flex items-center gap-2">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+      </svg>
+      日報リレーターに戻る
+    </a>
+  </div>
+
+  <div class="flex gap-6">
+    <!-- 左: プリセット一覧 -->
+    <div class="w-80 flex-shrink-0">
+      <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+        <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-3 flex justify-between items-center">
+          <span class="font-semibold">プリセット一覧</span>
+          <button onclick="createNewPreset()"
+                  class="bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-lg text-sm transition">
+            + 新規作成
+          </button>
+        </div>
+        <div id="presetList" class="divide-y divide-gray-100 max-h-[600px] overflow-y-auto">
+          <div class="p-8 text-center text-gray-400">
+            <div class="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+            読み込み中...
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div class="preset-container">
-        <!-- プリセット一覧 -->
-        <div class="preset-list">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span>プリセット一覧</span>
-                    <button class="btn btn-sm btn-primary" onclick="createNewPreset()">
-                        + 新規
-                    </button>
-                </div>
-                <div class="card-body p-0">
-                    <div id="presetList">
-                        <div class="p-3 text-muted text-center">読み込み中...</div>
-                    </div>
-                </div>
-            </div>
+    <!-- 右: エディタ -->
+    <div class="flex-1">
+      <!-- ウェルカムカード -->
+      <div id="welcomeCard" class="bg-white rounded-xl shadow-lg p-12 text-center">
+        <div class="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
+          <svg class="w-12 h-12 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+          </svg>
+        </div>
+        <h2 class="text-xl font-bold text-gray-800 mb-2">プリセットを選択または作成</h2>
+        <p class="text-gray-500 mb-6">
+          プリセットでは勤怠データと日報のOCR領域を<br>視覚的に設定できます
+        </p>
+        <button onclick="createNewPreset()"
+                class="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition font-semibold">
+          新規プリセットを作成
+        </button>
+      </div>
+
+      <!-- エディタカード -->
+      <div id="editorCard" class="hidden">
+        <!-- プリセット名 -->
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <label class="block text-sm font-medium text-gray-700 mb-2">プリセット名</label>
+          <input type="text" id="presetName"
+                 class="w-full border border-gray-300 rounded-lg px-4 py-3 text-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                 placeholder="例: 標準フォーマット">
         </div>
 
-        <!-- プリセット編集エリア -->
-        <div class="preset-editor">
-            <div class="card" id="editorCard" style="display: none;">
-                <div class="card-header">
-                    <input type="text" id="presetName" class="form-control form-control-lg"
-                           placeholder="プリセット名を入力">
-                </div>
-                <div class="card-body">
-                    <!-- タブ切り替え -->
-                    <div class="tab-buttons">
-                        <button class="tab-button active" onclick="switchTab('attendance')">
-                            勤怠データ
-                        </button>
-                        <button class="tab-button" onclick="switchTab('daily_report')">
-                            日報
-                        </button>
-                    </div>
-
-                    <!-- 勤怠データ設定 -->
-                    <div id="attendanceTab" class="tab-content">
-                        <div class="row">
-                            <div class="col-md-8">
-                                <h5>サンプルPDFをアップロード</h5>
-                                <div class="drop-zone" id="attendanceDropZone"
-                                     onclick="document.getElementById('attendanceFileInput').click()">
-                                    PDFファイルをドロップまたはクリックして選択
-                                </div>
-                                <input type="file" id="attendanceFileInput" accept=".pdf"
-                                       style="display: none;" onchange="loadPreviewImage('attendance', this)">
-
-                                <div class="image-editor-container mt-3" id="attendanceImageContainer">
-                                    <img id="attendanceImage" src="" style="display: none;">
-                                    <div class="region-overlay" id="attendanceOverlay"></div>
-                                    <div class="text-muted p-4 text-center" id="attendancePlaceholder">
-                                        PDFをアップロードしてください
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <h5>ヘッダー領域</h5>
-                                <div class="mb-3">
-                                    <label class="form-label">位置 (X, Y, 幅, 高さ) - 0~1の割合</label>
-                                    <div class="input-group input-group-sm">
-                                        <input type="number" class="form-control" id="att_header_x"
-                                               value="0" step="0.01" min="0" max="1">
-                                        <input type="number" class="form-control" id="att_header_y"
-                                               value="0" step="0.01" min="0" max="1">
-                                        <input type="number" class="form-control" id="att_header_w"
-                                               value="1" step="0.01" min="0" max="1">
-                                        <input type="number" class="form-control" id="att_header_h"
-                                               value="0.15" step="0.01" min="0" max="1">
-                                    </div>
-                                </div>
-                                <button class="btn btn-sm btn-outline-primary"
-                                        onclick="drawRegionOnImage('attendance', 'header')">
-                                    領域を表示
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 日報設定 -->
-                    <div id="dailyReportTab" class="tab-content" style="display: none;">
-                        <div class="row">
-                            <div class="col-md-8">
-                                <h5>サンプルPDFをアップロード</h5>
-                                <div class="drop-zone" id="dailyReportDropZone"
-                                     onclick="document.getElementById('dailyReportFileInput').click()">
-                                    PDFファイルをドロップまたはクリックして選択
-                                </div>
-                                <input type="file" id="dailyReportFileInput" accept=".pdf"
-                                       style="display: none;" onchange="loadPreviewImage('daily_report', this)">
-
-                                <div class="image-editor-container mt-3" id="dailyReportImageContainer">
-                                    <img id="dailyReportImage" src="" style="display: none;">
-                                    <div class="region-overlay" id="dailyReportOverlay"></div>
-                                    <div class="text-muted p-4 text-center" id="dailyReportPlaceholder">
-                                        PDFをアップロードしてください
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <h5>メイン読み取り領域</h5>
-                                <div class="mb-3">
-                                    <label class="form-label">位置 (X, Y, 幅, 高さ)</label>
-                                    <div class="input-group input-group-sm">
-                                        <input type="number" class="form-control" id="dr_main_x"
-                                               value="0.75" step="0.01" min="0" max="1">
-                                        <input type="number" class="form-control" id="dr_main_y"
-                                               value="0" step="0.01" min="0" max="1">
-                                        <input type="number" class="form-control" id="dr_main_w"
-                                               value="0.25" step="0.01" min="0" max="1">
-                                        <input type="number" class="form-control" id="dr_main_h"
-                                               value="1" step="0.01" min="0" max="1">
-                                    </div>
-                                </div>
-                                <button class="btn btn-sm btn-outline-primary mb-3"
-                                        onclick="drawRegionOnImage('daily_report', 'main')">
-                                    領域を表示
-                                </button>
-
-                                <h5>フィールド定義</h5>
-                                <div class="field-list" id="fieldList">
-                                    <!-- フィールドはJSで生成 -->
-                                </div>
-                                <button class="btn btn-sm btn-outline-success mt-2" onclick="addField()">
-                                    + フィールド追加
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 保存・削除ボタン -->
-                    <div class="mt-4 d-flex justify-content-between">
-                        <button class="btn btn-danger" onclick="deletePreset()" id="deleteBtn" style="display: none;">
-                            削除
-                        </button>
-                        <div class="btn-group">
-                            <button class="btn btn-secondary" onclick="cancelEdit()">キャンセル</button>
-                            <button class="btn btn-primary" onclick="savePreset()">保存</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 初期メッセージ -->
-            <div class="card" id="welcomeCard">
-                <div class="card-body text-center py-5">
-                    <h4 class="text-muted">プリセットを選択するか、新規作成してください</h4>
-                    <p class="text-muted">
-                        プリセットでは勤怠データと日報のOCR領域を視覚的に設定できます
-                    </p>
-                    <button class="btn btn-primary btn-lg" onclick="createNewPreset()">
-                        新規プリセットを作成
-                    </button>
-                </div>
-            </div>
+        <!-- タブ -->
+        <div class="flex gap-2 mb-4">
+          <button id="tabAttendance" onclick="switchTab('attendance')"
+                  class="flex-1 py-3 px-6 rounded-lg font-semibold transition bg-blue-600 text-white">
+            📊 勤怠データ設定
+          </button>
+          <button id="tabDailyReport" onclick="switchTab('daily_report')"
+                  class="flex-1 py-3 px-6 rounded-lg font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300">
+            📋 日報設定
+          </button>
         </div>
+
+        <!-- 勤怠データタブ -->
+        <div id="attendanceTab" class="bg-white rounded-xl shadow-lg p-6">
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 画像エリア -->
+            <div class="lg:col-span-2">
+              <h3 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                サンプルPDFプレビュー
+              </h3>
+
+              <!-- ドロップゾーン -->
+              <div id="attendanceDropZone"
+                   class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition"
+                   onclick="document.getElementById('attendanceFileInput').click()">
+                <svg class="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                </svg>
+                <p class="text-gray-600 font-medium">PDFファイルをドロップまたはクリック</p>
+                <p class="text-sm text-gray-400 mt-1">サンプルPDFをアップロードして領域を確認</p>
+              </div>
+              <input type="file" id="attendanceFileInput" accept=".pdf" class="hidden"
+                     onchange="loadPreviewImage('attendance', this)">
+
+              <!-- 画像コンテナ -->
+              <div id="attendanceImageContainer"
+                   class="hidden mt-4 relative bg-gray-900 rounded-xl overflow-hidden">
+                <img id="attendanceImage" src="" class="w-full">
+                <div id="attendanceOverlay" class="absolute inset-0 pointer-events-none"></div>
+              </div>
+            </div>
+
+            <!-- 設定エリア -->
+            <div>
+              <h3 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                ヘッダー領域
+              </h3>
+
+              <div class="bg-gray-50 rounded-lg p-4 space-y-4">
+                <p class="text-sm text-gray-600">社員番号・期間を読み取る領域を指定</p>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs text-gray-500 mb-1">X位置 (0~1)</label>
+                    <input type="number" id="att_header_x" value="0" step="0.01" min="0" max="1"
+                           class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                           onchange="updateAttendancePreview()">
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-500 mb-1">Y位置 (0~1)</label>
+                    <input type="number" id="att_header_y" value="0" step="0.01" min="0" max="1"
+                           class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                           onchange="updateAttendancePreview()">
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-500 mb-1">幅 (0~1)</label>
+                    <input type="number" id="att_header_w" value="1" step="0.01" min="0" max="1"
+                           class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                           onchange="updateAttendancePreview()">
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-500 mb-1">高さ (0~1)</label>
+                    <input type="number" id="att_header_h" value="0.15" step="0.01" min="0" max="1"
+                           class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                           onchange="updateAttendancePreview()">
+                  </div>
+                </div>
+
+                <button onclick="updateAttendancePreview()"
+                        class="w-full bg-blue-100 text-blue-700 py-2 rounded-lg hover:bg-blue-200 transition text-sm font-medium">
+                  プレビュー更新
+                </button>
+              </div>
+
+              <div class="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                <p class="text-sm text-yellow-800">
+                  <strong>ヒント:</strong> 値は0〜1の割合で指定します。
+                  例えば上から15%の領域は Y=0, 高さ=0.15 となります。
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 日報タブ -->
+        <div id="dailyReportTab" class="hidden bg-white rounded-xl shadow-lg p-6">
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 画像エリア -->
+            <div class="lg:col-span-2">
+              <h3 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                サンプルPDFプレビュー
+              </h3>
+
+              <!-- ドロップゾーン -->
+              <div id="dailyReportDropZone"
+                   class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition"
+                   onclick="document.getElementById('dailyReportFileInput').click()">
+                <svg class="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                </svg>
+                <p class="text-gray-600 font-medium">PDFファイルをドロップまたはクリック</p>
+                <p class="text-sm text-gray-400 mt-1">サンプルPDFをアップロードして領域を確認</p>
+              </div>
+              <input type="file" id="dailyReportFileInput" accept=".pdf" class="hidden"
+                     onchange="loadPreviewImage('daily_report', this)">
+
+              <!-- 画像コンテナ -->
+              <div id="dailyReportImageContainer"
+                   class="hidden mt-4 relative bg-gray-900 rounded-xl overflow-hidden">
+                <img id="dailyReportImage" src="" class="w-full">
+                <div id="dailyReportOverlay" class="absolute inset-0 pointer-events-none"></div>
+              </div>
+            </div>
+
+            <!-- 設定エリア -->
+            <div class="space-y-4">
+              <!-- メイン領域 -->
+              <div>
+                <h3 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                  <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+                  </svg>
+                  メイン読み取り領域
+                </h3>
+
+                <div class="bg-green-50 rounded-lg p-4 space-y-3 border border-green-200">
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <label class="block text-xs text-gray-500 mb-1">X位置</label>
+                      <input type="number" id="dr_main_x" value="0.75" step="0.01" min="0" max="1"
+                             class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                             onchange="updateDailyReportPreview()">
+                    </div>
+                    <div>
+                      <label class="block text-xs text-gray-500 mb-1">Y位置</label>
+                      <input type="number" id="dr_main_y" value="0" step="0.01" min="0" max="1"
+                             class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                             onchange="updateDailyReportPreview()">
+                    </div>
+                    <div>
+                      <label class="block text-xs text-gray-500 mb-1">幅</label>
+                      <input type="number" id="dr_main_w" value="0.25" step="0.01" min="0" max="1"
+                             class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                             onchange="updateDailyReportPreview()">
+                    </div>
+                    <div>
+                      <label class="block text-xs text-gray-500 mb-1">高さ</label>
+                      <input type="number" id="dr_main_h" value="1" step="0.01" min="0" max="1"
+                             class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                             onchange="updateDailyReportPreview()">
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- フィールド一覧 -->
+              <div>
+                <h3 class="font-semibold text-gray-800 mb-3 flex items-center justify-between">
+                  <span class="flex items-center gap-2">
+                    <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/>
+                    </svg>
+                    フィールド定義
+                  </span>
+                  <button onclick="addField()"
+                          class="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200 transition">
+                    + 追加
+                  </button>
+                </h3>
+
+                <div id="fieldList" class="bg-gray-50 rounded-lg divide-y divide-gray-200 max-h-64 overflow-y-auto">
+                  <div class="p-4 text-center text-gray-400 text-sm">フィールドがありません</div>
+                </div>
+              </div>
+
+              <button onclick="updateDailyReportPreview()"
+                      class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition font-medium">
+                プレビュー更新
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 保存・削除ボタン -->
+        <div class="flex justify-between items-center mt-6">
+          <button id="deleteBtn" onclick="deletePreset()"
+                  class="hidden bg-red-100 text-red-700 px-6 py-3 rounded-lg hover:bg-red-200 transition font-medium">
+            このプリセットを削除
+          </button>
+          <div class="flex gap-3 ml-auto">
+            <button onclick="cancelEdit()"
+                    class="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg hover:bg-gray-300 transition font-medium">
+              キャンセル
+            </button>
+            <button onclick="savePreset()"
+                    class="bg-green-600 text-white px-8 py-3 rounded-lg hover:bg-green-700 transition font-semibold">
+              保存する
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
+  </div>
 </div>
 
 <!-- フィールド編集モーダル -->
-<div class="modal fade" id="fieldModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">フィールド編集</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label">フィールドID</label>
-                    <select class="form-select" id="fieldName">
-                        <option value="employee_id">社員番号 (employee_id)</option>
-                        <option value="date">日付 (date)</option>
-                        <option value="vehicle_code">車両番号 (vehicle_code)</option>
-                        <option value="start_time">始業時刻 (start_time)</option>
-                        <option value="end_time">終業時刻 (end_time)</option>
-                        <option value="meter_out">出庫メーター (meter_out)</option>
-                        <option value="meter_in">入庫メーター (meter_in)</option>
-                        <option value="mileage">走行粁 (mileage)</option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">ラベル（表示名）</label>
-                    <input type="text" class="form-control" id="fieldLabel" placeholder="例: 社員番号">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">領域 (X, Y, 幅, 高さ) - 0~1の割合</label>
-                    <div class="input-group">
-                        <input type="number" class="form-control" id="field_x" step="0.01" min="0" max="1">
-                        <input type="number" class="form-control" id="field_y" step="0.01" min="0" max="1">
-                        <input type="number" class="form-control" id="field_w" step="0.01" min="0" max="1">
-                        <input type="number" class="form-control" id="field_h" step="0.01" min="0" max="1">
-                    </div>
-                </div>
-                <p class="text-muted small">
-                    画像上でドラッグして領域を指定することもできます
-                </p>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-danger" onclick="deleteField()" id="deleteFieldBtn"
-                        style="display: none;">削除</button>
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
-                <button type="button" class="btn btn-primary" onclick="saveField()">保存</button>
-            </div>
-        </div>
+<div id="fieldModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
+    <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-xl">
+      <h3 class="font-semibold text-lg">フィールド編集</h3>
     </div>
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">フィールドタイプ</label>
+        <select id="fieldName" class="w-full border border-gray-300 rounded-lg px-4 py-2">
+          <option value="employee_id">社員番号</option>
+          <option value="date">日付</option>
+          <option value="vehicle_code">車両番号</option>
+          <option value="start_time">始業時刻</option>
+          <option value="end_time">終業時刻</option>
+          <option value="meter_out">出庫メーター</option>
+          <option value="meter_in">入庫メーター</option>
+          <option value="mileage">走行粁</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">ラベル（表示名）</label>
+        <input type="text" id="fieldLabel" class="w-full border border-gray-300 rounded-lg px-4 py-2"
+               placeholder="例: 社員番号">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">領域 (X, Y, 幅, 高さ)</label>
+        <div class="grid grid-cols-4 gap-2">
+          <input type="number" id="field_x" step="0.01" min="0" max="1" placeholder="X"
+                 class="border border-gray-300 rounded px-3 py-2 text-sm">
+          <input type="number" id="field_y" step="0.01" min="0" max="1" placeholder="Y"
+                 class="border border-gray-300 rounded px-3 py-2 text-sm">
+          <input type="number" id="field_w" step="0.01" min="0" max="1" placeholder="幅"
+                 class="border border-gray-300 rounded px-3 py-2 text-sm">
+          <input type="number" id="field_h" step="0.01" min="0" max="1" placeholder="高さ"
+                 class="border border-gray-300 rounded px-3 py-2 text-sm">
+        </div>
+      </div>
+    </div>
+    <div class="bg-gray-50 px-6 py-4 rounded-b-xl flex justify-between">
+      <button id="deleteFieldBtn" onclick="deleteField()"
+              class="hidden text-red-600 hover:text-red-800 font-medium">
+        削除
+      </button>
+      <div class="flex gap-3 ml-auto">
+        <button onclick="closeFieldModal()"
+                class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition">
+          キャンセル
+        </button>
+        <button onclick="saveField()"
+                class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition font-medium">
+          保存
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
+
+<style>
+  .region-rect {
+    position: absolute;
+    border: 3px solid;
+    pointer-events: none;
+  }
+  .region-label {
+    position: absolute;
+    top: -24px;
+    left: 0;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+    white-space: nowrap;
+    border-radius: 4px;
+  }
+</style>
 
 <script>
 let currentPreset = null;
@@ -375,488 +374,463 @@ let presets = [];
 let currentTab = 'attendance';
 let dailyReportFields = [];
 let editingFieldIndex = -1;
-let imageData = {
-    attendance: null,
-    daily_report: null
-};
 
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
-    loadPresets();
-    setupDropZones();
-    setupDrawing();
+  loadPresets();
+  setupDropZones();
 });
 
 // ドロップゾーン設定
 function setupDropZones() {
-    ['attendance', 'daily_report'].forEach(type => {
-        const dropZone = document.getElementById(type === 'attendance' ? 'attendanceDropZone' : 'dailyReportDropZone');
+  ['attendance', 'daily_report'].forEach(type => {
+    const dropZone = document.getElementById(type === 'attendance' ? 'attendanceDropZone' : 'dailyReportDropZone');
 
-        dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZone.classList.add('dragover');
-        });
-
-        dropZone.addEventListener('dragleave', () => {
-            dropZone.classList.remove('dragover');
-        });
-
-        dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('dragover');
-            const file = e.dataTransfer.files[0];
-            if (file && file.type === 'application/pdf') {
-                loadPreviewImageFromFile(type, file);
-            }
-        });
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('border-blue-400', 'bg-blue-50');
     });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('border-blue-400', 'bg-blue-50');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-blue-400', 'bg-blue-50');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type === 'application/pdf') {
+        loadPreviewImageFromFile(type, file);
+      }
+    });
+  });
 }
 
 // プリセット一覧読み込み
 function loadPresets() {
-    fetch('/tools/report_relater/api/presets')
-        .then(r => r.json())
-        .then(data => {
-            presets = data.presets || [];
-            renderPresetList();
-        })
-        .catch(err => {
-            console.error('プリセット読み込みエラー:', err);
-            document.getElementById('presetList').innerHTML =
-                '<div class="p-3 text-danger">読み込みエラー</div>';
-        });
+  fetch('/tools/report_relater/api/presets')
+    .then(r => r.json())
+    .then(data => {
+      presets = data.presets || [];
+      renderPresetList();
+    })
+    .catch(err => {
+      console.error('プリセット読み込みエラー:', err);
+      document.getElementById('presetList').innerHTML =
+        '<div class="p-8 text-center text-red-500">読み込みエラー</div>';
+    });
 }
 
 function renderPresetList() {
-    const container = document.getElementById('presetList');
-    if (presets.length === 0) {
-        container.innerHTML = '<div class="p-3 text-muted text-center">プリセットがありません</div>';
-        return;
-    }
+  const container = document.getElementById('presetList');
+  if (presets.length === 0) {
+    container.innerHTML = `
+      <div class="p-8 text-center text-gray-400">
+        <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+        </svg>
+        プリセットがありません
+      </div>`;
+    return;
+  }
 
-    container.innerHTML = presets.map(p => `
-        <div class="preset-item ${currentPreset && currentPreset.id === p.id ? 'active' : ''}"
-             onclick="selectPreset('${p.id}')">
-            <div class="preset-name">${escapeHtml(p.name)}</div>
-            <div class="preset-meta">
-                作成: ${p.created_by || '不明'} /
-                ${new Date(p.updated_at || p.created_at).toLocaleDateString('ja-JP')}
-            </div>
-        </div>
-    `).join('');
+  container.innerHTML = presets.map(p => `
+    <div class="p-4 cursor-pointer hover:bg-blue-50 transition ${currentPreset && currentPreset.id === p.id ? 'bg-blue-100 border-l-4 border-blue-600' : ''}"
+         onclick="selectPreset('${p.id}')">
+      <div class="font-medium text-gray-800">${escapeHtml(p.name)}</div>
+      <div class="text-sm text-gray-500 mt-1">
+        ${p.created_by || '不明'} ・ ${new Date(p.updated_at || p.created_at).toLocaleDateString('ja-JP')}
+      </div>
+    </div>
+  `).join('');
 }
 
 function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 // プリセット選択
 function selectPreset(id) {
-    const preset = presets.find(p => p.id === id);
-    if (!preset) return;
+  const preset = presets.find(p => p.id === id);
+  if (!preset) return;
 
-    currentPreset = JSON.parse(JSON.stringify(preset)); // Deep copy
+  currentPreset = JSON.parse(JSON.stringify(preset));
 
-    document.getElementById('welcomeCard').style.display = 'none';
-    document.getElementById('editorCard').style.display = 'block';
-    document.getElementById('deleteBtn').style.display = 'block';
+  document.getElementById('welcomeCard').classList.add('hidden');
+  document.getElementById('editorCard').classList.remove('hidden');
+  document.getElementById('deleteBtn').classList.remove('hidden');
 
-    document.getElementById('presetName').value = preset.name;
+  document.getElementById('presetName').value = preset.name;
 
-    // 勤怠データ設定を読み込み
-    if (preset.attendance && preset.attendance.header_region) {
-        const hr = preset.attendance.header_region;
-        document.getElementById('att_header_x').value = hr[0];
-        document.getElementById('att_header_y').value = hr[1];
-        document.getElementById('att_header_w').value = hr[2];
-        document.getElementById('att_header_h').value = hr[3];
+  // 勤怠データ設定
+  if (preset.attendance && preset.attendance.header_region) {
+    const hr = preset.attendance.header_region;
+    document.getElementById('att_header_x').value = hr[0];
+    document.getElementById('att_header_y').value = hr[1];
+    document.getElementById('att_header_w').value = hr[2];
+    document.getElementById('att_header_h').value = hr[3];
+  }
+
+  // 日報設定
+  if (preset.daily_report) {
+    if (preset.daily_report.main_region) {
+      const mr = preset.daily_report.main_region;
+      document.getElementById('dr_main_x').value = mr[0];
+      document.getElementById('dr_main_y').value = mr[1];
+      document.getElementById('dr_main_w').value = mr[2];
+      document.getElementById('dr_main_h').value = mr[3];
     }
+    dailyReportFields = preset.daily_report.fields || [];
+  } else {
+    dailyReportFields = [];
+  }
 
-    // 日報設定を読み込み
-    if (preset.daily_report) {
-        if (preset.daily_report.main_region) {
-            const mr = preset.daily_report.main_region;
-            document.getElementById('dr_main_x').value = mr[0];
-            document.getElementById('dr_main_y').value = mr[1];
-            document.getElementById('dr_main_w').value = mr[2];
-            document.getElementById('dr_main_h').value = mr[3];
-        }
-        dailyReportFields = preset.daily_report.fields || [];
-    } else {
-        dailyReportFields = [];
-    }
-
-    renderFieldList();
-    renderPresetList();
+  renderFieldList();
+  renderPresetList();
 }
 
 // 新規プリセット作成
 function createNewPreset() {
-    currentPreset = {
-        id: null,
-        name: '',
-        attendance: {
-            header_region: [0, 0, 1.0, 0.15],
-            fields: []
-        },
-        daily_report: {
-            main_region: [0.75, 0, 0.25, 1.0],
-            fields: [
-                {name: 'employee_id', label: '社員番号', region: [0.80, 0.00, 0.20, 0.06]},
-                {name: 'date', label: '日付', region: [0.80, 0.05, 0.20, 0.06]},
-                {name: 'vehicle_code', label: '車両番号', region: [0.80, 0.10, 0.20, 0.05]},
-                {name: 'start_time', label: '始業時刻', region: [0.88, 0.17, 0.12, 0.05]},
-                {name: 'end_time', label: '終業時刻', region: [0.88, 0.21, 0.12, 0.05]},
-                {name: 'meter_out', label: '出庫メーター', region: [0.80, 0.25, 0.20, 0.05]},
-                {name: 'meter_in', label: '入庫メーター', region: [0.80, 0.30, 0.20, 0.05]},
-                {name: 'mileage', label: '走行粁', region: [0.80, 0.35, 0.20, 0.05]},
-            ]
-        }
-    };
+  currentPreset = {
+    id: null,
+    name: '',
+    attendance: { header_region: [0, 0, 1.0, 0.15], fields: [] },
+    daily_report: {
+      main_region: [0.75, 0, 0.25, 1.0],
+      fields: [
+        {name: 'employee_id', label: '社員番号', region: [0.80, 0.00, 0.20, 0.06]},
+        {name: 'date', label: '日付', region: [0.80, 0.05, 0.20, 0.06]},
+        {name: 'vehicle_code', label: '車両番号', region: [0.80, 0.10, 0.20, 0.05]},
+        {name: 'start_time', label: '始業時刻', region: [0.88, 0.17, 0.12, 0.05]},
+        {name: 'end_time', label: '終業時刻', region: [0.88, 0.21, 0.12, 0.05]},
+        {name: 'meter_out', label: '出庫メーター', region: [0.80, 0.25, 0.20, 0.05]},
+        {name: 'meter_in', label: '入庫メーター', region: [0.80, 0.30, 0.20, 0.05]},
+        {name: 'mileage', label: '走行粁', region: [0.80, 0.35, 0.20, 0.05]},
+      ]
+    }
+  };
 
-    dailyReportFields = currentPreset.daily_report.fields;
+  dailyReportFields = currentPreset.daily_report.fields;
 
-    document.getElementById('welcomeCard').style.display = 'none';
-    document.getElementById('editorCard').style.display = 'block';
-    document.getElementById('deleteBtn').style.display = 'none';
+  document.getElementById('welcomeCard').classList.add('hidden');
+  document.getElementById('editorCard').classList.remove('hidden');
+  document.getElementById('deleteBtn').classList.add('hidden');
 
-    document.getElementById('presetName').value = '';
-    document.getElementById('att_header_x').value = 0;
-    document.getElementById('att_header_y').value = 0;
-    document.getElementById('att_header_w').value = 1;
-    document.getElementById('att_header_h').value = 0.15;
-    document.getElementById('dr_main_x').value = 0.75;
-    document.getElementById('dr_main_y').value = 0;
-    document.getElementById('dr_main_w').value = 0.25;
-    document.getElementById('dr_main_h').value = 1;
+  document.getElementById('presetName').value = '';
+  document.getElementById('att_header_x').value = 0;
+  document.getElementById('att_header_y').value = 0;
+  document.getElementById('att_header_w').value = 1;
+  document.getElementById('att_header_h').value = 0.15;
+  document.getElementById('dr_main_x').value = 0.75;
+  document.getElementById('dr_main_y').value = 0;
+  document.getElementById('dr_main_w').value = 0.25;
+  document.getElementById('dr_main_h').value = 1;
 
-    renderFieldList();
-    renderPresetList();
+  renderFieldList();
+  renderPresetList();
 }
 
 // タブ切り替え
 function switchTab(tab) {
-    currentTab = tab;
-    document.querySelectorAll('.tab-button').forEach(btn => {
-        btn.classList.toggle('active', btn.textContent.includes(
-            tab === 'attendance' ? '勤怠' : '日報'
-        ));
-    });
-    document.getElementById('attendanceTab').style.display = tab === 'attendance' ? 'block' : 'none';
-    document.getElementById('dailyReportTab').style.display = tab === 'daily_report' ? 'block' : 'none';
+  currentTab = tab;
+
+  const tabAtt = document.getElementById('tabAttendance');
+  const tabDr = document.getElementById('tabDailyReport');
+  const contentAtt = document.getElementById('attendanceTab');
+  const contentDr = document.getElementById('dailyReportTab');
+
+  if (tab === 'attendance') {
+    tabAtt.className = 'flex-1 py-3 px-6 rounded-lg font-semibold transition bg-blue-600 text-white';
+    tabDr.className = 'flex-1 py-3 px-6 rounded-lg font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300';
+    contentAtt.classList.remove('hidden');
+    contentDr.classList.add('hidden');
+  } else {
+    tabDr.className = 'flex-1 py-3 px-6 rounded-lg font-semibold transition bg-blue-600 text-white';
+    tabAtt.className = 'flex-1 py-3 px-6 rounded-lg font-semibold transition bg-gray-200 text-gray-700 hover:bg-gray-300';
+    contentDr.classList.remove('hidden');
+    contentAtt.classList.add('hidden');
+  }
 }
 
 // プレビュー画像読み込み
 function loadPreviewImage(type, input) {
-    const file = input.files[0];
-    if (file) {
-        loadPreviewImageFromFile(type, file);
-    }
+  const file = input.files[0];
+  if (file) loadPreviewImageFromFile(type, file);
 }
 
 function loadPreviewImageFromFile(type, file) {
-    const formData = new FormData();
-    formData.append('file', file);
+  const formData = new FormData();
+  formData.append('file', file);
 
-    fetch('/tools/report_relater/api/preview_image', {
-        method: 'POST',
-        body: formData
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.error) {
-            alert('エラー: ' + data.error);
-            return;
-        }
+  // ドロップゾーンを隠す
+  const dropZone = document.getElementById(type === 'attendance' ? 'attendanceDropZone' : 'dailyReportDropZone');
+  dropZone.innerHTML = '<div class="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div><p class="mt-2 text-gray-500">読み込み中...</p>';
 
-        imageData[type] = data;
+  fetch('/tools/report_relater/api/preview_image', {
+    method: 'POST',
+    body: formData
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) {
+      alert('エラー: ' + data.error);
+      return;
+    }
 
-        const imgId = type === 'attendance' ? 'attendanceImage' : 'dailyReportImage';
-        const placeholderId = type === 'attendance' ? 'attendancePlaceholder' : 'dailyReportPlaceholder';
-
-        const img = document.getElementById(imgId);
-        img.src = 'data:image/png;base64,' + data.image;
-        img.style.display = 'block';
-        document.getElementById(placeholderId).style.display = 'none';
-
-        // 画像読み込み完了後に領域を描画
-        img.onload = function() {
-            if (type === 'attendance') {
-                drawRegionOnImage('attendance', 'header');
-            } else {
-                drawAllDailyReportRegions();
-            }
-        };
-    })
-    .catch(err => {
-        console.error('画像読み込みエラー:', err);
-        alert('画像の読み込みに失敗しました');
-    });
-}
-
-// 領域描画
-function drawRegionOnImage(type, regionType) {
-    const overlayId = type === 'attendance' ? 'attendanceOverlay' : 'dailyReportOverlay';
     const imgId = type === 'attendance' ? 'attendanceImage' : 'dailyReportImage';
-    const overlay = document.getElementById(overlayId);
-    const img = document.getElementById(imgId);
+    const containerId = type === 'attendance' ? 'attendanceImageContainer' : 'dailyReportImageContainer';
 
-    if (!img.src || img.style.display === 'none') return;
+    document.getElementById(imgId).src = 'data:image/png;base64,' + data.image;
+    document.getElementById(containerId).classList.remove('hidden');
+    dropZone.classList.add('hidden');
 
-    overlay.innerHTML = '';
-
-    const imgRect = img.getBoundingClientRect();
-    const containerRect = img.parentElement.getBoundingClientRect();
-
-    if (type === 'attendance' && regionType === 'header') {
-        const x = parseFloat(document.getElementById('att_header_x').value) || 0;
-        const y = parseFloat(document.getElementById('att_header_y').value) || 0;
-        const w = parseFloat(document.getElementById('att_header_w').value) || 1;
-        const h = parseFloat(document.getElementById('att_header_h').value) || 0.15;
-
-        addRegionRect(overlay, img, x, y, w, h, 'Header', 'red');
+    // プレビュー更新
+    if (type === 'attendance') {
+      updateAttendancePreview();
+    } else {
+      updateDailyReportPreview();
     }
+  })
+  .catch(err => {
+    console.error('画像読み込みエラー:', err);
+    alert('画像の読み込みに失敗しました');
+  });
 }
 
-function drawAllDailyReportRegions() {
-    const overlay = document.getElementById('dailyReportOverlay');
-    const img = document.getElementById('dailyReportImage');
+// プレビュー更新
+function updateAttendancePreview() {
+  const overlay = document.getElementById('attendanceOverlay');
+  const img = document.getElementById('attendanceImage');
+  if (!img.src) return;
 
-    if (!img.src || img.style.display === 'none') return;
+  overlay.innerHTML = '';
 
-    overlay.innerHTML = '';
+  const x = parseFloat(document.getElementById('att_header_x').value) || 0;
+  const y = parseFloat(document.getElementById('att_header_y').value) || 0;
+  const w = parseFloat(document.getElementById('att_header_w').value) || 1;
+  const h = parseFloat(document.getElementById('att_header_h').value) || 0.15;
 
-    // メイン領域
-    const mx = parseFloat(document.getElementById('dr_main_x').value) || 0.75;
-    const my = parseFloat(document.getElementById('dr_main_y').value) || 0;
-    const mw = parseFloat(document.getElementById('dr_main_w').value) || 0.25;
-    const mh = parseFloat(document.getElementById('dr_main_h').value) || 1;
-
-    addRegionRect(overlay, img, mx, my, mw, mh, 'Main Region', 'green');
-
-    // フィールド領域
-    dailyReportFields.forEach((field, index) => {
-        if (field.region) {
-            addRegionRect(overlay, img,
-                field.region[0], field.region[1], field.region[2], field.region[3],
-                field.label || field.name, 'red', index
-            );
-        }
-    });
+  addRegionRect(overlay, x, y, w, h, 'Header', '#ef4444');
 }
 
-function addRegionRect(overlay, img, x, y, w, h, label, color, fieldIndex) {
-    const rect = document.createElement('div');
-    rect.className = 'region-rect';
-    rect.style.left = (x * 100) + '%';
-    rect.style.top = (y * 100) + '%';
-    rect.style.width = (w * 100) + '%';
-    rect.style.height = (h * 100) + '%';
-    rect.style.borderColor = color;
-    rect.style.background = color === 'green' ? 'rgba(0,255,0,0.1)' : 'rgba(255,0,0,0.1)';
+function updateDailyReportPreview() {
+  const overlay = document.getElementById('dailyReportOverlay');
+  const img = document.getElementById('dailyReportImage');
+  if (!img.src) return;
 
-    const labelEl = document.createElement('div');
-    labelEl.className = 'region-label';
-    labelEl.textContent = label;
-    labelEl.style.background = color;
-    rect.appendChild(labelEl);
+  overlay.innerHTML = '';
 
-    // リサイズハンドル
-    const handle = document.createElement('div');
-    handle.className = 'resize-handle se';
-    handle.style.borderColor = color;
-    rect.appendChild(handle);
+  // メイン領域（緑）
+  const mx = parseFloat(document.getElementById('dr_main_x').value) || 0.75;
+  const my = parseFloat(document.getElementById('dr_main_y').value) || 0;
+  const mw = parseFloat(document.getElementById('dr_main_w').value) || 0.25;
+  const mh = parseFloat(document.getElementById('dr_main_h').value) || 1;
 
-    // フィールド編集
-    if (fieldIndex !== undefined) {
-        rect.onclick = (e) => {
-            e.stopPropagation();
-            editField(fieldIndex);
-        };
+  addRegionRect(overlay, mx, my, mw, mh, 'Main Region', '#22c55e');
+
+  // フィールド領域（赤）
+  dailyReportFields.forEach(field => {
+    if (field.region) {
+      addRegionRect(overlay, field.region[0], field.region[1], field.region[2], field.region[3],
+                   field.label || field.name, '#ef4444');
     }
+  });
+}
 
-    overlay.appendChild(rect);
+function addRegionRect(overlay, x, y, w, h, label, color) {
+  const rect = document.createElement('div');
+  rect.className = 'region-rect';
+  rect.style.left = (x * 100) + '%';
+  rect.style.top = (y * 100) + '%';
+  rect.style.width = (w * 100) + '%';
+  rect.style.height = (h * 100) + '%';
+  rect.style.borderColor = color;
+  rect.style.backgroundColor = color + '20';
+
+  const labelEl = document.createElement('div');
+  labelEl.className = 'region-label';
+  labelEl.textContent = label;
+  labelEl.style.backgroundColor = color;
+  rect.appendChild(labelEl);
+
+  overlay.appendChild(rect);
 }
 
 // フィールド一覧表示
 function renderFieldList() {
-    const container = document.getElementById('fieldList');
-    if (dailyReportFields.length === 0) {
-        container.innerHTML = '<div class="p-3 text-muted text-center">フィールドがありません</div>';
-        return;
-    }
+  const container = document.getElementById('fieldList');
+  if (dailyReportFields.length === 0) {
+    container.innerHTML = '<div class="p-4 text-center text-gray-400 text-sm">フィールドがありません</div>';
+    return;
+  }
 
-    container.innerHTML = dailyReportFields.map((field, index) => `
-        <div class="field-item" onclick="editField(${index})">
-            <span>${escapeHtml(field.label || field.name)}</span>
-            <span class="text-muted small">${field.name}</span>
-        </div>
-    `).join('');
+  container.innerHTML = dailyReportFields.map((field, index) => `
+    <div class="p-3 flex justify-between items-center hover:bg-gray-100 cursor-pointer transition"
+         onclick="editField(${index})">
+      <div>
+        <span class="font-medium text-gray-800">${escapeHtml(field.label || field.name)}</span>
+        <span class="text-xs text-gray-400 ml-2">${field.name}</span>
+      </div>
+      <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      </svg>
+    </div>
+  `).join('');
 }
 
 // フィールド追加
 function addField() {
-    editingFieldIndex = -1;
-    document.getElementById('fieldName').value = 'employee_id';
-    document.getElementById('fieldLabel').value = '';
-    document.getElementById('field_x').value = 0.8;
-    document.getElementById('field_y').value = 0.4;
-    document.getElementById('field_w').value = 0.2;
-    document.getElementById('field_h').value = 0.05;
-    document.getElementById('deleteFieldBtn').style.display = 'none';
-
-    new bootstrap.Modal(document.getElementById('fieldModal')).show();
+  editingFieldIndex = -1;
+  document.getElementById('fieldName').value = 'employee_id';
+  document.getElementById('fieldLabel').value = '';
+  document.getElementById('field_x').value = 0.8;
+  document.getElementById('field_y').value = 0.4;
+  document.getElementById('field_w').value = 0.2;
+  document.getElementById('field_h').value = 0.05;
+  document.getElementById('deleteFieldBtn').classList.add('hidden');
+  document.getElementById('fieldModal').classList.remove('hidden');
 }
 
 // フィールド編集
 function editField(index) {
-    editingFieldIndex = index;
-    const field = dailyReportFields[index];
+  editingFieldIndex = index;
+  const field = dailyReportFields[index];
 
-    document.getElementById('fieldName').value = field.name;
-    document.getElementById('fieldLabel').value = field.label || '';
-    document.getElementById('field_x').value = field.region ? field.region[0] : 0;
-    document.getElementById('field_y').value = field.region ? field.region[1] : 0;
-    document.getElementById('field_w').value = field.region ? field.region[2] : 0.1;
-    document.getElementById('field_h').value = field.region ? field.region[3] : 0.05;
-    document.getElementById('deleteFieldBtn').style.display = 'block';
+  document.getElementById('fieldName').value = field.name;
+  document.getElementById('fieldLabel').value = field.label || '';
+  document.getElementById('field_x').value = field.region ? field.region[0] : 0;
+  document.getElementById('field_y').value = field.region ? field.region[1] : 0;
+  document.getElementById('field_w').value = field.region ? field.region[2] : 0.1;
+  document.getElementById('field_h').value = field.region ? field.region[3] : 0.05;
+  document.getElementById('deleteFieldBtn').classList.remove('hidden');
+  document.getElementById('fieldModal').classList.remove('hidden');
+}
 
-    new bootstrap.Modal(document.getElementById('fieldModal')).show();
+function closeFieldModal() {
+  document.getElementById('fieldModal').classList.add('hidden');
 }
 
 // フィールド保存
 function saveField() {
-    const field = {
-        name: document.getElementById('fieldName').value,
-        label: document.getElementById('fieldLabel').value || document.getElementById('fieldName').selectedOptions[0].text.split(' ')[0],
-        region: [
-            parseFloat(document.getElementById('field_x').value),
-            parseFloat(document.getElementById('field_y').value),
-            parseFloat(document.getElementById('field_w').value),
-            parseFloat(document.getElementById('field_h').value)
-        ]
-    };
+  const fieldNameSelect = document.getElementById('fieldName');
+  const field = {
+    name: fieldNameSelect.value,
+    label: document.getElementById('fieldLabel').value || fieldNameSelect.options[fieldNameSelect.selectedIndex].text,
+    region: [
+      parseFloat(document.getElementById('field_x').value),
+      parseFloat(document.getElementById('field_y').value),
+      parseFloat(document.getElementById('field_w').value),
+      parseFloat(document.getElementById('field_h').value)
+    ]
+  };
 
-    if (editingFieldIndex >= 0) {
-        dailyReportFields[editingFieldIndex] = field;
-    } else {
-        dailyReportFields.push(field);
-    }
+  if (editingFieldIndex >= 0) {
+    dailyReportFields[editingFieldIndex] = field;
+  } else {
+    dailyReportFields.push(field);
+  }
 
-    bootstrap.Modal.getInstance(document.getElementById('fieldModal')).hide();
-    renderFieldList();
-    drawAllDailyReportRegions();
+  closeFieldModal();
+  renderFieldList();
+  updateDailyReportPreview();
 }
 
 // フィールド削除
 function deleteField() {
-    if (editingFieldIndex >= 0) {
-        dailyReportFields.splice(editingFieldIndex, 1);
-        bootstrap.Modal.getInstance(document.getElementById('fieldModal')).hide();
-        renderFieldList();
-        drawAllDailyReportRegions();
-    }
+  if (editingFieldIndex >= 0) {
+    dailyReportFields.splice(editingFieldIndex, 1);
+    closeFieldModal();
+    renderFieldList();
+    updateDailyReportPreview();
+  }
 }
 
 // プリセット保存
 function savePreset() {
-    const name = document.getElementById('presetName').value.trim();
-    if (!name) {
-        alert('プリセット名を入力してください');
-        return;
+  const name = document.getElementById('presetName').value.trim();
+  if (!name) {
+    alert('プリセット名を入力してください');
+    return;
+  }
+
+  const data = {
+    name: name,
+    attendance: {
+      header_region: [
+        parseFloat(document.getElementById('att_header_x').value),
+        parseFloat(document.getElementById('att_header_y').value),
+        parseFloat(document.getElementById('att_header_w').value),
+        parseFloat(document.getElementById('att_header_h').value)
+      ],
+      fields: []
+    },
+    daily_report: {
+      main_region: [
+        parseFloat(document.getElementById('dr_main_x').value),
+        parseFloat(document.getElementById('dr_main_y').value),
+        parseFloat(document.getElementById('dr_main_w').value),
+        parseFloat(document.getElementById('dr_main_h').value)
+      ],
+      fields: dailyReportFields
     }
+  };
 
-    const data = {
-        name: name,
-        attendance: {
-            header_region: [
-                parseFloat(document.getElementById('att_header_x').value),
-                parseFloat(document.getElementById('att_header_y').value),
-                parseFloat(document.getElementById('att_header_w').value),
-                parseFloat(document.getElementById('att_header_h').value)
-            ],
-            fields: []
-        },
-        daily_report: {
-            main_region: [
-                parseFloat(document.getElementById('dr_main_x').value),
-                parseFloat(document.getElementById('dr_main_y').value),
-                parseFloat(document.getElementById('dr_main_w').value),
-                parseFloat(document.getElementById('dr_main_h').value)
-            ],
-            fields: dailyReportFields
-        }
-    };
+  const isNew = !currentPreset.id;
+  const url = isNew ? '/tools/report_relater/api/presets' : `/tools/report_relater/api/presets/${currentPreset.id}`;
+  const method = isNew ? 'POST' : 'PUT';
 
-    const isNew = !currentPreset.id;
-    const url = isNew ? '/tools/report_relater/api/presets' :
-                        `/tools/report_relater/api/presets/${currentPreset.id}`;
-    const method = isNew ? 'POST' : 'PUT';
-
-    fetch(url, {
-        method: method,
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(data)
-    })
-    .then(r => r.json())
-    .then(result => {
-        if (result.error) {
-            alert('エラー: ' + result.error);
-            return;
-        }
-
-        alert('保存しました');
-        loadPresets();
-        if (result.preset) {
-            currentPreset = result.preset;
-        }
-    })
-    .catch(err => {
-        console.error('保存エラー:', err);
-        alert('保存に失敗しました');
-    });
+  fetch(url, {
+    method: method,
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  })
+  .then(r => r.json())
+  .then(result => {
+    if (result.error) {
+      alert('エラー: ' + result.error);
+      return;
+    }
+    alert('保存しました');
+    loadPresets();
+    if (result.preset) currentPreset = result.preset;
+  })
+  .catch(err => {
+    console.error('保存エラー:', err);
+    alert('保存に失敗しました');
+  });
 }
 
 // プリセット削除
 function deletePreset() {
-    if (!currentPreset || !currentPreset.id) return;
+  if (!currentPreset || !currentPreset.id) return;
+  if (!confirm('このプリセットを削除しますか？')) return;
 
-    if (!confirm('このプリセットを削除しますか？')) return;
-
-    fetch(`/tools/report_relater/api/presets/${currentPreset.id}`, {
-        method: 'DELETE'
-    })
-    .then(r => r.json())
-    .then(result => {
-        if (result.error) {
-            alert('エラー: ' + result.error);
-            return;
-        }
-
-        currentPreset = null;
-        document.getElementById('editorCard').style.display = 'none';
-        document.getElementById('welcomeCard').style.display = 'block';
-        loadPresets();
-    })
-    .catch(err => {
-        console.error('削除エラー:', err);
-        alert('削除に失敗しました');
-    });
+  fetch(`/tools/report_relater/api/presets/${currentPreset.id}`, { method: 'DELETE' })
+  .then(r => r.json())
+  .then(result => {
+    if (result.error) {
+      alert('エラー: ' + result.error);
+      return;
+    }
+    currentPreset = null;
+    document.getElementById('editorCard').classList.add('hidden');
+    document.getElementById('welcomeCard').classList.remove('hidden');
+    loadPresets();
+  })
+  .catch(err => {
+    console.error('削除エラー:', err);
+    alert('削除に失敗しました');
+  });
 }
 
 // 編集キャンセル
 function cancelEdit() {
-    currentPreset = null;
-    document.getElementById('editorCard').style.display = 'none';
-    document.getElementById('welcomeCard').style.display = 'block';
-    renderPresetList();
-}
-
-// 描画機能のセットアップ
-function setupDrawing() {
-    // 今後の拡張用：マウスドラッグで領域を描画する機能
+  currentPreset = null;
+  document.getElementById('editorCard').classList.add('hidden');
+  document.getElementById('welcomeCard').classList.remove('hidden');
+  renderPresetList();
 }
 </script>
 {% endblock %}
