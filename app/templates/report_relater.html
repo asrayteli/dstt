@@ -423,6 +423,7 @@ function renderOCRResults(data) {
   try {
     if (att.applied_settings) {
       let settingsHtml = `<strong>プリセット:</strong> ${att.applied_settings.preset_name || '不明'}<br>`;
+      settingsHtml += `<strong>OCRエンジン:</strong> ${att.applied_settings.ocr_engine || 'Tesseract'}<br>`;
 
       // 画像サイズ
       if (att.applied_settings.image_size) {

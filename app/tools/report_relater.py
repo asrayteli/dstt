@@ -28,6 +28,12 @@ try:
 except ImportError:
     TESSERACT_AVAILABLE = False
 
+try:
+    import easyocr
+    EASYOCR_AVAILABLE = True
+except ImportError:
+    EASYOCR_AVAILABLE = False
+
 
 report_relater_bp = Blueprint(
     "report_relater", __name__, url_prefix="/tools/report_relater"
@@ -77,6 +83,30 @@ def _configure_tesseract():
 
 
 TESSERACT_CONFIGURED = _configure_tesseract()
+
+# ============================================================
+# EasyOCR 初期化
+# ============================================================
+EASYOCR_READER = None
+
+def _init_easyocr():
+    """EasyOCRリーダーを初期化する（遅延初期化）"""
+    global EASYOCR_READER
+    if EASYOCR_READER is None and EASYOCR_AVAILABLE:
+        try:
+            # 日本語と英語をサポート、GPUがあれば使用
+            EASYOCR_READER = easyocr.Reader(['ja', 'en'], gpu=True)
+            logger.info("EasyOCR初期化成功（GPU使用）")
+        except Exception as e:
+            try:
+                # GPU失敗時はCPUで再試行
+                EASYOCR_READER = easyocr.Reader(['ja', 'en'], gpu=False)
+                logger.info("EasyOCR初期化成功（CPU使用）")
+            except Exception as e2:
+                logger.error(f"EasyOCR初期化失敗: {e2}")
+                return None
+    return EASYOCR_READER
+
 
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 PDF_RENDER_DPI = 300
@@ -578,9 +608,17 @@ def process_attendance_pdf(pdf_path, preset=None):
 
     logger.info(f"テーブル設定: data_start_y={data_start_y}, row_height={row_height}, max_rows={max_rows}")
 
+    # OCRエンジンを判定
+    ocr_engine = "不明"
+    if EASYOCR_AVAILABLE:
+        ocr_engine = "EasyOCR"
+    elif TESSERACT_AVAILABLE and TESSERACT_CONFIGURED:
+        ocr_engine = "Tesseract"
+
     # 適用された設定を結果に保存（デバッグ用）
     result["applied_settings"] = {
         "preset_name": preset.get("name", "なし") if preset else "デフォルト",
+        "ocr_engine": ocr_engine,
         "table_config": table_config,
         "columns": [{"name": c.get("name"), "label": c.get("label"), "x": c.get("x"), "width": c.get("width")} for c in columns],
         "image_size": None,  # 後で設定
@@ -814,7 +852,69 @@ def extract_attendance_fields_by_region(cv_img, fields):
 
 
 def ocr_region_improved(region, field_name):
-    """改善されたOCR処理"""
+    """改善されたOCR処理（EasyOCR優先、Tesseractフォールバック）"""
+    try:
+        # EasyOCRを試行
+        reader = _init_easyocr()
+        if reader is not None:
+            return _ocr_with_easyocr(region, field_name, reader)
+
+        # EasyOCRが使えない場合はTesseractにフォールバック
+        if TESSERACT_AVAILABLE and TESSERACT_CONFIGURED:
+            return _ocr_with_tesseract(region, field_name)
+
+        logger.error("OCRエンジンが利用できません")
+        return ""
+
+    except Exception as e:
+        logger.warning(f"OCRエラー ({field_name}): {e}")
+        return ""
+
+
+def _ocr_with_easyocr(region, field_name, reader):
+    """EasyOCRでOCR処理を行う"""
+    try:
+        # 画像の前処理
+        # グレースケール変換
+        gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+
+        # コントラスト強調 (CLAHE)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+
+        # 小さい領域は拡大
+        h_r, w_r = gray.shape[:2]
+        if h_r < 40:
+            scale = 40.0 / h_r
+            gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+
+        # パディングを追加
+        gray = cv2.copyMakeBorder(gray, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
+
+        # EasyOCRで認識
+        # detail=0で単純なテキストリストを取得
+        results = reader.readtext(gray, detail=0, paragraph=False)
+
+        if results:
+            text = "".join(results)
+        else:
+            text = ""
+
+        # 後処理
+        text = post_process_ocr_text(text, field_name)
+
+        return text
+
+    except Exception as e:
+        logger.warning(f"EasyOCRエラー ({field_name}): {e}")
+        # Tesseractにフォールバック
+        if TESSERACT_AVAILABLE and TESSERACT_CONFIGURED:
+            return _ocr_with_tesseract(region, field_name)
+        return ""
+
+
+def _ocr_with_tesseract(region, field_name):
+    """TesseractでOCR処理を行う（フォールバック用）"""
     try:
         # グレースケール変換
         gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
@@ -843,16 +943,12 @@ def ocr_region_improved(region, field_name):
 
         # フィールドタイプに応じたOCR設定
         if field_name in ("actual_start", "actual_end", "start_time", "end_time"):
-            # 時刻用
             config = "--psm 7 -c tessedit_char_whitelist=0123456789:"
         elif field_name in ("meter_out", "meter_in", "mileage", "vehicle_code", "employee_id"):
-            # 数字のみ
             config = "--psm 7 -c tessedit_char_whitelist=0123456789"
         elif field_name == "date":
-            # 日付用
             config = "--psm 7 -c tessedit_char_whitelist=0123456789/"
         elif field_name == "day_of_week":
-            # 曜日（日本語）
             config = "--psm 7 -l jpn"
         else:
             config = "--psm 7 -c tessedit_char_whitelist=0123456789/:.-"
@@ -865,7 +961,7 @@ def ocr_region_improved(region, field_name):
         return text
 
     except Exception as e:
-        logger.warning(f"OCRエラー ({field_name}): {e}")
+        logger.warning(f"Tesseract OCRエラー ({field_name}): {e}")
         return ""
 
 
