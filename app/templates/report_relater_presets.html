@@ -118,57 +118,54 @@
             </div>
 
             <!-- 設定エリア -->
-            <div>
-              <h3 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                </svg>
-                ヘッダー領域
-              </h3>
-
-              <div class="bg-gray-50 rounded-lg p-4 space-y-4">
-                <p class="text-sm text-gray-600">社員番号・期間を読み取る領域を指定</p>
-
-                <div class="grid grid-cols-2 gap-3">
-                  <div>
-                    <label class="block text-xs text-gray-500 mb-1">X位置 (0~1)</label>
-                    <input type="number" id="att_header_x" value="0" step="0.01" min="0" max="1"
-                           class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
-                           onchange="updateAttendancePreview()">
-                  </div>
-                  <div>
-                    <label class="block text-xs text-gray-500 mb-1">Y位置 (0~1)</label>
-                    <input type="number" id="att_header_y" value="0" step="0.01" min="0" max="1"
-                           class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
-                           onchange="updateAttendancePreview()">
-                  </div>
-                  <div>
-                    <label class="block text-xs text-gray-500 mb-1">幅 (0~1)</label>
-                    <input type="number" id="att_header_w" value="1" step="0.01" min="0" max="1"
-                           class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
-                           onchange="updateAttendancePreview()">
-                  </div>
-                  <div>
-                    <label class="block text-xs text-gray-500 mb-1">高さ (0~1)</label>
-                    <input type="number" id="att_header_h" value="0.15" step="0.01" min="0" max="1"
-                           class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
-                           onchange="updateAttendancePreview()">
+            <div class="space-y-4">
+              <!-- ヘッダー領域 -->
+              <div>
+                <h3 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                  <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                  </svg>
+                  ヘッダー領域
+                </h3>
+                <div class="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                  <p class="text-xs text-blue-700 mb-2">社員番号・期間を読み取る領域</p>
+                  <div class="grid grid-cols-4 gap-2 text-xs">
+                    <input type="number" id="att_header_x" value="0" step="0.01" min="0" max="1" placeholder="X"
+                           class="border border-gray-300 rounded px-2 py-1" onchange="updateAttendancePreview()">
+                    <input type="number" id="att_header_y" value="0" step="0.01" min="0" max="1" placeholder="Y"
+                           class="border border-gray-300 rounded px-2 py-1" onchange="updateAttendancePreview()">
+                    <input type="number" id="att_header_w" value="1" step="0.01" min="0" max="1" placeholder="W"
+                           class="border border-gray-300 rounded px-2 py-1" onchange="updateAttendancePreview()">
+                    <input type="number" id="att_header_h" value="0.15" step="0.01" min="0" max="1" placeholder="H"
+                           class="border border-gray-300 rounded px-2 py-1" onchange="updateAttendancePreview()">
                   </div>
                 </div>
-
-                <button onclick="updateAttendancePreview()"
-                        class="w-full bg-blue-100 text-blue-700 py-2 rounded-lg hover:bg-blue-200 transition text-sm font-medium">
-                  プレビュー更新
-                </button>
               </div>
 
-              <div class="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                <p class="text-sm text-yellow-800">
-                  <strong>ヒント:</strong> 値は0〜1の割合で指定します。
-                  例えば上から15%の領域は Y=0, 高さ=0.15 となります。
-                </p>
+              <!-- フィールド一覧 -->
+              <div>
+                <h3 class="font-semibold text-gray-800 mb-3 flex items-center justify-between">
+                  <span class="flex items-center gap-2">
+                    <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/>
+                    </svg>
+                    フィールド定義
+                  </span>
+                  <button onclick="addAttendanceField()"
+                          class="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200 transition">
+                    + 追加
+                  </button>
+                </h3>
+
+                <div id="attendanceFieldList" class="bg-gray-50 rounded-lg divide-y divide-gray-200 max-h-48 overflow-y-auto text-sm">
+                  <div class="p-4 text-center text-gray-400">フィールドがありません</div>
+                </div>
               </div>
+
+              <button onclick="updateAttendancePreview()"
+                      class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition font-medium">
+                プレビュー更新
+              </button>
             </div>
           </div>
         </div>
@@ -303,39 +300,50 @@
   </div>
 </div>
 
-<!-- 勤怠データ プレビューポップアップ (中央表示) -->
-<div id="attendancePopup" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-  <div class="bg-white rounded-xl shadow-2xl max-w-4xl max-h-[90vh] mx-4 flex flex-col">
-    <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-xl flex justify-between items-center">
-      <h3 class="font-semibold text-lg">勤怠データ - ヘッダー領域を指定</h3>
-      <button onclick="closeAttendancePopup()" class="text-white/80 hover:text-white">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-        </svg>
-      </button>
-    </div>
-    <div class="p-4 bg-blue-50 text-blue-800 text-sm">
-      画像上でドラッグしてヘッダー領域を指定してください
-    </div>
-    <div class="flex-1 overflow-auto p-4">
-      <div id="attendancePopupImageContainer" class="relative inline-block cursor-crosshair">
-        <img id="attendancePopupImage" src="" class="max-w-full">
-        <div id="attendancePopupOverlay" class="absolute inset-0"></div>
-        <div id="attendanceDragRect" class="hidden absolute border-2 border-red-500 bg-red-500/20 pointer-events-none"></div>
-      </div>
-    </div>
-    <div class="bg-gray-50 px-6 py-4 rounded-b-xl flex justify-between items-center">
-      <div class="text-sm text-gray-600">
-        現在の領域: <span id="attendanceRegionInfo">X: 0, Y: 0, 幅: 1, 高さ: 0.15</span>
-      </div>
-      <div class="flex gap-3">
-        <button onclick="closeAttendancePopup()"
-                class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition">
-          キャンセル
+<!-- 勤怠データ プレビューポップアップ (日報と同様のレイアウト) -->
+<div id="attendancePopup" class="hidden fixed inset-0 bg-black/70 z-50">
+  <div class="flex h-full">
+    <!-- 左側: プレビュー画像 -->
+    <div class="flex-1 flex flex-col bg-white m-4 mr-2 rounded-xl shadow-2xl max-w-4xl">
+      <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-xl flex justify-between items-center">
+        <h3 class="font-semibold text-lg">勤怠データ - フィールド領域を指定</h3>
+        <button onclick="closeAttendancePopup()" class="text-white/80 hover:text-white">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
         </button>
-        <button onclick="applyAttendanceRegion()"
-                class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition font-medium">
-          適用
+      </div>
+      <div id="attendancePopupHint" class="p-4 bg-blue-50 text-blue-800 text-sm">
+        右側のフィールドをクリックしてから、画像上でドラッグして領域を指定
+      </div>
+      <div class="flex-1 overflow-auto p-4">
+        <div id="attendancePopupImageContainer" class="relative inline-block cursor-crosshair">
+          <img id="attendancePopupImage" src="" class="max-w-full">
+          <div id="attendancePopupOverlay" class="absolute inset-0 pointer-events-none"></div>
+          <div id="attendanceDragRect" class="hidden absolute border-2 border-red-500 bg-red-500/20 pointer-events-none"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右側: フィールド一覧 -->
+    <div class="w-80 flex flex-col bg-white m-4 ml-2 rounded-xl shadow-2xl">
+      <div class="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-4 rounded-t-xl">
+        <h3 class="font-semibold text-lg">フィールド一覧</h3>
+        <p class="text-sm text-white/80 mt-1">クリックして選択後、画像上でドラッグ</p>
+      </div>
+      <div id="attendancePopupFieldList" class="flex-1 overflow-y-auto divide-y divide-gray-100">
+        <!-- フィールド一覧がここに入る -->
+      </div>
+      <div class="p-4 border-t">
+        <button onclick="addAttendanceFieldFromPopup()"
+                class="w-full bg-blue-100 text-blue-700 py-2 rounded-lg hover:bg-blue-200 transition text-sm font-medium">
+          + 新しいフィールドを追加
+        </button>
+      </div>
+      <div class="bg-gray-50 px-4 py-3 rounded-b-xl">
+        <button onclick="closeAttendancePopup()"
+                class="w-full bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition font-medium">
+          完了
         </button>
       </div>
     </div>
@@ -392,7 +400,46 @@
   </div>
 </div>
 
-<!-- フィールド追加モーダル -->
+<!-- 勤怠データ フィールド追加モーダル -->
+<div id="addAttendanceFieldModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
+    <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-xl">
+      <h3 class="font-semibold text-lg">勤怠フィールドを追加</h3>
+    </div>
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">フィールドタイプ</label>
+        <select id="newAttFieldName" class="w-full border border-gray-300 rounded-lg px-4 py-2">
+          <option value="date">年月日</option>
+          <option value="day_of_week">曜日</option>
+          <option value="actual_start">実績始業</option>
+          <option value="actual_end">実績終業</option>
+          <option value="meter_out">出庫メーター</option>
+          <option value="meter_in">入庫メーター</option>
+          <option value="mileage">走行キロ</option>
+          <option value="vehicle_code">車両番号</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">ラベル（表示名）</label>
+        <input type="text" id="newAttFieldLabel" class="w-full border border-gray-300 rounded-lg px-4 py-2"
+               placeholder="例: 年月日">
+      </div>
+    </div>
+    <div class="bg-gray-50 px-6 py-4 rounded-b-xl flex justify-end gap-3">
+      <button onclick="closeAddAttendanceFieldModal()"
+              class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition">
+        キャンセル
+      </button>
+      <button onclick="confirmAddAttendanceField()"
+              class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition font-medium">
+        追加して領域指定へ
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 日報 フィールド追加モーダル -->
 <div id="addFieldModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
   <div class="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
     <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-xl">
@@ -472,6 +519,7 @@ let currentPreset = null;
 let presets = [];
 let currentTab = 'attendance';
 let dailyReportFields = [];
+let attendanceFields = []; // 勤怠データフィールド
 let editingFieldIndex = -1;
 
 // ドラッグ用変数
@@ -480,7 +528,20 @@ let dragStartX = 0;
 let dragStartY = 0;
 let currentDragType = null; // 'attendance' or 'daily_report'
 let selectedFieldIndex = -1; // 日報ポップアップで選択中のフィールド
+let selectedAttFieldIndex = -1; // 勤怠ポップアップで選択中のフィールド
 let tempAttendanceRegion = [0, 0, 1, 0.15]; // 勤怠データ用一時保存領域
+
+// デフォルト勤怠フィールド
+const defaultAttendanceFields = [
+  {name: 'date', label: '年月日', region: [0.05, 0.10, 0.10, 0.05]},
+  {name: 'day_of_week', label: '曜日', region: [0.15, 0.10, 0.05, 0.05]},
+  {name: 'actual_start', label: '実績始業', region: [0.25, 0.10, 0.08, 0.05]},
+  {name: 'actual_end', label: '実績終業', region: [0.33, 0.10, 0.08, 0.05]},
+  {name: 'meter_out', label: '出庫メーター', region: [0.45, 0.10, 0.10, 0.05]},
+  {name: 'meter_in', label: '入庫メーター', region: [0.55, 0.10, 0.10, 0.05]},
+  {name: 'mileage', label: '走行キロ', region: [0.65, 0.10, 0.08, 0.05]},
+  {name: 'vehicle_code', label: '車両番号', region: [0.75, 0.10, 0.10, 0.05]},
+];
 
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
@@ -534,6 +595,9 @@ function setupDragHandlers() {
 function startDrag(e, type) {
   if (type === 'daily_report' && selectedFieldIndex < 0) {
     return; // 日報の場合、フィールドが選択されていないとドラッグ不可
+  }
+  if (type === 'attendance' && selectedAttFieldIndex < 0) {
+    return; // 勤怠の場合、フィールドが選択されていないとドラッグ不可
   }
 
   const container = e.currentTarget;
@@ -610,11 +674,13 @@ function endDrag(e, type) {
     return;
   }
 
-  if (type === 'attendance') {
-    tempAttendanceRegion = [x, y, w, h];
+  if (type === 'attendance' && selectedAttFieldIndex >= 0) {
+    // 勤怠フィールドの領域を更新
+    attendanceFields[selectedAttFieldIndex].region = [x, y, w, h];
     updateAttendancePopupOverlay();
+    renderAttendancePopupFieldList();
   } else if (type === 'daily_report' && selectedFieldIndex >= 0) {
-    // フィールドの領域を更新
+    // 日報フィールドの領域を更新
     dailyReportFields[selectedFieldIndex].region = [x, y, w, h];
     updateDailyReportPopupOverlay();
     renderPopupFieldList();
@@ -629,42 +695,185 @@ function openAttendancePopup() {
   const srcImg = document.getElementById('attendanceImage');
   if (!srcImg.src) return;
 
-  // 現在の値を読み込み
-  tempAttendanceRegion = [
-    parseFloat(document.getElementById('att_header_x').value) || 0,
-    parseFloat(document.getElementById('att_header_y').value) || 0,
-    parseFloat(document.getElementById('att_header_w').value) || 1,
-    parseFloat(document.getElementById('att_header_h').value) || 0.15
-  ];
-
+  selectedAttFieldIndex = -1;
   document.getElementById('attendancePopupImage').src = srcImg.src;
   document.getElementById('attendancePopup').classList.remove('hidden');
 
+  renderAttendancePopupFieldList();
   updateAttendancePopupOverlay();
-  document.getElementById('attendanceRegionInfo').textContent =
-    `X: ${tempAttendanceRegion[0].toFixed(2)}, Y: ${tempAttendanceRegion[1].toFixed(2)}, 幅: ${tempAttendanceRegion[2].toFixed(2)}, 高さ: ${tempAttendanceRegion[3].toFixed(2)}`;
+  updateAttendancePopupHint();
 }
 
 function closeAttendancePopup() {
   document.getElementById('attendancePopup').classList.add('hidden');
+  selectedAttFieldIndex = -1;
+
+  // メインのフィールドリストとプレビューを更新
+  renderAttendanceFieldList();
+  updateAttendancePreview();
+}
+
+function updateAttendancePopupHint() {
+  const hint = document.getElementById('attendancePopupHint');
+  const popup = document.getElementById('attendancePopup');
+
+  if (selectedAttFieldIndex >= 0) {
+    const field = attendanceFields[selectedAttFieldIndex];
+    hint.className = 'p-4 bg-red-50 text-red-800 text-sm font-medium';
+    hint.innerHTML = `<strong>${escapeHtml(field.label || field.name)}</strong> の領域を画像上でドラッグして指定してください`;
+    popup.classList.remove('no-field-selected');
+    popup.classList.add('field-selected');
+  } else {
+    hint.className = 'p-4 bg-blue-50 text-blue-800 text-sm';
+    hint.textContent = '右側のフィールドをクリックしてから、画像上でドラッグして領域を指定';
+    popup.classList.remove('field-selected');
+    popup.classList.add('no-field-selected');
+  }
+}
+
+function renderAttendancePopupFieldList() {
+  const container = document.getElementById('attendancePopupFieldList');
+  if (attendanceFields.length === 0) {
+    container.innerHTML = '<div class="p-4 text-center text-gray-400 text-sm">フィールドがありません</div>';
+    return;
+  }
+
+  container.innerHTML = attendanceFields.map((field, index) => `
+    <div class="p-3 flex justify-between items-center cursor-pointer transition ${selectedAttFieldIndex === index ? 'bg-blue-100 border-l-4 border-blue-500' : 'hover:bg-gray-100'}"
+         onclick="selectAttFieldForDrag(${index})">
+      <div class="flex-1">
+        <span class="font-medium text-gray-800">${escapeHtml(field.label || field.name)}</span>
+        <div class="text-xs text-gray-400 mt-1">
+          ${field.region ? `X:${field.region[0].toFixed(2)} Y:${field.region[1].toFixed(2)} W:${field.region[2].toFixed(2)} H:${field.region[3].toFixed(2)}` : '未設定'}
+        </div>
+      </div>
+      <button onclick="event.stopPropagation(); removeAttFieldFromPopup(${index})" class="text-red-400 hover:text-red-600 p-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+        </svg>
+      </button>
+    </div>
+  `).join('');
+}
+
+function selectAttFieldForDrag(index) {
+  selectedAttFieldIndex = index;
+  renderAttendancePopupFieldList();
+  updateAttendancePopupOverlay();
+  updateAttendancePopupHint();
+}
+
+function removeAttFieldFromPopup(index) {
+  if (confirm('このフィールドを削除しますか？')) {
+    attendanceFields.splice(index, 1);
+    if (selectedAttFieldIndex === index) {
+      selectedAttFieldIndex = -1;
+    } else if (selectedAttFieldIndex > index) {
+      selectedAttFieldIndex--;
+    }
+    renderAttendancePopupFieldList();
+    updateAttendancePopupOverlay();
+    updateAttendancePopupHint();
+  }
 }
 
 function updateAttendancePopupOverlay() {
   const overlay = document.getElementById('attendancePopupOverlay');
   overlay.innerHTML = '';
 
-  const [x, y, w, h] = tempAttendanceRegion;
-  addRegionRect(overlay, x, y, w, h, 'Header', '#ef4444');
+  // ヘッダー領域（緑）
+  const hx = parseFloat(document.getElementById('att_header_x').value) || 0;
+  const hy = parseFloat(document.getElementById('att_header_y').value) || 0;
+  const hw = parseFloat(document.getElementById('att_header_w').value) || 1;
+  const hh = parseFloat(document.getElementById('att_header_h').value) || 0.15;
+  addRegionRect(overlay, hx, hy, hw, hh, 'Header', '#22c55e');
+
+  // フィールド領域
+  attendanceFields.forEach((field, index) => {
+    if (field.region) {
+      const color = selectedAttFieldIndex === index ? '#ef4444' : '#3b82f6';
+      addRegionRect(overlay, field.region[0], field.region[1], field.region[2], field.region[3],
+                   field.label || field.name, color);
+    }
+  });
 }
 
-function applyAttendanceRegion() {
-  document.getElementById('att_header_x').value = tempAttendanceRegion[0].toFixed(2);
-  document.getElementById('att_header_y').value = tempAttendanceRegion[1].toFixed(2);
-  document.getElementById('att_header_w').value = tempAttendanceRegion[2].toFixed(2);
-  document.getElementById('att_header_h').value = tempAttendanceRegion[3].toFixed(2);
+function addAttendanceFieldFromPopup() {
+  document.getElementById('addAttendanceFieldModal').classList.remove('hidden');
+  document.getElementById('newAttFieldName').value = 'date';
+  document.getElementById('newAttFieldLabel').value = '';
+}
 
-  updateAttendancePreview();
-  closeAttendancePopup();
+function closeAddAttendanceFieldModal() {
+  document.getElementById('addAttendanceFieldModal').classList.add('hidden');
+}
+
+function confirmAddAttendanceField() {
+  const nameSelect = document.getElementById('newAttFieldName');
+  const label = document.getElementById('newAttFieldLabel').value || nameSelect.options[nameSelect.selectedIndex].text;
+
+  const newField = {
+    name: nameSelect.value,
+    label: label,
+    region: [0.1, 0.1, 0.1, 0.05] // デフォルト領域
+  };
+
+  attendanceFields.push(newField);
+  selectedAttFieldIndex = attendanceFields.length - 1;
+
+  closeAddAttendanceFieldModal();
+  renderAttendancePopupFieldList();
+  updateAttendancePopupOverlay();
+  updateAttendancePopupHint();
+}
+
+// 勤怠フィールド一覧（メインページ）
+function renderAttendanceFieldList() {
+  const container = document.getElementById('attendanceFieldList');
+  if (attendanceFields.length === 0) {
+    container.innerHTML = '<div class="p-4 text-center text-gray-400 text-sm">フィールドがありません</div>';
+    return;
+  }
+
+  container.innerHTML = attendanceFields.map((field, index) => `
+    <div class="p-2 flex justify-between items-center hover:bg-gray-100 cursor-pointer transition"
+         onclick="editAttendanceField(${index})">
+      <div>
+        <span class="font-medium text-gray-800">${escapeHtml(field.label || field.name)}</span>
+      </div>
+      <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      </svg>
+    </div>
+  `).join('');
+}
+
+function addAttendanceField() {
+  const srcImg = document.getElementById('attendanceImage');
+  if (srcImg.src && srcImg.src !== window.location.href) {
+    openAttendancePopup();
+    setTimeout(() => addAttendanceFieldFromPopup(), 100);
+  } else {
+    // 画像がない場合はデフォルトフィールドを追加
+    if (attendanceFields.length === 0) {
+      attendanceFields = JSON.parse(JSON.stringify(defaultAttendanceFields));
+    }
+    renderAttendanceFieldList();
+    updateAttendancePreview();
+  }
+}
+
+function editAttendanceField(index) {
+  const srcImg = document.getElementById('attendanceImage');
+  if (srcImg.src && srcImg.src !== window.location.href) {
+    selectedAttFieldIndex = index;
+    openAttendancePopup();
+    setTimeout(() => {
+      selectAttFieldForDrag(index);
+    }, 100);
+  } else {
+    alert('先にPDFをアップロードしてください');
+  }
 }
 
 // 日報ポップアップ
@@ -873,12 +1082,17 @@ function selectPreset(id) {
   document.getElementById('presetName').value = preset.name;
 
   // 勤怠データ設定
-  if (preset.attendance && preset.attendance.header_region) {
-    const hr = preset.attendance.header_region;
-    document.getElementById('att_header_x').value = hr[0];
-    document.getElementById('att_header_y').value = hr[1];
-    document.getElementById('att_header_w').value = hr[2];
-    document.getElementById('att_header_h').value = hr[3];
+  if (preset.attendance) {
+    if (preset.attendance.header_region) {
+      const hr = preset.attendance.header_region;
+      document.getElementById('att_header_x').value = hr[0];
+      document.getElementById('att_header_y').value = hr[1];
+      document.getElementById('att_header_w').value = hr[2];
+      document.getElementById('att_header_h').value = hr[3];
+    }
+    attendanceFields = preset.attendance.fields || [];
+  } else {
+    attendanceFields = [];
   }
 
   // 日報設定
@@ -895,6 +1109,7 @@ function selectPreset(id) {
     dailyReportFields = [];
   }
 
+  renderAttendanceFieldList();
   renderFieldList();
   renderPresetList();
 }
@@ -904,7 +1119,10 @@ function createNewPreset() {
   currentPreset = {
     id: null,
     name: '',
-    attendance: { header_region: [0, 0, 1.0, 0.15], fields: [] },
+    attendance: {
+      header_region: [0, 0, 1.0, 0.15],
+      fields: JSON.parse(JSON.stringify(defaultAttendanceFields))
+    },
     daily_report: {
       main_region: [0.75, 0, 0.25, 1.0],
       fields: [
@@ -920,6 +1138,7 @@ function createNewPreset() {
     }
   };
 
+  attendanceFields = currentPreset.attendance.fields;
   dailyReportFields = currentPreset.daily_report.fields;
 
   document.getElementById('welcomeCard').classList.add('hidden');
@@ -936,6 +1155,7 @@ function createNewPreset() {
   document.getElementById('dr_main_w').value = 0.25;
   document.getElementById('dr_main_h').value = 1;
 
+  renderAttendanceFieldList();
   renderFieldList();
   renderPresetList();
 }
@@ -1015,12 +1235,21 @@ function updateAttendancePreview() {
 
   overlay.innerHTML = '';
 
+  // ヘッダー領域（緑）
   const x = parseFloat(document.getElementById('att_header_x').value) || 0;
   const y = parseFloat(document.getElementById('att_header_y').value) || 0;
   const w = parseFloat(document.getElementById('att_header_w').value) || 1;
   const h = parseFloat(document.getElementById('att_header_h').value) || 0.15;
 
-  addRegionRect(overlay, x, y, w, h, 'Header', '#ef4444');
+  addRegionRect(overlay, x, y, w, h, 'Header', '#22c55e');
+
+  // フィールド領域（赤）
+  attendanceFields.forEach(field => {
+    if (field.region) {
+      addRegionRect(overlay, field.region[0], field.region[1], field.region[2], field.region[3],
+                   field.label || field.name, '#ef4444');
+    }
+  });
 }
 
 function updateDailyReportPreview() {
@@ -1140,7 +1369,7 @@ function savePreset() {
         parseFloat(document.getElementById('att_header_w').value),
         parseFloat(document.getElementById('att_header_h').value)
       ],
-      fields: []
+      fields: attendanceFields
     },
     daily_report: {
       main_region: [

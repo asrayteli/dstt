@@ -123,7 +123,16 @@ def get_default_fields():
     return {
         "attendance": {
             "header_region": [0, 0, 1.0, 0.15],
-            "fields": []
+            "fields": [
+                {"name": "date", "label": "年月日", "region": [0.05, 0.10, 0.10, 0.05]},
+                {"name": "day_of_week", "label": "曜日", "region": [0.15, 0.10, 0.05, 0.05]},
+                {"name": "actual_start", "label": "実績始業", "region": [0.25, 0.10, 0.08, 0.05]},
+                {"name": "actual_end", "label": "実績終業", "region": [0.33, 0.10, 0.08, 0.05]},
+                {"name": "meter_out", "label": "出庫メーター", "region": [0.45, 0.10, 0.10, 0.05]},
+                {"name": "meter_in", "label": "入庫メーター", "region": [0.55, 0.10, 0.10, 0.05]},
+                {"name": "mileage", "label": "走行キロ", "region": [0.65, 0.10, 0.08, 0.05]},
+                {"name": "vehicle_code", "label": "車両番号", "region": [0.75, 0.10, 0.10, 0.05]},
+            ]
         },
         "daily_report": {
             "main_region": [0.75, 0, 0.25, 1.0],
@@ -533,19 +542,18 @@ def process_attendance_pdf(pdf_path, preset=None):
         "page_images": [],
     }
 
-    # プリセットからヘッダー領域を取得
+    # プリセットからヘッダー領域とフィールド定義を取得
     header_region = [0, 0, 1.0, 0.15]  # デフォルト
-    attendance_fields = []
+    attendance_fields = get_default_fields()["attendance"]["fields"]
     if preset and "attendance" in preset:
         att_preset = preset["attendance"]
         if "header_region" in att_preset:
             header_region = att_preset["header_region"]
-        if "fields" in att_preset:
+        if "fields" in att_preset and att_preset["fields"]:
             attendance_fields = att_preset["fields"]
 
     try:
         doc = fitz.open(pdf_path)
-        all_text = ""
 
         for page_num in range(len(doc)):
             page = doc[page_num]
@@ -562,14 +570,7 @@ def process_attendance_pdf(pdf_path, preset=None):
             # OCR領域を収集
             ocr_regions = []
 
-            # 全ページ領域（緑の細い枠で表示）
-            ocr_regions.append({
-                "rect": (5, 5, w - 10, h - 10),
-                "label": "Full Page OCR",
-                "color": (0, 255, 0)  # 緑
-            })
-
-            # 1ページ目はヘッダー領域も表示（プリセットから）
+            # 1ページ目でヘッダー情報を取得
             if page_num == 0:
                 hx, hy, hw, hh = header_region
                 header_h = int(hh * h)
@@ -582,7 +583,13 @@ def process_attendance_pdf(pdf_path, preset=None):
                     "color": (0, 0, 255)  # 赤
                 })
 
-            # プリセットのフィールド領域も表示
+                gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+                _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                header_info = extract_header_info(binary, header_region)
+                result["employee_id"] = header_info.get("employee_id", "")
+                result["period"] = header_info.get("period", "")
+
+            # フィールド領域を表示
             for field in attendance_fields:
                 if "region" in field:
                     fx, fy, fw, fh = field["region"]
@@ -602,33 +609,182 @@ def process_attendance_pdf(pdf_path, preset=None):
             annotated_pil.save(buf, format="PNG")
             result["page_images"].append(base64.b64encode(buf.getvalue()).decode("utf-8"))
 
-            # 全ページOCR（数字と基本記号のみ）
-            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-            # まず数字だけのOCRを試す
-            text = pytesseract.image_to_string(
-                binary,
-                config="--psm 6 -c tessedit_char_whitelist=0123456789/:.-,| "
-            )
-            all_text += text + "\n"
-
-            # 1ページ目でヘッダー情報を取得
-            if page_num == 0:
-                header_info = extract_header_info(binary, header_region)
-                result["employee_id"] = header_info.get("employee_id", "")
-                result["period"] = header_info.get("period", "")
+            # フィールド単位でOCR処理
+            page_rows = extract_attendance_fields_by_region(cv_img, attendance_fields)
+            result["rows"].extend(page_rows)
 
         doc.close()
-
-        # テキストから行データを抽出
-        result["rows"] = parse_attendance_text(all_text)
 
     except Exception as e:
         logger.error(f"勤怠データOCRエラー: {e}")
         logger.error(traceback.format_exc())
 
     return result
+
+
+def extract_attendance_fields_by_region(cv_img, fields):
+    """勤怠データのフィールドを領域単位でOCR"""
+    h, w = cv_img.shape[:2]
+    rows = []
+
+    # フィールドを縦位置でグループ化
+    field_by_y = {}
+    for field in fields:
+        if "region" not in field:
+            continue
+        _, fy, _, fh = field["region"]
+        y_center = fy + fh / 2
+        # 同じ行のフィールドをグループ化（Y座標が近いもの）
+        found_group = False
+        for group_y in field_by_y.keys():
+            if abs(group_y - y_center) < 0.02:  # 2%以内なら同じ行
+                field_by_y[group_y].append(field)
+                found_group = True
+                break
+        if not found_group:
+            field_by_y[y_center] = [field]
+
+    # 各行を処理
+    for y_center in sorted(field_by_y.keys()):
+        row_fields = field_by_y[y_center]
+        row_data = {
+            "date": "",
+            "day_of_week": "",
+            "actual_start": "",
+            "actual_end": "",
+            "meter_out": "",
+            "meter_in": "",
+            "mileage": "",
+            "vehicle_code": "",
+        }
+
+        for field in row_fields:
+            field_name = field.get("name", "")
+            if field_name not in row_data:
+                continue
+
+            fx, fy, fw, fh = field["region"]
+            x = int(fx * w)
+            y = int(fy * h)
+            region_w = int(fw * w)
+            region_h = int(fh * h)
+
+            # 境界チェック
+            x = max(0, min(x, w - 1))
+            y = max(0, min(y, h - 1))
+            region_w = min(region_w, w - x)
+            region_h = min(region_h, h - y)
+
+            if region_w <= 5 or region_h <= 5:
+                continue
+
+            region = cv_img[y:y + region_h, x:x + region_w]
+
+            # 前処理を改善
+            text = ocr_region_improved(region, field_name)
+
+            if text:
+                row_data[field_name] = text
+
+        # 日付があれば行として追加
+        if row_data["date"]:
+            rows.append(row_data)
+
+    return rows
+
+
+def ocr_region_improved(region, field_name):
+    """改善されたOCR処理"""
+    try:
+        # グレースケール変換
+        gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+
+        # ノイズ除去
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+
+        # コントラスト強調 (CLAHE)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+
+        # 適応的二値化
+        binary = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY, 11, 2
+        )
+
+        # 小さい領域は拡大
+        h_r, w_r = binary.shape[:2]
+        if h_r < 40:
+            scale = 40.0 / h_r
+            binary = cv2.resize(binary, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+
+        # パディングを追加
+        binary = cv2.copyMakeBorder(binary, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
+
+        # フィールドタイプに応じたOCR設定
+        if field_name in ("actual_start", "actual_end", "start_time", "end_time"):
+            # 時刻用
+            config = "--psm 7 -c tessedit_char_whitelist=0123456789:"
+        elif field_name in ("meter_out", "meter_in", "mileage", "vehicle_code", "employee_id"):
+            # 数字のみ
+            config = "--psm 7 -c tessedit_char_whitelist=0123456789"
+        elif field_name == "date":
+            # 日付用
+            config = "--psm 7 -c tessedit_char_whitelist=0123456789/"
+        elif field_name == "day_of_week":
+            # 曜日（日本語）
+            config = "--psm 7 -l jpn"
+        else:
+            config = "--psm 7 -c tessedit_char_whitelist=0123456789/:.-"
+
+        text = pytesseract.image_to_string(binary, config=config).strip()
+
+        # 後処理
+        text = post_process_ocr_text(text, field_name)
+
+        return text
+
+    except Exception as e:
+        logger.warning(f"OCRエラー ({field_name}): {e}")
+        return ""
+
+
+def post_process_ocr_text(text, field_name):
+    """OCR結果の後処理"""
+    if not text:
+        return ""
+
+    # 基本的なクリーンアップ
+    text = text.strip()
+    text = re.sub(r"\s+", "", text)  # 空白除去
+
+    if field_name in ("actual_start", "actual_end", "start_time", "end_time"):
+        # 時刻形式に整形
+        text = re.sub(r"[^\d:]", "", text)
+        if ":" not in text and len(text) >= 3:
+            text = text[:-2] + ":" + text[-2:]
+
+    elif field_name in ("meter_out", "meter_in"):
+        # メーター: 数字のみ
+        text = re.sub(r"[^\d]", "", text)
+
+    elif field_name == "mileage":
+        # 走行距離: 数字のみ
+        text = re.sub(r"[^\d]", "", text)
+
+    elif field_name == "vehicle_code":
+        # 車両番号: 数字のみ、6桁
+        text = re.sub(r"[^\d]", "", text)
+
+    elif field_name == "employee_id":
+        # 社員番号: 数字のみ、7桁
+        text = re.sub(r"[^\d]", "", text)
+
+    elif field_name == "date":
+        # 日付形式
+        text = re.sub(r"[^\d/]", "", text)
+
+    return text
 
 
 def draw_ocr_regions_attendance(cv_img, regions):
@@ -1023,53 +1179,12 @@ def extract_fields_by_region(cv_img, fields, preset_fields=None):
 
             region = cv_img[y:y + region_h, x:x + region_w]
 
-            # 前処理
-            gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
-
-            # コントラスト強調
-            gray = cv2.equalizeHist(gray)
-
-            # 二値化
-            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-            # 小さい場合は拡大
-            h_r, w_r = binary.shape[:2]
-            if h_r < 30:
-                scale = 30.0 / h_r
-                binary = cv2.resize(binary, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-
-            # OCR（数字のみ）
-            text = pytesseract.image_to_string(
-                binary,
-                config="--psm 7 -c tessedit_char_whitelist=0123456789/:.-"
-            ).strip()
+            # 改善されたOCR処理を使用
+            text = ocr_region_improved(region, field_name)
 
             # 結果があれば更新
             if text and not fields.get(field_name):
-                # 後処理
-                text = re.sub(r"[^0123456789/:.-]", "", text)
-
-                if field_name == "vehicle_code":
-                    text = re.sub(r"[^\d]", "", text)
-                    if len(text) == 6:
-                        fields[field_name] = text
-                elif field_name in ("meter_out", "meter_in"):
-                    text = re.sub(r"[^\d]", "", text)
-                    if len(text) >= 4:
-                        fields[field_name] = text
-                elif field_name == "mileage":
-                    text = re.sub(r"[^\d]", "", text)
-                    if text:
-                        fields[field_name] = text
-                elif field_name == "employee_id":
-                    text = re.sub(r"[^\d]", "", text)
-                    if len(text) == 7:
-                        fields[field_name] = text
-                elif field_name in ("start_time", "end_time"):
-                    if ":" in text or len(text) >= 3:
-                        fields[field_name] = text
-                else:
-                    fields[field_name] = text
+                fields[field_name] = text
 
         except Exception as e:
             logger.warning(f"フィールド {field_name} 抽出エラー: {e}")
