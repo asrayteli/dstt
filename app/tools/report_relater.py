@@ -582,7 +582,9 @@ def process_attendance_pdf(pdf_path, preset=None):
     result["applied_settings"] = {
         "preset_name": preset.get("name", "なし") if preset else "デフォルト",
         "table_config": table_config,
-        "columns": [{"name": c.get("name"), "label": c.get("label"), "x": c.get("x"), "width": c.get("width")} for c in columns]
+        "columns": [{"name": c.get("name"), "label": c.get("label"), "x": c.get("x"), "width": c.get("width")} for c in columns],
+        "image_size": None,  # 後で設定
+        "pixel_coords": []  # 実際のピクセル座標
     }
 
     try:
@@ -599,6 +601,23 @@ def process_attendance_pdf(pdf_path, preset=None):
             cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
             h, w = cv_img.shape[:2]
+
+            # 1ページ目で画像サイズとピクセル座標を記録
+            if page_num == 0:
+                result["applied_settings"]["image_size"] = {"width": w, "height": h}
+                result["applied_settings"]["pixel_coords"] = []
+                for col in columns:
+                    col_x = col.get("x", 0)
+                    col_width = col.get("width", 0.05)
+                    px_x = int(col_x * w)
+                    px_w = int(col_width * w)
+                    result["applied_settings"]["pixel_coords"].append({
+                        "name": col.get("name"),
+                        "x_norm": col_x,
+                        "width_norm": col_width,
+                        "x_px": px_x,
+                        "width_px": px_w
+                    })
 
             # OCR領域を収集（可視化用）
             ocr_regions = []

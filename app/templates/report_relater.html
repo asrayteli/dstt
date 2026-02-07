@@ -424,6 +424,12 @@ function renderOCRResults(data) {
     if (att.applied_settings) {
       let settingsHtml = `<strong>プリセット:</strong> ${att.applied_settings.preset_name || '不明'}<br>`;
 
+      // 画像サイズ
+      if (att.applied_settings.image_size) {
+        const imgSize = att.applied_settings.image_size;
+        settingsHtml += `<strong>画像サイズ:</strong> ${imgSize.width} x ${imgSize.height} px<br>`;
+      }
+
       if (att.applied_settings.table_config) {
         const tc = att.applied_settings.table_config;
         settingsHtml += `<strong>テーブル設定:</strong> data_start_y=${tc.data_start_y}, row_height=${tc.row_height}, max_rows=${tc.max_rows}<br>`;
@@ -431,7 +437,13 @@ function renderOCRResults(data) {
         settingsHtml += `<strong>テーブル設定:</strong> なし<br>`;
       }
 
-      if (att.applied_settings.columns && att.applied_settings.columns.length > 0) {
+      // ピクセル座標（詳細）
+      if (att.applied_settings.pixel_coords && att.applied_settings.pixel_coords.length > 0) {
+        settingsHtml += `<strong>カラムのピクセル座標 (${att.applied_settings.pixel_coords.length}個):</strong><br>`;
+        att.applied_settings.pixel_coords.forEach(pc => {
+          settingsHtml += `  ${pc.name}: 正規化(x=${pc.x_norm?.toFixed(3) || 'N/A'}, w=${pc.width_norm?.toFixed(3) || 'N/A'}) → ピクセル(x=${pc.x_px}px, w=${pc.width_px}px)<br>`;
+        });
+      } else if (att.applied_settings.columns && att.applied_settings.columns.length > 0) {
         settingsHtml += `<strong>カラム (${att.applied_settings.columns.length}個):</strong><br>`;
         att.applied_settings.columns.forEach(col => {
           const xVal = (col.x !== undefined && col.x !== null) ? col.x.toFixed(3) : 'N/A';
