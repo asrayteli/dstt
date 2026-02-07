@@ -122,16 +122,23 @@ def get_default_fields():
     """デフォルトのフィールド定義を返す"""
     return {
         "attendance": {
-            "header_region": [0, 0, 1.0, 0.15],
-            "fields": [
-                {"name": "date", "label": "年月日", "region": [0.05, 0.10, 0.10, 0.05]},
-                {"name": "day_of_week", "label": "曜日", "region": [0.15, 0.10, 0.05, 0.05]},
-                {"name": "actual_start", "label": "実績始業", "region": [0.25, 0.10, 0.08, 0.05]},
-                {"name": "actual_end", "label": "実績終業", "region": [0.33, 0.10, 0.08, 0.05]},
-                {"name": "meter_out", "label": "出庫メーター", "region": [0.45, 0.10, 0.10, 0.05]},
-                {"name": "meter_in", "label": "入庫メーター", "region": [0.55, 0.10, 0.10, 0.05]},
-                {"name": "mileage", "label": "走行キロ", "region": [0.65, 0.10, 0.08, 0.05]},
-                {"name": "vehicle_code", "label": "車両番号", "region": [0.75, 0.10, 0.10, 0.05]},
+            # テーブル形式設定
+            "table_config": {
+                "header_region": [0, 0, 1.0, 0.08],  # ヘッダー領域（社員番号・期間）
+                "data_start_y": 0.12,  # データ行の開始Y位置
+                "row_height": 0.022,   # 1行の高さ
+                "max_rows": 31,        # 最大行数（1ヶ月分）
+            },
+            # カラム定義（X位置と幅）
+            "columns": [
+                {"name": "date", "label": "月日", "x": 0.02, "width": 0.04},
+                {"name": "day_of_week", "label": "曜", "x": 0.06, "width": 0.02},
+                {"name": "actual_start", "label": "実績始業", "x": 0.22, "width": 0.04},
+                {"name": "actual_end", "label": "実績終業", "x": 0.26, "width": 0.04},
+                {"name": "meter_out", "label": "出庫メーター", "x": 0.60, "width": 0.05},
+                {"name": "meter_in", "label": "入庫メーター", "x": 0.65, "width": 0.05},
+                {"name": "mileage", "label": "走行キロ", "x": 0.70, "width": 0.04},
+                {"name": "vehicle_code", "label": "車両番号", "x": 0.92, "width": 0.06},
             ]
         },
         "daily_report": {
@@ -533,7 +540,7 @@ def download_csv():
 # ============================================================
 
 def process_attendance_pdf(pdf_path, preset=None):
-    """勤怠データPDFを処理"""
+    """勤怠データPDFを処理（テーブル形式対応）"""
     result = {
         "employee_id": "",
         "employee_name": "",
@@ -542,15 +549,23 @@ def process_attendance_pdf(pdf_path, preset=None):
         "page_images": [],
     }
 
-    # プリセットからヘッダー領域とフィールド定義を取得
-    header_region = [0, 0, 1.0, 0.15]  # デフォルト
-    attendance_fields = get_default_fields()["attendance"]["fields"]
+    # プリセットからテーブル設定とカラム定義を取得
+    default_attendance = get_default_fields()["attendance"]
+    table_config = default_attendance.get("table_config", {})
+    columns = default_attendance.get("columns", [])
+
     if preset and "attendance" in preset:
         att_preset = preset["attendance"]
-        if "header_region" in att_preset:
-            header_region = att_preset["header_region"]
-        if "fields" in att_preset and att_preset["fields"]:
-            attendance_fields = att_preset["fields"]
+        if "table_config" in att_preset:
+            table_config = att_preset["table_config"]
+        if "columns" in att_preset and att_preset["columns"]:
+            columns = att_preset["columns"]
+
+    # テーブル設定パラメータ
+    header_region = table_config.get("header_region", [0, 0, 1.0, 0.08])
+    data_start_y = table_config.get("data_start_y", 0.12)
+    row_height = table_config.get("row_height", 0.022)
+    max_rows = table_config.get("max_rows", 31)
 
     try:
         doc = fitz.open(pdf_path)
@@ -567,20 +582,20 @@ def process_attendance_pdf(pdf_path, preset=None):
 
             h, w = cv_img.shape[:2]
 
-            # OCR領域を収集
+            # OCR領域を収集（可視化用）
             ocr_regions = []
 
             # 1ページ目でヘッダー情報を取得
             if page_num == 0:
                 hx, hy, hw, hh = header_region
-                header_h = int(hh * h)
-                header_y = int(hy * h)
-                header_x = int(hx * w)
-                header_w = int(hw * w)
+                header_h_px = int(hh * h)
+                header_y_px = int(hy * h)
+                header_x_px = int(hx * w)
+                header_w_px = int(hw * w)
                 ocr_regions.append({
-                    "rect": (header_x, header_y, header_w, header_h),
+                    "rect": (header_x_px, header_y_px, header_w_px, header_h_px),
                     "label": "Header",
-                    "color": (0, 0, 255)  # 赤
+                    "color": (0, 255, 0)  # 緑
                 })
 
                 gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
@@ -589,17 +604,13 @@ def process_attendance_pdf(pdf_path, preset=None):
                 result["employee_id"] = header_info.get("employee_id", "")
                 result["period"] = header_info.get("period", "")
 
-            # フィールド領域を表示
-            for field in attendance_fields:
-                if "region" in field:
-                    fx, fy, fw, fh = field["region"]
-                    ocr_regions.append({
-                        "rect": (int(fx * w), int(fy * h), int(fw * w), int(fh * h)),
-                        "label": field.get("label", field.get("name", "")),
-                        "color": (255, 0, 0)  # 青
-                    })
+            # テーブル行をOCR
+            page_rows = extract_attendance_table_rows(
+                cv_img, columns, data_start_y, row_height, max_rows, ocr_regions
+            )
+            result["rows"].extend(page_rows)
 
-            # 赤枠を描画
+            # OCR領域を描画
             annotated = draw_ocr_regions_attendance(cv_img, ocr_regions)
 
             # 赤枠付き画像をサムネイルとして保存
@@ -609,10 +620,6 @@ def process_attendance_pdf(pdf_path, preset=None):
             annotated_pil.save(buf, format="PNG")
             result["page_images"].append(base64.b64encode(buf.getvalue()).decode("utf-8"))
 
-            # フィールド単位でOCR処理
-            page_rows = extract_attendance_fields_by_region(cv_img, attendance_fields)
-            result["rows"].extend(page_rows)
-
         doc.close()
 
     except Exception as e:
@@ -620,6 +627,82 @@ def process_attendance_pdf(pdf_path, preset=None):
         logger.error(traceback.format_exc())
 
     return result
+
+
+def extract_attendance_table_rows(cv_img, columns, data_start_y, row_height, max_rows, ocr_regions):
+    """テーブル形式の勤怠データから行を抽出"""
+    h, w = cv_img.shape[:2]
+    rows = []
+    empty_row_count = 0
+
+    for row_idx in range(max_rows):
+        # 行のY位置を計算
+        row_y = data_start_y + (row_idx * row_height)
+        if row_y + row_height > 1.0:
+            break  # 画像範囲外
+
+        row_data = {
+            "date": "",
+            "day_of_week": "",
+            "actual_start": "",
+            "actual_end": "",
+            "meter_out": "",
+            "meter_in": "",
+            "mileage": "",
+            "vehicle_code": "",
+        }
+
+        has_data = False
+
+        # 各カラムを処理
+        for col in columns:
+            col_name = col.get("name", "")
+            col_x = col.get("x", 0)
+            col_width = col.get("width", 0.05)
+
+            # ピクセル座標に変換
+            x = int(col_x * w)
+            y = int(row_y * h)
+            region_w = int(col_width * w)
+            region_h = int(row_height * h)
+
+            # 境界チェック
+            x = max(0, min(x, w - 1))
+            y = max(0, min(y, h - 1))
+            region_w = min(region_w, w - x)
+            region_h = min(region_h, h - y)
+
+            if region_w <= 5 or region_h <= 5:
+                continue
+
+            # 最初の行のみOCR領域を可視化
+            if row_idx < 3:
+                ocr_regions.append({
+                    "rect": (x, y, region_w, region_h),
+                    "label": col.get("label", col_name),
+                    "color": (255, 0, 0)  # 青
+                })
+
+            # 領域を切り出してOCR
+            region = cv_img[y:y + region_h, x:x + region_w]
+            text = ocr_region_improved(region, col_name)
+
+            if text and col_name in row_data:
+                row_data[col_name] = text
+                if text.strip():
+                    has_data = True
+
+        # 日付データがあれば行として追加
+        if row_data["date"] or has_data:
+            rows.append(row_data)
+            empty_row_count = 0
+        else:
+            empty_row_count += 1
+            # 3行連続で空なら終了
+            if empty_row_count >= 3:
+                break
+
+    return rows
 
 
 def extract_attendance_fields_by_region(cv_img, fields):
