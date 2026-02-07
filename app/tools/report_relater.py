@@ -547,6 +547,7 @@ def process_attendance_pdf(pdf_path, preset=None):
         "period": "",
         "rows": [],
         "page_images": [],
+        "applied_settings": {},  # 適用された設定を保存（デバッグ用）
     }
 
     # プリセットからテーブル設定とカラム定義を取得
@@ -556,16 +557,33 @@ def process_attendance_pdf(pdf_path, preset=None):
 
     if preset and "attendance" in preset:
         att_preset = preset["attendance"]
+        logger.info(f"プリセット適用中: {preset.get('name', 'unknown')}")
+        logger.info(f"プリセット attendance キー: {list(att_preset.keys())}")
         if "table_config" in att_preset:
             table_config = att_preset["table_config"]
+            logger.info(f"table_config適用: {table_config}")
         if "columns" in att_preset and att_preset["columns"]:
             columns = att_preset["columns"]
+            logger.info(f"カラム数: {len(columns)}")
+            for col in columns:
+                logger.info(f"  カラム: {col.get('label')} x={col.get('x')} width={col.get('width')}")
+    else:
+        logger.info("プリセットなし、デフォルト設定を使用")
 
     # テーブル設定パラメータ
     header_region = table_config.get("header_region", [0, 0, 1.0, 0.08])
     data_start_y = table_config.get("data_start_y", 0.12)
     row_height = table_config.get("row_height", 0.022)
     max_rows = table_config.get("max_rows", 31)
+
+    logger.info(f"テーブル設定: data_start_y={data_start_y}, row_height={row_height}, max_rows={max_rows}")
+
+    # 適用された設定を結果に保存（デバッグ用）
+    result["applied_settings"] = {
+        "preset_name": preset.get("name", "なし") if preset else "デフォルト",
+        "table_config": table_config,
+        "columns": [{"name": c.get("name"), "label": c.get("label"), "x": c.get("x"), "width": c.get("width")} for c in columns]
+    }
 
     try:
         doc = fitz.open(pdf_path)
