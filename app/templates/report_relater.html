@@ -124,9 +124,9 @@
       </div>
 
       <!-- 適用された設定（デバッグ用） -->
-      <div id="att-applied-settings" class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm hidden">
+      <div id="att-applied-settings" class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm">
         <div class="font-semibold text-yellow-800 mb-2">適用された設定:</div>
-        <div id="att-settings-content" class="text-yellow-700 text-xs font-mono"></div>
+        <div id="att-settings-content" class="text-yellow-700 text-xs font-mono">（OCR処理後に表示されます）</div>
       </div>
 
       <!-- ページ画像プレビュー -->
@@ -419,26 +419,36 @@ function renderOCRResults(data) {
   document.getElementById('att-period').textContent = att.period || '';
 
   // 適用された設定を表示（デバッグ用）
-  if (att.applied_settings) {
-    const settingsDiv = document.getElementById('att-applied-settings');
-    const settingsContent = document.getElementById('att-settings-content');
-    settingsDiv.classList.remove('hidden');
+  const settingsContent = document.getElementById('att-settings-content');
+  try {
+    if (att.applied_settings) {
+      let settingsHtml = `<strong>プリセット:</strong> ${att.applied_settings.preset_name || '不明'}<br>`;
 
-    let settingsHtml = `<strong>プリセット:</strong> ${att.applied_settings.preset_name}<br>`;
+      if (att.applied_settings.table_config) {
+        const tc = att.applied_settings.table_config;
+        settingsHtml += `<strong>テーブル設定:</strong> data_start_y=${tc.data_start_y}, row_height=${tc.row_height}, max_rows=${tc.max_rows}<br>`;
+      } else {
+        settingsHtml += `<strong>テーブル設定:</strong> なし<br>`;
+      }
 
-    if (att.applied_settings.table_config) {
-      const tc = att.applied_settings.table_config;
-      settingsHtml += `<strong>テーブル設定:</strong> data_start_y=${tc.data_start_y}, row_height=${tc.row_height}, max_rows=${tc.max_rows}<br>`;
+      if (att.applied_settings.columns && att.applied_settings.columns.length > 0) {
+        settingsHtml += `<strong>カラム (${att.applied_settings.columns.length}個):</strong><br>`;
+        att.applied_settings.columns.forEach(col => {
+          const xVal = (col.x !== undefined && col.x !== null) ? col.x.toFixed(3) : 'N/A';
+          const wVal = (col.width !== undefined && col.width !== null) ? col.width.toFixed(3) : 'N/A';
+          settingsHtml += `  ${col.label || col.name || '?'}: x=${xVal}, width=${wVal}<br>`;
+        });
+      } else {
+        settingsHtml += `<strong>カラム:</strong> なし<br>`;
+      }
+
+      settingsContent.innerHTML = settingsHtml;
+    } else {
+      settingsContent.innerHTML = '<span class="text-red-600">applied_settings がレスポンスに含まれていません</span>';
     }
-
-    if (att.applied_settings.columns && att.applied_settings.columns.length > 0) {
-      settingsHtml += `<strong>カラム (${att.applied_settings.columns.length}個):</strong><br>`;
-      att.applied_settings.columns.forEach(col => {
-        settingsHtml += `  ${col.label || col.name}: x=${col.x?.toFixed(3)}, width=${col.width?.toFixed(3)}<br>`;
-      });
-    }
-
-    settingsContent.innerHTML = settingsHtml;
+  } catch (e) {
+    settingsContent.innerHTML = `<span class="text-red-600">エラー: ${e.message}</span>`;
+    console.error('設定表示エラー:', e);
   }
 
   // 勤怠ページ画像
