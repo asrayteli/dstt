@@ -190,39 +190,67 @@ def get_default_fields():
 # ============================================================
 # 日報フィールド定義（デフォルト - プリセット未使用時）
 # フォーマット: (x%, y%, w%, h%) - フォーム右側に集中
+# A5横向き日報フォーマット（大新東株式会社）用
 # ============================================================
 DAILY_REPORT_FIELDS = {
+    # 社員番号（7桁）- 最上部
     "employee_id": {
         "label": "社員番号",
-        "region": (0.80, 0.00, 0.20, 0.06),
+        "region": (0.82, 0.015, 0.17, 0.04),
     },
-    "date": {
-        "label": "日付",
-        "region": (0.80, 0.05, 0.20, 0.06),
+    # 日付は年・月・日・曜日を個別に認識して結合
+    "date_year": {
+        "label": "年",
+        "region": (0.765, 0.055, 0.055, 0.04),
     },
+    "date_month": {
+        "label": "月",
+        "region": (0.84, 0.055, 0.035, 0.04),
+    },
+    "date_day": {
+        "label": "日",
+        "region": (0.895, 0.055, 0.035, 0.04),
+    },
+    "date_weekday": {
+        "label": "曜日",
+        "region": (0.94, 0.055, 0.04, 0.04),
+    },
+    # 車両番号（6ケタ）
     "vehicle_code": {
-        "label": "車両番号(6ケタ)",
-        "region": (0.80, 0.10, 0.20, 0.05),
+        "label": "車両番号",
+        "region": (0.765, 0.095, 0.15, 0.04),
     },
-    "start_time": {
-        "label": "始業時刻",
-        "region": (0.88, 0.17, 0.12, 0.05),
+    # 始業時刻（時と分を個別認識）
+    "start_hour": {
+        "label": "始業時",
+        "region": (0.895, 0.135, 0.04, 0.045),
     },
-    "end_time": {
-        "label": "終業時刻",
-        "region": (0.88, 0.21, 0.12, 0.05),
+    "start_min": {
+        "label": "始業分",
+        "region": (0.945, 0.135, 0.04, 0.045),
     },
+    # 終業時刻（時と分を個別認識）
+    "end_hour": {
+        "label": "終業時",
+        "region": (0.895, 0.18, 0.04, 0.045),
+    },
+    "end_min": {
+        "label": "終業分",
+        "region": (0.945, 0.18, 0.04, 0.045),
+    },
+    # メーター（5桁）
     "meter_out": {
         "label": "出庫メーター",
-        "region": (0.80, 0.25, 0.20, 0.05),
+        "region": (0.82, 0.225, 0.165, 0.045),
     },
     "meter_in": {
         "label": "入庫メーター",
-        "region": (0.80, 0.30, 0.20, 0.05),
+        "region": (0.82, 0.27, 0.165, 0.045),
     },
+    # 走行粁
     "mileage": {
         "label": "走行粁",
-        "region": (0.80, 0.35, 0.20, 0.05),
+        "region": (0.90, 0.315, 0.085, 0.04),
     },
 }
 
@@ -1267,7 +1295,7 @@ def draw_ocr_regions(cv_img, regions):
 
 
 def process_daily_report_page(cv_img, page_num, preset=None):
-    """日報1ページを処理。フィールド値とOCR領域情報を返す"""
+    """日報1ページを処理。各フィールドを個別にOCRして値と領域情報を返す"""
     fields = {
         "date": "",
         "employee_id": "",
@@ -1277,17 +1305,15 @@ def process_daily_report_page(cv_img, page_num, preset=None):
         "meter_in": "",
         "mileage": "",
         "vehicle_code": "",
+        "confidence": {}  # 信頼度
     }
     ocr_regions = []
 
-    # プリセットからメイン領域とフィールド定義を取得
-    main_region = [0.75, 0, 0.25, 1.0]  # デフォルト: 右25%
-    preset_fields = None
-    if preset:
-        if "main_region" in preset:
-            main_region = preset["main_region"]
-        if "fields" in preset:
-            preset_fields = preset["fields"]
+    # プリセットからフィールド定義を取得、なければデフォルト使用
+    if preset and "fields" in preset:
+        field_defs = {f["name"]: f for f in preset["fields"]}
+    else:
+        field_defs = DAILY_REPORT_FIELDS
 
     try:
         h, w = cv_img.shape[:2]
@@ -1297,52 +1323,116 @@ def process_daily_report_page(cv_img, page_num, preset=None):
             cv_img = cv2.rotate(cv_img, cv2.ROTATE_90_CLOCKWISE)
             h, w = cv_img.shape[:2]
 
-        # メイン領域を処理（プリセットから）
-        mx, my, mw, mh = main_region
-        main_x = int(mx * w)
-        main_y = int(my * h)
-        main_w = int(mw * w)
-        main_h = int(mh * h)
+        # 個別フィールドのOCR結果を格納
+        raw_fields = {}
+        confidences = {}
 
-        main_region_img = cv_img[main_y:main_y + main_h, main_x:main_x + main_w]
-
-        # メイン領域を赤枠で表示
-        ocr_regions.append({
-            "rect": (main_x, main_y, main_w, main_h),
-            "label": "Main Region"
-        })
-
-        # グレースケール・コントラスト強調
-        gray = cv2.cvtColor(main_region_img, cv2.COLOR_BGR2GRAY)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        gray = clahe.apply(gray)
-
-        # EasyOCRまたはTesseractでOCR
-        text = ""
-        reader = _init_easyocr()
-        if reader is not None:
+        # 各フィールドを個別にOCR
+        for field_name, field_def in field_defs.items():
             try:
-                results = reader.readtext(gray, detail=0, paragraph=False)
-                text = " ".join(results) if results else ""
+                # 領域情報を取得
+                if "region" in field_def:
+                    region_data = field_def["region"]
+                    if isinstance(region_data, (list, tuple)) and len(region_data) >= 4:
+                        rx, ry, rw, rh = region_data[:4]
+                    else:
+                        continue
+                else:
+                    continue
+
+                # ピクセル座標に変換
+                x = int(rx * w)
+                y = int(ry * h)
+                region_w = int(rw * w)
+                region_h = int(rh * h)
+
+                # 境界チェック
+                x = max(0, min(x, w - 1))
+                y = max(0, min(y, h - 1))
+                region_w = min(region_w, w - x)
+                region_h = min(region_h, h - y)
+
+                if region_w <= 10 or region_h <= 10:
+                    continue
+
+                # OCR領域情報を記録
+                ocr_regions.append({
+                    "rect": (x, y, region_w, region_h),
+                    "label": field_def.get("label", field_name)
+                })
+
+                # 領域を切り出してOCR（信頼度も取得）
+                region = cv_img[y:y + region_h, x:x + region_w]
+                text, confidence = ocr_region_improved(region, field_name, return_confidence=True)
+
+                raw_fields[field_name] = text
+                confidences[field_name] = confidence
+
+                logger.info(f"日報フィールド {field_name}: '{text}' (信頼度: {confidence}%)")
+
             except Exception as e:
-                logger.warning(f"日報EasyOCRエラー: {e}")
+                logger.warning(f"日報フィールド {field_name} OCRエラー: {e}")
 
-        # EasyOCRが失敗した場合はTesseractにフォールバック
-        if not text and TESSERACT_AVAILABLE and TESSERACT_CONFIGURED:
-            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            text = pytesseract.image_to_string(
-                binary,
-                config="--psm 6 -c tessedit_char_whitelist=0123456789/:.-"
-            )
+        # フィールドを結合・整形
+        # 社員番号
+        if "employee_id" in raw_fields:
+            emp_id = re.sub(r"[^\d]", "", raw_fields["employee_id"])
+            fields["employee_id"] = emp_id
+            fields["confidence"]["employee_id"] = confidences.get("employee_id", 0)
 
-        logger.info(f"日報ページ{page_num + 1} OCR結果: {text[:200] if text else '(空)'}...")
+        # 日付を結合（年/月/日）
+        year = re.sub(r"[^\d]", "", raw_fields.get("date_year", ""))
+        month = re.sub(r"[^\d]", "", raw_fields.get("date_month", ""))
+        day = re.sub(r"[^\d]", "", raw_fields.get("date_day", ""))
+        if year and month and day:
+            fields["date"] = f"{year}/{month.zfill(2)}/{day.zfill(2)}"
+            # 信頼度は平均
+            date_conf = [confidences.get("date_year", 0), confidences.get("date_month", 0), confidences.get("date_day", 0)]
+            date_conf = [c for c in date_conf if c >= 0]
+            fields["confidence"]["date"] = round(sum(date_conf) / len(date_conf), 1) if date_conf else 0
 
-        # パターンマッチングで各フィールドを抽出
-        fields = extract_daily_report_fields(text)
+        # 車両番号
+        if "vehicle_code" in raw_fields:
+            vcode = re.sub(r"[^\d\-]", "", raw_fields["vehicle_code"])
+            fields["vehicle_code"] = vcode
+            fields["confidence"]["vehicle_code"] = confidences.get("vehicle_code", 0)
 
-        # 各フィールドを個別領域からも試す（プリセットのフィールドを使用）
-        fields, field_regions = extract_fields_by_region(cv_img, fields, preset_fields)
-        ocr_regions.extend(field_regions)
+        # 始業時刻を結合（時:分）
+        start_h = re.sub(r"[^\d]", "", raw_fields.get("start_hour", ""))
+        start_m = re.sub(r"[^\d]", "", raw_fields.get("start_min", ""))
+        if start_h and start_m:
+            fields["start_time"] = f"{start_h}:{start_m.zfill(2)}"
+            start_conf = [confidences.get("start_hour", 0), confidences.get("start_min", 0)]
+            start_conf = [c for c in start_conf if c >= 0]
+            fields["confidence"]["start_time"] = round(sum(start_conf) / len(start_conf), 1) if start_conf else 0
+
+        # 終業時刻を結合（時:分）
+        end_h = re.sub(r"[^\d]", "", raw_fields.get("end_hour", ""))
+        end_m = re.sub(r"[^\d]", "", raw_fields.get("end_min", ""))
+        if end_h and end_m:
+            fields["end_time"] = f"{end_h}:{end_m.zfill(2)}"
+            end_conf = [confidences.get("end_hour", 0), confidences.get("end_min", 0)]
+            end_conf = [c for c in end_conf if c >= 0]
+            fields["confidence"]["end_time"] = round(sum(end_conf) / len(end_conf), 1) if end_conf else 0
+
+        # メーター
+        if "meter_out" in raw_fields:
+            meter_out = re.sub(r"[^\d]", "", raw_fields["meter_out"])
+            fields["meter_out"] = meter_out
+            fields["confidence"]["meter_out"] = confidences.get("meter_out", 0)
+
+        if "meter_in" in raw_fields:
+            meter_in = re.sub(r"[^\d]", "", raw_fields["meter_in"])
+            fields["meter_in"] = meter_in
+            fields["confidence"]["meter_in"] = confidences.get("meter_in", 0)
+
+        # 走行粁
+        if "mileage" in raw_fields:
+            mileage = re.sub(r"[^\d]", "", raw_fields["mileage"])
+            fields["mileage"] = mileage
+            fields["confidence"]["mileage"] = confidences.get("mileage", 0)
+
+        logger.info(f"日報ページ{page_num + 1} 最終結果: {fields}")
 
     except Exception as e:
         logger.error(f"日報ページ処理エラー (ページ{page_num + 1}): {e}")

@@ -599,6 +599,7 @@ function createAttendanceRow(row, idx) {
 function createReportRow(row, idx) {
   const tr = document.createElement('tr');
   tr.className = 'hover:bg-gray-50';
+  const confidence = row.confidence || {};
 
   // ページ番号（読み取り専用）
   const pgTd = document.createElement('td');
@@ -610,9 +611,30 @@ function createReportRow(row, idx) {
   fields.forEach(f => {
     const td = document.createElement('td');
     td.className = 'border px-1 py-1';
+
+    // 信頼度に応じた背景色
+    const conf = confidence[f];
+    let bgClass = '';
+    if (conf !== undefined && conf >= 0) {
+      if (conf < 50) {
+        bgClass = 'bg-red-100';  // 低信頼度: 赤
+      } else if (conf < 80) {
+        bgClass = 'bg-yellow-100';  // 中信頼度: 黄
+      }
+    }
+
+    // 信頼度表示
+    if (conf !== undefined && conf >= 0) {
+      const confSpan = document.createElement('span');
+      confSpan.className = `text-xs mr-1 ${conf < 50 ? 'text-red-600' : conf < 80 ? 'text-yellow-600' : 'text-green-600'}`;
+      confSpan.textContent = `${Math.round(conf)}%`;
+      confSpan.title = `OCR信頼度: ${conf.toFixed(1)}%`;
+      td.appendChild(confSpan);
+    }
+
     const input = document.createElement('input');
     input.type = 'text';
-    input.className = 'w-full px-1 py-0.5 text-sm border-0 bg-transparent focus:bg-yellow-50 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded';
+    input.className = `w-full px-1 py-0.5 text-sm border-0 bg-transparent focus:bg-yellow-50 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded ${bgClass}`;
     input.value = row[f] || '';
     input.dataset.field = f;
     input.dataset.idx = idx;
