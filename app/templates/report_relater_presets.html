@@ -450,25 +450,40 @@
 
 <!-- 日報 フィールド追加モーダル -->
 <div id="addFieldModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-  <div class="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
     <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4 rounded-t-xl">
       <h3 class="font-semibold text-lg">新しいフィールドを追加</h3>
     </div>
     <div class="p-6 space-y-4">
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">フィールドタイプ</label>
-        <select id="newFieldName" class="w-full border border-gray-300 rounded-lg px-4 py-2">
-          <option value="employee_id">社員番号</option>
-          <option value="date">日付</option>
-          <option value="vehicle_code">車両番号</option>
-          <option value="start_time">始業時刻</option>
-          <option value="end_time">終業時刻</option>
-          <option value="meter_out">出庫メーター</option>
-          <option value="meter_in">入庫メーター</option>
-          <option value="mileage">走行粁</option>
+        <label class="block text-sm font-medium text-gray-700 mb-2">フィールドタイプ</label>
+        <select id="newFieldName" class="w-full border border-gray-300 rounded-lg px-4 py-2" onchange="onFieldTypeChange()">
+          <optgroup label="グループフィールド（複数の領域を結合）">
+            <option value="date_group">📅 日付グループ（年・月・日・曜日）</option>
+            <option value="start_time_group">🕐 始業時刻グループ（時・分）</option>
+            <option value="end_time_group">🕐 終業時刻グループ（時・分）</option>
+          </optgroup>
+          <optgroup label="単独フィールド">
+            <option value="employee_id">社員番号</option>
+            <option value="vehicle_code">車両番号</option>
+            <option value="meter_out">出庫メーター</option>
+            <option value="meter_in">入庫メーター</option>
+            <option value="mileage">走行粁</option>
+          </optgroup>
         </select>
       </div>
-      <div>
+
+      <!-- グループフィールドの説明 -->
+      <div id="groupFieldInfo" class="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+        <div class="font-semibold text-blue-800 mb-1">グループフィールドについて</div>
+        <p class="text-blue-700">
+          各部分（年・月・日など）を個別にOCR認識し、結合して照合します。
+          区切り文字に左右されず高精度です。
+        </p>
+        <div id="groupSubfieldsPreview" class="mt-2 text-blue-600 font-mono text-xs"></div>
+      </div>
+
+      <div id="singleFieldLabelDiv">
         <label class="block text-sm font-medium text-gray-700 mb-1">ラベル（表示名）</label>
         <input type="text" id="newFieldLabel" class="w-full border border-gray-300 rounded-lg px-4 py-2"
                placeholder="例: 社員番号">
@@ -984,22 +999,63 @@ function renderPopupFieldList() {
     return;
   }
 
-  container.innerHTML = dailyReportFields.map((field, index) => `
-    <div class="p-3 flex justify-between items-center cursor-pointer transition ${selectedFieldIndex === index ? 'bg-red-100 border-l-4 border-red-500' : 'hover:bg-gray-100'}"
-         onclick="selectFieldForDrag(${index})">
-      <div class="flex-1">
-        <span class="font-medium text-gray-800">${escapeHtml(field.label || field.name)}</span>
-        <div class="text-xs text-gray-400 mt-1">
-          ${field.region ? `X:${field.region[0].toFixed(2)} Y:${field.region[1].toFixed(2)} W:${field.region[2].toFixed(2)} H:${field.region[3].toFixed(2)}` : '未設定'}
+  // グループごとにフィールドをまとめて表示
+  let html = '';
+  let currentGroup = null;
+
+  dailyReportFields.forEach((field, index) => {
+    const isGroupField = field.group && FIELD_GROUPS[field.group];
+
+    // グループの開始
+    if (isGroupField && field.group !== currentGroup) {
+      if (currentGroup !== null) {
+        html += '</div>'; // 前のグループを閉じる
+      }
+      const groupDef = FIELD_GROUPS[field.group];
+      html += `
+        <div class="bg-blue-50 border-l-4 border-blue-400">
+          <div class="px-3 py-2 bg-blue-100 text-blue-800 text-xs font-semibold flex items-center gap-1">
+            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+            </svg>
+            ${groupDef.label}グループ → ${groupDef.outputField}
+          </div>
+      `;
+      currentGroup = field.group;
+    } else if (!isGroupField && currentGroup !== null) {
+      html += '</div>'; // グループを閉じる
+      currentGroup = null;
+    }
+
+    const groupBadge = isGroupField
+      ? `<span class="ml-1 px-1.5 py-0.5 bg-blue-200 text-blue-700 text-xs rounded">${FIELD_GROUPS[field.group].label}</span>`
+      : '';
+
+    html += `
+      <div class="p-3 flex justify-between items-center cursor-pointer transition ${selectedFieldIndex === index ? 'bg-red-100 border-l-4 border-red-500' : 'hover:bg-gray-100'} ${isGroupField ? 'pl-6' : ''}"
+           onclick="selectFieldForDrag(${index})">
+        <div class="flex-1">
+          <span class="font-medium text-gray-800">${escapeHtml(field.label || field.name)}</span>
+          ${groupBadge}
+          <div class="text-xs text-gray-400 mt-1">
+            ${field.region ? `X:${field.region[0].toFixed(2)} Y:${field.region[1].toFixed(2)} W:${field.region[2].toFixed(2)} H:${field.region[3].toFixed(2)}` : '未設定'}
+          </div>
         </div>
+        <button onclick="event.stopPropagation(); removeFieldFromPopup(${index})" class="text-red-400 hover:text-red-600 p-1">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+        </button>
       </div>
-      <button onclick="event.stopPropagation(); removeFieldFromPopup(${index})" class="text-red-400 hover:text-red-600 p-1">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-        </svg>
-      </button>
-    </div>
-  `).join('');
+    `;
+  });
+
+  // 最後のグループを閉じる
+  if (currentGroup !== null) {
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
 }
 
 function selectFieldForDrag(index) {
@@ -1044,28 +1100,125 @@ function updateDailyReportPopupOverlay() {
   });
 }
 
+// グループフィールド定義
+const FIELD_GROUPS = {
+  date_group: {
+    label: '日付',
+    outputField: 'date',
+    subfields: [
+      {name: 'date_year', label: '年', defaultRegion: [0.76, 0.05, 0.05, 0.04]},
+      {name: 'date_month', label: '月', defaultRegion: [0.82, 0.05, 0.03, 0.04]},
+      {name: 'date_day', label: '日', defaultRegion: [0.86, 0.05, 0.03, 0.04]},
+      {name: 'date_weekday', label: '曜日', defaultRegion: [0.90, 0.05, 0.03, 0.04]},
+    ],
+    format: (parts) => {
+      const year = parts.date_year || '';
+      const month = parts.date_month || '';
+      const day = parts.date_day || '';
+      if (year && month && day) {
+        return `${year}/${month.padStart(2,'0')}/${day.padStart(2,'0')}`;
+      }
+      return '';
+    }
+  },
+  start_time_group: {
+    label: '始業時刻',
+    outputField: 'start_time',
+    subfields: [
+      {name: 'start_hour', label: '始業時', defaultRegion: [0.88, 0.14, 0.04, 0.04]},
+      {name: 'start_min', label: '始業分', defaultRegion: [0.93, 0.14, 0.04, 0.04]},
+    ],
+    format: (parts) => {
+      const hour = parts.start_hour || '';
+      const min = parts.start_min || '';
+      if (hour && min) {
+        return `${hour}:${min.padStart(2,'0')}`;
+      }
+      return '';
+    }
+  },
+  end_time_group: {
+    label: '終業時刻',
+    outputField: 'end_time',
+    subfields: [
+      {name: 'end_hour', label: '終業時', defaultRegion: [0.88, 0.18, 0.04, 0.04]},
+      {name: 'end_min', label: '終業分', defaultRegion: [0.93, 0.18, 0.04, 0.04]},
+    ],
+    format: (parts) => {
+      const hour = parts.end_hour || '';
+      const min = parts.end_min || '';
+      if (hour && min) {
+        return `${hour}:${min.padStart(2,'0')}`;
+      }
+      return '';
+    }
+  }
+};
+
 function addFieldFromPopup() {
   document.getElementById('addFieldModal').classList.remove('hidden');
-  document.getElementById('newFieldName').value = 'employee_id';
+  document.getElementById('newFieldName').value = 'date_group';
   document.getElementById('newFieldLabel').value = '';
+  onFieldTypeChange();
 }
 
 function closeAddFieldModal() {
   document.getElementById('addFieldModal').classList.add('hidden');
 }
 
+function onFieldTypeChange() {
+  const fieldType = document.getElementById('newFieldName').value;
+  const groupInfo = document.getElementById('groupFieldInfo');
+  const labelDiv = document.getElementById('singleFieldLabelDiv');
+  const preview = document.getElementById('groupSubfieldsPreview');
+
+  if (FIELD_GROUPS[fieldType]) {
+    // グループフィールド
+    groupInfo.classList.remove('hidden');
+    labelDiv.classList.add('hidden');
+    const group = FIELD_GROUPS[fieldType];
+    preview.innerHTML = `追加されるサブフィールド: ${group.subfields.map(s => s.label).join(' + ')} → ${group.label}`;
+  } else {
+    // 単独フィールド
+    groupInfo.classList.add('hidden');
+    labelDiv.classList.remove('hidden');
+  }
+}
+
 function confirmAddField() {
   const nameSelect = document.getElementById('newFieldName');
-  const label = document.getElementById('newFieldLabel').value || nameSelect.options[nameSelect.selectedIndex].text;
+  const fieldType = nameSelect.value;
 
-  const newField = {
-    name: nameSelect.value,
-    label: label,
-    region: [0.8, 0.4, 0.15, 0.05] // デフォルト領域
-  };
+  if (FIELD_GROUPS[fieldType]) {
+    // グループフィールド: サブフィールドを全て追加
+    const group = FIELD_GROUPS[fieldType];
+    const startIndex = dailyReportFields.length;
 
-  dailyReportFields.push(newField);
-  selectedFieldIndex = dailyReportFields.length - 1;
+    group.subfields.forEach(subfield => {
+      dailyReportFields.push({
+        name: subfield.name,
+        label: subfield.label,
+        region: [...subfield.defaultRegion],
+        group: fieldType,
+        outputField: group.outputField
+      });
+    });
+
+    // 最初のサブフィールドを選択
+    selectedFieldIndex = startIndex;
+  } else {
+    // 単独フィールド
+    const label = document.getElementById('newFieldLabel').value || nameSelect.options[nameSelect.selectedIndex].text;
+
+    const newField = {
+      name: fieldType,
+      label: label,
+      region: [0.8, 0.4, 0.15, 0.05]
+    };
+
+    dailyReportFields.push(newField);
+    selectedFieldIndex = dailyReportFields.length - 1;
+  }
 
   closeAddFieldModal();
   renderPopupFieldList();
