@@ -165,6 +165,12 @@
         <span class="text-sm text-gray-500" id="report-page-count"></span>
       </div>
 
+      <!-- 適用された設定（デバッグ用） -->
+      <div id="rep-applied-settings" class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm">
+        <div class="font-semibold text-yellow-800 mb-2">適用された設定:</div>
+        <div id="rep-settings-content" class="text-yellow-700 text-xs font-mono">（OCR処理後に表示されます）</div>
+      </div>
+
       <!-- ページ画像プレビュー -->
       <div id="rep-images" class="mb-4 flex gap-2 overflow-x-auto pb-2">
       </div>
@@ -497,6 +503,39 @@ function renderOCRResults(data) {
 
   document.getElementById('report-page-count').textContent = `${(rep.reports || []).length}ページ検出`;
 
+  // 日報の適用された設定を表示（デバッグ用）
+  const repSettingsContent = document.getElementById('rep-settings-content');
+  try {
+    if (rep.applied_settings) {
+      let settingsHtml = `<strong>プリセット:</strong> ${rep.applied_settings.preset_name || '不明'}<br>`;
+      settingsHtml += `<strong>OCRエンジン:</strong> ${rep.applied_settings.ocr_engine || 'Tesseract'}<br>`;
+
+      // 画像サイズ
+      if (rep.applied_settings.image_size) {
+        const imgSize = rep.applied_settings.image_size;
+        settingsHtml += `<strong>画像サイズ:</strong> ${imgSize.width} x ${imgSize.height} px<br>`;
+      }
+
+      // フィールド情報
+      if (rep.applied_settings.fields && rep.applied_settings.fields.length > 0) {
+        settingsHtml += `<strong>フィールド (${rep.applied_settings.fields.length}個):</strong><br>`;
+        rep.applied_settings.fields.forEach(f => {
+          const region = f.region ? `[${f.region.map(v => v?.toFixed ? v.toFixed(3) : v).join(', ')}]` : 'なし';
+          settingsHtml += `  ${f.label || f.name || '?'}: ${region}<br>`;
+        });
+      } else {
+        settingsHtml += `<strong>フィールド:</strong> プリセット未設定（デフォルト処理）<br>`;
+      }
+
+      repSettingsContent.innerHTML = settingsHtml;
+    } else {
+      repSettingsContent.innerHTML = '<span class="text-red-600">applied_settings がレスポンスに含まれていません</span>';
+    }
+  } catch (e) {
+    repSettingsContent.innerHTML = `<span class="text-red-600">エラー: ${e.message}</span>`;
+    console.error('日報設定表示エラー:', e);
+  }
+
   // 日報データテーブル
   const repTbody = document.getElementById('rep-tbody');
   repTbody.innerHTML = '';
@@ -509,12 +548,35 @@ function createAttendanceRow(row, idx) {
   const tr = document.createElement('tr');
   tr.className = 'hover:bg-gray-50';
   const fields = ['date', 'day_of_week', 'work_type', 'actual_start', 'actual_end', 'meter_out', 'meter_in', 'mileage', 'vehicle_code', 'site_name'];
+  const confidence = row.confidence || {};
+
   fields.forEach(f => {
     const td = document.createElement('td');
     td.className = 'border px-1 py-1';
+
+    // 信頼度に応じた背景色
+    const conf = confidence[f];
+    let bgClass = '';
+    if (conf !== undefined && conf >= 0) {
+      if (conf < 50) {
+        bgClass = 'bg-red-100';  // 低信頼度: 赤
+      } else if (conf < 80) {
+        bgClass = 'bg-yellow-100';  // 中信頼度: 黄
+      }
+    }
+
+    // 信頼度表示
+    if (conf !== undefined && conf >= 0) {
+      const confSpan = document.createElement('span');
+      confSpan.className = `text-xs mr-1 ${conf < 50 ? 'text-red-600' : conf < 80 ? 'text-yellow-600' : 'text-green-600'}`;
+      confSpan.textContent = `${Math.round(conf)}%`;
+      confSpan.title = `OCR信頼度: ${conf.toFixed(1)}%`;
+      td.appendChild(confSpan);
+    }
+
     const input = document.createElement('input');
     input.type = 'text';
-    input.className = 'w-full px-1 py-0.5 text-sm border-0 bg-transparent focus:bg-yellow-50 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded';
+    input.className = `w-full px-1 py-0.5 text-sm border-0 bg-transparent focus:bg-yellow-50 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded ${bgClass}`;
     input.value = row[f] || '';
     input.dataset.field = f;
     input.dataset.idx = idx;

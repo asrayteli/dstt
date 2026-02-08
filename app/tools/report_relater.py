@@ -725,6 +725,8 @@ def extract_attendance_table_rows(cv_img, columns, data_start_y, row_height, max
             "meter_in": "",
             "mileage": "",
             "vehicle_code": "",
+            # 信頼度（%）
+            "confidence": {}
         }
 
         has_data = False
@@ -750,21 +752,22 @@ def extract_attendance_table_rows(cv_img, columns, data_start_y, row_height, max
             if region_w <= 5 or region_h <= 5:
                 continue
 
-            # 最初の行のみOCR領域を可視化
-            if row_idx < 3:
-                ocr_regions.append({
-                    "rect": (x, y, region_w, region_h),
-                    "label": col.get("label", col_name),
-                    "color": (255, 0, 0)  # 青
-                })
+            # OCR領域を可視化（全行）
+            # 最初の3行はラベル付き、それ以降はラベルなし
+            ocr_regions.append({
+                "rect": (x, y, region_w, region_h),
+                "label": col.get("label", col_name) if row_idx < 3 else "",
+                "color": (255, 0, 0)  # 青
+            })
 
-            # 領域を切り出してOCR
+            # 領域を切り出してOCR（信頼度も取得）
             region = cv_img[y:y + region_h, x:x + region_w]
-            text = ocr_region_improved(region, col_name)
+            text, confidence = ocr_region_improved(region, col_name, return_confidence=True)
 
-            if text and col_name in row_data:
+            if col_name in row_data and col_name != "confidence":
                 row_data[col_name] = text
-                if text.strip():
+                row_data["confidence"][col_name] = confidence
+                if text and text.strip():
                     has_data = True
 
         # 日付データがあれば行として追加
@@ -851,27 +854,37 @@ def extract_attendance_fields_by_region(cv_img, fields):
     return rows
 
 
-def ocr_region_improved(region, field_name):
-    """改善されたOCR処理（EasyOCR優先、Tesseractフォールバック）"""
+def ocr_region_improved(region, field_name, return_confidence=False):
+    """改善されたOCR処理（EasyOCR優先、Tesseractフォールバック）
+
+    Args:
+        region: 画像領域
+        field_name: フィールド名
+        return_confidence: Trueの場合、(text, confidence)のタプルを返す
+
+    Returns:
+        return_confidence=False: text (str)
+        return_confidence=True: (text, confidence) のタプル (confidence: 0-100)
+    """
     try:
         # EasyOCRを試行
         reader = _init_easyocr()
         if reader is not None:
-            return _ocr_with_easyocr(region, field_name, reader)
+            return _ocr_with_easyocr(region, field_name, reader, return_confidence)
 
         # EasyOCRが使えない場合はTesseractにフォールバック
         if TESSERACT_AVAILABLE and TESSERACT_CONFIGURED:
-            return _ocr_with_tesseract(region, field_name)
+            return _ocr_with_tesseract(region, field_name, return_confidence)
 
         logger.error("OCRエンジンが利用できません")
-        return ""
+        return ("", 0) if return_confidence else ""
 
     except Exception as e:
         logger.warning(f"OCRエラー ({field_name}): {e}")
-        return ""
+        return ("", 0) if return_confidence else ""
 
 
-def _ocr_with_easyocr(region, field_name, reader):
+def _ocr_with_easyocr(region, field_name, reader, return_confidence=False):
     """EasyOCRでOCR処理を行う"""
     try:
         # 画像の前処理
@@ -891,29 +904,39 @@ def _ocr_with_easyocr(region, field_name, reader):
         # パディングを追加
         gray = cv2.copyMakeBorder(gray, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
 
-        # EasyOCRで認識
-        # detail=0で単純なテキストリストを取得
-        results = reader.readtext(gray, detail=0, paragraph=False)
+        # EasyOCRで認識（detail=1で信頼度も取得）
+        results = reader.readtext(gray, detail=1, paragraph=False)
 
         if results:
-            text = "".join(results)
+            # 結合してテキストと平均信頼度を計算
+            texts = []
+            confidences = []
+            for (bbox, text, conf) in results:
+                texts.append(text)
+                confidences.append(conf)
+
+            combined_text = "".join(texts)
+            avg_confidence = sum(confidences) / len(confidences) * 100 if confidences else 0
         else:
-            text = ""
+            combined_text = ""
+            avg_confidence = 0
 
         # 後処理
-        text = post_process_ocr_text(text, field_name)
+        combined_text = post_process_ocr_text(combined_text, field_name)
 
-        return text
+        if return_confidence:
+            return (combined_text, round(avg_confidence, 1))
+        return combined_text
 
     except Exception as e:
         logger.warning(f"EasyOCRエラー ({field_name}): {e}")
         # Tesseractにフォールバック
         if TESSERACT_AVAILABLE and TESSERACT_CONFIGURED:
-            return _ocr_with_tesseract(region, field_name)
-        return ""
+            return _ocr_with_tesseract(region, field_name, return_confidence)
+        return ("", 0) if return_confidence else ""
 
 
-def _ocr_with_tesseract(region, field_name):
+def _ocr_with_tesseract(region, field_name, return_confidence=False):
     """TesseractでOCR処理を行う（フォールバック用）"""
     try:
         # グレースケール変換
@@ -958,10 +981,15 @@ def _ocr_with_tesseract(region, field_name):
         # 後処理
         text = post_process_ocr_text(text, field_name)
 
+        # Tesseractの場合、信頼度は-1（不明）とする
+        if return_confidence:
+            return (text, -1)
         return text
 
     except Exception as e:
         logger.warning(f"Tesseract OCRエラー ({field_name}): {e}")
+        if return_confidence:
+            return ("", 0)
         return ""
 
 
@@ -1140,15 +1168,34 @@ def parse_attendance_text(text):
 
 def process_daily_report_pdf(pdf_path, preset=None):
     """日報PDFを処理"""
+    # OCRエンジンを判定
+    ocr_engine = "不明"
+    if EASYOCR_AVAILABLE:
+        ocr_engine = "EasyOCR"
+    elif TESSERACT_AVAILABLE and TESSERACT_CONFIGURED:
+        ocr_engine = "Tesseract"
+
     result = {
         "reports": [],
         "page_images": [],
+        "applied_settings": {
+            "ocr_engine": ocr_engine,
+            "preset_name": preset.get("name", "なし") if preset else "デフォルト",
+            "fields": [],
+            "image_size": None,
+        }
     }
 
     # プリセットから日報設定を取得
     daily_report_preset = None
     if preset and "daily_report" in preset:
         daily_report_preset = preset["daily_report"]
+        # フィールド情報をデバッグ用に保存
+        if "fields" in daily_report_preset:
+            result["applied_settings"]["fields"] = [
+                {"name": f.get("name"), "label": f.get("label"), "region": f.get("region")}
+                for f in daily_report_preset["fields"]
+            ]
 
     try:
         doc = fitz.open(pdf_path)
@@ -1162,6 +1209,11 @@ def process_daily_report_pdf(pdf_path, preset=None):
             img_data = pix.tobytes("png")
             pil_img = Image.open(io.BytesIO(img_data))
             cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+
+            # 最初のページで画像サイズを記録
+            if page_num == 0:
+                h, w = cv_img.shape[:2]
+                result["applied_settings"]["image_size"] = {"width": w, "height": h}
 
             # 日報ページを処理（OCR領域情報も取得）
             report_data, ocr_regions = process_daily_report_page(cv_img, page_num, daily_report_preset)
@@ -1260,17 +1312,30 @@ def process_daily_report_page(cv_img, page_num, preset=None):
             "label": "Main Region"
         })
 
-        # グレースケール・二値化
+        # グレースケール・コントラスト強調
         gray = cv2.cvtColor(main_region_img, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
 
-        # 数字のみOCR
-        text = pytesseract.image_to_string(
-            binary,
-            config="--psm 6 -c tessedit_char_whitelist=0123456789/:.-"
-        )
+        # EasyOCRまたはTesseractでOCR
+        text = ""
+        reader = _init_easyocr()
+        if reader is not None:
+            try:
+                results = reader.readtext(gray, detail=0, paragraph=False)
+                text = " ".join(results) if results else ""
+            except Exception as e:
+                logger.warning(f"日報EasyOCRエラー: {e}")
 
-        logger.info(f"日報ページ{page_num + 1} OCR結果: {text[:200]}...")
+        # EasyOCRが失敗した場合はTesseractにフォールバック
+        if not text and TESSERACT_AVAILABLE and TESSERACT_CONFIGURED:
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            text = pytesseract.image_to_string(
+                binary,
+                config="--psm 6 -c tessedit_char_whitelist=0123456789/:.-"
+            )
+
+        logger.info(f"日報ページ{page_num + 1} OCR結果: {text[:200] if text else '(空)'}...")
 
         # パターンマッチングで各フィールドを抽出
         fields = extract_daily_report_fields(text)
