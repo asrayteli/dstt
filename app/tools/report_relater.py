@@ -424,11 +424,19 @@ def delete_preset(preset_id):
 @report_relater_bp.route("/api/preview_image", methods=["POST"])
 @login_required
 def preview_image():
-    """PDFの最初のページを画像として返す（プリセット設定用）"""
+    """PDFの最初のページを画像として返す（プリセット設定用）
+
+    document_type パラメータ:
+    - "attendance": 勤怠データ（A4縦）- 回転なし
+    - "daily_report": 日報（A5横）- 縦長の場合は自動回転
+    """
     try:
         file = request.files.get("file")
         if not file or not file.filename:
             return jsonify({"error": "ファイルがアップロードされていません"}), 400
+
+        # 文書タイプを取得（日報の場合は回転処理を行う）
+        document_type = request.form.get("document_type", "attendance")
 
         temp_dir = tempfile.mkdtemp()
         try:
@@ -444,6 +452,19 @@ def preview_image():
             img_data = pix.tobytes("png")
             pil_img = Image.open(io.BytesIO(img_data))
 
+            # 元のサイズを記録
+            original_width = pil_img.width
+            original_height = pil_img.height
+            was_rotated = False
+
+            # 日報の場合、縦長なら横向きに回転（実際のOCR処理と同じ処理）
+            if document_type == "daily_report":
+                if pil_img.height > pil_img.width:
+                    # 90度時計回りに回転（OCR処理と同じ）
+                    pil_img = pil_img.rotate(-90, expand=True)
+                    was_rotated = True
+                    logger.info(f"日報プレビュー: 縦長画像を回転 ({original_width}x{original_height} -> {pil_img.width}x{pil_img.height})")
+
             # サムネイル作成
             pil_img.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
             buf = io.BytesIO()
@@ -456,6 +477,10 @@ def preview_image():
                 "image": img_base64,
                 "width": pil_img.width,
                 "height": pil_img.height,
+                "original_width": original_width,
+                "original_height": original_height,
+                "was_rotated": was_rotated,
+                "document_type": document_type,
             })
 
         finally:

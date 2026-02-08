@@ -80,6 +80,19 @@
 
         <!-- 勤怠データタブ（テーブル形式） -->
         <div id="attendanceTab" class="bg-white rounded-xl shadow-lg p-6">
+          <!-- A4縦向き説明 -->
+          <div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <div class="flex items-center gap-2 text-green-800">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              <span class="font-semibold">勤怠データは A4 縦向きとして処理されます</span>
+            </div>
+            <p class="text-sm text-green-700 mt-1">
+              テーブル形式のデータを列単位でOCRします。列の位置と行の高さを調整してください。
+            </p>
+          </div>
+
           <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <!-- 画像エリア -->
             <div class="lg:col-span-2">
@@ -181,6 +194,20 @@
 
         <!-- 日報タブ -->
         <div id="dailyReportTab" class="hidden bg-white rounded-xl shadow-lg p-6">
+          <!-- A5横向き説明 -->
+          <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div class="flex items-center gap-2 text-blue-800">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <span class="font-semibold">日報は A5 横向きとして処理されます</span>
+            </div>
+            <p class="text-sm text-blue-700 mt-1">
+              縦向きでスキャンされたPDFは自動的に90度回転されます。座標はこの回転後の画像に対して適用されます。
+            </p>
+            <div id="dailyReportRotationInfo" class="hidden mt-2 text-sm text-blue-600 font-mono"></div>
+          </div>
+
           <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <!-- 画像エリア -->
             <div class="lg:col-span-2">
@@ -1247,6 +1274,10 @@ function loadPreviewImageFromFile(type, file) {
   const formData = new FormData();
   formData.append('file', file);
 
+  // 文書タイプを送信（日報の場合は自動回転される）
+  const documentType = type === 'attendance' ? 'attendance' : 'daily_report';
+  formData.append('document_type', documentType);
+
   // ドロップゾーンを隠す
   const dropZone = document.getElementById(type === 'attendance' ? 'attendanceDropZone' : 'dailyReportDropZone');
   dropZone.innerHTML = '<div class="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto"></div><p class="mt-2 text-gray-500">読み込み中...</p>';
@@ -1268,6 +1299,18 @@ function loadPreviewImageFromFile(type, file) {
     document.getElementById(imgId).src = 'data:image/png;base64,' + data.image;
     document.getElementById(containerId).classList.remove('hidden');
     dropZone.classList.add('hidden');
+
+    // 日報の場合、回転情報を表示
+    if (type === 'daily_report') {
+      const rotationInfo = document.getElementById('dailyReportRotationInfo');
+      if (data.was_rotated) {
+        rotationInfo.innerHTML = `<span class="text-green-600">縦向きPDFを自動回転しました: ${data.original_width}x${data.original_height} → ${data.width}x${data.height}</span>`;
+        rotationInfo.classList.remove('hidden');
+      } else {
+        rotationInfo.innerHTML = `画像サイズ: ${data.width}x${data.height} (回転なし)`;
+        rotationInfo.classList.remove('hidden');
+      }
+    }
 
     // プレビュー更新
     if (type === 'attendance') {
