@@ -127,6 +127,7 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
+    position: relative;
   }
   .pcsv-main {
     flex: 1;
@@ -383,16 +384,24 @@
     gap: 16px;
   }
 
-  /* Side panel */
+  /* Side panel - fixed overlay on right */
   .pcsv-panel {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
     width: 0;
     overflow: hidden;
     background: #fff;
     border-left: 1px solid var(--pcsv-grid-border);
-    transition: width 0.2s ease;
-    flex-shrink: 0;
+    transition: width 0.25s ease;
+    z-index: 20;
+    box-shadow: none;
   }
-  .pcsv-panel.open { width: var(--pcsv-panel-width); }
+  .pcsv-panel.open {
+    width: var(--pcsv-panel-width);
+    box-shadow: -4px 0 20px rgba(0,0,0,0.10);
+  }
   .pcsv-panel-inner {
     width: var(--pcsv-panel-width);
     height: 100%;
@@ -707,6 +716,58 @@
     outline: none;
   }
   .pcsv-formula-bar .formula-input:focus { border-color: var(--pcsv-accent); }
+  .pcsv-formula-bar .formula-input.has-formula {
+    color: var(--pcsv-accent);
+    font-weight: 500;
+  }
+  .pcsv-fx-help-btn {
+    width: 20px;
+    height: 20px;
+    border: 1px solid #e2e8f0;
+    border-radius: 3px;
+    background: #f8fafc;
+    color: #94a3b8;
+    font-size: 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+  }
+  .pcsv-fx-help-btn:hover { background: #e2e8f0; color: var(--pcsv-text); }
+  /* Formula help popup */
+  .pcsv-fx-popup {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 100px;
+    width: 520px;
+    max-height: 400px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+    z-index: 60;
+    padding: 16px;
+    font-size: 12px;
+  }
+  .pcsv-fx-popup.show { display: block; }
+  .pcsv-fx-popup h4 { font-size: 13px; font-weight: 700; margin: 0 0 10px; color: var(--pcsv-text); }
+  .pcsv-fx-popup .fx-cat { margin-bottom: 12px; }
+  .pcsv-fx-popup .fx-cat-title {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    color: var(--pcsv-accent); letter-spacing: 0.5px; margin-bottom: 4px;
+    padding-bottom: 3px; border-bottom: 1px solid #f1f5f9;
+  }
+  .pcsv-fx-popup .fx-row {
+    display: flex; justify-content: space-between; padding: 3px 0;
+    cursor: pointer; border-radius: 3px; padding: 3px 6px;
+  }
+  .pcsv-fx-popup .fx-row:hover { background: #f1f5f9; }
+  .pcsv-fx-popup .fx-name { font-weight: 600; font-family: monospace; color: var(--pcsv-text); }
+  .pcsv-fx-popup .fx-desc { color: var(--pcsv-text-muted); text-align: right; }
 
   /* Context menu */
   .pcsv-ctx-menu {
@@ -898,11 +959,60 @@
   </div>
 
   <!-- Formula Bar -->
-  <div class="pcsv-formula-bar" id="formulaBar">
+  <div class="pcsv-formula-bar" id="formulaBar" style="position:relative">
     <span class="cell-ref" id="cellRef">-</span>
     <span class="fx-label">fx</span>
-    <input type="text" class="formula-input" id="formulaInput" placeholder="セルを選択してください"
-      onkeydown="onFormulaKey(event)" onblur="commitFormula()">
+    <button class="pcsv-fx-help-btn" onclick="toggleFxHelp()" title="数式ヘルプ">?</button>
+    <input type="text" class="formula-input" id="formulaInput" placeholder="値を入力 / =SUM(A1:A10) で数式を使用"
+      onkeydown="onFormulaKey(event)" onblur="commitFormula()" oninput="onFormulaInput()">
+    <!-- Formula help popup -->
+    <div class="pcsv-fx-popup" id="fxHelpPopup">
+      <h4>数式リファレンス (= で始めて入力)</h4>
+      <div class="fx-cat">
+        <div class="fx-cat-title">セル参照</div>
+        <div class="fx-row"><span class="fx-name">A1</span><span class="fx-desc">列A, 行1のセル</span></div>
+        <div class="fx-row"><span class="fx-name">A1:A10</span><span class="fx-desc">A1からA10の範囲</span></div>
+        <div class="fx-row"><span class="fx-name">A</span><span class="fx-desc">A列全体</span></div>
+      </div>
+      <div class="fx-cat">
+        <div class="fx-cat-title">集計関数</div>
+        <div class="fx-row" onclick="insertFx('=SUM()')"><span class="fx-name">=SUM(範囲)</span><span class="fx-desc">合計</span></div>
+        <div class="fx-row" onclick="insertFx('=AVG()')"><span class="fx-name">=AVG(範囲)</span><span class="fx-desc">平均</span></div>
+        <div class="fx-row" onclick="insertFx('=COUNT()')"><span class="fx-name">=COUNT(範囲)</span><span class="fx-desc">データ件数</span></div>
+        <div class="fx-row" onclick="insertFx('=MIN()')"><span class="fx-name">=MIN(範囲)</span><span class="fx-desc">最小値</span></div>
+        <div class="fx-row" onclick="insertFx('=MAX()')"><span class="fx-name">=MAX(範囲)</span><span class="fx-desc">最大値</span></div>
+        <div class="fx-row" onclick="insertFx('=MEDIAN()')"><span class="fx-name">=MEDIAN(範囲)</span><span class="fx-desc">中央値</span></div>
+        <div class="fx-row" onclick="insertFx('=STDEV()')"><span class="fx-name">=STDEV(範囲)</span><span class="fx-desc">標準偏差</span></div>
+        <div class="fx-row" onclick="insertFx('=COUNTBLANK()')"><span class="fx-name">=COUNTBLANK(範囲)</span><span class="fx-desc">空欄の数</span></div>
+      </div>
+      <div class="fx-cat">
+        <div class="fx-cat-title">条件・検索</div>
+        <div class="fx-row" onclick="insertFx('=IF(,,)')"><span class="fx-name">=IF(条件, 真, 偽)</span><span class="fx-desc">条件分岐</span></div>
+        <div class="fx-row" onclick="insertFx('=COUNTIF(,)')"><span class="fx-name">=COUNTIF(範囲, 条件)</span><span class="fx-desc">条件付きカウント</span></div>
+        <div class="fx-row" onclick="insertFx('=SUMIF(,)')"><span class="fx-name">=SUMIF(範囲, 条件)</span><span class="fx-desc">条件付き合計</span></div>
+        <div class="fx-row" onclick="insertFx('=VLOOKUP(,,)')"><span class="fx-name">=VLOOKUP(値, 列, 結果列)</span><span class="fx-desc">縦検索</span></div>
+      </div>
+      <div class="fx-cat">
+        <div class="fx-cat-title">文字列</div>
+        <div class="fx-row" onclick="insertFx('=UPPER()')"><span class="fx-name">=UPPER(セル)</span><span class="fx-desc">大文字変換</span></div>
+        <div class="fx-row" onclick="insertFx('=LOWER()')"><span class="fx-name">=LOWER(セル)</span><span class="fx-desc">小文字変換</span></div>
+        <div class="fx-row" onclick="insertFx('=TRIM()')"><span class="fx-name">=TRIM(セル)</span><span class="fx-desc">空白除去</span></div>
+        <div class="fx-row" onclick="insertFx('=LEN()')"><span class="fx-name">=LEN(セル)</span><span class="fx-desc">文字数</span></div>
+        <div class="fx-row" onclick="insertFx('=CONCAT(,)')"><span class="fx-name">=CONCAT(A1, B1)</span><span class="fx-desc">文字列結合</span></div>
+        <div class="fx-row" onclick="insertFx('=LEFT(,)')"><span class="fx-name">=LEFT(セル, 文字数)</span><span class="fx-desc">左から取得</span></div>
+        <div class="fx-row" onclick="insertFx('=RIGHT(,)')"><span class="fx-name">=RIGHT(セル, 文字数)</span><span class="fx-desc">右から取得</span></div>
+        <div class="fx-row" onclick="insertFx('=MID(,,)')"><span class="fx-name">=MID(セル, 開始, 文字数)</span><span class="fx-desc">中間取得</span></div>
+        <div class="fx-row" onclick="insertFx('=SUBSTITUTE(,,)')"><span class="fx-name">=SUBSTITUTE(セル, 検索, 置換)</span><span class="fx-desc">文字列置換</span></div>
+      </div>
+      <div class="fx-cat">
+        <div class="fx-cat-title">数値・日付</div>
+        <div class="fx-row" onclick="insertFx('=ROUND(,)')"><span class="fx-name">=ROUND(値, 桁数)</span><span class="fx-desc">四捨五入</span></div>
+        <div class="fx-row" onclick="insertFx('=ABS()')"><span class="fx-name">=ABS(値)</span><span class="fx-desc">絶対値</span></div>
+        <div class="fx-row" onclick="insertFx('=TODAY()')"><span class="fx-name">=TODAY()</span><span class="fx-desc">今日の日付</span></div>
+        <div class="fx-row" onclick="insertFx('=NOW()')"><span class="fx-name">=NOW()</span><span class="fx-desc">現在日時</span></div>
+        <div class="fx-row" onclick="insertFx('=UNIQUE()')"><span class="fx-name">=UNIQUE(範囲)</span><span class="fx-desc">ユニーク値の数</span></div>
+      </div>
+    </div>
   </div>
 
   <!-- Body -->
@@ -1330,13 +1440,223 @@ function updateSelectionStatus() {
   } else ci.textContent='';
 }
 
+// ========== Formula Engine ==========
+function colLetterToIndex(letters) {
+  letters=letters.toUpperCase(); let idx=0;
+  for(let i=0;i<letters.length;i++) idx=idx*26+(letters.charCodeAt(i)-64);
+  return idx-1;
+}
+function indexToColLetter(idx) {
+  let s=''; idx++;
+  while(idx>0){idx--;s=String.fromCharCode(65+(idx%26))+s;idx=Math.floor(idx/26);}
+  return s;
+}
+function parseCellRef(ref) {
+  const m=ref.trim().match(/^([A-Za-z]+)(\d+)$/);
+  if(!m) return null;
+  const ci=colLetterToIndex(m[1]),ri=parseInt(m[2])-1;
+  if(ci<0||ri<0) return null;
+  return {col:ci,row:ri};
+}
+function parseRange(rangeStr) {
+  rangeStr=rangeStr.trim();
+  if(/^[A-Za-z]+$/.test(rangeStr)){return{type:'column',col:colLetterToIndex(rangeStr)};}
+  if(!rangeStr.includes(':')){const c=parseCellRef(rangeStr);if(c)return{type:'cell',row:c.row,col:c.col};return null;}
+  const parts=rangeStr.split(':');
+  if(parts.length!==2) return null;
+  if(/^[A-Za-z]+$/.test(parts[0])&&/^[A-Za-z]+$/.test(parts[1])){
+    return{type:'colRange',c1:colLetterToIndex(parts[0]),c2:colLetterToIndex(parts[1])};
+  }
+  const from=parseCellRef(parts[0]),to=parseCellRef(parts[1]);
+  if(from&&to) return{type:'range',r1:Math.min(from.row,to.row),c1:Math.min(from.col,to.col),r2:Math.max(from.row,to.row),c2:Math.max(from.col,to.col)};
+  return null;
+}
+function getCellVal(row,col){
+  if(row<0||row>=S.data.length||col<0||col>=S.headers.length) return '';
+  return S.data[row][col]||'';
+}
+function getRangeValues(rangeStr){
+  const rng=parseRange(rangeStr); if(!rng) return [];
+  if(rng.type==='cell') return [getCellVal(rng.row,rng.col)];
+  if(rng.type==='column') return S.data.map(r=>r[rng.col]||'');
+  if(rng.type==='range'){
+    const v=[];for(let r=rng.r1;r<=rng.r2;r++)for(let c=rng.c1;c<=rng.c2;c++)v.push(getCellVal(r,c));return v;
+  }
+  if(rng.type==='colRange'){
+    const v=[];for(let r=0;r<S.data.length;r++)for(let c=rng.c1;c<=rng.c2;c++)v.push(getCellVal(r,c));return v;
+  }
+  return [];
+}
+function getRangeNums(rangeStr){return getRangeValues(rangeStr).map(v=>parseFloat(v)).filter(v=>!isNaN(v));}
+function parseFormulaArgs(argsStr){
+  const args=[];let cur='',depth=0,inQ=false;
+  for(let i=0;i<argsStr.length;i++){
+    const ch=argsStr[i];
+    if(ch==='"'){inQ=!inQ;cur+=ch;}
+    else if(!inQ&&ch==='('){depth++;cur+=ch;}
+    else if(!inQ&&ch===')'){depth--;cur+=ch;}
+    else if(!inQ&&ch===','&&depth===0){args.push(cur);cur='';}
+    else{cur+=ch;}
+  }
+  if(cur) args.push(cur);
+  return args;
+}
+function resolveArg(arg){
+  arg=arg.trim();
+  if(arg.startsWith('"')&&arg.endsWith('"')) return arg.slice(1,-1);
+  // Nested formula
+  if(arg.startsWith('=')){try{return evaluateFormula(arg);}catch(e){return '#ERROR';}}
+  // Function call without =
+  const fm=arg.match(/^([A-Z_]+)\s*\((.+)\)$/is);
+  if(fm){try{return evaluateFormula('='+arg);}catch(e){return '#ERROR';}}
+  const ref=parseCellRef(arg);
+  if(ref) return getCellVal(ref.row,ref.col);
+  const n=parseFloat(arg);
+  if(!isNaN(n)&&String(n)===arg) return n;
+  return arg;
+}
+function resolveNum(arg){const v=resolveArg(arg);return parseFloat(v);}
+function resolveStr(arg){return String(resolveArg(arg));}
+function evalCondition(condStr){
+  condStr=condStr.trim();
+  const ops=['>=','<=','<>','!=','=','>','<'];
+  for(const op of ops){
+    // Find op not inside quotes
+    let inQ=false,idx=-1;
+    for(let i=0;i<condStr.length;i++){
+      if(condStr[i]==='"')inQ=!inQ;
+      if(!inQ&&condStr.substring(i,i+op.length)===op){idx=i;break;}
+    }
+    if(idx>0){
+      const left=resolveArg(condStr.substring(0,idx)),right=resolveArg(condStr.substring(idx+op.length));
+      const ln=parseFloat(left),rn=parseFloat(right),useN=!isNaN(ln)&&!isNaN(rn);
+      switch(op){
+        case '>': return useN?ln>rn:String(left)>String(right);
+        case '<': return useN?ln<rn:String(left)<String(right);
+        case '>=': return useN?ln>=rn:String(left)>=String(right);
+        case '<=': return useN?ln<=rn:String(left)<=String(right);
+        case '=': return String(left)===String(right);
+        case '<>':case '!=': return String(left)!==String(right);
+      }
+    }
+  }
+  const v=resolveArg(condStr);
+  return v&&v!=='0'&&v!=='false'&&v!=='';
+}
+function matchCriteria(value,criteria){
+  const ops=['>=','<=','<>','!=','>','<','='];
+  for(const op of ops){
+    if(criteria.startsWith(op)){
+      const right=criteria.substring(op.length);
+      const vn=parseFloat(value),rn=parseFloat(right),useN=!isNaN(vn)&&!isNaN(rn);
+      switch(op){
+        case '>':return useN?vn>rn:value>right;case '<':return useN?vn<rn:value<right;
+        case '>=':return useN?vn>=rn:value>=right;case '<=':return useN?vn<=rn:value<=right;
+        case '=':return value===right;case '<>':case '!=':return value!==right;
+      }
+    }
+  }
+  return value===criteria;
+}
+function evaluateFormula(formula){
+  let expr=formula.substring(1).trim();
+  const funcMatch=expr.match(/^([A-Z_]+)\s*\(([\s\S]*)\)$/i);
+  if(!funcMatch){
+    const ref=parseCellRef(expr);if(ref)return getCellVal(ref.row,ref.col);
+    // Simple arithmetic
+    try{
+      const replaced=expr.replace(/([A-Za-z]+\d+)/g,(m)=>{const r=parseCellRef(m);return r?`(${parseFloat(getCellVal(r.row,r.col))||0})`:'0';});
+      const result=Function('"use strict";return ('+replaced+')')();
+      if(typeof result==='number'&&isFinite(result)) return result;
+    }catch(e){}
+    return '#ERROR: 不明な数式';
+  }
+  const func=funcMatch[1].toUpperCase(),args=parseFormulaArgs(funcMatch[2]);
+  switch(func){
+    case 'SUM':{const nums=args.flatMap(a=>getRangeNums(a));return nums.reduce((s,n)=>s+n,0);}
+    case 'AVG':case 'AVERAGE':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?nums.reduce((s,n)=>s+n,0)/nums.length:0;}
+    case 'COUNT':{return args.flatMap(a=>getRangeValues(a)).filter(v=>v.trim()!=='').length;}
+    case 'COUNTA':{return args.flatMap(a=>getRangeValues(a)).filter(v=>v.trim()!=='').length;}
+    case 'COUNTBLANK':{return args.flatMap(a=>getRangeValues(a)).filter(v=>v.trim()==='').length;}
+    case 'MIN':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?Math.min(...nums):0;}
+    case 'MAX':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?Math.max(...nums):0;}
+    case 'MEDIAN':{
+      const nums=args.flatMap(a=>getRangeNums(a)).sort((a,b)=>a-b);if(!nums.length)return 0;
+      const mid=Math.floor(nums.length/2);return nums.length%2?nums[mid]:(nums[mid-1]+nums[mid])/2;
+    }
+    case 'STDEV':{
+      const nums=args.flatMap(a=>getRangeNums(a));if(nums.length<2)return 0;
+      const avg=nums.reduce((s,n)=>s+n,0)/nums.length;
+      return Math.sqrt(nums.reduce((s,n)=>s+Math.pow(n-avg,2),0)/(nums.length-1));
+    }
+    case 'UPPER':{if(!args.length)return '#ERROR';return resolveStr(args[0]).toUpperCase();}
+    case 'LOWER':{if(!args.length)return '#ERROR';return resolveStr(args[0]).toLowerCase();}
+    case 'TRIM':{if(!args.length)return '#ERROR';return resolveStr(args[0]).trim();}
+    case 'LEN':{if(!args.length)return '#ERROR';return resolveStr(args[0]).length;}
+    case 'CONCAT':case 'CONCATENATE':{return args.map(a=>resolveStr(a)).join('');}
+    case 'LEFT':{if(args.length<2)return '#ERROR';const t=resolveStr(args[0]),n=parseInt(resolveArg(args[1]));return t.substring(0,n);}
+    case 'RIGHT':{if(args.length<2)return '#ERROR';const t=resolveStr(args[0]),n=parseInt(resolveArg(args[1]));return t.substring(t.length-n);}
+    case 'MID':{if(args.length<3)return '#ERROR';const t=resolveStr(args[0]),st=parseInt(resolveArg(args[1]))-1,ln=parseInt(resolveArg(args[2]));return t.substring(st,st+ln);}
+    case 'SUBSTITUTE':{if(args.length<3)return '#ERROR';return resolveStr(args[0]).split(resolveStr(args[1])).join(resolveStr(args[2]));}
+    case 'IF':{
+      if(args.length<3)return '#ERROR: IF(条件,真,偽)';
+      return evalCondition(args[0])?resolveArg(args[1]):resolveArg(args[2]);
+    }
+    case 'COUNTIF':{
+      if(args.length<2)return '#ERROR';
+      const vals=getRangeValues(args[0].trim()),criteria=args[1].trim().replace(/^"|"$/g,'');
+      return vals.filter(v=>matchCriteria(v,criteria)).length;
+    }
+    case 'SUMIF':{
+      if(args.length<2)return '#ERROR';
+      const vals=getRangeValues(args[0].trim()),criteria=args[1].trim().replace(/^"|"$/g,'');
+      let sum=0;vals.forEach(v=>{if(matchCriteria(v,criteria)){const n=parseFloat(v);if(!isNaN(n))sum+=n;}});return sum;
+    }
+    case 'VLOOKUP':{
+      if(args.length<3)return '#ERROR: VLOOKUP(値,検索列,結果列)';
+      const searchVal=String(resolveArg(args[0])),
+            searchCol=/^[A-Za-z]+$/.test(args[1].trim())?colLetterToIndex(args[1].trim()):parseInt(args[1].trim())-1,
+            resultCol=/^[A-Za-z]+$/.test(args[2].trim())?colLetterToIndex(args[2].trim()):parseInt(args[2].trim())-1;
+      if(isNaN(searchCol)||isNaN(resultCol))return '#ERROR: 列指定不正';
+      for(let r=0;r<S.data.length;r++){if((S.data[r][searchCol]||'')===searchVal)return S.data[r][resultCol]||'';}
+      return '#N/A';
+    }
+    case 'ROUND':{const v=resolveNum(args[0]),d=args.length>1?parseInt(resolveArg(args[1])):0;if(isNaN(v))return '#ERROR';return parseFloat(v.toFixed(d));}
+    case 'ABS':{const v=resolveNum(args[0]);if(isNaN(v))return '#ERROR';return Math.abs(v);}
+    case 'CEILING':case 'CEIL':{const v=resolveNum(args[0]);if(isNaN(v))return '#ERROR';return Math.ceil(v);}
+    case 'FLOOR':{const v=resolveNum(args[0]);if(isNaN(v))return '#ERROR';return Math.floor(v);}
+    case 'POWER':case 'POW':{if(args.length<2)return '#ERROR';const b=resolveNum(args[0]),e=resolveNum(args[1]);return Math.pow(b,e);}
+    case 'SQRT':{const v=resolveNum(args[0]);if(isNaN(v)||v<0)return '#ERROR';return Math.sqrt(v);}
+    case 'MOD':{if(args.length<2)return '#ERROR';const a=resolveNum(args[0]),b=resolveNum(args[1]);if(b===0)return '#DIV/0!';return a%b;}
+    case 'TODAY':return new Date().toISOString().split('T')[0];
+    case 'NOW':return new Date().toISOString().replace('T',' ').substring(0,19);
+    case 'UNIQUE':{return new Set(args.flatMap(a=>getRangeValues(a))).size;}
+    case 'PROPER':{return resolveStr(args[0]).replace(/\b\w/g,c=>c.toUpperCase());}
+    case 'REPT':{if(args.length<2)return '#ERROR';return resolveStr(args[0]).repeat(parseInt(resolveArg(args[1]))||0);}
+    case 'TEXT':{
+      if(!args.length)return '#ERROR';
+      const v=resolveArg(args[0]),fmt=args.length>1?resolveStr(args[1]):'';
+      if(fmt==='#,##0'){const n=parseFloat(v);return isNaN(n)?String(v):n.toLocaleString();}
+      if(fmt.includes('.')){const n=parseFloat(v),d=(fmt.split('.')[1]||'').length;return isNaN(n)?String(v):n.toFixed(d);}
+      return String(v);
+    }
+    default:return `#ERROR: 未対応関数 ${func}`;
+  }
+}
+
 // ========== Formula Bar ==========
 function updateFormulaBar() {
   const ref=document.getElementById('cellRef'), inp=document.getElementById('formulaInput');
   if(S.selectedCell) {
-    ref.textContent=`${S.headers[S.selectedCell.col]||''} : ${S.selectedCell.row+1}`;
+    const colL=indexToColLetter(S.selectedCell.col);
+    ref.textContent=`${colL}${S.selectedCell.row+1}`;
     inp.value=S.data[S.selectedCell.row]?.[S.selectedCell.col]||'';
-  } else { ref.textContent='-'; inp.value=''; }
+    inp.classList.toggle('has-formula', inp.value.startsWith('='));
+  } else { ref.textContent='-'; inp.value=''; inp.classList.remove('has-formula'); }
+}
+function onFormulaInput() {
+  const inp=document.getElementById('formulaInput');
+  inp.classList.toggle('has-formula', inp.value.startsWith('='));
 }
 function onFormulaKey(e) {
   if(e.key==='Enter'){e.preventDefault();commitFormula();}
@@ -1345,8 +1665,31 @@ function onFormulaKey(e) {
 function commitFormula() {
   if(!S.selectedCell) return;
   const v=document.getElementById('formulaInput').value;
+  if(v.startsWith('=')){
+    try{
+      const result=evaluateFormula(v);
+      const resultStr=String(result);
+      const old=S.data[S.selectedCell.row]?.[S.selectedCell.col];
+      if(old!==resultStr){saveState('数式評価');S.data[S.selectedCell.row][S.selectedCell.col]=resultStr;renderBody();}
+      toast(`結果: ${resultStr}`,'success');
+    }catch(e){toast(`数式エラー: ${e.message}`,'error');}
+    return;
+  }
   const old=S.data[S.selectedCell.row]?.[S.selectedCell.col];
   if(old!==v){saveState('数式バー編集');S.data[S.selectedCell.row][S.selectedCell.col]=v;renderBody();}
+}
+function toggleFxHelp(){
+  const popup=document.getElementById('fxHelpPopup');
+  popup.classList.toggle('show');
+}
+function insertFx(fx){
+  const inp=document.getElementById('formulaInput');
+  inp.value=fx; inp.focus();
+  // Position cursor inside parentheses
+  const parenPos=fx.indexOf('(');
+  if(parenPos>=0) inp.setSelectionRange(parenPos+1,fx.length-1);
+  inp.classList.add('has-formula');
+  document.getElementById('fxHelpPopup').classList.remove('show');
 }
 
 // ========== Clipboard ==========
@@ -1955,8 +2298,12 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.querySelectorAll('.pcsv-modal-overlay').forEach(ov=>{
     ov.addEventListener('click',e=>{if(e.target===ov)ov.classList.add('hidden')});
   });
-  // Global click to close context menu
-  document.addEventListener('click',()=>hideContextMenu());
+  // Global click to close context menu and fx help
+  document.addEventListener('click',(e)=>{
+    hideContextMenu();
+    const popup=document.getElementById('fxHelpPopup');
+    if(popup&&popup.classList.contains('show')&&!e.target.closest('.pcsv-fx-help-btn')&&!e.target.closest('.pcsv-fx-popup'))popup.classList.remove('show');
+  });
   // ESC
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'){hideContextMenu();document.querySelectorAll('.pcsv-modal-overlay').forEach(o=>o.classList.add('hidden'));}
