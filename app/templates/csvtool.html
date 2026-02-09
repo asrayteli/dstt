@@ -85,7 +85,7 @@
   }
   .pcsv-toolbar::-webkit-scrollbar { height: 0; }
   .pcsv-toolbar-row2 {
-    display: none;
+    display: flex;
     align-items: center;
     height: 34px;
     padding: 0 8px;
@@ -95,9 +95,6 @@
     background: #f8fafc;
   }
   .pcsv-toolbar-row2::-webkit-scrollbar { height: 0; }
-  .pcsv-toolbar-wrap.two-rows .pcsv-toolbar-row2 { display: flex; }
-  .pcsv-toolbar-wrap.two-rows .pcsv-toolbar { border-bottom: none; }
-  .pcsv-toolbar-wrap.two-rows .tb-overflow { display: none !important; }
   .pcsv-tb-sep {
     width: 1px;
     height: 20px;
@@ -1095,75 +1092,40 @@
         <span class="btn-text">GoTo</span>
       </button>
 
-      <!-- These items appear in row1 when wide, hidden when 2-row mode -->
-      <div class="pcsv-tb-sep tb-overflow"></div>
-      <button class="pcsv-tb-btn tb-overflow" id="btnValidate" onclick="toggleValidation()" disabled title="データ検証">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        <span class="btn-text">検証</span>
-      </button>
-      <button class="pcsv-tb-btn tb-overflow" id="btnStats" onclick="toggleStats()" disabled title="列統計">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-        <span class="btn-text">統計</span>
-      </button>
-      <button class="pcsv-tb-btn tb-overflow" id="btnInstant" onclick="toggleInstantPanel()" disabled title="インスタント管理" style="color:#7c3aed">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        <span class="btn-text">⚡ instant</span>
-      </button>
-      <div class="pcsv-tb-sep tb-overflow"></div>
-      <button class="pcsv-tb-btn tb-overflow" id="btnDiff" onclick="openDiffModal()" disabled title="CSV Diff (ファイル比較)">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-        <span class="btn-text">Diff</span>
-      </button>
-      <button class="pcsv-tb-btn tb-overflow" id="btnMerge" onclick="openMergeModal()" disabled title="CSVマージ (結合)">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-        <span class="btn-text">マージ</span>
-      </button>
-      <button class="pcsv-tb-btn tb-overflow" id="btnBookmarks" onclick="toggleBookmarkPanel()" disabled title="ブックマーク">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
-        <span class="btn-text">🔖</span>
-      </button>
-      <button class="pcsv-tb-btn tb-overflow" id="btnJournal" onclick="toggleJournalPanel()" disabled title="変更履歴">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        <span class="btn-text">履歴</span>
-      </button>
-      <button class="pcsv-tb-btn tb-overflow" id="btnViews" onclick="openViewSaveModal()" disabled title="ビューを保存 (仮想フィルタ)" style="color:#7c3aed">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-        <span class="btn-text">👁 View</span>
-      </button>
     </div>
 
-    <!-- Row 2: Analysis & Advanced (shown when window is narrow) -->
+    <!-- Row 2: 検証・分析・高度な機能 -->
     <div class="pcsv-toolbar-row2" id="toolbarRow2">
-      <button class="pcsv-tb-btn" id="btnValidate2" onclick="toggleValidation()" disabled title="データ検証">
+      <button class="pcsv-tb-btn" id="btnValidate" onclick="toggleValidation()" disabled title="データ検証">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         <span class="btn-text">検証</span>
       </button>
-      <button class="pcsv-tb-btn" id="btnStats2" onclick="toggleStats()" disabled title="列統計">
+      <button class="pcsv-tb-btn" id="btnStats" onclick="toggleStats()" disabled title="列統計">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
         <span class="btn-text">統計</span>
       </button>
-      <button class="pcsv-tb-btn" id="btnInstant2" onclick="toggleInstantPanel()" disabled title="インスタント管理" style="color:#7c3aed">
+      <button class="pcsv-tb-btn" id="btnInstant" onclick="toggleInstantPanel()" disabled title="インスタント管理" style="color:#7c3aed">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
         <span class="btn-text">⚡ instant</span>
       </button>
       <div class="pcsv-tb-sep"></div>
-      <button class="pcsv-tb-btn" id="btnDiff2" onclick="openDiffModal()" disabled title="CSV Diff (ファイル比較)">
+      <button class="pcsv-tb-btn" id="btnDiff" onclick="openDiffModal()" disabled title="CSV Diff (ファイル比較)">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
         <span class="btn-text">Diff</span>
       </button>
-      <button class="pcsv-tb-btn" id="btnMerge2" onclick="openMergeModal()" disabled title="CSVマージ (結合)">
+      <button class="pcsv-tb-btn" id="btnMerge" onclick="openMergeModal()" disabled title="CSVマージ (結合)">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
         <span class="btn-text">マージ</span>
       </button>
-      <button class="pcsv-tb-btn" id="btnBookmarks2" onclick="toggleBookmarkPanel()" disabled title="ブックマーク">
+      <button class="pcsv-tb-btn" id="btnBookmarks" onclick="toggleBookmarkPanel()" disabled title="ブックマーク">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
         <span class="btn-text">🔖</span>
       </button>
-      <button class="pcsv-tb-btn" id="btnJournal2" onclick="toggleJournalPanel()" disabled title="変更履歴">
+      <button class="pcsv-tb-btn" id="btnJournal" onclick="toggleJournalPanel()" disabled title="変更履歴">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         <span class="btn-text">履歴</span>
       </button>
-      <button class="pcsv-tb-btn" id="btnViews2" onclick="openViewSaveModal()" disabled title="ビューを保存 (仮想フィルタ)" style="color:#7c3aed">
+      <button class="pcsv-tb-btn" id="btnViews" onclick="openViewSaveModal()" disabled title="ビューを保存 (仮想フィルタ)" style="color:#7c3aed">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
         <span class="btn-text">👁 View</span>
       </button>
@@ -1692,7 +1654,7 @@ async function uploadFile(file) {
     S.instant.rows=new Set(); S.instant.cols=new Set(); S.instant.cells={}; S.instant.calcHistory=[]; S.instant.calcNextId=1;
     S.views=[]; S.viewsNextId=1; S.currentView=null; S.journal=[]; S.journalHighlight=false;
     S.diffResult=null; S.bookmarks=[]; S.bookmarkNextId=1;
-    showEditor(); renderGrid(); updateStatus(); enableToolbar(); setTimeout(_checkToolbarLayout,100);
+    showEditor(); renderGrid(); updateStatus(); enableToolbar();
     toast(`${j.filename} を読み込みました (${j.totalRows.toLocaleString()}行)`,'success');
     document.getElementById('headerInfo').style.display='flex';
     document.getElementById('headerFilename').textContent=j.filename;
@@ -1709,8 +1671,7 @@ function showEditor() {
 function enableToolbar() {
   ['btnSave','btnAddRow','btnDelRow','btnAddCol','btnDelCol','btnTrim','btnDedup',
    'btnEmptyRows','btnTranspose','btnSearch','btnGoto','btnValidate','btnStats','btnInstant',
-   'btnDiff','btnMerge','btnBookmarks','btnJournal','btnViews',
-   'btnValidate2','btnStats2','btnInstant2','btnDiff2','btnMerge2','btnBookmarks2','btnJournal2','btnViews2'
+   'btnDiff','btnMerge','btnBookmarks','btnJournal','btnViews'
   ].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=false;});
   updateUndoButtons();
 }
@@ -3740,43 +3701,8 @@ function gotoBookmark(id){
 }
 
 // ========== Init ==========
-// Toolbar responsive: detect overflow and toggle 2-row mode
-let _tbCheckPending=false;
-function _checkToolbarLayout(){
-  if(_tbCheckPending) return;
-  _tbCheckPending=true;
-  requestAnimationFrame(()=>{
-    _tbCheckPending=false;
-    const wrap=document.getElementById('toolbarWrap');
-    const row1=document.getElementById('toolbar');
-    if(!wrap||!row1) return;
-    // To measure, we need all overflow items visible (1-row mode)
-    const wasTwoRows=wrap.classList.contains('two-rows');
-    if(wasTwoRows) wrap.classList.remove('two-rows');
-    // Force synchronous reflow
-    void row1.offsetWidth;
-    const sw=row1.scrollWidth, cw=row1.clientWidth;
-    const needsTwoRows=sw>cw+2;
-    if(needsTwoRows) wrap.classList.add('two-rows');
-    // else keep 1-row mode (already removed)
-  });
-}
-
 document.addEventListener('DOMContentLoaded',()=>{
   initUpload(); initKeyboard();
-  // Responsive toolbar - use ResizeObserver to detect container width changes
-  let _tbLastWidth=0;
-  const tbWrap=document.getElementById('toolbarWrap');
-  if(tbWrap&&window.ResizeObserver){
-    new ResizeObserver(entries=>{
-      const w=entries[0].contentRect.width;
-      if(Math.abs(w-_tbLastWidth)>2){_tbLastWidth=w;_checkToolbarLayout();}
-    }).observe(tbWrap);
-  }
-  // Fallback: also listen to window resize
-  window.addEventListener('resize',_checkToolbarLayout);
-  // Initial check after a short delay to ensure layout is stable
-  setTimeout(_checkToolbarLayout,50);
   // Drag selection
   const gw=document.getElementById('gridWrap');
   if(gw){
