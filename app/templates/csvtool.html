@@ -671,6 +671,50 @@
   .pcsv-table td.row-num.row-highlight { background: #e0e7ff !important; color: var(--pcsv-accent); }
   .pcsv-table td.multi-selected { background: #c7d2fe !important; outline: 1px solid var(--pcsv-accent); outline-offset: -1px; }
 
+  /* Disabled cells/rows/cols - shown but excluded from formulas */
+  .pcsv-table td.cell-disabled {
+    background: #f3f4f6 !important;
+    color: #9ca3af !important;
+    position: relative;
+  }
+  .pcsv-table td.cell-disabled::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,0.03) 4px, rgba(0,0,0,0.03) 5px);
+    pointer-events: none;
+  }
+  .pcsv-table thead th.col-disabled { color: #9ca3af !important; background: #f3f4f6 !important; }
+  .pcsv-table td.row-num.row-disabled { color: #d1d5db !important; background: #f3f4f6 !important; }
+
+  /* Hidden cells - pink border, content invisible */
+  .pcsv-table td.cell-hidden {
+    border: 2px solid #f472b6 !important;
+    color: transparent !important;
+    user-select: none;
+    background: #fdf2f8 !important;
+  }
+
+  /* Hidden row/col markers */
+  .hidden-marker-row, .hidden-marker-col {
+    background: #fce7f3;
+    text-align: center;
+    font-size: 10px;
+    color: #be185d;
+    cursor: pointer;
+    user-select: none;
+    height: 4px !important;
+    max-height: 4px !important;
+    line-height: 4px;
+    padding: 0 !important;
+    border: 1px dashed #f9a8d4 !important;
+  }
+  .hidden-marker-row:hover, .hidden-marker-col:hover { background: #fbcfe8; }
+
+  /* Drag selection cursor */
+  .pcsv-grid-wrap.dragging { cursor: crosshair; }
+  .pcsv-grid-wrap.dragging * { user-select: none !important; }
+
   /* Formula bar */
   .pcsv-formula-bar {
     display: none;
@@ -1237,6 +1281,11 @@ const S = {
   issueMap: {},
   ctxTarget: null,
   formulas: {}, // "row,col" -> formula string
+  // Disable/Hide state
+  disabledRows: new Set(), disabledCols: new Set(), disabledCells: new Set(),
+  hiddenRows: new Set(), hiddenCols: new Set(), hiddenCells: new Set(),
+  // Drag selection
+  dragging: false, dragStart: null,
 };
 function hasData() { return S.headers.length > 0; }
 
@@ -1263,23 +1312,25 @@ function clearSelection() {
 }
 
 // ========== Undo / Redo ==========
+function _serializeSets(){return{dR:[...S.disabledRows],dC:[...S.disabledCols],dCe:[...S.disabledCells],hR:[...S.hiddenRows],hC:[...S.hiddenCols],hCe:[...S.hiddenCells]};}
+function _restoreSets(s){if(!s)return;S.disabledRows=new Set(s.dR||[]);S.disabledCols=new Set(s.dC||[]);S.disabledCells=new Set(s.dCe||[]);S.hiddenRows=new Set(s.hR||[]);S.hiddenCols=new Set(s.hC||[]);S.hiddenCells=new Set(s.hCe||[]);}
 function saveState(label) {
-  S.undoStack.push({label,headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data)),formulas:JSON.parse(JSON.stringify(S.formulas))});
+  S.undoStack.push({label,headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data)),formulas:JSON.parse(JSON.stringify(S.formulas)),sets:_serializeSets()});
   if(S.undoStack.length>50) S.undoStack.shift();
   S.redoStack=[]; updateUndoButtons();
 }
 function doUndo() {
   if(!S.undoStack.length) return;
   const st=S.undoStack.pop();
-  S.redoStack.push({label:'redo',headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data)),formulas:JSON.parse(JSON.stringify(S.formulas))});
-  S.headers=st.headers; S.data=st.data; S.formulas=st.formulas||{}; recalcAllFormulas();
+  S.redoStack.push({label:'redo',headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data)),formulas:JSON.parse(JSON.stringify(S.formulas)),sets:_serializeSets()});
+  S.headers=st.headers; S.data=st.data; S.formulas=st.formulas||{}; _restoreSets(st.sets); recalcAllFormulas();
   updateUndoButtons(); renderGrid(); updateStatus(); toast('元に戻しました');
 }
 function doRedo() {
   if(!S.redoStack.length) return;
   const st=S.redoStack.pop();
-  S.undoStack.push({label:'undo',headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data)),formulas:JSON.parse(JSON.stringify(S.formulas))});
-  S.headers=st.headers; S.data=st.data; S.formulas=st.formulas||{}; recalcAllFormulas();
+  S.undoStack.push({label:'undo',headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data)),formulas:JSON.parse(JSON.stringify(S.formulas)),sets:_serializeSets()});
+  S.headers=st.headers; S.data=st.data; S.formulas=st.formulas||{}; _restoreSets(st.sets); recalcAllFormulas();
   updateUndoButtons(); renderGrid(); updateStatus(); toast('やり直しました');
 }
 function updateUndoButtons() {
@@ -1306,6 +1357,8 @@ async function uploadFile(file) {
     S.headers=j.headers; S.data=j.data; S.filename=j.filename; S.encoding=j.encoding; S.delimiter=j.delimiter;
     S.page=1; S.selectedCell=null; S.selectedRows=new Set(); S.selectedCols=new Set(); S.multiCells=new Set(); S.selRange=null;
     S.sortCol=-1; S.sortDir=0; S.undoStack=[]; S.redoStack=[]; S.issueMap={}; S.formulas={};
+    S.disabledRows=new Set(); S.disabledCols=new Set(); S.disabledCells=new Set();
+    S.hiddenRows=new Set(); S.hiddenCols=new Set(); S.hiddenCells=new Set(); S.dragging=false; S.dragStart=null;
     showEditor(); renderGrid(); updateStatus(); enableToolbar();
     toast(`${j.filename} を読み込みました (${j.totalRows.toLocaleString()}行)`,'success');
     document.getElementById('headerInfo').style.display='flex';
@@ -1327,36 +1380,42 @@ function enableToolbar() {
   updateUndoButtons();
 }
 
+// ========== Visible Row/Col Helpers ==========
+function getVisibleRows(){const a=[];for(let i=0;i<S.data.length;i++)if(!S.hiddenRows.has(i))a.push(i);return a;}
+function getVisibleCols(){const a=[];for(let i=0;i<S.headers.length;i++)if(!S.hiddenCols.has(i))a.push(i);return a;}
+
 // ========== Grid Rendering ==========
-function getPageData() {
-  if(S.pageSize===0) return {rows:S.data,start:0,end:S.data.length};
-  const start=(S.page-1)*S.pageSize, end=Math.min(start+S.pageSize,S.data.length);
-  return {rows:S.data.slice(start,end),start,end};
-}
 function renderGrid() { renderHeader(); renderBody(); renderPagination(); }
 function renderHeader() {
-  const thead=document.getElementById('tableThead');
+  const thead=document.getElementById('tableThead'), visCols=getVisibleCols();
   let h='<tr><th class="row-num">#</th>';
-  S.headers.forEach((hdr,i)=>{
+  visCols.forEach(i=>{
     let arrow='<svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>';
     if(S.sortCol===i&&S.sortDir===1) arrow='<svg class="sort-icon asc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>';
     else if(S.sortCol===i&&S.sortDir===2) arrow='<svg class="sort-icon desc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>';
-    const esc=escHtml(hdr);
-    const hl=S.selectedCols.has(i)||(S.selectedCell&&S.selectedCell.col===i)||(S.selRange&&i>=S.selRange.c1&&i<=S.selRange.c2) ? ' col-highlight':'';
-    h+=`<th class="${hl}" data-col="${i}" onclick="onHeaderClick(${i},event)" oncontextmenu="onHeaderCtx(event,${i})" title="${esc}"><div class="th-content"><span class="th-label">${esc}</span>${arrow}</div></th>`;
+    const esc=escHtml(S.headers[i]);
+    let cl=S.selectedCols.has(i)||(S.selectedCell&&S.selectedCell.col===i)||(S.selRange&&i>=S.selRange.c1&&i<=S.selRange.c2)?' col-highlight':'';
+    if(S.disabledCols.has(i)) cl+=' col-disabled';
+    h+=`<th class="${cl}" data-col="${i}" onclick="onHeaderClick(${i},event)" oncontextmenu="onHeaderCtx(event,${i})" title="${esc}"><div class="th-content"><span class="th-label">${esc}</span>${arrow}</div></th>`;
   });
   h+='</tr>'; thead.innerHTML=h;
 }
 function renderBody() {
   recalcAllFormulas();
-  const {rows,start}=getPageData(), tbody=document.getElementById('tableTbody');
+  const visRows=getVisibleRows(), visCols=getVisibleCols(), tbody=document.getElementById('tableTbody');
+  // Paginate visible rows
+  let pageRows;
+  if(S.pageSize===0) pageRows=visRows;
+  else { const st=(S.page-1)*S.pageSize,en=Math.min(st+S.pageSize,visRows.length); pageRows=visRows.slice(st,en); }
   let h='';
-  for(let ri=0;ri<rows.length;ri++){
-    const di=start+ri, row=rows[ri], isRS=S.selectedRows.has(di);
+  for(let ri=0;ri<pageRows.length;ri++){
+    const di=pageRows[ri], row=S.data[di], isRS=S.selectedRows.has(di);
     const rowHL=(S.selectedCell&&S.selectedCell.row===di)||(S.selRange&&di>=S.selRange.r1&&di<=S.selRange.r2);
+    const rowDis=S.disabledRows.has(di);
     h+=`<tr class="${isRS?'row-selected':''}" data-ridx="${di}">`;
-    h+=`<td class="row-num${rowHL?' row-highlight':''}" onclick="toggleRowSelect(${di},event)" oncontextmenu="onRowCtx(event,${di})">${di+1}</td>`;
-    for(let ci=0;ci<S.headers.length;ci++){
+    h+=`<td class="row-num${rowHL?' row-highlight':''}${rowDis?' row-disabled':''}" onclick="toggleRowSelect(${di},event)" oncontextmenu="onRowCtx(event,${di})">${di+1}</td>`;
+    for(let vi=0;vi<visCols.length;vi++){
+      const ci=visCols[vi];
       const val=ci<row.length?row[ci]:'';
       const isSel=S.selectedCell&&S.selectedCell.row===di&&S.selectedCell.col===ci;
       const ik=`${di},${ci}`;
@@ -1373,22 +1432,29 @@ function renderBody() {
           if(ci===S.selRange.c2) cls+=' range-right';
         }
       }
+      // Disable / Hide styling
+      if(S.hiddenCells.has(ik)) cls+=' cell-hidden';
+      else if(S.disabledCells.has(ik)||rowDis||S.disabledCols.has(ci)) cls+=' cell-disabled';
       if(S.issueMap[ik]) cls+=S.issueMap[ik]==='error'?' cell-error':' cell-warning';
       if(S.searchMatches.some(m=>m.row===di&&m.col===ci)) cls+=' cell-match';
-      h+=`<td class="${cls}" data-ridx="${di}" data-cidx="${ci}" onclick="onCellClick(${di},${ci},event)" ondblclick="startEdit(${di},${ci})" oncontextmenu="onCellCtx(event,${di},${ci})">${escHtml(val)}</td>`;
+      const displayVal=S.hiddenCells.has(ik)?'':escHtml(val);
+      h+=`<td class="${cls}" data-ridx="${di}" data-cidx="${ci}" onmousedown="onCellMouseDown(${di},${ci},event)" ondblclick="startEdit(${di},${ci})" oncontextmenu="onCellCtx(event,${di},${ci})">${displayVal}</td>`;
     }
     h+='</tr>';
   }
   tbody.innerHTML=h;
 }
 function renderPagination() {
+  const totalVis=getVisibleRows().length;
   if(S.pageSize===0){
-    document.getElementById('pgInfo').textContent=`全 ${S.data.length.toLocaleString()} 行`;
+    document.getElementById('pgInfo').textContent=`全 ${totalVis.toLocaleString()} 行${S.hiddenRows.size>0?` (${S.hiddenRows.size}行非表示)`:''}`;
     document.getElementById('pgNumbers').innerHTML=''; document.getElementById('pgPrev').disabled=true; document.getElementById('pgNext').disabled=true; return;
   }
-  const tp=Math.max(1,Math.ceil(S.data.length/S.pageSize)); if(S.page>tp)S.page=tp;
-  const s=(S.page-1)*S.pageSize+1, e=Math.min(S.page*S.pageSize,S.data.length);
-  document.getElementById('pgInfo').textContent=`${s.toLocaleString()}-${e.toLocaleString()} / ${S.data.length.toLocaleString()} 行`;
+  const tp=Math.max(1,Math.ceil(totalVis/S.pageSize)); if(S.page>tp)S.page=tp;
+  const s=(S.page-1)*S.pageSize+1, e=Math.min(S.page*S.pageSize,totalVis);
+  let info=`${s.toLocaleString()}-${e.toLocaleString()} / ${totalVis.toLocaleString()} 行`;
+  if(S.hiddenRows.size>0) info+=` (${S.hiddenRows.size}非表示)`;
+  document.getElementById('pgInfo').textContent=info;
   document.getElementById('pgPrev').disabled=S.page<=1; document.getElementById('pgNext').disabled=S.page>=tp;
   let nums='',mv=5,sp=Math.max(1,S.page-Math.floor(mv/2)),ep=Math.min(tp,sp+mv-1);
   if(ep-sp<mv-1) sp=Math.max(1,ep-mv+1);
@@ -1396,27 +1462,53 @@ function renderPagination() {
   document.getElementById('pgNumbers').innerHTML=nums;
 }
 function prevPage(){if(S.page>1){S.page--;renderBody();renderPagination()}}
-function nextPage(){const tp=Math.ceil(S.data.length/S.pageSize);if(S.page<tp){S.page++;renderBody();renderPagination()}}
+function nextPage(){const tp=Math.ceil(getVisibleRows().length/S.pageSize);if(S.page<tp){S.page++;renderBody();renderPagination()}}
 function goToPage(p){S.page=p;renderBody();renderPagination()}
 function changePageSize(){S.pageSize=parseInt(document.getElementById('pgSize').value);S.page=1;renderBody();renderPagination()}
 
-// ========== Cell Selection & Range ==========
-function onCellClick(row,col,event) {
-  if(S.editing) return;
+// ========== Cell Selection, Range & Drag ==========
+function onCellMouseDown(row,col,event) {
+  if(event.button!==0||S.editing) return;
   hideContextMenu();
+  // Shift+click → extend range
   if(event.shiftKey && S.selectedCell) {
     S.selRange=normalizeRange(S.selectedCell.row,S.selectedCell.col,row,col);
     S.multiCells.clear(); S.selectedCols.clear();
     renderGrid(); updateFormulaBar(); updateSelectionSummary(); updateSelectionStatus(); return;
   }
+  // Ctrl+click → multi-cell
   if(event.ctrlKey||event.metaKey) {
     const k=`${row},${col}`;
     if(S.multiCells.has(k)) S.multiCells.delete(k); else S.multiCells.add(k);
     S.selectedCell={row,col}; S.selRange=null; S.selectedCols.clear();
     renderGrid(); updateFormulaBar(); updateSelectionSummary(); updateSelectionStatus(); return;
   }
+  // Start drag
+  S.dragStart={row,col}; S.dragging=false;
   S.selRange=null; S.selectedCell={row,col}; S.selectedCols.clear(); S.selectedRows.clear(); S.multiCells.clear();
+  document.getElementById('gridWrap').classList.add('dragging');
   renderGrid(); updateFormulaBar(); updateSelectionSummary(); updateSelectionStatus();
+}
+function onGridMouseMove(e) {
+  if(!S.dragStart) return;
+  const el=document.elementFromPoint(e.clientX,e.clientY);
+  if(!el||el.dataset.ridx===undefined||el.dataset.cidx===undefined) return;
+  const row=parseInt(el.dataset.ridx),col=parseInt(el.dataset.cidx);
+  if(isNaN(row)||isNaN(col)) return;
+  if(row===S.dragStart.row&&col===S.dragStart.col&&!S.dragging) return; // no movement yet
+  S.dragging=true;
+  S.selRange=normalizeRange(S.dragStart.row,S.dragStart.col,row,col);
+  renderBody(); updateSelectionSummary(); updateSelectionStatus();
+}
+function onGridMouseUp() {
+  if(S.dragStart) {
+    document.getElementById('gridWrap')?.classList.remove('dragging');
+    if(!S.dragging) {
+      // Was just a click, not a drag — update formula bar
+      updateFormulaBar();
+    }
+    S.dragStart=null;
+  }
 }
 function onHeaderClick(colIdx,event) {
   if(event.ctrlKey||event.metaKey) {
@@ -1505,6 +1597,11 @@ function parseRange(rangeStr) {
 }
 function getCellVal(row,col){
   if(row<0||row>=S.data.length||col<0||col>=S.headers.length) return '';
+  // Disabled/hidden cells return '' for formulas
+  if(S.disabledRows.has(row)||S.disabledCols.has(col)) return '';
+  if(S.hiddenRows.has(row)||S.hiddenCols.has(col)) return '';
+  const ck=`${row},${col}`;
+  if(S.disabledCells.has(ck)||S.hiddenCells.has(ck)) return '';
   return S.data[row][col]||'';
 }
 function getRangeValues(rangeStr){
@@ -2145,17 +2242,56 @@ function showContextMenu(e,items) {
     if(rect.bottom>window.innerHeight) menu.style.top=(my-rect.height)+'px';
   });
 }
+// ========== Disable / Hide Functions ==========
+function disableCell(r,c){saveState('セル無効化');S.disabledCells.add(`${r},${c}`);renderBody();toast('セルを無効化しました');}
+function hideCell(r,c){saveState('セル非表示');S.hiddenCells.add(`${r},${c}`);renderBody();toast('セルを非表示にしました');}
+function disableRow(r){saveState('行無効化');S.disabledRows.add(r);renderGrid();toast(`行${r+1}を無効化しました`);}
+function hideRow(r){saveState('行非表示');S.hiddenRows.add(r);renderGrid();updateStatus();toast(`行${r+1}を非表示にしました`);}
+function disableCol(c){saveState('列無効化');S.disabledCols.add(c);renderGrid();toast(`列「${S.headers[c]}」を無効化しました`);}
+function hideCol(c){saveState('列非表示');S.hiddenCols.add(c);renderGrid();updateStatus();toast(`列「${S.headers[c]}」を非表示にしました`);}
+function enableCell(k){saveState('セル有効化');S.disabledCells.delete(k);renderBody();}
+function showCell(k){saveState('セル表示');S.hiddenCells.delete(k);renderBody();}
+function enableRow(r){saveState('行有効化');S.disabledRows.delete(r);renderGrid();}
+function showRow(r){saveState('行表示');S.hiddenRows.delete(r);renderGrid();updateStatus();}
+function enableCol(c){saveState('列有効化');S.disabledCols.delete(c);renderGrid();}
+function showCol(c){saveState('列表示');S.hiddenCols.delete(c);renderGrid();updateStatus();}
+function clearAllDisabled(){saveState('全無効化解除');S.disabledRows.clear();S.disabledCols.clear();S.disabledCells.clear();renderGrid();toast('全ての無効化を解除しました','success');}
+function clearAllHidden(){saveState('全非表示解除');S.hiddenRows.clear();S.hiddenCols.clear();S.hiddenCells.clear();renderGrid();updateStatus();toast('全ての非表示を解除しました','success');}
+
+function buildDisableMenu(){
+  const items=[];
+  if(S.disabledRows.size||S.disabledCols.size||S.disabledCells.size){
+    items.push({label:'全ての無効化を解除',action:'clearAllDisabled()'});
+    S.disabledRows.forEach(r=>items.push({label:`行${r+1}`,action:`enableRow(${r})`}));
+    S.disabledCols.forEach(c=>items.push({label:`列「${escHtml(S.headers[c])}」`,action:`enableCol(${c})`}));
+    S.disabledCells.forEach(k=>{const[r,c]=k.split(',');items.push({label:`セル ${indexToColLetter(+c)}${+r+1}`,action:`enableCell('${k}')`});});
+  }
+  return items;
+}
+function buildHiddenMenu(){
+  const items=[];
+  if(S.hiddenRows.size||S.hiddenCols.size||S.hiddenCells.size){
+    items.push({label:'全ての非表示を解除',action:'clearAllHidden()'});
+    S.hiddenRows.forEach(r=>items.push({label:`行${r+1}`,action:`showRow(${r})`}));
+    S.hiddenCols.forEach(c=>items.push({label:`列「${escHtml(S.headers[c])}」`,action:`showCol(${c})`}));
+    S.hiddenCells.forEach(k=>{const[r,c]=k.split(',');items.push({label:`セル ${indexToColLetter(+c)}${+r+1}`,action:`showCell('${k}')`});});
+  }
+  return items;
+}
+
 function freezeFormula(row,col) {
   const fk=`${row},${col}`;
   if(!S.formulas[fk]) return;
   saveState('数式結果を挿入');
-  delete S.formulas[fk]; // Remove formula, keep the evaluated value in S.data
+  delete S.formulas[fk];
   renderBody(); updateFormulaBar();
   toast('数式を削除し結果値を確定しました','success');
 }
 function onCellCtx(e,row,col) {
   S.selectedCell={row,col};renderBody();updateFormulaBar();
-  const fk=`${row},${col}`, hasFormula=!!S.formulas[fk];
+  const fk=`${row},${col}`, ck=`${row},${col}`;
+  const hasFormula=!!S.formulas[fk];
+  const isCellDis=S.disabledCells.has(ck), isCellHid=S.hiddenCells.has(ck);
   const items=[
     {label:'コピー',action:'doCopy()',shortcut:'Ctrl+C'},
     {label:'切り取り',action:'doCut()',shortcut:'Ctrl+X'},
@@ -2164,49 +2300,58 @@ function onCellCtx(e,row,col) {
   ];
   if(hasFormula) items.push({label:'数式結果を挿入',action:`freezeFormula(${row},${col})`});
   items.push('---');
-  showContextMenu(e,[...items,
-    {label:'行操作',sub:[
-      {label:'上に行を挿入',action:`insertRowAt(${row},true)`},
-      {label:'下に行を挿入',action:`insertRowAt(${row},false)`},
-      {label:'行を複製',action:`duplicateRow(${row})`},
-      {label:'行を上に移動',action:`moveRowUp(${row})`},
-      {label:'行を下に移動',action:`moveRowDown(${row})`},
-      {label:'行を削除',action:`deleteRowAt(${row})`},
-    ]},
-    {label:'列操作',sub:[
-      {label:'列名を変更',action:`openRenameCol(${col})`},
-      {label:'左に列を挿入',action:`insertColumnAt(${col},'left')`},
-      {label:'右に列を挿入',action:`insertColumnAt(${col},'right')`},
-      {label:'列を複製',action:`duplicateColumn(${col})`},
-      {label:'列を分割...',action:`openSplitCol(${col})`},
-      {label:'列を結合...',action:'openMergeCols()'},
-      {label:'空欄を埋める...',action:`openFillEmpty(${col})`},
-      {label:'列を削除',action:`deleteColumnAt(${col})`},
-    ]},
-    {label:'テキスト変換',sub:[
-      {label:'大文字に変換',action:`colToUpperCase(${col})`},
-      {label:'小文字に変換',action:`colToLowerCase(${col})`},
-      {label:'先頭を大文字に',action:`colCapitalize(${col})`},
-      {label:'前後空白を削除',action:`colTrim(${col})`},
-    ]},
-    '---',
-    {label:'数式を挿入',sub:[
-      {label:'=SUM() 合計',action:`insertFxToCell(${row},${col},'=SUM()')`},
-      {label:'=AVG() 平均',action:`insertFxToCell(${row},${col},'=AVG()')`},
-      {label:'=COUNT() 件数',action:`insertFxToCell(${row},${col},'=COUNT()')`},
-      {label:'=MIN() 最小',action:`insertFxToCell(${row},${col},'=MIN()')`},
-      {label:'=MAX() 最大',action:`insertFxToCell(${row},${col},'=MAX()')`},
-      {label:'=IF(,,) 条件',action:`insertFxToCell(${row},${col},'=IF(,,)')`},
-      {label:'=VLOOKUP(,,) 検索',action:`insertFxToCell(${row},${col},'=VLOOKUP(,,)')`},
-      {label:'=COUNTIF(,) 条件カウント',action:`insertFxToCell(${row},${col},'=COUNTIF(,)')`},
-    ]},
-  ]);
+  items.push({label:'行操作',sub:[
+    {label:'上に行を挿入',action:`insertRowAt(${row},true)`},
+    {label:'下に行を挿入',action:`insertRowAt(${row},false)`},
+    {label:'行を複製',action:`duplicateRow(${row})`},
+    {label:'行を上に移動',action:`moveRowUp(${row})`},
+    {label:'行を下に移動',action:`moveRowDown(${row})`},
+    {label:'行を削除',action:`deleteRowAt(${row})`},
+  ]});
+  items.push({label:'列操作',sub:[
+    {label:'列名を変更',action:`openRenameCol(${col})`},
+    {label:'左に列を挿入',action:`insertColumnAt(${col},'left')`},
+    {label:'右に列を挿入',action:`insertColumnAt(${col},'right')`},
+    {label:'列を複製',action:`duplicateColumn(${col})`},
+    {label:'列を分割...',action:`openSplitCol(${col})`},
+    {label:'列を結合...',action:'openMergeCols()'},
+    {label:'空欄を埋める...',action:`openFillEmpty(${col})`},
+    {label:'列を削除',action:`deleteColumnAt(${col})`},
+  ]});
+  items.push({label:'テキスト変換',sub:[
+    {label:'大文字に変換',action:`colToUpperCase(${col})`},
+    {label:'小文字に変換',action:`colToLowerCase(${col})`},
+    {label:'先頭を大文字に',action:`colCapitalize(${col})`},
+    {label:'前後空白を削除',action:`colTrim(${col})`},
+  ]});
+  items.push({label:'数式を挿入',sub:[
+    {label:'=SUM() 合計',action:`insertFxToCell(${row},${col},'=SUM()')`},
+    {label:'=AVG() 平均',action:`insertFxToCell(${row},${col},'=AVG()')`},
+    {label:'=COUNT() 件数',action:`insertFxToCell(${row},${col},'=COUNT()')`},
+    {label:'=MIN() 最小',action:`insertFxToCell(${row},${col},'=MIN()')`},
+    {label:'=MAX() 最大',action:`insertFxToCell(${row},${col},'=MAX()')`},
+    {label:'=IF(,,) 条件',action:`insertFxToCell(${row},${col},'=IF(,,)')`},
+    {label:'=VLOOKUP(,,) 検索',action:`insertFxToCell(${row},${col},'=VLOOKUP(,,)')`},
+    {label:'=COUNTIF(,) 条件カウント',action:`insertFxToCell(${row},${col},'=COUNTIF(,)')`},
+  ]});
+  items.push('---');
+  // Disable/Hide for this cell
+  if(isCellDis) items.push({label:'セルの無効化を解除',action:`enableCell('${ck}')`});
+  else items.push({label:'セルを無効化',action:`disableCell(${row},${col})`});
+  if(isCellHid) items.push({label:'セルの非表示を解除',action:`showCell('${ck}')`});
+  else items.push({label:'セルを非表示',action:`hideCell(${row},${col})`});
+  // Unhide/Enable menus
+  const disList=buildDisableMenu(), hidList=buildHiddenMenu();
+  if(disList.length) items.push({label:'無効化を解除',sub:disList});
+  if(hidList.length) items.push({label:'非表示を解除',sub:hidList});
+  showContextMenu(e,items);
 }
 function onRowCtx(e,row) {
   if(!S.selectedRows.has(row)){S.selectedRows.clear();S.selectedRows.add(row);}
   renderBody();
   const multi=S.selectedRows.size>1;
-  showContextMenu(e,[
+  const isRowDis=S.disabledRows.has(row);
+  const items=[
     {label:'上に行を挿入',action:`insertRowAt(${row},true)`},
     {label:'下に行を挿入',action:`insertRowAt(${row},false)`},
     {label:'行を複製',action:`duplicateRow(${row})`},
@@ -2214,15 +2359,23 @@ function onRowCtx(e,row) {
     {label:'行を上に移動',action:`moveRowUp(${row})`,shortcut:'Alt+↑'},
     {label:'行を下に移動',action:`moveRowDown(${row})`,shortcut:'Alt+↓'},
     '---',
-    {label:multi?`${S.selectedRows.size}行を削除`:'行を削除',action:multi?'deleteSelectedRows()':`deleteRowAt(${row})`,danger:true},
-  ]);
+    isRowDis?{label:'行の無効化を解除',action:`enableRow(${row})`}:{label:'行を無効化',action:`disableRow(${row})`},
+    {label:'行を非表示',action:`hideRow(${row})`},
+  ];
+  const disList=buildDisableMenu(), hidList=buildHiddenMenu();
+  if(disList.length) items.push({label:'無効化を解除',sub:disList});
+  if(hidList.length) items.push({label:'非表示を解除',sub:hidList});
+  items.push('---');
+  items.push({label:multi?`${S.selectedRows.size}行を削除`:'行を削除',action:multi?'deleteSelectedRows()':`deleteRowAt(${row})`,danger:true});
+  showContextMenu(e,items);
 }
 function onHeaderCtx(e,col) {
   e.stopPropagation();
   if(!S.selectedCols.has(col)){S.selectedCols.clear();S.selectedCols.add(col);}
   renderGrid();
   const multi=S.selectedCols.size>1;
-  showContextMenu(e,[
+  const isColDis=S.disabledCols.has(col);
+  const items=[
     {label:'昇順でソート',action:`forceSortCol(${col},1)`},
     {label:'降順でソート',action:`forceSortCol(${col},2)`},
     '---',
@@ -2241,8 +2394,15 @@ function onHeaderCtx(e,col) {
     {label:'列を結合...',action:'openMergeCols()'},
     {label:'空欄を埋める...',action:`openFillEmpty(${col})`,disabled:multi},
     '---',
-    {label:multi?`${S.selectedCols.size}列を削除`:'列を削除',action:multi?'deleteSelectedColumn()':`deleteColumnAt(${col})`,danger:true},
-  ]);
+    isColDis?{label:'列の無効化を解除',action:`enableCol(${col})`}:{label:'列を無効化',action:`disableCol(${col})`},
+    {label:'列を非表示',action:`hideCol(${col})`},
+  ];
+  const disList=buildDisableMenu(), hidList=buildHiddenMenu();
+  if(disList.length) items.push({label:'無効化を解除',sub:disList});
+  if(hidList.length) items.push({label:'非表示を解除',sub:hidList});
+  items.push('---');
+  items.push({label:multi?`${S.selectedCols.size}列を削除`:'列を削除',action:multi?'deleteSelectedColumn()':`deleteColumnAt(${col})`,danger:true});
+  showContextMenu(e,items);
 }
 // Batch column transforms
 function selectedColsTransform(type){
@@ -2405,7 +2565,15 @@ async function doDownload(){
 
 // ========== Status Bar ==========
 function updateStatus(){
-  document.getElementById('statusRows').textContent=hasData()?`${S.data.length.toLocaleString()} 行 / ${S.headers.length} 列`:'データなし';
+  if(!hasData()){document.getElementById('statusRows').textContent='データなし';return updateSelectionStatus();}
+  let t=`${S.data.length.toLocaleString()} 行 / ${S.headers.length} 列`;
+  const hides=[];
+  if(S.hiddenRows.size) hides.push(`${S.hiddenRows.size}行非表示`);
+  if(S.hiddenCols.size) hides.push(`${S.hiddenCols.size}列非表示`);
+  if(S.disabledRows.size) hides.push(`${S.disabledRows.size}行無効`);
+  if(S.disabledCols.size) hides.push(`${S.disabledCols.size}列無効`);
+  if(hides.length) t+=` (${hides.join(', ')})`;
+  document.getElementById('statusRows').textContent=t;
   updateSelectionStatus();
 }
 
@@ -2480,6 +2648,12 @@ function extendRange(toRow,toCol){
 // ========== Init ==========
 document.addEventListener('DOMContentLoaded',()=>{
   initUpload(); initKeyboard();
+  // Drag selection
+  const gw=document.getElementById('gridWrap');
+  if(gw){
+    gw.addEventListener('mousemove',onGridMouseMove);
+    document.addEventListener('mouseup',onGridMouseUp);
+  }
   // Close modals on overlay click
   document.querySelectorAll('.pcsv-modal-overlay').forEach(ov=>{
     ov.addEventListener('click',e=>{if(e.target===ov)ov.classList.add('hidden')});
