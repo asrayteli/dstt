@@ -1,99 +1,719 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-xl mx-auto mt-10 bg-white rounded-xl shadow p-6">
-  <h2 class="text-xl font-bold mb-4">🔄 ファイル名一括変換ツール</h2>
+<style>
+  /* ===== Theme Variables ===== */
+  :root {
+    --primary: #3b82f6;
+    --primary-dark: #2563eb;
+    --primary-light: #93bbfd;
+    --primary-bg: #eff6ff;
+    --accent: #10b981;
+    --accent-dark: #059669;
+    --danger: #ef4444;
+    --danger-dark: #dc2626;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+  }
 
-  <form action="/tools/rename" method="POST" enctype="multipart/form-data" id="renameForm">
-    <div class="mb-4">
-      <label class="block mb-1">ファイルを複数選択:</label>
-      <input type="file" name="files" multiple class="w-full" id="fileInput">
+  /* ===== Card Shell ===== */
+  .rename-card {
+    max-width: 960px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 1rem;
+    box-shadow: 0 4px 24px rgba(59,130,246,.10);
+    overflow: hidden;
+  }
+  .rename-header {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    color: #fff;
+    padding: 1.5rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+  }
+  .rename-header h2 { font-size: 1.35rem; font-weight: 700; margin: 0; }
+  .rename-header .subtitle { font-size: .85rem; opacity: .85; margin-top: .15rem; }
+  .rename-body { padding: 1.5rem 2rem 2rem; }
+
+  /* ===== Drop Zone ===== */
+  .drop-zone {
+    border: 2px dashed var(--gray-300);
+    border-radius: .75rem;
+    padding: 2.5rem 1rem;
+    text-align: center;
+    transition: all .2s;
+    cursor: pointer;
+    background: var(--gray-50);
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--primary);
+    background: var(--primary-bg);
+  }
+  .drop-zone svg { margin: 0 auto .75rem; }
+  .drop-zone .drop-label { font-size: .95rem; color: var(--gray-500); }
+  .drop-zone .drop-label span { color: var(--primary); font-weight: 600; cursor: pointer; }
+
+  /* ===== File Chips ===== */
+  .file-chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+  .file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    background: var(--primary-bg);
+    color: var(--primary-dark);
+    border: 1px solid #bfdbfe;
+    border-radius: 9999px;
+    padding: .25rem .5rem .25rem .75rem;
+    font-size: .8rem;
+    font-weight: 500;
+    animation: chipIn .25s ease;
+  }
+  .file-chip .ext {
+    background: var(--primary);
+    color: #fff;
+    border-radius: 9999px;
+    padding: 0 .45rem;
+    font-size: .7rem;
+    line-height: 1.6;
+    margin-right: .15rem;
+  }
+  .file-chip button {
+    background: none; border: none; cursor: pointer;
+    color: var(--gray-400); font-size: 1rem; line-height: 1;
+    padding: .1rem; border-radius: 9999px; transition: color .15s;
+  }
+  .file-chip button:hover { color: var(--danger); }
+  @keyframes chipIn { from { opacity:0; transform: scale(.85); } to { opacity:1; transform: scale(1); } }
+
+  /* ===== Mode Grid ===== */
+  .mode-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: .5rem;
+    margin-top: .5rem;
+  }
+  .mode-btn {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: .3rem;
+    padding: .7rem .5rem;
+    border: 2px solid var(--gray-200);
+    border-radius: .65rem;
+    cursor: pointer;
+    background: #fff;
+    transition: all .2s;
+    font-size: .78rem;
+    color: var(--gray-600);
+    text-align: center;
+    font-weight: 500;
+  }
+  .mode-btn:hover { border-color: var(--primary-light); background: var(--primary-bg); }
+  .mode-btn.active {
+    border-color: var(--primary);
+    background: var(--primary-bg);
+    color: var(--primary-dark);
+    box-shadow: 0 0 0 3px rgba(59,130,246,.15);
+  }
+  .mode-btn .mode-icon { font-size: 1.4rem; }
+
+  /* ===== Options Panels ===== */
+  .opts-panel {
+    display: none;
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--gray-50);
+    border-radius: .65rem;
+    border: 1px solid var(--gray-200);
+    animation: slideDown .2s ease;
+  }
+  .opts-panel.visible { display: block; }
+  @keyframes slideDown { from { opacity:0; transform: translateY(-8px); } to { opacity:1; transform: translateY(0); } }
+
+  .opts-panel label {
+    display: block;
+    font-size: .8rem;
+    font-weight: 600;
+    color: var(--gray-600);
+    margin-bottom: .25rem;
+  }
+  .opts-panel input[type="text"],
+  .opts-panel input[type="number"],
+  .opts-panel select {
+    width: 100%;
+    border: 1px solid var(--gray-300);
+    border-radius: .45rem;
+    padding: .4rem .65rem;
+    font-size: .85rem;
+    margin-bottom: .65rem;
+    outline: none;
+    transition: border-color .15s;
+  }
+  .opts-panel input:focus, .opts-panel select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(59,130,246,.15);
+  }
+
+  .opts-row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+
+  /* ===== Token chips for custom pattern ===== */
+  .token-chips { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .6rem; }
+  .token-chip {
+    display: inline-block;
+    background: var(--primary);
+    color: #fff;
+    border-radius: .35rem;
+    padding: .15rem .55rem;
+    font-size: .75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+    user-select: none;
+  }
+  .token-chip:hover { background: var(--primary-dark); }
+
+  /* ===== Common Options ===== */
+  .common-opts {
+    margin-top: 1rem;
+    padding: .75rem 1rem;
+    background: #fff;
+    border-radius: .65rem;
+    border: 1px solid var(--gray-200);
+  }
+  .common-opts summary {
+    cursor: pointer;
+    font-size: .85rem;
+    font-weight: 600;
+    color: var(--gray-600);
+    user-select: none;
+    list-style: none;
+  }
+  .common-opts summary::-webkit-details-marker { display: none; }
+  .common-opts summary::before {
+    content: '\25B6';
+    display: inline-block;
+    margin-right: .4rem;
+    font-size: .65rem;
+    transition: transform .2s;
+  }
+  .common-opts[open] summary::before { transform: rotate(90deg); }
+  .common-opts .inner { margin-top: .75rem; }
+
+  /* ===== Preview Table ===== */
+  .preview-section {
+    margin-top: 1.5rem;
+    border-top: 1px solid var(--gray-200);
+    padding-top: 1.25rem;
+  }
+  .preview-title {
+    font-size: .95rem;
+    font-weight: 700;
+    color: var(--gray-700);
+    margin-bottom: .75rem;
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+  }
+  .preview-badge {
+    background: var(--accent);
+    color: #fff;
+    font-size: .65rem;
+    padding: .1rem .5rem;
+    border-radius: 9999px;
+    font-weight: 600;
+  }
+  .preview-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: .82rem;
+    border: 1px solid var(--gray-200);
+    border-radius: .5rem;
+    overflow: hidden;
+  }
+  .preview-table thead { background: var(--gray-100); }
+  .preview-table th {
+    padding: .55rem .75rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--gray-600);
+    font-size: .75rem;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+  }
+  .preview-table td {
+    padding: .5rem .75rem;
+    border-top: 1px solid var(--gray-100);
+    color: var(--gray-700);
+    word-break: break-all;
+  }
+  .preview-table tbody tr { transition: background .15s; }
+  .preview-table tbody tr:hover { background: var(--primary-bg); }
+  .preview-arrow {
+    color: var(--primary);
+    font-weight: 700;
+    text-align: center;
+    font-size: 1rem;
+  }
+  .name-changed { color: var(--primary-dark); font-weight: 600; }
+  .name-same { color: var(--gray-400); }
+
+  .preview-empty {
+    text-align: center;
+    padding: 2rem;
+    color: var(--gray-400);
+    font-size: .85rem;
+  }
+
+  /* ===== Buttons ===== */
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: .5rem;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    color: #fff;
+    border: none; border-radius: .55rem;
+    padding: .65rem 1.5rem;
+    font-size: .95rem; font-weight: 600;
+    cursor: pointer;
+    transition: all .2s;
+    box-shadow: 0 2px 8px rgba(59,130,246,.25);
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(59,130,246,.35); }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+  .btn-secondary {
+    display: inline-flex; align-items: center; gap: .5rem;
+    background: #fff;
+    color: var(--gray-600);
+    border: 1px solid var(--gray-300); border-radius: .55rem;
+    padding: .55rem 1.2rem;
+    font-size: .85rem; font-weight: 500;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn-secondary:hover { border-color: var(--primary); color: var(--primary); }
+
+  /* ===== Section Label ===== */
+  .section-label {
+    font-size: .85rem;
+    font-weight: 700;
+    color: var(--gray-700);
+    margin-bottom: .4rem;
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+  }
+  .section-label .step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.4rem; height: 1.4rem;
+    border-radius: 9999px;
+    background: var(--primary);
+    color: #fff;
+    font-size: .7rem;
+    font-weight: 700;
+  }
+
+  .file-count-badge {
+    background: var(--primary);
+    color: #fff;
+    font-size: .7rem;
+    padding: .05rem .5rem;
+    border-radius: 9999px;
+    font-weight: 600;
+    margin-left: .5rem;
+  }
+</style>
+
+<div class="rename-card">
+  <!-- Header -->
+  <div class="rename-header">
+    <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+    <div>
+      <h2>ファイル名一括変換ツール</h2>
+      <div class="subtitle">自由なパターンで複数ファイルを一括リネーム</div>
     </div>
+  </div>
 
-    <div class="mb-4">
-      <label class="block mb-1">変換方法:</label>
-      <select name="mode" class="w-full border rounded px-2 py-1">
-        <option value="sequential">連番（prefix_001.ext）</option>
-        <option value="date">日付＋連番（20250706_001.ext）</option>
-        <option value="replace">文字列置換</option>
-        <option value="append-sequential">元名_連番</option>
-        <option value="append-date">元名_日付</option>
-      </select>
-    </div>
+  <div class="rename-body">
+    <form action="/tools/rename" method="POST" enctype="multipart/form-data" id="renameForm">
 
-    <div class="mb-4" id="replace-options" style="display: none;">
-      <label class="block mb-1">置換元:</label>
-      <input type="text" name="search" class="w-full border rounded px-2 py-1">
-      <label class="block mb-1 mt-2">置換先:</label>
-      <input type="text" name="replace" class="w-full border rounded px-2 py-1">
-    </div>
+      <!-- STEP 1: File Upload -->
+      <div class="section-label"><span class="step">1</span> ファイルを選択</div>
+      <div class="drop-zone" id="dropZone">
+        <svg width="40" height="40" fill="none" stroke="#9ca3af" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 14v4a2 2 0 002 2h12a2 2 0 002-2v-4"/></svg>
+        <div class="drop-label">ここにファイルをドラッグ&ドロップ<br>または <span id="browseLink">クリックして選択</span></div>
+        <input type="file" name="files" multiple id="fileInput" style="display:none">
+      </div>
+      <div class="file-chips" id="fileChips"></div>
 
-    <div class="mb-4">
-      <label class="block mb-1">接頭語（prefix）:</label>
-      <input type="text" name="prefix" class="w-full border rounded px-2 py-1" placeholder="例: file_">
-    </div>
+      <!-- STEP 2: Mode Select -->
+      <div style="margin-top:1.5rem;">
+        <div class="section-label"><span class="step">2</span> 変換モードを選択</div>
+        <div class="mode-grid" id="modeGrid">
+          <div class="mode-btn active" data-mode="sequential">
+            <span class="mode-icon">🔢</span> 連番
+          </div>
+          <div class="mode-btn" data-mode="date">
+            <span class="mode-icon">📅</span> 日付+連番
+          </div>
+          <div class="mode-btn" data-mode="replace">
+            <span class="mode-icon">🔤</span> 文字列置換
+          </div>
+          <div class="mode-btn" data-mode="regex">
+            <span class="mode-icon">🔍</span> 正規表現
+          </div>
+          <div class="mode-btn" data-mode="append-sequential">
+            <span class="mode-icon">➕</span> 元名+連番
+          </div>
+          <div class="mode-btn" data-mode="append-date">
+            <span class="mode-icon">📆</span> 元名+日付
+          </div>
+          <div class="mode-btn" data-mode="case">
+            <span class="mode-icon">Aa</span> 大小変換
+          </div>
+          <div class="mode-btn" data-mode="insert">
+            <span class="mode-icon">📝</span> 挿入
+          </div>
+          <div class="mode-btn" data-mode="delete">
+            <span class="mode-icon">✂️</span> 削除
+          </div>
+          <div class="mode-btn" data-mode="ext">
+            <span class="mode-icon">📎</span> 拡張子変更
+          </div>
+          <div class="mode-btn" data-mode="custom">
+            <span class="mode-icon">🛠️</span> カスタム
+          </div>
+        </div>
+        <input type="hidden" name="mode" id="modeInput" value="sequential">
+      </div>
 
-    <div class="mb-4">
-      <label class="block mb-1">選択中のファイル:</label>
-      <ul id="fileList" class="list-disc pl-4 text-sm text-gray-700">
-        <!-- 選択されたファイルがここに表示されます -->
-      </ul>
-    </div>
+      <!-- Mode-specific options -->
+      <!-- Sequential -->
+      <div class="opts-panel visible" id="opts-sequential">
+        <label>接頭語（prefix）</label>
+        <input type="text" name="prefix" id="opt_prefix" placeholder="例: file_" value="file_">
+      </div>
 
-    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">変換＆ダウンロード</button>
-  </form>
+      <!-- Replace -->
+      <div class="opts-panel" id="opts-replace">
+        <div class="opts-row">
+          <div><label>置換元</label><input type="text" name="search" id="opt_search" placeholder="検索する文字列"></div>
+          <div><label>置換先</label><input type="text" name="replace" id="opt_replace" placeholder="置き換える文字列"></div>
+        </div>
+      </div>
+
+      <!-- Regex -->
+      <div class="opts-panel" id="opts-regex">
+        <div class="opts-row">
+          <div><label>正規表現パターン</label><input type="text" name="regex_pattern" id="opt_regex_pattern" placeholder="例: (\d+)"></div>
+          <div><label>置換文字列</label><input type="text" name="regex_replace" id="opt_regex_replace" placeholder="例: file_\1"></div>
+        </div>
+      </div>
+
+      <!-- Case -->
+      <div class="opts-panel" id="opts-case">
+        <label>変換タイプ</label>
+        <select name="case_type" id="opt_case_type">
+          <option value="lower">全て小文字</option>
+          <option value="upper">全て大文字</option>
+          <option value="title">タイトルケース</option>
+          <option value="ext_lower">拡張子のみ小文字</option>
+          <option value="ext_upper">拡張子のみ大文字</option>
+        </select>
+      </div>
+
+      <!-- Insert -->
+      <div class="opts-panel" id="opts-insert">
+        <div class="opts-row">
+          <div><label>挿入位置（0=先頭, -1=末尾手前）</label><input type="number" name="insert_pos" id="opt_insert_pos" value="0"></div>
+          <div><label>挿入するテキスト</label><input type="text" name="insert_text" id="opt_insert_text" placeholder="挿入する文字列"></div>
+        </div>
+      </div>
+
+      <!-- Delete -->
+      <div class="opts-panel" id="opts-delete">
+        <div class="opts-row">
+          <div><label>開始位置（0=先頭）</label><input type="number" name="delete_start" id="opt_delete_start" value="0"></div>
+          <div><label>削除文字数</label><input type="number" name="delete_count" id="opt_delete_count" value="0"></div>
+        </div>
+      </div>
+
+      <!-- Extension -->
+      <div class="opts-panel" id="opts-ext">
+        <label>新しい拡張子</label>
+        <input type="text" name="new_ext" id="opt_new_ext" placeholder="例: .pdf">
+      </div>
+
+      <!-- Custom Pattern -->
+      <div class="opts-panel" id="opts-custom">
+        <label>利用可能なトークン（クリックで挿入）</label>
+        <div class="token-chips" id="tokenChips">
+          <span class="token-chip" data-token="{name}">{name}</span>
+          <span class="token-chip" data-token="{ext}">{ext}</span>
+          <span class="token-chip" data-token="{num}">{num}</span>
+          <span class="token-chip" data-token="{date}">{date}</span>
+          <span class="token-chip" data-token="{original}">{original}</span>
+          <span class="token-chip" data-token="{upper}">{upper}</span>
+          <span class="token-chip" data-token="{lower}">{lower}</span>
+          <span class="token-chip" data-token="{i}">{i}</span>
+        </div>
+        <label>カスタムパターン</label>
+        <input type="text" name="custom_pattern" id="opt_custom_pattern" placeholder="例: {date}_{name}_{num}{ext}" value="{name}{ext}">
+      </div>
+
+      <!-- Common Options -->
+      <details class="common-opts" id="commonOpts">
+        <summary>共通オプション</summary>
+        <div class="inner">
+          <div class="opts-row">
+            <div><label>開始番号</label><input type="number" name="start_num" id="opt_start_num" value="1" min="0"></div>
+            <div><label>ゼロ埋め桁数</label><input type="number" name="zero_pad" id="opt_zero_pad" value="3" min="1" max="10"></div>
+          </div>
+          <label>日付フォーマット</label>
+          <input type="text" name="date_format" id="opt_date_format" placeholder="%Y%m%d" value="%Y%m%d">
+        </div>
+      </details>
+
+      <!-- STEP 3: Preview -->
+      <div class="preview-section" id="previewSection">
+        <div class="preview-title">
+          <span class="step" style="width:1.4rem;height:1.4rem;display:inline-flex;align-items:center;justify-content:center;border-radius:9999px;background:var(--primary);color:#fff;font-size:.7rem;font-weight:700;">3</span>
+          プレビュー
+          <span class="preview-badge" id="previewBadge" style="display:none">LIVE</span>
+        </div>
+        <div id="previewContent">
+          <div class="preview-empty">ファイルを選択するとリネーム結果をプレビューできます</div>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div style="margin-top:1.5rem; display:flex; gap:.75rem; align-items:center; flex-wrap:wrap;">
+        <button type="submit" class="btn-primary" id="submitBtn" disabled>
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/></svg>
+          変換＆ダウンロード
+        </button>
+        <button type="button" class="btn-secondary" id="clearBtn">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          全クリア
+        </button>
+        <span id="fileCountInfo" style="font-size:.8rem; color:var(--gray-500);"></span>
+      </div>
+    </form>
+  </div>
 </div>
 
 <script>
+(function() {
+  // Elements
+  const dropZone = document.getElementById('dropZone');
   const fileInput = document.getElementById('fileInput');
-  const fileList = document.getElementById('fileList');
+  const browseLink = document.getElementById('browseLink');
+  const fileChips = document.getElementById('fileChips');
+  const modeGrid = document.getElementById('modeGrid');
+  const modeInput = document.getElementById('modeInput');
   const form = document.getElementById('renameForm');
-  let filesArray = [];
+  const submitBtn = document.getElementById('submitBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const previewContent = document.getElementById('previewContent');
+  const previewBadge = document.getElementById('previewBadge');
+  const fileCountInfo = document.getElementById('fileCountInfo');
+  const tokenChips = document.getElementById('tokenChips');
 
-  // ファイル追加時の処理
-  fileInput.addEventListener('change', function () {
-    const newFiles = Array.from(fileInput.files);
-    filesArray = [...filesArray, ...newFiles]; // 既存のファイルと新しいファイルを結合
-    updateFileList(); // ファイルリストを更新
+  let filesArray = [];
+  let previewTimer = null;
+
+  // ===== Drop Zone =====
+  browseLink.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    const dt = e.dataTransfer;
+    if (dt.files.length) {
+      filesArray = [...filesArray, ...Array.from(dt.files)];
+      syncFiles();
+    }
+  });
+  fileInput.addEventListener('change', () => {
+    filesArray = [...filesArray, ...Array.from(fileInput.files)];
+    syncFiles();
   });
 
-  // ファイルリスト更新
-  function updateFileList() {
-    fileList.innerHTML = ''; // リストをリセット
-    filesArray.forEach((file, index) => {
-      const li = document.createElement('li');
-      li.textContent = file.name;
-      const removeButton = document.createElement('button');
-      removeButton.textContent = '削除';
-      removeButton.className = 'ml-2 text-red-500';
-      removeButton.onclick = function () {
-        removeFile(index); // インデックスでファイルを削除
-      };
-      li.appendChild(removeButton);
-      fileList.appendChild(li);
+  function syncFiles() {
+    // Render chips
+    fileChips.innerHTML = '';
+    filesArray.forEach((f, idx) => {
+      const ext = f.name.includes('.') ? f.name.split('.').pop().toUpperCase() : '';
+      const chip = document.createElement('div');
+      chip.className = 'file-chip';
+      chip.innerHTML =
+        (ext ? '<span class="ext">' + escapeHtml(ext) + '</span>' : '') +
+        '<span>' + escapeHtml(f.name) + '</span>' +
+        '<button type="button" data-idx="' + idx + '" title="削除">&times;</button>';
+      chip.querySelector('button').addEventListener('click', () => removeFile(idx));
+      fileChips.appendChild(chip);
+    });
+
+    // Update input
+    const dt = new DataTransfer();
+    filesArray.forEach(f => dt.items.add(f));
+    fileInput.files = dt.files;
+
+    // Toggle submit
+    submitBtn.disabled = filesArray.length === 0;
+    fileCountInfo.textContent = filesArray.length > 0 ? filesArray.length + ' 件のファイル' : '';
+
+    requestPreview();
+  }
+
+  function removeFile(idx) {
+    filesArray.splice(idx, 1);
+    syncFiles();
+  }
+
+  clearBtn.addEventListener('click', () => {
+    filesArray = [];
+    syncFiles();
+    previewContent.innerHTML = '<div class="preview-empty">ファイルを選択するとリネーム結果をプレビューできます</div>';
+    previewBadge.style.display = 'none';
+  });
+
+  // ===== Mode Selection =====
+  const modeBtns = modeGrid.querySelectorAll('.mode-btn');
+  modeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      modeBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      modeInput.value = btn.dataset.mode;
+
+      // Show/hide opts panels
+      document.querySelectorAll('.opts-panel').forEach(p => p.classList.remove('visible'));
+      const panel = document.getElementById('opts-' + btn.dataset.mode);
+      if (panel) panel.classList.add('visible');
+
+      requestPreview();
+    });
+  });
+
+  // ===== Token chips =====
+  tokenChips.querySelectorAll('.token-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const input = document.getElementById('opt_custom_pattern');
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
+      const val = input.value;
+      const token = chip.dataset.token;
+      input.value = val.substring(0, start) + token + val.substring(end);
+      input.focus();
+      input.setSelectionRange(start + token.length, start + token.length);
+      requestPreview();
+    });
+  });
+
+  // ===== Live Preview =====
+  // Listen to all inputs for changes
+  document.querySelectorAll('.opts-panel input, .opts-panel select, .common-opts input').forEach(el => {
+    el.addEventListener('input', () => requestPreview());
+    el.addEventListener('change', () => requestPreview());
+  });
+
+  function requestPreview() {
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(doPreview, 200);
+  }
+
+  function doPreview() {
+    const names = filesArray.map(f => f.name);
+    if (names.length === 0) {
+      previewContent.innerHTML = '<div class="preview-empty">ファイルを選択するとリネーム結果をプレビューできます</div>';
+      previewBadge.style.display = 'none';
+      return;
+    }
+
+    const mode = modeInput.value;
+    const opts = {
+      prefix: document.getElementById('opt_prefix').value,
+      search: document.getElementById('opt_search').value,
+      replace: document.getElementById('opt_replace').value,
+      regex_pattern: document.getElementById('opt_regex_pattern').value,
+      regex_replace: document.getElementById('opt_regex_replace').value,
+      case_type: document.getElementById('opt_case_type').value,
+      insert_pos: parseInt(document.getElementById('opt_insert_pos').value) || 0,
+      insert_text: document.getElementById('opt_insert_text').value,
+      delete_start: parseInt(document.getElementById('opt_delete_start').value) || 0,
+      delete_count: parseInt(document.getElementById('opt_delete_count').value) || 0,
+      new_ext: document.getElementById('opt_new_ext').value,
+      custom_pattern: document.getElementById('opt_custom_pattern').value,
+      start_num: parseInt(document.getElementById('opt_start_num').value) || 1,
+      zero_pad: parseInt(document.getElementById('opt_zero_pad').value) || 3,
+      date_format: document.getElementById('opt_date_format').value || '%Y%m%d'
+    };
+
+    fetch('/tools/rename/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filenames: names, mode: mode, opts: opts })
+    })
+    .then(r => r.json())
+    .then(data => renderPreview(data))
+    .catch(() => {
+      previewContent.innerHTML = '<div class="preview-empty">プレビューの取得に失敗しました</div>';
     });
   }
 
-  // ファイル削除
-  function removeFile(index) {
-    filesArray.splice(index, 1); // 指定されたインデックスのファイルを削除
-    updateFileList(); // リストを更新
-    // フォームの入力内容を再設定
-    const dataTransfer = new DataTransfer();
-    filesArray.forEach(file => dataTransfer.items.add(file));
-    fileInput.files = dataTransfer.files;
+  function renderPreview(data) {
+    if (!data.length) {
+      previewContent.innerHTML = '<div class="preview-empty">ファイルがありません</div>';
+      previewBadge.style.display = 'none';
+      return;
+    }
+    previewBadge.style.display = 'inline';
+
+    let html = '<table class="preview-table"><thead><tr>' +
+      '<th style="width:5%">#</th>' +
+      '<th style="width:42%">変更前</th>' +
+      '<th style="width:6%"></th>' +
+      '<th style="width:42%">変更後</th>' +
+      '</tr></thead><tbody>';
+
+    data.forEach((item, i) => {
+      const changed = item.original !== item.renamed;
+      const cls = changed ? 'name-changed' : 'name-same';
+      html += '<tr>' +
+        '<td style="color:var(--gray-400);font-size:.75rem;">' + (i + 1) + '</td>' +
+        '<td>' + escapeHtml(item.original) + '</td>' +
+        '<td class="preview-arrow">' + (changed ? '&#10132;' : '=') + '</td>' +
+        '<td class="' + cls + '">' + escapeHtml(item.renamed) + '</td>' +
+        '</tr>';
+    });
+
+    html += '</tbody></table>';
+    previewContent.innerHTML = html;
   }
 
-  // フォーム送信時にファイルを送信対象として反映
-  form.addEventListener('submit', function(event) {
-    const dataTransfer = new DataTransfer();
-    filesArray.forEach(file => dataTransfer.items.add(file));
-    fileInput.files = dataTransfer.files; // 送信対象として反映
+  // ===== Form Submit =====
+  form.addEventListener('submit', (e) => {
+    const dt = new DataTransfer();
+    filesArray.forEach(f => dt.items.add(f));
+    fileInput.files = dt.files;
   });
 
-  document.querySelector('select[name="mode"]').addEventListener('change', function () {
-    document.getElementById('replace-options').style.display =
-      this.value === 'replace' ? 'block' : 'none';
-  });
+  // ===== Utils =====
+  function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+})();
 </script>
 {% endblock %}
