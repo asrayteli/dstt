@@ -1286,6 +1286,8 @@ const S = {
   hiddenRows: new Set(), hiddenCols: new Set(), hiddenCells: new Set(),
   // Drag selection
   dragging: false, dragStart: null,
+  // Formula bar cell-reference selection
+  fxSelecting: false, _fxRefPos: -1, _fxRefEnd: -1,
 };
 function hasData() { return S.headers.length > 0; }
 
@@ -1383,6 +1385,14 @@ function enableToolbar() {
 // ========== Visible Row/Col Helpers ==========
 function getVisibleRows(){const a=[];for(let i=0;i<S.data.length;i++)if(!S.hiddenRows.has(i))a.push(i);return a;}
 function getVisibleCols(){const a=[];for(let i=0;i<S.headers.length;i++)if(!S.hiddenCols.has(i))a.push(i);return a;}
+function getPageData(){
+  const visRows=getVisibleRows();let pageRows;
+  if(S.pageSize===0)pageRows=visRows;
+  else{const st=(S.page-1)*S.pageSize;pageRows=visRows.slice(st,Math.min(st+S.pageSize,visRows.length));}
+  return{pageRows,visCols:getVisibleCols()};
+}
+function domRowIndex(row){const{pageRows}=getPageData();return pageRows.indexOf(row);}
+function domColIndex(col){return getVisibleCols().indexOf(col);}
 
 // ========== Grid Rendering ==========
 function renderGrid() { renderHeader(); renderBody(); renderPagination(); }
@@ -1468,8 +1478,22 @@ function changePageSize(){S.pageSize=parseInt(document.getElementById('pgSize').
 
 // ========== Cell Selection, Range & Drag ==========
 function onCellMouseDown(row,col,event) {
-  if(event.button!==0||S.editing) return;
+  if(event.button!==0) return;
+  // --- Formula bar cell-reference mode ---
+  const fxInp=document.getElementById('formulaInput');
+  if(document.activeElement===fxInp && fxInp.value.startsWith('=')) {
+    event.preventDefault(); event.stopPropagation();
+    S.fxSelecting=true; S.dragStart={row,col}; S.dragging=false;
+    const ref=indexToColLetter(col)+(row+1);
+    S._fxRefPos=fxInp.selectionStart!=null?fxInp.selectionStart:fxInp.value.length; S._fxRefEnd=S._fxRefPos;
+    insertRefToFormula(ref);
+    // Visual highlight on grid
+    S.selRange=normalizeRange(row,col,row,col); renderBody();
+    return;
+  }
+  if(S.editing) return;
   hideContextMenu();
+  event.preventDefault(); // prevent text selection during potential drag
   // Shift+click → extend range
   if(event.shiftKey && S.selectedCell) {
     S.selRange=normalizeRange(S.selectedCell.row,S.selectedCell.col,row,col);
@@ -1483,32 +1507,70 @@ function onCellMouseDown(row,col,event) {
     S.selectedCell={row,col}; S.selRange=null; S.selectedCols.clear();
     renderGrid(); updateFormulaBar(); updateSelectionSummary(); updateSelectionStatus(); return;
   }
-  // Start drag
+  // Start potential drag (don't add .dragging class yet — only on actual movement)
   S.dragStart={row,col}; S.dragging=false;
   S.selRange=null; S.selectedCell={row,col}; S.selectedCols.clear(); S.selectedRows.clear(); S.multiCells.clear();
-  document.getElementById('gridWrap').classList.add('dragging');
   renderGrid(); updateFormulaBar(); updateSelectionSummary(); updateSelectionStatus();
 }
 function onGridMouseMove(e) {
+  // --- Formula bar range selection ---
+  if(S.fxSelecting && S.dragStart) {
+    e.preventDefault();
+    const el=document.elementFromPoint(e.clientX,e.clientY);
+    if(!el||el.dataset.ridx===undefined||el.dataset.cidx===undefined) return;
+    const row=parseInt(el.dataset.ridx),col=parseInt(el.dataset.cidx);
+    if(isNaN(row)||isNaN(col)) return;
+    const r1=Math.min(S.dragStart.row,row),c1=Math.min(S.dragStart.col,col);
+    const r2=Math.max(S.dragStart.row,row),c2=Math.max(S.dragStart.col,col);
+    let ref;
+    if(r1===r2&&c1===c2) ref=indexToColLetter(c1)+(r1+1);
+    else ref=indexToColLetter(c1)+(r1+1)+':'+indexToColLetter(c2)+(r2+1);
+    insertRefToFormula(ref);
+    S.selRange=normalizeRange(S.dragStart.row,S.dragStart.col,row,col);
+    renderBody();
+    return;
+  }
+  // --- Normal drag selection ---
   if(!S.dragStart) return;
   const el=document.elementFromPoint(e.clientX,e.clientY);
   if(!el||el.dataset.ridx===undefined||el.dataset.cidx===undefined) return;
   const row=parseInt(el.dataset.ridx),col=parseInt(el.dataset.cidx);
   if(isNaN(row)||isNaN(col)) return;
   if(row===S.dragStart.row&&col===S.dragStart.col&&!S.dragging) return; // no movement yet
-  S.dragging=true;
+  if(!S.dragging) {
+    S.dragging=true;
+    document.getElementById('gridWrap').classList.add('dragging');
+  }
   S.selRange=normalizeRange(S.dragStart.row,S.dragStart.col,row,col);
   renderBody(); updateSelectionSummary(); updateSelectionStatus();
 }
 function onGridMouseUp() {
-  if(S.dragStart) {
+  // --- Formula bar range selection end ---
+  if(S.fxSelecting) {
+    S.fxSelecting=false; S.dragStart=null; S.dragging=false;
     document.getElementById('gridWrap')?.classList.remove('dragging');
-    if(!S.dragging) {
-      // Was just a click, not a drag — update formula bar
-      updateFormulaBar();
-    }
-    S.dragStart=null;
+    document.getElementById('formulaInput').focus();
+    return;
   }
+  // --- Normal drag end ---
+  if(S.dragStart) {
+    const wasDrag=S.dragging;
+    S.dragStart=null; S.dragging=false;
+    document.getElementById('gridWrap')?.classList.remove('dragging');
+    updateFormulaBar(); updateSelectionSummary(); updateSelectionStatus();
+  }
+}
+// Insert a cell/range reference into the formula bar (replacing the last inserted ref during a drag)
+function insertRefToFormula(ref) {
+  const inp=document.getElementById('formulaInput');
+  if(!inp) return;
+  const before=inp.value.substring(0,S._fxRefPos);
+  const after=inp.value.substring(S._fxRefEnd);
+  inp.value=before+ref+after;
+  S._fxRefEnd=S._fxRefPos+ref.length;
+  const cp=S._fxRefEnd;
+  inp.setSelectionRange(cp,cp);
+  inp.classList.toggle('has-formula',inp.value.startsWith('='));
 }
 function onHeaderClick(colIdx,event) {
   if(event.ctrlKey||event.metaKey) {
@@ -1813,10 +1875,12 @@ function updateFormulaBar() {
 function onFormulaInput() {
   const inp=document.getElementById('formulaInput');
   inp.classList.toggle('has-formula', inp.value.startsWith('='));
+  S._fxRefPos=-1; S._fxRefEnd=-1; // reset ref tracking on manual typing
 }
 function onFormulaKey(e) {
-  if(e.key==='Enter'){e.preventDefault();commitFormula();}
-  else if(e.key==='Escape'){e.preventDefault();updateFormulaBar();document.getElementById('formulaInput').blur();}
+  if(e.key==='Enter'){e.preventDefault();S._fxRefPos=-1;S._fxRefEnd=-1;commitFormula();}
+  else if(e.key==='Escape'){e.preventDefault();S._fxRefPos=-1;S._fxRefEnd=-1;updateFormulaBar();document.getElementById('formulaInput').blur();}
+  else{S._fxRefPos=-1;S._fxRefEnd=-1;} // reset ref tracking on manual typing
 }
 function commitFormula() {
   if(!S.selectedCell) return;
@@ -1891,9 +1955,10 @@ async function doPaste() {
 // ========== Cell Editing ==========
 function startEdit(row,col) {
   S.editing=true; S.selectedCell={row,col};
-  const{start}=getPageData(), lr=row-start, tbody=document.getElementById('tableTbody');
+  const lr=domRowIndex(row), tbody=document.getElementById('tableTbody');
   const tr=tbody.children[lr]; if(!tr) return;
-  const td=tr.children[col+1]; if(!td) return;
+  const ci=domColIndex(col); if(ci<0) return;
+  const td=tr.children[ci+1]; if(!td) return;
   const fk=`${row},${col}`;
   // Show formula text if cell has formula, otherwise show value
   const val=S.formulas[fk]||S.data[row][col]||'';
@@ -2470,8 +2535,8 @@ function doGoto(){
   if(S.pageSize>0) S.page=Math.floor((v-1)/S.pageSize)+1;
   S.selectedCell={row:v-1,col:0}; S.selRange=null;
   renderGrid();updateSelectionStatus();updateFormulaBar();
-  const{start}=getPageData(),lr=v-1-start,tbody=document.getElementById('tableTbody');
-  const tr=tbody.children[lr]; if(tr) tr.scrollIntoView({block:'center',behavior:'smooth'});
+  const lr=domRowIndex(v-1),tbody=document.getElementById('tableTbody');
+  const tr=lr>=0?tbody.children[lr]:null; if(tr) tr.scrollIntoView({block:'center',behavior:'smooth'});
 }
 
 // ========== Validation ==========
@@ -2514,8 +2579,8 @@ async function runValidation(){
 function navigateToIssue(row,col){
   if(S.pageSize>0) S.page=Math.floor(row/S.pageSize)+1;
   S.selectedCell={row,col:Math.max(0,col)};renderGrid();updateSelectionStatus();
-  const{start}=getPageData(),lr=row-start,tbody=document.getElementById('tableTbody');
-  const tr=tbody.children[lr];if(tr)tr.scrollIntoView({block:'center',behavior:'smooth'});
+  const lr=domRowIndex(row),tbody=document.getElementById('tableTbody');
+  const tr=lr>=0?tbody.children[lr]:null;if(tr)tr.scrollIntoView({block:'center',behavior:'smooth'});
 }
 
 // ========== Stats Panel ==========
@@ -2580,8 +2645,9 @@ function updateStatus(){
 // ========== Navigation ==========
 function ensureCellVisible(row,col){
   if(S.pageSize>0){const tp=Math.floor(row/S.pageSize)+1;if(tp!==S.page){S.page=tp;renderGrid();return;}}
-  const{start}=getPageData(),lr=row-start,tbody=document.getElementById('tableTbody');
-  const tr=tbody.children[lr];if(tr){const td=tr.children[col+1];if(td)td.scrollIntoView({block:'nearest',inline:'nearest'});}
+  const lr=domRowIndex(row),tbody=document.getElementById('tableTbody');
+  const tr=lr>=0?tbody.children[lr]:null;
+  if(tr){const ci=domColIndex(col);if(ci>=0){const td=tr.children[ci+1];if(td)td.scrollIntoView({block:'nearest',inline:'nearest'});}}
 }
 
 // ========== Keyboard Shortcuts ==========
