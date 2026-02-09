@@ -383,21 +383,27 @@
     gap: 16px;
   }
 
-  /* Side panel - flex sidebar (table shrinks to make room) */
+  /* Side panel - fixed floating panel on right side of viewport */
   .pcsv-panel {
-    width: 0;
-    overflow: hidden;
+    position: fixed;
+    top: 120px;
+    right: -360px;
+    width: var(--pcsv-panel-width);
+    bottom: 40px;
     background: #fff;
-    border-left: 1px solid var(--pcsv-grid-border);
-    transition: width 0.25s ease;
-    flex-shrink: 0;
+    border: 1px solid var(--pcsv-grid-border);
+    border-radius: 8px 0 0 8px;
+    transition: right 0.25s ease;
+    z-index: 50;
+    box-shadow: none;
+    overflow: hidden;
   }
   .pcsv-panel.open {
-    width: var(--pcsv-panel-width);
-    box-shadow: -2px 0 8px rgba(0,0,0,0.05);
+    right: 0;
+    box-shadow: -4px 0 20px rgba(0,0,0,0.12);
   }
   .pcsv-panel-inner {
-    width: var(--pcsv-panel-width);
+    width: 100%;
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -839,8 +845,7 @@
   /* Responsive - hide text on small screens */
   @media (max-width: 900px) {
     .pcsv-tb-btn .btn-text { display: none; }
-    .pcsv-panel.open { width: 280px; }
-    .pcsv-panel-inner { width: 280px; }
+    .pcsv-panel { width: 280px; right: -290px; }
   }
 </style>
 
@@ -1792,7 +1797,10 @@ function startEdit(row,col) {
   const{start}=getPageData(), lr=row-start, tbody=document.getElementById('tableTbody');
   const tr=tbody.children[lr]; if(!tr) return;
   const td=tr.children[col+1]; if(!td) return;
-  const val=S.data[row][col]||'', input=document.createElement('input');
+  const fk=`${row},${col}`;
+  // Show formula text if cell has formula, otherwise show value
+  const val=S.formulas[fk]||S.data[row][col]||'';
+  const input=document.createElement('input');
   input.className='pcsv-cell-input'; input.value=val;
   input.addEventListener('keydown',e=>{
     if(e.key==='Enter'){commitEdit(row,col,input.value);}
@@ -2137,14 +2145,26 @@ function showContextMenu(e,items) {
     if(rect.bottom>window.innerHeight) menu.style.top=(my-rect.height)+'px';
   });
 }
+function freezeFormula(row,col) {
+  const fk=`${row},${col}`;
+  if(!S.formulas[fk]) return;
+  saveState('数式結果を挿入');
+  delete S.formulas[fk]; // Remove formula, keep the evaluated value in S.data
+  renderBody(); updateFormulaBar();
+  toast('数式を削除し結果値を確定しました','success');
+}
 function onCellCtx(e,row,col) {
   S.selectedCell={row,col};renderBody();updateFormulaBar();
-  showContextMenu(e,[
+  const fk=`${row},${col}`, hasFormula=!!S.formulas[fk];
+  const items=[
     {label:'コピー',action:'doCopy()',shortcut:'Ctrl+C'},
     {label:'切り取り',action:'doCut()',shortcut:'Ctrl+X'},
     {label:'貼り付け',action:'doPaste()',shortcut:'Ctrl+V'},
     {label:'セルをクリア',action:`clearCell(${row},${col})`,shortcut:'Del'},
-    '---',
+  ];
+  if(hasFormula) items.push({label:'数式結果を挿入',action:`freezeFormula(${row},${col})`});
+  items.push('---');
+  showContextMenu(e,[...items,
     {label:'行操作',sub:[
       {label:'上に行を挿入',action:`insertRowAt(${row},true)`},
       {label:'下に行を挿入',action:`insertRowAt(${row},false)`},
@@ -2240,12 +2260,15 @@ function selectedColsTransform(type){
 // Insert formula into cell from context menu
 function insertFxToCell(row,col,fx){
   S.selectedCell={row,col};
-  const inp=document.getElementById('formulaInput');
-  inp.value=fx; inp.focus();
-  const pp=fx.indexOf('(');
-  if(pp>=0) inp.setSelectionRange(pp+1,fx.length-1);
+  renderBody(); // update grid selection highlight
+  // Set formula bar without calling updateFormulaBar (which would overwrite)
+  const ref=document.getElementById('cellRef'), inp=document.getElementById('formulaInput');
+  ref.textContent=`${indexToColLetter(col)}${row+1}`;
+  inp.value=fx;
   inp.classList.add('has-formula');
-  updateFormulaBar();
+  inp.focus();
+  const pp=fx.indexOf('(');
+  if(pp>=0) setTimeout(()=>inp.setSelectionRange(pp+1,fx.length-1),0);
 }
 function clearCell(r,c){if(S.data[r][c]!==''||S.formulas[`${r},${c}`]){saveState('セルクリア');S.data[r][c]='';delete S.formulas[`${r},${c}`];renderBody();updateFormulaBar();}}
 function forceSortCol(ci,dir){saveState('ソート');S.sortCol=ci;S.sortDir=dir;S.formulas={};
