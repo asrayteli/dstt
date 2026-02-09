@@ -1,136 +1,1741 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="max-w-4xl mx-auto mt-10 bg-white rounded-xl shadow p-6">
-  <h2 class="text-xl font-bold mb-4">📊 CSV整形・検証ツール</h2>
-
-  <form action="/tools/csvtool" method="POST" enctype="multipart/form-data">
-    <div class="mb-4">
-      <label class="block mb-1">CSVファイルを選択:</label>
-      <input type="file" name="csvfile" accept=".csv" required class="w-full">
-    </div>
-    <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">アップロード</button>
-  </form>
-
-  {% if headers %}
-  <form action="/tools/csvtool/process" method="POST" id="processForm">
-    <div class="mt-6">
-      <label class="block font-semibold mb-2">✅ オプション:</label>
-      <label><input type="checkbox" name="trim" checked> セルの前後空白を削除</label><br>
-      <label><input type="checkbox" name="check_missing" checked> 欠損チェック</label><br>
-      <label><input type="checkbox" name="check_duplicate"> 重複行チェック</label><br>
-    </div>
-
-    <div class="mt-4">
-      <label class="block font-semibold mb-2">🔀 並び順を変更（ドラッグして並び替え）:</label>
-      <ul id="sortableHeaders" class="flex flex-wrap gap-2 bg-gray-50 p-2 rounded border">
-        {% for h in headers %}
-          <li class="draggable-header bg-gray-200 px-3 py-1 rounded cursor-move" data-header="{{ h }}">{{ h }}</li>
-        {% endfor %}
-      </ul>
-      <input type="hidden" name="headers_order" id="headersOrder">
-    </div>
-
-    <div class="mt-4">
-      <label class="block font-semibold mb-2">✂ 抽出する列:</label>
-      {% for h in headers %}
-        <label class="mr-2"><input type="checkbox" name="selected_columns" value="{{ h }}" checked> {{ h }}</label>
-      {% endfor %}
-    </div>
-
-    <div class="mt-4">
-      <label class="block font-semibold mb-1">🔍 フィルタ条件:</label>
-      <input type="text" name="filter" class="w-full border rounded px-2 py-1" placeholder="例: 山田">
-    </div>
-
-    <button type="submit" class="bg-blue-600 text-white px-4 py-2 mt-4 rounded hover:bg-blue-700">操作を確定</button>
-  </form>
-
-  <div class="mt-6">
-    <h3 class="font-semibold mb-2">📋 プレビュー（最大20行）:</h3>
-    <div class="overflow-x-auto max-h-80 border rounded">
-      <table class="table-auto border-collapse w-full text-sm">
-        <thead>
-          <tr>
-            {% for h in headers %}
-              <th class="border px-2 py-1 bg-gray-100">{{ h }}</th>
-            {% endfor %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in preview %}
-            <tr>
-              {% for cell in row %}
-                <td class="border px-2 py-1">{{ cell }}</td>
-              {% endfor %}
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  {% if issues %}
-    <div class="mt-4 text-red-600">
-      <h4 class="font-semibold mb-1">⚠ 検出された問題:</h4>
-      <ul class="list-disc pl-5 text-sm">
-        {% for issue in issues %}
-          <li>{{ issue }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-  {% endif %}
-
-  <div class="mt-6">
-    <a href="{{ url_for('csvtool.download') }}" class="text-blue-600 underline">📥 修正済みCSVをダウンロード</a>
-  </div>
-  {% endif %}
-</div>
 
 <style>
-  .draggable-header {
+  /* ===== Power CSV - Core Styles ===== */
+  :root {
+    --pcsv-header: #1e293b;
+    --pcsv-toolbar-bg: #ffffff;
+    --pcsv-workspace: #f1f5f9;
+    --pcsv-grid-bg: #ffffff;
+    --pcsv-grid-border: #e2e8f0;
+    --pcsv-grid-header: #f8fafc;
+    --pcsv-grid-alt: #f8fafc;
+    --pcsv-accent: #2563eb;
+    --pcsv-accent-light: #dbeafe;
+    --pcsv-text: #1e293b;
+    --pcsv-text-muted: #64748b;
+    --pcsv-success: #16a34a;
+    --pcsv-warning: #d97706;
+    --pcsv-error: #dc2626;
+    --pcsv-status-bg: #f1f5f9;
+    --pcsv-row-hover: #f0f7ff;
+    --pcsv-selected-bg: #dbeafe;
+    --pcsv-selected-border: #2563eb;
+    --pcsv-panel-width: 340px;
+  }
+
+  #pcsvApp {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 64px);
+    margin: -32px;
+    background: var(--pcsv-workspace);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif;
+    font-size: 13px;
+    color: var(--pcsv-text);
+    overflow: hidden;
+  }
+
+  /* Header */
+  .pcsv-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 42px;
+    padding: 0 16px;
+    background: var(--pcsv-header);
+    color: #fff;
+    flex-shrink: 0;
     user-select: none;
+  }
+  .pcsv-header-title {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .pcsv-header-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    color: #94a3b8;
+  }
+  .pcsv-header-info .tag {
+    background: rgba(255,255,255,0.1);
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+
+  /* Toolbar */
+  .pcsv-toolbar {
+    display: flex;
+    align-items: center;
+    height: 40px;
+    padding: 0 8px;
+    background: var(--pcsv-toolbar-bg);
+    border-bottom: 1px solid var(--pcsv-grid-border);
+    flex-shrink: 0;
+    gap: 2px;
+    overflow-x: auto;
+    user-select: none;
+  }
+  .pcsv-toolbar::-webkit-scrollbar { height: 0; }
+  .pcsv-tb-sep {
+    width: 1px;
+    height: 20px;
+    background: #e2e8f0;
+    margin: 0 4px;
+    flex-shrink: 0;
+  }
+  .pcsv-tb-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--pcsv-text);
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s, border-color 0.12s;
+    flex-shrink: 0;
+  }
+  .pcsv-tb-btn:hover {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+  }
+  .pcsv-tb-btn:active { background: #e2e8f0; }
+  .pcsv-tb-btn.active {
+    background: var(--pcsv-accent-light);
+    border-color: var(--pcsv-accent);
+    color: var(--pcsv-accent);
+  }
+  .pcsv-tb-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+    pointer-events: none;
+  }
+  .pcsv-tb-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+  /* Body layout */
+  .pcsv-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .pcsv-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  /* Upload area */
+  .pcsv-upload {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+  }
+  .pcsv-upload-zone {
+    width: 100%;
+    max-width: 520px;
+    padding: 60px 40px;
+    border: 2px dashed #cbd5e1;
+    border-radius: 8px;
+    background: #fff;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .pcsv-upload-zone:hover,
+  .pcsv-upload-zone.dragover {
+    border-color: var(--pcsv-accent);
+    background: #f8faff;
+  }
+  .pcsv-upload-zone svg {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 16px;
+    color: #94a3b8;
+  }
+  .pcsv-upload-zone .main-text {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--pcsv-text);
+    margin-bottom: 6px;
+  }
+  .pcsv-upload-zone .sub-text {
+    font-size: 12px;
+    color: var(--pcsv-text-muted);
+  }
+  .pcsv-upload-zone input[type="file"] { display: none; }
+
+  /* Grid container */
+  .pcsv-grid-wrap {
+    flex: 1;
+    overflow: auto;
+    background: var(--pcsv-grid-bg);
+    position: relative;
+  }
+  .pcsv-grid-wrap::-webkit-scrollbar { width: 10px; height: 10px; }
+  .pcsv-grid-wrap::-webkit-scrollbar-track { background: #f1f5f9; }
+  .pcsv-grid-wrap::-webkit-scrollbar-thumb { background: #c4cdd5; border-radius: 5px; }
+  .pcsv-grid-wrap::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+  /* Data table */
+  .pcsv-table {
+    border-collapse: collapse;
+    width: max-content;
+    min-width: 100%;
+    font-size: 13px;
+    table-layout: fixed;
+  }
+  .pcsv-table th,
+  .pcsv-table td {
+    border: 1px solid var(--pcsv-grid-border);
+    padding: 0;
+    height: 28px;
+    max-height: 28px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    position: relative;
+  }
+
+  /* Row number column */
+  .pcsv-table .row-num {
+    width: 50px;
+    min-width: 50px;
+    max-width: 50px;
+    text-align: center;
+    background: var(--pcsv-grid-header);
+    color: var(--pcsv-text-muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+    position: sticky;
+    left: 0;
+    z-index: 2;
+  }
+
+  /* Header cells */
+  .pcsv-table thead th {
+    background: var(--pcsv-grid-header);
+    font-weight: 600;
+    font-size: 12px;
+    padding: 0 8px;
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    cursor: pointer;
+    user-select: none;
+    min-width: 100px;
+  }
+  .pcsv-table thead th:first-child {
+    z-index: 4;
+    cursor: default;
+  }
+  .pcsv-table thead th .th-content {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+  }
+  .pcsv-table thead th .th-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pcsv-table thead th .sort-icon {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    color: #94a3b8;
+  }
+  .pcsv-table thead th .sort-icon.asc,
+  .pcsv-table thead th .sort-icon.desc { color: var(--pcsv-accent); }
+
+  /* Data cells */
+  .pcsv-table tbody td {
+    padding: 0 8px;
+    cursor: cell;
+    min-width: 100px;
+  }
+  .pcsv-table tbody tr:nth-child(even) td:not(.row-num) {
+    background: var(--pcsv-grid-alt);
+  }
+  .pcsv-table tbody tr:hover td:not(.row-num) {
+    background: var(--pcsv-row-hover);
+  }
+
+  /* Cell states */
+  .pcsv-table td.selected {
+    outline: 2px solid var(--pcsv-selected-border);
+    outline-offset: -2px;
+    z-index: 1;
+  }
+  .pcsv-table tr.row-selected td.row-num {
+    background: var(--pcsv-accent-light);
+    color: var(--pcsv-accent);
+    font-weight: 600;
+  }
+  .pcsv-table td.cell-error {
+    background: #fef2f2 !important;
+  }
+  .pcsv-table td.cell-warning {
+    background: #fffbeb !important;
+  }
+  .pcsv-table td.cell-match {
+    background: #fef9c3 !important;
+  }
+
+  /* Cell editing */
+  .pcsv-cell-input {
+    position: absolute;
+    top: -1px;
+    left: -1px;
+    width: calc(100% + 2px);
+    height: calc(100% + 2px);
+    border: 2px solid var(--pcsv-accent);
+    padding: 0 7px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    background: #fff;
+    z-index: 5;
+    box-sizing: border-box;
+  }
+
+  /* Pagination bar */
+  .pcsv-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 32px;
+    padding: 0 12px;
+    background: var(--pcsv-toolbar-bg);
+    border-top: 1px solid var(--pcsv-grid-border);
+    font-size: 12px;
+    color: var(--pcsv-text-muted);
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .pcsv-pagination .pg-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .pcsv-pg-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 22px;
+    border: 1px solid #e2e8f0;
+    border-radius: 3px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--pcsv-text);
+  }
+  .pcsv-pg-btn:hover { background: #f1f5f9; }
+  .pcsv-pg-btn:disabled { opacity: 0.4; cursor: default; }
+  .pcsv-pg-btn.active {
+    background: var(--pcsv-accent);
+    color: #fff;
+    border-color: var(--pcsv-accent);
+  }
+  .pcsv-pg-select {
+    height: 22px;
+    border: 1px solid #e2e8f0;
+    border-radius: 3px;
+    font-size: 11px;
+    padding: 0 4px;
+    background: #fff;
+  }
+
+  /* Status bar */
+  .pcsv-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 26px;
+    padding: 0 12px;
+    background: var(--pcsv-status-bg);
+    border-top: 1px solid var(--pcsv-grid-border);
+    font-size: 11px;
+    color: var(--pcsv-text-muted);
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .pcsv-status .status-left,
+  .pcsv-status .status-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  /* Side panel */
+  .pcsv-panel {
+    width: 0;
+    overflow: hidden;
+    background: #fff;
+    border-left: 1px solid var(--pcsv-grid-border);
+    transition: width 0.2s ease;
+    flex-shrink: 0;
+  }
+  .pcsv-panel.open { width: var(--pcsv-panel-width); }
+  .pcsv-panel-inner {
+    width: var(--pcsv-panel-width);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .pcsv-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--pcsv-grid-border);
+    font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .pcsv-panel-close {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 3px;
+    color: var(--pcsv-text-muted);
+  }
+  .pcsv-panel-close:hover { background: #f1f5f9; }
+  .pcsv-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 14px;
+  }
+  .pcsv-panel-body::-webkit-scrollbar { width: 6px; }
+  .pcsv-panel-body::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+
+  /* Panel items */
+  .panel-section { margin-bottom: 16px; }
+  .panel-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--pcsv-text-muted);
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+  .panel-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 12px;
+  }
+  .panel-stat-row .label { color: var(--pcsv-text-muted); }
+  .panel-stat-row .value { font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  .issue-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px 8px;
+    margin-bottom: 4px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .issue-item:hover { background: #f8fafc; }
+  .issue-item .issue-badge {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .issue-badge.warning { background: var(--pcsv-warning); }
+  .issue-badge.error { background: var(--pcsv-error); }
+  .issue-item .issue-text { line-height: 1.4; color: var(--pcsv-text); }
+
+  .col-stat-card {
+    padding: 8px;
+    border: 1px solid var(--pcsv-grid-border);
+    border-radius: 4px;
+    margin-bottom: 6px;
+  }
+  .col-stat-card .col-name {
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+  .col-stat-bar {
+    height: 4px;
+    background: #e2e8f0;
+    border-radius: 2px;
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .col-stat-bar .fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+
+  /* Search bar (inline in toolbar) */
+  .pcsv-search-inline {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    margin-left: 4px;
+  }
+  .pcsv-search-inline.active { display: flex; }
+  .pcsv-search-input {
+    height: 26px;
+    width: 160px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    padding: 0 8px;
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .pcsv-search-input:focus { border-color: var(--pcsv-accent); }
+  .pcsv-replace-input {
+    height: 26px;
+    width: 140px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    padding: 0 8px;
+    font-size: 12px;
+    outline: none;
+  }
+  .pcsv-replace-input:focus { border-color: var(--pcsv-accent); }
+  .search-count {
+    font-size: 11px;
+    color: var(--pcsv-text-muted);
+    min-width: 40px;
+    text-align: center;
+  }
+
+  /* Toast */
+  .pcsv-toast-container {
+    position: fixed;
+    bottom: 40px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+  .pcsv-toast {
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    animation: toastIn 0.25s ease;
+    max-width: 360px;
+  }
+  .pcsv-toast.success { background: #16a34a; }
+  .pcsv-toast.error { background: #dc2626; }
+  .pcsv-toast.info { background: #1e293b; }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Modal overlay */
+  .pcsv-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pcsv-modal-overlay.hidden { display: none; }
+  .pcsv-modal {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+    padding: 24px;
+    min-width: 380px;
+    max-width: 90vw;
+  }
+  .pcsv-modal h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+  .pcsv-modal label {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--pcsv-text-muted);
+    margin-bottom: 4px;
+  }
+  .pcsv-modal select,
+  .pcsv-modal input[type="text"] {
+    width: 100%;
+    height: 32px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    padding: 0 8px;
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+  .pcsv-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .pcsv-modal-btn {
+    padding: 6px 16px;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    color: var(--pcsv-text);
+  }
+  .pcsv-modal-btn:hover { background: #f8fafc; }
+  .pcsv-modal-btn.primary {
+    background: var(--pcsv-accent);
+    color: #fff;
+    border-color: var(--pcsv-accent);
+  }
+  .pcsv-modal-btn.primary:hover { background: #1d4ed8; }
+
+  /* Loading */
+  .pcsv-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 40px;
+    color: var(--pcsv-text-muted);
+  }
+  .pcsv-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #e2e8f0;
+    border-top-color: var(--pcsv-accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Responsive - hide text on small screens */
+  @media (max-width: 900px) {
+    .pcsv-tb-btn .btn-text { display: none; }
+    .pcsv-panel.open { width: 280px; }
+    .pcsv-panel-inner { width: 280px; }
   }
 </style>
 
+<div id="pcsvApp">
+  <!-- Header -->
+  <div class="pcsv-header">
+    <div class="pcsv-header-title">Power CSV</div>
+    <div class="pcsv-header-info" id="headerInfo" style="display:none">
+      <span id="headerFilename"></span>
+      <span class="tag" id="headerEncoding"></span>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="pcsv-toolbar" id="toolbar">
+    <!-- File group -->
+    <button class="pcsv-tb-btn" onclick="triggerUpload()" title="CSVファイルを開く">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+      <span class="btn-text">開く</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnSave" onclick="openDownloadModal()" disabled title="CSVとしてダウンロード (Ctrl+S)">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+      <span class="btn-text">保存</span>
+    </button>
+
+    <div class="pcsv-tb-sep"></div>
+
+    <!-- Edit group -->
+    <button class="pcsv-tb-btn" id="btnUndo" onclick="doUndo()" disabled title="元に戻す (Ctrl+Z)">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4"/></svg>
+      <span class="btn-text">戻す</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnRedo" onclick="doRedo()" disabled title="やり直し (Ctrl+Y)">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10H11a5 5 0 00-5 5v2m15-7l-4-4m4 4l-4 4"/></svg>
+      <span class="btn-text">やり直し</span>
+    </button>
+
+    <div class="pcsv-tb-sep"></div>
+
+    <!-- Row/Col group -->
+    <button class="pcsv-tb-btn" id="btnAddRow" onclick="addRow()" disabled title="行を追加">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m-6-6h12"/></svg>
+      <span class="btn-text">行追加</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnDelRow" onclick="deleteSelectedRows()" disabled title="選択行を削除">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg>
+      <span class="btn-text">行削除</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnAddCol" onclick="openAddColumnModal()" disabled title="列を追加">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"/></svg>
+      <span class="btn-text">列追加</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnDelCol" onclick="deleteSelectedColumn()" disabled title="選択列を削除">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+      <span class="btn-text">列削除</span>
+    </button>
+
+    <div class="pcsv-tb-sep"></div>
+
+    <!-- Data ops group -->
+    <button class="pcsv-tb-btn" id="btnTrim" onclick="trimWhitespace()" disabled title="全セルの前後空白を削除">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8m-8 6h16"/></svg>
+      <span class="btn-text">Trim</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnDedup" onclick="removeDuplicates()" disabled title="重複行を削除">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+      <span class="btn-text">重複削除</span>
+    </button>
+
+    <div class="pcsv-tb-sep"></div>
+
+    <!-- Search -->
+    <button class="pcsv-tb-btn" id="btnSearch" onclick="toggleSearch()" disabled title="検索 (Ctrl+F)">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      <span class="btn-text">検索</span>
+    </button>
+    <div class="pcsv-search-inline" id="searchBar">
+      <input type="text" class="pcsv-search-input" id="searchInput" placeholder="検索..." oninput="doSearch()">
+      <span class="search-count" id="searchCount"></span>
+      <input type="text" class="pcsv-replace-input" id="replaceInput" placeholder="置換...">
+      <button class="pcsv-tb-btn" onclick="doReplaceAll()" title="全て置換">全置換</button>
+      <button class="pcsv-tb-btn" onclick="closeSearch()" title="閉じる">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:14px;height:14px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="pcsv-tb-sep"></div>
+
+    <!-- Panels -->
+    <button class="pcsv-tb-btn" id="btnValidate" onclick="toggleValidation()" disabled title="データ検証">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <span class="btn-text">検証</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnStats" onclick="toggleStats()" disabled title="列統計">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      <span class="btn-text">統計</span>
+    </button>
+  </div>
+
+  <!-- Body -->
+  <div class="pcsv-body">
+    <div class="pcsv-main">
+      <!-- Upload screen -->
+      <div class="pcsv-upload" id="uploadScreen">
+        <div class="pcsv-upload-zone" id="uploadZone">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 0l3-3m-3 3l3 3M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <div class="main-text">CSVファイルをドロップ</div>
+          <div class="sub-text">またはクリックしてファイルを選択</div>
+          <div class="sub-text" style="margin-top:12px;color:#94a3b8">対応: .csv / .tsv (UTF-8, Shift_JIS, EUC-JP 自動検出)</div>
+          <input type="file" id="fileInput" accept=".csv,.tsv,.txt">
+        </div>
+      </div>
+
+      <!-- Editor screen -->
+      <div id="editorScreen" style="display:none;flex:1;display:none;flex-direction:column;min-height:0">
+        <div class="pcsv-grid-wrap" id="gridWrap">
+          <table class="pcsv-table" id="dataTable">
+            <thead id="tableThead"></thead>
+            <tbody id="tableTbody"></tbody>
+          </table>
+        </div>
+        <div class="pcsv-pagination" id="paginationBar">
+          <div>
+            <span id="pgInfo"></span>
+          </div>
+          <div class="pg-controls">
+            <span style="margin-right:4px">行/ページ:</span>
+            <select class="pcsv-pg-select" id="pgSize" onchange="changePageSize()">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+              <option value="0">全て</option>
+            </select>
+            <button class="pcsv-pg-btn" id="pgPrev" onclick="prevPage()" disabled>&lt;</button>
+            <span id="pgNumbers"></span>
+            <button class="pcsv-pg-btn" id="pgNext" onclick="nextPage()" disabled>&gt;</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Validation Panel -->
+    <div class="pcsv-panel" id="validatePanel">
+      <div class="pcsv-panel-inner">
+        <div class="pcsv-panel-head">
+          <span>検証結果</span>
+          <button class="pcsv-panel-close" onclick="toggleValidation()">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:16px;height:16px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="pcsv-panel-body" id="validateContent">
+          <div class="pcsv-loading"><div class="pcsv-spinner"></div>検証中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats Panel -->
+    <div class="pcsv-panel" id="statsPanel">
+      <div class="pcsv-panel-inner">
+        <div class="pcsv-panel-head">
+          <span>列統計</span>
+          <button class="pcsv-panel-close" onclick="toggleStats()">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:16px;height:16px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="pcsv-panel-body" id="statsContent"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="pcsv-status" id="statusBar">
+    <div class="status-left">
+      <span id="statusRows">データなし</span>
+    </div>
+    <div class="status-right">
+      <span id="statusSelection"></span>
+      <span id="statusMode">待機中</span>
+    </div>
+  </div>
+</div>
+
+<!-- Download Modal -->
+<div class="pcsv-modal-overlay hidden" id="downloadModal">
+  <div class="pcsv-modal">
+    <h3>CSVエクスポート</h3>
+    <label>ファイル名</label>
+    <input type="text" id="dlFilename" value="export.csv">
+    <label>エンコーディング</label>
+    <select id="dlEncoding">
+      <option value="utf-8-sig" selected>UTF-8 (BOM付き / Excel推奨)</option>
+      <option value="utf-8">UTF-8</option>
+      <option value="shift_jis">Shift_JIS</option>
+      <option value="cp932">CP932 (Windows日本語)</option>
+    </select>
+    <label>区切り文字</label>
+    <select id="dlDelimiter">
+      <option value="," selected>カンマ (,)</option>
+      <option value="&#9;">タブ</option>
+      <option value=";">セミコロン (;)</option>
+    </select>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeDownloadModal()">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="doDownload()">ダウンロード</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Column Modal -->
+<div class="pcsv-modal-overlay hidden" id="addColModal">
+  <div class="pcsv-modal">
+    <h3>列を追加</h3>
+    <label>列名</label>
+    <input type="text" id="newColName" placeholder="新しい列名">
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeAddColumnModal()">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="doAddColumn()">追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="pcsv-toast-container" id="toastContainer"></div>
+
+
 <script>
-  // 並び順を取得してフォームに埋め込む
-  const headersOrderInput = document.getElementById("headersOrder");
-  const sortableHeaders = document.getElementById("sortableHeaders");
+// ===== Power CSV Application =====
 
-  let dragSrcEl = null;
+// --- State ---
+const S = {
+  headers: [],
+  data: [],
+  filename: '',
+  encoding: '',
+  delimiter: ',',
+  // Pagination
+  page: 1,
+  pageSize: 100,
+  // Selection
+  selectedCell: null,   // {row, col} (data index)
+  selectedRows: new Set(),
+  selectedCol: null,
+  // Sort
+  sortCol: -1,
+  sortDir: 0,  // 0=none, 1=asc, 2=desc
+  // Search
+  searchMatches: [],
+  // Undo/Redo
+  undoStack: [],
+  redoStack: [],
+  // Editing
+  editing: false,
+  // Panels
+  validateOpen: false,
+  statsOpen: false,
+  // Validation results
+  issueMap: {},  // "row,col" -> issue
+};
 
-  function handleDragStart(e) {
-    dragSrcEl = this;
-    this.classList.add("opacity-50");
-  }
+function hasData() { return S.headers.length > 0; }
 
-  function handleDragEnd() {
-    this.classList.remove("opacity-50");
-    updateHeadersOrderInput();
-  }
+// --- Toast ---
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = 'pcsv-toast ' + type;
+  el.textContent = msg;
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, 2500);
+  setTimeout(() => el.remove(), 2900);
+}
 
-  function handleDragOver(e) {
+// --- Undo / Redo ---
+function saveState(label) {
+  S.undoStack.push({
+    label,
+    headers: JSON.parse(JSON.stringify(S.headers)),
+    data: JSON.parse(JSON.stringify(S.data)),
+  });
+  if (S.undoStack.length > 50) S.undoStack.shift();
+  S.redoStack = [];
+  updateUndoButtons();
+}
+
+function doUndo() {
+  if (!S.undoStack.length) return;
+  const state = S.undoStack.pop();
+  S.redoStack.push({
+    label: 'redo',
+    headers: JSON.parse(JSON.stringify(S.headers)),
+    data: JSON.parse(JSON.stringify(S.data)),
+  });
+  S.headers = state.headers;
+  S.data = state.data;
+  updateUndoButtons();
+  renderGrid();
+  updateStatus();
+  toast('元に戻しました', 'info');
+}
+
+function doRedo() {
+  if (!S.redoStack.length) return;
+  const state = S.redoStack.pop();
+  S.undoStack.push({
+    label: 'undo',
+    headers: JSON.parse(JSON.stringify(S.headers)),
+    data: JSON.parse(JSON.stringify(S.data)),
+  });
+  S.headers = state.headers;
+  S.data = state.data;
+  updateUndoButtons();
+  renderGrid();
+  updateStatus();
+  toast('やり直しました', 'info');
+}
+
+function updateUndoButtons() {
+  document.getElementById('btnUndo').disabled = !S.undoStack.length;
+  document.getElementById('btnRedo').disabled = !S.redoStack.length;
+}
+
+// --- File Upload ---
+function triggerUpload() {
+  document.getElementById('fileInput').click();
+}
+
+function initUpload() {
+  const zone = document.getElementById('uploadZone');
+  const input = document.getElementById('fileInput');
+
+  zone.addEventListener('click', () => input.click());
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
     e.preventDefault();
-    const target = e.target.closest(".draggable-header");
-    if (target && target !== dragSrcEl) {
-      const rect = target.getBoundingClientRect();
-      const next = (e.clientX - rect.left) / rect.width > 0.5;
-      sortableHeaders.insertBefore(dragSrcEl, next ? target.nextSibling : target);
+    zone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+  });
+  input.addEventListener('change', () => {
+    if (input.files.length) uploadFile(input.files[0]);
+    input.value = '';
+  });
+}
+
+async function uploadFile(file) {
+  document.getElementById('statusMode').textContent = '読込中...';
+  const fd = new FormData();
+  fd.append('file', file);
+
+  try {
+    const res = await fetch('/tools/csvtool/api/upload', { method: 'POST', body: fd });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'アップロード失敗');
+
+    S.headers = json.headers;
+    S.data = json.data;
+    S.filename = json.filename;
+    S.encoding = json.encoding;
+    S.delimiter = json.delimiter;
+    S.page = 1;
+    S.selectedCell = null;
+    S.selectedRows = new Set();
+    S.selectedCol = null;
+    S.sortCol = -1;
+    S.sortDir = 0;
+    S.undoStack = [];
+    S.redoStack = [];
+    S.issueMap = {};
+
+    showEditor();
+    renderGrid();
+    updateStatus();
+    enableToolbar();
+    toast(`${json.filename} を読み込みました (${json.totalRows.toLocaleString()}行)`, 'success');
+
+    // Update header info
+    document.getElementById('headerInfo').style.display = 'flex';
+    document.getElementById('headerFilename').textContent = json.filename;
+    document.getElementById('headerEncoding').textContent = json.encoding.toUpperCase();
+
+    // Set download filename
+    document.getElementById('dlFilename').value = json.filename;
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+  document.getElementById('statusMode').textContent = '準備完了';
+}
+
+function showEditor() {
+  document.getElementById('uploadScreen').style.display = 'none';
+  const editor = document.getElementById('editorScreen');
+  editor.style.display = 'flex';
+}
+
+function enableToolbar() {
+  const btns = ['btnSave','btnAddRow','btnDelRow','btnAddCol','btnDelCol','btnTrim','btnDedup','btnSearch','btnValidate','btnStats'];
+  btns.forEach(id => document.getElementById(id).disabled = false);
+  updateUndoButtons();
+}
+
+// --- Grid Rendering ---
+function getPageData() {
+  if (S.pageSize === 0) return { rows: S.data, start: 0, end: S.data.length };
+  const start = (S.page - 1) * S.pageSize;
+  const end = Math.min(start + S.pageSize, S.data.length);
+  return { rows: S.data.slice(start, end), start, end };
+}
+
+function renderGrid() {
+  renderHeader();
+  renderBody();
+  renderPagination();
+}
+
+function renderHeader() {
+  const thead = document.getElementById('tableThead');
+  let html = '<tr><th class="row-num">#</th>';
+  S.headers.forEach((h, i) => {
+    let sortClass = '';
+    let sortArrow = '<svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>';
+    if (S.sortCol === i) {
+      if (S.sortDir === 1) {
+        sortClass = 'asc';
+        sortArrow = '<svg class="sort-icon asc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>';
+      } else if (S.sortDir === 2) {
+        sortClass = 'desc';
+        sortArrow = '<svg class="sort-icon desc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>';
+      }
     }
+    const escaped = escHtml(h);
+    html += `<th data-col="${i}" onclick="sortByCol(${i})" title="${escaped}"><div class="th-content"><span class="th-label">${escaped}</span>${sortArrow}</div></th>`;
+  });
+  html += '</tr>';
+  thead.innerHTML = html;
+}
+
+function renderBody() {
+  const { rows, start } = getPageData();
+  const tbody = document.getElementById('tableTbody');
+  let html = '';
+
+  for (let ri = 0; ri < rows.length; ri++) {
+    const dataIdx = start + ri;
+    const row = rows[ri];
+    const isRowSelected = S.selectedRows.has(dataIdx);
+    html += `<tr class="${isRowSelected ? 'row-selected' : ''}" data-ridx="${dataIdx}">`;
+    html += `<td class="row-num" onclick="toggleRowSelect(${dataIdx}, event)">${dataIdx + 1}</td>`;
+
+    for (let ci = 0; ci < S.headers.length; ci++) {
+      const val = ci < row.length ? row[ci] : '';
+      const isSelected = S.selectedCell && S.selectedCell.row === dataIdx && S.selectedCell.col === ci;
+      const issueKey = `${dataIdx},${ci}`;
+      let cls = '';
+      if (isSelected) cls += ' selected';
+      if (S.issueMap[issueKey]) {
+        const sev = S.issueMap[issueKey];
+        cls += sev === 'error' ? ' cell-error' : ' cell-warning';
+      }
+      if (S.searchMatches.some(m => m.row === dataIdx && m.col === ci)) cls += ' cell-match';
+
+      html += `<td class="${cls}" data-ridx="${dataIdx}" data-cidx="${ci}" onclick="selectCell(${dataIdx},${ci})" ondblclick="startEdit(${dataIdx},${ci})">${escHtml(val)}</td>`;
+    }
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+function renderPagination() {
+  if (S.pageSize === 0) {
+    document.getElementById('pgInfo').textContent = `全 ${S.data.length.toLocaleString()} 行`;
+    document.getElementById('pgNumbers').innerHTML = '';
+    document.getElementById('pgPrev').disabled = true;
+    document.getElementById('pgNext').disabled = true;
+    return;
   }
 
-  function updateHeadersOrderInput() {
-    const order = Array.from(sortableHeaders.children).map(el => el.dataset.header);
-    headersOrderInput.value = JSON.stringify(order);
-  }
+  const totalPages = Math.max(1, Math.ceil(S.data.length / S.pageSize));
+  if (S.page > totalPages) S.page = totalPages;
 
-  document.querySelectorAll(".draggable-header").forEach(el => {
-    el.setAttribute("draggable", true);
-    el.addEventListener("dragstart", handleDragStart);
-    el.addEventListener("dragend", handleDragEnd);
+  const start = (S.page - 1) * S.pageSize + 1;
+  const end = Math.min(S.page * S.pageSize, S.data.length);
+  document.getElementById('pgInfo').textContent = `${start.toLocaleString()}-${end.toLocaleString()} / ${S.data.length.toLocaleString()} 行`;
+
+  document.getElementById('pgPrev').disabled = S.page <= 1;
+  document.getElementById('pgNext').disabled = S.page >= totalPages;
+
+  // Page numbers
+  let nums = '';
+  const maxVisible = 5;
+  let startPage = Math.max(1, S.page - Math.floor(maxVisible / 2));
+  let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+  if (endPage - startPage < maxVisible - 1) startPage = Math.max(1, endPage - maxVisible + 1);
+
+  for (let p = startPage; p <= endPage; p++) {
+    nums += `<button class="pcsv-pg-btn ${p === S.page ? 'active' : ''}" onclick="goToPage(${p})">${p}</button>`;
+  }
+  document.getElementById('pgNumbers').innerHTML = nums;
+}
+
+function prevPage() { if (S.page > 1) { S.page--; renderBody(); renderPagination(); } }
+function nextPage() {
+  const totalPages = Math.ceil(S.data.length / S.pageSize);
+  if (S.page < totalPages) { S.page++; renderBody(); renderPagination(); }
+}
+function goToPage(p) { S.page = p; renderBody(); renderPagination(); }
+function changePageSize() {
+  S.pageSize = parseInt(document.getElementById('pgSize').value);
+  S.page = 1;
+  renderBody();
+  renderPagination();
+}
+
+// --- Cell Selection ---
+function selectCell(row, col) {
+  if (S.editing) return;
+  S.selectedCell = { row, col };
+  S.selectedCol = col;
+  renderBody();
+  updateSelectionStatus();
+}
+
+function toggleRowSelect(idx, event) {
+  if (event && event.shiftKey && S.selectedRows.size > 0) {
+    const last = Math.max(...S.selectedRows);
+    const from = Math.min(last, idx);
+    const to = Math.max(last, idx);
+    for (let i = from; i <= to; i++) S.selectedRows.add(i);
+  } else if (event && (event.ctrlKey || event.metaKey)) {
+    if (S.selectedRows.has(idx)) S.selectedRows.delete(idx);
+    else S.selectedRows.add(idx);
+  } else {
+    if (S.selectedRows.has(idx) && S.selectedRows.size === 1) S.selectedRows.clear();
+    else { S.selectedRows.clear(); S.selectedRows.add(idx); }
+  }
+  renderBody();
+  updateSelectionStatus();
+}
+
+function updateSelectionStatus() {
+  const el = document.getElementById('statusSelection');
+  if (S.selectedRows.size > 0) {
+    el.textContent = `${S.selectedRows.size}行選択中`;
+  } else if (S.selectedCell) {
+    const colName = S.headers[S.selectedCell.col] || '';
+    el.textContent = `${S.selectedCell.row + 1}行 : ${colName}`;
+  } else {
+    el.textContent = '';
+  }
+}
+
+// --- Cell Editing ---
+function startEdit(row, col) {
+  S.editing = true;
+  S.selectedCell = { row, col };
+  const { start } = getPageData();
+  const localRow = row - start;
+  const tbody = document.getElementById('tableTbody');
+  const tr = tbody.children[localRow];
+  if (!tr) return;
+  const td = tr.children[col + 1]; // +1 for row number
+  if (!td) return;
+
+  const val = S.data[row][col] || '';
+  const input = document.createElement('input');
+  input.className = 'pcsv-cell-input';
+  input.value = val;
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { commitEdit(row, col, input.value); }
+    else if (e.key === 'Escape') { cancelEdit(); }
+    else if (e.key === 'Tab') {
+      e.preventDefault();
+      commitEdit(row, col, input.value);
+      const nextCol = e.shiftKey ? col - 1 : col + 1;
+      if (nextCol >= 0 && nextCol < S.headers.length) {
+        selectCell(row, nextCol);
+        startEdit(row, nextCol);
+      }
+    }
+  });
+  input.addEventListener('blur', () => {
+    if (S.editing) commitEdit(row, col, input.value);
   });
 
-  sortableHeaders.addEventListener("dragover", handleDragOver);
-  updateHeadersOrderInput(); // 初期値設定
+  td.style.overflow = 'visible';
+  td.appendChild(input);
+  input.focus();
+  input.select();
+  document.getElementById('statusMode').textContent = '編集中';
+}
+
+function commitEdit(row, col, newVal) {
+  const oldVal = S.data[row][col];
+  if (oldVal !== newVal) {
+    saveState('セル編集');
+    S.data[row][col] = newVal;
+  }
+  S.editing = false;
+  renderBody();
+  document.getElementById('statusMode').textContent = '準備完了';
+}
+
+function cancelEdit() {
+  S.editing = false;
+  renderBody();
+  document.getElementById('statusMode').textContent = '準備完了';
+}
+
+// --- Sorting ---
+function sortByCol(colIdx) {
+  if (S.sortCol === colIdx) {
+    S.sortDir = (S.sortDir + 1) % 3;
+  } else {
+    S.sortCol = colIdx;
+    S.sortDir = 1;
+  }
+
+  if (S.sortDir === 0) {
+    // No sort - restore original order is complex; just leave current
+    S.sortCol = -1;
+  } else {
+    saveState('ソート');
+    const dir = S.sortDir === 1 ? 1 : -1;
+    S.data.sort((a, b) => {
+      const va = (a[colIdx] || '').toLowerCase();
+      const vb = (b[colIdx] || '').toLowerCase();
+      const na = parseFloat(va);
+      const nb = parseFloat(vb);
+      if (!isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
+      return va.localeCompare(vb, 'ja') * dir;
+    });
+  }
+
+  S.selectedCell = null;
+  S.selectedRows.clear();
+  renderGrid();
+}
+
+// --- Data Operations ---
+function trimWhitespace() {
+  saveState('Trim');
+  let count = 0;
+  S.data.forEach(row => {
+    row.forEach((cell, i) => {
+      const trimmed = cell.trim();
+      if (trimmed !== cell) { row[i] = trimmed; count++; }
+    });
+  });
+  renderBody();
+  toast(`${count}セルの空白を除去しました`, count > 0 ? 'success' : 'info');
+}
+
+function removeDuplicates() {
+  saveState('重複削除');
+  const seen = new Set();
+  const original = S.data.length;
+  S.data = S.data.filter(row => {
+    const key = JSON.stringify(row);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const removed = original - S.data.length;
+  renderGrid();
+  updateStatus();
+  toast(`${removed}件の重複行を削除しました`, removed > 0 ? 'success' : 'info');
+}
+
+function addRow() {
+  saveState('行追加');
+  const newRow = new Array(S.headers.length).fill('');
+  if (S.selectedCell) {
+    S.data.splice(S.selectedCell.row + 1, 0, newRow);
+  } else {
+    S.data.push(newRow);
+  }
+  renderGrid();
+  updateStatus();
+  toast('行を追加しました', 'success');
+}
+
+function deleteSelectedRows() {
+  if (S.selectedRows.size === 0) {
+    toast('削除する行を選択してください', 'info');
+    return;
+  }
+  saveState('行削除');
+  const indices = Array.from(S.selectedRows).sort((a, b) => b - a);
+  indices.forEach(i => S.data.splice(i, 1));
+  S.selectedRows.clear();
+  S.selectedCell = null;
+  renderGrid();
+  updateStatus();
+  toast(`${indices.length}行を削除しました`, 'success');
+}
+
+function openAddColumnModal() {
+  document.getElementById('addColModal').classList.remove('hidden');
+  document.getElementById('newColName').value = '';
+  document.getElementById('newColName').focus();
+}
+function closeAddColumnModal() {
+  document.getElementById('addColModal').classList.add('hidden');
+}
+function doAddColumn() {
+  const name = document.getElementById('newColName').value.trim();
+  if (!name) { toast('列名を入力してください', 'error'); return; }
+  saveState('列追加');
+  S.headers.push(name);
+  S.data.forEach(row => row.push(''));
+  closeAddColumnModal();
+  renderGrid();
+  updateStatus();
+  toast(`列「${name}」を追加しました`, 'success');
+}
+
+function deleteSelectedColumn() {
+  if (S.selectedCol === null || S.selectedCol < 0) {
+    toast('削除する列のセルを選択してください', 'info');
+    return;
+  }
+  const colName = S.headers[S.selectedCol];
+  if (!confirm(`列「${colName}」を削除しますか?`)) return;
+  saveState('列削除');
+  S.headers.splice(S.selectedCol, 1);
+  S.data.forEach(row => row.splice(S.selectedCol, 1));
+  S.selectedCell = null;
+  S.selectedCol = null;
+  renderGrid();
+  updateStatus();
+  toast(`列「${colName}」を削除しました`, 'success');
+}
+
+// --- Search & Replace ---
+function toggleSearch() {
+  const bar = document.getElementById('searchBar');
+  const btn = document.getElementById('btnSearch');
+  if (bar.classList.contains('active')) {
+    closeSearch();
+  } else {
+    bar.classList.add('active');
+    btn.classList.add('active');
+    document.getElementById('searchInput').focus();
+  }
+}
+function closeSearch() {
+  document.getElementById('searchBar').classList.remove('active');
+  document.getElementById('btnSearch').classList.remove('active');
+  document.getElementById('searchInput').value = '';
+  document.getElementById('replaceInput').value = '';
+  document.getElementById('searchCount').textContent = '';
+  S.searchMatches = [];
+  renderBody();
+}
+
+function doSearch() {
+  const query = document.getElementById('searchInput').value;
+  S.searchMatches = [];
+  if (query) {
+    const lower = query.toLowerCase();
+    S.data.forEach((row, ri) => {
+      row.forEach((cell, ci) => {
+        if (cell.toLowerCase().includes(lower)) {
+          S.searchMatches.push({ row: ri, col: ci });
+        }
+      });
+    });
+  }
+  document.getElementById('searchCount').textContent = S.searchMatches.length > 0 ? `${S.searchMatches.length}件` : (query ? '0件' : '');
+  renderBody();
+}
+
+function doReplaceAll() {
+  const search = document.getElementById('searchInput').value;
+  const replace = document.getElementById('replaceInput').value;
+  if (!search) { toast('検索文字列を入力してください', 'info'); return; }
+
+  saveState('置換');
+  let count = 0;
+  S.data.forEach(row => {
+    row.forEach((cell, i) => {
+      if (cell.includes(search)) {
+        row[i] = cell.split(search).join(replace);
+        count++;
+      }
+    });
+  });
+  S.searchMatches = [];
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchCount').textContent = '';
+  renderBody();
+  toast(`${count}セルを置換しました`, count > 0 ? 'success' : 'info');
+}
+
+// --- Validation ---
+function toggleValidation() {
+  S.validateOpen = !S.validateOpen;
+  const panel = document.getElementById('validatePanel');
+  const btn = document.getElementById('btnValidate');
+  if (S.validateOpen) {
+    if (S.statsOpen) toggleStats();
+    panel.classList.add('open');
+    btn.classList.add('active');
+    runValidation();
+  } else {
+    panel.classList.remove('open');
+    btn.classList.remove('active');
+    S.issueMap = {};
+    renderBody();
+  }
+}
+
+async function runValidation() {
+  const content = document.getElementById('validateContent');
+  content.innerHTML = '<div class="pcsv-loading"><div class="pcsv-spinner"></div>検証中...</div>';
+
+  try {
+    const res = await fetch('/tools/csvtool/api/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ headers: S.headers, data: S.data }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || '検証失敗');
+
+    // Build issue map for cell highlighting
+    S.issueMap = {};
+    json.issues.forEach(issue => {
+      if (issue.col >= 0) {
+        const key = `${issue.row},${issue.col}`;
+        S.issueMap[key] = issue.severity;
+      } else {
+        // Row-level issue (duplicate), mark all cells
+        for (let c = 0; c < S.headers.length; c++) {
+          const key = `${issue.row},${c}`;
+          if (!S.issueMap[key]) S.issueMap[key] = issue.severity;
+        }
+      }
+    });
+    renderBody();
+
+    // Render panel
+    const summary = json.summary;
+    let html = '<div class="panel-section">';
+    html += '<div class="panel-section-title">サマリー</div>';
+    html += `<div class="panel-stat-row"><span class="label">総行数</span><span class="value">${summary.totalRows.toLocaleString()}</span></div>`;
+    html += `<div class="panel-stat-row"><span class="label">総列数</span><span class="value">${summary.totalColumns}</span></div>`;
+    html += `<div class="panel-stat-row"><span class="label">空欄セル</span><span class="value" style="color:${summary.emptyCells > 0 ? 'var(--pcsv-warning)' : 'inherit'}">${summary.emptyCells.toLocaleString()}</span></div>`;
+    html += `<div class="panel-stat-row"><span class="label">重複行</span><span class="value" style="color:${summary.duplicateRows > 0 ? 'var(--pcsv-error)' : 'inherit'}">${summary.duplicateRows}</span></div>`;
+    html += '</div>';
+
+    if (json.issues.length > 0) {
+      html += '<div class="panel-section">';
+      html += `<div class="panel-section-title">問題一覧 (${json.issues.length}件)</div>`;
+      const maxShow = 200;
+      const displayIssues = json.issues.slice(0, maxShow);
+      displayIssues.forEach(issue => {
+        const badge = issue.severity === 'error' ? '<div class="issue-badge error">E</div>' : '<div class="issue-badge warning">W</div>';
+        html += `<div class="issue-item" onclick="navigateToIssue(${issue.row}, ${issue.col})">${badge}<div class="issue-text">${escHtml(issue.message)}</div></div>`;
+      });
+      if (json.issues.length > maxShow) {
+        html += `<div style="text-align:center;padding:8px;color:var(--pcsv-text-muted);font-size:12px">... 他 ${json.issues.length - maxShow} 件</div>`;
+      }
+      html += '</div>';
+    } else {
+      html += '<div style="text-align:center;padding:20px;color:var(--pcsv-success);font-size:13px">問題は検出されませんでした</div>';
+    }
+
+    content.innerHTML = html;
+  } catch (err) {
+    content.innerHTML = `<div style="color:var(--pcsv-error);padding:16px">${escHtml(err.message)}</div>`;
+  }
+}
+
+function navigateToIssue(row, col) {
+  if (S.pageSize > 0) {
+    S.page = Math.floor(row / S.pageSize) + 1;
+  }
+  S.selectedCell = { row, col: Math.max(0, col) };
+  renderGrid();
+  updateSelectionStatus();
+
+  // Scroll to the cell
+  const { start } = getPageData();
+  const localRow = row - start;
+  const tbody = document.getElementById('tableTbody');
+  const tr = tbody.children[localRow];
+  if (tr) tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+// --- Stats Panel ---
+function toggleStats() {
+  S.statsOpen = !S.statsOpen;
+  const panel = document.getElementById('statsPanel');
+  const btn = document.getElementById('btnStats');
+  if (S.statsOpen) {
+    if (S.validateOpen) toggleValidation();
+    panel.classList.add('open');
+    btn.classList.add('active');
+    renderStats();
+  } else {
+    panel.classList.remove('open');
+    btn.classList.remove('active');
+  }
+}
+
+async function renderStats() {
+  const content = document.getElementById('statsContent');
+  content.innerHTML = '<div class="pcsv-loading"><div class="pcsv-spinner"></div>分析中...</div>';
+
+  try {
+    const res = await fetch('/tools/csvtool/api/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ headers: S.headers, data: S.data }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error);
+
+    let html = '<div class="panel-section"><div class="panel-section-title">概要</div>';
+    html += `<div class="panel-stat-row"><span class="label">行数</span><span class="value">${S.data.length.toLocaleString()}</span></div>`;
+    html += `<div class="panel-stat-row"><span class="label">列数</span><span class="value">${S.headers.length}</span></div>`;
+    html += '</div>';
+
+    html += '<div class="panel-section"><div class="panel-section-title">列別統計</div>';
+    S.headers.forEach(h => {
+      const st = json.columnStats[h];
+      if (!st) return;
+      const fillColor = st.fillRate >= 90 ? 'var(--pcsv-success)' : st.fillRate >= 50 ? 'var(--pcsv-warning)' : 'var(--pcsv-error)';
+      html += `<div class="col-stat-card">`;
+      html += `<div class="col-name">${escHtml(h)}</div>`;
+      html += `<div class="panel-stat-row"><span class="label">ユニーク値</span><span class="value">${st.unique}</span></div>`;
+      html += `<div class="panel-stat-row"><span class="label">空欄</span><span class="value">${st.empty}</span></div>`;
+      html += `<div class="panel-stat-row"><span class="label">充填率</span><span class="value" style="color:${fillColor}">${st.fillRate}%</span></div>`;
+      html += `<div class="col-stat-bar"><div class="fill" style="width:${st.fillRate}%;background:${fillColor}"></div></div>`;
+      html += `</div>`;
+    });
+    html += '</div>';
+
+    content.innerHTML = html;
+  } catch (err) {
+    content.innerHTML = `<div style="color:var(--pcsv-error);padding:16px">${escHtml(err.message)}</div>`;
+  }
+}
+
+// --- Download ---
+function openDownloadModal() {
+  document.getElementById('downloadModal').classList.remove('hidden');
+}
+function closeDownloadModal() {
+  document.getElementById('downloadModal').classList.add('hidden');
+}
+
+async function doDownload() {
+  const filename = document.getElementById('dlFilename').value.trim() || 'export.csv';
+  const encoding = document.getElementById('dlEncoding').value;
+  const delimiter = document.getElementById('dlDelimiter').value;
+
+  try {
+    const res = await fetch('/tools/csvtool/api/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        headers: S.headers,
+        data: S.data,
+        encoding,
+        delimiter,
+        filename,
+      }),
+    });
+    if (!res.ok) {
+      const json = await res.json();
+      throw new Error(json.error || 'ダウンロード失敗');
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    closeDownloadModal();
+    toast('ダウンロードしました', 'success');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// --- Status Bar ---
+function updateStatus() {
+  document.getElementById('statusRows').textContent = hasData()
+    ? `${S.data.length.toLocaleString()} 行 / ${S.headers.length} 列`
+    : 'データなし';
+  updateSelectionStatus();
+}
+
+// --- Keyboard Shortcuts ---
+function initKeyboard() {
+  document.addEventListener('keydown', e => {
+    // Don't intercept when editing or in modal inputs
+    const tag = (e.target.tagName || '').toLowerCase();
+    const isModalInput = e.target.closest('.pcsv-modal') || e.target.closest('.pcsv-search-inline');
+
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); doUndo(); return; }
+      if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); doRedo(); return; }
+      if (e.key === 'f' && hasData()) { e.preventDefault(); toggleSearch(); return; }
+      if (e.key === 's' && hasData()) { e.preventDefault(); openDownloadModal(); return; }
+    }
+
+    if (S.editing || tag === 'input' || tag === 'select' || tag === 'textarea') return;
+
+    if (!hasData() || !S.selectedCell) return;
+
+    const { row, col } = S.selectedCell;
+    if (e.key === 'ArrowUp' && row > 0) { e.preventDefault(); selectCell(row - 1, col); ensureCellVisible(row - 1, col); }
+    else if (e.key === 'ArrowDown' && row < S.data.length - 1) { e.preventDefault(); selectCell(row + 1, col); ensureCellVisible(row + 1, col); }
+    else if (e.key === 'ArrowLeft' && col > 0) { e.preventDefault(); selectCell(row, col - 1); }
+    else if (e.key === 'ArrowRight' && col < S.headers.length - 1) { e.preventDefault(); selectCell(row, col + 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); startEdit(row, col); }
+    else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      if (S.data[row][col] !== '') {
+        saveState('セル削除');
+        S.data[row][col] = '';
+        renderBody();
+      }
+    }
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // Start typing to replace cell content
+      saveState('セル編集');
+      S.data[row][col] = '';
+      renderBody();
+      startEdit(row, col);
+      // The typed character will be captured by the input
+    }
+  });
+}
+
+function ensureCellVisible(row, col) {
+  if (S.pageSize > 0) {
+    const targetPage = Math.floor(row / S.pageSize) + 1;
+    if (targetPage !== S.page) {
+      S.page = targetPage;
+      renderGrid();
+      return;
+    }
+  }
+  const { start } = getPageData();
+  const localRow = row - start;
+  const tbody = document.getElementById('tableTbody');
+  const tr = tbody.children[localRow];
+  if (tr) {
+    const td = tr.children[col + 1];
+    if (td) td.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+}
+
+// --- Utility ---
+function escHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// --- Init ---
+document.addEventListener('DOMContentLoaded', () => {
+  initUpload();
+  initKeyboard();
+
+  // Close modals on overlay click
+  document.querySelectorAll('.pcsv-modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay) overlay.classList.add('hidden');
+    });
+  });
+
+  // ESC to close modals
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.pcsv-modal-overlay').forEach(o => o.classList.add('hidden'));
+    }
+  });
+});
 </script>
 {% endblock %}
