@@ -1692,7 +1692,7 @@ async function uploadFile(file) {
     S.instant.rows=new Set(); S.instant.cols=new Set(); S.instant.cells={}; S.instant.calcHistory=[]; S.instant.calcNextId=1;
     S.views=[]; S.viewsNextId=1; S.currentView=null; S.journal=[]; S.journalHighlight=false;
     S.diffResult=null; S.bookmarks=[]; S.bookmarkNextId=1;
-    showEditor(); renderGrid(); updateStatus(); enableToolbar();
+    showEditor(); renderGrid(); updateStatus(); enableToolbar(); setTimeout(_checkToolbarLayout,100);
     toast(`${j.filename} を読み込みました (${j.totalRows.toLocaleString()}行)`,'success');
     document.getElementById('headerInfo').style.display='flex';
     document.getElementById('headerFilename').textContent=j.filename;
@@ -3741,23 +3741,42 @@ function gotoBookmark(id){
 
 // ========== Init ==========
 // Toolbar responsive: detect overflow and toggle 2-row mode
+let _tbCheckPending=false;
 function _checkToolbarLayout(){
-  const wrap=document.getElementById('toolbarWrap');
-  const row1=document.getElementById('toolbar');
-  if(!wrap||!row1) return;
-  // Temporarily show single-row mode to measure
-  wrap.classList.remove('two-rows');
-  // Check if row1 overflows (buttons are wider than container)
-  const needsTwoRows=row1.scrollWidth>row1.clientWidth+4;
-  if(needsTwoRows) wrap.classList.add('two-rows');
-  else wrap.classList.remove('two-rows');
+  if(_tbCheckPending) return;
+  _tbCheckPending=true;
+  requestAnimationFrame(()=>{
+    _tbCheckPending=false;
+    const wrap=document.getElementById('toolbarWrap');
+    const row1=document.getElementById('toolbar');
+    if(!wrap||!row1) return;
+    // To measure, we need all overflow items visible (1-row mode)
+    const wasTwoRows=wrap.classList.contains('two-rows');
+    if(wasTwoRows) wrap.classList.remove('two-rows');
+    // Force synchronous reflow
+    void row1.offsetWidth;
+    const sw=row1.scrollWidth, cw=row1.clientWidth;
+    const needsTwoRows=sw>cw+2;
+    if(needsTwoRows) wrap.classList.add('two-rows');
+    // else keep 1-row mode (already removed)
+  });
 }
 
 document.addEventListener('DOMContentLoaded',()=>{
   initUpload(); initKeyboard();
-  // Responsive toolbar
-  _checkToolbarLayout();
+  // Responsive toolbar - use ResizeObserver to detect container width changes
+  let _tbLastWidth=0;
+  const tbWrap=document.getElementById('toolbarWrap');
+  if(tbWrap&&window.ResizeObserver){
+    new ResizeObserver(entries=>{
+      const w=entries[0].contentRect.width;
+      if(Math.abs(w-_tbLastWidth)>2){_tbLastWidth=w;_checkToolbarLayout();}
+    }).observe(tbWrap);
+  }
+  // Fallback: also listen to window resize
   window.addEventListener('resize',_checkToolbarLayout);
+  // Initial check after a short delay to ensure layout is stable
+  setTimeout(_checkToolbarLayout,50);
   // Drag selection
   const gw=document.getElementById('gridWrap');
   if(gw){
