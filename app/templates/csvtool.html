@@ -1878,8 +1878,15 @@ function onFormulaInput() {
   S._fxRefPos=-1; S._fxRefEnd=-1; // reset ref tracking on manual typing
 }
 function onFormulaKey(e) {
-  if(e.key==='Enter'){e.preventDefault();S._fxRefPos=-1;S._fxRefEnd=-1;commitFormula();}
-  else if(e.key==='Escape'){e.preventDefault();S._fxRefPos=-1;S._fxRefEnd=-1;updateFormulaBar();document.getElementById('formulaInput').blur();}
+  if(e.key==='Enter'){
+    e.preventDefault(); S._fxRefPos=-1; S._fxRefEnd=-1;
+    commitFormula();
+    // 数式確定後: 範囲選択を解除し、フォーカスを外す
+    S.selRange=null; S.multiCells.clear();
+    document.getElementById('formulaInput').blur();
+    renderBody(); updateSelectionStatus();
+  }
+  else if(e.key==='Escape'){e.preventDefault();S._fxRefPos=-1;S._fxRefEnd=-1;updateFormulaBar();document.getElementById('formulaInput').blur();S.selRange=null;renderBody();}
   else{S._fxRefPos=-1;S._fxRefEnd=-1;} // reset ref tracking on manual typing
 }
 function commitFormula() {
