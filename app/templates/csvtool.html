@@ -649,6 +649,136 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* Range selection */
+  .pcsv-table td.in-range {
+    background: #dbeafe !important;
+  }
+  .pcsv-table td.range-top { border-top: 2px solid var(--pcsv-accent) !important; }
+  .pcsv-table td.range-bottom { border-bottom: 2px solid var(--pcsv-accent) !important; }
+  .pcsv-table td.range-left { border-left: 2px solid var(--pcsv-accent) !important; }
+  .pcsv-table td.range-right { border-right: 2px solid var(--pcsv-accent) !important; }
+  .pcsv-table thead th.col-highlight { background: #e0e7ff !important; }
+  .pcsv-table td.row-num.row-highlight { background: #e0e7ff !important; color: var(--pcsv-accent); }
+
+  /* Formula bar */
+  .pcsv-formula-bar {
+    display: none;
+    align-items: center;
+    height: 30px;
+    padding: 0 8px;
+    background: #fff;
+    border-bottom: 1px solid var(--pcsv-grid-border);
+    flex-shrink: 0;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .pcsv-formula-bar.visible { display: flex; }
+  .pcsv-formula-bar .cell-ref {
+    min-width: 100px;
+    padding: 0 8px;
+    height: 22px;
+    line-height: 22px;
+    background: var(--pcsv-grid-header);
+    border: 1px solid var(--pcsv-grid-border);
+    border-radius: 3px;
+    font-weight: 600;
+    font-size: 11px;
+    text-align: center;
+    color: var(--pcsv-text-muted);
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pcsv-formula-bar .fx-label {
+    font-style: italic;
+    color: #94a3b8;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .pcsv-formula-bar .formula-input {
+    flex: 1;
+    height: 22px;
+    border: 1px solid var(--pcsv-grid-border);
+    border-radius: 3px;
+    padding: 0 8px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+  }
+  .pcsv-formula-bar .formula-input:focus { border-color: var(--pcsv-accent); }
+
+  /* Context menu */
+  .pcsv-ctx-menu {
+    position: fixed;
+    z-index: 500;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+    min-width: 220px;
+    padding: 4px;
+    font-size: 12px;
+    animation: ctxIn 0.1s ease;
+    display: none;
+  }
+  .pcsv-ctx-menu.show { display: block; }
+  @keyframes ctxIn {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .pcsv-ctx-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--pcsv-text);
+    user-select: none;
+  }
+  .pcsv-ctx-item:hover { background: #f1f5f9; }
+  .pcsv-ctx-item .ctx-shortcut {
+    color: #94a3b8;
+    font-size: 10px;
+    margin-left: 20px;
+    font-family: system-ui;
+  }
+  .pcsv-ctx-item.danger { color: var(--pcsv-error); }
+  .pcsv-ctx-item.danger:hover { background: #fef2f2; }
+  .pcsv-ctx-item.disabled { color: #cbd5e1; pointer-events: none; }
+  .pcsv-ctx-sep { height: 1px; background: #e2e8f0; margin: 4px 0; }
+  .pcsv-ctx-group-title {
+    padding: 4px 12px 2px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    user-select: none;
+  }
+  .pcsv-ctx-sub { position: relative; }
+  .pcsv-ctx-sub > .pcsv-ctx-item::after {
+    content: '▸';
+    margin-left: 8px;
+    font-size: 10px;
+    color: #94a3b8;
+  }
+  .pcsv-ctx-submenu {
+    display: none;
+    position: absolute;
+    top: -4px;
+    left: calc(100% + 2px);
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+    min-width: 180px;
+    padding: 4px;
+    z-index: 501;
+  }
+  .pcsv-ctx-sub:hover > .pcsv-ctx-submenu { display: block; }
+
   /* Responsive - hide text on small screens */
   @media (max-width: 900px) {
     .pcsv-tb-btn .btn-text { display: none; }
@@ -723,6 +853,15 @@
       <span class="btn-text">重複削除</span>
     </button>
 
+    <button class="pcsv-tb-btn" id="btnEmptyRows" onclick="removeEmptyRows()" disabled title="空行を削除">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+      <span class="btn-text">空行削除</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnTranspose" onclick="transposeData()" disabled title="行と列を入れ替え">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 12l-4-4m4 4l4-4m6-4v12m0-12l4 4m-4-4l-4 4"/></svg>
+      <span class="btn-text">行列入替</span>
+    </button>
+
     <div class="pcsv-tb-sep"></div>
 
     <!-- Search -->
@@ -740,6 +879,11 @@
       </button>
     </div>
 
+    <button class="pcsv-tb-btn" id="btnGoto" onclick="openGotoModal()" disabled title="指定行へジャンプ (Ctrl+G)">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <span class="btn-text">GoTo</span>
+    </button>
+
     <div class="pcsv-tb-sep"></div>
 
     <!-- Panels -->
@@ -751,6 +895,14 @@
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
       <span class="btn-text">統計</span>
     </button>
+  </div>
+
+  <!-- Formula Bar -->
+  <div class="pcsv-formula-bar" id="formulaBar">
+    <span class="cell-ref" id="cellRef">-</span>
+    <span class="fx-label">fx</span>
+    <input type="text" class="formula-input" id="formulaInput" placeholder="セルを選択してください"
+      onkeydown="onFormulaKey(event)" onblur="commitFormula()">
   </div>
 
   <!-- Body -->
@@ -831,7 +983,9 @@
       <span id="statusRows">データなし</span>
     </div>
     <div class="status-right">
+      <span id="statusSummary" style="font-variant-numeric:tabular-nums"></span>
       <span id="statusSelection"></span>
+      <span id="statusCellInfo" style="font-variant-numeric:tabular-nums"></span>
       <span id="statusMode">待機中</span>
     </div>
   </div>
@@ -876,866 +1030,939 @@
   </div>
 </div>
 
+<!-- Go To Row Modal -->
+<div class="pcsv-modal-overlay hidden" id="gotoModal">
+  <div class="pcsv-modal" style="min-width:300px">
+    <h3>行へジャンプ</h3>
+    <label>行番号 (1 ~ <span id="gotoMax">0</span>)</label>
+    <input type="text" id="gotoRow" placeholder="行番号を入力" onkeydown="if(event.key==='Enter')doGoto()">
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeGotoModal()">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="doGoto()">ジャンプ</button>
+    </div>
+  </div>
+</div>
+
+<!-- Rename Column Modal -->
+<div class="pcsv-modal-overlay hidden" id="renameColModal">
+  <div class="pcsv-modal" style="min-width:320px">
+    <h3>列名を変更</h3>
+    <label>現在: <strong id="renameColOld"></strong></label>
+    <input type="text" id="renameColNew" placeholder="新しい列名" onkeydown="if(event.key==='Enter')doRenameCol()">
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('renameColModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="doRenameCol()">変更</button>
+    </div>
+  </div>
+</div>
+
+<!-- Split Column Modal -->
+<div class="pcsv-modal-overlay hidden" id="splitColModal">
+  <div class="pcsv-modal" style="min-width:340px">
+    <h3>列を分割</h3>
+    <label>対象列: <strong id="splitColName"></strong></label>
+    <label style="margin-top:8px">区切り文字</label>
+    <input type="text" id="splitDelimiter" value="," placeholder="例: , / - スペース">
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('splitColModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="doSplitCol()">分割</button>
+    </div>
+  </div>
+</div>
+
+<!-- Merge Columns Modal -->
+<div class="pcsv-modal-overlay hidden" id="mergeColModal">
+  <div class="pcsv-modal" style="min-width:380px">
+    <h3>列を結合</h3>
+    <label>結合する列を選択</label>
+    <div id="mergeColList" style="max-height:200px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:4px;padding:8px;margin-bottom:12px"></div>
+    <label>区切り文字</label>
+    <input type="text" id="mergeSeparator" value=" " placeholder="例: スペース , -">
+    <label>新しい列名</label>
+    <input type="text" id="mergeNewName" placeholder="結合後の列名">
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('mergeColModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="doMergeCols()">結合</button>
+    </div>
+  </div>
+</div>
+
+<!-- Fill Empty Cells Modal -->
+<div class="pcsv-modal-overlay hidden" id="fillModal">
+  <div class="pcsv-modal" style="min-width:340px">
+    <h3>空欄を埋める</h3>
+    <label>対象列: <strong id="fillColName"></strong></label>
+    <label style="margin-top:8px">埋める値</label>
+    <input type="text" id="fillValue" placeholder="空欄に入れる値" onkeydown="if(event.key==='Enter')doFillEmpty()">
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('fillModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="doFillEmpty()">実行</button>
+    </div>
+  </div>
+</div>
+
+<!-- Context Menu -->
+<div class="pcsv-ctx-menu" id="ctxMenu"></div>
+
 <!-- Toast container -->
 <div class="pcsv-toast-container" id="toastContainer"></div>
 
 
 <script>
-// ===== Power CSV Application =====
+// ===== Power CSV v2 - Full Feature Application =====
 
-// --- State ---
+// ========== State ==========
 const S = {
-  headers: [],
-  data: [],
-  filename: '',
-  encoding: '',
-  delimiter: ',',
-  // Pagination
-  page: 1,
-  pageSize: 100,
-  // Selection
-  selectedCell: null,   // {row, col} (data index)
-  selectedRows: new Set(),
-  selectedCol: null,
-  // Sort
-  sortCol: -1,
-  sortDir: 0,  // 0=none, 1=asc, 2=desc
-  // Search
+  headers: [], data: [], filename: '', encoding: '', delimiter: ',',
+  page: 1, pageSize: 100,
+  selectedCell: null, selectedRows: new Set(), selectedCol: null,
+  selRange: null, // {r1,c1,r2,c2} normalized
+  sortCol: -1, sortDir: 0,
   searchMatches: [],
-  // Undo/Redo
-  undoStack: [],
-  redoStack: [],
-  // Editing
+  undoStack: [], redoStack: [],
   editing: false,
-  // Panels
-  validateOpen: false,
-  statsOpen: false,
-  // Validation results
-  issueMap: {},  // "row,col" -> issue
+  validateOpen: false, statsOpen: false,
+  issueMap: {},
+  ctxTarget: null, // {type:'cell'|'row'|'col', row, col}
 };
-
 function hasData() { return S.headers.length > 0; }
 
-// --- Toast ---
-function toast(msg, type = 'info') {
-  const el = document.createElement('div');
-  el.className = 'pcsv-toast ' + type;
-  el.textContent = msg;
+// ========== Utilities ==========
+function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+function toast(msg, type='info') {
+  const el = document.createElement('div'); el.className='pcsv-toast '+type; el.textContent=msg;
   document.getElementById('toastContainer').appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, 2500);
-  setTimeout(() => el.remove(), 2900);
+  setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity 0.3s'},2500);
+  setTimeout(()=>el.remove(),2900);
+}
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+function normalizeRange(r1,c1,r2,c2) {
+  return { r1:Math.min(r1,r2), c1:Math.min(c1,c2), r2:Math.max(r1,r2), c2:Math.max(c1,c2) };
+}
+function isInRange(row,col) {
+  if(!S.selRange) return false;
+  const {r1,c1,r2,c2}=S.selRange;
+  return row>=r1 && row<=r2 && col>=c1 && col<=c2;
 }
 
-// --- Undo / Redo ---
+// ========== Undo / Redo ==========
 function saveState(label) {
-  S.undoStack.push({
-    label,
-    headers: JSON.parse(JSON.stringify(S.headers)),
-    data: JSON.parse(JSON.stringify(S.data)),
-  });
-  if (S.undoStack.length > 50) S.undoStack.shift();
-  S.redoStack = [];
-  updateUndoButtons();
+  S.undoStack.push({label,headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data))});
+  if(S.undoStack.length>50) S.undoStack.shift();
+  S.redoStack=[]; updateUndoButtons();
 }
-
 function doUndo() {
-  if (!S.undoStack.length) return;
-  const state = S.undoStack.pop();
-  S.redoStack.push({
-    label: 'redo',
-    headers: JSON.parse(JSON.stringify(S.headers)),
-    data: JSON.parse(JSON.stringify(S.data)),
-  });
-  S.headers = state.headers;
-  S.data = state.data;
-  updateUndoButtons();
-  renderGrid();
-  updateStatus();
-  toast('元に戻しました', 'info');
+  if(!S.undoStack.length) return;
+  const st=S.undoStack.pop();
+  S.redoStack.push({label:'redo',headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data))});
+  S.headers=st.headers; S.data=st.data; updateUndoButtons(); renderGrid(); updateStatus(); toast('元に戻しました');
 }
-
 function doRedo() {
-  if (!S.redoStack.length) return;
-  const state = S.redoStack.pop();
-  S.undoStack.push({
-    label: 'undo',
-    headers: JSON.parse(JSON.stringify(S.headers)),
-    data: JSON.parse(JSON.stringify(S.data)),
-  });
-  S.headers = state.headers;
-  S.data = state.data;
-  updateUndoButtons();
-  renderGrid();
-  updateStatus();
-  toast('やり直しました', 'info');
+  if(!S.redoStack.length) return;
+  const st=S.redoStack.pop();
+  S.undoStack.push({label:'undo',headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data))});
+  S.headers=st.headers; S.data=st.data; updateUndoButtons(); renderGrid(); updateStatus(); toast('やり直しました');
 }
-
 function updateUndoButtons() {
-  document.getElementById('btnUndo').disabled = !S.undoStack.length;
-  document.getElementById('btnRedo').disabled = !S.redoStack.length;
+  document.getElementById('btnUndo').disabled=!S.undoStack.length;
+  document.getElementById('btnRedo').disabled=!S.redoStack.length;
 }
 
-// --- File Upload ---
-function triggerUpload() {
-  document.getElementById('fileInput').click();
-}
-
+// ========== File Upload ==========
+function triggerUpload() { document.getElementById('fileInput').click(); }
 function initUpload() {
-  const zone = document.getElementById('uploadZone');
-  const input = document.getElementById('fileInput');
-
-  zone.addEventListener('click', () => input.click());
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-  zone.addEventListener('drop', e => {
-    e.preventDefault();
-    zone.classList.remove('dragover');
-    if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
-  });
-  input.addEventListener('change', () => {
-    if (input.files.length) uploadFile(input.files[0]);
-    input.value = '';
-  });
+  const zone=document.getElementById('uploadZone'), inp=document.getElementById('fileInput');
+  zone.addEventListener('click',()=>inp.click());
+  zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragover')});
+  zone.addEventListener('dragleave',()=>zone.classList.remove('dragover'));
+  zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('dragover');if(e.dataTransfer.files.length)uploadFile(e.dataTransfer.files[0])});
+  inp.addEventListener('change',()=>{if(inp.files.length)uploadFile(inp.files[0]);inp.value=''});
 }
-
 async function uploadFile(file) {
-  document.getElementById('statusMode').textContent = '読込中...';
-  const fd = new FormData();
-  fd.append('file', file);
-
+  document.getElementById('statusMode').textContent='読込中...';
+  const fd=new FormData(); fd.append('file',file);
   try {
-    const res = await fetch('/tools/csvtool/api/upload', { method: 'POST', body: fd });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || 'アップロード失敗');
-
-    S.headers = json.headers;
-    S.data = json.data;
-    S.filename = json.filename;
-    S.encoding = json.encoding;
-    S.delimiter = json.delimiter;
-    S.page = 1;
-    S.selectedCell = null;
-    S.selectedRows = new Set();
-    S.selectedCol = null;
-    S.sortCol = -1;
-    S.sortDir = 0;
-    S.undoStack = [];
-    S.redoStack = [];
-    S.issueMap = {};
-
-    showEditor();
-    renderGrid();
-    updateStatus();
-    enableToolbar();
-    toast(`${json.filename} を読み込みました (${json.totalRows.toLocaleString()}行)`, 'success');
-
-    // Update header info
-    document.getElementById('headerInfo').style.display = 'flex';
-    document.getElementById('headerFilename').textContent = json.filename;
-    document.getElementById('headerEncoding').textContent = json.encoding.toUpperCase();
-
-    // Set download filename
-    document.getElementById('dlFilename').value = json.filename;
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-  document.getElementById('statusMode').textContent = '準備完了';
+    const res=await fetch('/tools/csvtool/api/upload',{method:'POST',body:fd});
+    const j=await res.json(); if(!res.ok) throw new Error(j.error||'アップロード失敗');
+    S.headers=j.headers; S.data=j.data; S.filename=j.filename; S.encoding=j.encoding; S.delimiter=j.delimiter;
+    S.page=1; S.selectedCell=null; S.selectedRows=new Set(); S.selectedCol=null; S.selRange=null;
+    S.sortCol=-1; S.sortDir=0; S.undoStack=[]; S.redoStack=[]; S.issueMap={};
+    showEditor(); renderGrid(); updateStatus(); enableToolbar();
+    toast(`${j.filename} を読み込みました (${j.totalRows.toLocaleString()}行)`,'success');
+    document.getElementById('headerInfo').style.display='flex';
+    document.getElementById('headerFilename').textContent=j.filename;
+    document.getElementById('headerEncoding').textContent=j.encoding.toUpperCase();
+    document.getElementById('dlFilename').value=j.filename;
+  } catch(err) { toast(err.message,'error'); }
+  document.getElementById('statusMode').textContent='準備完了';
 }
-
 function showEditor() {
-  document.getElementById('uploadScreen').style.display = 'none';
-  const editor = document.getElementById('editorScreen');
-  editor.style.display = 'flex';
+  document.getElementById('uploadScreen').style.display='none';
+  document.getElementById('editorScreen').style.display='flex';
+  document.getElementById('formulaBar').classList.add('visible');
 }
-
 function enableToolbar() {
-  const btns = ['btnSave','btnAddRow','btnDelRow','btnAddCol','btnDelCol','btnTrim','btnDedup','btnSearch','btnValidate','btnStats'];
-  btns.forEach(id => document.getElementById(id).disabled = false);
+  ['btnSave','btnAddRow','btnDelRow','btnAddCol','btnDelCol','btnTrim','btnDedup',
+   'btnEmptyRows','btnTranspose','btnSearch','btnGoto','btnValidate','btnStats'
+  ].forEach(id=>document.getElementById(id).disabled=false);
   updateUndoButtons();
 }
 
-// --- Grid Rendering ---
+// ========== Grid Rendering ==========
 function getPageData() {
-  if (S.pageSize === 0) return { rows: S.data, start: 0, end: S.data.length };
-  const start = (S.page - 1) * S.pageSize;
-  const end = Math.min(start + S.pageSize, S.data.length);
-  return { rows: S.data.slice(start, end), start, end };
+  if(S.pageSize===0) return {rows:S.data,start:0,end:S.data.length};
+  const start=(S.page-1)*S.pageSize, end=Math.min(start+S.pageSize,S.data.length);
+  return {rows:S.data.slice(start,end),start,end};
 }
-
-function renderGrid() {
-  renderHeader();
-  renderBody();
-  renderPagination();
-}
-
+function renderGrid() { renderHeader(); renderBody(); renderPagination(); }
 function renderHeader() {
-  const thead = document.getElementById('tableThead');
-  let html = '<tr><th class="row-num">#</th>';
-  S.headers.forEach((h, i) => {
-    let sortClass = '';
-    let sortArrow = '<svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>';
-    if (S.sortCol === i) {
-      if (S.sortDir === 1) {
-        sortClass = 'asc';
-        sortArrow = '<svg class="sort-icon asc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>';
-      } else if (S.sortDir === 2) {
-        sortClass = 'desc';
-        sortArrow = '<svg class="sort-icon desc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>';
-      }
-    }
-    const escaped = escHtml(h);
-    html += `<th data-col="${i}" onclick="sortByCol(${i})" title="${escaped}"><div class="th-content"><span class="th-label">${escaped}</span>${sortArrow}</div></th>`;
+  const thead=document.getElementById('tableThead');
+  let h='<tr><th class="row-num">#</th>';
+  S.headers.forEach((hdr,i)=>{
+    let arrow='<svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>';
+    if(S.sortCol===i&&S.sortDir===1) arrow='<svg class="sort-icon asc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>';
+    else if(S.sortCol===i&&S.sortDir===2) arrow='<svg class="sort-icon desc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>';
+    const esc=escHtml(hdr);
+    const hl=(S.selectedCell&&S.selectedCell.col===i)||( S.selRange&&i>=S.selRange.c1&&i<=S.selRange.c2) ? ' col-highlight':'';
+    h+=`<th class="${hl}" data-col="${i}" onclick="sortByCol(${i})" oncontextmenu="onHeaderCtx(event,${i})" title="${esc}"><div class="th-content"><span class="th-label">${esc}</span>${arrow}</div></th>`;
   });
-  html += '</tr>';
-  thead.innerHTML = html;
+  h+='</tr>'; thead.innerHTML=h;
 }
-
 function renderBody() {
-  const { rows, start } = getPageData();
-  const tbody = document.getElementById('tableTbody');
-  let html = '';
-
-  for (let ri = 0; ri < rows.length; ri++) {
-    const dataIdx = start + ri;
-    const row = rows[ri];
-    const isRowSelected = S.selectedRows.has(dataIdx);
-    html += `<tr class="${isRowSelected ? 'row-selected' : ''}" data-ridx="${dataIdx}">`;
-    html += `<td class="row-num" onclick="toggleRowSelect(${dataIdx}, event)">${dataIdx + 1}</td>`;
-
-    for (let ci = 0; ci < S.headers.length; ci++) {
-      const val = ci < row.length ? row[ci] : '';
-      const isSelected = S.selectedCell && S.selectedCell.row === dataIdx && S.selectedCell.col === ci;
-      const issueKey = `${dataIdx},${ci}`;
-      let cls = '';
-      if (isSelected) cls += ' selected';
-      if (S.issueMap[issueKey]) {
-        const sev = S.issueMap[issueKey];
-        cls += sev === 'error' ? ' cell-error' : ' cell-warning';
+  const {rows,start}=getPageData(), tbody=document.getElementById('tableTbody');
+  let h='';
+  for(let ri=0;ri<rows.length;ri++){
+    const di=start+ri, row=rows[ri], isRS=S.selectedRows.has(di);
+    const rowHL=(S.selectedCell&&S.selectedCell.row===di)||(S.selRange&&di>=S.selRange.r1&&di<=S.selRange.r2);
+    h+=`<tr class="${isRS?'row-selected':''}" data-ridx="${di}">`;
+    h+=`<td class="row-num${rowHL?' row-highlight':''}" onclick="toggleRowSelect(${di},event)" oncontextmenu="onRowCtx(event,${di})">${di+1}</td>`;
+    for(let ci=0;ci<S.headers.length;ci++){
+      const val=ci<row.length?row[ci]:'';
+      const isSel=S.selectedCell&&S.selectedCell.row===di&&S.selectedCell.col===ci;
+      const ik=`${di},${ci}`;
+      let cls='';
+      if(isSel) cls+=' selected';
+      if(isInRange(di,ci)){
+        cls+=' in-range';
+        if(S.selRange){
+          if(di===S.selRange.r1) cls+=' range-top';
+          if(di===S.selRange.r2) cls+=' range-bottom';
+          if(ci===S.selRange.c1) cls+=' range-left';
+          if(ci===S.selRange.c2) cls+=' range-right';
+        }
       }
-      if (S.searchMatches.some(m => m.row === dataIdx && m.col === ci)) cls += ' cell-match';
-
-      html += `<td class="${cls}" data-ridx="${dataIdx}" data-cidx="${ci}" onclick="selectCell(${dataIdx},${ci})" ondblclick="startEdit(${dataIdx},${ci})">${escHtml(val)}</td>`;
+      if(S.issueMap[ik]) cls+=S.issueMap[ik]==='error'?' cell-error':' cell-warning';
+      if(S.searchMatches.some(m=>m.row===di&&m.col===ci)) cls+=' cell-match';
+      h+=`<td class="${cls}" data-ridx="${di}" data-cidx="${ci}" onclick="onCellClick(${di},${ci},event)" ondblclick="startEdit(${di},${ci})" oncontextmenu="onCellCtx(event,${di},${ci})">${escHtml(val)}</td>`;
     }
-    html += '</tr>';
+    h+='</tr>';
   }
-  tbody.innerHTML = html;
+  tbody.innerHTML=h;
 }
-
 function renderPagination() {
-  if (S.pageSize === 0) {
-    document.getElementById('pgInfo').textContent = `全 ${S.data.length.toLocaleString()} 行`;
-    document.getElementById('pgNumbers').innerHTML = '';
-    document.getElementById('pgPrev').disabled = true;
-    document.getElementById('pgNext').disabled = true;
-    return;
+  if(S.pageSize===0){
+    document.getElementById('pgInfo').textContent=`全 ${S.data.length.toLocaleString()} 行`;
+    document.getElementById('pgNumbers').innerHTML=''; document.getElementById('pgPrev').disabled=true; document.getElementById('pgNext').disabled=true; return;
   }
+  const tp=Math.max(1,Math.ceil(S.data.length/S.pageSize)); if(S.page>tp)S.page=tp;
+  const s=(S.page-1)*S.pageSize+1, e=Math.min(S.page*S.pageSize,S.data.length);
+  document.getElementById('pgInfo').textContent=`${s.toLocaleString()}-${e.toLocaleString()} / ${S.data.length.toLocaleString()} 行`;
+  document.getElementById('pgPrev').disabled=S.page<=1; document.getElementById('pgNext').disabled=S.page>=tp;
+  let nums='',mv=5,sp=Math.max(1,S.page-Math.floor(mv/2)),ep=Math.min(tp,sp+mv-1);
+  if(ep-sp<mv-1) sp=Math.max(1,ep-mv+1);
+  for(let p=sp;p<=ep;p++) nums+=`<button class="pcsv-pg-btn ${p===S.page?'active':''}" onclick="goToPage(${p})">${p}</button>`;
+  document.getElementById('pgNumbers').innerHTML=nums;
+}
+function prevPage(){if(S.page>1){S.page--;renderBody();renderPagination()}}
+function nextPage(){const tp=Math.ceil(S.data.length/S.pageSize);if(S.page<tp){S.page++;renderBody();renderPagination()}}
+function goToPage(p){S.page=p;renderBody();renderPagination()}
+function changePageSize(){S.pageSize=parseInt(document.getElementById('pgSize').value);S.page=1;renderBody();renderPagination()}
 
-  const totalPages = Math.max(1, Math.ceil(S.data.length / S.pageSize));
-  if (S.page > totalPages) S.page = totalPages;
-
-  const start = (S.page - 1) * S.pageSize + 1;
-  const end = Math.min(S.page * S.pageSize, S.data.length);
-  document.getElementById('pgInfo').textContent = `${start.toLocaleString()}-${end.toLocaleString()} / ${S.data.length.toLocaleString()} 行`;
-
-  document.getElementById('pgPrev').disabled = S.page <= 1;
-  document.getElementById('pgNext').disabled = S.page >= totalPages;
-
-  // Page numbers
-  let nums = '';
-  const maxVisible = 5;
-  let startPage = Math.max(1, S.page - Math.floor(maxVisible / 2));
-  let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-  if (endPage - startPage < maxVisible - 1) startPage = Math.max(1, endPage - maxVisible + 1);
-
-  for (let p = startPage; p <= endPage; p++) {
-    nums += `<button class="pcsv-pg-btn ${p === S.page ? 'active' : ''}" onclick="goToPage(${p})">${p}</button>`;
+// ========== Cell Selection & Range ==========
+function onCellClick(row,col,event) {
+  if(S.editing) return;
+  hideContextMenu();
+  if(event.shiftKey && S.selectedCell) {
+    S.selRange=normalizeRange(S.selectedCell.row,S.selectedCell.col,row,col);
+    renderGrid(); updateFormulaBar(); updateSelectionSummary(); updateSelectionStatus(); return;
   }
-  document.getElementById('pgNumbers').innerHTML = nums;
+  S.selRange=null; S.selectedCell={row,col}; S.selectedCol=col; S.selectedRows.clear();
+  renderGrid(); updateFormulaBar(); updateSelectionSummary(); updateSelectionStatus();
 }
-
-function prevPage() { if (S.page > 1) { S.page--; renderBody(); renderPagination(); } }
-function nextPage() {
-  const totalPages = Math.ceil(S.data.length / S.pageSize);
-  if (S.page < totalPages) { S.page++; renderBody(); renderPagination(); }
+function selectCell(row,col) {
+  if(S.editing) return;
+  S.selRange=null; S.selectedCell={row,col}; S.selectedCol=col;
+  renderGrid(); updateFormulaBar(); updateSelectionSummary(); updateSelectionStatus();
 }
-function goToPage(p) { S.page = p; renderBody(); renderPagination(); }
-function changePageSize() {
-  S.pageSize = parseInt(document.getElementById('pgSize').value);
-  S.page = 1;
-  renderBody();
-  renderPagination();
-}
-
-// --- Cell Selection ---
-function selectCell(row, col) {
-  if (S.editing) return;
-  S.selectedCell = { row, col };
-  S.selectedCol = col;
-  renderBody();
-  updateSelectionStatus();
-}
-
-function toggleRowSelect(idx, event) {
-  if (event && event.shiftKey && S.selectedRows.size > 0) {
-    const last = Math.max(...S.selectedRows);
-    const from = Math.min(last, idx);
-    const to = Math.max(last, idx);
-    for (let i = from; i <= to; i++) S.selectedRows.add(i);
-  } else if (event && (event.ctrlKey || event.metaKey)) {
-    if (S.selectedRows.has(idx)) S.selectedRows.delete(idx);
-    else S.selectedRows.add(idx);
+function toggleRowSelect(idx,event) {
+  if(event&&event.shiftKey&&S.selectedRows.size>0){
+    const last=Math.max(...S.selectedRows),from=Math.min(last,idx),to=Math.max(last,idx);
+    for(let i=from;i<=to;i++) S.selectedRows.add(i);
+  } else if(event&&(event.ctrlKey||event.metaKey)){
+    if(S.selectedRows.has(idx)) S.selectedRows.delete(idx); else S.selectedRows.add(idx);
   } else {
-    if (S.selectedRows.has(idx) && S.selectedRows.size === 1) S.selectedRows.clear();
-    else { S.selectedRows.clear(); S.selectedRows.add(idx); }
+    if(S.selectedRows.has(idx)&&S.selectedRows.size===1) S.selectedRows.clear();
+    else{S.selectedRows.clear();S.selectedRows.add(idx)}
   }
-  renderBody();
-  updateSelectionStatus();
+  renderBody(); updateSelectionStatus();
 }
-
+function selectAll() {
+  if(!hasData()) return;
+  S.selRange=normalizeRange(0,0,S.data.length-1,S.headers.length-1);
+  S.selectedCell={row:0,col:0};
+  renderGrid(); updateSelectionStatus(); updateSelectionSummary();
+}
 function updateSelectionStatus() {
-  const el = document.getElementById('statusSelection');
-  if (S.selectedRows.size > 0) {
-    el.textContent = `${S.selectedRows.size}行選択中`;
-  } else if (S.selectedCell) {
-    const colName = S.headers[S.selectedCell.col] || '';
-    el.textContent = `${S.selectedCell.row + 1}行 : ${colName}`;
-  } else {
-    el.textContent = '';
-  }
+  const el=document.getElementById('statusSelection');
+  if(S.selectedRows.size>0) el.textContent=`${S.selectedRows.size}行選択中`;
+  else if(S.selRange) {
+    const nr=S.selRange.r2-S.selRange.r1+1, nc=S.selRange.c2-S.selRange.c1+1;
+    el.textContent=`範囲: ${nr}行×${nc}列`;
+  } else if(S.selectedCell) {
+    el.textContent=`${S.selectedCell.row+1}行 : ${S.headers[S.selectedCell.col]||''}`;
+  } else el.textContent='';
+  // Cell info
+  const ci=document.getElementById('statusCellInfo');
+  if(S.selectedCell&&!S.selRange) {
+    const v=S.data[S.selectedCell.row]?.[S.selectedCell.col]||'';
+    ci.textContent=v?`${v.length}文字`:'';
+  } else ci.textContent='';
 }
 
-// --- Cell Editing ---
-function startEdit(row, col) {
-  S.editing = true;
-  S.selectedCell = { row, col };
-  const { start } = getPageData();
-  const localRow = row - start;
-  const tbody = document.getElementById('tableTbody');
-  const tr = tbody.children[localRow];
-  if (!tr) return;
-  const td = tr.children[col + 1]; // +1 for row number
-  if (!td) return;
+// ========== Formula Bar ==========
+function updateFormulaBar() {
+  const ref=document.getElementById('cellRef'), inp=document.getElementById('formulaInput');
+  if(S.selectedCell) {
+    ref.textContent=`${S.headers[S.selectedCell.col]||''} : ${S.selectedCell.row+1}`;
+    inp.value=S.data[S.selectedCell.row]?.[S.selectedCell.col]||'';
+  } else { ref.textContent='-'; inp.value=''; }
+}
+function onFormulaKey(e) {
+  if(e.key==='Enter'){e.preventDefault();commitFormula();}
+  else if(e.key==='Escape'){e.preventDefault();updateFormulaBar();document.getElementById('formulaInput').blur();}
+}
+function commitFormula() {
+  if(!S.selectedCell) return;
+  const v=document.getElementById('formulaInput').value;
+  const old=S.data[S.selectedCell.row]?.[S.selectedCell.col];
+  if(old!==v){saveState('数式バー編集');S.data[S.selectedCell.row][S.selectedCell.col]=v;renderBody();}
+}
 
-  const val = S.data[row][col] || '';
-  const input = document.createElement('input');
-  input.className = 'pcsv-cell-input';
-  input.value = val;
-
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { commitEdit(row, col, input.value); }
-    else if (e.key === 'Escape') { cancelEdit(); }
-    else if (e.key === 'Tab') {
-      e.preventDefault();
-      commitEdit(row, col, input.value);
-      const nextCol = e.shiftKey ? col - 1 : col + 1;
-      if (nextCol >= 0 && nextCol < S.headers.length) {
-        selectCell(row, nextCol);
-        startEdit(row, nextCol);
+// ========== Clipboard ==========
+async function doCopy() {
+  let text='';
+  if(S.selRange){
+    const{r1,c1,r2,c2}=S.selRange;
+    for(let r=r1;r<=r2;r++){const cells=[];for(let c=c1;c<=c2;c++)cells.push(S.data[r]?.[c]||'');text+=cells.join('\t')+'\n';}
+  } else if(S.selectedCell){text=S.data[S.selectedCell.row]?.[S.selectedCell.col]||'';}
+  else return;
+  try{await navigator.clipboard.writeText(text);toast('コピーしました');}catch(e){toast('コピーに失敗しました','error');}
+}
+async function doCut() {
+  await doCopy(); saveState('切り取り');
+  if(S.selRange){const{r1,c1,r2,c2}=S.selRange;for(let r=r1;r<=r2;r++)for(let c=c1;c<=c2;c++)if(S.data[r])S.data[r][c]='';}
+  else if(S.selectedCell)S.data[S.selectedCell.row][S.selectedCell.col]='';
+  renderBody(); toast('切り取りました');
+}
+async function doPaste() {
+  if(!S.selectedCell) return;
+  try{
+    const text=await navigator.clipboard.readText();
+    const rows=text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+    if(rows[rows.length-1]==='') rows.pop();
+    const parsed=rows.map(r=>r.split('\t'));
+    saveState('貼り付け');
+    const sr=S.selectedCell.row,sc=S.selectedCell.col;
+    for(let r=0;r<parsed.length;r++){
+      const tr=sr+r;
+      while(tr>=S.data.length) S.data.push(new Array(S.headers.length).fill(''));
+      for(let c=0;c<parsed[r].length;c++){
+        const tc=sc+c;
+        if(tc<S.headers.length) S.data[tr][tc]=parsed[r][c];
       }
     }
+    renderGrid(); updateStatus(); toast(`${parsed.length}行を貼り付けました`,'success');
+  }catch(e){toast('貼り付けに失敗しました','error');}
+}
+
+// ========== Cell Editing ==========
+function startEdit(row,col) {
+  S.editing=true; S.selectedCell={row,col};
+  const{start}=getPageData(), lr=row-start, tbody=document.getElementById('tableTbody');
+  const tr=tbody.children[lr]; if(!tr) return;
+  const td=tr.children[col+1]; if(!td) return;
+  const val=S.data[row][col]||'', input=document.createElement('input');
+  input.className='pcsv-cell-input'; input.value=val;
+  input.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){commitEdit(row,col,input.value);}
+    else if(e.key==='Escape'){cancelEdit();}
+    else if(e.key==='Tab'){e.preventDefault();commitEdit(row,col,input.value);
+      const nc=e.shiftKey?col-1:col+1;
+      if(nc>=0&&nc<S.headers.length){selectCell(row,nc);startEdit(row,nc);}
+    }
   });
-  input.addEventListener('blur', () => {
-    if (S.editing) commitEdit(row, col, input.value);
-  });
-
-  td.style.overflow = 'visible';
-  td.appendChild(input);
-  input.focus();
-  input.select();
-  document.getElementById('statusMode').textContent = '編集中';
+  input.addEventListener('blur',()=>{if(S.editing)commitEdit(row,col,input.value)});
+  td.style.overflow='visible'; td.appendChild(input); input.focus(); input.select();
+  document.getElementById('statusMode').textContent='編集中';
 }
-
-function commitEdit(row, col, newVal) {
-  const oldVal = S.data[row][col];
-  if (oldVal !== newVal) {
-    saveState('セル編集');
-    S.data[row][col] = newVal;
-  }
-  S.editing = false;
-  renderBody();
-  document.getElementById('statusMode').textContent = '準備完了';
+function commitEdit(row,col,newVal) {
+  const old=S.data[row][col]; if(old!==newVal){saveState('セル編集');S.data[row][col]=newVal;}
+  S.editing=false; renderBody(); updateFormulaBar();
+  document.getElementById('statusMode').textContent='準備完了';
 }
+function cancelEdit() {S.editing=false;renderBody();document.getElementById('statusMode').textContent='準備完了';}
 
-function cancelEdit() {
-  S.editing = false;
-  renderBody();
-  document.getElementById('statusMode').textContent = '準備完了';
-}
-
-// --- Sorting ---
+// ========== Sorting ==========
 function sortByCol(colIdx) {
-  if (S.sortCol === colIdx) {
-    S.sortDir = (S.sortDir + 1) % 3;
-  } else {
-    S.sortCol = colIdx;
-    S.sortDir = 1;
-  }
-
-  if (S.sortDir === 0) {
-    // No sort - restore original order is complex; just leave current
-    S.sortCol = -1;
-  } else {
+  if(S.sortCol===colIdx) S.sortDir=(S.sortDir+1)%3; else{S.sortCol=colIdx;S.sortDir=1;}
+  if(S.sortDir===0){S.sortCol=-1;} else {
     saveState('ソート');
-    const dir = S.sortDir === 1 ? 1 : -1;
-    S.data.sort((a, b) => {
-      const va = (a[colIdx] || '').toLowerCase();
-      const vb = (b[colIdx] || '').toLowerCase();
-      const na = parseFloat(va);
-      const nb = parseFloat(vb);
-      if (!isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
-      return va.localeCompare(vb, 'ja') * dir;
+    const dir=S.sortDir===1?1:-1;
+    S.data.sort((a,b)=>{
+      const va=(a[colIdx]||'').toLowerCase(),vb=(b[colIdx]||'').toLowerCase();
+      const na=parseFloat(va),nb=parseFloat(vb);
+      if(!isNaN(na)&&!isNaN(nb)) return (na-nb)*dir;
+      return va.localeCompare(vb,'ja')*dir;
     });
   }
-
-  S.selectedCell = null;
-  S.selectedRows.clear();
-  renderGrid();
+  S.selectedCell=null;S.selectedRows.clear();S.selRange=null;renderGrid();
 }
 
-// --- Data Operations ---
+// ========== Data Operations ==========
 function trimWhitespace() {
-  saveState('Trim');
-  let count = 0;
-  S.data.forEach(row => {
-    row.forEach((cell, i) => {
-      const trimmed = cell.trim();
-      if (trimmed !== cell) { row[i] = trimmed; count++; }
-    });
-  });
-  renderBody();
-  toast(`${count}セルの空白を除去しました`, count > 0 ? 'success' : 'info');
+  saveState('Trim'); let c=0;
+  S.data.forEach(r=>r.forEach((v,i)=>{const t=v.trim();if(t!==v){r[i]=t;c++}}));
+  renderBody(); toast(`${c}セルの空白を除去しました`,c>0?'success':'info');
 }
-
 function removeDuplicates() {
-  saveState('重複削除');
-  const seen = new Set();
-  const original = S.data.length;
-  S.data = S.data.filter(row => {
-    const key = JSON.stringify(row);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  const removed = original - S.data.length;
-  renderGrid();
-  updateStatus();
-  toast(`${removed}件の重複行を削除しました`, removed > 0 ? 'success' : 'info');
+  saveState('重複削除');const seen=new Set(),orig=S.data.length;
+  S.data=S.data.filter(r=>{const k=JSON.stringify(r);if(seen.has(k))return false;seen.add(k);return true;});
+  renderGrid();updateStatus();toast(`${orig-S.data.length}件の重複行を削除しました`,orig-S.data.length>0?'success':'info');
+}
+function removeEmptyRows() {
+  saveState('空行削除');const orig=S.data.length;
+  S.data=S.data.filter(r=>r.some(c=>c.trim()!==''));
+  const rm=orig-S.data.length; renderGrid();updateStatus();
+  toast(`${rm}件の空行を削除しました`,rm>0?'success':'info');
+}
+function transposeData() {
+  if(!hasData()) return; saveState('行列入替');
+  const newH=['列'+ (1)]; // first col becomes header source
+  // Actually: transpose means rows become columns and vice versa
+  const oldH=S.headers, oldD=S.data;
+  const newHeaders=[]; const newData=[];
+  // First column of new data = old headers
+  // New headers = Row1, Row2, ... or use first column as headers
+  // Simple transpose: include headers as first row
+  const allRows=[oldH,...oldD];
+  const numCols=allRows.reduce((m,r)=>Math.max(m,r.length),0);
+  const numRows=allRows.length;
+  // New: numCols rows, numRows columns
+  const tHeaders=[]; for(let i=0;i<numRows;i++) tHeaders.push(i===0?'ヘッダ':`行${i}`);
+  const tData=[];
+  for(let c=0;c<numCols;c++){
+    const newRow=[];
+    for(let r=0;r<numRows;r++) newRow.push(allRows[r]?.[c]||'');
+    tData.push(newRow);
+  }
+  S.headers=tHeaders; S.data=tData; S.selectedCell=null; S.selRange=null; S.selectedRows.clear();
+  renderGrid();updateStatus();toast('行と列を入れ替えました','success');
 }
 
+// ========== Row Operations ==========
 function addRow() {
-  saveState('行追加');
-  const newRow = new Array(S.headers.length).fill('');
-  if (S.selectedCell) {
-    S.data.splice(S.selectedCell.row + 1, 0, newRow);
-  } else {
-    S.data.push(newRow);
-  }
-  renderGrid();
-  updateStatus();
-  toast('行を追加しました', 'success');
+  saveState('行追加'); const nr=new Array(S.headers.length).fill('');
+  if(S.selectedCell) S.data.splice(S.selectedCell.row+1,0,nr); else S.data.push(nr);
+  renderGrid();updateStatus();toast('行を追加しました','success');
 }
-
+function insertRowAt(idx,above) {
+  saveState('行挿入'); const nr=new Array(S.headers.length).fill('');
+  S.data.splice(above?idx:idx+1,0,nr);
+  renderGrid();updateStatus();toast('行を挿入しました','success');
+}
+function duplicateRow(idx) {
+  if(idx<0||idx>=S.data.length) return;
+  saveState('行複製'); S.data.splice(idx+1,0,[...S.data[idx]]);
+  renderGrid();updateStatus();toast('行を複製しました','success');
+}
+function moveRowUp(idx) {
+  if(idx<=0) return; saveState('行移動');
+  [S.data[idx-1],S.data[idx]]=[S.data[idx],S.data[idx-1]];
+  if(S.selectedCell&&S.selectedCell.row===idx) S.selectedCell.row=idx-1;
+  renderGrid();toast('行を上に移動しました','success');
+}
+function moveRowDown(idx) {
+  if(idx>=S.data.length-1) return; saveState('行移動');
+  [S.data[idx],S.data[idx+1]]=[S.data[idx+1],S.data[idx]];
+  if(S.selectedCell&&S.selectedCell.row===idx) S.selectedCell.row=idx+1;
+  renderGrid();toast('行を下に移動しました','success');
+}
 function deleteSelectedRows() {
-  if (S.selectedRows.size === 0) {
-    toast('削除する行を選択してください', 'info');
-    return;
-  }
+  if(S.selectedRows.size===0){toast('削除する行を選択してください');return;}
   saveState('行削除');
-  const indices = Array.from(S.selectedRows).sort((a, b) => b - a);
-  indices.forEach(i => S.data.splice(i, 1));
-  S.selectedRows.clear();
-  S.selectedCell = null;
-  renderGrid();
-  updateStatus();
-  toast(`${indices.length}行を削除しました`, 'success');
+  Array.from(S.selectedRows).sort((a,b)=>b-a).forEach(i=>S.data.splice(i,1));
+  S.selectedRows.clear();S.selectedCell=null;renderGrid();updateStatus();
+  toast('行を削除しました','success');
+}
+function deleteRowAt(idx) {
+  saveState('行削除');S.data.splice(idx,1);S.selectedCell=null;S.selectedRows.clear();
+  renderGrid();updateStatus();toast('行を削除しました','success');
 }
 
-function openAddColumnModal() {
-  document.getElementById('addColModal').classList.remove('hidden');
-  document.getElementById('newColName').value = '';
-  document.getElementById('newColName').focus();
+// ========== Column Operations ==========
+function openAddColumnModal(){openModal('addColModal');document.getElementById('newColName').value='';document.getElementById('newColName').focus();}
+function closeAddColumnModal(){closeModal('addColModal');}
+function doAddColumn(){
+  const n=document.getElementById('newColName').value.trim();if(!n){toast('列名を入力してください','error');return;}
+  saveState('列追加');S.headers.push(n);S.data.forEach(r=>r.push(''));closeAddColumnModal();renderGrid();updateStatus();
+  toast(`列「${n}」を追加しました`,'success');
 }
-function closeAddColumnModal() {
-  document.getElementById('addColModal').classList.add('hidden');
+function insertColumnAt(colIdx,side) {
+  const pos=side==='left'?colIdx:colIdx+1;
+  const name=prompt('新しい列名を入力:');if(!name) return;
+  saveState('列挿入');S.headers.splice(pos,0,name.trim()||`列${pos+1}`);
+  S.data.forEach(r=>r.splice(pos,0,''));renderGrid();updateStatus();toast('列を挿入しました','success');
 }
-function doAddColumn() {
-  const name = document.getElementById('newColName').value.trim();
-  if (!name) { toast('列名を入力してください', 'error'); return; }
-  saveState('列追加');
-  S.headers.push(name);
-  S.data.forEach(row => row.push(''));
-  closeAddColumnModal();
-  renderGrid();
-  updateStatus();
-  toast(`列「${name}」を追加しました`, 'success');
-}
-
 function deleteSelectedColumn() {
-  if (S.selectedCol === null || S.selectedCol < 0) {
-    toast('削除する列のセルを選択してください', 'info');
-    return;
-  }
-  const colName = S.headers[S.selectedCol];
-  if (!confirm(`列「${colName}」を削除しますか?`)) return;
-  saveState('列削除');
-  S.headers.splice(S.selectedCol, 1);
-  S.data.forEach(row => row.splice(S.selectedCol, 1));
-  S.selectedCell = null;
-  S.selectedCol = null;
-  renderGrid();
-  updateStatus();
-  toast(`列「${colName}」を削除しました`, 'success');
+  if(S.selectedCol===null||S.selectedCol<0){toast('削除する列のセルを選択してください');return;}
+  deleteColumnAt(S.selectedCol);
+}
+function deleteColumnAt(colIdx) {
+  const cn=S.headers[colIdx]; if(!confirm(`列「${cn}」を削除しますか?`)) return;
+  saveState('列削除');S.headers.splice(colIdx,1);S.data.forEach(r=>r.splice(colIdx,1));
+  S.selectedCell=null;S.selectedCol=null;renderGrid();updateStatus();toast(`列「${cn}」を削除しました`,'success');
+}
+function duplicateColumn(colIdx) {
+  saveState('列複製');const cn=S.headers[colIdx]+'_copy';
+  S.headers.splice(colIdx+1,0,cn);S.data.forEach(r=>r.splice(colIdx+1,0,r[colIdx]||''));
+  renderGrid();updateStatus();toast('列を複製しました','success');
+}
+// Rename
+function openRenameCol(colIdx) {
+  S.ctxTarget={type:'col',col:colIdx};
+  document.getElementById('renameColOld').textContent=S.headers[colIdx];
+  document.getElementById('renameColNew').value=S.headers[colIdx];
+  openModal('renameColModal'); document.getElementById('renameColNew').focus();
+  document.getElementById('renameColNew').select();
+}
+function doRenameCol() {
+  const n=document.getElementById('renameColNew').value.trim();if(!n){toast('列名を入力してください','error');return;}
+  if(!S.ctxTarget) return; saveState('列名変更');
+  S.headers[S.ctxTarget.col]=n; closeModal('renameColModal'); renderGrid();
+  toast('列名を変更しました','success');
+}
+// Split
+function openSplitCol(colIdx) {
+  S.ctxTarget={type:'col',col:colIdx};
+  document.getElementById('splitColName').textContent=S.headers[colIdx];
+  document.getElementById('splitDelimiter').value=',';
+  openModal('splitColModal');document.getElementById('splitDelimiter').focus();
+}
+function doSplitCol() {
+  if(!S.ctxTarget) return;
+  const ci=S.ctxTarget.col, delim=document.getElementById('splitDelimiter').value;
+  if(!delim){toast('区切り文字を入力してください','error');return;}
+  saveState('列分割');
+  const maxParts=S.data.reduce((m,r)=>Math.max(m,(r[ci]||'').split(delim).length),0);
+  const baseName=S.headers[ci];
+  const newNames=[];for(let i=0;i<maxParts;i++) newNames.push(`${baseName}_${i+1}`);
+  // Replace original column with split columns
+  S.headers.splice(ci,1,...newNames);
+  S.data.forEach(r=>{
+    const parts=(r[ci]||'').split(delim);
+    const filled=[];for(let i=0;i<maxParts;i++) filled.push((parts[i]||'').trim());
+    r.splice(ci,1,...filled);
+  });
+  closeModal('splitColModal');renderGrid();updateStatus();
+  toast(`${maxParts}列に分割しました`,'success');
+}
+// Merge
+function openMergeCols() {
+  let html='';
+  S.headers.forEach((h,i)=>{
+    html+=`<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px;color:var(--pcsv-text)">
+      <input type="checkbox" value="${i}" class="merge-col-cb"> ${escHtml(h)}</label>`;
+  });
+  document.getElementById('mergeColList').innerHTML=html;
+  document.getElementById('mergeSeparator').value=' ';
+  document.getElementById('mergeNewName').value='';
+  openModal('mergeColModal');
+}
+function doMergeCols() {
+  const cbs=document.querySelectorAll('.merge-col-cb:checked');
+  const indices=Array.from(cbs).map(cb=>parseInt(cb.value));
+  if(indices.length<2){toast('2列以上選択してください','error');return;}
+  const sep=document.getElementById('mergeSeparator').value;
+  const newName=document.getElementById('mergeNewName').value.trim()||indices.map(i=>S.headers[i]).join('+');
+  saveState('列結合');
+  // Add merged column
+  S.headers.push(newName);
+  S.data.forEach(r=>{r.push(indices.map(i=>r[i]||'').join(sep));});
+  // Remove original columns (reverse order)
+  indices.sort((a,b)=>b-a).forEach(ci=>{S.headers.splice(ci,1);S.data.forEach(r=>r.splice(ci,1));});
+  closeModal('mergeColModal');renderGrid();updateStatus();
+  toast('列を結合しました','success');
+}
+// Fill empty
+function openFillEmpty(colIdx) {
+  S.ctxTarget={type:'col',col:colIdx};
+  document.getElementById('fillColName').textContent=S.headers[colIdx];
+  document.getElementById('fillValue').value='';
+  openModal('fillModal');document.getElementById('fillValue').focus();
+}
+function doFillEmpty() {
+  if(!S.ctxTarget) return;
+  const ci=S.ctxTarget.col, val=document.getElementById('fillValue').value;
+  saveState('空欄補填');let c=0;
+  S.data.forEach(r=>{if((r[ci]||'').trim()===''){r[ci]=val;c++;}});
+  closeModal('fillModal');renderBody();toast(`${c}セルを埋めました`,c>0?'success':'info');
 }
 
-// --- Search & Replace ---
-function toggleSearch() {
-  const bar = document.getElementById('searchBar');
-  const btn = document.getElementById('btnSearch');
-  if (bar.classList.contains('active')) {
-    closeSearch();
-  } else {
-    bar.classList.add('active');
-    btn.classList.add('active');
-    document.getElementById('searchInput').focus();
-  }
+// ========== Text Transforms ==========
+function transformColumn(colIdx,fn) {
+  saveState('テキスト変換');let c=0;
+  S.data.forEach(r=>{const old=r[colIdx]||'',nv=fn(old);if(nv!==old){r[colIdx]=nv;c++;}});
+  renderBody();toast(`${c}セルを変換しました`,c>0?'success':'info');
 }
-function closeSearch() {
+function colToUpperCase(ci){transformColumn(ci,s=>s.toUpperCase())}
+function colToLowerCase(ci){transformColumn(ci,s=>s.toLowerCase())}
+function colCapitalize(ci){transformColumn(ci,s=>s.replace(/\b\w/g,c=>c.toUpperCase()))}
+function colTrim(ci){transformColumn(ci,s=>s.trim())}
+
+// ========== Search & Replace ==========
+function toggleSearch(){
+  const bar=document.getElementById('searchBar'),btn=document.getElementById('btnSearch');
+  if(bar.classList.contains('active')) closeSearch();
+  else{bar.classList.add('active');btn.classList.add('active');document.getElementById('searchInput').focus();}
+}
+function closeSearch(){
   document.getElementById('searchBar').classList.remove('active');
   document.getElementById('btnSearch').classList.remove('active');
-  document.getElementById('searchInput').value = '';
-  document.getElementById('replaceInput').value = '';
-  document.getElementById('searchCount').textContent = '';
-  S.searchMatches = [];
+  document.getElementById('searchInput').value='';document.getElementById('replaceInput').value='';
+  document.getElementById('searchCount').textContent='';S.searchMatches=[];renderBody();
+}
+function doSearch(){
+  const q=document.getElementById('searchInput').value; S.searchMatches=[];
+  if(q){const l=q.toLowerCase();S.data.forEach((r,ri)=>r.forEach((c,ci)=>{if(c.toLowerCase().includes(l))S.searchMatches.push({row:ri,col:ci})}));}
+  document.getElementById('searchCount').textContent=S.searchMatches.length>0?`${S.searchMatches.length}件`:(q?'0件':'');
   renderBody();
 }
+function doReplaceAll(){
+  const s=document.getElementById('searchInput').value,r=document.getElementById('replaceInput').value;
+  if(!s){toast('検索文字列を入力してください');return;}
+  saveState('置換');let c=0;
+  S.data.forEach(row=>row.forEach((v,i)=>{if(v.includes(s)){row[i]=v.split(s).join(r);c++;}}));
+  S.searchMatches=[];document.getElementById('searchInput').value='';document.getElementById('searchCount').textContent='';
+  renderBody();toast(`${c}セルを置換しました`,c>0?'success':'info');
+}
 
-function doSearch() {
-  const query = document.getElementById('searchInput').value;
-  S.searchMatches = [];
-  if (query) {
-    const lower = query.toLowerCase();
-    S.data.forEach((row, ri) => {
-      row.forEach((cell, ci) => {
-        if (cell.toLowerCase().includes(lower)) {
-          S.searchMatches.push({ row: ri, col: ci });
-        }
+// ========== Context Menu ==========
+function hideContextMenu(){document.getElementById('ctxMenu').classList.remove('show');}
+function showContextMenu(e,items) {
+  e.preventDefault(); e.stopPropagation();
+  const menu=document.getElementById('ctxMenu');
+  let h='';
+  items.forEach(item=>{
+    if(item==='---') {h+='<div class="pcsv-ctx-sep"></div>';return;}
+    if(item.group){h+=`<div class="pcsv-ctx-group-title">${item.group}</div>`;return;}
+    if(item.sub){
+      h+=`<div class="pcsv-ctx-sub"><div class="pcsv-ctx-item">${escHtml(item.label)}</div><div class="pcsv-ctx-submenu">`;
+      item.sub.forEach(si=>{
+        h+=`<div class="pcsv-ctx-item" onclick="${si.action};hideContextMenu()">${escHtml(si.label)}</div>`;
       });
-    });
-  }
-  document.getElementById('searchCount').textContent = S.searchMatches.length > 0 ? `${S.searchMatches.length}件` : (query ? '0件' : '');
-  renderBody();
-}
-
-function doReplaceAll() {
-  const search = document.getElementById('searchInput').value;
-  const replace = document.getElementById('replaceInput').value;
-  if (!search) { toast('検索文字列を入力してください', 'info'); return; }
-
-  saveState('置換');
-  let count = 0;
-  S.data.forEach(row => {
-    row.forEach((cell, i) => {
-      if (cell.includes(search)) {
-        row[i] = cell.split(search).join(replace);
-        count++;
-      }
-    });
+      h+=`</div></div>`;return;
+    }
+    const dc=item.danger?' danger':'';const dis=item.disabled?' disabled':'';
+    const sc=item.shortcut?`<span class="ctx-shortcut">${item.shortcut}</span>`:'';
+    h+=`<div class="pcsv-ctx-item${dc}${dis}" onclick="${item.action};hideContextMenu()">${escHtml(item.label)}${sc}</div>`;
   });
-  S.searchMatches = [];
-  document.getElementById('searchInput').value = '';
-  document.getElementById('searchCount').textContent = '';
-  renderBody();
-  toast(`${count}セルを置換しました`, count > 0 ? 'success' : 'info');
+  menu.innerHTML=h;
+  menu.classList.add('show');
+  // Position
+  const mx=e.clientX,my=e.clientY;
+  menu.style.left=mx+'px';menu.style.top=my+'px';
+  // Adjust if overflows
+  requestAnimationFrame(()=>{
+    const rect=menu.getBoundingClientRect();
+    if(rect.right>window.innerWidth) menu.style.left=(mx-rect.width)+'px';
+    if(rect.bottom>window.innerHeight) menu.style.top=(my-rect.height)+'px';
+  });
 }
+function onCellCtx(e,row,col) {
+  S.selectedCell={row,col};S.selectedCol=col;renderBody();updateFormulaBar();
+  showContextMenu(e,[
+    {label:'コピー',action:'doCopy()',shortcut:'Ctrl+C'},
+    {label:'切り取り',action:'doCut()',shortcut:'Ctrl+X'},
+    {label:'貼り付け',action:'doPaste()',shortcut:'Ctrl+V'},
+    '---',
+    {label:'セルをクリア',action:`clearCell(${row},${col})`,shortcut:'Del'},
+    '---',
+    {group:'行操作'},
+    {label:'上に行を挿入',action:`insertRowAt(${row},true)`},
+    {label:'下に行を挿入',action:`insertRowAt(${row},false)`},
+    {label:'行を複製',action:`duplicateRow(${row})`},
+    {label:'行を上に移動',action:`moveRowUp(${row})`,shortcut:'Alt+↑'},
+    {label:'行を下に移動',action:`moveRowDown(${row})`,shortcut:'Alt+↓'},
+    {label:'行を削除',action:`deleteRowAt(${row})`,danger:true},
+    '---',
+    {group:'列操作'},
+    {label:'列名を変更',action:`openRenameCol(${col})`},
+    {label:'左に列を挿入',action:`insertColumnAt(${col},'left')`},
+    {label:'右に列を挿入',action:`insertColumnAt(${col},'right')`},
+    {label:'列を複製',action:`duplicateColumn(${col})`},
+    {label:'列を削除',action:`deleteColumnAt(${col})`,danger:true},
+    '---',
+    {label:'テキスト変換',sub:[
+      {label:'大文字に変換',action:`colToUpperCase(${col})`},
+      {label:'小文字に変換',action:`colToLowerCase(${col})`},
+      {label:'先頭を大文字に',action:`colCapitalize(${col})`},
+      {label:'前後空白を削除',action:`colTrim(${col})`},
+    ]},
+    {label:'列を分割...',action:`openSplitCol(${col})`},
+    {label:'列を結合...',action:'openMergeCols()'},
+    {label:'空欄を埋める...',action:`openFillEmpty(${col})`},
+  ]);
+}
+function onRowCtx(e,row) {
+  S.selectedRows.clear();S.selectedRows.add(row);renderBody();
+  showContextMenu(e,[
+    {label:'行を選択',action:`toggleRowSelect(${row},null)`},
+    '---',
+    {label:'上に行を挿入',action:`insertRowAt(${row},true)`},
+    {label:'下に行を挿入',action:`insertRowAt(${row},false)`},
+    {label:'行を複製',action:`duplicateRow(${row})`},
+    '---',
+    {label:'行を上に移動',action:`moveRowUp(${row})`,shortcut:'Alt+↑'},
+    {label:'行を下に移動',action:`moveRowDown(${row})`,shortcut:'Alt+↓'},
+    '---',
+    {label:'行を削除',action:`deleteRowAt(${row})`,danger:true},
+  ]);
+}
+function onHeaderCtx(e,col) {
+  e.stopPropagation();
+  showContextMenu(e,[
+    {label:'昇順でソート',action:`forceSortCol(${col},1)`},
+    {label:'降順でソート',action:`forceSortCol(${col},2)`},
+    '---',
+    {label:'列名を変更',action:`openRenameCol(${col})`},
+    {label:'列を複製',action:`duplicateColumn(${col})`},
+    {label:'左に列を挿入',action:`insertColumnAt(${col},'left')`},
+    {label:'右に列を挿入',action:`insertColumnAt(${col},'right')`},
+    '---',
+    {label:'テキスト変換',sub:[
+      {label:'大文字に変換',action:`colToUpperCase(${col})`},
+      {label:'小文字に変換',action:`colToLowerCase(${col})`},
+      {label:'先頭を大文字に',action:`colCapitalize(${col})`},
+      {label:'前後空白を削除',action:`colTrim(${col})`},
+    ]},
+    {label:'列を分割...',action:`openSplitCol(${col})`},
+    {label:'列を結合...',action:'openMergeCols()'},
+    {label:'空欄を埋める...',action:`openFillEmpty(${col})`},
+    '---',
+    {label:'列を削除',action:`deleteColumnAt(${col})`,danger:true},
+  ]);
+}
+function clearCell(r,c){if(S.data[r][c]!==''){saveState('セルクリア');S.data[r][c]='';renderBody();updateFormulaBar();}}
+function forceSortCol(ci,dir){saveState('ソート');S.sortCol=ci;S.sortDir=dir;
+  const d=dir===1?1:-1;S.data.sort((a,b)=>{const va=(a[ci]||'').toLowerCase(),vb=(b[ci]||'').toLowerCase();
+  const na=parseFloat(va),nb=parseFloat(vb);if(!isNaN(na)&&!isNaN(nb))return(na-nb)*d;return va.localeCompare(vb,'ja')*d;});
+  S.selectedCell=null;S.selectedRows.clear();S.selRange=null;renderGrid();}
 
-// --- Validation ---
-function toggleValidation() {
-  S.validateOpen = !S.validateOpen;
-  const panel = document.getElementById('validatePanel');
-  const btn = document.getElementById('btnValidate');
-  if (S.validateOpen) {
-    if (S.statsOpen) toggleStats();
-    panel.classList.add('open');
-    btn.classList.add('active');
-    runValidation();
-  } else {
-    panel.classList.remove('open');
-    btn.classList.remove('active');
-    S.issueMap = {};
-    renderBody();
+// ========== Selection Summary ==========
+function updateSelectionSummary() {
+  const el=document.getElementById('statusSummary');
+  let nums=[];
+  if(S.selRange){
+    const{r1,c1,r2,c2}=S.selRange;
+    for(let r=r1;r<=r2;r++) for(let c=c1;c<=c2;c++){const v=parseFloat(S.data[r]?.[c]);if(!isNaN(v))nums.push(v);}
   }
+  if(nums.length>=2){
+    const sum=nums.reduce((a,b)=>a+b,0);
+    const avg=sum/nums.length;
+    el.textContent=`SUM: ${sum.toLocaleString(undefined,{maximumFractionDigits:2})}  AVG: ${avg.toLocaleString(undefined,{maximumFractionDigits:2})}  COUNT: ${nums.length}`;
+  } else el.textContent='';
 }
 
-async function runValidation() {
-  const content = document.getElementById('validateContent');
-  content.innerHTML = '<div class="pcsv-loading"><div class="pcsv-spinner"></div>検証中...</div>';
+// ========== GoTo Row ==========
+function openGotoModal(){
+  document.getElementById('gotoMax').textContent=S.data.length;
+  document.getElementById('gotoRow').value='';openModal('gotoModal');document.getElementById('gotoRow').focus();
+}
+function closeGotoModal(){closeModal('gotoModal');}
+function doGoto(){
+  const v=parseInt(document.getElementById('gotoRow').value);
+  if(isNaN(v)||v<1||v>S.data.length){toast('有効な行番号を入力してください','error');return;}
+  closeGotoModal();
+  if(S.pageSize>0) S.page=Math.floor((v-1)/S.pageSize)+1;
+  S.selectedCell={row:v-1,col:0}; S.selRange=null;
+  renderGrid();updateSelectionStatus();updateFormulaBar();
+  const{start}=getPageData(),lr=v-1-start,tbody=document.getElementById('tableTbody');
+  const tr=tbody.children[lr]; if(tr) tr.scrollIntoView({block:'center',behavior:'smooth'});
+}
 
-  try {
-    const res = await fetch('/tools/csvtool/api/validate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ headers: S.headers, data: S.data }),
-    });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || '検証失敗');
-
-    // Build issue map for cell highlighting
-    S.issueMap = {};
-    json.issues.forEach(issue => {
-      if (issue.col >= 0) {
-        const key = `${issue.row},${issue.col}`;
-        S.issueMap[key] = issue.severity;
-      } else {
-        // Row-level issue (duplicate), mark all cells
-        for (let c = 0; c < S.headers.length; c++) {
-          const key = `${issue.row},${c}`;
-          if (!S.issueMap[key]) S.issueMap[key] = issue.severity;
-        }
-      }
+// ========== Validation ==========
+function toggleValidation(){
+  S.validateOpen=!S.validateOpen;
+  const panel=document.getElementById('validatePanel'),btn=document.getElementById('btnValidate');
+  if(S.validateOpen){if(S.statsOpen)toggleStats();panel.classList.add('open');btn.classList.add('active');runValidation();}
+  else{panel.classList.remove('open');btn.classList.remove('active');S.issueMap={};renderBody();}
+}
+async function runValidation(){
+  const content=document.getElementById('validateContent');
+  content.innerHTML='<div class="pcsv-loading"><div class="pcsv-spinner"></div>検証中...</div>';
+  try{
+    const res=await fetch('/tools/csvtool/api/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headers:S.headers,data:S.data})});
+    const j=await res.json();if(!res.ok)throw new Error(j.error||'検証失敗');
+    S.issueMap={};
+    j.issues.forEach(issue=>{
+      if(issue.col>=0){S.issueMap[`${issue.row},${issue.col}`]=issue.severity;}
+      else{for(let c=0;c<S.headers.length;c++){const k=`${issue.row},${c}`;if(!S.issueMap[k])S.issueMap[k]=issue.severity;}}
     });
     renderBody();
-
-    // Render panel
-    const summary = json.summary;
-    let html = '<div class="panel-section">';
-    html += '<div class="panel-section-title">サマリー</div>';
-    html += `<div class="panel-stat-row"><span class="label">総行数</span><span class="value">${summary.totalRows.toLocaleString()}</span></div>`;
-    html += `<div class="panel-stat-row"><span class="label">総列数</span><span class="value">${summary.totalColumns}</span></div>`;
-    html += `<div class="panel-stat-row"><span class="label">空欄セル</span><span class="value" style="color:${summary.emptyCells > 0 ? 'var(--pcsv-warning)' : 'inherit'}">${summary.emptyCells.toLocaleString()}</span></div>`;
-    html += `<div class="panel-stat-row"><span class="label">重複行</span><span class="value" style="color:${summary.duplicateRows > 0 ? 'var(--pcsv-error)' : 'inherit'}">${summary.duplicateRows}</span></div>`;
-    html += '</div>';
-
-    if (json.issues.length > 0) {
-      html += '<div class="panel-section">';
-      html += `<div class="panel-section-title">問題一覧 (${json.issues.length}件)</div>`;
-      const maxShow = 200;
-      const displayIssues = json.issues.slice(0, maxShow);
-      displayIssues.forEach(issue => {
-        const badge = issue.severity === 'error' ? '<div class="issue-badge error">E</div>' : '<div class="issue-badge warning">W</div>';
-        html += `<div class="issue-item" onclick="navigateToIssue(${issue.row}, ${issue.col})">${badge}<div class="issue-text">${escHtml(issue.message)}</div></div>`;
+    const sm=j.summary;
+    let h='<div class="panel-section"><div class="panel-section-title">サマリー</div>';
+    h+=`<div class="panel-stat-row"><span class="label">総行数</span><span class="value">${sm.totalRows.toLocaleString()}</span></div>`;
+    h+=`<div class="panel-stat-row"><span class="label">総列数</span><span class="value">${sm.totalColumns}</span></div>`;
+    h+=`<div class="panel-stat-row"><span class="label">空欄セル</span><span class="value" style="color:${sm.emptyCells>0?'var(--pcsv-warning)':'inherit'}">${sm.emptyCells.toLocaleString()}</span></div>`;
+    h+=`<div class="panel-stat-row"><span class="label">重複行</span><span class="value" style="color:${sm.duplicateRows>0?'var(--pcsv-error)':'inherit'}">${sm.duplicateRows}</span></div></div>`;
+    if(j.issues.length>0){
+      h+=`<div class="panel-section"><div class="panel-section-title">問題一覧 (${j.issues.length}件)</div>`;
+      j.issues.slice(0,200).forEach(issue=>{
+        const badge=issue.severity==='error'?'<div class="issue-badge error">E</div>':'<div class="issue-badge warning">W</div>';
+        h+=`<div class="issue-item" onclick="navigateToIssue(${issue.row},${issue.col})">${badge}<div class="issue-text">${escHtml(issue.message)}</div></div>`;
       });
-      if (json.issues.length > maxShow) {
-        html += `<div style="text-align:center;padding:8px;color:var(--pcsv-text-muted);font-size:12px">... 他 ${json.issues.length - maxShow} 件</div>`;
-      }
-      html += '</div>';
-    } else {
-      html += '<div style="text-align:center;padding:20px;color:var(--pcsv-success);font-size:13px">問題は検出されませんでした</div>';
-    }
-
-    content.innerHTML = html;
-  } catch (err) {
-    content.innerHTML = `<div style="color:var(--pcsv-error);padding:16px">${escHtml(err.message)}</div>`;
-  }
+      if(j.issues.length>200) h+=`<div style="text-align:center;padding:8px;color:var(--pcsv-text-muted);font-size:12px">... 他 ${j.issues.length-200} 件</div>`;
+      h+='</div>';
+    } else h+='<div style="text-align:center;padding:20px;color:var(--pcsv-success);font-size:13px">問題は検出されませんでした</div>';
+    content.innerHTML=h;
+  }catch(err){content.innerHTML=`<div style="color:var(--pcsv-error);padding:16px">${escHtml(err.message)}</div>`;}
+}
+function navigateToIssue(row,col){
+  if(S.pageSize>0) S.page=Math.floor(row/S.pageSize)+1;
+  S.selectedCell={row,col:Math.max(0,col)};renderGrid();updateSelectionStatus();
+  const{start}=getPageData(),lr=row-start,tbody=document.getElementById('tableTbody');
+  const tr=tbody.children[lr];if(tr)tr.scrollIntoView({block:'center',behavior:'smooth'});
 }
 
-function navigateToIssue(row, col) {
-  if (S.pageSize > 0) {
-    S.page = Math.floor(row / S.pageSize) + 1;
-  }
-  S.selectedCell = { row, col: Math.max(0, col) };
-  renderGrid();
-  updateSelectionStatus();
-
-  // Scroll to the cell
-  const { start } = getPageData();
-  const localRow = row - start;
-  const tbody = document.getElementById('tableTbody');
-  const tr = tbody.children[localRow];
-  if (tr) tr.scrollIntoView({ block: 'center', behavior: 'smooth' });
+// ========== Stats Panel ==========
+function toggleStats(){
+  S.statsOpen=!S.statsOpen;
+  const panel=document.getElementById('statsPanel'),btn=document.getElementById('btnStats');
+  if(S.statsOpen){if(S.validateOpen)toggleValidation();panel.classList.add('open');btn.classList.add('active');renderStats();}
+  else{panel.classList.remove('open');btn.classList.remove('active');}
 }
-
-// --- Stats Panel ---
-function toggleStats() {
-  S.statsOpen = !S.statsOpen;
-  const panel = document.getElementById('statsPanel');
-  const btn = document.getElementById('btnStats');
-  if (S.statsOpen) {
-    if (S.validateOpen) toggleValidation();
-    panel.classList.add('open');
-    btn.classList.add('active');
-    renderStats();
-  } else {
-    panel.classList.remove('open');
-    btn.classList.remove('active');
-  }
-}
-
-async function renderStats() {
-  const content = document.getElementById('statsContent');
-  content.innerHTML = '<div class="pcsv-loading"><div class="pcsv-spinner"></div>分析中...</div>';
-
-  try {
-    const res = await fetch('/tools/csvtool/api/validate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ headers: S.headers, data: S.data }),
+async function renderStats(){
+  const content=document.getElementById('statsContent');
+  content.innerHTML='<div class="pcsv-loading"><div class="pcsv-spinner"></div>分析中...</div>';
+  try{
+    const res=await fetch('/tools/csvtool/api/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headers:S.headers,data:S.data})});
+    const j=await res.json();if(!res.ok)throw new Error(j.error);
+    let h='<div class="panel-section"><div class="panel-section-title">概要</div>';
+    h+=`<div class="panel-stat-row"><span class="label">行数</span><span class="value">${S.data.length.toLocaleString()}</span></div>`;
+    h+=`<div class="panel-stat-row"><span class="label">列数</span><span class="value">${S.headers.length}</span></div></div>`;
+    h+='<div class="panel-section"><div class="panel-section-title">列別統計</div>';
+    S.headers.forEach(hdr=>{
+      const st=j.columnStats[hdr];if(!st)return;
+      const fc=st.fillRate>=90?'var(--pcsv-success)':st.fillRate>=50?'var(--pcsv-warning)':'var(--pcsv-error)';
+      h+=`<div class="col-stat-card"><div class="col-name">${escHtml(hdr)}</div>`;
+      h+=`<div class="panel-stat-row"><span class="label">ユニーク値</span><span class="value">${st.unique}</span></div>`;
+      h+=`<div class="panel-stat-row"><span class="label">空欄</span><span class="value">${st.empty}</span></div>`;
+      h+=`<div class="panel-stat-row"><span class="label">充填率</span><span class="value" style="color:${fc}">${st.fillRate}%</span></div>`;
+      h+=`<div class="col-stat-bar"><div class="fill" style="width:${st.fillRate}%;background:${fc}"></div></div></div>`;
     });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error);
-
-    let html = '<div class="panel-section"><div class="panel-section-title">概要</div>';
-    html += `<div class="panel-stat-row"><span class="label">行数</span><span class="value">${S.data.length.toLocaleString()}</span></div>`;
-    html += `<div class="panel-stat-row"><span class="label">列数</span><span class="value">${S.headers.length}</span></div>`;
-    html += '</div>';
-
-    html += '<div class="panel-section"><div class="panel-section-title">列別統計</div>';
-    S.headers.forEach(h => {
-      const st = json.columnStats[h];
-      if (!st) return;
-      const fillColor = st.fillRate >= 90 ? 'var(--pcsv-success)' : st.fillRate >= 50 ? 'var(--pcsv-warning)' : 'var(--pcsv-error)';
-      html += `<div class="col-stat-card">`;
-      html += `<div class="col-name">${escHtml(h)}</div>`;
-      html += `<div class="panel-stat-row"><span class="label">ユニーク値</span><span class="value">${st.unique}</span></div>`;
-      html += `<div class="panel-stat-row"><span class="label">空欄</span><span class="value">${st.empty}</span></div>`;
-      html += `<div class="panel-stat-row"><span class="label">充填率</span><span class="value" style="color:${fillColor}">${st.fillRate}%</span></div>`;
-      html += `<div class="col-stat-bar"><div class="fill" style="width:${st.fillRate}%;background:${fillColor}"></div></div>`;
-      html += `</div>`;
-    });
-    html += '</div>';
-
-    content.innerHTML = html;
-  } catch (err) {
-    content.innerHTML = `<div style="color:var(--pcsv-error);padding:16px">${escHtml(err.message)}</div>`;
-  }
+    h+='</div>'; content.innerHTML=h;
+  }catch(err){content.innerHTML=`<div style="color:var(--pcsv-error);padding:16px">${escHtml(err.message)}</div>`;}
 }
 
-// --- Download ---
-function openDownloadModal() {
-  document.getElementById('downloadModal').classList.remove('hidden');
-}
-function closeDownloadModal() {
-  document.getElementById('downloadModal').classList.add('hidden');
-}
-
-async function doDownload() {
-  const filename = document.getElementById('dlFilename').value.trim() || 'export.csv';
-  const encoding = document.getElementById('dlEncoding').value;
-  const delimiter = document.getElementById('dlDelimiter').value;
-
-  try {
-    const res = await fetch('/tools/csvtool/api/download', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        headers: S.headers,
-        data: S.data,
-        encoding,
-        delimiter,
-        filename,
-      }),
-    });
-    if (!res.ok) {
-      const json = await res.json();
-      throw new Error(json.error || 'ダウンロード失敗');
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    closeDownloadModal();
-    toast('ダウンロードしました', 'success');
-  } catch (err) {
-    toast(err.message, 'error');
-  }
+// ========== Download ==========
+function openDownloadModal(){openModal('downloadModal');}
+function closeDownloadModal(){closeModal('downloadModal');}
+async function doDownload(){
+  const fn=document.getElementById('dlFilename').value.trim()||'export.csv';
+  const enc=document.getElementById('dlEncoding').value,delim=document.getElementById('dlDelimiter').value;
+  try{
+    const res=await fetch('/tools/csvtool/api/download',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({headers:S.headers,data:S.data,encoding:enc,delimiter:delim,filename:fn})});
+    if(!res.ok){const j=await res.json();throw new Error(j.error||'ダウンロード失敗');}
+    const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download=fn;a.click();URL.revokeObjectURL(url);closeDownloadModal();toast('ダウンロードしました','success');
+  }catch(err){toast(err.message,'error');}
 }
 
-// --- Status Bar ---
-function updateStatus() {
-  document.getElementById('statusRows').textContent = hasData()
-    ? `${S.data.length.toLocaleString()} 行 / ${S.headers.length} 列`
-    : 'データなし';
+// ========== Status Bar ==========
+function updateStatus(){
+  document.getElementById('statusRows').textContent=hasData()?`${S.data.length.toLocaleString()} 行 / ${S.headers.length} 列`:'データなし';
   updateSelectionStatus();
 }
 
-// --- Keyboard Shortcuts ---
-function initKeyboard() {
-  document.addEventListener('keydown', e => {
-    // Don't intercept when editing or in modal inputs
-    const tag = (e.target.tagName || '').toLowerCase();
-    const isModalInput = e.target.closest('.pcsv-modal') || e.target.closest('.pcsv-search-inline');
+// ========== Navigation ==========
+function ensureCellVisible(row,col){
+  if(S.pageSize>0){const tp=Math.floor(row/S.pageSize)+1;if(tp!==S.page){S.page=tp;renderGrid();return;}}
+  const{start}=getPageData(),lr=row-start,tbody=document.getElementById('tableTbody');
+  const tr=tbody.children[lr];if(tr){const td=tr.children[col+1];if(td)td.scrollIntoView({block:'nearest',inline:'nearest'});}
+}
 
-    if (e.ctrlKey || e.metaKey) {
-      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); doUndo(); return; }
-      if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); doRedo(); return; }
-      if (e.key === 'f' && hasData()) { e.preventDefault(); toggleSearch(); return; }
-      if (e.key === 's' && hasData()) { e.preventDefault(); openDownloadModal(); return; }
+// ========== Keyboard Shortcuts ==========
+function initKeyboard(){
+  document.addEventListener('keydown',e=>{
+    const tag=(e.target.tagName||'').toLowerCase();
+    // Global shortcuts
+    if(e.ctrlKey||e.metaKey){
+      if(e.key==='z'&&!e.shiftKey){e.preventDefault();doUndo();return;}
+      if(e.key==='y'||(e.key==='z'&&e.shiftKey)){e.preventDefault();doRedo();return;}
+      if(e.key==='f'&&hasData()){e.preventDefault();toggleSearch();return;}
+      if(e.key==='s'&&hasData()){e.preventDefault();openDownloadModal();return;}
+      if(e.key==='g'&&hasData()){e.preventDefault();openGotoModal();return;}
+      if(e.key==='a'&&hasData()&&tag!=='input'&&tag!=='textarea'){e.preventDefault();selectAll();return;}
+      if(e.key==='c'&&hasData()&&tag!=='input'&&tag!=='textarea'){e.preventDefault();doCopy();return;}
+      if(e.key==='x'&&hasData()&&tag!=='input'&&tag!=='textarea'){e.preventDefault();doCut();return;}
+      if(e.key==='v'&&hasData()&&tag!=='input'&&tag!=='textarea'){e.preventDefault();doPaste();return;}
     }
-
-    if (S.editing || tag === 'input' || tag === 'select' || tag === 'textarea') return;
-
-    if (!hasData() || !S.selectedCell) return;
-
-    const { row, col } = S.selectedCell;
-    if (e.key === 'ArrowUp' && row > 0) { e.preventDefault(); selectCell(row - 1, col); ensureCellVisible(row - 1, col); }
-    else if (e.key === 'ArrowDown' && row < S.data.length - 1) { e.preventDefault(); selectCell(row + 1, col); ensureCellVisible(row + 1, col); }
-    else if (e.key === 'ArrowLeft' && col > 0) { e.preventDefault(); selectCell(row, col - 1); }
-    else if (e.key === 'ArrowRight' && col < S.headers.length - 1) { e.preventDefault(); selectCell(row, col + 1); }
-    else if (e.key === 'Enter') { e.preventDefault(); startEdit(row, col); }
-    else if (e.key === 'Delete' || e.key === 'Backspace') {
+    // Alt shortcuts
+    if(e.altKey&&S.selectedCell&&!S.editing&&tag!=='input'){
+      if(e.key==='ArrowUp'){e.preventDefault();moveRowUp(S.selectedCell.row);return;}
+      if(e.key==='ArrowDown'){e.preventDefault();moveRowDown(S.selectedCell.row);return;}
+    }
+    if(S.editing||tag==='input'||tag==='select'||tag==='textarea') return;
+    if(!hasData()||!S.selectedCell) return;
+    const{row,col}=S.selectedCell;
+    if(e.key==='ArrowUp'&&row>0){e.preventDefault();if(e.shiftKey){extendRange(row-1,col)}else{selectCell(row-1,col);}ensureCellVisible(row-1,col);}
+    else if(e.key==='ArrowDown'&&row<S.data.length-1){e.preventDefault();if(e.shiftKey){extendRange(row+1,col)}else{selectCell(row+1,col);}ensureCellVisible(row+1,col);}
+    else if(e.key==='ArrowLeft'&&col>0){e.preventDefault();if(e.shiftKey){extendRange(row,col-1)}else{selectCell(row,col-1);}}
+    else if(e.key==='ArrowRight'&&col<S.headers.length-1){e.preventDefault();if(e.shiftKey){extendRange(row,col+1)}else{selectCell(row,col+1);}}
+    else if(e.key==='Enter'){e.preventDefault();startEdit(row,col);}
+    else if(e.key==='Delete'||e.key==='Backspace'){
       e.preventDefault();
-      if (S.data[row][col] !== '') {
-        saveState('セル削除');
-        S.data[row][col] = '';
-        renderBody();
-      }
+      if(S.selRange){saveState('範囲クリア');const{r1,c1,r2,c2}=S.selRange;for(let r=r1;r<=r2;r++)for(let c=c1;c<=c2;c++)if(S.data[r])S.data[r][c]='';renderBody();}
+      else if(S.data[row][col]!==''){saveState('セル削除');S.data[row][col]='';renderBody();}
     }
-    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      // Start typing to replace cell content
-      saveState('セル編集');
-      S.data[row][col] = '';
-      renderBody();
-      startEdit(row, col);
-      // The typed character will be captured by the input
+    else if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
+      saveState('セル編集');S.data[row][col]='';renderBody();startEdit(row,col);
     }
   });
 }
-
-function ensureCellVisible(row, col) {
-  if (S.pageSize > 0) {
-    const targetPage = Math.floor(row / S.pageSize) + 1;
-    if (targetPage !== S.page) {
-      S.page = targetPage;
-      renderGrid();
-      return;
-    }
-  }
-  const { start } = getPageData();
-  const localRow = row - start;
-  const tbody = document.getElementById('tableTbody');
-  const tr = tbody.children[localRow];
-  if (tr) {
-    const td = tr.children[col + 1];
-    if (td) td.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }
+function extendRange(toRow,toCol){
+  if(!S.selectedCell) return;
+  S.selRange=normalizeRange(S.selectedCell.row,S.selectedCell.col,toRow,toCol);
+  renderGrid();updateSelectionStatus();updateSelectionSummary();
 }
 
-// --- Utility ---
-function escHtml(str) {
-  if (!str) return '';
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-// --- Init ---
-document.addEventListener('DOMContentLoaded', () => {
-  initUpload();
-  initKeyboard();
-
+// ========== Init ==========
+document.addEventListener('DOMContentLoaded',()=>{
+  initUpload(); initKeyboard();
   // Close modals on overlay click
-  document.querySelectorAll('.pcsv-modal-overlay').forEach(overlay => {
-    overlay.addEventListener('click', e => {
-      if (e.target === overlay) overlay.classList.add('hidden');
-    });
+  document.querySelectorAll('.pcsv-modal-overlay').forEach(ov=>{
+    ov.addEventListener('click',e=>{if(e.target===ov)ov.classList.add('hidden')});
   });
-
-  // ESC to close modals
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      document.querySelectorAll('.pcsv-modal-overlay').forEach(o => o.classList.add('hidden'));
-    }
+  // Global click to close context menu
+  document.addEventListener('click',()=>hideContextMenu());
+  // ESC
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){hideContextMenu();document.querySelectorAll('.pcsv-modal-overlay').forEach(o=>o.classList.add('hidden'));}
   });
+  // Prevent default context menu on the app
+  document.getElementById('pcsvApp').addEventListener('contextmenu',e=>{if(hasData())e.preventDefault()});
 });
 </script>
 {% endblock %}
