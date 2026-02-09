@@ -1,10 +1,32 @@
 from flask import Blueprint, render_template, request, send_file, jsonify
-import zipfile, os, tempfile, re
-from werkzeug.utils import secure_filename
+import zipfile, os, tempfile, re, unicodedata
 from datetime import datetime
 from flask_login import login_required
 
 rename_bp = Blueprint("rename", __name__, url_prefix="/tools/rename")
+
+
+def safe_filename(filename):
+    """secure_filename の日本語対応版。
+    パス区切り・制御文字・危険な文字を除去しつつ、
+    日本語などのUnicode文字はそのまま保持する。
+    """
+    # NFC正規化（濁点等の結合文字を統合）
+    filename = unicodedata.normalize("NFC", filename)
+    # ディレクトリ部分を除去（パストラバーサル防止）
+    filename = filename.replace("\\", "/")
+    filename = filename.split("/")[-1]
+    # 制御文字・ヌルバイト除去
+    filename = re.sub(r"[\x00-\x1f\x7f]", "", filename)
+    # OSで禁止される文字を除去  < > : " | ? *
+    filename = re.sub(r'[<>:"|?*]', "", filename)
+    # 先頭のドットを除去（隠しファイル防止）
+    filename = filename.lstrip(".")
+    # 空白のみ・空文字のフォールバック
+    filename = filename.strip()
+    if not filename:
+        filename = "unnamed"
+    return filename
 
 
 def apply_rename(filename, mode, opts, index):
@@ -122,9 +144,9 @@ def rename_tool():
 
     with zipfile.ZipFile(zip_path, "w") as zipf:
         for i, file in enumerate(files):
-            filename = secure_filename(file.filename)
+            filename = safe_filename(file.filename)
             new_name = apply_rename(filename, mode, opts, i)
-            new_name = secure_filename(new_name) if new_name else filename
+            new_name = safe_filename(new_name) if new_name else filename
 
             temp_file_path = os.path.join(temp_dir, new_name)
             file.save(temp_file_path)
@@ -148,9 +170,9 @@ def preview():
 
     results = []
     for i, fname in enumerate(filenames):
-        safe = secure_filename(fname)
+        safe = safe_filename(fname)
         new_name = apply_rename(safe, mode, opts, i)
-        new_name = secure_filename(new_name) if new_name else safe
+        new_name = safe_filename(new_name) if new_name else safe
         results.append({"original": fname, "safe": safe, "renamed": new_name})
 
     return jsonify(results)
