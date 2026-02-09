@@ -69,19 +69,35 @@
   }
 
   /* Toolbar */
+  .pcsv-toolbar-wrap {
+    flex-shrink: 0;
+    background: var(--pcsv-toolbar-bg);
+    border-bottom: 1px solid var(--pcsv-grid-border);
+    user-select: none;
+  }
   .pcsv-toolbar {
     display: flex;
     align-items: center;
-    height: 40px;
+    height: 36px;
     padding: 0 8px;
-    background: var(--pcsv-toolbar-bg);
-    border-bottom: 1px solid var(--pcsv-grid-border);
-    flex-shrink: 0;
     gap: 2px;
     overflow-x: auto;
-    user-select: none;
   }
   .pcsv-toolbar::-webkit-scrollbar { height: 0; }
+  .pcsv-toolbar-row2 {
+    display: none;
+    align-items: center;
+    height: 34px;
+    padding: 0 8px;
+    gap: 2px;
+    overflow-x: auto;
+    border-top: 1px solid #f1f5f9;
+    background: #f8fafc;
+  }
+  .pcsv-toolbar-row2::-webkit-scrollbar { height: 0; }
+  .pcsv-toolbar-wrap.two-rows .pcsv-toolbar-row2 { display: flex; }
+  .pcsv-toolbar-wrap.two-rows .pcsv-toolbar { border-bottom: none; }
+  .pcsv-toolbar-wrap.two-rows .tb-overflow { display: none !important; }
   .pcsv-tb-sep {
     width: 1px;
     height: 20px;
@@ -993,131 +1009,165 @@
   </div>
 
   <!-- Toolbar -->
-  <div class="pcsv-toolbar" id="toolbar">
-    <!-- File group -->
-    <button class="pcsv-tb-btn" onclick="triggerUpload()" title="CSVファイルを開く">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
-      <span class="btn-text">開く</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnSave" onclick="openDownloadModal()" disabled title="CSVとしてダウンロード (Ctrl+S)">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-      <span class="btn-text">保存</span>
-    </button>
+  <div class="pcsv-toolbar-wrap" id="toolbarWrap">
+    <!-- Row 1: Core editing -->
+    <div class="pcsv-toolbar" id="toolbar">
+      <!-- File group -->
+      <button class="pcsv-tb-btn" onclick="triggerUpload()" title="CSVファイルを開く">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+        <span class="btn-text">開く</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnSave" onclick="openDownloadModal()" disabled title="CSVとしてダウンロード (Ctrl+S)">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        <span class="btn-text">保存</span>
+      </button>
 
-    <div class="pcsv-tb-sep"></div>
+      <div class="pcsv-tb-sep"></div>
 
-    <!-- Edit group -->
-    <button class="pcsv-tb-btn" id="btnUndo" onclick="doUndo()" disabled title="元に戻す (Ctrl+Z)">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4"/></svg>
-      <span class="btn-text">戻す</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnRedo" onclick="doRedo()" disabled title="やり直し (Ctrl+Y)">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10H11a5 5 0 00-5 5v2m15-7l-4-4m4 4l-4 4"/></svg>
-      <span class="btn-text">やり直し</span>
-    </button>
+      <!-- Edit group -->
+      <button class="pcsv-tb-btn" id="btnUndo" onclick="doUndo()" disabled title="元に戻す (Ctrl+Z)">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4"/></svg>
+        <span class="btn-text">戻す</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnRedo" onclick="doRedo()" disabled title="やり直し (Ctrl+Y)">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10H11a5 5 0 00-5 5v2m15-7l-4-4m4 4l-4 4"/></svg>
+        <span class="btn-text">やり直し</span>
+      </button>
 
-    <div class="pcsv-tb-sep"></div>
+      <div class="pcsv-tb-sep"></div>
 
-    <!-- Row/Col group -->
-    <button class="pcsv-tb-btn" id="btnAddRow" onclick="addRow()" disabled title="行を追加">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m-6-6h12"/></svg>
-      <span class="btn-text">行追加</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnDelRow" onclick="deleteSelectedRows()" disabled title="選択行を削除">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg>
-      <span class="btn-text">行削除</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnAddCol" onclick="openAddColumnModal()" disabled title="列を追加">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"/></svg>
-      <span class="btn-text">列追加</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnDelCol" onclick="deleteSelectedColumn()" disabled title="選択列を削除">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-      <span class="btn-text">列削除</span>
-    </button>
+      <!-- Row/Col group -->
+      <button class="pcsv-tb-btn" id="btnAddRow" onclick="addRow()" disabled title="行を追加">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m-6-6h12"/></svg>
+        <span class="btn-text">行追加</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnDelRow" onclick="deleteSelectedRows()" disabled title="選択行を削除">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg>
+        <span class="btn-text">行削除</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnAddCol" onclick="openAddColumnModal()" disabled title="列を追加">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"/></svg>
+        <span class="btn-text">列追加</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnDelCol" onclick="deleteSelectedColumn()" disabled title="選択列を削除">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        <span class="btn-text">列削除</span>
+      </button>
 
-    <div class="pcsv-tb-sep"></div>
+      <div class="pcsv-tb-sep"></div>
 
-    <!-- Data ops group -->
-    <button class="pcsv-tb-btn" id="btnTrim" onclick="trimWhitespace()" disabled title="全セルの前後空白を削除">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8m-8 6h16"/></svg>
-      <span class="btn-text">Trim</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnDedup" onclick="removeDuplicates()" disabled title="重複行を削除">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-      <span class="btn-text">重複削除</span>
-    </button>
+      <!-- Data ops group -->
+      <button class="pcsv-tb-btn" id="btnTrim" onclick="trimWhitespace()" disabled title="全セルの前後空白を削除">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8m-8 6h16"/></svg>
+        <span class="btn-text">Trim</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnDedup" onclick="removeDuplicates()" disabled title="重複行を削除">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        <span class="btn-text">重複削除</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnEmptyRows" onclick="removeEmptyRows()" disabled title="空行を削除">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        <span class="btn-text">空行削除</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnTranspose" onclick="transposeData()" disabled title="行と列を入れ替え">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 12l-4-4m4 4l4-4m6-4v12m0-12l4 4m-4-4l-4 4"/></svg>
+        <span class="btn-text">行列入替</span>
+      </button>
 
-    <button class="pcsv-tb-btn" id="btnEmptyRows" onclick="removeEmptyRows()" disabled title="空行を削除">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-      <span class="btn-text">空行削除</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnTranspose" onclick="transposeData()" disabled title="行と列を入れ替え">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 12l-4-4m4 4l4-4m6-4v12m0-12l4 4m-4-4l-4 4"/></svg>
-      <span class="btn-text">行列入替</span>
-    </button>
+      <div class="pcsv-tb-sep"></div>
 
-    <div class="pcsv-tb-sep"></div>
+      <!-- Search -->
+      <button class="pcsv-tb-btn" id="btnSearch" onclick="toggleSearch()" disabled title="検索 (Ctrl+F)">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <span class="btn-text">検索</span>
+      </button>
+      <div class="pcsv-search-inline" id="searchBar">
+        <input type="text" class="pcsv-search-input" id="searchInput" placeholder="検索..." oninput="doSearch()">
+        <span class="search-count" id="searchCount"></span>
+        <input type="text" class="pcsv-replace-input" id="replaceInput" placeholder="置換...">
+        <button class="pcsv-tb-btn" onclick="doReplaceAll()" title="全て置換">全置換</button>
+        <button class="pcsv-tb-btn" onclick="closeSearch()" title="閉じる">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:14px;height:14px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <button class="pcsv-tb-btn" id="btnGoto" onclick="openGotoModal()" disabled title="指定行へジャンプ (Ctrl+G)">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span class="btn-text">GoTo</span>
+      </button>
 
-    <!-- Search -->
-    <button class="pcsv-tb-btn" id="btnSearch" onclick="toggleSearch()" disabled title="検索 (Ctrl+F)">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-      <span class="btn-text">検索</span>
-    </button>
-    <div class="pcsv-search-inline" id="searchBar">
-      <input type="text" class="pcsv-search-input" id="searchInput" placeholder="検索..." oninput="doSearch()">
-      <span class="search-count" id="searchCount"></span>
-      <input type="text" class="pcsv-replace-input" id="replaceInput" placeholder="置換...">
-      <button class="pcsv-tb-btn" onclick="doReplaceAll()" title="全て置換">全置換</button>
-      <button class="pcsv-tb-btn" onclick="closeSearch()" title="閉じる">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:14px;height:14px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      <!-- These items appear in row1 when wide, hidden when 2-row mode -->
+      <div class="pcsv-tb-sep tb-overflow"></div>
+      <button class="pcsv-tb-btn tb-overflow" id="btnValidate" onclick="toggleValidation()" disabled title="データ検証">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span class="btn-text">検証</span>
+      </button>
+      <button class="pcsv-tb-btn tb-overflow" id="btnStats" onclick="toggleStats()" disabled title="列統計">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        <span class="btn-text">統計</span>
+      </button>
+      <button class="pcsv-tb-btn tb-overflow" id="btnInstant" onclick="toggleInstantPanel()" disabled title="インスタント管理" style="color:#7c3aed">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        <span class="btn-text">⚡ instant</span>
+      </button>
+      <div class="pcsv-tb-sep tb-overflow"></div>
+      <button class="pcsv-tb-btn tb-overflow" id="btnDiff" onclick="openDiffModal()" disabled title="CSV Diff (ファイル比較)">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        <span class="btn-text">Diff</span>
+      </button>
+      <button class="pcsv-tb-btn tb-overflow" id="btnMerge" onclick="openMergeModal()" disabled title="CSVマージ (結合)">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        <span class="btn-text">マージ</span>
+      </button>
+      <button class="pcsv-tb-btn tb-overflow" id="btnBookmarks" onclick="toggleBookmarkPanel()" disabled title="ブックマーク">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+        <span class="btn-text">🔖</span>
+      </button>
+      <button class="pcsv-tb-btn tb-overflow" id="btnJournal" onclick="toggleJournalPanel()" disabled title="変更履歴">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span class="btn-text">履歴</span>
+      </button>
+      <button class="pcsv-tb-btn tb-overflow" id="btnViews" onclick="openViewSaveModal()" disabled title="ビューを保存 (仮想フィルタ)" style="color:#7c3aed">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+        <span class="btn-text">👁 View</span>
       </button>
     </div>
 
-    <button class="pcsv-tb-btn" id="btnGoto" onclick="openGotoModal()" disabled title="指定行へジャンプ (Ctrl+G)">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 9l3 3m0 0l-3 3m3-3H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      <span class="btn-text">GoTo</span>
-    </button>
-
-    <div class="pcsv-tb-sep"></div>
-
-    <!-- Panels -->
-    <button class="pcsv-tb-btn" id="btnValidate" onclick="toggleValidation()" disabled title="データ検証">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      <span class="btn-text">検証</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnStats" onclick="toggleStats()" disabled title="列統計">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-      <span class="btn-text">統計</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnInstant" onclick="toggleInstantPanel()" disabled title="インスタント管理" style="color:#7c3aed">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-      <span class="btn-text">⚡ instant</span>
-    </button>
-
-    <div class="pcsv-tb-sep"></div>
-
-    <!-- Advanced -->
-    <button class="pcsv-tb-btn" id="btnDiff" onclick="openDiffModal()" disabled title="CSV Diff (ファイル比較)">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-      <span class="btn-text">Diff</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnMerge" onclick="openMergeModal()" disabled title="CSVマージ (結合)">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-      <span class="btn-text">マージ</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnBookmarks" onclick="toggleBookmarkPanel()" disabled title="ブックマーク">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
-      <span class="btn-text">🔖</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnJournal" onclick="toggleJournalPanel()" disabled title="変更履歴">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      <span class="btn-text">履歴</span>
-    </button>
-    <button class="pcsv-tb-btn" id="btnViews" onclick="openViewSaveModal()" disabled title="ビューを保存 (仮想フィルタ)" style="color:#7c3aed">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-      <span class="btn-text">👁 View</span>
-    </button>
+    <!-- Row 2: Analysis & Advanced (shown when window is narrow) -->
+    <div class="pcsv-toolbar-row2" id="toolbarRow2">
+      <button class="pcsv-tb-btn" id="btnValidate2" onclick="toggleValidation()" disabled title="データ検証">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span class="btn-text">検証</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnStats2" onclick="toggleStats()" disabled title="列統計">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        <span class="btn-text">統計</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnInstant2" onclick="toggleInstantPanel()" disabled title="インスタント管理" style="color:#7c3aed">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        <span class="btn-text">⚡ instant</span>
+      </button>
+      <div class="pcsv-tb-sep"></div>
+      <button class="pcsv-tb-btn" id="btnDiff2" onclick="openDiffModal()" disabled title="CSV Diff (ファイル比較)">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        <span class="btn-text">Diff</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnMerge2" onclick="openMergeModal()" disabled title="CSVマージ (結合)">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        <span class="btn-text">マージ</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnBookmarks2" onclick="toggleBookmarkPanel()" disabled title="ブックマーク">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+        <span class="btn-text">🔖</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnJournal2" onclick="toggleJournalPanel()" disabled title="変更履歴">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span class="btn-text">履歴</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnViews2" onclick="openViewSaveModal()" disabled title="ビューを保存 (仮想フィルタ)" style="color:#7c3aed">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+        <span class="btn-text">👁 View</span>
+      </button>
+    </div>
   </div>
 
   <!-- Views Bar (A1) -->
@@ -1659,8 +1709,9 @@ function showEditor() {
 function enableToolbar() {
   ['btnSave','btnAddRow','btnDelRow','btnAddCol','btnDelCol','btnTrim','btnDedup',
    'btnEmptyRows','btnTranspose','btnSearch','btnGoto','btnValidate','btnStats','btnInstant',
-   'btnDiff','btnMerge','btnBookmarks','btnJournal','btnViews'
-  ].forEach(id=>document.getElementById(id).disabled=false);
+   'btnDiff','btnMerge','btnBookmarks','btnJournal','btnViews',
+   'btnValidate2','btnStats2','btnInstant2','btnDiff2','btnMerge2','btnBookmarks2','btnJournal2','btnViews2'
+  ].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=false;});
   updateUndoButtons();
 }
 
@@ -3689,8 +3740,24 @@ function gotoBookmark(id){
 }
 
 // ========== Init ==========
+// Toolbar responsive: detect overflow and toggle 2-row mode
+function _checkToolbarLayout(){
+  const wrap=document.getElementById('toolbarWrap');
+  const row1=document.getElementById('toolbar');
+  if(!wrap||!row1) return;
+  // Temporarily show single-row mode to measure
+  wrap.classList.remove('two-rows');
+  // Check if row1 overflows (buttons are wider than container)
+  const needsTwoRows=row1.scrollWidth>row1.clientWidth+4;
+  if(needsTwoRows) wrap.classList.add('two-rows');
+  else wrap.classList.remove('two-rows');
+}
+
 document.addEventListener('DOMContentLoaded',()=>{
   initUpload(); initKeyboard();
+  // Responsive toolbar
+  _checkToolbarLayout();
+  window.addEventListener('resize',_checkToolbarLayout);
   // Drag selection
   const gw=document.getElementById('gridWrap');
   if(gw){
