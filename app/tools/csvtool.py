@@ -1,122 +1,182 @@
-from flask import Blueprint, render_template, request, session, send_file, redirect, url_for
+from flask import Blueprint, render_template, request, session, send_file, jsonify
 import csv, os, tempfile
 import chardet
-from io import BytesIO, StringIO
+from io import StringIO
 from flask_login import login_required
 
 csvtool_bp = Blueprint("csvtool", __name__, url_prefix="/tools/csvtool")
 
-@csvtool_bp.route("/", methods=["GET", "POST"])
+
+@csvtool_bp.route("/")
 @login_required
 def csvtool():
-    if request.method == "GET":
-        return render_template("csvtool.html")
+    return render_template("csvtool.html")
 
-    file = request.files["csvfile"]
+
+@csvtool_bp.route("/api/upload", methods=["POST"])
+@login_required
+def api_upload():
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "ファイルが選択されていません"}), 400
+
     file_bytes = file.read()
-    detected_encoding = chardet.detect(file_bytes)
-    encoding = detected_encoding['encoding']
+    if not file_bytes:
+        return jsonify({"error": "ファイルが空です"}), 400
+
+    detected = chardet.detect(file_bytes)
+    encoding = detected.get("encoding") or "utf-8"
+    confidence = detected.get("confidence", 0)
+
+    decoded = None
+    used_encoding = encoding
+
+    encodings_to_try = [encoding, "utf-8", "utf-8-sig", "shift_jis", "cp932",
+                        "euc-jp", "iso-2022-jp", "latin-1"]
+    seen = set()
+    for enc in encodings_to_try:
+        if enc and enc.lower() not in seen:
+            seen.add(enc.lower())
+            try:
+                decoded = file_bytes.decode(enc)
+                used_encoding = enc
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+
+    if decoded is None:
+        return jsonify({"error": "エンコーディングの検出に失敗しました"}), 400
+
+    if decoded.startswith("\ufeff"):
+        decoded = decoded[1:]
 
     try:
-        decoded = file_bytes.decode(encoding)
-    except UnicodeDecodeError:
-        return "エンコーディングの読み込みに失敗しました。別のファイルを試してください。"
+        dialect = csv.Sniffer().sniff(decoded[:8192])
+        delimiter = dialect.delimiter
+    except csv.Error:
+        delimiter = ","
 
-    reader = csv.reader(StringIO(decoded))
+    reader = csv.reader(StringIO(decoded), delimiter=delimiter)
     rows = list(reader)
+
+    if not rows:
+        return jsonify({"error": "CSVにデータがありません"}), 400
+
+    rows = [r for r in rows if any(cell.strip() for cell in r)]
+    if not rows:
+        return jsonify({"error": "CSVにデータがありません"}), 400
+
     headers = rows[0]
     data = rows[1:]
+    col_count = len(headers)
+
+    normalized = []
+    for row in data:
+        if len(row) < col_count:
+            row = row + [""] * (col_count - len(row))
+        elif len(row) > col_count:
+            row = row[:col_count]
+        normalized.append(row)
+
+    return jsonify({
+        "headers": headers,
+        "data": normalized,
+        "encoding": used_encoding,
+        "confidence": round(confidence * 100, 1),
+        "delimiter": delimiter,
+        "totalRows": len(normalized),
+        "totalColumns": len(headers),
+        "filename": file.filename,
+    })
+
+
+@csvtool_bp.route("/api/download", methods=["POST"])
+@login_required
+def api_download():
+    payload = request.get_json()
+    if not payload:
+        return jsonify({"error": "データがありません"}), 400
+
+    headers = payload.get("headers", [])
+    data = payload.get("data", [])
+    encoding = payload.get("encoding", "utf-8-sig")
+    delimiter = payload.get("delimiter", ",")
+    filename = payload.get("filename", "power_csv_export.csv")
 
     temp_dir = tempfile.mkdtemp()
-    raw_path = os.path.join(temp_dir, "original.csv")
-    with open(raw_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+    output_path = os.path.join(temp_dir, "export.csv")
+
+    with open(output_path, "w", newline="", encoding=encoding) as f:
+        writer = csv.writer(f, delimiter=delimiter)
         writer.writerow(headers)
         writer.writerows(data)
 
-    session["csvtool_raw"] = raw_path
+    return send_file(output_path, as_attachment=True, download_name=filename)
 
-    return render_template("csvtool.html", headers=headers, preview=data[:20])
 
-@csvtool_bp.route("/process", methods=["POST"])
+@csvtool_bp.route("/api/validate", methods=["POST"])
 @login_required
-def csvtool_process():
-    raw_path = session.get("csvtool_raw")
-    if not raw_path or not os.path.exists(raw_path):
-        return redirect(url_for("csvtool.csvtool"))
+def api_validate():
+    payload = request.get_json()
+    if not payload:
+        return jsonify({"error": "データがありません"}), 400
 
-    trim = bool(request.form.get("trim"))
-    check_missing = bool(request.form.get("check_missing"))
-    check_duplicate = bool(request.form.get("check_duplicate"))
-    filter_str = request.form.get("filter", "").strip()
-    selected_columns = request.form.getlist("selected_columns")
-    headers_order = request.form.get("headers_order")
-
-    with open(raw_path, "r", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-
-    headers = rows[0]
-    data = rows[1:]
+    headers = payload.get("headers", [])
+    data = payload.get("data", [])
     issues = []
 
-    if trim:
-        data = [[cell.strip() for cell in row] for row in data]
+    col_stats = {}
+    for col_idx, header in enumerate(headers):
+        col_values = [row[col_idx] if col_idx < len(row) else "" for row in data]
+        non_empty = [v for v in col_values if v.strip()]
+        unique_values = set(non_empty)
+        empty_count = len(col_values) - len(non_empty)
+        col_stats[header] = {
+            "index": col_idx,
+            "total": len(col_values),
+            "empty": empty_count,
+            "unique": len(unique_values),
+            "fillRate": round((len(non_empty) / max(len(col_values), 1)) * 100, 1),
+        }
 
-    if check_missing:
-        for i, row in enumerate(data, 2):
-            if any(cell.strip() == "" for cell in row):
-                issues.append(f"{i}行目に空欄があります")
+    empty_cells = 0
+    for i, row in enumerate(data):
+        for j, cell in enumerate(row):
+            if j < len(headers) and cell.strip() == "":
+                issues.append({
+                    "type": "missing",
+                    "severity": "warning",
+                    "row": i,
+                    "col": j,
+                    "message": f"{i + 2}行目「{headers[j]}」が空欄",
+                })
+                empty_cells += 1
 
-    if check_duplicate:
-        seen = set()
-        for i, row in enumerate(data, 2):
-            row_tuple = tuple(row)
-            if row_tuple in seen:
-                issues.append(f"{i}行目が重複しています")
-            else:
-                seen.add(row_tuple)
+    seen = {}
+    duplicate_count = 0
+    for i, row in enumerate(data):
+        key = tuple(row)
+        if key in seen:
+            issues.append({
+                "type": "duplicate",
+                "severity": "error",
+                "row": i,
+                "col": -1,
+                "originalRow": seen[key],
+                "message": f"{i + 2}行目 → {seen[key] + 2}行目と重複",
+            })
+            duplicate_count += 1
+        else:
+            seen[key] = i
 
-    if headers_order:
-        import json
-        try:
-            order = json.loads(headers_order)
-            header_index = {h: i for i, h in enumerate(headers)}
-            headers = [h for h in order if h in header_index]
-            data = [[row[header_index[h]] for h in headers] for row in data]
-        except Exception as e:
-            issues.append(f"並び替え失敗: {str(e)}")
-
-    if selected_columns:
-        header_index = {h: i for i, h in enumerate(headers)}
-        headers = [h for h in headers if h in selected_columns]
-        data = [[row[header_index[h]] for h in headers] for row in data]
-
-    if filter_str:
-        data = [row for row in data if any(filter_str in cell for cell in row)]
-
-    temp_dir = tempfile.mkdtemp()
-    output_path = os.path.join(temp_dir, "cleaned.csv")
-    session["csvtool_download"] = output_path
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(headers)
-        writer.writerows(data)
-
-    return render_template("csvtool.html", headers=headers, preview=data[:20], issues=issues)
-
-@csvtool_bp.route("/download")
-@login_required
-def download():
-    path = session.get("csvtool_download")
-    if not path or not os.path.exists(path):
-        return redirect(url_for("csvtool.csvtool"))
-
-    with open(path, "r", encoding="utf-8") as infile:
-        content = infile.read()
-
-    temp_path = os.path.join(tempfile.mkdtemp(), "cleaned_with_bom.csv")
-    with open(temp_path, "w", newline="", encoding="utf-8-sig") as outfile:
-        outfile.write(content)
-
-    return send_file(temp_path, as_attachment=True, download_name="cleaned.csv")
+    return jsonify({
+        "issues": issues,
+        "summary": {
+            "totalRows": len(data),
+            "totalColumns": len(headers),
+            "emptyCells": empty_cells,
+            "duplicateRows": duplicate_count,
+            "issueCount": len(issues),
+        },
+        "columnStats": col_stats,
+    })
