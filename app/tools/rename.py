@@ -74,12 +74,6 @@ def apply_rename(filename, mode, opts, index):
         end = min(start + count, len(name))
         return name[:start] + name[end:] + ext
 
-    elif mode == "ext":
-        new_ext = opts.get("new_ext", "")
-        if new_ext and not new_ext.startswith("."):
-            new_ext = "." + new_ext
-        return name + new_ext
-
     elif mode == "custom":
         pattern = opts.get("custom_pattern", "{name}{ext}")
         try:
@@ -117,7 +111,6 @@ def rename_tool():
         "insert_text": request.form.get("insert_text", ""),
         "delete_start": int(request.form.get("delete_start", 0)),
         "delete_count": int(request.form.get("delete_count", 0)),
-        "new_ext": request.form.get("new_ext", ""),
         "custom_pattern": request.form.get("custom_pattern", "{name}{ext}"),
         "start_num": int(request.form.get("start_num", 1)),
         "zero_pad": int(request.form.get("zero_pad", 3)),

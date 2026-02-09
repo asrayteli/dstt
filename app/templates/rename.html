@@ -179,6 +179,70 @@
   }
   .token-chip:hover { background: var(--primary-dark); }
 
+  /* ===== Mode Description ===== */
+  .mode-desc {
+    margin-top: .75rem;
+    padding: .75rem 1rem;
+    background: var(--primary-bg);
+    border-left: 3px solid var(--primary);
+    border-radius: 0 .5rem .5rem 0;
+    font-size: .82rem;
+    color: var(--gray-700);
+    line-height: 1.65;
+    animation: slideDown .2s ease;
+  }
+  .mode-desc .desc-title {
+    font-weight: 700;
+    color: var(--primary-dark);
+    margin-bottom: .3rem;
+  }
+  .mode-desc .desc-example {
+    display: inline-block;
+    margin-top: .35rem;
+    padding: .2rem .6rem;
+    background: #fff;
+    border: 1px solid #bfdbfe;
+    border-radius: .35rem;
+    font-family: monospace;
+    font-size: .78rem;
+    color: var(--gray-600);
+  }
+  .mode-desc code {
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    border-radius: .25rem;
+    padding: .05rem .35rem;
+    font-size: .78rem;
+    color: var(--primary-dark);
+    font-family: monospace;
+  }
+
+  /* ===== Token Legend Table ===== */
+  .token-legend {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .78rem;
+    margin-bottom: .75rem;
+  }
+  .token-legend th {
+    text-align: left;
+    padding: .3rem .5rem;
+    background: var(--gray-100);
+    color: var(--gray-600);
+    font-weight: 600;
+    font-size: .72rem;
+  }
+  .token-legend td {
+    padding: .3rem .5rem;
+    border-top: 1px solid var(--gray-100);
+    color: var(--gray-700);
+  }
+  .token-legend .tok {
+    font-family: monospace;
+    color: var(--primary-dark);
+    font-weight: 600;
+  }
+
   /* ===== Common Options ===== */
   .common-opts {
     margin-top: 1rem;
@@ -385,14 +449,19 @@
           <div class="mode-btn" data-mode="delete">
             <span class="mode-icon">✂️</span> 削除
           </div>
-          <div class="mode-btn" data-mode="ext">
-            <span class="mode-icon">📎</span> 拡張子変更
-          </div>
           <div class="mode-btn" data-mode="custom">
             <span class="mode-icon">🛠️</span> カスタム
           </div>
         </div>
         <input type="hidden" name="mode" id="modeInput" value="sequential">
+
+        <!-- Mode Description Area -->
+        <div class="mode-desc" id="modeDesc">
+          <div class="desc-title">連番モード</div>
+          元のファイル名を無視し、指定した接頭語＋連番で統一的にリネームします。<br>
+          大量のファイルに通し番号を振りたいときに便利です。<br>
+          <span class="desc-example">例: 報告書.pdf, メモ.docx → file_001.pdf, file_002.docx</span>
+        </div>
       </div>
 
       <!-- Mode-specific options -->
@@ -402,21 +471,30 @@
         <input type="text" name="prefix" id="opt_prefix" placeholder="例: file_" value="file_">
       </div>
 
+      <!-- Date (no extra options needed beyond common) -->
+      <div class="opts-panel" id="opts-date" style="display:none;"></div>
+
       <!-- Replace -->
       <div class="opts-panel" id="opts-replace">
         <div class="opts-row">
-          <div><label>置換元</label><input type="text" name="search" id="opt_search" placeholder="検索する文字列"></div>
-          <div><label>置換先</label><input type="text" name="replace" id="opt_replace" placeholder="置き換える文字列"></div>
+          <div><label>置換元（この文字列を探す）</label><input type="text" name="search" id="opt_search" placeholder="例: old"></div>
+          <div><label>置換先（この文字列に変える）</label><input type="text" name="replace" id="opt_replace" placeholder="例: new"></div>
         </div>
       </div>
 
       <!-- Regex -->
       <div class="opts-panel" id="opts-regex">
         <div class="opts-row">
-          <div><label>正規表現パターン</label><input type="text" name="regex_pattern" id="opt_regex_pattern" placeholder="例: (\d+)"></div>
-          <div><label>置換文字列</label><input type="text" name="regex_replace" id="opt_regex_replace" placeholder="例: file_\1"></div>
+          <div><label>正規表現パターン</label><input type="text" name="regex_pattern" id="opt_regex_pattern" placeholder="例: (\d{4})(\d{2})(\d{2})"></div>
+          <div><label>置換文字列</label><input type="text" name="regex_replace" id="opt_regex_replace" placeholder="例: \1-\2-\3"></div>
         </div>
       </div>
+
+      <!-- Append Sequential (no extra options) -->
+      <div class="opts-panel" id="opts-append-sequential" style="display:none;"></div>
+
+      <!-- Append Date (no extra options) -->
+      <div class="opts-panel" id="opts-append-date" style="display:none;"></div>
 
       <!-- Case -->
       <div class="opts-panel" id="opts-case">
@@ -424,7 +502,7 @@
         <select name="case_type" id="opt_case_type">
           <option value="lower">全て小文字</option>
           <option value="upper">全て大文字</option>
-          <option value="title">タイトルケース</option>
+          <option value="title">タイトルケース（単語の先頭を大文字）</option>
           <option value="ext_lower">拡張子のみ小文字</option>
           <option value="ext_upper">拡張子のみ大文字</option>
         </select>
@@ -434,27 +512,34 @@
       <div class="opts-panel" id="opts-insert">
         <div class="opts-row">
           <div><label>挿入位置（0=先頭, -1=末尾手前）</label><input type="number" name="insert_pos" id="opt_insert_pos" value="0"></div>
-          <div><label>挿入するテキスト</label><input type="text" name="insert_text" id="opt_insert_text" placeholder="挿入する文字列"></div>
+          <div><label>挿入するテキスト</label><input type="text" name="insert_text" id="opt_insert_text" placeholder="例: v2_"></div>
         </div>
       </div>
 
       <!-- Delete -->
       <div class="opts-panel" id="opts-delete">
         <div class="opts-row">
-          <div><label>開始位置（0=先頭）</label><input type="number" name="delete_start" id="opt_delete_start" value="0"></div>
+          <div><label>開始位置（0=先頭から数えて何文字目）</label><input type="number" name="delete_start" id="opt_delete_start" value="0"></div>
           <div><label>削除文字数</label><input type="number" name="delete_count" id="opt_delete_count" value="0"></div>
         </div>
       </div>
 
-      <!-- Extension -->
-      <div class="opts-panel" id="opts-ext">
-        <label>新しい拡張子</label>
-        <input type="text" name="new_ext" id="opt_new_ext" placeholder="例: .pdf">
-      </div>
-
       <!-- Custom Pattern -->
       <div class="opts-panel" id="opts-custom">
-        <label>利用可能なトークン（クリックで挿入）</label>
+        <label>トークン一覧（クリックでパターン欄に挿入できます）</label>
+        <table class="token-legend">
+          <thead><tr><th>トークン</th><th>意味</th><th>例（元ファイル: Report_2025.pdf）</th></tr></thead>
+          <tbody>
+            <tr><td class="tok">{name}</td><td>拡張子を除いたファイル名</td><td>Report_2025</td></tr>
+            <tr><td class="tok">{ext}</td><td>拡張子（ドット付き）</td><td>.pdf</td></tr>
+            <tr><td class="tok">{num}</td><td>ゼロ埋め連番（共通オプションで桁数変更可）</td><td>001, 002, 003...</td></tr>
+            <tr><td class="tok">{date}</td><td>今日の日付（共通オプションでフォーマット変更可）</td><td>20260209</td></tr>
+            <tr><td class="tok">{original}</td><td>元のファイル名（拡張子込み）</td><td>Report_2025.pdf</td></tr>
+            <tr><td class="tok">{upper}</td><td>ファイル名を大文字に変換</td><td>REPORT_2025</td></tr>
+            <tr><td class="tok">{lower}</td><td>ファイル名を小文字に変換</td><td>report_2025</td></tr>
+            <tr><td class="tok">{i}</td><td>0始まりの連番インデックス</td><td>0, 1, 2...</td></tr>
+          </tbody>
+        </table>
         <div class="token-chips" id="tokenChips">
           <span class="token-chip" data-token="{name}">{name}</span>
           <span class="token-chip" data-token="{ext}">{ext}</span>
@@ -530,6 +615,70 @@
   let filesArray = [];
   let previewTimer = null;
 
+  // ===== Mode Descriptions =====
+  const modeDescriptions = {
+    'sequential': {
+      title: '連番モード',
+      text: '元のファイル名を無視し、指定した接頭語＋連番で統一的にリネームします。<br>大量のファイルに通し番号を振りたいときに便利です。',
+      example: '例: 報告書.pdf, メモ.docx → file_001.pdf, file_002.docx'
+    },
+    'date': {
+      title: '日付＋連番モード',
+      text: '今日の日付と連番を組み合わせてリネームします。<br>日報や議事録など、日付で管理したいファイルに最適です。',
+      example: '例: 報告書.pdf → 20260209_001.pdf'
+    },
+    'replace': {
+      title: '文字列置換モード',
+      text: 'ファイル名に含まれる特定の文字列を、別の文字列に置き換えます。<br>ファイル名の一部だけを一括変更したいときに使います。',
+      example: '例: 「old」→「new」 : report_old.pdf → report_new.pdf'
+    },
+    'regex': {
+      title: '正規表現モード',
+      text: '正規表現パターンで高度な文字列置換を行います。<br>括弧 <code>()</code> でキャプチャした部分を <code>\\1</code>, <code>\\2</code> で参照できます。',
+      example: '例: パターン (\\d{4})(\\d{2}) → 置換 \\1-\\2 : file_202502.txt → file_2025-02.txt'
+    },
+    'append-sequential': {
+      title: '元名＋連番モード',
+      text: '元のファイル名を残したまま、末尾に連番を付加します。<br>同名ファイルの区別や、バージョン管理に使えます。',
+      example: '例: design.png → design_001.png'
+    },
+    'append-date': {
+      title: '元名＋日付モード',
+      text: '元のファイル名を残したまま、末尾に今日の日付を付加します。<br>バックアップや日次スナップショットの命名に便利です。',
+      example: '例: data.csv → data_20260209.csv'
+    },
+    'case': {
+      title: '大文字/小文字変換モード',
+      text: 'ファイル名の大文字・小文字を変換します。<br>「拡張子のみ」オプションで .JPG → .jpg のような統一も可能です。',
+      example: '例: My_Report.PDF → (小文字) my_report.pdf / (拡張子のみ小文字) My_Report.pdf'
+    },
+    'insert': {
+      title: 'テキスト挿入モード',
+      text: 'ファイル名の指定した位置にテキストを挿入します。<br>位置 0 で先頭に追加、-1 で末尾の1文字手前に挿入できます。',
+      example: '例: 位置=0, テキスト「v2_」 : report.pdf → v2_report.pdf'
+    },
+    'delete': {
+      title: 'テキスト削除モード',
+      text: 'ファイル名の指定した位置から指定文字数を削除します。<br>不要なプレフィックスやコード番号の除去に使えます。',
+      example: '例: 開始=0, 削除=4 : IMG_sunset.jpg → sunset.jpg'
+    },
+    'custom': {
+      title: 'カスタムパターンモード',
+      text: 'トークン（ <code>{name}</code>, <code>{date}</code>, <code>{num}</code> 等）を自由に組み合わせて命名ルールを作れます。<br>下のトークン一覧を参考にパターンを入力してください。上のチップをクリックするとパターン欄に挿入されます。',
+      example: '例: パターン「{date}_{name}_{num}{ext}」 → 20260209_report_001.pdf'
+    }
+  };
+
+  function updateModeDesc(mode) {
+    const desc = modeDescriptions[mode];
+    const el = document.getElementById('modeDesc');
+    if (desc && el) {
+      el.innerHTML = '<div class="desc-title">' + desc.title + '</div>' +
+        desc.text + '<br><span class="desc-example">' + desc.example + '</span>';
+      el.style.display = 'block';
+    }
+  }
+
   // ===== Drop Zone =====
   browseLink.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
   dropZone.addEventListener('click', () => fileInput.click());
@@ -601,6 +750,9 @@
       const panel = document.getElementById('opts-' + btn.dataset.mode);
       if (panel) panel.classList.add('visible');
 
+      // Update mode description
+      updateModeDesc(btn.dataset.mode);
+
       requestPreview();
     });
   });
@@ -652,7 +804,6 @@
       insert_text: document.getElementById('opt_insert_text').value,
       delete_start: parseInt(document.getElementById('opt_delete_start').value) || 0,
       delete_count: parseInt(document.getElementById('opt_delete_count').value) || 0,
-      new_ext: document.getElementById('opt_new_ext').value,
       custom_pattern: document.getElementById('opt_custom_pattern').value,
       start_num: parseInt(document.getElementById('opt_start_num').value) || 1,
       zero_pad: parseInt(document.getElementById('opt_zero_pad').value) || 3,
