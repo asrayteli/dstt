@@ -715,6 +715,43 @@
   .pcsv-grid-wrap.dragging { cursor: crosshair; }
   .pcsv-grid-wrap.dragging * { user-select: none !important; }
 
+  /* Instant (session-only) rows/cols/cells */
+  .pcsv-table td.cell-instant, .pcsv-table thead th.col-instant {
+    background: #f3e8ff !important; color: #6b21a8;
+  }
+  .pcsv-table td.cell-instant.selected { background: #e9d5ff !important; }
+  .pcsv-table td.row-num.row-instant { background: #ede9fe !important; color: #7c3aed; font-weight: 600; }
+  .pcsv-table thead th.col-instant { background: #ede9fe !important; color: #6b21a8; }
+  .pcsv-table td.cell-instant-overlay {
+    background: #faf5ff !important; position: relative;
+    box-shadow: inset 0 0 0 1.5px #a78bfa;
+  }
+  .pcsv-table td.cell-instant-overlay::after {
+    content: '⚡'; position: absolute; top: -2px; right: 1px; font-size: 8px; opacity: 0.6;
+  }
+  .inst-badge { display: inline-block; background: #8b5cf6; color: #fff; font-size: 9px; padding: 0 3px; border-radius: 3px; margin-right: 3px; vertical-align: middle; line-height: 14px; }
+  /* Instant management panel */
+  .pcsv-inst-calc { display: flex; gap: 6px; margin-bottom: 8px; }
+  .pcsv-inst-calc input { flex: 1; font-size: 12px; padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-family: monospace; }
+  .pcsv-inst-calc input.has-result { border-color: #8b5cf6; }
+  .pcsv-inst-calc button { padding: 5px 10px; background: #8b5cf6; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap; }
+  .pcsv-inst-calc button:hover { background: #7c3aed; }
+  .pcsv-inst-result { font-size: 12px; font-family: monospace; padding: 4px 8px; background: #faf5ff; border-radius: 4px; margin-bottom: 10px; min-height: 20px; color: #6b21a8; word-break: break-all; }
+  .pcsv-inst-section { margin-bottom: 12px; }
+  .pcsv-inst-section h5 { font-size: 11px; color: #6b7280; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .pcsv-inst-item { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; font-size: 12px; border-radius: 4px; margin-bottom: 2px; background: #faf5ff; }
+  .pcsv-inst-item:hover { background: #ede9fe; }
+  .pcsv-inst-item .inst-del { cursor: pointer; color: #ef4444; font-size: 14px; }
+  .pcsv-inst-item .inst-del:hover { color: #dc2626; }
+  .pcsv-inst-opts { margin-top: 10px; }
+  .pcsv-inst-opts label { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; padding: 3px 0; }
+  .pcsv-inst-opts input[type=checkbox] { accent-color: #8b5cf6; }
+  .pcsv-inst-hist { max-height: 200px; overflow-y: auto; }
+  .pcsv-inst-hist-item { font-size: 11px; padding: 3px 6px; border-bottom: 1px solid #f3f4f6; font-family: monospace; }
+  .pcsv-inst-hist-item .hist-expr { color: #6b21a8; }
+  .pcsv-inst-hist-item .hist-result { color: #059669; margin-left: 6px; }
+  .pcsv-inst-hist-item .hist-time { color: #9ca3af; font-size: 10px; margin-left: 4px; }
+
   /* Formula bar */
   .pcsv-formula-bar {
     display: none;
@@ -1001,6 +1038,10 @@
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
       <span class="btn-text">統計</span>
     </button>
+    <button class="pcsv-tb-btn" id="btnInstant" onclick="toggleInstantPanel()" disabled title="インスタント管理" style="color:#7c3aed">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      <span class="btn-text">⚡ instant</span>
+    </button>
   </div>
 
   <!-- Formula Bar -->
@@ -1128,6 +1169,39 @@
           </button>
         </div>
         <div class="pcsv-panel-body" id="statsContent"></div>
+      </div>
+    </div>
+
+    <!-- Instant Management Panel -->
+    <div class="pcsv-panel" id="instantPanel">
+      <div class="pcsv-panel-inner">
+        <div class="pcsv-panel-head" style="background:#ede9fe;border-color:#c4b5fd">
+          <span style="color:#6b21a8">⚡ インスタント管理</span>
+          <button class="pcsv-panel-close" onclick="toggleInstantPanel()">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:16px;height:16px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="pcsv-panel-body" id="instantContent" style="padding:12px;overflow-y:auto">
+          <!-- Calculator -->
+          <div class="pcsv-inst-section">
+            <h5>計算枠 (数式で表を参照可能)</h5>
+            <div class="pcsv-inst-calc">
+              <input type="text" id="instCalcInput" placeholder="例: =SUM(A1:A10) / =AVG(B1:B100)" onkeydown="if(event.key==='Enter'){event.preventDefault();instCalcRun();}">
+              <button onclick="instCalcRun()">計算</button>
+            </div>
+            <div class="pcsv-inst-result" id="instCalcResult">結果がここに表示されます</div>
+            <div style="text-align:right"><button onclick="toggleInstCalcHistory()" style="font-size:11px;background:none;border:1px solid #d1d5db;border-radius:4px;padding:2px 8px;cursor:pointer;color:#6b7280">📜 計算履歴</button></div>
+            <div id="instCalcHistoryWrap" class="pcsv-inst-hist" style="display:none"></div>
+          </div>
+          <!-- Instant list -->
+          <div class="pcsv-inst-section" id="instListSection"></div>
+          <!-- Options -->
+          <div class="pcsv-inst-section pcsv-inst-opts">
+            <h5>参照ルール</h5>
+            <label><input type="checkbox" id="optInstToInst" onchange="S.instant.options.instantToInstantRef=this.checked;recalcAllFormulas();renderBody()"> インスタント同士の参照を許可</label>
+            <label><input type="checkbox" id="optCellOverlay" onchange="S.instant.options.cellOverlayRef=this.checked;recalcAllFormulas();renderBody()"> セルオーバーレイ値を参照に使用 (デフォルト: 元の値)</label>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1288,6 +1362,19 @@ const S = {
   dragging: false, dragStart: null,
   // Formula bar cell-reference selection
   fxSelecting: false, _fxRefPos: -1, _fxRefEnd: -1,
+  // Instant (session-only temporary rows/cols/cells)
+  instant: {
+    rows: new Set(),    // data row indices that are instant
+    cols: new Set(),    // header col indices that are instant
+    cells: {},          // "row,col" -> {original: string} for overlay cells
+    options: {
+      instantToInstantRef: false, // allow instant-to-instant references
+      cellOverlayRef: false,      // use overlay value when other cells reference
+    },
+    calcHistory: [],    // [{id, expr, result, timestamp}]
+    calcNextId: 1,
+  },
+  instantOpen: false,   // management panel open state
 };
 function hasData() { return S.headers.length > 0; }
 
@@ -1314,8 +1401,10 @@ function clearSelection() {
 }
 
 // ========== Undo / Redo ==========
-function _serializeSets(){return{dR:[...S.disabledRows],dC:[...S.disabledCols],dCe:[...S.disabledCells],hR:[...S.hiddenRows],hC:[...S.hiddenCols],hCe:[...S.hiddenCells]};}
-function _restoreSets(s){if(!s)return;S.disabledRows=new Set(s.dR||[]);S.disabledCols=new Set(s.dC||[]);S.disabledCells=new Set(s.dCe||[]);S.hiddenRows=new Set(s.hR||[]);S.hiddenCols=new Set(s.hC||[]);S.hiddenCells=new Set(s.hCe||[]);}
+function _serializeSets(){return{dR:[...S.disabledRows],dC:[...S.disabledCols],dCe:[...S.disabledCells],hR:[...S.hiddenRows],hC:[...S.hiddenCols],hCe:[...S.hiddenCells],
+  iR:[...S.instant.rows],iC:[...S.instant.cols],iCe:JSON.parse(JSON.stringify(S.instant.cells)),iOpt:{...S.instant.options}};}
+function _restoreSets(s){if(!s)return;S.disabledRows=new Set(s.dR||[]);S.disabledCols=new Set(s.dC||[]);S.disabledCells=new Set(s.dCe||[]);S.hiddenRows=new Set(s.hR||[]);S.hiddenCols=new Set(s.hC||[]);S.hiddenCells=new Set(s.hCe||[]);
+  S.instant.rows=new Set(s.iR||[]);S.instant.cols=new Set(s.iC||[]);S.instant.cells=s.iCe||{};if(s.iOpt)S.instant.options={...s.iOpt};}
 function saveState(label) {
   S.undoStack.push({label,headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data)),formulas:JSON.parse(JSON.stringify(S.formulas)),sets:_serializeSets()});
   if(S.undoStack.length>50) S.undoStack.shift();
@@ -1361,6 +1450,7 @@ async function uploadFile(file) {
     S.sortCol=-1; S.sortDir=0; S.undoStack=[]; S.redoStack=[]; S.issueMap={}; S.formulas={};
     S.disabledRows=new Set(); S.disabledCols=new Set(); S.disabledCells=new Set();
     S.hiddenRows=new Set(); S.hiddenCols=new Set(); S.hiddenCells=new Set(); S.dragging=false; S.dragStart=null;
+    S.instant.rows=new Set(); S.instant.cols=new Set(); S.instant.cells={}; S.instant.calcHistory=[]; S.instant.calcNextId=1;
     showEditor(); renderGrid(); updateStatus(); enableToolbar();
     toast(`${j.filename} を読み込みました (${j.totalRows.toLocaleString()}行)`,'success');
     document.getElementById('headerInfo').style.display='flex';
@@ -1377,7 +1467,7 @@ function showEditor() {
 }
 function enableToolbar() {
   ['btnSave','btnAddRow','btnDelRow','btnAddCol','btnDelCol','btnTrim','btnDedup',
-   'btnEmptyRows','btnTranspose','btnSearch','btnGoto','btnValidate','btnStats'
+   'btnEmptyRows','btnTranspose','btnSearch','btnGoto','btnValidate','btnStats','btnInstant'
   ].forEach(id=>document.getElementById(id).disabled=false);
   updateUndoButtons();
 }
@@ -1406,7 +1496,9 @@ function renderHeader() {
     const esc=escHtml(S.headers[i]);
     let cl=S.selectedCols.has(i)||(S.selectedCell&&S.selectedCell.col===i)||(S.selRange&&i>=S.selRange.c1&&i<=S.selRange.c2)?' col-highlight':'';
     if(S.disabledCols.has(i)) cl+=' col-disabled';
-    h+=`<th class="${cl}" data-col="${i}" onclick="onHeaderClick(${i},event)" oncontextmenu="onHeaderCtx(event,${i})" title="${esc}"><div class="th-content"><span class="th-label">${esc}</span>${arrow}</div></th>`;
+    if(S.instant.cols.has(i)) cl+=' col-instant';
+    const instPre=S.instant.cols.has(i)?'<span class="inst-badge">⚡</span>':'';
+    h+=`<th class="${cl}" data-col="${i}" onclick="onHeaderClick(${i},event)" oncontextmenu="onHeaderCtx(event,${i})" title="${esc}"><div class="th-content"><span class="th-label">${instPre}${esc}</span>${arrow}</div></th>`;
   });
   h+='</tr>'; thead.innerHTML=h;
 }
@@ -1422,8 +1514,11 @@ function renderBody() {
     const di=pageRows[ri], row=S.data[di], isRS=S.selectedRows.has(di);
     const rowHL=(S.selectedCell&&S.selectedCell.row===di)||(S.selRange&&di>=S.selRange.r1&&di<=S.selRange.r2);
     const rowDis=S.disabledRows.has(di);
-    h+=`<tr class="${isRS?'row-selected':''}" data-ridx="${di}">`;
-    h+=`<td class="row-num${rowHL?' row-highlight':''}${rowDis?' row-disabled':''}" onclick="toggleRowSelect(${di},event)" oncontextmenu="onRowCtx(event,${di})">${di+1}</td>`;
+    const rowInst=S.instant.rows.has(di);
+    h+=`<tr class="${isRS?'row-selected':''}${rowInst?' instant-row':''}" data-ridx="${di}">`;
+    const rnCls='row-num'+(rowHL?' row-highlight':'')+(rowDis?' row-disabled':'')+(rowInst?' row-instant':'');
+    const rnLabel=rowInst?`<span class="inst-badge">⚡</span>${di+1}`:`${di+1}`;
+    h+=`<td class="${rnCls}" onclick="toggleRowSelect(${di},event)" oncontextmenu="onRowCtx(event,${di})">${rnLabel}</td>`;
     for(let vi=0;vi<visCols.length;vi++){
       const ci=visCols[vi];
       const val=ci<row.length?row[ci]:'';
@@ -1445,6 +1540,9 @@ function renderBody() {
       // Disable / Hide styling
       if(S.hiddenCells.has(ik)) cls+=' cell-hidden';
       else if(S.disabledCells.has(ik)||rowDis||S.disabledCols.has(ci)) cls+=' cell-disabled';
+      // Instant styling
+      if(rowInst||S.instant.cols.has(ci)) cls+=' cell-instant';
+      else if(S.instant.cells.hasOwnProperty(ik)) cls+=' cell-instant-overlay';
       if(S.issueMap[ik]) cls+=S.issueMap[ik]==='error'?' cell-error':' cell-warning';
       if(S.searchMatches.some(m=>m.row===di&&m.col===ci)) cls+=' cell-match';
       const displayVal=S.hiddenCells.has(ik)?'':escHtml(val);
@@ -1659,11 +1757,22 @@ function parseRange(rangeStr) {
 }
 function getCellVal(row,col){
   if(row<0||row>=S.data.length||col<0||col>=S.headers.length) return '';
-  // Disabled/hidden cells return '' for formulas
   if(S.disabledRows.has(row)||S.disabledCols.has(col)) return '';
   if(S.hiddenRows.has(row)||S.hiddenCols.has(col)) return '';
   const ck=`${row},${col}`;
   if(S.disabledCells.has(ck)||S.hiddenCells.has(ck)) return '';
+  // Instant reference rules (uses global _formulaCtxInstant)
+  const fi=_formulaCtxInstant;
+  const isInstCell=S.instant.rows.has(row)||S.instant.cols.has(col);
+  const hasOverlay=S.instant.cells.hasOwnProperty(ck);
+  if(isInstCell){
+    if(!fi) return ''; // normal→instant: skip
+    if(!S.instant.options.instantToInstantRef) return ''; // instant→instant: skip by default
+    return S.data[row]?.[col]||'';
+  }
+  if(hasOverlay && !fi && !S.instant.options.cellOverlayRef){
+    return S.instant.cells[ck].original;
+  }
   return S.data[row][col]||'';
 }
 function getRangeValues(rangeStr){
@@ -1836,16 +1945,18 @@ function evaluateFormula(formula){
 }
 
 // ========== Formula Recalculation ==========
-let _recalcing=false;
+let _recalcing=false, _formulaCtxInstant=false; // global context for formula evaluation chain
 function recalcAllFormulas(){
   if(_recalcing)return; _recalcing=true;
   for(const key in S.formulas){
     const [r,c]=key.split(',').map(Number);
     if(r<S.data.length&&c<S.headers.length){
+      // Set global context: is this formula in an instant cell?
+      _formulaCtxInstant=S.instant.rows.has(r)||S.instant.cols.has(c);
       try{S.data[r][c]=String(evaluateFormula(S.formulas[key]));}catch(e){S.data[r][c]='#ERROR';}
     }else{delete S.formulas[key];}
   }
-  _recalcing=false;
+  _formulaCtxInstant=false; _recalcing=false;
 }
 function adjustFormulasRowInsert(atIdx){
   const nf={};for(const k in S.formulas){const[r,c]=k.split(',').map(Number);nf[`${r>=atIdx?r+1:r},${c}`]=S.formulas[k];}S.formulas=nf;
@@ -1865,7 +1976,8 @@ function updateFormulaBar() {
   const ref=document.getElementById('cellRef'), inp=document.getElementById('formulaInput');
   if(S.selectedCell) {
     const colL=indexToColLetter(S.selectedCell.col);
-    ref.textContent=`${colL}${S.selectedCell.row+1}`;
+    const isInst=S.instant.rows.has(S.selectedCell.row)||S.instant.cols.has(S.selectedCell.col)||S.instant.cells.hasOwnProperty(`${S.selectedCell.row},${S.selectedCell.col}`);
+    ref.textContent=`${isInst?'⚡ ':''}${colL}${S.selectedCell.row+1}`;
     const fk=`${S.selectedCell.row},${S.selectedCell.col}`;
     // Show formula text if cell has a formula, otherwise show value
     inp.value=S.formulas[fk]||S.data[S.selectedCell.row]?.[S.selectedCell.col]||'';
@@ -2078,7 +2190,7 @@ function addRow() {
 function insertRowAt(idx,above) {
   saveState('行挿入'); const pos=above?idx:idx+1;
   const nr=new Array(S.headers.length).fill('');
-  adjustFormulasRowInsert(pos); S.data.splice(pos,0,nr);
+  adjustFormulasRowInsert(pos); _adjustInstantSets('row',pos,1); S.data.splice(pos,0,nr);
   renderGrid();updateStatus();toast('行を挿入しました','success');
 }
 function duplicateRow(idx) {
@@ -2106,7 +2218,9 @@ function deleteSelectedRows() {
   toast('行を削除しました','success');
 }
 function deleteRowAt(idx) {
-  saveState('行削除'); adjustFormulasRowDelete(idx); S.data.splice(idx,1); clearSelection();
+  saveState('行削除'); adjustFormulasRowDelete(idx);
+  S.instant.rows.delete(idx); _adjustInstantSets('row',idx,-1);
+  S.data.splice(idx,1); clearSelection();
   renderGrid();updateStatus();toast('行を削除しました','success');
 }
 
@@ -2121,7 +2235,7 @@ function doAddColumn(){
 function insertColumnAt(colIdx,side) {
   const pos=side==='left'?colIdx:colIdx+1;
   const name=prompt('新しい列名を入力:');if(!name) return;
-  saveState('列挿入'); adjustFormulasColInsert(pos);
+  saveState('列挿入'); adjustFormulasColInsert(pos); _adjustInstantSets('col',pos,1);
   S.headers.splice(pos,0,name.trim()||`列${pos+1}`);
   S.data.forEach(r=>r.splice(pos,0,''));renderGrid();updateStatus();toast('列を挿入しました','success');
 }
@@ -2407,6 +2521,12 @@ function onCellCtx(e,row,col) {
     {label:'=COUNTIF(,) 条件カウント',action:`insertFxToCell(${row},${col},'=COUNTIF(,)')`},
   ]});
   items.push('---');
+  // Instant cell overlay
+  if(S.instant.cells.hasOwnProperty(ck)){
+    items.push({label:'⚡ インスタントメモを解除',action:`removeInstantCellOverlay(${row},${col})`});
+  } else if(!S.instant.rows.has(row)&&!S.instant.cols.has(col)){
+    items.push({label:'⚡ インスタントメモ',action:`createInstantCellOverlay(${row},${col})`});
+  }
   // Disable/Hide for this cell
   if(isCellDis) items.push({label:'セルの無効化を解除',action:`enableCell('${ck}')`});
   else items.push({label:'セルを無効化',action:`disableCell(${row},${col})`});
@@ -2434,6 +2554,16 @@ function onRowCtx(e,row) {
     isRowDis?{label:'行の無効化を解除',action:`enableRow(${row})`}:{label:'行を無効化',action:`disableRow(${row})`},
     {label:'行を非表示',action:`hideRow(${row})`},
   ];
+  // Instant
+  items.push('---');
+  const instRowSub=[
+    {label:'空白行を作成',action:`createInstantRow(${row},null)`},
+    {label:'合計行を作成 (SUM)',action:`createInstantRow(${row},'colsum')`},
+    {label:'平均行を作成 (AVG)',action:`createInstantRow(${row},'colavg')`},
+    {label:'連番行を作成',action:`createInstantRow(${row},'serial')`},
+  ];
+  if(S.instant.rows.has(row)) instRowSub.push({label:'このインスタント行を削除',action:`deleteInstantRow(${row})`});
+  items.push({label:'⚡ インスタント',sub:instRowSub});
   const disList=buildDisableMenu(), hidList=buildHiddenMenu();
   if(disList.length) items.push({label:'無効化を解除',sub:disList});
   if(hidList.length) items.push({label:'非表示を解除',sub:hidList});
@@ -2469,6 +2599,16 @@ function onHeaderCtx(e,col) {
     isColDis?{label:'列の無効化を解除',action:`enableCol(${col})`}:{label:'列を無効化',action:`disableCol(${col})`},
     {label:'列を非表示',action:`hideCol(${col})`},
   ];
+  // Instant
+  items.push('---');
+  const instColSub=[
+    {label:'空白列を作成',action:`createInstantCol(${col},null)`},
+    {label:'合計列を作成 (SUM)',action:`createInstantCol(${col},'rowsum')`},
+    {label:'連番列を作成',action:`createInstantCol(${col},'serial')`},
+    {label:'前列との差分',action:`createInstantCol(${col},'diff')`},
+  ];
+  if(S.instant.cols.has(col)) instColSub.push({label:'このインスタント列を削除',action:`deleteInstantCol(${col})`});
+  items.push({label:'⚡ インスタント',sub:instColSub});
   const disList=buildDisableMenu(), hidList=buildHiddenMenu();
   if(disList.length) items.push({label:'無効化を解除',sub:disList});
   if(hidList.length) items.push({label:'非表示を解除',sub:hidList});
@@ -2626,13 +2766,204 @@ function closeDownloadModal(){closeModal('downloadModal');}
 async function doDownload(){
   const fn=document.getElementById('dlFilename').value.trim()||'export.csv';
   const enc=document.getElementById('dlEncoding').value,delim=document.getElementById('dlDelimiter').value;
+  // Build clean data excluding instant rows/cols and restoring overlay cells
+  const instCols=[...S.instant.cols].sort((a,b)=>b-a); // reverse for safe splicing
+  const instRows=[...S.instant.rows].sort((a,b)=>b-a);
+  let dlHeaders=JSON.parse(JSON.stringify(S.headers));
+  let dlData=JSON.parse(JSON.stringify(S.data));
+  // Restore overlay cells to original values
+  for(const ck in S.instant.cells){const[r,c]=ck.split(',').map(Number);if(r<dlData.length&&c<dlHeaders.length)dlData[r][c]=S.instant.cells[ck].original;}
+  // Remove instant columns (reverse order)
+  instCols.forEach(ci=>{dlHeaders.splice(ci,1);dlData.forEach(r=>r.splice(ci,1));});
+  // Remove instant rows (reverse order)
+  instRows.forEach(ri=>{dlData.splice(ri,1);});
   try{
     const res=await fetch('/tools/csvtool/api/download',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({headers:S.headers,data:S.data,encoding:enc,delimiter:delim,filename:fn})});
+      body:JSON.stringify({headers:dlHeaders,data:dlData,encoding:enc,delimiter:delim,filename:fn})});
     if(!res.ok){const j=await res.json();throw new Error(j.error||'ダウンロード失敗');}
     const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download=fn;a.click();URL.revokeObjectURL(url);closeDownloadModal();toast('ダウンロードしました','success');
+    a.href=url;a.download=fn;a.click();URL.revokeObjectURL(url);closeDownloadModal();toast('ダウンロードしました（インスタント除外済み）','success');
   }catch(err){toast(err.message,'error');}
+}
+
+// ========== Instant (Session-Only) ==========
+function _adjustInstantSets(type,atIdx,delta){
+  // Shift instant row/col indices when inserting or deleting rows/cols
+  const set=type==='row'?S.instant.rows:S.instant.cols;
+  const newSet=new Set();
+  set.forEach(i=>{
+    if(delta>0){newSet.add(i>=atIdx?i+delta:i);}
+    else{if(i===atIdx)return;newSet.add(i>atIdx?i+delta:i);}
+  });
+  if(type==='row') S.instant.rows=newSet; else S.instant.cols=newSet;
+  // Shift overlay cell keys
+  if(type==='row'){
+    const nc={};for(const k in S.instant.cells){const[r,c]=k.split(',').map(Number);
+      if(delta<0&&r===atIdx)continue;const nr=delta>0?(r>=atIdx?r+delta:r):(r>atIdx?r+delta:r);nc[`${nr},${c}`]=S.instant.cells[k];}S.instant.cells=nc;
+  }else{
+    const nc={};for(const k in S.instant.cells){const[r,c]=k.split(',').map(Number);
+      if(delta<0&&c===atIdx)continue;const ncc=delta>0?(c>=atIdx?c+delta:c):(c>atIdx?c+delta:c);nc[`${r},${ncc}`]=S.instant.cells[k];}S.instant.cells=nc;
+  }
+}
+function createInstantRow(atIdx,template){
+  saveState('インスタント行追加');
+  const pos=atIdx; // insert above the specified row
+  const nr=new Array(S.headers.length).fill('');
+  adjustFormulasRowInsert(pos); _adjustInstantSets('row',pos,1);
+  S.data.splice(pos,0,nr); S.instant.rows.add(pos);
+  // Apply template
+  if(template==='serial'){for(let i=0;i<nr.length;i++) nr[i]=String(i+1);}
+  else if(template==='colsum'){
+    const nonInstCols=[];for(let c=0;c<S.headers.length;c++)if(!S.instant.cols.has(c))nonInstCols.push(c);
+    nonInstCols.forEach(c=>{
+      const colL=indexToColLetter(c);
+      let sumParts=[];for(let r=0;r<S.data.length;r++){if(r===pos||S.instant.rows.has(r))continue;sumParts.push(colL+(r+1));}
+      if(sumParts.length){const fx='=SUM('+colL+'1:'+colL+S.data.length+')';S.formulas[`${pos},${c}`]=fx;try{nr[c]=String(evaluateFormula(fx));}catch(e){nr[c]='#ERROR';}}
+    });
+  }
+  else if(template==='colavg'){
+    const nonInstCols=[];for(let c=0;c<S.headers.length;c++)if(!S.instant.cols.has(c))nonInstCols.push(c);
+    nonInstCols.forEach(c=>{
+      const colL=indexToColLetter(c);
+      const fx='=AVG('+colL+'1:'+colL+S.data.length+')';S.formulas[`${pos},${c}`]=fx;try{nr[c]=String(evaluateFormula(fx));}catch(e){nr[c]='#ERROR';}
+    });
+  }
+  renderGrid();updateStatus();renderInstantList();toast('インスタント行を追加しました','success');
+}
+function deleteInstantRow(idx){
+  if(!S.instant.rows.has(idx)) return;
+  saveState('インスタント行削除');
+  // Remove formulas in this row
+  for(let c=0;c<S.headers.length;c++) delete S.formulas[`${idx},${c}`];
+  adjustFormulasRowDelete(idx); S.data.splice(idx,1);
+  S.instant.rows.delete(idx);
+  _adjustInstantSets('row',idx,-1);
+  clearSelection();renderGrid();updateStatus();renderInstantList();toast('インスタント行を削除しました','success');
+}
+function createInstantCol(atIdx,template){
+  saveState('インスタント列追加');
+  const pos=atIdx; // insert to the left of the specified col
+  adjustFormulasColInsert(pos); _adjustInstantSets('col',pos,1);
+  S.headers.splice(pos,0,'⚡ Instant');
+  S.data.forEach(r=>r.splice(pos,0,''));
+  S.instant.cols.add(pos);
+  // Apply template
+  if(template==='serial'){S.data.forEach((r,i)=>{r[pos]=String(i+1);});}
+  else if(template==='rowsum'){
+    const nonInstCols=[];for(let c=0;c<S.headers.length;c++)if(c!==pos&&!S.instant.cols.has(c))nonInstCols.push(c);
+    S.data.forEach((r,ri)=>{
+      if(S.instant.rows.has(ri))return;
+      const parts=nonInstCols.map(c=>indexToColLetter(c)+(ri+1));
+      if(parts.length){const fx='=SUM('+parts[0].charAt(0)+(ri+1)+':'+indexToColLetter(nonInstCols[nonInstCols.length-1])+(ri+1)+')';
+        S.formulas[`${ri},${pos}`]=fx;try{r[pos]=String(evaluateFormula(fx));}catch(e){r[pos]='#ERROR';}}
+    });
+  }
+  else if(template==='diff'&&pos>=2){
+    const prevCol=pos-1;
+    S.data.forEach((r,ri)=>{
+      if(S.instant.rows.has(ri))return;
+      const fx='='+indexToColLetter(prevCol)+(ri+1)+'-'+indexToColLetter(prevCol-1)+(ri+1);
+      S.formulas[`${ri},${pos}`]=fx;try{r[pos]=String(evaluateFormula(fx));}catch(e){r[pos]='#ERROR';}
+    });
+  }
+  renderGrid();updateStatus();renderInstantList();toast('インスタント列を追加しました','success');
+}
+function deleteInstantCol(idx){
+  if(!S.instant.cols.has(idx)) return;
+  saveState('インスタント列削除');
+  // Remove formulas in this col
+  for(let r=0;r<S.data.length;r++) delete S.formulas[`${r},${idx}`];
+  adjustFormulasColDelete(idx); S.headers.splice(idx,1); S.data.forEach(r=>r.splice(idx,1));
+  S.instant.cols.delete(idx);
+  _adjustInstantSets('col',idx,-1);
+  clearSelection();renderGrid();updateStatus();renderInstantList();toast('インスタント列を削除しました','success');
+}
+function createInstantCellOverlay(row,col){
+  const ck=`${row},${col}`;
+  if(S.instant.cells.hasOwnProperty(ck)||S.instant.rows.has(row)||S.instant.cols.has(col)) return;
+  saveState('インスタントメモ');
+  S.instant.cells[ck]={original:S.data[row][col]||''};
+  S.data[row][col]=''; // clear to let user input overlay
+  renderBody();renderInstantList();toast('インスタントメモを設定しました','success');
+  startEdit(row,col);
+}
+function removeInstantCellOverlay(row,col){
+  const ck=`${row},${col}`;
+  if(!S.instant.cells.hasOwnProperty(ck)) return;
+  saveState('インスタントメモ解除');
+  S.data[row][col]=S.instant.cells[ck].original;
+  delete S.instant.cells[ck]; delete S.formulas[ck];
+  renderBody();renderInstantList();toast('インスタントメモを解除しました','success');
+}
+// Instant management panel
+function toggleInstantPanel(){
+  S.instantOpen=!S.instantOpen;
+  const panel=document.getElementById('instantPanel'),btn=document.getElementById('btnInstant');
+  if(S.instantOpen){
+    if(S.validateOpen)toggleValidation();if(S.statsOpen)toggleStats();
+    panel.classList.add('open');btn.classList.add('active');renderInstantList();
+    document.getElementById('optInstToInst').checked=S.instant.options.instantToInstantRef;
+    document.getElementById('optCellOverlay').checked=S.instant.options.cellOverlayRef;
+  }else{panel.classList.remove('open');btn.classList.remove('active');}
+}
+function renderInstantList(){
+  const sec=document.getElementById('instListSection'); if(!sec) return;
+  let h='';
+  // Instant rows
+  const iRows=[...S.instant.rows].sort((a,b)=>a-b);
+  if(iRows.length){
+    h+='<h5>インスタント行 ('+iRows.length+')</h5>';
+    iRows.forEach(r=>{
+      h+=`<div class="pcsv-inst-item"><span>⚡ 行 ${r+1}</span><span class="inst-del" onclick="deleteInstantRow(${r})" title="削除">✕</span></div>`;
+    });
+  }
+  // Instant cols
+  const iCols=[...S.instant.cols].sort((a,b)=>a-b);
+  if(iCols.length){
+    h+='<h5>インスタント列 ('+iCols.length+')</h5>';
+    iCols.forEach(c=>{
+      h+=`<div class="pcsv-inst-item"><span>⚡ 列 ${escHtml(S.headers[c])} (${indexToColLetter(c)})</span><span class="inst-del" onclick="deleteInstantCol(${c})" title="削除">✕</span></div>`;
+    });
+  }
+  // Instant cell overlays
+  const cellKeys=Object.keys(S.instant.cells);
+  if(cellKeys.length){
+    h+='<h5>インスタントメモ ('+cellKeys.length+')</h5>';
+    cellKeys.forEach(ck=>{
+      const[r,c]=ck.split(',').map(Number);
+      h+=`<div class="pcsv-inst-item"><span>⚡ ${indexToColLetter(c)}${r+1} (元: "${escHtml(S.instant.cells[ck].original)}")</span><span class="inst-del" onclick="removeInstantCellOverlay(${r},${c})" title="解除">✕</span></div>`;
+    });
+  }
+  if(!h) h='<p style="color:#9ca3af;font-size:12px;text-align:center;padding:20px 0">インスタントはまだありません<br>右クリックメニューから追加できます</p>';
+  sec.innerHTML=h;
+}
+// Instant calculator
+function instCalcRun(){
+  const inp=document.getElementById('instCalcInput'),resEl=document.getElementById('instCalcResult');
+  const expr=inp.value.trim();if(!expr){resEl.textContent='数式を入力してください';return;}
+  try{
+    _formulaCtxInstant=true; // allow reading everything
+    const result=expr.startsWith('=')?evaluateFormula(expr):evaluateFormula('='+expr);
+    _formulaCtxInstant=false;
+    resEl.textContent='= '+String(result);
+    inp.classList.add('has-result');
+    S.instant.calcHistory.push({id:S.instant.calcNextId++,expr:expr,result:String(result),timestamp:new Date().toLocaleTimeString()});
+    renderInstCalcHistory();
+  }catch(e){_formulaCtxInstant=false;resEl.textContent='エラー: '+e.message;inp.classList.remove('has-result');}
+}
+function toggleInstCalcHistory(){
+  const w=document.getElementById('instCalcHistoryWrap');
+  w.style.display=w.style.display==='none'?'block':'none';
+  if(w.style.display==='block') renderInstCalcHistory();
+}
+function renderInstCalcHistory(){
+  const w=document.getElementById('instCalcHistoryWrap');if(!w)return;
+  if(!S.instant.calcHistory.length){w.innerHTML='<p style="font-size:11px;color:#9ca3af;padding:8px;text-align:center">履歴なし</p>';return;}
+  let h='';
+  [...S.instant.calcHistory].reverse().forEach(item=>{
+    h+=`<div class="pcsv-inst-hist-item"><span class="hist-expr">${escHtml(item.expr)}</span><span class="hist-result">= ${escHtml(item.result)}</span><span class="hist-time">${item.timestamp}</span></div>`;
+  });
+  w.innerHTML=h;
 }
 
 // ========== Status Bar ==========
@@ -2644,6 +2975,8 @@ function updateStatus(){
   if(S.hiddenCols.size) hides.push(`${S.hiddenCols.size}列非表示`);
   if(S.disabledRows.size) hides.push(`${S.disabledRows.size}行無効`);
   if(S.disabledCols.size) hides.push(`${S.disabledCols.size}列無効`);
+  const instCount=S.instant.rows.size+S.instant.cols.size+Object.keys(S.instant.cells).length;
+  if(instCount) hides.push(`⚡${instCount}インスタント`);
   if(hides.length) t+=` (${hides.join(', ')})`;
   document.getElementById('statusRows').textContent=t;
   updateSelectionStatus();
