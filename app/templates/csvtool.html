@@ -928,6 +928,58 @@
     .pcsv-tb-btn .btn-text { display: none; }
     .pcsv-panel { width: 280px; right: -290px; }
   }
+
+  /* === A1: Instant Views (Virtual Filters) === */
+  .pcsv-views-bar { display:none; align-items:center; gap:6px; padding:3px 10px; background:#faf5ff; border-bottom:1px solid #e9d5ff; font-size:11px; flex-wrap:wrap; }
+  .pcsv-views-bar.active { display:flex; }
+  .pcsv-view-chip { display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:12px; border:1px solid #d8b4fe; background:#fff; cursor:pointer; font-size:11px; transition:all .15s; }
+  .pcsv-view-chip:hover { background:#f3e8ff; }
+  .pcsv-view-chip.current { background:#8b5cf6; color:#fff; border-color:#8b5cf6; }
+  .pcsv-view-chip .view-del { margin-left:3px; font-size:13px; opacity:.6; }
+  .pcsv-view-chip .view-del:hover { opacity:1; }
+  .pcsv-view-add { padding:2px 8px; border-radius:12px; border:1px dashed #c4b5fd; background:none; cursor:pointer; font-size:11px; color:#7c3aed; }
+  .pcsv-view-add:hover { background:#f3e8ff; }
+
+  /* === A2: Instant Compare Column === */
+  .cell-cmp-match { background:#d1fae5 !important; }
+  .cell-cmp-diff { background:#fef3c7 !important; }
+  .cell-cmp-empty { background:#fee2e2 !important; }
+
+  /* === B1: Cell Journal (Change Tracking) === */
+  .cell-changed { position:relative; }
+  .cell-changed::before { content:''; position:absolute; top:1px; left:1px; width:0; height:0; border-left:5px solid #f59e0b; border-bottom:5px solid transparent; }
+  .pcsv-journal-tip { position:absolute; z-index:200; background:#1f2937; color:#fff; padding:6px 10px; border-radius:6px; font-size:11px; max-width:260px; box-shadow:0 4px 12px rgba(0,0,0,.3); pointer-events:none; white-space:pre-line; }
+  .pcsv-journal-list { max-height:300px; overflow-y:auto; }
+  .pcsv-journal-entry { padding:4px 8px; font-size:11px; border-bottom:1px solid #f3f4f6; }
+  .pcsv-journal-entry .j-old { color:#ef4444; text-decoration:line-through; }
+  .pcsv-journal-entry .j-new { color:#10b981; font-weight:600; }
+  .pcsv-journal-entry .j-time { color:#9ca3af; font-size:10px; }
+  .pcsv-journal-entry .j-cell { color:#6366f1; font-weight:600; }
+
+  /* === B2: CSV Diff === */
+  .pcsv-diff-panel { padding:12px; overflow-y:auto; }
+  .diff-row-added td { background:#d1fae5 !important; }
+  .diff-row-deleted td { background:#fee2e2 !important; }
+  .diff-cell-changed { background:#fef9c3 !important; box-shadow:inset 0 0 0 1.5px #f59e0b; }
+  .diff-legend { display:flex; gap:12px; margin-bottom:10px; font-size:11px; }
+  .diff-legend span { display:inline-flex; align-items:center; gap:4px; }
+  .diff-legend .dl-box { width:12px; height:12px; border-radius:2px; }
+
+  /* === C1: CSV Merge === */
+  .pcsv-merge-opts label { display:block; padding:4px 0; font-size:12px; cursor:pointer; }
+  .pcsv-merge-opts select { width:100%; padding:4px 8px; border:1px solid #d1d5db; border-radius:4px; font-size:12px; margin:4px 0; }
+  .pcsv-merge-preview { max-height:200px; overflow:auto; font-size:11px; border:1px solid #e5e7eb; border-radius:4px; margin:8px 0; }
+  .pcsv-merge-preview table { width:100%; border-collapse:collapse; }
+  .pcsv-merge-preview th,.pcsv-merge-preview td { padding:2px 6px; border:1px solid #e5e7eb; font-size:10px; }
+  .pcsv-merge-preview th { background:#f3f4f6; position:sticky; top:0; }
+
+  /* === C2: Bookmarks === */
+  .cell-bookmarked { position:relative; }
+  .cell-bookmarked::after { content:'🔖'; position:absolute; top:-2px; right:1px; font-size:8px; }
+  .pcsv-bm-item { display:flex; align-items:center; justify-content:space-between; padding:5px 8px; font-size:12px; border-radius:4px; margin-bottom:2px; cursor:pointer; background:#f0f9ff; }
+  .pcsv-bm-item:hover { background:#dbeafe; }
+  .pcsv-bm-item .bm-del { color:#ef4444; cursor:pointer; font-size:13px; }
+  .pcsv-bm-label { font-size:10px; color:#6b7280; margin-left:6px; }
 </style>
 
 <div id="pcsvApp">
@@ -1042,7 +1094,34 @@
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
       <span class="btn-text">⚡ instant</span>
     </button>
+
+    <div class="pcsv-tb-sep"></div>
+
+    <!-- Advanced -->
+    <button class="pcsv-tb-btn" id="btnDiff" onclick="openDiffModal()" disabled title="CSV Diff (ファイル比較)">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      <span class="btn-text">Diff</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnMerge" onclick="openMergeModal()" disabled title="CSVマージ (結合)">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      <span class="btn-text">マージ</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnBookmarks" onclick="toggleBookmarkPanel()" disabled title="ブックマーク">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+      <span class="btn-text">🔖</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnJournal" onclick="toggleJournalPanel()" disabled title="変更履歴">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <span class="btn-text">履歴</span>
+    </button>
+    <button class="pcsv-tb-btn" id="btnViews" onclick="openViewSaveModal()" disabled title="ビューを保存 (仮想フィルタ)" style="color:#7c3aed">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+      <span class="btn-text">👁 View</span>
+    </button>
   </div>
+
+  <!-- Views Bar (A1) -->
+  <div class="pcsv-views-bar" id="viewsBar"></div>
 
   <!-- Formula Bar -->
   <div class="pcsv-formula-bar" id="formulaBar" style="position:relative">
@@ -1206,6 +1285,50 @@
     </div>
   </div>
 
+    <!-- Bookmark Panel -->
+    <div class="pcsv-panel" id="bookmarkPanel">
+      <div class="pcsv-panel-inner">
+        <div class="pcsv-panel-head" style="background:#eff6ff;border-color:#bfdbfe">
+          <span style="color:#1d4ed8">🔖 ブックマーク</span>
+          <button class="pcsv-panel-close" onclick="toggleBookmarkPanel()">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:16px;height:16px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="pcsv-panel-body" id="bookmarkContent" style="padding:12px;overflow-y:auto">
+          <p style="color:#9ca3af;font-size:12px;text-align:center;padding:20px 0">ブックマークはありません<br>セルを右クリック→「🔖 ブックマーク」で追加</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Journal Panel (Change History) -->
+    <div class="pcsv-panel" id="journalPanel">
+      <div class="pcsv-panel-inner">
+        <div class="pcsv-panel-head" style="background:#fffbeb;border-color:#fde68a">
+          <span style="color:#92400e">📝 変更履歴</span>
+          <div>
+            <button onclick="toggleJournalHighlight()" class="pcsv-panel-close" title="変更セルをハイライト" style="margin-right:4px;font-size:12px">🔦</button>
+            <button class="pcsv-panel-close" onclick="toggleJournalPanel()">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:16px;height:16px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="pcsv-panel-body pcsv-journal-list" id="journalContent" style="padding:8px;overflow-y:auto"></div>
+      </div>
+    </div>
+
+    <!-- Diff Panel -->
+    <div class="pcsv-panel" id="diffPanel" style="width:420px;right:-430px">
+      <div class="pcsv-panel-inner">
+        <div class="pcsv-panel-head" style="background:#fef3c7;border-color:#fde68a">
+          <span style="color:#92400e">📊 CSV Diff 結果</span>
+          <button class="pcsv-panel-close" onclick="closeDiffPanel()">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:16px;height:16px"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="pcsv-panel-body pcsv-diff-panel" id="diffContent" style="padding:12px;overflow-y:auto"></div>
+      </div>
+    </div>
+
   <!-- Status Bar -->
   <div class="pcsv-status" id="statusBar">
     <div class="status-left">
@@ -1330,6 +1453,57 @@
   </div>
 </div>
 
+<!-- Diff Modal -->
+<div class="pcsv-modal-overlay hidden" id="diffModal">
+  <div class="pcsv-modal" style="min-width:400px">
+    <h3>📊 CSV Diff — ファイル比較</h3>
+    <p style="font-size:12px;color:#6b7280;margin-bottom:10px">比較するCSVファイルをアップロードしてください。現在のデータとの差分を表示します。</p>
+    <input type="file" id="diffFileInput" accept=".csv,.tsv,.txt" style="margin-bottom:10px">
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('diffModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="runDiff()">比較実行</button>
+    </div>
+  </div>
+</div>
+
+<!-- Merge Modal -->
+<div class="pcsv-modal-overlay hidden" id="mergeModal">
+  <div class="pcsv-modal" style="min-width:440px">
+    <h3>🔗 CSVマージ — ファイル結合</h3>
+    <p style="font-size:12px;color:#6b7280;margin-bottom:8px">結合するCSVファイルをアップロードしてください。</p>
+    <input type="file" id="mergeFileInput" accept=".csv,.tsv,.txt" style="margin-bottom:10px">
+    <div class="pcsv-merge-opts">
+      <label><input type="radio" name="mergeType" value="union" checked> 縦結合 (UNION) — 行を追加</label>
+      <label><input type="radio" name="mergeType" value="join"> 横結合 (JOIN) — キー列で結合</label>
+      <div id="mergeJoinOpts" style="display:none;padding:8px;background:#f9fafb;border-radius:4px;margin:6px 0">
+        <label style="font-size:11px;color:#6b7280">キー列 (現在のファイル)</label>
+        <select id="mergeKeyCol"></select>
+      </div>
+    </div>
+    <div id="mergePreview"></div>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('mergeModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="runMerge()">マージ実行</button>
+    </div>
+  </div>
+</div>
+
+<!-- View Save Modal -->
+<div class="pcsv-modal-overlay hidden" id="viewSaveModal">
+  <div class="pcsv-modal" style="min-width:320px">
+    <h3>👁 ビューを保存</h3>
+    <label style="font-size:12px;color:#6b7280">ビュー名</label>
+    <input type="text" id="viewSaveName" placeholder="例: 売上100万以上" onkeydown="if(event.key==='Enter')doSaveView()">
+    <label style="font-size:12px;color:#6b7280;margin-top:8px">フィルタ条件 (列名 演算子 値)</label>
+    <input type="text" id="viewSaveFilter" placeholder='例: A>100  B="東京"  C!=""' style="font-family:monospace">
+    <p style="font-size:10px;color:#9ca3af;margin:4px 0">演算子: = != > < >= <= contains  複数条件はスペースで区切り(AND)</p>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('viewSaveModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="doSaveView()">保存</button>
+    </div>
+  </div>
+</div>
+
 <!-- Context Menu -->
 <div class="pcsv-ctx-menu" id="ctxMenu"></div>
 
@@ -1375,6 +1549,21 @@ const S = {
     calcNextId: 1,
   },
   instantOpen: false,   // management panel open state
+  // Views (A1)
+  views: [],            // [{id,name,filter}]
+  viewsNextId: 1,
+  currentView: null,    // active view id or null
+  // Journal (B1)
+  journal: [],          // [{cell,old,new,time}]
+  journalHighlight: false,
+  journalOpen: false,
+  // Diff (B2)
+  diffOpen: false,
+  diffResult: null,
+  // Bookmarks (C2)
+  bookmarks: [],        // [{id,row,col,label}]
+  bookmarkNextId: 1,
+  bookmarkOpen: false,
 };
 function hasData() { return S.headers.length > 0; }
 
@@ -1451,6 +1640,8 @@ async function uploadFile(file) {
     S.disabledRows=new Set(); S.disabledCols=new Set(); S.disabledCells=new Set();
     S.hiddenRows=new Set(); S.hiddenCols=new Set(); S.hiddenCells=new Set(); S.dragging=false; S.dragStart=null;
     S.instant.rows=new Set(); S.instant.cols=new Set(); S.instant.cells={}; S.instant.calcHistory=[]; S.instant.calcNextId=1;
+    S.views=[]; S.viewsNextId=1; S.currentView=null; S.journal=[]; S.journalHighlight=false;
+    S.diffResult=null; S.bookmarks=[]; S.bookmarkNextId=1;
     showEditor(); renderGrid(); updateStatus(); enableToolbar();
     toast(`${j.filename} を読み込みました (${j.totalRows.toLocaleString()}行)`,'success');
     document.getElementById('headerInfo').style.display='flex';
@@ -1467,7 +1658,8 @@ function showEditor() {
 }
 function enableToolbar() {
   ['btnSave','btnAddRow','btnDelRow','btnAddCol','btnDelCol','btnTrim','btnDedup',
-   'btnEmptyRows','btnTranspose','btnSearch','btnGoto','btnValidate','btnStats','btnInstant'
+   'btnEmptyRows','btnTranspose','btnSearch','btnGoto','btnValidate','btnStats','btnInstant',
+   'btnDiff','btnMerge','btnBookmarks','btnJournal','btnViews'
   ].forEach(id=>document.getElementById(id).disabled=false);
   updateUndoButtons();
 }
@@ -1545,6 +1737,10 @@ function renderBody() {
       else if(S.instant.cells.hasOwnProperty(ik)) cls+=' cell-instant-overlay';
       if(S.issueMap[ik]) cls+=S.issueMap[ik]==='error'?' cell-error':' cell-warning';
       if(S.searchMatches.some(m=>m.row===di&&m.col===ci)) cls+=' cell-match';
+      // Journal highlight (B1)
+      if(S.journalHighlight&&S.journal.some(j=>j.row===di&&j.col===ci)) cls+=' cell-changed';
+      // Bookmark indicator (C2)
+      if(S.bookmarks.some(b=>b.row===di&&b.col===ci)) cls+=' cell-bookmarked';
       const displayVal=S.hiddenCells.has(ik)?'':escHtml(val);
       h+=`<td class="${cls}" data-ridx="${di}" data-cidx="${ci}" onmousedown="onCellMouseDown(${di},${ci},event)" ondblclick="startEdit(${di},${ci})" oncontextmenu="onCellCtx(event,${di},${ci})">${displayVal}</td>`;
     }
@@ -2097,18 +2293,19 @@ function startEdit(row,col) {
 }
 function commitEdit(row,col,newVal) {
   const fk=`${row},${col}`;
+  const _oldVal=S.data[row]?.[col]||'';
   if(newVal.startsWith('=')){
     saveState('数式入力');
     S.formulas[fk]=newVal;
     try{S.data[row][col]=String(evaluateFormula(newVal));}catch(e){S.data[row][col]='#ERROR';}
-    // Apply formula to multi-selected cells too
+    if(_oldVal!==S.data[row][col]) _journalRecord(row,col,_oldVal,S.data[row][col]);
     if(S.multiCells.size>1){
       S.multiCells.forEach(k=>{if(k===fk)return;const[r,c]=k.split(',').map(Number);
-        S.formulas[k]=newVal;try{S.data[r][c]=String(evaluateFormula(newVal));}catch(e2){S.data[r][c]='#ERROR';}});
+        const o2=S.data[r][c];S.formulas[k]=newVal;try{S.data[r][c]=String(evaluateFormula(newVal));}catch(e2){S.data[r][c]='#ERROR';}if(o2!==S.data[r][c])_journalRecord(r,c,o2,S.data[r][c]);});
     }
   } else {
     const old=S.data[row][col]; delete S.formulas[fk];
-    if(old!==newVal){saveState('セル編集');S.data[row][col]=newVal;}
+    if(old!==newVal){saveState('セル編集');S.data[row][col]=newVal;_journalRecord(row,col,old,newVal);}
     // Apply to multi-selected cells
     if(S.multiCells.size>1){
       S.multiCells.forEach(k=>{if(k===fk)return;const[r,c]=k.split(',').map(Number);
@@ -2521,6 +2718,12 @@ function onCellCtx(e,row,col) {
     {label:'=COUNTIF(,) 条件カウント',action:`insertFxToCell(${row},${col},'=COUNTIF(,)')`},
   ]});
   items.push('---');
+  // Bookmark (C2)
+  if(S.bookmarks.some(b=>b.row===row&&b.col===col)){
+    items.push({label:'🔖 ブックマーク解除',action:`removeBookmarkAt(${row},${col})`});
+  } else {
+    items.push({label:'🔖 ブックマーク',action:`addBookmark(${row},${col})`});
+  }
   // Instant cell overlay
   if(S.instant.cells.hasOwnProperty(ck)){
     items.push({label:'⚡ インスタントメモを解除',action:`removeInstantCellOverlay(${row},${col})`});
@@ -2599,6 +2802,12 @@ function onHeaderCtx(e,col) {
     isColDis?{label:'列の無効化を解除',action:`enableCol(${col})`}:{label:'列を無効化',action:`disableCol(${col})`},
     {label:'列を非表示',action:`hideCol(${col})`},
   ];
+  // Compare column (A2) - needs 2 selected columns
+  if(S.selectedCols.size===2){
+    const cc=Array.from(S.selectedCols);
+    items.push('---');
+    items.push({label:'⚡ 2列を比較 (インスタント)',action:`createCompareColumn(${cc[0]},${cc[1]})`});
+  }
   // Instant
   items.push('---');
   const instColSub=[
@@ -3049,6 +3258,434 @@ function extendRange(toRow,toCol){
   if(!S.selectedCell) return;
   S.selRange=normalizeRange(S.selectedCell.row,S.selectedCell.col,toRow,toCol);
   renderGrid();updateSelectionStatus();updateSelectionSummary();
+}
+
+// ========== A1: Instant Views (Virtual Filters) ==========
+function openViewSaveModal(){
+  document.getElementById('viewSaveName').value='';
+  document.getElementById('viewSaveFilter').value='';
+  openModal('viewSaveModal');
+  document.getElementById('viewSaveName').focus();
+}
+function doSaveView(){
+  const name=document.getElementById('viewSaveName').value.trim();
+  const filterStr=document.getElementById('viewSaveFilter').value.trim();
+  if(!name){toast('ビュー名を入力してください','error');return;}
+  if(!filterStr){toast('フィルタ条件を入力してください','error');return;}
+  const view={id:S.viewsNextId++,name,filter:filterStr};
+  S.views.push(view);
+  closeModal('viewSaveModal');
+  renderViewsBar();
+  toast(`ビュー「${name}」を保存しました`,'success');
+}
+function renderViewsBar(){
+  const bar=document.getElementById('viewsBar');
+  if(!S.views.length){bar.classList.remove('active');return;}
+  bar.classList.add('active');
+  let h='<span style="color:#7c3aed;font-weight:600">👁 Views:</span>';
+  h+='<span class="pcsv-view-chip'+(S.currentView===null?' current':'')+'" onclick="clearView()">全データ</span>';
+  S.views.forEach(v=>{
+    h+=`<span class="pcsv-view-chip${S.currentView===v.id?' current':''}" onclick="applyView(${v.id})">${escHtml(v.name)}<span class="view-del" onclick="event.stopPropagation();removeView(${v.id})">✕</span></span>`;
+  });
+  h+='<span class="pcsv-view-chip" onclick="openViewSaveModal()" style="border-style:dashed;color:#7c3aed">+ 追加</span>';
+  bar.innerHTML=h;
+}
+function _parseViewFilter(filterStr){
+  // Parse filter string: "A>100 B="東京" C!="" D contains hello"
+  const conditions=[];
+  const regex=/([A-Z]+)\s*(=|!=|>=|<=|>|<|contains)\s*("([^"]*)"|(\S+))/gi;
+  let m;
+  while((m=regex.exec(filterStr))!==null){
+    const colName=m[1];
+    const op=m[2].toLowerCase();
+    const val=m[4]!==undefined?m[4]:m[5];
+    // Find col index by header name or letter
+    let ci=S.headers.findIndex(h=>h.toLowerCase()===colName.toLowerCase());
+    if(ci<0){
+      // try as column letter
+      const li=colLetterToIndex(colName);
+      if(li>=0&&li<S.headers.length) ci=li;
+    }
+    if(ci>=0) conditions.push({col:ci,op,val});
+  }
+  return conditions;
+}
+function _matchesViewFilter(rowData,conditions){
+  return conditions.every(cond=>{
+    const cellVal=rowData[cond.col]||'';
+    const cv=cellVal.toLowerCase(),tv=cond.val.toLowerCase();
+    const cn=parseFloat(cellVal),tn=parseFloat(cond.val);
+    switch(cond.op){
+      case '=': return cellVal===cond.val;
+      case '!=': return cellVal!==cond.val;
+      case '>': return !isNaN(cn)&&!isNaN(tn)&&cn>tn;
+      case '<': return !isNaN(cn)&&!isNaN(tn)&&cn<tn;
+      case '>=': return !isNaN(cn)&&!isNaN(tn)&&cn>=tn;
+      case '<=': return !isNaN(cn)&&!isNaN(tn)&&cn<=tn;
+      case 'contains': return cv.includes(tv);
+      default: return true;
+    }
+  });
+}
+function applyView(viewId){
+  const v=S.views.find(x=>x.id===viewId);
+  if(!v){toast('ビューが見つかりません','error');return;}
+  S.currentView=viewId;
+  const conditions=_parseViewFilter(v.filter);
+  if(!conditions.length){toast('フィルタ条件を解析できません','error');return;}
+  // Apply virtual filter using hiddenRows
+  S.hiddenRows.clear();
+  for(let i=0;i<S.data.length;i++){
+    if(!_matchesViewFilter(S.data[i],conditions)) S.hiddenRows.add(i);
+  }
+  S.page=1;
+  renderViewsBar();renderGrid();updateStatus();
+  toast(`ビュー「${v.name}」を適用中 (${S.data.length-S.hiddenRows.size}行表示)`,'success');
+}
+function clearView(){
+  S.currentView=null;
+  S.hiddenRows.clear();
+  S.page=1;
+  renderViewsBar();renderGrid();updateStatus();
+  toast('全データを表示','success');
+}
+function removeView(viewId){
+  S.views=S.views.filter(v=>v.id!==viewId);
+  if(S.currentView===viewId) clearView();
+  else renderViewsBar();
+  toast('ビューを削除しました','success');
+}
+
+// ========== A2: Instant Compare Column ==========
+function createCompareColumn(col1,col2){
+  saveState('比較列追加');
+  const pos=Math.max(col1,col2)+1;
+  const name=`⚡比較: ${S.headers[col1]} vs ${S.headers[col2]}`;
+  adjustFormulasColInsert(pos); _adjustInstantSets('col',pos,1);
+  S.headers.splice(pos,0,name);
+  S.data.forEach((r,ri)=>{
+    const v1=r[col1]||'',v2=r[col2]||'';
+    if(v1===''&&v2==='') r.splice(pos,0,'(両方空)');
+    else if(v1===v2) r.splice(pos,0,'✓ 一致');
+    else if(v1===''||v2==='') r.splice(pos,0,'⚠ 片方空');
+    else r.splice(pos,0,`✗ 差異`);
+  });
+  S.instant.cols.add(pos);
+  renderGrid();updateStatus();renderInstantList();
+  toast('比較列を追加しました（インスタント）','success');
+}
+
+// ========== B1: Cell Journal (Change History Tracking) ==========
+function _journalRecord(row,col,oldVal,newVal){
+  if(oldVal===newVal) return;
+  S.journal.push({
+    row,col,
+    cell:indexToColLetter(col)+(row+1),
+    old:oldVal,
+    new:newVal,
+    time:new Date().toLocaleTimeString()
+  });
+  // Keep max 500 entries
+  if(S.journal.length>500) S.journal=S.journal.slice(-500);
+  if(S.journalOpen) renderJournal();
+}
+function toggleJournalPanel(){
+  S.journalOpen=!S.journalOpen;
+  const panel=document.getElementById('journalPanel'),btn=document.getElementById('btnJournal');
+  if(S.journalOpen){
+    // Close other panels
+    if(S.validateOpen)toggleValidation();if(S.statsOpen)toggleStats();if(S.instantOpen)toggleInstantPanel();if(S.bookmarkOpen)toggleBookmarkPanel();if(S.diffOpen)closeDiffPanel();
+    panel.classList.add('open');btn.classList.add('active');renderJournal();
+  }else{panel.classList.remove('open');btn.classList.remove('active');}
+}
+function renderJournal(){
+  const el=document.getElementById('journalContent');
+  if(!S.journal.length){el.innerHTML='<p style="color:#9ca3af;font-size:12px;text-align:center;padding:20px 0">変更履歴はまだありません</p>';return;}
+  let h=`<div style="padding:4px 8px;font-size:11px;color:#6b7280;border-bottom:1px solid #e5e7eb">${S.journal.length}件の変更</div>`;
+  [...S.journal].reverse().forEach(j=>{
+    h+=`<div class="pcsv-journal-entry" onclick="navigateToIssue(${j.row},${j.col})" style="cursor:pointer">`;
+    h+=`<span class="j-cell">${j.cell}</span> `;
+    h+=`<span class="j-old">${escHtml(j.old||'(空)')}</span> → `;
+    h+=`<span class="j-new">${escHtml(j.new||'(空)')}</span> `;
+    h+=`<span class="j-time">${j.time}</span>`;
+    h+=`</div>`;
+  });
+  el.innerHTML=h;
+}
+function toggleJournalHighlight(){
+  S.journalHighlight=!S.journalHighlight;
+  renderBody();
+  toast(S.journalHighlight?'変更セルをハイライト中':'ハイライト解除',S.journalHighlight?'success':'info');
+}
+
+// ========== B2: CSV Diff (File Comparison) ==========
+function openDiffModal(){
+  document.getElementById('diffFileInput').value='';
+  openModal('diffModal');
+}
+function _parseCSVText(text){
+  const lines=text.split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length) return {headers:[],data:[]};
+  // Detect delimiter
+  const firstLine=lines[0];
+  let delim=',';
+  if(firstLine.split('\t').length>firstLine.split(',').length) delim='\t';
+  else if(firstLine.split(';').length>firstLine.split(',').length) delim=';';
+  const headers=lines[0].split(delim).map(h=>h.replace(/^"|"$/g,'').trim());
+  const data=[];
+  for(let i=1;i<lines.length;i++){
+    const row=lines[i].split(delim).map(c=>c.replace(/^"|"$/g,'').trim());
+    while(row.length<headers.length) row.push('');
+    data.push(row);
+  }
+  return {headers,data};
+}
+function runDiff(){
+  const fileInput=document.getElementById('diffFileInput');
+  if(!fileInput.files.length){toast('ファイルを選択してください','error');return;}
+  const reader=new FileReader();
+  reader.onload=function(e){
+    const parsed=_parseCSVText(e.target.result);
+    if(!parsed.headers.length){toast('CSVを解析できませんでした','error');return;}
+    // Compute diff
+    const result={added:[],deleted:[],changed:[],summary:{}};
+    const maxRows=Math.max(S.data.length,parsed.data.length);
+    const maxCols=Math.max(S.headers.length,parsed.headers.length);
+    // Header diff
+    result.headerDiff=[];
+    for(let c=0;c<maxCols;c++){
+      const h1=S.headers[c]||'';
+      const h2=parsed.headers[c]||'';
+      result.headerDiff.push({cur:h1,other:h2,match:h1===h2});
+    }
+    // Row diff
+    for(let r=0;r<maxRows;r++){
+      const curRow=S.data[r];
+      const otherRow=parsed.data[r];
+      if(!curRow&&otherRow){result.added.push({row:r,data:otherRow});continue;}
+      if(curRow&&!otherRow){result.deleted.push({row:r,data:curRow});continue;}
+      // Both exist - check cell differences
+      const cellDiffs=[];
+      for(let c=0;c<Math.max(curRow.length,otherRow.length);c++){
+        const v1=curRow[c]||'',v2=otherRow[c]||'';
+        if(v1!==v2) cellDiffs.push({col:c,cur:v1,other:v2});
+      }
+      if(cellDiffs.length) result.changed.push({row:r,diffs:cellDiffs});
+    }
+    result.summary={total:maxRows,added:result.added.length,deleted:result.deleted.length,changed:result.changed.length,identical:maxRows-result.added.length-result.deleted.length-result.changed.length};
+    S.diffResult=result;
+    closeModal('diffModal');
+    renderDiffResult();
+    // Open diff panel
+    S.diffOpen=true;
+    document.getElementById('diffPanel').classList.add('open');
+    toast(`Diff完了: ${result.changed.length}行変更, ${result.added.length}行追加, ${result.deleted.length}行削除`,'success');
+  };
+  reader.readAsText(fileInput.files[0]);
+}
+function renderDiffResult(){
+  const el=document.getElementById('diffContent');
+  if(!S.diffResult){el.innerHTML='';return;}
+  const r=S.diffResult;
+  let h='<div style="margin-bottom:12px">';
+  h+=`<div style="display:flex;gap:8px;flex-wrap:wrap">`;
+  h+=`<span style="padding:2px 8px;border-radius:4px;background:#d1fae5;font-size:11px">+${r.summary.added} 追加</span>`;
+  h+=`<span style="padding:2px 8px;border-radius:4px;background:#fee2e2;font-size:11px">-${r.summary.deleted} 削除</span>`;
+  h+=`<span style="padding:2px 8px;border-radius:4px;background:#fef9c3;font-size:11px">~${r.summary.changed} 変更</span>`;
+  h+=`<span style="padding:2px 8px;border-radius:4px;background:#e5e7eb;font-size:11px">=${r.summary.identical} 一致</span>`;
+  h+=`</div></div>`;
+  // Changed rows
+  if(r.changed.length){
+    h+='<h5 style="font-size:12px;color:#92400e;margin:8px 0 4px">変更された行</h5>';
+    r.changed.slice(0,100).forEach(ch=>{
+      h+=`<div style="margin-bottom:6px;padding:4px 6px;background:#fffbeb;border-radius:4px;font-size:11px;cursor:pointer" onclick="navigateToIssue(${ch.row},${ch.diffs[0].col})">`;
+      h+=`<strong>行${ch.row+1}</strong>: `;
+      ch.diffs.slice(0,5).forEach(d=>{
+        const colName=S.headers[d.col]||indexToColLetter(d.col);
+        h+=`<span style="margin-right:6px">${escHtml(colName)}: <span style="color:#ef4444;text-decoration:line-through">${escHtml(d.cur||'(空)')}</span>→<span style="color:#10b981">${escHtml(d.other||'(空)')}</span></span>`;
+      });
+      if(ch.diffs.length>5) h+=`<span style="color:#9ca3af">...他${ch.diffs.length-5}列</span>`;
+      h+=`</div>`;
+    });
+    if(r.changed.length>100) h+=`<p style="color:#9ca3af;font-size:11px;text-align:center">... 他${r.changed.length-100}行</p>`;
+  }
+  // Added rows
+  if(r.added.length){
+    h+='<h5 style="font-size:12px;color:#059669;margin:8px 0 4px">追加された行 (比較ファイルにのみ存在)</h5>';
+    r.added.slice(0,50).forEach(a=>{
+      h+=`<div style="margin-bottom:2px;padding:2px 6px;background:#d1fae5;border-radius:3px;font-size:11px">行${a.row+1}: ${escHtml(a.data.slice(0,5).join(', '))}${a.data.length>5?'...':''}</div>`;
+    });
+    if(r.added.length>50) h+=`<p style="color:#9ca3af;font-size:11px">... 他${r.added.length-50}行</p>`;
+  }
+  // Deleted rows
+  if(r.deleted.length){
+    h+='<h5 style="font-size:12px;color:#dc2626;margin:8px 0 4px">削除された行 (現在のファイルにのみ存在)</h5>';
+    r.deleted.slice(0,50).forEach(d=>{
+      h+=`<div style="margin-bottom:2px;padding:2px 6px;background:#fee2e2;border-radius:3px;font-size:11px">行${d.row+1}: ${escHtml(d.data.slice(0,5).join(', '))}${d.data.length>5?'...':''}</div>`;
+    });
+    if(r.deleted.length>50) h+=`<p style="color:#9ca3af;font-size:11px">... 他${r.deleted.length-50}行</p>`;
+  }
+  if(!r.changed.length&&!r.added.length&&!r.deleted.length){
+    h+='<div style="text-align:center;padding:20px;color:#16a34a;font-size:14px">完全一致 — 差分はありません</div>';
+  }
+  el.innerHTML=h;
+}
+function closeDiffPanel(){
+  S.diffOpen=false;S.diffResult=null;
+  document.getElementById('diffPanel').classList.remove('open');
+}
+
+// ========== C1: CSV Merge (File Join) ==========
+function openMergeModal(){
+  document.getElementById('mergeFileInput').value='';
+  document.getElementById('mergePreview').innerHTML='';
+  // Populate key column select
+  const sel=document.getElementById('mergeKeyCol');
+  sel.innerHTML=S.headers.map((h,i)=>`<option value="${i}">${escHtml(h)}</option>`).join('');
+  // Radio toggle
+  document.querySelectorAll('input[name="mergeType"]').forEach(r=>{
+    r.addEventListener('change',function(){
+      document.getElementById('mergeJoinOpts').style.display=this.value==='join'?'block':'none';
+    });
+  });
+  document.getElementById('mergeJoinOpts').style.display='none';
+  document.querySelector('input[name="mergeType"][value="union"]').checked=true;
+  openModal('mergeModal');
+}
+function runMerge(){
+  const fileInput=document.getElementById('mergeFileInput');
+  if(!fileInput.files.length){toast('ファイルを選択してください','error');return;}
+  const mergeType=document.querySelector('input[name="mergeType"]:checked').value;
+  const reader=new FileReader();
+  reader.onload=function(e){
+    const parsed=_parseCSVText(e.target.result);
+    if(!parsed.headers.length){toast('CSVを解析できませんでした','error');return;}
+    saveState('CSVマージ');
+    if(mergeType==='union'){
+      // UNION: append rows, align columns
+      // Map other columns to current columns
+      const colMap=parsed.headers.map(h=>{
+        const ci=S.headers.indexOf(h);
+        return ci;
+      });
+      // Add new columns that don't exist
+      const newCols=[];
+      parsed.headers.forEach((h,i)=>{
+        if(colMap[i]<0){
+          colMap[i]=S.headers.length;
+          S.headers.push(h);
+          S.data.forEach(r=>r.push(''));
+          newCols.push(h);
+        }
+      });
+      // Add rows
+      parsed.data.forEach(row=>{
+        const nr=new Array(S.headers.length).fill('');
+        row.forEach((v,i)=>{if(colMap[i]>=0)nr[colMap[i]]=v;});
+        S.data.push(nr);
+      });
+      closeModal('mergeModal');
+      renderGrid();updateStatus();
+      toast(`${parsed.data.length}行を追加しました (UNION)${newCols.length?` 新列: ${newCols.join(', ')}`:''}`,'success');
+    } else {
+      // JOIN: merge by key column
+      const keyColIdx=parseInt(document.getElementById('mergeKeyCol').value);
+      const keyHeader=S.headers[keyColIdx];
+      // Find matching column in other file
+      const otherKeyIdx=parsed.headers.indexOf(keyHeader);
+      if(otherKeyIdx<0){toast(`キー列「${keyHeader}」が比較ファイルに見つかりません`,'error');return;}
+      // Build lookup from other file
+      const lookup={};
+      parsed.data.forEach(row=>{
+        const key=row[otherKeyIdx]||'';
+        if(key) lookup[key]=row;
+      });
+      // Add new columns from other file (excluding key column)
+      const otherNewCols=[];
+      parsed.headers.forEach((h,i)=>{
+        if(i===otherKeyIdx) return;
+        const ci=S.headers.indexOf(h);
+        if(ci<0){
+          otherNewCols.push({srcIdx:i,destIdx:S.headers.length});
+          S.headers.push(h);
+          S.data.forEach(r=>r.push(''));
+        } else {
+          otherNewCols.push({srcIdx:i,destIdx:ci});
+        }
+      });
+      // Fill in data from matches
+      let matched=0;
+      S.data.forEach(row=>{
+        const key=row[keyColIdx]||'';
+        const otherRow=lookup[key];
+        if(otherRow){
+          matched++;
+          otherNewCols.forEach(c=>{
+            if(!row[c.destIdx])row[c.destIdx]=otherRow[c.srcIdx]||'';
+          });
+        }
+      });
+      closeModal('mergeModal');
+      renderGrid();updateStatus();
+      toast(`JOIN完了: ${matched}行がマッチ, ${otherNewCols.length}列を追加/更新`,'success');
+    }
+  };
+  reader.readAsText(fileInput.files[0]);
+}
+
+// ========== C2: Cell Bookmarks ==========
+function addBookmark(row,col){
+  if(S.bookmarks.some(b=>b.row===row&&b.col===col)){toast('既にブックマークされています');return;}
+  const label=prompt('ブックマークラベル (空欄可):','')??'';
+  S.bookmarks.push({id:S.bookmarkNextId++,row,col,label:label.trim(),cell:indexToColLetter(col)+(row+1)});
+  renderBody();
+  if(S.bookmarkOpen)renderBookmarks();
+  toast(`${indexToColLetter(col)}${row+1}をブックマークしました`,'success');
+}
+function removeBookmark(id){
+  S.bookmarks=S.bookmarks.filter(b=>b.id!==id);
+  renderBody();
+  if(S.bookmarkOpen)renderBookmarks();
+}
+function removeBookmarkAt(row,col){
+  S.bookmarks=S.bookmarks.filter(b=>!(b.row===row&&b.col===col));
+  renderBody();
+  if(S.bookmarkOpen)renderBookmarks();
+  toast('ブックマークを解除しました','success');
+}
+function toggleBookmarkPanel(){
+  S.bookmarkOpen=!S.bookmarkOpen;
+  const panel=document.getElementById('bookmarkPanel'),btn=document.getElementById('btnBookmarks');
+  if(S.bookmarkOpen){
+    if(S.validateOpen)toggleValidation();if(S.statsOpen)toggleStats();if(S.instantOpen)toggleInstantPanel();if(S.journalOpen)toggleJournalPanel();if(S.diffOpen)closeDiffPanel();
+    panel.classList.add('open');btn.classList.add('active');renderBookmarks();
+  }else{panel.classList.remove('open');btn.classList.remove('active');}
+}
+function renderBookmarks(){
+  const el=document.getElementById('bookmarkContent');
+  if(!S.bookmarks.length){
+    el.innerHTML='<p style="color:#9ca3af;font-size:12px;text-align:center;padding:20px 0">ブックマークはありません<br>セルを右クリック→「🔖 ブックマーク」で追加</p>';
+    return;
+  }
+  let h=`<div style="padding:4px 0 8px;font-size:11px;color:#6b7280">${S.bookmarks.length}件のブックマーク</div>`;
+  S.bookmarks.forEach(b=>{
+    const val=S.data[b.row]?.[b.col]||'';
+    h+=`<div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid #f3f4f6;cursor:pointer;font-size:12px" onclick="gotoBookmark(${b.id})" title="クリックでジャンプ">`;
+    h+=`<span style="font-weight:600;color:#2563eb;min-width:36px">${b.cell}</span>`;
+    h+=`<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.label?escHtml(b.label):escHtml(val)||'<span style=color:#d1d5db>(空)</span>'}</span>`;
+    h+=`<span style="color:#ef4444;cursor:pointer;font-size:14px" onclick="event.stopPropagation();removeBookmark(${b.id})" title="削除">✕</span>`;
+    h+=`</div>`;
+  });
+  el.innerHTML=h;
+}
+function gotoBookmark(id){
+  const b=S.bookmarks.find(x=>x.id===id);
+  if(!b)return;
+  if(S.pageSize>0) S.page=Math.floor(b.row/S.pageSize)+1;
+  S.selectedCell={row:b.row,col:b.col}; S.selRange=null;
+  renderGrid();updateSelectionStatus();updateFormulaBar();
+  const lr=domRowIndex(b.row),tbody=document.getElementById('tableTbody');
+  const tr=lr>=0?tbody.children[lr]:null;if(tr)tr.scrollIntoView({block:'center',behavior:'smooth'});
 }
 
 // ========== Init ==========
