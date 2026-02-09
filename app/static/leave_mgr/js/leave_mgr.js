@@ -7,8 +7,10 @@ let confirmCallback = null;
 let currentEditingLeave = null; // 編集中の休暇情報を保持
 let userNameCache = {}; // ユーザー名キャッシュ
 let employeeSearchTimeout = null; // 社員検索のデバウンス用
+let deputySearchTimeout = null; // 代務者検索のデバウンス用
 let bulkRegisterList = []; // 一括登録待ちリスト
 let bulkEmployeeSearchTimeout = null; // 一括登録用社員検索のデバウンス用
+let bulkDeputySearchTimeout = null; // 一括登録用代務者検索のデバウンス用
 
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
@@ -77,6 +79,17 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // 代務者入力時のリアルタイム検索
+    const leaveDeputiesInput = document.getElementById('leave-deputies');
+    if (leaveDeputiesInput) {
+        leaveDeputiesInput.addEventListener('input', function() {
+            const inputModeElement = document.querySelector('input[name="input-mode"]:checked');
+            if (inputModeElement && inputModeElement.value === 'auto') {
+                searchDeputies(this.value);
+            }
+        });
+    }
+
     // 一括登録用: 入力モード切り替え
     const bulkInputModeAuto = document.getElementById('bulk-input-mode-auto');
     const bulkInputModeManual = document.getElementById('bulk-input-mode-manual');
@@ -92,6 +105,17 @@ document.addEventListener('DOMContentLoaded', function() {
             const inputModeElement = document.querySelector('input[name="bulk-input-mode"]:checked');
             if (inputModeElement && inputModeElement.value === 'auto') {
                 searchBulkEmployees(this.value);
+            }
+        });
+    }
+
+    // 一括登録用: 代務者入力時のリアルタイム検索
+    const bulkLeaveDeputiesInput = document.getElementById('bulk-leave-deputies');
+    if (bulkLeaveDeputiesInput) {
+        bulkLeaveDeputiesInput.addEventListener('input', function() {
+            const inputModeElement = document.querySelector('input[name="bulk-input-mode"]:checked');
+            if (inputModeElement && inputModeElement.value === 'auto') {
+                searchBulkDeputies(this.value);
             }
         });
     }
@@ -356,6 +380,8 @@ function showLeaveModal(date = null) {
 
         // 候補リストをリセット
         document.getElementById('employee-suggestions-list').innerHTML =
+            '<div class="text-sm text-gray-400">名前を入力してください</div>';
+        document.getElementById('deputy-suggestions-list').innerHTML =
             '<div class="text-sm text-gray-400">名前を入力してください</div>';
 
         if (date) {
@@ -1224,6 +1250,10 @@ function showBulkRegisterModal() {
         if (suggestionsList) {
             suggestionsList.innerHTML = '<div class="text-sm text-gray-400">名前を入力してください</div>';
         }
+        const deputySuggestionsList = document.getElementById('bulk-deputy-suggestions-list');
+        if (deputySuggestionsList) {
+            deputySuggestionsList.innerHTML = '<div class="text-sm text-gray-400">名前を入力してください</div>';
+        }
 
         // 一括登録リストをクリア
         bulkRegisterList = [];
@@ -1259,6 +1289,7 @@ function initializeBulkLeaveTypeOptions() {
 // 一括登録用: 入力モード切り替え
 function toggleBulkInputMode(mode) {
     const suggestionPanel = document.getElementById('bulk-employee-suggestions');
+    const deputySuggestionPanel = document.getElementById('bulk-deputy-suggestions');
 
     if (!suggestionPanel) {
         console.warn('Bulk employee suggestions panel not found');
@@ -1267,8 +1298,14 @@ function toggleBulkInputMode(mode) {
 
     if (mode === 'auto') {
         suggestionPanel.style.display = 'block';
+        if (deputySuggestionPanel) {
+            deputySuggestionPanel.style.display = 'block';
+        }
     } else {
         suggestionPanel.style.display = 'none';
+        if (deputySuggestionPanel) {
+            deputySuggestionPanel.style.display = 'none';
+        }
     }
 }
 
@@ -1330,6 +1367,85 @@ function selectBulkEmployee(name, number) {
     const suggestionsList = document.getElementById('bulk-employee-suggestions-list');
     if (suggestionsList) {
         suggestionsList.innerHTML = '<div class="text-sm text-gray-400">名前を入力してください</div>';
+    }
+}
+
+// ========== 一括登録用の代務者検索機能 ==========
+
+// 一括登録用: 代務者検索（デバウンス付き）
+function searchBulkDeputies(query) {
+    clearTimeout(bulkDeputySearchTimeout);
+
+    const suggestionsList = document.getElementById('bulk-deputy-suggestions-list');
+    if (!suggestionsList) return;
+
+    if (!query || query.trim().length === 0) {
+        suggestionsList.innerHTML = '<div class="text-sm text-gray-400">名前を入力してください</div>';
+        return;
+    }
+
+    // カンマ区切りの最後の部分のみを検索対象とする
+    const parts = query.split(/[,、]/);
+    const lastPart = parts[parts.length - 1].trim();
+
+    if (!lastPart || lastPart.length === 0) {
+        suggestionsList.innerHTML = '<div class="text-sm text-gray-400">名前を入力してください</div>';
+        return;
+    }
+
+    bulkDeputySearchTimeout = setTimeout(() => {
+        fetch(`/tools/pluslist/api/search_employee?q=${encodeURIComponent(lastPart)}`)
+            .then(response => response.json())
+            .then(employees => displayBulkDeputySuggestions(employees))
+            .catch(error => {
+                console.error('Deputy search error:', error);
+                suggestionsList.innerHTML = '<div class="text-sm text-red-500">検索エラー</div>';
+            });
+    }, 300);
+}
+
+// 一括登録用: 代務者候補を表示
+function displayBulkDeputySuggestions(employees) {
+    const suggestionPanel = document.getElementById('bulk-deputy-suggestions');
+    const suggestionsList = document.getElementById('bulk-deputy-suggestions-list');
+    if (!suggestionsList || !suggestionPanel) return;
+
+    if (!employees || employees.length === 0) {
+        suggestionPanel.querySelector('.text-sm').innerHTML = '候補';
+        suggestionsList.innerHTML = '<div class="text-sm text-gray-400">該当する社員が見つかりません</div>';
+        return;
+    }
+
+    // 件数を表示
+    suggestionPanel.querySelector('.text-sm').innerHTML = `候補 <span class="employee-suggestions-count">(${employees.length}件)</span>`;
+
+    let html = '<div class="employee-suggestions-scroll">';
+    employees.forEach(emp => {
+        html += `<div class="employee-suggestion-item" onclick="selectBulkDeputy('${emp.employee_name.replace(/'/g, "\\'")}')">
+            <span class="employee-suggestion-name">${emp.employee_name}</span>
+            <span class="employee-suggestion-number">(${emp.employee_number})</span>
+        </div>`;
+    });
+    html += '</div>';
+
+    suggestionsList.innerHTML = html;
+}
+
+// 一括登録用: 代務者候補を選択
+function selectBulkDeputy(employeeName) {
+    const deputiesInput = document.getElementById('bulk-leave-deputies');
+    const currentValue = deputiesInput.value;
+
+    // カンマ区切りの最後の部分を選択した社員名で置き換え
+    const parts = currentValue.split(/[,、]/);
+    parts[parts.length - 1] = employeeName;
+
+    // カンマ区切りで再結合
+    deputiesInput.value = parts.join(', ');
+
+    const suggestionsList = document.getElementById('bulk-deputy-suggestions-list');
+    if (suggestionsList) {
+        suggestionsList.innerHTML = '<div class="text-sm text-gray-400">選択されました</div>';
     }
 }
 
@@ -1823,6 +1939,7 @@ async function executeCopyLeave() {
 // 入力モード切り替え
 function toggleInputMode(mode) {
     const suggestionPanel = document.getElementById('employee-suggestions');
+    const deputySuggestionPanel = document.getElementById('deputy-suggestions');
 
     if (!suggestionPanel) {
         console.warn('Employee suggestions panel not found');
@@ -1832,14 +1949,25 @@ function toggleInputMode(mode) {
     if (mode === 'auto') {
         // 自動入力モード：候補パネルを表示
         suggestionPanel.style.display = 'block';
+        if (deputySuggestionPanel) {
+            deputySuggestionPanel.style.display = 'block';
+        }
         // 現在の名前で検索を実行
         const nameInput = document.getElementById('leave-name');
         if (nameInput && nameInput.value) {
             searchEmployees(nameInput.value);
         }
+        // 現在の代務者で検索を実行
+        const deputiesInput = document.getElementById('leave-deputies');
+        if (deputiesInput && deputiesInput.value) {
+            searchDeputies(deputiesInput.value);
+        }
     } else {
         // 手動入力モード：候補パネルを非表示
         suggestionPanel.style.display = 'none';
+        if (deputySuggestionPanel) {
+            deputySuggestionPanel.style.display = 'none';
+        }
     }
 }
 
@@ -1906,5 +2034,89 @@ function selectEmployee(employeeNumber, employeeName) {
 
     // 候補リストをクリア
     document.getElementById('employee-suggestions-list').innerHTML =
+        '<div class="text-sm text-gray-400">選択されました</div>';
+}
+
+// ========== 代務者用の社員名簿PLUS連携機能 ==========
+
+// 代務者検索（デバウンス付き）
+function searchDeputies(query) {
+    // デバウンス処理（300ms待機）
+    clearTimeout(deputySearchTimeout);
+
+    if (!query || query.trim().length === 0) {
+        // 入力が空の場合
+        document.getElementById('deputy-suggestions-list').innerHTML =
+            '<div class="text-sm text-gray-400">名前を入力してください</div>';
+        return;
+    }
+
+    // カンマ区切りの最後の部分のみを検索対象とする
+    const parts = query.split(/[,、]/);
+    const lastPart = parts[parts.length - 1].trim();
+
+    if (!lastPart || lastPart.length === 0) {
+        document.getElementById('deputy-suggestions-list').innerHTML =
+            '<div class="text-sm text-gray-400">名前を入力してください</div>';
+        return;
+    }
+
+    deputySearchTimeout = setTimeout(() => {
+        // 社員名簿PLUSのAPIを呼び出し
+        fetch(`/tools/pluslist/api/search_employee?q=${encodeURIComponent(lastPart)}`)
+            .then(response => response.json())
+            .then(employees => {
+                displayDeputySuggestions(employees);
+            })
+            .catch(error => {
+                console.error('Deputy search error:', error);
+                document.getElementById('deputy-suggestions-list').innerHTML =
+                    '<div class="text-sm text-red-500">検索エラー</div>';
+            });
+    }, 300);
+}
+
+// 代務者候補を表示
+function displayDeputySuggestions(employees) {
+    const suggestionPanel = document.getElementById('deputy-suggestions');
+    const listContainer = document.getElementById('deputy-suggestions-list');
+
+    if (employees.length === 0) {
+        suggestionPanel.querySelector('.text-sm').innerHTML = '候補';
+        listContainer.innerHTML = '<div class="text-sm text-gray-400">該当する社員が見つかりません</div>';
+        return;
+    }
+
+    // 件数を表示
+    suggestionPanel.querySelector('.text-sm').innerHTML = `候補 <span class="employee-suggestions-count">(${employees.length}件)</span>`;
+
+    let html = '<div class="employee-suggestions-scroll">';
+    employees.forEach(emp => {
+        html += `
+            <div class="employee-suggestion-item" onclick="selectDeputy('${emp.employee_name.replace(/'/g, "\\'")}')">
+                <span class="employee-suggestion-name">${emp.employee_name}</span>
+                <span class="employee-suggestion-number">(${emp.employee_number})</span>
+            </div>
+        `;
+    });
+    html += '</div>';
+
+    listContainer.innerHTML = html;
+}
+
+// 代務者候補を選択
+function selectDeputy(employeeName) {
+    const deputiesInput = document.getElementById('leave-deputies');
+    const currentValue = deputiesInput.value;
+
+    // カンマ区切りの最後の部分を選択した社員名で置き換え
+    const parts = currentValue.split(/[,、]/);
+    parts[parts.length - 1] = employeeName;
+
+    // カンマ区切りで再結合
+    deputiesInput.value = parts.join(', ');
+
+    // 候補リストをクリア
+    document.getElementById('deputy-suggestions-list').innerHTML =
         '<div class="text-sm text-gray-400">選択されました</div>';
 }

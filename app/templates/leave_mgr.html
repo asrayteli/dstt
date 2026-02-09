@@ -132,7 +132,17 @@
             
             <div class="form-group">
                 <label class="form-label">代務者（カンマ区切りで複数入力可）</label>
-                <input type="text" id="leave-deputies" class="form-input" placeholder="例: 田中, 佐藤">
+                <input type="text" id="leave-deputies" class="form-input" placeholder="例: 田中, 佐藤" autocomplete="off">
+            </div>
+
+            <!-- 代務者候補パネル（自動入力モード時のみ表示） -->
+            <div id="deputy-suggestions" style="display: none; margin: -8px 0 12px 0;">
+                <div style="border: 1px solid #d1d5db; border-radius: 4px; background: white; padding: 8px;">
+                    <div class="text-sm text-gray-500 mb-2">候補</div>
+                    <div id="deputy-suggestions-list">
+                        <div class="text-sm text-gray-400">名前を入力してください</div>
+                    </div>
+                </div>
             </div>
             
             <div class="form-group">
@@ -418,7 +428,17 @@
 
                 <div class="form-group">
                     <label class="form-label">代務者（カンマ区切り）</label>
-                    <input type="text" id="bulk-leave-deputies" class="form-input" placeholder="田中, 佐藤">
+                    <input type="text" id="bulk-leave-deputies" class="form-input" placeholder="田中, 佐藤" autocomplete="off">
+                </div>
+
+                <!-- 代務者候補パネル（自動入力モード時のみ表示） -->
+                <div id="bulk-deputy-suggestions" style="display: none; margin: -8px 0 12px 0;">
+                    <div style="border: 1px solid #d1d5db; border-radius: 4px; background: white; padding: 8px;">
+                        <div class="text-sm text-gray-500 mb-2">候補</div>
+                        <div id="bulk-deputy-suggestions-list">
+                            <div class="text-sm text-gray-400">名前を入力してください</div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="form-group">
