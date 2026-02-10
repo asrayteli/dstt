@@ -743,6 +743,9 @@
     content: '⚡'; position: absolute; top: -2px; right: 1px; font-size: 8px; opacity: 0.6;
   }
   .inst-badge { display: inline-block; background: #8b5cf6; color: #fff; font-size: 9px; padding: 0 3px; border-radius: 3px; margin-right: 3px; vertical-align: middle; line-height: 14px; }
+  .inst-reflected-badge { display: inline-block; background: #059669; color: #fff; font-size: 8px; padding: 0 3px; border-radius: 3px; margin-left: 2px; vertical-align: middle; line-height: 12px; }
+  .pcsv-table td.cell-instant.inst-reflected, .pcsv-table thead th.col-instant.inst-reflected { background: #ecfdf5 !important; color: #065f46; }
+  .pcsv-table td.row-num.row-instant.inst-reflected { background: #d1fae5 !important; color: #059669; }
   /* Instant management panel */
   .pcsv-inst-calc { display: flex; gap: 6px; margin-bottom: 8px; }
   .pcsv-inst-calc input { flex: 1; font-size: 12px; padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-family: monospace; }
@@ -1548,18 +1551,21 @@ const S = {
   dragging: false, dragStart: null,
   // Formula bar cell-reference selection
   fxSelecting: false, _fxRefPos: -1, _fxRefEnd: -1,
-  // Instant (session-only temporary rows/cols/cells)
+  // Instant (session-only temporary rows/cols/cells) — stored SEPARATELY from S.data/S.headers
   instant: {
-    rows: new Set(),    // data row indices that are instant
-    cols: new Set(),    // header col indices that are instant
-    cells: {},          // "row,col" -> {original: string} for overlay cells
+    rows: [],           // [{id, afterRow, data:[], formulas:{colIdx:formula}, reflected:false}]
+    cols: [],           // [{id, afterCol, header, data:{rowIdx:val}, formulas:{rowIdx:formula}, reflected:false}]
+    cells: {},          // "row,col" -> {original: string} for overlay cells (real cells only)
     options: {
-      instantToInstantRef: false, // allow instant-to-instant references
+      instantToInstantRef: false, // allow instant-to-instant references (requires reflected=true too)
       cellOverlayRef: false,      // use overlay value when other cells reference
     },
     calcHistory: [],    // [{id, expr, result, timestamp}]
     calcNextId: 1,
+    rowNextId: 1,
+    colNextId: 1,
   },
+  selectedInstCell: null, // {type:'row',instRow:obj,col:realColIdx} | {type:'col',row:realRowIdx,instCol:obj} | null
   instantOpen: false,   // management panel open state
   // Views (A1)
   views: [],            // [{id,name,filter}]
@@ -1598,14 +1604,14 @@ function isInRange(row,col) {
   return row>=r1 && row<=r2 && col>=c1 && col<=c2;
 }
 function clearSelection() {
-  S.selectedCell=null; S.selectedRows.clear(); S.selectedCols.clear(); S.multiCells.clear(); S.selRange=null;
+  S.selectedCell=null; S.selectedInstCell=null; S.selectedRows.clear(); S.selectedCols.clear(); S.multiCells.clear(); S.selRange=null;
 }
 
 // ========== Undo / Redo ==========
 function _serializeSets(){return{dR:[...S.disabledRows],dC:[...S.disabledCols],dCe:[...S.disabledCells],hR:[...S.hiddenRows],hC:[...S.hiddenCols],hCe:[...S.hiddenCells],
-  iR:[...S.instant.rows],iC:[...S.instant.cols],iCe:JSON.parse(JSON.stringify(S.instant.cells)),iOpt:{...S.instant.options}};}
+  iR:JSON.parse(JSON.stringify(S.instant.rows)),iC:JSON.parse(JSON.stringify(S.instant.cols)),iCe:JSON.parse(JSON.stringify(S.instant.cells)),iOpt:{...S.instant.options},iRNid:S.instant.rowNextId,iCNid:S.instant.colNextId};}
 function _restoreSets(s){if(!s)return;S.disabledRows=new Set(s.dR||[]);S.disabledCols=new Set(s.dC||[]);S.disabledCells=new Set(s.dCe||[]);S.hiddenRows=new Set(s.hR||[]);S.hiddenCols=new Set(s.hC||[]);S.hiddenCells=new Set(s.hCe||[]);
-  S.instant.rows=new Set(s.iR||[]);S.instant.cols=new Set(s.iC||[]);S.instant.cells=s.iCe||{};if(s.iOpt)S.instant.options={...s.iOpt};}
+  S.instant.rows=s.iR||[];S.instant.cols=s.iC||[];S.instant.cells=s.iCe||{};if(s.iOpt)S.instant.options={...s.iOpt};if(s.iRNid)S.instant.rowNextId=s.iRNid;if(s.iCNid)S.instant.colNextId=s.iCNid;}
 function saveState(label) {
   S.undoStack.push({label,headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data)),formulas:JSON.parse(JSON.stringify(S.formulas)),sets:_serializeSets()});
   if(S.undoStack.length>50) S.undoStack.shift();
@@ -1651,7 +1657,7 @@ async function uploadFile(file) {
     S.sortCol=-1; S.sortDir=0; S.undoStack=[]; S.redoStack=[]; S.issueMap={}; S.formulas={};
     S.disabledRows=new Set(); S.disabledCols=new Set(); S.disabledCells=new Set();
     S.hiddenRows=new Set(); S.hiddenCols=new Set(); S.hiddenCells=new Set(); S.dragging=false; S.dragStart=null;
-    S.instant.rows=new Set(); S.instant.cols=new Set(); S.instant.cells={}; S.instant.calcHistory=[]; S.instant.calcNextId=1;
+    S.instant.rows=[]; S.instant.cols=[]; S.instant.cells={}; S.instant.calcHistory=[]; S.instant.calcNextId=1; S.instant.rowNextId=1; S.instant.colNextId=1; S.selectedInstCell=null;
     S.views=[]; S.viewsNextId=1; S.currentView=null; S.journal=[]; S.journalHighlight=false;
     S.diffResult=null; S.bookmarks=[]; S.bookmarkNextId=1;
     showEditor(); renderGrid(); updateStatus(); enableToolbar();
@@ -1687,76 +1693,157 @@ function getPageData(){
 }
 function domRowIndex(row){const{pageRows}=getPageData();return pageRows.indexOf(row);}
 function domColIndex(col){return getVisibleCols().indexOf(col);}
+// Build visual column list interleaving real cols and instant cols
+function _buildVisualCols(visCols){
+  const result=[];
+  // Instant cols before first col (afterCol < 0)
+  S.instant.cols.filter(ic=>ic.afterCol<0).sort((a,b)=>a.id-b.id).forEach(ic=>{result.push({t:'i',obj:ic});});
+  visCols.forEach(ci=>{
+    result.push({t:'r',idx:ci});
+    S.instant.cols.filter(ic=>ic.afterCol===ci).sort((a,b)=>a.id-b.id).forEach(ic=>{result.push({t:'i',obj:ic});});
+  });
+  // Instant cols after last col
+  if(visCols.length){
+    const lastCol=visCols[visCols.length-1];
+    S.instant.cols.filter(ic=>ic.afterCol>lastCol&&!visCols.includes(ic.afterCol)).sort((a,b)=>a.id-b.id).forEach(ic=>{result.push({t:'i',obj:ic});});
+  }
+  return result;
+}
+// Build visual row list interleaving real rows and instant rows
+function _buildVisualRows(pageRows){
+  const result=[];
+  // Instant rows before first row (afterRow < 0)
+  S.instant.rows.filter(ir=>ir.afterRow<0).sort((a,b)=>a.id-b.id).forEach(ir=>{result.push({t:'i',obj:ir});});
+  pageRows.forEach(ri=>{
+    result.push({t:'r',idx:ri});
+    S.instant.rows.filter(ir=>ir.afterRow===ri).sort((a,b)=>a.id-b.id).forEach(ir=>{result.push({t:'i',obj:ir});});
+  });
+  return result;
+}
+// Helper: check if a real row is an instant row (always false now, instants are separate)
+function _isInstRow(idx){return false;}
+function _isInstCol(idx){return false;}
+// Find instant row/col by id
+function _findInstRow(id){return S.instant.rows.find(ir=>ir.id===id)||null;}
+function _findInstCol(id){return S.instant.cols.find(ic=>ic.id===id)||null;}
+// Get instant cell value for formula context
+function _getInstantCellVal(instObj,type,idx){
+  if(type==='row'){
+    // instObj is an instant row, idx is real col index
+    return instObj.data[idx]||'';
+  } else {
+    // instObj is an instant col, idx is real row index
+    return instObj.data[idx]!=null?String(instObj.data[idx]):'';
+  }
+}
 
 // ========== Grid Rendering ==========
 function renderGrid() { renderHeader(); renderBody(); renderPagination(); }
 function renderHeader() {
   const thead=document.getElementById('tableThead'), visCols=getVisibleCols();
+  const vCols=_buildVisualCols(visCols);
   let h='<tr><th class="row-num">#</th>';
-  visCols.forEach(i=>{
-    let arrow='<svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>';
-    if(S.sortCol===i&&S.sortDir===1) arrow='<svg class="sort-icon asc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>';
-    else if(S.sortCol===i&&S.sortDir===2) arrow='<svg class="sort-icon desc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>';
-    const esc=escHtml(S.headers[i]);
-    let cl=S.selectedCols.has(i)||(S.selectedCell&&S.selectedCell.col===i)||(S.selRange&&i>=S.selRange.c1&&i<=S.selRange.c2)?' col-highlight':'';
-    if(S.disabledCols.has(i)) cl+=' col-disabled';
-    if(S.instant.cols.has(i)) cl+=' col-instant';
-    const instPre=S.instant.cols.has(i)?'<span class="inst-badge">⚡</span>':'';
-    h+=`<th class="${cl}" data-col="${i}" onclick="onHeaderClick(${i},event)" oncontextmenu="onHeaderCtx(event,${i})" title="${esc}"><div class="th-content"><span class="th-label">${instPre}${esc}</span>${arrow}</div></th>`;
+  vCols.forEach(vc=>{
+    if(vc.t==='r'){
+      const i=vc.idx;
+      let arrow='<svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>';
+      if(S.sortCol===i&&S.sortDir===1) arrow='<svg class="sort-icon asc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>';
+      else if(S.sortCol===i&&S.sortDir===2) arrow='<svg class="sort-icon desc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>';
+      const esc=escHtml(S.headers[i]);
+      let cl=S.selectedCols.has(i)||(S.selectedCell&&S.selectedCell.col===i)||(S.selRange&&i>=S.selRange.c1&&i<=S.selRange.c2)?' col-highlight':'';
+      if(S.disabledCols.has(i)) cl+=' col-disabled';
+      h+=`<th class="${cl}" data-col="${i}" onclick="onHeaderClick(${i},event)" oncontextmenu="onHeaderCtx(event,${i})" title="${esc}"><div class="th-content"><span class="th-label">${esc}</span>${arrow}</div></th>`;
+    } else {
+      const ic=vc.obj;
+      let cl='col-instant'+(ic.reflected?' inst-reflected':'');
+      const refBadge=ic.reflected?'<span class="inst-reflected-badge">反映</span>':'';
+      h+=`<th class="${cl}" data-inst-col-id="${ic.id}" oncontextmenu="onInstColCtx(event,${ic.id})" title="${escHtml(ic.header)}"><div class="th-content"><span class="th-label"><span class="inst-badge">⚡</span>${escHtml(ic.header)}${refBadge}</span></div></th>`;
+    }
   });
   h+='</tr>'; thead.innerHTML=h;
 }
 function renderBody() {
   recalcAllFormulas();
   const visRows=getVisibleRows(), visCols=getVisibleCols(), tbody=document.getElementById('tableTbody');
+  const vCols=_buildVisualCols(visCols);
   // Paginate visible rows
   let pageRows;
   if(S.pageSize===0) pageRows=visRows;
   else { const st=(S.page-1)*S.pageSize,en=Math.min(st+S.pageSize,visRows.length); pageRows=visRows.slice(st,en); }
+  const vRows=_buildVisualRows(pageRows);
   let h='';
-  for(let ri=0;ri<pageRows.length;ri++){
-    const di=pageRows[ri], row=S.data[di], isRS=S.selectedRows.has(di);
-    const rowHL=(S.selectedCell&&S.selectedCell.row===di)||(S.selRange&&di>=S.selRange.r1&&di<=S.selRange.r2);
-    const rowDis=S.disabledRows.has(di);
-    const rowInst=S.instant.rows.has(di);
-    h+=`<tr class="${isRS?'row-selected':''}${rowInst?' instant-row':''}" data-ridx="${di}">`;
-    const rnCls='row-num'+(rowHL?' row-highlight':'')+(rowDis?' row-disabled':'')+(rowInst?' row-instant':'');
-    const rnLabel=rowInst?`<span class="inst-badge">⚡</span>${di+1}`:`${di+1}`;
-    h+=`<td class="${rnCls}" onclick="toggleRowSelect(${di},event)" oncontextmenu="onRowCtx(event,${di})">${rnLabel}</td>`;
-    for(let vi=0;vi<visCols.length;vi++){
-      const ci=visCols[vi];
-      const val=ci<row.length?row[ci]:'';
-      const isSel=S.selectedCell&&S.selectedCell.row===di&&S.selectedCell.col===ci;
-      const ik=`${di},${ci}`;
-      let cls='';
-      if(isSel) cls+=' selected';
-      if(S.multiCells.has(ik)) cls+=' multi-selected';
-      if(S.selectedCols.has(ci)) cls+=' col-selected';
-      if(isInRange(di,ci)){
-        cls+=' in-range';
-        if(S.selRange){
-          if(di===S.selRange.r1) cls+=' range-top';
-          if(di===S.selRange.r2) cls+=' range-bottom';
-          if(ci===S.selRange.c1) cls+=' range-left';
-          if(ci===S.selRange.c2) cls+=' range-right';
+  for(let vri=0;vri<vRows.length;vri++){
+    const vr=vRows[vri];
+    if(vr.t==='r'){
+      // ---- Real row ----
+      const di=vr.idx, row=S.data[di], isRS=S.selectedRows.has(di);
+      const rowHL=(S.selectedCell&&S.selectedCell.row===di)||(S.selRange&&di>=S.selRange.r1&&di<=S.selRange.r2);
+      const rowDis=S.disabledRows.has(di);
+      h+=`<tr class="${isRS?'row-selected':''}" data-ridx="${di}">`;
+      const rnCls='row-num'+(rowHL?' row-highlight':'')+(rowDis?' row-disabled':'');
+      h+=`<td class="${rnCls}" onclick="toggleRowSelect(${di},event)" oncontextmenu="onRowCtx(event,${di})">${di+1}</td>`;
+      for(let vci=0;vci<vCols.length;vci++){
+        const vc=vCols[vci];
+        if(vc.t==='r'){
+          const ci=vc.idx;
+          const val=ci<row.length?row[ci]:'';
+          const isSel=S.selectedCell&&S.selectedCell.row===di&&S.selectedCell.col===ci;
+          const ik=`${di},${ci}`;
+          let cls='';
+          if(isSel) cls+=' selected';
+          if(S.multiCells.has(ik)) cls+=' multi-selected';
+          if(S.selectedCols.has(ci)) cls+=' col-selected';
+          if(isInRange(di,ci)){
+            cls+=' in-range';
+            if(S.selRange){
+              if(di===S.selRange.r1) cls+=' range-top';
+              if(di===S.selRange.r2) cls+=' range-bottom';
+              if(ci===S.selRange.c1) cls+=' range-left';
+              if(ci===S.selRange.c2) cls+=' range-right';
+            }
+          }
+          if(S.hiddenCells.has(ik)) cls+=' cell-hidden';
+          else if(S.disabledCells.has(ik)||rowDis||S.disabledCols.has(ci)) cls+=' cell-disabled';
+          if(S.instant.cells.hasOwnProperty(ik)) cls+=' cell-instant-overlay';
+          if(S.issueMap[ik]) cls+=S.issueMap[ik]==='error'?' cell-error':' cell-warning';
+          if(S.searchMatches.some(m=>m.row===di&&m.col===ci)) cls+=' cell-match';
+          if(S.journalHighlight&&S.journal.some(j=>j.row===di&&j.col===ci)) cls+=' cell-changed';
+          if(S.bookmarks.some(b=>b.row===di&&b.col===ci)) cls+=' cell-bookmarked';
+          const displayVal=S.hiddenCells.has(ik)?'':escHtml(val);
+          h+=`<td class="${cls}" data-ridx="${di}" data-cidx="${ci}" onmousedown="onCellMouseDown(${di},${ci},event)" ondblclick="startEdit(${di},${ci})" oncontextmenu="onCellCtx(event,${di},${ci})">${displayVal}</td>`;
+        } else {
+          // Instant col cell for a real row
+          const ic=vc.obj;
+          const icVal=ic.data[di]!=null?String(ic.data[di]):'';
+          const isSel=S.selectedInstCell&&S.selectedInstCell.type==='col'&&S.selectedInstCell.instCol.id===ic.id&&S.selectedInstCell.row===di;
+          let cls='cell-instant'+(ic.reflected?' inst-reflected':'')+(isSel?' selected':'');
+          h+=`<td class="${cls}" data-ridx="${di}" data-inst-col-id="${ic.id}" onmousedown="onInstCellMouseDown('col',${di},${ic.id},event)" ondblclick="startInstEdit('col',${di},${ic.id})" oncontextmenu="onInstCellCtx(event,'col',${di},${ic.id})">${escHtml(icVal)}</td>`;
         }
       }
-      // Disable / Hide styling
-      if(S.hiddenCells.has(ik)) cls+=' cell-hidden';
-      else if(S.disabledCells.has(ik)||rowDis||S.disabledCols.has(ci)) cls+=' cell-disabled';
-      // Instant styling
-      if(rowInst||S.instant.cols.has(ci)) cls+=' cell-instant';
-      else if(S.instant.cells.hasOwnProperty(ik)) cls+=' cell-instant-overlay';
-      if(S.issueMap[ik]) cls+=S.issueMap[ik]==='error'?' cell-error':' cell-warning';
-      if(S.searchMatches.some(m=>m.row===di&&m.col===ci)) cls+=' cell-match';
-      // Journal highlight (B1)
-      if(S.journalHighlight&&S.journal.some(j=>j.row===di&&j.col===ci)) cls+=' cell-changed';
-      // Bookmark indicator (C2)
-      if(S.bookmarks.some(b=>b.row===di&&b.col===ci)) cls+=' cell-bookmarked';
-      const displayVal=S.hiddenCells.has(ik)?'':escHtml(val);
-      h+=`<td class="${cls}" data-ridx="${di}" data-cidx="${ci}" onmousedown="onCellMouseDown(${di},${ci},event)" ondblclick="startEdit(${di},${ci})" oncontextmenu="onCellCtx(event,${di},${ci})">${displayVal}</td>`;
+      h+='</tr>';
+    } else {
+      // ---- Instant row ----
+      const ir=vr.obj;
+      h+=`<tr class="instant-row" data-inst-row-id="${ir.id}">`;
+      const rnCls='row-num row-instant'+(ir.reflected?' inst-reflected':'');
+      const refBadge=ir.reflected?'<span class="inst-reflected-badge">反映</span>':'';
+      h+=`<td class="${rnCls}" oncontextmenu="onInstRowCtx(event,${ir.id})"><span class="inst-badge">⚡</span>${refBadge}</td>`;
+      for(let vci=0;vci<vCols.length;vci++){
+        const vc=vCols[vci];
+        if(vc.t==='r'){
+          // Instant row, real col
+          const ci=vc.idx;
+          const val=ir.data[ci]!=null?String(ir.data[ci]):'';
+          const isSel=S.selectedInstCell&&S.selectedInstCell.type==='row'&&S.selectedInstCell.instRow.id===ir.id&&S.selectedInstCell.col===ci;
+          let cls='cell-instant'+(ir.reflected?' inst-reflected':'')+(isSel?' selected':'');
+          h+=`<td class="${cls}" data-inst-row-id="${ir.id}" data-cidx="${ci}" onmousedown="onInstCellMouseDown('row',${ir.id},${ci},event)" ondblclick="startInstEdit('row',${ir.id},${ci})" oncontextmenu="onInstCellCtx(event,'row',${ir.id},${ci})">${escHtml(val)}</td>`;
+        } else {
+          // Instant row × instant col intersection → empty
+          h+=`<td class="cell-instant" style="background:#ede9fe"></td>`;
+        }
+      }
+      h+='</tr>';
     }
-    h+='</tr>';
   }
   tbody.innerHTML=h;
 }
@@ -1815,7 +1902,7 @@ function onCellMouseDown(row,col,event) {
   }
   // Start potential drag (don't add .dragging class yet — only on actual movement)
   S.dragStart={row,col}; S.dragging=false;
-  S.selRange=null; S.selectedCell={row,col}; S.selectedCols.clear(); S.selectedRows.clear(); S.multiCells.clear();
+  S.selRange=null; S.selectedCell={row,col}; S.selectedInstCell=null; S.selectedCols.clear(); S.selectedRows.clear(); S.multiCells.clear();
   renderGrid(); updateFormulaBar(); updateSelectionSummary(); updateSelectionStatus();
 }
 function onGridMouseMove(e) {
@@ -1893,7 +1980,7 @@ function onHeaderClick(colIdx,event) {
 }
 function selectCell(row,col) {
   if(S.editing) return;
-  S.selRange=null; S.selectedCell={row,col}; S.selectedCols.clear(); S.multiCells.clear();
+  S.selRange=null; S.selectedCell={row,col}; S.selectedInstCell=null; S.selectedCols.clear(); S.multiCells.clear();
   renderGrid(); updateFormulaBar(); updateSelectionSummary(); updateSelectionStatus();
 }
 function toggleRowSelect(idx,event) {
@@ -1969,16 +2056,9 @@ function getCellVal(row,col){
   if(S.hiddenRows.has(row)||S.hiddenCols.has(col)) return '';
   const ck=`${row},${col}`;
   if(S.disabledCells.has(ck)||S.hiddenCells.has(ck)) return '';
-  // Instant reference rules (uses global _formulaCtxInstant)
-  const fi=_formulaCtxInstant;
-  const isInstCell=S.instant.rows.has(row)||S.instant.cols.has(col);
+  // Overlay cells: when not in instant formula context and overlay ref not enabled, return original
   const hasOverlay=S.instant.cells.hasOwnProperty(ck);
-  if(isInstCell){
-    if(!fi) return ''; // normal→instant: skip
-    if(!S.instant.options.instantToInstantRef) return ''; // instant→instant: skip by default
-    return S.data[row]?.[col]||'';
-  }
-  if(hasOverlay && !fi && !S.instant.options.cellOverlayRef){
+  if(hasOverlay && !_formulaCtxInstant && !S.instant.options.cellOverlayRef){
     return S.instant.cells[ck].original;
   }
   return S.data[row][col]||'';
@@ -2156,14 +2236,29 @@ function evaluateFormula(formula){
 let _recalcing=false, _formulaCtxInstant=false; // global context for formula evaluation chain
 function recalcAllFormulas(){
   if(_recalcing)return; _recalcing=true;
+  // 1. Recalculate real cell formulas (never in instant context)
+  _formulaCtxInstant=false;
   for(const key in S.formulas){
     const [r,c]=key.split(',').map(Number);
     if(r<S.data.length&&c<S.headers.length){
-      // Set global context: is this formula in an instant cell?
-      _formulaCtxInstant=S.instant.rows.has(r)||S.instant.cols.has(c);
       try{S.data[r][c]=String(evaluateFormula(S.formulas[key]));}catch(e){S.data[r][c]='#ERROR';}
     }else{delete S.formulas[key];}
   }
+  // 2. Recalculate instant row formulas
+  _formulaCtxInstant=true;
+  S.instant.rows.forEach(ir=>{
+    for(const cStr in ir.formulas){
+      const c=parseInt(cStr);
+      try{ir.data[c]=String(evaluateFormula(ir.formulas[cStr]));}catch(e){ir.data[c]='#ERROR';}
+    }
+  });
+  // 3. Recalculate instant col formulas
+  S.instant.cols.forEach(ic=>{
+    for(const rStr in ic.formulas){
+      const r=parseInt(rStr);
+      try{ic.data[r]=String(evaluateFormula(ic.formulas[rStr]));}catch(e){ic.data[r]='#ERROR';}
+    }
+  });
   _formulaCtxInstant=false; _recalcing=false;
 }
 function adjustFormulasRowInsert(atIdx){
@@ -2182,12 +2277,24 @@ function adjustFormulasColDelete(atIdx){
 // ========== Formula Bar ==========
 function updateFormulaBar() {
   const ref=document.getElementById('cellRef'), inp=document.getElementById('formulaInput');
-  if(S.selectedCell) {
+  if(S.selectedInstCell) {
+    const sic=S.selectedInstCell;
+    if(sic.type==='row'){
+      ref.textContent=`⚡ IR${sic.instRow.id}:${indexToColLetter(sic.col)}`;
+      const fx=sic.instRow.formulas[sic.col]||'';
+      inp.value=fx||sic.instRow.data[sic.col]||'';
+      inp.classList.toggle('has-formula', !!fx||inp.value.startsWith('='));
+    } else {
+      ref.textContent=`⚡ IC${sic.instCol.id}:${sic.row+1}`;
+      const fx=sic.instCol.formulas[sic.row]||'';
+      inp.value=fx||sic.instCol.data[sic.row]||'';
+      inp.classList.toggle('has-formula', !!fx||inp.value.startsWith('='));
+    }
+  } else if(S.selectedCell) {
     const colL=indexToColLetter(S.selectedCell.col);
-    const isInst=S.instant.rows.has(S.selectedCell.row)||S.instant.cols.has(S.selectedCell.col)||S.instant.cells.hasOwnProperty(`${S.selectedCell.row},${S.selectedCell.col}`);
-    ref.textContent=`${isInst?'⚡ ':''}${colL}${S.selectedCell.row+1}`;
+    const hasOverlay=S.instant.cells.hasOwnProperty(`${S.selectedCell.row},${S.selectedCell.col}`);
+    ref.textContent=`${hasOverlay?'⚡ ':''}${colL}${S.selectedCell.row+1}`;
     const fk=`${S.selectedCell.row},${S.selectedCell.col}`;
-    // Show formula text if cell has a formula, otherwise show value
     inp.value=S.formulas[fk]||S.data[S.selectedCell.row]?.[S.selectedCell.col]||'';
     inp.classList.toggle('has-formula', !!S.formulas[fk]||inp.value.startsWith('='));
   } else { ref.textContent='-'; inp.value=''; inp.classList.remove('has-formula'); }
@@ -2210,6 +2317,17 @@ function onFormulaKey(e) {
   else{S._fxRefPos=-1;S._fxRefEnd=-1;} // reset ref tracking on manual typing
 }
 function commitFormula() {
+  // Handle instant cell formula commit
+  if(S.selectedInstCell){
+    const v=document.getElementById('formulaInput').value;
+    const sic=S.selectedInstCell;
+    if(sic.type==='row'){
+      commitInstEdit('row',sic.instRow.id,sic.col,v);
+    }else{
+      commitInstEdit('col',sic.row,sic.instCol.id,v);
+    }
+    return;
+  }
   if(!S.selectedCell) return;
   const v=document.getElementById('formulaInput').value;
   const {row,col}=S.selectedCell, fk=`${row},${col}`;
@@ -2428,7 +2546,7 @@ function deleteSelectedRows() {
 }
 function deleteRowAt(idx) {
   saveState('行削除'); adjustFormulasRowDelete(idx);
-  S.instant.rows.delete(idx); _adjustInstantSets('row',idx,-1);
+  _adjustInstantSets('row',idx,-1);
   S.data.splice(idx,1); clearSelection();
   renderGrid();updateStatus();toast('行を削除しました','success');
 }
@@ -2736,10 +2854,10 @@ function onCellCtx(e,row,col) {
   } else {
     items.push({label:'🔖 ブックマーク',action:`addBookmark(${row},${col})`});
   }
-  // Instant cell overlay
+  // Instant cell overlay (only for real cells)
   if(S.instant.cells.hasOwnProperty(ck)){
     items.push({label:'⚡ インスタントメモを解除',action:`removeInstantCellOverlay(${row},${col})`});
-  } else if(!S.instant.rows.has(row)&&!S.instant.cols.has(col)){
+  } else {
     items.push({label:'⚡ インスタントメモ',action:`createInstantCellOverlay(${row},${col})`});
   }
   // Disable/Hide for this cell
@@ -2777,7 +2895,6 @@ function onRowCtx(e,row) {
     {label:'平均行を作成 (AVG)',action:`createInstantRow(${row},'colavg')`},
     {label:'連番行を作成',action:`createInstantRow(${row},'serial')`},
   ];
-  if(S.instant.rows.has(row)) instRowSub.push({label:'このインスタント行を削除',action:`deleteInstantRow(${row})`});
   items.push({label:'⚡ インスタント',sub:instRowSub});
   const disList=buildDisableMenu(), hidList=buildHiddenMenu();
   if(disList.length) items.push({label:'無効化を解除',sub:disList});
@@ -2828,7 +2945,6 @@ function onHeaderCtx(e,col) {
     {label:'連番列を作成',action:`createInstantCol(${col},'serial')`},
     {label:'前列との差分',action:`createInstantCol(${col},'diff')`},
   ];
-  if(S.instant.cols.has(col)) instColSub.push({label:'このインスタント列を削除',action:`deleteInstantCol(${col})`});
   items.push({label:'⚡ インスタント',sub:instColSub});
   const disList=buildDisableMenu(), hidList=buildHiddenMenu();
   if(disList.length) items.push({label:'無効化を解除',sub:disList});
@@ -2987,17 +3103,10 @@ function closeDownloadModal(){closeModal('downloadModal');}
 async function doDownload(){
   const fn=document.getElementById('dlFilename').value.trim()||'export.csv';
   const enc=document.getElementById('dlEncoding').value,delim=document.getElementById('dlDelimiter').value;
-  // Build clean data excluding instant rows/cols and restoring overlay cells
-  const instCols=[...S.instant.cols].sort((a,b)=>b-a); // reverse for safe splicing
-  const instRows=[...S.instant.rows].sort((a,b)=>b-a);
+  // Instant rows/cols are NOT in S.data/S.headers, so just restore overlay cells
   let dlHeaders=JSON.parse(JSON.stringify(S.headers));
   let dlData=JSON.parse(JSON.stringify(S.data));
-  // Restore overlay cells to original values
   for(const ck in S.instant.cells){const[r,c]=ck.split(',').map(Number);if(r<dlData.length&&c<dlHeaders.length)dlData[r][c]=S.instant.cells[ck].original;}
-  // Remove instant columns (reverse order)
-  instCols.forEach(ci=>{dlHeaders.splice(ci,1);dlData.forEach(r=>r.splice(ci,1));});
-  // Remove instant rows (reverse order)
-  instRows.forEach(ri=>{dlData.splice(ri,1);});
   try{
     const res=await fetch('/tools/csvtool/api/download',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({headers:dlHeaders,data:dlData,encoding:enc,delimiter:delim,filename:fn})});
@@ -3007,101 +3116,150 @@ async function doDownload(){
   }catch(err){toast(err.message,'error');}
 }
 
-// ========== Instant (Session-Only) ==========
+// ========== Instant (Session-Only) — stored separately from S.data ==========
 function _adjustInstantSets(type,atIdx,delta){
-  // Shift instant row/col indices when inserting or deleting rows/cols
-  const set=type==='row'?S.instant.rows:S.instant.cols;
-  const newSet=new Set();
-  set.forEach(i=>{
-    if(delta>0){newSet.add(i>=atIdx?i+delta:i);}
-    else{if(i===atIdx)return;newSet.add(i>atIdx?i+delta:i);}
-  });
-  if(type==='row') S.instant.rows=newSet; else S.instant.cols=newSet;
-  // Shift overlay cell keys
+  // When a real row/col is inserted or deleted, adjust instant afterRow/afterCol and overlay cell keys
   if(type==='row'){
+    S.instant.rows.forEach(ir=>{
+      if(delta>0){if(ir.afterRow>=atIdx)ir.afterRow+=delta;}
+      else{if(ir.afterRow>atIdx)ir.afterRow+=delta;else if(ir.afterRow===atIdx)ir.afterRow=Math.max(-1,atIdx-1);}
+      // Note: instant row data is indexed by real col, so row insert/delete doesn't affect it
+    });
+    S.instant.cols.forEach(ic=>{
+      // Shift data keys (real row indices)
+      const nd={},nf={};
+      for(const k in ic.data){const r=parseInt(k);
+        if(delta<0&&r===atIdx)continue;
+        const nr=delta>0?(r>=atIdx?r+delta:r):(r>atIdx?r+delta:r);
+        nd[nr]=ic.data[k]; if(ic.formulas[k])nf[nr]=ic.formulas[k];
+      }
+      ic.data=nd; ic.formulas=nf;
+    });
+    // Shift overlay cell keys
     const nc={};for(const k in S.instant.cells){const[r,c]=k.split(',').map(Number);
       if(delta<0&&r===atIdx)continue;const nr=delta>0?(r>=atIdx?r+delta:r):(r>atIdx?r+delta:r);nc[`${nr},${c}`]=S.instant.cells[k];}S.instant.cells=nc;
   }else{
+    // type==='col': a real column was inserted/deleted
+    S.instant.cols.forEach(ic=>{
+      if(delta>0){if(ic.afterCol>=atIdx)ic.afterCol+=delta;}
+      else{if(ic.afterCol>atIdx)ic.afterCol+=delta;else if(ic.afterCol===atIdx)ic.afterCol=Math.max(-1,atIdx-1);}
+    });
+    S.instant.rows.forEach(ir=>{
+      // Shift instant row data array for real col change
+      if(delta>0){
+        ir.data.splice(atIdx,0,'');
+        // Shift formula keys for col insert
+        const nf={};for(const k in ir.formulas){const c=parseInt(k);
+          nf[c>=atIdx?c+delta:c]=ir.formulas[k];}ir.formulas=nf;
+      } else {
+        ir.data.splice(atIdx,1);
+        // Shift formula keys for col delete
+        const nf={};for(const k in ir.formulas){const c=parseInt(k);
+          if(c===atIdx)continue;const nc=c>atIdx?c+delta:c;nf[nc]=ir.formulas[k];}ir.formulas=nf;
+      }
+    });
+    // Shift overlay cell keys
     const nc={};for(const k in S.instant.cells){const[r,c]=k.split(',').map(Number);
       if(delta<0&&c===atIdx)continue;const ncc=delta>0?(c>=atIdx?c+delta:c):(c>atIdx?c+delta:c);nc[`${r},${ncc}`]=S.instant.cells[k];}S.instant.cells=nc;
   }
 }
 function createInstantRow(atIdx,template){
   saveState('インスタント行追加');
-  const pos=atIdx; // insert above the specified row
-  const nr=new Array(S.headers.length).fill('');
-  adjustFormulasRowInsert(pos); _adjustInstantSets('row',pos,1);
-  S.data.splice(pos,0,nr); S.instant.rows.add(pos);
-  // Apply template
-  if(template==='serial'){for(let i=0;i<nr.length;i++) nr[i]=String(i+1);}
+  const id=S.instant.rowNextId++;
+  const afterRow=atIdx-1; // visually above atIdx = after (atIdx-1)
+  const data=new Array(S.headers.length).fill('');
+  const formulas={};
+  const ir={id,afterRow,data,formulas,reflected:false};
+  // Apply template (formulas reference real data which has NOT shifted)
+  if(template==='serial'){for(let i=0;i<data.length;i++) data[i]=String(i+1);}
   else if(template==='colsum'){
-    const nonInstCols=[];for(let c=0;c<S.headers.length;c++)if(!S.instant.cols.has(c))nonInstCols.push(c);
-    nonInstCols.forEach(c=>{
+    _formulaCtxInstant=true;
+    for(let c=0;c<S.headers.length;c++){
       const colL=indexToColLetter(c);
-      let sumParts=[];for(let r=0;r<S.data.length;r++){if(r===pos||S.instant.rows.has(r))continue;sumParts.push(colL+(r+1));}
-      if(sumParts.length){const fx='=SUM('+colL+'1:'+colL+S.data.length+')';S.formulas[`${pos},${c}`]=fx;try{nr[c]=String(evaluateFormula(fx));}catch(e){nr[c]='#ERROR';}}
-    });
+      const fx='=SUM('+colL+'1:'+colL+S.data.length+')';
+      formulas[c]=fx;
+      try{data[c]=String(evaluateFormula(fx));}catch(e){data[c]='#ERROR';}
+    }
+    _formulaCtxInstant=false;
   }
   else if(template==='colavg'){
-    const nonInstCols=[];for(let c=0;c<S.headers.length;c++)if(!S.instant.cols.has(c))nonInstCols.push(c);
-    nonInstCols.forEach(c=>{
+    _formulaCtxInstant=true;
+    for(let c=0;c<S.headers.length;c++){
       const colL=indexToColLetter(c);
-      const fx='=AVG('+colL+'1:'+colL+S.data.length+')';S.formulas[`${pos},${c}`]=fx;try{nr[c]=String(evaluateFormula(fx));}catch(e){nr[c]='#ERROR';}
-    });
+      const fx='=AVG('+colL+'1:'+colL+S.data.length+')';
+      formulas[c]=fx;
+      try{data[c]=String(evaluateFormula(fx));}catch(e){data[c]='#ERROR';}
+    }
+    _formulaCtxInstant=false;
   }
+  S.instant.rows.push(ir);
   renderGrid();updateStatus();renderInstantList();toast('インスタント行を追加しました','success');
 }
-function deleteInstantRow(idx){
-  if(!S.instant.rows.has(idx)) return;
+function deleteInstantRow(id){
+  const idx=S.instant.rows.findIndex(ir=>ir.id===id);
+  if(idx<0) return;
   saveState('インスタント行削除');
-  // Remove formulas in this row
-  for(let c=0;c<S.headers.length;c++) delete S.formulas[`${idx},${c}`];
-  adjustFormulasRowDelete(idx); S.data.splice(idx,1);
-  S.instant.rows.delete(idx);
-  _adjustInstantSets('row',idx,-1);
+  S.instant.rows.splice(idx,1);
+  if(S.selectedInstCell&&S.selectedInstCell.type==='row'&&S.selectedInstCell.instRow.id===id) S.selectedInstCell=null;
   clearSelection();renderGrid();updateStatus();renderInstantList();toast('インスタント行を削除しました','success');
 }
 function createInstantCol(atIdx,template){
   saveState('インスタント列追加');
-  const pos=atIdx; // insert to the left of the specified col
-  adjustFormulasColInsert(pos); _adjustInstantSets('col',pos,1);
-  S.headers.splice(pos,0,'⚡ Instant');
-  S.data.forEach(r=>r.splice(pos,0,''));
-  S.instant.cols.add(pos);
-  // Apply template
-  if(template==='serial'){S.data.forEach((r,i)=>{r[pos]=String(i+1);});}
+  const id=S.instant.colNextId++;
+  const afterCol=atIdx-1; // visually to the left of atIdx = after (atIdx-1)
+  const header='Instant';
+  const data={}, formulas={};
+  const ic={id,afterCol,header,data,formulas,reflected:false};
+  // Apply template (formulas reference real data which has NOT shifted)
+  if(template==='serial'){S.data.forEach((_,ri)=>{data[ri]=String(ri+1);});}
   else if(template==='rowsum'){
-    const nonInstCols=[];for(let c=0;c<S.headers.length;c++)if(c!==pos&&!S.instant.cols.has(c))nonInstCols.push(c);
-    S.data.forEach((r,ri)=>{
-      if(S.instant.rows.has(ri))return;
-      const parts=nonInstCols.map(c=>indexToColLetter(c)+(ri+1));
-      if(parts.length){const fx='=SUM('+parts[0].charAt(0)+(ri+1)+':'+indexToColLetter(nonInstCols[nonInstCols.length-1])+(ri+1)+')';
-        S.formulas[`${ri},${pos}`]=fx;try{r[pos]=String(evaluateFormula(fx));}catch(e){r[pos]='#ERROR';}}
+    _formulaCtxInstant=true;
+    S.data.forEach((_,ri)=>{
+      const firstCol=indexToColLetter(0),lastCol=indexToColLetter(S.headers.length-1);
+      const fx='=SUM('+firstCol+(ri+1)+':'+lastCol+(ri+1)+')';
+      formulas[ri]=fx;
+      try{data[ri]=String(evaluateFormula(fx));}catch(e){data[ri]='#ERROR';}
     });
+    _formulaCtxInstant=false;
   }
-  else if(template==='diff'&&pos>=2){
-    const prevCol=pos-1;
-    S.data.forEach((r,ri)=>{
-      if(S.instant.rows.has(ri))return;
-      const fx='='+indexToColLetter(prevCol)+(ri+1)+'-'+indexToColLetter(prevCol-1)+(ri+1);
-      S.formulas[`${ri},${pos}`]=fx;try{r[pos]=String(evaluateFormula(fx));}catch(e){r[pos]='#ERROR';}
+  else if(template==='diff'&&atIdx>=1){
+    _formulaCtxInstant=true;
+    const prevCol=atIdx, prevPrevCol=atIdx-1;
+    S.data.forEach((_,ri)=>{
+      const fx='='+indexToColLetter(prevCol)+(ri+1)+'-'+indexToColLetter(prevPrevCol)+(ri+1);
+      formulas[ri]=fx;
+      try{data[ri]=String(evaluateFormula(fx));}catch(e){data[ri]='#ERROR';}
     });
+    _formulaCtxInstant=false;
   }
+  S.instant.cols.push(ic);
   renderGrid();updateStatus();renderInstantList();toast('インスタント列を追加しました','success');
 }
-function deleteInstantCol(idx){
-  if(!S.instant.cols.has(idx)) return;
+function deleteInstantCol(id){
+  const idx=S.instant.cols.findIndex(ic=>ic.id===id);
+  if(idx<0) return;
   saveState('インスタント列削除');
-  // Remove formulas in this col
-  for(let r=0;r<S.data.length;r++) delete S.formulas[`${r},${idx}`];
-  adjustFormulasColDelete(idx); S.headers.splice(idx,1); S.data.forEach(r=>r.splice(idx,1));
-  S.instant.cols.delete(idx);
-  _adjustInstantSets('col',idx,-1);
+  S.instant.cols.splice(idx,1);
+  if(S.selectedInstCell&&S.selectedInstCell.type==='col'&&S.selectedInstCell.instCol.id===id) S.selectedInstCell=null;
   clearSelection();renderGrid();updateStatus();renderInstantList();toast('インスタント列を削除しました','success');
+}
+function reflectInstantRow(id){
+  const ir=_findInstRow(id);if(!ir)return;
+  saveState('インスタント反映切替');
+  ir.reflected=!ir.reflected;
+  renderGrid();renderInstantList();
+  toast(ir.reflected?'インスタント行を反映しました':'インスタント行の反映を解除しました','success');
+}
+function reflectInstantCol(id){
+  const ic=_findInstCol(id);if(!ic)return;
+  saveState('インスタント反映切替');
+  ic.reflected=!ic.reflected;
+  renderGrid();renderInstantList();
+  toast(ic.reflected?'インスタント列を反映しました':'インスタント列の反映を解除しました','success');
 }
 function createInstantCellOverlay(row,col){
   const ck=`${row},${col}`;
-  if(S.instant.cells.hasOwnProperty(ck)||S.instant.rows.has(row)||S.instant.cols.has(col)) return;
+  if(S.instant.cells.hasOwnProperty(ck)) return;
   saveState('インスタントメモ');
   S.instant.cells[ck]={original:S.data[row][col]||''};
   S.data[row][col]=''; // clear to let user input overlay
@@ -3115,6 +3273,149 @@ function removeInstantCellOverlay(row,col){
   S.data[row][col]=S.instant.cells[ck].original;
   delete S.instant.cells[ck]; delete S.formulas[ck];
   renderBody();renderInstantList();toast('インスタントメモを解除しました','success');
+}
+// Instant cell event handlers
+function onInstCellMouseDown(type,id,idx,event){
+  if(event.button!==0)return;
+  S.selectedCell=null;S.selRange=null;S.selectedRows.clear();S.selectedCols.clear();S.multiCells.clear();
+  if(type==='row'){
+    const ir=_findInstRow(id);if(!ir)return;
+    S.selectedInstCell={type:'row',instRow:ir,col:idx};
+  }else{
+    const ic=_findInstCol(id);if(!ic)return;
+    S.selectedInstCell={type:'col',row:id,instCol:ic}; // id is actually rowIdx here
+    // Fix: for col type, id param is rowIdx, idx param is colId
+    const actualIc=_findInstCol(idx);if(!actualIc)return;
+    S.selectedInstCell={type:'col',row:id,instCol:actualIc};
+  }
+  renderBody();updateFormulaBar();updateSelectionStatus();
+}
+function startInstEdit(type,id,idx){
+  if(type==='row'){
+    const ir=_findInstRow(id);if(!ir)return;
+    S.selectedInstCell={type:'row',instRow:ir,col:idx};
+    S.selectedCell=null;S.editing=true;
+    // Find the DOM cell
+    const trs=document.getElementById('tableTbody').querySelectorAll(`tr[data-inst-row-id="${id}"]`);
+    if(!trs.length)return;
+    const visCols=getVisibleCols();const vCols=_buildVisualCols(visCols);
+    let tdIdx=-1;for(let i=0;i<vCols.length;i++){if(vCols[i].t==='r'&&vCols[i].idx===idx){tdIdx=i;break;}}
+    if(tdIdx<0)return;
+    const td=trs[0].children[tdIdx+1];if(!td)return;
+    const fx=ir.formulas[idx]||'';
+    const val=fx||ir.data[idx]||'';
+    const input=document.createElement('input');
+    input.className='pcsv-cell-input'; input.value=val;
+    input.addEventListener('keydown',e=>{
+      if(e.key==='Enter'){commitInstEdit(type,ir.id,idx,input.value);}
+      else if(e.key==='Escape'){cancelEdit();}
+    });
+    input.addEventListener('blur',()=>{if(S.editing)commitInstEdit(type,ir.id,idx,input.value)});
+    td.style.overflow='visible'; td.appendChild(input); input.focus(); input.select();
+    document.getElementById('statusMode').textContent='編集中';
+  }else{
+    // type==='col', id=rowIdx, idx=colId
+    const ic=_findInstCol(idx);if(!ic)return;
+    const rowIdx=id;
+    S.selectedInstCell={type:'col',row:rowIdx,instCol:ic};
+    S.selectedCell=null;S.editing=true;
+    const trs=document.getElementById('tableTbody').querySelectorAll(`tr[data-ridx="${rowIdx}"]`);
+    if(!trs.length)return;
+    const visCols=getVisibleCols();const vCols=_buildVisualCols(visCols);
+    let tdIdx=-1;for(let i=0;i<vCols.length;i++){if(vCols[i].t==='i'&&vCols[i].obj.id===ic.id){tdIdx=i;break;}}
+    if(tdIdx<0)return;
+    const td=trs[0].children[tdIdx+1];if(!td)return;
+    const fx=ic.formulas[rowIdx]||'';
+    const val=fx||ic.data[rowIdx]||'';
+    const input=document.createElement('input');
+    input.className='pcsv-cell-input'; input.value=val;
+    input.addEventListener('keydown',e=>{
+      if(e.key==='Enter'){commitInstEdit(type,rowIdx,ic.id,input.value);}
+      else if(e.key==='Escape'){cancelEdit();}
+    });
+    input.addEventListener('blur',()=>{if(S.editing)commitInstEdit(type,rowIdx,ic.id,input.value)});
+    td.style.overflow='visible'; td.appendChild(input); input.focus(); input.select();
+    document.getElementById('statusMode').textContent='編集中';
+  }
+}
+function commitInstEdit(type,id,idx,newVal){
+  S.editing=false;
+  if(type==='row'){
+    const ir=_findInstRow(id);if(!ir)return;
+    if(newVal.startsWith('=')){
+      _formulaCtxInstant=true;
+      ir.formulas[idx]=newVal;
+      try{ir.data[idx]=String(evaluateFormula(newVal));}catch(e){ir.data[idx]='#ERROR';}
+      _formulaCtxInstant=false;
+    }else{
+      delete ir.formulas[idx];
+      ir.data[idx]=newVal;
+    }
+  }else{
+    // type==='col', id=rowIdx, idx=colId
+    const ic=_findInstCol(idx);if(!ic)return;
+    const rowIdx=id;
+    if(newVal.startsWith('=')){
+      _formulaCtxInstant=true;
+      ic.formulas[rowIdx]=newVal;
+      try{ic.data[rowIdx]=String(evaluateFormula(newVal));}catch(e){ic.data[rowIdx]='#ERROR';}
+      _formulaCtxInstant=false;
+    }else{
+      delete ic.formulas[rowIdx];
+      ic.data[rowIdx]=newVal;
+    }
+  }
+  renderBody();updateFormulaBar();
+  document.getElementById('statusMode').textContent='準備完了';
+}
+// Instant context menus
+function onInstRowCtx(e,instRowId){
+  e.preventDefault();e.stopPropagation();
+  const ir=_findInstRow(instRowId);if(!ir)return;
+  const items=[
+    ir.reflected
+      ?{label:'⚡ インスタント反映を解除',action:`reflectInstantRow(${instRowId})`}
+      :{label:'⚡ インスタントを反映',action:`reflectInstantRow(${instRowId})`},
+    '---',
+    {label:'インスタント行を削除',action:`deleteInstantRow(${instRowId})`,danger:true},
+  ];
+  showContextMenu(e,items);
+}
+function onInstColCtx(e,instColId){
+  e.preventDefault();e.stopPropagation();
+  const ic=_findInstCol(instColId);if(!ic)return;
+  const items=[
+    ic.reflected
+      ?{label:'⚡ インスタント反映を解除',action:`reflectInstantCol(${instColId})`}
+      :{label:'⚡ インスタントを反映',action:`reflectInstantCol(${instColId})`},
+    '---',
+    {label:'インスタント列を削除',action:`deleteInstantCol(${instColId})`,danger:true},
+  ];
+  showContextMenu(e,items);
+}
+function onInstCellCtx(e,type,id,idx){
+  e.preventDefault();e.stopPropagation();
+  if(type==='row'){
+    const ir=_findInstRow(id);if(!ir)return;
+    const items=[
+      ir.reflected
+        ?{label:'⚡ インスタント反映を解除',action:`reflectInstantRow(${id})`}
+        :{label:'⚡ インスタントを反映',action:`reflectInstantRow(${id})`},
+      '---',
+      {label:'インスタント行を削除',action:`deleteInstantRow(${id})`,danger:true},
+    ];
+    showContextMenu(e,items);
+  }else{
+    const ic=_findInstCol(idx);if(!ic)return;
+    const items=[
+      ic.reflected
+        ?{label:'⚡ インスタント反映を解除',action:`reflectInstantCol(${idx})`}
+        :{label:'⚡ インスタントを反映',action:`reflectInstantCol(${idx})`},
+      '---',
+      {label:'インスタント列を削除',action:`deleteInstantCol(${idx})`,danger:true},
+    ];
+    showContextMenu(e,items);
+  }
 }
 // Instant management panel
 function toggleInstantPanel(){
@@ -3131,19 +3432,20 @@ function renderInstantList(){
   const sec=document.getElementById('instListSection'); if(!sec) return;
   let h='';
   // Instant rows
-  const iRows=[...S.instant.rows].sort((a,b)=>a-b);
-  if(iRows.length){
-    h+='<h5>インスタント行 ('+iRows.length+')</h5>';
-    iRows.forEach(r=>{
-      h+=`<div class="pcsv-inst-item"><span>⚡ 行 ${r+1}</span><span class="inst-del" onclick="deleteInstantRow(${r})" title="削除">✕</span></div>`;
+  if(S.instant.rows.length){
+    h+='<h5>インスタント行 ('+S.instant.rows.length+')</h5>';
+    S.instant.rows.forEach(ir=>{
+      const refLabel=ir.reflected?' <span class="inst-reflected-badge">反映</span>':'';
+      h+=`<div class="pcsv-inst-item"><span>⚡ IR${ir.id} (行${ir.afterRow+1}の後)${refLabel}</span><span class="inst-del" onclick="deleteInstantRow(${ir.id})" title="削除">✕</span></div>`;
     });
   }
   // Instant cols
-  const iCols=[...S.instant.cols].sort((a,b)=>a-b);
-  if(iCols.length){
-    h+='<h5>インスタント列 ('+iCols.length+')</h5>';
-    iCols.forEach(c=>{
-      h+=`<div class="pcsv-inst-item"><span>⚡ 列 ${escHtml(S.headers[c])} (${indexToColLetter(c)})</span><span class="inst-del" onclick="deleteInstantCol(${c})" title="削除">✕</span></div>`;
+  if(S.instant.cols.length){
+    h+='<h5>インスタント列 ('+S.instant.cols.length+')</h5>';
+    S.instant.cols.forEach(ic=>{
+      const refLabel=ic.reflected?' <span class="inst-reflected-badge">反映</span>':'';
+      const afterLabel=ic.afterCol>=0?`列${escHtml(S.headers[ic.afterCol]||'')}の後`:'先頭';
+      h+=`<div class="pcsv-inst-item"><span>⚡ ${escHtml(ic.header)} (${afterLabel})${refLabel}</span><span class="inst-del" onclick="deleteInstantCol(${ic.id})" title="削除">✕</span></div>`;
     });
   }
   // Instant cell overlays
@@ -3196,7 +3498,7 @@ function updateStatus(){
   if(S.hiddenCols.size) hides.push(`${S.hiddenCols.size}列非表示`);
   if(S.disabledRows.size) hides.push(`${S.disabledRows.size}行無効`);
   if(S.disabledCols.size) hides.push(`${S.disabledCols.size}列無効`);
-  const instCount=S.instant.rows.size+S.instant.cols.size+Object.keys(S.instant.cells).length;
+  const instCount=S.instant.rows.length+S.instant.cols.length+Object.keys(S.instant.cells).length;
   if(instCount) hides.push(`⚡${instCount}インスタント`);
   if(hides.length) t+=` (${hides.join(', ')})`;
   document.getElementById('statusRows').textContent=t;
@@ -3371,18 +3673,18 @@ function removeView(viewId){
 // ========== A2: Instant Compare Column ==========
 function createCompareColumn(col1,col2){
   saveState('比較列追加');
-  const pos=Math.max(col1,col2)+1;
-  const name=`⚡比較: ${S.headers[col1]} vs ${S.headers[col2]}`;
-  adjustFormulasColInsert(pos); _adjustInstantSets('col',pos,1);
-  S.headers.splice(pos,0,name);
+  const afterCol=Math.max(col1,col2);
+  const header=`比較: ${S.headers[col1]} vs ${S.headers[col2]}`;
+  const id=S.instant.colNextId++;
+  const data={}, formulas={};
   S.data.forEach((r,ri)=>{
     const v1=r[col1]||'',v2=r[col2]||'';
-    if(v1===''&&v2==='') r.splice(pos,0,'(両方空)');
-    else if(v1===v2) r.splice(pos,0,'✓ 一致');
-    else if(v1===''||v2==='') r.splice(pos,0,'⚠ 片方空');
-    else r.splice(pos,0,`✗ 差異`);
+    if(v1===''&&v2==='') data[ri]='(両方空)';
+    else if(v1===v2) data[ri]='✓ 一致';
+    else if(v1===''||v2==='') data[ri]='⚠ 片方空';
+    else data[ri]='✗ 差異';
   });
-  S.instant.cols.add(pos);
+  S.instant.cols.push({id,afterCol,header,data,formulas,reflected:false});
   renderGrid();updateStatus();renderInstantList();
   toast('比較列を追加しました（インスタント）','success');
 }
