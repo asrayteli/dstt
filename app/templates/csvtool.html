@@ -1023,6 +1023,10 @@
     <!-- Row 1: Core editing -->
     <div class="pcsv-toolbar" id="toolbar">
       <!-- File group -->
+      <button class="pcsv-tb-btn" onclick="openNewCSVModal()" title="新規CSVを作成">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        <span class="btn-text">新規</span>
+      </button>
       <button class="pcsv-tb-btn" onclick="triggerUpload()" title="CSVファイルを開く">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
         <span class="btn-text">開く</span>
@@ -1216,6 +1220,9 @@
           <div class="sub-text">またはクリックしてファイルを選択</div>
           <div class="sub-text" style="margin-top:12px;color:#94a3b8">対応: .csv / .tsv (UTF-8, Shift_JIS, EUC-JP 自動検出)</div>
           <input type="file" id="fileInput" accept=".csv,.tsv,.txt">
+        </div>
+        <div style="margin-top:16px;text-align:center">
+          <button class="pcsv-btn pcsv-btn-primary" onclick="openNewCSVModal()" style="padding:8px 24px;font-size:13px">新規CSVを作成</button>
         </div>
       </div>
 
@@ -1536,6 +1543,31 @@
   </div>
 </div>
 
+<!-- New CSV Modal -->
+<div class="pcsv-modal hidden" id="newCsvModal">
+  <div class="pcsv-modal-content" style="max-width:380px">
+    <h3>新規CSVを作成</h3>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
+      <div>
+        <label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">列数</label>
+        <input type="number" id="newCsvCols" value="5" min="1" max="200" class="pcsv-input" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">行数</label>
+        <input type="number" id="newCsvRows" value="10" min="0" max="10000" class="pcsv-input" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">ファイル名</label>
+        <input type="text" id="newCsvFilename" value="新規.csv" class="pcsv-input" style="width:100%">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="pcsv-btn" onclick="closeModal('newCsvModal')">キャンセル</button>
+      <button class="pcsv-btn pcsv-btn-primary" onclick="doCreateNewCSV()">作成</button>
+    </div>
+  </div>
+</div>
+
 <!-- Context Menu -->
 <div class="pcsv-ctx-menu" id="ctxMenu"></div>
 
@@ -1566,6 +1598,8 @@ const S = {
   hiddenRows: new Set(), hiddenCols: new Set(), hiddenCells: new Set(),
   // Drag selection
   dragging: false, dragStart: null,
+  _lastClickTime: 0, _lastClickRow: -1, _lastClickCol: -1, // for dblclick detection
+  _lastInstClickTime: 0, _lastInstClickType: '', _lastInstClickId: -1, _lastInstClickIdx: -1,
   // Formula bar cell-reference selection
   fxSelecting: false, _fxRefPos: -1, _fxRefEnd: -1,
   // Instant (session-only temporary rows/cols/cells) — stored SEPARATELY from S.data/S.headers
@@ -1691,6 +1725,28 @@ function showEditor() {
   document.getElementById('uploadScreen').style.display='none';
   document.getElementById('editorScreen').style.display='flex';
   document.getElementById('formulaBar').classList.add('visible');
+}
+function openNewCSVModal(){document.getElementById('newCsvModal').classList.remove('hidden');}
+function doCreateNewCSV(){
+  const numCols=Math.max(1,Math.min(200,parseInt(document.getElementById('newCsvCols').value)||5));
+  const numRows=Math.max(0,Math.min(10000,parseInt(document.getElementById('newCsvRows').value)||10));
+  const fname=(document.getElementById('newCsvFilename').value||'新規.csv').trim();
+  S.headers=[];for(let i=0;i<numCols;i++)S.headers.push('列'+(i+1));
+  S.data=[];for(let r=0;r<numRows;r++)S.data.push(new Array(numCols).fill(''));
+  S.filename=fname; S.encoding='utf-8'; S.delimiter=',';
+  S.page=1;S.selectedCell=null;S.selectedRows=new Set();S.selectedCols=new Set();S.multiCells=new Set();S.selRange=null;
+  S.sortCol=-1;S.sortDir=0;S.undoStack=[];S.redoStack=[];S.issueMap={};S.formulas={};
+  S.disabledRows=new Set();S.disabledCols=new Set();S.disabledCells=new Set();
+  S.hiddenRows=new Set();S.hiddenCols=new Set();S.hiddenCells=new Set();S.dragging=false;S.dragStart=null;
+  S.instant.rows=[];S.instant.cols=[];S.instant.cells={};S.instant.calcHistory=[];S.instant.calcNextId=1;S.instant.rowNextId=1;S.instant.colNextId=1;S.instant._xData={};S.selectedInstCell=null;
+  S.views=[];S.viewsNextId=1;S.currentView=null;S.journal=[];S.journalHighlight=false;
+  S.diffResult=null;S.bookmarks=[];S.bookmarkNextId=1;
+  closeModal('newCsvModal');showEditor();renderGrid();updateStatus();enableToolbar();
+  document.getElementById('headerInfo').style.display='flex';
+  document.getElementById('headerFilename').textContent=fname;
+  document.getElementById('headerEncoding').textContent='UTF-8';
+  document.getElementById('dlFilename').value=fname;
+  toast(`新規CSV (${numCols}列×${numRows}行) を作成しました`,'success');
 }
 function enableToolbar() {
   ['btnSave','btnAddRow','btnDelRow','btnAddCol','btnDelCol','btnTrim','btnDedup',
@@ -1915,12 +1971,18 @@ function onCellMouseDown(row,col,event) {
     const ref=indexToColLetter(col)+(row+1);
     S._fxRefPos=fxInp.selectionStart!=null?fxInp.selectionStart:fxInp.value.length; S._fxRefEnd=S._fxRefPos;
     insertRefToFormula(ref);
-    // Visual highlight on grid
     S.selRange=normalizeRange(row,col,row,col); renderBody();
     return;
   }
   if(S.editing) return;
   hideContextMenu();
+  // Manual double-click detection (renderGrid destroys DOM, preventing native dblclick)
+  const now=Date.now();
+  if(S._lastClickRow===row && S._lastClickCol===col && now-S._lastClickTime<400){
+    S._lastClickTime=0; S._lastClickRow=-1; S._lastClickCol=-1;
+    startEdit(row,col); return;
+  }
+  S._lastClickTime=now; S._lastClickRow=row; S._lastClickCol=col;
   event.preventDefault(); // prevent text selection during potential drag
   // Shift+click → extend range
   if(event.shiftKey && S.selectedCell) {
@@ -2788,14 +2850,27 @@ function showContextMenu(e,items) {
   });
   menu.innerHTML=h;
   menu.classList.add('show');
-  // Position
+  // Position: place at mouse cursor, then adjust to stay within viewport
   const mx=e.clientX,my=e.clientY;
   menu.style.left=mx+'px';menu.style.top=my+'px';
-  // Adjust if overflows
   requestAnimationFrame(()=>{
     const rect=menu.getBoundingClientRect();
-    if(rect.right>window.innerWidth) menu.style.left=(mx-rect.width)+'px';
-    if(rect.bottom>window.innerHeight) menu.style.top=(my-rect.height)+'px';
+    const vw=window.innerWidth,vh=window.innerHeight;
+    // Horizontal: prefer right of cursor, fall back to left, clamp to 0
+    let x=mx;
+    if(rect.right>vw) x=Math.max(0,mx-rect.width);
+    if(x+rect.width>vw) x=Math.max(0,vw-rect.width);
+    // Vertical: prefer below cursor, fall back to above, clamp to 0
+    let y=my;
+    if(rect.bottom>vh) y=Math.max(0,my-rect.height);
+    if(y+rect.height>vh) y=Math.max(0,vh-rect.height);
+    menu.style.left=x+'px';menu.style.top=y+'px';
+    // Adjust submenus: if menu is on the right side, show submenus to the left
+    if(x+rect.width+180>vw){
+      menu.querySelectorAll('.pcsv-ctx-submenu').forEach(sm=>{
+        sm.style.left='auto';sm.style.right='calc(100% + 2px)';
+      });
+    }
   });
 }
 // ========== Disable / Hide Functions ==========
@@ -3320,6 +3395,13 @@ function removeInstantCellOverlay(row,col){
 // Instant cell event handlers
 function onInstCellMouseDown(type,id,idx,event){
   if(event.button!==0)return;
+  // Manual double-click detection for instant cells
+  const now=Date.now();
+  if(S._lastInstClickType===type && S._lastInstClickId===id && S._lastInstClickIdx===idx && now-S._lastInstClickTime<400){
+    S._lastInstClickTime=0; S._lastInstClickType=''; S._lastInstClickId=-1; S._lastInstClickIdx=-1;
+    startInstEdit(type,id,idx); return;
+  }
+  S._lastInstClickTime=now; S._lastInstClickType=type; S._lastInstClickId=id; S._lastInstClickIdx=idx;
   S.selectedCell=null;S.selRange=null;S.selectedRows.clear();S.selectedCols.clear();S.multiCells.clear();
   if(type==='row'){
     // id=instRowId, idx=realColIdx
@@ -3423,6 +3505,42 @@ function commitInstEdit(type,id,idx,newVal){
   renderBody();updateFormulaBar();
   document.getElementById('statusMode').textContent='準備完了';
 }
+// ---- Instant cell clipboard / clear / formula helpers ----
+function _getInstCellVal(type,id,idx){
+  if(type==='row'){const ir=_findInstRow(id);return ir?(ir.data[idx]||''):'';}
+  if(type==='col'){const ic=_findInstCol(idx);return ic?(ic.data[id]||''):'';}
+  const xKey=`ir${id}_ic${idx}`;return S.instant._xData[xKey]||'';
+}
+async function instCellCopy(type,id,idx){
+  const val=_getInstCellVal(type,id,idx);
+  try{await navigator.clipboard.writeText(val);toast('コピーしました');}catch(e){toast('コピーに失敗しました','error');}
+}
+async function instCellPaste(type,id,idx){
+  try{
+    const text=await navigator.clipboard.readText();
+    if(type==='row'){const ir=_findInstRow(id);if(ir){ir.data[idx]=text;delete ir.formulas[idx];}}
+    else if(type==='col'){const ic=_findInstCol(idx);if(ic){ic.data[id]=text;delete ic.formulas[id];}}
+    else{S.instant._xData[`ir${id}_ic${idx}`]=text;}
+    renderBody();updateFormulaBar();toast('貼り付けました');
+  }catch(e){toast('貼り付けに失敗しました','error');}
+}
+function instCellClear(type,id,idx){
+  if(type==='row'){const ir=_findInstRow(id);if(ir){ir.data[idx]='';delete ir.formulas[idx];}}
+  else if(type==='col'){const ic=_findInstCol(idx);if(ic){ic.data[id]='';delete ic.formulas[id];}}
+  else{S.instant._xData[`ir${id}_ic${idx}`]='';}
+  renderBody();updateFormulaBar();toast('クリアしました');
+}
+function insertInstFx(type,id,idx,fx){
+  // Select the instant cell and start editing with the formula
+  if(type==='row'){const ir=_findInstRow(id);if(ir)S.selectedInstCell={type:'row',instRow:ir,col:idx};}
+  else if(type==='col'){const ic=_findInstCol(idx);if(ic)S.selectedInstCell={type:'col',row:id,instCol:ic};}
+  else{const ir=_findInstRow(id),ic=_findInstCol(idx);if(ir&&ic)S.selectedInstCell={type:'cross',instRow:ir,instCol:ic};}
+  renderBody();
+  const ref=document.getElementById('cellRef'),inp=document.getElementById('formulaInput');
+  ref.textContent=type==='row'?`⚡IR${id}`:type==='col'?`⚡IC${idx}`:`⚡X`;
+  inp.value=fx;inp.classList.add('has-formula');inp.focus();
+  const pp=fx.indexOf('(');if(pp>=0)setTimeout(()=>inp.setSelectionRange(pp+1,fx.length-1),0);
+}
 // Instant context menus — include normal operations alongside instant-specific ones
 function _instReflectItem(type,id,obj){
   return obj.reflected
@@ -3473,7 +3591,21 @@ function onInstColCtx(e,instColId){
 }
 function onInstCellCtx(e,type,id,idx){
   e.preventDefault();e.stopPropagation();
-  const items=[];
+  const t=JSON.stringify(type);
+  const items=[
+    {label:'コピー',action:`instCellCopy(${t},${id},${idx})`},
+    {label:'貼り付け',action:`instCellPaste(${t},${id},${idx})`},
+    {label:'セルをクリア',action:`instCellClear(${t},${id},${idx})`},
+  ];
+  items.push({label:'数式を挿入',sub:[
+    {label:'=SUM() 合計',action:`insertInstFx(${t},${id},${idx},'=SUM()')`},
+    {label:'=AVG() 平均',action:`insertInstFx(${t},${id},${idx},'=AVG()')`},
+    {label:'=COUNT() 件数',action:`insertInstFx(${t},${id},${idx},'=COUNT()')`},
+    {label:'=MIN() 最小',action:`insertInstFx(${t},${id},${idx},'=MIN()')`},
+    {label:'=MAX() 最大',action:`insertInstFx(${t},${id},${idx},'=MAX()')`},
+    {label:'=IF(,,) 条件',action:`insertInstFx(${t},${id},${idx},'=IF(,,)')`},
+  ]});
+  items.push('---');
   if(type==='row'){
     const ir=_findInstRow(id);if(!ir)return;
     const refRow=Math.max(0,ir.afterRow+1);
@@ -3491,7 +3623,6 @@ function onInstCellCtx(e,type,id,idx){
     items.push({label:'左に通常列を挿入',action:`insertColumnAt(${refCol},'left')`});
     items.push({label:'右に通常列を挿入',action:`insertColumnAt(${refCol},'right')`});
   }else{
-    // cross
     const ir=_findInstRow(id);const ic=_findInstCol(idx);
     if(ir){items.push(_instReflectItem('row',id,ir));items.push({label:'インスタント行を削除',action:`deleteInstantRow(${id})`,danger:true});}
     if(ic){items.push(_instReflectItem('col',idx,ic));items.push({label:'インスタント列を削除',action:`deleteInstantCol(${idx})`,danger:true});}
