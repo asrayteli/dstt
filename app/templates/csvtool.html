@@ -1709,8 +1709,20 @@ function getPageData(){
   else{const st=(S.page-1)*S.pageSize;pageRows=visRows.slice(st,Math.min(st+S.pageSize,visRows.length));}
   return{pageRows,visCols:getVisibleCols()};
 }
-function domRowIndex(row){const{pageRows}=getPageData();return pageRows.indexOf(row);}
-function domColIndex(col){return getVisibleCols().indexOf(col);}
+function domRowIndex(row){
+  // Return DOM <tr> index for a real row, accounting for instant rows in the visual grid
+  const{pageRows}=getPageData();
+  const vRows=_buildVisualRows(pageRows);
+  for(let i=0;i<vRows.length;i++){if(vRows[i].t==='r'&&vRows[i].idx===row) return i;}
+  return -1;
+}
+function domColIndex(col){
+  // Return DOM <td> index (0-based, excluding row-num) for a real col, accounting for instant cols
+  const visCols=getVisibleCols();
+  const vCols=_buildVisualCols(visCols);
+  for(let i=0;i<vCols.length;i++){if(vCols[i].t==='r'&&vCols[i].idx===col) return i;}
+  return -1;
+}
 // Build visual column list interleaving real cols and instant cols
 function _buildVisualCols(visCols){
   const result=[];
@@ -3411,56 +3423,85 @@ function commitInstEdit(type,id,idx,newVal){
   renderBody();updateFormulaBar();
   document.getElementById('statusMode').textContent='準備完了';
 }
-// Instant context menus
+// Instant context menus — include normal operations alongside instant-specific ones
+function _instReflectItem(type,id,obj){
+  return obj.reflected
+    ?{label:'⚡ インスタント反映を解除',action:`reflect${type==='row'?'InstantRow':'InstantCol'}(${id})`}
+    :{label:'⚡ インスタントを反映',action:`reflect${type==='row'?'InstantRow':'InstantCol'}(${id})`};
+}
 function onInstRowCtx(e,instRowId){
   e.preventDefault();e.stopPropagation();
   const ir=_findInstRow(instRowId);if(!ir)return;
+  const refRow=Math.max(0,ir.afterRow+1); // nearest real row position
   const items=[
-    ir.reflected
-      ?{label:'⚡ インスタント反映を解除',action:`reflectInstantRow(${instRowId})`}
-      :{label:'⚡ インスタントを反映',action:`reflectInstantRow(${instRowId})`},
-    '---',
+    _instReflectItem('row',instRowId,ir),
     {label:'インスタント行を削除',action:`deleteInstantRow(${instRowId})`,danger:true},
+    '---',
+    {label:'上に通常行を挿入',action:`insertRowAt(${refRow},true)`},
+    {label:'下に通常行を挿入',action:`insertRowAt(${refRow},false)`},
   ];
+  const instRowSub=[
+    {label:'空白行を作成',action:`createInstantRow(${refRow},null)`},
+    {label:'合計行を作成 (SUM)',action:`createInstantRow(${refRow},'colsum')`},
+    {label:'平均行を作成 (AVG)',action:`createInstantRow(${refRow},'colavg')`},
+    {label:'連番行を作成',action:`createInstantRow(${refRow},'serial')`},
+  ];
+  items.push({label:'⚡ インスタント追加',sub:instRowSub});
   showContextMenu(e,items);
 }
 function onInstColCtx(e,instColId){
   e.preventDefault();e.stopPropagation();
   const ic=_findInstCol(instColId);if(!ic)return;
+  const refCol=Math.max(0,ic.afterCol>=0?ic.afterCol:0); // nearest real col
   const items=[
-    ic.reflected
-      ?{label:'⚡ インスタント反映を解除',action:`reflectInstantCol(${instColId})`}
-      :{label:'⚡ インスタントを反映',action:`reflectInstantCol(${instColId})`},
-    '---',
+    _instReflectItem('col',instColId,ic),
     {label:'インスタント列を削除',action:`deleteInstantCol(${instColId})`,danger:true},
+    '---',
+    {label:'昇順でソート',action:`forceSortCol(${refCol},1)`},
+    {label:'降順でソート',action:`forceSortCol(${refCol},2)`},
+    '---',
+    {label:'左に通常列を挿入',action:`insertColumnAt(${refCol},'left')`},
+    {label:'右に通常列を挿入',action:`insertColumnAt(${refCol},'right')`},
   ];
+  const instColSub=[
+    {label:'空白列を作成',action:`createInstantCol(${refCol},null)`},
+    {label:'合計列を作成 (SUM)',action:`createInstantCol(${refCol},'rowsum')`},
+    {label:'連番列を作成',action:`createInstantCol(${refCol},'serial')`},
+  ];
+  items.push({label:'⚡ インスタント追加',sub:instColSub});
   showContextMenu(e,items);
 }
 function onInstCellCtx(e,type,id,idx){
   e.preventDefault();e.stopPropagation();
+  const items=[];
   if(type==='row'){
     const ir=_findInstRow(id);if(!ir)return;
-    showContextMenu(e,[
-      ir.reflected?{label:'⚡ インスタント反映を解除',action:`reflectInstantRow(${id})`}:{label:'⚡ インスタントを反映',action:`reflectInstantRow(${id})`},
-      '---',{label:'インスタント行を削除',action:`deleteInstantRow(${id})`,danger:true},
-    ]);
+    const refRow=Math.max(0,ir.afterRow+1);
+    items.push(_instReflectItem('row',id,ir));
+    items.push({label:'インスタント行を削除',action:`deleteInstantRow(${id})`,danger:true});
+    items.push('---');
+    items.push({label:'上に通常行を挿入',action:`insertRowAt(${refRow},true)`});
+    items.push({label:'下に通常行を挿入',action:`insertRowAt(${refRow},false)`});
   }else if(type==='col'){
     const ic=_findInstCol(idx);if(!ic)return;
-    showContextMenu(e,[
-      ic.reflected?{label:'⚡ インスタント反映を解除',action:`reflectInstantCol(${idx})`}:{label:'⚡ インスタントを反映',action:`reflectInstantCol(${idx})`},
-      '---',{label:'インスタント列を削除',action:`deleteInstantCol(${idx})`,danger:true},
-    ]);
-  }else{
-    // cross: show both row and col options
-    const ir=_findInstRow(id);const ic=_findInstCol(idx);
-    const items=[];
-    if(ir){items.push(ir.reflected?{label:'⚡ 行の反映を解除',action:`reflectInstantRow(${id})`}:{label:'⚡ 行を反映',action:`reflectInstantRow(${id})`});}
-    if(ic){items.push(ic.reflected?{label:'⚡ 列の反映を解除',action:`reflectInstantCol(${idx})`}:{label:'⚡ 列を反映',action:`reflectInstantCol(${idx})`});}
+    const refCol=Math.max(0,ic.afterCol>=0?ic.afterCol:0);
+    items.push(_instReflectItem('col',idx,ic));
+    items.push({label:'インスタント列を削除',action:`deleteInstantCol(${idx})`,danger:true});
     items.push('---');
-    if(ir) items.push({label:'インスタント行を削除',action:`deleteInstantRow(${id})`,danger:true});
-    if(ic) items.push({label:'インスタント列を削除',action:`deleteInstantCol(${idx})`,danger:true});
-    showContextMenu(e,items);
+    items.push({label:'左に通常列を挿入',action:`insertColumnAt(${refCol},'left')`});
+    items.push({label:'右に通常列を挿入',action:`insertColumnAt(${refCol},'right')`});
+  }else{
+    // cross
+    const ir=_findInstRow(id);const ic=_findInstCol(idx);
+    if(ir){items.push(_instReflectItem('row',id,ir));items.push({label:'インスタント行を削除',action:`deleteInstantRow(${id})`,danger:true});}
+    if(ic){items.push(_instReflectItem('col',idx,ic));items.push({label:'インスタント列を削除',action:`deleteInstantCol(${idx})`,danger:true});}
+    const refRow=ir?Math.max(0,ir.afterRow+1):0;
+    const refCol=ic&&ic.afterCol>=0?ic.afterCol:0;
+    items.push('---');
+    items.push({label:'通常行を挿入',action:`insertRowAt(${refRow},true)`});
+    items.push({label:'通常列を挿入',action:`insertColumnAt(${refCol},'right')`});
   }
+  showContextMenu(e,items);
 }
 // Instant management panel
 function toggleInstantPanel(){
