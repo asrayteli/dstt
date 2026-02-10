@@ -956,6 +956,16 @@
   .pcsv-view-add { padding:2px 8px; border-radius:12px; border:1px dashed #c4b5fd; background:none; cursor:pointer; font-size:11px; color:#7c3aed; }
   .pcsv-view-add:hover { background:#f3e8ff; }
 
+  /* View condition builder */
+  .pcsv-vcond { display:flex; gap:4px; align-items:center; font-size:12px; }
+  .pcsv-vcond select, .pcsv-vcond input { font-size:12px; padding:4px 6px; border:1px solid #d1d5db; border-radius:4px; }
+  .pcsv-vcond select { min-width:0; flex-shrink:0; }
+  .pcsv-vcond .vcond-col { flex:1; max-width:140px; }
+  .pcsv-vcond .vcond-op { width:90px; }
+  .pcsv-vcond .vcond-val { flex:2; min-width:80px; }
+  .pcsv-vcond .vcond-del { background:none; border:none; color:#ef4444; cursor:pointer; font-size:16px; padding:0 4px; flex-shrink:0; }
+  .pcsv-vcond .vcond-del:hover { color:#b91c1c; }
+
   /* === A2: Instant Compare Column === */
   .cell-cmp-match { background:#d1fae5 !important; }
   .cell-cmp-diff { background:#fef3c7 !important; }
@@ -1503,17 +1513,24 @@
   </div>
 </div>
 
-<!-- View Save Modal -->
+<!-- View Save Modal (Visual Filter Builder) -->
 <div class="pcsv-modal-overlay hidden" id="viewSaveModal">
-  <div class="pcsv-modal" style="min-width:320px">
-    <h3>👁 ビューを保存</h3>
+  <div class="pcsv-modal" style="min-width:480px;max-width:600px">
+    <h3>👁 ビューを作成</h3>
     <label style="font-size:12px;color:#6b7280">ビュー名</label>
     <input type="text" id="viewSaveName" placeholder="例: 売上100万以上" onkeydown="if(event.key==='Enter')doSaveView()">
-    <label style="font-size:12px;color:#6b7280;margin-top:8px">フィルタ条件 (列名 演算子 値)</label>
-    <input type="text" id="viewSaveFilter" placeholder='例: A>100  B="東京"  C!=""' style="font-family:monospace">
-    <p style="font-size:10px;color:#9ca3af;margin:4px 0">演算子: = != > < >= <= contains  複数条件はスペースで区切り(AND)</p>
+    <label style="font-size:12px;color:#6b7280;margin-top:10px">フィルタ条件</label>
+    <div id="viewConditions" style="display:flex;flex-direction:column;gap:6px;margin:6px 0;max-height:220px;overflow-y:auto"></div>
+    <div style="display:flex;gap:6px;align-items:center;margin:4px 0">
+      <button class="pcsv-modal-btn" onclick="addViewCondition()" style="font-size:11px;padding:3px 10px">+ 条件を追加</button>
+      <span id="viewLogicToggle" style="font-size:11px;color:#6b7280;cursor:pointer;user-select:none" onclick="toggleViewLogic()" title="クリックで切替">
+        条件の結合: <strong id="viewLogicLabel">AND (すべて一致)</strong>
+      </span>
+    </div>
+    <div id="viewPreviewInfo" style="font-size:11px;color:#7c3aed;margin:6px 0;min-height:16px"></div>
     <div class="pcsv-modal-actions">
       <button class="pcsv-modal-btn" onclick="closeModal('viewSaveModal')">キャンセル</button>
+      <button class="pcsv-modal-btn" onclick="previewView()" style="background:#f3e8ff;color:#7c3aed;border-color:#d8b4fe">プレビュー</button>
       <button class="pcsv-modal-btn primary" onclick="doSaveView()">保存</button>
     </div>
   </div>
@@ -1564,6 +1581,7 @@ const S = {
     calcNextId: 1,
     rowNextId: 1,
     colNextId: 1,
+    _xData: {},         // intersection data: "ir{id}_ic{id}" -> value
   },
   selectedInstCell: null, // {type:'row',instRow:obj,col:realColIdx} | {type:'col',row:realRowIdx,instCol:obj} | null
   instantOpen: false,   // management panel open state
@@ -1657,7 +1675,7 @@ async function uploadFile(file) {
     S.sortCol=-1; S.sortDir=0; S.undoStack=[]; S.redoStack=[]; S.issueMap={}; S.formulas={};
     S.disabledRows=new Set(); S.disabledCols=new Set(); S.disabledCells=new Set();
     S.hiddenRows=new Set(); S.hiddenCols=new Set(); S.hiddenCells=new Set(); S.dragging=false; S.dragStart=null;
-    S.instant.rows=[]; S.instant.cols=[]; S.instant.cells={}; S.instant.calcHistory=[]; S.instant.calcNextId=1; S.instant.rowNextId=1; S.instant.colNextId=1; S.selectedInstCell=null;
+    S.instant.rows=[]; S.instant.cols=[]; S.instant.cells={}; S.instant.calcHistory=[]; S.instant.calcNextId=1; S.instant.rowNextId=1; S.instant.colNextId=1; S.instant._xData={}; S.selectedInstCell=null;
     S.views=[]; S.viewsNextId=1; S.currentView=null; S.journal=[]; S.journalHighlight=false;
     S.diffResult=null; S.bookmarks=[]; S.bookmarkNextId=1;
     showEditor(); renderGrid(); updateStatus(); enableToolbar();
@@ -1838,8 +1856,13 @@ function renderBody() {
           let cls='cell-instant'+(ir.reflected?' inst-reflected':'')+(isSel?' selected':'');
           h+=`<td class="${cls}" data-inst-row-id="${ir.id}" data-cidx="${ci}" onmousedown="onInstCellMouseDown('row',${ir.id},${ci},event)" ondblclick="startInstEdit('row',${ir.id},${ci})" oncontextmenu="onInstCellCtx(event,'row',${ir.id},${ci})">${escHtml(val)}</td>`;
         } else {
-          // Instant row × instant col intersection → empty
-          h+=`<td class="cell-instant" style="background:#ede9fe"></td>`;
+          // Instant row × instant col intersection
+          const ic=vc.obj;
+          const xKey=`ir${ir.id}_ic${ic.id}`;
+          const xVal=S.instant._xData&&S.instant._xData[xKey]||'';
+          const isSel=S.selectedInstCell&&S.selectedInstCell.type==='cross'&&S.selectedInstCell.instRow.id===ir.id&&S.selectedInstCell.instCol.id===ic.id;
+          let cls='cell-instant'+(isSel?' selected':'');
+          h+=`<td class="${cls}" style="background:#ede9fe" data-inst-row-id="${ir.id}" data-inst-col-id="${ic.id}" onmousedown="onInstCellMouseDown('cross',${ir.id},${ic.id},event)" ondblclick="startInstEdit('cross',${ir.id},${ic.id})" oncontextmenu="onInstCellCtx(event,'cross',${ir.id},${ic.id})">${escHtml(xVal)}</td>`;
         }
       }
       h+='</tr>';
@@ -2284,11 +2307,17 @@ function updateFormulaBar() {
       const fx=sic.instRow.formulas[sic.col]||'';
       inp.value=fx||sic.instRow.data[sic.col]||'';
       inp.classList.toggle('has-formula', !!fx||inp.value.startsWith('='));
-    } else {
+    } else if(sic.type==='col'){
       ref.textContent=`⚡ IC${sic.instCol.id}:${sic.row+1}`;
       const fx=sic.instCol.formulas[sic.row]||'';
       inp.value=fx||sic.instCol.data[sic.row]||'';
       inp.classList.toggle('has-formula', !!fx||inp.value.startsWith('='));
+    } else {
+      // cross
+      ref.textContent=`⚡ IR${sic.instRow.id}×IC${sic.instCol.id}`;
+      const xKey=`ir${sic.instRow.id}_ic${sic.instCol.id}`;
+      inp.value=S.instant._xData[xKey]||'';
+      inp.classList.remove('has-formula');
     }
   } else if(S.selectedCell) {
     const colL=indexToColLetter(S.selectedCell.col);
@@ -2323,8 +2352,10 @@ function commitFormula() {
     const sic=S.selectedInstCell;
     if(sic.type==='row'){
       commitInstEdit('row',sic.instRow.id,sic.col,v);
-    }else{
+    }else if(sic.type==='col'){
       commitInstEdit('col',sic.row,sic.instCol.id,v);
+    }else{
+      commitInstEdit('cross',sic.instRow.id,sic.instCol.id,v);
     }
     return;
   }
@@ -3279,64 +3310,72 @@ function onInstCellMouseDown(type,id,idx,event){
   if(event.button!==0)return;
   S.selectedCell=null;S.selRange=null;S.selectedRows.clear();S.selectedCols.clear();S.multiCells.clear();
   if(type==='row'){
+    // id=instRowId, idx=realColIdx
     const ir=_findInstRow(id);if(!ir)return;
     S.selectedInstCell={type:'row',instRow:ir,col:idx};
+  }else if(type==='col'){
+    // id=realRowIdx, idx=instColId
+    const ic=_findInstCol(idx);if(!ic)return;
+    S.selectedInstCell={type:'col',row:id,instCol:ic};
   }else{
-    const ic=_findInstCol(id);if(!ic)return;
-    S.selectedInstCell={type:'col',row:id,instCol:ic}; // id is actually rowIdx here
-    // Fix: for col type, id param is rowIdx, idx param is colId
-    const actualIc=_findInstCol(idx);if(!actualIc)return;
-    S.selectedInstCell={type:'col',row:id,instCol:actualIc};
+    // type==='cross': id=instRowId, idx=instColId
+    const ir=_findInstRow(id);if(!ir)return;
+    const ic=_findInstCol(idx);if(!ic)return;
+    S.selectedInstCell={type:'cross',instRow:ir,instCol:ic};
   }
   renderBody();updateFormulaBar();updateSelectionStatus();
 }
 function startInstEdit(type,id,idx){
+  S.selectedCell=null;S.editing=true;
+  const visCols=getVisibleCols();const vCols=_buildVisualCols(visCols);
+  const tbody=document.getElementById('tableTbody');
   if(type==='row'){
-    const ir=_findInstRow(id);if(!ir)return;
+    // id=instRowId, idx=realColIdx
+    const ir=_findInstRow(id);if(!ir){S.editing=false;return;}
     S.selectedInstCell={type:'row',instRow:ir,col:idx};
-    S.selectedCell=null;S.editing=true;
-    // Find the DOM cell
-    const trs=document.getElementById('tableTbody').querySelectorAll(`tr[data-inst-row-id="${id}"]`);
-    if(!trs.length)return;
-    const visCols=getVisibleCols();const vCols=_buildVisualCols(visCols);
+    const trs=tbody.querySelectorAll(`tr[data-inst-row-id="${id}"]`);
+    if(!trs.length){S.editing=false;return;}
     let tdIdx=-1;for(let i=0;i<vCols.length;i++){if(vCols[i].t==='r'&&vCols[i].idx===idx){tdIdx=i;break;}}
-    if(tdIdx<0)return;
-    const td=trs[0].children[tdIdx+1];if(!td)return;
-    const fx=ir.formulas[idx]||'';
-    const val=fx||ir.data[idx]||'';
-    const input=document.createElement('input');
-    input.className='pcsv-cell-input'; input.value=val;
-    input.addEventListener('keydown',e=>{
-      if(e.key==='Enter'){commitInstEdit(type,ir.id,idx,input.value);}
-      else if(e.key==='Escape'){cancelEdit();}
-    });
-    input.addEventListener('blur',()=>{if(S.editing)commitInstEdit(type,ir.id,idx,input.value)});
-    td.style.overflow='visible'; td.appendChild(input); input.focus(); input.select();
-    document.getElementById('statusMode').textContent='編集中';
-  }else{
-    // type==='col', id=rowIdx, idx=colId
-    const ic=_findInstCol(idx);if(!ic)return;
-    const rowIdx=id;
-    S.selectedInstCell={type:'col',row:rowIdx,instCol:ic};
-    S.selectedCell=null;S.editing=true;
-    const trs=document.getElementById('tableTbody').querySelectorAll(`tr[data-ridx="${rowIdx}"]`);
-    if(!trs.length)return;
-    const visCols=getVisibleCols();const vCols=_buildVisualCols(visCols);
+    if(tdIdx<0){S.editing=false;return;}
+    const td=trs[0].children[tdIdx+1];if(!td){S.editing=false;return;}
+    const val=ir.formulas[idx]||ir.data[idx]||'';
+    _attachInstInput(td,val,()=>commitInstEdit('row',ir.id,idx,td.querySelector('input').value));
+  }else if(type==='col'){
+    // id=realRowIdx, idx=instColId
+    const ic=_findInstCol(idx);if(!ic){S.editing=false;return;}
+    S.selectedInstCell={type:'col',row:id,instCol:ic};
+    const trs=tbody.querySelectorAll(`tr[data-ridx="${id}"]`);
+    if(!trs.length){S.editing=false;return;}
     let tdIdx=-1;for(let i=0;i<vCols.length;i++){if(vCols[i].t==='i'&&vCols[i].obj.id===ic.id){tdIdx=i;break;}}
-    if(tdIdx<0)return;
-    const td=trs[0].children[tdIdx+1];if(!td)return;
-    const fx=ic.formulas[rowIdx]||'';
-    const val=fx||ic.data[rowIdx]||'';
-    const input=document.createElement('input');
-    input.className='pcsv-cell-input'; input.value=val;
-    input.addEventListener('keydown',e=>{
-      if(e.key==='Enter'){commitInstEdit(type,rowIdx,ic.id,input.value);}
-      else if(e.key==='Escape'){cancelEdit();}
-    });
-    input.addEventListener('blur',()=>{if(S.editing)commitInstEdit(type,rowIdx,ic.id,input.value)});
-    td.style.overflow='visible'; td.appendChild(input); input.focus(); input.select();
-    document.getElementById('statusMode').textContent='編集中';
+    if(tdIdx<0){S.editing=false;return;}
+    const td=trs[0].children[tdIdx+1];if(!td){S.editing=false;return;}
+    const val=ic.formulas[id]||ic.data[id]||'';
+    _attachInstInput(td,val,()=>commitInstEdit('col',id,ic.id,td.querySelector('input').value));
+  }else{
+    // type==='cross', id=instRowId, idx=instColId
+    const ir=_findInstRow(id);const ic=_findInstCol(idx);
+    if(!ir||!ic){S.editing=false;return;}
+    S.selectedInstCell={type:'cross',instRow:ir,instCol:ic};
+    const trs=tbody.querySelectorAll(`tr[data-inst-row-id="${id}"]`);
+    if(!trs.length){S.editing=false;return;}
+    let tdIdx=-1;for(let i=0;i<vCols.length;i++){if(vCols[i].t==='i'&&vCols[i].obj.id===ic.id){tdIdx=i;break;}}
+    if(tdIdx<0){S.editing=false;return;}
+    const td=trs[0].children[tdIdx+1];if(!td){S.editing=false;return;}
+    const xKey=`ir${ir.id}_ic${ic.id}`;
+    const val=S.instant._xData[xKey]||'';
+    _attachInstInput(td,val,()=>commitInstEdit('cross',ir.id,ic.id,td.querySelector('input').value));
   }
+}
+function _attachInstInput(td,val,commitFn){
+  const input=document.createElement('input');
+  input.className='pcsv-cell-input'; input.value=val;
+  input.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){commitFn();}
+    else if(e.key==='Escape'){cancelEdit();}
+  });
+  input.addEventListener('blur',()=>{if(S.editing)commitFn()});
+  td.style.overflow='visible'; td.appendChild(input); input.focus(); input.select();
+  document.getElementById('statusMode').textContent='編集中';
 }
 function commitInstEdit(type,id,idx,newVal){
   S.editing=false;
@@ -3351,19 +3390,23 @@ function commitInstEdit(type,id,idx,newVal){
       delete ir.formulas[idx];
       ir.data[idx]=newVal;
     }
-  }else{
-    // type==='col', id=rowIdx, idx=colId
+  }else if(type==='col'){
+    // id=rowIdx, idx=colId
     const ic=_findInstCol(idx);if(!ic)return;
-    const rowIdx=id;
     if(newVal.startsWith('=')){
       _formulaCtxInstant=true;
-      ic.formulas[rowIdx]=newVal;
-      try{ic.data[rowIdx]=String(evaluateFormula(newVal));}catch(e){ic.data[rowIdx]='#ERROR';}
+      ic.formulas[id]=newVal;
+      try{ic.data[id]=String(evaluateFormula(newVal));}catch(e){ic.data[id]='#ERROR';}
       _formulaCtxInstant=false;
     }else{
-      delete ic.formulas[rowIdx];
-      ic.data[rowIdx]=newVal;
+      delete ic.formulas[id];
+      ic.data[id]=newVal;
     }
+  }else{
+    // type==='cross', id=instRowId, idx=instColId
+    const xKey=`ir${id}_ic${idx}`;
+    if(!S.instant._xData) S.instant._xData={};
+    S.instant._xData[xKey]=newVal;
   }
   renderBody();updateFormulaBar();
   document.getElementById('statusMode').textContent='準備完了';
@@ -3397,23 +3440,25 @@ function onInstCellCtx(e,type,id,idx){
   e.preventDefault();e.stopPropagation();
   if(type==='row'){
     const ir=_findInstRow(id);if(!ir)return;
-    const items=[
-      ir.reflected
-        ?{label:'⚡ インスタント反映を解除',action:`reflectInstantRow(${id})`}
-        :{label:'⚡ インスタントを反映',action:`reflectInstantRow(${id})`},
-      '---',
-      {label:'インスタント行を削除',action:`deleteInstantRow(${id})`,danger:true},
-    ];
-    showContextMenu(e,items);
-  }else{
+    showContextMenu(e,[
+      ir.reflected?{label:'⚡ インスタント反映を解除',action:`reflectInstantRow(${id})`}:{label:'⚡ インスタントを反映',action:`reflectInstantRow(${id})`},
+      '---',{label:'インスタント行を削除',action:`deleteInstantRow(${id})`,danger:true},
+    ]);
+  }else if(type==='col'){
     const ic=_findInstCol(idx);if(!ic)return;
-    const items=[
-      ic.reflected
-        ?{label:'⚡ インスタント反映を解除',action:`reflectInstantCol(${idx})`}
-        :{label:'⚡ インスタントを反映',action:`reflectInstantCol(${idx})`},
-      '---',
-      {label:'インスタント列を削除',action:`deleteInstantCol(${idx})`,danger:true},
-    ];
+    showContextMenu(e,[
+      ic.reflected?{label:'⚡ インスタント反映を解除',action:`reflectInstantCol(${idx})`}:{label:'⚡ インスタントを反映',action:`reflectInstantCol(${idx})`},
+      '---',{label:'インスタント列を削除',action:`deleteInstantCol(${idx})`,danger:true},
+    ]);
+  }else{
+    // cross: show both row and col options
+    const ir=_findInstRow(id);const ic=_findInstCol(idx);
+    const items=[];
+    if(ir){items.push(ir.reflected?{label:'⚡ 行の反映を解除',action:`reflectInstantRow(${id})`}:{label:'⚡ 行を反映',action:`reflectInstantRow(${id})`});}
+    if(ic){items.push(ic.reflected?{label:'⚡ 列の反映を解除',action:`reflectInstantCol(${idx})`}:{label:'⚡ 列を反映',action:`reflectInstantCol(${idx})`});}
+    items.push('---');
+    if(ir) items.push({label:'インスタント行を削除',action:`deleteInstantRow(${id})`,danger:true});
+    if(ic) items.push({label:'インスタント列を削除',action:`deleteInstantCol(${idx})`,danger:true});
     showContextMenu(e,items);
   }
 }
@@ -3574,19 +3619,72 @@ function extendRange(toRow,toCol){
   renderGrid();updateSelectionStatus();updateSelectionSummary();
 }
 
-// ========== A1: Instant Views (Virtual Filters) ==========
+// ========== A1: Instant Views (Visual Filter Builder) ==========
+let _viewLogic='and'; // 'and' or 'or'
+let _viewConditions=[]; // [{col,op,val}] — temp state for the builder modal
+
 function openViewSaveModal(){
   document.getElementById('viewSaveName').value='';
-  document.getElementById('viewSaveFilter').value='';
+  document.getElementById('viewPreviewInfo').textContent='';
+  _viewLogic='and';
+  _viewConditions=[{col:0,op:'contains',val:''}];
+  _renderViewConditions();
+  _updateLogicLabel();
   openModal('viewSaveModal');
   document.getElementById('viewSaveName').focus();
 }
+function _renderViewConditions(){
+  const wrap=document.getElementById('viewConditions');
+  if(!S.headers.length){wrap.innerHTML='<p style="font-size:11px;color:#9ca3af">データを読み込んでください</p>';return;}
+  let h='';
+  _viewConditions.forEach((cond,i)=>{
+    let colOpts='';
+    S.headers.forEach((hdr,ci)=>{colOpts+=`<option value="${ci}"${cond.col===ci?' selected':''}>${escHtml(hdr)} (${indexToColLetter(ci)})</option>`;});
+    h+=`<div class="pcsv-vcond">`;
+    h+=`<select class="vcond-col" onchange="_viewConditions[${i}].col=+this.value">${colOpts}</select>`;
+    h+=`<select class="vcond-op" onchange="_viewConditions[${i}].op=this.value">`;
+    const ops=[['contains','含む'],['not_contains','含まない'],['=','等しい'],['!=','等しくない'],['>','より大きい'],['>=','以上'],['<','より小さい'],['<=','以下'],['empty','空欄'],['not_empty','空欄でない'],['starts','で始まる'],['ends','で終わる']];
+    ops.forEach(([v,l])=>{h+=`<option value="${v}"${cond.op===v?' selected':''}>${l}</option>`;});
+    h+=`</select>`;
+    const noVal=cond.op==='empty'||cond.op==='not_empty';
+    h+=`<input class="vcond-val" type="text" value="${escHtml(cond.val)}" placeholder="値" oninput="_viewConditions[${i}].val=this.value"${noVal?' disabled style="opacity:.4"':''}>`;
+    h+=`<button class="vcond-del" onclick="removeViewCondition(${i})" title="削除">✕</button>`;
+    h+=`</div>`;
+  });
+  wrap.innerHTML=h;
+}
+function addViewCondition(){
+  _viewConditions.push({col:0,op:'contains',val:''});
+  _renderViewConditions();
+}
+function removeViewCondition(i){
+  _viewConditions.splice(i,1);
+  if(!_viewConditions.length) _viewConditions.push({col:0,op:'contains',val:''});
+  _renderViewConditions();
+}
+function toggleViewLogic(){
+  _viewLogic=_viewLogic==='and'?'or':'and';
+  _updateLogicLabel();
+}
+function _updateLogicLabel(){
+  document.getElementById('viewLogicLabel').textContent=_viewLogic==='and'?'AND (すべて一致)':'OR (いずれか一致)';
+}
+function _buildViewConditions(){
+  return _viewConditions.filter(c=>c.op==='empty'||c.op==='not_empty'||c.val.trim()!=='').map(c=>({col:c.col,op:c.op,val:c.val}));
+}
+function previewView(){
+  const conds=_buildViewConditions();
+  if(!conds.length){document.getElementById('viewPreviewInfo').textContent='有効な条件がありません';return;}
+  let count=0;
+  for(let i=0;i<S.data.length;i++){if(_matchesViewFilter(S.data[i],conds,_viewLogic))count++;}
+  document.getElementById('viewPreviewInfo').textContent=`プレビュー: ${count.toLocaleString()} / ${S.data.length.toLocaleString()} 行が一致`;
+}
 function doSaveView(){
   const name=document.getElementById('viewSaveName').value.trim();
-  const filterStr=document.getElementById('viewSaveFilter').value.trim();
   if(!name){toast('ビュー名を入力してください','error');return;}
-  if(!filterStr){toast('フィルタ条件を入力してください','error');return;}
-  const view={id:S.viewsNextId++,name,filter:filterStr};
+  const conds=_buildViewConditions();
+  if(!conds.length){toast('有効なフィルタ条件を追加してください','error');return;}
+  const view={id:S.viewsNextId++,name,conditions:conds,logic:_viewLogic};
   S.views.push(view);
   closeModal('viewSaveModal');
   renderViewsBar();
@@ -3604,30 +3702,10 @@ function renderViewsBar(){
   h+='<span class="pcsv-view-chip" onclick="openViewSaveModal()" style="border-style:dashed;color:#7c3aed">+ 追加</span>';
   bar.innerHTML=h;
 }
-function _parseViewFilter(filterStr){
-  // Parse filter string: "A>100 B="東京" C!="" D contains hello"
-  const conditions=[];
-  const regex=/([A-Z]+)\s*(=|!=|>=|<=|>|<|contains)\s*("([^"]*)"|(\S+))/gi;
-  let m;
-  while((m=regex.exec(filterStr))!==null){
-    const colName=m[1];
-    const op=m[2].toLowerCase();
-    const val=m[4]!==undefined?m[4]:m[5];
-    // Find col index by header name or letter
-    let ci=S.headers.findIndex(h=>h.toLowerCase()===colName.toLowerCase());
-    if(ci<0){
-      // try as column letter
-      const li=colLetterToIndex(colName);
-      if(li>=0&&li<S.headers.length) ci=li;
-    }
-    if(ci>=0) conditions.push({col:ci,op,val});
-  }
-  return conditions;
-}
-function _matchesViewFilter(rowData,conditions){
-  return conditions.every(cond=>{
+function _matchesViewFilter(rowData,conditions,logic){
+  const test=cond=>{
     const cellVal=rowData[cond.col]||'';
-    const cv=cellVal.toLowerCase(),tv=cond.val.toLowerCase();
+    const cv=cellVal.toLowerCase(),tv=(cond.val||'').toLowerCase();
     const cn=parseFloat(cellVal),tn=parseFloat(cond.val);
     switch(cond.op){
       case '=': return cellVal===cond.val;
@@ -3637,24 +3715,51 @@ function _matchesViewFilter(rowData,conditions){
       case '>=': return !isNaN(cn)&&!isNaN(tn)&&cn>=tn;
       case '<=': return !isNaN(cn)&&!isNaN(tn)&&cn<=tn;
       case 'contains': return cv.includes(tv);
+      case 'not_contains': return !cv.includes(tv);
+      case 'empty': return cellVal.trim()==='';
+      case 'not_empty': return cellVal.trim()!=='';
+      case 'starts': return cv.startsWith(tv);
+      case 'ends': return cv.endsWith(tv);
       default: return true;
     }
-  });
+  };
+  return logic==='or'?conditions.some(test):conditions.every(test);
 }
 function applyView(viewId){
   const v=S.views.find(x=>x.id===viewId);
   if(!v){toast('ビューが見つかりません','error');return;}
   S.currentView=viewId;
-  const conditions=_parseViewFilter(v.filter);
+  // Support both new format (conditions array) and legacy (filter string)
+  let conditions,logic;
+  if(v.conditions){
+    conditions=v.conditions; logic=v.logic||'and';
+  }else{
+    // Legacy: parse filter string
+    conditions=_parseLegacyFilter(v.filter); logic='and';
+  }
   if(!conditions.length){toast('フィルタ条件を解析できません','error');return;}
-  // Apply virtual filter using hiddenRows
   S.hiddenRows.clear();
   for(let i=0;i<S.data.length;i++){
-    if(!_matchesViewFilter(S.data[i],conditions)) S.hiddenRows.add(i);
+    if(!_matchesViewFilter(S.data[i],conditions,logic)) S.hiddenRows.add(i);
   }
   S.page=1;
   renderViewsBar();renderGrid();updateStatus();
   toast(`ビュー「${v.name}」を適用中 (${S.data.length-S.hiddenRows.size}行表示)`,'success');
+}
+function _parseLegacyFilter(filterStr){
+  if(!filterStr) return [];
+  const conditions=[];
+  const regex=/([A-Z]+)\s*(=|!=|>=|<=|>|<|contains)\s*("([^"]*)"|(\S+))/gi;
+  let m;
+  while((m=regex.exec(filterStr))!==null){
+    const colName=m[1];
+    const op=m[2].toLowerCase();
+    const val=m[4]!==undefined?m[4]:m[5];
+    let ci=S.headers.findIndex(h=>h.toLowerCase()===colName.toLowerCase());
+    if(ci<0){const li=colLetterToIndex(colName);if(li>=0&&li<S.headers.length)ci=li;}
+    if(ci>=0) conditions.push({col:ci,op,val});
+  }
+  return conditions;
 }
 function clearView(){
   S.currentView=null;
