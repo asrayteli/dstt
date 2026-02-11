@@ -12,3 +12,9 @@ def index():
     is_admin = current_user.username == "3243012"
     
     return render_template("index.html", user_name=user_name, is_admin=is_admin)
+
+
+@main.route("/manual")
+@login_required
+def manual():
+    return render_template("manual.html")
