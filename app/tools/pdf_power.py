@@ -4,6 +4,7 @@ import tempfile
 import shutil
 import traceback
 import zipfile
+import json
 from werkzeug.utils import secure_filename
 from PIL import Image
 from docx import Document
@@ -55,6 +56,236 @@ except Exception as e:
 @login_required
 def pdf_power_home():
     return render_template("pdf_power.html")
+
+
+def _parse_page_number(page_value, total_pages):
+    """Convert 1-based page number to 0-based index."""
+    try:
+        page_number = int(page_value)
+    except (TypeError, ValueError):
+        raise ValueError("Page number must be an integer.")
+    if page_number < 1 or page_number > total_pages:
+        raise ValueError(f"Page number must be between 1 and {total_pages}.")
+    return page_number - 1
+
+
+def _parse_color_hex(color_value, default=(0, 0, 0)):
+    """Convert '#RRGGBB' / 'RRGGBB' to PyMuPDF RGB tuple."""
+    if not color_value:
+        return default
+    color = str(color_value).strip()
+    if color.lower() in {"none", "transparent"}:
+        return None
+    if color.startswith("#"):
+        color = color[1:]
+    if len(color) != 6:
+        return default
+    try:
+        r = int(color[0:2], 16) / 255
+        g = int(color[2:4], 16) / 255
+        b = int(color[4:6], 16) / 255
+        return (r, g, b)
+    except ValueError:
+        return default
+
+
+def _parse_page_ranges(pages_str, total_pages):
+    """
+    Parse page specification:
+    - all
+    - 1,3,5
+    - 1-3,7,10-12
+    Returns 0-based indices.
+    """
+    text = (pages_str or "").strip().lower()
+    if text == "all":
+        return list(range(total_pages))
+
+    page_indices = []
+    for raw_part in str(pages_str).split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            start_str, end_str = part.split("-", 1)
+            start = int(start_str.strip())
+            end = int(end_str.strip())
+            if start > end:
+                raise ValueError(f"Invalid range: {part}")
+            page_indices.extend(range(start - 1, end))
+        else:
+            page_indices.append(int(part) - 1)
+
+    if not page_indices:
+        raise ValueError("Page range is empty.")
+
+    for idx in page_indices:
+        if idx < 0 or idx >= total_pages:
+            raise ValueError(f"Out of range page number: {idx + 1}")
+
+    return page_indices
+
+
+_JAPANESE_FONT_CACHE = None
+_FONT_REGISTERED = set()
+
+
+def _resolve_japanese_font_file():
+    """Resolve a usable Japanese font file path once and cache it."""
+    global _JAPANESE_FONT_CACHE
+    if _JAPANESE_FONT_CACHE is not None:
+        return _JAPANESE_FONT_CACHE
+
+    candidates = [
+        "C:/Windows/Fonts/msgothic.ttc",
+        "C:/Windows/Fonts/meiryo.ttc",
+        "C:/Windows/Fonts/YuGothM.ttc",
+        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttf",
+    ]
+
+    for path in candidates:
+        if os.path.exists(path):
+            _JAPANESE_FONT_CACHE = path
+            return path
+
+    _JAPANESE_FONT_CACHE = ""
+    return ""
+
+
+def _is_non_ascii_text(text):
+    return any(ord(ch) > 127 for ch in str(text))
+
+
+def _insert_textbox_with_fallback(page, rect, text, font_size, color, font_name):
+    """
+    Insert text robustly:
+    - ASCII: use requested font
+    - Non-ASCII: try embedded Japanese font file, then CJK built-in font aliases, then requested font
+    """
+    if not _is_non_ascii_text(text):
+        page.insert_textbox(
+            rect,
+            text,
+            fontsize=font_size,
+            fontname=font_name,
+            color=color,
+            overlay=True,
+        )
+        return
+
+    font_file = _resolve_japanese_font_file()
+    if font_file:
+        try:
+            alias = "jp_fallback"
+            if alias not in _FONT_REGISTERED:
+                page.insert_font(fontname=alias, fontfile=font_file)
+                _FONT_REGISTERED.add(alias)
+            page.insert_textbox(
+                rect,
+                text,
+                fontsize=font_size,
+                fontname=alias,
+                color=color,
+                overlay=True,
+            )
+            return
+        except Exception:
+            logger.warning("Japanese font embedding failed; trying CJK built-in font fallback.")
+
+    for alias in ("japan", "japan-s", "japan-g"):
+        try:
+            page.insert_textbox(
+                rect,
+                text,
+                fontsize=font_size,
+                fontname=alias,
+                color=color,
+                overlay=True,
+            )
+            return
+        except Exception:
+            continue
+
+    page.insert_textbox(
+        rect,
+        text,
+        fontsize=font_size,
+        fontname=font_name,
+        color=color,
+        overlay=True,
+    )
+
+
+def _dash_pattern(stroke_style):
+    style = str(stroke_style or "solid").lower()
+    if style == "dashed":
+        return "[8 4] 0"
+    if style == "dotted":
+        return "[1 3] 0"
+    return None
+
+
+def _to_pdf_point(page, x, y):
+    """
+    Convert viewer coordinates (PDF.js-rendered page space) to base PDF coordinates.
+    The viewer follows page rotation metadata, while drawing APIs operate in base space.
+    """
+    xv = float(x)
+    yv = float(y)
+    rot = int(getattr(page, "rotation", 0)) % 360
+    mbox = page.mediabox
+    width = float(mbox.width)
+    height = float(mbox.height)
+
+    if rot == 90:
+        return fitz.Point(yv, height - xv)
+    if rot == 180:
+        return fitz.Point(width - xv, height - yv)
+    if rot == 270:
+        return fitz.Point(width - yv, xv)
+    return fitz.Point(xv, yv)
+
+
+def _to_pdf_rect(page, x, y, w, h):
+    # Map all corners to preserve correct bounds on rotated pages.
+    x1 = float(x)
+    y1 = float(y)
+    x2 = x1 + float(w)
+    y2 = y1 + float(h)
+    corners = [
+        _to_pdf_point(page, x1, y1),
+        _to_pdf_point(page, x2, y1),
+        _to_pdf_point(page, x1, y2),
+        _to_pdf_point(page, x2, y2),
+    ]
+    xs = [p.x for p in corners]
+    ys = [p.y for p in corners]
+    rect = fitz.Rect(min(xs), min(ys), max(xs), max(ys))
+    rect.normalize()
+    return rect
+
+
+def _collect_affected_pages_for_edit(operations, total_pages):
+    """
+    Collect 0-based page indices touched by edit operations.
+    Used to normalize page rotation before drawing.
+    """
+    affected = set()
+    for idx, op in enumerate(operations, start=1):
+        if not isinstance(op, dict):
+            raise ValueError(f"Operation {idx} format is invalid.")
+
+        op_type = op.get("type")
+        if op_type in {"add_text", "add_shape", "add_image"}:
+            affected.add(_parse_page_number(op.get("page"), total_pages))
+        elif op_type == "copy_region_paste":
+            affected.add(_parse_page_number(op.get("source_page"), total_pages))
+            affected.add(_parse_page_number(op.get("target_page"), total_pages))
+
+    return affected
 
 
 # ========================================
@@ -471,22 +702,15 @@ def split_or_merge_pdf():
                 return jsonify({"error": "ページ範囲を指定してください（例: 1-5）"}), 400
 
             try:
-                if '-' in page_range:
-                    start, end = map(int, page_range.split('-'))
-                else:
-                    start = end = int(page_range)
+                reader = PdfReader(file_paths[0])
+                total_pages = len(reader.pages)
+                pages_to_extract = _parse_page_ranges(page_range, total_pages)
             except ValueError:
                 return jsonify({"error": "ページ範囲の指定が正しくありません（例: 1-5）"}), 400
 
             try:
-                reader = PdfReader(file_paths[0])
-                total_pages = len(reader.pages)
-
-                if start < 1 or end > total_pages or start > end:
-                    return jsonify({"error": f"ページ範囲が無効です。1-{total_pages}の範囲で指定してください"}), 400
-
                 writer = PdfWriter()
-                for page_num in range(start - 1, end):
+                for page_num in pages_to_extract:
                     writer.add_page(reader.pages[page_num])
 
                 with open(output_path, "wb") as output_pdf:
@@ -1249,19 +1473,10 @@ def rotate_pdf():
             total_pages = len(reader.pages)
 
             # ページ指定の解析
-            if pages_str == "all":
-                pages_to_rotate = list(range(total_pages))
-            else:
-                try:
-                    pages_to_rotate = []
-                    for part in pages_str.split(','):
-                        if '-' in part:
-                            start, end = map(int, part.split('-'))
-                            pages_to_rotate.extend(range(start - 1, end))
-                        else:
-                            pages_to_rotate.append(int(part) - 1)
-                except ValueError:
-                    return jsonify({"error": "ページ指定が正しくありません（例: 1-3,5,7）"}), 400
+            try:
+                pages_to_rotate = set(_parse_page_ranges(pages_str, total_pages))
+            except ValueError:
+                return jsonify({"error": "ページ指定が正しくありません（例: 1-3,5,7）"}), 400
 
             # ページを回転
             for i in range(total_pages):
@@ -1608,6 +1823,217 @@ def page_operations():
 # ========================================
 # ヘルスチェック用エンドポイント
 # ========================================
+@pdf_power_bp.route("/edit", methods=["POST"])
+@login_required
+def edit_pdf_overlay():
+    """
+    Overlay-based PDF editing.
+    Supported operations:
+    - add_text
+    - add_shape (rect / ellipse / line)
+    - add_image
+    - copy_region_paste
+    """
+    temp_dir = None
+    try:
+        file = request.files.get("pdf")
+        if not file or not file.filename:
+            return jsonify({"error": "PDF file is required."}), 400
+
+        filename = secure_filename(file.filename)
+        if not filename.lower().endswith(".pdf"):
+            return jsonify({"error": "Only PDF files are supported."}), 400
+
+        operations_raw = request.form.get("operations", "[]")
+        try:
+            operations = json.loads(operations_raw)
+        except json.JSONDecodeError:
+            return jsonify({"error": "Invalid operations JSON."}), 400
+
+        if not isinstance(operations, list) or not operations:
+            return jsonify({"error": "At least one edit operation is required."}), 400
+
+        temp_dir = tempfile.mkdtemp()
+        input_path = os.path.join(temp_dir, filename)
+        output_path = os.path.join(temp_dir, "powerpdf_edited_output.pdf")
+        file.save(input_path)
+
+        if os.path.getsize(input_path) > MAX_FILE_SIZE:
+            return jsonify({"error": "File size exceeds 100MB limit."}), 400
+
+        doc = fitz.open(input_path)
+        total_pages = len(doc)
+        if total_pages == 0:
+            doc.close()
+            return jsonify({"error": "PDF has no pages."}), 400
+
+        affected_pages = _collect_affected_pages_for_edit(operations, total_pages)
+        for page_idx in sorted(affected_pages):
+            page = doc[page_idx]
+            if int(getattr(page, "rotation", 0)) % 360 != 0:
+                page.remove_rotation()
+
+        image_bytes_cache = {}
+
+        for idx, op in enumerate(operations, start=1):
+            if not isinstance(op, dict):
+                doc.close()
+                return jsonify({"error": f"Operation {idx} format is invalid."}), 400
+
+            op_type = op.get("type")
+
+            if op_type == "add_text":
+                page_idx = _parse_page_number(op.get("page"), total_pages)
+                page = doc[page_idx]
+                text = str(op.get("text", "")).strip()
+                if not text:
+                    raise ValueError(f"Operation {idx}: text is empty.")
+                x = float(op.get("x", 0))
+                y = float(op.get("y", 0))
+                w = max(float(op.get("width", 240)), 1)
+                h = max(float(op.get("height", 48)), 1)
+                font_size = max(float(op.get("font_size", 14)), 1)
+                font_name = str(op.get("font_name", "helv"))
+                color = _parse_color_hex(op.get("color", "#111827"), (0.07, 0.09, 0.13))
+                text_rect = _to_pdf_rect(page, x, y, w, h)
+
+                _insert_textbox_with_fallback(
+                    page=page,
+                    rect=text_rect,
+                    text=text,
+                    font_size=font_size,
+                    color=color,
+                    font_name=font_name,
+                )
+
+            elif op_type == "add_shape":
+                page_idx = _parse_page_number(op.get("page"), total_pages)
+                page = doc[page_idx]
+                shape_type = str(op.get("shape", "rect")).lower()
+                stroke_width = max(float(op.get("stroke_width", 2)), 0.1)
+                stroke = _parse_color_hex(op.get("stroke_color", "#1d4ed8"), (0.11, 0.31, 0.85))
+                fill = _parse_color_hex(op.get("fill_color", "transparent"), None)
+                stroke_style = str(op.get("stroke_style", "solid")).lower()
+                dashes = _dash_pattern(stroke_style)
+                shape = page.new_shape()
+                if shape_type in {"rect", "ellipse"}:
+                    x = float(op.get("x", 0))
+                    y = float(op.get("y", 0))
+                    w = max(float(op.get("width", 120)), 1)
+                    h = max(float(op.get("height", 80)), 1)
+                    rect = _to_pdf_rect(page, x, y, w, h)
+                    if shape_type == "rect":
+                        shape.draw_rect(rect)
+                    else:
+                        shape.draw_oval(rect)
+                elif shape_type == "line":
+                    p1 = _to_pdf_point(page, float(op.get("x1", 0)), float(op.get("y1", 0)))
+                    p2 = _to_pdf_point(page, float(op.get("x2", 120)), float(op.get("y2", 120)))
+                    shape.draw_line(p1, p2)
+                else:
+                    raise ValueError(f"Operation {idx}: unsupported shape type '{shape_type}'.")
+                shape.finish(color=stroke, fill=fill, width=stroke_width, dashes=dashes)
+                shape.commit(overlay=True)
+
+            elif op_type == "add_image":
+                page_idx = _parse_page_number(op.get("page"), total_pages)
+                page = doc[page_idx]
+                image_ref = str(op.get("image_ref", "")).strip()
+                image_bytes = b""
+                if image_ref:
+                    cache_key = f"ref:{image_ref}"
+                    if cache_key not in image_bytes_cache:
+                        image_file = request.files.get(image_ref)
+                        if not image_file:
+                            raise ValueError(f"Operation {idx}: image file not found for '{image_ref}'.")
+                        image_bytes_cache[cache_key] = image_file.read()
+                    image_bytes = image_bytes_cache[cache_key]
+                    if not image_bytes:
+                        raise ValueError(f"Operation {idx}: image data is empty for '{image_ref}'.")
+                else:
+                    image_files = request.files.getlist("image_files")
+                    try:
+                        image_index = int(op.get("image_index", 1))
+                    except (TypeError, ValueError):
+                        raise ValueError(f"Operation {idx}: image_index must be an integer.")
+                    if image_index < 1 or image_index > len(image_files):
+                        raise ValueError(
+                            f"Operation {idx}: image_index must be between 1 and {len(image_files)}."
+                        )
+                    cache_key = f"index:{image_index}"
+                    if cache_key not in image_bytes_cache:
+                        image_bytes_cache[cache_key] = image_files[image_index - 1].read()
+                    image_bytes = image_bytes_cache[cache_key]
+                    if not image_bytes:
+                        raise ValueError(f"Operation {idx}: image data is empty for image_index {image_index}.")
+
+                x = float(op.get("x", 0))
+                y = float(op.get("y", 0))
+                w = max(float(op.get("width", 120)), 1)
+                h = max(float(op.get("height", 120)), 1)
+                rect = _to_pdf_rect(page, x, y, w, h)
+                page.insert_image(
+                    rect,
+                    stream=image_bytes,
+                    overlay=True,
+                )
+
+            elif op_type == "copy_region_paste":
+                source_page_idx = _parse_page_number(op.get("source_page"), total_pages)
+                target_page_idx = _parse_page_number(op.get("target_page"), total_pages)
+                source_page = doc[source_page_idx]
+                target_page = doc[target_page_idx]
+                sx = float(op.get("source_x", 0))
+                sy = float(op.get("source_y", 0))
+                sw = max(float(op.get("source_width", 120)), 1)
+                sh = max(float(op.get("source_height", 80)), 1)
+                tx = float(op.get("target_x", 0))
+                ty = float(op.get("target_y", 0))
+                tw = max(float(op.get("target_width", sw)), 1)
+                th = max(float(op.get("target_height", sh)), 1)
+                clip = _to_pdf_rect(source_page, sx, sy, sw, sh)
+                pix = source_page.get_pixmap(clip=clip, alpha=False)
+                target_rect = _to_pdf_rect(target_page, tx, ty, tw, th)
+                target_page.insert_image(
+                    target_rect,
+                    stream=pix.tobytes("png"),
+                    overlay=True,
+                )
+
+            else:
+                raise ValueError(f"Operation {idx}: unsupported type '{op_type}'.")
+
+        doc.save(output_path)
+        doc.close()
+        with open(output_path, "rb") as output_file:
+            file_data = io.BytesIO(output_file.read())
+        file_data.seek(0)
+
+        @after_this_request
+        def cleanup(response):
+            try:
+                if temp_dir and os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.error(f"Temporary directory cleanup error: {e}")
+            return response
+
+        return send_file(
+            file_data,
+            as_attachment=True,
+            download_name="powerpdf_edited_output.pdf",
+            mimetype="application/pdf",
+        )
+
+    except ValueError as e:
+        logger.warning(f"PowerPDF edit validation error: {e}")
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"PowerPDF edit error: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"error": f"PowerPDF edit failed: {str(e)}"}), 500
+
+
 @pdf_power_bp.route("/health", methods=["GET"])
 def health_check():
-    return jsonify({"status": "healthy", "service": "pdf_power"}), 200
+    return jsonify({"status": "healthy", "service": "PowerPDF"}), 200
