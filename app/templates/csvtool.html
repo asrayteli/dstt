@@ -3608,7 +3608,7 @@ function onInstColCtx(e,instColId){
 }
 function onInstCellCtx(e,type,id,idx){
   e.preventDefault();e.stopPropagation();
-  const t=JSON.stringify(type);
+  const t=`'${type}'`;
   const items=[
     {label:'コピー',action:`instCellCopy(${t},${id},${idx})`},
     {label:'貼り付け',action:`instCellPaste(${t},${id},${idx})`},
