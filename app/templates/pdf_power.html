@@ -285,11 +285,26 @@
     <div class="bg-gradient-to-r from-orange-50 to-amber-50 p-6 rounded-lg border-l-4 border-orange-500">
       <h3 class="font-semibold mb-4 text-xl text-gray-700">🔄 ページ回転</h3>
       <p class="text-gray-600 mb-4">PDFのページを指定した角度で回転させます。</p>
-      <form action="/tools/pdf_power/rotate" method="POST" enctype="multipart/form-data">
+      <form action="/tools/pdf_power/rotate" method="POST" enctype="multipart/form-data" id="rotateForm">
         <div class="mb-4">
           <label class="block text-sm font-medium text-gray-600 mb-2">PDFファイル選択</label>
-          <input type="file" name="pdf" required accept=".pdf"
+          <input type="file" name="pdf" id="rotatePdfInput" required accept=".pdf"
                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-orange-500 focus:border-transparent">
+        </div>
+
+        <div class="mb-4 rounded-md border border-orange-200 bg-white p-3">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-sm font-medium text-gray-700">回転プレビュー</p>
+            <div class="flex items-center gap-2 text-sm">
+              <button type="button" id="rotatePrevPage" class="px-2 py-1 border rounded hover:bg-gray-100">◀</button>
+              <span id="rotatePageInfo" class="text-gray-600">- / -</span>
+              <button type="button" id="rotateNextPage" class="px-2 py-1 border rounded hover:bg-gray-100">▶</button>
+            </div>
+          </div>
+          <div id="rotatePreviewWrap" class="max-h-[480px] overflow-auto border border-gray-200 rounded bg-gray-50 p-2">
+            <canvas id="rotatePreviewCanvas" class="mx-auto bg-white shadow-sm"></canvas>
+          </div>
+          <p id="rotatePreviewHint" class="text-xs text-gray-500 mt-2">PDFを選択すると、選択角度での見た目を動的に確認できます。</p>
         </div>
 
         <div class="mb-4">
@@ -951,6 +966,96 @@
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
   }
+
+
+  // ページ回転の動的プレビュー
+  (() => {
+    if (!window.pdfjsLib) return;
+    const rotateForm = document.getElementById('rotateForm');
+    if (!rotateForm) return;
+
+    const fileInput = document.getElementById('rotatePdfInput');
+    const canvas = document.getElementById('rotatePreviewCanvas');
+    const wrap = document.getElementById('rotatePreviewWrap');
+    const hint = document.getElementById('rotatePreviewHint');
+    const pageInfo = document.getElementById('rotatePageInfo');
+    const prevBtn = document.getElementById('rotatePrevPage');
+    const nextBtn = document.getElementById('rotateNextPage');
+    const rotationRadios = rotateForm.querySelectorAll('input[name="rotation"]');
+
+    if (!fileInput || !canvas || !wrap || !pageInfo || !prevBtn || !nextBtn) return;
+
+    let pdfDoc = null;
+    let pageNum = 1;
+    let renderTask = null;
+
+    const getRotation = () => {
+      const checked = rotateForm.querySelector('input[name="rotation"]:checked');
+      return checked ? parseInt(checked.value, 10) : 90;
+    };
+
+    const renderRotatePreview = async () => {
+      if (!pdfDoc) return;
+      if (renderTask) {
+        try { renderTask.cancel(); } catch (_) {}
+      }
+      const page = await pdfDoc.getPage(pageNum);
+      const rotation = getRotation();
+      const baseViewport = page.getViewport({ scale: 1, rotation });
+      const targetWidth = Math.max(320, wrap.clientWidth - 12);
+      const scale = Math.min(2.2, targetWidth / baseViewport.width);
+      const viewport = page.getViewport({ scale, rotation });
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const context = canvas.getContext('2d', { alpha: false });
+      renderTask = page.render({ canvasContext: context, viewport });
+      await renderTask.promise;
+      renderTask = null;
+      pageInfo.textContent = `${pageNum} / ${pdfDoc.numPages}`;
+      prevBtn.disabled = pageNum <= 1;
+      nextBtn.disabled = pageNum >= pdfDoc.numPages;
+    };
+
+    fileInput.addEventListener('change', async (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) {
+        pdfDoc = null;
+        pageInfo.textContent = '- / -';
+        return;
+      }
+      try {
+        const data = await file.arrayBuffer();
+        pdfDoc = await pdfjsLib.getDocument({ data }).promise;
+        pageNum = 1;
+        await renderRotatePreview();
+        hint.textContent = '回転角度・ページ切替に応じてプレビューが更新されます。';
+      } catch (error) {
+        hint.textContent = 'プレビューの読み込みに失敗しました。ファイル形式を確認してください。';
+      }
+    });
+
+    rotationRadios.forEach((radio) => {
+      radio.addEventListener('change', () => {
+        renderRotatePreview();
+      });
+    });
+
+    prevBtn.addEventListener('click', async () => {
+      if (!pdfDoc || pageNum <= 1) return;
+      pageNum -= 1;
+      await renderRotatePreview();
+    });
+
+    nextBtn.addEventListener('click', async () => {
+      if (!pdfDoc || pageNum >= pdfDoc.numPages) return;
+      pageNum += 1;
+      await renderRotatePreview();
+    });
+
+    window.addEventListener('resize', () => {
+      if (pdfDoc) renderRotatePreview();
+    });
+  })();
 
   // 初期表示
   if (window.pdfjsLib) {

@@ -1469,14 +1469,19 @@ def _create_zip_file(output_files, temp_dir):
 def rotate_pdf():
     """PDFページの回転機能"""
     temp_dir = None
+    doc = None
     try:
         file = request.files.get("pdf")
         if not file or not file.filename:
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
         filename = secure_filename(file.filename)
-        if not filename.endswith('.pdf'):
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
+        if not filename:
+            filename = "uploaded.pdf"
+        elif not filename.lower().endswith('.pdf'):
+            filename = f"{filename}.pdf"
 
         rotation = request.form.get("rotation", "90")
         pages_str = request.form.get("pages", "all")
@@ -1497,49 +1502,47 @@ def rotate_pdf():
         if os.path.getsize(input_path) > MAX_FILE_SIZE:
             return jsonify({"error": "ファイルサイズが大きすぎます（100MB以下にしてください）"}), 400
 
+        doc = fitz.open(input_path)
+        total_pages = len(doc)
+        if total_pages == 0:
+            return jsonify({"error": "PDFにページがありません"}), 400
+
+        # ページ指定の解析
         try:
-            reader = PdfReader(input_path)
-            writer = PdfWriter()
-            total_pages = len(reader.pages)
+            pages_to_rotate = set(_parse_page_ranges(pages_str, total_pages))
+        except ValueError:
+            return jsonify({"error": "ページ指定が正しくありません（例: 1-3,5,7）"}), 400
 
-            # ページ指定の解析
+        # ページを回転（既存回転を考慮して加算）
+        for i in range(total_pages):
+            if i not in pages_to_rotate:
+                continue
+            page = doc[i]
+            current_rotation = int(getattr(page, "rotation", 0)) % 360
+            page.set_rotation((current_rotation + rotation_angle) % 360)
+
+        doc.save(output_path)
+        doc.close()
+        doc = None
+
+        @after_this_request
+        def cleanup(response):
             try:
-                pages_to_rotate = set(_parse_page_ranges(pages_str, total_pages))
-            except ValueError:
-                return jsonify({"error": "ページ指定が正しくありません（例: 1-3,5,7）"}), 400
+                if temp_dir and os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.error(f"一時ディレクトリの削除に失敗: {e}")
+            return response
 
-            # ページを回転
-            for i in range(total_pages):
-                page = reader.pages[i]
-                if i in pages_to_rotate:
-                    page.rotate(rotation_angle)
-                writer.add_page(page)
-
-            with open(output_path, "wb") as output_pdf:
-                writer.write(output_pdf)
-
-            @after_this_request
-            def cleanup(response):
-                try:
-                    if temp_dir and os.path.exists(temp_dir):
-                        shutil.rmtree(temp_dir)
-                except Exception as e:
-                    logger.error(f"一時ディレクトリの削除に失敗: {e}")
-                return response
-
-            return send_file(output_path, as_attachment=True, download_name="rotated_output.pdf")
-
-        except Exception as e:
-            logger.error(f"PDF回転に失敗しました: {e}")
-            logger.error(traceback.format_exc())
-            return jsonify({"error": f"PDF回転に失敗しました: {str(e)}"}), 500
+        return send_file(output_path, as_attachment=True, download_name="rotated_output.pdf")
 
     except Exception as e:
         logger.error(f"回転処理中にエラーが発生しました: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"error": f"回転処理中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        pass
+        if doc is not None:
+            doc.close()
 
 
 # ========================================
