@@ -1107,6 +1107,10 @@ def extract_text():
         pass
 
 
+def _temp_input_pdf_path(temp_dir):
+    """PyMuPDFの保存先と衝突しない一時入力PDFパスを返す。"""
+    return os.path.join(temp_dir, "uploaded_input.pdf")
+
 def _validate_pdf_file(file_path):
     """PDFファイルの有効性を確認"""
     try:
@@ -1494,7 +1498,7 @@ def rotate_pdf():
             return jsonify({"error": "回転角度が正しくありません"}), 400
 
         temp_dir = tempfile.mkdtemp()
-        input_path = os.path.join(temp_dir, filename)
+        input_path = _temp_input_pdf_path(temp_dir)
         output_path = os.path.join(temp_dir, "rotated_output.pdf")
         file.save(input_path)
 
@@ -1642,7 +1646,7 @@ def edit_metadata():
         keywords = request.form.get("keywords", "")
 
         temp_dir = tempfile.mkdtemp()
-        input_path = os.path.join(temp_dir, filename)
+        input_path = _temp_input_pdf_path(temp_dir)
         output_path = os.path.join(temp_dir, "metadata_updated.pdf")
         file.save(input_path)
 
@@ -1713,7 +1717,7 @@ def add_watermark():
             return jsonify({"error": "透かしテキストを入力してください"}), 400
 
         temp_dir = tempfile.mkdtemp()
-        input_path = os.path.join(temp_dir, filename)
+        input_path = _temp_input_pdf_path(temp_dir)
         output_path = os.path.join(temp_dir, "watermarked_output.pdf")
         file.save(input_path)
 
@@ -1892,7 +1896,7 @@ def edit_pdf_overlay():
             return jsonify({"error": "At least one edit operation is required."}), 400
 
         temp_dir = tempfile.mkdtemp()
-        input_path = os.path.join(temp_dir, filename)
+        input_path = _temp_input_pdf_path(temp_dir)
         output_path = os.path.join(temp_dir, "powerpdf_edited_output.pdf")
         file.save(input_path)
 
