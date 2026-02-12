@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 # ファイルサイズ制限（全機能共通）
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
+# 範囲コピー時の描画品質設定（高画質寄り）
+COPY_REGION_BASE_DPI = 300
+COPY_REGION_MAX_SCALE = 8.0
+
 # 日本語フォント設定
 JAPANESE_FONT = 'Helvetica'  # デフォルト
 try:
@@ -2023,8 +2027,18 @@ def edit_pdf_overlay():
                 tw = max(float(op.get("target_width", sw)), 1)
                 th = max(float(op.get("target_height", sh)), 1)
                 clip = _to_pdf_rect(source_page, sx, sy, sw, sh)
-                pix = source_page.get_pixmap(clip=clip, alpha=False)
                 target_rect = _to_pdf_rect(target_page, tx, ty, tw, th)
+
+                # 既定72dpiではぼやけやすいため、高DPIでクリップを生成
+                dpi_scale = COPY_REGION_BASE_DPI / 72.0
+                scale_x = min(COPY_REGION_MAX_SCALE, max(1.0, tw / sw) * dpi_scale)
+                scale_y = min(COPY_REGION_MAX_SCALE, max(1.0, th / sh) * dpi_scale)
+                pix = source_page.get_pixmap(
+                    clip=clip,
+                    matrix=fitz.Matrix(scale_x, scale_y),
+                    alpha=False,
+                )
+
                 target_page.insert_image(
                     target_rect,
                     stream=pix.tobytes("png"),
