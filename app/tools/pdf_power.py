@@ -1563,17 +1563,26 @@ def password_protect():
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
         filename = secure_filename(file.filename)
-        if not filename.endswith('.pdf'):
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
+        if not filename:
+            filename = "uploaded.pdf"
+        elif not filename.lower().endswith('.pdf'):
+            filename = f"{filename}.pdf"
 
         mode = request.form.get("mode", "add")
         password = request.form.get("password", "")
 
+        if mode not in {"add", "remove"}:
+            return jsonify({"error": "操作モードが正しくありません"}), 400
+
         if mode == "add" and not password:
             return jsonify({"error": "パスワードを入力してください"}), 400
+        if mode == "remove" and not password:
+            return jsonify({"error": "解除用のパスワードを入力してください"}), 400
 
         temp_dir = tempfile.mkdtemp()
-        input_path = os.path.join(temp_dir, filename)
+        input_path = _temp_input_pdf_path(temp_dir)
         output_path = os.path.join(temp_dir, "password_protected.pdf")
         file.save(input_path)
 
@@ -1583,15 +1592,24 @@ def password_protect():
 
         try:
             if mode == "add":
-                # パスワード追加
-                with pikepdf.open(input_path) as pdf:
-                    pdf.save(output_path, encryption=pikepdf.Encryption(
-                        owner=password,
-                        user=password,
-                        R=6  # AES-256
-                    ))
+                # パスワード追加（既に保護済みの場合は明示エラー）
+                try:
+                    with pikepdf.open(input_path) as pdf:
+                        pdf.save(output_path, encryption=pikepdf.Encryption(
+                            owner=password,
+                            user=password,
+                            R=6  # AES-256
+                        ))
+                except pikepdf.PasswordError:
+                    return jsonify({"error": "このPDFには既にパスワードが設定されています。解除してから再設定してください"}), 400
             else:
-                # パスワード解除
+                # パスワード解除（総当たりは行わず、入力パスワードのみ検証）
+                try:
+                    with pikepdf.open(input_path) as _:
+                        return jsonify({"error": "このPDFにはパスワードが設定されていません"}), 400
+                except pikepdf.PasswordError:
+                    pass
+
                 try:
                     with pikepdf.open(input_path, password=password) as pdf:
                         pdf.save(output_path)
