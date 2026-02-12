@@ -1123,6 +1123,32 @@ def _validate_pdf_file(file_path):
         return False
 
 
+def _is_probably_pdf_upload(upload_file):
+    """拡張子が無くても、ヘッダとMIMEからPDFアップロードを判定する。"""
+    if not upload_file:
+        return False
+
+    filename = secure_filename(upload_file.filename or "")
+    mimetype = (upload_file.mimetype or "").lower()
+
+    stream = upload_file.stream
+    current_pos = stream.tell()
+    try:
+        stream.seek(0)
+        header = stream.read(5)
+    finally:
+        stream.seek(current_pos)
+
+    if header == b"%PDF-":
+        return True
+    if filename.lower().endswith(".pdf"):
+        return True
+    if mimetype in {"application/pdf", "application/x-pdf"}:
+        return True
+
+    return False
+
+
 def _extract_text_from_pdf(file_path, keyword, extract_images, temp_dir):
     """PDFからテキストを抽出"""
     try:
@@ -1841,8 +1867,13 @@ def edit_pdf_overlay():
             return jsonify({"error": "PDF file is required."}), 400
 
         filename = secure_filename(file.filename)
-        if not filename.lower().endswith(".pdf"):
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "Only PDF files are supported."}), 400
+
+        if not filename:
+            filename = "uploaded.pdf"
+        elif not filename.lower().endswith(".pdf"):
+            filename = f"{filename}.pdf"
 
         operations_raw = request.form.get("operations", "[]")
         try:
