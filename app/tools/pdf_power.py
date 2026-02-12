@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 # ファイルサイズ制限（全機能共通）
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
+# 範囲コピー時の描画品質設定（高画質寄り）
+COPY_REGION_BASE_DPI = 300
+COPY_REGION_MAX_SCALE = 8.0
+
 # 日本語フォント設定
 JAPANESE_FONT = 'Helvetica'  # デフォルト
 try:
@@ -1123,6 +1127,32 @@ def _validate_pdf_file(file_path):
         return False
 
 
+def _is_probably_pdf_upload(upload_file):
+    """拡張子が無くても、ヘッダとMIMEからPDFアップロードを判定する。"""
+    if not upload_file:
+        return False
+
+    filename = secure_filename(upload_file.filename or "")
+    mimetype = (upload_file.mimetype or "").lower()
+
+    stream = upload_file.stream
+    current_pos = stream.tell()
+    try:
+        stream.seek(0)
+        header = stream.read(5)
+    finally:
+        stream.seek(current_pos)
+
+    if header == b"%PDF-":
+        return True
+    if filename.lower().endswith(".pdf"):
+        return True
+    if mimetype in {"application/pdf", "application/x-pdf"}:
+        return True
+
+    return False
+
+
 def _extract_text_from_pdf(file_path, keyword, extract_images, temp_dir):
     """PDFからテキストを抽出"""
     try:
@@ -1841,8 +1871,13 @@ def edit_pdf_overlay():
             return jsonify({"error": "PDF file is required."}), 400
 
         filename = secure_filename(file.filename)
-        if not filename.lower().endswith(".pdf"):
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "Only PDF files are supported."}), 400
+
+        if not filename:
+            filename = "uploaded.pdf"
+        elif not filename.lower().endswith(".pdf"):
+            filename = f"{filename}.pdf"
 
         operations_raw = request.form.get("operations", "[]")
         try:
@@ -1992,8 +2027,18 @@ def edit_pdf_overlay():
                 tw = max(float(op.get("target_width", sw)), 1)
                 th = max(float(op.get("target_height", sh)), 1)
                 clip = _to_pdf_rect(source_page, sx, sy, sw, sh)
-                pix = source_page.get_pixmap(clip=clip, alpha=False)
                 target_rect = _to_pdf_rect(target_page, tx, ty, tw, th)
+
+                # 既定72dpiではぼやけやすいため、高DPIでクリップを生成
+                dpi_scale = COPY_REGION_BASE_DPI / 72.0
+                scale_x = min(COPY_REGION_MAX_SCALE, max(1.0, tw / sw) * dpi_scale)
+                scale_y = min(COPY_REGION_MAX_SCALE, max(1.0, th / sh) * dpi_scale)
+                pix = source_page.get_pixmap(
+                    clip=clip,
+                    matrix=fitz.Matrix(scale_x, scale_y),
+                    alpha=False,
+                )
+
                 target_page.insert_image(
                     target_rect,
                     stream=pix.tobytes("png"),
