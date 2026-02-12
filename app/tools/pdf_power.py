@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 # ファイルサイズ制限（全機能共通）
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
+# 範囲コピー時の描画品質設定（高画質寄り）
+COPY_REGION_BASE_DPI = 300
+COPY_REGION_MAX_SCALE = 8.0
+
 # 日本語フォント設定
 JAPANESE_FONT = 'Helvetica'  # デフォルト
 try:
@@ -1123,6 +1127,32 @@ def _validate_pdf_file(file_path):
         return False
 
 
+def _is_probably_pdf_upload(upload_file):
+    """拡張子が無くても、ヘッダとMIMEからPDFアップロードを判定する。"""
+    if not upload_file:
+        return False
+
+    filename = secure_filename(upload_file.filename or "")
+    mimetype = (upload_file.mimetype or "").lower()
+
+    stream = upload_file.stream
+    current_pos = stream.tell()
+    try:
+        stream.seek(0)
+        header = stream.read(5)
+    finally:
+        stream.seek(current_pos)
+
+    if header == b"%PDF-":
+        return True
+    if filename.lower().endswith(".pdf"):
+        return True
+    if mimetype in {"application/pdf", "application/x-pdf"}:
+        return True
+
+    return False
+
+
 def _extract_text_from_pdf(file_path, keyword, extract_images, temp_dir):
     """PDFからテキストを抽出"""
     try:
@@ -1439,14 +1469,19 @@ def _create_zip_file(output_files, temp_dir):
 def rotate_pdf():
     """PDFページの回転機能"""
     temp_dir = None
+    doc = None
     try:
         file = request.files.get("pdf")
         if not file or not file.filename:
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
         filename = secure_filename(file.filename)
-        if not filename.endswith('.pdf'):
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
+        if not filename:
+            filename = "uploaded.pdf"
+        elif not filename.lower().endswith('.pdf'):
+            filename = f"{filename}.pdf"
 
         rotation = request.form.get("rotation", "90")
         pages_str = request.form.get("pages", "all")
@@ -1467,49 +1502,47 @@ def rotate_pdf():
         if os.path.getsize(input_path) > MAX_FILE_SIZE:
             return jsonify({"error": "ファイルサイズが大きすぎます（100MB以下にしてください）"}), 400
 
+        doc = fitz.open(input_path)
+        total_pages = len(doc)
+        if total_pages == 0:
+            return jsonify({"error": "PDFにページがありません"}), 400
+
+        # ページ指定の解析
         try:
-            reader = PdfReader(input_path)
-            writer = PdfWriter()
-            total_pages = len(reader.pages)
+            pages_to_rotate = set(_parse_page_ranges(pages_str, total_pages))
+        except ValueError:
+            return jsonify({"error": "ページ指定が正しくありません（例: 1-3,5,7）"}), 400
 
-            # ページ指定の解析
+        # ページを回転（既存回転を考慮して加算）
+        for i in range(total_pages):
+            if i not in pages_to_rotate:
+                continue
+            page = doc[i]
+            current_rotation = int(getattr(page, "rotation", 0)) % 360
+            page.set_rotation((current_rotation + rotation_angle) % 360)
+
+        doc.save(output_path)
+        doc.close()
+        doc = None
+
+        @after_this_request
+        def cleanup(response):
             try:
-                pages_to_rotate = set(_parse_page_ranges(pages_str, total_pages))
-            except ValueError:
-                return jsonify({"error": "ページ指定が正しくありません（例: 1-3,5,7）"}), 400
+                if temp_dir and os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.error(f"一時ディレクトリの削除に失敗: {e}")
+            return response
 
-            # ページを回転
-            for i in range(total_pages):
-                page = reader.pages[i]
-                if i in pages_to_rotate:
-                    page.rotate(rotation_angle)
-                writer.add_page(page)
-
-            with open(output_path, "wb") as output_pdf:
-                writer.write(output_pdf)
-
-            @after_this_request
-            def cleanup(response):
-                try:
-                    if temp_dir and os.path.exists(temp_dir):
-                        shutil.rmtree(temp_dir)
-                except Exception as e:
-                    logger.error(f"一時ディレクトリの削除に失敗: {e}")
-                return response
-
-            return send_file(output_path, as_attachment=True, download_name="rotated_output.pdf")
-
-        except Exception as e:
-            logger.error(f"PDF回転に失敗しました: {e}")
-            logger.error(traceback.format_exc())
-            return jsonify({"error": f"PDF回転に失敗しました: {str(e)}"}), 500
+        return send_file(output_path, as_attachment=True, download_name="rotated_output.pdf")
 
     except Exception as e:
         logger.error(f"回転処理中にエラーが発生しました: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"error": f"回転処理中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        pass
+        if doc is not None:
+            doc.close()
 
 
 # ========================================
@@ -1841,8 +1874,13 @@ def edit_pdf_overlay():
             return jsonify({"error": "PDF file is required."}), 400
 
         filename = secure_filename(file.filename)
-        if not filename.lower().endswith(".pdf"):
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "Only PDF files are supported."}), 400
+
+        if not filename:
+            filename = "uploaded.pdf"
+        elif not filename.lower().endswith(".pdf"):
+            filename = f"{filename}.pdf"
 
         operations_raw = request.form.get("operations", "[]")
         try:
@@ -1992,8 +2030,18 @@ def edit_pdf_overlay():
                 tw = max(float(op.get("target_width", sw)), 1)
                 th = max(float(op.get("target_height", sh)), 1)
                 clip = _to_pdf_rect(source_page, sx, sy, sw, sh)
-                pix = source_page.get_pixmap(clip=clip, alpha=False)
                 target_rect = _to_pdf_rect(target_page, tx, ty, tw, th)
+
+                # 既定72dpiではぼやけやすいため、高DPIでクリップを生成
+                dpi_scale = COPY_REGION_BASE_DPI / 72.0
+                scale_x = min(COPY_REGION_MAX_SCALE, max(1.0, tw / sw) * dpi_scale)
+                scale_y = min(COPY_REGION_MAX_SCALE, max(1.0, th / sh) * dpi_scale)
+                pix = source_page.get_pixmap(
+                    clip=clip,
+                    matrix=fitz.Matrix(scale_x, scale_y),
+                    alpha=False,
+                )
+
                 target_page.insert_image(
                     target_rect,
                     stream=pix.tobytes("png"),
