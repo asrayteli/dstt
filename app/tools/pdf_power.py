@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 # ファイルサイズ制限（全機能共通）
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
+# 範囲コピー時の描画品質設定（高画質寄り）
+COPY_REGION_BASE_DPI = 300
+COPY_REGION_MAX_SCALE = 8.0
+
 # 日本語フォント設定
 JAPANESE_FONT = 'Helvetica'  # デフォルト
 try:
@@ -1103,6 +1107,10 @@ def extract_text():
         pass
 
 
+def _temp_input_pdf_path(temp_dir):
+    """PyMuPDFの保存先と衝突しない一時入力PDFパスを返す。"""
+    return os.path.join(temp_dir, "uploaded_input.pdf")
+
 def _validate_pdf_file(file_path):
     """PDFファイルの有効性を確認"""
     try:
@@ -1121,6 +1129,32 @@ def _validate_pdf_file(file_path):
     except Exception as e:
         logger.error(f"PDFファイル検証エラー: {e}")
         return False
+
+
+def _is_probably_pdf_upload(upload_file):
+    """拡張子が無くても、ヘッダとMIMEからPDFアップロードを判定する。"""
+    if not upload_file:
+        return False
+
+    filename = secure_filename(upload_file.filename or "")
+    mimetype = (upload_file.mimetype or "").lower()
+
+    stream = upload_file.stream
+    current_pos = stream.tell()
+    try:
+        stream.seek(0)
+        header = stream.read(5)
+    finally:
+        stream.seek(current_pos)
+
+    if header == b"%PDF-":
+        return True
+    if filename.lower().endswith(".pdf"):
+        return True
+    if mimetype in {"application/pdf", "application/x-pdf"}:
+        return True
+
+    return False
 
 
 def _extract_text_from_pdf(file_path, keyword, extract_images, temp_dir):
@@ -1439,14 +1473,19 @@ def _create_zip_file(output_files, temp_dir):
 def rotate_pdf():
     """PDFページの回転機能"""
     temp_dir = None
+    doc = None
     try:
         file = request.files.get("pdf")
         if not file or not file.filename:
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
         filename = secure_filename(file.filename)
-        if not filename.endswith('.pdf'):
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
+        if not filename:
+            filename = "uploaded.pdf"
+        elif not filename.lower().endswith('.pdf'):
+            filename = f"{filename}.pdf"
 
         rotation = request.form.get("rotation", "90")
         pages_str = request.form.get("pages", "all")
@@ -1459,7 +1498,7 @@ def rotate_pdf():
             return jsonify({"error": "回転角度が正しくありません"}), 400
 
         temp_dir = tempfile.mkdtemp()
-        input_path = os.path.join(temp_dir, filename)
+        input_path = _temp_input_pdf_path(temp_dir)
         output_path = os.path.join(temp_dir, "rotated_output.pdf")
         file.save(input_path)
 
@@ -1467,49 +1506,47 @@ def rotate_pdf():
         if os.path.getsize(input_path) > MAX_FILE_SIZE:
             return jsonify({"error": "ファイルサイズが大きすぎます（100MB以下にしてください）"}), 400
 
+        doc = fitz.open(input_path)
+        total_pages = len(doc)
+        if total_pages == 0:
+            return jsonify({"error": "PDFにページがありません"}), 400
+
+        # ページ指定の解析
         try:
-            reader = PdfReader(input_path)
-            writer = PdfWriter()
-            total_pages = len(reader.pages)
+            pages_to_rotate = set(_parse_page_ranges(pages_str, total_pages))
+        except ValueError:
+            return jsonify({"error": "ページ指定が正しくありません（例: 1-3,5,7）"}), 400
 
-            # ページ指定の解析
+        # ページを回転（既存回転を考慮して加算）
+        for i in range(total_pages):
+            if i not in pages_to_rotate:
+                continue
+            page = doc[i]
+            current_rotation = int(getattr(page, "rotation", 0)) % 360
+            page.set_rotation((current_rotation + rotation_angle) % 360)
+
+        doc.save(output_path)
+        doc.close()
+        doc = None
+
+        @after_this_request
+        def cleanup(response):
             try:
-                pages_to_rotate = set(_parse_page_ranges(pages_str, total_pages))
-            except ValueError:
-                return jsonify({"error": "ページ指定が正しくありません（例: 1-3,5,7）"}), 400
+                if temp_dir and os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.error(f"一時ディレクトリの削除に失敗: {e}")
+            return response
 
-            # ページを回転
-            for i in range(total_pages):
-                page = reader.pages[i]
-                if i in pages_to_rotate:
-                    page.rotate(rotation_angle)
-                writer.add_page(page)
-
-            with open(output_path, "wb") as output_pdf:
-                writer.write(output_pdf)
-
-            @after_this_request
-            def cleanup(response):
-                try:
-                    if temp_dir and os.path.exists(temp_dir):
-                        shutil.rmtree(temp_dir)
-                except Exception as e:
-                    logger.error(f"一時ディレクトリの削除に失敗: {e}")
-                return response
-
-            return send_file(output_path, as_attachment=True, download_name="rotated_output.pdf")
-
-        except Exception as e:
-            logger.error(f"PDF回転に失敗しました: {e}")
-            logger.error(traceback.format_exc())
-            return jsonify({"error": f"PDF回転に失敗しました: {str(e)}"}), 500
+        return send_file(output_path, as_attachment=True, download_name="rotated_output.pdf")
 
     except Exception as e:
         logger.error(f"回転処理中にエラーが発生しました: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"error": f"回転処理中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        pass
+        if doc is not None:
+            doc.close()
 
 
 # ========================================
@@ -1526,17 +1563,26 @@ def password_protect():
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
         filename = secure_filename(file.filename)
-        if not filename.endswith('.pdf'):
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
+        if not filename:
+            filename = "uploaded.pdf"
+        elif not filename.lower().endswith('.pdf'):
+            filename = f"{filename}.pdf"
 
         mode = request.form.get("mode", "add")
         password = request.form.get("password", "")
 
+        if mode not in {"add", "remove"}:
+            return jsonify({"error": "操作モードが正しくありません"}), 400
+
         if mode == "add" and not password:
             return jsonify({"error": "パスワードを入力してください"}), 400
+        if mode == "remove" and not password:
+            return jsonify({"error": "解除用のパスワードを入力してください"}), 400
 
         temp_dir = tempfile.mkdtemp()
-        input_path = os.path.join(temp_dir, filename)
+        input_path = _temp_input_pdf_path(temp_dir)
         output_path = os.path.join(temp_dir, "password_protected.pdf")
         file.save(input_path)
 
@@ -1546,15 +1592,24 @@ def password_protect():
 
         try:
             if mode == "add":
-                # パスワード追加
-                with pikepdf.open(input_path) as pdf:
-                    pdf.save(output_path, encryption=pikepdf.Encryption(
-                        owner=password,
-                        user=password,
-                        R=6  # AES-256
-                    ))
+                # パスワード追加（既に保護済みの場合は明示エラー）
+                try:
+                    with pikepdf.open(input_path) as pdf:
+                        pdf.save(output_path, encryption=pikepdf.Encryption(
+                            owner=password,
+                            user=password,
+                            R=6  # AES-256
+                        ))
+                except pikepdf.PasswordError:
+                    return jsonify({"error": "このPDFには既にパスワードが設定されています。解除してから再設定してください"}), 400
             else:
-                # パスワード解除
+                # パスワード解除（総当たりは行わず、入力パスワードのみ検証）
+                try:
+                    with pikepdf.open(input_path) as _:
+                        return jsonify({"error": "このPDFにはパスワードが設定されていません"}), 400
+                except pikepdf.PasswordError:
+                    pass
+
                 try:
                     with pikepdf.open(input_path, password=password) as pdf:
                         pdf.save(output_path)
@@ -1609,7 +1664,7 @@ def edit_metadata():
         keywords = request.form.get("keywords", "")
 
         temp_dir = tempfile.mkdtemp()
-        input_path = os.path.join(temp_dir, filename)
+        input_path = _temp_input_pdf_path(temp_dir)
         output_path = os.path.join(temp_dir, "metadata_updated.pdf")
         file.save(input_path)
 
@@ -1680,7 +1735,7 @@ def add_watermark():
             return jsonify({"error": "透かしテキストを入力してください"}), 400
 
         temp_dir = tempfile.mkdtemp()
-        input_path = os.path.join(temp_dir, filename)
+        input_path = _temp_input_pdf_path(temp_dir)
         output_path = os.path.join(temp_dir, "watermarked_output.pdf")
         file.save(input_path)
 
@@ -1841,8 +1896,13 @@ def edit_pdf_overlay():
             return jsonify({"error": "PDF file is required."}), 400
 
         filename = secure_filename(file.filename)
-        if not filename.lower().endswith(".pdf"):
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "Only PDF files are supported."}), 400
+
+        if not filename:
+            filename = "uploaded.pdf"
+        elif not filename.lower().endswith(".pdf"):
+            filename = f"{filename}.pdf"
 
         operations_raw = request.form.get("operations", "[]")
         try:
@@ -1854,7 +1914,7 @@ def edit_pdf_overlay():
             return jsonify({"error": "At least one edit operation is required."}), 400
 
         temp_dir = tempfile.mkdtemp()
-        input_path = os.path.join(temp_dir, filename)
+        input_path = _temp_input_pdf_path(temp_dir)
         output_path = os.path.join(temp_dir, "powerpdf_edited_output.pdf")
         file.save(input_path)
 
@@ -1992,8 +2052,18 @@ def edit_pdf_overlay():
                 tw = max(float(op.get("target_width", sw)), 1)
                 th = max(float(op.get("target_height", sh)), 1)
                 clip = _to_pdf_rect(source_page, sx, sy, sw, sh)
-                pix = source_page.get_pixmap(clip=clip, alpha=False)
                 target_rect = _to_pdf_rect(target_page, tx, ty, tw, th)
+
+                # 既定72dpiではぼやけやすいため、高DPIでクリップを生成
+                dpi_scale = COPY_REGION_BASE_DPI / 72.0
+                scale_x = min(COPY_REGION_MAX_SCALE, max(1.0, tw / sw) * dpi_scale)
+                scale_y = min(COPY_REGION_MAX_SCALE, max(1.0, th / sh) * dpi_scale)
+                pix = source_page.get_pixmap(
+                    clip=clip,
+                    matrix=fitz.Matrix(scale_x, scale_y),
+                    alpha=False,
+                )
+
                 target_page.insert_image(
                     target_rect,
                     stream=pix.tobytes("png"),
