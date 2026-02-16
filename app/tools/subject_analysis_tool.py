@@ -155,12 +155,16 @@ def parse_subject_data(csv_data):
         subject_name = row[12].strip() if len(row) > 12 else ""
         contract_type = row[5].strip() if len(row) > 5 else ""
 
+        # 科目コードの表記ゆれを吸収（半角/全角スペース）
+        normalized_subject_code = subject_code.replace(" ", "").replace("　", "")
+        is_indirect_cost = normalized_subject_code in ["間接原価", "関節原価"]
+
         # 科目コードが「販売費」の場合はスキップ
-        if subject_code == "販売費":
+        if normalized_subject_code == "販売費":
             continue
 
         # 科目名称が空の場合は、間接原価以外はスキップ
-        if not subject_name and subject_code != "間接原価":
+        if not subject_name and not is_indirect_cost:
             continue
 
         # 契約コードが空の場合はスキップ
@@ -170,6 +174,12 @@ def parse_subject_data(csv_data):
         # 自動車売上の場合は、契約形態名称を科目名称として使用
         # （基本請負料とその他請負料を別々に扱うため）
         display_subject_name = subject_name
+
+        # 間接原価は科目名称が空で入ってくるケースがあるため、
+        # 表示・集計用の科目名として科目コードを採用する
+        if not display_subject_name and is_indirect_cost:
+            display_subject_name = "間接原価"
+
         if subject_name == "自動車売上":
             if contract_type in ["基本請負料", "その他請負料"]:
                 display_subject_name = contract_type
