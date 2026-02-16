@@ -158,11 +158,13 @@ class TableRenderer {
         this.currentData = results;
         const tbody = document.getElementById('detail-tbody');
         const countEl = document.getElementById('detail-count');
+        const isSimpleMode = filters.comparisonMode === 'simple_view';
 
         if (!tbody) return;
 
         if (results.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-gray-500">データがありません</td></tr>';
+            const colSpan = isSimpleMode ? 6 : 9;
+            tbody.innerHTML = `<tr><td colspan="${colSpan}" class="text-center text-gray-500">データがありません</td></tr>`;
             countEl.textContent = '0';
             return;
         }
@@ -186,7 +188,7 @@ class TableRenderer {
 
             // ハイライトクラス決定
             let highlightClass = '';
-            if (filters.highlightEnabled && result.isAnomaly) {
+            if (!isSimpleMode && filters.highlightEnabled && result.isAnomaly) {
                 if (result.diff > 0) {
                     highlightClass = 'highlight-increase';
                 } else if (result.diff < 0) {
@@ -206,7 +208,7 @@ class TableRenderer {
             let diffRateDisplay = this.formatNumber(result.diffRate, true) + '%';
 
             // 表示モードに応じて調整
-            if (filters.displayMode === 'value_only') {
+            if (isSimpleMode || filters.displayMode === 'value_only') {
                 comparisonValueDisplay = '-';
                 diffDisplay = '-';
                 diffRateDisplay = '-';
@@ -232,6 +234,7 @@ class TableRenderer {
                 comparisonLabel: result.comparisonLabel,
                 diff: result.diff,
                 diffRate: result.diffRate,
+                hasComparison: !!result.hasComparison,
                 isRevenue: item.is_revenue
             }).replace(/"/g, '&quot;');
 
@@ -243,9 +246,9 @@ class TableRenderer {
                     <td>${item.subject_name}</td>
                     <td>${result.month}月</td>
                     <td class="text-right">${currentValueDisplay}</td>
-                    <td class="text-right">${comparisonValueDisplay}</td>
-                    <td class="text-right">${diffDisplay}</td>
-                    <td class="text-right">${diffRateDisplay}</td>
+                    <td class="text-right compare-only">${comparisonValueDisplay}</td>
+                    <td class="text-right compare-only">${diffDisplay}</td>
+                    <td class="text-right compare-only">${diffRateDisplay}</td>
                 </tr>
             `;
         });
@@ -267,6 +270,7 @@ class TableRenderer {
      */
     renderSiteSummary(summary, filters) {
         const container = document.getElementById('site-summary-content');
+        const isSimpleMode = filters.comparisonMode === 'simple_view';
         if (!container) return;
 
         if (summary.length === 0) {
@@ -284,14 +288,16 @@ class TableRenderer {
                                 ${site.siteName} (${site.corpName})
                             </div>
                             <div class="text-sm text-gray-600">
-                                ${site.segment} | 異常値: ${site.anomalyCount}件
+                                ${site.segment}
+                                <span class="compare-only"> | 異常値: ${site.anomalyCount}件</span>
+                                <span class="simple-only"> | 単純表示</span>
                             </div>
                         </div>
                         <div class="text-right">
-                            <div class="text-lg font-bold ${site.totalDiff >= 0 ? 'text-red-600' : 'text-blue-600'}">
-                                ${this.formatNumber(site.totalDiff, true)}
+                            <div class="text-lg font-bold ${isSimpleMode ? '' : (site.totalDiff >= 0 ? 'text-red-600' : 'text-blue-600')}">
+                                ${isSimpleMode ? this.formatNumber(site.totalCurrent) : this.formatNumber(site.totalDiff, true)}
                             </div>
-                            <div class="text-sm text-gray-600">
+                            <div class="text-sm text-gray-600 compare-only">
                                 (${this.formatNumber(site.totalDiffRate, true)}%)
                             </div>
                         </div>
@@ -303,16 +309,16 @@ class TableRenderer {
                                     <th>科目</th>
                                     <th>月</th>
                                     <th>当期値</th>
-                                    <th>比較値</th>
-                                    <th>差異</th>
-                                    <th>差異率</th>
+                                    <th class="compare-only">比較値</th>
+                                    <th class="compare-only">差異</th>
+                                    <th class="compare-only">差異率</th>
                                 </tr>
                             </thead>
                             <tbody>
             `;
 
             site.items.forEach(result => {
-                const highlightClass = filters.highlightEnabled && result.isAnomaly
+                const highlightClass = !isSimpleMode && filters.highlightEnabled && result.isAnomaly
                     ? (result.diff > 0 ? 'highlight-increase' : 'highlight-decrease')
                     : '';
 
@@ -328,6 +334,7 @@ class TableRenderer {
                     comparisonLabel: result.comparisonLabel,
                     diff: result.diff,
                     diffRate: result.diffRate,
+                    hasComparison: !!result.hasComparison,
                     isRevenue: result.item.is_revenue
                 }).replace(/"/g, '&quot;');
 
@@ -336,9 +343,9 @@ class TableRenderer {
                         <td>${result.item.subject_name}</td>
                         <td>${result.month}月</td>
                         <td class="text-right">${this.formatNumber(result.currentValue)}</td>
-                        <td class="text-right">${this.formatNumber(result.comparisonValue)}</td>
-                        <td class="text-right">${this.formatNumber(result.diff, true)}</td>
-                        <td class="text-right">${this.formatNumber(result.diffRate, true)}%</td>
+                        <td class="text-right compare-only">${this.formatNumber(result.comparisonValue)}</td>
+                        <td class="text-right compare-only">${this.formatNumber(result.diff, true)}</td>
+                        <td class="text-right compare-only">${this.formatNumber(result.diffRate, true)}%</td>
                     </tr>
                 `;
             });
@@ -364,6 +371,13 @@ class TableRenderer {
         this.bindContextMenuForTooltipData('#site-summary-content tbody tr[data-tooltip]', (data) => {
             const typeLabel = data.isRevenue ? '売上' : '原価';
             const signNote = data.isRevenue ? '' : '（符号反転済み）';
+            const comparisonHtml = data.hasComparison
+                ? `
+                    <div class="tooltip-row"><span class="tooltip-key">比較元 (${data.comparisonLabel}):</span><span class="tooltip-value">${this.formatNumber(data.comparisonValue)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">差異:</span><span class="tooltip-value" style="color: ${data.diff >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diff, true)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">差異率:</span><span class="tooltip-value" style="color: ${data.diffRate >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diffRate, true)}%</span></div>
+                `
+                : '<div class="tooltip-row"><span class="tooltip-key">モード:</span><span class="tooltip-value">単純表示（比較なし）</span></div>';
 
             return `
                 <div class="tooltip-content">
@@ -373,9 +387,7 @@ class TableRenderer {
                     <div class="tooltip-row"><span class="tooltip-key">対象月:</span><span class="tooltip-value">${data.month}月</span></div>
                     <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
                     <div class="tooltip-row"><span class="tooltip-key">当期値:</span><span class="tooltip-value">${this.formatNumber(data.currentValue)}円</span></div>
-                    <div class="tooltip-row"><span class="tooltip-key">比較元 (${data.comparisonLabel}):</span><span class="tooltip-value">${this.formatNumber(data.comparisonValue)}円</span></div>
-                    <div class="tooltip-row"><span class="tooltip-key">差異:</span><span class="tooltip-value" style="color: ${data.diff >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diff, true)}円</span></div>
-                    <div class="tooltip-row"><span class="tooltip-key">差異率:</span><span class="tooltip-value" style="color: ${data.diffRate >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diffRate, true)}%</span></div>
+                    ${comparisonHtml}
                 </div>
             `;
         });
@@ -386,6 +398,7 @@ class TableRenderer {
      */
     renderSubjectSummary(summary, filters) {
         const container = document.getElementById('subject-summary-content');
+        const isSimpleMode = filters.comparisonMode === 'simple_view';
         if (!container) return;
 
         if (summary.length === 0) {
@@ -416,18 +429,18 @@ class TableRenderer {
                     <tr>
                         <th class="sortable-subject" data-column="subjectName">科目名 <span class="sort-indicator"></span></th>
                         <th class="sortable-subject" data-column="siteCount">現場数 <span class="sort-indicator"></span></th>
-                        <th class="sortable-subject" data-column="anomalyCount">異常値件数 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject compare-only" data-column="anomalyCount">異常値件数 <span class="sort-indicator"></span></th>
                         <th class="sortable-subject" data-column="totalCurrent">当期合計 <span class="sort-indicator"></span></th>
-                        <th class="sortable-subject" data-column="totalComparison">比較合計 <span class="sort-indicator"></span></th>
-                        <th class="sortable-subject" data-column="totalDiff">差異 <span class="sort-indicator"></span></th>
-                        <th class="sortable-subject" data-column="totalDiffRate">差異率 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject compare-only" data-column="totalComparison">比較合計 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject compare-only" data-column="totalDiff">差異 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject compare-only" data-column="totalDiffRate">差異率 <span class="sort-indicator"></span></th>
                     </tr>
                 </thead>
                 <tbody>
         `;
 
         filteredSummary.forEach(subject => {
-            const highlightClass = filters.highlightEnabled &&
+            const highlightClass = !isSimpleMode && filters.highlightEnabled &&
                 (subject.anomalyCount > 0 ||
                     Math.abs(subject.totalDiffRate) > filters.thresholdRate)
                 ? (subject.totalDiff > 0 ? 'highlight-increase' : 'highlight-decrease')
@@ -444,18 +457,19 @@ class TableRenderer {
                 totalDiffRate: subject.totalDiffRate,
                 avgCurrent: subject.totalCurrent / subject.siteCount,
                 avgComparison: subject.totalComparison / subject.siteCount,
-                avgDiff: subject.totalDiff / subject.siteCount
+                avgDiff: subject.totalDiff / subject.siteCount,
+                hasComparison: !isSimpleMode
             }).replace(/"/g, '&quot;');
 
             html += `
                 <tr class="${highlightClass}" data-tooltip='${tooltipData}'>
                     <td>${subject.subjectName}</td>
                     <td class="text-right">${subject.siteCount}</td>
-                    <td class="text-right">${subject.anomalyCount}</td>
+                    <td class="text-right compare-only">${subject.anomalyCount}</td>
                     <td class="text-right">${this.formatNumber(subject.totalCurrent)}</td>
-                    <td class="text-right">${this.formatNumber(subject.totalComparison)}</td>
-                    <td class="text-right">${this.formatNumber(subject.totalDiff, true)}</td>
-                    <td class="text-right">${this.formatNumber(subject.totalDiffRate, true)}%</td>
+                    <td class="text-right compare-only">${this.formatNumber(subject.totalComparison)}</td>
+                    <td class="text-right compare-only">${this.formatNumber(subject.totalDiff, true)}</td>
+                    <td class="text-right compare-only">${this.formatNumber(subject.totalDiffRate, true)}%</td>
                 </tr>
             `;
         });
@@ -478,23 +492,32 @@ class TableRenderer {
      * 科目別サマリーのツールチップリスナー設定
      */
     setupSubjectSummaryTooltipListeners() {
-        this.bindContextMenuForTooltipData('#subject-summary-content tbody tr[data-tooltip]', (data) => `
-            <div class="tooltip-content">
-                <div class="tooltip-label">📋 科目別サマリー詳細</div>
-                <div class="tooltip-row"><span class="tooltip-key">科目:</span><span class="tooltip-value">${data.subjectName}</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">対象現場数:</span><span class="tooltip-value">${data.siteCount}現場</span></div>
-                <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
-                <div class="tooltip-row"><span class="tooltip-key">当期合計:</span><span class="tooltip-value">${this.formatNumber(data.totalCurrent)}円</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">比較合計:</span><span class="tooltip-value">${this.formatNumber(data.totalComparison)}円</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">差異合計:</span><span class="tooltip-value" style="color: ${data.totalDiff >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.totalDiff, true)}円</span></div>
-                <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
-                <div class="tooltip-row"><span class="tooltip-key">現場平均（当期）:</span><span class="tooltip-value">${this.formatNumber(data.avgCurrent)}円</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">現場平均（比較）:</span><span class="tooltip-value">${this.formatNumber(data.avgComparison)}円</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">現場平均（差異）:</span><span class="tooltip-value" style="color: ${data.avgDiff >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.avgDiff, true)}円</span></div>
-                <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
-                <div class="tooltip-row"><span class="tooltip-key">異常値件数:</span><span class="tooltip-value text-red-400">${data.anomalyCount}件</span></div>
-            </div>
-        `);
+        this.bindContextMenuForTooltipData('#subject-summary-content tbody tr[data-tooltip]', (data) => {
+            const comparisonHtml = data.hasComparison
+                ? `
+                    <div class="tooltip-row"><span class="tooltip-key">比較合計:</span><span class="tooltip-value">${this.formatNumber(data.totalComparison)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">差異合計:</span><span class="tooltip-value" style="color: ${data.totalDiff >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.totalDiff, true)}円</span></div>
+                    <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
+                    <div class="tooltip-row"><span class="tooltip-key">現場平均（比較）:</span><span class="tooltip-value">${this.formatNumber(data.avgComparison)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">現場平均（差異）:</span><span class="tooltip-value" style="color: ${data.avgDiff >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.avgDiff, true)}円</span></div>
+                    <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
+                    <div class="tooltip-row"><span class="tooltip-key">異常値件数:</span><span class="tooltip-value text-red-400">${data.anomalyCount}件</span></div>
+                `
+                : '<div class="tooltip-row"><span class="tooltip-key">モード:</span><span class="tooltip-value">単純表示（比較なし）</span></div>';
+
+            return `
+                <div class="tooltip-content">
+                    <div class="tooltip-label">📋 科目別サマリー詳細</div>
+                    <div class="tooltip-row"><span class="tooltip-key">科目:</span><span class="tooltip-value">${data.subjectName}</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">対象現場数:</span><span class="tooltip-value">${data.siteCount}現場</span></div>
+                    <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
+                    <div class="tooltip-row"><span class="tooltip-key">当期合計:</span><span class="tooltip-value">${this.formatNumber(data.totalCurrent)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">現場平均（当期）:</span><span class="tooltip-value">${this.formatNumber(data.avgCurrent)}円</span></div>
+                    <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
+                    ${comparisonHtml}
+                </div>
+            `;
+        });
     }
 
     /**
@@ -506,6 +529,51 @@ class TableRenderer {
 
         if (!stats) {
             container.innerHTML = '<p class="text-center text-gray-500">データがありません</p>';
+            return;
+        }
+
+        if (stats.isSimpleMode) {
+            const html = `
+                <div class="stats-grid mb-4">
+                    <div class="stat-card">
+                        <div class="stat-label">📊 総データ件数</div>
+                        <div class="stat-value">${stats.count.toLocaleString()}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">💰 当期値合計</div>
+                        <div class="stat-value">${this.formatNumber(stats.currentValue.sum)}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">📐 当期値平均</div>
+                        <div class="stat-value">${this.formatNumber(stats.currentValue.avg)}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">📍 当期値中央値</div>
+                        <div class="stat-value">${this.formatNumber(stats.currentValue.median)}</div>
+                    </div>
+                </div>
+                ${stats.revenue && stats.cost ? `
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div class="bg-green-50 border border-green-200 rounded p-4">
+                            <h4 class="font-semibold mb-2 text-green-800">💵 売上統計</h4>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between"><span>合計:</span><span class="font-semibold">${this.formatNumber(stats.revenue.sum)}</span></div>
+                                <div class="flex justify-between"><span>平均:</span><span>${this.formatNumber(stats.revenue.avg)}</span></div>
+                                <div class="flex justify-between"><span>件数:</span><span>${stats.revenue.count}</span></div>
+                            </div>
+                        </div>
+                        <div class="bg-orange-50 border border-orange-200 rounded p-4">
+                            <h4 class="font-semibold mb-2 text-orange-800">💸 原価統計</h4>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between"><span>合計:</span><span class="font-semibold">${this.formatNumber(stats.cost.sum)}</span></div>
+                                <div class="flex justify-between"><span>平均:</span><span>${this.formatNumber(stats.cost.avg)}</span></div>
+                                <div class="flex justify-between"><span>件数:</span><span>${stats.cost.count}</span></div>
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
+            `;
+            container.innerHTML = html;
             return;
         }
 
@@ -711,6 +779,7 @@ class TableRenderer {
      */
     renderProfitAnalysis(profitData, filters) {
         const container = document.getElementById('profit-content');
+        const isSimpleMode = filters.comparisonMode === 'simple_view';
         if (!container) return;
 
         // 売上項目が選択されていない場合はエラーメッセージ
@@ -772,19 +841,19 @@ class TableRenderer {
                 <div class="stat-card">
                     <div class="stat-label">総売上</div>
                     <div class="stat-value text-green-600">${this.formatNumber(totalRevenue)}</div>
-                    <div class="text-xs text-gray-500 mt-1">比較: ${this.formatNumber(totalRevenueComparison)}</div>
+                    <div class="text-xs text-gray-500 mt-1 compare-only">比較: ${this.formatNumber(totalRevenueComparison)}</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">総原価</div>
                     <div class="stat-value text-orange-600">${this.formatNumber(totalCost)}</div>
-                    <div class="text-xs text-gray-500 mt-1">比較: ${this.formatNumber(totalCostComparison)}</div>
+                    <div class="text-xs text-gray-500 mt-1 compare-only">比較: ${this.formatNumber(totalCostComparison)}</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">総利益</div>
                     <div class="stat-value ${totalProfit >= 0 ? 'text-blue-600' : 'text-red-600'}">
                         ${this.formatNumber(totalProfit, true)}
                     </div>
-                    <div class="text-xs ${profitDiff >= 0 ? 'text-blue-600' : 'text-red-600'} mt-1">
+                    <div class="text-xs ${profitDiff >= 0 ? 'text-blue-600' : 'text-red-600'} mt-1 compare-only">
                         差異: ${this.formatNumber(profitDiff, true)}
                     </div>
                 </div>
@@ -793,7 +862,7 @@ class TableRenderer {
                     <div class="stat-value ${avgProfitRate >= 0 ? 'text-blue-600' : 'text-red-600'}">
                         ${this.formatNumber(avgProfitRate, true)}%
                     </div>
-                    <div class="text-xs ${profitRateDiff >= 0 ? 'text-blue-600' : 'text-red-600'} mt-1">
+                    <div class="text-xs ${profitRateDiff >= 0 ? 'text-blue-600' : 'text-red-600'} mt-1 compare-only">
                         差異: ${this.formatNumber(profitRateDiff, true)}%pt
                     </div>
                 </div>
@@ -810,10 +879,10 @@ class TableRenderer {
                             <th class="sortable-profit" data-column="cost">原価 <span class="sort-indicator"></span></th>
                             <th class="sortable-profit" data-column="profit">利益 <span class="sort-indicator"></span></th>
                             <th class="sortable-profit" data-column="profitRate">利益率(%) <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit" data-column="profitComparison">比較利益 <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit" data-column="profitRateComparison">比較利益率(%) <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit" data-column="profitDiff">利益差異 <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit" data-column="profitRateDiff">利益率差異 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit compare-only" data-column="profitComparison">比較利益 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit compare-only" data-column="profitRateComparison">比較利益率(%) <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit compare-only" data-column="profitDiff">利益差異 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit compare-only" data-column="profitRateDiff">利益率差異 <span class="sort-indicator"></span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -825,7 +894,7 @@ class TableRenderer {
 
             // ハイライト判定（利益率が大きく変動した場合）
             let highlightClass = '';
-            if (Math.abs(profitRateDiffItem) > filters.thresholdRate) {
+            if (!isSimpleMode && Math.abs(profitRateDiffItem) > filters.thresholdRate) {
                 highlightClass = profitRateDiffItem > 0 ? 'highlight-decrease' : 'highlight-increase';
             }
 
@@ -842,7 +911,8 @@ class TableRenderer {
                 costComparison: item.costComparison,
                 profitComparison: item.profitComparison,
                 profitRateComparison: item.profitRateComparison,
-                comparisonLabel: item.comparisonLabel
+                comparisonLabel: item.comparisonLabel,
+                hasComparison: !isSimpleMode
             }).replace(/"/g, '&quot;');
 
             html += `
@@ -856,12 +926,12 @@ class TableRenderer {
                         ${this.formatNumber(item.profit, true)}
                     </td>
                     <td class="text-right font-semibold">${this.formatNumber(item.profitRate, true)}%</td>
-                    <td class="text-right text-gray-600">${this.formatNumber(item.profitComparison, true)}</td>
-                    <td class="text-right text-gray-600">${this.formatNumber(item.profitRateComparison, true)}%</td>
-                    <td class="text-right ${profitDiffItem >= 0 ? 'text-blue-600' : 'text-red-600'}">
+                    <td class="text-right text-gray-600 compare-only">${this.formatNumber(item.profitComparison, true)}</td>
+                    <td class="text-right text-gray-600 compare-only">${this.formatNumber(item.profitRateComparison, true)}%</td>
+                    <td class="text-right ${profitDiffItem >= 0 ? 'text-blue-600' : 'text-red-600'} compare-only">
                         ${this.formatNumber(profitDiffItem, true)}
                     </td>
-                    <td class="text-right ${profitRateDiffItem >= 0 ? 'text-blue-600' : 'text-red-600'}">
+                    <td class="text-right ${profitRateDiffItem >= 0 ? 'text-blue-600' : 'text-red-600'} compare-only">
                         ${this.formatNumber(profitRateDiffItem, true)}%pt
                     </td>
                 </tr>
@@ -887,24 +957,35 @@ class TableRenderer {
      * 利益分析のツールチップリスナー設定
      */
     setupProfitTooltipListeners() {
-        this.bindContextMenuForTooltipData('#profit-content tbody tr[data-tooltip]', (data) => `
-            <div class="tooltip-content">
-                <div class="tooltip-label">💰 利益分析詳細</div>
-                <div class="tooltip-row"><span class="tooltip-key">現場:</span><span class="tooltip-value">${data.siteName}</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">対象月:</span><span class="tooltip-value">${data.month}月</span></div>
-                <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
-                <div class="tooltip-row"><span class="tooltip-key">当期売上:</span><span class="tooltip-value">${this.formatNumber(data.revenue)}円</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">当期原価:</span><span class="tooltip-value">${this.formatNumber(data.cost)}円</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">当期利益:</span><span class="tooltip-value" style="color: ${data.profit >= 0 ? '#93c5fd' : '#fca5a5'}">${this.formatNumber(data.profit, true)}円</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">当期利益率:</span><span class="tooltip-value">${this.formatNumber(data.profitRate, true)}%</span></div>
-                <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
-                <div class="tooltip-row"><span class="tooltip-key">比較元 (${data.comparisonLabel}):</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">  売上:</span><span class="tooltip-value">${this.formatNumber(data.revenueComparison)}円</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">  原価:</span><span class="tooltip-value">${this.formatNumber(data.costComparison)}円</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">  利益:</span><span class="tooltip-value">${this.formatNumber(data.profitComparison, true)}円</span></div>
-                <div class="tooltip-row"><span class="tooltip-key">  利益率:</span><span class="tooltip-value">${this.formatNumber(data.profitRateComparison, true)}%</span></div>
-            </div>
-        `);
+        this.bindContextMenuForTooltipData('#profit-content tbody tr[data-tooltip]', (data) => {
+            const comparisonHtml = data.hasComparison
+                ? `
+                    <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
+                    <div class="tooltip-row"><span class="tooltip-key">比較元 (${data.comparisonLabel}):</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">  売上:</span><span class="tooltip-value">${this.formatNumber(data.revenueComparison)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">  原価:</span><span class="tooltip-value">${this.formatNumber(data.costComparison)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">  利益:</span><span class="tooltip-value">${this.formatNumber(data.profitComparison, true)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">  利益率:</span><span class="tooltip-value">${this.formatNumber(data.profitRateComparison, true)}%</span></div>
+                `
+                : `
+                    <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
+                    <div class="tooltip-row"><span class="tooltip-key">モード:</span><span class="tooltip-value">単純表示（比較なし）</span></div>
+                `;
+
+            return `
+                <div class="tooltip-content">
+                    <div class="tooltip-label">💰 利益分析詳細</div>
+                    <div class="tooltip-row"><span class="tooltip-key">現場:</span><span class="tooltip-value">${data.siteName}</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">対象月:</span><span class="tooltip-value">${data.month}月</span></div>
+                    <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
+                    <div class="tooltip-row"><span class="tooltip-key">当期売上:</span><span class="tooltip-value">${this.formatNumber(data.revenue)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">当期原価:</span><span class="tooltip-value">${this.formatNumber(data.cost)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">当期利益:</span><span class="tooltip-value" style="color: ${data.profit >= 0 ? '#93c5fd' : '#fca5a5'}">${this.formatNumber(data.profit, true)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">当期利益率:</span><span class="tooltip-value">${this.formatNumber(data.profitRate, true)}%</span></div>
+                    ${comparisonHtml}
+                </div>
+            `;
+        });
     }
 
     /**
@@ -1083,6 +1164,15 @@ class TableRenderer {
         this.bindContextMenuForTooltipData('#detail-tbody tr[data-tooltip]', (data) => {
             const typeLabel = data.isRevenue ? '売上' : '原価';
             const signNote = data.isRevenue ? '' : '（符号反転済み）';
+            const comparisonHtml = data.hasComparison
+                ? `
+                    <div class="tooltip-row"><span class="tooltip-key">比較元 (${data.comparisonLabel}):</span><span class="tooltip-value">${this.formatNumber(data.comparisonValue)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">差異:</span><span class="tooltip-value" style="color: ${data.diff >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diff, true)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">差異率:</span><span class="tooltip-value" style="color: ${data.diffRate >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diffRate, true)}%</span></div>
+                `
+                : `
+                    <div class="tooltip-row"><span class="tooltip-key">モード:</span><span class="tooltip-value">単純表示（比較なし）</span></div>
+                `;
 
             return `
                 <div class="tooltip-content">
@@ -1092,9 +1182,7 @@ class TableRenderer {
                     <div class="tooltip-row"><span class="tooltip-key">対象月:</span><span class="tooltip-value">${data.month}月</span></div>
                     <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
                     <div class="tooltip-row"><span class="tooltip-key">当期値:</span><span class="tooltip-value">${this.formatNumber(data.currentValue)}円</span></div>
-                    <div class="tooltip-row"><span class="tooltip-key">比較元 (${data.comparisonLabel}):</span><span class="tooltip-value">${this.formatNumber(data.comparisonValue)}円</span></div>
-                    <div class="tooltip-row"><span class="tooltip-key">差異:</span><span class="tooltip-value" style="color: ${data.diff >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diff, true)}円</span></div>
-                    <div class="tooltip-row"><span class="tooltip-key">差異率:</span><span class="tooltip-value" style="color: ${data.diffRate >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diffRate, true)}%</span></div>
+                    ${comparisonHtml}
                 </div>
             `;
         });

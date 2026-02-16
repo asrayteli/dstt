@@ -29,6 +29,7 @@ class ExportHandler {
         results.forEach(result => {
             const item = result.item;
             const segment = dataManager.rawData.siteMapping[item.contract_code] || '未分類';
+            const hasComparison = !!result.hasComparison;
 
             rows.push([
                 item.site_name,
@@ -37,9 +38,9 @@ class ExportHandler {
                 item.subject_name,
                 `${result.month}月`,
                 result.currentValue,
-                result.comparisonValue,
-                result.diff,
-                result.diffRate.toFixed(2)
+                hasComparison ? result.comparisonValue : '-',
+                hasComparison ? result.diff : '-',
+                hasComparison ? result.diffRate.toFixed(2) : '-'
             ]);
         });
 
@@ -89,6 +90,7 @@ class ExportHandler {
         results.forEach(result => {
             const item = result.item;
             const segment = dataManager.rawData.siteMapping[item.contract_code] || '未分類';
+            const hasComparison = !!result.hasComparison;
 
             html += '<tr>';
             html += `<td>${item.site_name}</td>`;
@@ -97,9 +99,9 @@ class ExportHandler {
             html += `<td>${item.subject_name}</td>`;
             html += `<td>${result.month}月</td>`;
             html += `<td>${result.currentValue}</td>`;
-            html += `<td>${result.comparisonValue}</td>`;
-            html += `<td>${result.diff}</td>`;
-            html += `<td>${result.diffRate.toFixed(2)}</td>`;
+            html += `<td>${hasComparison ? result.comparisonValue : '-'}</td>`;
+            html += `<td>${hasComparison ? result.diff : '-'}</td>`;
+            html += `<td>${hasComparison ? result.diffRate.toFixed(2) : '-'}</td>`;
             html += '</tr>';
         });
 

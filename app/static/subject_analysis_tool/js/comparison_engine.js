@@ -40,6 +40,7 @@ class ComparisonEngine {
                 const currentValue = item.amounts[monthIndex];
                 let comparisonValue = 0;
                 let comparisonLabel = '';
+                let hasComparison = true;
 
                 // 比較モード別の処理
                 if (comparisonMode === 'prev_year') {
@@ -92,6 +93,10 @@ class ComparisonEngine {
                         comparisonValue = prevYearItem.amounts[monthIndex];
                         comparisonLabel = `前年${month}月`;
                     }
+                } else if (comparisonMode === 'simple_view') {
+                    comparisonValue = currentValue;
+                    comparisonLabel = '単純表示';
+                    hasComparison = false;
                 }
 
                 // 差異計算
@@ -99,6 +104,7 @@ class ComparisonEngine {
                 result.month = month;
                 result.item = item;
                 result.comparisonLabel = comparisonLabel;
+                result.hasComparison = hasComparison;
                 result.isAnomaly = this.checkAnomaly(result, thresholdRate, thresholdAmount, thresholdCondition);
 
                 this.comparisonResults.push(result);
@@ -330,6 +336,7 @@ class ComparisonEngine {
         if (this.comparisonResults.length === 0) {
             return null;
         }
+        const isSimpleMode = !!(filters && filters.comparisonMode === 'simple_view');
 
         let currentValues, comparisonValues, diffs, diffRates;
         let revenueValues, costValues;
@@ -373,6 +380,7 @@ class ComparisonEngine {
         const iqr = q3 - q1;
 
         return {
+            isSimpleMode: isSimpleMode,
             count: this.comparisonResults.length,
             anomalyCount: this.comparisonResults.filter(r => r.isAnomaly).length,
             revenueCount: revenueCount,
