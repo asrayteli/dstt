@@ -1,4 +1,4 @@
-// テーブルレンダラー - テーブル表示、ソート、ページネーション
+﻿// テーブルレンダラー - テーブル表示、ソート、ページネーション
 
 class TableRenderer {
     constructor() {
@@ -21,6 +21,25 @@ class TableRenderer {
         this.contextMenuEl = null;
         this.detailPopupEl = null;
         this.initializeDetailContextMenu();
+    }
+
+    bindSearchInput(input, onCommit) {
+        if (!input) return;
+        let isComposing = false;
+
+        input.addEventListener('compositionstart', () => {
+            isComposing = true;
+        });
+
+        input.addEventListener('compositionend', (e) => {
+            isComposing = false;
+            onCommit(e.target.value);
+        });
+
+        input.addEventListener('input', (e) => {
+            if (isComposing || e.isComposing) return;
+            onCommit(e.target.value);
+        });
     }
 
     /**
@@ -491,13 +510,6 @@ class TableRenderer {
         }
 
         const html = `
-            <div class="bg-yellow-50 border border-yellow-200 rounded p-4 mb-4">
-                <p class="text-sm text-yellow-800">
-                    💡 <strong>当期値合計と差異合計の関係:</strong><br>
-                    差異合計 = 当期値合計 - 比較値合計<br>
-                    比較値（前年値や基準月値）が存在する場合、両者は通常異なります。これは正常な動作です。
-                </p>
-            </div>
             <div class="stats-grid mb-4">
                 <div class="stat-card" data-tooltip="分析対象となる全データ行の数">
                     <div class="stat-label">📊 総データ件数</div>
@@ -753,11 +765,6 @@ class TableRenderer {
         }
 
         let html = `
-            <div class="bg-blue-50 border border-blue-200 rounded p-4 mb-4">
-                <p class="text-sm text-blue-800">
-                    💡 <strong>利益の計算:</strong> 利益 = 売上 + 原価（原価は負の値）
-                </p>
-            </div>
             <div class="mb-4">
                 <input type="text" id="profit-search" placeholder="現場名・法人名・月で検索..." class="form-input" style="max-width: 300px;" value="${this.profitSearch}">
             </div>
@@ -1184,12 +1191,10 @@ class TableRenderer {
     setupSubjectSummaryListeners(summary, filters) {
         // 検索ボックス
         const searchInput = document.getElementById('subject-summary-search');
-        if (searchInput) {
-            searchInput.addEventListener('input', (e) => {
-                this.subjectSummarySearch = e.target.value;
-                this.renderSubjectSummary(summary, filters);
-            });
-        }
+        this.bindSearchInput(searchInput, (value) => {
+            this.subjectSummarySearch = value;
+            this.renderSubjectSummary(summary, filters);
+        });
 
         // ソートヘッダー
         document.querySelectorAll('.sortable-subject').forEach(th => {
@@ -1238,12 +1243,10 @@ class TableRenderer {
     setupProfitListeners(profitData, filters) {
         // 検索ボックス
         const searchInput = document.getElementById('profit-search');
-        if (searchInput) {
-            searchInput.addEventListener('input', (e) => {
-                this.profitSearch = e.target.value;
-                this.renderProfitAnalysis(profitData, filters);
-            });
-        }
+        this.bindSearchInput(searchInput, (value) => {
+            this.profitSearch = value;
+            this.renderProfitAnalysis(profitData, filters);
+        });
 
         // ソートヘッダー
         document.querySelectorAll('.sortable-profit').forEach(th => {
@@ -1320,4 +1323,4 @@ function toggleSummaryCard(index) {
 }
 
 // グローバルインスタンス
-const tableRenderer = new TableRenderer();
+var tableRenderer = new TableRenderer();

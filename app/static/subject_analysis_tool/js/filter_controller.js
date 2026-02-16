@@ -190,18 +190,28 @@ class FilterController {
         const input = document.getElementById(inputId);
         if (!input) return;
 
-        input.addEventListener('input', (e) => {
-            const searchTerm = e.target.value.toLowerCase();
+        let isComposing = false;
+        const applyFilter = (value) => {
+            const searchTerm = String(value || '').toLowerCase();
             const items = document.querySelectorAll(itemSelector);
-
             items.forEach(item => {
                 const text = item.textContent.toLowerCase();
-                if (text.includes(searchTerm)) {
-                    item.style.display = '';
-                } else {
-                    item.style.display = 'none';
-                }
+                item.style.display = text.includes(searchTerm) ? '' : 'none';
             });
+        };
+
+        input.addEventListener('compositionstart', () => {
+            isComposing = true;
+        });
+
+        input.addEventListener('compositionend', (e) => {
+            isComposing = false;
+            applyFilter(e.target.value);
+        });
+
+        input.addEventListener('input', (e) => {
+            if (isComposing || e.isComposing) return;
+            applyFilter(e.target.value);
         });
     }
 

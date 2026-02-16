@@ -1,55 +1,73 @@
-// メイン制御スクリプト
-
-// グローバル変数
 let currentFilters = null;
 
-// 初期化
+const UPLOAD_INPUT_IDS = ['subject-file', 'prev-year-subject-file', 'site-file'];
+const FILE_NAME_LABEL_IDS = {
+    'subject-file': 'subject-file-name',
+    'prev-year-subject-file': 'prev-year-subject-file-name',
+    'site-file': 'site-file-name'
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     showWelcomeScreen();
 });
 
-/**
- * イベントリスナー設定
- */
 function setupEventListeners() {
-    // アップロードボタン
-    document.getElementById('upload-btn').addEventListener('click', () => {
-        openUploadModal();
+    const uploadBtn = document.getElementById('upload-btn');
+    if (uploadBtn) {
+        uploadBtn.addEventListener('click', () => {
+            showWelcomeScreen();
+            openFileDialog('subject-file');
+        });
+    }
+
+    const resetBtn = document.getElementById('reset-btn');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', resetAll);
+    }
+
+    const uploadForm = document.getElementById('upload-form');
+    if (uploadForm) {
+        uploadForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            handleFileUpload();
+        });
+    }
+
+    setupUploadInteractions();
+
+    const resultExpandToggle = document.getElementById('result-expand-toggle');
+    if (resultExpandToggle) {
+        resultExpandToggle.addEventListener('click', () => toggleResultFocus());
+    }
+
+    const resultFocusBackdrop = document.getElementById('result-focus-backdrop');
+    if (resultFocusBackdrop) {
+        resultFocusBackdrop.addEventListener('click', () => toggleResultFocus(false));
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isResultFocusEnabled()) {
+            toggleResultFocus(false);
+        }
     });
 
-    // リセットボタン
-    document.getElementById('reset-btn').addEventListener('click', () => {
-        resetAll();
-    });
-
-    // アップロードフォーム
-    document.getElementById('upload-form').addEventListener('submit', (e) => {
-        e.preventDefault();
-        handleFileUpload();
-    });
-
-    // タブ切り替え
-    document.querySelectorAll('.tab-btn').forEach(btn => {
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
+            if (!btn.dataset.tab) return;
             switchTab(btn.dataset.tab);
         });
     });
 
-    // 比較モード変更時のUI更新
     const comparisonMode = document.getElementById('comparison-mode');
     if (comparisonMode) {
         comparisonMode.addEventListener('change', () => {
             const baseMonthGroup = document.getElementById('base-month-group');
-            if (comparisonMode.value === 'same_year') {
-                baseMonthGroup.style.display = 'block';
-            } else {
-                baseMonthGroup.style.display = 'none';
-            }
+            if (!baseMonthGroup) return;
+            baseMonthGroup.style.display = comparisonMode.value === 'same_year' ? 'block' : 'none';
         });
     }
 
-    // 詳細一覧テーブルの検索機能
     const detailSearch = document.getElementById('detail-search');
     if (detailSearch) {
         detailSearch.addEventListener('input', (e) => {
@@ -62,63 +80,123 @@ function setupEventListeners() {
     }
 }
 
-/**
- * ウェルカム画面表示
- */
-function showWelcomeScreen() {
-    document.getElementById('welcome-screen').classList.remove('hidden');
-    document.getElementById('main-content').classList.add('hidden');
+function setupUploadInteractions() {
+    document.querySelectorAll('[data-pick-for]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            const inputId = e.currentTarget.dataset.pickFor;
+            openFileDialog(inputId);
+        });
+    });
+
+    document.querySelectorAll('.dropzone[data-input-id]').forEach((zone) => {
+        const inputId = zone.dataset.inputId;
+        zone.addEventListener('click', (e) => {
+            if (e.target.closest('button')) return;
+            openFileDialog(inputId);
+        });
+
+        zone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            zone.classList.add('dragover');
+        });
+
+        zone.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            zone.classList.add('dragover');
+        });
+
+        zone.addEventListener('dragleave', () => {
+            zone.classList.remove('dragover');
+        });
+
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            zone.classList.remove('dragover');
+            const droppedFiles = e.dataTransfer && e.dataTransfer.files;
+            if (!droppedFiles || droppedFiles.length === 0) return;
+            setInputFile(inputId, droppedFiles[0]);
+        });
+    });
+
+    UPLOAD_INPUT_IDS.forEach((inputId) => {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        input.addEventListener('change', () => updateFileNameLabel(inputId));
+    });
 }
 
-/**
- * メインコンテンツ表示
- */
-function showMainContent() {
-    document.getElementById('welcome-screen').classList.add('hidden');
-    document.getElementById('main-content').classList.remove('hidden');
-    document.getElementById('reset-btn').style.display = 'inline-block';
+function openFileDialog(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.click();
 }
 
-/**
- * アップロードモーダルを開く
- */
-function openUploadModal() {
-    document.getElementById('upload-modal').classList.remove('hidden');
-}
-
-/**
- * アップロードモーダルを閉じる
- */
-function closeUploadModal() {
-    document.getElementById('upload-modal').classList.add('hidden');
-}
-
-/**
- * ファイルアップロード処理
- */
-async function handleFileUpload() {
-    const subjectFile = document.getElementById('subject-file').files[0];
-    const prevYearSubjectFile = document.getElementById('prev-year-subject-file').files[0];
-    const siteFile = document.getElementById('site-file').files[0];
-
-    if (!subjectFile) {
-        alert('科目別推移表（CSV）は必須です');
+function setInputFile(inputId, file) {
+    if (!file) return;
+    if (!String(file.name || '').toLowerCase().endsWith('.csv')) {
+        alert('CSVファイルを選択してください。');
         return;
     }
 
-    // FormData作成
-    const formData = new FormData();
-    formData.append('subject_file', subjectFile);
-    if (prevYearSubjectFile) {
-        formData.append('prev_year_subject_file', prevYearSubjectFile);
-    }
-    if (siteFile) {
-        formData.append('site_file', siteFile);
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+    updateFileNameLabel(inputId);
+}
+
+function updateFileNameLabel(inputId) {
+    const input = document.getElementById(inputId);
+    const label = document.getElementById(FILE_NAME_LABEL_IDS[inputId]);
+    if (!input || !label) return;
+    label.textContent = input.files && input.files[0] ? input.files[0].name : '未選択';
+}
+
+function resetUploadLabels() {
+    Object.values(FILE_NAME_LABEL_IDS).forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '未選択';
+    });
+}
+
+function showWelcomeScreen() {
+    const welcome = document.getElementById('welcome-screen');
+    const main = document.getElementById('main-content');
+    if (welcome) welcome.classList.remove('hidden');
+    if (main) main.classList.add('hidden');
+}
+
+function showMainContent() {
+    const welcome = document.getElementById('welcome-screen');
+    const main = document.getElementById('main-content');
+    const resetBtn = document.getElementById('reset-btn');
+    if (welcome) welcome.classList.add('hidden');
+    if (main) main.classList.remove('hidden');
+    if (resetBtn) resetBtn.style.display = 'inline-block';
+}
+
+async function handleFileUpload() {
+    const subjectInput = document.getElementById('subject-file');
+    const prevYearInput = document.getElementById('prev-year-subject-file');
+    const siteInput = document.getElementById('site-file');
+
+    const subjectFile = subjectInput && subjectInput.files ? subjectInput.files[0] : null;
+    const prevYearSubjectFile = prevYearInput && prevYearInput.files ? prevYearInput.files[0] : null;
+    const siteFile = siteInput && siteInput.files ? siteInput.files[0] : null;
+
+    if (!subjectFile) {
+        alert('科目別分析表（CSV）を選択してください。');
+        return;
     }
 
-    // ローディング表示
+    const formData = new FormData();
+    formData.append('subject_file', subjectFile);
+    if (prevYearSubjectFile) formData.append('prev_year_subject_file', prevYearSubjectFile);
+    if (siteFile) formData.append('site_file', siteFile);
+
     showLoading();
-    closeUploadModal();
 
     try {
         const response = await fetch('/tools/subject_analysis_tool/api/upload', {
@@ -127,28 +205,21 @@ async function handleFileUpload() {
         });
 
         const result = await response.json();
-
         if (!response.ok || result.error) {
-            throw new Error(result.error || 'アップロードに失敗しました');
+            throw new Error(result.error || 'データの読み込みに失敗しました。');
         }
 
-        // データをDataManagerに設定
         dataManager.setData(result.data);
-
-        // デバッグ情報
-        console.log('Loaded data:', result.data);
-        console.log('Sites:', dataManager.getSites());
-        console.log('Subjects:', dataManager.getSubjects());
-
-        // UI初期化
         filterController.initUI();
-
-        // メインコンテンツ表示
         showMainContent();
         hideLoading();
 
-        alert(`データの読み込みに成功しました\n- 当期データ: ${result.metadata.current_year_count}件\n- 前年データ: ${result.metadata.prev_year_count}件\n- 現場マッピング: ${result.metadata.site_count}件`);
-
+        alert(
+            `読み込みに成功しました。\n` +
+            `- 当期データ: ${result.metadata.current_year_count}件\n` +
+            `- 前年データ: ${result.metadata.prev_year_count}件\n` +
+            `- 現場マッピング: ${result.metadata.site_count}件`
+        );
     } catch (error) {
         hideLoading();
         alert(`エラー: ${error.message}`);
@@ -156,32 +227,26 @@ async function handleFileUpload() {
     }
 }
 
-/**
- * フィルターを適用して分析実行
- */
 function applyFilters() {
     const filters = filterController.getFilters();
 
-    // バリデーション
     if (filters.months.length === 0) {
-        alert('対象月を選択してください');
+        alert('対象月を選択してください。');
         return;
     }
 
     if (filters.subjects.length === 0) {
-        alert('科目を選択してください');
+        alert('科目を選択してください。');
         return;
     }
 
-    // 前年比較モードで前年データがない場合
     if (filters.comparisonMode === 'prev_year' && !dataManager.hasPrevYearData()) {
-        alert('前年比較を行うには前年データが必要です');
+        alert('前年比較には前年データが必要です。');
         return;
     }
 
-    // 同年度内比較モードで基準月が選択されていない場合
     if (filters.comparisonMode === 'same_year' && !filters.baseMonth) {
-        alert('基準月を選択してください');
+        alert('基準月を選択してください。');
         return;
     }
 
@@ -189,23 +254,15 @@ function applyFilters() {
     currentFilters = filters;
 
     try {
-        // 比較実行
         const results = comparisonEngine.executeComparison(filters);
 
-        // デバッグ情報
-        console.log('Filters:', filters);
-        console.log('Results count:', results.length);
-
-        // 結果が空の場合の警告
         if (results.length === 0) {
             hideLoading();
-            alert('条件に一致するデータが見つかりませんでした。\n\n確認事項：\n- 対象月、現場、科目が選択されているか\n- 前年比較の場合、前年データがアップロードされているか\n- 同年度内比較の場合、基準月以外の月が選択されているか');
+            alert('条件に一致するデータがありません。フィルター条件を見直してください。');
             return;
         }
 
-        // 各タブを更新
         updateAllTabs(results, filters);
-
         hideLoading();
     } catch (error) {
         hideLoading();
@@ -214,106 +271,92 @@ function applyFilters() {
     }
 }
 
-/**
- * すべてのタブを更新
- */
 function updateAllTabs(results, filters) {
-    // 詳細一覧
     tableRenderer.renderDetailTable(results, filters);
 
-    // 現場別サマリー
     const siteSummary = comparisonEngine.getSiteSummary();
     tableRenderer.renderSiteSummary(siteSummary, filters);
 
-    // 科目別サマリー
     const subjectSummary = comparisonEngine.getSubjectSummary();
     tableRenderer.renderSubjectSummary(subjectSummary, filters);
 
-    // 利益分析
     const profitData = comparisonEngine.getProfitAnalysis();
     tableRenderer.renderProfitAnalysis(profitData, filters);
 
-    // グラフ
     chartRenderer.renderChart(filters);
-
-    // ヒートマップ
     chartRenderer.renderHeatmap(results, filters);
 
-    // 統計分析
     const stats = comparisonEngine.getStatistics(filters);
     tableRenderer.renderStatistics(stats);
 }
 
-/**
- * タブ切り替え
- */
 function switchTab(tabName) {
-    // タブボタンの状態更新
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        if (btn.dataset.tab === tabName) {
-            btn.classList.add('active');
-        } else {
-            btn.classList.remove('active');
-        }
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.tab === tabName);
     });
 
-    // タブコンテンツの表示切り替え
-    document.querySelectorAll('.tab-pane').forEach(pane => {
+    document.querySelectorAll('.tab-pane').forEach((pane) => {
         pane.classList.remove('active');
     });
 
     const targetPane = document.getElementById(`tab-${tabName}`);
     if (targetPane) {
         targetPane.classList.add('active');
-
-        // グラフタブの場合は再描画
         if (tabName === 'chart' && currentFilters) {
             chartRenderer.renderChart(currentFilters);
         }
     }
 }
 
-/**
- * リセット
- */
 function resetAll() {
-    if (!confirm('すべてのデータと設定をリセットしますか？')) {
+    if (!confirm('読み込み済みデータと選択状態をリセットします。よろしいですか？')) {
         return;
     }
 
-    // データをリセット
     dataManager.reset();
     filterController.reset();
     chartRenderer.destroy();
 
-    // UIをリセット
-    document.getElementById('upload-form').reset();
+    const uploadForm = document.getElementById('upload-form');
+    if (uploadForm) uploadForm.reset();
+    resetUploadLabels();
+
     currentFilters = null;
-
-    // ウェルカム画面に戻る
+    toggleResultFocus(false);
     showWelcomeScreen();
-    document.getElementById('reset-btn').style.display = 'none';
+
+    const resetBtn = document.getElementById('reset-btn');
+    if (resetBtn) resetBtn.style.display = 'none';
 }
 
-/**
- * ローディング表示
- */
 function showLoading() {
-    document.getElementById('loading').classList.remove('hidden');
+    const loading = document.getElementById('loading');
+    if (loading) loading.classList.remove('hidden');
 }
 
-/**
- * ローディング非表示
- */
 function hideLoading() {
-    document.getElementById('loading').classList.add('hidden');
+    const loading = document.getElementById('loading');
+    if (loading) loading.classList.add('hidden');
 }
 
-/**
- * グローバル関数（HTMLから呼ばれる）
- */
-window.openUploadModal = openUploadModal;
-window.closeUploadModal = closeUploadModal;
+function isResultFocusEnabled() {
+    const workbench = document.querySelector('.sat-workbench');
+    return !!(workbench && workbench.classList.contains('focus-results'));
+}
+
+function toggleResultFocus(forceState = null) {
+    const workbench = document.querySelector('.sat-workbench');
+    const backdrop = document.getElementById('result-focus-backdrop');
+    const toggle = document.getElementById('result-expand-toggle');
+    if (!workbench || !backdrop || !toggle) return;
+
+    const nextState = forceState === null ? !workbench.classList.contains('focus-results') : !!forceState;
+    workbench.classList.toggle('focus-results', nextState);
+    backdrop.classList.toggle('hidden', !nextState);
+    toggle.textContent = nextState ? '縮小' : '拡大';
+    toggle.classList.toggle('active', nextState);
+}
+
 window.applyFilters = applyFilters;
 window.switchTab = switchTab;
 window.resetAll = resetAll;
