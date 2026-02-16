@@ -500,6 +500,39 @@
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
 
+.sat-context-menu {
+    position: fixed;
+    z-index: 2000;
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+    min-width: 170px;
+    overflow: hidden;
+}
+
+.sat-context-menu-item {
+    width: 100%;
+    padding: 0.55rem 0.8rem;
+    border: none;
+    background: #fff;
+    text-align: left;
+    font-size: 0.875rem;
+    color: #111827;
+    cursor: pointer;
+}
+
+.sat-context-menu-item:hover {
+    background: #f3f4f6;
+}
+
+.sat-detail-popup {
+    position: fixed;
+    z-index: 1999;
+    pointer-events: auto;
+    max-width: 360px;
+}
+
 .tooltip-content {
     display: flex;
     flex-direction: column;
@@ -530,7 +563,7 @@
 /* テーブルのセルにホバー効果を追加 */
 .data-table tbody tr td {
     position: relative;
-    cursor: help;
+    cursor: context-menu;
 }
 
 /* レスポンシブ */
