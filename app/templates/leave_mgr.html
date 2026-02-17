@@ -70,6 +70,9 @@
         <button onclick="showBulkRegisterModal()" class="btn btn-primary" disabled id="bulk-register-btn" style="margin-left: 10px;">
             📋 一括登録
         </button>
+        <button onclick="showLeaveSearchModal()" class="btn btn-secondary" disabled id="search-leave-btn" style="margin-left: 10px;">
+            🔍 休暇検索
+        </button>
     </div>
 </div>
 
@@ -507,6 +510,95 @@
             <button onclick="executeCopyLeave()" class="btn btn-success">
                 コピー実行
             </button>
+        </div>
+    </div>
+</div>
+
+<!-- 休暇検索モーダル -->
+<div id="leave-search-modal" class="hidden modal-overlay">
+    <div class="modal-content modal-xlarge">
+        <h3 class="text-lg font-bold mb-4">休暇検索</h3>
+
+        <div class="search-form-grid">
+            <div class="form-group">
+                <label class="form-label">期間（開始）</label>
+                <input type="date" id="search-date-from" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">期間（終了）</label>
+                <input type="date" id="search-date-to" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">特定月</label>
+                <input type="month" id="search-specific-month" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">休暇取得者名（完全一致）</label>
+                <input type="text" id="search-name" class="form-input" placeholder="社員名簿PLUS候補から選択可" autocomplete="off">
+                <div id="search-employee-suggestions" style="display: none; margin-top: 6px;">
+                    <div style="border: 1px solid #d1d5db; border-radius: 4px; background: white; padding: 8px;">
+                        <div class="text-sm text-gray-500 mb-2">候補</div>
+                        <div id="search-employee-suggestions-list">
+                            <div class="text-sm text-gray-400">名前を入力してください</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">社員番号</label>
+                <input type="text" id="search-employee-number" class="form-input" placeholder="部分一致">
+            </div>
+            <div class="form-group">
+                <label class="form-label">休暇種類</label>
+                <select id="search-leave-type" class="form-input">
+                    <option value="">すべて</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">代務者名（完全一致）</label>
+                <input type="text" id="search-deputy" class="form-input" placeholder="社員名簿PLUS候補から選択可" autocomplete="off">
+                <div id="search-deputy-suggestions" style="display: none; margin-top: 6px;">
+                    <div style="border: 1px solid #d1d5db; border-radius: 4px; background: white; padding: 8px;">
+                        <div class="text-sm text-gray-500 mb-2">候補</div>
+                        <div id="search-deputy-suggestions-list">
+                            <div class="text-sm text-gray-400">名前を入力してください</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">確認状況</label>
+                <select id="search-confirmed-status" class="form-input">
+                    <option value="all">すべて</option>
+                    <option value="confirmed">確認済み</option>
+                    <option value="unconfirmed">未確認</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">代務者設定</label>
+                <select id="search-deputy-status" class="form-input">
+                    <option value="all">すべて</option>
+                    <option value="set">設定あり</option>
+                    <option value="unset">未設定のみ</option>
+                </select>
+            </div>
+            <div class="form-group search-full-row">
+                <label class="form-label">備考</label>
+                <input type="text" id="search-remarks" class="form-input" placeholder="部分一致">
+            </div>
+        </div>
+
+        <div class="flex justify-end gap-2 mb-4">
+            <button onclick="resetLeaveSearchForm()" class="btn btn-outline">条件クリア</button>
+            <button onclick="executeLeaveSearch()" class="btn btn-primary">検索</button>
+        </div>
+
+        <div id="leave-search-results" class="leave-search-results">
+            <div class="text-center text-gray-500 py-6">条件を指定して検索してください</div>
+        </div>
+
+        <div class="text-right mt-4">
+            <button onclick="closeLeaveSearchModal()" class="btn btn-outline">閉じる</button>
         </div>
     </div>
 </div>

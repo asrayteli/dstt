@@ -972,6 +972,18 @@
     max-height: none;
 }
 
+.simple-only {
+    display: none;
+}
+
+.sat-container.sat-simple-view .compare-only {
+    display: none !important;
+}
+
+.sat-container.sat-simple-view .simple-only {
+    display: block;
+}
+
 .hidden {
     display: none !important;
 }

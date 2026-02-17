@@ -99,6 +99,7 @@
                                 <label class="control-label">比較モード</label>
                                 <select id="comparison-mode" class="form-input">
                                     <option value="prev_year">前年同月比較</option>
+                                    <option value="simple_view">&#21336;&#32020;&#34920;&#31034;</option>
                                     <option value="same_year">同年別月比較</option>
                                     <option value="cumulative">累計比較</option>
                                 </select>
@@ -120,7 +121,7 @@
                                     <option value="3">3月</option>
                                 </select>
                             </div>
-                            <div class="control-group">
+                            <div class="control-group compare-only">
                                 <label class="control-label">表示項目</label>
                                 <select id="display-mode" class="form-input">
                                     <option value="all">すべて表示</option>
@@ -133,7 +134,7 @@
                             </div>
                         </div>
 
-                        <div class="control-row">
+                        <div class="control-row compare-only">
                             <div class="control-group">
                                 <label class="control-label">差異率閾値（%）</label>
                                 <input type="number" id="threshold-rate" class="form-input" value="5" step="0.1">
@@ -167,7 +168,7 @@
                         <button class="tab-btn" data-tab="subject-summary">科目別サマリー</button>
                         <button class="tab-btn" data-tab="profit">利益分析</button>
                         <button class="tab-btn" data-tab="chart">推移グラフ</button>
-                        <button class="tab-btn" data-tab="heatmap">ヒートマップ</button>
+                        <button class="tab-btn compare-only" data-tab="heatmap">ヒートマップ</button>
                         <button class="tab-btn" data-tab="statistics">統計分析</button>
                         <button id="result-expand-toggle" class="tab-btn tab-btn-expand" type="button">拡大</button>
                     </nav>
@@ -195,9 +196,9 @@
                                             <th class="sortable" data-column="subject_name">科目</th>
                                             <th class="sortable" data-column="month">月</th>
                                             <th class="sortable" data-column="current_value">当期値</th>
-                                            <th class="sortable" data-column="comparison_value">比較値</th>
-                                            <th class="sortable" data-column="diff">差異</th>
-                                            <th class="sortable" data-column="diff_rate">差異率(%)</th>
+                                            <th class="sortable compare-only" data-column="comparison_value">比較値</th>
+                                            <th class="sortable compare-only" data-column="diff">差異</th>
+                                            <th class="sortable compare-only" data-column="diff_rate">差異率(%)</th>
                                         </tr>
                                     </thead>
                                     <tbody id="detail-tbody"></tbody>
@@ -230,7 +231,7 @@
                             <canvas id="main-chart"></canvas>
                         </div>
 
-                        <div id="tab-heatmap" class="tab-pane">
+                        <div id="tab-heatmap" class="tab-pane compare-only">
                             <p class="heatmap-mini-help">色が濃いほど差異率の変化が大きく、赤は増加、青は減少です。</p>
                             <div id="heatmap-content"></div>
                         </div>

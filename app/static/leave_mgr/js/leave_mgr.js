@@ -11,6 +11,10 @@ let deputySearchTimeout = null; // 代務者検索のデバウンス用
 let bulkRegisterList = []; // 一括登録待ちリスト
 let bulkEmployeeSearchTimeout = null; // 一括登録用社員検索のデバウンス用
 let bulkDeputySearchTimeout = null; // 一括登録用代務者検索のデバウンス用
+let searchModalEmployeeTimeout = null; // 検索モーダル用社員検索デバウンス
+let searchModalDeputyTimeout = null; // 検索モーダル用代務者検索デバウンス
+let leaveNameBlurTimeout = null; // 休暇編集モーダル: 名前入力のblur遅延
+let leaveDeputyBlurTimeout = null; // 休暇編集モーダル: 代務者入力のblur遅延
 
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
@@ -36,10 +40,12 @@ document.addEventListener('DOMContentLoaded', function() {
             if (currentCalendarId) {
                 document.getElementById('add-leave-btn').disabled = false;
                 document.getElementById('bulk-register-btn').disabled = false;
+                document.getElementById('search-leave-btn').disabled = false;
                 loadCalendar();
             } else {
                 document.getElementById('add-leave-btn').disabled = true;
                 document.getElementById('bulk-register-btn').disabled = true;
+                document.getElementById('search-leave-btn').disabled = true;
                 document.getElementById('calendar-container').innerHTML = '<div class="text-center text-gray-500 py-8">カレンダーを選択してください</div>';
             }
         });
@@ -77,6 +83,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 searchEmployees(this.value);
             }
         });
+
+        leaveNameInput.addEventListener('focus', function() {
+            clearTimeout(leaveNameBlurTimeout);
+            const inputModeElement = document.querySelector('input[name="input-mode"]:checked');
+            if (inputModeElement && inputModeElement.value === 'auto' && this.value.trim().length > 0) {
+                searchEmployees(this.value);
+            }
+        });
+
+        leaveNameInput.addEventListener('blur', function() {
+            leaveNameBlurTimeout = setTimeout(() => {
+                const panel = document.getElementById('employee-suggestions');
+                if (panel) panel.style.display = 'none';
+            }, 150);
+        });
     }
 
     // 代務者入力時のリアルタイム検索
@@ -87,6 +108,21 @@ document.addEventListener('DOMContentLoaded', function() {
             if (inputModeElement && inputModeElement.value === 'auto') {
                 searchDeputies(this.value);
             }
+        });
+
+        leaveDeputiesInput.addEventListener('focus', function() {
+            clearTimeout(leaveDeputyBlurTimeout);
+            const inputModeElement = document.querySelector('input[name="input-mode"]:checked');
+            if (inputModeElement && inputModeElement.value === 'auto' && this.value.trim().length > 0) {
+                searchDeputies(this.value);
+            }
+        });
+
+        leaveDeputiesInput.addEventListener('blur', function() {
+            leaveDeputyBlurTimeout = setTimeout(() => {
+                const panel = document.getElementById('deputy-suggestions');
+                if (panel) panel.style.display = 'none';
+            }, 150);
         });
     }
 
@@ -117,6 +153,22 @@ document.addEventListener('DOMContentLoaded', function() {
             if (inputModeElement && inputModeElement.value === 'auto') {
                 searchBulkDeputies(this.value);
             }
+        });
+    }
+
+    // 検索モーダル用: 休暇取得者名検索
+    const searchNameInput = document.getElementById('search-name');
+    if (searchNameInput) {
+        searchNameInput.addEventListener('input', function() {
+            searchSearchModalEmployees(this.value);
+        });
+    }
+
+    // 検索モーダル用: 代務者名検索
+    const searchDeputyInput = document.getElementById('search-deputy');
+    if (searchDeputyInput) {
+        searchDeputyInput.addEventListener('input', function() {
+            searchSearchModalDeputies(this.value);
         });
     }
 
@@ -199,6 +251,17 @@ function initializeLeaveTypeOptions() {
     }
 }
 
+// 代務者が設定されているかを判定
+function hasAssignedDeputy(leave) {
+    if (!leave || !Array.isArray(leave.deputies)) return false;
+    const unsetTokens = new Set(['なし', '無し', '-', '－', 'ー', '未設定', '未定']);
+    const normalized = leave.deputies
+        .map(d => String(d || '').trim())
+        .filter(d => d.length > 0);
+    if (normalized.length === 0) return false;
+    return normalized.some(d => !unsetTokens.has(d));
+}
+
 // カレンダー読み込み
 function loadCalendar() {
     if (!currentCalendarId) return;
@@ -277,10 +340,11 @@ function renderCalendar() {
         displayLeaves.forEach(leave => {
             const color = window.leaveColors[leave.leave_type] || '#6b7280';
             const confirmedIcon = leave.confirmed_by ? '✓' : '';
+            const deputyUnsetIcon = hasAssignedDeputy(leave) ? '' : '!';
             calendarHtml += `
                 <div class="leave-item" style="background-color: ${color}; color: white;" 
                      onclick="editLeave('${leave.id}', event)" title="${leave.name} (${leave.leave_type})">
-                    ${confirmedIcon}${leave.name}
+                    ${deputyUnsetIcon}${confirmedIcon}${leave.name}
                 </div>
             `;
         });
@@ -660,12 +724,13 @@ function showDateDetail(dateStr, event) {
     dayLeaves.forEach(leave => {
         const color = window.leaveColors[leave.leave_type] || '#6b7280';
         const canDelete = isAdmin || leave.created_by === currentUserId;
-        
+        const deputyUnsetIcon = hasAssignedDeputy(leave) ? '' : '!';
+
         const creatorDisplayName = getUserDisplayName(leave.created_by);
         const confirmerDisplayName = leave.confirmed_by ? getUserDisplayName(leave.confirmed_by) : null;
-        
+
         contentHtml += '<tr>';
-        contentHtml += `<td>${leave.name}</td>`;
+        contentHtml += `<td>${deputyUnsetIcon}${leave.name}</td>`;
         contentHtml += `<td><span class="badge" style="background-color: ${color}; color: white">${leave.leave_type}</span></td>`;
         contentHtml += `<td>${leave.deputies ? leave.deputies.join(', ') : '-'}</td>`;
         contentHtml += `<td><span data-username="${leave.created_by || ''}">${creatorDisplayName}</span></td>`;
@@ -794,6 +859,259 @@ function confirmAction() {
     if (confirmCallback) {
         confirmCallback();
     }
+}
+
+// ========== 休暇検索 ==========
+
+function initializeSearchLeaveTypeOptions() {
+    const leaveTypeSelect = document.getElementById('search-leave-type');
+    if (!leaveTypeSelect || !window.leaveColors) return;
+
+    leaveTypeSelect.innerHTML = '<option value="">すべて</option>';
+    for (const leaveType of Object.keys(window.leaveColors)) {
+        const option = document.createElement('option');
+        option.value = leaveType;
+        option.textContent = leaveType;
+        leaveTypeSelect.appendChild(option);
+    }
+}
+
+function showLeaveSearchModal() {
+    if (!currentCalendarId) {
+        alert('カレンダーを選択してください');
+        return;
+    }
+
+    hideAllModals();
+    initializeSearchLeaveTypeOptions();
+
+    const modal = document.getElementById('leave-search-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        document.body.classList.add('modal-open');
+    }
+}
+
+function closeLeaveSearchModal() {
+    const modal = document.getElementById('leave-search-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        document.body.classList.remove('modal-open');
+    }
+}
+
+function resetLeaveSearchForm() {
+    const fields = [
+        'search-date-from',
+        'search-date-to',
+        'search-specific-month',
+        'search-name',
+        'search-employee-number',
+        'search-leave-type',
+        'search-deputy',
+        'search-remarks',
+        'search-confirmed-status',
+        'search-deputy-status'
+    ];
+    fields.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    document.getElementById('search-confirmed-status').value = 'all';
+    document.getElementById('search-deputy-status').value = 'all';
+    const employeeSuggestionPanel = document.getElementById('search-employee-suggestions');
+    const deputySuggestionPanel = document.getElementById('search-deputy-suggestions');
+    if (employeeSuggestionPanel) employeeSuggestionPanel.style.display = 'none';
+    if (deputySuggestionPanel) deputySuggestionPanel.style.display = 'none';
+    document.getElementById('leave-search-results').innerHTML =
+        '<div class="text-center text-gray-500 py-6">条件を指定して検索してください</div>';
+}
+
+function executeLeaveSearch() {
+    if (!currentCalendarId) {
+        alert('カレンダーを選択してください');
+        return;
+    }
+
+    const params = new URLSearchParams({
+        calendar_id: currentCalendarId
+    });
+
+    const mappings = [
+        ['search-date-from', 'date_from'],
+        ['search-date-to', 'date_to'],
+        ['search-specific-month', 'specific_month'],
+        ['search-name', 'name'],
+        ['search-employee-number', 'employee_number'],
+        ['search-leave-type', 'leave_type'],
+        ['search-deputy', 'deputy'],
+        ['search-remarks', 'remarks'],
+        ['search-confirmed-status', 'confirmed'],
+        ['search-deputy-status', 'deputy_status']
+    ];
+    mappings.forEach(([id, key]) => {
+        const value = (document.getElementById(id)?.value || '').trim();
+        if (value) params.set(key, value);
+    });
+
+    const resultsContainer = document.getElementById('leave-search-results');
+    resultsContainer.innerHTML = '<div class="text-center text-gray-500 py-6">検索中...</div>';
+
+    fetch(`/tools/leave_mgr/api/search?${params.toString()}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                resultsContainer.innerHTML = `<div class="text-center text-red-600 py-6">${data.error}</div>`;
+                return;
+            }
+            renderLeaveSearchResults(data.results || []);
+        })
+        .catch(error => {
+            console.error('Error searching leaves:', error);
+            resultsContainer.innerHTML = '<div class="text-center text-red-600 py-6">検索に失敗しました</div>';
+        });
+}
+
+function renderLeaveSearchResults(results) {
+    const container = document.getElementById('leave-search-results');
+    if (!container) return;
+
+    if (!results || results.length === 0) {
+        container.innerHTML = '<div class="text-center text-gray-500 py-6">該当データがありません</div>';
+        return;
+    }
+
+    let html = '<table class="data-table">';
+    html += '<thead><tr>';
+    html += '<th>日付</th>';
+    html += '<th>名前</th>';
+    html += '<th>社員番号</th>';
+    html += '<th>休暇種類</th>';
+    html += '<th>代務者</th>';
+    html += '<th>確認</th>';
+    html += '<th>備考</th>';
+    html += '</tr></thead><tbody>';
+
+    results.forEach(leave => {
+        const color = window.leaveColors[leave.leave_type] || '#6b7280';
+        const deputyUnsetIcon = leave.has_assigned_deputy ? '' : '!';
+        const confirmedText = leave.confirmed_by ? '✓確認済み' : '未確認';
+        const deputiesText = Array.isArray(leave.deputies) && leave.deputies.length > 0 ? leave.deputies.join(', ') : '-';
+
+        html += '<tr>';
+        html += `<td>${leave.date || '-'}</td>`;
+        html += `<td>${deputyUnsetIcon}${leave.name || '-'}</td>`;
+        html += `<td>${leave.employee_number || '-'}</td>`;
+        html += `<td><span class="badge" style="background-color: ${color}; color: white">${leave.leave_type || '-'}</span></td>`;
+        html += `<td>${deputiesText}</td>`;
+        html += `<td>${confirmedText}</td>`;
+        html += `<td>${leave.remarks || '-'}</td>`;
+        html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+    html = `<div class="p-2 text-sm text-gray-700">検索結果: ${results.length}件</div>` + html;
+    container.innerHTML = html;
+}
+
+// 検索モーダル: 休暇取得者候補検索
+function searchSearchModalEmployees(query) {
+    clearTimeout(searchModalEmployeeTimeout);
+
+    const panel = document.getElementById('search-employee-suggestions');
+    const list = document.getElementById('search-employee-suggestions-list');
+    if (!panel || !list) return;
+
+    if (!query || query.trim().length === 0) {
+        panel.style.display = 'none';
+        list.innerHTML = '<div class="text-sm text-gray-400">名前を入力してください</div>';
+        return;
+    }
+
+    panel.style.display = 'block';
+    searchModalEmployeeTimeout = setTimeout(() => {
+        fetch(`/tools/pluslist/api/search_employee?q=${encodeURIComponent(query)}`)
+            .then(response => response.json())
+            .then(employees => {
+                if (!employees || employees.length === 0) {
+                    list.innerHTML = '<div class="text-sm text-gray-400">該当する社員が見つかりません</div>';
+                    return;
+                }
+                let html = '<div class="employee-suggestions-scroll">';
+                employees.forEach(emp => {
+                    html += `<div class="employee-suggestion-item" onclick="selectSearchEmployee('${emp.employee_name.replace(/'/g, "\\'")}')">
+                        <span class="employee-suggestion-name">${emp.employee_name}</span>
+                        <span class="employee-suggestion-number">(${emp.employee_number})</span>
+                    </div>`;
+                });
+                html += '</div>';
+                list.innerHTML = html;
+            })
+            .catch(error => {
+                console.error('Search modal employee search error:', error);
+                list.innerHTML = '<div class="text-sm text-red-500">検索エラー</div>';
+            });
+    }, 300);
+}
+
+function selectSearchEmployee(employeeName) {
+    const input = document.getElementById('search-name');
+    if (input) input.value = employeeName;
+    const panel = document.getElementById('search-employee-suggestions');
+    const list = document.getElementById('search-employee-suggestions-list');
+    if (list) list.innerHTML = '<div class="text-sm text-gray-400">選択されました</div>';
+    if (panel) panel.style.display = 'none';
+}
+
+// 検索モーダル: 代務者候補検索
+function searchSearchModalDeputies(query) {
+    clearTimeout(searchModalDeputyTimeout);
+
+    const panel = document.getElementById('search-deputy-suggestions');
+    const list = document.getElementById('search-deputy-suggestions-list');
+    if (!panel || !list) return;
+
+    if (!query || query.trim().length === 0) {
+        panel.style.display = 'none';
+        list.innerHTML = '<div class="text-sm text-gray-400">名前を入力してください</div>';
+        return;
+    }
+
+    panel.style.display = 'block';
+    searchModalDeputyTimeout = setTimeout(() => {
+        fetch(`/tools/pluslist/api/search_employee?q=${encodeURIComponent(query)}`)
+            .then(response => response.json())
+            .then(employees => {
+                if (!employees || employees.length === 0) {
+                    list.innerHTML = '<div class="text-sm text-gray-400">該当する社員が見つかりません</div>';
+                    return;
+                }
+                let html = '<div class="employee-suggestions-scroll">';
+                employees.forEach(emp => {
+                    html += `<div class="employee-suggestion-item" onclick="selectSearchDeputy('${emp.employee_name.replace(/'/g, "\\'")}')">
+                        <span class="employee-suggestion-name">${emp.employee_name}</span>
+                        <span class="employee-suggestion-number">(${emp.employee_number})</span>
+                    </div>`;
+                });
+                html += '</div>';
+                list.innerHTML = html;
+            })
+            .catch(error => {
+                console.error('Search modal deputy search error:', error);
+                list.innerHTML = '<div class="text-sm text-red-500">検索エラー</div>';
+            });
+    }, 300);
+}
+
+function selectSearchDeputy(employeeName) {
+    const input = document.getElementById('search-deputy');
+    if (input) input.value = employeeName;
+    const panel = document.getElementById('search-deputy-suggestions');
+    const list = document.getElementById('search-deputy-suggestions-list');
+    if (list) list.innerHTML = '<div class="text-sm text-gray-400">選択されました</div>';
+    if (panel) panel.style.display = 'none';
 }
 
 // 管理者機能（isAdminがtrueの場合のみ使用）
@@ -1940,6 +2258,8 @@ async function executeCopyLeave() {
 function toggleInputMode(mode) {
     const suggestionPanel = document.getElementById('employee-suggestions');
     const deputySuggestionPanel = document.getElementById('deputy-suggestions');
+    const nameInput = document.getElementById('leave-name');
+    const deputiesInput = document.getElementById('leave-deputies');
 
     if (!suggestionPanel) {
         console.warn('Employee suggestions panel not found');
@@ -1947,19 +2267,14 @@ function toggleInputMode(mode) {
     }
 
     if (mode === 'auto') {
-        // 自動入力モード：候補パネルを表示
-        suggestionPanel.style.display = 'block';
-        if (deputySuggestionPanel) {
-            deputySuggestionPanel.style.display = 'block';
-        }
-        // 現在の名前で検索を実行
-        const nameInput = document.getElementById('leave-name');
-        if (nameInput && nameInput.value) {
+        // 自動入力モード：フォーカス中かつ1文字以上入力時のみ候補表示
+        suggestionPanel.style.display = 'none';
+        if (deputySuggestionPanel) deputySuggestionPanel.style.display = 'none';
+
+        if (nameInput && document.activeElement === nameInput && nameInput.value.trim().length > 0) {
             searchEmployees(nameInput.value);
         }
-        // 現在の代務者で検索を実行
-        const deputiesInput = document.getElementById('leave-deputies');
-        if (deputiesInput && deputiesInput.value) {
+        if (deputiesInput && document.activeElement === deputiesInput && deputiesInput.value.trim().length > 0) {
             searchDeputies(deputiesInput.value);
         }
     } else {
@@ -1976,12 +2291,28 @@ function searchEmployees(query) {
     // デバウンス処理（300ms待機）
     clearTimeout(employeeSearchTimeout);
 
+    const suggestionPanel = document.getElementById('employee-suggestions');
+    const nameInput = document.getElementById('leave-name');
+    const inputModeElement = document.querySelector('input[name="input-mode"]:checked');
+
+    if (!inputModeElement || inputModeElement.value !== 'auto') {
+        if (suggestionPanel) suggestionPanel.style.display = 'none';
+        return;
+    }
+
     if (!query || query.trim().length === 0) {
         // 入力が空の場合
+        if (suggestionPanel) suggestionPanel.style.display = 'none';
         document.getElementById('employee-suggestions-list').innerHTML =
             '<div class="text-sm text-gray-400">名前を入力してください</div>';
         return;
     }
+
+    if (!nameInput || document.activeElement !== nameInput) {
+        return;
+    }
+
+    if (suggestionPanel) suggestionPanel.style.display = 'block';
 
     employeeSearchTimeout = setTimeout(() => {
         // 社員名簿PLUSのAPIを呼び出し
@@ -2035,6 +2366,9 @@ function selectEmployee(employeeNumber, employeeName) {
     // 候補リストをクリア
     document.getElementById('employee-suggestions-list').innerHTML =
         '<div class="text-sm text-gray-400">選択されました</div>';
+
+    const panel = document.getElementById('employee-suggestions');
+    if (panel) panel.style.display = 'none';
 }
 
 // ========== 代務者用の社員名簿PLUS連携機能 ==========
@@ -2044,8 +2378,18 @@ function searchDeputies(query) {
     // デバウンス処理（300ms待機）
     clearTimeout(deputySearchTimeout);
 
+    const suggestionPanel = document.getElementById('deputy-suggestions');
+    const deputiesInput = document.getElementById('leave-deputies');
+    const inputModeElement = document.querySelector('input[name="input-mode"]:checked');
+
+    if (!inputModeElement || inputModeElement.value !== 'auto') {
+        if (suggestionPanel) suggestionPanel.style.display = 'none';
+        return;
+    }
+
     if (!query || query.trim().length === 0) {
         // 入力が空の場合
+        if (suggestionPanel) suggestionPanel.style.display = 'none';
         document.getElementById('deputy-suggestions-list').innerHTML =
             '<div class="text-sm text-gray-400">名前を入力してください</div>';
         return;
@@ -2060,6 +2404,12 @@ function searchDeputies(query) {
             '<div class="text-sm text-gray-400">名前を入力してください</div>';
         return;
     }
+
+    if (!deputiesInput || document.activeElement !== deputiesInput) {
+        return;
+    }
+
+    if (suggestionPanel) suggestionPanel.style.display = 'block';
 
     deputySearchTimeout = setTimeout(() => {
         // 社員名簿PLUSのAPIを呼び出し
@@ -2119,4 +2469,7 @@ function selectDeputy(employeeName) {
     // 候補リストをクリア
     document.getElementById('deputy-suggestions-list').innerHTML =
         '<div class="text-sm text-gray-400">選択されました</div>';
+
+    const panel = document.getElementById('deputy-suggestions');
+    if (panel) panel.style.display = 'none';
 }

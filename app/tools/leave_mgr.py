@@ -123,6 +123,21 @@ def save_calendar_data(calendar_id, year_month, data):
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+def has_assigned_deputy(leave):
+    """代務者が実質的に設定されているかを判定"""
+    deputies = leave.get("deputies", [])
+    if isinstance(deputies, str):
+        deputies = [d.strip() for d in deputies.split(",")]
+    if not isinstance(deputies, list):
+        return False
+
+    normalized = [str(d).strip() for d in deputies if str(d).strip()]
+    if not normalized:
+        return False
+
+    unset_tokens = {"なし", "無し", "-", "－", "ー", "未設定", "未定"}
+    return any(d not in unset_tokens for d in normalized)
+
 @leave_mgr_bp.route("/")
 @login_required
 def index():
@@ -160,6 +175,103 @@ def get_calendar(calendar_id, year_month):
     
     data = load_calendar_data(calendar_id, year_month)
     return jsonify(data)
+
+@leave_mgr_bp.route("/api/search")
+@login_required
+def search_leaves():
+    """休暇を検索"""
+    user_id = str(current_user.username)
+
+    calendar_id = request.args.get("calendar_id", "").strip()
+    if not calendar_id:
+        return jsonify({"error": "calendar_idは必須です"}), 400
+
+    # アクセス権限チェック
+    if calendar_id not in get_user_calendars(user_id) and not is_admin(user_id):
+        return jsonify({"error": "アクセス権限がありません"}), 403
+
+    date_from = request.args.get("date_from", "").strip()
+    date_to = request.args.get("date_to", "").strip()
+    specific_month = request.args.get("specific_month", "").strip()  # YYYY-MM
+    name = request.args.get("name", "").strip()
+    employee_number = request.args.get("employee_number", "").strip()
+    leave_type = request.args.get("leave_type", "").strip()
+    deputy = request.args.get("deputy", "").strip()
+    remarks = request.args.get("remarks", "").strip().lower()
+    confirmed = request.args.get("confirmed", "all").strip()  # all / confirmed / unconfirmed
+    deputy_status = request.args.get("deputy_status", "all").strip()  # all / set / unset
+
+    calendars_path = os.path.join(get_data_path(), "calendars")
+    if not os.path.exists(calendars_path):
+        return jsonify({"results": [], "count": 0})
+
+    results = []
+    prefix = f"{calendar_id}_"
+
+    for filename in os.listdir(calendars_path):
+        if not filename.startswith(prefix) or not filename.endswith(".json"):
+            continue
+
+        year_month = filename[len(prefix):-5]
+        if specific_month:
+            target_ym = specific_month.replace("-", "")
+            if year_month != target_ym:
+                continue
+
+        file_path = os.path.join(calendars_path, filename)
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+
+        for leave in data.get("leaves", []):
+            leave_date = str(leave.get("date", ""))
+            leave_name = str(leave.get("name", ""))
+            leave_emp_no = str(leave.get("employee_number", ""))
+            leave_type_value = str(leave.get("leave_type", ""))
+            leave_deputies = leave.get("deputies", [])
+            leave_remarks = str(leave.get("remarks", ""))
+            is_confirmed = bool(leave.get("confirmed_by"))
+            has_deputy = has_assigned_deputy(leave)
+
+            if date_from and leave_date and leave_date < date_from:
+                continue
+            if date_to and leave_date and leave_date > date_to:
+                continue
+            if name and leave_name.strip() != name:
+                continue
+            if employee_number and employee_number not in leave_emp_no:
+                continue
+            if leave_type and leave_type != leave_type_value:
+                continue
+            if deputy:
+                if isinstance(leave_deputies, list):
+                    deputies_list = [str(d).strip() for d in leave_deputies]
+                elif isinstance(leave_deputies, str):
+                    deputies_list = [d.strip() for d in re.split(r"[,、]", leave_deputies)]
+                else:
+                    deputies_list = []
+                if deputy not in deputies_list:
+                    continue
+            if remarks and remarks not in leave_remarks.lower():
+                continue
+            if confirmed == "confirmed" and not is_confirmed:
+                continue
+            if confirmed == "unconfirmed" and is_confirmed:
+                continue
+            if deputy_status == "set" and not has_deputy:
+                continue
+            if deputy_status == "unset" and has_deputy:
+                continue
+
+            item = dict(leave)
+            item["year_month"] = year_month
+            item["has_assigned_deputy"] = has_deputy
+            results.append(item)
+
+    results.sort(key=lambda x: (x.get("date", ""), x.get("name", "")))
+    return jsonify({"results": results, "count": len(results)})
 
 @leave_mgr_bp.route("/api/leave", methods=["POST"])
 @login_required

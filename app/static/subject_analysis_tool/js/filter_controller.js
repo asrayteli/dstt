@@ -15,6 +15,7 @@ class FilterController {
         this.renderSiteList();
         this.renderSubjectList();
         this.setupEventListeners();
+        this.updateComparisonModeUI();
     }
 
     /**
@@ -298,11 +299,18 @@ class FilterController {
     updateComparisonModeUI() {
         const mode = document.getElementById('comparison-mode').value;
         const baseMonthGroup = document.getElementById('base-month-group');
+        const container = document.querySelector('.sat-container');
 
-        if (mode === 'same_year') {
-            baseMonthGroup.style.display = 'block';
-        } else {
-            baseMonthGroup.style.display = 'none';
+        if (baseMonthGroup) {
+            if (mode === 'same_year') {
+                baseMonthGroup.style.display = 'block';
+            } else {
+                baseMonthGroup.style.display = 'none';
+            }
+        }
+
+        if (container) {
+            container.classList.toggle('sat-simple-view', mode === 'simple_view');
         }
     }
 

@@ -62,9 +62,7 @@ function setupEventListeners() {
     const comparisonMode = document.getElementById('comparison-mode');
     if (comparisonMode) {
         comparisonMode.addEventListener('change', () => {
-            const baseMonthGroup = document.getElementById('base-month-group');
-            if (!baseMonthGroup) return;
-            baseMonthGroup.style.display = comparisonMode.value === 'same_year' ? 'block' : 'none';
+            applyComparisonModeUI(comparisonMode.value);
         });
     }
 
@@ -78,6 +76,8 @@ function setupEventListeners() {
             }
         });
     }
+
+    applyComparisonModeUI(comparisonMode ? comparisonMode.value : 'prev_year');
 }
 
 function setupUploadInteractions() {
@@ -175,6 +175,7 @@ function showMainContent() {
     if (welcome) welcome.classList.add('hidden');
     if (main) main.classList.remove('hidden');
     if (resetBtn) resetBtn.style.display = 'inline-block';
+    applyComparisonModeUI();
 }
 
 async function handleFileUpload() {
@@ -228,7 +229,7 @@ async function handleFileUpload() {
 }
 
 function applyFilters() {
-    const filters = filterController.getFilters();
+    const filters = normalizeFiltersForSimpleView(filterController.getFilters());
 
     if (filters.months.length === 0) {
         alert('対象月を選択してください。');
@@ -355,6 +356,45 @@ function toggleResultFocus(forceState = null) {
     backdrop.classList.toggle('hidden', !nextState);
     toggle.textContent = nextState ? '縮小' : '拡大';
     toggle.classList.toggle('active', nextState);
+}
+
+function normalizeFiltersForSimpleView(filters) {
+    if (!filters || filters.comparisonMode !== 'simple_view') {
+        return filters;
+    }
+
+    const normalized = { ...filters };
+    if (normalized.months.length === 0) {
+        normalized.months = [...dataManager.metadata.months];
+    }
+    if (normalized.subjects.length === 0) {
+        normalized.subjects = getAllSubjects();
+    }
+    normalized.displayMode = 'value_only';
+    normalized.highlightEnabled = false;
+    return normalized;
+}
+
+function getAllSubjects() {
+    const groups = dataManager.getSubjects();
+    return [...new Set(Object.values(groups).flat())];
+}
+
+function applyComparisonModeUI(mode = null) {
+    const comparisonModeSelect = document.getElementById('comparison-mode');
+    if (mode && comparisonModeSelect && comparisonModeSelect.value !== mode) {
+        comparisonModeSelect.value = mode;
+    }
+
+    if (filterController && typeof filterController.updateComparisonModeUI === 'function') {
+        filterController.updateComparisonModeUI();
+    }
+
+    const selectedMode = comparisonModeSelect?.value || mode || 'prev_year';
+    const activeTab = document.querySelector('.tab-btn.active');
+    if (selectedMode === 'simple_view' && activeTab && activeTab.classList.contains('compare-only')) {
+        switchTab('detail');
+    }
 }
 
 window.applyFilters = applyFilters;
