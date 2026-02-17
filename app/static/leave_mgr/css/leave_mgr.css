@@ -347,3 +347,26 @@
 body.modal-open {
     overflow: hidden;
 }
+
+.search-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.search-full-row {
+    grid-column: 1 / -1;
+}
+
+.leave-search-results {
+    max-height: 420px;
+    overflow-y: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
+
+@media (max-width: 768px) {
+    .search-form-grid {
+        grid-template-columns: 1fr;
+    }
+}
