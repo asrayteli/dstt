@@ -4,6 +4,11 @@ from flask import Blueprint, request, jsonify, render_template
 from flask_login import login_required, current_user
 from werkzeug.security import generate_password_hash
 from app.models import db, User
+from app.announcement_store import (
+    list_announcements,
+    create_announcement,
+    delete_announcement,
+)
 import re
 import secrets
 import string
@@ -171,3 +176,51 @@ def api_generate_password():
 
     password = generate_random_password()
     return jsonify({"password": password})
+
+
+@user_management_bp.route("/announcements", methods=["GET"])
+@login_required
+def announcement_admin_page():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    return render_template("admin_announcements.html")
+
+
+@user_management_bp.route("/api/announcements", methods=["GET"])
+@login_required
+def get_announcements():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    return jsonify({"announcements": list_announcements()})
+
+
+@user_management_bp.route("/api/announcements", methods=["POST"])
+@login_required
+def post_announcement():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    data = request.json or {}
+    title = str(data.get("title", "")).strip()
+    content = str(data.get("content", "")).strip()
+    if not content:
+        return jsonify({"error": "本文は必須です"}), 400
+
+    item = create_announcement(
+        title=title if title else "お知らせ",
+        content=content,
+        created_by=current_user.username,
+    )
+    return jsonify({"success": True, "announcement": item})
+
+
+@user_management_bp.route("/api/announcements/<int:announcement_id>", methods=["DELETE"])
+@login_required
+def remove_announcement(announcement_id):
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    ok = delete_announcement(announcement_id)
+    if not ok:
+        return jsonify({"error": "お知らせが見つかりません"}), 404
+    return jsonify({"success": True})

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+  <h1 class="text-2xl font-bold mb-6">お知らせ管理</h1>
+
+  <div class="bg-white rounded-2xl shadow p-6 mb-6">
+    <h2 class="text-lg font-semibold mb-4">新規登録</h2>
+    <form id="announcementForm" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">タイトル</label>
+        <input id="announcementTitle" type="text" class="w-full border rounded px-3 py-2" placeholder="例: メンテナンスのお知らせ">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">本文</label>
+        <textarea id="announcementContent" rows="5" class="w-full border rounded px-3 py-2" required></textarea>
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">登録</button>
+        <a href="/" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">戻る</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow p-6">
+    <h2 class="text-lg font-semibold mb-4">登録済みお知らせ</h2>
+    <div id="announcementList" class="space-y-3 text-sm text-gray-600">読み込み中...</div>
+  </div>
+</div>
+
+<script>
+  async function loadAnnouncements() {
+    const listEl = document.getElementById('announcementList');
+    listEl.textContent = '読み込み中...';
+    try {
+      const res = await fetch('/tools/user_management/api/announcements');
+      const data = await res.json();
+      const items = data.announcements || [];
+      if (items.length === 0) {
+        listEl.textContent = '登録済みのお知らせはありません。';
+        return;
+      }
+
+      listEl.innerHTML = items.map((item) => `
+        <div class="border rounded-lg p-4">
+          <div class="flex justify-between items-start gap-4 mb-2">
+            <div>
+              <div class="font-semibold text-gray-900">${item.title}</div>
+              <div class="text-xs text-gray-500">${item.created_at} / ${item.created_by}</div>
+            </div>
+            <button class="bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600 text-xs" onclick="deleteAnnouncement(${item.id})">削除</button>
+          </div>
+          <div class="whitespace-pre-wrap text-gray-700">${item.content}</div>
+        </div>
+      `).join('');
+    } catch (e) {
+      listEl.textContent = `読み込みに失敗しました: ${e.message}`;
+    }
+  }
+
+  async function deleteAnnouncement(id) {
+    if (!confirm('このお知らせを削除しますか？')) return;
+    const res = await fetch(`/tools/user_management/api/announcements/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.error || '削除に失敗しました');
+      return;
+    }
+    await loadAnnouncements();
+  }
+
+  document.getElementById('announcementForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const title = document.getElementById('announcementTitle').value.trim();
+    const content = document.getElementById('announcementContent').value.trim();
+    if (!content) {
+      alert('本文を入力してください');
+      return;
+    }
+    const res = await fetch('/tools/user_management/api/announcements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, content })
+    });
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.error || '登録に失敗しました');
+      return;
+    }
+    document.getElementById('announcementForm').reset();
+    await loadAnnouncements();
+    alert('登録しました');
+  });
+
+  loadAnnouncements();
+</script>
+{% endblock %}
