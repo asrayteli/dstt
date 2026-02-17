@@ -3,6 +3,40 @@
 {% block content %}
   <h1 class="text-2xl font-bold mb-6" id="welcome-message">ようこそ、{{ user_name }}様 DaiShinToTools ダッシュボードへ</h1>
 
+  {% if announcements_to_show %}
+  <div id="announcementPopup" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+      <div class="p-6 border-b">
+        <h2 class="text-xl font-bold text-gray-900">お知らせ</h2>
+      </div>
+      <div class="p-6 space-y-4">
+        {% for item in announcements_to_show %}
+        <div class="border rounded-lg p-4">
+          <div class="flex justify-between items-center mb-2">
+            <h3 class="font-semibold text-gray-900">{{ item.title }}</h3>
+            <span class="text-xs text-gray-500">{{ item.created_at }}</span>
+          </div>
+          <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ item.content }}</p>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="p-4 border-t text-right">
+        <button onclick="closeAnnouncementPopup()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+          閉じる
+        </button>
+      </div>
+    </div>
+  </div>
+  <script>
+    function closeAnnouncementPopup() {
+      const popup = document.getElementById('announcementPopup');
+      if (popup) {
+        popup.classList.add('hidden');
+      }
+    }
+  </script>
+  {% endif %}
+
   <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
     <a href="/tools/datecalc" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
       <h2 class="text-lg font-semibold mb-2">📆 日時計算</h2>
@@ -117,6 +151,12 @@
   </div>
 
   <!-- ユーザー作成モーダル -->
+  <div class="mt-4">
+    <a href="/tools/user_management/announcements" class="inline-block bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition">
+      お知らせ管理
+    </a>
+  </div>
+
   <div id="createUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
     <div class="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
       <h3 class="text-xl font-bold mb-4">👤 新規ユーザー作成</h3>
