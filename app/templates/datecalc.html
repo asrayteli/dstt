@@ -1,49 +1,128 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-3xl mx-auto bg-white p-8 rounded-2xl shadow-md mt-6">
-  <h2 class="text-xl font-bold mb-4">📅 日時加算・減算</h2>
-  <form method="POST" class="space-y-4">
-    <input type="hidden" name="mode" value="addsub">
-    <label class="block">
-      基準日時:
-      <input type="datetime-local" name="base_datetime" class="w-full border rounded px-2 py-1 mt-1" required>
-    </label>
-    <div class="grid grid-cols-3 gap-4">
-      <label>日: <input type="number" name="days" class="w-full border rounded px-2 py-1" value="0"></label>
-      <label>時: <input type="number" name="hours" class="w-full border rounded px-2 py-1" value="0"></label>
-      <label>分: <input type="number" name="minutes" class="w-full border rounded px-2 py-1" value="0"></label>
+<style>
+  .datecalc-shell {
+    background:
+      radial-gradient(1000px 500px at 8% -25%, rgba(14, 116, 144, 0.18), transparent 60%),
+      radial-gradient(820px 420px at 95% -10%, rgba(202, 138, 4, 0.18), transparent 55%),
+      linear-gradient(160deg, #f8fafc 0%, #f1f5f9 65%, #fefce8 100%);
+    border-radius: 28px;
+    padding: 28px;
+    box-shadow: 0 16px 44px rgba(15, 23, 42, 0.14);
+  }
+
+  .panel {
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 20px;
+    backdrop-filter: blur(8px);
+  }
+
+</style>
+
+<div class="datecalc-shell max-w-7xl mx-auto mt-3">
+  <div class="mb-5">
+    <h1 class="text-3xl font-extrabold text-slate-800">日時計算ツール</h1>
+    <p class="text-sm text-slate-600 mt-1">加減算 / 日付差分 / 月末調整</p>
+  </div>
+
+  {% if errors %}
+    <div class="panel p-4 mb-4 border-red-300 text-red-700">
+      {% for err in errors %}
+        <p class="text-sm">{{ err }}</p>
+      {% endfor %}
     </div>
-    <label class="block mt-2">
-      操作:
-      <select name="operation" class="w-full border rounded px-2 py-1 mt-1">
-        <option value="add">加算</option>
-        <option value="sub">減算</option>
-      </select>
-    </label>
-    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">計算</button>
-  </form>
-</div>
+  {% endif %}
 
-<div class="max-w-3xl mx-auto bg-white p-8 rounded-2xl shadow-md mt-6">
-  <h2 class="text-xl font-bold mb-4">🕓 日時差分</h2>
-  <form method="POST" class="space-y-4">
-    <input type="hidden" name="mode" value="diff">
-    <label class="block">
-      日時1:
-      <input type="datetime-local" name="datetime1" class="w-full border rounded px-2 py-1 mt-1" required>
-    </label>
-    <label class="block">
-      日時2:
-      <input type="datetime-local" name="datetime2" class="w-full border rounded px-2 py-1 mt-1" required>
-    </label>
-    <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">差分計算</button>
-  </form>
-</div>
+  {% if result %}
+    <div class="panel p-5 mb-5">
+      <p class="text-xs text-slate-500">{{ result.title }}</p>
+      <p class="text-3xl font-black text-slate-900 mt-1">{{ result.summary }}</p>
+      <div class="text-sm text-slate-600 mt-2 space-y-1">
+        {% for detail in result.details %}
+          <p>{{ detail }}</p>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
 
-{% if result %}
-<div class="max-w-3xl mx-auto mt-6 text-center text-lg font-semibold text-blue-700">
-  ✅ 結果: {{ result }}
+  <div class="grid xl:grid-cols-2 gap-5">
+    <form method="POST" class="panel p-5 space-y-4">
+      <input type="hidden" name="mode" value="addsub">
+      <h2 class="font-bold text-slate-800">1) 日時の加算・減算</h2>
+      <p class="text-xs text-slate-500">基準日時に「年・月・日・時・分」をまとめて足し引きします。締切や実施日の試算に使えます。</p>
+      <label class="block text-sm">基準日時
+        <input type="datetime-local" name="base_datetime" value="{{ form_state.base_datetime }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2" required>
+      </label>
+      <div class="grid grid-cols-5 gap-2">
+        <label class="text-sm">年
+          <input type="number" name="years" value="{{ form_state.years }}" class="w-full mt-1 border border-slate-300 rounded-lg px-2 py-2">
+        </label>
+        <label class="text-sm">月
+          <input type="number" name="months" value="{{ form_state.months }}" class="w-full mt-1 border border-slate-300 rounded-lg px-2 py-2">
+        </label>
+        <label class="text-sm">日
+          <input type="number" name="days" value="{{ form_state.days }}" class="w-full mt-1 border border-slate-300 rounded-lg px-2 py-2">
+        </label>
+        <label class="text-sm">時
+          <input type="number" name="hours" value="{{ form_state.hours }}" class="w-full mt-1 border border-slate-300 rounded-lg px-2 py-2">
+        </label>
+        <label class="text-sm">分
+          <input type="number" name="minutes" value="{{ form_state.minutes }}" class="w-full mt-1 border border-slate-300 rounded-lg px-2 py-2">
+        </label>
+      </div>
+      <div class="grid md:grid-cols-2 gap-3">
+        <label class="text-sm">操作
+          <select name="operation" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2">
+            <option value="add" {% if form_state.operation == 'add' %}selected{% endif %}>加算</option>
+            <option value="sub" {% if form_state.operation == 'sub' %}selected{% endif %}>減算</option>
+          </select>
+        </label>
+        <label class="text-sm">表示形式
+          <select name="output_format" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2">
+            <option value="hyphen" {% if form_state.output_format == 'hyphen' %}selected{% endif %}>YYYY-MM-DD HH:mm</option>
+            <option value="slash" {% if form_state.output_format == 'slash' %}selected{% endif %}>YYYY/MM/DD HH:mm</option>
+            <option value="iso" {% if form_state.output_format == 'iso' %}selected{% endif %}>ISO</option>
+          </select>
+        </label>
+      </div>
+      <button class="w-full bg-slate-900 text-white rounded-lg px-4 py-2 font-semibold hover:bg-slate-800">計算する</button>
+    </form>
+
+    <form method="POST" class="panel p-5 space-y-4">
+      <input type="hidden" name="mode" value="diff">
+      <h2 class="font-bold text-slate-800">2) 日付差分</h2>
+      <p class="text-xs text-slate-500">2つの日付の差を日数で計算します。時間差は計算しません。</p>
+      <label class="block text-sm">日付1
+        <input type="date" name="date1" value="{{ form_state.date1 }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2" required>
+      </label>
+      <label class="block text-sm">日付2
+        <input type="date" name="date2" value="{{ form_state.date2 }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2" required>
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="absolute_diff" {% if form_state.absolute_diff %}checked{% endif %}>
+        絶対値で表示（先後関係を無視）
+      </label>
+      <button class="w-full bg-emerald-700 text-white rounded-lg px-4 py-2 font-semibold hover:bg-emerald-600">差分計算</button>
+    </form>
+
+    <form method="POST" class="panel p-5 space-y-4">
+      <input type="hidden" name="mode" value="month_shift">
+      <h2 class="font-bold text-slate-800">3) 月単位シフト（月末対応）</h2>
+      <p class="text-xs text-slate-500">指定日を「何か月後/前」に移動します。請求日や更新日の月送り計算向けです。</p>
+      <label class="block text-sm">基準日
+        <input type="date" name="month_base_date" value="{{ form_state.month_base_date }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2" required>
+      </label>
+      <label class="block text-sm">シフト月数（未来:+ / 過去:-）
+        <input type="number" name="month_shift" value="{{ form_state.month_shift }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2">
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="keep_month_end" {% if form_state.keep_month_end %}checked{% endif %}>
+        月末日を維持（例: 1/31 + 1か月 = 2/末）
+      </label>
+      <button class="w-full bg-amber-600 text-white rounded-lg px-4 py-2 font-semibold hover:bg-amber-500">月シフト計算</button>
+    </form>
+  </div>
 </div>
-{% endif %}
 {% endblock %}
