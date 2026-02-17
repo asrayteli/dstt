@@ -1,125 +1,234 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto mt-10 bg-white rounded-xl shadow p-6">
-  <h2 class="text-xl font-bold mb-4">📅 営業日計算ツール</h2>
+<style>
+  .workday-shell {
+    background:
+      radial-gradient(1200px 500px at 5% -20%, rgba(14, 116, 144, 0.22), transparent 60%),
+      radial-gradient(900px 380px at 95% -10%, rgba(22, 163, 74, 0.2), transparent 55%),
+      linear-gradient(160deg, #f8fafc 0%, #eef2ff 55%, #ecfeff 100%);
+    border-radius: 28px;
+    padding: 28px;
+    box-shadow: 0 16px 40px rgba(2, 6, 23, 0.12);
+  }
 
-  <form action="/tools/workday" method="POST" class="mb-6" id="workday-form">
-    <div class="mb-4">
-      <label class="block mb-1">開始日:</label>
-      <input type="date" name="start_date" class="w-full border rounded px-2 py-1" 
-             value="{{ request.form.get('start_date', '') }}" required>
-    </div>
+  .glass {
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 20px;
+  }
 
-    <div class="mb-4">
-      <label class="block mb-1">終了日:</label>
-      <input type="date" name="end_date" class="w-full border rounded px-2 py-1" 
-             value="{{ request.form.get('end_date', '') }}" required>
-    </div>
+  .chip {
+    border: 1px solid #94a3b8;
+    border-radius: 999px;
+    padding: 2px 12px;
+    font-size: 12px;
+    color: #334155;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
 
-    <div class="mb-4">
-      <label class="block mb-1">営業日とする曜日:</label>
-      <div class="grid grid-cols-2 gap-2 sm:flex sm:justify-between">
-        {% set selected_weekdays = request.form.getlist('weekdays[]') %}
-        <label class="flex items-center"><input type="checkbox" name="weekdays[]" value="0" {% if '0' in selected_weekdays %}checked{% endif %} class="mr-1"> 日曜日</label>
-        <label class="flex items-center"><input type="checkbox" name="weekdays[]" value="1" {% if '1' in selected_weekdays %}checked{% endif %} class="mr-1"> 月曜日</label>
-        <label class="flex items-center"><input type="checkbox" name="weekdays[]" value="2" {% if '2' in selected_weekdays %}checked{% endif %} class="mr-1"> 火曜日</label>
-        <label class="flex items-center"><input type="checkbox" name="weekdays[]" value="3" {% if '3' in selected_weekdays %}checked{% endif %} class="mr-1"> 水曜日</label>
-        <label class="flex items-center"><input type="checkbox" name="weekdays[]" value="4" {% if '4' in selected_weekdays %}checked{% endif %} class="mr-1"> 木曜日</label>
-        <label class="flex items-center"><input type="checkbox" name="weekdays[]" value="5" {% if '5' in selected_weekdays %}checked{% endif %} class="mr-1"> 金曜日</label>
-        <label class="flex items-center"><input type="checkbox" name="weekdays[]" value="6" {% if '6' in selected_weekdays %}checked{% endif %} class="mr-1"> 土曜日</label>
-      </div>
-    </div>
-    
-    <div class="mb-4">
-      <label class="block mb-1">祝日の扱い:</label>
-      <label class="flex items-center">
-        <input type="checkbox" name="count_holidays" class="mr-2" {% if request.form.get('count_holidays') == 'on' %}checked{% endif %}> 
-        祝日を営業日としてカウント
-      </label>
-    </div>
+  .chip:hover { background: #e2e8f0; }
+  .day-cell { min-height: 42px; }
+</style>
 
-    <div class="mb-4">
-      <label class="block mb-1">特別除外日:</label>
-      <textarea name="holidays" rows="3" class="w-full border rounded px-2 py-1" 
-                placeholder="例: 2025-01-01,2025-05-03">{{ request.form.get('holidays', '') }}</textarea>
-    </div>
-
+<div class="workday-shell max-w-7xl mx-auto mt-3">
+  <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-6">
     <div>
-      ※年末年始はデフォルトでは1月1日のみを除外日としています。<br>
+      <h1 class="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">営業日計算ツール</h1>
+      <p class="text-sm text-slate-600 mt-1">期間集計 / カレンダー出力を1画面で完結</p>
     </div>
+    <div class="flex flex-wrap gap-2">
+      <button type="button" class="chip" onclick="setRangeThisMonth()">今月</button>
+      <button type="button" class="chip" onclick="setRangeNextMonth()">翌月</button>
+      <button type="button" class="chip" onclick="setWeekdays('weekday')">平日</button>
+      <button type="button" class="chip" onclick="setWeekdays('all')">全曜日</button>
+    </div>
+  </div>
 
-    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">営業日計算</button>
-  </form>
-
-  {% if calendar %}
-    <div class="mt-6">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-semibold">📅 営業日カレンダー</h3>
-        <form method="POST" action="{{ url_for('workday.download_excel') }}" style="display: inline-block;">
-          <!-- 隠しフィールドで設定値を渡す -->
-          <input type="hidden" name="start_date" value="{{ request.form.get('start_date') }}">
-          <input type="hidden" name="end_date" value="{{ request.form.get('end_date') }}">
-          {% for weekday in request.form.getlist('weekdays[]') %}
-          <input type="hidden" name="weekdays[]" value="{{ weekday }}">
-          {% endfor %}
-          <input type="hidden" name="holidays" value="{{ request.form.get('holidays', '') }}">
-          {% if request.form.get('count_holidays') == 'on' %}
-          <input type="hidden" name="count_holidays" value="on">
-          {% endif %}
-          
-          <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 text-sm">
-            📊 エクセルでダウンロード
-          </button>
-        </form>
-      </div>
-
-      <div class="mb-4 text-sm">
-        <span class="inline-block w-4 h-4 bg-green-100 border mr-2"></span>営業日
-        <span class="inline-block w-4 h-4 bg-gray-300 border mr-2 ml-4"></span>休日
-      </div>
-      
-      {% for (year, month), days in calendar.items() %}
-        <h4 class="text-lg font-semibold mt-6">{{ year }}年{{ month }}月</h4>
-        <div class="overflow-x-auto">
-          <table class="table-auto border-collapse w-full text-sm">
-            <thead>
-              <tr>
-                <th class="px-2 py-1 border bg-gray-100 text-red-600">日</th>
-                <th class="px-2 py-1 border bg-gray-100">月</th>
-                <th class="px-2 py-1 border bg-gray-100">火</th>
-                <th class="px-2 py-1 border bg-gray-100">水</th>
-                <th class="px-2 py-1 border bg-gray-100">木</th>
-                <th class="px-2 py-1 border bg-gray-100">金</th>
-                <th class="px-2 py-1 border bg-gray-100 text-blue-600">土</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in days %}
-                <tr>
-                  {% for day in row %}
-                    <td class="px-2 py-1 border text-center {% if day.is_workday %}bg-green-100{% elif day.date %}bg-gray-300{% else %}bg-gray-50{% endif %}">
-                      {% if day.date %}
-                        {{ day.date.strftime('%d') }}
-                      {% else %}
-                        
-                      {% endif %}
-                    </td>
-                  {% endfor %}
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
+  {% if errors %}
+    <div class="glass p-4 mb-4 border-red-300 text-red-700">
+      {% for err in errors %}
+        <p class="text-sm">{{ err }}</p>
       {% endfor %}
     </div>
   {% endif %}
 
-  {% if workday_count %}
-    <div class="mt-6 p-4 bg-blue-50 rounded-lg">
-      <h3 class="font-semibold mb-2">📊 結果:</h3>
-      <p class="text-lg">指定期間内の営業日数: <span class="font-bold text-blue-600">{{ workday_count }}日</span></p>
+  <form action="{{ url_for('workday.workday') }}" method="POST" id="workday-form" class="glass p-5 mb-5">
+    <div class="grid lg:grid-cols-3 gap-5">
+      <section class="space-y-3">
+        <h2 class="font-bold text-slate-800">期間設定</h2>
+        <label class="block text-sm text-slate-700">開始日
+          <input type="date" name="start_date" value="{{ form_state.start_date }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white/80" required>
+        </label>
+        <label class="block text-sm text-slate-700">終了日
+          <input type="date" name="end_date" value="{{ form_state.end_date }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white/80" required>
+        </label>
+        <label class="block text-sm text-slate-700">営業日一覧プレビュー件数
+          <input type="number" min="5" max="60" name="preview_limit" value="{{ form_state.preview_limit }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white/80">
+        </label>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-bold text-slate-800">営業日ルール</h2>
+        <div class="grid grid-cols-4 md:grid-cols-7 gap-2 text-xs">
+          {% for i in range(7) %}
+            <label class="flex items-center gap-1 bg-white/80 rounded-lg px-2 py-2 border border-slate-200">
+              <input type="checkbox" name="weekdays[]" value="{{ i }}" {% if i in form_state.weekdays %}checked{% endif %}>
+              <span>{{ weekday_labels[i] }}</span>
+            </label>
+          {% endfor %}
+        </div>
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" name="include_japan_holidays" {% if form_state.include_japan_holidays %}checked{% endif %}>
+          日本の祝日を自動適用
+        </label>
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" name="count_holidays" {% if form_state.count_holidays %}checked{% endif %}>
+          祝日を営業日に含める
+        </label>
+        <label class="block text-sm text-slate-700">追加の除外日（`,` / 改行区切り）
+          <textarea name="holidays" rows="3" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2 bg-white/80" placeholder="2026-05-01,2026-05-02">{{ form_state.holidays }}</textarea>
+        </label>
+      </section>
+
+      <section class="space-y-3">
+        <h2 class="font-bold text-slate-800">実務メモ</h2>
+        <div class="text-sm text-slate-600 space-y-2">
+          <p>・平日だけ集計したい場合は「平日」ボタンを使うと早いです。</p>
+          <p>・祝日を自動適用した上で、社内独自の休業日を追加除外日に入れてください。</p>
+          <p>・一覧プレビュー件数を増やすと、営業日の目視確認がしやすくなります。</p>
+        </div>
+        <button type="submit" class="w-full mt-2 bg-slate-900 text-white rounded-lg px-4 py-2 font-semibold hover:bg-slate-800 transition">計算する</button>
+      </section>
     </div>
+  </form>
+
+  {% if stats %}
+    <section class="grid md:grid-cols-5 gap-3 mb-5">
+      <div class="glass p-4">
+        <p class="text-xs text-slate-500">総日数</p>
+        <p class="text-2xl font-black text-slate-800">{{ stats.total_days }}</p>
+      </div>
+      <div class="glass p-4">
+        <p class="text-xs text-slate-500">営業日</p>
+        <p class="text-2xl font-black text-emerald-700">{{ stats.workday_count }}</p>
+      </div>
+      <div class="glass p-4">
+        <p class="text-xs text-slate-500">非営業日</p>
+        <p class="text-2xl font-black text-rose-700">{{ stats.non_workday_count }}</p>
+      </div>
+      <div class="glass p-4">
+        <p class="text-xs text-slate-500">祝日ヒット</p>
+        <p class="text-2xl font-black text-cyan-700">{{ stats.holiday_hits }}</p>
+      </div>
+      <div class="glass p-4">
+        <p class="text-xs text-slate-500">営業日率</p>
+        <p class="text-2xl font-black text-indigo-700">{{ stats.workday_ratio }}%</p>
+      </div>
+    </section>
+
+    <section class="grid xl:grid-cols-4 gap-5">
+      <div class="xl:col-span-3 glass p-4 overflow-hidden">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+          <h3 class="font-bold text-slate-800">営業日カレンダー</h3>
+          <form method="POST" action="{{ url_for('workday.download_excel') }}" class="inline-block">
+            <input type="hidden" name="start_date" value="{{ form_state.start_date }}">
+            <input type="hidden" name="end_date" value="{{ form_state.end_date }}">
+            {% for weekday in form_state.weekdays %}
+              <input type="hidden" name="weekdays[]" value="{{ weekday }}">
+            {% endfor %}
+            <input type="hidden" name="holidays" value="{{ form_state.holidays }}">
+            {% if form_state.include_japan_holidays %}<input type="hidden" name="include_japan_holidays" value="on">{% endif %}
+            {% if form_state.count_holidays %}<input type="hidden" name="count_holidays" value="on">{% endif %}
+            <button type="submit" class="bg-emerald-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-emerald-500">Excelダウンロード</button>
+          </form>
+        </div>
+
+        <div class="text-xs mb-3 text-slate-600 flex gap-4">
+          <span><span class="inline-block w-3 h-3 rounded-sm bg-emerald-200 mr-1"></span>営業日</span>
+          <span><span class="inline-block w-3 h-3 rounded-sm bg-rose-200 mr-1"></span>休日/祝日</span>
+        </div>
+
+        {% for (year, month), days in calendar.items() %}
+          <h4 class="text-sm font-bold text-slate-700 mt-4 mb-2">{{ year }}年{{ month }}月</h4>
+          <div class="overflow-x-auto rounded-lg border border-slate-200">
+            <table class="min-w-full text-xs">
+              <thead class="bg-slate-100 sticky top-0">
+                <tr>
+                  <th class="px-2 py-2 text-red-600">日</th>
+                  <th class="px-2 py-2">月</th>
+                  <th class="px-2 py-2">火</th>
+                  <th class="px-2 py-2">水</th>
+                  <th class="px-2 py-2">木</th>
+                  <th class="px-2 py-2">金</th>
+                  <th class="px-2 py-2 text-blue-700">土</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in days %}
+                  <tr>
+                    {% for day in row %}
+                      {% if day.date %}
+                        <td class="day-cell border border-slate-100 px-1 py-1 text-center {% if day.is_workday %}bg-emerald-100{% else %}bg-rose-100{% endif %}">
+                          <div class="font-semibold">{{ day.date.strftime('%d') }}</div>
+                        </td>
+                      {% else %}
+                        <td class="day-cell border border-slate-100 bg-slate-50"></td>
+                      {% endif %}
+                    {% endfor %}
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endfor %}
+      </div>
+
+      <div class="space-y-4">
+        <div class="glass p-4">
+          <h3 class="font-bold text-slate-800 mb-2">営業日一覧（先頭{{ workday_preview|length }}件）</h3>
+          <p class="text-xs text-slate-500 mb-2">全{{ workday_total_list_count }}件</p>
+          <div class="max-h-64 overflow-auto text-xs text-slate-700 space-y-1">
+            {% for d in workday_preview %}
+              <div class="px-2 py-1 rounded bg-slate-100">{{ d }}</div>
+            {% endfor %}
+            {% if not workday_preview %}
+              <div class="text-slate-500">営業日がありません。</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </section>
   {% endif %}
 </div>
+
+<script>
+  function setWeekdays(mode) {
+    const all = document.querySelectorAll('input[name="weekdays[]"]');
+    const weekdaySet = new Set(['1', '2', '3', '4', '5']);
+    all.forEach((el) => {
+      el.checked = mode === 'all' ? true : weekdaySet.has(el.value);
+    });
+  }
+
+  function setRangeThisMonth() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    document.querySelector('input[name="start_date"]').value = `${y}-${m}-01`;
+    document.querySelector('input[name="end_date"]').value = `${y}-${m}-${d}`;
+  }
+
+  function setRangeNextMonth() {
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const last = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+    const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    document.querySelector('input[name="start_date"]').value = fmt(first);
+    document.querySelector('input[name="end_date"]').value = fmt(last);
+  }
+</script>
 {% endblock %}
