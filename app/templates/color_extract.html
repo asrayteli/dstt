@@ -81,17 +81,19 @@
         <span id="zoomLabel" class="text-xs text-gray-600 w-16 text-center">100%</span>
         <button id="zoomInBtn" type="button" class="text-xs bg-gray-100 border px-2 py-1 rounded hover:bg-gray-200">＋</button>
         <button id="resetViewBtn" type="button" class="text-xs bg-gray-100 border px-2 py-1 rounded hover:bg-gray-200">表示をリセット</button>
+        <button id="toolHandBtn" type="button" class="text-xs bg-gray-100 border px-2 py-1 rounded hover:bg-gray-200">✋ 手のひら</button>
+        <button id="toolPickerBtn" type="button" class="text-xs bg-indigo-100 border px-2 py-1 rounded hover:bg-indigo-200">🎯 色指定</button>
         <button id="toggleRegionBtn" type="button" class="text-xs bg-amber-100 border px-2 py-1 rounded hover:bg-amber-200">範囲指定: OFF</button>
         <button id="clearRegionBtn" type="button" class="text-xs bg-gray-100 border px-2 py-1 rounded hover:bg-gray-200">範囲クリア</button>
       </div>
       <div id="previewViewport" class="border rounded-lg min-h-[360px] h-[70vh] bg-gray-50 overflow-hidden relative">
         <div id="previewCanvasWrap" class="absolute inset-0 flex items-center justify-center select-none">
           <img id="previewImage" alt="preview" class="hidden cursor-crosshair pointer-events-auto" draggable="false">
-          <div id="selectionBox" class="hidden absolute border-2 border-amber-500 bg-amber-200/20 pointer-events-none"></div>
+          <div id="selectionBox" class="hidden absolute border-2 border-amber-500 pointer-events-none"></div>
           <p id="previewPlaceholder" class="text-sm text-gray-500">ファイルを選択するとプレビューが表示されます</p>
         </div>
       </div>
-      <p class="text-xs text-gray-500 mt-3">範囲指定ONでドラッグすると処理範囲を制限できます。OFF時は拡大画像をドラッグで移動（手のひらツール）。</p>
+      <p class="text-xs text-gray-500 mt-3">ツールを「手のひら」「色指定」で切替できます。範囲指定ONでドラッグすると処理範囲を制限できます。</p>
     </div>
   </div>
 </div>
@@ -121,6 +123,8 @@
   const zoomInBtn = document.getElementById('zoomInBtn');
   const zoomOutBtn = document.getElementById('zoomOutBtn');
   const resetViewBtn = document.getElementById('resetViewBtn');
+  const toolHandBtn = document.getElementById('toolHandBtn');
+  const toolPickerBtn = document.getElementById('toolPickerBtn');
   const toggleRegionBtn = document.getElementById('toggleRegionBtn');
   const clearRegionBtn = document.getElementById('clearRegionBtn');
   const zoomLabel = document.getElementById('zoomLabel');
@@ -140,6 +144,7 @@
   let suppressClick = false;
   let selectionStart = null;
   let selectedRegion = null; // normalized {x,y,w,h}
+  let activeTool = 'picker'; // picker | hand
 
   function normalizeHex(value) {
     const v = (value || '').trim();
@@ -180,7 +185,11 @@
   function applyPreviewTransform() {
     previewImage.style.transformOrigin = 'center center';
     previewImage.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
-    previewImage.style.cursor = regionMode ? 'crosshair' : (zoomLevel > 1 ? (isPanning ? 'grabbing' : 'grab') : 'crosshair');
+    if (regionMode || activeTool === 'picker') {
+      previewImage.style.cursor = 'crosshair';
+    } else {
+      previewImage.style.cursor = zoomLevel > 1 ? (isPanning ? 'grabbing' : 'grab') : 'grab';
+    }
     zoomLabel.textContent = `${Math.round(zoomLevel * 100)}%`;
   }
 
@@ -205,6 +214,15 @@
     regionMode = enabled;
     toggleRegionBtn.textContent = `範囲指定: ${enabled ? 'ON' : 'OFF'}`;
     toggleRegionBtn.classList.toggle('bg-amber-300', enabled);
+    applyPreviewTransform();
+  }
+
+  function setActiveTool(tool) {
+    activeTool = tool;
+    toolHandBtn.classList.toggle('bg-sky-300', tool === 'hand');
+    toolPickerBtn.classList.toggle('bg-indigo-300', tool === 'picker');
+    toolHandBtn.classList.toggle('font-semibold', tool === 'hand');
+    toolPickerBtn.classList.toggle('font-semibold', tool === 'picker');
     applyPreviewTransform();
   }
 
@@ -346,7 +364,7 @@
 
   previewImage.addEventListener('click', (e) => {
     if (!previewImage.src || isPanning || selectingRegion || suppressClick) return;
-    if (regionMode) return;
+    if (regionMode || activeTool !== 'picker') return;
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
@@ -389,6 +407,7 @@
       return;
     }
 
+    if (activeTool !== 'hand') return;
     if (zoomLevel <= 1) return;
     isPanning = true;
     panStartX = e.clientX - panX;
@@ -451,6 +470,8 @@
   zoomInBtn.addEventListener('click', () => { changeZoom(0.25); requestAnimationFrame(renderSelectionBox); });
   zoomOutBtn.addEventListener('click', () => { changeZoom(-0.25); requestAnimationFrame(renderSelectionBox); });
   resetViewBtn.addEventListener('click', () => { resetPreviewView(); requestAnimationFrame(renderSelectionBox); });
+  toolHandBtn.addEventListener('click', () => setActiveTool('hand'));
+  toolPickerBtn.addEventListener('click', () => setActiveTool('picker'));
   toggleRegionBtn.addEventListener('click', () => setRegionMode(!regionMode));
   clearRegionBtn.addEventListener('click', clearRegion);
 
@@ -473,6 +494,7 @@
   renderColorList();
   syncReplacement();
   updateModeUI();
+  setActiveTool('picker');
   applyPreviewTransform();
 })();
 </script>
