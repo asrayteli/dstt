@@ -89,6 +89,19 @@
     (function() {
       const sidebar = document.getElementById('app-sidebar');
       const toggleButton = document.getElementById('sidebar-toggle');
+      const mainContent = document.getElementById('app-main-content');
+      const params = new URLSearchParams(window.location.search);
+      const isEditorWindow = params.get('editor_window') === '1';
+
+      if (isEditorWindow) {
+        if (sidebar) sidebar.style.display = 'none';
+        if (toggleButton) toggleButton.style.display = 'none';
+        if (mainContent) {
+          mainContent.style.padding = '0';
+          mainContent.style.maxWidth = '100%';
+        }
+        return;
+      }
 
       // localStorageから前回の状態を読み込む
       const sidebarVisible = localStorage.getItem('sidebarVisible') !== 'false';

@@ -509,6 +509,7 @@
           <div class="editor-toolbar">
             <button type="button" class="toolbar-btn" id="handToolBtn">手のひら</button>
             <button type="button" class="toolbar-btn" data-action="add_text">テキスト</button>
+            <button type="button" class="toolbar-btn" data-action="start_freehand">自由描画</button>
             <button type="button" class="toolbar-btn" id="zoomOutBtn">-</button>
             <span id="zoomInfo">100%</span>
             <button type="button" class="toolbar-btn" id="zoomInBtn">+</button>
@@ -530,7 +531,8 @@
                 <button type="button" data-action="add_text">テキストを追加</button>
                 <button type="button" data-action="add_rect">四角形を追加</button>
                 <button type="button" data-action="add_ellipse">楕円を追加</button>
-                <button type="button" data-action="add_line">線を追加</button>
+                <button type="button" data-action="add_line">線を追加(2点指定)</button>
+                <button type="button" data-action="start_freehand">自由描画開始</button>
                 <button type="button" data-action="add_image">画像を追加</button>
                 <button type="button" data-action="start_copy">範囲コピー開始</button>
                 <button type="button" data-action="copy_selected">コピー</button>
@@ -549,6 +551,16 @@
             <button type="button" class="toolbar-btn" id="layerMoveDownBtn">↓</button>
           </div>
           <div id="layerList" class="layer-list mb-4"></div>
+          <div class="line-maker mb-4">
+            <h5 class="font-semibold text-gray-700 mb-2">線を数値で追加</h5>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="block text-xs text-gray-500">始点X<input type="number" id="lineStartX" step="0.1" class="w-full px-2 py-1 border rounded" value="40"></label>
+              <label class="block text-xs text-gray-500">始点Y<input type="number" id="lineStartY" step="0.1" class="w-full px-2 py-1 border rounded" value="40"></label>
+              <label class="block text-xs text-gray-500">終点X<input type="number" id="lineEndX" step="0.1" class="w-full px-2 py-1 border rounded" value="200"></label>
+              <label class="block text-xs text-gray-500">終点Y<input type="number" id="lineEndY" step="0.1" class="w-full px-2 py-1 border rounded" value="140"></label>
+            </div>
+            <button type="button" class="toolbar-btn mt-2 w-full" id="addLineByPointBtn">起点/終点を指定して線を追加</button>
+          </div>
           <h4 class="font-semibold text-gray-700 mb-2">要素プロパティ</h4>
           <p id="propEmpty" class="text-sm text-gray-500">要素をクリックすると編集できます。</p>
           <div id="propForm" class="hidden space-y-2">
@@ -717,20 +729,22 @@
 
   .editor-viewer {
     position: relative;
-    min-height: 620px;
+    height: 620px;
     overflow: auto;
     border: 1px solid #cbd5e1;
     border-radius: 10px;
     background: #eff6ff;
     padding: 12px;
     display: block;
+    scrollbar-gutter: stable both-edges;
   }
 
   .canvas-stage {
     position: relative;
-    display: inline-block;
+    display: block;
+    width: max-content;
     line-height: 0;
-    min-width: 100%;
+    margin: 0 auto;
   }
 
   #pdfCanvas {
@@ -799,6 +813,15 @@
     pointer-events: none;
   }
 
+  .freehand-preview {
+    position: absolute;
+    pointer-events: none;
+    border: 0;
+    background: transparent;
+    overflow: visible;
+    z-index: 12;
+  }
+
   .context-menu {
     position: absolute;
     z-index: 20;
@@ -849,12 +872,15 @@
   }
 
   .layer-list {
-    max-height: 220px;
+    max-height: 260px;
     overflow: auto;
     border: 1px solid #dbe4f4;
     border-radius: 8px;
     padding: 6px;
     background: #f8fbff;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .layer-item {
@@ -864,9 +890,18 @@
     border: 1px solid #d4def4;
     background: #fff;
     border-radius: 6px;
-    padding: 5px 6px;
-    margin-bottom: 4px;
+    padding: 6px 8px;
     cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: left;
+  }
+
+  .overlay-item.freehand {
+    border: 0;
+    background: transparent;
+    overflow: visible;
   }
 
   .layer-item.active {
@@ -1260,9 +1295,14 @@
   const groupLine2 = get('groupLine2');
   const groupImageIndex = get('groupImageIndex');
   const groupStrokeStyle = get('groupStrokeStyle');
+  const lineStartX = get('lineStartX');
+  const lineStartY = get('lineStartY');
+  const lineEndX = get('lineEndX');
+  const lineEndY = get('lineEndY');
+  const addLineByPointBtn = get('addLineByPointBtn');
 
   let pdfDoc = null, pageNum = 1, scale = 1.25, renderTask = null;
-  let mode = 'idle', lineStart = null, copySource = null, dragStart = null;
+  let mode = 'idle', lineStart = null, copySource = null, dragStart = null, freehandCurrent = null;
   let handMode = false, tempHandMode = false, eyedropperMode = false, isPanning = false, panStart = null;
   let moveDrag = null, resizeDrag = null, suppressClick = false;
   let contextPoint = { x: 0, y: 0 }, selectedIndex = -1;
@@ -1271,7 +1311,10 @@
   const ops = [];
   const imageFilesByRef = new Map();
   const imageUrlByRef = new Map();
-  const pxToPdf = (v) => v / scale;
+  const q1 = (v) => Math.round(Number(v || 0) * 10) / 10;
+  const qMin1 = (v) => Math.max(1, q1(v));
+  const qMin01 = (v) => Math.max(0.1, q1(v));
+  const pxToPdf = (v) => q1(v / scale);
   const pdfToPx = (v) => v * scale;
   const styleToCss = (s) => (s === 'dashed' ? 'dashed' : s === 'dotted' ? 'dotted' : 'solid');
   const deep = (v) => JSON.parse(JSON.stringify(v));
@@ -1281,8 +1324,47 @@
   pastePreview.className = 'paste-preview hidden';
   overlayLayer.appendChild(pastePreview);
 
+  const freehandPreview = document.createElement('div');
+  freehandPreview.className = 'freehand-preview hidden';
+  overlayLayer.appendChild(freehandPreview);
+
   const normalizeOp = (op) => {
     if (!op.id) op.id = genId();
+    if (op.type === 'add_text') {
+      op.page = Number(op.page || pageNum || 1);
+      op.x = q1(op.x || 0); op.y = q1(op.y || 0);
+      op.width = qMin1(op.width || 220); op.height = qMin1(op.height || 90);
+      op.font_size = qMin01(op.font_size || 16);
+    } else if (op.type === 'add_shape') {
+      op.page = Number(op.page || pageNum || 1);
+      op.stroke_width = qMin01(op.stroke_width || 2);
+      op.stroke_style = op.stroke_style || 'solid';
+      if (op.shape === 'line') {
+        op.x1 = q1(op.x1 || 0); op.y1 = q1(op.y1 || 0);
+        op.x2 = q1(op.x2 || 120); op.y2 = q1(op.y2 || 120);
+      } else {
+        op.x = q1(op.x || 0); op.y = q1(op.y || 0);
+        op.width = qMin1(op.width || 220); op.height = qMin1(op.height || 90);
+      }
+    } else if (op.type === 'add_image') {
+      op.page = Number(op.page || pageNum || 1);
+      op.x = q1(op.x || 0); op.y = q1(op.y || 0);
+      op.width = qMin1(op.width || 220); op.height = qMin1(op.height || 120);
+    } else if (op.type === 'copy_region_paste') {
+      op.source_page = Number(op.source_page || pageNum || 1);
+      op.target_page = Number(op.target_page || pageNum || 1);
+      op.source_x = q1(op.source_x || 0); op.source_y = q1(op.source_y || 0);
+      op.source_width = qMin1(op.source_width || 120); op.source_height = qMin1(op.source_height || 80);
+      op.target_x = q1(op.target_x || 0); op.target_y = q1(op.target_y || 0);
+      op.target_width = qMin1(op.target_width || op.source_width || 120);
+      op.target_height = qMin1(op.target_height || op.source_height || 80);
+    } else if (op.type === 'add_freehand') {
+      op.page = Number(op.page || pageNum || 1);
+      op.points = Array.isArray(op.points) ? op.points.map((pt) => ({ x: q1(pt.x || 0), y: q1(pt.y || 0) })) : [];
+      op.stroke_color = op.stroke_color || '#1d4ed8';
+      op.stroke_width = qMin01(op.stroke_width || 2);
+      op.stroke_style = op.stroke_style || 'solid';
+    }
     return op;
   };
 
@@ -1291,6 +1373,12 @@
     if (handMode || tempHandMode) now = 'hand';
     if (eyedropperMode) now = 'eyedropper';
     modeBadge.textContent = `Mode: ${now}`;
+  };
+
+  const syncViewerHeight = () => {
+    const top = viewerWrap.getBoundingClientRect().top;
+    const h = Math.max(320, Math.floor(window.innerHeight - top - 20));
+    viewerWrap.style.height = `${h}px`;
   };
 
   const syncOverlay = () => {
@@ -1318,6 +1406,31 @@
     pastePreview.classList.remove('hidden');
   };
   const hidePastePreview = () => pastePreview.classList.add('hidden');
+  const hideFreehandPreview = () => {
+    freehandPreview.classList.add('hidden');
+    freehandPreview.innerHTML = '';
+  };
+  const updateFreehandPreview = () => {
+    if (mode !== 'freehand' || !freehandCurrent || freehandCurrent.length < 2) {
+      hideFreehandPreview();
+      return;
+    }
+    const xs = freehandCurrent.map((pt) => pdfToPx(pt.x));
+    const ys = freehandCurrent.map((pt) => pdfToPx(pt.y));
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const width = Math.max(2, maxX - minX);
+    const height = Math.max(2, maxY - minY);
+    freehandPreview.style.left = `${minX}px`;
+    freehandPreview.style.top = `${minY}px`;
+    freehandPreview.style.width = `${width}px`;
+    freehandPreview.style.height = `${height}px`;
+    const points = freehandCurrent.map((pt) => `${pdfToPx(pt.x) - minX},${pdfToPx(pt.y) - minY}`).join(' ');
+    freehandPreview.innerHTML = `<svg width="${width}" height="${height}" style="overflow:visible"><polyline fill="none" stroke="#1d4ed8" stroke-width="${Math.max(1, pdfToPx(2))}" points="${points}" /></svg>`;
+    freehandPreview.classList.remove('hidden');
+  };
 
   const removeImageRefIfUnused = (ref) => {
     if (!ref) return;
@@ -1363,7 +1476,8 @@
       row.className = 'layer-item';
       if (i === selectedIndex) row.classList.add('active');
       const page = op.page || op.target_page || '-';
-      row.textContent = `${i + 1}. ${op.type} (p.${page})`;
+      const typeLabel = op.type === 'add_freehand' ? 'freehand' : op.type;
+      row.innerHTML = `<span>${i + 1}. ${typeLabel}</span><span class="text-[10px] text-slate-500">p.${page}</span>`;
       row.dataset.idx = String(i);
       layerList.appendChild(row);
     }
@@ -1421,9 +1535,36 @@
         item.style.left = `${pdfToPx(op.target_x)}px`; item.style.top = `${pdfToPx(op.target_y)}px`;
         item.style.width = `${pdfToPx(op.target_width)}px`; item.style.height = `${pdfToPx(op.target_height)}px`;
         item.style.borderColor = '#0ea5e9'; item.style.background = 'rgba(14,165,233,0.1)';
+      } else if (op.type === 'add_freehand' && op.page === pageNum && Array.isArray(op.points) && op.points.length >= 2) {
+        const xs = op.points.map((pt) => pdfToPx(pt.x));
+        const ys = op.points.map((pt) => pdfToPx(pt.y));
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        const width = Math.max(2, maxX - minX);
+        const height = Math.max(2, maxY - minY);
+        item.classList.add('freehand');
+        item.style.left = `${minX}px`;
+        item.style.top = `${minY}px`;
+        item.style.width = `${width}px`;
+        item.style.height = `${height}px`;
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('width', String(width));
+        svg.setAttribute('height', String(height));
+        svg.style.overflow = 'visible';
+        const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        polyline.setAttribute('fill', 'none');
+        polyline.setAttribute('stroke', op.stroke_color || '#1d4ed8');
+        polyline.setAttribute('stroke-width', String(Math.max(1, pdfToPx(op.stroke_width || 2))));
+        const dash = op.stroke_style === 'dashed' ? '8 4' : op.stroke_style === 'dotted' ? '2 4' : '';
+        if (dash) polyline.setAttribute('stroke-dasharray', dash);
+        polyline.setAttribute('points', op.points.map((pt) => `${pdfToPx(pt.x) - minX},${pdfToPx(pt.y) - minY}`).join(' '));
+        svg.appendChild(polyline);
+        item.appendChild(svg);
       } else return;
 
-      if (idx === selectedIndex && (op.type !== 'add_shape' || (op.type === 'add_shape' && op.shape !== 'line'))) {
+      if (idx === selectedIndex && op.type !== 'add_freehand' && (op.type !== 'add_shape' || (op.type === 'add_shape' && op.shape !== 'line'))) {
         ['nw', 'ne', 'sw', 'se'].forEach((dir) => {
           const h = document.createElement('span');
           h.className = `resize-handle ${dir}`;
@@ -1480,25 +1621,44 @@
         propX.value = op.x1; propY.value = op.y1; propX2.value = op.x2; propY2.value = op.y2;
       }
     }
+    if (op.type === 'add_freehand') {
+      groupSize.classList.add('hidden');
+      groupShapeColors.classList.remove('hidden');
+      groupStrokeStyle.classList.remove('hidden');
+      propStrokeColor.value = op.stroke_color || '#1d4ed8';
+      propFillColor.value = '#ffffff';
+      propStrokeWidth.value = op.stroke_width || 2;
+      propStrokeStyle.value = op.stroke_style || 'solid';
+      propX.value = 0;
+      propY.value = 0;
+      propW.value = 0;
+      propH.value = 0;
+    }
   };
 
   const applyPropChanges = () => {
     const op = ops[selectedIndex];
     if (!op) return;
-    const v = (el) => Number(el.value || 0);
+    const v = (el) => q1(el.value || 0);
     if (op.type === 'add_text') {
-      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = v(propW); op.height = v(propH);
-      op.text = propText.value || ''; op.font_size = v(propFontSize) || 14; op.color = propTextColor.value;
+      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = qMin1(v(propW)); op.height = qMin1(v(propH));
+      op.text = propText.value || ''; op.font_size = qMin01(v(propFontSize) || 14); op.color = propTextColor.value;
     } else if (op.type === 'add_shape') {
       op.page = v(propPage); op.stroke_style = propStrokeStyle.value;
       if (op.shape === 'line') { op.x1 = v(propX); op.y1 = v(propY); op.x2 = v(propX2); op.y2 = v(propY2); }
-      else { op.x = v(propX); op.y = v(propY); op.width = Math.max(1, v(propW)); op.height = Math.max(1, v(propH)); }
-      op.stroke_color = propStrokeColor.value; op.fill_color = propFillColor.value; op.stroke_width = Math.max(0.1, v(propStrokeWidth) || 2);
+      else { op.x = v(propX); op.y = v(propY); op.width = qMin1(v(propW)); op.height = qMin1(v(propH)); }
+      op.stroke_color = propStrokeColor.value; op.fill_color = propFillColor.value; op.stroke_width = qMin01(v(propStrokeWidth) || 2);
     } else if (op.type === 'add_image') {
-      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = Math.max(1, v(propW)); op.height = Math.max(1, v(propH));
+      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = qMin1(v(propW)); op.height = qMin1(v(propH));
     } else if (op.type === 'copy_region_paste') {
-      op.target_page = v(propPage); op.target_x = v(propX); op.target_y = v(propY); op.target_width = Math.max(1, v(propW)); op.target_height = Math.max(1, v(propH));
+      op.target_page = v(propPage); op.target_x = v(propX); op.target_y = v(propY); op.target_width = qMin1(v(propW)); op.target_height = qMin1(v(propH));
+    } else if (op.type === 'add_freehand') {
+      op.page = v(propPage);
+      op.stroke_color = propStrokeColor.value;
+      op.stroke_width = qMin01(v(propStrokeWidth) || 2);
+      op.stroke_style = propStrokeStyle.value;
     }
+    normalizeOp(op);
     updateOpsField(); renderOps(); renderLayerList();
   };
   [propPage, propStrokeWidth, propStrokeStyle, propX, propY, propW, propH, propText, propFontSize, propTextColor, propStrokeColor, propFillColor, propX2, propY2]
@@ -1592,6 +1752,7 @@
     else if (action === 'add_ellipse') ops.push(normalizeOp({ type: 'add_shape', page: pageNum, shape: 'ellipse', x, y, width: 220, height: 90, stroke_color: '#1d4ed8', fill_color: '#93c5fd', stroke_width: 2, stroke_style: 'solid' }));
     else if (action === 'add_image') { addImageAt(x, y); return; }
     else if (action === 'add_line') { mode = 'line'; lineStart = { x, y }; updateModeBadge(); return; }
+    else if (action === 'start_freehand') { mode = 'freehand'; freehandCurrent = null; hidePastePreview(); hideFreehandPreview(); updateModeBadge(); return; }
     else if (action === 'start_copy') { mode = 'copy_select'; copySource = null; hidePastePreview(); updateModeBadge(); return; }
     updateOpsField(); renderOps(); renderLayerList(); selectOp(ops.length - 1);
   };
@@ -1610,6 +1771,17 @@
   };
 
   if (isEditorWindow && openEditorWindowBtn) openEditorWindowBtn.style.display = 'none';
+
+  addLineByPointBtn?.addEventListener('click', () => {
+    if (!pdfDoc) return;
+    const sx = Number(lineStartX?.value || 0);
+    const sy = Number(lineStartY?.value || 0);
+    const ex = Number(lineEndX?.value || 0);
+    const ey = Number(lineEndY?.value || 0);
+    commitHistory();
+    ops.push(normalizeOp({ type: 'add_shape', page: pageNum, shape: 'line', x1: sx, y1: sy, x2: ex, y2: ey, stroke_color: '#1d4ed8', stroke_width: 2, stroke_style: 'solid' }));
+    updateOpsField(); renderOps(); renderLayerList(); selectOp(ops.length - 1);
+  });
 
   openEditorWindowBtn?.addEventListener('click', () => {
     const w = Math.max(1200, Math.floor(window.screen.availWidth * 0.96));
@@ -1631,6 +1803,7 @@
   layerList?.addEventListener('click', (ev) => { const b = ev.target.closest('.layer-item'); if (b) selectOp(Number(b.dataset.idx)); });
 
   document.addEventListener('click', () => hideMenu());
+  window.addEventListener('resize', syncViewerHeight);
 
   overlayLayer.addEventListener('contextmenu', (ev) => {
     ev.preventDefault();
@@ -1695,6 +1868,8 @@
           else { moveDrag.ox = op.x; moveDrag.oy = op.y; }
         } else if (op.type === 'copy_region_paste') {
           moveDrag.tx = op.target_x; moveDrag.ty = op.target_y;
+        } else if (op.type === 'add_freehand') {
+          moveDrag.points = deep(op.points || []);
         }
         return;
       }
@@ -1704,6 +1879,12 @@
       isPanning = true;
       panStart = { x: ev.clientX, y: ev.clientY, left: viewerWrap.scrollLeft, top: viewerWrap.scrollTop };
       syncOverlay();
+      return;
+    }
+    if (mode === 'freehand' && !handMode && ev.button === 0 && !item && !handle) {
+      const p = getPoint(ev);
+      freehandCurrent = [{ x: pxToPdf(p.x), y: pxToPdf(p.y) }];
+      updateFreehandPreview();
       return;
     }
     if (mode !== 'copy_select' || !pdfDoc) return;
@@ -1722,17 +1903,17 @@
       const ratio = (src.width || 1) / Math.max(1, (src.height || 1));
       if ('x' in src && 'width' in src) {
         const shift = ev.shiftKey;
-        if (resizeDrag.dir.includes('e')) op.width = Math.max(1, src.width + dx);
-        if (resizeDrag.dir.includes('s')) op.height = Math.max(1, src.height + dy);
-        if (resizeDrag.dir.includes('w')) { op.x = src.x + dx; op.width = Math.max(1, src.width - dx); }
-        if (resizeDrag.dir.includes('n')) { op.y = src.y + dy; op.height = Math.max(1, src.height - dy); }
+        if (resizeDrag.dir.includes('e')) op.width = qMin1(src.width + dx);
+        if (resizeDrag.dir.includes('s')) op.height = qMin1(src.height + dy);
+        if (resizeDrag.dir.includes('w')) { op.x = q1(src.x + dx); op.width = qMin1(src.width - dx); }
+        if (resizeDrag.dir.includes('n')) { op.y = q1(src.y + dy); op.height = qMin1(src.height - dy); }
         if (shift) {
-          if (op.width / op.height > ratio) op.width = op.height * ratio;
-          else op.height = op.width / ratio;
+          if (op.width / op.height > ratio) op.width = qMin1(op.height * ratio);
+          else op.height = qMin1(op.width / ratio);
         }
       } else if ('target_x' in src) {
-        if (resizeDrag.dir.includes('e')) op.target_width = Math.max(1, src.target_width + dx);
-        if (resizeDrag.dir.includes('s')) op.target_height = Math.max(1, src.target_height + dy);
+        if (resizeDrag.dir.includes('e')) op.target_width = qMin1(src.target_width + dx);
+        if (resizeDrag.dir.includes('s')) op.target_height = qMin1(src.target_height + dy);
       }
       updateOpsField(); renderOps(); if (selectedIndex === resizeDrag.idx) selectOp(resizeDrag.idx);
       return;
@@ -1745,15 +1926,22 @@
       if (Math.abs(dx) > 0.2 || Math.abs(dy) > 0.2) moveDrag.moved = true;
       const op = ops[moveDrag.idx];
       if (!op) return;
-      if (op.type === 'add_text' || op.type === 'add_image') { op.x = (moveDrag.ox ?? op.x ?? 0) + dx; op.y = (moveDrag.oy ?? op.y ?? 0) + dy; }
+      if (op.type === 'add_text' || op.type === 'add_image') { op.x = q1((moveDrag.ox ?? op.x ?? 0) + dx); op.y = q1((moveDrag.oy ?? op.y ?? 0) + dy); }
       else if (op.type === 'add_shape') {
-        if (op.shape === 'line') { op.x1 = (moveDrag.ox1 ?? op.x1 ?? 0) + dx; op.y1 = (moveDrag.oy1 ?? op.y1 ?? 0) + dy; op.x2 = (moveDrag.ox2 ?? op.x2 ?? 0) + dx; op.y2 = (moveDrag.oy2 ?? op.y2 ?? 0) + dy; }
-        else { op.x = (moveDrag.ox ?? op.x ?? 0) + dx; op.y = (moveDrag.oy ?? op.y ?? 0) + dy; }
-      } else if (op.type === 'copy_region_paste') { op.target_x = (moveDrag.tx ?? op.target_x ?? 0) + dx; op.target_y = (moveDrag.ty ?? op.target_y ?? 0) + dy; }
+        if (op.shape === 'line') { op.x1 = q1((moveDrag.ox1 ?? op.x1 ?? 0) + dx); op.y1 = q1((moveDrag.oy1 ?? op.y1 ?? 0) + dy); op.x2 = q1((moveDrag.ox2 ?? op.x2 ?? 0) + dx); op.y2 = q1((moveDrag.oy2 ?? op.y2 ?? 0) + dy); }
+        else { op.x = q1((moveDrag.ox ?? op.x ?? 0) + dx); op.y = q1((moveDrag.oy ?? op.y ?? 0) + dy); }
+      } else if (op.type === 'copy_region_paste') { op.target_x = q1((moveDrag.tx ?? op.target_x ?? 0) + dx); op.target_y = q1((moveDrag.ty ?? op.target_y ?? 0) + dy); }
+      else if (op.type === 'add_freehand' && Array.isArray(op.points)) { op.points = (moveDrag.points || op.points).map((pt) => ({ x: q1(pt.x + dx), y: q1(pt.y + dy) })); }
       updateOpsField(); renderOps(); if (selectedIndex === moveDrag.idx) selectOp(moveDrag.idx);
       return;
     }
     if (isPanning && panStart) { viewerWrap.scrollLeft = panStart.left - (ev.clientX - panStart.x); viewerWrap.scrollTop = panStart.top - (ev.clientY - panStart.y); return; }
+    if (mode === 'freehand' && freehandCurrent) {
+      const p = getPoint(ev);
+      freehandCurrent.push({ x: pxToPdf(p.x), y: pxToPdf(p.y) });
+      updateFreehandPreview();
+      return;
+    }
     if (mode === 'copy_paste' && copySource) { const p = getPoint(ev); updatePastePreview(p.x, p.y); return; }
     if (!dragStart || mode !== 'copy_select') return;
     const p = getPoint(ev), left = Math.min(dragStart.x, p.x), top = Math.min(dragStart.y, p.y), w = Math.abs(p.x - dragStart.x), h = Math.abs(p.y - dragStart.y);
@@ -1763,10 +1951,20 @@
   overlayLayer.addEventListener('mouseup', (ev) => {
     if (resizeDrag) { resizeDrag = null; return; }
     if (moveDrag) { suppressClick = moveDrag.moved; moveDrag = null; return; }
+    if (mode === 'freehand' && freehandCurrent) {
+      if (freehandCurrent.length >= 2) {
+        commitHistory();
+        ops.push(normalizeOp({ type: 'add_freehand', page: pageNum, points: freehandCurrent, stroke_color: '#1d4ed8', stroke_width: 2, stroke_style: 'solid' }));
+        updateOpsField(); renderOps(); renderLayerList(); selectOp(ops.length - 1);
+      }
+      freehandCurrent = null;
+      hideFreehandPreview();
+      return;
+    }
     if (isPanning) { isPanning = false; panStart = null; syncOverlay(); return; }
     if (!dragStart || mode !== 'copy_select') return;
     const p = getPoint(ev), left = Math.min(dragStart.x, p.x), top = Math.min(dragStart.y, p.y), w = Math.max(2, Math.abs(p.x - dragStart.x)), h = Math.max(2, Math.abs(p.y - dragStart.y));
-    copySource = { page: pageNum, x: pxToPdf(left), y: pxToPdf(top), w: pxToPdf(w), h: pxToPdf(h) };
+    copySource = { page: pageNum, x: q1(pxToPdf(left)), y: q1(pxToPdf(top)), w: qMin1(pxToPdf(w)), h: qMin1(pxToPdf(h)) };
     dragStart = null;
     dragRect.classList.add('hidden');
     mode = 'copy_paste';
@@ -1777,6 +1975,7 @@
   overlayLayer.addEventListener('mouseleave', () => {
     if (moveDrag) { suppressClick = moveDrag.moved; moveDrag = null; }
     hidePastePreview();
+    if (mode !== 'freehand') hideFreehandPreview();
   });
 
   deleteSelectedBtn.addEventListener('click', () => {
@@ -1818,7 +2017,7 @@
     const cmd = ev.ctrlKey || ev.metaKey;
     if (ev.code === 'Space' && !tempHandMode) { tempHandMode = true; syncOverlay(); ev.preventDefault(); }
     if (ev.key === 'Escape') {
-      mode = 'idle'; lineStart = null; copySource = null; hidePastePreview(); eyedropperMode = false; syncOverlay();
+      mode = 'idle'; lineStart = null; copySource = null; freehandCurrent = null; hidePastePreview(); hideFreehandPreview(); eyedropperMode = false; syncOverlay();
     }
     if (cmd && ev.key.toLowerCase() === 'c') { cloneSelectedOp(); }
     if (cmd && ev.key.toLowerCase() === 'v') { pasteClonedOp(); ev.preventDefault(); }
@@ -1865,6 +2064,7 @@
 
   selectOp(-1);
   renderLayerList();
+  syncViewerHeight();
   syncOverlay();
 })();
 </script>
