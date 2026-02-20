@@ -61,11 +61,18 @@ def _post_edit(client, pdf_bytes, operations, uploads=None):
     return client.post("/tools/pdf_power/edit", data=data, content_type="multipart/form-data")
 
 
+
+
+def test_round_to_tenth_helper(pdf_power_module):
+    assert pdf_power_module._round_to_tenth(12.345) == 12.3
+    assert pdf_power_module._round_to_tenth(12.36) == 12.4
+
 def test_collect_affected_pages_for_edit(pdf_power_module):
     operations = [
         {"type": "add_text", "page": 1},
         {"type": "copy_region_paste", "source_page": 2, "target_page": 3},
         {"type": "add_image", "page": 3},
+        {"type": "add_freehand", "page": 2, "points": [{"x": 10, "y": 10}, {"x": 20, "y": 20}]},
     ]
     assert pdf_power_module._collect_affected_pages_for_edit(operations, 5) == {0, 1, 2}
 
@@ -212,3 +219,26 @@ def test_invalid_operations_json_returns_400(client):
         content_type="multipart/form-data",
     )
     assert response.status_code == 400
+
+
+def test_add_freehand_stroke(client):
+    operations = [
+        {
+            "type": "add_freehand",
+            "page": 1,
+            "points": [
+                {"x": 30, "y": 40},
+                {"x": 90, "y": 60},
+                {"x": 140, "y": 130},
+            ],
+            "stroke_color": "#ff0000",
+            "stroke_width": 3,
+            "stroke_style": "solid",
+        }
+    ]
+    response = _post_edit(client, _make_pdf(rotation=0), operations)
+    assert response.status_code == 200
+    doc = fitz.open(stream=response.data, filetype="pdf")
+    page = doc[0]
+    assert len(page.get_drawings()) > 0
+    doc.close()
