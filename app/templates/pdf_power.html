@@ -509,7 +509,6 @@
           <div class="editor-toolbar">
             <button type="button" class="toolbar-btn" id="handToolBtn">手のひら</button>
             <button type="button" class="toolbar-btn" data-action="add_text">テキスト</button>
-            <button type="button" class="toolbar-btn" data-action="add_line">線(2点指定)</button>
             <button type="button" class="toolbar-btn" data-action="start_freehand">自由描画</button>
             <button type="button" class="toolbar-btn" id="zoomOutBtn">-</button>
             <span id="zoomInfo">100%</span>
@@ -730,7 +729,7 @@
 
   .editor-viewer {
     position: relative;
-    min-height: 620px;
+    height: 620px;
     overflow: auto;
     border: 1px solid #cbd5e1;
     border-radius: 10px;
@@ -812,6 +811,15 @@
     border: 1px dashed #0ea5e9;
     background: rgba(14, 165, 233, 0.15);
     pointer-events: none;
+  }
+
+  .freehand-preview {
+    position: absolute;
+    pointer-events: none;
+    border: 0;
+    background: transparent;
+    overflow: visible;
+    z-index: 12;
   }
 
   .context-menu {
@@ -1316,6 +1324,10 @@
   pastePreview.className = 'paste-preview hidden';
   overlayLayer.appendChild(pastePreview);
 
+  const freehandPreview = document.createElement('div');
+  freehandPreview.className = 'freehand-preview hidden';
+  overlayLayer.appendChild(freehandPreview);
+
   const normalizeOp = (op) => {
     if (!op.id) op.id = genId();
     if (op.type === 'add_text') {
@@ -1363,6 +1375,12 @@
     modeBadge.textContent = `Mode: ${now}`;
   };
 
+  const syncViewerHeight = () => {
+    const top = viewerWrap.getBoundingClientRect().top;
+    const h = Math.max(320, Math.floor(window.innerHeight - top - 20));
+    viewerWrap.style.height = `${h}px`;
+  };
+
   const syncOverlay = () => {
     canvasStage.style.width = `${canvas.width}px`;
     canvasStage.style.height = `${canvas.height}px`;
@@ -1388,6 +1406,31 @@
     pastePreview.classList.remove('hidden');
   };
   const hidePastePreview = () => pastePreview.classList.add('hidden');
+  const hideFreehandPreview = () => {
+    freehandPreview.classList.add('hidden');
+    freehandPreview.innerHTML = '';
+  };
+  const updateFreehandPreview = () => {
+    if (mode !== 'freehand' || !freehandCurrent || freehandCurrent.length < 2) {
+      hideFreehandPreview();
+      return;
+    }
+    const xs = freehandCurrent.map((pt) => pdfToPx(pt.x));
+    const ys = freehandCurrent.map((pt) => pdfToPx(pt.y));
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const width = Math.max(2, maxX - minX);
+    const height = Math.max(2, maxY - minY);
+    freehandPreview.style.left = `${minX}px`;
+    freehandPreview.style.top = `${minY}px`;
+    freehandPreview.style.width = `${width}px`;
+    freehandPreview.style.height = `${height}px`;
+    const points = freehandCurrent.map((pt) => `${pdfToPx(pt.x) - minX},${pdfToPx(pt.y) - minY}`).join(' ');
+    freehandPreview.innerHTML = `<svg width="${width}" height="${height}" style="overflow:visible"><polyline fill="none" stroke="#1d4ed8" stroke-width="${Math.max(1, pdfToPx(2))}" points="${points}" /></svg>`;
+    freehandPreview.classList.remove('hidden');
+  };
 
   const removeImageRefIfUnused = (ref) => {
     if (!ref) return;
@@ -1709,7 +1752,7 @@
     else if (action === 'add_ellipse') ops.push(normalizeOp({ type: 'add_shape', page: pageNum, shape: 'ellipse', x, y, width: 220, height: 90, stroke_color: '#1d4ed8', fill_color: '#93c5fd', stroke_width: 2, stroke_style: 'solid' }));
     else if (action === 'add_image') { addImageAt(x, y); return; }
     else if (action === 'add_line') { mode = 'line'; lineStart = { x, y }; updateModeBadge(); return; }
-    else if (action === 'start_freehand') { mode = 'freehand'; freehandCurrent = null; hidePastePreview(); updateModeBadge(); return; }
+    else if (action === 'start_freehand') { mode = 'freehand'; freehandCurrent = null; hidePastePreview(); hideFreehandPreview(); updateModeBadge(); return; }
     else if (action === 'start_copy') { mode = 'copy_select'; copySource = null; hidePastePreview(); updateModeBadge(); return; }
     updateOpsField(); renderOps(); renderLayerList(); selectOp(ops.length - 1);
   };
@@ -1760,6 +1803,7 @@
   layerList?.addEventListener('click', (ev) => { const b = ev.target.closest('.layer-item'); if (b) selectOp(Number(b.dataset.idx)); });
 
   document.addEventListener('click', () => hideMenu());
+  window.addEventListener('resize', syncViewerHeight);
 
   overlayLayer.addEventListener('contextmenu', (ev) => {
     ev.preventDefault();
@@ -1840,6 +1884,7 @@
     if (mode === 'freehand' && !handMode && ev.button === 0 && !item && !handle) {
       const p = getPoint(ev);
       freehandCurrent = [{ x: pxToPdf(p.x), y: pxToPdf(p.y) }];
+      updateFreehandPreview();
       return;
     }
     if (mode !== 'copy_select' || !pdfDoc) return;
@@ -1894,6 +1939,7 @@
     if (mode === 'freehand' && freehandCurrent) {
       const p = getPoint(ev);
       freehandCurrent.push({ x: pxToPdf(p.x), y: pxToPdf(p.y) });
+      updateFreehandPreview();
       return;
     }
     if (mode === 'copy_paste' && copySource) { const p = getPoint(ev); updatePastePreview(p.x, p.y); return; }
@@ -1912,6 +1958,7 @@
         updateOpsField(); renderOps(); renderLayerList(); selectOp(ops.length - 1);
       }
       freehandCurrent = null;
+      hideFreehandPreview();
       return;
     }
     if (isPanning) { isPanning = false; panStart = null; syncOverlay(); return; }
@@ -1928,6 +1975,7 @@
   overlayLayer.addEventListener('mouseleave', () => {
     if (moveDrag) { suppressClick = moveDrag.moved; moveDrag = null; }
     hidePastePreview();
+    if (mode !== 'freehand') hideFreehandPreview();
   });
 
   deleteSelectedBtn.addEventListener('click', () => {
@@ -1969,7 +2017,7 @@
     const cmd = ev.ctrlKey || ev.metaKey;
     if (ev.code === 'Space' && !tempHandMode) { tempHandMode = true; syncOverlay(); ev.preventDefault(); }
     if (ev.key === 'Escape') {
-      mode = 'idle'; lineStart = null; copySource = null; hidePastePreview(); eyedropperMode = false; syncOverlay();
+      mode = 'idle'; lineStart = null; copySource = null; freehandCurrent = null; hidePastePreview(); hideFreehandPreview(); eyedropperMode = false; syncOverlay();
     }
     if (cmd && ev.key.toLowerCase() === 'c') { cloneSelectedOp(); }
     if (cmd && ev.key.toLowerCase() === 'v') { pasteClonedOp(); ev.preventDefault(); }
@@ -2016,6 +2064,7 @@
 
   selectOp(-1);
   renderLayerList();
+  syncViewerHeight();
   syncOverlay();
 })();
 </script>
