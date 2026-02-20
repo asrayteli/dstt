@@ -507,9 +507,8 @@
 
         <section class="editor-main">
           <div class="editor-toolbar">
-            <button type="button" class="toolbar-btn" id="prevPageBtn">前</button>
-            <span id="pageInfo">- / -</span>
-            <button type="button" class="toolbar-btn" id="nextPageBtn">次</button>
+            <button type="button" class="toolbar-btn" id="handToolBtn">手のひら</button>
+            <button type="button" class="toolbar-btn" data-action="add_text">テキスト</button>
             <button type="button" class="toolbar-btn" id="zoomOutBtn">-</button>
             <span id="zoomInfo">100%</span>
             <button type="button" class="toolbar-btn" id="zoomInBtn">+</button>
@@ -517,26 +516,10 @@
               <option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option>
               <option value="1.25" selected>125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option>
             </select>
-            <button type="button" class="toolbar-btn" data-action="add_text">T</button>
-            <button type="button" class="toolbar-btn" data-action="add_rect">□</button>
-            <button type="button" class="toolbar-btn" data-action="add_ellipse">◯</button>
-            <button type="button" class="toolbar-btn" data-action="add_line">／</button>
-            <button type="button" class="toolbar-btn" data-action="add_image">画像</button>
-            <button type="button" class="toolbar-btn" data-action="start_copy">範囲コピー</button>
-            <button type="button" class="toolbar-btn" id="copySelectedBtn">コピー</button>
-            <button type="button" class="toolbar-btn" id="pasteSelectedBtn">貼り付け</button>
-            <button type="button" class="toolbar-btn" id="toggleLeftPanelBtn">左パネル</button>
-            <button type="button" class="toolbar-btn" id="toggleRightPanelBtn">右パネル</button>
-            <button type="button" class="toolbar-btn" id="handToolBtn">手のひら</button>
-            <button type="button" class="toolbar-btn" id="eyedropperBtn">スポイト</button>
-            <select id="eyedropperTarget" class="toolbar-select" title="スポイト適用先">
-              <option value="stroke">線色</option><option value="fill">塗り色</option><option value="text">文字色</option>
-            </select>
-            <span class="mode-badge" id="modeBadge">Mode: Idle</span>
-            <span id="pageMeta">-</span>
             <button type="button" class="toolbar-btn" id="undoOpBtn">元に戻す</button>
             <button type="button" class="toolbar-btn" id="redoOpBtn">やり直し</button>
-            <button type="button" class="toolbar-btn danger" id="clearOpsBtn">全削除</button>
+            <span class="mode-badge" id="modeBadge">Mode: Idle</span>
+            <span id="pageInfo">- / -</span>
           </div>
           <div class="editor-viewer" id="viewerWrap">
             <div class="canvas-stage" id="canvasStage">
@@ -740,15 +723,14 @@
     border-radius: 10px;
     background: #eff6ff;
     padding: 12px;
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
+    display: block;
   }
 
   .canvas-stage {
     position: relative;
     display: inline-block;
     line-height: 0;
+    min-width: 100%;
   }
 
   #pdfCanvas {
@@ -1190,10 +1172,41 @@
   const editorForm = document.getElementById('editorForm');
   if (!editorForm) return;
 
+  const isEditorWindow = new URLSearchParams(window.location.search).get('editor_window') === '1';
+  if (isEditorWindow) {
+    const root = document.getElementById('pdfPowerRoot');
+    const appSidebar = document.getElementById('app-sidebar');
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    const appMain = document.getElementById('app-main-content');
+    if (appSidebar) appSidebar.style.display = 'none';
+    if (sidebarToggle) sidebarToggle.style.display = 'none';
+    if (appMain) {
+      appMain.style.padding = '0';
+      appMain.style.maxWidth = '100%';
+    }
+    if (root) {
+      root.style.maxWidth = 'none';
+      root.style.margin = '0';
+      root.style.marginTop = '0';
+      root.style.borderRadius = '0';
+      root.style.padding = '10px';
+      const tabsBar = root.querySelector('.flex.flex-wrap.justify-center.gap-2.mb-8');
+      if (tabsBar) tabsBar.remove();
+      root.querySelectorAll('.tab-content').forEach((el) => {
+        if (el.id !== 'editor') el.remove();
+      });
+      const editorTab = document.getElementById('editor');
+      if (editorTab) {
+        editorTab.classList.add('active');
+        editorTab.style.display = 'block';
+      }
+    }
+    if (typeof switchTab === 'function') switchTab('editor');
+    document.title = 'PDFPower Editor';
+  }
+
   const get = (id) => document.getElementById(id);
   const openEditorWindowBtn = get('openEditorWindowBtn');
-  const toggleLeftPanelBtn = get('toggleLeftPanelBtn');
-  const toggleRightPanelBtn = get('toggleRightPanelBtn');
   const editorPdfInput = get('editorPdfInput');
   const canvasStage = get('canvasStage');
   const canvas = get('pdfCanvas');
@@ -1206,9 +1219,6 @@
   const zoomInfo = get('zoomInfo');
   const zoomPreset = get('zoomPreset');
   const modeBadge = get('modeBadge');
-  const pageMeta = get('pageMeta');
-  const prevPageBtn = get('prevPageBtn');
-  const nextPageBtn = get('nextPageBtn');
   const zoomOutBtn = get('zoomOutBtn');
   const zoomInBtn = get('zoomInBtn');
   const handToolBtn = get('handToolBtn');
@@ -1216,7 +1226,6 @@
   const eyedropperTarget = get('eyedropperTarget');
   const undoOpBtn = get('undoOpBtn');
   const redoOpBtn = get('redoOpBtn');
-  const clearOpsBtn = get('clearOpsBtn');
   const copySelectedBtn = get('copySelectedBtn');
   const pasteSelectedBtn = get('pasteSelectedBtn');
   const operationsInput = get('operationsInput');
@@ -1251,17 +1260,6 @@
   const groupLine2 = get('groupLine2');
   const groupImageIndex = get('groupImageIndex');
   const groupStrokeStyle = get('groupStrokeStyle');
-
-  const updatePanelToggleState = () => {
-    const leftCollapsed = editorForm.classList.contains('left-collapsed');
-    const rightCollapsed = editorForm.classList.contains('right-collapsed');
-    if (toggleLeftPanelBtn) toggleLeftPanelBtn.textContent = leftCollapsed ? '左パネルを開く' : '左パネルを閉じる';
-    if (toggleRightPanelBtn) toggleRightPanelBtn.textContent = rightCollapsed ? '右パネルを開く' : '右パネルを閉じる';
-  };
-  toggleLeftPanelBtn?.addEventListener('click', () => { editorForm.classList.toggle('left-collapsed'); updatePanelToggleState(); });
-  toggleRightPanelBtn?.addEventListener('click', () => { editorForm.classList.toggle('right-collapsed'); updatePanelToggleState(); });
-  editorForm.classList.remove('left-collapsed', 'right-collapsed');
-  updatePanelToggleState();
 
   let pdfDoc = null, pageNum = 1, scale = 1.25, renderTask = null;
   let mode = 'idle', lineStart = null, copySource = null, dragStart = null;
@@ -1305,11 +1303,6 @@
     handToolBtn.classList.toggle('active', handMode || tempHandMode);
     eyedropperBtn?.classList.toggle('active', eyedropperMode);
     updateModeBadge();
-  };
-  const detectPaper = (wPt, hPt) => {
-    const mmW = (wPt * 25.4) / 72, mmH = (hPt * 25.4) / 72;
-    const portrait = mmH >= mmW;
-    return `${portrait ? '縦向き' : '横向き'} ${Math.round(mmW)}x${Math.round(mmH)}mm`;
   };
 
   const updateOpsField = () => { operationsInput.value = JSON.stringify(ops); };
@@ -1537,7 +1530,6 @@
     pageInfo.textContent = `${pageNum} / ${pdfDoc.numPages}`;
     zoomInfo.textContent = `${Math.round(scale * 100)}%`;
     if (zoomPreset) zoomPreset.value = String(scale);
-    pageMeta.textContent = detectPaper(baseVp.width, baseVp.height);
     syncOverlay();
     renderOps();
     restoreCenterPdfPoint(anchor);
@@ -1616,6 +1608,8 @@
     const next = redoStack.pop();
     restoreOpsState(next);
   };
+
+  if (isEditorWindow && openEditorWindowBtn) openEditorWindowBtn.style.display = 'none';
 
   openEditorWindowBtn?.addEventListener('click', () => {
     const w = Math.max(1200, Math.floor(window.screen.availWidth * 0.96));
@@ -1798,18 +1792,6 @@
   undoOpBtn.addEventListener('click', doUndo);
   redoOpBtn?.addEventListener('click', doRedo);
 
-  clearOpsBtn.addEventListener('click', () => {
-    if (!ops.length) return;
-    commitHistory();
-    imageUrlByRef.forEach((u) => URL.revokeObjectURL(u));
-    imageUrlByRef.clear(); imageFilesByRef.clear();
-    ops.length = 0; selectedIndex = -1;
-    mode = 'idle'; lineStart = null; copySource = null;
-    hidePastePreview(); updateOpsField(); renderOps(); renderLayerList(); selectOp(-1); updateModeBadge();
-  });
-
-  prevPageBtn.addEventListener('click', async () => { if (pdfDoc && pageNum > 1) { pageNum -= 1; await renderPage(); } });
-  nextPageBtn.addEventListener('click', async () => { if (pdfDoc && pageNum < pdfDoc.numPages) { pageNum += 1; await renderPage(); } });
 
   const setZoom = async (nextScale) => {
     if (!pdfDoc) return;
