@@ -1304,6 +1304,7 @@
     eyedropperBtn?.classList.toggle('active', eyedropperMode);
     updateModeBadge();
   };
+
   const updateOpsField = () => { operationsInput.value = JSON.stringify(ops); };
   const getPoint = (ev) => { const r = overlayLayer.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
   const hideMenu = () => contextMenu.classList.add('hidden');
