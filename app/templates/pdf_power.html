@@ -507,18 +507,19 @@
 
         <section class="editor-main">
           <div class="editor-toolbar">
-            <button type="button" class="toolbar-btn" id="prevPageBtn">前</button>
-            <span id="pageInfo">- / -</span>
-            <button type="button" class="toolbar-btn" id="nextPageBtn">次</button>
+            <button type="button" class="toolbar-btn" id="handToolBtn">手のひら</button>
+            <button type="button" class="toolbar-btn" data-action="add_text">テキスト</button>
             <button type="button" class="toolbar-btn" id="zoomOutBtn">-</button>
             <span id="zoomInfo">100%</span>
             <button type="button" class="toolbar-btn" id="zoomInBtn">+</button>
-            <button type="button" class="toolbar-btn" id="toggleLeftPanelBtn">左パネル</button>
-            <button type="button" class="toolbar-btn" id="toggleRightPanelBtn">右パネル</button>
-            <button type="button" class="toolbar-btn" id="handToolBtn">手のひら</button>
-            <span id="pageMeta">-</span>
+            <select id="zoomPreset" class="toolbar-select" title="ズーム倍率">
+              <option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option>
+              <option value="1.25" selected>125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option>
+            </select>
             <button type="button" class="toolbar-btn" id="undoOpBtn">元に戻す</button>
-            <button type="button" class="toolbar-btn danger" id="clearOpsBtn">全削除</button>
+            <button type="button" class="toolbar-btn" id="redoOpBtn">やり直し</button>
+            <span class="mode-badge" id="modeBadge">Mode: Idle</span>
+            <span id="pageInfo">- / -</span>
           </div>
           <div class="editor-viewer" id="viewerWrap">
             <div class="canvas-stage" id="canvasStage">
@@ -532,12 +533,22 @@
                 <button type="button" data-action="add_line">線を追加</button>
                 <button type="button" data-action="add_image">画像を追加</button>
                 <button type="button" data-action="start_copy">範囲コピー開始</button>
+                <button type="button" data-action="copy_selected">コピー</button>
+                <button type="button" data-action="paste_selected">貼り付け</button>
               </div>
             </div>
           </div>
         </section>
 
         <aside class="editor-card editor-panel" id="editorRightPanel">
+          <h4 class="font-semibold text-gray-700 mb-2">レイヤー</h4>
+          <div class="layer-toolbar">
+            <button type="button" class="toolbar-btn" id="layerBringFrontBtn">最前面</button>
+            <button type="button" class="toolbar-btn" id="layerSendBackBtn">最背面</button>
+            <button type="button" class="toolbar-btn" id="layerMoveUpBtn">↑</button>
+            <button type="button" class="toolbar-btn" id="layerMoveDownBtn">↓</button>
+          </div>
+          <div id="layerList" class="layer-list mb-4"></div>
           <h4 class="font-semibold text-gray-700 mb-2">要素プロパティ</h4>
           <p id="propEmpty" class="text-sm text-gray-500">要素をクリックすると編集できます。</p>
           <div id="propForm" class="hidden space-y-2">
@@ -677,6 +688,27 @@
     background: #fff1f2;
   }
 
+  .toolbar-select {
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #1e3a8a;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .mode-badge {
+    display: inline-flex;
+    align-items: center;
+    background: #dbeafe;
+    color: #1e40af;
+    border-radius: 9999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
   #handToolBtn.active {
     background: #1d4ed8;
     color: #fff;
@@ -691,15 +723,14 @@
     border-radius: 10px;
     background: #eff6ff;
     padding: 12px;
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
+    display: block;
   }
 
   .canvas-stage {
     position: relative;
     display: inline-block;
     line-height: 0;
+    min-width: 100%;
   }
 
   #pdfCanvas {
@@ -794,6 +825,54 @@
 
   .context-menu button:hover {
     background: #edf4ff;
+  }
+
+  .overlay-item .resize-handle {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border: 1px solid #1d4ed8;
+    background: #fff;
+    z-index: 2;
+  }
+
+  .overlay-item .resize-handle.nw { left: -5px; top: -5px; cursor: nwse-resize; }
+  .overlay-item .resize-handle.ne { right: -5px; top: -5px; cursor: nesw-resize; }
+  .overlay-item .resize-handle.sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+  .overlay-item .resize-handle.se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+
+  .layer-toolbar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+
+  .layer-list {
+    max-height: 220px;
+    overflow: auto;
+    border: 1px solid #dbe4f4;
+    border-radius: 8px;
+    padding: 6px;
+    background: #f8fbff;
+  }
+
+  .layer-item {
+    font-size: 12px;
+    font-weight: 600;
+    color: #334155;
+    border: 1px solid #d4def4;
+    background: #fff;
+    border-radius: 6px;
+    padding: 5px 6px;
+    margin-bottom: 4px;
+    cursor: pointer;
+  }
+
+  .layer-item.active {
+    border-color: #1d4ed8;
+    background: #eaf2ff;
+    color: #1d4ed8;
   }
 
   .compression-option {
@@ -1093,101 +1172,137 @@
   const editorForm = document.getElementById('editorForm');
   if (!editorForm) return;
 
-  const openEditorWindowBtn = document.getElementById('openEditorWindowBtn');
-  const toggleLeftPanelBtn = document.getElementById('toggleLeftPanelBtn');
-  const toggleRightPanelBtn = document.getElementById('toggleRightPanelBtn');
-  const editorPdfInput = document.getElementById('editorPdfInput');
-  const canvasStage = document.getElementById('canvasStage');
-  const canvas = document.getElementById('pdfCanvas');
-  const ctx = canvas.getContext('2d');
-  const overlayLayer = document.getElementById('overlayLayer');
-  const dragRect = document.getElementById('dragRect');
-  const contextMenu = document.getElementById('contextMenu');
-  const viewerWrap = document.getElementById('viewerWrap');
-  const pageInfo = document.getElementById('pageInfo');
-  const zoomInfo = document.getElementById('zoomInfo');
-  const pageMeta = document.getElementById('pageMeta');
-  const prevPageBtn = document.getElementById('prevPageBtn');
-  const nextPageBtn = document.getElementById('nextPageBtn');
-  const zoomOutBtn = document.getElementById('zoomOutBtn');
-  const zoomInBtn = document.getElementById('zoomInBtn');
-  const handToolBtn = document.getElementById('handToolBtn');
-  const undoOpBtn = document.getElementById('undoOpBtn');
-  const clearOpsBtn = document.getElementById('clearOpsBtn');
-  const operationsInput = document.getElementById('operationsInput');
-  const propEmpty = document.getElementById('propEmpty');
-  const propForm = document.getElementById('propForm');
-  const propType = document.getElementById('propType');
-  const propPage = document.getElementById('propPage');
-  const propStrokeWidth = document.getElementById('propStrokeWidth');
-  const propStrokeStyle = document.getElementById('propStrokeStyle');
-  const propX = document.getElementById('propX');
-  const propY = document.getElementById('propY');
-  const propW = document.getElementById('propW');
-  const propH = document.getElementById('propH');
-  const propText = document.getElementById('propText');
-  const propFontSize = document.getElementById('propFontSize');
-  const propTextColor = document.getElementById('propTextColor');
-  const propStrokeColor = document.getElementById('propStrokeColor');
-  const propFillColor = document.getElementById('propFillColor');
-  const propX2 = document.getElementById('propX2');
-  const propY2 = document.getElementById('propY2');
-  const propImageIndex = document.getElementById('propImageIndex');
-  const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
-  const groupSize = document.getElementById('groupSize');
-  const groupText = document.getElementById('groupText');
-  const groupFont = document.getElementById('groupFont');
-  const groupShapeColors = document.getElementById('groupShapeColors');
-  const groupLine2 = document.getElementById('groupLine2');
-  const groupImageIndex = document.getElementById('groupImageIndex');
-  const groupStrokeStyle = document.getElementById('groupStrokeStyle');
+  const isEditorWindow = new URLSearchParams(window.location.search).get('editor_window') === '1';
+  if (isEditorWindow) {
+    const root = document.getElementById('pdfPowerRoot');
+    const appSidebar = document.getElementById('app-sidebar');
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    const appMain = document.getElementById('app-main-content');
+    if (appSidebar) appSidebar.style.display = 'none';
+    if (sidebarToggle) sidebarToggle.style.display = 'none';
+    if (appMain) {
+      appMain.style.padding = '0';
+      appMain.style.maxWidth = '100%';
+    }
+    if (root) {
+      root.style.maxWidth = 'none';
+      root.style.margin = '0';
+      root.style.marginTop = '0';
+      root.style.borderRadius = '0';
+      root.style.padding = '10px';
+      const tabsBar = root.querySelector('.flex.flex-wrap.justify-center.gap-2.mb-8');
+      if (tabsBar) tabsBar.remove();
+      root.querySelectorAll('.tab-content').forEach((el) => {
+        if (el.id !== 'editor') el.remove();
+      });
+      const editorTab = document.getElementById('editor');
+      if (editorTab) {
+        editorTab.classList.add('active');
+        editorTab.style.display = 'block';
+      }
+    }
+    if (typeof switchTab === 'function') switchTab('editor');
+    document.title = 'PDFPower Editor';
+  }
 
-  const updatePanelToggleState = () => {
-    const leftCollapsed = editorForm.classList.contains('left-collapsed');
-    const rightCollapsed = editorForm.classList.contains('right-collapsed');
-    if (toggleLeftPanelBtn) toggleLeftPanelBtn.textContent = leftCollapsed ? '左パネルを開く' : '左パネルを閉じる';
-    if (toggleRightPanelBtn) toggleRightPanelBtn.textContent = rightCollapsed ? '右パネルを開く' : '右パネルを閉じる';
-  };
+  const get = (id) => document.getElementById(id);
+  const openEditorWindowBtn = get('openEditorWindowBtn');
+  const editorPdfInput = get('editorPdfInput');
+  const canvasStage = get('canvasStage');
+  const canvas = get('pdfCanvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const overlayLayer = get('overlayLayer');
+  const dragRect = get('dragRect');
+  const contextMenu = get('contextMenu');
+  const viewerWrap = get('viewerWrap');
+  const pageInfo = get('pageInfo');
+  const zoomInfo = get('zoomInfo');
+  const zoomPreset = get('zoomPreset');
+  const modeBadge = get('modeBadge');
+  const zoomOutBtn = get('zoomOutBtn');
+  const zoomInBtn = get('zoomInBtn');
+  const handToolBtn = get('handToolBtn');
+  const eyedropperBtn = get('eyedropperBtn');
+  const eyedropperTarget = get('eyedropperTarget');
+  const undoOpBtn = get('undoOpBtn');
+  const redoOpBtn = get('redoOpBtn');
+  const copySelectedBtn = get('copySelectedBtn');
+  const pasteSelectedBtn = get('pasteSelectedBtn');
+  const operationsInput = get('operationsInput');
+  const layerList = get('layerList');
+  const layerBringFrontBtn = get('layerBringFrontBtn');
+  const layerSendBackBtn = get('layerSendBackBtn');
+  const layerMoveUpBtn = get('layerMoveUpBtn');
+  const layerMoveDownBtn = get('layerMoveDownBtn');
 
-  if (toggleLeftPanelBtn) toggleLeftPanelBtn.addEventListener('click', () => {
-    editorForm.classList.toggle('left-collapsed');
-    updatePanelToggleState();
-  });
-  if (toggleRightPanelBtn) toggleRightPanelBtn.addEventListener('click', () => {
-    editorForm.classList.toggle('right-collapsed');
-    updatePanelToggleState();
-  });
-  editorForm.classList.remove('left-collapsed', 'right-collapsed');
-  updatePanelToggleState();
+  const propEmpty = get('propEmpty');
+  const propForm = get('propForm');
+  const propType = get('propType');
+  const propPage = get('propPage');
+  const propStrokeWidth = get('propStrokeWidth');
+  const propStrokeStyle = get('propStrokeStyle');
+  const propX = get('propX');
+  const propY = get('propY');
+  const propW = get('propW');
+  const propH = get('propH');
+  const propText = get('propText');
+  const propFontSize = get('propFontSize');
+  const propTextColor = get('propTextColor');
+  const propStrokeColor = get('propStrokeColor');
+  const propFillColor = get('propFillColor');
+  const propX2 = get('propX2');
+  const propY2 = get('propY2');
+  const deleteSelectedBtn = get('deleteSelectedBtn');
+  const groupSize = get('groupSize');
+  const groupText = get('groupText');
+  const groupFont = get('groupFont');
+  const groupShapeColors = get('groupShapeColors');
+  const groupLine2 = get('groupLine2');
+  const groupImageIndex = get('groupImageIndex');
+  const groupStrokeStyle = get('groupStrokeStyle');
 
   let pdfDoc = null, pageNum = 1, scale = 1.25, renderTask = null;
   let mode = 'idle', lineStart = null, copySource = null, dragStart = null;
-  let handMode = false, isPanning = false, panStart = null;
-  let moveDrag = null, suppressClick = false;
+  let handMode = false, tempHandMode = false, eyedropperMode = false, isPanning = false, panStart = null;
+  let moveDrag = null, resizeDrag = null, suppressClick = false;
   let contextPoint = { x: 0, y: 0 }, selectedIndex = -1;
+  let opClipboard = null, pasteOffset = 0;
+  const historyStack = [], redoStack = [];
   const ops = [];
   const imageFilesByRef = new Map();
   const imageUrlByRef = new Map();
   const pxToPdf = (v) => v / scale;
   const pdfToPx = (v) => v * scale;
   const styleToCss = (s) => (s === 'dashed' ? 'dashed' : s === 'dotted' ? 'dotted' : 'solid');
+  const deep = (v) => JSON.parse(JSON.stringify(v));
+  const genId = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
   const pastePreview = document.createElement('div');
   pastePreview.className = 'paste-preview hidden';
   overlayLayer.appendChild(pastePreview);
+
+  const normalizeOp = (op) => {
+    if (!op.id) op.id = genId();
+    return op;
+  };
+
+  const updateModeBadge = () => {
+    let now = mode;
+    if (handMode || tempHandMode) now = 'hand';
+    if (eyedropperMode) now = 'eyedropper';
+    modeBadge.textContent = `Mode: ${now}`;
+  };
 
   const syncOverlay = () => {
     canvasStage.style.width = `${canvas.width}px`;
     canvasStage.style.height = `${canvas.height}px`;
     overlayLayer.style.width = `${canvas.width}px`;
     overlayLayer.style.height = `${canvas.height}px`;
-    overlayLayer.classList.toggle('hand-mode', handMode);
+    overlayLayer.classList.toggle('hand-mode', handMode || tempHandMode || eyedropperMode);
     overlayLayer.classList.toggle('panning', isPanning);
-    handToolBtn.classList.toggle('active', handMode);
-  };
-  const detectPaper = (wPt, hPt) => {
-    const mmW = (wPt * 25.4) / 72, mmH = (hPt * 25.4) / 72;
-    const portrait = mmH >= mmW;
-    return `${portrait ? '縦向き' : '横向き'} ${Math.round(mmW)}x${Math.round(mmH)}mm`;
+    handToolBtn.classList.toggle('active', handMode || tempHandMode);
+    eyedropperBtn?.classList.toggle('active', eyedropperMode);
+    updateModeBadge();
   };
   const updateOpsField = () => { operationsInput.value = JSON.stringify(ops); };
   const getPoint = (ev) => { const r = overlayLayer.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
@@ -1202,10 +1317,72 @@
     pastePreview.classList.remove('hidden');
   };
   const hidePastePreview = () => pastePreview.classList.add('hidden');
+
   const removeImageRefIfUnused = (ref) => {
-    if (!ref || ops.some((op) => op.type === 'add_image' && op.image_ref === ref)) return;
-    const url = imageUrlByRef.get(ref); if (url) URL.revokeObjectURL(url);
-    imageUrlByRef.delete(ref); imageFilesByRef.delete(ref);
+    if (!ref) return;
+    const stillUsed = ops.some((o) => o.type === 'add_image' && o.image_ref === ref);
+    if (!stillUsed) {
+      const url = imageUrlByRef.get(ref);
+      if (url) URL.revokeObjectURL(url);
+      imageUrlByRef.delete(ref);
+      imageFilesByRef.delete(ref);
+    }
+  };
+
+  const commitHistory = () => {
+    historyStack.push(deep(ops));
+    if (historyStack.length > 100) historyStack.shift();
+    redoStack.length = 0;
+  };
+
+  const restoreOpsState = (nextOps) => {
+    const oldRefs = new Set(ops.filter((o) => o.type === 'add_image').map((o) => o.image_ref));
+    ops.length = 0;
+    nextOps.forEach((op) => ops.push(normalizeOp(op)));
+    const newRefs = new Set(ops.filter((o) => o.type === 'add_image').map((o) => o.image_ref));
+    oldRefs.forEach((ref) => { if (!newRefs.has(ref)) removeImageRefIfUnused(ref); });
+    selectedIndex = Math.min(selectedIndex, ops.length - 1);
+    updateOpsField();
+    renderOps();
+    renderLayerList();
+    selectOp(selectedIndex);
+  };
+
+  const renderLayerList = () => {
+    if (!layerList) return;
+    layerList.innerHTML = '';
+    if (!ops.length) {
+      layerList.innerHTML = '<div class="text-xs text-gray-500">レイヤーはまだありません。</div>';
+      return;
+    }
+    for (let i = ops.length - 1; i >= 0; i -= 1) {
+      const op = ops[i];
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'layer-item';
+      if (i === selectedIndex) row.classList.add('active');
+      const page = op.page || op.target_page || '-';
+      row.textContent = `${i + 1}. ${op.type} (p.${page})`;
+      row.dataset.idx = String(i);
+      layerList.appendChild(row);
+    }
+  };
+
+  const moveLayer = (direction) => {
+    if (selectedIndex < 0) return;
+    const target = direction === 'front' ? ops.length - 1
+      : direction === 'back' ? 0
+      : direction === 'up' ? Math.min(ops.length - 1, selectedIndex + 1)
+      : Math.max(0, selectedIndex - 1);
+    if (target === selectedIndex) return;
+    commitHistory();
+    const [item] = ops.splice(selectedIndex, 1);
+    ops.splice(target, 0, item);
+    selectedIndex = target;
+    updateOpsField();
+    renderOps();
+    renderLayerList();
+    selectOp(selectedIndex);
   };
 
   const renderOps = () => {
@@ -1213,23 +1390,18 @@
     ops.forEach((op, idx) => {
       const item = document.createElement('div');
       item.className = 'overlay-item';
-      if (idx === selectedIndex) item.classList.add('selected');
       item.dataset.idx = String(idx);
+      if (idx === selectedIndex) item.classList.add('selected');
       if (op.type === 'add_text' && op.page === pageNum) {
         item.classList.add('text');
         item.style.left = `${pdfToPx(op.x)}px`; item.style.top = `${pdfToPx(op.y)}px`;
         item.style.width = `${pdfToPx(op.width)}px`; item.style.height = `${pdfToPx(op.height)}px`;
-        item.style.color = op.color || '#0f172a'; item.style.fontSize = `${Math.max(1, pdfToPx(op.font_size || 14))}px`;
-        item.style.fontFamily = 'Helvetica, Arial, sans-serif';
-        item.style.lineHeight = '1.2';
-        item.style.padding = '0';
-        item.textContent = op.text; overlayLayer.appendChild(item); return;
-      }
-      if (op.type === 'add_shape' && op.page === pageNum) {
+        item.style.color = op.color || '#0f172a'; item.style.fontSize = `${Math.max(8, pdfToPx(op.font_size || 14))}px`; item.textContent = op.text || '';
+      } else if (op.type === 'add_shape' && op.page === pageNum) {
         const cssStyle = styleToCss(op.stroke_style || 'solid');
         if (op.shape === 'line') {
           const x1 = pdfToPx(op.x1), y1 = pdfToPx(op.y1), x2 = pdfToPx(op.x2), y2 = pdfToPx(op.y2);
-          const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy), ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+          const len = Math.hypot(x2 - x1, y2 - y1), ang = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
           item.classList.add('line'); item.style.left = `${x1}px`; item.style.top = `${y1}px`; item.style.width = `${len}px`;
           item.style.borderTopColor = op.stroke_color || '#1d4ed8'; item.style.borderTopStyle = cssStyle; item.style.borderTopWidth = `${Math.max(1, pdfToPx(op.stroke_width || 2))}px`; item.style.transform = `rotate(${ang}deg)`;
         } else {
@@ -1238,26 +1410,34 @@
           item.style.borderColor = op.stroke_color || '#1d4ed8'; item.style.borderStyle = cssStyle; item.style.borderWidth = `${Math.max(1, pdfToPx(op.stroke_width || 2))}px`; item.style.background = op.fill_color || 'transparent';
           if (op.shape === 'ellipse') item.style.borderRadius = '999px';
         }
-        overlayLayer.appendChild(item); return;
-      }
-      if (op.type === 'add_image' && op.page === pageNum) {
+      } else if (op.type === 'add_image' && op.page === pageNum) {
         item.style.left = `${pdfToPx(op.x)}px`; item.style.top = `${pdfToPx(op.y)}px`;
         item.style.width = `${pdfToPx(op.width)}px`; item.style.height = `${pdfToPx(op.height)}px`;
         const url = imageUrlByRef.get(op.image_ref);
         item.style.background = url ? `url("${url}") center / cover no-repeat` : 'rgba(37,99,235,0.08)';
-        item.style.borderColor = '#2563eb'; overlayLayer.appendChild(item); return;
-      }
-      if (op.type === 'copy_region_paste' && op.target_page === pageNum) {
+        item.style.borderColor = '#2563eb';
+      } else if (op.type === 'copy_region_paste' && op.target_page === pageNum) {
         item.style.left = `${pdfToPx(op.target_x)}px`; item.style.top = `${pdfToPx(op.target_y)}px`;
         item.style.width = `${pdfToPx(op.target_width)}px`; item.style.height = `${pdfToPx(op.target_height)}px`;
-        item.style.borderColor = '#0ea5e9'; item.style.background = 'rgba(14,165,233,0.1)'; overlayLayer.appendChild(item);
+        item.style.borderColor = '#0ea5e9'; item.style.background = 'rgba(14,165,233,0.1)';
+      } else return;
+
+      if (idx === selectedIndex && (op.type !== 'add_shape' || (op.type === 'add_shape' && op.shape !== 'line'))) {
+        ['nw', 'ne', 'sw', 'se'].forEach((dir) => {
+          const h = document.createElement('span');
+          h.className = `resize-handle ${dir}`;
+          h.dataset.dir = dir;
+          item.appendChild(h);
+        });
       }
+      overlayLayer.appendChild(item);
     });
   };
 
   const selectOp = (idx) => {
     selectedIndex = idx;
     renderOps();
+    renderLayerList();
     const op = ops[idx];
     if (!op) {
       propEmpty.classList.remove('hidden');
@@ -1273,7 +1453,6 @@
     groupLine2.classList.add('hidden');
     groupImageIndex.classList.add('hidden');
     groupStrokeStyle.classList.add('hidden');
-
     propType.value = op.type;
     propPage.value = op.page || op.target_page || 1;
     propStrokeWidth.value = op.stroke_width || 2;
@@ -1297,10 +1476,7 @@
       if (op.shape === 'line') {
         groupLine2.classList.remove('hidden');
         groupSize.classList.add('hidden');
-        propX.value = op.x1;
-        propY.value = op.y1;
-        propX2.value = op.x2;
-        propY2.value = op.y2;
+        propX.value = op.x1; propY.value = op.y1; propX2.value = op.x2; propY2.value = op.y2;
       }
     }
   };
@@ -1315,106 +1491,252 @@
     } else if (op.type === 'add_shape') {
       op.page = v(propPage); op.stroke_style = propStrokeStyle.value;
       if (op.shape === 'line') { op.x1 = v(propX); op.y1 = v(propY); op.x2 = v(propX2); op.y2 = v(propY2); }
-      else { op.x = v(propX); op.y = v(propY); op.width = v(propW); op.height = v(propH); }
-      op.stroke_color = propStrokeColor.value; op.fill_color = propFillColor.value; op.stroke_width = v(propStrokeWidth) || 2;
+      else { op.x = v(propX); op.y = v(propY); op.width = Math.max(1, v(propW)); op.height = Math.max(1, v(propH)); }
+      op.stroke_color = propStrokeColor.value; op.fill_color = propFillColor.value; op.stroke_width = Math.max(0.1, v(propStrokeWidth) || 2);
     } else if (op.type === 'add_image') {
-      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = v(propW); op.height = v(propH);
+      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = Math.max(1, v(propW)); op.height = Math.max(1, v(propH));
     } else if (op.type === 'copy_region_paste') {
-      op.target_page = v(propPage); op.target_x = v(propX); op.target_y = v(propY); op.target_width = v(propW); op.target_height = v(propH);
+      op.target_page = v(propPage); op.target_x = v(propX); op.target_y = v(propY); op.target_width = Math.max(1, v(propW)); op.target_height = Math.max(1, v(propH));
     }
-    updateOpsField();
-    renderOps();
+    updateOpsField(); renderOps(); renderLayerList();
   };
-  [propPage, propStrokeWidth, propStrokeStyle, propX, propY, propW, propH, propText, propFontSize, propTextColor, propStrokeColor, propFillColor, propX2, propY2, propImageIndex]
+  [propPage, propStrokeWidth, propStrokeStyle, propX, propY, propW, propH, propText, propFontSize, propTextColor, propStrokeColor, propFillColor, propX2, propY2]
     .forEach((el) => el.addEventListener('input', applyPropChanges));
 
-  const renderPage = async () => {
+  const captureCenterPdfPoint = () => {
+    const cx = viewerWrap.scrollLeft + viewerWrap.clientWidth / 2;
+    const cy = viewerWrap.scrollTop + viewerWrap.clientHeight / 2;
+    return { x: pxToPdf(cx), y: pxToPdf(cy) };
+  };
+  const restoreCenterPdfPoint = (point) => {
+    if (!point) return;
+    viewerWrap.scrollLeft = Math.max(0, pdfToPx(point.x) - viewerWrap.clientWidth / 2);
+    viewerWrap.scrollTop = Math.max(0, pdfToPx(point.y) - viewerWrap.clientHeight / 2);
+  };
+
+  const renderPage = async (anchor = null) => {
     if (!pdfDoc) return;
     const page = await pdfDoc.getPage(pageNum);
     const baseVp = page.getViewport({ scale: 1.0 });
     const viewport = page.getViewport({ scale });
-    canvas.width = viewport.width; canvas.height = viewport.height;
-    canvas.style.width = `${viewport.width}px`; canvas.style.height = `${viewport.height}px`;
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    canvas.style.width = `${viewport.width}px`;
+    canvas.style.height = `${viewport.height}px`;
     if (renderTask) { try { renderTask.cancel(); } catch (_) {} }
-    renderTask = page.render({ canvasContext: ctx, viewport }); await renderTask.promise;
-    pageInfo.textContent = `${pageNum} / ${pdfDoc.numPages}`; zoomInfo.textContent = `${Math.round(scale * 100)}%`; pageMeta.textContent = detectPaper(baseVp.width, baseVp.height);
-    syncOverlay(); renderOps();
+    renderTask = page.render({ canvasContext: ctx, viewport });
+    await renderTask.promise;
+    pageInfo.textContent = `${pageNum} / ${pdfDoc.numPages}`;
+    zoomInfo.textContent = `${Math.round(scale * 100)}%`;
+    if (zoomPreset) zoomPreset.value = String(scale);
+    syncOverlay();
+    renderOps();
+    restoreCenterPdfPoint(anchor);
   };
 
-  const pickImageFile = () => new Promise((resolve) => { const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*'; input.onchange = () => resolve(input.files && input.files[0] ? input.files[0] : null); input.click(); });
+  const pickImageFile = () => new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*';
+    input.onchange = () => resolve(input.files && input.files[0] ? input.files[0] : null);
+    input.click();
+  });
+
   const addImageAt = async (x, y) => {
-    const file = await pickImageFile(); if (!file) return;
+    const file = await pickImageFile();
+    if (!file) return;
     const ref = `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    imageFilesByRef.set(ref, file); imageUrlByRef.set(ref, URL.createObjectURL(file));
-    ops.push({ type: 'add_image', page: pageNum, x, y, width: 220, height: 120, image_ref: ref });
-    updateOpsField(); renderOps();
+    imageFilesByRef.set(ref, file);
+    imageUrlByRef.set(ref, URL.createObjectURL(file));
+    commitHistory();
+    ops.push(normalizeOp({ type: 'add_image', page: pageNum, x, y, width: 220, height: 120, image_ref: ref }));
+    updateOpsField(); renderOps(); renderLayerList(); selectOp(ops.length - 1);
   };
-  const addByMenu = (action) => {
+
+  const cloneSelectedOp = () => {
+    if (selectedIndex < 0 || !ops[selectedIndex]) return;
+    opClipboard = deep(ops[selectedIndex]);
+  };
+
+  const pasteClonedOp = () => {
+    if (!opClipboard) return;
+    commitHistory();
+    pasteOffset += 14;
+    const cloned = deep(opClipboard);
+    normalizeOp(cloned);
+    if ('x' in cloned) cloned.x += pxToPdf(pasteOffset);
+    if ('y' in cloned) cloned.y += pxToPdf(pasteOffset);
+    if ('x1' in cloned) { cloned.x1 += pxToPdf(pasteOffset); cloned.y1 += pxToPdf(pasteOffset); cloned.x2 += pxToPdf(pasteOffset); cloned.y2 += pxToPdf(pasteOffset); }
+    if ('target_x' in cloned) cloned.target_x += pxToPdf(pasteOffset);
+    if ('target_y' in cloned) cloned.target_y += pxToPdf(pasteOffset);
+    ops.push(cloned);
+    updateOpsField(); renderOps(); renderLayerList(); selectOp(ops.length - 1);
+  };
+
+  const applyPickedColor = (hex) => {
+    const target = eyedropperTarget?.value || 'stroke';
+    if (target === 'text') propTextColor.value = hex;
+    else if (target === 'fill') propFillColor.value = hex;
+    else propStrokeColor.value = hex;
+    applyPropChanges();
+  };
+
+  const addByAction = (action) => {
     hideMenu(); if (!pdfDoc) return;
     const x = pxToPdf(contextPoint.x), y = pxToPdf(contextPoint.y);
-    if (action === 'add_text') ops.push({ type: 'add_text', page: pageNum, x, y, width: 220, height: 90, text: 'テキスト', font_size: 16, color: '#0f172a' });
-    else if (action === 'add_rect') ops.push({ type: 'add_shape', page: pageNum, shape: 'rect', x, y, width: 220, height: 90, stroke_color: '#1d4ed8', fill_color: '#93c5fd', stroke_width: 2, stroke_style: 'solid' });
-    else if (action === 'add_ellipse') ops.push({ type: 'add_shape', page: pageNum, shape: 'ellipse', x, y, width: 220, height: 90, stroke_color: '#1d4ed8', fill_color: '#93c5fd', stroke_width: 2, stroke_style: 'solid' });
+    if (action === 'copy_selected') return cloneSelectedOp();
+    if (action === 'paste_selected') return pasteClonedOp();
+    commitHistory();
+    if (action === 'add_text') ops.push(normalizeOp({ type: 'add_text', page: pageNum, x, y, width: 220, height: 90, text: 'テキスト', font_size: 16, color: '#0f172a' }));
+    else if (action === 'add_rect') ops.push(normalizeOp({ type: 'add_shape', page: pageNum, shape: 'rect', x, y, width: 220, height: 90, stroke_color: '#1d4ed8', fill_color: '#93c5fd', stroke_width: 2, stroke_style: 'solid' }));
+    else if (action === 'add_ellipse') ops.push(normalizeOp({ type: 'add_shape', page: pageNum, shape: 'ellipse', x, y, width: 220, height: 90, stroke_color: '#1d4ed8', fill_color: '#93c5fd', stroke_width: 2, stroke_style: 'solid' }));
     else if (action === 'add_image') { addImageAt(x, y); return; }
-    else if (action === 'add_line') { mode = 'line'; lineStart = { x, y }; }
-    else if (action === 'start_copy') { mode = 'copy_select'; copySource = null; hidePastePreview(); }
-    updateOpsField(); renderOps();
+    else if (action === 'add_line') { mode = 'line'; lineStart = { x, y }; updateModeBadge(); return; }
+    else if (action === 'start_copy') { mode = 'copy_select'; copySource = null; hidePastePreview(); updateModeBadge(); return; }
+    updateOpsField(); renderOps(); renderLayerList(); selectOp(ops.length - 1);
   };
 
-  if (openEditorWindowBtn) {
-    openEditorWindowBtn.addEventListener('click', () => {
-      const w = Math.max(1200, Math.floor(window.screen.availWidth * 0.96));
-      const h = Math.max(800, Math.floor(window.screen.availHeight * 0.94));
-      window.open('/tools/pdf_power/editor', 'powerpdf_editor', `width=${w},height=${h},left=0,top=0,resizable=yes,scrollbars=yes`);
-    });
-  }
-  contextMenu.addEventListener('click', (ev) => { const btn = ev.target.closest('button[data-action]'); if (btn) addByMenu(btn.dataset.action); });
+  const doUndo = () => {
+    if (!historyStack.length) return;
+    redoStack.push(deep(ops));
+    const prev = historyStack.pop();
+    restoreOpsState(prev);
+  };
+  const doRedo = () => {
+    if (!redoStack.length) return;
+    historyStack.push(deep(ops));
+    const next = redoStack.pop();
+    restoreOpsState(next);
+  };
+
+  if (isEditorWindow && openEditorWindowBtn) openEditorWindowBtn.style.display = 'none';
+
+  openEditorWindowBtn?.addEventListener('click', () => {
+    const w = Math.max(1200, Math.floor(window.screen.availWidth * 0.96));
+    const h = Math.max(800, Math.floor(window.screen.availHeight * 0.94));
+    window.open('/tools/pdf_power?editor_window=1', 'powerpdf_editor', `width=${w},height=${h},left=0,top=0,resizable=yes,scrollbars=yes`);
+  });
+
+  contextMenu.addEventListener('click', (ev) => { const btn = ev.target.closest('button[data-action]'); if (btn) addByAction(btn.dataset.action); });
+  document.querySelectorAll('.editor-toolbar [data-action]').forEach((btn) => btn.addEventListener('click', () => addByAction(btn.dataset.action)));
   handToolBtn.addEventListener('click', () => { handMode = !handMode; syncOverlay(); });
+  eyedropperBtn?.addEventListener('click', () => { eyedropperMode = !eyedropperMode; syncOverlay(); });
+  copySelectedBtn?.addEventListener('click', cloneSelectedOp);
+  pasteSelectedBtn?.addEventListener('click', pasteClonedOp);
+
+  layerBringFrontBtn?.addEventListener('click', () => moveLayer('front'));
+  layerSendBackBtn?.addEventListener('click', () => moveLayer('back'));
+  layerMoveUpBtn?.addEventListener('click', () => moveLayer('up'));
+  layerMoveDownBtn?.addEventListener('click', () => moveLayer('down'));
+  layerList?.addEventListener('click', (ev) => { const b = ev.target.closest('.layer-item'); if (b) selectOp(Number(b.dataset.idx)); });
+
   document.addEventListener('click', () => hideMenu());
-  overlayLayer.addEventListener('contextmenu', (ev) => { ev.preventDefault(); if (handMode || !pdfDoc) return; const p = getPoint(ev); contextPoint = p; showMenu(p.x, p.y); });
+
+  overlayLayer.addEventListener('contextmenu', (ev) => {
+    ev.preventDefault();
+    if (handMode || !pdfDoc) return;
+    const p = getPoint(ev);
+    contextPoint = p;
+    showMenu(p.x, p.y);
+  });
+
   overlayLayer.addEventListener('click', (ev) => {
     if (!pdfDoc || handMode || isPanning) return;
     if (suppressClick) { suppressClick = false; return; }
+
+    if (eyedropperMode) {
+      const p = getPoint(ev);
+      const px = Math.max(0, Math.min(canvas.width - 1, Math.round(p.x)));
+      const py = Math.max(0, Math.min(canvas.height - 1, Math.round(p.y)));
+      const c = ctx.getImageData(px, py, 1, 1).data;
+      const hex = `#${[c[0], c[1], c[2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+      applyPickedColor(hex);
+      eyedropperMode = false;
+      syncOverlay();
+      return;
+    }
+
     const item = ev.target.closest('.overlay-item');
     if (item) { selectOp(Number(item.dataset.idx)); return; }
     selectOp(-1);
     const p = getPoint(ev);
-    if (mode === 'line' && lineStart) { ops.push({ type: 'add_shape', page: pageNum, shape: 'line', x1: lineStart.x, y1: lineStart.y, x2: pxToPdf(p.x), y2: pxToPdf(p.y), stroke_color: '#1d4ed8', stroke_width: 2, stroke_style: 'solid' }); mode = 'idle'; lineStart = null; updateOpsField(); renderOps(); }
-    else if (mode === 'copy_paste' && copySource) {
-      ops.push({ type: 'copy_region_paste', source_page: copySource.page, source_x: copySource.x, source_y: copySource.y, source_width: copySource.w, source_height: copySource.h, target_page: pageNum, target_x: pxToPdf(p.x), target_y: pxToPdf(p.y), target_width: copySource.w, target_height: copySource.h });
-      mode = 'idle'; copySource = null; hidePastePreview(); updateOpsField(); renderOps(); selectOp(ops.length - 1);
+    if (mode === 'line' && lineStart) {
+      commitHistory();
+      ops.push(normalizeOp({ type: 'add_shape', page: pageNum, shape: 'line', x1: lineStart.x, y1: lineStart.y, x2: pxToPdf(p.x), y2: pxToPdf(p.y), stroke_color: '#1d4ed8', stroke_width: 2, stroke_style: 'solid' }));
+      mode = 'idle'; lineStart = null; updateOpsField(); renderOps(); renderLayerList(); selectOp(ops.length - 1); updateModeBadge();
+    } else if (mode === 'copy_paste' && copySource) {
+      commitHistory();
+      ops.push(normalizeOp({ type: 'copy_region_paste', source_page: copySource.page, source_x: copySource.x, source_y: copySource.y, source_width: copySource.w, source_height: copySource.h, target_page: pageNum, target_x: pxToPdf(p.x), target_y: pxToPdf(p.y), target_width: copySource.w, target_height: copySource.h }));
+      mode = 'idle'; copySource = null; hidePastePreview(); updateOpsField(); renderOps(); renderLayerList(); selectOp(ops.length - 1); updateModeBadge();
     }
   });
+
   overlayLayer.addEventListener('mousedown', (ev) => {
     const item = ev.target.closest('.overlay-item');
-    if (item && !handMode && mode !== 'copy_select' && ev.button === 0) {
+    const handle = ev.target.closest('.resize-handle');
+    if (item && handle && !handMode && ev.button === 0) {
       const idx = Number(item.dataset.idx);
       const op = ops[idx];
-      if (op) {
-        const p = getPoint(ev);
-        moveDrag = {
-          idx,
-          sx: p.x,
-          sy: p.y,
-          ox: op.x,
-          oy: op.y,
-          ox1: op.x1,
-          oy1: op.y1,
-          ox2: op.x2,
-          oy2: op.y2,
-          tx: op.target_x,
-          ty: op.target_y,
-          moved: false,
-        };
+      if (!op) return;
+      commitHistory();
+      resizeDrag = { idx, dir: handle.dataset.dir, sx: ev.clientX, sy: ev.clientY, op: deep(op) };
+      return;
+    }
+    if (item && !handMode && mode !== 'copy_select' && ev.button === 0) {
+      const idx = Number(item.dataset.idx);
+      if (idx >= 0 && idx < ops.length) {
+        const op = ops[idx];
         selectOp(idx);
+        moveDrag = { idx, sx: getPoint(ev).x, sy: getPoint(ev).y, moved: false };
+        if (op.type === 'add_text' || op.type === 'add_image') {
+          moveDrag.ox = op.x; moveDrag.oy = op.y;
+        } else if (op.type === 'add_shape') {
+          if (op.shape === 'line') { moveDrag.ox1 = op.x1; moveDrag.oy1 = op.y1; moveDrag.ox2 = op.x2; moveDrag.oy2 = op.y2; }
+          else { moveDrag.ox = op.x; moveDrag.oy = op.y; }
+        } else if (op.type === 'copy_region_paste') {
+          moveDrag.tx = op.target_x; moveDrag.ty = op.target_y;
+        }
         return;
       }
     }
-    if (handMode && ev.button === 0) { ev.preventDefault(); isPanning = true; panStart = { x: ev.clientX, y: ev.clientY, left: viewerWrap.scrollLeft, top: viewerWrap.scrollTop }; syncOverlay(); return; }
+    if ((handMode || tempHandMode) && ev.button === 0) {
+      ev.preventDefault();
+      isPanning = true;
+      panStart = { x: ev.clientX, y: ev.clientY, left: viewerWrap.scrollLeft, top: viewerWrap.scrollTop };
+      syncOverlay();
+      return;
+    }
     if (mode !== 'copy_select' || !pdfDoc) return;
-    dragStart = getPoint(ev); dragRect.classList.remove('hidden'); dragRect.style.left = `${dragStart.x}px`; dragRect.style.top = `${dragStart.y}px`; dragRect.style.width = '0px'; dragRect.style.height = '0px';
+    dragStart = getPoint(ev);
+    dragRect.classList.remove('hidden');
+    dragRect.style.left = `${dragStart.x}px`; dragRect.style.top = `${dragStart.y}px`; dragRect.style.width = '0px'; dragRect.style.height = '0px';
   });
+
   overlayLayer.addEventListener('mousemove', (ev) => {
+    if (resizeDrag) {
+      const op = ops[resizeDrag.idx];
+      if (!op) return;
+      const dx = pxToPdf(ev.clientX - resizeDrag.sx);
+      const dy = pxToPdf(ev.clientY - resizeDrag.sy);
+      const src = resizeDrag.op;
+      const ratio = (src.width || 1) / Math.max(1, (src.height || 1));
+      if ('x' in src && 'width' in src) {
+        const shift = ev.shiftKey;
+        if (resizeDrag.dir.includes('e')) op.width = Math.max(1, src.width + dx);
+        if (resizeDrag.dir.includes('s')) op.height = Math.max(1, src.height + dy);
+        if (resizeDrag.dir.includes('w')) { op.x = src.x + dx; op.width = Math.max(1, src.width - dx); }
+        if (resizeDrag.dir.includes('n')) { op.y = src.y + dy; op.height = Math.max(1, src.height - dy); }
+        if (shift) {
+          if (op.width / op.height > ratio) op.width = op.height * ratio;
+          else op.height = op.width / ratio;
+        }
+      } else if ('target_x' in src) {
+        if (resizeDrag.dir.includes('e')) op.target_width = Math.max(1, src.target_width + dx);
+        if (resizeDrag.dir.includes('s')) op.target_height = Math.max(1, src.target_height + dy);
+      }
+      updateOpsField(); renderOps(); if (selectedIndex === resizeDrag.idx) selectOp(resizeDrag.idx);
+      return;
+    }
+
     if (moveDrag) {
       const p = getPoint(ev);
       const dx = pxToPdf(p.x - moveDrag.sx);
@@ -1422,26 +1744,12 @@
       if (Math.abs(dx) > 0.2 || Math.abs(dy) > 0.2) moveDrag.moved = true;
       const op = ops[moveDrag.idx];
       if (!op) return;
-      if (op.type === 'add_text' || op.type === 'add_image') {
-        op.x = (moveDrag.ox ?? op.x ?? 0) + dx;
-        op.y = (moveDrag.oy ?? op.y ?? 0) + dy;
-      } else if (op.type === 'add_shape') {
-        if (op.shape === 'line') {
-          op.x1 = (moveDrag.ox1 ?? op.x1 ?? 0) + dx;
-          op.y1 = (moveDrag.oy1 ?? op.y1 ?? 0) + dy;
-          op.x2 = (moveDrag.ox2 ?? op.x2 ?? 0) + dx;
-          op.y2 = (moveDrag.oy2 ?? op.y2 ?? 0) + dy;
-        } else {
-          op.x = (moveDrag.ox ?? op.x ?? 0) + dx;
-          op.y = (moveDrag.oy ?? op.y ?? 0) + dy;
-        }
-      } else if (op.type === 'copy_region_paste') {
-        op.target_x = (moveDrag.tx ?? op.target_x ?? 0) + dx;
-        op.target_y = (moveDrag.ty ?? op.target_y ?? 0) + dy;
-      }
-      updateOpsField();
-      renderOps();
-      if (selectedIndex === moveDrag.idx) selectOp(moveDrag.idx);
+      if (op.type === 'add_text' || op.type === 'add_image') { op.x = (moveDrag.ox ?? op.x ?? 0) + dx; op.y = (moveDrag.oy ?? op.y ?? 0) + dy; }
+      else if (op.type === 'add_shape') {
+        if (op.shape === 'line') { op.x1 = (moveDrag.ox1 ?? op.x1 ?? 0) + dx; op.y1 = (moveDrag.oy1 ?? op.y1 ?? 0) + dy; op.x2 = (moveDrag.ox2 ?? op.x2 ?? 0) + dx; op.y2 = (moveDrag.oy2 ?? op.y2 ?? 0) + dy; }
+        else { op.x = (moveDrag.ox ?? op.x ?? 0) + dx; op.y = (moveDrag.oy ?? op.y ?? 0) + dy; }
+      } else if (op.type === 'copy_region_paste') { op.target_x = (moveDrag.tx ?? op.target_x ?? 0) + dx; op.target_y = (moveDrag.ty ?? op.target_y ?? 0) + dy; }
+      updateOpsField(); renderOps(); if (selectedIndex === moveDrag.idx) selectOp(moveDrag.idx);
       return;
     }
     if (isPanning && panStart) { viewerWrap.scrollLeft = panStart.left - (ev.clientX - panStart.x); viewerWrap.scrollTop = panStart.top - (ev.clientY - panStart.y); return; }
@@ -1450,40 +1758,74 @@
     const p = getPoint(ev), left = Math.min(dragStart.x, p.x), top = Math.min(dragStart.y, p.y), w = Math.abs(p.x - dragStart.x), h = Math.abs(p.y - dragStart.y);
     dragRect.style.left = `${left}px`; dragRect.style.top = `${top}px`; dragRect.style.width = `${w}px`; dragRect.style.height = `${h}px`;
   });
+
   overlayLayer.addEventListener('mouseup', (ev) => {
-    if (moveDrag) {
-      suppressClick = moveDrag.moved;
-      moveDrag = null;
-      return;
-    }
+    if (resizeDrag) { resizeDrag = null; return; }
+    if (moveDrag) { suppressClick = moveDrag.moved; moveDrag = null; return; }
     if (isPanning) { isPanning = false; panStart = null; syncOverlay(); return; }
     if (!dragStart || mode !== 'copy_select') return;
     const p = getPoint(ev), left = Math.min(dragStart.x, p.x), top = Math.min(dragStart.y, p.y), w = Math.max(2, Math.abs(p.x - dragStart.x)), h = Math.max(2, Math.abs(p.y - dragStart.y));
-    copySource = { page: pageNum, x: pxToPdf(left), y: pxToPdf(top), w: pxToPdf(w), h: pxToPdf(h) }; dragStart = null; dragRect.classList.add('hidden'); mode = 'copy_paste'; updatePastePreview(p.x, p.y);
+    copySource = { page: pageNum, x: pxToPdf(left), y: pxToPdf(top), w: pxToPdf(w), h: pxToPdf(h) };
+    dragStart = null;
+    dragRect.classList.add('hidden');
+    mode = 'copy_paste';
+    updatePastePreview(p.x, p.y);
+    updateModeBadge();
   });
+
   overlayLayer.addEventListener('mouseleave', () => {
-    if (moveDrag) {
-      suppressClick = moveDrag.moved;
-      moveDrag = null;
-    }
+    if (moveDrag) { suppressClick = moveDrag.moved; moveDrag = null; }
     hidePastePreview();
   });
 
   deleteSelectedBtn.addEventListener('click', () => {
     if (selectedIndex < 0) return;
+    commitHistory();
     const removed = ops[selectedIndex];
     ops.splice(selectedIndex, 1);
     selectedIndex = -1;
     if (removed && removed.type === 'add_image') removeImageRefIfUnused(removed.image_ref);
-    updateOpsField(); renderOps(); selectOp(-1);
+    updateOpsField(); renderOps(); renderLayerList(); selectOp(-1);
   });
-  undoOpBtn.addEventListener('click', () => { const removed = ops.pop(); if (removed && removed.type === 'add_image') removeImageRefIfUnused(removed.image_ref); selectedIndex = Math.min(selectedIndex, ops.length - 1); updateOpsField(); renderOps(); selectOp(selectedIndex); });
-  clearOpsBtn.addEventListener('click', () => { imageUrlByRef.forEach((u) => URL.revokeObjectURL(u)); imageUrlByRef.clear(); imageFilesByRef.clear(); ops.length = 0; selectedIndex = -1; mode = 'idle'; lineStart = null; copySource = null; hidePastePreview(); updateOpsField(); renderOps(); selectOp(-1); });
-  prevPageBtn.addEventListener('click', async () => { if (pdfDoc && pageNum > 1) { pageNum -= 1; await renderPage(); } });
-  nextPageBtn.addEventListener('click', async () => { if (pdfDoc && pageNum < pdfDoc.numPages) { pageNum += 1; await renderPage(); } });
-  zoomOutBtn.addEventListener('click', async () => { if (pdfDoc) { scale = Math.max(0.5, scale - 0.1); await renderPage(); } });
-  zoomInBtn.addEventListener('click', async () => { if (pdfDoc) { scale = Math.min(3.0, scale + 0.1); await renderPage(); } });
-  editorPdfInput.addEventListener('change', async (ev) => { const file = ev.target.files && ev.target.files[0]; if (!file) return; const data = await file.arrayBuffer(); pdfDoc = await pdfjsLib.getDocument({ data }).promise; pageNum = 1; scale = 1.25; await renderPage(); selectOp(-1); });
+
+  undoOpBtn.addEventListener('click', doUndo);
+  redoOpBtn?.addEventListener('click', doRedo);
+
+
+  const setZoom = async (nextScale) => {
+    if (!pdfDoc) return;
+    const anchor = captureCenterPdfPoint();
+    scale = Math.max(0.5, Math.min(3.0, nextScale));
+    await renderPage(anchor);
+  };
+  zoomOutBtn.addEventListener('click', async () => setZoom(scale - 0.1));
+  zoomInBtn.addEventListener('click', async () => setZoom(scale + 0.1));
+  zoomPreset?.addEventListener('change', async () => setZoom(Number(zoomPreset.value || scale)));
+
+  editorPdfInput.addEventListener('change', async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    const data = await file.arrayBuffer();
+    pdfDoc = await pdfjsLib.getDocument({ data }).promise;
+    pageNum = 1; scale = 1.25;
+    await renderPage();
+    selectOp(-1);
+    updateModeBadge();
+  });
+
+  document.addEventListener('keydown', async (ev) => {
+    const cmd = ev.ctrlKey || ev.metaKey;
+    if (ev.code === 'Space' && !tempHandMode) { tempHandMode = true; syncOverlay(); ev.preventDefault(); }
+    if (ev.key === 'Escape') {
+      mode = 'idle'; lineStart = null; copySource = null; hidePastePreview(); eyedropperMode = false; syncOverlay();
+    }
+    if (cmd && ev.key.toLowerCase() === 'c') { cloneSelectedOp(); }
+    if (cmd && ev.key.toLowerCase() === 'v') { pasteClonedOp(); ev.preventDefault(); }
+    if (cmd && ev.key.toLowerCase() === 'z' && ev.shiftKey) { doRedo(); ev.preventDefault(); }
+    else if (cmd && ev.key.toLowerCase() === 'z') { doUndo(); ev.preventDefault(); }
+  });
+  document.addEventListener('keyup', (ev) => { if (ev.code === 'Space') { tempHandMode = false; syncOverlay(); } });
+
   viewerWrap.setAttribute('tabindex', '0');
   setTimeout(() => viewerWrap.focus(), 0);
 
@@ -1519,7 +1861,11 @@
       submitBtn.textContent = originalText;
     }
   });
+
   selectOp(-1);
+  renderLayerList();
+  syncOverlay();
 })();
 </script>
+
 {% endblock %}
