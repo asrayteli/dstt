@@ -62,6 +62,12 @@ def pdf_power_home():
     return render_template("pdf_power.html")
 
 
+@pdf_power_bp.route("/editor", methods=["GET"])
+@login_required
+def pdf_power_editor_window():
+    return render_template("pdf_power_editor_window.html")
+
+
 def _parse_page_number(page_value, total_pages):
     """Convert 1-based page number to 0-based index."""
     try:
