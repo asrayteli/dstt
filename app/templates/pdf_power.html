@@ -1301,7 +1301,10 @@
   const ops = [];
   const imageFilesByRef = new Map();
   const imageUrlByRef = new Map();
-  const pxToPdf = (v) => v / scale;
+  const q1 = (v) => Math.round(Number(v || 0) * 10) / 10;
+  const qMin1 = (v) => Math.max(1, q1(v));
+  const qMin01 = (v) => Math.max(0.1, q1(v));
+  const pxToPdf = (v) => q1(v / scale);
   const pdfToPx = (v) => v * scale;
   const styleToCss = (s) => (s === 'dashed' ? 'dashed' : s === 'dotted' ? 'dotted' : 'solid');
   const deep = (v) => JSON.parse(JSON.stringify(v));
@@ -1313,11 +1316,39 @@
 
   const normalizeOp = (op) => {
     if (!op.id) op.id = genId();
-    if (op.type === 'add_freehand') {
+    if (op.type === 'add_text') {
       op.page = Number(op.page || pageNum || 1);
-      op.points = Array.isArray(op.points) ? op.points.map((pt) => ({ x: Number(pt.x || 0), y: Number(pt.y || 0) })) : [];
+      op.x = q1(op.x || 0); op.y = q1(op.y || 0);
+      op.width = qMin1(op.width || 220); op.height = qMin1(op.height || 90);
+      op.font_size = qMin01(op.font_size || 16);
+    } else if (op.type === 'add_shape') {
+      op.page = Number(op.page || pageNum || 1);
+      op.stroke_width = qMin01(op.stroke_width || 2);
+      op.stroke_style = op.stroke_style || 'solid';
+      if (op.shape === 'line') {
+        op.x1 = q1(op.x1 || 0); op.y1 = q1(op.y1 || 0);
+        op.x2 = q1(op.x2 || 120); op.y2 = q1(op.y2 || 120);
+      } else {
+        op.x = q1(op.x || 0); op.y = q1(op.y || 0);
+        op.width = qMin1(op.width || 220); op.height = qMin1(op.height || 90);
+      }
+    } else if (op.type === 'add_image') {
+      op.page = Number(op.page || pageNum || 1);
+      op.x = q1(op.x || 0); op.y = q1(op.y || 0);
+      op.width = qMin1(op.width || 220); op.height = qMin1(op.height || 120);
+    } else if (op.type === 'copy_region_paste') {
+      op.source_page = Number(op.source_page || pageNum || 1);
+      op.target_page = Number(op.target_page || pageNum || 1);
+      op.source_x = q1(op.source_x || 0); op.source_y = q1(op.source_y || 0);
+      op.source_width = qMin1(op.source_width || 120); op.source_height = qMin1(op.source_height || 80);
+      op.target_x = q1(op.target_x || 0); op.target_y = q1(op.target_y || 0);
+      op.target_width = qMin1(op.target_width || op.source_width || 120);
+      op.target_height = qMin1(op.target_height || op.source_height || 80);
+    } else if (op.type === 'add_freehand') {
+      op.page = Number(op.page || pageNum || 1);
+      op.points = Array.isArray(op.points) ? op.points.map((pt) => ({ x: q1(pt.x || 0), y: q1(pt.y || 0) })) : [];
       op.stroke_color = op.stroke_color || '#1d4ed8';
-      op.stroke_width = Math.max(0.1, Number(op.stroke_width || 2));
+      op.stroke_width = qMin01(op.stroke_width || 2);
       op.stroke_style = op.stroke_style || 'solid';
     }
     return op;
@@ -1563,25 +1594,26 @@
   const applyPropChanges = () => {
     const op = ops[selectedIndex];
     if (!op) return;
-    const v = (el) => Number(el.value || 0);
+    const v = (el) => q1(el.value || 0);
     if (op.type === 'add_text') {
-      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = v(propW); op.height = v(propH);
-      op.text = propText.value || ''; op.font_size = v(propFontSize) || 14; op.color = propTextColor.value;
+      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = qMin1(v(propW)); op.height = qMin1(v(propH));
+      op.text = propText.value || ''; op.font_size = qMin01(v(propFontSize) || 14); op.color = propTextColor.value;
     } else if (op.type === 'add_shape') {
       op.page = v(propPage); op.stroke_style = propStrokeStyle.value;
       if (op.shape === 'line') { op.x1 = v(propX); op.y1 = v(propY); op.x2 = v(propX2); op.y2 = v(propY2); }
-      else { op.x = v(propX); op.y = v(propY); op.width = Math.max(1, v(propW)); op.height = Math.max(1, v(propH)); }
-      op.stroke_color = propStrokeColor.value; op.fill_color = propFillColor.value; op.stroke_width = Math.max(0.1, v(propStrokeWidth) || 2);
+      else { op.x = v(propX); op.y = v(propY); op.width = qMin1(v(propW)); op.height = qMin1(v(propH)); }
+      op.stroke_color = propStrokeColor.value; op.fill_color = propFillColor.value; op.stroke_width = qMin01(v(propStrokeWidth) || 2);
     } else if (op.type === 'add_image') {
-      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = Math.max(1, v(propW)); op.height = Math.max(1, v(propH));
+      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = qMin1(v(propW)); op.height = qMin1(v(propH));
     } else if (op.type === 'copy_region_paste') {
-      op.target_page = v(propPage); op.target_x = v(propX); op.target_y = v(propY); op.target_width = Math.max(1, v(propW)); op.target_height = Math.max(1, v(propH));
+      op.target_page = v(propPage); op.target_x = v(propX); op.target_y = v(propY); op.target_width = qMin1(v(propW)); op.target_height = qMin1(v(propH));
     } else if (op.type === 'add_freehand') {
       op.page = v(propPage);
       op.stroke_color = propStrokeColor.value;
-      op.stroke_width = Math.max(0.1, v(propStrokeWidth) || 2);
+      op.stroke_width = qMin01(v(propStrokeWidth) || 2);
       op.stroke_style = propStrokeStyle.value;
     }
+    normalizeOp(op);
     updateOpsField(); renderOps(); renderLayerList();
   };
   [propPage, propStrokeWidth, propStrokeStyle, propX, propY, propW, propH, propText, propFontSize, propTextColor, propStrokeColor, propFillColor, propX2, propY2]
@@ -1824,17 +1856,17 @@
       const ratio = (src.width || 1) / Math.max(1, (src.height || 1));
       if ('x' in src && 'width' in src) {
         const shift = ev.shiftKey;
-        if (resizeDrag.dir.includes('e')) op.width = Math.max(1, src.width + dx);
-        if (resizeDrag.dir.includes('s')) op.height = Math.max(1, src.height + dy);
-        if (resizeDrag.dir.includes('w')) { op.x = src.x + dx; op.width = Math.max(1, src.width - dx); }
-        if (resizeDrag.dir.includes('n')) { op.y = src.y + dy; op.height = Math.max(1, src.height - dy); }
+        if (resizeDrag.dir.includes('e')) op.width = qMin1(src.width + dx);
+        if (resizeDrag.dir.includes('s')) op.height = qMin1(src.height + dy);
+        if (resizeDrag.dir.includes('w')) { op.x = q1(src.x + dx); op.width = qMin1(src.width - dx); }
+        if (resizeDrag.dir.includes('n')) { op.y = q1(src.y + dy); op.height = qMin1(src.height - dy); }
         if (shift) {
-          if (op.width / op.height > ratio) op.width = op.height * ratio;
-          else op.height = op.width / ratio;
+          if (op.width / op.height > ratio) op.width = qMin1(op.height * ratio);
+          else op.height = qMin1(op.width / ratio);
         }
       } else if ('target_x' in src) {
-        if (resizeDrag.dir.includes('e')) op.target_width = Math.max(1, src.target_width + dx);
-        if (resizeDrag.dir.includes('s')) op.target_height = Math.max(1, src.target_height + dy);
+        if (resizeDrag.dir.includes('e')) op.target_width = qMin1(src.target_width + dx);
+        if (resizeDrag.dir.includes('s')) op.target_height = qMin1(src.target_height + dy);
       }
       updateOpsField(); renderOps(); if (selectedIndex === resizeDrag.idx) selectOp(resizeDrag.idx);
       return;
@@ -1847,12 +1879,12 @@
       if (Math.abs(dx) > 0.2 || Math.abs(dy) > 0.2) moveDrag.moved = true;
       const op = ops[moveDrag.idx];
       if (!op) return;
-      if (op.type === 'add_text' || op.type === 'add_image') { op.x = (moveDrag.ox ?? op.x ?? 0) + dx; op.y = (moveDrag.oy ?? op.y ?? 0) + dy; }
+      if (op.type === 'add_text' || op.type === 'add_image') { op.x = q1((moveDrag.ox ?? op.x ?? 0) + dx); op.y = q1((moveDrag.oy ?? op.y ?? 0) + dy); }
       else if (op.type === 'add_shape') {
-        if (op.shape === 'line') { op.x1 = (moveDrag.ox1 ?? op.x1 ?? 0) + dx; op.y1 = (moveDrag.oy1 ?? op.y1 ?? 0) + dy; op.x2 = (moveDrag.ox2 ?? op.x2 ?? 0) + dx; op.y2 = (moveDrag.oy2 ?? op.y2 ?? 0) + dy; }
-        else { op.x = (moveDrag.ox ?? op.x ?? 0) + dx; op.y = (moveDrag.oy ?? op.y ?? 0) + dy; }
-      } else if (op.type === 'copy_region_paste') { op.target_x = (moveDrag.tx ?? op.target_x ?? 0) + dx; op.target_y = (moveDrag.ty ?? op.target_y ?? 0) + dy; }
-      else if (op.type === 'add_freehand' && Array.isArray(op.points)) { op.points = (moveDrag.points || op.points).map((pt) => ({ x: pt.x + dx, y: pt.y + dy })); }
+        if (op.shape === 'line') { op.x1 = q1((moveDrag.ox1 ?? op.x1 ?? 0) + dx); op.y1 = q1((moveDrag.oy1 ?? op.y1 ?? 0) + dy); op.x2 = q1((moveDrag.ox2 ?? op.x2 ?? 0) + dx); op.y2 = q1((moveDrag.oy2 ?? op.y2 ?? 0) + dy); }
+        else { op.x = q1((moveDrag.ox ?? op.x ?? 0) + dx); op.y = q1((moveDrag.oy ?? op.y ?? 0) + dy); }
+      } else if (op.type === 'copy_region_paste') { op.target_x = q1((moveDrag.tx ?? op.target_x ?? 0) + dx); op.target_y = q1((moveDrag.ty ?? op.target_y ?? 0) + dy); }
+      else if (op.type === 'add_freehand' && Array.isArray(op.points)) { op.points = (moveDrag.points || op.points).map((pt) => ({ x: q1(pt.x + dx), y: q1(pt.y + dy) })); }
       updateOpsField(); renderOps(); if (selectedIndex === moveDrag.idx) selectOp(moveDrag.idx);
       return;
     }
@@ -1883,7 +1915,7 @@
     if (isPanning) { isPanning = false; panStart = null; syncOverlay(); return; }
     if (!dragStart || mode !== 'copy_select') return;
     const p = getPoint(ev), left = Math.min(dragStart.x, p.x), top = Math.min(dragStart.y, p.y), w = Math.max(2, Math.abs(p.x - dragStart.x)), h = Math.max(2, Math.abs(p.y - dragStart.y));
-    copySource = { page: pageNum, x: pxToPdf(left), y: pxToPdf(top), w: pxToPdf(w), h: pxToPdf(h) };
+    copySource = { page: pageNum, x: q1(pxToPdf(left)), y: q1(pxToPdf(top)), w: qMin1(pxToPdf(w)), h: qMin1(pxToPdf(h)) };
     dragStart = null;
     dragRect.classList.add('hidden');
     mode = 'copy_paste';

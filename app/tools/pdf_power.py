@@ -238,6 +238,11 @@ def _dash_pattern(stroke_style):
     return None
 
 
+def _round_to_tenth(value):
+    """Round numeric input to 1 decimal place for stable PDF rendering."""
+    return round(float(value), 1)
+
+
 def _to_pdf_point(page, x, y):
     """
     Convert viewer coordinates (PDF.js-rendered page space) to base PDF coordinates.
@@ -1955,11 +1960,11 @@ def edit_pdf_overlay():
                 text = str(op.get("text", "")).strip()
                 if not text:
                     raise ValueError(f"Operation {idx}: text is empty.")
-                x = float(op.get("x", 0))
-                y = float(op.get("y", 0))
-                w = max(float(op.get("width", 240)), 1)
-                h = max(float(op.get("height", 48)), 1)
-                font_size = max(float(op.get("font_size", 14)), 1)
+                x = _round_to_tenth(op.get("x", 0))
+                y = _round_to_tenth(op.get("y", 0))
+                w = max(_round_to_tenth(op.get("width", 240)), 1)
+                h = max(_round_to_tenth(op.get("height", 48)), 1)
+                font_size = max(_round_to_tenth(op.get("font_size", 14)), 1)
                 font_name = str(op.get("font_name", "helv"))
                 color = _parse_color_hex(op.get("color", "#111827"), (0.07, 0.09, 0.13))
                 text_rect = _to_pdf_rect(page, x, y, w, h)
@@ -1977,25 +1982,25 @@ def edit_pdf_overlay():
                 page_idx = _parse_page_number(op.get("page"), total_pages)
                 page = doc[page_idx]
                 shape_type = str(op.get("shape", "rect")).lower()
-                stroke_width = max(float(op.get("stroke_width", 2)), 0.1)
+                stroke_width = max(_round_to_tenth(op.get("stroke_width", 2)), 0.1)
                 stroke = _parse_color_hex(op.get("stroke_color", "#1d4ed8"), (0.11, 0.31, 0.85))
                 fill = _parse_color_hex(op.get("fill_color", "transparent"), None)
                 stroke_style = str(op.get("stroke_style", "solid")).lower()
                 dashes = _dash_pattern(stroke_style)
                 shape = page.new_shape()
                 if shape_type in {"rect", "ellipse"}:
-                    x = float(op.get("x", 0))
-                    y = float(op.get("y", 0))
-                    w = max(float(op.get("width", 120)), 1)
-                    h = max(float(op.get("height", 80)), 1)
+                    x = _round_to_tenth(op.get("x", 0))
+                    y = _round_to_tenth(op.get("y", 0))
+                    w = max(_round_to_tenth(op.get("width", 120)), 1)
+                    h = max(_round_to_tenth(op.get("height", 80)), 1)
                     rect = _to_pdf_rect(page, x, y, w, h)
                     if shape_type == "rect":
                         shape.draw_rect(rect)
                     else:
                         shape.draw_oval(rect)
                 elif shape_type == "line":
-                    p1 = _to_pdf_point(page, float(op.get("x1", 0)), float(op.get("y1", 0)))
-                    p2 = _to_pdf_point(page, float(op.get("x2", 120)), float(op.get("y2", 120)))
+                    p1 = _to_pdf_point(page, _round_to_tenth(op.get("x1", 0)), _round_to_tenth(op.get("y1", 0)))
+                    p2 = _to_pdf_point(page, _round_to_tenth(op.get("x2", 120)), _round_to_tenth(op.get("y2", 120)))
                     shape.draw_line(p1, p2)
                 else:
                     raise ValueError(f"Operation {idx}: unsupported shape type '{shape_type}'.")
@@ -2034,10 +2039,10 @@ def edit_pdf_overlay():
                     if not image_bytes:
                         raise ValueError(f"Operation {idx}: image data is empty for image_index {image_index}.")
 
-                x = float(op.get("x", 0))
-                y = float(op.get("y", 0))
-                w = max(float(op.get("width", 120)), 1)
-                h = max(float(op.get("height", 120)), 1)
+                x = _round_to_tenth(op.get("x", 0))
+                y = _round_to_tenth(op.get("y", 0))
+                w = max(_round_to_tenth(op.get("width", 120)), 1)
+                h = max(_round_to_tenth(op.get("height", 120)), 1)
                 rect = _to_pdf_rect(page, x, y, w, h)
                 page.insert_image(
                     rect,
@@ -2051,7 +2056,7 @@ def edit_pdf_overlay():
                 points = op.get("points", [])
                 if not isinstance(points, list) or len(points) < 2:
                     raise ValueError(f"Operation {idx}: freehand points must have at least 2 points.")
-                stroke_width = max(float(op.get("stroke_width", 2)), 0.1)
+                stroke_width = max(_round_to_tenth(op.get("stroke_width", 2)), 0.1)
                 stroke = _parse_color_hex(op.get("stroke_color", "#1d4ed8"), (0.11, 0.31, 0.85))
                 stroke_style = str(op.get("stroke_style", "solid")).lower()
                 dashes = _dash_pattern(stroke_style)
@@ -2059,8 +2064,8 @@ def edit_pdf_overlay():
                 for point_idx, point in enumerate(points, start=1):
                     if not isinstance(point, dict):
                         raise ValueError(f"Operation {idx}: point {point_idx} is invalid.")
-                    px = float(point.get("x", 0))
-                    py = float(point.get("y", 0))
+                    px = _round_to_tenth(point.get("x", 0))
+                    py = _round_to_tenth(point.get("y", 0))
                     pdf_points.append(_to_pdf_point(page, px, py))
 
                 shape = page.new_shape()
@@ -2074,14 +2079,14 @@ def edit_pdf_overlay():
                 target_page_idx = _parse_page_number(op.get("target_page"), total_pages)
                 source_page = doc[source_page_idx]
                 target_page = doc[target_page_idx]
-                sx = float(op.get("source_x", 0))
-                sy = float(op.get("source_y", 0))
-                sw = max(float(op.get("source_width", 120)), 1)
-                sh = max(float(op.get("source_height", 80)), 1)
-                tx = float(op.get("target_x", 0))
-                ty = float(op.get("target_y", 0))
-                tw = max(float(op.get("target_width", sw)), 1)
-                th = max(float(op.get("target_height", sh)), 1)
+                sx = _round_to_tenth(op.get("source_x", 0))
+                sy = _round_to_tenth(op.get("source_y", 0))
+                sw = max(_round_to_tenth(op.get("source_width", 120)), 1)
+                sh = max(_round_to_tenth(op.get("source_height", 80)), 1)
+                tx = _round_to_tenth(op.get("target_x", 0))
+                ty = _round_to_tenth(op.get("target_y", 0))
+                tw = max(_round_to_tenth(op.get("target_width", sw)), 1)
+                th = max(_round_to_tenth(op.get("target_height", sh)), 1)
                 clip = _to_pdf_rect(source_page, sx, sy, sw, sh)
                 target_rect = _to_pdf_rect(target_page, tx, ty, tw, th)
 
