@@ -9,6 +9,8 @@ from werkzeug.utils import secure_filename
 
 from app.services.color_extract_service import (
     apply_color_operation,
+    detect_pdf_bytes,
+    normalize_pdf_bytes,
     parse_hex_color,
     process_pdf_bytes,
     render_pdf_first_page_preview,
@@ -17,18 +19,25 @@ from app.services.color_extract_service import (
 
 color_extract_bp = Blueprint("color_extract", __name__, url_prefix="/tools/color_extract")
 
-ALLOWED_EXTENSIONS = {"pdf", "png", "jpg", "jpeg", "webp"}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
-
-
-def _is_allowed(filename: str) -> bool:
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 def _parse_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return str(value).strip().lower() in {"1", "true", "on", "yes"}
+
+
+
+
+def _detect_input_kind(filename: str, file_bytes: bytes) -> str:
+    ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
+    looks_pdf = detect_pdf_bytes(file_bytes)
+    if ext == "pdf" or looks_pdf:
+        return "pdf"
+    if ext in {"png", "jpg", "jpeg", "webp"}:
+        return "image"
+    raise ValueError("対応していないファイル形式です。")
 
 
 def _parse_settings(form) -> tuple[str, list[tuple[int, int, int]], int, bool, tuple[int, int, int] | None]:
@@ -73,20 +82,18 @@ def preview():
         return jsonify({"error": "ファイルを選択してください。"}), 400
 
     filename = secure_filename(file.filename)
-    if not _is_allowed(filename):
-        return jsonify({"error": "対応していないファイル形式です。"}), 400
-
     file_bytes = file.read()
     if len(file_bytes) > MAX_FILE_SIZE:
         return jsonify({"error": "ファイルサイズ上限(100MB)を超えています。"}), 413
 
     try:
         mode, target_colors, tolerance, transparent_output, replacement_color = _parse_settings(request.form)
-        ext = filename.rsplit(".", 1)[1].lower()
+        input_kind = _detect_input_kind(filename, file_bytes)
 
-        if ext == "pdf":
+        if input_kind == "pdf":
+            normalized_pdf = normalize_pdf_bytes(file_bytes)
             png_bytes = render_pdf_first_page_preview(
-                pdf_bytes=file_bytes,
+                pdf_bytes=normalized_pdf,
                 mode=mode,
                 target_colors=target_colors,
                 tolerance=tolerance,
@@ -127,21 +134,19 @@ def process():
         return jsonify({"error": "ファイルを選択してください。"}), 400
 
     filename = secure_filename(file.filename)
-    if not _is_allowed(filename):
-        return jsonify({"error": "対応していないファイル形式です。"}), 400
-
     file_bytes = file.read()
     if len(file_bytes) > MAX_FILE_SIZE:
         return jsonify({"error": "ファイルサイズ上限(100MB)を超えています。"}), 413
 
     try:
         mode, target_colors, tolerance, transparent_output, replacement_color = _parse_settings(request.form)
-        ext = filename.rsplit(".", 1)[1].lower()
+        input_kind = _detect_input_kind(filename, file_bytes)
 
-        base_name = os.path.splitext(filename)[0]
-        if ext == "pdf":
+        base_name = os.path.splitext(filename)[0] or "processed"
+        if input_kind == "pdf":
+            normalized_pdf = normalize_pdf_bytes(file_bytes)
             out_bytes = process_pdf_bytes(
-                pdf_bytes=file_bytes,
+                pdf_bytes=normalized_pdf,
                 mode=mode,
                 target_colors=target_colors,
                 tolerance=tolerance,

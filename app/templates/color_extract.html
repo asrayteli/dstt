@@ -74,9 +74,18 @@
         <h2 class="font-semibold text-lg">リアルタイムプレビュー</h2>
         <span id="previewStatus" class="text-xs text-gray-500">待機中</span>
       </div>
-      <div class="border rounded-lg min-h-[360px] bg-gray-50 flex items-center justify-center overflow-hidden">
-        <img id="previewImage" alt="preview" class="max-w-full max-h-[70vh] hidden cursor-crosshair">
-        <p id="previewPlaceholder" class="text-sm text-gray-500">ファイルを選択するとプレビューが表示されます</p>
+      <div class="flex items-center gap-2 mb-3">
+        <button id="zoomOutBtn" type="button" class="text-xs bg-gray-100 border px-2 py-1 rounded hover:bg-gray-200">−</button>
+        <span id="zoomLabel" class="text-xs text-gray-600 w-16 text-center">100%</span>
+        <button id="zoomInBtn" type="button" class="text-xs bg-gray-100 border px-2 py-1 rounded hover:bg-gray-200">＋</button>
+        <button id="resetViewBtn" type="button" class="text-xs bg-gray-100 border px-2 py-1 rounded hover:bg-gray-200">表示をリセット</button>
+        <span class="text-xs text-gray-500 ml-auto">ズーム時はドラッグで移動（手のひらツール）</span>
+      </div>
+      <div id="previewViewport" class="border rounded-lg min-h-[360px] h-[70vh] bg-gray-50 overflow-hidden relative">
+        <div id="previewCanvasWrap" class="absolute inset-0 flex items-center justify-center select-none">
+          <img id="previewImage" alt="preview" class="hidden cursor-crosshair pointer-events-auto" draggable="false">
+          <p id="previewPlaceholder" class="text-sm text-gray-500">ファイルを選択するとプレビューが表示されます</p>
+        </div>
       </div>
       <p class="text-xs text-gray-500 mt-3">プレビュー画像をクリックすると、その位置の色を対象色に追加できます。</p>
     </div>
@@ -102,10 +111,21 @@
   const previewImage = document.getElementById('previewImage');
   const previewPlaceholder = document.getElementById('previewPlaceholder');
   const previewStatus = document.getElementById('previewStatus');
+  const previewViewport = document.getElementById('previewViewport');
+  const zoomInBtn = document.getElementById('zoomInBtn');
+  const zoomOutBtn = document.getElementById('zoomOutBtn');
+  const resetViewBtn = document.getElementById('resetViewBtn');
+  const zoomLabel = document.getElementById('zoomLabel');
 
   let currentPreviewUrl = null;
   let debounceTimer = null;
   let colors = ['#ff0000'];
+  let zoomLevel = 1;
+  let panX = 0;
+  let panY = 0;
+  let isPanning = false;
+  let panStartX = 0;
+  let panStartY = 0;
 
   function normalizeHex(value) {
     const v = (value || '').trim();
@@ -143,6 +163,32 @@
     debounceTimer = setTimeout(triggerPreview, 350);
   }
 
+  function applyPreviewTransform() {
+    const tx = panX;
+    const ty = panY;
+    previewImage.style.transformOrigin = 'center center';
+    previewImage.style.transform = `translate(${tx}px, ${ty}px) scale(${zoomLevel})`;
+    previewImage.style.cursor = zoomLevel > 1 ? (isPanning ? 'grabbing' : 'grab') : 'crosshair';
+    zoomLabel.textContent = `${Math.round(zoomLevel * 100)}%`;
+  }
+
+  function resetPreviewView() {
+    zoomLevel = 1;
+    panX = 0;
+    panY = 0;
+    applyPreviewTransform();
+  }
+
+  function changeZoom(step) {
+    const next = Math.min(4, Math.max(0.25, zoomLevel + step));
+    zoomLevel = Number(next.toFixed(2));
+    if (zoomLevel <= 1) {
+      panX = 0;
+      panY = 0;
+    }
+    applyPreviewTransform();
+  }
+
   async function triggerPreview() {
     if (!fileInput.files.length || colors.length === 0) return;
 
@@ -169,6 +215,7 @@
       previewImage.src = currentPreviewUrl;
       previewImage.classList.remove('hidden');
       previewPlaceholder.classList.add('hidden');
+      resetPreviewView();
       previewStatus.textContent = 'プレビュー更新完了';
     } catch (err) {
       previewStatus.textContent = `エラー: ${err.message}`;
@@ -245,7 +292,7 @@
   });
 
   previewImage.addEventListener('click', (e) => {
-    if (!previewImage.src) return;
+    if (!previewImage.src || isPanning) return;
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -265,10 +312,42 @@
     addColor(hex);
   });
 
+  previewViewport.addEventListener('wheel', (e) => {
+    if (!previewImage.src) return;
+    e.preventDefault();
+    changeZoom(e.deltaY > 0 ? -0.1 : 0.1);
+  }, { passive: false });
+
+  previewImage.addEventListener('mousedown', (e) => {
+    if (zoomLevel <= 1) return;
+    isPanning = true;
+    panStartX = e.clientX - panX;
+    panStartY = e.clientY - panY;
+    applyPreviewTransform();
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isPanning) return;
+    panX = e.clientX - panStartX;
+    panY = e.clientY - panStartY;
+    applyPreviewTransform();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!isPanning) return;
+    isPanning = false;
+    applyPreviewTransform();
+  });
+
   tolerance.addEventListener('input', () => {
     tolValue.textContent = tolerance.value;
     schedulePreview();
   });
+
+  zoomInBtn.addEventListener('click', () => changeZoom(0.25));
+  zoomOutBtn.addEventListener('click', () => changeZoom(-0.25));
+  resetViewBtn.addEventListener('click', resetPreviewView);
 
   mode.addEventListener('change', updateModeUI);
   transparentOutput.addEventListener('change', schedulePreview);
@@ -289,6 +368,7 @@
   renderColorList();
   syncReplacement();
   updateModeUI();
+  applyPreviewTransform();
 })();
 </script>
 {% endblock %}

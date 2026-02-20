@@ -3,10 +3,37 @@ from typing import Iterable, List, Sequence, Tuple
 
 import fitz
 import numpy as np
+import pikepdf
 from PIL import Image
 
 
 Color = Tuple[int, int, int]
+
+
+def detect_pdf_bytes(file_bytes: bytes) -> bool:
+    header = file_bytes[:1024]
+    return b"%PDF" in header
+
+
+def normalize_pdf_bytes(file_bytes: bytes) -> bytes:
+    """Validate/repair PDF bytes when possible and return readable bytes."""
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        doc.close()
+        return file_bytes
+    except Exception:
+        pass
+
+    try:
+        with pikepdf.open(io.BytesIO(file_bytes), allow_overwriting_input=True) as pdf:
+            out = io.BytesIO()
+            pdf.save(out, linearize=True)
+            repaired = out.getvalue()
+        doc = fitz.open(stream=repaired, filetype="pdf")
+        doc.close()
+        return repaired
+    except Exception as exc:
+        raise ValueError("PDFとして読み込めない、または破損している可能性があります。") from exc
 
 
 def parse_hex_color(value: str) -> Color:

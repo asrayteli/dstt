@@ -7,18 +7,31 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import importlib.util
+
 import fitz
 import pytest
+from flask import Flask
 from PIL import Image
 
-from app import create_app
+
+def _load_color_extract_module():
+    module_path = ROOT / "app" / "tools" / "color_extract.py"
+    spec = importlib.util.spec_from_file_location("color_extract_test_module", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture(scope="module")
 def client():
-    app = create_app()
+    module = _load_color_extract_module()
+    app = Flask(__name__)
+    app.secret_key = "test"
     app.config["TESTING"] = True
     app.config["LOGIN_DISABLED"] = True
+    app.register_blueprint(module.color_extract_bp)
     with app.test_client() as c:
         yield c
 
@@ -117,3 +130,34 @@ def test_invalid_target_colors_returns_400(client):
     assert response.status_code == 400
     data = response.get_json()
     assert "target_colors" in data["error"]
+
+
+def test_pdf_content_with_non_pdf_extension_is_still_processed(client):
+    pdf_bytes = _make_sample_pdf_bytes()
+    payload = {
+        "mode": "exclude",
+        "target_colors": json.dumps(["#ff0000"]),
+        "tolerance": "10",
+        "transparent_output": "true",
+        "file": (io.BytesIO(pdf_bytes), "sample.bin"),
+    }
+    response = client.post("/tools/color_extract/process", data=payload, content_type="multipart/form-data")
+
+    assert response.status_code == 200
+    assert response.content_type.startswith("application/pdf")
+
+
+def test_invalid_pdf_returns_400_with_clear_message(client):
+    invalid_pdf_like = b"%PDF-1.4\nnot-a-real-pdf"
+    payload = {
+        "mode": "exclude",
+        "target_colors": json.dumps(["#ff0000"]),
+        "tolerance": "10",
+        "transparent_output": "true",
+        "file": (io.BytesIO(invalid_pdf_like), "broken.pdf"),
+    }
+    response = client.post("/tools/color_extract/process", data=payload, content_type="multipart/form-data")
+
+    assert response.status_code == 400
+    data = response.get_json()
+    assert "PDF" in data["error"]
