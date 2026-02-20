@@ -495,7 +495,7 @@
     <div class="bg-gradient-to-r from-blue-50 to-cyan-50 p-6 rounded-lg border-l-4 border-blue-600">
       <h3 class="font-semibold mb-4 text-xl text-gray-700">PowerPDF 編集</h3>
       <form action="/tools/pdf_power/edit" method="POST" enctype="multipart/form-data" id="editorForm" class="editor-grid">
-        <aside class="editor-card">
+        <aside class="editor-card editor-panel" id="editorLeftPanel">
           <label class="block text-sm font-medium text-gray-600 mb-2">編集するPDF</label>
           <input type="file" name="pdf" id="editorPdfInput" accept=".pdf"
                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent" required>
@@ -513,6 +513,8 @@
             <button type="button" class="toolbar-btn" id="zoomOutBtn">-</button>
             <span id="zoomInfo">100%</span>
             <button type="button" class="toolbar-btn" id="zoomInBtn">+</button>
+            <button type="button" class="toolbar-btn" id="toggleLeftPanelBtn">左パネル</button>
+            <button type="button" class="toolbar-btn" id="toggleRightPanelBtn">右パネル</button>
             <button type="button" class="toolbar-btn" id="handToolBtn">手のひら</button>
             <span id="pageMeta">-</span>
             <button type="button" class="toolbar-btn" id="undoOpBtn">元に戻す</button>
@@ -535,7 +537,7 @@
           </div>
         </section>
 
-        <aside class="editor-card">
+        <aside class="editor-card editor-panel" id="editorRightPanel">
           <h4 class="font-semibold text-gray-700 mb-2">要素プロパティ</h4>
           <p id="propEmpty" class="text-sm text-gray-500">要素をクリックすると編集できます。</p>
           <div id="propForm" class="hidden space-y-2">
@@ -614,9 +616,24 @@
 
   .editor-grid {
     display: grid;
-    grid-template-columns: 280px minmax(0, 1fr) 280px;
+    grid-template-columns: minmax(0, var(--left-panel-width, 280px)) minmax(0, 1fr) minmax(0, var(--right-panel-width, 280px));
     gap: 12px;
     align-items: start;
+  }
+
+  .editor-grid.left-collapsed {
+    --left-panel-width: 0px;
+  }
+
+  .editor-grid.right-collapsed {
+    --right-panel-width: 0px;
+  }
+
+  .editor-grid.left-collapsed #editorLeftPanel,
+  .editor-grid.right-collapsed #editorRightPanel {
+    padding: 0;
+    border: 0;
+    overflow: hidden;
   }
 
   .editor-card {
@@ -809,6 +826,12 @@
 
     .editor-grid {
       grid-template-columns: 1fr;
+      --left-panel-width: 0px;
+      --right-panel-width: 0px;
+    }
+
+    .editor-panel {
+      position: static;
     }
 
     .editor-card {
@@ -1069,34 +1092,10 @@
   if (!window.pdfjsLib) return;
   const editorForm = document.getElementById('editorForm');
   if (!editorForm) return;
-  const isEditorWindow = new URLSearchParams(window.location.search).get('editor_window') === '1';
-  if (isEditorWindow && typeof switchTab === 'function') {
-    switchTab('editor');
-  }
-  const root = document.getElementById('pdfPowerRoot');
-  if (isEditorWindow && root) {
-    root.style.maxWidth = 'none';
-    root.style.margin = '0';
-    root.style.marginTop = '0';
-    root.style.borderRadius = '0';
-    root.style.padding = '12px';
-    root.style.minHeight = 'calc(100vh - 80px)';
-    const tabButtonsWrap = root.querySelector('.flex.flex-wrap.justify-center.gap-2.mb-8');
-    if (tabButtonsWrap) tabButtonsWrap.style.display = 'none';
-    root.querySelectorAll('.tab-content').forEach((el) => {
-      if (el.id !== 'editor') el.style.display = 'none';
-    });
-    const editorGrid = root.querySelector('#editorForm');
-    if (editorGrid) editorGrid.style.gridTemplateColumns = '260px minmax(0,1fr) 300px';
-    const appSidebar = document.getElementById('app-sidebar');
-    const sidebarToggle = document.getElementById('sidebar-toggle');
-    const appMain = document.getElementById('app-main-content');
-    if (appSidebar) appSidebar.style.display = 'none';
-    if (sidebarToggle) sidebarToggle.style.display = 'none';
-    if (appMain) appMain.style.padding = '0';
-  }
 
   const openEditorWindowBtn = document.getElementById('openEditorWindowBtn');
+  const toggleLeftPanelBtn = document.getElementById('toggleLeftPanelBtn');
+  const toggleRightPanelBtn = document.getElementById('toggleRightPanelBtn');
   const editorPdfInput = document.getElementById('editorPdfInput');
   const canvasStage = document.getElementById('canvasStage');
   const canvas = document.getElementById('pdfCanvas');
@@ -1142,8 +1141,24 @@
   const groupLine2 = document.getElementById('groupLine2');
   const groupImageIndex = document.getElementById('groupImageIndex');
   const groupStrokeStyle = document.getElementById('groupStrokeStyle');
-  if (isEditorWindow && viewerWrap) viewerWrap.style.minHeight = 'calc(100vh - 190px)';
-  if (isEditorWindow && openEditorWindowBtn) openEditorWindowBtn.style.display = 'none';
+
+  const updatePanelToggleState = () => {
+    const leftCollapsed = editorForm.classList.contains('left-collapsed');
+    const rightCollapsed = editorForm.classList.contains('right-collapsed');
+    if (toggleLeftPanelBtn) toggleLeftPanelBtn.textContent = leftCollapsed ? '左パネルを開く' : '左パネルを閉じる';
+    if (toggleRightPanelBtn) toggleRightPanelBtn.textContent = rightCollapsed ? '右パネルを開く' : '右パネルを閉じる';
+  };
+
+  if (toggleLeftPanelBtn) toggleLeftPanelBtn.addEventListener('click', () => {
+    editorForm.classList.toggle('left-collapsed');
+    updatePanelToggleState();
+  });
+  if (toggleRightPanelBtn) toggleRightPanelBtn.addEventListener('click', () => {
+    editorForm.classList.toggle('right-collapsed');
+    updatePanelToggleState();
+  });
+  editorForm.classList.remove('left-collapsed', 'right-collapsed');
+  updatePanelToggleState();
 
   let pdfDoc = null, pageNum = 1, scale = 1.25, renderTask = null;
   let mode = 'idle', lineStart = null, copySource = null, dragStart = null;
@@ -1346,11 +1361,13 @@
     updateOpsField(); renderOps();
   };
 
-  openEditorWindowBtn.addEventListener('click', () => {
-    const w = Math.max(1200, Math.floor(window.screen.availWidth * 0.96));
-    const h = Math.max(800, Math.floor(window.screen.availHeight * 0.94));
-    window.open('/tools/pdf_power?editor_window=1', 'powerpdf_editor', `width=${w},height=${h},left=0,top=0,resizable=yes,scrollbars=yes`);
-  });
+  if (openEditorWindowBtn) {
+    openEditorWindowBtn.addEventListener('click', () => {
+      const w = Math.max(1200, Math.floor(window.screen.availWidth * 0.96));
+      const h = Math.max(800, Math.floor(window.screen.availHeight * 0.94));
+      window.open('/tools/pdf_power/editor', 'powerpdf_editor', `width=${w},height=${h},left=0,top=0,resizable=yes,scrollbars=yes`);
+    });
+  }
   contextMenu.addEventListener('click', (ev) => { const btn = ev.target.closest('button[data-action]'); if (btn) addByMenu(btn.dataset.action); });
   handToolBtn.addEventListener('click', () => { handMode = !handMode; syncOverlay(); });
   document.addEventListener('click', () => hideMenu());
@@ -1467,6 +1484,9 @@
   zoomOutBtn.addEventListener('click', async () => { if (pdfDoc) { scale = Math.max(0.5, scale - 0.1); await renderPage(); } });
   zoomInBtn.addEventListener('click', async () => { if (pdfDoc) { scale = Math.min(3.0, scale + 0.1); await renderPage(); } });
   editorPdfInput.addEventListener('change', async (ev) => { const file = ev.target.files && ev.target.files[0]; if (!file) return; const data = await file.arrayBuffer(); pdfDoc = await pdfjsLib.getDocument({ data }).promise; pageNum = 1; scale = 1.25; await renderPage(); selectOp(-1); });
+  viewerWrap.setAttribute('tabindex', '0');
+  setTimeout(() => viewerWrap.focus(), 0);
+
   editorForm.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     if (!editorPdfInput.files || !editorPdfInput.files[0]) { alert('PDFファイルを選択してください。'); return; }

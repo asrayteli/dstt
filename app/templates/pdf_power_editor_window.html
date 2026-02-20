@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PowerPDF Editor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    body { margin:0; background:#f8fafc; color:#0f172a; }
+    .editor-shell { height:100vh; display:flex; flex-direction:column; padding:8px; }
+    .editor-header { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#475569; margin-bottom:8px; }
+  .editor-grid {
+    display: grid;
+    grid-template-columns: minmax(0, var(--left-panel-width, 280px)) minmax(0, 1fr) minmax(0, var(--right-panel-width, 280px));
+    gap: 12px;
+    align-items: start;
+  }
+
+  .editor-grid.left-collapsed {
+    --left-panel-width: 0px;
+  }
+
+  .editor-grid.right-collapsed {
+    --right-panel-width: 0px;
+  }
+
+  .editor-grid.left-collapsed #editorLeftPanel,
+  .editor-grid.right-collapsed #editorRightPanel {
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+  }
+
+  .editor-card {
+    background: #fff;
+    border: 1px solid #dbe4f4;
+    border-radius: 10px;
+    padding: 10px;
+    position: sticky;
+    top: 12px;
+  }
+
+  .editor-main {
+    min-width: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  .editor-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #334155;
+  }
+
+  .toolbar-btn {
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #1e3a8a;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .toolbar-btn.danger {
+    color: #b91c1c;
+    border-color: #fecaca;
+    background: #fff1f2;
+  }
+
+  #handToolBtn.active {
+    background: #1d4ed8;
+    color: #fff;
+    border-color: #1d4ed8;
+  }
+
+  .editor-viewer {
+    position: relative;
+    min-height: 620px;
+    overflow: auto;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #eff6ff;
+    padding: 12px;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+
+  .canvas-stage {
+    position: relative;
+    display: inline-block;
+    line-height: 0;
+  }
+
+  #pdfCanvas {
+    display: block;
+    background: #fff;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  }
+
+  #overlayLayer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    border: 0;
+    pointer-events: auto;
+  }
+
+  #overlayLayer.hand-mode {
+    cursor: grab;
+  }
+
+  #overlayLayer.hand-mode.panning {
+    cursor: grabbing;
+  }
+
+  .overlay-item {
+    position: absolute;
+    border: 1px dashed rgba(37, 99, 235, 0.55);
+    box-sizing: border-box;
+    cursor: move;
+  }
+
+  .overlay-item.text {
+    padding: 0;
+    border: 1px solid rgba(37, 99, 235, 0.4);
+    background: rgba(219, 234, 254, 0.5);
+    overflow: hidden;
+    white-space: pre-wrap;
+    line-height: 1.2;
+    font-family: "Helvetica", "Arial", sans-serif;
+    text-overflow: clip;
+  }
+
+  .overlay-item.line {
+    border: 0;
+    height: 0;
+    border-top: 2px dashed rgba(37, 99, 235, 0.85);
+    transform-origin: 0 0;
+  }
+
+  .overlay-item.selected {
+    outline: 2px solid #f59e0b;
+    outline-offset: 1px;
+  }
+
+  .drag-rect {
+    position: absolute;
+    border: 1px dashed #1d4ed8;
+    background: rgba(59, 130, 246, 0.16);
+    pointer-events: none;
+  }
+
+  .paste-preview {
+    position: absolute;
+    border: 1px dashed #0ea5e9;
+    background: rgba(14, 165, 233, 0.15);
+    pointer-events: none;
+  }
+
+  .context-menu {
+    position: absolute;
+    z-index: 20;
+    min-width: 170px;
+    border: 1px solid #9bb4de;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+    padding: 6px;
+  }
+
+  .context-menu button {
+    width: 100%;
+    text-align: left;
+    border: 0;
+    background: transparent;
+    border-radius: 6px;
+    padding: 7px 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #1f3f7e;
+    cursor: pointer;
+  }
+
+  .context-menu button:hover {
+    background: #edf4ff;
+  }
+
+
+    .editor-viewer { min-height: calc(100vh - 120px); }
+  </style>
+</head>
+<body>
+  <div class="editor-shell">
+    <header class="editor-header"><strong>PowerPDF Editor</strong><span>専用ウィンドウ</span></header>
+    <div id="editor" class="tab-content active" style="display:block;">
+    <div class="bg-gradient-to-r from-blue-50 to-cyan-50 p-6 rounded-lg border-l-4 border-blue-600">
+      <h3 class="font-semibold mb-4 text-xl text-gray-700">PowerPDF 編集</h3>
+      <form action="/tools/pdf_power/edit" method="POST" enctype="multipart/form-data" id="editorForm" class="editor-grid">
+        <aside class="editor-card editor-panel" id="editorLeftPanel">
+          <label class="block text-sm font-medium text-gray-600 mb-2">編集するPDF</label>
+          <input type="file" name="pdf" id="editorPdfInput" accept=".pdf"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent" required>
+          <input type="hidden" name="operations" id="operationsInput" value="[]">
+          
+          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-md mt-3 w-full hover:bg-blue-700 transition">編集PDFを生成</button>
+          <p class="text-xs text-gray-500 mt-3">プレビューを右クリックすると、テキスト・図形・画像・範囲コピーを追加できます。</p>
+        </aside>
+
+        <section class="editor-main">
+          <div class="editor-toolbar">
+            <button type="button" class="toolbar-btn" id="prevPageBtn">前</button>
+            <span id="pageInfo">- / -</span>
+            <button type="button" class="toolbar-btn" id="nextPageBtn">次</button>
+            <button type="button" class="toolbar-btn" id="zoomOutBtn">-</button>
+            <span id="zoomInfo">100%</span>
+            <button type="button" class="toolbar-btn" id="zoomInBtn">+</button>
+            <button type="button" class="toolbar-btn" id="toggleLeftPanelBtn">左パネル</button>
+            <button type="button" class="toolbar-btn" id="toggleRightPanelBtn">右パネル</button>
+            <button type="button" class="toolbar-btn" id="handToolBtn">手のひら</button>
+            <span id="pageMeta">-</span>
+            <button type="button" class="toolbar-btn" id="undoOpBtn">元に戻す</button>
+            <button type="button" class="toolbar-btn danger" id="clearOpsBtn">全削除</button>
+          </div>
+          <div class="editor-viewer" id="viewerWrap">
+            <div class="canvas-stage" id="canvasStage">
+              <canvas id="pdfCanvas"></canvas>
+              <div id="overlayLayer"></div>
+              <div id="dragRect" class="drag-rect hidden"></div>
+              <div id="contextMenu" class="context-menu hidden">
+                <button type="button" data-action="add_text">テキストを追加</button>
+                <button type="button" data-action="add_rect">四角形を追加</button>
+                <button type="button" data-action="add_ellipse">楕円を追加</button>
+                <button type="button" data-action="add_line">線を追加</button>
+                <button type="button" data-action="add_image">画像を追加</button>
+                <button type="button" data-action="start_copy">範囲コピー開始</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="editor-card editor-panel" id="editorRightPanel">
+          <h4 class="font-semibold text-gray-700 mb-2">要素プロパティ</h4>
+          <p id="propEmpty" class="text-sm text-gray-500">要素をクリックすると編集できます。</p>
+          <div id="propForm" class="hidden space-y-2">
+            <label class="block text-xs text-gray-500">種類<input type="text" id="propType" readonly class="w-full px-2 py-1 border rounded"></label>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="block text-xs text-gray-500">ページ<input type="number" id="propPage" min="1" class="w-full px-2 py-1 border rounded"></label>
+              <label class="block text-xs text-gray-500">線幅<input type="number" id="propStrokeWidth" min="0.1" step="0.1" class="w-full px-2 py-1 border rounded"></label>
+            </div>
+            <label class="block text-xs text-gray-500" id="groupStrokeStyle">線種
+              <select id="propStrokeStyle" class="w-full px-2 py-1 border rounded">
+                <option value="solid">実線</option>
+                <option value="dashed">破線</option>
+                <option value="dotted">点線</option>
+              </select>
+            </label>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="block text-xs text-gray-500">X<input type="number" id="propX" step="0.1" class="w-full px-2 py-1 border rounded"></label>
+              <label class="block text-xs text-gray-500">Y<input type="number" id="propY" step="0.1" class="w-full px-2 py-1 border rounded"></label>
+            </div>
+            <div class="grid grid-cols-2 gap-2" id="groupSize">
+              <label class="block text-xs text-gray-500">幅<input type="number" id="propW" step="0.1" class="w-full px-2 py-1 border rounded"></label>
+              <label class="block text-xs text-gray-500">高さ<input type="number" id="propH" step="0.1" class="w-full px-2 py-1 border rounded"></label>
+            </div>
+            <label class="block text-xs text-gray-500 hidden" id="groupText">テキスト<input type="text" id="propText" class="w-full px-2 py-1 border rounded"></label>
+            <div class="grid grid-cols-2 gap-2 hidden" id="groupFont">
+              <label class="block text-xs text-gray-500">文字サイズ<input type="number" id="propFontSize" min="1" class="w-full px-2 py-1 border rounded"></label>
+              <label class="block text-xs text-gray-500">文字色<input type="color" id="propTextColor" class="w-full px-2 py-1 border rounded"></label>
+            </div>
+            <div class="grid grid-cols-2 gap-2 hidden" id="groupShapeColors">
+              <label class="block text-xs text-gray-500">線色<input type="color" id="propStrokeColor" class="w-full px-2 py-1 border rounded"></label>
+              <label class="block text-xs text-gray-500">塗り色<input type="color" id="propFillColor" class="w-full px-2 py-1 border rounded"></label>
+            </div>
+            <div class="grid grid-cols-2 gap-2 hidden" id="groupLine2">
+              <label class="block text-xs text-gray-500">X2<input type="number" id="propX2" step="0.1" class="w-full px-2 py-1 border rounded"></label>
+              <label class="block text-xs text-gray-500">Y2<input type="number" id="propY2" step="0.1" class="w-full px-2 py-1 border rounded"></label>
+            </div>
+            <label class="hidden" id="groupImageIndex">予備<input type="number" id="propImageIndex" min="1"></label>
+            <button type="button" class="bg-red-600 text-white px-3 py-2 rounded-md w-full mt-2 hover:bg-red-700 transition" id="deleteSelectedBtn">選択要素を削除</button>
+          </div>
+        </aside>
+      </form>
+    </div>
+  </div>
+  </div>
+  <script>if (window.pdfjsLib) { pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; }</script>
+  <script>
+
+(() => {
+  if (!window.pdfjsLib) return;
+  const editorForm = document.getElementById('editorForm');
+  if (!editorForm) return;
+
+  const toggleLeftPanelBtn = document.getElementById('toggleLeftPanelBtn');
+  const toggleRightPanelBtn = document.getElementById('toggleRightPanelBtn');
+  const editorPdfInput = document.getElementById('editorPdfInput');
+  const canvasStage = document.getElementById('canvasStage');
+  const canvas = document.getElementById('pdfCanvas');
+  const ctx = canvas.getContext('2d');
+  const overlayLayer = document.getElementById('overlayLayer');
+  const dragRect = document.getElementById('dragRect');
+  const contextMenu = document.getElementById('contextMenu');
+  const viewerWrap = document.getElementById('viewerWrap');
+  const pageInfo = document.getElementById('pageInfo');
+  const zoomInfo = document.getElementById('zoomInfo');
+  const pageMeta = document.getElementById('pageMeta');
+  const prevPageBtn = document.getElementById('prevPageBtn');
+  const nextPageBtn = document.getElementById('nextPageBtn');
+  const zoomOutBtn = document.getElementById('zoomOutBtn');
+  const zoomInBtn = document.getElementById('zoomInBtn');
+  const handToolBtn = document.getElementById('handToolBtn');
+  const undoOpBtn = document.getElementById('undoOpBtn');
+  const clearOpsBtn = document.getElementById('clearOpsBtn');
+  const operationsInput = document.getElementById('operationsInput');
+  const propEmpty = document.getElementById('propEmpty');
+  const propForm = document.getElementById('propForm');
+  const propType = document.getElementById('propType');
+  const propPage = document.getElementById('propPage');
+  const propStrokeWidth = document.getElementById('propStrokeWidth');
+  const propStrokeStyle = document.getElementById('propStrokeStyle');
+  const propX = document.getElementById('propX');
+  const propY = document.getElementById('propY');
+  const propW = document.getElementById('propW');
+  const propH = document.getElementById('propH');
+  const propText = document.getElementById('propText');
+  const propFontSize = document.getElementById('propFontSize');
+  const propTextColor = document.getElementById('propTextColor');
+  const propStrokeColor = document.getElementById('propStrokeColor');
+  const propFillColor = document.getElementById('propFillColor');
+  const propX2 = document.getElementById('propX2');
+  const propY2 = document.getElementById('propY2');
+  const propImageIndex = document.getElementById('propImageIndex');
+  const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+  const groupSize = document.getElementById('groupSize');
+  const groupText = document.getElementById('groupText');
+  const groupFont = document.getElementById('groupFont');
+  const groupShapeColors = document.getElementById('groupShapeColors');
+  const groupLine2 = document.getElementById('groupLine2');
+  const groupImageIndex = document.getElementById('groupImageIndex');
+  const groupStrokeStyle = document.getElementById('groupStrokeStyle');
+
+  const updatePanelToggleState = () => {
+    const leftCollapsed = editorForm.classList.contains('left-collapsed');
+    const rightCollapsed = editorForm.classList.contains('right-collapsed');
+    if (toggleLeftPanelBtn) toggleLeftPanelBtn.textContent = leftCollapsed ? '左パネルを開く' : '左パネルを閉じる';
+    if (toggleRightPanelBtn) toggleRightPanelBtn.textContent = rightCollapsed ? '右パネルを開く' : '右パネルを閉じる';
+  };
+
+  if (toggleLeftPanelBtn) toggleLeftPanelBtn.addEventListener('click', () => {
+    editorForm.classList.toggle('left-collapsed');
+    updatePanelToggleState();
+  });
+  if (toggleRightPanelBtn) toggleRightPanelBtn.addEventListener('click', () => {
+    editorForm.classList.toggle('right-collapsed');
+    updatePanelToggleState();
+  });
+  editorForm.classList.remove('left-collapsed', 'right-collapsed');
+  updatePanelToggleState();
+
+  let pdfDoc = null, pageNum = 1, scale = 1.25, renderTask = null;
+  let mode = 'idle', lineStart = null, copySource = null, dragStart = null;
+  let handMode = false, isPanning = false, panStart = null;
+  let moveDrag = null, suppressClick = false;
+  let contextPoint = { x: 0, y: 0 }, selectedIndex = -1;
+  const ops = [];
+  const imageFilesByRef = new Map();
+  const imageUrlByRef = new Map();
+  const pxToPdf = (v) => v / scale;
+  const pdfToPx = (v) => v * scale;
+  const styleToCss = (s) => (s === 'dashed' ? 'dashed' : s === 'dotted' ? 'dotted' : 'solid');
+  const pastePreview = document.createElement('div');
+  pastePreview.className = 'paste-preview hidden';
+  overlayLayer.appendChild(pastePreview);
+
+  const syncOverlay = () => {
+    canvasStage.style.width = `${canvas.width}px`;
+    canvasStage.style.height = `${canvas.height}px`;
+    overlayLayer.style.width = `${canvas.width}px`;
+    overlayLayer.style.height = `${canvas.height}px`;
+    overlayLayer.classList.toggle('hand-mode', handMode);
+    overlayLayer.classList.toggle('panning', isPanning);
+    handToolBtn.classList.toggle('active', handMode);
+  };
+  const detectPaper = (wPt, hPt) => {
+    const mmW = (wPt * 25.4) / 72, mmH = (hPt * 25.4) / 72;
+    const portrait = mmH >= mmW;
+    return `${portrait ? '縦向き' : '横向き'} ${Math.round(mmW)}x${Math.round(mmH)}mm`;
+  };
+  const updateOpsField = () => { operationsInput.value = JSON.stringify(ops); };
+  const getPoint = (ev) => { const r = overlayLayer.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
+  const hideMenu = () => contextMenu.classList.add('hidden');
+  const showMenu = (x, y) => { contextMenu.style.left = `${x}px`; contextMenu.style.top = `${y}px`; contextMenu.classList.remove('hidden'); };
+  const updatePastePreview = (px, py) => {
+    if (!copySource || mode !== 'copy_paste') { pastePreview.classList.add('hidden'); return; }
+    pastePreview.style.left = `${px}px`;
+    pastePreview.style.top = `${py}px`;
+    pastePreview.style.width = `${pdfToPx(copySource.w)}px`;
+    pastePreview.style.height = `${pdfToPx(copySource.h)}px`;
+    pastePreview.classList.remove('hidden');
+  };
+  const hidePastePreview = () => pastePreview.classList.add('hidden');
+  const removeImageRefIfUnused = (ref) => {
+    if (!ref || ops.some((op) => op.type === 'add_image' && op.image_ref === ref)) return;
+    const url = imageUrlByRef.get(ref); if (url) URL.revokeObjectURL(url);
+    imageUrlByRef.delete(ref); imageFilesByRef.delete(ref);
+  };
+
+  const renderOps = () => {
+    overlayLayer.querySelectorAll('.overlay-item').forEach((el) => el.remove());
+    ops.forEach((op, idx) => {
+      const item = document.createElement('div');
+      item.className = 'overlay-item';
+      if (idx === selectedIndex) item.classList.add('selected');
+      item.dataset.idx = String(idx);
+      if (op.type === 'add_text' && op.page === pageNum) {
+        item.classList.add('text');
+        item.style.left = `${pdfToPx(op.x)}px`; item.style.top = `${pdfToPx(op.y)}px`;
+        item.style.width = `${pdfToPx(op.width)}px`; item.style.height = `${pdfToPx(op.height)}px`;
+        item.style.color = op.color || '#0f172a'; item.style.fontSize = `${Math.max(1, pdfToPx(op.font_size || 14))}px`;
+        item.style.fontFamily = 'Helvetica, Arial, sans-serif';
+        item.style.lineHeight = '1.2';
+        item.style.padding = '0';
+        item.textContent = op.text; overlayLayer.appendChild(item); return;
+      }
+      if (op.type === 'add_shape' && op.page === pageNum) {
+        const cssStyle = styleToCss(op.stroke_style || 'solid');
+        if (op.shape === 'line') {
+          const x1 = pdfToPx(op.x1), y1 = pdfToPx(op.y1), x2 = pdfToPx(op.x2), y2 = pdfToPx(op.y2);
+          const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy), ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+          item.classList.add('line'); item.style.left = `${x1}px`; item.style.top = `${y1}px`; item.style.width = `${len}px`;
+          item.style.borderTopColor = op.stroke_color || '#1d4ed8'; item.style.borderTopStyle = cssStyle; item.style.borderTopWidth = `${Math.max(1, pdfToPx(op.stroke_width || 2))}px`; item.style.transform = `rotate(${ang}deg)`;
+        } else {
+          item.style.left = `${pdfToPx(op.x)}px`; item.style.top = `${pdfToPx(op.y)}px`;
+          item.style.width = `${pdfToPx(op.width)}px`; item.style.height = `${pdfToPx(op.height)}px`;
+          item.style.borderColor = op.stroke_color || '#1d4ed8'; item.style.borderStyle = cssStyle; item.style.borderWidth = `${Math.max(1, pdfToPx(op.stroke_width || 2))}px`; item.style.background = op.fill_color || 'transparent';
+          if (op.shape === 'ellipse') item.style.borderRadius = '999px';
+        }
+        overlayLayer.appendChild(item); return;
+      }
+      if (op.type === 'add_image' && op.page === pageNum) {
+        item.style.left = `${pdfToPx(op.x)}px`; item.style.top = `${pdfToPx(op.y)}px`;
+        item.style.width = `${pdfToPx(op.width)}px`; item.style.height = `${pdfToPx(op.height)}px`;
+        const url = imageUrlByRef.get(op.image_ref);
+        item.style.background = url ? `url("${url}") center / cover no-repeat` : 'rgba(37,99,235,0.08)';
+        item.style.borderColor = '#2563eb'; overlayLayer.appendChild(item); return;
+      }
+      if (op.type === 'copy_region_paste' && op.target_page === pageNum) {
+        item.style.left = `${pdfToPx(op.target_x)}px`; item.style.top = `${pdfToPx(op.target_y)}px`;
+        item.style.width = `${pdfToPx(op.target_width)}px`; item.style.height = `${pdfToPx(op.target_height)}px`;
+        item.style.borderColor = '#0ea5e9'; item.style.background = 'rgba(14,165,233,0.1)'; overlayLayer.appendChild(item);
+      }
+    });
+  };
+
+  const selectOp = (idx) => {
+    selectedIndex = idx;
+    renderOps();
+    const op = ops[idx];
+    if (!op) {
+      propEmpty.classList.remove('hidden');
+      propForm.classList.add('hidden');
+      return;
+    }
+    propEmpty.classList.add('hidden');
+    propForm.classList.remove('hidden');
+    groupSize.classList.remove('hidden');
+    groupText.classList.add('hidden');
+    groupFont.classList.add('hidden');
+    groupShapeColors.classList.add('hidden');
+    groupLine2.classList.add('hidden');
+    groupImageIndex.classList.add('hidden');
+    groupStrokeStyle.classList.add('hidden');
+
+    propType.value = op.type;
+    propPage.value = op.page || op.target_page || 1;
+    propStrokeWidth.value = op.stroke_width || 2;
+    propStrokeStyle.value = op.stroke_style || 'solid';
+    propX.value = op.x ?? op.target_x ?? op.x1 ?? 0;
+    propY.value = op.y ?? op.target_y ?? op.y1 ?? 0;
+    propW.value = op.width ?? op.target_width ?? 100;
+    propH.value = op.height ?? op.target_height ?? 50;
+    if (op.type === 'add_text') {
+      groupText.classList.remove('hidden');
+      groupFont.classList.remove('hidden');
+      propText.value = op.text || '';
+      propFontSize.value = op.font_size || 14;
+      propTextColor.value = op.color || '#0f172a';
+    }
+    if (op.type === 'add_shape') {
+      groupShapeColors.classList.remove('hidden');
+      groupStrokeStyle.classList.remove('hidden');
+      propStrokeColor.value = op.stroke_color || '#1d4ed8';
+      propFillColor.value = op.fill_color && op.fill_color.startsWith('#') ? op.fill_color : '#93c5fd';
+      if (op.shape === 'line') {
+        groupLine2.classList.remove('hidden');
+        groupSize.classList.add('hidden');
+        propX.value = op.x1;
+        propY.value = op.y1;
+        propX2.value = op.x2;
+        propY2.value = op.y2;
+      }
+    }
+  };
+
+  const applyPropChanges = () => {
+    const op = ops[selectedIndex];
+    if (!op) return;
+    const v = (el) => Number(el.value || 0);
+    if (op.type === 'add_text') {
+      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = v(propW); op.height = v(propH);
+      op.text = propText.value || ''; op.font_size = v(propFontSize) || 14; op.color = propTextColor.value;
+    } else if (op.type === 'add_shape') {
+      op.page = v(propPage); op.stroke_style = propStrokeStyle.value;
+      if (op.shape === 'line') { op.x1 = v(propX); op.y1 = v(propY); op.x2 = v(propX2); op.y2 = v(propY2); }
+      else { op.x = v(propX); op.y = v(propY); op.width = v(propW); op.height = v(propH); }
+      op.stroke_color = propStrokeColor.value; op.fill_color = propFillColor.value; op.stroke_width = v(propStrokeWidth) || 2;
+    } else if (op.type === 'add_image') {
+      op.page = v(propPage); op.x = v(propX); op.y = v(propY); op.width = v(propW); op.height = v(propH);
+    } else if (op.type === 'copy_region_paste') {
+      op.target_page = v(propPage); op.target_x = v(propX); op.target_y = v(propY); op.target_width = v(propW); op.target_height = v(propH);
+    }
+    updateOpsField();
+    renderOps();
+  };
+  [propPage, propStrokeWidth, propStrokeStyle, propX, propY, propW, propH, propText, propFontSize, propTextColor, propStrokeColor, propFillColor, propX2, propY2, propImageIndex]
+    .forEach((el) => el.addEventListener('input', applyPropChanges));
+
+  const renderPage = async () => {
+    if (!pdfDoc) return;
+    const page = await pdfDoc.getPage(pageNum);
+    const baseVp = page.getViewport({ scale: 1.0 });
+    const viewport = page.getViewport({ scale });
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    canvas.style.width = `${viewport.width}px`; canvas.style.height = `${viewport.height}px`;
+    if (renderTask) { try { renderTask.cancel(); } catch (_) {} }
+    renderTask = page.render({ canvasContext: ctx, viewport }); await renderTask.promise;
+    pageInfo.textContent = `${pageNum} / ${pdfDoc.numPages}`; zoomInfo.textContent = `${Math.round(scale * 100)}%`; pageMeta.textContent = detectPaper(baseVp.width, baseVp.height);
+    syncOverlay(); renderOps();
+  };
+
+  const pickImageFile = () => new Promise((resolve) => { const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*'; input.onchange = () => resolve(input.files && input.files[0] ? input.files[0] : null); input.click(); });
+  const addImageAt = async (x, y) => {
+    const file = await pickImageFile(); if (!file) return;
+    const ref = `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    imageFilesByRef.set(ref, file); imageUrlByRef.set(ref, URL.createObjectURL(file));
+    ops.push({ type: 'add_image', page: pageNum, x, y, width: 220, height: 120, image_ref: ref });
+    updateOpsField(); renderOps();
+  };
+  const addByMenu = (action) => {
+    hideMenu(); if (!pdfDoc) return;
+    const x = pxToPdf(contextPoint.x), y = pxToPdf(contextPoint.y);
+    if (action === 'add_text') ops.push({ type: 'add_text', page: pageNum, x, y, width: 220, height: 90, text: 'テキスト', font_size: 16, color: '#0f172a' });
+    else if (action === 'add_rect') ops.push({ type: 'add_shape', page: pageNum, shape: 'rect', x, y, width: 220, height: 90, stroke_color: '#1d4ed8', fill_color: '#93c5fd', stroke_width: 2, stroke_style: 'solid' });
+    else if (action === 'add_ellipse') ops.push({ type: 'add_shape', page: pageNum, shape: 'ellipse', x, y, width: 220, height: 90, stroke_color: '#1d4ed8', fill_color: '#93c5fd', stroke_width: 2, stroke_style: 'solid' });
+    else if (action === 'add_image') { addImageAt(x, y); return; }
+    else if (action === 'add_line') { mode = 'line'; lineStart = { x, y }; }
+    else if (action === 'start_copy') { mode = 'copy_select'; copySource = null; hidePastePreview(); }
+    updateOpsField(); renderOps();
+  };
+
+  contextMenu.addEventListener('click', (ev) => { const btn = ev.target.closest('button[data-action]'); if (btn) addByMenu(btn.dataset.action); });
+  handToolBtn.addEventListener('click', () => { handMode = !handMode; syncOverlay(); });
+  document.addEventListener('click', () => hideMenu());
+  overlayLayer.addEventListener('contextmenu', (ev) => { ev.preventDefault(); if (handMode || !pdfDoc) return; const p = getPoint(ev); contextPoint = p; showMenu(p.x, p.y); });
+  overlayLayer.addEventListener('click', (ev) => {
+    if (!pdfDoc || handMode || isPanning) return;
+    if (suppressClick) { suppressClick = false; return; }
+    const item = ev.target.closest('.overlay-item');
+    if (item) { selectOp(Number(item.dataset.idx)); return; }
+    selectOp(-1);
+    const p = getPoint(ev);
+    if (mode === 'line' && lineStart) { ops.push({ type: 'add_shape', page: pageNum, shape: 'line', x1: lineStart.x, y1: lineStart.y, x2: pxToPdf(p.x), y2: pxToPdf(p.y), stroke_color: '#1d4ed8', stroke_width: 2, stroke_style: 'solid' }); mode = 'idle'; lineStart = null; updateOpsField(); renderOps(); }
+    else if (mode === 'copy_paste' && copySource) {
+      ops.push({ type: 'copy_region_paste', source_page: copySource.page, source_x: copySource.x, source_y: copySource.y, source_width: copySource.w, source_height: copySource.h, target_page: pageNum, target_x: pxToPdf(p.x), target_y: pxToPdf(p.y), target_width: copySource.w, target_height: copySource.h });
+      mode = 'idle'; copySource = null; hidePastePreview(); updateOpsField(); renderOps(); selectOp(ops.length - 1);
+    }
+  });
+  overlayLayer.addEventListener('mousedown', (ev) => {
+    const item = ev.target.closest('.overlay-item');
+    if (item && !handMode && mode !== 'copy_select' && ev.button === 0) {
+      const idx = Number(item.dataset.idx);
+      const op = ops[idx];
+      if (op) {
+        const p = getPoint(ev);
+        moveDrag = {
+          idx,
+          sx: p.x,
+          sy: p.y,
+          ox: op.x,
+          oy: op.y,
+          ox1: op.x1,
+          oy1: op.y1,
+          ox2: op.x2,
+          oy2: op.y2,
+          tx: op.target_x,
+          ty: op.target_y,
+          moved: false,
+        };
+        selectOp(idx);
+        return;
+      }
+    }
+    if (handMode && ev.button === 0) { ev.preventDefault(); isPanning = true; panStart = { x: ev.clientX, y: ev.clientY, left: viewerWrap.scrollLeft, top: viewerWrap.scrollTop }; syncOverlay(); return; }
+    if (mode !== 'copy_select' || !pdfDoc) return;
+    dragStart = getPoint(ev); dragRect.classList.remove('hidden'); dragRect.style.left = `${dragStart.x}px`; dragRect.style.top = `${dragStart.y}px`; dragRect.style.width = '0px'; dragRect.style.height = '0px';
+  });
+  overlayLayer.addEventListener('mousemove', (ev) => {
+    if (moveDrag) {
+      const p = getPoint(ev);
+      const dx = pxToPdf(p.x - moveDrag.sx);
+      const dy = pxToPdf(p.y - moveDrag.sy);
+      if (Math.abs(dx) > 0.2 || Math.abs(dy) > 0.2) moveDrag.moved = true;
+      const op = ops[moveDrag.idx];
+      if (!op) return;
+      if (op.type === 'add_text' || op.type === 'add_image') {
+        op.x = (moveDrag.ox ?? op.x ?? 0) + dx;
+        op.y = (moveDrag.oy ?? op.y ?? 0) + dy;
+      } else if (op.type === 'add_shape') {
+        if (op.shape === 'line') {
+          op.x1 = (moveDrag.ox1 ?? op.x1 ?? 0) + dx;
+          op.y1 = (moveDrag.oy1 ?? op.y1 ?? 0) + dy;
+          op.x2 = (moveDrag.ox2 ?? op.x2 ?? 0) + dx;
+          op.y2 = (moveDrag.oy2 ?? op.y2 ?? 0) + dy;
+        } else {
+          op.x = (moveDrag.ox ?? op.x ?? 0) + dx;
+          op.y = (moveDrag.oy ?? op.y ?? 0) + dy;
+        }
+      } else if (op.type === 'copy_region_paste') {
+        op.target_x = (moveDrag.tx ?? op.target_x ?? 0) + dx;
+        op.target_y = (moveDrag.ty ?? op.target_y ?? 0) + dy;
+      }
+      updateOpsField();
+      renderOps();
+      if (selectedIndex === moveDrag.idx) selectOp(moveDrag.idx);
+      return;
+    }
+    if (isPanning && panStart) { viewerWrap.scrollLeft = panStart.left - (ev.clientX - panStart.x); viewerWrap.scrollTop = panStart.top - (ev.clientY - panStart.y); return; }
+    if (mode === 'copy_paste' && copySource) { const p = getPoint(ev); updatePastePreview(p.x, p.y); return; }
+    if (!dragStart || mode !== 'copy_select') return;
+    const p = getPoint(ev), left = Math.min(dragStart.x, p.x), top = Math.min(dragStart.y, p.y), w = Math.abs(p.x - dragStart.x), h = Math.abs(p.y - dragStart.y);
+    dragRect.style.left = `${left}px`; dragRect.style.top = `${top}px`; dragRect.style.width = `${w}px`; dragRect.style.height = `${h}px`;
+  });
+  overlayLayer.addEventListener('mouseup', (ev) => {
+    if (moveDrag) {
+      suppressClick = moveDrag.moved;
+      moveDrag = null;
+      return;
+    }
+    if (isPanning) { isPanning = false; panStart = null; syncOverlay(); return; }
+    if (!dragStart || mode !== 'copy_select') return;
+    const p = getPoint(ev), left = Math.min(dragStart.x, p.x), top = Math.min(dragStart.y, p.y), w = Math.max(2, Math.abs(p.x - dragStart.x)), h = Math.max(2, Math.abs(p.y - dragStart.y));
+    copySource = { page: pageNum, x: pxToPdf(left), y: pxToPdf(top), w: pxToPdf(w), h: pxToPdf(h) }; dragStart = null; dragRect.classList.add('hidden'); mode = 'copy_paste'; updatePastePreview(p.x, p.y);
+  });
+  overlayLayer.addEventListener('mouseleave', () => {
+    if (moveDrag) {
+      suppressClick = moveDrag.moved;
+      moveDrag = null;
+    }
+    hidePastePreview();
+  });
+
+  deleteSelectedBtn.addEventListener('click', () => {
+    if (selectedIndex < 0) return;
+    const removed = ops[selectedIndex];
+    ops.splice(selectedIndex, 1);
+    selectedIndex = -1;
+    if (removed && removed.type === 'add_image') removeImageRefIfUnused(removed.image_ref);
+    updateOpsField(); renderOps(); selectOp(-1);
+  });
+  undoOpBtn.addEventListener('click', () => { const removed = ops.pop(); if (removed && removed.type === 'add_image') removeImageRefIfUnused(removed.image_ref); selectedIndex = Math.min(selectedIndex, ops.length - 1); updateOpsField(); renderOps(); selectOp(selectedIndex); });
+  clearOpsBtn.addEventListener('click', () => { imageUrlByRef.forEach((u) => URL.revokeObjectURL(u)); imageUrlByRef.clear(); imageFilesByRef.clear(); ops.length = 0; selectedIndex = -1; mode = 'idle'; lineStart = null; copySource = null; hidePastePreview(); updateOpsField(); renderOps(); selectOp(-1); });
+  prevPageBtn.addEventListener('click', async () => { if (pdfDoc && pageNum > 1) { pageNum -= 1; await renderPage(); } });
+  nextPageBtn.addEventListener('click', async () => { if (pdfDoc && pageNum < pdfDoc.numPages) { pageNum += 1; await renderPage(); } });
+  zoomOutBtn.addEventListener('click', async () => { if (pdfDoc) { scale = Math.max(0.5, scale - 0.1); await renderPage(); } });
+  zoomInBtn.addEventListener('click', async () => { if (pdfDoc) { scale = Math.min(3.0, scale + 0.1); await renderPage(); } });
+  editorPdfInput.addEventListener('change', async (ev) => { const file = ev.target.files && ev.target.files[0]; if (!file) return; const data = await file.arrayBuffer(); pdfDoc = await pdfjsLib.getDocument({ data }).promise; pageNum = 1; scale = 1.25; await renderPage(); selectOp(-1); });
+  viewerWrap.setAttribute('tabindex', '0');
+  setTimeout(() => viewerWrap.focus(), 0);
+
+  editorForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (!editorPdfInput.files || !editorPdfInput.files[0]) { alert('PDFファイルを選択してください。'); return; }
+    if (!ops.length) { alert('編集内容がありません。'); return; }
+    updateOpsField();
+    const submitBtn = editorForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = '生成中...';
+    try {
+      const formData = new FormData();
+      formData.append('pdf', editorPdfInput.files[0], editorPdfInput.files[0].name);
+      formData.append('operations', operationsInput.value);
+      imageFilesByRef.forEach((file, ref) => formData.append(ref, file, file.name));
+      const response = await fetch(editorForm.action, { method: 'POST', body: formData });
+      if (!response.ok) {
+        let message = '編集PDFの生成に失敗しました。';
+        try { const data = await response.json(); if (data && data.error) message = data.error; } catch (_) {}
+        throw new Error(message);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'powerpdf_edited_output.pdf'; a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert(error.message || '編集PDFの生成に失敗しました。');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalText;
+    }
+  });
+  selectOp(-1);
+})();
+
+  </script>
+</body>
+</html>
