@@ -289,7 +289,7 @@ def _collect_affected_pages_for_edit(operations, total_pages):
             raise ValueError(f"Operation {idx} format is invalid.")
 
         op_type = op.get("type")
-        if op_type in {"add_text", "add_shape", "add_image"}:
+        if op_type in {"add_text", "add_shape", "add_image", "add_freehand"}:
             affected.add(_parse_page_number(op.get("page"), total_pages))
         elif op_type == "copy_region_paste":
             affected.add(_parse_page_number(op.get("source_page"), total_pages))
@@ -1893,6 +1893,7 @@ def edit_pdf_overlay():
     - add_text
     - add_shape (rect / ellipse / line)
     - add_image
+    - add_freehand
     - copy_region_paste
     """
     temp_dir = None
@@ -2043,6 +2044,30 @@ def edit_pdf_overlay():
                     stream=image_bytes,
                     overlay=True,
                 )
+
+            elif op_type == "add_freehand":
+                page_idx = _parse_page_number(op.get("page"), total_pages)
+                page = doc[page_idx]
+                points = op.get("points", [])
+                if not isinstance(points, list) or len(points) < 2:
+                    raise ValueError(f"Operation {idx}: freehand points must have at least 2 points.")
+                stroke_width = max(float(op.get("stroke_width", 2)), 0.1)
+                stroke = _parse_color_hex(op.get("stroke_color", "#1d4ed8"), (0.11, 0.31, 0.85))
+                stroke_style = str(op.get("stroke_style", "solid")).lower()
+                dashes = _dash_pattern(stroke_style)
+                pdf_points = []
+                for point_idx, point in enumerate(points, start=1):
+                    if not isinstance(point, dict):
+                        raise ValueError(f"Operation {idx}: point {point_idx} is invalid.")
+                    px = float(point.get("x", 0))
+                    py = float(point.get("y", 0))
+                    pdf_points.append(_to_pdf_point(page, px, py))
+
+                shape = page.new_shape()
+                for i in range(1, len(pdf_points)):
+                    shape.draw_line(pdf_points[i - 1], pdf_points[i])
+                shape.finish(color=stroke, fill=None, width=stroke_width, dashes=dashes)
+                shape.commit(overlay=True)
 
             elif op_type == "copy_region_paste":
                 source_page_idx = _parse_page_number(op.get("source_page"), total_pages)
