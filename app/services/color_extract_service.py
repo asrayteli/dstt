@@ -1,13 +1,13 @@
 import io
-from typing import Iterable, List, Sequence, Tuple
+from typing import Sequence, Tuple
 
 import fitz
 import numpy as np
 import pikepdf
 from PIL import Image
 
-
 Color = Tuple[int, int, int]
+Region = Tuple[float, float, float, float]
 
 
 def detect_pdf_bytes(file_bytes: bytes) -> bool:
@@ -65,6 +65,24 @@ def _mask_for_colors(rgb_array: np.ndarray, target_colors: Sequence[Color], tole
     return mask
 
 
+def _build_region_mask(height: int, width: int, region: Region | None) -> np.ndarray | None:
+    if region is None:
+        return None
+
+    rx, ry, rw, rh = region
+    x0 = max(0, min(width, int(round(rx * width))))
+    y0 = max(0, min(height, int(round(ry * height))))
+    x1 = max(0, min(width, int(round((rx + rw) * width))))
+    y1 = max(0, min(height, int(round((ry + rh) * height))))
+
+    if x1 <= x0 or y1 <= y0:
+        raise ValueError("処理範囲が不正です。")
+
+    region_mask = np.zeros((height, width), dtype=bool)
+    region_mask[y0:y1, x0:x1] = True
+    return region_mask
+
+
 def apply_color_operation(
     image: Image.Image,
     mode: str,
@@ -72,28 +90,39 @@ def apply_color_operation(
     tolerance: int,
     transparent_output: bool,
     replacement_color: Color | None = None,
+    region: Region | None = None,
 ) -> Image.Image:
     rgba = image.convert("RGBA")
     arr = np.array(rgba)
     rgb = arr[:, :, :3]
     alpha = arr[:, :, 3]
+    h, w = rgb.shape[:2]
 
-    mask = _mask_for_colors(rgb, target_colors, tolerance)
+    color_mask = _mask_for_colors(rgb, target_colors, tolerance)
+    region_mask = _build_region_mask(h, w, region)
+    effective_mask = color_mask if region_mask is None else (color_mask & region_mask)
 
     if mode == "extract":
-        if transparent_output:
-            alpha[~mask] = 0
+        if region_mask is None:
+            if transparent_output:
+                alpha[~effective_mask] = 0
+            else:
+                rgb[~effective_mask] = [255, 255, 255]
         else:
-            rgb[~mask] = [255, 255, 255]
+            within_region_nonmatch = region_mask & ~effective_mask
+            if transparent_output:
+                alpha[within_region_nonmatch] = 0
+            else:
+                rgb[within_region_nonmatch] = [255, 255, 255]
     elif mode == "exclude":
         if transparent_output:
-            alpha[mask] = 0
+            alpha[effective_mask] = 0
         else:
-            rgb[mask] = [255, 255, 255]
+            rgb[effective_mask] = [255, 255, 255]
     elif mode == "replace":
         if replacement_color is None:
             raise ValueError("replacement_color is required for replace mode")
-        rgb[mask] = np.array(replacement_color, dtype=np.uint8)
+        rgb[effective_mask] = np.array(replacement_color, dtype=np.uint8)
     else:
         raise ValueError("Unsupported mode")
 
@@ -120,6 +149,7 @@ def process_pdf_bytes(
     transparent_output: bool,
     replacement_color: Color | None = None,
     zoom: float = 2.0,
+    region: Region | None = None,
 ) -> bytes:
     source_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     out_doc = fitz.open()
@@ -135,6 +165,7 @@ def process_pdf_bytes(
                 tolerance=tolerance,
                 transparent_output=transparent_output,
                 replacement_color=replacement_color,
+                region=region,
             )
             png_bytes = _pil_to_png_bytes(processed)
             width = processed.width
@@ -157,6 +188,7 @@ def render_pdf_first_page_preview(
     transparent_output: bool,
     replacement_color: Color | None = None,
     zoom: float = 1.5,
+    region: Region | None = None,
 ) -> bytes:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
@@ -172,6 +204,7 @@ def render_pdf_first_page_preview(
             tolerance=tolerance,
             transparent_output=transparent_output,
             replacement_color=replacement_color,
+            region=region,
         )
         return _pil_to_png_bytes(processed)
     finally:

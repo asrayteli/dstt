@@ -63,6 +63,8 @@
           </select>
         </div>
 
+        <input type="hidden" id="processRegionInput" name="process_region">
+
         <div class="pt-2">
           <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">処理してダウンロード</button>
         </div>
@@ -74,20 +76,22 @@
         <h2 class="font-semibold text-lg">リアルタイムプレビュー</h2>
         <span id="previewStatus" class="text-xs text-gray-500">待機中</span>
       </div>
-      <div class="flex items-center gap-2 mb-3">
+      <div class="flex items-center gap-2 mb-3 flex-wrap">
         <button id="zoomOutBtn" type="button" class="text-xs bg-gray-100 border px-2 py-1 rounded hover:bg-gray-200">−</button>
         <span id="zoomLabel" class="text-xs text-gray-600 w-16 text-center">100%</span>
         <button id="zoomInBtn" type="button" class="text-xs bg-gray-100 border px-2 py-1 rounded hover:bg-gray-200">＋</button>
         <button id="resetViewBtn" type="button" class="text-xs bg-gray-100 border px-2 py-1 rounded hover:bg-gray-200">表示をリセット</button>
-        <span class="text-xs text-gray-500 ml-auto">ズーム時はドラッグで移動（手のひらツール）</span>
+        <button id="toggleRegionBtn" type="button" class="text-xs bg-amber-100 border px-2 py-1 rounded hover:bg-amber-200">範囲指定: OFF</button>
+        <button id="clearRegionBtn" type="button" class="text-xs bg-gray-100 border px-2 py-1 rounded hover:bg-gray-200">範囲クリア</button>
       </div>
       <div id="previewViewport" class="border rounded-lg min-h-[360px] h-[70vh] bg-gray-50 overflow-hidden relative">
         <div id="previewCanvasWrap" class="absolute inset-0 flex items-center justify-center select-none">
           <img id="previewImage" alt="preview" class="hidden cursor-crosshair pointer-events-auto" draggable="false">
+          <div id="selectionBox" class="hidden absolute border-2 border-amber-500 bg-amber-200/20 pointer-events-none"></div>
           <p id="previewPlaceholder" class="text-sm text-gray-500">ファイルを選択するとプレビューが表示されます</p>
         </div>
       </div>
-      <p class="text-xs text-gray-500 mt-3">プレビュー画像をクリックすると、その位置の色を対象色に追加できます。</p>
+      <p class="text-xs text-gray-500 mt-3">範囲指定ONでドラッグすると処理範囲を制限できます。OFF時は拡大画像をドラッグで移動（手のひらツール）。</p>
     </div>
   </div>
 </div>
@@ -105,6 +109,7 @@
   const replacementColor = document.getElementById('replacementColor');
   const replacementHex = document.getElementById('replacementHex');
   const targetColorsInput = document.getElementById('targetColorsInput');
+  const processRegionInput = document.getElementById('processRegionInput');
   const colorList = document.getElementById('colorList');
   const addColorBtn = document.getElementById('addColorBtn');
   const eyedropperBtn = document.getElementById('eyedropperBtn');
@@ -112,9 +117,12 @@
   const previewPlaceholder = document.getElementById('previewPlaceholder');
   const previewStatus = document.getElementById('previewStatus');
   const previewViewport = document.getElementById('previewViewport');
+  const selectionBox = document.getElementById('selectionBox');
   const zoomInBtn = document.getElementById('zoomInBtn');
   const zoomOutBtn = document.getElementById('zoomOutBtn');
   const resetViewBtn = document.getElementById('resetViewBtn');
+  const toggleRegionBtn = document.getElementById('toggleRegionBtn');
+  const clearRegionBtn = document.getElementById('clearRegionBtn');
   const zoomLabel = document.getElementById('zoomLabel');
 
   let currentPreviewUrl = null;
@@ -126,6 +134,12 @@
   let isPanning = false;
   let panStartX = 0;
   let panStartY = 0;
+
+  let regionMode = false;
+  let selectingRegion = false;
+  let suppressClick = false;
+  let selectionStart = null;
+  let selectedRegion = null; // normalized {x,y,w,h}
 
   function normalizeHex(value) {
     const v = (value || '').trim();
@@ -164,11 +178,9 @@
   }
 
   function applyPreviewTransform() {
-    const tx = panX;
-    const ty = panY;
     previewImage.style.transformOrigin = 'center center';
-    previewImage.style.transform = `translate(${tx}px, ${ty}px) scale(${zoomLevel})`;
-    previewImage.style.cursor = zoomLevel > 1 ? (isPanning ? 'grabbing' : 'grab') : 'crosshair';
+    previewImage.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+    previewImage.style.cursor = regionMode ? 'crosshair' : (zoomLevel > 1 ? (isPanning ? 'grabbing' : 'grab') : 'crosshair');
     zoomLabel.textContent = `${Math.round(zoomLevel * 100)}%`;
   }
 
@@ -189,6 +201,45 @@
     applyPreviewTransform();
   }
 
+  function setRegionMode(enabled) {
+    regionMode = enabled;
+    toggleRegionBtn.textContent = `範囲指定: ${enabled ? 'ON' : 'OFF'}`;
+    toggleRegionBtn.classList.toggle('bg-amber-300', enabled);
+    applyPreviewTransform();
+  }
+
+  function clearRegion() {
+    selectedRegion = null;
+    processRegionInput.value = '';
+    selectionBox.classList.add('hidden');
+    schedulePreview();
+  }
+
+  function clamp01(v) {
+    return Math.min(1, Math.max(0, v));
+  }
+
+  function getNormalizedPosFromEvent(e) {
+    const rect = previewImage.getBoundingClientRect();
+    const nx = clamp01((e.clientX - rect.left) / rect.width);
+    const ny = clamp01((e.clientY - rect.top) / rect.height);
+    return { x: nx, y: ny, rect };
+  }
+
+  function renderSelectionBox() {
+    if (!selectedRegion || !previewImage.src) {
+      selectionBox.classList.add('hidden');
+      return;
+    }
+
+    const rect = previewImage.getBoundingClientRect();
+    selectionBox.classList.remove('hidden');
+    selectionBox.style.left = `${rect.left - previewViewport.getBoundingClientRect().left + rect.width * selectedRegion.x}px`;
+    selectionBox.style.top = `${rect.top - previewViewport.getBoundingClientRect().top + rect.height * selectedRegion.y}px`;
+    selectionBox.style.width = `${rect.width * selectedRegion.w}px`;
+    selectionBox.style.height = `${rect.height * selectedRegion.h}px`;
+  }
+
   async function triggerPreview() {
     if (!fileInput.files.length || colors.length === 0) return;
 
@@ -199,6 +250,9 @@
     fd.append('tolerance', tolerance.value);
     fd.append('transparent_output', transparentOutput.checked ? 'true' : 'false');
     fd.append('replacement_color', replacementColor.value);
+    if (selectedRegion) {
+      fd.append('process_region', JSON.stringify(selectedRegion));
+    }
 
     previewStatus.textContent = 'プレビュー更新中...';
 
@@ -216,6 +270,7 @@
       previewImage.classList.remove('hidden');
       previewPlaceholder.classList.add('hidden');
       resetPreviewView();
+      requestAnimationFrame(renderSelectionBox);
       previewStatus.textContent = 'プレビュー更新完了';
     } catch (err) {
       previewStatus.textContent = `エラー: ${err.message}`;
@@ -260,9 +315,7 @@
     }
   });
 
-  addColorBtn.addEventListener('click', () => {
-    addColor('#000000');
-  });
+  addColorBtn.addEventListener('click', () => addColor('#000000'));
 
   eyedropperBtn.addEventListener('click', async () => {
     if ('EyeDropper' in window) {
@@ -271,7 +324,7 @@
         const result = await eyeDropper.open();
         addColor(result.sRGBHex);
       } catch (_) {
-        // cancelled
+        // cancel
       }
       return;
     }
@@ -292,7 +345,9 @@
   });
 
   previewImage.addEventListener('click', (e) => {
-    if (!previewImage.src || isPanning) return;
+    if (!previewImage.src || isPanning || selectingRegion || suppressClick) return;
+    if (regionMode) return;
+
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -316,9 +371,24 @@
     if (!previewImage.src) return;
     e.preventDefault();
     changeZoom(e.deltaY > 0 ? -0.1 : 0.1);
+    requestAnimationFrame(renderSelectionBox);
   }, { passive: false });
 
   previewImage.addEventListener('mousedown', (e) => {
+    if (!previewImage.src) return;
+
+    if (regionMode) {
+      selectingRegion = true;
+      suppressClick = false;
+      const pos = getNormalizedPosFromEvent(e);
+      selectionStart = { x: pos.x, y: pos.y };
+      selectedRegion = { x: pos.x, y: pos.y, w: 0.0001, h: 0.0001 };
+      processRegionInput.value = JSON.stringify(selectedRegion);
+      renderSelectionBox();
+      e.preventDefault();
+      return;
+    }
+
     if (zoomLevel <= 1) return;
     isPanning = true;
     panStartX = e.clientX - panX;
@@ -328,16 +398,49 @@
   });
 
   window.addEventListener('mousemove', (e) => {
-    if (!isPanning) return;
-    panX = e.clientX - panStartX;
-    panY = e.clientY - panStartY;
-    applyPreviewTransform();
+    if (isPanning) {
+      panX = e.clientX - panStartX;
+      panY = e.clientY - panStartY;
+      applyPreviewTransform();
+      requestAnimationFrame(renderSelectionBox);
+      return;
+    }
+
+    if (!selectingRegion || !selectionStart) return;
+    const pos = getNormalizedPosFromEvent(e);
+    const minX = Math.min(selectionStart.x, pos.x);
+    const minY = Math.min(selectionStart.y, pos.y);
+    const maxX = Math.max(selectionStart.x, pos.x);
+    const maxY = Math.max(selectionStart.y, pos.y);
+    selectedRegion = {
+      x: minX,
+      y: minY,
+      w: Math.max(0.0001, maxX - minX),
+      h: Math.max(0.0001, maxY - minY),
+    };
+    processRegionInput.value = JSON.stringify(selectedRegion);
+    renderSelectionBox();
+    suppressClick = true;
   });
 
   window.addEventListener('mouseup', () => {
-    if (!isPanning) return;
-    isPanning = false;
-    applyPreviewTransform();
+    if (isPanning) {
+      isPanning = false;
+      applyPreviewTransform();
+    }
+
+    if (selectingRegion) {
+      selectingRegion = false;
+      if (selectedRegion && (selectedRegion.w < 0.01 || selectedRegion.h < 0.01)) {
+        selectedRegion = null;
+        processRegionInput.value = '';
+        selectionBox.classList.add('hidden');
+      } else if (selectedRegion) {
+        processRegionInput.value = JSON.stringify(selectedRegion);
+      }
+      schedulePreview();
+      setTimeout(() => { suppressClick = false; }, 50);
+    }
   });
 
   tolerance.addEventListener('input', () => {
@@ -345,9 +448,11 @@
     schedulePreview();
   });
 
-  zoomInBtn.addEventListener('click', () => changeZoom(0.25));
-  zoomOutBtn.addEventListener('click', () => changeZoom(-0.25));
-  resetViewBtn.addEventListener('click', resetPreviewView);
+  zoomInBtn.addEventListener('click', () => { changeZoom(0.25); requestAnimationFrame(renderSelectionBox); });
+  zoomOutBtn.addEventListener('click', () => { changeZoom(-0.25); requestAnimationFrame(renderSelectionBox); });
+  resetViewBtn.addEventListener('click', () => { resetPreviewView(); requestAnimationFrame(renderSelectionBox); });
+  toggleRegionBtn.addEventListener('click', () => setRegionMode(!regionMode));
+  clearRegionBtn.addEventListener('click', clearRegion);
 
   mode.addEventListener('change', updateModeUI);
   transparentOutput.addEventListener('change', schedulePreview);
@@ -360,10 +465,10 @@
 
   form.addEventListener('submit', () => {
     targetColorsInput.value = JSON.stringify(colors);
-    if (mode.value === 'replace') {
-      replacementColor.name = 'replacement_color';
-    }
+    processRegionInput.value = selectedRegion ? JSON.stringify(selectedRegion) : '';
   });
+
+  window.addEventListener('resize', () => requestAnimationFrame(renderSelectionBox));
 
   renderColorList();
   syncReplacement();

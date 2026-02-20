@@ -161,3 +161,48 @@ def test_invalid_pdf_returns_400_with_clear_message(client):
     assert response.status_code == 400
     data = response.get_json()
     assert "PDF" in data["error"]
+
+
+def test_process_region_limits_effect(client):
+    src = Image.new("RGBA", (20, 20), (0, 0, 255, 255))
+    for x in range(20):
+        for y in range(20):
+            if x < 10:
+                src.putpixel((x, y), (255, 0, 0, 255))
+    src_buf = io.BytesIO()
+    src.save(src_buf, format="PNG")
+
+    # region only right-half, so left red area must remain unchanged
+    payload = {
+        "mode": "replace",
+        "target_colors": json.dumps(["#ff0000"]),
+        "replacement_color": "#00ff00",
+        "tolerance": "10",
+        "transparent_output": "false",
+        "output_format": "png",
+        "process_region": json.dumps({"x": 0.5, "y": 0.0, "w": 0.5, "h": 1.0}),
+        "file": (io.BytesIO(src_buf.getvalue()), "sample.png"),
+    }
+    response = client.post("/tools/color_extract/process", data=payload, content_type="multipart/form-data")
+
+    assert response.status_code == 200
+    out = Image.open(io.BytesIO(response.data)).convert("RGBA")
+    # left side red remains red (outside region)
+    assert out.getpixel((2, 2))[:3] == (255, 0, 0)
+    # right side blue remains blue
+    assert out.getpixel((15, 2))[:3] == (0, 0, 255)
+
+
+def test_invalid_region_returns_400(client):
+    payload = {
+        "mode": "exclude",
+        "target_colors": json.dumps(["#ff0000"]),
+        "tolerance": "10",
+        "transparent_output": "true",
+        "process_region": json.dumps({"x": 0.9, "y": 0.9, "w": 0.5, "h": 0.5}),
+        "file": (io.BytesIO(_make_sample_png_bytes()), "sample.png"),
+    }
+    response = client.post("/tools/color_extract/preview", data=payload, content_type="multipart/form-data")
+
+    assert response.status_code == 400
+    assert "処理範囲" in response.get_json()["error"]
