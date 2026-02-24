@@ -1,4 +1,4 @@
-import io
+﻿import io
 import json
 import sys
 from pathlib import Path
@@ -56,6 +56,17 @@ def _make_sample_pdf_bytes():
     return data
 
 
+def _make_multi_page_pdf_bytes():
+    doc = fitz.open()
+    p1 = doc.new_page(width=120, height=120)
+    p1.draw_rect(fitz.Rect(0, 0, 120, 120), color=(1, 0, 0), fill=(1, 0, 0))
+    p2 = doc.new_page(width=120, height=120)
+    p2.draw_rect(fitz.Rect(0, 0, 120, 120), color=(0, 1, 0), fill=(0, 1, 0))
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
 def test_preview_png_returns_image(client):
     payload = {
         "mode": "exclude",
@@ -86,7 +97,7 @@ def test_process_png_can_download_jpg(client):
     assert response.status_code == 200
     assert response.content_type.startswith("image/jpeg")
     assert "attachment" in response.headers.get("Content-Disposition", "")
-    assert 'sample_processed.jpg' in response.headers.get("Content-Disposition", "")
+    assert "sample_processed.jpg" in response.headers.get("Content-Disposition", "")
 
 
 def test_preview_and_process_pdf(client):
@@ -172,7 +183,6 @@ def test_process_region_limits_effect(client):
     src_buf = io.BytesIO()
     src.save(src_buf, format="PNG")
 
-    # region only right-half, so left red area must remain unchanged
     payload = {
         "mode": "replace",
         "target_colors": json.dumps(["#ff0000"]),
@@ -187,9 +197,7 @@ def test_process_region_limits_effect(client):
 
     assert response.status_code == 200
     out = Image.open(io.BytesIO(response.data)).convert("RGBA")
-    # left side red remains red (outside region)
     assert out.getpixel((2, 2))[:3] == (255, 0, 0)
-    # right side blue remains blue
     assert out.getpixel((15, 2))[:3] == (0, 0, 255)
 
 
@@ -206,3 +214,170 @@ def test_invalid_region_returns_400(client):
 
     assert response.status_code == 400
     assert "処理範囲" in response.get_json()["error"]
+
+
+def test_auto_tune_returns_suggestion(client):
+    payload = {
+        "mode": "exclude",
+        "preset": "stamp_red",
+        "color_metric": "deltae",
+        "target_colors": json.dumps(["#ff0000"]),
+        "tolerance": "20",
+        "saturation_min": "0",
+        "lightness_min": "0",
+        "lightness_max": "255",
+        "enable_preprocess": "true",
+        "transparent_output": "true",
+        "file": (io.BytesIO(_make_sample_png_bytes()), "sample.png"),
+    }
+    response = client.post("/tools/color_extract/auto_tune", data=payload, content_type="multipart/form-data")
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "suggested_tolerance" in data
+    assert 0 <= data["suggested_tolerance"] <= 120
+
+
+def test_stamp_red_preset_can_reduce_red_noise(client):
+    img = Image.new("RGBA", (30, 20), (255, 255, 255, 255))
+    for x in range(5, 25):
+        for y in range(6, 14):
+            img.putpixel((x, y), (220, 40, 40, 255))
+    img.putpixel((1, 1), (220, 35, 35, 255))
+    img.putpixel((28, 18), (225, 45, 45, 255))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+
+    payload = {
+        "mode": "exclude",
+        "preset": "stamp_red",
+        "color_metric": "deltae",
+        "target_colors": json.dumps(["#dd2222"]),
+        "tolerance": "30",
+        "saturation_min": "0",
+        "lightness_min": "0",
+        "lightness_max": "255",
+        "enable_preprocess": "true",
+        "enable_postprocess": "true",
+        "min_component_area": "10",
+        "transparent_output": "false",
+        "output_format": "png",
+        "file": (io.BytesIO(buf.getvalue()), "stamp.png"),
+    }
+    response = client.post("/tools/color_extract/process", data=payload, content_type="multipart/form-data")
+
+    assert response.status_code == 200
+    out = Image.open(io.BytesIO(response.data)).convert("RGBA")
+    assert out.getpixel((10, 10))[:3] == (255, 255, 255)
+    assert out.getpixel((1, 1))[:3] != (255, 255, 255)
+
+
+def test_preview_pdf_returns_page_headers(client):
+    pdf_bytes = _make_multi_page_pdf_bytes()
+    payload = {
+        "mode": "exclude",
+        "target_colors": json.dumps(["#ff0000"]),
+        "tolerance": "20",
+        "transparent_output": "true",
+        "preview_page": "2",
+        "file": (io.BytesIO(pdf_bytes), "multi.pdf"),
+    }
+    response = client.post("/tools/color_extract/preview", data=payload, content_type="multipart/form-data")
+
+    assert response.status_code == 200
+    assert response.headers.get("X-PDF-Total-Pages") == "2"
+    assert response.headers.get("X-PDF-Page") == "2"
+
+
+def test_process_region_png_output_for_image(client):
+    payload = {
+        "mode": "exclude",
+        "target_colors": json.dumps(["#ff0000"]),
+        "tolerance": "20",
+        "transparent_output": "true",
+        "output_region_png": "true",
+        "process_region": json.dumps({"x": 0.0, "y": 0.0, "w": 0.5, "h": 1.0}),
+        "file": (io.BytesIO(_make_sample_png_bytes()), "sample.png"),
+    }
+    response = client.post("/tools/color_extract/process", data=payload, content_type="multipart/form-data")
+
+    assert response.status_code == 200
+    assert response.content_type.startswith("image/png")
+    out = Image.open(io.BytesIO(response.data)).convert("RGBA")
+    assert out.size == (8, 16)
+
+
+def test_process_region_png_output_for_pdf_current_page(client):
+    pdf_bytes = _make_multi_page_pdf_bytes()
+    payload = {
+        "mode": "exclude",
+        "target_colors": json.dumps(["#00ff00"]),
+        "tolerance": "20",
+        "transparent_output": "true",
+        "output_region_png": "true",
+        "preview_page": "2",
+        "process_region": json.dumps({"x": 0.0, "y": 0.0, "w": 0.5, "h": 1.0}),
+        "file": (io.BytesIO(pdf_bytes), "multi.pdf"),
+    }
+    response = client.post("/tools/color_extract/process", data=payload, content_type="multipart/form-data")
+
+    assert response.status_code == 200
+    assert response.content_type.startswith("image/png")
+    out = Image.open(io.BytesIO(response.data)).convert("RGBA")
+    assert out.width > 0 and out.height > 0
+
+
+def test_process_with_rect_fill_transparent_paint_action(client):
+    payload = {
+        "mode": "exclude",
+        "target_colors": json.dumps(["#00ff00"]),
+        "tolerance": "1",
+        "transparent_output": "false",
+        "output_format": "png",
+        "paint_actions": json.dumps(
+            [
+                {
+                    "type": "rect_fill",
+                    "x": 0.0,
+                    "y": 0.0,
+                    "w": 0.5,
+                    "h": 1.0,
+                    "color": "#00000000",
+                    "page": None,
+                }
+            ]
+        ),
+        "file": (io.BytesIO(_make_sample_png_bytes()), "sample.png"),
+    }
+    response = client.post("/tools/color_extract/process", data=payload, content_type="multipart/form-data")
+    assert response.status_code == 200
+    out = Image.open(io.BytesIO(response.data)).convert("RGBA")
+    assert out.getpixel((2, 2))[3] == 0
+    assert out.getpixel((12, 2))[3] == 255
+
+
+def test_process_with_free_draw_paint_action(client):
+    payload = {
+        "mode": "exclude",
+        "target_colors": json.dumps(["#00ff00"]),
+        "tolerance": "1",
+        "transparent_output": "false",
+        "output_format": "png",
+        "paint_actions": json.dumps(
+            [
+                {
+                    "type": "free_draw",
+                    "points": [{"x": 0.6, "y": 0.5}, {"x": 0.9, "y": 0.5}],
+                    "size": 4,
+                    "color": "#00FF00FF",
+                    "page": None,
+                }
+            ]
+        ),
+        "file": (io.BytesIO(_make_sample_png_bytes()), "sample.png"),
+    }
+    response = client.post("/tools/color_extract/process", data=payload, content_type="multipart/form-data")
+    assert response.status_code == 200
+    out = Image.open(io.BytesIO(response.data)).convert("RGBA")
+    px = out.getpixel((13, 8))
+    assert px[:3] == (0, 255, 0)
