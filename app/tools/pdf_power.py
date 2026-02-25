@@ -798,9 +798,9 @@ def compress_pdf():
         if not file or not file.filename:
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
-        filename = secure_filename(file.filename)
-        if not filename.endswith('.pdf'):
-            return jsonify({"error": "PDFファイルのみ対応しています"}), 400
+        filename = secure_filename(file.filename or "")
+        if not filename:
+            filename = "uploaded.pdf"
 
         compression_level = request.form.get("compression_level", "medium")
 
