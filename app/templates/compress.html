@@ -1,85 +1,454 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-xl mx-auto mt-10 bg-white rounded-xl shadow p-6">
-  <h2 class="text-xl font-bold mb-4">📦 圧縮ファイル生成ツール</h2>
+<style>
+  :root {
+    --primary: #3b82f6;
+    --primary-dark: #2563eb;
+    --primary-light: #93bbfd;
+    --primary-bg: #eff6ff;
+    --accent: #10b981;
+    --danger: #ef4444;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+  }
 
-  <form action="{{ url_for('compress.compress_tool') }}" method="POST" enctype="multipart/form-data" id="compressForm">
-    <div class="mb-4">
-      <label class="block mb-1">ファイルを複数選択:</label>
-      <input type="file" name="files" multiple class="w-full" id="fileInput">
-    </div>
+  .compress-card {
+    max-width: 980px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 1rem;
+    box-shadow: 0 4px 24px rgba(59, 130, 246, .10);
+    overflow: hidden;
+  }
 
-    <div class="mb-4">
-      <label class="block mb-1">選択中のファイル:</label>
-      <ul id="fileList" class="list-disc pl-4 text-sm text-gray-700">
-        <!-- 選択されたファイルがここに表示されます -->
-      </ul>
-    </div>
+  .compress-header {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    color: #fff;
+    padding: 1.5rem 2rem;
+  }
 
-    <div class="mb-4">
-      <label class="block mb-1">圧縮形式を選択:</label>
-      <select name="format" class="w-full border rounded px-2 py-1">
-        <option value="zip">ZIP</option>
-        <option value="tar">TAR</option>
-        <option value="tar.gz">TAR.GZ</option>
-      </select>
-    </div>
+  .compress-header h2 { font-size: 1.35rem; font-weight: 700; margin: 0; }
+  .compress-header .subtitle { font-size: .88rem; opacity: .88; margin-top: .2rem; }
 
-    <div class="mb-4">
-      <label class="block mb-1">パスワード（任意・ZIPのみ）:</label>
-      <input type="password" name="password" class="w-full border rounded px-2 py-1" placeholder="パスワードを設定（任意）">
-    </div>
+  .compress-body { padding: 1.5rem 2rem 2rem; }
 
-    <div class="mb-4">
-      <label class="block mb-1">圧縮ファイル名（任意）:</label>
-      <input type="text" name="archive_name" class="w-full border rounded px-2 py-1" placeholder="例: archive_name">
-    </div>
+  .section-title {
+    margin-top: 1.25rem;
+    margin-bottom: .45rem;
+    font-size: .85rem;
+    font-weight: 700;
+    color: var(--gray-600);
+  }
 
-    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">圧縮＆ダウンロード</button>
-  </form>
+  .drop-zone {
+    border: 2px dashed var(--gray-300);
+    border-radius: .75rem;
+    padding: 2.3rem 1rem;
+    text-align: center;
+    background: var(--gray-50);
+    cursor: pointer;
+    transition: .2s;
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--primary);
+    background: var(--primary-bg);
+  }
+  .drop-zone .drop-label { font-size: .95rem; color: var(--gray-500); }
+  .drop-zone .drop-label span { color: var(--primary); font-weight: 600; }
+
+  .meta-row {
+    margin-top: .6rem;
+    display: flex;
+    gap: 1rem;
+    font-size: .8rem;
+    color: var(--gray-500);
+  }
+
+  .file-chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .9rem; }
+  .file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    background: var(--primary-bg);
+    color: var(--primary-dark);
+    border: 1px solid #bfdbfe;
+    border-radius: 9999px;
+    padding: .25rem .5rem .25rem .75rem;
+    font-size: .8rem;
+    font-weight: 500;
+  }
+  .file-chip .ext {
+    background: var(--primary);
+    color: #fff;
+    border-radius: 9999px;
+    padding: 0 .45rem;
+    font-size: .7rem;
+    line-height: 1.6;
+  }
+  .file-chip button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--gray-400);
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .file-chip button:hover { color: var(--danger); }
+
+  .mode-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+    gap: .5rem;
+    margin-top: .5rem;
+  }
+  .mode-btn {
+    border: 2px solid var(--gray-200);
+    background: #fff;
+    border-radius: .65rem;
+    padding: .7rem .6rem;
+    text-align: center;
+    color: var(--gray-600);
+    font-size: .82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: .2s;
+  }
+  .mode-btn:hover { border-color: var(--primary-light); background: var(--primary-bg); }
+  .mode-btn.active {
+    border-color: var(--primary);
+    background: var(--primary-bg);
+    color: var(--primary-dark);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, .15);
+  }
+
+  .opts-card {
+    margin-top: .9rem;
+    padding: 1rem;
+    border: 1px solid var(--gray-200);
+    border-radius: .75rem;
+    background: var(--gray-50);
+  }
+
+  .opts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .75rem;
+  }
+
+  .field label {
+    display: block;
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--gray-600);
+    margin-bottom: .25rem;
+  }
+
+  .field input,
+  .field select {
+    width: 100%;
+    border: 1px solid var(--gray-300);
+    border-radius: .45rem;
+    padding: .45rem .65rem;
+    background: #fff;
+    font-size: .85rem;
+  }
+
+  .field .hint {
+    margin-top: .2rem;
+    font-size: .72rem;
+    color: var(--gray-500);
+  }
+
+  .preview-box {
+    margin-top: 1rem;
+    border: 1px solid var(--gray-200);
+    border-radius: .65rem;
+    background: #fff;
+    padding: .85rem 1rem;
+    font-size: .82rem;
+    color: var(--gray-700);
+  }
+  .preview-box .line { margin: .15rem 0; }
+  .preview-box .warn { color: #b45309; font-weight: 600; }
+
+  .actions {
+    margin-top: 1.2rem;
+    display: flex;
+    gap: .6rem;
+    flex-wrap: wrap;
+  }
+  .btn {
+    border: none;
+    border-radius: .6rem;
+    font-size: .88rem;
+    font-weight: 700;
+    padding: .62rem 1rem;
+    cursor: pointer;
+  }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-dark); }
+  .btn-secondary { background: var(--gray-100); color: var(--gray-700); border: 1px solid var(--gray-300); }
+
+  @media (max-width: 768px) {
+    .compress-body, .compress-header { padding: 1.2rem 1rem; }
+    .opts-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="compress-card">
+  <div class="compress-header">
+    <h2>圧縮ファイル生成ツール</h2>
+    <div class="subtitle">複数形式・暗号化・除外設定に対応</div>
+  </div>
+
+  <div class="compress-body">
+    <form action="{{ url_for('compress.compress_tool') }}" method="POST" enctype="multipart/form-data" id="compressForm">
+      <input type="file" name="files" id="fileInput" multiple class="hidden">
+      <input type="hidden" name="format" id="formatInput" value="zip">
+
+      <div class="section-title">対象ファイル</div>
+      <div class="drop-zone" id="dropZone">
+        <div class="drop-label">ここにファイルをドロップ、または <span>クリックして選択</span></div>
+      </div>
+      <div class="meta-row">
+        <span id="fileCount">0件</span>
+        <span id="fileSize">合計 0 B</span>
+      </div>
+      <div id="fileChips" class="file-chips"></div>
+
+      <div class="section-title">圧縮形式</div>
+      <div class="mode-grid" id="formatModes">
+        <button type="button" class="mode-btn active" data-format="zip">ZIP</button>
+        <button type="button" class="mode-btn" data-format="tar">TAR</button>
+        <button type="button" class="mode-btn" data-format="tar.gz">TAR.GZ</button>
+      </div>
+
+      <div class="opts-card">
+        <div class="opts-grid">
+          <div class="field">
+            <label for="archiveName">出力ファイル名</label>
+            <input id="archiveName" type="text" name="archive_name" placeholder="例: 2026_案件資料">
+          </div>
+          <div class="field">
+            <label for="rootFolder">ルートフォルダ名（任意）</label>
+            <input id="rootFolder" type="text" name="root_folder" placeholder="例: 配布用データ">
+          </div>
+          <div class="field">
+            <label for="compressLevel">圧縮レベル</label>
+            <select id="compressLevel" name="compress_level">
+              <option value="standard" selected>標準</option>
+              <option value="high">高圧縮</option>
+            </select>
+            <div class="hint">※ 速度優先は設けていません。</div>
+          </div>
+          <div class="field" id="passwordField">
+            <label for="passwordInput">パスワード（ZIPのみ）</label>
+            <input id="passwordInput" type="password" name="password" placeholder="未入力なら暗号化なし">
+          </div>
+          <div class="field">
+            <label for="excludeExts">除外拡張子（カンマ区切り）</label>
+            <input id="excludeExts" type="text" name="exclude_exts" placeholder="tmp,log,bak">
+          </div>
+          <div class="field">
+            <label for="excludePatterns">除外パターン（カンマ区切り）</label>
+            <input id="excludePatterns" type="text" name="exclude_patterns" placeholder="*.tmp,*_old.*">
+          </div>
+        </div>
+      </div>
+
+      <div class="preview-box" id="previewBox">
+        <div class="line">生成予定ファイル: <strong id="previewName">dstt_compressed.zip</strong></div>
+        <div class="line">対象件数: <strong id="previewIncluded">0</strong> / 除外: <strong id="previewExcluded">0</strong></div>
+        <div class="line" id="previewWarning"></div>
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">圧縮してダウンロード</button>
+        <button type="button" class="btn btn-secondary" id="resetBtn">設定をリセット</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <script>
-  const fileInput = document.getElementById('fileInput');
-  const fileList = document.getElementById('fileList');
   const form = document.getElementById('compressForm');
+  const fileInput = document.getElementById('fileInput');
+  const dropZone = document.getElementById('dropZone');
+  const fileChips = document.getElementById('fileChips');
+  const fileCount = document.getElementById('fileCount');
+  const fileSize = document.getElementById('fileSize');
+  const formatInput = document.getElementById('formatInput');
+  const formatButtons = document.querySelectorAll('#formatModes .mode-btn');
+  const passwordField = document.getElementById('passwordField');
+  const passwordInput = document.getElementById('passwordInput');
+  const previewName = document.getElementById('previewName');
+  const previewIncluded = document.getElementById('previewIncluded');
+  const previewExcluded = document.getElementById('previewExcluded');
+  const previewWarning = document.getElementById('previewWarning');
+
+  const archiveName = document.getElementById('archiveName');
+  const rootFolder = document.getElementById('rootFolder');
+  const compressLevel = document.getElementById('compressLevel');
+  const excludeExts = document.getElementById('excludeExts');
+  const excludePatterns = document.getElementById('excludePatterns');
+  const resetBtn = document.getElementById('resetBtn');
+
   let filesArray = [];
 
-  fileInput.addEventListener('change', function () {
-    const newFiles = Array.from(fileInput.files);
-    filesArray = [...filesArray, ...newFiles];
-    updateFileList();
-  });
+  const toReadableSize = (bytes) => {
+    if (!bytes) return '合計 0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let idx = 0;
+    while (size >= 1024 && idx < units.length - 1) {
+      size /= 1024;
+      idx += 1;
+    }
+    return `合計 ${size.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+  };
 
-  function updateFileList() {
-    fileList.innerHTML = '';
-    filesArray.forEach((file, index) => {
-      const li = document.createElement('li');
-      li.textContent = file.name;
-      const removeButton = document.createElement('button');
-      removeButton.textContent = '削除';
-      removeButton.className = 'ml-2 text-red-500';
-      removeButton.onclick = function () {
-        removeFile(index);
-      };
-      li.appendChild(removeButton);
-      fileList.appendChild(li);
+  const fileExt = (name) => {
+    const dot = name.lastIndexOf('.');
+    return dot >= 0 ? name.substring(dot + 1).toUpperCase() : 'FILE';
+  };
+
+  const syncFileInput = () => {
+    const dt = new DataTransfer();
+    filesArray.forEach((file) => dt.items.add(file));
+    fileInput.files = dt.files;
+  };
+
+  const refreshFileView = () => {
+    fileChips.innerHTML = '';
+    let total = 0;
+    filesArray.forEach((file, idx) => {
+      total += file.size || 0;
+      const chip = document.createElement('div');
+      chip.className = 'file-chip';
+      chip.innerHTML = `<span class="ext">${fileExt(file.name)}</span><span>${file.name}</span>`;
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = '×';
+      del.addEventListener('click', () => {
+        filesArray.splice(idx, 1);
+        syncFileInput();
+        refreshFileView();
+        requestPreview();
+      });
+      chip.appendChild(del);
+      fileChips.appendChild(chip);
     });
-  }
 
-  function removeFile(index) {
-    filesArray.splice(index, 1);
-    updateFileList();
-    const dataTransfer = new DataTransfer();
-    filesArray.forEach(file => dataTransfer.items.add(file));
-    fileInput.files = dataTransfer.files;
-  }
+    fileCount.textContent = `${filesArray.length}件`;
+    fileSize.textContent = toReadableSize(total);
+  };
 
-  form.addEventListener('submit', function(event) {
-    const dataTransfer = new DataTransfer();
-    filesArray.forEach(file => dataTransfer.items.add(file));
-    fileInput.files = dataTransfer.files;
+  const addFiles = (newFiles) => {
+    filesArray = filesArray.concat(Array.from(newFiles));
+    syncFileInput();
+    refreshFileView();
+    requestPreview();
+  };
+
+  const updateFormatUi = () => {
+    const fmt = formatInput.value;
+    formatButtons.forEach((btn) => btn.classList.toggle('active', btn.dataset.format === fmt));
+
+    const zipMode = fmt === 'zip';
+    passwordField.style.display = zipMode ? '' : 'none';
+    if (!zipMode) passwordInput.value = '';
+    requestPreview();
+  };
+
+  const requestPreview = async () => {
+    const payload = {
+      filenames: filesArray.map((f) => f.name),
+      format: formatInput.value,
+      archive_name: archiveName.value,
+      root_folder: rootFolder.value,
+      compress_level: compressLevel.value,
+      exclude_exts: excludeExts.value,
+      exclude_patterns: excludePatterns.value,
+    };
+
+    try {
+      const res = await fetch("{{ url_for('compress.preview_compress') }}", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('preview error');
+      const data = await res.json();
+      previewName.textContent = data.archive_name || 'dstt_compressed.zip';
+      previewIncluded.textContent = data.included_count ?? 0;
+      previewExcluded.textContent = data.excluded_count ?? 0;
+      previewWarning.textContent = (data.warnings && data.warnings.length > 0) ? data.warnings[0] : '';
+      previewWarning.className = data.warnings && data.warnings.length > 0 ? 'line warn' : 'line';
+    } catch (e) {
+      previewWarning.textContent = 'プレビューの取得に失敗しました。';
+      previewWarning.className = 'line warn';
+    }
+  };
+
+  dropZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => addFiles(fileInput.files));
+
+  ['dragenter', 'dragover'].forEach((event) => {
+    dropZone.addEventListener(event, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.add('dragover');
+    });
   });
+
+  ['dragleave', 'drop'].forEach((event) => {
+    dropZone.addEventListener(event, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove('dragover');
+    });
+  });
+
+  dropZone.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
+
+  formatButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      formatInput.value = btn.dataset.format;
+      updateFormatUi();
+    });
+  });
+
+  [archiveName, rootFolder, compressLevel, excludeExts, excludePatterns].forEach((input) => {
+    input.addEventListener('input', requestPreview);
+    input.addEventListener('change', requestPreview);
+  });
+
+  resetBtn.addEventListener('click', () => {
+    filesArray = [];
+    syncFileInput();
+    refreshFileView();
+    archiveName.value = '';
+    rootFolder.value = '';
+    compressLevel.value = 'standard';
+    excludeExts.value = '';
+    excludePatterns.value = '';
+    passwordInput.value = '';
+    formatInput.value = 'zip';
+    updateFormatUi();
+    requestPreview();
+  });
+
+  form.addEventListener('submit', () => syncFileInput());
+
+  updateFormatUi();
+  refreshFileView();
+  requestPreview();
 </script>
 {% endblock %}
