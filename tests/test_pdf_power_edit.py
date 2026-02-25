@@ -63,6 +63,15 @@ def _post_edit(client, pdf_bytes, operations, uploads=None):
 
 
 
+
+
+def _post_compress(client, pdf_bytes, filename="input.pdf", compression_level="medium"):
+    data = {
+        "pdf": (io.BytesIO(pdf_bytes), filename),
+        "compression_level": compression_level,
+    }
+    return client.post("/tools/pdf_power/compress", data=data, content_type="multipart/form-data")
+
 def test_round_to_tenth_helper(pdf_power_module):
     assert pdf_power_module._round_to_tenth(12.345) == 12.3
     assert pdf_power_module._round_to_tenth(12.36) == 12.4
@@ -242,3 +251,19 @@ def test_add_freehand_stroke(client):
     page = doc[0]
     assert len(page.get_drawings()) > 0
     doc.close()
+
+
+def test_compress_accepts_pdf_content_even_with_non_pdf_extension(client):
+    response = _post_compress(client, _make_pdf(rotation=0), filename="input.bin")
+    assert response.status_code == 200
+    assert response.content_type.startswith("application/pdf")
+    doc = fitz.open(stream=response.data, filetype="pdf")
+    assert doc.page_count == 1
+    doc.close()
+
+
+def test_compress_rejects_invalid_pdf_content(client):
+    response = _post_compress(client, b"not-a-pdf", filename="broken.pdf")
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert "PDFファイルが破損しています" in payload["error"]
