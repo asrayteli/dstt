@@ -23,13 +23,21 @@
       <button id="resizeCanvasBtn" class="mt-2 px-3 py-1 rounded bg-gray-700 text-white hover:bg-gray-800">適用</button>
     </div>
 
-    <div class="text-sm bg-gray-50 rounded border p-3">
+    <div class="text-sm bg-gray-50 rounded border p-3 space-y-2">
       <p class="font-semibold mb-1">サイズ推定</p>
       <p id="detectedSize" class="text-gray-700">未読込</p>
-      <label class="mt-2 flex items-center gap-2 text-xs">
-        <input id="snapToPaperSize" type="checkbox" checked>
-        近い規定サイズ（A3/A4/B4/B5）へ自動調整
-      </label>
+      <p id="detectedFileType" class="text-xs text-gray-600">ファイルタイプ: 未判定</p>
+      <div class="pt-1 border-t border-gray-200">
+        <p class="text-xs font-medium text-gray-700 mb-1">透過PNG出力サイズ</p>
+        <label class="flex items-center gap-2 text-xs">
+          <input type="radio" name="exportSizeMode" value="source" checked>
+          アップロード元サイズ（推奨）
+        </label>
+        <label class="flex items-center gap-2 text-xs mt-1">
+          <input type="radio" name="exportSizeMode" value="canvas">
+          ユーザー指定サイズ（キャンバス）
+        </label>
+      </div>
     </div>
   </div>
 
@@ -97,7 +105,6 @@
   }
 </style>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.min.mjs" type="module"></script>
 <script>
   const stage = document.getElementById('stage');
   const overlayLayer = document.getElementById('overlayLayer');
@@ -111,9 +118,13 @@
     { name: 'B5', w: 182, h: 257 },
   ];
 
+  const detectedFileType = document.getElementById('detectedFileType');
+
   let selected = null;
   let dragState = null;
   let pdfjsLibPromise = null;
+  let sourceSize = { width: stage.clientWidth, height: stage.clientHeight, unit: 'px' };
+  let sourceType = '未判定';
 
   function getPdfJs() {
     if (!pdfjsLibPromise) {
@@ -123,14 +134,16 @@
   }
 
   function setCanvasSize(width, height) {
-    document.getElementById('canvasWidth').value = Math.round(width);
-    document.getElementById('canvasHeight').value = Math.round(height);
-    stage.style.width = `${Math.round(width)}px`;
-    stage.style.height = `${Math.round(height)}px`;
+    const safeW = Math.max(100, Math.round(width));
+    const safeH = Math.max(100, Math.round(height));
+    document.getElementById('canvasWidth').value = safeW;
+    document.getElementById('canvasHeight').value = safeH;
+    stage.style.width = `${safeW}px`;
+    stage.style.height = `${safeH}px`;
   }
 
-  function closestPaperSize(widthPx, heightPx) {
-    const ratio = Math.max(widthPx, heightPx) / Math.min(widthPx, heightPx);
+  function closestPaperSizeByRatio(width, height) {
+    const ratio = Math.max(width, height) / Math.min(width, height);
     let best = null;
     for (const paper of PAPER_MM) {
       const pRatio = Math.max(paper.w, paper.h) / Math.min(paper.w, paper.h);
@@ -140,42 +153,39 @@
     return best;
   }
 
-  function maybeSnapToPaper(widthPx, heightPx) {
-    const snapEnabled = document.getElementById('snapToPaperSize').checked;
-    const closest = closestPaperSize(widthPx, heightPx);
-    if (!closest) return { width: widthPx, height: heightPx, label: '不明' };
-
-    const normalizedDiff = closest.diff / (Math.max(widthPx, heightPx) / Math.min(widthPx, heightPx));
-    const isClose = normalizedDiff < 0.03; // 比率差3%以内
-
-    if (!snapEnabled || !isClose) {
-      return {
-        width: widthPx,
-        height: heightPx,
-        label: `${Math.round(widthPx)}×${Math.round(heightPx)}px（近似: ${closest.paper.name} / 比率差 ${(normalizedDiff * 100).toFixed(2)}%）`,
-      };
+  function closestPaperSizeByMm(widthMm, heightMm) {
+    const longSide = Math.max(widthMm, heightMm);
+    const shortSide = Math.min(widthMm, heightMm);
+    let best = null;
+    for (const paper of PAPER_MM) {
+      const pLong = Math.max(paper.w, paper.h);
+      const pShort = Math.min(paper.w, paper.h);
+      const diff = Math.abs(longSide - pLong) + Math.abs(shortSide - pShort);
+      if (!best || diff < best.diff) best = { paper, diff };
     }
-
-    const isPortrait = heightPx >= widthPx;
-    const targetRatio = isPortrait ? (closest.paper.w / closest.paper.h) : (closest.paper.h / closest.paper.w);
-    let newWidth = widthPx;
-    let newHeight = heightPx;
-
-    if ((widthPx / heightPx) > targetRatio) {
-      newWidth = heightPx * targetRatio;
-    } else {
-      newHeight = widthPx / targetRatio;
-    }
-
-    return {
-      width: newWidth,
-      height: newHeight,
-      label: `${closest.paper.name}へ自動調整（${Math.round(newWidth)}×${Math.round(newHeight)}px）`,
-    };
+    return best;
   }
 
-  function updateDetectedSize(text) {
-    detectedSize.textContent = text;
+  function detectFileTypeFromSize({ widthPx, heightPx, widthMm = null, heightMm = null, sourceKind }) {
+    if (widthMm && heightMm) {
+      const best = closestPaperSizeByMm(widthMm, heightMm);
+      if (best && best.diff < 16) {
+        return `${sourceKind} / ${best.paper.name} 推定（実寸ベース）`;
+      }
+    }
+
+    const bestByRatio = closestPaperSizeByRatio(widthPx, heightPx);
+    if (bestByRatio) {
+      const pct = ((bestByRatio.diff / (Math.max(widthPx, heightPx) / Math.min(widthPx, heightPx))) * 100).toFixed(2);
+      return `${sourceKind} / ${bestByRatio.paper.name} 近似（比率差 ${pct}%）`;
+    }
+
+    return sourceKind;
+  }
+
+  function updateDetectedInfo(sizeText, typeText) {
+    detectedSize.textContent = sizeText;
+    detectedFileType.textContent = `ファイルタイプ: ${typeText}`;
   }
 
   function selectItem(item) {
@@ -199,8 +209,13 @@
   document.addEventListener('mousemove', (event) => {
     if (!dragState) return;
     const stageRect = stage.getBoundingClientRect();
-    dragState.item.style.left = `${Math.max(0, event.clientX - stageRect.left - dragState.dx)}px`;
-    dragState.item.style.top = `${Math.max(0, event.clientY - stageRect.top - dragState.dy)}px`;
+    const itemRect = dragState.item.getBoundingClientRect();
+    const maxX = Math.max(0, stageRect.width - itemRect.width);
+    const maxY = Math.max(0, stageRect.height - itemRect.height);
+    const x = event.clientX - stageRect.left - dragState.dx;
+    const y = event.clientY - stageRect.top - dragState.dy;
+    dragState.item.style.left = `${Math.min(maxX, Math.max(0, x))}px`;
+    dragState.item.style.top = `${Math.min(maxY, Math.max(0, y))}px`;
   });
 
   document.addEventListener('mouseup', () => { dragState = null; });
@@ -223,21 +238,38 @@
         const loadingTask = pdfjsLib.getDocument({ data });
         const pdf = await loadingTask.promise;
         const page = await pdf.getPage(1);
-        const viewport = page.getViewport({ scale: 2 });
+
+        const sourceViewport = page.getViewport({ scale: 1 });
+        const renderViewport = page.getViewport({ scale: 2 });
+        const widthPt = sourceViewport.width;
+        const heightPt = sourceViewport.height;
+        const widthMm = widthPt * 25.4 / 72;
+        const heightMm = heightPt * 25.4 / 72;
+
+        sourceSize = { width: widthPt, height: heightPt, unit: 'pt' };
+        sourceType = detectFileTypeFromSize({
+          widthPx: widthPt,
+          heightPx: heightPt,
+          widthMm,
+          heightMm,
+          sourceKind: 'PDF'
+        });
 
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+        canvas.width = renderViewport.width;
+        canvas.height = renderViewport.height;
 
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
         backgroundLayer.src = canvas.toDataURL('image/png');
 
-        const snapped = maybeSnapToPaper(viewport.width, viewport.height);
-        setCanvasSize(snapped.width, snapped.height);
-        updateDetectedSize(`PDF 1ページ目: ${Math.round(viewport.width)}×${Math.round(viewport.height)}px / ${snapped.label}`);
+        setCanvasSize(widthPt, heightPt);
+        updateDetectedInfo(
+          `PDF 1ページ目: ${Math.round(widthPt)}×${Math.round(heightPt)}pt（約 ${widthMm.toFixed(1)}×${heightMm.toFixed(1)}mm）`,
+          sourceType
+        );
       } catch (error) {
-        updateDetectedSize(`PDF読込失敗: ${error.message}`);
+        updateDetectedInfo(`PDF読込失敗: ${error.message}`, '判定失敗');
       }
       return;
     }
@@ -247,9 +279,14 @@
       const img = new Image();
       img.onload = () => {
         backgroundLayer.src = e.target.result;
-        const snapped = maybeSnapToPaper(img.naturalWidth, img.naturalHeight);
-        setCanvasSize(snapped.width, snapped.height);
-        updateDetectedSize(`画像: ${img.naturalWidth}×${img.naturalHeight}px / ${snapped.label}`);
+        sourceSize = { width: img.naturalWidth, height: img.naturalHeight, unit: 'px' };
+        sourceType = detectFileTypeFromSize({
+          widthPx: img.naturalWidth,
+          heightPx: img.naturalHeight,
+          sourceKind: '画像'
+        });
+        setCanvasSize(img.naturalWidth, img.naturalHeight);
+        updateDetectedInfo(`画像: ${img.naturalWidth}×${img.naturalHeight}px`, sourceType);
       };
       img.src = e.target.result;
     };
@@ -312,27 +349,29 @@
 
   document.getElementById('printBtn').addEventListener('click', () => window.print());
 
-  document.getElementById('exportBtn').addEventListener('click', async () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = stage.clientWidth;
-    canvas.height = stage.clientHeight;
-    const ctx = canvas.getContext('2d');
+  async function drawOverlayToCanvas(ctx, outputWidth, outputHeight) {
+    const stageWidth = stage.clientWidth;
+    const stageHeight = stage.clientHeight;
+    const scaleX = outputWidth / Math.max(1, stageWidth);
+    const scaleY = outputHeight / Math.max(1, stageHeight);
 
     for (const node of Array.from(overlayLayer.children)) {
-      const x = parseFloat(node.style.left || '0');
-      const y = parseFloat(node.style.top || '0');
+      const x = parseFloat(node.style.left || '0') * scaleX;
+      const y = parseFloat(node.style.top || '0') * scaleY;
       if (node.tagName === 'IMG') {
         await new Promise((resolve) => {
           const image = new Image();
           image.onload = () => {
-            ctx.drawImage(image, x, y, parseFloat(node.style.width || image.naturalWidth), parseFloat(node.style.height || image.naturalHeight));
+            const w = parseFloat(node.style.width || image.naturalWidth) * scaleX;
+            const h = parseFloat(node.style.height || image.naturalHeight) * scaleY;
+            ctx.drawImage(image, x, y, w, h);
             resolve();
           };
           image.src = node.src;
         });
       } else if (node.style.border) {
-        const w = parseFloat(node.style.width || '0');
-        const h = parseFloat(node.style.height || '0');
+        const w = parseFloat(node.style.width || '0') * scaleX;
+        const h = parseFloat(node.style.height || '0') * scaleY;
         if (node.style.borderRadius) {
           ctx.beginPath();
           ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
@@ -349,15 +388,34 @@
           ctx.strokeRect(x, y, w, h);
         }
       } else {
+        const fontSize = parseFloat(node.style.fontSize || '24') * Math.min(scaleX, scaleY);
         ctx.fillStyle = node.style.color || '#111';
-        ctx.font = `${node.style.fontSize || '24px'} sans-serif`;
-        ctx.fillText(node.textContent || '', x, y + parseFloat(node.style.fontSize || '24'));
+        ctx.font = `${Math.max(8, fontSize)}px sans-serif`;
+        const lines = (node.textContent || '').split('\n');
+        const lineHeight = Math.max(10, fontSize * 1.2);
+        lines.forEach((line, idx) => {
+          ctx.fillText(line, x, y + lineHeight * (idx + 1));
+        });
       }
     }
+  }
+
+  document.getElementById('exportBtn').addEventListener('click', async () => {
+    const mode = document.querySelector('input[name="exportSizeMode"]:checked')?.value || 'source';
+    const canvas = document.createElement('canvas');
+
+    const outWidth = mode === 'source' ? Math.round(sourceSize.width || stage.clientWidth) : stage.clientWidth;
+    const outHeight = mode === 'source' ? Math.round(sourceSize.height || stage.clientHeight) : stage.clientHeight;
+
+    canvas.width = Math.max(1, outWidth);
+    canvas.height = Math.max(1, outHeight);
+    const ctx = canvas.getContext('2d');
+
+    await drawOverlayToCanvas(ctx, canvas.width, canvas.height);
 
     const link = document.createElement('a');
     link.href = canvas.toDataURL('image/png');
-    link.download = 'powerstamp-overlay.png';
+    link.download = mode === 'source' ? 'powerstamp-overlay-source-size.png' : 'powerstamp-overlay-custom-size.png';
     link.click();
   });
 </script>
