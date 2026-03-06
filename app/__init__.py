@@ -86,4 +86,7 @@ def create_app():
     from .tools.color_extract import color_extract_bp
     app.register_blueprint(color_extract_bp)
 
+    from .tools.powerstamp import powerstamp_bp
+    app.register_blueprint(powerstamp_bp)
+
     return app

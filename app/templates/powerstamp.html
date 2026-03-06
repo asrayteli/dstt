@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-4">
+  <h1 class="text-2xl font-bold">🖋️ PowerSTAMP</h1>
+  <p class="text-sm text-gray-600">
+    スキャン画像/PDFを背景として読み込み、その上に文字・図形・画像を重ねます。印刷時は背景を除外し、追加したスタンプのみを出力します。
+  </p>
+
+  <div class="bg-white rounded-xl shadow p-4 grid lg:grid-cols-4 gap-4">
+    <div class="lg:col-span-2">
+      <label class="block text-sm font-medium mb-1">背景ファイル（JPG/PNG/PDF）</label>
+      <input id="backgroundInput" type="file" accept="image/*,.pdf,application/pdf" class="w-full text-sm" />
+      <p class="text-xs text-gray-500 mt-2">PDFは1ページ目を背景表示します。</p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium mb-1">キャンバスサイズ(px)</label>
+      <div class="flex gap-2">
+        <input id="canvasWidth" type="number" value="1200" min="100" class="w-full border rounded px-2 py-1" />
+        <input id="canvasHeight" type="number" value="1700" min="100" class="w-full border rounded px-2 py-1" />
+      </div>
+      <button id="resizeCanvasBtn" class="mt-2 px-3 py-1 rounded bg-gray-700 text-white hover:bg-gray-800">適用</button>
+    </div>
+
+    <div class="text-sm bg-gray-50 rounded border p-3">
+      <p class="font-semibold mb-1">サイズ推定</p>
+      <p id="detectedSize" class="text-gray-700">未読込</p>
+      <label class="mt-2 flex items-center gap-2 text-xs">
+        <input id="snapToPaperSize" type="checkbox" checked>
+        近い規定サイズ（A3/A4/B4/B5）へ自動調整
+      </label>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow p-4 flex flex-wrap gap-2">
+    <button id="printBtn" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">印刷（スタンプのみ）</button>
+    <button id="exportBtn" class="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700">透過PNG保存</button>
+    <button id="clearBtn" class="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-700">全削除</button>
+  </div>
+
+  <div class="bg-white rounded-xl shadow p-4 grid lg:grid-cols-4 gap-4">
+    <div class="space-y-3">
+      <h2 class="font-semibold">テキスト追加</h2>
+      <input id="textContent" type="text" value="入力文字" class="w-full border rounded px-2 py-1" />
+      <div class="flex gap-2">
+        <input id="textSize" type="number" value="32" min="8" class="w-full border rounded px-2 py-1" />
+        <input id="textColor" type="color" value="#1f2937" class="w-16 h-10 border rounded" />
+      </div>
+      <button id="addTextBtn" class="w-full px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800">テキスト配置</button>
+    </div>
+
+    <div class="space-y-3">
+      <h2 class="font-semibold">図形追加</h2>
+      <div class="flex gap-2">
+        <select id="shapeType" class="w-full border rounded px-2 py-1">
+          <option value="rect">四角形</option>
+          <option value="ellipse">楕円</option>
+        </select>
+        <input id="shapeStroke" type="color" value="#2563eb" class="w-16 h-10 border rounded" />
+        <input id="shapeFill" type="color" value="#93c5fd" class="w-16 h-10 border rounded" />
+      </div>
+      <div class="flex gap-2">
+        <input id="shapeWidth" type="number" value="180" min="10" class="w-full border rounded px-2 py-1" />
+        <input id="shapeHeight" type="number" value="80" min="10" class="w-full border rounded px-2 py-1" />
+      </div>
+      <button id="addShapeBtn" class="w-full px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800">図形配置</button>
+    </div>
+
+    <div class="space-y-3 lg:col-span-2">
+      <h2 class="font-semibold">画像スタンプ追加</h2>
+      <div class="flex gap-2">
+        <input id="stampImageInput" type="file" accept="image/*" class="w-full text-sm" />
+        <input id="imageScale" type="number" value="100" min="10" class="w-24 border rounded px-2 py-1" title="%" />
+      </div>
+      <button id="addImageBtn" class="px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800">画像配置</button>
+      <p class="text-xs text-gray-500">選択中スタンプはドラッグ移動、Deleteで削除できます。</p>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow p-4 overflow-auto">
+    <div id="stage" class="relative border border-dashed border-gray-400 mx-auto bg-white" style="width:1200px;height:1700px;">
+      <img id="backgroundLayer" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" alt="背景" />
+      <div id="overlayLayer" class="absolute inset-0"></div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .stamp-item { position: absolute; cursor: move; user-select: none; }
+  .stamp-item.selected { outline: 2px dashed #ef4444; outline-offset: 2px; }
+  @media print {
+    body * { visibility: hidden !important; }
+    #stage, #stage * { visibility: visible !important; }
+    #stage { position: absolute; left: 0; top: 0; border: none !important; }
+    #backgroundLayer { display: none !important; }
+  }
+</style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.min.mjs" type="module"></script>
+<script>
+  const stage = document.getElementById('stage');
+  const overlayLayer = document.getElementById('overlayLayer');
+  const backgroundLayer = document.getElementById('backgroundLayer');
+  const detectedSize = document.getElementById('detectedSize');
+
+  const PAPER_MM = [
+    { name: 'A3', w: 297, h: 420 },
+    { name: 'A4', w: 210, h: 297 },
+    { name: 'B4', w: 257, h: 364 },
+    { name: 'B5', w: 182, h: 257 },
+  ];
+
+  let selected = null;
+  let dragState = null;
+  let pdfjsLibPromise = null;
+
+  function getPdfJs() {
+    if (!pdfjsLibPromise) {
+      pdfjsLibPromise = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.min.mjs');
+    }
+    return pdfjsLibPromise;
+  }
+
+  function setCanvasSize(width, height) {
+    document.getElementById('canvasWidth').value = Math.round(width);
+    document.getElementById('canvasHeight').value = Math.round(height);
+    stage.style.width = `${Math.round(width)}px`;
+    stage.style.height = `${Math.round(height)}px`;
+  }
+
+  function closestPaperSize(widthPx, heightPx) {
+    const ratio = Math.max(widthPx, heightPx) / Math.min(widthPx, heightPx);
+    let best = null;
+    for (const paper of PAPER_MM) {
+      const pRatio = Math.max(paper.w, paper.h) / Math.min(paper.w, paper.h);
+      const diff = Math.abs(ratio - pRatio);
+      if (!best || diff < best.diff) best = { paper, diff };
+    }
+    return best;
+  }
+
+  function maybeSnapToPaper(widthPx, heightPx) {
+    const snapEnabled = document.getElementById('snapToPaperSize').checked;
+    const closest = closestPaperSize(widthPx, heightPx);
+    if (!closest) return { width: widthPx, height: heightPx, label: '不明' };
+
+    const normalizedDiff = closest.diff / (Math.max(widthPx, heightPx) / Math.min(widthPx, heightPx));
+    const isClose = normalizedDiff < 0.03; // 比率差3%以内
+
+    if (!snapEnabled || !isClose) {
+      return {
+        width: widthPx,
+        height: heightPx,
+        label: `${Math.round(widthPx)}×${Math.round(heightPx)}px（近似: ${closest.paper.name} / 比率差 ${(normalizedDiff * 100).toFixed(2)}%）`,
+      };
+    }
+
+    const isPortrait = heightPx >= widthPx;
+    const targetRatio = isPortrait ? (closest.paper.w / closest.paper.h) : (closest.paper.h / closest.paper.w);
+    let newWidth = widthPx;
+    let newHeight = heightPx;
+
+    if ((widthPx / heightPx) > targetRatio) {
+      newWidth = heightPx * targetRatio;
+    } else {
+      newHeight = widthPx / targetRatio;
+    }
+
+    return {
+      width: newWidth,
+      height: newHeight,
+      label: `${closest.paper.name}へ自動調整（${Math.round(newWidth)}×${Math.round(newHeight)}px）`,
+    };
+  }
+
+  function updateDetectedSize(text) {
+    detectedSize.textContent = text;
+  }
+
+  function selectItem(item) {
+    document.querySelectorAll('.stamp-item').forEach((el) => el.classList.remove('selected'));
+    selected = item;
+    if (item) item.classList.add('selected');
+  }
+
+  function makeDraggable(item) {
+    item.classList.add('stamp-item');
+    item.style.left = '80px';
+    item.style.top = '80px';
+
+    item.addEventListener('mousedown', (event) => {
+      selectItem(item);
+      const rect = item.getBoundingClientRect();
+      dragState = { item, dx: event.clientX - rect.left, dy: event.clientY - rect.top };
+    });
+  }
+
+  document.addEventListener('mousemove', (event) => {
+    if (!dragState) return;
+    const stageRect = stage.getBoundingClientRect();
+    dragState.item.style.left = `${Math.max(0, event.clientX - stageRect.left - dragState.dx)}px`;
+    dragState.item.style.top = `${Math.max(0, event.clientY - stageRect.top - dragState.dy)}px`;
+  });
+
+  document.addEventListener('mouseup', () => { dragState = null; });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Delete' && selected) {
+      selected.remove();
+      selected = null;
+    }
+  });
+
+  document.getElementById('backgroundInput').addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      try {
+        const data = await file.arrayBuffer();
+        const pdfjsLib = await getPdfJs();
+        const loadingTask = pdfjsLib.getDocument({ data });
+        const pdf = await loadingTask.promise;
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 2 });
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        backgroundLayer.src = canvas.toDataURL('image/png');
+
+        const snapped = maybeSnapToPaper(viewport.width, viewport.height);
+        setCanvasSize(snapped.width, snapped.height);
+        updateDetectedSize(`PDF 1ページ目: ${Math.round(viewport.width)}×${Math.round(viewport.height)}px / ${snapped.label}`);
+      } catch (error) {
+        updateDetectedSize(`PDF読込失敗: ${error.message}`);
+      }
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        backgroundLayer.src = e.target.result;
+        const snapped = maybeSnapToPaper(img.naturalWidth, img.naturalHeight);
+        setCanvasSize(snapped.width, snapped.height);
+        updateDetectedSize(`画像: ${img.naturalWidth}×${img.naturalHeight}px / ${snapped.label}`);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById('resizeCanvasBtn').addEventListener('click', () => {
+    const width = Number(document.getElementById('canvasWidth').value);
+    const height = Number(document.getElementById('canvasHeight').value);
+    if (width >= 100 && height >= 100) setCanvasSize(width, height);
+  });
+
+  document.getElementById('addTextBtn').addEventListener('click', () => {
+    const div = document.createElement('div');
+    div.textContent = document.getElementById('textContent').value || '入力文字';
+    div.style.fontSize = `${Number(document.getElementById('textSize').value)}px`;
+    div.style.color = document.getElementById('textColor').value;
+    div.style.whiteSpace = 'pre';
+    makeDraggable(div);
+    overlayLayer.appendChild(div);
+    selectItem(div);
+  });
+
+  document.getElementById('addShapeBtn').addEventListener('click', () => {
+    const shape = document.createElement('div');
+    shape.style.width = `${Number(document.getElementById('shapeWidth').value)}px`;
+    shape.style.height = `${Number(document.getElementById('shapeHeight').value)}px`;
+    shape.style.border = `2px solid ${document.getElementById('shapeStroke').value}`;
+    shape.style.background = document.getElementById('shapeFill').value;
+    if (document.getElementById('shapeType').value === 'ellipse') shape.style.borderRadius = '9999px';
+    makeDraggable(shape);
+    overlayLayer.appendChild(shape);
+    selectItem(shape);
+  });
+
+  document.getElementById('addImageBtn').addEventListener('click', () => {
+    const file = document.getElementById('stampImageInput').files[0];
+    if (!file) return alert('画像スタンプを選択してください');
+
+    const scale = Number(document.getElementById('imageScale').value) / 100;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = document.createElement('img');
+      img.src = event.target.result;
+      img.onload = () => {
+        img.style.width = `${Math.max(20, img.naturalWidth * scale)}px`;
+        img.style.height = `${Math.max(20, img.naturalHeight * scale)}px`;
+      };
+      makeDraggable(img);
+      overlayLayer.appendChild(img);
+      selectItem(img);
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    overlayLayer.innerHTML = '';
+    selectItem(null);
+  });
+
+  document.getElementById('printBtn').addEventListener('click', () => window.print());
+
+  document.getElementById('exportBtn').addEventListener('click', async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = stage.clientWidth;
+    canvas.height = stage.clientHeight;
+    const ctx = canvas.getContext('2d');
+
+    for (const node of Array.from(overlayLayer.children)) {
+      const x = parseFloat(node.style.left || '0');
+      const y = parseFloat(node.style.top || '0');
+      if (node.tagName === 'IMG') {
+        await new Promise((resolve) => {
+          const image = new Image();
+          image.onload = () => {
+            ctx.drawImage(image, x, y, parseFloat(node.style.width || image.naturalWidth), parseFloat(node.style.height || image.naturalHeight));
+            resolve();
+          };
+          image.src = node.src;
+        });
+      } else if (node.style.border) {
+        const w = parseFloat(node.style.width || '0');
+        const h = parseFloat(node.style.height || '0');
+        if (node.style.borderRadius) {
+          ctx.beginPath();
+          ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+          ctx.fillStyle = node.style.background || 'transparent';
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = node.style.borderColor || '#000';
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = node.style.background || 'transparent';
+          ctx.fillRect(x, y, w, h);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = node.style.borderColor || '#000';
+          ctx.strokeRect(x, y, w, h);
+        }
+      } else {
+        ctx.fillStyle = node.style.color || '#111';
+        ctx.font = `${node.style.fontSize || '24px'} sans-serif`;
+        ctx.fillText(node.textContent || '', x, y + parseFloat(node.style.fontSize || '24'));
+      }
+    }
+
+    const link = document.createElement('a');
+    link.href = canvas.toDataURL('image/png');
+    link.download = 'powerstamp-overlay.png';
+    link.click();
+  });
+</script>
+{% endblock %}
