@@ -1,11 +1,17 @@
 (() => {
   const stage = document.getElementById('stage');
+  const stageViewport = document.getElementById('stageViewport');
+  const stageScroll = document.getElementById('stageScroll');
   const overlayLayer = document.getElementById('overlayLayer');
   const backgroundLayer = document.getElementById('backgroundLayer');
   const detectedSize = document.getElementById('detectedSize');
   const detectedFileType = document.getElementById('detectedFileType');
+  const zoomInBtn = document.getElementById('zoomInBtn');
+  const zoomOutBtn = document.getElementById('zoomOutBtn');
+  const zoomResetBtn = document.getElementById('zoomResetBtn');
+  const zoomLabel = document.getElementById('zoomLabel');
 
-  if (!stage || !overlayLayer || !backgroundLayer || !detectedSize || !detectedFileType) {
+  if (!stage || !stageViewport || !overlayLayer || !backgroundLayer || !detectedSize || !detectedFileType) {
     return;
   }
 
@@ -19,11 +25,28 @@
   let selected = null;
   let dragState = null;
   let pdfjsLibPromise = null;
+  let zoom = 1;
+  const ZOOM_MIN = 0.25;
+  const ZOOM_MAX = 4;
+  const ZOOM_STEP = 0.1;
 
   function getStagePixelSize() {
     const w = Number(document.getElementById('canvasWidth')?.value) || parseFloat(stage.style.width) || stage.getBoundingClientRect().width;
     const h = Number(document.getElementById('canvasHeight')?.value) || parseFloat(stage.style.height) || stage.getBoundingClientRect().height;
     return { width: Math.max(1, Math.round(w)), height: Math.max(1, Math.round(h)) };
+  }
+
+  function applyZoom() {
+    const { width, height } = getStagePixelSize();
+    stage.style.transform = `scale(${zoom})`;
+    stageViewport.style.width = `${Math.round(width * zoom)}px`;
+    stageViewport.style.height = `${Math.round(height * zoom)}px`;
+    if (zoomLabel) zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  }
+
+  function setZoom(nextZoom) {
+    zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextZoom));
+    applyZoom();
   }
 
   let sourceSize = { ...getStagePixelSize(), unit: 'px' };
@@ -48,6 +71,7 @@
     document.getElementById('canvasHeight').value = safeH;
     stage.style.width = `${safeW}px`;
     stage.style.height = `${safeH}px`;
+    applyZoom();
   }
 
   function closestPaperSizeByRatio(width, height) {
@@ -118,10 +142,15 @@
     if (!dragState) return;
     const stageRect = stage.getBoundingClientRect();
     const itemRect = dragState.item.getBoundingClientRect();
-    const maxX = Math.max(0, stageRect.width - itemRect.width);
-    const maxY = Math.max(0, stageRect.height - itemRect.height);
-    const x = event.clientX - stageRect.left - dragState.dx;
-    const y = event.clientY - stageRect.top - dragState.dy;
+    const scale = zoom || 1;
+    const logicalStageW = stageRect.width / scale;
+    const logicalStageH = stageRect.height / scale;
+    const logicalItemW = itemRect.width / scale;
+    const logicalItemH = itemRect.height / scale;
+    const maxX = Math.max(0, logicalStageW - logicalItemW);
+    const maxY = Math.max(0, logicalStageH - logicalItemH);
+    const x = (event.clientX - stageRect.left - dragState.dx) / scale;
+    const y = (event.clientY - stageRect.top - dragState.dy) / scale;
     dragState.item.style.left = `${Math.min(maxX, Math.max(0, x))}px`;
     dragState.item.style.top = `${Math.min(maxY, Math.max(0, y))}px`;
   });
@@ -257,6 +286,17 @@
 
   document.getElementById('printBtn').addEventListener('click', () => window.print());
 
+  zoomInBtn?.addEventListener('click', () => setZoom(zoom + ZOOM_STEP));
+  zoomOutBtn?.addEventListener('click', () => setZoom(zoom - ZOOM_STEP));
+  zoomResetBtn?.addEventListener('click', () => setZoom(1));
+
+  stageScroll?.addEventListener('wheel', (event) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    const delta = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+    setZoom(zoom + delta);
+  }, { passive: false });
+
   async function drawOverlayToCanvas(ctx, outputWidth, outputHeight) {
     const { width: stageWidth, height: stageHeight } = getStagePixelSize();
     const scaleX = outputWidth / Math.max(1, stageWidth);
@@ -326,4 +366,6 @@
     link.download = mode === 'source' ? 'powerstamp-overlay-source-size.png' : 'powerstamp-overlay-custom-size.png';
     link.click();
   });
+
+  applyZoom();
 })();

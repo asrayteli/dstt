@@ -41,10 +41,18 @@
     </div>
   </div>
 
-  <div class="bg-white rounded-xl shadow p-4 flex flex-wrap gap-2">
+  <div class="bg-white rounded-xl shadow p-4 flex flex-wrap items-center gap-2">
     <button id="printBtn" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">印刷（スタンプのみ）</button>
     <button id="exportBtn" class="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700">透過PNG保存</button>
     <button id="clearBtn" class="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-700">全削除</button>
+
+    <div class="ml-auto flex items-center gap-2 text-sm">
+      <span class="text-gray-600">表示倍率</span>
+      <button id="zoomOutBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">−</button>
+      <button id="zoomResetBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">100%</button>
+      <button id="zoomInBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">＋</button>
+      <span id="zoomLabel" class="w-14 text-right font-semibold text-gray-700">100%</span>
+    </div>
   </div>
 
   <div class="bg-white rounded-xl shadow p-4 grid lg:grid-cols-4 gap-4">
@@ -86,10 +94,12 @@
     </div>
   </div>
 
-  <div class="bg-white rounded-xl shadow p-4 overflow-auto">
-    <div id="stage" class="relative border border-dashed border-gray-400 mx-auto bg-white" style="width:1200px;height:1700px;">
-      <img id="backgroundLayer" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" alt="背景" />
-      <div id="overlayLayer" class="absolute inset-0"></div>
+  <div id="stageScroll" class="bg-white rounded-xl shadow p-4 overflow-auto">
+    <div id="stageViewport" class="relative mx-auto" style="width:1200px;height:1700px;">
+      <div id="stage" class="relative border border-dashed border-gray-400 bg-white" style="width:1200px;height:1700px; transform-origin: top left;">
+        <img id="backgroundLayer" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" alt="背景" />
+        <div id="overlayLayer" class="absolute inset-0"></div>
+      </div>
     </div>
   </div>
 </div>
