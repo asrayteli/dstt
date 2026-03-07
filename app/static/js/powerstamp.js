@@ -19,11 +19,24 @@
   let selected = null;
   let dragState = null;
   let pdfjsLibPromise = null;
-  let sourceSize = { width: stage.clientWidth, height: stage.clientHeight, unit: 'px' };
+
+  function getStagePixelSize() {
+    const w = Number(document.getElementById('canvasWidth')?.value) || parseFloat(stage.style.width) || stage.getBoundingClientRect().width;
+    const h = Number(document.getElementById('canvasHeight')?.value) || parseFloat(stage.style.height) || stage.getBoundingClientRect().height;
+    return { width: Math.max(1, Math.round(w)), height: Math.max(1, Math.round(h)) };
+  }
+
+  let sourceSize = { ...getStagePixelSize(), unit: 'px' };
 
   function getPdfJs() {
     if (!pdfjsLibPromise) {
-      pdfjsLibPromise = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.min.mjs');
+      pdfjsLibPromise = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.min.mjs')
+        .then((pdfjsLib) => {
+          if (pdfjsLib?.GlobalWorkerOptions) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.worker.min.mjs';
+          }
+          return pdfjsLib;
+        });
     }
     return pdfjsLibPromise;
   }
@@ -245,8 +258,7 @@
   document.getElementById('printBtn').addEventListener('click', () => window.print());
 
   async function drawOverlayToCanvas(ctx, outputWidth, outputHeight) {
-    const stageWidth = stage.clientWidth;
-    const stageHeight = stage.clientHeight;
+    const { width: stageWidth, height: stageHeight } = getStagePixelSize();
     const scaleX = outputWidth / Math.max(1, stageWidth);
     const scaleY = outputHeight / Math.max(1, stageHeight);
 
@@ -299,8 +311,9 @@
     const mode = document.querySelector('input[name="exportSizeMode"]:checked')?.value || 'source';
     const canvas = document.createElement('canvas');
 
-    const outWidth = mode === 'source' ? Math.round(sourceSize.width || stage.clientWidth) : stage.clientWidth;
-    const outHeight = mode === 'source' ? Math.round(sourceSize.height || stage.clientHeight) : stage.clientHeight;
+    const stageSize = getStagePixelSize();
+    const outWidth = mode === 'source' ? Math.round(sourceSize.width || stageSize.width) : stageSize.width;
+    const outHeight = mode === 'source' ? Math.round(sourceSize.height || stageSize.height) : stageSize.height;
 
     canvas.width = Math.max(1, outWidth);
     canvas.height = Math.max(1, outHeight);
