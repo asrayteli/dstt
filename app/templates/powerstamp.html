@@ -46,12 +46,23 @@
     <button id="exportBtn" class="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700">透過PNG保存</button>
     <button id="clearBtn" class="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-700">全削除</button>
 
-    <div class="ml-auto flex items-center gap-2 text-sm">
+    <div class="ml-auto flex flex-wrap items-center gap-2 text-sm">
       <span class="text-gray-600">表示倍率</span>
       <button id="zoomOutBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">−</button>
       <button id="zoomResetBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">100%</button>
       <button id="zoomInBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">＋</button>
       <span id="zoomLabel" class="w-14 text-right font-semibold text-gray-700">100%</span>
+
+      <span class="ml-3 text-gray-600">精度補正</span>
+      <label class="text-xs text-gray-600">X</label>
+      <input id="calibOffsetX" type="number" value="0" step="0.1" class="w-20 border rounded px-2 py-1" title="Xオフセット(px)">
+      <label class="text-xs text-gray-600">Y</label>
+      <input id="calibOffsetY" type="number" value="0" step="0.1" class="w-20 border rounded px-2 py-1" title="Yオフセット(px)">
+      <label class="text-xs text-gray-600">SX%</label>
+      <input id="calibScaleX" type="number" value="100" step="0.1" class="w-20 border rounded px-2 py-1" title="Xスケール(%)">
+      <label class="text-xs text-gray-600">SY%</label>
+      <input id="calibScaleY" type="number" value="100" step="0.1" class="w-20 border rounded px-2 py-1" title="Yスケール(%)">
+      <button id="calibResetBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">補正リセット</button>
     </div>
   </div>
 
@@ -90,7 +101,7 @@
         <input id="imageScale" type="number" value="100" min="10" class="w-24 border rounded px-2 py-1" title="%" />
       </div>
       <button id="addImageBtn" class="px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800">画像配置</button>
-      <p class="text-xs text-gray-500">選択中スタンプはドラッグ移動、Deleteで削除できます。</p>
+      <p class="text-xs text-gray-500">選択中スタンプはドラッグ移動、Deleteで削除。Ctrl/Cmd + C でコピー、Ctrl/Cmd + V で貼り付けできます。</p>
     </div>
   </div>
 

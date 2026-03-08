@@ -10,6 +10,11 @@
   const zoomOutBtn = document.getElementById('zoomOutBtn');
   const zoomResetBtn = document.getElementById('zoomResetBtn');
   const zoomLabel = document.getElementById('zoomLabel');
+  const calibOffsetXInput = document.getElementById('calibOffsetX');
+  const calibOffsetYInput = document.getElementById('calibOffsetY');
+  const calibScaleXInput = document.getElementById('calibScaleX');
+  const calibScaleYInput = document.getElementById('calibScaleY');
+  const calibResetBtn = document.getElementById('calibResetBtn');
 
   if (!stage || !stageViewport || !overlayLayer || !backgroundLayer || !detectedSize || !detectedFileType) {
     return;
@@ -25,6 +30,7 @@
   let selected = null;
   let dragState = null;
   let pdfjsLibPromise = null;
+  let clipboardStamp = null;
   let zoom = 1;
   const ZOOM_MIN = 0.25;
   const ZOOM_MAX = 4;
@@ -50,6 +56,39 @@
   }
 
   let sourceSize = { ...getStagePixelSize(), unit: 'px' };
+
+  const CALIB_KEY = 'powerstampCalibrationV1';
+
+  function getCalibration() {
+    const offsetX = Number(calibOffsetXInput?.value || 0);
+    const offsetY = Number(calibOffsetYInput?.value || 0);
+    const scaleX = Number(calibScaleXInput?.value || 100) / 100;
+    const scaleY = Number(calibScaleYInput?.value || 100) / 100;
+    return {
+      offsetX: Number.isFinite(offsetX) ? offsetX : 0,
+      offsetY: Number.isFinite(offsetY) ? offsetY : 0,
+      scaleX: Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1,
+      scaleY: Number.isFinite(scaleY) && scaleY > 0 ? scaleY : 1,
+    };
+  }
+
+  function saveCalibration() {
+    try {
+      localStorage.setItem(CALIB_KEY, JSON.stringify(getCalibration()));
+    } catch (_) {}
+  }
+
+  function loadCalibration() {
+    try {
+      const raw = localStorage.getItem(CALIB_KEY);
+      if (!raw) return;
+      const c = JSON.parse(raw);
+      if (calibOffsetXInput) calibOffsetXInput.value = String(c.offsetX ?? 0);
+      if (calibOffsetYInput) calibOffsetYInput.value = String(c.offsetY ?? 0);
+      if (calibScaleXInput) calibScaleXInput.value = String(((c.scaleX ?? 1) * 100));
+      if (calibScaleYInput) calibScaleYInput.value = String(((c.scaleY ?? 1) * 100));
+    } catch (_) {}
+  }
 
   function getPdfJs() {
     if (!pdfjsLibPromise) {
@@ -128,14 +167,108 @@
 
   function makeDraggable(item) {
     item.classList.add('stamp-item');
-    item.style.left = '80px';
-    item.style.top = '80px';
+    item.style.left = item.style.left || '80px';
+    item.style.top = item.style.top || '80px';
 
     item.addEventListener('mousedown', (event) => {
       selectItem(item);
       const rect = item.getBoundingClientRect();
       dragState = { item, dx: event.clientX - rect.left, dy: event.clientY - rect.top };
     });
+  }
+
+  function isEditableTarget(target) {
+    if (!target) return false;
+    const tag = target.tagName?.toLowerCase();
+    return tag === 'input' || tag === 'textarea' || target.isContentEditable;
+  }
+
+  function serializeStamp(node) {
+    if (!node) return null;
+    const base = {
+      left: parseFloat(node.style.left || '0'),
+      top: parseFloat(node.style.top || '0'),
+    };
+
+    if (node.tagName === 'IMG') {
+      return {
+        type: 'image',
+        ...base,
+        src: node.src,
+        width: parseFloat(node.style.width || '0'),
+        height: parseFloat(node.style.height || '0'),
+      };
+    }
+
+    if (node.style.border) {
+      return {
+        type: 'shape',
+        ...base,
+        width: parseFloat(node.style.width || '0'),
+        height: parseFloat(node.style.height || '0'),
+        border: node.style.border,
+        borderColor: node.style.borderColor,
+        background: node.style.background,
+        borderRadius: node.style.borderRadius || '',
+      };
+    }
+
+    return {
+      type: 'text',
+      ...base,
+      text: node.textContent || '',
+      fontSize: node.style.fontSize || '24px',
+      color: node.style.color || '#111',
+      whiteSpace: node.style.whiteSpace || 'pre',
+    };
+  }
+
+  function buildStampFromData(data) {
+    if (!data) return null;
+    let node = null;
+
+    if (data.type === 'image') {
+      node = document.createElement('img');
+      node.src = data.src;
+      if (data.width) node.style.width = `${data.width}px`;
+      if (data.height) node.style.height = `${data.height}px`;
+    } else if (data.type === 'shape') {
+      node = document.createElement('div');
+      if (data.width) node.style.width = `${data.width}px`;
+      if (data.height) node.style.height = `${data.height}px`;
+      if (data.border) node.style.border = data.border;
+      if (data.borderColor) node.style.borderColor = data.borderColor;
+      if (data.background) node.style.background = data.background;
+      if (data.borderRadius) node.style.borderRadius = data.borderRadius;
+    } else if (data.type === 'text') {
+      node = document.createElement('div');
+      node.textContent = data.text || '入力文字';
+      node.style.fontSize = data.fontSize || '24px';
+      node.style.color = data.color || '#111';
+      node.style.whiteSpace = data.whiteSpace || 'pre';
+    }
+
+    if (!node) return null;
+
+    const offset = 20;
+    node.style.left = `${Math.max(0, (data.left || 0) + offset)}px`;
+    node.style.top = `${Math.max(0, (data.top || 0) + offset)}px`;
+    makeDraggable(node);
+    return node;
+  }
+
+  function copySelectedStamp() {
+    if (!selected) return false;
+    clipboardStamp = serializeStamp(selected);
+    return !!clipboardStamp;
+  }
+
+  function pasteStamp() {
+    const node = buildStampFromData(clipboardStamp);
+    if (!node) return false;
+    overlayLayer.appendChild(node);
+    selectItem(node);
+    return true;
   }
 
   document.addEventListener('mousemove', (event) => {
@@ -158,9 +291,26 @@
   document.addEventListener('mouseup', () => { dragState = null; });
 
   document.addEventListener('keydown', (event) => {
+    if (isEditableTarget(event.target)) return;
+
+    const key = event.key.toLowerCase();
+    const withMeta = event.ctrlKey || event.metaKey;
+
     if (event.key === 'Delete' && selected) {
       selected.remove();
       selected = null;
+      return;
+    }
+
+    if (withMeta && key === 'c' && selected) {
+      event.preventDefault();
+      copySelectedStamp();
+      return;
+    }
+
+    if (withMeta && key === 'v') {
+      event.preventDefault();
+      pasteStamp();
     }
   });
 
@@ -297,28 +447,48 @@
     setZoom(zoom + delta);
   }, { passive: false });
 
+  [calibOffsetXInput, calibOffsetYInput, calibScaleXInput, calibScaleYInput].forEach((input) => {
+    input?.addEventListener('change', saveCalibration);
+  });
+
+  calibResetBtn?.addEventListener('click', () => {
+    if (calibOffsetXInput) calibOffsetXInput.value = '0';
+    if (calibOffsetYInput) calibOffsetYInput.value = '0';
+    if (calibScaleXInput) calibScaleXInput.value = '100';
+    if (calibScaleYInput) calibScaleYInput.value = '100';
+    saveCalibration();
+  });
+
   async function drawOverlayToCanvas(ctx, outputWidth, outputHeight) {
     const { width: stageWidth, height: stageHeight } = getStagePixelSize();
     const scaleX = outputWidth / Math.max(1, stageWidth);
     const scaleY = outputHeight / Math.max(1, stageHeight);
+    const calib = getCalibration();
+
+    const applyCalibX = (v) => (v * calib.scaleX) + calib.offsetX;
+    const applyCalibY = (v) => (v * calib.scaleY) + calib.offsetY;
+    const applyCalibW = (v) => v * calib.scaleX;
+    const applyCalibH = (v) => v * calib.scaleY;
 
     for (const node of Array.from(overlayLayer.children)) {
-      const x = parseFloat(node.style.left || '0') * scaleX;
-      const y = parseFloat(node.style.top || '0') * scaleY;
+      const baseX = parseFloat(node.style.left || '0') * scaleX;
+      const baseY = parseFloat(node.style.top || '0') * scaleY;
+      const x = applyCalibX(baseX);
+      const y = applyCalibY(baseY);
       if (node.tagName === 'IMG') {
         await new Promise((resolve) => {
           const image = new Image();
           image.onload = () => {
-            const w = parseFloat(node.style.width || image.naturalWidth) * scaleX;
-            const h = parseFloat(node.style.height || image.naturalHeight) * scaleY;
+            const w = applyCalibW(parseFloat(node.style.width || image.naturalWidth) * scaleX);
+            const h = applyCalibH(parseFloat(node.style.height || image.naturalHeight) * scaleY);
             ctx.drawImage(image, x, y, w, h);
             resolve();
           };
           image.src = node.src;
         });
       } else if (node.style.border) {
-        const w = parseFloat(node.style.width || '0') * scaleX;
-        const h = parseFloat(node.style.height || '0') * scaleY;
+        const w = applyCalibW(parseFloat(node.style.width || '0') * scaleX);
+        const h = applyCalibH(parseFloat(node.style.height || '0') * scaleY);
         if (node.style.borderRadius) {
           ctx.beginPath();
           ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
@@ -335,7 +505,8 @@
           ctx.strokeRect(x, y, w, h);
         }
       } else {
-        const fontSize = parseFloat(node.style.fontSize || '24') * Math.min(scaleX, scaleY);
+        const baseFontSize = parseFloat(node.style.fontSize || '24') * Math.min(scaleX, scaleY);
+        const fontSize = baseFontSize * Math.min(calib.scaleX, calib.scaleY);
         ctx.fillStyle = node.style.color || '#111';
         ctx.font = `${Math.max(8, fontSize)}px sans-serif`;
         const lines = (node.textContent || '').split('\n');
@@ -367,5 +538,6 @@
     link.click();
   });
 
+  loadCalibration();
   applyZoom();
 })();
