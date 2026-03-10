@@ -459,8 +459,11 @@
         const heightPt = sourceViewport.height;
         const widthMm = widthPt * 25.4 / 72;
         const heightMm = heightPt * 25.4 / 72;
+        const widthPx = renderViewport.width;
+        const heightPx = renderViewport.height;
 
-        sourceSize = { width: widthPt, height: heightPt, unit: 'pt' };
+        // プレビュー見え方と出力サイズの一致を優先し、PDF背景は描画ピクセル寸法をsourceSizeに採用する。
+        sourceSize = { width: widthPx, height: heightPx, unit: 'px' };
         const sourceType = detectFileTypeFromSize({
           widthPx: widthPt,
           heightPx: heightPt,
@@ -477,9 +480,9 @@
         await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
         backgroundLayer.src = canvas.toDataURL('image/png');
 
-        setCanvasSize(widthPt, heightPt);
+        setCanvasSize(widthPx, heightPx);
         updateDetectedInfo(
-          `PDF 1ページ目: ${Math.round(widthPt)}×${Math.round(heightPt)}pt（約 ${widthMm.toFixed(1)}×${heightMm.toFixed(1)}mm）`,
+          `PDF 1ページ目: ${Math.round(widthPt)}×${Math.round(heightPt)}pt（約 ${widthMm.toFixed(1)}×${heightMm.toFixed(1)}mm） / 表示 ${Math.round(widthPx)}×${Math.round(heightPx)}px`,
           sourceType
         );
       } catch (error) {

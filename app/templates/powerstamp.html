@@ -28,8 +28,8 @@
       <p id="detectedSize" class="text-gray-700">未読込</p>
       <p id="detectedFileType" class="text-xs text-gray-600">ファイルタイプ: 未判定</p>
       <p class="text-[11px] text-gray-500 leading-snug">
-        寸法仕様: 画像はpx基準、PDFはpt基準（1pt=1/72inch）。
-        「背景元サイズ」での透過PNG出力は、この基準寸法をそのまま使用します。
+        寸法仕様: 画像は元px、PDFはプレビュー表示px（ページ実寸ptも併記）。
+        「背景元サイズ」での透過PNG出力は、プレビューに合わせた表示px寸法を使用します。
       </p>
       <div class="pt-1 border-t border-gray-200">
         <p class="text-xs font-medium text-gray-700 mb-1">透過PNG出力サイズ</p>
@@ -118,7 +118,7 @@
   <div id="stageScroll" class="bg-white rounded-xl shadow p-4 overflow-auto">
     <div id="stageViewport" class="relative mx-auto" style="width:1200px;height:1700px;">
       <div id="stage" class="relative border border-dashed border-gray-400 bg-white" style="width:1200px;height:1700px; transform-origin: top left;">
-        <img id="backgroundLayer" class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none" alt="背景" />
+        <img id="backgroundLayer" class="absolute inset-0 w-full h-full object-fill pointer-events-none select-none" alt="背景" />
         <div id="overlayLayer" class="absolute inset-0"></div>
       </div>
     </div>
