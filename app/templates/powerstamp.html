@@ -41,6 +41,24 @@
           <input type="radio" name="exportSizeMode" value="canvas">
           ユーザー指定サイズ（キャンバス）
         </label>
+        <label class="flex items-center gap-2 text-xs mt-1">
+          <input type="radio" name="exportSizeMode" value="paper">
+          用紙サイズ指定（実印刷向け）
+        </label>
+        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          <select id="paperSizeSelect" class="border rounded px-2 py-1">
+            <option value="A4">A4</option>
+            <option value="A3">A3</option>
+            <option value="B4">B4</option>
+            <option value="B5">B5</option>
+          </select>
+          <select id="paperOrientation" class="border rounded px-2 py-1">
+            <option value="portrait">縦</option>
+            <option value="landscape">横</option>
+          </select>
+          <label>DPI</label>
+          <input id="paperDpiInput" type="number" value="300" min="72" max="1200" class="w-20 border rounded px-2 py-1" />
+        </div>
       </div>
     </div>
   </div>
@@ -73,6 +91,16 @@
       <label class="text-xs text-gray-600">SY%</label>
       <input id="calibScaleY" type="number" value="100" step="0.1" class="w-20 border rounded px-2 py-1" title="Yスケール(%)">
       <button id="calibResetBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">補正リセット</button>
+      <label class="flex items-center gap-1 text-xs text-gray-700">
+        <input id="applyCalibrationOnExport" type="checkbox">
+        補正を出力に適用
+      </label>
+      <label class="flex items-center gap-1 text-xs text-gray-700">
+        <input id="useAnchorOrigin" type="checkbox">
+        左上基準点を使う
+      </label>
+      <button id="setAnchorBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">基準点を設定</button>
+      <span id="anchorStatus" class="text-xs text-gray-600">未設定</span>
     </div>
   </div>
 
@@ -120,6 +148,7 @@
       <div id="stage" class="relative border border-dashed border-gray-400 bg-white" style="width:1200px;height:1700px; transform-origin: top left;">
         <img id="backgroundLayer" class="absolute inset-0 w-full h-full object-fill pointer-events-none select-none" alt="背景" />
         <div id="overlayLayer" class="absolute inset-0"></div>
+        <div id="anchorMarker" class="absolute hidden" style="width:14px;height:14px;border:2px solid #ef4444;border-radius:9999px;transform:translate(-7px,-7px);pointer-events:none;z-index:20;"></div>
       </div>
     </div>
   </div>
