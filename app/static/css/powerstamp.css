@@ -1,0 +1,9 @@
+.stamp-item { position: absolute; cursor: move; user-select: none; }
+.stamp-item.selected { outline: 2px dashed #ef4444; outline-offset: 2px; }
+
+@media print {
+  body * { visibility: hidden !important; }
+  #stage, #stage * { visibility: visible !important; }
+  #stage { position: absolute; left: 0; top: 0; border: none !important; }
+  #backgroundLayer { display: none !important; }
+}
