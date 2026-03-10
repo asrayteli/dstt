@@ -21,6 +21,7 @@
   const templateSelect = document.getElementById('templateSelect');
   const loadTemplateBtn = document.getElementById('loadTemplateBtn');
   const deleteTemplateBtn = document.getElementById('deleteTemplateBtn');
+  const openPreviewTabBtn = document.getElementById('openPreviewTabBtn');
   const useAnchorOrigin = document.getElementById('useAnchorOrigin');
   const setAnchorBtn = document.getElementById('setAnchorBtn');
   const anchorStatus = document.getElementById('anchorStatus');
@@ -454,6 +455,25 @@
     setAnchorUI(anchorPoint);
   });
 
+
+  function buildPreviewState() {
+    return {
+      canvas: getStagePixelSize(),
+      backgroundSrc: backgroundLayer?.src || '',
+      stamps: serializeAllStamps(),
+    };
+  }
+
+  function openPreviewInNewTab() {
+    try {
+      localStorage.setItem('powerstampPreviewState', JSON.stringify(buildPreviewState()));
+    } catch (e) {
+      alert(`プレビュー状態の保存に失敗しました: ${e.message}`);
+      return;
+    }
+    window.open('/tools/powerstamp/preview?editor_window=1', '_blank', 'noopener');
+  }
+
 document.addEventListener('mousemove', (event) => {
     if (!dragState) return;
     const stageRect = stage.getBoundingClientRect();
@@ -652,6 +672,8 @@ document.addEventListener('mousemove', (event) => {
   deleteTemplateBtn?.addEventListener('click', () => {
     deleteTemplate().catch((e) => alert(`テンプレ削除エラー: ${e.message}`));
   });
+
+  openPreviewTabBtn?.addEventListener('click', openPreviewInNewTab);
 
   setAnchorBtn?.addEventListener('click', () => {
     waitingAnchorPick = true;

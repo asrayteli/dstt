@@ -123,3 +123,9 @@ def delete_template(template_id):
         return jsonify({"error": "テンプレートが見つかりません"}), 404
     _save_templates(templates)
     return jsonify({"ok": True})
+
+
+@powerstamp_bp.route("/preview", methods=["GET"])
+@login_required
+def powerstamp_preview():
+    return render_template("powerstamp_preview.html")
