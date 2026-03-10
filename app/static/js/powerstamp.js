@@ -15,6 +15,11 @@
   const calibScaleXInput = document.getElementById('calibScaleX');
   const calibScaleYInput = document.getElementById('calibScaleY');
   const calibResetBtn = document.getElementById('calibResetBtn');
+  const templateNameInput = document.getElementById('templateNameInput');
+  const saveTemplateBtn = document.getElementById('saveTemplateBtn');
+  const templateSelect = document.getElementById('templateSelect');
+  const loadTemplateBtn = document.getElementById('loadTemplateBtn');
+  const deleteTemplateBtn = document.getElementById('deleteTemplateBtn');
 
   if (!stage || !stageViewport || !overlayLayer || !backgroundLayer || !detectedSize || !detectedFileType) {
     return;
@@ -271,6 +276,128 @@
     return true;
   }
 
+  function serializeAllStamps() {
+    return Array.from(overlayLayer.children)
+      .map((node) => serializeStamp(node))
+      .filter(Boolean);
+  }
+
+  function restoreAllStamps(stamps) {
+    overlayLayer.innerHTML = '';
+    selected = null;
+    if (!Array.isArray(stamps)) return;
+    for (const stamp of stamps) {
+      const node = buildStampFromData({ ...stamp, left: stamp.left || 0, top: stamp.top || 0 });
+      if (!node) continue;
+      node.style.left = `${Math.max(0, Number(stamp.left || 0))}px`;
+      node.style.top = `${Math.max(0, Number(stamp.top || 0))}px`;
+      overlayLayer.appendChild(node);
+    }
+  }
+
+  function currentTemplatePayload() {
+    return {
+      version: 1,
+      sourceSize,
+      canvas: getStagePixelSize(),
+      calibration: getCalibration(),
+      stamps: serializeAllStamps(),
+    };
+  }
+
+  async function refreshTemplateList(selectId = null) {
+    if (!templateSelect) return;
+    const res = await fetch('/tools/powerstamp/api/templates');
+    const json = await res.json();
+    templateSelect.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = `テンプレート選択（${json.count || 0}/${json.max || 20}）`;
+    templateSelect.appendChild(placeholder);
+
+    for (const tpl of (json.templates || [])) {
+      const opt = document.createElement('option');
+      opt.value = tpl.id;
+      opt.textContent = tpl.name;
+      templateSelect.appendChild(opt);
+    }
+
+    if (selectId) templateSelect.value = selectId;
+  }
+
+  async function saveTemplate() {
+    const name = (templateNameInput?.value || '').trim();
+    if (!name) {
+      alert('テンプレート名を入力してください');
+      return;
+    }
+
+    const payload = {
+      name,
+      data: currentTemplatePayload(),
+    };
+
+    const res = await fetch('/tools/powerstamp/api/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      alert(json.error || 'テンプレート保存に失敗しました');
+      return;
+    }
+    await refreshTemplateList(json.id);
+  }
+
+  async function loadTemplate() {
+    const id = templateSelect?.value;
+    if (!id) {
+      alert('テンプレートを選択してください');
+      return;
+    }
+
+    const res = await fetch(`/tools/powerstamp/api/templates/${id}`);
+    const json = await res.json();
+    if (!res.ok || !json.template) {
+      alert(json.error || 'テンプレート読込に失敗しました');
+      return;
+    }
+
+    const data = json.template.data || {};
+    const canvas = data.canvas || {};
+    if (canvas.width && canvas.height) setCanvasSize(canvas.width, canvas.height);
+
+    if (data.calibration) {
+      if (calibOffsetXInput) calibOffsetXInput.value = String(data.calibration.offsetX ?? 0);
+      if (calibOffsetYInput) calibOffsetYInput.value = String(data.calibration.offsetY ?? 0);
+      if (calibScaleXInput) calibScaleXInput.value = String((data.calibration.scaleX ?? 1) * 100);
+      if (calibScaleYInput) calibScaleYInput.value = String((data.calibration.scaleY ?? 1) * 100);
+      saveCalibration();
+    }
+
+    sourceSize = data.sourceSize || sourceSize;
+    restoreAllStamps(data.stamps || []);
+  }
+
+  async function deleteTemplate() {
+    const id = templateSelect?.value;
+    if (!id) {
+      alert('削除するテンプレートを選択してください');
+      return;
+    }
+    if (!confirm('選択中テンプレートを削除します。よろしいですか？')) return;
+
+    const res = await fetch(`/tools/powerstamp/api/templates/${id}`, { method: 'DELETE' });
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      alert(json.error || 'テンプレート削除に失敗しました');
+      return;
+    }
+    await refreshTemplateList();
+  }
+
   document.addEventListener('mousemove', (event) => {
     if (!dragState) return;
     const stageRect = stage.getBoundingClientRect();
@@ -459,6 +586,16 @@
     saveCalibration();
   });
 
+  saveTemplateBtn?.addEventListener('click', () => {
+    saveTemplate().catch((e) => alert(`テンプレ保存エラー: ${e.message}`));
+  });
+  loadTemplateBtn?.addEventListener('click', () => {
+    loadTemplate().catch((e) => alert(`テンプレ読込エラー: ${e.message}`));
+  });
+  deleteTemplateBtn?.addEventListener('click', () => {
+    deleteTemplate().catch((e) => alert(`テンプレ削除エラー: ${e.message}`));
+  });
+
   async function drawOverlayToCanvas(ctx, outputWidth, outputHeight) {
     const { width: stageWidth, height: stageHeight } = getStagePixelSize();
     const scaleX = outputWidth / Math.max(1, stageWidth);
@@ -523,6 +660,10 @@
     const canvas = document.createElement('canvas');
 
     const stageSize = getStagePixelSize();
+    // 寸法仕様:
+    // - 画像背景: sourceSize は px
+    // - PDF背景: sourceSize は pt(1/72inch)
+    // 「背景元サイズ」出力では sourceSize の数値をそのまま出力キャンバス寸法として採用する。
     const outWidth = mode === 'source' ? Math.round(sourceSize.width || stageSize.width) : stageSize.width;
     const outHeight = mode === 'source' ? Math.round(sourceSize.height || stageSize.height) : stageSize.height;
 
@@ -540,4 +681,5 @@
 
   loadCalibration();
   applyZoom();
+  refreshTemplateList().catch(() => {});
 })();
