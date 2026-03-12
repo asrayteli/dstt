@@ -82,8 +82,15 @@ def _merge_seed_templates(templates):
             seed_data = st.get("data") if isinstance(st.get("data"), dict) else {}
             if "guide" in seed_data and "guide" not in cur_data:
                 cur_data["guide"] = seed_data["guide"]
-                cur["data"] = cur_data
                 changed = True
+            if "guide_mm" in seed_data and "guide_mm" not in cur_data:
+                cur_data["guide_mm"] = seed_data["guide_mm"]
+                changed = True
+            if "paper" in seed_data and "paper" not in cur_data:
+                cur_data["paper"] = seed_data["paper"]
+                changed = True
+            if changed:
+                cur["data"] = cur_data
 
     if changed and len(templates) > MAX_TEMPLATES:
         templates.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
