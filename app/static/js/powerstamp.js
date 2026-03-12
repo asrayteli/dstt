@@ -66,11 +66,31 @@
     if (guideLayer) guideLayer.innerHTML = '';
   }
 
-  function renderGuide(guide) {
+  function renderGuide(guide, paper = null) {
     clearGuide();
-    if (!guideLayer || !guide || !Array.isArray(guide.boxes)) return;
+    if (!guideLayer || !guide) return;
 
-    for (const b of guide.boxes) {
+    let boxes = [];
+
+    if (Array.isArray(guide.boxes)) {
+      boxes = guide.boxes;
+    }
+
+    // mm定義があれば、現在キャンバス寸法に合わせてpxへ変換
+    if (Array.isArray(guide.boxes_mm) && paper && paper.w_mm && paper.h_mm) {
+      const canvas = getStagePixelSize();
+      const sx = canvas.width / paper.w_mm;
+      const sy = canvas.height / paper.h_mm;
+      boxes = guide.boxes_mm.map((b) => ({
+        x: (b.x_mm || 0) * sx,
+        y: (b.y_mm || 0) * sy,
+        w: (b.w_mm || 0) * sx,
+        h: (b.h_mm || 0) * sy,
+        label: b.label || ''
+      }));
+    }
+
+    for (const b of boxes) {
       const box = document.createElement('div');
       box.className = 'guide-box';
       box.style.left = `${Math.max(0, b.x || 0)}px`;
@@ -484,8 +504,8 @@ function mmToPx(mm, dpi) {
     sourceSize = data.sourceSize || sourceSize;
     restoreAllStamps(data.stamps || []);
 
-    const guide = data.guide || buildEnvelopeGuideByName(json.template.name);
-    renderGuide(guide);
+    const guide = (data.guide_mm ? { boxes_mm: data.guide_mm.boxes } : data.guide) || buildEnvelopeGuideByName(json.template.name);
+    renderGuide(guide, data.paper || null);
   }
 
   async function deleteTemplate() {
@@ -648,7 +668,13 @@ document.addEventListener('mousemove', (event) => {
   document.getElementById('resizeCanvasBtn').addEventListener('click', () => {
     const width = Number(document.getElementById('canvasWidth').value);
     const height = Number(document.getElementById('canvasHeight').value);
-    if (width >= 100 && height >= 100) setCanvasSize(width, height);
+    if (width >= 100 && height >= 100) {
+      setCanvasSize(width, height);
+      const id = templateSelect?.value;
+      if (id) {
+        loadTemplate().catch(() => {});
+      }
+    }
   });
 
   document.getElementById('addTextBtn').addEventListener('click', () => {
