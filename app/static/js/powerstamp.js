@@ -49,7 +49,7 @@
   let pdfjsLibPromise = null;
   let clipboardStamp = null;
   let zoom = 1;
-  const ZOOM_MIN = 0.25;
+  const ZOOM_MIN = 0.05;
   const ZOOM_MAX = 4;
   const ZOOM_STEP = 0.1;
 
@@ -191,10 +191,11 @@ function mmToPx(mm, dpi) {
   function fitStageToScreen() {
     if (!stageScroll) return;
     const { width, height } = getStagePixelSize();
-    const pad = 24;
     const rect = stageScroll.getBoundingClientRect();
-    const availW = Math.max(200, rect.width - pad);
-    const availH = Math.max(200, rect.height - pad);
+    const padW = 12;
+    const padH = 12;
+    const availW = Math.max(120, rect.width - padW);
+    const availH = Math.max(120, rect.height - padH);
     const zw = availW / Math.max(1, width);
     const zh = availH / Math.max(1, height);
     const target = Math.min(1, zw, zh);
@@ -768,7 +769,7 @@ document.addEventListener('mousemove', (event) => {
     selectItem(null);
   });
 
-    async function printOverlayDirect() {
+    async function printOverlayDirect(win) {
     const stageSize = getStagePixelSize();
     const mode = document.querySelector('input[name="exportSizeMode"]:checked')?.value || 'source';
 
@@ -786,6 +787,7 @@ document.addEventListener('mousemove', (event) => {
 
     if (useAnchorOrigin?.checked && !anchorPoint) {
       alert('左上基準点が未設定です。');
+      if (win) win.close();
       return;
     }
 
@@ -796,7 +798,6 @@ document.addEventListener('mousemove', (event) => {
     await drawOverlayToCanvas(ctx, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/png');
 
-    // 用紙サイズを可能な限り明示して、1ページ化を狙う
     let pageWmm = null;
     let pageHmm = null;
     if (mode === 'paper') {
@@ -810,7 +811,6 @@ document.addEventListener('mousemove', (event) => {
       pageHmm = (sourceSize.height * 25.4) / 72;
     }
 
-    const win = window.open('', '_blank', 'noopener');
     if (!win) {
       alert('印刷ウィンドウを開けません。ポップアップを許可してください。');
       return;
@@ -825,7 +825,15 @@ document.addEventListener('mousemove', (event) => {
   }
 
   document.getElementById('printBtn').addEventListener('click', () => {
-    printOverlayDirect().catch((e) => alert(`印刷準備エラー: ${e.message}`));
+    const win = window.open('', '_blank', 'noopener');
+    if (!win) {
+      alert('印刷ウィンドウを開けません。ポップアップを許可してください。');
+      return;
+    }
+    printOverlayDirect(win).catch((e) => {
+      try { win.close(); } catch (_) {}
+      alert(`印刷準備エラー: ${e.message}`);
+    });
   });
 
   zoomInBtn?.addEventListener('click', () => setZoom(zoom + ZOOM_STEP));
@@ -980,5 +988,9 @@ document.addEventListener('mousemove', (event) => {
   applyZoom();
   refreshTemplateList().catch(() => {});
   window.addEventListener('resize', () => { fitStageToScreen(); });
+  if (window.ResizeObserver && stageScroll) {
+    const ro = new ResizeObserver(() => fitStageToScreen());
+    ro.observe(stageScroll);
+  }
   setTimeout(() => fitStageToScreen(), 0);
 })();
