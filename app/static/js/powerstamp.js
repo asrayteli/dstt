@@ -76,28 +76,45 @@
       boxes = guide.boxes;
     }
 
-    // mm定義があれば、現在キャンバス寸法に合わせてpxへ変換
     if (Array.isArray(guide.boxes_mm) && paper && paper.w_mm && paper.h_mm) {
       const canvas = getStagePixelSize();
       const sx = canvas.width / paper.w_mm;
       const sy = canvas.height / paper.h_mm;
       boxes = guide.boxes_mm.map((b) => ({
+        ...b,
         x: (b.x_mm || 0) * sx,
         y: (b.y_mm || 0) * sy,
         w: (b.w_mm || 0) * sx,
         h: (b.h_mm || 0) * sy,
-        label: b.label || ''
       }));
     }
 
     for (const b of boxes) {
-      const box = document.createElement('div');
-      box.className = 'guide-box';
-      box.style.left = `${Math.max(0, b.x || 0)}px`;
-      box.style.top = `${Math.max(0, b.y || 0)}px`;
-      box.style.width = `${Math.max(0, b.w || 0)}px`;
-      box.style.height = `${Math.max(0, b.h || 0)}px`;
-      guideLayer.appendChild(box);
+      if (b.type === 'zip7') {
+        const count = 7;
+        const splitAfter = Number(b.split_after || 3);
+        const gap = Math.max(2, (b.h || 0) * 0.2);
+        const cellsW = (b.w - gap) / count;
+        for (let i = 0; i < count; i++) {
+          const extraGap = i >= splitAfter ? gap : 0;
+          const x = (b.x || 0) + i * cellsW + extraGap;
+          const box = document.createElement('div');
+          box.className = 'guide-box';
+          box.style.left = `${Math.max(0, x)}px`;
+          box.style.top = `${Math.max(0, b.y || 0)}px`;
+          box.style.width = `${Math.max(0, cellsW - 1)}px`;
+          box.style.height = `${Math.max(0, b.h || 0)}px`;
+          guideLayer.appendChild(box);
+        }
+      } else {
+        const box = document.createElement('div');
+        box.className = 'guide-box';
+        box.style.left = `${Math.max(0, b.x || 0)}px`;
+        box.style.top = `${Math.max(0, b.y || 0)}px`;
+        box.style.width = `${Math.max(0, b.w || 0)}px`;
+        box.style.height = `${Math.max(0, b.h || 0)}px`;
+        guideLayer.appendChild(box);
+      }
 
       if (b.label) {
         const label = document.createElement('div');
@@ -116,7 +133,7 @@
     if (n.includes('長3')) {
       return {
         boxes_mm: [
-          { x_mm: 57, y_mm: 12, w_mm: 55, h_mm: 12, label: '郵便番号' },
+          { type: 'zip7', x_mm: 57, y_mm: 12, w_mm: 55, h_mm: 12, label: '郵便番号', split_after: 3 },
           { x_mm: 72, y_mm: 45, w_mm: 38, h_mm: 155, label: '宛名（縦書き想定）' },
           { x_mm: 10, y_mm: 185, w_mm: 45, h_mm: 38, label: '差出人' }
         ]
@@ -125,7 +142,7 @@
     if (n.includes('角2')) {
       return {
         boxes_mm: [
-          { x_mm: 170, y_mm: 14, w_mm: 60, h_mm: 13, label: '郵便番号' },
+          { type: 'zip7', x_mm: 170, y_mm: 14, w_mm: 60, h_mm: 13, label: '郵便番号', split_after: 3 },
           { x_mm: 145, y_mm: 70, w_mm: 75, h_mm: 210, label: '宛名（縦書き想定）' },
           { x_mm: 18, y_mm: 270, w_mm: 70, h_mm: 45, label: '差出人' }
         ]
@@ -163,6 +180,18 @@ function mmToPx(mm, dpi) {
     anchorMarker.style.left = `${point.x}px`;
     anchorMarker.style.top = `${point.y}px`;
     anchorStatus.textContent = `(${Math.round(point.x)}, ${Math.round(point.y)})`;
+  }
+
+  function fitStageToScreen() {
+    if (!stageScroll) return;
+    const { width, height } = getStagePixelSize();
+    const pad = 24;
+    const availW = Math.max(200, stageScroll.clientWidth - pad);
+    const availH = Math.max(200, stageScroll.clientHeight - pad);
+    const zw = availW / Math.max(1, width);
+    const zh = availH / Math.max(1, height);
+    const target = Math.min(1, zw, zh);
+    setZoom(target);
   }
 
   function getStagePixelSize() {
@@ -494,10 +523,17 @@ function mmToPx(mm, dpi) {
     if (canvas.width && canvas.height) setCanvasSize(canvas.width, canvas.height);
 
     if (data.calibration) {
-      if (calibOffsetXInput) calibOffsetXInput.value = String(data.calibration.offsetX ?? 0);
-      if (calibOffsetYInput) calibOffsetYInput.value = String(data.calibration.offsetY ?? 0);
-      if (calibScaleXInput) calibScaleXInput.value = String((data.calibration.scaleX ?? 1) * 100);
-      if (calibScaleYInput) calibScaleYInput.value = String((data.calibration.scaleY ?? 1) * 100);
+      const ox = Number(data.calibration.offsetX ?? 0);
+      const oy = Number(data.calibration.offsetY ?? 0);
+      const sx = Number(data.calibration.scaleX ?? 1);
+      const sy = Number(data.calibration.scaleY ?? 1);
+      if (calibOffsetXInput) calibOffsetXInput.value = String(ox);
+      if (calibOffsetYInput) calibOffsetYInput.value = String(oy);
+      if (calibScaleXInput) calibScaleXInput.value = String(sx * 100);
+      if (calibScaleYInput) calibScaleYInput.value = String(sy * 100);
+      if (applyCalibrationOnExport) {
+        applyCalibrationOnExport.checked = (ox !== 0 || oy !== 0 || sx !== 1 || sy !== 1);
+      }
       saveCalibration();
     }
 
@@ -935,4 +971,6 @@ document.addEventListener('mousemove', (event) => {
   loadCalibration();
   applyZoom();
   refreshTemplateList().catch(() => {});
+  window.addEventListener('resize', () => { fitStageToScreen(); });
+  setTimeout(() => fitStageToScreen(), 0);
 })();

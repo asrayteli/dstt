@@ -18,7 +18,7 @@
       },
       "calibration": {
         "offsetX": 0,
-        "offsetY": 0,
+        "offsetY": -83,
         "scaleX": 1,
         "scaleY": 1
       },
@@ -56,11 +56,13 @@
       "guide_mm": {
         "boxes": [
           {
+            "type": "zip7",
             "x_mm": 57,
             "y_mm": 12,
             "w_mm": 55,
             "h_mm": 12,
-            "label": "郵便番号"
+            "label": "郵便番号",
+            "split_after": 3
           },
           {
             "x_mm": 72,
@@ -99,7 +101,7 @@
       },
       "calibration": {
         "offsetX": 0,
-        "offsetY": 0,
+        "offsetY": -83,
         "scaleX": 1,
         "scaleY": 1
       },
@@ -137,11 +139,13 @@
       "guide_mm": {
         "boxes": [
           {
+            "type": "zip7",
             "x_mm": 170,
             "y_mm": 14,
             "w_mm": 60,
             "h_mm": 13,
-            "label": "郵便番号"
+            "label": "郵便番号",
+            "split_after": 3
           },
           {
             "x_mm": 145,
