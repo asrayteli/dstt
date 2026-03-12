@@ -11,6 +11,7 @@
   const zoomOutBtn = document.getElementById('zoomOutBtn');
   const zoomResetBtn = document.getElementById('zoomResetBtn');
   const zoomLabel = document.getElementById('zoomLabel');
+  const zoomFitBtn = document.getElementById('zoomFitBtn');
   const calibOffsetXInput = document.getElementById('calibOffsetX');
   const calibOffsetYInput = document.getElementById('calibOffsetY');
   const calibScaleXInput = document.getElementById('calibScaleX');
@@ -86,24 +87,29 @@
         y: (b.y_mm || 0) * sy,
         w: (b.w_mm || 0) * sx,
         h: (b.h_mm || 0) * sy,
+        gap: (b.gap_mm || 0) * sx,
       }));
     }
 
     for (const b of boxes) {
       if (b.type === 'zip7') {
-        const count = 7;
-        const splitAfter = Number(b.split_after || 3);
-        const gap = Math.max(2, (b.h || 0) * 0.2);
-        const cellsW = (b.w - gap) / count;
+        const n1 = Number(b.digits_first || 3);
+        const n2 = Number(b.digits_second || 4);
+        const count = n1 + n2;
+        const gap = Math.max(2, Number(b.gap || 0));
+        const totalW = Math.max(0, Number(b.w || 0));
+        const cellW = (totalW - gap) / count;
+        const y = Math.max(0, Number(b.y || 0));
+        const h = Math.max(0, Number(b.h || 0));
         for (let i = 0; i < count; i++) {
-          const extraGap = i >= splitAfter ? gap : 0;
-          const x = (b.x || 0) + i * cellsW + extraGap;
+          const inSecond = i >= n1;
+          const x = (Number(b.x || 0)) + (i * cellW) + (inSecond ? gap : 0);
           const box = document.createElement('div');
           box.className = 'guide-box';
           box.style.left = `${Math.max(0, x)}px`;
-          box.style.top = `${Math.max(0, b.y || 0)}px`;
-          box.style.width = `${Math.max(0, cellsW - 1)}px`;
-          box.style.height = `${Math.max(0, b.h || 0)}px`;
+          box.style.top = `${y}px`;
+          box.style.width = `${Math.max(0, cellW - 1)}px`;
+          box.style.height = `${h}px`;
           guideLayer.appendChild(box);
         }
       } else {
@@ -133,7 +139,7 @@
     if (n.includes('長3')) {
       return {
         boxes_mm: [
-          { type: 'zip7', x_mm: 57, y_mm: 12, w_mm: 55, h_mm: 12, label: '郵便番号', split_after: 3 },
+          { type: 'zip7', x_mm: 57, y_mm: 12, w_mm: 55, h_mm: 12, label: '郵便番号', digits_first: 3, digits_second: 4, gap_mm: 4 },
           { x_mm: 72, y_mm: 45, w_mm: 38, h_mm: 155, label: '宛名（縦書き想定）' },
           { x_mm: 10, y_mm: 185, w_mm: 45, h_mm: 38, label: '差出人' }
         ]
@@ -142,7 +148,7 @@
     if (n.includes('角2')) {
       return {
         boxes_mm: [
-          { type: 'zip7', x_mm: 170, y_mm: 14, w_mm: 60, h_mm: 13, label: '郵便番号', split_after: 3 },
+          { type: 'zip7', x_mm: 170, y_mm: 14, w_mm: 60, h_mm: 13, label: '郵便番号', digits_first: 3, digits_second: 4, gap_mm: 4 },
           { x_mm: 145, y_mm: 70, w_mm: 75, h_mm: 210, label: '宛名（縦書き想定）' },
           { x_mm: 18, y_mm: 270, w_mm: 70, h_mm: 45, label: '差出人' }
         ]
@@ -186,8 +192,9 @@ function mmToPx(mm, dpi) {
     if (!stageScroll) return;
     const { width, height } = getStagePixelSize();
     const pad = 24;
-    const availW = Math.max(200, stageScroll.clientWidth - pad);
-    const availH = Math.max(200, stageScroll.clientHeight - pad);
+    const rect = stageScroll.getBoundingClientRect();
+    const availW = Math.max(200, rect.width - pad);
+    const availH = Math.max(200, rect.height - pad);
     const zw = availW / Math.max(1, width);
     const zh = availH / Math.max(1, height);
     const target = Math.min(1, zw, zh);
@@ -824,6 +831,7 @@ document.addEventListener('mousemove', (event) => {
   zoomInBtn?.addEventListener('click', () => setZoom(zoom + ZOOM_STEP));
   zoomOutBtn?.addEventListener('click', () => setZoom(zoom - ZOOM_STEP));
   zoomResetBtn?.addEventListener('click', () => setZoom(1));
+  zoomFitBtn?.addEventListener('click', () => fitStageToScreen());
 
   stageScroll?.addEventListener('wheel', (event) => {
     if (!event.ctrlKey) return;
