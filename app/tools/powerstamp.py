@@ -1,26 +1,60 @@
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, render_template, request, jsonify, current_app, has_app_context
 from flask_login import login_required, current_user
 import os
 import json
 from datetime import datetime
+import shutil
 
 powerstamp_bp = Blueprint("powerstamp", __name__, url_prefix="/tools/powerstamp")
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-TEMPLATE_STORE_PATH = os.path.join(BASE_DIR, "..", "data", "powerstamp_templates.json")
+LEGACY_STORE_PATH = os.path.join(BASE_DIR, "..", "data", "powerstamp_templates.json")
+SEED_STORE_PATH = os.path.join(BASE_DIR, "..", "data", "powerstamp_templates.seed.json")
 MAX_TEMPLATES = 20
 
 
-def _ensure_store_dir():
-    os.makedirs(os.path.dirname(TEMPLATE_STORE_PATH), exist_ok=True)
+def _runtime_store_path() -> str:
+    # 追跡対象(app/data)ではなく、実行時データ(instance)へ保存する
+    if has_app_context() and current_app:
+        return os.path.join(current_app.instance_path, "powerstamp_templates.json")
+    # フォールバック（通常は使わない）
+    return os.path.join(BASE_DIR, "..", "..", "instance", "powerstamp_templates.json")
+
+
+def _ensure_runtime_store_initialized() -> str:
+    store_path = os.path.abspath(_runtime_store_path())
+    os.makedirs(os.path.dirname(store_path), exist_ok=True)
+
+    if os.path.exists(store_path):
+        return store_path
+
+    # 既存環境移行: legacyファイルがあれば最優先で移す
+    if os.path.exists(LEGACY_STORE_PATH):
+        try:
+            shutil.copy2(LEGACY_STORE_PATH, store_path)
+            return store_path
+        except Exception:
+            pass
+
+    # 初期化: seedがあればseedで初期化
+    if os.path.exists(SEED_STORE_PATH):
+        try:
+            shutil.copy2(SEED_STORE_PATH, store_path)
+            return store_path
+        except Exception:
+            pass
+
+    # どちらもなければ空配列
+    with open(store_path, "w", encoding="utf-8") as f:
+        json.dump([], f, ensure_ascii=False, indent=2)
+
+    return store_path
 
 
 def _load_templates():
-    _ensure_store_dir()
-    if not os.path.exists(TEMPLATE_STORE_PATH):
-        return []
+    store_path = _ensure_runtime_store_initialized()
     try:
-        with open(TEMPLATE_STORE_PATH, "r", encoding="utf-8") as f:
+        with open(store_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, list):
                 return data
@@ -30,8 +64,8 @@ def _load_templates():
 
 
 def _save_templates(templates):
-    _ensure_store_dir()
-    with open(TEMPLATE_STORE_PATH, "w", encoding="utf-8") as f:
+    store_path = _ensure_runtime_store_initialized()
+    with open(store_path, "w", encoding="utf-8") as f:
         json.dump(templates, f, ensure_ascii=False, indent=2)
 
 
@@ -45,7 +79,6 @@ def powerstamp():
 @login_required
 def list_templates():
     templates = _load_templates()
-    # 一覧表示用に軽量情報だけ返す
     summary = [
         {
             "id": t.get("id"),
@@ -56,7 +89,6 @@ def list_templates():
         }
         for t in templates
     ]
-    # 新しい順
     summary.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
     return jsonify({"templates": summary, "max": MAX_TEMPLATES, "count": len(summary)})
 
@@ -87,7 +119,6 @@ def save_template():
     now = datetime.utcnow().isoformat()
     owner = getattr(current_user, "username", "unknown")
 
-    # 同名は上書き
     existing = next((t for t in templates if t.get("name") == name), None)
     if existing:
         existing["data"] = data
