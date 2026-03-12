@@ -129,3 +129,9 @@ def delete_template(template_id):
 @login_required
 def powerstamp_preview():
     return render_template("powerstamp_preview.html")
+
+
+@powerstamp_bp.route("/verify", methods=["GET"])
+@login_required
+def powerstamp_verify():
+    return render_template("powerstamp_verify.html")

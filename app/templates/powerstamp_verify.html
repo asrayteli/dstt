@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-4">
+  <h1 class="text-2xl font-bold">🧪 PowerSTAMP 実物照合</h1>
+  <p class="text-sm text-gray-600">元ファイルと出力透過PNGを重ねて、実際に一致するかを確認する専用タブです。</p>
+
+  <div class="bg-white rounded-xl shadow p-4 grid lg:grid-cols-3 gap-4 text-sm">
+    <div>
+      <label class="block font-medium mb-1">① 元ファイル（画像/PDF）</label>
+      <input id="baseInput" type="file" accept="image/*,.pdf,application/pdf" class="w-full text-sm" />
+      <p id="baseInfo" class="text-xs text-gray-600 mt-1">未読込</p>
+    </div>
+    <div>
+      <label class="block font-medium mb-1">② 透過PNG</label>
+      <input id="overlayInput" type="file" accept="image/png" class="w-full text-sm" />
+      <p id="overlayInfo" class="text-xs text-gray-600 mt-1">未読込</p>
+    </div>
+    <div class="space-y-2">
+      <label class="block font-medium">表示調整</label>
+      <label class="flex items-center gap-2 text-xs">
+        透過度
+        <input id="alphaRange" type="range" min="0" max="100" value="60" class="w-40" />
+        <span id="alphaLabel">60%</span>
+      </label>
+      <label class="flex items-center gap-2 text-xs">
+        X補正(px)
+        <input id="shiftX" type="number" value="0" step="0.5" class="w-20 border rounded px-2 py-1" />
+      </label>
+      <label class="flex items-center gap-2 text-xs">
+        Y補正(px)
+        <input id="shiftY" type="number" value="0" step="0.5" class="w-20 border rounded px-2 py-1" />
+      </label>
+      <label class="flex items-center gap-2 text-xs">
+        拡大率(%)
+        <input id="scalePct" type="number" value="100" step="0.1" class="w-24 border rounded px-2 py-1" />
+      </label>
+      <label class="flex items-center gap-2 text-xs">
+        <input id="diffMode" type="checkbox" />
+        差分表示（difference）
+      </label>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow p-4">
+    <p id="judgeInfo" class="text-xs text-gray-700 mb-2">判定: 元ファイルと透過PNGの縦横が一致しているか確認してください。</p>
+    <div id="stageWrap" class="overflow-auto border rounded">
+      <div id="stage" class="relative bg-gray-100" style="width: 800px; height: 600px;">
+        <img id="baseLayer" class="absolute inset-0 w-full h-full object-fill pointer-events-none" alt="base" />
+        <img id="overlayLayer" class="absolute inset-0 w-full h-full object-fill pointer-events-none" alt="overlay" style="opacity:0.6; mix-blend-mode: normal; transform-origin: top left;" />
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const baseInput = document.getElementById('baseInput');
+  const overlayInput = document.getElementById('overlayInput');
+  const baseLayer = document.getElementById('baseLayer');
+  const overlayLayer = document.getElementById('overlayLayer');
+  const baseInfo = document.getElementById('baseInfo');
+  const overlayInfo = document.getElementById('overlayInfo');
+  const judgeInfo = document.getElementById('judgeInfo');
+  const stage = document.getElementById('stage');
+  const alphaRange = document.getElementById('alphaRange');
+  const alphaLabel = document.getElementById('alphaLabel');
+  const shiftX = document.getElementById('shiftX');
+  const shiftY = document.getElementById('shiftY');
+  const scalePct = document.getElementById('scalePct');
+  const diffMode = document.getElementById('diffMode');
+
+  let pdfjsLibPromise = null;
+  const state = {
+    base: null,
+    overlay: null,
+  };
+
+  function getPdfJs() {
+    if (!pdfjsLibPromise) {
+      pdfjsLibPromise = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.min.mjs').then((pdfjsLib) => {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.worker.min.mjs';
+        return pdfjsLib;
+      });
+    }
+    return pdfjsLibPromise;
+  }
+
+  function applyOverlayTransform() {
+    const x = Number(shiftX.value || 0);
+    const y = Number(shiftY.value || 0);
+    const s = Math.max(1, Number(scalePct.value || 100)) / 100;
+    overlayLayer.style.transform = `translate(${x}px, ${y}px) scale(${s})`;
+  }
+
+  function applyAlpha() {
+    const a = Number(alphaRange.value || 60);
+    alphaLabel.textContent = `${a}%`;
+    overlayLayer.style.opacity = String(a / 100);
+  }
+
+  function applyDiffMode() {
+    overlayLayer.style.mixBlendMode = diffMode.checked ? 'difference' : 'normal';
+  }
+
+  function updateJudge() {
+    if (!state.base || !state.overlay) {
+      judgeInfo.textContent = '判定: 元ファイルと透過PNGを両方読み込んでください。';
+      return;
+    }
+    const same = state.base.width === state.overlay.width && state.base.height === state.overlay.height;
+    judgeInfo.textContent = same
+      ? `判定: ✅ 縦横一致 (${state.base.width}×${state.base.height})`
+      : `判定: ⚠️ 縦横不一致 base=${state.base.width}×${state.base.height} / overlay=${state.overlay.width}×${state.overlay.height}`;
+  }
+
+  function setStageSize(w, h) {
+    stage.style.width = `${w}px`;
+    stage.style.height = `${h}px`;
+  }
+
+  async function loadBase(file) {
+    if (!file) return;
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      const data = await file.arrayBuffer();
+      const pdfjsLib = await getPdfJs();
+      const pdf = await pdfjsLib.getDocument({ data }).promise;
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 1 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      baseLayer.src = canvas.toDataURL('image/png');
+      state.base = { width: Math.round(viewport.width), height: Math.round(viewport.height), unit: 'pt' };
+      setStageSize(state.base.width, state.base.height);
+      baseInfo.textContent = `PDF: ${state.base.width}×${state.base.height} (pt)`;
+      updateJudge();
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = url;
+    });
+    baseLayer.src = url;
+    state.base = { width: img.naturalWidth, height: img.naturalHeight, unit: 'px' };
+    setStageSize(state.base.width, state.base.height);
+    baseInfo.textContent = `画像: ${state.base.width}×${state.base.height} (px)`;
+    updateJudge();
+  }
+
+  async function loadOverlay(file) {
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = url;
+    });
+    overlayLayer.src = url;
+    state.overlay = { width: img.naturalWidth, height: img.naturalHeight, unit: 'px' };
+    overlayInfo.textContent = `PNG: ${state.overlay.width}×${state.overlay.height}`;
+    updateJudge();
+  }
+
+  baseInput.addEventListener('change', async (e) => {
+    try { await loadBase(e.target.files[0]); }
+    catch (err) { baseInfo.textContent = `読込失敗: ${err.message}`; }
+  });
+  overlayInput.addEventListener('change', async (e) => {
+    try { await loadOverlay(e.target.files[0]); }
+    catch (err) { overlayInfo.textContent = `読込失敗: ${err.message}`; }
+  });
+
+  alphaRange.addEventListener('input', applyAlpha);
+  shiftX.addEventListener('input', applyOverlayTransform);
+  shiftY.addEventListener('input', applyOverlayTransform);
+  scalePct.addEventListener('input', applyOverlayTransform);
+  diffMode.addEventListener('change', applyDiffMode);
+
+  applyAlpha();
+  applyOverlayTransform();
+  applyDiffMode();
+})();
+</script>
+{% endblock %}
