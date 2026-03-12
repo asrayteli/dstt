@@ -81,6 +81,7 @@
       <button id="zoomOutBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">−</button>
       <button id="zoomResetBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">100%</button>
       <button id="zoomInBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">＋</button>
+      <button id="zoomFitBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">Fit</button>
       <span id="zoomLabel" class="w-14 text-right font-semibold text-gray-700">100%</span>
 
       <span class="ml-3 text-gray-600">精度補正</span>
@@ -145,7 +146,7 @@
     </div>
   </div>
 
-  <div id="stageScroll" class="bg-white rounded-xl shadow p-4 overflow-auto" style="max-height: 62vh;">
+  <div id="stageScroll" class="bg-white rounded-xl shadow p-4 overflow-hidden" style="height: 62vh;">
     <div id="stageViewport" class="relative mx-auto" style="width:1200px;height:1700px;">
       <div id="stage" class="relative border border-dashed border-gray-400 bg-white" style="width:1200px;height:1700px; transform-origin: top left;">
         <img id="backgroundLayer" class="absolute inset-0 w-full h-full object-fill pointer-events-none select-none" alt="背景" />
@@ -158,5 +159,5 @@
 </div>
 
 <link rel="stylesheet" href="{{ url_for('static', filename='css/powerstamp.css') }}">
-<script src="{{ url_for('static', filename='js/powerstamp.js') }}?v=20260312a" defer></script>
+<script src="{{ url_for('static', filename='js/powerstamp.js') }}?v=20260312b" defer></script>
 {% endblock %}
