@@ -465,6 +465,16 @@
     };
   }
 
+  function openWithPopupFallback(url) {
+    const win = window.open(url, '_blank', 'noopener');
+    if (!win) {
+      // ポップアップブロック時は同タブ遷移にフォールバック
+      window.location.href = url;
+      return false;
+    }
+    return true;
+  }
+
   function openPreviewInNewTab() {
     try {
       localStorage.setItem('powerstampPreviewState', JSON.stringify(buildPreviewState()));
@@ -472,7 +482,7 @@
       alert(`プレビュー状態の保存に失敗しました: ${e.message}`);
       return;
     }
-    window.open('/tools/powerstamp/preview?editor_window=1', '_blank', 'noopener');
+    openWithPopupFallback('/tools/powerstamp/preview?editor_window=1');
   }
 
 document.addEventListener('mousemove', (event) => {
@@ -675,7 +685,7 @@ document.addEventListener('mousemove', (event) => {
   });
 
   openPreviewTabBtn?.addEventListener('click', openPreviewInNewTab);
-  openVerifyTabBtn?.addEventListener('click', () => window.open('/tools/powerstamp/verify', '_blank', 'noopener'));
+  openVerifyTabBtn?.addEventListener('click', () => openWithPopupFallback('/tools/powerstamp/verify'));
 
   setAnchorBtn?.addEventListener('click', () => {
     waitingAnchorPick = true;
