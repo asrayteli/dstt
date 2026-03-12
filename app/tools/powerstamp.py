@@ -75,6 +75,15 @@ def _merge_seed_templates(templates):
         if name not in by_name:
             templates.append(st)
             changed = True
+        else:
+            # 既存テンプレに不足しているguide等を補完
+            cur = by_name[name]
+            cur_data = cur.get("data") if isinstance(cur.get("data"), dict) else {}
+            seed_data = st.get("data") if isinstance(st.get("data"), dict) else {}
+            if "guide" in seed_data and "guide" not in cur_data:
+                cur_data["guide"] = seed_data["guide"]
+                cur["data"] = cur_data
+                changed = True
 
     if changed and len(templates) > MAX_TEMPLATES:
         templates.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
