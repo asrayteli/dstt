@@ -1,0 +1,54 @@
+[
+  {
+    "id": "tpl_env_封筒テンプレ_長3_120x235mm_300dpi",
+    "name": "封筒テンプレ_長3_120x235mm_300dpi",
+    "created_at": "2026-03-12T15:36:10",
+    "updated_at": "2026-03-12T15:36:10",
+    "owner": "PASTEL",
+    "data": {
+      "version": 1,
+      "sourceSize": {
+        "width": 1417,
+        "height": 2776,
+        "unit": "px"
+      },
+      "canvas": {
+        "width": 1417,
+        "height": 2776
+      },
+      "calibration": {
+        "offsetX": 0,
+        "offsetY": 0,
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "stamps": []
+    }
+  },
+  {
+    "id": "tpl_env_封筒テンプレ_角2_240x332mm_300dpi",
+    "name": "封筒テンプレ_角2_240x332mm_300dpi",
+    "created_at": "2026-03-12T15:36:10",
+    "updated_at": "2026-03-12T15:36:10",
+    "owner": "PASTEL",
+    "data": {
+      "version": 1,
+      "sourceSize": {
+        "width": 2835,
+        "height": 3921,
+        "unit": "px"
+      },
+      "canvas": {
+        "width": 2835,
+        "height": 3921
+      },
+      "calibration": {
+        "offsetX": 0,
+        "offsetY": 0,
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "stamps": []
+    }
+  }
+]
