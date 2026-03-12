@@ -465,23 +465,13 @@
     };
   }
 
-  function openInNewTabOrAlert(url) {
-    const win = window.open(url, '_blank', 'noopener');
-    if (!win) {
-      alert('ポップアップがブロックされました。ブラウザ設定でこのサイトのポップアップを許可してください。');
-      return false;
-    }
-    return true;
-  }
-
-  function openPreviewInNewTab() {
+  function preparePreviewStateForNewTab(event) {
     try {
       localStorage.setItem('powerstampPreviewState', JSON.stringify(buildPreviewState()));
     } catch (e) {
+      event.preventDefault();
       alert(`プレビュー状態の保存に失敗しました: ${e.message}`);
-      return;
     }
-    openInNewTabOrAlert('/tools/powerstamp/preview?editor_window=1');
   }
 
 document.addEventListener('mousemove', (event) => {
@@ -741,8 +731,7 @@ document.addEventListener('mousemove', (event) => {
     deleteTemplate().catch((e) => alert(`テンプレ削除エラー: ${e.message}`));
   });
 
-  openPreviewTabBtn?.addEventListener('click', openPreviewInNewTab);
-  openVerifyTabBtn?.addEventListener('click', () => openInNewTabOrAlert('/tools/powerstamp/verify'));
+  openPreviewTabBtn?.addEventListener('click', preparePreviewStateForNewTab);
 
   setAnchorBtn?.addEventListener('click', () => {
     waitingAnchorPick = true;
