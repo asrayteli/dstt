@@ -2,6 +2,7 @@
   const stage = document.getElementById('stage');
   const stageViewport = document.getElementById('stageViewport');
   const stageScroll = document.getElementById('stageScroll');
+  const guideLayer = document.getElementById('guideLayer');
   const overlayLayer = document.getElementById('overlayLayer');
   const backgroundLayer = document.getElementById('backgroundLayer');
   const detectedSize = document.getElementById('detectedSize');
@@ -31,7 +32,7 @@
   const paperOrientation = document.getElementById('paperOrientation');
   const paperDpiInput = document.getElementById('paperDpiInput');
 
-  if (!stage || !stageViewport || !overlayLayer || !backgroundLayer || !detectedSize || !detectedFileType) {
+  if (!stage || !stageViewport || !guideLayer || !overlayLayer || !backgroundLayer || !detectedSize || !detectedFileType) {
     return;
   }
 
@@ -56,7 +57,64 @@
   let waitingAnchorPick = false;
 
   
-  function mmToPx(mm, dpi) {
+  
+  function mmToCanvasPx(mm, dpi = 300) {
+    return (mm / 25.4) * dpi;
+  }
+
+  function clearGuide() {
+    if (guideLayer) guideLayer.innerHTML = '';
+  }
+
+  function renderGuide(guide) {
+    clearGuide();
+    if (!guideLayer || !guide || !Array.isArray(guide.boxes)) return;
+
+    for (const b of guide.boxes) {
+      const box = document.createElement('div');
+      box.className = 'guide-box';
+      box.style.left = `${Math.max(0, b.x || 0)}px`;
+      box.style.top = `${Math.max(0, b.y || 0)}px`;
+      box.style.width = `${Math.max(0, b.w || 0)}px`;
+      box.style.height = `${Math.max(0, b.h || 0)}px`;
+      guideLayer.appendChild(box);
+
+      if (b.label) {
+        const label = document.createElement('div');
+        label.className = 'guide-label';
+        label.textContent = b.label;
+        label.style.left = `${Math.max(0, (b.x || 0) + 2)}px`;
+        label.style.top = `${Math.max(0, (b.y || 0) - 18)}px`;
+        guideLayer.appendChild(label);
+      }
+    }
+  }
+
+  function buildEnvelopeGuideByName(name) {
+    if (!name) return null;
+    const n = String(name);
+    if (n.includes('長3')) {
+      return {
+        boxes: [
+          { x: 900, y: 930, w: 360, h: 1320, label: '宛名（縦書き想定）' },
+          { x: 120, y: 2200, w: 300, h: 430, label: '差出人' },
+          { x: 960, y: 820, w: 280, h: 90, label: '郵便番号' }
+        ]
+      };
+    }
+    if (n.includes('角2')) {
+      return {
+        boxes: [
+          { x: 1700, y: 1200, w: 760, h: 1900, label: '宛名（縦書き想定）' },
+          { x: 220, y: 3100, w: 560, h: 560, label: '差出人' },
+          { x: 1800, y: 1040, w: 520, h: 120, label: '郵便番号' }
+        ]
+      };
+    }
+    return null;
+  }
+
+function mmToPx(mm, dpi) {
     return (mm / 25.4) * dpi;
   }
 
@@ -425,6 +483,9 @@
 
     sourceSize = data.sourceSize || sourceSize;
     restoreAllStamps(data.stamps || []);
+
+    const guide = data.guide || buildEnvelopeGuideByName(json.template.name);
+    renderGuide(guide);
   }
 
   async function deleteTemplate() {
