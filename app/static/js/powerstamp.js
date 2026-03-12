@@ -15,11 +15,20 @@
   const calibScaleXInput = document.getElementById('calibScaleX');
   const calibScaleYInput = document.getElementById('calibScaleY');
   const calibResetBtn = document.getElementById('calibResetBtn');
+  const applyCalibrationOnExport = document.getElementById('applyCalibrationOnExport');
   const templateNameInput = document.getElementById('templateNameInput');
   const saveTemplateBtn = document.getElementById('saveTemplateBtn');
   const templateSelect = document.getElementById('templateSelect');
   const loadTemplateBtn = document.getElementById('loadTemplateBtn');
   const deleteTemplateBtn = document.getElementById('deleteTemplateBtn');
+  const openPreviewTabBtn = document.getElementById('openPreviewTabBtn');
+  const useAnchorOrigin = document.getElementById('useAnchorOrigin');
+  const setAnchorBtn = document.getElementById('setAnchorBtn');
+  const anchorStatus = document.getElementById('anchorStatus');
+  const anchorMarker = document.getElementById('anchorMarker');
+  const paperSizeSelect = document.getElementById('paperSizeSelect');
+  const paperOrientation = document.getElementById('paperOrientation');
+  const paperDpiInput = document.getElementById('paperDpiInput');
 
   if (!stage || !stageViewport || !overlayLayer || !backgroundLayer || !detectedSize || !detectedFileType) {
     return;
@@ -40,6 +49,42 @@
   const ZOOM_MIN = 0.25;
   const ZOOM_MAX = 4;
   const ZOOM_STEP = 0.1;
+
+  const PAPER_MAP_MM = { A3: {w:297,h:420}, A4:{w:210,h:297}, B4:{w:257,h:364}, B5:{w:182,h:257} };
+  let anchorPoint = null;
+  let waitingAnchorPick = false;
+
+  
+  function mmToPx(mm, dpi) {
+    return (mm / 25.4) * dpi;
+  }
+
+  function getPaperOutputSize() {
+    const key = paperSizeSelect?.value || 'A4';
+    const p = PAPER_MAP_MM[key] || PAPER_MAP_MM.A4;
+    const isLandscape = (paperOrientation?.value || 'portrait') === 'landscape';
+    const dpi = Math.max(72, Number(paperDpiInput?.value || 300));
+    const wMm = isLandscape ? p.h : p.w;
+    const hMm = isLandscape ? p.w : p.h;
+    return {
+      width: Math.round(mmToPx(wMm, dpi)),
+      height: Math.round(mmToPx(hMm, dpi)),
+      label: `${key} ${isLandscape ? '横' : '縦'} @${dpi}dpi`
+    };
+  }
+
+  function setAnchorUI(point) {
+    if (!anchorMarker || !anchorStatus) return;
+    if (!point) {
+      anchorMarker.classList.add('hidden');
+      anchorStatus.textContent = '未設定';
+      return;
+    }
+    anchorMarker.classList.remove('hidden');
+    anchorMarker.style.left = `${point.x}px`;
+    anchorMarker.style.top = `${point.y}px`;
+    anchorStatus.textContent = `(${Math.round(point.x)}, ${Math.round(point.y)})`;
+  }
 
   function getStagePixelSize() {
     const w = Number(document.getElementById('canvasWidth')?.value) || parseFloat(stage.style.width) || stage.getBoundingClientRect().width;
@@ -398,7 +443,38 @@
     await refreshTemplateList();
   }
 
-  document.addEventListener('mousemove', (event) => {
+    stage.addEventListener('click', (event) => {
+    if (!waitingAnchorPick) return;
+    const rect = stage.getBoundingClientRect();
+    const scale = zoom || 1;
+    anchorPoint = {
+      x: (event.clientX - rect.left) / scale,
+      y: (event.clientY - rect.top) / scale,
+    };
+    waitingAnchorPick = false;
+    setAnchorUI(anchorPoint);
+  });
+
+
+  function buildPreviewState() {
+    return {
+      canvas: getStagePixelSize(),
+      backgroundSrc: backgroundLayer?.src || '',
+      stamps: serializeAllStamps(),
+    };
+  }
+
+  function openPreviewInNewTab() {
+    try {
+      localStorage.setItem('powerstampPreviewState', JSON.stringify(buildPreviewState()));
+    } catch (e) {
+      alert(`プレビュー状態の保存に失敗しました: ${e.message}`);
+      return;
+    }
+    window.open('/tools/powerstamp/preview?editor_window=1', '_blank', 'noopener');
+  }
+
+document.addEventListener('mousemove', (event) => {
     if (!dragState) return;
     const stageRect = stage.getBoundingClientRect();
     const itemRect = dragState.item.getBoundingClientRect();
@@ -597,11 +673,27 @@
     deleteTemplate().catch((e) => alert(`テンプレ削除エラー: ${e.message}`));
   });
 
+  openPreviewTabBtn?.addEventListener('click', openPreviewInNewTab);
+
+  setAnchorBtn?.addEventListener('click', () => {
+    waitingAnchorPick = true;
+    if (anchorStatus) anchorStatus.textContent = 'クリック待ち...';
+  });
+
+  useAnchorOrigin?.addEventListener('change', () => {
+    if (!useAnchorOrigin.checked) {
+      waitingAnchorPick = false;
+    }
+  });
+
   async function drawOverlayToCanvas(ctx, outputWidth, outputHeight) {
     const { width: stageWidth, height: stageHeight } = getStagePixelSize();
     const scaleX = outputWidth / Math.max(1, stageWidth);
     const scaleY = outputHeight / Math.max(1, stageHeight);
-    const calib = getCalibration();
+    const ax = (useAnchorOrigin?.checked && anchorPoint) ? anchorPoint.x : 0;
+    const ay = (useAnchorOrigin?.checked && anchorPoint) ? anchorPoint.y : 0;
+    const calibEnabled = !!applyCalibrationOnExport?.checked;
+    const calib = calibEnabled ? getCalibration() : { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
 
     const applyCalibX = (v) => (v * calib.scaleX) + calib.offsetX;
     const applyCalibY = (v) => (v * calib.scaleY) + calib.offsetY;
@@ -609,8 +701,8 @@
     const applyCalibH = (v) => v * calib.scaleY;
 
     for (const node of Array.from(overlayLayer.children)) {
-      const baseX = parseFloat(node.style.left || '0') * scaleX;
-      const baseY = parseFloat(node.style.top || '0') * scaleY;
+      const baseX = (parseFloat(node.style.left || '0') - ax) * scaleX;
+      const baseY = (parseFloat(node.style.top || '0') - ay) * scaleY;
       const x = applyCalibX(baseX);
       const y = applyCalibY(baseY);
       if (node.tagName === 'IMG') {
@@ -665,12 +757,26 @@
     // - 画像背景: sourceSize は px
     // - PDF背景: sourceSize は pt(1/72inch)
     // 「背景元サイズ」出力では sourceSize の数値をそのまま出力キャンバス寸法として採用する。
-    const outWidth = mode === 'source' ? Math.round(sourceSize.width || stageSize.width) : stageSize.width;
-    const outHeight = mode === 'source' ? Math.round(sourceSize.height || stageSize.height) : stageSize.height;
+    let outWidth = stageSize.width;
+    let outHeight = stageSize.height;
+
+    if (mode === 'source') {
+      outWidth = Math.round(sourceSize.width || stageSize.width);
+      outHeight = Math.round(sourceSize.height || stageSize.height);
+    } else if (mode === 'paper') {
+      const paper = getPaperOutputSize();
+      outWidth = paper.width;
+      outHeight = paper.height;
+    }
 
     canvas.width = Math.max(1, outWidth);
     canvas.height = Math.max(1, outHeight);
     const ctx = canvas.getContext('2d');
+
+    if (useAnchorOrigin?.checked && !anchorPoint) {
+      alert('左上基準点が未設定です。「基準点を設定」を押して背景左上をクリックしてください。');
+      return;
+    }
 
     await drawOverlayToCanvas(ctx, canvas.width, canvas.height);
 
@@ -680,6 +786,7 @@
     link.click();
   });
 
+  setAnchorUI(null);
   loadCalibration();
   applyZoom();
   refreshTemplateList().catch(() => {});
