@@ -80,15 +80,27 @@ def _merge_seed_templates(templates):
             cur = by_name[name]
             cur_data = cur.get("data") if isinstance(cur.get("data"), dict) else {}
             seed_data = st.get("data") if isinstance(st.get("data"), dict) else {}
-            if "guide" in seed_data and "guide" not in cur_data:
-                cur_data["guide"] = seed_data["guide"]
-                changed = True
-            if "guide_mm" in seed_data and "guide_mm" not in cur_data:
-                cur_data["guide_mm"] = seed_data["guide_mm"]
-                changed = True
-            if "paper" in seed_data and "paper" not in cur_data:
-                cur_data["paper"] = seed_data["paper"]
-                changed = True
+            # 封筒系テンプレはseedを真として同期（座標修正を確実反映）
+            if "封筒テンプレ" in name:
+                if "guide" in seed_data:
+                    cur_data["guide"] = seed_data["guide"]
+                    changed = True
+                if "guide_mm" in seed_data:
+                    cur_data["guide_mm"] = seed_data["guide_mm"]
+                    changed = True
+                if "paper" in seed_data:
+                    cur_data["paper"] = seed_data["paper"]
+                    changed = True
+            else:
+                if "guide" in seed_data and "guide" not in cur_data:
+                    cur_data["guide"] = seed_data["guide"]
+                    changed = True
+                if "guide_mm" in seed_data and "guide_mm" not in cur_data:
+                    cur_data["guide_mm"] = seed_data["guide_mm"]
+                    changed = True
+                if "paper" in seed_data and "paper" not in cur_data:
+                    cur_data["paper"] = seed_data["paper"]
+                    changed = True
             if changed:
                 cur["data"] = cur_data
 
