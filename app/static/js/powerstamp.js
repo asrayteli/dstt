@@ -115,19 +115,19 @@
     const n = String(name);
     if (n.includes('長3')) {
       return {
-        boxes: [
-          { x: 900, y: 930, w: 360, h: 1320, label: '宛名（縦書き想定）' },
-          { x: 120, y: 2200, w: 300, h: 430, label: '差出人' },
-          { x: 960, y: 820, w: 280, h: 90, label: '郵便番号' }
+        boxes_mm: [
+          { x_mm: 57, y_mm: 12, w_mm: 55, h_mm: 12, label: '郵便番号' },
+          { x_mm: 72, y_mm: 45, w_mm: 38, h_mm: 155, label: '宛名（縦書き想定）' },
+          { x_mm: 10, y_mm: 185, w_mm: 45, h_mm: 38, label: '差出人' }
         ]
       };
     }
     if (n.includes('角2')) {
       return {
-        boxes: [
-          { x: 1700, y: 1200, w: 760, h: 1900, label: '宛名（縦書き想定）' },
-          { x: 220, y: 3100, w: 560, h: 560, label: '差出人' },
-          { x: 1800, y: 1040, w: 520, h: 120, label: '郵便番号' }
+        boxes_mm: [
+          { x_mm: 170, y_mm: 14, w_mm: 60, h_mm: 13, label: '郵便番号' },
+          { x_mm: 145, y_mm: 70, w_mm: 75, h_mm: 210, label: '宛名（縦書き想定）' },
+          { x_mm: 18, y_mm: 270, w_mm: 70, h_mm: 45, label: '差出人' }
         ]
       };
     }
