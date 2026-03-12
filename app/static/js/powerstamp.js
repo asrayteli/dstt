@@ -465,11 +465,10 @@
     };
   }
 
-  function openWithPopupFallback(url) {
+  function openInNewTabOrAlert(url) {
     const win = window.open(url, '_blank', 'noopener');
     if (!win) {
-      // ポップアップブロック時は同タブ遷移にフォールバック
-      window.location.href = url;
+      alert('ポップアップがブロックされました。ブラウザ設定でこのサイトのポップアップを許可してください。');
       return false;
     }
     return true;
@@ -482,7 +481,7 @@
       alert(`プレビュー状態の保存に失敗しました: ${e.message}`);
       return;
     }
-    openWithPopupFallback('/tools/powerstamp/preview?editor_window=1');
+    openInNewTabOrAlert('/tools/powerstamp/preview?editor_window=1');
   }
 
 document.addEventListener('mousemove', (event) => {
@@ -649,7 +648,65 @@ document.addEventListener('mousemove', (event) => {
     selectItem(null);
   });
 
-  document.getElementById('printBtn').addEventListener('click', () => window.print());
+    async function printOverlayDirect() {
+    const stageSize = getStagePixelSize();
+    const mode = document.querySelector('input[name="exportSizeMode"]:checked')?.value || 'source';
+
+    let outWidth = stageSize.width;
+    let outHeight = stageSize.height;
+
+    if (mode === 'source') {
+      outWidth = Math.round(sourceSize.width || stageSize.width);
+      outHeight = Math.round(sourceSize.height || stageSize.height);
+    } else if (mode === 'paper') {
+      const paper = getPaperOutputSize();
+      outWidth = paper.width;
+      outHeight = paper.height;
+    }
+
+    if (useAnchorOrigin?.checked && !anchorPoint) {
+      alert('左上基準点が未設定です。');
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, outWidth);
+    canvas.height = Math.max(1, outHeight);
+    const ctx = canvas.getContext('2d');
+    await drawOverlayToCanvas(ctx, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/png');
+
+    // 用紙サイズを可能な限り明示して、1ページ化を狙う
+    let pageWmm = null;
+    let pageHmm = null;
+    if (mode === 'paper') {
+      const key = paperSizeSelect?.value || 'A4';
+      const p = PAPER_MAP_MM[key] || PAPER_MAP_MM.A4;
+      const isLandscape = (paperOrientation?.value || 'portrait') === 'landscape';
+      pageWmm = isLandscape ? p.h : p.w;
+      pageHmm = isLandscape ? p.w : p.h;
+    } else if (sourceSize.unit === 'pt') {
+      pageWmm = (sourceSize.width * 25.4) / 72;
+      pageHmm = (sourceSize.height * 25.4) / 72;
+    }
+
+    const win = window.open('', '_blank', 'noopener');
+    if (!win) {
+      alert('印刷ウィンドウを開けません。ポップアップを許可してください。');
+      return;
+    }
+
+    const pageSizeCss = (pageWmm && pageHmm)
+      ? `@page { size: ${pageWmm.toFixed(2)}mm ${pageHmm.toFixed(2)}mm; margin: 0; }`
+      : '@page { margin: 0; }';
+
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>PowerSTAMP Print</title><style>${pageSizeCss} html,body{margin:0;padding:0;} .sheet{width:100vw;height:100vh;display:flex;align-items:stretch;justify-content:stretch;} img{width:100%;height:100%;object-fit:fill;}</style></head><body><div class="sheet"><img src="${dataUrl}" /></div><script>window.onload=()=>{setTimeout(()=>{window.print();},150)}<\/script></body></html>`);
+    win.document.close();
+  }
+
+  document.getElementById('printBtn').addEventListener('click', () => {
+    printOverlayDirect().catch((e) => alert(`印刷準備エラー: ${e.message}`));
+  });
 
   zoomInBtn?.addEventListener('click', () => setZoom(zoom + ZOOM_STEP));
   zoomOutBtn?.addEventListener('click', () => setZoom(zoom - ZOOM_STEP));
@@ -685,7 +742,7 @@ document.addEventListener('mousemove', (event) => {
   });
 
   openPreviewTabBtn?.addEventListener('click', openPreviewInNewTab);
-  openVerifyTabBtn?.addEventListener('click', () => openWithPopupFallback('/tools/powerstamp/verify'));
+  openVerifyTabBtn?.addEventListener('click', () => openInNewTabOrAlert('/tools/powerstamp/verify'));
 
   setAnchorBtn?.addEventListener('click', () => {
     waitingAnchorPick = true;
