@@ -22,6 +22,7 @@
   const loadTemplateBtn = document.getElementById('loadTemplateBtn');
   const deleteTemplateBtn = document.getElementById('deleteTemplateBtn');
   const openPreviewTabBtn = document.getElementById('openPreviewTabBtn');
+  const openVerifyTabBtn = document.getElementById('openVerifyTabBtn');
   const useAnchorOrigin = document.getElementById('useAnchorOrigin');
   const setAnchorBtn = document.getElementById('setAnchorBtn');
   const anchorStatus = document.getElementById('anchorStatus');
@@ -674,6 +675,7 @@ document.addEventListener('mousemove', (event) => {
   });
 
   openPreviewTabBtn?.addEventListener('click', openPreviewInNewTab);
+  openVerifyTabBtn?.addEventListener('click', () => window.open('/tools/powerstamp/verify', '_blank', 'noopener'));
 
   setAnchorBtn?.addEventListener('click', () => {
     waitingAnchorPick = true;
