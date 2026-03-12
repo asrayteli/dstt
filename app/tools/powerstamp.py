@@ -51,16 +51,55 @@ def _ensure_runtime_store_initialized() -> str:
     return store_path
 
 
+
+
+def _merge_seed_templates(templates):
+    if not os.path.exists(SEED_STORE_PATH):
+        return templates
+    try:
+        with open(SEED_STORE_PATH, "r", encoding="utf-8") as f:
+            seed = json.load(f)
+            if not isinstance(seed, list):
+                return templates
+    except Exception:
+        return templates
+
+    by_name = {t.get("name"): t for t in templates if isinstance(t, dict)}
+    changed = False
+    for st in seed:
+        if not isinstance(st, dict):
+            continue
+        name = st.get("name")
+        if not name:
+            continue
+        if name not in by_name:
+            templates.append(st)
+            changed = True
+
+    if changed and len(templates) > MAX_TEMPLATES:
+        templates.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+        templates = templates[:MAX_TEMPLATES]
+    return templates
+
+
 def _load_templates():
     store_path = _ensure_runtime_store_initialized()
     try:
         with open(store_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if isinstance(data, list):
-                return data
-            return []
+            if not isinstance(data, list):
+                data = []
     except Exception:
-        return []
+        data = []
+
+    merged = _merge_seed_templates(data)
+    if merged != data:
+        try:
+            with open(store_path, "w", encoding="utf-8") as f:
+                json.dump(merged, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+    return merged
 
 
 def _save_templates(templates):
