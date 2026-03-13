@@ -32,6 +32,8 @@
   const paperSizeSelect = document.getElementById('paperSizeSelect');
   const paperOrientation = document.getElementById('paperOrientation');
   const paperDpiInput = document.getElementById('paperDpiInput');
+  const postalCodeInput = document.getElementById('postalCodeInput');
+  const applyPostalCodeBtn = document.getElementById('applyPostalCodeBtn');
 
   if (!stage || !stageViewport || !guideLayer || !overlayLayer || !backgroundLayer || !detectedSize || !detectedFileType) {
     return;
@@ -56,6 +58,8 @@
   const PAPER_MAP_MM = { A3: {w:297,h:420}, A4:{w:210,h:297}, B4:{w:257,h:364}, B5:{w:182,h:257} };
   let anchorPoint = null;
   let waitingAnchorPick = false;
+  let activeGuide = null;
+  let activePaper = null;
 
   
   
@@ -67,21 +71,15 @@
     if (guideLayer) guideLayer.innerHTML = '';
   }
 
-  function renderGuide(guide, paper = null) {
-    clearGuide();
-    if (!guideLayer || !guide) return;
 
-    let boxes = [];
-
-    if (Array.isArray(guide.boxes)) {
-      boxes = guide.boxes;
-    }
+  function resolveGuideBoxes(guide, paper = null) {
+    if (!guide) return [];
 
     if (Array.isArray(guide.boxes_mm) && paper && paper.w_mm && paper.h_mm) {
       const canvas = getStagePixelSize();
       const sx = canvas.width / paper.w_mm;
       const sy = canvas.height / paper.h_mm;
-      boxes = guide.boxes_mm.map((b) => ({
+      return guide.boxes_mm.map((b) => ({
         ...b,
         x: (b.x_mm || 0) * sx,
         y: (b.y_mm || 0) * sy,
@@ -90,6 +88,82 @@
         gap: (b.gap_mm || 0) * sx,
       }));
     }
+
+    if (Array.isArray(guide.boxes)) {
+      return guide.boxes;
+    }
+
+    return [];
+  }
+
+  function clearAutoPostalCodeStamps() {
+    Array.from(overlayLayer.querySelectorAll('.auto-postal-code')).forEach((node) => node.remove());
+  }
+
+  function normalizePostalCode(raw) {
+    return String(raw || '').replace(/\D/g, '').slice(0, 7);
+  }
+
+  function applyPostalCodeToGuide(rawCode) {
+    const zipCode = normalizePostalCode(rawCode);
+    if (!zipCode) {
+      clearAutoPostalCodeStamps();
+      return;
+    }
+
+    const boxes = resolveGuideBoxes(activeGuide, activePaper);
+    const zipGuide = boxes.find((b) => b && b.type === 'zip7');
+    if (!zipGuide) {
+      alert('現在のテンプレートに郵便番号欄がありません。封筒テンプレートを読み込んでください。');
+      return;
+    }
+
+    clearAutoPostalCodeStamps();
+
+    const n1 = Number(zipGuide.digits_first || 3);
+    const n2 = Number(zipGuide.digits_second || 4);
+    const count = n1 + n2;
+    const gap = Math.max(2, Number(zipGuide.gap || 0));
+    const totalW = Math.max(0, Number(zipGuide.w || 0));
+    const cellW = (totalW - gap) / count;
+    const baseX = Number(zipGuide.x || 0);
+    const baseY = Number(zipGuide.y || 0);
+    const h = Math.max(0, Number(zipGuide.h || 0));
+    const digits = zipCode.padEnd(count, ' ');
+
+    for (let i = 0; i < count; i++) {
+      const inSecond = i >= n1;
+      const x = baseX + (i * cellW) + (inSecond ? gap : 0);
+      const text = document.createElement('div');
+      text.className = 'stamp-item auto-postal-code';
+      text.dataset.autoPostalCode = 'true';
+      text.textContent = digits[i] || ' ';
+      text.style.left = `${Math.max(0, x)}px`;
+      text.style.top = `${Math.max(0, baseY)}px`;
+      text.style.width = `${Math.max(1, cellW)}px`;
+      text.style.height = `${Math.max(1, h)}px`;
+      text.style.display = 'flex';
+      text.style.alignItems = 'center';
+      text.style.justifyContent = 'center';
+      text.style.fontFamily = '"Noto Sans JP", sans-serif';
+      text.style.fontWeight = '700';
+      text.style.fontSize = `${Math.max(12, Math.round(h * 0.72))}px`;
+      text.style.lineHeight = '1';
+      text.style.color = '#111';
+      text.style.whiteSpace = 'pre';
+      overlayLayer.appendChild(text);
+    }
+  }
+
+  function triggerPostalCodeApply() {
+    applyPostalCodeToGuide(postalCodeInput?.value || '');
+  }
+
+  function renderGuide(guide, paper = null) {
+    clearGuide();
+    if (!guideLayer || !guide) return;
+
+    let boxes = resolveGuideBoxes(guide, paper);
 
     for (const b of boxes) {
       if (b.type === 'zip7') {
@@ -386,6 +460,9 @@ function mmToPx(mm, dpi) {
       fontSize: node.style.fontSize || '24px',
       color: node.style.color || '#111',
       whiteSpace: node.style.whiteSpace || 'pre',
+      fontFamily: node.style.fontFamily || '',
+      fontWeight: node.style.fontWeight || '',
+      lineHeight: node.style.lineHeight || '',
     };
   }
 
@@ -412,6 +489,9 @@ function mmToPx(mm, dpi) {
       node.style.fontSize = data.fontSize || '24px';
       node.style.color = data.color || '#111';
       node.style.whiteSpace = data.whiteSpace || 'pre';
+      if (data.fontFamily) node.style.fontFamily = data.fontFamily;
+      if (data.fontWeight) node.style.fontWeight = data.fontWeight;
+      if (data.lineHeight) node.style.lineHeight = data.lineHeight;
     }
 
     if (!node) return null;
@@ -549,7 +629,10 @@ function mmToPx(mm, dpi) {
     restoreAllStamps(data.stamps || []);
 
     const guide = (data.guide_mm ? { boxes_mm: data.guide_mm.boxes } : data.guide) || buildEnvelopeGuideByName(json.template.name);
-    renderGuide(guide, data.paper || null);
+    activeGuide = guide || null;
+    activePaper = data.paper || null;
+    renderGuide(activeGuide, activePaper);
+    if (postalCodeInput?.value) triggerPostalCodeApply();
   }
 
   async function deleteTemplate() {
@@ -717,6 +800,8 @@ document.addEventListener('mousemove', (event) => {
       const id = templateSelect?.value;
       if (id) {
         loadTemplate().catch(() => {});
+      } else if (postalCodeInput?.value) {
+        triggerPostalCodeApply();
       }
     }
   });
@@ -727,6 +812,9 @@ document.addEventListener('mousemove', (event) => {
     div.style.fontSize = `${Number(document.getElementById('textSize').value)}px`;
     div.style.color = document.getElementById('textColor').value;
     div.style.whiteSpace = 'pre';
+    div.style.fontFamily = '"Noto Sans JP", sans-serif';
+    div.style.fontWeight = '500';
+    div.style.lineHeight = '1.2';
     makeDraggable(div);
     overlayLayer.appendChild(div);
     selectItem(div);
@@ -807,8 +895,8 @@ document.addEventListener('mousemove', (event) => {
       pageWmm = isLandscape ? p.h : p.w;
       pageHmm = isLandscape ? p.w : p.h;
     } else if (sourceSize.unit === 'pt') {
-      pageWmm = (sourceSize.width * 25.4) / 72;
-      pageHmm = (sourceSize.height * 25.4) / 72;
+      pageWmm = (outWidth * 25.4) / 72;
+      pageHmm = (outHeight * 25.4) / 72;
     }
 
     if (!win) {
@@ -868,6 +956,14 @@ document.addEventListener('mousemove', (event) => {
   });
   deleteTemplateBtn?.addEventListener('click', () => {
     deleteTemplate().catch((e) => alert(`テンプレ削除エラー: ${e.message}`));
+  });
+
+  applyPostalCodeBtn?.addEventListener('click', triggerPostalCodeApply);
+  postalCodeInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      triggerPostalCodeApply();
+    }
   });
 
   openPreviewTabBtn?.addEventListener('click', preparePreviewStateForNewTab);
@@ -932,14 +1028,29 @@ document.addEventListener('mousemove', (event) => {
           ctx.strokeRect(x, y, w, h);
         }
       } else {
-        const baseFontSize = parseFloat(node.style.fontSize || '24') * Math.min(scaleX, scaleY);
-        const fontSize = baseFontSize * Math.min(calib.scaleX, calib.scaleY);
-        ctx.fillStyle = node.style.color || '#111';
-        ctx.font = `${Math.max(8, fontSize)}px sans-serif`;
+        const computed = window.getComputedStyle(node);
+        const baseFontSize = parseFloat(computed.fontSize || node.style.fontSize || '24') * Math.min(scaleX, scaleY);
+        const fontSize = Math.max(8, baseFontSize * Math.min(calib.scaleX, calib.scaleY));
+        const fontFamily = node.style.fontFamily || computed.fontFamily || '"Noto Sans JP", sans-serif';
+        const fontWeight = node.style.fontWeight || computed.fontWeight || '400';
+        const rawLineHeight = node.style.lineHeight || computed.lineHeight || 'normal';
+        let lineHeight = fontSize * 1.2;
+        if (rawLineHeight !== 'normal') {
+          if (rawLineHeight.endsWith('px')) {
+            lineHeight = parseFloat(rawLineHeight) * Math.min(scaleX, scaleY) * Math.min(calib.scaleX, calib.scaleY);
+          } else {
+            const ratio = parseFloat(rawLineHeight);
+            if (Number.isFinite(ratio) && ratio > 0) lineHeight = fontSize * ratio;
+          }
+        }
+
+        ctx.fillStyle = node.style.color || computed.color || '#111';
+        ctx.textBaseline = 'top';
+        ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+
         const lines = (node.textContent || '').split('\n');
-        const lineHeight = Math.max(10, fontSize * 1.2);
         lines.forEach((line, idx) => {
-          ctx.fillText(line, x, y + lineHeight * (idx + 1));
+          ctx.fillText(line, x, y + lineHeight * idx);
         });
       }
     }

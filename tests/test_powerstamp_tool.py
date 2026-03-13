@@ -29,3 +29,5 @@ def test_powerstamp_screen_is_available():
     assert "印刷（スタンプのみ）" in html
     assert "サイズ推定" in html
     assert "JPG/PNG/PDF" in html
+    assert "郵便番号（7桁）" in html
+    assert "postalCodeInput" in html

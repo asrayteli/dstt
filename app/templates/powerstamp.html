@@ -142,6 +142,16 @@
         <input id="imageScale" type="number" value="100" min="10" class="w-24 border rounded px-2 py-1" title="%" />
       </div>
       <button id="addImageBtn" class="px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800">画像配置</button>
+
+      <div class="pt-2 border-t border-gray-200">
+        <h3 class="font-medium text-sm mb-2">封筒向け 郵便番号（7桁）</h3>
+        <div class="flex gap-2 items-center">
+          <input id="postalCodeInput" type="text" inputmode="numeric" maxlength="8" placeholder="123-4567" class="w-40 border rounded px-2 py-1 text-sm" />
+          <button id="applyPostalCodeBtn" class="px-3 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-sm">郵便番号を反映</button>
+        </div>
+        <p class="text-xs text-gray-500 mt-1">封筒テンプレート読込後、この欄の数字を変更するだけで郵便番号欄に自動配置します。</p>
+      </div>
+
       <p class="text-xs text-gray-500">選択中スタンプはドラッグ移動、Deleteで削除。Ctrl/Cmd + C でコピー、Ctrl/Cmd + V で貼り付けできます。</p>
     </div>
   </div>
@@ -159,5 +169,5 @@
 </div>
 
 <link rel="stylesheet" href="{{ url_for('static', filename='css/powerstamp.css') }}">
-<script src="{{ url_for('static', filename='js/powerstamp.js') }}?v=20260312b" defer></script>
+<script src="{{ url_for('static', filename='js/powerstamp.js') }}?v=20260313b" defer></script>
 {% endblock %}
