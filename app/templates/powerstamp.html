@@ -82,7 +82,11 @@
       <button id="zoomResetBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">100%</button>
       <button id="zoomInBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">＋</button>
       <button id="zoomFitBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">Fit</button>
+      <input id="zoomSlider" type="range" min="5" max="400" step="5" value="100" class="w-36" title="表示拡大率(%)" />
       <span id="zoomLabel" class="w-14 text-right font-semibold text-gray-700">100%</span>
+      <span class="ml-3 text-gray-600">編集外背景</span>
+      <input id="outsideAreaColor" type="color" value="#f3f4f6" class="w-10 h-8 border rounded bg-white" title="編集対象外エリアの色" />
+      <button id="outsideAreaColorResetBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50 text-xs">リセット</button>
 
       <span class="ml-3 text-gray-600">精度補正</span>
       <label class="text-xs text-gray-600">X</label>
@@ -115,6 +119,19 @@
         <input id="textSize" type="number" value="32" min="8" class="w-full border rounded px-2 py-1" />
         <input id="textColor" type="color" value="#1f2937" class="w-16 h-10 border rounded" />
       </div>
+      <select id="textFontFamily" class="w-full border rounded px-2 py-1 text-sm">
+        <option value="'Noto Sans JP', sans-serif">Noto Sans JP</option>
+        <option value="'Yu Gothic', 'YuGothic', sans-serif">Yu Gothic</option>
+        <option value="'Meiryo', sans-serif">Meiryo</option>
+        <option value="'MS PGothic', 'MS Gothic', sans-serif">MS Gothic</option>
+        <option value="serif">Serif</option>
+        <option value="sans-serif">Sans Serif</option>
+      </select>
+      <label class="flex items-center gap-2 text-sm text-gray-700">
+        <input id="textVertical" type="checkbox" />
+        縦書きで追加
+      </label>
+      <button id="toggleSelectedTextDirectionBtn" class="w-full px-3 py-2 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm">選択中テキストの縦横を切替</button>
       <button id="addTextBtn" class="w-full px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800">テキスト配置</button>
     </div>
 
@@ -142,11 +159,21 @@
         <input id="imageScale" type="number" value="100" min="10" class="w-24 border rounded px-2 py-1" title="%" />
       </div>
       <button id="addImageBtn" class="px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800">画像配置</button>
+
+      <div id="postalCodePanel" class="pt-2 border-t border-gray-200 hidden">
+        <h3 class="font-medium text-sm mb-2">封筒向け 郵便番号（7桁）</h3>
+        <div class="flex gap-2 items-center">
+          <input id="postalCodeInput" type="text" inputmode="numeric" maxlength="7" placeholder="1234567" class="w-40 border rounded px-2 py-1 text-sm" />
+          <button id="applyPostalCodeBtn" class="px-3 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-sm">郵便番号を反映</button>
+        </div>
+        <p class="text-xs text-gray-500 mt-1">封筒テンプレート読込後、この欄の数字を変更するだけで郵便番号欄に自動配置します。</p>
+      </div>
+
       <p class="text-xs text-gray-500">選択中スタンプはドラッグ移動、Deleteで削除。Ctrl/Cmd + C でコピー、Ctrl/Cmd + V で貼り付けできます。</p>
     </div>
   </div>
 
-  <div id="stageScroll" class="bg-white rounded-xl shadow p-4 overflow-hidden" style="height: 62vh;">
+  <div id="stageScroll" class="bg-white rounded-xl shadow p-4 overflow-auto powerstamp-stage-scroll">
     <div id="stageViewport" class="relative mx-auto" style="width:1200px;height:1700px;">
       <div id="stage" class="relative border border-dashed border-gray-400 bg-white" style="width:1200px;height:1700px; transform-origin: top left;">
         <img id="backgroundLayer" class="absolute inset-0 w-full h-full object-fill pointer-events-none select-none" alt="背景" />
@@ -159,5 +186,5 @@
 </div>
 
 <link rel="stylesheet" href="{{ url_for('static', filename='css/powerstamp.css') }}">
-<script src="{{ url_for('static', filename='js/powerstamp.js') }}?v=20260312b" defer></script>
+<script src="{{ url_for('static', filename='js/powerstamp.js') }}?v=20260313c" defer></script>
 {% endblock %}

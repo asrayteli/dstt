@@ -18,7 +18,7 @@
       },
       "calibration": {
         "offsetX": 0,
-        "offsetY": -83,
+        "offsetY": 0,
         "scaleX": 1,
         "scaleY": 1
       },
@@ -105,7 +105,7 @@
       },
       "calibration": {
         "offsetX": 0,
-        "offsetY": -83,
+        "offsetY": 0,
         "scaleX": 1,
         "scaleY": 1
       },

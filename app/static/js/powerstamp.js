@@ -12,6 +12,9 @@
   const zoomResetBtn = document.getElementById('zoomResetBtn');
   const zoomLabel = document.getElementById('zoomLabel');
   const zoomFitBtn = document.getElementById('zoomFitBtn');
+  const zoomSlider = document.getElementById('zoomSlider');
+  const outsideAreaColorInput = document.getElementById('outsideAreaColor');
+  const outsideAreaColorResetBtn = document.getElementById('outsideAreaColorResetBtn');
   const calibOffsetXInput = document.getElementById('calibOffsetX');
   const calibOffsetYInput = document.getElementById('calibOffsetY');
   const calibScaleXInput = document.getElementById('calibScaleX');
@@ -32,6 +35,12 @@
   const paperSizeSelect = document.getElementById('paperSizeSelect');
   const paperOrientation = document.getElementById('paperOrientation');
   const paperDpiInput = document.getElementById('paperDpiInput');
+  const textFontFamily = document.getElementById('textFontFamily');
+  const textVertical = document.getElementById('textVertical');
+  const toggleSelectedTextDirectionBtn = document.getElementById('toggleSelectedTextDirectionBtn');
+  const postalCodePanel = document.getElementById('postalCodePanel');
+  const postalCodeInput = document.getElementById('postalCodeInput');
+  const applyPostalCodeBtn = document.getElementById('applyPostalCodeBtn');
 
   if (!stage || !stageViewport || !guideLayer || !overlayLayer || !backgroundLayer || !detectedSize || !detectedFileType) {
     return;
@@ -46,6 +55,7 @@
 
   let selected = null;
   let dragState = null;
+  let resizeState = null;
   let pdfjsLibPromise = null;
   let clipboardStamp = null;
   let zoom = 1;
@@ -56,6 +66,15 @@
   const PAPER_MAP_MM = { A3: {w:297,h:420}, A4:{w:210,h:297}, B4:{w:257,h:364}, B5:{w:182,h:257} };
   let anchorPoint = null;
   let waitingAnchorPick = false;
+  let activeGuide = null;
+  let activePaper = null;
+  let contextMenu = null;
+  let contextTarget = null;
+  let contextPoint = null;
+  let contextColorTarget = null;
+  let colorDialog = null;
+  let colorDialogInput = null;
+  let activeTemplateName = '';
 
   
   
@@ -67,21 +86,15 @@
     if (guideLayer) guideLayer.innerHTML = '';
   }
 
-  function renderGuide(guide, paper = null) {
-    clearGuide();
-    if (!guideLayer || !guide) return;
 
-    let boxes = [];
-
-    if (Array.isArray(guide.boxes)) {
-      boxes = guide.boxes;
-    }
+  function resolveGuideBoxes(guide, paper = null) {
+    if (!guide) return [];
 
     if (Array.isArray(guide.boxes_mm) && paper && paper.w_mm && paper.h_mm) {
       const canvas = getStagePixelSize();
       const sx = canvas.width / paper.w_mm;
       const sy = canvas.height / paper.h_mm;
-      boxes = guide.boxes_mm.map((b) => ({
+      return guide.boxes_mm.map((b) => ({
         ...b,
         x: (b.x_mm || 0) * sx,
         y: (b.y_mm || 0) * sy,
@@ -90,6 +103,110 @@
         gap: (b.gap_mm || 0) * sx,
       }));
     }
+
+    if (Array.isArray(guide.boxes)) {
+      return guide.boxes;
+    }
+
+    return [];
+  }
+
+  function clearAutoPostalCodeStamps() {
+    Array.from(overlayLayer.querySelectorAll('.auto-postal-code')).forEach((node) => node.remove());
+  }
+
+  function normalizePostalCode(raw) {
+    return String(raw || '').replace(/\D/g, '').slice(0, 7);
+  }
+
+  function isEnvelopeTemplateName(name) {
+    const n = String(name || '').toLowerCase();
+    return (
+      n.includes('長3') ||
+      n.includes('長３') ||
+      n.includes('角2') ||
+      n.includes('角２') ||
+      n.includes('角2号') ||
+      n.includes('角２号') ||
+      n.includes('n3') ||
+      n.includes('k2') ||
+      n.includes('long3') ||
+      n.includes('kaku2')
+    );
+  }
+
+  function updatePostalCodePanel() {
+    if (!postalCodePanel) return;
+    const show = isEnvelopeTemplateName(activeTemplateName);
+    postalCodePanel.classList.toggle('hidden', !show);
+    if (!show) {
+      clearAutoPostalCodeStamps();
+    } else if (postalCodeInput?.value) {
+      triggerPostalCodeApply();
+    }
+  }
+
+  function applyPostalCodeToGuide(rawCode) {
+    const zipCode = normalizePostalCode(rawCode);
+    if (!zipCode) {
+      clearAutoPostalCodeStamps();
+      return;
+    }
+
+    const boxes = resolveGuideBoxes(activeGuide, activePaper);
+    const zipGuide = boxes.find((b) => b && b.type === 'zip7');
+    if (!zipGuide) {
+      alert('現在のテンプレートに郵便番号欄がありません。封筒テンプレートを読み込んでください。');
+      return;
+    }
+
+    clearAutoPostalCodeStamps();
+
+    const n1 = Number(zipGuide.digits_first || 3);
+    const n2 = Number(zipGuide.digits_second || 4);
+    const count = n1 + n2;
+    const gap = Math.max(2, Number(zipGuide.gap || 0));
+    const totalW = Math.max(0, Number(zipGuide.w || 0));
+    const cellW = (totalW - gap) / count;
+    const baseX = Number(zipGuide.x || 0);
+    const baseY = Number(zipGuide.y || 0);
+    const h = Math.max(0, Number(zipGuide.h || 0));
+    const digits = zipCode.padEnd(count, ' ');
+
+    for (let i = 0; i < count; i++) {
+      const inSecond = i >= n1;
+      const x = baseX + (i * cellW) + (inSecond ? gap : 0);
+      const text = document.createElement('div');
+      text.className = 'stamp-item auto-postal-code';
+      text.dataset.autoPostalCode = 'true';
+      text.textContent = digits[i] || ' ';
+      text.style.left = `${Math.max(0, x)}px`;
+      text.style.top = `${Math.max(0, baseY)}px`;
+      text.style.width = `${Math.max(1, cellW)}px`;
+      text.style.height = `${Math.max(1, h)}px`;
+      text.style.display = 'flex';
+      text.style.alignItems = 'center';
+      text.style.justifyContent = 'center';
+      text.style.fontFamily = '"Noto Sans JP", sans-serif';
+      text.style.fontWeight = '700';
+      text.style.fontSize = `${Math.max(12, Math.round(h * 0.72))}px`;
+      text.style.lineHeight = '1';
+      text.style.color = '#111';
+      text.style.whiteSpace = 'pre';
+      overlayLayer.appendChild(text);
+    }
+  }
+
+  function triggerPostalCodeApply() {
+    if (postalCodePanel?.classList.contains('hidden')) return;
+    applyPostalCodeToGuide(postalCodeInput?.value || '');
+  }
+
+  function renderGuide(guide, paper = null) {
+    clearGuide();
+    if (!guideLayer || !guide) return;
+
+    let boxes = resolveGuideBoxes(guide, paper);
 
     for (const b of boxes) {
       if (b.type === 'zip7') {
@@ -136,7 +253,7 @@
   function buildEnvelopeGuideByName(name) {
     if (!name) return null;
     const n = String(name);
-    if (n.includes('長3')) {
+    if (n.includes('長3') || n.includes('長３') || n.toLowerCase().includes('n3') || n.toLowerCase().includes('long3')) {
       return {
         boxes_mm: [
           { type: 'zip7', x_mm: 57, y_mm: 12, w_mm: 55, h_mm: 12, label: '郵便番号', digits_first: 3, digits_second: 4, gap_mm: 4 },
@@ -145,7 +262,7 @@
         ]
       };
     }
-    if (n.includes('角2')) {
+    if (n.includes('角2') || n.includes('角２') || n.includes('角2号') || n.includes('角２号') || n.toLowerCase().includes('k2') || n.toLowerCase().includes('kaku2')) {
       return {
         boxes_mm: [
           { type: 'zip7', x_mm: 170, y_mm: 14, w_mm: 60, h_mm: 13, label: '郵便番号', digits_first: 3, digits_second: 4, gap_mm: 4 },
@@ -191,11 +308,12 @@ function mmToPx(mm, dpi) {
   function fitStageToScreen() {
     if (!stageScroll) return;
     const { width, height } = getStagePixelSize();
-    const rect = stageScroll.getBoundingClientRect();
-    const padW = 12;
-    const padH = 12;
-    const availW = Math.max(120, rect.width - padW);
-    const availH = Math.max(120, rect.height - padH);
+    const style = window.getComputedStyle(stageScroll);
+    const padX = (parseFloat(style.paddingLeft || '0') + parseFloat(style.paddingRight || '0'));
+    const padY = (parseFloat(style.paddingTop || '0') + parseFloat(style.paddingBottom || '0'));
+    const safety = 4;
+    const availW = Math.max(120, stageScroll.clientWidth - padX - safety);
+    const availH = Math.max(120, stageScroll.clientHeight - padY - safety);
     const zw = availW / Math.max(1, width);
     const zh = availH / Math.max(1, height);
     const target = Math.min(1, zw, zh);
@@ -214,6 +332,7 @@ function mmToPx(mm, dpi) {
     stageViewport.style.width = `${Math.round(width * zoom)}px`;
     stageViewport.style.height = `${Math.round(height * zoom)}px`;
     if (zoomLabel) zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+    if (zoomSlider) zoomSlider.value = String(Math.round(zoom * 100));
   }
 
   function setZoom(nextZoom) {
@@ -224,6 +343,8 @@ function mmToPx(mm, dpi) {
   let sourceSize = { ...getStagePixelSize(), unit: 'px' };
 
   const CALIB_KEY = 'powerstampCalibrationV1';
+  const OUTSIDE_AREA_COLOR_KEY = 'powerstampOutsideAreaColorV1';
+  const OUTSIDE_AREA_DEFAULT = '#f3f4f6';
 
   function getCalibration() {
     const offsetX = Number(calibOffsetXInput?.value || 0);
@@ -253,6 +374,28 @@ function mmToPx(mm, dpi) {
       if (calibOffsetYInput) calibOffsetYInput.value = String(c.offsetY ?? 0);
       if (calibScaleXInput) calibScaleXInput.value = String(((c.scaleX ?? 1) * 100));
       if (calibScaleYInput) calibScaleYInput.value = String(((c.scaleY ?? 1) * 100));
+    } catch (_) {}
+  }
+
+  function applyOutsideAreaColor(color) {
+    if (!stageScroll) return;
+    const safe = /^#[0-9a-fA-F]{6}$/.test(String(color || '')) ? color : OUTSIDE_AREA_DEFAULT;
+    stageScroll.style.backgroundColor = safe;
+    if (outsideAreaColorInput) outsideAreaColorInput.value = safe;
+  }
+
+  function loadOutsideAreaColor() {
+    try {
+      const stored = localStorage.getItem(OUTSIDE_AREA_COLOR_KEY);
+      applyOutsideAreaColor(stored || outsideAreaColorInput?.value || OUTSIDE_AREA_DEFAULT);
+    } catch (_) {
+      applyOutsideAreaColor(outsideAreaColorInput?.value || OUTSIDE_AREA_DEFAULT);
+    }
+  }
+
+  function saveOutsideAreaColor(color) {
+    try {
+      localStorage.setItem(OUTSIDE_AREA_COLOR_KEY, color);
     } catch (_) {}
   }
 
@@ -328,18 +471,90 @@ function mmToPx(mm, dpi) {
   function selectItem(item) {
     document.querySelectorAll('.stamp-item').forEach((el) => el.classList.remove('selected'));
     selected = item;
-    if (item) item.classList.add('selected');
+    if (item) {
+      item.classList.add('selected');
+      if (textVertical && item.dataset.stampType === 'text') {
+        const mode = item.style.writingMode || window.getComputedStyle(item).writingMode || 'horizontal-tb';
+        textVertical.checked = mode.startsWith('vertical');
+      }
+    }
+  }
+
+  function setTextDirection(node, vertical) {
+    if (!node) return;
+    if (vertical) {
+      node.style.writingMode = 'vertical-rl';
+      node.style.textOrientation = 'upright';
+      node.style.lineHeight = node.style.lineHeight || '1.1';
+    } else {
+      node.style.writingMode = 'horizontal-tb';
+      node.style.textOrientation = 'mixed';
+      node.style.lineHeight = node.style.lineHeight || '1.2';
+    }
+  }
+
+  function ensureResizeHandle(item) {
+    if (!item || item.querySelector('.stamp-resize-handle')) return;
+    const handle = document.createElement('div');
+    handle.className = 'stamp-resize-handle';
+    handle.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      selectItem(item);
+      const rect = item.getBoundingClientRect();
+      const fontSize = parseFloat(item.style.fontSize || window.getComputedStyle(item).fontSize || '24');
+      resizeState = {
+        item,
+        startX: event.clientX,
+        startY: event.clientY,
+        startWidth: Math.max(1, rect.width / (zoom || 1)),
+        startHeight: Math.max(1, rect.height / (zoom || 1)),
+        startFontSize: Number.isFinite(fontSize) ? fontSize : 24,
+        isText: item.dataset.stampType === 'text',
+      };
+      dragState = null;
+    });
+    item.appendChild(handle);
+  }
+
+  function clampItemWithinStage(item) {
+    if (!item) return;
+    const stageSize = getStagePixelSize();
+    const rect = item.getBoundingClientRect();
+    const scale = zoom || 1;
+    const w = Math.max(1, rect.width / scale);
+    const h = Math.max(1, rect.height / scale);
+    const maxX = Math.max(0, stageSize.width - w);
+    const maxY = Math.max(0, stageSize.height - h);
+    const x = Math.max(0, Math.min(maxX, parseFloat(item.style.left || '0')));
+    const y = Math.max(0, Math.min(maxY, parseFloat(item.style.top || '0')));
+    item.style.left = `${x}px`;
+    item.style.top = `${y}px`;
   }
 
   function makeDraggable(item) {
     item.classList.add('stamp-item');
     item.style.left = item.style.left || '80px';
     item.style.top = item.style.top || '80px';
+    ensureResizeHandle(item);
 
     item.addEventListener('mousedown', (event) => {
+      if (event.target?.classList?.contains('stamp-resize-handle')) return;
       selectItem(item);
       const rect = item.getBoundingClientRect();
       dragState = { item, dx: event.clientX - rect.left, dy: event.clientY - rect.top };
+    });
+
+    item.addEventListener('dblclick', (event) => {
+      if (item.dataset.stampType !== 'text') return;
+      event.preventDefault();
+      event.stopPropagation();
+      selectItem(item);
+      const current = item.textContent || '';
+      const next = window.prompt('テキスト内容を編集', current);
+      if (next === null) return;
+      item.textContent = next;
+      ensureResizeHandle(item);
     });
   }
 
@@ -386,6 +601,13 @@ function mmToPx(mm, dpi) {
       fontSize: node.style.fontSize || '24px',
       color: node.style.color || '#111',
       whiteSpace: node.style.whiteSpace || 'pre',
+      width: parseFloat(node.style.width || '0'),
+      height: parseFloat(node.style.height || '0'),
+      fontFamily: node.style.fontFamily || '',
+      fontWeight: node.style.fontWeight || '',
+      lineHeight: node.style.lineHeight || '',
+      writingMode: node.style.writingMode || '',
+      textOrientation: node.style.textOrientation || '',
     };
   }
 
@@ -395,11 +617,13 @@ function mmToPx(mm, dpi) {
 
     if (data.type === 'image') {
       node = document.createElement('img');
+      node.dataset.stampType = 'image';
       node.src = data.src;
       if (data.width) node.style.width = `${data.width}px`;
       if (data.height) node.style.height = `${data.height}px`;
     } else if (data.type === 'shape') {
       node = document.createElement('div');
+      node.dataset.stampType = 'shape';
       if (data.width) node.style.width = `${data.width}px`;
       if (data.height) node.style.height = `${data.height}px`;
       if (data.border) node.style.border = data.border;
@@ -408,10 +632,18 @@ function mmToPx(mm, dpi) {
       if (data.borderRadius) node.style.borderRadius = data.borderRadius;
     } else if (data.type === 'text') {
       node = document.createElement('div');
+      node.dataset.stampType = 'text';
       node.textContent = data.text || '入力文字';
       node.style.fontSize = data.fontSize || '24px';
       node.style.color = data.color || '#111';
       node.style.whiteSpace = data.whiteSpace || 'pre';
+      if (data.width) node.style.width = `${data.width}px`;
+      if (data.height) node.style.height = `${data.height}px`;
+      if (data.fontFamily) node.style.fontFamily = data.fontFamily;
+      if (data.fontWeight) node.style.fontWeight = data.fontWeight;
+      if (data.lineHeight) node.style.lineHeight = data.lineHeight;
+      if (data.writingMode) node.style.writingMode = data.writingMode;
+      if (data.textOrientation) node.style.textOrientation = data.textOrientation;
     }
 
     if (!node) return null;
@@ -435,6 +667,193 @@ function mmToPx(mm, dpi) {
     overlayLayer.appendChild(node);
     selectItem(node);
     return true;
+  }
+
+  function createTextStamp(text) {
+    const div = document.createElement('div');
+    div.dataset.stampType = 'text';
+    div.textContent = text || document.getElementById('textContent').value || '入力文字';
+    div.style.fontSize = `${Number(document.getElementById('textSize').value)}px`;
+    div.style.color = document.getElementById('textColor').value;
+    div.style.whiteSpace = 'pre';
+    div.style.fontFamily = textFontFamily?.value || '"Noto Sans JP", sans-serif';
+    div.style.fontWeight = '500';
+    div.style.lineHeight = '1.2';
+    setTextDirection(div, !!textVertical?.checked);
+    makeDraggable(div);
+    return div;
+  }
+
+  function toStagePointFromEvent(event) {
+    const rect = stage.getBoundingClientRect();
+    const scale = zoom || 1;
+    const x = (event.clientX - rect.left) / scale;
+    const y = (event.clientY - rect.top) / scale;
+    return {
+      x: Math.max(0, Math.min(getStagePixelSize().width, x)),
+      y: Math.max(0, Math.min(getStagePixelSize().height, y)),
+    };
+  }
+
+  function hideContextMenu() {
+    if (contextMenu) contextMenu.classList.add('hidden');
+    contextTarget = null;
+    contextPoint = null;
+  }
+
+  function ensureContextMenu() {
+    if (contextMenu) return contextMenu;
+    const menu = document.createElement('div');
+    menu.className = 'powerstamp-context-menu hidden';
+    menu.id = 'powerstampContextMenu';
+    document.body.appendChild(menu);
+
+    menu.addEventListener('click', async (event) => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      const action = button.dataset.action;
+      const point = contextPoint;
+      const target = contextTarget;
+      hideContextMenu();
+
+      if (action === 'add-text' && point) {
+        const node = createTextStamp();
+        node.style.left = `${point.x}px`;
+        node.style.top = `${point.y}px`;
+        overlayLayer.appendChild(node);
+        selectItem(node);
+        return;
+      }
+
+      if (action === 'paste' && point) {
+        try {
+          const plain = await navigator.clipboard.readText();
+          if (plain) {
+            const node = createTextStamp(plain);
+            node.style.left = `${point.x}px`;
+            node.style.top = `${point.y}px`;
+            overlayLayer.appendChild(node);
+            selectItem(node);
+            return;
+          }
+        } catch (_) {}
+
+        if (clipboardStamp) {
+          const node = buildStampFromData({ ...clipboardStamp, left: point.x, top: point.y });
+          if (node) {
+            node.style.left = `${point.x}px`;
+            node.style.top = `${point.y}px`;
+            overlayLayer.appendChild(node);
+            selectItem(node);
+          }
+        }
+        return;
+      }
+
+      if (!target || target.dataset.stampType !== 'text') return;
+      selectItem(target);
+
+      if (action === 'copy-text') {
+        copySelectedStamp();
+        try { await navigator.clipboard.writeText(target.textContent || ''); } catch (_) {}
+        return;
+      }
+
+      if (action === 'toggle-direction') {
+        const mode = target.style.writingMode || window.getComputedStyle(target).writingMode || 'horizontal-tb';
+        const toVertical = !mode.startsWith('vertical');
+        setTextDirection(target, toVertical);
+        if (textVertical) textVertical.checked = toVertical;
+        return;
+      }
+
+      if (action === 'change-color') {
+        openColorDialogForTarget(target);
+        return;
+      }
+
+      if (action === 'delete-text') {
+        target.remove();
+        if (selected === target) selected = null;
+      }
+    });
+
+    contextMenu = menu;
+    return menu;
+  }
+
+  function ensureColorDialog() {
+    if (colorDialog) return colorDialog;
+    const dialog = document.createElement('div');
+    dialog.className = 'powerstamp-color-dialog hidden';
+    dialog.innerHTML = `
+      <div class="powerstamp-color-dialog-panel">
+        <h4>テキスト色を変更</h4>
+        <input type="color" id="powerstampColorDialogInput" value="#111111" />
+        <div class="powerstamp-color-dialog-actions">
+          <button type="button" data-action="cancel">キャンセル</button>
+          <button type="button" data-action="apply" class="primary">OK</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(dialog);
+    colorDialog = dialog;
+    colorDialogInput = dialog.querySelector('#powerstampColorDialogInput');
+
+    dialog.addEventListener('click', (event) => {
+      const action = event.target?.dataset?.action;
+      if (event.target === dialog || action === 'cancel') {
+        dialog.classList.add('hidden');
+        contextColorTarget = null;
+        return;
+      }
+      if (action === 'apply' && contextColorTarget && colorDialogInput) {
+        contextColorTarget.style.color = colorDialogInput.value;
+        dialog.classList.add('hidden');
+        contextColorTarget = null;
+      }
+    });
+
+    return dialog;
+  }
+
+  function openColorDialogForTarget(target) {
+    if (!target || target.dataset.stampType !== 'text') return;
+    const dialog = ensureColorDialog();
+    const now = target.style.color || '#111111';
+    const hex = rgbToHex(now) || '#111111';
+    contextColorTarget = target;
+    if (colorDialogInput) colorDialogInput.value = hex;
+    dialog.classList.remove('hidden');
+  }
+
+  function rgbToHex(color) {
+    if (/^#[0-9a-fA-F]{6}$/.test(String(color || ''))) return color;
+    const m = String(color || '').match(/^rgb\(\s*(\d+),\s*(\d+),\s*(\d+)\s*\)$/i);
+    if (!m) return null;
+    return `#${[m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('')}`;
+  }
+
+  function showContextMenu(event, target, point) {
+    const menu = ensureContextMenu();
+    const isText = !!target && target.dataset.stampType === 'text';
+    menu.innerHTML = `
+      <button data-action="add-text">ここにテキスト追加</button>
+      <button data-action="paste">ここにペースト</button>
+      ${isText ? '<button data-action="copy-text">コピー</button>' : ''}
+      ${isText ? '<button data-action="toggle-direction">縦書き/横書き切替</button>' : ''}
+      ${isText ? '<button data-action="change-color">色を変更</button>' : ''}
+      ${isText ? '<button data-action="delete-text" class="danger">削除</button>' : ''}
+    `;
+    contextTarget = target || null;
+    contextPoint = point || null;
+
+    const pad = 6;
+    const x = Math.min(window.innerWidth - 210, event.clientX + pad);
+    const y = Math.min(window.innerHeight - 220, event.clientY + pad);
+    menu.style.left = `${Math.max(6, x)}px`;
+    menu.style.top = `${Math.max(6, y)}px`;
+    menu.classList.remove('hidden');
   }
 
   function serializeAllStamps() {
@@ -527,6 +946,7 @@ function mmToPx(mm, dpi) {
     }
 
     const data = json.template.data || {};
+    activeTemplateName = json.template.name || '';
     const canvas = data.canvas || {};
     if (canvas.width && canvas.height) setCanvasSize(canvas.width, canvas.height);
 
@@ -548,8 +968,13 @@ function mmToPx(mm, dpi) {
     sourceSize = data.sourceSize || sourceSize;
     restoreAllStamps(data.stamps || []);
 
-    const guide = (data.guide_mm ? { boxes_mm: data.guide_mm.boxes } : data.guide) || buildEnvelopeGuideByName(json.template.name);
-    renderGuide(guide, data.paper || null);
+    const envelopeGuide = buildEnvelopeGuideByName(activeTemplateName);
+    const guide = envelopeGuide || (data.guide_mm ? { boxes_mm: data.guide_mm.boxes } : data.guide);
+    activeGuide = guide || null;
+    activePaper = data.paper || null;
+    renderGuide(activeGuide, activePaper);
+    updatePostalCodePanel();
+    if (postalCodeInput?.value && !postalCodePanel?.classList.contains('hidden')) triggerPostalCodeApply();
   }
 
   async function deleteTemplate() {
@@ -581,6 +1006,16 @@ function mmToPx(mm, dpi) {
     setAnchorUI(anchorPoint);
   });
 
+  stage.addEventListener('contextmenu', (event) => {
+    const stamp = event.target?.closest?.('.stamp-item');
+    const inStage = stage.contains(event.target);
+    if (!inStage) return;
+    event.preventDefault();
+    const point = toStagePointFromEvent(event);
+    if (stamp) selectItem(stamp);
+    showContextMenu(event, stamp || null, point);
+  });
+
 
   function buildPreviewState() {
     return {
@@ -600,6 +1035,28 @@ function mmToPx(mm, dpi) {
   }
 
 document.addEventListener('mousemove', (event) => {
+    if (resizeState) {
+      const scale = zoom || 1;
+      const dx = (event.clientX - resizeState.startX) / scale;
+      const dy = (event.clientY - resizeState.startY) / scale;
+      const nextW = Math.max(20, resizeState.startWidth + dx);
+      const nextH = Math.max(20, resizeState.startHeight + dy);
+
+      if (resizeState.isText) {
+        const baseW = Math.max(1, resizeState.startWidth);
+        const baseH = Math.max(1, resizeState.startHeight);
+        const ratio = Math.max(nextW / baseW, nextH / baseH);
+        const nextFont = Math.max(8, resizeState.startFontSize * ratio);
+        resizeState.item.style.fontSize = `${Math.round(nextFont)}px`;
+      } else {
+        resizeState.item.style.width = `${Math.round(nextW)}px`;
+        resizeState.item.style.height = `${Math.round(nextH)}px`;
+      }
+
+      clampItemWithinStage(resizeState.item);
+      return;
+    }
+
     if (!dragState) return;
     const stageRect = stage.getBoundingClientRect();
     const itemRect = dragState.item.getBoundingClientRect();
@@ -616,7 +1073,21 @@ document.addEventListener('mousemove', (event) => {
     dragState.item.style.top = `${Math.min(maxY, Math.max(0, y))}px`;
   });
 
-  document.addEventListener('mouseup', () => { dragState = null; });
+  document.addEventListener('mouseup', () => {
+    dragState = null;
+    if (resizeState) {
+      clampItemWithinStage(resizeState.item);
+      resizeState = null;
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    if (contextMenu && !contextMenu.contains(event.target)) {
+      hideContextMenu();
+    }
+  });
+
+  stageScroll?.addEventListener('scroll', hideContextMenu);
 
   document.addEventListener('keydown', (event) => {
     if (isEditableTarget(event.target)) return;
@@ -639,6 +1110,10 @@ document.addEventListener('mousemove', (event) => {
     if (withMeta && key === 'v') {
       event.preventDefault();
       pasteStamp();
+    }
+
+    if (event.key === 'Escape') {
+      hideContextMenu();
     }
   });
 
@@ -717,23 +1192,32 @@ document.addEventListener('mousemove', (event) => {
       const id = templateSelect?.value;
       if (id) {
         loadTemplate().catch(() => {});
+      } else if (postalCodeInput?.value) {
+        triggerPostalCodeApply();
       }
     }
   });
 
   document.getElementById('addTextBtn').addEventListener('click', () => {
-    const div = document.createElement('div');
-    div.textContent = document.getElementById('textContent').value || '入力文字';
-    div.style.fontSize = `${Number(document.getElementById('textSize').value)}px`;
-    div.style.color = document.getElementById('textColor').value;
-    div.style.whiteSpace = 'pre';
-    makeDraggable(div);
+    const div = createTextStamp();
     overlayLayer.appendChild(div);
     selectItem(div);
   });
 
+  toggleSelectedTextDirectionBtn?.addEventListener('click', () => {
+    if (!selected || selected.dataset.stampType !== 'text') {
+      alert('テキストスタンプを選択してから実行してください。');
+      return;
+    }
+    const mode = selected.style.writingMode || window.getComputedStyle(selected).writingMode || 'horizontal-tb';
+    const toVertical = !mode.startsWith('vertical');
+    setTextDirection(selected, toVertical);
+    if (textVertical) textVertical.checked = toVertical;
+  });
+
   document.getElementById('addShapeBtn').addEventListener('click', () => {
     const shape = document.createElement('div');
+    shape.dataset.stampType = 'shape';
     shape.style.width = `${Number(document.getElementById('shapeWidth').value)}px`;
     shape.style.height = `${Number(document.getElementById('shapeHeight').value)}px`;
     shape.style.border = `2px solid ${document.getElementById('shapeStroke').value}`;
@@ -752,6 +1236,7 @@ document.addEventListener('mousemove', (event) => {
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = document.createElement('img');
+      img.dataset.stampType = 'image';
       img.src = event.target.result;
       img.onload = () => {
         img.style.width = `${Math.max(20, img.naturalWidth * scale)}px`;
@@ -807,8 +1292,8 @@ document.addEventListener('mousemove', (event) => {
       pageWmm = isLandscape ? p.h : p.w;
       pageHmm = isLandscape ? p.w : p.h;
     } else if (sourceSize.unit === 'pt') {
-      pageWmm = (sourceSize.width * 25.4) / 72;
-      pageHmm = (sourceSize.height * 25.4) / 72;
+      pageWmm = (outWidth * 25.4) / 72;
+      pageHmm = (outHeight * 25.4) / 72;
     }
 
     if (!win) {
@@ -840,6 +1325,19 @@ document.addEventListener('mousemove', (event) => {
   zoomOutBtn?.addEventListener('click', () => setZoom(zoom - ZOOM_STEP));
   zoomResetBtn?.addEventListener('click', () => setZoom(1));
   zoomFitBtn?.addEventListener('click', () => fitStageToScreen());
+  zoomSlider?.addEventListener('input', () => {
+    const pct = Number(zoomSlider.value || 100);
+    setZoom(pct / 100);
+  });
+  outsideAreaColorInput?.addEventListener('input', () => {
+    const color = outsideAreaColorInput.value || OUTSIDE_AREA_DEFAULT;
+    applyOutsideAreaColor(color);
+    saveOutsideAreaColor(color);
+  });
+  outsideAreaColorResetBtn?.addEventListener('click', () => {
+    applyOutsideAreaColor(OUTSIDE_AREA_DEFAULT);
+    saveOutsideAreaColor(OUTSIDE_AREA_DEFAULT);
+  });
 
   stageScroll?.addEventListener('wheel', (event) => {
     if (!event.ctrlKey) return;
@@ -868,6 +1366,20 @@ document.addEventListener('mousemove', (event) => {
   });
   deleteTemplateBtn?.addEventListener('click', () => {
     deleteTemplate().catch((e) => alert(`テンプレ削除エラー: ${e.message}`));
+  });
+
+  applyPostalCodeBtn?.addEventListener('click', triggerPostalCodeApply);
+  postalCodeInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      triggerPostalCodeApply();
+    }
+  });
+  postalCodeInput?.addEventListener('input', () => {
+    const normalized = normalizePostalCode(postalCodeInput.value || '');
+    if (postalCodeInput.value !== normalized) {
+      postalCodeInput.value = normalized;
+    }
   });
 
   openPreviewTabBtn?.addEventListener('click', preparePreviewStateForNewTab);
@@ -932,15 +1444,43 @@ document.addEventListener('mousemove', (event) => {
           ctx.strokeRect(x, y, w, h);
         }
       } else {
-        const baseFontSize = parseFloat(node.style.fontSize || '24') * Math.min(scaleX, scaleY);
-        const fontSize = baseFontSize * Math.min(calib.scaleX, calib.scaleY);
-        ctx.fillStyle = node.style.color || '#111';
-        ctx.font = `${Math.max(8, fontSize)}px sans-serif`;
+        const computed = window.getComputedStyle(node);
+        const baseFontSize = parseFloat(computed.fontSize || node.style.fontSize || '24') * Math.min(scaleX, scaleY);
+        const fontSize = Math.max(8, baseFontSize * Math.min(calib.scaleX, calib.scaleY));
+        const fontFamily = node.style.fontFamily || computed.fontFamily || '"Noto Sans JP", sans-serif';
+        const fontWeight = node.style.fontWeight || computed.fontWeight || '400';
+        const rawLineHeight = node.style.lineHeight || computed.lineHeight || 'normal';
+        let lineHeight = fontSize * 1.2;
+        if (rawLineHeight !== 'normal') {
+          if (rawLineHeight.endsWith('px')) {
+            lineHeight = parseFloat(rawLineHeight) * Math.min(scaleX, scaleY) * Math.min(calib.scaleX, calib.scaleY);
+          } else {
+            const ratio = parseFloat(rawLineHeight);
+            if (Number.isFinite(ratio) && ratio > 0) lineHeight = fontSize * ratio;
+          }
+        }
+
+        ctx.fillStyle = node.style.color || computed.color || '#111';
+        ctx.textBaseline = 'top';
+        ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+
         const lines = (node.textContent || '').split('\n');
-        const lineHeight = Math.max(10, fontSize * 1.2);
-        lines.forEach((line, idx) => {
-          ctx.fillText(line, x, y + lineHeight * (idx + 1));
-        });
+        const writingMode = node.style.writingMode || computed.writingMode || 'horizontal-tb';
+        if (writingMode.startsWith('vertical')) {
+          const columnGap = fontSize * 1.05;
+          lines.forEach((line, colIdx) => {
+            let cursorY = y;
+            const columnX = x + (columnGap * colIdx);
+            for (const ch of Array.from(line)) {
+              ctx.fillText(ch, columnX, cursorY);
+              cursorY += lineHeight;
+            }
+          });
+        } else {
+          lines.forEach((line, idx) => {
+            ctx.fillText(line, x, y + lineHeight * idx);
+          });
+        }
       }
     }
   }
@@ -984,7 +1524,9 @@ document.addEventListener('mousemove', (event) => {
   });
 
   setAnchorUI(null);
+  updatePostalCodePanel();
   loadCalibration();
+  loadOutsideAreaColor();
   applyZoom();
   refreshTemplateList().catch(() => {});
   window.addEventListener('resize', () => { fitStageToScreen(); });

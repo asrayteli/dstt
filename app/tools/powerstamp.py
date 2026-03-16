@@ -91,6 +91,9 @@ def _merge_seed_templates(templates):
                 if "paper" in seed_data:
                     cur_data["paper"] = seed_data["paper"]
                     changed = True
+                if "calibration" in seed_data:
+                    cur_data["calibration"] = seed_data["calibration"]
+                    changed = True
             else:
                 if "guide" in seed_data and "guide" not in cur_data:
                     cur_data["guide"] = seed_data["guide"]
@@ -100,6 +103,9 @@ def _merge_seed_templates(templates):
                     changed = True
                 if "paper" in seed_data and "paper" not in cur_data:
                     cur_data["paper"] = seed_data["paper"]
+                    changed = True
+                if "calibration" in seed_data and "calibration" not in cur_data:
+                    cur_data["calibration"] = seed_data["calibration"]
                     changed = True
             if changed:
                 cur["data"] = cur_data
