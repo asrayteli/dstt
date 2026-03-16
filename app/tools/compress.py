@@ -30,9 +30,14 @@ def safe_filename(filename: str) -> str:
 
 
 def sanitize_archive_name(name: str) -> str:
-    cleaned = safe_filename(name)
+    raw = (name or "").strip()
+    if not raw:
+        return "dstt_compressed"
+    cleaned = safe_filename(raw)
     cleaned = re.sub(r"\.+$", "", cleaned).strip()
-    return cleaned or "dstt_compressed"
+    if not cleaned or cleaned == "unnamed_file":
+        return "dstt_compressed"
+    return cleaned
 
 
 def parse_csv_values(raw: str) -> list[str]:
