@@ -17,9 +17,9 @@
 }
 .stamp-item.selected .stamp-resize-handle { display: block; }
 .powerstamp-stage-scroll {
-  height: calc(100vh - 19rem);
-  min-height: 420px;
-  max-height: 82vh;
+  height: calc(100vh - 13rem);
+  min-height: 560px;
+  max-height: 90vh;
 }
 
 @media print {
@@ -109,7 +109,8 @@
 
 @media (max-width: 1024px) {
   .powerstamp-stage-scroll {
-    height: calc(100vh - 14rem);
-    min-height: 360px;
+    height: calc(100vh - 10rem);
+    min-height: 460px;
+    max-height: 92vh;
   }
 }
