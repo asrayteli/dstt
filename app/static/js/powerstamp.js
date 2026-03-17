@@ -1478,27 +1478,45 @@ document.addEventListener('mousemove', (event) => {
           }
         }
 
-        ctx.fillStyle = node.style.color || computed.color || '#111';
-        ctx.textBaseline = 'top';
-        ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-
         const lines = (node.textContent || '').split('\n');
         const writingMode = node.style.writingMode || computed.writingMode || 'horizontal-tb';
+        const boxW = applyCalibW(parseFloat(node.style.width || '0') * scaleX);
+        const boxH = applyCalibH(parseFloat(node.style.height || '0') * scaleY);
+        const hasBox = boxW > 0 && boxH > 0;
+        const isFlexCenter = hasBox && (computed.display === 'flex' || node.style.display === 'flex');
+
+        ctx.fillStyle = node.style.color || computed.color || '#111';
+        ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+        ctx.textBaseline = 'top';
+        ctx.textAlign = (isFlexCenter && !writingMode.startsWith('vertical')) ? 'center' : 'left';
+
         if (writingMode.startsWith('vertical')) {
           const columnGap = fontSize * 1.05;
+          const totalColumns = lines.length;
+          const totalW = columnGap * Math.max(0, totalColumns - 1);
+          const startX = isFlexCenter ? (x + ((boxW - totalW) / 2)) : x;
+          const totalChars = Math.max(1, ...lines.map((line) => Array.from(line).length));
+          const totalH = lineHeight * totalChars;
+          const startY = isFlexCenter ? (y + ((boxH - totalH) / 2)) : y;
+
           lines.forEach((line, colIdx) => {
-            let cursorY = y;
-            const columnX = x + (columnGap * colIdx);
+            let cursorY = startY;
+            const columnX = startX + (columnGap * colIdx);
             for (const ch of Array.from(line)) {
               ctx.fillText(ch, columnX, cursorY);
               cursorY += lineHeight;
             }
           });
         } else {
+          const totalTextH = lineHeight * lines.length;
+          const textX = isFlexCenter ? (x + (boxW / 2)) : x;
+          const startY = isFlexCenter ? (y + ((boxH - totalTextH) / 2)) : y;
           lines.forEach((line, idx) => {
-            ctx.fillText(line, x, y + lineHeight * idx);
+            ctx.fillText(line, textX, startY + lineHeight * idx);
           });
         }
+
+        ctx.textAlign = 'left';
       }
     }
   }
