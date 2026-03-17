@@ -1529,10 +1529,4 @@ document.addEventListener('mousemove', (event) => {
   loadOutsideAreaColor();
   applyZoom();
   refreshTemplateList().catch(() => {});
-  window.addEventListener('resize', () => { fitStageToScreen(); });
-  if (window.ResizeObserver && stageScroll) {
-    const ro = new ResizeObserver(() => fitStageToScreen());
-    ro.observe(stageScroll);
-  }
-  setTimeout(() => fitStageToScreen(), 0);
 })();
