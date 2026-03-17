@@ -62,11 +62,10 @@
             "w_mm": 55,
             "h_mm": 12,
             "label": "郵便番号",
-            "split_after": 3,
-            "group": "3-4",
-            "gap_mm": 4.0,
             "digits_first": 3,
-            "digits_second": 4
+            "digits_second": 4,
+            "inter_gap_mm": 1.0,
+            "group_gap_mm": 2.5
           },
           {
             "x_mm": 72,
@@ -149,11 +148,10 @@
             "w_mm": 60,
             "h_mm": 13,
             "label": "郵便番号",
-            "split_after": 3,
-            "group": "3-4",
-            "gap_mm": 4.0,
             "digits_first": 3,
-            "digits_second": 4
+            "digits_second": 4,
+            "inter_gap_mm": 1.0,
+            "group_gap_mm": 2.5
           },
           {
             "x_mm": 145,

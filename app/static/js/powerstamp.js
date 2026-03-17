@@ -91,17 +91,24 @@
   function resolveGuideBoxes(guide, paper = null) {
     if (!guide) return [];
 
-    if (Array.isArray(guide.boxes_mm) && paper && paper.w_mm && paper.h_mm) {
-      const canvas = getStagePixelSize();
-      const sx = canvas.width / paper.w_mm;
-      const sy = canvas.height / paper.h_mm;
+    if (Array.isArray(guide.boxes_mm)) {
+      let sx, sy;
+      if (paper && paper.w_mm && paper.h_mm) {
+        const canvas = getStagePixelSize();
+        sx = canvas.width / paper.w_mm;
+        sy = canvas.height / paper.h_mm;
+      } else {
+        // paperがない場合は300dpi想定でmm→px変換
+        const dpi = Number(paperDpiInput?.value || 300);
+        sx = dpi / 25.4;
+        sy = dpi / 25.4;
+      }
       return guide.boxes_mm.map((b) => ({
         ...b,
         x: (b.x_mm || 0) * sx,
         y: (b.y_mm || 0) * sy,
         w: (b.w_mm || 0) * sx,
         h: (b.h_mm || 0) * sy,
-        gap: (b.gap_mm || 0) * sx,
         inter_gap: (b.inter_gap_mm || 0) * sx,
         group_gap: (b.group_gap_mm || 0) * sx,
       }));
@@ -123,18 +130,16 @@
   }
 
   function isEnvelopeTemplateName(name) {
-    const n = String(name || '').toLowerCase();
+    const n = String(name || '');
     return (
+      n.includes('封筒') ||
       n.includes('長3') ||
       n.includes('長３') ||
       n.includes('角2') ||
       n.includes('角２') ||
-      n.includes('角2号') ||
-      n.includes('角２号') ||
-      n.includes('n3') ||
-      n.includes('k2') ||
-      n.includes('long3') ||
-      n.includes('kaku2')
+      /\blong3\b/i.test(n) ||
+      /\bkaku2\b/i.test(n) ||
+      /\bnaga3\b/i.test(n)
     );
   }
 
@@ -169,7 +174,7 @@
     const n2 = Number(zipGuide.digits_second || 4);
     const count = n1 + n2;
     const interGap = Math.max(0, Number(zipGuide.inter_gap || 0));
-    const groupGap = Math.max(interGap, Number(zipGuide.group_gap || zipGuide.gap || 0));
+    const groupGap = Math.max(interGap, Number(zipGuide.group_gap || 0));
     const totalW = Math.max(0, Number(zipGuide.w || 0));
     const totalGap = (interGap * Math.max(0, count - 2)) + groupGap;
     const cellW = (totalW - totalGap) / count;
@@ -177,9 +182,10 @@
     const baseY = Number(zipGuide.y || 0);
     const h = Math.max(0, Number(zipGuide.h || 0));
     const digits = zipCode.padEnd(count, ' ');
+    // フォントサイズ: セル高さの約70%を基準に自動計算
+    const autoFontSize = Math.max(12, Math.round(h * 0.70));
 
     for (let i = 0; i < count; i++) {
-      const inSecond = i >= n1;
       const x = baseX
         + (i * cellW)
         + (i * interGap)
@@ -197,7 +203,7 @@
       text.style.justifyContent = 'center';
       text.style.fontFamily = '"Noto Sans JP", sans-serif';
       text.style.fontWeight = '700';
-      text.style.fontSize = `${Math.max(12, Number(zipGuide.font_size || Math.round(h * 0.72)))}px`;
+      text.style.fontSize = `${autoFontSize}px`;
       text.style.lineHeight = '1';
       text.style.color = '#111';
       text.style.whiteSpace = 'pre';
@@ -222,14 +228,13 @@
         const n2 = Number(b.digits_second || 4);
         const count = n1 + n2;
         const interGap = Math.max(0, Number(b.inter_gap || 0));
-        const groupGap = Math.max(interGap, Number(b.group_gap || b.gap || 0));
+        const groupGap = Math.max(interGap, Number(b.group_gap || 0));
         const totalW = Math.max(0, Number(b.w || 0));
         const totalGap = (interGap * Math.max(0, count - 2)) + groupGap;
         const cellW = (totalW - totalGap) / count;
         const y = Math.max(0, Number(b.y || 0));
         const h = Math.max(0, Number(b.h || 0));
         for (let i = 0; i < count; i++) {
-          const inSecond = i >= n1;
           const x = (Number(b.x || 0))
             + (i * cellW)
             + (i * interGap)
@@ -263,29 +268,7 @@
     }
   }
 
-  function buildEnvelopeGuideByName(name) {
-    if (!name) return null;
-    const n = String(name);
-    if (n.includes('長3') || n.includes('長３') || n.toLowerCase().includes('n3') || n.toLowerCase().includes('long3')) {
-      return {
-        boxes_mm: [
-          { type: 'zip7', x_mm: 49, y_mm: 12, w_mm: 63, h_mm: 12, label: '郵便番号', digits_first: 3, digits_second: 4, inter_gap_mm: 1, group_gap_mm: 2, font_size: 14 },
-          { x_mm: 72, y_mm: 45, w_mm: 38, h_mm: 155, label: '宛名（縦書き想定）' },
-          { x_mm: 10, y_mm: 185, w_mm: 45, h_mm: 38, label: '差出人' }
-        ]
-      };
-    }
-    if (n.includes('角2') || n.includes('角２') || n.includes('角2号') || n.includes('角２号') || n.toLowerCase().includes('k2') || n.toLowerCase().includes('kaku2')) {
-      return {
-        boxes_mm: [
-          { type: 'zip7', x_mm: 170, y_mm: 14, w_mm: 60, h_mm: 13, label: '郵便番号', digits_first: 3, digits_second: 4, gap_mm: 4 },
-          { x_mm: 145, y_mm: 70, w_mm: 75, h_mm: 210, label: '宛名（縦書き想定）' },
-          { x_mm: 18, y_mm: 270, w_mm: 70, h_mm: 45, label: '差出人' }
-        ]
-      };
-    }
-    return null;
-  }
+  /* buildEnvelopeGuideByName は削除。seedデータの guide_mm を常に使用する。 */
 
 function mmToPx(mm, dpi) {
     return (mm / 25.4) * dpi;
@@ -891,13 +874,16 @@ function mmToPx(mm, dpi) {
   }
 
   function currentTemplatePayload() {
-    return {
+    const payload = {
       version: 1,
       sourceSize,
       canvas: getStagePixelSize(),
       calibration: getCalibration(),
       stamps: serializeAllStamps(),
     };
+    if (activeGuide) payload.guide = activeGuide;
+    if (activePaper) payload.paper = activePaper;
+    return payload;
   }
 
   async function refreshTemplateList(selectId = null) {
@@ -983,8 +969,9 @@ function mmToPx(mm, dpi) {
     sourceSize = data.sourceSize || sourceSize;
     restoreAllStamps(data.stamps || []);
 
-    const envelopeGuide = buildEnvelopeGuideByName(activeTemplateName);
-    const guide = envelopeGuide || (data.guide_mm ? { boxes_mm: data.guide_mm.boxes } : data.guide);
+    const guide = data.guide_mm
+      ? { boxes_mm: data.guide_mm.boxes, boxes: data.guide?.boxes }
+      : data.guide;
     activeGuide = guide || null;
     activePaper = data.paper || null;
     renderGuide(activeGuide, activePaper);
