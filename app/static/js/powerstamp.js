@@ -102,6 +102,8 @@
         w: (b.w_mm || 0) * sx,
         h: (b.h_mm || 0) * sy,
         gap: (b.gap_mm || 0) * sx,
+        inter_gap: (b.inter_gap_mm || 0) * sx,
+        group_gap: (b.group_gap_mm || 0) * sx,
       }));
     }
 
@@ -166,9 +168,11 @@
     const n1 = Number(zipGuide.digits_first || 3);
     const n2 = Number(zipGuide.digits_second || 4);
     const count = n1 + n2;
-    const gap = Math.max(2, Number(zipGuide.gap || 0));
+    const interGap = Math.max(0, Number(zipGuide.inter_gap || 0));
+    const groupGap = Math.max(interGap, Number(zipGuide.group_gap || zipGuide.gap || 0));
     const totalW = Math.max(0, Number(zipGuide.w || 0));
-    const cellW = (totalW - gap) / count;
+    const totalGap = (interGap * Math.max(0, count - 2)) + groupGap;
+    const cellW = (totalW - totalGap) / count;
     const baseX = Number(zipGuide.x || 0);
     const baseY = Number(zipGuide.y || 0);
     const h = Math.max(0, Number(zipGuide.h || 0));
@@ -176,7 +180,10 @@
 
     for (let i = 0; i < count; i++) {
       const inSecond = i >= n1;
-      const x = baseX + (i * cellW) + (inSecond ? gap : 0);
+      const x = baseX
+        + (i * cellW)
+        + (i * interGap)
+        + (i >= n1 ? (groupGap - interGap) : 0);
       const text = document.createElement('div');
       text.className = 'stamp-item auto-postal-code';
       text.dataset.autoPostalCode = 'true';
@@ -190,7 +197,7 @@
       text.style.justifyContent = 'center';
       text.style.fontFamily = '"Noto Sans JP", sans-serif';
       text.style.fontWeight = '700';
-      text.style.fontSize = `${Math.max(12, Math.round(h * 0.72))}px`;
+      text.style.fontSize = `${Math.max(12, Number(zipGuide.font_size || Math.round(h * 0.72)))}px`;
       text.style.lineHeight = '1';
       text.style.color = '#111';
       text.style.whiteSpace = 'pre';
@@ -214,14 +221,19 @@
         const n1 = Number(b.digits_first || 3);
         const n2 = Number(b.digits_second || 4);
         const count = n1 + n2;
-        const gap = Math.max(2, Number(b.gap || 0));
+        const interGap = Math.max(0, Number(b.inter_gap || 0));
+        const groupGap = Math.max(interGap, Number(b.group_gap || b.gap || 0));
         const totalW = Math.max(0, Number(b.w || 0));
-        const cellW = (totalW - gap) / count;
+        const totalGap = (interGap * Math.max(0, count - 2)) + groupGap;
+        const cellW = (totalW - totalGap) / count;
         const y = Math.max(0, Number(b.y || 0));
         const h = Math.max(0, Number(b.h || 0));
         for (let i = 0; i < count; i++) {
           const inSecond = i >= n1;
-          const x = (Number(b.x || 0)) + (i * cellW) + (inSecond ? gap : 0);
+          const x = (Number(b.x || 0))
+            + (i * cellW)
+            + (i * interGap)
+            + (i >= n1 ? (groupGap - interGap) : 0);
           const box = document.createElement('div');
           box.className = 'guide-box';
           box.style.left = `${Math.max(0, x)}px`;
@@ -257,7 +269,7 @@
     if (n.includes('長3') || n.includes('長３') || n.toLowerCase().includes('n3') || n.toLowerCase().includes('long3')) {
       return {
         boxes_mm: [
-          { type: 'zip7', x_mm: 57, y_mm: 12, w_mm: 55, h_mm: 12, label: '郵便番号', digits_first: 3, digits_second: 4, gap_mm: 4 },
+          { type: 'zip7', x_mm: 49, y_mm: 12, w_mm: 63, h_mm: 12, label: '郵便番号', digits_first: 3, digits_second: 4, inter_gap_mm: 1, group_gap_mm: 2, font_size: 14 },
           { x_mm: 72, y_mm: 45, w_mm: 38, h_mm: 155, label: '宛名（縦書き想定）' },
           { x_mm: 10, y_mm: 185, w_mm: 45, h_mm: 38, label: '差出人' }
         ]
