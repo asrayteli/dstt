@@ -59,6 +59,7 @@
   let pdfjsLibPromise = null;
   let clipboardStamp = null;
   let zoom = 1;
+  let autoFitOnResize = false;
   const ZOOM_MIN = 0.05;
   const ZOOM_MAX = 4;
   const ZOOM_STEP = 0.1;
@@ -317,7 +318,7 @@ function mmToPx(mm, dpi) {
     const zw = availW / Math.max(1, width);
     const zh = availH / Math.max(1, height);
     const target = Math.min(1, zw, zh);
-    setZoom(target);
+    setZoom(target, { keepAutoFit: true });
   }
 
   function getStagePixelSize() {
@@ -335,8 +336,10 @@ function mmToPx(mm, dpi) {
     if (zoomSlider) zoomSlider.value = String(Math.round(zoom * 100));
   }
 
-  function setZoom(nextZoom) {
+  function setZoom(nextZoom, options = {}) {
+    const { keepAutoFit = false } = options;
     zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextZoom));
+    if (!keepAutoFit) autoFitOnResize = false;
     applyZoom();
   }
 
@@ -1324,7 +1327,10 @@ document.addEventListener('mousemove', (event) => {
   zoomInBtn?.addEventListener('click', () => setZoom(zoom + ZOOM_STEP));
   zoomOutBtn?.addEventListener('click', () => setZoom(zoom - ZOOM_STEP));
   zoomResetBtn?.addEventListener('click', () => setZoom(1));
-  zoomFitBtn?.addEventListener('click', () => fitStageToScreen());
+  zoomFitBtn?.addEventListener('click', () => {
+    autoFitOnResize = true;
+    fitStageToScreen();
+  });
   zoomSlider?.addEventListener('input', () => {
     const pct = Number(zoomSlider.value || 100);
     setZoom(pct / 100);
@@ -1529,10 +1535,14 @@ document.addEventListener('mousemove', (event) => {
   loadOutsideAreaColor();
   applyZoom();
   refreshTemplateList().catch(() => {});
-  window.addEventListener('resize', () => { fitStageToScreen(); });
+
+  window.addEventListener('resize', () => {
+    if (autoFitOnResize) fitStageToScreen();
+  });
   if (window.ResizeObserver && stageScroll) {
-    const ro = new ResizeObserver(() => fitStageToScreen());
+    const ro = new ResizeObserver(() => {
+      if (autoFitOnResize) fitStageToScreen();
+    });
     ro.observe(stageScroll);
   }
-  setTimeout(() => fitStageToScreen(), 0);
 })();
