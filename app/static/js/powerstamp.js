@@ -1293,6 +1293,10 @@ document.addEventListener('mousemove', (event) => {
       const isLandscape = (paperOrientation?.value || 'portrait') === 'landscape';
       pageWmm = isLandscape ? p.h : p.w;
       pageHmm = isLandscape ? p.w : p.h;
+    } else if (activePaper && activePaper.w_mm && activePaper.h_mm) {
+      // 封筒等テンプレート固有の用紙サイズを使用
+      pageWmm = activePaper.w_mm;
+      pageHmm = activePaper.h_mm;
     } else if (sourceSize.unit === 'pt') {
       pageWmm = (outWidth * 25.4) / 72;
       pageHmm = (outHeight * 25.4) / 72;
@@ -1307,7 +1311,11 @@ document.addEventListener('mousemove', (event) => {
       ? `@page { size: ${pageWmm.toFixed(2)}mm ${pageHmm.toFixed(2)}mm; margin: 0; }`
       : '@page { margin: 0; }';
 
-    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>PowerSTAMP Print</title><style>${pageSizeCss} html,body{margin:0;padding:0;} .sheet{width:100vw;height:100vh;display:flex;align-items:stretch;justify-content:stretch;} img{width:100%;height:100%;object-fit:fill;}</style></head><body><div class="sheet"><img src="${dataUrl}" /></div><script>window.onload=()=>{setTimeout(()=>{window.print();},150)}<\/script></body></html>`);
+    // 用紙mm寸法がわかっている場合は正確なmm指定で配置
+    const imgSizeCss = (pageWmm && pageHmm)
+      ? `width:${pageWmm.toFixed(2)}mm;height:${pageHmm.toFixed(2)}mm;`
+      : 'width:100%;height:100%;object-fit:contain;';
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>PowerSTAMP Print</title><style>${pageSizeCss} html,body{margin:0;padding:0;overflow:hidden;} .sheet{width:100vw;height:100vh;display:flex;align-items:flex-start;justify-content:flex-start;} img{${imgSizeCss}}</style></head><body><div class="sheet"><img src="${dataUrl}" /></div><script>window.onload=()=>{setTimeout(()=>{window.print();},150)}<\/script></body></html>`);
     win.document.close();
   }
 
