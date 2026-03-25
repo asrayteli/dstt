@@ -4,6 +4,7 @@ from flask_login import LoginManager
 from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
+from .navigation import NAV_ITEMS
 
 from .models import db
 login_manager = LoginManager()
@@ -26,6 +27,10 @@ def create_app():
 
 
     app.secret_key = 'test'
+
+    @app.context_processor
+    def inject_navigation():
+        return {"app_navigation_items": NAV_ITEMS}
 
     # トップページ
     from .routes import main

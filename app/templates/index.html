@@ -38,110 +38,13 @@
   {% endif %}
 
   <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-    <a href="/tools/datecalc" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">📆 日時計算</h2>
-      <p class="text-sm text-gray-600 mb-4">日時の加算・減算や差分を計算できます</p>
+    {% for item in app_navigation_items %}
+    <a href="{{ item.href }}" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
+      <h2 class="text-lg font-semibold mb-2">{{ item.icon }} {{ item.label }}</h2>
+      <p class="text-sm text-gray-600 mb-4">{{ item.description }}</p>
       <span class="text-blue-600">開く →</span>
     </a>
-
-    <a href="/tools/calc" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">🧮 電卓</h2>
-      <p class="text-sm text-gray-600 mb-4">最もシンプルな電卓</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/rename" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">🔄 一括リネーム</h2>
-      <p class="text-sm text-gray-600 mb-4">アップロードしたファイル名を一括で変換</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/compress" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">📦 ファイル圧縮</h2>
-      <p class="text-sm text-gray-600 mb-4">アップロードしたファイルを圧縮</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/csvtool" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">📊 PowerCSV</h2>
-      <p class="text-sm text-gray-600 mb-4">CSV操作の専門ツール。編集・検証・変換をこれ一つで。</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/password_tool" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">🔐 パスワード生成・管理ツール</h2>
-      <p class="text-sm text-gray-600 mb-4">強固なパスワードを生成 管理することができます。</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/workday" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">📅 営業日計算ツール</h2>
-      <p class="text-sm text-gray-600 mb-4">指定営業日を計算できます。</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/pdf_power" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">📚 PowerPDF</h2>
-      <p class="text-sm text-gray-600 mb-4">PDFを操作する汎用ツール</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
-
-    <a href="/tools/share" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">📪️ FILE POST</h2>
-      <p class="text-sm text-gray-600 mb-4">ファイル共有ツール</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/car_inspe" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">📄 車検証ツール</h2>
-      <p class="text-sm text-gray-600 mb-4">車検証の読み取りツール</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/shiftersync" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">👥 shiftersync</h2>
-      <p class="text-sm text-gray-600 mb-4">シフト作成を更に効率化</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/leave_mgr" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">⛵ 有休共有ツール</h2>
-      <p class="text-sm text-gray-600 mb-4">運転士の有休日を共有</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/monthly_generator" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-        <h2 class="text-lg font-semibold mb-2">📝 月次ジェネレーター</h2>
-        <p class="text-sm text-gray-600 mb-4">面倒な月次報告書の数値入力を自動で</p>
-        <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/subject_analysis_tool" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-        <h2 class="text-lg font-semibold mb-2">⚖️ 科目別分析ツール SAT</h2>
-        <p class="text-sm text-gray-600 mb-4">現場収支の分析をお手伝い</p>
-        <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/pluslist" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-        <h2 class="text-lg font-semibold mb-2">📛　社員名簿PLUS</h2>
-        <p class="text-sm text-gray-600 mb-4">高速で多機能な名簿機能をあなたに</p>
-        <span class="text-blue-600">開く →</span>
-    </a>
-
-
-    <a href="/tools/color_extract" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-        <h2 class="text-lg font-semibold mb-2">🎨 抜き出しツール</h2>
-        <p class="text-sm text-gray-600 mb-4">PDF/画像の指定色を抽出・除外・置換。スポイトとリアルタイムプレビュー対応</p>
-        <span class="text-blue-600">開く →</span>
-    </a>
-
-    <a href="/tools/powerstamp" class="block bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer">
-      <h2 class="text-lg font-semibold mb-2">🖋️ PowerSTAMP</h2>
-      <p class="text-sm text-gray-600 mb-4">スキャン背景に文字・図形・画像を重ね、背景抜きで印刷</p>
-      <span class="text-blue-600">開く →</span>
-    </a>
-
+    {% endfor %}
   </div>
 
 
