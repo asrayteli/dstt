@@ -1,165 +1,257 @@
-/**
- * Shifter-Sync 既存シフト編集画面
- * 共通モジュール (ss_common.js) を使用
- */
-
 $(document).ready(function() {
-  // アップロードボタン
-  $('#uploadBtn').click(function() {
-    const fileInput = $('#shiftFile')[0];
+  const commentRowPrefix = '#comment';
 
-    if (!fileInput.files.length) {
-      alert('シフトCSVファイルを選択してください');
-      return;
-    }
-
-    const file = fileInput.files[0];
-    const reader = new FileReader();
-
-    reader.onload = function(event) {
-      const csvData = event.target.result;
-      parseAndDisplayCSV(csvData);
-    };
-
-    reader.onerror = function() {
-      alert('ファイルの読み込みに失敗しました');
-    };
-
-    reader.readAsText(file);
-  });
-
-  /**
-   * CSVをパースしてカレンダーを表示
-   */
-  function parseAndDisplayCSV(csvData) {
-    const lines = csvData.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-
-    if (lines.length < 3) {
-      alert('CSVファイルの形式が正しくありません');
-      return;
-    }
-
-    // メタデータ行をパース
-    const meta = lines[0].split(',');
-    if (meta.length < 4) {
-      alert('CSVの1行目が不正です（モード,年,月,名前 が必要）');
-      return;
-    }
-
-    const mode = meta[0].trim();
-    const year = parseInt(meta[1]);
-    const month = parseInt(meta[2]);
-    const name = meta[3].trim();
-
-    // 台数設定
-    let capacityEnabled = false;
-    let requiredCapacity = 0;
-
-    if (meta.length >= 5) {
-      capacityEnabled = true;
-      requiredCapacity = parseInt(meta[4]) || 0;
-    }
-
-    // バリデーション
-    if (!['scene', 'person'].includes(mode)) {
-      alert('モードは "scene" または "person" である必要があります');
-      return;
-    }
-
-    if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
-      alert('年月の指定が不正です');
-      return;
-    }
-
-    // データ行をパース
-    const dataLines = lines.slice(2);
-    const initialData = {};
-
-    dataLines.forEach(line => {
-      const parts = line.split(',').map(p => p.trim());
-      if (parts.length < 1) return;
-
-      const day = parseInt(parts[0]);
-      if (isNaN(day) || day < 1 || day > 31) return;
-
-      const entries = parts.slice(1).filter(e => e.length > 0);
-      initialData[day] = entries;
-    });
-
-    // 状態を設定
-    ShifterSync.setState('mode', mode);
-    ShifterSync.setState('name', name);
-    ShifterSync.setState('capacityEnabled', capacityEnabled);
-    ShifterSync.setState('requiredCapacity', requiredCapacity);
-
-    // カレンダーHTMLを構築
-    const calendarHTML = `
-      <div style="min-height: 100vh; width: 100%; background: linear-gradient(135deg, #e0f2fe 0%, #dbeafe 50%, #e0e7ff 100%); padding: 1vh 0; box-sizing: border-box; overflow-x: hidden;">
-        <div class="container animate-fade-in" style="margin: 0 auto; max-width: 100%;">
-          <h2>${mode === 'scene' ? '現場' : '人物'}: ${name} (${year}年${month}月)
-            ${capacityEnabled ? ` - 必要人数: ${requiredCapacity}人/日` : ''}
-          </h2>
-
-          <div style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); padding: 0.8vw 1.2vw; border-radius: 8px; margin-bottom: 1vh; text-align: center; font-size: 0.85vw; color: #1e40af; font-weight: 600; box-shadow: 0 2px 6px rgba(59, 130, 246, 0.1);">
-            📝 操作方法: エントリーをダブルクリックで編集 / [×]ボタンまたは右クリックで削除 / Enterキーで素早く追加
-          </div>
-
-          <div class="weekday-header">
-            <div>月</div>
-            <div>火</div>
-            <div>水</div>
-            <div>木</div>
-            <div>金</div>
-            <div>土</div>
-            <div>日</div>
-          </div>
-
-          <div id="shiftGrid" class="calendar-grid"></div>
-
-          <div style="text-align: center; margin-top: 30px;">
-            <button type="button" id="saveBtn" class="btn-danger">
-              💾 保存
-            </button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    $('#inputArea').html(calendarHTML).hide().fadeIn(400);
-
-    // カレンダーを生成
-    setTimeout(function() {
-      ShifterSync.buildCalendar(year, month, mode, initialData);
-
-      // スムーズスクロール
-      $('html, body').animate({
-        scrollTop: $('#inputArea').offset().top - 20
-      }, 600);
-    }, 0);
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
-  // 保存ボタン
-  $(document).on('click', '#saveBtn', function() {
-    if (!confirm('シフトをCSVファイルとして保存しますか？')) return;
+  function decodeCsvBuffer(buffer) {
+    const encodings = ['utf-8', 'shift_jis'];
+    for (const encoding of encodings) {
+      try {
+        const decoded = new TextDecoder(encoding, { fatal: true }).decode(buffer);
+        if (decoded) {
+          return decoded;
+        }
+      } catch (_) {
+        // Try the next encoding.
+      }
+    }
+    return new TextDecoder('utf-8').decode(buffer);
+  }
 
+  function parseCsvRows(text) {
+    const rows = [];
+    let row = [];
+    let cell = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i += 1) {
+      const char = text[i];
+      const next = text[i + 1];
+
+      if (char === '"') {
+        if (inQuotes && next === '"') {
+          cell += '"';
+          i += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+        continue;
+      }
+
+      if (char === ',' && !inQuotes) {
+        row.push(cell);
+        cell = '';
+        continue;
+      }
+
+      if ((char === '\n' || char === '\r') && !inQuotes) {
+        if (char === '\r' && next === '\n') {
+          i += 1;
+        }
+        row.push(cell);
+        const normalized = row.map((item) => String(item || '').trim());
+        if (normalized.some((item) => item.length > 0)) {
+          rows.push(normalized);
+        }
+        row = [];
+        cell = '';
+        continue;
+      }
+
+      cell += char;
+    }
+
+    row.push(cell);
+    const normalized = row.map((item) => String(item || '').trim());
+    if (normalized.some((item) => item.length > 0)) {
+      rows.push(normalized);
+    }
+
+    return rows;
+  }
+
+  function parseEntry(entry) {
+    return {
+      id: `upload-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      value: String(entry || '').trim(),
+      comment: ''
+    };
+  }
+
+  function parseCsvPayload(csvText) {
+    const rows = parseCsvRows(csvText);
+    if (rows.length < 2 || rows[0].length < 4) {
+      throw new Error('CSV の形式が正しくありません');
+    }
+
+    const header = rows[0];
+    const mode = header[0].trim();
+    const year = parseInt(header[1], 10);
+    const month = parseInt(header[2], 10);
+    const name = header[3].trim();
+    const requiredCapacity = header.length >= 5 ? parseInt(header[4], 10) || 0 : 0;
+    const entriesPerDay = {};
+    const commentRows = [];
+
+    if (!['scene', 'person'].includes(mode)) {
+      throw new Error('mode は scene または person のみ対応です');
+    }
+    if (!year || year < 1900 || year > 2100) {
+      throw new Error('年は 1900 から 2100 の範囲で指定してください');
+    }
+    if (!month || month < 1 || month > 12) {
+      throw new Error('月は 1 から 12 の範囲で指定してください');
+    }
+    if (!name) {
+      throw new Error('対象名が空です');
+    }
+
+    rows.slice(2).forEach((row) => {
+      if (!row.length) {
+        return;
+      }
+      if (/^\d+$/.test(row[0])) {
+        entriesPerDay[row[0]] = row.slice(1).filter(Boolean).map((entry) => parseEntry(entry));
+        return;
+      }
+      if (row[0] === commentRowPrefix) {
+        commentRows.push(row);
+      }
+    });
+
+    commentRows.forEach((row) => {
+      if (row.length < 4) {
+        return;
+      }
+      const day = String(parseInt(row[1], 10));
+      const index = parseInt(row[2], 10);
+      if (!entriesPerDay[day] || Number.isNaN(index) || !entriesPerDay[day][index]) {
+        return;
+      }
+      entriesPerDay[day][index].comment = row[3] || '';
+    });
+
+    return {
+      mode,
+      year,
+      month,
+      name,
+      capacityEnabled: requiredCapacity > 0,
+      requiredCapacity,
+      entriesPerDay
+    };
+  }
+
+  function renderEditorShell(payload) {
+    const safeName = escapeHtml(payload.name);
+    return `
+      <section class="ss-section">
+        <div class="ss-section-head">
+          <div>
+            <h2>編集画面</h2>
+            <p class="ss-section-note">項目をクリックすると、コメントを含む詳細を確認できます。</p>
+          </div>
+          <div class="ss-actions">
+            <button type="button" id="saveBtn" class="btn-primary">CSV を保存</button>
+          </div>
+        </div>
+
+        <div class="ss-summary-grid" style="margin-bottom: 18px;">
+          <div class="ss-summary-item">
+            <div class="ss-summary-label">種別</div>
+            <div class="ss-summary-value">${payload.mode === 'scene' ? '現場シフト' : '個人シフト'}</div>
+          </div>
+          <div class="ss-summary-item">
+            <div class="ss-summary-label">対象</div>
+            <div class="ss-summary-value">${safeName}</div>
+          </div>
+          <div class="ss-summary-item">
+            <div class="ss-summary-label">年月</div>
+            <div class="ss-summary-value">${payload.year}年${payload.month}月</div>
+          </div>
+          <div class="ss-summary-item">
+            <div class="ss-summary-label">必要人数</div>
+            <div class="ss-summary-value">${payload.capacityEnabled ? `${payload.requiredCapacity}人` : '未設定'}</div>
+          </div>
+        </div>
+
+        <div class="weekday-header">
+          <div>月</div>
+          <div>火</div>
+          <div>水</div>
+          <div>木</div>
+          <div>金</div>
+          <div>土</div>
+          <div>日</div>
+        </div>
+        <div id="shiftGrid" class="calendar-grid"></div>
+      </section>
+    `;
+  }
+
+  function downloadCsv(filename) {
     const csv = ShifterSync.buildCSV();
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
+    const link = $('<a>')
+      .attr('href', url)
+      .attr('download', filename)
+      .appendTo('body');
+    link[0].click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
 
+  $('#uploadBtn').on('click', function() {
+    const fileInput = $('#shiftFile')[0];
+    if (!fileInput.files.length) {
+      alert('CSV ファイルを選択してください');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      try {
+        const payload = parseCsvPayload(decodeCsvBuffer(event.target.result));
+        ShifterSync.setState('mode', payload.mode);
+        ShifterSync.setState('name', payload.name);
+        ShifterSync.setState('capacityEnabled', payload.capacityEnabled);
+        ShifterSync.setState('requiredCapacity', payload.requiredCapacity);
+
+        $('#inputArea')
+          .html(renderEditorShell(payload))
+          .stop(true, true)
+          .fadeIn(180);
+
+        ShifterSync.buildCalendar(payload.year, payload.month, payload.mode, payload.entriesPerDay);
+
+        $('html, body').animate({
+          scrollTop: $('#inputArea').offset().top - 20
+        }, 280);
+      } catch (error) {
+        alert(error.message || 'CSV の読み込みに失敗しました');
+      }
+    };
+
+    reader.onerror = function() {
+      alert('CSV の読み込みに失敗しました');
+    };
+
+    reader.readAsArrayBuffer(fileInput.files[0]);
+  });
+
+  $(document).on('click', '#saveBtn', function() {
     const mode = ShifterSync.getState('mode');
     const year = ShifterSync.getState('year');
     const month = ShifterSync.getState('month');
     const name = ShifterSync.getState('name');
-
-    const link = $('<a>')
-      .attr('href', url)
-      .attr('download', `${mode},${year},${month},${name}_edited.csv`)
-      .appendTo('body');
-
-    link[0].click();
-    link.remove();
-    URL.revokeObjectURL(url);
-
-    alert('保存しました！');
+    downloadCsv(`${mode},${year},${month},${name}_edited.csv`);
   });
 });

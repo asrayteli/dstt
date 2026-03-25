@@ -1,77 +1,149 @@
-from flask import Blueprint, render_template, request, redirect, url_for, send_from_directory, flash, jsonify
-import os
-import csv
-import io
-from collections import defaultdict, Counter
-from werkzeug.utils import secure_filename
+from __future__ import annotations
 
-import re
-from datetime import datetime
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4, landscape
+import os
+import secrets
+from collections import Counter, defaultdict
+from pathlib import Path
+
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
+from PIL import Image, ImageDraw, ImageFont
 from reportlab.lib import colors
 from reportlab.lib.colors import HexColor
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from PIL import Image, ImageDraw, ImageFont
-import calendar
+from reportlab.pdfgen import canvas
+from werkzeug.utils import secure_filename
+
+try:
+    from .shiftersync_format import (
+        OPTION_MAPPINGS,
+        entry_display_text,
+        entry_name_for_comparison,
+        entry_option_and_name,
+        parse_csv_text,
+    )
+except ImportError:
+    from app.tools.shiftersync_format import (  # type: ignore
+        OPTION_MAPPINGS,
+        entry_display_text,
+        entry_name_for_comparison,
+        entry_option_and_name,
+        parse_csv_text,
+    )
 
 
 shiftersync_bp = Blueprint("shiftersync", __name__, url_prefix="/tools/shiftersync")
 
-nowdir = os.getcwd()
+ARTIFACT_SESSION_KEY = "shiftersync_calendar_artifacts"
+NUMBER_CAR_OPTIONS = {"N1", "N2", "N3", "N4", "N5"}
+TIME_CONFLICT_RULES = {
+    ("A", "P"): False,
+    ("A", "E"): True,
+    ("A", "L"): False,
+    ("P", "E"): False,
+    ("P", "L"): True,
+    ("E", "L"): False,
+}
+VEHICLE_OPTIONS = {"M", "C", "O", "W", "V"}
 
-# トップページ：新規作成かアップロード選択
+
+def _calendar_output_dir() -> Path:
+    configured = current_app.config.get("SHIFTERSYNC_OUTPUT_DIR") or os.environ.get("SHIFTERSYNC_OUTPUT_DIR")
+    base = Path(configured) if configured else Path(current_app.instance_path) / "shiftersync" / "calendar_outputs"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _decode_csv_bytes(raw: bytes) -> str:
+    last_error: Exception | None = None
+    for encoding in ("utf-8-sig", "cp932", "shift_jis"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    raise ValueError(f"CSV の読み込みに失敗しました: {last_error}")
+
+
+def _safe_download_name(title: str, year: int, month: int, extension: str) -> str:
+    safe_title = secure_filename(title) or "calendar"
+    return f"{year}-{str(month).zfill(2)}_calendar_{safe_title}.{extension}"
+
+
+def _register_artifact(path: Path, download_name: str, mimetype: str) -> str:
+    token = secrets.token_urlsafe(24)
+    artifacts = dict(session.get(ARTIFACT_SESSION_KEY) or {})
+    artifacts[token] = {
+        "path": str(path),
+        "download_name": download_name,
+        "mimetype": mimetype,
+    }
+    session[ARTIFACT_SESSION_KEY] = artifacts
+    session.modified = True
+    return token
+
+
 @shiftersync_bp.route("/", methods=["GET", "POST"])
 def shiftersync():
     result = None
     if request.method == "POST":
-        # 新規作成 or CSVアップロードを選択する処理
         action = request.form.get("action")
         if action == "create":
             return redirect(url_for("shiftersync.create"))
-        elif action == "upload":
+        if action == "upload":
             return redirect(url_for("shiftersync.upload"))
-        elif action == "check":
+        if action == "check":
             return redirect(url_for("shiftersync.check"))
-        elif action == "calendar":
+        if action == "calendar":
             return redirect(url_for("shiftersync.calendar_view"))
+        if action == "cloudshift":
+            return redirect(url_for("cloudshift.index"))
     return render_template("shiftersync.html", result=result)
 
-# 新規シフト作成ページ
+
 @shiftersync_bp.route("/create", methods=["GET", "POST"])
 def create():
-    if request.method == "POST":
-        # 新規シフト作成処理
-        year = request.form["year"]
-        month = request.form["month"]
-        mode = request.form["mode"]
-        name = request.form["name"]
-        # シフトデータを生成または保存する処理
-        return redirect(url_for("shiftersync.create"))
     return render_template("ss_create.html")
+
 
 @shiftersync_bp.route("/upload", methods=["GET", "POST"])
 def upload():
-    if request.method == "POST":
-        file = request.files.get("file")
-        if file and file.filename.endswith(".csv"):
-            # ファイルを保存
-            file_path = os.path.join("app", "storage", "shiftersync", file.filename)
-            file.save(file_path)
-            
-            # ファイルをUTF-8で読み込む
-            data = []
-            try:
-                with open(file_path, mode="r", encoding="utf-8") as f:
-                    reader = csv.reader(f)
-                    for row in reader:
-                        data.append(row)
-            except UnicodeDecodeError:
-                return "文字コードエラー: このアプリで作成されたファイルのみ対応しています", 400
-
-            return render_template("ss_upload.html", data=data)
     return render_template("ss_upload.html")
+
+
+def _is_duplicate_by_rules(option1: str | None, option2: str | None) -> bool:
+    if option1 is None or option2 is None:
+        return True
+
+    if option1 in NUMBER_CAR_OPTIONS or option2 in NUMBER_CAR_OPTIONS:
+        return True
+
+    if option1 in {"A", "P", "E", "L"} or option2 in {"A", "P", "E", "L"}:
+        if option1 not in {"A", "P", "E", "L"} or option2 not in {"A", "P", "E", "L"}:
+            return False
+        key = tuple(sorted((option1, option2)))
+        return TIME_CONFLICT_RULES.get(key, option1 == option2)
+
+    if option1 in VEHICLE_OPTIONS and option2 in VEHICLE_OPTIONS:
+        if option1 == "V" or option2 == "V":
+            return True
+        if option1 == option2:
+            return True
+        return False
+
+    return option1 == option2
 
 
 @shiftersync_bp.route("/check", methods=["GET", "POST"])
@@ -79,694 +151,363 @@ def check():
     if request.method == "GET":
         return render_template("ss_check.html")
 
-    files = request.files.getlist('csv_files')
+    files = request.files.getlist("csv_files")
     if not files:
-        return jsonify({"error": "CSVファイルをアップロードしてください"})
+        return jsonify({"error": "CSV ファイルをアップロードしてください"})
+    if len(files) > 50:
+        return jsonify({"error": "CSV は 50 ファイルまで比較できます"})
 
-    # ファイル数制限を撤廃（20ファイル想定だが制限なし）
-    max_files = 50  # 安全のため上限は設定するが大幅に緩和
-    if len(files) > max_files:
-        return jsonify({"error": f"ファイル数が多すぎます。最大{max_files}件まで対応しています"})
+    mode = None
+    year = None
+    month = None
+    file_targets: list[str] = []
+    file_capacities: list[int | None] = []
+    shift_data = defaultdict(lambda: [[] for _ in range(len(files))])
 
-    mode, year, month = None, None, None
-    file_targets = []  # 各ファイルの対象名
-    file_capacities = []  # 各ファイルの台数設定
-    shift_data = defaultdict(lambda: [[] for _ in range(len(files))])  # {日: [[人A,人B],[],[]]}
+    for file_index, file in enumerate(files):
+        filename = secure_filename(file.filename or f"file_{file_index + 1}.csv")
+        try:
+            payload = parse_csv_text(_decode_csv_bytes(file.read()))
+        except Exception as exc:
+            return jsonify({"error": f"{filename} の読み込みに失敗しました: {exc}"})
 
-    # オプションマッピング定義
-    option_mappings = {
-        'A': '午前',
-        'P': '午後',
-        'E': '早番',
-        'L': '遅番',
-        'M': 'マイクロ',
-        'C': '中型',
-        'O': '大型',
-        'W': 'ワゴン',
-        'V': '役員車両',
-        'N1': '1号車',
-        'N2': '2号車',
-        'N3': '3号車',
-        'N4': '4号車',
-        'N5': '5号車'
+        file_mode = payload["mode"]
+        file_year = payload["year"]
+        file_month = payload["month"]
+        if mode is None:
+            mode, year, month = file_mode, file_year, file_month
+        elif (mode, year, month) != (file_mode, file_year, file_month):
+            return jsonify({"error": f"{filename} は他の CSV とモードまたは年月が一致していません"})
+
+        file_targets.append(payload["title"])
+        file_capacities.append(payload["required_capacity"] or None)
+
+        for day_key, entries in payload["entries_per_day"].items():
+            day = int(day_key)
+            normalized_entries = []
+            for entry in entries:
+                option_key, name, comment = entry_option_and_name(entry)
+                normalized_entries.append(
+                    {
+                        "original": entry["value"],
+                        "display": entry_display_text(entry),
+                        "comparison": entry_name_for_comparison(entry),
+                        "option": option_key,
+                        "name": name,
+                        "comment": comment,
+                    }
+                )
+            shift_data[day][file_index].extend(normalized_entries)
+
+    if mode is None or year is None or month is None:
+        return jsonify({"error": "比較できる CSV がありません"})
+
+    conflicts = []
+    same_site_conflicts = []
+
+    for day, per_file_entries in shift_data.items():
+        for file_index, entries in enumerate(per_file_entries):
+            name_count = Counter(entry["name"] for entry in entries if entry["name"])
+            for entry in entries:
+                if entry["name"] and name_count[entry["name"]] > 1:
+                    same_site_conflicts.append(
+                        {"date": day, "entry": entry["original"], "file_index": file_index}
+                    )
+
+        grouped = defaultdict(list)
+        for file_index, entries in enumerate(per_file_entries):
+            for entry in entries:
+                if entry["name"]:
+                    grouped[entry["name"]].append({"file_index": file_index, "entry": entry})
+
+        for items in grouped.values():
+            if len(items) < 2:
+                continue
+            for left_index, left in enumerate(items):
+                for right in items[left_index + 1 :]:
+                    if left["file_index"] == right["file_index"]:
+                        continue
+                    if _is_duplicate_by_rules(left["entry"]["option"], right["entry"]["option"]):
+                        conflicts.append({"date": day, "entry": left["entry"]["original"]})
+                        conflicts.append({"date": day, "entry": right["entry"]["original"]})
+
+    conflicts = list({f'{item["date"]}-{item["entry"]}': item for item in conflicts}.values())
+    same_site_conflicts = list(
+        {
+            f'{item["date"]}-{item["entry"]}-{item["file_index"]}': item
+            for item in same_site_conflicts
+        }.values()
+    )
+
+    all_dates = list(range(1, __import__("calendar").monthrange(year, month)[1] + 1))
+    matrix = {
+        day: shift_data.get(day, [[] for _ in range(len(files))])
+        for day in all_dates
     }
 
-    def parse_entry_for_display(entry):
-        """エントリーを表示用に変換"""
-        import re
-        option_match = re.match(r'^!([^!]+)!(.+)$', entry)
-        if option_match:
-            option_key = option_match.group(1)
-            name = option_match.group(2)
-            option_text = option_mappings.get(option_key, option_key)
-            return f"{option_text} {name}"
-        return entry
-
-    def parse_entry_for_comparison(entry):
-        """エントリーを比較用に変換（名前部分のみ取得）"""
-        import re
-        option_match = re.match(r'^!([^!]+)!(.+)$', entry)
-        if option_match:
-            return option_match.group(2)  # 名前部分のみ
-        return entry
-
-    def extract_option_and_name(entry):
-        """エントリーからオプションと名前を分離"""
-        import re
-        option_match = re.match(r'^!([^!]+)!(.+)$', entry)
-        if option_match:
-            return option_match.group(1), option_match.group(2)
-        return None, entry
-
-    def is_duplicate_by_rules(option1, option2):
-        """新しい重複判定ルールに基づいて重複を判定"""
-        # オプションなし同士またはどちらかがオプションなしの場合は重複
-        if option1 is None or option2 is None:
-            return True
-        
-        # 号車オプション（N1-N5）が含まれる場合は常に重複
-        number_car_options = ['N1', 'N2', 'N3', 'N4', 'N5']
-        if option1 in number_car_options or option2 in number_car_options:
-            return True
-        
-        # 時間オプションの定義と判定
-        time_options = {
-            'A': '午前',
-            'P': '午後', 
-            'E': '早番',
-            'L': '遅番'
+    return jsonify(
+        {
+            "mode": mode,
+            "year": year,
+            "month": month,
+            "targets": file_targets,
+            "capacities": file_capacities,
+            "dates": all_dates,
+            "matrix": matrix,
+            "conflicts": conflicts,
+            "same_site_conflicts": same_site_conflicts,
+            "option_mappings": OPTION_MAPPINGS,
+            "total_files": len(files),
         }
-        
-        # どちらかに時間オプションが含まれる場合は時間ルールで判定
-        if option1 in time_options or option2 in time_options:
-            # 時間オプション以外は時間との重複なしとして扱う
-            if option1 not in time_options or option2 not in time_options:
-                return False
-            
-            # 時間オプション同士の重複判定
-            time_conflict_rules = {
-                ('A', 'P'): False,  # 午前 vs 午後 → 重複なし
-                ('A', 'E'): True,   # 午前 vs 早番 → 重複あり
-                ('A', 'L'): False,  # 午前 vs 遅番 → 重複なし
-                ('P', 'E'): False,  # 午後 vs 早番 → 重複なし
-                ('P', 'L'): True,   # 午後 vs 遅番 → 重複あり
-                ('E', 'L'): False,  # 早番 vs 遅番 → 重複なし（念のため）
-            }
-            
-            # 順序を正規化して判定
-            key = tuple(sorted([option1, option2]))
-            return time_conflict_rules.get(key, option1 == option2)
-        
-        # 車両オプションの判定
-        vehicle_options = {
-            'M': 'マイクロ',
-            'C': '中型',
-            'O': '大型', 
-            'W': 'ワゴン',
-            'V': '役員車両'
-        }
-        
-        if option1 in vehicle_options and option2 in vehicle_options:
-            # 役員車両 vs その他車両 → 重複あり
-            if option1 == 'V' or option2 == 'V':
-                return True
-            # 同じ車両オプション → 重複あり
-            if option1 == option2:
-                return True
-            # 異なる車両オプション（役員車両以外） → 重複なし
-            return False
-        
-        # その他の場合は同じオプションのみ重複
-        return option1 == option2
-
-    # CSVファイル処理部分（変更なし）
-    for file_index, file in enumerate(files):
-        filename = secure_filename(file.filename)
-
-        try:
-            content = file.read().decode('utf-8-sig')
-        except Exception:
-            return jsonify({"error": f"{filename} の読み込みに失敗しました"})
-
-        reader = csv.reader(io.StringIO(content))
-        rows = list(reader)
-
-        if len(rows) < 2:
-            return jsonify({"error": f"{filename} の行数が不足しています"})
-
-        header = rows[0]
-        if len(header) < 4:
-            return jsonify({"error": f"{filename} のヘッダーが不正です（4列未満）"})
-
-        f_mode = header[0].strip().lower().lstrip('\ufeff')
-        if f_mode not in ("scene", "person"):
-            return jsonify({"error": f"{filename} のモードが不正です（scene または person）"})
-
-        try:
-            f_year = int(header[1])
-            f_month = int(header[2])
-        except ValueError:
-            return jsonify({"error": f"{filename} の年月が整数ではありません"})
-
-        f_target = header[3].strip()
-        
-        # 台数設定の読み込み（5番目の要素があれば）
-        f_capacity = None
-        if len(header) >= 5:
-            try:
-                f_capacity = int(header[4])
-            except ValueError:
-                f_capacity = None
-
-        if mode is None:
-            mode, year, month = f_mode, f_year, f_month
-        elif (f_mode, f_year, f_month) != (mode, year, month):
-            return jsonify({"error": f"{filename} は他のファイルとモード・年月が一致していません"})
-
-        file_targets.append(f_target)
-        file_capacities.append(f_capacity)
-
-        for row in rows[2:]:
-            if not row or not row[0].strip().isdigit():
-                continue
-            try:
-                day = int(row[0].strip())
-            except ValueError:
-                continue
-
-            entries = [e.strip() for e in row[1:] if e.strip()]
-            
-            # エントリーを処理（表示用と比較用を両方保存）
-            processed_entries = []
-            for entry in entries:
-                display_entry = parse_entry_for_display(entry)
-                comparison_name = parse_entry_for_comparison(entry)
-                option, name = extract_option_and_name(entry)
-                processed_entries.append({
-                    'original': entry,
-                    'display': display_entry,
-                    'comparison': comparison_name,
-                    'option': option,
-                    'name': name
-                })
-            
-            shift_data[day][file_index].extend(processed_entries)
-
-    # 新しい重複検出アルゴリズム
-    conflicts = []
-    same_site_conflicts = []  # 同一現場内重複を追加
-    
-    for day in shift_data.keys():
-        # 各ファイル内での同一現場重複をチェック
-        for file_index, entries in enumerate(shift_data[day]):
-            name_count = defaultdict(list)
-            for entry in entries:
-                name_count[entry['name']].append(entry)
-            
-            # 同一現場内で同じ名前が複数回出現する場合
-            for name, entry_list in name_count.items():
-                if len(entry_list) > 1:
-                    for entry in entry_list:
-                        same_site_conflicts.append({
-                            "date": day,
-                            "entry": entry['original'],
-                            "file_index": file_index
-                        })
-        
-        # 異なるファイル間での重複をチェック
-        # 名前ごとにエントリーをグループ化
-        name_to_entries = defaultdict(list)
-        for file_index, entries in enumerate(shift_data[day]):
-            for entry in entries:
-                name_to_entries[entry['name']].append({
-                    'file_index': file_index,
-                    'entry': entry
-                })
-        
-        # 各名前について、異なるファイル間での重複をチェック
-        for name, entry_info_list in name_to_entries.items():
-            if len(entry_info_list) < 2:
-                continue
-            
-            # 異なるファイル間でのペアをチェック
-            for i in range(len(entry_info_list)):
-                for j in range(i + 1, len(entry_info_list)):
-                    entry_info1 = entry_info_list[i]
-                    entry_info2 = entry_info_list[j]
-                    
-                    # 異なるファイルかチェック
-                    if entry_info1['file_index'] != entry_info2['file_index']:
-                        option1 = entry_info1['entry']['option']
-                        option2 = entry_info2['entry']['option']
-                        
-                        # 新しいルールで重複判定
-                        if is_duplicate_by_rules(option1, option2):
-                            conflicts.append({
-                                "date": day,
-                                "entry": entry_info1['entry']['original']
-                            })
-                            conflicts.append({
-                                "date": day,
-                                "entry": entry_info2['entry']['original']
-                            })
-
-    # 重複を除去
-    conflicts = list({f"{c['date']}-{c['entry']}": c for c in conflicts}.values())
-    same_site_conflicts = list({f"{c['date']}-{c['entry']}-{c['file_index']}": c for c in same_site_conflicts}.values())
-
-    # 全日付を生成（1日から月末まで）
-    import calendar
-    days_in_month = calendar.monthrange(year, month)[1]
-    all_possible_dates = list(range(1, days_in_month + 1))
-    
-    # データがない日付も含めて結果マトリックスを作成
-    complete_matrix = {}
-    for day in all_possible_dates:
-        if day in shift_data:
-            complete_matrix[day] = shift_data[day]
-        else:
-            # データがない日は空のリストで埋める
-            complete_matrix[day] = [[] for _ in range(len(files))]
-
-    return jsonify({
-        "mode": mode,
-        "year": year,
-        "month": month,
-        "targets": file_targets,
-        "capacities": file_capacities,
-        "dates": all_possible_dates,
-        "matrix": complete_matrix,
-        "conflicts": conflicts,
-        "same_site_conflicts": same_site_conflicts,  # 同一現場内重複を追加
-        "option_mappings": option_mappings,
-        "total_files": len(files)
-    })
+    )
 
 
-UPLOAD_FOLDER = 'app/static/calendar_outputs'
-
-@shiftersync_bp.route('/calendar', methods=['GET', 'POST'])
+@shiftersync_bp.route("/calendar", methods=["GET", "POST"])
 def calendar_view():
-    if request.method == 'POST':
-        file = request.files.get('csvfile')
-        format_type = request.form.get('format')  # 'pdf' or 'png'
+    if request.method != "POST":
+        return render_template("ss_calendar.html")
 
-        if not file or not format_type:
-            flash("ファイルと出力形式を選択してください")
-            return render_template('ss_calendar.html')
+    file = request.files.get("csvfile")
+    format_type = request.form.get("format")
+    if not file or not format_type:
+        flash("CSV ファイルと出力形式を選択してください")
+        return render_template("ss_calendar.html")
 
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(filepath)
+    try:
+        payload = parse_csv_text(_decode_csv_bytes(file.read()))
 
-        try:
-            # === CSVパースと情報抽出 ===
-            with open(filepath, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
+        day_map = {
+            int(day): [
+                {
+                    "title": entry_display_text(entry),
+                    "comment": entry.get("comment", ""),
+                }
+                for entry in entries
+            ]
+            for day, entries in payload["entries_per_day"].items()
+        }
 
-                try:
-                    # 既存のCSV解析コード（変更なし）
-                    header = next(reader)
-                    mode = header[0].strip().lower()
-                    year = int(header[1])
-                    month = int(header[2])
-                    target_name = header[3]
-                    
-                    capacity = None
-                    if len(header) >= 5:
-                        try:
-                            capacity = int(header[4])
-                        except ValueError:
-                            capacity = None
+        output_filename = (
+            f'{payload["year"]}-{str(payload["month"]).zfill(2)}_calendar_'
+            f'{secure_filename(payload["title"]) or "calendar"}_{secrets.token_hex(6)}.{format_type}'
+        )
+        output_path = _calendar_output_dir() / output_filename
 
-                    next(reader)
-
-                    option_mappings = {
-                            'A': '午前',
-                            'P': '午後',
-                            'E': '早番',
-                            'L': '遅番',
-                            'M': 'マイクロ',
-                            'C': '中型',
-                            'O': '大型',
-                            'W': 'ワゴン',
-                            'V': '役員車両',
-                            'N1': '1号車',
-                            'N2': '2号車',
-                            'N3': '3号車',
-                            'N4': '4号車',
-                            'N5': '5号車'
-                            
-                        }
-
-                    def parse_entry_for_display(entry):
-                        import re
-                        option_match = re.match(r'^!([^!]+)!(.+)$', entry)
-                        if option_match:
-                            option_key = option_match.group(1)
-                            name = option_match.group(2)
-                            option_text = option_mappings.get(option_key, option_key)
-                            return f"{option_text} {name}"
-                        return entry
-
-                    day_map = {}
-                    for row in reader:
-                        if len(row) >= 2:
-                            try:
-                                day = int(row[0])
-                                raw_entries = [v.strip() for v in row[1:] if v.strip()]
-                                display_entries = [parse_entry_for_display(entry) for entry in raw_entries]
-                                day_map[day] = display_entries
-                            except ValueError:
-                                continue
-
-                except Exception as e:
-                    flash(f"CSVの読み込み中にエラーが発生しました: {e}")
-                    return render_template('ss_calendar.html')
-
-            # === 出力ファイル名生成 ===
-            output_filename = f"{year}-{str(month).zfill(2)}_カレンダー_{target_name}.{format_type}"
-            output_path = os.path.join(UPLOAD_FOLDER, output_filename)
-
-            # === カレンダー生成 ===
-            if format_type == 'pdf':
-                generate_pdf_calendar(output_path, year, month, mode, target_name, day_map, capacity)
-            elif format_type == 'png':
-                generate_png_calendar(output_path, year, month, mode, target_name, day_map, capacity)
-
-            return render_template(
-                'ss_calendar.html',
-                image_file=output_filename if format_type == 'png' else None,
-                pdf_file=output_filename if format_type == 'pdf' else None
+        if format_type == "pdf":
+            generate_pdf_calendar(
+                output_path,
+                payload["year"],
+                payload["month"],
+                payload["mode"],
+                payload["title"],
+                day_map,
+                payload["required_capacity"] or None,
             )
+            mimetype = "application/pdf"
+        elif format_type == "png":
+            generate_png_calendar(
+                output_path,
+                payload["year"],
+                payload["month"],
+                payload["mode"],
+                payload["title"],
+                day_map,
+                payload["required_capacity"] or None,
+            )
+            mimetype = "image/png"
+        else:
+            flash("未対応の出力形式です")
+            return render_template("ss_calendar.html")
 
-        except Exception as e:
-            flash(f"カレンダー出力時にエラーが発生しました: {e}")
-            return render_template('ss_calendar.html')
-        
-        finally:
-            # === アップロードされたCSVファイルを削除 ===
-            try:
-                if os.path.exists(filepath):
-                    os.remove(filepath)
-            except Exception as e:
-                print(f"アップロードファイルの削除に失敗しました: {e}")
+        artifact_token = _register_artifact(
+            output_path,
+            _safe_download_name(payload["title"], payload["year"], payload["month"], format_type),
+            mimetype,
+        )
+        artifact_url = url_for("shiftersync.download", token=artifact_token)
+        return render_template(
+            "ss_calendar.html",
+            image_url=artifact_url if format_type == "png" else None,
+            pdf_url=artifact_url if format_type == "pdf" else None,
+            download_url=f"{artifact_url}?download=1",
+        )
+    except Exception as exc:
+        flash(f"カレンダー出力に失敗しました: {exc}")
+        return render_template("ss_calendar.html")
+def _register_pdf_font() -> str:
+    try:
+        font_path = "./app/static/fonts/NotoSansJP-VariableFont_wght.ttf"
+        pdfmetrics.registerFont(TTFont("Noto", font_path))
+        return "Noto"
+    except Exception:
+        return "Helvetica"
 
-    return render_template('ss_calendar.html')
+
+def _load_image_font(size: int):
+    try:
+        return ImageFont.truetype("./app/static/fonts/NotoSansJP-VariableFont_wght.ttf", size)
+    except OSError:
+        return ImageFont.load_default()
+
+
+def _calendar_weekdays() -> list[str]:
+    return ["月", "火", "水", "木", "金", "土", "日"]
+
+
+def _comment_badge(comment: str) -> str:
+    return " *" if comment else ""
 
 
 def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None):
-    c = canvas.Canvas(path, pagesize=landscape(A4))
+    pdf = canvas.Canvas(path, pagesize=landscape(A4))
     width, height = landscape(A4)
+    font_name = _register_pdf_font()
 
-    # 日本語フォント設定
-    try:
-        font_path = "./app/static/fonts/NotoSansJP-VariableFont_wght.ttf"
-        pdfmetrics.registerFont(TTFont('Noto', font_path))
-        c.setFont('Noto', 24)
-    except:
-        print("フォントの読み込みに失敗しました。デフォルトフォントを使用します。")
-        c.setFont('Helvetica', 20)
-
-    # === 美しいヘッダーデザイン ===
-    # メインヘッダー背景（グラデーション風）
-    c.setFillColor(HexColor("#3b82f6"))
-    c.rect(0, height - 80, width, 80, fill=1)
-    
-    # ヘッダー装飾ライン
-    c.setFillColor(HexColor("#1b73ff"))
-    c.rect(0, height - 85, width, 5, fill=1)
-    
-    # タイトル
-    c.setFillColor(colors.white)
-    title_text = f"{year}年{month}月 {title} シフト表"
+    pdf.setFillColor(HexColor("#4f5a54"))
+    pdf.rect(0, height - 62, width, 62, fill=1)
+    pdf.setFillColor(colors.white)
+    pdf.setFont(font_name, 22)
+    header_text = f"{year}年{month}月 {title}"
     if capacity:
-        title_text += f" (必要人数: {capacity}人/日)"
-    c.drawCentredString(width / 2, height - 50, title_text)
+        header_text += f" / 必要人数 {capacity}"
+    pdf.drawCentredString(width / 2, height - 40, header_text)
 
-    # === カレンダーグリッド設定 ===
-    start_x = 40
-    start_y = height - 120
-    cell_w = (width - 80) / 7
-    cell_h = 90
+    start_x = 34
+    start_y = height - 108
+    cell_w = (width - 68) / 7
+    cell_h = 88
 
-    # 曜日ヘッダー
-    weekdays = ['月', '火', '水', '木', '金', '土', '日']
-    for i, day in enumerate(weekdays):
-        x = start_x + i * cell_w
-        y = start_y
-        
-        # 曜日背景（グラデーション風）
-        if i == 5:  # 土曜日
-            c.setFillColor(HexColor("#3b82f6"))
-        elif i == 6:  # 日曜日
-            c.setFillColor(HexColor("#ef4444"))
-        else:
-            c.setFillColor(HexColor("#cdcefa"))
-        
-        c.rect(x, y, cell_w, 35, fill=1)
-        
-        # ヘッダー下部のアクセントライン
-        c.setFillColor(HexColor("#1e293b"))
-        c.rect(x, y - 3, cell_w, 3, fill=1)
-        
-        # 曜日の枠線を追加
-        c.setStrokeColor(HexColor("#1e293b"))
-        c.setLineWidth(1)
-        c.rect(x, y, cell_w, 35, fill=0)
-        
-        # 曜日テキスト
-        c.setFillColor(colors.black)
-        c.setFont('Noto', 18)
-        c.drawCentredString(x + cell_w/2, y + 8, day)
+    pdf.setFont(font_name, 12)
+    for column, day_name in enumerate(_calendar_weekdays()):
+        x = start_x + column * cell_w
+        pdf.setFillColor(HexColor("#efefe8"))
+        pdf.rect(x, start_y, cell_w, 26, fill=1)
+        pdf.setFillColor(HexColor("#43463f"))
+        pdf.drawCentredString(x + cell_w / 2, start_y + 8, day_name)
 
-    # === カレンダー本体 ===
-    cal = calendar.Calendar(firstweekday=calendar.MONDAY)
-    weeks = cal.monthdayscalendar(year, month)
+    calendar_module = __import__("calendar")
+    weeks = calendar_module.Calendar(firstweekday=calendar_module.MONDAY).monthdayscalendar(year, month)
+    for week_index, week in enumerate(weeks):
+        for column, day in enumerate(week):
+            x = start_x + column * cell_w
+            y = start_y - 28 - week_index * cell_h
+            pdf.setFillColor(HexColor("#fbfbf8") if day else HexColor("#f4f4f1"))
+            pdf.rect(x, y, cell_w, cell_h, fill=1)
+            pdf.setStrokeColor(HexColor("#d7d7d1"))
+            pdf.rect(x, y, cell_w, cell_h, fill=0)
+            if day == 0:
+                continue
 
-    for w, week in enumerate(weeks):
-        for d, day in enumerate(week):
-            x = start_x + d * cell_w
-            y = start_y - 90 - (w * cell_h)  # -35で曜日ヘッダー分を考慮
-            
-            if day != 0:
-                # セル背景
-                if d == 5:  # 土曜日
-                    bg_color = HexColor("#eff6ff")
-                elif d == 6:  # 日曜日
-                    bg_color = HexColor("#fef2f2")
-                else:
-                    bg_color = colors.white
-                
-                c.setFillColor(bg_color)
-                c.rect(x, y, cell_w, cell_h, fill=1)
-                
-                # 台数不足の警告背景
-                content_lines = day_map.get(day, [])
-                if capacity and len(content_lines) < capacity:
-                    c.setFillColor(HexColor("#ffffff"))
-                    c.rect(x + 2, y + 2, cell_w - 4, cell_h - 4, fill=1)
-                
-                # セルの枠線とシャドウ効果
-                c.setStrokeColor(HexColor("#353535"))
-                c.setLineWidth(2)
-                c.rect(x, y, cell_w, cell_h, fill=0)
-                
-                # 内側の装飾ボーダー
-                c.setStrokeColor(HexColor("#f3f4f6"))
-                c.setLineWidth(1)
-                c.rect(x + 1, y + 1, cell_w - 2, cell_h - 2, fill=0)
-                
-                # 日付番号（左上角の装飾的な配置）
-                c.setFillColor(HexColor("#1e293b"))
-                date_bg_w = 30
-                date_bg_h = 20
-                c.rect(x + 3, y + cell_h - date_bg_h - 3, date_bg_w, date_bg_h, fill=1)
-                
-                c.setFillColor(colors.white)
-                c.setFont('Noto', 14)
-                c.drawCentredString(x + 3 + date_bg_w/2, y + cell_h - 17, str(day))
-                
-                # コンテンツ表示
-                c.setFont('Noto', 11)
-                for i, line in enumerate(content_lines[:5]):
-                    text_x = x + 8
-                    text_y = y + cell_h - 35 - (i * 13)
-                    
-                    # オプション別の色分け
-                    if "午前" in line or "早番" in line:
-                        c.setFillColor(HexColor("#059669"))
-                    elif "午後" in line or "遅番" in line:
-                        c.setFillColor(HexColor("#dc2626"))
-                    elif "号車" in line:
-                        c.setFillColor(HexColor("#7c3aed"))
-                    else:
-                        c.setFillColor(HexColor("#374151"))
-                    
-                    # テキストが長い場合は省略
-                    if len(line) > 12:
-                        line = line[:10] + "..."
-                    
-                    c.drawString(text_x, text_y, line)
+            entries = day_map.get(day, [])
+            if capacity and len(entries) < capacity:
+                pdf.setStrokeColor(HexColor("#c79a62"))
+                pdf.rect(x + 2, y + 2, cell_w - 4, cell_h - 4, fill=0)
 
-    # フッター装飾
-    c.setFillColor(HexColor("#f3f4f6"))
-    c.rect(0, 0, width, 30, fill=1)
-    c.setFillColor(HexColor("#6b7280"))
-    c.setFont('Noto', 10)
-    c.drawCentredString(width / 2, 10, f"Generated by Shifter-Sync | {year}/{month}")
+            pdf.setFillColor(HexColor("#2f312d"))
+            pdf.setFont(font_name, 11)
+            pdf.drawString(x + 6, y + cell_h - 16, str(day))
 
-    c.save()
+            for line_index, entry in enumerate(entries[:4]):
+                line_y = y + cell_h - 30 - line_index * 14
+                title_text = entry["title"]
+                if len(title_text) > 15:
+                    title_text = f"{title_text[:15]}..."
+                pdf.setFont(font_name, 8.5)
+                pdf.setFillColor(HexColor("#384039"))
+                pdf.drawString(x + 6, line_y, f"{title_text}{_comment_badge(entry['comment'])}")
+                if entry["comment"]:
+                    comment_text = entry["comment"]
+                    if len(comment_text) > 16:
+                        comment_text = f"{comment_text[:16]}..."
+                    pdf.setFont(font_name, 7.5)
+                    pdf.setFillColor(HexColor("#6a6d66"))
+                    pdf.drawString(x + 10, line_y - 9, comment_text)
+
+    pdf.save()
 
 
 def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None):
-    # 高解像度設定 - PDFと同じ比率に調整
     width = 1600
-    height = 1200
+    height = 1180
     cell_w = (width - 80) // 7
     cell_h = 140
 
-    img = Image.new("RGB", (width, height), "#f8fafc")
+    img = Image.new("RGB", (width, height), "#f4f4f1")
     draw = ImageDraw.Draw(img)
+    title_font = _load_image_font(34)
+    header_font = _load_image_font(24)
+    day_font = _load_image_font(20)
+    text_font = _load_image_font(16)
+    comment_font = _load_image_font(14)
+    footer_font = _load_image_font(12)
 
-    # フォント設定
-    try:
-        font_title = ImageFont.truetype("./app/static/fonts/NotoSansJP-VariableFont_wght.ttf", 36)
-        font_day = ImageFont.truetype("./app/static/fonts/NotoSansJP-VariableFont_wght.ttf", 24)
-        font_text = ImageFont.truetype("./app/static/fonts/NotoSansJP-VariableFont_wght.ttf", 20)
-        font_header = ImageFont.truetype("./app/static/fonts/NotoSansJP-VariableFont_wght.ttf", 28)
-        font_footer = ImageFont.truetype("./app/static/fonts/NotoSansJP-VariableFont_wght.ttf", 14)
-    except IOError:
-        print("フォントの読み込みに失敗しました。デフォルトフォントを使用します。")
-        font_title = ImageFont.load_default()
-        font_day = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-        font_header = ImageFont.load_default()
-        font_footer = ImageFont.load_default()
-
-    # === 美しいヘッダー（PDFと統一）===
-    # メインヘッダー背景
-    draw.rectangle([0, 0, width, 120], fill="#3b82f6")
-    
-    # ヘッダー装飾ライン
-    draw.rectangle([0, 120, width, 127], fill="#1b73ff")
-    
-    # タイトル
-    title_text = f"{year}年{month}月 {title} シフト表"
+    draw.rectangle([0, 0, width, 92], fill="#4f5a54")
+    title_text = f"{year}年{month}月 {title}"
     if capacity:
-        title_text += f" (必要人数: {capacity}人/日)"
-    
-    bbox = draw.textbbox((0, 0), title_text, font=font_title)
-    title_width = bbox[2] - bbox[0]
-    draw.text(((width - title_width) // 2, 40), title_text, fill="white", font=font_title)
+        title_text += f" / 必要人数 {capacity}"
+    title_box = draw.textbbox((0, 0), title_text, font=title_font)
+    draw.text(((width - (title_box[2] - title_box[0])) // 2, 26), title_text, fill="white", font=title_font)
 
-    # === 曜日ヘッダー（PDFと統一）===
     start_x = 40
-    start_y = 150
-    weekdays = ['月', '火', '水', '木', '金', '土', '日']
-    
-    for i, day in enumerate(weekdays):
-        x = start_x + i * cell_w
-        y = start_y
-        
-        # 曜日背景（グラデーション風）
-        if i == 5:  # 土曜日
-            color = "#3b82f6"
-        elif i == 6:  # 日曜日
-            color = "#ef4444"
-        else:
-            color = "#c4c5fd"
-        
-        draw.rectangle([x, y, x + cell_w, y + 50], fill=color)
-        
-        # ヘッダー下部のアクセントライン
-        draw.rectangle([x, y + 50, x + cell_w, y + 55], fill="#1e293b")
-        
-        # 曜日テキスト
-        bbox = draw.textbbox((0, 0), day, font=font_header)
-        text_width = bbox[2] - bbox[0]
-        draw.text((x + (cell_w - text_width) // 2, y + 5), day, fill="black", font=font_header)
+    start_y = 126
+    for column, day_name in enumerate(_calendar_weekdays()):
+        x = start_x + column * cell_w
+        draw.rectangle([x, start_y, x + cell_w, start_y + 42], fill="#efefe8", outline="#d7d7d1")
+        box = draw.textbbox((0, 0), day_name, font=header_font)
+        draw.text((x + (cell_w - (box[2] - box[0])) / 2, start_y + 7), day_name, fill="#43463f", font=header_font)
 
-    # === カレンダー本体（PDFと統一）===
-    cal = calendar.Calendar(firstweekday=calendar.MONDAY)
-    weeks = cal.monthdayscalendar(year, month)
+    calendar_module = __import__("calendar")
+    weeks = calendar_module.Calendar(firstweekday=calendar_module.MONDAY).monthdayscalendar(year, month)
+    for week_index, week in enumerate(weeks):
+        for column, day in enumerate(week):
+            x = start_x + column * cell_w
+            y = start_y + 52 + week_index * cell_h
+            fill = "#fbfbf8" if day else "#f4f4f1"
+            draw.rectangle([x, y, x + cell_w, y + cell_h], fill=fill, outline="#d7d7d1", width=2)
+            if day == 0:
+                continue
 
-    for w, week in enumerate(weeks):
-        for d, day in enumerate(week):
-            x = start_x + d * cell_w
-            y = start_y + 55 + w * cell_h
-            
-            if day != 0:
-                # セル背景
-                if d == 5:  # 土曜日
-                    bg_color = "#eff6ff"
-                elif d == 6:  # 日曜日
-                    bg_color = "#fef2f2"
-                else:
-                    bg_color = "white"
-                
-                draw.rectangle([x, y, x + cell_w, y + cell_h], fill=bg_color)
-                
-                # 台数不足の警告背景
-                content_lines = day_map.get(day, [])
-                if capacity and len(content_lines) < capacity:
-                    draw.rectangle([x + 3, y + 3, x + cell_w - 3, y + cell_h - 3], fill="#ffffff")
-                
-                # セルの枠線とシャドウ効果
-                draw.rectangle([x, y, x + cell_w, y + cell_h], outline="#353535", width=3)
-                
-                # 内側の装飾ボーダー
-                draw.rectangle([x + 1, y + 1, x + cell_w - 1, y + cell_h - 1], outline="#f3f4f6", width=1)
-                
-                # 日付番号（左上角の装飾的な配置 - PDFと統一）
-                date_bg_w = 45
-                date_bg_h = 30
-                draw.rectangle([x + 5, y + 5, x + 5 + date_bg_w, y + 5 + date_bg_h], fill="#1e293b")
-                
-                day_str = str(day)
-                bbox = draw.textbbox((0, 0), day_str, font=font_day)
-                day_width = bbox[2] - bbox[0]
-                
-                # テキストを背景の中央に正確に配置（PDFの方式を参考）
-                text_x = x + 5 + date_bg_w // 2
-                text_y = y - 10 + date_bg_h // 2 - 2  # 少し上にオフセット
-                
-                # 中央揃えでテキストを描画
-                draw.text((text_x - day_width // 2, text_y), day_str, fill="white", font=font_day)
-                
-                # コンテンツ表示
-                for i, line in enumerate(content_lines[:5]):
-                    text_x = x + 12
-                    text_y = y + 45 + i * 20
-                    
-                    # オプション別の色分け（PDFと統一）
-                    text_color = "#374151"
-                    if "午前" in line or "早番" in line:
-                        text_color = "#059669"
-                    elif "午後" in line or "遅番" in line:
-                        text_color = "#dc2626"
-                    elif "号車" in line:
-                        text_color = "#7c3aed"
-                    
-                    # テキストが長い場合は省略
-                    if len(line) > 15:
-                        line = line[:13] + "..."
-                    
-                    draw.text((text_x, text_y), line, fill=text_color, font=font_text)
+            entries = day_map.get(day, [])
+            if capacity and len(entries) < capacity:
+                draw.rectangle([x + 3, y + 3, x + cell_w - 3, y + cell_h - 3], outline="#c79a62", width=2)
 
-    # フッター装飾（PDFと統一）
-    draw.rectangle([0, height - 45, width, height], fill="#f3f4f6")
-    footer_text = f"Generated by Shifter-Sync | {year}/{month}"
-    bbox = draw.textbbox((0, 0), footer_text, font=font_footer)
-    footer_width = bbox[2] - bbox[0]
-    draw.text(((width - footer_width) // 2, height - 30), footer_text, fill="#6b7280", font=font_footer)
+            draw.rectangle([x + 8, y + 8, x + 46, y + 34], fill="#ecece7")
+            day_text = str(day)
+            day_box = draw.textbbox((0, 0), day_text, font=day_font)
+            draw.text((x + 27 - (day_box[2] - day_box[0]) / 2, y + 10), day_text, fill="#2f312d", font=day_font)
 
+            for line_index, entry in enumerate(entries[:4]):
+                top = y + 42 + line_index * 24
+                title_text = entry["title"]
+                if len(title_text) > 15:
+                    title_text = f"{title_text[:15]}..."
+                draw.text((x + 10, top), f"{title_text}{_comment_badge(entry['comment'])}", fill="#384039", font=text_font)
+                if entry["comment"]:
+                    comment_text = entry["comment"]
+                    if len(comment_text) > 18:
+                        comment_text = f"{comment_text[:18]}..."
+                    draw.text((x + 18, top + 12), comment_text, fill="#6a6d66", font=comment_font)
+
+    footer = f"Generated by Shifter-Sync / {year}-{str(month).zfill(2)}"
+    footer_box = draw.textbbox((0, 0), footer, font=footer_font)
+    draw.text(((width - (footer_box[2] - footer_box[0])) // 2, height - 28), footer, fill="#777973", font=footer_font)
     img.save(path, "PNG", optimize=True, quality=95)
 
 
+@shiftersync_bp.route("/download/<token>", methods=["GET"])
+def download(token):
+    artifacts = session.get(ARTIFACT_SESSION_KEY) or {}
+    artifact = artifacts.get(token)
+    if not artifact:
+        abort(404)
 
-# CSVダウンロードページ
-@shiftersync_bp.route("/download/<filename>", methods=["GET"])
-def download(filename):
-    directory = os.path.join("app", "storage", "shiftersync")
-    return send_from_directory(directory, filename)
+    path = Path(artifact.get("path", ""))
+    if not path.exists() or not path.is_file():
+        abort(404)
+
+    return send_file(
+        path,
+        as_attachment=request.args.get("download") == "1",
+        download_name=artifact.get("download_name") or path.name,
+        mimetype=artifact.get("mimetype"),
+    )

@@ -1,52 +1,49 @@
 {% extends "base.html" %}
 
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='shiftersync/css/ss_common.css') }}">
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="{{ url_for('static', filename='shiftersync/js/ss_common.js') }}"></script>
 
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <title>Shiftersync - シフト編集</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='shiftersync/css/ss_common.css') }}">
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="{{ url_for('static', filename='shiftersync/js/ss_common.js') }}"></script>
-</head>
-
-<body>
-
-<div style="min-height: 100vh; background: linear-gradient(135deg, #e0f2fe 0%, #dbeafe 50%, #e0e7ff 100%); display: flex; align-items: center; justify-content: center; padding: 20px;">
+<main class="ss-page">
   <div class="container animate-fade-in">
+    <div class="ss-stack">
+      <header class="ss-header-block">
+        <div class="ss-eyebrow">ShifterSync</div>
+        <h1 class="ss-title">既存シフト編集</h1>
+        <p class="ss-subtitle">
+          ShifterSync の CSV を読み込み、カレンダー上で編集できます。コメント付きの新形式にも対応しています。
+        </p>
+      </header>
 
-    <h2 style="text-align: center; margin-bottom: 10px;">
-      Shifter-Sync
-    </h2>
-    <h2 style="text-align: center; font-size: 1.5rem; color: #64748b; margin-bottom: 30px;">
-      シフト編集
-    </h2>
+      <section class="ss-section">
+        <div class="ss-section-head">
+          <div>
+            <h2>CSV 読み込み</h2>
+            <p class="ss-section-note">
+              旧形式の CSV も読み込めます。コメントがある場合は詳細ポップアップで確認できます。
+            </p>
+          </div>
+          <div class="ss-actions">
+            <button type="button" id="backBtn" class="btn-secondary" onclick="history.back()">戻る</button>
+          </div>
+        </div>
 
-    <form id="shiftUploadForm">
-      <div class="file-upload-group">
-        <label for="shiftFile" class="file-upload-label">シフトファイル (CSV)</label>
-        <input type="file" name="shiftFile" id="shiftFile" class="file-upload-input" accept=".csv" required>
-      </div>
+        <form id="shiftUploadForm" style="padding: 0; border: 0; background: transparent; box-shadow: none; margin: 0;">
+          <div class="file-upload-group">
+            <label for="shiftFile" class="file-upload-label">ShifterSync CSV</label>
+            <input type="file" name="shiftFile" id="shiftFile" class="file-upload-input" accept=".csv" required>
+          </div>
+          <div class="ss-actions" style="margin-top: 18px;">
+            <button type="button" id="uploadBtn" class="btn-primary">読み込む</button>
+          </div>
+        </form>
+      </section>
 
-      <div style="text-align: center; display: flex; gap: 12px; justify-content: center; margin-top: 20px;">
-        <button type="button" id="uploadBtn" class="btn-primary">
-          📤 ファイルアップロード
-        </button>
-        <button type="button" id="backBtn" onclick="history.back()" class="btn-secondary">
-          ← 戻る
-        </button>
-      </div>
-    </form>
+      <div id="inputArea" style="display: none;"></div>
+    </div>
   </div>
-</div>
+</main>
 
-<div id="inputArea" style="display: none;"></div>
-
-</body>
 <script src="{{ url_for('static', filename='shiftersync/js/ss_upload.js') }}"></script>
-
-</html>
-
 {% endblock %}

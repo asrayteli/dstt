@@ -1,84 +1,75 @@
 {% extends "base.html" %}
 
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='shiftersync/css/ss_common.css') }}">
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="{{ url_for('static', filename='shiftersync/js/ss_common.js') }}"></script>
 
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <title>Shiftersync - 新規シフト作成</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='shiftersync/css/ss_common.css') }}">
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="{{ url_for('static', filename='shiftersync/js/ss_common.js') }}"></script>
-</head>
-
-<body>
-
-<div style="min-height: 100vh; background: linear-gradient(135deg, #e0f2fe 0%, #dbeafe 50%, #e0e7ff 100%); display: flex; align-items: center; justify-content: center; padding: 20px;">
+<main class="ss-page">
   <div class="container animate-fade-in">
+    <div class="ss-stack">
+      <header class="ss-header-block">
+        <div class="ss-eyebrow">ShifterSync</div>
+        <h1 class="ss-title">新規シフト作成</h1>
+        <p class="ss-subtitle">
+          基本情報を決めてからカレンダーを開きます。各シフトには任意のコメントを付けられ、クリックすると詳細を確認できます。
+        </p>
+      </header>
 
-    <h2 style="text-align: center; margin-bottom: 10px;">
-      Shifter-Sync
-    </h2>
-    <h2 style="text-align: center; font-size: 1.5rem; color: #64748b; margin-bottom: 30px;">
-      新規シフト作成
-    </h2>
-
-    <form id="shiftMetaForm">
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px;">
-        <div>
-          <label for="mode" class="form-label">モード</label>
-          <select name="mode" id="mode" class="form-select">
-            <option value="scene">現場</option>
-            <option value="person">人物</option>
-          </select>
+      <section class="ss-section">
+        <div class="ss-section-head">
+          <div>
+            <h2>基本情報</h2>
+          </div>
+          <div class="ss-actions">
+            <button type="button" id="backBtn" class="btn-secondary" onclick="history.back()">戻る</button>
+          </div>
         </div>
 
-        <div>
-          <label for="year" class="form-label">年</label>
-          <input type="number" name="year" id="year" class="form-input" required>
-        </div>
+        <form id="shiftMetaForm" style="padding: 0; border: 0; background: transparent; box-shadow: none; margin: 0;">
+          <div class="ss-meta-grid">
+            <div>
+              <label for="mode" class="form-label">種別</label>
+              <select name="mode" id="mode" class="form-select">
+                <option value="scene">現場シフト</option>
+                <option value="person">個人シフト</option>
+              </select>
+            </div>
+            <div>
+              <label for="year" class="form-label">年</label>
+              <input type="number" name="year" id="year" class="form-input" min="2000" max="2100" required>
+            </div>
+            <div>
+              <label for="month" class="form-label">月</label>
+              <input type="number" name="month" id="month" class="form-input" min="1" max="12" required>
+            </div>
+            <div>
+              <label id="nameLabel" for="target_name" class="form-label">現場名</label>
+              <input type="text" name="target_name" id="target_name" class="form-input" required>
+            </div>
+          </div>
 
-        <div>
-          <label for="month" class="form-label">月</label>
-          <input type="number" name="month" id="month" class="form-input" min="1" max="12" required>
-        </div>
+          <div style="margin-top: 18px;">
+            <label style="display: inline-flex; align-items: center; gap: 8px;">
+              <input type="checkbox" id="enableCapacity" name="enableCapacity" class="form-checkbox">
+              <span class="form-label" style="margin-bottom: 0;">必要人数を設定する</span>
+            </label>
+            <div id="capacityInputGroup" style="display: none; margin-top: 10px; max-width: 220px;">
+              <label for="capacity" class="form-label">必要人数</label>
+              <input type="number" id="capacity" name="capacity" class="form-input" min="1" max="99">
+            </div>
+          </div>
 
-        <div>
-          <label id="nameLabel" for="target_name" class="form-label">現場名</label>
-          <input type="text" name="target_name" id="target_name" class="form-input" required>
-        </div>
-      </div>
+          <div class="ss-actions" style="margin-top: 20px;">
+            <button type="button" id="startBtn" class="btn-primary">カレンダーを開く</button>
+          </div>
+        </form>
+      </section>
 
-      <!-- 台数設定セクション -->
-      <div style="margin-bottom: 20px;">
-        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
-          <input type="checkbox" id="enableCapacity" name="enableCapacity" class="form-checkbox">
-          <span class="form-label" style="margin-bottom: 0;">台数設定を使用する</span>
-        </label>
-        <div id="capacityInputGroup" style="display: none;">
-          <label for="capacity" class="form-label">必要人数 (人/日)</label>
-          <input type="number" id="capacity" name="capacity" class="form-input" min="1" max="20" style="max-width: 200px;">
-        </div>
-      </div>
-
-      <div style="text-align: center; display: flex; gap: 12px; justify-content: center;">
-        <button type="button" id="startBtn" class="btn-primary">
-          🚀 作成開始
-        </button>
-        <button type="button" id="backBtn" onclick="history.back()" class="btn-secondary">
-          ← 戻る
-        </button>
-      </div>
-    </form>
+      <div id="inputArea" style="display: none;"></div>
+    </div>
   </div>
-</div>
+</main>
 
-<div id="inputArea" style="display: none;"></div>
-
-</body>
 <script src="{{ url_for('static', filename='shiftersync/js/ss_create.js') }}"></script>
-
-</html>
-
 {% endblock %}

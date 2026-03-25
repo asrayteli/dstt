@@ -1,0 +1,88 @@
+{
+  "id": "e297303477d6b843a377bead",
+  "owner_user_id": "owner01",
+  "title": "Mobile Preview",
+  "mode": "scene",
+  "view_token": "0T50cURa40UiWxkgFQTJvDQbWz_dVz94pX21vJ2rRG0",
+  "edit_token": "NZMcC7TiiHJf0pnui8ONj4KQQijODRvlC7Hd_WepWps",
+  "created_at": "2026-03-25T16:49:39Z",
+  "updated_at": "2026-03-25T16:49:39Z",
+  "months": {
+    "2026-08": {
+      "year": 2026,
+      "month": 8,
+      "capacity_enabled": true,
+      "required_capacity": 2,
+      "entries_per_day": {
+        "1": [
+          {
+            "id": "a1",
+            "value": "!A!?? ??",
+            "comment": "????????"
+          },
+          {
+            "id": "a2",
+            "value": "????",
+            "comment": "??????"
+          }
+        ],
+        "2": [
+          {
+            "id": "b1",
+            "value": "!M!?? ??",
+            "comment": "??????"
+          }
+        ],
+        "3": [],
+        "4": [
+          {
+            "id": "c1",
+            "value": "????",
+            "comment": "????"
+          },
+          {
+            "id": "c2",
+            "value": "!E!?? ??",
+            "comment": ""
+          }
+        ],
+        "5": [],
+        "6": [],
+        "7": [
+          {
+            "id": "d1",
+            "value": "!N1!?????",
+            "comment": "21???"
+          }
+        ],
+        "8": [],
+        "9": [],
+        "10": [],
+        "11": [],
+        "12": [],
+        "13": [],
+        "14": [],
+        "15": [],
+        "16": [],
+        "17": [],
+        "18": [],
+        "19": [],
+        "20": [],
+        "21": [],
+        "22": [],
+        "23": [],
+        "24": [],
+        "25": [],
+        "26": [],
+        "27": [],
+        "28": [],
+        "29": [],
+        "30": [],
+        "31": []
+      },
+      "revision": 2,
+      "created_at": "2026-03-25T16:49:39Z",
+      "updated_at": "2026-03-25T16:49:39Z"
+    }
+  }
+}
