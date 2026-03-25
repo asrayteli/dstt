@@ -22,54 +22,14 @@
           <li class="my-2">
             <a href="/" class="block px-4 py-2 rounded hover:bg-blue-100">🏠 ダッシュボード</a>
           </li>
+          {% for item in app_navigation_items %}
           <li class="my-2">
-            <a href="/tools/datecalc" class="block px-4 py-2 rounded hover:bg-blue-100">📆 日時計算</a>
+            <a
+              href="{{ item.href }}"
+              class="block px-4 py-2 rounded hover:bg-blue-100 {% if request.path.startswith(item.href) %}bg-blue-50 text-blue-700 font-medium{% endif %}"
+            >{{ item.icon }} {{ item.label }}</a>
           </li>
-          <li class="my-2">
-            <a href="/tools/calc" class="block px-4 py-2 rounded hover:bg-blue-100">🧮 電卓</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/rename" class="block px-4 py-2 rounded hover:bg-blue-100">🔄 ファイル名一括変換</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/compress" class="block px-4 py-2 rounded hover:bg-blue-100">📦 圧縮ファイル生成</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/csvtool" class="block px-4 py-2 rounded hover:bg-blue-100">📊 PowerCSV</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/password_tool" class="block px-4 py-2 rounded hover:bg-blue-100">🔐 パスワード生成管理ツール</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/workday" class="block px-4 py-2 rounded hover:bg-blue-100">📅 営業日計算ツール</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/pdf_power" class="block px-4 py-2 rounded hover:bg-blue-100">📚 PowerPDF</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/powerstamp" class="block px-4 py-2 rounded hover:bg-blue-100">🖋️ PowerSTAMP</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/share" class="block px-4 py-2 rounded hover:bg-blue-100">📪️ FILE POST</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/car_inspe" class="block px-4 py-2 rounded hover:bg-blue-100">📄 車検証ツール</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/shiftersync" class="block px-4 py-2 rounded hover:bg-blue-100">👥 ShifterSync</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/leave_mgr" class="block px-4 py-2 rounded hover:bg-blue-100">⛵ 有休共有ツール</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/monthly_generator" class="block px-4 py-2 rounded hover:bg-blue-100">📝 月次ジェネレーター</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/subject_analysis_tool" class="block px-4 py-2 rounded hover:bg-blue-100">⚖️ SAT　科目別分析ツール</a>
-          </li>
-          <li class="my-2">
-            <a href="/tools/pluslist" class="block px-4 py-2 rounded hover:bg-blue-100">📛　社員名簿PLUS</a>
-          </li>
+          {% endfor %}
         </ul>
       </nav>
     </aside>
