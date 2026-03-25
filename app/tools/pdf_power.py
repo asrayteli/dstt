@@ -2047,6 +2047,7 @@ def edit_pdf_overlay():
                 page.insert_image(
                     rect,
                     stream=image_bytes,
+                    keep_proportion=False,
                     overlay=True,
                 )
 

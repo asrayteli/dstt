@@ -205,6 +205,71 @@ def test_same_image_ref_can_be_reused_multiple_times(client):
     doc.close()
 
 
+def test_add_image_respects_requested_width_and_height(client):
+    operations = [
+        {
+            "type": "add_image",
+            "page": 1,
+            "x": 40,
+            "y": 50,
+            "width": 160,
+            "height": 60,
+            "image_ref": "imgRect",
+        }
+    ]
+    response = _post_edit(
+        client,
+        _make_pdf(rotation=0),
+        operations,
+        uploads={"imgRect": (io.BytesIO(_png_bytes((40, 90, 220))), "rect.png")},
+    )
+    assert response.status_code == 200
+    doc = fitz.open(stream=response.data, filetype="pdf")
+    page = doc[0]
+    image_blocks = [b for b in page.get_text("dict")["blocks"] if b["type"] == 1]
+    assert image_blocks
+    inserted = fitz.Rect(image_blocks[0]["bbox"])
+    expected = fitz.Rect(40, 50, 200, 110)
+    assert abs(inserted.x0 - expected.x0) <= 1
+    assert abs(inserted.y0 - expected.y0) <= 1
+    assert abs(inserted.width - expected.width) <= 1
+    assert abs(inserted.height - expected.height) <= 1
+    doc.close()
+
+
+def test_add_image_respects_requested_size_on_rotated_page(client):
+    operations = [
+        {
+            "type": "add_image",
+            "page": 1,
+            "x": 55,
+            "y": 65,
+            "width": 150,
+            "height": 70,
+            "image_ref": "imgRot",
+        }
+    ]
+    response = _post_edit(
+        client,
+        _make_pdf(rotation=90),
+        operations,
+        uploads={"imgRot": (io.BytesIO(_png_bytes((180, 60, 30))), "rot.png")},
+    )
+    assert response.status_code == 200
+    doc = fitz.open(stream=response.data, filetype="pdf")
+    page = doc[0]
+    assert page.rotation == 0
+    image_blocks = [b for b in page.get_text("dict")["blocks"] if b["type"] == 1]
+    assert image_blocks
+    inserted = fitz.Rect(image_blocks[0]["bbox"])
+    expected = fitz.Rect(55, 65, 205, 135)
+    assert abs(inserted.x0 - expected.x0) <= 1
+    assert abs(inserted.y0 - expected.y0) <= 1
+    assert abs(inserted.width - expected.width) <= 1
+    assert abs(inserted.height - expected.height) <= 1
+    doc.close()
+
+
 def test_empty_image_data_returns_400_with_operation_index(client):
     operations = [
         {"type": "add_image", "page": 1, "x": 30, "y": 40, "width": 80, "height": 80, "image_ref": "imgEmpty"}

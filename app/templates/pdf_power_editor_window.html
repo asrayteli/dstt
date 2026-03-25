@@ -448,7 +448,7 @@
         item.style.left = `${pdfToPx(op.x)}px`; item.style.top = `${pdfToPx(op.y)}px`;
         item.style.width = `${pdfToPx(op.width)}px`; item.style.height = `${pdfToPx(op.height)}px`;
         const url = imageUrlByRef.get(op.image_ref);
-        item.style.background = url ? `url("${url}") center / cover no-repeat` : 'rgba(37,99,235,0.08)';
+        item.style.background = url ? `url("${url}") center / 100% 100% no-repeat` : 'rgba(37,99,235,0.08)';
         item.style.borderColor = '#2563eb'; overlayLayer.appendChild(item); return;
       }
       if (op.type === 'copy_region_paste' && op.target_page === pageNum) {
