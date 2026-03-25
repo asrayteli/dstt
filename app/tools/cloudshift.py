@@ -556,15 +556,48 @@ def _trim_revision_snapshots(snapshots: dict[str, Any]) -> dict[str, Any]:
     return trimmed
 
 
+def _base_month_signature(month_data: dict[str, Any], year: int, month: int) -> dict[str, Any]:
+    return {
+        "year": year,
+        "month": month,
+        "required_capacity": _sanitize_capacity(month_data.get("required_capacity"))[1],
+        "entries_per_day": _normalize_entries(month_data.get("entries_per_day"), year, month),
+    }
+
+
+def _resolve_base_month_without_revision(
+    current_month: dict[str, Any], request_base_month: dict[str, Any]
+) -> dict[str, Any] | None:
+    year = current_month["year"]
+    month = current_month["month"]
+    requested_signature = _base_month_signature(request_base_month or {}, year, month)
+
+    candidates: list[dict[str, Any]] = [_snapshot_month_payload(current_month)]
+    snapshots = current_month.get("revision_snapshots") or {}
+    for key in sorted(snapshots.keys(), key=lambda value: int(value), reverse=True):
+        snapshot = snapshots.get(key)
+        if snapshot:
+            candidates.append(snapshot)
+
+    for candidate in candidates:
+        if _base_month_signature(candidate, year, month) == requested_signature:
+            return candidate
+    return None
+
+
 def _trusted_base_month(current_month: dict[str, Any], request_base_month: dict[str, Any]) -> dict[str, Any]:
     try:
         requested_revision = int((request_base_month or {}).get("revision", 0))
     except (TypeError, ValueError):
         requested_revision = 0
 
-    current_revision = int(current_month.get("revision", 1))
     if requested_revision <= 0:
+        fallback_snapshot = _resolve_base_month_without_revision(current_month, request_base_month or {})
+        if fallback_snapshot:
+            return fallback_snapshot
         raise CloudShiftError("編集対象が古い可能性があります。再読み込みしてから保存してください", 409)
+
+    current_revision = int(current_month.get("revision", 1))
     if requested_revision == current_revision:
         return _snapshot_month_payload(current_month)
 

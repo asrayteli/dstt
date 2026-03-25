@@ -305,12 +305,16 @@
     function collectMonthPayload() {
       const month = currentMonth();
       if (!month) return null;
+      const baseMonth = state.baseMonth || month;
       return {
         base_month: {
-          year: month.year,
-          month: month.month,
-          required_capacity: state.baseMonth ? state.baseMonth.required_capacity : month.required_capacity,
-          entries_per_day: state.baseMonth ? state.baseMonth.entries_per_day : month.entries_per_day
+          year: baseMonth.year,
+          month: baseMonth.month,
+          revision: baseMonth.revision,
+          created_at: baseMonth.created_at,
+          updated_at: baseMonth.updated_at,
+          required_capacity: baseMonth.required_capacity,
+          entries_per_day: baseMonth.entries_per_day
         },
         required_capacity: parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0,
         entries_per_day: ShifterSync.getEntriesPerDay()
