@@ -47,6 +47,15 @@ def _token_from_url(value: str) -> str:
     return Path(urlparse(value).path).name
 
 
+def _legacy_base_month(month: dict) -> dict:
+    return {
+        "year": month["year"],
+        "month": month["month"],
+        "required_capacity": month.get("required_capacity", 0),
+        "entries_per_day": month.get("entries_per_day", {}),
+    }
+
+
 def test_owner_can_create_and_public_view_can_read(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
@@ -243,3 +252,132 @@ def test_public_edit_can_merge_against_prior_revision_snapshot(tmp_path):
     assert merged_month["revision"] == 3
     assert merged_month["entries_per_day"]["1"][0]["value"] == "!A!Alice"
     assert merged_month["entries_per_day"]["2"][0]["value"] == "!P!Bob"
+
+
+def test_owner_save_accepts_legacy_base_month_without_revision(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Owner Legacy Save",
+            "mode": "scene",
+            "year": "2026",
+            "month": "8",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    month = payload["month"]
+
+    month_entries = dict(month["entries_per_day"])
+    month_entries["3"] = [{"id": "entry-3", "value": "Main Hall", "comment": ""}]
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/8",
+        json={
+            "required_capacity": 2,
+            "entries_per_day": month_entries,
+            "base_month": _legacy_base_month(month),
+        },
+    )
+
+    assert save_response.status_code == 200
+    saved_month = save_response.get_json()["month"]
+    assert saved_month["revision"] == 2
+    assert saved_month["required_capacity"] == 2
+    assert saved_month["entries_per_day"]["3"][0]["value"] == "Main Hall"
+
+
+def test_public_edit_legacy_base_month_can_merge_from_snapshot(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Legacy Snapshot Merge",
+            "mode": "scene",
+            "year": "2026",
+            "month": "9",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    edit_token = _token_from_url(payload["project"]["urls"]["edit_url"])
+    initial_month = payload["month"]
+
+    module.current_user = _guest()
+    first_entries = dict(initial_month["entries_per_day"])
+    first_entries["1"] = [{"id": "entry-1", "value": "!A!Alice", "comment": ""}]
+    first_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/public/edit/{edit_token}/month/2026/9",
+        json={
+            "editor_name": "Guest A",
+            "required_capacity": 0,
+            "entries_per_day": first_entries,
+            "base_month": _legacy_base_month(initial_month),
+        },
+    )
+    assert first_save.status_code == 200
+
+    second_entries = dict(initial_month["entries_per_day"])
+    second_entries["2"] = [{"id": "entry-2", "value": "!P!Bob", "comment": ""}]
+    second_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/public/edit/{edit_token}/month/2026/9",
+        json={
+            "editor_name": "Guest B",
+            "required_capacity": 0,
+            "entries_per_day": second_entries,
+            "base_month": _legacy_base_month(initial_month),
+        },
+    )
+
+    assert second_save.status_code == 200
+    merged_month = second_save.get_json()["month"]
+    assert merged_month["revision"] == 3
+    assert merged_month["entries_per_day"]["1"][0]["value"] == "!A!Alice"
+    assert merged_month["entries_per_day"]["2"][0]["value"] == "!P!Bob"
+
+
+def test_legacy_base_month_without_matching_snapshot_still_conflicts(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Legacy Conflict",
+            "mode": "scene",
+            "year": "2026",
+            "month": "10",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    month = payload["month"]
+
+    month_entries = dict(month["entries_per_day"])
+    month_entries["1"] = [{"id": "entry-1", "value": "Current", "comment": ""}]
+    first_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/10",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": month_entries,
+            "base_month": month,
+        },
+    )
+    assert first_save.status_code == 200
+
+    stale_base = _legacy_base_month(month)
+    stale_base["entries_per_day"] = dict(stale_base["entries_per_day"])
+    stale_base["entries_per_day"]["2"] = [{"id": "ghost-entry", "value": "Ghost", "comment": ""}]
+    stale_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/10",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": month_entries,
+            "base_month": stale_base,
+        },
+    )
+
+    assert stale_save.status_code == 409
