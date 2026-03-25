@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "_cloudshift_style.html" %}
+
+<main class="cloud-page">
+  <div class="cloud-shell">
+    <header class="cloud-hero">
+      <div class="cloud-hero-copy">
+        <div class="cloud-page-kicker">ShifterSync</div>
+        <h1 class="cloud-page-title">Shifter-Sync CloudShift</h1>
+        <p class="cloud-page-note">共有シフトの作成、公開、編集を同じ流れで扱えるクラウド版ワークスペースです。</p>
+      </div>
+      <div id="cloud-current-project" class="cloud-current-project">未選択</div>
+    </header>
+
+    <nav class="cloud-tabs" aria-label="CloudShift menu">
+      <button type="button" class="cloud-tab is-active" data-cloud-tab="list">自分のシフト帳</button>
+      <button type="button" class="cloud-tab" data-cloud-tab="create">新規作成</button>
+      <button type="button" class="cloud-tab" data-cloud-tab="import">CSV取込</button>
+      <button type="button" class="cloud-tab" data-cloud-tab="editor">編集</button>
+    </nav>
+
+    <section id="cloud-panel-list" class="cloud-panel is-active">
+      <div class="cloud-panel-head">
+        <div>
+          <h2>自分のシフト帳</h2>
+          <p>作成済みのシフト帳を選ぶと、月の切替や共有URLの管理にすぐ移れます。</p>
+        </div>
+        <button id="cloud-refresh-projects" type="button" class="cloud-btn secondary">再読み込み</button>
+      </div>
+      <div id="cloud-project-list" class="cloud-project-list"></div>
+    </section>
+
+    <section id="cloud-panel-create" class="cloud-panel">
+      <div class="cloud-panel-head">
+        <div>
+          <h2>新規作成</h2>
+          <p>最初の 1 か月を作成してから、前月・翌月をあとで追加できます。</p>
+        </div>
+      </div>
+      <form id="cloud-create-form" class="cloud-form">
+        <div class="cloud-form-grid">
+          <label class="cloud-field">
+            <span>タイトル</span>
+            <input id="cloud-create-title" name="title" class="cloud-input" type="text" required>
+          </label>
+          <label class="cloud-field">
+            <span>種別</span>
+            <select id="cloud-create-mode" name="mode" class="cloud-input">
+              <option value="scene">現場シフト</option>
+              <option value="person">個人シフト</option>
+            </select>
+          </label>
+          <label class="cloud-field">
+            <span>年</span>
+            <input id="cloud-create-year" name="year" class="cloud-input" type="number" min="2000" max="2100" required>
+          </label>
+          <label class="cloud-field">
+            <span>月</span>
+            <input id="cloud-create-month" name="month" class="cloud-input" type="number" min="1" max="12" required>
+          </label>
+          <label class="cloud-field">
+            <span>必要人数</span>
+            <input id="cloud-create-capacity" name="required_capacity" class="cloud-input" type="number" min="0" max="99" value="0">
+          </label>
+        </div>
+        <div class="cloud-actions">
+          <button type="submit" class="cloud-btn primary">作成して編集へ進む</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="cloud-panel-import" class="cloud-panel">
+      <div class="cloud-panel-head">
+        <div>
+          <h2>CSV取込</h2>
+          <p>ShifterSync の CSV を読み込み、CloudShift のシフト帳としてそのまま共有できます。</p>
+        </div>
+      </div>
+      <form id="cloud-import-form" class="cloud-form" enctype="multipart/form-data">
+        <div class="cloud-form-grid">
+          <label class="cloud-field">
+            <span>タイトル上書き</span>
+            <input id="cloud-import-title" name="title" class="cloud-input" type="text" placeholder="空欄なら CSV のタイトルを使用">
+          </label>
+          <label class="cloud-field cloud-field-wide">
+            <span>CSVファイル</span>
+            <input id="cloud-import-file" name="csv_file" class="cloud-input" type="file" accept=".csv" required>
+          </label>
+        </div>
+        <div class="cloud-actions">
+          <button type="submit" class="cloud-btn primary">取り込んで編集へ進む</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="cloud-panel-editor" class="cloud-panel">
+      <div id="cloud-empty-state" class="cloud-empty-state">
+        <h2>編集するシフト帳を選んでください</h2>
+        <p>「自分のシフト帳」から開くか、「新規作成」「CSV取込」から作業を始められます。</p>
+      </div>
+
+      <div id="cloud-workspace" class="cloud-workspace cloud-hidden">
+        <div class="cloud-editor-bar">
+          <div class="cloud-editor-heading">
+            <h2 id="cloud-editor-title">編集</h2>
+            <p id="cloud-editor-meta">対象の月を選んで編集を始めてください。</p>
+          </div>
+          <div class="cloud-editor-actions">
+            <label class="cloud-field cloud-field-inline cloud-title-field">
+              <span>タイトル</span>
+              <input id="cloud-project-title" class="cloud-input" type="text">
+            </label>
+            <button id="cloud-save-title" type="button" class="cloud-btn secondary">タイトル保存</button>
+            <button id="cloud-save-month" type="button" class="cloud-btn primary">この月を保存</button>
+          </div>
+        </div>
+
+        <div id="cloud-project-badges" class="cloud-badges"></div>
+
+        <div class="cloud-tool-dock">
+          <details class="cloud-fold">
+            <summary class="cloud-fold-summary">共有URL</summary>
+            <div class="cloud-fold-content">
+              <div class="cloud-url-grid">
+                <label class="cloud-field">
+                  <span>閲覧URL</span>
+                  <input id="cloud-view-url" class="cloud-input" type="text" readonly>
+                </label>
+                <div class="cloud-inline-actions">
+                  <button id="cloud-open-view-url" type="button" class="cloud-btn secondary">開く</button>
+                  <button id="cloud-copy-view-url" type="button" class="cloud-btn secondary">コピー</button>
+                </div>
+                <label class="cloud-field">
+                  <span>編集URL</span>
+                  <input id="cloud-edit-url" class="cloud-input" type="text" readonly>
+                </label>
+                <div class="cloud-inline-actions">
+                  <button id="cloud-open-edit-url" type="button" class="cloud-btn secondary">開く</button>
+                  <button id="cloud-copy-edit-url" type="button" class="cloud-btn secondary">コピー</button>
+                </div>
+              </div>
+              <div class="cloud-actions compact">
+                <button id="cloud-regenerate-urls" type="button" class="cloud-btn ghost">URLを再発行</button>
+              </div>
+            </div>
+          </details>
+
+          <details class="cloud-fold" open>
+            <summary class="cloud-fold-summary">月と出力</summary>
+            <div class="cloud-fold-content">
+              <div class="cloud-month-grid">
+                <label class="cloud-field">
+                  <span>表示中の月</span>
+                  <select id="cloud-month-select" class="cloud-input"></select>
+                </label>
+                <label class="cloud-field">
+                  <span>必要人数</span>
+                  <input id="cloud-required-capacity" class="cloud-input" type="number" min="0" max="99" value="0">
+                </label>
+              </div>
+              <div class="cloud-actions compact">
+                <button id="cloud-prev-month" type="button" class="cloud-btn secondary">前の月へ</button>
+                <button id="cloud-next-month" type="button" class="cloud-btn secondary">次の月へ</button>
+                <button id="cloud-add-prev-month" type="button" class="cloud-btn ghost">前月を追加</button>
+                <button id="cloud-add-next-month" type="button" class="cloud-btn ghost">翌月を追加</button>
+                <button id="cloud-export-csv" type="button" class="cloud-btn secondary">CSV出力</button>
+                <button id="cloud-export-xlsx" type="button" class="cloud-btn secondary">xlsx出力</button>
+              </div>
+            </div>
+          </details>
+
+          <details class="cloud-fold">
+            <summary class="cloud-fold-summary">編集履歴</summary>
+            <div class="cloud-fold-content">
+              <div id="cloud-history-list" class="cloud-history-list"></div>
+            </div>
+          </details>
+
+          <details class="cloud-fold cloud-fold-danger">
+            <summary class="cloud-fold-summary">削除</summary>
+            <div class="cloud-fold-content">
+              <div class="cloud-actions compact">
+                <button id="cloud-delete-month" type="button" class="cloud-btn danger">この月を削除</button>
+                <button id="cloud-delete-project" type="button" class="cloud-btn danger">シフト帳を完全削除</button>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div id="cloud-month-empty" class="cloud-empty-state cloud-hidden">
+          <h3>月データがありません</h3>
+          <p>最初の月を作成してから、カレンダーを開けます。</p>
+          <div class="cloud-actions">
+            <button id="cloud-create-first-month" type="button" class="cloud-btn primary">月を作成</button>
+          </div>
+        </div>
+
+        <section class="cloud-calendar-stage">
+          <div id="cloud-editor-panel" class="cloud-editor-host"></div>
+        </section>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div id="cloud-flash" class="cloud-flash info"></div>
+
+<script>
+  window.CLOUDSHIFT_PAGE = {
+    type: "owner"
+  };
+</script>
+{% include "_cloudshift_script.html" %}
+{% endblock %}

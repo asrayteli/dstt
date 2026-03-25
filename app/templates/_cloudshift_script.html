@@ -1,0 +1,792 @@
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="{{ url_for('static', filename='shiftersync/js/ss_common.js') }}"></script>
+<script>
+  (function() {
+    'use strict';
+
+    const PAGE = window.CLOUDSHIFT_PAGE || {};
+    const state = {
+      projects: [],
+      projectPayload: null,
+      baseMonth: null,
+      guestName: PAGE.authenticatedEditorName || ''
+    };
+
+    function $(id) {
+      return document.getElementById(id);
+    }
+
+    function deepClone(value) {
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function modeLabel(mode) {
+      return mode === 'scene' ? '現場' : '個人';
+    }
+
+    function modeLongLabel(mode) {
+      return mode === 'scene' ? '現場シフト' : '個人シフト';
+    }
+
+    function isLikelyMobileDevice() {
+      const ua = navigator.userAgent || '';
+      const touchDevice = navigator.maxTouchPoints > 1;
+      const narrowViewport = window.matchMedia('(max-width: 820px)').matches;
+      return narrowViewport || /iPhone|iPad|iPod|Android|Mobile/i.test(ua) || touchDevice;
+    }
+
+    function applyPublicDeviceMode() {
+      if (PAGE.type !== 'public') return;
+      const mobile = isLikelyMobileDevice();
+      document.body.classList.toggle('cloud-device-mobile', mobile);
+      document.body.classList.toggle('cloud-device-desktop', !mobile);
+      document.body.setAttribute('data-cloud-device', mobile ? 'mobile' : 'desktop');
+      const shell = document.querySelector('.cloud-public-shell');
+      if (shell) {
+        shell.setAttribute('data-cloud-device', mobile ? 'mobile' : 'desktop');
+      }
+    }
+
+    function showFlash(message, type) {
+      const node = $('cloud-flash');
+      if (!node) return;
+      node.className = `cloud-flash ${type || 'info'}`;
+      node.textContent = message;
+      node.style.display = 'block';
+      clearTimeout(showFlash._timer);
+      showFlash._timer = setTimeout(() => {
+        node.style.display = 'none';
+      }, 2600);
+    }
+
+    async function requestJson(url, options) {
+      const opts = Object.assign({ headers: {} }, options || {});
+      if (opts.body && !(opts.body instanceof FormData) && !opts.headers['Content-Type']) {
+        opts.headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(opts.body);
+      }
+      const response = await fetch(url, opts);
+      const isJson = (response.headers.get('content-type') || '').includes('application/json');
+      const payload = isJson ? await response.json() : null;
+      if (!response.ok) {
+        throw new Error((payload && payload.error) || 'リクエストに失敗しました');
+      }
+      return payload;
+    }
+
+    function unwrapProjectPayload(payload) {
+      return payload && payload.project && payload.project.project ? payload.project : payload;
+    }
+
+    function currentProject() {
+      return state.projectPayload ? state.projectPayload.project : null;
+    }
+
+    function currentMonth() {
+      return state.projectPayload ? state.projectPayload.month : null;
+    }
+
+    function currentMonthKey() {
+      return state.projectPayload ? state.projectPayload.active_month_key : null;
+    }
+
+    function parseMonthKey(monthKey) {
+      const match = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+      if (!match) return null;
+      return { year: parseInt(match[1], 10), month: parseInt(match[2], 10) };
+    }
+
+    function formatMonthKey(monthKey) {
+      const parsed = parseMonthKey(monthKey);
+      return parsed ? `${parsed.year}年${parsed.month}月` : '未選択';
+    }
+
+    function nextMonthKey(monthKey, delta) {
+      const parsed = parseMonthKey(monthKey);
+      if (!parsed) return null;
+      const date = new Date(parsed.year, parsed.month - 1 + delta, 1);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    function promptMonthKey(defaultValue) {
+      return window.prompt('作成する年月を YYYY-MM 形式で入力してください', defaultValue || new Date().toISOString().slice(0, 7));
+    }
+
+    function updateCurrentProjectLabel() {
+      const node = $('cloud-current-project') || $('cloud-public-identity');
+      if (!node) return;
+
+      if (PAGE.type === 'public') {
+        if (PAGE.accessMode !== 'edit') {
+          node.classList.add('cloud-hidden');
+          return;
+        }
+
+        const editorName = PAGE.authenticatedEditorName || state.guestName;
+        if (!editorName) {
+          node.classList.add('cloud-hidden');
+          return;
+        }
+
+        node.textContent = `編集者: ${editorName}`;
+        node.classList.remove('cloud-hidden');
+
+        const note = $('cloud-public-editor-note');
+        if (note) {
+          note.textContent = `${editorName} として保存します`;
+        }
+        return;
+      }
+
+      const project = currentProject();
+      node.textContent = project ? `${project.title} / ${modeLabel(project.mode)}` : '未選択';
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll('[data-cloud-tab]').forEach((button) => {
+        button.classList.toggle('is-active', button.getAttribute('data-cloud-tab') === tabName);
+      });
+      document.querySelectorAll('.cloud-panel').forEach((panel) => {
+        panel.classList.toggle('is-active', panel.id === `cloud-panel-${tabName}`);
+      });
+    }
+
+    function renderProjectList() {
+      const list = $('cloud-project-list');
+      if (!list) return;
+
+      if (!state.projects.length) {
+        list.innerHTML = '<div class="cloud-empty-state"><p>まだシフト帳がありません。</p></div>';
+        return;
+      }
+
+      list.innerHTML = state.projects.map((project) => `
+        <article class="cloud-project-item${currentProject() && currentProject().id === project.id ? ' active' : ''}" data-project-id="${project.id}">
+          <div class="cloud-project-card-head">
+            <div>
+              <h3>${escapeHtml(project.title)}</h3>
+              <p>${modeLongLabel(project.mode)} / ${project.month_count}か月</p>
+            </div>
+            <span class="cloud-badge">${project.latest_month_key ? escapeHtml(formatMonthKey(project.latest_month_key)) : '月未作成'}</span>
+          </div>
+          <div class="cloud-project-meta">
+            <span>最終更新: ${escapeHtml(project.updated_at || '-')}</span>
+          </div>
+        </article>
+      `).join('');
+    }
+
+    function renderHistory(history) {
+      const list = $('cloud-history-list');
+      if (!list) return;
+
+      if (!history || history.length === 0) {
+        list.innerHTML = '<div class="cloud-empty-state"><p>編集履歴はまだありません。</p></div>';
+        return;
+      }
+
+      list.innerHTML = history.map((item) => `
+        <article class="cloud-history-item">
+          <div class="cloud-badge">${escapeHtml(item.timestamp || '')} / ${escapeHtml(item.editor_name || '')}</div>
+          <ul>${(item.changes || []).map((change) => `<li>${escapeHtml(change)}</li>`).join('')}</ul>
+        </article>
+      `).join('');
+    }
+
+    function buildCalendarHost(targetId) {
+      const host = $(targetId);
+      if (!host) return;
+      host.innerHTML = `
+        <div class="container cloud-calendar-container">
+          <div class="weekday-header">
+            <div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div><div>日</div>
+          </div>
+          <div id="shiftGrid" class="calendar-grid"></div>
+        </div>
+      `;
+    }
+
+    function mountEditor(editable) {
+      const project = currentProject();
+      const month = currentMonth();
+      const host = $('cloud-editor-panel');
+      if (!host || !project) return;
+
+      if (!month) {
+        host.innerHTML = '';
+        const empty = $('cloud-month-empty') || $('cloud-public-empty');
+        if (empty) empty.classList.remove('cloud-hidden');
+        return;
+      }
+
+      const empty = $('cloud-month-empty') || $('cloud-public-empty');
+      if (empty) empty.classList.add('cloud-hidden');
+
+      buildCalendarHost('cloud-editor-panel');
+      ShifterSync.setState('mode', project.mode);
+      ShifterSync.setState('name', project.title);
+      ShifterSync.setState('capacityEnabled', (parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0) > 0);
+      ShifterSync.setState('requiredCapacity', parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0);
+      ShifterSync.buildCalendar(month.year, month.month, project.mode, month.entries_per_day || {}, { editable });
+    }
+
+    function renderWorkspace(editable) {
+      const project = currentProject();
+      const month = currentMonth();
+
+      if (PAGE.type === 'owner') {
+        $('cloud-empty-state').classList.toggle('cloud-hidden', !!project);
+        $('cloud-workspace').classList.toggle('cloud-hidden', !project);
+      }
+
+      if (!project) {
+        if ($('cloud-editor-panel')) $('cloud-editor-panel').innerHTML = '';
+        updateCurrentProjectLabel();
+        if (PAGE.type === 'owner') renderHistory([]);
+        return;
+      }
+
+      updateCurrentProjectLabel();
+
+      if ($('cloud-project-title')) $('cloud-project-title').value = project.title || '';
+      if ($('cloud-view-url')) $('cloud-view-url').value = project.urls.view_url || '';
+      if ($('cloud-edit-url')) $('cloud-edit-url').value = project.urls.edit_url || '';
+
+      if ($('cloud-project-badges')) {
+        $('cloud-project-badges').innerHTML = `
+          <span class="cloud-badge">${modeLongLabel(project.mode)}</span>
+          <span class="cloud-badge">${(project.month_keys || []).length}か月</span>
+          <span class="cloud-badge">${escapeHtml(project.updated_at || '')}</span>
+        `;
+      }
+
+      if ($('cloud-month-select')) {
+        $('cloud-month-select').innerHTML = (project.month_keys || []).map((key) => `
+          <option value="${key}" ${key === currentMonthKey() ? 'selected' : ''}>${formatMonthKey(key)}</option>
+        `).join('');
+      }
+
+      if ($('cloud-required-capacity')) {
+        $('cloud-required-capacity').value = month ? (month.required_capacity || 0) : 0;
+        $('cloud-required-capacity').disabled = !editable;
+      }
+
+      if ($('cloud-capacity-field')) {
+        $('cloud-capacity-field').classList.toggle('cloud-hidden', PAGE.accessMode !== 'edit');
+      }
+
+      if ($('cloud-save-month')) $('cloud-save-month').classList.toggle('cloud-hidden', !editable);
+      if ($('cloud-add-prev-month')) $('cloud-add-prev-month').classList.toggle('cloud-hidden', !editable);
+      if ($('cloud-add-next-month')) $('cloud-add-next-month').classList.toggle('cloud-hidden', !editable);
+      if ($('cloud-create-first-month')) $('cloud-create-first-month').classList.toggle('cloud-hidden', !editable);
+
+      if ($('cloud-editor-title')) {
+        $('cloud-editor-title').textContent = month ? `${project.title} / ${formatMonthKey(currentMonthKey())}` : `${project.title} / 月未作成`;
+      }
+
+      if ($('cloud-editor-meta')) {
+        $('cloud-editor-meta').textContent = month
+          ? `${modeLongLabel(project.mode)} / リビジョン ${month.revision}`
+          : '最初の月を作成してからカレンダーを開けます。';
+      }
+
+      mountEditor(editable);
+    }
+
+    function collectMonthPayload() {
+      const month = currentMonth();
+      if (!month) return null;
+      return {
+        base_month: {
+          year: month.year,
+          month: month.month,
+          required_capacity: state.baseMonth ? state.baseMonth.required_capacity : month.required_capacity,
+          entries_per_day: state.baseMonth ? state.baseMonth.entries_per_day : month.entries_per_day
+        },
+        required_capacity: parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0,
+        entries_per_day: ShifterSync.getEntriesPerDay()
+      };
+    }
+
+    async function loadProjects() {
+      if (PAGE.type !== 'owner') return;
+      const data = await requestJson('/tools/shiftersync/cloudshift/api/list');
+      state.projects = data.projects || [];
+      renderProjectList();
+    }
+
+    async function loadHistory(projectId) {
+      if (PAGE.type !== 'owner') return;
+      try {
+        const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}/history`);
+        renderHistory(data.history || []);
+      } catch (_) {
+        renderHistory([]);
+      }
+    }
+
+    async function selectProject(projectId, monthKey) {
+      const suffix = monthKey ? `?month_key=${encodeURIComponent(monthKey)}` : '';
+      const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}${suffix}`));
+      state.projectPayload = payload;
+      state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      renderProjectList();
+      renderWorkspace(true);
+      await loadHistory(projectId);
+      switchTab('editor');
+    }
+
+    async function loadPublic(monthKey) {
+      const suffix = monthKey ? `?month_key=${encodeURIComponent(monthKey)}` : '';
+      const payload = await requestJson(`/tools/shiftersync/cloudshift/api/public/${PAGE.accessMode}/${PAGE.token}${suffix}`);
+      if (payload.authenticated_editor_name) {
+        PAGE.authenticatedEditorName = payload.authenticated_editor_name;
+        state.guestName = payload.authenticated_editor_name;
+      }
+      state.projectPayload = payload;
+      state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      updateCurrentProjectLabel();
+      renderWorkspace(PAGE.accessMode === 'edit');
+    }
+
+    function guestNameKey() {
+      return `cloudshift:guest:${PAGE.token}`;
+    }
+
+    function ensureGuestName() {
+      if (PAGE.authenticatedEditorName) {
+        state.guestName = PAGE.authenticatedEditorName;
+        updateCurrentProjectLabel();
+        return true;
+      }
+
+      if (!state.guestName) {
+        state.guestName = window.localStorage.getItem(guestNameKey()) || '';
+      }
+
+      if (!state.guestName) {
+        const entered = window.prompt('編集者名を入力してください', '');
+        if (!entered || !entered.trim()) {
+          showFlash('編集者名を入力してください', 'error');
+          return false;
+        }
+        state.guestName = entered.trim();
+        window.localStorage.setItem(guestNameKey(), state.guestName);
+      }
+
+      updateCurrentProjectLabel();
+      return true;
+    }
+
+    async function saveMonthOwner() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) return;
+
+      const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}`, {
+        method: 'PUT',
+        body: collectMonthPayload()
+      }));
+      state.projectPayload = payload;
+      state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      renderWorkspace(true);
+      await loadProjects();
+      await loadHistory(project.id);
+      showFlash('この月を保存しました', 'success');
+    }
+
+    async function saveMonthPublic() {
+      const month = currentMonth();
+      if (!month || !ensureGuestName()) return;
+
+      const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/public/edit/${PAGE.token}/month/${month.year}/${month.month}`, {
+        method: 'PUT',
+        body: Object.assign(collectMonthPayload(), { editor_name: state.guestName })
+      }));
+      state.projectPayload = payload;
+      state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      renderWorkspace(true);
+      showFlash('この月を保存しました', 'success');
+    }
+
+    async function createMonth(targetKey, ownerMode) {
+      const project = currentProject();
+      if (!project) return;
+
+      const parsed = parseMonthKey(targetKey);
+      if (!parsed) {
+        showFlash('年月は YYYY-MM 形式で入力してください', 'error');
+        return;
+      }
+
+      const sourceMonthKey = currentMonthKey();
+      const useCopy = sourceMonthKey
+        ? window.confirm(`${formatMonthKey(targetKey)} を現在の月からコピーして作成しますか？\nOK: コピー / キャンセル: 空で作成`)
+        : false;
+
+      const body = {
+        year: parsed.year,
+        month: parsed.month,
+        init_mode: useCopy ? 'copy' : 'blank',
+        source_month_key: useCopy ? sourceMonthKey : null,
+        required_capacity: parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0
+      };
+
+      if (ownerMode) {
+        const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month`, {
+          method: 'POST',
+          body
+        }));
+        state.projectPayload = payload;
+        state.baseMonth = payload.month ? deepClone(payload.month) : null;
+        renderWorkspace(true);
+        await loadProjects();
+        await loadHistory(project.id);
+      } else {
+        if (!ensureGuestName()) return;
+        body.editor_name = state.guestName;
+        const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/public/edit/${PAGE.token}/month`, {
+          method: 'POST',
+          body
+        }));
+        state.projectPayload = payload;
+        state.baseMonth = payload.month ? deepClone(payload.month) : null;
+        renderWorkspace(true);
+      }
+
+      showFlash(`${formatMonthKey(targetKey)} を作成しました`, 'success');
+    }
+
+    async function navigateMonth(delta, ownerMode) {
+      const activeKey = currentMonthKey() || (currentProject() && currentProject().latest_month_key);
+      if (!activeKey) return;
+
+      const targetKey = nextMonthKey(activeKey, delta);
+      if (!targetKey) return;
+
+      const monthKeys = (currentProject().month_keys || []);
+      if (monthKeys.includes(targetKey)) {
+        if (ownerMode) {
+          await selectProject(currentProject().id, targetKey);
+        } else {
+          await loadPublic(targetKey);
+        }
+        return;
+      }
+
+      if (!ownerMode && PAGE.accessMode !== 'edit') {
+        showFlash('その月はまだ作成されていません', 'info');
+        return;
+      }
+
+      await createMonth(targetKey, ownerMode);
+    }
+
+    async function deleteMonth() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) return;
+      if (!window.confirm(`${formatMonthKey(currentMonthKey())} を削除しますか？`)) return;
+
+      await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}`, { method: 'DELETE' });
+      state.projectPayload = null;
+      state.baseMonth = null;
+      await loadProjects();
+      updateCurrentProjectLabel();
+      switchTab('list');
+      showFlash('この月を削除しました', 'success');
+    }
+
+    async function deleteProject() {
+      const project = currentProject();
+      if (!project) return;
+      if (!window.confirm(`シフト帳「${project.title}」を完全削除しますか？`)) return;
+
+      await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}`, { method: 'DELETE' });
+      state.projectPayload = null;
+      state.baseMonth = null;
+      await loadProjects();
+      renderHistory([]);
+      renderWorkspace(true);
+      updateCurrentProjectLabel();
+      switchTab('list');
+      showFlash('シフト帳を完全削除しました', 'success');
+    }
+
+    async function regenerateUrls() {
+      const project = currentProject();
+      if (!project) return;
+      if (!window.confirm('閲覧URLと編集URLを再発行しますか？ 以前のURLは無効になります。')) return;
+
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/tokens/regenerate`, {
+        method: 'POST',
+        body: {}
+      });
+
+      if ($('cloud-view-url')) $('cloud-view-url').value = data.urls.view_url || '';
+      if ($('cloud-edit-url')) $('cloud-edit-url').value = data.urls.edit_url || '';
+      showFlash('URLを再発行しました', 'success');
+    }
+
+    async function copyText(text, message) {
+      if (!text) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const temp = document.createElement('textarea');
+        temp.value = text;
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        temp.remove();
+      }
+      showFlash(message, 'success');
+    }
+
+    function bindOwnerEvents() {
+      document.querySelectorAll('[data-cloud-tab]').forEach((button) => {
+        button.addEventListener('click', function() {
+          switchTab(this.getAttribute('data-cloud-tab'));
+        });
+      });
+
+      const refreshProjects = $('cloud-refresh-projects');
+      if (refreshProjects) {
+        refreshProjects.addEventListener('click', async () => {
+          await loadProjects();
+          showFlash('一覧を更新しました', 'info');
+        });
+      }
+
+      const projectList = $('cloud-project-list');
+      if (projectList) {
+        projectList.addEventListener('click', (event) => {
+          const item = event.target.closest('[data-project-id]');
+          if (!item) return;
+          selectProject(item.getAttribute('data-project-id')).catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const createForm = $('cloud-create-form');
+      if (createForm) {
+        createForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const formData = new FormData(event.currentTarget);
+          const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
+          state.projectPayload = unwrapProjectPayload(data);
+          state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
+          await loadProjects();
+          await loadHistory(state.projectPayload.project.id);
+          renderWorkspace(true);
+          updateCurrentProjectLabel();
+          switchTab('editor');
+          showFlash('シフト帳を作成しました', 'success');
+        });
+      }
+
+      const importForm = $('cloud-import-form');
+      if (importForm) {
+        importForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const formData = new FormData(event.currentTarget);
+          const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
+          state.projectPayload = unwrapProjectPayload(data);
+          state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
+          await loadProjects();
+          await loadHistory(state.projectPayload.project.id);
+          renderWorkspace(true);
+          updateCurrentProjectLabel();
+          switchTab('editor');
+          showFlash('CSV を取り込みました', 'success');
+        });
+      }
+
+      const saveTitle = $('cloud-save-title');
+      if (saveTitle) {
+        saveTitle.addEventListener('click', async () => {
+          const project = currentProject();
+          if (!project) return;
+          const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/meta`, {
+            method: 'PUT',
+            body: { title: $('cloud-project-title').value.trim() }
+          }));
+          state.projectPayload = payload;
+          renderWorkspace(true);
+          await loadProjects();
+          await loadHistory(project.id);
+          showFlash('タイトルを更新しました', 'success');
+        });
+      }
+
+      const openView = $('cloud-open-view-url');
+      if (openView) openView.addEventListener('click', () => window.open($('cloud-view-url').value, '_blank', 'noopener'));
+
+      const openEdit = $('cloud-open-edit-url');
+      if (openEdit) openEdit.addEventListener('click', () => window.open($('cloud-edit-url').value, '_blank', 'noopener'));
+
+      const copyView = $('cloud-copy-view-url');
+      if (copyView) copyView.addEventListener('click', () => copyText($('cloud-view-url').value, '閲覧URLをコピーしました').catch((error) => showFlash(error.message, 'error')));
+
+      const copyEdit = $('cloud-copy-edit-url');
+      if (copyEdit) copyEdit.addEventListener('click', () => copyText($('cloud-edit-url').value, '編集URLをコピーしました').catch((error) => showFlash(error.message, 'error')));
+
+      const regenerate = $('cloud-regenerate-urls');
+      if (regenerate) regenerate.addEventListener('click', () => regenerateUrls().catch((error) => showFlash(error.message, 'error')));
+
+      const monthSelect = $('cloud-month-select');
+      if (monthSelect) {
+        monthSelect.addEventListener('change', (event) => {
+          selectProject(currentProject().id, event.target.value).catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const prevMonth = $('cloud-prev-month');
+      if (prevMonth) prevMonth.addEventListener('click', () => navigateMonth(-1, true).catch((error) => showFlash(error.message, 'error')));
+
+      const nextMonth = $('cloud-next-month');
+      if (nextMonth) nextMonth.addEventListener('click', () => navigateMonth(1, true).catch((error) => showFlash(error.message, 'error')));
+
+      const addPrevMonth = $('cloud-add-prev-month');
+      if (addPrevMonth) addPrevMonth.addEventListener('click', () => createMonth(nextMonthKey(currentMonthKey() || currentProject().latest_month_key, -1), true).catch((error) => showFlash(error.message, 'error')));
+
+      const addNextMonth = $('cloud-add-next-month');
+      if (addNextMonth) addNextMonth.addEventListener('click', () => createMonth(nextMonthKey(currentMonthKey() || currentProject().latest_month_key, 1), true).catch((error) => showFlash(error.message, 'error')));
+
+      const createFirstMonth = $('cloud-create-first-month');
+      if (createFirstMonth) {
+        createFirstMonth.addEventListener('click', () => {
+          const monthKey = promptMonthKey();
+          if (!monthKey) return;
+          createMonth(monthKey, true).catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const requiredCapacity = $('cloud-required-capacity');
+      if (requiredCapacity) {
+        requiredCapacity.addEventListener('input', () => {
+          const value = parseInt(requiredCapacity.value || '0', 10) || 0;
+          ShifterSync.setState('capacityEnabled', value > 0);
+          ShifterSync.setState('requiredCapacity', value);
+          ShifterSync.updateAllCapacityWarnings();
+        });
+      }
+
+      const saveMonth = $('cloud-save-month');
+      if (saveMonth) saveMonth.addEventListener('click', () => saveMonthOwner().catch((error) => showFlash(error.message, 'error')));
+
+      const exportCsv = $('cloud-export-csv');
+      if (exportCsv) {
+        exportCsv.addEventListener('click', () => {
+          if (!currentProject() || !currentMonthKey()) return;
+          window.location.href = `/tools/shiftersync/cloudshift/api/project/${currentProject().id}/export/csv?month_key=${encodeURIComponent(currentMonthKey())}`;
+        });
+      }
+
+      const exportXlsx = $('cloud-export-xlsx');
+      if (exportXlsx) {
+        exportXlsx.addEventListener('click', () => {
+          if (!currentProject() || !currentMonthKey()) return;
+          window.location.href = `/tools/shiftersync/cloudshift/api/project/${currentProject().id}/export/xlsx?month_key=${encodeURIComponent(currentMonthKey())}`;
+        });
+      }
+
+      const deleteMonthBtn = $('cloud-delete-month');
+      if (deleteMonthBtn) deleteMonthBtn.addEventListener('click', () => deleteMonth().catch((error) => showFlash(error.message, 'error')));
+
+      const deleteProjectBtn = $('cloud-delete-project');
+      if (deleteProjectBtn) deleteProjectBtn.addEventListener('click', () => deleteProject().catch((error) => showFlash(error.message, 'error')));
+    }
+
+    function bindPublicEvents() {
+      const monthSelect = $('cloud-month-select');
+      if (monthSelect) {
+        monthSelect.addEventListener('change', (event) => {
+          loadPublic(event.target.value).catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const prevMonth = $('cloud-prev-month');
+      if (prevMonth) prevMonth.addEventListener('click', () => navigateMonth(-1, false).catch((error) => showFlash(error.message, 'error')));
+
+      const nextMonth = $('cloud-next-month');
+      if (nextMonth) nextMonth.addEventListener('click', () => navigateMonth(1, false).catch((error) => showFlash(error.message, 'error')));
+
+      const addPrevMonth = $('cloud-add-prev-month');
+      if (addPrevMonth) addPrevMonth.addEventListener('click', () => createMonth(nextMonthKey(currentMonthKey() || currentProject().latest_month_key, -1), false).catch((error) => showFlash(error.message, 'error')));
+
+      const addNextMonth = $('cloud-add-next-month');
+      if (addNextMonth) addNextMonth.addEventListener('click', () => createMonth(nextMonthKey(currentMonthKey() || currentProject().latest_month_key, 1), false).catch((error) => showFlash(error.message, 'error')));
+
+      const createFirstMonth = $('cloud-create-first-month');
+      if (createFirstMonth) {
+        createFirstMonth.addEventListener('click', () => {
+          const monthKey = promptMonthKey();
+          if (!monthKey) return;
+          createMonth(monthKey, false).catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const saveMonth = $('cloud-save-month');
+      if (saveMonth) saveMonth.addEventListener('click', () => saveMonthPublic().catch((error) => showFlash(error.message, 'error')));
+
+      const requiredCapacity = $('cloud-required-capacity');
+      if (requiredCapacity) {
+        requiredCapacity.addEventListener('input', () => {
+          const value = parseInt(requiredCapacity.value || '0', 10) || 0;
+          ShifterSync.setState('capacityEnabled', value > 0);
+          ShifterSync.setState('requiredCapacity', value);
+          ShifterSync.updateAllCapacityWarnings();
+        });
+      }
+
+      const exportCsv = $('cloud-export-csv');
+      if (exportCsv) {
+        exportCsv.addEventListener('click', () => {
+          if (!currentMonthKey()) return;
+          window.location.href = `/tools/shiftersync/cloudshift/api/public/${PAGE.accessMode}/${PAGE.token}/export/csv?month_key=${encodeURIComponent(currentMonthKey())}`;
+        });
+      }
+
+      const exportXlsx = $('cloud-export-xlsx');
+      if (exportXlsx) {
+        exportXlsx.addEventListener('click', () => {
+          if (!currentMonthKey()) return;
+          window.location.href = `/tools/shiftersync/cloudshift/api/public/${PAGE.accessMode}/${PAGE.token}/export/xlsx?month_key=${encodeURIComponent(currentMonthKey())}`;
+        });
+      }
+    }
+
+    async function initOwner() {
+      const now = new Date();
+      if ($('cloud-create-year')) $('cloud-create-year').value = now.getFullYear();
+      if ($('cloud-create-month')) $('cloud-create-month').value = now.getMonth() + 1;
+      bindOwnerEvents();
+      await loadProjects();
+      updateCurrentProjectLabel();
+    }
+
+    async function initPublic() {
+      applyPublicDeviceMode();
+      window.addEventListener('resize', applyPublicDeviceMode);
+      bindPublicEvents();
+      await loadPublic();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      if (PAGE.type === 'owner') {
+        initOwner().catch((error) => showFlash(error.message, 'error'));
+      } else {
+        initPublic().catch((error) => showFlash(error.message, 'error'));
+      }
+    });
+  })();
+</script>

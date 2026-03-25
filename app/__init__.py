@@ -68,6 +68,9 @@ def create_app():
     from .tools.shiftersync import shiftersync_bp
     app.register_blueprint(shiftersync_bp)
 
+    from .tools.cloudshift import cloudshift_bp
+    app.register_blueprint(cloudshift_bp)
+
     from .tools.leave_mgr import leave_mgr_bp
     app.register_blueprint(leave_mgr_bp)
 
