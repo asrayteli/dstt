@@ -385,11 +385,10 @@ h1, h2, h3 {
 }
 
 .day-tool-row {
-    display: flex;
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 6px;
     align-items: center;
-    justify-content: flex-start;
 }
 
 .option-select-btn {
@@ -401,14 +400,20 @@ h1, h2, h3 {
     cursor: pointer;
     display: inline-flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
     padding: 8px 10px;
     font-size: 12px;
     font-weight: 700;
     white-space: nowrap;
-    width: auto;
-    max-width: calc(100% - 68px);
-    flex: 0 1 auto;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+}
+
+.option-select-btn span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .option-select-btn.has-options {

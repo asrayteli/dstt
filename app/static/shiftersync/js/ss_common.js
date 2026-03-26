@@ -292,7 +292,7 @@ const ShifterSync = (function() {
       .attr('type', 'button')
       .addClass('option-select-btn')
       .attr('data-day', day)
-      .html('<span>設定</span><span>オプションなし</span>');
+      .html('<span>設定</span><span>OP無し</span>');
 
     const toolDetailBtn = $('<button>')
       .attr('type', 'button')
@@ -584,7 +584,7 @@ const ShifterSync = (function() {
     }
     const selected = getSelectedOptionsForDay(day)[0];
     if (!selected) {
-      btn.html('<span>設定</span><span>オプションなし</span>');
+      btn.html('<span>設定</span><span>OP無し</span>');
       btn.removeClass('has-options');
       return;
     }
