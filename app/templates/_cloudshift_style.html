@@ -512,6 +512,17 @@
     gap: 12px;
   }
 
+  .cloud-sync-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+  }
+
+  .cloud-sync-actions {
+    align-items: end;
+  }
+
   .cloud-history-list {
     display: grid;
     gap: 10px;
@@ -543,7 +554,7 @@
   }
 
   .cloud-editor-host .container {
-    width: max(100%, 980px);
+    width: 100%;
     max-width: none;
     min-width: 0;
     margin: 0;
@@ -627,6 +638,10 @@
       grid-template-columns: 1fr;
     }
 
+    .cloud-sync-grid {
+      grid-template-columns: 1fr;
+    }
+
     .cloud-title-field {
       min-width: 0;
       width: 100%;
@@ -707,6 +722,17 @@
     background: linear-gradient(180deg, #ffffff 0%, #f6fbff 100%);
   }
 
+  body.cloud-public-page.cloud-device-mobile .cloud-editor-host .day-box.is-saturday {
+    background: linear-gradient(180deg, #e3f0ff 0%, #d7e9fe 100%);
+    border-color: #98b9de;
+  }
+
+  body.cloud-public-page.cloud-device-mobile .cloud-editor-host .day-box.is-sunday,
+  body.cloud-public-page.cloud-device-mobile .cloud-editor-host .day-box.is-holiday {
+    background: linear-gradient(180deg, #ffe7ec 0%, #fbdde4 100%);
+    border-color: #d69faa;
+  }
+
   body.cloud-public-page.cloud-device-mobile .cloud-editor-host .date-label {
     width: fit-content;
     min-width: 72px;
@@ -714,6 +740,17 @@
     border-radius: 999px;
     background: #eaf4ff;
     font-size: 13px;
+  }
+
+  body.cloud-public-page.cloud-device-mobile .cloud-editor-host .day-box.is-saturday .date-label {
+    background: #cddff4;
+    color: #143b64;
+  }
+
+  body.cloud-public-page.cloud-device-mobile .cloud-editor-host .day-box.is-sunday .date-label,
+  body.cloud-public-page.cloud-device-mobile .cloud-editor-host .day-box.is-holiday .date-label {
+    background: #f3d0d8;
+    color: #853344;
   }
 
   body.cloud-public-page.cloud-device-mobile .cloud-editor-host .entry-list-container {

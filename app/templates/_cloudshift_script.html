@@ -9,8 +9,13 @@
       projects: [],
       projectPayload: null,
       baseMonth: null,
-      guestName: PAGE.authenticatedEditorName || ''
+      guestName: PAGE.authenticatedEditorName || '',
+      leaveSync: {
+        calendars: [],
+        selectedCalendarId: ''
+      }
     };
+    const employeeSearchCache = new Map();
 
     function $(id) {
       return document.getElementById(id);
@@ -99,6 +104,11 @@
       return state.projectPayload ? state.projectPayload.active_month_key : null;
     }
 
+    function isPersonProject() {
+      const project = currentProject();
+      return !!project && project.mode === 'person';
+    }
+
     function parseMonthKey(monthKey) {
       const match = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
       if (!match) return null;
@@ -119,6 +129,187 @@
 
     function promptMonthKey(defaultValue) {
       return window.prompt('作成する年月を YYYY-MM 形式で入力してください', defaultValue || new Date().toISOString().slice(0, 7));
+    }
+
+    function selectedLeaveCalendarId() {
+      const node = $('cloud-sync-calendar');
+      return node ? node.value : state.leaveSync.selectedCalendarId;
+    }
+
+    function titleFieldRefs(kind) {
+      if (kind === 'create') {
+        return {
+          input: $('cloud-create-title'),
+          hidden: $('cloud-create-employee-number'),
+          panel: $('cloud-create-candidate-panel'),
+          note: $('cloud-create-selected-note'),
+          label: $('cloud-create-title') ? $('cloud-create-title').previousElementSibling : null
+        };
+      }
+      return {
+        input: $('cloud-project-title'),
+        hidden: $('cloud-project-employee-number'),
+        panel: $('cloud-project-candidate-panel'),
+        note: $('cloud-project-selected-note'),
+        label: $('cloud-project-title') ? $('cloud-project-title').previousElementSibling : null
+      };
+    }
+
+    function titleFieldMode(kind) {
+      if (kind === 'create') {
+        return $('cloud-create-mode') ? $('cloud-create-mode').value : 'scene';
+      }
+      return currentProject() ? currentProject().mode : 'scene';
+    }
+
+    function setTitleFieldMode(kind) {
+      const refs = titleFieldRefs(kind);
+      const isPerson = titleFieldMode(kind) === 'person';
+      if (refs.label) {
+        refs.label.textContent = isPerson ? '社員' : 'タイトル';
+      }
+      if (refs.input) {
+        refs.input.placeholder = isPerson ? '社員名' : 'タイトル';
+      }
+      if (!isPerson) {
+        if (refs.hidden) refs.hidden.value = '';
+        if (refs.note) refs.note.textContent = '';
+        if (refs.panel) {
+          refs.panel.innerHTML = '';
+          refs.panel.classList.add('cloud-hidden');
+        }
+      }
+    }
+
+    async function fetchEmployeeCandidates(query) {
+      const key = String(query || '').trim();
+      if (!key) return [];
+      if (employeeSearchCache.has(key)) {
+        return employeeSearchCache.get(key);
+      }
+      const response = await fetch(`/tools/pluslist/api/search_employee?q=${encodeURIComponent(key)}`, {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) {
+        throw new Error('社員候補の検索に失敗しました');
+      }
+      const payload = await response.json();
+      const candidates = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload.results)
+          ? payload.results
+          : Array.isArray(payload.items)
+            ? payload.items
+            : Array.isArray(payload.employees)
+              ? payload.employees
+              : [];
+      employeeSearchCache.set(key, candidates);
+      return candidates;
+    }
+
+    function applyEmployeeCandidate(kind, candidate) {
+      const refs = titleFieldRefs(kind);
+      if (!refs.input || !refs.hidden) {
+        return;
+      }
+      refs.input.value = String(candidate.employee_name || '');
+      refs.input.dataset.selectedEmployeeName = String(candidate.employee_name || '');
+      refs.hidden.value = String(candidate.employee_number || '');
+      if (refs.note) {
+        refs.note.textContent = refs.hidden.value ? `選択中: ${refs.hidden.value}` : '';
+      }
+      if (refs.panel) {
+        refs.panel.innerHTML = '';
+        refs.panel.classList.add('cloud-hidden');
+      }
+    }
+
+    function renderEmployeeCandidates(kind, candidates) {
+      const refs = titleFieldRefs(kind);
+      if (!refs.panel) {
+        return;
+      }
+      if (titleFieldMode(kind) !== 'person') {
+        refs.panel.innerHTML = '';
+        refs.panel.classList.add('cloud-hidden');
+        return;
+      }
+      const normalized = (Array.isArray(candidates) ? candidates : [])
+        .map((item) => ({
+          employee_number: String(item.employee_number || '').trim(),
+          employee_name: String(item.employee_name || '').trim(),
+          office_name: String(item.office_name || '').trim(),
+          job_title: String(item.job_title || '').trim()
+        }))
+        .filter((item) => item.employee_number && item.employee_name);
+      if (!normalized.length) {
+        refs.panel.innerHTML = '<div style="color: var(--cloud-muted); font-size: 12px; padding: 4px 2px;">候補が見つかりません</div>';
+        refs.panel.classList.remove('cloud-hidden');
+        return;
+      }
+      refs.panel.innerHTML = normalized.slice(0, 8).map((candidate) => {
+        const label = [
+          candidate.employee_name,
+          candidate.employee_number,
+          candidate.office_name,
+          candidate.job_title
+        ].filter(Boolean).join(' / ');
+        return `
+          <button
+            type="button"
+            class="cloud-employee-candidate"
+            data-kind="${kind}"
+            data-employee-name="${escapeHtml(candidate.employee_name)}"
+            data-employee-number="${escapeHtml(candidate.employee_number)}"
+            style="display:block; width:100%; text-align:left; border:1px solid var(--cloud-line); border-radius:10px; background:#fff; color:var(--cloud-text); padding:8px 10px; cursor:pointer; margin:0 0 6px;"
+          >${escapeHtml(label)}</button>
+        `;
+      }).join('');
+      refs.panel.classList.remove('cloud-hidden');
+    }
+
+    let employeeSearchTimer = null;
+    function scheduleEmployeeSearch(kind) {
+      const refs = titleFieldRefs(kind);
+      if (!refs.input || titleFieldMode(kind) !== 'person') {
+        return;
+      }
+      const query = refs.input.value.trim();
+      if (refs.input.dataset.selectedEmployeeName && refs.input.dataset.selectedEmployeeName !== query) {
+        refs.hidden.value = '';
+        if (refs.note) refs.note.textContent = '';
+      }
+      if (!query) {
+        if (refs.panel) {
+          refs.panel.innerHTML = '';
+          refs.panel.classList.add('cloud-hidden');
+        }
+        return;
+      }
+      window.clearTimeout(employeeSearchTimer);
+      employeeSearchTimer = window.setTimeout(async () => {
+        const latestQuery = refs.input.value.trim();
+        if (!latestQuery) {
+          if (refs.panel) {
+            refs.panel.innerHTML = '';
+            refs.panel.classList.add('cloud-hidden');
+          }
+          return;
+        }
+        try {
+          const candidates = await fetchEmployeeCandidates(latestQuery);
+          if (refs.input.value.trim() !== latestQuery) {
+            return;
+          }
+          renderEmployeeCandidates(kind, candidates);
+        } catch (_) {
+          if (refs.panel) {
+            refs.panel.innerHTML = '';
+            refs.panel.classList.add('cloud-hidden');
+          }
+        }
+      }, 220);
     }
 
     function updateCurrentProjectLabel() {
@@ -202,6 +393,88 @@
       `).join('');
     }
 
+    function renderLeaveSyncControls() {
+      const row = $('cloud-leave-sync-row');
+      const select = $('cloud-sync-calendar');
+      const button = $('cloud-sync-leaves');
+      if (!row || !select || !button) {
+        return;
+      }
+
+      const visible = PAGE.type === 'owner' && isPersonProject() && !!currentMonth();
+      row.classList.toggle('cloud-hidden', !visible);
+      if (!visible) {
+        select.innerHTML = '';
+        button.disabled = true;
+        return;
+      }
+
+      const calendars = state.leaveSync.calendars || [];
+      if (!calendars.length) {
+        select.innerHTML = '<option value="">反映先がありません</option>';
+        select.disabled = true;
+        button.disabled = true;
+        return;
+      }
+
+      if (!state.leaveSync.selectedCalendarId || !calendars.some((item) => item.calendar_id === state.leaveSync.selectedCalendarId)) {
+        state.leaveSync.selectedCalendarId = calendars[0].calendar_id;
+      }
+
+      select.innerHTML = calendars.map((item) => `
+        <option value="${escapeHtml(item.calendar_id)}" ${item.calendar_id === state.leaveSync.selectedCalendarId ? 'selected' : ''}>
+          ${escapeHtml(item.name || item.calendar_id)}
+        </option>
+      `).join('');
+      select.disabled = false;
+      button.disabled = !selectedLeaveCalendarId();
+    }
+
+    async function loadLeaveSyncCalendars(projectId) {
+      if (PAGE.type !== 'owner' || !projectId) {
+        state.leaveSync.calendars = [];
+        state.leaveSync.selectedCalendarId = '';
+        renderLeaveSyncControls();
+        return;
+      }
+
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}/leave-sync/calendars`);
+      state.leaveSync.calendars = data.calendars || [];
+      if (!state.leaveSync.calendars.some((item) => item.calendar_id === state.leaveSync.selectedCalendarId)) {
+        state.leaveSync.selectedCalendarId = state.leaveSync.calendars[0] ? state.leaveSync.calendars[0].calendar_id : '';
+      }
+      renderLeaveSyncControls();
+    }
+
+    async function syncCurrentMonthLeaves() {
+      const project = currentProject();
+      const month = currentMonth();
+      const calendarId = selectedLeaveCalendarId();
+      if (!project || !month) {
+        return;
+      }
+      if (!calendarId) {
+        showFlash('営業所を選択してください', 'error');
+        return;
+      }
+
+      const result = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/leave-sync/${month.year}/${month.month}`, {
+        method: 'POST',
+        body: {
+          calendar_id: calendarId
+        }
+      });
+
+      let message = `有休マネージャーへ反映しました: 登録 ${result.created_total} 件 / 置換削除 ${result.removed_total} 件`;
+      if (result.skipped_total) {
+        message += ` / スキップ ${result.skipped_total} 件`;
+      }
+      showFlash(message, result.skipped_total ? 'info' : 'success');
+      if (project.id) {
+        await loadHistory(project.id);
+      }
+    }
+
     function buildCalendarHost(targetId) {
       const host = $(targetId);
       if (!host) return;
@@ -251,13 +524,22 @@
       if (!project) {
         if ($('cloud-editor-panel')) $('cloud-editor-panel').innerHTML = '';
         updateCurrentProjectLabel();
+        renderLeaveSyncControls();
         if (PAGE.type === 'owner') renderHistory([]);
         return;
       }
 
       updateCurrentProjectLabel();
 
-      if ($('cloud-project-title')) $('cloud-project-title').value = project.title || '';
+      if ($('cloud-project-title')) {
+        $('cloud-project-title').value = project.title || '';
+        $('cloud-project-title').dataset.selectedEmployeeName = project.title || '';
+      }
+      if ($('cloud-project-employee-number')) $('cloud-project-employee-number').value = project.employee_number || '';
+      if ($('cloud-project-selected-note')) {
+        $('cloud-project-selected-note').textContent = project.employee_number ? `選択中: ${project.employee_number}` : '';
+      }
+      setTitleFieldMode('project');
       if ($('cloud-view-url')) $('cloud-view-url').value = project.urls.view_url || '';
       if ($('cloud-edit-url')) $('cloud-edit-url').value = project.urls.edit_url || '';
 
@@ -279,6 +561,8 @@
         $('cloud-required-capacity').value = month ? (month.required_capacity || 0) : 0;
         $('cloud-required-capacity').disabled = !editable;
       }
+
+      renderLeaveSyncControls();
 
       if ($('cloud-capacity-field')) {
         $('cloud-capacity-field').classList.toggle('cloud-hidden', PAGE.accessMode !== 'edit');
@@ -345,6 +629,7 @@
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       renderProjectList();
       renderWorkspace(true);
+      await loadLeaveSyncCalendars(projectId);
       await loadHistory(projectId);
       switchTab('editor');
     }
@@ -518,6 +803,8 @@
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}`, { method: 'DELETE' });
       state.projectPayload = null;
       state.baseMonth = null;
+      state.leaveSync.calendars = [];
+      state.leaveSync.selectedCalendarId = '';
       await loadProjects();
       renderHistory([]);
       renderWorkspace(true);
@@ -589,6 +876,7 @@
           state.projectPayload = unwrapProjectPayload(data);
           state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
           await loadProjects();
+          await loadLeaveSyncCalendars(state.projectPayload.project.id);
           await loadHistory(state.projectPayload.project.id);
           renderWorkspace(true);
           updateCurrentProjectLabel();
@@ -606,6 +894,7 @@
           state.projectPayload = unwrapProjectPayload(data);
           state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
           await loadProjects();
+          await loadLeaveSyncCalendars(state.projectPayload.project.id);
           await loadHistory(state.projectPayload.project.id);
           renderWorkspace(true);
           updateCurrentProjectLabel();
@@ -621,7 +910,10 @@
           if (!project) return;
           const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/meta`, {
             method: 'PUT',
-            body: { title: $('cloud-project-title').value.trim() }
+            body: {
+              title: $('cloud-project-title').value.trim(),
+              employee_number: $('cloud-project-employee-number') ? $('cloud-project-employee-number').value.trim() : ''
+            }
           }));
           state.projectPayload = payload;
           renderWorkspace(true);
@@ -651,6 +943,45 @@
         monthSelect.addEventListener('change', (event) => {
           selectProject(currentProject().id, event.target.value).catch((error) => showFlash(error.message, 'error'));
         });
+      }
+
+      const createMode = $('cloud-create-mode');
+      if (createMode) {
+        createMode.addEventListener('change', () => {
+          setTitleFieldMode('create');
+        });
+      }
+
+      const createTitle = $('cloud-create-title');
+      if (createTitle) {
+        createTitle.addEventListener('input', () => scheduleEmployeeSearch('create'));
+      }
+
+      const projectTitle = $('cloud-project-title');
+      if (projectTitle) {
+        projectTitle.addEventListener('input', () => scheduleEmployeeSearch('project'));
+      }
+
+      document.addEventListener('click', (event) => {
+        const candidate = event.target.closest('.cloud-employee-candidate');
+        if (!candidate) return;
+        applyEmployeeCandidate(candidate.getAttribute('data-kind'), {
+          employee_name: candidate.getAttribute('data-employee-name') || '',
+          employee_number: candidate.getAttribute('data-employee-number') || ''
+        });
+      });
+
+      const syncCalendar = $('cloud-sync-calendar');
+      if (syncCalendar) {
+        syncCalendar.addEventListener('change', (event) => {
+          state.leaveSync.selectedCalendarId = event.target.value || '';
+          renderLeaveSyncControls();
+        });
+      }
+
+      const syncLeaves = $('cloud-sync-leaves');
+      if (syncLeaves) {
+        syncLeaves.addEventListener('click', () => syncCurrentMonthLeaves().catch((error) => showFlash(error.message, 'error')));
       }
 
       const prevMonth = $('cloud-prev-month');
@@ -692,6 +1023,14 @@
         exportCsv.addEventListener('click', () => {
           if (!currentProject() || !currentMonthKey()) return;
           window.location.href = `/tools/shiftersync/cloudshift/api/project/${currentProject().id}/export/csv?month_key=${encodeURIComponent(currentMonthKey())}`;
+        });
+      }
+
+      const exportCalendar = $('cloud-export-calendar');
+      if (exportCalendar) {
+        exportCalendar.addEventListener('click', () => {
+          if (!currentProject() || !currentMonthKey()) return;
+          window.location.href = `/tools/shiftersync/cloudshift/api/project/${currentProject().id}/export/calendar_png?month_key=${encodeURIComponent(currentMonthKey())}`;
         });
       }
 
@@ -760,6 +1099,14 @@
         });
       }
 
+      const exportCalendar = $('cloud-export-calendar');
+      if (exportCalendar) {
+        exportCalendar.addEventListener('click', () => {
+          if (!currentMonthKey()) return;
+          window.location.href = `/tools/shiftersync/cloudshift/api/public/${PAGE.accessMode}/${PAGE.token}/export/calendar_png?month_key=${encodeURIComponent(currentMonthKey())}`;
+        });
+      }
+
       const exportXlsx = $('cloud-export-xlsx');
       if (exportXlsx) {
         exportXlsx.addEventListener('click', () => {
@@ -773,6 +1120,7 @@
       const now = new Date();
       if ($('cloud-create-year')) $('cloud-create-year').value = now.getFullYear();
       if ($('cloud-create-month')) $('cloud-create-month').value = now.getMonth() + 1;
+      setTitleFieldMode('create');
       bindOwnerEvents();
       await loadProjects();
       updateCurrentProjectLabel();

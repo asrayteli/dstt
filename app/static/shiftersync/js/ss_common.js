@@ -7,28 +7,47 @@ const ShifterSync = (function() {
   'use strict';
 
   const optionMappings = {
-    A: '午前',
-    P: '午後',
-    E: '早番',
-    L: '遅番',
-    M: 'マイクロ',
-    C: '中型',
-    O: '大型',
-    W: 'ワゴン',
-    V: '役員車両',
-    N1: '1号車',
-    N2: '2号車',
-    N3: '3号車',
-    N4: '4号車',
-    N5: '5号車'
+    A: '\u5348\u524d',
+    P: '\u5348\u5f8c',
+    E: '\u65e9\u756a',
+    L: '\u9045\u756a',
+    M: '\u30de\u30a4\u30af\u30ed',
+    C: '\u4e2d\u578b',
+    O: '\u5927\u578b',
+    W: '\u30ef\u30b4\u30f3',
+    V: '\u5f79\u54e1\u8eca\u4e21',
+    N1: '1\u53f7\u8eca',
+    N2: '2\u53f7\u8eca',
+    N3: '3\u53f7\u8eca',
+    N4: '4\u53f7\u8eca',
+    N5: '5\u53f7\u8eca'
   };
 
+  const leaveOptionMappings = {
+    PAID: '\u6709\u4f11',
+    COMP: '\u4ee3\u4f11',
+    CONDOLENCE: '\u6176\u5f14\u4f11\u6687',
+    CARE: '\u4ecb\u8b77\u4f11\u6687',
+    REFRESH: '\u30ea\u30d5\u30ec\u30c3\u30b7\u30e5\u4f11\u6687',
+    OTHER: '\u305d\u306e\u4ed6'
+  };
+
+  const allOptionMappings = Object.assign({}, optionMappings, leaveOptionMappings);
+  const shiftTimeOptionKeys = ['A', 'P', 'E', 'L'];
+  const leaveOptionKeys = Object.keys(leaveOptionMappings);
+  const vehicleOptionKeys = ['M', 'C', 'O', 'W', 'V'];
+  const vehicleNumberOptionKeys = ['N1', 'N2', 'N3', 'N4', 'N5'];
   const commentRowPrefix = '#comment';
+  const employeeNumberRowPrefix = '#employee_number';
+  const projectEmployeeNumberRowPrefix = '#project_employee_number';
+
   const state = {
     mode: 'scene',
     year: null,
     month: null,
     name: null,
+    targetEmployeeNumber: '',
+    holidays: new Set(Array.isArray(window.SHIFTERSYNC_HOLIDAYS) ? window.SHIFTERSYNC_HOLIDAYS : []),
     entriesPerDay: {},
     capacityEnabled: false,
     requiredCapacity: 0,
@@ -37,6 +56,33 @@ const ShifterSync = (function() {
     modalDay: null,
     modalEntryId: null
   };
+
+  const employeeSearchCache = new Map();
+  const employeeSearchTimers = new WeakMap();
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function insertTextAtCursor(element, text) {
+    if (!element) {
+      return;
+    }
+    const value = String(element.value || '');
+    const start = Number.isInteger(element.selectionStart) ? element.selectionStart : value.length;
+    const end = Number.isInteger(element.selectionEnd) ? element.selectionEnd : value.length;
+    element.value = `${value.slice(0, start)}${text}${value.slice(end)}`;
+    const nextCursor = start + text.length;
+    if (typeof element.setSelectionRange === 'function') {
+      element.setSelectionRange(nextCursor, nextCursor);
+    }
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  }
 
   function makeEntryId() {
     return `entry-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -48,10 +94,7 @@ const ShifterSync = (function() {
     if (!match) {
       return { optionKey: null, name: text };
     }
-    return {
-      optionKey: match[1],
-      name: match[2]
-    };
+    return { optionKey: match[1], name: match[2] };
   }
 
   function formatEntryValue(optionKey, name) {
@@ -71,7 +114,7 @@ const ShifterSync = (function() {
       if (!value) {
         return null;
       }
-      return { id: makeEntryId(), value, comment: '' };
+      return { id: makeEntryId(), value, comment: '', employee_number: '' };
     }
 
     const value = String(entry.value || '').trim();
@@ -81,7 +124,8 @@ const ShifterSync = (function() {
     return {
       id: String(entry.id || makeEntryId()),
       value,
-      comment: String(entry.comment || '').trim()
+      comment: String(entry.comment || '').trim(),
+      employee_number: String(entry.employee_number || entry.employeeNumber || '').trim()
     };
   }
 
@@ -93,7 +137,8 @@ const ShifterSync = (function() {
     return {
       id: withNewId ? makeEntryId() : normalized.id,
       value: normalized.value,
-      comment: normalized.comment
+      comment: normalized.comment,
+      employee_number: normalized.employee_number
     };
   }
 
@@ -101,9 +146,7 @@ const ShifterSync = (function() {
     if (!Array.isArray(rawEntries)) {
       return [];
     }
-    return rawEntries
-      .map((entry) => normalizeEntry(entry))
-      .filter(Boolean);
+    return rawEntries.map((entry) => normalizeEntry(entry)).filter(Boolean);
   }
 
   function getDayEntries(day) {
@@ -126,6 +169,383 @@ const ShifterSync = (function() {
     state.selectedOptions[String(day)] = [];
   }
 
+  function isPersonMode() {
+    return state.mode === 'person';
+  }
+
+  function pad2(value) {
+    return String(value).padStart(2, '0');
+  }
+
+  function calendarDateKey(year, month, day) {
+    return `${String(year).padStart(4, '0')}-${pad2(month)}-${pad2(day)}`;
+  }
+
+  function getDayToneClass(year, month, day) {
+    const dateKey = calendarDateKey(year, month, day);
+    if (state.holidays.has(dateKey)) {
+      return 'is-holiday';
+    }
+    const weekday = new Date(year, month - 1, day).getDay();
+    if (weekday === 0) {
+      return 'is-sunday';
+    }
+    if (weekday === 6) {
+      return 'is-saturday';
+    }
+    return '';
+  }
+
+  function getOptionSectionsForMode(mode) {
+    const sections = [
+      { title: '\u6642\u9593\u5e2f', optionKeys: shiftTimeOptionKeys }
+    ];
+    if (mode === 'person') {
+      sections.push({ title: '\u4f11\u6687\u7a2e\u5225', optionKeys: leaveOptionKeys });
+    }
+    sections.push(
+      { title: '\u8eca\u4e21\u30bf\u30a4\u30d7', optionKeys: vehicleOptionKeys },
+      { title: '\u8eca\u756a\u53f7', optionKeys: vehicleNumberOptionKeys }
+    );
+    return sections;
+  }
+
+  function getSelectableOptionKeysForMode(mode) {
+    const keys = shiftTimeOptionKeys.slice();
+    if (mode === 'person') {
+      keys.push(...leaveOptionKeys);
+    }
+    keys.push(...vehicleOptionKeys, ...vehicleNumberOptionKeys);
+    return keys;
+  }
+
+  function normalizeEmployeeCandidate(candidate) {
+    if (!candidate || typeof candidate !== 'object') {
+      return null;
+    }
+    const employeeNumber = String(candidate.employee_number || candidate.employeeNumber || '').trim();
+    const employeeName = String(candidate.employee_name || candidate.employeeName || '').trim();
+    if (!employeeNumber || !employeeName) {
+      return null;
+    }
+    return {
+      employee_number: employeeNumber,
+      employee_name: employeeName,
+      office_name: String(candidate.office_name || candidate.officeName || '').trim(),
+      job_title: String(candidate.job_title || candidate.jobTitle || '').trim()
+    };
+  }
+
+  function getEmployeeSearchPanelForInput($input) {
+    if (!$input || !$input.length) {
+      return $();
+    }
+
+    const kind = String($input.attr('data-search-kind') || '');
+    if (kind === 'modal') {
+      return $('#ss-entry-modal-candidate-panel');
+    }
+
+    const day = String($input.attr('data-day') || '');
+    if (!day) {
+      return $();
+    }
+    return $(`.ss-candidate-panel[data-search-kind='day'][data-day='${day}']`);
+  }
+
+  function getEmployeeSelectionNoteForInput($input) {
+    if (!$input || !$input.length) {
+      return $();
+    }
+
+    const kind = String($input.attr('data-search-kind') || '');
+    if (kind === 'modal') {
+      return $('#ss-entry-modal-selected-note');
+    }
+
+    const day = String($input.attr('data-day') || '');
+    if (!day) {
+      return $();
+    }
+    return $(`.ss-selected-note[data-search-kind='day'][data-day='${day}']`);
+  }
+
+  function clearEmployeeSelectionForInput($input) {
+    if (!$input || !$input.length) {
+      return;
+    }
+    $input.removeAttr('data-employee-number');
+    $input.removeAttr('data-selected-employee-name');
+    $input.attr('data-search-token', `cleared-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    const kind = String($input.attr('data-search-kind') || '');
+    if (kind === 'modal') {
+      const employeeField = $('#ss-entry-modal-employee-number');
+      if (employeeField.length) {
+        employeeField.val('');
+      }
+    }
+    const note = getEmployeeSelectionNoteForInput($input);
+    if (note.length) {
+      note.text('');
+    }
+  }
+
+  function setEmployeeSelectionForInput($input, candidate) {
+    const normalized = normalizeEmployeeCandidate(candidate);
+    if (!$input || !$input.length || !normalized) {
+      return;
+    }
+
+    $input.val(normalized.employee_name);
+    $input.attr('data-employee-number', normalized.employee_number);
+    $input.attr('data-selected-employee-name', normalized.employee_name);
+    $input.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+
+    const kind = String($input.attr('data-search-kind') || '');
+    if (kind === 'modal') {
+      const employeeField = $('#ss-entry-modal-employee-number');
+      if (employeeField.length) {
+        employeeField.val(normalized.employee_number);
+      }
+    }
+
+    const note = getEmployeeSelectionNoteForInput($input);
+    if (note.length) {
+      note.text(`\u9078\u629e\u4e2d: ${normalized.employee_number}`);
+    }
+
+    const panel = getEmployeeSearchPanelForInput($input);
+    if (panel.length) {
+      panel.empty().addClass('ss-hidden');
+    }
+  }
+
+  function buildEmployeeCandidateText(candidate) {
+    const normalized = normalizeEmployeeCandidate(candidate);
+    if (!normalized) {
+      return '';
+    }
+
+    const segments = [
+      normalized.employee_name,
+      normalized.employee_number
+    ];
+    if (normalized.office_name) {
+      segments.push(normalized.office_name);
+    }
+    if (normalized.job_title) {
+      segments.push(normalized.job_title);
+    }
+    return segments.filter(Boolean).join(' / ');
+  }
+
+  function renderEmployeeSearchResults($panel, $input, candidates, emptyMessage) {
+    if (!$panel || !$panel.length || !$input || !$input.length) {
+      return;
+    }
+
+    $panel.empty();
+
+    const list = $('<div>').css({
+      display: 'grid',
+      gap: '6px'
+    });
+
+    const normalizedCandidates = Array.isArray(candidates)
+      ? candidates.map((item) => normalizeEmployeeCandidate(item)).filter(Boolean)
+      : [];
+
+    if (!normalizedCandidates.length) {
+      list.append(
+        $('<div>')
+          .css({
+            color: '#6b7280',
+            fontSize: '12px',
+            padding: '4px 2px'
+          })
+          .text(emptyMessage || '\u5019\u88dc\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093')
+      );
+    } else {
+      const panelKind = String($panel.attr('data-search-kind') || '');
+      const panelDay = String($panel.attr('data-day') || '');
+      normalizedCandidates.slice(0, 8).forEach((candidate) => {
+        const button = $('<button>')
+          .attr('type', 'button')
+          .addClass('ss-employee-candidate-btn')
+          .attr('data-search-kind', panelKind)
+          .attr('data-day', panelDay)
+          .attr('data-employee-number', candidate.employee_number)
+          .attr('data-employee-name', candidate.employee_name)
+          .css({
+            border: '1px solid #cfe1f6',
+            borderRadius: '10px',
+            background: '#fff',
+            color: '#18324c',
+            cursor: 'pointer',
+            padding: '8px 10px',
+            textAlign: 'left',
+            width: '100%'
+          })
+          .text(buildEmployeeCandidateText(candidate))
+          .on('mousedown', function(event) {
+            event.preventDefault();
+          })
+          .on('click', function() {
+            setEmployeeSelectionForInput($input, candidate);
+          });
+        list.append(button);
+      });
+    }
+
+    $panel.append(list).removeClass('ss-hidden');
+  }
+
+  async function fetchEmployeeCandidates(query) {
+    const key = String(query || '').trim();
+    if (!key) {
+      return [];
+    }
+
+    if (employeeSearchCache.has(key)) {
+      return employeeSearchCache.get(key);
+    }
+
+    const response = await fetch(`/tools/pluslist/api/search_employee?q=${encodeURIComponent(key)}`, {
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error('\u793e\u54e1\u5019\u88dc\u306e\u691c\u7d22\u306b\u5931\u6557\u3057\u307e\u3057\u305f');
+    }
+
+    const payload = await response.json();
+    const candidates = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload.results)
+        ? payload.results
+        : Array.isArray(payload.items)
+          ? payload.items
+          : Array.isArray(payload.employees)
+            ? payload.employees
+            : [];
+    employeeSearchCache.set(key, candidates);
+    return candidates;
+  }
+
+  function scheduleEmployeeSearchForInput($input) {
+    if (!isPersonMode() || !$input || !$input.length) {
+      return;
+    }
+
+    const query = String($input.val() || '').trim();
+    const panel = getEmployeeSearchPanelForInput($input);
+    if (!query) {
+      clearEmployeeSelectionForInput($input);
+      if (panel.length) {
+        panel.empty().addClass('ss-hidden');
+      }
+      return;
+    }
+
+    const currentSelectedName = String($input.attr('data-selected-employee-name') || '');
+    if (currentSelectedName && currentSelectedName !== query) {
+      clearEmployeeSelectionForInput($input);
+    }
+
+    const element = $input[0];
+    const previousTimer = employeeSearchTimers.get(element);
+    if (previousTimer) {
+      window.clearTimeout(previousTimer);
+    }
+
+    const timer = window.setTimeout(async () => {
+      const latestQuery = String($input.val() || '').trim();
+      if (!latestQuery) {
+        if (panel.length) {
+          panel.empty().addClass('ss-hidden');
+        }
+        return;
+      }
+
+      const searchToken = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      $input.attr('data-search-token', searchToken);
+      try {
+        const candidates = await fetchEmployeeCandidates(latestQuery);
+        if ($input.attr('data-search-token') !== searchToken) {
+          return;
+        }
+        if (String($input.val() || '').trim() !== latestQuery) {
+          return;
+        }
+        renderEmployeeSearchResults(panel, $input, candidates, '\u5019\u88dc\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093');
+      } catch (_) {
+        if (panel.length) {
+          panel.empty().addClass('ss-hidden');
+        }
+      }
+    }, 220);
+    employeeSearchTimers.set(element, timer);
+  }
+
+  function scheduleEmployeeSearchForModal() {
+    const $input = $('#ss-entry-modal-name');
+    if (!isPersonMode() || !$input.length) {
+      return;
+    }
+
+    const query = String($input.val() || '').trim();
+    const panel = $('#ss-entry-modal-candidate-panel');
+    if (!query) {
+      clearEmployeeSelectionForInput($input);
+      if (panel.length) {
+        panel.empty().addClass('ss-hidden');
+      }
+      return;
+    }
+
+    const currentSelectedName = String($input.attr('data-selected-employee-name') || '');
+    if (currentSelectedName && currentSelectedName !== query) {
+      clearEmployeeSelectionForInput($input);
+    }
+
+    const element = $input[0];
+    const previousTimer = employeeSearchTimers.get(element);
+    if (previousTimer) {
+      window.clearTimeout(previousTimer);
+    }
+
+    const timer = window.setTimeout(async () => {
+      const latestQuery = String($input.val() || '').trim();
+      if (!latestQuery) {
+        if (panel.length) {
+          panel.empty().addClass('ss-hidden');
+        }
+        return;
+      }
+
+      const searchToken = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      $input.attr('data-search-token', searchToken);
+      try {
+        const candidates = await fetchEmployeeCandidates(latestQuery);
+        if ($input.attr('data-search-token') !== searchToken) {
+          return;
+        }
+        if (String($input.val() || '').trim() !== latestQuery) {
+          return;
+        }
+        renderEmployeeSearchResults(panel, $input, candidates, '\u5019\u88dc\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093');
+      } catch (_) {
+        if (panel.length) {
+          panel.empty().addClass('ss-hidden');
+        }
+      }
+    }, 220);
+    employeeSearchTimers.set(element, timer);
+  }
+
   function getEntryDisplayParts(entry) {
     const normalized = normalizeEntry(entry);
     if (!normalized) {
@@ -133,13 +553,14 @@ const ShifterSync = (function() {
     }
     const parsed = parseEntryValue(normalized.value);
     return {
-      title: parsed.optionKey ? `${optionMappings[parsed.optionKey] || parsed.optionKey} ${parsed.name}` : parsed.name,
-      comment: normalized.comment || ''
+      title: parsed.optionKey ? `${parsed.name} ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : parsed.name,
+      comment: normalized.comment || '',
+      employee_number: normalized.employee_number || ''
     };
   }
 
   function getCommentPreview(comment) {
-    const text = String(comment || '').trim();
+    const text = String(comment || '').trim().replace(/\s*\r?\n\s*/g, ' / ');
     if (!text) {
       return '';
     }
@@ -166,10 +587,10 @@ const ShifterSync = (function() {
         <div class="ss-modal-panel">
           <div class="ss-modal-header">
             <div>
-              <h3 id="ss-day-detail-title" class="ss-modal-title">日別詳細</h3>
+              <h3 id="ss-day-detail-title" class="ss-modal-title">\u65e5\u5225\u8a73\u7d30</h3>
               <p id="ss-day-detail-subtitle" class="ss-modal-subtitle"></p>
             </div>
-            <button type="button" class="ss-modal-close" data-close-modal="day">閉じる</button>
+            <button type="button" class="ss-modal-close" data-close-modal="day">\u9589\u3058\u308b</button>
           </div>
           <div id="ss-day-detail-body" class="ss-modal-body"></div>
         </div>
@@ -179,10 +600,10 @@ const ShifterSync = (function() {
         <div class="ss-modal-panel ss-modal-panel-narrow">
           <div class="ss-modal-header">
             <div>
-              <h3 id="ss-entry-modal-title" class="ss-modal-title">シフト詳細</h3>
+              <h3 id="ss-entry-modal-title" class="ss-modal-title">\u30a8\u30f3\u30c8\u30ea\u8a73\u7d30</h3>
               <p id="ss-entry-modal-subtitle" class="ss-modal-subtitle"></p>
             </div>
-            <button type="button" class="ss-modal-close" data-close-modal="entry">閉じる</button>
+            <button type="button" class="ss-modal-close" data-close-modal="entry">\u9589\u3058\u308b</button>
           </div>
           <div id="ss-entry-modal-body" class="ss-modal-body"></div>
         </div>
@@ -193,10 +614,9 @@ const ShifterSync = (function() {
 
   function closeModal(kind) {
     const target = document.getElementById(kind === 'day' ? 'ss-day-detail-modal' : 'ss-entry-modal');
-    if (!target) {
-      return;
+    if (target) {
+      target.classList.add('ss-hidden');
     }
-    target.classList.add('ss-hidden');
   }
 
   function bindModalEvents() {
@@ -205,47 +625,71 @@ const ShifterSync = (function() {
     });
   }
 
-  function buildCalendar(year, month, mode, initialData = null, options = {}) {
-    state.year = year;
-    state.month = month;
-    state.mode = mode;
-    state.editable = Object.prototype.hasOwnProperty.call(options, 'editable') ? !!options.editable : true;
-    state.entriesPerDay = {};
-    state.selectedOptions = {};
+  function updateCapacityWarning(day) {
+    const box = $(`.day-box[data-day='${day}']`);
+    if (!box.length) {
+      return;
+    }
+    if (!state.capacityEnabled || state.requiredCapacity <= 0) {
+      box.removeClass('capacity-warning');
+      return;
+    }
+    box.toggleClass('capacity-warning', getDayEntries(day).length < state.requiredCapacity);
+  }
 
-    ensureModalScaffold();
-    bindModalEvents();
+  function updateAllCapacityWarnings() {
+    Object.keys(state.entriesPerDay).forEach((day) => updateCapacityWarning(day));
+  }
 
-    const grid = $('#shiftGrid');
-    grid.empty();
+  function updateEntryDisplay(day) {
+    const container = $(`.entry-list-container[data-day='${day}']`);
+    container.empty();
 
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const rawDow = new Date(year, month - 1, 1).getDay();
-    const firstDow = (rawDow + 6) % 7;
-
-    for (let i = 0; i < firstDow; i += 1) {
-      grid.append($('<div>').addClass('day-box empty'));
+    const entries = getDayEntries(day);
+    if (!entries.length) {
+      container.append('<div class="entry-empty-note">\u307e\u3060\u767b\u9332\u3055\u308c\u3066\u3044\u307e\u305b\u3093</div>');
+      return;
     }
 
-    for (let day = 1; day <= daysInMonth; day += 1) {
-      const key = String(day);
-      setDayEntries(day, initialData && (initialData[key] || initialData[day]) ? (initialData[key] || initialData[day]) : []);
-      const dayBox = createDayBox(day, daysInMonth);
-      grid.append(dayBox);
-      updateEntryDisplay(day);
-      updateCapacityWarning(day);
-    }
+    entries.forEach((entry) => {
+      const parts = getEntryDisplayParts(entry);
+      const item = $('<div>')
+        .addClass('entry-item')
+        .attr('data-day', day)
+        .attr('data-entry-id', entry.id)
+        .append(
+          $('<div>')
+            .addClass('entry-item-main')
+            .append(
+              $('<div>').addClass('entry-item-title').text(parts.title),
+              $('<div>').addClass(`entry-item-comment${parts.comment ? '' : ' is-empty'}`).text(parts.comment ? getCommentPreview(parts.comment) : '\u30b3\u30e1\u30f3\u30c8\u306a\u3057')
+            )
+        );
 
-    attachEventHandlers();
+      if (state.editable) {
+        item.append(
+          $('<button>')
+            .attr('type', 'button')
+            .addClass('entry-item-delete')
+            .text('\u524a\u9664')
+        );
+      }
+
+      container.append(item);
+    });
   }
 
   function createDayBox(day, maxDay) {
     const dayBox = $('<div>').addClass('day-box').attr('data-day', day);
+    const toneClass = getDayToneClass(state.year, state.month, day);
+    if (toneClass) {
+      dayBox.addClass(toneClass);
+    }
     const header = $('<button>')
       .attr('type', 'button')
       .addClass('date-label day-detail-trigger')
       .attr('data-day', day)
-      .text(`${day}日`);
+      .text(`${day}\u65e5`);
     dayBox.append(header);
 
     const entryContainer = $('<div>')
@@ -262,7 +706,7 @@ const ShifterSync = (function() {
               .attr('type', 'button')
               .addClass('day-detail-trigger muted-link')
               .attr('data-day', day)
-              .text('詳細を見る')
+              .text('\u8a73\u7d30\u3092\u898b\u308b')
           )
       );
       return dayBox;
@@ -273,40 +717,37 @@ const ShifterSync = (function() {
     const nameInput = $('<input>')
       .attr('type', 'text')
       .addClass('entry-input')
-      .attr('placeholder', state.mode === 'scene' ? '人物名' : '現場名')
+      .attr('placeholder', state.mode === 'scene' ? '\u4eba\u7269\u540d' : '\u73fe\u5834\u540d')
       .attr('data-day', day);
     const addBtn = $('<button>')
       .attr('type', 'button')
       .addClass('add-entry-btn')
       .attr('data-day', day)
-      .text('追加');
+      .text('\u8ffd\u52a0');
     inputRow.append(nameInput, addBtn);
 
-    const commentInput = $('<input>')
-      .attr('type', 'text')
+    const commentInput = $('<textarea>')
       .addClass('entry-comment-input')
-      .attr('placeholder', 'コメント（任意）')
+      .attr('placeholder', '\u30b3\u30e1\u30f3\u30c8')
+      .attr('rows', 2)
       .attr('data-day', day);
 
     const optionBtn = $('<button>')
       .attr('type', 'button')
       .addClass('option-select-btn')
       .attr('data-day', day)
-      .html('<span>設定</span><span>オプションなし</span>');
+      .html('<span>\u8a2d\u5b9a</span><span>OP\u7121\u3057</span>');
 
     const toolDetailBtn = $('<button>')
       .attr('type', 'button')
       .addClass('detail-btn day-detail-trigger')
       .attr('data-day', day)
-      .text('詳細');
-    const toolRow = $('<div>').addClass('day-tool-row');
-    toolRow.append(optionBtn, toolDetailBtn);
+      .text('\u8a73\u7d30');
 
-    const footerRow = $('<div>').addClass('input-row copy-row');
     const copyInput = $('<input>')
       .attr('type', 'number')
       .addClass('copy-input')
-      .attr('placeholder', '複製元日')
+      .attr('placeholder', '\u30b3\u30d4\u30fc\u5143\u65e5')
       .attr('min', 1)
       .attr('max', maxDay)
       .attr('data-day', day);
@@ -314,15 +755,11 @@ const ShifterSync = (function() {
       .attr('type', 'button')
       .addClass('copy-btn')
       .attr('data-day', day)
-      .text('コピー');
-    const detailBtn = $('<button>')
-      .attr('type', 'button')
-      .addClass('detail-btn day-detail-trigger')
-      .attr('data-day', day)
-      .text('詳細');
-    footerRow.append(copyInput, copyBtn);
+      .text('\u30b3\u30d4\u30fc');
+    const controlsGrid = $('<div>').addClass('day-controls-grid');
+    controlsGrid.append(optionBtn, toolDetailBtn, copyInput, copyBtn);
 
-    inputGroup.append(inputRow, commentInput, toolRow, footerRow);
+    inputGroup.append(inputRow, commentInput, controlsGrid);
     dayBox.append(inputGroup);
     return dayBox;
   }
@@ -330,7 +767,10 @@ const ShifterSync = (function() {
   function clearEventHandlers() {
     $(document).off('keydown', '.entry-input');
     $(document).off('keydown', '.entry-comment-input');
+    $(document).off('keydown', '#ss-entry-modal-comment');
     $(document).off('keydown', '.copy-input');
+    $(document).off('input', '.ss-employee-search-input');
+    $(document).off('click', '.ss-employee-candidate-btn');
     $(document).off('click', '.add-entry-btn');
     $(document).off('click', '.option-select-btn');
     $(document).off('click', '.copy-btn');
@@ -369,10 +809,56 @@ const ShifterSync = (function() {
     });
 
     $(document).on('keydown', '.entry-comment-input', function(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        addEntry($(this).attr('data-day'));
+      if (e.key !== 'Enter') {
+        return;
       }
+      if (e.altKey) {
+        e.preventDefault();
+        insertTextAtCursor(this, '\n');
+        return;
+      }
+      e.preventDefault();
+      addEntry($(this).attr('data-day'));
+    });
+
+    $(document).on('keydown', '#ss-entry-modal-comment', function(e) {
+      if (e.key !== 'Enter') {
+        return;
+      }
+      if (e.altKey) {
+        e.preventDefault();
+        insertTextAtCursor(this, '\n');
+        return;
+      }
+      e.preventDefault();
+    });
+
+    $(document).on('input', '.ss-employee-search-input', function() {
+      if (!isPersonMode()) {
+        return;
+      }
+      scheduleEmployeeSearchForInput($(this));
+    });
+
+    $(document).on('click', '.ss-employee-candidate-btn', function() {
+      const $btn = $(this);
+      const kind = String($btn.attr('data-search-kind') || '');
+      if (kind === 'modal') {
+        const $input = $('#ss-entry-modal-name');
+        setEmployeeSelectionForInput($input, {
+          employee_number: $btn.attr('data-employee-number') || '',
+          employee_name: $btn.attr('data-employee-name') || $btn.text() || ''
+        });
+        return;
+      }
+
+      const day = String($btn.attr('data-day') || '');
+      const $input = $(`.entry-input[data-day='${day}']`);
+      setEmployeeSelectionForInput($input, {
+        employee_number: $btn.attr('data-employee-number') || '',
+        employee_name: $btn.attr('data-employee-name') || $btn.text() || ''
+      });
+      updateDayEmployeeSelectionNote(day);
     });
 
     $(document).on('keydown', '.copy-input', function(e) {
@@ -427,7 +913,8 @@ const ShifterSync = (function() {
     const entry = normalizeEntry({
       id: makeEntryId(),
       value: formatEntryValue(options[0] || null, name),
-      comment: commentInput.val().trim()
+      comment: commentInput.val().trim(),
+      employee_number: ''
     });
     if (!entry) {
       return;
@@ -447,7 +934,7 @@ const ShifterSync = (function() {
   function copyEntries(targetDay) {
     const sourceDay = parseInt($(`.copy-input[data-day='${targetDay}']`).val(), 10);
     if (!sourceDay || !state.entriesPerDay[String(sourceDay)]) {
-      alert('コピー元の日付が正しくありません');
+      alert('\u30b3\u30d4\u30fc\u5143\u65e5\u306e\u30c7\u30fc\u30bf\u304c\u3042\u308a\u307e\u305b\u3093');
       return;
     }
     setDayEntries(targetDay, getDayEntries(sourceDay).map((entry) => cloneEntry(entry, true)));
@@ -464,86 +951,6 @@ const ShifterSync = (function() {
     closeModal('entry');
   }
 
-  function updateEntryDisplay(day) {
-    const container = $(`.entry-list-container[data-day='${day}']`);
-    container.empty();
-
-    const entries = getDayEntries(day);
-    if (!entries.length) {
-      container.append('<div class="entry-empty-note">まだ登録がありません</div>');
-      return;
-    }
-
-    entries.forEach((entry) => {
-      const parts = getEntryDisplayParts(entry);
-      const item = $('<div>')
-        .addClass('entry-item')
-        .attr('data-day', day)
-        .attr('data-entry-id', entry.id)
-        .append(
-          $('<div>')
-            .addClass('entry-item-main')
-            .append(
-              $('<div>').addClass('entry-item-title').text(parts.title),
-              $('<div>').addClass(`entry-item-comment${parts.comment ? '' : ' is-empty'}`).text(parts.comment ? getCommentPreview(parts.comment) : 'コメントなし')
-            )
-        );
-
-      if (state.editable) {
-        item.append(
-          $('<button>')
-            .attr('type', 'button')
-            .addClass('entry-item-delete')
-            .text('削除')
-        );
-      }
-
-      container.append(item);
-    });
-  }
-
-  function showOptionPopup(day) {
-    const dayKey = String(day);
-    const overlay = $('<div>').addClass('popup-overlay');
-    const popup = $('<div>').addClass('popup-content');
-    popup.append('<div class="popup-header">オプション選択</div>');
-    popup.append(createOptionSection('時間帯', ['A', 'P', 'E', 'L'], dayKey));
-    popup.append(createOptionSection('車両タイプ', ['M', 'C', 'O', 'W', 'V'], dayKey));
-    popup.append(createOptionSection('車番号', ['N1', 'N2', 'N3', 'N4', 'N5'], dayKey));
-
-    const footer = $('<div>').addClass('popup-footer');
-    footer.append(
-      $('<button>')
-        .addClass('popup-clear-btn')
-        .text('クリア')
-        .on('click', function() {
-          clearSelectedOptionsForDay(dayKey);
-          updateOptionButtonStates(dayKey, overlay);
-        })
-    );
-    footer.append(
-      $('<button>')
-        .addClass('popup-confirm-btn')
-        .text('決定')
-        .on('click', function() {
-          updateOptionSelectButton(dayKey);
-          overlay.remove();
-          $(`.entry-input[data-day='${dayKey}']`).focus();
-        })
-    );
-    popup.append(footer);
-    overlay.append(popup);
-    $('body').append(overlay);
-
-    updateOptionButtonStates(dayKey, overlay);
-
-    overlay.on('click', function(e) {
-      if (e.target === overlay[0]) {
-        overlay.remove();
-      }
-    });
-  }
-
   function createOptionSection(title, optionKeys, dayKey) {
     const section = $('<div>').addClass('popup-section');
     section.append(`<div class="popup-section-title">${title}</div>`);
@@ -554,7 +961,7 @@ const ShifterSync = (function() {
         .addClass('option-btn')
         .attr('data-day', dayKey)
         .attr('data-option', key)
-        .text(optionMappings[key])
+        .text(allOptionMappings[key] || key)
         .on('click', function() {
           const current = getSelectedOptionsForDay(dayKey);
           if (current[0] === key) {
@@ -584,41 +991,66 @@ const ShifterSync = (function() {
     }
     const selected = getSelectedOptionsForDay(day)[0];
     if (!selected) {
-      btn.html('<span>設定</span><span>オプションなし</span>');
+      btn.html('<span>\u8a2d\u5b9a</span><span>OP\u7121\u3057</span>');
       btn.removeClass('has-options');
       return;
     }
-    btn.html(`<span>設定</span><span>${optionMappings[selected]}</span>`);
+    btn.html(`<span>\u8a2d\u5b9a</span><span>${allOptionMappings[selected] || selected}</span>`);
     btn.addClass('has-options');
   }
 
-  function updateCapacityWarning(day) {
-    const box = $(`.day-box[data-day='${day}']`);
-    if (!box.length) {
-      return;
-    }
-    if (!state.capacityEnabled || state.requiredCapacity <= 0) {
-      box.removeClass('capacity-warning');
-      return;
-    }
-    box.toggleClass('capacity-warning', getDayEntries(day).length < state.requiredCapacity);
-  }
+  function showOptionPopup(day) {
+    const dayKey = String(day);
+    const overlay = $('<div>').addClass('popup-overlay');
+    const popup = $('<div>').addClass('popup-content');
+    popup.append('<div class="popup-header">\u30aa\u30d7\u30b7\u30e7\u30f3\u9078\u629e</div>');
+    getOptionSectionsForMode(state.mode).forEach((section) => {
+      popup.append(createOptionSection(section.title, section.optionKeys, dayKey));
+    });
 
-  function updateAllCapacityWarnings() {
-    Object.keys(state.entriesPerDay).forEach((day) => updateCapacityWarning(day));
+    const footer = $('<div>').addClass('popup-footer');
+    footer.append(
+      $('<button>')
+        .addClass('popup-clear-btn')
+        .text('\u30af\u30ea\u30a2')
+        .on('click', function() {
+          clearSelectedOptionsForDay(dayKey);
+          updateOptionButtonStates(dayKey, overlay);
+        })
+    );
+    footer.append(
+      $('<button>')
+        .addClass('popup-confirm-btn')
+        .text('\u78ba\u5b9a')
+        .on('click', function() {
+          updateOptionSelectButton(dayKey);
+          overlay.remove();
+          $(`.entry-input[data-day='${dayKey}']`).focus();
+        })
+    );
+    popup.append(footer);
+    overlay.append(popup);
+    $('body').append(overlay);
+
+    updateOptionButtonStates(dayKey, overlay);
+
+    overlay.on('click', function(e) {
+      if (e.target === overlay[0]) {
+        overlay.remove();
+      }
+    });
   }
 
   function openDayDetail(day) {
     ensureModalScaffold();
     const modal = $('#ss-day-detail-modal');
     const entries = getDayEntries(day);
-    const title = `${state.year}年${state.month}月 ${day}日の詳細`;
-    $('#ss-day-detail-title').text(title);
-    $('#ss-day-detail-subtitle').text(`${state.mode === 'scene' ? '現場' : '個人'}: ${state.name || ''}`);
+    $('#ss-day-detail-title').text(`${state.year}\u5e74${state.month}\u6708${day}\u65e5\u306e\u8a73\u7d30`);
+    $('#ss-day-detail-subtitle').text(`${state.mode === 'scene' ? '\u73fe\u5834' : '\u500b\u4eba'}: ${state.name || ''}`);
 
     const body = $('#ss-day-detail-body');
     if (!entries.length) {
-      body.html('<div class="ss-detail-empty">この日はまだシフトがありません。</div>');
+      body.html('<div class="ss-detail-empty">\u3053\u306e\u65e5\u306f\u307e\u3060\u767b\u9332\u304c\u3042\u308a\u307e\u305b\u3093</div>');
     } else {
       body.html(entries.map((entry, index) => {
         const parts = getEntryDisplayParts(entry);
@@ -626,19 +1058,19 @@ const ShifterSync = (function() {
           <article class="ss-detail-card">
             <div class="ss-detail-row">
               <div>
-                <div class="ss-detail-label">シフト ${index + 1}</div>
+                <div class="ss-detail-label">\u30a8\u30f3\u30c8\u30ea ${index + 1}</div>
                 <div class="ss-detail-value">${escapeHtml(parts.title)}</div>
               </div>
               ${state.editable ? `
                 <div class="ss-detail-actions">
-                  <button type="button" class="ss-entry-edit-btn muted-link" data-day="${day}" data-entry-id="${entry.id}">編集</button>
-                  <button type="button" class="ss-entry-delete-btn muted-link danger" data-day="${day}" data-entry-id="${entry.id}">削除</button>
+                  <button type="button" class="ss-entry-edit-btn muted-link" data-day="${day}" data-entry-id="${entry.id}">\u7de8\u96c6</button>
+                  <button type="button" class="ss-entry-delete-btn muted-link danger" data-day="${day}" data-entry-id="${entry.id}">\u524a\u9664</button>
                 </div>
               ` : ''}
             </div>
             <div class="ss-detail-comment-block">
-              <div class="ss-detail-label">コメント</div>
-              <div class="ss-detail-comment">${parts.comment ? escapeHtml(parts.comment) : '<span class="ss-detail-empty-text">コメントなし</span>'}</div>
+              <div class="ss-detail-label">\u30b3\u30e1\u30f3\u30c8</div>
+              <div class="ss-detail-comment">${parts.comment ? escapeHtml(parts.comment) : '<span class="ss-detail-empty-text">\u30b3\u30e1\u30f3\u30c8\u306a\u3057</span>'}</div>
             </div>
           </article>
         `;
@@ -657,26 +1089,26 @@ const ShifterSync = (function() {
     }
 
     const parsed = parseEntryValue(entry.value);
-    $('#ss-entry-modal-title').text(`${day}日のシフト詳細`);
-    $('#ss-entry-modal-subtitle').text(state.editable ? '内容を確認し、必要なら編集してください。' : '内容を確認できます。');
+    $('#ss-entry-modal-title').text(`${day}\u65e5\u306e\u30a8\u30f3\u30c8\u30ea\u8a73\u7d30`);
+    $('#ss-entry-modal-subtitle').text(state.editable ? '\u5185\u5bb9\u3092\u78ba\u8a8d\u3057\u3001\u5909\u66f4\u3057\u3066\u304f\u3060\u3055\u3044' : '\u5185\u5bb9\u3092\u78ba\u8a8d\u3067\u304d\u307e\u3059');
 
     const body = $('#ss-entry-modal-body');
-    const optionText = parsed.optionKey ? optionMappings[parsed.optionKey] || parsed.optionKey : 'なし';
+    const optionText = parsed.optionKey ? allOptionMappings[parsed.optionKey] || parsed.optionKey : '\u306a\u3057';
 
     if (!state.editable) {
       body.html(`
         <div class="ss-detail-form">
           <div class="ss-detail-field">
-            <div class="ss-detail-label">名前</div>
+            <div class="ss-detail-label">\u540d\u524d</div>
             <div class="ss-detail-static">${escapeHtml(parsed.name)}</div>
           </div>
           <div class="ss-detail-field">
-            <div class="ss-detail-label">オプション</div>
+            <div class="ss-detail-label">\u30aa\u30d7\u30b7\u30e7\u30f3</div>
             <div class="ss-detail-static">${escapeHtml(optionText)}</div>
           </div>
           <div class="ss-detail-field">
-            <div class="ss-detail-label">コメント</div>
-            <div class="ss-detail-static">${entry.comment ? escapeHtml(entry.comment) : '<span class="ss-detail-empty-text">コメントなし</span>'}</div>
+            <div class="ss-detail-label">\u30b3\u30e1\u30f3\u30c8</div>
+            <div class="ss-detail-static">${entry.comment ? escapeHtml(entry.comment) : '<span class="ss-detail-empty-text">\u30b3\u30e1\u30f3\u30c8\u306a\u3057</span>'}</div>
           </div>
         </div>
       `);
@@ -684,28 +1116,29 @@ const ShifterSync = (function() {
       return;
     }
 
+    const availableOptionKeys = getSelectableOptionKeysForMode(state.mode);
     body.html(`
       <div class="ss-detail-form">
         <input type="hidden" id="ss-entry-modal-day" value="${day}">
         <input type="hidden" id="ss-entry-modal-id" value="${escapeHtml(entry.id)}">
         <div class="ss-detail-field">
-          <label class="ss-detail-label" for="ss-entry-modal-name">名前</label>
+          <label class="ss-detail-label" for="ss-entry-modal-name">\u540d\u524d</label>
           <input id="ss-entry-modal-name" class="ss-detail-input" type="text" value="${escapeHtml(parsed.name)}">
         </div>
         <div class="ss-detail-field">
-          <label class="ss-detail-label" for="ss-entry-modal-option">オプション</label>
+          <label class="ss-detail-label" for="ss-entry-modal-option">\u30aa\u30d7\u30b7\u30e7\u30f3</label>
           <select id="ss-entry-modal-option" class="ss-detail-input">
-            <option value="">なし</option>
-            ${Object.keys(optionMappings).map((key) => `<option value="${key}" ${key === parsed.optionKey ? 'selected' : ''}>${escapeHtml(optionMappings[key])}</option>`).join('')}
+            <option value="">\u306a\u3057</option>
+            ${availableOptionKeys.map((key) => `<option value="${key}" ${key === parsed.optionKey ? 'selected' : ''}>${escapeHtml(allOptionMappings[key] || key)}</option>`).join('')}
           </select>
         </div>
         <div class="ss-detail-field">
-          <label class="ss-detail-label" for="ss-entry-modal-comment">コメント</label>
+          <label class="ss-detail-label" for="ss-entry-modal-comment">\u30b3\u30e1\u30f3\u30c8</label>
           <textarea id="ss-entry-modal-comment" class="ss-detail-textarea" rows="4">${escapeHtml(entry.comment)}</textarea>
         </div>
         <div class="ss-detail-actions foot">
-          <button type="button" class="btn-secondary" data-close-modal="entry">閉じる</button>
-          <button type="button" class="btn-primary ss-entry-save-btn">保存</button>
+          <button type="button" class="btn-secondary" data-close-modal="entry">\u9589\u3058\u308b</button>
+          <button type="button" class="btn-primary ss-entry-save-btn">\u4fdd\u5b58</button>
         </div>
       </div>
     `);
@@ -718,7 +1151,7 @@ const ShifterSync = (function() {
     const entryId = $('#ss-entry-modal-id').val();
     const name = $('#ss-entry-modal-name').val().trim();
     if (!name) {
-      alert('名前を入力してください');
+      alert('\u540d\u524d\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044');
       return;
     }
 
@@ -731,7 +1164,8 @@ const ShifterSync = (function() {
       return normalizeEntry({
         id: entry.id,
         value: formatEntryValue(optionKey, name),
-        comment
+        comment,
+        employee_number: entry.employee_number || ''
       });
     });
 
@@ -742,13 +1176,63 @@ const ShifterSync = (function() {
     openDayDetail(day);
   }
 
-  function escapeHtml(value) {
-    return String(value || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+  function updateDayEmployeeSelectionNote(dayKey) {
+    const $input = $(`.entry-input[data-day='${dayKey}']`);
+    if (!$input.length) {
+      return;
+    }
+    const note = $(`.ss-selected-note[data-search-kind='day'][data-day='${dayKey}']`);
+    if (!note.length) {
+      return;
+    }
+    const selectedNumber = String($input.attr('data-employee-number') || '').trim();
+    const selectedName = String($input.attr('data-selected-employee-name') || '').trim();
+    if (!selectedNumber) {
+      note.text('');
+      return;
+    }
+    note.text(selectedName ? `\u9078\u629e\u4e2d: ${selectedName} / ${selectedNumber}` : `\u9078\u629e\u4e2d: ${selectedNumber}`);
+  }
+
+  function buildCalendar(year, month, mode, initialData = null, options = {}) {
+    state.year = year;
+    state.month = month;
+    state.mode = mode;
+    state.editable = Object.prototype.hasOwnProperty.call(options, 'editable') ? !!options.editable : true;
+    state.holidays = new Set(
+      Array.isArray(options.holidays)
+        ? options.holidays.map((value) => String(value))
+        : Array.isArray(window.SHIFTERSYNC_HOLIDAYS)
+          ? window.SHIFTERSYNC_HOLIDAYS.map((value) => String(value))
+          : []
+    );
+    state.entriesPerDay = {};
+    state.selectedOptions = {};
+
+    ensureModalScaffold();
+    bindModalEvents();
+
+    const grid = $('#shiftGrid');
+    grid.empty();
+
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const rawDow = new Date(year, month - 1, 1).getDay();
+    const firstDow = (rawDow + 6) % 7;
+
+    for (let i = 0; i < firstDow; i += 1) {
+      grid.append($('<div>').addClass('day-box empty'));
+    }
+
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const key = String(day);
+      setDayEntries(day, initialData && (initialData[key] || initialData[day]) ? (initialData[key] || initialData[day]) : []);
+      const dayBox = createDayBox(day, daysInMonth);
+      grid.append(dayBox);
+      updateEntryDisplay(day);
+      updateCapacityWarning(day);
+    }
+
+    attachEventHandlers();
   }
 
   function buildCSV() {
@@ -759,10 +1243,11 @@ const ShifterSync = (function() {
 
     const rows = [
       header,
-      [state.mode === 'scene' ? '日付' : '日付', state.mode === 'scene' ? '出勤者' : '現場']
+      ['\u65e5\u4ed8', state.mode === 'scene' ? '\u51fa\u52e4\u8005' : '\u73fe\u5834']
     ];
 
     const commentRows = [];
+    const employeeNumberRows = [];
     Object.keys(state.entriesPerDay)
       .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
       .forEach((day) => {
@@ -774,11 +1259,16 @@ const ShifterSync = (function() {
           if (entry.comment) {
             commentRows.push([commentRowPrefix, day, index, entry.comment]);
           }
+          if (entry.employee_number) {
+            employeeNumberRows.push([employeeNumberRowPrefix, day, index, entry.employee_number]);
+          }
         });
       });
 
     return rows
       .concat(commentRows)
+      .concat(employeeNumberRows)
+      .concat(state.mode === 'person' && state.targetEmployeeNumber ? [[projectEmployeeNumberRowPrefix, state.targetEmployeeNumber]] : [])
       .map((row) => row.map((cell) => csvEscape(cell)).join(','))
       .join('\n');
   }

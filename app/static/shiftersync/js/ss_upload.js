@@ -1,5 +1,7 @@
 $(document).ready(function() {
   const commentRowPrefix = '#comment';
+  const employeeNumberRowPrefix = '#employee_number';
+  const projectEmployeeNumberRowPrefix = '#project_employee_number';
 
   function escapeHtml(value) {
     return String(value || '')
@@ -81,7 +83,8 @@ $(document).ready(function() {
     return {
       id: `upload-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       value: String(entry || '').trim(),
-      comment: ''
+      comment: '',
+      employee_number: ''
     };
   }
 
@@ -99,6 +102,8 @@ $(document).ready(function() {
     const requiredCapacity = header.length >= 5 ? parseInt(header[4], 10) || 0 : 0;
     const entriesPerDay = {};
     const commentRows = [];
+    const employeeNumberRows = [];
+    let targetEmployeeNumber = '';
 
     if (!['scene', 'person'].includes(mode)) {
       throw new Error('mode は scene または person のみ対応です');
@@ -123,6 +128,14 @@ $(document).ready(function() {
       }
       if (row[0] === commentRowPrefix) {
         commentRows.push(row);
+        return;
+      }
+      if (row[0] === employeeNumberRowPrefix) {
+        employeeNumberRows.push(row);
+        return;
+      }
+      if (row[0] === projectEmployeeNumberRowPrefix) {
+        targetEmployeeNumber = row[1] || '';
       }
     });
 
@@ -138,11 +151,24 @@ $(document).ready(function() {
       entriesPerDay[day][index].comment = row[3] || '';
     });
 
+    employeeNumberRows.forEach((row) => {
+      if (row.length < 4) {
+        return;
+      }
+      const day = String(parseInt(row[1], 10));
+      const index = parseInt(row[2], 10);
+      if (!entriesPerDay[day] || Number.isNaN(index) || !entriesPerDay[day][index]) {
+        return;
+      }
+      entriesPerDay[day][index].employee_number = row[3] || '';
+    });
+
     return {
       mode,
       year,
       month,
       name,
+      targetEmployeeNumber,
       capacityEnabled: requiredCapacity > 0,
       requiredCapacity,
       entriesPerDay
@@ -222,6 +248,7 @@ $(document).ready(function() {
         const payload = parseCsvPayload(decodeCsvBuffer(event.target.result));
         ShifterSync.setState('mode', payload.mode);
         ShifterSync.setState('name', payload.name);
+        ShifterSync.setState('targetEmployeeNumber', payload.targetEmployeeNumber || '');
         ShifterSync.setState('capacityEnabled', payload.capacityEnabled);
         ShifterSync.setState('requiredCapacity', payload.requiredCapacity);
 

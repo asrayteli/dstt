@@ -26,23 +26,30 @@ from flask import (
 from flask_login import current_user, login_required
 from openpyxl import Workbook
 from werkzeug.exceptions import HTTPException
+from werkzeug.utils import secure_filename
 
 try:
     from .shiftersync_format import (
+        LEAVE_OPTION_MAPPINGS,
         entry_display_text,
         normalize_entries_for_month,
         parse_csv_text,
+        parse_entry_value,
         serialize_csv_text,
         serialize_entry_rows,
     )
+    from .japan_holidays import JAPAN_HOLIDAYS
 except ImportError:
     from app.tools.shiftersync_format import (  # type: ignore
+        LEAVE_OPTION_MAPPINGS,
         entry_display_text,
         normalize_entries_for_month,
         parse_csv_text,
+        parse_entry_value,
         serialize_csv_text,
         serialize_entry_rows,
     )
+    from app.tools.japan_holidays import JAPAN_HOLIDAYS  # type: ignore
 
 
 cloudshift_bp = Blueprint("cloudshift", __name__, url_prefix="/tools/shiftersync/cloudshift")
@@ -205,6 +212,10 @@ def _sanitize_mode(value: str) -> str:
     return mode
 
 
+def _sanitize_employee_number(value: Any) -> str:
+    return str(value or "").strip()
+
+
 def _sanitize_capacity(raw: Any) -> tuple[bool, int]:
     if raw in (None, "", False):
         return False, 0
@@ -269,6 +280,7 @@ def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
         "id": project["id"],
         "title": project["title"],
         "mode": project["mode"],
+        "employee_number": str(project.get("employee_number") or ""),
         "owner_user_id": project["owner_user_id"],
         "month_keys": month_keys,
         "month_count": len(month_keys),
@@ -357,6 +369,7 @@ def _month_detail(project: dict[str, Any], month_key: str) -> dict[str, Any]:
             "id": project["id"],
             "title": project["title"],
             "mode": project["mode"],
+            "employee_number": str(project.get("employee_number") or ""),
             "month_keys": _sort_month_keys(list((project.get("months") or {}).keys())),
             "urls": _project_public_urls(project),
         },
@@ -365,7 +378,12 @@ def _month_detail(project: dict[str, Any], month_key: str) -> dict[str, Any]:
     }
 
 
-def _csv_lines_for_month(project_title: str, project_mode: str, month_data: dict[str, Any]) -> list[list[Any]]:
+def _csv_lines_for_month(
+    project_title: str,
+    project_mode: str,
+    month_data: dict[str, Any],
+    project_employee_number: str = "",
+) -> list[list[Any]]:
     return serialize_entry_rows(
         project_mode,
         month_data["year"],
@@ -373,6 +391,7 @@ def _csv_lines_for_month(project_title: str, project_mode: str, month_data: dict
         project_title,
         month_data.get("required_capacity", 0) if month_data.get("capacity_enabled") else 0,
         month_data.get("entries_per_day", {}),
+        project_employee_number,
     )
 
 
@@ -383,7 +402,12 @@ def _safe_download_stem(value: str) -> str:
     return safe
 
 
-def _csv_text_for_month(project_title: str, project_mode: str, month_data: dict[str, Any]) -> str:
+def _csv_text_for_month(
+    project_title: str,
+    project_mode: str,
+    month_data: dict[str, Any],
+    project_employee_number: str = "",
+) -> str:
     return serialize_csv_text(
         project_mode,
         month_data["year"],
@@ -391,14 +415,20 @@ def _csv_text_for_month(project_title: str, project_mode: str, month_data: dict[
         project_title,
         month_data.get("required_capacity", 0) if month_data.get("capacity_enabled") else 0,
         month_data.get("entries_per_day", {}),
+        project_employee_number,
     )
 
 
-def _xlsx_bytes_for_month(project_title: str, project_mode: str, month_data: dict[str, Any]) -> io.BytesIO:
+def _xlsx_bytes_for_month(
+    project_title: str,
+    project_mode: str,
+    month_data: dict[str, Any],
+    project_employee_number: str = "",
+) -> io.BytesIO:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = f"{month_data['year']}-{month_data['month']:02d}"
-    for row in _csv_lines_for_month(project_title, project_mode, month_data):
+    for row in _csv_lines_for_month(project_title, project_mode, month_data, project_employee_number):
         sheet.append(row)
     for cell in sheet[1]:
         font = copy(cell.font)
@@ -430,6 +460,7 @@ def _parse_shiftersync_csv(file_storage) -> dict[str, Any]:
     return {
         "title": _sanitize_title(parsed["title"]),
         "mode": _sanitize_mode(parsed["mode"]),
+        "employee_number": _sanitize_employee_number(parsed.get("employee_number")),
         "year": parsed["year"],
         "month": parsed["month"],
         "capacity_enabled": parsed["capacity_enabled"],
@@ -617,6 +648,129 @@ def _editor_identity(editor_name: str | None = None) -> tuple[str, str]:
     return label[:80], "guest"
 
 
+def _leave_sync_bridge():
+    try:
+        from .leave_mgr import (
+            ensure_data_directories,
+            get_cloudshift_calendar_options,
+            replace_cloudshift_leaves,
+        )
+    except ImportError:
+        from app.tools.leave_mgr import (  # type: ignore
+            ensure_data_directories,
+            get_cloudshift_calendar_options,
+            replace_cloudshift_leaves,
+        )
+    return ensure_data_directories, get_cloudshift_calendar_options, replace_cloudshift_leaves
+
+
+def _calendar_export_bridge():
+    try:
+        from .shiftersync import generate_png_calendar
+    except ImportError:
+        from app.tools.shiftersync import generate_png_calendar  # type: ignore
+    return generate_png_calendar
+
+
+def _leave_option_label(option_key: str | None) -> str | None:
+    if not option_key:
+        return None
+    return LEAVE_OPTION_MAPPINGS.get(option_key)
+
+
+def _cloudshift_leave_rows(
+    project: dict[str, Any], month_data: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    leaves: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    project_name = str(project.get("title") or "").strip()
+    project_employee_number = str(project.get("employee_number") or "").strip()
+
+    for day_key, entries in (month_data.get("entries_per_day") or {}).items():
+        try:
+            day = int(day_key)
+        except (TypeError, ValueError):
+            continue
+
+        date_text = f"{month_data['year']:04d}-{month_data['month']:02d}-{day:02d}"
+        for index, entry in enumerate(entries or []):
+            option_key, name = parse_entry_value((entry or {}).get("value", ""))
+            leave_type = _leave_option_label(option_key)
+            if not leave_type:
+                continue
+
+            normalized_name = project_name
+            employee_number = project_employee_number
+            payload = {
+                "date": date_text,
+                "name": normalized_name,
+                "employee_number": employee_number,
+                "leave_type": leave_type,
+                "comment": str((entry or {}).get("comment") or "").strip(),
+                "source_entry_id": str((entry or {}).get("id") or "").strip(),
+            }
+            if not employee_number:
+                skipped.append(
+                    {
+                        "day": day,
+                        "entry_id": payload["source_entry_id"],
+                        "name": normalized_name,
+                        "leave_type": leave_type,
+                        "reason": "employee_number_missing",
+                    }
+                )
+                continue
+            leaves.append(payload)
+
+    return leaves, skipped
+
+
+def _calendar_day_map(month_data: dict[str, Any]) -> dict[int, list[dict[str, str]]]:
+    return {
+        int(day): [
+            {
+                "title": entry_display_text(entry),
+                "comment": str(entry.get("comment", "")),
+            }
+            for entry in entries
+        ]
+        for day, entries in (month_data.get("entries_per_day") or {}).items()
+    }
+
+
+def _calendar_download_name(title: str, year: int, month: int) -> str:
+    safe_title = secure_filename(title) or "calendar"
+    return f"{year}-{str(month).zfill(2)}_calendar_{safe_title}.png"
+
+
+def _calendar_png_bytes_for_month(
+    project_title: str, project_mode: str, month_data: dict[str, Any]
+) -> io.BytesIO:
+    generate_png_calendar = _calendar_export_bridge()
+    temp_dir = _runtime_root() / "exports"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = temp_dir / f"calendar_{secrets.token_hex(12)}.png"
+    try:
+        generate_png_calendar(
+            temp_path,
+            month_data["year"],
+            month_data["month"],
+            project_mode,
+            project_title,
+            _calendar_day_map(month_data),
+            month_data.get("required_capacity", 0) if month_data.get("capacity_enabled") else None,
+        )
+        buffer = io.BytesIO(temp_path.read_bytes())
+        buffer.seek(0)
+        return buffer
+    finally:
+        try:
+            if temp_path.exists():
+                temp_path.unlink()
+        except OSError:
+            pass
+
+
 def _project_detail_payload(project: dict[str, Any], selected_month_key: str | None = None) -> dict[str, Any]:
     month_keys = _sort_month_keys(list((project.get("months") or {}).keys()))
     active_month_key = None
@@ -642,7 +796,11 @@ def _project_detail_payload(project: dict[str, Any], selected_month_key: str | N
 @cloudshift_bp.route("/")
 @login_required
 def index():
-    return render_template("cloudshift.html", user_name=_user_label())
+    return render_template(
+        "cloudshift.html",
+        user_name=_user_label(),
+        shiftersync_holidays=sorted(set(JAPAN_HOLIDAYS)),
+    )
 
 
 @cloudshift_bp.route("/view/<token>")
@@ -654,6 +812,7 @@ def public_view(token: str):
         token=token,
         project_title=project["title"],
         authenticated_editor_name=_user_label() if current_user.is_authenticated else "",
+        shiftersync_holidays=sorted(set(JAPAN_HOLIDAYS)),
     )
 
 
@@ -666,6 +825,7 @@ def public_edit(token: str):
         token=token,
         project_title=project["title"],
         authenticated_editor_name=_user_label() if current_user.is_authenticated else "",
+        shiftersync_holidays=sorted(set(JAPAN_HOLIDAYS)),
     )
 
 
@@ -692,6 +852,7 @@ def api_create():
         parsed = _parse_shiftersync_csv(csv_file)
         title = _sanitize_title(title_override or parsed["title"])
         mode = parsed["mode"]
+        employee_number = parsed.get("employee_number", "")
         year, month = _validate_year_month(parsed["year"], parsed["month"])
         capacity_enabled = parsed["capacity_enabled"]
         required_capacity = parsed["required_capacity"]
@@ -699,6 +860,7 @@ def api_create():
     else:
         title = _sanitize_title(title_override)
         mode = _sanitize_mode(request.form.get("mode"))
+        employee_number = _sanitize_employee_number(request.form.get("employee_number"))
         year, month = _validate_year_month(request.form.get("year"), request.form.get("month"))
         capacity_enabled, required_capacity = _sanitize_capacity(request.form.get("required_capacity"))
         entries = {}
@@ -710,6 +872,7 @@ def api_create():
         "owner_user_id": _user_id(),
         "title": title,
         "mode": mode,
+        "employee_number": employee_number if mode == "person" else "",
         "view_token": _share_token(),
         "edit_token": _share_token(),
         "created_at": _utcnow_iso(),
@@ -748,10 +911,27 @@ def api_project_meta(project_id: str):
     with _project_lock(project_id):
         project = _owner_project_or_404(project_id)
         new_title = _sanitize_title(data.get("title", project["title"]))
+        old_title = project["title"]
+        old_employee_number = str(project.get("employee_number") or "")
+        new_employee_number = _sanitize_employee_number(data.get("employee_number", project.get("employee_number", "")))
+        if project.get("mode") != "person":
+            new_employee_number = ""
+        metadata_changed = False
         if new_title != project["title"]:
-            old_title = project["title"]
             project["title"] = new_title
+            metadata_changed = True
+        if new_employee_number != str(project.get("employee_number") or ""):
+            project["employee_number"] = new_employee_number
+            metadata_changed = True
+        if metadata_changed:
             _save_project(project)
+            changes = []
+            if new_title != old_title:
+                changes.append(f"タイトルを {old_title} から {new_title} に変更")
+            if new_employee_number != old_employee_number:
+                changes.append("社員IDを更新")
+            if not changes:
+                changes.append("メタ情報を更新")
             _append_history(
                 project_id,
                 {
@@ -760,7 +940,7 @@ def api_project_meta(project_id: str):
                     "editor_type": "owner",
                     "action": "title_updated",
                     "month_key": None,
-                    "changes": [f"タイトルを {old_title} から {new_title} に変更"],
+                    "changes": changes,
                 },
             )
     return jsonify({"success": True, "project": _project_detail_payload(project)})
@@ -939,6 +1119,96 @@ def api_history(project_id: str):
     return jsonify({"history": _load_history(project_id)})
 
 
+@cloudshift_bp.route("/api/project/<project_id>/leave-sync/calendars")
+@login_required
+def api_leave_sync_calendars(project_id: str):
+    _owner_project_or_404(project_id)
+    ensure_data_directories, get_cloudshift_calendar_options, _ = _leave_sync_bridge()
+    ensure_data_directories()
+    return jsonify(
+        {
+            "success": True,
+            "calendars": get_cloudshift_calendar_options(_user_id()),
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/leave-sync/<int:year>/<int:month>", methods=["POST"])
+@login_required
+def api_leave_sync(project_id: str, year: int, month: int):
+    payload = request.get_json(silent=True) or {}
+    calendar_id = str(payload.get("calendar_id") or "").strip()
+    if not calendar_id:
+        raise CloudShiftError("営業所を選択してください", 400)
+
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        if project.get("mode") != "person":
+            raise CloudShiftError("休暇反映は person モードのみ対応です", 400)
+
+        month_key = _month_key(year, month)
+        month_data = (project.get("months") or {}).get(month_key)
+        if not month_data:
+            raise CloudShiftError("対象の月が存在しません", 404)
+
+        leaves, skipped = _cloudshift_leave_rows(project, month_data)
+        ensure_data_directories, _, replace_cloudshift_leaves = _leave_sync_bridge()
+        ensure_data_directories()
+        try:
+            result = replace_cloudshift_leaves(
+                user_id=_user_id(),
+                calendar_id=calendar_id,
+                target_year_month=f"{year:04d}{month:02d}",
+                source_project_id=project_id,
+                source_month_key=month_key,
+                leaves=leaves,
+            )
+        except PermissionError as exc:
+            raise CloudShiftError("選択した営業所に反映する権限がありません", 403) from exc
+
+    skipped_items = [
+        {
+            "day": item["day"],
+            "entry_id": item["entry_id"],
+            "name": item["name"],
+            "leave_type": item["leave_type"],
+            "reason": "社員ID未設定のためスキップ",
+        }
+        for item in skipped
+    ]
+    if result.get("skipped"):
+        skipped_items.extend(result["skipped"])
+
+    history_changes = [
+        f"{month_key} の休暇を営業所 {calendar_id} に反映",
+        f"登録 {result['created_total']} 件 / 置換削除 {result['removed_total']} 件 / スキップ {len(skipped_items)} 件",
+    ]
+    _append_history(
+        project_id,
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": _user_label(),
+            "editor_type": "owner",
+            "action": "leave_sync",
+            "month_key": month_key,
+            "changes": history_changes,
+        },
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "calendar_id": calendar_id,
+            "month_key": month_key,
+            "created_total": result["created_total"],
+            "removed_total": result["removed_total"],
+            "removed_by_calendar": result["removed_by_calendar"],
+            "skipped_total": len(skipped_items),
+            "skipped": skipped_items,
+        }
+    )
+
+
 def _send_month_export(project: dict[str, Any], month_key: str, export_format: str):
     month_data = (project.get("months") or {}).get(month_key)
     if not month_data:
@@ -947,7 +1217,12 @@ def _send_month_export(project: dict[str, Any], month_key: str, export_format: s
         f"{project['mode']},{month_data['year']},{month_data['month']},{project['title']}"
     )
     if export_format == "csv":
-        csv_text = _csv_text_for_month(project["title"], project["mode"], month_data)
+        csv_text = _csv_text_for_month(
+            project["title"],
+            project["mode"],
+            month_data,
+            str(project.get("employee_number") or ""),
+        )
         return send_file(
             io.BytesIO(csv_text.encode("utf-8-sig")),
             as_attachment=True,
@@ -955,12 +1230,25 @@ def _send_month_export(project: dict[str, Any], month_key: str, export_format: s
             mimetype="text/csv; charset=utf-8",
         )
     if export_format == "xlsx":
-        workbook_bytes = _xlsx_bytes_for_month(project["title"], project["mode"], month_data)
+        workbook_bytes = _xlsx_bytes_for_month(
+            project["title"],
+            project["mode"],
+            month_data,
+            str(project.get("employee_number") or ""),
+        )
         return send_file(
             workbook_bytes,
             as_attachment=True,
             download_name=f"{filename_base}.xlsx",
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    if export_format == "calendar_png":
+        png_bytes = _calendar_png_bytes_for_month(project["title"], project["mode"], month_data)
+        return send_file(
+            png_bytes,
+            as_attachment=True,
+            download_name=_calendar_download_name(project["title"], month_data["year"], month_data["month"]),
+            mimetype="image/png",
         )
     abort(404)
 

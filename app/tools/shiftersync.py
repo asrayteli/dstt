@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import secrets
 from collections import Counter, defaultdict
+from datetime import date
 from pathlib import Path
 
 from flask import (
@@ -29,20 +30,24 @@ from werkzeug.utils import secure_filename
 
 try:
     from .shiftersync_format import (
+        LEAVE_OPTION_MAPPINGS,
         OPTION_MAPPINGS,
         entry_display_text,
         entry_name_for_comparison,
         entry_option_and_name,
         parse_csv_text,
     )
+    from .japan_holidays import JAPAN_HOLIDAYS
 except ImportError:
     from app.tools.shiftersync_format import (  # type: ignore
+        LEAVE_OPTION_MAPPINGS,
         OPTION_MAPPINGS,
         entry_display_text,
         entry_name_for_comparison,
         entry_option_and_name,
         parse_csv_text,
     )
+    from app.tools.japan_holidays import JAPAN_HOLIDAYS  # type: ignore
 
 
 shiftersync_bp = Blueprint("shiftersync", __name__, url_prefix="/tools/shiftersync")
@@ -58,6 +63,8 @@ TIME_CONFLICT_RULES = {
     ("E", "L"): False,
 }
 VEHICLE_OPTIONS = {"M", "C", "O", "W", "V"}
+LEAVE_OPTION_KEYS = set(LEAVE_OPTION_MAPPINGS.keys())
+JAPAN_HOLIDAYS_SET = set(JAPAN_HOLIDAYS)
 
 
 def _calendar_output_dir() -> Path:
@@ -115,15 +122,18 @@ def shiftersync():
 
 @shiftersync_bp.route("/create", methods=["GET", "POST"])
 def create():
-    return render_template("ss_create.html")
+    return render_template("ss_create.html", shiftersync_holidays=sorted(JAPAN_HOLIDAYS_SET))
 
 
 @shiftersync_bp.route("/upload", methods=["GET", "POST"])
 def upload():
-    return render_template("ss_upload.html")
+    return render_template("ss_upload.html", shiftersync_holidays=sorted(JAPAN_HOLIDAYS_SET))
 
 
 def _is_duplicate_by_rules(option1: str | None, option2: str | None) -> bool:
+    if option1 in LEAVE_OPTION_KEYS or option2 in LEAVE_OPTION_KEYS:
+        return False
+
     if option1 is None or option2 is None:
         return True
 
@@ -207,9 +217,17 @@ def check():
 
     for day, per_file_entries in shift_data.items():
         for file_index, entries in enumerate(per_file_entries):
-            name_count = Counter(entry["name"] for entry in entries if entry["name"])
+            name_count = Counter(
+                entry["name"]
+                for entry in entries
+                if entry["name"] and entry["option"] not in LEAVE_OPTION_KEYS
+            )
             for entry in entries:
-                if entry["name"] and name_count[entry["name"]] > 1:
+                if (
+                    entry["name"]
+                    and entry["option"] not in LEAVE_OPTION_KEYS
+                    and name_count[entry["name"]] > 1
+                ):
                     same_site_conflicts.append(
                         {"date": day, "entry": entry["original"], "file_index": file_index}
                     )
@@ -355,7 +373,150 @@ def _calendar_weekdays() -> list[str]:
 
 
 def _comment_badge(comment: str) -> str:
-    return " *" if comment else ""
+    return ""
+
+
+def _calendar_day_kind(year: int, month: int, day: int) -> str:
+    iso_date = f"{year:04d}-{month:02d}-{day:02d}"
+    if iso_date in JAPAN_HOLIDAYS_SET:
+        return "holiday"
+
+    weekday = date(year, month, day).weekday()
+    if weekday == 6:
+        return "sunday"
+    if weekday == 5:
+        return "saturday"
+    return "weekday"
+
+
+def _png_calendar_palette(kind: str) -> dict[str, str]:
+    if kind == "holiday":
+        return {
+            "cell_background": "#fde7ec",
+            "cell_border": "#cf94a1",
+            "badge_background": "#f1ccd4",
+            "badge_text": "#111111",
+        }
+    if kind == "sunday":
+        return {
+            "cell_background": "#fde7ec",
+            "cell_border": "#cf94a1",
+            "badge_background": "#f1ccd4",
+            "badge_text": "#111111",
+        }
+    if kind == "saturday":
+        return {
+            "cell_background": "#e4f0ff",
+            "cell_border": "#86a9d2",
+            "badge_background": "#cadcf3",
+            "badge_text": "#111111",
+        }
+    return {
+        "cell_background": "#ffffff",
+        "cell_border": "#7898bd",
+        "badge_background": "#cddff2",
+        "badge_text": "#111111",
+    }
+
+
+def _text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> int:
+    if not text:
+        return 0
+    box = draw.textbbox((0, 0), text, font=font)
+    return box[2] - box[0]
+
+
+def _ellipsize_calendar_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.ImageFont,
+    max_width: int,
+) -> str:
+    value = str(text or "")
+    if not value:
+        return ""
+    if _text_width(draw, value, font) <= max_width:
+        return value
+
+    ellipsis = "..."
+    ellipsis_width = _text_width(draw, ellipsis, font)
+    if ellipsis_width >= max_width:
+        return ellipsis
+
+    trimmed = value
+    while trimmed and _text_width(draw, trimmed, font) + ellipsis_width > max_width:
+        trimmed = trimmed[:-1]
+    return f"{trimmed}{ellipsis}" if trimmed else ellipsis
+
+
+def _fit_calendar_lines(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.ImageFont,
+    max_width: int,
+    max_lines: int,
+) -> list[str]:
+    normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized or max_lines <= 0:
+        return []
+
+    paragraphs = normalized.split("\n")
+    lines: list[str] = []
+    truncated = False
+
+    for paragraph_index, paragraph in enumerate(paragraphs):
+        current = ""
+        text_value = paragraph.strip()
+
+        if not text_value:
+            if lines and len(lines) < max_lines:
+                lines.append("")
+            elif paragraph_index < len(paragraphs) - 1:
+                truncated = True
+                break
+            continue
+
+        for character in text_value:
+            candidate = f"{current}{character}"
+            if current and _text_width(draw, candidate, font) > max_width:
+                lines.append(current)
+                current = character
+                if len(lines) >= max_lines:
+                    truncated = True
+                    break
+            else:
+                current = candidate
+
+        if truncated:
+            break
+
+        if current:
+            lines.append(current)
+            if len(lines) > max_lines:
+                lines = lines[:max_lines]
+                truncated = True
+                break
+
+        if len(lines) >= max_lines and paragraph_index < len(paragraphs) - 1:
+            truncated = True
+            break
+
+    if truncated and lines:
+        lines[-1] = _ellipsize_calendar_text(draw, lines[-1], font, max_width)
+
+    return lines[:max_lines]
+
+
+def _draw_bold_calendar_text(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[float, float],
+    text: str,
+    *,
+    fill: str,
+    font: ImageFont.ImageFont,
+) -> None:
+    draw.text(position, text, fill=fill, font=font)
+    draw.text((position[0] + 0.45, position[1]), text, fill=fill, font=font)
 
 
 def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None):
@@ -391,9 +552,26 @@ def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None
         for column, day in enumerate(week):
             x = start_x + column * cell_w
             y = start_y - 28 - week_index * cell_h
-            pdf.setFillColor(HexColor("#fbfbf8") if day else HexColor("#f4f4f1"))
+            day_kind = _calendar_day_kind(year, month, day) if day else "weekday"
+            if not day:
+                fill_color = HexColor("#ececec")
+                stroke_color = HexColor("#c4c4c4")
+                badge_fill = HexColor("#dddddd")
+            elif day_kind == "saturday":
+                fill_color = HexColor("#edf5ff")
+                stroke_color = HexColor("#8eadd0")
+                badge_fill = HexColor("#dbe9f8")
+            elif day_kind in {"sunday", "holiday"}:
+                fill_color = HexColor("#fdf0f2")
+                stroke_color = HexColor("#d4a0aa")
+                badge_fill = HexColor("#f6dfe3")
+            else:
+                fill_color = HexColor("#fbfbf8")
+                stroke_color = HexColor("#7898bd")
+                badge_fill = HexColor("#dbe9f7")
+            pdf.setFillColor(fill_color)
             pdf.rect(x, y, cell_w, cell_h, fill=1)
-            pdf.setStrokeColor(HexColor("#d7d7d1"))
+            pdf.setStrokeColor(stroke_color)
             pdf.rect(x, y, cell_w, cell_h, fill=0)
             if day == 0:
                 continue
@@ -403,7 +581,9 @@ def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None
                 pdf.setStrokeColor(HexColor("#c79a62"))
                 pdf.rect(x + 2, y + 2, cell_w - 4, cell_h - 4, fill=0)
 
-            pdf.setFillColor(HexColor("#2f312d"))
+            pdf.setFillColor(badge_fill)
+            pdf.rect(x + 6, y + cell_h - 21, 22, 14, fill=1, stroke=0)
+            pdf.setFillColor(HexColor("#111111"))
             pdf.setFont(font_name, 11)
             pdf.drawString(x + 6, y + cell_h - 16, str(day))
 
@@ -413,14 +593,14 @@ def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None
                 if len(title_text) > 15:
                     title_text = f"{title_text[:15]}..."
                 pdf.setFont(font_name, 8.5)
-                pdf.setFillColor(HexColor("#384039"))
+                pdf.setFillColor(HexColor("#111111"))
                 pdf.drawString(x + 6, line_y, f"{title_text}{_comment_badge(entry['comment'])}")
                 if entry["comment"]:
                     comment_text = entry["comment"]
                     if len(comment_text) > 16:
                         comment_text = f"{comment_text[:16]}..."
                     pdf.setFont(font_name, 7.5)
-                    pdf.setFillColor(HexColor("#6a6d66"))
+                    pdf.setFillColor(HexColor("#111111"))
                     pdf.drawString(x + 10, line_y - 9, comment_text)
 
     pdf.save()
@@ -429,32 +609,63 @@ def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None
 def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None):
     width = 1600
     height = 1180
+    page_background = "#eef5fc"
+    header_background = "#5f86b7"
+    header_text = "#ffffff"
+    weekday_background = "#d4e4f5"
+    weekday_text = "#111111"
+    cell_background = "#ffffff"
+    empty_cell_background = "#ececec"
+    border_color = "#7898bd"
+    title_text_color = "#111111"
+    comment_text_color = "#111111"
+    entry_card_background = "#f5f9fe"
+    entry_card_border = "#a8c0dc"
+    footer_text_color = "#111111"
+    shortage_border = "#d59f58"
     cell_w = (width - 80) // 7
-    cell_h = 140
+    cell_h = 148
 
-    img = Image.new("RGB", (width, height), "#f4f4f1")
+    img = Image.new("RGB", (width, height), page_background)
     draw = ImageDraw.Draw(img)
-    title_font = _load_image_font(34)
+    title_font = _load_image_font(36)
     header_font = _load_image_font(24)
     day_font = _load_image_font(20)
     text_font = _load_image_font(16)
     comment_font = _load_image_font(14)
     footer_font = _load_image_font(12)
 
-    draw.rectangle([0, 0, width, 92], fill="#4f5a54")
+    draw.rectangle([0, 0, width, 92], fill=header_background)
     title_text = f"{year}年{month}月 {title}"
     if capacity:
         title_text += f" / 必要人数 {capacity}"
     title_box = draw.textbbox((0, 0), title_text, font=title_font)
-    draw.text(((width - (title_box[2] - title_box[0])) // 2, 26), title_text, fill="white", font=title_font)
+    _draw_bold_calendar_text(
+        draw,
+        ((width - (title_box[2] - title_box[0])) // 2, 24),
+        title_text,
+        fill=header_text,
+        font=title_font,
+    )
 
     start_x = 40
     start_y = 126
     for column, day_name in enumerate(_calendar_weekdays()):
         x = start_x + column * cell_w
-        draw.rectangle([x, start_y, x + cell_w, start_y + 42], fill="#efefe8", outline="#d7d7d1")
+        draw.rectangle(
+            [x, start_y, x + cell_w, start_y + 42],
+            fill=weekday_background,
+            outline=border_color,
+            width=2,
+        )
         box = draw.textbbox((0, 0), day_name, font=header_font)
-        draw.text((x + (cell_w - (box[2] - box[0])) / 2, start_y + 7), day_name, fill="#43463f", font=header_font)
+        _draw_bold_calendar_text(
+            draw,
+            (x + (cell_w - (box[2] - box[0])) / 2, start_y + 7),
+            day_name,
+            fill=weekday_text,
+            font=header_font,
+        )
 
     calendar_module = __import__("calendar")
     weeks = calendar_module.Calendar(firstweekday=calendar_module.MONDAY).monthdayscalendar(year, month)
@@ -462,35 +673,125 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
         for column, day in enumerate(week):
             x = start_x + column * cell_w
             y = start_y + 52 + week_index * cell_h
-            fill = "#fbfbf8" if day else "#f4f4f1"
-            draw.rectangle([x, y, x + cell_w, y + cell_h], fill=fill, outline="#d7d7d1", width=2)
+            if day:
+                day_palette = _png_calendar_palette(_calendar_day_kind(year, month, day))
+                fill = day_palette["cell_background"]
+                cell_outline = day_palette["cell_border"]
+            else:
+                day_palette = None
+                fill = empty_cell_background
+                cell_outline = border_color
+            draw.rectangle([x, y, x + cell_w, y + cell_h], fill=fill, outline=cell_outline, width=2)
             if day == 0:
                 continue
 
             entries = day_map.get(day, [])
             if capacity and len(entries) < capacity:
-                draw.rectangle([x + 3, y + 3, x + cell_w - 3, y + cell_h - 3], outline="#c79a62", width=2)
+                draw.rectangle(
+                    [x + 3, y + 3, x + cell_w - 3, y + cell_h - 3],
+                    outline=shortage_border,
+                    width=2,
+                )
 
-            draw.rectangle([x + 8, y + 8, x + 46, y + 34], fill="#ecece7")
+            draw.rectangle(
+                [x + 8, y + 8, x + 48, y + 36],
+                fill=day_palette["badge_background"],
+                outline=None,
+            )
             day_text = str(day)
             day_box = draw.textbbox((0, 0), day_text, font=day_font)
-            draw.text((x + 27 - (day_box[2] - day_box[0]) / 2, y + 10), day_text, fill="#2f312d", font=day_font)
+            _draw_bold_calendar_text(
+                draw,
+                (x + 28 - (day_box[2] - day_box[0]) / 2, y + 10),
+                day_text,
+                fill=day_palette["badge_text"],
+                font=day_font,
+            )
 
-            for line_index, entry in enumerate(entries[:4]):
-                top = y + 42 + line_index * 24
-                title_text = entry["title"]
-                if len(title_text) > 15:
-                    title_text = f"{title_text[:15]}..."
-                draw.text((x + 10, top), f"{title_text}{_comment_badge(entry['comment'])}", fill="#384039", font=text_font)
-                if entry["comment"]:
-                    comment_text = entry["comment"]
-                    if len(comment_text) > 18:
-                        comment_text = f"{comment_text[:18]}..."
-                    draw.text((x + 18, top + 12), comment_text, fill="#6a6d66", font=comment_font)
+            content_left = x + 10
+            content_right = x + cell_w - 10
+            content_width = content_right - content_left - 10
+            content_bottom = y + cell_h - 12
+            cursor_y = y + 42
+            rendered_entries = 0
 
-    footer = f"Generated by Shifter-Sync / {year}-{str(month).zfill(2)}"
+            for entry_index, entry in enumerate(entries):
+                remaining_entries = len(entries) - entry_index - 1
+                title_lines = _fit_calendar_lines(
+                    draw,
+                    f"{entry['title']}{_comment_badge(entry['comment'])}",
+                    text_font,
+                    content_width,
+                    1,
+                )
+                comment_lines = _fit_calendar_lines(
+                    draw,
+                    entry["comment"],
+                    comment_font,
+                    content_width - 10,
+                    2,
+                )
+                block_height = 14
+                if title_lines:
+                    block_height += len(title_lines) * 18
+                if comment_lines:
+                    block_height += 4 + len(comment_lines) * 15
+                reserve_height = 18 if remaining_entries > 0 else 0
+                if cursor_y + block_height > content_bottom - reserve_height:
+                    break
+
+                draw.rectangle(
+                    [content_left, cursor_y, content_right, cursor_y + block_height],
+                    fill=entry_card_background,
+                    outline=entry_card_border,
+                    width=1,
+                )
+
+                line_top = cursor_y + 8
+                for line in title_lines:
+                    _draw_bold_calendar_text(
+                        draw,
+                        (content_left + 8, line_top),
+                        line,
+                        fill=title_text_color,
+                        font=text_font,
+                    )
+                    line_top += 18
+                if comment_lines:
+                    line_top += 2
+                    for line in comment_lines:
+                        _draw_bold_calendar_text(
+                            draw,
+                            (content_left + 14, line_top),
+                            line,
+                            fill=comment_text_color,
+                            font=comment_font,
+                        )
+                        line_top += 15
+
+                cursor_y += block_height + 6
+                rendered_entries += 1
+
+            remaining_count = len(entries) - rendered_entries
+            if remaining_count > 0:
+                more_text = f"+{remaining_count}件"
+                _draw_bold_calendar_text(
+                    draw,
+                    (content_left + 2, min(cursor_y + 2, content_bottom - 14)),
+                    more_text,
+                    fill=comment_text_color,
+                    font=comment_font,
+                )
+
+    footer = f"Generated by DSTT Shifter-Sync / {year}-{str(month).zfill(2)}"
     footer_box = draw.textbbox((0, 0), footer, font=footer_font)
-    draw.text(((width - (footer_box[2] - footer_box[0])) // 2, height - 28), footer, fill="#777973", font=footer_font)
+    _draw_bold_calendar_text(
+        draw,
+        ((width - (footer_box[2] - footer_box[0])) // 2, height - 28),
+        footer,
+        fill=footer_text_color,
+        font=footer_font,
+    )
     img.save(path, "PNG", optimize=True, quality=95)
 
 

@@ -4,6 +4,9 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='shiftersync/css/ss_common.css') }}">
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="{{ url_for('static', filename='shiftersync/js/ss_common.js') }}"></script>
+<script>
+  window.SHIFTERSYNC_HOLIDAYS = {{ shiftersync_holidays|tojson }};
+</script>
 
 <main class="ss-page">
   <div class="container animate-fade-in">
@@ -46,6 +49,9 @@
             <div>
               <label id="nameLabel" for="target_name" class="form-label">現場名</label>
               <input type="text" name="target_name" id="target_name" class="form-input" required>
+              <input type="hidden" name="target_employee_number" id="target_employee_number">
+              <div id="targetCandidatePanel" class="ss-hidden" style="margin-top: 8px; border: 1px solid var(--ss-line); border-radius: 12px; background: #fff; box-shadow: var(--ss-shadow); padding: 8px; max-height: 220px; overflow: auto;"></div>
+              <div id="targetSelectedNote" style="margin-top: 6px; color: var(--ss-muted); font-size: 11px; min-height: 1.1em;"></div>
             </div>
           </div>
 

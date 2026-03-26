@@ -165,6 +165,13 @@ h1, h2, h3 {
     transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
+.entry-comment-input {
+    line-height: 1.45;
+    min-height: 46px;
+    max-height: 84px;
+    resize: vertical;
+}
+
 .form-input:focus,
 .form-select:focus,
 .entry-input:focus,
@@ -263,15 +270,16 @@ h1, h2, h3 {
 .calendar-grid {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 10px;
+    gap: 8px;
 }
 
 .day-box {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    min-height: 250px;
-    padding: 10px;
+    gap: 6px;
+    min-height: 210px;
+    container-type: inline-size;
+    padding: 8px;
     background: #f9fcff;
     border: 1px solid var(--ss-line);
     border-radius: 12px;
@@ -288,6 +296,28 @@ h1, h2, h3 {
     background: #fff9ef;
 }
 
+.day-box.is-saturday {
+    background: #e3f0ff;
+    border-color: #98b9de;
+}
+
+.day-box.is-saturday .date-label {
+    background: #cddff4;
+    color: #143b64;
+}
+
+.day-box.is-sunday,
+.day-box.is-holiday {
+    background: #ffe7ec;
+    border-color: #d69faa;
+}
+
+.day-box.is-sunday .date-label,
+.day-box.is-holiday .date-label {
+    background: #f3d0d8;
+    color: #853344;
+}
+
 .date-label {
     appearance: none;
     border: 0;
@@ -295,9 +325,9 @@ h1, h2, h3 {
     background: #f0f7ff;
     color: var(--ss-ink);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 700;
-    padding: 6px 9px;
+    padding: 5px 8px;
     text-align: left;
 }
 
@@ -305,15 +335,15 @@ h1, h2, h3 {
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
-    gap: 8px;
-    padding: 2px 0;
+    gap: 6px;
+    padding: 1px 0;
     overflow-y: auto;
 }
 
 .entry-empty-note {
     color: var(--ss-muted);
-    font-size: 12px;
-    padding: 8px 4px;
+    font-size: 11px;
+    padding: 6px 3px;
 }
 
 .entry-item {
@@ -321,7 +351,7 @@ h1, h2, h3 {
     align-items: flex-start;
     justify-content: space-between;
     gap: 7px;
-    padding: 8px 9px;
+    padding: 7px 8px;
     background: #fff;
     border: 1px solid var(--ss-soft-line);
     border-radius: 10px;
@@ -337,7 +367,7 @@ h1, h2, h3 {
 }
 
 .entry-item-title {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     color: var(--ss-ink);
 }
@@ -345,7 +375,7 @@ h1, h2, h3 {
 .entry-item-comment {
     margin-top: 2px;
     color: var(--ss-muted);
-    font-size: 11px;
+    font-size: 10px;
     line-height: 1.4;
     word-break: break-word;
 }
@@ -367,29 +397,24 @@ h1, h2, h3 {
 
 .input-group {
     display: grid;
-    gap: 6px;
+    gap: 5px;
 }
 
 .input-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 6px;
+    gap: 5px;
 }
 
 .input-row.compact {
     grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
-.copy-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.day-tool-row {
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 6px;
-    align-items: center;
-    justify-content: flex-start;
+.day-controls-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 5px;
+    align-items: stretch;
 }
 
 .option-select-btn {
@@ -401,14 +426,14 @@ h1, h2, h3 {
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    font-size: 12px;
+    gap: 6px;
+    padding: 7px 8px;
+    font-size: 11px;
     font-weight: 700;
     white-space: nowrap;
-    width: auto;
-    max-width: calc(100% - 68px);
-    flex: 0 1 auto;
+    width: 100%;
+    max-width: none;
+    justify-content: center;
 }
 
 .option-select-btn.has-options {
@@ -417,15 +442,22 @@ h1, h2, h3 {
     color: #215d99;
 }
 
+.copy-input {
+    width: 100%;
+    min-width: 0;
+    text-align: center;
+    padding-inline: 8px;
+}
+
 .add-entry-btn,
 .copy-btn,
 .detail-btn {
-    padding: 8px 10px;
+    padding: 7px 8px;
+    font-size: 11px;
 }
 
 .detail-btn,
 .copy-btn {
-    flex: 0 0 auto;
     white-space: nowrap;
 }
 
@@ -636,6 +668,12 @@ h1, h2, h3 {
     line-height: 1.6;
 }
 
+.ss-detail-comment,
+.ss-detail-static {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .ss-detail-form {
     display: grid;
     gap: 14px;
@@ -685,6 +723,30 @@ h1, h2, h3 {
     animation: ssFadeUp 0.22s ease-out;
 }
 
+@container (max-width: 168px) {
+    .input-row,
+    .input-row.compact {
+        grid-template-columns: 1fr;
+    }
+
+    .day-controls-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .option-select-btn,
+    .detail-btn,
+    .copy-btn,
+    .add-entry-btn {
+        width: 100%;
+        max-width: none;
+    }
+
+    .copy-input {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
 @keyframes ssFadeUp {
     from {
         opacity: 0;
@@ -699,11 +761,12 @@ h1, h2, h3 {
 @media (max-width: 960px) {
     .weekday-header,
     .calendar-grid {
-        gap: 8px;
+        gap: 6px;
     }
 
     .day-box {
-        min-height: 220px;
+        min-height: 185px;
+        padding: 7px;
     }
 }
 
@@ -734,8 +797,8 @@ h1, h2, h3 {
         grid-template-columns: 1fr;
     }
 
-    .copy-row {
-        grid-template-columns: minmax(0, 1fr) auto;
+    .day-controls-grid {
+        grid-template-columns: 1fr;
     }
 
     .option-buttons {

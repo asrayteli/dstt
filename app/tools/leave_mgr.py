@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 import re
 from pathlib import Path
+from typing import Any
 
 leave_mgr_bp = Blueprint("leave_mgr", __name__, url_prefix="/tools/leave_mgr")
 
@@ -20,6 +21,9 @@ LEAVE_TYPES = {
     "リフレッシュ休暇": "#EC4899",  # ピンク系
     "その他": "#0EA5E9"       # 青系
 }
+
+SYNC_SOURCE_CLOUDSHIFT = "cloudshift"
+SYNC_REMARK_PREFIX = "[from CloudShift]"
 
 def get_data_path():
     """データディレクトリのパスを取得"""
@@ -137,6 +141,272 @@ def has_assigned_deputy(leave):
 
     unset_tokens = {"なし", "無し", "-", "－", "ー", "未設定", "未定"}
     return any(d not in unset_tokens for d in normalized)
+
+def _clean_text(value: Any, default: str = "") -> str:
+    text = str(value or "").strip()
+    return text if text else default
+
+
+def _normalize_year_month_key(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        raise ValueError("year_month is required")
+    normalized = text.replace("-", "")
+    if not re.fullmatch(r"\d{6}", normalized):
+        raise ValueError("year_month must be YYYYMM or YYYY-MM")
+    return normalized
+
+
+def _normalize_month_key(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        raise ValueError("month_key is required")
+    if re.fullmatch(r"\d{6}", text):
+        return f"{text[:4]}-{text[4:]}"
+    if re.fullmatch(r"\d{4}-\d{2}", text):
+        return text
+    raise ValueError("month_key must be YYYYMM or YYYY-MM")
+
+
+def _normalize_employee_number(value: Any) -> str:
+    return _clean_text(value)
+
+
+def _cloudshift_remarks(comment: Any) -> str:
+    text = _clean_text(comment)
+    if text:
+        return f"{SYNC_REMARK_PREFIX} / {text}"
+    return SYNC_REMARK_PREFIX
+
+
+def _safe_source_value(value: Any) -> str:
+    text = _clean_text(value)
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", text)[:120]
+
+
+def _cloudshift_leave_id(
+    source_project_id: str,
+    source_month_key: str,
+    source_entry_id: str,
+    day: str,
+    index: int,
+) -> str:
+    raw_entry_id = source_entry_id or f"{day}-{index}"
+    parts = [
+        "cloudshift",
+        source_project_id or "project",
+        source_month_key or "month",
+        raw_entry_id,
+    ]
+    return _safe_source_value("-".join(parts))
+
+
+def _cloudshift_accessible_calendar_ids(user_id: str) -> list[str]:
+    permissions = load_permissions()
+    calendar_meta = load_calendar_meta()
+
+    if is_admin(user_id):
+        calendar_ids = set(calendar_meta.keys())
+        calendar_ids.update(permissions.get("user_calendars", {}).get(user_id, []))
+    else:
+        calendar_ids = set(permissions.get("user_calendars", {}).get(user_id, []))
+
+    return sorted(
+        calendar_ids,
+        key=lambda calendar_id: (
+            str(calendar_meta.get(calendar_id, {}).get("name", calendar_id)).lower(),
+            calendar_id,
+        ),
+    )
+
+
+def get_cloudshift_calendar_options(user_id: str) -> list[dict[str, str]]:
+    calendar_meta = load_calendar_meta()
+    return [
+        {
+            "calendar_id": calendar_id,
+            "name": str(calendar_meta.get(calendar_id, {}).get("name", calendar_id)),
+        }
+        for calendar_id in _cloudshift_accessible_calendar_ids(user_id)
+    ]
+
+
+def _cloudshift_source_matches(
+    leave: dict[str, Any],
+    *,
+    user_id: str,
+    source_project_id: str,
+    source_month_key: str,
+) -> bool:
+    if leave.get("sync_source") != SYNC_SOURCE_CLOUDSHIFT:
+        return False
+    if source_project_id and str(leave.get("source_project_id", "")) != source_project_id:
+        return False
+    if source_month_key and str(leave.get("source_month_key", "")) != source_month_key:
+        return False
+
+    leave_user_id = str(leave.get("sync_user_id") or leave.get("created_by") or "")
+    return leave_user_id == user_id
+
+
+def _remove_cloudshift_source_entries(
+    user_id: str,
+    source_project_id: str,
+    source_month_key: str,
+) -> dict[str, Any]:
+    removed_by_calendar: dict[str, int] = {}
+    removed_total = 0
+    target_year_month = source_month_key.replace("-", "")
+
+    for calendar_id in _cloudshift_accessible_calendar_ids(user_id):
+        calendar_data = load_calendar_data(calendar_id, target_year_month)
+        leaves = list(calendar_data.get("leaves", []))
+        kept_leaves = []
+        removed_count = 0
+        for leave in leaves:
+            if _cloudshift_source_matches(
+                leave,
+                user_id=user_id,
+                source_project_id=source_project_id,
+                source_month_key=source_month_key,
+            ):
+                removed_count += 1
+                continue
+            kept_leaves.append(leave)
+
+        if removed_count:
+            calendar_data["leaves"] = kept_leaves
+            save_calendar_data(calendar_id, target_year_month, calendar_data)
+            removed_by_calendar[calendar_id] = removed_count
+            removed_total += removed_count
+
+    return {"removed_total": removed_total, "removed_by_calendar": removed_by_calendar}
+
+
+def _normalize_cloudshift_leave(
+    payload: dict[str, Any],
+    *,
+    user_id: str,
+    calendar_id: str,
+    target_year_month: str,
+    source_project_id: str,
+    source_month_key: str,
+    index: int,
+) -> tuple[dict[str, Any] | None, str | None]:
+    date = _clean_text(payload.get("date"))
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        return None, "invalid date"
+    if date.replace("-", "")[:6] != target_year_month:
+        return None, "date does not match target month"
+
+    leave_type = _clean_text(payload.get("leave_type"))
+    if leave_type not in LEAVE_TYPES:
+        return None, "invalid leave_type"
+
+    name = _clean_text(payload.get("name"))
+    if not name:
+        return None, "name is required"
+
+    employee_number = _normalize_employee_number(payload.get("employee_number"))
+    if not employee_number:
+        return None, "employee_number is required"
+
+    source_entry_id = _clean_text(
+        payload.get("source_entry_id")
+        or payload.get("id")
+        or payload.get("source_id")
+    )
+
+    leave = {
+        "id": _cloudshift_leave_id(
+            source_project_id,
+            source_month_key,
+            source_entry_id,
+            date.replace("-", ""),
+            index,
+        ),
+        "date": date,
+        "name": name,
+        "employee_number": employee_number,
+        "leave_type": leave_type,
+        "deputies": [],
+        "remarks": _cloudshift_remarks(payload.get("comment") or payload.get("remarks")),
+        "created_by": user_id,
+        "created_at": datetime.now().isoformat(),
+        "confirmed_by": None,
+        "confirmed_at": None,
+        "sync_source": SYNC_SOURCE_CLOUDSHIFT,
+        "sync_user_id": user_id,
+        "source_project_id": source_project_id,
+        "source_month_key": source_month_key,
+        "source_entry_id": source_entry_id,
+        "source_entry_index": index,
+        "source_calendar_id": calendar_id,
+        "target_year_month": target_year_month,
+    }
+    return leave, None
+
+
+def replace_cloudshift_leaves(
+    *,
+    user_id: str,
+    calendar_id: str,
+    target_year_month: str,
+    source_project_id: str,
+    source_month_key: str,
+    leaves: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if calendar_id not in _cloudshift_accessible_calendar_ids(user_id):
+        raise PermissionError("calendar is not accessible")
+
+    cleanup = _remove_cloudshift_source_entries(user_id, source_project_id, source_month_key)
+
+    calendar_data = load_calendar_data(calendar_id, target_year_month)
+    existing_leaves = list(calendar_data.get("leaves", []))
+    normalized_leaves: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+
+    for index, payload in enumerate(leaves):
+        if not isinstance(payload, dict):
+            skipped.append(
+                {
+                    "index": str(index),
+                    "reason": "invalid entry type",
+                }
+            )
+            continue
+        normalized, reason = _normalize_cloudshift_leave(
+            payload,
+            user_id=user_id,
+            calendar_id=calendar_id,
+            target_year_month=target_year_month,
+            source_project_id=source_project_id,
+            source_month_key=source_month_key,
+            index=index,
+        )
+        if normalized is None:
+            skipped.append(
+                {
+                    "index": str(index),
+                    "reason": reason or "invalid entry",
+                }
+            )
+            continue
+        normalized_leaves.append(normalized)
+
+    calendar_data["leaves"] = existing_leaves + normalized_leaves
+    save_calendar_data(calendar_id, target_year_month, calendar_data)
+
+    return {
+        "calendar_id": calendar_id,
+        "year_month": target_year_month,
+        "removed_total": cleanup["removed_total"],
+        "removed_by_calendar": cleanup["removed_by_calendar"],
+        "created_total": len(normalized_leaves),
+        "skipped_total": len(skipped),
+        "skipped": skipped,
+    }
+
 
 @leave_mgr_bp.route("/")
 @login_required
@@ -460,6 +730,75 @@ def get_user_name(username):
         return jsonify({"name": user.name or "unknown"})
     else:
         return jsonify({"name": "unknown"})
+
+@leave_mgr_bp.route("/api/cloudshift/calendars")
+@login_required
+def cloudshift_calendar_options():
+    ensure_data_directories()
+    user_id = str(current_user.username)
+    return jsonify(
+        {
+            "calendars": get_cloudshift_calendar_options(user_id),
+            "user_id": user_id,
+            "is_admin": is_admin(user_id),
+        }
+    )
+
+
+@leave_mgr_bp.route("/api/cloudshift/sync", methods=["POST"])
+@login_required
+def cloudshift_sync():
+    ensure_data_directories()
+    user_id = str(current_user.username)
+    data = request.json or {}
+
+    try:
+        calendar_id = _clean_text(data.get("calendar_id"))
+        target_year_month = _normalize_year_month_key(data.get("year_month") or data.get("target_year_month"))
+        source_project_id = _clean_text(data.get("source_project_id"))
+        source_month_key = _normalize_month_key(data.get("source_month_key") or data.get("month_key"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if not calendar_id:
+        return jsonify({"error": "calendar_id is required"}), 400
+    if not source_project_id:
+        return jsonify({"error": "source_project_id is required"}), 400
+
+    leaves = data.get("leaves")
+    if not isinstance(leaves, list):
+        return jsonify({"error": "leaves must be a list"}), 400
+
+    accessible_calendar_ids = _cloudshift_accessible_calendar_ids(user_id)
+    if calendar_id not in accessible_calendar_ids:
+        return jsonify({"error": "calendar is not accessible"}), 403
+
+    try:
+        result = replace_cloudshift_leaves(
+            user_id=user_id,
+            calendar_id=calendar_id,
+            target_year_month=target_year_month,
+            source_project_id=source_project_id,
+            source_month_key=source_month_key,
+            leaves=leaves,
+        )
+    except PermissionError:
+        return jsonify({"error": "calendar is not accessible"}), 403
+
+    return jsonify(
+        {
+            "success": True,
+            "user_id": user_id,
+            "calendar_id": result["calendar_id"],
+            "year_month": result["year_month"],
+            "removed_total": result["removed_total"],
+            "removed_by_calendar": result["removed_by_calendar"],
+            "created_total": result["created_total"],
+            "skipped_total": result["skipped_total"],
+            "skipped": result["skipped"],
+        }
+    )
+
 
 @leave_mgr_bp.route("/api/admin/calendar", methods=["POST"])
 @login_required
