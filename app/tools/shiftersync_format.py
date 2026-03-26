@@ -2,29 +2,43 @@ from __future__ import annotations
 
 import csv
 import io
-import secrets
 import re
+import secrets
 from calendar import monthrange
 from typing import Any
 
 
 COMMENT_ROW_PREFIX = "#comment"
-OPTION_MAPPINGS = {
-    "A": "午前",
-    "P": "午後",
-    "E": "早番",
-    "L": "遅番",
-    "M": "マイクロ",
-    "C": "中型",
-    "O": "大型",
-    "W": "ワゴン",
-    "V": "役員車両",
-    "N1": "1号車",
-    "N2": "2号車",
-    "N3": "3号車",
-    "N4": "4号車",
-    "N5": "5号車",
+EMPLOYEE_NUMBER_ROW_PREFIX = "#employee_number"
+PROJECT_EMPLOYEE_NUMBER_ROW_PREFIX = "#project_employee_number"
+
+SHIFT_OPTION_MAPPINGS = {
+    "A": "\u5348\u524d",
+    "P": "\u5348\u5f8c",
+    "E": "\u65e9\u756a",
+    "L": "\u9045\u756a",
+    "M": "\u30de\u30a4\u30af\u30ed",
+    "C": "\u4e2d\u578b",
+    "O": "\u5927\u578b",
+    "W": "\u30ef\u30b4\u30f3",
+    "V": "\u5f79\u54e1\u8eca\u4e21",
+    "N1": "1\u53f7\u8eca",
+    "N2": "2\u53f7\u8eca",
+    "N3": "3\u53f7\u8eca",
+    "N4": "4\u53f7\u8eca",
+    "N5": "5\u53f7\u8eca",
 }
+
+LEAVE_OPTION_MAPPINGS = {
+    "PAID": "\u6709\u4f11",
+    "COMP": "\u4ee3\u4f11",
+    "CONDOLENCE": "\u6176\u5f14\u4f11\u6687",
+    "CARE": "\u4ecb\u8b77\u4f11\u6687",
+    "REFRESH": "\u30ea\u30d5\u30ec\u30c3\u30b7\u30e5\u4f11\u6687",
+    "OTHER": "\u305d\u306e\u4ed6",
+}
+
+OPTION_MAPPINGS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS}
 
 ENTRY_VALUE_PATTERN = re.compile(r"^!([^!]+)!(.+)$")
 
@@ -51,7 +65,7 @@ def parse_entry_value(value: str) -> tuple[str | None, str]:
     text = str(value or "").strip()
     match = ENTRY_VALUE_PATTERN.match(text)
     if not match:
-      return None, text
+        return None, text
     return match.group(1), match.group(2)
 
 
@@ -60,10 +74,12 @@ def normalize_entry(raw: Any) -> dict[str, str]:
         value = str(raw.get("value", "")).strip()
         if not value:
             return {}
+        employee_number = str(raw.get("employee_number", raw.get("employeeNumber", "")) or "").strip()
         return {
             "id": str(raw.get("id") or generate_entry_id()),
             "value": value,
             "comment": str(raw.get("comment", "") or "").strip(),
+            "employee_number": employee_number,
         }
 
     value = str(raw or "").strip()
@@ -73,6 +89,7 @@ def normalize_entry(raw: Any) -> dict[str, str]:
         "id": generate_entry_id(),
         "value": value,
         "comment": "",
+        "employee_number": "",
     }
 
 
@@ -111,6 +128,7 @@ def serialize_entry_rows(
     title: str,
     required_capacity: int,
     entries_per_day: dict[str, list[dict[str, str]]],
+    project_employee_number: str = "",
 ) -> list[list[Any]]:
     year, month = validate_year_month(year, month)
     header = [mode, year, month, title]
@@ -123,6 +141,7 @@ def serialize_entry_rows(
     ]
 
     comment_rows: list[list[Any]] = []
+    employee_number_rows: list[list[Any]] = []
     for day in range(1, monthrange(year, month)[1] + 1):
         key = str(day)
         day_entries = [normalize_entry(item) for item in entries_per_day.get(key, [])]
@@ -130,10 +149,22 @@ def serialize_entry_rows(
         if visible_entries:
             rows.append([day, *visible_entries])
         for index, entry in enumerate(day_entries):
-            if entry and entry.get("comment"):
+            if not entry:
+                continue
+            if entry.get("comment"):
                 comment_rows.append([COMMENT_ROW_PREFIX, day, index, entry["comment"]])
+            if entry.get("employee_number"):
+                employee_number_rows.append(
+                    [EMPLOYEE_NUMBER_ROW_PREFIX, day, index, entry["employee_number"]]
+                )
 
-    return rows + comment_rows
+    metadata_rows: list[list[Any]] = []
+    if str(project_employee_number or "").strip():
+        metadata_rows.append(
+            [PROJECT_EMPLOYEE_NUMBER_ROW_PREFIX, str(project_employee_number).strip()]
+        )
+
+    return rows + comment_rows + employee_number_rows + metadata_rows
 
 
 def serialize_csv_text(
@@ -143,10 +174,21 @@ def serialize_csv_text(
     title: str,
     required_capacity: int,
     entries_per_day: dict[str, list[dict[str, str]]],
+    project_employee_number: str = "",
 ) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerows(serialize_entry_rows(mode, year, month, title, required_capacity, entries_per_day))
+    writer.writerows(
+        serialize_entry_rows(
+            mode,
+            year,
+            month,
+            title,
+            required_capacity,
+            entries_per_day,
+            project_employee_number,
+        )
+    )
     return buffer.getvalue()
 
 
@@ -174,6 +216,8 @@ def parse_csv_text(text: str) -> dict[str, Any]:
 
     entries_per_day = empty_entries_for_month(year, month)
     comment_rows: list[list[str]] = []
+    employee_number_rows: list[list[str]] = []
+    project_employee_number = ""
     for row in rows[2:]:
         if not row:
             continue
@@ -183,13 +227,19 @@ def parse_csv_text(text: str) -> dict[str, Any]:
             if day_key not in entries_per_day:
                 continue
             entries_per_day[day_key] = [
-                normalize_entry({"value": cell, "comment": ""})
+                normalize_entry({"value": cell, "comment": "", "employee_number": ""})
                 for cell in row[1:]
                 if str(cell).strip()
             ]
             continue
         if head == COMMENT_ROW_PREFIX:
             comment_rows.append(row)
+            continue
+        if head == EMPLOYEE_NUMBER_ROW_PREFIX:
+            employee_number_rows.append(row)
+            continue
+        if head == PROJECT_EMPLOYEE_NUMBER_ROW_PREFIX and len(row) >= 2:
+            project_employee_number = str(row[1] or "").strip()
 
     for row in comment_rows:
         if len(row) < 4:
@@ -203,11 +253,24 @@ def parse_csv_text(text: str) -> dict[str, Any]:
             continue
         entries_per_day[day_key][index]["comment"] = str(row[3] or "").strip()
 
+    for row in employee_number_rows:
+        if len(row) < 4:
+            continue
+        try:
+            day_key = str(int(row[1]))
+            index = int(row[2])
+        except (TypeError, ValueError):
+            continue
+        if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
+            continue
+        entries_per_day[day_key][index]["employee_number"] = str(row[3] or "").strip()
+
     return {
         "mode": mode,
         "year": year,
         "month": month,
         "title": title,
+        "employee_number": project_employee_number,
         "capacity_enabled": required_capacity > 0,
         "required_capacity": required_capacity,
         "entries_per_day": entries_per_day,
@@ -219,7 +282,7 @@ def entry_display_text(entry: Any, *, include_comment: bool = False, comment_lim
     if not normalized:
         return ""
     option_key, name = parse_entry_value(normalized["value"])
-    head = f"{OPTION_MAPPINGS.get(option_key, option_key)} {name}" if option_key else name
+    head = f"{name} {OPTION_MAPPINGS.get(option_key, option_key)}" if option_key else name
     comment = normalized.get("comment", "").strip()
     if not include_comment or not comment:
         return head

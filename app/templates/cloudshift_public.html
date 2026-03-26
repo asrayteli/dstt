@@ -38,7 +38,7 @@
 
       <div class="cloud-tool-dock cloud-tool-dock-public">
         <details class="cloud-fold" open>
-          <summary class="cloud-fold-summary">月と出力</summary>
+          <summary class="cloud-fold-summary">アクション</summary>
           <div class="cloud-fold-content">
             <div class="cloud-month-grid">
               <label class="cloud-field">
@@ -55,6 +55,7 @@
               <button id="cloud-next-month" type="button" class="cloud-btn secondary">次の月へ</button>
               <button id="cloud-add-prev-month" type="button" class="cloud-btn ghost">前月を追加</button>
               <button id="cloud-add-next-month" type="button" class="cloud-btn ghost">翌月を追加</button>
+              <button id="cloud-export-calendar" type="button" class="cloud-btn secondary">カレンダー出力</button>
               <button id="cloud-export-csv" type="button" class="cloud-btn secondary">CSV出力</button>
               <button id="cloud-export-xlsx" type="button" class="cloud-btn secondary">xlsx出力</button>
             </div>
@@ -99,6 +100,7 @@
   <div id="cloud-flash" class="cloud-flash info"></div>
 
   <script>
+    window.SHIFTERSYNC_HOLIDAYS = {{ shiftersync_holidays|tojson }};
     window.CLOUDSHIFT_PAGE = {
       type: "public",
       accessMode: "{{ access_mode }}",

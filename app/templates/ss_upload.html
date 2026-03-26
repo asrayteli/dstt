@@ -4,6 +4,9 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='shiftersync/css/ss_common.css') }}">
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="{{ url_for('static', filename='shiftersync/js/ss_common.js') }}"></script>
+<script>
+  window.SHIFTERSYNC_HOLIDAYS = {{ shiftersync_holidays|tojson }};
+</script>
 
 <main class="ss-page">
   <div class="container animate-fade-in">
