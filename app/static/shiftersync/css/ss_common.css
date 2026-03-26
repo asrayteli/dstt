@@ -155,6 +155,7 @@ h1, h2, h3 {
 .copy-input,
 .ss-detail-input,
 .ss-detail-textarea {
+    min-width: 0;
     width: 100%;
     border: 1px solid #cfd3cc;
     border-radius: 10px;
@@ -283,6 +284,12 @@ h1, h2, h3 {
     background: #f9fcff;
     border: 1px solid var(--ss-line);
     border-radius: 12px;
+    overflow: hidden;
+}
+
+.day-box,
+.day-box * {
+    box-sizing: border-box;
 }
 
 .day-box.empty {

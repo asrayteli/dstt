@@ -59,6 +59,7 @@
   let pdfjsLibPromise = null;
   let clipboardStamp = null;
   let zoom = 1;
+  let autoFitOnResize = false;
   const ZOOM_MIN = 0.05;
   const ZOOM_MAX = 4;
   const ZOOM_STEP = 0.1;
@@ -90,17 +91,26 @@
   function resolveGuideBoxes(guide, paper = null) {
     if (!guide) return [];
 
-    if (Array.isArray(guide.boxes_mm) && paper && paper.w_mm && paper.h_mm) {
-      const canvas = getStagePixelSize();
-      const sx = canvas.width / paper.w_mm;
-      const sy = canvas.height / paper.h_mm;
+    if (Array.isArray(guide.boxes_mm)) {
+      let sx, sy;
+      if (paper && paper.w_mm && paper.h_mm) {
+        const canvas = getStagePixelSize();
+        sx = canvas.width / paper.w_mm;
+        sy = canvas.height / paper.h_mm;
+      } else {
+        // paperがない場合は300dpi想定でmm→px変換
+        const dpi = Number(paperDpiInput?.value || 300);
+        sx = dpi / 25.4;
+        sy = dpi / 25.4;
+      }
       return guide.boxes_mm.map((b) => ({
         ...b,
         x: (b.x_mm || 0) * sx,
         y: (b.y_mm || 0) * sy,
         w: (b.w_mm || 0) * sx,
         h: (b.h_mm || 0) * sy,
-        gap: (b.gap_mm || 0) * sx,
+        inter_gap: (b.inter_gap_mm || 0) * sx,
+        group_gap: (b.group_gap_mm || 0) * sx,
       }));
     }
 
@@ -120,18 +130,16 @@
   }
 
   function isEnvelopeTemplateName(name) {
-    const n = String(name || '').toLowerCase();
+    const n = String(name || '');
     return (
+      n.includes('封筒') ||
       n.includes('長3') ||
       n.includes('長３') ||
       n.includes('角2') ||
       n.includes('角２') ||
-      n.includes('角2号') ||
-      n.includes('角２号') ||
-      n.includes('n3') ||
-      n.includes('k2') ||
-      n.includes('long3') ||
-      n.includes('kaku2')
+      /\blong3\b/i.test(n) ||
+      /\bkaku2\b/i.test(n) ||
+      /\bnaga3\b/i.test(n)
     );
   }
 
@@ -165,17 +173,23 @@
     const n1 = Number(zipGuide.digits_first || 3);
     const n2 = Number(zipGuide.digits_second || 4);
     const count = n1 + n2;
-    const gap = Math.max(2, Number(zipGuide.gap || 0));
+    const interGap = Math.max(0, Number(zipGuide.inter_gap || 0));
+    const groupGap = Math.max(interGap, Number(zipGuide.group_gap || 0));
     const totalW = Math.max(0, Number(zipGuide.w || 0));
-    const cellW = (totalW - gap) / count;
+    const totalGap = (interGap * Math.max(0, count - 2)) + groupGap;
+    const cellW = (totalW - totalGap) / count;
     const baseX = Number(zipGuide.x || 0);
     const baseY = Number(zipGuide.y || 0);
     const h = Math.max(0, Number(zipGuide.h || 0));
     const digits = zipCode.padEnd(count, ' ');
+    // フォントサイズ: セル高さの約70%を基準に自動計算
+    const autoFontSize = Math.max(12, Math.round(h * 0.70));
 
     for (let i = 0; i < count; i++) {
-      const inSecond = i >= n1;
-      const x = baseX + (i * cellW) + (inSecond ? gap : 0);
+      const x = baseX
+        + (i * cellW)
+        + (i * interGap)
+        + (i >= n1 ? (groupGap - interGap) : 0);
       const text = document.createElement('div');
       text.className = 'stamp-item auto-postal-code';
       text.dataset.autoPostalCode = 'true';
@@ -189,7 +203,7 @@
       text.style.justifyContent = 'center';
       text.style.fontFamily = '"Noto Sans JP", sans-serif';
       text.style.fontWeight = '700';
-      text.style.fontSize = `${Math.max(12, Math.round(h * 0.72))}px`;
+      text.style.fontSize = `${autoFontSize}px`;
       text.style.lineHeight = '1';
       text.style.color = '#111';
       text.style.whiteSpace = 'pre';
@@ -213,14 +227,18 @@
         const n1 = Number(b.digits_first || 3);
         const n2 = Number(b.digits_second || 4);
         const count = n1 + n2;
-        const gap = Math.max(2, Number(b.gap || 0));
+        const interGap = Math.max(0, Number(b.inter_gap || 0));
+        const groupGap = Math.max(interGap, Number(b.group_gap || 0));
         const totalW = Math.max(0, Number(b.w || 0));
-        const cellW = (totalW - gap) / count;
+        const totalGap = (interGap * Math.max(0, count - 2)) + groupGap;
+        const cellW = (totalW - totalGap) / count;
         const y = Math.max(0, Number(b.y || 0));
         const h = Math.max(0, Number(b.h || 0));
         for (let i = 0; i < count; i++) {
-          const inSecond = i >= n1;
-          const x = (Number(b.x || 0)) + (i * cellW) + (inSecond ? gap : 0);
+          const x = (Number(b.x || 0))
+            + (i * cellW)
+            + (i * interGap)
+            + (i >= n1 ? (groupGap - interGap) : 0);
           const box = document.createElement('div');
           box.className = 'guide-box';
           box.style.left = `${Math.max(0, x)}px`;
@@ -250,29 +268,7 @@
     }
   }
 
-  function buildEnvelopeGuideByName(name) {
-    if (!name) return null;
-    const n = String(name);
-    if (n.includes('長3') || n.includes('長３') || n.toLowerCase().includes('n3') || n.toLowerCase().includes('long3')) {
-      return {
-        boxes_mm: [
-          { type: 'zip7', x_mm: 57, y_mm: 12, w_mm: 55, h_mm: 12, label: '郵便番号', digits_first: 3, digits_second: 4, gap_mm: 4 },
-          { x_mm: 72, y_mm: 45, w_mm: 38, h_mm: 155, label: '宛名（縦書き想定）' },
-          { x_mm: 10, y_mm: 185, w_mm: 45, h_mm: 38, label: '差出人' }
-        ]
-      };
-    }
-    if (n.includes('角2') || n.includes('角２') || n.includes('角2号') || n.includes('角２号') || n.toLowerCase().includes('k2') || n.toLowerCase().includes('kaku2')) {
-      return {
-        boxes_mm: [
-          { type: 'zip7', x_mm: 170, y_mm: 14, w_mm: 60, h_mm: 13, label: '郵便番号', digits_first: 3, digits_second: 4, gap_mm: 4 },
-          { x_mm: 145, y_mm: 70, w_mm: 75, h_mm: 210, label: '宛名（縦書き想定）' },
-          { x_mm: 18, y_mm: 270, w_mm: 70, h_mm: 45, label: '差出人' }
-        ]
-      };
-    }
-    return null;
-  }
+  /* buildEnvelopeGuideByName は削除。seedデータの guide_mm を常に使用する。 */
 
 function mmToPx(mm, dpi) {
     return (mm / 25.4) * dpi;
@@ -317,7 +313,7 @@ function mmToPx(mm, dpi) {
     const zw = availW / Math.max(1, width);
     const zh = availH / Math.max(1, height);
     const target = Math.min(1, zw, zh);
-    setZoom(target);
+    setZoom(target, { keepAutoFit: true });
   }
 
   function getStagePixelSize() {
@@ -335,8 +331,10 @@ function mmToPx(mm, dpi) {
     if (zoomSlider) zoomSlider.value = String(Math.round(zoom * 100));
   }
 
-  function setZoom(nextZoom) {
+  function setZoom(nextZoom, options = {}) {
+    const { keepAutoFit = false } = options;
     zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextZoom));
+    if (!keepAutoFit) autoFitOnResize = false;
     applyZoom();
   }
 
@@ -876,13 +874,16 @@ function mmToPx(mm, dpi) {
   }
 
   function currentTemplatePayload() {
-    return {
+    const payload = {
       version: 1,
       sourceSize,
       canvas: getStagePixelSize(),
       calibration: getCalibration(),
       stamps: serializeAllStamps(),
     };
+    if (activeGuide) payload.guide = activeGuide;
+    if (activePaper) payload.paper = activePaper;
+    return payload;
   }
 
   async function refreshTemplateList(selectId = null) {
@@ -968,8 +969,9 @@ function mmToPx(mm, dpi) {
     sourceSize = data.sourceSize || sourceSize;
     restoreAllStamps(data.stamps || []);
 
-    const envelopeGuide = buildEnvelopeGuideByName(activeTemplateName);
-    const guide = envelopeGuide || (data.guide_mm ? { boxes_mm: data.guide_mm.boxes } : data.guide);
+    const guide = data.guide_mm
+      ? { boxes_mm: data.guide_mm.boxes, boxes: data.guide?.boxes }
+      : data.guide;
     activeGuide = guide || null;
     activePaper = data.paper || null;
     renderGuide(activeGuide, activePaper);
@@ -1291,6 +1293,10 @@ document.addEventListener('mousemove', (event) => {
       const isLandscape = (paperOrientation?.value || 'portrait') === 'landscape';
       pageWmm = isLandscape ? p.h : p.w;
       pageHmm = isLandscape ? p.w : p.h;
+    } else if (activePaper && activePaper.w_mm && activePaper.h_mm) {
+      // 封筒等テンプレート固有の用紙サイズを使用
+      pageWmm = activePaper.w_mm;
+      pageHmm = activePaper.h_mm;
     } else if (sourceSize.unit === 'pt') {
       pageWmm = (outWidth * 25.4) / 72;
       pageHmm = (outHeight * 25.4) / 72;
@@ -1305,7 +1311,11 @@ document.addEventListener('mousemove', (event) => {
       ? `@page { size: ${pageWmm.toFixed(2)}mm ${pageHmm.toFixed(2)}mm; margin: 0; }`
       : '@page { margin: 0; }';
 
-    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>PowerSTAMP Print</title><style>${pageSizeCss} html,body{margin:0;padding:0;} .sheet{width:100vw;height:100vh;display:flex;align-items:stretch;justify-content:stretch;} img{width:100%;height:100%;object-fit:fill;}</style></head><body><div class="sheet"><img src="${dataUrl}" /></div><script>window.onload=()=>{setTimeout(()=>{window.print();},150)}<\/script></body></html>`);
+    // 用紙mm寸法がわかっている場合は正確なmm指定で配置
+    const imgSizeCss = (pageWmm && pageHmm)
+      ? `width:${pageWmm.toFixed(2)}mm;height:${pageHmm.toFixed(2)}mm;`
+      : 'width:100%;height:100%;object-fit:contain;';
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>PowerSTAMP Print</title><style>${pageSizeCss} html,body{margin:0;padding:0;overflow:hidden;} .sheet{width:100vw;height:100vh;display:flex;align-items:flex-start;justify-content:flex-start;} img{${imgSizeCss}}</style></head><body><div class="sheet"><img src="${dataUrl}" /></div><script>window.onload=()=>{setTimeout(()=>{window.print();},150)}<\/script></body></html>`);
     win.document.close();
   }
 
@@ -1324,7 +1334,10 @@ document.addEventListener('mousemove', (event) => {
   zoomInBtn?.addEventListener('click', () => setZoom(zoom + ZOOM_STEP));
   zoomOutBtn?.addEventListener('click', () => setZoom(zoom - ZOOM_STEP));
   zoomResetBtn?.addEventListener('click', () => setZoom(1));
-  zoomFitBtn?.addEventListener('click', () => fitStageToScreen());
+  zoomFitBtn?.addEventListener('click', () => {
+    autoFitOnResize = true;
+    fitStageToScreen();
+  });
   zoomSlider?.addEventListener('input', () => {
     const pct = Number(zoomSlider.value || 100);
     setZoom(pct / 100);
@@ -1460,27 +1473,45 @@ document.addEventListener('mousemove', (event) => {
           }
         }
 
-        ctx.fillStyle = node.style.color || computed.color || '#111';
-        ctx.textBaseline = 'top';
-        ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-
         const lines = (node.textContent || '').split('\n');
         const writingMode = node.style.writingMode || computed.writingMode || 'horizontal-tb';
+        const boxW = applyCalibW(parseFloat(node.style.width || '0') * scaleX);
+        const boxH = applyCalibH(parseFloat(node.style.height || '0') * scaleY);
+        const hasBox = boxW > 0 && boxH > 0;
+        const isFlexCenter = hasBox && (computed.display === 'flex' || node.style.display === 'flex');
+
+        ctx.fillStyle = node.style.color || computed.color || '#111';
+        ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+        ctx.textBaseline = 'top';
+        ctx.textAlign = (isFlexCenter && !writingMode.startsWith('vertical')) ? 'center' : 'left';
+
         if (writingMode.startsWith('vertical')) {
           const columnGap = fontSize * 1.05;
+          const totalColumns = lines.length;
+          const totalW = columnGap * Math.max(0, totalColumns - 1);
+          const startX = isFlexCenter ? (x + ((boxW - totalW) / 2)) : x;
+          const totalChars = Math.max(1, ...lines.map((line) => Array.from(line).length));
+          const totalH = lineHeight * totalChars;
+          const startY = isFlexCenter ? (y + ((boxH - totalH) / 2)) : y;
+
           lines.forEach((line, colIdx) => {
-            let cursorY = y;
-            const columnX = x + (columnGap * colIdx);
+            let cursorY = startY;
+            const columnX = startX + (columnGap * colIdx);
             for (const ch of Array.from(line)) {
               ctx.fillText(ch, columnX, cursorY);
               cursorY += lineHeight;
             }
           });
         } else {
+          const totalTextH = lineHeight * lines.length;
+          const textX = isFlexCenter ? (x + (boxW / 2)) : x;
+          const startY = isFlexCenter ? (y + ((boxH - totalTextH) / 2)) : y;
           lines.forEach((line, idx) => {
-            ctx.fillText(line, x, y + lineHeight * idx);
+            ctx.fillText(line, textX, startY + lineHeight * idx);
           });
         }
+
+        ctx.textAlign = 'left';
       }
     }
   }
@@ -1529,10 +1560,14 @@ document.addEventListener('mousemove', (event) => {
   loadOutsideAreaColor();
   applyZoom();
   refreshTemplateList().catch(() => {});
-  window.addEventListener('resize', () => { fitStageToScreen(); });
+
+  window.addEventListener('resize', () => {
+    if (autoFitOnResize) fitStageToScreen();
+  });
   if (window.ResizeObserver && stageScroll) {
-    const ro = new ResizeObserver(() => fitStageToScreen());
+    const ro = new ResizeObserver(() => {
+      if (autoFitOnResize) fitStageToScreen();
+    });
     ro.observe(stageScroll);
   }
-  setTimeout(() => fitStageToScreen(), 0);
 })();
