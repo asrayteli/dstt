@@ -173,6 +173,14 @@ const ShifterSync = (function() {
     return state.mode === 'person';
   }
 
+  function isSceneMode() {
+    return state.mode === 'scene';
+  }
+
+  function isEntryEmployeeSearchEnabled() {
+    return isSceneMode();
+  }
+
   function pad2(value) {
     return String(value).padStart(2, '0');
   }
@@ -286,7 +294,7 @@ const ShifterSync = (function() {
     }
     const note = getEmployeeSelectionNoteForInput($input);
     if (note.length) {
-      note.text('');
+      note.text('').addClass('ss-hidden');
     }
   }
 
@@ -311,7 +319,7 @@ const ShifterSync = (function() {
 
     const note = getEmployeeSelectionNoteForInput($input);
     if (note.length) {
-      note.text(`\u9078\u629e\u4e2d: ${normalized.employee_number}`);
+      note.text(`\u9078\u629e\u4e2d: ${normalized.employee_number}`).removeClass('ss-hidden');
     }
 
     const panel = getEmployeeSearchPanelForInput($input);
@@ -326,17 +334,7 @@ const ShifterSync = (function() {
       return '';
     }
 
-    const segments = [
-      normalized.employee_name,
-      normalized.employee_number
-    ];
-    if (normalized.office_name) {
-      segments.push(normalized.office_name);
-    }
-    if (normalized.job_title) {
-      segments.push(normalized.job_title);
-    }
-    return segments.filter(Boolean).join(' / ');
+    return [normalized.employee_name, normalized.employee_number].filter(Boolean).join(' / ');
   }
 
   function renderEmployeeSearchResults($panel, $input, candidates, emptyMessage) {
@@ -436,7 +434,7 @@ const ShifterSync = (function() {
   }
 
   function scheduleEmployeeSearchForInput($input) {
-    if (!isPersonMode() || !$input || !$input.length) {
+    if (!isEntryEmployeeSearchEnabled() || !$input || !$input.length) {
       return;
     }
 
@@ -492,7 +490,7 @@ const ShifterSync = (function() {
 
   function scheduleEmployeeSearchForModal() {
     const $input = $('#ss-entry-modal-name');
-    if (!isPersonMode() || !$input.length) {
+    if (!isEntryEmployeeSearchEnabled() || !$input.length) {
       return;
     }
 
@@ -567,6 +565,20 @@ const ShifterSync = (function() {
     return text.length > 24 ? `${text.slice(0, 24)}...` : text;
   }
 
+  function getSelectedEmployeeNumberForInput($input) {
+    if (!$input || !$input.length) {
+      return '';
+    }
+
+    const selectedNumber = String($input.attr('data-employee-number') || '').trim();
+    const selectedName = String($input.attr('data-selected-employee-name') || '').trim();
+    const currentName = String($input.val() || '').trim();
+    if (!selectedNumber || !selectedName || !currentName) {
+      return '';
+    }
+    return currentName === selectedName ? selectedNumber : '';
+  }
+
   function csvEscape(value) {
     const text = String(value ?? '');
     if (/[",\n\r]/.test(text)) {
@@ -639,6 +651,29 @@ const ShifterSync = (function() {
 
   function updateAllCapacityWarnings() {
     Object.keys(state.entriesPerDay).forEach((day) => updateCapacityWarning(day));
+  }
+
+  function replaceEntriesPerDay(entriesPerDay) {
+    const nextEntries = {};
+    const source = entriesPerDay && typeof entriesPerDay === 'object' ? entriesPerDay : {};
+    const daysInMonth = state.year && state.month ? new Date(state.year, state.month, 0).getDate() : 0;
+
+    if (daysInMonth > 0) {
+      for (let day = 1; day <= daysInMonth; day += 1) {
+        const key = String(day);
+        nextEntries[key] = normalizeDayEntries(source[key] || source[day] || []);
+      }
+    } else {
+      Object.keys(source).forEach((day) => {
+        nextEntries[String(day)] = normalizeDayEntries(source[day]);
+      });
+    }
+
+    state.entriesPerDay = nextEntries;
+    Object.keys(nextEntries).forEach((day) => {
+      updateEntryDisplay(day);
+      updateCapacityWarning(day);
+    });
   }
 
   function updateEntryDisplay(day) {
@@ -719,6 +754,11 @@ const ShifterSync = (function() {
       .addClass('entry-input')
       .attr('placeholder', state.mode === 'scene' ? '\u4eba\u7269\u540d' : '\u73fe\u5834\u540d')
       .attr('data-day', day);
+    if (isEntryEmployeeSearchEnabled()) {
+      nameInput
+        .addClass('ss-employee-search-input')
+        .attr('data-search-kind', 'day');
+    }
     const addBtn = $('<button>')
       .attr('type', 'button')
       .addClass('add-entry-btn')
@@ -730,6 +770,16 @@ const ShifterSync = (function() {
       .addClass('entry-comment-input')
       .attr('placeholder', '\u30b3\u30e1\u30f3\u30c8')
       .attr('rows', 2)
+      .attr('data-day', day);
+
+    const selectionNote = $('<div>')
+      .addClass('ss-selected-note ss-hidden')
+      .attr('data-search-kind', 'day')
+      .attr('data-day', day);
+
+    const candidatePanel = $('<div>')
+      .addClass('ss-candidate-panel ss-hidden')
+      .attr('data-search-kind', 'day')
       .attr('data-day', day);
 
     const optionBtn = $('<button>')
@@ -759,7 +809,7 @@ const ShifterSync = (function() {
     const controlsGrid = $('<div>').addClass('day-controls-grid');
     controlsGrid.append(optionBtn, toolDetailBtn, copyInput, copyBtn);
 
-    inputGroup.append(inputRow, commentInput, controlsGrid);
+    inputGroup.append(inputRow, selectionNote, candidatePanel, commentInput, controlsGrid);
     dayBox.append(inputGroup);
     return dayBox;
   }
@@ -834,7 +884,7 @@ const ShifterSync = (function() {
     });
 
     $(document).on('input', '.ss-employee-search-input', function() {
-      if (!isPersonMode()) {
+      if (!isEntryEmployeeSearchEnabled()) {
         return;
       }
       scheduleEmployeeSearchForInput($(this));
@@ -914,7 +964,7 @@ const ShifterSync = (function() {
       id: makeEntryId(),
       value: formatEntryValue(options[0] || null, name),
       comment: commentInput.val().trim(),
-      employee_number: ''
+      employee_number: getSelectedEmployeeNumberForInput(nameInput)
     });
     if (!entry) {
       return;
@@ -927,6 +977,7 @@ const ShifterSync = (function() {
     updateCapacityWarning(dayKey);
     nameInput.val('').focus();
     commentInput.val('');
+    clearEmployeeSelectionForInput(nameInput);
     clearSelectedOptionsForDay(dayKey);
     updateOptionSelectButton(dayKey);
   }
@@ -1121,9 +1172,18 @@ const ShifterSync = (function() {
       <div class="ss-detail-form">
         <input type="hidden" id="ss-entry-modal-day" value="${day}">
         <input type="hidden" id="ss-entry-modal-id" value="${escapeHtml(entry.id)}">
+        <input type="hidden" id="ss-entry-modal-employee-number" value="${escapeHtml(entry.employee_number || '')}">
         <div class="ss-detail-field">
           <label class="ss-detail-label" for="ss-entry-modal-name">\u540d\u524d</label>
-          <input id="ss-entry-modal-name" class="ss-detail-input" type="text" value="${escapeHtml(parsed.name)}">
+          <input
+            id="ss-entry-modal-name"
+            class="ss-detail-input${isEntryEmployeeSearchEnabled() ? ' ss-employee-search-input' : ''}"
+            type="text"
+            value="${escapeHtml(parsed.name)}"
+            ${isEntryEmployeeSearchEnabled() ? 'data-search-kind="modal"' : ''}
+          >
+          <div id="ss-entry-modal-selected-note" class="ss-selected-note${entry.employee_number ? '' : ' ss-hidden'}">${entry.employee_number ? `選択中: ${escapeHtml(parsed.name)} / ${escapeHtml(entry.employee_number)}` : ''}</div>
+          <div id="ss-entry-modal-candidate-panel" class="ss-candidate-panel ss-hidden" data-search-kind="modal"></div>
         </div>
         <div class="ss-detail-field">
           <label class="ss-detail-label" for="ss-entry-modal-option">\u30aa\u30d7\u30b7\u30e7\u30f3</label>
@@ -1143,6 +1203,13 @@ const ShifterSync = (function() {
       </div>
     `);
 
+    if (isEntryEmployeeSearchEnabled() && entry.employee_number) {
+      const $modalNameInput = $('#ss-entry-modal-name');
+      $modalNameInput.attr('data-employee-number', String(entry.employee_number || ''));
+      $modalNameInput.attr('data-selected-employee-name', parsed.name);
+      $modalNameInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    }
+
     $('#ss-entry-modal').removeClass('ss-hidden');
   }
 
@@ -1157,6 +1224,7 @@ const ShifterSync = (function() {
 
     const optionKey = $('#ss-entry-modal-option').val() || null;
     const comment = $('#ss-entry-modal-comment').val().trim();
+    const employeeNumber = getSelectedEmployeeNumberForInput($('#ss-entry-modal-name'));
     const nextEntries = getDayEntries(day).map((entry) => {
       if (entry.id !== entryId) {
         return entry;
@@ -1165,7 +1233,7 @@ const ShifterSync = (function() {
         id: entry.id,
         value: formatEntryValue(optionKey, name),
         comment,
-        employee_number: entry.employee_number || ''
+        employee_number: employeeNumber
       });
     });
 
@@ -1188,10 +1256,12 @@ const ShifterSync = (function() {
     const selectedNumber = String($input.attr('data-employee-number') || '').trim();
     const selectedName = String($input.attr('data-selected-employee-name') || '').trim();
     if (!selectedNumber) {
-      note.text('');
+      note.text('').addClass('ss-hidden');
       return;
     }
-    note.text(selectedName ? `\u9078\u629e\u4e2d: ${selectedName} / ${selectedNumber}` : `\u9078\u629e\u4e2d: ${selectedNumber}`);
+    note
+      .text(selectedName ? `\u9078\u629e\u4e2d: ${selectedName} / ${selectedNumber}` : `\u9078\u629e\u4e2d: ${selectedNumber}`)
+      .removeClass('ss-hidden');
   }
 
   function buildCalendar(year, month, mode, initialData = null, options = {}) {
@@ -1284,6 +1354,17 @@ const ShifterSync = (function() {
     return state[key];
   }
 
+  function getOptionMappings() {
+    return Object.assign({}, allOptionMappings);
+  }
+
+  function getOptionSectionsForModeExport(mode) {
+    return getOptionSectionsForMode(mode).map((section) => ({
+      title: section.title,
+      optionKeys: section.optionKeys.slice()
+    }));
+  }
+
   function getEntriesPerDay() {
     const snapshot = {};
     Object.keys(state.entriesPerDay).forEach((day) => {
@@ -1297,7 +1378,10 @@ const ShifterSync = (function() {
     buildCSV,
     setState,
     getState,
+    replaceEntriesPerDay,
     getEntriesPerDay,
-    updateAllCapacityWarnings
+    updateAllCapacityWarnings,
+    getOptionMappings,
+    getOptionSectionsForMode: getOptionSectionsForModeExport
   };
 })();

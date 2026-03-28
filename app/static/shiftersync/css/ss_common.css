@@ -407,6 +407,22 @@ h1, h2, h3 {
     gap: 5px;
 }
 
+.ss-selected-note {
+    color: var(--ss-muted);
+    font-size: 11px;
+    line-height: 1.4;
+    min-height: 15px;
+    padding: 0 2px;
+}
+
+.ss-candidate-panel {
+    display: grid;
+    gap: 6px;
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 2px 0 0;
+}
+
 .input-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
