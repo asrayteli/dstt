@@ -5,6 +5,7 @@ import secrets
 from collections import Counter, defaultdict
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from flask import (
     Blueprint,
@@ -454,22 +455,25 @@ def _fit_calendar_lines(
     text: str,
     font: ImageFont.ImageFont,
     max_width: int,
-    max_lines: int,
+    max_lines: int | None,
 ) -> list[str]:
     normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not normalized or max_lines <= 0:
+    if not normalized:
+        return []
+    if max_lines is not None and max_lines <= 0:
         return []
 
     paragraphs = normalized.split("\n")
     lines: list[str] = []
     truncated = False
+    unlimited = max_lines is None
 
     for paragraph_index, paragraph in enumerate(paragraphs):
         current = ""
         text_value = paragraph.strip()
 
         if not text_value:
-            if lines and len(lines) < max_lines:
+            if lines and (unlimited or len(lines) < max_lines):
                 lines.append("")
             elif paragraph_index < len(paragraphs) - 1:
                 truncated = True
@@ -481,7 +485,7 @@ def _fit_calendar_lines(
             if current and _text_width(draw, candidate, font) > max_width:
                 lines.append(current)
                 current = character
-                if len(lines) >= max_lines:
+                if not unlimited and len(lines) >= max_lines:
                     truncated = True
                     break
             else:
@@ -492,19 +496,55 @@ def _fit_calendar_lines(
 
         if current:
             lines.append(current)
-            if len(lines) > max_lines:
+            if not unlimited and len(lines) > max_lines:
                 lines = lines[:max_lines]
                 truncated = True
                 break
 
-        if len(lines) >= max_lines and paragraph_index < len(paragraphs) - 1:
+        if not unlimited and len(lines) >= max_lines and paragraph_index < len(paragraphs) - 1:
             truncated = True
             break
 
     if truncated and lines:
         lines[-1] = _ellipsize_calendar_text(draw, lines[-1], font, max_width)
 
-    return lines[:max_lines]
+    return lines if unlimited else lines[:max_lines]
+
+
+def _layout_png_entry_block(
+    draw: ImageDraw.ImageDraw,
+    entry: dict[str, Any],
+    title_font: ImageFont.ImageFont,
+    comment_font: ImageFont.ImageFont,
+    title_width: int,
+    comment_width: int,
+) -> dict[str, Any]:
+    title_lines = _fit_calendar_lines(
+        draw,
+        f"{entry['title']}{_comment_badge(entry['comment'])}",
+        title_font,
+        title_width,
+        1,
+    )
+    comment_lines = _fit_calendar_lines(
+        draw,
+        entry["comment"],
+        comment_font,
+        comment_width,
+        None,
+    )
+
+    block_height = 14
+    if title_lines:
+        block_height += len(title_lines) * 18
+    if comment_lines:
+        block_height += 4 + len(comment_lines) * 15
+
+    return {
+        "title_lines": title_lines,
+        "comment_lines": comment_lines,
+        "block_height": block_height,
+    }
 
 
 def _draw_bold_calendar_text(
@@ -608,13 +648,12 @@ def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None
 
 def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None):
     width = 1600
-    height = 1180
+    min_height = 1180
     page_background = "#eef5fc"
     header_background = "#5f86b7"
     header_text = "#ffffff"
     weekday_background = "#d4e4f5"
     weekday_text = "#111111"
-    cell_background = "#ffffff"
     empty_cell_background = "#ececec"
     border_color = "#7898bd"
     title_text_color = "#111111"
@@ -624,16 +663,66 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
     footer_text_color = "#111111"
     shortage_border = "#d59f58"
     cell_w = (width - 80) // 7
-    cell_h = 148
+    minimum_bottom_space = 58
+    start_x = 40
+    start_y = 126
+    weekday_header_height = 42
+    calendar_top = start_y + 52
+    content_left_padding = 10
+    content_right_padding = 10
+    content_inner_padding = 10
+    content_top_offset = 42
+    content_bottom_padding = 12
+    entry_gap = 6
+    title_width = cell_w - content_left_padding - content_right_padding - content_inner_padding
+    comment_width = title_width - 10
 
-    img = Image.new("RGB", (width, height), page_background)
-    draw = ImageDraw.Draw(img)
     title_font = _load_image_font(36)
     header_font = _load_image_font(24)
     day_font = _load_image_font(20)
     text_font = _load_image_font(16)
     comment_font = _load_image_font(14)
     footer_font = _load_image_font(12)
+
+    calendar_module = __import__("calendar")
+    weeks = calendar_module.Calendar(firstweekday=calendar_module.MONDAY).monthdayscalendar(year, month)
+    week_count = max(len(weeks), 1)
+    base_cell_height = max(148, (min_height - calendar_top - minimum_bottom_space) // week_count)
+
+    measurement = Image.new("RGB", (width, min_height), page_background)
+    measurement_draw = ImageDraw.Draw(measurement)
+    entry_layouts_by_day: dict[int, list[dict[str, Any]]] = {}
+    row_heights: list[int] = []
+
+    for week in weeks:
+        row_height = base_cell_height
+        for day in week:
+            if day == 0:
+                continue
+            layouts = [
+                _layout_png_entry_block(
+                    measurement_draw,
+                    entry,
+                    text_font,
+                    comment_font,
+                    title_width,
+                    comment_width,
+                )
+                for entry in day_map.get(day, [])
+            ]
+            entry_layouts_by_day[day] = layouts
+            content_height = 0
+            for index, layout in enumerate(layouts):
+                if index > 0:
+                    content_height += entry_gap
+                content_height += layout["block_height"]
+            required_height = content_top_offset + content_bottom_padding + content_height
+            row_height = max(row_height, required_height)
+        row_heights.append(row_height)
+
+    height = max(min_height, calendar_top + sum(row_heights) + minimum_bottom_space)
+    img = Image.new("RGB", (width, height), page_background)
+    draw = ImageDraw.Draw(img)
 
     draw.rectangle([0, 0, width, 92], fill=header_background)
     title_text = f"{year}年{month}月 {title}"
@@ -648,12 +737,10 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
         font=title_font,
     )
 
-    start_x = 40
-    start_y = 126
     for column, day_name in enumerate(_calendar_weekdays()):
         x = start_x + column * cell_w
         draw.rectangle(
-            [x, start_y, x + cell_w, start_y + 42],
+            [x, start_y, x + cell_w, start_y + weekday_header_height],
             fill=weekday_background,
             outline=border_color,
             width=2,
@@ -667,12 +754,12 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
             font=header_font,
         )
 
-    calendar_module = __import__("calendar")
-    weeks = calendar_module.Calendar(firstweekday=calendar_module.MONDAY).monthdayscalendar(year, month)
+    current_y = calendar_top
     for week_index, week in enumerate(weeks):
+        row_height = row_heights[week_index]
         for column, day in enumerate(week):
             x = start_x + column * cell_w
-            y = start_y + 52 + week_index * cell_h
+            y = current_y
             if day:
                 day_palette = _png_calendar_palette(_calendar_day_kind(year, month, day))
                 fill = day_palette["cell_background"]
@@ -681,14 +768,14 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
                 day_palette = None
                 fill = empty_cell_background
                 cell_outline = border_color
-            draw.rectangle([x, y, x + cell_w, y + cell_h], fill=fill, outline=cell_outline, width=2)
+            draw.rectangle([x, y, x + cell_w, y + row_height], fill=fill, outline=cell_outline, width=2)
             if day == 0:
                 continue
 
             entries = day_map.get(day, [])
             if capacity and len(entries) < capacity:
                 draw.rectangle(
-                    [x + 3, y + 3, x + cell_w - 3, y + cell_h - 3],
+                    [x + 3, y + 3, x + cell_w - 3, y + row_height - 3],
                     outline=shortage_border,
                     width=2,
                 )
@@ -708,37 +795,12 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
                 font=day_font,
             )
 
-            content_left = x + 10
-            content_right = x + cell_w - 10
-            content_width = content_right - content_left - 10
-            content_bottom = y + cell_h - 12
-            cursor_y = y + 42
-            rendered_entries = 0
+            content_left = x + content_left_padding
+            content_right = x + cell_w - content_right_padding
+            cursor_y = y + content_top_offset
 
-            for entry_index, entry in enumerate(entries):
-                remaining_entries = len(entries) - entry_index - 1
-                title_lines = _fit_calendar_lines(
-                    draw,
-                    f"{entry['title']}{_comment_badge(entry['comment'])}",
-                    text_font,
-                    content_width,
-                    1,
-                )
-                comment_lines = _fit_calendar_lines(
-                    draw,
-                    entry["comment"],
-                    comment_font,
-                    content_width - 10,
-                    2,
-                )
-                block_height = 14
-                if title_lines:
-                    block_height += len(title_lines) * 18
-                if comment_lines:
-                    block_height += 4 + len(comment_lines) * 15
-                reserve_height = 18 if remaining_entries > 0 else 0
-                if cursor_y + block_height > content_bottom - reserve_height:
-                    break
+            for layout in entry_layouts_by_day.get(day, []):
+                block_height = layout["block_height"]
 
                 draw.rectangle(
                     [content_left, cursor_y, content_right, cursor_y + block_height],
@@ -748,7 +810,7 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
                 )
 
                 line_top = cursor_y + 8
-                for line in title_lines:
+                for line in layout["title_lines"]:
                     _draw_bold_calendar_text(
                         draw,
                         (content_left + 8, line_top),
@@ -757,9 +819,9 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
                         font=text_font,
                     )
                     line_top += 18
-                if comment_lines:
+                if layout["comment_lines"]:
                     line_top += 2
-                    for line in comment_lines:
+                    for line in layout["comment_lines"]:
                         _draw_bold_calendar_text(
                             draw,
                             (content_left + 14, line_top),
@@ -769,25 +831,15 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
                         )
                         line_top += 15
 
-                cursor_y += block_height + 6
-                rendered_entries += 1
+                cursor_y += block_height + entry_gap
 
-            remaining_count = len(entries) - rendered_entries
-            if remaining_count > 0:
-                more_text = f"+{remaining_count}件"
-                _draw_bold_calendar_text(
-                    draw,
-                    (content_left + 2, min(cursor_y + 2, content_bottom - 14)),
-                    more_text,
-                    fill=comment_text_color,
-                    font=comment_font,
-                )
+        current_y += row_height
 
     footer = f"Generated by DSTT Shifter-Sync / {year}-{str(month).zfill(2)}"
     footer_box = draw.textbbox((0, 0), footer, font=footer_font)
     _draw_bold_calendar_text(
         draw,
-        ((width - (footer_box[2] - footer_box[0])) // 2, height - 28),
+        ((width - (footer_box[2] - footer_box[0])) // 2, height - 24),
         footer,
         fill=footer_text_color,
         font=footer_font,

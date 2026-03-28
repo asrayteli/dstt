@@ -4,13 +4,14 @@ import sys
 from pathlib import Path
 
 from flask import Flask
+from PIL import Image, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.tools.shiftersync import _calendar_day_kind
+from app.tools.shiftersync import _calendar_day_kind, _fit_calendar_lines, _load_image_font, generate_png_calendar
 from app.tools.shiftersync_format import entry_display_text
 
 
@@ -110,3 +111,47 @@ def test_calendar_day_kind_distinguishes_saturday_sunday_and_holiday():
     assert _calendar_day_kind(2026, 3, 21) == "saturday"
     assert _calendar_day_kind(2026, 3, 22) == "sunday"
     assert _calendar_day_kind(2026, 3, 18) == "weekday"
+
+
+def test_fit_calendar_lines_allows_more_than_two_comment_lines():
+    image = Image.new("RGB", (400, 400), "white")
+    draw = ImageDraw.Draw(image)
+    font = _load_image_font(14)
+
+    lines = _fit_calendar_lines(
+        draw,
+        "1行目コメント\n2行目コメント\n3行目コメント\n4行目コメント",
+        font,
+        120,
+        None,
+    )
+
+    assert len(lines) >= 4
+
+
+def test_generate_png_calendar_uses_lower_space_for_six_week_month(tmp_path):
+    path = tmp_path / "calendar_six_weeks.png"
+
+    generate_png_calendar(path, 2026, 3, "scene", "Tokyo Team", {}, None)
+
+    with Image.open(path) as image:
+        assert image.size[1] >= 1180
+        assert image.getpixel((50, 1090)) != (238, 245, 252)
+
+
+def test_generate_png_calendar_expands_for_long_multiline_comment(tmp_path):
+    path = tmp_path / "calendar_long_comment.png"
+    long_comment = "\n".join([f"コメント{i}" for i in range(1, 13)])
+
+    generate_png_calendar(
+        path,
+        2026,
+        4,
+        "scene",
+        "Tokyo Team",
+        {1: [{"title": "Alice 午前", "comment": long_comment}]},
+        None,
+    )
+
+    with Image.open(path) as image:
+        assert image.size[1] > 1180
