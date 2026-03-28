@@ -31,6 +31,7 @@ from werkzeug.utils import secure_filename
 try:
     from .shiftersync_format import (
         LEAVE_OPTION_MAPPINGS,
+        SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         normalize_entries_for_month,
         parse_csv_text,
@@ -42,6 +43,7 @@ try:
 except ImportError:
     from app.tools.shiftersync_format import (  # type: ignore
         LEAVE_OPTION_MAPPINGS,
+        SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         normalize_entries_for_month,
         parse_csv_text,
@@ -56,7 +58,10 @@ cloudshift_bp = Blueprint("cloudshift", __name__, url_prefix="/tools/shiftersync
 
 LOCK_TIMEOUT_SECONDS = 8.0
 LOCK_POLL_SECONDS = 0.05
-MAX_REVISION_SNAPSHOTS = 20
+MAX_REVISION_SNAPSHOTS = 12
+OPTION_LABELS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS}
+SHIFT_TIME_OPTION_KEYS = {"A", "P", "E", "L"}
+VEHICLE_OPTION_KEYS = {"M", "C", "O", "W", "V", "N1", "N2", "N3", "N4", "N5"}
 
 
 class CloudShiftError(Exception):
@@ -585,6 +590,341 @@ def _trim_revision_snapshots(snapshots: dict[str, Any]) -> dict[str, Any]:
     for key in keys[:-MAX_REVISION_SNAPSHOTS]:
         trimmed.pop(key, None)
     return trimmed
+
+
+def _month_entry_metrics(month_data: dict[str, Any]) -> dict[str, int]:
+    entries_per_day = month_data.get("entries_per_day") or {}
+    entry_count = 0
+    day_count = 0
+    comment_count = 0
+    for entries in entries_per_day.values():
+        normalized_entries = entries if isinstance(entries, list) else []
+        if normalized_entries:
+            day_count += 1
+        entry_count += len(normalized_entries)
+        comment_count += sum(1 for entry in normalized_entries if str(entry.get("comment") or "").strip())
+    return {
+        "entry_count": entry_count,
+        "day_count": day_count,
+        "comment_count": comment_count,
+    }
+
+
+def _revision_summary_item(
+    month_data: dict[str, Any],
+    *,
+    revision: int,
+    is_current: bool,
+) -> dict[str, Any]:
+    metrics = _month_entry_metrics(month_data)
+    return {
+        "revision": revision,
+        "is_current": is_current,
+        "updated_at": month_data.get("updated_at"),
+        "required_capacity": month_data.get("required_capacity", 0),
+        "capacity_enabled": bool(month_data.get("capacity_enabled")),
+        "entry_count": metrics["entry_count"],
+        "day_count": metrics["day_count"],
+        "comment_count": metrics["comment_count"],
+    }
+
+
+def _month_revision_catalog(month_data: dict[str, Any]) -> list[dict[str, Any]]:
+    current_revision = int(month_data.get("revision", 1))
+    snapshots = month_data.get("revision_snapshots") or {}
+    items = [_revision_summary_item(month_data, revision=current_revision, is_current=True)]
+    for key in sorted(snapshots.keys(), key=lambda value: int(value), reverse=True):
+        snapshot = snapshots.get(key)
+        if not snapshot:
+            continue
+        try:
+            revision = int(key)
+        except (TypeError, ValueError):
+            continue
+        items.append(_revision_summary_item(snapshot, revision=revision, is_current=False))
+    items.sort(key=lambda item: item["revision"], reverse=True)
+    return items
+
+
+def _restore_month_revision_in_project(
+    project: dict[str, Any],
+    year: int,
+    month: int,
+    revision: int,
+    actor_name: str,
+    actor_type: str,
+) -> dict[str, Any]:
+    year, month = _validate_year_month(year, month)
+    month_key = _month_key(year, month)
+    current_month = (project.get("months") or {}).get(month_key)
+    if not current_month:
+        raise CloudShiftError("対象の月が存在しません", 404)
+
+    current_revision = int(current_month.get("revision", 1))
+    if revision == current_revision:
+        raise CloudShiftError("現在のリビジョンは復元できません", 400)
+
+    snapshot = (current_month.get("revision_snapshots") or {}).get(str(revision))
+    if not snapshot:
+        raise CloudShiftError("指定したリビジョンが見つかりません", 404)
+
+    restored = _snapshot_month_payload(snapshot)
+    restored["year"] = year
+    restored["month"] = month
+    restored["capacity_enabled"] = bool(restored.get("required_capacity", 0) > 0)
+    restored["entries_per_day"] = _normalize_entries(restored.get("entries_per_day"), year, month)
+    restored["revision"] = current_revision + 1
+    restored["created_at"] = current_month.get("created_at", _utcnow_iso())
+    restored["updated_at"] = _utcnow_iso()
+
+    snapshots = dict(current_month.get("revision_snapshots") or {})
+    snapshots[str(current_revision)] = _snapshot_month_payload(current_month)
+    restored["revision_snapshots"] = _trim_revision_snapshots(snapshots)
+
+    changes = [f"{month_key} をリビジョン {revision} の内容で復元"]
+    changes.extend(_describe_month_changes(current_month, restored)[:20])
+
+    project["months"][month_key] = restored
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "month_restored",
+            "month_key": month_key,
+            "changes": changes[:100],
+        },
+    )
+    return restored
+
+
+def _counter_items(counter: dict[str, int], *, limit: int | None = None) -> list[dict[str, Any]]:
+    items = [{"label": label, "count": count} for label, count in counter.items() if count > 0]
+    items.sort(key=lambda item: (-item["count"], item["label"]))
+    if limit is not None:
+        return items[:limit]
+    return items
+
+
+def _named_frequency_items(
+    rows: dict[tuple[str, str], dict[str, Any]],
+    *,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    items = []
+    for payload in rows.values():
+        label = payload["label"]
+        day_count = len(payload["days"])
+        items.append(
+            {
+                "label": label,
+                "count": payload["count"],
+                "meta": f"{day_count}日 / コメント {payload['comment_count']}件",
+            }
+        )
+    items.sort(key=lambda item: (-item["count"], item["label"]))
+    if limit is not None:
+        return items[:limit]
+    return items
+
+
+def _month_summary_from_payload(project: dict[str, Any], month_data: dict[str, Any]) -> dict[str, Any]:
+    mode = project.get("mode", "scene")
+    days_in_month = monthrange(month_data["year"], month_data["month"])[1]
+    entry_count = 0
+    active_days = 0
+    empty_days = 0
+    comment_count = 0
+    comment_days = 0
+    shortage_days = 0
+    max_entries_in_day = 0
+
+    primary_rows: dict[tuple[str, str], dict[str, Any]] = {}
+    time_counter: dict[str, int] = {}
+    vehicle_counter: dict[str, int] = {}
+    leave_counter: dict[str, int] = {}
+    comment_day_counter: dict[str, int] = {}
+    work_entry_count = 0
+    leave_entry_count = 0
+
+    entries_per_day = _normalize_entries(month_data.get("entries_per_day"), month_data["year"], month_data["month"])
+    for day in range(1, days_in_month + 1):
+        day_key = str(day)
+        entries = entries_per_day.get(day_key, [])
+        entry_total = len(entries)
+        entry_count += entry_total
+        max_entries_in_day = max(max_entries_in_day, entry_total)
+        if entry_total:
+            active_days += 1
+        else:
+            empty_days += 1
+
+        if month_data.get("capacity_enabled") and month_data.get("required_capacity", 0) > 0:
+            if entry_total < int(month_data.get("required_capacity", 0)):
+                shortage_days += 1
+
+        day_comment_count = 0
+        for entry in entries:
+            option_key, raw_name = parse_entry_value(entry.get("value") or "")
+            name = str(raw_name or "").strip()
+            employee_number = str(entry.get("employee_number") or "").strip()
+            comment = str(entry.get("comment") or "").strip()
+            if comment:
+                comment_count += 1
+                day_comment_count += 1
+
+            include_primary_row = not (mode == "person" and option_key in LEAVE_OPTION_MAPPINGS)
+            if include_primary_row:
+                key = (name, employee_number)
+                if key not in primary_rows:
+                    label = name or "名称未設定"
+                    if employee_number:
+                        label = f"{label} / {employee_number}"
+                    primary_rows[key] = {
+                        "label": label,
+                        "count": 0,
+                        "days": set(),
+                        "comment_count": 0,
+                    }
+                primary_rows[key]["count"] += 1
+                primary_rows[key]["days"].add(day)
+                if comment:
+                    primary_rows[key]["comment_count"] += 1
+
+            if option_key in SHIFT_TIME_OPTION_KEYS:
+                time_counter[OPTION_LABELS.get(option_key, option_key)] = (
+                    time_counter.get(OPTION_LABELS.get(option_key, option_key), 0) + 1
+                )
+                work_entry_count += 1
+            elif option_key in LEAVE_OPTION_MAPPINGS:
+                leave_counter[OPTION_LABELS.get(option_key, option_key)] = (
+                    leave_counter.get(OPTION_LABELS.get(option_key, option_key), 0) + 1
+                )
+                leave_entry_count += 1
+            elif option_key:
+                work_entry_count += 1
+            else:
+                work_entry_count += 1
+
+            if option_key in VEHICLE_OPTION_KEYS:
+                vehicle_counter[OPTION_LABELS.get(option_key, option_key)] = (
+                    vehicle_counter.get(OPTION_LABELS.get(option_key, option_key), 0) + 1
+                )
+
+        if day_comment_count:
+            comment_days += 1
+            comment_day_counter[f"{day}日"] = day_comment_count
+
+    average_entries = round(entry_count / active_days, 1) if active_days else 0
+    overview = [
+        {"label": "登録件数", "value": f"{entry_count}件"},
+        {"label": "入力日数", "value": f"{active_days}日"},
+        {"label": "空欄日数", "value": f"{empty_days}日"},
+        {"label": "平均件数", "value": f"{average_entries}件/日"},
+        {"label": "コメント", "value": f"{comment_count}件 / {comment_days}日"},
+        {"label": "最大件数日", "value": f"{max_entries_in_day}件"},
+    ]
+    if month_data.get("capacity_enabled") and month_data.get("required_capacity", 0) > 0:
+        overview.append({"label": "必要人数", "value": str(month_data["required_capacity"])})
+        overview.append({"label": "不足日数", "value": f"{shortage_days}日"})
+
+    if mode == "scene":
+        sections = [
+            {
+                "title": "人物別回数",
+                "items": _named_frequency_items(primary_rows),
+                "empty_message": "人物の登録はまだありません",
+            },
+            {
+                "title": "時間帯",
+                "items": _counter_items(time_counter),
+                "empty_message": "時間帯オプションはまだありません",
+            },
+            {
+                "title": "車両",
+                "items": _counter_items(vehicle_counter),
+                "empty_message": "車両オプションはまだありません",
+            },
+            {
+                "title": "コメントが多い日",
+                "items": _counter_items(comment_day_counter, limit=10),
+                "empty_message": "コメント付きの登録はまだありません",
+            },
+        ]
+    else:
+        overview.extend(
+            [
+                {"label": "勤務登録", "value": f"{work_entry_count}件"},
+                {"label": "休暇登録", "value": f"{leave_entry_count}件"},
+            ]
+        )
+        sections = [
+            {
+                "title": "現場別回数",
+                "items": _named_frequency_items(primary_rows),
+                "empty_message": "現場の登録はまだありません",
+            },
+            {
+                "title": "勤務帯",
+                "items": _counter_items(time_counter),
+                "empty_message": "勤務帯オプションはまだありません",
+            },
+            {
+                "title": "休暇種別",
+                "items": _counter_items(leave_counter),
+                "empty_message": "休暇登録はまだありません",
+            },
+            {
+                "title": "車両",
+                "items": _counter_items(vehicle_counter),
+                "empty_message": "車両オプションはまだありません",
+            },
+        ]
+
+    return {
+        "month_key": _month_key(month_data["year"], month_data["month"]),
+        "title": project.get("title", ""),
+        "mode": mode,
+        "revision": int(month_data.get("revision", 1)),
+        "overview": overview,
+        "sections": sections,
+    }
+
+
+def _summary_month_payload(project: dict[str, Any], year: int, month: int, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    year, month = _validate_year_month(year, month)
+    month_key = _month_key(year, month)
+    current_month = (project.get("months") or {}).get(month_key)
+    if not current_month:
+        raise CloudShiftError("対象の月が存在しません", 404)
+
+    if not payload:
+        return _month_summary_from_payload(project, current_month)
+
+    required_capacity = (
+        _sanitize_capacity(payload.get("required_capacity"))[1]
+        if "required_capacity" in payload
+        else int(current_month.get("required_capacity", 0))
+    )
+    entries_per_day = (
+        payload.get("entries_per_day")
+        if "entries_per_day" in payload
+        else current_month.get("entries_per_day") or {}
+    )
+    month_data = {
+        **_snapshot_month_payload(current_month),
+        "year": year,
+        "month": month,
+        "capacity_enabled": required_capacity > 0,
+        "required_capacity": required_capacity,
+        "entries_per_day": _normalize_entries(entries_per_day, year, month),
+        "revision": int(current_month.get("revision", 1)),
+        "created_at": current_month.get("created_at"),
+        "updated_at": current_month.get("updated_at"),
+    }
+    return _month_summary_from_payload(project, month_data)
 
 
 def _base_month_signature(month_data: dict[str, Any], year: int, month: int) -> dict[str, Any]:
@@ -1119,6 +1459,48 @@ def api_history(project_id: str):
     return jsonify({"history": _load_history(project_id)})
 
 
+@cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/revisions")
+@login_required
+def api_month_revisions(project_id: str, year: int, month: int):
+    project = _owner_project_or_404(project_id)
+    month_key = _month_key(*_validate_year_month(year, month))
+    month_data = (project.get("months") or {}).get(month_key)
+    if not month_data:
+        raise CloudShiftError("対象の月が存在しません", 404)
+    return jsonify(
+        {
+            "success": True,
+            "month_key": month_key,
+            "current_revision": int(month_data.get("revision", 1)),
+            "revisions": _month_revision_catalog(month_data),
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/restore", methods=["POST"])
+@login_required
+def api_restore_month_revision(project_id: str, year: int, month: int):
+    payload = request.get_json(silent=True) or {}
+    try:
+        revision = int(payload.get("revision"))
+    except (TypeError, ValueError) as exc:
+        raise CloudShiftError("復元するリビジョンを指定してください", 400) from exc
+
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        month_payload = _restore_month_revision_in_project(project, year, month, revision, _user_label(), "owner")
+    month_key = _month_key(year, month)
+    return jsonify({"success": True, "month": month_payload, "project": _project_detail_payload(project, month_key)})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/summary", methods=["GET", "POST"])
+@login_required
+def api_month_summary(project_id: str, year: int, month: int):
+    project = _owner_project_or_404(project_id)
+    payload = request.get_json(silent=True) if request.method == "POST" else None
+    return jsonify({"success": True, "summary": _summary_month_payload(project, year, month, payload)})
+
+
 @cloudshift_bp.route("/api/project/<project_id>/leave-sync/calendars")
 @login_required
 def api_leave_sync_calendars(project_id: str):
@@ -1313,3 +1695,12 @@ def api_public_save_month(token: str, year: int, month: int):
         month_payload = _save_month_in_project(project, year, month, payload, actor_name, actor_type)
     month_key = _month_key(year, month)
     return jsonify({"success": True, "month": month_payload, "project": _project_detail_payload(project, month_key)})
+
+
+@cloudshift_bp.route("/api/public/<token_type>/<token>/month/<int:year>/<int:month>/summary", methods=["GET", "POST"])
+def api_public_month_summary(token_type: str, token: str, year: int, month: int):
+    if token_type not in {"view", "edit"}:
+        abort(404)
+    project = _find_project_by_token(token, token_type)
+    payload = request.get_json(silent=True) if request.method == "POST" else None
+    return jsonify({"success": True, "summary": _summary_month_payload(project, year, month, payload)})

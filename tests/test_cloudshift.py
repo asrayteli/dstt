@@ -536,3 +536,186 @@ def test_scene_project_cannot_sync_leaves(tmp_path):
     )
 
     assert sync_response.status_code == 400
+
+
+def test_owner_can_restore_revision_and_snapshot_limit_stays_at_12(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Restore Case",
+            "mode": "scene",
+            "year": "2026",
+            "month": "11",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    month = payload["month"]
+
+    revisions = {1: month["entries_per_day"]["1"]}
+    for revision in range(2, 15):
+        month_entries = dict(month["entries_per_day"])
+        month_entries["1"] = [
+            {"id": f"entry-{revision}", "value": f"!A!Member {revision}", "comment": f"rev {revision}"}
+        ]
+        save_response = client.put(
+            f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/11",
+            json={
+                "required_capacity": 0,
+                "entries_per_day": month_entries,
+                "base_month": month,
+            },
+        )
+        assert save_response.status_code == 200
+        month = save_response.get_json()["month"]
+        revisions[revision] = month["entries_per_day"]["1"]
+
+    revision_list = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/11/revisions"
+    )
+    assert revision_list.status_code == 200
+    revision_payload = revision_list.get_json()
+    revision_numbers = [item["revision"] for item in revision_payload["revisions"]]
+    assert revision_payload["current_revision"] == 14
+    assert revision_numbers == list(range(14, 1, -1))
+    assert 1 not in revision_numbers
+
+    restore_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/11/restore",
+        json={"revision": 5},
+    )
+    assert restore_response.status_code == 200
+    restored_month = restore_response.get_json()["month"]
+    assert restored_month["revision"] == 15
+    assert restored_month["entries_per_day"]["1"] == revisions[5]
+
+    restored_list = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/11/revisions"
+    )
+    assert restored_list.status_code == 200
+    restored_numbers = [item["revision"] for item in restored_list.get_json()["revisions"]]
+    assert restored_numbers == list(range(15, 2, -1))
+    assert 2 not in restored_numbers
+    assert 14 in restored_numbers
+
+
+def test_scene_month_summary_counts_people_options_and_comments(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Scene Summary",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+
+    summary_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4/summary",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": {
+                "1": [
+                    {
+                        "id": "entry-a",
+                        "value": "!A!Alice",
+                        "comment": "Morning",
+                        "employee_number": "1001",
+                    },
+                    {
+                        "id": "entry-b",
+                        "value": "!P!Bob",
+                        "comment": "",
+                    },
+                ],
+                "2": [
+                    {
+                        "id": "entry-c",
+                        "value": "!M!Alice",
+                        "comment": "",
+                        "employee_number": "1001",
+                    }
+                ],
+                "3": [
+                    {
+                        "id": "entry-d",
+                        "value": "Charlie",
+                        "comment": "",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert summary_response.status_code == 200
+    summary = summary_response.get_json()["summary"]
+    assert summary["mode"] == "scene"
+    overview = {item["label"]: item["value"] for item in summary["overview"]}
+    assert overview["登録件数"] == "4件"
+    assert overview["入力日数"] == "3日"
+    assert overview["コメント"] == "1件 / 1日"
+
+    sections = {section["title"]: section["items"] for section in summary["sections"]}
+    people_items = {item["label"]: item for item in sections["人物別回数"]}
+    assert people_items["Alice / 1001"]["count"] == 2
+    assert people_items["Alice / 1001"]["meta"] == "2日 / コメント 1件"
+    assert people_items["Bob"]["count"] == 1
+    assert {item["label"]: item["count"] for item in sections["時間帯"]} == {"午前": 1, "午後": 1}
+    assert {item["label"]: item["count"] for item in sections["車両"]} == {"マイクロ": 1}
+    assert {item["label"]: item["count"] for item in sections["コメントが多い日"]} == {"1日": 1}
+
+
+def test_person_month_summary_separates_worksites_and_leaves(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Person Summary",
+            "mode": "person",
+            "employee_number": "1001",
+            "year": "2026",
+            "month": "5",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    view_token = _token_from_url(payload["project"]["urls"]["view_url"])
+
+    summary_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/view/{view_token}/month/2026/5/summary",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": {
+                "1": [{"id": "work-1", "value": "Main Hall", "comment": ""}],
+                "2": [{"id": "work-2", "value": "!A!Main Hall", "comment": ""}],
+                "3": [{"id": "leave-1", "value": "!PAID!有休", "comment": "vacation"}],
+                "4": [{"id": "leave-2", "value": "!COMP!代休", "comment": ""}],
+                "5": [{"id": "work-3", "value": "!W!Branch", "comment": ""}],
+            },
+        },
+    )
+
+    assert summary_response.status_code == 200
+    summary = summary_response.get_json()["summary"]
+    assert summary["mode"] == "person"
+    overview = {item["label"]: item["value"] for item in summary["overview"]}
+    assert overview["登録件数"] == "5件"
+    assert overview["勤務登録"] == "3件"
+    assert overview["休暇登録"] == "2件"
+
+    sections = {section["title"]: section["items"] for section in summary["sections"]}
+    worksites = {item["label"]: item["count"] for item in sections["現場別回数"]}
+    assert worksites == {"Main Hall": 2, "Branch": 1}
+    assert {item["label"]: item["count"] for item in sections["勤務帯"]} == {"午前": 1}
+    assert {item["label"]: item["count"] for item in sections["休暇種別"]} == {"有休": 1, "代休": 1}
+    assert {item["label"]: item["count"] for item in sections["車両"]} == {"ワゴン": 1}

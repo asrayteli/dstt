@@ -334,17 +334,7 @@ const ShifterSync = (function() {
       return '';
     }
 
-    const segments = [
-      normalized.employee_name,
-      normalized.employee_number
-    ];
-    if (normalized.office_name) {
-      segments.push(normalized.office_name);
-    }
-    if (normalized.job_title) {
-      segments.push(normalized.job_title);
-    }
-    return segments.filter(Boolean).join(' / ');
+    return [normalized.employee_name, normalized.employee_number].filter(Boolean).join(' / ');
   }
 
   function renderEmployeeSearchResults($panel, $input, candidates, emptyMessage) {
@@ -661,6 +651,29 @@ const ShifterSync = (function() {
 
   function updateAllCapacityWarnings() {
     Object.keys(state.entriesPerDay).forEach((day) => updateCapacityWarning(day));
+  }
+
+  function replaceEntriesPerDay(entriesPerDay) {
+    const nextEntries = {};
+    const source = entriesPerDay && typeof entriesPerDay === 'object' ? entriesPerDay : {};
+    const daysInMonth = state.year && state.month ? new Date(state.year, state.month, 0).getDate() : 0;
+
+    if (daysInMonth > 0) {
+      for (let day = 1; day <= daysInMonth; day += 1) {
+        const key = String(day);
+        nextEntries[key] = normalizeDayEntries(source[key] || source[day] || []);
+      }
+    } else {
+      Object.keys(source).forEach((day) => {
+        nextEntries[String(day)] = normalizeDayEntries(source[day]);
+      });
+    }
+
+    state.entriesPerDay = nextEntries;
+    Object.keys(nextEntries).forEach((day) => {
+      updateEntryDisplay(day);
+      updateCapacityWarning(day);
+    });
   }
 
   function updateEntryDisplay(day) {
@@ -1341,6 +1354,17 @@ const ShifterSync = (function() {
     return state[key];
   }
 
+  function getOptionMappings() {
+    return Object.assign({}, allOptionMappings);
+  }
+
+  function getOptionSectionsForModeExport(mode) {
+    return getOptionSectionsForMode(mode).map((section) => ({
+      title: section.title,
+      optionKeys: section.optionKeys.slice()
+    }));
+  }
+
   function getEntriesPerDay() {
     const snapshot = {};
     Object.keys(state.entriesPerDay).forEach((day) => {
@@ -1354,7 +1378,10 @@ const ShifterSync = (function() {
     buildCSV,
     setState,
     getState,
+    replaceEntriesPerDay,
     getEntriesPerDay,
-    updateAllCapacityWarnings
+    updateAllCapacityWarnings,
+    getOptionMappings,
+    getOptionSectionsForMode: getOptionSectionsForModeExport
   };
 })();

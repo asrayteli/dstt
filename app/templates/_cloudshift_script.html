@@ -1,4 +1,4 @@
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+﻿<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="{{ url_for('static', filename='shiftersync/js/ss_common.js') }}"></script>
 <script>
   (function() {
@@ -25,6 +25,171 @@
       return JSON.parse(JSON.stringify(value));
     }
 
+    function makeEntryId() {
+      return `cloud-entry-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    function parseEntryValue(value) {
+      const text = String(value || '').trim();
+      const match = text.match(/^!([^!]+)!(.+)$/);
+      if (!match) {
+        return { optionKey: null, name: text };
+      }
+      return { optionKey: match[1], name: match[2] };
+    }
+
+    function formatEntryValue(optionKey, name) {
+      const safeName = String(name || '').trim();
+      if (!safeName) {
+        return '';
+      }
+      return optionKey ? `!${optionKey}!${safeName}` : safeName;
+    }
+
+    function optionMappings() {
+      if (ShifterSync.getOptionMappings) {
+        return ShifterSync.getOptionMappings();
+      }
+      return {
+        A: "午前",
+        P: "午後",
+        E: "早番",
+        L: "遅番",
+        M: "マイクロ",
+        C: "中型",
+        O: "大型",
+        W: "ワゴン",
+        V: "役員車両",
+        N1: "1号車",
+        N2: "2号車",
+        N3: "3号車",
+        N4: "4号車",
+        N5: "5号車",
+        PAID: "有休",
+        COMP: "代休",
+        CONDOLENCE: "慶弔休暇",
+        CARE: "介護休暇",
+        REFRESH: "リフレッシュ休暇",
+        OTHER: "その他"
+      };
+    }
+
+    function optionSectionsForMode(mode) {
+      if (ShifterSync.getOptionSectionsForMode) {
+        return ShifterSync.getOptionSectionsForMode(mode) || [];
+      }
+      const sections = [{ title: "時間帯", optionKeys: ["A", "P", "E", "L"] }];
+      if (mode === "person") {
+        sections.push({ title: "休暇種別", optionKeys: ["PAID", "COMP", "CONDOLENCE", "CARE", "REFRESH", "OTHER"] });
+      }
+      sections.push(
+        { title: "車両タイプ", optionKeys: ["M", "C", "O", "W", "V"] },
+        { title: "車番", optionKeys: ["N1", "N2", "N3", "N4", "N5"] }
+      );
+      return sections;
+    }
+
+    function optionLabelForKey(optionKey) {
+      return optionMappings()[optionKey] || optionKey;
+    }
+
+    function monthDays(month) {
+      if (!month) return 0;
+      return new Date(month.year, month.month, 0).getDate();
+    }
+
+    function monthDayKeys(month) {
+      return Array.from({ length: monthDays(month) }, (_, index) => String(index + 1));
+    }
+
+    function createBulkEntryFromForm(dayKey, refs) {
+      const name = refs.nameInput ? refs.nameInput.value.trim() : '';
+      if (!name) return null;
+      const optionKey = refs.optionSelect ? refs.optionSelect.value : '';
+      const comment = refs.commentInput ? refs.commentInput.value.trim() : '';
+      const employeeNumber = refs.employeeInput ? refs.employeeInput.value.trim() : '';
+      return {
+        id: makeEntryId(),
+        value: formatEntryValue(optionKey || null, name),
+        comment,
+        employee_number: employeeNumber
+      };
+    }
+
+    function cloneEntryForBulk(entry) {
+      return {
+        id: makeEntryId(),
+        value: String(entry && entry.value ? entry.value : '').trim(),
+        comment: String(entry && entry.comment ? entry.comment : '').trim(),
+        employee_number: String(entry && entry.employee_number ? entry.employee_number : '').trim()
+      };
+    }
+
+    function ensureCloudModal(modalId, titleText) {
+      let modal = document.getElementById(modalId);
+      if (modal) {
+        if (titleText) {
+          const title = modal.querySelector('[data-cloud-modal-title]');
+          if (title) title.textContent = titleText;
+        }
+        return modal;
+      }
+
+      modal = document.createElement('div');
+      modal.id = modalId;
+      modal.className = 'cloud-modal-overlay cloud-hidden';
+      modal.innerHTML = `
+        <div class="cloud-modal-panel" role="dialog" aria-modal="true">
+          <div class="cloud-modal-header">
+            <div>
+              <div class="cloud-modal-kicker">CloudShift</div>
+              <h3 class="cloud-modal-title" data-cloud-modal-title>${escapeHtml(titleText || '')}</h3>
+            </div>
+            <button type="button" class="cloud-btn secondary cloud-modal-close" data-cloud-modal-close>髢峨§繧・/button>
+          </div>
+          <div class="cloud-modal-body" data-cloud-modal-body></div>
+          <div class="cloud-modal-footer" data-cloud-modal-footer></div>
+        </div>
+      `;
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+          closeCloudModal(modalId);
+        }
+      });
+      modal.querySelector('[data-cloud-modal-close]').addEventListener('click', () => closeCloudModal(modalId));
+      document.body.appendChild(modal);
+      return modal;
+    }
+
+    function closeCloudModal(modalId) {
+      const modal = document.getElementById(modalId);
+      if (modal) {
+        modal.classList.add('cloud-hidden');
+      }
+      if (!document.querySelector('.cloud-modal-overlay:not(.cloud-hidden)')) {
+        document.body.classList.remove('cloud-modal-open');
+      }
+    }
+
+    function openCloudModal(modalId, titleText) {
+      const modal = ensureCloudModal(modalId, titleText);
+      if (titleText) {
+        const title = modal.querySelector('[data-cloud-modal-title]');
+        if (title) title.textContent = titleText;
+      }
+      modal.classList.remove('cloud-hidden');
+      document.body.classList.add('cloud-modal-open');
+      return modal;
+    }
+
+    function modalBody(modal) {
+      return modal.querySelector('[data-cloud-modal-body]');
+    }
+
+    function modalFooter(modal) {
+      return modal.querySelector('[data-cloud-modal-footer]');
+    }
+
     function escapeHtml(value) {
       return String(value || '')
         .replace(/&/g, '&amp;')
@@ -35,11 +200,11 @@
     }
 
     function modeLabel(mode) {
-      return mode === 'scene' ? '現場' : '個人';
+      return mode === 'scene' ? '迴ｾ蝣ｴ' : '蛟倶ｺｺ';
     }
 
     function modeLongLabel(mode) {
-      return mode === 'scene' ? '現場シフト' : '個人シフト';
+      return mode === 'scene' ? '迴ｾ蝣ｴ繧ｷ繝輔ヨ' : '蛟倶ｺｺ繧ｷ繝輔ヨ';
     }
 
     function isLikelyMobileDevice() {
@@ -83,7 +248,7 @@
       const isJson = (response.headers.get('content-type') || '').includes('application/json');
       const payload = isJson ? await response.json() : null;
       if (!response.ok) {
-        throw new Error((payload && payload.error) || 'リクエストに失敗しました');
+        throw new Error((payload && payload.error) || '繝ｪ繧ｯ繧ｨ繧ｹ繝医↓螟ｱ謨励＠縺ｾ縺励◆');
       }
       return payload;
     }
@@ -128,7 +293,7 @@
     }
 
     function promptMonthKey(defaultValue) {
-      return window.prompt('作成する年月を YYYY-MM 形式で入力してください', defaultValue || new Date().toISOString().slice(0, 7));
+      return window.prompt('菴懈・縺吶ｋ蟷ｴ譛医ｒ YYYY-MM 蠖｢蠑上〒蜈･蜉帙＠縺ｦ縺上□縺輔＞', defaultValue || new Date().toISOString().slice(0, 7));
     }
 
     function selectedLeaveCalendarId() {
@@ -166,7 +331,7 @@
       const refs = titleFieldRefs(kind);
       const isPerson = titleFieldMode(kind) === 'person';
       if (refs.label) {
-        refs.label.textContent = isPerson ? '社員' : 'タイトル';
+        refs.label.textContent = isPerson ? '遉ｾ蜩｡' : '繧ｿ繧､繝医Ν';
       }
       if (refs.input) {
         refs.input.placeholder = isPerson ? '社員名' : 'タイトル';
@@ -192,7 +357,7 @@
         headers: { Accept: 'application/json' }
       });
       if (!response.ok) {
-        throw new Error('社員候補の検索に失敗しました');
+        throw new Error('遉ｾ蜩｡蛟呵｣懊・讀懃ｴ｢縺ｫ螟ｱ謨励＠縺ｾ縺励◆');
       }
       const payload = await response.json();
       const candidates = Array.isArray(payload)
@@ -217,7 +382,7 @@
       refs.input.dataset.selectedEmployeeName = String(candidate.employee_name || '');
       refs.hidden.value = String(candidate.employee_number || '');
       if (refs.note) {
-        refs.note.textContent = refs.hidden.value ? `選択中: ${refs.hidden.value}` : '';
+        refs.note.textContent = refs.hidden.value ? `驕ｸ謚樔ｸｭ: ${refs.hidden.value}` : '';
       }
       if (refs.panel) {
         refs.panel.innerHTML = '';
@@ -244,7 +409,7 @@
         }))
         .filter((item) => item.employee_number && item.employee_name);
       if (!normalized.length) {
-        refs.panel.innerHTML = '<div style="color: var(--cloud-muted); font-size: 12px; padding: 4px 2px;">候補が見つかりません</div>';
+        refs.panel.innerHTML = '<div style="color: var(--cloud-muted); font-size: 12px; padding: 4px 2px;">蛟呵｣懊′隕九▽縺九ｊ縺ｾ縺帙ｓ</div>';
         refs.panel.classList.remove('cloud-hidden');
         return;
       }
@@ -328,12 +493,12 @@
           return;
         }
 
-        node.textContent = `編集者: ${editorName}`;
+        node.textContent = `邱ｨ髮・・ ${editorName}`;
         node.classList.remove('cloud-hidden');
 
         const note = $('cloud-public-editor-note');
         if (note) {
-          note.textContent = `${editorName} として保存します`;
+          note.textContent = `${editorName} として編集中です`;
         }
         return;
       }
@@ -356,7 +521,7 @@
       if (!list) return;
 
       if (!state.projects.length) {
-        list.innerHTML = '<div class="cloud-empty-state"><p>まだシフト帳がありません。</p></div>';
+        list.innerHTML = '<div class="cloud-empty-state"><p>縺ｾ縺繧ｷ繝輔ヨ蟶ｳ縺後≠繧翫∪縺帙ｓ縲・/p></div>';
         return;
       }
 
@@ -365,12 +530,12 @@
           <div class="cloud-project-card-head">
             <div>
               <h3>${escapeHtml(project.title)}</h3>
-              <p>${modeLongLabel(project.mode)} / ${project.month_count}か月</p>
+              <p>${modeLongLabel(project.mode)} / ${project.month_count}縺区怦</p>
             </div>
-            <span class="cloud-badge">${project.latest_month_key ? escapeHtml(formatMonthKey(project.latest_month_key)) : '月未作成'}</span>
+            <span class="cloud-badge">${project.latest_month_key ? escapeHtml(formatMonthKey(project.latest_month_key)) : '譛域悴菴懈・'}</span>
           </div>
           <div class="cloud-project-meta">
-            <span>最終更新: ${escapeHtml(project.updated_at || '-')}</span>
+            <span>譛邨よ峩譁ｰ: ${escapeHtml(project.updated_at || '-')}</span>
           </div>
         </article>
       `).join('');
@@ -381,7 +546,7 @@
       if (!list) return;
 
       if (!history || history.length === 0) {
-        list.innerHTML = '<div class="cloud-empty-state"><p>編集履歴はまだありません。</p></div>';
+        list.innerHTML = '<div class="cloud-empty-state"><p>邱ｨ髮・ｱ･豁ｴ縺ｯ縺ｾ縺縺ゅｊ縺ｾ縺帙ｓ縲・/p></div>';
         return;
       }
 
@@ -391,6 +556,574 @@
           <ul>${(item.changes || []).map((change) => `<li>${escapeHtml(change)}</li>`).join('')}</ul>
         </article>
       `).join('');
+    }
+
+    function ensureActionButton(buttonId, label, className, onClick) {
+      if (document.getElementById(buttonId)) {
+        return;
+      }
+      const exportButton = document.getElementById('cloud-export-xlsx');
+      const row = exportButton ? exportButton.closest('.cloud-actions.compact') : null;
+      if (!row) {
+        return;
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.id = buttonId;
+      button.className = className;
+      button.textContent = label;
+      button.addEventListener('click', onClick);
+      row.appendChild(button);
+    }
+
+    function ensureCloudActionButtons() {
+      ensureActionButton('cloud-open-summary', '月間集計', 'cloud-btn secondary', () => openSummaryModal().catch((error) => showFlash(error.message, 'error')));
+      if (PAGE.type === 'owner' || PAGE.accessMode === 'edit') {
+        ensureActionButton('cloud-open-bulk-edit', '範囲一括編集', 'cloud-btn secondary', () => openBulkEditModal().catch((error) => showFlash(error.message, 'error')));
+      }
+      if (PAGE.type === 'owner') {
+        ensureActionButton('cloud-open-restore', '復元', 'cloud-btn ghost', () => openRestoreModal().catch((error) => showFlash(error.message, 'error')));
+      }
+    }
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      const modal = document.querySelector('.cloud-modal-overlay:not(.cloud-hidden)');
+      if (modal) {
+        closeCloudModal(modal.id);
+      }
+    });
+
+    function currentEntriesSnapshot() {
+      return ShifterSync.getEntriesPerDay ? ShifterSync.getEntriesPerDay() : {};
+    }
+
+    function replaceCalendarEntries(nextEntries) {
+      if (!ShifterSync.replaceEntriesPerDay) return;
+      ShifterSync.replaceEntriesPerDay(nextEntries);
+      if (currentMonth()) {
+        ShifterSync.setState('mode', currentProject().mode);
+        ShifterSync.setState('name', currentProject().title);
+      }
+    }
+
+    function monthDayListForCurrentMonth() {
+      return monthDayKeys(currentMonth()).map((day) => parseInt(day, 10));
+    }
+
+    function weekdayKeyForDay(day) {
+      const month = currentMonth();
+      if (!month) return null;
+      return new Date(month.year, month.month - 1, day).getDay();
+    }
+
+    function selectedDaysFromBulkForm(form) {
+      const scope = form.querySelector('[name="bulk_scope"]').value;
+      const month = currentMonth();
+      if (!month) return [];
+      const days = monthDayListForCurrentMonth();
+      if (scope === 'all') {
+        return days;
+      }
+      if (scope === 'range') {
+        const start = parseInt(form.querySelector('[name="bulk_start_day"]').value || '0', 10);
+        const end = parseInt(form.querySelector('[name="bulk_end_day"]').value || '0', 10);
+        if (!start || !end || start > end) return [];
+        return days.filter((day) => day >= start && day <= end);
+      }
+      if (scope === 'weekends') {
+        return days.filter((day) => {
+          const weekday = weekdayKeyForDay(day);
+          return weekday === 0 || weekday === 6;
+        });
+      }
+      if (scope === 'weekdays') {
+        const selected = Array.from(form.querySelectorAll('[data-bulk-weekday]:checked')).map((input) => parseInt(input.value, 10));
+        if (!selected.length) return [];
+        return days.filter((day) => selected.includes(weekdayKeyForDay(day)));
+      }
+      return [];
+    }
+
+    async function loadRevisionSnapshots(project, month) {
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/revisions`);
+      const rows = Array.isArray(data.revisions)
+        ? data.revisions
+        : Array.isArray(data.items)
+          ? data.items
+          : Array.isArray(data.snapshots)
+            ? data.snapshots
+            : [];
+      const currentRevision = Number(month.revision || 0);
+      if (currentRevision && !rows.some((item) => Number(item.revision || item.version || item.rev || 0) === currentRevision)) {
+        rows.unshift({
+          revision: currentRevision,
+          updated_at: month.updated_at || month.created_at || '-',
+          entry_count: Object.values(month.entries_per_day || {}).reduce((total, entries) => total + (Array.isArray(entries) ? entries.length : 0), 0),
+          current: true,
+          note: '現在の版'
+        });
+      }
+      return rows;
+    }
+
+    function renderRestoreModalRows(revisions) {
+      if (!revisions.length) {
+        return '<div class="cloud-empty-state"><p>蠕ｩ蜈・〒縺阪ｋ繝ｪ繝薙ず繝ｧ繝ｳ縺後∪縺縺ゅｊ縺ｾ縺帙ｓ縲・/p></div>';
+      }
+
+      const firstRestorableIndex = revisions.findIndex((revision) => !(revision.current || revision.is_current));
+      return revisions.map((revision, index) => {
+        const revisionNo = Number(revision.revision || revision.version || revision.rev || index + 1);
+        const updatedAt = revision.updated_at || revision.timestamp || revision.created_at || '-';
+        const entryCount = revision.entry_count ?? revision.entries_count ?? revision.total_entries ?? '';
+        const commentCount = revision.comment_count ?? revision.comments_count ?? '';
+        const isCurrent = !!revision.current || !!revision.is_current;
+        const labelParts = [`rev ${revisionNo}`];
+        if (updatedAt && updatedAt !== '-') labelParts.push(updatedAt);
+        if (entryCount !== '') labelParts.push(`entries ${entryCount}`);
+        if (commentCount !== '') labelParts.push(`comments ${commentCount}`);
+        if (isCurrent) labelParts.push('current');
+        return `
+          <label class="cloud-revision-row">
+            <input
+              type="radio"
+              name="cloud-restore-revision"
+              value="${revisionNo}"
+              ${!isCurrent && index === firstRestorableIndex ? 'checked' : ''}
+              ${isCurrent ? 'disabled' : ''}
+            >
+            <span class="cloud-revision-main">
+              <span class="cloud-revision-title">${escapeHtml(labelParts.join(' / '))}</span>
+              <span class="cloud-revision-meta">${escapeHtml(revision.note || revision.description || revision.editor_name || '')}</span>
+            </span>
+          </label>
+        `;
+      }).join('');
+    }
+
+    async function restoreSelectedRevision(modal) {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) return;
+      const selected = modal.querySelector('input[name="cloud-restore-revision"]:checked');
+      const revision = selected ? parseInt(selected.value || '0', 10) : 0;
+      if (!revision) {
+        showFlash('蠕ｩ蜈・☆繧九Μ繝薙ず繝ｧ繝ｳ繧帝∈謚槭＠縺ｦ縺上□縺輔＞', 'error');
+        return;
+      }
+
+      const payload = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/restore`, {
+        method: 'POST',
+        body: { revision }
+      });
+      state.projectPayload = unwrapProjectPayload(payload);
+      state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
+      renderWorkspace(true);
+      await loadProjects();
+      await loadHistory(project.id);
+      closeCloudModal('cloud-restore-modal');
+      showFlash(`rev ${revision} 繧貞ｾｩ蜈・＠縺ｾ縺励◆`, 'success');
+    }
+
+    async function openRestoreModal() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) return;
+
+      const modal = openCloudModal('cloud-restore-modal', `蠕ｩ蜈・/ ${formatMonthKey(currentMonthKey())}`);
+      modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>繝ｪ繝薙ず繝ｧ繝ｳ繧定ｪｭ縺ｿ霎ｼ縺ｿ荳ｭ縺ｧ縺・..</p></div>';
+      modalFooter(modal).innerHTML = `
+        <button type="button" class="cloud-btn secondary" data-cloud-restore-cancel>髢峨§繧・/button>
+        <button type="button" class="cloud-btn primary" data-cloud-restore-confirm>蠕ｩ蜈・/button>
+      `;
+      modalFooter(modal).querySelector('[data-cloud-restore-cancel]').addEventListener('click', () => closeCloudModal('cloud-restore-modal'));
+
+      try {
+        const revisions = await loadRevisionSnapshots(project, month);
+        modalBody(modal).innerHTML = `
+          <p class="cloud-panel-note">驕ｸ繧薙□繝ｪ繝薙ず繝ｧ繝ｳ繧堤樟蝨ｨ迚医→縺励※蜀堺ｿ晏ｭ倥＠縺ｾ縺吶ら樟蝨ｨ縺ｮ蜀・ｮｹ縺ｯ螟ｱ繧上ｌ縺ｾ縺帙ｓ縲・/p>
+          <div class="cloud-revision-list">${renderRestoreModalRows(revisions)}</div>
+        `;
+        modalFooter(modal).querySelector('[data-cloud-restore-confirm]').addEventListener('click', () => {
+          restoreSelectedRevision(modal).catch((error) => showFlash(error.message, 'error'));
+        });
+      } catch (error) {
+        modalBody(modal).innerHTML = `<div class="cloud-empty-state"><p>${escapeHtml(error.message || '繝ｪ繝薙ず繝ｧ繝ｳ荳隕ｧ縺ｮ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆')}</p></div>`;
+        modalFooter(modal).querySelector('[data-cloud-restore-confirm]').disabled = true;
+      }
+    }
+
+    function buildBulkOptionSelect(mode) {
+      return optionSectionsForMode(mode).map((section) => `
+        <optgroup label="${escapeHtml(section.title)}">
+          ${section.optionKeys.map((key) => `<option value="${escapeHtml(key)}">${escapeHtml(optionLabelForKey(key))}</option>`).join('')}
+        </optgroup>
+      `).join('');
+    }
+
+    function buildBulkWeekdayChecks() {
+      const labels = ['日', '月', '火', '水', '木', '金', '土'];
+      return labels.map((label, index) => `
+        <label class="cloud-bulk-weekday">
+          <input type="checkbox" data-bulk-weekday value="${index}" ${index >= 1 && index <= 5 ? 'checked' : ''}>
+          <span>${label}</span>
+        </label>
+      `).join('');
+    }
+
+    function updateBulkFieldVisibility(form) {
+      const operation = form.querySelector('[name="bulk_operation"]').value;
+      const scope = form.querySelector('[name="bulk_scope"]').value;
+      const template = form.querySelector('[data-bulk-template]');
+      const copy = form.querySelector('[data-bulk-copy]');
+      const ranges = form.querySelectorAll('[data-bulk-range]');
+      const weekdays = form.querySelector('[data-bulk-weekdays]');
+      template.classList.toggle('cloud-hidden', operation === 'delete' || operation === 'copy');
+      copy.classList.toggle('cloud-hidden', operation !== 'copy');
+      ranges.forEach((node) => node.classList.toggle('cloud-hidden', scope !== 'range'));
+      weekdays.classList.toggle('cloud-hidden', scope !== 'weekdays');
+    }
+
+    function updateBulkPreview(form) {
+      const preview = form.querySelector('[data-bulk-preview]');
+      const targetDays = selectedDaysFromBulkForm(form);
+      if (!targetDays.length) {
+        preview.textContent = '対象範囲を選択してください';
+        return;
+      }
+      const previewDays = targetDays.slice(0, 8).map((day) => `${day}日`).join('、');
+      preview.textContent = targetDays.length > 8
+        ? `対象 ${targetDays.length}日: ${previewDays} ほか`
+        : `対象 ${targetDays.length}日: ${previewDays}`;
+    }
+
+    function buildLocalSummary(project, month, payload) {
+      const entriesPerDay = payload && payload.entries_per_day ? payload.entries_per_day : currentEntriesSnapshot();
+      const days = monthDays(month);
+      const sections = optionSectionsForMode(project.mode).map((section) => ({
+        title: section.title,
+        rows: section.optionKeys.map((key) => ({ label: optionLabelForKey(key), value: 0 }))
+      }));
+      const countsByKey = {};
+      const uniquePeople = new Set();
+      let totalEntries = 0;
+      let activeDays = 0;
+      let commentCount = 0;
+
+      Object.keys(entriesPerDay || {}).forEach((dayKey) => {
+        const entries = Array.isArray(entriesPerDay[dayKey]) ? entriesPerDay[dayKey] : [];
+        if (!entries.length) return;
+        activeDays += 1;
+        entries.forEach((entry) => {
+          const parsed = parseEntryValue(entry && entry.value);
+          totalEntries += 1;
+          if (entry && entry.comment) commentCount += 1;
+          if (project.mode === 'scene') {
+            const sceneKey = entry && entry.employee_number ? String(entry.employee_number) : parsed.name;
+            if (sceneKey) uniquePeople.add(sceneKey);
+          } else if (entry && entry.employee_number) {
+            uniquePeople.add(String(entry.employee_number));
+          }
+          if (parsed.optionKey) {
+            countsByKey[parsed.optionKey] = (countsByKey[parsed.optionKey] || 0) + 1;
+          }
+        });
+      });
+
+      sections.forEach((section) => {
+        section.rows = section.rows.map((row, index) => {
+          const key = section.optionKeys[index];
+          return { label: row.label, value: countsByKey[key] || 0 };
+        });
+      });
+
+      return {
+        title: `${project.title} / ${formatMonthKey(currentMonthKey())}`,
+        mode: project.mode,
+        metrics: [
+          { label: "日数", value: days },
+          { label: "登録日", value: activeDays },
+          { label: "エントリ", value: totalEntries },
+          { label: "コメント", value: commentCount },
+          { label: project.mode === 'scene' ? "人数" : "社員番号", value: uniquePeople.size },
+          ...(parseInt((payload && payload.required_capacity) || month.required_capacity || 0, 10) > 0
+            ? [{ label: "必要人数", value: parseInt((payload && payload.required_capacity) || month.required_capacity || 0, 10) }]
+            : [])
+        ],
+        sections,
+        note: payload ? "未保存の編集内容を反映したローカル集計です" : "保存済みの内容で集計しました"
+      };
+    }
+
+    function normalizeSummaryPayload(payload, fallback) {
+      if (!payload) return fallback;
+      if (payload.summary) {
+        const summary = payload.summary;
+        if (Array.isArray(summary.overview) || (Array.isArray(summary.sections) && summary.sections.some((section) => Array.isArray(section.items)))) {
+          return {
+            title: summary.title || fallback.title,
+            mode: summary.mode || fallback.mode,
+            note: summary.revision ? `revision ${summary.revision} を集計しています` : (summary.note || fallback.note),
+            metrics: Array.isArray(summary.overview)
+              ? summary.overview.map((item) => ({
+                  label: item.label || '',
+                  value: item.value || ''
+                }))
+              : (fallback.metrics || []),
+            sections: Array.isArray(summary.sections)
+              ? summary.sections.map((section) => ({
+                  title: section.title || '',
+                  rows: Array.isArray(section.items)
+                    ? section.items.map((item) => ({
+                        label: item.meta ? `${item.label} / ${item.meta}` : item.label,
+                        value: item.count
+                      }))
+                    : []
+                }))
+              : (fallback.sections || [])
+          };
+        }
+        return summary;
+      }
+      if (payload.metrics || payload.sections) return payload;
+      return fallback;
+    }
+
+    function renderSummaryModalContent(modal, summary) {
+      const body = modalBody(modal);
+      const footer = modalFooter(modal);
+      const metrics = Array.isArray(summary.metrics) ? summary.metrics : [];
+      const sections = Array.isArray(summary.sections) ? summary.sections : [];
+      body.innerHTML = `
+        <div class="cloud-summary-head">
+          <div>
+            <div class="cloud-modal-kicker">${escapeHtml(summary.mode === 'person' ? 'person' : 'scene')}</div>
+            <div class="cloud-summary-title">${escapeHtml(summary.title || '')}</div>
+          </div>
+        </div>
+        <div class="cloud-summary-metrics">
+          ${metrics.map((item) => `
+            <div class="cloud-summary-metric">
+              <span>${escapeHtml(item.label)}</span>
+              <strong>${escapeHtml(String(item.value ?? '-'))}</strong>
+            </div>
+          `).join('')}
+        </div>
+        <div class="cloud-summary-sections">
+          ${sections.map((section) => `
+            <section class="cloud-summary-section">
+              <h4>${escapeHtml(section.title || '')}</h4>
+              <div class="cloud-summary-table">
+                ${(section.rows || []).map((row) => `
+                  <div class="cloud-summary-row">
+                    <span>${escapeHtml(row.label || '')}</span>
+                    <strong>${escapeHtml(String(row.value ?? '-'))}</strong>
+                  </div>
+                `).join('')}
+              </div>
+            </section>
+          `).join('')}
+        </div>
+        <p class="cloud-panel-note">${escapeHtml(summary.note || '')}</p>
+      `;
+      footer.innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-summary-close>髢峨§繧・/button>';
+      footer.querySelector('[data-cloud-summary-close]').addEventListener('click', () => closeCloudModal('cloud-summary-modal'));
+    }
+
+    async function fetchMonthlySummary(project, month, includeDraft) {
+      const basePath = PAGE.type === 'owner'
+        ? `/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/summary`
+        : `/tools/shiftersync/cloudshift/api/public/${PAGE.accessMode}/${PAGE.token}/month/${month.year}/${month.month}/summary`;
+      const payload = includeDraft ? collectMonthPayload() : null;
+      const requestOptions = includeDraft
+        ? { method: 'POST', body: Object.assign({ mode: project.mode }, payload) }
+        : { method: 'GET' };
+      try {
+        return normalizeSummaryPayload(await requestJson(basePath, requestOptions), buildLocalSummary(project, month, includeDraft ? payload : null));
+      } catch (_) {
+        return buildLocalSummary(project, month, includeDraft ? payload : null);
+      }
+    }
+
+    async function openSummaryModal() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) return;
+
+      const modal = openCloudModal('cloud-summary-modal', `譛磯俣髮・ｨ・/ ${formatMonthKey(currentMonthKey())}`);
+      modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>髮・ｨ井ｸｭ縺ｧ縺・..</p></div>';
+      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-summary-close>髢峨§繧・/button>';
+      modalFooter(modal).querySelector('[data-cloud-summary-close]').addEventListener('click', () => closeCloudModal('cloud-summary-modal'));
+
+      const includeDraft = PAGE.type !== 'public' || PAGE.accessMode === 'edit';
+      const summary = await fetchMonthlySummary(project, month, includeDraft);
+      renderSummaryModalContent(modal, summary);
+    }
+
+    function applyBulkEditFromModal(modal) {
+      const form = modal.querySelector('form');
+      const project = currentProject();
+      if (!project || !form) return;
+      const targetDays = selectedDaysFromBulkForm(form);
+      if (!targetDays.length) {
+        showFlash('蟇ｾ雎｡譌･繧帝∈謚槭＠縺ｦ縺上□縺輔＞', 'error');
+        return;
+      }
+
+      const operation = form.querySelector('[name="bulk_operation"]').value;
+      const currentEntries = currentEntriesSnapshot();
+      const nextEntries = deepClone(currentEntries);
+
+      if (operation === 'delete') {
+        targetDays.forEach((day) => {
+          nextEntries[String(day)] = [];
+        });
+      } else if (operation === 'copy') {
+        const sourceDay = parseInt(form.querySelector('[name="bulk_copy_source_day"]').value || '0', 10);
+        const copyMode = form.querySelector('[name="bulk_copy_mode"]').value;
+        const sourceEntries = Array.isArray(currentEntries[String(sourceDay)]) ? currentEntries[String(sourceDay)] : [];
+        if (!sourceDay || !sourceEntries.length) {
+          showFlash('繧ｳ繝斐・蜈・・譌･縺ｫ繝・・繧ｿ縺後≠繧翫∪縺帙ｓ', 'error');
+          return;
+        }
+        targetDays.forEach((day) => {
+          const clonedEntries = sourceEntries.map((entry) => cloneEntryForBulk(entry));
+          const key = String(day);
+          nextEntries[key] = copyMode === 'append'
+            ? (Array.isArray(nextEntries[key]) ? nextEntries[key] : []).concat(clonedEntries)
+            : clonedEntries;
+        });
+      } else {
+        const templateEntry = createBulkEntryFromForm(null, {
+          nameInput: form.querySelector('[name="bulk_name"]'),
+          commentInput: form.querySelector('[name="bulk_comment"]'),
+          optionSelect: form.querySelector('[name="bulk_option"]'),
+          employeeInput: form.querySelector('[name="bulk_employee_number"]')
+        });
+        if (!templateEntry) {
+          showFlash('蜷榊燕繧貞・蜉帙＠縺ｦ縺上□縺輔＞', 'error');
+          return;
+        }
+        targetDays.forEach((day) => {
+          const key = String(day);
+          const nextDayEntries = Array.isArray(nextEntries[key]) ? nextEntries[key].slice() : [];
+          if (operation === 'replace') {
+            nextEntries[key] = [cloneEntryForBulk(templateEntry)];
+          } else {
+            nextDayEntries.push(cloneEntryForBulk(templateEntry));
+            nextEntries[key] = nextDayEntries;
+          }
+        });
+      }
+
+      replaceCalendarEntries(nextEntries);
+      closeCloudModal('cloud-bulk-modal');
+      showFlash(`蟇ｾ雎｡ ${targetDays.length}譌･ 繧呈峩譁ｰ縺励∪縺励◆縲ゆｿ晏ｭ倥・繧ｿ繝ｳ縺ｧ遒ｺ螳壹＠縺ｦ縺上□縺輔＞`, 'success');
+    }
+
+    function openBulkEditModal() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) return;
+
+      const modal = openCloudModal('cloud-bulk-modal', `遽・峇荳諡ｬ邱ｨ髮・/ ${formatMonthKey(currentMonthKey())}`);
+      const body = modalBody(modal);
+      const footer = modalFooter(modal);
+      body.innerHTML = `
+        <form class="cloud-bulk-form">
+          <div class="cloud-bulk-grid">
+            <label class="cloud-field">
+              <span>蟇ｾ雎｡遽・峇</span>
+              <select name="bulk_scope" class="cloud-input">
+                <option value="all">蜈ｨ譌･</option>
+                <option value="range">譛滄俣謖・ｮ・/option>
+                <option value="weekdays">譖懈律謖・ｮ・/option>
+                <option value="weekends">蝨滓律</option>
+              </select>
+            </label>
+            <label class="cloud-field" data-bulk-range>
+              <span>髢句ｧ区律</span>
+              <input name="bulk_start_day" class="cloud-input" type="number" min="1" max="${monthDays(month)}" value="1">
+            </label>
+            <label class="cloud-field" data-bulk-range>
+              <span>邨ゆｺ・律</span>
+              <input name="bulk_end_day" class="cloud-input" type="number" min="1" max="${monthDays(month)}" value="${monthDays(month)}">
+            </label>
+            <div class="cloud-bulk-weekdays" data-bulk-weekdays>
+              ${buildBulkWeekdayChecks()}
+            </div>
+            <label class="cloud-field">
+              <span>謫堺ｽ・/span>
+              <select name="bulk_operation" class="cloud-input">
+                <option value="add">霑ｽ蜉</option>
+                <option value="replace">鄂ｮ謠・/option>
+                <option value="delete">蜑企勁</option>
+                <option value="copy">繧ｳ繝斐・</option>
+              </select>
+            </label>
+            <div data-bulk-template class="cloud-bulk-template">
+              <label class="cloud-field">
+                <span>蜷榊燕</span>
+                <input name="bulk_name" class="cloud-input" type="text">
+              </label>
+              <label class="cloud-field">
+                <span>遉ｾ蜩｡逡ｪ蜿ｷ</span>
+                <input name="bulk_employee_number" class="cloud-input" type="text">
+              </label>
+              <label class="cloud-field">
+                <span>繧ｪ繝励す繝ｧ繝ｳ</span>
+                <select name="bulk_option" class="cloud-input">
+                  <option value="">縺ｪ縺・/option>
+                  ${buildBulkOptionSelect(project.mode)}
+                </select>
+              </label>
+              <label class="cloud-field cloud-field-wide">
+                <span>繧ｳ繝｡繝ｳ繝・/span>
+                <textarea name="bulk_comment" class="cloud-input" rows="3"></textarea>
+              </label>
+            </div>
+            <div data-bulk-copy class="cloud-bulk-copy cloud-hidden">
+              <label class="cloud-field">
+                <span>繧ｳ繝斐・蜈・律</span>
+                <input name="bulk_copy_source_day" class="cloud-input" type="number" min="1" max="${monthDays(month)}" value="1">
+              </label>
+              <label class="cloud-field">
+                <span>蜿肴丐譁ｹ豕・/span>
+                <select name="bulk_copy_mode" class="cloud-input">
+                  <option value="replace">鄂ｮ謠・/option>
+                  <option value="append">霑ｽ蜉</option>
+                </select>
+              </label>
+            </div>
+            <div class="cloud-note-chip cloud-bulk-preview" data-bulk-preview>蟇ｾ雎｡遽・峇繧帝∈謚槭＠縺ｦ縺上□縺輔＞</div>
+          </div>
+        </form>
+      `;
+      footer.innerHTML = `
+        <button type="button" class="cloud-btn secondary" data-cloud-bulk-close>髢峨§繧・/button>
+        <button type="button" class="cloud-btn primary" data-cloud-bulk-apply>驕ｩ逕ｨ</button>
+      `;
+      const form = body.querySelector('form');
+      const applyBtn = footer.querySelector('[data-cloud-bulk-apply]');
+      footer.querySelector('[data-cloud-bulk-close]').addEventListener('click', () => closeCloudModal('cloud-bulk-modal'));
+      form.querySelector('[name="bulk_scope"]').addEventListener('change', () => {
+        updateBulkFieldVisibility(form);
+        updateBulkPreview(form);
+      });
+      form.querySelector('[name="bulk_operation"]').addEventListener('change', () => {
+        updateBulkFieldVisibility(form);
+        updateBulkPreview(form);
+      });
+      form.querySelectorAll('[data-bulk-weekday], [name="bulk_start_day"], [name="bulk_end_day"], [name="bulk_copy_source_day"]').forEach((node) => {
+        node.addEventListener('input', () => updateBulkPreview(form));
+        node.addEventListener('change', () => updateBulkPreview(form));
+      });
+      applyBtn.addEventListener('click', () => applyBulkEditFromModal(modal));
+      updateBulkFieldVisibility(form);
+      updateBulkPreview(form);
     }
 
     function renderLeaveSyncControls() {
@@ -411,7 +1144,7 @@
 
       const calendars = state.leaveSync.calendars || [];
       if (!calendars.length) {
-        select.innerHTML = '<option value="">反映先がありません</option>';
+        select.innerHTML = '<option value="">蜿肴丐蜈医′縺ゅｊ縺ｾ縺帙ｓ</option>';
         select.disabled = true;
         button.disabled = true;
         return;
@@ -454,7 +1187,7 @@
         return;
       }
       if (!calendarId) {
-        showFlash('営業所を選択してください', 'error');
+        showFlash('蝟ｶ讌ｭ謇繧帝∈謚槭＠縺ｦ縺上□縺輔＞', 'error');
         return;
       }
 
@@ -465,9 +1198,9 @@
         }
       });
 
-      let message = `有休マネージャーへ反映しました: 登録 ${result.created_total} 件 / 置換削除 ${result.removed_total} 件`;
+      let message = `譛我ｼ代・繝阪・繧ｸ繝｣繝ｼ縺ｸ蜿肴丐縺励∪縺励◆: 逋ｻ骭ｲ ${result.created_total} 莉ｶ / 鄂ｮ謠帛炎髯､ ${result.removed_total} 莉ｶ`;
       if (result.skipped_total) {
-        message += ` / スキップ ${result.skipped_total} 件`;
+        message += ` / 繧ｹ繧ｭ繝・・ ${result.skipped_total} 莉ｶ`;
       }
       showFlash(message, result.skipped_total ? 'info' : 'success');
       if (project.id) {
@@ -481,7 +1214,7 @@
       host.innerHTML = `
         <div class="container cloud-calendar-container">
           <div class="weekday-header">
-            <div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div><div>日</div>
+            <div>譛・/div><div>轣ｫ</div><div>豌ｴ</div><div>譛ｨ</div><div>驥・/div><div>蝨・/div><div>譌･</div>
           </div>
           <div id="shiftGrid" class="calendar-grid"></div>
         </div>
@@ -537,7 +1270,7 @@
       }
       if ($('cloud-project-employee-number')) $('cloud-project-employee-number').value = project.employee_number || '';
       if ($('cloud-project-selected-note')) {
-        $('cloud-project-selected-note').textContent = project.employee_number ? `選択中: ${project.employee_number}` : '';
+        $('cloud-project-selected-note').textContent = project.employee_number ? `驕ｸ謚樔ｸｭ: ${project.employee_number}` : '';
       }
       setTitleFieldMode('project');
       if ($('cloud-view-url')) $('cloud-view-url').value = project.urls.view_url || '';
@@ -546,7 +1279,7 @@
       if ($('cloud-project-badges')) {
         $('cloud-project-badges').innerHTML = `
           <span class="cloud-badge">${modeLongLabel(project.mode)}</span>
-          <span class="cloud-badge">${(project.month_keys || []).length}か月</span>
+          <span class="cloud-badge">${(project.month_keys || []).length}縺区怦</span>
           <span class="cloud-badge">${escapeHtml(project.updated_at || '')}</span>
         `;
       }
@@ -572,15 +1305,18 @@
       if ($('cloud-add-prev-month')) $('cloud-add-prev-month').classList.toggle('cloud-hidden', !editable);
       if ($('cloud-add-next-month')) $('cloud-add-next-month').classList.toggle('cloud-hidden', !editable);
       if ($('cloud-create-first-month')) $('cloud-create-first-month').classList.toggle('cloud-hidden', !editable);
+      if ($('cloud-open-summary')) $('cloud-open-summary').classList.toggle('cloud-hidden', !month);
+      if ($('cloud-open-bulk-edit')) $('cloud-open-bulk-edit').classList.toggle('cloud-hidden', !month || !editable || (PAGE.type === 'public' && PAGE.accessMode !== 'edit'));
+      if ($('cloud-open-restore')) $('cloud-open-restore').classList.toggle('cloud-hidden', !month || PAGE.type !== 'owner');
 
       if ($('cloud-editor-title')) {
-        $('cloud-editor-title').textContent = month ? `${project.title} / ${formatMonthKey(currentMonthKey())}` : `${project.title} / 月未作成`;
+        $('cloud-editor-title').textContent = month ? `${project.title} / ${formatMonthKey(currentMonthKey())}` : `${project.title} / 譛域悴菴懈・`;
       }
 
       if ($('cloud-editor-meta')) {
         $('cloud-editor-meta').textContent = month
-          ? `${modeLongLabel(project.mode)} / リビジョン ${month.revision}`
-          : '最初の月を作成してからカレンダーを開けます。';
+          ? `${modeLongLabel(project.mode)} / 繝ｪ繝薙ず繝ｧ繝ｳ ${month.revision}`
+          : '最初の月を作成するとカレンダーを編集できます';
       }
 
       mountEditor(editable);
@@ -663,9 +1399,9 @@
       }
 
       if (!state.guestName) {
-        const entered = window.prompt('編集者名を入力してください', '');
+        const entered = window.prompt('邱ｨ髮・・錐繧貞・蜉帙＠縺ｦ縺上□縺輔＞', '');
         if (!entered || !entered.trim()) {
-          showFlash('編集者名を入力してください', 'error');
+          showFlash('邱ｨ髮・・錐繧貞・蜉帙＠縺ｦ縺上□縺輔＞', 'error');
           return false;
         }
         state.guestName = entered.trim();
@@ -690,7 +1426,7 @@
       renderWorkspace(true);
       await loadProjects();
       await loadHistory(project.id);
-      showFlash('この月を保存しました', 'success');
+      showFlash('縺薙・譛医ｒ菫晏ｭ倥＠縺ｾ縺励◆', 'success');
     }
 
     async function saveMonthPublic() {
@@ -704,7 +1440,7 @@
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       renderWorkspace(true);
-      showFlash('この月を保存しました', 'success');
+      showFlash('縺薙・譛医ｒ菫晏ｭ倥＠縺ｾ縺励◆', 'success');
     }
 
     async function createMonth(targetKey, ownerMode) {
@@ -713,13 +1449,13 @@
 
       const parsed = parseMonthKey(targetKey);
       if (!parsed) {
-        showFlash('年月は YYYY-MM 形式で入力してください', 'error');
+        showFlash('蟷ｴ譛医・ YYYY-MM 蠖｢蠑上〒蜈･蜉帙＠縺ｦ縺上□縺輔＞', 'error');
         return;
       }
 
       const sourceMonthKey = currentMonthKey();
       const useCopy = sourceMonthKey
-        ? window.confirm(`${formatMonthKey(targetKey)} を現在の月からコピーして作成しますか？\nOK: コピー / キャンセル: 空で作成`)
+        ? window.confirm(`${formatMonthKey(targetKey)} 繧堤樟蝨ｨ縺ｮ譛医°繧峨さ繝斐・縺励※菴懈・縺励∪縺吶°・歃nOK: 繧ｳ繝斐・ / 繧ｭ繝｣繝ｳ繧ｻ繝ｫ: 遨ｺ縺ｧ菴懈・`)
         : false;
 
       const body = {
@@ -752,7 +1488,7 @@
         renderWorkspace(true);
       }
 
-      showFlash(`${formatMonthKey(targetKey)} を作成しました`, 'success');
+      showFlash(`${formatMonthKey(targetKey)} 繧剃ｽ懈・縺励∪縺励◆`, 'success');
     }
 
     async function navigateMonth(delta, ownerMode) {
@@ -773,7 +1509,7 @@
       }
 
       if (!ownerMode && PAGE.accessMode !== 'edit') {
-        showFlash('その月はまだ作成されていません', 'info');
+        showFlash('縺昴・譛医・縺ｾ縺菴懈・縺輔ｌ縺ｦ縺・∪縺帙ｓ', 'info');
         return;
       }
 
@@ -792,13 +1528,13 @@
       await loadProjects();
       updateCurrentProjectLabel();
       switchTab('list');
-      showFlash('この月を削除しました', 'success');
+      showFlash('縺薙・譛医ｒ蜑企勁縺励∪縺励◆', 'success');
     }
 
     async function deleteProject() {
       const project = currentProject();
       if (!project) return;
-      if (!window.confirm(`シフト帳「${project.title}」を完全削除しますか？`)) return;
+      if (!window.confirm(`シフト案件「${project.title}」を削除しますか？`)) return;
 
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}`, { method: 'DELETE' });
       state.projectPayload = null;
@@ -810,13 +1546,13 @@
       renderWorkspace(true);
       updateCurrentProjectLabel();
       switchTab('list');
-      showFlash('シフト帳を完全削除しました', 'success');
+      showFlash('繧ｷ繝輔ヨ蟶ｳ繧貞ｮ悟・蜑企勁縺励∪縺励◆', 'success');
     }
 
     async function regenerateUrls() {
       const project = currentProject();
       if (!project) return;
-      if (!window.confirm('閲覧URLと編集URLを再発行しますか？ 以前のURLは無効になります。')) return;
+      if (!window.confirm('公開URLと編集URLを再発行しますか？既存のURLは無効になります。')) return;
 
       const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/tokens/regenerate`, {
         method: 'POST',
@@ -825,7 +1561,7 @@
 
       if ($('cloud-view-url')) $('cloud-view-url').value = data.urls.view_url || '';
       if ($('cloud-edit-url')) $('cloud-edit-url').value = data.urls.edit_url || '';
-      showFlash('URLを再発行しました', 'success');
+      showFlash('URL繧貞・逋ｺ陦後＠縺ｾ縺励◆', 'success');
     }
 
     async function copyText(text, message) {
@@ -854,7 +1590,7 @@
       if (refreshProjects) {
         refreshProjects.addEventListener('click', async () => {
           await loadProjects();
-          showFlash('一覧を更新しました', 'info');
+          showFlash('荳隕ｧ繧呈峩譁ｰ縺励∪縺励◆', 'info');
         });
       }
 
@@ -881,7 +1617,7 @@
           renderWorkspace(true);
           updateCurrentProjectLabel();
           switchTab('editor');
-          showFlash('シフト帳を作成しました', 'success');
+          showFlash('繧ｷ繝輔ヨ蟶ｳ繧剃ｽ懈・縺励∪縺励◆', 'success');
         });
       }
 
@@ -899,7 +1635,7 @@
           renderWorkspace(true);
           updateCurrentProjectLabel();
           switchTab('editor');
-          showFlash('CSV を取り込みました', 'success');
+          showFlash('CSV 繧貞叙繧願ｾｼ縺ｿ縺ｾ縺励◆', 'success');
         });
       }
 
@@ -919,7 +1655,7 @@
           renderWorkspace(true);
           await loadProjects();
           await loadHistory(project.id);
-          showFlash('タイトルを更新しました', 'success');
+          showFlash('繧ｿ繧､繝医Ν繧呈峩譁ｰ縺励∪縺励◆', 'success');
         });
       }
 
@@ -930,10 +1666,10 @@
       if (openEdit) openEdit.addEventListener('click', () => window.open($('cloud-edit-url').value, '_blank', 'noopener'));
 
       const copyView = $('cloud-copy-view-url');
-      if (copyView) copyView.addEventListener('click', () => copyText($('cloud-view-url').value, '閲覧URLをコピーしました').catch((error) => showFlash(error.message, 'error')));
+      if (copyView) copyView.addEventListener('click', () => copyText($('cloud-view-url').value, '髢ｲ隕ｧURL繧偵さ繝斐・縺励∪縺励◆').catch((error) => showFlash(error.message, 'error')));
 
       const copyEdit = $('cloud-copy-edit-url');
-      if (copyEdit) copyEdit.addEventListener('click', () => copyText($('cloud-edit-url').value, '編集URLをコピーしました').catch((error) => showFlash(error.message, 'error')));
+      if (copyEdit) copyEdit.addEventListener('click', () => copyText($('cloud-edit-url').value, '邱ｨ髮・RL繧偵さ繝斐・縺励∪縺励◆').catch((error) => showFlash(error.message, 'error')));
 
       const regenerate = $('cloud-regenerate-urls');
       if (regenerate) regenerate.addEventListener('click', () => regenerateUrls().catch((error) => showFlash(error.message, 'error')));
@@ -1122,6 +1858,7 @@
       if ($('cloud-create-month')) $('cloud-create-month').value = now.getMonth() + 1;
       setTitleFieldMode('create');
       bindOwnerEvents();
+      ensureCloudActionButtons();
       await loadProjects();
       updateCurrentProjectLabel();
     }
@@ -1130,6 +1867,7 @@
       applyPublicDeviceMode();
       window.addEventListener('resize', applyPublicDeviceMode);
       bindPublicEvents();
+      ensureCloudActionButtons();
       await loadPublic();
     }
 
@@ -1142,3 +1880,6 @@
     });
   })();
 </script>
+
+
+
