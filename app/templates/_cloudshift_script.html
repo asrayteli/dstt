@@ -89,6 +89,13 @@
       return sections;
     }
 
+    function bulkOptionSectionsForMode(mode) {
+      return optionSectionsForMode(mode).map((section) => ({
+        title: section.title,
+        optionKeys: Array.isArray(section.optionKeys) ? section.optionKeys.slice() : []
+      }));
+    }
+
     function optionLabelForKey(optionKey) {
       return optionMappings()[optionKey] || optionKey;
     }
@@ -107,7 +114,9 @@
       if (!name) return null;
       const optionKey = refs.optionSelect ? refs.optionSelect.value : '';
       const comment = refs.commentInput ? refs.commentInput.value.trim() : '';
-      const employeeNumber = refs.employeeInput ? refs.employeeInput.value.trim() : '';
+      const employeeNumber = refs.employeeInput
+        ? refs.employeeInput.value.trim()
+        : (refs.nameInput && refs.nameInput.dataset ? String(refs.nameInput.dataset.employeeNumber || '').trim() : '');
       return {
         id: makeEntryId(),
         value: formatEntryValue(optionKey || null, name),
@@ -145,7 +154,7 @@
               <div class="cloud-modal-kicker">CloudShift</div>
               <h3 class="cloud-modal-title" data-cloud-modal-title>${escapeHtml(titleText || '')}</h3>
             </div>
-            <button type="button" class="cloud-btn secondary cloud-modal-close" data-cloud-modal-close>髢峨§繧・/button>
+            <button type="button" class="cloud-btn secondary cloud-modal-close" data-cloud-modal-close>閉じる</button>
           </div>
           <div class="cloud-modal-body" data-cloud-modal-body></div>
           <div class="cloud-modal-footer" data-cloud-modal-footer></div>
@@ -200,11 +209,11 @@
     }
 
     function modeLabel(mode) {
-      return mode === 'scene' ? '迴ｾ蝣ｴ' : '蛟倶ｺｺ';
+      return mode === 'scene' ? '現場' : '個人';
     }
 
     function modeLongLabel(mode) {
-      return mode === 'scene' ? '迴ｾ蝣ｴ繧ｷ繝輔ヨ' : '蛟倶ｺｺ繧ｷ繝輔ヨ';
+      return mode === 'scene' ? '現場シフト' : '個人シフト';
     }
 
     function isLikelyMobileDevice() {
@@ -248,7 +257,7 @@
       const isJson = (response.headers.get('content-type') || '').includes('application/json');
       const payload = isJson ? await response.json() : null;
       if (!response.ok) {
-        throw new Error((payload && payload.error) || '繝ｪ繧ｯ繧ｨ繧ｹ繝医↓螟ｱ謨励＠縺ｾ縺励◆');
+        throw new Error((payload && payload.error) || 'リクエストに失敗しました');
       }
       return payload;
     }
@@ -293,7 +302,7 @@
     }
 
     function promptMonthKey(defaultValue) {
-      return window.prompt('菴懈・縺吶ｋ蟷ｴ譛医ｒ YYYY-MM 蠖｢蠑上〒蜈･蜉帙＠縺ｦ縺上□縺輔＞', defaultValue || new Date().toISOString().slice(0, 7));
+      return window.prompt('作成する年月を YYYY-MM 形式で入力してください', defaultValue || new Date().toISOString().slice(0, 7));
     }
 
     function selectedLeaveCalendarId() {
@@ -331,7 +340,7 @@
       const refs = titleFieldRefs(kind);
       const isPerson = titleFieldMode(kind) === 'person';
       if (refs.label) {
-        refs.label.textContent = isPerson ? '遉ｾ蜩｡' : '繧ｿ繧､繝医Ν';
+        refs.label.textContent = isPerson ? '社員' : 'タイトル';
       }
       if (refs.input) {
         refs.input.placeholder = isPerson ? '社員名' : 'タイトル';
@@ -357,7 +366,7 @@
         headers: { Accept: 'application/json' }
       });
       if (!response.ok) {
-        throw new Error('遉ｾ蜩｡蛟呵｣懊・讀懃ｴ｢縺ｫ螟ｱ謨励＠縺ｾ縺励◆');
+        throw new Error('社員候補の取得に失敗しました');
       }
       const payload = await response.json();
       const candidates = Array.isArray(payload)
@@ -382,7 +391,7 @@
       refs.input.dataset.selectedEmployeeName = String(candidate.employee_name || '');
       refs.hidden.value = String(candidate.employee_number || '');
       if (refs.note) {
-        refs.note.textContent = refs.hidden.value ? `驕ｸ謚樔ｸｭ: ${refs.hidden.value}` : '';
+        refs.note.textContent = refs.hidden.value ? `社員番号: ${refs.hidden.value}` : '';
       }
       if (refs.panel) {
         refs.panel.innerHTML = '';
@@ -403,22 +412,18 @@
       const normalized = (Array.isArray(candidates) ? candidates : [])
         .map((item) => ({
           employee_number: String(item.employee_number || '').trim(),
-          employee_name: String(item.employee_name || '').trim(),
-          office_name: String(item.office_name || '').trim(),
-          job_title: String(item.job_title || '').trim()
+          employee_name: String(item.employee_name || '').trim()
         }))
         .filter((item) => item.employee_number && item.employee_name);
       if (!normalized.length) {
-        refs.panel.innerHTML = '<div style="color: var(--cloud-muted); font-size: 12px; padding: 4px 2px;">蛟呵｣懊′隕九▽縺九ｊ縺ｾ縺帙ｓ</div>';
+        refs.panel.innerHTML = '<div style="color: var(--cloud-muted); font-size: 12px; padding: 4px 2px;">候補が見つかりません</div>';
         refs.panel.classList.remove('cloud-hidden');
         return;
       }
       refs.panel.innerHTML = normalized.slice(0, 8).map((candidate) => {
         const label = [
           candidate.employee_name,
-          candidate.employee_number,
-          candidate.office_name,
-          candidate.job_title
+          candidate.employee_number
         ].filter(Boolean).join(' / ');
         return `
           <button
@@ -435,6 +440,7 @@
     }
 
     let employeeSearchTimer = null;
+    let bulkEmployeeSearchTimer = null;
     function scheduleEmployeeSearch(kind) {
       const refs = titleFieldRefs(kind);
       if (!refs.input || titleFieldMode(kind) !== 'person') {
@@ -477,6 +483,126 @@
       }, 220);
     }
 
+    function bulkFieldRefs(form) {
+      if (!form) {
+        return {
+          nameInput: null,
+          employeeInput: null,
+          panel: null,
+          note: null
+        };
+      }
+      return {
+        nameInput: form.querySelector('[name="bulk_name"]'),
+        employeeInput: form.querySelector('[name="bulk_employee_number"]'),
+        panel: form.querySelector('[data-bulk-candidate-panel]'),
+        note: form.querySelector('[data-bulk-selected-note]')
+      };
+    }
+
+    function clearBulkEmployeeSelection(form) {
+      const refs = bulkFieldRefs(form);
+      if (!refs.nameInput) return;
+      refs.nameInput.removeAttribute('data-employee-number');
+      refs.nameInput.removeAttribute('data-selected-employee-name');
+      if (refs.employeeInput) {
+        refs.employeeInput.value = '';
+      }
+      if (refs.note) {
+        refs.note.textContent = '';
+        refs.note.classList.add('cloud-hidden');
+      }
+    }
+
+    function applyBulkEmployeeCandidate(form, candidate) {
+      const refs = bulkFieldRefs(form);
+      if (!refs.nameInput) return;
+      refs.nameInput.value = String(candidate.employee_name || '');
+      refs.nameInput.dataset.selectedEmployeeName = String(candidate.employee_name || '');
+      refs.nameInput.dataset.employeeNumber = String(candidate.employee_number || '');
+      if (refs.employeeInput) {
+        refs.employeeInput.value = String(candidate.employee_number || '');
+      }
+      if (refs.note) {
+        refs.note.textContent = candidate.employee_number ? `社員番号: ${candidate.employee_number}` : '';
+        refs.note.classList.toggle('cloud-hidden', !candidate.employee_number);
+      }
+      if (refs.panel) {
+        refs.panel.innerHTML = '';
+        refs.panel.classList.add('cloud-hidden');
+      }
+    }
+
+    function renderBulkEmployeeCandidates(form, candidates) {
+      const refs = bulkFieldRefs(form);
+      if (!refs.panel) {
+        return;
+      }
+      const normalized = (Array.isArray(candidates) ? candidates : [])
+        .map((item) => ({
+          employee_number: String(item.employee_number || '').trim(),
+          employee_name: String(item.employee_name || '').trim()
+        }))
+        .filter((item) => item.employee_number && item.employee_name);
+      if (!normalized.length) {
+        refs.panel.innerHTML = '<div style="color: var(--cloud-muted); font-size: 12px; padding: 4px 2px;">候補が見つかりません</div>';
+        refs.panel.classList.remove('cloud-hidden');
+        return;
+      }
+      refs.panel.innerHTML = normalized.slice(0, 8).map((candidate) => `
+        <button
+          type="button"
+          class="cloud-bulk-employee-candidate"
+          data-employee-name="${escapeHtml(candidate.employee_name)}"
+          data-employee-number="${escapeHtml(candidate.employee_number)}"
+          style="display:block; width:100%; text-align:left; border:1px solid var(--cloud-line); border-radius:10px; background:#fff; color:var(--cloud-text); padding:8px 10px; cursor:pointer; margin:0 0 6px;"
+        >${escapeHtml(`${candidate.employee_name} / ${candidate.employee_number}`)}</button>
+      `).join('');
+      refs.panel.classList.remove('cloud-hidden');
+    }
+
+    function scheduleBulkEmployeeSearch(form) {
+      const project = currentProject();
+      const refs = bulkFieldRefs(form);
+      if (!project || project.mode !== 'scene' || !refs.nameInput) {
+        return;
+      }
+      const query = refs.nameInput.value.trim();
+      if (refs.nameInput.dataset.selectedEmployeeName && refs.nameInput.dataset.selectedEmployeeName !== query) {
+        clearBulkEmployeeSelection(form);
+      }
+      if (!query) {
+        if (refs.panel) {
+          refs.panel.innerHTML = '';
+          refs.panel.classList.add('cloud-hidden');
+        }
+        return;
+      }
+      window.clearTimeout(bulkEmployeeSearchTimer);
+      bulkEmployeeSearchTimer = window.setTimeout(async () => {
+        const latestQuery = refs.nameInput.value.trim();
+        if (!latestQuery) {
+          if (refs.panel) {
+            refs.panel.innerHTML = '';
+            refs.panel.classList.add('cloud-hidden');
+          }
+          return;
+        }
+        try {
+          const candidates = await fetchEmployeeCandidates(latestQuery);
+          if (refs.nameInput.value.trim() !== latestQuery) {
+            return;
+          }
+          renderBulkEmployeeCandidates(form, candidates);
+        } catch (_) {
+          if (refs.panel) {
+            refs.panel.innerHTML = '';
+            refs.panel.classList.add('cloud-hidden');
+          }
+        }
+      }, 220);
+    }
+
     function updateCurrentProjectLabel() {
       const node = $('cloud-current-project') || $('cloud-public-identity');
       if (!node) return;
@@ -493,7 +619,7 @@
           return;
         }
 
-        node.textContent = `邱ｨ髮・・ ${editorName}`;
+        node.textContent = `編集中: ${editorName}`;
         node.classList.remove('cloud-hidden');
 
         const note = $('cloud-public-editor-note');
@@ -521,7 +647,7 @@
       if (!list) return;
 
       if (!state.projects.length) {
-        list.innerHTML = '<div class="cloud-empty-state"><p>縺ｾ縺繧ｷ繝輔ヨ蟶ｳ縺後≠繧翫∪縺帙ｓ縲・/p></div>';
+        list.innerHTML = '<div class="cloud-empty-state"><p>まだシフト表がありません。</p></div>';
         return;
       }
 
@@ -530,12 +656,12 @@
           <div class="cloud-project-card-head">
             <div>
               <h3>${escapeHtml(project.title)}</h3>
-              <p>${modeLongLabel(project.mode)} / ${project.month_count}縺区怦</p>
+              <p>${modeLongLabel(project.mode)} / ${project.month_count}か月</p>
             </div>
-            <span class="cloud-badge">${project.latest_month_key ? escapeHtml(formatMonthKey(project.latest_month_key)) : '譛域悴菴懈・'}</span>
+            <span class="cloud-badge">${project.latest_month_key ? escapeHtml(formatMonthKey(project.latest_month_key)) : '未作成月'}</span>
           </div>
           <div class="cloud-project-meta">
-            <span>譛邨よ峩譁ｰ: ${escapeHtml(project.updated_at || '-')}</span>
+            <span>最終更新: ${escapeHtml(project.updated_at || '-')}</span>
           </div>
         </article>
       `).join('');
@@ -546,7 +672,7 @@
       if (!list) return;
 
       if (!history || history.length === 0) {
-        list.innerHTML = '<div class="cloud-empty-state"><p>邱ｨ髮・ｱ･豁ｴ縺ｯ縺ｾ縺縺ゅｊ縺ｾ縺帙ｓ縲・/p></div>';
+        list.innerHTML = '<div class="cloud-empty-state"><p>編集履歴はまだありません。</p></div>';
         return;
       }
 
@@ -671,7 +797,7 @@
 
     function renderRestoreModalRows(revisions) {
       if (!revisions.length) {
-        return '<div class="cloud-empty-state"><p>蠕ｩ蜈・〒縺阪ｋ繝ｪ繝薙ず繝ｧ繝ｳ縺後∪縺縺ゅｊ縺ｾ縺帙ｓ縲・/p></div>';
+        return '<div class="cloud-empty-state"><p>復元できるリビジョンがまだありません。</p></div>';
       }
 
       const firstRestorableIndex = revisions.findIndex((revision) => !(revision.current || revision.is_current));
@@ -711,7 +837,7 @@
       const selected = modal.querySelector('input[name="cloud-restore-revision"]:checked');
       const revision = selected ? parseInt(selected.value || '0', 10) : 0;
       if (!revision) {
-        showFlash('蠕ｩ蜈・☆繧九Μ繝薙ず繝ｧ繝ｳ繧帝∈謚槭＠縺ｦ縺上□縺輔＞', 'error');
+        showFlash('復元するリビジョンを選択してください', 'error');
         return;
       }
 
@@ -725,7 +851,7 @@
       await loadProjects();
       await loadHistory(project.id);
       closeCloudModal('cloud-restore-modal');
-      showFlash(`rev ${revision} 繧貞ｾｩ蜈・＠縺ｾ縺励◆`, 'success');
+      showFlash(`rev ${revision} を復元しました`, 'success');
     }
 
     async function openRestoreModal() {
@@ -733,31 +859,31 @@
       const month = currentMonth();
       if (!project || !month) return;
 
-      const modal = openCloudModal('cloud-restore-modal', `蠕ｩ蜈・/ ${formatMonthKey(currentMonthKey())}`);
-      modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>繝ｪ繝薙ず繝ｧ繝ｳ繧定ｪｭ縺ｿ霎ｼ縺ｿ荳ｭ縺ｧ縺・..</p></div>';
+      const modal = openCloudModal('cloud-restore-modal', `復元 / ${formatMonthKey(currentMonthKey())}`);
+      modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>リビジョンを読み込み中です...</p></div>';
       modalFooter(modal).innerHTML = `
-        <button type="button" class="cloud-btn secondary" data-cloud-restore-cancel>髢峨§繧・/button>
-        <button type="button" class="cloud-btn primary" data-cloud-restore-confirm>蠕ｩ蜈・/button>
+        <button type="button" class="cloud-btn secondary" data-cloud-restore-cancel>閉じる</button>
+        <button type="button" class="cloud-btn primary" data-cloud-restore-confirm>復元</button>
       `;
       modalFooter(modal).querySelector('[data-cloud-restore-cancel]').addEventListener('click', () => closeCloudModal('cloud-restore-modal'));
 
       try {
         const revisions = await loadRevisionSnapshots(project, month);
         modalBody(modal).innerHTML = `
-          <p class="cloud-panel-note">驕ｸ繧薙□繝ｪ繝薙ず繝ｧ繝ｳ繧堤樟蝨ｨ迚医→縺励※蜀堺ｿ晏ｭ倥＠縺ｾ縺吶ら樟蝨ｨ縺ｮ蜀・ｮｹ縺ｯ螟ｱ繧上ｌ縺ｾ縺帙ｓ縲・/p>
+          <p class="cloud-panel-note">選んだリビジョンを現在版として復元します。現在の内容は失われません。</p>
           <div class="cloud-revision-list">${renderRestoreModalRows(revisions)}</div>
         `;
         modalFooter(modal).querySelector('[data-cloud-restore-confirm]').addEventListener('click', () => {
           restoreSelectedRevision(modal).catch((error) => showFlash(error.message, 'error'));
         });
       } catch (error) {
-        modalBody(modal).innerHTML = `<div class="cloud-empty-state"><p>${escapeHtml(error.message || '繝ｪ繝薙ず繝ｧ繝ｳ荳隕ｧ縺ｮ蜿門ｾ励↓螟ｱ謨励＠縺ｾ縺励◆')}</p></div>`;
+        modalBody(modal).innerHTML = `<div class="cloud-empty-state"><p>${escapeHtml(error.message || 'リビジョン一覧の取得に失敗しました')}</p></div>`;
         modalFooter(modal).querySelector('[data-cloud-restore-confirm]').disabled = true;
       }
     }
 
     function buildBulkOptionSelect(mode) {
-      return optionSectionsForMode(mode).map((section) => `
+      return bulkOptionSectionsForMode(mode).map((section) => `
         <optgroup label="${escapeHtml(section.title)}">
           ${section.optionKeys.map((key) => `<option value="${escapeHtml(key)}">${escapeHtml(optionLabelForKey(key))}</option>`).join('')}
         </optgroup>
@@ -805,6 +931,7 @@
       const days = monthDays(month);
       const sections = optionSectionsForMode(project.mode).map((section) => ({
         title: section.title,
+        optionKeys: Array.isArray(section.optionKeys) ? section.optionKeys.slice() : [],
         rows: section.optionKeys.map((key) => ({ label: optionLabelForKey(key), value: 0 }))
       }));
       const countsByKey = {};
@@ -876,6 +1003,7 @@
             sections: Array.isArray(summary.sections)
               ? summary.sections.map((section) => ({
                   title: section.title || '',
+                  emptyMessage: section.empty_message || section.emptyMessage || '',
                   rows: Array.isArray(section.items)
                     ? section.items.map((item) => ({
                         label: item.meta ? `${item.label} / ${item.meta}` : item.label,
@@ -917,19 +1045,21 @@
             <section class="cloud-summary-section">
               <h4>${escapeHtml(section.title || '')}</h4>
               <div class="cloud-summary-table">
-                ${(section.rows || []).map((row) => `
-                  <div class="cloud-summary-row">
-                    <span>${escapeHtml(row.label || '')}</span>
-                    <strong>${escapeHtml(String(row.value ?? '-'))}</strong>
-                  </div>
-                `).join('')}
+                ${(section.rows || []).length
+                  ? (section.rows || []).map((row) => `
+                    <div class="cloud-summary-row">
+                      <span>${escapeHtml(row.label || '')}</span>
+                      <strong>${escapeHtml(String(row.value ?? '-'))}</strong>
+                    </div>
+                  `).join('')
+                  : `<div class="cloud-summary-row is-empty"><span>${escapeHtml(section.emptyMessage || 'まだ集計データがありません')}</span><strong>-</strong></div>`}
               </div>
             </section>
           `).join('')}
         </div>
         <p class="cloud-panel-note">${escapeHtml(summary.note || '')}</p>
       `;
-      footer.innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-summary-close>髢峨§繧・/button>';
+      footer.innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-summary-close>閉じる</button>';
       footer.querySelector('[data-cloud-summary-close]').addEventListener('click', () => closeCloudModal('cloud-summary-modal'));
     }
 
@@ -953,9 +1083,9 @@
       const month = currentMonth();
       if (!project || !month) return;
 
-      const modal = openCloudModal('cloud-summary-modal', `譛磯俣髮・ｨ・/ ${formatMonthKey(currentMonthKey())}`);
-      modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>髮・ｨ井ｸｭ縺ｧ縺・..</p></div>';
-      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-summary-close>髢峨§繧・/button>';
+      const modal = openCloudModal('cloud-summary-modal', `月間集計 / ${formatMonthKey(currentMonthKey())}`);
+      modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>集計中です...</p></div>';
+      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-summary-close>閉じる</button>';
       modalFooter(modal).querySelector('[data-cloud-summary-close]').addEventListener('click', () => closeCloudModal('cloud-summary-modal'));
 
       const includeDraft = PAGE.type !== 'public' || PAGE.accessMode === 'edit';
@@ -969,7 +1099,7 @@
       if (!project || !form) return;
       const targetDays = selectedDaysFromBulkForm(form);
       if (!targetDays.length) {
-        showFlash('蟇ｾ雎｡譌･繧帝∈謚槭＠縺ｦ縺上□縺輔＞', 'error');
+        showFlash('対象日を選択してください', 'error');
         return;
       }
 
@@ -986,7 +1116,7 @@
         const copyMode = form.querySelector('[name="bulk_copy_mode"]').value;
         const sourceEntries = Array.isArray(currentEntries[String(sourceDay)]) ? currentEntries[String(sourceDay)] : [];
         if (!sourceDay || !sourceEntries.length) {
-          showFlash('繧ｳ繝斐・蜈・・譌･縺ｫ繝・・繧ｿ縺後≠繧翫∪縺帙ｓ', 'error');
+          showFlash('コピー元の日にデータがありません', 'error');
           return;
         }
         targetDays.forEach((day) => {
@@ -1004,7 +1134,7 @@
           employeeInput: form.querySelector('[name="bulk_employee_number"]')
         });
         if (!templateEntry) {
-          showFlash('蜷榊燕繧貞・蜉帙＠縺ｦ縺上□縺輔＞', 'error');
+          showFlash('追加内容を入力してください', 'error');
           return;
         }
         targetDays.forEach((day) => {
@@ -1021,7 +1151,7 @@
 
       replaceCalendarEntries(nextEntries);
       closeCloudModal('cloud-bulk-modal');
-      showFlash(`蟇ｾ雎｡ ${targetDays.length}譌･ 繧呈峩譁ｰ縺励∪縺励◆縲ゆｿ晏ｭ倥・繧ｿ繝ｳ縺ｧ遒ｺ螳壹＠縺ｦ縺上□縺輔＞`, 'success');
+      showFlash(`対象 ${targetDays.length} 日を更新しました。保存ボタンで確定してください`, 'success');
     }
 
     function openBulkEditModal() {
@@ -1029,86 +1159,93 @@
       const month = currentMonth();
       if (!project || !month) return;
 
-      const modal = openCloudModal('cloud-bulk-modal', `遽・峇荳諡ｬ邱ｨ髮・/ ${formatMonthKey(currentMonthKey())}`);
+      const modal = openCloudModal('cloud-bulk-modal', `範囲一括編集 / ${formatMonthKey(currentMonthKey())}`);
       const body = modalBody(modal);
       const footer = modalFooter(modal);
       body.innerHTML = `
         <form class="cloud-bulk-form">
           <div class="cloud-bulk-grid">
             <label class="cloud-field">
-              <span>蟇ｾ雎｡遽・峇</span>
+              <span>対象範囲</span>
               <select name="bulk_scope" class="cloud-input">
-                <option value="all">蜈ｨ譌･</option>
-                <option value="range">譛滄俣謖・ｮ・/option>
-                <option value="weekdays">譖懈律謖・ｮ・/option>
-                <option value="weekends">蝨滓律</option>
+                <option value="all">全日</option>
+                <option value="range">期間指定</option>
+                <option value="weekdays">曜日指定</option>
+                <option value="weekends">土日</option>
               </select>
             </label>
             <label class="cloud-field" data-bulk-range>
-              <span>髢句ｧ区律</span>
+              <span>開始日</span>
               <input name="bulk_start_day" class="cloud-input" type="number" min="1" max="${monthDays(month)}" value="1">
             </label>
             <label class="cloud-field" data-bulk-range>
-              <span>邨ゆｺ・律</span>
+              <span>終了日</span>
               <input name="bulk_end_day" class="cloud-input" type="number" min="1" max="${monthDays(month)}" value="${monthDays(month)}">
             </label>
             <div class="cloud-bulk-weekdays" data-bulk-weekdays>
               ${buildBulkWeekdayChecks()}
             </div>
             <label class="cloud-field">
-              <span>謫堺ｽ・/span>
+              <span>操作</span>
               <select name="bulk_operation" class="cloud-input">
-                <option value="add">霑ｽ蜉</option>
-                <option value="replace">鄂ｮ謠・/option>
-                <option value="delete">蜑企勁</option>
-                <option value="copy">繧ｳ繝斐・</option>
+                <option value="add">追加</option>
+                <option value="replace">置換</option>
+                <option value="delete">削除</option>
+                <option value="copy">コピー</option>
               </select>
             </label>
             <div data-bulk-template class="cloud-bulk-template">
               <label class="cloud-field">
-                <span>蜷榊燕</span>
+                <span>入力名</span>
                 <input name="bulk_name" class="cloud-input" type="text">
+                <div class="cloud-inline-note cloud-hidden" data-bulk-selected-note></div>
+                <div class="cloud-bulk-candidate-panel cloud-hidden" data-bulk-candidate-panel></div>
               </label>
-              <label class="cloud-field">
-                <span>遉ｾ蜩｡逡ｪ蜿ｷ</span>
+              <label class="cloud-field${project.mode === 'person' ? ' cloud-hidden' : ''}" data-bulk-employee-field>
+                <span>社員番号</span>
                 <input name="bulk_employee_number" class="cloud-input" type="text">
               </label>
               <label class="cloud-field">
-                <span>繧ｪ繝励す繝ｧ繝ｳ</span>
+                <span>オプション</span>
                 <select name="bulk_option" class="cloud-input">
-                  <option value="">縺ｪ縺・/option>
+                  <option value="">なし</option>
                   ${buildBulkOptionSelect(project.mode)}
                 </select>
               </label>
               <label class="cloud-field cloud-field-wide">
-                <span>繧ｳ繝｡繝ｳ繝・/span>
+                <span>コメント</span>
                 <textarea name="bulk_comment" class="cloud-input" rows="3"></textarea>
               </label>
             </div>
             <div data-bulk-copy class="cloud-bulk-copy cloud-hidden">
               <label class="cloud-field">
-                <span>繧ｳ繝斐・蜈・律</span>
+                <span>コピー元の日</span>
                 <input name="bulk_copy_source_day" class="cloud-input" type="number" min="1" max="${monthDays(month)}" value="1">
               </label>
               <label class="cloud-field">
-                <span>蜿肴丐譁ｹ豕・/span>
+                <span>適用方法</span>
                 <select name="bulk_copy_mode" class="cloud-input">
-                  <option value="replace">鄂ｮ謠・/option>
-                  <option value="append">霑ｽ蜉</option>
+                  <option value="replace">置換</option>
+                  <option value="append">追加</option>
                 </select>
               </label>
             </div>
-            <div class="cloud-note-chip cloud-bulk-preview" data-bulk-preview>蟇ｾ雎｡遽・峇繧帝∈謚槭＠縺ｦ縺上□縺輔＞</div>
+            <div class="cloud-note-chip cloud-bulk-preview" data-bulk-preview>対象範囲を選択してください</div>
           </div>
         </form>
       `;
       footer.innerHTML = `
-        <button type="button" class="cloud-btn secondary" data-cloud-bulk-close>髢峨§繧・/button>
-        <button type="button" class="cloud-btn primary" data-cloud-bulk-apply>驕ｩ逕ｨ</button>
+        <button type="button" class="cloud-btn secondary" data-cloud-bulk-close>閉じる</button>
+        <button type="button" class="cloud-btn primary" data-cloud-bulk-apply>適用</button>
       `;
       const form = body.querySelector('form');
       const applyBtn = footer.querySelector('[data-cloud-bulk-apply]');
       footer.querySelector('[data-cloud-bulk-close]').addEventListener('click', () => closeCloudModal('cloud-bulk-modal'));
+      const bulkNameInput = form.querySelector('[name="bulk_name"]');
+      if (bulkNameInput) {
+        bulkNameInput.placeholder = project.mode === 'scene' ? '人物名' : '現場名';
+        bulkNameInput.addEventListener('input', () => scheduleBulkEmployeeSearch(form));
+      }
       form.querySelector('[name="bulk_scope"]').addEventListener('change', () => {
         updateBulkFieldVisibility(form);
         updateBulkPreview(form);
@@ -1120,6 +1257,16 @@
       form.querySelectorAll('[data-bulk-weekday], [name="bulk_start_day"], [name="bulk_end_day"], [name="bulk_copy_source_day"]').forEach((node) => {
         node.addEventListener('input', () => updateBulkPreview(form));
         node.addEventListener('change', () => updateBulkPreview(form));
+      });
+      form.addEventListener('click', (event) => {
+        const candidate = event.target.closest('.cloud-bulk-employee-candidate');
+        if (!candidate) return;
+        event.preventDefault();
+        event.stopPropagation();
+        applyBulkEmployeeCandidate(form, {
+          employee_name: candidate.getAttribute('data-employee-name') || '',
+          employee_number: candidate.getAttribute('data-employee-number') || ''
+        });
       });
       applyBtn.addEventListener('click', () => applyBulkEditFromModal(modal));
       updateBulkFieldVisibility(form);
@@ -1144,7 +1291,7 @@
 
       const calendars = state.leaveSync.calendars || [];
       if (!calendars.length) {
-        select.innerHTML = '<option value="">蜿肴丐蜈医′縺ゅｊ縺ｾ縺帙ｓ</option>';
+        select.innerHTML = '<option value="">営業所がありません</option>';
         select.disabled = true;
         button.disabled = true;
         return;
@@ -1187,7 +1334,7 @@
         return;
       }
       if (!calendarId) {
-        showFlash('蝟ｶ讌ｭ謇繧帝∈謚槭＠縺ｦ縺上□縺輔＞', 'error');
+        showFlash('営業所を選択してください', 'error');
         return;
       }
 
@@ -1198,9 +1345,9 @@
         }
       });
 
-      let message = `譛我ｼ代・繝阪・繧ｸ繝｣繝ｼ縺ｸ蜿肴丐縺励∪縺励◆: 逋ｻ骭ｲ ${result.created_total} 莉ｶ / 鄂ｮ謠帛炎髯､ ${result.removed_total} 莉ｶ`;
+      let message = `月次マネージャーへ反映しました: 登録 ${result.created_total} 件 / 置換削除 ${result.removed_total} 件`;
       if (result.skipped_total) {
-        message += ` / 繧ｹ繧ｭ繝・・ ${result.skipped_total} 莉ｶ`;
+        message += ` / スキップ ${result.skipped_total} 件`;
       }
       showFlash(message, result.skipped_total ? 'info' : 'success');
       if (project.id) {
@@ -1214,7 +1361,7 @@
       host.innerHTML = `
         <div class="container cloud-calendar-container">
           <div class="weekday-header">
-            <div>譛・/div><div>轣ｫ</div><div>豌ｴ</div><div>譛ｨ</div><div>驥・/div><div>蝨・/div><div>譌･</div>
+            <div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div><div>日</div>
           </div>
           <div id="shiftGrid" class="calendar-grid"></div>
         </div>
@@ -1270,7 +1417,7 @@
       }
       if ($('cloud-project-employee-number')) $('cloud-project-employee-number').value = project.employee_number || '';
       if ($('cloud-project-selected-note')) {
-        $('cloud-project-selected-note').textContent = project.employee_number ? `驕ｸ謚樔ｸｭ: ${project.employee_number}` : '';
+        $('cloud-project-selected-note').textContent = project.employee_number ? `社員番号: ${project.employee_number}` : '';
       }
       setTitleFieldMode('project');
       if ($('cloud-view-url')) $('cloud-view-url').value = project.urls.view_url || '';
@@ -1279,7 +1426,7 @@
       if ($('cloud-project-badges')) {
         $('cloud-project-badges').innerHTML = `
           <span class="cloud-badge">${modeLongLabel(project.mode)}</span>
-          <span class="cloud-badge">${(project.month_keys || []).length}縺区怦</span>
+          <span class="cloud-badge">${(project.month_keys || []).length}か月</span>
           <span class="cloud-badge">${escapeHtml(project.updated_at || '')}</span>
         `;
       }
@@ -1310,12 +1457,12 @@
       if ($('cloud-open-restore')) $('cloud-open-restore').classList.toggle('cloud-hidden', !month || PAGE.type !== 'owner');
 
       if ($('cloud-editor-title')) {
-        $('cloud-editor-title').textContent = month ? `${project.title} / ${formatMonthKey(currentMonthKey())}` : `${project.title} / 譛域悴菴懈・`;
+        $('cloud-editor-title').textContent = month ? `${project.title} / ${formatMonthKey(currentMonthKey())}` : `${project.title} / 未作成月`;
       }
 
       if ($('cloud-editor-meta')) {
         $('cloud-editor-meta').textContent = month
-          ? `${modeLongLabel(project.mode)} / 繝ｪ繝薙ず繝ｧ繝ｳ ${month.revision}`
+          ? `${modeLongLabel(project.mode)} / リビジョン ${month.revision}`
           : '最初の月を作成するとカレンダーを編集できます';
       }
 
@@ -1399,9 +1546,9 @@
       }
 
       if (!state.guestName) {
-        const entered = window.prompt('邱ｨ髮・・錐繧貞・蜉帙＠縺ｦ縺上□縺輔＞', '');
+        const entered = window.prompt('編集者名を入力してください', '');
         if (!entered || !entered.trim()) {
-          showFlash('邱ｨ髮・・錐繧貞・蜉帙＠縺ｦ縺上□縺輔＞', 'error');
+          showFlash('編集者名を入力してください', 'error');
           return false;
         }
         state.guestName = entered.trim();
@@ -1426,7 +1573,7 @@
       renderWorkspace(true);
       await loadProjects();
       await loadHistory(project.id);
-      showFlash('縺薙・譛医ｒ菫晏ｭ倥＠縺ｾ縺励◆', 'success');
+      showFlash('この月を保存しました', 'success');
     }
 
     async function saveMonthPublic() {
@@ -1440,7 +1587,7 @@
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       renderWorkspace(true);
-      showFlash('縺薙・譛医ｒ菫晏ｭ倥＠縺ｾ縺励◆', 'success');
+      showFlash('この月を保存しました', 'success');
     }
 
     async function createMonth(targetKey, ownerMode) {
@@ -1449,13 +1596,13 @@
 
       const parsed = parseMonthKey(targetKey);
       if (!parsed) {
-        showFlash('蟷ｴ譛医・ YYYY-MM 蠖｢蠑上〒蜈･蜉帙＠縺ｦ縺上□縺輔＞', 'error');
+        showFlash('年月を YYYY-MM 形式で入力してください', 'error');
         return;
       }
 
       const sourceMonthKey = currentMonthKey();
       const useCopy = sourceMonthKey
-        ? window.confirm(`${formatMonthKey(targetKey)} 繧堤樟蝨ｨ縺ｮ譛医°繧峨さ繝斐・縺励※菴懈・縺励∪縺吶°・歃nOK: 繧ｳ繝斐・ / 繧ｭ繝｣繝ｳ繧ｻ繝ｫ: 遨ｺ縺ｧ菴懈・`)
+        ? window.confirm(`${formatMonthKey(targetKey)} を現在の月からコピーして作成しますか？\nOK: コピー / キャンセル: 空で作成`)
         : false;
 
       const body = {
@@ -1488,7 +1635,7 @@
         renderWorkspace(true);
       }
 
-      showFlash(`${formatMonthKey(targetKey)} 繧剃ｽ懈・縺励∪縺励◆`, 'success');
+      showFlash(`${formatMonthKey(targetKey)} を作成しました`, 'success');
     }
 
     async function navigateMonth(delta, ownerMode) {
@@ -1509,7 +1656,7 @@
       }
 
       if (!ownerMode && PAGE.accessMode !== 'edit') {
-        showFlash('縺昴・譛医・縺ｾ縺菴懈・縺輔ｌ縺ｦ縺・∪縺帙ｓ', 'info');
+        showFlash('その月はまだ作成されていません', 'info');
         return;
       }
 
@@ -1528,7 +1675,7 @@
       await loadProjects();
       updateCurrentProjectLabel();
       switchTab('list');
-      showFlash('縺薙・譛医ｒ蜑企勁縺励∪縺励◆', 'success');
+      showFlash('この月を削除しました', 'success');
     }
 
     async function deleteProject() {
@@ -1546,7 +1693,7 @@
       renderWorkspace(true);
       updateCurrentProjectLabel();
       switchTab('list');
-      showFlash('繧ｷ繝輔ヨ蟶ｳ繧貞ｮ悟・蜑企勁縺励∪縺励◆', 'success');
+      showFlash('シフト表を削除しました', 'success');
     }
 
     async function regenerateUrls() {
@@ -1561,7 +1708,7 @@
 
       if ($('cloud-view-url')) $('cloud-view-url').value = data.urls.view_url || '';
       if ($('cloud-edit-url')) $('cloud-edit-url').value = data.urls.edit_url || '';
-      showFlash('URL繧貞・逋ｺ陦後＠縺ｾ縺励◆', 'success');
+      showFlash('URLを再発行しました', 'success');
     }
 
     async function copyText(text, message) {
@@ -1590,7 +1737,7 @@
       if (refreshProjects) {
         refreshProjects.addEventListener('click', async () => {
           await loadProjects();
-          showFlash('荳隕ｧ繧呈峩譁ｰ縺励∪縺励◆', 'info');
+          showFlash('一覧を更新しました', 'info');
         });
       }
 
@@ -1617,7 +1764,7 @@
           renderWorkspace(true);
           updateCurrentProjectLabel();
           switchTab('editor');
-          showFlash('繧ｷ繝輔ヨ蟶ｳ繧剃ｽ懈・縺励∪縺励◆', 'success');
+          showFlash('シフト表を作成しました', 'success');
         });
       }
 
@@ -1635,7 +1782,7 @@
           renderWorkspace(true);
           updateCurrentProjectLabel();
           switchTab('editor');
-          showFlash('CSV 繧貞叙繧願ｾｼ縺ｿ縺ｾ縺励◆', 'success');
+          showFlash('CSV を読み込みました', 'success');
         });
       }
 
@@ -1655,7 +1802,7 @@
           renderWorkspace(true);
           await loadProjects();
           await loadHistory(project.id);
-          showFlash('繧ｿ繧､繝医Ν繧呈峩譁ｰ縺励∪縺励◆', 'success');
+          showFlash('タイトルを更新しました', 'success');
         });
       }
 
@@ -1666,10 +1813,10 @@
       if (openEdit) openEdit.addEventListener('click', () => window.open($('cloud-edit-url').value, '_blank', 'noopener'));
 
       const copyView = $('cloud-copy-view-url');
-      if (copyView) copyView.addEventListener('click', () => copyText($('cloud-view-url').value, '髢ｲ隕ｧURL繧偵さ繝斐・縺励∪縺励◆').catch((error) => showFlash(error.message, 'error')));
+      if (copyView) copyView.addEventListener('click', () => copyText($('cloud-view-url').value, '閲覧URLをコピーしました').catch((error) => showFlash(error.message, 'error')));
 
       const copyEdit = $('cloud-copy-edit-url');
-      if (copyEdit) copyEdit.addEventListener('click', () => copyText($('cloud-edit-url').value, '邱ｨ髮・RL繧偵さ繝斐・縺励∪縺励◆').catch((error) => showFlash(error.message, 'error')));
+      if (copyEdit) copyEdit.addEventListener('click', () => copyText($('cloud-edit-url').value, '編集URLをコピーしました').catch((error) => showFlash(error.message, 'error')));
 
       const regenerate = $('cloud-regenerate-urls');
       if (regenerate) regenerate.addEventListener('click', () => regenerateUrls().catch((error) => showFlash(error.message, 'error')));

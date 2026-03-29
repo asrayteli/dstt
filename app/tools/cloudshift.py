@@ -154,7 +154,7 @@ def _project_lock(project_id: str):
             break
         except FileExistsError:
             if time.monotonic() - start > LOCK_TIMEOUT_SECONDS:
-                raise TimeoutError("cloudshift project lock timeout")
+                raise CloudShiftError("別の更新処理が進行中です。少し待ってから再度お試しください", 423)
             time.sleep(LOCK_POLL_SECONDS)
     try:
         os.write(fd, str(os.getpid()).encode("ascii", errors="ignore"))
@@ -506,8 +506,8 @@ def _describe_month_changes(previous_month: dict[str, Any], current_month: dict[
             changes.extend(_describe_day_changes(previous_entries, current_entries, day))
     if previous_month.get("required_capacity", 0) != current_month.get("required_capacity", 0):
         changes.append(
-            f"{current_month['year']}-{current_month['month']:02d} 縺ｮ蠢・ｦ∽ｺｺ謨ｰ繧・"
-            f"{previous_month.get('required_capacity', 0)} 縺九ｉ {current_month.get('required_capacity', 0)} 縺ｫ螟画峩"
+            f"{current_month['year']}-{current_month['month']:02d} の必要人数を "
+            f"{previous_month.get('required_capacity', 0)} から {current_month.get('required_capacity', 0)} に変更"
         )
     return changes
 
@@ -1381,10 +1381,12 @@ def _save_month_in_project(
         "entries_per_day": payload.get("entries_per_day") or {},
     }
     merged = _merge_month_payload(current_month, incoming_month, base_month)
+    changes = _describe_month_changes(current_month, merged)
+    if not changes:
+        return current_month
     snapshots = dict(current_month.get("revision_snapshots") or {})
     snapshots[str(int(current_month.get("revision", 1)))] = _snapshot_month_payload(current_month)
     merged["revision_snapshots"] = _trim_revision_snapshots(snapshots)
-    changes = _describe_month_changes(current_month, merged)
     project["months"][month_key] = merged
     _save_project(project)
     if changes:

@@ -602,6 +602,86 @@ def test_owner_can_restore_revision_and_snapshot_limit_stays_at_12(tmp_path):
     assert 14 in restored_numbers
 
 
+def test_noop_save_keeps_revision_and_snapshots_unchanged(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Noop Save",
+            "mode": "scene",
+            "year": "2026",
+            "month": "6",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    month = payload["month"]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/6",
+        json={
+            "required_capacity": month["required_capacity"],
+            "entries_per_day": month["entries_per_day"],
+            "base_month": month,
+        },
+    )
+
+    assert save_response.status_code == 200
+    saved_month = save_response.get_json()["month"]
+    assert saved_month["revision"] == 1
+
+    with client.application.app_context():
+        stored = module._load_json(module._project_path(project_id))
+
+    assert stored is not None
+    assert stored["months"]["2026-06"]["revision"] == 1
+    assert stored["months"]["2026-06"].get("revision_snapshots") == {}
+
+
+def test_lock_timeout_returns_json_error_instead_of_500(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Lock Timeout",
+            "mode": "scene",
+            "year": "2026",
+            "month": "7",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    month = payload["month"]
+
+    with client.application.app_context():
+        lock_path = module._locks_dir() / f"{project_id}.lock"
+        lock_path.write_text("busy", encoding="utf-8")
+
+    original_timeout = module.LOCK_TIMEOUT_SECONDS
+    module.LOCK_TIMEOUT_SECONDS = 0
+    try:
+        save_response = client.put(
+            f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/7",
+            json={
+                "required_capacity": month["required_capacity"],
+                "entries_per_day": month["entries_per_day"],
+                "base_month": month,
+            },
+        )
+    finally:
+        module.LOCK_TIMEOUT_SECONDS = original_timeout
+        with client.application.app_context():
+            if lock_path.exists():
+                lock_path.unlink()
+
+    assert save_response.status_code == 423
+    assert save_response.get_json()["error"] == "別の更新処理が進行中です。少し待ってから再度お試しください"
+
+
 def test_scene_month_summary_counts_people_options_and_comments(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
