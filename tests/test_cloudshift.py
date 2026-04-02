@@ -125,6 +125,49 @@ def test_owner_can_create_and_public_view_can_read(tmp_path):
     assert "edit_url" not in public_data["project"]["urls"]
 
 
+def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
+    script = (ROOT / "app" / "templates" / "_cloudshift_script.html").read_text(encoding="utf-8")
+    style = (ROOT / "app" / "templates" / "_cloudshift_style.html").read_text(encoding="utf-8")
+    ss_common_js = (ROOT / "app" / "static" / "shiftersync" / "js" / "ss_common.js").read_text(encoding="utf-8")
+    ss_common_css = (ROOT / "app" / "static" / "shiftersync" / "css" / "ss_common.css").read_text(encoding="utf-8")
+
+    assert 'value="picked"' in script
+    assert "日付を選んで選択" in script
+    assert "openBulkEditModal().catch" not in script
+    assert "openBulkEditModal();" in script
+    assert "cloud-assist-filter-grid" in script
+    assert "cloud-assist-switch" in script
+    assert "data-assist-edit-list" in script
+    assert 'data-assist-tab="details"' in script
+    assert "custom_points" in script
+    assert "day-assist-search" in script
+    assert "data-day-assist-record" in script
+    assert "buildAssistDetailsPanel" in script
+    assert "openAssistDayActionModal" in script
+    assert "preferred_weekdays" in script
+    assert "blocked_weekdays" in script
+    assert "data-assist-edit-profile" in script
+    assert "option_aptitude" in script
+    assert "data-assist-detail-toggle" in script
+    assert "detailSections" in script
+    assert "オプションなし" in script
+    assert "曜日なし" in script
+    assert "function bindAssistEditListEvents" in script
+    assert "bindAssistEditListEvents(modal);" in script
+    assert ".cloud-assist-filter-grid" in style
+    assert ".cloud-assist-switch" in style
+    assert ".cloud-assist-detail-grid" in style
+    assert ".cloud-assist-detail-accordion" in style
+    assert ".cloud-assist-weekday-picker" in style
+    assert '.cloud-assist-panel[data-assist-panel="details"] .cloud-assist-section' in style
+    assert '.cloud-assist-panel[data-assist-panel="edit"] .cloud-assist-stack' in style
+    assert "@media (max-height: 900px)" in style
+    assert "[data-assist-edit-list]" in style
+    assert "day-assist-trigger" in ss_common_js
+    assert "getSelectedOptionsForDay" in ss_common_js
+    assert ".assist-btn" in ss_common_css
+
+
 def test_public_edit_save_writes_history_and_exports_comment(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
@@ -203,6 +246,701 @@ def test_public_edit_save_writes_history_and_exports_comment(tmp_path):
     assert calendar_png_export.status_code == 200
     assert calendar_png_export.content_type.startswith("image/png")
     assert len(calendar_png_export.data) > 100
+
+
+def test_scene_assist_owner_can_manage_records_rules_and_search_prioritizes_dedicated(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Scene",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/rules",
+        json={
+            "weekday": 1,
+            "shift_key": "A",
+            "notes": "火曜午前ルール",
+            "assignments": [
+                {"candidate_name": "Dedicated User", "employee_number": "1001", "role_type": "dedicated", "priority": 1},
+                {"candidate_name": "Backup User", "employee_number": "1002", "role_type": "backup", "priority": 1},
+                {"candidate_name": "Normal User", "employee_number": "1003", "role_type": "normal", "priority": 1},
+            ],
+        },
+    )
+    assert rule_response.status_code == 200
+    assist_after_rule = rule_response.get_json()["assist"]
+    assert len(assist_after_rule["rules"]) == 1
+
+    record_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/records",
+        json={
+            "date": "2026-03-31",
+            "candidate_name": "Backup User",
+            "employee_number": "1002",
+            "shift_key": "A",
+            "role_type": "backup",
+            "notes": "前回対応",
+        },
+    )
+    assert record_response.status_code == 200
+
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
+        json={
+            "target_date": "2026-04-07",
+            "shift_key": "A",
+        },
+    )
+    assert search_response.status_code == 200
+    search_payload = search_response.get_json()
+    results = search_payload["results"]
+    assert [item["name"] for item in results[:3]] == ["Dedicated User", "Backup User", "Normal User"]
+    assert results[0]["score"] > results[1]["score"] > results[2]["score"]
+    assert search_payload["score_reference"]["theoretical_max"] is None
+    assert search_payload["score_reference"]["single_rule_max"] == 1940
+    assert search_payload["score_reference"]["single_record_max"] == 330
+    assert results[0]["breakdown"]
+    assert any(part["category"] == "rule" for part in results[0]["breakdown"])
+
+
+def test_scene_assist_accepts_no_shift_and_weekday_only_matches_and_custom_points(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Expanded",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/rules",
+        json={
+            "weekday": 1,
+            "shift_key": "",
+            "notes": "曜日だけで使う",
+            "assignments": [
+                {
+                    "candidate_name": "Weekday Dedicated",
+                    "employee_number": "5101",
+                    "role_type": "dedicated",
+                    "priority": 1,
+                    "custom_points": 55,
+                }
+            ],
+        },
+    )
+    assert rule_response.status_code == 200
+    saved_rule = rule_response.get_json()["rule"]
+    assert saved_rule["shift_key"] == ""
+    assert saved_rule["shift_label"] == "オプションなし"
+    assert saved_rule["assignments"][0]["custom_points"] == 55
+
+    record_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/records",
+        json={
+            "date": "2026-03-31",
+            "candidate_name": "Weekday Dedicated",
+            "employee_number": "5101",
+            "shift_key": "",
+            "role_type": "dedicated",
+        },
+    )
+    assert record_response.status_code == 200
+    assert record_response.get_json()["record"]["shift_label"] == "オプションなし"
+
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
+        json={
+            "target_date": "2026-04-07",
+            "shift_key": "A",
+        },
+    )
+    assert search_response.status_code == 200
+    payload = search_response.get_json()
+    assert payload["query"]["shift_key"] == "A"
+    assert payload["score_reference"]["single_rule_weekday_max"] == 1320
+    assert payload["score_reference"]["single_record_weekday_max"] == 165
+    assert payload["results"][0]["name"] == "Weekday Dedicated"
+    assert payload["results"][0]["score"] == 540
+    assert any(part["match_scope"] == "weekday" for part in payload["results"][0]["breakdown"])
+    assert any(int(part.get("custom_points", 0) or 0) == 55 for part in payload["results"][0]["breakdown"])
+
+
+def test_scene_assist_rule_accepts_no_weekday_and_search_uses_weekday_scope(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist No Weekday Rule",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/rules",
+        json={
+            "weekday": "",
+            "shift_key": "",
+            "assignments": [
+                {
+                    "candidate_name": "General Dedicated",
+                    "employee_number": "5301",
+                    "role_type": "dedicated",
+                    "priority": 1,
+                }
+            ],
+        },
+    )
+    assert rule_response.status_code == 200
+    saved_rule = rule_response.get_json()["rule"]
+    assert saved_rule["weekday"] is None
+    assert saved_rule["weekday_label"] == "曜日なし"
+    assert saved_rule["shift_label"] == "オプションなし"
+
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
+        json={
+            "target_date": "2026-04-07",
+            "shift_key": "A",
+        },
+    )
+    assert search_response.status_code == 200
+    payload = search_response.get_json()
+    assert payload["results"][0]["name"] == "General Dedicated"
+    assert payload["results"][0]["score"] == 320
+    assert payload["results"][0]["breakdown"][0]["match_scope"] == "weekday"
+    assert payload["results"][0]["breakdown"][0]["match_label"] == "曜日なし"
+
+
+def test_scene_assist_search_allows_no_shift_query(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist No Shift Search",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    create_record = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/records",
+        json={
+            "date": "2026-03-31",
+            "candidate_name": "No Shift User",
+            "employee_number": "5201",
+            "shift_key": "",
+            "role_type": "normal",
+        },
+    )
+    assert create_record.status_code == 200
+
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
+        json={
+            "target_date": "2026-04-07",
+            "shift_key": "",
+        },
+    )
+    assert search_response.status_code == 200
+    payload = search_response.get_json()
+    assert payload["query"]["shift_label"] == "オプションなし"
+    assert payload["results"][0]["name"] == "No Shift User"
+    assert payload["results"][0]["breakdown"][0]["match_scope"] == "exact"
+
+
+def test_public_edit_assist_can_edit_records_but_not_rules(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Edit",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    edit_token = _token_from_url(payload["project"]["urls"]["edit_url"])
+
+    module.current_user = _guest()
+    create_record = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/edit/{edit_token}/assist/records",
+        json={
+            "editor_name": "Guest Helper",
+            "date": "2026-04-01",
+            "candidate_name": "Guest Person",
+            "employee_number": "2001",
+            "shift_key": "P",
+            "role_type": "normal",
+        },
+    )
+    assert create_record.status_code == 200
+    record_id = create_record.get_json()["record"]["id"]
+
+    update_record = client.put(
+        f"/tools/shiftersync/cloudshift/api/public/edit/{edit_token}/assist/records/{record_id}",
+        json={
+            "editor_name": "Guest Helper",
+            "date": "2026-04-08",
+            "candidate_name": "Guest Person",
+            "employee_number": "2001",
+            "shift_key": "P",
+            "role_type": "backup",
+            "notes": "差し替え",
+        },
+    )
+    assert update_record.status_code == 200
+    assert update_record.get_json()["record"]["role_type"] == "backup"
+
+    forbidden_rule = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/edit/{edit_token}/assist/rules",
+        json={
+            "editor_name": "Guest Helper",
+            "weekday": 1,
+            "shift_key": "A",
+            "assignments": [
+                {"candidate_name": "Guest Person", "employee_number": "2001", "role_type": "dedicated", "priority": 1}
+            ],
+        },
+    )
+    assert forbidden_rule.status_code == 403
+
+
+def test_assist_endpoints_are_scene_only(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Person",
+            "mode": "person",
+            "employee_number": "3001",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+
+    response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
+        json={"target_date": "2026-04-07", "shift_key": "A"},
+    )
+    assert response.status_code == 400
+    assert "scene" in response.get_json()["error"]
+
+
+def test_scene_assist_search_uses_only_past_records(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Timeline",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    past_record = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/records",
+        json={
+            "date": "2026-03-31",
+            "candidate_name": "Past User",
+            "employee_number": "4101",
+            "shift_key": "A",
+            "role_type": "normal",
+        },
+    )
+    assert past_record.status_code == 200
+
+    future_record = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/records",
+        json={
+            "date": "2026-04-14",
+            "candidate_name": "Future User",
+            "employee_number": "4102",
+            "shift_key": "A",
+            "role_type": "dedicated",
+        },
+    )
+    assert future_record.status_code == 200
+
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
+        json={
+            "target_date": "2026-04-07",
+            "shift_key": "A",
+        },
+    )
+    assert search_response.status_code == 200
+
+    results = search_response.get_json()["results"]
+    assert [item["name"] for item in results] == ["Past User"]
+    assert results[0]["matched_record_count"] == 1
+
+
+def test_scene_assist_rule_rejects_reversed_effective_period(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Rule Period",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/rules",
+        json={
+            "weekday": 1,
+            "shift_key": "A",
+            "effective_from": "2026-04-30",
+            "effective_to": "2026-04-01",
+            "assignments": [
+                {
+                    "candidate_name": "Period User",
+                    "employee_number": "4201",
+                    "role_type": "dedicated",
+                    "priority": 1,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 400
+    assert "適用期間" in response.get_json()["error"]
+
+
+def test_scene_assist_profile_preferred_weekday_adds_bonus(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Preferred Weekday",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/rules",
+        json={
+            "weekday": 1,
+            "shift_key": "A",
+            "assignments": [
+                {
+                    "candidate_name": "Preferred User",
+                    "employee_number": "6101",
+                    "role_type": "dedicated",
+                    "priority": 1,
+                }
+            ],
+        },
+    )
+    assert rule_response.status_code == 200
+    profile_id = rule_response.get_json()["assist"]["profiles"][0]["id"]
+
+    profile_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/profiles/{profile_id}",
+        json={
+            "active": True,
+            "preferred_weekdays": [1],
+            "blocked_weekdays": [],
+        },
+    )
+    assert profile_response.status_code == 200
+
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
+        json={
+            "target_date": "2026-04-07",
+            "shift_key": "A",
+        },
+    )
+    assert search_response.status_code == 200
+    payload = search_response.get_json()
+    result = payload["results"][0]
+    assert result["name"] == "Preferred User"
+    assert result["score"] == 970
+    assert payload["score_reference"]["preferred_weekday_bonus"] == 30
+    assert any(part["category"] == "profile" and part["points"] == 30 for part in result["breakdown"])
+
+
+def test_scene_assist_profile_blocked_weekday_excludes_candidate(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Blocked Weekday",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/rules",
+        json={
+            "weekday": 1,
+            "shift_key": "A",
+            "assignments": [
+                {
+                    "candidate_name": "Blocked User",
+                    "employee_number": "6201",
+                    "role_type": "dedicated",
+                    "priority": 1,
+                },
+                {
+                    "candidate_name": "Allowed User",
+                    "employee_number": "6202",
+                    "role_type": "backup",
+                    "priority": 1,
+                },
+            ],
+        },
+    )
+    assert rule_response.status_code == 200
+    profiles = {item["name"]: item for item in rule_response.get_json()["assist"]["profiles"]}
+
+    profile_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/profiles/{profiles['Blocked User']['id']}",
+        json={
+            "active": True,
+            "preferred_weekdays": [],
+            "blocked_weekdays": [1],
+        },
+    )
+    assert profile_response.status_code == 200
+
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
+        json={
+            "target_date": "2026-04-07",
+            "shift_key": "A",
+        },
+    )
+    assert search_response.status_code == 200
+    payload = search_response.get_json()
+    assert payload["score_reference"]["blocked_weekday_policy"] == "exclude"
+    assert [item["name"] for item in payload["results"]] == ["Allowed User"]
+
+
+def test_public_edit_assist_profile_updates_are_forbidden(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Profile Auth",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    edit_token = _token_from_url(payload["project"]["urls"]["edit_url"])
+
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/rules",
+        json={
+            "weekday": 1,
+            "shift_key": "A",
+            "assignments": [
+                {
+                    "candidate_name": "Protected User",
+                    "employee_number": "6301",
+                    "role_type": "dedicated",
+                    "priority": 1,
+                }
+            ],
+        },
+    )
+    profile_id = rule_response.get_json()["assist"]["profiles"][0]["id"]
+
+    module.current_user = _guest()
+    response = client.put(
+        f"/tools/shiftersync/cloudshift/api/public/edit/{edit_token}/assist/profiles/{profile_id}",
+        json={
+            "editor_name": "Guest Helper",
+            "preferred_weekdays": [1],
+            "blocked_weekdays": [],
+        },
+    )
+    assert response.status_code == 403
+
+
+def test_scene_assist_option_aptitude_learning_adds_bonus_for_five_exact_vehicle_records(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Aptitude Bonus",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/rules",
+        json={
+            "weekday": 1,
+            "shift_key": "O",
+            "assignments": [
+                {
+                    "candidate_name": "Vehicle Expert",
+                    "employee_number": "6401",
+                    "role_type": "dedicated",
+                    "priority": 1,
+                }
+            ],
+        },
+    )
+    assert rule_response.status_code == 200
+
+    for date_text in ["2025-12-01", "2025-12-03", "2025-12-04", "2025-12-05", "2025-12-06"]:
+        record_response = client.post(
+            f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/records",
+            json={
+                "date": date_text,
+                "candidate_name": "Vehicle Expert",
+                "employee_number": "6401",
+                "shift_key": "O",
+                "role_type": "normal",
+            },
+        )
+        assert record_response.status_code == 200
+
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
+        json={
+            "target_date": "2026-04-07",
+            "shift_key": "O",
+        },
+    )
+    assert search_response.status_code == 200
+    payload = search_response.get_json()
+    result = payload["results"][0]
+    assert result["name"] == "Vehicle Expert"
+    assert result["score"] == 965
+    assert payload["score_reference"]["option_aptitude"]["max_bonus"] == 25
+    assert any(
+        part["category"] == "aptitude" and part["points"] == 25 and part["record_count"] == 5
+        for part in result["breakdown"]
+    )
+
+
+def test_scene_assist_option_aptitude_learning_penalizes_missing_exact_timeslot_with_same_category_history(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Aptitude Penalty",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/rules",
+        json={
+            "weekday": 1,
+            "shift_key": "A",
+            "assignments": [
+                {
+                    "candidate_name": "Morning Unknown",
+                    "employee_number": "6501",
+                    "role_type": "dedicated",
+                    "priority": 1,
+                }
+            ],
+        },
+    )
+    assert rule_response.status_code == 200
+
+    for date_text in ["2025-12-25", "2025-12-26"]:
+        record_response = client.post(
+            f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/records",
+            json={
+                "date": date_text,
+                "candidate_name": "Morning Unknown",
+                "employee_number": "6501",
+                "shift_key": "P",
+                "role_type": "normal",
+            },
+        )
+        assert record_response.status_code == 200
+
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
+        json={
+            "target_date": "2026-04-07",
+            "shift_key": "A",
+        },
+    )
+    assert search_response.status_code == 200
+    payload = search_response.get_json()
+    result = payload["results"][0]
+    assert result["name"] == "Morning Unknown"
+    assert result["score"] == 930
+    assert payload["score_reference"]["option_aptitude"]["min_penalty"] == -10
+    assert any(
+        part["category"] == "aptitude" and part["points"] == -10 and part["record_count"] == 0
+        for part in result["breakdown"]
+    )
 
 
 def test_owner_can_delete_last_month_and_keep_project(tmp_path):

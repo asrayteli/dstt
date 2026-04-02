@@ -196,6 +196,7 @@ h1, h2, h3 {
 .btn-danger,
 .add-entry-btn,
 .copy-btn,
+.assist-btn,
 .detail-btn {
     appearance: none;
     border: 1px solid transparent;
@@ -220,6 +221,7 @@ h1, h2, h3 {
 
 .btn-secondary,
 .copy-btn,
+.assist-btn,
 .detail-btn {
     background: #f8fbff;
     border-color: var(--ss-line);
@@ -228,6 +230,7 @@ h1, h2, h3 {
 
 .btn-secondary:hover,
 .copy-btn:hover,
+.assist-btn:hover,
 .detail-btn:hover {
     background: var(--ss-accent-soft);
 }
@@ -474,17 +477,27 @@ h1, h2, h3 {
 
 .add-entry-btn,
 .copy-btn,
+.assist-btn,
 .detail-btn {
     padding: 7px 8px;
     font-size: 11px;
 }
 
+.assist-btn,
 .detail-btn,
 .copy-btn {
     white-space: nowrap;
 }
 
 .day-box-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.ss-detail-assist-action {
+    margin-top: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--ss-line);
     display: flex;
     justify-content: flex-end;
 }
@@ -757,6 +770,7 @@ h1, h2, h3 {
     }
 
     .option-select-btn,
+    .assist-btn,
     .detail-btn,
     .copy-btn,
     .add-entry-btn {

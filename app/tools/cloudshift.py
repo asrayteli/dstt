@@ -9,7 +9,7 @@ import time
 from calendar import monthrange
 from contextlib import contextmanager
 from copy import copy
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +62,31 @@ MAX_REVISION_SNAPSHOTS = 12
 OPTION_LABELS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS}
 SHIFT_TIME_OPTION_KEYS = {"A", "P", "E", "L"}
 VEHICLE_OPTION_KEYS = {"M", "C", "O", "W", "V", "N1", "N2", "N3", "N4", "N5"}
+ASSIST_ROLE_LABELS = {
+    "normal": "通常",
+    "dedicated": "専従者",
+    "backup": "代務者",
+}
+ASSIST_ROLE_SCORES = {
+    "normal": 100,
+    "dedicated": 300,
+    "backup": 200,
+}
+ASSIST_MATCH_SCOPE_LABELS = {
+    "exact": "曜日・オプション一致",
+    "weekday": "曜日一致",
+    "other_weekday": "曜日不一致（実績のみ）",
+}
+ASSIST_WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"]
+ASSIST_WEEKDAYLESS_LABEL = "曜日なし"
+ASSIST_OPTIONLESS_LABEL = "オプションなし"
+ASSIST_CUSTOM_POINTS_MIN = -1000
+ASSIST_CUSTOM_POINTS_MAX = 1000
+ASSIST_PREFERRED_WEEKDAY_BONUS = 30
+ASSIST_OPTION_APTITUDE_MAX_BONUS = 25
+ASSIST_OPTION_APTITUDE_MID_BONUS = 15
+ASSIST_OPTION_APTITUDE_MIN_BONUS = 5
+ASSIST_OPTION_APTITUDE_ZERO_PENALTY = -10
 
 
 class CloudShiftError(Exception):
@@ -988,6 +1013,1103 @@ def _editor_identity(editor_name: str | None = None) -> tuple[str, str]:
     return label[:80], "guest"
 
 
+def _assist_id(prefix: str) -> str:
+    return f"{prefix}_{secrets.token_hex(8)}"
+
+
+def _assist_weekday_label(index: int) -> str:
+    if 0 <= index < len(ASSIST_WEEKDAY_LABELS):
+        return ASSIST_WEEKDAY_LABELS[index]
+    return str(index)
+
+
+def _assist_rule_weekday_value(value: Any) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return _assist_weekday_index(text)
+
+
+def _assist_rule_weekday_label(value: Any) -> str:
+    if value in (None, ""):
+        return ASSIST_WEEKDAYLESS_LABEL
+    try:
+        return _assist_weekday_label(int(value))
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _assist_date_parts(value: Any) -> tuple[str, date]:
+    text = str(value or "").strip()
+    if not text:
+        raise CloudShiftError("日付は必須です", 400)
+    try:
+        parsed = datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise CloudShiftError("日付は YYYY-MM-DD 形式で入力してください", 400) from exc
+    return parsed.isoformat(), parsed
+
+
+def _assist_weekday_index(value: Any) -> int:
+    try:
+        weekday = int(value)
+    except (TypeError, ValueError) as exc:
+        raise CloudShiftError("曜日が不正です", 400) from exc
+    if weekday < 0 or weekday > 6:
+        raise CloudShiftError("曜日が不正です", 400)
+    return weekday
+
+
+def _assist_short_text(value: Any, label: str, *, required: bool = False, limit: int = 80) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    if required and not text:
+        raise CloudShiftError(f"{label}は必須です", 400)
+    return text[:limit]
+
+
+def _assist_long_text(value: Any, *, limit: int = 500) -> str:
+    return str(value or "").replace("\r", "").strip()[:limit]
+
+
+def _assist_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _assist_shift_key(value: Any, *, required: bool = False) -> str:
+    key = str(value or "").strip().upper()
+    if not key:
+        if required:
+            raise CloudShiftError("オプションは必須です", 400)
+        return ""
+    if key not in OPTION_LABELS:
+        raise CloudShiftError("オプション種別が不正です", 400)
+    return key
+
+
+def _assist_shift_label(value: Any) -> str:
+    key = str(value or "").strip().upper()
+    return OPTION_LABELS.get(key, key) if key else ASSIST_OPTIONLESS_LABEL
+
+
+def _assist_role_type(value: Any) -> str:
+    role_type = str(value or "").strip().lower()
+    if role_type not in ASSIST_ROLE_LABELS:
+        raise CloudShiftError("役割種別が不正です", 400)
+    return role_type
+
+
+def _assist_custom_points(value: Any) -> int:
+    if value in (None, ""):
+        return 0
+    try:
+        points = int(value)
+    except (TypeError, ValueError) as exc:
+        raise CloudShiftError("独自点数が不正です", 400) from exc
+    if points < ASSIST_CUSTOM_POINTS_MIN or points > ASSIST_CUSTOM_POINTS_MAX:
+        raise CloudShiftError(
+            f"独自点数は {ASSIST_CUSTOM_POINTS_MIN} から {ASSIST_CUSTOM_POINTS_MAX} の範囲で入力してください",
+            400,
+        )
+    return points
+
+
+def _assist_priority(value: Any) -> int:
+    try:
+        priority = int(value)
+    except (TypeError, ValueError) as exc:
+        raise CloudShiftError("優先順位が不正です", 400) from exc
+    if priority < 1 or priority > 99:
+        raise CloudShiftError("優先順位は 1 から 99 の範囲で入力してください", 400)
+    return priority
+
+
+def _assist_period_value(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return _assist_date_parts(text)[0]
+
+
+def _assist_weekday_values(value: Any, label: str) -> list[int]:
+    if value in (None, ""):
+        return []
+    items = value if isinstance(value, list) else [value]
+    weekdays: list[int] = []
+    for item in items:
+        weekday = _assist_weekday_index(item)
+        if weekday not in weekdays:
+            weekdays.append(weekday)
+    return sorted(weekdays)
+
+
+def _assist_candidate_lookup_key(candidate_id: Any, employee_number: Any, candidate_name: Any) -> str:
+    normalized_id = str(candidate_id or "").strip()
+    if normalized_id:
+        return normalized_id
+    return f"{str(employee_number or '').strip()}:{str(candidate_name or '').strip()}"
+
+
+def _assist_option_aptitude_category(shift_key: Any) -> str | None:
+    key = str(shift_key or "").strip().upper()
+    if key in SHIFT_TIME_OPTION_KEYS:
+        return "time"
+    if key in VEHICLE_OPTION_KEYS:
+        return "vehicle"
+    return None
+
+
+def _assist_option_aptitude_label(category: str | None) -> str:
+    if category == "time":
+        return "時間帯適性"
+    if category == "vehicle":
+        return "車両適性"
+    return "オプション適性"
+
+
+def _assist_option_aptitude_points(exact_count: int, category_total: int) -> int:
+    if exact_count >= 5:
+        return ASSIST_OPTION_APTITUDE_MAX_BONUS
+    if exact_count >= 3:
+        return ASSIST_OPTION_APTITUDE_MID_BONUS
+    if exact_count >= 1:
+        return ASSIST_OPTION_APTITUDE_MIN_BONUS
+    if category_total > 0:
+        return ASSIST_OPTION_APTITUDE_ZERO_PENALTY
+    return 0
+
+
+def _assist_option_aptitude_bucket_label(exact_count: int, category_total: int) -> str:
+    if exact_count >= 5:
+        return "5件以上"
+    if exact_count >= 3:
+        return "3-4件"
+    if exact_count >= 1:
+        return "1-2件"
+    if category_total > 0:
+        return "同カテゴリ実績あり / 対象0件"
+    return "学習データなし"
+
+
+def _ensure_scene_project(project: dict[str, Any]) -> None:
+    if project.get("mode") != "scene":
+        raise CloudShiftError("アシスト機能は scene モード専用です", 400)
+
+
+def _ensure_assist(project: dict[str, Any]) -> dict[str, Any]:
+    assist = project.get("assist")
+    if not isinstance(assist, dict):
+        assist = {}
+    payload = {
+        "version": int(assist.get("version", 1) or 1),
+        "profiles": [item for item in (assist.get("profiles") or []) if isinstance(item, dict)],
+        "records": [item for item in (assist.get("records") or []) if isinstance(item, dict)],
+        "rules": [item for item in (assist.get("rules") or []) if isinstance(item, dict)],
+    }
+    project["assist"] = payload
+    return payload
+
+
+def _assist_profile_payload(profile: dict[str, Any]) -> dict[str, Any]:
+    preferred_weekdays = _assist_weekday_values(profile.get("preferred_weekdays"), "希望曜日")
+    blocked_weekdays = _assist_weekday_values(profile.get("blocked_weekdays"), "NG曜日")
+    return {
+        "id": str(profile.get("id") or ""),
+        "name": str(profile.get("name") or ""),
+        "employee_number": str(profile.get("employee_number") or ""),
+        "aliases": [str(item).strip() for item in (profile.get("aliases") or []) if str(item).strip()],
+        "active": bool(profile.get("active", True)),
+        "notes": str(profile.get("notes") or ""),
+        "preferred_weekdays": preferred_weekdays,
+        "preferred_weekday_labels": [_assist_weekday_label(item) for item in preferred_weekdays],
+        "blocked_weekdays": blocked_weekdays,
+        "blocked_weekday_labels": [_assist_weekday_label(item) for item in blocked_weekdays],
+        "created_at": profile.get("created_at"),
+        "updated_at": profile.get("updated_at"),
+    }
+
+
+def _assist_record_payload(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(record.get("id") or ""),
+        "date": str(record.get("date") or ""),
+        "weekday": int(record.get("weekday", 0) or 0),
+        "weekday_label": _assist_weekday_label(int(record.get("weekday", 0) or 0)),
+        "candidate_id": str(record.get("candidate_id") or ""),
+        "candidate_name": str(record.get("candidate_name") or ""),
+        "employee_number": str(record.get("employee_number") or ""),
+        "shift_key": str(record.get("shift_key") or ""),
+        "shift_label": _assist_shift_label(record.get("shift_key")),
+        "role_type": str(record.get("role_type") or "normal"),
+        "role_label": ASSIST_ROLE_LABELS.get(str(record.get("role_type") or "normal"), "通常"),
+        "notes": str(record.get("notes") or ""),
+        "created_at": record.get("created_at"),
+        "updated_at": record.get("updated_at"),
+        "created_by": record.get("created_by"),
+        "updated_by": record.get("updated_by"),
+    }
+
+
+def _assist_rule_payload(rule: dict[str, Any]) -> dict[str, Any]:
+    weekday = _assist_rule_weekday_value(rule.get("weekday"))
+    assignments = []
+    for item in (rule.get("assignments") or []):
+        if not isinstance(item, dict):
+            continue
+        role_type = str(item.get("role_type") or "normal")
+        assignments.append(
+            {
+                "candidate_id": str(item.get("candidate_id") or ""),
+                "candidate_name": str(item.get("candidate_name") or ""),
+                "employee_number": str(item.get("employee_number") or ""),
+                "role_type": role_type,
+                "role_label": ASSIST_ROLE_LABELS.get(role_type, "通常"),
+                "priority": int(item.get("priority", 1) or 1),
+                "custom_points": int(item.get("custom_points", 0) or 0),
+            }
+        )
+    assignments.sort(
+        key=lambda item: (
+            -_assist_rule_points(item["role_type"], item["priority"], int(item.get("custom_points", 0) or 0)),
+            item["priority"],
+            item["candidate_name"],
+        )
+    )
+    return {
+        "id": str(rule.get("id") or ""),
+        "weekday": weekday,
+        "weekday_label": _assist_rule_weekday_label(weekday),
+        "shift_key": str(rule.get("shift_key") or ""),
+        "shift_label": _assist_shift_label(rule.get("shift_key")),
+        "enabled": bool(rule.get("enabled", True)),
+        "notes": str(rule.get("notes") or ""),
+        "effective_from": rule.get("effective_from"),
+        "effective_to": rule.get("effective_to"),
+        "assignments": assignments,
+        "created_at": rule.get("created_at"),
+        "updated_at": rule.get("updated_at"),
+        "created_by": rule.get("created_by"),
+        "updated_by": rule.get("updated_by"),
+    }
+
+
+def _assist_bootstrap_payload(project: dict[str, Any], *, can_edit_records: bool, can_edit_rules: bool) -> dict[str, Any]:
+    assist = _ensure_assist(project)
+    profiles = [_assist_profile_payload(item) for item in assist["profiles"]]
+    records = [_assist_record_payload(item) for item in assist["records"]]
+    rules = [_assist_rule_payload(item) for item in assist["rules"]]
+    profiles.sort(key=lambda item: (not item["active"], item["name"], item["employee_number"]))
+    records.sort(key=lambda item: (item["date"], item["shift_key"], item["candidate_name"]), reverse=True)
+    rules.sort(
+        key=lambda item: (
+            item["weekday"] is None,
+            item["weekday"] if item["weekday"] is not None else 99,
+            item["shift_key"],
+            item["id"],
+        )
+    )
+    return {
+        "success": True,
+        "assist": {
+            "version": assist["version"],
+            "profiles": profiles,
+            "records": records,
+            "rules": rules,
+        },
+        "permissions": {
+            "can_edit_records": bool(can_edit_records),
+            "can_edit_rules": bool(can_edit_rules),
+            "can_edit_profiles": bool(can_edit_rules),
+        },
+    }
+
+
+def _find_assist_profile(
+    assist: dict[str, Any],
+    *,
+    candidate_id: str = "",
+    employee_number: str = "",
+    candidate_name: str = "",
+) -> dict[str, Any] | None:
+    profiles = assist.get("profiles") or []
+    normalized_id = str(candidate_id or "").strip()
+    normalized_number = str(employee_number or "").strip()
+    normalized_name = str(candidate_name or "").strip()
+    if normalized_id:
+        for profile in profiles:
+            if str(profile.get("id") or "") == normalized_id:
+                return profile
+    if normalized_number:
+        for profile in profiles:
+            if str(profile.get("employee_number") or "") == normalized_number:
+                return profile
+    if normalized_name:
+        for profile in profiles:
+            if str(profile.get("name") or "") == normalized_name and not str(profile.get("employee_number") or ""):
+                return profile
+    return None
+
+
+def _upsert_assist_profile(
+    assist: dict[str, Any],
+    *,
+    candidate_id: str = "",
+    candidate_name: str,
+    employee_number: str = "",
+) -> dict[str, Any]:
+    name = _assist_short_text(candidate_name, "候補者名", required=True, limit=80)
+    number = _sanitize_employee_number(employee_number)
+    profile = _find_assist_profile(
+        assist,
+        candidate_id=candidate_id,
+        employee_number=number,
+        candidate_name=name,
+    )
+    timestamp = _utcnow_iso()
+    if profile:
+        profile["name"] = name
+        if number:
+            profile["employee_number"] = number
+        profile["updated_at"] = timestamp
+        profile["active"] = True
+        profile["preferred_weekdays"] = _assist_weekday_values(profile.get("preferred_weekdays"), "希望曜日")
+        profile["blocked_weekdays"] = _assist_weekday_values(profile.get("blocked_weekdays"), "NG曜日")
+        return profile
+    created = {
+        "id": _assist_id("cand"),
+        "name": name,
+        "employee_number": number,
+        "aliases": [],
+        "active": True,
+        "notes": "",
+        "preferred_weekdays": [],
+        "blocked_weekdays": [],
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    assist["profiles"].append(created)
+    return created
+
+
+def _assist_profile_history_label(profile: dict[str, Any]) -> str:
+    label = str(profile.get("name") or "-")
+    employee_number = str(profile.get("employee_number") or "").strip()
+    if employee_number:
+        label = f"{label} / {employee_number}"
+    return label
+
+
+def _assist_profile_mutation(
+    project: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    actor_name: str,
+    actor_type: str,
+    profile_id: str,
+) -> dict[str, Any]:
+    _ensure_scene_project(project)
+    assist = _ensure_assist(project)
+    existing = next((item for item in assist["profiles"] if str(item.get("id") or "") == profile_id), None)
+    if not existing:
+        raise CloudShiftError("対象の候補者プロファイルが見つかりません", 404)
+    preferred_weekdays = _assist_weekday_values(payload.get("preferred_weekdays"), "希望曜日")
+    blocked_weekdays = _assist_weekday_values(payload.get("blocked_weekdays"), "NG曜日")
+    duplicated = sorted(set(preferred_weekdays) & set(blocked_weekdays))
+    if duplicated:
+        duplicated_labels = " / ".join(_assist_weekday_label(item) for item in duplicated)
+        raise CloudShiftError(f"希望曜日とNG曜日が重複しています: {duplicated_labels}", 400)
+    existing["active"] = _assist_bool(payload.get("active"), bool(existing.get("active", True)))
+    existing["preferred_weekdays"] = preferred_weekdays
+    existing["blocked_weekdays"] = blocked_weekdays
+    existing["updated_at"] = _utcnow_iso()
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "assist_profile_saved",
+            "month_key": None,
+            "changes": [f"候補者プロファイルを更新: {_assist_profile_history_label(existing)}"],
+        },
+    )
+    return existing
+
+
+def _assist_record_from_payload(
+    assist: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    existing: dict[str, Any] | None = None,
+    actor_name: str,
+) -> dict[str, Any]:
+    date_text, parsed_date = _assist_date_parts(payload.get("date"))
+    shift_key = _assist_shift_key(payload.get("shift_key"), required=False)
+    role_type = _assist_role_type(payload.get("role_type") or "normal")
+    notes = _assist_long_text(payload.get("notes"))
+    profile = _upsert_assist_profile(
+        assist,
+        candidate_id=str(payload.get("candidate_id") or ""),
+        candidate_name=payload.get("candidate_name"),
+        employee_number=payload.get("employee_number"),
+    )
+    timestamp = _utcnow_iso()
+    if existing:
+        created_at = existing.get("created_at", timestamp)
+        created_by = existing.get("created_by", actor_name)
+        record_id = str(existing.get("id") or _assist_id("rec"))
+    else:
+        created_at = timestamp
+        created_by = actor_name
+        record_id = _assist_id("rec")
+    return {
+        "id": record_id,
+        "date": date_text,
+        "weekday": parsed_date.weekday(),
+        "candidate_id": profile["id"],
+        "candidate_name": profile["name"],
+        "employee_number": profile.get("employee_number", ""),
+        "shift_key": shift_key,
+        "role_type": role_type,
+        "notes": notes,
+        "created_at": created_at,
+        "updated_at": timestamp,
+        "created_by": created_by,
+        "updated_by": actor_name,
+    }
+
+
+def _assist_rule_assignments_from_payload(assist: dict[str, Any], payload: Any) -> list[dict[str, Any]]:
+    items = payload if isinstance(payload, list) else []
+    assignments = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        profile = _upsert_assist_profile(
+            assist,
+            candidate_id=str(item.get("candidate_id") or ""),
+            candidate_name=item.get("candidate_name"),
+            employee_number=item.get("employee_number"),
+        )
+        assignments.append(
+            {
+                "candidate_id": profile["id"],
+                "candidate_name": profile["name"],
+                "employee_number": profile.get("employee_number", ""),
+                "role_type": _assist_role_type(item.get("role_type") or "normal"),
+                "priority": _assist_priority(item.get("priority") or 1),
+                "custom_points": _assist_custom_points(item.get("custom_points")),
+            }
+        )
+    if not assignments:
+        raise CloudShiftError("ルール候補を1件以上入力してください", 400)
+    assignments.sort(
+        key=lambda item: (
+            -_assist_rule_points(item["role_type"], item["priority"], int(item.get("custom_points", 0) or 0)),
+            item["priority"],
+            item["candidate_name"],
+        )
+    )
+    return assignments
+
+
+def _assist_rule_from_payload(
+    assist: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    existing: dict[str, Any] | None = None,
+    actor_name: str,
+) -> dict[str, Any]:
+    weekday = _assist_rule_weekday_value(payload.get("weekday"))
+    shift_key = _assist_shift_key(payload.get("shift_key"), required=False)
+    notes = _assist_long_text(payload.get("notes"))
+    effective_from = _assist_period_value(payload.get("effective_from"))
+    effective_to = _assist_period_value(payload.get("effective_to"))
+    if effective_from and effective_to and effective_from > effective_to:
+        raise CloudShiftError("ルールの適用期間が不正です", 400)
+    timestamp = _utcnow_iso()
+    if existing:
+        created_at = existing.get("created_at", timestamp)
+        created_by = existing.get("created_by", actor_name)
+        rule_id = str(existing.get("id") or _assist_id("rule"))
+    else:
+        created_at = timestamp
+        created_by = actor_name
+        rule_id = _assist_id("rule")
+    return {
+        "id": rule_id,
+        "weekday": weekday,
+        "shift_key": shift_key,
+        "enabled": bool(payload.get("enabled", True)),
+        "effective_from": effective_from,
+        "effective_to": effective_to,
+        "assignments": _assist_rule_assignments_from_payload(assist, payload.get("assignments")),
+        "notes": notes,
+        "created_at": created_at,
+        "updated_at": timestamp,
+        "created_by": created_by,
+        "updated_by": actor_name,
+    }
+
+
+def _assist_match_scope(target_shift_key: Any, source_shift_key: Any) -> str:
+    return "exact" if str(target_shift_key or "").strip().upper() == str(source_shift_key or "").strip().upper() else "weekday"
+
+
+def _assist_rule_priority_bonus(priority: int, match_scope: str = "exact") -> int:
+    if match_scope == "weekday":
+        return max(0, 20 - ((priority - 1) * 3))
+    return max(0, 40 - ((priority - 1) * 5))
+
+
+def _assist_rule_points(role_type: str, priority: int, custom_points: int = 0, match_scope: str = "exact") -> int:
+    base_points = ASSIST_ROLE_SCORES.get(role_type, 0)
+    if match_scope == "weekday":
+        return base_points + _assist_rule_priority_bonus(priority, match_scope) + custom_points
+    return (base_points * 3) + _assist_rule_priority_bonus(priority, match_scope) + custom_points
+
+
+def _assist_record_recency_bonus(days_ago: int, match_scope: str = "exact") -> int:
+    if match_scope == "other_weekday":
+        if days_ago <= 30:
+            return 10
+        if days_ago <= 90:
+            return 5
+        return 0
+    if match_scope == "weekday":
+        if days_ago <= 30:
+            return 15
+        if days_ago <= 90:
+            return 10
+        if days_ago <= 180:
+            return 5
+        return 0
+    if days_ago <= 30:
+        return 30
+    if days_ago <= 90:
+        return 20
+    if days_ago <= 180:
+        return 10
+    return 0
+
+
+def _assist_record_points(role_type: str, days_ago: int, match_scope: str = "exact") -> int:
+    base_points = ASSIST_ROLE_SCORES.get(role_type, 0)
+    if match_scope == "other_weekday":
+        return max(10, base_points // 4) + _assist_record_recency_bonus(days_ago, match_scope)
+    if match_scope == "weekday":
+        return max(20, base_points // 2) + _assist_record_recency_bonus(days_ago, match_scope)
+    return base_points + _assist_record_recency_bonus(days_ago, match_scope)
+
+
+def _assist_record_history_label(record: dict[str, Any]) -> str:
+    return (
+        f"{record.get('date')}({_assist_weekday_label(int(record.get('weekday', 0) or 0))}) / "
+        f"{_assist_shift_label(record.get('shift_key'))} / "
+        f"{record.get('candidate_name')} / "
+        f"{ASSIST_ROLE_LABELS.get(str(record.get('role_type') or 'normal'), '通常')}"
+    )
+
+
+def _assist_rule_history_label(rule: dict[str, Any]) -> str:
+    weekday = _assist_rule_weekday_value(rule.get("weekday"))
+    weekday_label = _assist_rule_weekday_label(weekday)
+    return (
+        f"{weekday_label if weekday is None else f'{weekday_label}曜日'} / "
+        f"{_assist_shift_label(rule.get('shift_key'))}"
+    )
+
+
+def _assist_record_mutation(
+    project: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    actor_name: str,
+    actor_type: str,
+    record_id: str | None = None,
+) -> dict[str, Any]:
+    _ensure_scene_project(project)
+    assist = _ensure_assist(project)
+    existing = None
+    if record_id:
+        existing = next((item for item in assist["records"] if str(item.get("id") or "") == record_id), None)
+        if not existing:
+            raise CloudShiftError("対象の実績が見つかりません", 404)
+    record = _assist_record_from_payload(assist, payload, existing=existing, actor_name=actor_name)
+    if existing:
+        index = assist["records"].index(existing)
+        assist["records"][index] = record
+        changes = [f"アシスト実績を更新: {_assist_record_history_label(record)}"]
+    else:
+        assist["records"].append(record)
+        changes = [f"アシスト実績を登録: {_assist_record_history_label(record)}"]
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "assist_record_saved",
+            "month_key": None,
+            "changes": changes,
+        },
+    )
+    return record
+
+
+def _assist_record_delete(project: dict[str, Any], record_id: str, *, actor_name: str, actor_type: str) -> None:
+    _ensure_scene_project(project)
+    assist = _ensure_assist(project)
+    existing = next((item for item in assist["records"] if str(item.get("id") or "") == record_id), None)
+    if not existing:
+        raise CloudShiftError("対象の実績が見つかりません", 404)
+    assist["records"] = [item for item in assist["records"] if str(item.get("id") or "") != record_id]
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "assist_record_deleted",
+            "month_key": None,
+            "changes": [f"アシスト実績を削除: {_assist_record_history_label(existing)}"],
+        },
+    )
+
+
+def _assist_rule_mutation(
+    project: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    actor_name: str,
+    actor_type: str,
+    rule_id: str | None = None,
+) -> dict[str, Any]:
+    _ensure_scene_project(project)
+    assist = _ensure_assist(project)
+    existing = None
+    if rule_id:
+        existing = next((item for item in assist["rules"] if str(item.get("id") or "") == rule_id), None)
+        if not existing:
+            raise CloudShiftError("対象のルールが見つかりません", 404)
+    rule = _assist_rule_from_payload(assist, payload, existing=existing, actor_name=actor_name)
+    if existing:
+        index = assist["rules"].index(existing)
+        assist["rules"][index] = rule
+        changes = [f"シフトルールを更新: {_assist_rule_history_label(rule)}"]
+    else:
+        assist["rules"].append(rule)
+        changes = [f"シフトルールを登録: {_assist_rule_history_label(rule)}"]
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "assist_rule_saved",
+            "month_key": None,
+            "changes": changes,
+        },
+    )
+    return rule
+
+
+def _assist_rule_delete(project: dict[str, Any], rule_id: str, *, actor_name: str, actor_type: str) -> None:
+    _ensure_scene_project(project)
+    assist = _ensure_assist(project)
+    existing = next((item for item in assist["rules"] if str(item.get("id") or "") == rule_id), None)
+    if not existing:
+        raise CloudShiftError("対象のルールが見つかりません", 404)
+    assist["rules"] = [item for item in assist["rules"] if str(item.get("id") or "") != rule_id]
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "assist_rule_deleted",
+            "month_key": None,
+            "changes": [f"シフトルールを削除: {_assist_rule_history_label(existing)}"],
+        },
+    )
+
+
+def _rule_effective_for_date(rule: dict[str, Any], target_date: date) -> bool:
+    effective_from = str(rule.get("effective_from") or "").strip()
+    effective_to = str(rule.get("effective_to") or "").strip()
+    if effective_from:
+        _, start_date = _assist_date_parts(effective_from)
+        if target_date < start_date:
+            return False
+    if effective_to:
+        _, end_date = _assist_date_parts(effective_to)
+        if target_date > end_date:
+            return False
+    return True
+
+
+def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    _ensure_scene_project(project)
+    assist = _ensure_assist(project)
+    target_date_text, target_date = _assist_date_parts(payload.get("target_date"))
+    weekday = target_date.weekday()
+    shift_key = _assist_shift_key(payload.get("shift_key"), required=False)
+    target_aptitude_category = _assist_option_aptitude_category(shift_key)
+    try:
+        limit = int(payload.get("limit", 10) or 10)
+    except (TypeError, ValueError):
+        limit = 10
+    limit = max(1, min(limit, 30))
+
+    candidates: dict[str, dict[str, Any]] = {}
+    option_aptitude_counts: dict[str, dict[str, int]] = {}
+    option_aptitude_category_totals: dict[str, dict[str, int]] = {}
+
+    def upsert_result(candidate_id: str, name: str, employee_number: str) -> dict[str, Any]:
+        key = _assist_candidate_lookup_key(candidate_id, employee_number, name)
+        item = candidates.get(key)
+        if item:
+            return item
+        item = {
+            "candidate_key": key,
+            "candidate_id": candidate_id,
+            "name": name,
+            "employee_number": employee_number,
+            "score": 0,
+            "reasons": [],
+            "matched_rule_count": 0,
+            "matched_record_count": 0,
+            "breakdown": [],
+        }
+        candidates[key] = item
+        return item
+
+    for rule in assist.get("rules") or []:
+        if not rule.get("enabled", True):
+            continue
+        rule_weekday = _assist_rule_weekday_value(rule.get("weekday"))
+        if rule_weekday is not None and rule_weekday != weekday:
+            continue
+        if not _rule_effective_for_date(rule, target_date):
+            continue
+        rule_shift_key = str(rule.get("shift_key") or "")
+        rule_shift_label = _assist_shift_label(rule_shift_key)
+        rule_weekday_label = _assist_rule_weekday_label(rule_weekday)
+        match_scope = (
+            "exact"
+            if rule_weekday is not None and _assist_match_scope(shift_key, rule_shift_key) == "exact"
+            else "weekday"
+        )
+        match_label = (
+            ASSIST_MATCH_SCOPE_LABELS["exact"]
+            if match_scope == "exact"
+            else (ASSIST_WEEKDAYLESS_LABEL if rule_weekday is None else ASSIST_MATCH_SCOPE_LABELS["weekday"])
+        )
+        rule_breakdown_label = (
+            "ルール一致"
+            if match_scope == "exact"
+            else ("曜日なしルール" if rule_weekday is None else "曜日一致ルール")
+        )
+        rule_context = (
+            f"{rule_weekday_label if rule_weekday is None else f'{rule_weekday_label}曜'} / {rule_shift_label}"
+        )
+        for assignment in rule.get("assignments") or []:
+            if not isinstance(assignment, dict):
+                continue
+            role_type = str(assignment.get("role_type") or "normal")
+            priority = int(assignment.get("priority", 1) or 1)
+            custom_points = int(assignment.get("custom_points", 0) or 0)
+            item = upsert_result(
+                str(assignment.get("candidate_id") or ""),
+                str(assignment.get("candidate_name") or ""),
+                str(assignment.get("employee_number") or ""),
+            )
+            base_points = ASSIST_ROLE_SCORES.get(role_type, 0)
+            priority_bonus = _assist_rule_priority_bonus(priority, match_scope)
+            points = _assist_rule_points(role_type, priority, custom_points, match_scope)
+            item["score"] += points
+            item["matched_rule_count"] += 1
+            item["reasons"].append(
+                f"{rule_context} の{match_label} "
+                f"{ASSIST_ROLE_LABELS.get(role_type, '通常')}ルール"
+                + (f" (優先 {priority})" if role_type != "dedicated" else "")
+            )
+            item["breakdown"].append(
+                {
+                    "category": "rule",
+                    "label": rule_breakdown_label,
+                    "match_scope": match_scope,
+                    "match_label": match_label,
+                    "role_type": role_type,
+                    "role_label": ASSIST_ROLE_LABELS.get(role_type, "通常"),
+                    "priority": priority,
+                    "base_points": base_points,
+                    "priority_bonus": priority_bonus,
+                    "custom_points": custom_points,
+                    "points": points,
+                    "formula": (
+                        f"({base_points} x 3) + {priority_bonus}"
+                        if match_scope == "exact"
+                        else f"{base_points} + {priority_bonus}"
+                    ) + (f" + {custom_points}" if custom_points else ""),
+                    "context": rule_context,
+                }
+            )
+
+    for record in assist.get("records") or []:
+        record_date_text = str(record.get("date") or "").strip()
+        if not record_date_text:
+            continue
+        _, record_date = _assist_date_parts(record_date_text)
+        if record_date > target_date:
+            continue
+        candidate_key = _assist_candidate_lookup_key(
+            record.get("candidate_id"),
+            record.get("employee_number"),
+            record.get("candidate_name"),
+        )
+        days_ago = (target_date - record_date).days
+        record_weekday = int(record.get("weekday", -1) or -1)
+        weekday_matches = record_weekday == weekday
+        record_shift_key = str(record.get("shift_key") or "")
+        record_shift_label = _assist_shift_label(record_shift_key)
+        record_aptitude_category = _assist_option_aptitude_category(record_shift_key)
+        if record_aptitude_category:
+            candidate_option_counts = option_aptitude_counts.setdefault(candidate_key, {})
+            candidate_option_counts[record_shift_key] = candidate_option_counts.get(record_shift_key, 0) + 1
+            candidate_category_totals = option_aptitude_category_totals.setdefault(candidate_key, {})
+            candidate_category_totals[record_aptitude_category] = (
+                candidate_category_totals.get(record_aptitude_category, 0) + 1
+            )
+        if weekday_matches:
+            match_scope = _assist_match_scope(shift_key, record_shift_key)
+        else:
+            if days_ago > 90:
+                continue
+            match_scope = "other_weekday"
+        recency_bonus = _assist_record_recency_bonus(days_ago, match_scope)
+        role_type = str(record.get("role_type") or "normal")
+        base_points = ASSIST_ROLE_SCORES.get(role_type, 0)
+        points = _assist_record_points(role_type, days_ago, match_scope)
+        item = upsert_result(
+            str(record.get("candidate_id") or ""),
+            str(record.get("candidate_name") or ""),
+            str(record.get("employee_number") or ""),
+        )
+        item["score"] += points
+        item["matched_record_count"] += 1
+        if match_scope == "other_weekday":
+            record_weekday_label = _assist_weekday_label(record_weekday) if record_weekday >= 0 else "?"
+            label_text = f"曜日不一致実績({record_weekday_label}曜)"
+        else:
+            label_text = "実績一致" if match_scope == "exact" else "曜日一致実績"
+        item["reasons"].append(
+            f"{record_date_text} の{ASSIST_MATCH_SCOPE_LABELS.get(match_scope, '一致')}実績 "
+            f"({ASSIST_ROLE_LABELS.get(role_type, '通常')})"
+        )
+        if match_scope == "other_weekday":
+            formula = f"max(10, {base_points} // 4) + {recency_bonus}"
+        elif match_scope == "exact":
+            formula = f"{base_points} + {recency_bonus}"
+        else:
+            formula = f"max(20, {base_points} // 2) + {recency_bonus}"
+        item["breakdown"].append(
+            {
+                "category": "record",
+                "label": label_text,
+                "match_scope": match_scope,
+                "match_label": ASSIST_MATCH_SCOPE_LABELS.get(match_scope, "一致"),
+                "role_type": role_type,
+                "role_label": ASSIST_ROLE_LABELS.get(role_type, "通常"),
+                "base_points": base_points,
+                "recency_bonus": recency_bonus,
+                "days_ago": days_ago,
+                "points": points,
+                "formula": formula,
+                "context": f"{record_date_text} / {record_shift_label}",
+            }
+        )
+
+    results: list[dict[str, Any]] = []
+    category_order = {"profile": 0, "aptitude": 1, "rule": 2, "record": 3}
+    for item in candidates.values():
+        profile = _find_assist_profile(
+            assist,
+            candidate_id=str(item.get("candidate_id") or ""),
+            employee_number=str(item.get("employee_number") or ""),
+            candidate_name=str(item.get("name") or ""),
+        )
+        if profile:
+            if not bool(profile.get("active", True)):
+                continue
+            blocked_weekdays = _assist_weekday_values(profile.get("blocked_weekdays"), "NG曜日")
+            if weekday in blocked_weekdays:
+                continue
+            preferred_weekdays = _assist_weekday_values(profile.get("preferred_weekdays"), "希望曜日")
+            if weekday in preferred_weekdays:
+                weekday_label = _assist_weekday_label(weekday)
+                item["score"] += ASSIST_PREFERRED_WEEKDAY_BONUS
+                item["reasons"].append(f"{weekday_label}曜が希望曜日のため加点")
+                item["breakdown"].append(
+                    {
+                        "category": "profile",
+                        "label": "希望曜日一致",
+                        "match_scope": "preferred_weekday",
+                        "match_label": "希望曜日",
+                        "points": ASSIST_PREFERRED_WEEKDAY_BONUS,
+                        "formula": f"{ASSIST_PREFERRED_WEEKDAY_BONUS}",
+                        "context": f"{weekday_label}曜",
+                    }
+                )
+        if target_aptitude_category:
+            candidate_key = str(item.get("candidate_key") or "")
+            exact_count = int((option_aptitude_counts.get(candidate_key) or {}).get(shift_key, 0) or 0)
+            category_total = int(
+                (option_aptitude_category_totals.get(candidate_key) or {}).get(target_aptitude_category, 0) or 0
+            )
+            aptitude_points = _assist_option_aptitude_points(exact_count, category_total)
+            if aptitude_points:
+                bucket_label = _assist_option_aptitude_bucket_label(exact_count, category_total)
+                aptitude_label = _assist_option_aptitude_label(target_aptitude_category)
+                item["score"] += aptitude_points
+                item["reasons"].append(
+                    f"{_assist_shift_label(shift_key)} の{aptitude_label}補正 "
+                    f"({bucket_label} / 実績 {exact_count}件)"
+                )
+                item["breakdown"].append(
+                    {
+                        "category": "aptitude",
+                        "label": aptitude_label,
+                        "match_scope": target_aptitude_category,
+                        "match_label": "自動学習",
+                        "record_count": exact_count,
+                        "category_total": category_total,
+                        "points": aptitude_points,
+                        "formula": f"{bucket_label} -> {aptitude_points:+d}",
+                        "context": f"{_assist_shift_label(shift_key)} / 実績 {exact_count}件",
+                    }
+                )
+        unique_reasons = []
+        for reason in item["reasons"]:
+            if reason not in unique_reasons:
+                unique_reasons.append(reason)
+        item["reasons"] = unique_reasons[:6]
+        item["breakdown"].sort(
+            key=lambda part: (
+                -int(part.get("points", 0) or 0),
+                category_order.get(str(part.get("category") or ""), 9),
+                str(part.get("context") or ""),
+            )
+        )
+        results.append(item)
+    results.sort(
+        key=lambda item: (
+            -int(item["score"]),
+            -int(item["matched_rule_count"]),
+            -int(item["matched_record_count"]),
+            item["name"],
+            item["employee_number"],
+        )
+    )
+    return {
+        "success": True,
+        "query": {
+            "target_date": target_date_text,
+            "weekday": weekday,
+            "weekday_label": _assist_weekday_label(weekday),
+            "shift_key": shift_key,
+            "shift_label": _assist_shift_label(shift_key),
+        },
+        "score_reference": {
+            "theoretical_max": None,
+            "theoretical_max_label": "上限なし",
+            "baseline_score": 0,
+            "single_rule_max": _assist_rule_points("dedicated", 1, ASSIST_CUSTOM_POINTS_MAX),
+            "single_rule_weekday_max": _assist_rule_points("dedicated", 1, ASSIST_CUSTOM_POINTS_MAX, "weekday"),
+            "single_record_max": _assist_record_points("dedicated", 0),
+            "single_record_weekday_max": _assist_record_points("dedicated", 0, "weekday"),
+            "single_record_other_weekday_max": _assist_record_points("dedicated", 0, "other_weekday"),
+            "role_scores": ASSIST_ROLE_SCORES,
+            "match_scopes": ASSIST_MATCH_SCOPE_LABELS,
+            "priority_bonus": {
+                "formula": "max(0, 40 - ((priority - 1) * 5))",
+                "first_priority": 40,
+                "step": 5,
+            },
+            "weekday_priority_bonus": {
+                "formula": "max(0, 20 - ((priority - 1) * 3))",
+                "first_priority": 20,
+                "step": 3,
+            },
+            "recency_bonus": {
+                "within_30_days": 30,
+                "within_90_days": 20,
+                "within_180_days": 10,
+                "older": 0,
+            },
+            "weekday_recency_bonus": {
+                "within_30_days": 15,
+                "within_90_days": 10,
+                "within_180_days": 5,
+                "older": 0,
+            },
+            "other_weekday_recency_bonus": {
+                "within_30_days": 10,
+                "within_90_days": 5,
+                "older": 0,
+            },
+            "custom_points": {
+                "formula": "rule_points + custom_points",
+                "default": 0,
+                "min": ASSIST_CUSTOM_POINTS_MIN,
+                "max": ASSIST_CUSTOM_POINTS_MAX,
+            },
+            "preferred_weekday_bonus": ASSIST_PREFERRED_WEEKDAY_BONUS,
+            "option_aptitude": {
+                "source": "assist_records",
+                "applies_to": ["time", "vehicle"],
+                "tiers": [
+                    {"label": "5件以上", "minimum_count": 5, "points": ASSIST_OPTION_APTITUDE_MAX_BONUS},
+                    {"label": "3-4件", "minimum_count": 3, "maximum_count": 4, "points": ASSIST_OPTION_APTITUDE_MID_BONUS},
+                    {"label": "1-2件", "minimum_count": 1, "maximum_count": 2, "points": ASSIST_OPTION_APTITUDE_MIN_BONUS},
+                    {
+                        "label": "同カテゴリ実績あり / 対象0件",
+                        "minimum_count": 0,
+                        "same_category_history_required": True,
+                        "points": ASSIST_OPTION_APTITUDE_ZERO_PENALTY,
+                    },
+                    {
+                        "label": "学習データなし",
+                        "minimum_count": 0,
+                        "same_category_history_required": False,
+                        "points": 0,
+                    },
+                ],
+                "max_bonus": ASSIST_OPTION_APTITUDE_MAX_BONUS,
+                "min_penalty": ASSIST_OPTION_APTITUDE_ZERO_PENALTY,
+            },
+            "blocked_weekday_policy": "exclude",
+            "inactive_profile_policy": "exclude",
+        },
+        "results": results[:limit],
+    }
+
+
 def _leave_sync_bridge():
     try:
         from .leave_mgr import (
@@ -1593,6 +2715,135 @@ def api_leave_sync(project_id: str, year: int, month: int):
     )
 
 
+@cloudshift_bp.route("/api/project/<project_id>/assist")
+@login_required
+def api_assist_owner(project_id: str):
+    project = _owner_project_or_404(project_id)
+    return jsonify(_assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=True))
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/records", methods=["POST"])
+@login_required
+def api_assist_owner_create_record(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        record = _assist_record_mutation(project, payload, actor_name=_user_label(), actor_type="owner")
+    return jsonify(
+        {
+            "success": True,
+            "record": _assist_record_payload(record),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=True)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/records/<record_id>", methods=["PUT"])
+@login_required
+def api_assist_owner_update_record(project_id: str, record_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        record = _assist_record_mutation(project, payload, actor_name=_user_label(), actor_type="owner", record_id=record_id)
+    return jsonify(
+        {
+            "success": True,
+            "record": _assist_record_payload(record),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=True)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/records/<record_id>", methods=["DELETE"])
+@login_required
+def api_assist_owner_delete_record(project_id: str, record_id: str):
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        _assist_record_delete(project, record_id, actor_name=_user_label(), actor_type="owner")
+    return jsonify(
+        {
+            "success": True,
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=True)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/rules", methods=["POST"])
+@login_required
+def api_assist_owner_create_rule(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        rule = _assist_rule_mutation(project, payload, actor_name=_user_label(), actor_type="owner")
+    return jsonify(
+        {
+            "success": True,
+            "rule": _assist_rule_payload(rule),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=True)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/rules/<rule_id>", methods=["PUT"])
+@login_required
+def api_assist_owner_update_rule(project_id: str, rule_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        rule = _assist_rule_mutation(project, payload, actor_name=_user_label(), actor_type="owner", rule_id=rule_id)
+    return jsonify(
+        {
+            "success": True,
+            "rule": _assist_rule_payload(rule),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=True)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/rules/<rule_id>", methods=["DELETE"])
+@login_required
+def api_assist_owner_delete_rule(project_id: str, rule_id: str):
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        _assist_rule_delete(project, rule_id, actor_name=_user_label(), actor_type="owner")
+    return jsonify(
+        {
+            "success": True,
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=True)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/profiles/<profile_id>", methods=["PUT"])
+@login_required
+def api_assist_owner_update_profile(project_id: str, profile_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        profile = _assist_profile_mutation(
+            project,
+            payload,
+            actor_name=_user_label(),
+            actor_type="owner",
+            profile_id=profile_id,
+        )
+    return jsonify(
+        {
+            "success": True,
+            "profile": _assist_profile_payload(profile),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=True)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/search", methods=["POST"])
+@login_required
+def api_assist_owner_search(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    project = _owner_project_or_404(project_id)
+    return jsonify(_assist_search(project, payload))
+
+
 def _send_month_export(project: dict[str, Any], month_key: str, export_format: str):
     month_data = (project.get("months") or {}).get(month_key)
     if not month_data:
@@ -1697,6 +2948,82 @@ def api_public_save_month(token: str, year: int, month: int):
         month_payload = _save_month_in_project(project, year, month, payload, actor_name, actor_type)
     month_key = _month_key(year, month)
     return jsonify({"success": True, "month": month_payload, "project": _project_detail_payload(project, month_key)})
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist")
+def api_public_assist(token: str):
+    project = _find_project_by_token(token, "edit")
+    return jsonify(_assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False))
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/records", methods=["POST"])
+def api_public_create_assist_record(token: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        record = _assist_record_mutation(project, payload, actor_name=actor_name, actor_type=actor_type)
+    return jsonify(
+        {
+            "success": True,
+            "record": _assist_record_payload(record),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/records/<record_id>", methods=["PUT"])
+def api_public_update_assist_record(token: str, record_id: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        record = _assist_record_mutation(project, payload, actor_name=actor_name, actor_type=actor_type, record_id=record_id)
+    return jsonify(
+        {
+            "success": True,
+            "record": _assist_record_payload(record),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/records/<record_id>", methods=["DELETE"])
+def api_public_delete_assist_record(token: str, record_id: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        _assist_record_delete(project, record_id, actor_name=actor_name, actor_type=actor_type)
+    return jsonify(
+        {
+            "success": True,
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/rules", methods=["POST", "PUT", "DELETE"])
+@cloudshift_bp.route("/api/public/edit/<token>/assist/rules/<rule_id>", methods=["PUT", "DELETE"])
+def api_public_rules_readonly(token: str, rule_id: str | None = None):
+    _find_project_by_token(token, "edit")
+    raise CloudShiftError("編集者はシフトルールを変更できません", 403)
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/profiles/<profile_id>", methods=["PUT"])
+def api_public_profiles_readonly(token: str, profile_id: str):
+    _find_project_by_token(token, "edit")
+    raise CloudShiftError("編集者は候補者プロファイルを変更できません", 403)
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/search", methods=["POST"])
+def api_public_assist_search(token: str):
+    payload = request.get_json(silent=True) or {}
+    project = _find_project_by_token(token, "edit")
+    return jsonify(_assist_search(project, payload))
 
 
 @cloudshift_bp.route("/api/public/<token_type>/<token>/month/<int:year>/<int:month>/summary", methods=["GET", "POST"])
