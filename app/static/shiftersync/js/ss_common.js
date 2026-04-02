@@ -1100,10 +1100,12 @@ const ShifterSync = (function() {
     $('#ss-day-detail-subtitle').text(`${state.mode === 'scene' ? '\u73fe\u5834' : '\u500b\u4eba'}: ${state.name || ''}`);
 
     const body = $('#ss-day-detail-body');
+    let html = '';
+
     if (!entries.length) {
-      body.html('<div class="ss-detail-empty">\u3053\u306e\u65e5\u306f\u307e\u3060\u767b\u9332\u304c\u3042\u308a\u307e\u305b\u3093</div>');
+      html += '<div class="ss-detail-empty">\u3053\u306e\u65e5\u306f\u307e\u3060\u767b\u9332\u304c\u3042\u308a\u307e\u305b\u3093</div>';
     } else {
-      body.html(entries.map((entry, index) => {
+      html += entries.map((entry, index) => {
         const parts = getEntryDisplayParts(entry);
         return `
           <article class="ss-detail-card">
@@ -1125,9 +1127,18 @@ const ShifterSync = (function() {
             </div>
           </article>
         `;
-      }).join(''));
+      }).join('');
     }
 
+    if (state.editable && state.mode === 'scene') {
+      html += `
+        <div class="ss-detail-assist-action">
+          <button type="button" class="btn-secondary day-assist-trigger" data-day="${day}">\u30a2\u30b7\u30b9\u30c8</button>
+        </div>
+      `;
+    }
+
+    body.html(html);
     modal.removeClass('ss-hidden');
   }
 
@@ -1373,6 +1384,10 @@ const ShifterSync = (function() {
     return snapshot;
   }
 
+  function getSelectedOptionsForDayExport(day) {
+    return getSelectedOptionsForDay(day);
+  }
+
   return {
     buildCalendar,
     buildCSV,
@@ -1380,6 +1395,7 @@ const ShifterSync = (function() {
     getState,
     replaceEntriesPerDay,
     getEntriesPerDay,
+    getSelectedOptionsForDay: getSelectedOptionsForDayExport,
     updateAllCapacityWarnings,
     getOptionMappings,
     getOptionSectionsForMode: getOptionSectionsForModeExport

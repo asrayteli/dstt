@@ -10,12 +10,45 @@
       projectPayload: null,
       baseMonth: null,
       guestName: PAGE.authenticatedEditorName || '',
+      assist: {
+        contextKey: '',
+        loaded: false,
+        data: null,
+        permissions: {
+          can_edit_records: false,
+          can_edit_rules: false,
+          can_edit_profiles: false
+        },
+        activeTab: 'register',
+        registerView: 'record',
+        editView: 'records',
+        detailSections: {
+          overview: false,
+          formulas: false
+        },
+        searchResult: null,
+        recordDraft: null,
+        dayContext: null,
+        editFilters: {
+          date_from: '',
+          date_to: '',
+          shift_key: '',
+          role_type: '',
+          candidate_query: ''
+        },
+        searchForm: {
+          target_date: '',
+          shift_key: ''
+        }
+      },
       leaveSync: {
         calendars: [],
         selectedCalendarId: ''
       }
     };
     const employeeSearchCache = new Map();
+    const ASSIST_OPTIONLESS_LABEL = 'オプションなし';
+    const ASSIST_WEEKDAYLESS_LABEL = '曜日なし';
 
     function $(id) {
       return document.getElementById(id);
@@ -603,6 +636,351 @@
       }, 220);
     }
 
+    let assistCandidateSearchTimer = null;
+
+    function defaultAssistTargetDate() {
+      const month = currentMonth();
+      if (month) {
+        return `${month.year}-${String(month.month).padStart(2, '0')}-01`;
+      }
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    }
+
+    function resetAssistState() {
+      state.assist.contextKey = '';
+      state.assist.loaded = false;
+      state.assist.data = null;
+      state.assist.permissions = {
+        can_edit_records: false,
+        can_edit_rules: false,
+        can_edit_profiles: false
+      };
+      state.assist.activeTab = 'register';
+      state.assist.registerView = 'record';
+      state.assist.editView = 'records';
+      state.assist.searchResult = null;
+      state.assist.recordDraft = null;
+      state.assist.dayContext = null;
+      state.assist.editFilters = {
+        date_from: '',
+        date_to: '',
+        shift_key: '',
+        role_type: '',
+        candidate_query: ''
+      };
+      state.assist.searchForm = {
+        target_date: defaultAssistTargetDate(),
+        shift_key: ''
+      };
+    }
+
+    function assistContextKey() {
+      const project = currentProject();
+      if (!project) return '';
+      return PAGE.type === 'owner'
+        ? `owner:${project.id}`
+        : `public:${PAGE.accessMode}:${PAGE.token}:${project.id}`;
+    }
+
+    function syncAssistContext() {
+      const key = assistContextKey();
+      if (state.assist.contextKey !== key) {
+        resetAssistState();
+        state.assist.contextKey = key;
+      }
+    }
+
+    function isAssistAvailable() {
+      const project = currentProject();
+      return !!project && project.mode === 'scene' && (PAGE.type === 'owner' || PAGE.accessMode === 'edit');
+    }
+
+    function assistBasePath() {
+      const project = currentProject();
+      if (!project || project.mode !== 'scene') return '';
+      if (PAGE.type === 'owner') {
+        return `/tools/shiftersync/cloudshift/api/project/${project.id}/assist`;
+      }
+      return `/tools/shiftersync/cloudshift/api/public/edit/${PAGE.token}/assist`;
+    }
+
+    function currentAssistData() {
+      return state.assist.data || {
+        profiles: [],
+        records: [],
+        rules: []
+      };
+    }
+
+    function assistRequestOptions(body) {
+      if (PAGE.type === 'public' && PAGE.accessMode === 'edit') {
+        if (!ensureGuestName()) {
+          throw new Error('編集者名を入力してください');
+        }
+        return Object.assign({}, body, { editor_name: state.guestName });
+      }
+      return body;
+    }
+
+    function applyAssistBootstrap(payload) {
+      state.assist.data = payload && payload.assist ? payload.assist : {
+        profiles: [],
+        records: [],
+        rules: []
+      };
+      state.assist.permissions = payload && payload.permissions ? payload.permissions : {
+        can_edit_records: false,
+        can_edit_rules: false,
+        can_edit_profiles: false
+      };
+      state.assist.loaded = true;
+    }
+
+    async function ensureAssistLoaded(force) {
+      syncAssistContext();
+      if (!isAssistAvailable()) {
+        resetAssistState();
+        return currentAssistData();
+      }
+      if (state.assist.loaded && !force) {
+        return currentAssistData();
+      }
+      const payload = await requestJson(assistBasePath());
+      applyAssistBootstrap(payload);
+      return currentAssistData();
+    }
+
+    function assistWeekdayLabels() {
+      return ['月', '火', '水', '木', '金', '土', '日'];
+    }
+
+    function assistWeekdayLabel(index) {
+      if (index == null || String(index).trim() === '') return ASSIST_WEEKDAYLESS_LABEL;
+      return assistWeekdayLabels()[index] || '';
+    }
+
+    function assistRoleLabel(roleType) {
+      if (roleType === 'dedicated') return '専従者';
+      if (roleType === 'backup') return '代務者';
+      return '通常';
+    }
+
+    function assistRoleBadgeClass(roleType) {
+      if (roleType === 'dedicated') return 'is-dedicated';
+      if (roleType === 'backup') return 'is-backup';
+      return 'is-normal';
+    }
+
+    function assistWeekdayIndexFromDate(dateText) {
+      if (!dateText) return null;
+      const parts = String(dateText).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!parts) return null;
+      return (new Date(parseInt(parts[1], 10), parseInt(parts[2], 10) - 1, parseInt(parts[3], 10)).getDay() + 6) % 7;
+    }
+
+    function assistWeekdayLabelFromDate(dateText) {
+      const parsed = String(dateText || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!parsed) return '曜日: -';
+      const weekday = (new Date(parseInt(parsed[1], 10), parseInt(parsed[2], 10) - 1, parseInt(parsed[3], 10)).getDay() + 6) % 7;
+      return `曜日: ${assistWeekdayLabel(weekday)}`;
+    }
+
+    function assistShiftLabel(shiftKey) {
+      return shiftKey ? optionLabelForKey(shiftKey) : ASSIST_OPTIONLESS_LABEL;
+    }
+
+    function assistRuleDisplayLabel(rule) {
+      const weekdayLabel = rule && (rule.weekday == null || String(rule.weekday).trim() === '')
+        ? ASSIST_WEEKDAYLESS_LABEL
+        : `${assistWeekdayLabel(rule && rule.weekday)}曜`;
+      return `${weekdayLabel} / ${assistShiftLabel(rule && rule.shift_key)}`;
+    }
+
+    function assistWeekdayValues(values) {
+      if (!Array.isArray(values)) return [];
+      return values
+        .map((value) => parseInt(value, 10))
+        .filter((value, index, list) => Number.isInteger(value) && value >= 0 && value <= 6 && list.indexOf(value) === index)
+        .sort((left, right) => left - right);
+    }
+
+    function assistWeekdaySummary(values, emptyLabel) {
+      const normalized = assistWeekdayValues(values);
+      return normalized.length ? normalized.map((value) => assistWeekdayLabel(value)).join(' / ') : (emptyLabel || 'なし');
+    }
+
+    function buildAssistWeekdayPreferenceField(name, selectedValues, accentClass) {
+      const selected = new Set(assistWeekdayValues(selectedValues).map((value) => String(value)));
+      return `
+        <div class="cloud-assist-weekday-picker">
+          ${assistWeekdayLabels().map((label, index) => `
+            <label class="cloud-assist-weekday-option ${accentClass || ''}">
+              <input type="checkbox" name="${name}" value="${index}" ${selected.has(String(index)) ? 'checked' : ''}>
+              <span>${escapeHtml(label)}</span>
+            </label>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function buildAssistShiftOptions(selectedValue, includeBlank, blankLabel) {
+      const sections = bulkOptionSectionsForMode('scene');
+      const groups = sections.map((section) => `
+        <optgroup label="${escapeHtml(section.title)}">
+          ${section.optionKeys.map((key) => `
+            <option value="${escapeHtml(key)}" ${key === selectedValue ? 'selected' : ''}>${escapeHtml(optionLabelForKey(key))}</option>
+          `).join('')}
+        </optgroup>
+      `).join('');
+      return `${includeBlank ? `<option value="">${escapeHtml(blankLabel || ASSIST_OPTIONLESS_LABEL)}</option>` : ''}${groups}`;
+    }
+
+    function buildAssistRoleOptions(selectedValue, includeBlank) {
+      const options = [
+        { value: 'normal', label: '通常' },
+        { value: 'dedicated', label: '専従者' },
+        { value: 'backup', label: '代務者' }
+      ];
+      return `${includeBlank ? '<option value="">すべて</option>' : ''}${options.map((item) => `
+        <option value="${item.value}" ${item.value === selectedValue ? 'selected' : ''}>${item.label}</option>
+      `).join('')}`;
+    }
+
+    function buildAssistWeekdayOptions(selectedValue, includeBlank, blankLabel) {
+      const options = assistWeekdayLabels().map((label, index) => `
+        <option value="${index}" ${String(index) === String(selectedValue) ? 'selected' : ''}>${label}</option>
+      `).join('');
+      if (!includeBlank) {
+        return options;
+      }
+      const normalized = selectedValue == null ? '' : String(selectedValue);
+      return `<option value="" ${normalized === '' ? 'selected' : ''}>${escapeHtml(blankLabel || ASSIST_WEEKDAYLESS_LABEL)}</option>${options}`;
+    }
+
+    function buildAssistCandidateField(prefix, candidate) {
+      const candidateName = candidate && candidate.candidate_name ? candidate.candidate_name : '';
+      const candidateId = candidate && candidate.candidate_id ? candidate.candidate_id : '';
+      const employeeNumber = candidate && candidate.employee_number ? candidate.employee_number : '';
+      return `
+        <label class="cloud-field cloud-field-wide">
+          <span>候補者</span>
+          <div class="cloud-assist-candidate-field" data-assist-candidate-field>
+            <input
+              name="${prefix}_candidate_name"
+              class="cloud-input"
+              type="text"
+              value="${escapeHtml(candidateName)}"
+              data-assist-candidate-input
+              data-selected-employee-name="${escapeHtml(candidateName)}"
+              placeholder="候補者名"
+            >
+            <input type="hidden" name="${prefix}_candidate_id" value="${escapeHtml(candidateId)}">
+            <input type="hidden" name="${prefix}_employee_number" value="${escapeHtml(employeeNumber)}">
+            <div class="cloud-inline-note${employeeNumber ? '' : ' cloud-hidden'}" data-assist-selected-note>${employeeNumber ? `社員番号: ${escapeHtml(employeeNumber)}` : ''}</div>
+            <div class="cloud-bulk-candidate-panel cloud-hidden" data-assist-candidate-panel></div>
+          </div>
+        </label>
+      `;
+    }
+
+    function assistCandidateFieldRefs(field) {
+      return {
+        nameInput: field ? field.querySelector('[data-assist-candidate-input]') : null,
+        idInput: field ? field.querySelector('input[name$="_candidate_id"]') : null,
+        employeeInput: field ? field.querySelector('input[name$="_employee_number"]') : null,
+        note: field ? field.querySelector('[data-assist-selected-note]') : null,
+        panel: field ? field.querySelector('[data-assist-candidate-panel]') : null
+      };
+    }
+
+    function clearAssistCandidateSelection(field) {
+      const refs = assistCandidateFieldRefs(field);
+      if (refs.idInput) refs.idInput.value = '';
+      if (refs.employeeInput) refs.employeeInput.value = '';
+      if (refs.note) {
+        refs.note.textContent = '';
+        refs.note.classList.add('cloud-hidden');
+      }
+    }
+
+    function applyAssistCandidateSelection(field, candidate) {
+      const refs = assistCandidateFieldRefs(field);
+      if (!refs.nameInput) return;
+      const selectedName = String(candidate.candidate_name || candidate.employee_name || candidate.name || '');
+      refs.nameInput.value = selectedName;
+      refs.nameInput.dataset.selectedEmployeeName = selectedName;
+      if (refs.idInput) refs.idInput.value = String(candidate.candidate_id || '');
+      if (refs.employeeInput) refs.employeeInput.value = String(candidate.employee_number || '');
+      if (refs.note) {
+        refs.note.textContent = candidate.employee_number ? `社員番号: ${candidate.employee_number}` : '';
+        refs.note.classList.toggle('cloud-hidden', !candidate.employee_number);
+      }
+      if (refs.panel) {
+        refs.panel.innerHTML = '';
+        refs.panel.classList.add('cloud-hidden');
+      }
+    }
+
+    function renderAssistCandidateSuggestions(field, candidates) {
+      const refs = assistCandidateFieldRefs(field);
+      if (!refs.panel) return;
+      const normalized = (Array.isArray(candidates) ? candidates : [])
+        .map((item) => ({
+          candidate_id: String(item.candidate_id || ''),
+          employee_number: String(item.employee_number || '').trim(),
+          employee_name: String(item.employee_name || item.candidate_name || item.name || '').trim()
+        }))
+        .filter((item) => item.employee_name);
+      if (!normalized.length) {
+        refs.panel.innerHTML = '<div style="color: var(--cloud-muted); font-size: 12px; padding: 4px 2px;">候補が見つかりません</div>';
+        refs.panel.classList.remove('cloud-hidden');
+        return;
+      }
+      refs.panel.innerHTML = normalized.slice(0, 8).map((candidate) => `
+        <button
+          type="button"
+          class="cloud-assist-candidate"
+          data-candidate-id="${escapeHtml(candidate.candidate_id)}"
+          data-candidate-name="${escapeHtml(candidate.employee_name)}"
+          data-employee-name="${escapeHtml(candidate.employee_name)}"
+          data-employee-number="${escapeHtml(candidate.employee_number)}"
+        >${escapeHtml([candidate.employee_name, candidate.employee_number].filter(Boolean).join(' / '))}</button>
+      `).join('');
+      refs.panel.classList.remove('cloud-hidden');
+    }
+
+    function scheduleAssistCandidateSearch(field) {
+      const refs = assistCandidateFieldRefs(field);
+      if (!refs.nameInput) return;
+      const query = refs.nameInput.value.trim();
+      if (refs.nameInput.dataset.selectedEmployeeName && refs.nameInput.dataset.selectedEmployeeName !== query) {
+        clearAssistCandidateSelection(field);
+      }
+      if (!query) {
+        if (refs.panel) {
+          refs.panel.innerHTML = '';
+          refs.panel.classList.add('cloud-hidden');
+        }
+        return;
+      }
+      window.clearTimeout(assistCandidateSearchTimer);
+      assistCandidateSearchTimer = window.setTimeout(async () => {
+        const latestQuery = refs.nameInput.value.trim();
+        if (!latestQuery) return;
+        try {
+          const candidates = await fetchEmployeeCandidates(latestQuery);
+          if (refs.nameInput.value.trim() !== latestQuery) return;
+          renderAssistCandidateSuggestions(field, candidates);
+        } catch (_) {
+          if (refs.panel) {
+            refs.panel.innerHTML = '';
+            refs.panel.classList.add('cloud-hidden');
+          }
+        }
+      }, 220);
+    }
+
     function updateCurrentProjectLabel() {
       const node = $('cloud-current-project') || $('cloud-public-identity');
       if (!node) return;
@@ -631,6 +1009,1632 @@
 
       const project = currentProject();
       node.textContent = project ? `${project.title} / ${modeLabel(project.mode)}` : '未選択';
+    }
+
+    function buildAssistRecordForm(record, formId, submitLabel) {
+      const source = record || state.assist.recordDraft || {};
+      return `
+        <form class="cloud-assist-form" data-assist-record-form data-form-id="${formId}" data-record-id="${escapeHtml(source.id || '')}">
+          <div class="cloud-bulk-grid">
+            <label class="cloud-field">
+              <span>日付</span>
+              <input name="date" class="cloud-input" type="date" value="${escapeHtml(source.date || defaultAssistTargetDate())}" required>
+              <div class="cloud-inline-note" data-assist-date-note>${assistWeekdayLabelFromDate(source.date || defaultAssistTargetDate())}</div>
+            </label>
+            <label class="cloud-field">
+              <span>オプション</span>
+              <select name="shift_key" class="cloud-input">
+                ${buildAssistShiftOptions(source.shift_key || '', true, ASSIST_OPTIONLESS_LABEL)}
+              </select>
+            </label>
+            <label class="cloud-field">
+              <span>役割</span>
+              <select name="role_type" class="cloud-input" required>
+                ${buildAssistRoleOptions(source.role_type || 'normal', false)}
+              </select>
+            </label>
+            ${buildAssistCandidateField(formId, source)}
+            <label class="cloud-field cloud-field-wide">
+              <span>メモ</span>
+              <textarea name="notes" class="cloud-input" rows="3">${escapeHtml(source.notes || '')}</textarea>
+            </label>
+          </div>
+          <div class="cloud-actions compact">
+            <button type="submit" class="cloud-btn primary">${submitLabel}</button>
+          </div>
+        </form>
+      `;
+    }
+
+    function buildAssistRuleAssignmentRow(assignment, rowIndex) {
+      const item = assignment || {};
+      const prefix = `rule_assignment_${rowIndex}_${Date.now().toString(36)}`;
+      return `
+        <div class="cloud-assist-assignment-row" data-assist-assignment-row>
+          ${buildAssistCandidateField(prefix, {
+            candidate_id: item.candidate_id || '',
+            candidate_name: item.candidate_name || '',
+            employee_number: item.employee_number || ''
+          })}
+          <label class="cloud-field">
+            <span>役割</span>
+            <select name="role_type" class="cloud-input">
+              ${buildAssistRoleOptions(item.role_type || 'dedicated', false)}
+            </select>
+          </label>
+          <label class="cloud-field">
+            <span>優先順位</span>
+            <input name="priority" class="cloud-input" type="number" min="1" max="99" value="${escapeHtml(String(item.priority || 1))}">
+          </label>
+          <label class="cloud-field">
+            <span>独自点数</span>
+            <input name="custom_points" class="cloud-input" type="number" step="1" min="-1000" max="1000" value="${escapeHtml(String(item.custom_points || 0))}">
+          </label>
+          <div class="cloud-actions compact">
+            <button type="button" class="cloud-btn ghost" data-assist-remove-assignment>行を削除</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function buildAssistRuleAssignments(assignments) {
+      const rows = Array.isArray(assignments) && assignments.length ? assignments : [
+        { role_type: 'dedicated', priority: 1 },
+        { role_type: 'backup', priority: 1 }
+      ];
+      return rows.map((item, index) => buildAssistRuleAssignmentRow(item, index)).join('');
+    }
+
+    function buildAssistRuleForm(rule, formId, submitLabel) {
+      const source = rule || {};
+      return `
+        <form class="cloud-assist-form" data-assist-rule-form data-form-id="${formId}" data-rule-id="${escapeHtml(source.id || '')}">
+          <div class="cloud-bulk-grid">
+            <label class="cloud-field">
+              <span>曜日</span>
+              <select name="weekday" class="cloud-input">
+                ${buildAssistWeekdayOptions(source.weekday != null ? source.weekday : '', true, ASSIST_WEEKDAYLESS_LABEL)}
+              </select>
+            </label>
+            <label class="cloud-field">
+              <span>オプション</span>
+              <select name="shift_key" class="cloud-input">
+                ${buildAssistShiftOptions(source.shift_key || '', true, ASSIST_OPTIONLESS_LABEL)}
+              </select>
+            </label>
+            <label class="cloud-field">
+              <span>有効</span>
+              <select name="enabled" class="cloud-input">
+                <option value="true" ${source.enabled === false ? '' : 'selected'}>有効</option>
+                <option value="false" ${source.enabled === false ? 'selected' : ''}>無効</option>
+              </select>
+            </label>
+            <label class="cloud-field cloud-field-wide">
+              <span>メモ</span>
+              <textarea name="notes" class="cloud-input" rows="2">${escapeHtml(source.notes || '')}</textarea>
+            </label>
+          </div>
+          <div class="cloud-assist-assignment-block">
+            <div class="cloud-assist-subhead">
+              <strong>候補者ルール</strong>
+              <button type="button" class="cloud-btn secondary" data-assist-add-assignment>候補を追加</button>
+            </div>
+            <div data-assist-assignments>
+              ${buildAssistRuleAssignments(source.assignments || [])}
+            </div>
+          </div>
+          <div class="cloud-actions compact">
+            <button type="submit" class="cloud-btn primary">${submitLabel}</button>
+          </div>
+        </form>
+      `;
+    }
+
+    function buildAssistProfileForm(profile, formId, submitLabel) {
+      const source = profile || {};
+      return `
+        <form class="cloud-assist-form" data-assist-profile-form data-form-id="${formId}" data-profile-id="${escapeHtml(source.id || '')}">
+          <div class="cloud-assist-filter-grid">
+            <label class="cloud-field">
+              <span>候補者</span>
+              <input class="cloud-input" type="text" value="${escapeHtml(source.name || '')}" readonly>
+            </label>
+            <label class="cloud-field">
+              <span>社員番号</span>
+              <input class="cloud-input" type="text" value="${escapeHtml(source.employee_number || '社員番号なし')}" readonly>
+            </label>
+            <label class="cloud-field">
+              <span>候補状態</span>
+              <select name="active" class="cloud-input">
+                <option value="true" ${source.active !== false ? 'selected' : ''}>有効</option>
+                <option value="false" ${source.active === false ? 'selected' : ''}>検索から外す</option>
+              </select>
+            </label>
+          </div>
+          <label class="cloud-field cloud-field-wide">
+            <span>希望曜日</span>
+            ${buildAssistWeekdayPreferenceField('preferred_weekdays', source.preferred_weekdays || [], 'is-preferred')}
+            <div class="cloud-inline-note">一致した曜日は ${escapeHtml(String(assistScoreReference().preferred_weekday_bonus || 30))} 点加点します。</div>
+          </label>
+          <label class="cloud-field cloud-field-wide">
+            <span>NG曜日</span>
+            ${buildAssistWeekdayPreferenceField('blocked_weekdays', source.blocked_weekdays || [], 'is-blocked')}
+            <div class="cloud-inline-note">一致した曜日は候補から除外します。</div>
+          </label>
+          <div class="cloud-actions compact">
+            <button type="submit" class="cloud-btn primary">${submitLabel}</button>
+          </div>
+        </form>
+      `;
+    }
+
+    function buildAssistTabs() {
+      return `
+        <div class="cloud-assist-tabs">
+          <button type="button" class="cloud-tab${state.assist.activeTab === 'register' ? ' is-active' : ''}" data-assist-tab="register">登録</button>
+          <button type="button" class="cloud-tab${state.assist.activeTab === 'edit' ? ' is-active' : ''}" data-assist-tab="edit">編集</button>
+          <button type="button" class="cloud-tab${state.assist.activeTab === 'search' ? ' is-active' : ''}" data-assist-tab="search">サーチ</button>
+          <button type="button" class="cloud-tab${state.assist.activeTab === 'details' ? ' is-active' : ''}" data-assist-tab="details">詳細</button>
+        </div>
+      `;
+    }
+
+    function buildAssistRuleSummary(rule) {
+      return (rule.assignments || []).map((item) => `
+        <span class="cloud-assist-summary-chip ${assistRoleBadgeClass(item.role_type)}">
+          ${escapeHtml(`${assistRoleLabel(item.role_type)} ${item.priority}: ${item.candidate_name}${item.employee_number ? ` / ${item.employee_number}` : ''}${Number(item.custom_points || 0) ? ` / 独自 ${Number(item.custom_points || 0) > 0 ? '+' : ''}${item.custom_points}` : ''}`)}
+        </span>
+      `).join('');
+    }
+
+    function normalizeAssistUiState() {
+      const permissions = state.assist.permissions || {};
+      if (!['register', 'edit', 'search', 'details'].includes(state.assist.activeTab)) {
+        state.assist.activeTab = 'register';
+      }
+      if (state.assist.registerView !== 'record' && state.assist.registerView !== 'rule') {
+        state.assist.registerView = 'record';
+      }
+      if (!permissions.can_edit_rules) {
+        state.assist.registerView = 'record';
+      }
+      const allowedEditViews = permissions.can_edit_profiles
+        ? ['records', 'rules', 'profiles']
+        : ['records', 'rules'];
+      if (!allowedEditViews.includes(state.assist.editView)) {
+        state.assist.editView = 'records';
+      }
+      const detailSections = state.assist.detailSections || {};
+      state.assist.detailSections = {
+        overview: detailSections.overview === true,
+        formulas: detailSections.formulas === true
+      };
+    }
+
+    function assistCounts() {
+      const data = currentAssistData();
+      return {
+        records: Array.isArray(data.records) ? data.records.length : 0,
+        rules: Array.isArray(data.rules) ? data.rules.length : 0,
+        profiles: Array.isArray(data.profiles) ? data.profiles.length : 0
+      };
+    }
+
+    function defaultAssistScoreReference() {
+      return {
+        theoretical_max: null,
+        theoretical_max_label: '上限なし',
+        baseline_score: 0,
+        single_rule_max: 1940,
+        single_rule_weekday_max: 1320,
+        single_record_max: 330,
+        single_record_weekday_max: 165,
+        role_scores: {
+          normal: 100,
+          backup: 200,
+          dedicated: 300
+        },
+        match_scopes: {
+          exact: '曜日・オプション一致',
+          weekday: '曜日一致'
+        },
+        priority_bonus: {
+          formula: 'max(0, 40 - ((priority - 1) * 5))',
+          first_priority: 40,
+          step: 5
+        },
+        weekday_priority_bonus: {
+          formula: 'max(0, 20 - ((priority - 1) * 3))',
+          first_priority: 20,
+          step: 3
+        },
+        recency_bonus: {
+          within_30_days: 30,
+          within_90_days: 20,
+          within_180_days: 10,
+          older: 0
+        },
+        weekday_recency_bonus: {
+          within_30_days: 15,
+          within_90_days: 10,
+          within_180_days: 5,
+          older: 0
+        },
+        custom_points: {
+          formula: 'rule_points + custom_points',
+          default: 0,
+          min: -1000,
+          max: 1000
+        },
+        preferred_weekday_bonus: 30,
+        option_aptitude: {
+          source: 'assist_records',
+          applies_to: ['time', 'vehicle'],
+          tiers: [
+            { label: '5件以上', minimum_count: 5, points: 25 },
+            { label: '3-4件', minimum_count: 3, maximum_count: 4, points: 15 },
+            { label: '1-2件', minimum_count: 1, maximum_count: 2, points: 5 },
+            { label: '同カテゴリ実績あり / 対象0件', minimum_count: 0, same_category_history_required: true, points: -10 },
+            { label: '学習データなし', minimum_count: 0, same_category_history_required: false, points: 0 }
+          ],
+          max_bonus: 25,
+          min_penalty: -10
+        },
+        blocked_weekday_policy: 'exclude',
+        inactive_profile_policy: 'exclude'
+      };
+    }
+
+    function assistScoreReference() {
+      const result = state.assist.searchResult || {};
+      return Object.assign(defaultAssistScoreReference(), result.score_reference || {});
+    }
+
+    function assistSearchStats() {
+      const result = state.assist.searchResult;
+      const items = result && Array.isArray(result.results) ? result.results : [];
+      if (!items.length) {
+        return {
+          count: 0,
+          average: null,
+          max: null,
+          min: null
+        };
+      }
+      const scores = items.map((item) => Number(item.score || 0));
+      const total = scores.reduce((sum, value) => sum + value, 0);
+      return {
+        count: scores.length,
+        average: Math.round((total / scores.length) * 10) / 10,
+        max: Math.max(...scores),
+        min: Math.min(...scores)
+      };
+    }
+
+    function buildAssistViewSwitch(items, currentValue, attrName) {
+      return `
+        <div class="cloud-assist-switch" role="tablist">
+          ${items.map((item) => `
+            <button type="button" class="cloud-btn ${item.value === currentValue ? 'primary' : 'secondary'}" ${attrName}="${item.value}">${escapeHtml(item.label)}</button>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function buildAssistRegisterPanel() {
+      const permissions = state.assist.permissions || {};
+      const counts = assistCounts();
+      const registerItems = permissions.can_edit_rules
+        ? [
+            { value: 'record', label: `実績登録 (${counts.records})` },
+            { value: 'rule', label: `ルール登録 (${counts.rules})` }
+          ]
+        : [{ value: 'record', label: `実績登録 (${counts.records})` }];
+      const showRuleForm = permissions.can_edit_rules && state.assist.registerView === 'rule';
+      return `
+        <div class="cloud-assist-stack">
+          <div class="cloud-assist-section">
+            <div class="cloud-assist-subhead">
+              <div>
+                <strong>${showRuleForm ? 'シフトルール登録' : 'アシスト実績登録'}</strong>
+                <p class="cloud-panel-note">${showRuleForm ? '曜日とオプションごとの優先候補を設定します。曜日なし・オプションなしも登録できます。' : '過去の実績を記録し、候補検索の材料にします。オプションなしの実績も登録できます。'}</p>
+              </div>
+              ${buildAssistViewSwitch(registerItems, showRuleForm ? 'rule' : 'record', 'data-assist-register-view')}
+            </div>
+            <div class="cloud-assist-summary-row">
+              <span class="cloud-note-chip">実績 ${counts.records}件</span>
+              <span class="cloud-note-chip">ルール ${counts.rules}件</span>
+              ${permissions.can_edit_rules ? '' : '<span class="cloud-note-chip">編集者はルールを閲覧のみできます</span>'}
+            </div>
+            ${showRuleForm ? buildAssistRuleForm(null, 'assist-create-rule', 'ルールを登録') : buildAssistRecordForm(null, 'assist-create-record', '実績を登録')}
+          </div>
+        </div>
+      `;
+    }
+
+    function buildAssistEditPanels() {
+      const permissions = state.assist.permissions || {};
+      const counts = assistCounts();
+      const editItems = [
+        { value: 'records', label: `実績一覧 (${counts.records})` },
+        { value: 'rules', label: `ルール一覧 (${counts.rules})` }
+      ];
+      if (permissions.can_edit_profiles) {
+        editItems.push({ value: 'profiles', label: `候補者 (${counts.profiles})` });
+      }
+      const listTitle = state.assist.editView === 'rules'
+        ? 'シフトルール一覧'
+        : (state.assist.editView === 'profiles' ? '候補者プロファイル一覧' : '実績一覧');
+      const listDescription = state.assist.editView === 'rules'
+        ? '曜日とオプションの固定ルールを確認します。曜日なし・オプションなしも一覧できます。'
+        : (
+            state.assist.editView === 'profiles'
+              ? '候補者ごとの希望曜日・NG曜日・有効状態を管理します。'
+              : '登録済みの実績を確認・編集します。'
+          );
+      return `
+        <div class="cloud-assist-stack">
+          <div class="cloud-assist-section cloud-assist-section-filters">
+            <div class="cloud-assist-subhead">
+              <div>
+                <strong>絞り込み</strong>
+                <p class="cloud-panel-note">日付、オプション、役割、候補者名で一覧を絞り込みます。</p>
+              </div>
+              <button type="button" class="cloud-btn secondary" data-assist-reset-filters>クリア</button>
+            </div>
+            <div class="cloud-assist-filter-grid">
+              <label class="cloud-field">
+                <span>日付 From</span>
+                <input name="assist-filter-date-from" class="cloud-input" type="date" value="${escapeHtml(state.assist.editFilters.date_from || '')}">
+              </label>
+              <label class="cloud-field">
+                <span>日付 To</span>
+                <input name="assist-filter-date-to" class="cloud-input" type="date" value="${escapeHtml(state.assist.editFilters.date_to || '')}">
+              </label>
+              <label class="cloud-field">
+                <span>オプション</span>
+                <select name="assist-filter-shift" class="cloud-input">
+                  ${buildAssistShiftOptions(state.assist.editFilters.shift_key || '', true, 'すべて')}
+                </select>
+              </label>
+              <label class="cloud-field">
+                <span>役割</span>
+                <select name="assist-filter-role" class="cloud-input">
+                  ${buildAssistRoleOptions(state.assist.editFilters.role_type || '', true)}
+                </select>
+              </label>
+              <label class="cloud-field">
+                <span>候補者検索</span>
+                <input name="assist-filter-candidate" class="cloud-input" type="text" value="${escapeHtml(state.assist.editFilters.candidate_query || '')}" placeholder="名前 / 社員番号 / メモ">
+              </label>
+            </div>
+          </div>
+          <div class="cloud-assist-section cloud-assist-section-list">
+            <div class="cloud-assist-subhead">
+              <div>
+                <strong>${listTitle}</strong>
+                <p class="cloud-panel-note">${listDescription}</p>
+              </div>
+              ${buildAssistViewSwitch(editItems, state.assist.editView || 'records', 'data-assist-edit-view')}
+            </div>
+            <div class="cloud-assist-summary-row">
+              <span class="cloud-note-chip">実績 ${counts.records}件</span>
+              <span class="cloud-note-chip">ルール ${counts.rules}件</span>
+              ${permissions.can_edit_profiles ? `<span class="cloud-note-chip">候補者 ${counts.profiles}件</span>` : ''}
+              ${permissions.can_edit_rules ? '' : '<span class="cloud-note-chip">ルール編集はオーナーのみ</span>'}
+            </div>
+            <div data-assist-edit-list></div>
+          </div>
+        </div>
+      `;
+    }
+
+    function buildAssistSearchPanel() {
+      const searchForm = state.assist.searchForm || {};
+      const result = state.assist.searchResult;
+      const resultCount = result && Array.isArray(result.results) ? result.results.length : 0;
+      return `
+        <div class="cloud-assist-section cloud-assist-section-search-form">
+          <div class="cloud-assist-subhead">
+              <div>
+                <strong>候補検索</strong>
+                <p class="cloud-panel-note">指定日の曜日とオプションから、候補者を点数付きで提案します。オプションなし検索もできます。</p>
+              </div>
+          </div>
+          <form data-assist-search-form class="cloud-assist-form">
+            <div class="cloud-assist-filter-grid">
+              <label class="cloud-field">
+                <span>対象日</span>
+                <input name="target_date" class="cloud-input" type="date" value="${escapeHtml(searchForm.target_date || defaultAssistTargetDate())}" required>
+              </label>
+              <label class="cloud-field">
+                <span>オプション</span>
+                <select name="shift_key" class="cloud-input">
+                  ${buildAssistShiftOptions(searchForm.shift_key || '', true, ASSIST_OPTIONLESS_LABEL)}
+                </select>
+              </label>
+            </div>
+            <div class="cloud-actions compact">
+              <button type="submit" class="cloud-btn primary">候補を検索</button>
+            </div>
+          </form>
+        </div>
+        <div class="cloud-assist-section cloud-assist-section-results">
+          <div class="cloud-assist-subhead">
+            <div>
+              <strong>候補結果</strong>
+              <p class="cloud-panel-note">${result && result.query ? escapeHtml(`${result.query.target_date} / ${result.query.weekday_label} / ${result.query.shift_label}`) : 'まだ検索していません。'}</p>
+            </div>
+            <span class="cloud-note-chip">候補 ${resultCount}件</span>
+          </div>
+          <div data-assist-search-results>
+            ${buildAssistSearchResults(result)}
+          </div>
+        </div>
+      `;
+    }
+
+    function buildAssistBreakdownByCategory(breakdown) {
+      const profiles = (breakdown || []).filter((part) => part.category === 'profile');
+      const aptitudes = (breakdown || []).filter((part) => part.category === 'aptitude');
+      const rules = (breakdown || []).filter((part) => part.category === 'rule');
+      const records = (breakdown || []).filter((part) => part.category === 'record');
+      let html = '';
+      if (profiles.length) {
+        html += `<div class="cloud-assist-category-section">
+          <div class="cloud-assist-category-label">候補者条件</div>
+          ${profiles.map((part) => `
+            <div class="cloud-assist-category-item">
+              <div class="cloud-assist-category-item-head">
+                <span class="cloud-note-chip">${escapeHtml(part.match_label || '-')}</span>
+              </div>
+              <p class="cloud-panel-note">${escapeHtml(part.context || '-')} → ${escapeHtml(String(part.points || 0))}点 (${escapeHtml(part.formula || '-')})</p>
+            </div>
+          `).join('')}
+        </div>`;
+      }
+      if (aptitudes.length) {
+        html += `<div class="cloud-assist-category-section">
+          <div class="cloud-assist-category-label">オプション適性</div>
+          ${aptitudes.map((part) => `
+            <div class="cloud-assist-category-item">
+              <div class="cloud-assist-category-item-head">
+                <span class="cloud-note-chip">${escapeHtml(part.match_label || '-')}</span>
+                ${part.record_count != null ? `<span class="cloud-note-chip">実績 ${escapeHtml(String(part.record_count))}件</span>` : ''}
+              </div>
+              <p class="cloud-panel-note">${escapeHtml(part.context || '-')} → ${escapeHtml(String(part.points || 0))}点 (${escapeHtml(part.formula || '-')})</p>
+            </div>
+          `).join('')}
+        </div>`;
+      }
+      if (rules.length) {
+        html += `<div class="cloud-assist-category-section">
+          <div class="cloud-assist-category-label">適用ルール</div>
+          ${rules.map((part) => `
+            <div class="cloud-assist-category-item">
+              <div class="cloud-assist-category-item-head">
+                <span class="cloud-note-chip">${escapeHtml(part.match_label || '-')}</span>
+                <span class="cloud-note-chip">${escapeHtml(part.role_label || '通常')}</span>
+                ${part.priority ? `<span class="cloud-note-chip">優先 ${escapeHtml(String(part.priority))}</span>` : ''}
+                ${Number(part.custom_points || 0) ? `<span class="cloud-note-chip">独自 ${escapeHtml(`${Number(part.custom_points || 0) > 0 ? '+' : ''}${part.custom_points}`)}</span>` : ''}
+              </div>
+              <p class="cloud-panel-note">${escapeHtml(part.context || '-')} → ${escapeHtml(String(part.points || 0))}点 (${escapeHtml(part.formula || '-')})</p>
+            </div>
+          `).join('')}
+        </div>`;
+      }
+      if (records.length) {
+        html += `<div class="cloud-assist-category-section">
+          <div class="cloud-assist-category-label">該当実績</div>
+          ${records.map((part) => `
+            <div class="cloud-assist-category-item">
+              <div class="cloud-assist-category-item-head">
+                <span class="cloud-note-chip">${escapeHtml(part.match_label || '-')}</span>
+                <span class="cloud-note-chip">${escapeHtml(part.role_label || '通常')}</span>
+                ${part.days_ago != null ? `<span class="cloud-note-chip">${escapeHtml(String(part.days_ago))}日前</span>` : ''}
+              </div>
+              <p class="cloud-panel-note">${escapeHtml(part.context || '-')} → ${escapeHtml(String(part.points || 0))}点 (${escapeHtml(part.formula || '-')})</p>
+            </div>
+          `).join('')}
+        </div>`;
+      }
+      return html;
+    }
+
+    function buildAssistSearchResults(result) {
+      if (!result || !Array.isArray(result.results)) {
+        return '<div class="cloud-empty-state"><p>検索条件を入力して候補を表示します。</p></div>';
+      }
+      if (!result.results.length) {
+        return '<div class="cloud-empty-state"><p>一致する候補が見つかりませんでした。</p></div>';
+      }
+      return result.results.map((item) => `
+        <article class="cloud-assist-result-card">
+          <div class="cloud-assist-result-head">
+            <div>
+              <h4>${escapeHtml(item.name || '-')}</h4>
+              <p>${escapeHtml(item.employee_number || '社員番号なし')}</p>
+            </div>
+            <div class="cloud-assist-score">${escapeHtml(String(item.score || 0))}点</div>
+          </div>
+          <div class="cloud-assist-result-meta">
+            <span class="cloud-note-chip">ルール一致 ${escapeHtml(String(item.matched_rule_count || 0))}</span>
+            <span class="cloud-note-chip">実績一致 ${escapeHtml(String(item.matched_record_count || 0))}</span>
+          </div>
+          ${buildAssistBreakdownByCategory(item.breakdown)}
+        </article>
+      `).join('');
+    }
+
+    function buildAssistDetailAccordion(sectionKey, title, description, bodyHtml, chipText) {
+      const detailSections = state.assist.detailSections || {};
+      const expanded = detailSections[sectionKey] === true;
+      return `
+        <section class="cloud-assist-section cloud-assist-detail-accordion${expanded ? ' is-expanded' : ' is-collapsed'}">
+          <button
+            type="button"
+            class="cloud-assist-detail-toggle"
+            data-assist-detail-toggle="${escapeHtml(sectionKey)}"
+            aria-expanded="${expanded ? 'true' : 'false'}"
+          >
+            <div class="cloud-assist-detail-toggle-copy">
+              <strong>${escapeHtml(title)}</strong>
+              <p class="cloud-panel-note">${escapeHtml(description)}</p>
+            </div>
+            <div class="cloud-assist-detail-toggle-meta">
+              ${chipText ? `<span class="cloud-note-chip">${escapeHtml(chipText)}</span>` : ''}
+              <span class="cloud-assist-detail-toggle-icon">${expanded ? '閉じる' : '展開'}</span>
+            </div>
+          </button>
+          <div class="cloud-assist-detail-body${expanded ? '' : ' cloud-hidden'}">
+            ${bodyHtml}
+          </div>
+        </section>
+      `;
+    }
+
+    function buildAssistDetailResultBreakdown(result) {
+      const parts = Array.isArray(result.breakdown) ? result.breakdown : [];
+      if (!parts.length) {
+        return '<div class="cloud-empty-state"><p>内訳はありません。</p></div>';
+      }
+      const profiles = parts.filter((part) => part.category === 'profile');
+      const aptitudes = parts.filter((part) => part.category === 'aptitude');
+      const rules = parts.filter((part) => part.category === 'rule');
+      const records = parts.filter((part) => part.category === 'record');
+      let html = '';
+      if (profiles.length) {
+        html += `<div class="cloud-assist-detail-category-heading">候補者条件</div>`;
+        html += profiles.map((part) => `
+          <article class="cloud-assist-detail-breakdown-item">
+            <div class="cloud-assist-result-head">
+              <div>
+                <strong>${escapeHtml(part.label || '-')}</strong>
+                <p class="cloud-panel-note">${escapeHtml(part.context || '-')}</p>
+              </div>
+              <div class="cloud-assist-score">${escapeHtml(String(part.points || 0))}点</div>
+            </div>
+            <div class="cloud-assist-result-meta">
+              ${part.match_label ? `<span class="cloud-note-chip">${escapeHtml(part.match_label)}</span>` : ''}
+            </div>
+            <p class="cloud-panel-note">式: ${escapeHtml(part.formula || '-')}</p>
+          </article>
+        `).join('');
+      }
+      if (aptitudes.length) {
+        html += `<div class="cloud-assist-detail-category-heading">オプション適性</div>`;
+        html += aptitudes.map((part) => `
+          <article class="cloud-assist-detail-breakdown-item">
+            <div class="cloud-assist-result-head">
+              <div>
+                <strong>${escapeHtml(part.label || '-')}</strong>
+                <p class="cloud-panel-note">${escapeHtml(part.context || '-')}</p>
+              </div>
+              <div class="cloud-assist-score">${escapeHtml(String(part.points || 0))}点</div>
+            </div>
+            <div class="cloud-assist-result-meta">
+              ${part.match_label ? `<span class="cloud-note-chip">${escapeHtml(part.match_label)}</span>` : ''}
+              ${part.record_count != null ? `<span class="cloud-note-chip">実績 ${escapeHtml(String(part.record_count))}件</span>` : ''}
+            </div>
+            <p class="cloud-panel-note">式: ${escapeHtml(part.formula || '-')}</p>
+          </article>
+        `).join('');
+      }
+      if (rules.length) {
+        html += `<div class="cloud-assist-detail-category-heading">適用ルール</div>`;
+        html += rules.map((part) => `
+          <article class="cloud-assist-detail-breakdown-item">
+            <div class="cloud-assist-result-head">
+              <div>
+                <strong>${escapeHtml(part.label || '-')}</strong>
+                <p class="cloud-panel-note">${escapeHtml(`${part.context || '-'} / ${part.role_label || '-'}`)}</p>
+              </div>
+              <div class="cloud-assist-score">${escapeHtml(String(part.points || 0))}点</div>
+            </div>
+            <div class="cloud-assist-result-meta">
+              ${part.match_label ? `<span class="cloud-note-chip">${escapeHtml(part.match_label)}</span>` : ''}
+              ${part.priority ? `<span class="cloud-note-chip">優先 ${escapeHtml(String(part.priority))}</span>` : ''}
+              ${Number(part.custom_points || 0) ? `<span class="cloud-note-chip">独自 ${escapeHtml(`${Number(part.custom_points || 0) > 0 ? '+' : ''}${part.custom_points}`)}</span>` : ''}
+            </div>
+            <p class="cloud-panel-note">式: ${escapeHtml(part.formula || '-')}</p>
+          </article>
+        `).join('');
+      }
+      if (records.length) {
+        html += `<div class="cloud-assist-detail-category-heading">該当実績</div>`;
+        html += records.map((part) => `
+          <article class="cloud-assist-detail-breakdown-item">
+            <div class="cloud-assist-result-head">
+              <div>
+                <strong>${escapeHtml(part.label || '-')}</strong>
+                <p class="cloud-panel-note">${escapeHtml(`${part.context || '-'} / ${part.role_label || '-'}`)}</p>
+              </div>
+              <div class="cloud-assist-score">${escapeHtml(String(part.points || 0))}点</div>
+            </div>
+            <div class="cloud-assist-result-meta">
+              ${part.match_label ? `<span class="cloud-note-chip">${escapeHtml(part.match_label)}</span>` : ''}
+              ${part.days_ago != null ? `<span class="cloud-note-chip">${escapeHtml(String(part.days_ago))}日前</span>` : ''}
+            </div>
+            <p class="cloud-panel-note">式: ${escapeHtml(part.formula || '-')}</p>
+          </article>
+        `).join('');
+      }
+      return html;
+    }
+
+    function buildAssistDetailsPanel() {
+      const reference = assistScoreReference();
+      const stats = assistSearchStats();
+      const result = state.assist.searchResult;
+      const items = result && Array.isArray(result.results) ? result.results : [];
+      const overviewBody = `
+        <div class="cloud-assist-detail-grid">
+          <article class="cloud-assist-detail-card">
+            <strong>理論上限</strong>
+            <div class="cloud-assist-detail-value">${escapeHtml(reference.theoretical_max_label || '上限なし')}</div>
+            <p class="cloud-panel-note">一致ルールと実績を加算し続けるため、現在は固定の満点を設けていません。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>単一ルール最大</strong>
+            <div class="cloud-assist-detail-value">${escapeHtml(String(reference.single_rule_max || 0))}点</div>
+            <p class="cloud-panel-note">専従者・優先1位の曜日・オプション一致 1件ぶんです。独自点数の最大値も含めた理論値です。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>単一曜日一致ルール</strong>
+            <div class="cloud-assist-detail-value">${escapeHtml(String(reference.single_rule_weekday_max || 0))}点</div>
+            <p class="cloud-panel-note">専従者・優先1位の曜日一致ルール、または曜日なしルール 1件ぶんの加点です。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>単一実績最大</strong>
+            <div class="cloud-assist-detail-value">${escapeHtml(String(reference.single_record_max || 0))}点</div>
+            <p class="cloud-panel-note">専従者・30日以内の曜日・オプション一致実績 1件ぶんの加点です。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>単一曜日一致実績</strong>
+            <div class="cloud-assist-detail-value">${escapeHtml(String(reference.single_record_weekday_max || 0))}点</div>
+            <p class="cloud-panel-note">専従者・30日以内の曜日一致実績 1件ぶんの加点です。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>基準点</strong>
+            <div class="cloud-assist-detail-value">${escapeHtml(String(reference.baseline_score || 0))}点</div>
+            <p class="cloud-panel-note">一致がない状態を 0 点としています。固定の合格ラインはまだありません。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>希望曜日一致</strong>
+            <div class="cloud-assist-detail-value">+${escapeHtml(String(reference.preferred_weekday_bonus || 0))}点</div>
+            <p class="cloud-panel-note">候補者プロファイルの希望曜日と検索曜日が一致したときの加点です。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>適性学習 最大</strong>
+            <div class="cloud-assist-detail-value">+${escapeHtml(String(reference.option_aptitude && reference.option_aptitude.max_bonus != null ? reference.option_aptitude.max_bonus : 0))}点</div>
+            <p class="cloud-panel-note">対象オプションの実績が 5 件以上ある候補に与える最大加点です。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>現在の平均値</strong>
+            <div class="cloud-assist-detail-value">${stats.average != null ? escapeHtml(String(stats.average)) + '点' : '未検索'}</div>
+            <p class="cloud-panel-note">最新の検索結果に表示されている候補の平均点です。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>独自点数の範囲</strong>
+            <div class="cloud-assist-detail-value">${escapeHtml(String(reference.custom_points && reference.custom_points.min != null ? reference.custom_points.min : -1000))} 〜 ${escapeHtml(String(reference.custom_points && reference.custom_points.max != null ? reference.custom_points.max : 1000))}</div>
+            <p class="cloud-panel-note">ルール候補ごとに設定できる補正値です。プラスもマイナスも使えます。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>現在の表示幅</strong>
+            <div class="cloud-assist-detail-value">${stats.max != null ? `${escapeHtml(String(stats.min))} - ${escapeHtml(String(stats.max))}点` : '未検索'}</div>
+            <p class="cloud-panel-note">最新検索の最低点から最高点までを表示しています。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>NG曜日の扱い</strong>
+            <div class="cloud-assist-detail-value">${escapeHtml(reference.blocked_weekday_policy === 'exclude' ? '除外' : '減点')}</div>
+            <p class="cloud-panel-note">NG曜日が一致した候補は検索結果に出しません。無効化した候補も同様に除外します。</p>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>未経験ペナルティ</strong>
+            <div class="cloud-assist-detail-value">${escapeHtml(String(reference.option_aptitude && reference.option_aptitude.min_penalty != null ? reference.option_aptitude.min_penalty : 0))}点</div>
+            <p class="cloud-panel-note">同じカテゴリの実績はあるが、対象オプションの実績が 0 件のときだけ減点します。学習データがない候補は 0 点のままです。</p>
+          </article>
+        </div>
+      `;
+      const formulasBody = `
+        <div class="cloud-assist-detail-formulas">
+          <article class="cloud-assist-detail-card">
+            <strong>役割の基礎点</strong>
+            <ul class="cloud-assist-reasons">
+              <li>通常: ${escapeHtml(String((reference.role_scores || {}).normal || 0))}点</li>
+              <li>代務者: ${escapeHtml(String((reference.role_scores || {}).backup || 0))}点</li>
+              <li>専従者: ${escapeHtml(String((reference.role_scores || {}).dedicated || 0))}点</li>
+            </ul>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>ルール一致</strong>
+            <p class="cloud-panel-note">式: 役割基礎点 x 3 + 優先順位ボーナス + 独自点数</p>
+            <p class="cloud-panel-note">優先順位ボーナス: ${escapeHtml(reference.priority_bonus && reference.priority_bonus.formula ? reference.priority_bonus.formula : '-')}</p>
+            <ul class="cloud-assist-reasons">
+              <li>優先1位: ${escapeHtml(String(reference.priority_bonus && reference.priority_bonus.first_priority != null ? reference.priority_bonus.first_priority : 0))}点</li>
+              <li>順位が1つ下がるごと: -${escapeHtml(String(reference.priority_bonus && reference.priority_bonus.step != null ? reference.priority_bonus.step : 0))}点</li>
+              <li>独自点数: ${escapeHtml(reference.custom_points && reference.custom_points.formula ? reference.custom_points.formula : 'rule_points + custom_points')}</li>
+              <li>独自点数の範囲: ${escapeHtml(String(reference.custom_points && reference.custom_points.min != null ? reference.custom_points.min : -1000))} 〜 ${escapeHtml(String(reference.custom_points && reference.custom_points.max != null ? reference.custom_points.max : 1000))}</li>
+            </ul>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>曜日一致ルール</strong>
+            <p class="cloud-panel-note">式: 役割基礎点 + 曜日一致ボーナス + 独自点数</p>
+            <p class="cloud-panel-note">曜日一致ボーナス: ${escapeHtml(reference.weekday_priority_bonus && reference.weekday_priority_bonus.formula ? reference.weekday_priority_bonus.formula : '-')}</p>
+            <ul class="cloud-assist-reasons">
+              <li>優先1位: ${escapeHtml(String(reference.weekday_priority_bonus && reference.weekday_priority_bonus.first_priority != null ? reference.weekday_priority_bonus.first_priority : 0))}点</li>
+              <li>順位が1つ下がるごと: -${escapeHtml(String(reference.weekday_priority_bonus && reference.weekday_priority_bonus.step != null ? reference.weekday_priority_bonus.step : 0))}点</li>
+              <li>曜日なしルール・オプションなしルールもこの式で加点します</li>
+            </ul>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>実績一致</strong>
+            <p class="cloud-panel-note">式: 役割基礎点 + 直近ボーナス</p>
+            <ul class="cloud-assist-reasons">
+              <li>30日以内: +${escapeHtml(String(reference.recency_bonus && reference.recency_bonus.within_30_days != null ? reference.recency_bonus.within_30_days : 0))}点</li>
+              <li>31-90日: +${escapeHtml(String(reference.recency_bonus && reference.recency_bonus.within_90_days != null ? reference.recency_bonus.within_90_days : 0))}点</li>
+              <li>91-180日: +${escapeHtml(String(reference.recency_bonus && reference.recency_bonus.within_180_days != null ? reference.recency_bonus.within_180_days : 0))}点</li>
+              <li>181日以上: +${escapeHtml(String(reference.recency_bonus && reference.recency_bonus.older != null ? reference.recency_bonus.older : 0))}点</li>
+            </ul>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>曜日一致実績</strong>
+            <p class="cloud-panel-note">式: max(20, 役割基礎点 / 2) + 直近ボーナス</p>
+            <ul class="cloud-assist-reasons">
+              <li>30日以内: +${escapeHtml(String(reference.weekday_recency_bonus && reference.weekday_recency_bonus.within_30_days != null ? reference.weekday_recency_bonus.within_30_days : 0))}点</li>
+              <li>31-90日: +${escapeHtml(String(reference.weekday_recency_bonus && reference.weekday_recency_bonus.within_90_days != null ? reference.weekday_recency_bonus.within_90_days : 0))}点</li>
+              <li>91-180日: +${escapeHtml(String(reference.weekday_recency_bonus && reference.weekday_recency_bonus.within_180_days != null ? reference.weekday_recency_bonus.within_180_days : 0))}点</li>
+              <li>181日以上: +${escapeHtml(String(reference.weekday_recency_bonus && reference.weekday_recency_bonus.older != null ? reference.weekday_recency_bonus.older : 0))}点</li>
+            </ul>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>曜日不一致実績</strong>
+            <p class="cloud-panel-note">式: max(10, 役割基礎点 / 4) + 直近ボーナス</p>
+            <p class="cloud-panel-note">90日以内の実績のみ対象です。曜日は違っても直近に勤務実績があれば候補に含めます。</p>
+            <ul class="cloud-assist-reasons">
+              <li>30日以内: +${escapeHtml(String(reference.other_weekday_recency_bonus && reference.other_weekday_recency_bonus.within_30_days != null ? reference.other_weekday_recency_bonus.within_30_days : 0))}点</li>
+              <li>31-90日: +${escapeHtml(String(reference.other_weekday_recency_bonus && reference.other_weekday_recency_bonus.within_90_days != null ? reference.other_weekday_recency_bonus.within_90_days : 0))}点</li>
+              <li>91日以上: 対象外</li>
+            </ul>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>候補者プロファイル</strong>
+            <p class="cloud-panel-note">希望曜日一致: +${escapeHtml(String(reference.preferred_weekday_bonus || 0))}点</p>
+            <ul class="cloud-assist-reasons">
+              <li>希望曜日が一致したら加点します</li>
+              <li>NG曜日が一致した候補は検索結果から除外します</li>
+              <li>候補状態が無効のプロファイルも検索結果から除外します</li>
+            </ul>
+          </article>
+          <article class="cloud-assist-detail-card">
+            <strong>しきい値型の適性学習</strong>
+            <p class="cloud-panel-note">学習元: ${escapeHtml(reference.option_aptitude && reference.option_aptitude.source ? reference.option_aptitude.source : 'assist_records')}</p>
+            <ul class="cloud-assist-reasons">
+              ${((reference.option_aptitude && reference.option_aptitude.tiers) || []).map((tier) => `
+                <li>${escapeHtml(`${tier.label}: ${Number(tier.points || 0) > 0 ? '+' : ''}${tier.points}点`)}</li>
+              `).join('')}
+            </ul>
+            <p class="cloud-panel-note">時間帯または車両オプションを検索したときだけ集計学習を適用します。</p>
+          </article>
+        </div>
+      `;
+      return `
+        <div class="cloud-assist-stack cloud-assist-details-stack">
+          ${buildAssistDetailAccordion(
+            'overview',
+            '点数の見方',
+            '候補者の点数は、曜日・オプション一致、曜日一致、過去実績一致、希望曜日一致、オプション適性の集計学習を加算して計算しています。曜日なしやオプションなしのルールは曜日一致側の式で加点し、NG曜日や無効化された候補は検索結果から除外します。',
+            overviewBody,
+            '基準一覧'
+          )}
+          ${buildAssistDetailAccordion(
+            'formulas',
+            '計算式一覧',
+            '現在の内部式をそのまま一覧化しています。',
+            formulasBody,
+            '内部式'
+          )}
+          <div class="cloud-assist-section cloud-assist-section-results">
+            <div class="cloud-assist-subhead">
+              <div>
+                <strong>最新検索の内訳</strong>
+                <p class="cloud-panel-note">${result && result.query ? escapeHtml(`${result.query.target_date} / ${result.query.weekday_label} / ${result.query.shift_label}`) : 'サーチを実行すると候補ごとの加点内訳を表示します。'}</p>
+              </div>
+              <span class="cloud-note-chip">候補 ${escapeHtml(String(stats.count || 0))}件</span>
+            </div>
+            <div class="cloud-assist-detail-breakdown-list">
+              ${items.length ? items.map((item) => `
+                <article class="cloud-assist-detail-result">
+                  <div class="cloud-assist-result-head">
+                    <div>
+                      <h4>${escapeHtml(item.name || '-')}</h4>
+                      <p>${escapeHtml(item.employee_number || '社員番号なし')}</p>
+                    </div>
+                    <div class="cloud-assist-score">${escapeHtml(String(item.score || 0))}点</div>
+                  </div>
+                  <div class="cloud-assist-result-meta">
+                    <span class="cloud-note-chip">ルール一致 ${escapeHtml(String(item.matched_rule_count || 0))}</span>
+                    <span class="cloud-note-chip">実績一致 ${escapeHtml(String(item.matched_record_count || 0))}</span>
+                  </div>
+                  ${buildAssistDetailResultBreakdown(item)}
+                </article>
+              `).join('') : '<div class="cloud-empty-state"><p>まだ検索していません。</p></div>'}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderAssistModalContent(modal) {
+      const body = modalBody(modal);
+      const footer = modalFooter(modal);
+      normalizeAssistUiState();
+      modal.classList.add('cloud-modal-overlay-workspace');
+      const panel = modal.querySelector('.cloud-modal-panel');
+      if (panel) panel.classList.add('cloud-modal-panel-workspace');
+      body.innerHTML = `
+        <div class="cloud-assist-shell">
+          ${buildAssistTabs()}
+          <div class="cloud-assist-panel${state.assist.activeTab === 'register' ? ' is-active' : ''}" data-assist-panel="register">
+            ${buildAssistRegisterPanel()}
+          </div>
+          <div class="cloud-assist-panel${state.assist.activeTab === 'edit' ? ' is-active' : ''}" data-assist-panel="edit">
+            ${buildAssistEditPanels()}
+          </div>
+          <div class="cloud-assist-panel${state.assist.activeTab === 'search' ? ' is-active' : ''}" data-assist-panel="search">
+            ${buildAssistSearchPanel()}
+          </div>
+          <div class="cloud-assist-panel${state.assist.activeTab === 'details' ? ' is-active' : ''}" data-assist-panel="details">
+            ${buildAssistDetailsPanel()}
+          </div>
+        </div>
+      `;
+      footer.innerHTML = '';
+      bindAssistModalEvents(modal);
+      if (state.assist.activeTab === 'edit') {
+        renderAssistEditLists(modal);
+      }
+    }
+
+    function currentAssistModal() {
+      return document.getElementById('cloud-assist-modal');
+    }
+
+    function filteredAssistRecords() {
+      const filters = state.assist.editFilters || {};
+      return (currentAssistData().records || []).filter((record) => {
+        if (filters.date_from && String(record.date || '') < filters.date_from) return false;
+        if (filters.date_to && String(record.date || '') > filters.date_to) return false;
+        if (filters.shift_key && String(record.shift_key || '') !== filters.shift_key) return false;
+        if (filters.role_type && String(record.role_type || '') !== filters.role_type) return false;
+        if (filters.candidate_query) {
+          const query = filters.candidate_query.toLowerCase();
+          const haystack = [
+            record.candidate_name,
+            record.employee_number,
+            record.notes
+          ].join(' ').toLowerCase();
+          if (!haystack.includes(query)) return false;
+        }
+        return true;
+      });
+    }
+
+    function filteredAssistRules() {
+      const filters = state.assist.editFilters || {};
+      return (currentAssistData().rules || []).filter((rule) => {
+        if (filters.shift_key && String(rule.shift_key || '') !== filters.shift_key) return false;
+        if (filters.candidate_query) {
+          const query = filters.candidate_query.toLowerCase();
+          const haystack = [
+            rule.notes,
+            ...(rule.assignments || []).map((item) => `${item.candidate_name} ${item.employee_number}`)
+          ].join(' ').toLowerCase();
+          if (!haystack.includes(query)) return false;
+        }
+        if (filters.role_type) {
+          const matched = (rule.assignments || []).some((item) => String(item.role_type || '') === filters.role_type);
+          if (!matched) return false;
+        }
+        return true;
+      });
+    }
+
+    function filteredAssistProfiles() {
+      const filters = state.assist.editFilters || {};
+      return (currentAssistData().profiles || []).filter((profile) => {
+        if (filters.candidate_query) {
+          const query = filters.candidate_query.toLowerCase();
+          const haystack = [
+            profile.name,
+            profile.employee_number,
+            ...(profile.preferred_weekday_labels || []),
+            ...(profile.blocked_weekday_labels || [])
+          ].join(' ').toLowerCase();
+          if (!haystack.includes(query)) return false;
+        }
+        return true;
+      });
+    }
+
+    function renderAssistEditLists(modal) {
+      const list = modal.querySelector('[data-assist-edit-list]');
+      if (!list) return;
+      if (state.assist.editView === 'profiles') {
+        const profiles = filteredAssistProfiles();
+        const canEditProfiles = !!(state.assist.permissions && state.assist.permissions.can_edit_profiles);
+        list.innerHTML = profiles.length ? profiles.map((profile) => `
+          <article class="cloud-assist-card">
+            <div class="cloud-assist-card-head">
+              <div>
+                <h4>${escapeHtml(profile.name || '-')}</h4>
+                <p>${escapeHtml(profile.employee_number || '社員番号なし')}</p>
+              </div>
+              <div class="cloud-actions compact${canEditProfiles ? '' : ' cloud-hidden'}">
+                <button type="button" class="cloud-btn secondary" data-assist-edit-profile="${escapeHtml(profile.id)}">編集</button>
+              </div>
+            </div>
+            <div class="cloud-assist-card-meta">
+              <span>${profile.active === false ? '検索対象外' : '有効'}</span>
+              <span>${escapeHtml(`希望 ${assistWeekdaySummary(profile.preferred_weekdays || [], 'なし')}`)}</span>
+              <span>${escapeHtml(`NG ${assistWeekdaySummary(profile.blocked_weekdays || [], 'なし')}`)}</span>
+            </div>
+            <div class="cloud-assist-summary-row">
+              ${(profile.preferred_weekday_labels || []).map((label) => `
+                <span class="cloud-assist-summary-chip is-preferred">希望 ${escapeHtml(label)}</span>
+              `).join('')}
+              ${(profile.blocked_weekday_labels || []).map((label) => `
+                <span class="cloud-assist-summary-chip is-blocked">NG ${escapeHtml(label)}</span>
+              `).join('')}
+              ${!(profile.preferred_weekday_labels || []).length && !(profile.blocked_weekday_labels || []).length ? '<span class="cloud-note-chip">曜日条件なし</span>' : ''}
+            </div>
+          </article>
+        `).join('') : '<div class="cloud-empty-state"><p>一致する候補者プロファイルはありません。</p></div>';
+        bindAssistEditListEvents(modal);
+        return;
+      }
+      if (state.assist.editView === 'rules') {
+        const rules = filteredAssistRules();
+        const canEditRules = !!(state.assist.permissions && state.assist.permissions.can_edit_rules);
+        list.innerHTML = rules.length ? rules.map((rule) => `
+          <article class="cloud-assist-card">
+              <div class="cloud-assist-card-head">
+              <div>
+                <h4>${escapeHtml(assistRuleDisplayLabel(rule))}</h4>
+                <p>${rule.enabled ? '有効' : '無効'}</p>
+              </div>
+              <div class="cloud-actions compact${canEditRules ? '' : ' cloud-hidden'}">
+                <button type="button" class="cloud-btn secondary" data-assist-edit-rule="${escapeHtml(rule.id)}">編集</button>
+                <button type="button" class="cloud-btn ghost" data-assist-delete-rule="${escapeHtml(rule.id)}">削除</button>
+              </div>
+            </div>
+            <div class="cloud-assist-summary-row">
+              ${buildAssistRuleSummary(rule)}
+            </div>
+            <p class="cloud-panel-note">${escapeHtml(rule.notes || 'メモなし')}</p>
+          </article>
+        `).join('') : '<div class="cloud-empty-state"><p>一致するルールはありません。</p></div>';
+        bindAssistEditListEvents(modal);
+        return;
+      }
+      const records = filteredAssistRecords();
+      list.innerHTML = records.length ? records.map((record) => `
+        <article class="cloud-assist-card">
+          <div class="cloud-assist-card-head">
+            <div>
+              <h4>${escapeHtml(record.candidate_name || '-')}</h4>
+              <p>${escapeHtml(`${record.date} (${record.weekday_label}) / ${record.shift_label} / ${record.role_label}`)}</p>
+            </div>
+            <div class="cloud-actions compact">
+              <button type="button" class="cloud-btn secondary" data-assist-edit-record="${escapeHtml(record.id)}">編集</button>
+              <button type="button" class="cloud-btn ghost" data-assist-delete-record="${escapeHtml(record.id)}">削除</button>
+            </div>
+          </div>
+          <div class="cloud-assist-card-meta">
+            <span>${escapeHtml(record.employee_number || '社員番号なし')}</span>
+            <span>${escapeHtml(record.updated_by || '')}</span>
+          </div>
+          <p class="cloud-panel-note">${escapeHtml(record.notes || 'メモなし')}</p>
+        </article>
+      `).join('') : '<div class="cloud-empty-state"><p>一致する実績はありません。</p></div>';
+      bindAssistEditListEvents(modal);
+    }
+
+    function collectAssistCandidatePayload(form, prefix) {
+      return {
+        candidate_id: (form.querySelector(`input[name="${prefix}_candidate_id"]`) || {}).value || '',
+        candidate_name: (form.querySelector(`input[name="${prefix}_candidate_name"]`) || {}).value || '',
+        employee_number: (form.querySelector(`input[name="${prefix}_employee_number"]`) || {}).value || ''
+      };
+    }
+
+    function collectAssistRecordPayload(form) {
+      return Object.assign(collectAssistCandidatePayload(form, form.getAttribute('data-form-id')), {
+        date: form.querySelector('[name="date"]').value,
+        shift_key: form.querySelector('[name="shift_key"]').value,
+        role_type: form.querySelector('[name="role_type"]').value,
+        notes: form.querySelector('[name="notes"]').value
+      });
+    }
+
+    function collectAssistRulePayload(form) {
+      const assignments = Array.from(form.querySelectorAll('[data-assist-assignment-row]')).map((row) => {
+        const field = row.querySelector('[data-assist-candidate-field]');
+        const refs = assistCandidateFieldRefs(field);
+        return {
+          candidate_id: refs.idInput ? refs.idInput.value : '',
+          candidate_name: refs.nameInput ? refs.nameInput.value : '',
+          employee_number: refs.employeeInput ? refs.employeeInput.value : '',
+          role_type: (row.querySelector('[name="role_type"]') || {}).value || 'dedicated',
+          priority: (row.querySelector('[name="priority"]') || {}).value || '1',
+          custom_points: (row.querySelector('[name="custom_points"]') || {}).value || '0'
+        };
+      }).filter((item) => item.candidate_name);
+      return {
+        weekday: form.querySelector('[name="weekday"]').value,
+        shift_key: form.querySelector('[name="shift_key"]').value,
+        enabled: form.querySelector('[name="enabled"]').value === 'true',
+        notes: form.querySelector('[name="notes"]').value,
+        assignments
+      };
+    }
+
+    function collectAssistProfilePayload(form) {
+      const collectWeekdays = (name) => Array.from(form.querySelectorAll(`input[name="${name}"]:checked`))
+        .map((input) => parseInt(input.value, 10))
+        .filter((value) => Number.isInteger(value));
+      return {
+        active: (form.querySelector('[name="active"]') || {}).value === 'true',
+        preferred_weekdays: collectWeekdays('preferred_weekdays'),
+        blocked_weekdays: collectWeekdays('blocked_weekdays')
+      };
+    }
+
+    function assistDateTextForDay(day) {
+      const month = currentMonth();
+      const parsedDay = parseInt(day || '0', 10);
+      if (!month || !parsedDay) return defaultAssistTargetDate();
+      return `${month.year}-${String(month.month).padStart(2, '0')}-${String(parsedDay).padStart(2, '0')}`;
+    }
+
+    function assistSelectedShiftKeyForDay(day) {
+      if (!window.ShifterSync || !ShifterSync.getSelectedOptionsForDay) return '';
+      const options = ShifterSync.getSelectedOptionsForDay(String(day));
+      return Array.isArray(options) && options.length ? String(options[0] || '') : '';
+    }
+
+    function parseCalendarAssistEntry(entry) {
+      const value = String(entry && entry.value ? entry.value : '').trim();
+      const match = value.match(/^!([^!]+)!(.+)$/);
+      return {
+        shift_key: match ? String(match[1] || '').trim() : '',
+        candidate_name: (match ? String(match[2] || '') : value).trim(),
+        employee_number: String(entry && entry.employee_number ? entry.employee_number : '').trim(),
+        notes: String(entry && entry.comment ? entry.comment : '').trim()
+      };
+    }
+
+    function currentDayEntries(day) {
+      const entriesPerDay = currentEntriesSnapshot();
+      return Array.isArray(entriesPerDay[String(day)]) ? entriesPerDay[String(day)] : [];
+    }
+
+    async function executeAssistSearch(payload) {
+      const normalized = {
+        target_date: payload && payload.target_date ? payload.target_date : defaultAssistTargetDate(),
+        shift_key: payload && payload.shift_key ? payload.shift_key : ''
+      };
+      state.assist.searchForm = Object.assign({}, normalized);
+      state.assist.searchResult = await requestJson(`${assistBasePath()}/search`, {
+        method: 'POST',
+        body: normalized
+      });
+      return state.assist.searchResult;
+    }
+
+    async function saveAssistRecord(form, recordId) {
+      const payload = assistRequestOptions(collectAssistRecordPayload(form));
+      const base = assistBasePath();
+      const response = await requestJson(recordId ? `${base}/records/${recordId}` : `${base}/records`, {
+        method: recordId ? 'PUT' : 'POST',
+        body: payload
+      });
+      state.assist.data = response.assist || currentAssistData();
+      state.assist.loaded = true;
+      if (!recordId) {
+        state.assist.recordDraft = null;
+      }
+      const modal = currentAssistModal();
+      if (modal && !modal.classList.contains('cloud-hidden')) {
+        renderAssistModalContent(modal);
+      }
+      return response;
+    }
+
+    async function saveAssistRule(form, ruleId) {
+      const base = assistBasePath();
+      const response = await requestJson(ruleId ? `${base}/rules/${ruleId}` : `${base}/rules`, {
+        method: ruleId ? 'PUT' : 'POST',
+        body: collectAssistRulePayload(form)
+      });
+      state.assist.data = response.assist || currentAssistData();
+      state.assist.loaded = true;
+      const modal = currentAssistModal();
+      if (modal && !modal.classList.contains('cloud-hidden')) {
+        renderAssistModalContent(modal);
+      }
+      return response;
+    }
+
+    async function saveAssistProfile(form, profileId) {
+      const response = await requestJson(`${assistBasePath()}/profiles/${profileId}`, {
+        method: 'PUT',
+        body: collectAssistProfilePayload(form)
+      });
+      state.assist.data = response.assist || currentAssistData();
+      state.assist.loaded = true;
+      const modal = currentAssistModal();
+      if (modal && !modal.classList.contains('cloud-hidden')) {
+        renderAssistModalContent(modal);
+      }
+      return response;
+    }
+
+    async function deleteAssistRecord(recordId) {
+      if (!window.confirm('この実績を削除しますか？')) return;
+      const payload = PAGE.type === 'public' && PAGE.accessMode === 'edit'
+        ? assistRequestOptions({})
+        : {};
+      const response = await requestJson(`${assistBasePath()}/records/${recordId}`, {
+        method: 'DELETE',
+        body: payload
+      });
+      state.assist.data = response.assist || currentAssistData();
+      state.assist.loaded = true;
+      const modal = currentAssistModal();
+      if (modal && !modal.classList.contains('cloud-hidden')) {
+        renderAssistModalContent(modal);
+      }
+    }
+
+    async function deleteAssistRule(ruleId) {
+      if (!window.confirm('このシフトルールを削除しますか？')) return;
+      const response = await requestJson(`${assistBasePath()}/rules/${ruleId}`, {
+        method: 'DELETE',
+        body: {}
+      });
+      state.assist.data = response.assist || currentAssistData();
+      state.assist.loaded = true;
+      const modal = currentAssistModal();
+      if (modal && !modal.classList.contains('cloud-hidden')) {
+        renderAssistModalContent(modal);
+      }
+    }
+
+    async function runAssistSearch(form) {
+      await executeAssistSearch({
+        target_date: form.querySelector('[name="target_date"]').value,
+        shift_key: form.querySelector('[name="shift_key"]').value
+      });
+      const modal = currentAssistModal();
+      if (modal && !modal.classList.contains('cloud-hidden')) {
+        renderAssistModalContent(modal);
+      }
+    }
+
+    function resetAssistFilters() {
+      state.assist.editFilters = {
+        date_from: '',
+        date_to: '',
+        shift_key: '',
+        role_type: '',
+        candidate_query: ''
+      };
+    }
+
+    async function withAssistPending(trigger, task) {
+      const button = trigger || null;
+      if (button) {
+        if (button.dataset.assistPending === '1') return;
+        button.dataset.assistPending = '1';
+        button.disabled = true;
+      }
+      try {
+        return await task();
+      } finally {
+        if (button) {
+          button.disabled = false;
+          delete button.dataset.assistPending;
+        }
+      }
+    }
+
+    async function openAssistRecordEditModal(recordId) {
+      const record = (currentAssistData().records || []).find((item) => item.id === recordId);
+      if (!record) return;
+      const modal = openCloudModal('cloud-assist-record-edit-modal', 'アシスト実績の編集');
+      modalBody(modal).innerHTML = buildAssistRecordForm(record, `assist-edit-record-${recordId}`, '更新する');
+      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-assist-record-close>閉じる</button>';
+      modalFooter(modal).querySelector('[data-cloud-assist-record-close]').addEventListener('click', () => closeCloudModal('cloud-assist-record-edit-modal'));
+      bindAssistFormEvents(modal);
+      modal.querySelector('[data-assist-record-form]').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submitter = event.submitter || event.currentTarget.querySelector('[type="submit"]');
+        try {
+          await withAssistPending(submitter, () => saveAssistRecord(event.currentTarget, recordId));
+          closeCloudModal('cloud-assist-record-edit-modal');
+          showFlash('アシスト実績を更新しました', 'success');
+        } catch (error) {
+          showFlash(error.message, 'error');
+        }
+      });
+    }
+
+    async function openAssistRuleEditModal(ruleId) {
+      const rule = (currentAssistData().rules || []).find((item) => item.id === ruleId);
+      if (!rule) return;
+      const modal = openCloudModal('cloud-assist-rule-edit-modal', 'シフトルールの編集');
+      modalBody(modal).innerHTML = buildAssistRuleForm(rule, `assist-edit-rule-${ruleId}`, '更新する');
+      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-assist-rule-close>閉じる</button>';
+      modalFooter(modal).querySelector('[data-cloud-assist-rule-close]').addEventListener('click', () => closeCloudModal('cloud-assist-rule-edit-modal'));
+      bindAssistFormEvents(modal);
+      modal.querySelector('[data-assist-rule-form]').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submitter = event.submitter || event.currentTarget.querySelector('[type="submit"]');
+        try {
+          await withAssistPending(submitter, () => saveAssistRule(event.currentTarget, ruleId));
+          closeCloudModal('cloud-assist-rule-edit-modal');
+          showFlash('シフトルールを更新しました', 'success');
+        } catch (error) {
+          showFlash(error.message, 'error');
+        }
+      });
+    }
+
+    async function openAssistProfileEditModal(profileId) {
+      const profile = (currentAssistData().profiles || []).find((item) => item.id === profileId);
+      if (!profile) return;
+      const modal = openCloudModal('cloud-assist-profile-edit-modal', '候補者プロファイルの編集');
+      modalBody(modal).innerHTML = buildAssistProfileForm(profile, `assist-edit-profile-${profileId}`, '更新する');
+      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-assist-profile-close>閉じる</button>';
+      modalFooter(modal).querySelector('[data-cloud-assist-profile-close]').addEventListener('click', () => closeCloudModal('cloud-assist-profile-edit-modal'));
+      modal.querySelector('[data-assist-profile-form]').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submitter = event.submitter || event.currentTarget.querySelector('[type="submit"]');
+        try {
+          await withAssistPending(submitter, () => saveAssistProfile(event.currentTarget, profileId));
+          closeCloudModal('cloud-assist-profile-edit-modal');
+          showFlash('候補者プロファイルを更新しました', 'success');
+        } catch (error) {
+          showFlash(error.message, 'error');
+        }
+      });
+    }
+
+    function bindAssistFormEvents(scope) {
+      scope.querySelectorAll('[data-assist-candidate-input]').forEach((input) => {
+        input.addEventListener('input', () => scheduleAssistCandidateSearch(input.closest('[data-assist-candidate-field]')));
+      });
+      scope.querySelectorAll('[name="date"]').forEach((input) => {
+        const note = input.parentElement ? input.parentElement.querySelector('[data-assist-date-note]') : null;
+        const sync = () => {
+          if (note) note.textContent = assistWeekdayLabelFromDate(input.value);
+        };
+        input.addEventListener('input', sync);
+        input.addEventListener('change', sync);
+        sync();
+      });
+      scope.querySelectorAll('[data-assist-add-assignment]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const container = button.closest('form').querySelector('[data-assist-assignments]');
+          container.insertAdjacentHTML('beforeend', buildAssistRuleAssignmentRow({ role_type: 'backup', priority: 1 }, container.children.length));
+          bindAssistFormEvents(container);
+        });
+      });
+      scope.querySelectorAll('[data-assist-remove-assignment]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const row = button.closest('[data-assist-assignment-row]');
+          const container = row.parentElement;
+          row.remove();
+          if (!container.querySelector('[data-assist-assignment-row]')) {
+            container.insertAdjacentHTML('beforeend', buildAssistRuleAssignmentRow({ role_type: 'backup', priority: 1 }, 0));
+            bindAssistFormEvents(container);
+          }
+        });
+      });
+      if (!scope.dataset.assistCandidateClickBound) {
+        scope.dataset.assistCandidateClickBound = '1';
+        scope.addEventListener('click', (event) => {
+          const candidate = event.target.closest('.cloud-assist-candidate');
+          if (!candidate) return;
+          event.preventDefault();
+          applyAssistCandidateSelection(candidate.closest('[data-assist-candidate-field]'), {
+            candidate_id: candidate.getAttribute('data-candidate-id') || '',
+            candidate_name: candidate.getAttribute('data-candidate-name') || candidate.getAttribute('data-employee-name') || '',
+            employee_name: candidate.getAttribute('data-employee-name') || '',
+            employee_number: candidate.getAttribute('data-employee-number') || ''
+          });
+        });
+      }
+    }
+
+    function bindAssistModalEvents(modal) {
+      bindAssistFormEvents(modal);
+      modal.querySelectorAll('[data-assist-tab]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.assist.activeTab = button.getAttribute('data-assist-tab') || 'register';
+          renderAssistModalContent(modal);
+        });
+      });
+      modal.querySelectorAll('[data-assist-register-view]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.assist.registerView = button.getAttribute('data-assist-register-view') || 'record';
+          renderAssistModalContent(modal);
+        });
+      });
+      modal.querySelectorAll('[data-assist-edit-view]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.assist.editView = button.getAttribute('data-assist-edit-view') || 'records';
+          renderAssistModalContent(modal);
+        });
+      });
+      modal.querySelectorAll('[data-assist-detail-toggle]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const sectionKey = button.getAttribute('data-assist-detail-toggle') || '';
+          if (!sectionKey) return;
+          state.assist.detailSections = Object.assign({}, state.assist.detailSections || {}, {
+            [sectionKey]: !((state.assist.detailSections || {})[sectionKey] === true)
+          });
+          renderAssistModalContent(modal);
+        });
+      });
+      modal.querySelectorAll('[data-assist-reset-filters]').forEach((button) => {
+        button.addEventListener('click', () => {
+          resetAssistFilters();
+          renderAssistModalContent(modal);
+        });
+      });
+      const recordCreateForm = modal.querySelector('[data-assist-record-form][data-form-id="assist-create-record"]');
+      if (recordCreateForm) {
+        recordCreateForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const submitter = event.submitter || event.currentTarget.querySelector('[type="submit"]');
+          try {
+            await withAssistPending(submitter, () => saveAssistRecord(event.currentTarget, ''));
+            showFlash('アシスト実績を登録しました', 'success');
+          } catch (error) {
+            showFlash(error.message, 'error');
+          }
+        });
+      }
+      const ruleCreateForm = modal.querySelector('[data-assist-rule-form][data-form-id="assist-create-rule"]');
+      if (ruleCreateForm) {
+        ruleCreateForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const submitter = event.submitter || event.currentTarget.querySelector('[type="submit"]');
+          try {
+            await withAssistPending(submitter, () => saveAssistRule(event.currentTarget, ''));
+            showFlash('シフトルールを登録しました', 'success');
+          } catch (error) {
+            showFlash(error.message, 'error');
+          }
+        });
+      }
+      const searchForm = modal.querySelector('[data-assist-search-form]');
+      if (searchForm) {
+        searchForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const submitter = event.submitter || event.currentTarget.querySelector('[type="submit"]');
+          try {
+            await withAssistPending(submitter, () => runAssistSearch(event.currentTarget));
+          } catch (error) {
+            showFlash(error.message, 'error');
+          }
+        });
+      }
+      modal.querySelectorAll('[name="assist-filter-date-from"], [name="assist-filter-date-to"], [name="assist-filter-shift"], [name="assist-filter-role"], [name="assist-filter-candidate"]').forEach((input) => {
+        const syncFilters = () => {
+          state.assist.editFilters = {
+            date_from: (modal.querySelector('[name="assist-filter-date-from"]') || {}).value || '',
+            date_to: (modal.querySelector('[name="assist-filter-date-to"]') || {}).value || '',
+            shift_key: (modal.querySelector('[name="assist-filter-shift"]') || {}).value || '',
+            role_type: (modal.querySelector('[name="assist-filter-role"]') || {}).value || '',
+            candidate_query: (modal.querySelector('[name="assist-filter-candidate"]') || {}).value || ''
+          };
+          if (state.assist.activeTab === 'edit') {
+            renderAssistEditLists(modal);
+          }
+        };
+        input.addEventListener('input', syncFilters);
+        input.addEventListener('change', syncFilters);
+      });
+    }
+
+    function bindAssistEditListEvents(modal) {
+      modal.querySelectorAll('[data-assist-edit-record]').forEach((button) => {
+        button.addEventListener('click', () => openAssistRecordEditModal(button.getAttribute('data-assist-edit-record')).catch((error) => showFlash(error.message, 'error')));
+      });
+      modal.querySelectorAll('[data-assist-delete-record]').forEach((button) => {
+        button.addEventListener('click', () => deleteAssistRecord(button.getAttribute('data-assist-delete-record')).catch((error) => showFlash(error.message, 'error')));
+      });
+      modal.querySelectorAll('[data-assist-edit-rule]').forEach((button) => {
+        button.addEventListener('click', () => openAssistRuleEditModal(button.getAttribute('data-assist-edit-rule')).catch((error) => showFlash(error.message, 'error')));
+      });
+      modal.querySelectorAll('[data-assist-delete-rule]').forEach((button) => {
+        button.addEventListener('click', () => deleteAssistRule(button.getAttribute('data-assist-delete-rule')).catch((error) => showFlash(error.message, 'error')));
+      });
+      modal.querySelectorAll('[data-assist-edit-profile]').forEach((button) => {
+        button.addEventListener('click', () => openAssistProfileEditModal(button.getAttribute('data-assist-edit-profile')).catch((error) => showFlash(error.message, 'error')));
+      });
+    }
+
+    async function openAssistModal(options) {
+      const next = options || {};
+      if (!isAssistAvailable()) {
+        showFlash('アシスト機能は scene モードで利用できます', 'info');
+        return;
+      }
+      if (Object.prototype.hasOwnProperty.call(next, 'activeTab')) {
+        state.assist.activeTab = next.activeTab;
+      }
+      if (Object.prototype.hasOwnProperty.call(next, 'registerView')) {
+        state.assist.registerView = next.registerView;
+      }
+      if (Object.prototype.hasOwnProperty.call(next, 'recordDraft')) {
+        state.assist.recordDraft = next.recordDraft;
+      }
+      if (Object.prototype.hasOwnProperty.call(next, 'dayContext')) {
+        state.assist.dayContext = next.dayContext;
+      }
+      if (Object.prototype.hasOwnProperty.call(next, 'searchForm')) {
+        state.assist.searchForm = Object.assign(
+          {
+            target_date: defaultAssistTargetDate(),
+            shift_key: ''
+          },
+          next.searchForm || {}
+        );
+      }
+      const modal = openCloudModal('cloud-assist-modal', `アシスト / ${currentProject().title}`);
+      modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>アシストデータを読み込み中です...</p></div>';
+      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-assist-close>閉じる</button>';
+      modalFooter(modal).querySelector('[data-cloud-assist-close]').addEventListener('click', () => closeCloudModal('cloud-assist-modal'));
+      await ensureAssistLoaded(false);
+      if (next.autoSearch) {
+        await executeAssistSearch(state.assist.searchForm || {});
+      }
+      renderAssistModalContent(modal);
+    }
+
+    function buildAssistDayActionModal(day) {
+      const dateText = assistDateTextForDay(day);
+      const shiftKey = assistSelectedShiftKeyForDay(day);
+      const entries = currentDayEntries(day).map((entry) => parseCalendarAssistEntry(entry)).filter((entry) => entry.candidate_name);
+      return `
+        <div class="cloud-assist-stack">
+          <div class="cloud-assist-section">
+            <div class="cloud-assist-subhead">
+              <div>
+                <strong>候補者を探す</strong>
+                <p class="cloud-panel-note">${escapeHtml(`${dateText} / ${assistShiftLabel(shiftKey)}`)} を条件に assist サーチを開きます。</p>
+              </div>
+            </div>
+            <div class="cloud-actions compact">
+              <button type="button" class="cloud-btn primary" data-day-assist-search="${escapeHtml(String(day))}" data-day-assist-shift="${escapeHtml(shiftKey)}">この日で候補を検索</button>
+            </div>
+          </div>
+          <div class="cloud-assist-section">
+            <div class="cloud-assist-subhead">
+              <div>
+                <strong>実績として登録</strong>
+                <p class="cloud-panel-note">カレンダーに入っている内容を assist 実績登録フォームへ引き継ぎます。</p>
+              </div>
+            </div>
+            <div class="cloud-assist-detail-breakdown-list">
+              ${entries.length ? entries.map((entry, index) => `
+                <article class="cloud-assist-detail-breakdown-item">
+                  <div class="cloud-assist-result-head">
+                    <div>
+                      <strong>${escapeHtml(entry.candidate_name)}</strong>
+                      <p class="cloud-panel-note">${escapeHtml(`${assistShiftLabel(entry.shift_key)} / ${entry.employee_number || '社員番号なし'}`)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      class="cloud-btn secondary"
+                      data-day-assist-record="${escapeHtml(String(day))}"
+                      data-day-assist-index="${escapeHtml(String(index))}"
+                    >この内容で登録</button>
+                  </div>
+                  <p class="cloud-panel-note">${escapeHtml(entry.notes || 'コメントなし')}</p>
+                </article>
+              `).join('') : `
+                <div class="cloud-empty-state">
+                  <p>この日に登録済みエントリはありません。空の実績登録フォームを開けます。</p>
+                  <div class="cloud-actions compact">
+                    <button type="button" class="cloud-btn secondary" data-day-assist-record="${escapeHtml(String(day))}" data-day-assist-index="">空の実績登録フォームを開く</button>
+                  </div>
+                </div>
+              `}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function openAssistDayActionModal(day) {
+      if (!isAssistAvailable()) {
+        showFlash('アシスト機能は scene モードで利用できます', 'info');
+        return;
+      }
+      const modal = openCloudModal('cloud-assist-day-modal', `アシスト / ${assistDateTextForDay(day)}`);
+      modalBody(modal).innerHTML = buildAssistDayActionModal(day);
+      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-assist-day-close>閉じる</button>';
+      modalFooter(modal).querySelector('[data-cloud-assist-day-close]').addEventListener('click', () => closeCloudModal('cloud-assist-day-modal'));
+      modal.querySelectorAll('[data-day-assist-search]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          closeCloudModal('cloud-assist-day-modal');
+          const dateText = assistDateTextForDay(button.getAttribute('data-day-assist-search'));
+          const shiftKey = button.getAttribute('data-day-assist-shift') || '';
+          await openAssistModal({
+            activeTab: 'search',
+            recordDraft: null,
+            dayContext: {
+              date: dateText,
+              shift_key: shiftKey
+            },
+            searchForm: {
+              target_date: dateText,
+              shift_key: shiftKey
+            },
+            autoSearch: true
+          });
+        });
+      });
+      modal.querySelectorAll('[data-day-assist-record]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          closeCloudModal('cloud-assist-day-modal');
+          const targetDay = button.getAttribute('data-day-assist-record');
+          const index = button.getAttribute('data-day-assist-index');
+          const dateText = assistDateTextForDay(targetDay);
+          const entries = currentDayEntries(targetDay).map((entry) => parseCalendarAssistEntry(entry));
+          const source = index === '' ? null : entries[parseInt(index || '0', 10)] || null;
+          await openAssistModal({
+            activeTab: 'register',
+            registerView: 'record',
+            dayContext: {
+              date: dateText,
+              shift_key: source && source.shift_key ? source.shift_key : assistSelectedShiftKeyForDay(targetDay)
+            },
+            recordDraft: {
+              date: dateText,
+              shift_key: source && source.shift_key ? source.shift_key : assistSelectedShiftKeyForDay(targetDay),
+              candidate_name: source ? source.candidate_name : '',
+              employee_number: source ? source.employee_number : '',
+              notes: source ? source.notes : ''
+            }
+          });
+        });
+      });
     }
 
     function switchTab(tabName) {
@@ -705,7 +2709,25 @@
     function ensureCloudActionButtons() {
       ensureActionButton('cloud-open-summary', '月間集計', 'cloud-btn secondary', () => openSummaryModal().catch((error) => showFlash(error.message, 'error')));
       if (PAGE.type === 'owner' || PAGE.accessMode === 'edit') {
-        ensureActionButton('cloud-open-bulk-edit', '範囲一括編集', 'cloud-btn secondary', () => openBulkEditModal().catch((error) => showFlash(error.message, 'error')));
+        ensureActionButton('cloud-open-assist', 'アシスト', 'cloud-btn secondary', () => openAssistModal({
+          activeTab: 'register',
+          registerView: 'record',
+          recordDraft: null,
+          dayContext: null,
+          searchForm: {
+            target_date: defaultAssistTargetDate(),
+            shift_key: ''
+          }
+        }).catch((error) => showFlash(error.message, 'error')));
+      }
+      if (PAGE.type === 'owner' || PAGE.accessMode === 'edit') {
+        ensureActionButton('cloud-open-bulk-edit', '範囲一括編集', 'cloud-btn secondary', () => {
+          try {
+            openBulkEditModal();
+          } catch (error) {
+            showFlash(error.message, 'error');
+          }
+        });
       }
       if (PAGE.type === 'owner') {
         ensureActionButton('cloud-open-restore', '復元', 'cloud-btn ghost', () => openRestoreModal().catch((error) => showFlash(error.message, 'error')));
@@ -739,6 +2761,42 @@
       return monthDayKeys(currentMonth()).map((day) => parseInt(day, 10));
     }
 
+    function buildBulkDatePickCells(month) {
+      if (!month) return '';
+      const totalDays = monthDays(month);
+      const firstDow = (new Date(month.year, month.month - 1, 1).getDay() + 6) % 7;
+      const cells = [];
+      for (let index = 0; index < firstDow; index += 1) {
+        cells.push('<div class="cloud-bulk-date-cell is-empty" aria-hidden="true"></div>');
+      }
+      for (let day = 1; day <= totalDays; day += 1) {
+        cells.push(`
+          <button
+            type="button"
+            class="cloud-bulk-date-cell"
+            data-bulk-picked-day="${day}"
+            aria-pressed="false"
+          >${day}</button>
+        `);
+      }
+      return cells.join('');
+    }
+
+    function selectedPickedDaysFromBulkForm(form) {
+      return Array.from(form.querySelectorAll('[data-bulk-picked-day].is-selected'))
+        .map((button) => parseInt(button.getAttribute('data-bulk-picked-day') || '0', 10))
+        .filter((day) => !!day)
+        .sort((a, b) => a - b);
+    }
+
+    function toggleBulkPickedDay(form, day) {
+      const button = form.querySelector(`[data-bulk-picked-day="${day}"]`);
+      if (!button) return;
+      const selected = !button.classList.contains('is-selected');
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    }
+
     function weekdayKeyForDay(day) {
       const month = currentMonth();
       if (!month) return null;
@@ -769,6 +2827,9 @@
         const selected = Array.from(form.querySelectorAll('[data-bulk-weekday]:checked')).map((input) => parseInt(input.value, 10));
         if (!selected.length) return [];
         return days.filter((day) => selected.includes(weekdayKeyForDay(day)));
+      }
+      if (scope === 'picked') {
+        return selectedPickedDaysFromBulkForm(form);
       }
       return [];
     }
@@ -907,10 +2968,12 @@
       const copy = form.querySelector('[data-bulk-copy]');
       const ranges = form.querySelectorAll('[data-bulk-range]');
       const weekdays = form.querySelector('[data-bulk-weekdays]');
+      const picked = form.querySelector('[data-bulk-picked-days]');
       template.classList.toggle('cloud-hidden', operation === 'delete' || operation === 'copy');
       copy.classList.toggle('cloud-hidden', operation !== 'copy');
       ranges.forEach((node) => node.classList.toggle('cloud-hidden', scope !== 'range'));
       weekdays.classList.toggle('cloud-hidden', scope !== 'weekdays');
+      picked.classList.toggle('cloud-hidden', scope !== 'picked');
     }
 
     function updateBulkPreview(form) {
@@ -1172,6 +3235,7 @@
                 <option value="range">期間指定</option>
                 <option value="weekdays">曜日指定</option>
                 <option value="weekends">土日</option>
+                <option value="picked">日付を選んで選択</option>
               </select>
             </label>
             <label class="cloud-field" data-bulk-range>
@@ -1184,6 +3248,24 @@
             </label>
             <div class="cloud-bulk-weekdays" data-bulk-weekdays>
               ${buildBulkWeekdayChecks()}
+            </div>
+            <div class="cloud-bulk-picked-days cloud-hidden" data-bulk-picked-days>
+              <div class="cloud-bulk-picked-head">
+                <span>日付をクリックして対象日を選択</span>
+                <button type="button" class="cloud-btn ghost" data-bulk-picked-clear>選択解除</button>
+              </div>
+              <div class="cloud-bulk-picked-weekdays">
+                <span>月</span>
+                <span>火</span>
+                <span>水</span>
+                <span>木</span>
+                <span>金</span>
+                <span>土</span>
+                <span>日</span>
+              </div>
+              <div class="cloud-bulk-picked-grid">
+                ${buildBulkDatePickCells(month)}
+              </div>
             </div>
             <label class="cloud-field">
               <span>操作</span>
@@ -1257,6 +3339,25 @@
       form.querySelectorAll('[data-bulk-weekday], [name="bulk_start_day"], [name="bulk_end_day"], [name="bulk_copy_source_day"]').forEach((node) => {
         node.addEventListener('input', () => updateBulkPreview(form));
         node.addEventListener('change', () => updateBulkPreview(form));
+      });
+      form.addEventListener('click', (event) => {
+        const pickedDay = event.target.closest('[data-bulk-picked-day]');
+        if (pickedDay) {
+          event.preventDefault();
+          toggleBulkPickedDay(form, parseInt(pickedDay.getAttribute('data-bulk-picked-day') || '0', 10));
+          updateBulkPreview(form);
+          return;
+        }
+        const clearButton = event.target.closest('[data-bulk-picked-clear]');
+        if (clearButton) {
+          event.preventDefault();
+          form.querySelectorAll('[data-bulk-picked-day].is-selected').forEach((button) => {
+            button.classList.remove('is-selected');
+            button.setAttribute('aria-pressed', 'false');
+          });
+          updateBulkPreview(form);
+          return;
+        }
       });
       form.addEventListener('click', (event) => {
         const candidate = event.target.closest('.cloud-bulk-employee-candidate');
@@ -1402,6 +3503,7 @@
       }
 
       if (!project) {
+        resetAssistState();
         if ($('cloud-editor-panel')) $('cloud-editor-panel').innerHTML = '';
         updateCurrentProjectLabel();
         renderLeaveSyncControls();
@@ -1453,6 +3555,7 @@
       if ($('cloud-add-next-month')) $('cloud-add-next-month').classList.toggle('cloud-hidden', !editable);
       if ($('cloud-create-first-month')) $('cloud-create-first-month').classList.toggle('cloud-hidden', !editable);
       if ($('cloud-open-summary')) $('cloud-open-summary').classList.toggle('cloud-hidden', !month);
+      if ($('cloud-open-assist')) $('cloud-open-assist').classList.toggle('cloud-hidden', !isAssistAvailable());
       if ($('cloud-open-bulk-edit')) $('cloud-open-bulk-edit').classList.toggle('cloud-hidden', !month || !editable || (PAGE.type === 'public' && PAGE.accessMode !== 'edit'));
       if ($('cloud-open-restore')) $('cloud-open-restore').classList.toggle('cloud-hidden', !month || PAGE.type !== 'owner');
 
@@ -1510,6 +3613,7 @@
       const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}${suffix}`));
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      syncAssistContext();
       renderProjectList();
       renderWorkspace(true);
       await loadLeaveSyncCalendars(projectId);
@@ -1526,6 +3630,7 @@
       }
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      syncAssistContext();
       updateCurrentProjectLabel();
       renderWorkspace(PAGE.accessMode === 'edit');
     }
@@ -1672,6 +3777,7 @@
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}`, { method: 'DELETE' });
       state.projectPayload = null;
       state.baseMonth = null;
+      resetAssistState();
       await loadProjects();
       updateCurrentProjectLabel();
       switchTab('list');
@@ -1686,6 +3792,7 @@
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}`, { method: 'DELETE' });
       state.projectPayload = null;
       state.baseMonth = null;
+      resetAssistState();
       state.leaveSync.calendars = [];
       state.leaveSync.selectedCalendarId = '';
       await loadProjects();
@@ -1854,6 +3961,13 @@
         });
       });
 
+      document.addEventListener('click', (event) => {
+        const button = event.target.closest('.day-assist-trigger');
+        if (!button) return;
+        event.preventDefault();
+        openAssistDayActionModal(button.getAttribute('data-day')).catch((error) => showFlash(error.message, 'error'));
+      });
+
       const syncCalendar = $('cloud-sync-calendar');
       if (syncCalendar) {
         syncCalendar.addEventListener('change', (event) => {
@@ -1974,6 +4088,13 @@
         });
       }
 
+      document.addEventListener('click', (event) => {
+        const button = event.target.closest('.day-assist-trigger');
+        if (!button) return;
+        event.preventDefault();
+        openAssistDayActionModal(button.getAttribute('data-day')).catch((error) => showFlash(error.message, 'error'));
+      });
+
       const exportCsv = $('cloud-export-csv');
       if (exportCsv) {
         exportCsv.addEventListener('click', () => {
@@ -2027,6 +4148,3 @@
     });
   })();
 </script>
-
-
-
