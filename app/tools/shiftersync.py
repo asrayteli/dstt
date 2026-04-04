@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import secrets
-from collections import Counter, defaultdict
+from collections import defaultdict
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -55,6 +55,7 @@ shiftersync_bp = Blueprint("shiftersync", __name__, url_prefix="/tools/shiftersy
 
 ARTIFACT_SESSION_KEY = "shiftersync_calendar_artifacts"
 NUMBER_CAR_OPTIONS = {"N1", "N2", "N3", "N4", "N5"}
+TEMPORARY_OPTION = "TEMP"
 TIME_CONFLICT_RULES = {
     ("A", "P"): False,
     ("A", "E"): True,
@@ -131,15 +132,20 @@ def upload():
     return render_template("ss_upload.html", shiftersync_holidays=sorted(JAPAN_HOLIDAYS_SET))
 
 
-def _is_duplicate_by_rules(option1: str | None, option2: str | None) -> bool:
+def _is_duplicate_by_rules(
+    option1: str | None, option2: str | None, *, same_site: bool = False
+) -> bool:
     if option1 in LEAVE_OPTION_KEYS or option2 in LEAVE_OPTION_KEYS:
         return False
+
+    if option1 == TEMPORARY_OPTION or option2 == TEMPORARY_OPTION:
+        return same_site and option1 == option2 == TEMPORARY_OPTION
 
     if option1 is None or option2 is None:
         return True
 
     if option1 in NUMBER_CAR_OPTIONS or option2 in NUMBER_CAR_OPTIONS:
-        return True
+        return option1 in NUMBER_CAR_OPTIONS and option1 == option2
 
     if option1 in {"A", "P", "E", "L"} or option2 in {"A", "P", "E", "L"}:
         if option1 not in {"A", "P", "E", "L"} or option2 not in {"A", "P", "E", "L"}:
@@ -218,20 +224,24 @@ def check():
 
     for day, per_file_entries in shift_data.items():
         for file_index, entries in enumerate(per_file_entries):
-            name_count = Counter(
-                entry["name"]
-                for entry in entries
-                if entry["name"] and entry["option"] not in LEAVE_OPTION_KEYS
-            )
+            same_site_grouped = defaultdict(list)
             for entry in entries:
-                if (
-                    entry["name"]
-                    and entry["option"] not in LEAVE_OPTION_KEYS
-                    and name_count[entry["name"]] > 1
-                ):
-                    same_site_conflicts.append(
-                        {"date": day, "entry": entry["original"], "file_index": file_index}
-                    )
+                if entry["name"]:
+                    same_site_grouped[entry["name"]].append(entry)
+            for items in same_site_grouped.values():
+                if len(items) < 2:
+                    continue
+                for left_index, left in enumerate(items):
+                    for right in items[left_index + 1 :]:
+                        if _is_duplicate_by_rules(
+                            left["option"], right["option"], same_site=True
+                        ):
+                            same_site_conflicts.append(
+                                {"date": day, "entry": left["original"], "file_index": file_index}
+                            )
+                            same_site_conflicts.append(
+                                {"date": day, "entry": right["original"], "file_index": file_index}
+                            )
 
         grouped = defaultdict(list)
         for file_index, entries in enumerate(per_file_entries):

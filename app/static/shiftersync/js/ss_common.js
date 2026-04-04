@@ -11,6 +11,7 @@ const ShifterSync = (function() {
     P: '\u5348\u5f8c',
     E: '\u65e9\u756a',
     L: '\u9045\u756a',
+    TEMP: '\u81e8\u6642\u4fbf',
     M: '\u30de\u30a4\u30af\u30ed',
     C: '\u4e2d\u578b',
     O: '\u5927\u578b',
@@ -33,7 +34,7 @@ const ShifterSync = (function() {
   };
 
   const allOptionMappings = Object.assign({}, optionMappings, leaveOptionMappings);
-  const shiftTimeOptionKeys = ['A', 'P', 'E', 'L'];
+  const shiftTimeOptionKeys = ['A', 'P', 'E', 'L', 'TEMP'];
   const leaveOptionKeys = Object.keys(leaveOptionMappings);
   const vehicleOptionKeys = ['M', 'C', 'O', 'W', 'V'];
   const vehicleNumberOptionKeys = ['N1', 'N2', 'N3', 'N4', 'N5'];
@@ -1130,7 +1131,7 @@ const ShifterSync = (function() {
       }).join('');
     }
 
-    if (state.editable && state.mode === 'scene') {
+    if (state.editable && (state.mode === 'scene' || state.mode === 'person')) {
       html += `
         <div class="ss-detail-assist-action">
           <button type="button" class="btn-secondary day-assist-trigger" data-day="${day}">\u30a2\u30b7\u30b9\u30c8</button>

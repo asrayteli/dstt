@@ -40,6 +40,10 @@ def _owner():
     return SimpleNamespace(is_authenticated=True, username="owner01", name="Owner User")
 
 
+def _other_owner():
+    return SimpleNamespace(is_authenticated=True, username="owner02", name="Other Owner")
+
+
 def _guest():
     return SimpleNamespace(is_authenticated=False)
 
@@ -125,12 +129,89 @@ def test_owner_can_create_and_public_view_can_read(tmp_path):
     assert "edit_url" not in public_data["project"]["urls"]
 
 
+def test_owner_can_compare_own_cloudshift_projects_for_conflicts(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    alpha = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Alpha Team",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    ).get_json()["project"]
+    beta = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Beta Team",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    ).get_json()["project"]
+
+    alpha_id = alpha["project"]["id"]
+    beta_id = beta["project"]["id"]
+
+    alpha_entries = dict(alpha["month"]["entries_per_day"])
+    alpha_entries["1"] = [{"id": "alpha-1", "value": "!A!Alice", "comment": ""}]
+    beta_entries = dict(beta["month"]["entries_per_day"])
+    beta_entries["1"] = [{"id": "beta-1", "value": "!E!Alice", "comment": ""}]
+
+    alpha_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{alpha_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": alpha_entries,
+            "base_month": alpha["month"],
+        },
+    )
+    beta_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{beta_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": beta_entries,
+            "base_month": beta["month"],
+        },
+    )
+
+    assert alpha_save.status_code == 200
+    assert beta_save.status_code == 200
+
+    compare_response = client.post(
+        "/tools/shiftersync/cloudshift/api/conflict-check",
+        json={
+            "month_key": "2026-04",
+            "project_ids": [alpha_id, beta_id],
+        },
+    )
+
+    assert compare_response.status_code == 200
+    payload = compare_response.get_json()
+    assert payload["success"] is True
+    assert payload["mode"] == "scene"
+    assert payload["month_key"] == "2026-04"
+    assert payload["targets"] == ["Alpha Team", "Beta Team"]
+    assert [item["label"] for item in payload["sources"]] == ["Alpha Team", "Beta Team"]
+    assert {item["entry"] for item in payload["conflicts"]} == {"!A!Alice", "!E!Alice"}
+    assert payload["same_site_conflicts"] == []
+    assert payload["matrix"]["1"][0][0]["display"] == "Alice 午前"
+    assert payload["matrix"]["1"][1][0]["display"] == "Alice 早番"
+
+
 def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     script = (ROOT / "app" / "templates" / "_cloudshift_script.html").read_text(encoding="utf-8")
     style = (ROOT / "app" / "templates" / "_cloudshift_style.html").read_text(encoding="utf-8")
+    html = (ROOT / "app" / "templates" / "cloudshift.html").read_text(encoding="utf-8")
     ss_common_js = (ROOT / "app" / "static" / "shiftersync" / "js" / "ss_common.js").read_text(encoding="utf-8")
     ss_common_css = (ROOT / "app" / "static" / "shiftersync" / "css" / "ss_common.css").read_text(encoding="utf-8")
 
+    assert 'data-cloud-tab="conflict-check"' in html
+    assert 'id="cloud-check-mode"' in html
+    assert 'id="cloud-check-month"' in html
+    assert 'id="cloud-check-run"' in html
     assert 'value="picked"' in script
     assert "日付を選んで選択" in script
     assert "openBulkEditModal().catch" not in script
@@ -143,9 +224,15 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "day-assist-search" in script
     assert "data-day-assist-record" in script
     assert "buildAssistDetailsPanel" in script
+    assert "buildAssistSceneConflictNotice" in script
     assert "openAssistDayActionModal" in script
+    assert "data-assist-add-search-result-index" in script
+    assert "function notifyAssistAction" in script
+    assert "function closeAssistRelatedModals" in script
     assert "preferred_weekdays" in script
     assert "blocked_weekdays" in script
+    assert "has_scene_conflict" in script
+    assert "scene_conflict_site_names" in script
     assert "data-assist-edit-profile" in script
     assert "option_aptitude" in script
     assert "data-assist-detail-toggle" in script
@@ -163,8 +250,27 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert '.cloud-assist-panel[data-assist-panel="edit"] .cloud-assist-stack' in style
     assert "@media (max-height: 900px)" in style
     assert "[data-assist-edit-list]" in style
+    assert "`${base}/sites`" in script
+    assert "data-day-assist-site-type" in script
+    assert "data-day-assist-training-pick" in script
+    assert "site_type" in script
+    assert ".cloud-assist-result-card.is-conflict" in style
+    assert ".cloud-assist-conflict-note" in style
     assert "day-assist-trigger" in ss_common_js
     assert "getSelectedOptionsForDay" in ss_common_js
+    assert "TEMP" in ss_common_js
+    assert "TEMP" in script
+    assert "臨時便" in script
+    assert "function resetCreateForm()" in script
+    assert "if (tabName === 'create')" in script
+    assert "if (tabName === 'conflict-check')" in script
+    assert "function runConflictCheck()" in script
+    assert "/tools/shiftersync/cloudshift/api/conflict-check" in script
+    assert "cloud-check-entry" in script
+    assert "resetCreateForm();" in script
+    assert ".cloud-check-project-list" in style
+    assert ".cloud-check-scroll" in style
+    assert ".cloud-check-entry.is-conflict" in style
     assert ".assist-btn" in ss_common_css
 
 
@@ -474,6 +580,128 @@ def test_scene_assist_search_allows_no_shift_query(tmp_path):
     assert payload["results"][0]["breakdown"][0]["match_scope"] == "exact"
 
 
+def test_scene_assist_search_marks_same_day_scene_conflicts_only_for_competing_sites(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    base_project = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Assist Conflict Base",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    ).get_json()["project"]
+    base_project_id = base_project["project"]["id"]
+
+    conflict_project = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Conflict Site",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    ).get_json()["project"]
+    conflict_project_id = conflict_project["project"]["id"]
+
+    safe_project = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Safe Site",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    ).get_json()["project"]
+    safe_project_id = safe_project["project"]["id"]
+
+    rule_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{base_project_id}/assist/rules",
+        json={
+            "weekday": 1,
+            "shift_key": "A",
+            "assignments": [
+                {
+                    "candidate_name": "Conflict User",
+                    "employee_number": "7001",
+                    "role_type": "normal",
+                    "priority": 1,
+                }
+            ],
+        },
+    )
+    assert rule_response.status_code == 200
+
+    conflict_entries = dict(conflict_project["month"]["entries_per_day"])
+    conflict_entries["7"] = [
+        {"id": "conflict-1", "value": "!E!Conflict User", "comment": "", "employee_number": "7001"}
+    ]
+    update_conflict_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{conflict_project_id}/month/2026/4",
+        json={
+            "entries_per_day": conflict_entries,
+            "base_month": _legacy_base_month(conflict_project["month"]),
+        },
+    )
+    assert update_conflict_response.status_code == 200
+
+    safe_entries = dict(safe_project["month"]["entries_per_day"])
+    safe_entries["7"] = [
+        {"id": "safe-1", "value": "!P!Conflict User", "comment": "", "employee_number": "7001"}
+    ]
+    update_safe_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{safe_project_id}/month/2026/4",
+        json={
+            "entries_per_day": safe_entries,
+            "base_month": _legacy_base_month(safe_project["month"]),
+        },
+    )
+    assert update_safe_response.status_code == 200
+
+    module.current_user = _other_owner()
+    other_owner_project = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Other Owner Site",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    ).get_json()["project"]
+    other_owner_project_id = other_owner_project["project"]["id"]
+    other_owner_entries = dict(other_owner_project["month"]["entries_per_day"])
+    other_owner_entries["7"] = [
+        {"id": "other-1", "value": "!E!Conflict User", "comment": "", "employee_number": "7001"}
+    ]
+    update_other_owner_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{other_owner_project_id}/month/2026/4",
+        json={
+            "entries_per_day": other_owner_entries,
+            "base_month": _legacy_base_month(other_owner_project["month"]),
+        },
+    )
+    assert update_other_owner_response.status_code == 200
+
+    module.current_user = _owner()
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{base_project_id}/assist/search",
+        json={
+            "target_date": "2026-04-07",
+            "shift_key": "A",
+        },
+    )
+    assert search_response.status_code == 200
+    payload = search_response.get_json()
+    result = next(item for item in payload["results"] if item["name"] == "Conflict User")
+    assert result["has_scene_conflict"] is True
+    assert result["scene_conflict_site_names"] == ["Conflict Site"]
+    assert result["scene_conflict_site_count"] == 1
+    assert [item["project_title"] for item in result["scene_conflicts"]] == ["Conflict Site"]
+    assert result["scene_conflicts"][0]["shift_key"] == "E"
+
+
 def test_public_edit_assist_can_edit_records_but_not_rules(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
@@ -534,7 +762,7 @@ def test_public_edit_assist_can_edit_records_but_not_rules(tmp_path):
     assert forbidden_rule.status_code == 403
 
 
-def test_assist_endpoints_are_scene_only(tmp_path):
+def test_person_assist_bootstrap_and_sites_work_while_search_stays_scene_only(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
 
@@ -551,12 +779,225 @@ def test_assist_endpoints_are_scene_only(tmp_path):
     payload = create_response.get_json()["project"]
     project_id = payload["project"]["id"]
 
+    assist_response = client.get(f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist")
+    assert assist_response.status_code == 200
+    assist_payload = assist_response.get_json()
+    assert assist_payload["assist_mode"] == "person"
+    assert assist_payload["assist"]["experienced_sites"] == []
+
+    create_site = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/sites",
+        json={
+            "site_type": "experienced",
+            "date": "2026-04-01",
+            "site_name": "ABC公園",
+            "shift_key": "O",
+            "notes": "初回担当",
+        },
+    )
+    assert create_site.status_code == 200
+    created_site = create_site.get_json()["site"]
+    assert created_site["site_type"] == "experienced"
+    assert created_site["effective_from"] == "2026-04-02"
+    assert created_site["shift_key"] == "O"
+
     response = client.post(
         f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
         json={"target_date": "2026-04-07", "shift_key": "A"},
     )
     assert response.status_code == 400
     assert "scene" in response.get_json()["error"]
+
+
+def test_person_assist_experience_backfills_scene_records_and_search(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "佐藤さん",
+            "mode": "person",
+            "employee_number": "3001",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    person_id = person_response.get_json()["project"]["project"]["id"]
+
+    create_site = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/assist/sites",
+        json={
+            "site_type": "experienced",
+            "date": "2026-04-01",
+            "site_name": "ABC公園",
+            "shift_key": "O",
+            "notes": "初回担当",
+        },
+    )
+    assert create_site.status_code == 200
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "ABC公園",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    scene_id = scene_response.get_json()["project"]["project"]["id"]
+
+    assist_payload = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/assist"
+    ).get_json()["assist"]
+    assert [item["name"] for item in assist_payload["profiles"]] == ["佐藤さん"]
+    assert len(assist_payload["records"]) == 1
+    record = assist_payload["records"][0]
+    assert record["candidate_name"] == "佐藤さん"
+    assert record["employee_number"] == "3001"
+    assert record["date"] == "2026-04-02"
+    assert record["shift_key"] == "O"
+    assert record["role_type"] == "backup"
+    assert record["notes"] == "初回担当"
+
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/assist/search",
+        json={
+            "target_date": "2026-04-08",
+            "shift_key": "O",
+        },
+    )
+    assert search_response.status_code == 200
+    results = search_response.get_json()["results"]
+    assert [item["name"] for item in results] == ["佐藤さん"]
+
+
+def test_person_assist_site_type_update_and_delete_sync_scene_records(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "代務者A",
+            "mode": "person",
+            "employee_number": "3101",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    person_id = person_response.get_json()["project"]["project"]["id"]
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "研修センター",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    scene_id = scene_response.get_json()["project"]["project"]["id"]
+
+    create_training = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/assist/sites",
+        json={
+            "site_type": "training",
+            "date": "2026-04-03",
+            "site_name": "研修センター",
+            "shift_key": "A",
+            "notes": "見学予定",
+        },
+    )
+    assert create_training.status_code == 200
+    site_id = create_training.get_json()["site"]["id"]
+    assist_payload = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/assist"
+    ).get_json()["assist"]
+    assert assist_payload["records"] == []
+
+    update_site = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/assist/sites/{site_id}",
+        json={
+            "site_type": "experienced",
+            "date": "2026-04-03",
+            "site_name": "研修センター",
+            "shift_key": "A",
+            "notes": "見学完了",
+        },
+    )
+    assert update_site.status_code == 200
+    person_assist = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/assist"
+    ).get_json()["assist"]
+    assert len(person_assist["experienced_sites"]) == 1
+    assert person_assist["training_sites"] == []
+
+    assist_payload = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/assist"
+    ).get_json()["assist"]
+    assert len(assist_payload["records"]) == 1
+    assert assist_payload["records"][0]["shift_key"] == "A"
+    assert assist_payload["records"][0]["notes"] == "見学完了"
+
+    delete_site = client.delete(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/assist/sites/{site_id}"
+    )
+    assert delete_site.status_code == 200
+
+    assist_payload = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/assist"
+    ).get_json()["assist"]
+    assert assist_payload["records"] == []
+
+
+def test_person_assist_cross_owner_backfill_adds_auto_registration_note(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "佐藤さん",
+            "mode": "person",
+            "employee_number": "3201",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    person_id = person_response.get_json()["project"]["project"]["id"]
+
+    create_site = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/assist/sites",
+        json={
+            "site_type": "experienced",
+            "date": "2026-04-05",
+            "site_name": "跨ぎ現場",
+            "shift_key": "",
+            "notes": "共有メモ",
+        },
+    )
+    assert create_site.status_code == 200
+
+    module.current_user = _other_owner()
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "跨ぎ現場",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    scene_id = scene_response.get_json()["project"]["project"]["id"]
+
+    assist_payload = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/assist"
+    ).get_json()["assist"]
+    assert len(assist_payload["records"]) == 1
+    assert "共有メモ" in assist_payload["records"][0]["notes"]
+    assert "佐藤さん からの自動実績登録" in assist_payload["records"][0]["notes"]
 
 
 def test_scene_assist_search_uses_only_past_records(tmp_path):

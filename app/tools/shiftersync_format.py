@@ -17,6 +17,7 @@ SHIFT_OPTION_MAPPINGS = {
     "P": "\u5348\u5f8c",
     "E": "\u65e9\u756a",
     "L": "\u9045\u756a",
+    "TEMP": "\u81e8\u6642\u4fbf",
     "M": "\u30de\u30a4\u30af\u30ed",
     "C": "\u4e2d\u578b",
     "O": "\u5927\u578b",
