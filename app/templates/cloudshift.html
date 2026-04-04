@@ -19,6 +19,7 @@
       <button type="button" class="cloud-tab" data-cloud-tab="create">新規作成</button>
       <button type="button" class="cloud-tab" data-cloud-tab="import">CSV取込</button>
       <button type="button" class="cloud-tab" data-cloud-tab="editor">編集</button>
+      <button type="button" class="cloud-tab" data-cloud-tab="conflict-check">重複チェック</button>
     </nav>
 
     <section id="cloud-panel-list" class="cloud-panel is-active">
@@ -217,6 +218,45 @@
           <div id="cloud-editor-panel" class="cloud-editor-host"></div>
         </section>
       </div>
+    </section>
+
+    <section id="cloud-panel-conflict-check" class="cloud-panel">
+      <div class="cloud-panel-head">
+        <div>
+          <h2>重複チェック</h2>
+          <p>同じ年月の自分のシフト帳を選んで、CloudShift上で重複を確認します。</p>
+        </div>
+      </div>
+
+      <div class="cloud-form">
+        <div class="cloud-form-grid">
+          <label class="cloud-field">
+            <span>種別</span>
+            <select id="cloud-check-mode" class="cloud-input">
+              <option value="scene">現場シフト</option>
+              <option value="person">個人シフト</option>
+            </select>
+          </label>
+          <label class="cloud-field">
+            <span>年月</span>
+            <select id="cloud-check-month" class="cloud-input"></select>
+          </label>
+          <div class="cloud-field">
+            <span>選択状況</span>
+            <div id="cloud-check-selection-summary" class="cloud-note-chip">比較対象を選択してください</div>
+          </div>
+        </div>
+
+        <div class="cloud-actions compact">
+          <button id="cloud-check-select-all" type="button" class="cloud-btn secondary">すべて選択</button>
+          <button id="cloud-check-clear" type="button" class="cloud-btn ghost">選択解除</button>
+          <button id="cloud-check-run" type="button" class="cloud-btn primary">比較する</button>
+        </div>
+
+        <div id="cloud-check-project-list" class="cloud-check-project-list"></div>
+      </div>
+
+      <div id="cloud-check-results" class="cloud-check-results"></div>
     </section>
   </div>
 </main>

@@ -9,7 +9,7 @@ import time
 from calendar import monthrange
 from contextlib import contextmanager
 from copy import copy
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +39,7 @@ try:
         serialize_csv_text,
         serialize_entry_rows,
     )
+    from .shiftersync_check import compare_shift_payloads, is_duplicate_by_rules
     from .japan_holidays import JAPAN_HOLIDAYS
 except ImportError:
     from app.tools.shiftersync_format import (  # type: ignore
@@ -51,6 +52,7 @@ except ImportError:
         serialize_csv_text,
         serialize_entry_rows,
     )
+    from app.tools.shiftersync_check import compare_shift_payloads, is_duplicate_by_rules  # type: ignore
     from app.tools.japan_holidays import JAPAN_HOLIDAYS  # type: ignore
 
 
@@ -60,7 +62,7 @@ LOCK_TIMEOUT_SECONDS = 8.0
 LOCK_POLL_SECONDS = 0.05
 MAX_REVISION_SNAPSHOTS = 12
 OPTION_LABELS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS}
-SHIFT_TIME_OPTION_KEYS = {"A", "P", "E", "L"}
+SHIFT_TIME_OPTION_KEYS = {"A", "P", "E", "L", "TEMP"}
 VEHICLE_OPTION_KEYS = {"M", "C", "O", "W", "V", "N1", "N2", "N3", "N4", "N5"}
 ASSIST_ROLE_LABELS = {
     "normal": "通常",
@@ -87,6 +89,22 @@ ASSIST_OPTION_APTITUDE_MAX_BONUS = 25
 ASSIST_OPTION_APTITUDE_MID_BONUS = 15
 ASSIST_OPTION_APTITUDE_MIN_BONUS = 5
 ASSIST_OPTION_APTITUDE_ZERO_PENALTY = -10
+PERSON_ASSIST_SITE_LABELS = {
+    "experienced": "経験済現場",
+    "training": "研修要現場",
+}
+PERSON_ASSIST_AUTO_SOURCE = "person_experience"
+PERSON_ASSIST_EXPERIENCE_KIND = "experienced"
+PERSON_ASSIST_TRAINING_KIND = "training"
+PERSON_ASSIST_COLLECTION_KEYS = {
+    PERSON_ASSIST_EXPERIENCE_KIND: "experienced_sites",
+    PERSON_ASSIST_TRAINING_KIND: "training_sites",
+}
+PERSON_ASSIST_KIND_LABELS = {
+    PERSON_ASSIST_EXPERIENCE_KIND: "経験済現場",
+    PERSON_ASSIST_TRAINING_KIND: "研修要現場",
+}
+PERSON_ASSIST_AUTO_ROLE_TYPE = "backup"
 
 
 class CloudShiftError(Exception):
@@ -1206,6 +1224,11 @@ def _ensure_scene_project(project: dict[str, Any]) -> None:
         raise CloudShiftError("アシスト機能は scene モード専用です", 400)
 
 
+def _ensure_person_project(project: dict[str, Any]) -> None:
+    if project.get("mode") != "person":
+        raise CloudShiftError("このアシスト機能は person モード専用です", 400)
+
+
 def _ensure_assist(project: dict[str, Any]) -> dict[str, Any]:
     assist = project.get("assist")
     if not isinstance(assist, dict):
@@ -1215,9 +1238,522 @@ def _ensure_assist(project: dict[str, Any]) -> dict[str, Any]:
         "profiles": [item for item in (assist.get("profiles") or []) if isinstance(item, dict)],
         "records": [item for item in (assist.get("records") or []) if isinstance(item, dict)],
         "rules": [item for item in (assist.get("rules") or []) if isinstance(item, dict)],
+        "experienced_sites": [item for item in (assist.get("experienced_sites") or []) if isinstance(item, dict)],
+        "training_sites": [item for item in (assist.get("training_sites") or []) if isinstance(item, dict)],
     }
     project["assist"] = payload
     return payload
+
+
+def _person_assist_kind_key(kind: str) -> str:
+    if kind == "experienced":
+        return "experienced_sites"
+    if kind == "training":
+        return "training_sites"
+    raise CloudShiftError("person assist 種別が不正です", 400)
+
+
+def _person_assist_kind_label(kind: str) -> str:
+    if kind == "experienced":
+        return "経験済現場"
+    if kind == "training":
+        return "研修要現場"
+    raise CloudShiftError("person assist 種別が不正です", 400)
+
+
+def _person_assist_op_label(value: Any) -> str:
+    return "OPあり" if _assist_bool(value, False) else "OPなし"
+
+
+def _person_assist_site_payload(site: dict[str, Any]) -> dict[str, Any]:
+    weekday = int(site.get("weekday", 0) or 0)
+    return {
+        "id": str(site.get("id") or ""),
+        "date": str(site.get("date") or ""),
+        "weekday": weekday,
+        "weekday_label": _assist_weekday_label(weekday),
+        "site_name": str(site.get("site_name") or ""),
+        "has_op": bool(site.get("has_op", False)),
+        "op_label": _person_assist_op_label(site.get("has_op")),
+        "notes": str(site.get("notes") or ""),
+        "created_at": site.get("created_at"),
+        "updated_at": site.get("updated_at"),
+        "created_by": site.get("created_by"),
+        "updated_by": site.get("updated_by"),
+    }
+
+
+def _normalized_site_title(value: Any) -> str:
+    return " ".join(str(value or "").replace("\u3000", " ").split()).casefold()
+
+
+def _person_experience_available_from(date_text: str) -> str:
+    _, parsed = _assist_date_parts(date_text)
+    return (parsed + timedelta(days=1)).isoformat()
+
+
+def _person_assist_site_history_label(site: dict[str, Any]) -> str:
+    return (
+        f"{site.get('date')}({_assist_weekday_label(int(site.get('weekday', 0) or 0))}) / "
+        f"{site.get('site_name')} / "
+        f"{_person_assist_op_label(site.get('has_op'))}"
+    )
+
+
+def _person_assist_site_from_payload(
+    payload: dict[str, Any],
+    *,
+    existing: dict[str, Any] | None = None,
+    actor_name: str,
+) -> dict[str, Any]:
+    date_text, parsed_date = _assist_date_parts(payload.get("date"))
+    site_name = _assist_short_text(payload.get("site_name"), "現場名", required=True, limit=120)
+    notes = _assist_long_text(payload.get("notes"))
+    has_op = _assist_bool(payload.get("has_op"), False)
+    timestamp = _utcnow_iso()
+    if existing:
+        created_at = existing.get("created_at", timestamp)
+        created_by = existing.get("created_by", actor_name)
+        site_id = str(existing.get("id") or _assist_id("psite"))
+    else:
+        created_at = timestamp
+        created_by = actor_name
+        site_id = _assist_id("psite")
+    return {
+        "id": site_id,
+        "date": date_text,
+        "weekday": parsed_date.weekday(),
+        "site_name": site_name,
+        "has_op": has_op,
+        "notes": notes,
+        "created_at": created_at,
+        "updated_at": timestamp,
+        "created_by": created_by,
+        "updated_by": actor_name,
+    }
+
+
+def _ensure_person_project(project: dict[str, Any]) -> None:
+    if project.get("mode") != "person":
+        raise CloudShiftError("このアシスト機能は person モード専用です", 400)
+
+
+def _person_assist_collection_key(kind: str) -> str:
+    key = PERSON_ASSIST_COLLECTION_KEYS.get(str(kind or "").strip().lower())
+    if not key:
+        raise CloudShiftError("person assist 種別が不正です", 400)
+    return key
+
+
+def _person_assist_kind_label(kind: str) -> str:
+    normalized = str(kind or "").strip().lower()
+    return PERSON_ASSIST_KIND_LABELS.get(normalized, normalized or "person assist")
+
+
+def _ensure_person_assist(project: dict[str, Any]) -> dict[str, Any]:
+    assist = project.get("assist")
+    if not isinstance(assist, dict):
+        assist = {}
+    payload = {
+        "version": int(assist.get("version", 1) or 1),
+        "experienced_sites": [
+            item for item in (assist.get("experienced_sites") or []) if isinstance(item, dict)
+        ],
+        "training_sites": [
+            item for item in (assist.get("training_sites") or []) if isinstance(item, dict)
+        ],
+    }
+    project["assist"] = payload
+    return payload
+
+
+def _person_assist_site_payload(item: dict[str, Any], *, kind: str) -> dict[str, Any]:
+    return {
+        "id": str(item.get("id") or ""),
+        "kind": str(kind or ""),
+        "kind_label": _person_assist_kind_label(kind),
+        "date": str(item.get("date") or ""),
+        "effective_from": str(item.get("effective_from") or ""),
+        "site_name": str(item.get("site_name") or ""),
+        "shift_key": str(item.get("shift_key") or ""),
+        "shift_label": _assist_shift_label(item.get("shift_key")),
+        "notes": str(item.get("notes") or ""),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+        "created_by": item.get("created_by"),
+        "updated_by": item.get("updated_by"),
+    }
+
+
+def _person_assist_bootstrap_payload(project: dict[str, Any]) -> dict[str, Any]:
+    assist = _ensure_person_assist(project)
+    experienced = [
+        _person_assist_site_payload(item, kind=PERSON_ASSIST_EXPERIENCE_KIND)
+        for item in assist["experienced_sites"]
+    ]
+    trainings = [
+        _person_assist_site_payload(item, kind=PERSON_ASSIST_TRAINING_KIND)
+        for item in assist["training_sites"]
+    ]
+    experienced.sort(key=lambda item: (item["date"], item["site_name"], item["shift_key"]), reverse=True)
+    trainings.sort(key=lambda item: (item["date"], item["site_name"], item["shift_key"]), reverse=True)
+    return {
+        "success": True,
+        "assist_mode": "person",
+        "assist": {
+            "version": assist["version"],
+            "experienced_sites": experienced,
+            "training_sites": trainings,
+        },
+        "permissions": {
+            "can_edit_experienced": True,
+            "can_edit_training": True,
+        },
+    }
+
+
+def _person_assist_site_from_payload(
+    payload: dict[str, Any],
+    *,
+    kind: str,
+    existing: dict[str, Any] | None = None,
+    actor_name: str,
+) -> dict[str, Any]:
+    date_text, parsed_date = _assist_date_parts(payload.get("date"))
+    site_name = _assist_short_text(payload.get("site_name"), "現場名", required=True, limit=120)
+    shift_key = _assist_shift_key(payload.get("shift_key"), required=False)
+    notes = _assist_long_text(payload.get("notes"))
+    timestamp = _utcnow_iso()
+    if existing:
+        created_at = existing.get("created_at", timestamp)
+        created_by = existing.get("created_by", actor_name)
+        site_id = str(existing.get("id") or _assist_id("psite"))
+    else:
+        created_at = timestamp
+        created_by = actor_name
+        site_id = _assist_id("psite")
+    return {
+        "id": site_id,
+        "kind": kind,
+        "date": date_text,
+        "effective_from": (parsed_date + timedelta(days=1)).isoformat(),
+        "site_name": site_name,
+        "shift_key": shift_key,
+        "notes": notes,
+        "created_at": created_at,
+        "updated_at": timestamp,
+        "created_by": created_by,
+        "updated_by": actor_name,
+    }
+
+
+def _person_assist_site_history_label(item: dict[str, Any]) -> str:
+    return (
+        f"{item.get('date')} / {item.get('site_name')} / "
+        f"{_assist_shift_label(item.get('shift_key'))}"
+    )
+
+
+def _person_assist_site_mutation(
+    project: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    kind: str,
+    actor_name: str,
+    actor_type: str,
+    site_id: str | None = None,
+) -> dict[str, Any]:
+    _ensure_person_project(project)
+    assist = _ensure_person_assist(project)
+    collection_key = _person_assist_collection_key(kind)
+    existing = None
+    if site_id:
+        existing = next(
+            (
+                item
+                for item in assist[collection_key]
+                if str(item.get("id") or "") == str(site_id or "")
+            ),
+            None,
+        )
+        if not existing:
+            raise CloudShiftError("対象の person assist が見つかりません", 404)
+    item = _person_assist_site_from_payload(
+        payload,
+        kind=kind,
+        existing=existing,
+        actor_name=actor_name,
+    )
+    if existing:
+        index = assist[collection_key].index(existing)
+        assist[collection_key][index] = item
+        changes = [f"{_person_assist_kind_label(kind)}を更新: {_person_assist_site_history_label(item)}"]
+    else:
+        assist[collection_key].append(item)
+        changes = [f"{_person_assist_kind_label(kind)}を登録: {_person_assist_site_history_label(item)}"]
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "person_assist_site_saved",
+            "month_key": None,
+            "changes": changes,
+        },
+    )
+    return item
+
+
+def _person_assist_site_delete(
+    project: dict[str, Any],
+    site_id: str,
+    *,
+    kind: str,
+    actor_name: str,
+    actor_type: str,
+) -> None:
+    _ensure_person_project(project)
+    assist = _ensure_person_assist(project)
+    collection_key = _person_assist_collection_key(kind)
+    existing = next(
+        (
+            item
+            for item in assist[collection_key]
+            if str(item.get("id") or "") == str(site_id or "")
+        ),
+        None,
+    )
+    if not existing:
+        raise CloudShiftError("対象の person assist が見つかりません", 404)
+    assist[collection_key] = [
+        item for item in assist[collection_key] if str(item.get("id") or "") != str(site_id or "")
+    ]
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "person_assist_site_deleted",
+            "month_key": None,
+            "changes": [f"{_person_assist_kind_label(kind)}を削除: {_person_assist_site_history_label(existing)}"],
+        },
+    )
+
+
+def _person_experience_source_item(project: dict[str, Any], experience_id: str) -> dict[str, Any] | None:
+    if project.get("mode") != "person":
+        return None
+    assist = _ensure_person_assist(project)
+    return next(
+        (
+            item
+            for item in assist["experienced_sites"]
+            if str(item.get("id") or "") == str(experience_id or "")
+        ),
+        None,
+    )
+
+
+def _person_experience_sync_note(actor_name: str, notes: str) -> str:
+    base = f"{str(actor_name or '').strip() or 'user'} からの自動実績登録"
+    extra = str(notes or "").strip()
+    return f"{base}\n{extra}" if extra else base
+
+
+def _person_experience_sync_source(person_project: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "person_experience",
+        "person_project_id": str(person_project.get("id") or ""),
+        "experience_id": str(item.get("id") or ""),
+        "site_name": str(item.get("site_name") or ""),
+    }
+
+
+def _is_person_experience_synced_record(
+    record: dict[str, Any], person_project_id: str, experience_id: str
+) -> bool:
+    source = record.get("sync_source")
+    if not isinstance(source, dict):
+        return False
+    return (
+        str(source.get("type") or "") == "person_experience"
+        and str(source.get("person_project_id") or "") == str(person_project_id or "")
+        and str(source.get("experience_id") or "") == str(experience_id or "")
+    )
+
+
+def _remove_person_experience_synced_records(
+    scene_project: dict[str, Any],
+    person_project_id: str,
+    experience_id: str,
+    *,
+    actor_name: str,
+) -> bool:
+    assist = _ensure_assist(scene_project)
+    existing = [
+        item
+        for item in (assist.get("records") or [])
+        if _is_person_experience_synced_record(item, person_project_id, experience_id)
+    ]
+    if not existing:
+        return False
+    assist["records"] = [
+        item
+        for item in (assist.get("records") or [])
+        if not _is_person_experience_synced_record(item, person_project_id, experience_id)
+    ]
+    _save_project(scene_project)
+    _append_history(
+        scene_project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": "system",
+            "action": "assist_record_deleted",
+            "month_key": None,
+            "changes": [
+                f"person 経験済現場との自動連携を解除: {_assist_record_history_label(item)}"
+                for item in existing
+            ][:20],
+        },
+    )
+    return True
+
+
+def _upsert_person_experience_synced_record(
+    scene_project: dict[str, Any],
+    person_project: dict[str, Any],
+    experience: dict[str, Any],
+    *,
+    actor_name: str,
+) -> bool:
+    assist = _ensure_assist(scene_project)
+    existing = next(
+        (
+            item
+            for item in (assist.get("records") or [])
+            if _is_person_experience_synced_record(
+                item,
+                str(person_project.get("id") or ""),
+                str(experience.get("id") or ""),
+            )
+        ),
+        None,
+    )
+    record = _assist_record_from_payload(
+        assist,
+        {
+            "date": str(experience.get("effective_from") or experience.get("date") or ""),
+            "candidate_name": person_project.get("title"),
+            "employee_number": person_project.get("employee_number"),
+            "shift_key": experience.get("shift_key"),
+            "role_type": PERSON_ASSIST_AUTO_ROLE_TYPE,
+            "notes": _person_experience_sync_note(actor_name, str(experience.get("notes") or "")),
+        },
+        existing=existing,
+        actor_name=actor_name,
+    )
+    record["sync_source"] = _person_experience_sync_source(person_project, experience)
+    changed = False
+    if existing:
+        index = assist["records"].index(existing)
+        if assist["records"][index] != record:
+            assist["records"][index] = record
+            changed = True
+    else:
+        assist["records"].append(record)
+        changed = True
+    if not changed:
+        return False
+    _save_project(scene_project)
+    _append_history(
+        scene_project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": "system",
+            "action": "assist_record_saved",
+            "month_key": None,
+            "changes": [f"person 経験済現場から自動実績登録: {_assist_record_history_label(record)}"],
+        },
+    )
+    return True
+
+
+def _resync_person_experience_targets(person_project_id: str, experience_id: str, actor_name: str) -> None:
+    person_project = _load_json(_project_path(person_project_id))
+    experience = (
+        _person_experience_source_item(person_project, experience_id)
+        if isinstance(person_project, dict)
+        else None
+    )
+    experience_site_name = str(experience.get("site_name") or "").strip() if experience else ""
+    for path in _shifts_dir().glob("*.json"):
+        scene_project = _load_json(path)
+        if not scene_project or scene_project.get("mode") != "scene":
+            continue
+        scene_project_id = str(scene_project.get("id") or "")
+        with _project_lock(scene_project_id):
+            scene_project = _load_project(scene_project_id)
+            if scene_project.get("mode") != "scene":
+                continue
+            title_matches = (
+                bool(experience)
+                and str(scene_project.get("title") or "").strip() == experience_site_name
+            )
+            if title_matches:
+                _upsert_person_experience_synced_record(
+                    scene_project,
+                    person_project,
+                    experience,
+                    actor_name=actor_name,
+                )
+            else:
+                _remove_person_experience_synced_records(
+                    scene_project,
+                    person_project_id,
+                    experience_id,
+                    actor_name=actor_name,
+                )
+
+
+def _sync_scene_project_from_person_experiences(scene_project_id: str, actor_name: str) -> None:
+    with _project_lock(scene_project_id):
+        scene_project = _load_project(scene_project_id)
+        if scene_project.get("mode") != "scene":
+            return
+        target_title = str(scene_project.get("title") or "").strip()
+        for path in _shifts_dir().glob("*.json"):
+            person_project = _load_json(path)
+            if not person_project or person_project.get("mode") != "person":
+                continue
+            assist = _ensure_person_assist(person_project)
+            for experience in assist.get("experienced_sites") or []:
+                if str(experience.get("site_name") or "").strip() != target_title:
+                    continue
+                _upsert_person_experience_synced_record(
+                    scene_project,
+                    person_project,
+                    experience,
+                    actor_name=actor_name,
+                )
+
+
+def _resync_person_project_experiences(person_project_id: str, actor_name: str) -> None:
+    person_project = _load_json(_project_path(person_project_id))
+    if not person_project or person_project.get("mode") != "person":
+        return
+    assist = _ensure_person_assist(person_project)
+    for experience in assist.get("experienced_sites") or []:
+        _resync_person_experience_targets(
+            str(person_project.get("id") or ""),
+            str(experience.get("id") or ""),
+            actor_name,
+        )
 
 
 def _assist_profile_payload(profile: dict[str, Any]) -> dict[str, Any]:
@@ -1308,6 +1844,8 @@ def _assist_bootstrap_payload(project: dict[str, Any], *, can_edit_records: bool
     profiles = [_assist_profile_payload(item) for item in assist["profiles"]]
     records = [_assist_record_payload(item) for item in assist["records"]]
     rules = [_assist_rule_payload(item) for item in assist["rules"]]
+    experienced_sites = [_person_assist_site_payload(item) for item in assist["experienced_sites"]]
+    training_sites = [_person_assist_site_payload(item) for item in assist["training_sites"]]
     profiles.sort(key=lambda item: (not item["active"], item["name"], item["employee_number"]))
     records.sort(key=lambda item: (item["date"], item["shift_key"], item["candidate_name"]), reverse=True)
     rules.sort(
@@ -1318,6 +1856,8 @@ def _assist_bootstrap_payload(project: dict[str, Any], *, can_edit_records: bool
             item["id"],
         )
     )
+    experienced_sites.sort(key=lambda item: (item["date"], item["site_name"]), reverse=True)
+    training_sites.sort(key=lambda item: (item["date"], item["site_name"]), reverse=True)
     return {
         "success": True,
         "assist": {
@@ -1325,6 +1865,8 @@ def _assist_bootstrap_payload(project: dict[str, Any], *, can_edit_records: bool
             "profiles": profiles,
             "records": records,
             "rules": rules,
+            "experienced_sites": experienced_sites,
+            "training_sites": training_sites,
         },
         "permissions": {
             "can_edit_records": bool(can_edit_records),
@@ -1749,6 +2291,764 @@ def _assist_rule_delete(project: dict[str, Any], rule_id: str, *, actor_name: st
     )
 
 
+def _person_assist_site_mutation(
+    project: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    kind: str,
+    actor_name: str,
+    actor_type: str,
+    site_id: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    _ensure_person_project(project)
+    assist = _ensure_assist(project)
+    key = _person_assist_kind_key(kind)
+    existing = None
+    previous = None
+    if site_id:
+        existing = next((item for item in assist[key] if str(item.get("id") or "") == site_id), None)
+        if not existing:
+            raise CloudShiftError(f"対象の{_person_assist_kind_label(kind)}が見つかりません", 404)
+        previous = copy(existing)
+    site = _person_assist_site_from_payload(payload, existing=existing, actor_name=actor_name)
+    if existing:
+        index = assist[key].index(existing)
+        assist[key][index] = site
+        changes = [f"{_person_assist_kind_label(kind)}を更新: {_person_assist_site_history_label(site)}"]
+    else:
+        assist[key].append(site)
+        changes = [f"{_person_assist_kind_label(kind)}を登録: {_person_assist_site_history_label(site)}"]
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": f"person_assist_{kind}_saved",
+            "month_key": None,
+            "changes": changes,
+        },
+    )
+    return site, previous
+
+
+def _person_assist_site_delete(
+    project: dict[str, Any],
+    site_id: str,
+    *,
+    kind: str,
+    actor_name: str,
+    actor_type: str,
+) -> dict[str, Any]:
+    _ensure_person_project(project)
+    assist = _ensure_assist(project)
+    key = _person_assist_kind_key(kind)
+    existing = next((item for item in assist[key] if str(item.get("id") or "") == site_id), None)
+    if not existing:
+        raise CloudShiftError(f"対象の{_person_assist_kind_label(kind)}が見つかりません", 404)
+    assist[key] = [item for item in assist[key] if str(item.get("id") or "") != site_id]
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": f"person_assist_{kind}_deleted",
+            "month_key": None,
+            "changes": [f"{_person_assist_kind_label(kind)}を削除: {_person_assist_site_history_label(existing)}"],
+        },
+    )
+    return existing
+
+
+def _find_auto_scene_assist_record(
+    assist: dict[str, Any], *, source_project_id: str, source_site_id: str
+) -> dict[str, Any] | None:
+    return next(
+        (
+            item
+            for item in (assist.get("records") or [])
+            if str(item.get("source_type") or "") == "person_experience"
+            and str(item.get("source_project_id") or "") == source_project_id
+            and str(item.get("source_site_id") or "") == source_site_id
+        ),
+        None,
+    )
+
+
+def _person_experience_scene_notes(
+    source_project: dict[str, Any],
+    site: dict[str, Any],
+    *,
+    actor_name: str,
+    target_project: dict[str, Any],
+) -> str:
+    parts: list[str] = [_person_assist_op_label(site.get("has_op"))]
+    notes = str(site.get("notes") or "").strip()
+    if notes:
+        parts.append(notes)
+    if str(target_project.get("owner_user_id") or "") != str(source_project.get("owner_user_id") or ""):
+        parts.append(f"{actor_name} からの自動実績登録")
+    return "\n".join(part for part in parts if part)
+
+
+def _upsert_person_experience_scene_record(
+    target_project: dict[str, Any],
+    source_project: dict[str, Any],
+    site: dict[str, Any],
+    *,
+    actor_name: str,
+) -> str | None:
+    assist = _ensure_assist(target_project)
+    existing = _find_auto_scene_assist_record(
+        assist,
+        source_project_id=str(source_project.get("id") or ""),
+        source_site_id=str(site.get("id") or ""),
+    )
+    record = _assist_record_from_payload(
+        assist,
+        {
+            "date": _person_experience_available_from(str(site.get("date") or "")),
+            "candidate_name": source_project.get("title"),
+            "employee_number": source_project.get("employee_number"),
+            "shift_key": "",
+            "role_type": "backup",
+            "notes": _person_experience_scene_notes(
+                source_project,
+                site,
+                actor_name=actor_name,
+                target_project=target_project,
+            ),
+        },
+        existing=existing,
+        actor_name=actor_name,
+    )
+    record["source_type"] = "person_experience"
+    record["source_project_id"] = str(source_project.get("id") or "")
+    record["source_site_id"] = str(site.get("id") or "")
+    record["source_site_name"] = str(site.get("site_name") or "")
+    record["source_date"] = str(site.get("date") or "")
+    record["source_has_op"] = bool(site.get("has_op", False))
+    record["source_available_from"] = _person_experience_available_from(str(site.get("date") or ""))
+    if existing:
+        index = assist["records"].index(existing)
+        assist["records"][index] = record
+        return f"person経験済現場から自動実績を更新: {_assist_record_history_label(record)}"
+    assist["records"].append(record)
+    return f"person経験済現場から自動実績を登録: {_assist_record_history_label(record)}"
+
+
+def _remove_person_experience_scene_record(
+    target_project: dict[str, Any],
+    *,
+    source_project_id: str,
+    source_site_id: str,
+) -> str | None:
+    assist = _ensure_assist(target_project)
+    existing = _find_auto_scene_assist_record(
+        assist,
+        source_project_id=source_project_id,
+        source_site_id=source_site_id,
+    )
+    if not existing:
+        return None
+    assist["records"] = [
+        item
+        for item in assist["records"]
+        if str(item.get("id") or "") != str(existing.get("id") or "")
+    ]
+    return f"person経験済現場の自動実績を削除: {_assist_record_history_label(existing)}"
+
+
+def _sync_person_experience_to_scene_projects(
+    source_project: dict[str, Any],
+    site: dict[str, Any],
+    *,
+    actor_name: str,
+) -> None:
+    normalized_site = _normalized_site_title(site.get("site_name"))
+    for path in _shifts_dir().glob("*.json"):
+        target_summary = _load_json(path)
+        if not target_summary or target_summary.get("mode") != "scene":
+            continue
+        target_project_id = str(target_summary.get("id") or "")
+        with _project_lock(target_project_id):
+            target_project = _load_project(target_project_id)
+            if target_project.get("mode") != "scene":
+                continue
+            if _normalized_site_title(target_project.get("title")) == normalized_site:
+                change = _upsert_person_experience_scene_record(
+                    target_project,
+                    source_project,
+                    site,
+                    actor_name=actor_name,
+                )
+            else:
+                change = _remove_person_experience_scene_record(
+                    target_project,
+                    source_project_id=str(source_project.get("id") or ""),
+                    source_site_id=str(site.get("id") or ""),
+                )
+            if not change:
+                continue
+            _save_project(target_project)
+            _append_history(
+                target_project["id"],
+                {
+                    "timestamp": _utcnow_iso(),
+                    "editor_name": actor_name,
+                    "editor_type": "auto",
+                    "action": "person_experience_sync",
+                    "month_key": None,
+                    "changes": [change],
+                },
+            )
+
+
+def _delete_person_experience_from_scene_projects(
+    source_project_id: str,
+    source_site_id: str,
+    *,
+    actor_name: str,
+) -> None:
+    for path in _shifts_dir().glob("*.json"):
+        target_summary = _load_json(path)
+        if not target_summary or target_summary.get("mode") != "scene":
+            continue
+        target_project_id = str(target_summary.get("id") or "")
+        with _project_lock(target_project_id):
+            target_project = _load_project(target_project_id)
+            if target_project.get("mode") != "scene":
+                continue
+            change = _remove_person_experience_scene_record(
+                target_project,
+                source_project_id=source_project_id,
+                source_site_id=source_site_id,
+            )
+            if not change:
+                continue
+            _save_project(target_project)
+            _append_history(
+                target_project["id"],
+                {
+                    "timestamp": _utcnow_iso(),
+                    "editor_name": actor_name,
+                    "editor_type": "auto",
+                    "action": "person_experience_sync_deleted",
+                    "month_key": None,
+                    "changes": [change],
+                },
+            )
+
+
+def _resync_person_experience_project(source_project: dict[str, Any], *, actor_name: str) -> None:
+    _ensure_person_project(source_project)
+    assist = _ensure_assist(source_project)
+    for site in assist.get("experienced_sites") or []:
+        _sync_person_experience_to_scene_projects(source_project, site, actor_name=actor_name)
+
+
+def _backfill_scene_project_from_person_experience(
+    scene_project: dict[str, Any], *, actor_name: str
+) -> None:
+    _ensure_scene_project(scene_project)
+    normalized_title = _normalized_site_title(scene_project.get("title"))
+    if not normalized_title:
+        return
+    changes: list[str] = []
+    for path in _shifts_dir().glob("*.json"):
+        source_project = _load_json(path)
+        if not source_project or source_project.get("mode") != "person":
+            continue
+        source_assist = _ensure_assist(source_project)
+        for site in source_assist.get("experienced_sites") or []:
+            if _normalized_site_title(site.get("site_name")) != normalized_title:
+                continue
+            change = _upsert_person_experience_scene_record(
+                scene_project,
+                source_project,
+                site,
+                actor_name=actor_name,
+            )
+            if change:
+                changes.append(change)
+    if not changes:
+        return
+    _save_project(scene_project)
+    _append_history(
+        scene_project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": "auto",
+            "action": "person_experience_backfill",
+            "month_key": None,
+            "changes": changes[:100],
+        },
+    )
+
+
+def _person_assist_collection_key(kind: str) -> str:
+    normalized = str(kind or "").strip().lower()
+    key = PERSON_ASSIST_COLLECTION_KEYS.get(normalized)
+    if not key:
+        raise CloudShiftError("person assist 種別が不正です", 400)
+    return key
+
+
+def _person_assist_kind_label(kind: str) -> str:
+    normalized = str(kind or "").strip().lower()
+    return PERSON_ASSIST_KIND_LABELS.get(normalized, normalized or "person assist")
+
+
+def _ensure_person_assist(project: dict[str, Any]) -> dict[str, Any]:
+    assist = _ensure_assist(project)
+    assist["experienced_sites"] = [
+        item for item in (assist.get("experienced_sites") or []) if isinstance(item, dict)
+    ]
+    assist["training_sites"] = [
+        item for item in (assist.get("training_sites") or []) if isinstance(item, dict)
+    ]
+    return assist
+
+
+def _person_assist_site_payload(item: dict[str, Any], *, kind: str | None = None) -> dict[str, Any]:
+    site_type = str(kind or item.get("kind") or PERSON_ASSIST_EXPERIENCE_KIND).strip().lower()
+    if site_type not in PERSON_ASSIST_COLLECTION_KEYS:
+        site_type = PERSON_ASSIST_EXPERIENCE_KIND
+    return {
+        "id": str(item.get("id") or ""),
+        "site_type": site_type,
+        "kind": site_type,
+        "kind_label": _person_assist_kind_label(site_type),
+        "date": str(item.get("date") or ""),
+        "effective_from": str(item.get("effective_from") or ""),
+        "site_name": str(item.get("site_name") or ""),
+        "shift_key": str(item.get("shift_key") or ""),
+        "shift_label": _assist_shift_label(item.get("shift_key")),
+        "notes": str(item.get("notes") or ""),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+        "created_by": item.get("created_by"),
+        "updated_by": item.get("updated_by"),
+    }
+
+
+def _person_assist_bootstrap_payload(project: dict[str, Any], *, can_edit_sites: bool = True) -> dict[str, Any]:
+    assist = _ensure_person_assist(project)
+    experienced = [
+        _person_assist_site_payload(item, kind=PERSON_ASSIST_EXPERIENCE_KIND)
+        for item in assist["experienced_sites"]
+    ]
+    training = [
+        _person_assist_site_payload(item, kind=PERSON_ASSIST_TRAINING_KIND)
+        for item in assist["training_sites"]
+    ]
+    experienced.sort(key=lambda item: (item["date"], item["site_name"], item["shift_key"]), reverse=True)
+    training.sort(key=lambda item: (item["date"], item["site_name"], item["shift_key"]), reverse=True)
+    return {
+        "success": True,
+        "assist_mode": "person",
+        "assist": {
+            "version": assist["version"],
+            "experienced_sites": experienced,
+            "training_sites": training,
+        },
+        "permissions": {
+            "can_edit_sites": bool(can_edit_sites),
+            "can_edit_experienced": bool(can_edit_sites),
+            "can_edit_training": bool(can_edit_sites),
+        },
+    }
+
+
+def _person_assist_site_from_payload(
+    payload: dict[str, Any],
+    *,
+    kind: str | None = None,
+    existing: dict[str, Any] | None = None,
+    actor_name: str,
+) -> dict[str, Any]:
+    site_type = str(kind or payload.get("site_type") or (existing or {}).get("kind") or "").strip().lower()
+    if not site_type:
+        raise CloudShiftError("person assist 種別を指定してください", 400)
+    collection_key = _person_assist_collection_key(site_type)
+    date_text, parsed_date = _assist_date_parts(payload.get("date"))
+    timestamp = _utcnow_iso()
+    if existing:
+        created_at = existing.get("created_at", timestamp)
+        created_by = existing.get("created_by", actor_name)
+        site_id = str(existing.get("id") or _assist_id("psite"))
+    else:
+        created_at = timestamp
+        created_by = actor_name
+        site_id = _assist_id("psite")
+    return {
+        "id": site_id,
+        "kind": PERSON_ASSIST_EXPERIENCE_KIND
+        if collection_key == "experienced_sites"
+        else PERSON_ASSIST_TRAINING_KIND,
+        "date": date_text,
+        "effective_from": (parsed_date + timedelta(days=1)).isoformat(),
+        "site_name": _assist_short_text(payload.get("site_name"), "現場名", required=True, limit=120),
+        "shift_key": _assist_shift_key(payload.get("shift_key"), required=False),
+        "notes": _assist_long_text(payload.get("notes")),
+        "created_at": created_at,
+        "updated_at": timestamp,
+        "created_by": created_by,
+        "updated_by": actor_name,
+    }
+
+
+def _person_assist_site_history_label(item: dict[str, Any]) -> str:
+    return f"{item.get('date')} / {item.get('site_name')} / {_assist_shift_label(item.get('shift_key'))}"
+
+
+def _person_assist_site_mutation(
+    project: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    kind: str | None = None,
+    actor_name: str,
+    actor_type: str,
+    site_id: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    _ensure_person_project(project)
+    assist = _ensure_person_assist(project)
+    existing = None
+    existing_key = ""
+    previous = None
+    if site_id:
+        for key in ("experienced_sites", "training_sites"):
+            existing = next((item for item in assist[key] if str(item.get("id") or "") == str(site_id or "")), None)
+            if existing:
+                existing_key = key
+                previous = copy(existing)
+                break
+        if not existing:
+            raise CloudShiftError("対象の現場メモが見つかりません", 404)
+    site = _person_assist_site_from_payload(payload, kind=kind, existing=existing, actor_name=actor_name)
+    target_key = _person_assist_collection_key(site.get("kind"))
+    if existing and existing_key == target_key:
+        index = assist[target_key].index(existing)
+        assist[target_key][index] = site
+    else:
+        if existing and existing_key:
+            assist[existing_key] = [
+                item for item in assist[existing_key] if str(item.get("id") or "") != str(existing.get("id") or "")
+            ]
+        assist[target_key].append(site)
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "person_assist_site_saved",
+            "month_key": None,
+            "changes": [
+                f"{_person_assist_kind_label(site.get('kind'))}を更新: {_person_assist_site_history_label(site)}"
+                if existing
+                else f"{_person_assist_kind_label(site.get('kind'))}を登録: {_person_assist_site_history_label(site)}"
+            ],
+        },
+    )
+    return site, previous
+
+
+def _person_assist_site_delete(
+    project: dict[str, Any],
+    site_id: str,
+    *,
+    kind: str | None = None,
+    actor_name: str,
+    actor_type: str,
+) -> dict[str, Any]:
+    _ensure_person_project(project)
+    assist = _ensure_person_assist(project)
+    search_keys = [_person_assist_collection_key(kind)] if kind else ["experienced_sites", "training_sites"]
+    existing = None
+    existing_key = ""
+    for key in search_keys:
+        existing = next((item for item in assist[key] if str(item.get("id") or "") == str(site_id or "")), None)
+        if existing:
+            existing_key = key
+            break
+    if not existing or not existing_key:
+        raise CloudShiftError("対象の現場メモが見つかりません", 404)
+    assist[existing_key] = [item for item in assist[existing_key] if str(item.get("id") or "") != str(site_id or "")]
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "person_assist_site_deleted",
+            "month_key": None,
+            "changes": [f"{_person_assist_kind_label(existing.get('kind'))}を削除: {_person_assist_site_history_label(existing)}"],
+        },
+    )
+    return copy(existing)
+
+
+def _find_auto_scene_assist_record(
+    assist: dict[str, Any], *, source_project_id: str, source_site_id: str
+) -> dict[str, Any] | None:
+    return next(
+        (
+            item
+            for item in (assist.get("records") or [])
+            if str(item.get("source_type") or "") == PERSON_ASSIST_AUTO_SOURCE
+            and str(item.get("source_project_id") or "") == str(source_project_id or "")
+            and str(item.get("source_site_id") or "") == str(source_site_id or "")
+        ),
+        None,
+    )
+
+
+def _person_experience_scene_notes(
+    source_project: dict[str, Any], site: dict[str, Any], *, target_project: dict[str, Any]
+) -> str:
+    parts: list[str] = []
+    notes = str(site.get("notes") or "").strip()
+    if notes:
+        parts.append(notes)
+    if str(target_project.get("owner_user_id") or "") != str(source_project.get("owner_user_id") or ""):
+        user_label = str(source_project.get("title") or "").strip() or "ユーザー"
+        parts.append(f"{user_label} からの自動実績登録")
+    return "\n".join(parts)
+
+
+def _upsert_person_experience_scene_record(
+    target_project: dict[str, Any],
+    source_project: dict[str, Any],
+    site: dict[str, Any],
+    *,
+    actor_name: str,
+) -> str | None:
+    assist = _ensure_assist(target_project)
+    existing = _find_auto_scene_assist_record(
+        assist,
+        source_project_id=str(source_project.get("id") or ""),
+        source_site_id=str(site.get("id") or ""),
+    )
+    record = _assist_record_from_payload(
+        assist,
+        {
+            "date": str(site.get("effective_from") or _person_experience_available_from(str(site.get("date") or ""))),
+            "candidate_name": source_project.get("title"),
+            "employee_number": source_project.get("employee_number"),
+            "shift_key": site.get("shift_key"),
+            "role_type": PERSON_ASSIST_AUTO_ROLE_TYPE,
+            "notes": _person_experience_scene_notes(source_project, site, target_project=target_project),
+        },
+        existing=existing,
+        actor_name=actor_name,
+    )
+    record["source_type"] = PERSON_ASSIST_AUTO_SOURCE
+    record["source_project_id"] = str(source_project.get("id") or "")
+    record["source_site_id"] = str(site.get("id") or "")
+    record["source_site_name"] = str(site.get("site_name") or "")
+    record["source_date"] = str(site.get("date") or "")
+    record["source_shift_key"] = str(site.get("shift_key") or "")
+    record["source_available_from"] = str(record.get("date") or "")
+    if existing:
+        index = assist["records"].index(existing)
+        if assist["records"][index] == record:
+            return None
+        assist["records"][index] = record
+        return f"person経験済現場から自動実績を更新: {_assist_record_history_label(record)}"
+    assist["records"].append(record)
+    return f"person経験済現場から自動実績を登録: {_assist_record_history_label(record)}"
+
+
+def _remove_person_experience_scene_record(
+    target_project: dict[str, Any],
+    *,
+    source_project_id: str,
+    source_site_id: str,
+) -> str | None:
+    assist = _ensure_assist(target_project)
+    existing = _find_auto_scene_assist_record(
+        assist,
+        source_project_id=source_project_id,
+        source_site_id=source_site_id,
+    )
+    if not existing:
+        return None
+    assist["records"] = [
+        item
+        for item in (assist.get("records") or [])
+        if str(item.get("id") or "") != str(existing.get("id") or "")
+    ]
+    return f"person経験済現場の自動実績を削除: {_assist_record_history_label(existing)}"
+
+
+def _sync_person_experience_to_scene_projects(
+    source_project: dict[str, Any],
+    site: dict[str, Any],
+    *,
+    actor_name: str,
+) -> None:
+    if str(site.get("kind") or "") != PERSON_ASSIST_EXPERIENCE_KIND:
+        return
+    normalized_site = _normalized_site_title(site.get("site_name"))
+    if not normalized_site:
+        return
+    for path in _shifts_dir().glob("*.json"):
+        target_summary = _load_json(path)
+        if not target_summary or target_summary.get("mode") != "scene":
+            continue
+        target_project_id = str(target_summary.get("id") or "")
+        with _project_lock(target_project_id):
+            target_project = _load_project(target_project_id)
+            if target_project.get("mode") != "scene":
+                continue
+            if _normalized_site_title(target_project.get("title")) == normalized_site:
+                change = _upsert_person_experience_scene_record(
+                    target_project,
+                    source_project,
+                    site,
+                    actor_name=actor_name,
+                )
+            else:
+                change = _remove_person_experience_scene_record(
+                    target_project,
+                    source_project_id=str(source_project.get("id") or ""),
+                    source_site_id=str(site.get("id") or ""),
+                )
+            if not change:
+                continue
+            _save_project(target_project)
+            _append_history(
+                target_project["id"],
+                {
+                    "timestamp": _utcnow_iso(),
+                    "editor_name": actor_name,
+                    "editor_type": "auto",
+                    "action": "person_experience_sync",
+                    "month_key": None,
+                    "changes": [change],
+                },
+            )
+
+
+def _delete_person_experience_from_scene_projects(
+    source_project_id: str,
+    source_site_id: str,
+    *,
+    actor_name: str,
+) -> None:
+    for path in _shifts_dir().glob("*.json"):
+        target_summary = _load_json(path)
+        if not target_summary or target_summary.get("mode") != "scene":
+            continue
+        target_project_id = str(target_summary.get("id") or "")
+        with _project_lock(target_project_id):
+            target_project = _load_project(target_project_id)
+            if target_project.get("mode") != "scene":
+                continue
+            change = _remove_person_experience_scene_record(
+                target_project,
+                source_project_id=source_project_id,
+                source_site_id=source_site_id,
+            )
+            if not change:
+                continue
+            _save_project(target_project)
+            _append_history(
+                target_project["id"],
+                {
+                    "timestamp": _utcnow_iso(),
+                    "editor_name": actor_name,
+                    "editor_type": "auto",
+                    "action": "person_experience_sync_deleted",
+                    "month_key": None,
+                    "changes": [change],
+                },
+            )
+
+
+def _resync_person_experience_project(source_project: dict[str, Any], *, actor_name: str) -> None:
+    _ensure_person_project(source_project)
+    assist = _ensure_person_assist(source_project)
+    for site in assist.get("experienced_sites") or []:
+        _sync_person_experience_to_scene_projects(source_project, site, actor_name=actor_name)
+
+
+def _backfill_scene_project_from_person_experience(
+    scene_project: dict[str, Any], *, actor_name: str
+) -> None:
+    _ensure_scene_project(scene_project)
+    assist = _ensure_assist(scene_project)
+    normalized_title = _normalized_site_title(scene_project.get("title"))
+    changes: list[str] = []
+    matched_keys: set[tuple[str, str]] = set()
+    if normalized_title:
+        for path in _shifts_dir().glob("*.json"):
+            source_project = _load_json(path)
+            if not source_project or source_project.get("mode") != "person":
+                continue
+            source_assist = _ensure_person_assist(source_project)
+            for site in source_assist.get("experienced_sites") or []:
+                if _normalized_site_title(site.get("site_name")) != normalized_title:
+                    continue
+                matched_keys.add((str(source_project.get("id") or ""), str(site.get("id") or "")))
+                change = _upsert_person_experience_scene_record(
+                    scene_project,
+                    source_project,
+                    site,
+                    actor_name=actor_name,
+                )
+                if change:
+                    changes.append(change)
+    for record in list(assist.get("records") or []):
+        if str(record.get("source_type") or "") != PERSON_ASSIST_AUTO_SOURCE:
+            continue
+        source_key = (
+            str(record.get("source_project_id") or ""),
+            str(record.get("source_site_id") or ""),
+        )
+        if not normalized_title or source_key not in matched_keys:
+            change = _remove_person_experience_scene_record(
+                scene_project,
+                source_project_id=source_key[0],
+                source_site_id=source_key[1],
+            )
+            if change:
+                changes.append(change)
+    if not changes:
+        return
+    _save_project(scene_project)
+    _append_history(
+        scene_project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": "auto",
+            "action": "person_experience_backfill",
+            "month_key": None,
+            "changes": changes[:100],
+        },
+    )
+
+
+def _assist_bootstrap_for_project(
+    project: dict[str, Any],
+    *,
+    can_edit_records: bool,
+    can_edit_rules: bool,
+    can_edit_sites: bool,
+) -> dict[str, Any]:
+    if project.get("mode") == "person":
+        return _person_assist_bootstrap_payload(project, can_edit_sites=can_edit_sites)
+    return _assist_bootstrap_payload(project, can_edit_records=can_edit_records, can_edit_rules=can_edit_rules)
+
+
 def _rule_effective_for_date(rule: dict[str, Any], target_date: date) -> bool:
     effective_from = str(rule.get("effective_from") or "").strip()
     effective_to = str(rule.get("effective_to") or "").strip()
@@ -1763,6 +3063,129 @@ def _rule_effective_for_date(rule: dict[str, Any], target_date: date) -> bool:
     return True
 
 
+def _assist_scene_conflict_entries(project: dict[str, Any], target_date: date) -> list[dict[str, str]]:
+    owner_user_id = str(project.get("owner_user_id") or "").strip()
+    project_id = str(project.get("id") or "").strip()
+    month_key = _month_key(target_date.year, target_date.month)
+    day_key = str(target_date.day)
+    entries: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for path in _shifts_dir().glob("*.json"):
+        other_project = _load_json(path)
+        if not other_project:
+            continue
+        if str(other_project.get("id") or "").strip() == project_id:
+            continue
+        if str(other_project.get("mode") or "").strip() != "scene":
+            continue
+        if owner_user_id and str(other_project.get("owner_user_id") or "").strip() != owner_user_id:
+            continue
+        month_data = (other_project.get("months") or {}).get(month_key)
+        if not isinstance(month_data, dict):
+            continue
+        day_entries = (month_data.get("entries_per_day") or {}).get(day_key)
+        if not isinstance(day_entries, list):
+            continue
+        project_title = str(other_project.get("title") or "").strip() or "名称未設定"
+        other_project_id = str(other_project.get("id") or "").strip()
+        for entry in day_entries:
+            if not isinstance(entry, dict):
+                continue
+            shift_key, entry_name = parse_entry_value(entry.get("value") or "")
+            employee_number = str(entry.get("employee_number") or "").strip()
+            normalized_name = str(entry_name or "").strip()
+            key = (other_project_id, str(shift_key or "").strip(), employee_number, normalized_name)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append(
+                {
+                    "project_id": other_project_id,
+                    "project_title": project_title,
+                    "shift_key": str(shift_key or "").strip(),
+                    "shift_label": _assist_shift_label(shift_key),
+                    "entry_name": normalized_name,
+                    "employee_number": employee_number,
+                }
+            )
+    entries.sort(
+        key=lambda item: (
+            item["project_title"],
+            item["shift_label"],
+            item["entry_name"],
+            item["employee_number"],
+        )
+    )
+    return entries
+
+
+def _assist_candidate_matches_scene_entry(
+    *,
+    candidate_name: str,
+    candidate_employee_number: str,
+    entry_name: str,
+    entry_employee_number: str,
+) -> bool:
+    normalized_candidate_number = str(candidate_employee_number or "").strip()
+    normalized_entry_number = str(entry_employee_number or "").strip()
+    if normalized_candidate_number and normalized_entry_number:
+        return normalized_candidate_number == normalized_entry_number
+    normalized_candidate_name = str(candidate_name or "").strip()
+    normalized_entry_name = str(entry_name or "").strip()
+    return bool(normalized_candidate_name and normalized_entry_name and normalized_candidate_name == normalized_entry_name)
+
+
+def _assist_scene_conflicts_for_candidate(
+    conflict_entries: list[dict[str, str]],
+    *,
+    shift_key: str,
+    candidate_name: str,
+    employee_number: str,
+) -> list[dict[str, str]]:
+    conflicts: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    normalized_shift_key = str(shift_key or "").strip() or None
+    for entry in conflict_entries:
+        if not _assist_candidate_matches_scene_entry(
+            candidate_name=candidate_name,
+            candidate_employee_number=employee_number,
+            entry_name=str(entry.get("entry_name") or ""),
+            entry_employee_number=str(entry.get("employee_number") or ""),
+        ):
+            continue
+        other_shift_key = str(entry.get("shift_key") or "").strip() or None
+        if not is_duplicate_by_rules(normalized_shift_key, other_shift_key):
+            continue
+        key = (
+            str(entry.get("project_id") or "").strip(),
+            str(other_shift_key or ""),
+            str(entry.get("employee_number") or "").strip(),
+            str(entry.get("entry_name") or "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        conflicts.append(
+            {
+                "project_id": str(entry.get("project_id") or "").strip(),
+                "project_title": str(entry.get("project_title") or "").strip(),
+                "shift_key": str(other_shift_key or ""),
+                "shift_label": str(entry.get("shift_label") or _assist_shift_label(other_shift_key)),
+                "entry_name": str(entry.get("entry_name") or "").strip(),
+                "employee_number": str(entry.get("employee_number") or "").strip(),
+            }
+        )
+    conflicts.sort(
+        key=lambda item: (
+            item["project_title"],
+            item["shift_label"],
+            item["entry_name"],
+            item["employee_number"],
+        )
+    )
+    return conflicts
+
+
 def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     _ensure_scene_project(project)
     assist = _ensure_assist(project)
@@ -1775,6 +3198,7 @@ def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str
     except (TypeError, ValueError):
         limit = 10
     limit = max(1, min(limit, 30))
+    scene_conflict_entries = _assist_scene_conflict_entries(project, target_date)
 
     candidates: dict[str, dict[str, Any]] = {}
     option_aptitude_counts: dict[str, dict[str, int]] = {}
@@ -2009,6 +3433,21 @@ def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str
             if reason not in unique_reasons:
                 unique_reasons.append(reason)
         item["reasons"] = unique_reasons[:6]
+        scene_conflicts = _assist_scene_conflicts_for_candidate(
+            scene_conflict_entries,
+            shift_key=shift_key,
+            candidate_name=str(item.get("name") or ""),
+            employee_number=str(item.get("employee_number") or ""),
+        )
+        scene_conflict_site_names: list[str] = []
+        for conflict in scene_conflicts:
+            project_title = str(conflict.get("project_title") or "").strip()
+            if project_title and project_title not in scene_conflict_site_names:
+                scene_conflict_site_names.append(project_title)
+        item["has_scene_conflict"] = bool(scene_conflicts)
+        item["scene_conflicts"] = scene_conflicts
+        item["scene_conflict_site_names"] = scene_conflict_site_names
+        item["scene_conflict_site_count"] = len(scene_conflict_site_names)
         item["breakdown"].sort(
             key=lambda part: (
                 -int(part.get("points", 0) or 0),
@@ -2305,6 +3744,60 @@ def api_list():
     return jsonify({"projects": projects})
 
 
+@cloudshift_bp.route("/api/conflict-check", methods=["POST"])
+@login_required
+def api_conflict_check():
+    payload = request.get_json(silent=True) or {}
+    month_key = str(payload.get("month_key") or "").strip()
+    if not month_key:
+        raise CloudShiftError("比較する年月を選択してください", 400)
+
+    try:
+        year, month = _parse_month_key(month_key)
+        year, month = _validate_year_month(year, month)
+    except Exception as exc:
+        raise CloudShiftError("年月の形式が不正です", 400) from exc
+
+    raw_project_ids = payload.get("project_ids")
+    if not isinstance(raw_project_ids, list):
+        raise CloudShiftError("比較するシフト帳を選択してください", 400)
+
+    project_ids: list[str] = []
+    for item in raw_project_ids:
+        project_id = str(item or "").strip()
+        if project_id and project_id not in project_ids:
+            project_ids.append(project_id)
+
+    if not project_ids:
+        raise CloudShiftError("比較するシフト帳を選択してください", 400)
+
+    compare_payloads: list[dict[str, Any]] = []
+    for project_id in project_ids:
+        project = _owner_project_or_404(project_id)
+        month_data = (project.get("months") or {}).get(month_key)
+        if not month_data:
+            raise CloudShiftError(f"{project['title']} に {month_key} の月データがありません", 400)
+        compare_payloads.append(
+            {
+                "project_id": project["id"],
+                "month_key": month_key,
+                "label": project["title"],
+                "title": project["title"],
+                "mode": project["mode"],
+                "year": year,
+                "month": month,
+                "required_capacity": month_data.get("required_capacity", 0) if month_data.get("capacity_enabled") else 0,
+                "entries_per_day": month_data.get("entries_per_day") or {},
+            }
+        )
+
+    try:
+        result = compare_shift_payloads(compare_payloads)
+    except ValueError as exc:
+        raise CloudShiftError(str(exc), 400) from exc
+    return jsonify({"success": True, **result})
+
+
 @cloudshift_bp.route("/api/create", methods=["POST"])
 @login_required
 def api_create():
@@ -2355,6 +3848,8 @@ def api_create():
             "changes": [f"{month_key} を作成"],
         },
     )
+    if project["mode"] == "scene":
+        _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
     return jsonify({"success": True, "project": _project_detail_payload(project)})
 
 
@@ -2370,6 +3865,8 @@ def api_project_detail(project_id: str):
 @login_required
 def api_project_meta(project_id: str):
     data = request.get_json(silent=True) or {}
+    should_resync_person_experience = False
+    should_backfill_scene_person_experience = False
     with _project_lock(project_id):
         project = _owner_project_or_404(project_id)
         new_title = _sanitize_title(data.get("title", project["title"]))
@@ -2405,6 +3902,14 @@ def api_project_meta(project_id: str):
                     "changes": changes,
                 },
             )
+            should_resync_person_experience = project.get("mode") == "person" and (
+                new_title != old_title or new_employee_number != old_employee_number
+            )
+            should_backfill_scene_person_experience = project.get("mode") == "scene" and new_title != old_title
+    if should_resync_person_experience:
+        _resync_person_experience_project(project, actor_name=_user_label())
+    if should_backfill_scene_person_experience:
+        _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
     return jsonify({"success": True, "project": _project_detail_payload(project)})
 
 
@@ -2565,14 +4070,24 @@ def api_delete_month(project_id: str, year: int, month: int):
 @cloudshift_bp.route("/api/project/<project_id>", methods=["DELETE"])
 @login_required
 def api_delete_project(project_id: str):
+    deleted_experience_site_ids: list[str] = []
     with _project_lock(project_id):
         project = _owner_project_or_404(project_id)
+        if project.get("mode") == "person":
+            assist = _ensure_assist(project)
+            deleted_experience_site_ids = [
+                str(item.get("id") or "")
+                for item in (assist.get("experienced_sites") or [])
+                if str(item.get("id") or "")
+            ]
         project_path = _project_path(project_id)
         history_path = _history_path(project_id)
         if project_path.exists():
             project_path.unlink()
         if history_path.exists():
             history_path.unlink()
+    for site_id in deleted_experience_site_ids:
+        _delete_person_experience_from_scene_projects(project_id, site_id, actor_name=_user_label())
     return jsonify({"success": True, "deleted_project_id": project["id"]})
 
 
@@ -2719,7 +4234,234 @@ def api_leave_sync(project_id: str, year: int, month: int):
 @login_required
 def api_assist_owner(project_id: str):
     project = _owner_project_or_404(project_id)
-    return jsonify(_assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=True))
+    return jsonify(_assist_bootstrap_for_project(project, can_edit_records=True, can_edit_rules=True, can_edit_sites=True))
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/sites", methods=["POST"])
+@login_required
+def api_assist_owner_create_site(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name = _user_label()
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        site, previous = _person_assist_site_mutation(
+            project,
+            payload,
+            actor_name=actor_name,
+            actor_type="owner",
+        )
+    previous_kind = str((previous or {}).get("kind") or "")
+    current_kind = str(site.get("kind") or "")
+    if current_kind == PERSON_ASSIST_EXPERIENCE_KIND:
+        _sync_person_experience_to_scene_projects(project, site, actor_name=actor_name)
+    elif previous_kind == PERSON_ASSIST_EXPERIENCE_KIND:
+        _delete_person_experience_from_scene_projects(project_id, str(site.get("id") or ""), actor_name=actor_name)
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_for_project(
+                project,
+                can_edit_records=True,
+                can_edit_rules=False,
+                can_edit_sites=True,
+            )["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/sites/<site_id>", methods=["PUT"])
+@login_required
+def api_assist_owner_update_site(project_id: str, site_id: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name = _user_label()
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        site, previous = _person_assist_site_mutation(
+            project,
+            payload,
+            actor_name=actor_name,
+            actor_type="owner",
+            site_id=site_id,
+        )
+    previous_kind = str((previous or {}).get("kind") or "")
+    current_kind = str(site.get("kind") or "")
+    if current_kind == PERSON_ASSIST_EXPERIENCE_KIND:
+        _sync_person_experience_to_scene_projects(project, site, actor_name=actor_name)
+    elif previous_kind == PERSON_ASSIST_EXPERIENCE_KIND:
+        _delete_person_experience_from_scene_projects(project_id, str(site.get("id") or ""), actor_name=actor_name)
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_for_project(
+                project,
+                can_edit_records=True,
+                can_edit_rules=False,
+                can_edit_sites=True,
+            )["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/sites/<site_id>", methods=["DELETE"])
+@login_required
+def api_assist_owner_delete_site(project_id: str, site_id: str):
+    actor_name = _user_label()
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        deleted = _person_assist_site_delete(
+            project,
+            site_id,
+            actor_name=actor_name,
+            actor_type="owner",
+        )
+    if str(deleted.get("kind") or "") == PERSON_ASSIST_EXPERIENCE_KIND:
+        _delete_person_experience_from_scene_projects(project_id, site_id, actor_name=actor_name)
+    return jsonify(
+        {
+            "success": True,
+            "assist": _assist_bootstrap_for_project(
+                project,
+                can_edit_records=True,
+                can_edit_rules=False,
+                can_edit_sites=True,
+            )["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/experienced-sites", methods=["POST"])
+@login_required
+def api_assist_owner_create_experienced_site(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        site, _ = _person_assist_site_mutation(
+            project,
+            payload,
+            kind="experienced",
+            actor_name=_user_label(),
+            actor_type="owner",
+        )
+    _sync_person_experience_to_scene_projects(project, site, actor_name=_user_label())
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/experienced-sites/<site_id>", methods=["PUT"])
+@login_required
+def api_assist_owner_update_experienced_site(project_id: str, site_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        site, _ = _person_assist_site_mutation(
+            project,
+            payload,
+            kind="experienced",
+            actor_name=_user_label(),
+            actor_type="owner",
+            site_id=site_id,
+        )
+    _sync_person_experience_to_scene_projects(project, site, actor_name=_user_label())
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/experienced-sites/<site_id>", methods=["DELETE"])
+@login_required
+def api_assist_owner_delete_experienced_site(project_id: str, site_id: str):
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        _person_assist_site_delete(
+            project,
+            site_id,
+            kind="experienced",
+            actor_name=_user_label(),
+            actor_type="owner",
+        )
+    _delete_person_experience_from_scene_projects(project_id, site_id, actor_name=_user_label())
+    return jsonify(
+        {
+            "success": True,
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/training-sites", methods=["POST"])
+@login_required
+def api_assist_owner_create_training_site(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        site, _ = _person_assist_site_mutation(
+            project,
+            payload,
+            kind="training",
+            actor_name=_user_label(),
+            actor_type="owner",
+        )
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/training-sites/<site_id>", methods=["PUT"])
+@login_required
+def api_assist_owner_update_training_site(project_id: str, site_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        site, _ = _person_assist_site_mutation(
+            project,
+            payload,
+            kind="training",
+            actor_name=_user_label(),
+            actor_type="owner",
+            site_id=site_id,
+        )
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/assist/training-sites/<site_id>", methods=["DELETE"])
+@login_required
+def api_assist_owner_delete_training_site(project_id: str, site_id: str):
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        _person_assist_site_delete(
+            project,
+            site_id,
+            kind="training",
+            actor_name=_user_label(),
+            actor_type="owner",
+        )
+    return jsonify(
+        {
+            "success": True,
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
 
 
 @cloudshift_bp.route("/api/project/<project_id>/assist/records", methods=["POST"])
@@ -2953,7 +4695,243 @@ def api_public_save_month(token: str, year: int, month: int):
 @cloudshift_bp.route("/api/public/edit/<token>/assist")
 def api_public_assist(token: str):
     project = _find_project_by_token(token, "edit")
-    return jsonify(_assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False))
+    return jsonify(_assist_bootstrap_for_project(project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True))
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/sites", methods=["POST"])
+def api_public_create_site(token: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        site, previous = _person_assist_site_mutation(
+            project,
+            payload,
+            actor_name=actor_name,
+            actor_type=actor_type,
+        )
+    previous_kind = str((previous or {}).get("kind") or "")
+    current_kind = str(site.get("kind") or "")
+    if current_kind == PERSON_ASSIST_EXPERIENCE_KIND:
+        _sync_person_experience_to_scene_projects(project, site, actor_name=actor_name)
+    elif previous_kind == PERSON_ASSIST_EXPERIENCE_KIND:
+        _delete_person_experience_from_scene_projects(project["id"], str(site.get("id") or ""), actor_name=actor_name)
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_for_project(
+                project,
+                can_edit_records=True,
+                can_edit_rules=False,
+                can_edit_sites=True,
+            )["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/sites/<site_id>", methods=["PUT"])
+def api_public_update_site(token: str, site_id: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        site, previous = _person_assist_site_mutation(
+            project,
+            payload,
+            actor_name=actor_name,
+            actor_type=actor_type,
+            site_id=site_id,
+        )
+    previous_kind = str((previous or {}).get("kind") or "")
+    current_kind = str(site.get("kind") or "")
+    if current_kind == PERSON_ASSIST_EXPERIENCE_KIND:
+        _sync_person_experience_to_scene_projects(project, site, actor_name=actor_name)
+    elif previous_kind == PERSON_ASSIST_EXPERIENCE_KIND:
+        _delete_person_experience_from_scene_projects(project["id"], str(site.get("id") or ""), actor_name=actor_name)
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_for_project(
+                project,
+                can_edit_records=True,
+                can_edit_rules=False,
+                can_edit_sites=True,
+            )["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/sites/<site_id>", methods=["DELETE"])
+def api_public_delete_site(token: str, site_id: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        deleted = _person_assist_site_delete(
+            project,
+            site_id,
+            actor_name=actor_name,
+            actor_type=actor_type,
+        )
+    if str(deleted.get("kind") or "") == PERSON_ASSIST_EXPERIENCE_KIND:
+        _delete_person_experience_from_scene_projects(project["id"], site_id, actor_name=actor_name)
+    return jsonify(
+        {
+            "success": True,
+            "assist": _assist_bootstrap_for_project(
+                project,
+                can_edit_records=True,
+                can_edit_rules=False,
+                can_edit_sites=True,
+            )["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/experienced-sites", methods=["POST"])
+def api_public_create_experienced_site(token: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        site, _ = _person_assist_site_mutation(
+            project,
+            payload,
+            kind="experienced",
+            actor_name=actor_name,
+            actor_type=actor_type,
+        )
+    _sync_person_experience_to_scene_projects(project, site, actor_name=actor_name)
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/experienced-sites/<site_id>", methods=["PUT"])
+def api_public_update_experienced_site(token: str, site_id: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        site, _ = _person_assist_site_mutation(
+            project,
+            payload,
+            kind="experienced",
+            actor_name=actor_name,
+            actor_type=actor_type,
+            site_id=site_id,
+        )
+    _sync_person_experience_to_scene_projects(project, site, actor_name=actor_name)
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/experienced-sites/<site_id>", methods=["DELETE"])
+def api_public_delete_experienced_site(token: str, site_id: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        _person_assist_site_delete(
+            project,
+            site_id,
+            kind="experienced",
+            actor_name=actor_name,
+            actor_type=actor_type,
+        )
+    _delete_person_experience_from_scene_projects(project["id"], site_id, actor_name=actor_name)
+    return jsonify(
+        {
+            "success": True,
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/training-sites", methods=["POST"])
+def api_public_create_training_site(token: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        site, _ = _person_assist_site_mutation(
+            project,
+            payload,
+            kind="training",
+            actor_name=actor_name,
+            actor_type=actor_type,
+        )
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/training-sites/<site_id>", methods=["PUT"])
+def api_public_update_training_site(token: str, site_id: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        site, _ = _person_assist_site_mutation(
+            project,
+            payload,
+            kind="training",
+            actor_name=actor_name,
+            actor_type=actor_type,
+            site_id=site_id,
+        )
+    return jsonify(
+        {
+            "success": True,
+            "site": _person_assist_site_payload(site),
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
+
+
+@cloudshift_bp.route("/api/public/edit/<token>/assist/training-sites/<site_id>", methods=["DELETE"])
+def api_public_delete_training_site(token: str, site_id: str):
+    payload = request.get_json(silent=True) or {}
+    actor_name, actor_type = _editor_identity(payload.get("editor_name"))
+    project = _find_project_by_token(token, "edit")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "edit")
+        _person_assist_site_delete(
+            project,
+            site_id,
+            kind="training",
+            actor_name=actor_name,
+            actor_type=actor_type,
+        )
+    return jsonify(
+        {
+            "success": True,
+            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+        }
+    )
 
 
 @cloudshift_bp.route("/api/public/edit/<token>/assist/records", methods=["POST"])

@@ -102,6 +102,53 @@ def test_check_ignores_leave_entries_in_all_conflict_checks(tmp_path):
     assert payload["same_site_conflicts"] == []
 
 
+def test_check_numbered_vehicle_conflicts_only_with_same_number(tmp_path):
+    _, client = _build_client(tmp_path)
+    csv_a = "scene,2026,4,Team A\n譌･莉・迴ｾ蝣ｴ\n1,!N1!Alice,!N2!Alice,!N1!Alice\n"
+    csv_b = "scene,2026,4,Team B\n譌･莉・迴ｾ蝣ｴ\n1,!N3!Alice\n"
+    csv_c = "scene,2026,4,Team C\n譌･莉・迴ｾ蝣ｴ\n1,!N1!Alice\n"
+
+    response = client.post(
+        "/tools/shiftersync/check",
+        data={
+            "csv_files": [
+                (io.BytesIO(csv_a.encode("utf-8-sig")), "a.csv"),
+                (io.BytesIO(csv_b.encode("utf-8-sig")), "b.csv"),
+                (io.BytesIO(csv_c.encode("utf-8-sig")), "c.csv"),
+            ]
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert sorted(item["entry"] for item in payload["same_site_conflicts"]) == ["!N1!Alice"]
+    assert sorted(item["entry"] for item in payload["conflicts"]) == ["!N1!Alice"]
+
+
+def test_check_temporary_option_conflicts_only_within_same_site(tmp_path):
+    _, client = _build_client(tmp_path)
+    csv_a = "scene,2026,4,Team A\n譌･莉・迴ｾ蝣ｴ\n1,!TEMP!Alice,!TEMP!Alice\n"
+    csv_b = "scene,2026,4,Team B\n譌･莉・迴ｾ蝣ｴ\n1,!TEMP!Alice\n"
+
+    response = client.post(
+        "/tools/shiftersync/check",
+        data={
+            "csv_files": [
+                (io.BytesIO(csv_a.encode("utf-8-sig")), "a.csv"),
+                (io.BytesIO(csv_b.encode("utf-8-sig")), "b.csv"),
+            ]
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["option_mappings"]["TEMP"] == "臨時便"
+    assert sorted(item["entry"] for item in payload["same_site_conflicts"]) == ["!TEMP!Alice"]
+    assert payload["conflicts"] == []
+
+
 def test_entry_display_text_places_name_before_option():
     assert entry_display_text({"value": "!A!Alice", "comment": ""}) == "Alice 午前"
 

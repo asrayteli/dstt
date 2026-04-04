@@ -121,6 +121,12 @@
     text-overflow: ellipsis;
   }
 
+  .cloud-note-chip.danger {
+    border-color: rgba(191, 82, 82, 0.2);
+    background: var(--cloud-danger-soft);
+    color: var(--cloud-danger);
+  }
+
   .cloud-tabs {
     display: flex;
     flex-wrap: wrap;
@@ -311,6 +317,13 @@
     gap: 14px;
   }
 
+  .cloud-check-project-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+    gap: 12px;
+    margin-top: 16px;
+  }
+
   .cloud-project-item {
     border: 1px solid var(--cloud-line);
     border-radius: 20px;
@@ -325,6 +338,47 @@
     border-color: var(--cloud-primary);
     box-shadow: 0 16px 32px rgba(45, 111, 182, 0.12);
     transform: translateY(-1px);
+  }
+
+  .cloud-check-project-item {
+    border: 1px solid var(--cloud-line);
+    border-radius: 18px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    padding: 14px;
+  }
+
+  .cloud-check-project-item.is-selected {
+    border-color: var(--cloud-primary);
+    box-shadow: 0 14px 28px rgba(45, 111, 182, 0.1);
+  }
+
+  .cloud-check-project-label {
+    display: grid;
+    gap: 10px;
+    cursor: pointer;
+  }
+
+  .cloud-check-project-head {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .cloud-check-project-head input {
+    margin-top: 2px;
+  }
+
+  .cloud-check-project-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .cloud-check-project-meta {
+    margin: 4px 0 0;
+    color: var(--cloud-muted);
+    font-size: 12px;
+    line-height: 1.6;
   }
 
   .cloud-project-card-head {
@@ -538,6 +592,124 @@
   .cloud-history-item ul {
     margin: 8px 0 0;
     padding-left: 18px;
+  }
+
+  .cloud-check-results {
+    display: grid;
+    gap: 14px;
+    margin-top: 18px;
+  }
+
+  .cloud-check-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .cloud-check-scroll {
+    overflow: auto;
+    border: 1px solid var(--cloud-line);
+    border-radius: 18px;
+    background: #fff;
+  }
+
+  .cloud-check-table {
+    display: grid;
+    gap: 0;
+    min-width: max-content;
+  }
+
+  .cloud-check-header-row,
+  .cloud-check-date-row {
+    display: grid;
+    grid-template-columns: 90px repeat(var(--cloud-check-columns, 1), minmax(220px, 1fr));
+  }
+
+  .cloud-check-corner,
+  .cloud-check-header-cell,
+  .cloud-check-date-cell,
+  .cloud-check-cell {
+    min-width: 0;
+    padding: 12px;
+    border-bottom: 1px solid var(--cloud-line);
+    border-right: 1px solid var(--cloud-line);
+  }
+
+  .cloud-check-header-row > :last-child,
+  .cloud-check-date-row > :last-child {
+    border-right: 0;
+  }
+
+  .cloud-check-header-row:last-child,
+  .cloud-check-date-row:last-child {
+    border-bottom: 0;
+  }
+
+  .cloud-check-corner,
+  .cloud-check-header-cell {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #f7fbff;
+  }
+
+  .cloud-check-date-cell {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: #f9fcff;
+    font-weight: 800;
+    text-align: center;
+  }
+
+  .cloud-check-header-title {
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .cloud-check-header-meta {
+    margin-top: 4px;
+    color: var(--cloud-muted);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .cloud-check-cell {
+    background: #fff;
+  }
+
+  .cloud-check-cell.is-capacity-warning {
+    background: #fff7e8;
+  }
+
+  .cloud-check-entry-list {
+    display: grid;
+    gap: 6px;
+  }
+
+  .cloud-check-entry {
+    border: 1px solid var(--cloud-line);
+    border-radius: 12px;
+    background: #f8fbff;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 8px 10px;
+  }
+
+  .cloud-check-entry.is-conflict {
+    border-color: #ef9a9a;
+    background: #fff0f0;
+  }
+
+  .cloud-check-entry.is-self-conflict {
+    border-color: #98d8a3;
+    background: #edf9ef;
+  }
+
+  .cloud-check-entry.is-empty {
+    color: var(--cloud-muted);
+    background: #f8fafc;
+    text-align: center;
   }
 
   body.cloud-modal-open {
@@ -1041,6 +1213,30 @@
     border-radius: 16px;
     background: #fff;
     padding: 14px;
+  }
+
+  .cloud-assist-result-card.is-conflict {
+    border-color: rgba(191, 82, 82, 0.26);
+    background: linear-gradient(180deg, rgba(255, 240, 240, 0.94), #fff);
+  }
+
+  .cloud-assist-conflict-note {
+    display: grid;
+    gap: 4px;
+    border: 1px solid rgba(191, 82, 82, 0.2);
+    border-radius: 12px;
+    background: rgba(255, 240, 240, 0.72);
+    padding: 10px 12px;
+    color: var(--cloud-danger);
+  }
+
+  .cloud-assist-conflict-note strong {
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .cloud-assist-conflict-note .cloud-panel-note {
+    color: #8f3b3b;
   }
 
   .cloud-assist-card-head,
