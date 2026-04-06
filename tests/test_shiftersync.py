@@ -153,6 +153,15 @@ def test_entry_display_text_places_name_before_option():
     assert entry_display_text({"value": "!A!Alice", "comment": ""}) == "Alice 午前"
 
 
+def test_save_entry_modal_does_not_open_day_detail_popup():
+    script = (ROOT / "app" / "static" / "shiftersync" / "js" / "ss_common.js").read_text(encoding="utf-8")
+    start = script.index("function saveEntryFromModal()")
+    end = script.index("function updateDayEmployeeSelectionNote", start)
+    save_entry_block = script[start:end]
+    assert "closeModal('entry');" in save_entry_block
+    assert "openDayDetail(day);" not in save_entry_block
+
+
 def test_calendar_day_kind_distinguishes_saturday_sunday_and_holiday():
     assert _calendar_day_kind(2026, 3, 20) == "holiday"
     assert _calendar_day_kind(2026, 3, 21) == "saturday"
