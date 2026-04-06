@@ -1253,7 +1253,6 @@ const ShifterSync = (function() {
     updateEntryDisplay(day);
     updateCapacityWarning(day);
     closeModal('entry');
-    openDayDetail(day);
   }
 
   function updateDayEmployeeSelectionNote(dayKey) {
