@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .siteplus-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    padding: 0.65rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1;
+    transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .siteplus-btn-sm {
+    min-height: 32px;
+    padding: 0.45rem 0.8rem;
+    font-size: 0.75rem;
+  }
+
+  .siteplus-btn-primary {
+    background: rgb(15 23 42);
+    color: white;
+  }
+
+  .siteplus-btn-primary:hover {
+    background: rgb(30 41 59);
+  }
+
+  .siteplus-btn-secondary {
+    border-color: rgb(203 213 225);
+    background: white;
+    color: rgb(51 65 85);
+  }
+
+  .siteplus-btn-secondary:hover {
+    background: rgb(248 250 252);
+  }
+
+  .siteplus-btn-muted {
+    border-color: rgb(226 232 240);
+    background: rgb(241 245 249);
+    color: rgb(51 65 85);
+  }
+
+  .siteplus-btn-muted:hover {
+    background: rgb(226 232 240);
+  }
+
+  .siteplus-btn-danger {
+    background: rgb(225 29 72);
+    color: white;
+  }
+
+  .siteplus-btn-danger:hover {
+    background: rgb(190 24 93);
+  }
+
+  .siteplus-btn-hero-light {
+    background: white;
+    color: rgb(17 94 89);
+  }
+
+  .siteplus-btn-hero-light:hover {
+    background: rgb(240 253 250);
+  }
+
+  .siteplus-btn-hero-ghost {
+    border-color: rgba(255,255,255,0.35);
+    background: transparent;
+    color: white;
+  }
+
+  .siteplus-btn-hero-ghost:hover {
+    background: rgba(255,255,255,0.1);
+  }
+
+  .siteplus-modal-shell {
+    width: 100%;
+    overflow: hidden;
+    border-radius: 28px;
+    background: white;
+    box-shadow: 0 28px 90px rgba(15,23,42,0.28);
+  }
+
+  .siteplus-modal-header {
+    border-bottom: 1px solid rgb(226 232 240);
+    padding: 1.25rem 1.5rem;
+  }
+
+  .siteplus-modal-header-inner {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .siteplus-modal-body {
+    padding: 1.5rem;
+  }
+
+  .siteplus-modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-top: 1px dashed rgb(226 232 240);
+    padding-top: 1rem;
+  }
+
+  .siteplus-modal-actions-right {
+    margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .siteplus-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: flex-end;
+  }
+
+  .siteplus-card-actions .siteplus-btn {
+    min-width: 124px;
+  }
+</style>
+<div class="mx-auto max-w-7xl space-y-6 pb-10">
+  <section class="overflow-hidden rounded-[28px] bg-[linear-gradient(135deg,#0f766e_0%,#115e59_45%,#164e63_100%)] text-white shadow-[0_24px_80px_rgba(15,118,110,0.24)]">
+    <div class="grid gap-6 px-6 py-7 lg:grid-cols-[1.25fr,0.95fr] lg:px-8">
+      <div class="space-y-4">
+        <div class="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs tracking-[0.18em] text-white/80">SITE MASTER</div>
+        <div>
+          <h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">現場リストPLUS</h1>
+          <p class="mt-3 max-w-2xl text-sm leading-6 text-teal-50/90">一覧で確認しながら親現場と枝番号を管理するための画面です。CloudShift 連携の基準データとしてそのまま使える形に整えています。</p>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <button id="open-create-site" class="siteplus-btn siteplus-btn-hero-light">親現場を登録</button>
+          <button id="open-create-branch" class="siteplus-btn siteplus-btn-hero-ghost">枝番号を登録</button>
+        </div>
+      </div>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div class="rounded-2xl border border-white/10 bg-white/10 p-4">
+          <div class="text-xs uppercase tracking-[0.18em] text-white/65">LOGIN</div>
+          <div class="mt-2 text-lg font-semibold">{{ user_id }}</div>
+        </div>
+        <div class="rounded-2xl border border-white/10 bg-white/10 p-4">
+          <div class="text-xs uppercase tracking-[0.18em] text-white/65">SUMMARY</div>
+          <div id="siteplus-summary" class="mt-2 text-sm leading-6 text-white/90">読み込み中です</div>
+        </div>
+        <div class="rounded-2xl border border-white/10 bg-white/10 p-4 sm:col-span-2">
+          <div class="text-xs uppercase tracking-[0.18em] text-white/65">SELECTION</div>
+          <div id="selection-summary" class="mt-2 text-sm leading-6 text-white/90">親現場を選択すると対象がここに表示されます。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="rounded-[26px] border border-slate-200 bg-white p-5 shadow-[0_16px_50px_rgba(15,23,42,0.06)] sm:p-6">
+    <form id="search-form" class="space-y-5">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-slate-900">検索</h2>
+          <p class="text-sm text-slate-500">基本条件を前面に置き、詳細は折りたたんでいます。</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" id="toggle-advanced-filters" class="siteplus-btn siteplus-btn-secondary">詳細条件を開く</button>
+          <button type="button" id="reset-btn" class="siteplus-btn siteplus-btn-secondary">リセット</button>
+          <button type="submit" class="siteplus-btn siteplus-btn-primary">検索する</button>
+        </div>
+      </div>
+      <div class="grid gap-4 lg:grid-cols-[1.4fr,0.9fr,0.9fr]">
+        <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">横断検索</span><input id="filter-q" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="契約番号 / 現場名 / 担当者 / 枝番号"></label>
+        <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">契約番号</span><input id="filter-site-id" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="00001"></label>
+        <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">現場名</span><input id="filter-site-name" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="部分一致"></label>
+      </div>
+      <div id="active-filter-bar" class="hidden flex-wrap gap-2 border-t border-dashed border-slate-200 pt-1"></div>
+      <div id="advanced-filters" class="hidden border-t border-dashed border-slate-200 pt-5">
+        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者名</span><input id="filter-manager-name" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="姓 名"></label>
+          <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者ID</span><input id="filter-manager-id" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="社員番号"></label>
+          <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">枝番号</span><input id="filter-site-branch" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="001"></label>
+          <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">CloudShiftオプション</span><select id="filter-option-key" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"><option value="">すべて</option>{% for item in option_items %}<option value="{{ item.key }}">{{ item.label }}</option>{% endfor %}</select></label>
+          <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">登録者</span><input id="filter-site-register" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="DSTT ID"></label>
+          <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">最終更新者</span><input id="filter-site-updater" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="DSTT ID"></label>
+          <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">更新日 From</span><input id="filter-updated-from" type="date" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"></label>
+          <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">更新日 To</span><input id="filter-updated-to" type="date" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"></label>
+        </div>
+        <div class="mt-4 flex flex-wrap gap-5 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <label class="flex items-center gap-2"><input id="filter-include-inactive" type="checkbox" class="rounded border-slate-300">無効データも表示</label>
+          <label class="flex items-center gap-2"><input id="filter-duplicate-only" type="checkbox" class="rounded border-slate-300">同名現場のみ</label>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <section class="space-y-4">
+    <div class="flex items-center justify-between">
+      <div><h2 class="text-lg font-semibold text-slate-900">現場一覧</h2><p class="text-sm text-slate-500">一覧からそのまま編集と枝番号操作へ進めます。</p></div>
+      <span id="site-count" class="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">0 件</span>
+    </div>
+    <div id="site-list" class="space-y-4"><div class="rounded-[24px] border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">読み込み中です</div></div>
+  </section>
+</div>
+
+<div id="site-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/55 p-4">
+  <div class="siteplus-modal-shell max-w-3xl">
+    <div class="siteplus-modal-header"><div class="siteplus-modal-header-inner"><div><div class="text-xs uppercase tracking-[0.2em] text-slate-400">SITE EDITOR</div><h3 id="site-modal-title" class="mt-1 text-xl font-semibold text-slate-900">親現場を登録</h3><p id="site-modal-subtitle" class="mt-1 text-sm text-slate-500">契約番号と担当者情報を登録します。</p></div><button type="button" class="siteplus-btn siteplus-btn-muted" data-close-modal="site-modal">閉じる</button></div></div>
+    <form id="site-form" class="siteplus-modal-body space-y-5">
+      <div class="grid gap-4 md:grid-cols-2">
+        <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">契約番号</span><input name="site_id" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="00001" required></label>
+        <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">現場名</span><input name="site_name" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" required></label>
+        <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者(姓)</span><input name="site_manager_last" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" required></label>
+        <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者(名)</span><input name="site_manager_first" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" required></label>
+        <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者ID</span><input name="site_manager_id" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" required></label>
+        <label class="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"><span class="font-medium">有効</span><input name="is_active" type="checkbox" checked class="rounded border-slate-300"></label>
+      </div>
+      <div class="siteplus-modal-actions">
+        <button id="site-delete-btn" type="button" class="siteplus-btn siteplus-btn-danger hidden">論理削除</button>
+        <div class="siteplus-modal-actions-right"><button type="button" class="siteplus-btn siteplus-btn-secondary" data-close-modal="site-modal">キャンセル</button><button type="submit" class="siteplus-btn siteplus-btn-primary">保存</button></div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="branch-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/55 p-4">
+  <div class="siteplus-modal-shell max-w-2xl">
+    <div class="siteplus-modal-header"><div class="siteplus-modal-header-inner"><div><div class="text-xs uppercase tracking-[0.2em] text-slate-400">BRANCH EDITOR</div><h3 id="branch-modal-title" class="mt-1 text-xl font-semibold text-slate-900">枝番号を登録</h3><p id="branch-target" class="mt-1 text-sm text-slate-500">親現場を選択するとここに対象が表示されます。</p></div><button type="button" class="siteplus-btn siteplus-btn-muted" data-close-modal="branch-modal">閉じる</button></div></div>
+    <form id="branch-form" class="siteplus-modal-body space-y-5">
+      <div class="grid gap-4 md:grid-cols-2">
+        <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">枝番号</span><input name="site_branch" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="001" required></label>
+        <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">CloudShiftオプション</span><select name="cloudshift_option_key" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" required>{% for item in option_items %}<option value="{{ item.key }}" {% if item.key == 'PENDING' %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select></label>
+        <label class="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 md:col-span-2"><span class="font-medium">有効</span><input name="is_active" type="checkbox" checked class="rounded border-slate-300"></label>
+      </div>
+      <div class="siteplus-modal-actions">
+        <button id="branch-delete-btn" type="button" class="siteplus-btn siteplus-btn-danger hidden">論理削除</button>
+        <div class="siteplus-modal-actions-right"><button type="button" class="siteplus-btn siteplus-btn-secondary" data-close-modal="branch-modal">キャンセル</button><button type="submit" class="siteplus-btn siteplus-btn-primary">保存</button></div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="confirm-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/55 p-4">
+  <div class="siteplus-modal-shell max-h-[90vh] max-w-3xl">
+    <div class="siteplus-modal-header"><div class="siteplus-modal-header-inner"><div><div class="text-xs uppercase tracking-[0.2em] text-slate-400">CONFIRM</div><h3 id="confirm-title" class="mt-1 text-xl font-semibold text-slate-900">確認</h3><p id="confirm-message" class="mt-1 text-sm text-slate-500"></p></div><button id="confirm-cancel" type="button" class="siteplus-btn siteplus-btn-muted">閉じる</button></div></div>
+    <div id="confirm-body" class="max-h-[60vh] overflow-y-auto px-6 py-5 text-sm text-slate-700"></div>
+    <div class="flex justify-end border-t border-slate-200 px-6 py-4"><button type="button" id="confirm-ok" class="siteplus-btn siteplus-btn-primary">続行</button></div>
+  </div>
+</div>
+
+<script>
+const SITEPLUS={optionItems:{{ option_items|tojson }},sites:[],selectedSiteId:null,editingSiteId:null,editingBranchId:null,confirmHandler:null,advanced:false};
+const $=(s)=>document.querySelector(s),$$=(s)=>Array.from(document.querySelectorAll(s));
+const siteForm=$('#site-form'),branchForm=$('#branch-form');
+const esc=(v)=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#39;");
+async function req(url,opt={}){const r=await fetch(url,{headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});const t=await r.text();const d=t?JSON.parse(t):{};if(!r.ok){const e=new Error(d.error||'処理に失敗しました');e.payload=d;e.status=r.status;throw e}return d}
+const optionLabel=(k)=>((SITEPLUS.optionItems.find((i)=>i.key===k)||{}).label||k);
+const formDataObj=(f)=>{const d=Object.fromEntries(new FormData(f).entries());f.querySelectorAll('input[type="checkbox"]').forEach((c)=>d[c.name]=c.checked);return d};
+const openModal=(id)=>{$('#'+id).classList.remove('hidden');$('#'+id).classList.add('flex')}; const closeModal=(id)=>{$('#'+id).classList.add('hidden');$('#'+id).classList.remove('flex')};
+const selectedSite=()=>SITEPLUS.sites.find((i)=>i.id===SITEPLUS.selectedSiteId)||null;
+function setAdvanced(open){SITEPLUS.advanced=!!open;$('#advanced-filters').classList.toggle('hidden',!open);$('#toggle-advanced-filters').textContent=open?'詳細条件を閉じる':'詳細条件を開く'}
+function filters(){return{q:$('#filter-q').value.trim(),site_id:$('#filter-site-id').value.trim(),site_name:$('#filter-site-name').value.trim(),manager_name:$('#filter-manager-name').value.trim(),site_manager_id:$('#filter-manager-id').value.trim(),site_branch:$('#filter-site-branch').value.trim(),cloudshift_option_key:$('#filter-option-key').value,site_register:$('#filter-site-register').value.trim(),site_updater:$('#filter-site-updater').value.trim(),updated_from:$('#filter-updated-from').value,updated_to:$('#filter-updated-to').value,include_inactive:$('#filter-include-inactive').checked,duplicate_name_only:$('#filter-duplicate-only').checked}}
+function renderChips(){const f=filters(),labels={q:'横断検索',site_id:'契約番号',site_name:'現場名',manager_name:'担当者名',site_manager_id:'担当者ID',site_branch:'枝番号',cloudshift_option_key:'オプション',site_register:'登録者',site_updater:'最終更新者',updated_from:'更新日From',updated_to:'更新日To'};const chips=[];Object.entries(labels).forEach(([k,l])=>{if(!f[k])return;chips.push(`<span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">${esc(l)} <span class="text-slate-500">${esc(k==='cloudshift_option_key'?optionLabel(f[k]):f[k])}</span></span>`)});if(f.include_inactive)chips.push('<span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">無効データも表示</span>');if(f.duplicate_name_only)chips.push('<span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">同名現場のみ</span>');$('#active-filter-bar').innerHTML=chips.join('');$('#active-filter-bar').classList.toggle('hidden',!chips.length)}
+function renderSummary(){const activeSites=SITEPLUS.sites.filter((i)=>i.is_active).length;const activeBranches=SITEPLUS.sites.reduce((s,i)=>s+(i.active_branch_count||0),0);$('#siteplus-summary').textContent=`${activeSites}件の有効現場 / ${activeBranches}件の有効枝番号`;const site=selectedSite();$('#selection-summary').textContent=site?`${site.site_id} / ${site.site_name} を選択中。枝番号 ${site.branch_count||0}件 (${site.active_branch_count||0}件有効)`:'親現場を選択すると対象がここに表示されます。';$('#site-count').textContent=`${SITEPLUS.sites.length} 件`;renderChips()}
+function resetSiteForm(){siteForm.reset();siteForm.querySelector('[name="is_active"]').checked=true;SITEPLUS.editingSiteId=null;$('#site-delete-btn').classList.add('hidden');$('#site-modal-title').textContent='親現場を登録';$('#site-modal-subtitle').textContent='契約番号と担当者情報を登録します。'}
+function resetBranchForm(){branchForm.reset();branchForm.querySelector('[name="is_active"]').checked=true;branchForm.querySelector('[name="cloudshift_option_key"]').value='PENDING';SITEPLUS.editingBranchId=null;$('#branch-delete-btn').classList.add('hidden');$('#branch-modal-title').textContent='枝番号を登録';const site=selectedSite();$('#branch-target').textContent=site?`対象親現場: ${site.site_id} / ${site.site_name}`:'親現場を選択するとここに対象が表示されます。'}
+function changeTable(changes){if(!changes||!changes.length)return'<p class="text-sm text-slate-500">変更差分はありません。</p>';return`<div class="overflow-hidden rounded-[20px] border border-slate-200"><table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-slate-700"><tr><th class="px-4 py-3">項目</th><th class="px-4 py-3">変更前</th><th class="px-4 py-3">変更後</th></tr></thead><tbody>${changes.map((c)=>`<tr class="border-t border-slate-100"><td class="px-4 py-3 font-medium text-slate-900">${esc(c.label)}</td><td class="px-4 py-3">${esc(c.before??'')}</td><td class="px-4 py-3">${esc(c.after??'')}</td></tr>`).join('')}</tbody></table></div>`}
+function duplicateTable(rows){if(!rows||!rows.length)return'';return`<div class="space-y-3"><div class="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-800">同名の現場が既に登録されています。内容を確認して続行してください。</div><div class="overflow-hidden rounded-[20px] border border-amber-200"><table class="min-w-full text-sm"><thead class="bg-amber-50 text-left text-amber-900"><tr><th class="px-4 py-3">契約番号</th><th class="px-4 py-3">枝番号</th><th class="px-4 py-3">登録者</th><th class="px-4 py-3">更新日時</th><th class="px-4 py-3">状態</th></tr></thead><tbody>${rows.map((r)=>`<tr class="border-t border-amber-100"><td class="px-4 py-3">${esc(r.site_id)}</td><td class="px-4 py-3">${esc(r.site_branch)}</td><td class="px-4 py-3">${esc(r.site_register)}</td><td class="px-4 py-3">${esc(r.updated_at||'-')}</td><td class="px-4 py-3">${r.is_active?'有効':'無効'}</td></tr>`).join('')}</tbody></table></div></div>`}
+function openConfirm({title,message,bodyHtml,label='続行',onConfirm}){$('#confirm-title').textContent=title;$('#confirm-message').textContent=message||'';$('#confirm-body').innerHTML=bodyHtml||'';$('#confirm-ok').textContent=label;SITEPLUS.confirmHandler=onConfirm||null;openModal('confirm-modal')}
+function renderList(){renderSummary();if(!SITEPLUS.sites.length){$('#site-list').innerHTML='<div class="rounded-[24px] border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">条件に一致する現場がありません</div>';return}$('#site-list').innerHTML=SITEPLUS.sites.map((site)=>{const branches=Array.isArray(site.branches)?site.branches:[];const sel=site.id===SITEPLUS.selectedSiteId;return`<article class="overflow-hidden rounded-[26px] border ${sel?'border-teal-400 shadow-[0_18px_55px_rgba(13,148,136,0.16)]':'border-slate-200 shadow-sm'} bg-white"><div class="border-b border-slate-100 px-5 py-4 sm:px-6"><div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div class="space-y-3"><div class="flex flex-wrap items-center gap-2">${site.is_active?'<span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">有効</span>':'<span class="rounded-full bg-rose-100 px-3 py-1 text-xs font-medium text-rose-700">無効</span>'}${site.has_duplicate_name?'<span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">同名あり</span>':''}<button type="button" class="siteplus-btn siteplus-btn-muted siteplus-btn-sm" onclick="window.selectSite(${site.id})">${sel?'選択中':'選択'}</button></div><div><div class="text-xs uppercase tracking-[0.18em] text-slate-400">SITE</div><div class="mt-1 text-xl font-semibold text-slate-900">${esc(site.site_id)} / ${esc(site.site_name)}</div></div><div class="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 xl:grid-cols-4"><div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">担当者</div><div class="mt-1 font-medium text-slate-800">${esc(site.site_manager_last)} ${esc(site.site_manager_first)}</div><div class="text-xs text-slate-500">${esc(site.site_manager_id)}</div></div><div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">登録 / 更新</div><div class="mt-1 font-medium text-slate-800">${esc(site.site_register)}</div><div class="text-xs text-slate-500">${esc(site.site_updater)}</div></div><div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">更新日時</div><div class="mt-1 font-medium text-slate-800">${esc(site.updated_at||'-')}</div></div><div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">枝番号</div><div class="mt-1 font-medium text-slate-800">${branches.length}件</div><div class="text-xs text-slate-500">${site.active_branch_count||0}件有効</div></div></div></div><div class="siteplus-card-actions lg:w-[272px]"><button type="button" class="siteplus-btn siteplus-btn-primary" onclick="window.editSite(${site.id})">親現場を編集</button><button type="button" class="siteplus-btn border border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" onclick="window.prepareBranchForSite(${site.id})">枝番号を追加</button></div></div></div><div class="px-5 py-4 sm:px-6"><div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-slate-900">枝番号一覧</h3><span class="text-xs text-slate-500">${branches.length?`${branches.length}件`:'未登録'}</span></div>${branches.length?`<div class="overflow-hidden rounded-[20px] border border-slate-200"><table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-slate-500"><tr><th class="px-4 py-3">枝番号</th><th class="px-4 py-3">オプション</th><th class="px-4 py-3">登録者</th><th class="px-4 py-3">更新日時</th><th class="px-4 py-3">状態</th><th class="px-4 py-3"></th></tr></thead><tbody>${branches.map((b)=>`<tr class="border-t border-slate-100"><td class="px-4 py-3 font-medium text-slate-900">${esc(b.site_branch)}</td><td class="px-4 py-3">${esc(optionLabel(b.cloudshift_option_key))}</td><td class="px-4 py-3">${esc(b.site_register)}</td><td class="px-4 py-3">${esc(b.updated_at||'-')}</td><td class="px-4 py-3">${b.is_active?'<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">有効</span>':'<span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-700">無効</span>'}</td><td class="px-4 py-3 text-right"><button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.editBranch(${b.id})">編集</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">この親現場には枝番号がまだありません。</div>'}</div></article>`}).join('')}
+async function loadSites(){const p=new URLSearchParams();Object.entries(filters()).forEach(([k,v])=>{if(v!==''&&v!==false&&v!=null)p.set(k,v)});const d=await req(`/tools/siteplus/api/sites?${p.toString()}`);SITEPLUS.sites=d.sites||[];if(SITEPLUS.selectedSiteId&&!SITEPLUS.sites.some((s)=>s.id===SITEPLUS.selectedSiteId))SITEPLUS.selectedSiteId=null;renderList()}
+function openCreateSite(){resetSiteForm();openModal('site-modal')}
+function selectSite(id){SITEPLUS.selectedSiteId=id;renderList()}
+function editSite(id){const s=SITEPLUS.sites.find((i)=>i.id===id);if(!s)return;SITEPLUS.selectedSiteId=s.id;SITEPLUS.editingSiteId=s.id;$('#site-modal-title').textContent='親現場を編集';$('#site-modal-subtitle').textContent=`${s.site_id} / ${s.site_name} の内容を更新します。`;siteForm.querySelector('[name="site_id"]').value=s.site_id||'';siteForm.querySelector('[name="site_name"]').value=s.site_name||'';siteForm.querySelector('[name="site_manager_last"]').value=s.site_manager_last||'';siteForm.querySelector('[name="site_manager_first"]').value=s.site_manager_first||'';siteForm.querySelector('[name="site_manager_id"]').value=s.site_manager_id||'';siteForm.querySelector('[name="is_active"]').checked=!!s.is_active;$('#site-delete-btn').classList.remove('hidden');renderList();openModal('site-modal')}
+function openBranchModal(){const s=selectedSite();if(!s){window.alert('先に親現場を選択してください');return}resetBranchForm();$('#branch-target').textContent=`対象親現場: ${s.site_id} / ${s.site_name}`;openModal('branch-modal')}
+function prepareBranchForSite(id){const s=SITEPLUS.sites.find((i)=>i.id===id);if(!s)return;SITEPLUS.selectedSiteId=s.id;renderList();resetBranchForm();$('#branch-target').textContent=`対象親現場: ${s.site_id} / ${s.site_name}`;openModal('branch-modal')}
+function editBranch(id){for(const s of SITEPLUS.sites){const b=(s.branches||[]).find((i)=>i.id===id);if(!b)continue;SITEPLUS.selectedSiteId=s.id;SITEPLUS.editingBranchId=b.id;$('#branch-modal-title').textContent='枝番号を編集';$('#branch-target').textContent=`${s.site_id} / ${s.site_name} の枝番号を更新します。`;branchForm.querySelector('[name="site_branch"]').value=b.site_branch||'';branchForm.querySelector('[name="cloudshift_option_key"]').value=b.cloudshift_option_key||'PENDING';branchForm.querySelector('[name="is_active"]').checked=!!b.is_active;$('#branch-delete-btn').classList.remove('hidden');renderList();openModal('branch-modal');return}}
+async function submitSite(ev){ev.preventDefault();const payload=formDataObj(siteForm);try{if(!SITEPLUS.editingSiteId){await req('/tools/siteplus/api/sites',{method:'POST',body:JSON.stringify(payload)});closeModal('site-modal');resetSiteForm();await loadSites();return}const preview=await req(`/tools/siteplus/api/sites/${SITEPLUS.editingSiteId}/preview`,{method:'PUT',body:JSON.stringify(payload)});openConfirm({title:'親現場の変更確認',message:'変更内容を確認して問題なければ更新します。',bodyHtml:`${changeTable(preview.changes)}${duplicateTable(preview.duplicates)}`,label:'更新する',onConfirm:async()=>{await req(`/tools/siteplus/api/sites/${SITEPLUS.editingSiteId}`,{method:'PUT',body:JSON.stringify({...payload,confirm_changes:true,confirm_duplicate:true})});closeModal('confirm-modal');closeModal('site-modal');resetSiteForm();await loadSites()}})}catch(e){if(e.status===409&&e.payload?.duplicates){openConfirm({title:'同名現場の注意',message:'同名現場があります。このまま登録する場合は続行してください。',bodyHtml:duplicateTable(e.payload.duplicates),label:'そのまま登録',onConfirm:async()=>{await req('/tools/siteplus/api/sites',{method:'POST',body:JSON.stringify({...payload,confirm_duplicate:true})});closeModal('confirm-modal');closeModal('site-modal');resetSiteForm();await loadSites()}});return}window.alert(e.message||'処理に失敗しました')}}
+async function submitBranch(ev){ev.preventDefault();const s=selectedSite();if(!s){window.alert('先に親現場を選択してください');return}const payload=formDataObj(branchForm);try{if(!SITEPLUS.editingBranchId){await req(`/tools/siteplus/api/sites/${s.id}/branches`,{method:'POST',body:JSON.stringify(payload)});closeModal('branch-modal');resetBranchForm();await loadSites();SITEPLUS.selectedSiteId=s.id;renderList();return}const preview=await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}/preview`,{method:'PUT',body:JSON.stringify(payload)});openConfirm({title:'枝番号の変更確認',message:'変更内容を確認して問題なければ更新します。',bodyHtml:changeTable(preview.changes),label:'更新する',onConfirm:async()=>{await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}`,{method:'PUT',body:JSON.stringify({...payload,confirm_changes:true})});closeModal('confirm-modal');closeModal('branch-modal');resetBranchForm();await loadSites();SITEPLUS.selectedSiteId=s.id;renderList()}})}catch(e){window.alert(e.message||'処理に失敗しました')}}
+async function deleteSite(){if(!SITEPLUS.editingSiteId)return;const s=SITEPLUS.sites.find((i)=>i.id===SITEPLUS.editingSiteId);if(!s)return;openConfirm({title:'親現場の論理削除',message:'配下の枝番号もまとめて無効化します。',bodyHtml:`<div class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">${esc(s.site_id)} / ${esc(s.site_name)} を無効化します。</div>`,label:'無効化する',onConfirm:async()=>{await req(`/tools/siteplus/api/sites/${s.id}`,{method:'DELETE',body:JSON.stringify({confirm:true})});closeModal('confirm-modal');closeModal('site-modal');resetSiteForm();resetBranchForm();await loadSites()}})}
+async function deleteBranch(){if(!SITEPLUS.editingBranchId)return;openConfirm({title:'枝番号の論理削除',message:'この枝番号だけを無効化します。',bodyHtml:'<div class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">選択中の枝番号を無効化します。</div>',label:'無効化する',onConfirm:async()=>{await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}`,{method:'DELETE',body:JSON.stringify({confirm:true})});closeModal('confirm-modal');closeModal('branch-modal');resetBranchForm();await loadSites()}})}
+$('#open-create-site').addEventListener('click',openCreateSite);$('#open-create-branch').addEventListener('click',openBranchModal);$('#toggle-advanced-filters').addEventListener('click',()=>setAdvanced(!SITEPLUS.advanced));$('#search-form').addEventListener('submit',(e)=>{e.preventDefault();loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'))});$('#reset-btn').addEventListener('click',()=>{$('#search-form').reset();$('#filter-option-key').value='';$('#filter-include-inactive').checked=false;$('#filter-duplicate-only').checked=false;setAdvanced(false);loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'))});siteForm.addEventListener('submit',submitSite);branchForm.addEventListener('submit',submitBranch);$('#site-delete-btn').addEventListener('click',()=>deleteSite().catch((err)=>window.alert(err.message||'処理に失敗しました')));$('#branch-delete-btn').addEventListener('click',()=>deleteBranch().catch((err)=>window.alert(err.message||'処理に失敗しました')));$$('[data-close-modal]').forEach((b)=>b.addEventListener('click',()=>closeModal(b.getAttribute('data-close-modal'))));$('#confirm-cancel').addEventListener('click',()=>{SITEPLUS.confirmHandler=null;closeModal('confirm-modal')});$('#confirm-ok').addEventListener('click',async()=>{if(SITEPLUS.confirmHandler)await SITEPLUS.confirmHandler()});window.selectSite=selectSite;window.editSite=editSite;window.prepareBranchForSite=prepareBranchForSite;window.editBranch=editBranch;resetSiteForm();resetBranchForm();setAdvanced(false);loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'));
+</script>
+{% endblock %}

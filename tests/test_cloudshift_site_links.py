@@ -1,0 +1,241 @@
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import importlib.util
+
+from flask import Flask
+
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+SITE_PACKAGES = ROOT / "Lib" / "site-packages"
+if SITE_PACKAGES.exists() and str(SITE_PACKAGES) not in sys.path:
+    sys.path.append(str(SITE_PACKAGES))
+
+from app.models import Site, SiteBranch, db
+
+
+def _load_cloudshift_module():
+    module_path = ROOT / "app" / "tools" / "cloudshift.py"
+    spec = importlib.util.spec_from_file_location("cloudshift_site_test_module", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def _build_app(tmp_path):
+    module = _load_cloudshift_module()
+    app = Flask(__name__, root_path=str(tmp_path), instance_path=str(tmp_path / "instance"))
+    app.secret_key = "test"
+    app.config["TESTING"] = True
+    app.config["LOGIN_DISABLED"] = True
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{(tmp_path / 'cloudshift-sites.db').as_posix()}"
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    db.init_app(app)
+    app.register_blueprint(module.cloudshift_bp)
+    with app.app_context():
+        db.create_all()
+    return module, app
+
+
+def _owner():
+    return SimpleNamespace(is_authenticated=True, username="owner01", name="Owner User")
+
+
+def _create_site(app, *, site_id, site_name):
+    with app.app_context():
+        site = Site(
+            site_id=site_id,
+            site_name=site_name,
+            site_manager_last="Manager",
+            site_manager_first="One",
+            site_manager_id="9001",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.commit()
+        return site.id
+
+
+def _create_branch(app, *, site_row_id, site_branch, option_key="O"):
+    with app.app_context():
+        branch = SiteBranch(
+            site_row_id=site_row_id,
+            site_branch=site_branch,
+            cloudshift_option_key=option_key,
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(branch)
+        db.session.commit()
+        return branch.id
+
+
+def test_cloudshift_scene_create_can_link_site(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="12345", site_name="Alpha Site")
+    client = app.test_client()
+
+    response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Alpha Shift",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["project"]["project"]
+    assert payload["site"]["is_linked"] is True
+    assert payload["site"]["site_row_id"] == site_row_id
+    assert payload["site"]["site_id"] == "12345"
+    assert payload["site"]["site_name"] == "Alpha Site"
+
+
+def test_cloudshift_existing_scene_can_set_site_later(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="54321", site_name="Beta Site")
+    client = app.test_client()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Legacy Shift",
+            "mode": "scene",
+            "year": "2026",
+            "month": "5",
+        },
+    )
+    assert create_response.status_code == 200
+    project = create_response.get_json()["project"]["project"]
+    assert project["site"]["is_linked"] is False
+
+    update_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project['id']}/meta",
+        json={
+            "title": "Legacy Shift",
+            "site_row_id": site_row_id,
+        },
+    )
+
+    assert update_response.status_code == 200
+    updated_project = update_response.get_json()["project"]["project"]
+    assert updated_project["site"]["is_linked"] is True
+    assert updated_project["site"]["site_id"] == "54321"
+    assert updated_project["site"]["site_name"] == "Beta Site"
+
+
+def test_cloudshift_month_save_preserves_site_branch_metadata(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="13579", site_name="Gamma Site")
+    branch_row_id = _create_branch(app, site_row_id=site_row_id, site_branch="001", option_key="O")
+    client = app.test_client()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Gamma Shift",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert create_response.status_code == 200
+    project_payload = create_response.get_json()["project"]
+    project_id = project_payload["project"]["id"]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": project_payload["month"],
+            "entries_per_day": {
+                "1": [
+                    {
+                        "id": "entry-001",
+                        "value": "!O!Alice",
+                        "comment": "大型担当",
+                        "site_branch_row_id": str(branch_row_id),
+                        "site_branch": "001",
+                    }
+                ]
+            },
+        },
+    )
+
+    assert save_response.status_code == 200
+    month_payload = save_response.get_json()["month"]
+    entry = month_payload["entries_per_day"]["1"][0]
+    assert entry["site_branch_row_id"] == str(branch_row_id)
+    assert entry["site_branch"] == "001"
+
+
+def test_person_experience_site_link_matches_scene_by_site_row_id(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="24680", site_name="Linked Master Site")
+    client = app.test_client()
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Worker One",
+            "mode": "person",
+            "employee_number": "3001",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert person_response.status_code == 200
+    person_id = person_response.get_json()["project"]["project"]["id"]
+
+    create_site_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/assist/sites",
+        json={
+            "site_type": "experienced",
+            "date": "2026-04-01",
+            "site_row_id": site_row_id,
+            "site_name": "Legacy Name",
+            "shift_key": "O",
+            "notes": "大型担当",
+        },
+    )
+    assert create_site_response.status_code == 200
+    assist_site = create_site_response.get_json()["site"]
+    assert assist_site["site_row_id"] == site_row_id
+    assert assist_site["site_id"] == "24680"
+    assert assist_site["site_name"] == "Linked Master Site"
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Different Scene Title",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert scene_response.status_code == 200
+    scene_id = scene_response.get_json()["project"]["project"]["id"]
+
+    assist_payload = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/assist"
+    ).get_json()["assist"]
+    assert len(assist_payload["records"]) == 1
+    record = assist_payload["records"][0]
+    assert record["candidate_name"] == "Worker One"
+    assert record["shift_key"] == "O"

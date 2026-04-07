@@ -46,8 +46,8 @@
             <span>タイトル</span>
             <input id="cloud-create-title" name="title" class="cloud-input" type="text" required>
             <input id="cloud-create-employee-number" name="employee_number" type="hidden">
-            <div id="cloud-create-candidate-panel" class="cloud-hidden" style="border: 1px solid var(--cloud-line); border-radius: 12px; background: #fff; padding: 8px; max-height: 220px; overflow: auto;"></div>
-            <div id="cloud-create-selected-note" style="color: var(--cloud-muted); font-size: 11px; min-height: 1.1em;"></div>
+            <div id="cloud-create-candidate-panel" class="cloud-input-panel cloud-hidden"></div>
+            <div id="cloud-create-selected-note" class="cloud-field-note"></div>
           </label>
           <label class="cloud-field">
             <span>種別</span>
@@ -67,6 +67,16 @@
           <label class="cloud-field">
             <span>必要人数</span>
             <input id="cloud-create-capacity" name="required_capacity" class="cloud-input" type="number" min="0" max="99" value="0">
+          </label>
+          <label id="cloud-create-site-field" class="cloud-field cloud-field-wide">
+            <span>現場</span>
+            <div class="cloud-field-stack-inline">
+              <input id="cloud-create-site-display" class="cloud-input" type="text" placeholder="現場を選択してください" readonly>
+              <input id="cloud-create-site-row-id" name="site_row_id" type="hidden">
+              <button id="cloud-create-pick-site" type="button" class="cloud-btn secondary">現場を選ぶ</button>
+              <button id="cloud-create-clear-site" type="button" class="cloud-btn ghost">解除</button>
+            </div>
+            <div id="cloud-create-site-note" class="cloud-field-note"></div>
           </label>
         </div>
         <div class="cloud-actions">
@@ -106,6 +116,13 @@
       </div>
 
       <div id="cloud-workspace" class="cloud-workspace cloud-hidden">
+        <div id="cloud-site-warning" class="cloud-empty-state warning cloud-hidden">
+          <h2>現場が未設定です</h2>
+          <p>この現場シフトはまだ現場マスタと紐付いていません。名称一致のままだと他ユーザーとズレる可能性があります。</p>
+          <div class="cloud-actions">
+            <button id="cloud-open-site-picker" type="button" class="cloud-btn secondary">現場を設定する</button>
+          </div>
+        </div>
         <div class="cloud-editor-bar">
           <div class="cloud-editor-heading">
             <h2 id="cloud-editor-title">編集</h2>
@@ -117,8 +134,18 @@
               <input id="cloud-project-title" class="cloud-input" type="text">
               <input id="cloud-project-employee-number" type="hidden">
             </label>
-            <div id="cloud-project-candidate-panel" class="cloud-hidden" style="border: 1px solid var(--cloud-line); border-radius: 12px; background: #fff; padding: 8px; max-height: 220px; overflow: auto; min-width: min(360px, 100%);"></div>
-            <div id="cloud-project-selected-note" style="color: var(--cloud-muted); font-size: 11px; min-height: 1.1em;"></div>
+            <label id="cloud-project-site-field" class="cloud-field cloud-field-inline cloud-title-field">
+              <span>現場</span>
+              <input id="cloud-project-site-display" class="cloud-input" type="text" placeholder="現場を選択してください" readonly>
+              <input id="cloud-project-site-row-id" type="hidden">
+            </label>
+            <div class="cloud-inline-actions">
+              <button id="cloud-project-pick-site" type="button" class="cloud-btn secondary">現場を選ぶ</button>
+              <button id="cloud-project-clear-site" type="button" class="cloud-btn ghost">解除</button>
+            </div>
+            <div id="cloud-project-site-note" class="cloud-field-note"></div>
+            <div id="cloud-project-candidate-panel" class="cloud-input-panel wide cloud-hidden"></div>
+            <div id="cloud-project-selected-note" class="cloud-field-note"></div>
             <button id="cloud-save-title" type="button" class="cloud-btn secondary">タイトル保存</button>
             <button id="cloud-save-month" type="button" class="cloud-btn primary">この月を保存</button>
           </div>

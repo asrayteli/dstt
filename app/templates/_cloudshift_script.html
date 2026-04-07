@@ -53,6 +53,8 @@
       }
     };
     const employeeSearchCache = new Map();
+    const siteSearchCache = new Map();
+    const siteBranchCache = new Map();
     const ASSIST_OPTIONLESS_LABEL = 'オプションなし';
     const ASSIST_WEEKDAYLESS_LABEL = '曜日なし';
 
@@ -140,6 +142,78 @@
       return optionMappings()[optionKey] || optionKey;
     }
 
+    function normalizeSiteBranchRowId(value) {
+      const text = String(value || '').trim();
+      if (!text || !/^\d+$/.test(text)) {
+        return '';
+      }
+      return parseInt(text, 10) > 0 ? text : '';
+    }
+
+    function normalizeSiteBranchCandidate(branch) {
+      if (!branch || typeof branch !== 'object') {
+        return null;
+      }
+      const id = normalizeSiteBranchRowId(branch.id || branch.site_branch_row_id || branch.siteBranchRowId || '');
+      const siteBranch = String(branch.site_branch || branch.siteBranch || '').trim();
+      if (!id && !siteBranch) {
+        return null;
+      }
+      return {
+        id,
+        site_branch: siteBranch,
+        cloudshift_option_key: String(branch.cloudshift_option_key || branch.cloudshiftOptionKey || '').trim().toUpperCase(),
+        option_label: String(branch.option_label || branch.optionLabel || '').trim(),
+        is_active: branch.is_active !== false
+      };
+    }
+
+    function currentProjectSiteBranches() {
+      const raw = ShifterSync.getState ? ShifterSync.getState('siteBranches') : [];
+      return Array.isArray(raw) ? raw.map((branch) => normalizeSiteBranchCandidate(branch)).filter(Boolean) : [];
+    }
+
+    function currentProjectSiteContext() {
+      return ShifterSync.getState ? (ShifterSync.getState('siteContext') || null) : null;
+    }
+
+    function siteBranchCandidatesForOption(optionKey) {
+      const branches = currentProjectSiteBranches().filter((branch) => branch.is_active !== false);
+      if (!branches.length) {
+        return [];
+      }
+      const normalizedOption = String(optionKey || '').trim().toUpperCase();
+      if (!normalizedOption) {
+        return branches;
+      }
+      const matched = branches.filter((branch) => branch.cloudshift_option_key === normalizedOption);
+      return matched.length ? matched : branches;
+    }
+
+    function autoBranchFieldsForOption(optionKey) {
+      const candidates = siteBranchCandidatesForOption(optionKey);
+      if (candidates.length !== 1) {
+        return { site_branch_row_id: '', site_branch: '' };
+      }
+      return {
+        site_branch_row_id: candidates[0].id,
+        site_branch: candidates[0].site_branch
+      };
+    }
+
+    function setShifterSyncSiteStateForCurrentProject() {
+      if (!ShifterSync.setState) {
+        return;
+      }
+      const project = currentProject();
+      const site = project && project.mode === 'scene' ? (project.site || null) : null;
+      const cachedBranches = site && site.site_id && siteBranchCache.has(site.site_id)
+        ? siteBranchCache.get(site.site_id)
+        : [];
+      ShifterSync.setState('siteContext', site);
+      ShifterSync.setState('siteBranches', Array.isArray(cachedBranches) ? cachedBranches : []);
+    }
+
     function monthDays(month) {
       if (!month) return 0;
       return new Date(month.year, month.month, 0).getDate();
@@ -157,11 +231,23 @@
       const employeeNumber = refs.employeeInput
         ? refs.employeeInput.value.trim()
         : (refs.nameInput && refs.nameInput.dataset ? String(refs.nameInput.dataset.employeeNumber || '').trim() : '');
+      const selectedBranchOption = refs.branchSelect && refs.branchSelect.selectedOptions && refs.branchSelect.selectedOptions.length
+        ? refs.branchSelect.selectedOptions[0]
+        : null;
+      const explicitBranchRowId = refs.branchSelect ? normalizeSiteBranchRowId(refs.branchSelect.value) : '';
+      const explicitBranch = explicitBranchRowId
+        ? String(selectedBranchOption && selectedBranchOption.getAttribute('data-site-branch') || '').trim()
+        : '';
+      const autoBranchFields = currentProject() && currentProject().mode === 'scene' && !explicitBranchRowId
+        ? autoBranchFieldsForOption(optionKey || null)
+        : { site_branch_row_id: explicitBranchRowId, site_branch: explicitBranch };
       return {
         id: makeEntryId(),
         value: formatEntryValue(optionKey || null, name),
         comment,
-        employee_number: employeeNumber
+        employee_number: employeeNumber,
+        site_branch_row_id: autoBranchFields.site_branch_row_id,
+        site_branch: autoBranchFields.site_branch
       };
     }
 
@@ -170,7 +256,9 @@
         id: makeEntryId(),
         value: String(entry && entry.value ? entry.value : '').trim(),
         comment: String(entry && entry.comment ? entry.comment : '').trim(),
-        employee_number: String(entry && entry.employee_number ? entry.employee_number : '').trim()
+        employee_number: String(entry && entry.employee_number ? entry.employee_number : '').trim(),
+        site_branch_row_id: normalizeSiteBranchRowId(entry && (entry.site_branch_row_id || entry.siteBranchRowId || '')),
+        site_branch: String(entry && (entry.site_branch || entry.siteBranch || '') ? (entry.site_branch || entry.siteBranch || '') : '').trim()
       };
     }
 
@@ -395,6 +483,23 @@
       };
     }
 
+    function siteFieldRefs(kind) {
+      if (kind === 'create') {
+        return {
+          field: $('cloud-create-site-field'),
+          display: $('cloud-create-site-display'),
+          hidden: $('cloud-create-site-row-id'),
+          note: $('cloud-create-site-note')
+        };
+      }
+      return {
+        field: $('cloud-project-site-field'),
+        display: $('cloud-project-site-display'),
+        hidden: $('cloud-project-site-row-id'),
+        note: $('cloud-project-site-note')
+      };
+    }
+
     function titleFieldMode(kind) {
       if (kind === 'create') {
         return $('cloud-create-mode') ? $('cloud-create-mode').value : 'scene';
@@ -402,8 +507,32 @@
       return currentProject() ? currentProject().mode : 'scene';
     }
 
+    function applySiteSelection(kind, site) {
+      const refs = siteFieldRefs(kind);
+      if (!refs.display || !refs.hidden) {
+        return;
+      }
+      const siteId = String(site && site.site_id ? site.site_id : '').trim();
+      const siteName = String(site && site.site_name ? site.site_name : '').trim();
+      const siteRowId = site && site.id != null ? String(site.id) : String(site && site.site_row_id ? site.site_row_id : '').trim();
+      refs.display.value = siteId && siteName ? `${siteId} / ${siteName}` : '';
+      refs.hidden.value = siteRowId;
+      if (refs.note) {
+        const branchCount = site && site.active_branch_count != null ? ` / 有効枝番号 ${site.active_branch_count}件` : '';
+        refs.note.textContent = refs.hidden.value ? `現場ID: ${siteId}${branchCount}` : '';
+      }
+    }
+
+    function clearSiteSelection(kind) {
+      const refs = siteFieldRefs(kind);
+      if (refs.display) refs.display.value = '';
+      if (refs.hidden) refs.hidden.value = '';
+      if (refs.note) refs.note.textContent = '';
+    }
+
     function setTitleFieldMode(kind) {
       const refs = titleFieldRefs(kind);
+      const siteRefs = siteFieldRefs(kind);
       const isPerson = titleFieldMode(kind) === 'person';
       if (refs.label) {
         refs.label.textContent = isPerson ? '社員' : 'タイトル';
@@ -418,6 +547,19 @@
           refs.panel.innerHTML = '';
           refs.panel.classList.add('cloud-hidden');
         }
+      }
+      if (siteRefs.field) {
+        siteRefs.field.classList.toggle('cloud-hidden', isPerson);
+      }
+      if (kind === 'create') {
+        if ($('cloud-create-pick-site')) $('cloud-create-pick-site').classList.toggle('cloud-hidden', isPerson);
+        if ($('cloud-create-clear-site')) $('cloud-create-clear-site').classList.toggle('cloud-hidden', isPerson);
+      } else {
+        if ($('cloud-project-pick-site')) $('cloud-project-pick-site').classList.toggle('cloud-hidden', isPerson);
+        if ($('cloud-project-clear-site')) $('cloud-project-clear-site').classList.toggle('cloud-hidden', isPerson);
+      }
+      if (isPerson) {
+        clearSiteSelection(kind);
       }
     }
 
@@ -441,6 +583,7 @@
         refs.panel.innerHTML = '';
         refs.panel.classList.add('cloud-hidden');
       }
+      clearSiteSelection('create');
       setTitleFieldMode('create');
     }
 
@@ -469,6 +612,136 @@
               : [];
       employeeSearchCache.set(key, candidates);
       return candidates;
+    }
+
+    async function fetchSiteCandidates(query) {
+      const key = String(query || '').trim();
+      if (siteSearchCache.has(key)) {
+        return siteSearchCache.get(key);
+      }
+      const response = await fetch(`/tools/siteplus/api/cloudshift/sites?q=${encodeURIComponent(key)}`, {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) {
+        throw new Error('現場候補の取得に失敗しました');
+      }
+      const payload = await response.json();
+      const candidates = Array.isArray(payload.sites) ? payload.sites : [];
+      siteSearchCache.set(key, candidates);
+      return candidates;
+    }
+
+    async function fetchSiteBranches(siteId) {
+      const key = String(siteId || '').trim();
+      if (!key) {
+        return [];
+      }
+      if (siteBranchCache.has(key)) {
+        return siteBranchCache.get(key);
+      }
+      const response = await fetch(`/tools/siteplus/api/cloudshift/sites/${encodeURIComponent(key)}/branches`, {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) {
+        throw new Error('枝番号候補の取得に失敗しました');
+      }
+      const payload = await response.json();
+      const branches = Array.isArray(payload.branches)
+        ? payload.branches.map((branch) => normalizeSiteBranchCandidate(branch)).filter(Boolean)
+        : [];
+      siteBranchCache.set(key, branches);
+      return branches;
+    }
+
+    async function syncCurrentProjectSiteBranches() {
+      setShifterSyncSiteStateForCurrentProject();
+      const project = currentProject();
+      const site = project && project.mode === 'scene' ? (project.site || null) : null;
+      if (!project || project.mode !== 'scene' || !site || !site.is_linked || !site.site_id) {
+        return [];
+      }
+      const projectId = project.id;
+      const siteId = site.site_id;
+      const branches = await fetchSiteBranches(siteId);
+      const liveProject = currentProject();
+      if (!liveProject || liveProject.id !== projectId) {
+        return branches;
+      }
+      if (!ShifterSync.setState) {
+        return branches;
+      }
+      ShifterSync.setState('siteContext', liveProject.site || site);
+      ShifterSync.setState('siteBranches', branches);
+      if (currentMonth()) {
+        replaceCalendarEntries(currentEntriesSnapshot());
+      }
+      return branches;
+    }
+
+    async function openSitePicker(kind) {
+      const modal = openCloudModal('cloud-site-picker-modal', kind === 'create' ? '現場を選択' : '現場設定');
+      const body = modalBody(modal);
+      const footer = modalFooter(modal);
+      if (!body || !footer) return;
+
+      body.innerHTML = `
+        <div class="cloud-form">
+          <label class="cloud-field">
+            <span>現場検索</span>
+            <input id="cloud-site-picker-query" class="cloud-input" type="text" placeholder="契約番号または現場名">
+          </label>
+          <div id="cloud-site-picker-list" class="cloud-project-list"></div>
+        </div>
+      `;
+      footer.innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-modal-close-pick>閉じる</button>';
+      const closeBtn = footer.querySelector('[data-cloud-modal-close-pick]');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => closeCloudModal('cloud-site-picker-modal'));
+      }
+
+      const queryInput = $('cloud-site-picker-query');
+      const list = $('cloud-site-picker-list');
+      if (!queryInput || !list) return;
+
+      const render = (items) => {
+        if (!items.length) {
+          list.innerHTML = '<div class="cloud-empty-state"><p>候補が見つかりません。</p></div>';
+          return;
+        }
+        list.innerHTML = items.map((item) => `
+          <article class="cloud-project-item" data-site-pick="${escapeHtml(String(item.id))}">
+            <div class="cloud-project-card-head">
+              <div>
+                <h3>${escapeHtml(`${item.site_id || ''} / ${item.site_name || ''}`)}</h3>
+                <p>有効枝番号 ${escapeHtml(String(item.active_branch_count || 0))}件</p>
+              </div>
+              <span class="cloud-badge">${escapeHtml(item.site_id || '')}</span>
+            </div>
+          </article>
+        `).join('');
+        list.querySelectorAll('[data-site-pick]').forEach((node) => {
+          node.addEventListener('click', () => {
+            const selected = items.find((item) => String(item.id) === String(node.getAttribute('data-site-pick')));
+            if (!selected) return;
+            applySiteSelection(kind, selected);
+            closeCloudModal('cloud-site-picker-modal');
+          });
+        });
+      };
+
+      const load = async () => {
+        const items = await fetchSiteCandidates(queryInput.value.trim());
+        render(items);
+      };
+
+      queryInput.addEventListener('input', () => {
+        window.clearTimeout(queryInput._siteTimer);
+        queryInput._siteTimer = window.setTimeout(() => load().catch((error) => showFlash(error.message, 'error')), 180);
+      });
+      await load();
+      queryInput.focus();
     }
 
     function applyEmployeeCandidate(kind, candidate) {
@@ -1123,11 +1396,50 @@
       `).join('');
     }
 
+    function assistSiteDisplayValue(site) {
+      if (!site || typeof site !== 'object') {
+        return '';
+      }
+      const siteId = String(site.site_id || '').trim();
+      const siteName = String(site.site_name || site.candidate_name || '').trim();
+      return siteId && siteName ? `${siteId} / ${siteName}` : siteName;
+    }
+
+    function assistSiteNoteText(site) {
+      if (!site || typeof site !== 'object') {
+        return '現場リストPLUSから現場を選択してください';
+      }
+      if (site.site_row_id) {
+        const branchCount = site.site && site.site.active_branch_count != null
+          ? ` / 有効枝番号 ${site.site.active_branch_count}件`
+          : '';
+        return `契約番号: ${site.site_id || '-'}${branchCount}`;
+      }
+      if (site.site_name) {
+        return '未紐付けの旧データです。必要に応じて現場リストPLUSから選択し直してください';
+      }
+      return '現場リストPLUSから現場を選択してください';
+    }
+
     function buildAssistSiteForm(site, formId, submitLabel, options) {
       const source = site || state.assist.recordDraft || {};
       const allowSiteTypeChange = !!(options && options.allowSiteTypeChange);
       const currentSiteType = String(source.site_type || state.assist.registerView || 'experienced');
+      const currentSiteRowId = String(source.site_row_id || (source.site && source.site.site_row_id) || '');
+      const currentSiteId = String(source.site_id || (source.site && source.site.site_id) || '');
       const currentSiteName = String(source.site_name || source.candidate_name || '');
+      const siteDisplay = assistSiteDisplayValue({
+        site_row_id: currentSiteRowId,
+        site_id: currentSiteId,
+        site_name: currentSiteName,
+        site: source.site || null
+      });
+      const siteNote = assistSiteNoteText({
+        site_row_id: currentSiteRowId,
+        site_id: currentSiteId,
+        site_name: currentSiteName,
+        site: source.site || null
+      });
       return `
         <form class="cloud-assist-form" data-assist-site-form data-form-id="${formId}" data-site-id="${escapeHtml(source.id || '')}">
           <div class="cloud-bulk-grid">
@@ -1147,8 +1459,21 @@
               <div class="cloud-inline-note" data-assist-date-note>${assistWeekdayLabelFromDate(source.date || defaultAssistTargetDate())}</div>
             </label>
             <label class="cloud-field">
-              <span>現場名</span>
-              <input name="site_name" class="cloud-input" type="text" value="${escapeHtml(currentSiteName)}" required>
+              <span>現場</span>
+              <input name="site_row_id" type="hidden" value="${escapeHtml(currentSiteRowId)}">
+              <input name="site_id" type="hidden" value="${escapeHtml(currentSiteId)}">
+              <div class="cloud-inline-group">
+                <input
+                  name="site_name"
+                  class="cloud-input"
+                  type="text"
+                  value="${escapeHtml(currentSiteName)}"
+                  placeholder="現場名を入力、または現場リストPLUSから選択"
+                  required
+                >
+                <button type="button" class="cloud-btn secondary" data-assist-pick-site>選択</button>
+              </div>
+              <div class="cloud-inline-note" data-assist-site-note>${escapeHtml(siteNote)}</div>
             </label>
             <label class="cloud-field">
               <span>OP</span>
@@ -2214,6 +2539,7 @@
         if (filters.candidate_query) {
           const query = filters.candidate_query.toLowerCase();
           const haystack = [
+            site.site_id,
             site.site_name,
             site.notes
           ].join(' ').toLowerCase();
@@ -2279,6 +2605,7 @@
               </div>
             </div>
             <div class="cloud-assist-card-meta">
+              <span>${escapeHtml(site.site_id || '契約番号未設定')}</span>
               <span>${escapeHtml(site.shift_key ? assistShiftLabel(site.shift_key) : ASSIST_OPTIONLESS_LABEL)}</span>
               <span>${escapeHtml(assistSiteTypeLabel(site.site_type || siteType))}</span>
             </div>
@@ -2390,6 +2717,8 @@
       return {
         site_type: siteTypeField ? siteTypeField.value : (state.assist.registerView || 'experienced'),
         date: form.querySelector('[name="date"]').value,
+        site_row_id: (form.querySelector('[name="site_row_id"]') || {}).value || '',
+        site_id: (form.querySelector('[name="site_id"]') || {}).value || '',
         site_name: form.querySelector('[name="site_name"]').value,
         shift_key: form.querySelector('[name="shift_key"]').value,
         notes: form.querySelector('[name="notes"]').value
@@ -2608,6 +2937,93 @@
       return response;
     }
 
+    function assistSiteFieldRefs(form) {
+      return {
+        rowIdInput: form.querySelector('[name="site_row_id"]'),
+        siteIdInput: form.querySelector('[name="site_id"]'),
+        siteNameInput: form.querySelector('[name="site_name"]'),
+        note: form.querySelector('[data-assist-site-note]')
+      };
+    }
+
+    function applyAssistSiteSelectionToForm(form, site) {
+      const refs = assistSiteFieldRefs(form);
+      if (!refs.rowIdInput || !refs.siteNameInput) {
+        return;
+      }
+      const normalized = {
+        site_row_id: String(site && (site.id != null ? site.id : site.site_row_id) || '').trim(),
+        site_id: String(site && site.site_id || '').trim(),
+        site_name: String(site && site.site_name || '').trim(),
+        site: site || null
+      };
+      refs.rowIdInput.value = normalized.site_row_id;
+      if (refs.siteIdInput) refs.siteIdInput.value = normalized.site_id;
+      refs.siteNameInput.value = normalized.site_name;
+      if (refs.note) refs.note.textContent = assistSiteNoteText(normalized);
+    }
+
+    async function openAssistSitePickerForForm(form) {
+      if (!form) return;
+      const refs = assistSiteFieldRefs(form);
+      const initialQuery = refs.siteNameInput && refs.siteNameInput.value ? refs.siteNameInput.value.trim() : '';
+      const modal = openCloudModal('cloud-assist-site-picker-modal', '現場を選択');
+      const body = modalBody(modal);
+      const footer = modalFooter(modal);
+      if (!body || !footer) return;
+
+      body.innerHTML = `
+        <div class="cloud-form">
+          <label class="cloud-field">
+            <span>現場検索</span>
+            <input id="cloud-assist-site-picker-query" class="cloud-input" type="text" placeholder="契約番号または現場名" value="${escapeHtml(initialQuery)}">
+          </label>
+          <div id="cloud-assist-site-picker-list" class="cloud-project-list"></div>
+        </div>
+      `;
+      footer.innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-assist-site-picker-close>閉じる</button>';
+      footer.querySelector('[data-cloud-assist-site-picker-close]').addEventListener('click', () => closeCloudModal('cloud-assist-site-picker-modal'));
+
+      const queryInput = body.querySelector('#cloud-assist-site-picker-query');
+      const list = body.querySelector('#cloud-assist-site-picker-list');
+      const renderList = async () => {
+        if (!list) return;
+        list.innerHTML = '<div class="cloud-empty-state"><p>検索中です...</p></div>';
+        const sites = await fetchSiteCandidates(queryInput ? queryInput.value : '');
+        list.innerHTML = sites.length ? sites.map((site) => `
+          <article class="cloud-project-item">
+            <div class="cloud-project-title">${escapeHtml(site.site_name || '-')}</div>
+            <div class="cloud-project-meta">
+              <span>${escapeHtml(site.site_id || '-')}</span>
+              <span>${escapeHtml(`有効枝番号 ${site.active_branch_count || 0}件`)}</span>
+            </div>
+            <div class="cloud-actions compact">
+              <button type="button" class="cloud-btn primary" data-assist-site-picker-select="${escapeHtml(String(site.id))}">この現場を使う</button>
+            </div>
+          </article>
+        `).join('') : '<div class="cloud-empty-state"><p>一致する現場がありません。</p></div>';
+        list.querySelectorAll('[data-assist-site-picker-select]').forEach((button) => {
+          button.addEventListener('click', () => {
+            const picked = sites.find((item) => String(item.id) === String(button.getAttribute('data-assist-site-picker-select') || ''));
+            if (!picked) return;
+            applyAssistSiteSelectionToForm(form, picked);
+            closeCloudModal('cloud-assist-site-picker-modal');
+          });
+        });
+      };
+
+      if (queryInput) {
+        queryInput.addEventListener('input', () => {
+          window.clearTimeout(openAssistSitePickerForForm._timer);
+          openAssistSitePickerForForm._timer = window.setTimeout(() => {
+            renderList().catch((error) => showFlash(error.message, 'error'));
+          }, 180);
+        });
+        queryInput.focus();
+      }
+      await renderList();
+    }
+
     async function saveAssistRule(form, ruleId) {
       const base = assistBasePath();
       const response = await requestJson(ruleId ? `${base}/rules/${ruleId}` : `${base}/rules`, {
@@ -2824,6 +3240,30 @@
         input.addEventListener('change', sync);
         sync();
       });
+      scope.querySelectorAll('[data-assist-site-form] [name="site_name"]').forEach((input) => {
+        if (input.dataset.assistSiteInputBound === '1') return;
+        input.dataset.assistSiteInputBound = '1';
+        const sync = () => {
+          const form = input.closest('form');
+          const refs = assistSiteFieldRefs(form);
+          if (!refs.siteNameInput) return;
+          const normalizedName = refs.siteNameInput.value.trim();
+          if (!normalizedName) {
+            if (refs.rowIdInput) refs.rowIdInput.value = '';
+            if (refs.siteIdInput) refs.siteIdInput.value = '';
+            if (refs.note) refs.note.textContent = '現場名を入力するか、現場リストPLUSから選択してください';
+            return;
+          }
+          if (refs.rowIdInput && refs.rowIdInput.value) {
+            refs.rowIdInput.value = '';
+            if (refs.siteIdInput) refs.siteIdInput.value = '';
+            if (refs.note) refs.note.textContent = '手入力に変更したため、現場リンクを解除しました';
+          } else if (refs.note && !refs.siteIdInput?.value) {
+            refs.note.textContent = '未紐付けの現場名です。必要に応じて現場リストPLUSから選択してください';
+          }
+        };
+        input.addEventListener('input', sync);
+      });
       scope.querySelectorAll('[data-assist-add-assignment]').forEach((button) => {
         button.addEventListener('click', () => {
           const container = button.closest('form').querySelector('[data-assist-assignments]');
@@ -2840,6 +3280,13 @@
             container.insertAdjacentHTML('beforeend', buildAssistRuleAssignmentRow({ role_type: 'backup', priority: 1 }, 0));
             bindAssistFormEvents(container);
           }
+        });
+      });
+      scope.querySelectorAll('[data-assist-pick-site]').forEach((button) => {
+        if (button.dataset.assistSitePickerBound === '1') return;
+        button.dataset.assistSitePickerBound = '1';
+        button.addEventListener('click', () => {
+          openAssistSitePickerForForm(button.closest('form')).catch((error) => showFlash(error.message, 'error'));
         });
       });
       if (!scope.dataset.assistCandidateClickBound) {
@@ -3330,7 +3777,7 @@
           <div class="cloud-project-card-head">
             <div>
               <h3>${escapeHtml(project.title)}</h3>
-              <p>${modeLongLabel(project.mode)} / ${project.month_count}か月</p>
+              <p>${modeLongLabel(project.mode)} / ${project.month_count}か月${project.mode === 'scene' ? ` / ${escapeHtml(project.site && project.site.site_id ? project.site.site_id : '現場未設定')}` : ''}</p>
             </div>
             <span class="cloud-badge">${project.latest_month_key ? escapeHtml(formatMonthKey(project.latest_month_key)) : '未作成月'}</span>
           </div>
@@ -3786,7 +4233,7 @@
       });
       state.projectPayload = unwrapProjectPayload(payload);
       state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
-      renderWorkspace(true);
+      await renderWorkspaceWithSiteBranches(true);
       await loadProjects();
       await loadHistory(project.id);
       closeCloudModal('cloud-restore-modal');
@@ -3839,6 +4286,41 @@
       `).join('');
     }
 
+    function updateBulkBranchOptions(form) {
+      const branchField = form.querySelector('[data-bulk-branch-field]');
+      const branchSelect = form.querySelector('[name="bulk_site_branch_row_id"]');
+      const note = form.querySelector('[data-bulk-branch-note]');
+      if (!branchField || !branchSelect) return;
+
+      const project = currentProject();
+      if (!project || project.mode !== 'scene') {
+        branchField.classList.add('cloud-hidden');
+        return;
+      }
+
+      const optionKey = (form.querySelector('[name="bulk_option"]') || {}).value || '';
+      const candidates = siteBranchCandidatesForOption(optionKey);
+      const previousValue = normalizeSiteBranchRowId(branchSelect.value);
+      branchSelect.innerHTML = ['<option value="">未設定</option>']
+        .concat(candidates.map((branch) => (
+          `<option value="${escapeHtml(branch.id)}" data-site-branch="${escapeHtml(branch.site_branch)}">${escapeHtml(`${branch.site_branch} / ${branch.option_label || optionLabelForKey(branch.cloudshift_option_key)}`)}</option>`
+        )))
+        .join('');
+
+      let nextValue = previousValue && branchSelect.querySelector(`option[value="${previousValue}"]`) ? previousValue : '';
+      if (!nextValue && candidates.length === 1) {
+        nextValue = candidates[0].id;
+        if (note) note.textContent = `候補が1件のため 枝${candidates[0].site_branch} を自動選択します`;
+      } else if (!candidates.length) {
+        if (note) note.textContent = '選べる枝番号がありません。このままでも適用できます';
+      } else if (optionKey && !candidates.some((branch) => branch.cloudshift_option_key === String(optionKey).trim().toUpperCase())) {
+        if (note) note.textContent = '一致する枝番号がないため、登録済みの枝番号を表示しています';
+      } else if (note) {
+        note.textContent = '必要に応じて枝番号を選択してください';
+      }
+      branchSelect.value = nextValue;
+    }
+
     function updateBulkFieldVisibility(form) {
       const operation = form.querySelector('[name="bulk_operation"]').value;
       const scope = form.querySelector('[name="bulk_scope"]').value;
@@ -3847,11 +4329,15 @@
       const ranges = form.querySelectorAll('[data-bulk-range]');
       const weekdays = form.querySelector('[data-bulk-weekdays]');
       const picked = form.querySelector('[data-bulk-picked-days]');
+      const branchField = form.querySelector('[data-bulk-branch-field]');
       template.classList.toggle('cloud-hidden', operation === 'delete' || operation === 'copy');
       copy.classList.toggle('cloud-hidden', operation !== 'copy');
       ranges.forEach((node) => node.classList.toggle('cloud-hidden', scope !== 'range'));
       weekdays.classList.toggle('cloud-hidden', scope !== 'weekdays');
       picked.classList.toggle('cloud-hidden', scope !== 'picked');
+      if (branchField) {
+        branchField.classList.toggle('cloud-hidden', operation === 'delete' || operation === 'copy' || currentProject().mode !== 'scene');
+      }
     }
 
     function updateBulkPreview(form) {
@@ -4072,7 +4558,8 @@
           nameInput: form.querySelector('[name="bulk_name"]'),
           commentInput: form.querySelector('[name="bulk_comment"]'),
           optionSelect: form.querySelector('[name="bulk_option"]'),
-          employeeInput: form.querySelector('[name="bulk_employee_number"]')
+          employeeInput: form.querySelector('[name="bulk_employee_number"]'),
+          branchSelect: form.querySelector('[name="bulk_site_branch_row_id"]')
         });
         if (!templateEntry) {
           showFlash('追加内容を入力してください', 'error');
@@ -4172,6 +4659,13 @@
                   ${buildBulkOptionSelect(project.mode)}
                 </select>
               </label>
+              <label class="cloud-field${project.mode === 'scene' ? '' : ' cloud-hidden'}" data-bulk-branch-field>
+                <span>枝番号</span>
+                <select name="bulk_site_branch_row_id" class="cloud-input">
+                  <option value="">未設定</option>
+                </select>
+                <div class="cloud-inline-note" data-bulk-branch-note>必要に応じて枝番号を選択してください</div>
+              </label>
               <label class="cloud-field cloud-field-wide">
                 <span>コメント</span>
                 <textarea name="bulk_comment" class="cloud-input" rows="3"></textarea>
@@ -4214,6 +4708,10 @@
         updateBulkFieldVisibility(form);
         updateBulkPreview(form);
       });
+      const bulkOptionSelect = form.querySelector('[name="bulk_option"]');
+      if (bulkOptionSelect) {
+        bulkOptionSelect.addEventListener('change', () => updateBulkBranchOptions(form));
+      }
       form.querySelectorAll('[data-bulk-weekday], [name="bulk_start_day"], [name="bulk_end_day"], [name="bulk_copy_source_day"]').forEach((node) => {
         node.addEventListener('input', () => updateBulkPreview(form));
         node.addEventListener('change', () => updateBulkPreview(form));
@@ -4249,6 +4747,7 @@
       });
       applyBtn.addEventListener('click', () => applyBulkEditFromModal(modal));
       updateBulkFieldVisibility(form);
+      updateBulkBranchOptions(form);
       updateBulkPreview(form);
     }
 
@@ -4400,6 +4899,11 @@
         $('cloud-project-selected-note').textContent = project.employee_number ? `社員番号: ${project.employee_number}` : '';
       }
       setTitleFieldMode('project');
+      if (project.mode === 'scene') {
+        applySiteSelection('project', project.site || {});
+      } else {
+        clearSiteSelection('project');
+      }
       if ($('cloud-view-url')) $('cloud-view-url').value = project.urls.view_url || '';
       if ($('cloud-edit-url')) $('cloud-edit-url').value = project.urls.edit_url || '';
 
@@ -4407,6 +4911,7 @@
         $('cloud-project-badges').innerHTML = `
           <span class="cloud-badge">${modeLongLabel(project.mode)}</span>
           <span class="cloud-badge">${(project.month_keys || []).length}か月</span>
+          ${project.mode === 'scene' ? `<span class="cloud-badge">${escapeHtml(project.site && project.site.site_id ? `${project.site.site_id} / ${project.site.site_name || ''}` : '現場未設定')}</span>` : ''}
           <span class="cloud-badge">${escapeHtml(project.updated_at || '')}</span>
         `;
       }
@@ -4436,6 +4941,10 @@
       if ($('cloud-open-assist')) $('cloud-open-assist').classList.toggle('cloud-hidden', !isAssistAvailable());
       if ($('cloud-open-bulk-edit')) $('cloud-open-bulk-edit').classList.toggle('cloud-hidden', !month || !editable || (PAGE.type === 'public' && PAGE.accessMode !== 'edit'));
       if ($('cloud-open-restore')) $('cloud-open-restore').classList.toggle('cloud-hidden', !month || PAGE.type !== 'owner');
+      if ($('cloud-site-warning')) {
+        const showSiteWarning = project.mode === 'scene' && !(project.site && project.site.is_linked);
+        $('cloud-site-warning').classList.toggle('cloud-hidden', !showSiteWarning);
+      }
 
       if ($('cloud-editor-title')) {
         $('cloud-editor-title').textContent = month ? `${project.title} / ${formatMonthKey(currentMonthKey())}` : `${project.title} / 未作成月`;
@@ -4447,6 +4956,7 @@
           : '最初の月を作成するとカレンダーを編集できます';
       }
 
+      setShifterSyncSiteStateForCurrentProject();
       mountEditor(editable);
     }
 
@@ -4467,6 +4977,15 @@
         required_capacity: parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0,
         entries_per_day: ShifterSync.getEntriesPerDay()
       };
+    }
+
+    async function renderWorkspaceWithSiteBranches(editable) {
+      renderWorkspace(editable);
+      try {
+        await syncCurrentProjectSiteBranches();
+      } catch (error) {
+        showFlash(error.message, 'error');
+      }
     }
 
     async function loadProjects() {
@@ -4494,7 +5013,7 @@
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       syncAssistContext();
       renderProjectList();
-      renderWorkspace(true);
+      await renderWorkspaceWithSiteBranches(true);
       await loadLeaveSyncCalendars(projectId);
       await loadHistory(projectId);
       switchTab('editor');
@@ -4511,7 +5030,7 @@
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       syncAssistContext();
       updateCurrentProjectLabel();
-      renderWorkspace(PAGE.accessMode === 'edit');
+      await renderWorkspaceWithSiteBranches(PAGE.accessMode === 'edit');
     }
 
     function guestNameKey() {
@@ -4543,10 +5062,87 @@
       return true;
     }
 
+    function branchWarningItemsFromEntries() {
+      const entriesPerDay = currentEntriesSnapshot();
+      const branchIds = new Set(currentProjectSiteBranches().map((branch) => String(branch.id)));
+      const missing = [];
+      const invalid = [];
+
+      Object.keys(entriesPerDay)
+        .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+        .forEach((dayKey) => {
+          const dayEntries = Array.isArray(entriesPerDay[dayKey]) ? entriesPerDay[dayKey] : [];
+          dayEntries.forEach((entry) => {
+            const value = String(entry && entry.value ? entry.value : '').trim();
+            if (!value) {
+              return;
+            }
+            const parsed = parseEntryValue(value);
+            const label = parsed.optionKey
+              ? `${parsed.name} / ${optionLabelForKey(parsed.optionKey)}`
+              : parsed.name;
+            const branchRowId = normalizeSiteBranchRowId(entry && (entry.site_branch_row_id || entry.siteBranchRowId || ''));
+            const snapshotBranch = String(entry && (entry.site_branch || entry.siteBranch || '') ? (entry.site_branch || entry.siteBranch || '') : '').trim();
+            if (!branchRowId) {
+              missing.push({ day: dayKey, label });
+              return;
+            }
+            if (!branchIds.has(branchRowId)) {
+              invalid.push({ day: dayKey, label, site_branch: snapshotBranch });
+            }
+          });
+        });
+
+      return { missing, invalid };
+    }
+
+    function confirmSceneBranchSave() {
+      const project = currentProject();
+      if (!project || project.mode !== 'scene') {
+        return true;
+      }
+      const site = project.site || currentProjectSiteContext() || {};
+      const entriesPerDay = currentEntriesSnapshot();
+      const entryCount = Object.values(entriesPerDay).reduce((total, entries) => total + (Array.isArray(entries) ? entries.length : 0), 0);
+      if (entryCount <= 0 || !site || !site.is_linked) {
+        return true;
+      }
+
+      const branches = currentProjectSiteBranches();
+      const lines = [];
+      if (!branches.length) {
+        lines.push('この現場には有効な枝番号が登録されていません。');
+        lines.push('割当を保存しても、各行の枝番号は未設定のままになります。');
+      } else {
+        const warnings = branchWarningItemsFromEntries();
+        if (warnings.missing.length) {
+          lines.push(`枝番号未設定の割当が ${warnings.missing.length} 件あります。`);
+          warnings.missing.slice(0, 5).forEach((item) => {
+            lines.push(`- ${item.day}日: ${item.label}`);
+          });
+        }
+        if (warnings.invalid.length) {
+          lines.push(`現在は無効な枝番号を参照している割当が ${warnings.invalid.length} 件あります。`);
+          warnings.invalid.slice(0, 5).forEach((item) => {
+            const suffix = item.site_branch ? ` / 旧枝 ${item.site_branch}` : '';
+            lines.push(`- ${item.day}日: ${item.label}${suffix}`);
+          });
+        }
+      }
+
+      if (!lines.length) {
+        return true;
+      }
+      lines.push('');
+      lines.push('このまま保存しますか？');
+      return window.confirm(lines.join('\n'));
+    }
+
     async function saveMonthOwner() {
       const project = currentProject();
       const month = currentMonth();
       if (!project || !month) return;
+      if (!confirmSceneBranchSave()) return;
 
       const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}`, {
         method: 'PUT',
@@ -4554,7 +5150,7 @@
       }));
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
-      renderWorkspace(true);
+      await renderWorkspaceWithSiteBranches(true);
       await loadProjects();
       await loadHistory(project.id);
       showFlash('この月を保存しました', 'success');
@@ -4563,6 +5159,7 @@
     async function saveMonthPublic() {
       const month = currentMonth();
       if (!month || !ensureGuestName()) return;
+      if (!confirmSceneBranchSave()) return;
 
       const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/public/edit/${PAGE.token}/month/${month.year}/${month.month}`, {
         method: 'PUT',
@@ -4570,7 +5167,7 @@
       }));
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
-      renderWorkspace(true);
+      await renderWorkspaceWithSiteBranches(true);
       showFlash('この月を保存しました', 'success');
     }
 
@@ -4604,7 +5201,7 @@
         }));
         state.projectPayload = payload;
         state.baseMonth = payload.month ? deepClone(payload.month) : null;
-        renderWorkspace(true);
+        await renderWorkspaceWithSiteBranches(true);
         await loadProjects();
         await loadHistory(project.id);
       } else {
@@ -4616,7 +5213,7 @@
         }));
         state.projectPayload = payload;
         state.baseMonth = payload.month ? deepClone(payload.month) : null;
-        renderWorkspace(true);
+        await renderWorkspaceWithSiteBranches(true);
       }
 
       showFlash(`${formatMonthKey(targetKey)} を作成しました`, 'success');
@@ -4747,7 +5344,7 @@
           await loadProjects();
           await loadLeaveSyncCalendars(state.projectPayload.project.id);
           await loadHistory(state.projectPayload.project.id);
-          renderWorkspace(true);
+          await renderWorkspaceWithSiteBranches(true);
           updateCurrentProjectLabel();
           switchTab('editor');
           showFlash('シフト表を作成しました', 'success');
@@ -4765,7 +5362,7 @@
           await loadProjects();
           await loadLeaveSyncCalendars(state.projectPayload.project.id);
           await loadHistory(state.projectPayload.project.id);
-          renderWorkspace(true);
+          await renderWorkspaceWithSiteBranches(true);
           updateCurrentProjectLabel();
           switchTab('editor');
           showFlash('CSV を読み込みました', 'success');
@@ -4781,11 +5378,12 @@
             method: 'PUT',
             body: {
               title: $('cloud-project-title').value.trim(),
-              employee_number: $('cloud-project-employee-number') ? $('cloud-project-employee-number').value.trim() : ''
+              employee_number: $('cloud-project-employee-number') ? $('cloud-project-employee-number').value.trim() : '',
+              site_row_id: $('cloud-project-site-row-id') ? $('cloud-project-site-row-id').value.trim() : ''
             }
           }));
           state.projectPayload = payload;
-          renderWorkspace(true);
+          await renderWorkspaceWithSiteBranches(true);
           await loadProjects();
           await loadHistory(project.id);
           showFlash('タイトルを更新しました', 'success');
@@ -4818,6 +5416,37 @@
       if (createMode) {
         createMode.addEventListener('change', () => {
           setTitleFieldMode('create');
+        });
+      }
+
+      const createPickSite = $('cloud-create-pick-site');
+      if (createPickSite) {
+        createPickSite.addEventListener('click', () => {
+          openSitePicker('create').catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const createClearSite = $('cloud-create-clear-site');
+      if (createClearSite) {
+        createClearSite.addEventListener('click', () => clearSiteSelection('create'));
+      }
+
+      const projectPickSite = $('cloud-project-pick-site');
+      if (projectPickSite) {
+        projectPickSite.addEventListener('click', () => {
+          openSitePicker('project').catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const projectClearSite = $('cloud-project-clear-site');
+      if (projectClearSite) {
+        projectClearSite.addEventListener('click', () => clearSiteSelection('project'));
+      }
+
+      const openSitePickerButton = $('cloud-open-site-picker');
+      if (openSitePickerButton) {
+        openSitePickerButton.addEventListener('click', () => {
+          openSitePicker('project').catch((error) => showFlash(error.message, 'error'));
         });
       }
 

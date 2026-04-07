@@ -11,6 +11,8 @@ from typing import Any
 COMMENT_ROW_PREFIX = "#comment"
 EMPLOYEE_NUMBER_ROW_PREFIX = "#employee_number"
 PROJECT_EMPLOYEE_NUMBER_ROW_PREFIX = "#project_employee_number"
+SITE_BRANCH_ROW_ID_ROW_PREFIX = "#site_branch_row_id"
+SITE_BRANCH_ROW_PREFIX = "#site_branch"
 
 SHIFT_OPTION_MAPPINGS = {
     "A": "\u5348\u524d",
@@ -70,17 +72,32 @@ def parse_entry_value(value: str) -> tuple[str | None, str]:
     return match.group(1), match.group(2)
 
 
-def normalize_entry(raw: Any) -> dict[str, str]:
+def _normalize_site_branch_row_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if not text.isdigit():
+        return ""
+    return text if int(text) > 0 else ""
+
+
+def normalize_entry(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         value = str(raw.get("value", "")).strip()
         if not value:
             return {}
         employee_number = str(raw.get("employee_number", raw.get("employeeNumber", "")) or "").strip()
+        site_branch_row_id = _normalize_site_branch_row_id(
+            raw.get("site_branch_row_id", raw.get("siteBranchRowId", ""))
+        )
+        site_branch = str(raw.get("site_branch", raw.get("siteBranch", "")) or "").strip()
         return {
             "id": str(raw.get("id") or generate_entry_id()),
             "value": value,
             "comment": str(raw.get("comment", "") or "").strip(),
             "employee_number": employee_number,
+            "site_branch_row_id": site_branch_row_id,
+            "site_branch": site_branch,
         }
 
     value = str(raw or "").strip()
@@ -91,15 +108,17 @@ def normalize_entry(raw: Any) -> dict[str, str]:
         "value": value,
         "comment": "",
         "employee_number": "",
+        "site_branch_row_id": "",
+        "site_branch": "",
     }
 
 
-def empty_entries_for_month(year: int, month: int) -> dict[str, list[dict[str, str]]]:
+def empty_entries_for_month(year: int, month: int) -> dict[str, list[dict[str, Any]]]:
     year, month = validate_year_month(year, month)
     return {str(day): [] for day in range(1, monthrange(year, month)[1] + 1)}
 
 
-def normalize_entries_for_month(entries: Any, year: int, month: int) -> dict[str, list[dict[str, str]]]:
+def normalize_entries_for_month(entries: Any, year: int, month: int) -> dict[str, list[dict[str, Any]]]:
     normalized = empty_entries_for_month(year, month)
     if not isinstance(entries, dict):
         return normalized
@@ -113,7 +132,7 @@ def normalize_entries_for_month(entries: Any, year: int, month: int) -> dict[str
         if key not in normalized or not isinstance(raw_values, list):
             continue
 
-        day_entries: list[dict[str, str]] = []
+        day_entries: list[dict[str, Any]] = []
         for item in raw_values:
             entry = normalize_entry(item)
             if entry:
@@ -128,7 +147,7 @@ def serialize_entry_rows(
     month: int,
     title: str,
     required_capacity: int,
-    entries_per_day: dict[str, list[dict[str, str]]],
+    entries_per_day: dict[str, list[dict[str, Any]]],
     project_employee_number: str = "",
 ) -> list[list[Any]]:
     year, month = validate_year_month(year, month)
@@ -143,6 +162,8 @@ def serialize_entry_rows(
 
     comment_rows: list[list[Any]] = []
     employee_number_rows: list[list[Any]] = []
+    site_branch_row_id_rows: list[list[Any]] = []
+    site_branch_rows: list[list[Any]] = []
     for day in range(1, monthrange(year, month)[1] + 1):
         key = str(day)
         day_entries = [normalize_entry(item) for item in entries_per_day.get(key, [])]
@@ -158,6 +179,12 @@ def serialize_entry_rows(
                 employee_number_rows.append(
                     [EMPLOYEE_NUMBER_ROW_PREFIX, day, index, entry["employee_number"]]
                 )
+            if entry.get("site_branch_row_id"):
+                site_branch_row_id_rows.append(
+                    [SITE_BRANCH_ROW_ID_ROW_PREFIX, day, index, entry["site_branch_row_id"]]
+                )
+            if entry.get("site_branch"):
+                site_branch_rows.append([SITE_BRANCH_ROW_PREFIX, day, index, entry["site_branch"]])
 
     metadata_rows: list[list[Any]] = []
     if str(project_employee_number or "").strip():
@@ -165,7 +192,7 @@ def serialize_entry_rows(
             [PROJECT_EMPLOYEE_NUMBER_ROW_PREFIX, str(project_employee_number).strip()]
         )
 
-    return rows + comment_rows + employee_number_rows + metadata_rows
+    return rows + comment_rows + employee_number_rows + site_branch_row_id_rows + site_branch_rows + metadata_rows
 
 
 def serialize_csv_text(
@@ -174,7 +201,7 @@ def serialize_csv_text(
     month: int,
     title: str,
     required_capacity: int,
-    entries_per_day: dict[str, list[dict[str, str]]],
+    entries_per_day: dict[str, list[dict[str, Any]]],
     project_employee_number: str = "",
 ) -> str:
     buffer = io.StringIO()
@@ -218,6 +245,8 @@ def parse_csv_text(text: str) -> dict[str, Any]:
     entries_per_day = empty_entries_for_month(year, month)
     comment_rows: list[list[str]] = []
     employee_number_rows: list[list[str]] = []
+    site_branch_row_id_rows: list[list[str]] = []
+    site_branch_rows: list[list[str]] = []
     project_employee_number = ""
     for row in rows[2:]:
         if not row:
@@ -228,7 +257,15 @@ def parse_csv_text(text: str) -> dict[str, Any]:
             if day_key not in entries_per_day:
                 continue
             entries_per_day[day_key] = [
-                normalize_entry({"value": cell, "comment": "", "employee_number": ""})
+                normalize_entry(
+                    {
+                        "value": cell,
+                        "comment": "",
+                        "employee_number": "",
+                        "site_branch_row_id": "",
+                        "site_branch": "",
+                    }
+                )
                 for cell in row[1:]
                 if str(cell).strip()
             ]
@@ -238,6 +275,12 @@ def parse_csv_text(text: str) -> dict[str, Any]:
             continue
         if head == EMPLOYEE_NUMBER_ROW_PREFIX:
             employee_number_rows.append(row)
+            continue
+        if head == SITE_BRANCH_ROW_ID_ROW_PREFIX:
+            site_branch_row_id_rows.append(row)
+            continue
+        if head == SITE_BRANCH_ROW_PREFIX:
+            site_branch_rows.append(row)
             continue
         if head == PROJECT_EMPLOYEE_NUMBER_ROW_PREFIX and len(row) >= 2:
             project_employee_number = str(row[1] or "").strip()
@@ -265,6 +308,30 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
             continue
         entries_per_day[day_key][index]["employee_number"] = str(row[3] or "").strip()
+
+    for row in site_branch_row_id_rows:
+        if len(row) < 4:
+            continue
+        try:
+            day_key = str(int(row[1]))
+            index = int(row[2])
+        except (TypeError, ValueError):
+            continue
+        if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
+            continue
+        entries_per_day[day_key][index]["site_branch_row_id"] = _normalize_site_branch_row_id(row[3])
+
+    for row in site_branch_rows:
+        if len(row) < 4:
+            continue
+        try:
+            day_key = str(int(row[1]))
+            index = int(row[2])
+        except (TypeError, ValueError):
+            continue
+        if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
+            continue
+        entries_per_day[day_key][index]["site_branch"] = str(row[3] or "").strip()
 
     return {
         "mode": mode,

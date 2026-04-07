@@ -28,6 +28,8 @@ from openpyxl import Workbook
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
+from app.models import Site, db
+
 try:
     from .shiftersync_format import (
         LEAVE_OPTION_MAPPINGS,
@@ -264,6 +266,101 @@ def _sanitize_employee_number(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _sanitize_site_row_id(value: Any) -> int | None:
+    if value in (None, "", False):
+        return None
+    try:
+        site_row_id = int(value)
+    except (TypeError, ValueError) as exc:
+        raise CloudShiftError("現場の指定が不正です", 400) from exc
+    if site_row_id <= 0:
+        raise CloudShiftError("現場の指定が不正です", 400)
+    return site_row_id
+
+
+def _coerce_site_row_id(value: Any) -> int | None:
+    try:
+        return _sanitize_site_row_id(value)
+    except CloudShiftError:
+        return None
+
+
+def _load_site_reference(site_row_id: int | None, *, require_active: bool) -> dict[str, Any] | None:
+    if not site_row_id:
+        return None
+    site = db.session.get(Site, site_row_id)
+    if not site:
+        raise CloudShiftError("指定された現場が見つかりません", 400)
+    if require_active and not site.is_active:
+        raise CloudShiftError("無効化された現場は選択できません", 400)
+    return {
+        "site_row_id": site.id,
+        "site_id": site.site_id,
+        "site_name": site.site_name,
+        "is_active": bool(site.is_active),
+        "branch_count": len(site.branches),
+        "active_branch_count": len([branch for branch in site.branches if branch.is_active]),
+    }
+
+
+def _linked_site_snapshot_payload(site_row_id: Any, site_id: Any, site_name: Any) -> dict[str, Any]:
+    normalized_site_row_id = _coerce_site_row_id(site_row_id)
+    snapshot = {
+        "site_row_id": normalized_site_row_id,
+        "site_id": str(site_id or "").strip(),
+        "site_name": str(site_name or "").strip(),
+    }
+    if not normalized_site_row_id:
+        return {
+            **snapshot,
+            "is_linked": False,
+            "is_active": None,
+            "is_missing": False,
+            "branch_count": 0,
+            "active_branch_count": 0,
+        }
+    try:
+        linked = _load_site_reference(int(normalized_site_row_id), require_active=False)
+    except CloudShiftError:
+        linked = None
+    if not linked:
+        return {
+            **snapshot,
+            "is_linked": True,
+            "is_active": None,
+            "is_missing": True,
+            "branch_count": 0,
+            "active_branch_count": 0,
+        }
+    return {
+        **linked,
+        "is_linked": True,
+        "is_missing": False,
+    }
+
+
+def _project_site_payload(project: dict[str, Any]) -> dict[str, Any]:
+    return _linked_site_snapshot_payload(
+        project.get("site_row_id"),
+        project.get("site_id"),
+        project.get("site_name"),
+    )
+
+
+def _site_storage_fields(site_ref: dict[str, Any] | None) -> dict[str, Any]:
+    if not site_ref:
+        return {
+            "site_row_id": None,
+            "site_id": "",
+            "site_name": "",
+        }
+    return {
+        "site_row_id": site_ref["site_row_id"],
+        "site_id": site_ref["site_id"],
+        "site_name": site_ref["site_name"],
+    }
+
+
 def _sanitize_capacity(raw: Any) -> tuple[bool, int]:
     if raw in (None, "", False):
         return False, 0
@@ -335,6 +432,7 @@ def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
         "latest_month_key": month_keys[-1] if month_keys else None,
         "created_at": project.get("created_at"),
         "updated_at": project.get("updated_at"),
+        "site": _project_site_payload(project),
     }
 
 
@@ -418,6 +516,7 @@ def _month_detail(project: dict[str, Any], month_key: str) -> dict[str, Any]:
             "title": project["title"],
             "mode": project["mode"],
             "employee_number": str(project.get("employee_number") or ""),
+            "site": _project_site_payload(project),
             "month_keys": _sort_month_keys(list((project.get("months") or {}).keys())),
             "urls": _project_public_urls(project),
         },
@@ -2462,6 +2561,28 @@ def _remove_person_experience_scene_record(
     return f"person経験済現場の自動実績を削除: {_assist_record_history_label(existing)}"
 
 
+def _person_experience_matches_scene_project(site: dict[str, Any], scene_project: dict[str, Any]) -> bool:
+    site_row_id = _coerce_site_row_id(site.get("site_row_id"))
+    scene_site_row_id = _coerce_site_row_id(scene_project.get("site_row_id"))
+    if site_row_id and scene_site_row_id:
+        return site_row_id == scene_site_row_id
+
+    site_contract_id = str(site.get("site_id") or "").strip()
+    scene_contract_id = str(scene_project.get("site_id") or "").strip()
+    if site_contract_id and scene_contract_id:
+        return site_contract_id == scene_contract_id
+
+    normalized_site = _normalized_site_title(site.get("site_name"))
+    if not normalized_site:
+        return False
+
+    scene_site_name = str(scene_project.get("site_name") or "").strip()
+    if scene_site_name:
+        return _normalized_site_title(scene_site_name) == normalized_site
+
+    return _normalized_site_title(scene_project.get("title")) == normalized_site
+
+
 def _sync_person_experience_to_scene_projects(
     source_project: dict[str, Any],
     site: dict[str, Any],
@@ -2618,6 +2739,11 @@ def _person_assist_site_payload(item: dict[str, Any], *, kind: str | None = None
     site_type = str(kind or item.get("kind") or PERSON_ASSIST_EXPERIENCE_KIND).strip().lower()
     if site_type not in PERSON_ASSIST_COLLECTION_KEYS:
         site_type = PERSON_ASSIST_EXPERIENCE_KIND
+    site_link = _linked_site_snapshot_payload(
+        item.get("site_row_id"),
+        item.get("site_id"),
+        item.get("site_name"),
+    )
     return {
         "id": str(item.get("id") or ""),
         "site_type": site_type,
@@ -2625,7 +2751,10 @@ def _person_assist_site_payload(item: dict[str, Any], *, kind: str | None = None
         "kind_label": _person_assist_kind_label(site_type),
         "date": str(item.get("date") or ""),
         "effective_from": str(item.get("effective_from") or ""),
-        "site_name": str(item.get("site_name") or ""),
+        "site_row_id": site_link["site_row_id"],
+        "site_id": site_link["site_id"],
+        "site_name": site_link["site_name"],
+        "site": site_link,
         "shift_key": str(item.get("shift_key") or ""),
         "shift_label": _assist_shift_label(item.get("shift_key")),
         "notes": str(item.get("notes") or ""),
@@ -2685,6 +2814,12 @@ def _person_assist_site_from_payload(
         created_at = timestamp
         created_by = actor_name
         site_id = _assist_id("psite")
+    site_ref = _load_site_reference(_sanitize_site_row_id(payload.get("site_row_id")), require_active=True)
+    site_name = (
+        site_ref["site_name"]
+        if site_ref
+        else _assist_short_text(payload.get("site_name"), "現場名", required=True, limit=120)
+    )
     return {
         "id": site_id,
         "kind": PERSON_ASSIST_EXPERIENCE_KIND
@@ -2692,7 +2827,9 @@ def _person_assist_site_from_payload(
         else PERSON_ASSIST_TRAINING_KIND,
         "date": date_text,
         "effective_from": (parsed_date + timedelta(days=1)).isoformat(),
-        "site_name": _assist_short_text(payload.get("site_name"), "現場名", required=True, limit=120),
+        "site_row_id": site_ref["site_row_id"] if site_ref else None,
+        "site_id": site_ref["site_id"] if site_ref else str(payload.get("site_id") or "").strip(),
+        "site_name": site_name,
         "shift_key": _assist_shift_key(payload.get("shift_key"), required=False),
         "notes": _assist_long_text(payload.get("notes")),
         "created_at": created_at,
@@ -2703,7 +2840,12 @@ def _person_assist_site_from_payload(
 
 
 def _person_assist_site_history_label(item: dict[str, Any]) -> str:
-    return f"{item.get('date')} / {item.get('site_name')} / {_assist_shift_label(item.get('shift_key'))}"
+    site_label = (
+        f"{item.get('site_id')} / {item.get('site_name')}"
+        if str(item.get("site_id") or "").strip()
+        else str(item.get("site_name") or "")
+    )
+    return f"{item.get('date')} / {site_label} / {_assist_shift_label(item.get('shift_key'))}"
 
 
 def _person_assist_site_mutation(
@@ -2896,8 +3038,7 @@ def _sync_person_experience_to_scene_projects(
 ) -> None:
     if str(site.get("kind") or "") != PERSON_ASSIST_EXPERIENCE_KIND:
         return
-    normalized_site = _normalized_site_title(site.get("site_name"))
-    if not normalized_site:
+    if not (_coerce_site_row_id(site.get("site_row_id")) or str(site.get("site_id") or "").strip() or _normalized_site_title(site.get("site_name"))):
         return
     for path in _shifts_dir().glob("*.json"):
         target_summary = _load_json(path)
@@ -2908,7 +3049,7 @@ def _sync_person_experience_to_scene_projects(
             target_project = _load_project(target_project_id)
             if target_project.get("mode") != "scene":
                 continue
-            if _normalized_site_title(target_project.get("title")) == normalized_site:
+            if _person_experience_matches_scene_project(site, target_project):
                 change = _upsert_person_experience_scene_record(
                     target_project,
                     source_project,
@@ -2985,27 +3126,25 @@ def _backfill_scene_project_from_person_experience(
 ) -> None:
     _ensure_scene_project(scene_project)
     assist = _ensure_assist(scene_project)
-    normalized_title = _normalized_site_title(scene_project.get("title"))
     changes: list[str] = []
     matched_keys: set[tuple[str, str]] = set()
-    if normalized_title:
-        for path in _shifts_dir().glob("*.json"):
-            source_project = _load_json(path)
-            if not source_project or source_project.get("mode") != "person":
+    for path in _shifts_dir().glob("*.json"):
+        source_project = _load_json(path)
+        if not source_project or source_project.get("mode") != "person":
+            continue
+        source_assist = _ensure_person_assist(source_project)
+        for site in source_assist.get("experienced_sites") or []:
+            if not _person_experience_matches_scene_project(site, scene_project):
                 continue
-            source_assist = _ensure_person_assist(source_project)
-            for site in source_assist.get("experienced_sites") or []:
-                if _normalized_site_title(site.get("site_name")) != normalized_title:
-                    continue
-                matched_keys.add((str(source_project.get("id") or ""), str(site.get("id") or "")))
-                change = _upsert_person_experience_scene_record(
-                    scene_project,
-                    source_project,
-                    site,
-                    actor_name=actor_name,
-                )
-                if change:
-                    changes.append(change)
+            matched_keys.add((str(source_project.get("id") or ""), str(site.get("id") or "")))
+            change = _upsert_person_experience_scene_record(
+                scene_project,
+                source_project,
+                site,
+                actor_name=actor_name,
+            )
+            if change:
+                changes.append(change)
     for record in list(assist.get("records") or []):
         if str(record.get("source_type") or "") != PERSON_ASSIST_AUTO_SOURCE:
             continue
@@ -3013,7 +3152,7 @@ def _backfill_scene_project_from_person_experience(
             str(record.get("source_project_id") or ""),
             str(record.get("source_site_id") or ""),
         )
-        if not normalized_title or source_key not in matched_keys:
+        if source_key not in matched_keys:
             change = _remove_person_experience_scene_record(
                 scene_project,
                 source_project_id=source_key[0],
@@ -3819,6 +3958,9 @@ def api_create():
         year, month = _validate_year_month(request.form.get("year"), request.form.get("month"))
         capacity_enabled, required_capacity = _sanitize_capacity(request.form.get("required_capacity"))
         entries = {}
+    site_ref = None
+    if mode == "scene":
+        site_ref = _load_site_reference(_sanitize_site_row_id(request.form.get("site_row_id")), require_active=True)
 
     project_id = _project_id()
     month_key = _month_key(year, month)
@@ -3828,6 +3970,7 @@ def api_create():
         "title": title,
         "mode": mode,
         "employee_number": employee_number if mode == "person" else "",
+        **_site_storage_fields(site_ref if mode == "scene" else None),
         "view_token": _share_token(),
         "edit_token": _share_token(),
         "created_at": _utcnow_iso(),
@@ -3848,6 +3991,18 @@ def api_create():
             "changes": [f"{month_key} を作成"],
         },
     )
+    if site_ref:
+        _append_history(
+            project_id,
+            {
+                "timestamp": _utcnow_iso(),
+                "editor_name": _user_label(),
+                "editor_type": "owner",
+                "action": "site_linked",
+                "month_key": None,
+                "changes": [f"現場を {site_ref['site_id']} / {site_ref['site_name']} に設定"],
+            },
+        )
     if project["mode"] == "scene":
         _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
     return jsonify({"success": True, "project": _project_detail_payload(project)})
@@ -3872,15 +4027,28 @@ def api_project_meta(project_id: str):
         new_title = _sanitize_title(data.get("title", project["title"]))
         old_title = project["title"]
         old_employee_number = str(project.get("employee_number") or "")
+        old_site = _project_site_payload(project)
         new_employee_number = _sanitize_employee_number(data.get("employee_number", project.get("employee_number", "")))
         if project.get("mode") != "person":
             new_employee_number = ""
+        new_site_ref = None
+        if project.get("mode") == "scene":
+            incoming_site_row_id = data.get("site_row_id", project.get("site_row_id"))
+            new_site_ref = _load_site_reference(_sanitize_site_row_id(incoming_site_row_id), require_active=True)
         metadata_changed = False
         if new_title != project["title"]:
             project["title"] = new_title
             metadata_changed = True
         if new_employee_number != str(project.get("employee_number") or ""):
             project["employee_number"] = new_employee_number
+            metadata_changed = True
+        next_site_fields = _site_storage_fields(new_site_ref if project.get("mode") == "scene" else None)
+        if (
+            next_site_fields["site_row_id"] != project.get("site_row_id")
+            or next_site_fields["site_id"] != str(project.get("site_id") or "")
+            or next_site_fields["site_name"] != str(project.get("site_name") or "")
+        ):
+            project.update(next_site_fields)
             metadata_changed = True
         if metadata_changed:
             _save_project(project)
@@ -3889,6 +4057,12 @@ def api_project_meta(project_id: str):
                 changes.append(f"タイトルを {old_title} から {new_title} に変更")
             if new_employee_number != old_employee_number:
                 changes.append("社員IDを更新")
+            next_site = _project_site_payload(project)
+            if old_site.get("site_row_id") != next_site.get("site_row_id"):
+                if next_site.get("site_row_id"):
+                    changes.append(f"現場を {next_site.get('site_id')} / {next_site.get('site_name')} に設定")
+                elif old_site.get("site_row_id"):
+                    changes.append("現場設定を解除")
             if not changes:
                 changes.append("メタ情報を更新")
             _append_history(
@@ -3905,7 +4079,11 @@ def api_project_meta(project_id: str):
             should_resync_person_experience = project.get("mode") == "person" and (
                 new_title != old_title or new_employee_number != old_employee_number
             )
-            should_backfill_scene_person_experience = project.get("mode") == "scene" and new_title != old_title
+            should_backfill_scene_person_experience = project.get("mode") == "scene" and (
+                new_title != old_title
+                or old_site.get("site_row_id") != next_site.get("site_row_id")
+                or str(old_site.get("site_id") or "") != str(next_site.get("site_id") or "")
+            )
     if should_resync_person_experience:
         _resync_person_experience_project(project, actor_name=_user_label())
     if should_backfill_scene_person_experience:

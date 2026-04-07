@@ -101,4 +101,10 @@ NAV_ITEMS = (
         "label": "社員名簿PLUS",
         "description": "高速で多機能な名簿機能をあなたに",
     },
+    {
+        "href": "/tools/siteplus",
+        "icon": "搭",
+        "label": "現場リストPLUS",
+        "description": "契約番号と枝番号をAPI前提で管理する現場マスタ",
+    },
 )
