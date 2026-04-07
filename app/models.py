@@ -291,3 +291,92 @@ class SalaryUploadHistory(db.Model):
 
     def __repr__(self):
         return f'<SalaryUploadHistory {self.id}: {self.filename} by {self.uploaded_by}>'
+
+
+class Site(db.Model):
+    __tablename__ = 'sites'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    site_id = db.Column(db.String(5), unique=True, nullable=False, index=True)
+    site_name = db.Column(db.String(200), nullable=False, index=True)
+    site_manager_last = db.Column(db.String(100), nullable=False)
+    site_manager_first = db.Column(db.String(100), nullable=False)
+    site_manager_id = db.Column(db.String(20), nullable=False, index=True)
+    site_register = db.Column(db.String(80), nullable=False, index=True)
+    site_updater = db.Column(db.String(80), nullable=False, index=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    branches = db.relationship(
+        'SiteBranch',
+        back_populates='site',
+        cascade='all, delete-orphan',
+        order_by='SiteBranch.site_branch',
+    )
+
+    def manager_name(self):
+        return f'{self.site_manager_last} {self.site_manager_first}'.strip()
+
+    def to_dict(self, include_branches=True, include_inactive_branches=True):
+        branches = []
+        if include_branches:
+            for branch in self.branches:
+                if include_inactive_branches or branch.is_active:
+                    branches.append(branch.to_dict())
+        return {
+            'id': self.id,
+            'site_id': self.site_id,
+            'site_name': self.site_name,
+            'site_manager_last': self.site_manager_last,
+            'site_manager_first': self.site_manager_first,
+            'site_manager_id': self.site_manager_id,
+            'site_manager_name': self.manager_name(),
+            'site_register': self.site_register,
+            'site_updater': self.site_updater,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'branch_count': len(self.branches),
+            'active_branch_count': len([branch for branch in self.branches if branch.is_active]),
+            'branches': branches,
+        }
+
+    def __repr__(self):
+        return f'<Site {self.site_id}: {self.site_name}>'
+
+
+class SiteBranch(db.Model):
+    __tablename__ = 'site_branches'
+
+    __table_args__ = (
+        db.UniqueConstraint('site_row_id', 'site_branch', name='uq_site_branches_site_row_id_site_branch'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    site_row_id = db.Column(db.Integer, db.ForeignKey('sites.id'), nullable=False, index=True)
+    site_branch = db.Column(db.String(3), nullable=False, index=True)
+    cloudshift_option_key = db.Column(db.String(20), nullable=False, index=True)
+    site_register = db.Column(db.String(80), nullable=False, index=True)
+    site_updater = db.Column(db.String(80), nullable=False, index=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    site = db.relationship('Site', back_populates='branches')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'site_row_id': self.site_row_id,
+            'site_branch': self.site_branch,
+            'cloudshift_option_key': self.cloudshift_option_key,
+            'site_register': self.site_register,
+            'site_updater': self.site_updater,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def __repr__(self):
+        return f'<SiteBranch {self.site_row_id}:{self.site_branch}>'

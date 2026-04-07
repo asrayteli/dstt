@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.tools.shiftersync import _calendar_day_kind, _fit_calendar_lines, _load_image_font, generate_png_calendar
-from app.tools.shiftersync_format import entry_display_text
+from app.tools.shiftersync_format import entry_display_text, parse_csv_text, serialize_csv_text
 
 
 def _build_client(tmp_path):
@@ -211,3 +211,30 @@ def test_generate_png_calendar_expands_for_long_multiline_comment(tmp_path):
 
     with Image.open(path) as image:
         assert image.size[1] > 1180
+
+
+def test_csv_roundtrip_preserves_site_branch_metadata():
+    csv_text = serialize_csv_text(
+        "scene",
+        2026,
+        4,
+        "Tokyo Team",
+        0,
+        {
+            "1": [
+                {
+                    "id": "entry-1",
+                    "value": "!O!Alice",
+                    "comment": "大型担当",
+                    "employee_number": "9001",
+                    "site_branch_row_id": "12",
+                    "site_branch": "001",
+                }
+            ]
+        },
+    )
+
+    parsed = parse_csv_text(csv_text)
+    entry = parsed["entries_per_day"]["1"][0]
+    assert entry["site_branch_row_id"] == "12"
+    assert entry["site_branch"] == "001"

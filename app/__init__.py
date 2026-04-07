@@ -91,6 +91,9 @@ def create_app():
     from .tools.pluslist import pluslist_bp
     app.register_blueprint(pluslist_bp)
 
+    from .tools.siteplus import siteplus_bp
+    app.register_blueprint(siteplus_bp)
+
     from .tools.color_extract import color_extract_bp
     app.register_blueprint(color_extract_bp)
 

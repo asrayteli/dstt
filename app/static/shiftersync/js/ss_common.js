@@ -41,6 +41,8 @@ const ShifterSync = (function() {
   const commentRowPrefix = '#comment';
   const employeeNumberRowPrefix = '#employee_number';
   const projectEmployeeNumberRowPrefix = '#project_employee_number';
+  const siteBranchRowIdRowPrefix = '#site_branch_row_id';
+  const siteBranchRowPrefix = '#site_branch';
 
   const state = {
     mode: 'scene',
@@ -55,7 +57,9 @@ const ShifterSync = (function() {
     editable: true,
     selectedOptions: {},
     modalDay: null,
-    modalEntryId: null
+    modalEntryId: null,
+    siteContext: null,
+    siteBranches: []
   };
 
   const employeeSearchCache = new Map();
@@ -106,6 +110,181 @@ const ShifterSync = (function() {
     return optionKey ? `!${optionKey}!${safeName}` : safeName;
   }
 
+  function normalizeSiteBranchRowId(value) {
+    const text = String(value || '').trim();
+    if (!text || !/^\d+$/.test(text)) {
+      return '';
+    }
+    return parseInt(text, 10) > 0 ? text : '';
+  }
+
+  function normalizeSiteBranch(branch) {
+    if (!branch || typeof branch !== 'object') {
+      return null;
+    }
+    const id = normalizeSiteBranchRowId(branch.id || branch.site_branch_row_id || branch.siteBranchRowId || '');
+    const siteBranch = String(branch.site_branch || branch.siteBranch || '').trim();
+    if (!id && !siteBranch) {
+      return null;
+    }
+    return {
+      id,
+      site_branch: siteBranch,
+      cloudshift_option_key: String(branch.cloudshift_option_key || branch.cloudshiftOptionKey || '').trim().toUpperCase(),
+      option_label: String(branch.option_label || branch.optionLabel || '').trim(),
+      is_active: branch.is_active !== false
+    };
+  }
+
+  function currentSiteBranches() {
+    if (!Array.isArray(state.siteBranches)) {
+      return [];
+    }
+    return state.siteBranches.map((branch) => normalizeSiteBranch(branch)).filter(Boolean);
+  }
+
+  function isLinkedSceneSiteContext() {
+    const siteContext = state.siteContext && typeof state.siteContext === 'object' ? state.siteContext : null;
+    return isSceneMode() && !!(siteContext && siteContext.is_linked);
+  }
+
+  function hasActiveSiteBranches() {
+    return currentSiteBranches().some((branch) => branch.is_active !== false);
+  }
+
+  function findSiteBranchByRowId(siteBranchRowId) {
+    const normalizedId = normalizeSiteBranchRowId(siteBranchRowId);
+    if (!normalizedId) {
+      return null;
+    }
+    return currentSiteBranches().find((branch) => branch.id === normalizedId) || null;
+  }
+
+  function siteBranchOptionLabel(branch) {
+    if (!branch) {
+      return '';
+    }
+    return String(branch.option_label || allOptionMappings[branch.cloudshift_option_key] || branch.cloudshift_option_key || '').trim();
+  }
+
+  function siteBranchChoiceLabel(branch) {
+    if (!branch) {
+      return '';
+    }
+    const branchCode = String(branch.site_branch || '').trim();
+    const optionLabel = siteBranchOptionLabel(branch);
+    return optionLabel ? `${branchCode} / ${optionLabel}` : branchCode;
+  }
+
+  function entryBranchState(entry) {
+    const normalized = normalizeEntry(entry);
+    if (!normalized) {
+      return { site_branch_row_id: '', site_branch: '', label: '', is_missing: false };
+    }
+
+    const storedBranchRowId = normalizeSiteBranchRowId(normalized.site_branch_row_id || '');
+    const storedBranch = String(normalized.site_branch || '').trim();
+    const liveBranch = findSiteBranchByRowId(storedBranchRowId);
+    if (liveBranch) {
+      return {
+        site_branch_row_id: liveBranch.id,
+        site_branch: liveBranch.site_branch,
+        label: siteBranchChoiceLabel(liveBranch),
+        is_missing: false
+      };
+    }
+    if (storedBranchRowId || storedBranch) {
+      return {
+        site_branch_row_id: storedBranchRowId,
+        site_branch: storedBranch,
+        label: storedBranch ? `${storedBranch} / 現在は無効` : '現在は無効',
+        is_missing: true
+      };
+    }
+    return { site_branch_row_id: '', site_branch: '', label: '', is_missing: false };
+  }
+
+  function entryBranchIssue(entry) {
+    if (!isLinkedSceneSiteContext()) {
+      return { code: '', label: '', tone: '' };
+    }
+    const branchState = entryBranchState(entry);
+    if (branchState.is_missing) {
+      return { code: 'missing', label: '旧枝参照', tone: 'danger' };
+    }
+    if (!branchState.site_branch_row_id && hasActiveSiteBranches()) {
+      return { code: 'unassigned', label: '枝未設定', tone: 'warning' };
+    }
+    return { code: '', label: '', tone: '' };
+  }
+
+  function summarizeDayBranchIssues(day) {
+    if (!isLinkedSceneSiteContext()) {
+      return { text: '', tone: '', missingCount: 0, unassignedCount: 0, noBranches: false };
+    }
+    const entries = getDayEntries(day).filter((entry) => String(entry && entry.value ? entry.value : '').trim());
+    if (!entries.length) {
+      return { text: '', tone: '', missingCount: 0, unassignedCount: 0, noBranches: false };
+    }
+    if (!hasActiveSiteBranches()) {
+      return {
+        text: '有効な枝番号が未登録',
+        tone: 'warning',
+        missingCount: 0,
+        unassignedCount: entries.length,
+        noBranches: true
+      };
+    }
+    let missingCount = 0;
+    let unassignedCount = 0;
+    entries.forEach((entry) => {
+      const issue = entryBranchIssue(entry);
+      if (issue.code === 'missing') {
+        missingCount += 1;
+      } else if (issue.code === 'unassigned') {
+        unassignedCount += 1;
+      }
+    });
+    const parts = [];
+    if (missingCount) {
+      parts.push(`旧枝参照 ${missingCount}件`);
+    }
+    if (unassignedCount) {
+      parts.push(`枝未設定 ${unassignedCount}件`);
+    }
+    return {
+      text: parts.join(' / '),
+      tone: missingCount ? 'danger' : (unassignedCount ? 'warning' : ''),
+      missingCount,
+      unassignedCount,
+      noBranches: false
+    };
+  }
+
+  function siteBranchCandidatesForOption(optionKey) {
+    const branches = currentSiteBranches().filter((branch) => branch.is_active !== false);
+    if (!branches.length) {
+      return [];
+    }
+    const normalizedOptionKey = String(optionKey || '').trim().toUpperCase();
+    if (!normalizedOptionKey) {
+      return branches;
+    }
+    const matched = branches.filter((branch) => branch.cloudshift_option_key === normalizedOptionKey);
+    return matched.length ? matched : branches;
+  }
+
+  function autoBranchFieldsForOption(optionKey) {
+    const candidates = siteBranchCandidatesForOption(optionKey);
+    if (candidates.length !== 1) {
+      return { site_branch_row_id: '', site_branch: '' };
+    }
+    return {
+      site_branch_row_id: candidates[0].id,
+      site_branch: candidates[0].site_branch
+    };
+  }
+
   function normalizeEntry(entry) {
     if (!entry) {
       return null;
@@ -115,7 +294,7 @@ const ShifterSync = (function() {
       if (!value) {
         return null;
       }
-      return { id: makeEntryId(), value, comment: '', employee_number: '' };
+      return { id: makeEntryId(), value, comment: '', employee_number: '', site_branch_row_id: '', site_branch: '' };
     }
 
     const value = String(entry.value || '').trim();
@@ -126,7 +305,9 @@ const ShifterSync = (function() {
       id: String(entry.id || makeEntryId()),
       value,
       comment: String(entry.comment || '').trim(),
-      employee_number: String(entry.employee_number || entry.employeeNumber || '').trim()
+      employee_number: String(entry.employee_number || entry.employeeNumber || '').trim(),
+      site_branch_row_id: normalizeSiteBranchRowId(entry.site_branch_row_id || entry.siteBranchRowId || ''),
+      site_branch: String(entry.site_branch || entry.siteBranch || '').trim()
     };
   }
 
@@ -139,7 +320,9 @@ const ShifterSync = (function() {
       id: withNewId ? makeEntryId() : normalized.id,
       value: normalized.value,
       comment: normalized.comment,
-      employee_number: normalized.employee_number
+      employee_number: normalized.employee_number,
+      site_branch_row_id: normalized.site_branch_row_id,
+      site_branch: normalized.site_branch
     };
   }
 
@@ -548,13 +731,28 @@ const ShifterSync = (function() {
   function getEntryDisplayParts(entry) {
     const normalized = normalizeEntry(entry);
     if (!normalized) {
-      return { title: '', comment: '' };
+      return {
+        title: '',
+        comment: '',
+        employee_number: '',
+        branch_label: '',
+        branch_missing: false,
+        branch_issue_label: '',
+        branch_issue_tone: ''
+      };
     }
     const parsed = parseEntryValue(normalized.value);
+    const branchState = entryBranchState(normalized);
+    const branchIssue = entryBranchIssue(normalized);
+    const baseTitle = parsed.optionKey ? `${parsed.name} ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : parsed.name;
     return {
-      title: parsed.optionKey ? `${parsed.name} ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : parsed.name,
+      title: branchState.site_branch ? `${baseTitle} / 枝${branchState.site_branch}` : baseTitle,
       comment: normalized.comment || '',
-      employee_number: normalized.employee_number || ''
+      employee_number: normalized.employee_number || '',
+      branch_label: branchState.label,
+      branch_missing: branchState.is_missing,
+      branch_issue_label: branchIssue.label,
+      branch_issue_tone: branchIssue.tone
     };
   }
 
@@ -654,6 +852,36 @@ const ShifterSync = (function() {
     Object.keys(state.entriesPerDay).forEach((day) => updateCapacityWarning(day));
   }
 
+  function updateBranchWarning(day) {
+    const box = $(`.day-box[data-day='${day}']`);
+    if (!box.length) {
+      return;
+    }
+    const note = box.find('.day-branch-warning');
+    const summary = summarizeDayBranchIssues(day);
+    box.removeClass('branch-warning branch-danger branch-unavailable');
+    if (!note.length) {
+      return;
+    }
+    if (!summary.text) {
+      note.text('').addClass('ss-hidden').removeClass('is-warning is-danger');
+      return;
+    }
+    box.addClass(summary.tone === 'danger' ? 'branch-danger' : 'branch-warning');
+    if (summary.noBranches) {
+      box.addClass('branch-unavailable');
+    }
+    note
+      .text(summary.text)
+      .removeClass('ss-hidden')
+      .toggleClass('is-warning', summary.tone !== 'danger')
+      .toggleClass('is-danger', summary.tone === 'danger');
+  }
+
+  function updateAllBranchWarnings() {
+    Object.keys(state.entriesPerDay).forEach((day) => updateBranchWarning(day));
+  }
+
   function replaceEntriesPerDay(entriesPerDay) {
     const nextEntries = {};
     const source = entriesPerDay && typeof entriesPerDay === 'object' ? entriesPerDay : {};
@@ -674,6 +902,7 @@ const ShifterSync = (function() {
     Object.keys(nextEntries).forEach((day) => {
       updateEntryDisplay(day);
       updateCapacityWarning(day);
+      updateBranchWarning(day);
     });
   }
 
@@ -684,6 +913,7 @@ const ShifterSync = (function() {
     const entries = getDayEntries(day);
     if (!entries.length) {
       container.append('<div class="entry-empty-note">\u307e\u3060\u767b\u9332\u3055\u308c\u3066\u3044\u307e\u305b\u3093</div>');
+      updateBranchWarning(day);
       return;
     }
 
@@ -691,6 +921,8 @@ const ShifterSync = (function() {
       const parts = getEntryDisplayParts(entry);
       const item = $('<div>')
         .addClass('entry-item')
+        .toggleClass('has-branch-warning', parts.branch_issue_tone === 'warning')
+        .toggleClass('has-branch-danger', parts.branch_issue_tone === 'danger')
         .attr('data-day', day)
         .attr('data-entry-id', entry.id)
         .append(
@@ -698,6 +930,9 @@ const ShifterSync = (function() {
             .addClass('entry-item-main')
             .append(
               $('<div>').addClass('entry-item-title').text(parts.title),
+              parts.branch_issue_label
+                ? $('<div>').addClass(`entry-item-status is-${parts.branch_issue_tone || 'warning'}`).text(parts.branch_issue_label)
+                : null,
               $('<div>').addClass(`entry-item-comment${parts.comment ? '' : ' is-empty'}`).text(parts.comment ? getCommentPreview(parts.comment) : '\u30b3\u30e1\u30f3\u30c8\u306a\u3057')
             )
         );
@@ -713,6 +948,7 @@ const ShifterSync = (function() {
 
       container.append(item);
     });
+    updateBranchWarning(day);
   }
 
   function createDayBox(day, maxDay) {
@@ -727,6 +963,10 @@ const ShifterSync = (function() {
       .attr('data-day', day)
       .text(`${day}\u65e5`);
     dayBox.append(header);
+    dayBox.append(
+      $('<div>')
+        .addClass('day-branch-warning ss-hidden')
+    );
 
     const entryContainer = $('<div>')
       .addClass('entry-list-container')
@@ -831,6 +1071,8 @@ const ShifterSync = (function() {
     $(document).off('click', '.ss-entry-edit-btn');
     $(document).off('click', '.ss-entry-delete-btn');
     $(document).off('click', '.ss-entry-save-btn');
+    $(document).off('change', '#ss-entry-modal-option');
+    $(document).off('change', '#ss-entry-modal-site-branch');
   }
 
   function attachEventHandlers() {
@@ -949,6 +1191,19 @@ const ShifterSync = (function() {
     $(document).on('click', '.ss-entry-save-btn', function() {
       saveEntryFromModal();
     });
+
+    $(document).on('change', '#ss-entry-modal-option', function() {
+      refreshEntryModalBranchOptions();
+    });
+
+    $(document).on('change', '#ss-entry-modal-site-branch', function() {
+      const selected = $(this).find('option:selected');
+      $(this).attr('data-current-row-id', normalizeSiteBranchRowId($(this).val()));
+      $(this).attr('data-current-branch', String(selected.attr('data-site-branch') || '').trim());
+      if ($(this).val()) {
+        setEntryModalBranchMessage('');
+      }
+    });
   }
 
   function addEntry(day) {
@@ -961,11 +1216,14 @@ const ShifterSync = (function() {
     }
 
     const options = getSelectedOptionsForDay(dayKey);
+    const autoBranchFields = isSceneMode() ? autoBranchFieldsForOption(options[0] || null) : { site_branch_row_id: '', site_branch: '' };
     const entry = normalizeEntry({
       id: makeEntryId(),
       value: formatEntryValue(options[0] || null, name),
       comment: commentInput.val().trim(),
-      employee_number: getSelectedEmployeeNumberForInput(nameInput)
+      employee_number: getSelectedEmployeeNumberForInput(nameInput),
+      site_branch_row_id: autoBranchFields.site_branch_row_id,
+      site_branch: autoBranchFields.site_branch
     });
     if (!entry) {
       return;
@@ -1093,6 +1351,76 @@ const ShifterSync = (function() {
     });
   }
 
+  function setEntryModalBranchMessage(message) {
+    const note = $('#ss-entry-modal-branch-note');
+    if (!note.length) {
+      return;
+    }
+    const text = String(message || '').trim();
+    if (!text) {
+      note.text('').addClass('ss-hidden');
+      return;
+    }
+    note.text(text).removeClass('ss-hidden');
+  }
+
+  function refreshEntryModalBranchOptions() {
+    const select = $('#ss-entry-modal-site-branch');
+    if (!select.length) {
+      return;
+    }
+
+    const optionKey = $('#ss-entry-modal-option').val() || '';
+    const candidates = siteBranchCandidatesForOption(optionKey);
+    const currentRowId = normalizeSiteBranchRowId(select.attr('data-current-row-id') || '');
+    const currentBranch = String(select.attr('data-current-branch') || '').trim();
+    const previousValue = normalizeSiteBranchRowId(select.val() || '');
+    const currentBranchExists = currentRowId && candidates.some((branch) => branch.id === currentRowId);
+    const preservedBranch = currentRowId && !currentBranchExists
+      ? {
+          id: currentRowId,
+          site_branch: currentBranch,
+          cloudshift_option_key: '',
+          option_label: '',
+          is_active: false,
+        }
+      : null;
+
+    const options = ['<option value="">未設定</option>'];
+    if (preservedBranch) {
+      options.push(
+        `<option value="${escapeHtml(preservedBranch.id)}" data-site-branch="${escapeHtml(preservedBranch.site_branch)}">${escapeHtml(preservedBranch.site_branch ? `${preservedBranch.site_branch} / 現在は無効` : '現在は無効')}</option>`
+      );
+    }
+    candidates.forEach((branch) => {
+      options.push(
+        `<option value="${escapeHtml(branch.id)}" data-site-branch="${escapeHtml(branch.site_branch)}">${escapeHtml(siteBranchChoiceLabel(branch))}</option>`
+      );
+    });
+    select.html(options.join(''));
+
+    let nextValue = previousValue && select.find(`option[value="${previousValue}"]`).length ? previousValue : '';
+    if (!nextValue && currentRowId && select.find(`option[value="${currentRowId}"]`).length) {
+      nextValue = currentRowId;
+    }
+    if (!nextValue && candidates.length === 1) {
+      nextValue = candidates[0].id;
+      select.attr('data-current-row-id', candidates[0].id);
+      select.attr('data-current-branch', candidates[0].site_branch);
+      setEntryModalBranchMessage(`候補が1件のため 枝${candidates[0].site_branch} を自動選択しました`);
+    } else if (!currentSiteBranches().length) {
+      setEntryModalBranchMessage('この現場に有効な枝番号がありません');
+    } else if (optionKey && !candidates.some((branch) => branch.cloudshift_option_key === String(optionKey).trim().toUpperCase())) {
+      setEntryModalBranchMessage('一致する枝番号がないため、登録済みの枝番号をすべて表示しています');
+    } else if (preservedBranch) {
+      setEntryModalBranchMessage('現在は無効な枝番号が設定されています。必要に応じて再選択してください');
+    } else {
+      setEntryModalBranchMessage('');
+    }
+
+    select.val(nextValue);
+  }
+
   function openDayDetail(day) {
     ensureModalScaffold();
     const modal = $('#ss-day-detail-modal');
@@ -1113,7 +1441,10 @@ const ShifterSync = (function() {
             <div class="ss-detail-row">
               <div>
                 <div class="ss-detail-label">\u30a8\u30f3\u30c8\u30ea ${index + 1}</div>
-                <div class="ss-detail-value">${escapeHtml(parts.title)}</div>
+                <div class="ss-detail-value-row">
+                  <div class="ss-detail-value">${escapeHtml(parts.title)}</div>
+                  ${parts.branch_issue_label ? `<span class="ss-issue-pill is-${escapeHtml(parts.branch_issue_tone || 'warning')}">${escapeHtml(parts.branch_issue_label)}</span>` : ''}
+                </div>
               </div>
               ${state.editable ? `
                 <div class="ss-detail-actions">
@@ -1126,6 +1457,12 @@ const ShifterSync = (function() {
               <div class="ss-detail-label">\u30b3\u30e1\u30f3\u30c8</div>
               <div class="ss-detail-comment">${parts.comment ? escapeHtml(parts.comment) : '<span class="ss-detail-empty-text">\u30b3\u30e1\u30f3\u30c8\u306a\u3057</span>'}</div>
             </div>
+            ${parts.branch_label ? `
+              <div class="ss-detail-comment-block">
+                <div class="ss-detail-label">\u679d\u756a\u53f7</div>
+                <div class="ss-detail-comment">${escapeHtml(parts.branch_label)}</div>
+              </div>
+            ` : ''}
           </article>
         `;
       }).join('');
@@ -1157,6 +1494,10 @@ const ShifterSync = (function() {
 
     const body = $('#ss-entry-modal-body');
     const optionText = parsed.optionKey ? allOptionMappings[parsed.optionKey] || parsed.optionKey : '\u306a\u3057';
+    const branchState = entryBranchState(entry);
+    const siteContext = state.siteContext && typeof state.siteContext === 'object' ? state.siteContext : null;
+    const canChooseBranch = isSceneMode() && !!(siteContext && siteContext.is_linked);
+    const hasBranches = currentSiteBranches().length > 0;
 
     if (!state.editable) {
       body.html(`
@@ -1173,6 +1514,12 @@ const ShifterSync = (function() {
             <div class="ss-detail-label">\u30b3\u30e1\u30f3\u30c8</div>
             <div class="ss-detail-static">${entry.comment ? escapeHtml(entry.comment) : '<span class="ss-detail-empty-text">\u30b3\u30e1\u30f3\u30c8\u306a\u3057</span>'}</div>
           </div>
+          ${branchState.label ? `
+            <div class="ss-detail-field">
+              <div class="ss-detail-label">\u679d\u756a\u53f7</div>
+              <div class="ss-detail-static">${escapeHtml(branchState.label)}</div>
+            </div>
+          ` : ''}
         </div>
       `);
       $('#ss-entry-modal').removeClass('ss-hidden');
@@ -1208,6 +1555,23 @@ const ShifterSync = (function() {
           <label class="ss-detail-label" for="ss-entry-modal-comment">\u30b3\u30e1\u30f3\u30c8</label>
           <textarea id="ss-entry-modal-comment" class="ss-detail-textarea" rows="4">${escapeHtml(entry.comment)}</textarea>
         </div>
+        ${canChooseBranch ? `
+          <div class="ss-detail-field">
+            <label class="ss-detail-label" for="ss-entry-modal-site-branch">\u679d\u756a\u53f7</label>
+            <select
+              id="ss-entry-modal-site-branch"
+              class="ss-detail-input"
+              data-current-row-id="${escapeHtml(branchState.site_branch_row_id || '')}"
+              data-current-branch="${escapeHtml(branchState.site_branch || '')}"
+            ></select>
+            <div id="ss-entry-modal-branch-note" class="ss-selected-note${hasBranches || branchState.label ? '' : ' ss-hidden'}"></div>
+          </div>
+        ` : isSceneMode() ? `
+          <div class="ss-detail-field">
+            <div class="ss-detail-label">\u679d\u756a\u53f7</div>
+            <div class="ss-detail-static">${siteContext && siteContext.is_linked ? 'この現場に有効な枝番号がありません' : '現場未設定のため選択できません'}</div>
+          </div>
+        ` : ''}
         <div class="ss-detail-actions foot">
           <button type="button" class="btn-secondary" data-close-modal="entry">\u9589\u3058\u308b</button>
           <button type="button" class="btn-primary ss-entry-save-btn">\u4fdd\u5b58</button>
@@ -1220,6 +1584,10 @@ const ShifterSync = (function() {
       $modalNameInput.attr('data-employee-number', String(entry.employee_number || ''));
       $modalNameInput.attr('data-selected-employee-name', parsed.name);
       $modalNameInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    }
+
+    if (canChooseBranch) {
+      refreshEntryModalBranchOptions();
     }
 
     $('#ss-entry-modal').removeClass('ss-hidden');
@@ -1237,6 +1605,12 @@ const ShifterSync = (function() {
     const optionKey = $('#ss-entry-modal-option').val() || null;
     const comment = $('#ss-entry-modal-comment').val().trim();
     const employeeNumber = getSelectedEmployeeNumberForInput($('#ss-entry-modal-name'));
+    const siteBranchSelect = $('#ss-entry-modal-site-branch');
+    const siteBranchRowId = siteBranchSelect.length ? normalizeSiteBranchRowId(siteBranchSelect.val()) : '';
+    const selectedBranch = siteBranchSelect.length ? siteBranchSelect.find('option:selected') : $();
+    const siteBranch = siteBranchRowId
+      ? String(selectedBranch.attr('data-site-branch') || siteBranchSelect.attr('data-current-branch') || '').trim()
+      : '';
     const nextEntries = getDayEntries(day).map((entry) => {
       if (entry.id !== entryId) {
         return entry;
@@ -1245,7 +1619,9 @@ const ShifterSync = (function() {
         id: entry.id,
         value: formatEntryValue(optionKey, name),
         comment,
-        employee_number: employeeNumber
+        employee_number: employeeNumber,
+        site_branch_row_id: siteBranchRowId,
+        site_branch: siteBranch
       });
     });
 
@@ -1329,6 +1705,8 @@ const ShifterSync = (function() {
 
     const commentRows = [];
     const employeeNumberRows = [];
+    const siteBranchRowIdRows = [];
+    const siteBranchRows = [];
     Object.keys(state.entriesPerDay)
       .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
       .forEach((day) => {
@@ -1343,12 +1721,20 @@ const ShifterSync = (function() {
           if (entry.employee_number) {
             employeeNumberRows.push([employeeNumberRowPrefix, day, index, entry.employee_number]);
           }
+          if (entry.site_branch_row_id) {
+            siteBranchRowIdRows.push([siteBranchRowIdRowPrefix, day, index, entry.site_branch_row_id]);
+          }
+          if (entry.site_branch) {
+            siteBranchRows.push([siteBranchRowPrefix, day, index, entry.site_branch]);
+          }
         });
       });
 
     return rows
       .concat(commentRows)
       .concat(employeeNumberRows)
+      .concat(siteBranchRowIdRows)
+      .concat(siteBranchRows)
       .concat(state.mode === 'person' && state.targetEmployeeNumber ? [[projectEmployeeNumberRowPrefix, state.targetEmployeeNumber]] : [])
       .map((row) => row.map((cell) => csvEscape(cell)).join(','))
       .join('\n');
@@ -1358,6 +1744,11 @@ const ShifterSync = (function() {
     state[key] = value;
     if (key === 'capacityEnabled' || key === 'requiredCapacity') {
       updateAllCapacityWarnings();
+      updateAllBranchWarnings();
+    }
+    if (key === 'siteContext' || key === 'siteBranches') {
+      Object.keys(state.entriesPerDay).forEach((day) => updateEntryDisplay(day));
+      updateAllBranchWarnings();
     }
   }
 
@@ -1397,6 +1788,7 @@ const ShifterSync = (function() {
     getEntriesPerDay,
     getSelectedOptionsForDay: getSelectedOptionsForDayExport,
     updateAllCapacityWarnings,
+    updateAllBranchWarnings,
     getOptionMappings,
     getOptionSectionsForMode: getOptionSectionsForModeExport
   };

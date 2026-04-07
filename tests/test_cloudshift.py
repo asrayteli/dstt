@@ -252,12 +252,15 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "[data-assist-edit-list]" in style
     assert "`${base}/sites`" in script
     assert "data-day-assist-site-type" in script
+    assert 'name="bulk_site_branch_row_id"' in script
     assert "data-day-assist-training-pick" in script
     assert "site_type" in script
     assert ".cloud-assist-result-card.is-conflict" in style
     assert ".cloud-assist-conflict-note" in style
     assert "day-assist-trigger" in ss_common_js
     assert "getSelectedOptionsForDay" in ss_common_js
+    assert "function updateBranchWarning" in ss_common_js
+    assert "day-branch-warning" in ss_common_js
     assert "TEMP" in ss_common_js
     assert "TEMP" in script
     assert "臨時便" in script
@@ -272,6 +275,8 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert ".cloud-check-scroll" in style
     assert ".cloud-check-entry.is-conflict" in style
     assert ".assist-btn" in ss_common_css
+    assert ".day-box.branch-warning" in ss_common_css
+    assert ".entry-item-status.is-warning" in ss_common_css
 
 
 def test_public_edit_save_writes_history_and_exports_comment(tmp_path):
