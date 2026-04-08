@@ -141,6 +141,7 @@
         <div class="flex flex-wrap gap-3">
           <button id="open-create-site" class="siteplus-btn siteplus-btn-hero-light">親現場を登録</button>
           <button id="open-create-branch" class="siteplus-btn siteplus-btn-hero-ghost">枝番号を登録</button>
+          <button id="open-upload-site-table" class="siteplus-btn siteplus-btn-hero-ghost">現場表をアップロード</button>
         </div>
       </div>
       <div class="grid gap-3 sm:grid-cols-2">
@@ -252,6 +253,43 @@
   </div>
 </div>
 
+<div id="site-table-upload-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/55 p-4">
+  <div class="siteplus-modal-shell max-w-3xl">
+    <div class="siteplus-modal-header">
+      <div class="siteplus-modal-header-inner">
+        <div>
+          <div class="text-xs uppercase tracking-[0.2em] text-slate-400">SITE TABLE IMPORT</div>
+          <h3 class="mt-1 text-xl font-semibold text-slate-900">現場表アップロード</h3>
+          <p class="mt-1 text-sm text-slate-500">契約コード8桁（5桁契約番号 + 3桁枝番号）から親現場と枝番号を一括登録します。</p>
+        </div>
+        <button type="button" class="siteplus-btn siteplus-btn-muted" data-close-modal="site-table-upload-modal">閉じる</button>
+      </div>
+    </div>
+    <form id="site-table-upload-form" class="siteplus-modal-body space-y-5">
+      <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+        <div class="font-semibold text-slate-900">CSVフォーマット（1行目ヘッダー）</div>
+        <div class="mt-2 text-xs text-slate-600">1:契約コード(8桁), 2:セグメント(無視), 3:担当者姓, 4:担当者名, 5:担当者番号, 6:現場名</div>
+        <ul class="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-600">
+          <li>契約コードは 8 桁数字のみ</li>
+          <li>既存の親現場情報（現場名/担当者）は上書き</li>
+          <li>既存の枝番号はスキップ、新規枝はオプション「保留(PENDING)」で作成</li>
+        </ul>
+      </div>
+      <label class="block text-sm">
+        <span class="mb-1.5 block font-medium text-slate-700">現場表CSV</span>
+        <input id="site-table-upload-file" name="file" type="file" accept=".csv" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" required>
+      </label>
+      <div id="site-table-upload-result" class="hidden rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700"></div>
+      <div class="siteplus-modal-actions">
+        <div class="siteplus-modal-actions-right">
+          <button type="button" class="siteplus-btn siteplus-btn-secondary" data-close-modal="site-table-upload-modal">キャンセル</button>
+          <button type="submit" class="siteplus-btn siteplus-btn-primary">取り込み実行</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 const SITEPLUS={optionItems:{{ option_items|tojson }},sites:[],selectedSiteId:null,editingSiteId:null,editingBranchId:null,confirmHandler:null,advanced:false};
 const $=(s)=>document.querySelector(s),$$=(s)=>Array.from(document.querySelectorAll(s));
@@ -279,10 +317,21 @@ function editSite(id){const s=SITEPLUS.sites.find((i)=>i.id===id);if(!s)return;S
 function openBranchModal(){const s=selectedSite();if(!s){window.alert('先に親現場を選択してください');return}resetBranchForm();$('#branch-target').textContent=`対象親現場: ${s.site_id} / ${s.site_name}`;openModal('branch-modal')}
 function prepareBranchForSite(id){const s=SITEPLUS.sites.find((i)=>i.id===id);if(!s)return;SITEPLUS.selectedSiteId=s.id;renderList();resetBranchForm();$('#branch-target').textContent=`対象親現場: ${s.site_id} / ${s.site_name}`;openModal('branch-modal')}
 function editBranch(id){for(const s of SITEPLUS.sites){const b=(s.branches||[]).find((i)=>i.id===id);if(!b)continue;SITEPLUS.selectedSiteId=s.id;SITEPLUS.editingBranchId=b.id;$('#branch-modal-title').textContent='枝番号を編集';$('#branch-target').textContent=`${s.site_id} / ${s.site_name} の枝番号を更新します。`;branchForm.querySelector('[name="site_branch"]').value=b.site_branch||'';branchForm.querySelector('[name="cloudshift_option_key"]').value=b.cloudshift_option_key||'PENDING';branchForm.querySelector('[name="is_active"]').checked=!!b.is_active;$('#branch-delete-btn').classList.remove('hidden');renderList();openModal('branch-modal');return}}
+function resetUploadForm(){const form=$('#site-table-upload-form');form.reset();const box=$('#site-table-upload-result');box.classList.add('hidden');box.innerHTML=''}
+function openUploadModal(){resetUploadForm();openModal('site-table-upload-modal')}
+function renderUploadResult(summary){const box=$('#site-table-upload-result');const errors=(summary.errors||[]);box.innerHTML=`<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+<div class="rounded-xl bg-slate-50 p-3"><div class="text-xs text-slate-500">対象行</div><div class="text-lg font-semibold text-slate-900">${summary.total_rows||0}</div></div>
+<div class="rounded-xl bg-emerald-50 p-3"><div class="text-xs text-emerald-700">処理成功行</div><div class="text-lg font-semibold text-emerald-800">${summary.processed_rows||0}</div></div>
+<div class="rounded-xl bg-sky-50 p-3"><div class="text-xs text-sky-700">親現場 新規/更新</div><div class="text-lg font-semibold text-sky-800">${summary.site_created||0} / ${summary.site_updated||0}</div></div>
+<div class="rounded-xl bg-indigo-50 p-3"><div class="text-xs text-indigo-700">枝番号 新規</div><div class="text-lg font-semibold text-indigo-800">${summary.branch_created||0}</div></div>
+<div class="rounded-xl bg-amber-50 p-3"><div class="text-xs text-amber-700">枝番号 スキップ</div><div class="text-lg font-semibold text-amber-800">${summary.branch_skipped||0}</div></div>
+<div class="rounded-xl bg-rose-50 p-3"><div class="text-xs text-rose-700">エラー行</div><div class="text-lg font-semibold text-rose-800">${errors.length}</div></div>
+</div>${errors.length?`<div class="mt-4 overflow-hidden rounded-xl border border-rose-200"><table class="min-w-full text-xs"><thead class="bg-rose-50 text-left text-rose-800"><tr><th class="px-3 py-2">行</th><th class="px-3 py-2">エラー内容</th></tr></thead><tbody>${errors.slice(0,100).map((e)=>`<tr class="border-t border-rose-100"><td class="px-3 py-2">${esc(e.row)}</td><td class="px-3 py-2">${esc(e.message)}</td></tr>`).join('')}</tbody></table></div>${errors.length>100?'<p class="mt-2 text-xs text-rose-700">エラー表示は先頭100件までです。</p>':''}`:''}`;box.classList.remove('hidden')}
+async function submitSiteTableUpload(ev){ev.preventDefault();const form=$('#site-table-upload-form');const fileInput=$('#site-table-upload-file');if(!fileInput.files||!fileInput.files.length){window.alert('CSVファイルを選択してください');return}try{const fd=new FormData(form);const r=await fetch('/tools/siteplus/api/import-site-table',{method:'POST',body:fd});const t=await r.text();const d=t?JSON.parse(t):{};if(!r.ok)throw new Error(d.error||'取り込みに失敗しました');renderUploadResult(d.summary||{});await loadSites()}catch(e){window.alert(e.message||'取り込みに失敗しました')}}
 async function submitSite(ev){ev.preventDefault();const payload=formDataObj(siteForm);try{if(!SITEPLUS.editingSiteId){await req('/tools/siteplus/api/sites',{method:'POST',body:JSON.stringify(payload)});closeModal('site-modal');resetSiteForm();await loadSites();return}const preview=await req(`/tools/siteplus/api/sites/${SITEPLUS.editingSiteId}/preview`,{method:'PUT',body:JSON.stringify(payload)});openConfirm({title:'親現場の変更確認',message:'変更内容を確認して問題なければ更新します。',bodyHtml:`${changeTable(preview.changes)}${duplicateTable(preview.duplicates)}`,label:'更新する',onConfirm:async()=>{await req(`/tools/siteplus/api/sites/${SITEPLUS.editingSiteId}`,{method:'PUT',body:JSON.stringify({...payload,confirm_changes:true,confirm_duplicate:true})});closeModal('confirm-modal');closeModal('site-modal');resetSiteForm();await loadSites()}})}catch(e){if(e.status===409&&e.payload?.duplicates){openConfirm({title:'同名現場の注意',message:'同名現場があります。このまま登録する場合は続行してください。',bodyHtml:duplicateTable(e.payload.duplicates),label:'そのまま登録',onConfirm:async()=>{await req('/tools/siteplus/api/sites',{method:'POST',body:JSON.stringify({...payload,confirm_duplicate:true})});closeModal('confirm-modal');closeModal('site-modal');resetSiteForm();await loadSites()}});return}window.alert(e.message||'処理に失敗しました')}}
 async function submitBranch(ev){ev.preventDefault();const s=selectedSite();if(!s){window.alert('先に親現場を選択してください');return}const payload=formDataObj(branchForm);try{if(!SITEPLUS.editingBranchId){await req(`/tools/siteplus/api/sites/${s.id}/branches`,{method:'POST',body:JSON.stringify(payload)});closeModal('branch-modal');resetBranchForm();await loadSites();SITEPLUS.selectedSiteId=s.id;renderList();return}const preview=await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}/preview`,{method:'PUT',body:JSON.stringify(payload)});openConfirm({title:'枝番号の変更確認',message:'変更内容を確認して問題なければ更新します。',bodyHtml:changeTable(preview.changes),label:'更新する',onConfirm:async()=>{await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}`,{method:'PUT',body:JSON.stringify({...payload,confirm_changes:true})});closeModal('confirm-modal');closeModal('branch-modal');resetBranchForm();await loadSites();SITEPLUS.selectedSiteId=s.id;renderList()}})}catch(e){window.alert(e.message||'処理に失敗しました')}}
 async function deleteSite(){if(!SITEPLUS.editingSiteId)return;const s=SITEPLUS.sites.find((i)=>i.id===SITEPLUS.editingSiteId);if(!s)return;openConfirm({title:'親現場の論理削除',message:'配下の枝番号もまとめて無効化します。',bodyHtml:`<div class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">${esc(s.site_id)} / ${esc(s.site_name)} を無効化します。</div>`,label:'無効化する',onConfirm:async()=>{await req(`/tools/siteplus/api/sites/${s.id}`,{method:'DELETE',body:JSON.stringify({confirm:true})});closeModal('confirm-modal');closeModal('site-modal');resetSiteForm();resetBranchForm();await loadSites()}})}
 async function deleteBranch(){if(!SITEPLUS.editingBranchId)return;openConfirm({title:'枝番号の論理削除',message:'この枝番号だけを無効化します。',bodyHtml:'<div class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">選択中の枝番号を無効化します。</div>',label:'無効化する',onConfirm:async()=>{await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}`,{method:'DELETE',body:JSON.stringify({confirm:true})});closeModal('confirm-modal');closeModal('branch-modal');resetBranchForm();await loadSites()}})}
-$('#open-create-site').addEventListener('click',openCreateSite);$('#open-create-branch').addEventListener('click',openBranchModal);$('#toggle-advanced-filters').addEventListener('click',()=>setAdvanced(!SITEPLUS.advanced));$('#search-form').addEventListener('submit',(e)=>{e.preventDefault();loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'))});$('#reset-btn').addEventListener('click',()=>{$('#search-form').reset();$('#filter-option-key').value='';$('#filter-include-inactive').checked=false;$('#filter-duplicate-only').checked=false;setAdvanced(false);loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'))});siteForm.addEventListener('submit',submitSite);branchForm.addEventListener('submit',submitBranch);$('#site-delete-btn').addEventListener('click',()=>deleteSite().catch((err)=>window.alert(err.message||'処理に失敗しました')));$('#branch-delete-btn').addEventListener('click',()=>deleteBranch().catch((err)=>window.alert(err.message||'処理に失敗しました')));$$('[data-close-modal]').forEach((b)=>b.addEventListener('click',()=>closeModal(b.getAttribute('data-close-modal'))));$('#confirm-cancel').addEventListener('click',()=>{SITEPLUS.confirmHandler=null;closeModal('confirm-modal')});$('#confirm-ok').addEventListener('click',async()=>{if(SITEPLUS.confirmHandler)await SITEPLUS.confirmHandler()});window.selectSite=selectSite;window.editSite=editSite;window.prepareBranchForSite=prepareBranchForSite;window.editBranch=editBranch;resetSiteForm();resetBranchForm();setAdvanced(false);loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'));
+$('#open-create-site').addEventListener('click',openCreateSite);$('#open-create-branch').addEventListener('click',openBranchModal);$('#open-upload-site-table').addEventListener('click',openUploadModal);$('#toggle-advanced-filters').addEventListener('click',()=>setAdvanced(!SITEPLUS.advanced));$('#search-form').addEventListener('submit',(e)=>{e.preventDefault();loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'))});$('#reset-btn').addEventListener('click',()=>{$('#search-form').reset();$('#filter-option-key').value='';$('#filter-include-inactive').checked=false;$('#filter-duplicate-only').checked=false;setAdvanced(false);loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'))});siteForm.addEventListener('submit',submitSite);branchForm.addEventListener('submit',submitBranch);$('#site-table-upload-form').addEventListener('submit',submitSiteTableUpload);$('#site-delete-btn').addEventListener('click',()=>deleteSite().catch((err)=>window.alert(err.message||'処理に失敗しました')));$('#branch-delete-btn').addEventListener('click',()=>deleteBranch().catch((err)=>window.alert(err.message||'処理に失敗しました')));$$('[data-close-modal]').forEach((b)=>b.addEventListener('click',()=>closeModal(b.getAttribute('data-close-modal'))));$('#confirm-cancel').addEventListener('click',()=>{SITEPLUS.confirmHandler=null;closeModal('confirm-modal')});$('#confirm-ok').addEventListener('click',async()=>{if(SITEPLUS.confirmHandler)await SITEPLUS.confirmHandler()});window.selectSite=selectSite;window.editSite=editSite;window.prepareBranchForSite=prepareBranchForSite;window.editBranch=editBranch;resetSiteForm();resetBranchForm();resetUploadForm();setAdvanced(false);loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'));
 </script>
 {% endblock %}
