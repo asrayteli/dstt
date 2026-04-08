@@ -103,7 +103,7 @@ NAV_ITEMS = (
     },
     {
         "href": "/tools/siteplus",
-        "icon": "搭",
+        "icon": "🏗️",
         "label": "現場リストPLUS",
         "description": "契約番号と枝番号をAPI前提で管理する現場マスタ",
     },
