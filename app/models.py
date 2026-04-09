@@ -380,3 +380,54 @@ class SiteBranch(db.Model):
 
     def __repr__(self):
         return f'<SiteBranch {self.site_row_id}:{self.site_branch}>'
+
+
+class SiteContractMaster(db.Model):
+    __tablename__ = 'site_contract_master'
+
+    contract_code = db.Column(db.String(20), primary_key=True)
+    site_row_id = db.Column(db.Integer, db.ForeignKey('sites.id'), nullable=False, index=True)
+    site_branch_row_id = db.Column(db.Integer, db.ForeignKey('site_branches.id'), index=True)
+    site_id = db.Column(db.String(20), nullable=False, index=True)
+    site_branch = db.Column(db.String(3), nullable=False, index=True)
+    site_name = db.Column(db.String(200), nullable=False)
+    site_manager_id = db.Column(db.String(20), nullable=False, index=True)
+    site_manager_name = db.Column(db.String(200), nullable=False)
+    segment = db.Column(db.String(20), index=True)
+    cloudshift_option_key = db.Column(db.String(20), index=True)
+    dedicated_employee_number = db.Column(db.String(20), index=True)
+    dedicated_employee_name = db.Column(db.String(100))
+    dedicated_updated_by = db.Column(db.String(80))
+    dedicated_updated_at = db.Column(db.DateTime)
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    source = db.Column(db.String(30), nullable=False, default='siteplus')
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    site = db.relationship('Site', foreign_keys=[site_row_id], lazy='joined')
+    branch = db.relationship('SiteBranch', foreign_keys=[site_branch_row_id], lazy='joined')
+
+    def to_dict(self):
+        return {
+            'contract_code': self.contract_code,
+            'site_row_id': self.site_row_id,
+            'site_branch_row_id': self.site_branch_row_id,
+            'site_id': self.site_id,
+            'site_branch': self.site_branch,
+            'site_name': self.site_name,
+            'site_manager_id': self.site_manager_id,
+            'site_manager_name': self.site_manager_name,
+            'segment': self.segment,
+            'cloudshift_option_key': self.cloudshift_option_key,
+            'dedicated_employee_number': self.dedicated_employee_number,
+            'dedicated_employee_name': self.dedicated_employee_name,
+            'dedicated_updated_by': self.dedicated_updated_by,
+            'dedicated_updated_at': self.dedicated_updated_at.isoformat() if self.dedicated_updated_at else None,
+            'is_active': self.is_active,
+            'source': self.source,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def __repr__(self):
+        return f'<SiteContractMaster {self.contract_code}>'

@@ -212,9 +212,6 @@ const ShifterSync = (function() {
     if (branchState.is_missing) {
       return { code: 'missing', label: '旧枝参照', tone: 'danger' };
     }
-    if (!branchState.site_branch_row_id && hasActiveSiteBranches()) {
-      return { code: 'unassigned', label: '枝未設定', tone: 'warning' };
-    }
     return { code: '', label: '', tone: '' };
   }
 
@@ -226,37 +223,22 @@ const ShifterSync = (function() {
     if (!entries.length) {
       return { text: '', tone: '', missingCount: 0, unassignedCount: 0, noBranches: false };
     }
-    if (!hasActiveSiteBranches()) {
-      return {
-        text: '有効な枝番号が未登録',
-        tone: 'warning',
-        missingCount: 0,
-        unassignedCount: entries.length,
-        noBranches: true
-      };
-    }
     let missingCount = 0;
-    let unassignedCount = 0;
     entries.forEach((entry) => {
       const issue = entryBranchIssue(entry);
       if (issue.code === 'missing') {
         missingCount += 1;
-      } else if (issue.code === 'unassigned') {
-        unassignedCount += 1;
       }
     });
     const parts = [];
     if (missingCount) {
       parts.push(`旧枝参照 ${missingCount}件`);
     }
-    if (unassignedCount) {
-      parts.push(`枝未設定 ${unassignedCount}件`);
-    }
     return {
       text: parts.join(' / '),
-      tone: missingCount ? 'danger' : (unassignedCount ? 'warning' : ''),
+      tone: missingCount ? 'danger' : '',
       missingCount,
-      unassignedCount,
+      unassignedCount: 0,
       noBranches: false
     };
   }

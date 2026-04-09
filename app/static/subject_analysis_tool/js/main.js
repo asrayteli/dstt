@@ -34,6 +34,11 @@ function setupEventListeners() {
         });
     }
 
+    const siteSource = document.getElementById('site-source');
+    if (siteSource) {
+        siteSource.addEventListener('change', syncSiteSourceMode);
+    }
+
     setupUploadInteractions();
 
     const resultExpandToggle = document.getElementById('result-expand-toggle');
@@ -78,6 +83,29 @@ function setupEventListeners() {
     }
 
     applyComparisonModeUI(comparisonMode ? comparisonMode.value : 'prev_year');
+    syncSiteSourceMode();
+}
+
+function syncSiteSourceMode() {
+    const siteSource = document.getElementById('site-source');
+    const sitePanel = document.getElementById('site-source-file-panel');
+    const dbPanel = document.getElementById('site-source-db-panel');
+    const siteInput = document.getElementById('site-file');
+    const useDb = !siteSource || siteSource.value === 'db';
+
+    if (sitePanel) {
+        sitePanel.style.display = useDb ? 'none' : 'block';
+    }
+    if (dbPanel) {
+        dbPanel.style.display = useDb ? 'block' : 'none';
+    }
+    if (siteInput) {
+        siteInput.required = !useDb;
+        if (useDb) {
+            siteInput.value = '';
+            updateFileNameLabel('site-file');
+        }
+    }
 }
 
 function setupUploadInteractions() {
@@ -182,6 +210,7 @@ async function handleFileUpload() {
     const subjectInput = document.getElementById('subject-file');
     const prevYearInput = document.getElementById('prev-year-subject-file');
     const siteInput = document.getElementById('site-file');
+    const siteSource = document.getElementById('site-source')?.value || 'db';
 
     const subjectFile = subjectInput && subjectInput.files ? subjectInput.files[0] : null;
     const prevYearSubjectFile = prevYearInput && prevYearInput.files ? prevYearInput.files[0] : null;
@@ -191,11 +220,16 @@ async function handleFileUpload() {
         alert('科目別分析表（CSV）を選択してください。');
         return;
     }
+    if (siteSource === 'file' && !siteFile) {
+        alert('現場表読み込みモードでは現行現場表 CSV を選択してください。');
+        return;
+    }
 
     const formData = new FormData();
     formData.append('subject_file', subjectFile);
     if (prevYearSubjectFile) formData.append('prev_year_subject_file', prevYearSubjectFile);
     if (siteFile) formData.append('site_file', siteFile);
+    formData.append('site_source', siteSource);
 
     showLoading();
 
@@ -321,6 +355,7 @@ function resetAll() {
     const uploadForm = document.getElementById('upload-form');
     if (uploadForm) uploadForm.reset();
     resetUploadLabels();
+    syncSiteSourceMode();
 
     currentFilters = null;
     toggleResultFocus(false);

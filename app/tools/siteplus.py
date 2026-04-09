@@ -8,7 +8,7 @@ from flask import Blueprint, abort, current_app, jsonify, render_template, reque
 from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
-from app.models import Site, SiteBranch, db
+from app.models import Employee, Site, SiteBranch, SiteContractMaster, db
 
 try:
     from .shiftersync_format import SHIFT_OPTION_MAPPINGS
@@ -106,6 +106,14 @@ def _normalize_site_branch(value) -> str:
     return text.zfill(3)
 
 
+def _compose_contract_code(site_id, site_branch) -> str:
+    return f"{_normalize_site_id(site_id)}{_normalize_site_branch(site_branch)}"
+
+
+def _site_manager_name(site: Site) -> str:
+    return f"{site.site_manager_last} {site.site_manager_first}".strip()
+
+
 def _normalize_option_key(value) -> str:
     text = _normalize_required_text(value, "CloudShiftオプション").upper()
     if text not in VEHICLE_OPTION_LABELS:
@@ -166,6 +174,24 @@ def _site_duplicate_rows(site_name: str, exclude_site_row_id: int | None = None)
 
 def _serialize_site(site: Site, *, include_inactive_branches: bool) -> dict:
     payload = site.to_dict(include_branches=True, include_inactive_branches=include_inactive_branches)
+    contract_rows = SiteContractMaster.query.filter(SiteContractMaster.site_row_id == site.id).all()
+    contract_by_branch_id = {
+        int(row.site_branch_row_id): row
+        for row in contract_rows
+        if row.site_branch_row_id is not None
+    }
+    for branch in payload["branches"]:
+        row = contract_by_branch_id.get(int(branch["id"]))
+        if not row:
+            branch["contract_code"] = ""
+            branch["segment"] = None
+            branch["dedicated_employee_number"] = ""
+            branch["dedicated_employee_name"] = ""
+            continue
+        branch["contract_code"] = row.contract_code
+        branch["segment"] = row.segment
+        branch["dedicated_employee_number"] = row.dedicated_employee_number or ""
+        branch["dedicated_employee_name"] = row.dedicated_employee_name or ""
     payload["has_branches"] = bool(payload["branch_count"])
     return payload
 
@@ -197,6 +223,176 @@ def _site_option_label(value):
     if value is None:
         return ""
     return VEHICLE_OPTION_LABELS.get(str(value), str(value))
+
+
+def _employee_candidates_for_contract_code(contract_code: str) -> list[dict]:
+    normalized_contract_code = str(contract_code or "").strip()
+    if not normalized_contract_code:
+        return []
+    query = Employee.query.filter(Employee.contract_code == normalized_contract_code)
+    if hasattr(Employee, "is_deleted"):
+        query = query.filter(Employee.is_deleted.is_(False))
+    employees = query.order_by(Employee.employee_number.asc()).all()
+    return [
+        {
+            "employee_number": str(employee.employee_number or "").strip(),
+            "employee_name": str(employee.employee_name or "").strip(),
+            "contract_code": str(employee.contract_code or "").strip(),
+        }
+        for employee in employees
+    ]
+
+
+def _upsert_contract_master_for_site(site: Site) -> dict[str, int]:
+    existing_rows = SiteContractMaster.query.filter(SiteContractMaster.site_row_id == site.id).all()
+    existing_by_branch_id = {
+        int(row.site_branch_row_id): row
+        for row in existing_rows
+        if row.site_branch_row_id is not None
+    }
+    existing_by_contract = {str(row.contract_code or ""): row for row in existing_rows}
+    matched_contract_codes: set[str] = set()
+    matched_branch_ids: set[int] = set()
+    created = 0
+    updated = 0
+    manager_name = _site_manager_name(site)
+
+    for branch in site.branches:
+        contract_code = _compose_contract_code(site.site_id, branch.site_branch)
+        row = existing_by_branch_id.get(branch.id) or existing_by_contract.get(contract_code)
+        if row is None:
+            row = SiteContractMaster(
+                contract_code=contract_code,
+                site_row_id=site.id,
+                site_branch_row_id=branch.id,
+            )
+            db.session.add(row)
+            created += 1
+        else:
+            updated += 1
+
+        row.contract_code = contract_code
+        row.site_row_id = site.id
+        row.site_branch_row_id = branch.id
+        row.site_id = site.site_id
+        row.site_branch = branch.site_branch
+        row.site_name = site.site_name
+        row.site_manager_id = site.site_manager_id
+        row.site_manager_name = manager_name
+        row.cloudshift_option_key = branch.cloudshift_option_key
+        row.is_active = bool(site.is_active and branch.is_active)
+        if not row.source:
+            row.source = "siteplus"
+
+        matched_contract_codes.add(contract_code)
+        matched_branch_ids.add(branch.id)
+
+    for row in existing_rows:
+        branch_row_id = int(row.site_branch_row_id) if row.site_branch_row_id is not None else None
+        if branch_row_id in matched_branch_ids or str(row.contract_code or "") in matched_contract_codes:
+            continue
+        row.site_name = site.site_name
+        row.site_manager_id = site.site_manager_id
+        row.site_manager_name = manager_name
+        row.is_active = False
+        updated += 1
+
+    return {"created": created, "updated": updated}
+
+
+def _sync_contract_master() -> dict[str, int]:
+    summary = {"created": 0, "updated": 0, "unchanged": 0, "deactivated": 0}
+    sites = Site.query.order_by(Site.id.asc()).all()
+    seen_site_ids: set[int] = set()
+    for site in sites:
+        seen_site_ids.add(site.id)
+        result = _upsert_contract_master_for_site(site)
+        summary["created"] += result["created"]
+        summary["updated"] += result["updated"]
+
+    stale_rows = SiteContractMaster.query.filter(~SiteContractMaster.site_row_id.in_(seen_site_ids)).all() if seen_site_ids else SiteContractMaster.query.all()
+    for row in stale_rows:
+        if row.is_active:
+            row.is_active = False
+            summary["deactivated"] += 1
+
+    return summary
+
+
+def _ensure_contract_master_row(contract_code: str) -> SiteContractMaster | None:
+    normalized_contract_code = str(contract_code or "").strip()
+    if not normalized_contract_code:
+        return None
+    existing = db.session.get(SiteContractMaster, normalized_contract_code)
+    if existing:
+        return existing
+    if len(normalized_contract_code) < 8 or not normalized_contract_code[:8].isdigit():
+        return None
+
+    site_id = _normalize_site_id(normalized_contract_code[:5])
+    site_branch = _normalize_site_branch(normalized_contract_code[5:8])
+    site = Site.query.filter_by(site_id=site_id).first()
+    if not site:
+        return None
+    branch = SiteBranch.query.filter_by(site_row_id=site.id, site_branch=site_branch).first()
+    if not branch:
+        return None
+
+    row = SiteContractMaster(
+        contract_code=normalized_contract_code,
+        site_row_id=site.id,
+        site_branch_row_id=branch.id,
+        site_id=site.site_id,
+        site_branch=branch.site_branch,
+        site_name=site.site_name,
+        site_manager_id=site.site_manager_id,
+        site_manager_name=_site_manager_name(site),
+        cloudshift_option_key=branch.cloudshift_option_key,
+        is_active=bool(site.is_active and branch.is_active),
+        source="siteplus",
+    )
+    db.session.add(row)
+    return row
+
+
+def _update_contract_master_segments(site_rows: list[list[str]], *, source: str = "monthly_generator") -> dict[str, int]:
+    updated = 0
+    created = 0
+    skipped = 0
+    for index, row in enumerate(site_rows):
+        if index == 0:
+            continue
+        if len(row) < 2:
+            continue
+        contract_code = str(row[0] or "").strip()
+        segment = str(row[1] or "").strip()
+        if not contract_code or not segment:
+            continue
+        if segment not in {"役員", "一般", "旅客"}:
+            skipped += 1
+            continue
+        master_row = _ensure_contract_master_row(contract_code)
+        if not master_row:
+            skipped += 1
+            continue
+        was_new = master_row.created_at == master_row.updated_at and not master_row.segment
+        if master_row.segment != segment:
+            master_row.segment = segment
+            if source:
+                master_row.source = source
+            if was_new:
+                created += 1
+            else:
+                updated += 1
+        elif was_new:
+            created += 1
+    return {"created": created, "updated": updated, "skipped": skipped}
+
+
+def _serialize_contract_master_row(row: SiteContractMaster) -> dict:
+    payload = row.to_dict()
+    payload["dedicated_candidates"] = _employee_candidates_for_contract_code(row.contract_code)
+    return payload
 
 
 def _site_payload_from_request(data: dict, *, existing: Site | None = None) -> dict:
@@ -411,6 +607,89 @@ def api_sites():
     return jsonify({"sites": payload, "count": len(payload)})
 
 
+@siteplus_bp.route("/api/contract-master")
+@login_required
+def api_contract_master():
+    query = SiteContractMaster.query
+    only_active = _parse_bool(request.args.get("only_active"), default=True)
+    if only_active:
+        query = query.filter(SiteContractMaster.is_active.is_(True))
+
+    contract_code = str(request.args.get("contract_code", "") or "").strip()
+    if contract_code:
+        query = query.filter(SiteContractMaster.contract_code == contract_code)
+
+    site_row_id = str(request.args.get("site_row_id", "") or "").strip()
+    if site_row_id.isdigit():
+        query = query.filter(SiteContractMaster.site_row_id == int(site_row_id))
+
+    site_id = str(request.args.get("site_id", "") or "").strip()
+    if site_id:
+        query = query.filter(SiteContractMaster.site_id == _normalize_site_id(site_id))
+
+    manager_id = str(request.args.get("site_manager_id", "") or "").strip()
+    if manager_id:
+        query = query.filter(SiteContractMaster.site_manager_id.ilike(f"%{manager_id}%"))
+
+    items = query.order_by(SiteContractMaster.contract_code.asc()).all()
+    return jsonify({"items": [_serialize_contract_master_row(item) for item in items], "count": len(items)})
+
+
+@siteplus_bp.route("/api/contract-master/sync", methods=["POST"])
+@login_required
+def api_contract_master_sync():
+    summary = _sync_contract_master()
+    db.session.commit()
+    return jsonify({"success": True, "summary": summary})
+
+
+@siteplus_bp.route("/api/contract-master/<contract_code>/dedicated-candidates")
+@login_required
+def api_contract_master_dedicated_candidates(contract_code: str):
+    row = db.session.get(SiteContractMaster, str(contract_code or "").strip())
+    if row is None:
+        abort(404)
+    return jsonify(
+        {
+            "contract_code": row.contract_code,
+            "site_name": row.site_name,
+            "candidates": _employee_candidates_for_contract_code(row.contract_code),
+            "registered": {
+                "employee_number": row.dedicated_employee_number or "",
+                "employee_name": row.dedicated_employee_name or "",
+            },
+        }
+    )
+
+
+@siteplus_bp.route("/api/contract-master/<contract_code>/dedicated", methods=["PUT"])
+@login_required
+def api_contract_master_set_dedicated(contract_code: str):
+    row = db.session.get(SiteContractMaster, str(contract_code or "").strip())
+    if row is None:
+        abort(404)
+
+    data = request.get_json(silent=True) or {}
+    employee_number = str(data.get("employee_number", "") or "").strip()
+    if employee_number:
+        candidate = next(
+            (item for item in _employee_candidates_for_contract_code(row.contract_code) if item["employee_number"] == employee_number),
+            None,
+        )
+        if candidate is None:
+            return jsonify({"error": "契約コードに一致する社員が見つかりません"}), 400
+        row.dedicated_employee_number = candidate["employee_number"]
+        row.dedicated_employee_name = candidate["employee_name"]
+    else:
+        row.dedicated_employee_number = None
+        row.dedicated_employee_name = None
+
+    row.dedicated_updated_by = _user_id()
+    row.dedicated_updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({"success": True, "item": _serialize_contract_master_row(row)})
+
+
 @siteplus_bp.route("/api/sites/<int:site_row_id>")
 @login_required
 def api_site_detail(site_row_id: int):
@@ -450,6 +729,8 @@ def api_site_create():
         site_updater=user_id,
     )
     db.session.add(site)
+    db.session.flush()
+    _upsert_contract_master_for_site(site)
     db.session.commit()
     return jsonify({"success": True, "site": _serialize_site(site, include_inactive_branches=True)})
 
@@ -489,6 +770,7 @@ def api_site_update(site_row_id: int):
         for branch in site.branches:
             branch.is_active = False
             branch.site_updater = _user_id()
+    _upsert_contract_master_for_site(site)
     db.session.commit()
     return jsonify({"success": True, "site": _serialize_site(site, include_inactive_branches=True)})
 
@@ -512,6 +794,7 @@ def api_site_delete(site_row_id: int):
     for branch in site.branches:
         branch.is_active = False
         branch.site_updater = _user_id()
+    _upsert_contract_master_for_site(site)
     db.session.commit()
     return jsonify({"success": True})
 
@@ -558,6 +841,8 @@ def api_branch_create(site_row_id: int):
         **payload,
     )
     db.session.add(branch)
+    db.session.flush()
+    _upsert_contract_master_for_site(site)
     db.session.commit()
     return jsonify({"success": True, "branch": branch.to_dict()})
 
@@ -591,6 +876,7 @@ def api_branch_update(branch_id: int):
     for key, value in payload.items():
         setattr(branch, key, value)
     branch.site_updater = _user_id()
+    _upsert_contract_master_for_site(branch.site)
     db.session.commit()
     return jsonify({"success": True, "branch": branch.to_dict()})
 
@@ -611,6 +897,7 @@ def api_branch_delete(branch_id: int):
 
     branch.is_active = False
     branch.site_updater = _user_id()
+    _upsert_contract_master_for_site(branch.site)
     db.session.commit()
     return jsonify({"success": True})
 
@@ -638,6 +925,9 @@ def api_import_site_table():
         "site_updated": 0,
         "branch_created": 0,
         "branch_skipped": 0,
+        "segment_created": 0,
+        "segment_updated": 0,
+        "segment_skipped": 0,
         "errors": [],
     }
 
@@ -717,6 +1007,11 @@ def api_import_site_table():
         except ValueError as exc:
             summary["errors"].append({"row": row_index, "message": str(exc)})
 
+    _sync_contract_master()
+    segment_summary = _update_contract_master_segments(rows, source="siteplus")
+    summary["segment_created"] = segment_summary["created"]
+    summary["segment_updated"] = segment_summary["updated"]
+    summary["segment_skipped"] = segment_summary["skipped"]
     db.session.commit()
     return jsonify({"success": True, "summary": summary})
 

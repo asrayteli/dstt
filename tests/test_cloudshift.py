@@ -16,6 +16,8 @@ SITE_PACKAGES = ROOT / "Lib" / "site-packages"
 if SITE_PACKAGES.exists() and str(SITE_PACKAGES) not in sys.path:
     sys.path.append(str(SITE_PACKAGES))
 
+from app.models import Site, SiteBranch, SiteContractMaster, db
+
 
 def _load_cloudshift_module():
     module_path = ROOT / "app" / "tools" / "cloudshift.py"
@@ -32,7 +34,12 @@ def _build_client(tmp_path):
     app.secret_key = "test"
     app.config["TESTING"] = True
     app.config["LOGIN_DISABLED"] = True
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{(tmp_path / 'cloudshift.db').as_posix()}"
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    db.init_app(app)
     app.register_blueprint(module.cloudshift_bp)
+    with app.app_context():
+        db.create_all()
     return module, app.test_client()
 
 
@@ -261,8 +268,10 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "getSelectedOptionsForDay" in ss_common_js
     assert "function updateBranchWarning" in ss_common_js
     assert "day-branch-warning" in ss_common_js
+    assert "return { code: 'unassigned'" not in ss_common_js
     assert "TEMP" in ss_common_js
     assert "TEMP" in script
+    assert "warnings.missing.length" not in script
     assert "臨時便" in script
     assert "function resetCreateForm()" in script
     assert "if (tabName === 'create')" in script
@@ -422,6 +431,88 @@ def test_scene_assist_owner_can_manage_records_rules_and_search_prioritizes_dedi
     assert search_payload["score_reference"]["single_record_max"] == 330
     assert results[0]["breakdown"]
     assert any(part["category"] == "rule" for part in results[0]["breakdown"])
+
+
+def test_scene_assist_search_includes_registered_dedicated_candidate_from_master(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    with client.application.app_context():
+        site = Site(
+            site_id="01234",
+            site_name="Master Linked Site",
+            site_manager_last="管理",
+            site_manager_first="担当",
+            site_manager_id="9100",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.flush()
+        branch = SiteBranch(
+            site_row_id=site.id,
+            site_branch="001",
+            cloudshift_option_key="O",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(branch)
+        db.session.flush()
+        db.session.add(
+            SiteContractMaster(
+                contract_code="01234001",
+                site_row_id=site.id,
+                site_branch_row_id=branch.id,
+                site_id=site.site_id,
+                site_branch=branch.site_branch,
+                site_name=site.site_name,
+                site_manager_id=site.site_manager_id,
+                site_manager_name=site.manager_name(),
+                cloudshift_option_key=branch.cloudshift_option_key,
+                dedicated_employee_number="8801",
+                dedicated_employee_name="登録専従者",
+                is_active=True,
+                source="siteplus",
+            )
+        )
+        db.session.commit()
+        site_row_id = site.id
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Master Linked Site",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert create_response.status_code == 200
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    candidate_response = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/dedicated-candidate"
+    )
+    assert candidate_response.status_code == 200
+    candidates = candidate_response.get_json()["candidates"]
+    assert candidates[0]["employee_number"] == "8801"
+    assert candidates[0]["contract_codes"] == ["01234001"]
+
+    search_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist/search",
+        json={
+            "target_date": "2026-04-07",
+            "shift_key": "O",
+        },
+    )
+    assert search_response.status_code == 200
+    payload = search_response.get_json()
+    assert payload["results"][0]["employee_number"] == "8801"
+    assert payload["results"][0]["name"] == "登録専従者"
+    assert any(part["category"] == "master" for part in payload["results"][0]["breakdown"])
 
 
 def test_scene_assist_accepts_no_shift_and_weekday_only_matches_and_custom_points(tmp_path):

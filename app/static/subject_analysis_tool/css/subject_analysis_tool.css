@@ -759,6 +759,30 @@
     margin-top: 1rem;
 }
 
+.upload-mode-card,
+.mode-panel {
+    margin-bottom: 0.8rem;
+}
+
+.upload-mode-card {
+    border: 1px solid #d9e4f0;
+    border-radius: 12px;
+    background: #f9fcff;
+    padding: 0.8rem;
+}
+
+.mode-note-card {
+    background: #effaf5;
+    border-color: #bfe3cf;
+}
+
+.mode-help {
+    margin: 0.55rem 0 0;
+    color: #5e7082;
+    font-size: 0.82rem;
+    line-height: 1.6;
+}
+
 .quick-upload-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -5065,7 +5065,6 @@
     function branchWarningItemsFromEntries() {
       const entriesPerDay = currentEntriesSnapshot();
       const branchIds = new Set(currentProjectSiteBranches().map((branch) => String(branch.id)));
-      const missing = [];
       const invalid = [];
 
       Object.keys(entriesPerDay)
@@ -5084,7 +5083,6 @@
             const branchRowId = normalizeSiteBranchRowId(entry && (entry.site_branch_row_id || entry.siteBranchRowId || ''));
             const snapshotBranch = String(entry && (entry.site_branch || entry.siteBranch || '') ? (entry.site_branch || entry.siteBranch || '') : '').trim();
             if (!branchRowId) {
-              missing.push({ day: dayKey, label });
               return;
             }
             if (!branchIds.has(branchRowId)) {
@@ -5093,7 +5091,7 @@
           });
         });
 
-      return { missing, invalid };
+      return { invalid };
     }
 
     function confirmSceneBranchSave() {
@@ -5110,17 +5108,8 @@
 
       const branches = currentProjectSiteBranches();
       const lines = [];
-      if (!branches.length) {
-        lines.push('この現場には有効な枝番号が登録されていません。');
-        lines.push('割当を保存しても、各行の枝番号は未設定のままになります。');
-      } else {
+      if (branches.length) {
         const warnings = branchWarningItemsFromEntries();
-        if (warnings.missing.length) {
-          lines.push(`枝番号未設定の割当が ${warnings.missing.length} 件あります。`);
-          warnings.missing.slice(0, 5).forEach((item) => {
-            lines.push(`- ${item.day}日: ${item.label}`);
-          });
-        }
         if (warnings.invalid.length) {
           lines.push(`現在は無効な枝番号を参照している割当が ${warnings.invalid.length} 件あります。`);
           warnings.invalid.slice(0, 5).forEach((item) => {

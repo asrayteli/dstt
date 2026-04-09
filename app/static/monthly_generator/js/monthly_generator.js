@@ -1,132 +1,149 @@
-// 月次ジェネレーター JavaScript
-
-// 初期化
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('upload-form');
     if (form) {
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
             processFiles();
         });
     }
+
+    const siteSource = document.getElementById('site-source');
+    if (siteSource) {
+        siteSource.addEventListener('change', syncSiteSourceMode);
+    }
+
+    syncSiteSourceMode();
 });
 
-// ファイル処理のメイン関数
-async function processFiles() {
-    // 必須項目バリデーション
-    const subjectFile = document.getElementById('subject-file').files[0];
-    const siteFile = document.getElementById('site-file').files[0];
-    const reportFile = document.getElementById('report-file').files[0];
-    const targetMonth = document.getElementById('target-month').value;
-    const sheetName = document.getElementById('sheet-name').value;
+function syncSiteSourceMode() {
+    const siteSource = document.getElementById('site-source');
+    const siteFile = document.getElementById('site-file');
+    const siteManagerId = document.getElementById('site-manager-id');
+    const filePanel = document.getElementById('site-source-file-panel');
+    const dbPanel = document.getElementById('site-source-db-panel');
+    const useDb = !siteSource || siteSource.value === 'db';
 
-    if (!subjectFile || !siteFile || !reportFile || !targetMonth || !sheetName) {
-        alert('必須項目を全て入力してください');
+    if (filePanel) {
+        filePanel.style.display = useDb ? 'none' : 'block';
+    }
+    if (dbPanel) {
+        dbPanel.style.display = useDb ? 'block' : 'none';
+    }
+    if (siteFile) {
+        siteFile.required = !useDb;
+        if (useDb) {
+            siteFile.value = '';
+        }
+    }
+    if (siteManagerId) {
+        siteManagerId.required = useDb;
+        if (!useDb) {
+            siteManagerId.value = '';
+        }
+    }
+}
+
+async function processFiles() {
+    const subjectFile = document.getElementById('subject-file')?.files?.[0];
+    const siteFile = document.getElementById('site-file')?.files?.[0];
+    const reportFile = document.getElementById('report-file')?.files?.[0];
+    const prevYearSubjectFile = document.getElementById('prev-year-subject-file')?.files?.[0];
+    const prevYearSiteFile = document.getElementById('prev-year-site-file')?.files?.[0];
+    const forecastFile = document.getElementById('forecast-file')?.files?.[0];
+    const budgetFile = document.getElementById('budget-file')?.files?.[0];
+    const targetMonth = document.getElementById('target-month')?.value || '';
+    const sheetName = document.getElementById('sheet-name')?.value || '';
+    const siteSource = document.getElementById('site-source')?.value || 'db';
+    const siteManagerId = (document.getElementById('site-manager-id')?.value || '').trim();
+
+    if (!subjectFile || !reportFile || !targetMonth || !sheetName) {
+        alert('必須項目をすべて入力してください。');
+        return;
+    }
+    if (siteSource === 'file' && !siteFile) {
+        alert('現場表読み込みモードでは現行現場表 CSV を選択してください。');
+        return;
+    }
+    if (siteSource === 'db' && !siteManagerId) {
+        alert('現場リストPLUS参照モードでは担当者IDを入力してください。');
         return;
     }
 
-    // オプションファイル取得
-    const prevYearSubjectFile = document.getElementById('prev-year-subject-file').files[0];
-    const prevYearSiteFile = document.getElementById('prev-year-site-file').files[0];
-    const forecastFile = document.getElementById('forecast-file').files[0];
-    const budgetFile = document.getElementById('budget-file').files[0];
-
-    // フォームを非表示、進捗を表示
-    document.getElementById('upload-form').style.display = 'none';
-    document.getElementById('result-container').classList.add('hidden');
-    document.getElementById('progress-container').classList.remove('hidden');
-
-    // 進捗インジケーター開始
-    startProgress();
-
-    // FormData作成
     const formData = new FormData();
     formData.append('subject_file', subjectFile);
-    formData.append('site_file', siteFile);
     formData.append('report_file', reportFile);
     formData.append('target_month', targetMonth);
     formData.append('sheet_name', sheetName);
+    formData.append('site_source', siteSource);
+    if (siteFile) formData.append('site_file', siteFile);
+    if (siteManagerId) formData.append('site_manager_id', siteManagerId);
+    if (prevYearSubjectFile) formData.append('prev_year_subject_file', prevYearSubjectFile);
+    if (prevYearSiteFile) formData.append('prev_year_site_file', prevYearSiteFile);
+    if (forecastFile) formData.append('forecast_file', forecastFile);
+    if (budgetFile) formData.append('budget_file', budgetFile);
 
-    // オプションファイル追加
-    if (prevYearSubjectFile) {
-        formData.append('prev_year_subject_file', prevYearSubjectFile);
-    }
-    if (prevYearSiteFile) {
-        formData.append('prev_year_site_file', prevYearSiteFile);
-    }
-    if (forecastFile) {
-        formData.append('forecast_file', forecastFile);
-    }
-    if (budgetFile) {
-        formData.append('budget_file', budgetFile);
-    }
+    document.getElementById('upload-form').style.display = 'none';
+    document.getElementById('result-container').classList.add('hidden');
+    document.getElementById('progress-container').classList.remove('hidden');
+    startProgress();
 
     try {
-        // APIリクエスト
         const response = await fetch('/tools/monthly_generator/api/process', {
             method: 'POST',
             body: formData
         });
-
         const result = await response.json();
-
-        // 進捗完了
         completeProgress();
 
-        if (result.error) {
-            // エラー表示（ファイル選択は維持）
-            showError(result.error, result.details);
+        if (!response.ok || result.error) {
+            showError(result.error || '処理に失敗しました。', result.details || []);
             restoreFormWithFiles();
-        } else {
-            // 成功時
-            showSuccess(result);
-            downloadFile(result.output_file);
+            return;
         }
 
+        showSuccess(result);
+        downloadFile(result.output_file);
     } catch (error) {
-        console.error('Error:', error);
+        console.error(error);
         completeProgress();
-        showError('処理中にエラーが発生しました', [error.message]);
+        showError('処理中にエラーが発生しました。', [error.message]);
         restoreFormWithFiles();
     }
 }
 
-// 進捗インジケーター開始
 function startProgress() {
     let progress = 0;
     const totalSteps = 7;
-    const stepDuration = 800; // 各ステップの所要時間（ミリ秒）
 
-    const interval = setInterval(() => {
-        if (progress < totalSteps) {
-            progress++;
-            updateProgress(progress, totalSteps);
-        } else {
-            clearInterval(interval);
+    if (window.progressInterval) {
+        clearInterval(window.progressInterval);
+    }
+
+    window.progressInterval = setInterval(() => {
+        if (progress >= totalSteps) {
+            clearInterval(window.progressInterval);
+            return;
         }
-    }, stepDuration);
-
-    // インターバルIDを保存（必要に応じて停止可能）
-    window.progressInterval = interval;
+        progress += 1;
+        updateProgress(progress, totalSteps);
+    }, 800);
 }
 
-// 進捗更新
 function updateProgress(currentStep, totalSteps) {
     const percentage = Math.round((currentStep / totalSteps) * 100);
-
-    // プログレスバー更新
     const progressBar = document.getElementById('progress-bar');
-    progressBar.style.width = percentage + '%';
+    if (progressBar) {
+        progressBar.style.width = `${percentage}%`;
+    }
 
-    // パーセンテージ更新
-    document.getElementById('progress-percentage').textContent = percentage + '%';
+    const percentageLabel = document.getElementById('progress-percentage');
+    if (percentageLabel) {
+        percentageLabel.textContent = `${percentage}%`;
+    }
 
-    // ステップ表示更新
-    const stepItems = document.querySelectorAll('.step-item');
-    stepItems.forEach((item, index) => {
+    document.querySelectorAll('.step-item').forEach((item, index) => {
         const stepNumber = index + 1;
         item.classList.remove('active', 'completed');
-
         if (stepNumber < currentStep) {
             item.classList.add('completed');
         } else if (stepNumber === currentStep) {
@@ -135,328 +152,168 @@ function updateProgress(currentStep, totalSteps) {
     });
 }
 
-// 進捗完了
 function completeProgress() {
     if (window.progressInterval) {
         clearInterval(window.progressInterval);
     }
-
-    updateProgress(7, 7); // 100%に設定
-
-    // 少し遅延してから進捗を非表示
+    updateProgress(7, 7);
     setTimeout(() => {
         document.getElementById('progress-container').classList.add('hidden');
-    }, 1000);
+    }, 500);
 }
 
-// 成功時の表示
 function showSuccess(result) {
     const container = document.getElementById('result-container');
     const content = document.getElementById('result-content');
+    if (!container || !content) return;
 
-    let html = '<div class="result-box">';
-    html += '<h3 class="text-lg font-bold mb-4 text-green-600">✓ 処理が完了しました</h3>';
-    html += '<p class="mb-4">月次報告書にデータが書き込まれました。ダウンロードが自動で開始されます。</p>';
+    const sections = [];
+    sections.push('<div class="result-box">');
+    sections.push('<h3 class="mb-4 text-lg font-bold text-green-600">処理が完了しました</h3>');
+    sections.push('<p class="mb-4 text-sm text-gray-700">集計結果を確認して、そのまま出力ファイルをダウンロードできます。</p>');
 
-    // 集計データ表示
     if (result.data) {
-        // 単月データ
-        html += '<div class="mt-4 p-3 bg-white rounded border border-gray-200">';
-        html += '<h4 class="font-semibold mb-2">集計結果（単月）</h4>';
-        html += '<table class="min-w-full text-sm">';
-        html += '<thead><tr class="border-b">';
-        html += '<th class="text-left py-2 px-2">セグメント</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
-        html += '<th class="text-right py-2 px-2">材料</th>';
-        html += '<th class="text-right py-2 px-2">労務</th>';
-        html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '</tr></thead><tbody>';
-
-        for (const [segment, values] of Object.entries(result.data)) {
-            html += '<tr class="border-b">';
-            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
-            html += '</tr>';
-        }
-
-        html += '</tbody></table>';
-        html += '</div>';
-
-        // 累計データ
-        html += '<div class="mt-4 p-3 bg-white rounded border border-gray-200">';
-        html += '<h4 class="font-semibold mb-2">集計結果（累計 - 4月から）</h4>';
-        html += '<table class="min-w-full text-sm">';
-        html += '<thead><tr class="border-b">';
-        html += '<th class="text-left py-2 px-2">セグメント</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
-        html += '<th class="text-right py-2 px-2">材料</th>';
-        html += '<th class="text-right py-2 px-2">労務</th>';
-        html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '</tr></thead><tbody>';
-
-        for (const [segment, values] of Object.entries(result.data)) {
-            html += '<tr class="border-b">';
-            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費合算'])}</td>`;
-            html += '</tr>';
-        }
-
-        html += '</tbody></table>';
-        html += '</div>';
+        sections.push(renderSummaryTable('当年データ', result.data));
     }
-
-    // 前期データ表示
     if (result.prev_year_data) {
-        html += '<div class="mt-4 p-3 bg-blue-50 rounded border border-blue-200">';
-        html += '<h4 class="font-semibold mb-2 text-blue-800">前期データ（単月）</h4>';
-        html += '<table class="min-w-full text-sm">';
-        html += '<thead><tr class="border-b">';
-        html += '<th class="text-left py-2 px-2">セグメント</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
-        html += '<th class="text-right py-2 px-2">材料</th>';
-        html += '<th class="text-right py-2 px-2">労務</th>';
-        html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '</tr></thead><tbody>';
-
-        for (const [segment, values] of Object.entries(result.prev_year_data)) {
-            html += '<tr class="border-b">';
-            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
-            html += '</tr>';
-        }
-
-        html += '</tbody></table>';
-        html += '</div>';
-
-        // 前期累計データ
-        html += '<div class="mt-4 p-3 bg-blue-50 rounded border border-blue-200">';
-        html += '<h4 class="font-semibold mb-2 text-blue-800">前期データ（累計）</h4>';
-        html += '<table class="min-w-full text-sm">';
-        html += '<thead><tr class="border-b">';
-        html += '<th class="text-left py-2 px-2">セグメント</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
-        html += '<th class="text-right py-2 px-2">材料</th>';
-        html += '<th class="text-right py-2 px-2">労務</th>';
-        html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '</tr></thead><tbody>';
-
-        for (const [segment, values] of Object.entries(result.prev_year_data)) {
-            html += '<tr class="border-b">';
-            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務合算'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費合算'])}</td>`;
-            html += '</tr>';
-        }
-
-        html += '</tbody></table>';
-        html += '</div>';
+        sections.push(renderSummaryTable('前年データ', result.prev_year_data));
     }
-
-    // 見込データ表示
     if (result.forecast_data) {
-        html += '<div class="mt-4 p-3 bg-purple-50 rounded border border-purple-200">';
-        html += '<h4 class="font-semibold mb-2 text-purple-800">見込データ</h4>';
-        html += '<table class="min-w-full text-sm">';
-        html += '<thead><tr class="border-b">';
-        html += '<th class="text-left py-2 px-2">セグメント</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
-        html += '<th class="text-right py-2 px-2">材料</th>';
-        html += '<th class="text-right py-2 px-2">労務</th>';
-        html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '</tr></thead><tbody>';
-
-        for (const [segment, values] of Object.entries(result.forecast_data)) {
-            html += '<tr class="border-b">';
-            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
-            html += '</tr>';
-        }
-
-        html += '</tbody></table>';
-        html += '</div>';
+        sections.push(renderSummaryTable('予算データ', result.forecast_data));
     }
-
-    // 予算データ表示
     if (result.budget_data) {
-        // 単月予算データ
-        html += '<div class="mt-4 p-3 bg-green-50 rounded border border-green-200">';
-        html += '<h4 class="font-semibold mb-2 text-green-800">予算データ（単月）</h4>';
-        html += '<table class="min-w-full text-sm">';
-        html += '<thead><tr class="border-b">';
-        html += '<th class="text-left py-2 px-2">セグメント</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
-        html += '<th class="text-right py-2 px-2">材料</th>';
-        html += '<th class="text-right py-2 px-2">労務</th>';
-        html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '</tr></thead><tbody>';
-
-        for (const [segment, values] of Object.entries(result.budget_data['単月'])) {
-            html += '<tr class="border-b">';
-            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
-            html += '</tr>';
+        if (result.budget_data['原点']) {
+            sections.push(renderSummaryTable('予算 CSV (原点)', result.budget_data['原点']));
         }
-
-        html += '</tbody></table>';
-        html += '</div>';
-
-        // 累計予算データ
-        html += '<div class="mt-4 p-3 bg-green-50 rounded border border-green-200">';
-        html += '<h4 class="font-semibold mb-2 text-green-800">予算データ（累計）</h4>';
-        html += '<table class="min-w-full text-sm">';
-        html += '<thead><tr class="border-b">';
-        html += '<th class="text-left py-2 px-2">セグメント</th>';
-        html += '<th class="text-right py-2 px-2">基本売上</th>';
-        html += '<th class="text-right py-2 px-2">その他売上</th>';
-        html += '<th class="text-right py-2 px-2">材料</th>';
-        html += '<th class="text-right py-2 px-2">労務</th>';
-        html += '<th class="text-right py-2 px-2">経費</th>';
-        html += '</tr></thead><tbody>';
-
-        for (const [segment, values] of Object.entries(result.budget_data['累計'])) {
-            html += '<tr class="border-b">';
-            html += `<td class="py-2 px-2 font-semibold">${segment}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['基本売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['その他売上'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['材料'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['労務'])}</td>`;
-            html += `<td class="text-right py-2 px-2">${formatNumber(values['経費'])}</td>`;
-            html += '</tr>';
+        if (result.budget_data['累計']) {
+            sections.push(renderSummaryTable('予算 CSV (累計)', result.budget_data['累計']));
         }
-
-        html += '</tbody></table>';
-        html += '</div>';
     }
-
-    // 警告表示
     if (result.warnings && result.warnings.length > 0) {
-        html += '<div class="mt-4 p-3 bg-yellow-50 rounded border border-yellow-200">';
-        html += '<h4 class="font-semibold mb-2 text-yellow-800">⚠ 警告</h4>';
-        html += '<ul class="text-sm text-yellow-800 list-disc list-inside">';
-        for (const warning of result.warnings) {
-            html += `<li>${warning}</li>`;
-        }
-        html += '</ul>';
-        html += '</div>';
+        sections.push('<div class="mt-4 rounded border border-yellow-200 bg-yellow-50 p-3">');
+        sections.push('<h4 class="mb-2 font-semibold text-yellow-800">警告</h4>');
+        sections.push('<ul class="list-disc list-inside text-sm text-yellow-800">');
+        result.warnings.forEach((warning) => sections.push(`<li>${escapeHtml(warning)}</li>`));
+        sections.push('</ul></div>');
     }
-
-    // デバッグ情報表示
     if (result.debug) {
-        html += '<div class="mt-4 p-3 bg-yellow-50 rounded border border-yellow-200">';
-        html += '<h4 class="font-semibold mb-2 text-sm">デバッグ情報</h4>';
-        html += '<div class="text-xs text-gray-700">';
-        html += `<p>現場表の契約コード数: ${result.debug.site_dict_count}</p>`;
-        html += `<p>一致した契約コード数: ${result.debug.found_contracts_count}</p>`;
-        html += `<p>抽出されたデータ行数: ${result.debug.extracted_count}</p>`;
-        html += '</div>';
-        html += '</div>';
+        sections.push('<div class="mt-4 rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">');
+        sections.push(`<div>現場マスタ件数: ${formatNumber(result.debug.site_dict_count || 0)}</div>`);
+        sections.push(`<div>一致契約コード数: ${formatNumber(result.debug.found_contracts_count || 0)}</div>`);
+        sections.push(`<div>抽出明細数: ${formatNumber(result.debug.extracted_count || 0)}</div>`);
+        sections.push('</div>');
     }
 
-    html += '<div class="mt-4 text-center">';
-    html += '<button onclick="resetForm()" class="btn btn-primary">新しい処理を開始</button>';
-    html += '</div>';
-    html += '</div>';
+    sections.push('<div class="mt-4 text-center">');
+    sections.push('<button onclick="resetForm()" class="btn btn-primary">新しい処理を始める</button>');
+    sections.push('</div>');
+    sections.push('</div>');
 
-    content.innerHTML = html;
+    content.innerHTML = sections.join('');
     container.classList.remove('hidden');
 }
 
-// エラー表示
+function renderSummaryTable(title, data) {
+    const rows = Object.entries(data);
+    if (!rows.length) return '';
+
+    const html = [];
+    html.push('<div class="mt-4 rounded border border-gray-200 bg-white p-3">');
+    html.push(`<h4 class="mb-2 font-semibold text-gray-800">${escapeHtml(title)}</h4>`);
+    html.push('<div class="overflow-x-auto">');
+    html.push('<table class="min-w-full text-sm">');
+    html.push('<thead><tr class="border-b text-left">');
+    html.push('<th class="px-2 py-2">セグメント</th>');
+    html.push('<th class="px-2 py-2 text-right">基本請負費</th>');
+    html.push('<th class="px-2 py-2 text-right">その他請負費</th>');
+    html.push('<th class="px-2 py-2 text-right">販管費</th>');
+    html.push('<th class="px-2 py-2 text-right">原価</th>');
+    html.push('<th class="px-2 py-2 text-right">人件費</th>');
+    html.push('</tr></thead><tbody>');
+
+    rows.forEach(([segment, values]) => {
+        html.push('<tr class="border-b">');
+        html.push(`<td class="px-2 py-2 font-semibold">${escapeHtml(segment)}</td>`);
+        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['基本請負費'])}</td>`);
+        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['その他請負費'])}</td>`);
+        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['販管費'])}</td>`);
+        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['原価'])}</td>`);
+        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['人件費'])}</td>`);
+        html.push('</tr>');
+    });
+
+    html.push('</tbody></table></div></div>');
+    return html.join('');
+}
+
 function showError(message, details) {
     const modal = document.getElementById('error-modal');
     const content = document.getElementById('error-content');
+    if (!modal || !content) return;
 
-    let html = `<p class="font-semibold text-red-600 mb-2">${message}</p>`;
-
+    const parts = [`<p class="mb-2 font-semibold text-red-600">${escapeHtml(message)}</p>`];
     if (details && details.length > 0) {
-        html += '<div class="error-box">';
-        html += '<p class="font-semibold mb-2">詳細:</p>';
-        html += '<ul class="error-list">';
-        details.forEach(detail => {
-            html += `<li>${detail}</li>`;
-        });
-        html += '</ul>';
-        html += '</div>';
+        parts.push('<div class="error-box">');
+        parts.push('<p class="mb-2 font-semibold">詳細</p>');
+        parts.push('<ul class="error-list">');
+        details.forEach((detail) => parts.push(`<li>${escapeHtml(detail)}</li>`));
+        parts.push('</ul></div>');
     }
 
-    content.innerHTML = html;
+    content.innerHTML = parts.join('');
     modal.classList.remove('hidden');
     modal.style.display = 'flex';
 }
 
-// エラーモーダルを閉じる
 function closeErrorModal() {
     const modal = document.getElementById('error-modal');
+    if (!modal) return;
     modal.classList.add('hidden');
     modal.style.display = 'none';
 }
 
-// ファイルダウンロード
 function downloadFile(filePath) {
-    const filename = filePath.split('/').pop();
-    const downloadUrl = `/tools/monthly_generator/api/download/${filename}`;
+    const filename = String(filePath || '').split('/').pop();
+    if (!filename) return;
 
-    // ダウンロードリンクを作成してクリック
     const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = '月次報告書_出力.xlsx';
+    link.href = `/tools/monthly_generator/api/download/${filename}`;
+    link.download = '月次集計結果.xlsx';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 }
 
-// フォームをファイル選択を維持して再表示
 function restoreFormWithFiles() {
-    // フォームを再表示するが、ファイル選択はクリアしない
     document.getElementById('upload-form').style.display = 'block';
     document.getElementById('progress-container').classList.add('hidden');
     document.getElementById('result-container').classList.add('hidden');
 }
 
-// フォームリセット（ファイル選択も含めて全てクリア）
 function resetForm() {
-    document.getElementById('upload-form').reset();
-    document.getElementById('upload-form').style.display = 'block';
-    document.getElementById('progress-container').classList.add('hidden');
-    document.getElementById('result-container').classList.add('hidden');
+    const form = document.getElementById('upload-form');
+    if (form) {
+        form.reset();
+    }
+    syncSiteSourceMode();
+    restoreFormWithFiles();
 }
 
-// 数値フォーマット
 function formatNumber(num) {
-    if (typeof num !== 'number') {
+    if (typeof num !== 'number' || Number.isNaN(num)) {
         return '0';
     }
     return num.toLocaleString('ja-JP', {
         minimumFractionDigits: 0,
         maximumFractionDigits: 0
     });
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
 }

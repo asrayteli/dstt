@@ -7,6 +7,8 @@ from datetime import datetime
 from openpyxl import load_workbook
 import traceback
 
+from app.models import Site, SiteBranch, SiteContractMaster, db
+
 monthly_generator_bp = Blueprint("monthly_generator", __name__, url_prefix="/tools/monthly_generator")
 
 # 経費対照表（システムに組み込み）
@@ -118,6 +120,90 @@ def get_upload_folder():
     return folder
 
 
+def _normalize_site_id_for_master(value):
+    text = str(value or '').strip()
+    if not text or not text.isdigit():
+        raise ValueError('契約番号が不正です')
+    if len(text) > 5:
+        raise ValueError('契約番号は5桁以内で指定してください')
+    return text.zfill(5)
+
+
+def _normalize_site_branch_for_master(value):
+    text = str(value or '').strip()
+    if not text or not text.isdigit():
+        raise ValueError('枝番号が不正です')
+    if len(text) > 3:
+        raise ValueError('枝番号は3桁以内で指定してください')
+    return text.zfill(3)
+
+
+def _site_manager_name(site):
+    return f"{site.site_manager_last} {site.site_manager_first}".strip()
+
+
+def _upsert_segment_into_contract_master(contract_code, segment):
+    master_row = db.session.get(SiteContractMaster, contract_code)
+    if master_row is None:
+        if len(contract_code) < 8 or not contract_code[:8].isdigit():
+            return False
+        site_id = _normalize_site_id_for_master(contract_code[:5])
+        site_branch = _normalize_site_branch_for_master(contract_code[5:8])
+        site = Site.query.filter_by(site_id=site_id).first()
+        if site is None:
+            return False
+        branch = SiteBranch.query.filter_by(site_row_id=site.id, site_branch=site_branch).first()
+        if branch is None:
+            return False
+        master_row = SiteContractMaster(
+            contract_code=contract_code,
+            site_row_id=site.id,
+            site_branch_row_id=branch.id,
+            site_id=site.site_id,
+            site_branch=branch.site_branch,
+            site_name=site.site_name,
+            site_manager_id=site.site_manager_id,
+            site_manager_name=_site_manager_name(site),
+            cloudshift_option_key=branch.cloudshift_option_key,
+            is_active=bool(site.is_active and branch.is_active),
+            source='monthly_generator',
+        )
+        db.session.add(master_row)
+    master_row.segment = segment
+    if master_row.source in {'', 'siteplus'}:
+        master_row.source = 'monthly_generator'
+    return True
+
+
+def _site_dict_from_contract_master(site_manager_id):
+    manager_id = str(site_manager_id or '').strip()
+    if not manager_id:
+        raise ValueError('担当者IDを指定してください')
+
+    rows = (
+        SiteContractMaster.query
+        .filter(
+            SiteContractMaster.site_manager_id == manager_id,
+            SiteContractMaster.is_active.is_(True),
+        )
+        .order_by(SiteContractMaster.contract_code.asc())
+        .all()
+    )
+
+    site_dict = {}
+    warnings = []
+    for row in rows:
+        contract_code = str(row.contract_code or '').strip()
+        segment = str(row.segment or '').strip()
+        if not contract_code:
+            continue
+        if segment not in ['役員', '一般', '旅客']:
+            warnings.append(f"セグメント未設定: {contract_code} - {row.site_name}")
+            continue
+        site_dict[contract_code] = segment
+    return site_dict, warnings
+
+
 @monthly_generator_bp.route("/")
 @login_required
 def index():
@@ -145,20 +231,31 @@ def process_files():
         target_month = int(request.form.get('target_month'))  # 対象月（1-12）
         sheet_name = request.form.get('sheet_name')  # シート名
 
-        if not all([subject_file, site_file, report_file, target_month, sheet_name]):
+        site_source = str(request.form.get('site_source', 'file') or 'file').strip().lower()
+        site_manager_id = str(request.form.get('site_manager_id', '') or '').strip()
+
+        if not all([subject_file, report_file, target_month, sheet_name]):
             return jsonify({"error": "必要なファイルまたはパラメータが不足しています"}), 400
 
         # ファイル保存
         upload_folder = get_upload_folder()
+        if site_source not in {'file', 'db'}:
+            return jsonify({"error": "site_source は file または db を指定してください"}), 400
+        if site_source == 'file' and not site_file:
+            return jsonify({"error": "現場表CSVを選択してください"}), 400
+        if site_source == 'db' and not site_manager_id:
+            return jsonify({"error": "担当者IDを入力してください"}), 400
+
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         user_id = current_user.username
 
         subject_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_subject.csv")
-        site_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_site.csv")
+        site_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_site.csv") if site_source == 'file' else None
         report_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_report.xlsx")
 
         subject_file.save(subject_path)
-        site_file.save(site_path)
+        if site_path and site_file:
+            site_file.save(site_path)
         report_file.save(report_path)
 
         # オプションファイル保存
@@ -186,16 +283,20 @@ def process_files():
         # 処理実行
         result = process_monthly_data(
             subject_path, site_path, report_path, target_month, sheet_name,
-            prev_year_subject_path, prev_year_site_path, forecast_path, budget_path
+            prev_year_subject_path, prev_year_site_path, forecast_path, budget_path,
+            site_source=site_source, site_manager_id=site_manager_id
         )
 
         if result.get("error"):
+            db.session.rollback()
             return jsonify(result), 400
+        db.session.commit()
 
         # 一時ファイル削除（入力ファイル全て）
         try:
             os.remove(subject_path)
-            os.remove(site_path)
+            if site_path:
+                os.remove(site_path)
             os.remove(report_path)
             if prev_year_subject_path:
                 os.remove(prev_year_subject_path)
@@ -211,12 +312,14 @@ def process_files():
         return jsonify(result)
 
     except Exception as e:
+        db.session.rollback()
         traceback.print_exc()
         return jsonify({"error": f"処理中にエラーが発生しました: {str(e)}"}), 500
 
 
 def process_monthly_data(subject_path, site_path, report_path, target_month, sheet_name,
-                         prev_year_subject_path=None, prev_year_site_path=None, forecast_path=None, budget_path=None):
+                         prev_year_subject_path=None, prev_year_site_path=None, forecast_path=None, budget_path=None,
+                         site_source='file', site_manager_id=''):
     """月次データ処理のメインロジック"""
     errors = []
     warnings = []  # オプションデータの警告用
@@ -229,8 +332,8 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             return {"error": "科目別推移表の読み込みに失敗しました"}
 
         # 現場表読み込み
-        site_data = read_csv_with_encoding(site_path)
-        if not site_data:
+        site_data = read_csv_with_encoding(site_path) if site_source == 'file' else []
+        if site_source == 'file' and not site_data:
             return {"error": "現場表の読み込みに失敗しました"}
 
         # 前年データ読み込み（オプション）
@@ -250,6 +353,19 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
     # ステップ2: 現場表の解析（ヘッダー行をスキップ）
     # 新フォーマット: 契約コード,セグメント
     site_dict = {}  # 契約コードをキーとした辞書（8桁完全一致）
+
+    if site_source == 'db':
+        try:
+            master_site_dict, master_warnings = _site_dict_from_contract_master(site_manager_id)
+        except ValueError as e:
+            return {"error": str(e)}
+        if not master_site_dict:
+            return {"error": "指定した担当者IDに紐づく有効な現場契約マスタがありません"}
+        warnings.extend(master_warnings)
+        site_data = [["contract_code", "segment"]] + [
+            [contract_code, segment]
+            for contract_code, segment in master_site_dict.items()
+        ]
 
     for i, row in enumerate(site_data):
         if i == 0:  # ヘッダー行をスキップ
@@ -503,6 +619,10 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         output_path = report_path.replace('.xlsx', '_output.xlsx')
         wb.save(output_path)
         wb.close()
+
+        if site_source == 'file':
+            for contract_code, segment in site_dict.items():
+                _upsert_segment_into_contract_master(contract_code, segment)
 
         # ファイル名のみを抽出
         output_filename = os.path.basename(output_path)

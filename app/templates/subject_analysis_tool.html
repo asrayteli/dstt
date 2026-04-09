@@ -259,6 +259,17 @@
             <p class="welcome-description">CSVをドラッグ&ドロップして分析を開始できます。ファイル選択ボタンからの操作にも対応しています。</p>
 
             <form id="upload-form" class="quick-upload-form">
+                <div class="upload-mode-card">
+                    <div class="drop-head">
+                        <span>現行データの参照方法</span>
+                        <span class="drop-badge">必須</span>
+                    </div>
+                    <select id="site-source" class="form-input" required>
+                        <option value="db">現場リストPLUS参照モード</option>
+                        <option value="file">現場表読み込みモード</option>
+                    </select>
+                    <p class="mode-help">現行現場表を使う場合は現場表読み込みモード、現場リストPLUSの最新セグメントを使う場合は現場リストPLUS参照モードを選択します。</p>
+                </div>
                 <div class="quick-upload-grid">
                     <div class="drop-card required">
                         <div class="drop-head">
@@ -273,7 +284,7 @@
                         <input type="file" id="subject-file" accept=".csv" class="hidden" required>
                     </div>
 
-                    <div class="drop-card">
+                    <div class="drop-card" id="site-source-file-panel">
                         <div class="drop-head">
                             <span>前年データ（任意）</span>
                             <span class="drop-badge optional">任意</span>
@@ -297,6 +308,16 @@
                             <p class="drop-file" id="site-file-name">未選択</p>
                         </div>
                         <input type="file" id="site-file" accept=".csv" class="hidden">
+                    </div>
+                </div>
+
+                <div id="site-source-db-panel" class="mode-panel">
+                    <div class="drop-card mode-note-card">
+                        <div class="drop-head">
+                            <span>現場リストPLUS参照モード</span>
+                            <span class="drop-badge optional">自動</span>
+                        </div>
+                        <p class="mode-help">このモードでは現行現場表は不要です。現場リストPLUSに登録された最新セグメントを自動で参照します。</p>
                     </div>
                 </div>
 

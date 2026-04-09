@@ -28,7 +28,7 @@ from openpyxl import Workbook
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
-from app.models import Site, db
+from app.models import Site, SiteContractMaster, db
 
 try:
     from .shiftersync_format import (
@@ -345,6 +345,55 @@ def _project_site_payload(project: dict[str, Any]) -> dict[str, Any]:
         project.get("site_id"),
         project.get("site_name"),
     )
+
+
+def _project_registered_dedicated_candidates(project: dict[str, Any]) -> list[dict[str, Any]]:
+    if str(project.get("mode") or "") != "scene":
+        return []
+    site_row_id = _coerce_site_row_id(project.get("site_row_id"))
+    if not site_row_id:
+        return []
+    if "sqlalchemy" not in current_app.extensions:
+        return []
+
+    try:
+        rows = (
+            SiteContractMaster.query
+            .filter(
+                SiteContractMaster.site_row_id == int(site_row_id),
+                SiteContractMaster.is_active.is_(True),
+                SiteContractMaster.dedicated_employee_number.isnot(None),
+            )
+            .order_by(SiteContractMaster.contract_code.asc())
+            .all()
+        )
+    except Exception:
+        return []
+
+    candidates: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        employee_number = str(row.dedicated_employee_number or "").strip()
+        employee_name = str(row.dedicated_employee_name or "").strip()
+        if not employee_number and not employee_name:
+            continue
+        key = employee_number or employee_name
+        item = candidates.get(key)
+        if item is None:
+            item = {
+                "employee_number": employee_number,
+                "name": employee_name or employee_number,
+                "contract_codes": [],
+                "site_branches": [],
+            }
+            candidates[key] = item
+        contract_code = str(row.contract_code or "").strip()
+        if contract_code and contract_code not in item["contract_codes"]:
+            item["contract_codes"].append(contract_code)
+        site_branch = str(row.site_branch or "").strip()
+        if site_branch and site_branch not in item["site_branches"]:
+            item["site_branches"].append(site_branch)
+
+    return list(candidates.values())
 
 
 def _site_storage_fields(site_ref: dict[str, Any] | None) -> dict[str, Any]:
@@ -3362,6 +3411,37 @@ def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str
         candidates[key] = item
         return item
 
+    for dedicated in _project_registered_dedicated_candidates(project):
+        item = upsert_result(
+            "",
+            str(dedicated.get("name") or ""),
+            str(dedicated.get("employee_number") or ""),
+        )
+        points = 500
+        branch_labels = ", ".join(str(value) for value in (dedicated.get("site_branches") or []) if str(value).strip())
+        contract_labels = ", ".join(str(value) for value in (dedicated.get("contract_codes") or []) if str(value).strip())
+        context = "最新マスタ登録"
+        if branch_labels:
+            context += f" / 枝番号 {branch_labels}"
+        item["score"] += points
+        item["reasons"].append("最新マスタで専従者に登録済み")
+        item["breakdown"].append(
+            {
+                "category": "master",
+                "label": "専従者マスタ",
+                "match_scope": "contract_master",
+                "match_label": "最新マスタ",
+                "role_type": "dedicated",
+                "role_label": ASSIST_ROLE_LABELS.get("dedicated", "専従者"),
+                "points": points,
+                "formula": f"{points}",
+                "context": context,
+                "contract_codes": list(dedicated.get("contract_codes") or []),
+                "site_branches": list(dedicated.get("site_branches") or []),
+                "contract_code_label": contract_labels,
+            }
+        )
+
     for rule in assist.get("rules") or []:
         if not rule.get("enabled", True):
             continue
@@ -3509,7 +3589,7 @@ def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str
         )
 
     results: list[dict[str, Any]] = []
-    category_order = {"profile": 0, "aptitude": 1, "rule": 2, "record": 3}
+    category_order = {"master": 0, "profile": 1, "aptitude": 2, "rule": 3, "record": 4}
     for item in candidates.values():
         profile = _find_assist_profile(
             assist,
@@ -4413,6 +4493,20 @@ def api_leave_sync(project_id: str, year: int, month: int):
 def api_assist_owner(project_id: str):
     project = _owner_project_or_404(project_id)
     return jsonify(_assist_bootstrap_for_project(project, can_edit_records=True, can_edit_rules=True, can_edit_sites=True))
+
+
+@cloudshift_bp.route("/api/project/<project_id>/dedicated-candidate")
+@login_required
+def api_project_dedicated_candidate(project_id: str):
+    project = _owner_project_or_404(project_id)
+    return jsonify(
+        {
+            "success": True,
+            "project_id": project["id"],
+            "site": _project_site_payload(project),
+            "candidates": _project_registered_dedicated_candidates(project),
+        }
+    )
 
 
 @cloudshift_bp.route("/api/project/<project_id>/assist/sites", methods=["POST"])

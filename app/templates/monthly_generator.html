@@ -4,65 +4,87 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='monthly_generator/css/monthly_generator.css') }}">
 
 <div class="max-w-4xl mx-auto mt-6 bg-white rounded-xl shadow-lg p-6">
-    <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">📊 月次ジェネレーター</h2>
+    <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">月次ジェネレーター</h2>
 
-    <div class="mb-6 p-4 bg-blue-50 rounded-lg">
-        <h3 class="font-semibold mb-2 text-blue-800">使い方</h3>
+    <div class="mb-6 rounded-lg bg-blue-50 p-4">
+        <h3 class="mb-2 font-semibold text-blue-800">使い方</h3>
         <ol class="list-decimal list-inside space-y-1 text-sm text-gray-700">
-            <li>必須：科目別推移表（CSV）、現場表（CSV）、月次報告書（Excel）をアップロード</li>
-            <li>オプション：前年科目別推移表（CSV）、前年現場表（CSV）、見込ファイル（Excel）、予算表（CSV）をアップロード</li>
-            <li>対象月（1-12月）と出力先シート名を入力</li>
-            <li>「処理開始」ボタンをクリック</li>
-            <li>処理完了後、自動でダウンロードが開始されます</li>
+            <li>現行データの参照方法を選びます。</li>
+            <li>科目表 CSV と出力先 Excel を指定します。</li>
+            <li>前年比較をする場合だけ前年科目表と前年現場表を追加します。</li>
+            <li>対象月とシート名を入力して処理を実行します。</li>
         </ol>
     </div>
 
-    <!-- ファイルアップロードフォーム -->
     <form id="upload-form" class="space-y-4">
+        <div class="rounded-xl border border-blue-200 bg-blue-50 p-4">
+            <div class="form-group">
+                <label class="form-label">現行データの参照方法 *</label>
+                <select id="site-source" class="form-input" required>
+                    <option value="db">現場リストPLUS参照モード</option>
+                    <option value="file">現場表読み込みモード</option>
+                </select>
+                <p class="mt-1 text-xs text-gray-500">現行現場表を使うときは `現場表読み込みモード`、現場リストPLUSの最新マスタを使うときは `現場リストPLUS参照モード` を選択します。</p>
+            </div>
+
+            <div id="site-source-file-panel" class="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <h3 class="text-sm font-semibold text-slate-900">現場表読み込みモード</h3>
+                <p class="mt-1 text-xs text-slate-500">これまでどおり、現行の現場表 CSV を読み込んでセグメントを判定します。</p>
+                <div class="form-group mt-3">
+                    <label class="form-label">現行現場表 CSV *</label>
+                    <input type="file" id="site-file" accept=".csv" class="form-input">
+                    <p class="mt-1 text-xs text-gray-500">契約コードとセグメント列を含む現場表 CSV を指定してください。</p>
+                </div>
+            </div>
+
+            <div id="site-source-db-panel" class="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+                <h3 class="text-sm font-semibold text-emerald-900">現場リストPLUS参照モード</h3>
+                <p class="mt-1 text-xs text-emerald-800">現行現場表は不要です。現場リストPLUSに取り込まれた最新セグメントを担当者IDで絞って参照します。</p>
+                <div class="form-group mt-3" id="site-manager-group">
+                    <label class="form-label">担当者ID *</label>
+                    <input type="text" id="site-manager-id" class="form-input" placeholder="例: 9001">
+                    <p class="mt-1 text-xs text-gray-500">現場リストPLUSで管理している担当者IDを入力してください。</p>
+                </div>
+            </div>
+        </div>
+
         <div class="form-group">
-            <label class="form-label">科目別推移表（CSV） *</label>
+            <label class="form-label">科目表 CSV *</label>
             <input type="file" id="subject-file" accept=".csv" class="form-input" required>
-            <p class="text-xs text-gray-500 mt-1">法人名称、現場名称、科目名称、月別金額を含むCSVファイル</p>
+            <p class="mt-1 text-xs text-gray-500">当年の科目表 CSV を指定してください。</p>
         </div>
 
         <div class="form-group">
-            <label class="form-label">現場表（CSV） *</label>
-            <input type="file" id="site-file" accept=".csv" class="form-input" required>
-            <p class="text-xs text-gray-500 mt-1">法人名称、現場名称、セグメント（役員/一般/旅客）を含むCSVファイル</p>
-        </div>
-
-        <div class="form-group">
-            <label class="form-label">月次報告書（Excel） *</label>
+            <label class="form-label">出力先 Excel *</label>
             <input type="file" id="report-file" accept=".xlsx,.xls" class="form-input" required>
-            <p class="text-xs text-gray-500 mt-1">データを出力するExcelファイル</p>
+            <p class="mt-1 text-xs text-gray-500">集計結果を書き込む Excel ファイルを指定してください。</p>
         </div>
 
-        <!-- オプションファイル -->
-        <div class="mt-4 p-4 bg-gray-50 rounded-lg">
-            <h3 class="font-semibold mb-3 text-gray-700">オプションファイル（任意）</h3>
+        <div class="rounded-lg bg-gray-50 p-4">
+            <h3 class="mb-3 font-semibold text-gray-700">比較・任意ファイル</h3>
 
             <div class="form-group">
-                <label class="form-label">前年科目別推移表（CSV）</label>
+                <label class="form-label">前年科目表 CSV</label>
                 <input type="file" id="prev-year-subject-file" accept=".csv" class="form-input">
-                <p class="text-xs text-gray-500 mt-1">前年度の科目別推移表</p>
+                <p class="mt-1 text-xs text-gray-500">前年比較をするときだけ指定します。</p>
             </div>
 
             <div class="form-group">
-                <label class="form-label">前年現場表（CSV）</label>
+                <label class="form-label">前年現場表 CSV</label>
                 <input type="file" id="prev-year-site-file" accept=".csv" class="form-input">
-                <p class="text-xs text-gray-500 mt-1">前年度の現場表（契約コード、セグメント）</p>
+                <p class="mt-1 text-xs text-gray-500">前年比較では、現場リストPLUS参照モードでも前年現場表が必要です。</p>
             </div>
 
             <div class="form-group">
-                <label class="form-label">見込ファイル（Excel）</label>
+                <label class="form-label">予算 Excel</label>
                 <input type="file" id="forecast-file" accept=".xlsx,.xls" class="form-input">
-                <p class="text-xs text-gray-500 mt-1">見込データを含むExcelファイル</p>
+                <p class="mt-1 text-xs text-gray-500">予算値を参照したい場合の任意ファイルです。</p>
             </div>
 
             <div class="form-group">
-                <label class="form-label">予算表（CSV）</label>
+                <label class="form-label">予算 CSV</label>
                 <input type="file" id="budget-file" accept=".csv" class="form-input">
-                <p class="text-xs text-gray-500 mt-1">予算データを含むCSVファイル（セグメント別・項目別の月次予算）</p>
+                <p class="mt-1 text-xs text-gray-500">予算 CSV を使う場合の任意ファイルです。</p>
             </div>
         </div>
 
@@ -84,83 +106,74 @@
                     <option value="11">11月</option>
                     <option value="12">12月</option>
                 </select>
-                <p class="text-xs text-gray-500 mt-1">処理対象の月を選択</p>
+                <p class="mt-1 text-xs text-gray-500">集計対象の月を選択します。</p>
             </div>
 
             <div class="form-group">
-                <label class="form-label">出力先シート名 *</label>
+                <label class="form-label">出力シート名 *</label>
                 <input type="text" id="sheet-name" class="form-input" placeholder="例: Sheet1" required>
-                <p class="text-xs text-gray-500 mt-1">Excelファイル内のシート名</p>
+                <p class="mt-1 text-xs text-gray-500">Excel ファイル内の書き込み先シート名です。</p>
             </div>
         </div>
 
         <div class="text-center">
-            <button type="submit" class="btn btn-primary btn-lg">
-                処理開始
-            </button>
+            <button type="submit" class="btn btn-primary btn-lg">処理を実行</button>
         </div>
     </form>
 
-    <!-- 進捗インジケーター -->
     <div id="progress-container" class="hidden mt-6">
         <div class="progress-box">
             <h3 class="text-lg font-semibold mb-4 text-center">処理中...</h3>
 
-            <!-- プログレスバー -->
             <div class="progress-bar-container">
                 <div id="progress-bar" class="progress-bar"></div>
             </div>
             <p id="progress-percentage" class="text-center text-sm font-semibold mt-2">0%</p>
 
-            <!-- ステップ表示 -->
             <div class="steps-container mt-6">
                 <div class="step-item" data-step="1">
                     <div class="step-number">1</div>
-                    <div class="step-text">ファイルアップロード中</div>
+                    <div class="step-text">ファイル読み込み</div>
                 </div>
                 <div class="step-item" data-step="2">
                     <div class="step-number">2</div>
-                    <div class="step-text">データ抽出中</div>
+                    <div class="step-text">データ解析</div>
                 </div>
                 <div class="step-item" data-step="3">
                     <div class="step-number">3</div>
-                    <div class="step-text">セグメント分類中</div>
+                    <div class="step-text">セグメント判定</div>
                 </div>
                 <div class="step-item" data-step="4">
                     <div class="step-number">4</div>
-                    <div class="step-text">経費ジャンル分け中</div>
+                    <div class="step-text">月次集計</div>
                 </div>
                 <div class="step-item" data-step="5">
                     <div class="step-number">5</div>
-                    <div class="step-text">合算計算中</div>
+                    <div class="step-text">予算集計</div>
                 </div>
                 <div class="step-item" data-step="6">
                     <div class="step-number">6</div>
-                    <div class="step-text">データ検証中</div>
+                    <div class="step-text">結果確認</div>
                 </div>
                 <div class="step-item" data-step="7">
                     <div class="step-number">7</div>
-                    <div class="step-text">Excel出力中</div>
+                    <div class="step-text">Excel 出力</div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 結果表示エリア -->
     <div id="result-container" class="hidden mt-6">
         <div id="result-content"></div>
     </div>
 </div>
 
-<!-- エラーモーダル -->
 <div id="error-modal" class="hidden modal-overlay">
     <div class="modal-content">
         <h3 class="text-lg font-bold mb-4 text-red-600">エラー</h3>
         <div id="error-content" class="mb-4"></div>
         <div class="text-right">
-            <button onclick="closeErrorModal()" class="btn btn-outline">
-                閉じる
-            </button>
+            <button onclick="closeErrorModal()" class="btn btn-outline">閉じる</button>
         </div>
     </div>
 </div>

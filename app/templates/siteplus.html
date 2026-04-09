@@ -245,6 +245,31 @@
   </div>
 </div>
 
+<div id="dedicated-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/55 p-4">
+  <div class="siteplus-modal-shell max-w-2xl">
+    <div class="siteplus-modal-header">
+      <div class="siteplus-modal-header-inner">
+        <div>
+          <div class="text-xs uppercase tracking-[0.2em] text-slate-400">DEDICATED</div>
+          <h3 id="dedicated-modal-title" class="mt-1 text-xl font-semibold text-slate-900">専従者を登録</h3>
+          <p id="dedicated-modal-subtitle" class="mt-1 text-sm text-slate-500">契約コードに紐づく候補を表示します。</p>
+        </div>
+        <button type="button" class="siteplus-btn siteplus-btn-muted" data-close-modal="dedicated-modal">閉じる</button>
+      </div>
+    </div>
+    <div class="siteplus-modal-body space-y-4">
+      <div id="dedicated-current" class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700"></div>
+      <div id="dedicated-candidates" class="space-y-3"></div>
+      <div class="siteplus-modal-actions">
+        <button id="dedicated-clear-btn" type="button" class="siteplus-btn siteplus-btn-danger">専従者を解除</button>
+        <div class="siteplus-modal-actions-right">
+          <button type="button" class="siteplus-btn siteplus-btn-secondary" data-close-modal="dedicated-modal">閉じる</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="confirm-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/55 p-4">
   <div class="siteplus-modal-shell max-h-[90vh] max-w-3xl">
     <div class="siteplus-modal-header"><div class="siteplus-modal-header-inner"><div><div class="text-xs uppercase tracking-[0.2em] text-slate-400">CONFIRM</div><h3 id="confirm-title" class="mt-1 text-xl font-semibold text-slate-900">確認</h3><p id="confirm-message" class="mt-1 text-sm text-slate-500"></p></div><button id="confirm-cancel" type="button" class="siteplus-btn siteplus-btn-muted">閉じる</button></div></div>
@@ -291,7 +316,7 @@
 </div>
 
 <script>
-const SITEPLUS={optionItems:{{ option_items|tojson }},sites:[],selectedSiteId:null,editingSiteId:null,editingBranchId:null,confirmHandler:null,advanced:false};
+const SITEPLUS={optionItems:{{ option_items|tojson }},sites:[],selectedSiteId:null,editingSiteId:null,editingBranchId:null,dedicatedBranchId:null,dedicatedContractCode:'',confirmHandler:null,advanced:false};
 const $=(s)=>document.querySelector(s),$$=(s)=>Array.from(document.querySelectorAll(s));
 const siteForm=$('#site-form'),branchForm=$('#branch-form');
 const esc=(v)=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#39;");
@@ -325,6 +350,8 @@ function renderUploadResult(summary){const box=$('#site-table-upload-result');co
 <div class="rounded-xl bg-sky-50 p-3"><div class="text-xs text-sky-700">親現場 新規/更新</div><div class="text-lg font-semibold text-sky-800">${summary.site_created||0} / ${summary.site_updated||0}</div></div>
 <div class="rounded-xl bg-indigo-50 p-3"><div class="text-xs text-indigo-700">枝番号 新規</div><div class="text-lg font-semibold text-indigo-800">${summary.branch_created||0}</div></div>
 <div class="rounded-xl bg-amber-50 p-3"><div class="text-xs text-amber-700">枝番号 スキップ</div><div class="text-lg font-semibold text-amber-800">${summary.branch_skipped||0}</div></div>
+<div class="rounded-xl bg-teal-50 p-3"><div class="text-xs text-teal-700">セグメント 新規/更新</div><div class="text-lg font-semibold text-teal-800">${summary.segment_created||0} / ${summary.segment_updated||0}</div></div>
+<div class="rounded-xl bg-slate-50 p-3"><div class="text-xs text-slate-500">セグメント スキップ</div><div class="text-lg font-semibold text-slate-800">${summary.segment_skipped||0}</div></div>
 <div class="rounded-xl bg-rose-50 p-3"><div class="text-xs text-rose-700">エラー行</div><div class="text-lg font-semibold text-rose-800">${errors.length}</div></div>
 </div>${errors.length?`<div class="mt-4 overflow-hidden rounded-xl border border-rose-200"><table class="min-w-full text-xs"><thead class="bg-rose-50 text-left text-rose-800"><tr><th class="px-3 py-2">行</th><th class="px-3 py-2">エラー内容</th></tr></thead><tbody>${errors.slice(0,100).map((e)=>`<tr class="border-t border-rose-100"><td class="px-3 py-2">${esc(e.row)}</td><td class="px-3 py-2">${esc(e.message)}</td></tr>`).join('')}</tbody></table></div>${errors.length>100?'<p class="mt-2 text-xs text-rose-700">エラー表示は先頭100件までです。</p>':''}`:''}`;box.classList.remove('hidden')}
 async function submitSiteTableUpload(ev){ev.preventDefault();const form=$('#site-table-upload-form');const fileInput=$('#site-table-upload-file');if(!fileInput.files||!fileInput.files.length){window.alert('CSVファイルを選択してください');return}try{const fd=new FormData(form);const r=await fetch('/tools/siteplus/api/import-site-table',{method:'POST',body:fd});const t=await r.text();const d=t?JSON.parse(t):{};if(!r.ok)throw new Error(d.error||'取り込みに失敗しました');renderUploadResult(d.summary||{});await loadSites()}catch(e){window.alert(e.message||'取り込みに失敗しました')}}
@@ -333,5 +360,14 @@ async function submitBranch(ev){ev.preventDefault();const s=selectedSite();if(!s
 async function deleteSite(){if(!SITEPLUS.editingSiteId)return;const s=SITEPLUS.sites.find((i)=>i.id===SITEPLUS.editingSiteId);if(!s)return;openConfirm({title:'親現場の論理削除',message:'配下の枝番号もまとめて無効化します。',bodyHtml:`<div class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">${esc(s.site_id)} / ${esc(s.site_name)} を無効化します。</div>`,label:'無効化する',onConfirm:async()=>{await req(`/tools/siteplus/api/sites/${s.id}`,{method:'DELETE',body:JSON.stringify({confirm:true})});closeModal('confirm-modal');closeModal('site-modal');resetSiteForm();resetBranchForm();await loadSites()}})}
 async function deleteBranch(){if(!SITEPLUS.editingBranchId)return;openConfirm({title:'枝番号の論理削除',message:'この枝番号だけを無効化します。',bodyHtml:'<div class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">選択中の枝番号を無効化します。</div>',label:'無効化する',onConfirm:async()=>{await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}`,{method:'DELETE',body:JSON.stringify({confirm:true})});closeModal('confirm-modal');closeModal('branch-modal');resetBranchForm();await loadSites()}})}
 $('#open-create-site').addEventListener('click',openCreateSite);$('#open-create-branch').addEventListener('click',openBranchModal);$('#open-upload-site-table').addEventListener('click',openUploadModal);$('#toggle-advanced-filters').addEventListener('click',()=>setAdvanced(!SITEPLUS.advanced));$('#search-form').addEventListener('submit',(e)=>{e.preventDefault();loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'))});$('#reset-btn').addEventListener('click',()=>{$('#search-form').reset();$('#filter-option-key').value='';$('#filter-include-inactive').checked=false;$('#filter-duplicate-only').checked=false;setAdvanced(false);loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'))});siteForm.addEventListener('submit',submitSite);branchForm.addEventListener('submit',submitBranch);$('#site-table-upload-form').addEventListener('submit',submitSiteTableUpload);$('#site-delete-btn').addEventListener('click',()=>deleteSite().catch((err)=>window.alert(err.message||'処理に失敗しました')));$('#branch-delete-btn').addEventListener('click',()=>deleteBranch().catch((err)=>window.alert(err.message||'処理に失敗しました')));$$('[data-close-modal]').forEach((b)=>b.addEventListener('click',()=>closeModal(b.getAttribute('data-close-modal'))));$('#confirm-cancel').addEventListener('click',()=>{SITEPLUS.confirmHandler=null;closeModal('confirm-modal')});$('#confirm-ok').addEventListener('click',async()=>{if(SITEPLUS.confirmHandler)await SITEPLUS.confirmHandler()});window.selectSite=selectSite;window.editSite=editSite;window.prepareBranchForSite=prepareBranchForSite;window.editBranch=editBranch;resetSiteForm();resetBranchForm();resetUploadForm();setAdvanced(false);loadSites().catch((err)=>window.alert(err.message||'処理に失敗しました'));
+function branchById(id){for(const site of SITEPLUS.sites){const branch=(site.branches||[]).find((item)=>item.id===id);if(branch)return{site,branch}}return null}
+function allBranchContexts(){const items=[];for(const site of SITEPLUS.sites){for(const branch of (site.branches||[])){items.push({site,branch})}}return items}
+function renderDedicatedCandidates(payload,ctx){const current=payload.registered?.employee_name?`${esc(payload.registered.employee_name)} (${esc(payload.registered.employee_number)})`:'未登録';$('#dedicated-current').innerHTML=`<div class="text-xs uppercase tracking-[0.16em] text-slate-400">CURRENT</div><div class="mt-1 text-sm text-slate-700">現在の専従者: <span class="font-semibold text-slate-900">${current}</span></div><div class="mt-1 text-xs text-slate-500">契約コード ${esc(payload.contract_code)} / ${esc(ctx.site.site_name)} / 枝番号 ${esc(ctx.branch.site_branch)}</div>`;const candidates=Array.isArray(payload.candidates)?payload.candidates:[];$('#dedicated-candidates').innerHTML=candidates.length?candidates.map((candidate)=>`<button type="button" class="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-teal-300 hover:bg-teal-50" onclick="window.assignDedicatedEmployee('${esc(candidate.employee_number)}')"><span><span class="block font-semibold text-slate-900">${esc(candidate.employee_name||candidate.employee_number)}</span><span class="block text-xs text-slate-500">${esc(candidate.employee_number)}</span></span><span class="text-xs font-medium text-teal-700">この人にする</span></button>`).join(''):'<div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">この契約コードに一致する社員名簿PLUSの候補がありません。</div>'}
+async function openDedicatedModal(branchId){const ctx=branchById(branchId);if(!ctx)return;const contractCode=String(ctx.branch.contract_code||'').trim();if(!contractCode){window.alert('この枝番号には契約コードがまだありません。先に最新マスタを同期してください。');return}SITEPLUS.dedicatedBranchId=branchId;SITEPLUS.dedicatedContractCode=contractCode;$('#dedicated-modal-title').textContent='専従者を登録';$('#dedicated-modal-subtitle').textContent=`${ctx.site.site_id} / ${ctx.site.site_name} / 枝番号 ${ctx.branch.site_branch}`;$('#dedicated-current').innerHTML='<div class="text-sm text-slate-500">候補を読み込み中です...</div>';$('#dedicated-candidates').innerHTML='';openModal('dedicated-modal');try{const payload=await req(`/tools/siteplus/api/contract-master/${encodeURIComponent(contractCode)}/dedicated-candidates`);renderDedicatedCandidates(payload,ctx)}catch(e){closeModal('dedicated-modal');window.alert(e.message||'処理に失敗しました')}}
+async function assignDedicatedEmployee(employeeNumber){if(!SITEPLUS.dedicatedContractCode)return;try{await req(`/tools/siteplus/api/contract-master/${encodeURIComponent(SITEPLUS.dedicatedContractCode)}/dedicated`,{method:'PUT',body:JSON.stringify({employee_number:employeeNumber})});closeModal('dedicated-modal');await loadSites()}catch(e){window.alert(e.message||'処理に失敗しました')}}
+async function clearDedicatedEmployee(){if(!SITEPLUS.dedicatedContractCode)return;try{await req(`/tools/siteplus/api/contract-master/${encodeURIComponent(SITEPLUS.dedicatedContractCode)}/dedicated`,{method:'PUT',body:JSON.stringify({employee_number:''})});closeModal('dedicated-modal');await loadSites()}catch(e){window.alert(e.message||'処理に失敗しました')}}
+function decorateDedicatedButtons(){const contexts=allBranchContexts();const rows=$$('#site-list tbody tr');rows.forEach((row,index)=>{const ctx=contexts[index];if(!ctx)return;const actionCell=row.querySelector('td:last-child');if(!actionCell||actionCell.dataset.dedicatedReady==='1')return;actionCell.dataset.dedicatedReady='1';const wrap=document.createElement('div');wrap.className='flex justify-end gap-2';const editBtn=actionCell.querySelector('button');if(editBtn){wrap.appendChild(editBtn)}const dedicatedBtn=document.createElement('button');dedicatedBtn.type='button';dedicatedBtn.className='siteplus-btn siteplus-btn-muted siteplus-btn-sm';dedicatedBtn.textContent=ctx.branch.dedicated_employee_name?`専従: ${ctx.branch.dedicated_employee_name}`:'専従者';dedicatedBtn.addEventListener('click',()=>openDedicatedModal(ctx.branch.id));wrap.appendChild(dedicatedBtn);actionCell.innerHTML='';actionCell.appendChild(wrap);const firstCell=row.querySelector('td');if(firstCell&&ctx.branch.contract_code){const meta=document.createElement('div');meta.className='mt-1 text-xs text-slate-500';meta.textContent=`契約コード ${ctx.branch.contract_code}${ctx.branch.segment?` / ${ctx.branch.segment}`:''}`;firstCell.appendChild(meta)}})}
+const __siteplusRenderList=renderList;renderList=function(){__siteplusRenderList();decorateDedicatedButtons()}
+$('#dedicated-clear-btn').addEventListener('click',()=>clearDedicatedEmployee().catch((err)=>window.alert(err.message||'処理に失敗しました')));window.openDedicatedModal=openDedicatedModal;window.assignDedicatedEmployee=assignDedicatedEmployee;
 </script>
 {% endblock %}
