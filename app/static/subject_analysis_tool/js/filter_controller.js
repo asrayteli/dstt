@@ -327,6 +327,7 @@ class FilterController {
             sites: this.selectedSites,
             subjects: this.selectedSubjects,
             segments: this.selectedSegments,
+            managerId: document.getElementById('manager-id-filter')?.value.trim() || '',
             siteGroupMode: document.getElementById('site-group-mode').value,
             comparisonMode: document.getElementById('comparison-mode').value,
             baseMonth: document.getElementById('base-month').value,
@@ -351,6 +352,8 @@ class FilterController {
         document.querySelectorAll('.month-checkbox').forEach(cb => cb.checked = false);
         document.querySelectorAll('.site-checkbox').forEach(cb => cb.checked = false);
         document.querySelectorAll('.subject-checkbox').forEach(cb => cb.checked = false);
+        const managerIdInput = document.getElementById('manager-id-filter');
+        if (managerIdInput) managerIdInput.value = '';
     }
 
     /**

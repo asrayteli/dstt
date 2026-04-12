@@ -6,6 +6,7 @@ import traceback
 from datetime import datetime
 
 from app.models import SiteContractMaster
+from app.site_contract_master import VALID_SEGMENTS, ensure_contract_master_synced
 
 
 subject_analysis_tool_bp = Blueprint("subject_analysis_tool", __name__, url_prefix="/tools/subject_analysis_tool")
@@ -36,6 +37,47 @@ def load_site_mapping_from_master():
             continue
         site_dict[contract_code] = segment
     return site_dict
+
+
+def load_site_mapping_from_master():
+    ensure_contract_master_synced()
+
+    rows = (
+        SiteContractMaster.query
+        .filter(SiteContractMaster.is_active.is_(True))
+        .order_by(SiteContractMaster.contract_code.asc())
+        .all()
+    )
+
+    site_dict = {}
+    site_master = {}
+    warnings = []
+    matched_rows = 0
+
+    for row in rows:
+        matched_rows += 1
+        contract_code = str(row.contract_code or "").strip()
+        segment = str(row.segment or "").strip()
+        if not contract_code:
+            continue
+
+        site_master[contract_code] = {
+            "contract_code": contract_code,
+            "segment": segment if segment in VALID_SEGMENTS else "",
+            "site_manager_id": str(row.site_manager_id or "").strip(),
+            "site_manager_name": str(row.site_manager_name or "").strip(),
+            "site_name": str(row.site_name or "").strip(),
+        }
+
+        if segment not in VALID_SEGMENTS:
+            warnings.append(f"segment missing: {contract_code} - {row.site_name}")
+            continue
+        site_dict[contract_code] = segment
+    if matched_rows == 0:
+        raise ValueError("現場リストPLUSの契約マスタがまだ作成されていません。現場リストPLUSを開いて同期してください")
+    if matched_rows > 0 and not site_dict:
+        raise ValueError("現場リストPLUSの現場はありますが、セグメントが未登録です。現場表を取り込んでください")
+    return site_dict, site_master, warnings
 
 
 @subject_analysis_tool_bp.route("/")
@@ -85,10 +127,12 @@ def upload_files():
             except OSError:
                 pass
 
+        warnings = []
         if site_source == "db":
-            site_data = load_site_mapping_from_master()
+            site_data, site_master, warnings = load_site_mapping_from_master()
         else:
             site_data = {}
+            site_master = {}
             site_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_site.csv")
             site_file.save(site_path)
             site_csv = read_csv_with_encoding(site_path)
@@ -111,12 +155,14 @@ def upload_files():
                     "current_year": parsed_data,
                     "prev_year": prev_year_data,
                     "site_mapping": site_data,
+                    "site_master": site_master,
                 },
                 "metadata": {
                     "current_year_count": len(parsed_data),
                     "prev_year_count": len(prev_year_data) if prev_year_data else 0,
                     "site_count": len(site_data) if site_data else 0,
                     "site_source": site_source,
+                    "warnings": warnings,
                 },
             }
         )

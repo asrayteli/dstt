@@ -270,6 +270,39 @@
   </div>
 </div>
 
+<div id="segment-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/55 p-4">
+  <div class="siteplus-modal-shell max-w-2xl">
+    <div class="siteplus-modal-header">
+      <div class="siteplus-modal-header-inner">
+        <div>
+          <div class="text-xs uppercase tracking-[0.2em] text-slate-400">SEGMENT</div>
+          <h3 id="segment-modal-title" class="mt-1 text-xl font-semibold text-slate-900">セグメントを編集</h3>
+          <p id="segment-modal-subtitle" class="mt-1 text-sm text-slate-500">親現場または枝番号にセグメントを設定します。</p>
+        </div>
+        <button type="button" class="siteplus-btn siteplus-btn-muted" data-close-modal="segment-modal">閉じる</button>
+      </div>
+    </div>
+    <form id="segment-form" class="siteplus-modal-body space-y-5">
+      <label class="block text-sm">
+        <span class="mb-1.5 block font-medium text-slate-700">セグメント</span>
+        <select name="segment" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3">
+          <option value="">未設定にする</option>
+          <option value="役員">役員</option>
+          <option value="一般">一般</option>
+          <option value="旅客">旅客</option>
+        </select>
+      </label>
+      <div id="segment-modal-summary" class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700"></div>
+      <div class="siteplus-modal-actions">
+        <div class="siteplus-modal-actions-right">
+          <button type="button" class="siteplus-btn siteplus-btn-secondary" data-close-modal="segment-modal">キャンセル</button>
+          <button type="submit" class="siteplus-btn siteplus-btn-primary">保存</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="confirm-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/55 p-4">
   <div class="siteplus-modal-shell max-h-[90vh] max-w-3xl">
     <div class="siteplus-modal-header"><div class="siteplus-modal-header-inner"><div><div class="text-xs uppercase tracking-[0.2em] text-slate-400">CONFIRM</div><h3 id="confirm-title" class="mt-1 text-xl font-semibold text-slate-900">確認</h3><p id="confirm-message" class="mt-1 text-sm text-slate-500"></p></div><button id="confirm-cancel" type="button" class="siteplus-btn siteplus-btn-muted">閉じる</button></div></div>
@@ -316,7 +349,7 @@
 </div>
 
 <script>
-const SITEPLUS={optionItems:{{ option_items|tojson }},sites:[],selectedSiteId:null,editingSiteId:null,editingBranchId:null,dedicatedBranchId:null,dedicatedContractCode:'',confirmHandler:null,advanced:false};
+const SITEPLUS={optionItems:{{ option_items|tojson }},sites:[],selectedSiteId:null,selectedSiteIds:[],editingSiteId:null,editingBranchId:null,dedicatedBranchId:null,dedicatedContractCode:'',confirmHandler:null,advanced:false};
 const $=(s)=>document.querySelector(s),$$=(s)=>Array.from(document.querySelectorAll(s));
 const siteForm=$('#site-form'),branchForm=$('#branch-form');
 const esc=(v)=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#39;");
@@ -369,5 +402,1135 @@ async function clearDedicatedEmployee(){if(!SITEPLUS.dedicatedContractCode)retur
 function decorateDedicatedButtons(){const contexts=allBranchContexts();const rows=$$('#site-list tbody tr');rows.forEach((row,index)=>{const ctx=contexts[index];if(!ctx)return;const actionCell=row.querySelector('td:last-child');if(!actionCell||actionCell.dataset.dedicatedReady==='1')return;actionCell.dataset.dedicatedReady='1';const wrap=document.createElement('div');wrap.className='flex justify-end gap-2';const editBtn=actionCell.querySelector('button');if(editBtn){wrap.appendChild(editBtn)}const dedicatedBtn=document.createElement('button');dedicatedBtn.type='button';dedicatedBtn.className='siteplus-btn siteplus-btn-muted siteplus-btn-sm';dedicatedBtn.textContent=ctx.branch.dedicated_employee_name?`専従: ${ctx.branch.dedicated_employee_name}`:'専従者';dedicatedBtn.addEventListener('click',()=>openDedicatedModal(ctx.branch.id));wrap.appendChild(dedicatedBtn);actionCell.innerHTML='';actionCell.appendChild(wrap);const firstCell=row.querySelector('td');if(firstCell&&ctx.branch.contract_code){const meta=document.createElement('div');meta.className='mt-1 text-xs text-slate-500';meta.textContent=`契約コード ${ctx.branch.contract_code}${ctx.branch.segment?` / ${ctx.branch.segment}`:''}`;firstCell.appendChild(meta)}})}
 const __siteplusRenderList=renderList;renderList=function(){__siteplusRenderList();decorateDedicatedButtons()}
 $('#dedicated-clear-btn').addEventListener('click',()=>clearDedicatedEmployee().catch((err)=>window.alert(err.message||'処理に失敗しました')));window.openDedicatedModal=openDedicatedModal;window.assignDedicatedEmployee=assignDedicatedEmployee;
+const segmentForm=$('#segment-form');
+function segmentSummary(site){const counts={};for(const branch of (site.branches||[])){const key=String(branch.segment||'未設定');counts[key]=(counts[key]||0)+1}return Object.keys(counts).length?Object.entries(counts).map(([k,v])=>`${k}:${v}件`).join(' / '):'未設定'}
+function siteSegmentPreset(site){const values=[...new Set((site.branches||[]).map((b)=>String(b.segment||'').trim()).filter(Boolean))];return values.length===1?values[0]:''}
+function resetSegmentForm(){segmentForm.reset();SITEPLUS.segmentSiteId=null;SITEPLUS.segmentBranchId=null;SITEPLUS.segmentContractCode='';$('#segment-modal-title').textContent='セグメントを編集';$('#segment-modal-subtitle').textContent='親現場または枝番号にセグメントを設定します。';$('#segment-modal-summary').textContent='対象を選ぶとここに現在値が表示されます。'}
+function openSiteSegmentModal(siteId){const site=SITEPLUS.sites.find((item)=>item.id===siteId);if(!site)return;resetSegmentForm();SITEPLUS.segmentSiteId=site.id;$('#segment-modal-title').textContent='親現場配下のセグメントを一括編集';$('#segment-modal-subtitle').textContent=`${site.site_id} / ${site.site_name} の全枝番号をまとめて更新します。`;segmentForm.querySelector('[name="segment"]').value=siteSegmentPreset(site);$('#segment-modal-summary').textContent=`現在の内訳: ${segmentSummary(site)}`;openModal('segment-modal')}
+function openBranchSegmentModal(branchId){const ctx=branchById(branchId);if(!ctx)return;const contractCode=String(ctx.branch.contract_code||'').trim();if(!contractCode){window.alert('この枝番号には契約コードがありません。最新マスタを同期してから再度お試しください。');return}resetSegmentForm();SITEPLUS.segmentBranchId=ctx.branch.id;SITEPLUS.segmentContractCode=contractCode;$('#segment-modal-title').textContent='枝番号のセグメントを編集';$('#segment-modal-subtitle').textContent=`${ctx.site.site_id} / ${ctx.site.site_name} / 枝番号 ${ctx.branch.site_branch}`;segmentForm.querySelector('[name="segment"]').value=String(ctx.branch.segment||'').trim();$('#segment-modal-summary').textContent=`契約コード ${contractCode} / 現在値 ${ctx.branch.segment||'未設定'}`;openModal('segment-modal')}
+async function submitSegmentForm(ev){ev.preventDefault();const segment=segmentForm.querySelector('[name="segment"]').value;if(SITEPLUS.segmentContractCode){await req(`/tools/siteplus/api/contract-master/${encodeURIComponent(SITEPLUS.segmentContractCode)}/segment`,{method:'PUT',body:JSON.stringify({segment})})}else if(SITEPLUS.segmentSiteId){await req(`/tools/siteplus/api/sites/${SITEPLUS.segmentSiteId}/segments`,{method:'PUT',body:JSON.stringify({segment})})}else{return}closeModal('segment-modal');resetSegmentForm();await loadSites()}
+function decorateSegmentTools(){const cards=$$('#site-list article');cards.forEach((card,index)=>{const site=SITEPLUS.sites[index];if(!site)return;const actionArea=card.querySelector('.siteplus-card-actions');if(actionArea&&actionArea.dataset.segmentReady!=='1'){actionArea.dataset.segmentReady='1';const bulkBtn=document.createElement('button');bulkBtn.type='button';bulkBtn.className='siteplus-btn border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100';bulkBtn.textContent='全枝セグメント';bulkBtn.addEventListener('click',()=>openSiteSegmentModal(site.id));actionArea.appendChild(bulkBtn);const note=document.createElement('div');note.className='rounded-2xl bg-amber-50 px-4 py-3 text-xs text-amber-900';note.textContent=`セグメント: ${segmentSummary(site)}`;actionArea.appendChild(note)}});const contexts=allBranchContexts();const rows=$$('#site-list tbody tr');rows.forEach((row,index)=>{const ctx=contexts[index];if(!ctx)return;const actionCell=row.querySelector('td:last-child');if(actionCell&&actionCell.dataset.segmentReady!=='1'){actionCell.dataset.segmentReady='1';const wrap=actionCell.firstElementChild&&actionCell.firstElementChild.tagName==='DIV'?actionCell.firstElementChild:actionCell;const segmentBtn=document.createElement('button');segmentBtn.type='button';segmentBtn.className='siteplus-btn border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 siteplus-btn-sm';segmentBtn.textContent=ctx.branch.segment?`区分: ${ctx.branch.segment}`:'セグメント';segmentBtn.addEventListener('click',()=>openBranchSegmentModal(ctx.branch.id));wrap.appendChild(segmentBtn)}const firstCell=row.querySelector('td');if(firstCell&&firstCell.dataset.segmentShown!=='1'){firstCell.dataset.segmentShown='1';const segmentLine=document.createElement('div');segmentLine.className='mt-1 text-xs text-amber-800';segmentLine.textContent=`セグメント ${ctx.branch.segment||'未設定'}`;firstCell.appendChild(segmentLine)}})}
+segmentForm.addEventListener('submit',(ev)=>submitSegmentForm(ev).catch((err)=>window.alert(err.message||'蜃ｦ逅・↓螟ｱ謨励＠縺ｾ縺励◆')));window.openSiteSegmentModal=openSiteSegmentModal;window.openBranchSegmentModal=openBranchSegmentModal;
+const __siteplusRenderListWithSegment=renderList;renderList=function(){__siteplusRenderListWithSegment();decorateSegmentTools()}
+</script>
+<script>
+function ensureEmbeddedSegmentEditors(){
+  const siteGrid=siteForm?.querySelector('.grid');
+  const branchGrid=branchForm?.querySelector('.grid');
+  const siteActions=siteForm?.querySelector('.siteplus-modal-actions');
+  const branchActions=branchForm?.querySelector('.siteplus-modal-actions');
+
+  if(siteGrid && !siteForm.querySelector('[name="bulk_segment"]')){
+    const wrap=document.createElement('label');
+    wrap.className='text-sm';
+    wrap.innerHTML='<span class="mb-1.5 block font-medium text-slate-700">セグメント一括設定</span><select name="bulk_segment" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"><option value="__KEEP__">変更しない</option><option value="">未設定にする</option><option value="役員">役員</option><option value="一般">一般</option><option value="旅客">旅客</option></select>';
+    siteGrid.appendChild(wrap);
+  }
+
+  if(siteForm && siteActions && !$('#site-segment-note')){
+    const note=document.createElement('div');
+    note.id='site-segment-note';
+    note.className='rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700';
+    note.textContent='枝番号ごとのセグメント状況はここに表示されます。';
+    siteForm.insertBefore(note,siteActions);
+  }
+
+  if(branchGrid && !branchForm.querySelector('[name="segment"]')){
+    const wrap=document.createElement('label');
+    wrap.className='text-sm md:col-span-2';
+    wrap.innerHTML='<span class="mb-1.5 block font-medium text-slate-700">セグメント</span><select name="segment" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"><option value="">未設定</option><option value="役員">役員</option><option value="一般">一般</option><option value="旅客">旅客</option></select>';
+    branchGrid.appendChild(wrap);
+  }
+
+  if(branchForm && branchActions && !$('#branch-segment-note')){
+    const note=document.createElement('div');
+    note.id='branch-segment-note';
+    note.className='rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700';
+    note.textContent='契約コードと現在のセグメントがここに表示されます。';
+    branchForm.insertBefore(note,branchActions);
+  }
+}
+
+function composeContractCodeForUi(siteId, siteBranch){
+  return `${String(siteId||'').trim().padStart(5,'0')}${String(siteBranch||'').trim().padStart(3,'0')}`;
+}
+
+function summarizeSiteSegments(site){
+  const counts={};
+  for(const branch of (site.branches||[])){
+    const key=String(branch.segment||'').trim()||'未設定';
+    counts[key]=(counts[key]||0)+1;
+  }
+  const summary=Object.entries(counts).map(([label,count])=>`${label}:${count}件`).join(' / ');
+  if(!(site.branches||[]).length){
+    return '枝番号がまだありません。追加後に一括設定できます。';
+  }
+  return summary||'未設定';
+}
+
+function preferredBulkSegmentValue(site){
+  const values=[...new Set((site.branches||[]).map((branch)=>String(branch.segment||'').trim()).filter(Boolean))];
+  return values.length===1?values[0]:'__KEEP__';
+}
+
+SITEPLUS.selectedSiteIds=Array.isArray(SITEPLUS.selectedSiteIds)?SITEPLUS.selectedSiteIds.map((value)=>Number(value)).filter(Boolean):[];
+
+function selectedSites(){
+  const ids=new Set((SITEPLUS.selectedSiteIds||[]).map((value)=>Number(value)));
+  return SITEPLUS.sites.filter((site)=>ids.has(Number(site.id)));
+}
+
+function syncSiteSelectionState(){
+  const visibleIds=new Set(SITEPLUS.sites.map((site)=>Number(site.id)));
+  SITEPLUS.selectedSiteIds=(SITEPLUS.selectedSiteIds||[]).map((value)=>Number(value)).filter((value)=>visibleIds.has(value));
+  SITEPLUS.selectedSiteId=SITEPLUS.selectedSiteIds.length===1?SITEPLUS.selectedSiteIds[0]:null;
+}
+
+function isSiteSelected(id){
+  return (SITEPLUS.selectedSiteIds||[]).includes(Number(id));
+}
+
+function toggleSiteSelection(id){
+  const normalized=Number(id);
+  if(!normalized) return;
+  const selected=new Set((SITEPLUS.selectedSiteIds||[]).map((value)=>Number(value)));
+  if(selected.has(normalized)){
+    selected.delete(normalized);
+  }else{
+    selected.add(normalized);
+  }
+  SITEPLUS.selectedSiteIds=Array.from(selected);
+  SITEPLUS.selectedSiteId=SITEPLUS.selectedSiteIds.length===1?SITEPLUS.selectedSiteIds[0]:null;
+  renderList();
+}
+
+function selectSite(id){
+  toggleSiteSelection(id);
+  renderList();
+}
+
+function selectAllVisibleSites(){
+  SITEPLUS.selectedSiteIds=SITEPLUS.sites.map((site)=>Number(site.id));
+  SITEPLUS.selectedSiteId=SITEPLUS.selectedSiteIds.length===1?SITEPLUS.selectedSiteIds[0]:null;
+  renderList();
+}
+
+function clearSiteSelection(){
+  SITEPLUS.selectedSiteIds=[];
+  SITEPLUS.selectedSiteId=null;
+  renderList();
+}
+
+function bulkSiteSummary(){
+  const items=selectedSites();
+  if(!items.length){
+    return '親現場を複数選択すると対象がここに表示されます。';
+  }
+  const active=SITEPLUS.sites.find((site)=>Number(site.id)===Number(SITEPLUS.activeSiteId))||null;
+  const labels=items.slice(0,3).map((site)=>`${site.site_id} / ${site.site_name}`);
+  const extra=items.length>3?` ほか${items.length-3}件`:'';
+  const activeText=active?` 操作対象: ${active.site_id} / ${active.site_name}`:'';
+  return `${items.length}件選択中: ${labels.join(' / ')}${extra}${activeText?` / ${activeText}`:''}`;
+}
+
+renderSummary=function(){
+  syncSiteSelectionState();
+  const activeSites=SITEPLUS.sites.filter((item)=>item.is_active).length;
+  const activeBranches=SITEPLUS.sites.reduce((sum,item)=>sum+(item.active_branch_count||0),0);
+  $('#siteplus-summary').textContent=`${activeSites}件の有効現場 / ${activeBranches}件の有効枝番号`;
+  const activeSite=SITEPLUS.sites.find((item)=>Number(item.id)===Number(SITEPLUS.activeSiteId))||null;
+  if(activeSite){
+    $('#selection-summary').textContent=`${bulkSiteSummary()}。枝番号操作の対象は ${activeSite.site_id} / ${activeSite.site_name} です。`;
+  }else if(selectedSites().length){
+    $('#selection-summary').textContent=bulkSiteSummary();
+  }else{
+    $('#selection-summary').textContent='親現場を選択すると対象がここに表示されます。';
+  }
+  $('#site-count').textContent=`${SITEPLUS.sites.length} 件`;
+  renderChips();
+};
+
+function ensureBulkSiteEditor(){
+  if($('#bulk-site-modal')) return;
+  const host=document.createElement('div');
+  host.innerHTML=`
+    <div id="bulk-site-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/55 p-4">
+      <div class="siteplus-modal-shell max-w-3xl">
+        <div class="siteplus-modal-header">
+          <div class="siteplus-modal-header-inner">
+            <div>
+              <div class="text-xs uppercase tracking-[0.2em] text-slate-400">BULK EDIT</div>
+              <h3 class="mt-1 text-xl font-semibold text-slate-900">選択した親現場を一括編集</h3>
+              <p id="bulk-site-modal-summary" class="mt-1 text-sm text-slate-500">対象がここに表示されます。</p>
+            </div>
+            <button type="button" class="siteplus-btn siteplus-btn-muted" data-close-modal="bulk-site-modal">閉じる</button>
+          </div>
+        </div>
+        <form id="bulk-site-form" class="siteplus-modal-body space-y-5">
+          <div class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">空欄の項目は変更しません。親現場名と契約番号は一括編集の対象外です。</div>
+          <div class="grid gap-4 md:grid-cols-2">
+            <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者 姓</span><input name="site_manager_last" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="未入力なら変更しない"></label>
+            <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者 名</span><input name="site_manager_first" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="未入力なら変更しない"></label>
+            <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者ID</span><input name="site_manager_id" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="未入力なら変更しない"></label>
+            <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">有効状態</span><select name="is_active_mode" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"><option value="__KEEP__">変更しない</option><option value="true">有効にする</option><option value="false">無効にする</option></select></label>
+            <label class="text-sm md:col-span-2"><span class="mb-1.5 block font-medium text-slate-700">配下枝番号のセグメント</span><select name="bulk_segment" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"><option value="__KEEP__">変更しない</option><option value="">未設定にする</option><option value="役員">役員</option><option value="一般">一般</option><option value="旅客">旅客</option></select></label>
+          </div>
+          <div class="siteplus-modal-actions">
+            <div class="siteplus-modal-actions-right">
+              <button type="button" class="siteplus-btn siteplus-btn-secondary" data-close-modal="bulk-site-modal">キャンセル</button>
+              <button type="submit" class="siteplus-btn siteplus-btn-primary">一括編集を実行</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.body.appendChild(host.firstElementChild);
+  $('#bulk-site-form').addEventListener('submit',(ev)=>submitBulkSiteEdit(ev).catch((err)=>window.alert(err.message||'処理に失敗しました')));
+  $$('#bulk-site-modal [data-close-modal]').forEach((button)=>button.addEventListener('click',()=>closeModal('bulk-site-modal')));
+}
+
+function openBulkSiteEditModal(){
+  ensureBulkSiteEditor();
+  if(!selectedSites().length){
+    window.alert('先に親現場を選択してください');
+    return;
+  }
+  const form=$('#bulk-site-form');
+  form.reset();
+  form.querySelector('[name="is_active_mode"]').value='__KEEP__';
+  form.querySelector('[name="bulk_segment"]').value='__KEEP__';
+  $('#bulk-site-modal-summary').textContent=bulkSiteSummary();
+  openModal('bulk-site-modal');
+}
+
+async function submitBulkSiteEdit(ev){
+  ev.preventDefault();
+  const items=selectedSites();
+  if(!items.length){
+    window.alert('先に親現場を選択してください');
+    return;
+  }
+  const form=ev.currentTarget;
+  const managerLast=String(form.querySelector('[name="site_manager_last"]').value||'').trim();
+  const managerFirst=String(form.querySelector('[name="site_manager_first"]').value||'').trim();
+  const managerId=String(form.querySelector('[name="site_manager_id"]').value||'').trim();
+  const activeMode=String(form.querySelector('[name="is_active_mode"]').value||'__KEEP__');
+  const bulkSegment=String(form.querySelector('[name="bulk_segment"]').value||'__KEEP__');
+  const hasSiteChanges=!!(managerLast||managerFirst||managerId||activeMode!=='__KEEP__');
+  const hasSegmentChange=bulkSegment!=='__KEEP__';
+  if(!hasSiteChanges && !hasSegmentChange){
+    window.alert('変更内容を入力してください');
+    return;
+  }
+
+  for(const site of items){
+    if(hasSiteChanges){
+      const payload={
+        site_id: site.site_id,
+        site_name: site.site_name,
+        site_manager_last: managerLast||site.site_manager_last||'',
+        site_manager_first: managerFirst||site.site_manager_first||'',
+        site_manager_id: managerId||site.site_manager_id||'',
+        is_active: activeMode==='__KEEP__'?!!site.is_active:activeMode==='true',
+        confirm_changes: true,
+        confirm_duplicate: true
+      };
+      await req(`/tools/siteplus/api/sites/${site.id}`,{method:'PUT',body:JSON.stringify(payload)});
+    }
+    if(hasSegmentChange){
+      await req(`/tools/siteplus/api/sites/${site.id}/segments`,{method:'PUT',body:JSON.stringify({segment:bulkSegment})});
+    }
+  }
+  closeModal('bulk-site-modal');
+  await loadSites();
+  window.alert(`${items.length}件の親現場を一括編集しました`);
+}
+
+resetSiteForm=function(){
+  siteForm.reset();
+  siteForm.querySelector('[name="is_active"]').checked=true;
+  const bulkField=siteForm.querySelector('[name="bulk_segment"]');
+  if(bulkField) bulkField.value='__KEEP__';
+  const note=$('#site-segment-note');
+  if(note) note.textContent='枝番号ごとのセグメント状況はここに表示されます。';
+  SITEPLUS.editingSiteId=null;
+  $('#site-delete-btn').classList.add('hidden');
+  $('#site-hard-delete-btn')?.classList.add('hidden');
+  $('#site-modal-title').textContent='親現場を登録';
+  $('#site-modal-subtitle').textContent='契約番号と担当者情報を登録します。';
+};
+
+resetBranchForm=function(){
+  branchForm.reset();
+  branchForm.querySelector('[name="is_active"]').checked=true;
+  branchForm.querySelector('[name="cloudshift_option_key"]').value='PENDING';
+  const segmentField=branchForm.querySelector('[name="segment"]');
+  if(segmentField) segmentField.value='';
+  const note=$('#branch-segment-note');
+  if(note) note.textContent='契約コードと現在のセグメントがここに表示されます。';
+  SITEPLUS.editingBranchId=null;
+  $('#branch-delete-btn').classList.add('hidden');
+  $('#branch-modal-title').textContent='枝番号を登録';
+  const site=selectedSite();
+  $('#branch-target').textContent=site?`対象親現場: ${site.site_id} / ${site.site_name}`:'親現場を選択するとここに対象が表示されます。';
+};
+
+editSite=function(id){
+  const site=SITEPLUS.sites.find((item)=>item.id===id);
+  if(!site) return;
+  SITEPLUS.selectedSiteId=site.id;
+  SITEPLUS.editingSiteId=site.id;
+  $('#site-modal-title').textContent='親現場を編集';
+  $('#site-modal-subtitle').textContent=`${site.site_id} / ${site.site_name} の内容を更新します。`;
+  siteForm.querySelector('[name="site_id"]').value=site.site_id||'';
+  siteForm.querySelector('[name="site_name"]').value=site.site_name||'';
+  siteForm.querySelector('[name="site_manager_last"]').value=site.site_manager_last||'';
+  siteForm.querySelector('[name="site_manager_first"]').value=site.site_manager_first||'';
+  siteForm.querySelector('[name="site_manager_id"]').value=site.site_manager_id||'';
+  siteForm.querySelector('[name="is_active"]').checked=!!site.is_active;
+  const bulkField=siteForm.querySelector('[name="bulk_segment"]');
+  if(bulkField) bulkField.value=preferredBulkSegmentValue(site);
+  const note=$('#site-segment-note');
+  if(note) note.textContent=`現在の内訳: ${summarizeSiteSegments(site)}`;
+  $('#site-delete-btn').classList.remove('hidden');
+  renderList();
+  openModal('site-modal');
+};
+
+editBranch=function(id){
+  const ctx=branchById(id);
+  if(!ctx) return;
+  SITEPLUS.selectedSiteId=ctx.site.id;
+  SITEPLUS.editingBranchId=ctx.branch.id;
+  $('#branch-modal-title').textContent='枝番号を編集';
+  $('#branch-target').textContent=`${ctx.site.site_id} / ${ctx.site.site_name} の枝番号を更新します。`;
+  branchForm.querySelector('[name="site_branch"]').value=ctx.branch.site_branch||'';
+  branchForm.querySelector('[name="cloudshift_option_key"]').value=ctx.branch.cloudshift_option_key||'PENDING';
+  branchForm.querySelector('[name="is_active"]').checked=!!ctx.branch.is_active;
+  const segmentField=branchForm.querySelector('[name="segment"]');
+  if(segmentField) segmentField.value=String(ctx.branch.segment||'').trim();
+  const note=$('#branch-segment-note');
+  if(note) note.textContent=`契約コード ${ctx.branch.contract_code||'-'} / 現在値 ${ctx.branch.segment||'未設定'}`;
+  $('#branch-delete-btn').classList.remove('hidden');
+  renderList();
+  openModal('branch-modal');
+};
+
+renderList=function(){
+  renderSummary();
+  if(!SITEPLUS.sites.length){
+    $('#site-list').innerHTML='<div class="rounded-[24px] border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">条件に一致する現場がありません</div>';
+    return;
+  }
+
+  const toolbar=`
+    <div class="flex flex-col gap-3 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <div class="text-sm text-slate-600">${esc(bulkSiteSummary())}</div>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.selectAllVisibleSites()">表示中の現場を全選択</button>
+        <button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.clearSiteSelection()">選択を解除</button>
+        <button type="button" class="siteplus-btn siteplus-btn-primary siteplus-btn-sm" onclick="window.openBulkSiteEditModal()">一括編集</button>
+      </div>
+    </div>`;
+
+  const cards=SITEPLUS.sites.map((site)=>{
+    const branches=Array.isArray(site.branches)?site.branches:[];
+    const isActiveTarget=Number(site.id)===Number(SITEPLUS.activeSiteId);
+    const checked=isSiteSelected(site.id);
+    return `<article class="overflow-hidden rounded-[26px] border ${isActiveTarget?'border-teal-400 shadow-[0_18px_55px_rgba(13,148,136,0.16)]':'border-slate-200 shadow-sm'} bg-white">
+      <div class="border-b border-slate-100 px-5 py-4 sm:px-6">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div class="space-y-3">
+            <div class="flex flex-wrap items-center gap-2">
+              ${site.is_active?'<span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">有効</span>':'<span class="rounded-full bg-rose-100 px-3 py-1 text-xs font-medium text-rose-700">無効</span>'}
+              ${site.has_duplicate_name?'<span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">同名あり</span>':''}
+              <label class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700"><input type="checkbox" class="rounded border-slate-300" ${checked?'checked':''} onchange="window.toggleSiteSelection(${site.id})">一括編集対象</label>
+              
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-[0.18em] text-slate-400">SITE</div>
+              <div class="mt-1 text-xl font-semibold text-slate-900">${esc(site.site_id)} / ${esc(site.site_name)}</div>
+            </div>
+            <div class="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 xl:grid-cols-4">
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">担当者</div><div class="mt-1 font-medium text-slate-800">${esc(site.site_manager_last)} ${esc(site.site_manager_first)}</div><div class="text-xs text-slate-500">${esc(site.site_manager_id)}</div></div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">登録 / 更新</div><div class="mt-1 font-medium text-slate-800">${esc(site.site_register)}</div><div class="text-xs text-slate-500">${esc(site.site_updater)}</div></div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">更新日時</div><div class="mt-1 font-medium text-slate-800">${esc(site.updated_at||'-')}</div></div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">セグメント</div><div class="mt-1 font-medium text-slate-800">${esc(summarizeSiteSegments(site))}</div><div class="text-xs text-slate-500">${branches.length}件の枝番号</div></div>
+            </div>
+          </div>
+          <div class="siteplus-card-actions lg:w-[272px]">
+            <button type="button" class="siteplus-btn siteplus-btn-primary" onclick="window.editSite(${site.id})">親現場を編集</button>
+            <button type="button" class="siteplus-btn border border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" onclick="window.prepareBranchForSite(${site.id})">枝番号を追加</button>
+          </div>
+        </div>
+      </div>
+      <div class="px-5 py-4 sm:px-6">
+        <div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-slate-900">枝番号一覧</h3><span class="text-xs text-slate-500">${branches.length?`${branches.length}件`:'未登録'}</span></div>
+        ${branches.length?`<div class="overflow-hidden rounded-[20px] border border-slate-200"><table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-slate-500"><tr><th class="px-4 py-3">枝番号</th><th class="px-4 py-3">契約コード</th><th class="px-4 py-3">セグメント</th><th class="px-4 py-3">オプション</th><th class="px-4 py-3">登録者</th><th class="px-4 py-3">更新日時</th><th class="px-4 py-3">状態</th><th class="px-4 py-3"></th></tr></thead><tbody>${branches.map((branch)=>`<tr class="border-t border-slate-100"><td class="px-4 py-3 font-medium text-slate-900">${esc(branch.site_branch)}</td><td class="px-4 py-3 text-slate-600">${esc(branch.contract_code||'-')}</td><td class="px-4 py-3">${esc(branch.segment||'未設定')}</td><td class="px-4 py-3">${esc(optionLabel(branch.cloudshift_option_key))}</td><td class="px-4 py-3">${esc(branch.site_register)}</td><td class="px-4 py-3">${esc(branch.updated_at||'-')}</td><td class="px-4 py-3">${branch.is_active?'<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">有効</span>':'<span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-700">無効</span>'}</td><td class="px-4 py-3 text-right"><div class="flex justify-end gap-2"><button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.editBranch(${branch.id})">編集</button><button type="button" class="siteplus-btn siteplus-btn-muted siteplus-btn-sm" onclick="window.openDedicatedModal(${branch.id})">${branch.dedicated_employee_name?`専従: ${esc(branch.dedicated_employee_name)}`:'専従者'}</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">この親現場には枝番号がまだありません。</div>'}
+      </div>
+    </article>`;
+  }).join('');
+  $('#site-list').innerHTML=`<div class="space-y-4">${toolbar}${cards}</div>`;
+};
+
+loadSites=async function(){
+  const params=new URLSearchParams();
+  Object.entries(filters()).forEach(([key,value])=>{if(value!==''&&value!==false&&value!=null)params.set(key,value)});
+  const data=await req(`/tools/siteplus/api/sites?${params.toString()}`);
+  SITEPLUS.sites=data.sites||[];
+  syncSiteSelectionState();
+  renderList();
+};
+
+selectSite=function(id){
+  toggleSiteSelection(id);
+};
+
+prepareBranchForSite=function(id){
+  const site=SITEPLUS.sites.find((item)=>Number(item.id)===Number(id));
+  if(!site)return;
+  rememberActiveSite(site.id);
+  renderList();
+  resetBranchForm();
+  $('#branch-target').textContent=`対象親現場: ${site.site_id} / ${site.site_name}`;
+  openModal('branch-modal');
+};
+
+async function submitSiteWithSegments(ev){
+  ev.preventDefault();
+  ev.stopImmediatePropagation();
+  const payload=formDataObj(siteForm);
+  const bulkSegment=String(payload.bulk_segment??'__KEEP__');
+  delete payload.bulk_segment;
+
+  try{
+    if(!SITEPLUS.editingSiteId){
+      await req('/tools/siteplus/api/sites',{method:'POST',body:JSON.stringify(payload)});
+      closeModal('site-modal');
+      resetSiteForm();
+      await loadSites();
+      return;
+    }
+
+    const preview=await req(`/tools/siteplus/api/sites/${SITEPLUS.editingSiteId}/preview`,{method:'PUT',body:JSON.stringify(payload)});
+    openConfirm({
+      title:'親現場の変更確認',
+      message:'変更内容を確認して問題なければ更新します。',
+      bodyHtml:`${changeTable(preview.changes)}${duplicateTable(preview.duplicates)}`,
+      label:'更新する',
+      onConfirm:async()=>{
+        await req(`/tools/siteplus/api/sites/${SITEPLUS.editingSiteId}`,{method:'PUT',body:JSON.stringify({...payload,confirm_changes:true,confirm_duplicate:true})});
+        if(bulkSegment!=='__KEEP__'){
+          await req(`/tools/siteplus/api/sites/${SITEPLUS.editingSiteId}/segments`,{method:'PUT',body:JSON.stringify({segment:bulkSegment})});
+        }
+        closeModal('confirm-modal');
+        closeModal('site-modal');
+        resetSiteForm();
+        await loadSites();
+      }
+    });
+  }catch(e){
+    if(e.status===409&&e.payload?.duplicates){
+      openConfirm({
+        title:'同名現場の注意',
+        message:'同名現場があります。このまま登録する場合は続行してください。',
+        bodyHtml:duplicateTable(e.payload.duplicates),
+        label:'そのまま登録',
+        onConfirm:async()=>{
+          await req('/tools/siteplus/api/sites',{method:'POST',body:JSON.stringify({...payload,confirm_duplicate:true})});
+          closeModal('confirm-modal');
+          closeModal('site-modal');
+          resetSiteForm();
+          await loadSites();
+        }
+      });
+      return;
+    }
+    window.alert(e.message||'処理に失敗しました');
+  }
+}
+
+async function submitBranchWithSegment(ev){
+  ev.preventDefault();
+  ev.stopImmediatePropagation();
+  const site=selectedSite();
+  if(!site){
+    window.alert('先に親現場を選択してください');
+    return;
+  }
+
+  const payload=formDataObj(branchForm);
+  const segment=String(payload.segment??'');
+  delete payload.segment;
+
+  try{
+    if(!SITEPLUS.editingBranchId){
+      const created=await req(`/tools/siteplus/api/sites/${site.id}/branches`,{method:'POST',body:JSON.stringify(payload)});
+      const createdBranch=created.branch||{};
+      const contractCode=composeContractCodeForUi(site.site_id, createdBranch.site_branch||payload.site_branch);
+      await req(`/tools/siteplus/api/contract-master/${encodeURIComponent(contractCode)}/segment`,{method:'PUT',body:JSON.stringify({segment})});
+      closeModal('branch-modal');
+      resetBranchForm();
+      await loadSites();
+      SITEPLUS.selectedSiteId=site.id;
+      renderList();
+      return;
+    }
+
+    const preview=await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}/preview`,{method:'PUT',body:JSON.stringify(payload)});
+    openConfirm({
+      title:'枝番号の変更確認',
+      message:'変更内容を確認して問題なければ更新します。',
+      bodyHtml:changeTable(preview.changes),
+      label:'更新する',
+      onConfirm:async()=>{
+        await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}`,{method:'PUT',body:JSON.stringify({...payload,confirm_changes:true})});
+        const contractCode=composeContractCodeForUi(site.site_id, payload.site_branch);
+        await req(`/tools/siteplus/api/contract-master/${encodeURIComponent(contractCode)}/segment`,{method:'PUT',body:JSON.stringify({segment})});
+        closeModal('confirm-modal');
+        closeModal('branch-modal');
+        resetBranchForm();
+        await loadSites();
+        SITEPLUS.selectedSiteId=site.id;
+        renderList();
+      }
+    });
+  }catch(e){
+    window.alert(e.message||'処理に失敗しました');
+  }
+}
+
+bulkSiteSummary=function(){
+  const items=selectedSites();
+  if(!items.length){
+    return '現場を選択すると、ここに一括編集対象が表示されます。';
+  }
+  const labels=items.slice(0,3).map((site)=>`${site.site_id} / ${site.site_name}`);
+  const extra=items.length>3?` ほか${items.length-3}件`:'';
+  return `${items.length}件を選択中: ${labels.join(' / ')}${extra}`;
+};
+
+renderSummary=function(){
+  syncSiteSelectionState();
+  const activeSites=SITEPLUS.sites.filter((item)=>item.is_active).length;
+  const activeBranches=SITEPLUS.sites.reduce((sum,item)=>sum+(item.active_branch_count||0),0);
+  $('#siteplus-summary').textContent=`${activeSites}件の有効現場 / ${activeBranches}件の有効枝番号`;
+  const items=selectedSites();
+  if(items.length===1){
+    $('#selection-summary').textContent=`${bulkSiteSummary()}。上部の「枝番号を登録」はこの1件を対象に使えます。`;
+  }else if(items.length>1){
+    $('#selection-summary').textContent=`${bulkSiteSummary()}。枝番号登録は1件だけ選択したときに使えます。`;
+  }else{
+    $('#selection-summary').textContent=bulkSiteSummary();
+  }
+  $('#site-count').textContent=`${SITEPLUS.sites.length} 件`;
+  renderChips();
+};
+
+renderList=function(){
+  renderSummary();
+  if(!SITEPLUS.sites.length){
+    $('#site-list').innerHTML='<div class="rounded-[24px] border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">条件に一致する現場がありません</div>';
+    return;
+  }
+
+  const toolbar=`
+    <div class="flex flex-col gap-3 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <div class="text-sm text-slate-600">${esc(bulkSiteSummary())}</div>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.selectAllVisibleSites()">表示中の現場を全選択</button>
+        <button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.clearSiteSelection()">選択を解除</button>
+        <button type="button" class="siteplus-btn siteplus-btn-primary siteplus-btn-sm" onclick="window.openBulkSiteEditModal()">一括編集</button>
+      </div>
+    </div>`;
+
+  const cards=SITEPLUS.sites.map((site)=>{
+    const branches=Array.isArray(site.branches)?site.branches:[];
+    const checked=isSiteSelected(site.id);
+    return `<article class="overflow-hidden rounded-[26px] border ${checked?'border-teal-400 shadow-[0_18px_55px_rgba(13,148,136,0.16)]':'border-slate-200 shadow-sm'} bg-white">
+      <div class="border-b border-slate-100 px-5 py-4 sm:px-6">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div class="space-y-3">
+            <div class="flex flex-wrap items-center gap-2">
+              ${site.is_active?'<span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">有効</span>':'<span class="rounded-full bg-rose-100 px-3 py-1 text-xs font-medium text-rose-700">無効</span>'}
+              ${site.has_duplicate_name?'<span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">同名あり</span>':''}
+              <label class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700"><input type="checkbox" class="rounded border-slate-300" ${checked?'checked':''} onchange="window.toggleSiteSelection(${site.id})">選択</label>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-[0.18em] text-slate-400">SITE</div>
+              <div class="mt-1 text-xl font-semibold text-slate-900">${esc(site.site_id)} / ${esc(site.site_name)}</div>
+            </div>
+            <div class="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 xl:grid-cols-4">
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">担当者</div><div class="mt-1 font-medium text-slate-800">${esc(site.site_manager_last)} ${esc(site.site_manager_first)}</div><div class="text-xs text-slate-500">${esc(site.site_manager_id)}</div></div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">登録 / 更新</div><div class="mt-1 font-medium text-slate-800">${esc(site.site_register)}</div><div class="text-xs text-slate-500">${esc(site.site_updater)}</div></div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">更新日時</div><div class="mt-1 font-medium text-slate-800">${esc(site.updated_at||'-')}</div></div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">セグメント</div><div class="mt-1 font-medium text-slate-800">${esc(summarizeSiteSegments(site))}</div><div class="text-xs text-slate-500">${branches.length}件の枝番号</div></div>
+            </div>
+          </div>
+          <div class="siteplus-card-actions lg:w-[272px]">
+            <button type="button" class="siteplus-btn siteplus-btn-primary" onclick="window.editSite(${site.id})">親現場を編集</button>
+            <button type="button" class="siteplus-btn border border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100" onclick="window.prepareBranchForSite(${site.id})">枝番号を追加</button>
+          </div>
+        </div>
+      </div>
+      <div class="px-5 py-4 sm:px-6">
+        <div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-slate-900">枝番号一覧</h3><span class="text-xs text-slate-500">${branches.length?`${branches.length}件`:'未登録'}</span></div>
+        ${branches.length?`<div class="overflow-hidden rounded-[20px] border border-slate-200"><table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-slate-500"><tr><th class="px-4 py-3">枝番号</th><th class="px-4 py-3">契約コード</th><th class="px-4 py-3">セグメント</th><th class="px-4 py-3">オプション</th><th class="px-4 py-3">登録者</th><th class="px-4 py-3">更新日時</th><th class="px-4 py-3">状態</th><th class="px-4 py-3"></th></tr></thead><tbody>${branches.map((branch)=>`<tr class="border-t border-slate-100"><td class="px-4 py-3 font-medium text-slate-900">${esc(branch.site_branch)}</td><td class="px-4 py-3 text-slate-600">${esc(branch.contract_code||'-')}</td><td class="px-4 py-3">${esc(branch.segment||'未設定')}</td><td class="px-4 py-3">${esc(optionLabel(branch.cloudshift_option_key))}</td><td class="px-4 py-3">${esc(branch.site_register)}</td><td class="px-4 py-3">${esc(branch.updated_at||'-')}</td><td class="px-4 py-3">${branch.is_active?'<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">有効</span>':'<span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-700">無効</span>'}</td><td class="px-4 py-3 text-right"><div class="flex justify-end gap-2"><button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.editBranch(${branch.id})">編集</button><button type="button" class="siteplus-btn siteplus-btn-muted siteplus-btn-sm" onclick="window.openDedicatedModal(${branch.id})">${branch.dedicated_employee_name?`専従: ${esc(branch.dedicated_employee_name)}`:'専従設定'}</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">この親現場には枝番号がまだありません。</div>'}
+      </div>
+    </article>`;
+  }).join('');
+  $('#site-list').innerHTML=`<div class="space-y-4">${toolbar}${cards}</div>`;
+  decorateDedicatedButtons();
+  decorateSegmentTools();
+};
+
+loadSites=async function(){
+  const params=new URLSearchParams();
+  Object.entries(filters()).forEach(([key,value])=>{if(value!==''&&value!==false&&value!=null)params.set(key,value)});
+  const data=await req(`/tools/siteplus/api/sites?${params.toString()}`);
+  SITEPLUS.sites=data.sites||[];
+  syncSiteSelectionState();
+  renderList();
+};
+
+selectSite=function(id){
+  toggleSiteSelection(id);
+};
+
+function resolveSelectedSiteForBranchAction(){
+  syncSiteSelectionState();
+  const items=selectedSites();
+  if(items.length===1){
+    SITEPLUS.selectedSiteId=items[0].id;
+    return items[0];
+  }
+  if(items.length>1){
+    window.alert('枝番号を登録するときは、親現場を1件だけ選択してください。');
+    return null;
+  }
+  window.alert('先に親現場を1件選択してください。');
+  return null;
+}
+
+openBranchModal=function(){
+  const site=resolveSelectedSiteForBranchAction();
+  if(!site) return;
+  resetBranchForm();
+  $('#branch-target').textContent=`対象親現場: ${site.site_id} / ${site.site_name}`;
+  openModal('branch-modal');
+};
+
+prepareBranchForSite=function(id){
+  const site=SITEPLUS.sites.find((item)=>Number(item.id)===Number(id));
+  if(!site)return;
+  SITEPLUS.selectedSiteId=site.id;
+  resetBranchForm();
+  $('#branch-target').textContent=`対象親現場: ${site.site_id} / ${site.site_name}`;
+  openModal('branch-modal');
+};
+
+const siteplusCreateBranchButton=$('#open-create-branch');
+if(siteplusCreateBranchButton){
+  siteplusCreateBranchButton.addEventListener('click',(ev)=>{
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    openBranchModal();
+  },true);
+}
+
+ensureEmbeddedSegmentEditors();
+ensureBulkSiteEditor();
+siteForm.addEventListener('submit',(ev)=>submitSiteWithSegments(ev),true);
+branchForm.addEventListener('submit',(ev)=>submitBranchWithSegment(ev),true);
+window.selectSite=selectSite;
+window.toggleSiteSelection=toggleSiteSelection;
+window.selectAllVisibleSites=selectAllVisibleSites;
+window.clearSiteSelection=clearSiteSelection;
+window.openBulkSiteEditModal=openBulkSiteEditModal;
+window.editSite=editSite;
+window.editBranch=editBranch;
+window.prepareBranchForSite=prepareBranchForSite;
+window.openDedicatedModal=openDedicatedModal;
+resetSiteForm();
+resetBranchForm();
+renderList();
+</script>
+<script>
+SITEPLUS.unifiedEditorSiteId=SITEPLUS.unifiedEditorSiteId||null;
+
+function ensureUnifiedSiteEditor(){
+  if($('#unified-site-editor-modal')) return;
+  const host=document.createElement('div');
+  host.innerHTML=`
+    <div id="unified-site-editor-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/55 p-4">
+      <div class="siteplus-modal-shell max-w-4xl">
+        <div class="siteplus-modal-header">
+          <div class="siteplus-modal-header-inner">
+            <div>
+              <div class="text-xs uppercase tracking-[0.2em] text-slate-400">EDITOR</div>
+              <h3 id="unified-site-editor-title" class="mt-1 text-xl font-semibold text-slate-900">編集</h3>
+              <p id="unified-site-editor-subtitle" class="mt-1 text-sm text-slate-500">親現場と枝番号をまとめて編集できます。</p>
+            </div>
+            <button type="button" class="siteplus-btn siteplus-btn-muted" data-close-unified-editor>閉じる</button>
+          </div>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button type="button" class="siteplus-btn siteplus-btn-primary siteplus-btn-sm" data-editor-tab="site">親現場</button>
+            <button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" data-editor-tab="branch">枝番号</button>
+            <button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" data-editor-tab="segment">全枝セグメント</button>
+          </div>
+        </div>
+        <div class="siteplus-modal-body">
+          <div id="unified-site-editor-panel-site" class="space-y-4">
+            <div id="unified-site-note" class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700"></div>
+          </div>
+          <div id="unified-site-editor-panel-branch" class="hidden space-y-4">
+            <div id="unified-branch-note" class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700"></div>
+          </div>
+          <div id="unified-site-editor-panel-segment" class="hidden space-y-4">
+            <div id="unified-segment-note" class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700"></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(host.firstElementChild);
+
+  $('#unified-site-editor-panel-site').appendChild(siteForm);
+  $('#unified-site-editor-panel-branch').appendChild(branchForm);
+  $('#unified-site-editor-panel-segment').appendChild(segmentForm);
+
+  const confirmModal=$('#confirm-modal');
+  if(confirmModal){
+    confirmModal.classList.remove('z-50');
+    confirmModal.classList.add('z-[70]');
+  }
+
+  const siteActions=siteForm.querySelector('.siteplus-modal-actions');
+  const siteDeleteButton=$('#site-delete-btn');
+  const branchDeleteButton=$('#branch-delete-btn');
+  if(siteDeleteButton){
+    siteDeleteButton.textContent='無効化';
+  }
+  if(branchDeleteButton){
+    branchDeleteButton.textContent='完全削除';
+    branchDeleteButton.classList.add('hidden');
+  }
+  if(siteActions && !$('#site-hard-delete-btn')){
+    const hardDeleteButton=document.createElement('button');
+    hardDeleteButton.type='button';
+    hardDeleteButton.id='site-hard-delete-btn';
+    hardDeleteButton.className='siteplus-btn siteplus-btn-danger hidden';
+    hardDeleteButton.textContent='完全削除';
+    if(siteDeleteButton && siteDeleteButton.parentElement===siteActions){
+      siteActions.insertBefore(hardDeleteButton, siteDeleteButton.nextSibling);
+    }else if(siteDeleteButton && siteDeleteButton.parentElement){
+      siteDeleteButton.parentElement.appendChild(hardDeleteButton);
+    }else{
+      siteActions.insertBefore(hardDeleteButton, siteActions.firstChild);
+    }
+    hardDeleteButton.addEventListener('click',()=>deleteSite('hard').catch((err)=>window.alert(err.message||'処理に失敗しました')));
+  }
+
+  siteForm.querySelector('[name="bulk_segment"]')?.closest('label')?.classList.add('hidden');
+  $('#site-segment-note')?.classList.add('hidden');
+  $('#branch-segment-note')?.classList.add('hidden');
+
+  $$('#unified-site-editor-modal [data-close-unified-editor]').forEach((button)=>button.addEventListener('click',()=>closeModal('unified-site-editor-modal')));
+  [siteForm,branchForm,segmentForm].forEach((form)=>{
+    form.querySelectorAll('[data-close-modal]').forEach((button)=>{
+      button.addEventListener('click',(ev)=>{
+        ev.preventDefault();
+        closeModal('unified-site-editor-modal');
+      });
+    });
+  });
+  $$('#unified-site-editor-modal [data-editor-tab]').forEach((button)=>button.addEventListener('click',()=>switchUnifiedSiteEditorTab(button.dataset.editorTab)));
+}
+
+function setUnifiedSiteEditorHeader(site, tab){
+  const labels={site:'親現場',branch:'枝番号',segment:'全枝セグメント'};
+  $('#unified-site-editor-title').textContent=site?`${site.site_id} / ${site.site_name}`:'親現場を登録';
+  $('#unified-site-editor-subtitle').textContent=site?`${labels[tab]||'編集'}タブを開いて内容を更新できます。`:'親現場の新規登録です。';
+}
+
+function refreshUnifiedSiteEditorTabs(){
+  const hasSite=!!SITEPLUS.unifiedEditorSiteId;
+  $$('#unified-site-editor-modal [data-editor-tab]').forEach((button)=>{
+    const tab=button.dataset.editorTab;
+    const disabled=!hasSite && tab!=='site';
+    button.disabled=disabled;
+    button.classList.toggle('opacity-50',disabled);
+    button.classList.toggle('cursor-not-allowed',disabled);
+  });
+}
+
+function switchUnifiedSiteEditorTab(tab){
+  ensureUnifiedSiteEditor();
+  if(!SITEPLUS.unifiedEditorSiteId && tab!=='site'){
+    window.alert('先に親現場を指定してください。');
+    return;
+  }
+  const site=SITEPLUS.sites.find((item)=>Number(item.id)===Number(SITEPLUS.unifiedEditorSiteId))||null;
+  setUnifiedSiteEditorHeader(site,tab);
+  $$('#unified-site-editor-modal [data-editor-tab]').forEach((button)=>{
+    const active=button.dataset.editorTab===tab;
+    button.classList.toggle('siteplus-btn-primary',active);
+    button.classList.toggle('siteplus-btn-secondary',!active);
+  });
+  ['site','branch','segment'].forEach((name)=>{
+    $(`#unified-site-editor-panel-${name}`).classList.toggle('hidden',name!==tab);
+  });
+  if(site && tab==='branch' && !SITEPLUS.editingBranchId){
+    $('#unified-branch-note').textContent=`対象親現場: ${site.site_id} / ${site.site_name}`;
+  }
+  if(site && tab==='segment'){
+    SITEPLUS.segmentSiteId=site.id;
+    SITEPLUS.segmentBranchId=null;
+    SITEPLUS.segmentContractCode='';
+    segmentForm.querySelector('[name="segment"]').value=siteSegmentPreset(site);
+    $('#unified-segment-note').textContent=`${site.site_id} / ${site.site_name} 配下の全枝へ同じセグメントを設定します。現在: ${summarizeSiteSegments(site)}`;
+  }
+}
+
+function openUnifiedSiteEditor(tab){
+  ensureUnifiedSiteEditor();
+  refreshUnifiedSiteEditorTabs();
+  openModal('unified-site-editor-modal');
+  switchUnifiedSiteEditorTab(tab);
+}
+
+function populateSiteFormForEditor(site){
+  ensureUnifiedSiteEditor();
+  resetSiteForm();
+  SITEPLUS.unifiedEditorSiteId=site.id;
+  SITEPLUS.selectedSiteId=site.id;
+  SITEPLUS.editingSiteId=site.id;
+  siteForm.querySelector('[name="site_id"]').value=site.site_id||'';
+  siteForm.querySelector('[name="site_name"]').value=site.site_name||'';
+  siteForm.querySelector('[name="site_manager_last"]').value=site.site_manager_last||'';
+  siteForm.querySelector('[name="site_manager_first"]').value=site.site_manager_first||'';
+  siteForm.querySelector('[name="site_manager_id"]').value=site.site_manager_id||'';
+  siteForm.querySelector('[name="is_active"]').checked=!!site.is_active;
+  $('#site-delete-btn').classList.remove('hidden');
+  $('#site-hard-delete-btn')?.classList.remove('hidden');
+  $('#unified-site-note').textContent=`親現場 ${site.site_id} / ${site.site_name} の基本情報を更新します。`;
+}
+
+function populateBranchFormForCreate(site){
+  ensureUnifiedSiteEditor();
+  resetBranchForm();
+  SITEPLUS.unifiedEditorSiteId=site.id;
+  SITEPLUS.selectedSiteId=site.id;
+  $('#unified-branch-note').textContent=`対象親現場: ${site.site_id} / ${site.site_name}`;
+}
+
+function populateBranchFormForEdit(ctx){
+  ensureUnifiedSiteEditor();
+  resetBranchForm();
+  SITEPLUS.unifiedEditorSiteId=ctx.site.id;
+  SITEPLUS.selectedSiteId=ctx.site.id;
+  SITEPLUS.editingBranchId=ctx.branch.id;
+  branchForm.querySelector('[name="site_branch"]').value=ctx.branch.site_branch||'';
+  branchForm.querySelector('[name="cloudshift_option_key"]').value=ctx.branch.cloudshift_option_key||'PENDING';
+  branchForm.querySelector('[name="is_active"]').checked=!!ctx.branch.is_active;
+  branchForm.querySelector('[name="segment"]').value=String(ctx.branch.segment||'').trim();
+  $('#branch-delete-btn').classList.remove('hidden');
+  $('#unified-branch-note').textContent=`${ctx.site.site_id} / ${ctx.site.site_name} / 枝番号 ${ctx.branch.site_branch} を編集します。`;
+}
+
+openCreateSite=function(){
+  ensureUnifiedSiteEditor();
+  SITEPLUS.unifiedEditorSiteId=null;
+  SITEPLUS.selectedSiteId=null;
+  resetSiteForm();
+  resetBranchForm();
+  resetSegmentForm();
+  $('#unified-site-note').textContent='新しい親現場を登録します。';
+  openUnifiedSiteEditor('site');
+};
+
+editSite=function(id){
+  const site=SITEPLUS.sites.find((item)=>Number(item.id)===Number(id));
+  if(!site) return;
+  populateSiteFormForEditor(site);
+  populateBranchFormForCreate(site);
+  openUnifiedSiteEditor('site');
+};
+
+prepareBranchForSite=function(id){
+  const site=SITEPLUS.sites.find((item)=>Number(item.id)===Number(id));
+  if(!site) return;
+  populateSiteFormForEditor(site);
+  populateBranchFormForCreate(site);
+  openUnifiedSiteEditor('branch');
+};
+
+editBranch=function(id){
+  const ctx=branchById(id);
+  if(!ctx) return;
+  populateSiteFormForEditor(ctx.site);
+  populateBranchFormForEdit(ctx);
+  openUnifiedSiteEditor('branch');
+};
+
+function resolveSingleSelectedSite(){
+  syncSiteSelectionState();
+  const items=selectedSites();
+  if(items.length===1) return items[0];
+  if(items.length>1){
+    window.alert('枝番号を登録するときは、親現場を1件だけ選択してください。');
+    return null;
+  }
+  window.alert('先に親現場を1件選択してください。');
+  return null;
+}
+
+openBranchModal=function(){
+  const site=resolveSingleSelectedSite();
+  if(!site) return;
+  populateSiteFormForEditor(site);
+  populateBranchFormForCreate(site);
+  openUnifiedSiteEditor('branch');
+};
+
+submitSiteWithSegments=async function(ev){
+  ev.preventDefault();
+  ev.stopImmediatePropagation();
+  const payload=formDataObj(siteForm);
+  delete payload.bulk_segment;
+  try{
+    if(!SITEPLUS.editingSiteId){
+      await req('/tools/siteplus/api/sites',{method:'POST',body:JSON.stringify(payload)});
+      closeModal('unified-site-editor-modal');
+      resetSiteForm();
+      await loadSites();
+      return;
+    }
+    const preview=await req(`/tools/siteplus/api/sites/${SITEPLUS.editingSiteId}/preview`,{method:'PUT',body:JSON.stringify(payload)});
+    openConfirm({
+      title:'親現場の変更確認',
+      message:'変更内容を確認して問題なければ更新します。',
+      bodyHtml:`${changeTable(preview.changes)}${duplicateTable(preview.duplicates)}`,
+      label:'更新する',
+      onConfirm:async()=>{
+        await req(`/tools/siteplus/api/sites/${SITEPLUS.editingSiteId}`,{method:'PUT',body:JSON.stringify({...payload,confirm_changes:true,confirm_duplicate:true})});
+        closeModal('confirm-modal');
+        closeModal('unified-site-editor-modal');
+        resetSiteForm();
+        await loadSites();
+      }
+    });
+  }catch(e){
+    if(e.status===409&&e.payload?.duplicates){
+      openConfirm({
+        title:'同名現場の注意',
+        message:'同名現場があります。このまま登録する場合は続行してください。',
+        bodyHtml:duplicateTable(e.payload.duplicates),
+        label:'そのまま登録',
+        onConfirm:async()=>{
+          await req('/tools/siteplus/api/sites',{method:'POST',body:JSON.stringify({...payload,confirm_duplicate:true})});
+          closeModal('confirm-modal');
+          closeModal('unified-site-editor-modal');
+          resetSiteForm();
+          await loadSites();
+        }
+      });
+      return;
+    }
+    window.alert(e.message||'処理に失敗しました');
+  }
+};
+
+submitBranchWithSegment=async function(ev){
+  ev.preventDefault();
+  ev.stopImmediatePropagation();
+  const site=SITEPLUS.sites.find((item)=>Number(item.id)===Number(SITEPLUS.unifiedEditorSiteId))||selectedSite();
+  if(!site){
+    window.alert('先に親現場を指定してください。');
+    return;
+  }
+  const payload=formDataObj(branchForm);
+  const segment=String(payload.segment??'');
+  delete payload.segment;
+  try{
+    if(!SITEPLUS.editingBranchId){
+      const created=await req(`/tools/siteplus/api/sites/${site.id}/branches`,{method:'POST',body:JSON.stringify(payload)});
+      const createdBranch=created.branch||{};
+      const contractCode=composeContractCodeForUi(site.site_id, createdBranch.site_branch||payload.site_branch);
+      await req(`/tools/siteplus/api/contract-master/${encodeURIComponent(contractCode)}/segment`,{method:'PUT',body:JSON.stringify({segment})});
+      closeModal('unified-site-editor-modal');
+      resetBranchForm();
+      await loadSites();
+      return;
+    }
+    const preview=await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}/preview`,{method:'PUT',body:JSON.stringify(payload)});
+    openConfirm({
+      title:'枝番号の変更確認',
+      message:'変更内容を確認して問題なければ更新します。',
+      bodyHtml:changeTable(preview.changes),
+      label:'更新する',
+      onConfirm:async()=>{
+        await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}`,{method:'PUT',body:JSON.stringify({...payload,confirm_changes:true})});
+        const contractCode=composeContractCodeForUi(site.site_id, payload.site_branch);
+        await req(`/tools/siteplus/api/contract-master/${encodeURIComponent(contractCode)}/segment`,{method:'PUT',body:JSON.stringify({segment})});
+        closeModal('confirm-modal');
+        closeModal('unified-site-editor-modal');
+        resetBranchForm();
+        await loadSites();
+      }
+    });
+  }catch(e){
+    window.alert(e.message||'処理に失敗しました');
+  }
+};
+
+submitSegmentForm=async function(ev){
+  ev.preventDefault();
+  const site=SITEPLUS.sites.find((item)=>Number(item.id)===Number(SITEPLUS.unifiedEditorSiteId));
+  if(!site){
+    window.alert('先に親現場を指定してください。');
+    return;
+  }
+  const segment=segmentForm.querySelector('[name="segment"]').value;
+  await req(`/tools/siteplus/api/sites/${site.id}/segments`,{method:'PUT',body:JSON.stringify({segment})});
+  closeModal('unified-site-editor-modal');
+  resetSegmentForm();
+  await loadSites();
+};
+
+deleteSite=async function(mode='soft'){
+  if(!SITEPLUS.editingSiteId) return;
+  const site=SITEPLUS.sites.find((item)=>Number(item.id)===Number(SITEPLUS.editingSiteId));
+  if(!site) return;
+  const isHardDelete=mode==='hard';
+  openConfirm({
+    title:isHardDelete?'親現場の完全削除':'親現場の論理削除',
+    message:isHardDelete?'親現場・枝番号・契約マスタを完全に削除します。元に戻せません。':'配下の枝番号もまとめて無効化します。',
+    bodyHtml:`<div class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">${esc(site.site_id)} / ${esc(site.site_name)} を${isHardDelete?'完全削除':'無効化'}します。</div>`,
+    label:isHardDelete?'完全削除する':'無効化する',
+    onConfirm:async()=>{
+      await req(`/tools/siteplus/api/sites/${site.id}`,{method:'DELETE',body:JSON.stringify({confirm:true,mode:isHardDelete?'hard':'soft'})});
+      closeModal('confirm-modal');
+      closeModal('unified-site-editor-modal');
+      SITEPLUS.unifiedEditorSiteId=null;
+      resetSiteForm();
+      resetBranchForm();
+      await loadSites();
+    }
+  });
+};
+
+deleteBranch=async function(mode='hard'){
+  if(!SITEPLUS.editingBranchId) return;
+  const isHardDelete=mode==='hard';
+  openConfirm({
+    title:'枝番号の論理削除',
+    message:'この枝番号だけを無効化します。',
+    bodyHtml:'<div class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">選択中の枝番号を無効化します。</div>',
+    label:'無効化する',
+    onConfirm:async()=>{
+      await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}`,{method:'DELETE',body:JSON.stringify({confirm:true})});
+      closeModal('confirm-modal');
+      closeModal('unified-site-editor-modal');
+      resetBranchForm();
+      await loadSites();
+    }
+  });
+};
+
+deleteBranch=async function(mode='hard'){
+  if(!SITEPLUS.editingBranchId) return;
+  const isHardDelete=mode==='hard';
+  openConfirm({
+    title:isHardDelete?'枝番号の完全削除':'枝番号の論理削除',
+    message:isHardDelete?'この枝番号と契約マスタを完全に削除します。元に戻せません。':'この枝番号だけを無効化します。',
+    bodyHtml:`<div class="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">選択中の枝番号を${isHardDelete?'完全削除':'無効化'}します。</div>`,
+    label:isHardDelete?'完全削除する':'無効化する',
+    onConfirm:async()=>{
+      await req(`/tools/siteplus/api/branches/${SITEPLUS.editingBranchId}`,{method:'DELETE',body:JSON.stringify({confirm:true,mode:isHardDelete?'hard':'soft'})});
+      closeModal('confirm-modal');
+      closeModal('unified-site-editor-modal');
+      resetBranchForm();
+      await loadSites();
+    }
+  });
+};
+
+renderList=function(){
+  renderSummary();
+  if(!SITEPLUS.sites.length){
+    $('#site-list').innerHTML='<div class="rounded-[24px] border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">条件に一致する現場がありません</div>';
+    return;
+  }
+  const toolbar=`
+    <div class="flex flex-col gap-3 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <div class="text-sm text-slate-600">${esc(bulkSiteSummary())}</div>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.selectAllVisibleSites()">表示中の現場を全選択</button>
+        <button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.clearSiteSelection()">選択を解除</button>
+        <button type="button" class="siteplus-btn siteplus-btn-primary siteplus-btn-sm" onclick="window.openBulkSiteEditModal()">一括編集</button>
+      </div>
+    </div>`;
+  const cards=SITEPLUS.sites.map((site)=>{
+    const branches=Array.isArray(site.branches)?site.branches:[];
+    const checked=isSiteSelected(site.id);
+    return `<article class="overflow-hidden rounded-[26px] border ${checked?'border-teal-400 shadow-[0_18px_55px_rgba(13,148,136,0.16)]':'border-slate-200 shadow-sm'} bg-white">
+      <div class="border-b border-slate-100 px-5 py-4 sm:px-6">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div class="space-y-3">
+            <div class="flex flex-wrap items-center gap-2">
+              ${site.is_active?'<span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">有効</span>':'<span class="rounded-full bg-rose-100 px-3 py-1 text-xs font-medium text-rose-700">無効</span>'}
+              ${site.has_duplicate_name?'<span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">同名あり</span>':''}
+              <label class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700"><input type="checkbox" class="rounded border-slate-300" ${checked?'checked':''} onchange="window.toggleSiteSelection(${site.id})">選択</label>
+            </div>
+            <div>
+              <div class="text-xs uppercase tracking-[0.18em] text-slate-400">SITE</div>
+              <div class="mt-1 text-xl font-semibold text-slate-900">${esc(site.site_id)} / ${esc(site.site_name)}</div>
+            </div>
+            <div class="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 xl:grid-cols-4">
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">担当者</div><div class="mt-1 font-medium text-slate-800">${esc(site.site_manager_last)} ${esc(site.site_manager_first)}</div><div class="text-xs text-slate-500">${esc(site.site_manager_id)}</div></div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">登録 / 更新</div><div class="mt-1 font-medium text-slate-800">${esc(site.site_register)}</div><div class="text-xs text-slate-500">${esc(site.site_updater)}</div></div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">更新日時</div><div class="mt-1 font-medium text-slate-800">${esc(site.updated_at||'-')}</div></div>
+              <div class="rounded-2xl bg-slate-50 px-4 py-3"><div class="text-xs uppercase tracking-[0.14em] text-slate-400">枝番号</div><div class="mt-1 font-medium text-slate-800">${branches.length}件</div><div class="text-xs text-slate-500">${site.active_branch_count||0}件有効</div></div>
+            </div>
+          </div>
+          <div class="siteplus-card-actions lg:w-[160px]">
+            <button type="button" class="siteplus-btn siteplus-btn-primary" onclick="window.editSite(${site.id})">編集</button>
+          </div>
+        </div>
+      </div>
+      <div class="px-5 py-4 sm:px-6">
+        <div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-slate-900">枝番号一覧</h3><span class="text-xs text-slate-500">${branches.length?`${branches.length}件`:'未登録'}</span></div>
+        ${branches.length?`<div class="overflow-hidden rounded-[20px] border border-slate-200"><table class="min-w-full text-sm"><thead class="bg-slate-50 text-left text-slate-500"><tr><th class="px-4 py-3">枝番号</th><th class="px-4 py-3">契約コード</th><th class="px-4 py-3">セグメント</th><th class="px-4 py-3">オプション</th><th class="px-4 py-3">登録者</th><th class="px-4 py-3">更新日時</th><th class="px-4 py-3">状態</th><th class="px-4 py-3"></th></tr></thead><tbody>${branches.map((branch)=>`<tr class="border-t border-slate-100"><td class="px-4 py-3 font-medium text-slate-900">${esc(branch.site_branch)}</td><td class="px-4 py-3 text-slate-600">${esc(branch.contract_code||'-')}</td><td class="px-4 py-3">${esc(branch.segment||'未設定')}</td><td class="px-4 py-3">${esc(optionLabel(branch.cloudshift_option_key))}</td><td class="px-4 py-3">${esc(branch.site_register)}</td><td class="px-4 py-3">${esc(branch.updated_at||'-')}</td><td class="px-4 py-3">${branch.is_active?'<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">有効</span>':'<span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-700">無効</span>'}</td><td class="px-4 py-3 text-right"><div class="flex justify-end gap-2"><button type="button" class="siteplus-btn siteplus-btn-secondary siteplus-btn-sm" onclick="window.editBranch(${branch.id})">編集</button><button type="button" class="siteplus-btn siteplus-btn-muted siteplus-btn-sm" onclick="window.openDedicatedModal(${branch.id})">${branch.dedicated_employee_name?`専従: ${esc(branch.dedicated_employee_name)}`:'専従設定'}</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">この親現場には枝番号がまだありません。</div>'}
+      </div>
+    </article>`;
+  }).join('');
+  $('#site-list').innerHTML=`<div class="space-y-4">${toolbar}${cards}</div>`;
+};
+
+window.editSite=editSite;
+window.editBranch=editBranch;
+window.prepareBranchForSite=prepareBranchForSite;
+window.openCreateSite=openCreateSite;
+window.openBranchModal=openBranchModal;
+
+const siteCreateButton=$('#open-create-site');
+if(siteCreateButton){
+  siteCreateButton.addEventListener('click',(ev)=>{
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    openCreateSite();
+  },true);
+}
+
+const branchCreateButton=$('#open-create-branch');
+if(branchCreateButton){
+  branchCreateButton.addEventListener('click',(ev)=>{
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    openBranchModal();
+  },true);
+}
+
+renderList();
 </script>
 {% endblock %}

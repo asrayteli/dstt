@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 import traceback
 
 from app.models import Site, SiteBranch, SiteContractMaster, db
+from app.site_contract_master import load_site_mapping
 
 monthly_generator_bp = Blueprint("monthly_generator", __name__, url_prefix="/tools/monthly_generator")
 
@@ -201,6 +202,21 @@ def _site_dict_from_contract_master(site_manager_id):
             warnings.append(f"セグメント未設定: {contract_code} - {row.site_name}")
             continue
         site_dict[contract_code] = segment
+    return site_dict, warnings
+
+
+def _site_dict_from_contract_master(site_manager_id):
+    manager_id = str(site_manager_id or '').strip()
+    if not manager_id:
+        raise ValueError('担当者IDを入力してください')
+    site_dict, warnings, matched_rows = load_site_mapping(site_manager_id=manager_id)
+    if matched_rows == 0:
+        raise ValueError(f"担当者ID {manager_id} に一致する現場が現場リストPLUSに見つかりません")
+    if matched_rows > 0 and not site_dict:
+        raise ValueError(
+            f"担当者ID {manager_id} の現場は見つかりましたが、セグメントが未登録です。"
+            "現場リストPLUSで現場表を取り込んでください"
+        )
     return site_dict, warnings
 
 

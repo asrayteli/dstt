@@ -15,12 +15,21 @@ SITE_PACKAGES = ROOT / "Lib" / "site-packages"
 if SITE_PACKAGES.exists() and str(SITE_PACKAGES) not in sys.path:
     sys.path.append(str(SITE_PACKAGES))
 
-from app.models import Employee, Office, SiteContractMaster, db
+from app.models import Employee, Office, SiteBranch, SiteContractMaster, db
 
 
 def _load_siteplus_module():
     module_path = ROOT / "app" / "tools" / "siteplus.py"
     spec = importlib.util.spec_from_file_location("siteplus_test_module", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_cloudshift_module():
+    module_path = ROOT / "app" / "tools" / "cloudshift.py"
+    spec = importlib.util.spec_from_file_location("cloudshift_test_module_for_siteplus", module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
     spec.loader.exec_module(module)
@@ -45,6 +54,28 @@ def _build_client(tmp_path):
     with app.app_context():
         db.create_all()
     return module, app.test_client()
+
+
+def _build_client_with_cloudshift(tmp_path):
+    module = _load_siteplus_module()
+    cloudshift_module = _load_cloudshift_module()
+    app = Flask(
+        __name__,
+        root_path=str(ROOT / "app"),
+        template_folder="templates",
+        instance_path=str(tmp_path / "instance"),
+    )
+    app.secret_key = "test"
+    app.config["TESTING"] = True
+    app.config["LOGIN_DISABLED"] = True
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{(tmp_path / 'siteplus_cloudshift.db').as_posix()}"
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    db.init_app(app)
+    app.register_blueprint(module.siteplus_bp)
+    app.register_blueprint(cloudshift_module.cloudshift_bp)
+    with app.app_context():
+        db.create_all()
+    return module, cloudshift_module, app.test_client()
 
 
 def _user(user_id="tester01"):
@@ -98,7 +129,16 @@ def test_siteplus_page_renders(tmp_path):
     response = client.get("/tools/siteplus/")
 
     assert response.status_code == 200
-    assert "/tools/siteplus/api/sites" in response.get_data(as_text=True)
+    html = response.get_data(as_text=True)
+    assert "/tools/siteplus/api/sites" in html
+    assert 'id="segment-modal"' in html
+    assert 'bulk_segment' in html
+    assert 'branch-segment-note' in html
+    assert 'selectedSiteIds' in html
+    assert '表示中の現場を全選択' in html
+    assert 'openBulkSiteEditModal' in html
+    assert 'id="unified-site-editor-modal"' in html
+    assert 'data-editor-tab="segment"' in html
 
 
 def test_siteplus_duplicate_name_warning_can_be_confirmed(tmp_path):
@@ -245,6 +285,99 @@ def test_siteplus_site_delete_hides_site_from_cloudshift_api(tmp_path):
     assert after_delete.get_json()["sites"] == []
 
 
+def test_siteplus_site_hard_delete_removes_rows(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _user()
+
+    create_response = client.post(
+        "/tools/siteplus/api/sites",
+        json={
+            "site_id": "445",
+            "site_name": "Hard Delete Site",
+            "site_manager_last": "削除",
+            "site_manager_first": "対象",
+            "site_manager_id": "9006",
+        },
+    )
+    assert create_response.status_code == 200
+    site_payload = create_response.get_json()["site"]
+
+    branch_response = client.post(
+        f"/tools/siteplus/api/sites/{site_payload['id']}/branches",
+        json={
+            "site_branch": "3",
+            "cloudshift_option_key": "O",
+        },
+    )
+    assert branch_response.status_code == 200
+
+    delete_needs_confirm = client.delete(
+        f"/tools/siteplus/api/sites/{site_payload['id']}",
+        json={"mode": "hard"},
+    )
+    assert delete_needs_confirm.status_code == 409
+    assert delete_needs_confirm.get_json()["delete_mode"] == "hard"
+
+    delete_response = client.delete(
+        f"/tools/siteplus/api/sites/{site_payload['id']}",
+        json={"confirm": True, "mode": "hard"},
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.get_json()["delete_mode"] == "hard"
+
+    with client.application.app_context():
+        assert db.session.get(module.Site, site_payload["id"]) is None
+        assert SiteBranch.query.filter_by(site_row_id=site_payload["id"]).count() == 0
+        assert SiteContractMaster.query.filter_by(site_row_id=site_payload["id"]).count() == 0
+
+
+def test_siteplus_branch_hard_delete_removes_branch_and_contract_master(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _user()
+
+    create_response = client.post(
+        "/tools/siteplus/api/sites",
+        json={
+            "site_id": "446",
+            "site_name": "Branch Hard Delete Site",
+            "site_manager_last": "枝",
+            "site_manager_first": "削除",
+            "site_manager_id": "9007",
+        },
+    )
+    assert create_response.status_code == 200
+    site_payload = create_response.get_json()["site"]
+
+    branch_response = client.post(
+        f"/tools/siteplus/api/sites/{site_payload['id']}/branches",
+        json={
+            "site_branch": "4",
+            "cloudshift_option_key": "O",
+        },
+    )
+    assert branch_response.status_code == 200
+    branch_payload = branch_response.get_json()["branch"]
+
+    delete_needs_confirm = client.delete(
+        f"/tools/siteplus/api/branches/{branch_payload['id']}",
+        json={"mode": "hard"},
+    )
+    assert delete_needs_confirm.status_code == 409
+    assert delete_needs_confirm.get_json()["delete_mode"] == "hard"
+
+    delete_response = client.delete(
+        f"/tools/siteplus/api/branches/{branch_payload['id']}",
+        json={"confirm": True, "mode": "hard"},
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.get_json()["delete_mode"] == "hard"
+
+    with client.application.app_context():
+        assert db.session.get(SiteBranch, branch_payload["id"]) is None
+        assert SiteContractMaster.query.filter_by(site_branch_row_id=branch_payload["id"]).count() == 0
+        assert db.session.get(module.Site, site_payload["id"]) is not None
+
+
 def test_siteplus_can_register_dedicated_employee_from_contract_code(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _user()
@@ -315,6 +448,76 @@ def test_siteplus_can_register_dedicated_employee_from_contract_code(tmp_path):
         assert master_row.dedicated_employee_number == "7001"
 
 
+def test_siteplus_dedicated_registration_syncs_cloudshift_rule(tmp_path):
+    module, cloudshift_module, client = _build_client_with_cloudshift(tmp_path)
+    module.current_user = _user()
+    cloudshift_module.current_user = _user()
+
+    site_response = client.post(
+        "/tools/siteplus/api/sites",
+        json={
+            "site_id": "556",
+            "site_name": "Dedicated Sync Site",
+            "site_manager_last": "管理",
+            "site_manager_first": "担当",
+            "site_manager_id": "9011",
+        },
+    )
+    assert site_response.status_code == 200
+    site_payload = site_response.get_json()["site"]
+
+    branch_response = client.post(
+        f"/tools/siteplus/api/sites/{site_payload['id']}/branches",
+        json={
+            "site_branch": "7",
+            "cloudshift_option_key": "O",
+        },
+    )
+    assert branch_response.status_code == 200
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Dedicated Sync Site",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_payload["id"]),
+        },
+    )
+    assert create_response.status_code == 200
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    contract_code = "00556007"
+    with client.application.app_context():
+        db.session.add(Office(office_code="TOKYO", office_name="Tokyo", created_by="tester01"))
+        db.session.add(
+            Employee(
+                employee_number="7002",
+                office_code="TOKYO",
+                office_name="Tokyo",
+                employee_name="同期 花子",
+                contract_code=contract_code,
+            )
+        )
+        db.session.commit()
+
+    save_response = client.put(
+        f"/tools/siteplus/api/contract-master/{contract_code}/dedicated",
+        json={"employee_number": "7002"},
+    )
+    assert save_response.status_code == 200
+    assert save_response.get_json()["cloudshift_synced"] is True
+
+    assist_response = client.get(f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist")
+    assert assist_response.status_code == 200
+    rules = assist_response.get_json()["assist"]["rules"]
+    auto_rules = [rule for rule in rules if rule.get("source_type") == "siteplus_dedicated"]
+    assert len(auto_rules) == 1
+    assert auto_rules[0]["assignments"][0]["employee_number"] == "7002"
+    assert auto_rules[0]["source_contract_code"] == contract_code
+
+
 def test_siteplus_import_site_table_updates_contract_master_segment(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _user()
@@ -342,3 +545,93 @@ def test_siteplus_import_site_table_updates_contract_master_segment(tmp_path):
         assert master_row.segment == "一般"
         assert master_row.site_id == "01234"
         assert master_row.site_branch == "001"
+
+
+def test_siteplus_api_sites_backfills_missing_contract_master_rows(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _user()
+
+    with client.application.app_context():
+        from app.models import Site, SiteBranch
+
+        site = Site(
+            site_id="88888",
+            site_name="既存現場",
+            site_manager_last="山田",
+            site_manager_first="太郎",
+            site_manager_id="0108486",
+            site_register="tester01",
+            site_updater="tester01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.flush()
+        db.session.add(
+            SiteBranch(
+                site_row_id=site.id,
+                site_branch="001",
+                cloudshift_option_key="PENDING",
+                site_register="tester01",
+                site_updater="tester01",
+                is_active=True,
+            )
+        )
+        db.session.commit()
+
+    response = client.get("/tools/siteplus/api/sites")
+    assert response.status_code == 200
+
+    with client.application.app_context():
+        master_row = db.session.get(SiteContractMaster, "88888001")
+        assert master_row is not None
+        assert master_row.site_manager_id == "0108486"
+
+
+def test_siteplus_can_update_segment_per_branch_and_per_site(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _user()
+
+    site_response = client.post(
+        "/tools/siteplus/api/sites",
+        json={
+            "site_id": "77777",
+            "site_name": "Segment Site",
+            "site_manager_last": "山田",
+            "site_manager_first": "太郎",
+            "site_manager_id": "9009",
+        },
+    )
+    assert site_response.status_code == 200
+    site_payload = site_response.get_json()["site"]
+
+    first_branch = client.post(
+        f"/tools/siteplus/api/sites/{site_payload['id']}/branches",
+        json={"site_branch": "1", "cloudshift_option_key": "PENDING"},
+    )
+    second_branch = client.post(
+        f"/tools/siteplus/api/sites/{site_payload['id']}/branches",
+        json={"site_branch": "2", "cloudshift_option_key": "PENDING"},
+    )
+    assert first_branch.status_code == 200
+    assert second_branch.status_code == 200
+
+    branch_segment_response = client.put(
+        "/tools/siteplus/api/contract-master/77777001/segment",
+        json={"segment": "一般"},
+    )
+    assert branch_segment_response.status_code == 200
+    assert branch_segment_response.get_json()["item"]["segment"] == "一般"
+
+    bulk_response = client.put(
+        f"/tools/siteplus/api/sites/{site_payload['id']}/segments",
+        json={"segment": "旅客"},
+    )
+    assert bulk_response.status_code == 200
+    assert bulk_response.get_json()["updated_count"] == 2
+
+    list_response = client.get("/tools/siteplus/api/sites")
+    assert list_response.status_code == 200
+    branches = list_response.get_json()["sites"][0]["branches"]
+    branch_segments = {branch["contract_code"]: branch["segment"] for branch in branches}
+    assert branch_segments["77777001"] == "旅客"
+    assert branch_segments["77777002"] == "旅客"

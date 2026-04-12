@@ -53,12 +53,12 @@ def _user(user_id="tester01"):
 def _subject_csv_bytes():
     header = [f"h{i}" for i in range(25)]
     row = [""] * 25
-    row[5] = "基本請負費"
+    row[5] = "基本請負料"
     row[8] = "01234001"
     row[9] = "株式会社テスト"
     row[10] = "テスト現場"
     row[11] = "CODE"
-    row[12] = "基本請負費"
+    row[12] = "基本請負料"
     row[13] = "100"
     csv_text = ",".join(header) + "\n" + ",".join(row) + "\n"
     return csv_text.encode("utf-8")
@@ -99,6 +99,8 @@ def test_subject_analysis_tool_db_mode_uses_site_contract_master(tmp_path):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["metadata"]["site_source"] == "db"
+    assert payload["data"]["site_master"]["01234001"]["site_manager_id"] == "9001"
+    assert payload["data"]["site_master"]["01234001"]["segment"] == "一般"
     assert payload["data"]["site_mapping"]["01234001"] == "一般"
 
 
@@ -111,5 +113,7 @@ def test_subject_analysis_tool_page_renders_site_source_modes(tmp_path):
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert 'id="site-source"' in html
+    assert 'id="prev-year-panel"' in html
     assert 'id="site-source-file-panel"' in html
     assert 'id="site-source-db-panel"' in html
+    assert 'id="manager-id-filter"' in html

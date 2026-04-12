@@ -9,6 +9,7 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
 from app.models import Employee, Site, SiteBranch, SiteContractMaster, db
+from app.site_contract_master import ensure_contract_master_synced
 
 try:
     from .shiftersync_format import SHIFT_OPTION_MAPPINGS
@@ -395,6 +396,15 @@ def _serialize_contract_master_row(row: SiteContractMaster) -> dict:
     return payload
 
 
+def _normalize_segment_value(value, *, allow_blank: bool = True) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None if allow_blank else ""
+    if text not in {"役員", "一般", "旅客"}:
+        raise ValueError("セグメントは 役員 / 一般 / 旅客 のいずれかを指定してください")
+    return text
+
+
 def _site_payload_from_request(data: dict, *, existing: Site | None = None) -> dict:
     site_id = _normalize_site_id(data.get("site_id"))
     site_name = _normalize_required_text(data.get("site_name"), "現場名")
@@ -595,6 +605,7 @@ def api_options():
 @siteplus_bp.route("/api/sites")
 @login_required
 def api_sites():
+    ensure_contract_master_synced()
     query, include_inactive = _site_query_from_filters(request.args)
     sites = query.order_by(Site.site_id.asc()).all()
     payload = [_serialize_site(site, include_inactive_branches=include_inactive) for site in sites]
@@ -610,6 +621,7 @@ def api_sites():
 @siteplus_bp.route("/api/contract-master")
 @login_required
 def api_contract_master():
+    ensure_contract_master_synced()
     query = SiteContractMaster.query
     only_active = _parse_bool(request.args.get("only_active"), default=True)
     if only_active:
@@ -670,6 +682,9 @@ def api_contract_master_set_dedicated(contract_code: str):
         abort(404)
 
     data = request.get_json(silent=True) or {}
+    delete_mode = str(data.get("mode") or "soft").strip().lower()
+    if delete_mode not in {"soft", "hard"}:
+        delete_mode = "soft"
     employee_number = str(data.get("employee_number", "") or "").strip()
     if employee_number:
         candidate = next(
@@ -687,7 +702,83 @@ def api_contract_master_set_dedicated(contract_code: str):
     row.dedicated_updated_by = _user_id()
     row.dedicated_updated_at = datetime.utcnow()
     db.session.commit()
+    warning = None
+    cloudshift_synced = True
+    try:
+        from .cloudshift import _resync_siteplus_dedicated_projects_for_site_row
+    except ImportError:
+        from app.tools.cloudshift import _resync_siteplus_dedicated_projects_for_site_row  # type: ignore
+
+    try:
+        _resync_siteplus_dedicated_projects_for_site_row(row.site_row_id, actor_name=_user_id())
+    except Exception:
+        current_app.logger.exception("Failed to sync SitePlus dedicated setting to CloudShift rules")
+        warning = "CloudShift への専従ルール同期に失敗しました"
+        cloudshift_synced = False
+
+    payload = {"success": True, "item": _serialize_contract_master_row(row), "cloudshift_synced": cloudshift_synced}
+    if warning:
+        payload["warning"] = warning
+    return jsonify(payload)
+
+
+@siteplus_bp.route("/api/contract-master/<contract_code>/segment", methods=["PUT"])
+@login_required
+def api_contract_master_set_segment(contract_code: str):
+    ensure_contract_master_synced()
+    row = db.session.get(SiteContractMaster, str(contract_code or "").strip())
+    if row is None:
+        abort(404)
+
+    data = request.get_json(silent=True) or {}
+    try:
+        segment = _normalize_segment_value(data.get("segment"), allow_blank=True)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    row.segment = segment
+    row.source = "siteplus"
+    db.session.commit()
     return jsonify({"success": True, "item": _serialize_contract_master_row(row)})
+
+
+@siteplus_bp.route("/api/sites/<int:site_row_id>/segments", methods=["PUT"])
+@login_required
+def api_site_set_segments(site_row_id: int):
+    site = _get_site_or_404(site_row_id)
+    _upsert_contract_master_for_site(site)
+
+    data = request.get_json(silent=True) or {}
+    try:
+        segment = _normalize_segment_value(data.get("segment"), allow_blank=True)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    updated_contract_codes: list[str] = []
+    for branch in site.branches:
+        contract_code = _compose_contract_code(site.site_id, branch.site_branch)
+        row = db.session.get(SiteContractMaster, contract_code)
+        if row is None:
+            row = _ensure_contract_master_row(contract_code)
+        if row is None:
+            continue
+        row.segment = segment
+        row.source = "siteplus"
+        updated_contract_codes.append(contract_code)
+
+    db.session.commit()
+    rows = [
+        db.session.get(SiteContractMaster, contract_code)
+        for contract_code in updated_contract_codes
+    ]
+    return jsonify(
+        {
+            "success": True,
+            "site_row_id": site.id,
+            "updated_count": len(updated_contract_codes),
+            "items": [_serialize_contract_master_row(row) for row in rows if row is not None],
+        }
+    )
 
 
 @siteplus_bp.route("/api/sites/<int:site_row_id>")
@@ -780,14 +871,26 @@ def api_site_update(site_row_id: int):
 def api_site_delete(site_row_id: int):
     site = _get_site_or_404(site_row_id)
     data = request.get_json(silent=True) or {}
+    delete_mode = str(data.get("mode") or "soft").strip().lower()
+    if delete_mode not in {"soft", "hard"}:
+        delete_mode = "soft"
     if not _parse_bool(data.get("confirm"), default=False):
         return jsonify(
             {
                 "error": "削除確認が必要です",
                 "requires_confirmation": True,
+                "delete_mode": delete_mode,
                 "site": _serialize_site(site, include_inactive_branches=True),
             }
         ), 409
+
+    if delete_mode == "hard":
+        SiteContractMaster.query.filter(SiteContractMaster.site_row_id == site.id).delete(
+            synchronize_session=False
+        )
+        db.session.delete(site)
+        db.session.commit()
+        return jsonify({"success": True, "delete_mode": "hard"})
 
     site.is_active = False
     site.site_updater = _user_id()
@@ -796,7 +899,7 @@ def api_site_delete(site_row_id: int):
         branch.site_updater = _user_id()
     _upsert_contract_master_for_site(site)
     db.session.commit()
-    return jsonify({"success": True})
+    return jsonify({"success": True, "delete_mode": "soft"})
 
 
 @siteplus_bp.route("/api/sites/<int:site_row_id>/branches/preview", methods=["POST"])
@@ -886,20 +989,32 @@ def api_branch_update(branch_id: int):
 def api_branch_delete(branch_id: int):
     branch = _get_branch_or_404(branch_id)
     data = request.get_json(silent=True) or {}
+    delete_mode = str(data.get("mode") or "soft").strip().lower()
+    if delete_mode not in {"soft", "hard"}:
+        delete_mode = "soft"
     if not _parse_bool(data.get("confirm"), default=False):
         return jsonify(
             {
                 "error": "削除確認が必要です",
                 "requires_confirmation": True,
+                "delete_mode": delete_mode,
                 "branch": branch.to_dict(),
             }
         ), 409
+
+    if delete_mode == "hard":
+        SiteContractMaster.query.filter(
+            SiteContractMaster.site_branch_row_id == branch.id
+        ).delete(synchronize_session=False)
+        db.session.delete(branch)
+        db.session.commit()
+        return jsonify({"success": True, "delete_mode": "hard"})
 
     branch.is_active = False
     branch.site_updater = _user_id()
     _upsert_contract_master_for_site(branch.site)
     db.session.commit()
-    return jsonify({"success": True})
+    return jsonify({"success": True, "delete_mode": "soft"})
 
 
 @siteplus_bp.route("/api/import-site-table", methods=["POST"])

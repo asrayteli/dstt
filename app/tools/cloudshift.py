@@ -91,6 +91,7 @@ ASSIST_OPTION_APTITUDE_MAX_BONUS = 25
 ASSIST_OPTION_APTITUDE_MID_BONUS = 15
 ASSIST_OPTION_APTITUDE_MIN_BONUS = 5
 ASSIST_OPTION_APTITUDE_ZERO_PENALTY = -10
+SITEPLUS_DEDICATED_RULE_SOURCE = "siteplus_dedicated"
 PERSON_ASSIST_SITE_LABELS = {
     "experienced": "経験済現場",
     "training": "研修要現場",
@@ -394,6 +395,221 @@ def _project_registered_dedicated_candidates(project: dict[str, Any]) -> list[di
             item["site_branches"].append(site_branch)
 
     return list(candidates.values())
+
+
+def _siteplus_dedicated_rows_for_site_row_id(site_row_id: int | None) -> list[SiteContractMaster]:
+    normalized_site_row_id = _coerce_site_row_id(site_row_id)
+    if not normalized_site_row_id or "sqlalchemy" not in current_app.extensions:
+        return []
+    try:
+        return (
+            SiteContractMaster.query
+            .filter(SiteContractMaster.site_row_id == int(normalized_site_row_id))
+            .order_by(SiteContractMaster.contract_code.asc())
+            .all()
+        )
+    except Exception:
+        return []
+
+
+def _is_siteplus_dedicated_rule(rule: dict[str, Any]) -> bool:
+    return str(rule.get("source_type") or "").strip() == SITEPLUS_DEDICATED_RULE_SOURCE
+
+
+def _siteplus_dedicated_rule_context(row: SiteContractMaster) -> tuple[str, str]:
+    branch_label = str(row.site_branch or "").strip() or "-"
+    contract_code = str(row.contract_code or "").strip()
+    label = f"枝番号 {branch_label}"
+    if contract_code:
+        label += f" / 契約コード {contract_code}"
+    notes = f"現場リストPLUSの専従者登録から自動同期: {label}"
+    return label, notes
+
+
+def _siteplus_dedicated_rule_matches_row(rule: dict[str, Any], row: SiteContractMaster) -> bool:
+    if not _is_siteplus_dedicated_rule(rule):
+        return False
+    if str(rule.get("source_contract_code") or "").strip() != str(row.contract_code or "").strip():
+        return False
+
+    assignments = rule.get("assignments") or []
+    if len(assignments) != 1:
+        return False
+    assignment = assignments[0] if isinstance(assignments[0], dict) else {}
+    _, expected_notes = _siteplus_dedicated_rule_context(row)
+    return (
+        _assist_rule_weekday_value(rule.get("weekday")) is None
+        and str(rule.get("shift_key") or "") == ""
+        and bool(rule.get("enabled", True))
+        and str(rule.get("effective_from") or "") == ""
+        and str(rule.get("effective_to") or "") == ""
+        and str(rule.get("notes") or "") == expected_notes
+        and str(rule.get("source_site_branch") or "").strip() == str(row.site_branch or "").strip()
+        and _coerce_site_row_id(rule.get("source_site_row_id")) == _coerce_site_row_id(row.site_row_id)
+        and str(assignment.get("candidate_name") or "").strip() == str(row.dedicated_employee_name or "").strip()
+        and str(assignment.get("employee_number") or "").strip() == str(row.dedicated_employee_number or "").strip()
+        and str(assignment.get("role_type") or "").strip() == "dedicated"
+        and int(assignment.get("priority") or 0) == 1
+        and int(assignment.get("custom_points") or 0) == 0
+    )
+
+
+def _build_siteplus_dedicated_rule(
+    assist: dict[str, Any],
+    row: SiteContractMaster,
+    *,
+    actor_name: str,
+    existing: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    branch_context, notes = _siteplus_dedicated_rule_context(row)
+    rule = _assist_rule_from_payload(
+        assist,
+        {
+            "weekday": None,
+            "shift_key": "",
+            "enabled": True,
+            "notes": notes,
+            "assignments": [
+                {
+                    "candidate_name": str(row.dedicated_employee_name or "").strip(),
+                    "employee_number": str(row.dedicated_employee_number or "").strip(),
+                    "role_type": "dedicated",
+                    "priority": 1,
+                    "custom_points": 0,
+                }
+            ],
+        },
+        existing=existing,
+        actor_name=actor_name,
+    )
+    rule["source_type"] = SITEPLUS_DEDICATED_RULE_SOURCE
+    rule["source_contract_code"] = str(row.contract_code or "").strip()
+    rule["source_site_row_id"] = _coerce_site_row_id(row.site_row_id)
+    rule["source_site_branch"] = str(row.site_branch or "").strip()
+    rule["source_site_branch_row_id"] = int(row.site_branch_row_id) if row.site_branch_row_id is not None else None
+    rule["source_label"] = branch_context
+    return rule
+
+
+def _sync_siteplus_dedicated_rules_in_project(
+    project: dict[str, Any],
+    rows: list[SiteContractMaster],
+    *,
+    actor_name: str,
+) -> list[str]:
+    _ensure_scene_project(project)
+    assist = _ensure_assist(project)
+    desired_rows = {
+        str(row.contract_code or "").strip(): row
+        for row in rows
+        if (
+            row
+            and row.is_active
+            and str(row.dedicated_employee_number or "").strip()
+            and str(row.dedicated_employee_name or "").strip()
+        )
+    }
+
+    preserved_rules: list[dict[str, Any]] = []
+    auto_rules_by_contract: dict[str, list[dict[str, Any]]] = {}
+    for rule in assist.get("rules") or []:
+        if _is_siteplus_dedicated_rule(rule):
+            contract_code = str(rule.get("source_contract_code") or "").strip()
+            auto_rules_by_contract.setdefault(contract_code, []).append(rule)
+            continue
+        preserved_rules.append(rule)
+
+    next_rules = list(preserved_rules)
+    changes: list[str] = []
+    for contract_code, row in desired_rows.items():
+        existing_rules = auto_rules_by_contract.pop(contract_code, [])
+        primary = existing_rules[0] if existing_rules else None
+        for duplicate in existing_rules[1:]:
+            duplicate_branch = str(duplicate.get("source_site_branch") or "").strip() or "-"
+            changes.append(f"CloudShift 自動専従ルールの重複を整理: 枝番号 {duplicate_branch}")
+        if primary and _siteplus_dedicated_rule_matches_row(primary, row) and len(existing_rules) == 1:
+            next_rules.append(primary)
+            continue
+        next_rules.append(_build_siteplus_dedicated_rule(assist, row, actor_name=actor_name, existing=primary))
+        branch_label, _ = _siteplus_dedicated_rule_context(row)
+        employee_label = str(row.dedicated_employee_name or "").strip() or str(row.dedicated_employee_number or "").strip()
+        if primary:
+            changes.append(f"CloudShift 専従ルールを同期更新: {branch_label} / {employee_label}")
+        else:
+            changes.append(f"CloudShift 専従ルールを同期登録: {branch_label} / {employee_label}")
+
+    for contract_code, stale_rules in auto_rules_by_contract.items():
+        for stale in stale_rules:
+            branch_label = str(stale.get("source_site_branch") or "").strip() or "-"
+            changes.append(
+                f"CloudShift 専従ルールを解除: 枝番号 {branch_label}"
+                + (f" / 契約コード {contract_code}" if contract_code else "")
+            )
+
+    if changes:
+        assist["rules"] = next_rules
+    return changes
+
+
+def _backfill_scene_project_from_siteplus_dedicated(
+    scene_project: dict[str, Any],
+    *,
+    actor_name: str,
+) -> None:
+    _ensure_scene_project(scene_project)
+    rows = _siteplus_dedicated_rows_for_site_row_id(_coerce_site_row_id(scene_project.get("site_row_id")))
+    changes = _sync_siteplus_dedicated_rules_in_project(scene_project, rows, actor_name=actor_name)
+    if not changes:
+        return
+    _save_project(scene_project)
+    _append_history(
+        scene_project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": "auto",
+            "action": "siteplus_dedicated_backfill",
+            "month_key": None,
+            "changes": changes[:100],
+        },
+    )
+
+
+def _resync_siteplus_dedicated_projects_for_site_row(
+    site_row_id: int | None,
+    *,
+    actor_name: str,
+) -> None:
+    normalized_site_row_id = _coerce_site_row_id(site_row_id)
+    if not normalized_site_row_id:
+        return
+    rows = _siteplus_dedicated_rows_for_site_row_id(normalized_site_row_id)
+    for path in _shifts_dir().glob("*.json"):
+        target_summary = _load_json(path)
+        if not target_summary or target_summary.get("mode") != "scene":
+            continue
+        if _coerce_site_row_id(target_summary.get("site_row_id")) != normalized_site_row_id:
+            continue
+        target_project_id = str(target_summary.get("id") or "")
+        with _project_lock(target_project_id):
+            target_project = _load_project(target_project_id)
+            if target_project.get("mode") != "scene":
+                continue
+            changes = _sync_siteplus_dedicated_rules_in_project(target_project, rows, actor_name=actor_name)
+            if not changes:
+                continue
+            _save_project(target_project)
+            _append_history(
+                target_project["id"],
+                {
+                    "timestamp": _utcnow_iso(),
+                    "editor_name": actor_name,
+                    "editor_type": "auto",
+                    "action": "siteplus_dedicated_sync",
+                    "month_key": None,
+                    "changes": changes[:100],
+                },
+            )
 
 
 def _site_storage_fields(site_ref: dict[str, Any] | None) -> dict[str, Any]:
@@ -1984,6 +2200,10 @@ def _assist_rule_payload(rule: dict[str, Any]) -> dict[str, Any]:
         "updated_at": rule.get("updated_at"),
         "created_by": rule.get("created_by"),
         "updated_by": rule.get("updated_by"),
+        "source_type": str(rule.get("source_type") or ""),
+        "source_contract_code": str(rule.get("source_contract_code") or ""),
+        "source_site_branch": str(rule.get("source_site_branch") or ""),
+        "source_site_row_id": _coerce_site_row_id(rule.get("source_site_row_id")),
     }
 
 
@@ -4085,6 +4305,7 @@ def api_create():
         )
     if project["mode"] == "scene":
         _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
+        _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
     return jsonify({"success": True, "project": _project_detail_payload(project)})
 
 
@@ -4168,6 +4389,7 @@ def api_project_meta(project_id: str):
         _resync_person_experience_project(project, actor_name=_user_label())
     if should_backfill_scene_person_experience:
         _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
+        _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
     return jsonify({"success": True, "project": _project_detail_payload(project)})
 
 

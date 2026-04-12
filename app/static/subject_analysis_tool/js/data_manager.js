@@ -5,7 +5,8 @@ class DataManager {
         this.rawData = {
             currentYear: [],
             prevYear: [],
-            siteMapping: {}
+            siteMapping: {},
+            siteMaster: {}
         };
         this.processedData = [];
         this.metadata = {
@@ -23,6 +24,7 @@ class DataManager {
         this.rawData.currentYear = responseData.current_year || [];
         this.rawData.prevYear = responseData.prev_year || [];
         this.rawData.siteMapping = responseData.site_mapping || {};
+        this.rawData.siteMaster = responseData.site_master || {};
 
         this.extractMetadata();
     }
@@ -57,6 +59,22 @@ class DataManager {
      */
     get5DigitCode(contractCode) {
         return contractCode.substring(0, 5);
+    }
+
+    normalizeManagerId(value) {
+        const text = String(value || '').trim();
+        if (!text) return '';
+        if (/^\d+$/.test(text)) {
+            return text.replace(/^0+/, '') || '0';
+        }
+        return text;
+    }
+
+    managerIdsMatch(left, right) {
+        const leftText = String(left || '').trim();
+        const rightText = String(right || '').trim();
+        if (!leftText || !rightText) return false;
+        return leftText === rightText || this.normalizeManagerId(leftText) === this.normalizeManagerId(rightText);
     }
 
     /**
@@ -271,7 +289,8 @@ class DataManager {
             sites = [],
             subjects = [],
             months = [],
-            segments = []
+            segments = [],
+            managerId = ''
         } = filters;
 
         let filteredData = this.rawData.currentYear.filter(item => {
@@ -290,6 +309,11 @@ class DataManager {
             if (segments.length > 0) {
                 const segment = this.rawData.siteMapping[item.contract_code];
                 if (!segment || !segments.includes(segment)) return false;
+            }
+
+            if (managerId) {
+                const siteMaster = this.rawData.siteMaster[item.contract_code] || {};
+                if (!this.managerIdsMatch(siteMaster.site_manager_id, managerId)) return false;
             }
 
             return true;
@@ -433,7 +457,8 @@ class DataManager {
         this.rawData = {
             currentYear: [],
             prevYear: [],
-            siteMapping: {}
+            siteMapping: {},
+            siteMaster: {}
         };
         this.processedData = [];
         this.metadata = {

@@ -229,9 +229,13 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert 'data-assist-tab="details"' in script
     assert "custom_points" in script
     assert "day-assist-search" in script
+    assert "他の候補者を探す" in script
+    assert "最有力候補" in script
+    assert "data-day-assist-top-add" in script
     assert "data-day-assist-record" in script
     assert "buildAssistDetailsPanel" in script
     assert "buildAssistSceneConflictNotice" in script
+    assert "buildAssistDayTopCandidateCard" in script
     assert "openAssistDayActionModal" in script
     assert "data-assist-add-search-result-index" in script
     assert "function notifyAssistAction" in script
@@ -513,6 +517,76 @@ def test_scene_assist_search_includes_registered_dedicated_candidate_from_master
     assert payload["results"][0]["employee_number"] == "8801"
     assert payload["results"][0]["name"] == "登録専従者"
     assert any(part["category"] == "master" for part in payload["results"][0]["breakdown"])
+
+
+def test_scene_project_backfills_siteplus_dedicated_rule_from_master(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    with client.application.app_context():
+        site = Site(
+            site_id="02222",
+            site_name="Auto Rule Site",
+            site_manager_last="管理",
+            site_manager_first="担当",
+            site_manager_id="9200",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.flush()
+        branch = SiteBranch(
+            site_row_id=site.id,
+            site_branch="004",
+            cloudshift_option_key="O",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(branch)
+        db.session.flush()
+        db.session.add(
+            SiteContractMaster(
+                contract_code="02222004",
+                site_row_id=site.id,
+                site_branch_row_id=branch.id,
+                site_id=site.site_id,
+                site_branch=branch.site_branch,
+                site_name=site.site_name,
+                site_manager_id=site.site_manager_id,
+                site_manager_name=site.manager_name(),
+                cloudshift_option_key=branch.cloudshift_option_key,
+                dedicated_employee_number="7711",
+                dedicated_employee_name="自動 専従",
+                is_active=True,
+                source="siteplus",
+            )
+        )
+        db.session.commit()
+        site_row_id = site.id
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Auto Rule Site",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert create_response.status_code == 200
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    assist_response = client.get(f"/tools/shiftersync/cloudshift/api/project/{project_id}/assist")
+    assert assist_response.status_code == 200
+    rules = assist_response.get_json()["assist"]["rules"]
+    auto_rules = [rule for rule in rules if rule.get("source_type") == "siteplus_dedicated"]
+    assert len(auto_rules) == 1
+    assert auto_rules[0]["assignments"][0]["employee_number"] == "7711"
+    assert auto_rules[0]["assignments"][0]["candidate_name"] == "自動 専従"
+    assert auto_rules[0]["source_contract_code"] == "02222004"
 
 
 def test_scene_assist_accepts_no_shift_and_weekday_only_matches_and_custom_points(tmp_path):

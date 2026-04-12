@@ -145,3 +145,69 @@ def test_monthly_generator_page_renders_both_site_source_panels(tmp_path):
     assert 'id="site-source"' in html
     assert 'id="site-source-file-panel"' in html
     assert 'id="site-source-db-panel"' in html
+
+
+def test_monthly_generator_db_mode_matches_manager_id_without_leading_zero(tmp_path):
+    module, app = _build_app(tmp_path)
+    subject_name = next(iter(module.EXPENSE_MAPPING.keys()))
+
+    subject_path = tmp_path / "subject_zero.csv"
+    report_path = tmp_path / "report_zero.xlsx"
+    _write_subject_csv(subject_path, subject_name)
+    _write_report_xlsx(report_path)
+
+    with app.app_context():
+        site = Site(
+            site_id="01234",
+            site_name="ゼロ現場",
+            site_manager_last="山田",
+            site_manager_first="太郎",
+            site_manager_id="0108486",
+            site_register="tester",
+            site_updater="tester",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.flush()
+
+        branch = SiteBranch(
+            site_row_id=site.id,
+            site_branch="001",
+            cloudshift_option_key="PENDING",
+            site_register="tester",
+            site_updater="tester",
+            is_active=True,
+        )
+        db.session.add(branch)
+        db.session.flush()
+
+        db.session.add(
+            SiteContractMaster(
+                contract_code="01234001",
+                site_row_id=site.id,
+                site_branch_row_id=branch.id,
+                site_id="01234",
+                site_branch="001",
+                site_name="ゼロ現場",
+                site_manager_id="0108486",
+                site_manager_name="山田 太郎",
+                segment="一般",
+                cloudshift_option_key="PENDING",
+                is_active=True,
+                source="siteplus",
+            )
+        )
+        db.session.commit()
+
+        result = module.process_monthly_data(
+            str(subject_path),
+            None,
+            str(report_path),
+            4,
+            "Sheet1",
+            site_source="db",
+            site_manager_id="108486",
+        )
+
+    assert result["success"] is True
+    assert result["debug"]["site_dict_count"] == 1

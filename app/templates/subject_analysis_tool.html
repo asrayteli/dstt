@@ -24,6 +24,14 @@
                 </div>
 
                 <div class="sidebar-scroll">
+                    <details class="sidebar-section filter-fold">
+                        <summary class="filter-fold-summary">
+                            <h3 class="sidebar-title">担当者番号</h3>
+                        </summary>
+                        <input type="text" id="manager-id-filter" placeholder="最新マスタの担当者番号で絞り込み" class="form-input mb-2">
+                        <p class="text-xs text-gray-500">現場リストPLUSの最新マスタに登録されている担当者番号を使って絞り込みます。</p>
+                    </details>
+
                     <details class="sidebar-section filter-fold" open>
                         <summary class="filter-fold-summary">
                             <h3 class="sidebar-title">対象月</h3>
@@ -284,7 +292,7 @@
                         <input type="file" id="subject-file" accept=".csv" class="hidden" required>
                     </div>
 
-                    <div class="drop-card" id="site-source-file-panel">
+                    <div class="drop-card" id="prev-year-panel">
                         <div class="drop-head">
                             <span>前年データ（任意）</span>
                             <span class="drop-badge optional">任意</span>
@@ -297,7 +305,10 @@
                         <input type="file" id="prev-year-subject-file" accept=".csv" class="hidden">
                     </div>
 
-                    <div class="drop-card">
+                </div>
+
+                <div class="quick-upload-grid">
+                    <div class="drop-card" id="site-source-file-panel">
                         <div class="drop-head">
                             <span>現場マッピング（任意）</span>
                             <span class="drop-badge optional">任意</span>
@@ -308,6 +319,7 @@
                             <p class="drop-file" id="site-file-name">未選択</p>
                         </div>
                         <input type="file" id="site-file" accept=".csv" class="hidden">
+                        <p class="mode-help mt-3">契約コードごとにセグメントを対応づけるCSVです。現場リストPLUS参照モードなら不要です。</p>
                     </div>
                 </div>
 

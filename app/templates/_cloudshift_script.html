@@ -2138,6 +2138,52 @@
       `).join('');
     }
 
+    function buildAssistDayTopCandidateCard(day, shiftKey, result, previewError) {
+      const candidate = result && Array.isArray(result.results) ? result.results[0] : null;
+      if (candidate) {
+        const reasons = Array.isArray(candidate.reasons)
+          ? candidate.reasons.map((reason) => String(reason || '').trim()).filter(Boolean).slice(0, 3)
+          : [];
+        return `
+          <article class="cloud-assist-result-card${candidate && candidate.has_scene_conflict ? ' is-conflict' : ''}">
+            <div class="cloud-assist-result-head">
+              <div>
+                <h4>${escapeHtml(candidate.name || '-')}</h4>
+                <p>${escapeHtml(candidate.employee_number || '社員番号なし')}</p>
+              </div>
+              <div class="cloud-actions compact">
+                <div class="cloud-assist-score">${escapeHtml(String(candidate.score || 0))}点</div>
+                <button
+                  type="button"
+                  class="cloud-btn secondary"
+                  data-day-assist-top-add="${escapeHtml(String(day))}"
+                  data-day-assist-top-shift="${escapeHtml(String(shiftKey || ''))}"
+                  data-day-assist-top-name="${escapeHtml(candidate.name || '')}"
+                  data-day-assist-top-employee="${escapeHtml(candidate.employee_number || '')}"
+                >この候補を入れる</button>
+              </div>
+            </div>
+            <div class="cloud-assist-result-meta">
+              <span class="cloud-note-chip">ルール一致 ${escapeHtml(String(candidate.matched_rule_count || 0))}</span>
+              <span class="cloud-note-chip">実績一致 ${escapeHtml(String(candidate.matched_record_count || 0))}</span>
+              ${candidate && candidate.has_scene_conflict ? `<span class="cloud-note-chip danger">同日競合 ${escapeHtml(String(candidate.scene_conflict_site_count || 0))}現場</span>` : ''}
+            </div>
+            ${buildAssistSceneConflictNotice(candidate)}
+            ${reasons.length ? `
+              <div class="cloud-assist-category-section">
+                <div class="cloud-assist-category-label">主な理由</div>
+                ${reasons.map((reason) => `<p class="cloud-panel-note">${escapeHtml(reason)}</p>`).join('')}
+              </div>
+            ` : ''}
+          </article>
+        `;
+      }
+      if (previewError) {
+        return `<div class="cloud-empty-state"><p>${escapeHtml(previewError)}</p></div>`;
+      }
+      return '<div class="cloud-empty-state"><p>この条件では候補者が見つかりませんでした。</p></div>';
+    }
+
     function buildAssistDetailAccordion(sectionKey, title, description, bodyHtml, chipText) {
       const detailSections = state.assist.detailSections || {};
       const expanded = detailSections[sectionKey] === true;
@@ -2874,6 +2920,17 @@
       });
     }
 
+    function appendAssistSearchResultToSpecificDay(day, shiftKey, candidate) {
+      const dayKey = String(day || '').trim();
+      const name = String(candidate && candidate.name ? candidate.name : '').trim();
+      if (!dayKey || !name) return false;
+      return appendAssistEntryToDay(dayKey, {
+        value: shiftKey ? `!${shiftKey}!${name}` : name,
+        comment: '',
+        employee_number: String(candidate && candidate.employee_number ? candidate.employee_number : '').trim()
+      });
+    }
+
     function buildAssistSearchResultAction(item, index) {
       if (!canAppendAssistSearchResultToDay()) return '';
       const day = assistTargetDayFromContext();
@@ -2886,17 +2943,204 @@
       `;
     }
 
-    async function executeAssistSearch(payload) {
-      const normalized = {
+    function normalizeAssistSearchPayload(payload) {
+      return {
         target_date: payload && payload.target_date ? payload.target_date : defaultAssistTargetDate(),
         shift_key: payload && payload.shift_key ? payload.shift_key : ''
       };
-      state.assist.searchForm = Object.assign({}, normalized);
-      state.assist.searchResult = await requestJson(`${assistBasePath()}/search`, {
+    }
+
+    async function fetchAssistSearchPreview(payload) {
+      const normalized = normalizeAssistSearchPayload(payload);
+      return requestJson(`${assistBasePath()}/search`, {
         method: 'POST',
         body: normalized
       });
+    }
+
+    async function executeAssistSearch(payload) {
+      const normalized = normalizeAssistSearchPayload(payload);
+      state.assist.searchForm = Object.assign({}, normalized);
+      state.assist.searchResult = await fetchAssistSearchPreview(normalized);
       return state.assist.searchResult;
+    }
+
+    function assistDaySearchPayload(day, shiftKey) {
+      return {
+        target_date: assistDateTextForDay(day),
+        shift_key: shiftKey || ''
+      };
+    }
+
+    function buildAssistDaySearchAction(day, shiftKey, label) {
+      return `
+        <button
+          type="button"
+          class="cloud-btn primary"
+          data-day-assist-search="${escapeHtml(String(day))}"
+          data-day-assist-shift="${escapeHtml(shiftKey || '')}"
+        >${escapeHtml(label)}</button>
+      `;
+    }
+
+    function buildAssistDayActionModal(day, previewResult, previewError) {
+      const normalized = {
+        target_date: '',
+        shift_key: ''
+      };
+      normalized.target_date = assistDateTextForDay(day);
+      normalized.shift_key = assistSelectedShiftKeyForDay(day);
+      const dateText = normalized.target_date;
+      const shiftKey = normalized.shift_key;
+      const entries = currentDayEntries(day).map((entry) => parseCalendarAssistEntry(entry)).filter((entry) => entry.candidate_name);
+      if (currentAssistMode() === 'person') {
+        const actionLabel = (siteType) => `${assistSiteTypeLabel(siteType)}へ登録`;
+        const trainingCandidates = !entries.length ? suggestedTrainingSitesForDay(day) : [];
+        return `
+          <div class="cloud-assist-stack">
+            ${!entries.length ? `
+              <div class="cloud-assist-section">
+                <div class="cloud-assist-subhead">
+                  <div>
+                    <strong>研修要現場の候補</strong>
+                    <p class="cloud-panel-note">${escapeHtml(`${dateText} / ${assistShiftLabel(shiftKey)}`)} の候補として、登録済みの研修要現場を表示します。</p>
+                  </div>
+                </div>
+                <div class="cloud-assist-detail-breakdown-list">
+                  ${trainingCandidates.length ? trainingCandidates.map((site) => `
+                    <article class="cloud-assist-detail-breakdown-item">
+                      <div class="cloud-assist-result-head">
+                        <div>
+                          <strong>${escapeHtml(site.site_name || '-')}</strong>
+                          <p class="cloud-panel-note">${escapeHtml(`${site.date || '-'} / ${assistShiftLabel(site.shift_key)} / 研修要現場`)}</p>
+                        </div>
+                        <div class="cloud-actions compact">
+                          <button
+                            type="button"
+                            class="cloud-btn primary"
+                            data-day-assist-training-pick="${escapeHtml(String(day))}"
+                            data-day-assist-training-id="${escapeHtml(site.id)}"
+                          >この候補を入れる</button>
+                        </div>
+                      </div>
+                      <p class="cloud-panel-note">${escapeHtml(site.notes || 'コメントなし')}</p>
+                    </article>
+                  `).join('') : `
+                    <div class="cloud-empty-state">
+                      <p>研修要現場の候補はまだ登録されていません。</p>
+                    </div>
+                  `}
+                </div>
+              </div>
+            ` : ''}
+            <div class="cloud-assist-section">
+              <div class="cloud-assist-subhead">
+                <div>
+                  <strong>現場メモを登録</strong>
+                  <p class="cloud-panel-note">${escapeHtml(`${dateText} / ${assistShiftLabel(shiftKey)}`)} の内容を person assist の登録フォームへ引き継ぎます。</p>
+                </div>
+              </div>
+              <div class="cloud-assist-detail-breakdown-list">
+                ${entries.length ? entries.map((entry, index) => `
+                  <article class="cloud-assist-detail-breakdown-item">
+                    <div class="cloud-assist-result-head">
+                      <div>
+                        <strong>${escapeHtml(entry.candidate_name)}</strong>
+                        <p class="cloud-panel-note">${escapeHtml(`${assistShiftLabel(entry.shift_key)} / ${entry.employee_number || '社員番号なし'}`)}</p>
+                      </div>
+                      <div class="cloud-actions compact">
+                        <button
+                          type="button"
+                          class="cloud-btn secondary"
+                          data-day-assist-site="${escapeHtml(String(day))}"
+                          data-day-assist-index="${escapeHtml(String(index))}"
+                          data-day-assist-site-type="experienced"
+                        >${escapeHtml(actionLabel('experienced'))}</button>
+                        <button
+                          type="button"
+                          class="cloud-btn secondary"
+                          data-day-assist-site="${escapeHtml(String(day))}"
+                          data-day-assist-index="${escapeHtml(String(index))}"
+                          data-day-assist-site-type="training"
+                        >${escapeHtml(actionLabel('training'))}</button>
+                      </div>
+                    </div>
+                    <p class="cloud-panel-note">${escapeHtml(entry.notes || 'コメントなし')}</p>
+                  </article>
+                `).join('') : `
+                  <div class="cloud-empty-state">
+                    <p>この日に登録済みエントリはありません。空の登録フォームを開けます。</p>
+                    <div class="cloud-actions compact">
+                      <button type="button" class="cloud-btn secondary" data-day-assist-site="${escapeHtml(String(day))}" data-day-assist-index="" data-day-assist-site-type="experienced">${escapeHtml(actionLabel('experienced'))}</button>
+                      <button type="button" class="cloud-btn secondary" data-day-assist-site="${escapeHtml(String(day))}" data-day-assist-index="" data-day-assist-site-type="training">${escapeHtml(actionLabel('training'))}</button>
+                    </div>
+                  </div>
+                `}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div class="cloud-assist-stack">
+          <div class="cloud-assist-section">
+            <div class="cloud-assist-subhead">
+              <div>
+                <strong>最有力候補</strong>
+                <p class="cloud-panel-note">${escapeHtml(`${dateText} / ${assistShiftLabel(shiftKey)}`)} の条件で、現在もっとも点数が高い候補者を表示しています。</p>
+              </div>
+            </div>
+            <div class="cloud-assist-detail-breakdown-list">
+              ${buildAssistDayTopCandidateCard(day, shiftKey, previewResult, previewError)}
+            </div>
+          </div>
+          <div class="cloud-assist-section">
+            <div class="cloud-assist-subhead">
+              <div>
+                <strong>他の候補者を探す</strong>
+                <p class="cloud-panel-note">同じ条件で assist サーチを開き、候補一覧を確認します。</p>
+              </div>
+            </div>
+            <div class="cloud-actions compact">
+              ${buildAssistDaySearchAction(day, shiftKey, '他の候補者を探す')}
+            </div>
+          </div>
+          <div class="cloud-assist-section">
+            <div class="cloud-assist-subhead">
+              <div>
+                <strong>実績として登録</strong>
+                <p class="cloud-panel-note">カレンダーに入っている内容を assist 実績登録フォームへ引き継ぎます。</p>
+              </div>
+            </div>
+            <div class="cloud-assist-detail-breakdown-list">
+              ${entries.length ? entries.map((entry, index) => `
+                <article class="cloud-assist-detail-breakdown-item">
+                  <div class="cloud-assist-result-head">
+                    <div>
+                      <strong>${escapeHtml(entry.candidate_name)}</strong>
+                      <p class="cloud-panel-note">${escapeHtml(`${assistShiftLabel(entry.shift_key)} / ${entry.employee_number || '社員番号なし'}`)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      class="cloud-btn secondary"
+                      data-day-assist-record="${escapeHtml(String(day))}"
+                      data-day-assist-index="${escapeHtml(String(index))}"
+                    >この内容で登録</button>
+                  </div>
+                  <p class="cloud-panel-note">${escapeHtml(entry.notes || 'コメントなし')}</p>
+                </article>
+              `).join('') : `
+                <div class="cloud-empty-state">
+                  <p>この日に登録済みエントリはありません。空の実績登録フォームを開けます。</p>
+                  <div class="cloud-actions compact">
+                    <button type="button" class="cloud-btn secondary" data-day-assist-record="${escapeHtml(String(day))}" data-day-assist-index="">空の実績登録フォームを開く</button>
+                  </div>
+                </div>
+              `}
+            </div>
+          </div>
+        </div>
+      `;
     }
 
     async function saveAssistRecord(form, recordId) {
@@ -3500,159 +3744,24 @@
       renderAssistModalContent(modal);
     }
 
-    function buildAssistDayActionModal(day) {
-      const dateText = assistDateTextForDay(day);
-      const shiftKey = assistSelectedShiftKeyForDay(day);
-      const entries = currentDayEntries(day).map((entry) => parseCalendarAssistEntry(entry)).filter((entry) => entry.candidate_name);
-      if (currentAssistMode() === 'person') {
-        const actionLabel = (siteType) => `${assistSiteTypeLabel(siteType)}へ登録`;
-        const trainingCandidates = !entries.length ? suggestedTrainingSitesForDay(day) : [];
-        return `
-          <div class="cloud-assist-stack">
-            ${!entries.length ? `
-              <div class="cloud-assist-section">
-                <div class="cloud-assist-subhead">
-                  <div>
-                    <strong>研修要現場の候補</strong>
-                    <p class="cloud-panel-note">${escapeHtml(`${dateText} / ${assistShiftLabel(shiftKey)}`)} の候補として、登録済みの研修要現場を表示します。</p>
-                  </div>
-                </div>
-                <div class="cloud-assist-detail-breakdown-list">
-                  ${trainingCandidates.length ? trainingCandidates.map((site) => `
-                    <article class="cloud-assist-detail-breakdown-item">
-                      <div class="cloud-assist-result-head">
-                        <div>
-                          <strong>${escapeHtml(site.site_name || '-')}</strong>
-                          <p class="cloud-panel-note">${escapeHtml(`${site.date || '-'} / ${assistShiftLabel(site.shift_key)} / 研修要現場`)}</p>
-                        </div>
-                        <div class="cloud-actions compact">
-                          <button
-                            type="button"
-                            class="cloud-btn primary"
-                            data-day-assist-training-pick="${escapeHtml(String(day))}"
-                            data-day-assist-training-id="${escapeHtml(site.id)}"
-                          >この候補を入れる</button>
-                        </div>
-                      </div>
-                      <p class="cloud-panel-note">${escapeHtml(site.notes || 'コメントなし')}</p>
-                    </article>
-                  `).join('') : `
-                    <div class="cloud-empty-state">
-                      <p>研修要現場の候補はまだ登録されていません。</p>
-                    </div>
-                  `}
-                </div>
-              </div>
-            ` : ''}
-            <div class="cloud-assist-section">
-              <div class="cloud-assist-subhead">
-                <div>
-                  <strong>現場メモを登録</strong>
-                  <p class="cloud-panel-note">${escapeHtml(`${dateText} / ${assistShiftLabel(shiftKey)}`)} の内容を person assist の登録フォームへ引き継ぎます。</p>
-                </div>
-              </div>
-              <div class="cloud-assist-detail-breakdown-list">
-                ${entries.length ? entries.map((entry, index) => `
-                  <article class="cloud-assist-detail-breakdown-item">
-                    <div class="cloud-assist-result-head">
-                      <div>
-                        <strong>${escapeHtml(entry.candidate_name)}</strong>
-                        <p class="cloud-panel-note">${escapeHtml(`${assistShiftLabel(entry.shift_key)} / ${entry.employee_number || '社員番号なし'}`)}</p>
-                      </div>
-                      <div class="cloud-actions compact">
-                        <button
-                          type="button"
-                          class="cloud-btn secondary"
-                          data-day-assist-site="${escapeHtml(String(day))}"
-                          data-day-assist-index="${escapeHtml(String(index))}"
-                          data-day-assist-site-type="experienced"
-                        >${escapeHtml(actionLabel('experienced'))}</button>
-                        <button
-                          type="button"
-                          class="cloud-btn secondary"
-                          data-day-assist-site="${escapeHtml(String(day))}"
-                          data-day-assist-index="${escapeHtml(String(index))}"
-                          data-day-assist-site-type="training"
-                        >${escapeHtml(actionLabel('training'))}</button>
-                      </div>
-                    </div>
-                    <p class="cloud-panel-note">${escapeHtml(entry.notes || 'コメントなし')}</p>
-                  </article>
-                `).join('') : `
-                  <div class="cloud-empty-state">
-                    <p>この日に登録済みエントリはありません。空の登録フォームを開けます。</p>
-                    <div class="cloud-actions compact">
-                      <button type="button" class="cloud-btn secondary" data-day-assist-site="${escapeHtml(String(day))}" data-day-assist-index="" data-day-assist-site-type="experienced">${escapeHtml(actionLabel('experienced'))}</button>
-                      <button type="button" class="cloud-btn secondary" data-day-assist-site="${escapeHtml(String(day))}" data-day-assist-index="" data-day-assist-site-type="training">${escapeHtml(actionLabel('training'))}</button>
-                    </div>
-                  </div>
-                `}
-              </div>
-            </div>
-          </div>
-        `;
-      }
-      return `
-        <div class="cloud-assist-stack">
-          <div class="cloud-assist-section">
-            <div class="cloud-assist-subhead">
-              <div>
-                <strong>候補者を探す</strong>
-                <p class="cloud-panel-note">${escapeHtml(`${dateText} / ${assistShiftLabel(shiftKey)}`)} を条件に assist サーチを開きます。</p>
-              </div>
-            </div>
-            <div class="cloud-actions compact">
-              <button type="button" class="cloud-btn primary" data-day-assist-search="${escapeHtml(String(day))}" data-day-assist-shift="${escapeHtml(shiftKey)}">この日で候補を検索</button>
-            </div>
-          </div>
-          <div class="cloud-assist-section">
-            <div class="cloud-assist-subhead">
-              <div>
-                <strong>実績として登録</strong>
-                <p class="cloud-panel-note">カレンダーに入っている内容を assist 実績登録フォームへ引き継ぎます。</p>
-              </div>
-            </div>
-            <div class="cloud-assist-detail-breakdown-list">
-              ${entries.length ? entries.map((entry, index) => `
-                <article class="cloud-assist-detail-breakdown-item">
-                  <div class="cloud-assist-result-head">
-                    <div>
-                      <strong>${escapeHtml(entry.candidate_name)}</strong>
-                      <p class="cloud-panel-note">${escapeHtml(`${assistShiftLabel(entry.shift_key)} / ${entry.employee_number || '社員番号なし'}`)}</p>
-                    </div>
-                    <button
-                      type="button"
-                      class="cloud-btn secondary"
-                      data-day-assist-record="${escapeHtml(String(day))}"
-                      data-day-assist-index="${escapeHtml(String(index))}"
-                    >この内容で登録</button>
-                  </div>
-                  <p class="cloud-panel-note">${escapeHtml(entry.notes || 'コメントなし')}</p>
-                </article>
-              `).join('') : `
-                <div class="cloud-empty-state">
-                  <p>この日に登録済みエントリはありません。空の実績登録フォームを開けます。</p>
-                  <div class="cloud-actions compact">
-                    <button type="button" class="cloud-btn secondary" data-day-assist-record="${escapeHtml(String(day))}" data-day-assist-index="">空の実績登録フォームを開く</button>
-                  </div>
-                </div>
-              `}
-            </div>
-          </div>
-        </div>
-      `;
-    }
-
     async function openAssistDayActionModal(day) {
       if (!isAssistAvailable()) {
         showFlash('アシスト機能は scene / person モードで利用できます', 'info');
         return;
       }
+      let previewResult = null;
+      let previewError = '';
       if (currentAssistMode() === 'person') {
         await ensureAssistLoaded(false);
+      } else {
+        try {
+          previewResult = await fetchAssistSearchPreview(assistDaySearchPayload(day, assistSelectedShiftKeyForDay(day)));
+        } catch (error) {
+          previewError = error && error.message ? error.message : '候補者の取得に失敗しました';
+        }
       }
       const modal = openCloudModal('cloud-assist-day-modal', `アシスト / ${assistDateTextForDay(day)}`);
-      modalBody(modal).innerHTML = buildAssistDayActionModal(day);
+      modalBody(modal).innerHTML = buildAssistDayActionModal(day, previewResult, previewError);
       modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-assist-day-close>閉じる</button>';
       modalFooter(modal).querySelector('[data-cloud-assist-day-close]').addEventListener('click', () => closeCloudModal('cloud-assist-day-modal'));
       if (currentAssistMode() === 'person') {
@@ -3719,6 +3828,21 @@
             },
             autoSearch: true
           });
+        });
+      });
+      modal.querySelectorAll('[data-day-assist-top-add]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const targetDay = button.getAttribute('data-day-assist-top-add') || '';
+          const shiftKey = button.getAttribute('data-day-assist-top-shift') || '';
+          const candidate = {
+            name: button.getAttribute('data-day-assist-top-name') || '',
+            employee_number: button.getAttribute('data-day-assist-top-employee') || ''
+          };
+          if (!appendAssistSearchResultToSpecificDay(targetDay, shiftKey, candidate)) {
+            showFlash('最有力候補を予定に追加できませんでした', 'error');
+            return;
+          }
+          notifyAssistAction('最有力候補をその日の予定に入れました。保存ボタンで確定してください');
         });
       });
       modal.querySelectorAll('[data-day-assist-record]').forEach((button) => {
