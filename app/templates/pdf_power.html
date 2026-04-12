@@ -1,25 +1,231 @@
 {% extends "base.html" %}
 
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pdf_power_control.css') }}">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<div id="pdfPowerRoot" class="max-w-7xl mx-auto mt-10 bg-white rounded-xl shadow-lg p-8">
-  <h2 class="text-3xl font-bold mb-8 text-center text-gray-800">📚 PowerPDF</h2>
+<div class="pdf-power-shell container mx-auto px-4 py-6 max-w-7xl">
+  <section class="pdf-power-hero">
+    <div class="pdf-power-hero-grid">
+      <div class="pdf-power-hero-copy">
+        <div class="pdf-power-pill">DOCUMENT CONTROL</div>
+        <div>
+          <h1 class="pdf-power-title">📚 PowerPDF</h1>
+          <p class="pdf-power-subtitle">PDFの操作ならPowerPDF。並び替えから編集、圧縮から抽出。できないことはありません。</p>
+        </div>
+      </div>
+      <div class="pdf-power-hero-meta">
+        <div class="pdf-power-hero-card is-login">
+          <div class="pdf-power-hero-card-label">LOGIN</div>
+          <div class="pdf-power-hero-card-value">{{ user_id or 'USER' }}</div>
+        </div>
+        <div class="pdf-power-hero-card is-summary">
+          <div class="pdf-power-hero-card-label">SUMMARY</div>
+          <div id="pdfPowerHeroToolLabel" class="pdf-power-hero-card-value">コントロール</div>
+          <div id="pdfPowerHeroSummary" class="pdf-power-hero-card-note">複数PDFを読み込み、ページ単位で選択・並べ替え・回転しながら、出力まで一括で整えます。</div>
+        </div>
+        <div class="pdf-power-hero-card is-wide">
+          <div class="pdf-power-hero-card-label">DETAIL</div>
+          <div id="pdfPowerHeroDetailValue" class="pdf-power-hero-card-value">0ファイル / 0 B</div>
+          <div id="pdfPowerHeroDetailNote" class="pdf-power-hero-card-note">アップロードされたPDFの合計容量とファイル数をここに表示します。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="pdfPowerRoot" class="pdf-power-frame" data-control-process-url="{{ url_for('pdf_power.process_control_pdf') }}">
 
   <!-- タブボタン -->
-  <div class="flex flex-wrap justify-center gap-2 mb-8">
-    <button onclick="switchTab('convert')" class="tab-button">PDF変換</button>
-    <button onclick="switchTab('splitmerge')" class="tab-button">分割・結合</button>
-    <button onclick="switchTab('compress')" class="tab-button">圧縮</button>
-    <button onclick="switchTab('extract')" class="tab-button">テキスト抽出</button>
-    <button onclick="switchTab('rotate')" class="tab-button">ページ回転</button>
-    <button onclick="switchTab('password')" class="tab-button">パスワード</button>
-    <button onclick="switchTab('metadata')" class="tab-button">メタデータ</button>
-    <button onclick="switchTab('watermark')" class="tab-button">透かし</button>
-    <button onclick="switchTab('pages')" class="tab-button">ページ操作</button>
-    <button onclick="switchTab('editor')" class="tab-button">編集</button>
+  <div class="pdf-power-tabs flex flex-wrap justify-center gap-2 mb-8">
+    <button onclick="switchTab('control')" class="tab-button" data-tab="control">コントロール</button>
+    <button onclick="switchTab('convert')" class="tab-button" data-tab="convert">PDF変換</button>
+    <button onclick="switchTab('compress')" class="tab-button" data-tab="compress">圧縮</button>
+    <button onclick="switchTab('extract')" class="tab-button" data-tab="extract">テキスト抽出</button>
+    <button onclick="switchTab('editor')" class="tab-button" data-tab="editor">編集</button>
   </div>
 
   <!-- タブ内容 -->
+
+  <div id="control" class="tab-content hidden">
+    <div class="control-stage-shell">
+    <div class="control-wizard">
+      <div class="control-step-nav">
+        <button type="button" class="control-step-tab" data-control-step-nav="1">1. アップロード</button>
+        <button type="button" class="control-step-tab" data-control-step-nav="2">2. コントロール</button>
+        <button type="button" class="control-step-tab" data-control-step-nav="3">3. 出力設定</button>
+      </div>
+
+      <section class="control-step-panel" data-control-step-panel="1">
+        <div class="control-step-header">
+          <div>
+            <p class="control-step-eyebrow">Step 1</p>
+            <h3>PDFを追加</h3>
+            <p>まずは対象のPDFを読み込みます。複数PDFをまとめて追加でき、ドラッグアンドドロップにも対応します。</p>
+          </div>
+          <span class="control-badge">複数対応</span>
+        </div>
+
+        <label for="controlPdfInput" class="control-upload-drop" tabindex="0">
+          <span class="control-upload-title">PDFを選択</span>
+          <span class="control-upload-subtitle">ドラッグアンドドロップ、またはクリックで追加できます</span>
+        </label>
+        <input type="file" id="controlPdfInput" accept=".pdf" multiple class="hidden">
+
+        <div class="control-mini-note">
+          入力PDFのパスワード解除もここから進められます。出力側でパスワードを設定しなければ、復号済みのPDFとして書き出せます。
+        </div>
+
+        <div id="controlDocList" class="control-doc-list"></div>
+
+        <div class="control-step-actions">
+          <span></span>
+          <button type="button" id="controlToArrangeBtn" class="control-primary-btn">コントロールへ進む</button>
+        </div>
+      </section>
+
+      <section class="control-step-panel" data-control-step-panel="2" hidden>
+        <div class="control-step-header">
+          <div>
+            <p class="control-step-eyebrow">Step 2</p>
+            <h3>コントロール</h3>
+            <p>ここではプレビューを見ながら、1ページずつ出力対象を選択し、ドラッグで順番変更したり回転を行います。</p>
+          </div>
+          <span id="controlArrangeCountBadge" class="control-badge">まだページがありません</span>
+        </div>
+
+        <div class="control-page-layout">
+          <div class="control-preview-card">
+            <div class="control-preview-head">
+              <div>
+                <p class="control-preview-label">Preview</p>
+                <div id="controlActivePageLabel" class="control-preview-title">ページを選択してください</div>
+              </div>
+              <span id="controlActivePageRotation" class="control-badge">0°</span>
+            </div>
+            <div id="controlPreviewWrap" class="control-preview-wrap">
+              <canvas id="controlPreviewCanvas"></canvas>
+              <div id="controlPreviewPlaceholder" class="control-preview-placeholder">ページを選ぶと、ここにプレビューが表示されます。</div>
+            </div>
+          </div>
+
+          <div class="control-pages-card">
+            <div class="control-pages-head">
+              <div>
+                <p>Pages</p>
+                <div id="controlSelectionSummary" class="control-preview-title">0 / 0 ページを出力対象</div>
+              </div>
+            </div>
+
+            <div class="control-page-toolbar">
+              <button type="button" class="control-secondary-btn" data-control-batch="select-all">すべて選択</button>
+              <button type="button" class="control-secondary-btn" data-control-batch="clear-selection">すべて外す</button>
+              <button type="button" class="control-secondary-btn" data-control-batch="rotate-left">選択を左回転</button>
+              <button type="button" class="control-secondary-btn" data-control-batch="rotate-right">選択を右回転</button>
+            </div>
+
+            <div id="controlPageList" class="control-page-list"></div>
+          </div>
+        </div>
+
+        <div class="control-step-actions">
+          <button type="button" id="controlBackToUploadBtn" class="control-secondary-btn">アップロードに戻る</button>
+          <button type="button" id="controlToOutputBtn" class="control-primary-btn">出力設定へ進む</button>
+        </div>
+      </section>
+
+      <section class="control-step-panel" data-control-step-panel="3" hidden>
+        <div class="control-step-header">
+          <div>
+            <p class="control-step-eyebrow">Step 3</p>
+            <h3>出力設定</h3>
+            <p>最後に透かし、メタデータ、パスワードを必要に応じて設定して、1つのPDFとして出力します。</p>
+          </div>
+          <span id="controlOutputCountBadge" class="control-badge">0ページ</span>
+        </div>
+
+        <div class="control-settings-stack">
+          <div class="control-settings-card">
+            <h4>出力ファイル名</h4>
+            <input type="text" id="controlOutputName" class="control-output-name" value="control_output.pdf" placeholder="control_output.pdf">
+          </div>
+
+          <details class="control-settings-card control-disclosure">
+            <summary>透かし</summary>
+            <div class="control-disclosure-body control-settings-grid">
+              <label class="control-check"><input type="checkbox" id="controlWatermarkEnabled"> 透かしを入れる</label>
+              <label>文字
+                <input type="text" id="controlWatermarkText" placeholder="CONFIDENTIAL">
+              </label>
+              <label>適用ページ
+                <input type="text" id="controlWatermarkPages" value="all" placeholder="all / 1,3-5">
+              </label>
+              <label>配置
+                <select id="controlWatermarkPosition">
+                  <option value="center">中央</option>
+                  <option value="tile">全面タイル</option>
+                  <option value="top-left">左上</option>
+                  <option value="top-center">上中央</option>
+                  <option value="top-right">右上</option>
+                  <option value="middle-left">左中央</option>
+                  <option value="middle-right">右中央</option>
+                  <option value="bottom-left">左下</option>
+                  <option value="bottom-center">下中央</option>
+                  <option value="bottom-right">右下</option>
+                </select>
+              </label>
+              <label>色
+                <input type="color" id="controlWatermarkColor" value="#94a3b8">
+              </label>
+              <label>透明度
+                <input type="range" id="controlWatermarkOpacity" min="0.05" max="1" step="0.05" value="0.22">
+              </label>
+              <label>文字サイズ
+                <input type="number" id="controlWatermarkFontSize" min="12" max="240" step="1" value="60">
+              </label>
+              <label>角度
+                <input type="number" id="controlWatermarkRotation" min="-360" max="360" step="5" value="45">
+              </label>
+            </div>
+          </details>
+
+          <details class="control-settings-card control-disclosure">
+            <summary>メタデータ</summary>
+            <div class="control-disclosure-body control-settings-grid">
+              <label>タイトル
+                <input type="text" id="controlMetaTitle" placeholder="タイトル">
+              </label>
+              <label>作成者
+                <input type="text" id="controlMetaAuthor" placeholder="作成者">
+              </label>
+              <label>件名
+                <input type="text" id="controlMetaSubject" placeholder="件名">
+              </label>
+              <label>キーワード
+                <input type="text" id="controlMetaKeywords" placeholder="keyword1, keyword2">
+              </label>
+            </div>
+          </details>
+
+          <details class="control-settings-card control-disclosure">
+            <summary>セキュリティ</summary>
+            <div class="control-disclosure-body control-settings-grid">
+              <label class="control-check"><input type="checkbox" id="controlOutputPasswordEnabled"> 出力PDFにパスワードを設定</label>
+              <label>出力パスワード
+                <input type="password" id="controlOutputPassword" placeholder="任意">
+              </label>
+            </div>
+          </details>
+
+          <div id="controlStatus" class="control-status">出力前の確認やエラーはここに表示します。</div>
+        </div>
+
+        <div class="control-step-actions">
+          <button type="button" id="controlBackToArrangeBtn" class="control-secondary-btn">コントロールに戻る</button>
+          <button type="button" id="controlExportBtn" class="control-primary-btn">選択中のページをPDFとして出力</button>
+        </div>
+      </section>
+    </div>
+    </div>
+  </div>
 
   <!-- 1. PDF変換 -->
   <div id="convert" class="tab-content hidden">
@@ -499,56 +705,186 @@
   <div id="editor" class="tab-content hidden">
     <div class="bg-gradient-to-r from-blue-50 to-cyan-50 p-6 rounded-lg border-l-4 border-blue-600">
       <h3 class="font-semibold mb-4 text-xl text-gray-700">PowerPDF 編集</h3>
-      <form action="/tools/pdf_power/edit" method="POST" enctype="multipart/form-data" id="editorForm" class="editor-grid">
-        <aside class="editor-card editor-panel" id="editorLeftPanel">
-          <label class="block text-sm font-medium text-gray-600 mb-2">編集するPDF</label>
-          <input type="file" name="pdf" id="editorPdfInput" accept=".pdf"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent" required>
-          <input type="hidden" name="operations" id="operationsInput" value="[]">
-          <button type="button" class="bg-blue-100 text-blue-700 px-3 py-2 rounded-md mt-3 w-full hover:bg-blue-200 transition" id="openEditorWindowBtn">編集専用ウィンドウを開く</button>
-          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-md mt-3 w-full hover:bg-blue-700 transition">編集PDFを生成</button>
-          <p class="text-xs text-gray-500 mt-3">プレビューを右クリックすると、テキスト・図形・画像・範囲コピーを追加できます。</p>
-        </aside>
-
+      <form action="/tools/pdf_power/edit" method="POST" enctype="multipart/form-data" id="editorForm" class="editor-grid" novalidate>
+        <input type="file" name="pdf" id="editorPdfInput" accept=".pdf" class="hidden">
+        <input type="file" name="reference_pdf" id="referencePdfInput" accept=".pdf" class="hidden">
+        <input type="hidden" name="operations" id="operationsInput" value="[]">
         <section class="editor-main">
-          <div class="editor-toolbar">
-            <button type="button" class="toolbar-btn" id="handToolBtn">手のひら</button>
-            <button type="button" class="toolbar-btn" data-action="add_text">テキスト</button>
-            <button type="button" class="toolbar-btn" data-action="start_freehand">自由描画</button>
-            <button type="button" class="toolbar-btn" id="zoomOutBtn">-</button>
-            <span id="zoomInfo">100%</span>
-            <button type="button" class="toolbar-btn" id="zoomInBtn">+</button>
-            <select id="zoomPreset" class="toolbar-select" title="ズーム倍率">
-              <option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option>
-              <option value="1.25" selected>125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option>
-            </select>
-            <button type="button" class="toolbar-btn" id="undoOpBtn">元に戻す</button>
-            <button type="button" class="toolbar-btn" id="redoOpBtn">やり直し</button>
-            <span class="mode-badge" id="modeBadge">Mode: Idle</span>
-            <span id="pageInfo">- / -</span>
-          </div>
-          <div class="editor-viewer" id="viewerWrap">
-            <div class="canvas-stage" id="canvasStage">
-              <canvas id="pdfCanvas"></canvas>
-              <div id="overlayLayer"></div>
-              <div id="dragRect" class="drag-rect hidden"></div>
-              <div id="contextMenu" class="context-menu hidden">
-                <button type="button" data-action="add_text">テキストを追加</button>
-                <button type="button" data-action="add_rect">四角形を追加</button>
-                <button type="button" data-action="add_ellipse">楕円を追加</button>
-                <button type="button" data-action="add_line">線を追加(2点指定)</button>
-                <button type="button" data-action="start_freehand">自由描画開始</button>
-                <button type="button" data-action="add_image">画像を追加</button>
-                <button type="button" data-action="start_copy">範囲コピー開始</button>
-                <button type="button" data-action="copy_selected">コピー</button>
-                <button type="button" data-action="paste_selected">貼り付け</button>
+          <div class="editor-toolbar-shell">
+            <div class="editor-toolbar">
+              <div class="editor-toolbar-group editor-toolbar-group-strong">
+                <div class="toolbar-menu-shell" id="editorUploadMenuShell">
+                  <button type="button" class="toolbar-btn" id="uploadMenuBtn">アップロード</button>
+                  <div id="uploadMenu" class="toolbar-menu hidden">
+                    <button type="button" data-upload-target="edit">編集PDFをアップロード</button>
+                    <button type="button" data-upload-target="reference">参照PDFをアップロード</button>
+                    <button type="button" id="clearReferencePdfBtn">参照PDFを外す</button>
+                  </div>
+                </div>
+                <div class="toolbar-menu-shell" id="editorSettingsMenuShell">
+                  <button type="button" class="toolbar-btn" id="settingsMenuBtn">設定</button>
+                  <div id="settingsMenu" class="toolbar-menu toolbar-menu-settings hidden">
+                    <div class="toolbar-menu-section">
+                      <div class="toolbar-menu-title">参照PDF</div>
+                      <label class="toolbar-switch" for="referenceVisibilityToggle">
+                        <input type="checkbox" id="referenceVisibilityToggle">
+                        <span class="toolbar-switch-track" aria-hidden="true"></span>
+                        <span class="toolbar-switch-copy">
+                          <strong>参照PDFを表示</strong>
+                          <span>参照PDFを読み込んだ後にだけ切り替えできます。</span>
+                        </span>
+                      </label>
+                    </div>
+                    <div class="toolbar-menu-section">
+                      <div class="toolbar-menu-title">参照プレビュー配置</div>
+                      <label class="toolbar-switch" for="referenceLayoutToggle">
+                        <input type="checkbox" id="referenceLayoutToggle">
+                        <span class="toolbar-switch-track" aria-hidden="true"></span>
+                        <span class="toolbar-switch-copy">
+                          <strong>右側に並べる</strong>
+                          <span>オフで下側表示、オンで編集PDFの右側に表示します。</span>
+                        </span>
+                      </label>
+                    </div>
+                    <div class="toolbar-menu-section">
+                      <div class="toolbar-menu-title">表示倍率</div>
+                      <label class="toolbar-switch" for="keepEditZoomToggle">
+                        <input type="checkbox" id="keepEditZoomToggle">
+                        <span class="toolbar-switch-track" aria-hidden="true"></span>
+                        <span class="toolbar-switch-copy">
+                          <strong>編集PDFの倍率を維持</strong>
+                          <span>オンにすると現在の表示倍率を次のPDF読み込み時にも引き継ぎます。</span>
+                        </span>
+                      </label>
+                    </div>
+                    <div class="toolbar-menu-section">
+                      <label class="toolbar-range-label" for="referencePaneSizeRange">
+                        <span>参照プレビューサイズ</span>
+                        <span id="referencePaneSizeValue">36%</span>
+                      </label>
+                      <input type="range" id="referencePaneSizeRange" min="28" max="52" step="2" value="36">
+                    </div>
+                  </div>
+                </div>
+                <button type="button" class="toolbar-btn" id="referenceCopyBtn" disabled>参照PDFから範囲コピー</button>
+                <button type="submit" class="toolbar-btn toolbar-btn-primary" id="editorSubmitBtn">編集PDFを生成</button>
+              </div>
+              <div class="editor-toolbar-group">
+                <button type="button" class="toolbar-btn" id="handToolBtn">手のひら</button>
+                <button type="button" class="toolbar-btn" data-action="add_text">テキスト</button>
+                <button type="button" class="toolbar-btn" data-action="start_freehand">自由描画</button>
+                <button type="button" class="toolbar-btn" id="undoOpBtn">元に戻す</button>
+                <button type="button" class="toolbar-btn" id="redoOpBtn">やり直し</button>
+                <button type="button" class="toolbar-btn" id="openEditorWindowBtn">専用ウィンドウ</button>
+                <span class="mode-badge" id="modeBadge">Mode: Idle</span>
               </div>
             </div>
+            <p class="editor-toolbar-note">編集PDFが作業対象です。参照PDFを表示すると、別枠で見比べながら範囲コピーして貼り付けできます。</p>
+          </div>
+          <div class="editor-document-strip hidden" id="editorDocumentStrip">
+            <div class="editor-doc-chip" id="editDocChip">編集PDF: 未アップロード</div>
+            <div class="editor-doc-chip hidden" id="referenceDocChip">参照PDF: 未アップロード</div>
+          </div>
+          <div class="editor-viewers reference-layout-side" id="editorViewers">
+            <section class="editor-view-pane" id="editViewerPane">
+              <div class="editor-view-head">
+                <div>
+                  <p class="editor-view-label">EDIT PDF</p>
+                  <div id="editViewerTitle" class="editor-view-title">編集PDFをアップロードしてください</div>
+                </div>
+                <div class="editor-view-actions">
+                  <button type="button" class="toolbar-btn" id="editPrevPageBtn">前</button>
+                  <span class="toolbar-status" id="editPageInfo">- / -</span>
+                  <button type="button" class="toolbar-btn" id="editNextPageBtn">次</button>
+                  <button type="button" class="toolbar-btn" id="editZoomOutBtn">-</button>
+                  <span class="toolbar-status" id="editZoomInfo">100%</span>
+                  <button type="button" class="toolbar-btn" id="editZoomInBtn">+</button>
+                  <select id="editZoomPreset" class="toolbar-select" title="編集PDFのズーム倍率">
+                    <option value="0.35">35%</option><option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option>
+                    <option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option>
+                  </select>
+                </div>
+              </div>
+              <div id="editEmptyState" class="editor-empty-state">
+                <div class="editor-empty-card">
+                  <p class="editor-empty-eyebrow">UPLOAD</p>
+                  <h4>編集PDFを読み込む</h4>
+                  <p>編集中のPDFを読み込むと、ここに編集ビューを表示します。参照PDFはあとから追加して並べて確認できます。</p>
+                  <div class="editor-empty-actions">
+                    <button type="button" class="toolbar-btn toolbar-btn-primary" data-upload-target="edit">編集PDFをアップロード</button>
+                    <button type="button" class="toolbar-btn" data-upload-target="reference">参照PDFを追加</button>
+                  </div>
+                  <p class="editor-empty-note">アップロード後は上部の「アップロード」から編集PDFと参照PDFを差し替えられます。</p>
+                </div>
+              </div>
+              <div class="editor-viewer viewer-empty" id="viewerWrap">
+                <div class="canvas-stage hidden" id="canvasStage">
+                  <canvas id="pdfCanvas"></canvas>
+                  <div id="overlayLayer"></div>
+                  <div id="dragRect" class="drag-rect hidden"></div>
+                  <div id="contextMenu" class="context-menu hidden">
+                    <button type="button" data-action="add_text">テキストを追加</button>
+                    <button type="button" data-action="add_rect">四角形を追加</button>
+                    <button type="button" data-action="add_ellipse">楕円を追加</button>
+                    <button type="button" data-action="add_line">線を追加(2点指定)</button>
+                    <button type="button" data-action="start_freehand">自由描画開始</button>
+                    <button type="button" data-action="add_image">画像を追加</button>
+                    <button type="button" data-action="start_copy">範囲コピー開始</button>
+                    <button type="button" data-action="copy_selected">コピー</button>
+                    <button type="button" data-action="paste_selected">貼り付け</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+            <section class="editor-view-pane hidden" id="referenceViewerPane">
+              <div class="editor-view-head">
+                <div>
+                  <p class="editor-view-label">REFERENCE PDF</p>
+                  <div id="referenceViewerTitle" class="editor-view-title">参照PDFは未アップロードです</div>
+                </div>
+                <div class="editor-view-actions">
+                  <button type="button" class="toolbar-btn" id="referencePrevPageBtn">前</button>
+                  <span class="toolbar-status" id="referencePageInfo">- / -</span>
+                  <button type="button" class="toolbar-btn" id="referenceNextPageBtn">次</button>
+                  <button type="button" class="toolbar-btn" id="referenceZoomOutBtn">-</button>
+                  <span class="toolbar-status" id="referenceZoomInfo">100%</span>
+                  <button type="button" class="toolbar-btn" id="referenceZoomInBtn">+</button>
+                  <select id="referenceZoomPreset" class="toolbar-select" title="参照PDFのズーム倍率">
+                    <option value="0.35">35%</option><option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option>
+                    <option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option>
+                  </select>
+                </div>
+              </div>
+              <div id="referenceEmptyState" class="editor-empty-state compact">
+                <div class="editor-empty-card compact">
+                  <p class="editor-empty-eyebrow">REFERENCE</p>
+                  <h4>参照PDFを追加する</h4>
+                  <p>参照PDFを表示すると、そのPDFから直接範囲コピーして編集PDFへ貼り付けられます。</p>
+                  <div class="editor-empty-actions">
+                    <button type="button" class="toolbar-btn" data-upload-target="reference">参照PDFをアップロード</button>
+                  </div>
+                </div>
+              </div>
+              <div class="editor-viewer viewer-empty" id="referenceViewerWrap">
+                <div class="canvas-stage hidden" id="referenceCanvasStage">
+                  <canvas id="referencePdfCanvas"></canvas>
+                  <div id="referenceOverlayLayer"></div>
+                  <div id="referenceDragRect" class="drag-rect hidden"></div>
+                </div>
+              </div>
+            </section>
           </div>
         </section>
 
         <aside class="editor-card editor-panel" id="editorRightPanel">
-          <h4 class="font-semibold text-gray-700 mb-2">レイヤー</h4>
+          <div class="editor-panel-header">
+            <div>
+              <h4 class="font-semibold text-gray-700 mb-1">編集パネル</h4>
+              <p class="editor-panel-note">追加した要素の順序変更、数値入力、微調整をここで行います。</p>
+            </div>
+          </div>
+          <div class="editor-panel-section">
+            <h5 class="editor-panel-label">レイヤー</h5>
           <div class="layer-toolbar">
             <button type="button" class="toolbar-btn" id="layerBringFrontBtn">最前面</button>
             <button type="button" class="toolbar-btn" id="layerSendBackBtn">最背面</button>
@@ -556,8 +892,9 @@
             <button type="button" class="toolbar-btn" id="layerMoveDownBtn">↓</button>
           </div>
           <div id="layerList" class="layer-list mb-4"></div>
-          <div class="line-maker mb-4">
-            <h5 class="font-semibold text-gray-700 mb-2">線を数値で追加</h5>
+          </div>
+          <div class="editor-panel-section line-maker mb-4">
+            <h5 class="editor-panel-label">線を数値で追加</h5>
             <div class="grid grid-cols-2 gap-2">
               <label class="block text-xs text-gray-500">始点X<input type="number" id="lineStartX" step="0.1" class="w-full px-2 py-1 border rounded" value="40"></label>
               <label class="block text-xs text-gray-500">始点Y<input type="number" id="lineStartY" step="0.1" class="w-full px-2 py-1 border rounded" value="40"></label>
@@ -566,6 +903,7 @@
             </div>
             <button type="button" class="toolbar-btn mt-2 w-full" id="addLineByPointBtn">起点/終点を指定して線を追加</button>
           </div>
+          <div class="editor-panel-section">
           <h4 class="font-semibold text-gray-700 mb-2">要素プロパティ</h4>
           <p id="propEmpty" class="text-sm text-gray-500">要素をクリックすると編集できます。</p>
           <div id="propForm" class="hidden space-y-2">
@@ -605,33 +943,43 @@
             <label class="hidden" id="groupImageIndex">予備<input type="number" id="propImageIndex" min="1"></label>
             <button type="button" class="bg-red-600 text-white px-3 py-2 rounded-md w-full mt-2 hover:bg-red-700 transition" id="deleteSelectedBtn">選択要素を削除</button>
           </div>
+          </div>
         </aside>
       </form>
     </div>
   </div>
 </div>
+</div>
 
 <style>
-  .tab-button {
-    padding: 10px 16px;
-    background-color: #f1f5f9;
-    border-radius: 8px;
-    font-weight: 600;
+  .pdf-power-tabs {
+    margin-bottom: 1.75rem;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 0.35rem;
+  }
+
+  .pdf-power-shell .tab-button {
+    padding: 12px 16px;
+    background: transparent;
+    border-radius: 16px 16px 0 0;
+    font-weight: 700;
     color: #64748b;
     transition: all 0.2s;
-    border: 2px solid transparent;
+    border: 0;
+    border-bottom: 3px solid transparent;
     font-size: 14px;
+    white-space: nowrap;
   }
 
-  .tab-button:hover {
-    background-color: #e2e8f0;
-    color: #475569;
+  .pdf-power-shell .tab-button:hover {
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.02));
+    color: #334155;
   }
 
-  .tab-button.active {
-    background-color: #3b82f6;
-    color: white;
-    border-color: #2563eb;
+  .pdf-power-shell .tab-button.active {
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.14), rgba(239, 246, 255, 0.8));
+    color: #1d4ed8;
+    border-color: #3b82f6;
   }
 
   .tab-content {
@@ -644,20 +992,15 @@
 
   .editor-grid {
     display: grid;
-    grid-template-columns: minmax(0, var(--left-panel-width, 280px)) minmax(0, 1fr) minmax(0, var(--right-panel-width, 280px));
+    grid-template-columns: minmax(0, 1fr) minmax(0, var(--right-panel-width, 280px));
     gap: 12px;
     align-items: start;
-  }
-
-  .editor-grid.left-collapsed {
-    --left-panel-width: 0px;
   }
 
   .editor-grid.right-collapsed {
     --right-panel-width: 0px;
   }
 
-  .editor-grid.left-collapsed #editorLeftPanel,
   .editor-grid.right-collapsed #editorRightPanel {
     padding: 0;
     border: 0;
@@ -667,25 +1010,86 @@
   .editor-card {
     background: #fff;
     border: 1px solid #dbe4f4;
-    border-radius: 10px;
-    padding: 10px;
+    border-radius: 14px;
+    padding: 14px;
     position: sticky;
     top: 12px;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+  }
+
+  .editor-panel {
+    display: grid;
+    gap: 14px;
+    align-content: start;
+  }
+
+  .editor-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .editor-panel-note {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #64748b;
+  }
+
+  .editor-panel-section {
+    display: grid;
+    gap: 8px;
+  }
+
+  .editor-panel-label {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: #334155;
   }
 
   .editor-main {
     min-width: 0;
     display: grid;
-    gap: 8px;
+    gap: 10px;
+    align-content: start;
+  }
+
+  .editor-toolbar-shell {
+    border: 1px solid #dbe4f4;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+    padding: 12px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
   }
 
   .editor-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    gap: 10px;
     font-size: 12px;
     color: #334155;
+  }
+
+  .editor-toolbar-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .editor-toolbar-group-strong {
+    flex: 1 1 360px;
+  }
+
+  .editor-toolbar-note {
+    margin: 10px 0 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #64748b;
   }
 
   .toolbar-btn {
@@ -697,6 +1101,18 @@
     font-size: 12px;
     font-weight: 700;
     cursor: pointer;
+  }
+
+  .toolbar-btn[disabled],
+  .toolbar-select[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .toolbar-btn-primary {
+    background: #1d4ed8;
+    color: #fff;
+    border-color: #1d4ed8;
   }
 
   .toolbar-btn.danger {
@@ -715,6 +1131,19 @@
     font-weight: 700;
   }
 
+  .toolbar-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 68px;
+    padding: 5px 8px;
+    border-radius: 9999px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
   .mode-badge {
     display: inline-flex;
     align-items: center;
@@ -726,6 +1155,273 @@
     font-weight: 700;
   }
 
+  .toolbar-menu-shell {
+    position: relative;
+  }
+
+  .toolbar-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 30;
+    min-width: 190px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 14px 26px rgba(15, 23, 42, 0.16);
+    padding: 6px;
+  }
+
+  .toolbar-menu.hidden,
+  .editor-empty-state.hidden {
+    display: none !important;
+  }
+
+  .toolbar-menu button {
+    width: 100%;
+    text-align: left;
+    border: 0;
+    background: transparent;
+    border-radius: 7px;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #1f3f7e;
+    cursor: pointer;
+  }
+
+  .toolbar-menu button:hover {
+    background: #edf4ff;
+  }
+
+  .toolbar-menu-settings {
+    min-width: 320px;
+    padding: 12px;
+    display: grid;
+    gap: 14px;
+  }
+
+  .toolbar-menu-section {
+    display: grid;
+    gap: 10px;
+  }
+
+  .toolbar-menu-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #334155;
+  }
+
+  .toolbar-switch {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px 12px;
+    align-items: center;
+    cursor: pointer;
+  }
+
+  .toolbar-switch input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .toolbar-switch-track {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    border-radius: 9999px;
+    background: #cbd5e1;
+    transition: background 0.2s ease;
+  }
+
+  .toolbar-switch-track::after {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    background: #fff;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+    transition: transform 0.2s ease;
+  }
+
+  .toolbar-switch input:checked + .toolbar-switch-track {
+    background: #2563eb;
+  }
+
+  .toolbar-switch input:checked + .toolbar-switch-track::after {
+    transform: translateX(18px);
+  }
+
+  .toolbar-switch-copy {
+    display: grid;
+    gap: 2px;
+    font-size: 12px;
+    color: #64748b;
+    line-height: 1.5;
+  }
+
+  .toolbar-switch-copy strong {
+    color: #0f172a;
+  }
+
+  .toolbar-range-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+  }
+
+  .toolbar-menu input[type="range"] {
+    width: 100%;
+    accent-color: #2563eb;
+  }
+
+  .editor-document-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .editor-doc-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 9999px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .editor-viewers {
+    --reference-pane-size: 36%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .editor-viewers.reference-visible.reference-layout-side {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, var(--reference-pane-size));
+  }
+
+  .editor-viewers.reference-visible.reference-layout-bottom {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .editor-view-pane {
+    min-width: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  #editViewerPane > #editEmptyState,
+  #editViewerPane > #viewerWrap,
+  #referenceViewerPane > #referenceEmptyState,
+  #referenceViewerPane > #referenceViewerWrap {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .editor-view-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .editor-view-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: #475569;
+  }
+
+  .editor-view-label {
+    margin: 0 0 2px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #64748b;
+  }
+
+  .editor-view-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  .editor-empty-state {
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    align-self: stretch;
+    padding: 20px;
+    z-index: 1;
+  }
+
+  .editor-empty-state.compact {
+    min-height: 0;
+  }
+
+  .editor-empty-card {
+    width: min(100%, 420px);
+    padding: 22px 24px;
+    border-radius: 18px;
+    border: 1px solid rgba(191, 219, 254, 0.9);
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+    text-align: left;
+    color: #334155;
+  }
+
+  .editor-empty-card h4 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  .editor-empty-card p {
+    margin: 10px 0 0;
+    line-height: 1.7;
+  }
+
+  .editor-empty-card.compact h4 {
+    font-size: 18px;
+  }
+
+  .editor-empty-eyebrow {
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    color: #2563eb;
+  }
+
+  .editor-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .editor-empty-note {
+    font-size: 12px;
+    color: #64748b;
+  }
+
   #handToolBtn.active {
     background: #1d4ed8;
     color: #fff;
@@ -734,14 +1430,22 @@
 
   .editor-viewer {
     position: relative;
-    height: 620px;
+    min-height: 440px;
     overflow: auto;
     border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    background: #eff6ff;
-    padding: 12px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #eef6ff 0%, #f8fbff 100%);
+    padding: 14px;
     display: block;
     scrollbar-gutter: stable both-edges;
+  }
+
+  .editor-viewer.viewer-empty {
+    background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%);
+  }
+
+  .editor-view-pane.hidden {
+    display: none !important;
   }
 
   .canvas-stage {
@@ -752,13 +1456,24 @@
     margin: 0 auto;
   }
 
+  .canvas-stage.hidden {
+    display: none;
+  }
+
   #pdfCanvas {
     display: block;
     background: #fff;
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
   }
 
-  #overlayLayer {
+  #referencePdfCanvas {
+    display: block;
+    background: #fff;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  }
+
+  #overlayLayer,
+  #referenceOverlayLayer {
     position: absolute;
     left: 0;
     top: 0;
@@ -772,6 +1487,10 @@
 
   #overlayLayer.hand-mode.panning {
     cursor: grabbing;
+  }
+
+  #referenceOverlayLayer.reference-selecting {
+    cursor: crosshair;
   }
 
   .overlay-item {
@@ -877,7 +1596,7 @@
   }
 
   .layer-list {
-    max-height: 260px;
+    max-height: 280px;
     overflow: auto;
     border: 1px solid #dbe4f4;
     border-radius: 8px;
@@ -945,7 +1664,6 @@
 
     .editor-grid {
       grid-template-columns: 1fr;
-      --left-panel-width: 0px;
       --right-panel-width: 0px;
     }
 
@@ -956,10 +1674,116 @@
     .editor-card {
       position: static;
     }
+
+    .editor-toolbar-shell {
+      padding: 10px;
+    }
+
+    .editor-toolbar-group-strong {
+      flex-basis: 100%;
+    }
+
+    .editor-viewers.reference-visible {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
 
 <script>
+  const PDF_POWER_HERO_TOOL_META = {
+    control: {
+      label: 'コントロール',
+      summary: '複数PDFを読み込み、ページ単位で選択・並べ替え・回転しながら、出力まで一括で整えます。'
+    },
+    convert: {
+      label: 'PDF変換',
+      summary: '画像や文書とPDFの相互変換を行い、用途に合わせた形式へスムーズに切り替えます。'
+    },
+    compress: {
+      label: '圧縮',
+      summary: 'PDFを圧縮し、画質と容量のバランスを取りながら扱いやすいサイズへ整えます。'
+    },
+    extract: {
+      label: 'テキスト抽出',
+      summary: 'PDFからテキストや画像を取り出し、必要な情報をすばやく再利用できます。'
+    },
+    editor: {
+      label: '編集',
+      summary: 'PDFを直接編集し、図形や文字の追加、加工、仕上げまでこの場で進められます。'
+    }
+  };
+
+  const PDF_POWER_HERO_DETAILS = {};
+
+  function updatePdfPowerHeroSummary(tabId) {
+    const label = document.getElementById('pdfPowerHeroToolLabel');
+    const summary = document.getElementById('pdfPowerHeroSummary');
+    const meta = PDF_POWER_HERO_TOOL_META[tabId] || PDF_POWER_HERO_TOOL_META.control;
+    if (label) label.textContent = meta.label;
+    if (summary) summary.textContent = meta.summary;
+  }
+
+  function buildPdfPowerHeroDetailFromInputs(tabId) {
+    const tab = document.getElementById(tabId);
+    if (!tab) {
+      return {
+        count: 0,
+        size: 0,
+        note: 'アップロードされたPDFの合計容量とファイル数をここに表示します。'
+      };
+    }
+
+    const pdfFiles = Array.from(tab.querySelectorAll('input[type="file"]'))
+      .flatMap((input) => Array.from(input.files || []))
+      .filter((file) => /\.pdf$/i.test(file.name || '') || file.type === 'application/pdf');
+
+    const totalSize = pdfFiles.reduce((sum, file) => sum + Number(file.size || 0), 0);
+    return {
+      count: pdfFiles.length,
+      size: totalSize,
+      note: pdfFiles.length
+        ? '現在選択中のツールで読み込んだPDFの合計容量です。'
+        : 'アップロードされたPDFの合計容量とファイル数をここに表示します。'
+    };
+  }
+
+  function renderPdfPowerHeroDetail(tabId) {
+    const value = document.getElementById('pdfPowerHeroDetailValue');
+    const note = document.getElementById('pdfPowerHeroDetailNote');
+    const detail = PDF_POWER_HERO_DETAILS[tabId] || buildPdfPowerHeroDetailFromInputs(tabId);
+    if (value) {
+      value.textContent = `${detail.count || 0}ファイル / ${formatFileSize(detail.size || 0)}`;
+    }
+    if (note) {
+      note.textContent = detail.note || 'アップロードされたPDFの合計容量とファイル数をここに表示します。';
+    }
+  }
+
+  function setPdfPowerHeroDetail(tabId, detail) {
+    PDF_POWER_HERO_DETAILS[tabId] = {
+      count: Number(detail?.count || 0),
+      size: Number(detail?.size || 0),
+      note: detail?.note || ''
+    };
+
+    const activeTab = document.querySelector('.tab-content.active');
+    if (activeTab && activeTab.id === tabId) {
+      renderPdfPowerHeroDetail(tabId);
+    }
+  }
+
+  window.setPdfPowerHeroDetail = setPdfPowerHeroDetail;
+
+  function bindPdfPowerHeroFileInputs() {
+    document.querySelectorAll('.tab-content input[type="file"]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const tab = input.closest('.tab-content');
+        if (!tab || tab.id === 'control') return;
+        setPdfPowerHeroDetail(tab.id, buildPdfPowerHeroDetailFromInputs(tab.id));
+      });
+    });
+  }
+
   function switchTab(tabId) {
     // すべてのタブボタンからactiveクラスを削除
     document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
@@ -978,12 +1802,13 @@
     }
 
     // 対応するタブボタンをアクティブに
-    const tabButtons = document.querySelectorAll('.tab-button');
-    const tabOrder = ['convert', 'splitmerge', 'compress', 'extract', 'rotate', 'password', 'metadata', 'watermark', 'pages', 'editor'];
-    const tabIndex = tabOrder.indexOf(tabId);
-    if (tabIndex !== -1 && tabButtons[tabIndex]) {
-      tabButtons[tabIndex].classList.add('active');
+    const matchingButton = document.querySelector(`.tab-button[data-tab="${tabId}"]`);
+    if (matchingButton) {
+      matchingButton.classList.add('active');
     }
+
+    updatePdfPowerHeroSummary(tabId);
+    renderPdfPowerHeroDetail(tabId);
   }
 
   function selectCompression(element, level) {
@@ -1023,6 +1848,8 @@
 
   // 分割・結合の操作に応じてページ範囲フィールドの表示/非表示を切り替え
   document.addEventListener('DOMContentLoaded', function() {
+    bindPdfPowerHeroFileInputs();
+
     const splitMergeForm = document.querySelector('form[action="/tools/pdf_power/split_merge"]');
     const modeRadios = splitMergeForm ? splitMergeForm.querySelectorAll('input[name="mode"]') : [];
     const rangeGroup = document.getElementById('range-group');
@@ -1204,16 +2031,23 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   }
 
-  switchTab({{ initial_tab|default('convert')|tojson }});
+  switchTab({{ initial_tab|default('control')|tojson }});
 </script>
+<script src="{{ url_for('static', filename='js/pdf_power_control.js') }}"></script>
+<script src="{{ url_for('static', filename='js/pdf_power_editor.js') }}"></script>
 <script>
 (() => {
   if (!window.pdfjsLib) return;
+  return;
   const editorForm = document.getElementById('editorForm');
   if (!editorForm) return;
+  if (window.__pdfPowerEnhancedEditorLoaded) return;
+  if (document.getElementById('referenceViewerPane')) return;
 
   const isEditorWindow = new URLSearchParams(window.location.search).get('editor_window') === '1';
   if (isEditorWindow) {
+    const shell = document.querySelector('.pdf-power-shell');
+    const hero = document.querySelector('.pdf-power-hero');
     const root = document.getElementById('pdfPowerRoot');
     const appSidebar = document.getElementById('app-sidebar');
     const sidebarToggle = document.getElementById('sidebar-toggle');
@@ -1224,13 +2058,20 @@
       appMain.style.padding = '0';
       appMain.style.maxWidth = '100%';
     }
+    if (hero) hero.remove();
+    if (shell) {
+      shell.style.padding = '0';
+      shell.style.maxWidth = '100%';
+      shell.style.borderRadius = '0';
+      shell.style.background = 'transparent';
+    }
     if (root) {
       root.style.maxWidth = 'none';
       root.style.margin = '0';
       root.style.marginTop = '0';
       root.style.borderRadius = '0';
       root.style.padding = '10px';
-      const tabsBar = root.querySelector('.flex.flex-wrap.justify-center.gap-2.mb-8');
+      const tabsBar = root.querySelector('.pdf-power-tabs');
       if (tabsBar) tabsBar.remove();
       root.querySelectorAll('.tab-content').forEach((el) => {
         if (el.id !== 'editor') el.remove();
@@ -2073,5 +2914,4 @@
   syncOverlay();
 })();
 </script>
-
 {% endblock %}
