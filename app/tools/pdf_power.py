@@ -5,14 +5,18 @@ import shutil
 import traceback
 import zipfile
 import json
+import textwrap
+import uuid
 from werkzeug.utils import secure_filename
 from PIL import Image
 from docx import Document
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
+from reportlab.lib.colors import Color
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from PyPDF2 import PdfReader, PdfWriter
 import fitz  # PyMuPDF
 import io
@@ -34,38 +38,62 @@ MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 COPY_REGION_BASE_DPI = 300
 COPY_REGION_MAX_SCALE = 8.0
 
-# 日本語フォント設定
-JAPANESE_FONT = 'Helvetica'  # デフォルト
+JAPANESE_FONT = "Helvetica"
+REPORTLAB_JAPANESE_FONT = "Helvetica"
+
 try:
-    # システムにある日本語フォントを試行
-    font_paths = [
-        '/System/Library/Fonts/NotoSansCJK.ttc',
-        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-        '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttf',
+    _reportlab_font_paths = [
+        "C:/Windows/Fonts/msgothic.ttc",
+        "C:/Windows/Fonts/meiryo.ttc",
+        "C:/Windows/Fonts/YuGothM.ttc",
+        "/System/Library/Fonts/NotoSansCJK.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttf",
     ]
-    for font_path in font_paths:
-        if os.path.exists(font_path):
-            pdfmetrics.registerFont(TTFont('NotoSansCJK', font_path))
-            JAPANESE_FONT = 'NotoSansCJK'
-            logger.info(f"日本語フォント登録成功: {font_path}")
-            break
-    if JAPANESE_FONT == 'Helvetica':
-        logger.warning("日本語フォントが見つかりません。Helveticaを使用します（日本語は正しく表示されない可能性があります）")
+    for _font_path in _reportlab_font_paths:
+        if os.path.exists(_font_path):
+            try:
+                pdfmetrics.registerFont(TTFont("NotoSansCJK", _font_path))
+                JAPANESE_FONT = "NotoSansCJK"
+                break
+            except Exception:
+                continue
+
+    try:
+        pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
+        REPORTLAB_JAPANESE_FONT = "HeiseiKakuGo-W5"
+    except Exception:
+        REPORTLAB_JAPANESE_FONT = JAPANESE_FONT
+
+    if REPORTLAB_JAPANESE_FONT == "Helvetica":
+        logger.warning(
+            "Japanese font was not found. PowerPDF text output will fall back to Helvetica."
+        )
 except Exception as e:
-    logger.error(f"日本語フォント登録エラー: {e}")
+    logger.error(f"Japanese font registration error: {e}")
     logger.error(traceback.format_exc())
 
 
 @pdf_power_bp.route("/", methods=["GET"])
 @login_required
 def pdf_power_home():
-    return render_template("pdf_power.html")
+    return render_template("pdf_power.html", initial_tab="convert", password_mode="add")
 
 
 @pdf_power_bp.route("/editor", methods=["GET"])
 @login_required
 def pdf_power_editor_window():
     return render_template("pdf_power_editor_window.html")
+
+
+def _render_pdf_power_form_error(message, tab="convert", status=400, **context):
+    render_context = {
+        "initial_tab": tab,
+        "password_mode": context.get("password_mode", "add"),
+        "password_error": context.get("password_error"),
+    }
+    render_context.update(context)
+    return render_template("pdf_power.html", **render_context), status
 
 
 def _parse_page_number(page_value, total_pages):
@@ -303,6 +331,120 @@ def _collect_affected_pages_for_edit(operations, total_pages):
     return affected
 
 
+def _is_pdf_filename(filename):
+    return str(filename or "").lower().endswith(".pdf")
+
+
+def _sanitize_upload_filename(upload_file, default_name="uploaded"):
+    filename = secure_filename((getattr(upload_file, "filename", "") or "").strip())
+    return filename or default_name
+
+
+def _ensure_pdf_upload_filename(upload_file, default_name="uploaded.pdf"):
+    filename = _sanitize_upload_filename(upload_file, default_name)
+    if not _is_pdf_filename(filename):
+        filename = f"{filename}.pdf"
+    return filename
+
+
+def _unique_temp_path(temp_dir, filename):
+    safe_name = secure_filename(filename) or "file"
+    stem, ext = os.path.splitext(safe_name)
+    return os.path.join(temp_dir, f"{stem}_{uuid.uuid4().hex}{ext}")
+
+
+def _send_path_bytes(file_path, download_name, mimetype=None):
+    with open(file_path, "rb") as fh:
+        file_data = io.BytesIO(fh.read())
+    file_data.seek(0)
+    return send_file(
+        file_data,
+        as_attachment=True,
+        download_name=download_name,
+        mimetype=mimetype,
+    )
+
+
+def _read_text_file(file_path):
+    for encoding in ("utf-8-sig", "utf-8", "cp932", "shift_jis"):
+        try:
+            with open(file_path, "r", encoding=encoding) as fh:
+                return fh.read()
+        except UnicodeDecodeError:
+            continue
+    with open(file_path, "r", encoding="utf-8", errors="replace") as fh:
+        return fh.read()
+
+
+def _reportlab_font_name_for_text(text):
+    return REPORTLAB_JAPANESE_FONT if _is_non_ascii_text(text) else "Helvetica"
+
+
+def _wrap_reportlab_text(text, font_name, font_size, max_width, pdf_canvas):
+    if text == "":
+        return [""]
+
+    wrapped_lines = []
+    current = ""
+    for ch in str(text):
+        candidate = current + ch
+        if not current or pdf_canvas.stringWidth(candidate, font_name, font_size) <= max_width:
+            current = candidate
+        else:
+            wrapped_lines.append(current)
+            current = ch
+    if current or not wrapped_lines:
+        wrapped_lines.append(current)
+    return wrapped_lines
+
+
+def _create_text_pdf(content, output_path):
+    page_width, page_height = letter
+    margin = 72
+    font_size = 12
+    line_height = 18
+    max_width = page_width - (margin * 2)
+
+    pdf_canvas = canvas.Canvas(output_path, pagesize=letter)
+    y = page_height - margin
+
+    for raw_line in str(content).splitlines():
+        font_name = _reportlab_font_name_for_text(raw_line)
+        wrapped_lines = _wrap_reportlab_text(raw_line, font_name, font_size, max_width, pdf_canvas)
+        for line in wrapped_lines:
+            if y < margin:
+                pdf_canvas.showPage()
+                y = page_height - margin
+            pdf_canvas.setFont(font_name, font_size)
+            pdf_canvas.drawString(margin, y, line)
+            y -= line_height
+        if raw_line == "":
+            y -= line_height / 2
+
+    pdf_canvas.save()
+
+
+def _create_image_pdf(image_path, output_path):
+    with Image.open(image_path) as image:
+        rgb_image = image.convert("RGB")
+        rgb_image.save(output_path, "PDF")
+
+
+def _create_watermark_overlay(page_rect, watermark_text):
+    buffer = io.BytesIO()
+    pdf_canvas = canvas.Canvas(buffer, pagesize=(page_rect.width, page_rect.height))
+    font_name = _reportlab_font_name_for_text(watermark_text)
+    pdf_canvas.setFillColor(Color(0.8, 0.8, 0.8))
+    pdf_canvas.setFont(font_name, 60)
+    pdf_canvas.saveState()
+    pdf_canvas.translate(page_rect.width / 2, page_rect.height / 2)
+    pdf_canvas.rotate(45)
+    pdf_canvas.drawCentredString(0, 0, watermark_text)
+    pdf_canvas.restoreState()
+    pdf_canvas.save()
+    return buffer.getvalue()
+
+
 # ========================================
 # 1. PDF変換機能
 # ========================================
@@ -317,8 +459,8 @@ def convert_from_pdf():
         if not file or not file.filename:
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
-        filename = secure_filename(file.filename)
-        if not filename.endswith('.pdf'):
+        filename = _ensure_pdf_upload_filename(file, "uploaded.pdf")
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
 
         output_format = request.form.get("output_format", "png")
@@ -388,7 +530,7 @@ def convert_from_pdf():
                         logger.error(f"一時ディレクトリの削除に失敗: {e}")
                     return response
 
-                return send_file(zip_path, as_attachment=True, download_name=f"pdf_to_{output_format}.zip")
+                return _send_path_bytes(zip_path, f"pdf_to_{output_format}.zip", "application/zip")
             else:
                 # 1ページのみの場合は単一ファイルを返す
                 @after_this_request
@@ -400,7 +542,7 @@ def convert_from_pdf():
                         logger.error(f"一時ディレクトリの削除に失敗: {e}")
                     return response
 
-                return send_file(output_files[0]["path"], as_attachment=True, download_name=output_files[0]["name"])
+                return _send_path_bytes(output_files[0]["path"], output_files[0]["name"])
 
         elif output_format == "txt":
             # PDF→TXT変換
@@ -427,7 +569,7 @@ def convert_from_pdf():
                     logger.error(f"一時ディレクトリの削除に失敗: {e}")
                 return response
 
-            return send_file(txt_path, as_attachment=True, download_name="converted_output.txt")
+            return _send_path_bytes(txt_path, "converted_output.txt", "text/plain; charset=utf-8")
 
         elif output_format == "docx":
             # PDF→DOCX変換
@@ -464,7 +606,11 @@ def convert_from_pdf():
                     logger.error(f"一時ディレクトリの削除に失敗: {e}")
                 return response
 
-            return send_file(docx_path, as_attachment=True, download_name="converted_output.docx")
+            return _send_path_bytes(
+                docx_path,
+                "converted_output.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
 
     except Exception as e:
         logger.error(f"PDF変換処理中にエラーが発生しました: {e}")
@@ -487,6 +633,80 @@ def convert_pdf():
         # PDF→ファイル変換の場合
         if direction == "from_pdf":
             return convert_from_pdf()
+
+        files = request.files.getlist("files")
+        if not files or not files[0].filename:
+            return jsonify({"error": "ファイルがアップロードされていません"}), 400
+
+        temp_dir = tempfile.mkdtemp()
+        output_path = os.path.join(temp_dir, "converted_output.pdf")
+        part_paths = []
+
+        for index, file in enumerate(files, start=1):
+            if not file.filename:
+                continue
+
+            filename = _sanitize_upload_filename(file, f"upload_{index}")
+            ext = os.path.splitext(filename)[1].lower()
+            file_path = _unique_temp_path(temp_dir, filename)
+            file.save(file_path)
+
+            if os.path.getsize(file_path) > MAX_FILE_SIZE:
+                return jsonify({"error": f"ファイルサイズが大きすぎます（100MB以下にしてください）: {filename}"}), 400
+
+            part_path = os.path.join(temp_dir, f"convert_part_{index:03d}.pdf")
+
+            if ext in [".png", ".jpg", ".jpeg", ".bmp", ".gif"]:
+                try:
+                    _create_image_pdf(file_path, part_path)
+                except Exception as e:
+                    logger.error(f"画像の変換に失敗しました: {e}")
+                    logger.error(traceback.format_exc())
+                    return jsonify({"error": f"画像の変換に失敗しました: {filename}"}), 400
+            elif ext == ".txt":
+                try:
+                    _create_text_pdf(_read_text_file(file_path), part_path)
+                except Exception as e:
+                    logger.error(f"テキストファイルの変換に失敗しました: {e}")
+                    logger.error(traceback.format_exc())
+                    return jsonify({"error": f"テキストファイルの変換に失敗しました: {str(e)}"}), 400
+            elif ext == ".docx":
+                try:
+                    word_doc = Document(file_path)
+                    content = "\n".join(para.text for para in word_doc.paragraphs)
+                    _create_text_pdf(content, part_path)
+                except Exception as e:
+                    logger.error(f"Wordファイルの変換に失敗しました: {e}")
+                    logger.error(traceback.format_exc())
+                    return jsonify({"error": f"Wordファイルの変換に失敗しました: {str(e)}"}), 400
+            else:
+                ext_label = ext[1:] if ext.startswith(".") else ext
+                return jsonify({"error": f"対応していないファイル形式です: {ext_label}. PNG, JPG, JPEG, BMP, GIF, TXT, DOCXのみ対応しています。"}), 400
+
+            part_paths.append(part_path)
+
+        if not part_paths:
+            return jsonify({"error": "変換するファイルが見つかりませんでした"}), 400
+
+        writer = PdfWriter()
+        for part_path in part_paths:
+            reader = PdfReader(part_path)
+            for page in reader.pages:
+                writer.add_page(page)
+
+        with open(output_path, "wb") as output_pdf:
+            writer.write(output_pdf)
+
+        @after_this_request
+        def cleanup(response):
+            try:
+                if temp_dir and os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.error(f"一時ディレクトリの削除に失敗: {e}")
+            return response
+
+        return _send_path_bytes(output_path, "converted_output.pdf", "application/pdf")
 
         # ファイル→PDF変換（既存の処理）
         files = request.files.getlist("files")
@@ -691,11 +911,11 @@ def split_or_merge_pdf():
         for file in files:
             if not file.filename:
                 continue
-            filename = secure_filename(file.filename)
-            if not filename.endswith('.pdf'):
+            filename = _ensure_pdf_upload_filename(file, "uploaded.pdf")
+            if not _is_probably_pdf_upload(file):
                 return jsonify({"error": f"PDFファイルのみ対応しています: {filename}"}), 400
 
-            file_path = os.path.join(temp_dir, filename)
+            file_path = _unique_temp_path(temp_dir, filename)
             file.save(file_path)
 
             # ファイルサイズチェック
@@ -740,7 +960,7 @@ def split_or_merge_pdf():
                         logger.error(f"一時ディレクトリの削除に失敗: {e}")
                     return response
 
-                return send_file(output_path, as_attachment=True, download_name="split_output.pdf")
+                return _send_path_bytes(output_path, "split_output.pdf", "application/pdf")
 
             except Exception as e:
                 logger.error(f"PDF分割に失敗しました: {e}")
@@ -771,7 +991,7 @@ def split_or_merge_pdf():
                         logger.error(f"一時ディレクトリの削除に失敗: {e}")
                     return response
 
-                return send_file(output_path, as_attachment=True, download_name="merged_output.pdf")
+                return _send_path_bytes(output_path, "merged_output.pdf", "application/pdf")
 
             except Exception as e:
                 logger.error(f"PDF結合に失敗しました: {e}")
@@ -1052,8 +1272,8 @@ def extract_text():
         if not file or not file.filename:
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
-        filename = secure_filename(file.filename)
-        if not filename.endswith('.pdf'):
+        filename = _ensure_pdf_upload_filename(file, "uploaded.pdf")
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
 
         keyword = request.form.get("keyword", "").strip()
@@ -1089,11 +1309,7 @@ def extract_text():
                         logger.error(f"一時ディレクトリの削除に失敗: {e}")
                     return response
 
-                return send_file(
-                    output_files[0]["path"],
-                    as_attachment=True,
-                    download_name=output_files[0]["name"]
-                )
+                return _send_path_bytes(output_files[0]["path"], output_files[0]["name"])
             else:
                 zip_path = _create_zip_file(output_files, temp_dir)
 
@@ -1106,7 +1322,7 @@ def extract_text():
                         logger.error(f"一時ディレクトリの削除に失敗: {e}")
                     return response
 
-                return send_file(zip_path, as_attachment=True, download_name="extracted_content.zip")
+                return _send_path_bytes(zip_path, "extracted_content.zip", "application/zip")
         else:
             return jsonify({"error": extraction_result["error"]}), 500
 
@@ -1490,13 +1706,9 @@ def rotate_pdf():
         if not file or not file.filename:
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
-        filename = secure_filename(file.filename)
+        filename = _ensure_pdf_upload_filename(file, "uploaded.pdf")
         if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
-        if not filename:
-            filename = "uploaded.pdf"
-        elif not filename.lower().endswith('.pdf'):
-            filename = f"{filename}.pdf"
 
         rotation = request.form.get("rotation", "90")
         pages_str = request.form.get("pages", "all")
@@ -1549,7 +1761,7 @@ def rotate_pdf():
                 logger.error(f"一時ディレクトリの削除に失敗: {e}")
             return response
 
-        return send_file(output_path, as_attachment=True, download_name="rotated_output.pdf")
+        return _send_path_bytes(output_path, "rotated_output.pdf", "application/pdf")
 
     except Exception as e:
         logger.error(f"回転処理中にエラーが発生しました: {e}")
@@ -1573,13 +1785,9 @@ def password_protect():
         if not file or not file.filename:
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
-        filename = secure_filename(file.filename)
+        filename = _ensure_pdf_upload_filename(file, "uploaded.pdf")
         if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
-        if not filename:
-            filename = "uploaded.pdf"
-        elif not filename.lower().endswith('.pdf'):
-            filename = f"{filename}.pdf"
 
         mode = request.form.get("mode", "add")
         password = request.form.get("password", "")
@@ -1617,7 +1825,13 @@ def password_protect():
                 # パスワード解除（総当たりは行わず、入力パスワードのみ検証）
                 try:
                     with pikepdf.open(input_path) as _:
-                        return jsonify({"error": "このPDFにはパスワードが設定されていません"}), 400
+                        return _render_pdf_power_form_error(
+                            "このPDFにはパスワードが設定されていません。",
+                            tab="password",
+                            status=400,
+                            password_mode="remove",
+                            password_error="このPDFにはパスワードが設定されていません。",
+                        )
                 except pikepdf.PasswordError:
                     pass
 
@@ -1625,7 +1839,13 @@ def password_protect():
                     with pikepdf.open(input_path, password=password) as pdf:
                         pdf.save(output_path)
                 except pikepdf.PasswordError:
-                    return jsonify({"error": "パスワードが正しくありません"}), 400
+                    return _render_pdf_power_form_error(
+                        "入力されたパスワードが正しくありません。もう一度確認してください。",
+                        tab="password",
+                        status=400,
+                        password_mode="remove",
+                        password_error="入力されたパスワードが正しくありません。もう一度確認してください。",
+                    )
 
             @after_this_request
             def cleanup(response):
@@ -1637,7 +1857,7 @@ def password_protect():
                 return response
 
             download_name = "password_protected.pdf" if mode == "add" else "password_removed.pdf"
-            return send_file(output_path, as_attachment=True, download_name=download_name)
+            return _send_path_bytes(output_path, download_name, "application/pdf")
 
         except Exception as e:
             logger.error(f"パスワード処理に失敗しました: {e}")
@@ -1665,8 +1885,8 @@ def edit_metadata():
         if not file or not file.filename:
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
-        filename = secure_filename(file.filename)
-        if not filename.endswith('.pdf'):
+        filename = _ensure_pdf_upload_filename(file, "uploaded.pdf")
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
 
         title = request.form.get("title", "")
@@ -1709,7 +1929,7 @@ def edit_metadata():
                     logger.error(f"一時ディレクトリの削除に失敗: {e}")
                 return response
 
-            return send_file(output_path, as_attachment=True, download_name="metadata_updated.pdf")
+            return _send_path_bytes(output_path, "metadata_updated.pdf", "application/pdf")
 
         except Exception as e:
             logger.error(f"メタデータ編集に失敗しました: {e}")
@@ -1737,8 +1957,8 @@ def add_watermark():
         if not file or not file.filename:
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
-        filename = secure_filename(file.filename)
-        if not filename.endswith('.pdf'):
+        filename = _ensure_pdf_upload_filename(file, "uploaded.pdf")
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
 
         watermark_text = request.form.get("watermark_text", "")
@@ -1759,20 +1979,14 @@ def add_watermark():
 
             for page_num in range(len(doc)):
                 page = doc[page_num]
-
-                # ページの中央に透かしを追加
-                text_rect = page.rect
-                text_point = fitz.Point(text_rect.width / 2, text_rect.height / 2)
-
-                # 透かしテキストを挿入（半透明、斜め）
-                page.insert_text(
-                    text_point,
-                    watermark_text,
-                    fontsize=60,
-                    rotate=45,
-                    color=(0.8, 0.8, 0.8),  # 薄いグレー
-                    overlay=True
+                overlay_pdf = fitz.open(
+                    stream=_create_watermark_overlay(page.rect, watermark_text),
+                    filetype="pdf",
                 )
+                try:
+                    page.show_pdf_page(page.rect, overlay_pdf, 0, overlay=True)
+                finally:
+                    overlay_pdf.close()
 
             doc.save(output_path)
             doc.close()
@@ -1786,7 +2000,7 @@ def add_watermark():
                     logger.error(f"一時ディレクトリの削除に失敗: {e}")
                 return response
 
-            return send_file(output_path, as_attachment=True, download_name="watermarked_output.pdf")
+            return _send_path_bytes(output_path, "watermarked_output.pdf", "application/pdf")
 
         except Exception as e:
             logger.error(f"透かし追加に失敗しました: {e}")
@@ -1814,8 +2028,8 @@ def page_operations():
         if not file or not file.filename:
             return jsonify({"error": "PDFファイルがアップロードされていません"}), 400
 
-        filename = secure_filename(file.filename)
-        if not filename.endswith('.pdf'):
+        filename = _ensure_pdf_upload_filename(file, "uploaded.pdf")
+        if not _is_probably_pdf_upload(file):
             return jsonify({"error": "PDFファイルのみ対応しています"}), 400
 
         operation = request.form.get("operation", "")
@@ -1869,7 +2083,7 @@ def page_operations():
                     logger.error(f"一時ディレクトリの削除に失敗: {e}")
                 return response
 
-            return send_file(output_path, as_attachment=True, download_name="pages_output.pdf")
+            return _send_path_bytes(output_path, "pages_output.pdf", "application/pdf")
 
         except ValueError as e:
             return jsonify({"error": f"ページ指定が正しくありません: {str(e)}"}), 400
