@@ -80,10 +80,14 @@ def test_collect_affected_pages_for_edit(pdf_power_module):
     operations = [
         {"type": "add_text", "page": 1},
         {"type": "copy_region_paste", "source_page": 2, "target_page": 3},
+        {"type": "copy_region_paste", "source_document": "reference", "source_page": 2, "target_page": 1},
         {"type": "add_image", "page": 3},
         {"type": "add_freehand", "page": 2, "points": [{"x": 10, "y": 10}, {"x": 20, "y": 20}]},
     ]
-    assert pdf_power_module._collect_affected_pages_for_edit(operations, 5) == {0, 1, 2}
+    assert pdf_power_module._collect_affected_pages_for_edit(operations, 5, 4) == {
+        "edit": {0, 1, 2},
+        "reference": {1},
+    }
 
 
 def test_edit_overlay_non_rotated_regression(client):
@@ -182,6 +186,39 @@ def test_copy_region_paste_on_rotated_page(client):
     doc = fitz.open(stream=response.data, filetype="pdf")
     page = doc[0]
     assert page.rotation == 0
+    assert len(page.get_images(full=True)) >= 1
+    doc.close()
+
+
+def test_copy_region_paste_from_reference_pdf(client):
+    operations = [
+        {
+            "type": "copy_region_paste",
+            "source_document": "reference",
+            "source_page": 1,
+            "source_x": 45,
+            "source_y": 60,
+            "source_width": 180,
+            "source_height": 80,
+            "target_page": 1,
+            "target_x": 220,
+            "target_y": 180,
+            "target_width": 160,
+            "target_height": 70,
+        }
+    ]
+    response = client.post(
+        "/tools/pdf_power/edit",
+        data={
+            "pdf": (io.BytesIO(_make_pdf(rotation=0)), "edit.pdf"),
+            "reference_pdf": (io.BytesIO(_make_pdf(rotation=270)), "reference.pdf"),
+            "operations": json.dumps(operations),
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+    doc = fitz.open(stream=response.data, filetype="pdf")
+    page = doc[0]
     assert len(page.get_images(full=True)) >= 1
     doc.close()
 

@@ -1,5 +1,6 @@
 import importlib.util
 import io
+import json
 import os
 import re
 import shutil
@@ -39,6 +40,16 @@ def _png_bytes(color=(40, 120, 220)):
     buf = io.BytesIO()
     image.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def _encrypted_pdf_bytes(password, label="LOCKED"):
+    encrypted = io.BytesIO()
+    with pikepdf.open(io.BytesIO(_make_pdf(label))) as pdf:
+        pdf.save(
+            encrypted,
+            encryption=pikepdf.Encryption(owner=password, user=password, R=6),
+        )
+    return encrypted.getvalue()
 
 
 @pytest.fixture
@@ -89,6 +100,123 @@ def test_merge_preserves_distinct_files_even_when_names_match(client):
     assert doc.page_count == 2
     assert "FIRST-1" in doc[0].get_text("text")
     assert "SECOND-1" in doc[1].get_text("text")
+    doc.close()
+
+
+def test_editor_window_route_redirects_to_editor_window_mode(client):
+    response = client.get("/tools/pdf_power/editor", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/tools/pdf_power/?editor_window=1")
+
+
+def test_control_process_can_reorder_rotate_and_watermark_pages(client):
+    plan = {
+        "outputName": "ordered-control.pdf",
+        "documents": [
+            {"id": "doc-a", "uploadIndex": 0, "name": "first.pdf", "password": ""},
+            {"id": "doc-b", "uploadIndex": 1, "name": "second.pdf", "password": ""},
+        ],
+        "pages": [
+            {"documentId": "doc-b", "sourcePageIndex": 0, "rotation": 0},
+            {"documentId": "doc-a", "sourcePageIndex": 1, "rotation": 90},
+        ],
+        "metadata": {"title": "Control Title"},
+        "watermark": {
+            "enabled": True,
+            "text": "STAMP",
+            "pages": "all",
+            "position": "center",
+            "color": "#94a3b8",
+            "opacity": 0.2,
+            "font_size": 42,
+            "rotation": 45,
+        },
+        "outputPassword": {"enabled": False, "password": ""},
+    }
+
+    response = client.post(
+        "/tools/pdf_power/control_process",
+        data={
+            "plan": json.dumps(plan),
+            "pdfs": [
+                (io.BytesIO(_make_pdf("FIRST", pages=2)), "first.pdf"),
+                (io.BytesIO(_make_pdf("SECOND", pages=1)), "second.pdf"),
+            ],
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    doc = fitz.open(stream=response.data, filetype="pdf")
+    assert doc.page_count == 2
+    assert "SECOND-1" in doc[0].get_text("text")
+    assert "FIRST-2" in doc[1].get_text("text")
+    assert doc[1].rotation == 90
+    assert doc.metadata["title"] == "Control Title"
+    assert doc[0].search_for("STAMP")
+    doc.close()
+
+
+def test_control_process_can_unlock_input_pdf_when_output_password_is_off(client):
+    plan = {
+        "outputName": "decrypted-output.pdf",
+        "documents": [
+            {"id": "doc-a", "uploadIndex": 0, "name": "locked.pdf", "password": "input-secret"},
+        ],
+        "pages": [
+            {"documentId": "doc-a", "sourcePageIndex": 0, "rotation": 0},
+        ],
+        "watermark": {"enabled": False},
+        "metadata": {},
+        "outputPassword": {"enabled": False, "password": ""},
+    }
+
+    response = client.post(
+        "/tools/pdf_power/control_process",
+        data={
+            "plan": json.dumps(plan),
+            "pdfs": [(io.BytesIO(_encrypted_pdf_bytes("input-secret")), "locked.pdf")],
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    doc = fitz.open(stream=response.data, filetype="pdf")
+    assert not doc.needs_pass
+    assert "LOCKED-1" in doc[0].get_text("text")
+    doc.close()
+
+
+def test_control_process_can_set_output_password(client):
+    plan = {
+        "outputName": "protected-output.pdf",
+        "documents": [
+            {"id": "doc-a", "uploadIndex": 0, "name": "plain.pdf", "password": ""},
+        ],
+        "pages": [
+            {"documentId": "doc-a", "sourcePageIndex": 0, "rotation": 0},
+        ],
+        "watermark": {"enabled": False},
+        "metadata": {},
+        "outputPassword": {"enabled": True, "password": "output-secret"},
+    }
+
+    response = client.post(
+        "/tools/pdf_power/control_process",
+        data={
+            "plan": json.dumps(plan),
+            "pdfs": [(io.BytesIO(_make_pdf("PLAIN")), "plain.pdf")],
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    doc = fitz.open(stream=response.data, filetype="pdf")
+    assert doc.needs_pass
+    with pytest.raises(ValueError):
+        doc[0].get_text("text")
+    assert doc.authenticate("output-secret")
+    assert "PLAIN-1" in doc[0].get_text("text")
     doc.close()
 
 
@@ -151,6 +279,32 @@ def test_pdf_power_template_scripts_are_valid_javascript():
             os.remove(temp_path)
 
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_pdf_power_control_script_is_valid_javascript():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+
+    script_path = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "pdf_power_control.js"
+    result = subprocess.run([node, "--check", str(script_path)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_pdf_power_editor_script_is_valid_javascript():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+
+    script_path = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "pdf_power_editor.js"
+    result = subprocess.run([node, "--check", str(script_path)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_pdf_power_template_loads_editor_script_once():
+    template_path = Path(__file__).resolve().parents[1] / "app" / "templates" / "pdf_power.html"
+    raw = template_path.read_text(encoding="utf-8")
+    assert raw.count("js/pdf_power_editor.js") == 1
 
 
 def test_password_remove_with_wrong_password_returns_html_error_screen(client):

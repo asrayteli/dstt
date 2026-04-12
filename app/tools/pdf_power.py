@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, send_file, jsonify, after_this_request
+from flask import Blueprint, render_template, request, send_file, jsonify, after_this_request, redirect, url_for
 import os
 import tempfile
 import shutil
@@ -22,7 +22,7 @@ import fitz  # PyMuPDF
 import io
 import pikepdf
 import logging
-from flask_login import login_required
+from flask_login import login_required, current_user
 
 
 pdf_power_bp = Blueprint("pdf_power", __name__, url_prefix="/tools/pdf_power")
@@ -77,20 +77,26 @@ except Exception as e:
 @pdf_power_bp.route("/", methods=["GET"])
 @login_required
 def pdf_power_home():
-    return render_template("pdf_power.html", initial_tab="convert", password_mode="add")
+    return render_template(
+        "pdf_power.html",
+        initial_tab="control",
+        password_mode="add",
+        user_id=str(getattr(current_user, "username", "") or ""),
+    )
 
 
 @pdf_power_bp.route("/editor", methods=["GET"])
 @login_required
 def pdf_power_editor_window():
-    return render_template("pdf_power_editor_window.html")
+    return redirect(url_for("pdf_power.pdf_power_home", editor_window=1))
 
 
-def _render_pdf_power_form_error(message, tab="convert", status=400, **context):
+def _render_pdf_power_form_error(message, tab="control", status=400, **context):
     render_context = {
         "initial_tab": tab,
         "password_mode": context.get("password_mode", "add"),
         "password_error": context.get("password_error"),
+        "user_id": str(getattr(current_user, "username", "") or ""),
     }
     render_context.update(context)
     return render_template("pdf_power.html", **render_context), status
@@ -311,22 +317,32 @@ def _to_pdf_rect(page, x, y, w, h):
     return rect
 
 
-def _collect_affected_pages_for_edit(operations, total_pages):
+def _normalize_edit_source_document(source_document):
+    return "reference" if str(source_document or "").strip().lower() == "reference" else "edit"
+
+
+def _collect_affected_pages_for_edit(operations, total_pages, reference_total_pages=0):
     """
     Collect 0-based page indices touched by edit operations.
     Used to normalize page rotation before drawing.
     """
-    affected = set()
+    affected = {"edit": set(), "reference": set()}
     for idx, op in enumerate(operations, start=1):
         if not isinstance(op, dict):
             raise ValueError(f"Operation {idx} format is invalid.")
 
         op_type = op.get("type")
         if op_type in {"add_text", "add_shape", "add_image", "add_freehand"}:
-            affected.add(_parse_page_number(op.get("page"), total_pages))
+            affected["edit"].add(_parse_page_number(op.get("page"), total_pages))
         elif op_type == "copy_region_paste":
-            affected.add(_parse_page_number(op.get("source_page"), total_pages))
-            affected.add(_parse_page_number(op.get("target_page"), total_pages))
+            source_document = _normalize_edit_source_document(op.get("source_document"))
+            if source_document == "reference":
+                if reference_total_pages < 1:
+                    raise ValueError("Reference PDF is required for reference copy operations.")
+                affected["reference"].add(_parse_page_number(op.get("source_page"), reference_total_pages))
+            else:
+                affected["edit"].add(_parse_page_number(op.get("source_page"), total_pages))
+            affected["edit"].add(_parse_page_number(op.get("target_page"), total_pages))
 
     return affected
 
@@ -431,18 +447,203 @@ def _create_image_pdf(image_path, output_path):
 
 
 def _create_watermark_overlay(page_rect, watermark_text):
+    settings = {}
+    if isinstance(watermark_text, dict):
+        settings = watermark_text
+        watermark_text = settings.get("text", "")
+
+    text = str(watermark_text or "").strip()
+    if not text:
+        raise ValueError("Watermark text is required.")
+
+    font_name = _reportlab_font_name_for_text(text)
+    font_size = max(12, min(int(float(settings.get("font_size", 60) or 60)), 240))
+    rotation = float(settings.get("rotation", 45) or 45)
+    opacity = min(max(float(settings.get("opacity", 0.22) or 0.22), 0.05), 1.0)
+    position = str(settings.get("position", "center") or "center").strip().lower()
+    margin_x = max(0, float(settings.get("margin_x", 36) or 36))
+    margin_y = max(0, float(settings.get("margin_y", 36) or 36))
+    fill_rgb = _parse_color_hex(settings.get("color"), default=(0.8, 0.8, 0.8)) or (0.8, 0.8, 0.8)
+
     buffer = io.BytesIO()
     pdf_canvas = canvas.Canvas(buffer, pagesize=(page_rect.width, page_rect.height))
-    font_name = _reportlab_font_name_for_text(watermark_text)
-    pdf_canvas.setFillColor(Color(0.8, 0.8, 0.8))
-    pdf_canvas.setFont(font_name, 60)
-    pdf_canvas.saveState()
-    pdf_canvas.translate(page_rect.width / 2, page_rect.height / 2)
-    pdf_canvas.rotate(45)
-    pdf_canvas.drawCentredString(0, 0, watermark_text)
-    pdf_canvas.restoreState()
+    pdf_canvas.setFillColor(Color(*fill_rgb))
+    if hasattr(pdf_canvas, "setFillAlpha"):
+        try:
+            pdf_canvas.setFillAlpha(opacity)
+        except Exception:
+            pass
+    pdf_canvas.setFont(font_name, font_size)
+
+    text_width = pdf_canvas.stringWidth(text, font_name, font_size)
+    half_width = text_width / 2
+    half_height = font_size / 2
+    x_positions = {
+        "left": margin_x + half_width,
+        "center": page_rect.width / 2,
+        "right": max(page_rect.width / 2, page_rect.width - margin_x - half_width),
+    }
+    y_positions = {
+        "top": max(page_rect.height / 2, page_rect.height - margin_y - half_height),
+        "middle": page_rect.height / 2,
+        "bottom": margin_y + half_height,
+    }
+
+    def draw_at(center_x, center_y):
+        pdf_canvas.saveState()
+        pdf_canvas.translate(center_x, center_y)
+        pdf_canvas.rotate(rotation)
+        pdf_canvas.drawCentredString(0, 0, text)
+        pdf_canvas.restoreState()
+
+    if position == "tile":
+        step_x = max(text_width + 64, page_rect.width / 3)
+        step_y = max(font_size * 2.8, page_rect.height / 3)
+        start_x = margin_x + half_width
+        start_y = margin_y + half_height
+        max_x = max(start_x, page_rect.width - margin_x - half_width)
+        max_y = max(start_y, page_rect.height - margin_y - half_height)
+        y = start_y
+        while y <= max_y:
+            x = start_x
+            while x <= max_x:
+                draw_at(x, y)
+                x += step_x
+            y += step_y
+    else:
+        anchor_map = {
+            "top-left": (x_positions["left"], y_positions["top"]),
+            "top-center": (x_positions["center"], y_positions["top"]),
+            "top-right": (x_positions["right"], y_positions["top"]),
+            "middle-left": (x_positions["left"], y_positions["middle"]),
+            "center": (x_positions["center"], y_positions["middle"]),
+            "middle-right": (x_positions["right"], y_positions["middle"]),
+            "bottom-left": (x_positions["left"], y_positions["bottom"]),
+            "bottom-center": (x_positions["center"], y_positions["bottom"]),
+            "bottom-right": (x_positions["right"], y_positions["bottom"]),
+        }
+        draw_at(*anchor_map.get(position, anchor_map["center"]))
+
     pdf_canvas.save()
     return buffer.getvalue()
+
+
+def _normalize_pdf_download_name(filename, default_name="control_output.pdf"):
+    name = str(filename or "").strip().replace("\\", "_").replace("/", "_")
+    if not name:
+        name = default_name
+    if not name.lower().endswith(".pdf"):
+        name = f"{name}.pdf"
+    return name
+
+
+def _coerce_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _coerce_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_control_plan(plan_raw):
+    try:
+        plan = json.loads(plan_raw or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("コントロール設定の読み込みに失敗しました。") from exc
+
+    if not isinstance(plan, dict):
+        raise ValueError("コントロール設定の形式が正しくありません。")
+    if not isinstance(plan.get("documents"), list) or not plan["documents"]:
+        raise ValueError("少なくとも1つのPDFを読み込んでください。")
+    if not isinstance(plan.get("pages"), list) or not plan["pages"]:
+        raise ValueError("出力対象のページが選択されていません。")
+
+    return plan
+
+
+def _open_control_source_pdf(file_path, password="", display_name="PDF"):
+    doc = fitz.open(file_path)
+    if not doc.needs_pass:
+        return doc
+
+    supplied_password = str(password or "")
+    if not supplied_password:
+        doc.close()
+        raise ValueError(f"{display_name} はパスワードで保護されています。入力PDFのパスワードを設定してください。")
+
+    if not doc.authenticate(supplied_password):
+        doc.close()
+        raise ValueError(f"{display_name} のパスワードが正しくありません。")
+
+    return doc
+
+
+def _build_control_metadata(selected_pages, docs_by_id, metadata_overrides):
+    metadata = {}
+    source_doc_ids = {page_plan.get("documentId") for page_plan in selected_pages}
+    if len(source_doc_ids) == 1:
+        source_doc = docs_by_id.get(next(iter(source_doc_ids)))
+        if source_doc is not None:
+            for key in ("title", "author", "subject", "keywords"):
+                value = (source_doc.metadata or {}).get(key)
+                if value:
+                    metadata[key] = value
+
+    overrides = metadata_overrides if isinstance(metadata_overrides, dict) else {}
+    for key in ("title", "author", "subject", "keywords"):
+        value = str(overrides.get(key, "") or "").strip()
+        if value:
+            metadata[key] = value
+
+    return metadata
+
+
+def _apply_control_watermark(doc, watermark_settings):
+    if not isinstance(watermark_settings, dict) or not _coerce_bool(watermark_settings.get("enabled")):
+        return
+
+    text = str(watermark_settings.get("text", "") or "").strip()
+    if not text or len(doc) == 0:
+        return
+
+    page_spec = str(watermark_settings.get("pages", "all") or "all").strip()
+    target_pages = set(_parse_page_ranges(page_spec, len(doc)))
+
+    overlay_settings = {
+        "text": text,
+        "font_size": _coerce_int(watermark_settings.get("font_size"), 60),
+        "rotation": _coerce_float(watermark_settings.get("rotation"), 45.0),
+        "opacity": _coerce_float(watermark_settings.get("opacity"), 0.22),
+        "position": str(watermark_settings.get("position", "center") or "center"),
+        "margin_x": _coerce_float(watermark_settings.get("margin_x"), 36.0),
+        "margin_y": _coerce_float(watermark_settings.get("margin_y"), 36.0),
+        "color": watermark_settings.get("color", "#c0c7d1"),
+    }
+
+    for page_index in target_pages:
+        page = doc[page_index]
+        overlay_pdf = fitz.open(
+            stream=_create_watermark_overlay(page.rect, overlay_settings),
+            filetype="pdf",
+        )
+        try:
+            page.show_pdf_page(page.rect, overlay_pdf, 0, overlay=True)
+        finally:
+            overlay_pdf.close()
 
 
 # ========================================
@@ -1009,6 +1210,140 @@ def split_or_merge_pdf():
 # ========================================
 # 3. PDF圧縮機能（改善版）
 # ========================================
+@pdf_power_bp.route("/control_process", methods=["POST"])
+@login_required
+def process_control_pdf():
+    temp_dir = None
+    output_doc = None
+    source_docs = []
+
+    try:
+        plan = _parse_control_plan(request.form.get("plan"))
+        uploads = request.files.getlist("pdfs")
+        if not uploads:
+            return jsonify({"error": "PDFファイルがアップロードされていません。"}), 400
+
+        documents_plan = plan.get("documents", [])
+        if len(uploads) < len(documents_plan):
+            return jsonify({"error": "アップロードされたPDF数が設定内容と一致しません。"}), 400
+
+        temp_dir = tempfile.mkdtemp()
+        docs_by_id = {}
+
+        for fallback_index, doc_plan in enumerate(documents_plan):
+            if not isinstance(doc_plan, dict):
+                return jsonify({"error": "PDF設定の形式が正しくありません。"}), 400
+
+            document_id = str(doc_plan.get("id", "") or "").strip()
+            if not document_id:
+                return jsonify({"error": "PDF設定にIDがありません。"}), 400
+
+            upload_index = _coerce_int(doc_plan.get("uploadIndex"), fallback_index)
+            if upload_index < 0 or upload_index >= len(uploads):
+                return jsonify({"error": "アップロードPDFの参照位置が不正です。"}), 400
+
+            upload = uploads[upload_index]
+            if not upload or not upload.filename:
+                return jsonify({"error": "PDFファイルの読み込みに失敗しました。"}), 400
+            if not _is_probably_pdf_upload(upload):
+                return jsonify({"error": f"PDFファイルのみ対応しています: {upload.filename}"}), 400
+
+            filename = _ensure_pdf_upload_filename(upload, f"source_{fallback_index + 1}.pdf")
+            input_path = _unique_temp_path(temp_dir, filename)
+            upload.save(input_path)
+
+            if os.path.getsize(input_path) > MAX_FILE_SIZE:
+                return jsonify({"error": f"ファイルサイズが大きすぎます: {filename}"}), 400
+
+            display_name = str(doc_plan.get("name") or upload.filename or f"PDF {fallback_index + 1}")
+            password = str(doc_plan.get("password", "") or "")
+            source_doc = _open_control_source_pdf(input_path, password=password, display_name=display_name)
+            source_docs.append(source_doc)
+            docs_by_id[document_id] = source_doc
+
+        selected_pages = plan.get("pages", [])
+        output_doc = fitz.open()
+        for page_order, page_plan in enumerate(selected_pages, start=1):
+            if not isinstance(page_plan, dict):
+                return jsonify({"error": f"{page_order}番目のページ設定が不正です。"}), 400
+
+            document_id = str(page_plan.get("documentId", "") or "").strip()
+            source_doc = docs_by_id.get(document_id)
+            if source_doc is None:
+                return jsonify({"error": f"{page_order}番目のページで参照しているPDFが見つかりません。"}), 400
+
+            source_page_index = _coerce_int(page_plan.get("sourcePageIndex"), -1)
+            if source_page_index < 0 or source_page_index >= len(source_doc):
+                return jsonify({"error": f"{page_order}番目のページ番号が不正です。"}), 400
+
+            output_doc.insert_pdf(source_doc, from_page=source_page_index, to_page=source_page_index)
+            extra_rotation = _coerce_int(page_plan.get("rotation"), 0) % 360
+            if extra_rotation:
+                inserted_page = output_doc[-1]
+                current_rotation = int(getattr(inserted_page, "rotation", 0)) % 360
+                inserted_page.set_rotation((current_rotation + extra_rotation) % 360)
+
+        if len(output_doc) == 0:
+            return jsonify({"error": "出力対象のページがありません。"}), 400
+
+        metadata = _build_control_metadata(selected_pages, docs_by_id, plan.get("metadata"))
+        if metadata:
+            output_doc.set_metadata(metadata)
+
+        try:
+            _apply_control_watermark(output_doc, plan.get("watermark"))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        output_password_settings = plan.get("outputPassword") if isinstance(plan.get("outputPassword"), dict) else {}
+        output_password_enabled = _coerce_bool(output_password_settings.get("enabled"))
+        output_password = str(output_password_settings.get("password", "") or "")
+        if output_password_enabled and not output_password:
+            return jsonify({"error": "出力パスワードを設定する場合はパスワードを入力してください。"}), 400
+
+        output_path = os.path.join(temp_dir, "control_output.pdf")
+        save_kwargs = {"garbage": 3, "deflate": True}
+        if output_password_enabled:
+            save_kwargs.update(
+                {
+                    "encryption": fitz.PDF_ENCRYPT_AES_256,
+                    "owner_pw": output_password,
+                    "user_pw": output_password,
+                }
+            )
+        output_doc.save(output_path, **save_kwargs)
+        output_doc.close()
+        output_doc = None
+
+        download_name = _normalize_pdf_download_name(plan.get("outputName"), "control_output.pdf")
+
+        @after_this_request
+        def cleanup(response):
+            try:
+                if temp_dir and os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.error(f"一時ディレクトリの削除に失敗: {e}")
+            return response
+
+        return _send_path_bytes(output_path, download_name, "application/pdf")
+
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as e:
+        logger.error(f"コントロール処理中にエラーが発生しました: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"error": f"コントロール処理中にエラーが発生しました: {str(e)}"}), 500
+    finally:
+        if output_doc is not None:
+            output_doc.close()
+        for source_doc in source_docs:
+            try:
+                source_doc.close()
+            except Exception:
+                pass
+
+
 @pdf_power_bp.route("/compress", methods=["POST"])
 @login_required
 def compress_pdf():
@@ -2116,19 +2451,15 @@ def edit_pdf_overlay():
     - copy_region_paste
     """
     temp_dir = None
+    cleanup_registered = False
+    doc = None
+    reference_doc = None
     try:
         file = request.files.get("pdf")
         if not file or not file.filename:
             return jsonify({"error": "PDF file is required."}), 400
-
-        filename = secure_filename(file.filename)
         if not _is_probably_pdf_upload(file):
             return jsonify({"error": "Only PDF files are supported."}), 400
-
-        if not filename:
-            filename = "uploaded.pdf"
-        elif not filename.lower().endswith(".pdf"):
-            filename = f"{filename}.pdf"
 
         operations_raw = request.form.get("operations", "[]")
         try:
@@ -2138,6 +2469,13 @@ def edit_pdf_overlay():
 
         if not isinstance(operations, list) or not operations:
             return jsonify({"error": "At least one edit operation is required."}), 400
+
+        requires_reference_pdf = any(
+            isinstance(op, dict)
+            and op.get("type") == "copy_region_paste"
+            and _normalize_edit_source_document(op.get("source_document")) == "reference"
+            for op in operations
+        )
 
         temp_dir = tempfile.mkdtemp()
         input_path = _temp_input_pdf_path(temp_dir)
@@ -2150,24 +2488,41 @@ def edit_pdf_overlay():
         doc = fitz.open(input_path)
         total_pages = len(doc)
         if total_pages == 0:
-            doc.close()
             return jsonify({"error": "PDF has no pages."}), 400
 
-        affected_pages = _collect_affected_pages_for_edit(operations, total_pages)
-        for page_idx in sorted(affected_pages):
+        reference_total_pages = 0
+        if requires_reference_pdf:
+            reference_file = request.files.get("reference_pdf")
+            if not reference_file or not reference_file.filename:
+                return jsonify({"error": "Reference PDF is required for reference copy operations."}), 400
+            if not _is_probably_pdf_upload(reference_file):
+                return jsonify({"error": "Only PDF files are supported for reference_pdf."}), 400
+            reference_input_path = os.path.join(temp_dir, "reference_input.pdf")
+            reference_file.save(reference_input_path)
+            if os.path.getsize(reference_input_path) > MAX_FILE_SIZE:
+                return jsonify({"error": "Reference PDF size exceeds 100MB limit."}), 400
+            reference_doc = fitz.open(reference_input_path)
+            reference_total_pages = len(reference_doc)
+            if reference_total_pages == 0:
+                return jsonify({"error": "Reference PDF has no pages."}), 400
+
+        affected_pages = _collect_affected_pages_for_edit(operations, total_pages, reference_total_pages)
+        for page_idx in sorted(affected_pages["edit"]):
             page = doc[page_idx]
             if int(getattr(page, "rotation", 0)) % 360 != 0:
                 page.remove_rotation()
+        if reference_doc is not None:
+            for page_idx in sorted(affected_pages["reference"]):
+                page = reference_doc[page_idx]
+                if int(getattr(page, "rotation", 0)) % 360 != 0:
+                    page.remove_rotation()
 
         image_bytes_cache = {}
-
         for idx, op in enumerate(operations, start=1):
             if not isinstance(op, dict):
-                doc.close()
                 return jsonify({"error": f"Operation {idx} format is invalid."}), 400
 
             op_type = op.get("type")
-
             if op_type == "add_text":
                 page_idx = _parse_page_number(op.get("page"), total_pages)
                 page = doc[page_idx]
@@ -2181,11 +2536,9 @@ def edit_pdf_overlay():
                 font_size = max(_round_to_tenth(op.get("font_size", 14)), 1)
                 font_name = str(op.get("font_name", "helv"))
                 color = _parse_color_hex(op.get("color", "#111827"), (0.07, 0.09, 0.13))
-                text_rect = _to_pdf_rect(page, x, y, w, h)
-
                 _insert_textbox_with_fallback(
                     page=page,
-                    rect=text_rect,
+                    rect=_to_pdf_rect(page, x, y, w, h),
                     text=text,
                     font_size=font_size,
                     color=color,
@@ -2199,23 +2552,25 @@ def edit_pdf_overlay():
                 stroke_width = max(_round_to_tenth(op.get("stroke_width", 2)), 0.1)
                 stroke = _parse_color_hex(op.get("stroke_color", "#1d4ed8"), (0.11, 0.31, 0.85))
                 fill = _parse_color_hex(op.get("fill_color", "transparent"), None)
-                stroke_style = str(op.get("stroke_style", "solid")).lower()
-                dashes = _dash_pattern(stroke_style)
+                dashes = _dash_pattern(str(op.get("stroke_style", "solid")).lower())
                 shape = page.new_shape()
                 if shape_type in {"rect", "ellipse"}:
-                    x = _round_to_tenth(op.get("x", 0))
-                    y = _round_to_tenth(op.get("y", 0))
-                    w = max(_round_to_tenth(op.get("width", 120)), 1)
-                    h = max(_round_to_tenth(op.get("height", 80)), 1)
-                    rect = _to_pdf_rect(page, x, y, w, h)
+                    rect = _to_pdf_rect(
+                        page,
+                        _round_to_tenth(op.get("x", 0)),
+                        _round_to_tenth(op.get("y", 0)),
+                        max(_round_to_tenth(op.get("width", 120)), 1),
+                        max(_round_to_tenth(op.get("height", 80)), 1),
+                    )
                     if shape_type == "rect":
                         shape.draw_rect(rect)
                     else:
                         shape.draw_oval(rect)
                 elif shape_type == "line":
-                    p1 = _to_pdf_point(page, _round_to_tenth(op.get("x1", 0)), _round_to_tenth(op.get("y1", 0)))
-                    p2 = _to_pdf_point(page, _round_to_tenth(op.get("x2", 120)), _round_to_tenth(op.get("y2", 120)))
-                    shape.draw_line(p1, p2)
+                    shape.draw_line(
+                        _to_pdf_point(page, _round_to_tenth(op.get("x1", 0)), _round_to_tenth(op.get("y1", 0))),
+                        _to_pdf_point(page, _round_to_tenth(op.get("x2", 120)), _round_to_tenth(op.get("y2", 120))),
+                    )
                 else:
                     raise ValueError(f"Operation {idx}: unsupported shape type '{shape_type}'.")
                 shape.finish(color=stroke, fill=fill, width=stroke_width, dashes=dashes)
@@ -2243,23 +2598,21 @@ def edit_pdf_overlay():
                     except (TypeError, ValueError):
                         raise ValueError(f"Operation {idx}: image_index must be an integer.")
                     if image_index < 1 or image_index > len(image_files):
-                        raise ValueError(
-                            f"Operation {idx}: image_index must be between 1 and {len(image_files)}."
-                        )
+                        raise ValueError(f"Operation {idx}: image_index must be between 1 and {len(image_files)}.")
                     cache_key = f"index:{image_index}"
                     if cache_key not in image_bytes_cache:
                         image_bytes_cache[cache_key] = image_files[image_index - 1].read()
                     image_bytes = image_bytes_cache[cache_key]
                     if not image_bytes:
                         raise ValueError(f"Operation {idx}: image data is empty for image_index {image_index}.")
-
-                x = _round_to_tenth(op.get("x", 0))
-                y = _round_to_tenth(op.get("y", 0))
-                w = max(_round_to_tenth(op.get("width", 120)), 1)
-                h = max(_round_to_tenth(op.get("height", 120)), 1)
-                rect = _to_pdf_rect(page, x, y, w, h)
                 page.insert_image(
-                    rect,
+                    _to_pdf_rect(
+                        page,
+                        _round_to_tenth(op.get("x", 0)),
+                        _round_to_tenth(op.get("y", 0)),
+                        max(_round_to_tenth(op.get("width", 120)), 1),
+                        max(_round_to_tenth(op.get("height", 120)), 1),
+                    ),
                     stream=image_bytes,
                     keep_proportion=False,
                     overlay=True,
@@ -2271,29 +2624,31 @@ def edit_pdf_overlay():
                 points = op.get("points", [])
                 if not isinstance(points, list) or len(points) < 2:
                     raise ValueError(f"Operation {idx}: freehand points must have at least 2 points.")
-                stroke_width = max(_round_to_tenth(op.get("stroke_width", 2)), 0.1)
-                stroke = _parse_color_hex(op.get("stroke_color", "#1d4ed8"), (0.11, 0.31, 0.85))
-                stroke_style = str(op.get("stroke_style", "solid")).lower()
-                dashes = _dash_pattern(stroke_style)
                 pdf_points = []
                 for point_idx, point in enumerate(points, start=1):
                     if not isinstance(point, dict):
                         raise ValueError(f"Operation {idx}: point {point_idx} is invalid.")
-                    px = _round_to_tenth(point.get("x", 0))
-                    py = _round_to_tenth(point.get("y", 0))
-                    pdf_points.append(_to_pdf_point(page, px, py))
-
+                    pdf_points.append(_to_pdf_point(page, _round_to_tenth(point.get("x", 0)), _round_to_tenth(point.get("y", 0))))
                 shape = page.new_shape()
-                for i in range(1, len(pdf_points)):
-                    shape.draw_line(pdf_points[i - 1], pdf_points[i])
-                shape.finish(color=stroke, fill=None, width=stroke_width, dashes=dashes)
+                for point_idx in range(1, len(pdf_points)):
+                    shape.draw_line(pdf_points[point_idx - 1], pdf_points[point_idx])
+                shape.finish(
+                    color=_parse_color_hex(op.get("stroke_color", "#1d4ed8"), (0.11, 0.31, 0.85)),
+                    fill=None,
+                    width=max(_round_to_tenth(op.get("stroke_width", 2)), 0.1),
+                    dashes=_dash_pattern(str(op.get("stroke_style", "solid")).lower()),
+                )
                 shape.commit(overlay=True)
 
             elif op_type == "copy_region_paste":
-                source_page_idx = _parse_page_number(op.get("source_page"), total_pages)
-                target_page_idx = _parse_page_number(op.get("target_page"), total_pages)
-                source_page = doc[source_page_idx]
-                target_page = doc[target_page_idx]
+                source_document = _normalize_edit_source_document(op.get("source_document"))
+                if source_document == "reference":
+                    if reference_doc is None:
+                        raise ValueError(f"Operation {idx}: reference PDF is required.")
+                    source_page = reference_doc[_parse_page_number(op.get("source_page"), reference_total_pages)]
+                else:
+                    source_page = doc[_parse_page_number(op.get("source_page"), total_pages)]
+                target_page = doc[_parse_page_number(op.get("target_page"), total_pages)]
                 sx = _round_to_tenth(op.get("source_x", 0))
                 sy = _round_to_tenth(op.get("source_y", 0))
                 sw = max(_round_to_tenth(op.get("source_width", 120)), 1)
@@ -2304,28 +2659,27 @@ def edit_pdf_overlay():
                 th = max(_round_to_tenth(op.get("target_height", sh)), 1)
                 clip = _to_pdf_rect(source_page, sx, sy, sw, sh)
                 target_rect = _to_pdf_rect(target_page, tx, ty, tw, th)
-
-                # 既定72dpiではぼやけやすいため、高DPIでクリップを生成
                 dpi_scale = COPY_REGION_BASE_DPI / 72.0
-                scale_x = min(COPY_REGION_MAX_SCALE, max(1.0, tw / sw) * dpi_scale)
-                scale_y = min(COPY_REGION_MAX_SCALE, max(1.0, th / sh) * dpi_scale)
                 pix = source_page.get_pixmap(
                     clip=clip,
-                    matrix=fitz.Matrix(scale_x, scale_y),
+                    matrix=fitz.Matrix(
+                        min(COPY_REGION_MAX_SCALE, max(1.0, tw / sw) * dpi_scale),
+                        min(COPY_REGION_MAX_SCALE, max(1.0, th / sh) * dpi_scale),
+                    ),
                     alpha=False,
                 )
-
-                target_page.insert_image(
-                    target_rect,
-                    stream=pix.tobytes("png"),
-                    overlay=True,
-                )
+                target_page.insert_image(target_rect, stream=pix.tobytes("png"), overlay=True)
 
             else:
                 raise ValueError(f"Operation {idx}: unsupported type '{op_type}'.")
 
         doc.save(output_path)
         doc.close()
+        doc = None
+        if reference_doc is not None:
+            reference_doc.close()
+            reference_doc = None
+
         with open(output_path, "rb") as output_file:
             file_data = io.BytesIO(output_file.read())
         file_data.seek(0)
@@ -2339,6 +2693,7 @@ def edit_pdf_overlay():
                 logger.error(f"Temporary directory cleanup error: {e}")
             return response
 
+        cleanup_registered = True
         return send_file(
             file_data,
             as_attachment=True,
@@ -2353,6 +2708,13 @@ def edit_pdf_overlay():
         logger.error(f"PowerPDF edit error: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"error": f"PowerPDF edit failed: {str(e)}"}), 500
+    finally:
+        if doc is not None:
+            doc.close()
+        if reference_doc is not None:
+            reference_doc.close()
+        if temp_dir and not cleanup_registered and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
 
 
 @pdf_power_bp.route("/health", methods=["GET"])
