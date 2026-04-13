@@ -24,7 +24,7 @@ class FilterController {
     renderSiteList() {
         const sites = dataManager.getSites();
         const container = document.getElementById('site-list');
-        const siteGroupMode = document.getElementById('site-group-mode')?.value || '5digit';
+        const siteGroupMode = document.getElementById('site-group-mode')?.value || '8digit';
 
         if (sites.length === 0) {
             container.innerHTML = '<p class="text-sm text-gray-500">現場データがありません</p>';
@@ -48,8 +48,10 @@ class FilterController {
 
                 grouped5Digit[segment].forEach((group, groupIndex) => {
                     const code5 = group.code5;
-                    const groupKey = `5digit:${code5}`;
-                    const allChecked = this.selectedSites.some(s => s.startsWith(`5digit:${code5}`));
+                    const segmentKey = group.segment || segment;
+                    const groupKey = `5digit:${code5}:${segmentKey}`;
+                    const treeId = `children-${code5}-${segmentKey}-${groupIndex}`;
+                    const allChecked = this.selectedSites.includes(groupKey);
 
                     html += `
                         <div class="site-item site-group-5digit">
@@ -57,14 +59,14 @@ class FilterController {
                                    class="site-checkbox site-checkbox-5digit"
                                    value="${groupKey}"
                                    data-segment="${segment}"
-                                   data-code5="${code5}"
+                                   data-group-key="${groupKey}"
                                    ${allChecked ? 'checked' : ''}
                                    onchange="filterController.handle5DigitCheckboxChange(this)">
-                            <span onclick="filterController.toggle8DigitChildren('${code5}')" style="cursor: pointer;">
-                                <span id="expand-icon-${code5}">▶</span> ${group.corpName}（${group.children.length}拠点）
+                            <span onclick="filterController.toggle8DigitChildren('${treeId}')" style="cursor: pointer;">
+                                <span id="expand-icon-${treeId}">▶</span> ${group.corpName}（${group.children.length}拠点）
                             </span>
                         </div>
-                        <div id="children-${code5}" class="site-8digit-children" style="display: none; margin-left: 20px;">
+                        <div id="${treeId}" class="site-8digit-children" style="display: none; margin-left: 20px;">
                     `;
 
                     group.children.forEach(site => {
@@ -76,7 +78,7 @@ class FilterController {
                                        class="site-checkbox site-checkbox-8digit"
                                        value="${siteKey}"
                                        data-segment="${segment}"
-                                       data-code5="${code5}"
+                                       data-group-key="${groupKey}"
                                        ${checked ? 'checked' : ''}
                                        onchange="filterController.handle8DigitCheckboxChange(this)">
                                 <span>${site.displayName}</span>
@@ -359,9 +361,9 @@ class FilterController {
     /**
      * 8桁の子要素を展開/折りたたみ
      */
-    toggle8DigitChildren(code5) {
-        const childrenDiv = document.getElementById(`children-${code5}`);
-        const iconSpan = document.getElementById(`expand-icon-${code5}`);
+    toggle8DigitChildren(treeId) {
+        const childrenDiv = document.getElementById(treeId);
+        const iconSpan = document.getElementById(`expand-icon-${treeId}`);
 
         if (childrenDiv.style.display === 'none') {
             childrenDiv.style.display = 'block';
@@ -376,11 +378,11 @@ class FilterController {
      * 5桁チェックボックスの変更ハンドラー
      */
     handle5DigitCheckboxChange(checkbox) {
-        const code5 = checkbox.dataset.code5;
+        const groupKey = checkbox.dataset.groupKey;
         const isChecked = checkbox.checked;
 
         // 配下の8桁チェックボックスを全て同じ状態にする
-        const children = document.querySelectorAll(`.site-checkbox-8digit[data-code5="${code5}"]`);
+        const children = document.querySelectorAll(`.site-checkbox-8digit[data-group-key="${groupKey}"]`);
         children.forEach(child => {
             child.checked = isChecked;
         });
@@ -392,15 +394,15 @@ class FilterController {
      * 8桁チェックボックスの変更ハンドラー
      */
     handle8DigitCheckboxChange(checkbox) {
-        const code5 = checkbox.dataset.code5;
+        const groupKey = checkbox.dataset.groupKey;
 
         // 同じグループの8桁チェックボックスの状態を確認
-        const children = document.querySelectorAll(`.site-checkbox-8digit[data-code5="${code5}"]`);
+        const children = document.querySelectorAll(`.site-checkbox-8digit[data-group-key="${groupKey}"]`);
         const allChecked = Array.from(children).every(cb => cb.checked);
         const noneChecked = Array.from(children).every(cb => !cb.checked);
 
         // 5桁チェックボックスの状態を更新
-        const parent5Digit = document.querySelector(`.site-checkbox-5digit[data-code5="${code5}"]`);
+        const parent5Digit = document.querySelector(`.site-checkbox-5digit[data-group-key="${groupKey}"]`);
         if (parent5Digit) {
             if (allChecked) {
                 parent5Digit.checked = true;
