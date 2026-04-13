@@ -224,21 +224,21 @@ function renderSummaryTable(title, data) {
     html.push('<table class="min-w-full text-sm">');
     html.push('<thead><tr class="border-b text-left">');
     html.push('<th class="px-2 py-2">セグメント</th>');
-    html.push('<th class="px-2 py-2 text-right">基本請負費</th>');
-    html.push('<th class="px-2 py-2 text-right">その他請負費</th>');
-    html.push('<th class="px-2 py-2 text-right">販管費</th>');
-    html.push('<th class="px-2 py-2 text-right">原価</th>');
-    html.push('<th class="px-2 py-2 text-right">人件費</th>');
+    html.push('<th class="px-2 py-2 text-right">基本売上</th>');
+    html.push('<th class="px-2 py-2 text-right">その他売上</th>');
+    html.push('<th class="px-2 py-2 text-right">材料</th>');
+    html.push('<th class="px-2 py-2 text-right">労務</th>');
+    html.push('<th class="px-2 py-2 text-right">経費</th>');
     html.push('</tr></thead><tbody>');
 
     rows.forEach(([segment, values]) => {
         html.push('<tr class="border-b">');
         html.push(`<td class="px-2 py-2 font-semibold">${escapeHtml(segment)}</td>`);
-        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['基本請負費'])}</td>`);
-        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['その他請負費'])}</td>`);
-        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['販管費'])}</td>`);
-        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['原価'])}</td>`);
-        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['人件費'])}</td>`);
+        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['基本売上'])}</td>`);
+        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['その他売上'])}</td>`);
+        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['材料'])}</td>`);
+        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['労務'])}</td>`);
+        html.push(`<td class="px-2 py-2 text-right">${formatNumber(values['経費'])}</td>`);
         html.push('</tr>');
     });
 

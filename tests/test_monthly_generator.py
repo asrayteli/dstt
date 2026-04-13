@@ -211,3 +211,19 @@ def test_monthly_generator_db_mode_matches_manager_id_without_leading_zero(tmp_p
 
     assert result["success"] is True
     assert result["debug"]["site_dict_count"] == 1
+
+
+def test_monthly_generator_summary_js_uses_backend_keys():
+    js_path = ROOT / "app" / "static" / "monthly_generator" / "js" / "monthly_generator.js"
+    script = js_path.read_text(encoding="utf-8")
+
+    assert "基本売上" in script
+    assert "その他売上" in script
+    assert "材料" in script
+    assert "労務" in script
+    assert "経費" in script
+
+    assert "基本請負費" not in script
+    assert "その他請負費" not in script
+    assert "販管費" not in script
+    assert "人件費" not in script

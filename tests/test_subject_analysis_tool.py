@@ -50,18 +50,76 @@ def _user(user_id="tester01"):
     return SimpleNamespace(is_authenticated=True, username=user_id, name="Test User")
 
 
-def _subject_csv_bytes():
+def _subject_csv_bytes(contract_type="基本請負料", subject_name="基本請負料"):
     header = [f"h{i}" for i in range(25)]
     row = [""] * 25
-    row[5] = "基本請負料"
+    row[5] = contract_type
     row[8] = "01234001"
     row[9] = "株式会社テスト"
     row[10] = "テスト現場"
     row[11] = "CODE"
-    row[12] = "基本請負料"
+    row[12] = subject_name
     row[13] = "100"
     csv_text = ",".join(header) + "\n" + ",".join(row) + "\n"
     return csv_text.encode("utf-8")
+
+
+def test_parse_subject_data_splits_auto_sales_by_contract_type(tmp_path):
+    module = _load_sat_module()
+    csv_text = (
+        ",".join(f"h{i}" for i in range(25))
+        + "\n"
+        + ",".join(
+            [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "基本請負料",
+                "",
+                "",
+                "01234001",
+                "株式会社テスト",
+                "テスト現場",
+                "CODE1",
+                "自動車売上",
+                "100",
+            ]
+            + [""] * 11
+        )
+        + "\n"
+        + ",".join(
+            [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "その他請負料",
+                "",
+                "",
+                "01234002",
+                "株式会社テスト",
+                "別現場",
+                "CODE2",
+                "自動車売上",
+                "200",
+            ]
+            + [""] * 11
+        )
+        + "\n"
+    )
+
+    subject_csv_path = tmp_path / "subject.csv"
+    subject_csv_path.write_text(csv_text, encoding="utf-8")
+    csv_data = module.read_csv_with_encoding(subject_csv_path)
+    parsed = module.parse_subject_data(csv_data)
+
+    assert [item["subject_name"] for item in parsed] == ["基本請負料", "その他請負料"]
+    assert [item["original_subject_name"] for item in parsed] == ["自動車売上", "自動車売上"]
+    assert [item["is_revenue"] for item in parsed] == [True, True]
+    assert [item["amounts"][0] for item in parsed] == [100.0, 200.0]
 
 
 def test_subject_analysis_tool_db_mode_uses_site_contract_master(tmp_path):

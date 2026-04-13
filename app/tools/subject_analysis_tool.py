@@ -245,7 +245,7 @@ def parse_subject_data(csv_data):
     """科目別分析表 CSV を解析して明細配列に変換する。"""
     parsed = []
     indirect_cost_codes = {"間接原価", "関節原価"}
-    revenue_names = {"基本請負費", "その他請負費"}
+    revenue_names = {"基本請負料", "その他請負料"}
 
     for index, row in enumerate(csv_data):
         if index == 0:
@@ -272,11 +272,11 @@ def parse_subject_data(csv_data):
         if not display_subject_name and is_indirect_cost:
             display_subject_name = "間接原価"
 
-        if subject_name == "自費診療収入":
+        if subject_name == "自動車売上":
             if contract_type in revenue_names:
                 display_subject_name = contract_type
             elif contract_type:
-                display_subject_name = f"自費診療収入({contract_type})"
+                display_subject_name = f"自動車売上({contract_type})"
 
         amounts = []
         for col_index in range(13, len(row)):
