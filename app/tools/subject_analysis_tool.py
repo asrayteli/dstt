@@ -7,7 +7,7 @@ import traceback
 from datetime import datetime
 
 from app.models import SiteContractMaster
-from app.site_contract_master import VALID_SEGMENTS, ensure_contract_master_synced
+from app.site_contract_master import VALID_SEGMENTS, ensure_contract_master_synced, manager_ids_match
 
 
 subject_analysis_tool_bp = Blueprint("subject_analysis_tool", __name__, url_prefix="/tools/subject_analysis_tool")
@@ -184,6 +184,43 @@ def upload_files():
             }
         )
 
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({"error": f"処理中にエラーが発生しました: {exc}"}), 500
+
+
+@subject_analysis_tool_bp.route("/api/manager_contracts", methods=["GET"])
+@login_required
+def manager_contracts():
+    try:
+        manager_id = str(request.args.get("manager_id", "") or "").strip()
+        if not manager_id:
+            return jsonify({"error": "manager_id を指定してください"}), 400
+
+        ensure_contract_master_synced()
+        rows = (
+            SiteContractMaster.query
+            .filter(SiteContractMaster.is_active.is_(True))
+            .order_by(SiteContractMaster.contract_code.asc())
+            .all()
+        )
+
+        contract_codes = []
+        for row in rows:
+            if not manager_ids_match(row.site_manager_id, manager_id):
+                continue
+            contract_code = normalize_contract_code(row.contract_code)
+            if not contract_code:
+                continue
+            contract_codes.append(contract_code)
+
+        return jsonify(
+            {
+                "manager_id": manager_id,
+                "contract_codes": sorted(set(contract_codes)),
+                "count": len(set(contract_codes)),
+            }
+        )
     except Exception as exc:
         traceback.print_exc()
         return jsonify({"error": f"処理中にエラーが発生しました: {exc}"}), 500

@@ -1,4 +1,5 @@
 let currentFilters = null;
+const managerContractCache = new Map();
 
 const UPLOAD_INPUT_IDS = ['subject-file', 'prev-year-subject-file', 'site-file'];
 const FILE_NAME_LABEL_IDS = {
@@ -262,7 +263,25 @@ async function handleFileUpload() {
     }
 }
 
-function applyFilters() {
+async function resolveManagerScopedContracts(managerId) {
+    const key = String(managerId || '').trim();
+    if (!key) return null;
+    if (managerContractCache.has(key)) {
+        return managerContractCache.get(key);
+    }
+
+    const response = await fetch(`/tools/subject_analysis_tool/api/manager_contracts?manager_id=${encodeURIComponent(key)}`);
+    const payload = await response.json();
+    if (!response.ok || payload.error) {
+        throw new Error(payload.error || '担当者番号による現場絞り込みに失敗しました。');
+    }
+
+    const contractCodes = Array.isArray(payload.contract_codes) ? payload.contract_codes : [];
+    managerContractCache.set(key, contractCodes);
+    return contractCodes;
+}
+
+async function applyFilters() {
     const filters = normalizeFiltersForSimpleView(filterController.getFilters());
 
     if (filters.months.length === 0) {
@@ -286,9 +305,14 @@ function applyFilters() {
     }
 
     showLoading();
-    currentFilters = filters;
 
     try {
+        if (filters.managerId) {
+            const managerContracts = await resolveManagerScopedContracts(filters.managerId);
+            filters.allowedContractCodes = managerContracts;
+        }
+
+        currentFilters = filters;
         const results = comparisonEngine.executeComparison(filters);
 
         if (results.length === 0) {
@@ -358,6 +382,7 @@ function resetAll() {
     syncSiteSourceMode();
 
     currentFilters = null;
+    managerContractCache.clear();
     toggleResultFocus(false);
     showWelcomeScreen();
 

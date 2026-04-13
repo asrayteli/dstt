@@ -297,10 +297,18 @@ class DataManager {
             subjects = [],
             months = [],
             segments = [],
-            managerId = ''
+            managerId = '',
+            allowedContractCodes = []
         } = filters;
+        const allowedSet = new Set((allowedContractCodes || []).map((code) => String(code || '').trim()).filter(Boolean));
 
         let filteredData = this.rawData.currentYear.filter(item => {
+            const contractCode = String(item.contract_code || '').trim();
+
+            if (allowedSet.size > 0 && !allowedSet.has(contractCode)) {
+                return false;
+            }
+
             // 現場フィルタ
             if (sites.length > 0) {
                 const siteKey = `${item.contract_code}|${item.site_name}|${item.corp_name}`;

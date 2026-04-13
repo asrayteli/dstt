@@ -15,6 +15,7 @@ class ComparisonEngine {
             subjects,
             segments,
             managerId,
+            allowedContractCodes,
             siteGroupMode,
             comparisonMode,
             baseMonth,
@@ -24,7 +25,7 @@ class ComparisonEngine {
         } = filters;
 
         // データ取得
-        let currentData = dataManager.getData({ sites, subjects, months, segments, managerId });
+        let currentData = dataManager.getData({ sites, subjects, months, segments, managerId, allowedContractCodes });
 
         // 5桁グループ化モードの場合はデータを合算
         if (siteGroupMode === '5digit') {
