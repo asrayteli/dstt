@@ -132,6 +132,9 @@ def test_monthly_generator_db_mode_uses_site_contract_master(tmp_path):
     assert result["success"] is True
     assert result["debug"]["site_dict_count"] == 1
     assert abs(result["data"]["一般"][expense_category]) == 100
+    assert result["debug"]["segment_contract_codes"]["一般"] == ["01234001"]
+    assert result["debug"]["segment_contract_codes"]["役員"] == []
+    assert result["debug"]["segment_contract_codes"]["旅客"] == []
 
 
 def test_monthly_generator_page_renders_both_site_source_panels(tmp_path):
@@ -369,3 +372,6 @@ def test_monthly_generator_summary_js_uses_backend_keys():
     assert "その他請負費" not in script
     assert "販管費" not in script
     assert "人件費" not in script
+    assert "window.progressHideTimeout" in script
+    assert "renderSegmentContractCodes" in script
+    assert "対象契約コード" in script

@@ -136,6 +136,10 @@ function startProgress() {
     let progress = 0;
     const totalSteps = 7;
 
+    if (window.progressHideTimeout) {
+        clearTimeout(window.progressHideTimeout);
+        window.progressHideTimeout = null;
+    }
     if (window.progressInterval) {
         clearInterval(window.progressInterval);
     }
@@ -178,8 +182,12 @@ function completeProgress() {
         clearInterval(window.progressInterval);
     }
     updateProgress(7, 7);
-    setTimeout(() => {
+    if (window.progressHideTimeout) {
+        clearTimeout(window.progressHideTimeout);
+    }
+    window.progressHideTimeout = setTimeout(() => {
         document.getElementById('progress-container').classList.add('hidden');
+        window.progressHideTimeout = null;
     }, 500);
 }
 
@@ -224,6 +232,9 @@ function showSuccess(result) {
         sections.push(`<div>抽出明細数: ${formatNumber(result.debug.extracted_count || 0)}</div>`);
         sections.push('</div>');
     }
+    if (result.debug?.segment_contract_codes) {
+        sections.push(renderSegmentContractCodes(result.debug.segment_contract_codes));
+    }
 
     sections.push('<div class="mt-4 text-center">');
     sections.push('<button onclick="resetForm()" class="btn btn-primary">新しい処理を始める</button>');
@@ -264,6 +275,26 @@ function renderSummaryTable(title, data) {
     });
 
     html.push('</tbody></table></div></div>');
+    return html.join('');
+}
+
+function renderSegmentContractCodes(segmentContractCodes) {
+    const rows = Object.entries(segmentContractCodes || {}).filter(([, codes]) => Array.isArray(codes) && codes.length > 0);
+    if (!rows.length) return '';
+
+    const html = [];
+    html.push('<div class="mt-4 rounded border border-slate-200 bg-white p-3">');
+    html.push('<h4 class="mb-2 font-semibold text-gray-800">対象契約コード</h4>');
+    html.push('<div class="space-y-2 text-sm text-slate-700">');
+
+    rows.forEach(([segment, codes]) => {
+        html.push('<div class="rounded bg-slate-50 p-3">');
+        html.push(`<div class="font-semibold text-slate-900">${escapeHtml(segment)}</div>`);
+        html.push(`<div class="mt-1 break-all">${escapeHtml(codes.join(', '))}</div>`);
+        html.push('</div>');
+    });
+
+    html.push('</div></div>');
     return html.join('');
 }
 
@@ -326,6 +357,10 @@ function downloadFile(filePath) {
 }
 
 function restoreFormWithFiles() {
+    if (window.progressHideTimeout) {
+        clearTimeout(window.progressHideTimeout);
+        window.progressHideTimeout = null;
+    }
     document.getElementById('upload-form').style.display = 'block';
     document.getElementById('progress-container').classList.add('hidden');
     document.getElementById('result-container').classList.add('hidden');

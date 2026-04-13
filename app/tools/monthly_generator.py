@@ -510,10 +510,16 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         "一般": {"材料": 0, "労務": 0, "経費": 0, "基本売上": 0, "その他売上": 0, "材料合算": 0, "労務合算": 0, "経費合算": 0, "基本売上合算": 0, "その他売上合算": 0},
         "旅客": {"材料": 0, "労務": 0, "経費": 0, "基本売上": 0, "その他売上": 0, "材料合算": 0, "労務合算": 0, "経費合算": 0, "基本売上合算": 0, "その他売上合算": 0},
     }
+    segment_contract_codes = {
+        "役員": set(),
+        "一般": set(),
+        "旅客": set(),
+    }
 
     unknown_subjects = set()
 
     for item in extracted_data:
+        contract_code = item["契約コード"]
         segment = item["セグメント"]
         subject = item["科目名称"]
         amounts = item["金額データ"]
@@ -522,6 +528,7 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
 
         if segment not in aggregated:
             continue
+        segment_contract_codes[segment].add(contract_code)
 
         # 月のインデックス計算（4月が基準月、列13がamounts[0]）
         # 4-12月: month_index = target_month - 4 (0-8)
@@ -681,6 +688,10 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                 "site_dict_count": len(site_dict),
                 "missing_contracts": list(missing_contracts) if missing_contracts else [],
                 "missing_subject_sites": missing_subject_sites,
+                "segment_contract_codes": {
+                    segment: sorted(codes)
+                    for segment, codes in segment_contract_codes.items()
+                },
             }
         }
 
