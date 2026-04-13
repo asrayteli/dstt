@@ -294,54 +294,23 @@ function closeErrorModal() {
 }
 
 function requestMissingSiteConfirmation(message, missingSites) {
-    const modal = document.getElementById('missing-sites-modal');
-    const content = document.getElementById('missing-sites-content');
-
-    if (!modal || !content) {
-        const lines = (missingSites || []).map((item) => {
-            const siteName = item.site_name || '不明';
-            return `契約コード: ${item.contract_code} / 現場名: ${siteName}`;
-        });
-        return Promise.resolve(window.confirm([message || '確認が必要です。', ...lines].join('\n')));
-    }
-
-    const parts = [
-        `<p class="mb-3 font-semibold text-amber-700">${escapeHtml(message || '確認が必要です。')}</p>`,
-        '<div class="rounded border border-amber-200 bg-amber-50 p-4">',
-        '<p class="mb-2 text-sm text-amber-900">以下の現場は科目別推移表に見つかりませんでした。</p>',
-        '<ul class="error-list">'
-    ];
-
-    (missingSites || []).forEach((item) => {
-        parts.push(
-            `<li class="text-amber-900">契約コード: ${escapeHtml(item.contract_code)} / 現場名: ${escapeHtml(item.site_name || '不明')}</li>`
-        );
+    const lines = (missingSites || []).map((item) => {
+        const siteName = item.site_name || '不明';
+        return `契約コード: ${item.contract_code} / 現場名: ${siteName}`;
     });
-
-    parts.push('</ul></div>');
-    parts.push('<p class="mt-3 text-sm text-slate-600">無視して続行すると、上記の現場は今回の月次集計から除外します。</p>');
-
-    content.innerHTML = parts.join('');
-    modal.classList.remove('hidden');
-    modal.style.display = 'flex';
-
-    return new Promise((resolve) => {
-        window.missingSitesConfirmResolver = resolve;
-    });
+    const prompt = [
+        message || '確認が必要です。',
+        '',
+        '以下の現場は科目別推移表に見つかりませんでした。',
+        ...lines,
+        '',
+        '無視して続行しますか？'
+    ].join('\n');
+    return Promise.resolve(window.confirm(prompt));
 }
 
 function closeMissingSitesModal(shouldContinue) {
-    const modal = document.getElementById('missing-sites-modal');
-    if (modal) {
-        modal.classList.add('hidden');
-        modal.style.display = 'none';
-    }
-
-    const resolver = window.missingSitesConfirmResolver;
-    window.missingSitesConfirmResolver = null;
-    if (resolver) {
-        resolver(Boolean(shouldContinue));
-    }
+    return Boolean(shouldContinue);
 }
 
 function downloadFile(filePath) {
@@ -360,7 +329,6 @@ function restoreFormWithFiles() {
     document.getElementById('upload-form').style.display = 'block';
     document.getElementById('progress-container').classList.add('hidden');
     document.getElementById('result-container').classList.add('hidden');
-    closeMissingSitesModal(false);
 }
 
 function resetForm() {

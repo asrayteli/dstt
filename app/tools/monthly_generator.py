@@ -179,35 +179,6 @@ def _upsert_segment_into_contract_master(contract_code, segment):
 def _site_dict_from_contract_master(site_manager_id):
     manager_id = str(site_manager_id or '').strip()
     if not manager_id:
-        raise ValueError('担当者IDを指定してください')
-
-    rows = (
-        SiteContractMaster.query
-        .filter(
-            SiteContractMaster.site_manager_id == manager_id,
-            SiteContractMaster.is_active.is_(True),
-        )
-        .order_by(SiteContractMaster.contract_code.asc())
-        .all()
-    )
-
-    site_dict = {}
-    warnings = []
-    for row in rows:
-        contract_code = str(row.contract_code or '').strip()
-        segment = str(row.segment or '').strip()
-        if not contract_code:
-            continue
-        if segment not in ['役員', '一般', '旅客']:
-            warnings.append(f"セグメント未設定: {contract_code} - {row.site_name}")
-            continue
-        site_dict[contract_code] = segment
-    return site_dict, warnings
-
-
-def _site_dict_from_contract_master(site_manager_id):
-    manager_id = str(site_manager_id or '').strip()
-    if not manager_id:
         raise ValueError('担当者IDを入力してください')
     site_dict, warnings, matched_rows = load_site_mapping(site_manager_id=manager_id)
     if matched_rows == 0:
