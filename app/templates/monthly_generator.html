@@ -178,5 +178,16 @@
     </div>
 </div>
 
+<div id="missing-sites-modal" class="hidden modal-overlay">
+    <div class="modal-content">
+        <h3 class="text-lg font-bold mb-4 text-amber-600">確認</h3>
+        <div id="missing-sites-content" class="mb-4"></div>
+        <div class="flex justify-end gap-2">
+            <button type="button" onclick="closeMissingSitesModal(false)" class="btn btn-outline">戻る</button>
+            <button type="button" onclick="closeMissingSitesModal(true)" class="btn btn-primary">無視して続行</button>
+        </div>
+    </div>
+</div>
+
 <script src="{{ url_for('static', filename='monthly_generator/js/monthly_generator.js') }}"></script>
 {% endblock %}

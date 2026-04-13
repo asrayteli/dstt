@@ -43,7 +43,8 @@ function syncSiteSourceMode() {
     }
 }
 
-async function processFiles() {
+async function processFiles(options = {}) {
+    const { ignoreMissingSubjectSites = false } = options;
     const subjectFile = document.getElementById('subject-file')?.files?.[0];
     const siteFile = document.getElementById('site-file')?.files?.[0];
     const reportFile = document.getElementById('report-file')?.files?.[0];
@@ -81,6 +82,7 @@ async function processFiles() {
     if (prevYearSiteFile) formData.append('prev_year_site_file', prevYearSiteFile);
     if (forecastFile) formData.append('forecast_file', forecastFile);
     if (budgetFile) formData.append('budget_file', budgetFile);
+    if (ignoreMissingSubjectSites) formData.append('ignore_missing_subject_sites', '1');
 
     document.getElementById('upload-form').style.display = 'none';
     document.getElementById('result-container').classList.add('hidden');
@@ -94,6 +96,25 @@ async function processFiles() {
         });
         const result = await response.json();
         completeProgress();
+
+        if (result.confirmation_required) {
+            if (ignoreMissingSubjectSites) {
+                showError(result.message || '確認が必要です。', result.details || []);
+                restoreFormWithFiles();
+                return;
+            }
+
+            const shouldContinue = await requestMissingSiteConfirmation(
+                result.message,
+                result.missing_subject_sites || []
+            );
+            if (shouldContinue) {
+                await processFiles({ ignoreMissingSubjectSites: true });
+            } else {
+                restoreFormWithFiles();
+            }
+            return;
+        }
 
         if (!response.ok || result.error) {
             showError(result.error || '処理に失敗しました。', result.details || []);
@@ -272,6 +293,57 @@ function closeErrorModal() {
     modal.style.display = 'none';
 }
 
+function requestMissingSiteConfirmation(message, missingSites) {
+    const modal = document.getElementById('missing-sites-modal');
+    const content = document.getElementById('missing-sites-content');
+
+    if (!modal || !content) {
+        const lines = (missingSites || []).map((item) => {
+            const siteName = item.site_name || '不明';
+            return `契約コード: ${item.contract_code} / 現場名: ${siteName}`;
+        });
+        return Promise.resolve(window.confirm([message || '確認が必要です。', ...lines].join('\n')));
+    }
+
+    const parts = [
+        `<p class="mb-3 font-semibold text-amber-700">${escapeHtml(message || '確認が必要です。')}</p>`,
+        '<div class="rounded border border-amber-200 bg-amber-50 p-4">',
+        '<p class="mb-2 text-sm text-amber-900">以下の現場は科目別推移表に見つかりませんでした。</p>',
+        '<ul class="error-list">'
+    ];
+
+    (missingSites || []).forEach((item) => {
+        parts.push(
+            `<li class="text-amber-900">契約コード: ${escapeHtml(item.contract_code)} / 現場名: ${escapeHtml(item.site_name || '不明')}</li>`
+        );
+    });
+
+    parts.push('</ul></div>');
+    parts.push('<p class="mt-3 text-sm text-slate-600">無視して続行すると、上記の現場は今回の月次集計から除外します。</p>');
+
+    content.innerHTML = parts.join('');
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+
+    return new Promise((resolve) => {
+        window.missingSitesConfirmResolver = resolve;
+    });
+}
+
+function closeMissingSitesModal(shouldContinue) {
+    const modal = document.getElementById('missing-sites-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+    }
+
+    const resolver = window.missingSitesConfirmResolver;
+    window.missingSitesConfirmResolver = null;
+    if (resolver) {
+        resolver(Boolean(shouldContinue));
+    }
+}
+
 function downloadFile(filePath) {
     const filename = String(filePath || '').split('/').pop();
     if (!filename) return;
@@ -288,6 +360,7 @@ function restoreFormWithFiles() {
     document.getElementById('upload-form').style.display = 'block';
     document.getElementById('progress-container').classList.add('hidden');
     document.getElementById('result-container').classList.add('hidden');
+    closeMissingSitesModal(false);
 }
 
 function resetForm() {

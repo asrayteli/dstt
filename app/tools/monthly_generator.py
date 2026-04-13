@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 import traceback
 
 from app.models import Site, SiteBranch, SiteContractMaster, db
-from app.site_contract_master import load_site_mapping
+from app.site_contract_master import load_site_mapping, manager_ids_match
 
 monthly_generator_bp = Blueprint("monthly_generator", __name__, url_prefix="/tools/monthly_generator")
 
@@ -217,7 +217,23 @@ def _site_dict_from_contract_master(site_manager_id):
             f"担当者ID {manager_id} の現場は見つかりましたが、セグメントが未登録です。"
             "現場リストPLUSで現場表を取り込んでください"
         )
-    return site_dict, warnings
+    site_name_map = {}
+    rows = (
+        SiteContractMaster.query
+        .filter(SiteContractMaster.is_active.is_(True))
+        .order_by(SiteContractMaster.contract_code.asc())
+        .all()
+    )
+    for row in rows:
+        if not manager_ids_match(row.site_manager_id, manager_id):
+            continue
+        contract_code = str(row.contract_code or '').strip()
+        if contract_code not in site_dict:
+            continue
+        site_name = str(row.site_name or '').strip()
+        if site_name:
+            site_name_map[contract_code] = site_name
+    return site_dict, site_name_map, warnings
 
 
 @monthly_generator_bp.route("/")
@@ -249,6 +265,7 @@ def process_files():
 
         site_source = str(request.form.get('site_source', 'file') or 'file').strip().lower()
         site_manager_id = str(request.form.get('site_manager_id', '') or '').strip()
+        ignore_missing_subject_sites = str(request.form.get('ignore_missing_subject_sites', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
         if not all([subject_file, report_file, target_month, sheet_name]):
             return jsonify({"error": "必要なファイルまたはパラメータが不足しています"}), 400
@@ -300,30 +317,41 @@ def process_files():
         result = process_monthly_data(
             subject_path, site_path, report_path, target_month, sheet_name,
             prev_year_subject_path, prev_year_site_path, forecast_path, budget_path,
-            site_source=site_source, site_manager_id=site_manager_id
+            site_source=site_source,
+            site_manager_id=site_manager_id,
+            ignore_missing_subject_sites=ignore_missing_subject_sites
         )
+
+        def _cleanup_input_files():
+            try:
+                os.remove(subject_path)
+                if site_path:
+                    os.remove(site_path)
+                os.remove(report_path)
+                if prev_year_subject_path:
+                    os.remove(prev_year_subject_path)
+                if prev_year_site_path:
+                    os.remove(prev_year_site_path)
+                if forecast_path:
+                    os.remove(forecast_path)
+                if budget_path:
+                    os.remove(budget_path)
+            except OSError:
+                pass
+
+        if result.get("confirmation_required"):
+            db.session.rollback()
+            _cleanup_input_files()
+            return jsonify(result)
 
         if result.get("error"):
             db.session.rollback()
+            _cleanup_input_files()
             return jsonify(result), 400
         db.session.commit()
 
         # 一時ファイル削除（入力ファイル全て）
-        try:
-            os.remove(subject_path)
-            if site_path:
-                os.remove(site_path)
-            os.remove(report_path)
-            if prev_year_subject_path:
-                os.remove(prev_year_subject_path)
-            if prev_year_site_path:
-                os.remove(prev_year_site_path)
-            if forecast_path:
-                os.remove(forecast_path)
-            if budget_path:
-                os.remove(budget_path)
-        except:
-            pass
+        _cleanup_input_files()
 
         return jsonify(result)
 
@@ -335,7 +363,7 @@ def process_files():
 
 def process_monthly_data(subject_path, site_path, report_path, target_month, sheet_name,
                          prev_year_subject_path=None, prev_year_site_path=None, forecast_path=None, budget_path=None,
-                         site_source='file', site_manager_id=''):
+                         site_source='file', site_manager_id='', ignore_missing_subject_sites=False):
     """月次データ処理のメインロジック"""
     errors = []
     warnings = []  # オプションデータの警告用
@@ -369,15 +397,17 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
     # ステップ2: 現場表の解析（ヘッダー行をスキップ）
     # 新フォーマット: 契約コード,セグメント
     site_dict = {}  # 契約コードをキーとした辞書（8桁完全一致）
+    site_name_map = {}
 
     if site_source == 'db':
         try:
-            master_site_dict, master_warnings = _site_dict_from_contract_master(site_manager_id)
+            master_site_dict, master_site_name_map, master_warnings = _site_dict_from_contract_master(site_manager_id)
         except ValueError as e:
             return {"error": str(e)}
         if not master_site_dict:
             return {"error": "指定した担当者IDに紐づく有効な現場契約マスタがありません"}
         warnings.extend(master_warnings)
+        site_name_map.update(master_site_name_map)
         site_data = [["contract_code", "segment"]] + [
             [contract_code, segment]
             for contract_code, segment in master_site_dict.items()
@@ -401,6 +431,10 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
 
             # 8桁完全一致で辞書に登録（重複時は上書き）
             site_dict[contract_code] = segment
+            if len(row) >= 3:
+                site_name = row[2].strip()
+                if site_name:
+                    site_name_map[contract_code] = site_name
 
     # ステップ3: 科目別推移表から対象現場のデータを抽出（ヘッダー行をスキップ）
     extracted_data = []
@@ -473,11 +507,31 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
             if contract_code:
                 missing_contracts.add(f"{contract_code} ({corp_name} - {site_name})")
 
-    # ステップ4: エラーチェック
-    # 現場表にあるが科目別推移表に見つからない契約コード
-    for contract_code in site_dict.keys():
-        if contract_code not in found_contracts:
-            errors.append(f"契約コードが科目別推移表に見つかりません: {contract_code}")
+    # ステップ4: 現場表にあるが科目別推移表に見つからない現場の確認
+    missing_subject_sites = []
+    for contract_code in sorted(site_dict.keys()):
+        if contract_code in found_contracts:
+            continue
+        missing_subject_sites.append({
+            "contract_code": contract_code,
+            "site_name": site_name_map.get(contract_code, "")
+        })
+
+    if missing_subject_sites and not ignore_missing_subject_sites:
+        return {
+            "confirmation_required": True,
+            "message": "現場リストPLUSにはあるが、アップロードした科目別推移表に見つからない現場があります。これらを無視して処理を続けるか確認してください。",
+            "missing_subject_sites": missing_subject_sites,
+            "details": [
+                f"契約コード: {item['contract_code']} / 現場名: {item['site_name'] or '不明'}"
+                for item in missing_subject_sites
+            ],
+        }
+
+    if missing_subject_sites:
+        warnings.append(
+            f"科目別推移表に見つからない現場 {len(missing_subject_sites)} 件を無視して処理を続行しました。"
+        )
 
     # ステップ5: 経費ジャンル分けと合算
     aggregated = {
@@ -654,7 +708,8 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
                 "extracted_count": len(extracted_data),
                 "found_contracts_count": len(found_contracts),
                 "site_dict_count": len(site_dict),
-                "missing_contracts": list(missing_contracts) if missing_contracts else []
+                "missing_contracts": list(missing_contracts) if missing_contracts else [],
+                "missing_subject_sites": missing_subject_sites,
             }
         }
 
