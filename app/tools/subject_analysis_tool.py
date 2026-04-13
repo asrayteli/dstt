@@ -2,14 +2,31 @@ from flask import Blueprint, current_app, jsonify, render_template, request
 from flask_login import current_user, login_required
 import csv
 import os
+import re
 import traceback
 from datetime import datetime
 
 from app.models import SiteContractMaster
-from app.site_contract_master import VALID_SEGMENTS, ensure_contract_master_synced
+from app.site_contract_master import VALID_SEGMENTS, ensure_contract_master_synced, manager_ids_match
 
 
 subject_analysis_tool_bp = Blueprint("subject_analysis_tool", __name__, url_prefix="/tools/subject_analysis_tool")
+
+
+_DECIMAL_INTEGER_PATTERN = re.compile(r"^\d+\.0+$")
+_DIGITS_PATTERN = re.compile(r"^\d+$")
+
+
+def normalize_contract_code(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.replace(",", "").replace(" ", "").replace("\u3000", "")
+    if _DECIMAL_INTEGER_PATTERN.match(text):
+        text = text.split(".", 1)[0]
+    if _DIGITS_PATTERN.match(text) and len(text) < 8:
+        text = text.zfill(8)
+    return text
 
 
 def get_upload_folder():
@@ -31,7 +48,7 @@ def load_site_mapping_from_master():
 
     site_dict = {}
     for row in rows:
-        contract_code = str(row.contract_code or "").strip()
+        contract_code = normalize_contract_code(row.contract_code)
         segment = str(row.segment or "").strip()
         if not contract_code or segment not in valid_segments:
             continue
@@ -56,7 +73,7 @@ def load_site_mapping_from_master():
 
     for row in rows:
         matched_rows += 1
-        contract_code = str(row.contract_code or "").strip()
+        contract_code = normalize_contract_code(row.contract_code)
         segment = str(row.segment or "").strip()
         if not contract_code:
             continue
@@ -172,6 +189,43 @@ def upload_files():
         return jsonify({"error": f"処理中にエラーが発生しました: {exc}"}), 500
 
 
+@subject_analysis_tool_bp.route("/api/manager_contracts", methods=["GET"])
+@login_required
+def manager_contracts():
+    try:
+        manager_id = str(request.args.get("manager_id", "") or "").strip()
+        if not manager_id:
+            return jsonify({"error": "manager_id を指定してください"}), 400
+
+        ensure_contract_master_synced()
+        rows = (
+            SiteContractMaster.query
+            .filter(SiteContractMaster.is_active.is_(True))
+            .order_by(SiteContractMaster.contract_code.asc())
+            .all()
+        )
+
+        contract_codes = []
+        for row in rows:
+            if not manager_ids_match(row.site_manager_id, manager_id):
+                continue
+            contract_code = normalize_contract_code(row.contract_code)
+            if not contract_code:
+                continue
+            contract_codes.append(contract_code)
+
+        return jsonify(
+            {
+                "manager_id": manager_id,
+                "contract_codes": sorted(set(contract_codes)),
+                "count": len(set(contract_codes)),
+            }
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({"error": f"処理中にエラーが発生しました: {exc}"}), 500
+
+
 def read_csv_with_encoding(file_path):
     """複数エンコーディングで CSV を読み込む。"""
     encodings = ["utf-8", "shift_jis", "cp932", "utf-8-sig"]
@@ -199,7 +253,7 @@ def parse_subject_data(csv_data):
         if len(row) < 13:
             continue
 
-        contract_code = row[8].strip() if len(row) > 8 else ""
+        contract_code = normalize_contract_code(row[8] if len(row) > 8 else "")
         corp_name = row[9].strip() if len(row) > 9 else ""
         site_name = row[10].strip() if len(row) > 10 else ""
         subject_code = row[11].strip() if len(row) > 11 else ""
@@ -265,7 +319,7 @@ def parse_site_data(csv_data):
         if len(row) < 2:
             continue
 
-        contract_code = row[0].strip()
+        contract_code = normalize_contract_code(row[0])
         segment = row[1].strip()
         if not contract_code:
             continue

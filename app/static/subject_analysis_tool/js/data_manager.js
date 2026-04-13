@@ -115,19 +115,17 @@ class DataManager {
         if (segments.length === 0) return '未分類';
         if (segments.length === 1) return segments[0];
 
-        // 複数あり、同数の場合はユーザーに質問
+        // 複数あり、同数の場合は自動判定
         const sortedSegments = segments.sort((a, b) => segmentCounts[b] - segmentCounts[a]);
         const maxCount = segmentCounts[sortedSegments[0]];
         const tiedSegments = sortedSegments.filter(s => segmentCounts[s] === maxCount);
 
         if (tiedSegments.length > 1) {
-            // 同数の場合はアラートで質問
-            const message = `現場コード${code5}は以下のセグメントが同数です:\n${
-                tiedSegments.map(s => `${s}: ${segmentCounts[s]}件`).join('\n')
-            }\nどちらを使用しますか？`;
-
-            const selected = confirm(`${message}\n\nOK = ${tiedSegments[0]} / キャンセル = ${tiedSegments[1]}`);
-            return selected ? tiedSegments[0] : tiedSegments[1];
+            const classifiedSegments = tiedSegments.filter(s => s !== '未分類');
+            if (classifiedSegments.length === 1) {
+                return classifiedSegments[0];
+            }
+            return '混在';
         }
 
         return sortedSegments[0];
@@ -158,24 +156,33 @@ class DataManager {
             });
         });
 
-        // セグメント別に整理
+        // セグメント別に整理（同一5桁でもセグメント単位で分割）
         Object.keys(code5Groups).forEach(code5 => {
             const sites = code5Groups[code5];
-            const segment = this.getSegmentFor5Digit(code5);
+            const segmentBuckets = {};
+            sites.forEach((site) => {
+                const segment = site.segment || '未分類';
+                if (!segmentBuckets[segment]) {
+                    segmentBuckets[segment] = [];
+                }
+                segmentBuckets[segment].push(site);
+            });
 
-            if (!grouped[segment]) {
-                grouped[segment] = [];
-            }
+            Object.keys(segmentBuckets).forEach((segment) => {
+                if (!grouped[segment]) {
+                    grouped[segment] = [];
+                }
 
-            // 代表の現場名（最初の1件）
-            const representativeSite = sites[0];
+                const segmentSites = segmentBuckets[segment].sort((a, b) => a.displayName.localeCompare(b.displayName, 'ja'));
+                const representativeSite = segmentSites[0];
 
-            grouped[segment].push({
-                code5: code5,
-                siteName: representativeSite.siteName,
-                corpName: representativeSite.corpName,
-                segment: segment,
-                children: sites.sort((a, b) => a.displayName.localeCompare(b.displayName, 'ja'))
+                grouped[segment].push({
+                    code5: code5,
+                    siteName: representativeSite.siteName,
+                    corpName: representativeSite.corpName,
+                    segment: segment,
+                    children: segmentSites
+                });
             });
         });
 
@@ -290,10 +297,18 @@ class DataManager {
             subjects = [],
             months = [],
             segments = [],
-            managerId = ''
+            managerId = '',
+            allowedContractCodes = []
         } = filters;
+        const allowedSet = new Set((allowedContractCodes || []).map((code) => String(code || '').trim()).filter(Boolean));
 
         let filteredData = this.rawData.currentYear.filter(item => {
+            const contractCode = String(item.contract_code || '').trim();
+
+            if (allowedSet.size > 0 && !allowedSet.has(contractCode)) {
+                return false;
+            }
+
             // 現場フィルタ
             if (sites.length > 0) {
                 const siteKey = `${item.contract_code}|${item.site_name}|${item.corp_name}`;
