@@ -155,9 +155,9 @@ def create_app():
     }
     _EXEMPT_PATH_PREFIXES = (
         "/tools/shiftersync/download/",
-        "/tools/cloudshift/view/",
-        "/tools/cloudshift/edit/",
-        "/tools/cloudshift/api/public/",
+        "/tools/shiftersync/cloudshift/view/",
+        "/tools/shiftersync/cloudshift/edit/",
+        "/tools/shiftersync/cloudshift/api/public/",
     )
 
     @app.before_request
