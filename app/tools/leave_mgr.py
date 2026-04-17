@@ -86,14 +86,82 @@ def save_calendar_meta(meta):
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
 def is_admin(user_id):
-    """管理者権限チェック"""
+    """管理者権限チェック。DSTT管理者 or leave_mgr独自管理者。"""
+    try:
+        from app.access_control import is_admin_user as _is_dstt_admin
+        if _is_dstt_admin():
+            return True
+    except Exception:
+        pass
     permissions = load_permissions()
     return user_id in permissions.get('admins', [])
 
+
+def get_calendar_office_code(calendar_id: str) -> str | None:
+    meta = load_calendar_meta()
+    info = meta.get(calendar_id) or {}
+    if isinstance(info, dict):
+        code = info.get("office_code")
+        if isinstance(code, str):
+            code = code.strip()
+            return code or None
+    return None
+
+
+def set_calendar_office_code(calendar_id: str, office_code: str | None):
+    meta = load_calendar_meta()
+    if calendar_id not in meta:
+        return False, "カレンダーが見つかりません"
+    info = meta[calendar_id]
+    if not isinstance(info, dict):
+        info = {}
+    if office_code:
+        info["office_code"] = str(office_code).strip()
+    else:
+        info.pop("office_code", None)
+    meta[calendar_id] = info
+    save_calendar_meta(meta)
+    return True, None
+
+
+def _calendars_by_office_codes(office_codes) -> set[str]:
+    """指定された営業所コードに紐付くカレンダーIDの集合。"""
+    if not office_codes:
+        return set()
+    codes = {str(c).strip() for c in office_codes if str(c).strip()}
+    if not codes:
+        return set()
+    meta = load_calendar_meta()
+    result = set()
+    for cal_id, info in meta.items():
+        if not isinstance(info, dict):
+            continue
+        code = info.get("office_code")
+        if isinstance(code, str) and code.strip() in codes:
+            result.add(cal_id)
+    return result
+
+
 def get_user_calendars(user_id):
-    """ユーザーがアクセス可能なカレンダーIDリストを取得"""
+    """ユーザーがアクセス可能なカレンダーIDリストを取得。
+    「個別付与」＋「ユーザーの営業所コードに一致するカレンダー」の和集合を返す。
+    DSTT管理者は全カレンダーにアクセス可能。"""
+    meta = load_calendar_meta()
+    if is_admin(user_id):
+        return list(meta.keys())
+
     permissions = load_permissions()
-    return permissions.get('user_calendars', {}).get(user_id, [])
+    result = set(permissions.get('user_calendars', {}).get(user_id, []))
+
+    try:
+        from flask_login import current_user as _cu
+        from app.access_control import user_office_codes as _codes
+        if getattr(_cu, 'is_authenticated', False) and getattr(_cu, 'username', None) == user_id:
+            result |= _calendars_by_office_codes(_codes(_cu))
+    except Exception:
+        pass
+
+    return sorted(result)
 
 def validate_calendar_id(calendar_id):
     """カレンダーIDのバリデーション"""
@@ -825,11 +893,16 @@ def create_calendar():
         return jsonify({"error": "このカレンダーIDは既に存在します"}), 400
     
     # メタ情報を保存
-    meta[calendar_id] = {
+    office_code_raw = data.get('office_code')
+    office_code = str(office_code_raw).strip() if isinstance(office_code_raw, str) else None
+    meta_entry = {
         "created_by": user_id,
         "created_at": datetime.now().isoformat(),
-        "name": data.get('name', calendar_id)
+        "name": data.get('name', calendar_id),
     }
+    if office_code:
+        meta_entry["office_code"] = office_code
+    meta[calendar_id] = meta_entry
     save_calendar_meta(meta)
     
     # 作成者に権限を付与
