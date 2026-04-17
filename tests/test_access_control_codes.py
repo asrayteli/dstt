@@ -197,3 +197,51 @@ def test_branch_code_and_office_code_persistence(app_ctx):
         reread_o = AccessOffice.query.filter_by(code="U01").first()
         assert reread_o is not None
         assert reread_o.name == "梅田営業所"
+
+
+def test_branch_only_user_inherits_all_offices_under_branch(app_ctx):
+    from app.models import db, AccessBranch, AccessOffice
+    from app.access_control import user_office_codes, user_can_access_office_code
+
+    with app_ctx.app_context():
+        b = AccessBranch(name="東京支店", code="T01")
+        other_b = AccessBranch(name="大阪支店", code="O01")
+        db.session.add_all([b, other_b])
+        db.session.flush()
+
+        o1 = AccessOffice(branch_id=b.id, name="新宿営業所", code="S01")
+        o2 = AccessOffice(branch_id=b.id, name="渋谷営業所", code="S02")
+        outside = AccessOffice(branch_id=other_b.id, name="梅田営業所", code="U01")
+        db.session.add_all([o1, o2, outside])
+        db.session.flush()
+
+        branch_user = _mk_user(username="bm", branch_id=b.id)
+        db.session.add(branch_user)
+        db.session.commit()
+
+        codes = user_office_codes(branch_user)
+        assert codes == {"S01", "S02"}
+        assert user_can_access_office_code("S01", branch_user)
+        assert user_can_access_office_code("S02", branch_user)
+        assert not user_can_access_office_code("U01", branch_user)
+
+
+def test_user_with_office_does_not_auto_inherit_branch_offices(app_ctx):
+    from app.models import db, AccessBranch, AccessOffice
+    from app.access_control import user_office_codes
+
+    with app_ctx.app_context():
+        b = AccessBranch(name="東京支店", code="T01")
+        db.session.add(b)
+        db.session.flush()
+        o1 = AccessOffice(branch_id=b.id, name="新宿営業所", code="S01")
+        o2 = AccessOffice(branch_id=b.id, name="渋谷営業所", code="S02")
+        db.session.add_all([o1, o2])
+        db.session.flush()
+
+        # branch + 主営業所 = 主営業所のみ（自動展開しない）
+        u = _mk_user(username="staff", branch_id=b.id, office_id=o1.id)
+        db.session.add(u)
+        db.session.commit()
+
+        assert user_office_codes(u) == {"S01"}
