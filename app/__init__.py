@@ -150,7 +150,8 @@ def create_app():
         "pluslist": "pluslist",
         "siteplus": "siteplus",
         "shiftersync": "shiftersync",
-        "cloudshift": "cloudshift",
+        # CloudShiftはShifterSyncのサブ機能なので、ShifterSync権限で判定する
+        "cloudshift": "shiftersync",
         "subject_analysis_tool": "subject_analysis_tool",
     }
     _EXEMPT_PATH_PREFIXES = (

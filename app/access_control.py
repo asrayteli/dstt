@@ -35,8 +35,7 @@ TOOL_ACCESS_CATEGORIES: dict[str, str] = {
     "leave_mgr": "sensitive",            # 有休共有ツール
     "pluslist": "sensitive",             # 社員名簿PLUS
     "siteplus": "sensitive",             # 現場リストPLUS
-    "shiftersync": "sensitive",          # ShifterSync（社員名簿/現場リストと連携）
-    "cloudshift": "sensitive",           # CloudShift（有休共有と連携）
+    "shiftersync": "sensitive",          # ShifterSync（社員名簿/現場リストと連携、CloudShiftも包含）
     "subject_analysis_tool": "sensitive",  # 科目別分析ツール（現場リストPLUSを利用）
 
     # 以下は公開（ログインで誰でも利用可）
