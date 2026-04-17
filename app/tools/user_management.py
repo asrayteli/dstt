@@ -9,6 +9,9 @@ from app.models import (
     AccessBranch,
     AccessOffice,
     AccessDepartment,
+    GroupToolPermission,
+    Site,
+    UserAccessibleOffice,
     UserToolPermission,
 )
 from app.access_control import (
@@ -43,6 +46,11 @@ def generate_random_password(length=12):
 
 
 def _serialize_user(user: User) -> dict:
+    extra_offices = (
+        UserAccessibleOffice.query.filter_by(user_id=user.id).all()
+        if user.id is not None
+        else []
+    )
     return {
         "id": user.id,
         "username": user.username,
@@ -53,8 +61,11 @@ def _serialize_user(user: User) -> dict:
         "office_id": user.office_id,
         "department_id": user.department_id,
         "branch_name": user.branch.name if user.branch else None,
+        "branch_code": user.branch.code if user.branch else None,
         "office_name": user.user_office.name if user.user_office else None,
+        "office_code": user.user_office.code if user.user_office else None,
         "department_name": user.department.name if user.department else None,
+        "extra_office_ids": [row.office_id for row in extra_offices],
         "tool_keys": [p.tool_key for p in user.tool_permissions],
     }
 
@@ -250,6 +261,83 @@ def update_user_profile(user_id):
         return jsonify({"error": f"更新に失敗しました: {str(e)}"}), 500
 
 
+@user_management_bp.route("/api/users/<int:user_id>/offices", methods=["GET"])
+@login_required
+def get_user_extra_offices(user_id):
+    """ユーザーの追加営業所アクセス（主営業所以外）を取得"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "ユーザーが見つかりません"}), 404
+
+    rows = UserAccessibleOffice.query.filter_by(user_id=user_id).all()
+    return jsonify({
+        "user_id": user_id,
+        "office_ids": [r.office_id for r in rows],
+    })
+
+
+@user_management_bp.route("/api/users/<int:user_id>/offices", methods=["PUT"])
+@login_required
+def update_user_extra_offices(user_id):
+    """ユーザーの追加営業所アクセスを一括更新（主営業所は除いたリスト）"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "ユーザーが見つかりません"}), 404
+
+    data = request.json or {}
+    raw_ids = data.get("office_ids")
+    if not isinstance(raw_ids, list):
+        return jsonify({"error": "office_idsはリストで指定してください"}), 400
+
+    desired_ids: set[int] = set()
+    for v in raw_ids:
+        try:
+            desired_ids.add(int(v))
+        except (TypeError, ValueError):
+            return jsonify({"error": f"不正なoffice_id: {v}"}), 400
+
+    # 主営業所はここから除外する（重複防止）
+    if user.office_id is not None:
+        desired_ids.discard(int(user.office_id))
+
+    # 存在確認
+    if desired_ids:
+        found = {
+            o.id for o in AccessOffice.query.filter(AccessOffice.id.in_(desired_ids)).all()
+        }
+        missing = desired_ids - found
+        if missing:
+            return jsonify({"error": f"存在しない営業所ID: {sorted(missing)}"}), 400
+
+    existing_rows = UserAccessibleOffice.query.filter_by(user_id=user_id).all()
+    existing = {row.office_id: row for row in existing_rows}
+    to_add = desired_ids - set(existing.keys())
+    to_remove = set(existing.keys()) - desired_ids
+
+    try:
+        for oid in to_add:
+            db.session.add(UserAccessibleOffice(user_id=user_id, office_id=oid))
+        for oid in to_remove:
+            db.session.delete(existing[oid])
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"更新に失敗しました: {str(e)}"}), 500
+
+    rows = UserAccessibleOffice.query.filter_by(user_id=user_id).all()
+    return jsonify({
+        "success": True,
+        "user_id": user_id,
+        "office_ids": [r.office_id for r in rows],
+    })
+
+
 @user_management_bp.route("/api/users/<int:user_id>/tools", methods=["GET"])
 @login_required
 def get_user_tools(user_id):
@@ -325,6 +413,13 @@ def get_organization():
     })
 
 
+def _normalize_code(value) -> str | None:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s if s else None
+
+
 @user_management_bp.route("/api/branches", methods=["POST"])
 @login_required
 def create_branch():
@@ -333,12 +428,15 @@ def create_branch():
 
     data = request.json or {}
     name = str(data.get("name", "")).strip()
+    code = _normalize_code(data.get("code"))
     if not name:
         return jsonify({"error": "支店名は必須です"}), 400
     if AccessBranch.query.filter_by(name=name).first():
         return jsonify({"error": "同名の支店が既に存在します"}), 400
+    if code and AccessBranch.query.filter_by(code=code).first():
+        return jsonify({"error": "同コードの支店が既に存在します"}), 400
 
-    branch = AccessBranch(name=name)
+    branch = AccessBranch(name=name, code=code)
     db.session.add(branch)
     db.session.commit()
     return jsonify({"success": True, "branch": branch.to_dict(include_children=True)})
@@ -365,6 +463,17 @@ def update_branch(branch_id):
     ).first()
     if dup:
         return jsonify({"error": "同名の支店が既に存在します"}), 400
+
+    if "code" in data:
+        code = _normalize_code(data.get("code"))
+        if code:
+            dup_code = AccessBranch.query.filter(
+                AccessBranch.code == code,
+                AccessBranch.id != branch_id,
+            ).first()
+            if dup_code:
+                return jsonify({"error": "同コードの支店が既に存在します"}), 400
+        branch.code = code
 
     branch.name = name
     db.session.commit()
@@ -398,6 +507,7 @@ def create_office():
 
     data = request.json or {}
     name = str(data.get("name", "")).strip()
+    code = _normalize_code(data.get("code"))
     branch_id = data.get("branch_id")
     if not name or not branch_id:
         return jsonify({"error": "支店と営業所名は必須です"}), 400
@@ -407,8 +517,10 @@ def create_office():
         return jsonify({"error": "支店が見つかりません"}), 404
     if AccessOffice.query.filter_by(branch_id=branch_id, name=name).first():
         return jsonify({"error": "同支店内に同名の営業所があります"}), 400
+    if code and AccessOffice.query.filter_by(code=code).first():
+        return jsonify({"error": "同コードの営業所が既に存在します"}), 400
 
-    office = AccessOffice(branch_id=branch_id, name=name)
+    office = AccessOffice(branch_id=branch_id, name=name, code=code)
     db.session.add(office)
     db.session.commit()
     return jsonify({"success": True, "office": office.to_dict(include_children=True)})
@@ -436,6 +548,17 @@ def update_office(office_id):
     ).first()
     if dup:
         return jsonify({"error": "同支店内に同名の営業所があります"}), 400
+
+    if "code" in data:
+        code = _normalize_code(data.get("code"))
+        if code:
+            dup_code = AccessOffice.query.filter(
+                AccessOffice.code == code,
+                AccessOffice.id != office_id,
+            ).first()
+            if dup_code:
+                return jsonify({"error": "同コードの営業所が既に存在します"}), 400
+        office.code = code
 
     office.name = name
     db.session.commit()
@@ -550,6 +673,235 @@ def get_tools_catalog():
             "category": TOOL_ACCESS_CATEGORIES.get(key, "public"),
         })
     return jsonify({"tools": items})
+
+
+# ============================================================
+# グループツール権限（支店/営業所/担当スコープの一括付与）
+# ============================================================
+
+
+def _coerce_optional_int(value):
+    if value in (None, "", "null", "None"):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _validate_group_scope(branch_id, office_id, department_id):
+    """グループルールの支店/営業所/担当の整合性を確認。"""
+    if branch_id is None and office_id is None and department_id is None:
+        return "支店・営業所・担当のいずれか1つ以上を指定してください"
+
+    if office_id is not None:
+        office = AccessOffice.query.get(office_id)
+        if not office:
+            return "指定された営業所は存在しません"
+        if branch_id is not None and office.branch_id != branch_id:
+            return "営業所と支店の組み合わせが不正です"
+
+    if department_id is not None:
+        department = AccessDepartment.query.get(department_id)
+        if not department:
+            return "指定された担当は存在しません"
+        if office_id is not None and department.office_id != office_id:
+            return "担当と営業所の組み合わせが不正です"
+        if branch_id is not None and department.office.branch_id != branch_id:
+            return "担当と支店の組み合わせが不正です"
+    return None
+
+
+@user_management_bp.route("/api/group-tool-permissions", methods=["GET"])
+@login_required
+def list_group_tool_permissions():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    rows = GroupToolPermission.query.order_by(GroupToolPermission.tool_key).all()
+    return jsonify({"permissions": [r.to_dict() for r in rows]})
+
+
+@user_management_bp.route("/api/group-tool-permissions", methods=["POST"])
+@login_required
+def create_group_tool_permission():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    data = request.json or {}
+    tool_key = str(data.get("tool_key", "")).strip()
+    if not tool_key:
+        return jsonify({"error": "tool_keyは必須です"}), 400
+    sensitive_keys = {k for k, c in TOOL_ACCESS_CATEGORIES.items() if c == "sensitive"}
+    if tool_key not in sensitive_keys:
+        return jsonify({"error": f"{tool_key} はグループ付与対象のツールではありません"}), 400
+
+    branch_id = _coerce_optional_int(data.get("branch_id"))
+    office_id = _coerce_optional_int(data.get("office_id"))
+    department_id = _coerce_optional_int(data.get("department_id"))
+
+    err = _validate_group_scope(branch_id, office_id, department_id)
+    if err:
+        return jsonify({"error": err}), 400
+
+    dup = GroupToolPermission.query.filter_by(
+        tool_key=tool_key,
+        branch_id=branch_id,
+        office_id=office_id,
+        department_id=department_id,
+    ).first()
+    if dup:
+        return jsonify({"error": "同じスコープの付与が既に存在します"}), 400
+
+    row = GroupToolPermission(
+        tool_key=tool_key,
+        branch_id=branch_id,
+        office_id=office_id,
+        department_id=department_id,
+        granted_by=current_user.username,
+    )
+    db.session.add(row)
+    db.session.commit()
+    return jsonify({"success": True, "permission": row.to_dict()})
+
+
+@user_management_bp.route("/api/group-tool-permissions/<int:permission_id>", methods=["DELETE"])
+@login_required
+def delete_group_tool_permission(permission_id):
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    row = GroupToolPermission.query.get(permission_id)
+    if not row:
+        return jsonify({"error": "付与が見つかりません"}), 404
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({"success": True})
+
+
+# ============================================================
+# siteplus 管理（現場 ↔ 営業所コード）
+# ============================================================
+
+
+@user_management_bp.route("/api/siteplus/sites", methods=["GET"])
+@login_required
+def list_siteplus_sites_for_admin():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    sites = Site.query.order_by(Site.site_id).all()
+    return jsonify({
+        "sites": [
+            {
+                "id": s.id,
+                "site_id": s.site_id,
+                "site_name": s.site_name,
+                "office_code": s.office_code,
+                "is_active": s.is_active,
+            }
+            for s in sites
+        ]
+    })
+
+
+@user_management_bp.route("/api/siteplus/sites/<int:site_row_id>/office-code", methods=["PUT"])
+@login_required
+def update_siteplus_site_office_code(site_row_id):
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    site = Site.query.get(site_row_id)
+    if not site:
+        return jsonify({"error": "現場が見つかりません"}), 404
+
+    data = request.json or {}
+    site.office_code = _normalize_code(data.get("office_code"))
+    db.session.commit()
+    return jsonify({
+        "success": True,
+        "site": {
+            "id": site.id,
+            "site_id": site.site_id,
+            "office_code": site.office_code,
+        },
+    })
+
+
+@user_management_bp.route("/api/siteplus/sites/office-code/bulk", methods=["PUT"])
+@login_required
+def bulk_update_siteplus_office_codes():
+    """一括更新: [{"id": 1, "office_code": "112010"}, ...]"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    data = request.json or {}
+    items = data.get("items")
+    if not isinstance(items, list):
+        return jsonify({"error": "itemsはリストで指定してください"}), 400
+
+    updated = 0
+    missing: list = []
+    try:
+        for entry in items:
+            sid = _coerce_optional_int(entry.get("id")) if isinstance(entry, dict) else None
+            if sid is None:
+                continue
+            site = Site.query.get(sid)
+            if not site:
+                missing.append(sid)
+                continue
+            site.office_code = _normalize_code(entry.get("office_code"))
+            updated += 1
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"一括更新に失敗しました: {str(e)}"}), 500
+
+    return jsonify({"success": True, "updated": updated, "missing": missing})
+
+
+# ============================================================
+# leave_mgr 管理（カレンダー ↔ 営業所コード）
+# ============================================================
+
+
+@user_management_bp.route("/api/leave-mgr/calendars", methods=["GET"])
+@login_required
+def list_leave_mgr_calendars_for_admin():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    from app.tools.leave_mgr import (
+        load_calendar_meta,
+        get_calendar_office_code,
+    )
+    meta = load_calendar_meta() or {}
+    result = []
+    for cal_id, info in meta.items():
+        result.append({
+            "calendar_id": cal_id,
+            "name": info.get("name") if isinstance(info, dict) else None,
+            "office_code": get_calendar_office_code(cal_id),
+        })
+    result.sort(key=lambda x: x["calendar_id"])
+    return jsonify({"calendars": result})
+
+
+@user_management_bp.route("/api/leave-mgr/calendars/<string:calendar_id>/office-code", methods=["PUT"])
+@login_required
+def update_leave_mgr_calendar_office_code(calendar_id):
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    from app.tools.leave_mgr import set_calendar_office_code
+
+    data = request.json or {}
+    code = _normalize_code(data.get("office_code"))
+    ok, err = set_calendar_office_code(calendar_id, code)
+    if not ok:
+        return jsonify({"error": err or "更新に失敗しました"}), 400
+    return jsonify({"success": True, "calendar_id": calendar_id, "office_code": code})
 
 
 # ============================================================

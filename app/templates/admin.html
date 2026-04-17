@@ -11,8 +11,11 @@
   <div class="border-b border-gray-200 mb-6">
     <nav class="flex gap-2 flex-wrap">
       <button data-tab="users" class="admin-tab px-4 py-2 border-b-2 border-red-600 text-red-700 font-medium">👤 ユーザー管理</button>
-      <button data-tab="permissions" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🔐 ツールアクセス権</button>
+      <button data-tab="permissions" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🔐 ツールアクセス権（個人）</button>
+      <button data-tab="group-perms" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🏷️ グループ付与</button>
       <button data-tab="organization" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🏢 支店・営業所・担当</button>
+      <button data-tab="siteplus-codes" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🏗️ 現場の営業所コード</button>
+      <button data-tab="leavemgr-codes" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">⛵ 有休カレンダー</button>
       <button data-tab="announcements" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">📣 お知らせ</button>
     </nav>
   </div>
@@ -80,6 +83,98 @@
       </div>
 
       <div id="org-tree" class="space-y-4"></div>
+    </div>
+  </section>
+
+  <!-- ===== グループ付与 ===== -->
+  <section id="tab-group-perms" class="admin-section hidden">
+    <div class="bg-white rounded-xl shadow p-6">
+      <h2 class="text-xl font-semibold mb-2">グループ単位でのツールアクセス権付与</h2>
+      <p class="text-sm text-gray-600 mb-4">
+        支店・営業所・担当の組み合わせでツールアクセスを一括許可できます。<br>
+        いずれも未指定はそのスコープを「任意」とみなします。少なくとも1つはスコープを指定してください。<br>
+        例：「〇〇支店」だけ指定 → その支店に所属するユーザー全員に対象ツールを許可。
+      </p>
+
+      <div class="border rounded p-4 mb-6 bg-gray-50">
+        <h3 class="font-medium mb-3">➕ 新しい付与を追加</h3>
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
+          <select id="gp-tool" class="border rounded px-2 py-2 text-sm"></select>
+          <select id="gp-branch" class="border rounded px-2 py-2 text-sm"></select>
+          <select id="gp-office" class="border rounded px-2 py-2 text-sm"></select>
+          <select id="gp-dept" class="border rounded px-2 py-2 text-sm"></select>
+        </div>
+        <div class="mt-3 text-right">
+          <button id="btn-gp-add" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">追加</button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded border">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="p-2 text-left">ツール</th>
+              <th class="p-2 text-left">支店</th>
+              <th class="p-2 text-left">営業所</th>
+              <th class="p-2 text-left">担当</th>
+              <th class="p-2 text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="gp-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== siteplus 現場の営業所コード ===== -->
+  <section id="tab-siteplus-codes" class="admin-section hidden">
+    <div class="bg-white rounded-xl shadow p-6">
+      <h2 class="text-xl font-semibold mb-2">現場リストPLUS：現場ごとの営業所コード</h2>
+      <p class="text-sm text-gray-600 mb-4">
+        各現場に営業所コードを割り当てます。ユーザーは自分の営業所コードに一致する現場のみ閲覧・編集できます。
+        一括保存は右下のボタンを押してください。
+      </p>
+
+      <div class="flex items-center gap-2 mb-3">
+        <input id="sp-filter" placeholder="現場ID・名称で検索" class="border rounded px-3 py-2 text-sm flex-1">
+        <button id="btn-sp-bulk" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">💾 一括保存</button>
+      </div>
+
+      <div class="max-h-[60vh] overflow-auto border rounded">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 sticky top-0">
+            <tr>
+              <th class="p-2 text-left">契約番号</th>
+              <th class="p-2 text-left">現場名</th>
+              <th class="p-2 text-left">営業所コード</th>
+            </tr>
+          </thead>
+          <tbody id="sp-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== leave_mgr カレンダーの営業所コード ===== -->
+  <section id="tab-leavemgr-codes" class="admin-section hidden">
+    <div class="bg-white rounded-xl shadow p-6">
+      <h2 class="text-xl font-semibold mb-2">有休共有ツール：カレンダーと営業所コード</h2>
+      <p class="text-sm text-gray-600 mb-4">
+        各カレンダーに営業所コードを紐付けると、その営業所コードを持つユーザーが自動的に閲覧・編集できるようになります。
+      </p>
+      <div class="max-h-[60vh] overflow-auto border rounded">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 sticky top-0">
+            <tr>
+              <th class="p-2 text-left">カレンダーID</th>
+              <th class="p-2 text-left">名称</th>
+              <th class="p-2 text-left">営業所コード</th>
+              <th class="p-2 text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="lm-tbody"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
@@ -160,6 +255,11 @@
         <label class="block text-sm font-medium mb-1">担当</label>
         <select name="department_id" class="w-full border rounded px-3 py-2"></select>
       </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">追加でアクセスを許可する営業所（兼務等）</label>
+        <div id="edit-extra-offices" class="border rounded p-2 max-h-40 overflow-y-auto text-sm space-y-1"></div>
+        <p class="text-xs text-gray-500 mt-1">選択した営業所のデータにもアクセスできます。主営業所は自動的に含まれるので除外してください。</p>
+      </div>
       <div class="flex gap-2 pt-2">
         <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex-1">保存</button>
         <button type="button" id="btn-cancel-edit-user" class="bg-gray-400 text-white px-4 py-2 rounded">キャンセル</button>
@@ -227,6 +327,9 @@ $$('.admin-tab').forEach(btn => btn.addEventListener('click', () => {
   if (tab === 'users') loadUsers();
   if (tab === 'permissions') loadPermissions();
   if (tab === 'organization') loadOrganization();
+  if (tab === 'group-perms') loadGroupPerms();
+  if (tab === 'siteplus-codes') loadSiteplusCodes();
+  if (tab === 'leavemgr-codes') loadLeaveMgrCodes();
 }));
 
 // ===== Users =====
@@ -247,8 +350,8 @@ function renderUsers() {
       <td class="p-3 font-mono">${u.username}${u.is_legacy_admin ? '<span class="ml-1 text-xs text-red-600">[初期管理者]</span>' : ''}</td>
       <td class="p-3">${escape(u.name)}</td>
       <td class="p-3">${u.is_admin ? '<span class="text-red-600 font-medium">✔</span>' : '-'}</td>
-      <td class="p-3">${escape(u.branch_name || '-')}</td>
-      <td class="p-3">${escape(u.office_name || '-')}</td>
+      <td class="p-3">${escape(u.branch_name || '-')}${u.branch_code ? ' <span class="text-xs font-mono text-blue-700">[' + escape(u.branch_code) + ']</span>' : ''}</td>
+      <td class="p-3">${escape(u.office_name || '-')}${u.office_code ? ' <span class="text-xs font-mono text-blue-700">[' + escape(u.office_code) + ']</span>' : ''}</td>
       <td class="p-3">${escape(u.department_name || '-')}</td>
       <td class="p-3 text-right">
         <button onclick="openEditUser(${u.id})" class="bg-blue-500 text-white px-2 py-1 rounded text-xs">編集</button>
@@ -307,6 +410,7 @@ async function openEditUser(userId) {
   populateBranchSelect(f.branch_id, user.branch_id);
   populateOfficeSelect(f.office_id, user.branch_id, user.office_id);
   populateDepartmentSelect(f.department_id, user.office_id, user.department_id);
+  populateExtraOffices(user.extra_office_ids || [], user.office_id);
 
   f.branch_id.onchange = () => {
     populateOfficeSelect(f.office_id, +f.branch_id.value || null, null);
@@ -314,9 +418,36 @@ async function openEditUser(userId) {
   };
   f.office_id.onchange = () => {
     populateDepartmentSelect(f.department_id, +f.office_id.value || null, null);
+    populateExtraOffices(getCheckedExtraOffices(), +f.office_id.value || null);
   };
 
   $('#modal-edit-user').classList.remove('hidden');
+}
+
+function getCheckedExtraOffices() {
+  return $$('#edit-extra-offices input[type=checkbox]:checked').map(cb => +cb.value);
+}
+
+function populateExtraOffices(selectedIds, primaryOfficeId) {
+  const sel = new Set((selectedIds || []).map(v => +v));
+  if (primaryOfficeId) sel.delete(+primaryOfficeId);
+  const rows = [];
+  for (const b of state.branches) {
+    for (const o of b.offices) {
+      if (primaryOfficeId && +primaryOfficeId === +o.id) continue;
+      const checked = sel.has(+o.id) ? 'checked' : '';
+      const codeLabel = o.code ? ` <span class="text-xs text-gray-500">[${escape(o.code)}]</span>` : '';
+      rows.push(`
+        <label class="flex items-center gap-2">
+          <input type="checkbox" value="${o.id}" ${checked}>
+          <span>${escape(b.name)} / ${escape(o.name)}${codeLabel}</span>
+        </label>
+      `);
+    }
+  }
+  $('#edit-extra-offices').innerHTML = rows.length
+    ? rows.join('')
+    : '<p class="text-xs text-gray-500">営業所が登録されていません。</p>';
 }
 $('#btn-cancel-edit-user').addEventListener('click', () => $('#modal-edit-user').classList.add('hidden'));
 
@@ -343,8 +474,9 @@ function populateDepartmentSelect(el, officeId, selectedId) {
 $('#form-edit-user').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
+  const userId = f.user_id.value;
   try {
-    await api(`/tools/user_management/api/users/${f.user_id.value}/profile`, {
+    await api(`/tools/user_management/api/users/${userId}/profile`, {
       method: 'PUT',
       body: {
         name: f.name.value,
@@ -353,6 +485,10 @@ $('#form-edit-user').addEventListener('submit', async (e) => {
         office_id: f.office_id.value || null,
         department_id: f.department_id.value || null,
       }
+    });
+    await api(`/tools/user_management/api/users/${userId}/offices`, {
+      method: 'PUT',
+      body: { office_ids: getCheckedExtraOffices() }
     });
     $('#modal-edit-user').classList.add('hidden');
     loadUsers();
@@ -473,10 +609,11 @@ function renderOrganization() {
       <div class="flex items-center justify-between p-3 bg-gray-50 border-b">
         <div class="flex items-center gap-3">
           <strong>🏢 ${escape(b.name)}</strong>
+          <span class="text-xs font-mono ${b.code ? 'text-blue-700' : 'text-gray-400'}">${b.code ? '[' + escape(b.code) + ']' : '（コード未設定）'}</span>
           <span class="text-xs text-gray-500">営業所 ${b.offices.length}</span>
         </div>
         <div class="flex gap-2">
-          <button onclick="renameBranch(${b.id})" class="text-blue-600 text-sm">名称変更</button>
+          <button onclick="editBranch(${b.id})" class="text-blue-600 text-sm">編集</button>
           <button onclick="deleteBranch(${b.id})" class="text-red-600 text-sm">削除</button>
         </div>
       </div>
@@ -484,9 +621,12 @@ function renderOrganization() {
         ${b.offices.map(o => `
           <div class="border rounded p-2 bg-gray-50">
             <div class="flex items-center justify-between">
-              <div>🏪 ${escape(o.name)}</div>
+              <div>
+                🏪 ${escape(o.name)}
+                <span class="ml-2 text-xs font-mono ${o.code ? 'text-blue-700' : 'text-gray-400'}">${o.code ? '[' + escape(o.code) + ']' : '（コード未設定）'}</span>
+              </div>
               <div class="flex gap-2">
-                <button onclick="renameOffice(${o.id})" class="text-blue-600 text-xs">名称変更</button>
+                <button onclick="editOffice(${o.id})" class="text-blue-600 text-xs">編集</button>
                 <button onclick="deleteOffice(${o.id})" class="text-red-600 text-xs">削除</button>
               </div>
             </div>
@@ -519,19 +659,25 @@ function renderOrganization() {
 $('#btn-add-branch').addEventListener('click', async () => {
   const name = $('#new-branch-name').value.trim();
   if (!name) return alert('支店名を入力してください。');
+  const code = (prompt('支店コード（任意。空欄可）', '') || '').trim() || null;
   try {
-    await api('/tools/user_management/api/branches', { method: 'POST', body: { name } });
+    await api('/tools/user_management/api/branches', { method: 'POST', body: { name, code } });
     $('#new-branch-name').value = '';
     loadOrganization();
   } catch (err) { alert('エラー: ' + err.message); }
 });
 
-async function renameBranch(id) {
+async function editBranch(id) {
   const cur = state.branches.find(b => b.id === id);
-  const name = prompt('新しい支店名', cur?.name || '');
+  const name = prompt('支店名', cur?.name || '');
   if (!name) return;
+  const code = prompt('支店コード（空欄で未設定）', cur?.code || '');
+  if (code === null) return;
   try {
-    await api(`/tools/user_management/api/branches/${id}`, { method: 'PUT', body: { name } });
+    await api(`/tools/user_management/api/branches/${id}`, {
+      method: 'PUT',
+      body: { name, code: code.trim() || null }
+    });
     loadOrganization();
   } catch (err) { alert('エラー: ' + err.message); }
 }
@@ -547,17 +693,28 @@ async function addOffice(branchId) {
   const input = document.getElementById(`office-input-${branchId}`);
   const name = input.value.trim();
   if (!name) return;
+  const code = (prompt('営業所コード（任意。空欄可）', '') || '').trim() || null;
   try {
-    await api('/tools/user_management/api/offices', { method: 'POST', body: { branch_id: branchId, name } });
+    await api('/tools/user_management/api/offices', { method: 'POST', body: { branch_id: branchId, name, code } });
     input.value = '';
     loadOrganization();
   } catch (err) { alert('エラー: ' + err.message); }
 }
-async function renameOffice(id) {
-  const name = prompt('新しい営業所名');
+async function editOffice(id) {
+  let cur = null;
+  for (const b of state.branches) {
+    const found = b.offices.find(o => o.id === id);
+    if (found) { cur = found; break; }
+  }
+  const name = prompt('営業所名', cur?.name || '');
   if (!name) return;
+  const code = prompt('営業所コード（空欄で未設定）', cur?.code || '');
+  if (code === null) return;
   try {
-    await api(`/tools/user_management/api/offices/${id}`, { method: 'PUT', body: { name } });
+    await api(`/tools/user_management/api/offices/${id}`, {
+      method: 'PUT',
+      body: { name, code: code.trim() || null }
+    });
     loadOrganization();
   } catch (err) { alert('エラー: ' + err.message); }
 }
@@ -592,6 +749,182 @@ async function deleteDepartment(id) {
   try {
     await api(`/tools/user_management/api/departments/${id}`, { method: 'DELETE' });
     loadOrganization();
+  } catch (err) { alert('エラー: ' + err.message); }
+}
+
+// ===== Group permissions =====
+const groupState = { tools: [], branches: [], rules: [] };
+
+async function loadGroupPerms() {
+  const [toolsResp, orgResp, rulesResp] = await Promise.all([
+    api('/tools/user_management/api/tools'),
+    api('/tools/user_management/api/organization'),
+    api('/tools/user_management/api/group-tool-permissions'),
+  ]);
+  groupState.tools = toolsResp.tools.filter(t => t.category === 'sensitive');
+  groupState.branches = orgResp.branches;
+  groupState.rules = rulesResp.permissions;
+
+  $('#gp-tool').innerHTML = '<option value="">ツール選択</option>' + groupState.tools.map(t =>
+    `<option value="${t.key}">${escape(t.label)}</option>`).join('');
+  $('#gp-branch').innerHTML = '<option value="">支店（任意）</option>' + groupState.branches.map(b =>
+    `<option value="${b.id}">${escape(b.name)}</option>`).join('');
+  $('#gp-branch').onchange = updateGpOfficeSelect;
+  $('#gp-office').onchange = updateGpDeptSelect;
+  updateGpOfficeSelect();
+  renderGroupRules();
+}
+
+function updateGpOfficeSelect() {
+  const branchId = parseInt($('#gp-branch').value);
+  const branch = groupState.branches.find(b => b.id === branchId);
+  const offices = branch ? branch.offices : [];
+  $('#gp-office').innerHTML = '<option value="">営業所（任意）</option>' + offices.map(o =>
+    `<option value="${o.id}">${escape(o.name)}</option>`).join('');
+  updateGpDeptSelect();
+}
+
+function updateGpDeptSelect() {
+  const officeId = parseInt($('#gp-office').value);
+  let depts = [];
+  for (const b of groupState.branches) {
+    const o = b.offices.find(o => o.id === officeId);
+    if (o) { depts = o.departments; break; }
+  }
+  $('#gp-dept').innerHTML = '<option value="">担当（任意）</option>' + depts.map(d =>
+    `<option value="${d.id}">${escape(d.name)}</option>`).join('');
+}
+
+function renderGroupRules() {
+  const tbody = $('#gp-tbody');
+  if (!groupState.rules.length) {
+    tbody.innerHTML = '<tr><td class="p-3 text-gray-500" colspan="5">付与はまだありません</td></tr>';
+    return;
+  }
+  tbody.innerHTML = groupState.rules.map(r => {
+    const tool = groupState.tools.find(t => t.key === r.tool_key);
+    return `
+      <tr class="border-t">
+        <td class="p-2">${escape(tool ? tool.label : r.tool_key)}</td>
+        <td class="p-2">${escape(r.branch_name || '（任意）')}</td>
+        <td class="p-2">${escape(r.office_name || '（任意）')}</td>
+        <td class="p-2">${escape(r.department_name || '（任意）')}</td>
+        <td class="p-2 text-right">
+          <button onclick="deleteGroupRule(${r.id})" class="bg-red-500 text-white px-2 py-1 rounded text-xs">削除</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+$('#btn-gp-add').addEventListener('click', async () => {
+  const tool = $('#gp-tool').value;
+  if (!tool) return alert('ツールを選択してください。');
+  const branch = $('#gp-branch').value || null;
+  const office = $('#gp-office').value || null;
+  const dept = $('#gp-dept').value || null;
+  if (!branch && !office && !dept) return alert('支店・営業所・担当のいずれか1つ以上を指定してください。');
+  try {
+    await api('/tools/user_management/api/group-tool-permissions', {
+      method: 'POST',
+      body: { tool_key: tool, branch_id: branch, office_id: office, department_id: dept }
+    });
+    loadGroupPerms();
+  } catch (err) { alert('エラー: ' + err.message); }
+});
+
+async function deleteGroupRule(id) {
+  if (!confirm('この付与を削除しますか？')) return;
+  try {
+    await api(`/tools/user_management/api/group-tool-permissions/${id}`, { method: 'DELETE' });
+    loadGroupPerms();
+  } catch (err) { alert('エラー: ' + err.message); }
+}
+
+// ===== Siteplus codes =====
+const spState = { sites: [], dirty: new Map() };
+
+async function loadSiteplusCodes() {
+  const { sites } = await api('/tools/user_management/api/siteplus/sites');
+  spState.sites = sites;
+  spState.dirty = new Map();
+  renderSiteplusCodes();
+}
+
+function renderSiteplusCodes() {
+  const q = ($('#sp-filter').value || '').trim().toLowerCase();
+  const rows = spState.sites.filter(s => {
+    if (!q) return true;
+    return String(s.site_id).toLowerCase().includes(q) || String(s.site_name).toLowerCase().includes(q);
+  });
+  $('#sp-tbody').innerHTML = rows.map(s => {
+    const val = spState.dirty.has(s.id) ? spState.dirty.get(s.id) : (s.office_code || '');
+    const dirty = spState.dirty.has(s.id) ? 'bg-yellow-50' : '';
+    return `
+      <tr class="border-t ${dirty}">
+        <td class="p-2 font-mono">${escape(s.site_id)}</td>
+        <td class="p-2">${escape(s.site_name)}</td>
+        <td class="p-2"><input data-sid="${s.id}" class="sp-code-input border rounded px-2 py-1 font-mono text-sm w-40" value="${escape(val)}"></td>
+      </tr>
+    `;
+  }).join('');
+  $$('.sp-code-input').forEach(inp => {
+    inp.addEventListener('input', (e) => {
+      const sid = parseInt(e.target.dataset.sid);
+      const site = spState.sites.find(s => s.id === sid);
+      if (!site) return;
+      const v = e.target.value.trim();
+      if ((site.office_code || '') === v) {
+        spState.dirty.delete(sid);
+      } else {
+        spState.dirty.set(sid, v);
+      }
+      e.target.closest('tr').classList.toggle('bg-yellow-50', spState.dirty.has(sid));
+    });
+  });
+}
+
+$('#sp-filter')?.addEventListener('input', renderSiteplusCodes);
+
+$('#btn-sp-bulk').addEventListener('click', async () => {
+  if (spState.dirty.size === 0) return alert('変更はありません。');
+  const items = Array.from(spState.dirty.entries()).map(([id, office_code]) => ({ id, office_code }));
+  try {
+    await api('/tools/user_management/api/siteplus/sites/office-code/bulk', {
+      method: 'PUT', body: { items }
+    });
+    alert(`${items.length}件を更新しました。`);
+    loadSiteplusCodes();
+  } catch (err) { alert('エラー: ' + err.message); }
+});
+
+// ===== Leave_mgr codes =====
+async function loadLeaveMgrCodes() {
+  const { calendars } = await api('/tools/user_management/api/leave-mgr/calendars');
+  $('#lm-tbody').innerHTML = calendars.length
+    ? calendars.map(c => `
+      <tr class="border-t">
+        <td class="p-2 font-mono">${escape(c.calendar_id)}</td>
+        <td class="p-2">${escape(c.name || '')}</td>
+        <td class="p-2"><input data-cid="${escape(c.calendar_id)}" class="lm-code-input border rounded px-2 py-1 font-mono text-sm w-40" value="${escape(c.office_code || '')}"></td>
+        <td class="p-2 text-right">
+          <button onclick="saveLeaveCalendarCode(this)" data-cid="${escape(c.calendar_id)}" class="bg-blue-500 text-white px-2 py-1 rounded text-xs">保存</button>
+        </td>
+      </tr>
+    `).join('')
+    : '<tr><td class="p-3 text-gray-500" colspan="4">カレンダーはまだありません</td></tr>';
+}
+
+async function saveLeaveCalendarCode(btn) {
+  const cid = btn.dataset.cid;
+  const row = btn.closest('tr');
+  const input = row.querySelector('.lm-code-input');
+  try {
+    await api(`/tools/user_management/api/leave-mgr/calendars/${encodeURIComponent(cid)}/office-code`, {
+      method: 'PUT',
+      body: { office_code: input.value.trim() || null }
+    });
+    alert('保存しました');
   } catch (err) { alert('エラー: ' + err.message); }
 }
 

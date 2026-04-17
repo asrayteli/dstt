@@ -43,6 +43,7 @@ class AccessBranch(db.Model):
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
+    code = db.Column(db.String(20), unique=True, nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     offices = db.relationship(
@@ -56,6 +57,7 @@ class AccessBranch(db.Model):
         data = {
             'id': self.id,
             'name': self.name,
+            'code': self.code,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
         if include_children:
@@ -73,6 +75,7 @@ class AccessOffice(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     branch_id = db.Column(db.Integer, db.ForeignKey('access_branches.id'), nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
+    code = db.Column(db.String(20), unique=True, nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     branch = db.relationship('AccessBranch', back_populates='offices')
@@ -88,6 +91,7 @@ class AccessOffice(db.Model):
             'id': self.id,
             'branch_id': self.branch_id,
             'name': self.name,
+            'code': self.code,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
         if include_children:
@@ -118,6 +122,22 @@ class AccessDepartment(db.Model):
         }
 
 
+class UserAccessibleOffice(db.Model):
+    """ユーザーが主営業所以外に追加でアクセスできる営業所の紐付け"""
+    __tablename__ = 'user_accessible_offices'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'office_id', name='uq_user_accessible_office'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    office_id = db.Column(db.Integer, db.ForeignKey('access_offices.id'), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('extra_offices', cascade='all, delete-orphan'))
+    office = db.relationship('AccessOffice')
+
+
 class UserToolPermission(db.Model):
     """個別ツールアクセス権付与"""
     __tablename__ = 'user_tool_permissions'
@@ -138,6 +158,46 @@ class UserToolPermission(db.Model):
             'id': self.id,
             'user_id': self.user_id,
             'tool_key': self.tool_key,
+            'granted_by': self.granted_by,
+            'granted_at': self.granted_at.isoformat() if self.granted_at else None,
+        }
+
+
+class GroupToolPermission(db.Model):
+    """支店/営業所/担当による一括ツールアクセス権付与。
+    branch_id, office_id, department_id のうちNULLは「任意」を意味する。
+    ユーザーは、自身の支店/営業所(複数含む)/担当が、設定されたスコープを
+    すべて満たす場合に、そのツールへのアクセスが許可される。"""
+    __tablename__ = 'group_tool_permissions'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'tool_key', 'branch_id', 'office_id', 'department_id',
+            name='uq_group_tool_permission',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    tool_key = db.Column(db.String(80), nullable=False, index=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey('access_branches.id'), nullable=True, index=True)
+    office_id = db.Column(db.Integer, db.ForeignKey('access_offices.id'), nullable=True, index=True)
+    department_id = db.Column(db.Integer, db.ForeignKey('access_departments.id'), nullable=True, index=True)
+    granted_by = db.Column(db.String(80), nullable=True)
+    granted_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    branch = db.relationship('AccessBranch')
+    office = db.relationship('AccessOffice')
+    department = db.relationship('AccessDepartment')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tool_key': self.tool_key,
+            'branch_id': self.branch_id,
+            'office_id': self.office_id,
+            'department_id': self.department_id,
+            'branch_name': self.branch.name if self.branch else None,
+            'office_name': self.office.name if self.office else None,
+            'department_name': self.department.name if self.department else None,
             'granted_by': self.granted_by,
             'granted_at': self.granted_at.isoformat() if self.granted_at else None,
         }
@@ -426,6 +486,7 @@ class Site(db.Model):
     site_manager_id = db.Column(db.String(20), nullable=False, index=True)
     site_register = db.Column(db.String(80), nullable=False, index=True)
     site_updater = db.Column(db.String(80), nullable=False, index=True)
+    office_code = db.Column(db.String(20), nullable=True, index=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -456,6 +517,7 @@ class Site(db.Model):
             'site_manager_name': self.manager_name(),
             'site_register': self.site_register,
             'site_updater': self.site_updater,
+            'office_code': self.office_code,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

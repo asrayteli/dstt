@@ -20,7 +20,15 @@ from typing import Iterable
 from flask import abort, jsonify, redirect, request, url_for
 from flask_login import current_user
 
-from .models import User, UserToolPermission, db
+from .models import (
+    AccessBranch,
+    AccessOffice,
+    GroupToolPermission,
+    User,
+    UserAccessibleOffice,
+    UserToolPermission,
+    db,
+)
 from .navigation import NAV_ITEMS
 
 
@@ -100,6 +108,103 @@ def _user_granted_tool_keys(user) -> set[str]:
     return {row.tool_key for row in rows}
 
 
+# ------------------------------------------------------------------
+# 所属（支店/営業所/担当）の解決
+# ------------------------------------------------------------------
+
+def user_office_ids(user=None) -> set[int]:
+    """ユーザーがアクセスできる営業所IDの集合（主営業所 + 追加付与）。"""
+    user = user if user is not None else current_user
+    if user is None or not getattr(user, "is_authenticated", False):
+        return set()
+    ids: set[int] = set()
+    if getattr(user, "office_id", None):
+        ids.add(int(user.office_id))
+    user_id = getattr(user, "id", None)
+    if user_id:
+        rows = UserAccessibleOffice.query.filter_by(user_id=user_id).all()
+        for row in rows:
+            if row.office_id is not None:
+                ids.add(int(row.office_id))
+    return ids
+
+
+def user_branch_ids(user=None) -> set[int]:
+    """ユーザーがアクセスできる支店IDの集合。
+    主支店 + アクセス可能な営業所から導出される支店。"""
+    user = user if user is not None else current_user
+    if user is None or not getattr(user, "is_authenticated", False):
+        return set()
+    ids: set[int] = set()
+    if getattr(user, "branch_id", None):
+        ids.add(int(user.branch_id))
+    office_ids = user_office_ids(user)
+    if office_ids:
+        rows = AccessOffice.query.filter(AccessOffice.id.in_(office_ids)).all()
+        for row in rows:
+            if row.branch_id is not None:
+                ids.add(int(row.branch_id))
+    return ids
+
+
+def user_department_ids(user=None) -> set[int]:
+    user = user if user is not None else current_user
+    if user is None or not getattr(user, "is_authenticated", False):
+        return set()
+    ids: set[int] = set()
+    if getattr(user, "department_id", None):
+        ids.add(int(user.department_id))
+    return ids
+
+
+def user_office_codes(user=None) -> set[str]:
+    """データフィルタ用。ユーザーがアクセスできる営業所の「コード」集合。
+    コード未設定の営業所は無視する。"""
+    office_ids = user_office_ids(user)
+    if not office_ids:
+        return set()
+    rows = AccessOffice.query.filter(AccessOffice.id.in_(office_ids)).all()
+    return {r.code for r in rows if r.code}
+
+
+def user_branch_codes(user=None) -> set[str]:
+    branch_ids = user_branch_ids(user)
+    if not branch_ids:
+        return set()
+    rows = AccessBranch.query.filter(AccessBranch.id.in_(branch_ids)).all()
+    return {r.code for r in rows if r.code}
+
+
+def _user_satisfies_group_rule(user, rule: GroupToolPermission) -> bool:
+    """グループ付与ルールがユーザーの所属範囲を満たすか判定。"""
+    branch_ids = user_branch_ids(user)
+    office_ids = user_office_ids(user)
+    dept_ids = user_department_ids(user)
+
+    if rule.branch_id is not None and int(rule.branch_id) not in branch_ids:
+        return False
+    if rule.office_id is not None and int(rule.office_id) not in office_ids:
+        return False
+    if rule.department_id is not None and int(rule.department_id) not in dept_ids:
+        return False
+    # 全てのスコープが未設定だと全ユーザーに許可になってしまうので、
+    # 少なくとも 1 つは設定されていることを要件とする。
+    if rule.branch_id is None and rule.office_id is None and rule.department_id is None:
+        return False
+    return True
+
+
+def _group_granted_tool_keys(user) -> set[str]:
+    if user is None or not getattr(user, "is_authenticated", False):
+        return set()
+    rules = GroupToolPermission.query.all()
+    keys: set[str] = set()
+    for rule in rules:
+        if _user_satisfies_group_rule(user, rule):
+            keys.add(rule.tool_key)
+    return keys
+
+
 def user_has_tool_access(tool_key: str, user=None) -> bool:
     user = user if user is not None else current_user
     if user is None or not getattr(user, "is_authenticated", False):
@@ -108,7 +213,11 @@ def user_has_tool_access(tool_key: str, user=None) -> bool:
         return True
     if not tool_requires_permission(tool_key):
         return True
-    return tool_key in _user_granted_tool_keys(user)
+    if tool_key in _user_granted_tool_keys(user):
+        return True
+    if tool_key in _group_granted_tool_keys(user):
+        return True
+    return False
 
 
 def get_accessible_nav_items(user=None) -> list[dict]:
@@ -118,7 +227,9 @@ def get_accessible_nav_items(user=None) -> list[dict]:
         return []
 
     admin = is_admin_user(user)
-    granted = _user_granted_tool_keys(user) if not admin else None
+    granted: set[str] | None = None
+    if not admin:
+        granted = set(_user_granted_tool_keys(user)) | set(_group_granted_tool_keys(user))
 
     visible: list[dict] = []
     for item in NAV_ITEMS:
@@ -132,6 +243,20 @@ def get_accessible_nav_items(user=None) -> list[dict]:
         if granted is not None and tool_key in granted:
             visible.append(item)
     return visible
+
+
+def user_can_access_office_code(office_code: str | None, user=None) -> bool:
+    """データに割り当てられた office_code に対するアクセス判定。
+    - 管理者は常に可。
+    - コード未設定（None/空）のデータは管理者のみ可（誤公開防止）。
+    - それ以外は、ユーザーのアクセス可能な営業所コード集合に含まれていれば可。"""
+    user = user if user is not None else current_user
+    if is_admin_user(user):
+        return True
+    code = (office_code or "").strip()
+    if not code:
+        return False
+    return code in user_office_codes(user)
 
 
 def _nav_tool_key(item: dict) -> str:

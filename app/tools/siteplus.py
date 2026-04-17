@@ -33,6 +33,7 @@ SITE_FIELD_LABELS = {
     "site_manager_last": "担当者(姓)",
     "site_manager_first": "担当者(名)",
     "site_manager_id": "担当者ID",
+    "office_code": "営業所コード",
     "is_active": "有効状態",
 }
 
@@ -413,6 +414,13 @@ def _site_payload_from_request(data: dict, *, existing: Site | None = None) -> d
     site_manager_id = _normalize_required_text(data.get("site_manager_id"), "担当者ID")
     is_active = _parse_bool(data.get("is_active"), default=True if existing is None else existing.is_active)
 
+    if "office_code" in data:
+        raw_code = data.get("office_code")
+        office_code = str(raw_code).strip() if raw_code is not None else ""
+        office_code = office_code or None
+    else:
+        office_code = existing.office_code if existing else None
+
     query = Site.query.filter(Site.site_id == site_id)
     if existing is not None:
         query = query.filter(Site.id != existing.id)
@@ -425,6 +433,7 @@ def _site_payload_from_request(data: dict, *, existing: Site | None = None) -> d
         "site_manager_last": site_manager_last,
         "site_manager_first": site_manager_first,
         "site_manager_id": site_manager_id,
+        "office_code": office_code,
         "is_active": is_active,
     }
 
@@ -481,6 +490,19 @@ def _branch_preview_response(payload: dict, branch: SiteBranch | None = None) ->
 def _site_query_from_filters(args):
     include_inactive = _parse_bool(args.get("include_inactive"), default=False)
     query = Site.query.outerjoin(SiteBranch)
+
+    # アクセス権フィルタ: 非管理者はユーザーに紐付く営業所コードの現場のみ
+    # テスト等で current_user が DB 上のユーザーでない場合（id が無い）はスキップ
+    try:
+        from app.access_control import is_admin_user, user_office_codes
+        if getattr(current_user, "id", None) is not None and not is_admin_user():
+            allowed = user_office_codes()
+            if not allowed:
+                query = query.filter(db.false())
+            else:
+                query = query.filter(Site.office_code.in_(allowed))
+    except Exception:
+        pass
 
     if not include_inactive:
         query = query.filter(Site.is_active.is_(True))

@@ -17,8 +17,9 @@ def _ensure_access_control_schema(app):
         db.create_all()
 
         inspector = inspect(db.engine)
-        user_columns = {c["name"] for c in inspector.get_columns("users")}
         alters = []
+
+        user_columns = {c["name"] for c in inspector.get_columns("users")}
         if "is_admin" not in user_columns:
             alters.append("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
         if "branch_id" not in user_columns:
@@ -27,6 +28,21 @@ def _ensure_access_control_schema(app):
             alters.append("ALTER TABLE users ADD COLUMN office_id INTEGER")
         if "department_id" not in user_columns:
             alters.append("ALTER TABLE users ADD COLUMN department_id INTEGER")
+
+        if "access_branches" in inspector.get_table_names():
+            branch_cols = {c["name"] for c in inspector.get_columns("access_branches")}
+            if "code" not in branch_cols:
+                alters.append("ALTER TABLE access_branches ADD COLUMN code VARCHAR(20)")
+
+        if "access_offices" in inspector.get_table_names():
+            office_cols = {c["name"] for c in inspector.get_columns("access_offices")}
+            if "code" not in office_cols:
+                alters.append("ALTER TABLE access_offices ADD COLUMN code VARCHAR(20)")
+
+        if "sites" in inspector.get_table_names():
+            site_cols = {c["name"] for c in inspector.get_columns("sites")}
+            if "office_code" not in site_cols:
+                alters.append("ALTER TABLE sites ADD COLUMN office_code VARCHAR(20)")
 
         if alters:
             with db.engine.begin() as conn:

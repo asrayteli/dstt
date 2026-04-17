@@ -12,6 +12,10 @@ from io import BytesIO
 import csv
 
 from app.models import db, Employee, Office, UploadHistory, EditHistory, SalaryMapping, EmployeeSalary, SalaryUploadHistory
+from app.access_control import (
+    is_admin_user as _is_dstt_admin,
+    user_office_codes as _dstt_user_office_codes,
+)
 
 pluslist_bp = Blueprint("pluslist", __name__, url_prefix="/tools/pluslist")
 
@@ -71,19 +75,33 @@ def save_permissions(permissions):
 
 
 def is_admin(user_id):
-    """管理者権限チェック"""
+    """管理者権限チェック。DSTT管理者(is_admin=True)か、pluslist独自の管理者。"""
+    if _is_dstt_admin():
+        return True
     permissions = load_permissions()
     return user_id in permissions.get('admins', [])
 
 
 def get_user_offices(user_id):
-    """ユーザーがアクセス可能な営業所コードリストを取得"""
+    """ユーザーがアクセス可能な営業所コードリストを取得。
+    - DSTT管理者は全営業所。
+    - それ以外は「ユーザーに紐付けた支店/営業所のコード」＋「pluslist独自の個別付与」の和集合。
+    """
     if is_admin(user_id):
-        # 管理者は全営業所アクセス可能
         return [office.office_code for office in Office.query.all()]
 
     permissions = load_permissions()
-    return permissions.get('user_offices', {}).get(user_id, [])
+    legacy = set(permissions.get('user_offices', {}).get(user_id, []))
+
+    try:
+        from flask_login import current_user as _cu
+        # current_user が一致する場合のみ新方式を併用（他ユーザーIDで呼ばれる場合は従来のみ）
+        if getattr(_cu, 'is_authenticated', False) and getattr(_cu, 'username', None) == user_id:
+            legacy |= set(_dstt_user_office_codes(_cu))
+    except Exception:
+        pass
+
+    return sorted(legacy)
 
 
 def has_office_access(user_id, office_code):
