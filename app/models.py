@@ -13,12 +13,134 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     name = db.Column(db.String(100), nullable=True, default='unknown')
 
+    # アクセス権管理（支店 > 営業所 > 担当）
+    is_admin = db.Column(db.Boolean, nullable=False, default=False)
+    branch_id = db.Column(db.Integer, db.ForeignKey('access_branches.id'), nullable=True)
+    office_id = db.Column(db.Integer, db.ForeignKey('access_offices.id'), nullable=True)
+    department_id = db.Column(db.Integer, db.ForeignKey('access_departments.id'), nullable=True)
+
+    branch = db.relationship('AccessBranch', foreign_keys=[branch_id])
+    user_office = db.relationship('AccessOffice', foreign_keys=[office_id])
+    department = db.relationship('AccessDepartment', foreign_keys=[department_id])
+
+    tool_permissions = db.relationship(
+        'UserToolPermission',
+        back_populates='user',
+        cascade='all, delete-orphan',
+    )
+
     def __repr__(self):
         return f'<User {self.username}>'
 
     def get_id(self):
         # usernameを返すように修正（leave_mgr.pyでcurrent_user.usernameを使用しているため）
         return str(self.username)
+
+
+class AccessBranch(db.Model):
+    """支店マスタ（アクセス権管理用）"""
+    __tablename__ = 'access_branches'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    offices = db.relationship(
+        'AccessOffice',
+        back_populates='branch',
+        cascade='all, delete-orphan',
+        order_by='AccessOffice.name',
+    )
+
+    def to_dict(self, include_children=False):
+        data = {
+            'id': self.id,
+            'name': self.name,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+        if include_children:
+            data['offices'] = [o.to_dict(include_children=True) for o in self.offices]
+        return data
+
+
+class AccessOffice(db.Model):
+    """営業所マスタ（アクセス権管理用）"""
+    __tablename__ = 'access_offices'
+    __table_args__ = (
+        db.UniqueConstraint('branch_id', 'name', name='uq_access_office_branch_name'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey('access_branches.id'), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    branch = db.relationship('AccessBranch', back_populates='offices')
+    departments = db.relationship(
+        'AccessDepartment',
+        back_populates='office',
+        cascade='all, delete-orphan',
+        order_by='AccessDepartment.name',
+    )
+
+    def to_dict(self, include_children=False):
+        data = {
+            'id': self.id,
+            'branch_id': self.branch_id,
+            'name': self.name,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+        if include_children:
+            data['departments'] = [d.to_dict() for d in self.departments]
+        return data
+
+
+class AccessDepartment(db.Model):
+    """担当マスタ（アクセス権管理用）"""
+    __tablename__ = 'access_departments'
+    __table_args__ = (
+        db.UniqueConstraint('office_id', 'name', name='uq_access_department_office_name'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    office_id = db.Column(db.Integer, db.ForeignKey('access_offices.id'), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    office = db.relationship('AccessOffice', back_populates='departments')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'office_id': self.office_id,
+            'name': self.name,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class UserToolPermission(db.Model):
+    """個別ツールアクセス権付与"""
+    __tablename__ = 'user_tool_permissions'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'tool_key', name='uq_user_tool_permission'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    tool_key = db.Column(db.String(80), nullable=False, index=True)
+    granted_by = db.Column(db.String(80), nullable=True)
+    granted_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', back_populates='tool_permissions')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'tool_key': self.tool_key,
+            'granted_by': self.granted_by,
+            'granted_at': self.granted_at.isoformat() if self.granted_at else None,
+        }
 
 
 # 社員名簿PLUS用モデル

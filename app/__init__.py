@@ -1,6 +1,7 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
+from sqlalchemy import inspect, text
 from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
@@ -8,6 +9,36 @@ from .navigation import NAV_ITEMS
 
 from .models import db
 login_manager = LoginManager()
+
+
+def _ensure_access_control_schema(app):
+    """既存DBにアクセス権管理用のテーブル/カラムを自動追加する。"""
+    with app.app_context():
+        db.create_all()
+
+        inspector = inspect(db.engine)
+        user_columns = {c["name"] for c in inspector.get_columns("users")}
+        alters = []
+        if "is_admin" not in user_columns:
+            alters.append("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
+        if "branch_id" not in user_columns:
+            alters.append("ALTER TABLE users ADD COLUMN branch_id INTEGER")
+        if "office_id" not in user_columns:
+            alters.append("ALTER TABLE users ADD COLUMN office_id INTEGER")
+        if "department_id" not in user_columns:
+            alters.append("ALTER TABLE users ADD COLUMN department_id INTEGER")
+
+        if alters:
+            with db.engine.begin() as conn:
+                for sql in alters:
+                    conn.execute(text(sql))
+
+        # 旧来の固定管理者IDを is_admin=True に昇格
+        from .access_control import ensure_legacy_admin_flag
+        try:
+            ensure_legacy_admin_flag()
+        except Exception:
+            db.session.rollback()
 
 def create_app():
     app = Flask(__name__, static_folder='./static/')
@@ -30,7 +61,15 @@ def create_app():
 
     @app.context_processor
     def inject_navigation():
-        return {"app_navigation_items": NAV_ITEMS}
+        from .access_control import (
+            get_accessible_nav_items,
+            is_admin_user,
+        )
+        return {
+            "app_navigation_items": get_accessible_nav_items(),
+            "all_navigation_items": NAV_ITEMS,
+            "current_user_is_admin": is_admin_user(),
+        }
 
     # トップページ
     from .routes import main
@@ -99,5 +138,46 @@ def create_app():
 
     from .tools.powerstamp import powerstamp_bp
     app.register_blueprint(powerstamp_bp)
+
+    # アクセス権管理（機密ツールに before_request を紐付け）
+    from flask import request as _req
+    from .access_control import TOOL_ACCESS_CATEGORIES, enforce_tool_access
+
+    # Blueprint毎のアクセス制御除外パスプレフィックス。
+    # トークン共有等、ログインしていない外部ユーザーが利用する経路を除外する。
+    _BP_TO_TOOL_KEY = {
+        "leave_mgr": "leave_mgr",
+        "pluslist": "pluslist",
+        "siteplus": "siteplus",
+        "shiftersync": "shiftersync",
+        "cloudshift": "cloudshift",
+        "subject_analysis_tool": "subject_analysis_tool",
+    }
+    _EXEMPT_PATH_PREFIXES = (
+        "/tools/shiftersync/download/",
+        "/tools/cloudshift/view/",
+        "/tools/cloudshift/edit/",
+        "/tools/cloudshift/api/public/",
+    )
+
+    @app.before_request
+    def _enforce_sensitive_tool_access():
+        endpoint = _req.endpoint or ""
+        if "." not in endpoint:
+            return None
+        bp_name = endpoint.split(".", 1)[0]
+        tool_key = _BP_TO_TOOL_KEY.get(bp_name)
+        if not tool_key:
+            return None
+        if TOOL_ACCESS_CATEGORIES.get(tool_key) != "sensitive":
+            return None
+        path = _req.path or ""
+        for pref in _EXEMPT_PATH_PREFIXES:
+            if path.startswith(pref):
+                return None
+        return enforce_tool_access(tool_key)
+
+    # DBスキーマの初期化（既存DBへのカラム追加含む）
+    _ensure_access_control_schema(app)
 
     return app
