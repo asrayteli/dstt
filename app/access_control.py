@@ -1,0 +1,265 @@
+"""DSTT全体で共有するアクセス権管理ロジック。
+
+設計概要
+------
+- ツールごとにアクセス制御カテゴリを定義する（`TOOL_ACCESS_CATEGORIES`）。
+  * ``public``   : ログイン済みなら誰でも利用可。
+  * ``sensitive``: 個人情報を扱う／他の機密ツールと連携するため、
+                    個別の付与または管理者権限が必要。
+- ユーザーには「支店 → 営業所 → 担当」の3階層所属と、ツール毎の個別付与
+  (`UserToolPermission`) を持たせ、管理者ページから設定できるようにする。
+- ダッシュボードのナビゲーションは、アクセスできるツールのみ表示する。
+- 個別のツール側では `require_tool_access` デコレータで強制的にガードする。
+"""
+
+from __future__ import annotations
+
+from functools import wraps
+from typing import Iterable
+
+from flask import abort, jsonify, redirect, request, url_for
+from flask_login import current_user
+
+from .models import User, UserToolPermission, db
+from .navigation import NAV_ITEMS
+
+
+# 初期管理者ID（旧実装の互換性のためハードコーディング）
+LEGACY_ADMIN_USERNAME = "3243012"
+
+
+# ツールカテゴリ定義。`nav_key` は NAV_ITEMS の href 末尾 (= Blueprint url_prefix の末尾)
+# と一致させる。
+TOOL_ACCESS_CATEGORIES: dict[str, str] = {
+    # 機密情報を扱うツール：個別付与が必要
+    "leave_mgr": "sensitive",            # 有休共有ツール
+    "pluslist": "sensitive",             # 社員名簿PLUS
+    "siteplus": "sensitive",             # 現場リストPLUS
+    "shiftersync": "sensitive",          # ShifterSync（社員名簿/現場リストと連携）
+    "cloudshift": "sensitive",           # CloudShift（有休共有と連携）
+    "subject_analysis_tool": "sensitive",  # 科目別分析ツール（現場リストPLUSを利用）
+
+    # 以下は公開（ログインで誰でも利用可）
+    "datecalc": "public",
+    "calc": "public",
+    "rename": "public",
+    "compress": "public",
+    "csvtool": "public",
+    "password_tool": "public",
+    "workday": "public",
+    "pdf_power": "public",
+    "color_extract": "public",
+    "powerstamp": "public",
+    "share": "public",
+    "car_inspe": "public",
+    "monthly_generator": "public",
+}
+
+
+def tool_category(tool_key: str) -> str:
+    return TOOL_ACCESS_CATEGORIES.get(tool_key, "public")
+
+
+def tool_requires_permission(tool_key: str) -> bool:
+    return tool_category(tool_key) == "sensitive"
+
+
+# ------------------------------------------------------------------
+# 管理者判定
+# ------------------------------------------------------------------
+
+def is_admin_user(user=None) -> bool:
+    """現在のユーザー（または指定ユーザー）が管理者かどうか。"""
+    user = user if user is not None else current_user
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_admin", False):
+        return True
+    # レガシー互換：従来の固定管理者ID
+    return getattr(user, "username", None) == LEGACY_ADMIN_USERNAME
+
+
+def ensure_legacy_admin_flag() -> None:
+    """既存DBの `3243012` を `is_admin=True` に自動昇格させる。"""
+    user = User.query.filter_by(username=LEGACY_ADMIN_USERNAME).first()
+    if user and not user.is_admin:
+        user.is_admin = True
+        db.session.commit()
+
+
+# ------------------------------------------------------------------
+# ツールアクセス判定
+# ------------------------------------------------------------------
+
+def _user_granted_tool_keys(user) -> set[str]:
+    if user is None or not getattr(user, "is_authenticated", False):
+        return set()
+    user_id = getattr(user, "id", None)
+    if not user_id:
+        return set()
+    rows = UserToolPermission.query.filter_by(user_id=user_id).all()
+    return {row.tool_key for row in rows}
+
+
+def user_has_tool_access(tool_key: str, user=None) -> bool:
+    user = user if user is not None else current_user
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    if is_admin_user(user):
+        return True
+    if not tool_requires_permission(tool_key):
+        return True
+    return tool_key in _user_granted_tool_keys(user)
+
+
+def get_accessible_nav_items(user=None) -> list[dict]:
+    """ユーザーがアクセスできるツールだけに絞ったナビゲーション一覧を返す。"""
+    user = user if user is not None else current_user
+    if user is None or not getattr(user, "is_authenticated", False):
+        return []
+
+    admin = is_admin_user(user)
+    granted = _user_granted_tool_keys(user) if not admin else None
+
+    visible: list[dict] = []
+    for item in NAV_ITEMS:
+        tool_key = _nav_tool_key(item)
+        if admin:
+            visible.append(item)
+            continue
+        if not tool_requires_permission(tool_key):
+            visible.append(item)
+            continue
+        if granted is not None and tool_key in granted:
+            visible.append(item)
+    return visible
+
+
+def _nav_tool_key(item: dict) -> str:
+    key = str(item.get("key", "")).strip()
+    if key:
+        return key
+    href = str(item.get("href", "")).strip("/")
+    # 例: "tools/leave_mgr" -> "leave_mgr"
+    if "/" in href:
+        return href.rsplit("/", 1)[-1]
+    return href
+
+
+def all_tool_keys_in_order() -> list[str]:
+    return [_nav_tool_key(item) for item in NAV_ITEMS]
+
+
+# ------------------------------------------------------------------
+# デコレータ
+# ------------------------------------------------------------------
+
+def enforce_tool_access(tool_key: str):
+    """Blueprintの `before_request` 用ヘルパー。
+    未ログイン/権限不足なら適切なレスポンスを返す。"""
+    if not current_user.is_authenticated:
+        return redirect(url_for("auth.login"))
+    if not user_has_tool_access(tool_key):
+        if _wants_json():
+            return jsonify({"error": "このツールへのアクセス権限がありません"}), 403
+        abort(403)
+    return None
+
+
+def require_tool_access(tool_key: str):
+    """特定ツールへのアクセスを要求するFlaskデコレータ。"""
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if not current_user.is_authenticated:
+                return redirect(url_for("auth.login"))
+            if not user_has_tool_access(tool_key):
+                if _wants_json():
+                    return jsonify({"error": "このツールへのアクセス権限がありません"}), 403
+                abort(403)
+            return fn(*args, **kwargs)
+        return wrapper
+
+    return decorator
+
+
+def require_admin(fn):
+    """管理者専用エンドポイント用デコレータ。"""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return redirect(url_for("auth.login"))
+        if not is_admin_user():
+            if _wants_json():
+                return jsonify({"error": "管理者権限が必要です"}), 403
+            abort(403)
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def _wants_json() -> bool:
+    path = request.path or ""
+    if "/api/" in path or path.endswith("/api"):
+        return True
+    accept = request.headers.get("Accept", "") or ""
+    if "application/json" in accept and "text/html" not in accept:
+        return True
+    if request.is_json:
+        return True
+    return False
+
+
+# ------------------------------------------------------------------
+# 一括付与/剥奪ユーティリティ
+# ------------------------------------------------------------------
+
+def grant_tool_access(user_id: int, tool_keys: Iterable[str], granted_by: str) -> None:
+    existing = {
+        row.tool_key
+        for row in UserToolPermission.query.filter_by(user_id=user_id).all()
+    }
+    added = False
+    for key in tool_keys:
+        if key in existing:
+            continue
+        db.session.add(
+            UserToolPermission(user_id=user_id, tool_key=key, granted_by=granted_by)
+        )
+        existing.add(key)
+        added = True
+    if added:
+        db.session.commit()
+
+
+def revoke_tool_access(user_id: int, tool_keys: Iterable[str]) -> None:
+    keys = list(tool_keys)
+    if not keys:
+        return
+    UserToolPermission.query.filter(
+        UserToolPermission.user_id == user_id,
+        UserToolPermission.tool_key.in_(keys),
+    ).delete(synchronize_session=False)
+    db.session.commit()
+
+
+def set_tool_access(user_id: int, tool_keys: Iterable[str], granted_by: str) -> None:
+    """ユーザーのツール許可を、指定セットと完全一致するよう同期する。"""
+    desired = set(tool_keys)
+    existing_rows = UserToolPermission.query.filter_by(user_id=user_id).all()
+    existing = {row.tool_key: row for row in existing_rows}
+
+    to_add = desired - set(existing.keys())
+    to_remove = set(existing.keys()) - desired
+
+    for key in to_add:
+        db.session.add(
+            UserToolPermission(user_id=user_id, tool_key=key, granted_by=granted_by)
+        )
+    for key in to_remove:
+        db.session.delete(existing[key])
+
+    if to_add or to_remove:
+        db.session.commit()

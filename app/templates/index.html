@@ -56,22 +56,24 @@
   <div class="mt-12 border-t pt-8">
     <h2 class="text-2xl font-bold mb-4 text-red-600">🔧 管理者メニュー</h2>
     <div class="bg-red-50 border border-red-200 rounded-2xl p-6">
-      <div class="flex flex-wrap gap-4">
+      <p class="text-sm text-gray-700 mb-4">
+        ユーザー管理、支店・営業所・担当の編集、ツールアクセス権の付与は、統合管理ページから行ってください。
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <a href="/tools/user_management/admin" class="inline-block bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition">
+          🗂️ 統合管理ページを開く
+        </a>
+        <a href="/tools/user_management/announcements" class="inline-block bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition">
+          📣 お知らせ管理
+        </a>
         <button onclick="showCreateUserModal()" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition">
-          👤 ユーザー作成
+          👤 クイック: ユーザー作成
         </button>
         <button onclick="showUserListModal()" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition">
-          📝 ユーザー管理
+          📝 クイック: ユーザー一覧
         </button>
       </div>
     </div>
-  </div>
-
-  <!-- ユーザー作成モーダル -->
-  <div class="mt-4">
-    <a href="/tools/user_management/announcements" class="inline-block bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition">
-      お知らせ管理
-    </a>
   </div>
 
   <div id="createUserModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
