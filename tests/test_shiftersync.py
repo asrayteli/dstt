@@ -238,3 +238,33 @@ def test_csv_roundtrip_preserves_site_branch_metadata():
     entry = parsed["entries_per_day"]["1"][0]
     assert entry["site_branch_row_id"] == "12"
     assert entry["site_branch"] == "001"
+
+
+def test_csv_roundtrip_preserves_person_site_link_metadata():
+    csv_text = serialize_csv_text(
+        "person",
+        2026,
+        4,
+        "Worker One",
+        0,
+        {
+            "2": [
+                {
+                    "id": "entry-2",
+                    "value": "!N1!Linked Master Site",
+                    "comment": "linked site",
+                    "site_row_id": "88",
+                    "site_id": "24680",
+                    "site_name": "Linked Master Site",
+                }
+            ]
+        },
+        "3001",
+    )
+
+    parsed = parse_csv_text(csv_text)
+    entry = parsed["entries_per_day"]["2"][0]
+    assert entry["site_row_id"] == "88"
+    assert entry["site_id"] == "24680"
+    assert entry["site_name"] == "Linked Master Site"
+    assert parsed["employee_number"] == "3001"

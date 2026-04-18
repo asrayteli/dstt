@@ -238,6 +238,17 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "buildAssistDayTopCandidateCard" in script
     assert "openAssistDayActionModal" in script
     assert "data-assist-add-search-result-index" in script
+    assert "window.CLOUDSHIFT_CAN_OPEN_SYNC_SOURCE" in script
+    assert "window.CLOUDSHIFT_OPEN_SYNC_SOURCE" in script
+    assert "openSyncedSourceEntry(entry)" in script
+    assert "ShifterSync.openEntryModal(sourceDay, sourceEntryId)" in script
+    assert "syncReturnContext" in script
+    assert "maybeReturnToSyncOrigin" in script
+    assert "selectProject(sourceProjectId, sourceMonthKey, { preserveSyncReturnContext: true })" in script
+    assert "に戻りました" in script
+    assert "ss-open-sync-source-btn" in ss_common_js
+    assert "反映元を編集" in ss_common_js
+    assert "openEntryModal" in ss_common_js
     assert "function notifyAssistAction" in script
     assert "function closeAssistRelatedModals" in script
     assert "preferred_weekdays" in script

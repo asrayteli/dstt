@@ -183,6 +183,53 @@ def test_cloudshift_month_save_preserves_site_branch_metadata(tmp_path):
     assert entry["site_branch"] == "001"
 
 
+def test_scene_month_save_applies_siteplus_option_from_branch(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="77777", site_name="Delta Site")
+    branch_row_id = _create_branch(app, site_row_id=site_row_id, site_branch="001", option_key="N1")
+    client = app.test_client()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Delta Shift",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert create_response.status_code == 200
+    project_payload = create_response.get_json()["project"]
+    project_id = project_payload["project"]["id"]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": project_payload["month"],
+            "entries_per_day": {
+                "1": [
+                    {
+                        "id": "entry-branch-option",
+                        "value": "Alice",
+                        "comment": "branch mapped",
+                        "site_branch_row_id": str(branch_row_id),
+                        "site_branch": "001",
+                    }
+                ]
+            },
+        },
+    )
+
+    assert save_response.status_code == 200
+    entry = save_response.get_json()["month"]["entries_per_day"]["1"][0]
+    assert entry["value"] == "!N1!Alice"
+    assert entry["site_branch_row_id"] == str(branch_row_id)
+    assert entry["site_branch"] == "001"
+
+
 def test_person_experience_site_link_matches_scene_by_site_row_id(tmp_path):
     module, app = _build_app(tmp_path)
     module.current_user = _owner()
@@ -239,3 +286,402 @@ def test_person_experience_site_link_matches_scene_by_site_row_id(tmp_path):
     record = assist_payload["records"][0]
     assert record["candidate_name"] == "Worker One"
     assert record["shift_key"] == "O"
+
+
+def test_scene_month_syncs_assignment_to_person_project(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="24680", site_name="Linked Master Site")
+    _create_branch(app, site_row_id=site_row_id, site_branch="001", option_key="N1")
+    client = app.test_client()
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Worker One",
+            "mode": "person",
+            "employee_number": "3001",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert person_response.status_code == 200
+    person_id = person_response.get_json()["project"]["project"]["id"]
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Scene One",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert scene_response.status_code == 200
+    scene_payload = scene_response.get_json()["project"]
+    scene_id = scene_payload["project"]["id"]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": scene_payload["month"],
+            "entries_per_day": {
+                "1": [
+                    {
+                        "id": "scene-entry-1",
+                        "value": "!N1!Worker One",
+                        "comment": "scene source",
+                        "employee_number": "3001",
+                    }
+                ]
+            },
+        },
+    )
+    assert save_response.status_code == 200
+
+    person_detail = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}",
+        query_string={"month_key": "2026-04"},
+    )
+    assert person_detail.status_code == 200
+    mirrored_entries = person_detail.get_json()["month"]["entries_per_day"]["1"]
+    assert len(mirrored_entries) == 1
+    entry = mirrored_entries[0]
+    assert entry["value"] == "!N1!Linked Master Site"
+    assert entry["site_row_id"] == str(site_row_id)
+    assert entry["site_id"] == "24680"
+    assert entry["site_name"] == "Linked Master Site"
+    assert entry["sync_source_type"] == "scene_shift"
+    assert entry["sync_source_project_id"] == scene_id
+
+
+def test_new_person_project_receives_existing_scene_shift_sync(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="24680", site_name="Linked Master Site")
+    _create_branch(app, site_row_id=site_row_id, site_branch="001", option_key="N1")
+    client = app.test_client()
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Scene One",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert scene_response.status_code == 200
+    scene_payload = scene_response.get_json()["project"]
+    scene_id = scene_payload["project"]["id"]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": scene_payload["month"],
+            "entries_per_day": {
+                "3": [
+                    {
+                        "id": "scene-entry-existing",
+                        "value": "!N1!Worker One",
+                        "comment": "existing scene source",
+                        "employee_number": "3001",
+                    }
+                ]
+            },
+        },
+    )
+    assert save_response.status_code == 200
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Worker One",
+            "mode": "person",
+            "employee_number": "3001",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert person_response.status_code == 200
+    person_month = person_response.get_json()["project"]["month"]
+    mirrored_entries = person_month["entries_per_day"]["3"]
+    assert len(mirrored_entries) == 1
+    assert mirrored_entries[0]["value"] == "!N1!Linked Master Site"
+    assert mirrored_entries[0]["sync_source_type"] == "scene_shift"
+
+
+def test_person_month_syncs_assignment_to_scene_project(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="24680", site_name="Linked Master Site")
+    branch_row_id = _create_branch(app, site_row_id=site_row_id, site_branch="001", option_key="N1")
+    client = app.test_client()
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Worker One",
+            "mode": "person",
+            "employee_number": "3001",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert person_response.status_code == 200
+    person_payload = person_response.get_json()["project"]
+    person_id = person_payload["project"]["id"]
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Scene One",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert scene_response.status_code == 200
+    scene_id = scene_response.get_json()["project"]["project"]["id"]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": person_payload["month"],
+            "entries_per_day": {
+                "2": [
+                    {
+                        "id": "person-entry-1",
+                        "value": "!N1!Linked Master Site",
+                        "comment": "person source",
+                        "site_row_id": str(site_row_id),
+                        "site_id": "24680",
+                        "site_name": "Linked Master Site",
+                    }
+                ]
+            },
+        },
+    )
+    assert save_response.status_code == 200
+
+    scene_detail = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}",
+        query_string={"month_key": "2026-04"},
+    )
+    assert scene_detail.status_code == 200
+    mirrored_entries = scene_detail.get_json()["month"]["entries_per_day"]["2"]
+    assert len(mirrored_entries) == 1
+    entry = mirrored_entries[0]
+    assert entry["value"] == "!N1!Worker One"
+    assert entry["employee_number"] == "3001"
+    assert entry["site_branch_row_id"] == str(branch_row_id)
+    assert entry["site_branch"] == "001"
+    assert entry["sync_source_type"] == "person_shift"
+    assert entry["sync_source_project_id"] == person_id
+
+
+def test_new_scene_project_receives_existing_person_shift_sync(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="24680", site_name="Linked Master Site")
+    _create_branch(app, site_row_id=site_row_id, site_branch="001", option_key="N1")
+    client = app.test_client()
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Worker One",
+            "mode": "person",
+            "employee_number": "3001",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert person_response.status_code == 200
+    person_payload = person_response.get_json()["project"]
+    person_id = person_payload["project"]["id"]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": person_payload["month"],
+            "entries_per_day": {
+                "4": [
+                    {
+                        "id": "person-entry-existing",
+                        "value": "!N1!Linked Master Site",
+                        "comment": "existing person source",
+                        "site_row_id": str(site_row_id),
+                        "site_id": "24680",
+                        "site_name": "Linked Master Site",
+                    }
+                ]
+            },
+        },
+    )
+    assert save_response.status_code == 200
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Scene One",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert scene_response.status_code == 200
+    scene_month = scene_response.get_json()["project"]["month"]
+    mirrored_entries = scene_month["entries_per_day"]["4"]
+    assert len(mirrored_entries) == 1
+    assert mirrored_entries[0]["value"] == "!N1!Worker One"
+    assert mirrored_entries[0]["employee_number"] == "3001"
+    assert mirrored_entries[0]["sync_source_type"] == "person_shift"
+
+
+def test_new_month_receives_existing_opposite_shift_sync(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="24680", site_name="Linked Master Site")
+    _create_branch(app, site_row_id=site_row_id, site_branch="001", option_key="N1")
+    client = app.test_client()
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Scene One",
+            "mode": "scene",
+            "year": "2026",
+            "month": "5",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert scene_response.status_code == 200
+    scene_payload = scene_response.get_json()["project"]
+    scene_id = scene_payload["project"]["id"]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/5",
+        json={
+            "required_capacity": 0,
+            "base_month": scene_payload["month"],
+            "entries_per_day": {
+                "6": [
+                    {
+                        "id": "scene-entry-may",
+                        "value": "!N1!Worker One",
+                        "comment": "may scene source",
+                        "employee_number": "3001",
+                    }
+                ]
+            },
+        },
+    )
+    assert save_response.status_code == 200
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Worker One",
+            "mode": "person",
+            "employee_number": "3001",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert person_response.status_code == 200
+    person_id = person_response.get_json()["project"]["project"]["id"]
+
+    create_month_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month",
+        json={
+            "year": 2026,
+            "month": 5,
+            "init_mode": "blank",
+        },
+    )
+    assert create_month_response.status_code == 200
+    person_month = create_month_response.get_json()["project"]["month"]
+    mirrored_entries = person_month["entries_per_day"]["6"]
+    assert len(mirrored_entries) == 1
+    assert mirrored_entries[0]["value"] == "!N1!Linked Master Site"
+    assert mirrored_entries[0]["sync_source_type"] == "scene_shift"
+
+
+def test_deleting_source_month_removes_shift_sync_entries(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="24680", site_name="Linked Master Site")
+    client = app.test_client()
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Worker One",
+            "mode": "person",
+            "employee_number": "3001",
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert person_response.status_code == 200
+    person_id = person_response.get_json()["project"]["project"]["id"]
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Scene One",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    )
+    assert scene_response.status_code == 200
+    scene_payload = scene_response.get_json()["project"]
+    scene_id = scene_payload["project"]["id"]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": scene_payload["month"],
+            "entries_per_day": {
+                "1": [
+                    {
+                        "id": "scene-entry-1",
+                        "value": "Worker One",
+                        "comment": "scene source",
+                        "employee_number": "3001",
+                    }
+                ]
+            },
+        },
+    )
+    assert save_response.status_code == 200
+
+    person_before_delete = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}",
+        query_string={"month_key": "2026-04"},
+    )
+    assert len(person_before_delete.get_json()["month"]["entries_per_day"]["1"]) == 1
+
+    delete_response = client.delete(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4"
+    )
+    assert delete_response.status_code == 200
+
+    person_after_delete = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}",
+        query_string={"month_key": "2026-04"},
+    )
+    assert person_after_delete.status_code == 200
+    assert person_after_delete.get_json()["month"]["entries_per_day"]["1"] == []

@@ -11,6 +11,9 @@ from typing import Any
 COMMENT_ROW_PREFIX = "#comment"
 EMPLOYEE_NUMBER_ROW_PREFIX = "#employee_number"
 PROJECT_EMPLOYEE_NUMBER_ROW_PREFIX = "#project_employee_number"
+SITE_ROW_ID_ROW_PREFIX = "#site_row_id"
+SITE_ID_ROW_PREFIX = "#site_id"
+SITE_NAME_ROW_PREFIX = "#site_name"
 SITE_BRANCH_ROW_ID_ROW_PREFIX = "#site_branch_row_id"
 SITE_BRANCH_ROW_PREFIX = "#site_branch"
 
@@ -81,6 +84,19 @@ def _normalize_site_branch_row_id(value: Any) -> str:
     return text if int(text) > 0 else ""
 
 
+def _normalize_site_row_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if not text.isdigit():
+        return ""
+    return text if int(text) > 0 else ""
+
+
+def _normalize_sync_text(value: Any, *, limit: int = 120) -> str:
+    return str(value or "").replace("\r", " ").replace("\n", " ").strip()[:limit]
+
+
 def normalize_entry(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         value = str(raw.get("value", "")).strip()
@@ -90,14 +106,26 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         site_branch_row_id = _normalize_site_branch_row_id(
             raw.get("site_branch_row_id", raw.get("siteBranchRowId", ""))
         )
+        site_row_id = _normalize_site_row_id(raw.get("site_row_id", raw.get("siteRowId", "")))
+        site_id = str(raw.get("site_id", raw.get("siteId", "")) or "").strip()
+        site_name = str(raw.get("site_name", raw.get("siteName", "")) or "").strip()
         site_branch = str(raw.get("site_branch", raw.get("siteBranch", "")) or "").strip()
         return {
             "id": str(raw.get("id") or generate_entry_id()),
             "value": value,
             "comment": str(raw.get("comment", "") or "").strip(),
             "employee_number": employee_number,
+            "site_row_id": site_row_id,
+            "site_id": site_id,
+            "site_name": site_name,
             "site_branch_row_id": site_branch_row_id,
             "site_branch": site_branch,
+            "sync_source_type": _normalize_sync_text(raw.get("sync_source_type", raw.get("syncSourceType", "")), limit=40),
+            "sync_source_project_id": _normalize_sync_text(raw.get("sync_source_project_id", raw.get("syncSourceProjectId", "")), limit=80),
+            "sync_source_project_title": _normalize_sync_text(raw.get("sync_source_project_title", raw.get("syncSourceProjectTitle", "")), limit=120),
+            "sync_source_month_key": _normalize_sync_text(raw.get("sync_source_month_key", raw.get("syncSourceMonthKey", "")), limit=20),
+            "sync_source_day": _normalize_sync_text(raw.get("sync_source_day", raw.get("syncSourceDay", "")), limit=10),
+            "sync_source_entry_id": _normalize_sync_text(raw.get("sync_source_entry_id", raw.get("syncSourceEntryId", "")), limit=80),
         }
 
     value = str(raw or "").strip()
@@ -108,8 +136,17 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         "value": value,
         "comment": "",
         "employee_number": "",
+        "site_row_id": "",
+        "site_id": "",
+        "site_name": "",
         "site_branch_row_id": "",
         "site_branch": "",
+        "sync_source_type": "",
+        "sync_source_project_id": "",
+        "sync_source_project_title": "",
+        "sync_source_month_key": "",
+        "sync_source_day": "",
+        "sync_source_entry_id": "",
     }
 
 
@@ -162,6 +199,9 @@ def serialize_entry_rows(
 
     comment_rows: list[list[Any]] = []
     employee_number_rows: list[list[Any]] = []
+    site_row_id_rows: list[list[Any]] = []
+    site_id_rows: list[list[Any]] = []
+    site_name_rows: list[list[Any]] = []
     site_branch_row_id_rows: list[list[Any]] = []
     site_branch_rows: list[list[Any]] = []
     for day in range(1, monthrange(year, month)[1] + 1):
@@ -179,6 +219,18 @@ def serialize_entry_rows(
                 employee_number_rows.append(
                     [EMPLOYEE_NUMBER_ROW_PREFIX, day, index, entry["employee_number"]]
                 )
+            if entry.get("site_row_id"):
+                site_row_id_rows.append(
+                    [SITE_ROW_ID_ROW_PREFIX, day, index, entry["site_row_id"]]
+                )
+            if entry.get("site_id"):
+                site_id_rows.append(
+                    [SITE_ID_ROW_PREFIX, day, index, entry["site_id"]]
+                )
+            if entry.get("site_name"):
+                site_name_rows.append(
+                    [SITE_NAME_ROW_PREFIX, day, index, entry["site_name"]]
+                )
             if entry.get("site_branch_row_id"):
                 site_branch_row_id_rows.append(
                     [SITE_BRANCH_ROW_ID_ROW_PREFIX, day, index, entry["site_branch_row_id"]]
@@ -192,7 +244,17 @@ def serialize_entry_rows(
             [PROJECT_EMPLOYEE_NUMBER_ROW_PREFIX, str(project_employee_number).strip()]
         )
 
-    return rows + comment_rows + employee_number_rows + site_branch_row_id_rows + site_branch_rows + metadata_rows
+    return (
+        rows
+        + comment_rows
+        + employee_number_rows
+        + site_row_id_rows
+        + site_id_rows
+        + site_name_rows
+        + site_branch_row_id_rows
+        + site_branch_rows
+        + metadata_rows
+    )
 
 
 def serialize_csv_text(
@@ -245,6 +307,9 @@ def parse_csv_text(text: str) -> dict[str, Any]:
     entries_per_day = empty_entries_for_month(year, month)
     comment_rows: list[list[str]] = []
     employee_number_rows: list[list[str]] = []
+    site_row_id_rows: list[list[str]] = []
+    site_id_rows: list[list[str]] = []
+    site_name_rows: list[list[str]] = []
     site_branch_row_id_rows: list[list[str]] = []
     site_branch_rows: list[list[str]] = []
     project_employee_number = ""
@@ -275,6 +340,15 @@ def parse_csv_text(text: str) -> dict[str, Any]:
             continue
         if head == EMPLOYEE_NUMBER_ROW_PREFIX:
             employee_number_rows.append(row)
+            continue
+        if head == SITE_ROW_ID_ROW_PREFIX:
+            site_row_id_rows.append(row)
+            continue
+        if head == SITE_ID_ROW_PREFIX:
+            site_id_rows.append(row)
+            continue
+        if head == SITE_NAME_ROW_PREFIX:
+            site_name_rows.append(row)
             continue
         if head == SITE_BRANCH_ROW_ID_ROW_PREFIX:
             site_branch_row_id_rows.append(row)
@@ -308,6 +382,42 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
             continue
         entries_per_day[day_key][index]["employee_number"] = str(row[3] or "").strip()
+
+    for row in site_row_id_rows:
+        if len(row) < 4:
+            continue
+        try:
+            day_key = str(int(row[1]))
+            index = int(row[2])
+        except (TypeError, ValueError):
+            continue
+        if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
+            continue
+        entries_per_day[day_key][index]["site_row_id"] = _normalize_site_row_id(row[3])
+
+    for row in site_id_rows:
+        if len(row) < 4:
+            continue
+        try:
+            day_key = str(int(row[1]))
+            index = int(row[2])
+        except (TypeError, ValueError):
+            continue
+        if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
+            continue
+        entries_per_day[day_key][index]["site_id"] = str(row[3] or "").strip()
+
+    for row in site_name_rows:
+        if len(row) < 4:
+            continue
+        try:
+            day_key = str(int(row[1]))
+            index = int(row[2])
+        except (TypeError, ValueError):
+            continue
+        if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
+            continue
+        entries_per_day[day_key][index]["site_name"] = str(row[3] or "").strip()
 
     for row in site_branch_row_id_rows:
         if len(row) < 4:

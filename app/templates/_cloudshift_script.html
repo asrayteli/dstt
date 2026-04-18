@@ -9,6 +9,7 @@
       projects: [],
       projectPayload: null,
       baseMonth: null,
+      syncReturnContext: null,
       guestName: PAGE.authenticatedEditorName || '',
       assist: {
         contextKey: '',
@@ -4197,6 +4198,12 @@
       return ShifterSync.getEntriesPerDay ? ShifterSync.getEntriesPerDay() : {};
     }
 
+    function currentEntryByDayAndId(dayKey, entryId) {
+      const entriesPerDay = currentEntriesSnapshot();
+      const entries = Array.isArray(entriesPerDay[String(dayKey)]) ? entriesPerDay[String(dayKey)] : [];
+      return entries.find((entry) => String(entry && entry.id ? entry.id : '') === String(entryId || '')) || null;
+    }
+
     function replaceCalendarEntries(nextEntries) {
       if (!ShifterSync.replaceEntriesPerDay) return;
       ShifterSync.replaceEntriesPerDay(nextEntries);
@@ -5130,7 +5137,11 @@
       }
     }
 
-    async function selectProject(projectId, monthKey) {
+    async function selectProject(projectId, monthKey, options) {
+      const settings = options || {};
+      if (!settings.preserveSyncReturnContext) {
+        state.syncReturnContext = null;
+      }
       const suffix = monthKey ? `?month_key=${encodeURIComponent(monthKey)}` : '';
       const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}${suffix}`));
       state.projectPayload = payload;
@@ -5266,6 +5277,9 @@
       await renderWorkspaceWithSiteBranches(true);
       await loadProjects();
       await loadHistory(project.id);
+      if (await maybeReturnToSyncOrigin(project.id, `${month.year}-${String(month.month).padStart(2, '0')}`)) {
+        return;
+      }
       showFlash('この月を保存しました', 'success');
     }
 
@@ -5282,6 +5296,62 @@
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       await renderWorkspaceWithSiteBranches(true);
       showFlash('この月を保存しました', 'success');
+    }
+
+    async function openSyncedSourceEntry(entry) {
+      if (PAGE.type !== 'owner') {
+        showFlash('反映元を直接開けるのは管理画面のみです', 'error');
+        return;
+      }
+      const originProject = currentProject();
+      const originMonthKey = currentMonthKey();
+      const sourceProjectId = String(entry && entry.sync_source_project_id ? entry.sync_source_project_id : '').trim();
+      const sourceMonthKey = String(entry && entry.sync_source_month_key ? entry.sync_source_month_key : '').trim();
+      const sourceDay = String(entry && entry.sync_source_day ? entry.sync_source_day : '').trim();
+      const sourceEntryId = String(entry && entry.sync_source_entry_id ? entry.sync_source_entry_id : '').trim();
+      if (!sourceProjectId || !sourceMonthKey || !sourceDay || !sourceEntryId) {
+        showFlash('反映元の情報が見つからないため編集できません', 'error');
+        return;
+      }
+      state.syncReturnContext = originProject && originMonthKey ? {
+        origin_project_id: originProject.id,
+        origin_project_title: originProject.title,
+        origin_month_key: originMonthKey,
+        source_project_id: sourceProjectId,
+        source_month_key: sourceMonthKey
+      } : null;
+      closeLegacyDetailModals();
+      await selectProject(sourceProjectId, sourceMonthKey, { preserveSyncReturnContext: true });
+      const sourceEntry = currentEntryByDayAndId(sourceDay, sourceEntryId);
+      if (!sourceEntry) {
+        state.syncReturnContext = null;
+        showFlash('反映元のエントリが見つかりませんでした', 'error');
+        return;
+      }
+      if (!ShifterSync.openEntryModal) {
+        state.syncReturnContext = null;
+        showFlash('編集モーダルを開けませんでした', 'error');
+        return;
+      }
+      ShifterSync.openEntryModal(sourceDay, sourceEntryId);
+      showFlash('反映元のシフトを開きました。編集後に「この月を保存」で自動同期されます', 'info');
+    }
+
+    async function maybeReturnToSyncOrigin(savedProjectId, savedMonthKey) {
+      const ctx = state.syncReturnContext;
+      if (!ctx) {
+        return false;
+      }
+      if (
+        String(ctx.source_project_id || '') !== String(savedProjectId || '')
+        || String(ctx.source_month_key || '') !== String(savedMonthKey || '')
+      ) {
+        return false;
+      }
+      state.syncReturnContext = null;
+      await selectProject(ctx.origin_project_id, ctx.origin_month_key);
+      showFlash(`${ctx.origin_project_title || '元のシフト'} に戻りました`, 'success');
+      return true;
     }
 
     async function createMonth(targetKey, ownerMode) {
@@ -5825,6 +5895,23 @@
       ensureCloudActionButtons();
       await loadPublic();
     }
+
+    window.CLOUDSHIFT_CAN_OPEN_SYNC_SOURCE = function(entry) {
+      if (PAGE.type !== 'owner') {
+        return false;
+      }
+      return !!(
+        entry
+        && entry.sync_source_project_id
+        && entry.sync_source_month_key
+        && entry.sync_source_day
+        && entry.sync_source_entry_id
+      );
+    };
+
+    window.CLOUDSHIFT_OPEN_SYNC_SOURCE = function(entry) {
+      openSyncedSourceEntry(entry).catch((error) => showFlash(error.message, 'error'));
+    };
 
     document.addEventListener('DOMContentLoaded', () => {
       if (PAGE.type === 'owner') {

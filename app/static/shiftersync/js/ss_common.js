@@ -41,8 +41,12 @@ const ShifterSync = (function() {
   const commentRowPrefix = '#comment';
   const employeeNumberRowPrefix = '#employee_number';
   const projectEmployeeNumberRowPrefix = '#project_employee_number';
+  const siteRowIdRowPrefix = '#site_row_id';
+  const siteIdRowPrefix = '#site_id';
+  const siteNameRowPrefix = '#site_name';
   const siteBranchRowIdRowPrefix = '#site_branch_row_id';
   const siteBranchRowPrefix = '#site_branch';
+  const shiftSyncSourceTypes = ['scene_shift', 'person_shift'];
 
   const state = {
     mode: 'scene',
@@ -64,6 +68,8 @@ const ShifterSync = (function() {
 
   const employeeSearchCache = new Map();
   const employeeSearchTimers = new WeakMap();
+  const siteSearchCache = new Map();
+  const siteSearchTimers = new WeakMap();
 
   function escapeHtml(value) {
     return String(value || '')
@@ -111,6 +117,14 @@ const ShifterSync = (function() {
   }
 
   function normalizeSiteBranchRowId(value) {
+    const text = String(value || '').trim();
+    if (!text || !/^\d+$/.test(text)) {
+      return '';
+    }
+    return parseInt(text, 10) > 0 ? text : '';
+  }
+
+  function normalizeSiteRowId(value) {
     const text = String(value || '').trim();
     if (!text || !/^\d+$/.test(text)) {
       return '';
@@ -276,7 +290,23 @@ const ShifterSync = (function() {
       if (!value) {
         return null;
       }
-      return { id: makeEntryId(), value, comment: '', employee_number: '', site_branch_row_id: '', site_branch: '' };
+      return {
+        id: makeEntryId(),
+        value,
+        comment: '',
+        employee_number: '',
+        site_row_id: '',
+        site_id: '',
+        site_name: '',
+        site_branch_row_id: '',
+        site_branch: '',
+        sync_source_type: '',
+        sync_source_project_id: '',
+        sync_source_project_title: '',
+        sync_source_month_key: '',
+        sync_source_day: '',
+        sync_source_entry_id: ''
+      };
     }
 
     const value = String(entry.value || '').trim();
@@ -288,8 +318,17 @@ const ShifterSync = (function() {
       value,
       comment: String(entry.comment || '').trim(),
       employee_number: String(entry.employee_number || entry.employeeNumber || '').trim(),
+      site_row_id: normalizeSiteRowId(entry.site_row_id || entry.siteRowId || ''),
+      site_id: String(entry.site_id || entry.siteId || '').trim(),
+      site_name: String(entry.site_name || entry.siteName || '').trim(),
       site_branch_row_id: normalizeSiteBranchRowId(entry.site_branch_row_id || entry.siteBranchRowId || ''),
-      site_branch: String(entry.site_branch || entry.siteBranch || '').trim()
+      site_branch: String(entry.site_branch || entry.siteBranch || '').trim(),
+      sync_source_type: String(entry.sync_source_type || entry.syncSourceType || '').trim(),
+      sync_source_project_id: String(entry.sync_source_project_id || entry.syncSourceProjectId || '').trim(),
+      sync_source_project_title: String(entry.sync_source_project_title || entry.syncSourceProjectTitle || '').trim(),
+      sync_source_month_key: String(entry.sync_source_month_key || entry.syncSourceMonthKey || '').trim(),
+      sync_source_day: String(entry.sync_source_day || entry.syncSourceDay || '').trim(),
+      sync_source_entry_id: String(entry.sync_source_entry_id || entry.syncSourceEntryId || '').trim()
     };
   }
 
@@ -303,9 +342,36 @@ const ShifterSync = (function() {
       value: normalized.value,
       comment: normalized.comment,
       employee_number: normalized.employee_number,
+      site_row_id: normalized.site_row_id,
+      site_id: normalized.site_id,
+      site_name: normalized.site_name,
       site_branch_row_id: normalized.site_branch_row_id,
-      site_branch: normalized.site_branch
+      site_branch: normalized.site_branch,
+      sync_source_type: normalized.sync_source_type,
+      sync_source_project_id: normalized.sync_source_project_id,
+      sync_source_project_title: normalized.sync_source_project_title,
+      sync_source_month_key: normalized.sync_source_month_key,
+      sync_source_day: normalized.sync_source_day,
+      sync_source_entry_id: normalized.sync_source_entry_id
     };
+  }
+
+  function isSyncedEntry(entry) {
+    const normalized = normalizeEntry(entry);
+    if (!normalized) {
+      return false;
+    }
+    return shiftSyncSourceTypes.includes(String(normalized.sync_source_type || '').trim());
+  }
+
+  function canOpenSyncedSourceEntry(entry) {
+    const normalized = normalizeEntry(entry);
+    if (!normalized || !isSyncedEntry(normalized)) {
+      return false;
+    }
+    return typeof window.CLOUDSHIFT_CAN_OPEN_SYNC_SOURCE === 'function'
+      ? !!window.CLOUDSHIFT_CAN_OPEN_SYNC_SOURCE(normalized)
+      : false;
   }
 
   function normalizeDayEntries(rawEntries) {
@@ -345,6 +411,10 @@ const ShifterSync = (function() {
 
   function isEntryEmployeeSearchEnabled() {
     return isSceneMode();
+  }
+
+  function isEntrySiteSearchEnabled() {
+    return isPersonMode();
   }
 
   function pad2(value) {
@@ -407,6 +477,42 @@ const ShifterSync = (function() {
       employee_name: employeeName,
       office_name: String(candidate.office_name || candidate.officeName || '').trim(),
       job_title: String(candidate.job_title || candidate.jobTitle || '').trim()
+    };
+  }
+
+  function normalizeSiteCandidate(candidate) {
+    if (!candidate || typeof candidate !== 'object') {
+      return null;
+    }
+    const siteRowId = normalizeSiteRowId(candidate.id || candidate.site_row_id || candidate.siteRowId || '');
+    const siteId = String(candidate.site_id || candidate.siteId || '').trim();
+    const siteName = String(candidate.site_name || candidate.siteName || '').trim();
+    if (!siteRowId && !siteId) {
+      return null;
+    }
+    return {
+      site_row_id: siteRowId,
+      site_id: siteId,
+      site_name: siteName,
+      active_branch_count: parseInt(candidate.active_branch_count || candidate.activeBranchCount || '0', 10) || 0
+    };
+  }
+
+  function getSelectedSiteDataForInput($input) {
+    if (!$input || !$input.length) {
+      return { site_row_id: '', site_id: '', site_name: '' };
+    }
+    const selectedRowId = String($input.attr('data-site-row-id') || '').trim();
+    const selectedSiteId = String($input.attr('data-site-id') || '').trim();
+    const selectedSiteName = String($input.attr('data-selected-site-name') || '').trim();
+    const currentName = String($input.val() || '').trim();
+    if (!currentName || !selectedSiteName || currentName !== selectedSiteName) {
+      return { site_row_id: '', site_id: '', site_name: '' };
+    }
+    return {
+      site_row_id: normalizeSiteRowId(selectedRowId),
+      site_id: selectedSiteId,
+      site_name: selectedSiteName
     };
   }
 
@@ -710,6 +816,222 @@ const ShifterSync = (function() {
     employeeSearchTimers.set(element, timer);
   }
 
+  function clearSiteSelectionForInput($input) {
+    if (!$input || !$input.length) {
+      return;
+    }
+    $input.removeAttr('data-site-row-id');
+    $input.removeAttr('data-site-id');
+    $input.removeAttr('data-selected-site-name');
+    $input.attr('data-search-token', `cleared-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    const note = getEmployeeSelectionNoteForInput($input);
+    if (note.length) {
+      note.text('').addClass('ss-hidden');
+    }
+  }
+
+  function setSiteSelectionForInput($input, candidate) {
+    const normalized = normalizeSiteCandidate(candidate);
+    if (!$input || !$input.length || !normalized) {
+      return;
+    }
+    $input.val(normalized.site_name);
+    $input.attr('data-site-row-id', normalized.site_row_id);
+    $input.attr('data-site-id', normalized.site_id);
+    $input.attr('data-selected-site-name', normalized.site_name);
+    $input.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    const note = getEmployeeSelectionNoteForInput($input);
+    if (note.length) {
+      const label = [normalized.site_id, normalized.site_name].filter(Boolean).join(' / ');
+      note.text(label ? `選択中: ${label}` : '').toggleClass('ss-hidden', !label);
+    }
+    const panel = getEmployeeSearchPanelForInput($input);
+    if (panel.length) {
+      panel.empty().addClass('ss-hidden');
+    }
+  }
+
+  function renderSiteSearchResults($panel, $input, candidates, emptyMessage) {
+    if (!$panel || !$panel.length || !$input || !$input.length) {
+      return;
+    }
+    $panel.empty();
+    const list = $('<div>').css({
+      display: 'grid',
+      gap: '6px'
+    });
+    const normalizedCandidates = Array.isArray(candidates)
+      ? candidates.map((item) => normalizeSiteCandidate(item)).filter(Boolean)
+      : [];
+    if (!normalizedCandidates.length) {
+      list.append(
+        $('<div>')
+          .css({
+            color: '#6b7280',
+            fontSize: '12px',
+            padding: '4px 2px'
+          })
+          .text(emptyMessage || '候補が見つかりません')
+      );
+    } else {
+      const panelKind = String($panel.attr('data-search-kind') || '');
+      const panelDay = String($panel.attr('data-day') || '');
+      normalizedCandidates.slice(0, 8).forEach((candidate) => {
+        const button = $('<button>')
+          .attr('type', 'button')
+          .addClass('ss-site-candidate-btn')
+          .attr('data-search-kind', panelKind)
+          .attr('data-day', panelDay)
+          .attr('data-site-row-id', candidate.site_row_id)
+          .attr('data-site-id', candidate.site_id)
+          .attr('data-site-name', candidate.site_name)
+          .css({
+            border: '1px solid #cfe1f6',
+            borderRadius: '10px',
+            background: '#fff',
+            color: '#18324c',
+            cursor: 'pointer',
+            padding: '8px 10px',
+            textAlign: 'left',
+            width: '100%'
+          })
+          .text([candidate.site_id, candidate.site_name].filter(Boolean).join(' / '))
+          .on('mousedown', function(event) {
+            event.preventDefault();
+          })
+          .on('click', function() {
+            setSiteSelectionForInput($input, candidate);
+          });
+        list.append(button);
+      });
+    }
+    $panel.append(list).removeClass('ss-hidden');
+  }
+
+  async function fetchSiteCandidates(query) {
+    const key = String(query || '').trim();
+    if (!key) {
+      return [];
+    }
+    if (siteSearchCache.has(key)) {
+      return siteSearchCache.get(key);
+    }
+    const response = await fetch(`/tools/siteplus/api/cloudshift/sites?q=${encodeURIComponent(key)}`, {
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json'
+      }
+    });
+    if (!response.ok) {
+      throw new Error('現場候補の検索に失敗しました');
+    }
+    const payload = await response.json();
+    const candidates = Array.isArray(payload.sites) ? payload.sites : [];
+    siteSearchCache.set(key, candidates);
+    return candidates;
+  }
+
+  function scheduleSiteSearchForInput($input) {
+    if (!isEntrySiteSearchEnabled() || !$input || !$input.length) {
+      return;
+    }
+    const query = String($input.val() || '').trim();
+    const panel = getEmployeeSearchPanelForInput($input);
+    if (!query) {
+      clearSiteSelectionForInput($input);
+      if (panel.length) {
+        panel.empty().addClass('ss-hidden');
+      }
+      return;
+    }
+    const currentSelectedName = String($input.attr('data-selected-site-name') || '');
+    if (currentSelectedName && currentSelectedName !== query) {
+      clearSiteSelectionForInput($input);
+    }
+    const element = $input[0];
+    const previousTimer = siteSearchTimers.get(element);
+    if (previousTimer) {
+      window.clearTimeout(previousTimer);
+    }
+    const timer = window.setTimeout(async () => {
+      const latestQuery = String($input.val() || '').trim();
+      if (!latestQuery) {
+        if (panel.length) {
+          panel.empty().addClass('ss-hidden');
+        }
+        return;
+      }
+      const searchToken = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      $input.attr('data-search-token', searchToken);
+      try {
+        const candidates = await fetchSiteCandidates(latestQuery);
+        if ($input.attr('data-search-token') !== searchToken) {
+          return;
+        }
+        if (String($input.val() || '').trim() !== latestQuery) {
+          return;
+        }
+        renderSiteSearchResults(panel, $input, candidates, '候補が見つかりません');
+      } catch (_) {
+        if (panel.length) {
+          panel.empty().addClass('ss-hidden');
+        }
+      }
+    }, 220);
+    siteSearchTimers.set(element, timer);
+  }
+
+  function scheduleSiteSearchForModal() {
+    const $input = $('#ss-entry-modal-name');
+    if (!isEntrySiteSearchEnabled() || !$input.length) {
+      return;
+    }
+    const query = String($input.val() || '').trim();
+    const panel = $('#ss-entry-modal-candidate-panel');
+    if (!query) {
+      clearSiteSelectionForInput($input);
+      if (panel.length) {
+        panel.empty().addClass('ss-hidden');
+      }
+      return;
+    }
+    const currentSelectedName = String($input.attr('data-selected-site-name') || '');
+    if (currentSelectedName && currentSelectedName !== query) {
+      clearSiteSelectionForInput($input);
+    }
+    const element = $input[0];
+    const previousTimer = siteSearchTimers.get(element);
+    if (previousTimer) {
+      window.clearTimeout(previousTimer);
+    }
+    const timer = window.setTimeout(async () => {
+      const latestQuery = String($input.val() || '').trim();
+      if (!latestQuery) {
+        if (panel.length) {
+          panel.empty().addClass('ss-hidden');
+        }
+        return;
+      }
+      const searchToken = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      $input.attr('data-search-token', searchToken);
+      try {
+        const candidates = await fetchSiteCandidates(latestQuery);
+        if ($input.attr('data-search-token') !== searchToken) {
+          return;
+        }
+        if (String($input.val() || '').trim() !== latestQuery) {
+          return;
+        }
+        renderSiteSearchResults(panel, $input, candidates, '候補が見つかりません');
+      } catch (_) {
+        if (panel.length) {
+          panel.empty().addClass('ss-hidden');
+        }
+      }
+    }, 220);
+    siteSearchTimers.set(element, timer);
+  }
+
   function getEntryDisplayParts(entry) {
     const normalized = normalizeEntry(entry);
     if (!normalized) {
@@ -901,6 +1223,7 @@ const ShifterSync = (function() {
 
     entries.forEach((entry) => {
       const parts = getEntryDisplayParts(entry);
+      const syncedEntry = isSyncedEntry(entry);
       const item = $('<div>')
         .addClass('entry-item')
         .toggleClass('has-branch-warning', parts.branch_issue_tone === 'warning')
@@ -919,7 +1242,7 @@ const ShifterSync = (function() {
             )
         );
 
-      if (state.editable) {
+      if (state.editable && !syncedEntry) {
         item.append(
           $('<button>')
             .attr('type', 'button')
@@ -980,6 +1303,10 @@ const ShifterSync = (function() {
     if (isEntryEmployeeSearchEnabled()) {
       nameInput
         .addClass('ss-employee-search-input')
+        .attr('data-search-kind', 'day');
+    } else if (isEntrySiteSearchEnabled()) {
+      nameInput
+        .addClass('ss-site-search-input')
         .attr('data-search-kind', 'day');
     }
     const addBtn = $('<button>')
@@ -1043,7 +1370,9 @@ const ShifterSync = (function() {
     $(document).off('keydown', '#ss-entry-modal-comment');
     $(document).off('keydown', '.copy-input');
     $(document).off('input', '.ss-employee-search-input');
+    $(document).off('input', '.ss-site-search-input');
     $(document).off('click', '.ss-employee-candidate-btn');
+    $(document).off('click', '.ss-site-candidate-btn');
     $(document).off('click', '.add-entry-btn');
     $(document).off('click', '.option-select-btn');
     $(document).off('click', '.copy-btn');
@@ -1055,6 +1384,7 @@ const ShifterSync = (function() {
     $(document).off('click', '.ss-entry-save-btn');
     $(document).off('change', '#ss-entry-modal-option');
     $(document).off('change', '#ss-entry-modal-site-branch');
+    $(document).off('click', '.ss-open-sync-source-btn');
   }
 
   function attachEventHandlers() {
@@ -1115,6 +1445,13 @@ const ShifterSync = (function() {
       scheduleEmployeeSearchForInput($(this));
     });
 
+    $(document).on('input', '.ss-site-search-input', function() {
+      if (!isEntrySiteSearchEnabled()) {
+        return;
+      }
+      scheduleSiteSearchForInput($(this));
+    });
+
     $(document).on('click', '.ss-employee-candidate-btn', function() {
       const $btn = $(this);
       const kind = String($btn.attr('data-search-kind') || '');
@@ -1134,6 +1471,24 @@ const ShifterSync = (function() {
         employee_name: $btn.attr('data-employee-name') || $btn.text() || ''
       });
       updateDayEmployeeSelectionNote(day);
+    });
+
+    $(document).on('click', '.ss-site-candidate-btn', function() {
+      const $btn = $(this);
+      const kind = String($btn.attr('data-search-kind') || '');
+      const payload = {
+        site_row_id: $btn.attr('data-site-row-id') || '',
+        site_id: $btn.attr('data-site-id') || '',
+        site_name: $btn.attr('data-site-name') || ''
+      };
+      if (kind === 'modal') {
+        setSiteSelectionForInput($('#ss-entry-modal-name'), payload);
+        return;
+      }
+      const day = String($btn.attr('data-day') || '');
+      const $input = $(`.entry-input[data-day='${day}']`);
+      setSiteSelectionForInput($input, payload);
+      updateDaySiteSelectionNote(day);
     });
 
     $(document).on('keydown', '.copy-input', function(e) {
@@ -1186,6 +1541,21 @@ const ShifterSync = (function() {
         setEntryModalBranchMessage('');
       }
     });
+
+    $(document).on('click', '.ss-open-sync-source-btn', function() {
+      if (typeof window.CLOUDSHIFT_OPEN_SYNC_SOURCE !== 'function') {
+        return;
+      }
+      const payload = {
+        sync_source_type: $(this).attr('data-sync-source-type') || '',
+        sync_source_project_id: $(this).attr('data-sync-source-project-id') || '',
+        sync_source_project_title: $(this).attr('data-sync-source-project-title') || '',
+        sync_source_month_key: $(this).attr('data-sync-source-month-key') || '',
+        sync_source_day: $(this).attr('data-sync-source-day') || '',
+        sync_source_entry_id: $(this).attr('data-sync-source-entry-id') || '',
+      };
+      window.CLOUDSHIFT_OPEN_SYNC_SOURCE(payload);
+    });
   }
 
   function addEntry(day) {
@@ -1199,11 +1569,15 @@ const ShifterSync = (function() {
 
     const options = getSelectedOptionsForDay(dayKey);
     const autoBranchFields = isSceneMode() ? autoBranchFieldsForOption(options[0] || null) : { site_branch_row_id: '', site_branch: '' };
+    const selectedSite = isPersonMode() ? getSelectedSiteDataForInput(nameInput) : { site_row_id: '', site_id: '', site_name: '' };
     const entry = normalizeEntry({
       id: makeEntryId(),
       value: formatEntryValue(options[0] || null, name),
       comment: commentInput.val().trim(),
       employee_number: getSelectedEmployeeNumberForInput(nameInput),
+      site_row_id: selectedSite.site_row_id,
+      site_id: selectedSite.site_id,
+      site_name: selectedSite.site_name,
       site_branch_row_id: autoBranchFields.site_branch_row_id,
       site_branch: autoBranchFields.site_branch
     });
@@ -1219,6 +1593,7 @@ const ShifterSync = (function() {
     nameInput.val('').focus();
     commentInput.val('');
     clearEmployeeSelectionForInput(nameInput);
+    clearSiteSelectionForInput(nameInput);
     clearSelectedOptionsForDay(dayKey);
     updateOptionSelectButton(dayKey);
   }
@@ -1229,7 +1604,10 @@ const ShifterSync = (function() {
       alert('\u30b3\u30d4\u30fc\u5143\u65e5\u306e\u30c7\u30fc\u30bf\u304c\u3042\u308a\u307e\u305b\u3093');
       return;
     }
-    setDayEntries(targetDay, getDayEntries(sourceDay).map((entry) => cloneEntry(entry, true)));
+    const copiedEntries = getDayEntries(sourceDay)
+      .filter((entry) => !isSyncedEntry(entry))
+      .map((entry) => cloneEntry(entry, true));
+    setDayEntries(targetDay, copiedEntries);
     updateEntryDisplay(targetDay);
     updateCapacityWarning(targetDay);
     $(`.copy-input[data-day='${targetDay}']`).val('');
@@ -1418,6 +1796,7 @@ const ShifterSync = (function() {
     } else {
       html += entries.map((entry, index) => {
         const parts = getEntryDisplayParts(entry);
+        const syncedEntry = isSyncedEntry(entry);
         return `
           <article class="ss-detail-card">
             <div class="ss-detail-row">
@@ -1428,7 +1807,7 @@ const ShifterSync = (function() {
                   ${parts.branch_issue_label ? `<span class="ss-issue-pill is-${escapeHtml(parts.branch_issue_tone || 'warning')}">${escapeHtml(parts.branch_issue_label)}</span>` : ''}
                 </div>
               </div>
-              ${state.editable ? `
+              ${state.editable && !syncedEntry ? `
                 <div class="ss-detail-actions">
                   <button type="button" class="ss-entry-edit-btn muted-link" data-day="${day}" data-entry-id="${entry.id}">\u7de8\u96c6</button>
                   <button type="button" class="ss-entry-delete-btn muted-link danger" data-day="${day}" data-entry-id="${entry.id}">\u524a\u9664</button>
@@ -1480,10 +1859,23 @@ const ShifterSync = (function() {
     const siteContext = state.siteContext && typeof state.siteContext === 'object' ? state.siteContext : null;
     const canChooseBranch = isSceneMode() && !!(siteContext && siteContext.is_linked);
     const hasBranches = currentSiteBranches().length > 0;
+    const syncedEntry = isSyncedEntry(entry);
+    const canOpenSource = canOpenSyncedSourceEntry(entry);
+    const selectedSite = {
+      site_row_id: String(entry.site_row_id || '').trim(),
+      site_id: String(entry.site_id || '').trim(),
+      site_name: String(entry.site_name || parsed.name || '').trim()
+    };
 
-    if (!state.editable) {
+    if (!state.editable || syncedEntry) {
       body.html(`
         <div class="ss-detail-form">
+          ${syncedEntry ? `
+            <div class="ss-detail-field">
+              <div class="ss-detail-label">\u540c\u671f</div>
+              <div class="ss-detail-static">\u81ea\u52d5\u53cd\u6620\u30a8\u30f3\u30c8\u30ea\u3067\u3059\u3002\u7de8\u96c6\u306f\u5143\u306e\u30b7\u30d5\u30c8\u5074\u3067\u884c\u3063\u3066\u304f\u3060\u3055\u3044\u3002</div>
+            </div>
+          ` : ''}
           <div class="ss-detail-field">
             <div class="ss-detail-label">\u540d\u524d</div>
             <div class="ss-detail-static">${escapeHtml(parsed.name)}</div>
@@ -1496,10 +1888,30 @@ const ShifterSync = (function() {
             <div class="ss-detail-label">\u30b3\u30e1\u30f3\u30c8</div>
             <div class="ss-detail-static">${entry.comment ? escapeHtml(entry.comment) : '<span class="ss-detail-empty-text">\u30b3\u30e1\u30f3\u30c8\u306a\u3057</span>'}</div>
           </div>
+          ${selectedSite.site_id || selectedSite.site_name ? `
+            <div class="ss-detail-field">
+              <div class="ss-detail-label">\u73fe\u5834\u30ea\u30f3\u30af</div>
+              <div class="ss-detail-static">${escapeHtml([selectedSite.site_id, selectedSite.site_name].filter(Boolean).join(' / '))}</div>
+            </div>
+          ` : ''}
           ${branchState.label ? `
             <div class="ss-detail-field">
               <div class="ss-detail-label">\u679d\u756a\u53f7</div>
               <div class="ss-detail-static">${escapeHtml(branchState.label)}</div>
+            </div>
+          ` : ''}
+          ${syncedEntry && canOpenSource ? `
+            <div class="ss-detail-actions foot">
+              <button
+                type="button"
+                class="btn-primary ss-open-sync-source-btn"
+                data-sync-source-type="${escapeHtml(entry.sync_source_type || '')}"
+                data-sync-source-project-id="${escapeHtml(entry.sync_source_project_id || '')}"
+                data-sync-source-project-title="${escapeHtml(entry.sync_source_project_title || '')}"
+                data-sync-source-month-key="${escapeHtml(entry.sync_source_month_key || '')}"
+                data-sync-source-day="${escapeHtml(entry.sync_source_day || '')}"
+                data-sync-source-entry-id="${escapeHtml(entry.sync_source_entry_id || '')}"
+              >反映元を編集</button>
             </div>
           ` : ''}
         </div>
@@ -1518,12 +1930,12 @@ const ShifterSync = (function() {
           <label class="ss-detail-label" for="ss-entry-modal-name">\u540d\u524d</label>
           <input
             id="ss-entry-modal-name"
-            class="ss-detail-input${isEntryEmployeeSearchEnabled() ? ' ss-employee-search-input' : ''}"
+            class="ss-detail-input${isEntryEmployeeSearchEnabled() ? ' ss-employee-search-input' : ''}${isEntrySiteSearchEnabled() ? ' ss-site-search-input' : ''}"
             type="text"
             value="${escapeHtml(parsed.name)}"
-            ${isEntryEmployeeSearchEnabled() ? 'data-search-kind="modal"' : ''}
+            ${isEntryEmployeeSearchEnabled() || isEntrySiteSearchEnabled() ? 'data-search-kind="modal"' : ''}
           >
-          <div id="ss-entry-modal-selected-note" class="ss-selected-note${entry.employee_number ? '' : ' ss-hidden'}">${entry.employee_number ? `選択中: ${escapeHtml(parsed.name)} / ${escapeHtml(entry.employee_number)}` : ''}</div>
+          <div id="ss-entry-modal-selected-note" class="ss-selected-note${entry.employee_number || selectedSite.site_id ? '' : ' ss-hidden'}">${entry.employee_number ? `選択中: ${escapeHtml(parsed.name)} / ${escapeHtml(entry.employee_number)}` : selectedSite.site_id ? `選択中: ${escapeHtml([selectedSite.site_id, selectedSite.site_name].filter(Boolean).join(' / '))}` : ''}</div>
           <div id="ss-entry-modal-candidate-panel" class="ss-candidate-panel ss-hidden" data-search-kind="modal"></div>
         </div>
         <div class="ss-detail-field">
@@ -1568,6 +1980,14 @@ const ShifterSync = (function() {
       $modalNameInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     }
 
+    if (isEntrySiteSearchEnabled() && (selectedSite.site_row_id || selectedSite.site_id)) {
+      const $modalNameInput = $('#ss-entry-modal-name');
+      $modalNameInput.attr('data-site-row-id', selectedSite.site_row_id);
+      $modalNameInput.attr('data-site-id', selectedSite.site_id);
+      $modalNameInput.attr('data-selected-site-name', selectedSite.site_name || parsed.name);
+      $modalNameInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    }
+
     if (canChooseBranch) {
       refreshEntryModalBranchOptions();
     }
@@ -1586,7 +2006,9 @@ const ShifterSync = (function() {
 
     const optionKey = $('#ss-entry-modal-option').val() || null;
     const comment = $('#ss-entry-modal-comment').val().trim();
-    const employeeNumber = getSelectedEmployeeNumberForInput($('#ss-entry-modal-name'));
+    const $nameInput = $('#ss-entry-modal-name');
+    const employeeNumber = getSelectedEmployeeNumberForInput($nameInput);
+    const selectedSiteForSave = isPersonMode() ? getSelectedSiteDataForInput($nameInput) : { site_row_id: '', site_id: '', site_name: '' };
     const siteBranchSelect = $('#ss-entry-modal-site-branch');
     const siteBranchRowId = siteBranchSelect.length ? normalizeSiteBranchRowId(siteBranchSelect.val()) : '';
     const selectedBranch = siteBranchSelect.length ? siteBranchSelect.find('option:selected') : $();
@@ -1602,6 +2024,9 @@ const ShifterSync = (function() {
         value: formatEntryValue(optionKey, name),
         comment,
         employee_number: employeeNumber,
+        site_row_id: selectedSiteForSave.site_row_id,
+        site_id: selectedSiteForSave.site_id,
+        site_name: selectedSiteForSave.site_name,
         site_branch_row_id: siteBranchRowId,
         site_branch: siteBranch
       });
@@ -1631,6 +2056,24 @@ const ShifterSync = (function() {
     note
       .text(selectedName ? `\u9078\u629e\u4e2d: ${selectedName} / ${selectedNumber}` : `\u9078\u629e\u4e2d: ${selectedNumber}`)
       .removeClass('ss-hidden');
+  }
+
+  function updateDaySiteSelectionNote(dayKey) {
+    const $input = $(`.entry-input[data-day='${dayKey}']`);
+    if (!$input.length) {
+      return;
+    }
+    const note = $(`.ss-selected-note[data-search-kind='day'][data-day='${dayKey}']`);
+    if (!note.length) {
+      return;
+    }
+    const selected = getSelectedSiteDataForInput($input);
+    const label = [selected.site_id, selected.site_name].filter(Boolean).join(' / ');
+    if (!label) {
+      note.text('').addClass('ss-hidden');
+      return;
+    }
+    note.text(`選択中: ${label}`).removeClass('ss-hidden');
   }
 
   function buildCalendar(year, month, mode, initialData = null, options = {}) {
@@ -1687,6 +2130,9 @@ const ShifterSync = (function() {
 
     const commentRows = [];
     const employeeNumberRows = [];
+    const siteRowIdRows = [];
+    const siteIdRows = [];
+    const siteNameRows = [];
     const siteBranchRowIdRows = [];
     const siteBranchRows = [];
     Object.keys(state.entriesPerDay)
@@ -1703,6 +2149,15 @@ const ShifterSync = (function() {
           if (entry.employee_number) {
             employeeNumberRows.push([employeeNumberRowPrefix, day, index, entry.employee_number]);
           }
+          if (entry.site_row_id) {
+            siteRowIdRows.push([siteRowIdRowPrefix, day, index, entry.site_row_id]);
+          }
+          if (entry.site_id) {
+            siteIdRows.push([siteIdRowPrefix, day, index, entry.site_id]);
+          }
+          if (entry.site_name) {
+            siteNameRows.push([siteNameRowPrefix, day, index, entry.site_name]);
+          }
           if (entry.site_branch_row_id) {
             siteBranchRowIdRows.push([siteBranchRowIdRowPrefix, day, index, entry.site_branch_row_id]);
           }
@@ -1715,6 +2170,9 @@ const ShifterSync = (function() {
     return rows
       .concat(commentRows)
       .concat(employeeNumberRows)
+      .concat(siteRowIdRows)
+      .concat(siteIdRows)
+      .concat(siteNameRows)
       .concat(siteBranchRowIdRows)
       .concat(siteBranchRows)
       .concat(state.mode === 'person' && state.targetEmployeeNumber ? [[projectEmployeeNumberRowPrefix, state.targetEmployeeNumber]] : [])
@@ -1772,6 +2230,7 @@ const ShifterSync = (function() {
     updateAllCapacityWarnings,
     updateAllBranchWarnings,
     getOptionMappings,
-    getOptionSectionsForMode: getOptionSectionsForModeExport
+    getOptionSectionsForMode: getOptionSectionsForModeExport,
+    openEntryModal
   };
 })();
