@@ -797,10 +797,40 @@ def list_siteplus_sites_for_admin():
                 "id": s.id,
                 "site_id": s.site_id,
                 "site_name": s.site_name,
+                "site_manager_last": s.site_manager_last,
+                "site_manager_first": s.site_manager_first,
+                "site_manager_id": s.site_manager_id,
+                "site_manager_name": s.manager_name(),
                 "office_code": s.office_code,
                 "is_active": s.is_active,
             }
             for s in sites
+        ]
+    })
+
+
+@user_management_bp.route("/api/siteplus/accessible-offices", methods=["GET"])
+@login_required
+def list_siteplus_accessible_offices():
+    """管理者向け：営業所コード入力補助用に全営業所を返す。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    offices = (
+        AccessOffice.query.join(AccessBranch, AccessOffice.branch_id == AccessBranch.id)
+        .order_by(AccessBranch.name, AccessOffice.name)
+        .all()
+    )
+    return jsonify({
+        "offices": [
+            {
+                "code": o.code or "",
+                "name": o.name,
+                "branch_name": o.branch.name if o.branch else "",
+                "branch_code": (o.branch.code or "") if o.branch else "",
+            }
+            for o in offices
+            if o.code
         ]
     })
 
@@ -831,27 +861,63 @@ def update_siteplus_site_office_code(site_row_id):
 @user_management_bp.route("/api/siteplus/sites/office-code/bulk", methods=["PUT"])
 @login_required
 def bulk_update_siteplus_office_codes():
-    """一括更新: [{"id": 1, "office_code": "112010"}, ...]"""
+    """一括更新。
+    インライン保存: {"items": [{"id": 1, "office_code": "112010"}, ...]}
+    一括編集モーダル: {"ids": [1,2,3], "office_code": "112010"?, "is_active": bool?}
+    """
     if not is_admin():
         return jsonify({"error": "管理者権限が必要です"}), 403
 
     data = request.json or {}
     items = data.get("items")
-    if not isinstance(items, list):
-        return jsonify({"error": "itemsはリストで指定してください"}), 400
+    ids = data.get("ids")
+
+    if isinstance(items, list):
+        updated = 0
+        missing: list = []
+        try:
+            for entry in items:
+                sid = _coerce_optional_int(entry.get("id")) if isinstance(entry, dict) else None
+                if sid is None:
+                    continue
+                site = Site.query.get(sid)
+                if not site:
+                    missing.append(sid)
+                    continue
+                site.office_code = _normalize_code(entry.get("office_code"))
+                updated += 1
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": f"一括更新に失敗しました: {str(e)}"}), 500
+        return jsonify({"success": True, "updated": updated, "missing": missing})
+
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "items または ids を指定してください"}), 400
+
+    has_office = "office_code" in data
+    has_active = "is_active" in data
+    if not has_office and not has_active:
+        return jsonify({"error": "変更する項目がありません"}), 400
+
+    office_value = _normalize_code(data.get("office_code")) if has_office else None
+    active_value = bool(data.get("is_active")) if has_active else None
 
     updated = 0
-    missing: list = []
+    missing = []
     try:
-        for entry in items:
-            sid = _coerce_optional_int(entry.get("id")) if isinstance(entry, dict) else None
+        for raw in ids:
+            sid = _coerce_optional_int(raw)
             if sid is None:
                 continue
             site = Site.query.get(sid)
             if not site:
                 missing.append(sid)
                 continue
-            site.office_code = _normalize_code(entry.get("office_code"))
+            if has_office:
+                site.office_code = office_value
+            if has_active:
+                site.is_active = active_value
             updated += 1
         db.session.commit()
     except Exception as e:
