@@ -579,6 +579,7 @@ function ensureBulkSiteEditor(){
             <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者 名</span><input name="site_manager_first" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="未入力なら変更しない"></label>
             <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">担当者ID</span><input name="site_manager_id" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3" placeholder="未入力なら変更しない"></label>
             <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">有効状態</span><select name="is_active_mode" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"><option value="__KEEP__">変更しない</option><option value="true">有効にする</option><option value="false">無効にする</option></select></label>
+            <label class="text-sm"><span class="mb-1.5 block font-medium text-slate-700">営業所コード</span><select name="office_code_mode" id="bulk-office-code" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"><option value="__KEEP__">変更しない</option><option value="">未設定にする</option></select><span class="mt-1 block text-xs text-slate-500">アクセス権限のある営業所から選択できます。</span></label>
             <label class="text-sm md:col-span-2"><span class="mb-1.5 block font-medium text-slate-700">配下枝番号のセグメント</span><select name="bulk_segment" class="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3"><option value="__KEEP__">変更しない</option><option value="">未設定にする</option><option value="役員">役員</option><option value="一般">一般</option><option value="旅客">旅客</option></select></label>
           </div>
           <div class="siteplus-modal-actions">
@@ -595,6 +596,19 @@ function ensureBulkSiteEditor(){
   $$('#bulk-site-modal [data-close-modal]').forEach((button)=>button.addEventListener('click',()=>closeModal('bulk-site-modal')));
 }
 
+function renderBulkOfficeCodeOptions(){
+  const sel=$('#bulk-office-code');
+  if(!sel) return;
+  const current=sel.value||'__KEEP__';
+  const offices=SITEPLUS.accessibleOffices||[];
+  const groups=new Map();
+  offices.forEach((o)=>{const g=o.branch_name||'(支店未設定)';if(!groups.has(g))groups.set(g,[]);groups.get(g).push(o)});
+  const parts=['<option value="__KEEP__">変更しない</option>','<option value="">未設定にする</option>'];
+  groups.forEach((items,g)=>{parts.push(`<optgroup label="${esc(g)}">`);items.forEach((o)=>{parts.push(`<option value="${esc(o.code)}">${esc(o.code)} / ${esc(o.name)}</option>`)});parts.push('</optgroup>')});
+  sel.innerHTML=parts.join('');
+  sel.value=current;
+}
+
 function openBulkSiteEditModal(){
   ensureBulkSiteEditor();
   if(!selectedSites().length){
@@ -603,7 +617,9 @@ function openBulkSiteEditModal(){
   }
   const form=$('#bulk-site-form');
   form.reset();
+  renderBulkOfficeCodeOptions();
   form.querySelector('[name="is_active_mode"]').value='__KEEP__';
+  form.querySelector('[name="office_code_mode"]').value='__KEEP__';
   form.querySelector('[name="bulk_segment"]').value='__KEEP__';
   $('#bulk-site-modal-summary').textContent=bulkSiteSummary();
   openModal('bulk-site-modal');
@@ -621,8 +637,9 @@ async function submitBulkSiteEdit(ev){
   const managerFirst=String(form.querySelector('[name="site_manager_first"]').value||'').trim();
   const managerId=String(form.querySelector('[name="site_manager_id"]').value||'').trim();
   const activeMode=String(form.querySelector('[name="is_active_mode"]').value||'__KEEP__');
+  const officeCodeMode=String(form.querySelector('[name="office_code_mode"]').value||'__KEEP__');
   const bulkSegment=String(form.querySelector('[name="bulk_segment"]').value||'__KEEP__');
-  const hasSiteChanges=!!(managerLast||managerFirst||managerId||activeMode!=='__KEEP__');
+  const hasSiteChanges=!!(managerLast||managerFirst||managerId||activeMode!=='__KEEP__'||officeCodeMode!=='__KEEP__');
   const hasSegmentChange=bulkSegment!=='__KEEP__';
   if(!hasSiteChanges && !hasSegmentChange){
     window.alert('変更内容を入力してください');
@@ -641,6 +658,9 @@ async function submitBulkSiteEdit(ev){
         confirm_changes: true,
         confirm_duplicate: true
       };
+      if(officeCodeMode!=='__KEEP__'){
+        payload.office_code=officeCodeMode;
+      }
       await req(`/tools/siteplus/api/sites/${site.id}`,{method:'PUT',body:JSON.stringify(payload)});
     }
     if(hasSegmentChange){

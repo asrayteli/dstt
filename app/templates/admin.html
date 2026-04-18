@@ -132,20 +132,40 @@
       <h2 class="text-xl font-semibold mb-2">現場リストPLUS：現場ごとの営業所コード</h2>
       <p class="text-sm text-gray-600 mb-4">
         各現場に営業所コードを割り当てます。ユーザーは自分の営業所コードに一致する現場のみ閲覧・編集できます。
-        一括保存は右下のボタンを押してください。
+        横断検索・複数選択による一括編集に対応しています。
       </p>
 
-      <div class="flex items-center gap-2 mb-3">
-        <input id="sp-filter" placeholder="現場ID・名称で検索" class="border rounded px-3 py-2 text-sm flex-1">
-        <button id="btn-sp-bulk" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">💾 一括保存</button>
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <input id="sp-filter" placeholder="契約番号・現場名・担当者名・担当者ID・営業所コードで検索" class="border rounded px-3 py-2 text-sm flex-1 min-w-[260px]">
+        <select id="sp-filter-active" class="border rounded px-3 py-2 text-sm">
+          <option value="all">稼働状態：すべて</option>
+          <option value="active">稼働中のみ</option>
+          <option value="inactive">停止中のみ</option>
+        </select>
+        <select id="sp-filter-office" class="border rounded px-3 py-2 text-sm">
+          <option value="__ALL__">営業所コード：すべて</option>
+          <option value="__NONE__">未設定のみ</option>
+        </select>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
+        <button id="btn-sp-select-all" type="button" class="px-3 py-1.5 border rounded hover:bg-gray-50">全選択（表示中）</button>
+        <button id="btn-sp-clear-sel" type="button" class="px-3 py-1.5 border rounded hover:bg-gray-50">選択解除</button>
+        <span id="sp-sel-count" class="text-gray-600">0 件選択中</span>
+        <button id="btn-sp-bulk-edit" type="button" class="bg-amber-600 text-white px-4 py-2 rounded hover:bg-amber-700 disabled:opacity-50" disabled>✏️ 選択した現場を一括編集</button>
+        <button id="btn-sp-bulk" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 ml-auto">💾 インライン編集を一括保存</button>
       </div>
 
       <div class="max-h-[60vh] overflow-auto border rounded">
         <table class="w-full text-sm">
           <thead class="bg-gray-50 sticky top-0">
             <tr>
+              <th class="p-2 text-left w-10"><input id="sp-head-check" type="checkbox"></th>
               <th class="p-2 text-left">契約番号</th>
               <th class="p-2 text-left">現場名</th>
+              <th class="p-2 text-left">担当者</th>
+              <th class="p-2 text-left">担当者ID</th>
+              <th class="p-2 text-left">稼働</th>
               <th class="p-2 text-left">営業所コード</th>
             </tr>
           </thead>
@@ -154,6 +174,36 @@
       </div>
     </div>
   </section>
+
+  <!-- ===== siteplus 一括編集モーダル ===== -->
+  <div id="modal-sp-bulk" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+      <h3 class="text-xl font-bold mb-2">✏️ 選択した現場を一括編集</h3>
+      <p id="sp-bulk-target" class="text-sm text-gray-600 mb-4">0 件の現場を対象とします。</p>
+      <form id="form-sp-bulk" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">営業所コード</label>
+          <select name="office_code_mode" class="w-full border rounded px-3 py-2 text-sm">
+            <option value="__KEEP__">変更しない</option>
+            <option value="">未設定にする</option>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">登録済みの営業所から選択できます。</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">稼働状態</label>
+          <select name="active_mode" class="w-full border rounded px-3 py-2 text-sm">
+            <option value="__KEEP__">変更しない</option>
+            <option value="true">稼働中にする</option>
+            <option value="false">停止中にする</option>
+          </select>
+        </div>
+        <div class="flex gap-2 pt-2">
+          <button type="submit" class="bg-amber-600 text-white px-4 py-2 rounded hover:bg-amber-700 flex-1">適用</button>
+          <button type="button" id="btn-cancel-sp-bulk" class="bg-gray-400 text-white px-4 py-2 rounded">キャンセル</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- ===== leave_mgr カレンダーの営業所コード ===== -->
   <section id="tab-leavemgr-codes" class="admin-section hidden">
@@ -842,32 +892,118 @@ async function deleteGroupRule(id) {
 }
 
 // ===== Siteplus codes =====
-const spState = { sites: [], dirty: new Map() };
+const spState = {
+  sites: [],
+  offices: [],
+  dirty: new Map(),
+  selected: new Set(),
+};
 
 async function loadSiteplusCodes() {
-  const { sites } = await api('/tools/user_management/api/siteplus/sites');
-  spState.sites = sites;
+  const [sitesRes, officesRes] = await Promise.all([
+    api('/tools/user_management/api/siteplus/sites'),
+    api('/tools/user_management/api/siteplus/accessible-offices').catch(() => ({ offices: [] })),
+  ]);
+  spState.sites = sitesRes.sites || [];
+  spState.offices = officesRes.offices || [];
   spState.dirty = new Map();
+  spState.selected = new Set();
+  populateSpOfficeFilter();
+  populateSpBulkOfficeSelect();
   renderSiteplusCodes();
 }
 
-function renderSiteplusCodes() {
+function spFilteredSites() {
   const q = ($('#sp-filter').value || '').trim().toLowerCase();
-  const rows = spState.sites.filter(s => {
+  const activeMode = $('#sp-filter-active').value;
+  const officeMode = $('#sp-filter-office').value;
+  return spState.sites.filter(s => {
+    if (activeMode === 'active' && !s.is_active) return false;
+    if (activeMode === 'inactive' && s.is_active) return false;
+    if (officeMode === '__NONE__') {
+      if (s.office_code) return false;
+    } else if (officeMode !== '__ALL__') {
+      if ((s.office_code || '') !== officeMode) return false;
+    }
     if (!q) return true;
-    return String(s.site_id).toLowerCase().includes(q) || String(s.site_name).toLowerCase().includes(q);
+    const hay = [
+      s.site_id, s.site_name,
+      s.site_manager_name, s.site_manager_last, s.site_manager_first,
+      s.site_manager_id, s.office_code,
+    ].map(v => String(v || '').toLowerCase()).join(' ');
+    return hay.includes(q);
   });
-  $('#sp-tbody').innerHTML = rows.map(s => {
-    const val = spState.dirty.has(s.id) ? spState.dirty.get(s.id) : (s.office_code || '');
-    const dirty = spState.dirty.has(s.id) ? 'bg-yellow-50' : '';
-    return `
-      <tr class="border-t ${dirty}">
-        <td class="p-2 font-mono">${escape(s.site_id)}</td>
-        <td class="p-2">${escape(s.site_name)}</td>
-        <td class="p-2"><input data-sid="${s.id}" class="sp-code-input border rounded px-2 py-1 font-mono text-sm w-40" value="${escape(val)}"></td>
-      </tr>
-    `;
-  }).join('');
+}
+
+function populateSpOfficeFilter() {
+  const sel = $('#sp-filter-office');
+  const current = sel.value || '__ALL__';
+  const opts = ['<option value="__ALL__">営業所コード：すべて</option>', '<option value="__NONE__">未設定のみ</option>'];
+  const seen = new Set();
+  spState.offices.forEach(o => {
+    if (!o.code || seen.has(o.code)) return;
+    seen.add(o.code);
+    opts.push(`<option value="${escape(o.code)}">${escape(o.code)} / ${escape(o.name)}</option>`);
+  });
+  spState.sites.forEach(s => {
+    if (s.office_code && !seen.has(s.office_code)) {
+      seen.add(s.office_code);
+      opts.push(`<option value="${escape(s.office_code)}">${escape(s.office_code)}（未登録）</option>`);
+    }
+  });
+  sel.innerHTML = opts.join('');
+  sel.value = current;
+}
+
+function populateSpBulkOfficeSelect() {
+  const sel = $('#form-sp-bulk [name=office_code_mode]');
+  if (!sel) return;
+  const current = sel.value || '__KEEP__';
+  const groups = new Map();
+  spState.offices.forEach(o => {
+    if (!o.code) return;
+    const g = o.branch_name || '（支店未設定）';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(o);
+  });
+  const parts = ['<option value="__KEEP__">変更しない</option>', '<option value="">未設定にする</option>'];
+  groups.forEach((items, g) => {
+    parts.push(`<optgroup label="${escape(g)}">`);
+    items.forEach(o => {
+      parts.push(`<option value="${escape(o.code)}">${escape(o.code)} / ${escape(o.name)}</option>`);
+    });
+    parts.push('</optgroup>');
+  });
+  sel.innerHTML = parts.join('');
+  sel.value = current;
+}
+
+function renderSiteplusCodes() {
+  const rows = spFilteredSites();
+  const tbody = $('#sp-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td class="p-3 text-gray-500" colspan="7">該当する現場がありません。</td></tr>';
+  } else {
+    tbody.innerHTML = rows.map(s => {
+      const val = spState.dirty.has(s.id) ? spState.dirty.get(s.id) : (s.office_code || '');
+      const dirty = spState.dirty.has(s.id) ? 'bg-yellow-50' : '';
+      const sel = spState.selected.has(s.id) ? 'checked' : '';
+      const active = s.is_active
+        ? '<span class="text-green-600 text-xs">稼働中</span>'
+        : '<span class="text-gray-400 text-xs">停止中</span>';
+      return `
+        <tr class="border-t ${dirty}">
+          <td class="p-2"><input type="checkbox" class="sp-row-check" data-sid="${s.id}" ${sel}></td>
+          <td class="p-2 font-mono">${escape(s.site_id)}</td>
+          <td class="p-2">${escape(s.site_name)}</td>
+          <td class="p-2">${escape(s.site_manager_name || '')}</td>
+          <td class="p-2 font-mono text-xs">${escape(s.site_manager_id || '')}</td>
+          <td class="p-2">${active}</td>
+          <td class="p-2"><input data-sid="${s.id}" class="sp-code-input border rounded px-2 py-1 font-mono text-sm w-40" value="${escape(val)}"></td>
+        </tr>
+      `;
+    }).join('');
+  }
   $$('.sp-code-input').forEach(inp => {
     inp.addEventListener('input', (e) => {
       const sid = parseInt(e.target.dataset.sid);
@@ -882,9 +1018,47 @@ function renderSiteplusCodes() {
       e.target.closest('tr').classList.toggle('bg-yellow-50', spState.dirty.has(sid));
     });
   });
+  $$('.sp-row-check').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const sid = parseInt(e.target.dataset.sid);
+      if (e.target.checked) spState.selected.add(sid);
+      else spState.selected.delete(sid);
+      updateSpSelectionUI();
+    });
+  });
+  updateSpSelectionUI();
 }
 
-$('#sp-filter')?.addEventListener('input', renderSiteplusCodes);
+function updateSpSelectionUI() {
+  $('#sp-sel-count').textContent = `${spState.selected.size} 件選択中`;
+  $('#btn-sp-bulk-edit').disabled = spState.selected.size === 0;
+  const visible = spFilteredSites();
+  const allChecked = visible.length > 0 && visible.every(s => spState.selected.has(s.id));
+  const head = $('#sp-head-check');
+  if (head) head.checked = allChecked;
+}
+
+['#sp-filter', '#sp-filter-active', '#sp-filter-office'].forEach(sel => {
+  $(sel)?.addEventListener('input', renderSiteplusCodes);
+  $(sel)?.addEventListener('change', renderSiteplusCodes);
+});
+
+$('#sp-head-check')?.addEventListener('change', (e) => {
+  const visible = spFilteredSites();
+  if (e.target.checked) visible.forEach(s => spState.selected.add(s.id));
+  else visible.forEach(s => spState.selected.delete(s.id));
+  renderSiteplusCodes();
+});
+
+$('#btn-sp-select-all')?.addEventListener('click', () => {
+  spFilteredSites().forEach(s => spState.selected.add(s.id));
+  renderSiteplusCodes();
+});
+
+$('#btn-sp-clear-sel')?.addEventListener('click', () => {
+  spState.selected.clear();
+  renderSiteplusCodes();
+});
 
 $('#btn-sp-bulk').addEventListener('click', async () => {
   if (spState.dirty.size === 0) return alert('変更はありません。');
@@ -894,6 +1068,42 @@ $('#btn-sp-bulk').addEventListener('click', async () => {
       method: 'PUT', body: { items }
     });
     alert(`${items.length}件を更新しました。`);
+    loadSiteplusCodes();
+  } catch (err) { alert('エラー: ' + err.message); }
+});
+
+$('#btn-sp-bulk-edit')?.addEventListener('click', () => {
+  if (spState.selected.size === 0) return;
+  const form = $('#form-sp-bulk');
+  form.reset();
+  form.office_code_mode.value = '__KEEP__';
+  form.active_mode.value = '__KEEP__';
+  $('#sp-bulk-target').textContent = `${spState.selected.size} 件の現場を対象とします。`;
+  $('#modal-sp-bulk').classList.remove('hidden');
+});
+
+$('#btn-cancel-sp-bulk')?.addEventListener('click', () => {
+  $('#modal-sp-bulk').classList.add('hidden');
+});
+
+$('#form-sp-bulk')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const officeMode = form.office_code_mode.value;
+  const activeMode = form.active_mode.value;
+  if (officeMode === '__KEEP__' && activeMode === '__KEEP__') {
+    return alert('変更する項目を選択してください。');
+  }
+  const ids = Array.from(spState.selected);
+  const body = { ids };
+  if (officeMode !== '__KEEP__') body.office_code = officeMode;
+  if (activeMode !== '__KEEP__') body.is_active = activeMode === 'true';
+  try {
+    const res = await api('/tools/user_management/api/siteplus/sites/office-code/bulk', {
+      method: 'PUT', body
+    });
+    alert(`${res.updated || 0} 件を更新しました。`);
+    $('#modal-sp-bulk').classList.add('hidden');
     loadSiteplusCodes();
   } catch (err) { alert('エラー: ' + err.message); }
 });
