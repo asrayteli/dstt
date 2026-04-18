@@ -113,19 +113,29 @@ def _user_granted_tool_keys(user) -> set[str]:
 # ------------------------------------------------------------------
 
 def user_office_ids(user=None) -> set[int]:
-    """ユーザーがアクセスできる営業所IDの集合（主営業所 + 追加付与）。"""
+    """ユーザーがアクセスできる営業所IDの集合（主営業所 + 追加付与）。
+
+    特例: 主営業所が未設定で支店のみ登録されているユーザーは、
+    その支店配下の全営業所を自動的にアクセス対象とする。
+    """
     user = user if user is not None else current_user
     if user is None or not getattr(user, "is_authenticated", False):
         return set()
     ids: set[int] = set()
-    if getattr(user, "office_id", None):
-        ids.add(int(user.office_id))
+    primary_office_id = getattr(user, "office_id", None)
+    if primary_office_id:
+        ids.add(int(primary_office_id))
     user_id = getattr(user, "id", None)
     if user_id:
         rows = UserAccessibleOffice.query.filter_by(user_id=user_id).all()
         for row in rows:
             if row.office_id is not None:
                 ids.add(int(row.office_id))
+    branch_id = getattr(user, "branch_id", None)
+    if branch_id and not primary_office_id:
+        rows = AccessOffice.query.filter_by(branch_id=int(branch_id)).all()
+        for row in rows:
+            ids.add(int(row.id))
     return ids
 
 

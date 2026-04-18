@@ -56,6 +56,47 @@ def _user_id() -> str:
     return str(getattr(current_user, "username", "") or "")
 
 
+def _accessible_office_rows() -> list:
+    """ユーザーが現場に紐付け可能な営業所（コード設定済み）。"""
+    from app.models import AccessOffice
+    from app.access_control import is_admin_user, user_office_ids
+
+    query = AccessOffice.query.filter(AccessOffice.code.isnot(None), AccessOffice.code != "")
+    if getattr(current_user, "id", None) is not None and not is_admin_user():
+        ids = user_office_ids()
+        if not ids:
+            return []
+        query = query.filter(AccessOffice.id.in_(ids))
+    return query.order_by(AccessOffice.branch_id.asc(), AccessOffice.code.asc()).all()
+
+
+def _accessible_office_codes() -> set[str]:
+    return {row.code for row in _accessible_office_rows() if row.code}
+
+
+def _validate_assignable_office_code(code: str) -> str:
+    """ユーザーが割り当て可能な営業所コードかをチェックする。
+
+    管理者は任意の存在する営業所コードを割り当て可能。
+    """
+    from app.models import AccessOffice
+    from app.access_control import is_admin_user
+
+    text = str(code or "").strip()
+    if not text:
+        return text
+    exists = AccessOffice.query.filter(AccessOffice.code == text).first()
+    if exists is None:
+        raise ValueError(f"営業所コード '{text}' は存在しません")
+    if getattr(current_user, "id", None) is None:
+        return text
+    if is_admin_user():
+        return text
+    if text not in _accessible_office_codes():
+        raise ValueError(f"営業所コード '{text}' へのアクセス権限がありません")
+    return text
+
+
 def _get_site_or_404(site_row_id: int) -> Site:
     site = db.session.get(Site, site_row_id)
     if site is None:
@@ -421,6 +462,9 @@ def _site_payload_from_request(data: dict, *, existing: Site | None = None) -> d
     else:
         office_code = existing.office_code if existing else None
 
+    if office_code is not None:
+        office_code = _validate_assignable_office_code(office_code)
+
     query = Site.query.filter(Site.site_id == site_id)
     if existing is not None:
         query = query.filter(Site.id != existing.id)
@@ -622,6 +666,31 @@ def _read_csv_rows_with_fallback(upload) -> list[list[str]]:
 @login_required
 def api_options():
     return jsonify({"options": _cloudshift_option_items()})
+
+
+@siteplus_bp.route("/api/accessible-offices")
+@login_required
+def api_accessible_offices():
+    from app.models import AccessBranch
+
+    rows = _accessible_office_rows()
+    branch_ids = {row.branch_id for row in rows if row.branch_id is not None}
+    branches = {
+        b.id: b for b in (AccessBranch.query.filter(AccessBranch.id.in_(branch_ids)).all() if branch_ids else [])
+    }
+    items = []
+    for row in rows:
+        branch = branches.get(row.branch_id)
+        items.append(
+            {
+                "code": row.code,
+                "name": row.name,
+                "branch_name": branch.name if branch else "",
+                "branch_code": branch.code if branch else "",
+            }
+        )
+    items.sort(key=lambda x: (x.get("branch_code") or "", x.get("code") or ""))
+    return jsonify({"offices": items})
 
 
 @siteplus_bp.route("/api/sites")
@@ -1055,6 +1124,14 @@ def api_import_site_table():
         return jsonify({"error": "CSVにデータがありません"}), 400
 
     actor = _user_id()
+    from app.models import AccessOffice
+    valid_office_codes = {
+        row.code
+        for row in AccessOffice.query.filter(
+            AccessOffice.code.isnot(None), AccessOffice.code != ""
+        ).all()
+        if row.code
+    }
     summary = {
         "total_rows": 0,
         "processed_rows": 0,
@@ -1062,6 +1139,7 @@ def api_import_site_table():
         "site_updated": 0,
         "branch_created": 0,
         "branch_skipped": 0,
+        "office_code_skipped": 0,
         "segment_created": 0,
         "segment_updated": 0,
         "segment_skipped": 0,
@@ -1078,9 +1156,19 @@ def api_import_site_table():
             site_manager_first = _normalize_required_text(row[3] if len(row) > 3 else "", "担当者(名)")
             site_manager_id = _normalize_required_text(row[4] if len(row) > 4 else "", "担当者番号")
             site_name = _normalize_required_text(row[5] if len(row) > 5 else "", "現場名")
+            office_code_raw = str(row[6] if len(row) > 6 else "").strip()
 
             if len(contract_code) != 8 or not contract_code.isdigit():
                 raise ValueError("契約コードは8桁の数字で入力してください")
+
+            office_code: str | None = None
+            if office_code_raw:
+                if office_code_raw not in valid_office_codes:
+                    summary["office_code_skipped"] += 1
+                    raise ValueError(
+                        f"営業所コード '{office_code_raw}' は存在しません。現場登録をスキップしました"
+                    )
+                office_code = office_code_raw
 
             site_id = _normalize_site_id(contract_code[:5])
             site_branch = _normalize_site_branch(contract_code[5:])
@@ -1093,6 +1181,7 @@ def api_import_site_table():
                     site_manager_last=site_manager_last,
                     site_manager_first=site_manager_first,
                     site_manager_id=site_manager_id,
+                    office_code=office_code,
                     site_register=actor,
                     site_updater=actor,
                     is_active=True,
@@ -1113,6 +1202,9 @@ def api_import_site_table():
                     updated = True
                 if site.site_manager_id != site_manager_id:
                     site.site_manager_id = site_manager_id
+                    updated = True
+                if office_code is not None and site.office_code != office_code:
+                    site.office_code = office_code
                     updated = True
                 if not site.is_active:
                     site.is_active = True

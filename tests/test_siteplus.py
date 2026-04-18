@@ -547,6 +547,50 @@ def test_siteplus_import_site_table_updates_contract_master_segment(tmp_path):
         assert master_row.site_branch == "001"
 
 
+def test_siteplus_import_site_table_with_office_code_column(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _user()
+
+    with client.application.app_context():
+        from app.models import AccessBranch, AccessOffice
+        b = AccessBranch(name="東京支店", code="T01")
+        db.session.add(b)
+        db.session.flush()
+        db.session.add(AccessOffice(branch_id=b.id, name="新宿営業所", code="S01"))
+        db.session.commit()
+
+    csv_text = "\n".join(
+        [
+            "契約コード,セグメント,担当者姓,担当者名,担当者ID,現場名,営業所コード",
+            "01234001,一般,山田,太郎,9001,取込現場,S01",
+            "02234001,一般,山田,太郎,9001,別現場,UNKNOWN",
+            "03234001,一般,山田,太郎,9001,コード無し現場,",
+        ]
+    )
+
+    response = client.post(
+        "/tools/siteplus/api/import-site-table",
+        data={"file": (io.BytesIO(csv_text.encode("utf-8")), "site_table.csv")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    summary = response.get_json()["summary"]
+    assert summary["total_rows"] == 3
+    assert summary["processed_rows"] == 2
+    assert summary["office_code_skipped"] == 1
+    assert any("UNKNOWN" in err["message"] for err in summary["errors"])
+
+    with client.application.app_context():
+        from app.models import Site
+        ok_site = Site.query.filter_by(site_id="01234").first()
+        assert ok_site is not None and ok_site.office_code == "S01"
+        no_code_site = Site.query.filter_by(site_id="03234").first()
+        assert no_code_site is not None and (no_code_site.office_code in (None, ""))
+        rejected = Site.query.filter_by(site_id="02234").first()
+        assert rejected is None
+
+
 def test_siteplus_api_sites_backfills_missing_contract_master_rows(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _user()
