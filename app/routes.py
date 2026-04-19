@@ -1,11 +1,12 @@
-from flask import Blueprint, render_template
+from flask import Blueprint, abort, render_template
 from flask_login import login_required, current_user
 
-from .access_control import is_admin_user
+from .access_control import is_admin_user, user_has_tool_access
 from .announcement_store import (
     get_unread_announcements_for_user,
     mark_announcements_read,
 )
+from .manuals import get_manual
 
 main = Blueprint("main", __name__)
 
@@ -26,3 +27,14 @@ def index():
         is_admin=is_admin,
         announcements_to_show=unread,
     )
+
+
+@main.route("/manual/<tool_key>")
+@login_required
+def tool_manual(tool_key):
+    manual = get_manual(tool_key)
+    if manual is None:
+        abort(404)
+    if not user_has_tool_access(tool_key):
+        abort(403)
+    return render_template("manual.html", manual=manual)
