@@ -5,7 +5,10 @@ from sqlalchemy import inspect, text
 from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
+from dotenv import load_dotenv
 from .navigation import NAV_ITEMS
+
+load_dotenv()
 
 from .models import db
 login_manager = LoginManager()

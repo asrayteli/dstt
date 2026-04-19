@@ -21,3 +21,4 @@ app/static/monthly_generator/uploads/*
 app/static/pluslist/uploads/*
 !app/static/pluslist/uploads/.gitkeep
 *.pyc
+.env
