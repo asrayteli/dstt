@@ -38,8 +38,8 @@ NAV_ITEMS = (
         "key": "password_tool",
         "href": "/tools/password_tool",
         "icon": "🔐",
-        "label": "パスワード生成・管理ツール",
-        "description": "強固なパスワードを生成 管理することができます。",
+        "label": "Power IDeep",
+        "description": "高レベルのIDパスワード管理ツール",
     },
     {
         "key": "workday",

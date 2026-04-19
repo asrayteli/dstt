@@ -24,6 +24,40 @@
     "orchid", "pearl", "penguin", "poppy", "primrose", "pulse", "ripple", "sandstone", "sequoia", "sierra",
     "snowcap", "sparrow", "tempest", "terrace", "thyme", "torrent", "truffle", "valley", "walnut", "whisper"
   ];
+  const GLOSSARY = {
+    "master-password": {
+      title: "マスターパスワード",
+      body: "この保管庫全体を開くための合言葉です。忘れると中身を取り出せないので、長くて自分だけが分かるものにしてください。",
+    },
+    "kdf-iterations": {
+      title: "鍵導出回数",
+      body: "入力したパスワードから暗号鍵を作る計算回数です。多いほど総当たりに強くなりますが、そのぶん開閉には少し時間がかかります。",
+    },
+    "auto-lock": {
+      title: "自動ロック",
+      body: "一定時間操作がないと、復号用の鍵をブラウザのメモリから消して保管庫を閉じる仕組みです。離席時の見られ防止に役立ちます。",
+    },
+    passphrase: {
+      title: "パスフレーズ",
+      body: "複数の単語をつないで作る長い合言葉です。長さを確保しやすく、入力しやすいので、覚えやすさを重視したいときに向いています。",
+    },
+    "symbol-set": {
+      title: "記号セット",
+      body: "ランダム生成で使ってよい記号の一覧です。ここから消した記号は生成候補に入らなくなります。",
+    },
+    "custom-charset": {
+      title: "カスタム文字セット",
+      body: "ここに入力した文字だけで生成する特別モードです。通常の小文字・大文字・数字・記号の設定より優先されます。",
+    },
+    "api-key": {
+      title: "API キー",
+      body: "サービス同士の接続認証に使う長いトークンです。人が直接入力するより、自動連携や開発用途で使われることが多い秘密情報です。",
+    },
+    totp: {
+      title: "TOTP シークレット",
+      body: "30秒ごとに変わる6桁コードを作る元データです。認証アプリの中に入っている秘密鍵と同じものです。",
+    },
+  };
 
   const state = {
     endpoints: {},
@@ -42,6 +76,9 @@
     editingId: null,
     revealedIds: new Set(),
     totpKeyCache: new Map(),
+    glossaryKey: "",
+    glossaryTrigger: null,
+    activeTab: "vault",
   };
 
   const els = {};
@@ -68,6 +105,7 @@
       itemsUrl: root.dataset.itemsUrl,
     };
 
+    decorateGlossaryTerms();
     bindEvents();
     restorePreferences();
     await refreshVaultState();
@@ -77,6 +115,7 @@
   function bindElements() {
     els.flashBanner = document.getElementById("flash-banner");
     els.vaultPill = document.getElementById("vault-pill");
+    els.vaultMetaStrip = document.getElementById("vault-meta-strip");
     els.vaultSummary = document.getElementById("vault-summary");
     els.vaultSecurityNote = document.getElementById("vault-security-note");
     els.lockVaultButton = document.getElementById("lock-vault-button");
@@ -134,6 +173,12 @@
     els.vaultSearch = document.getElementById("vault-search");
     els.vaultSort = document.getElementById("vault-sort");
     els.vaultList = document.getElementById("vault-list");
+    els.glossaryPopover = document.getElementById("glossary-popover");
+    els.glossaryPopoverTitle = document.getElementById("glossary-popover-title");
+    els.glossaryPopoverBody = document.getElementById("glossary-popover-body");
+    els.glossaryPopoverClose = document.getElementById("glossary-popover-close");
+    els.toolTabButtons = Array.from(document.querySelectorAll("[data-tool-tab]"));
+    els.toolTabPanels = Array.from(document.querySelectorAll("[data-tool-tab-panel]"));
   }
 
   function bindEvents() {
@@ -151,9 +196,124 @@
     els.vaultSort.addEventListener("change", renderVaultList);
     els.lockVaultButton.addEventListener("click", () => lockVault("手動でロックしました。", "warn"));
     els.autoLockMinutes.addEventListener("change", handleAutoLockPreferenceChange);
+    els.toolTabButtons.forEach((button) => {
+      button.addEventListener("click", () => switchToolTab(button.dataset.toolTab || ""));
+    });
+    if (els.glossaryPopoverClose) {
+      els.glossaryPopoverClose.addEventListener("click", hideGlossaryPopover);
+    }
+    document.addEventListener("click", handleGlossaryDocumentClick);
+    document.addEventListener("keydown", handleGlossaryKeydown);
+    window.addEventListener("resize", hideGlossaryPopover);
+    window.addEventListener("scroll", hideGlossaryPopover, true);
 
-    ["pointerdown", "keydown", "scroll", "focusin"].forEach((eventName) => {
-      document.addEventListener(eventName, touchSession, { passive: true });
+  }
+
+  function decorateGlossaryTerms() {
+    document.querySelectorAll(".js-glossary-term").forEach((node) => {
+      const key = node.dataset.glossaryKey || "";
+      const glossary = GLOSSARY[key];
+      const sourceText = (node.textContent || "").trim() || glossary?.title || "";
+      if (!glossary || !sourceText) {
+        return;
+      }
+      node.classList.add("glossary-term");
+      node.innerHTML = Array.from(sourceText)
+        .map((char) => {
+          if (char === " ") {
+            return "<span class=\"glossary-term__space\" aria-hidden=\"true\"></span>";
+          }
+          return `<span class="glossary-term__char" role="button" tabindex="0" data-glossary-key="${escapeHtml(key)}" aria-label="${escapeHtml(glossary.title)} の説明を表示">${escapeHtml(char)}</span>`;
+        })
+        .join("");
+    });
+  }
+
+  function handleGlossaryDocumentClick(event) {
+    const trigger = event.target.closest(".glossary-term__char");
+    if (trigger) {
+      event.preventDefault();
+      const key = trigger.dataset.glossaryKey || "";
+      if (state.glossaryKey === key && state.glossaryTrigger === trigger) {
+        hideGlossaryPopover();
+      } else {
+        showGlossaryPopover(trigger, key);
+      }
+      return;
+    }
+
+    if (els.glossaryPopover && els.glossaryPopover.contains(event.target)) {
+      return;
+    }
+
+    hideGlossaryPopover();
+  }
+
+  function handleGlossaryKeydown(event) {
+    const trigger = event.target.closest(".glossary-term__char");
+    if (trigger && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      showGlossaryPopover(trigger, trigger.dataset.glossaryKey || "");
+      return;
+    }
+
+    if (event.key === "Escape") {
+      hideGlossaryPopover();
+    }
+  }
+
+  function showGlossaryPopover(trigger, key) {
+    const glossary = GLOSSARY[key];
+    if (!glossary || !els.glossaryPopover || !els.glossaryPopoverTitle || !els.glossaryPopoverBody) {
+      return;
+    }
+
+    state.glossaryKey = key;
+    state.glossaryTrigger = trigger;
+    els.glossaryPopover.hidden = false;
+    els.glossaryPopoverTitle.textContent = glossary.title;
+    els.glossaryPopoverBody.textContent = glossary.body;
+    document.querySelectorAll(".glossary-term").forEach((node) => {
+      node.classList.toggle("glossary-term--active", node.contains(trigger));
+    });
+    positionGlossaryPopover(trigger);
+  }
+
+  function positionGlossaryPopover(trigger) {
+    if (!els.glossaryPopover || !trigger) {
+      return;
+    }
+
+    const margin = 12;
+    const offset = 14;
+    const rect = trigger.getBoundingClientRect();
+    const popoverWidth = els.glossaryPopover.offsetWidth;
+    const popoverHeight = els.glossaryPopover.offsetHeight;
+    let left = rect.left + rect.width / 2 - popoverWidth / 2;
+    left = Math.max(margin, Math.min(window.innerWidth - popoverWidth - margin, left));
+
+    let top = rect.bottom + offset;
+    let placement = "bottom";
+    if (top + popoverHeight > window.innerHeight - margin) {
+      top = rect.top - popoverHeight - offset;
+      placement = "top";
+    }
+    top = Math.max(margin, top);
+
+    els.glossaryPopover.dataset.placement = placement;
+    els.glossaryPopover.style.left = `${left}px`;
+    els.glossaryPopover.style.top = `${top}px`;
+  }
+
+  function hideGlossaryPopover() {
+    if (!els.glossaryPopover) {
+      return;
+    }
+    els.glossaryPopover.hidden = true;
+    state.glossaryKey = "";
+    state.glossaryTrigger = null;
+    document.querySelectorAll(".glossary-term--active").forEach((node) => {
+      node.classList.remove("glossary-term--active");
     });
   }
 
@@ -161,6 +321,10 @@
     const savedMinutes = Number.parseInt(localStorage.getItem("dstt-vault-auto-lock-minutes") || "", 10);
     if (Number.isFinite(savedMinutes) && savedMinutes >= 1 && savedMinutes <= 240) {
       state.autoLockMinutes = savedMinutes;
+    }
+    const savedTab = localStorage.getItem("dstt-vault-active-tab") || "vault";
+    if (["vault", "generator", "editor", "list"].includes(savedTab)) {
+      state.activeTab = savedTab;
     }
     els.autoLockMinutes.value = String(state.autoLockMinutes);
     els.changeKdfIterations.value = els.setupKdfIterations.value || "600000";
@@ -427,6 +591,10 @@
     state.revealedIds.clear();
     state.totpKeyCache.clear();
     state.editingId = null;
+    if (state.activeTab !== "vault") {
+      state.activeTab = "vault";
+    }
+    hideGlossaryPopover();
     clearEntryForm();
     renderAll();
     if (message) {
@@ -435,6 +603,7 @@
   }
 
   function renderAll() {
+    renderToolTabs();
     renderGeneratorMode();
     renderVaultSummary();
     renderAuthPanels();
@@ -449,36 +618,67 @@
     const passphraseMode = els.generatorMode.value === "passphrase";
     els.generatorRandomFields.hidden = passphraseMode;
     els.generatorPassphraseFields.hidden = !passphraseMode;
+    els.generatorForm.dataset.mode = passphraseMode ? "passphrase" : "random";
+  }
+
+  function isVaultReady() {
+    return Boolean(state.vault) && state.unlocked;
+  }
+
+  function renderToolTabs() {
+    const ready = isVaultReady();
+    els.toolTabButtons.forEach((button) => {
+      const tab = button.dataset.toolTab || "";
+      const locked = !ready && tab !== "vault";
+      const active = button.dataset.toolTab === state.activeTab;
+      button.classList.toggle("is-active", active);
+      button.classList.toggle("is-locked", locked);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+      button.setAttribute("aria-disabled", locked ? "true" : "false");
+      button.disabled = locked;
+    });
+    els.toolTabPanels.forEach((panel) => {
+      panel.hidden = panel.dataset.toolTabPanel !== state.activeTab;
+    });
+  }
+
+  function switchToolTab(tabName, options) {
+    if (!["vault", "generator", "editor", "list"].includes(tabName)) {
+      return;
+    }
+    if (!isVaultReady() && tabName !== "vault") {
+      showFlash("先に保管庫を作成してアンロックしてください。", "warn");
+      tabName = "vault";
+    }
+    state.activeTab = tabName;
+    if (!options || options.persist !== false) {
+      localStorage.setItem("dstt-vault-active-tab", tabName);
+    }
+    hideGlossaryPopover();
+    renderToolTabs();
   }
 
   function renderVaultSummary() {
-    const entries = state.unlocked ? state.entries : [];
-    const health = computeVaultHealth(entries);
-
-    if (!state.vault) {
-      els.vaultPill.textContent = "未作成";
-      els.vaultPill.dataset.state = "missing";
-      els.vaultSummary.innerHTML = [
-        statCard("保管庫", "未作成"),
-        statCard("保存件数", "0"),
-        statCard("重複", "0"),
-        statCard("TOTP", "0"),
-      ].join("");
-      els.vaultSecurityNote.textContent = "最初に保管庫を作成すると、以後は暗号化データだけがサーバーへ保存されます。";
+    if (!state.unlocked) {
+      els.vaultMetaStrip.hidden = true;
+      els.vaultPill.textContent = state.vault ? "ロック中" : "未作成";
+      els.vaultPill.dataset.state = state.vault ? "locked" : "missing";
       els.lockVaultButton.disabled = true;
       return;
     }
 
-    els.vaultPill.textContent = state.unlocked ? "アンロック中" : "ロック中";
-    els.vaultPill.dataset.state = state.unlocked ? "unlocked" : "locked";
-    els.lockVaultButton.disabled = !state.unlocked;
+    const health = computeVaultHealth(state.entries);
+    els.vaultMetaStrip.hidden = false;
+    els.vaultPill.textContent = "アンロック中";
+    els.vaultPill.dataset.state = "unlocked";
+    els.lockVaultButton.disabled = false;
     els.vaultSummary.innerHTML = [
-      statCard("保存件数", String(entries.length)),
+      statCard("保存件数", String(state.entries.length)),
       statCard("重複パスワード", String(health.duplicateCount)),
       statCard("要注意", String(health.weakCount + health.staleCount)),
       statCard("TOTP", String(health.totpCount)),
     ].join("");
-    els.vaultSecurityNote.textContent = `鍵導出方式 ${state.vault.kdf_name} / ${Number(state.vault.kdf_iterations).toLocaleString("ja-JP")} 回。`;
+    els.vaultSecurityNote.hidden = true;
   }
 
   function renderAuthPanels() {
@@ -486,7 +686,6 @@
     els.setupPanel.hidden = vaultExists;
     els.unlockPanel.hidden = !vaultExists || state.unlocked;
     els.changeMasterPanel.hidden = !vaultExists || !state.unlocked;
-    els.vaultWorkspace.hidden = !state.unlocked;
     els.entrySaveButton.disabled = !state.unlocked;
   }
 
@@ -500,13 +699,22 @@
     els.generatorResults.className = "result-list";
     els.generatorResults.innerHTML = state.results
       .map((result, index) => {
+        const profile = describeSecretProfile(result.secret);
         return `
           <article class="result-card strength-card" data-score="${result.strength.score}">
-            <p class="result-card__title">候補 ${index + 1}</p>
+            <div class="result-card__head">
+              <div>
+                <p class="result-card__eyebrow">候補 ${index + 1}</p>
+                <p class="result-card__title">${escapeHtml(result.strength.label)}</p>
+              </div>
+              <span class="status-badge" data-tone="${result.strength.score}">推定 ${result.strength.bits} bits</span>
+            </div>
             <div class="result-card__secret">${escapeHtml(result.secret)}</div>
-            <p class="result-card__meta">
-              ${escapeHtml(result.strength.label)} / 推定 ${result.strength.bits} bits / ${escapeHtml(result.strength.detail)}
-            </p>
+            <div class="meta-pills">
+              <span class="meta-pill">${escapeHtml(profile.lengthLabel)}</span>
+              <span class="meta-pill">${escapeHtml(profile.composition)}</span>
+            </div>
+            <p class="result-card__meta">${escapeHtml(result.strength.detail)}</p>
             <div class="result-card__actions">
               <button class="button button--primary" type="button" data-action="copy-generated" data-index="${index}">コピー</button>
               <button class="button button--secondary" type="button" data-action="use-generated" data-index="${index}">入力欄へ使う</button>
@@ -524,6 +732,7 @@
         const secret = state.results[Number(button.dataset.index)].secret;
         els.entryPassword.value = secret;
         renderEditorStrength();
+        switchToolTab("editor", { persist: false });
         showFlash("生成結果を入力欄に反映しました。", "success");
       });
     });
@@ -540,8 +749,13 @@
     els.editorStrengthPanel.className = "strength-panel";
     els.editorStrengthPanel.innerHTML = `
       <div class="strength-card" data-score="${strength.score}">
-        <p class="result-card__title">${escapeHtml(strength.label)}</p>
-        <p class="result-card__meta">推定 ${strength.bits} bits / ${escapeHtml(strength.detail)}</p>
+        <div class="strength-card__head">
+          <p class="result-card__title">${escapeHtml(strength.label)}</p>
+          <span class="status-badge" data-tone="${strength.score}">${strength.bits ? `推定 ${strength.bits} bits` : "内容メモ"}</span>
+        </div>
+        <div class="strength-meter"><span style="width: ${strengthProgress(strength)}%;"></span></div>
+        <p class="result-card__meta">${escapeHtml(strength.detail)}</p>
+        <p class="strength-card__tip">${escapeHtml(strengthAdvice(strength, els.entryType.value))}</p>
       </div>
     `;
   }
@@ -563,27 +777,49 @@
     els.vaultList.className = "vault-list";
     els.vaultList.innerHTML = filteredEntries
       .map((entry) => {
+        const strength = scoreSecret(entry.secret, entry.secretType);
         const revealed = state.revealedIds.has(entry.id);
         const secretToShow = revealed ? entry.secret : maskSecret(entry.secret);
+        const safeUrl = safeExternalUrl(entry.url);
         const totpBlock = entry.totpSecret
           ? `
-            <div class="vault-card__code">
-              <span class="js-totp-code" data-entry-id="${entry.id}">------</span>
-              <span class="muted js-totp-remaining" data-entry-id="${entry.id}">30s</span>
+            <div class="totp-panel">
+              <span class="totp-panel__label">ワンタイムコード</span>
+              <div class="vault-card__code">
+                <span class="js-totp-code" data-entry-id="${entry.id}">------</span>
+                <span class="muted js-totp-remaining" data-entry-id="${entry.id}">30s</span>
+              </div>
             </div>
           `
           : "";
         const historyText = entry.history.length ? `過去 ${entry.history.length} 件の変更履歴` : "履歴なし";
+        const tagBlock = entry.tags.length
+          ? `
+            <div class="meta-pills">
+              ${entry.tags.map((tag) => `<span class="meta-pill meta-pill--tag">${escapeHtml(tag)}</span>`).join("")}
+            </div>
+          `
+          : "";
         return `
-          <article class="vault-card">
-            <p class="vault-card__title">${escapeHtml(entry.title || "無題の資格情報")}</p>
-            <p class="vault-card__meta">
-              ${escapeHtml(entry.secretType)} / ${escapeHtml(entry.username || "ユーザー名未設定")} / 更新 ${escapeHtml(formatDate(entry.updatedAt))}
-            </p>
-            ${entry.url ? `<p class="vault-card__meta">${escapeHtml(entry.url)}</p>` : ""}
+          <article class="vault-card strength-card" data-score="${strength.score}">
+            <div class="vault-card__head">
+              <div>
+                <p class="vault-card__eyebrow">更新 ${escapeHtml(formatDate(entry.updatedAt))}</p>
+                <p class="vault-card__title">${escapeHtml(entry.title || "無題の資格情報")}</p>
+              </div>
+              <span class="status-badge" data-tone="${strength.score}">${escapeHtml(secretTypeLabel(entry.secretType))}</span>
+            </div>
+            <div class="meta-pills">
+              <span class="meta-pill">${escapeHtml(entry.username || "ユーザー名未設定")}</span>
+              <span class="meta-pill">${escapeHtml(historyText)}</span>
+              ${strength.bits ? `<span class="meta-pill">推定 ${strength.bits} bits</span>` : ""}
+              ${safeUrl ? `<a class="meta-pill meta-pill--link" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">URL を開く</a>` : ""}
+            </div>
             <div class="vault-card__secret">${escapeHtml(secretToShow)}</div>
             ${totpBlock}
-            <p class="vault-card__meta">${escapeHtml(entry.tags.join(", ") || "タグなし")} / ${escapeHtml(historyText)}</p>
+            ${tagBlock}
+            ${entry.url && !safeUrl ? `<p class="vault-card__meta">${escapeHtml(entry.url)}</p>` : ""}
+            ${entry.notes ? `<p class="vault-card__note">${escapeHtml(truncateText(entry.notes, 120))}</p>` : ""}
             <div class="vault-card__actions">
               <button class="button button--primary" type="button" data-action="copy-secret" data-id="${entry.id}">コピー</button>
               <button class="button button--secondary" type="button" data-action="toggle-reveal" data-id="${entry.id}">${revealed ? "隠す" : "表示"}</button>
@@ -719,6 +955,7 @@
         els.entryTags.value = entry.tags.join(", ");
         els.entryNotes.value = entry.notes;
         renderEditorStrength();
+        switchToolTab("editor", { persist: false });
         window.scrollTo({ top: 0, behavior: "smooth" });
       });
     });
@@ -1104,6 +1341,79 @@
       bits,
       detail: "長さや文字種が不足しています。",
     };
+  }
+
+  function describeSecretProfile(secret) {
+    const parts = [];
+    if (/[a-z]/.test(secret)) {
+      parts.push("小文字");
+    }
+    if (/[A-Z]/.test(secret)) {
+      parts.push("大文字");
+    }
+    if (/\d/.test(secret)) {
+      parts.push("数字");
+    }
+    if (/[^A-Za-z0-9]/.test(secret)) {
+      parts.push("記号");
+    }
+    return {
+      lengthLabel: `${Array.from(String(secret || "")).length}文字`,
+      composition: parts.join("・") || "単一構成",
+    };
+  }
+
+  function strengthProgress(strength) {
+    if (strength.score === "good") {
+      return Math.max(74, Math.min(100, strength.bits));
+    }
+    if (strength.score === "warn") {
+      return Math.max(44, Math.min(78, Math.round(strength.bits * 0.82)));
+    }
+    return Math.max(16, Math.min(48, Math.round(strength.bits * 0.58)));
+  }
+
+  function strengthAdvice(strength, secretType) {
+    if (secretType === "secure-note") {
+      return "長文メモ向けです。タイトルとタグを付けると、あとで探しやすくなります。";
+    }
+    if (strength.score === "good") {
+      return "このまま保存して問題ありません。別サービスでの使い回しだけ避けるとさらに安心です。";
+    }
+    if (strength.score === "warn") {
+      return "実用はできますが、18文字前後まで伸ばすか文字種を増やすとより強くなります。";
+    }
+    return "長さを増やし、小文字・大文字・数字・記号のうち3種類以上を混ぜるのがおすすめです。";
+  }
+
+  function secretTypeLabel(secretType) {
+    if (secretType === "api-key") {
+      return "APIキー";
+    }
+    if (secretType === "secure-note") {
+      return "セキュアメモ";
+    }
+    return "パスワード";
+  }
+
+  function safeExternalUrl(value) {
+    try {
+      const url = new URL(value);
+      if (/^https?:$/i.test(url.protocol)) {
+        return url.toString();
+      }
+    } catch (_error) {
+      return "";
+    }
+    return "";
+  }
+
+  function truncateText(value, maxLength) {
+    const text = String(value || "").trim();
+    if (!text || text.length <= maxLength) {
+      return text;
+    }
+    return `${text.slice(0, maxLength).trimEnd()}…`;
   }
 
   async function buildVaultCreationPayload(masterPassword, iterations) {

@@ -81,6 +81,20 @@ def test_password_tool_page_uses_hardened_headers(app_ctx):
     assert b"cdn.tailwindcss.com" not in response.data
 
 
+def test_password_tool_page_exposes_glossary_and_tabs(app_ctx):
+    username = _create_user(app_ctx)
+    client = app_ctx.test_client()
+    _login(client, username)
+
+    response = client.get("/tools/password_tool/")
+
+    assert response.status_code == 200
+    assert b'data-glossary-key="master-password"' in response.data
+    assert b'data-tool-tab="generator"' in response.data
+    assert b"Zero-Plaintext Vault" not in response.data
+    assert b'id="glossary-popover"' in response.data
+
+
 def test_password_vault_create_and_store_encrypted_items(app_ctx):
     from app.models import PasswordVault, PasswordVaultItem
 
