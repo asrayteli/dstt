@@ -163,6 +163,49 @@ class UserToolPermission(db.Model):
         }
 
 
+class PasswordVault(db.Model):
+    """Client-side encrypted password vault metadata."""
+
+    __tablename__ = 'password_vaults'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True, index=True)
+    kdf_name = db.Column(db.String(50), nullable=False, default='PBKDF2-SHA-256')
+    kdf_iterations = db.Column(db.Integer, nullable=False, default=600000)
+    salt_b64 = db.Column(db.Text, nullable=False)
+    check_nonce_b64 = db.Column(db.Text, nullable=False)
+    check_ciphertext_b64 = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = db.relationship(
+        'User',
+        backref=db.backref('password_vault', uselist=False, cascade='all, delete-orphan'),
+    )
+    items = db.relationship(
+        'PasswordVaultItem',
+        back_populates='vault',
+        cascade='all, delete-orphan',
+        order_by='PasswordVaultItem.updated_at.desc()',
+    )
+
+
+class PasswordVaultItem(db.Model):
+    """Opaque encrypted vault item. The server never stores plaintext fields."""
+
+    __tablename__ = 'password_vault_items'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    vault_id = db.Column(db.Integer, db.ForeignKey('password_vaults.id'), nullable=False, index=True)
+    schema_version = db.Column(db.Integer, nullable=False, default=1)
+    nonce_b64 = db.Column(db.Text, nullable=False)
+    ciphertext_b64 = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    vault = db.relationship('PasswordVault', back_populates='items')
+
+
 class GroupToolPermission(db.Model):
     """支店/営業所/担当による一括ツールアクセス権付与。
     branch_id, office_id, department_id のうちNULLは「任意」を意味する。

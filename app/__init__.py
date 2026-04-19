@@ -56,10 +56,12 @@ def _ensure_access_control_schema(app):
         except Exception:
             db.session.rollback()
 
-def create_app():
+def create_app(test_config=None):
     app = Flask(__name__, static_folder='./static/')
-    app.config['SECRET_KEY'] = 'your_secret_key'
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'  # SQLiteデータベース
+    app.config['SECRET_KEY'] = os.environ.get('DSTT_SECRET_KEY', 'change-this-secret-key')
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DSTT_DATABASE_URI', 'sqlite:///users.db')  # SQLiteデータベース
+    if test_config:
+        app.config.update(test_config)
     db.init_app(app)
     login_manager.login_view = "auth.login"  # ログインページのエンドポイント
     login_manager.init_app(app)
@@ -71,10 +73,6 @@ def create_app():
     @login_manager.user_loader
     def load_user(user_id):
         return User.query.filter_by(username=user_id).first()
-
-
-    app.secret_key = 'test'
-
     @app.context_processor
     def inject_navigation():
         from .access_control import (

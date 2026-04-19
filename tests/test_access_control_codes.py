@@ -19,11 +19,14 @@ def app_ctx(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.chdir(tmp_path)
 
-    app = create_app()
-    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
-    app.config["TESTING"] = True
-    app.config["WTF_CSRF_ENABLED"] = False
-    app.config["SECRET_KEY"] = "test"
+    app = create_app(
+        {
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}",
+            "TESTING": True,
+            "WTF_CSRF_ENABLED": False,
+            "SECRET_KEY": "test",
+        }
+    )
 
     with app.app_context():
         db.drop_all()
