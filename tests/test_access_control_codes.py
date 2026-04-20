@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -11,8 +12,32 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
+def _stub_optional_deps():
+    if "openpyxl" in sys.modules:
+        return
+
+    openpyxl = types.ModuleType("openpyxl")
+    openpyxl.Workbook = object
+
+    styles = types.ModuleType("openpyxl.styles")
+    styles.Font = object
+    styles.PatternFill = object
+    styles.Border = object
+    styles.Side = object
+    styles.Alignment = object
+
+    sys.modules["openpyxl"] = openpyxl
+    sys.modules["openpyxl.styles"] = styles
+
+    if "qrcode" not in sys.modules:
+        qrcode = types.ModuleType("qrcode")
+        qrcode.make = lambda *_args, **_kwargs: types.SimpleNamespace(save=lambda *_a, **_k: None)
+        sys.modules["qrcode"] = qrcode
+
+
 @pytest.fixture()
 def app_ctx(tmp_path, monkeypatch):
+    _stub_optional_deps()
     from app import create_app
     from app.models import db
 

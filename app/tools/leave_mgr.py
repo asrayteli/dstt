@@ -10,7 +10,7 @@ from typing import Any
 leave_mgr_bp = Blueprint("leave_mgr", __name__, url_prefix="/tools/leave_mgr")
 
 # 初期管理者ID（ハードコーディング）
-INITIAL_ADMIN_ID = "3243012"
+INITIAL_ADMIN_ID = None
 
 # 休暇種類と色の定義
 LEAVE_TYPES = {
@@ -41,10 +41,8 @@ def ensure_data_directories():
     permissions_file = os.path.join(data_path, 'permissions.json')
     if not os.path.exists(permissions_file):
         initial_permissions = {
-            "admins": [INITIAL_ADMIN_ID],
-            "user_calendars": {
-                INITIAL_ADMIN_ID: []
-            }
+            "admins": [],
+            "user_calendars": {}
         }
         with open(permissions_file, 'w', encoding='utf-8') as f:
             json.dump(initial_permissions, f, ensure_ascii=False, indent=2)
@@ -62,7 +60,7 @@ def load_permissions():
         with open(permissions_file, 'r', encoding='utf-8') as f:
             return json.load(f)
     except:
-        return {"admins": [INITIAL_ADMIN_ID], "user_calendars": {}}
+        return {"admins": [], "user_calendars": {}}
 
 def save_permissions(permissions):
     """権限情報を保存"""
@@ -966,7 +964,7 @@ def get_users_permissions():
         user_info = {
             "user_id": uid,
             "is_admin": uid in permissions.get('admins', []),
-            "is_protected": uid == INITIAL_ADMIN_ID,  # 初期管理者は保護対象
+            "is_protected": False,
             "calendars": []
         }
         
@@ -996,7 +994,7 @@ def revoke_permission():
     calendar_id = data.get('calendar_id')  # calendar権限剥奪時のみ使用
     
     # 初期管理者の保護
-    if target_user_id == INITIAL_ADMIN_ID:
+    if INITIAL_ADMIN_ID and target_user_id == INITIAL_ADMIN_ID:
         return jsonify({"error": "初期管理者の権限は変更できません"}), 403
     
     permissions = load_permissions()

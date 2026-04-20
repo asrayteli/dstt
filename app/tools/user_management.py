@@ -15,9 +15,9 @@ from app.models import (
     UserToolPermission,
 )
 from app.access_control import (
-    LEGACY_ADMIN_USERNAME,
     TOOL_ACCESS_CATEGORIES,
     is_admin_user,
+    is_legacy_admin_username,
     set_tool_access,
 )
 from app.navigation import NAV_ITEMS
@@ -55,8 +55,8 @@ def _serialize_user(user: User) -> dict:
         "id": user.id,
         "username": user.username,
         "name": user.name or "unknown",
-        "is_admin": bool(user.is_admin) or user.username == LEGACY_ADMIN_USERNAME,
-        "is_legacy_admin": user.username == LEGACY_ADMIN_USERNAME,
+        "is_admin": is_admin_user(user),
+        "is_legacy_admin": is_legacy_admin_username(user.username),
         "branch_id": user.branch_id,
         "office_id": user.office_id,
         "department_id": user.department_id,
@@ -113,7 +113,7 @@ def create_user():
             username=username,
             password_hash=generate_password_hash(password),
             name=name,
-            is_admin=bool(data.get('is_admin', False)),
+            is_admin=bool(data.get('is_admin', False)) or is_legacy_admin_username(username),
             branch_id=data.get('branch_id'),
             office_id=data.get('office_id'),
             department_id=data.get('department_id'),
@@ -141,9 +141,10 @@ def delete_user(user_id):
     user = User.query.get(user_id)
     if not user:
         return jsonify({"error": "ユーザーが見つかりません"}), 404
+    if is_legacy_admin_username(user.username):
+        return jsonify({"error": "初期管理者は削除できません"}), 400
     if user.username == current_user.username:
         return jsonify({"error": "自分自身を削除することはできません"}), 400
-    if user.username == LEGACY_ADMIN_USERNAME:
         return jsonify({"error": "初期管理者は削除できません"}), 400
 
     try:
@@ -245,9 +246,9 @@ def update_user_profile(user_id):
             user.name = name
 
     if "is_admin" in data:
-        if user.username == LEGACY_ADMIN_USERNAME and not data.get("is_admin"):
+        if is_legacy_admin_username(user.username) and not data.get("is_admin"):
             return jsonify({"error": "初期管理者の権限は外せません"}), 400
-        user.is_admin = bool(data.get("is_admin"))
+        user.is_admin = True if is_legacy_admin_username(user.username) else bool(data.get("is_admin"))
 
     user.branch_id = branch_id
     user.office_id = office_id

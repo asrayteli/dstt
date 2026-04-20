@@ -5,10 +5,49 @@ from sqlalchemy import inspect, text
 from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
+import secrets
+from pathlib import Path
 from .navigation import NAV_ITEMS
 
 from .models import db
 login_manager = LoginManager()
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_or_create_local_secret(app: Flask) -> str:
+    secret_path = Path(app.instance_path) / "secret_key"
+    if secret_path.exists():
+        secret_key = secret_path.read_text(encoding="utf-8").strip()
+        if secret_key:
+            return secret_key
+
+    secret_path.parent.mkdir(parents=True, exist_ok=True)
+    secret_key = secrets.token_urlsafe(48)
+    secret_path.write_text(secret_key, encoding="utf-8")
+    return secret_key
+
+
+def _resolve_secret_key(app: Flask, test_config=None) -> str:
+    if test_config and test_config.get("SECRET_KEY"):
+        return str(test_config["SECRET_KEY"])
+
+    secret_key = (os.environ.get("DSTT_SECRET_KEY") or "").strip()
+    if secret_key:
+        return secret_key
+
+    return _load_or_create_local_secret(app)
+
+
+def _resolve_database_uri(test_config=None) -> str:
+    if test_config and test_config.get("SQLALCHEMY_DATABASE_URI"):
+        return str(test_config["SQLALCHEMY_DATABASE_URI"])
+    return os.environ.get("DSTT_DATABASE_URI", "sqlite:///users.db")
 
 
 def _ensure_access_control_schema(app):
@@ -58,11 +97,22 @@ def _ensure_access_control_schema(app):
 
 def create_app(test_config=None):
     app = Flask(__name__, static_folder='./static/')
-    app.config['SECRET_KEY'] = os.environ.get('DSTT_SECRET_KEY', 'change-this-secret-key')
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DSTT_DATABASE_URI', 'sqlite:///users.db')  # SQLiteデータベース
+    app.config['SECRET_KEY'] = _resolve_secret_key(app, test_config)
+    app.config['SQLALCHEMY_DATABASE_URI'] = _resolve_database_uri(test_config)
+    app.config['ALLOW_SELF_REGISTRATION'] = _env_bool('DSTT_ALLOW_SELF_REGISTRATION', False)
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = os.environ.get('DSTT_SESSION_COOKIE_SAMESITE', 'Lax')
+    app.config['SESSION_COOKIE_SECURE'] = _env_bool(
+        'DSTT_SESSION_COOKIE_SECURE',
+        not bool(test_config and test_config.get('TESTING')),
+    )
+    app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+    app.config['REMEMBER_COOKIE_SAMESITE'] = os.environ.get('DSTT_REMEMBER_COOKIE_SAMESITE', 'Lax')
+    app.config['REMEMBER_COOKIE_SECURE'] = app.config['SESSION_COOKIE_SECURE']
     if test_config:
         app.config.update(test_config)
     db.init_app(app)
+    login_manager.init_app(app)
     login_manager.login_view = "auth.login"  # ログインページのエンドポイント
     login_manager.init_app(app)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
@@ -111,17 +161,29 @@ def create_app(test_config=None):
     from .tools.password_tool import password_tool_bp
     app.register_blueprint(password_tool_bp)
 
-    from .tools.workday import workday_bp
-    app.register_blueprint(workday_bp)
+    try:
+        from .tools.workday import workday_bp
+        app.register_blueprint(workday_bp)
+    except ModuleNotFoundError:
+        if not app.config.get("TESTING"):
+            raise
 
     from .tools.pdf_power import pdf_power_bp
     app.register_blueprint(pdf_power_bp)
 
-    from .tools.share import share_bp
-    app.register_blueprint(share_bp)
+    try:
+        from .tools.share import share_bp
+        app.register_blueprint(share_bp)
+    except ModuleNotFoundError:
+        if not app.config.get("TESTING"):
+            raise
 
-    from .tools.car_inspe import car_inspe_bp
-    app.register_blueprint(car_inspe_bp)
+    try:
+        from .tools.car_inspe import car_inspe_bp
+        app.register_blueprint(car_inspe_bp)
+    except ModuleNotFoundError:
+        if not app.config.get("TESTING"):
+            raise
 
     from .tools.shiftersync import shiftersync_bp
     app.register_blueprint(shiftersync_bp)

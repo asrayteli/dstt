@@ -1,8 +1,4 @@
 {
-  "admins": [
-    "3243012"
-  ],
-  "user_offices": {
-    "3243012": []
-  }
+  "admins": [],
+  "user_offices": {}
 }

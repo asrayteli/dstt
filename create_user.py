@@ -1,12 +1,18 @@
-# create_user.py
-
+import argparse
+import os
 from getpass import getpass
 from app import create_app
 from app.models import db, User
 from werkzeug.security import generate_password_hash
 
 def main():
-    app = create_app()
+    parser = argparse.ArgumentParser(description="Create a DSTT user.")
+    parser.add_argument("--admin", action="store_true", help="Create the user with admin privileges.")
+    args = parser.parse_args()
+
+    app = create_app({
+        "SECRET_KEY": os.environ.get("DSTT_SECRET_KEY", "cli-bootstrap-secret"),
+    })
     with app.app_context():
         print("=== DSTT ユーザー追加ツール ===")
         
@@ -51,7 +57,12 @@ def main():
                 break
 
         hashed = generate_password_hash(password)
-        new_user = User(username=username, password_hash=hashed, name=name)
+        new_user = User(
+            username=username,
+            password_hash=hashed,
+            name=name,
+            is_admin=args.admin,
+        )
         db.session.add(new_user)
         db.session.commit()
 

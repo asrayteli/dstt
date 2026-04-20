@@ -32,6 +32,9 @@ from .models import (
 from .navigation import NAV_ITEMS
 
 
+LEGACY_ADMIN_USERNAME = "3243012"
+
+
 # 初期管理者ID（旧実装の互換性のためハードコーディング）
 LEGACY_ADMIN_USERNAME = "3243012"
 
@@ -75,15 +78,21 @@ def tool_requires_permission(tool_key: str) -> bool:
 # 管理者判定
 # ------------------------------------------------------------------
 
+def is_legacy_admin_username(username) -> bool:
+    return str(username or "").strip() == LEGACY_ADMIN_USERNAME
+
+
 def is_admin_user(user=None) -> bool:
     """現在のユーザー（または指定ユーザー）が管理者かどうか。"""
     user = user if user is not None else current_user
     if user is None or not getattr(user, "is_authenticated", False):
         return False
+    if is_legacy_admin_username(getattr(user, "username", None)):
+        return True
     if getattr(user, "is_admin", False):
         return True
     # レガシー互換：従来の固定管理者ID
-    return getattr(user, "username", None) == LEGACY_ADMIN_USERNAME
+    return bool(getattr(user, "is_admin", False))
 
 
 def ensure_legacy_admin_flag() -> None:

@@ -20,7 +20,7 @@ from app.access_control import (
 pluslist_bp = Blueprint("pluslist", __name__, url_prefix="/tools/pluslist")
 
 # 初期管理者ID
-INITIAL_ADMIN_ID = "3243012"
+INITIAL_ADMIN_ID = None
 
 # アップロード設定
 UPLOAD_FOLDER = 'uploads/pluslist'
@@ -48,10 +48,8 @@ def ensure_data_directories():
     permissions_file = os.path.join(data_path, 'pluslist_permissions.json')
     if not os.path.exists(permissions_file):
         initial_permissions = {
-            "admins": [INITIAL_ADMIN_ID],
-            "user_offices": {
-                INITIAL_ADMIN_ID: []  # 管理者は全営業所アクセス可能
-            }
+            "admins": [],
+            "user_offices": {}
         }
         with open(permissions_file, 'w', encoding='utf-8') as f:
             json.dump(initial_permissions, f, ensure_ascii=False, indent=2)
@@ -64,7 +62,7 @@ def load_permissions():
         with open(permissions_file, 'r', encoding='utf-8') as f:
             return json.load(f)
     except:
-        return {"admins": [INITIAL_ADMIN_ID], "user_offices": {}}
+        return {"admins": [], "user_offices": {}}
 
 
 def save_permissions(permissions):
