@@ -129,10 +129,16 @@ def create_app(test_config=None):
             get_accessible_nav_items,
             is_admin_user,
         )
+        from flask_login import current_user
+        try:
+            uid = current_user.username if current_user.is_authenticated else ""
+        except Exception:
+            uid = ""
         return {
             "app_navigation_items": get_accessible_nav_items(),
             "all_navigation_items": NAV_ITEMS,
             "current_user_is_admin": is_admin_user(),
+            "current_user_id": uid,
         }
 
     # トップページ

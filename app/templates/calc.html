@@ -1,8 +1,30 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-md mx-auto mt-10 bg-white rounded-xl shadow p-6">
-  <h2 class="text-xl font-bold mb-4 text-center">🧮 電卓</h2>
+<div class="mx-auto max-w-5xl space-y-6 pb-10">
+  <section class="dstt-hero" style="background: linear-gradient(135deg, #4338ca 0%, #6366f1 55%, #8b5cf6 100%);">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">CALCULATOR</div>
+        <div>
+          <h1 class="dstt-hero-title">電卓</h1>
+          <p class="dstt-hero-subtitle">最もシンプルな四則演算電卓。キーボード入力にも対応し、計算履歴を即座に振り返れます。</p>
+        </div>
+      </div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">LOGIN</div>
+          <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
+        </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">SHORTCUT</div>
+          <div class="dstt-hero-card-value">Enter で計算 / Esc でクリア</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+<div class="max-w-md mx-auto bg-white rounded-xl shadow p-6">
 
   <!-- 表示領域 -->
   <input id="display" type="text" readonly class="w-full mb-4 text-right text-2xl p-2 border rounded bg-gray-50" />
@@ -32,6 +54,7 @@
       <!-- 履歴がここに追加されます -->
     </ul>
   </div>
+</div>
 </div>
 
 <script>

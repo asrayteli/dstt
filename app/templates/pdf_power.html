@@ -4,29 +4,29 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/pdf_power_control.css') }}">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <div class="pdf-power-shell container mx-auto px-4 py-6 max-w-7xl">
-  <section class="pdf-power-hero">
-    <div class="pdf-power-hero-grid">
-      <div class="pdf-power-hero-copy">
-        <div class="pdf-power-pill">DOCUMENT CONTROL</div>
+  <section class="dstt-hero" style="background: linear-gradient(135deg, #991b1b 0%, #dc2626 50%, #f97316 100%);">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">DOCUMENT CONTROL</div>
         <div>
-          <h1 class="pdf-power-title">📚 PowerPDF</h1>
-          <p class="pdf-power-subtitle">PDFの操作ならPowerPDF。並び替えから編集、圧縮から抽出。できないことはありません。</p>
+          <h1 class="dstt-hero-title">PowerPDF</h1>
+          <p class="dstt-hero-subtitle">PDFの操作ならPowerPDF。並び替えから編集、圧縮から抽出。できないことはありません。</p>
         </div>
       </div>
-      <div class="pdf-power-hero-meta">
-        <div class="pdf-power-hero-card is-login">
-          <div class="pdf-power-hero-card-label">LOGIN</div>
-          <div class="pdf-power-hero-card-value">{{ user_id or 'USER' }}</div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">LOGIN</div>
+          <div class="dstt-hero-card-value">{{ user_id or current_user_id or 'USER' }}</div>
         </div>
-        <div class="pdf-power-hero-card is-summary">
-          <div class="pdf-power-hero-card-label">SUMMARY</div>
-          <div id="pdfPowerHeroToolLabel" class="pdf-power-hero-card-value">コントロール</div>
-          <div id="pdfPowerHeroSummary" class="pdf-power-hero-card-note">複数PDFを読み込み、ページ単位で選択・並べ替え・回転しながら、出力まで一括で整えます。</div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">SUMMARY</div>
+          <div id="pdfPowerHeroToolLabel" class="dstt-hero-card-value">コントロール</div>
+          <div id="pdfPowerHeroSummary" class="dstt-hero-card-note">複数PDFを読み込み、ページ単位で選択・並べ替え・回転しながら、出力まで一括で整えます。</div>
         </div>
-        <div class="pdf-power-hero-card is-wide">
-          <div class="pdf-power-hero-card-label">DETAIL</div>
-          <div id="pdfPowerHeroDetailValue" class="pdf-power-hero-card-value">0ファイル / 0 B</div>
-          <div id="pdfPowerHeroDetailNote" class="pdf-power-hero-card-note">アップロードされたPDFの合計容量とファイル数をここに表示します。</div>
+        <div class="dstt-hero-card is-wide">
+          <div class="dstt-hero-card-label">DETAIL</div>
+          <div id="pdfPowerHeroDetailValue" class="dstt-hero-card-value">0ファイル / 0 B</div>
+          <div id="pdfPowerHeroDetailNote" class="dstt-hero-card-note">アップロードされたPDFの合計容量とファイル数をここに表示します。</div>
         </div>
       </div>
     </div>

@@ -1,8 +1,30 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-xl mx-auto mt-10 bg-white rounded-xl shadow p-6">
-  <h2 class="text-xl font-bold mb-4">🚗 車検証PDF名変更ツール</h2>
+<div class="mx-auto max-w-5xl space-y-6 pb-10">
+  <section class="dstt-hero" style="background: linear-gradient(135deg, #b91c1c 0%, #ea580c 55%, #f59e0b 100%);">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">VEHICLE INSPECTION</div>
+        <div>
+          <h1 class="dstt-hero-title">車検証ツール</h1>
+          <p class="dstt-hero-subtitle">車検証PDFをOCRで読み取り、車検満了日・登録番号・保管場所を含むファイル名へ自動変換します。</p>
+        </div>
+      </div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">LOGIN</div>
+          <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
+        </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">FORMAT</div>
+          <div class="dstt-hero-card-value">満了日_ID_保管場所_登録番号.pdf</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+<div class="max-w-xl mx-auto bg-white rounded-xl shadow p-6">
 
   {% if error %}
     <div class="mb-4 text-red-600 font-semibold">
@@ -41,5 +63,6 @@
     <p>・ファイル名：<code>車検満了日_ID_保管場所_登録番号.pdf</code></p>
     <p>・失敗時はエラーメッセージが記載されたテキストファイルがダウンロードされます</p>
   </div>
+</div>
 </div>
 {% endblock %}

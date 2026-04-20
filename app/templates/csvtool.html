@@ -37,6 +37,78 @@
     overflow: hidden;
   }
 
+  body.pcsv-editor-window #pcsvApp {
+    height: 100vh;
+    margin: 0;
+  }
+
+  /* ===== PowerCSV Entry Screen ===== */
+  .pcsv-entry-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 768px) {
+    .pcsv-entry-grid { grid-template-columns: 1fr 1fr; }
+  }
+  .pcsv-entry-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1.75rem 1.5rem;
+    border-radius: 24px;
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    text-align: left;
+    cursor: pointer;
+    width: 100%;
+  }
+  .pcsv-entry-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 44px rgba(15, 23, 42, 0.12);
+    border-color: #2563eb;
+  }
+  .pcsv-entry-card-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+    color: #2563eb;
+  }
+  .pcsv-entry-card.is-create .pcsv-entry-card-icon {
+    background: linear-gradient(135deg, #dcfce7, #bbf7d0);
+    color: #16a34a;
+  }
+  .pcsv-entry-card-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #0f172a;
+  }
+  .pcsv-entry-card-desc {
+    font-size: 0.875rem;
+    color: #475569;
+    line-height: 1.55;
+  }
+  .pcsv-entry-card-cta {
+    margin-top: auto;
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 1.1rem;
+    border-radius: 9999px;
+    background: #0f172a;
+    color: #ffffff;
+    font-size: 0.825rem;
+    font-weight: 600;
+  }
+  .pcsv-entry-card.is-create .pcsv-entry-card-cta { background: #16a34a; }
+
   /* Header */
   .pcsv-header {
     display: flex;
@@ -1009,7 +1081,75 @@
   .pcsv-bm-label { font-size:10px; color:#6b7280; margin-left:6px; }
 </style>
 
-<div id="pcsvApp">
+<!-- ===== PowerCSV エントリ画面（編集ウィンドウ以外で表示） ===== -->
+<div id="pcsvEntryScreen" class="mx-auto max-w-5xl space-y-6 pb-10">
+  <section class="dstt-hero" style="background: linear-gradient(135deg, #064e3b 0%, #047857 50%, #10b981 100%);">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">POWER CSV</div>
+        <div>
+          <h1 class="dstt-hero-title">PowerCSV</h1>
+          <p class="dstt-hero-subtitle">CSV操作の専門ツール。編集・検証・変換をこれ一つで。読み込みまたは新規作成を選ぶと、専用ウィンドウで広々と編集できます。</p>
+        </div>
+      </div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">LOGIN</div>
+          <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
+        </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">FORMATS</div>
+          <div class="dstt-hero-card-value">CSV / TSV</div>
+          <div class="dstt-hero-card-note">UTF-8 / Shift_JIS / EUC-JP 自動検出</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="pcsv-entry-grid">
+    <button type="button" class="pcsv-entry-card" onclick="pcsvEntryOpen('open')">
+      <div class="pcsv-entry-card-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+      </div>
+      <div class="pcsv-entry-card-title">既存CSVを読み込む</div>
+      <div class="pcsv-entry-card-desc">手元の CSV / TSV ファイルを開いて編集します。エンコーディングは自動判定されます。</div>
+      <span class="pcsv-entry-card-cta">編集ウィンドウを開く →</span>
+    </button>
+    <button type="button" class="pcsv-entry-card is-create" onclick="pcsvEntryOpen('new')">
+      <div class="pcsv-entry-card-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+      </div>
+      <div class="pcsv-entry-card-title">新規CSVを作成</div>
+      <div class="pcsv-entry-card-desc">空のテーブルから作成。行数・列数・ファイル名は次のステップで指定します。</div>
+      <span class="pcsv-entry-card-cta">編集ウィンドウを開く →</span>
+    </button>
+  </div>
+</div>
+
+<script>
+  (function() {
+    var params = new URLSearchParams(window.location.search);
+    var isEditor = params.get('editor_window') === '1';
+    var entry = document.getElementById('pcsvEntryScreen');
+    if (isEditor) {
+      document.body.classList.add('pcsv-editor-window');
+      if (entry) entry.style.display = 'none';
+    }
+  })();
+
+  function pcsvEntryOpen(action) {
+    var url = '/tools/csvtool/?editor_window=1&action=' + encodeURIComponent(action);
+    var w = Math.min(window.screen.availWidth || 1600, 1600);
+    var h = Math.min(window.screen.availHeight || 1000, 1000);
+    var features = 'width=' + w + ',height=' + h + ',menubar=no,toolbar=no,location=no,status=no';
+    var win = window.open(url, '_blank', features);
+    if (!win) {
+      window.location.href = url;
+    }
+  }
+</script>
+
+<div id="pcsvApp" style="display:none">
   <!-- Header -->
   <div class="pcsv-header">
     <div class="pcsv-header-title">PowerCSV</div>
@@ -4298,6 +4438,14 @@ function gotoBookmark(id){
 
 // ========== Init ==========
 document.addEventListener('DOMContentLoaded',()=>{
+  // editor_window モードでのみ pcsvApp を表示し、action パラメータに応じた起動を行う
+  var _pcsvParams = new URLSearchParams(window.location.search);
+  var _pcsvIsEditor = _pcsvParams.get('editor_window') === '1';
+  var _pcsvApp = document.getElementById('pcsvApp');
+  if (_pcsvIsEditor && _pcsvApp) {
+    _pcsvApp.style.display = 'flex';
+    document.title = 'PowerCSV - 編集';
+  }
   initUpload(); initKeyboard();
   // Drag selection
   const gw=document.getElementById('gridWrap');
@@ -4321,6 +4469,16 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
   // Prevent default context menu on the app
   document.getElementById('pcsvApp').addEventListener('contextmenu',e=>{if(hasData())e.preventDefault()});
+
+  // editor_window モード: action パラメータに応じて自動起動
+  if (_pcsvIsEditor) {
+    var _pcsvAction = _pcsvParams.get('action');
+    if (_pcsvAction === 'open') {
+      setTimeout(function(){ try { triggerUpload(); } catch(e){} }, 80);
+    } else if (_pcsvAction === 'new') {
+      setTimeout(function(){ try { openNewCSVModal(); } catch(e){} }, 80);
+    }
+  }
 });
 </script>
 {% endblock %}

@@ -33,19 +33,36 @@
   .day-cell { min-height: 42px; }
 </style>
 
-<div class="workday-shell max-w-7xl mx-auto mt-3">
-  <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-6">
-    <div>
-      <h1 class="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">営業日計算ツール</h1>
-      <p class="text-sm text-slate-600 mt-1">期間集計 / カレンダー出力を1画面で完結</p>
+<div class="max-w-7xl mx-auto space-y-6 pb-10">
+  <section class="dstt-hero" style="background: linear-gradient(135deg, #0e7490 0%, #0891b2 50%, #16a34a 100%);">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">WORKDAY CALC</div>
+        <div>
+          <h1 class="dstt-hero-title">営業日計算ツール</h1>
+          <p class="dstt-hero-subtitle">指定期間の営業日数を計算し、カレンダーとしても出力。日本の祝日に対応した営業日カウンタです。</p>
+        </div>
+        <div class="dstt-hero-actions">
+          <button type="button" class="dstt-hero-btn dstt-hero-btn-light" onclick="setRangeThisMonth()">今月</button>
+          <button type="button" class="dstt-hero-btn dstt-hero-btn-ghost" onclick="setRangeNextMonth()">翌月</button>
+          <button type="button" class="dstt-hero-btn dstt-hero-btn-ghost" onclick="setWeekdays('weekday')">平日</button>
+          <button type="button" class="dstt-hero-btn dstt-hero-btn-ghost" onclick="setWeekdays('all')">全曜日</button>
+        </div>
+      </div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">LOGIN</div>
+          <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
+        </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">FUNCTIONS</div>
+          <div class="dstt-hero-card-value">期間集計 / カレンダー出力</div>
+        </div>
+      </div>
     </div>
-    <div class="flex flex-wrap gap-2">
-      <button type="button" class="chip" onclick="setRangeThisMonth()">今月</button>
-      <button type="button" class="chip" onclick="setRangeNextMonth()">翌月</button>
-      <button type="button" class="chip" onclick="setWeekdays('weekday')">平日</button>
-      <button type="button" class="chip" onclick="setWeekdays('all')">全曜日</button>
-    </div>
-  </div>
+  </section>
+
+<div class="workday-shell">
 
   {% if errors %}
     <div class="glass p-4 mb-4 border-red-300 text-red-700">
@@ -202,6 +219,7 @@
       </div>
     </section>
   {% endif %}
+</div>
 </div>
 
 <script>

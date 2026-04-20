@@ -396,16 +396,31 @@
   }
 </style>
 
-<div class="rename-card">
-  <!-- Header -->
-  <div class="rename-header">
-    <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-    <div>
-      <h2>ファイル名一括変換ツール</h2>
-      <div class="subtitle">自由なパターンで複数ファイルを一括リネーム</div>
+<div class="mx-auto" style="max-width: 960px;">
+  <section class="dstt-hero" style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #60a5fa 100%); margin-bottom: 1.25rem;">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">BATCH RENAME</div>
+        <div>
+          <h1 class="dstt-hero-title">一括リネーム</h1>
+          <p class="dstt-hero-subtitle">アップロードしたファイル名を自由なパターンで一括変換。連番・置換・前後付加に対応します。</p>
+        </div>
+      </div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">LOGIN</div>
+          <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
+        </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">FUNCTIONS</div>
+          <div class="dstt-hero-card-value">置換 / 連番 / 前後付加</div>
+        </div>
+      </div>
     </div>
-  </div>
+  </section>
+</div>
 
+<div class="rename-card">
   <div class="rename-body">
     <form action="/tools/rename" method="POST" enctype="multipart/form-data" id="renameForm">
 

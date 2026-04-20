@@ -3,8 +3,30 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', filename='monthly_generator/css/monthly_generator.css') }}">
 
-<div class="max-w-4xl mx-auto mt-6 bg-white rounded-xl shadow-lg p-6">
-    <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">月次ジェネレーター</h2>
+<div class="max-w-4xl mx-auto space-y-6 pb-10">
+  <section class="dstt-hero" style="background: linear-gradient(135deg, #9d174d 0%, #be185d 50%, #f43f5e 100%);">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">MONTHLY REPORT</div>
+        <div>
+          <h1 class="dstt-hero-title">月次ジェネレーター</h1>
+          <p class="dstt-hero-subtitle">面倒な月次報告書の数値入力を自動化。科目表 CSV と Excel テンプレートから月次帳票を一括生成します。</p>
+        </div>
+      </div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">LOGIN</div>
+          <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
+        </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">MODE</div>
+          <div class="dstt-hero-card-value">PLUS連携 / ファイル読み込み</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+<div class="bg-white rounded-xl shadow-lg p-6">
 
     <div class="mb-6 rounded-lg bg-blue-50 p-4">
         <h3 class="mb-2 font-semibold text-blue-800">使い方</h3>
@@ -176,6 +198,7 @@
             <button onclick="closeErrorModal()" class="btn btn-outline">閉じる</button>
         </div>
     </div>
+</div>
 </div>
 
 <script src="{{ url_for('static', filename='monthly_generator/js/monthly_generator.js') }}"></script>

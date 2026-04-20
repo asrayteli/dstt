@@ -5,14 +5,27 @@
 
 <main class="cloud-page">
   <div class="cloud-shell">
-    <header class="cloud-hero">
-      <div class="cloud-hero-copy">
-        <div class="cloud-page-kicker">ShifterSync</div>
-        <h1 class="cloud-page-title">Shifter-Sync CloudShift</h1>
-        <p class="cloud-page-note">共有シフトの作成、公開、編集を同じ流れで扱えるクラウド版ワークスペースです。</p>
+    <section class="dstt-hero" style="background: linear-gradient(135deg, #0c4a6e 0%, #0369a1 50%, #06b6d4 100%); margin-bottom: 1.25rem;">
+      <div class="dstt-hero-grid">
+        <div class="dstt-hero-copy">
+          <div class="dstt-hero-pill">CLOUD SHIFT</div>
+          <div>
+            <h1 class="dstt-hero-title">Shifter-Sync CloudShift</h1>
+            <p class="dstt-hero-subtitle">共有シフトの作成、公開、編集を同じ流れで扱えるクラウド版ワークスペースです。</p>
+          </div>
+        </div>
+        <div class="dstt-hero-meta">
+          <div class="dstt-hero-card">
+            <div class="dstt-hero-card-label">LOGIN</div>
+            <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
+          </div>
+          <div class="dstt-hero-card">
+            <div class="dstt-hero-card-label">CURRENT</div>
+            <div id="cloud-current-project" class="dstt-hero-card-value">未選択</div>
+          </div>
+        </div>
       </div>
-      <div id="cloud-current-project" class="cloud-current-project">未選択</div>
-    </header>
+    </section>
 
     <nav class="cloud-tabs" aria-label="CloudShift menu">
       <button type="button" class="cloud-tab is-active" data-cloud-tab="list">自分のシフト帳</button>
