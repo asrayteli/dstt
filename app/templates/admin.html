@@ -660,6 +660,7 @@ function renderOrganization() {
         <div class="flex items-center gap-3">
           <strong>🏢 ${escape(b.name)}</strong>
           <span class="text-xs font-mono ${b.code ? 'text-blue-700' : 'text-gray-400'}">${b.code ? '[' + escape(b.code) + ']' : '（コード未設定）'}</span>
+          <button onclick="setBranchCode(${b.id})" class="text-xs ${b.code ? 'text-gray-500 hover:text-blue-600' : 'text-orange-500 hover:text-orange-700 font-semibold'} underline">${b.code ? 'コード変更' : 'コードを追加'}</button>
           <span class="text-xs text-gray-500">営業所 ${b.offices.length}</span>
         </div>
         <div class="flex gap-2">
@@ -671,9 +672,10 @@ function renderOrganization() {
         ${b.offices.map(o => `
           <div class="border rounded p-2 bg-gray-50">
             <div class="flex items-center justify-between">
-              <div>
+              <div class="flex items-center gap-1 flex-wrap">
                 🏪 ${escape(o.name)}
                 <span class="ml-2 text-xs font-mono ${o.code ? 'text-blue-700' : 'text-gray-400'}">${o.code ? '[' + escape(o.code) + ']' : '（コード未設定）'}</span>
+                <button onclick="setOfficeCode(${o.id})" class="text-xs ${o.code ? 'text-gray-500 hover:text-blue-600' : 'text-orange-500 hover:text-orange-700 font-semibold'} underline">${o.code ? 'コード変更' : 'コードを追加'}</button>
               </div>
               <div class="flex gap-2">
                 <button onclick="editOffice(${o.id})" class="text-blue-600 text-xs">編集</button>
@@ -731,6 +733,18 @@ async function editBranch(id) {
     loadOrganization();
   } catch (err) { alert('エラー: ' + err.message); }
 }
+async function setBranchCode(id) {
+  const cur = state.branches.find(b => b.id === id);
+  const code = prompt('支店コード（空欄で未設定）', cur?.code || '');
+  if (code === null) return;
+  try {
+    await api(`/tools/user_management/api/branches/${id}`, {
+      method: 'PUT',
+      body: { name: cur.name, code: code.trim() || null }
+    });
+    loadOrganization();
+  } catch (err) { alert('エラー: ' + err.message); }
+}
 async function deleteBranch(id) {
   if (!confirm('支店を削除すると、配下の営業所・担当・所属ユーザーの紐付けも解除されます。続行しますか？')) return;
   try {
@@ -764,6 +778,22 @@ async function editOffice(id) {
     await api(`/tools/user_management/api/offices/${id}`, {
       method: 'PUT',
       body: { name, code: code.trim() || null }
+    });
+    loadOrganization();
+  } catch (err) { alert('エラー: ' + err.message); }
+}
+async function setOfficeCode(id) {
+  let cur = null;
+  for (const b of state.branches) {
+    const found = b.offices.find(o => o.id === id);
+    if (found) { cur = found; break; }
+  }
+  const code = prompt('営業所コード（空欄で未設定）', cur?.code || '');
+  if (code === null) return;
+  try {
+    await api(`/tools/user_management/api/offices/${id}`, {
+      method: 'PUT',
+      body: { name: cur.name, code: code.trim() || null }
     });
     loadOrganization();
   } catch (err) { alert('エラー: ' + err.message); }
