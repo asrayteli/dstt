@@ -1,6 +1,8 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from sqlalchemy import inspect, text
 from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -12,6 +14,7 @@ load_dotenv()
 
 from .models import db
 login_manager = LoginManager()
+limiter = Limiter(key_func=get_remote_address, default_limits=["300 per day", "60 per hour"])
 
 
 def _ensure_access_control_schema(app):
@@ -61,11 +64,20 @@ def _ensure_access_control_schema(app):
 
 def create_app(test_config=None):
     app = Flask(__name__, static_folder='./static/')
-    app.config['SECRET_KEY'] = os.environ.get('DSTT_SECRET_KEY', 'change-this-secret-key')
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DSTT_DATABASE_URI', 'sqlite:///users.db')  # SQLiteデータベース
+
+    secret_key = os.environ.get('DSTT_SECRET_KEY', '')
+    if not secret_key:
+        raise RuntimeError(
+            "DSTT_SECRET_KEY が設定されていません。"
+            ".env ファイルに DSTT_SECRET_KEY を設定してください。"
+        )
+    app.config['SECRET_KEY'] = secret_key
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DSTT_DATABASE_URI', 'sqlite:///users.db')
+
     if test_config:
         app.config.update(test_config)
     db.init_app(app)
+    limiter.init_app(app)
     login_manager.login_view = "auth.login"  # ログインページのエンドポイント
     login_manager.init_app(app)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)

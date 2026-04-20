@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import wraps
 from typing import Iterable
 
@@ -32,8 +33,8 @@ from .models import (
 from .navigation import NAV_ITEMS
 
 
-# 初期管理者ID（旧実装の互換性のためハードコーディング）
-LEGACY_ADMIN_USERNAME = "3243012"
+# 旧来の固定管理者ID（.envのDSTT_LEGACY_ADMIN_USERNAMEで設定、未設定なら無効）
+LEGACY_ADMIN_USERNAME = os.environ.get('DSTT_LEGACY_ADMIN_USERNAME', '')
 
 
 # ツールカテゴリ定義。`nav_key` は NAV_ITEMS の href 末尾 (= Blueprint url_prefix の末尾)
@@ -87,7 +88,9 @@ def is_admin_user(user=None) -> bool:
 
 
 def ensure_legacy_admin_flag() -> None:
-    """既存DBの `3243012` を `is_admin=True` に自動昇格させる。"""
+    """DSTT_LEGACY_ADMIN_USERNAMEで指定されたユーザーを is_admin=True に昇格させる。"""
+    if not LEGACY_ADMIN_USERNAME:
+        return
     user = User.query.filter_by(username=LEGACY_ADMIN_USERNAME).first()
     if user and not user.is_admin:
         user.is_admin = True

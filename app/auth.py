@@ -2,11 +2,13 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from .models import db, User
+from . import limiter
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
 # ログインページ
 @auth_bp.route('/login', methods=['GET', 'POST'])
+@limiter.limit("10 per minute; 30 per hour")
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('main.index'))
