@@ -254,6 +254,31 @@ def create_app(test_config=None):
                 return None
         return enforce_tool_access(tool_key)
 
+    # 軽量 CSRF 対策: 個人情報を扱うツールの書き込み系 API に限り
+    # Origin/Referer の同一オリジンを確認する（両方未設定なら通過）。
+    from .security.request_guard import enforce_same_origin_for_mutations
+    _SAME_ORIGIN_PATH_PREFIXES = (
+        "/tools/pluslist/api/",
+        "/tools/siteplus/api/",
+    )
+
+    @app.before_request
+    def _enforce_same_origin_for_sensitive_apis():
+        if app.config.get("TESTING") and not app.config.get("DSTT_ENFORCE_SAME_ORIGIN_IN_TESTS"):
+            return None
+        path = _req.path or ""
+        if not any(path.startswith(p) for p in _SAME_ORIGIN_PATH_PREFIXES):
+            return None
+        return enforce_same_origin_for_mutations()
+
+    # 本番での暗号鍵必須化ガード（opt-in）
+    if _env_bool("DSTT_REQUIRE_ENCRYPTION_KEY_ENV", False) and not app.config.get("TESTING"):
+        from .security.file_crypto import EncryptionKeyMissingError, get_data_encryption_key
+        try:
+            get_data_encryption_key()
+        except EncryptionKeyMissingError as exc:
+            raise RuntimeError(str(exc))
+
     # DBスキーマの初期化（既存DBへのカラム追加含む）
     _ensure_access_control_schema(app)
 

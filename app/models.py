@@ -3,6 +3,8 @@ from flask_login import UserMixin
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 
+from .security.column_crypto import EncryptedText
+
 db = SQLAlchemy()
 
 class User(UserMixin, db.Model):
@@ -438,8 +440,9 @@ class EditHistory(db.Model):
     edited_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     action = db.Column(db.String(20), nullable=False)  # create / update / delete
     field_name = db.Column(db.String(100))  # 変更フィールド名
-    old_value = db.Column(db.Text)  # 変更前の値
-    new_value = db.Column(db.Text)  # 変更後の値
+    # 個人情報を含みうるため AES-256-GCM で暗号化（既存平文レコードは自動で後方互換表示）
+    old_value = db.Column(EncryptedText)
+    new_value = db.Column(EncryptedText)
 
     # リレーション
     employee = db.relationship('Employee', back_populates='edit_histories')

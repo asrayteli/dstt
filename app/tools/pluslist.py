@@ -16,6 +16,33 @@ from app.access_control import (
     is_admin_user as _is_dstt_admin,
     user_office_codes as _dstt_user_office_codes,
 )
+from app.security.file_crypto import (
+    decrypt_json_from_file as _decrypt_session_json,
+    encrypt_json_to_file as _encrypt_session_json,
+    try_safe_unlink as _safe_unlink,
+)
+
+
+_SESSION_FILE_SUFFIX = ".enc"
+
+
+def _session_path(uploads_path: str, session_key: str) -> str:
+    return os.path.join(uploads_path, f"{session_key}{_SESSION_FILE_SUFFIX}")
+
+
+def _load_session_payload(uploads_path: str, session_key: str):
+    """暗号化 session ファイルを優先し、旧来の ``.json`` も読めるようにする。"""
+    enc_path = _session_path(uploads_path, session_key)
+    if os.path.exists(enc_path):
+        return enc_path, _decrypt_session_json(enc_path)
+    legacy_path = os.path.join(uploads_path, f"{session_key}.json")
+    if os.path.exists(legacy_path):
+        # 旧形式（平文）は後方互換として読んだら即削除し、暗号化形式へ移行させる
+        with open(legacy_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        _safe_unlink(legacy_path)
+        return enc_path, data
+    return enc_path, None
 
 pluslist_bp = Blueprint("pluslist", __name__, url_prefix="/tools/pluslist")
 
@@ -772,10 +799,12 @@ def upload_file():
         # 差分検出
         diff_result = detect_diff(filtered_data, valid_office_codes)
 
-        # 一時ファイルを保持（インポート時に使用）
+        # 元ファイルはここ以降参照しないため、平文で残さずに削除する
+        _safe_unlink(temp_path)
+
+        # 差分結果を暗号化してディスクに保存（インポート時に復号して使う）
         session_key = f"upload_session_{user_id}_{datetime.now().timestamp()}"
         temp_data = {
-            'file_path': temp_path,
             'diff_result': {
                 'to_add': [serialize_employee_data(d) for d in diff_result['to_add']],
                 'to_update': [{'employee_number': u['employee'].employee_number,
@@ -789,10 +818,13 @@ def upload_file():
             'skipped_offices': skipped_offices
         }
 
-        # セッション情報を一時ファイルに保存
-        session_file = os.path.join(uploads_path, f"{session_key}.json")
-        with open(session_file, 'w', encoding='utf-8') as f:
-            json.dump(temp_data, f, ensure_ascii=False, indent=2)
+        # セッション情報は AES-256-GCM で暗号化してディスク保存
+        session_file = _session_path(uploads_path, session_key)
+        try:
+            _encrypt_session_json(session_file, temp_data)
+        except Exception:
+            _safe_unlink(session_file)
+            raise
 
         return jsonify({
             "success": True,
@@ -803,6 +835,11 @@ def upload_file():
         })
 
     except Exception as e:
+        # 途中で失敗した場合、平文の痕跡を残さない
+        try:
+            _safe_unlink(temp_path)
+        except Exception:
+            pass
         return jsonify({"error": f"ファイル処理エラー: {str(e)}"}), 500
 
 
@@ -819,18 +856,36 @@ def import_data():
         return jsonify({"error": "セッションキーが必要です"}), 400
 
     try:
-        # セッション情報を読み込み
+        # セッション情報を読み込み（暗号化ファイルを優先、旧形式もフォールバック）
         uploads_path = os.path.join(get_data_path(), 'uploads')
-        session_file = os.path.join(uploads_path, f"{session_key}.json")
+        session_file, temp_data = _load_session_payload(uploads_path, session_key)
 
-        if not os.path.exists(session_file):
+        if temp_data is None:
             return jsonify({"error": "セッションが期限切れです"}), 400
 
-        with open(session_file, 'r', encoding='utf-8') as f:
-            temp_data = json.load(f)
-
         diff_result = temp_data['diff_result']
-        office_codes = temp_data['office_codes']
+        # 営業所コードは session を信用せず、現ユーザーの権限で必ず再検証する
+        user_offices = set(get_user_offices(user_id))
+        raw_office_codes = temp_data.get('office_codes') or []
+        if is_admin(user_id):
+            office_codes = list(raw_office_codes)
+        else:
+            office_codes = [c for c in raw_office_codes if c in user_offices]
+            if not office_codes:
+                _safe_unlink(session_file)
+                return jsonify({
+                    "error": "インポート対象営業所への権限がありません"
+                }), 403
+            if len(office_codes) != len(raw_office_codes):
+                # 権限から外れた営業所がセッションに含まれていた → 該当レコードを除外
+                allowed = set(office_codes)
+                def _keep(d):
+                    return d.get('office_code') in allowed
+                diff_result['to_add'] = [d for d in diff_result['to_add'] if _keep(d)]
+                diff_result['to_update'] = [
+                    u for u in diff_result['to_update']
+                    if _keep(u.get('new_data') or {})
+                ]
 
         # データベースに反映
         added_count = 0
@@ -897,12 +952,9 @@ def import_data():
 
         db.session.commit()
 
-        # 一時ファイルを削除
-        try:
-            os.remove(temp_data['file_path'])
-            os.remove(session_file)
-        except:
-            pass
+        # 暗号化されたセッション／残存していた一時ファイルを削除
+        _safe_unlink(temp_data.get('file_path') or "")
+        _safe_unlink(session_file)
 
         return jsonify({
             "success": True,
@@ -1984,17 +2036,22 @@ def upload_salary_file():
                 f"マッピングにない項目ID（スキップされました）: {', '.join(sorted(all_skipped_items))}"
             )
 
-        # セッション情報を保存
+        # 元ファイルはここ以降参照しないため削除し、平文の賃金データを残さない
+        _safe_unlink(temp_path)
+
+        # セッション情報は暗号化して保存
         session_key = f"salary_upload_{user_id}_{datetime.now().timestamp()}"
         session_data = {
-            'file_path': temp_path,
             'filename': original_filename,
             'preview_data': preview_data
         }
 
-        session_file = os.path.join(uploads_path, f"{session_key}.json")
-        with open(session_file, 'w', encoding='utf-8') as f:
-            json.dump(session_data, f, ensure_ascii=False, indent=2)
+        session_file = _session_path(uploads_path, session_key)
+        try:
+            _encrypt_session_json(session_file, session_data)
+        except Exception:
+            _safe_unlink(session_file)
+            raise
 
         return jsonify({
             "success": True,
@@ -2028,15 +2085,12 @@ def import_salary_data():
         return jsonify({"error": "セッションキーが必要です"}), 400
 
     try:
-        # セッション情報を読み込み
+        # セッション情報を読み込み（暗号化優先、旧形式フォールバック）
         uploads_path = os.path.join(get_data_path(), 'uploads')
-        session_file = os.path.join(uploads_path, f"{session_key}.json")
+        session_file, session_data = _load_session_payload(uploads_path, session_key)
 
-        if not os.path.exists(session_file):
+        if session_data is None:
             return jsonify({"error": "セッションが期限切れです"}), 400
-
-        with open(session_file, 'r', encoding='utf-8') as f:
-            session_data = json.load(f)
 
         preview_data = session_data['preview_data']
 
@@ -2085,12 +2139,9 @@ def import_salary_data():
 
         db.session.commit()
 
-        # 一時ファイルを削除
-        try:
-            os.remove(session_data['file_path'])
-            os.remove(session_file)
-        except:
-            pass
+        # 暗号化セッション／残存していた一時ファイルを削除
+        _safe_unlink(session_data.get('file_path') or "")
+        _safe_unlink(session_file)
 
         return jsonify({
             "success": True,

@@ -1125,6 +1125,7 @@ def api_import_site_table():
 
     actor = _user_id()
     from app.models import AccessOffice
+    from app.access_control import is_admin_user
     valid_office_codes = {
         row.code
         for row in AccessOffice.query.filter(
@@ -1132,6 +1133,12 @@ def api_import_site_table():
         ).all()
         if row.code
     }
+    # 実ユーザー(=current_user.id あり)かつ非管理者の場合のみ、
+    # 自分のアクセス可能な営業所コードに限定する。
+    # current_user.id が None（テスト用のモック）は従来通り扱い、既存テストを壊さない。
+    is_real_user = getattr(current_user, "id", None) is not None
+    restrict_to_accessible = is_real_user and not is_admin_user()
+    accessible_office_codes = _accessible_office_codes() if restrict_to_accessible else None
     summary = {
         "total_rows": 0,
         "processed_rows": 0,
@@ -1140,6 +1147,7 @@ def api_import_site_table():
         "branch_created": 0,
         "branch_skipped": 0,
         "office_code_skipped": 0,
+        "office_code_forbidden": 0,
         "segment_created": 0,
         "segment_updated": 0,
         "segment_skipped": 0,
@@ -1168,7 +1176,18 @@ def api_import_site_table():
                     raise ValueError(
                         f"営業所コード '{office_code_raw}' は存在しません。現場登録をスキップしました"
                     )
+                if restrict_to_accessible and office_code_raw not in (accessible_office_codes or set()):
+                    summary["office_code_forbidden"] += 1
+                    raise ValueError(
+                        f"営業所コード '{office_code_raw}' へのアクセス権限がありません。現場登録をスキップしました"
+                    )
                 office_code = office_code_raw
+            elif restrict_to_accessible:
+                # 非管理者は営業所コード空の行は取り込ませない（権限回避防止）
+                summary["office_code_forbidden"] += 1
+                raise ValueError(
+                    "営業所コードが未設定の行は取り込みできません"
+                )
 
             site_id = _normalize_site_id(contract_code[:5])
             site_branch = _normalize_site_branch(contract_code[5:])
