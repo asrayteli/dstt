@@ -2,7 +2,9 @@ __pycache__/
 dstt/
 app/__pycache__/
 app/tools/__pycache__/
-app/static/calendar_outputs/*.pdf
+# Runtime / generated data
+app/static/calendar_outputs/*
+!app/static/calendar_outputs/.gitkeep
 app/tools/__pycache__/
 .vscode
 .vscode/
@@ -18,6 +20,8 @@ app/static/leave_mgr/permissions.json
 app/static/leave_mgr/calendar_meta.json
 app/static/monthly_generator/uploads/*
 !app/static/monthly_generator/uploads/.gitkeep
+app/static/pluslist/pluslist_permissions.json
 app/static/pluslist/uploads/*
 !app/static/pluslist/uploads/.gitkeep
+var/
 *.pyc

@@ -1,5 +1,0 @@
-2026/03/26-01:52:28.728 7e68 Creating DB H:\DSTT\dstt\var\edge-profile\Default\Asset Store\assets.db since it was missing.
-2026/03/26-01:52:28.991 7e68 Reusing MANIFEST H:\DSTT\dstt\var\edge-profile\Default\Asset Store\assets.db/MANIFEST-000001
-2026/03/26-01:52:31.427 7e64 Level-0 table #5: started
-2026/03/26-01:52:31.491 7e64 Level-0 table #5: 332815 bytes OK
-2026/03/26-01:52:31.528 7e64 Delete type=0 #3
