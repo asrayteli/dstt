@@ -297,8 +297,13 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "resetCreateForm();" in script
     assert ".cloud-check-project-list" in style
     assert ".cloud-check-scroll" in style
+    assert ".cloud-check-header-row" in style
+    assert "overflow: visible;" in style
     assert ".cloud-check-entry.is-conflict" in style
     assert ".assist-btn" in ss_common_css
+    assert "entry-drag-handle" in ss_common_js
+    assert "function reorderEntryWithinDay" in ss_common_js
+    assert ".entry-item.is-drop-before" in ss_common_css
     assert ".day-box.branch-warning" in ss_common_css
     assert ".entry-item-status.is-warning" in ss_common_css
 

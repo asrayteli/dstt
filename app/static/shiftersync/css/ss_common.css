@@ -396,6 +396,22 @@ h1, h2, h3 {
     cursor: pointer;
 }
 
+.entry-item.is-draggable {
+    cursor: grab;
+}
+
+.entry-item.is-dragging {
+    opacity: 0.55;
+}
+
+.entry-item.is-drop-before {
+    box-shadow: inset 0 3px 0 var(--ss-accent);
+}
+
+.entry-item.is-drop-after {
+    box-shadow: inset 0 -3px 0 var(--ss-accent);
+}
+
 .entry-item.has-branch-warning {
     border-color: #e2c68b;
     background: #fffaf1;
@@ -411,7 +427,29 @@ h1, h2, h3 {
 }
 
 .entry-item-main {
+    flex: 1 1 auto;
     min-width: 0;
+}
+
+.entry-drag-handle {
+    align-items: center;
+    align-self: stretch;
+    border-radius: 8px;
+    color: var(--ss-muted);
+    cursor: grab;
+    display: inline-flex;
+    flex: 0 0 22px;
+    font-size: 14px;
+    font-weight: 800;
+    justify-content: center;
+    line-height: 1;
+    min-height: 28px;
+    user-select: none;
+}
+
+.entry-drag-handle:hover {
+    background: #eef6ff;
+    color: var(--ss-accent);
 }
 
 .entry-item-title {

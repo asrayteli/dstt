@@ -665,8 +665,8 @@
   }
 
   .cloud-check-scroll {
-    overflow: auto;
-    max-height: calc(100dvh - 160px);
+    overflow: visible;
+    max-height: none;
     border: 1px solid var(--cloud-line);
     border-radius: 18px;
     background: #fff;
@@ -675,7 +675,8 @@
   .cloud-check-table {
     display: grid;
     gap: 0;
-    min-width: max-content;
+    width: max-content;
+    min-width: 100%;
   }
 
   .cloud-check-header-row,
@@ -704,25 +705,29 @@
     border-bottom: 0;
   }
 
-  .cloud-check-header-cell {
+  .cloud-check-header-row {
     position: sticky;
-    top: 0;
-    z-index: 2;
+    top: 8px;
+    z-index: 8;
+    box-shadow: 0 10px 24px rgba(24, 50, 76, 0.12);
+  }
+
+  .cloud-check-corner,
+  .cloud-check-header-cell {
+    position: relative;
     background: #f7fbff;
   }
 
   .cloud-check-corner {
     position: sticky;
-    top: 0;
     left: 0;
-    z-index: 3;
-    background: #f7fbff;
+    z-index: 9;
   }
 
   .cloud-check-date-cell {
     position: sticky;
     left: 0;
-    z-index: 1;
+    z-index: 4;
     background: #f9fcff;
     font-weight: 800;
     text-align: center;

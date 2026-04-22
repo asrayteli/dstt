@@ -63,7 +63,9 @@ const ShifterSync = (function() {
     modalDay: null,
     modalEntryId: null,
     siteContext: null,
-    siteBranches: []
+    siteBranches: [],
+    dragEntry: null,
+    suppressEntryClick: false
   };
 
   const employeeSearchCache = new Map();
@@ -1224,13 +1226,23 @@ const ShifterSync = (function() {
     entries.forEach((entry) => {
       const parts = getEntryDisplayParts(entry);
       const syncedEntry = isSyncedEntry(entry);
+      const canDragEntry = state.editable && entries.length > 1 && !syncedEntry;
       const item = $('<div>')
         .addClass('entry-item')
+        .toggleClass('is-draggable', canDragEntry)
         .toggleClass('has-branch-warning', parts.branch_issue_tone === 'warning')
         .toggleClass('has-branch-danger', parts.branch_issue_tone === 'danger')
         .attr('data-day', day)
         .attr('data-entry-id', entry.id)
         .append(
+          canDragEntry
+            ? $('<span>')
+              .addClass('entry-drag-handle')
+              .attr('role', 'button')
+              .attr('aria-label', '表示順を並び替え')
+              .attr('title', '表示順を並び替え')
+              .text('↕')
+            : null,
           $('<div>')
             .addClass('entry-item-main')
             .append(
@@ -1241,6 +1253,10 @@ const ShifterSync = (function() {
               $('<div>').addClass(`entry-item-comment${parts.comment ? '' : ' is-empty'}`).text(parts.comment ? getCommentPreview(parts.comment) : '\u30b3\u30e1\u30f3\u30c8\u306a\u3057')
             )
         );
+
+      if (canDragEntry) {
+        item.attr('draggable', 'true');
+      }
 
       if (state.editable && !syncedEntry) {
         item.append(
@@ -1364,6 +1380,70 @@ const ShifterSync = (function() {
     return dayBox;
   }
 
+  function clearEntryDropMarkers() {
+    $('.entry-item.is-drop-before, .entry-item.is-drop-after')
+      .removeClass('is-drop-before is-drop-after');
+  }
+
+  function clearEntryDragState() {
+    $('.entry-item.is-dragging').removeClass('is-dragging');
+    clearEntryDropMarkers();
+    state.dragEntry = null;
+  }
+
+  function suppressNextEntryClick() {
+    state.suppressEntryClick = true;
+    window.setTimeout(() => {
+      state.suppressEntryClick = false;
+    }, 120);
+  }
+
+  function getEntryDropPlacement(event, target) {
+    const rect = target.getBoundingClientRect();
+    const clientY = event && Number.isFinite(event.clientY) ? event.clientY : rect.top + (rect.height / 2);
+    return clientY < rect.top + (rect.height / 2) ? 'before' : 'after';
+  }
+
+  function reorderEntryWithinDay(day, sourceEntryId, targetEntryId = null, placement = 'after') {
+    const dayKey = String(day);
+    const sourceId = String(sourceEntryId || '');
+    const targetId = targetEntryId ? String(targetEntryId) : null;
+    if (!dayKey || !sourceId || sourceId === targetId) {
+      return false;
+    }
+
+    const originalEntries = getDayEntries(dayKey);
+    const originalOrder = originalEntries.map((entry) => entry.id).join('\u0000');
+    const nextEntries = originalEntries.slice();
+    const sourceIndex = nextEntries.findIndex((entry) => entry.id === sourceId);
+    if (sourceIndex < 0) {
+      return false;
+    }
+
+    const [movedEntry] = nextEntries.splice(sourceIndex, 1);
+    let insertIndex = nextEntries.length;
+    if (targetId) {
+      insertIndex = nextEntries.findIndex((entry) => entry.id === targetId);
+      if (insertIndex < 0) {
+        insertIndex = nextEntries.length;
+      } else if (placement === 'after') {
+        insertIndex += 1;
+      }
+    }
+
+    nextEntries.splice(insertIndex, 0, movedEntry);
+    const nextOrder = nextEntries.map((entry) => entry.id).join('\u0000');
+    if (originalOrder === nextOrder) {
+      return false;
+    }
+
+    setDayEntries(dayKey, nextEntries);
+    updateEntryDisplay(dayKey);
+    updateCapacityWarning(dayKey);
+    updateBranchWarning(dayKey);
+    return true;
+  }
+
   function clearEventHandlers() {
     $(document).off('keydown', '.entry-input');
     $(document).off('keydown', '.entry-comment-input');
@@ -1378,6 +1458,14 @@ const ShifterSync = (function() {
     $(document).off('click', '.copy-btn');
     $(document).off('click', '.entry-item-delete');
     $(document).off('click', '.entry-item');
+    $(document).off('click', '.entry-drag-handle');
+    $(document).off('dragstart', '.entry-item');
+    $(document).off('dragover', '.entry-item');
+    $(document).off('dragleave', '.entry-item');
+    $(document).off('drop', '.entry-item');
+    $(document).off('dragend', '.entry-item');
+    $(document).off('dragover', '.entry-list-container');
+    $(document).off('drop', '.entry-list-container');
     $(document).off('click', '.day-detail-trigger');
     $(document).off('click', '.ss-entry-edit-btn');
     $(document).off('click', '.ss-entry-delete-btn');
@@ -1396,7 +1484,14 @@ const ShifterSync = (function() {
     });
 
     $(document).on('click', '.entry-item', function(e) {
+      if (state.suppressEntryClick) {
+        e.preventDefault();
+        return;
+      }
       if ($(e.target).closest('.entry-item-delete').length > 0) {
+        return;
+      }
+      if ($(e.target).closest('.entry-drag-handle').length > 0) {
         return;
       }
       openEntryModal($(this).data('day'), $(this).data('entryId'));
@@ -1405,6 +1500,105 @@ const ShifterSync = (function() {
     if (!state.editable) {
       return;
     }
+
+    $(document).on('click', '.entry-drag-handle', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    $(document).on('dragstart', '.entry-item', function(e) {
+      const item = $(this);
+      if (!item.hasClass('is-draggable')) {
+        e.preventDefault();
+        return;
+      }
+
+      const day = String(item.attr('data-day') || '');
+      const entryId = String(item.attr('data-entry-id') || '');
+      if (!day || !entryId) {
+        e.preventDefault();
+        return;
+      }
+
+      state.dragEntry = { day, entryId };
+      item.addClass('is-dragging');
+      const originalEvent = e.originalEvent;
+      if (originalEvent && originalEvent.dataTransfer) {
+        originalEvent.dataTransfer.effectAllowed = 'move';
+        originalEvent.dataTransfer.setData('text/plain', `${day}:${entryId}`);
+      }
+    });
+
+    $(document).on('dragover', '.entry-item', function(e) {
+      const dragEntry = state.dragEntry;
+      const item = $(this);
+      if (!dragEntry || String(item.attr('data-day') || '') !== dragEntry.day) {
+        return;
+      }
+      if (String(item.attr('data-entry-id') || '') === dragEntry.entryId) {
+        return;
+      }
+
+      e.preventDefault();
+      const placement = getEntryDropPlacement(e.originalEvent || e, this);
+      clearEntryDropMarkers();
+      item.addClass(placement === 'before' ? 'is-drop-before' : 'is-drop-after');
+      const originalEvent = e.originalEvent;
+      if (originalEvent && originalEvent.dataTransfer) {
+        originalEvent.dataTransfer.dropEffect = 'move';
+      }
+    });
+
+    $(document).on('dragleave', '.entry-item', function() {
+      $(this).removeClass('is-drop-before is-drop-after');
+    });
+
+    $(document).on('drop', '.entry-item', function(e) {
+      const dragEntry = state.dragEntry;
+      const item = $(this);
+      if (!dragEntry || String(item.attr('data-day') || '') !== dragEntry.day) {
+        return;
+      }
+      e.preventDefault();
+      const targetEntryId = String(item.attr('data-entry-id') || '');
+      const placement = getEntryDropPlacement(e.originalEvent || e, this);
+      const changed = reorderEntryWithinDay(dragEntry.day, dragEntry.entryId, targetEntryId, placement);
+      if (changed) {
+        suppressNextEntryClick();
+      }
+      clearEntryDragState();
+    });
+
+    $(document).on('dragover', '.entry-list-container', function(e) {
+      const dragEntry = state.dragEntry;
+      const day = String($(this).attr('data-day') || '');
+      if (!dragEntry || dragEntry.day !== day || $(e.target).closest('.entry-item').length > 0) {
+        return;
+      }
+      e.preventDefault();
+      clearEntryDropMarkers();
+    });
+
+    $(document).on('drop', '.entry-list-container', function(e) {
+      const dragEntry = state.dragEntry;
+      const day = String($(this).attr('data-day') || '');
+      if (!dragEntry || dragEntry.day !== day || $(e.target).closest('.entry-item').length > 0) {
+        return;
+      }
+      e.preventDefault();
+      const changed = reorderEntryWithinDay(day, dragEntry.entryId, null, 'after');
+      if (changed) {
+        suppressNextEntryClick();
+      }
+      clearEntryDragState();
+    });
+
+    $(document).on('dragend', '.entry-item', function() {
+      if (state.dragEntry) {
+        suppressNextEntryClick();
+      }
+      clearEntryDragState();
+    });
 
     $(document).on('keydown', '.entry-input', function(e) {
       if (e.key === 'Enter') {

@@ -3,7 +3,22 @@
     "allow": [
       "Bash(git add:*)",
       "Bash(git commit -m ':*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(iconv -f UTF-16LE -t UTF-8 /h/DSTT/dstt/requirements.txt)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(grep \"\\\\.py$\")",
+      "Bash(iconv -f UTF-16 -t UTF-8 /h/DSTT/dstt/requirements.txt)",
+      "Bash(python -c \"from Cryptodome.Cipher import AES; print\\('AES-GCM OK'\\)\")",
+      "Bash(python -m pytest tests/test_security_hardening.py tests/test_siteplus.py tests/test_pluslist_template.py -x --tb=short)",
+      "Bash(python -m pytest tests/test_security_hardening.py tests/test_siteplus.py tests/test_pluslist_template.py --tb=line)",
+      "Bash(python -m pytest tests/test_security_hardening.py tests/test_siteplus.py tests/test_pluslist_template.py --tb=short)",
+      "Bash(python -m pytest tests/ --tb=line --ignore=tests/test_security_hardening.py)",
+      "Bash(python -m pytest tests/test_security_encryption.py -x --tb=short)",
+      "Bash(python -m pytest tests/test_security_encryption.py --tb=short)",
+      "Bash(python -m pytest tests/ --tb=line)",
+      "Bash(git commit -m ' *)",
+      "Bash(xargs -I{} basename {} .html)",
+      "Bash(grep -n \"</script>$\\\\|^</div>\" H:/DSTT/dstt/app/templates/workday.html)"
     ]
   }
 }
