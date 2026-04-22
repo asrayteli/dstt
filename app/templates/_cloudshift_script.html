@@ -4038,9 +4038,23 @@
         </div>
       `;
 
-      const bodyRows = dates.map((day) => `
-        <div class="cloud-check-date-row">
-          <div class="cloud-check-date-cell">${day}日</div>
+      const weekdayLabels = ['日', '月', '火', '水', '木', '金', '土'];
+      const resultYear = Number(result.year);
+      const resultMonth = Number(result.month);
+      const hasYearMonth = Number.isFinite(resultYear) && Number.isFinite(resultMonth) && resultMonth > 0;
+
+      const bodyRows = dates.map((day) => {
+        let weekdayClass = '';
+        let weekdayText = '';
+        if (hasYearMonth) {
+          const weekdayIdx = new Date(resultYear, resultMonth - 1, day).getDay();
+          weekdayText = weekdayLabels[weekdayIdx] || '';
+          if (weekdayIdx === 6) weekdayClass = ' is-saturday';
+          else if (weekdayIdx === 0) weekdayClass = ' is-sunday';
+        }
+        return `
+        <div class="cloud-check-date-row${weekdayClass}">
+          <div class="cloud-check-date-cell${weekdayClass}">${day}日${weekdayText ? ` (${weekdayText})` : ''}</div>
           ${labels.map((_, index) => {
             const entries = Array.isArray(matrix[day] && matrix[day][index]) ? matrix[day][index] : [];
             const capacity = capacities[index];
@@ -4052,10 +4066,11 @@
                   return `<div class="cloud-check-entry${isConflict ? ' is-conflict' : ''}${isSameSite ? ' is-self-conflict' : ''}">${escapeHtml(entry.display || entry.original || '')}</div>`;
                 }).join('')
               : '<div class="cloud-check-entry is-empty">未登録</div>';
-            return `<div class="cloud-check-cell${needsWarning ? ' is-capacity-warning' : ''}"><div class="cloud-check-entry-list">${entryHtml}</div></div>`;
+            return `<div class="cloud-check-cell${weekdayClass}${needsWarning ? ' is-capacity-warning' : ''}"><div class="cloud-check-entry-list">${entryHtml}</div></div>`;
           }).join('')}
         </div>
-      `).join('');
+      `;
+      }).join('');
 
       container.innerHTML = `
         ${summaryHtml}

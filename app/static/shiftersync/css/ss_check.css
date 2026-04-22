@@ -195,6 +195,10 @@ h1.title {
     border-bottom: 3px solid #e2e8f0;
     background: #ffffff;
     min-width: fit-content;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
 }
 
 .file-header {
@@ -408,6 +412,45 @@ h1.title {
 
 /* 台数不足警告 */
 .site-section.capacity-warning {
+    background-color: #fef3c7;
+    border-color: #f59e0b;
+}
+
+/* 土曜日（編集画面と同じ色） */
+.date-row.is-saturday {
+    background: #e3f0ff;
+    border-left-color: #98b9de;
+}
+
+.site-section.is-saturday {
+    background: #e3f0ff;
+    border-color: #98b9de;
+}
+
+.site-section.is-saturday .date-label {
+    background: #cddff4;
+    color: #143b64;
+}
+
+/* 日曜日（編集画面と同じ色） */
+.date-row.is-sunday {
+    background: #ffe7ec;
+    border-left-color: #d69faa;
+}
+
+.site-section.is-sunday {
+    background: #ffe7ec;
+    border-color: #d69faa;
+}
+
+.site-section.is-sunday .date-label {
+    background: #f3d0d8;
+    color: #853344;
+}
+
+/* 土日でも台数不足は優先 */
+.site-section.is-saturday.capacity-warning,
+.site-section.is-sunday.capacity-warning {
     background-color: #fef3c7;
     border-color: #f59e0b;
 }
