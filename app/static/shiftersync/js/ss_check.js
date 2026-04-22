@@ -46,11 +46,13 @@ $(document).ready(function () {
     });
   });
 
+  const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+
   function renderCheckResult(data) {
     const container = document.getElementById("result-table");
     container.innerHTML = ""; // リセット
 
-    const { targets, capacities, dates, matrix, conflicts, same_site_conflicts, option_mappings, total_files } = data;
+    const { year, month, targets, capacities, dates, matrix, conflicts, same_site_conflicts, option_mappings, total_files } = data;
     
     // 重複セットを作成
     const conflictSet = new Set(conflicts.map(c => `${c.date}-${c.entry}`));
@@ -88,6 +90,18 @@ $(document).ready(function () {
       const dateRow = document.createElement("div");
       dateRow.className = "date-row";
 
+      let weekdayIdx = null;
+      if (year && month) {
+        const dateObj = new Date(year, month - 1, date);
+        weekdayIdx = dateObj.getDay();
+      }
+      const weekdayLabel = weekdayIdx !== null ? WEEKDAY_LABELS[weekdayIdx] : "";
+      if (weekdayIdx === 6) {
+        dateRow.classList.add("is-saturday");
+      } else if (weekdayIdx === 0) {
+        dateRow.classList.add("is-sunday");
+      }
+
       targets.forEach((target, targetIdx) => {
         const siteSection = document.createElement("div");
         siteSection.className = "site-section";
@@ -96,15 +110,21 @@ $(document).ready(function () {
         const entries = matrix[date][targetIdx] || [];
         const currentCount = entries.length;
         const requiredCapacity = capacities[targetIdx];
-        
+
         if (requiredCapacity !== null && requiredCapacity !== undefined && currentCount < requiredCapacity) {
           siteSection.classList.add("capacity-warning");
+        }
+
+        if (weekdayIdx === 6) {
+          siteSection.classList.add("is-saturday");
+        } else if (weekdayIdx === 0) {
+          siteSection.classList.add("is-sunday");
         }
 
         // 日付ラベル
         const dateLabel = document.createElement("div");
         dateLabel.className = "date-label";
-        dateLabel.textContent = `${date}日`;
+        dateLabel.textContent = weekdayLabel ? `${date}日 (${weekdayLabel})` : `${date}日`;
         siteSection.appendChild(dateLabel);
 
         // 名前リスト

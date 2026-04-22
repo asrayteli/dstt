@@ -1607,10 +1607,71 @@ const ShifterSync = (function() {
     const copiedEntries = getDayEntries(sourceDay)
       .filter((entry) => !isSyncedEntry(entry))
       .map((entry) => cloneEntry(entry, true));
-    setDayEntries(targetDay, copiedEntries);
-    updateEntryDisplay(targetDay);
-    updateCapacityWarning(targetDay);
-    $(`.copy-input[data-day='${targetDay}']`).val('');
+
+    const existingEntries = getDayEntries(targetDay);
+    const hasExistingEntries = existingEntries.some((entry) => !isSyncedEntry(entry));
+
+    const performCopy = () => {
+      setDayEntries(targetDay, copiedEntries);
+      updateEntryDisplay(targetDay);
+      updateCapacityWarning(targetDay);
+      $(`.copy-input[data-day='${targetDay}']`).val('');
+    };
+
+    if (hasExistingEntries) {
+      showCopyOverwriteConfirm(sourceDay, targetDay, performCopy);
+      return;
+    }
+
+    performCopy();
+  }
+
+  function showCopyOverwriteConfirm(sourceDay, targetDay, onConfirm) {
+    const overlay = $('<div>').addClass('popup-overlay ss-copy-overwrite-overlay');
+    const popup = $('<div>').addClass('popup-content');
+    popup.append('<div class="popup-header">\u4e0a\u66f8\u304d\u306e\u78ba\u8a8d</div>');
+    popup.append(
+      $('<div>')
+        .addClass('popup-section')
+        .css({ 'font-size': '13px', 'line-height': '1.6', color: 'var(--ss-ink)' })
+        .html(
+          `${targetDay}\u65e5\u306b\u306f\u3059\u3067\u306b\u30b7\u30d5\u30c8\u304c\u5165\u3063\u3066\u3044\u307e\u3059\u3002<br>` +
+          `${sourceDay}\u65e5\u306e\u5185\u5bb9\u3067\u4e0a\u66f8\u304d\u3057\u307e\u3059\u304b\uff1f`
+        )
+    );
+
+    const footer = $('<div>').addClass('popup-footer');
+    const cancelBtn = $('<button>')
+      .attr('type', 'button')
+      .addClass('popup-clear-btn btn-secondary')
+      .text('\u30ad\u30e3\u30f3\u30bb\u30eb')
+      .on('click', function() {
+        overlay.remove();
+        $(`.copy-input[data-day='${targetDay}']`).val('').focus();
+      });
+    const confirmBtn = $('<button>')
+      .attr('type', 'button')
+      .addClass('popup-confirm-btn btn-danger')
+      .text('\u4e0a\u66f8\u304d')
+      .on('click', function() {
+        overlay.remove();
+        if (typeof onConfirm === 'function') {
+          onConfirm();
+        }
+      });
+    footer.append(cancelBtn, confirmBtn);
+    popup.append(footer);
+    overlay.append(popup);
+    $('body').append(overlay);
+
+    overlay.on('click', function(e) {
+      if (e.target === overlay[0]) {
+        overlay.remove();
+        $(`.copy-input[data-day='${targetDay}']`).val('').focus();
+      }
+    });
+
+    confirmBtn.trigger('focus');
   }
 
   function deleteEntry(day, entryId) {
