@@ -666,6 +666,7 @@
 
   .cloud-check-scroll {
     overflow: auto;
+    max-height: calc(100dvh - 160px);
     border: 1px solid var(--cloud-line);
     border-radius: 18px;
     background: #fff;
@@ -703,11 +704,18 @@
     border-bottom: 0;
   }
 
-  .cloud-check-corner,
   .cloud-check-header-cell {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 2;
+    background: #f7fbff;
+  }
+
+  .cloud-check-corner {
+    position: sticky;
+    top: 0;
+    left: 0;
+    z-index: 3;
     background: #f7fbff;
   }
 

@@ -156,8 +156,8 @@ h1.title {
 
 /* スクロール可能なコンテナ */
 .scrollable-container {
-    overflow-x: auto;
-    overflow-y: visible;
+    overflow: auto;
+    max-height: calc(100dvh - 160px);
     max-width: 100%;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
@@ -169,6 +169,7 @@ h1.title {
 /* Webkit系ブラウザ用のスクロールバースタイル */
 .scrollable-container::-webkit-scrollbar {
     height: 12px;
+    width: 12px;
 }
 
 .scrollable-container::-webkit-scrollbar-track {
