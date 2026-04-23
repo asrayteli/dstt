@@ -52,7 +52,8 @@
       <p class="text-sm text-gray-600 mb-4">
         「🔒 要許可」のツールは、個別に付与しないと利用できません。
         「🌐 公開」は全ログインユーザーが利用できます。<br>
-        管理者はすべてのツールにアクセスできます。
+        管理者はすべてのツールにアクセスできます。<br>
+        「🏷️ グループ許可」は「グループ付与」タブで設定されたルールにより、このユーザーが所属する支店・営業所・担当から自動的に許可されているツールです。個人チェックを外してもグループからのアクセスは解除されません。
       </p>
 
       <div class="mb-4 flex items-center gap-3">
@@ -599,6 +600,14 @@ async function loadPermissions() {
   $('#perm-tool-grid').innerHTML = '<p class="text-sm text-gray-500 col-span-full">上のセレクトでユーザーを選んでください。</p>';
 }
 
+function formatGroupScope(src) {
+  const parts = [];
+  if (src.branch_name) parts.push(escape(src.branch_name));
+  if (src.office_name) parts.push(escape(src.office_name));
+  if (src.department_name) parts.push(escape(src.department_name));
+  return parts.length ? parts.join(' / ') : '（任意）';
+}
+
 function renderPermissionGrid() {
   const userId = parseInt($('#perm-user-select').value);
   const user = state.users.find(u => u.id === userId);
@@ -607,20 +616,50 @@ function renderPermissionGrid() {
     return;
   }
   const grantedSet = new Set(user.tool_keys || []);
+  const groupSet = new Set(user.group_tool_keys || []);
+  const groupSources = user.group_tool_sources || {};
   const html = state.tools.map(t => {
     const isSensitive = t.category === 'sensitive';
-    const checked = isSensitive ? (user.is_admin || grantedSet.has(t.key)) : true;
+    const byGroup = isSensitive && groupSet.has(t.key);
+    const byIndividual = isSensitive && grantedSet.has(t.key);
+    const checked = isSensitive ? byIndividual : true;
     const disabled = !isSensitive || user.is_admin;
-    const badge = isSensitive
-      ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">🔒 要許可</span>'
-      : '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">🌐 公開</span>';
+    const badges = [
+      isSensitive
+        ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">🔒 要許可</span>'
+        : '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">🌐 公開</span>'
+    ];
+    if (byGroup) {
+      badges.push('<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded">🏷️ グループ許可</span>');
+    }
+    if (isSensitive && user.is_admin) {
+      badges.push('<span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded">👑 管理者のため全許可</span>');
+    }
+    let groupDetail = '';
+    if (byGroup) {
+      const sources = groupSources[t.key] || [];
+      const lines = sources.map(s => `・${formatGroupScope(s)}`).join('<br>');
+      const indivNote = byIndividual
+        ? ''
+        : '<div class="text-[11px] text-purple-700 mt-0.5">※ 個人付与はありませんが、グループルールにより許可されています。</div>';
+      groupDetail = `
+        <div class="mt-1 text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded px-2 py-1">
+          <div class="font-medium">🏷️ グループ許可の付与元</div>
+          <div class="mt-0.5">${lines || '・（任意）'}</div>
+          ${indivNote}
+        </div>`;
+    }
+    const cardBg = byGroup
+      ? 'bg-purple-50/40 border-purple-200'
+      : (disabled ? 'bg-gray-50 opacity-70' : 'hover:bg-blue-50 cursor-pointer');
     return `
-      <label class="flex items-start gap-2 border rounded p-3 ${disabled ? 'bg-gray-50 opacity-70' : 'hover:bg-blue-50 cursor-pointer'}">
+      <label class="flex items-start gap-2 border rounded p-3 ${cardBg}">
         <input type="checkbox" class="perm-cb mt-1" data-key="${t.key}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
         <div class="flex-1">
           <div class="font-medium">${t.icon || ''} ${escape(t.label)}</div>
           <div class="text-xs text-gray-600">${escape(t.description || '')}</div>
-          <div class="mt-1">${badge}</div>
+          <div class="mt-1 flex flex-wrap gap-1">${badges.join('')}</div>
+          ${groupDetail}
         </div>
       </label>`;
   }).join('');
