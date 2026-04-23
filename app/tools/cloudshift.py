@@ -1098,7 +1098,7 @@ def _merge_month_payload(
 
         merged_map: dict[str, dict[str, str]] = {}
         ordered_ids = []
-        for source in (current_day, incoming_day):
+        for source in (incoming_day, current_day):
             for entry in source:
                 if entry["id"] not in ordered_ids:
                     ordered_ids.append(entry["id"])

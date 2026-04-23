@@ -1226,7 +1226,7 @@ const ShifterSync = (function() {
     entries.forEach((entry) => {
       const parts = getEntryDisplayParts(entry);
       const syncedEntry = isSyncedEntry(entry);
-      const canDragEntry = state.editable && entries.length > 1 && !syncedEntry;
+      const canDragEntry = state.editable && !syncedEntry;
       const item = $('<div>')
         .addClass('entry-item')
         .toggleClass('is-draggable', canDragEntry)
@@ -1239,8 +1239,8 @@ const ShifterSync = (function() {
             ? $('<span>')
               .addClass('entry-drag-handle')
               .attr('role', 'button')
-              .attr('aria-label', '表示順を並び替え')
-              .attr('title', '表示順を並び替え')
+              .attr('aria-label', 'ドラッグで並び替え・別の日付へ移動')
+              .attr('title', 'ドラッグで並び替え・別の日付へ移動')
               .text('↕')
             : null,
           $('<div>')
@@ -1387,6 +1387,7 @@ const ShifterSync = (function() {
 
   function clearEntryDragState() {
     $('.entry-item.is-dragging').removeClass('is-dragging');
+    $('.day-box.is-drop-target').removeClass('is-drop-target');
     clearEntryDropMarkers();
     state.dragEntry = null;
   }
@@ -1404,43 +1405,69 @@ const ShifterSync = (function() {
     return clientY < rect.top + (rect.height / 2) ? 'before' : 'after';
   }
 
-  function reorderEntryWithinDay(day, sourceEntryId, targetEntryId = null, placement = 'after') {
-    const dayKey = String(day);
+  function moveEntry(sourceDay, sourceEntryId, targetDay, targetEntryId = null, placement = 'after') {
+    const sourceKey = String(sourceDay);
+    const targetKey = String(targetDay);
     const sourceId = String(sourceEntryId || '');
     const targetId = targetEntryId ? String(targetEntryId) : null;
-    if (!dayKey || !sourceId || sourceId === targetId) {
+    if (!sourceKey || !targetKey || !sourceId) {
+      return false;
+    }
+    if (sourceKey === targetKey && sourceId === targetId) {
       return false;
     }
 
-    const originalEntries = getDayEntries(dayKey);
-    const originalOrder = originalEntries.map((entry) => entry.id).join('\u0000');
-    const nextEntries = originalEntries.slice();
-    const sourceIndex = nextEntries.findIndex((entry) => entry.id === sourceId);
+    const sameDay = sourceKey === targetKey;
+    const sourceEntries = getDayEntries(sourceKey).slice();
+    const sourceIndex = sourceEntries.findIndex((entry) => entry.id === sourceId);
     if (sourceIndex < 0) {
       return false;
     }
-
-    const [movedEntry] = nextEntries.splice(sourceIndex, 1);
-    let insertIndex = nextEntries.length;
-    if (targetId) {
-      insertIndex = nextEntries.findIndex((entry) => entry.id === targetId);
-      if (insertIndex < 0) {
-        insertIndex = nextEntries.length;
-      } else if (placement === 'after') {
-        insertIndex += 1;
-      }
-    }
-
-    nextEntries.splice(insertIndex, 0, movedEntry);
-    const nextOrder = nextEntries.map((entry) => entry.id).join('\u0000');
-    if (originalOrder === nextOrder) {
+    const movedEntry = sourceEntries[sourceIndex];
+    if (!sameDay && isSyncedEntry(movedEntry)) {
       return false;
     }
 
-    setDayEntries(dayKey, nextEntries);
-    updateEntryDisplay(dayKey);
-    updateCapacityWarning(dayKey);
-    updateBranchWarning(dayKey);
+    const originalSourceOrder = sourceEntries.map((entry) => entry.id).join(' ');
+    sourceEntries.splice(sourceIndex, 1);
+
+    const targetEntries = sameDay ? sourceEntries : getDayEntries(targetKey).slice();
+    const originalTargetOrder = sameDay ? originalSourceOrder : targetEntries.map((entry) => entry.id).join(' ');
+
+    let insertIndex = targetEntries.length;
+    if (targetId) {
+      const found = targetEntries.findIndex((entry) => entry.id === targetId);
+      if (found >= 0) {
+        insertIndex = placement === 'after' ? found + 1 : found;
+      }
+    }
+    targetEntries.splice(insertIndex, 0, movedEntry);
+
+    if (sameDay) {
+      const nextOrder = targetEntries.map((entry) => entry.id).join(' ');
+      if (originalSourceOrder === nextOrder) {
+        return false;
+      }
+      setDayEntries(sourceKey, targetEntries);
+      updateEntryDisplay(sourceKey);
+      updateCapacityWarning(sourceKey);
+      updateBranchWarning(sourceKey);
+      return true;
+    }
+
+    const nextTargetOrder = targetEntries.map((entry) => entry.id).join(' ');
+    if (originalTargetOrder === nextTargetOrder) {
+      return false;
+    }
+
+    setDayEntries(sourceKey, sourceEntries);
+    setDayEntries(targetKey, targetEntries);
+    updateEntryDisplay(sourceKey);
+    updateEntryDisplay(targetKey);
+    updateCapacityWarning(sourceKey);
+    updateCapacityWarning(targetKey);
+    updateBranchWarning(sourceKey);
+    updateBranchWarning(targetKey);
     return true;
   }
 
@@ -1465,6 +1492,7 @@ const ShifterSync = (function() {
     $(document).off('drop', '.entry-item');
     $(document).off('dragend', '.entry-item');
     $(document).off('dragover', '.entry-list-container');
+    $(document).off('dragleave', '.entry-list-container');
     $(document).off('drop', '.entry-list-container');
     $(document).off('click', '.day-detail-trigger');
     $(document).off('click', '.ss-entry-edit-btn');
@@ -1520,7 +1548,11 @@ const ShifterSync = (function() {
         return;
       }
 
-      state.dragEntry = { day, entryId };
+      const entries = getDayEntries(day);
+      const entry = entries.find((item) => item.id === entryId);
+      const synced = entry ? isSyncedEntry(entry) : false;
+
+      state.dragEntry = { day, entryId, synced };
       item.addClass('is-dragging');
       const originalEvent = e.originalEvent;
       if (originalEvent && originalEvent.dataTransfer) {
@@ -1532,10 +1564,16 @@ const ShifterSync = (function() {
     $(document).on('dragover', '.entry-item', function(e) {
       const dragEntry = state.dragEntry;
       const item = $(this);
-      if (!dragEntry || String(item.attr('data-day') || '') !== dragEntry.day) {
+      if (!dragEntry) {
         return;
       }
-      if (String(item.attr('data-entry-id') || '') === dragEntry.entryId) {
+      const itemDay = String(item.attr('data-day') || '');
+      const itemEntryId = String(item.attr('data-entry-id') || '');
+      const sameDay = itemDay === dragEntry.day;
+      if (sameDay && itemEntryId === dragEntry.entryId) {
+        return;
+      }
+      if (!sameDay && dragEntry.synced) {
         return;
       }
 
@@ -1543,6 +1581,9 @@ const ShifterSync = (function() {
       const placement = getEntryDropPlacement(e.originalEvent || e, this);
       clearEntryDropMarkers();
       item.addClass(placement === 'before' ? 'is-drop-before' : 'is-drop-after');
+      if (!sameDay) {
+        $(`.day-box[data-day='${itemDay}']`).addClass('is-drop-target');
+      }
       const originalEvent = e.originalEvent;
       if (originalEvent && originalEvent.dataTransfer) {
         originalEvent.dataTransfer.dropEffect = 'move';
@@ -1556,13 +1597,18 @@ const ShifterSync = (function() {
     $(document).on('drop', '.entry-item', function(e) {
       const dragEntry = state.dragEntry;
       const item = $(this);
-      if (!dragEntry || String(item.attr('data-day') || '') !== dragEntry.day) {
+      if (!dragEntry) {
+        return;
+      }
+      const itemDay = String(item.attr('data-day') || '');
+      const itemEntryId = String(item.attr('data-entry-id') || '');
+      if (itemDay !== dragEntry.day && dragEntry.synced) {
+        clearEntryDragState();
         return;
       }
       e.preventDefault();
-      const targetEntryId = String(item.attr('data-entry-id') || '');
       const placement = getEntryDropPlacement(e.originalEvent || e, this);
-      const changed = reorderEntryWithinDay(dragEntry.day, dragEntry.entryId, targetEntryId, placement);
+      const changed = moveEntry(dragEntry.day, dragEntry.entryId, itemDay, itemEntryId, placement);
       if (changed) {
         suppressNextEntryClick();
       }
@@ -1572,21 +1618,40 @@ const ShifterSync = (function() {
     $(document).on('dragover', '.entry-list-container', function(e) {
       const dragEntry = state.dragEntry;
       const day = String($(this).attr('data-day') || '');
-      if (!dragEntry || dragEntry.day !== day || $(e.target).closest('.entry-item').length > 0) {
+      if (!dragEntry || $(e.target).closest('.entry-item').length > 0) {
+        return;
+      }
+      if (day !== dragEntry.day && dragEntry.synced) {
         return;
       }
       e.preventDefault();
       clearEntryDropMarkers();
+      if (day !== dragEntry.day) {
+        $(`.day-box[data-day='${day}']`).addClass('is-drop-target');
+      }
+    });
+
+    $(document).on('dragleave', '.entry-list-container', function(e) {
+      const related = e.originalEvent && e.originalEvent.relatedTarget;
+      if (related && this.contains(related)) {
+        return;
+      }
+      const day = String($(this).attr('data-day') || '');
+      $(`.day-box[data-day='${day}']`).removeClass('is-drop-target');
     });
 
     $(document).on('drop', '.entry-list-container', function(e) {
       const dragEntry = state.dragEntry;
       const day = String($(this).attr('data-day') || '');
-      if (!dragEntry || dragEntry.day !== day || $(e.target).closest('.entry-item').length > 0) {
+      if (!dragEntry || $(e.target).closest('.entry-item').length > 0) {
+        return;
+      }
+      if (day !== dragEntry.day && dragEntry.synced) {
+        clearEntryDragState();
         return;
       }
       e.preventDefault();
-      const changed = reorderEntryWithinDay(day, dragEntry.entryId, null, 'after');
+      const changed = moveEntry(dragEntry.day, dragEntry.entryId, day, null, 'after');
       if (changed) {
         suppressNextEntryClick();
       }

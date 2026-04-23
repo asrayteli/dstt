@@ -412,6 +412,12 @@ h1, h2, h3 {
     box-shadow: inset 0 -3px 0 var(--ss-accent);
 }
 
+.day-box.is-drop-target {
+    outline: 2px dashed var(--ss-accent);
+    outline-offset: -2px;
+    background: #eef6ff;
+}
+
 .entry-item.has-branch-warning {
     border-color: #e2c68b;
     background: #fffaf1;
