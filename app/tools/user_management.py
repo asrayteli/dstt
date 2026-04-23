@@ -16,6 +16,7 @@ from app.models import (
 )
 from app.access_control import (
     TOOL_ACCESS_CATEGORIES,
+    _user_satisfies_group_rule,
     is_admin_user,
     is_legacy_admin_username,
     set_tool_access,
@@ -45,12 +46,33 @@ def generate_random_password(length=12):
     return password
 
 
-def _serialize_user(user: User) -> dict:
+def _user_matching_group_rules(user: User, rules) -> dict:
+    """ユーザーに適用されるグループ付与ルールを tool_key 毎にまとめて返す。
+
+    戻り値: {tool_key: [{"branch_name": .., "office_name": .., "department_name": ..}, ...]}
+    画面側で「グループ許可」のバッジと付与元の表示に利用する。
+    """
+    matched: dict[str, list] = {}
+    for rule in rules:
+        if not _user_satisfies_group_rule(user, rule):
+            continue
+        matched.setdefault(rule.tool_key, []).append({
+            "branch_name": rule.branch.name if rule.branch else None,
+            "office_name": rule.office.name if rule.office else None,
+            "department_name": rule.department.name if rule.department else None,
+        })
+    return matched
+
+
+def _serialize_user(user: User, group_rules=None) -> dict:
     extra_offices = (
         UserAccessibleOffice.query.filter_by(user_id=user.id).all()
         if user.id is not None
         else []
     )
+    if group_rules is None:
+        group_rules = GroupToolPermission.query.all()
+    group_sources = _user_matching_group_rules(user, group_rules)
     return {
         "id": user.id,
         "username": user.username,
@@ -67,6 +89,8 @@ def _serialize_user(user: User) -> dict:
         "department_name": user.department.name if user.department else None,
         "extra_office_ids": [row.office_id for row in extra_offices],
         "tool_keys": [p.tool_key for p in user.tool_permissions],
+        "group_tool_keys": list(group_sources.keys()),
+        "group_tool_sources": group_sources,
     }
 
 
@@ -82,7 +106,10 @@ def get_users():
         return jsonify({"error": "管理者権限が必要です"}), 403
 
     users = User.query.order_by(User.username).all()
-    return jsonify({"users": [_serialize_user(u) for u in users]})
+    group_rules = GroupToolPermission.query.all()
+    return jsonify({
+        "users": [_serialize_user(u, group_rules=group_rules) for u in users]
+    })
 
 
 @user_management_bp.route("/api/users", methods=["POST"])
@@ -349,10 +376,13 @@ def get_user_tools(user_id):
     if not user:
         return jsonify({"error": "ユーザーが見つかりません"}), 404
 
+    group_sources = _user_matching_group_rules(user, GroupToolPermission.query.all())
     return jsonify({
         "user_id": user.id,
         "username": user.username,
         "tool_keys": [p.tool_key for p in user.tool_permissions],
+        "group_tool_keys": list(group_sources.keys()),
+        "group_tool_sources": group_sources,
     })
 
 
