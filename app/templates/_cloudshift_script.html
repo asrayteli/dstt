@@ -877,6 +877,17 @@
       }
     }
 
+    function clearBulkSiteSelection(form) {
+      const refs = bulkFieldRefs(form);
+      if (!refs.nameInput) return;
+      refs.nameInput.removeAttribute('data-site-id');
+      refs.nameInput.removeAttribute('data-selected-site-name');
+      if (refs.note) {
+        refs.note.textContent = '';
+        refs.note.classList.add('cloud-hidden');
+      }
+    }
+
     function applyBulkEmployeeCandidate(form, candidate) {
       const refs = bulkFieldRefs(form);
       if (!refs.nameInput) return;
@@ -889,6 +900,24 @@
       if (refs.note) {
         refs.note.textContent = candidate.employee_number ? `社員番号: ${candidate.employee_number}` : '';
         refs.note.classList.toggle('cloud-hidden', !candidate.employee_number);
+      }
+      if (refs.panel) {
+        refs.panel.innerHTML = '';
+        refs.panel.classList.add('cloud-hidden');
+      }
+    }
+
+    function applyBulkSiteCandidate(form, candidate) {
+      const refs = bulkFieldRefs(form);
+      if (!refs.nameInput) return;
+      const siteName = String(candidate.site_name || '').trim();
+      const siteId = String(candidate.site_id || '').trim();
+      refs.nameInput.value = siteName;
+      refs.nameInput.dataset.selectedSiteName = siteName;
+      refs.nameInput.dataset.siteId = siteId;
+      if (refs.note) {
+        refs.note.textContent = siteId ? `契約番号: ${siteId}` : '';
+        refs.note.classList.toggle('cloud-hidden', !siteId);
       }
       if (refs.panel) {
         refs.panel.innerHTML = '';
@@ -924,15 +953,53 @@
       refs.panel.classList.remove('cloud-hidden');
     }
 
-    function scheduleBulkEmployeeSearch(form) {
-      const project = currentProject();
+    function renderBulkSiteCandidates(form, candidates) {
       const refs = bulkFieldRefs(form);
-      if (!project || project.mode !== 'scene' || !refs.nameInput) {
+      if (!refs.panel) {
         return;
       }
+      const normalized = (Array.isArray(candidates) ? candidates : [])
+        .map((item) => ({
+          site_id: String(item.site_id || '').trim(),
+          site_name: String(item.site_name || '').trim()
+        }))
+        .filter((item) => item.site_name);
+      if (!normalized.length) {
+        refs.panel.innerHTML = '<div style="color: var(--cloud-muted); font-size: 12px; padding: 4px 2px;">候補が見つかりません</div>';
+        refs.panel.classList.remove('cloud-hidden');
+        return;
+      }
+      refs.panel.innerHTML = normalized.slice(0, 8).map((candidate) => {
+        const label = candidate.site_id ? `${candidate.site_name} / ${candidate.site_id}` : candidate.site_name;
+        return `
+          <button
+            type="button"
+            class="cloud-bulk-site-candidate"
+            data-site-name="${escapeHtml(candidate.site_name)}"
+            data-site-id="${escapeHtml(candidate.site_id)}"
+            style="display:block; width:100%; text-align:left; border:1px solid var(--cloud-line); border-radius:10px; background:#fff; color:var(--cloud-text); padding:8px 10px; cursor:pointer; margin:0 0 6px;"
+          >${escapeHtml(label)}</button>
+        `;
+      }).join('');
+      refs.panel.classList.remove('cloud-hidden');
+    }
+
+    function scheduleBulkCandidateSearch(form) {
+      const project = currentProject();
+      const refs = bulkFieldRefs(form);
+      if (!project || !refs.nameInput) {
+        return;
+      }
+      const mode = project.mode === 'person' ? 'person' : 'scene';
       const query = refs.nameInput.value.trim();
-      if (refs.nameInput.dataset.selectedEmployeeName && refs.nameInput.dataset.selectedEmployeeName !== query) {
-        clearBulkEmployeeSelection(form);
+      if (mode === 'scene') {
+        if (refs.nameInput.dataset.selectedEmployeeName && refs.nameInput.dataset.selectedEmployeeName !== query) {
+          clearBulkEmployeeSelection(form);
+        }
+      } else {
+        if (refs.nameInput.dataset.selectedSiteName && refs.nameInput.dataset.selectedSiteName !== query) {
+          clearBulkSiteSelection(form);
+        }
       }
       if (!query) {
         if (refs.panel) {
@@ -952,11 +1019,19 @@
           return;
         }
         try {
-          const candidates = await fetchEmployeeCandidates(latestQuery);
-          if (refs.nameInput.value.trim() !== latestQuery) {
-            return;
+          if (mode === 'scene') {
+            const candidates = await fetchEmployeeCandidates(latestQuery);
+            if (refs.nameInput.value.trim() !== latestQuery) {
+              return;
+            }
+            renderBulkEmployeeCandidates(form, candidates);
+          } else {
+            const candidates = await fetchSiteCandidates(latestQuery);
+            if (refs.nameInput.value.trim() !== latestQuery) {
+              return;
+            }
+            renderBulkSiteCandidates(form, candidates);
           }
-          renderBulkEmployeeCandidates(form, candidates);
         } catch (_) {
           if (refs.panel) {
             refs.panel.innerHTML = '';
@@ -4844,7 +4919,7 @@
       const bulkNameInput = form.querySelector('[name="bulk_name"]');
       if (bulkNameInput) {
         bulkNameInput.placeholder = project.mode === 'scene' ? '人物名' : '現場名';
-        bulkNameInput.addEventListener('input', () => scheduleBulkEmployeeSearch(form));
+        bulkNameInput.addEventListener('input', () => scheduleBulkCandidateSearch(form));
       }
       form.querySelector('[name="bulk_scope"]').addEventListener('change', () => {
         updateBulkFieldVisibility(form);
@@ -4882,14 +4957,25 @@
         }
       });
       form.addEventListener('click', (event) => {
-        const candidate = event.target.closest('.cloud-bulk-employee-candidate');
-        if (!candidate) return;
-        event.preventDefault();
-        event.stopPropagation();
-        applyBulkEmployeeCandidate(form, {
-          employee_name: candidate.getAttribute('data-employee-name') || '',
-          employee_number: candidate.getAttribute('data-employee-number') || ''
-        });
+        const employeeCandidate = event.target.closest('.cloud-bulk-employee-candidate');
+        if (employeeCandidate) {
+          event.preventDefault();
+          event.stopPropagation();
+          applyBulkEmployeeCandidate(form, {
+            employee_name: employeeCandidate.getAttribute('data-employee-name') || '',
+            employee_number: employeeCandidate.getAttribute('data-employee-number') || ''
+          });
+          return;
+        }
+        const siteCandidate = event.target.closest('.cloud-bulk-site-candidate');
+        if (siteCandidate) {
+          event.preventDefault();
+          event.stopPropagation();
+          applyBulkSiteCandidate(form, {
+            site_name: siteCandidate.getAttribute('data-site-name') || '',
+            site_id: siteCandidate.getAttribute('data-site-id') || ''
+          });
+        }
       });
       applyBtn.addEventListener('click', () => applyBulkEditFromModal(modal));
       updateBulkFieldVisibility(form);
