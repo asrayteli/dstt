@@ -1056,6 +1056,11 @@ def _describe_day_changes(previous: list[dict[str, str]], current: list[dict[str
     for entry_id, entry in previous_by_id.items():
         if entry_id not in current_by_id:
             changes.append(f"{day}日から {_entry_history_label(entry)} を削除")
+
+    common_previous_order = [entry["id"] for entry in previous if entry["id"] in current_by_id]
+    common_current_order = [entry["id"] for entry in current if entry["id"] in previous_by_id]
+    if len(common_previous_order) >= 2 and common_previous_order != common_current_order:
+        changes.append(f"{day}日の並び順を変更")
     return changes
 
 
