@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import secrets
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +67,12 @@ TIME_CONFLICT_RULES = {
 VEHICLE_OPTIONS = {"M", "C", "O", "W", "V"}
 LEAVE_OPTION_KEYS = set(LEAVE_OPTION_MAPPINGS.keys())
 JAPAN_HOLIDAYS_SET = set(JAPAN_HOLIDAYS)
+JST = timezone(timedelta(hours=9))
+
+
+def _calendar_issued_text() -> str:
+    now = datetime.now(JST)
+    return f"発行日時: {now.strftime('%Y年%m月%d日 %H:%M:%S')} (JST)"
 
 
 def _calendar_output_dir() -> Path:
@@ -575,16 +581,18 @@ def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None
     font_name = _register_pdf_font()
 
     pdf.setFillColor(HexColor("#4f5a54"))
-    pdf.rect(0, height - 62, width, 62, fill=1)
+    pdf.rect(0, height - 72, width, 72, fill=1)
     pdf.setFillColor(colors.white)
     pdf.setFont(font_name, 22)
     header_text = f"{year}年{month}月 {title}"
     if capacity:
         header_text += f" / 必要人数 {capacity}"
-    pdf.drawCentredString(width / 2, height - 40, header_text)
+    pdf.drawCentredString(width / 2, height - 32, header_text)
+    pdf.setFont(font_name, 9)
+    pdf.drawCentredString(width / 2, height - 60, _calendar_issued_text())
 
     start_x = 34
-    start_y = height - 108
+    start_y = height - 118
     cell_w = (width - 68) / 7
     cell_h = 88
 
@@ -675,8 +683,9 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
     cell_w = (width - 80) // 7
     minimum_bottom_space = 58
     start_x = 40
-    start_y = 126
+    start_y = 150
     weekday_header_height = 42
+    header_height = 116
     calendar_top = start_y + 52
     content_left_padding = 10
     content_right_padding = 10
@@ -693,6 +702,7 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
     text_font = _load_image_font(16)
     comment_font = _load_image_font(14)
     footer_font = _load_image_font(12)
+    issued_font = _load_image_font(16)
 
     calendar_module = __import__("calendar")
     weeks = calendar_module.Calendar(firstweekday=calendar_module.MONDAY).monthdayscalendar(year, month)
@@ -734,17 +744,26 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
     img = Image.new("RGB", (width, height), page_background)
     draw = ImageDraw.Draw(img)
 
-    draw.rectangle([0, 0, width, 92], fill=header_background)
+    draw.rectangle([0, 0, width, header_height], fill=header_background)
     title_text = f"{year}年{month}月 {title}"
     if capacity:
         title_text += f" / 必要人数 {capacity}"
     title_box = draw.textbbox((0, 0), title_text, font=title_font)
     _draw_bold_calendar_text(
         draw,
-        ((width - (title_box[2] - title_box[0])) // 2, 24),
+        ((width - (title_box[2] - title_box[0])) // 2, 18),
         title_text,
         fill=header_text,
         font=title_font,
+    )
+    issued_text = _calendar_issued_text()
+    issued_box = draw.textbbox((0, 0), issued_text, font=issued_font)
+    _draw_bold_calendar_text(
+        draw,
+        ((width - (issued_box[2] - issued_box[0])) // 2, 76),
+        issued_text,
+        fill=header_text,
+        font=issued_font,
     )
 
     for column, day_name in enumerate(_calendar_weekdays()):
