@@ -17,9 +17,85 @@
 }
 .stamp-item.selected .stamp-resize-handle { display: block; }
 .powerstamp-stage-scroll {
-  height: calc(100vh - 13rem);
+  height: calc(100vh - 10.5rem);
   min-height: 560px;
   max-height: 90vh;
+}
+
+.powerstamp-collapsible,
+.powerstamp-compact-details {
+  overflow: hidden;
+}
+
+.powerstamp-collapsible > summary,
+.powerstamp-compact-details > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.powerstamp-collapsible > summary::-webkit-details-marker,
+.powerstamp-compact-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.powerstamp-collapsible > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.powerstamp-collapsible > summary::after,
+.powerstamp-compact-details > summary::after {
+  content: "開く";
+  font-size: 11px;
+  color: #475569;
+}
+
+.powerstamp-collapsible[open] > summary::after,
+.powerstamp-compact-details[open] > summary::after {
+  content: "閉じる";
+}
+
+.powerstamp-collapsible-body {
+  border-top: 1px solid #e2e8f0;
+  padding: 14px 16px 16px;
+}
+
+.powerstamp-compact-details {
+  position: relative;
+}
+
+.powerstamp-compact-details > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.powerstamp-compact-details-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+  width: min(92vw, 760px);
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.14);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
 }
 
 @media print {
@@ -109,8 +185,14 @@
 
 @media (max-width: 1024px) {
   .powerstamp-stage-scroll {
-    height: calc(100vh - 10rem);
+    height: calc(100vh - 8.5rem);
     min-height: 460px;
     max-height: 92vh;
+  }
+
+  .powerstamp-compact-details-body {
+    left: 0;
+    right: auto;
+    width: min(92vw, 640px);
   }
 }

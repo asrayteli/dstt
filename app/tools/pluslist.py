@@ -1684,7 +1684,11 @@ def search_employee_api():
         'employee_number': e.employee_number,
         'employee_name': e.employee_name,
         'office_name': e.office_name,
-        'job_title': e.job_title
+        'job_title': e.job_title,
+        'postal_code': e.postal_code,
+        'address1': e.address1,
+        'address2': e.address2,
+        'mansion_name': e.mansion_name
     } for e in employees])
 
 

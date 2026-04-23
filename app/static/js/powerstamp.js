@@ -21,13 +21,8 @@
   const calibScaleYInput = document.getElementById('calibScaleY');
   const calibResetBtn = document.getElementById('calibResetBtn');
   const applyCalibrationOnExport = document.getElementById('applyCalibrationOnExport');
-  const templateNameInput = document.getElementById('templateNameInput');
-  const saveTemplateBtn = document.getElementById('saveTemplateBtn');
   const templateSelect = document.getElementById('templateSelect');
   const loadTemplateBtn = document.getElementById('loadTemplateBtn');
-  const deleteTemplateBtn = document.getElementById('deleteTemplateBtn');
-  const openPreviewTabBtn = document.getElementById('openPreviewTabBtn');
-  const openVerifyTabBtn = document.getElementById('openVerifyTabBtn');
   const useAnchorOrigin = document.getElementById('useAnchorOrigin');
   const setAnchorBtn = document.getElementById('setAnchorBtn');
   const anchorStatus = document.getElementById('anchorStatus');
@@ -35,23 +30,36 @@
   const paperSizeSelect = document.getElementById('paperSizeSelect');
   const paperOrientation = document.getElementById('paperOrientation');
   const paperDpiInput = document.getElementById('paperDpiInput');
+  const customPaperWidthMm = document.getElementById('customPaperWidthMm');
+  const customPaperHeightMm = document.getElementById('customPaperHeightMm');
+  const customPaperFields = Array.from(document.querySelectorAll('.paper-custom-field'));
   const textFontFamily = document.getElementById('textFontFamily');
   const textVertical = document.getElementById('textVertical');
   const toggleSelectedTextDirectionBtn = document.getElementById('toggleSelectedTextDirectionBtn');
   const postalCodePanel = document.getElementById('postalCodePanel');
   const postalCodeInput = document.getElementById('postalCodeInput');
   const applyPostalCodeBtn = document.getElementById('applyPostalCodeBtn');
+  const plusEmployeeSearchInput = document.getElementById('plusEmployeeSearchInput');
+  const plusEmployeeSearchBtn = document.getElementById('plusEmployeeSearchBtn');
+  const plusEmployeeSelect = document.getElementById('plusEmployeeSelect');
+  const applyPlusEmployeeBtn = document.getElementById('applyPlusEmployeeBtn');
+  const plusEmployeeStatus = document.getElementById('plusEmployeeStatus');
 
   if (!stage || !stageViewport || !guideLayer || !overlayLayer || !backgroundLayer || !detectedSize || !detectedFileType) {
     return;
   }
 
-  const PAPER_MM = [
-    { name: 'A3', w: 297, h: 420 },
-    { name: 'A4', w: 210, h: 297 },
-    { name: 'B4', w: 257, h: 364 },
-    { name: 'B5', w: 182, h: 257 },
+  const PAPER_DEFINITIONS = [
+    { key: 'A3', name: 'A3', w: 297, h: 420 },
+    { key: 'A4', name: 'A4', w: 210, h: 297 },
+    { key: 'A5', name: 'A5', w: 148, h: 210 },
+    { key: 'A6', name: 'A6', w: 105, h: 148 },
+    { key: 'B4', name: 'B4', w: 257, h: 364 },
+    { key: 'B5', name: 'B5', w: 182, h: 257 },
+    { key: 'NAGA3', name: '長3封筒', w: 120, h: 235 },
+    { key: 'KAKU2', name: '角2封筒', w: 240, h: 332 },
   ];
+  const PAPER_MAP_MM = Object.fromEntries(PAPER_DEFINITIONS.map((paper) => [paper.key, paper]));
 
   let selected = null;
   let dragState = null;
@@ -63,8 +71,8 @@
   const ZOOM_MIN = 0.05;
   const ZOOM_MAX = 4;
   const ZOOM_STEP = 0.1;
+  const MAX_EXACT_PDF_PIXELS = 50_000_000;
 
-  const PAPER_MAP_MM = { A3: {w:297,h:420}, A4:{w:210,h:297}, B4:{w:257,h:364}, B5:{w:182,h:257} };
   let anchorPoint = null;
   let waitingAnchorPick = false;
   let activeGuide = null;
@@ -76,12 +84,7 @@
   let colorDialog = null;
   let colorDialogInput = null;
   let activeTemplateName = '';
-
-  
-  
-  function mmToCanvasPx(mm, dpi = 300) {
-    return (mm / 25.4) * dpi;
-  }
+  let plusEmployeeResults = [];
 
   function clearGuide() {
     if (guideLayer) guideLayer.innerHTML = '';
@@ -111,6 +114,7 @@
         h: (b.h_mm || 0) * sy,
         inter_gap: (b.inter_gap_mm || 0) * sx,
         group_gap: (b.group_gap_mm || 0) * sx,
+        digit_font_size: b.digit_font_size_mm ? b.digit_font_size_mm * sy : undefined,
       }));
     }
 
@@ -182,8 +186,8 @@
     const baseY = Number(zipGuide.y || 0);
     const h = Math.max(0, Number(zipGuide.h || 0));
     const digits = zipCode.padEnd(count, ' ');
-    // フォントサイズ: セル高さの約70%を基準に自動計算
-    const autoFontSize = Math.max(12, Math.round(h * 0.70));
+    // フォントサイズ: 郵便枠内に余白を残す。mm指定があればそちらを優先する。
+    const autoFontSize = Math.max(8, Math.round(Number(zipGuide.digit_font_size || 0) || (h * 0.62)));
 
     for (let i = 0; i < count; i++) {
       const x = baseX
@@ -207,6 +211,7 @@
       text.style.lineHeight = '1';
       text.style.color = '#111';
       text.style.whiteSpace = 'pre';
+      text.style.fontVariantNumeric = 'tabular-nums';
       overlayLayer.appendChild(text);
     }
   }
@@ -214,6 +219,176 @@
   function triggerPostalCodeApply() {
     if (postalCodePanel?.classList.contains('hidden')) return;
     applyPostalCodeToGuide(postalCodeInput?.value || '');
+  }
+
+  function cleanEmployeeText(value) {
+    return String(value || '').replace(/[\r\n\t]+/g, ' ').trim();
+  }
+
+  function formatRecipientName(employee) {
+    const name = cleanEmployeeText(employee?.employee_name);
+    if (!name) return '';
+    return name.endsWith('様') ? name : `${name}　様`;
+  }
+
+  function buildEmployeeEnvelopeLines(employee) {
+    return [
+      cleanEmployeeText(employee?.address1),
+      cleanEmployeeText(employee?.address2),
+      cleanEmployeeText(employee?.mansion_name),
+      formatRecipientName(employee),
+    ].filter(Boolean);
+  }
+
+  function setPlusEmployeeStatus(message, tone = 'neutral') {
+    if (!plusEmployeeStatus) return;
+    plusEmployeeStatus.textContent = message || '';
+    const toneClass = {
+      neutral: 'text-gray-500',
+      ok: 'text-emerald-700',
+      warn: 'text-amber-700',
+      error: 'text-rose-700',
+    }[tone] || 'text-gray-500';
+    plusEmployeeStatus.className = `text-xs ${toneClass} min-w-[12rem]`;
+  }
+
+  function formatPlusEmployeeOption(employee) {
+    const number = cleanEmployeeText(employee?.employee_number);
+    const name = cleanEmployeeText(employee?.employee_name) || '氏名未設定';
+    const postal = cleanEmployeeText(employee?.postal_code);
+    const address = [
+      cleanEmployeeText(employee?.address1),
+      cleanEmployeeText(employee?.address2),
+      cleanEmployeeText(employee?.mansion_name),
+    ].filter(Boolean).join(' ');
+    return [name, number, postal ? `〒${postal}` : '', address].filter(Boolean).join(' / ');
+  }
+
+  function renderPlusEmployeeOptions() {
+    if (!plusEmployeeSelect) return;
+    plusEmployeeSelect.innerHTML = '';
+
+    if (!plusEmployeeResults.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = '該当する従業員がありません';
+      plusEmployeeSelect.appendChild(option);
+      return;
+    }
+
+    plusEmployeeResults.forEach((employee, index) => {
+      const option = document.createElement('option');
+      option.value = String(index);
+      option.textContent = formatPlusEmployeeOption(employee);
+      plusEmployeeSelect.appendChild(option);
+    });
+
+    plusEmployeeSelect.value = '0';
+  }
+
+  async function searchPlusEmployees() {
+    const query = cleanEmployeeText(plusEmployeeSearchInput?.value);
+    if (!query) {
+      plusEmployeeResults = [];
+      renderPlusEmployeeOptions();
+      setPlusEmployeeStatus('検索語を入力してください', 'warn');
+      return;
+    }
+
+    setPlusEmployeeStatus('検索中...');
+    const response = await fetch(`/tools/pluslist/api/search_employee?q=${encodeURIComponent(query)}`, {
+      credentials: 'same-origin',
+    });
+
+    if (response.status === 403) {
+      plusEmployeeResults = [];
+      renderPlusEmployeeOptions();
+      setPlusEmployeeStatus('社員名簿PLUSの権限がありません', 'error');
+      return;
+    }
+    if (!response.ok) {
+      throw new Error('社員名簿PLUSの検索に失敗しました');
+    }
+
+    const json = await response.json();
+    plusEmployeeResults = Array.isArray(json) ? json : [];
+    renderPlusEmployeeOptions();
+    setPlusEmployeeStatus(`${plusEmployeeResults.length}件`, plusEmployeeResults.length ? 'ok' : 'warn');
+  }
+
+  function getSelectedPlusEmployee() {
+    if (!plusEmployeeSelect) return null;
+    const index = Number(plusEmployeeSelect.value);
+    if (!Number.isInteger(index) || index < 0) return null;
+    return plusEmployeeResults[index] || null;
+  }
+
+  function clearAutoRecipientStamps() {
+    Array.from(overlayLayer.querySelectorAll('.auto-recipient-address')).forEach((node) => {
+      if (selected === node) selectItem(null);
+      node.remove();
+    });
+  }
+
+  function canvasPxPerMmY() {
+    const canvas = getStagePixelSize();
+    if (activePaper?.h_mm) {
+      const paperHeight = Number(activePaper.h_mm);
+      if (Number.isFinite(paperHeight) && paperHeight > 0) {
+        return canvas.height / paperHeight;
+      }
+    }
+    return getOutputDpi() / 25.4;
+  }
+
+  function applyPlusEmployeeToEnvelope(employee) {
+    const lines = buildEmployeeEnvelopeLines(employee);
+    if (!employee || !lines.length) {
+      alert('反映できる住所・氏名がありません。');
+      return;
+    }
+
+    const postal = normalizePostalCode(employee.postal_code || '');
+    if (postalCodeInput) {
+      postalCodeInput.value = postal;
+      if (postal && !postalCodePanel?.classList.contains('hidden')) {
+        triggerPostalCodeApply();
+      }
+    }
+
+    clearAutoRecipientStamps();
+
+    const canvas = getStagePixelSize();
+    const fontSize = Math.round(clampNumber(canvasPxPerMmY() * 5.4, 18, 84, 42));
+    const lineHeight = Math.round(fontSize * 1.45);
+    const boxW = Math.round(canvas.width * 0.76);
+    const boxH = Math.max(lineHeight, lineHeight * lines.length);
+    const div = document.createElement('div');
+    div.className = 'stamp-item auto-recipient-address';
+    div.dataset.stampType = 'text';
+    div.dataset.autoRecipientAddress = 'true';
+    div.textContent = lines.join('\n');
+    div.style.left = `${Math.max(0, Math.round((canvas.width - boxW) / 2))}px`;
+    div.style.top = `${Math.max(0, Math.round((canvas.height - boxH) / 2))}px`;
+    div.style.width = `${Math.max(1, boxW)}px`;
+    div.style.height = `${Math.max(1, boxH)}px`;
+    div.style.fontSize = `${fontSize}px`;
+    div.style.lineHeight = `${lineHeight}px`;
+    div.style.fontFamily = '"Noto Sans JP", "Yu Gothic", "YuGothic", "Meiryo", sans-serif';
+    div.style.fontWeight = '500';
+    div.style.color = '#111';
+    div.style.whiteSpace = 'pre';
+    div.style.textAlign = 'center';
+    div.style.writingMode = 'horizontal-tb';
+    div.style.textOrientation = 'mixed';
+    makeDraggable(div);
+    overlayLayer.appendChild(div);
+    selectItem(div);
+
+    const postalMessage = postal
+      ? '郵便番号と宛名を反映しました'
+      : '宛名を反映しました（郵便番号なし）';
+    setPlusEmployeeStatus(postalMessage, postal ? 'ok' : 'warn');
   }
 
   function renderGuide(guide, paper = null) {
@@ -268,23 +443,144 @@
     }
   }
 
+  function refreshActiveGuideForCanvas() {
+    if (!activeGuide) return;
+    renderGuide(activeGuide, activePaper);
+    if (postalCodeInput?.value && !postalCodePanel?.classList.contains('hidden')) {
+      triggerPostalCodeApply();
+    }
+  }
+
   /* buildEnvelopeGuideByName は削除。seedデータの guide_mm を常に使用する。 */
 
-function mmToPx(mm, dpi) {
+  function mmToPx(mm, dpi) {
     return (mm / 25.4) * dpi;
   }
 
-  function getPaperOutputSize() {
+  function clampNumber(value, min, max, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(max, Math.max(min, n));
+  }
+
+  function getOutputDpi() {
+    return clampNumber(paperDpiInput?.value, 72, 1200, 300);
+  }
+
+  function updateCustomPaperVisibility() {
+    const show = paperSizeSelect?.value === 'CUSTOM';
+    customPaperFields.forEach((field) => field.classList.toggle('hidden', !show));
+  }
+
+  function getSelectedPaperDefinition() {
     const key = paperSizeSelect?.value || 'A4';
-    const p = PAPER_MAP_MM[key] || PAPER_MAP_MM.A4;
+    if (key === 'CUSTOM') {
+      const w = clampNumber(customPaperWidthMm?.value, 10, 600, 210);
+      const h = clampNumber(customPaperHeightMm?.value, 10, 600, 297);
+      return {
+        key,
+        name: 'カスタム',
+        w_mm: w,
+        h_mm: h,
+        orientation: w > h ? 'landscape' : 'portrait',
+        label: `カスタム ${w}×${h}mm`,
+      };
+    }
+
+    const paper = PAPER_MAP_MM[key] || PAPER_MAP_MM.A4;
     const isLandscape = (paperOrientation?.value || 'portrait') === 'landscape';
-    const dpi = Math.max(72, Number(paperDpiInput?.value || 300));
-    const wMm = isLandscape ? p.h : p.w;
-    const hMm = isLandscape ? p.w : p.h;
+    const wMm = isLandscape ? paper.h : paper.w;
+    const hMm = isLandscape ? paper.w : paper.h;
     return {
-      width: Math.round(mmToPx(wMm, dpi)),
-      height: Math.round(mmToPx(hMm, dpi)),
-      label: `${key} ${isLandscape ? '横' : '縦'} @${dpi}dpi`
+      key: paper.key,
+      name: paper.name,
+      w_mm: wMm,
+      h_mm: hMm,
+      orientation: isLandscape ? 'landscape' : 'portrait',
+      label: `${paper.name} ${isLandscape ? '横' : '縦'}`,
+    };
+  }
+
+  function findPaperKeyBySize(wMm, hMm) {
+    const close = (a, b) => Math.abs(Number(a) - Number(b)) < 0.5;
+    for (const paper of PAPER_DEFINITIONS) {
+      if (close(wMm, paper.w) && close(hMm, paper.h)) {
+        return { key: paper.key, orientation: 'portrait' };
+      }
+      if (close(wMm, paper.h) && close(hMm, paper.w)) {
+        return { key: paper.key, orientation: 'landscape' };
+      }
+    }
+    return null;
+  }
+
+  function syncPaperControlsToPaper(paper) {
+    if (!paper || !paper.w_mm || !paper.h_mm || !paperSizeSelect) return;
+    const wMm = Number(paper.w_mm);
+    const hMm = Number(paper.h_mm);
+    const match = findPaperKeyBySize(wMm, hMm);
+    if (match) {
+      paperSizeSelect.value = match.key;
+      if (paperOrientation) paperOrientation.value = match.orientation;
+    } else {
+      paperSizeSelect.value = 'CUSTOM';
+      if (customPaperWidthMm) customPaperWidthMm.value = String(wMm);
+      if (customPaperHeightMm) customPaperHeightMm.value = String(hMm);
+    }
+    updateCustomPaperVisibility();
+  }
+
+  function getPaperOutputSize() {
+    const page = getSelectedPaperDefinition();
+    const dpi = getOutputDpi();
+    return {
+      width: Math.round(mmToPx(page.w_mm, dpi)),
+      height: Math.round(mmToPx(page.h_mm, dpi)),
+      w_mm: page.w_mm,
+      h_mm: page.h_mm,
+      dpi,
+      label: `${page.label} @${dpi}dpi`,
+    };
+  }
+
+  function getSourcePdfPageSizeMm() {
+    if (sourceSize.unit !== 'pt') return null;
+    return {
+      w_mm: (Number(sourceSize.width || 0) * 25.4) / 72,
+      h_mm: (Number(sourceSize.height || 0) * 25.4) / 72,
+      label: 'PDF原稿サイズ',
+    };
+  }
+
+  function resolveExactPageSize(mode) {
+    if (mode === 'paper') {
+      const paper = getSelectedPaperDefinition();
+      return { w_mm: paper.w_mm, h_mm: paper.h_mm, label: paper.label };
+    }
+    if (activePaper && activePaper.w_mm && activePaper.h_mm) {
+      return {
+        w_mm: Number(activePaper.w_mm),
+        h_mm: Number(activePaper.h_mm),
+        label: 'テンプレート用紙サイズ',
+      };
+    }
+    return getSourcePdfPageSizeMm();
+  }
+
+  function getExactPdfRasterSize(page, dpi = getOutputDpi()) {
+    let width = Math.max(1, Math.round(mmToPx(page.w_mm, dpi)));
+    let height = Math.max(1, Math.round(mmToPx(page.h_mm, dpi)));
+    const pixels = width * height;
+    if (pixels > MAX_EXACT_PDF_PIXELS) {
+      const factor = Math.sqrt(MAX_EXACT_PDF_PIXELS / pixels);
+      width = Math.max(1, Math.round(width * factor));
+      height = Math.max(1, Math.round(height * factor));
+      dpi = Math.max(72, Math.round(dpi * factor));
+    }
+    return {
+      width,
+      height,
+      dpi,
     };
   }
 
@@ -423,7 +719,7 @@ function mmToPx(mm, dpi) {
   function closestPaperSizeByRatio(width, height) {
     const ratio = Math.max(width, height) / Math.min(width, height);
     let best = null;
-    for (const paper of PAPER_MM) {
+    for (const paper of PAPER_DEFINITIONS) {
       const pRatio = Math.max(paper.w, paper.h) / Math.min(paper.w, paper.h);
       const diff = Math.abs(ratio - pRatio);
       if (!best || diff < best.diff) best = { paper, diff };
@@ -435,7 +731,7 @@ function mmToPx(mm, dpi) {
     const longSide = Math.max(widthMm, heightMm);
     const shortSide = Math.min(widthMm, heightMm);
     let best = null;
-    for (const paper of PAPER_MM) {
+    for (const paper of PAPER_DEFINITIONS) {
       const pLong = Math.max(paper.w, paper.h);
       const pShort = Math.min(paper.w, paper.h);
       const diff = Math.abs(longSide - pLong) + Math.abs(shortSide - pShort);
@@ -604,8 +900,10 @@ function mmToPx(mm, dpi) {
       fontFamily: node.style.fontFamily || '',
       fontWeight: node.style.fontWeight || '',
       lineHeight: node.style.lineHeight || '',
+      textAlign: node.style.textAlign || '',
       writingMode: node.style.writingMode || '',
       textOrientation: node.style.textOrientation || '',
+      autoRecipientAddress: node.dataset.autoRecipientAddress === 'true',
     };
   }
 
@@ -640,8 +938,13 @@ function mmToPx(mm, dpi) {
       if (data.fontFamily) node.style.fontFamily = data.fontFamily;
       if (data.fontWeight) node.style.fontWeight = data.fontWeight;
       if (data.lineHeight) node.style.lineHeight = data.lineHeight;
+      if (data.textAlign) node.style.textAlign = data.textAlign;
       if (data.writingMode) node.style.writingMode = data.writingMode;
       if (data.textOrientation) node.style.textOrientation = data.textOrientation;
+      if (data.autoRecipientAddress) {
+        node.dataset.autoRecipientAddress = 'true';
+        node.classList.add('auto-recipient-address');
+      }
     }
 
     if (!node) return null;
@@ -873,19 +1176,6 @@ function mmToPx(mm, dpi) {
     }
   }
 
-  function currentTemplatePayload() {
-    const payload = {
-      version: 1,
-      sourceSize,
-      canvas: getStagePixelSize(),
-      calibration: getCalibration(),
-      stamps: serializeAllStamps(),
-    };
-    if (activeGuide) payload.guide = activeGuide;
-    if (activePaper) payload.paper = activePaper;
-    return payload;
-  }
-
   async function refreshTemplateList(selectId = null) {
     if (!templateSelect) return;
     const res = await fetch('/tools/powerstamp/api/templates');
@@ -894,7 +1184,7 @@ function mmToPx(mm, dpi) {
 
     const placeholder = document.createElement('option');
     placeholder.value = '';
-    placeholder.textContent = `テンプレート選択（${json.count || 0}/${json.max || 20}）`;
+    placeholder.textContent = '定型テンプレートを選択';
     templateSelect.appendChild(placeholder);
 
     for (const tpl of (json.templates || [])) {
@@ -905,31 +1195,6 @@ function mmToPx(mm, dpi) {
     }
 
     if (selectId) templateSelect.value = selectId;
-  }
-
-  async function saveTemplate() {
-    const name = (templateNameInput?.value || '').trim();
-    if (!name) {
-      alert('テンプレート名を入力してください');
-      return;
-    }
-
-    const payload = {
-      name,
-      data: currentTemplatePayload(),
-    };
-
-    const res = await fetch('/tools/powerstamp/api/templates', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const json = await res.json();
-    if (!res.ok || !json.ok) {
-      alert(json.error || 'テンプレート保存に失敗しました');
-      return;
-    }
-    await refreshTemplateList(json.id);
   }
 
   async function loadTemplate() {
@@ -974,26 +1239,10 @@ function mmToPx(mm, dpi) {
       : data.guide;
     activeGuide = guide || null;
     activePaper = data.paper || null;
+    if (activePaper) syncPaperControlsToPaper(activePaper);
     renderGuide(activeGuide, activePaper);
     updatePostalCodePanel();
     if (postalCodeInput?.value && !postalCodePanel?.classList.contains('hidden')) triggerPostalCodeApply();
-  }
-
-  async function deleteTemplate() {
-    const id = templateSelect?.value;
-    if (!id) {
-      alert('削除するテンプレートを選択してください');
-      return;
-    }
-    if (!confirm('選択中テンプレートを削除します。よろしいですか？')) return;
-
-    const res = await fetch(`/tools/powerstamp/api/templates/${id}`, { method: 'DELETE' });
-    const json = await res.json();
-    if (!res.ok || !json.ok) {
-      alert(json.error || 'テンプレート削除に失敗しました');
-      return;
-    }
-    await refreshTemplateList();
   }
 
     stage.addEventListener('click', (event) => {
@@ -1017,24 +1266,6 @@ function mmToPx(mm, dpi) {
     if (stamp) selectItem(stamp);
     showContextMenu(event, stamp || null, point);
   });
-
-
-  function buildPreviewState() {
-    return {
-      canvas: getStagePixelSize(),
-      backgroundSrc: backgroundLayer?.src || '',
-      stamps: serializeAllStamps(),
-    };
-  }
-
-  function preparePreviewStateForNewTab(event) {
-    try {
-      localStorage.setItem('powerstampPreviewState', JSON.stringify(buildPreviewState()));
-    } catch (e) {
-      event.preventDefault();
-      alert(`プレビュー状態の保存に失敗しました: ${e.message}`);
-    }
-  }
 
 document.addEventListener('mousemove', (event) => {
     if (resizeState) {
@@ -1140,6 +1371,7 @@ document.addEventListener('mousemove', (event) => {
 
         // PDFはページ実寸ptをそのまま基準寸法として扱う（背景ファイルサイズ準拠）。
         sourceSize = { width: widthPt, height: heightPt, unit: 'pt' };
+        syncPaperControlsToPaper({ w_mm: widthMm, h_mm: heightMm });
         const sourceType = detectFileTypeFromSize({
           widthPx: widthPt,
           heightPx: heightPt,
@@ -1157,6 +1389,7 @@ document.addEventListener('mousemove', (event) => {
         backgroundLayer.src = canvas.toDataURL('image/png');
 
         setCanvasSize(widthPt, heightPt);
+        refreshActiveGuideForCanvas();
         updateDetectedInfo(
           `PDF 1ページ目: ${Math.round(widthPt)}×${Math.round(heightPt)}pt（約 ${widthMm.toFixed(1)}×${heightMm.toFixed(1)}mm）`,
           sourceType
@@ -1179,6 +1412,7 @@ document.addEventListener('mousemove', (event) => {
           sourceKind: '画像'
         });
         setCanvasSize(img.naturalWidth, img.naturalHeight);
+        refreshActiveGuideForCanvas();
         updateDetectedInfo(`画像: ${img.naturalWidth}×${img.naturalHeight}px`, sourceType);
       };
       img.src = e.target.result;
@@ -1256,21 +1490,9 @@ document.addEventListener('mousemove', (event) => {
     selectItem(null);
   });
 
-    async function printOverlayDirect(win) {
-    const stageSize = getStagePixelSize();
+  async function openExactPdfForPrint(win) {
     const mode = document.querySelector('input[name="exportSizeMode"]:checked')?.value || 'source';
-
-    let outWidth = stageSize.width;
-    let outHeight = stageSize.height;
-
-    if (mode === 'source') {
-      outWidth = Math.round(sourceSize.width || stageSize.width);
-      outHeight = Math.round(sourceSize.height || stageSize.height);
-    } else if (mode === 'paper') {
-      const paper = getPaperOutputSize();
-      outWidth = paper.width;
-      outHeight = paper.height;
-    }
+    const page = resolveExactPageSize(mode);
 
     if (useAnchorOrigin?.checked && !anchorPoint) {
       alert('左上基準点が未設定です。');
@@ -1278,56 +1500,66 @@ document.addEventListener('mousemove', (event) => {
       return;
     }
 
+    if (!page) {
+      alert('画像原稿は画素数だけでは実寸が分かりません。「用紙サイズ指定」を選んで、A4・長3封筒・角2封筒などの実寸を指定してください。');
+      if (win) win.close();
+      return;
+    }
+
+    if (!win) {
+      alert('PDF表示用のウィンドウを開けません。ポップアップを許可してください。');
+      return;
+    }
+
+    try {
+      win.document.write('<!doctype html><html><head><meta charset="utf-8"><title>PowerSTAMP</title></head><body style="font-family:sans-serif;padding:24px;">実寸PDFを作成中です...</body></html>');
+      win.document.close();
+    } catch (_) {}
+
+    const raster = getExactPdfRasterSize(page);
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, outWidth);
-    canvas.height = Math.max(1, outHeight);
+    canvas.width = raster.width;
+    canvas.height = raster.height;
     const ctx = canvas.getContext('2d');
     await drawOverlayToCanvas(ctx, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/png');
 
-    let pageWmm = null;
-    let pageHmm = null;
-    if (mode === 'paper') {
-      const key = paperSizeSelect?.value || 'A4';
-      const p = PAPER_MAP_MM[key] || PAPER_MAP_MM.A4;
-      const isLandscape = (paperOrientation?.value || 'portrait') === 'landscape';
-      pageWmm = isLandscape ? p.h : p.w;
-      pageHmm = isLandscape ? p.w : p.h;
-    } else if (activePaper && activePaper.w_mm && activePaper.h_mm) {
-      // 封筒等テンプレート固有の用紙サイズを使用
-      pageWmm = activePaper.w_mm;
-      pageHmm = activePaper.h_mm;
-    } else if (sourceSize.unit === 'pt') {
-      pageWmm = (outWidth * 25.4) / 72;
-      pageHmm = (outHeight * 25.4) / 72;
+    const response = await fetch('/tools/powerstamp/api/exact-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image: dataUrl,
+        page: { w_mm: page.w_mm, h_mm: page.h_mm },
+        dpi: raster.dpi,
+        filename: 'powerstamp-exact-print.pdf',
+      }),
+    });
+
+    if (!response.ok) {
+      let message = '実寸PDFの作成に失敗しました';
+      try {
+        const errorJson = await response.json();
+        if (errorJson?.error) message = errorJson.error;
+      } catch (_) {}
+      throw new Error(message);
     }
 
-    if (!win) {
-      alert('印刷ウィンドウを開けません。ポップアップを許可してください。');
-      return;
-    }
-
-    const pageSizeCss = (pageWmm && pageHmm)
-      ? `@page { size: ${pageWmm.toFixed(2)}mm ${pageHmm.toFixed(2)}mm; margin: 0; }`
-      : '@page { margin: 0; }';
-
-    // 用紙mm寸法がわかっている場合は正確なmm指定で配置
-    const imgSizeCss = (pageWmm && pageHmm)
-      ? `width:${pageWmm.toFixed(2)}mm;height:${pageHmm.toFixed(2)}mm;`
-      : 'width:100%;height:100%;object-fit:contain;';
-    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>PowerSTAMP Print</title><style>${pageSizeCss} html,body{margin:0;padding:0;overflow:hidden;} .sheet{width:100vw;height:100vh;display:flex;align-items:flex-start;justify-content:flex-start;} img{${imgSizeCss}}</style></head><body><div class="sheet"><img src="${dataUrl}" /></div><script>window.onload=()=>{setTimeout(()=>{window.print();},150)}<\/script></body></html>`);
-    win.document.close();
+    const blob = await response.blob();
+    const pdfUrl = URL.createObjectURL(blob);
+    try { win.opener = null; } catch (_) {}
+    win.location.href = pdfUrl;
+    setTimeout(() => URL.revokeObjectURL(pdfUrl), 120000);
   }
 
   document.getElementById('printBtn').addEventListener('click', () => {
-    const win = window.open('', '_blank', 'noopener');
+    const win = window.open('about:blank', '_blank');
     if (!win) {
-      alert('印刷ウィンドウを開けません。ポップアップを許可してください。');
+      alert('PDF表示用のウィンドウを開けません。ポップアップを許可してください。');
       return;
     }
-    printOverlayDirect(win).catch((e) => {
+    openExactPdfForPrint(win).catch((e) => {
       try { win.close(); } catch (_) {}
-      alert(`印刷準備エラー: ${e.message}`);
+      alert(`実寸PDF作成エラー: ${e.message}`);
     });
   });
 
@@ -1341,6 +1573,11 @@ document.addEventListener('mousemove', (event) => {
   zoomSlider?.addEventListener('input', () => {
     const pct = Number(zoomSlider.value || 100);
     setZoom(pct / 100);
+  });
+  paperSizeSelect?.addEventListener('change', updateCustomPaperVisibility);
+  templateSelect?.addEventListener('change', () => {
+    if (!templateSelect.value) return;
+    loadTemplate().catch((e) => alert(`テンプレ読込エラー: ${e.message}`));
   });
   outsideAreaColorInput?.addEventListener('input', () => {
     const color = outsideAreaColorInput.value || OUTSIDE_AREA_DEFAULT;
@@ -1371,14 +1608,8 @@ document.addEventListener('mousemove', (event) => {
     saveCalibration();
   });
 
-  saveTemplateBtn?.addEventListener('click', () => {
-    saveTemplate().catch((e) => alert(`テンプレ保存エラー: ${e.message}`));
-  });
   loadTemplateBtn?.addEventListener('click', () => {
     loadTemplate().catch((e) => alert(`テンプレ読込エラー: ${e.message}`));
-  });
-  deleteTemplateBtn?.addEventListener('click', () => {
-    deleteTemplate().catch((e) => alert(`テンプレ削除エラー: ${e.message}`));
   });
 
   applyPostalCodeBtn?.addEventListener('click', triggerPostalCodeApply);
@@ -1394,8 +1625,18 @@ document.addEventListener('mousemove', (event) => {
       postalCodeInput.value = normalized;
     }
   });
-
-  openPreviewTabBtn?.addEventListener('click', preparePreviewStateForNewTab);
+  plusEmployeeSearchBtn?.addEventListener('click', () => {
+    searchPlusEmployees().catch((e) => setPlusEmployeeStatus(e.message, 'error'));
+  });
+  plusEmployeeSearchInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      searchPlusEmployees().catch((e) => setPlusEmployeeStatus(e.message, 'error'));
+    }
+  });
+  applyPlusEmployeeBtn?.addEventListener('click', () => {
+    applyPlusEmployeeToEnvelope(getSelectedPlusEmployee());
+  });
 
   setAnchorBtn?.addEventListener('click', () => {
     waitingAnchorPick = true;
@@ -1479,11 +1720,16 @@ document.addEventListener('mousemove', (event) => {
         const boxH = applyCalibH(parseFloat(node.style.height || '0') * scaleY);
         const hasBox = boxW > 0 && boxH > 0;
         const isFlexCenter = hasBox && (computed.display === 'flex' || node.style.display === 'flex');
+        const textAlignStyle = (node.style.textAlign || computed.textAlign || 'left').toLowerCase();
+        const isTextCentered = hasBox && (isFlexCenter || textAlignStyle === 'center');
+        const isTextRight = hasBox && (textAlignStyle === 'right' || textAlignStyle === 'end');
 
         ctx.fillStyle = node.style.color || computed.color || '#111';
         ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
         ctx.textBaseline = 'top';
-        ctx.textAlign = (isFlexCenter && !writingMode.startsWith('vertical')) ? 'center' : 'left';
+        ctx.textAlign = (isTextCentered && !writingMode.startsWith('vertical'))
+          ? 'center'
+          : (isTextRight && !writingMode.startsWith('vertical')) ? 'right' : 'left';
 
         if (writingMode.startsWith('vertical')) {
           const columnGap = fontSize * 1.05;
@@ -1504,7 +1750,7 @@ document.addEventListener('mousemove', (event) => {
           });
         } else {
           const totalTextH = lineHeight * lines.length;
-          const textX = isFlexCenter ? (x + (boxW / 2)) : x;
+          const textX = isTextCentered ? (x + (boxW / 2)) : isTextRight ? (x + boxW) : x;
           const startY = isFlexCenter ? (y + ((boxH - totalTextH) / 2)) : y;
           lines.forEach((line, idx) => {
             ctx.fillText(line, textX, startY + lineHeight * idx);
@@ -1555,6 +1801,7 @@ document.addEventListener('mousemove', (event) => {
   });
 
   setAnchorUI(null);
+  updateCustomPaperVisibility();
   updatePostalCodePanel();
   loadCalibration();
   loadOutsideAreaColor();

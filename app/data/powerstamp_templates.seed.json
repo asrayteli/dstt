@@ -40,10 +40,10 @@
             "label": "差出人"
           },
           {
-            "x": 960,
-            "y": 820,
-            "w": 280,
-            "h": 90,
+            "x": 759,
+            "y": 142,
+            "w": 563,
+            "h": 94,
             "label": "郵便番号"
           }
         ]
@@ -57,15 +57,16 @@
         "boxes": [
           {
             "type": "zip7",
-            "x_mm": 57,
+            "x_mm": 64.3,
             "y_mm": 12,
-            "w_mm": 55,
-            "h_mm": 12,
+            "w_mm": 47.7,
+            "h_mm": 8,
             "label": "郵便番号",
             "digits_first": 3,
             "digits_second": 4,
             "inter_gap_mm": 1.0,
-            "group_gap_mm": 2.5
+            "group_gap_mm": 2.8,
+            "digit_font_size_mm": 5.0
           },
           {
             "x_mm": 72,
@@ -126,10 +127,10 @@
             "label": "差出人"
           },
           {
-            "x": 1800,
-            "y": 1040,
-            "w": 520,
-            "h": 120,
+            "x": 2177,
+            "y": 142,
+            "w": 563,
+            "h": 94,
             "label": "郵便番号"
           }
         ]
@@ -143,15 +144,16 @@
         "boxes": [
           {
             "type": "zip7",
-            "x_mm": 170,
-            "y_mm": 14,
-            "w_mm": 60,
-            "h_mm": 13,
+            "x_mm": 184.3,
+            "y_mm": 12,
+            "w_mm": 47.7,
+            "h_mm": 8,
             "label": "郵便番号",
             "digits_first": 3,
             "digits_second": 4,
             "inter_gap_mm": 1.0,
-            "group_gap_mm": 2.5
+            "group_gap_mm": 2.8,
+            "digit_font_size_mm": 5.0
           },
           {
             "x_mm": 145,
@@ -168,6 +170,192 @@
             "label": "差出人"
           }
         ]
+      }
+    }
+  },
+  {
+    "id": "tpl_paper_A4_210x297mm_300dpi",
+    "name": "用紙テンプレ_A4_210x297mm_300dpi",
+    "created_at": "2026-04-23T00:00:00",
+    "updated_at": "2026-04-23T00:00:00",
+    "owner": "SYSTEM",
+    "data": {
+      "version": 1,
+      "sourceSize": {
+        "width": 2480,
+        "height": 3508,
+        "unit": "px"
+      },
+      "canvas": {
+        "width": 2480,
+        "height": 3508
+      },
+      "calibration": {
+        "offsetX": 0,
+        "offsetY": 0,
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "stamps": [],
+      "paper": {
+        "w_mm": 210,
+        "h_mm": 297,
+        "orientation": "portrait"
+      }
+    }
+  },
+  {
+    "id": "tpl_paper_A3_297x420mm_300dpi",
+    "name": "用紙テンプレ_A3_297x420mm_300dpi",
+    "created_at": "2026-04-23T00:00:00",
+    "updated_at": "2026-04-23T00:00:00",
+    "owner": "SYSTEM",
+    "data": {
+      "version": 1,
+      "sourceSize": {
+        "width": 3508,
+        "height": 4961,
+        "unit": "px"
+      },
+      "canvas": {
+        "width": 3508,
+        "height": 4961
+      },
+      "calibration": {
+        "offsetX": 0,
+        "offsetY": 0,
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "stamps": [],
+      "paper": {
+        "w_mm": 297,
+        "h_mm": 420,
+        "orientation": "portrait"
+      }
+    }
+  },
+  {
+    "id": "tpl_paper_A5_148x210mm_300dpi",
+    "name": "用紙テンプレ_A5_148x210mm_300dpi",
+    "created_at": "2026-04-23T00:00:00",
+    "updated_at": "2026-04-23T00:00:00",
+    "owner": "SYSTEM",
+    "data": {
+      "version": 1,
+      "sourceSize": {
+        "width": 1748,
+        "height": 2480,
+        "unit": "px"
+      },
+      "canvas": {
+        "width": 1748,
+        "height": 2480
+      },
+      "calibration": {
+        "offsetX": 0,
+        "offsetY": 0,
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "stamps": [],
+      "paper": {
+        "w_mm": 148,
+        "h_mm": 210,
+        "orientation": "portrait"
+      }
+    }
+  },
+  {
+    "id": "tpl_paper_A6_105x148mm_300dpi",
+    "name": "用紙テンプレ_A6_105x148mm_300dpi",
+    "created_at": "2026-04-23T00:00:00",
+    "updated_at": "2026-04-23T00:00:00",
+    "owner": "SYSTEM",
+    "data": {
+      "version": 1,
+      "sourceSize": {
+        "width": 1240,
+        "height": 1748,
+        "unit": "px"
+      },
+      "canvas": {
+        "width": 1240,
+        "height": 1748
+      },
+      "calibration": {
+        "offsetX": 0,
+        "offsetY": 0,
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "stamps": [],
+      "paper": {
+        "w_mm": 105,
+        "h_mm": 148,
+        "orientation": "portrait"
+      }
+    }
+  },
+  {
+    "id": "tpl_paper_B4_257x364mm_300dpi",
+    "name": "用紙テンプレ_B4_257x364mm_300dpi",
+    "created_at": "2026-04-23T00:00:00",
+    "updated_at": "2026-04-23T00:00:00",
+    "owner": "SYSTEM",
+    "data": {
+      "version": 1,
+      "sourceSize": {
+        "width": 3035,
+        "height": 4299,
+        "unit": "px"
+      },
+      "canvas": {
+        "width": 3035,
+        "height": 4299
+      },
+      "calibration": {
+        "offsetX": 0,
+        "offsetY": 0,
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "stamps": [],
+      "paper": {
+        "w_mm": 257,
+        "h_mm": 364,
+        "orientation": "portrait"
+      }
+    }
+  },
+  {
+    "id": "tpl_paper_B5_182x257mm_300dpi",
+    "name": "用紙テンプレ_B5_182x257mm_300dpi",
+    "created_at": "2026-04-23T00:00:00",
+    "updated_at": "2026-04-23T00:00:00",
+    "owner": "SYSTEM",
+    "data": {
+      "version": 1,
+      "sourceSize": {
+        "width": 2150,
+        "height": 3035,
+        "unit": "px"
+      },
+      "canvas": {
+        "width": 2150,
+        "height": 3035
+      },
+      "calibration": {
+        "offsetX": 0,
+        "offsetY": 0,
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "stamps": [],
+      "paper": {
+        "w_mm": 182,
+        "h_mm": 257,
+        "orientation": "portrait"
       }
     }
   }
