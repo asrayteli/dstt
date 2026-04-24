@@ -144,15 +144,15 @@
         "boxes": [
           {
             "type": "zip7",
-            "x_mm": 184.3,
-            "y_mm": 12,
-            "w_mm": 47.7,
-            "h_mm": 8,
+            "x_mm": 140,
+            "y_mm": 17,
+            "w_mm": 83,
+            "h_mm": 15,
             "label": "郵便番号",
             "digits_first": 3,
             "digits_second": 4,
-            "inter_gap_mm": 1.0,
-            "group_gap_mm": 2.8,
+            "inter_gap_mm": 2.0,
+            "group_gap_mm": 4.0,
             "digit_font_size_mm": 5.0
           },
           {

@@ -114,11 +114,12 @@ def test_powerstamp_seed_templates_include_exact_papers_and_zip_guides():
     assert naga3["digit_font_size_mm"] == 5.0
 
     assert kaku2["type"] == "zip7"
-    assert kaku2["x_mm"] == 184.3
-    assert kaku2["y_mm"] == 12
-    assert kaku2["w_mm"] == 47.7
-    assert kaku2["h_mm"] == 8
-    assert kaku2["group_gap_mm"] == 2.8
+    assert kaku2["x_mm"] == 140
+    assert kaku2["y_mm"] == 17
+    assert kaku2["w_mm"] == 83
+    assert kaku2["h_mm"] == 15
+    assert kaku2["inter_gap_mm"] == 2.0
+    assert kaku2["group_gap_mm"] == 4.0
     assert kaku2["digit_font_size_mm"] == 5.0
 
 
