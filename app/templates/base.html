@@ -168,6 +168,11 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
         </svg>
       </button>
+      {% if request.path == "/" %}
+      <div class="fixed top-4 right-4 z-40 text-xs text-gray-500 bg-white/80 px-2 py-1 rounded-md shadow-sm">
+        Version {{ app_version }}
+      </div>
+      {% endif %}
 
       {% block content %}{% endblock %}
     </main>

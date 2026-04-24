@@ -8,6 +8,7 @@ import os
 import secrets
 from pathlib import Path
 from .navigation import NAV_ITEMS
+from .versioning import calculate_repo_version
 
 from .models import db
 login_manager = LoginManager()
@@ -97,6 +98,11 @@ def _ensure_access_control_schema(app):
 
 def create_app(test_config=None):
     app = Flask(__name__, static_folder='./static/')
+    app_version = os.environ.get('DSTT_APP_VERSION')
+    if app_version:
+        app.config['APP_VERSION'] = app_version
+    else:
+        app.config['APP_VERSION'] = calculate_repo_version(Path(app.root_path).parent)
     app.config['SECRET_KEY'] = _resolve_secret_key(app, test_config)
     app.config['SQLALCHEMY_DATABASE_URI'] = _resolve_database_uri(test_config)
     app.config['ALLOW_SELF_REGISTRATION'] = _env_bool('DSTT_ALLOW_SELF_REGISTRATION', False)
@@ -139,6 +145,7 @@ def create_app(test_config=None):
             "all_navigation_items": NAV_ITEMS,
             "current_user_is_admin": is_admin_user(),
             "current_user_id": uid,
+            "app_version": app.config.get("APP_VERSION", "v1.0.0"),
         }
 
     # トップページ
