@@ -345,6 +345,20 @@
       return mode === 'scene' ? '現場シフト' : '個人シフト';
     }
 
+    function projectAccessRole(project) {
+      return project && project.access_role === 'viewer' ? 'viewer' : 'owner';
+    }
+
+    function canEditCurrentProject() {
+      return PAGE.type === 'owner' && projectAccessRole(currentProject()) === 'owner';
+    }
+
+    function shareBadgeText(project) {
+      if (!project || !project.share) return '';
+      if (project.share.role === 'viewer') return '共有されたシフト';
+      return project.share.enabled ? '共有中' : '';
+    }
+
     function isLikelyMobileDevice() {
       const ua = navigator.userAgent || '';
       const touchDevice = navigator.maxTouchPoints > 1;
@@ -3972,19 +3986,41 @@
         return;
       }
 
-      list.innerHTML = state.projects.map((project) => `
-        <article class="cloud-project-item${currentProject() && currentProject().id === project.id ? ' active' : ''}" data-project-id="${project.id}">
-          <div class="cloud-project-card-head">
-            <div>
-              <h3>${escapeHtml(project.title)}</h3>
-              <p>${modeLongLabel(project.mode)} / ${project.month_count}か月${project.mode === 'scene' ? ` / ${escapeHtml(project.site && project.site.site_id ? project.site.site_id : '現場未設定')}` : ''}</p>
+      const groups = [
+        { key: 'person', title: '個人シフト', projects: state.projects.filter((project) => project.access_role !== 'viewer' && project.mode === 'person') },
+        { key: 'scene', title: '現場シフト', projects: state.projects.filter((project) => project.access_role !== 'viewer' && project.mode === 'scene') },
+        { key: 'shared', title: '共有されたシフト', projects: state.projects.filter((project) => project.access_role === 'viewer') }
+      ];
+
+      function projectCard(project) {
+        const shareText = shareBadgeText(project);
+        return `
+          <article class="cloud-project-item${currentProject() && currentProject().id === project.id ? ' active' : ''}${project.access_role === 'viewer' ? ' is-shared' : ''}" data-project-id="${project.id}">
+            <div class="cloud-project-card-head">
+              <div>
+                <h3>${escapeHtml(project.title)}</h3>
+                <p>${modeLongLabel(project.mode)} / ${project.month_count}か月${project.mode === 'scene' ? ` / ${escapeHtml(project.site && project.site.site_id ? project.site.site_id : '現場未設定')}` : ''}</p>
+              </div>
+              <span class="cloud-badge">${project.latest_month_key ? escapeHtml(formatMonthKey(project.latest_month_key)) : '未作成月'}</span>
             </div>
-            <span class="cloud-badge">${project.latest_month_key ? escapeHtml(formatMonthKey(project.latest_month_key)) : '未作成月'}</span>
+            <div class="cloud-project-meta">
+              <span>最終更新: ${escapeHtml(project.updated_at || '-')}</span>
+              ${shareText ? `<span class="cloud-badge ${project.access_role === 'viewer' ? 'shared' : 'shared-owner'}">${escapeHtml(shareText)}</span>` : ''}
+            </div>
+          </article>
+        `;
+      }
+
+      list.innerHTML = groups.map((group) => `
+        <section class="cloud-project-group" data-project-group="${group.key}">
+          <div class="cloud-project-group-head">
+            <h3>${group.title}</h3>
+            <span>${group.projects.length}件</span>
           </div>
-          <div class="cloud-project-meta">
-            <span>最終更新: ${escapeHtml(project.updated_at || '-')}</span>
-          </div>
-        </article>
+          ${group.projects.length
+            ? `<div class="cloud-project-group-grid">${group.projects.map(projectCard).join('')}</div>`
+            : '<div class="cloud-empty-state compact"><p>該当するシフト表はありません。</p></div>'}
+        </section>
       `).join('');
     }
 
@@ -4736,7 +4772,7 @@
       modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-summary-close>閉じる</button>';
       modalFooter(modal).querySelector('[data-cloud-summary-close]').addEventListener('click', () => closeCloudModal('cloud-summary-modal'));
 
-      const includeDraft = PAGE.type !== 'public' || PAGE.accessMode === 'edit';
+      const includeDraft = PAGE.type === 'public' ? PAGE.accessMode === 'edit' : canEditCurrentProject();
       const summary = await fetchMonthlySummary(project, month, includeDraft);
       renderSummaryModalContent(modal, summary);
     }
@@ -4991,7 +5027,7 @@
         return;
       }
 
-      const visible = PAGE.type === 'owner' && isPersonProject() && !!currentMonth();
+      const visible = PAGE.type === 'owner' && canEditCurrentProject() && isPersonProject() && !!currentMonth();
       row.classList.toggle('cloud-hidden', !visible);
       if (!visible) {
         select.innerHTML = '';
@@ -5105,6 +5141,7 @@
     function renderWorkspace(editable) {
       const project = currentProject();
       const month = currentMonth();
+      const isOwnerEditable = editable && projectAccessRole(project) === 'owner';
 
       if (PAGE.type === 'owner') {
         $('cloud-empty-state').classList.toggle('cloud-hidden', !!project);
@@ -5125,7 +5162,9 @@
       if ($('cloud-project-title')) {
         $('cloud-project-title').value = project.title || '';
         $('cloud-project-title').dataset.selectedEmployeeName = project.title || '';
+        $('cloud-project-title').disabled = !isOwnerEditable;
       }
+      if ($('cloud-save-title')) $('cloud-save-title').classList.toggle('cloud-hidden', !isOwnerEditable);
       if ($('cloud-project-employee-number')) $('cloud-project-employee-number').value = project.employee_number || '';
       if ($('cloud-project-selected-note')) {
         $('cloud-project-selected-note').textContent = project.employee_number ? `社員番号: ${project.employee_number}` : '';
@@ -5136,12 +5175,14 @@
       } else {
         clearSiteSelection('project');
       }
-      if ($('cloud-view-url')) $('cloud-view-url').value = project.urls.view_url || '';
-      if ($('cloud-edit-url')) $('cloud-edit-url').value = project.urls.edit_url || '';
+      if ($('cloud-view-url')) $('cloud-view-url').value = (project.urls && project.urls.view_url) || '';
+      if ($('cloud-edit-url')) $('cloud-edit-url').value = (project.urls && project.urls.edit_url) || '';
 
       if ($('cloud-project-badges')) {
+        const shareText = shareBadgeText(project);
         $('cloud-project-badges').innerHTML = `
           <span class="cloud-badge">${modeLongLabel(project.mode)}</span>
+          ${shareText ? `<span class="cloud-badge ${project.access_role === 'viewer' ? 'shared' : 'shared-owner'}">${escapeHtml(shareText)}</span>` : ''}
           <span class="cloud-badge">${(project.month_keys || []).length}か月</span>
           ${project.mode === 'scene' ? `<span class="cloud-badge">${escapeHtml(project.site && project.site.site_id ? `${project.site.site_id} / ${project.site.site_name || ''}` : '現場未設定')}</span>` : ''}
           <span class="cloud-badge">${escapeHtml(project.updated_at || '')}</span>
@@ -5156,7 +5197,7 @@
 
       if ($('cloud-required-capacity')) {
         $('cloud-required-capacity').value = month ? (month.required_capacity || 0) : 0;
-        $('cloud-required-capacity').disabled = !editable;
+        $('cloud-required-capacity').disabled = !isOwnerEditable;
       }
 
       renderLeaveSyncControls();
@@ -5165,14 +5206,24 @@
         $('cloud-capacity-field').classList.toggle('cloud-hidden', PAGE.accessMode !== 'edit');
       }
 
-      if ($('cloud-save-month')) $('cloud-save-month').classList.toggle('cloud-hidden', !editable);
-      if ($('cloud-add-prev-month')) $('cloud-add-prev-month').classList.toggle('cloud-hidden', !editable);
-      if ($('cloud-add-next-month')) $('cloud-add-next-month').classList.toggle('cloud-hidden', !editable);
-      if ($('cloud-create-first-month')) $('cloud-create-first-month').classList.toggle('cloud-hidden', !editable);
+      if ($('cloud-save-month')) $('cloud-save-month').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-add-prev-month')) $('cloud-add-prev-month').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-add-next-month')) $('cloud-add-next-month').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-create-first-month')) $('cloud-create-first-month').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-open-account-share')) $('cloud-open-account-share').classList.toggle('cloud-hidden', !isOwnerEditable);
       if ($('cloud-open-summary')) $('cloud-open-summary').classList.toggle('cloud-hidden', !month);
-      if ($('cloud-open-assist')) $('cloud-open-assist').classList.toggle('cloud-hidden', !isAssistAvailable());
-      if ($('cloud-open-bulk-edit')) $('cloud-open-bulk-edit').classList.toggle('cloud-hidden', !month || !editable || (PAGE.type === 'public' && PAGE.accessMode !== 'edit'));
-      if ($('cloud-open-restore')) $('cloud-open-restore').classList.toggle('cloud-hidden', !month || PAGE.type !== 'owner');
+      if ($('cloud-open-assist')) $('cloud-open-assist').classList.toggle('cloud-hidden', !isOwnerEditable || !isAssistAvailable());
+      if ($('cloud-open-bulk-edit')) $('cloud-open-bulk-edit').classList.toggle('cloud-hidden', !month || !isOwnerEditable || (PAGE.type === 'public' && PAGE.accessMode !== 'edit'));
+      if ($('cloud-open-restore')) $('cloud-open-restore').classList.toggle('cloud-hidden', !month || !isOwnerEditable);
+      if ($('cloud-project-pick-site')) $('cloud-project-pick-site').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-project-clear-site')) $('cloud-project-clear-site').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-open-view-url')) $('cloud-open-view-url').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-copy-view-url')) $('cloud-copy-view-url').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-open-edit-url')) $('cloud-open-edit-url').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-copy-edit-url')) $('cloud-copy-edit-url').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-delete-month')) $('cloud-delete-month').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-delete-project')) $('cloud-delete-project').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-regenerate-urls')) $('cloud-regenerate-urls').classList.toggle('cloud-hidden', !isOwnerEditable);
       if ($('cloud-site-warning')) {
         const showSiteWarning = project.mode === 'scene' && !(project.site && project.site.is_linked);
         $('cloud-site-warning').classList.toggle('cloud-hidden', !showSiteWarning);
@@ -5189,7 +5240,7 @@
       }
 
       setShifterSyncSiteStateForCurrentProject();
-      mountEditor(editable);
+      mountEditor(isOwnerEditable);
     }
 
     function collectMonthPayload() {
@@ -5249,9 +5300,13 @@
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       syncAssistContext();
       renderProjectList();
-      await renderWorkspaceWithSiteBranches(true);
-      await loadLeaveSyncCalendars(projectId);
-      await loadHistory(projectId);
+      await renderWorkspaceWithSiteBranches(projectAccessRole(payload.project) === 'owner');
+      if (projectAccessRole(payload.project) === 'owner') {
+        await loadLeaveSyncCalendars(projectId);
+        await loadHistory(projectId);
+      } else {
+        renderHistory([]);
+      }
       switchTab('editor');
     }
 
@@ -5593,6 +5648,83 @@
       showFlash(message, 'success');
     }
 
+    function employeeShareNumbersFromForm(form) {
+      return String((form.querySelector('[name="share_employee_numbers"]') || {}).value || '')
+        .split(/[\s,、]+/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+    }
+
+    function renderAccountShareModalBody(modal, data) {
+      const shares = data.shares || {};
+      const office = shares.office || {};
+      const employees = Array.isArray(shares.employees) ? shares.employees : [];
+      const ownerOffices = Array.isArray(data.owner_offices) ? data.owner_offices : [];
+      modalBody(modal).innerHTML = `
+        <form class="cloud-share-form">
+          <p class="cloud-panel-note">DSTTアカウントを持っている人向けの共有です。共有URLはアカウントがない人向けとして残します。</p>
+          <label class="cloud-share-option">
+            <input type="checkbox" name="share_office" ${office.enabled ? 'checked' : ''} ${ownerOffices.length ? '' : 'disabled'}>
+            <span>
+              <strong>同じ営業所内</strong>
+              <small>${ownerOffices.length ? ownerOffices.map((item) => item.label).join('、') : '共有に使える営業所権限がありません'}</small>
+            </span>
+          </label>
+          <label class="cloud-field">
+            <span>特定社員宛（社員番号）</span>
+            <textarea name="share_employee_numbers" class="cloud-input cloud-share-textarea" rows="4" placeholder="例: 3243012&#10;複数指定は改行・カンマ区切り">${escapeHtml(employees.map((item) => item.employee_number).join('\n'))}</textarea>
+          </label>
+          <div class="cloud-share-current">
+            <h4>現在の共有先</h4>
+            <div class="cloud-badges">
+              ${office.enabled ? `<span class="cloud-badge shared-owner">同じ営業所内</span>` : ''}
+              ${employees.map((item) => `<span class="cloud-badge shared-owner">${escapeHtml(item.name || item.employee_number)} / ${escapeHtml(item.employee_number)}</span>`).join('')}
+              ${!office.enabled && !employees.length ? '<span class="cloud-badge">未共有</span>' : ''}
+            </div>
+          </div>
+        </form>
+      `;
+      modalFooter(modal).innerHTML = `
+        <button type="button" class="cloud-btn secondary" data-cloud-share-close>閉じる</button>
+        <button type="button" class="cloud-btn primary" data-cloud-share-save>保存</button>
+      `;
+      modalFooter(modal).querySelector('[data-cloud-share-close]').addEventListener('click', () => closeCloudModal('cloud-account-share-modal'));
+      modalFooter(modal).querySelector('[data-cloud-share-save]').addEventListener('click', () => {
+        saveAccountShares(modal).catch((error) => showFlash(error.message, 'error'));
+      });
+    }
+
+    async function openAccountShareModal() {
+      const project = currentProject();
+      if (!project || projectAccessRole(project) !== 'owner') return;
+      const modal = openCloudModal('cloud-account-share-modal', `シフト帳共有 / ${project.title}`);
+      modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>共有設定を読み込み中です...</p></div>';
+      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-share-close>閉じる</button>';
+      modalFooter(modal).querySelector('[data-cloud-share-close]').addEventListener('click', () => closeCloudModal('cloud-account-share-modal'));
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/account-shares`);
+      renderAccountShareModalBody(modal, data);
+    }
+
+    async function saveAccountShares(modal) {
+      const project = currentProject();
+      const form = modal.querySelector('.cloud-share-form');
+      if (!project || !form) return;
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/account-shares`, {
+        method: 'PUT',
+        body: {
+          share_office: !!form.querySelector('[name="share_office"]')?.checked,
+          employee_numbers: employeeShareNumbersFromForm(form)
+        }
+      });
+      if (state.projectPayload && state.projectPayload.project) {
+        state.projectPayload.project.share = { role: 'owner', enabled: !!(data.shares && (data.shares.office.enabled || data.shares.employees.length)), settings: data.shares };
+      }
+      closeCloudModal('cloud-account-share-modal');
+      await loadProjects();
+      renderWorkspace(canEditCurrentProject());
+      showFlash('シフト帳共有を保存しました', 'success');
+    }
+
     function bindOwnerEvents() {
       document.querySelectorAll('[data-cloud-tab]').forEach((button) => {
         button.addEventListener('click', function() {
@@ -5850,6 +5982,9 @@
 
       const addNextMonth = $('cloud-add-next-month');
       if (addNextMonth) addNextMonth.addEventListener('click', () => createMonth(nextMonthKey(currentMonthKey() || currentProject().latest_month_key, 1), true).catch((error) => showFlash(error.message, 'error')));
+
+      const accountShare = $('cloud-open-account-share');
+      if (accountShare) accountShare.addEventListener('click', () => openAccountShareModal().catch((error) => showFlash(error.message, 'error')));
 
       const createFirstMonth = $('cloud-create-first-month');
       if (createFirstMonth) {

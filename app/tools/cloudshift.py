@@ -29,7 +29,8 @@ from openpyxl import Workbook
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
-from app.models import Site, SiteBranch, SiteContractMaster, db
+from app.access_control import user_office_ids
+from app.models import AccessOffice, Employee, Site, SiteBranch, SiteContractMaster, User, db
 
 try:
     from .shiftersync_format import (
@@ -842,7 +843,7 @@ def _build_month_payload(
 
 def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
     month_keys = _sort_month_keys(list((project.get("months") or {}).keys()))
-    return {
+    summary = {
         "id": project["id"],
         "title": project["title"],
         "mode": project["mode"],
@@ -855,6 +856,17 @@ def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
         "updated_at": project.get("updated_at"),
         "site": _project_site_payload(project),
     }
+    share_status = _share_status_for_current_user(project)
+    if share_status:
+        summary["share"] = share_status
+        summary["access_role"] = share_status["role"]
+    else:
+        summary["access_role"] = (
+            "owner"
+            if current_user.is_authenticated and project.get("owner_user_id") == _user_id()
+            else "none"
+        )
+    return summary
 
 
 def _project_public_urls(project: dict[str, Any]) -> dict[str, str]:
@@ -914,6 +926,111 @@ def _owner_project_or_404(project_id: str) -> dict[str, Any]:
     if project.get("owner_user_id") != _user_id():
         abort(404)
     return project
+
+
+def _current_share_office_ids() -> set[int]:
+    return {int(office_id) for office_id in user_office_ids(current_user) if office_id is not None}
+
+
+def _office_label_map(office_ids: set[int]) -> dict[int, str]:
+    if not office_ids:
+        return {}
+    rows = AccessOffice.query.filter(AccessOffice.id.in_(office_ids)).all()
+    labels: dict[int, str] = {}
+    for row in rows:
+        branch_name = row.branch.name if row.branch else ""
+        labels[int(row.id)] = f"{branch_name} / {row.name}" if branch_name else row.name
+    return labels
+
+
+def _employee_label_for_number(employee_number: str) -> str:
+    employee = Employee.query.filter_by(employee_number=employee_number).first()
+    if employee and employee.employee_name:
+        return employee.employee_name
+    user = User.query.filter_by(username=employee_number).first()
+    if user and user.name and user.name != "unknown":
+        return user.name
+    return employee_number
+
+
+def _normalized_account_shares(project: dict[str, Any]) -> dict[str, Any]:
+    raw = project.get("account_shares") if isinstance(project.get("account_shares"), dict) else {}
+    office = raw.get("office") if isinstance(raw.get("office"), dict) else {}
+    employees = raw.get("employees") if isinstance(raw.get("employees"), list) else []
+
+    office_ids: list[int] = []
+    for value in office.get("office_ids") or []:
+        try:
+            office_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if office_id > 0 and office_id not in office_ids:
+            office_ids.append(office_id)
+
+    employee_rows: list[dict[str, str]] = []
+    seen_numbers: set[str] = set()
+    for item in employees:
+        if isinstance(item, dict):
+            number = _sanitize_employee_number(item.get("employee_number"))
+            label = str(item.get("name") or "").strip()
+        else:
+            number = _sanitize_employee_number(item)
+            label = ""
+        if not number or number in seen_numbers:
+            continue
+        seen_numbers.add(number)
+        employee_rows.append({"employee_number": number, "name": label or _employee_label_for_number(number)})
+
+    office_labels = _office_label_map(set(office_ids))
+    return {
+        "office": {
+            "enabled": bool(office.get("enabled")) and bool(office_ids),
+            "office_ids": office_ids,
+            "offices": [
+                {"id": office_id, "label": office_labels.get(office_id, str(office_id))}
+                for office_id in office_ids
+            ],
+        },
+        "employees": employee_rows,
+        "updated_at": raw.get("updated_at"),
+        "updated_by": raw.get("updated_by"),
+    }
+
+
+def _project_is_shared_with_current_user(project: dict[str, Any]) -> bool:
+    if not current_user.is_authenticated:
+        return False
+    if project.get("owner_user_id") == _user_id():
+        return False
+    shares = _normalized_account_shares(project)
+    username = str(getattr(current_user, "username", "") or "").strip()
+    if username and any(item["employee_number"] == username for item in shares["employees"]):
+        return True
+    office_share = shares["office"]
+    if office_share.get("enabled"):
+        target_offices = {int(value) for value in office_share.get("office_ids") or []}
+        if target_offices & _current_share_office_ids():
+            return True
+    return False
+
+
+def _project_for_current_user_or_404(project_id: str) -> tuple[dict[str, Any], str]:
+    project = _load_project(project_id)
+    if project.get("owner_user_id") == _user_id():
+        return project, "owner"
+    if _project_is_shared_with_current_user(project):
+        return project, "viewer"
+    abort(404)
+
+
+def _share_status_for_current_user(project: dict[str, Any]) -> dict[str, Any] | None:
+    if current_user.is_authenticated and project.get("owner_user_id") == _user_id():
+        shares = _normalized_account_shares(project)
+        enabled = bool(shares["office"].get("enabled")) or bool(shares["employees"])
+        return {"role": "owner", "enabled": enabled, "settings": shares}
+    if _project_is_shared_with_current_user(project):
+        return {"role": "viewer", "enabled": True}
+    return None
 
 
 def _find_project_by_token(token: str, token_type: str) -> dict[str, Any]:
@@ -4645,7 +4762,10 @@ def api_list():
     projects = []
     for path in _shifts_dir().glob("*.json"):
         project = _load_json(path)
-        if not project or project.get("owner_user_id") != owner_id:
+        if not project:
+            continue
+        is_owner = project.get("owner_user_id") == owner_id
+        if not is_owner and not _project_is_shared_with_current_user(project):
             continue
         projects.append(_project_summary(project))
     projects.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
@@ -4784,9 +4904,14 @@ def api_create():
 @cloudshift_bp.route("/api/project/<project_id>")
 @login_required
 def api_project_detail(project_id: str):
-    project = _owner_project_or_404(project_id)
+    project, access_role = _project_for_current_user_or_404(project_id)
     selected_month_key = request.args.get("month_key")
-    return jsonify(_project_detail_payload(project, selected_month_key))
+    payload = _project_detail_payload(project, selected_month_key)
+    payload["access_role"] = access_role
+    payload["project"]["access_role"] = access_role
+    if access_role != "owner":
+        payload["project"]["urls"] = {}
+    return jsonify(payload)
 
 
 @cloudshift_bp.route("/api/project/<project_id>/meta", methods=["PUT"])
@@ -4889,6 +5014,83 @@ def api_regenerate_tokens(project_id: str):
             },
         )
     return jsonify({"success": True, "urls": _project_public_urls(project)})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/account-shares", methods=["GET", "PUT"])
+@login_required
+def api_project_account_shares(project_id: str):
+    if request.method == "GET":
+        project = _owner_project_or_404(project_id)
+        owner_office_ids = _current_share_office_ids()
+        office_labels = _office_label_map(owner_office_ids)
+        return jsonify(
+            {
+                "success": True,
+                "shares": _normalized_account_shares(project),
+                "owner_offices": [
+                    {"id": office_id, "label": office_labels.get(office_id, str(office_id))}
+                    for office_id in sorted(owner_office_ids)
+                ],
+            }
+        )
+
+    data = request.get_json(silent=True) or {}
+    share_office = bool(data.get("share_office"))
+    employee_numbers_raw = data.get("employee_numbers") or []
+    if not isinstance(employee_numbers_raw, list):
+        raise CloudShiftError("社員番号はリストで指定してください", 400)
+
+    employee_rows: list[dict[str, str]] = []
+    seen_numbers: set[str] = set()
+    for raw_number in employee_numbers_raw:
+        number = _sanitize_employee_number(raw_number)
+        if not number or number in seen_numbers:
+            continue
+        seen_numbers.add(number)
+        user = User.query.filter_by(username=number).first()
+        if not user:
+            raise CloudShiftError(f"社員番号 {number} のDSTTアカウントが見つかりません", 404)
+        employee_rows.append(
+            {
+                "employee_number": number,
+                "name": _employee_label_for_number(number),
+            }
+        )
+
+    owner_office_ids = _current_share_office_ids()
+    if share_office and not owner_office_ids:
+        raise CloudShiftError("共有に使える営業所権限がありません", 400)
+
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        project["account_shares"] = {
+            "office": {
+                "enabled": share_office,
+                "office_ids": sorted(owner_office_ids) if share_office else [],
+            },
+            "employees": employee_rows,
+            "updated_at": _utcnow_iso(),
+            "updated_by": _user_id(),
+        }
+        _save_project(project)
+        changes = []
+        changes.append("同じ営業所内への共有を有効化" if share_office else "同じ営業所内への共有を無効化")
+        if employee_rows:
+            changes.append("特定社員への共有: " + ", ".join(row["employee_number"] for row in employee_rows))
+        else:
+            changes.append("特定社員への共有を解除")
+        _append_history(
+            project_id,
+            {
+                "timestamp": _utcnow_iso(),
+                "editor_name": _user_label(),
+                "editor_type": "owner",
+                "action": "account_share_updated",
+                "month_key": None,
+                "changes": changes,
+            },
+        )
+    return jsonify({"success": True, "shares": _normalized_account_shares(project)})
 
 
 def _create_month_in_project(project: dict[str, Any], payload: dict[str, Any], actor_name: str, actor_type: str) -> dict[str, Any]:
@@ -5115,8 +5317,8 @@ def api_restore_month_revision(project_id: str, year: int, month: int):
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/summary", methods=["GET", "POST"])
 @login_required
 def api_month_summary(project_id: str, year: int, month: int):
-    project = _owner_project_or_404(project_id)
-    payload = request.get_json(silent=True) if request.method == "POST" else None
+    project, access_role = _project_for_current_user_or_404(project_id)
+    payload = request.get_json(silent=True) if request.method == "POST" and access_role == "owner" else None
     return jsonify({"success": True, "summary": _summary_month_payload(project, year, month, payload)})
 
 
@@ -5627,7 +5829,7 @@ def _send_month_export(project: dict[str, Any], month_key: str, export_format: s
 @cloudshift_bp.route("/api/project/<project_id>/export/<export_format>")
 @login_required
 def api_export_owner(project_id: str, export_format: str):
-    project = _owner_project_or_404(project_id)
+    project, _ = _project_for_current_user_or_404(project_id)
     month_key = request.args.get("month_key", "")
     return _send_month_export(project, month_key, export_format)
 

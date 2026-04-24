@@ -16,7 +16,7 @@ SITE_PACKAGES = ROOT / "Lib" / "site-packages"
 if SITE_PACKAGES.exists() and str(SITE_PACKAGES) not in sys.path:
     sys.path.append(str(SITE_PACKAGES))
 
-from app.models import Site, SiteBranch, SiteContractMaster, db
+from app.models import AccessBranch, AccessOffice, Site, SiteBranch, SiteContractMaster, User, db
 
 
 def _load_cloudshift_module():
@@ -53,6 +53,10 @@ def _other_owner():
 
 def _guest():
     return SimpleNamespace(is_authenticated=False)
+
+
+def _employee_user(username="2001", *, office_id=None, name="Shared User"):
+    return SimpleNamespace(is_authenticated=True, username=username, name=name, office_id=office_id, id=999)
 
 
 def _token_from_url(value: str) -> str:
@@ -134,6 +138,82 @@ def test_owner_can_create_and_public_view_can_read(tmp_path):
     assert public_data["month"]["year"] == 2026
     assert public_data["month"]["month"] == 4
     assert "edit_url" not in public_data["project"]["urls"]
+
+
+def test_account_share_specific_employee_can_view_but_not_edit(tmp_path):
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        db.session.add(User(username="2001", password_hash="x", name="Shared Employee"))
+        db.session.commit()
+
+    module.current_user = _owner()
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Private Person", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    )
+    project_payload = create_response.get_json()["project"]
+    project_id = project_payload["project"]["id"]
+
+    share_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/account-shares",
+        json={"share_office": False, "employee_numbers": ["2001"]},
+    )
+    assert share_response.status_code == 200
+
+    module.current_user = _employee_user("2001")
+    list_response = client.get("/tools/shiftersync/cloudshift/api/list")
+    assert list_response.status_code == 200
+    projects = list_response.get_json()["projects"]
+    assert projects[0]["access_role"] == "viewer"
+    assert projects[0]["share"]["role"] == "viewer"
+
+    detail_response = client.get(f"/tools/shiftersync/cloudshift/api/project/{project_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.get_json()
+    assert detail["project"]["access_role"] == "viewer"
+    assert detail["project"]["urls"] == {}
+
+    month = detail["month"]
+    edit_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": month["entries_per_day"], "base_month": month},
+    )
+    assert edit_response.status_code == 404
+
+
+def test_account_share_same_office_lists_shared_project(tmp_path):
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        branch = AccessBranch(name="Tokyo", code="TK")
+        db.session.add(branch)
+        db.session.flush()
+        office = AccessOffice(branch_id=branch.id, name="Shinjuku", code="S01")
+        db.session.add(office)
+        db.session.commit()
+        office_id = office.id
+
+    owner = _owner()
+    owner.office_id = office_id
+    owner.id = 100
+    module.current_user = owner
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Office Scene", "mode": "scene", "year": "2026", "month": "5"},
+    )
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    share_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/account-shares",
+        json={"share_office": True, "employee_numbers": []},
+    )
+    assert share_response.status_code == 200
+
+    module.current_user = _employee_user("3001", office_id=office_id)
+    list_response = client.get("/tools/shiftersync/cloudshift/api/list")
+    assert list_response.status_code == 200
+    projects = list_response.get_json()["projects"]
+    assert [project["id"] for project in projects] == [project_id]
+    assert projects[0]["access_role"] == "viewer"
 
 
 def test_owner_can_compare_own_cloudshift_projects_for_conflicts(tmp_path):

@@ -333,6 +333,31 @@
 
   .cloud-project-list {
     display: grid;
+    gap: 18px;
+  }
+
+  .cloud-project-group {
+    display: grid;
+    gap: 10px;
+  }
+
+  .cloud-project-group-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--cloud-muted);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .cloud-project-group-head h3 {
+    margin: 0;
+    color: var(--cloud-text);
+    font-size: 16px;
+  }
+
+  .cloud-project-group-grid {
+    display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
     gap: 14px;
   }
@@ -358,6 +383,11 @@
     border-color: var(--cloud-primary);
     box-shadow: 0 16px 32px rgba(45, 111, 182, 0.12);
     transform: translateY(-1px);
+  }
+
+  .cloud-project-item.is-shared {
+    border-color: #d8c9ff;
+    background: linear-gradient(180deg, #ffffff 0%, #f8f5ff 100%);
   }
 
   .cloud-check-project-item {
@@ -446,6 +476,51 @@
     font-size: 11px;
     font-weight: 800;
     padding: 7px 10px;
+  }
+
+  .cloud-badge.shared,
+  .cloud-badge.shared-owner {
+    background: #f1e8ff;
+    border-color: #d8c9ff;
+    color: #6b21a8;
+  }
+
+  .cloud-share-form {
+    display: grid;
+    gap: 16px;
+  }
+
+  .cloud-share-option {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 12px;
+    align-items: flex-start;
+    border: 1px solid var(--cloud-line);
+    border-radius: 14px;
+    padding: 14px;
+    background: #fff;
+  }
+
+  .cloud-share-option strong,
+  .cloud-share-current h4 {
+    display: block;
+    margin: 0 0 4px;
+    font-size: 14px;
+  }
+
+  .cloud-share-option small {
+    color: var(--cloud-muted);
+    line-height: 1.5;
+  }
+
+  .cloud-share-textarea {
+    min-height: 96px;
+    resize: vertical;
+  }
+
+  .cloud-empty-state.compact {
+    padding: 16px;
+    text-align: left;
   }
 
   .cloud-empty-state {
