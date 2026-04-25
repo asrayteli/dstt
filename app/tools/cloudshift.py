@@ -30,7 +30,18 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
 from app.access_control import user_office_ids
-from app.models import AccessOffice, Employee, Site, SiteBranch, SiteContractMaster, User, db
+from app.models import (
+    AccessOffice,
+    CloudShiftHistory,
+    CloudShiftMonth,
+    CloudShiftProject,
+    Employee,
+    Site,
+    SiteBranch,
+    SiteContractMaster,
+    User,
+    db,
+)
 
 try:
     from .shiftersync_format import (
@@ -589,8 +600,7 @@ def _resync_siteplus_dedicated_projects_for_site_row(
     if not normalized_site_row_id:
         return
     rows = _siteplus_dedicated_rows_for_site_row_id(normalized_site_row_id)
-    for path in _shifts_dir().glob("*.json"):
-        target_summary = _load_json(path)
+    for target_summary in _iter_stored_projects():
         if not target_summary or target_summary.get("mode") != "scene":
             continue
         if _coerce_site_row_id(target_summary.get("site_row_id")) != normalized_site_row_id:
@@ -834,6 +844,7 @@ def _build_month_payload(
         "capacity_enabled": bool(capacity_enabled and required_capacity > 0),
         "required_capacity": required_capacity if capacity_enabled and required_capacity > 0 else 0,
         "entries_per_day": _normalize_entries(entries, year, month),
+        "draft_entries_per_day": _normalize_entries(entries, year, month),
         "revision": revision,
         "created_at": timestamp,
         "updated_at": timestamp,
@@ -876,15 +887,145 @@ def _project_public_urls(project: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _client_month_payload(month_data: dict[str, Any] | None) -> dict[str, Any] | None:
+def _client_month_payload(month_data: dict[str, Any] | None, *, include_draft: bool = False) -> dict[str, Any] | None:
     if not month_data:
         return None
     payload = dict(month_data)
     payload.pop("revision_snapshots", None)
+    if not include_draft:
+        payload.pop("draft_entries_per_day", None)
     return payload
 
 
+_PROJECT_STORAGE_KEYS = {
+    "id",
+    "owner_user_id",
+    "title",
+    "mode",
+    "employee_number",
+    "site_row_id",
+    "site_id",
+    "site_name",
+    "site_manager_id",
+    "site_manager_name",
+    "view_token",
+    "edit_token",
+    "account_shares",
+    "assist",
+    "created_at",
+    "updated_at",
+    "months",
+}
+
+
+def _db_project_to_dict(row: CloudShiftProject) -> dict[str, Any]:
+    project = {
+        "id": row.id,
+        "owner_user_id": row.owner_user_id,
+        "title": row.title,
+        "mode": row.mode,
+        "employee_number": row.employee_number or "",
+        "site_row_id": row.site_row_id,
+        "site_id": row.site_id or "",
+        "site_name": row.site_name or "",
+        "site_manager_id": row.site_manager_id or "",
+        "site_manager_name": row.site_manager_name or "",
+        "view_token": row.view_token,
+        "edit_token": row.edit_token,
+        "account_shares": row.account_shares or {},
+        "assist": row.assist or {},
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "months": {},
+    }
+    for key, value in (row.extra_data or {}).items():
+        if key not in project:
+            project[key] = value
+    for month_row in row.months:
+        month_key = _month_key(month_row.year, month_row.month)
+        project["months"][month_key] = {
+            "year": month_row.year,
+            "month": month_row.month,
+            "capacity_enabled": bool(month_row.capacity_enabled),
+            "required_capacity": int(month_row.required_capacity or 0),
+            "entries_per_day": month_row.entries_per_day or {},
+            "draft_entries_per_day": month_row.draft_entries_per_day or {},
+            "revision": int(month_row.revision or 1),
+            "created_at": month_row.created_at,
+            "updated_at": month_row.updated_at,
+            "revision_snapshots": month_row.revision_snapshots or {},
+        }
+    return project
+
+
+def _db_project_from_id(project_id: str) -> dict[str, Any] | None:
+    row = db.session.get(CloudShiftProject, project_id)
+    if not row:
+        return None
+    return _db_project_to_dict(row)
+
+
+def _upsert_project_to_db(project: dict[str, Any]) -> None:
+    row = db.session.get(CloudShiftProject, project["id"])
+    if row is None:
+        row = CloudShiftProject(id=project["id"])
+        db.session.add(row)
+    row.owner_user_id = str(project.get("owner_user_id") or "")
+    row.title = str(project.get("title") or "")
+    row.mode = str(project.get("mode") or "")
+    row.employee_number = str(project.get("employee_number") or "")
+    row.site_row_id = _coerce_site_row_id(project.get("site_row_id"))
+    row.site_id = str(project.get("site_id") or "")
+    row.site_name = str(project.get("site_name") or "")
+    row.site_manager_id = str(project.get("site_manager_id") or "")
+    row.site_manager_name = str(project.get("site_manager_name") or "")
+    row.view_token = str(project.get("view_token") or "")
+    row.edit_token = str(project.get("edit_token") or "")
+    row.account_shares = project.get("account_shares") if isinstance(project.get("account_shares"), dict) else {}
+    row.assist = project.get("assist") if isinstance(project.get("assist"), dict) else {}
+    row.extra_data = {key: value for key, value in project.items() if key not in _PROJECT_STORAGE_KEYS}
+    row.created_at = str(project.get("created_at") or _utcnow_iso())
+    row.updated_at = str(project.get("updated_at") or _utcnow_iso())
+
+    for month_row in list(row.months):
+        db.session.delete(month_row)
+    db.session.flush()
+
+    for month_key, month_data in (project.get("months") or {}).items():
+        try:
+            year = int(month_data.get("year"))
+            month = int(month_data.get("month"))
+        except (TypeError, ValueError):
+            year, month = _parse_month_key(month_key)
+        normalized_entries = _normalize_entries(month_data.get("entries_per_day"), year, month)
+        draft_source = (
+            month_data.get("draft_entries_per_day")
+            if "draft_entries_per_day" in month_data
+            else normalized_entries
+        )
+        normalized_draft_entries = _normalize_entries(draft_source, year, month)
+        db.session.add(
+            CloudShiftMonth(
+                project_id=project["id"],
+                year=year,
+                month=month,
+                capacity_enabled=bool(month_data.get("capacity_enabled")),
+                required_capacity=int(month_data.get("required_capacity", 0) or 0),
+                entries_per_day=normalized_entries,
+                draft_entries_per_day=normalized_draft_entries,
+                revision=int(month_data.get("revision", 1) or 1),
+                revision_snapshots=month_data.get("revision_snapshots") or {},
+                created_at=str(month_data.get("created_at") or _utcnow_iso()),
+                updated_at=str(month_data.get("updated_at") or _utcnow_iso()),
+            )
+        )
+    db.session.commit()
+
+
 def _load_project(project_id: str) -> dict[str, Any]:
+    project = _db_project_from_id(project_id)
+    if project:
+        return project
     project = _load_json(_project_path(project_id))
     if not project:
         abort(404)
@@ -893,10 +1034,32 @@ def _load_project(project_id: str) -> dict[str, Any]:
 
 def _save_project(project: dict[str, Any]) -> None:
     project["updated_at"] = _utcnow_iso()
-    _safe_write_json(_project_path(project["id"]), project)
+    _upsert_project_to_db(project)
 
 
 def _append_history(project_id: str, entry: dict[str, Any]) -> None:
+    row = db.session.get(CloudShiftProject, project_id)
+    if row is not None:
+        payload = {
+            key: value
+            for key, value in entry.items()
+            if key not in {"timestamp", "editor_name", "editor_type", "action", "month_key", "changes"}
+        }
+        db.session.add(
+            CloudShiftHistory(
+                project_id=project_id,
+                timestamp=str(entry.get("timestamp") or _utcnow_iso()),
+                editor_name=str(entry.get("editor_name") or ""),
+                editor_type=str(entry.get("editor_type") or ""),
+                action=str(entry.get("action") or ""),
+                month_key=entry.get("month_key"),
+                changes=entry.get("changes") if isinstance(entry.get("changes"), list) else [],
+                payload=payload,
+            )
+        )
+        db.session.commit()
+        return
+
     history_path = _history_path(project_id)
     history_path.parent.mkdir(parents=True, exist_ok=True)
     with history_path.open("a", encoding="utf-8") as handle:
@@ -904,6 +1067,24 @@ def _append_history(project_id: str, entry: dict[str, Any]) -> None:
 
 
 def _load_history(project_id: str) -> list[dict[str, Any]]:
+    row = db.session.get(CloudShiftProject, project_id)
+    if row is not None:
+        rows = []
+        for item in CloudShiftHistory.query.filter_by(project_id=project_id).order_by(CloudShiftHistory.timestamp.desc(), CloudShiftHistory.id.desc()).all():
+            payload = dict(item.payload or {})
+            payload.update(
+                {
+                    "timestamp": item.timestamp,
+                    "editor_name": item.editor_name,
+                    "editor_type": item.editor_type,
+                    "action": item.action,
+                    "month_key": item.month_key,
+                    "changes": item.changes or [],
+                }
+            )
+            rows.append(payload)
+        return rows
+
     history_path = _history_path(project_id)
     if not history_path.exists():
         return []
@@ -919,6 +1100,85 @@ def _load_history(project_id: str) -> list[dict[str, Any]]:
                 continue
     rows.sort(key=lambda item: item.get("timestamp", ""), reverse=True)
     return rows
+
+
+def _iter_stored_projects() -> list[dict[str, Any]]:
+    projects: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for row in CloudShiftProject.query.order_by(CloudShiftProject.updated_at.desc()).all():
+        project = _db_project_to_dict(row)
+        projects.append(project)
+        seen_ids.add(str(project.get("id") or ""))
+    for path in _shifts_dir().glob("*.json"):
+        project = _load_json(path)
+        if not project:
+            continue
+        project_id = str(project.get("id") or path.stem)
+        if project_id in seen_ids:
+            continue
+        projects.append(project)
+        seen_ids.add(project_id)
+    return projects
+
+
+def migrate_cloudshift_json_to_db(*, dry_run: bool = False) -> dict[str, Any]:
+    """Import existing JSON-backed CloudShift projects into the configured DB.
+
+    The source JSON and JSONL files are never deleted or modified. Re-running this
+    migration updates the DB copy for the same project id.
+    """
+    result = {"projects_seen": 0, "projects_imported": 0, "histories_imported": 0, "errors": []}
+    for path in _shifts_dir().glob("*.json"):
+        result["projects_seen"] += 1
+        project = _load_json(path)
+        if not project:
+            result["errors"].append({"path": str(path), "error": "invalid_json"})
+            continue
+        project_id = str(project.get("id") or path.stem)
+        project["id"] = project_id
+        if dry_run:
+            result["projects_imported"] += 1
+            history_path = _history_path(project_id)
+            if history_path.exists():
+                result["histories_imported"] += sum(1 for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip())
+            continue
+        try:
+            _upsert_project_to_db(project)
+            CloudShiftHistory.query.filter_by(project_id=project_id).delete()
+            history_path = _history_path(project_id)
+            if history_path.exists():
+                with history_path.open("r", encoding="utf-8") as handle:
+                    for line in handle:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        db.session.add(
+                            CloudShiftHistory(
+                                project_id=project_id,
+                                timestamp=str(entry.get("timestamp") or _utcnow_iso()),
+                                editor_name=str(entry.get("editor_name") or ""),
+                                editor_type=str(entry.get("editor_type") or ""),
+                                action=str(entry.get("action") or ""),
+                                month_key=entry.get("month_key"),
+                                changes=entry.get("changes") if isinstance(entry.get("changes"), list) else [],
+                                payload={
+                                    key: value
+                                    for key, value in entry.items()
+                                    if key not in {"timestamp", "editor_name", "editor_type", "action", "month_key", "changes"}
+                                },
+                            )
+                        )
+                        result["histories_imported"] += 1
+            db.session.commit()
+            result["projects_imported"] += 1
+        except Exception as exc:
+            db.session.rollback()
+            result["errors"].append({"path": str(path), "error": str(exc)})
+    return result
 
 
 def _owner_project_or_404(project_id: str) -> dict[str, Any]:
@@ -1035,10 +1295,7 @@ def _share_status_for_current_user(project: dict[str, Any]) -> dict[str, Any] | 
 
 def _find_project_by_token(token: str, token_type: str) -> dict[str, Any]:
     key = "view_token" if token_type == "view" else "edit_token"
-    for path in _shifts_dir().glob("*.json"):
-        project = _load_json(path)
-        if not project:
-            continue
+    for project in _iter_stored_projects():
         if secrets.compare_digest(str(project.get(key, "")), token):
             return project
     abort(404)
@@ -1264,7 +1521,7 @@ def _merge_month_payload(
 
 
 def _snapshot_month_payload(month_data: dict[str, Any]) -> dict[str, Any]:
-    return _client_month_payload(month_data) or {}
+    return _client_month_payload(month_data, include_draft=False) or {}
 
 
 def _trim_revision_snapshots(snapshots: dict[str, Any]) -> dict[str, Any]:
@@ -1930,12 +2187,7 @@ def _normalized_site_title(value: Any) -> str:
 
 
 def _iter_project_summaries() -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    for path in _shifts_dir().glob("*.json"):
-        project = _load_json(path)
-        if isinstance(project, dict):
-            items.append(project)
-    return items
+    return _iter_stored_projects()
 
 
 def _matching_person_project_ids_for_scene_entry(source_project: dict[str, Any], entry: dict[str, Any]) -> list[str]:
@@ -2635,15 +2887,14 @@ def _upsert_person_experience_synced_record(
 
 
 def _resync_person_experience_targets(person_project_id: str, experience_id: str, actor_name: str) -> None:
-    person_project = _load_json(_project_path(person_project_id))
+    person_project = _load_project(person_project_id)
     experience = (
         _person_experience_source_item(person_project, experience_id)
         if isinstance(person_project, dict)
         else None
     )
     experience_site_name = str(experience.get("site_name") or "").strip() if experience else ""
-    for path in _shifts_dir().glob("*.json"):
-        scene_project = _load_json(path)
+    for scene_project in _iter_stored_projects():
         if not scene_project or scene_project.get("mode") != "scene":
             continue
         scene_project_id = str(scene_project.get("id") or "")
@@ -2677,8 +2928,7 @@ def _sync_scene_project_from_person_experiences(scene_project_id: str, actor_nam
         if scene_project.get("mode") != "scene":
             return
         target_title = str(scene_project.get("title") or "").strip()
-        for path in _shifts_dir().glob("*.json"):
-            person_project = _load_json(path)
+        for person_project in _iter_stored_projects():
             if not person_project or person_project.get("mode") != "person":
                 continue
             assist = _ensure_person_assist(person_project)
@@ -3445,8 +3695,7 @@ def _sync_person_experience_to_scene_projects(
     actor_name: str,
 ) -> None:
     normalized_site = _normalized_site_title(site.get("site_name"))
-    for path in _shifts_dir().glob("*.json"):
-        target_summary = _load_json(path)
+    for target_summary in _iter_stored_projects():
         if not target_summary or target_summary.get("mode") != "scene":
             continue
         target_project_id = str(target_summary.get("id") or "")
@@ -3489,8 +3738,7 @@ def _delete_person_experience_from_scene_projects(
     *,
     actor_name: str,
 ) -> None:
-    for path in _shifts_dir().glob("*.json"):
-        target_summary = _load_json(path)
+    for target_summary in _iter_stored_projects():
         if not target_summary or target_summary.get("mode") != "scene":
             continue
         target_project_id = str(target_summary.get("id") or "")
@@ -3534,8 +3782,7 @@ def _backfill_scene_project_from_person_experience(
     if not normalized_title:
         return
     changes: list[str] = []
-    for path in _shifts_dir().glob("*.json"):
-        source_project = _load_json(path)
+    for source_project in _iter_stored_projects():
         if not source_project or source_project.get("mode") != "person":
             continue
         source_assist = _ensure_assist(source_project)
@@ -3895,8 +4142,7 @@ def _sync_person_experience_to_scene_projects(
         return
     if not (_coerce_site_row_id(site.get("site_row_id")) or str(site.get("site_id") or "").strip() or _normalized_site_title(site.get("site_name"))):
         return
-    for path in _shifts_dir().glob("*.json"):
-        target_summary = _load_json(path)
+    for target_summary in _iter_stored_projects():
         if not target_summary or target_summary.get("mode") != "scene":
             continue
         target_project_id = str(target_summary.get("id") or "")
@@ -3939,8 +4185,7 @@ def _delete_person_experience_from_scene_projects(
     *,
     actor_name: str,
 ) -> None:
-    for path in _shifts_dir().glob("*.json"):
-        target_summary = _load_json(path)
+    for target_summary in _iter_stored_projects():
         if not target_summary or target_summary.get("mode") != "scene":
             continue
         target_project_id = str(target_summary.get("id") or "")
@@ -3983,8 +4228,7 @@ def _backfill_scene_project_from_person_experience(
     assist = _ensure_assist(scene_project)
     changes: list[str] = []
     matched_keys: set[tuple[str, str]] = set()
-    for path in _shifts_dir().glob("*.json"):
-        source_project = _load_json(path)
+    for source_project in _iter_stored_projects():
         if not source_project or source_project.get("mode") != "person":
             continue
         source_assist = _ensure_person_assist(source_project)
@@ -4064,8 +4308,7 @@ def _assist_scene_conflict_entries(project: dict[str, Any], target_date: date) -
     day_key = str(target_date.day)
     entries: list[dict[str, str]] = []
     seen: set[tuple[str, str, str, str]] = set()
-    for path in _shifts_dir().glob("*.json"):
-        other_project = _load_json(path)
+    for other_project in _iter_stored_projects():
         if not other_project:
             continue
         if str(other_project.get("id") or "").strip() == project_id:
@@ -4697,7 +4940,12 @@ def _calendar_png_bytes_for_month(
             pass
 
 
-def _project_detail_payload(project: dict[str, Any], selected_month_key: str | None = None) -> dict[str, Any]:
+def _project_detail_payload(
+    project: dict[str, Any],
+    selected_month_key: str | None = None,
+    *,
+    include_draft: bool = False,
+) -> dict[str, Any]:
     month_keys = _sort_month_keys(list((project.get("months") or {}).keys()))
     active_month_key = None
     month_data = None
@@ -4715,7 +4963,7 @@ def _project_detail_payload(project: dict[str, Any], selected_month_key: str | N
             "urls": _project_public_urls(project),
         },
         "active_month_key": active_month_key,
-        "month": _client_month_payload(month_data),
+        "month": _client_month_payload(month_data, include_draft=include_draft),
     }
 
 
@@ -4760,10 +5008,7 @@ def public_edit(token: str):
 def api_list():
     owner_id = _user_id()
     projects = []
-    for path in _shifts_dir().glob("*.json"):
-        project = _load_json(path)
-        if not project:
-            continue
+    for project in _iter_stored_projects():
         is_owner = project.get("owner_user_id") == owner_id
         if not is_owner and not _project_is_shared_with_current_user(project):
             continue
@@ -4898,7 +5143,7 @@ def api_create():
     _resync_shift_month(project, month_key, actor_name=_user_label())
     _refresh_shift_sync_for_target_month(project, month_key, actor_name=_user_label())
     project = _load_project(project_id)
-    return jsonify({"success": True, "project": _project_detail_payload(project)})
+    return jsonify({"success": True, "project": _project_detail_payload(project, include_draft=True)})
 
 
 @cloudshift_bp.route("/api/project/<project_id>")
@@ -4906,7 +5151,7 @@ def api_create():
 def api_project_detail(project_id: str):
     project, access_role = _project_for_current_user_or_404(project_id)
     selected_month_key = request.args.get("month_key")
-    payload = _project_detail_payload(project, selected_month_key)
+    payload = _project_detail_payload(project, selected_month_key, include_draft=access_role == "owner")
     payload["access_role"] = access_role
     payload["project"]["access_role"] = access_role
     if access_role != "owner":
@@ -4991,7 +5236,7 @@ def api_project_meta(project_id: str):
         _resync_shift_project(project, actor_name=_user_label())
         _refresh_shift_sync_for_target_project(project, actor_name=_user_label())
         project = _load_project(project_id)
-    return jsonify({"success": True, "project": _project_detail_payload(project)})
+    return jsonify({"success": True, "project": _project_detail_payload(project, include_draft=True)})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/tokens/regenerate", methods=["POST"])
@@ -5149,7 +5394,7 @@ def api_create_month(project_id: str):
     _resync_shift_month(project, month_key, actor_name=_user_label())
     _refresh_shift_sync_for_target_month(project, month_key, actor_name=_user_label())
     project = _load_project(project_id)
-    return jsonify({"success": True, "project": _project_detail_payload(project, month_key)})
+    return jsonify({"success": True, "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
 def _save_month_in_project(
@@ -5181,6 +5426,7 @@ def _save_month_in_project(
         "entries_per_day": prepared_entries,
     }
     merged = _merge_month_payload(current_month, incoming_month, base_month)
+    merged["draft_entries_per_day"] = _normalize_entries(merged.get("entries_per_day"), year, month)
     changes = _describe_month_changes(current_month, merged)
     if not changes:
         return current_month
@@ -5204,6 +5450,134 @@ def _save_month_in_project(
     return merged
 
 
+def _draft_entry_count(month_data: dict[str, Any]) -> int:
+    return sum(
+        len(entries)
+        for entries in (month_data.get("draft_entries_per_day") or {}).values()
+        if isinstance(entries, list)
+    )
+
+
+def _month_draft_has_changes(month_data: dict[str, Any], year: int, month: int) -> bool:
+    return _normalize_entries(month_data.get("entries_per_day"), year, month) != _normalize_entries(
+        month_data.get("draft_entries_per_day"), year, month
+    )
+
+
+def _save_draft_month_in_project(
+    project: dict[str, Any],
+    year: int,
+    month: int,
+    payload: dict[str, Any],
+    actor_name: str,
+    actor_type: str,
+) -> dict[str, Any]:
+    year, month = _validate_year_month(year, month)
+    month_key = _month_key(year, month)
+    current_month = (project.get("months") or {}).get(month_key)
+    if not current_month:
+        raise CloudShiftError("対象の月が存在しません", 404)
+    prepared_entries = _prepared_local_entries_for_month(
+        project,
+        current_month,
+        payload.get("entries_per_day") or {},
+        year=year,
+        month=month,
+    )
+    previous_count = _draft_entry_count(current_month)
+    current_month["draft_entries_per_day"] = prepared_entries
+    current_month["updated_at"] = _utcnow_iso()
+    _save_project(project)
+    next_count = _draft_entry_count(current_month)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "month_draft_saved",
+            "month_key": month_key,
+            "changes": [f"{month_key} の仮保存を {previous_count}件 から {next_count}件 に更新"],
+        },
+    )
+    return current_month
+
+
+def _clear_draft_month_in_project(
+    project: dict[str, Any],
+    year: int,
+    month: int,
+    actor_name: str,
+    actor_type: str,
+) -> dict[str, Any]:
+    year, month = _validate_year_month(year, month)
+    month_key = _month_key(year, month)
+    current_month = (project.get("months") or {}).get(month_key)
+    if not current_month:
+        raise CloudShiftError("対象の月が存在しません", 404)
+    previous_count = _draft_entry_count(current_month)
+    current_month["draft_entries_per_day"] = _normalize_entries(current_month.get("entries_per_day"), year, month)
+    current_month["updated_at"] = _utcnow_iso()
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "month_draft_cleared",
+            "month_key": month_key,
+            "changes": [f"{month_key} の仮保存を正式シフトの内容に戻しました ({previous_count}件)"],
+        },
+    )
+    return current_month
+
+
+def _publish_draft_month_in_project(
+    project: dict[str, Any],
+    year: int,
+    month: int,
+    actor_name: str,
+    actor_type: str,
+) -> dict[str, Any]:
+    year, month = _validate_year_month(year, month)
+    month_key = _month_key(year, month)
+    current_month = (project.get("months") or {}).get(month_key)
+    if not current_month:
+        raise CloudShiftError("対象の月が存在しません", 404)
+    draft_entries = _normalize_entries(current_month.get("draft_entries_per_day"), year, month)
+    draft_count = _draft_entry_count({"draft_entries_per_day": draft_entries})
+    if not _month_draft_has_changes(current_month, year, month):
+        return current_month
+
+    published = {
+        **current_month,
+        "entries_per_day": draft_entries,
+        "draft_entries_per_day": draft_entries,
+        "revision": int(current_month.get("revision", 1) or 1) + 1,
+        "updated_at": _utcnow_iso(),
+    }
+    snapshots = dict(current_month.get("revision_snapshots") or {})
+    snapshots[str(int(current_month.get("revision", 1) or 1))] = _snapshot_month_payload(current_month)
+    published["revision_snapshots"] = _trim_revision_snapshots(snapshots)
+    changes = _describe_month_changes(current_month, published)
+    changes.insert(0, f"{month_key} の仮保存 {draft_count}件を正式シフトへ反映")
+    project["months"][month_key] = published
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": actor_type,
+            "action": "month_draft_published",
+            "month_key": month_key,
+            "changes": changes[:100],
+        },
+    )
+    return published
+
+
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>", methods=["PUT"])
 @login_required
 def api_save_month(project_id: str, year: int, month: int):
@@ -5213,7 +5587,39 @@ def api_save_month(project_id: str, year: int, month: int):
         month_payload = _save_month_in_project(project, year, month, payload, _user_label(), "owner")
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=_user_label())
-    return jsonify({"success": True, "month": month_payload, "project": _project_detail_payload(project, month_key)})
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True), "project": _project_detail_payload(project, month_key, include_draft=True)})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/draft", methods=["PUT"])
+@login_required
+def api_save_month_draft(project_id: str, year: int, month: int):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        month_payload = _save_draft_month_in_project(project, year, month, payload, _user_label(), "owner")
+    month_key = _month_key(year, month)
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True), "project": _project_detail_payload(project, month_key, include_draft=True)})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/draft", methods=["DELETE"])
+@login_required
+def api_clear_month_draft(project_id: str, year: int, month: int):
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        month_payload = _clear_draft_month_in_project(project, year, month, _user_label(), "owner")
+    month_key = _month_key(year, month)
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True), "project": _project_detail_payload(project, month_key, include_draft=True)})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/draft/publish", methods=["POST"])
+@login_required
+def api_publish_month_draft(project_id: str, year: int, month: int):
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        month_payload = _publish_draft_month_in_project(project, year, month, _user_label(), "owner")
+    month_key = _month_key(year, month)
+    _resync_shift_month(project, month_key, actor_name=_user_label())
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>", methods=["DELETE"])
@@ -5262,6 +5668,10 @@ def api_delete_project(project_id: str):
             ]
         project_path = _project_path(project_id)
         history_path = _history_path(project_id)
+        project_row = db.session.get(CloudShiftProject, project_id)
+        if project_row is not None:
+            db.session.delete(project_row)
+            db.session.commit()
         if project_path.exists():
             project_path.unlink()
         if history_path.exists():
@@ -5311,7 +5721,7 @@ def api_restore_month_revision(project_id: str, year: int, month: int):
         project = _owner_project_or_404(project_id)
         month_payload = _restore_month_revision_in_project(project, year, month, revision, _user_label(), "owner")
     month_key = _month_key(year, month)
-    return jsonify({"success": True, "month": month_payload, "project": _project_detail_payload(project, month_key)})
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/summary", methods=["GET", "POST"])
@@ -5889,7 +6299,7 @@ def api_public_save_month(token: str, year: int, month: int):
         month_payload = _save_month_in_project(project, year, month, payload, actor_name, actor_type)
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=actor_name)
-    return jsonify({"success": True, "month": month_payload, "project": _project_detail_payload(project, month_key)})
+    return jsonify({"success": True, "month": _client_month_payload(month_payload), "project": _project_detail_payload(project, month_key)})
 
 
 @cloudshift_bp.route("/api/public/edit/<token>/assist")

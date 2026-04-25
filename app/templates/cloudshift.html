@@ -161,6 +161,14 @@
             <div id="cloud-project-selected-note" class="cloud-field-note"></div>
             <button id="cloud-save-title" type="button" class="cloud-btn secondary">タイトル保存</button>
             <button id="cloud-save-month" type="button" class="cloud-btn primary">この月を保存</button>
+            <div id="cloud-draft-controls" class="cloud-draft-controls cloud-hidden" aria-label="仮保存操作">
+              <div class="cloud-mode-toggle" role="group" aria-label="編集モード">
+                <button id="cloud-mode-normal" type="button" class="cloud-mode-btn is-active">通常</button>
+                <button id="cloud-mode-draft" type="button" class="cloud-mode-btn">仮保存</button>
+              </div>
+              <button id="cloud-publish-draft" type="button" class="cloud-btn secondary">シフトへ反映</button>
+              <button id="cloud-clear-draft" type="button" class="cloud-btn ghost">仮保存を破棄</button>
+            </div>
           </div>
         </div>
 

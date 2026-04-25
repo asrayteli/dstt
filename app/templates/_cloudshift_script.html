@@ -9,6 +9,8 @@
       projects: [],
       projectPayload: null,
       baseMonth: null,
+      editorMode: 'normal',
+      draftVisualObserver: null,
       syncReturnContext: null,
       guestName: PAGE.authenticatedEditorName || '',
       assist: {
@@ -445,6 +447,126 @@
 
     function currentMonthKey() {
       return state.projectPayload ? state.projectPayload.active_month_key : null;
+    }
+
+    function emptyEntriesForMonth(month) {
+      const days = monthDays(month);
+      return Array.from({ length: days }, (_, index) => String(index + 1)).reduce((acc, day) => {
+        acc[day] = [];
+        return acc;
+      }, {});
+    }
+
+    function draftEntriesForMonth(month) {
+      return month && month.draft_entries_per_day ? month.draft_entries_per_day : (month && month.entries_per_day ? month.entries_per_day : emptyEntriesForMonth(month));
+    }
+
+    function draftEntryCount(month) {
+      return Object.values((month && month.draft_entries_per_day) || {}).reduce(
+        (total, entries) => total + (Array.isArray(entries) ? entries.length : 0),
+        0
+      );
+    }
+
+    function entriesFingerprint(entries) {
+      return JSON.stringify(entries || {});
+    }
+
+    function draftHasChanges(month) {
+      if (!month) return false;
+      return entriesFingerprint(draftEntriesForMonth(month)) !== entriesFingerprint(month.entries_per_day || {});
+    }
+
+    function displayedEntriesForMonth(month) {
+      if (!month) return {};
+      if (state.editorMode !== 'draft') {
+        return month.entries_per_day || {};
+      }
+      const officialEntries = month.entries_per_day || {};
+      const draftEntries = draftEntriesForMonth(month);
+      const officialDayById = new Map();
+      Object.keys(officialEntries).forEach((officialDayKey) => {
+        const entries = officialEntries[officialDayKey];
+        if (!Array.isArray(entries)) return;
+        entries.forEach((entry) => {
+          const id = String(entry && entry.id ? entry.id : '').trim();
+          if (id) officialDayById.set(id, String(officialDayKey));
+        });
+      });
+      return Object.keys(draftEntries || {}).reduce((acc, dayKey) => {
+        const entries = Array.isArray(draftEntries[dayKey]) ? draftEntries[dayKey] : [];
+        acc[dayKey] = entries.map((entry) => {
+          const clone = Object.assign({}, entry);
+          const id = String(clone && clone.id ? clone.id : '').trim();
+          clone.cloud_draft_added = !!id && officialDayById.get(id) !== String(dayKey);
+          return clone;
+        });
+        return acc;
+      }, {});
+    }
+
+    function applyDraftVisualState(month, draftOverride) {
+      document.querySelectorAll('.day-box.has-draft-deletion').forEach((node) => {
+        node.classList.remove('has-draft-deletion');
+      });
+      document.querySelectorAll('.entry-item.is-cloud-draft-added').forEach((node) => {
+        node.classList.remove('is-cloud-draft-added');
+      });
+      if (!month || state.editorMode !== 'draft') return;
+      const draftEntries = draftOverride || draftEntriesForMonth(month);
+      const officialEntries = month.entries_per_day || {};
+      const officialDayById = new Map();
+      Object.keys(officialEntries).forEach((officialDayKey) => {
+        const entries = officialEntries[officialDayKey];
+        if (!Array.isArray(entries)) return;
+        entries.forEach((entry) => {
+          const id = String(entry && entry.id ? entry.id : '').trim();
+          if (id) officialDayById.set(id, String(officialDayKey));
+        });
+      });
+      Object.keys(draftEntries).forEach((dayKey) => {
+        const entries = draftEntries[dayKey];
+        if (!Array.isArray(entries)) return;
+        entries.forEach((entry) => {
+          const id = String(entry && entry.id ? entry.id : '').trim();
+          if (!id || officialDayById.get(id) === String(dayKey)) return;
+          const node = document.querySelector(`.entry-item[data-entry-id="${id}"]`);
+          if (node) node.classList.add('is-cloud-draft-added');
+        });
+      });
+      Object.keys(officialEntries).forEach((dayKey) => {
+        const officialIds = new Set((Array.isArray(officialEntries[dayKey]) ? officialEntries[dayKey] : [])
+          .map((entry) => String(entry && entry.id ? entry.id : '').trim())
+          .filter(Boolean));
+        if (!officialIds.size) return;
+        const draftIds = new Set((Array.isArray(draftEntries[dayKey]) ? draftEntries[dayKey] : [])
+          .map((entry) => String(entry && entry.id ? entry.id : '').trim())
+          .filter(Boolean));
+        const hasDeletedOfficial = Array.from(officialIds).some((id) => !draftIds.has(id));
+        if (!hasDeletedOfficial) return;
+        const box = document.querySelector(`.day-box[data-day="${String(dayKey)}"]`);
+        if (box) box.classList.add('has-draft-deletion');
+      });
+    }
+
+    function watchDraftVisualState(month) {
+      if (state.draftVisualObserver && typeof state.draftVisualObserver.disconnect === 'function') {
+        state.draftVisualObserver.disconnect();
+        state.draftVisualObserver = null;
+      }
+      const panel = $('cloud-editor-panel');
+      if (!panel || !month || state.editorMode !== 'draft') return;
+      let scheduled = false;
+      state.draftVisualObserver = new MutationObserver(() => {
+        if (scheduled) return;
+        scheduled = true;
+        window.setTimeout(() => {
+          scheduled = false;
+          const currentEntries = ShifterSync.getEntriesPerDay ? ShifterSync.getEntriesPerDay() : draftEntriesForMonth(month);
+          applyDraftVisualState(month, currentEntries);
+        }, 0);
+      });
+      state.draftVisualObserver.observe(panel, { childList: true, subtree: true });
     }
 
     function isPersonProject() {
@@ -5135,13 +5257,18 @@
       ShifterSync.setState('name', project.title);
       ShifterSync.setState('capacityEnabled', (parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0) > 0);
       ShifterSync.setState('requiredCapacity', parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0);
-      ShifterSync.buildCalendar(month.year, month.month, project.mode, month.entries_per_day || {}, { editable });
+      ShifterSync.buildCalendar(month.year, month.month, project.mode, displayedEntriesForMonth(month), { editable });
+      applyDraftVisualState(month);
+      watchDraftVisualState(month);
     }
 
     function renderWorkspace(editable) {
       const project = currentProject();
       const month = currentMonth();
       const isOwnerEditable = editable && projectAccessRole(project) === 'owner';
+      if (!isOwnerEditable && state.editorMode === 'draft') {
+        state.editorMode = 'normal';
+      }
 
       if (PAGE.type === 'owner') {
         $('cloud-empty-state').classList.toggle('cloud-hidden', !!project);
@@ -5149,6 +5276,7 @@
       }
 
       if (!project) {
+        state.editorMode = 'normal';
         resetAssistState();
         if ($('cloud-editor-panel')) $('cloud-editor-panel').innerHTML = '';
         updateCurrentProjectLabel();
@@ -5180,10 +5308,12 @@
 
       if ($('cloud-project-badges')) {
         const shareText = shareBadgeText(project);
+        const draftChanged = draftHasChanges(month);
         $('cloud-project-badges').innerHTML = `
           <span class="cloud-badge">${modeLongLabel(project.mode)}</span>
           ${shareText ? `<span class="cloud-badge ${project.access_role === 'viewer' ? 'shared' : 'shared-owner'}">${escapeHtml(shareText)}</span>` : ''}
           <span class="cloud-badge">${(project.month_keys || []).length}か月</span>
+          ${draftChanged ? `<span class="cloud-badge cloud-draft-badge">仮保存あり</span>` : ''}
           ${project.mode === 'scene' ? `<span class="cloud-badge">${escapeHtml(project.site && project.site.site_id ? `${project.site.site_id} / ${project.site.site_name || ''}` : '現場未設定')}</span>` : ''}
           <span class="cloud-badge">${escapeHtml(project.updated_at || '')}</span>
         `;
@@ -5207,6 +5337,12 @@
       }
 
       if ($('cloud-save-month')) $('cloud-save-month').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-draft-controls')) $('cloud-draft-controls').classList.toggle('cloud-hidden', !isOwnerEditable || !month);
+      if ($('cloud-mode-normal')) $('cloud-mode-normal').classList.toggle('is-active', state.editorMode !== 'draft');
+      if ($('cloud-mode-draft')) $('cloud-mode-draft').classList.toggle('is-active', state.editorMode === 'draft');
+      if ($('cloud-publish-draft')) $('cloud-publish-draft').classList.toggle('cloud-hidden', !isOwnerEditable || !month || !draftHasChanges(month));
+      if ($('cloud-clear-draft')) $('cloud-clear-draft').classList.toggle('cloud-hidden', !isOwnerEditable || !month || !draftHasChanges(month));
+      if ($('cloud-workspace')) $('cloud-workspace').classList.toggle('is-draft-mode', state.editorMode === 'draft');
       if ($('cloud-add-prev-month')) $('cloud-add-prev-month').classList.toggle('cloud-hidden', !isOwnerEditable);
       if ($('cloud-add-next-month')) $('cloud-add-next-month').classList.toggle('cloud-hidden', !isOwnerEditable);
       if ($('cloud-create-first-month')) $('cloud-create-first-month').classList.toggle('cloud-hidden', !isOwnerEditable);
@@ -5235,7 +5371,7 @@
 
       if ($('cloud-editor-meta')) {
         $('cloud-editor-meta').textContent = month
-          ? `${modeLongLabel(project.mode)} / リビジョン ${month.revision}`
+          ? `${modeLongLabel(project.mode)} / リビジョン ${month.revision}${state.editorMode === 'draft' ? ' / 仮保存モード' : ''}`
           : '最初の月を作成するとカレンダーを編集できます';
       }
 
@@ -5298,6 +5434,7 @@
       const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}${suffix}`));
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      state.editorMode = 'normal';
       syncAssistContext();
       renderProjectList();
       await renderWorkspaceWithSiteBranches(projectAccessRole(payload.project) === 'owner');
@@ -5319,6 +5456,7 @@
       }
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      state.editorMode = 'normal';
       syncAssistContext();
       updateCurrentProjectLabel();
       await renderWorkspaceWithSiteBranches(PAGE.accessMode === 'edit');
@@ -5422,6 +5560,10 @@
       const project = currentProject();
       const month = currentMonth();
       if (!project || !month) return;
+      if (state.editorMode === 'draft') {
+        await saveMonthDraft();
+        return;
+      }
       if (!confirmSceneBranchSave()) return;
 
       const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}`, {
@@ -5437,6 +5579,75 @@
         return;
       }
       showFlash('この月を保存しました', 'success');
+    }
+
+    async function saveMonthDraft() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) return;
+      if (!confirmSceneBranchSave()) return;
+
+      const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/draft`, {
+        method: 'PUT',
+        body: { entries_per_day: ShifterSync.getEntriesPerDay() }
+      }));
+      state.projectPayload = payload;
+      state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      state.editorMode = 'draft';
+      await renderWorkspaceWithSiteBranches(true);
+      await loadProjects();
+      await loadHistory(project.id);
+      showFlash('仮保存しました', 'success');
+    }
+
+    async function publishMonthDraft() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) return;
+      if (!draftHasChanges(month)) {
+        showFlash('反映する仮保存の変更がありません', 'info');
+        return;
+      }
+      if (!window.confirm('仮保存モードの内容を正式なシフトへ反映します。現在の正式シフトは仮保存の内容で置き換わります。よろしいですか？')) return;
+      const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/draft/publish`, {
+        method: 'POST',
+        body: {}
+      }));
+      state.projectPayload = payload;
+      state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      state.editorMode = 'normal';
+      await renderWorkspaceWithSiteBranches(true);
+      await loadProjects();
+      await loadHistory(project.id);
+      showFlash('仮保存をシフトへ反映しました', 'success');
+    }
+
+    async function clearMonthDraft() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) return;
+      if (!draftHasChanges(month)) {
+        showFlash('破棄する仮保存の変更がありません', 'info');
+        return;
+      }
+      if (!window.confirm('仮保存モードの変更を破棄し、正式シフトの内容に戻しますか？')) return;
+      const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/draft`, {
+        method: 'DELETE'
+      }));
+      state.projectPayload = payload;
+      state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      state.editorMode = 'draft';
+      await renderWorkspaceWithSiteBranches(true);
+      await loadProjects();
+      await loadHistory(project.id);
+      showFlash('仮保存を破棄しました', 'success');
+    }
+
+    async function switchEditorMode(mode) {
+      const nextMode = mode === 'draft' ? 'draft' : 'normal';
+      if (state.editorMode === nextMode) return;
+      state.editorMode = nextMode;
+      await renderWorkspaceWithSiteBranches(projectAccessRole(currentProject()) === 'owner');
     }
 
     async function saveMonthPublic() {
@@ -6007,6 +6218,18 @@
 
       const saveMonth = $('cloud-save-month');
       if (saveMonth) saveMonth.addEventListener('click', () => saveMonthOwner().catch((error) => showFlash(error.message, 'error')));
+
+      const modeNormal = $('cloud-mode-normal');
+      if (modeNormal) modeNormal.addEventListener('click', () => switchEditorMode('normal').catch((error) => showFlash(error.message, 'error')));
+
+      const modeDraft = $('cloud-mode-draft');
+      if (modeDraft) modeDraft.addEventListener('click', () => switchEditorMode('draft').catch((error) => showFlash(error.message, 'error')));
+
+      const publishDraft = $('cloud-publish-draft');
+      if (publishDraft) publishDraft.addEventListener('click', () => publishMonthDraft().catch((error) => showFlash(error.message, 'error')));
+
+      const clearDraft = $('cloud-clear-draft');
+      if (clearDraft) clearDraft.addEventListener('click', () => clearMonthDraft().catch((error) => showFlash(error.message, 'error')));
 
       const exportCsv = $('cloud-export-csv');
       if (exportCsv) {

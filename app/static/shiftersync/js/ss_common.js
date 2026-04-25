@@ -307,7 +307,8 @@ const ShifterSync = (function() {
         sync_source_project_title: '',
         sync_source_month_key: '',
         sync_source_day: '',
-        sync_source_entry_id: ''
+        sync_source_entry_id: '',
+        cloud_draft_added: false
       };
     }
 
@@ -330,7 +331,8 @@ const ShifterSync = (function() {
       sync_source_project_title: String(entry.sync_source_project_title || entry.syncSourceProjectTitle || '').trim(),
       sync_source_month_key: String(entry.sync_source_month_key || entry.syncSourceMonthKey || '').trim(),
       sync_source_day: String(entry.sync_source_day || entry.syncSourceDay || '').trim(),
-      sync_source_entry_id: String(entry.sync_source_entry_id || entry.syncSourceEntryId || '').trim()
+      sync_source_entry_id: String(entry.sync_source_entry_id || entry.syncSourceEntryId || '').trim(),
+      cloud_draft_added: entry.cloud_draft_added === true || entry.cloudDraftAdded === true
     };
   }
 
@@ -354,7 +356,8 @@ const ShifterSync = (function() {
       sync_source_project_title: normalized.sync_source_project_title,
       sync_source_month_key: normalized.sync_source_month_key,
       sync_source_day: normalized.sync_source_day,
-      sync_source_entry_id: normalized.sync_source_entry_id
+      sync_source_entry_id: normalized.sync_source_entry_id,
+      cloud_draft_added: normalized.cloud_draft_added === true
     };
   }
 
@@ -1230,6 +1233,7 @@ const ShifterSync = (function() {
       const item = $('<div>')
         .addClass('entry-item')
         .toggleClass('is-draggable', canDragEntry)
+        .toggleClass('is-cloud-draft-added', entry.cloud_draft_added === true)
         .toggleClass('has-branch-warning', parts.branch_issue_tone === 'warning')
         .toggleClass('has-branch-danger', parts.branch_issue_tone === 'danger')
         .attr('data-day', day)

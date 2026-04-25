@@ -140,6 +140,139 @@ def test_owner_can_create_and_public_view_can_read(tmp_path):
     assert "edit_url" not in public_data["project"]["urls"]
 
 
+def test_owner_draft_is_hidden_from_public_until_published(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Draft Team", "mode": "scene", "year": "2026", "month": "4"},
+    )
+    project_payload = create_response.get_json()["project"]
+    project_id = project_payload["project"]["id"]
+    view_token = _token_from_url(project_payload["project"]["urls"]["view_url"])
+
+    draft_entries = dict(project_payload["month"]["entries_per_day"])
+    draft_entries["1"] = [{"id": "draft-1", "value": "!A!Alice", "comment": "tentative"}]
+    draft_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4/draft",
+        json={"entries_per_day": draft_entries},
+    )
+    assert draft_response.status_code == 200
+    owner_month = draft_response.get_json()["month"]
+    assert owner_month["draft_entries_per_day"]["1"][0]["value"] == "!A!Alice"
+
+    public_response = client.get(f"/tools/shiftersync/cloudshift/api/public/view/{view_token}")
+    assert public_response.status_code == 200
+    public_month = public_response.get_json()["month"]
+    assert "draft_entries_per_day" not in public_month
+    assert public_month["entries_per_day"]["1"] == []
+
+    publish_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4/draft/publish",
+        json={},
+    )
+    assert publish_response.status_code == 200
+    published_month = publish_response.get_json()["month"]
+    assert published_month["entries_per_day"]["1"][0]["value"] == "!A!Alice"
+    assert published_month["draft_entries_per_day"]["1"][0]["value"] == "!A!Alice"
+
+    public_after_publish = client.get(f"/tools/shiftersync/cloudshift/api/public/view/{view_token}")
+    assert public_after_publish.get_json()["month"]["entries_per_day"]["1"][0]["value"] == "!A!Alice"
+
+
+def test_draft_mode_starts_from_current_shift_and_publish_replaces_official_month(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Replace Draft", "mode": "scene", "year": "2026", "month": "5"},
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    month = payload["month"]
+    official_entries = dict(month["entries_per_day"])
+    official_entries["1"] = [{"id": "official-1", "value": "!A!Official", "comment": ""}]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/5",
+        json={"required_capacity": 0, "entries_per_day": official_entries, "base_month": month},
+    )
+    assert save_response.status_code == 200
+    saved_month = save_response.get_json()["month"]
+    assert saved_month["draft_entries_per_day"]["1"][0]["value"] == "!A!Official"
+
+    draft_entries = dict(saved_month["draft_entries_per_day"])
+    draft_entries["1"] = []
+    draft_entries["2"] = [{"id": "draft-2", "value": "!P!Draft", "comment": ""}]
+    draft_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/5/draft",
+        json={"entries_per_day": draft_entries},
+    )
+    assert draft_response.status_code == 200
+    assert draft_response.get_json()["month"]["entries_per_day"]["1"][0]["value"] == "!A!Official"
+
+    publish_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/5/draft/publish",
+        json={},
+    )
+    assert publish_response.status_code == 200
+    published_month = publish_response.get_json()["month"]
+    assert published_month["entries_per_day"]["1"] == []
+    assert published_month["entries_per_day"]["2"][0]["value"] == "!P!Draft"
+    assert published_month["draft_entries_per_day"] == published_month["entries_per_day"]
+
+
+def test_json_cloudshift_project_can_be_migrated_to_db_without_deleting_source(tmp_path):
+    module, client = _build_client(tmp_path)
+    project = {
+        "id": "jsonproj01",
+        "owner_user_id": "owner01",
+        "title": "Legacy JSON",
+        "mode": "scene",
+        "employee_number": "",
+        "site_row_id": None,
+        "site_id": "",
+        "site_name": "",
+        "view_token": "view-token",
+        "edit_token": "edit-token",
+        "created_at": "2026-04-01T00:00:00Z",
+        "updated_at": "2026-04-01T00:00:00Z",
+        "months": {
+            "2026-04": {
+                "year": 2026,
+                "month": 4,
+                "capacity_enabled": False,
+                "required_capacity": 0,
+                "entries_per_day": {"1": [{"id": "legacy-1", "value": "!A!Legacy", "comment": ""}]},
+                "revision": 1,
+                "created_at": "2026-04-01T00:00:00Z",
+                "updated_at": "2026-04-01T00:00:00Z",
+                "revision_snapshots": {},
+            }
+        },
+    }
+    shifts_dir = tmp_path / "instance" / "cloudshift" / "shifts"
+    shifts_dir.mkdir(parents=True, exist_ok=True)
+    source_path = shifts_dir / "jsonproj01.json"
+    source_path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+
+    with client.application.app_context():
+        result = module.migrate_cloudshift_json_to_db()
+
+    assert result["projects_imported"] == 1
+    assert result["errors"] == []
+    assert source_path.exists()
+
+    module.current_user = _owner()
+    detail_response = client.get("/tools/shiftersync/cloudshift/api/project/jsonproj01")
+    assert detail_response.status_code == 200
+    detail = detail_response.get_json()
+    assert detail["project"]["title"] == "Legacy JSON"
+    assert detail["month"]["entries_per_day"]["1"][0]["value"] == "!A!Legacy"
+
+
 def test_account_share_specific_employee_can_view_but_not_edit(tmp_path):
     module, client = _build_client(tmp_path)
     with client.application.app_context():
@@ -2078,7 +2211,7 @@ def test_noop_save_keeps_revision_and_snapshots_unchanged(tmp_path):
     assert saved_month["revision"] == 1
 
     with client.application.app_context():
-        stored = module._load_json(module._project_path(project_id))
+        stored = module._load_project(project_id)
 
     assert stored is not None
     assert stored["months"]["2026-06"]["revision"] == 1

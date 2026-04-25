@@ -661,3 +661,76 @@ class SiteContractMaster(db.Model):
 
     def __repr__(self):
         return f'<SiteContractMaster {self.contract_code}>'
+
+
+class CloudShiftProject(db.Model):
+    __tablename__ = 'cloudshift_projects'
+
+    id = db.Column(db.String(24), primary_key=True)
+    owner_user_id = db.Column(db.String(80), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    mode = db.Column(db.String(20), nullable=False, index=True)
+    employee_number = db.Column(db.String(40), nullable=False, default='')
+    site_row_id = db.Column(db.Integer, index=True)
+    site_id = db.Column(db.String(20), index=True)
+    site_name = db.Column(db.String(200))
+    site_manager_id = db.Column(db.String(20), index=True)
+    site_manager_name = db.Column(db.String(200))
+    view_token = db.Column(db.String(128), nullable=False, unique=True, index=True)
+    edit_token = db.Column(db.String(128), nullable=False, unique=True, index=True)
+    account_shares = db.Column(db.JSON, nullable=False, default=dict)
+    assist = db.Column(db.JSON, nullable=False, default=dict)
+    extra_data = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.String(32), nullable=False)
+    updated_at = db.Column(db.String(32), nullable=False, index=True)
+
+    months = db.relationship(
+        'CloudShiftMonth',
+        back_populates='project',
+        cascade='all, delete-orphan',
+        order_by='CloudShiftMonth.year, CloudShiftMonth.month',
+    )
+    histories = db.relationship(
+        'CloudShiftHistory',
+        back_populates='project',
+        cascade='all, delete-orphan',
+        order_by='CloudShiftHistory.id',
+    )
+
+
+class CloudShiftMonth(db.Model):
+    __tablename__ = 'cloudshift_months'
+    __table_args__ = (
+        db.UniqueConstraint('project_id', 'year', 'month', name='uq_cloudshift_month_project_year_month'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    project_id = db.Column(db.String(24), db.ForeignKey('cloudshift_projects.id'), nullable=False, index=True)
+    year = db.Column(db.Integer, nullable=False, index=True)
+    month = db.Column(db.Integer, nullable=False, index=True)
+    capacity_enabled = db.Column(db.Boolean, nullable=False, default=False)
+    required_capacity = db.Column(db.Integer, nullable=False, default=0)
+    entries_per_day = db.Column(db.JSON, nullable=False, default=dict)
+    draft_entries_per_day = db.Column(db.JSON, nullable=False, default=dict)
+    revision = db.Column(db.Integer, nullable=False, default=1)
+    revision_snapshots = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.String(32), nullable=False)
+    updated_at = db.Column(db.String(32), nullable=False)
+
+    project = db.relationship('CloudShiftProject', back_populates='months')
+
+
+class CloudShiftHistory(db.Model):
+    __tablename__ = 'cloudshift_history'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    project_id = db.Column(db.String(24), db.ForeignKey('cloudshift_projects.id'), nullable=False, index=True)
+    timestamp = db.Column(db.String(32), nullable=False, index=True)
+    editor_name = db.Column(db.String(100), nullable=False, default='')
+    editor_type = db.Column(db.String(30), nullable=False, default='')
+    action = db.Column(db.String(60), nullable=False, default='')
+    month_key = db.Column(db.String(7), index=True)
+    changes = db.Column(db.JSON, nullable=False, default=list)
+    payload = db.Column(db.JSON, nullable=False, default=dict)
+
+    project = db.relationship('CloudShiftProject', back_populates='histories')
