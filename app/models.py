@@ -629,6 +629,9 @@ class SiteContractMaster(db.Model):
     dedicated_employee_name = db.Column(db.String(100))
     dedicated_updated_by = db.Column(db.String(80))
     dedicated_updated_at = db.Column(db.DateTime)
+    vehicle_number = db.Column(db.String(40), index=True)
+    vehicle_number_updated_by = db.Column(db.String(80))
+    vehicle_number_updated_at = db.Column(db.DateTime)
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
     source = db.Column(db.String(30), nullable=False, default='siteplus')
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -653,6 +656,9 @@ class SiteContractMaster(db.Model):
             'dedicated_employee_name': self.dedicated_employee_name,
             'dedicated_updated_by': self.dedicated_updated_by,
             'dedicated_updated_at': self.dedicated_updated_at.isoformat() if self.dedicated_updated_at else None,
+            'vehicle_number': self.vehicle_number or "",
+            'vehicle_number_updated_by': self.vehicle_number_updated_by,
+            'vehicle_number_updated_at': self.vehicle_number_updated_at.isoformat() if self.vehicle_number_updated_at else None,
             'is_active': self.is_active,
             'source': self.source,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -661,6 +667,52 @@ class SiteContractMaster(db.Model):
 
     def __repr__(self):
         return f'<SiteContractMaster {self.contract_code}>'
+
+
+class VehicleInspectionRecord(db.Model):
+    __tablename__ = 'vehicle_inspection_records'
+    __table_args__ = (
+        db.UniqueConstraint('contract_code', 'vehicle_number', name='uq_vehicle_inspection_contract_vehicle'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    contract_code = db.Column(db.String(20), nullable=False, index=True)
+    vehicle_number = db.Column(db.String(40), nullable=False, index=True)
+    registration_number = db.Column(db.String(80), index=True)
+    expiry_date = db.Column(db.String(8), index=True)
+    first_registration_month = db.Column(db.String(40))
+    passenger_capacity = db.Column(db.String(40))
+    displacement = db.Column(db.String(40))
+    site_name = db.Column(db.String(200))
+    original_filename = db.Column(db.String(255))
+    stored_filename = db.Column(db.String(255))
+    stored_path = db.Column(db.String(500))
+    uploaded_by = db.Column(db.String(80), index=True)
+    uploaded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    source = db.Column(db.String(30), nullable=False, default='ocr')
+    notes = db.Column(db.Text)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'contract_code': self.contract_code,
+            'vehicle_number': self.vehicle_number,
+            'registration_number': self.registration_number or '',
+            'expiry_date': self.expiry_date or '',
+            'first_registration_month': self.first_registration_month or '',
+            'passenger_capacity': self.passenger_capacity or '',
+            'displacement': self.displacement or '',
+            'site_name': self.site_name or '',
+            'original_filename': self.original_filename or '',
+            'stored_filename': self.stored_filename or '',
+            'has_pdf': bool(self.stored_path),
+            'uploaded_by': self.uploaded_by or '',
+            'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'source': self.source,
+            'notes': self.notes or '',
+        }
 
 
 class CloudShiftProject(db.Model):

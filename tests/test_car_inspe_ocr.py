@@ -30,6 +30,15 @@ def test_parse_expiry_date_accepts_reiwa_and_fullwidth_digits():
     assert parsed == "20250531"
 
 
+def test_parse_expiry_date_accepts_heisei_text():
+    module = load_car_inspe_module()
+
+    parsed, error = module.parse_expiry_date("有効期間の満了する日 平成31年4月30日")
+
+    assert error is None
+    assert parsed == "20190430"
+
+
 def test_parse_expiry_date_accepts_compact_yyyymmdd_candidate():
     module = load_car_inspe_module()
 
@@ -66,6 +75,176 @@ def test_best_candidate_prefers_valid_registration_shape():
     assert value == "品川300あ1234"
     assert raw == "品川300あ1234"
     assert score > 0
+
+
+def test_best_candidate_normalizes_first_registration_month():
+    module = load_car_inspe_module()
+
+    value, raw, score = module._best_candidate(["初度検査年月 R5 年 4 月", "検査年月"], "first_registration_month")
+
+    assert value == "2023年4月"
+    assert raw == "初度検査年月 R5 年 4 月"
+    assert score > 0
+
+
+def test_first_registration_month_supports_heisei_and_rejects_noise():
+    module = load_car_inspe_module()
+
+    assert module.normalize_first_registration_month("初度検査年月 平成 30 年 11 月") == "2018年11月"
+    assert module.normalize_first_registration_month("平成31年4月") == "2019年4月"
+    assert module.normalize_first_registration_month("2023年4月") == "2023年4月"
+    assert module.normalize_first_registration_month("SR424") == ""
+    assert module.normalize_first_registration_month("令和42年4月") == ""
+
+
+def test_best_candidate_normalizes_capacity_and_displacement_units():
+    module = load_car_inspe_module()
+
+    capacity, _raw_capacity, capacity_score = module._best_candidate(["5 入", "定員"], "passenger_capacity")
+    displacement, _raw_displacement, displacement_score = module._best_candidate(["1.50 l", "排気量"], "displacement")
+
+    assert capacity == "5人"
+    assert displacement == "1.5L"
+    assert capacity_score > 0
+    assert displacement_score > 0
+
+
+def test_displacement_falls_back_to_liter_for_decimal_without_unit():
+    module = load_car_inspe_module()
+
+    value, _raw, score = module._best_candidate(["0.65"], "displacement")
+
+    assert value == "0.65L"
+    assert score > 0
+
+
+def test_displacement_rounds_decimal_to_two_places():
+    module = load_car_inspe_module()
+
+    value, _raw, score = module._best_candidate(["0.658L"], "displacement")
+
+    assert value == "0.66L"
+    assert score > 0
+
+
+def test_capacity_handles_label_and_common_ocr_digit_confusion():
+    module = load_car_inspe_module()
+
+    value, _raw, score = module._best_candidate(["乗車定員 S 入"], "passenger_capacity")
+
+    assert value == "5人"
+    assert score > 0
+
+
+def test_displacement_accepts_cc_and_missing_decimal_candidates():
+    module = load_car_inspe_module()
+
+    assert module.normalize_displacement("総排気量 1,500cc") == "1.5L"
+    assert module.normalize_displacement("0.65L") == "0.65L"
+    assert module.normalize_displacement("2L") == "2L"
+    assert module.normalize_displacement("065L") == "65L"
+    assert module.normalize_displacement("65L") == "65L"
+    assert module.normalize_displacement("65.00L") == "65L"
+    assert module.normalize_displacement("15L") == "15L"
+    assert module.normalize_displacement("660L") == "660L"
+
+
+def test_ocr_preprocessing_restores_high_accuracy_variants():
+    module = load_car_inspe_module()
+    image = module.Image.new("RGB", (80, 28), "white")
+    draw = module.ImageDraw.Draw(image)
+    draw.text((4, 6), "0.65L", fill="black")
+
+    reg_variants = module._prepare_region_variants(image, "reg_number")
+    numeric_variants = module._prepare_region_variants(image, "displacement")
+    retry_variants = module._prepare_region_variants(image, "displacement", retry=True)
+
+    assert len(reg_variants) >= 80
+    assert len(numeric_variants) >= 120
+    assert len(retry_variants) >= 120
+    assert numeric_variants[0].mode == "L"
+    assert len({variant.size for variant in numeric_variants}) > 1
+    assert len({variant.tobytes() for variant in numeric_variants[:40]}) == 40
+
+
+def test_ocr_configs_follow_field_specific_guideline():
+    module = load_car_inspe_module()
+
+    assert "--psm 7" in module._ocr_configs_for_field("reg_number")[0]
+    assert "--psm 6" in module._ocr_configs_for_field("reg_number", retry=True)[0]
+    assert module._ocr_configs_for_field("expiry_date")[0] == "--oem 1 --psm 7"
+    assert all("tessedit_char_whitelist" not in config for config in module._ocr_configs_for_field("expiry_date"))
+    assert module._ocr_configs_for_field("first_registration_month")[0] == "--oem 1 --psm 7"
+    assert all("tessedit_char_whitelist" not in config for config in module._ocr_configs_for_field("first_registration_month"))
+    assert "--psm 8" in module._ocr_configs_for_field("passenger_capacity")[0]
+    assert "--psm 10" in module._ocr_configs_for_field("passenger_capacity", retry=True)[0]
+    assert "tessedit_char_whitelist=0123456789.LlKkWw" in module._ocr_configs_for_field("displacement")[0]
+    assert module._ocr_lang_for_field("displacement") == "eng"
+    assert module._ocr_lang_for_field("expiry_date") == "jpn+eng"
+
+
+def test_ocr_retry_runs_only_when_primary_score_is_low():
+    module = load_car_inspe_module()
+    image = module.Image.new("RGB", (80, 28), "white")
+    calls = []
+
+    def fake_ocr(_region, field, configs, *, retry=False, **kwargs):
+        calls.append((field, retry, configs[0], kwargs))
+        return [] if not retry else ["20261201"]
+
+    module._ocr_image_variants_tesseract = fake_ocr
+
+    texts = module._ocr_image_variants(image, "expiry_date")
+
+    assert texts == ["20261201"]
+    assert any(call[1] is False for call in calls)
+    assert any(call[1] is True for call in calls)
+
+
+def test_ocr_retry_is_skipped_when_primary_score_is_high():
+    module = load_car_inspe_module()
+    image = module.Image.new("RGB", (80, 28), "white")
+    calls = []
+
+    def fake_ocr(_region, field, configs, *, retry=False, **kwargs):
+        calls.append((field, retry, configs[0], kwargs))
+        return ["20261201"]
+
+    module._ocr_image_variants_tesseract = fake_ocr
+
+    texts = module._ocr_image_variants(image, "expiry_date")
+
+    assert texts == ["20261201"]
+    assert len(calls) == 1
+    assert calls[0][1] is False
+    assert calls[0][3]["variant_limit"] == module._ocr_fast_variant_count("expiry_date")
+
+
+def test_match_vehicle_uses_siteplus_contract_vehicle_number():
+    module = load_car_inspe_module()
+    entries = [
+        {
+            "vehicle_id": "01234001",
+            "contract_code": "01234001",
+            "vehicle_number": "1234",
+            "registration": "",
+            "suffix": "1234",
+            "location": "本社",
+        }
+    ]
+
+    match = module.match_vehicle("品川300あ1234", entries)
+
+    assert match["status"] == "matched"
+    assert match["best"]["vehicle_id"] == "01234001"
+    assert match["best"]["vehicle_number"] == "1234"
+
+
+def test_extract_suffix_digits_returns_blank_without_trailing_digits():
+    module = load_car_inspe_module()
+
+    assert module.extract_suffix_digits("") == ""
+    assert module.extract_suffix_digits("ABC") == ""
 
 
 def test_parse_vehicle_csv_detects_named_columns_and_matches_full_number():

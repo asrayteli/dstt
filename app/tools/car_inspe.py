@@ -1,8 +1,11 @@
 from flask import Blueprint, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 from flask_login import current_user, login_required
-import os, tempfile, csv, re, shutil, platform, logging, uuid, json, time, base64
+import os, tempfile, csv, re, shutil, platform, logging, uuid, json, time, base64, threading
+from concurrent.futures import ThreadPoolExecutor
 from app.access_control import is_admin_user
+from app.models import SiteContractMaster, VehicleInspectionRecord, db
+from app.site_contract_master import ensure_contract_master_synced
 try:
     import pytesseract
 except ImportError:  # pragma: no cover - production dependency guard
@@ -10,32 +13,47 @@ except ImportError:  # pragma: no cover - production dependency guard
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter, ImageOps
 import fitz  # PyMuPDF
 from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from io import BytesIO
 import unicodedata
 import zipfile
 from zipfile import ZipInfo
 import chardet
+import numpy as np
+from sqlalchemy import or_
 
 car_inspe_bp = Blueprint("car_inspe", __name__, url_prefix="/tools/car_inspe")
 logger = logging.getLogger(__name__)
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CAR_INSPE_WORK_DIR = os.path.join(APP_ROOT, "..", "var", "car_inspe")
+CAR_INSPE_STORAGE_DIR = os.path.join(CAR_INSPE_WORK_DIR, "storage")
 PRESET_STORE_PATH = os.path.join(CAR_INSPE_WORK_DIR, "presets.json")
 SESSION_TTL_SECONDS = 60 * 60 * 6
 
 COORD_PRESETS = {}
 DEFAULT_MANUAL_DPI = 300
 DEFAULT_FILENAME_TEMPLATE = "{expiry}_{vehicle_id}_{location}_{registration}.pdf"
+
+# Tesseract セットアップは初回呼び出しのみ実施し、以降はキャッシュを使う。
+_TESSERACT_READY = None
+_TESSERACT_LOCK = threading.Lock()
+_TESSERACT_WARMED = False
+# OCR 実行用の共有スレッドプール。Tesseract はサブプロセス呼び出しなので
+# I/O 待ち中に GIL を解放するため ThreadPool で並列化が有効。
+_OCR_WORKER_COUNT = max(2, min(8, (os.cpu_count() or 4)))
+_OCR_EXECUTOR = ThreadPoolExecutor(max_workers=_OCR_WORKER_COUNT, thread_name_prefix="car_inspe_ocr")
 CSV_FIELD_ALIASES = {
     "vehicle_id": ("契約コード", "契約CD", "契約ID", "id", "ID", "車両ID", "管理ID", "管理番号", "車番ID", "車両番号ID"),
     "registration": ("登録番号", "車両番号", "ナンバー", "自動車登録番号", "標識番号"),
     "suffix": ("下4桁", "末尾4桁", "登録番号末尾4桁", "車番末尾", "番号下4桁"),
     "location": ("現場名", "保管場所", "拠点", "拠点名", "営業所", "営業所名", "駐車場", "場所"),
 }
+EXTRA_OCR_FIELDS = ("first_registration_month", "passenger_capacity", "displacement")
 
 
 def ensure_work_dir():
     os.makedirs(CAR_INSPE_WORK_DIR, exist_ok=True)
+    os.makedirs(CAR_INSPE_STORAGE_DIR, exist_ok=True)
 
 
 def cleanup_old_sessions():
@@ -99,9 +117,9 @@ def first_preset_name():
     presets = all_presets()
     return next(iter(presets), "")
 
-def setup_tesseract():
+def _detect_tesseract():
     if pytesseract is None:
-        return False
+        return False, "pytesseract モジュールがインストールされていません。"
     app_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     system = platform.system().lower()
     if system == "windows":
@@ -109,11 +127,11 @@ def setup_tesseract():
         if os.path.exists(tesseract_path):
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
         else:
-            return False
+            return False, f"Tesseract 実行ファイルが見つかりません: {tesseract_path}"
     else:
         pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
         if not os.path.exists(pytesseract.pytesseract.tesseract_cmd):
-            return False
+            return False, "Tesseract 実行ファイル (/usr/bin/tesseract) が見つかりません。"
 
     tessdata_candidates = [
         os.path.join(app_root, "binaries", "windows", "tessdata"),
@@ -123,7 +141,52 @@ def setup_tesseract():
         if os.path.exists(tessdata_dir):
             os.environ["TESSDATA_PREFIX"] = tessdata_dir
             break
-    return True
+    return True, ""
+
+
+def setup_tesseract():
+    global _TESSERACT_READY
+    if _TESSERACT_READY is True:
+        return True
+    with _TESSERACT_LOCK:
+        if _TESSERACT_READY is True:
+            return True
+        ok, reason = _detect_tesseract()
+        _TESSERACT_READY = ok
+        if not ok:
+            logger.warning("Tesseract 初期化失敗: %s", reason)
+        return ok
+
+
+def setup_tesseract_with_reason():
+    """初期化結果を理由付きで返す。利用者向けエラーメッセージに使う。"""
+    global _TESSERACT_READY
+    with _TESSERACT_LOCK:
+        ok, reason = _detect_tesseract()
+        _TESSERACT_READY = ok
+        return ok, reason
+
+
+def warmup_tesseract():
+    """Tesseract バイナリと言語データを起動時に予熱する。
+    初回 OCR の遅延を抑えるため、tessdata を OS のファイルキャッシュに乗せる。
+    """
+    global _TESSERACT_WARMED
+    if _TESSERACT_WARMED or pytesseract is None:
+        return
+    try:
+        if not setup_tesseract():
+            return
+        dummy = Image.new("L", (60, 24), 255)
+        ImageDraw.Draw(dummy).text((4, 4), "12", fill=0)
+        try:
+            pytesseract.image_to_string(dummy, lang="jpn+eng", config="--oem 1 --psm 7")
+        except Exception:
+            logger.debug("Tesseract 予熱中の OCR で軽微なエラー", exc_info=True)
+        _TESSERACT_WARMED = True
+        logger.info("Tesseract の予熱が完了しました。")
+    except Exception:
+        logger.exception("Tesseract の予熱に失敗しました。")
 
 def is_valid_reg_number(reg_number):
     """
@@ -162,6 +225,8 @@ def normalize_ocr_text(text: str) -> str:
 
 def correct_ocr_text(text, field=None):
     text = normalize_ocr_text(text)
+    if field in {"first_registration_month", "passenger_capacity", "displacement"}:
+        return text
     common_replacements = {
         "O": "0", "o": "0", "D": "0", "Q": "0",
         "I": "1", "l": "1", "|": "1",
@@ -170,7 +235,8 @@ def correct_ocr_text(text, field=None):
     date_replacements = {
         "m": "日", "n": "日", "」": "月", "』": "月", "'": "月",
         "牛": "年", "干": "年", "于": "年", "午": "年",
-        "合": "令", "命": "令", "禾口": "和", "利": "和",
+        "合": "令", "命": "令", "今": "令", "苓": "令", "禾口": "和", "利": "和",
+        "平咸": "平成", "平戊": "平成", "平威": "平成",
     }
     replacements = dict(common_replacements)
     if field == "expiry_date":
@@ -244,62 +310,262 @@ def parse_expiry_date(raw_text: str):
     except ValueError:
         return None, "月日を数値として解釈できません"
 
-def _resize_image(image, scale):
-    resampling = getattr(Image, "Resampling", Image).LANCZOS
+def _resize_image(image, scale, resampling=None):
+    if resampling is None:
+        resampling = getattr(Image, "Resampling", Image).LANCZOS
     width = max(1, int(image.width * scale))
     height = max(1, int(image.height * scale))
     return image.resize((width, height), resampling)
 
 
-def _prepare_region_variants(region):
-    gray = ImageOps.grayscale(region)
-    gray = ImageOps.autocontrast(gray)
+def _add_ocr_variant(variants, seen, image, *, border=18):
+    padded = ImageOps.expand(image.convert("L"), border=border, fill=255)
+    fingerprint = (padded.size, padded.tobytes())
+    if fingerprint in seen:
+        return
+    seen.add(fingerprint)
+    variants.append(padded)
+
+
+def _adaptive_threshold(image, block_size=35, offset=12):
+    """局所平均を使った適応的二値化。影や紙面ムラに固定閾値より強い。"""
+    if block_size % 2 == 0:
+        block_size += 1
+    gray = image.convert("L")
+    source = np.asarray(gray, dtype=np.int16)
+    local_mean = np.asarray(gray.filter(ImageFilter.BoxBlur(block_size // 2)), dtype=np.int16)
+    binary = np.where(source < local_mean - int(offset), 0, 255).astype(np.uint8)
+    return Image.fromarray(binary, mode="L")
+
+
+def _suppress_form_lines(image):
+    gray = image.convert("L")
+    arr = np.array(gray, dtype=np.uint8)
+    if arr.size == 0:
+        return gray
+    dark = arr < 90
+    horizontal = np.where(dark.mean(axis=1) > 0.45)[0]
+    vertical = np.where(dark.mean(axis=0) > 0.45)[0]
+    for row in horizontal:
+        start = max(0, row - 1)
+        end = min(arr.shape[0], row + 2)
+        arr[start:end, :] = 255
+    for col in vertical:
+        start = max(0, col - 1)
+        end = min(arr.shape[1], col + 2)
+        arr[:, start:end] = 255
+    return Image.fromarray(arr, mode="L")
+
+
+def _threshold_image(image, threshold):
+    return image.point(lambda px, t=threshold: 0 if px < t else 255, "1").convert("L")
+
+
+def _variant_thresholds_for_field(field):
+    if field in {"passenger_capacity", "displacement"}:
+        return (105, 120, 135, 150, 165, 180, 195, 210, 225)
+    return (120, 135, 150, 165, 180, 195, 210, 225)
+
+
+def _variant_offsets_for_field(field):
+    if field in {"passenger_capacity", "displacement"}:
+        return (6, 9, 12, 15)
+    return (8, 11, 14)
+
+
+def _prepare_region_variants(region, field=None, *, retry=False):
+    """Build accuracy-oriented OCR images for one cropped ROI."""
+    gray = _suppress_form_lines(ImageOps.grayscale(region))
     variants = []
+    seen = set()
+    scales = (2.0, 2.5, 3.0)
+    if retry:
+        scales = (2.25, 2.75, 3.25)
 
-    for scale in (2.0, 3.0):
-        base = _resize_image(gray, scale)
-        base = ImageEnhance.Contrast(base).enhance(2.2)
-        base = ImageEnhance.Sharpness(base).enhance(1.8)
-        variants.append(base)
-        variants.append(base.filter(ImageFilter.MedianFilter(size=3)))
+    thresholds = _variant_thresholds_for_field(field)
+    offsets = _variant_offsets_for_field(field)
 
-        for threshold in (145, 165, 185, 205):
-            binary = base.point(lambda px, t=threshold: 0 if px < t else 255, "1").convert("L")
-            variants.append(binary)
+    for scale in scales:
+        resized = _resize_image(gray, scale)
+        autocontrast = ImageOps.autocontrast(resized, cutoff=1 if retry else 0)
+        base_images = [
+            resized,
+            autocontrast,
+            ImageEnhance.Contrast(autocontrast).enhance(1.6),
+            ImageEnhance.Contrast(autocontrast).enhance(2.2 if not retry else 2.6),
+            ImageEnhance.Sharpness(autocontrast).enhance(1.8),
+        ]
+        for base in base_images:
+            denoised = base.filter(ImageFilter.MedianFilter(size=3))
+            _add_ocr_variant(variants, seen, base)
+            _add_ocr_variant(variants, seen, denoised)
+            for threshold in thresholds:
+                _add_ocr_variant(variants, seen, _threshold_image(base, threshold))
+            for offset in offsets:
+                _add_ocr_variant(variants, seen, _adaptive_threshold(denoised, block_size=35, offset=offset))
 
-    padded = []
-    for image in variants:
-        padded.append(ImageOps.expand(image, border=18, fill=255))
-    return padded
+    return variants
 
 
-def _ocr_image_variants(region, field):
+def _ocr_image_variants_tesseract(region, field, configs, *, retry=False, variant_offset=0, variant_limit=None):
+    """variants × configs を共有スレッドプールで並列実行する。"""
+    if pytesseract is None:
+        return []
+    lang = _ocr_lang_for_field(field)
+    variants = _prepare_region_variants(region, field, retry=retry)
+    if variant_limit is None:
+        variants = variants[variant_offset:]
+    else:
+        variants = variants[variant_offset: variant_offset + variant_limit]
+    tasks = [(image, config) for image in variants for config in configs]
+    if not tasks:
+        return []
+
+    def _run(task):
+        image, config = task
+        try:
+            return pytesseract.image_to_string(image, lang=lang, config=config).strip()
+        except Exception as exc:
+            logger.debug("OCR failed for %s with %s: %s", field, config, exc)
+            return ""
+
+    texts = []
+    # Tesseract はサブプロセス呼び出しなので待機中は GIL を解放する。
+    # max_workers は共有 Executor のサイズに自動調整される。
+    for raw_text in _OCR_EXECUTOR.map(_run, tasks):
+        if raw_text:
+            texts.append(correct_ocr_text(raw_text, field))
+    return texts
+
+
+def _ocr_lang_for_field(field):
+    if field == "displacement":
+        return "eng"
+    return "jpn+eng"
+
+
+def _ocr_configs_for_field(field, *, retry=False):
     if field == "expiry_date":
         configs = [
             "--oem 1 --psm 7",
-            "--oem 1 --psm 6",
-            "--oem 1 --psm 11",
-            "--oem 1 --psm 13",
         ]
+        if retry:
+            configs = ["--oem 1 --psm 6"]
+    elif field == "first_registration_month":
+        configs = [
+            "--oem 1 --psm 7",
+        ]
+        if retry:
+            configs = ["--oem 1 --psm 6"]
+    elif field == "passenger_capacity":
+        psm = "10" if retry else "8"
+        configs = [f"--oem 1 --psm {psm} -c tessedit_char_whitelist=0123456789０１２３４５６７８９人入名員"]
+    elif field == "displacement":
+        configs = [
+            "--oem 1 --psm 7 -c tessedit_char_whitelist=0123456789.LlKkWw",
+        ]
+        if retry:
+            configs = ["--oem 1 --psm 6 -c tessedit_char_whitelist=0123456789.LlKkWw"]
     else:
         configs = [
             "--oem 1 --psm 7",
+        ]
+        if retry:
+            configs = ["--oem 1 --psm 6"]
+    extra_configs = []
+    if field == "expiry_date":
+        extra_configs = [
             "--oem 1 --psm 8",
             "--oem 1 --psm 6",
             "--oem 1 --psm 13",
         ]
+    elif field == "first_registration_month":
+        extra_configs = [
+            "--oem 1 --psm 8",
+            "--oem 1 --psm 6",
+            "--oem 1 --psm 13",
+        ]
+    elif field == "passenger_capacity":
+        extra_configs = [
+            "--oem 1 --psm 7 -c tessedit_char_whitelist=0123456789０１２３４５６７８９人入名員",
+            "--oem 1 --psm 8 -c tessedit_char_whitelist=0123456789０１２３４５６７８９人入名員",
+            "--oem 1 --psm 10 -c tessedit_char_whitelist=0123456789０１２３４５６７８９人入名員",
+            "--oem 1 --psm 6 -c tessedit_char_whitelist=0123456789０１２３４５６７８９人入名員",
+        ]
+    elif field == "displacement":
+        extra_configs = [
+            "--oem 1 --psm 8 -c tessedit_char_whitelist=0123456789.LlKkWw",
+            "--oem 1 --psm 6 -c tessedit_char_whitelist=0123456789.LlKkWw",
+            "--oem 1 --psm 13 -c tessedit_char_whitelist=0123456789.LlKkWw",
+        ]
+    elif field == "reg_number":
+        extra_configs = ["--oem 1 --psm 8", "--oem 1 --psm 6", "--oem 1 --psm 13"]
 
-    texts = []
-    for image in _prepare_region_variants(region):
-        for config in configs:
-            try:
-                text = pytesseract.image_to_string(image, lang="jpn+eng", config=config).strip()
-            except Exception as exc:
-                logger.debug("OCR failed for %s with %s: %s", field, config, exc)
-                continue
-            if text:
-                texts.append(correct_ocr_text(text, field))
-    return texts
+    for config in extra_configs:
+        if config not in configs:
+            configs.append(config)
+    return configs
+
+
+def _ocr_success_threshold(field):
+    if field == "reg_number":
+        return 40
+    if field in {"expiry_date", "first_registration_month", "passenger_capacity", "displacement"}:
+        return 80
+    return 1
+
+
+def _ocr_fast_variant_count(field):
+    if field in {"passenger_capacity", "displacement"}:
+        return 16
+    return 12
+
+
+def _ocr_fast_config_count(field):
+    return 1
+
+
+def _ocr_image_variants(region, field):
+    configs = _ocr_configs_for_field(field)
+    fast_variant_count = _ocr_fast_variant_count(field)
+    fast_config_count = _ocr_fast_config_count(field)
+
+    texts = _ocr_image_variants_tesseract(
+        region,
+        field,
+        configs[:fast_config_count],
+        retry=False,
+        variant_limit=fast_variant_count,
+    )
+    _value, _raw, score = _best_candidate(texts, field)
+    if score >= _ocr_success_threshold(field):
+        return texts
+
+    if len(configs) > fast_config_count:
+        texts.extend(_ocr_image_variants_tesseract(
+            region,
+            field,
+            configs[fast_config_count:],
+            retry=False,
+            variant_limit=fast_variant_count,
+        ))
+        _value, _raw, score = _best_candidate(texts, field)
+        if score >= _ocr_success_threshold(field):
+            return texts
+
+    texts.extend(_ocr_image_variants_tesseract(
+        region,
+        field,
+        configs,
+        retry=False,
+        variant_offset=fast_variant_count,
+    ))
+    _value, _raw, score = _best_candidate(texts, field)
+    if score >= _ocr_success_threshold(field):
+        return texts
+
+    retry_texts = _ocr_image_variants_tesseract(region, field, _ocr_configs_for_field(field, retry=True), retry=True)
+    return texts + retry_texts
 
 
 def _score_registration_candidate(text):
@@ -335,6 +601,169 @@ def _score_date_candidate(text):
     return score, formatted
 
 
+def normalize_first_registration_month(text):
+    value = unicodedata.normalize("NFKC", str(text or "")).strip()
+    value = re.sub(r"\s+", "", value)
+    western_match = re.search(r"(19\d{2}|20\d{2})年?(\d{1,2})月?", value)
+    if western_match:
+        year_int = int(western_match.group(1))
+        month_int = int(western_match.group(2))
+        if 1 <= month_int <= 12 and year_int <= datetime.now().year:
+            return f"{year_int}年{month_int}月"
+        return ""
+    value = (
+        value
+        .replace("初度検査年月", "")
+        .replace("検査年月", "")
+        .replace("合", "令")
+        .replace("命", "令")
+        .replace("今", "令")
+        .replace("苓", "令")
+        .replace("禾口", "和")
+        .replace("平咸", "平成")
+        .replace("平戊", "平成")
+        .replace("平威", "平成")
+    )
+    era_names = {
+        "令和": "令和",
+        "R": "令和",
+        "平成": "平成",
+        "H": "平成",
+        "昭和": "昭和",
+        "S": "昭和",
+    }
+    era_offsets = {
+        "令和": 2018,
+        "平成": 1988,
+        "昭和": 1925,
+    }
+    era_limits = {
+        "令和": (1, max(1, datetime.now().year - 2018)),
+        "平成": (1, 31),
+        "昭和": (1, 64),
+    }
+    match = re.search(r"(?<![A-Z0-9])(令和|平成|昭和|R|H|S)(元|\d{1,2})年?(\d{1,2})月?", value, re.I)
+    if not match:
+        return ""
+    era, year, month = match.groups()
+    era = era_names.get(era.upper(), era)
+    era_year = 1 if year == "元" else int(year)
+    month_int = int(month)
+    if month_int < 1 or month_int > 12:
+        return ""
+    min_year, max_year = era_limits[era]
+    if era_year < min_year or era_year > max_year:
+        return ""
+    western_year = era_offsets[era] + era_year
+    if western_year > datetime.now().year:
+        return ""
+    return f"{western_year}年{month_int}月"
+
+
+def normalize_passenger_capacity(text):
+    value = unicodedata.normalize("NFKC", str(text or ""))
+    value = value.translate(str.maketrans({
+        "O": "0", "o": "0", "D": "0", "Q": "0",
+        "I": "1", "l": "1", "|": "1", "!": "1",
+        "S": "5", "s": "5", "B": "8",
+    }))
+    value = value.replace("入", "人").replace("名", "人")
+    compact = re.sub(r"\s+", "", value)
+    unit_match = re.search(r"(\d{1,2})(?:人|員)", compact)
+    if unit_match:
+        count = int(unit_match.group(1))
+    else:
+        numbers = [int(item) for item in re.findall(r"(?<![\d.])(\d{1,2})(?![\d.])", compact)]
+        if not numbers:
+            return ""
+        label_index = max(compact.find("乗車定員"), compact.find("定員"))
+        if label_index >= 0:
+            tail_numbers = [int(item) for item in re.findall(r"(?<![\d.])(\d{1,2})(?![\d.])", compact[label_index:])]
+            if tail_numbers:
+                numbers = tail_numbers
+        count = numbers[0]
+    if count < 1 or count > 99:
+        return ""
+    return f"{count}人"
+
+
+def normalize_displacement(text):
+    value = unicodedata.normalize("NFKC", str(text or "")).upper()
+    value = value.replace("リットル", "L").replace("Ｌ", "L").replace("㎤", "CC").replace("CM3", "CC")
+    value = value.replace("I", "1").replace("|", "1").replace("O", "0").replace("，", ",")
+    value = re.sub(r"\s+", "", value)
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*(K?W|L|CC|C\.C\.)", value)
+    if match:
+        number, unit = match.groups()
+        unit = "CC" if unit == "C.C." else unit
+        number = number.replace(",", "" if unit == "CC" else ".")
+    else:
+        decimal_match = re.search(r"(\d+[.,]\d+)", value)
+        if not decimal_match:
+            return ""
+        number, unit = decimal_match.group(1).replace(",", "."), "L"
+    try:
+        decimal_number = Decimal(number)
+    except InvalidOperation:
+        return ""
+    if unit == "CC":
+        decimal_number = decimal_number / Decimal("1000")
+        unit = "L"
+    has_decimal_point = "." in number
+    if unit == "L":
+        try:
+            if has_decimal_point or decimal_number != decimal_number.to_integral_value():
+                decimal_number = decimal_number.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            number = format(decimal_number, "f")
+        except InvalidOperation:
+            return ""
+        if "." in number:
+            number = number.rstrip("0").rstrip(".")
+    else:
+        number = format(decimal_number.normalize(), "f").rstrip("0").rstrip(".")
+    return f"{number}{unit}"
+
+
+def _score_first_registration_month_candidate(text):
+    value = normalize_first_registration_month(text)
+    if not value:
+        return -100, ""
+    score = 100
+    if "年" in value and "月" in value:
+        score += 20
+    return score, value
+
+
+def _score_passenger_capacity_candidate(text):
+    value = normalize_passenger_capacity(text)
+    if not value:
+        return -100, ""
+    normalized = unicodedata.normalize("NFKC", str(text or ""))
+    score = 110
+    if "乗車定員" in normalized or "定員" in normalized:
+        score += 25
+    if re.search(r"\d{1,2}\s*(人|入|名|員)", normalized):
+        score += 20
+    if re.search(r"(kg|KG|L|リットル)", normalized):
+        score -= 30
+    return score, value
+
+
+def _score_displacement_candidate(text):
+    value = normalize_displacement(text)
+    if not value:
+        return -100, ""
+    score = 100
+    if value.endswith("L"):
+        score += 15
+    normalized = unicodedata.normalize("NFKC", str(text or ""))
+    if "排気量" in normalized or "定格出力" in normalized:
+        score += 25
+    if re.search(r"\d+(?:[.,]\d+)?\s*(L|l|W|w|kW|KW|cc|CC|リットル)", normalized):
+        score += 20
+    return score, value
+
+
 def _best_candidate(texts, field):
     best_score = -999
     best_value = ""
@@ -342,8 +771,16 @@ def _best_candidate(texts, field):
     for text in texts:
         if field == "reg_number":
             score, value = _score_registration_candidate(text)
-        else:
+        elif field == "expiry_date":
             score, value = _score_date_candidate(text)
+        elif field == "first_registration_month":
+            score, value = _score_first_registration_month_candidate(text)
+        elif field == "passenger_capacity":
+            score, value = _score_passenger_capacity_candidate(text)
+        elif field == "displacement":
+            score, value = _score_displacement_candidate(text)
+        else:
+            score, value = (1, normalize_ocr_text(text))
         if value and score > best_score:
             best_score = score
             best_value = value
@@ -456,7 +893,7 @@ def extract_with_preset(pdf_path, preset_name, custom_regions=None, image_path=N
     preset = presets.get(preset_name) or {"dpi": DEFAULT_MANUAL_DPI, "regions": {}}
     dpi = int(preset.get("dpi", DEFAULT_MANUAL_DPI))
     regions = custom_regions or preset.get("regions") or {}
-    if set(regions) != {"reg_number", "expiry_date"}:
+    if not {"reg_number", "expiry_date"}.issubset(set(regions)):
         raise ValueError("登録番号と満了日のOCR範囲を指定してください。")
     img = _load_image(image_path) if image_path and os.path.exists(image_path) else _render_first_page(pdf_path, dpi)
     draw = ImageDraw.Draw(img)
@@ -549,12 +986,14 @@ def extract_suffix_digits(text, length=4):
         else:
             break
     digits = ''.join(reversed(digits_reversed))
-    return digits.zfill(length)
+    if not digits:
+        return ""
+    return digits[-length:].zfill(length)
 
 
 def detect_csv_encoding(file_bytes):
     detected = chardet.detect(file_bytes)
-    candidates = [detected.get("encoding"), "utf-8-sig", "utf-8", "cp932", "shift_jis"]
+    candidates = ["utf-8-sig", "utf-8", "cp932", "shift_jis", detected.get("encoding")]
     seen = set()
     for enc in candidates:
         if not enc or enc.lower() in seen:
@@ -647,21 +1086,93 @@ def parse_vehicle_csv(file_bytes):
     }
 
 
+def normalize_vehicle_number(value):
+    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    return re.sub(r"\s+", "", text)
+
+
+def parse_management_date(value):
+    text = normalize_ocr_text(value)
+    if not text:
+        return ""
+    parsed, _err = parse_expiry_date(text)
+    if parsed:
+        return parsed
+    digits = re.sub(r"\D", "", text)
+    return digits[:8] if len(digits) >= 8 else text
+
+
+def load_vehicle_entries_from_db():
+    ensure_contract_master_synced()
+    records = VehicleInspectionRecord.query.order_by(VehicleInspectionRecord.updated_at.asc()).all()
+    latest_by_contract = {record.contract_code: record for record in records}
+    entries = []
+    rows = (
+        SiteContractMaster.query
+        .filter(SiteContractMaster.is_active.is_(True))
+        .order_by(SiteContractMaster.contract_code.asc())
+        .all()
+    )
+    for index, row in enumerate(rows, 1):
+        record = latest_by_contract.get(row.contract_code)
+        registration = clean_registration_number(record.registration_number if record else "")
+        vehicle_number = normalize_vehicle_number(row.vehicle_number or (record.vehicle_number if record else ""))
+        entries.append({
+            "row": index,
+            "vehicle_id": row.contract_code,
+            "contract_code": row.contract_code,
+            "vehicle_number": vehicle_number,
+            "registration": registration,
+            "suffix": extract_suffix_digits(registration or vehicle_number),
+            "location": row.site_name or "",
+            "raw": [],
+        })
+    return {
+        "encoding": "database",
+        "has_header": True,
+        "headers": ["契約コード", "車両番号", "登録番号", "現場名"],
+        "columns": {},
+        "entries": entries,
+    }
+
+
+def upsert_vehicle_mapping(contract_code, vehicle_number, *, actor=""):
+    contract_code = str(contract_code or "").strip()
+    vehicle_number = normalize_vehicle_number(vehicle_number)
+    if not contract_code or not vehicle_number:
+        return None
+    ensure_contract_master_synced()
+    row = db.session.get(SiteContractMaster, contract_code)
+    if row is None:
+        return None
+    row.vehicle_number = vehicle_number
+    row.vehicle_number_updated_by = actor
+    row.vehicle_number_updated_at = datetime.utcnow()
+    return row
+
+
 def match_vehicle(registration, csv_entries):
     registration = clean_registration_number(registration)
     suffix = extract_suffix_digits(registration)
+    normalized_registration = normalize_vehicle_number(registration)
     matches = []
     for entry in csv_entries:
         score = 0
+        entry_vehicle_number = normalize_vehicle_number(entry.get("vehicle_number", ""))
+        entry_suffix = extract_suffix_digits(entry_vehicle_number)
         if entry.get("registration") and clean_registration_number(entry["registration"]) == registration:
             score += 120
+        if entry_vehicle_number and normalized_registration and entry_vehicle_number == normalized_registration:
+            score += 130
+        if entry_suffix and suffix and entry_suffix == suffix:
+            score += 90
         if entry.get("suffix") and entry["suffix"] == suffix:
             score += 80
         if entry.get("registration") and entry["registration"] and entry["registration"] in registration:
             score += 20
         if score:
             matches.append({**entry, "score": score})
-    matches.sort(key=lambda item: item["score"], reverse=True)
+    matches.sort(key=lambda item: (item["score"], bool(item.get("vehicle_number")), bool(item.get("registration"))), reverse=True)
     best = matches[0] if matches else None
     return {
         "suffix": suffix,
@@ -772,7 +1283,7 @@ def send_file_and_cleanup(path, session_dir, **kwargs):
 def parse_regions_payload(payload):
     regions = {}
     source = payload or {}
-    for key in ("reg_number", "expiry_date"):
+    for key in ("reg_number", "expiry_date", *EXTRA_OCR_FIELDS):
         box = source.get(key)
         if not isinstance(box, list) or len(box) != 4:
             continue
@@ -782,7 +1293,9 @@ def parse_regions_payload(payload):
             continue
         if coords[2] > coords[0] and coords[3] > coords[1]:
             regions[key] = coords
-    return regions or None
+    if not {"reg_number", "expiry_date"}.issubset(regions):
+        return None
+    return regions
 
 
 def analyze_pdf_to_row(pdf_path, original_name, preset_name, csv_entries, custom_regions=None, image_path=None):
@@ -798,7 +1311,11 @@ def analyze_pdf_to_row(pdf_path, original_name, preset_name, csv_entries, custom
             "status": "needs_review",
             "registration_number": "",
             "expiry_date": "",
+            "first_registration_month": "",
+            "passenger_capacity": "",
+            "displacement": "",
             "vehicle_id": "",
+            "vehicle_number": "",
             "location": "",
             "match_status": "unmatched",
             "match_candidates": [],
@@ -819,7 +1336,11 @@ def analyze_pdf_to_row(pdf_path, original_name, preset_name, csv_entries, custom
         "status": "ready" if registration and formatted_date and best else "needs_review",
         "registration_number": registration,
         "expiry_date": formatted_date or "",
+        "first_registration_month": normalize_first_registration_month(ocr_result.get("first_registration_month", "")),
+        "passenger_capacity": normalize_passenger_capacity(ocr_result.get("passenger_capacity", "")),
+        "displacement": normalize_displacement(ocr_result.get("displacement", "")),
         "vehicle_id": best.get("vehicle_id", ""),
+        "vehicle_number": best.get("vehicle_number", "") or match["suffix"],
         "location": best.get("location", ""),
         "match_status": match["status"],
         "match_suffix": match["suffix"],
@@ -865,7 +1386,7 @@ def api_save_preset():
     if not name:
         return jsonify({"error": "プリセット名を入力してください。"}), 400
     regions = parse_regions_payload(payload.get("regions"))
-    if not regions or set(regions) != {"reg_number", "expiry_date"}:
+    if not regions or not {"reg_number", "expiry_date"}.issubset(set(regions)):
         return jsonify({"error": "登録番号と満了日の範囲を両方指定してください。"}), 400
     try:
         dpi = int(payload.get("dpi") or DEFAULT_MANUAL_DPI)
@@ -927,16 +1448,15 @@ def api_preview_pdf():
 @login_required
 def api_analyze():
     cleanup_old_sessions()
-    if not setup_tesseract():
-        return jsonify({"error": "Tesseractが利用できません。"}), 500
+    ok, reason = setup_tesseract_with_reason()
+    if not ok:
+        return jsonify({"error": f"OCRエンジン (Tesseract) を初期化できませんでした: {reason or '原因不明'}"}), 500
 
     pdf_files = [f for f in request.files.getlist("pdf_files") if f and f.filename]
     csv_file = request.files.get("csv_file")
     preset = request.form.get("preset", "")
     if not pdf_files:
         return jsonify({"error": "PDFを選択してください。"}), 400
-    if not csv_file:
-        return jsonify({"error": "CSVを選択してください。"}), 400
     if preset and preset not in all_presets():
         return jsonify({"error": "存在しないOCRプリセットです。"}), 400
     try:
@@ -963,18 +1483,21 @@ def api_analyze():
     elif not preset and not custom_regions:
         return jsonify({"error": "プリセットを選ぶか、PDF上でOCR範囲を指定してください。"}), 400
 
-    try:
-        csv_info = parse_vehicle_csv(csv_file.read())
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+    if csv_file and csv_file.filename:
+        try:
+            csv_info = parse_vehicle_csv(csv_file.read())
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+    else:
+        csv_info = load_vehicle_entries_from_db()
 
     session_id = uuid.uuid4().hex
     session_dir = user_session_dir(session_id)
     os.makedirs(session_dir, exist_ok=True)
 
-    rows = []
     files = {}
     used_preview_ids = []
+    analyze_tasks = []  # (index, file_id, pdf_path, image_path, original_name, active_regions)
     for index, pdf_file in enumerate(pdf_files):
         original_name = pdf_file.filename
         safe_name = secure_filename(original_name) or f"vehicle_{index + 1}.pdf"
@@ -989,42 +1512,66 @@ def api_analyze():
             except ValueError:
                 preview_manifest = None
 
-        if preview_manifest and os.path.exists(preview_manifest.get("pdf_path", "")) and os.path.exists(preview_manifest.get("image_path", "")):
-            original_name = preview_manifest.get("original_name") or original_name
-            shutil.copyfile(preview_manifest["pdf_path"], pdf_path)
-            shutil.copyfile(preview_manifest["image_path"], image_path)
-            used_preview_ids.append(preview_id)
-        else:
-            pdf_file.save(pdf_path)
-            _save_pdf_first_page_image(pdf_path, dpi_for_preset(preset), image_path)
+        try:
+            if preview_manifest and os.path.exists(preview_manifest.get("pdf_path", "")) and os.path.exists(preview_manifest.get("image_path", "")):
+                original_name = preview_manifest.get("original_name") or original_name
+                shutil.copyfile(preview_manifest["pdf_path"], pdf_path)
+                shutil.copyfile(preview_manifest["image_path"], image_path)
+                used_preview_ids.append(preview_id)
+            else:
+                pdf_file.save(pdf_path)
+                _save_pdf_first_page_image(pdf_path, dpi_for_preset(preset), image_path)
+        except Exception as exc:
+            logger.exception("PDFの保存または画像化に失敗: %s", original_name)
+            return jsonify({"error": f"{original_name} を読み込めませんでした: {exc}"}), 400
 
         files[file_id] = {"original_name": original_name, "path": pdf_path, "image_path": image_path, "dpi": dpi_for_preset(preset)}
         per_file_regions = None
         if region_mode == "per_file" and index < len(file_regions_payload):
             per_file_regions = parse_regions_payload(file_regions_payload[index])
         active_regions = per_file_regions or custom_regions
+        analyze_tasks.append((index, file_id, pdf_path, image_path, original_name, active_regions))
+
+    def _analyze_one(task):
+        idx, fid, ppath, ipath, oname, regs = task
         try:
-            row = analyze_pdf_to_row(pdf_path, original_name, preset, csv_info["entries"], active_regions, image_path=image_path)
+            return idx, analyze_pdf_to_row(ppath, oname, preset, csv_info["entries"], regs, image_path=ipath)
         except Exception as exc:
-            logger.exception("車検証PDF解析に失敗: %s", original_name)
-            row = {
-                "file_id": file_id,
-                "original_name": original_name,
+            logger.exception("車検証PDF解析に失敗: %s", oname)
+            fallback = {
+                "file_id": fid,
+                "original_name": oname,
                 "status": "needs_review",
                 "registration_number": "",
                 "expiry_date": "",
+                "first_registration_month": "",
+                "passenger_capacity": "",
+                "displacement": "",
                 "vehicle_id": "",
+                "vehicle_number": "",
                 "location": "",
                 "match_status": "unmatched",
                 "match_candidates": [],
                 "preset": preset,
-                "regions": active_regions or (all_presets().get(preset, {}).get("regions", {})),
+                "regions": regs or (all_presets().get(preset, {}).get("regions", {})),
                 "preview": "",
                 "candidate_texts": {},
                 "confidence": 0,
                 "message": f"解析中にエラーが発生しました: {exc}",
-        }
-        rows.append(row)
+            }
+            return idx, fallback
+
+    # PDF 単位で並列処理する。OCR 内部のスレッドプールと共有プールなので
+    # トータルの並列度は _OCR_WORKER_COUNT に自然に制限される。
+    rows = [None] * len(analyze_tasks)
+    if len(analyze_tasks) > 1:
+        max_pdf_workers = max(1, min(len(analyze_tasks), _OCR_WORKER_COUNT))
+        with ThreadPoolExecutor(max_workers=max_pdf_workers, thread_name_prefix="car_inspe_pdf") as pool:
+            for idx, row in pool.map(_analyze_one, analyze_tasks):
+                rows[idx] = row
+    elif analyze_tasks:
+        idx, row = _analyze_one(analyze_tasks[0])
+        rows[idx] = row
 
     manifest = {
         "session_id": session_id,
@@ -1070,16 +1617,21 @@ def api_reanalyze():
     custom_regions = parse_regions_payload(payload.get("regions"))
     if not preset and not custom_regions:
         return jsonify({"error": "プリセットを選ぶか、OCR範囲を指定してください。"}), 400
-    if not setup_tesseract():
-        return jsonify({"error": "Tesseractが利用できません。"}), 500
-    row = analyze_pdf_to_row(
-        file_info["path"],
-        file_info["original_name"],
-        preset,
-        manifest.get("csv", {}).get("entries", []),
-        custom_regions,
-        image_path=file_info.get("image_path"),
-    )
+    ok, reason = setup_tesseract_with_reason()
+    if not ok:
+        return jsonify({"error": f"OCRエンジン (Tesseract) を初期化できませんでした: {reason or '原因不明'}"}), 500
+    try:
+        row = analyze_pdf_to_row(
+            file_info["path"],
+            file_info["original_name"],
+            preset,
+            manifest.get("csv", {}).get("entries", []),
+            custom_regions,
+            image_path=file_info.get("image_path"),
+        )
+    except Exception as exc:
+        logger.exception("再OCRに失敗: %s", file_info.get("original_name"))
+        return jsonify({"error": f"再OCRに失敗しました: {exc}"}), 500
     return jsonify({"row": row})
 
 
@@ -1094,6 +1646,57 @@ def api_match():
     registration = payload.get("registration_number", "")
     match = match_vehicle(registration, manifest.get("csv", {}).get("entries", []))
     return jsonify({"match": match})
+
+
+def save_vehicle_record_from_row(row, source_path, output_filename):
+    contract_code = str(row.get("vehicle_id") or row.get("contract_code") or "").strip()
+    registration_number = clean_registration_number(row.get("registration_number", ""))
+    vehicle_number = normalize_vehicle_number(row.get("vehicle_number") or "")
+    if not vehicle_number:
+        vehicle_number = extract_suffix_digits(registration_number)
+    if not contract_code or not vehicle_number:
+        return None
+
+    actor = getattr(current_user, "username", "")
+    contract_row = upsert_vehicle_mapping(contract_code, vehicle_number, actor=actor)
+    site_name = row.get("location") or (contract_row.site_name if contract_row else "")
+
+    record = VehicleInspectionRecord.query.filter_by(
+        contract_code=contract_code,
+        vehicle_number=vehicle_number,
+    ).first()
+    if record is None:
+        record = VehicleInspectionRecord(contract_code=contract_code, vehicle_number=vehicle_number)
+        db.session.add(record)
+    elif record.stored_path and os.path.exists(record.stored_path):
+        try:
+            os.remove(record.stored_path)
+        except OSError:
+            logger.warning("古い車検証PDFを削除できませんでした: %s", record.stored_path, exc_info=True)
+
+    ensure_work_dir()
+    today_dir = os.path.join(CAR_INSPE_STORAGE_DIR, datetime.now().strftime("%Y%m"))
+    os.makedirs(today_dir, exist_ok=True)
+    stored_filename = sanitize_filename_part(
+        f"{contract_code}_{vehicle_number}_{output_filename}",
+        "vehicle_inspection.pdf",
+    )
+    stored_path = os.path.join(today_dir, stored_filename)
+    shutil.copyfile(source_path, stored_path)
+
+    record.registration_number = registration_number
+    record.expiry_date = parse_management_date(row.get("expiry_date"))
+    record.first_registration_month = normalize_first_registration_month(row.get("first_registration_month", ""))
+    record.passenger_capacity = normalize_passenger_capacity(row.get("passenger_capacity", ""))
+    record.displacement = normalize_displacement(row.get("displacement", ""))
+    record.site_name = site_name
+    record.original_filename = row.get("original_name", "")
+    record.stored_filename = output_filename
+    record.stored_path = stored_path
+    record.uploaded_by = actor
+    record.uploaded_at = datetime.utcnow()
+    record.source = "ocr"
+    return record
 
 
 @car_inspe_bp.route("/api/finalize", methods=["POST"])
@@ -1114,6 +1717,7 @@ def api_finalize():
         return jsonify({"error": "出力対象が選択されていません。"}), 400
 
     output_items = []
+    save_errors = []
     for row in selected_rows:
         file_id = os.path.basename(row.get("file_id", ""))
         file_info = manifest.get("files", {}).get(file_id)
@@ -1123,11 +1727,36 @@ def api_finalize():
             **row,
             "registration_number": clean_registration_number(row.get("registration_number", "")),
             "expiry_date": normalize_ocr_text(row.get("expiry_date", "")),
+            "first_registration_month": normalize_first_registration_month(row.get("first_registration_month", "")),
+            "passenger_capacity": normalize_passenger_capacity(row.get("passenger_capacity", "")),
+            "displacement": normalize_displacement(row.get("displacement", "")),
             "vehicle_id": row.get("vehicle_id", ""),
+            "vehicle_number": row.get("vehicle_number", ""),
             "location": row.get("location", ""),
         }
         filename = build_output_filename(normalized_row, template)
+        try:
+            saved = save_vehicle_record_from_row(normalized_row, file_info["path"], filename)
+        except Exception as exc:
+            logger.exception("車検証台帳の保存に失敗: %s", row.get("original_name", file_id))
+            save_errors.append(f"{row.get('original_name', file_id)}: {exc}")
+            continue
+        if saved is None:
+            save_errors.append(
+                f"{row.get('original_name', file_id)}: 契約コードと車両番号が両方そろっていません。"
+            )
         output_items.append((file_info["path"], filename))
+
+    if save_errors:
+        db.session.rollback()
+        return jsonify({"error": "台帳保存中にエラーが発生しました。\n" + "\n".join(save_errors)}), 400
+
+    try:
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception("車検証台帳のコミットに失敗")
+        return jsonify({"error": f"台帳の保存をコミットできませんでした: {exc}"}), 500
 
     if len(output_items) == 1:
         source_path, filename = output_items[0]
@@ -1153,7 +1782,123 @@ def api_finalize():
     return send_file_and_cleanup(zip_path, session_dir, as_attachment=True, download_name="vehicle_inspection_output.zip")
 
 
+@car_inspe_bp.route("/api/records", methods=["GET"])
+@login_required
+def api_records():
+    ensure_contract_master_synced()
+    q = normalize_ocr_text(request.args.get("q", ""))
+    status = str(request.args.get("status", "") or "").strip()
+    query = VehicleInspectionRecord.query
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            or_(
+                VehicleInspectionRecord.contract_code.ilike(like),
+                VehicleInspectionRecord.vehicle_number.ilike(like),
+                VehicleInspectionRecord.registration_number.ilike(like),
+                VehicleInspectionRecord.site_name.ilike(like),
+            )
+        )
+    records = query.order_by(VehicleInspectionRecord.expiry_date.asc(), VehicleInspectionRecord.contract_code.asc()).all()
+    today = datetime.now().strftime("%Y%m%d")
+    enriched = []
+    for record in records:
+        item = record.to_dict()
+        expiry = item.get("expiry_date") or ""
+        item["status"] = "unknown"
+        if expiry:
+            item["status"] = "expired" if expiry < today else "active"
+        if status and item["status"] != status:
+            continue
+        enriched.append(item)
+    return jsonify({
+        "records": enriched,
+        "count": len(enriched),
+        "summary": {
+            "contracts": SiteContractMaster.query.filter(SiteContractMaster.is_active.is_(True)).count(),
+            "records": VehicleInspectionRecord.query.count(),
+        },
+    })
+
+
+@car_inspe_bp.route("/api/records/<int:record_id>", methods=["PUT"])
+@login_required
+def api_update_record(record_id):
+    record = db.session.get(VehicleInspectionRecord, record_id)
+    if record is None:
+        return jsonify({"error": "対象データが見つかりません。"}), 404
+    data = request.get_json(silent=True) or {}
+    contract_code = str(data.get("contract_code", record.contract_code) or "").strip()
+    vehicle_number = normalize_vehicle_number(data.get("vehicle_number", record.vehicle_number))
+    if not contract_code or not vehicle_number:
+        return jsonify({"error": "契約コードと車両番号は必須です。"}), 400
+    duplicate = VehicleInspectionRecord.query.filter(
+        VehicleInspectionRecord.contract_code == contract_code,
+        VehicleInspectionRecord.vehicle_number == vehicle_number,
+        VehicleInspectionRecord.id != record.id,
+    ).first()
+    if duplicate:
+        return jsonify({"error": "同じ契約コードと車両番号の台帳が既にあります。"}), 409
+
+    record.contract_code = contract_code
+    record.vehicle_number = vehicle_number
+    record.registration_number = clean_registration_number(data.get("registration_number", record.registration_number))
+    record.expiry_date = parse_management_date(data.get("expiry_date", record.expiry_date))
+    record.first_registration_month = normalize_first_registration_month(data.get("first_registration_month", record.first_registration_month))
+    record.passenger_capacity = normalize_passenger_capacity(data.get("passenger_capacity", record.passenger_capacity))
+    record.displacement = normalize_displacement(data.get("displacement", record.displacement))
+    record.site_name = str(data.get("site_name", record.site_name) or "").strip()
+    record.notes = str(data.get("notes", record.notes) or "").strip()
+    upsert_vehicle_mapping(contract_code, vehicle_number, actor=getattr(current_user, "username", ""))
+    db.session.commit()
+    return jsonify({"success": True, "record": record.to_dict()})
+
+
+@car_inspe_bp.route("/api/records/<int:record_id>/download", methods=["GET"])
+@login_required
+def api_download_record_pdf(record_id):
+    record = db.session.get(VehicleInspectionRecord, record_id)
+    if record is None or not record.stored_path or not os.path.exists(record.stored_path):
+        return jsonify({"error": "PDFが見つかりません。"}), 404
+    return send_file(record.stored_path, as_attachment=True, download_name=record.stored_filename or os.path.basename(record.stored_path))
+
+
+@car_inspe_bp.route("/api/vehicle-mapping/import", methods=["POST"])
+@login_required
+def api_import_vehicle_mapping():
+    upload = request.files.get("file")
+    if not upload or not upload.filename:
+        return jsonify({"error": "CSVファイルを選択してください。"}), 400
+    try:
+        decoded, _encoding = detect_csv_encoding(upload.read())
+        rows = list(csv.reader(decoded.splitlines()))
+    except Exception as exc:
+        return jsonify({"error": f"CSVを読み込めませんでした: {exc}"}), 400
+
+    summary = {"total": 0, "updated": 0, "skipped": 0, "errors": []}
+    actor = getattr(current_user, "username", "")
+    for index, row in enumerate(rows[1:] if rows else [], start=2):
+        if not row or not any(str(cell or "").strip() for cell in row):
+            continue
+        summary["total"] += 1
+        contract_code = str(row[0] if len(row) > 0 else "").strip()
+        vehicle_number = normalize_vehicle_number(row[1] if len(row) > 1 else "")
+        contract_row = upsert_vehicle_mapping(contract_code, vehicle_number, actor=actor)
+        if contract_row is None:
+            summary["skipped"] += 1
+            summary["errors"].append({"row": index, "message": f"契約コード {contract_code} を更新できません。"})
+            continue
+        summary["updated"] += 1
+    db.session.commit()
+    return jsonify({"success": True, "summary": summary})
+
+
 @car_inspe_bp.route("/", methods=["GET"])
 @login_required
 def car_inspection():
-    return render_template("car_inspe.html", error=None)
+    mode = request.args.get("mode", "")
+    if mode == "read":
+        return render_template("car_inspe.html", error=None)
+    if mode == "manage":
+        return render_template("car_inspe_manage.html", error=None)
+    return render_template("car_inspe_home.html", error=None)

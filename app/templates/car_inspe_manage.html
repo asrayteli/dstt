@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  .vim-wrap { max-width: 1400px; margin: 0 auto; }
+  .vim-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 26px rgba(15, 23, 42, .06); }
+  .vim-btn { border-radius: 6px; border: 1px solid #cbd5e1; padding: .55rem .8rem; font-size: .84rem; font-weight: 700; }
+  .vim-btn-primary { background: #0369a1; border-color: #0369a1; color: #fff; }
+  .vim-input { width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; padding: .55rem .65rem; font-size: .86rem; }
+  .vim-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  .vim-table th { position: sticky; top: 0; background: #f8fafc; color: #475569; font-weight: 800; }
+  .vim-table th, .vim-table td { border-bottom: 1px solid #e2e8f0; padding: .6rem .7rem; text-align: left; white-space: nowrap; }
+  .vim-table tbody tr:hover { background: #f8fafc; }
+  .vim-badge { display: inline-flex; border-radius: 999px; padding: .16rem .5rem; font-size: .72rem; font-weight: 800; }
+  .vim-active { background: #dcfce7; color: #166534; }
+  .vim-expired { background: #fee2e2; color: #991b1b; }
+  .vim-unknown { background: #f1f5f9; color: #475569; }
+</style>
+
+<div class="vim-wrap space-y-5">
+  <section class="dstt-hero is-compact" style="background: linear-gradient(135deg, #075985 0%, #0f766e 100%);">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">MANAGEMENT</div>
+        <div>
+          <h1 class="dstt-hero-title">車検証管理</h1>
+          <p class="dstt-hero-subtitle">契約コード、車両番号、満了日、登録番号、車検証PDFをまとめて管理します。</p>
+        </div>
+        <div class="dstt-hero-actions">
+          <a class="dstt-hero-btn dstt-hero-btn-light" href="{{ url_for('car_inspe.car_inspection', mode='read') }}">読み取りへ</a>
+          <a class="dstt-hero-btn dstt-hero-btn-ghost" href="{{ url_for('car_inspe.car_inspection') }}">選択画面</a>
+          <button id="vim-open-map" type="button" class="dstt-hero-btn dstt-hero-btn-ghost">初回登録CSV</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+    <aside class="space-y-4">
+      <div class="vim-panel p-4 space-y-3">
+        <div class="text-sm font-bold text-slate-700">検索</div>
+        <input id="vim-q" class="vim-input" placeholder="契約コード / 車両番号 / 登録番号 / 現場名">
+        <select id="vim-status" class="vim-input">
+          <option value="">すべて</option>
+          <option value="active">有効</option>
+          <option value="expired">期限切れ</option>
+          <option value="unknown">満了日未登録</option>
+        </select>
+        <button id="vim-search" class="vim-btn vim-btn-primary w-full">検索</button>
+      </div>
+
+      <div class="vim-panel p-4 grid grid-cols-2 gap-3 text-sm">
+        <div><div class="text-xs text-slate-500">契約</div><div id="vim-s-contracts" class="text-xl font-bold text-slate-900">-</div></div>
+        <div><div class="text-xs text-slate-500">台帳</div><div id="vim-s-records" class="text-xl font-bold text-slate-900">-</div></div>
+      </div>
+    </aside>
+
+    <main class="vim-panel overflow-hidden">
+      <div class="flex items-center justify-between gap-3 border-b border-slate-200 p-4">
+        <div>
+          <div class="text-base font-bold text-slate-900">車両台帳</div>
+          <div id="vim-count" class="text-xs text-slate-500">読み込み中</div>
+        </div>
+        <button id="vim-refresh" class="vim-btn">更新</button>
+      </div>
+      <div id="vim-status" class="hidden border-b border-slate-200 px-4 py-2 text-sm"></div>
+      <div class="overflow-auto" style="max-height: 680px;">
+        <table class="vim-table">
+          <thead>
+            <tr>
+              <th>状態</th><th>契約コード</th><th>車両番号</th><th>満了日</th><th>登録番号</th><th>初度検査年月</th><th>乗車定員</th><th>排気量</th><th>現場名</th><th>PDF</th><th>編集</th>
+            </tr>
+          </thead>
+          <tbody id="vim-body"></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div id="vim-map-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/50 p-4">
+  <div class="w-full max-w-xl rounded-lg bg-white shadow-xl">
+    <div class="flex items-center justify-between border-b border-slate-200 p-4">
+      <div>
+        <div class="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">INITIAL IMPORT</div>
+        <div class="mt-1 font-bold text-slate-900">初回登録CSV</div>
+      </div>
+      <button type="button" id="vim-map-close" class="vim-btn">閉じる</button>
+    </div>
+    <div class="space-y-4 p-4">
+      <div class="rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+        1列目に契約コード、2列目に車両番号を入れたCSVを登録します。現場リストPLUSの契約マスタへ車両番号を保存します。
+      </div>
+      <input id="vim-map-file" type="file" accept=".csv" class="vim-input">
+      <button id="vim-map-upload" class="vim-btn vim-btn-primary w-full">車両番号を一括登録</button>
+      <div id="vim-map-result" class="text-sm leading-6 text-slate-600"></div>
+    </div>
+  </div>
+</div>
+
+<div id="vim-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/50 p-4">
+  <form id="vim-form" class="w-full max-w-3xl rounded-lg bg-white shadow-xl">
+    <div class="flex items-center justify-between border-b border-slate-200 p-4">
+      <div class="font-bold text-slate-900">台帳編集</div>
+      <button type="button" id="vim-close" class="vim-btn">閉じる</button>
+    </div>
+    <div class="grid gap-3 p-4 md:grid-cols-2">
+      <input type="hidden" name="id">
+      <label class="text-sm">契約コード<input name="contract_code" class="vim-input mt-1" required></label>
+      <label class="text-sm">車両番号<input name="vehicle_number" class="vim-input mt-1" required></label>
+      <label class="text-sm">満了日<input name="expiry_date" class="vim-input mt-1" placeholder="YYYYMMDD"></label>
+      <label class="text-sm">登録番号<input name="registration_number" class="vim-input mt-1"></label>
+      <label class="text-sm">初度検査年月<input name="first_registration_month" class="vim-input mt-1"></label>
+      <label class="text-sm">乗車定員<input name="passenger_capacity" class="vim-input mt-1"></label>
+      <label class="text-sm">排気量<input name="displacement" class="vim-input mt-1"></label>
+      <label class="text-sm md:col-span-2">現場名<input name="site_name" class="vim-input mt-1"></label>
+      <label class="text-sm md:col-span-2">メモ<textarea name="notes" class="vim-input mt-1" rows="3"></textarea></label>
+    </div>
+    <div class="flex justify-end gap-2 border-t border-slate-200 p-4">
+      <button type="button" id="vim-cancel" class="vim-btn">キャンセル</button>
+      <button class="vim-btn vim-btn-primary">保存</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const state = { records: [] };
+  const esc = (v) => { const d = document.createElement('div'); d.textContent = v == null ? '' : String(v); return d.innerHTML; };
+  const badge = (s) => s === 'expired' ? '<span class="vim-badge vim-expired">期限切れ</span>' : s === 'active' ? '<span class="vim-badge vim-active">有効</span>' : '<span class="vim-badge vim-unknown">未登録</span>';
+  function showStatus(text, kind) {
+    const el = $('vim-status');
+    if (!el) return;
+    if (!text) {
+      el.classList.add('hidden');
+      el.textContent = '';
+      return;
+    }
+    el.textContent = text;
+    el.classList.remove('hidden');
+    el.style.color = kind === 'error' ? '#b91c1c' : kind === 'success' ? '#15803d' : '#475569';
+    el.style.background = kind === 'error' ? '#fef2f2' : kind === 'success' ? '#ecfdf5' : '#f8fafc';
+  }
+  async function json(url, options = {}) {
+    let res;
+    try {
+      res = await fetch(url, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
+    } catch (netErr) {
+      throw new Error(`サーバーへの接続に失敗しました: ${netErr.message || netErr}`);
+    }
+    let data = {};
+    try { data = await res.json(); } catch (_) { data = {}; }
+    if (!res.ok) throw new Error(data.error || `処理に失敗しました (HTTP ${res.status})`);
+    return data;
+  }
+  async function load() {
+    const p = new URLSearchParams();
+    if ($('vim-q').value) p.set('q', $('vim-q').value);
+    if ($('vim-status').value) p.set('status', $('vim-status').value);
+    const data = await json(`/tools/car_inspe/api/records?${p.toString()}`);
+    state.records = data.records || [];
+    $('vim-count').textContent = `${state.records.length}件`;
+    $('vim-s-contracts').textContent = data.summary?.contracts ?? '-';
+    $('vim-s-records').textContent = data.summary?.records ?? '-';
+    $('vim-body').innerHTML = state.records.map((r) => `
+      <tr>
+        <td>${badge(r.status)}</td><td>${esc(r.contract_code)}</td><td>${esc(r.vehicle_number)}</td><td>${esc(r.expiry_date || '-')}</td>
+        <td>${esc(r.registration_number || '-')}</td><td>${esc(r.first_registration_month || '-')}</td><td>${esc(r.passenger_capacity || '-')}</td>
+        <td>${esc(r.displacement || '-')}</td><td>${esc(r.site_name || '-')}</td>
+        <td>${r.has_pdf ? `<a class="text-sky-700 font-bold" href="/tools/car_inspe/api/records/${r.id}/download">DL</a>` : '-'}</td>
+        <td><button class="vim-btn" data-edit="${r.id}">編集</button></td>
+      </tr>`).join('') || '<tr><td colspan="11" class="text-center text-slate-500">データがありません</td></tr>';
+    document.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => openEdit(Number(b.dataset.edit))));
+  }
+  function openEdit(id) {
+    const r = state.records.find((x) => x.id === id); if (!r) return;
+    const form = $('vim-form');
+    Object.keys(r).forEach((k) => { if (form.elements[k]) form.elements[k].value = r[k] || ''; });
+    form.elements.id.value = r.id;
+    $('vim-modal').classList.remove('hidden'); $('vim-modal').classList.add('flex');
+  }
+  function closeEdit() { $('vim-modal').classList.add('hidden'); $('vim-modal').classList.remove('flex'); }
+  function openMapModal() { $('vim-map-modal').classList.remove('hidden'); $('vim-map-modal').classList.add('flex'); }
+  function closeMapModal() { $('vim-map-modal').classList.add('hidden'); $('vim-map-modal').classList.remove('flex'); }
+  $('vim-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const form = ev.currentTarget;
+    const data = Object.fromEntries(new FormData(form).entries());
+    const id = data.id; delete data.id;
+    try {
+      await json(`/tools/car_inspe/api/records/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+      closeEdit();
+      showStatus('台帳を更新しました。', 'success');
+      await load();
+    } catch (e) {
+      showStatus(e.message || '台帳の更新に失敗しました。', 'error');
+    }
+  });
+  $('vim-map-upload').addEventListener('click', async () => {
+    const file = $('vim-map-file').files[0];
+    const result = $('vim-map-result');
+    if (!file) {
+      result.textContent = 'CSVファイルを選択してください。';
+      result.style.color = '#b91c1c';
+      return;
+    }
+    const fd = new FormData(); fd.append('file', file);
+    try {
+      const res = await fetch('/tools/car_inspe/api/vehicle-mapping/import', { method: 'POST', body: fd });
+      let data = {};
+      try { data = await res.json(); } catch (_) { data = {}; }
+      if (!res.ok) {
+        result.textContent = data.error || `登録に失敗しました (HTTP ${res.status})`;
+        result.style.color = '#b91c1c';
+        return;
+      }
+      result.style.color = '#15803d';
+      const errors = (data.summary?.errors || []).slice(0, 3).map((err) => `${err.row}行目: ${err.message}`).join(' / ');
+      result.textContent = `更新 ${data.summary.updated}件 / スキップ ${data.summary.skipped}件${errors ? ` / エラー: ${errors}` : ''}`;
+      await load();
+    } catch (e) {
+      result.textContent = `通信エラー: ${e.message || e}`;
+      result.style.color = '#b91c1c';
+    }
+  });
+  ['vim-search', 'vim-refresh'].forEach((id) => $(id).addEventListener('click', () => {
+    load().catch((e) => showStatus(e.message || '読み込みに失敗しました。', 'error'));
+  }));
+  ['vim-close', 'vim-cancel'].forEach((id) => $(id).addEventListener('click', closeEdit));
+  $('vim-open-map').addEventListener('click', openMapModal);
+  $('vim-map-close').addEventListener('click', closeMapModal);
+  load().catch((e) => showStatus(e.message || '読み込みに失敗しました。', 'error'));
+})();
+</script>
+{% endblock %}

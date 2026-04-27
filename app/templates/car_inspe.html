@@ -193,6 +193,18 @@
     border-color: #dc2626;
     background: rgba(220, 38, 38, .12);
   }
+  .ci-region-box.first_registration_month {
+    border-color: #0d9488;
+    background: rgba(13, 148, 136, .12);
+  }
+  .ci-region-box.passenger_capacity {
+    border-color: #0891b2;
+    background: rgba(8, 145, 178, .12);
+  }
+  .ci-region-box.displacement {
+    border-color: #16a34a;
+    background: rgba(22, 163, 74, .12);
+  }
   .ci-drag-box {
     position: absolute;
     border: 2px dashed #f59e0b;
@@ -269,6 +281,10 @@
           <h1 class="dstt-hero-title">車検証管理ツール</h1>
           <p class="dstt-hero-subtitle">車検証PDFを読み取り、CSVの車両台帳と照合。結果を確認・補正してから業務用ファイル名で出力します。</p>
         </div>
+        <div class="dstt-hero-actions">
+          <a class="dstt-hero-btn dstt-hero-btn-light" href="{{ url_for('car_inspe.car_inspection') }}">選択画面に戻る</a>
+          <a class="dstt-hero-btn dstt-hero-btn-ghost" href="{{ url_for('car_inspe.car_inspection', mode='manage') }}">管理画面へ</a>
+        </div>
       </div>
       <div class="dstt-hero-meta">
         <div class="dstt-hero-card">
@@ -298,7 +314,7 @@
             </div>
             <div class="ci-field">
               <label for="csvInput">車両台帳CSV</label>
-              <input id="csvInput" name="csv_file" type="file" accept=".csv" required>
+              <input id="csvInput" name="csv_file" type="file" accept=".csv">
             </div>
             <div class="ci-field">
               <label for="presetSelect">OCRプリセット</label>
@@ -385,6 +401,18 @@
             <label for="locationInput">現場名</label>
             <input id="locationInput" disabled>
           </div>
+          <div class="ci-field">
+            <label for="firstRegistrationInput">初度検査年月</label>
+            <input id="firstRegistrationInput" disabled>
+          </div>
+          <div class="ci-field">
+            <label for="passengerCapacityInput">乗車定員</label>
+            <input id="passengerCapacityInput" disabled>
+          </div>
+          <div class="ci-field">
+            <label for="displacementInput">排気量</label>
+            <input id="displacementInput" disabled>
+          </div>
         </div>
 
         <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -407,6 +435,33 @@
                   <input class="region-input" data-region="expiry_date" data-index="1" placeholder="y1" disabled>
                   <input class="region-input" data-region="expiry_date" data-index="2" placeholder="x2" disabled>
                   <input class="region-input" data-region="expiry_date" data-index="3" placeholder="y2" disabled>
+                </div>
+              </div>
+              <div>
+                <div class="ci-help font-semibold mb-1">初度検査年月</div>
+                <div class="ci-region-grid">
+                  <input class="region-input" data-region="first_registration_month" data-index="0" placeholder="x1" disabled>
+                  <input class="region-input" data-region="first_registration_month" data-index="1" placeholder="y1" disabled>
+                  <input class="region-input" data-region="first_registration_month" data-index="2" placeholder="x2" disabled>
+                  <input class="region-input" data-region="first_registration_month" data-index="3" placeholder="y2" disabled>
+                </div>
+              </div>
+              <div>
+                <div class="ci-help font-semibold mb-1">乗車定員</div>
+                <div class="ci-region-grid">
+                  <input class="region-input" data-region="passenger_capacity" data-index="0" placeholder="x1" disabled>
+                  <input class="region-input" data-region="passenger_capacity" data-index="1" placeholder="y1" disabled>
+                  <input class="region-input" data-region="passenger_capacity" data-index="2" placeholder="x2" disabled>
+                  <input class="region-input" data-region="passenger_capacity" data-index="3" placeholder="y2" disabled>
+                </div>
+              </div>
+              <div>
+                <div class="ci-help font-semibold mb-1">排気量</div>
+                <div class="ci-region-grid">
+                  <input class="region-input" data-region="displacement" data-index="0" placeholder="x1" disabled>
+                  <input class="region-input" data-region="displacement" data-index="1" placeholder="y1" disabled>
+                  <input class="region-input" data-region="displacement" data-index="2" placeholder="x2" disabled>
+                  <input class="region-input" data-region="displacement" data-index="3" placeholder="y2" disabled>
                 </div>
               </div>
             </div>
@@ -438,6 +493,9 @@
             <button id="nextPreviewBtn" type="button" class="ci-btn ci-btn-secondary" disabled>次のPDF</button>
             <button id="selectRegBtn" type="button" class="ci-btn ci-btn-secondary" disabled>登録番号を指定</button>
             <button id="selectExpiryBtn" type="button" class="ci-btn ci-btn-secondary" disabled>満了日を指定</button>
+            <button id="selectFirstRegBtn" type="button" class="ci-btn ci-btn-secondary" disabled>初度検査年月</button>
+            <button id="selectCapacityBtn" type="button" class="ci-btn ci-btn-secondary" disabled>乗車定員</button>
+            <button id="selectDisplacementBtn" type="button" class="ci-btn ci-btn-secondary" disabled>排気量</button>
             <button id="resetPreRegionsBtn" type="button" class="ci-btn ci-btn-secondary" disabled>プリセットに戻す</button>
           </div>
         </div>
@@ -477,6 +535,9 @@
   const expiryInput = $('expiryInput');
   const vehicleIdInput = $('vehicleIdInput');
   const locationInput = $('locationInput');
+  const firstRegistrationInput = $('firstRegistrationInput');
+  const passengerCapacityInput = $('passengerCapacityInput');
+  const displacementInput = $('displacementInput');
   const outputNameInput = $('outputNameInput');
   const candidateBox = $('candidateBox');
   const detailStatus = $('detailStatus');
@@ -488,6 +549,9 @@
   const savePresetBtn = $('savePresetBtn');
   const selectRegBtn = $('selectRegBtn');
   const selectExpiryBtn = $('selectExpiryBtn');
+  const selectFirstRegBtn = $('selectFirstRegBtn');
+  const selectCapacityBtn = $('selectCapacityBtn');
+  const selectDisplacementBtn = $('selectDisplacementBtn');
   const resetPreRegionsBtn = $('resetPreRegionsBtn');
   const prevPreviewBtn = $('prevPreviewBtn');
   const nextPreviewBtn = $('nextPreviewBtn');
@@ -499,6 +563,15 @@
   state.preSelectField = 'reg_number';
   state.preDrag = null;
   state.canManagePresets = false;
+  const OCR_FIELDS = ['reg_number', 'expiry_date', 'first_registration_month', 'passenger_capacity', 'displacement'];
+  const REQUIRED_OCR_FIELDS = ['reg_number', 'expiry_date'];
+  const OCR_FIELD_LABELS = {
+    reg_number: '登録番号',
+    expiry_date: '満了日',
+    first_registration_month: '初度検査年月',
+    passenger_capacity: '乗車定員',
+    displacement: '排気量',
+  };
 
   function setStatus(el, text, kind = '') {
     el.textContent = text || '';
@@ -578,7 +651,7 @@
   }
 
   function setInputsEnabled(enabled) {
-    [registrationInput, expiryInput, vehicleIdInput, locationInput].forEach((input) => input.disabled = !enabled);
+    [registrationInput, expiryInput, vehicleIdInput, locationInput, firstRegistrationInput, passengerCapacityInput, displacementInput].forEach((input) => input.disabled = !enabled);
     document.querySelectorAll('.region-input').forEach((input) => input.disabled = !enabled);
     reanalyzeBtn.disabled = !enabled;
     rematchBtn.disabled = !enabled;
@@ -595,9 +668,15 @@
   }
 
   function readRegions() {
-    const regions = { reg_number: [0, 0, 0, 0], expiry_date: [0, 0, 0, 0] };
+    const regions = {};
     document.querySelectorAll('.region-input').forEach((input) => {
-      regions[input.dataset.region][Number(input.dataset.index)] = Number(input.value || 0);
+      const region = input.dataset.region;
+      if (!regions[region]) regions[region] = [0, 0, 0, 0];
+      regions[region][Number(input.dataset.index)] = Number(input.value || 0);
+    });
+    Object.keys(regions).forEach((key) => {
+      const box = regions[key];
+      if (!(Number(box[2]) > Number(box[0]) && Number(box[3]) > Number(box[1]))) delete regions[key];
     });
     return regions;
   }
@@ -609,6 +688,9 @@
     }
     const regCandidates = (row.candidate_texts?.reg_number || []).slice(0, 4);
     const dateCandidates = (row.candidate_texts?.expiry_date || []).slice(0, 4);
+    const firstRegCandidates = (row.candidate_texts?.first_registration_month || []).slice(0, 4);
+    const capacityCandidates = (row.candidate_texts?.passenger_capacity || []).slice(0, 4);
+    const displacementCandidates = (row.candidate_texts?.displacement || []).slice(0, 4);
     const matches = row.match_candidates || [];
     candidateBox.innerHTML = `
       <div class="space-y-3">
@@ -616,6 +698,9 @@
           <div class="font-semibold text-slate-600 mb-1">OCR候補</div>
           <div>登録番号: ${regCandidates.length ? regCandidates.map(escapeHtml).join(' / ') : '-'}</div>
           <div>満了日: ${dateCandidates.length ? dateCandidates.map(escapeHtml).join(' / ') : '-'}</div>
+          <div>初度検査年月: ${firstRegCandidates.length ? firstRegCandidates.map(escapeHtml).join(' / ') : '-'}</div>
+          <div>乗車定員: ${capacityCandidates.length ? capacityCandidates.map(escapeHtml).join(' / ') : '-'}</div>
+          <div>排気量: ${displacementCandidates.length ? displacementCandidates.map(escapeHtml).join(' / ') : '-'}</div>
         </div>
         <div>
           <div class="font-semibold text-slate-600 mb-1">台帳候補</div>
@@ -639,11 +724,32 @@
     `;
     candidateBox.querySelectorAll('.match-pick').forEach((button) => {
       button.addEventListener('click', () => {
-        const match = matches[Number(button.dataset.index)];
-        if (!match) return;
-        vehicleIdInput.value = match.vehicle_id || '';
-        locationInput.value = match.location || '';
-        updateActiveFromInputs();
+        try {
+          const match = matches[Number(button.dataset.index)];
+          if (!match) {
+            setStatus(detailStatus, '採用対象の候補が見つかりません。', 'error');
+            return;
+          }
+          const row = currentRow();
+          if (!row) {
+            setStatus(detailStatus, '対象行が選択されていません。', 'error');
+            return;
+          }
+          row.vehicle_id = match.vehicle_id || '';
+          row.location = match.location || '';
+          row.match_status = 'matched';
+          row.match_suffix = match.suffix || row.match_suffix;
+          // 入力欄も即時反映してから selectRow で全体を再描画する。
+          vehicleIdInput.value = row.vehicle_id;
+          locationInput.value = row.location;
+          row.output_name = buildName(row);
+          row.status = row.registration_number && row.expiry_date && row.vehicle_id && row.location ? 'ready' : 'needs_review';
+          selectRow(state.activeIndex);
+          const label = match.vehicle_id ? `契約コード ${match.vehicle_id}` : '候補';
+          setStatus(detailStatus, `${label} を採用しました。`, 'success');
+        } catch (error) {
+          setStatus(detailStatus, `採用処理でエラーが発生しました: ${error.message || error}`, 'error');
+        }
       });
     });
   }
@@ -677,7 +783,7 @@
   function cloneRegions(regions) {
     if (!regions) return null;
     const output = {};
-    ['reg_number', 'expiry_date'].forEach((key) => {
+    OCR_FIELDS.forEach((key) => {
       if (Array.isArray(regions[key])) {
         output[key] = regions[key].map((value) => Number(value || 0));
       }
@@ -686,7 +792,7 @@
   }
 
   function hasCompleteRegions(regions) {
-    return ['reg_number', 'expiry_date'].every((key) => {
+    return REQUIRED_OCR_FIELDS.every((key) => {
       const box = regions?.[key];
       return Array.isArray(box) && box.length === 4 && Number(box[2]) > Number(box[0]) && Number(box[3]) > Number(box[1]);
     });
@@ -730,6 +836,9 @@
     const files = previewFiles();
     selectRegBtn.disabled = !enabled;
     selectExpiryBtn.disabled = !enabled;
+    selectFirstRegBtn.disabled = !enabled;
+    selectCapacityBtn.disabled = !enabled;
+    selectDisplacementBtn.disabled = !enabled;
     resetPreRegionsBtn.disabled = !enabled;
     prevPreviewBtn.disabled = !enabled || state.preFileIndex <= 0;
     nextPreviewBtn.disabled = !enabled || state.preFileIndex >= files.length - 1;
@@ -810,7 +919,7 @@
       previewRegions[state.preSelectField] = box.map((value) => Math.round(value));
       setActivePreRegions(sourceRegionsFromPreview(previewRegions));
       renderPreAnalyzePreview();
-      setStatus(uploadStatus, `${state.preSelectField === 'reg_number' ? '登録番号' : '満了日'}のOCR範囲を指定しました。`, 'success');
+      setStatus(uploadStatus, `${OCR_FIELD_LABELS[state.preSelectField] || state.preSelectField}のOCR範囲を指定しました。`, 'success');
     });
   }
 
@@ -872,6 +981,9 @@
     expiryInput.value = row.expiry_date || '';
     vehicleIdInput.value = row.vehicle_id || '';
     locationInput.value = row.location || '';
+    firstRegistrationInput.value = row.first_registration_month || '';
+    passengerCapacityInput.value = row.passenger_capacity || '';
+    displacementInput.value = row.displacement || '';
     outputNameInput.value = buildName(row);
     fillRegionInputs(row);
     renderCandidates(row);
@@ -888,6 +1000,9 @@
     row.expiry_date = expiryInput.value.trim();
     row.vehicle_id = vehicleIdInput.value.trim();
     row.location = locationInput.value.trim();
+    row.first_registration_month = firstRegistrationInput.value.trim();
+    row.passenger_capacity = passengerCapacityInput.value.trim();
+    row.displacement = displacementInput.value.trim();
     row.regions = readRegions();
     row.output_name = buildName(row);
     row.status = row.registration_number && row.expiry_date && row.vehicle_id && row.location ? 'ready' : 'needs_review';
@@ -895,19 +1010,27 @@
     renderRows();
   }
 
-  [registrationInput, expiryInput, vehicleIdInput, locationInput, filenameTemplate].forEach((input) => {
+  [registrationInput, expiryInput, vehicleIdInput, locationInput, firstRegistrationInput, passengerCapacityInput, displacementInput, filenameTemplate].forEach((input) => {
     input.addEventListener('input', updateActiveFromInputs);
   });
   document.querySelectorAll('.region-input').forEach((input) => input.addEventListener('input', updateActiveFromInputs));
 
   async function loadPresets() {
-    const response = await fetch('/tools/car_inspe/api/presets');
+    let response;
+    try {
+      response = await fetch('/tools/car_inspe/api/presets');
+    } catch (netErr) {
+      throw new Error(`プリセットの取得に失敗しました: ${netErr.message || netErr}`);
+    }
+    if (!response.ok) {
+      throw new Error(`プリセットの取得に失敗しました (HTTP ${response.status})`);
+    }
     const data = await response.json();
     const options = ['<option value="">手動指定</option>'].concat(
-      data.presets.map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}${preset.custom ? '（管理者）' : ''}</option>`)
+      (data.presets || []).map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}${preset.custom ? '（管理者）' : ''}</option>`)
     );
     presetSelect.innerHTML = options.join('');
-    state.presets = Object.fromEntries(data.presets.map((preset) => [preset.name, preset]));
+    state.presets = Object.fromEntries((data.presets || []).map((preset) => [preset.name, preset]));
     state.canManagePresets = Boolean(data.can_manage);
     if (data.default) presetSelect.value = data.default;
     savePresetBtn.title = state.canManagePresets ? '' : 'プリセット保存は管理者のみ利用できます。';
@@ -958,6 +1081,16 @@
     state.preSelectField = 'expiry_date';
     setStatus(uploadStatus, '満了日の範囲をドラッグしてください。');
   });
+  [
+    [selectFirstRegBtn, 'first_registration_month'],
+    [selectCapacityBtn, 'passenger_capacity'],
+    [selectDisplacementBtn, 'displacement'],
+  ].forEach(([button, field]) => {
+    button.addEventListener('click', () => {
+      state.preSelectField = field;
+      setStatus(uploadStatus, `${OCR_FIELD_LABELS[field]}の範囲をドラッグしてください。`);
+    });
+  });
   resetPreRegionsBtn.addEventListener('click', () => {
     if (!state.prePreview) return;
     setActivePreRegions(state.prePreview.regions);
@@ -1001,23 +1134,49 @@
     } else if (state.preAnalyzeRegions) {
       formData.append('regions', JSON.stringify(state.preAnalyzeRegions));
     }
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    if (analyzeBtn) analyzeBtn.disabled = true;
     try {
-      const response = await fetch('/tools/car_inspe/api/analyze', { method: 'POST', body: formData });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || '解析に失敗しました。');
+      let response;
+      try {
+        response = await fetch('/tools/car_inspe/api/analyze', { method: 'POST', body: formData });
+      } catch (netErr) {
+        throw new Error(`サーバーへの接続に失敗しました: ${netErr.message || netErr}`);
+      }
+      let data = {};
+      try {
+        data = await response.json();
+      } catch (parseErr) {
+        if (!response.ok) {
+          throw new Error(`解析に失敗しました (HTTP ${response.status})`);
+        }
+        throw new Error(`サーバー応答を解釈できませんでした: ${parseErr.message || parseErr}`);
+      }
+      if (!response.ok) throw new Error(data.error || `解析に失敗しました (HTTP ${response.status})`);
       state.sessionId = data.session_id;
       state.rows = data.rows || [];
       state.defaultTemplate = data.filename_template || state.defaultTemplate;
       filenameTemplate.value = state.defaultTemplate;
       csvSummary.textContent = `${data.csv.count}件 / 文字コード ${data.csv.encoding} / ${data.csv.has_header ? '列名あり' : '列名なし'}`;
-      setStatus(uploadStatus, '解析が完了しました。', 'success');
+      const reviewCount = state.rows.filter((row) => row.status !== 'ready').length;
+      if (reviewCount) {
+        setStatus(uploadStatus, `解析が完了しました（${reviewCount}件は要確認）。`, 'success');
+      } else {
+        setStatus(uploadStatus, '解析が完了しました。', 'success');
+      }
       renderRows();
       selectRow(0);
       if (modeSelect.value === 'auto') {
-        await finalize();
+        try {
+          await finalize();
+        } catch (autoErr) {
+          setStatus(uploadStatus, autoErr.message || '出力に失敗しました。', 'error');
+        }
       }
     } catch (error) {
-      setStatus(uploadStatus, error.message, 'error');
+      setStatus(uploadStatus, error.message || '解析に失敗しました。', 'error');
+    } finally {
+      if (analyzeBtn) analyzeBtn.disabled = false;
     }
   });
 
@@ -1103,18 +1262,33 @@
       state.rows[index].output_name = buildName(state.rows[index]);
     });
     setStatus(uploadStatus, '出力を作成しています...');
-    const response = await fetch('/tools/car_inspe/api/finalize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: state.sessionId,
-        rows: state.rows,
-        filename_template: filenameTemplate.value || state.defaultTemplate,
-      }),
-    });
+    let response;
+    try {
+      response = await fetch('/tools/car_inspe/api/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: state.sessionId,
+          rows: state.rows,
+          filename_template: filenameTemplate.value || state.defaultTemplate,
+        }),
+      });
+    } catch (error) {
+      throw new Error(`サーバーへの接続に失敗しました: ${error.message || error}`);
+    }
     if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.error || '出力に失敗しました。');
+      let detail = '';
+      try {
+        const data = await response.json();
+        detail = data?.error || '';
+      } catch (_) {
+        try {
+          detail = (await response.text()).slice(0, 400);
+        } catch (_) {
+          detail = '';
+        }
+      }
+      throw new Error(detail || `出力に失敗しました (HTTP ${response.status})`);
     }
     const blob = await response.blob();
     const disposition = response.headers.get('Content-Disposition') || '';
@@ -1132,10 +1306,13 @@
   }
 
   downloadBtn.addEventListener('click', async () => {
+    downloadBtn.disabled = true;
     try {
       await finalize();
     } catch (error) {
-      setStatus(uploadStatus, error.message, 'error');
+      setStatus(uploadStatus, error.message || '出力に失敗しました。', 'error');
+    } finally {
+      downloadBtn.disabled = state.rows.length === 0;
     }
   });
 

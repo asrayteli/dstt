@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto space-y-6">
+  <section class="dstt-hero" style="background: linear-gradient(135deg, #0f766e 0%, #0369a1 55%, #7c3aed 100%);">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">VEHICLE CERTIFICATE</div>
+        <div>
+          <h1 class="dstt-hero-title">車検証管理ツール</h1>
+          <p class="dstt-hero-subtitle">車検証PDFの読み取り、契約コードとの紐づけ、満了日とPDF原本の管理をひとつの画面から扱います。</p>
+        </div>
+        <div class="dstt-hero-actions">
+          <a class="dstt-hero-btn dstt-hero-btn-light" href="{{ url_for('car_inspe.car_inspection', mode='manage') }}">管理ページ</a>
+          <a class="dstt-hero-btn dstt-hero-btn-ghost" href="{{ url_for('car_inspe.car_inspection', mode='read') }}">車検証読み取り</a>
+        </div>
+      </div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">DATABASE</div>
+          <div class="dstt-hero-card-value">契約コード + 車両番号</div>
+          <div class="dstt-hero-card-note">内部IDを主キーにして、業務キーは一意制約として管理します。</div>
+        </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">PDF STORAGE</div>
+          <div class="dstt-hero-card-value">恒久保存</div>
+          <div class="dstt-hero-card-note">登録済みPDFは管理ページからいつでもダウンロードできます。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="grid gap-4 md:grid-cols-2">
+    <a href="{{ url_for('car_inspe.car_inspection', mode='manage') }}" class="block rounded-lg border border-slate-200 bg-white p-6 shadow-sm hover:border-sky-300 hover:shadow-md">
+      <div class="text-sm font-semibold text-sky-700">管理ページ</div>
+      <div class="mt-2 text-2xl font-semibold text-slate-900">台帳を見る・修正する</div>
+      <p class="mt-3 text-sm leading-6 text-slate-600">満了日、登録番号、型式、PDF原本、契約コードと車両番号の紐づけを管理します。</p>
+    </a>
+    <a href="{{ url_for('car_inspe.car_inspection', mode='read') }}" class="block rounded-lg border border-slate-200 bg-white p-6 shadow-sm hover:border-orange-300 hover:shadow-md">
+      <div class="text-sm font-semibold text-orange-700">車検証読み取り</div>
+      <div class="mt-2 text-2xl font-semibold text-slate-900">PDFを読み取って登録する</div>
+      <p class="mt-3 text-sm leading-6 text-slate-600">CSVなしで台帳照合します。初回登録や補正が必要な場合だけ管理ページで整えます。</p>
+    </a>
+  </div>
+</div>
+{% endblock %}

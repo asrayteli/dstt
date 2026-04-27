@@ -233,6 +233,7 @@ def _serialize_site(site: Site, *, include_inactive_branches: bool) -> dict:
             continue
         branch["contract_code"] = row.contract_code
         branch["segment"] = row.segment
+        branch["vehicle_number"] = row.vehicle_number or ""
         branch["dedicated_employee_number"] = row.dedicated_employee_number or ""
         branch["dedicated_employee_name"] = row.dedicated_employee_name or ""
     payload["has_branches"] = bool(payload["branch_count"])
@@ -833,6 +834,23 @@ def api_contract_master_set_segment(contract_code: str):
     return jsonify({"success": True, "item": _serialize_contract_master_row(row)})
 
 
+@siteplus_bp.route("/api/contract-master/<contract_code>/vehicle-number", methods=["PUT"])
+@login_required
+def api_contract_master_set_vehicle_number(contract_code: str):
+    ensure_contract_master_synced()
+    row = db.session.get(SiteContractMaster, str(contract_code or "").strip())
+    if row is None:
+        abort(404)
+
+    data = request.get_json(silent=True) or {}
+    vehicle_number = str(data.get("vehicle_number", "") or "").strip()
+    row.vehicle_number = vehicle_number or None
+    row.vehicle_number_updated_by = _user_id()
+    row.vehicle_number_updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({"success": True, "item": _serialize_contract_master_row(row)})
+
+
 @siteplus_bp.route("/api/sites/<int:site_row_id>/segments", methods=["PUT"])
 @login_required
 def api_site_set_segments(site_row_id: int):
@@ -1151,6 +1169,7 @@ def api_import_site_table():
         "segment_created": 0,
         "segment_updated": 0,
         "segment_skipped": 0,
+        "vehicle_number_updated": 0,
         "errors": [],
     }
 
@@ -1260,6 +1279,21 @@ def api_import_site_table():
     summary["segment_created"] = segment_summary["created"]
     summary["segment_updated"] = segment_summary["updated"]
     summary["segment_skipped"] = segment_summary["skipped"]
+    for row in rows[1:]:
+        if len(row) < 8:
+            continue
+        contract_code = str(row[0] or "").strip()
+        vehicle_number = str(row[7] or "").strip()
+        if not contract_code or not vehicle_number:
+            continue
+        master_row = db.session.get(SiteContractMaster, contract_code)
+        if master_row is None:
+            continue
+        if master_row.vehicle_number != vehicle_number:
+            master_row.vehicle_number = vehicle_number
+            master_row.vehicle_number_updated_by = actor
+            master_row.vehicle_number_updated_at = datetime.utcnow()
+            summary["vehicle_number_updated"] += 1
     db.session.commit()
     return jsonify({"success": True, "summary": summary})
 

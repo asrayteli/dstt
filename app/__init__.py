@@ -84,6 +84,20 @@ def _ensure_access_control_schema(app):
             if "office_code" not in site_cols:
                 alters.append("ALTER TABLE sites ADD COLUMN office_code VARCHAR(20)")
 
+        if "site_contract_master" in inspector.get_table_names():
+            contract_cols = {c["name"] for c in inspector.get_columns("site_contract_master")}
+            if "vehicle_number" not in contract_cols:
+                alters.append("ALTER TABLE site_contract_master ADD COLUMN vehicle_number VARCHAR(40)")
+            if "vehicle_number_updated_by" not in contract_cols:
+                alters.append("ALTER TABLE site_contract_master ADD COLUMN vehicle_number_updated_by VARCHAR(80)")
+            if "vehicle_number_updated_at" not in contract_cols:
+                alters.append("ALTER TABLE site_contract_master ADD COLUMN vehicle_number_updated_at DATETIME")
+
+        if "vehicle_inspection_records" in inspector.get_table_names():
+            vehicle_inspection_cols = {c["name"] for c in inspector.get_columns("vehicle_inspection_records")}
+            if "model_type" in vehicle_inspection_cols:
+                alters.append("ALTER TABLE vehicle_inspection_records DROP COLUMN model_type")
+
         if alters:
             with db.engine.begin() as conn:
                 for sql in alters:
@@ -192,8 +206,16 @@ def create_app(test_config=None):
             raise
 
     try:
-        from .tools.car_inspe import car_inspe_bp
+        from .tools.car_inspe import car_inspe_bp, warmup_tesseract
         app.register_blueprint(car_inspe_bp)
+        # Tesseract をバックグラウンドで予熱し、初回 OCR の体感速度を改善する。
+        if not app.config.get("TESTING"):
+            import threading as _threading
+            _threading.Thread(
+                target=warmup_tesseract,
+                name="car_inspe_tesseract_warmup",
+                daemon=True,
+            ).start()
     except ModuleNotFoundError:
         if not app.config.get("TESTING"):
             raise
