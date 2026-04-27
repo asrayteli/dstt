@@ -1278,9 +1278,10 @@
     }
     if (!response.ok) {
       let detail = '';
+      let errorData = {};
       try {
-        const data = await response.json();
-        detail = data?.error || '';
+        errorData = await response.json();
+        detail = errorData?.error || '';
       } catch (_) {
         try {
           detail = (await response.text()).slice(0, 400);
@@ -1288,7 +1289,29 @@
           detail = '';
         }
       }
-      throw new Error(detail || `出力に失敗しました (HTTP ${response.status})`);
+      if (response.status === 409 && errorData?.requires_confirmation) {
+        const missing = (errorData.missing_contracts || []).join(', ');
+        if (!window.confirm(`現場リストPLUSに無い契約コードです: ${missing}\n確認して台帳へ保存しますか？`)) {
+          throw new Error('現場リストPLUS未連携の保存をキャンセルしました。');
+        }
+        response = await fetch('/tools/car_inspe/api/finalize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: state.sessionId,
+            rows: state.rows,
+            filename_template: filenameTemplate.value || state.defaultTemplate,
+            confirm_unlinked_sites: true,
+          }),
+        });
+        if (!response.ok) {
+          let retryDetail = '';
+          try { retryDetail = (await response.json())?.error || ''; } catch (_) {}
+          throw new Error(retryDetail || `出力に失敗しました (HTTP ${response.status})`);
+        }
+      } else {
+        throw new Error(detail || `出力に失敗しました (HTTP ${response.status})`);
+      }
     }
     const blob = await response.blob();
     const disposition = response.headers.get('Content-Disposition') || '';

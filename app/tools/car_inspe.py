@@ -1151,6 +1151,55 @@ def upsert_vehicle_mapping(contract_code, vehicle_number, *, actor=""):
     return row
 
 
+def siteplus_contract_for_code(contract_code):
+    contract_code = str(contract_code or "").strip()
+    if not contract_code:
+        return None
+    ensure_contract_master_synced()
+    row = db.session.get(SiteContractMaster, contract_code)
+    if row is None or not row.is_active:
+        return None
+    return row
+
+
+def serialize_siteplus_contract(row):
+    if row is None:
+        return None
+    return {
+        "contract_code": row.contract_code,
+        "site_id": row.site_id,
+        "site_branch": row.site_branch,
+        "site_name": row.site_name,
+        "site_manager_id": row.site_manager_id,
+        "site_manager_name": row.site_manager_name,
+        "vehicle_number": row.vehicle_number or "",
+        "segment": row.segment or "",
+        "is_active": bool(row.is_active),
+    }
+
+
+def missing_siteplus_contract_response(contract_codes):
+    missing = sorted({str(code or "").strip() for code in contract_codes if str(code or "").strip()})
+    return jsonify({
+        "error": "現場リストPLUSに存在しない契約コードです。確認して保存する場合は再実行してください。",
+        "requires_confirmation": True,
+        "missing_contracts": missing,
+    }), 409
+
+
+def enrich_vehicle_record(record):
+    item = record.to_dict()
+    siteplus_row = siteplus_contract_for_code(record.contract_code)
+    item["siteplus_linked"] = siteplus_row is not None
+    item["siteplus_contract"] = serialize_siteplus_contract(siteplus_row)
+    if siteplus_row is not None:
+        item["site_name"] = siteplus_row.site_name or item.get("site_name", "")
+        item["siteplus_vehicle_number"] = siteplus_row.vehicle_number or ""
+    else:
+        item["siteplus_vehicle_number"] = ""
+    return item
+
+
 def match_vehicle(registration, csv_entries):
     registration = clean_registration_number(registration)
     suffix = extract_suffix_digits(registration)
@@ -1648,7 +1697,7 @@ def api_match():
     return jsonify({"match": match})
 
 
-def save_vehicle_record_from_row(row, source_path, output_filename):
+def save_vehicle_record_from_row(row, source_path, output_filename, *, allow_unlinked_site=False):
     contract_code = str(row.get("vehicle_id") or row.get("contract_code") or "").strip()
     registration_number = clean_registration_number(row.get("registration_number", ""))
     vehicle_number = normalize_vehicle_number(row.get("vehicle_number") or "")
@@ -1659,7 +1708,9 @@ def save_vehicle_record_from_row(row, source_path, output_filename):
 
     actor = getattr(current_user, "username", "")
     contract_row = upsert_vehicle_mapping(contract_code, vehicle_number, actor=actor)
-    site_name = row.get("location") or (contract_row.site_name if contract_row else "")
+    if contract_row is None and not allow_unlinked_site:
+        raise ValueError(f"現場リストPLUSに契約コード {contract_code} がありません")
+    site_name = (contract_row.site_name if contract_row else "") or row.get("location") or ""
 
     record = VehicleInspectionRecord.query.filter_by(
         contract_code=contract_code,
@@ -1695,7 +1746,7 @@ def save_vehicle_record_from_row(row, source_path, output_filename):
     record.stored_path = stored_path
     record.uploaded_by = actor
     record.uploaded_at = datetime.utcnow()
-    record.source = "ocr"
+    record.source = "ocr" if contract_row is not None else "ocr_unlinked"
     return record
 
 
@@ -1715,6 +1766,15 @@ def api_finalize():
     selected_rows = [row for row in rows if row.get("selected", True)]
     if not selected_rows:
         return jsonify({"error": "出力対象が選択されていません。"}), 400
+
+    allow_unlinked_site = bool(payload.get("confirm_unlinked_sites") or payload.get("confirm_missing_site"))
+    missing_contracts = []
+    for row in selected_rows:
+        contract_code = str(row.get("vehicle_id") or row.get("contract_code") or "").strip()
+        if contract_code and siteplus_contract_for_code(contract_code) is None:
+            missing_contracts.append(contract_code)
+    if missing_contracts and not allow_unlinked_site:
+        return missing_siteplus_contract_response(missing_contracts)
 
     output_items = []
     save_errors = []
@@ -1736,7 +1796,12 @@ def api_finalize():
         }
         filename = build_output_filename(normalized_row, template)
         try:
-            saved = save_vehicle_record_from_row(normalized_row, file_info["path"], filename)
+            saved = save_vehicle_record_from_row(
+                normalized_row,
+                file_info["path"],
+                filename,
+                allow_unlinked_site=allow_unlinked_site,
+            )
         except Exception as exc:
             logger.exception("車検証台帳の保存に失敗: %s", row.get("original_name", file_id))
             save_errors.append(f"{row.get('original_name', file_id)}: {exc}")
@@ -1803,7 +1868,7 @@ def api_records():
     today = datetime.now().strftime("%Y%m%d")
     enriched = []
     for record in records:
-        item = record.to_dict()
+        item = enrich_vehicle_record(record)
         expiry = item.get("expiry_date") or ""
         item["status"] = "unknown"
         if expiry:
@@ -1819,6 +1884,76 @@ def api_records():
             "records": VehicleInspectionRecord.query.count(),
         },
     })
+
+
+@car_inspe_bp.route("/api/site-contracts", methods=["GET"])
+@login_required
+def api_site_contracts():
+    ensure_contract_master_synced()
+    q = normalize_ocr_text(request.args.get("q", ""))
+    try:
+        limit = int(request.args.get("limit", 30) or 30)
+    except (TypeError, ValueError):
+        limit = 30
+    limit = min(max(limit, 1), 100)
+    query = SiteContractMaster.query.filter(SiteContractMaster.is_active.is_(True))
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            or_(
+                SiteContractMaster.contract_code.ilike(like),
+                SiteContractMaster.site_name.ilike(like),
+                SiteContractMaster.vehicle_number.ilike(like),
+                SiteContractMaster.site_manager_name.ilike(like),
+            )
+        )
+    rows = query.order_by(SiteContractMaster.contract_code.asc()).limit(limit).all()
+    return jsonify({
+        "contracts": [serialize_siteplus_contract(row) for row in rows],
+        "count": len(rows),
+    })
+
+
+@car_inspe_bp.route("/api/records", methods=["POST"])
+@login_required
+def api_create_record():
+    data = request.get_json(silent=True) or {}
+    contract_code = str(data.get("contract_code", "") or "").strip()
+    vehicle_number = normalize_vehicle_number(data.get("vehicle_number", ""))
+    if not contract_code or not vehicle_number:
+        return jsonify({"error": "契約コードと車両番号は必須です。"}), 400
+
+    duplicate = VehicleInspectionRecord.query.filter_by(
+        contract_code=contract_code,
+        vehicle_number=vehicle_number,
+    ).first()
+    if duplicate:
+        return jsonify({"error": "同じ契約コードと車両番号の台帳が既にあります。"}), 409
+
+    siteplus_row = siteplus_contract_for_code(contract_code)
+    if siteplus_row is None and not data.get("confirm_missing_site"):
+        return missing_siteplus_contract_response([contract_code])
+
+    actor = getattr(current_user, "username", "")
+    if siteplus_row is not None:
+        upsert_vehicle_mapping(contract_code, vehicle_number, actor=actor)
+
+    record = VehicleInspectionRecord(
+        contract_code=contract_code,
+        vehicle_number=vehicle_number,
+        registration_number=clean_registration_number(data.get("registration_number", "")),
+        expiry_date=parse_management_date(data.get("expiry_date", "")),
+        first_registration_month=normalize_first_registration_month(data.get("first_registration_month", "")),
+        passenger_capacity=normalize_passenger_capacity(data.get("passenger_capacity", "")),
+        displacement=normalize_displacement(data.get("displacement", "")),
+        site_name=(siteplus_row.site_name if siteplus_row else str(data.get("site_name", "") or "").strip()),
+        notes=str(data.get("notes", "") or "").strip(),
+        uploaded_by=actor,
+        source="manual" if siteplus_row is not None else "manual_unlinked",
+    )
+    db.session.add(record)
+    db.session.commit()
+    return jsonify({"success": True, "record": enrich_vehicle_record(record)})
 
 
 @car_inspe_bp.route("/api/records/<int:record_id>", methods=["PUT"])
@@ -1840,6 +1975,10 @@ def api_update_record(record_id):
     if duplicate:
         return jsonify({"error": "同じ契約コードと車両番号の台帳が既にあります。"}), 409
 
+    siteplus_row = siteplus_contract_for_code(contract_code)
+    if siteplus_row is None and not data.get("confirm_missing_site"):
+        return missing_siteplus_contract_response([contract_code])
+
     record.contract_code = contract_code
     record.vehicle_number = vehicle_number
     record.registration_number = clean_registration_number(data.get("registration_number", record.registration_number))
@@ -1847,11 +1986,33 @@ def api_update_record(record_id):
     record.first_registration_month = normalize_first_registration_month(data.get("first_registration_month", record.first_registration_month))
     record.passenger_capacity = normalize_passenger_capacity(data.get("passenger_capacity", record.passenger_capacity))
     record.displacement = normalize_displacement(data.get("displacement", record.displacement))
-    record.site_name = str(data.get("site_name", record.site_name) or "").strip()
+    record.site_name = (siteplus_row.site_name if siteplus_row else str(data.get("site_name", record.site_name) or "").strip())
     record.notes = str(data.get("notes", record.notes) or "").strip()
-    upsert_vehicle_mapping(contract_code, vehicle_number, actor=getattr(current_user, "username", ""))
+    if siteplus_row is not None:
+        upsert_vehicle_mapping(contract_code, vehicle_number, actor=getattr(current_user, "username", ""))
+        if record.source and record.source.endswith("_unlinked"):
+            record.source = record.source.replace("_unlinked", "")
+    elif not (record.source or "").endswith("_unlinked"):
+        record.source = f"{record.source or 'manual'}_unlinked"
     db.session.commit()
-    return jsonify({"success": True, "record": record.to_dict()})
+    return jsonify({"success": True, "record": enrich_vehicle_record(record)})
+
+
+@car_inspe_bp.route("/api/records/<int:record_id>", methods=["DELETE"])
+@login_required
+def api_delete_record(record_id):
+    record = db.session.get(VehicleInspectionRecord, record_id)
+    if record is None:
+        return jsonify({"error": "対象データが見つかりません。"}), 404
+    stored_path = record.stored_path
+    db.session.delete(record)
+    db.session.commit()
+    if stored_path and os.path.exists(stored_path):
+        try:
+            os.remove(stored_path)
+        except OSError:
+            logger.warning("車検証PDFを削除できませんでした: %s", stored_path, exc_info=True)
+    return jsonify({"success": True})
 
 
 @car_inspe_bp.route("/api/records/<int:record_id>/download", methods=["GET"])

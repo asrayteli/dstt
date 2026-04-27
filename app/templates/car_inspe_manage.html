@@ -6,6 +6,7 @@
   .vim-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 26px rgba(15, 23, 42, .06); }
   .vim-btn { border-radius: 6px; border: 1px solid #cbd5e1; padding: .55rem .8rem; font-size: .84rem; font-weight: 700; }
   .vim-btn-primary { background: #0369a1; border-color: #0369a1; color: #fff; }
+  .vim-btn-danger { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
   .vim-input { width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; padding: .55rem .65rem; font-size: .86rem; }
   .vim-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
   .vim-table th { position: sticky; top: 0; background: #f8fafc; color: #475569; font-weight: 800; }
@@ -15,13 +16,21 @@
   .vim-active { background: #dcfce7; color: #166534; }
   .vim-expired { background: #fee2e2; color: #991b1b; }
   .vim-unknown { background: #f1f5f9; color: #475569; }
+  .vim-linked { background: #e0f2fe; color: #075985; }
+  .vim-unlinked { background: #fef3c7; color: #92400e; }
+  .vim-modal-form { max-height: calc(100vh - 2rem); display: flex; flex-direction: column; }
+  .vim-form-body { overflow-y: auto; }
+  .vim-contract-list { display: grid; gap: 6px; max-height: 180px; overflow: auto; }
+  .vim-contract-option { width: 100%; display: block; border: 1px solid #cfe1f6; border-radius: 10px; background: #fff; color: #18324c; cursor: pointer; padding: 8px 10px; text-align: left; font-size: .82rem; }
+  .vim-contract-option:hover { border-color: #7dd3fc; background: #f0f9ff; }
+  .vim-contract-empty { color: #6b7280; font-size: 12px; padding: 4px 2px; }
 </style>
 
 <div class="vim-wrap space-y-5">
   <section class="dstt-hero is-compact" style="background: linear-gradient(135deg, #075985 0%, #0f766e 100%);">
     <div class="dstt-hero-grid">
       <div class="dstt-hero-copy">
-        <div class="dstt-hero-pill">MANAGEMENT</div>
+        <div class="dstt-hero-pill">管理</div>
         <div>
           <h1 class="dstt-hero-title">車検証管理</h1>
           <p class="dstt-hero-subtitle">契約コード、車両番号、満了日、登録番号、車検証PDFをまとめて管理します。</p>
@@ -29,6 +38,7 @@
         <div class="dstt-hero-actions">
           <a class="dstt-hero-btn dstt-hero-btn-light" href="{{ url_for('car_inspe.car_inspection', mode='read') }}">読み取りへ</a>
           <a class="dstt-hero-btn dstt-hero-btn-ghost" href="{{ url_for('car_inspe.car_inspection') }}">選択画面</a>
+          <button id="vim-add-record" type="button" class="dstt-hero-btn dstt-hero-btn-ghost">台帳追加</button>
           <button id="vim-open-map" type="button" class="dstt-hero-btn dstt-hero-btn-ghost">初回登録CSV</button>
         </div>
       </div>
@@ -40,7 +50,7 @@
       <div class="vim-panel p-4 space-y-3">
         <div class="text-sm font-bold text-slate-700">検索</div>
         <input id="vim-q" class="vim-input" placeholder="契約コード / 車両番号 / 登録番号 / 現場名">
-        <select id="vim-status" class="vim-input">
+        <select id="vim-status-filter" class="vim-input">
           <option value="">すべて</option>
           <option value="active">有効</option>
           <option value="expired">期限切れ</option>
@@ -63,7 +73,7 @@
         </div>
         <button id="vim-refresh" class="vim-btn">更新</button>
       </div>
-      <div id="vim-status" class="hidden border-b border-slate-200 px-4 py-2 text-sm"></div>
+      <div id="vim-message" class="hidden border-b border-slate-200 px-4 py-2 text-sm"></div>
       <div class="overflow-auto" style="max-height: 680px;">
         <table class="vim-table">
           <thead>
@@ -82,7 +92,7 @@
   <div class="w-full max-w-xl rounded-lg bg-white shadow-xl">
     <div class="flex items-center justify-between border-b border-slate-200 p-4">
       <div>
-        <div class="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">INITIAL IMPORT</div>
+        <div class="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">CSV登録</div>
         <div class="mt-1 font-bold text-slate-900">初回登録CSV</div>
       </div>
       <button type="button" id="vim-map-close" class="vim-btn">閉じる</button>
@@ -99,12 +109,12 @@
 </div>
 
 <div id="vim-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/50 p-4">
-  <form id="vim-form" class="w-full max-w-3xl rounded-lg bg-white shadow-xl">
+  <form id="vim-form" class="vim-modal-form w-full max-w-3xl rounded-lg bg-white shadow-xl">
     <div class="flex items-center justify-between border-b border-slate-200 p-4">
       <div class="font-bold text-slate-900">台帳編集</div>
       <button type="button" id="vim-close" class="vim-btn">閉じる</button>
     </div>
-    <div class="grid gap-3 p-4 md:grid-cols-2">
+    <div class="vim-form-body grid gap-3 p-4 md:grid-cols-2">
       <input type="hidden" name="id">
       <label class="text-sm">契約コード<input name="contract_code" class="vim-input mt-1" required></label>
       <label class="text-sm">車両番号<input name="vehicle_number" class="vim-input mt-1" required></label>
@@ -126,11 +136,81 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { records: [] };
+  const state = { records: [], contracts: [], contractSearchTimer: null };
   const esc = (v) => { const d = document.createElement('div'); d.textContent = v == null ? '' : String(v); return d.innerHTML; };
+  const linkBadge = (r) => r.siteplus_linked ? '<span class="vim-badge vim-linked">PLUS連携</span>' : '<span class="vim-badge vim-unlinked">未連携</span>';
   const badge = (s) => s === 'expired' ? '<span class="vim-badge vim-expired">期限切れ</span>' : s === 'active' ? '<span class="vim-badge vim-active">有効</span>' : '<span class="vim-badge vim-unknown">未登録</span>';
+  function ensureManageEnhancements() {
+    const form = $('vim-form');
+    if (!form || form.dataset.enhanced === '1') return;
+    form.dataset.enhanced = '1';
+    const contractInput = form.elements.contract_code;
+    if (contractInput) {
+      contractInput.setAttribute('list', 'vim-contract-options');
+      contractInput.closest('label')?.insertAdjacentHTML('afterend', `
+        <div class="md:col-span-2 space-y-2">
+          <label class="text-sm">現場リストPLUS検索<input id="vim-contract-search" class="vim-input mt-1" placeholder="契約コード / 現場名 / 車両番号"></label>
+          <datalist id="vim-contract-options"></datalist>
+          <div id="vim-contract-results" class="vim-contract-list hidden"></div>
+          <div id="vim-contract-note" class="text-xs text-slate-500">候補を選ぶと契約コード、現場名、登録済み車両番号を反映します。</div>
+        </div>`);
+    }
+    const actions = form.querySelector('.border-t');
+    if (actions && !$('vim-delete')) {
+      actions.insertAdjacentHTML('afterbegin', '<button type="button" id="vim-delete" class="vim-btn vim-btn-danger mr-auto hidden">削除</button>');
+    }
+    contractInput?.addEventListener('input', () => scheduleContractSearch(contractInput.value));
+    $('vim-contract-search')?.addEventListener('input', (ev) => scheduleContractSearch(ev.target.value));
+    $('vim-contract-search')?.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); searchContracts(ev.target.value); }
+    });
+    $('vim-delete')?.addEventListener('click', deleteCurrentRecord);
+  }
+  function applyContract(contract) {
+    const form = $('vim-form');
+    if (!form || !contract) return;
+    form.elements.contract_code.value = contract.contract_code || '';
+    form.elements.site_name.value = contract.site_name || '';
+    if ($('vim-contract-search')) $('vim-contract-search').value = [contract.contract_code, contract.site_name].filter(Boolean).join(' / ');
+    if (contract.vehicle_number && !form.elements.vehicle_number.value) {
+      form.elements.vehicle_number.value = contract.vehicle_number;
+    }
+    const note = $('vim-contract-note');
+    if (note) note.textContent = `PLUS連携: ${contract.contract_code} / ${contract.site_name || '-'} / 車両番号 ${contract.vehicle_number || '未登録'}`;
+  }
+  function scheduleContractSearch(query) {
+    window.clearTimeout(state.contractSearchTimer);
+    const box = $('vim-contract-results');
+    const value = String(query || '').trim();
+    if (!value) {
+      if (box) box.classList.add('hidden');
+      return;
+    }
+    state.contractSearchTimer = window.setTimeout(() => searchContracts(value).catch(() => {
+      if (box) box.classList.add('hidden');
+    }), 220);
+  }
+  async function searchContracts(queryText) {
+    const form = $('vim-form');
+    const q = String(queryText || $('vim-contract-search')?.value || form?.elements.contract_code?.value || '').trim();
+    const data = await json(`/tools/car_inspe/api/site-contracts?q=${encodeURIComponent(q)}&limit=50`);
+    state.contracts = data.contracts || [];
+    const datalist = $('vim-contract-options');
+    if (datalist) datalist.innerHTML = state.contracts.map((c) => `<option value="${esc(c.contract_code)}">${esc(c.site_name || '')} ${esc(c.vehicle_number || '')}</option>`).join('');
+    const box = $('vim-contract-results');
+    if (!box) return;
+    box.classList.toggle('hidden', !state.contracts.length);
+    box.innerHTML = state.contracts.map((c, index) => `
+      <button type="button" class="vim-contract-option" data-contract-index="${index}">
+        <strong>${esc(c.contract_code)}</strong> ${esc(c.site_name || '')}
+        <span class="text-slate-500">車両番号 ${esc(c.vehicle_number || '未登録')}</span>
+      </button>`).join('') || '<div class="vim-contract-empty">候補が見つかりません</div>';
+    box.querySelectorAll('[data-contract-index]').forEach((button) => {
+      button.addEventListener('click', () => applyContract(state.contracts[Number(button.dataset.contractIndex)]));
+    });
+  }
   function showStatus(text, kind) {
-    const el = $('vim-status');
+    const el = $('vim-message');
     if (!el) return;
     if (!text) {
       el.classList.add('hidden');
@@ -157,7 +237,7 @@
   async function load() {
     const p = new URLSearchParams();
     if ($('vim-q').value) p.set('q', $('vim-q').value);
-    if ($('vim-status').value) p.set('status', $('vim-status').value);
+    if ($('vim-status-filter').value) p.set('status', $('vim-status-filter').value);
     const data = await json(`/tools/car_inspe/api/records?${p.toString()}`);
     state.records = data.records || [];
     $('vim-count').textContent = `${state.records.length}件`;
@@ -165,7 +245,7 @@
     $('vim-s-records').textContent = data.summary?.records ?? '-';
     $('vim-body').innerHTML = state.records.map((r) => `
       <tr>
-        <td>${badge(r.status)}</td><td>${esc(r.contract_code)}</td><td>${esc(r.vehicle_number)}</td><td>${esc(r.expiry_date || '-')}</td>
+        <td>${badge(r.status)} ${linkBadge(r)}</td><td>${esc(r.contract_code)}</td><td>${esc(r.vehicle_number)}</td><td>${esc(r.expiry_date || '-')}</td>
         <td>${esc(r.registration_number || '-')}</td><td>${esc(r.first_registration_month || '-')}</td><td>${esc(r.passenger_capacity || '-')}</td>
         <td>${esc(r.displacement || '-')}</td><td>${esc(r.site_name || '-')}</td>
         <td>${r.has_pdf ? `<a class="text-sky-700 font-bold" href="/tools/car_inspe/api/records/${r.id}/download">DL</a>` : '-'}</td>
@@ -174,27 +254,75 @@
     document.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => openEdit(Number(b.dataset.edit))));
   }
   function openEdit(id) {
+    ensureManageEnhancements();
     const r = state.records.find((x) => x.id === id); if (!r) return;
     const form = $('vim-form');
+    form.reset();
     Object.keys(r).forEach((k) => { if (form.elements[k]) form.elements[k].value = r[k] || ''; });
     form.elements.id.value = r.id;
+    $('vim-delete')?.classList.remove('hidden');
+    if (r.siteplus_contract) applyContract(r.siteplus_contract);
+    else if ($('vim-contract-note')) $('vim-contract-note').textContent = '現場リストPLUSに未連携です。保存時に確認が必要です。';
     $('vim-modal').classList.remove('hidden'); $('vim-modal').classList.add('flex');
+  }
+  function openAdd() {
+    ensureManageEnhancements();
+    const form = $('vim-form');
+    form.reset();
+    form.elements.id.value = '';
+    $('vim-delete')?.classList.add('hidden');
+    if ($('vim-contract-note')) $('vim-contract-note').textContent = '候補を選ぶと契約コード、現場名、登録済み車両番号を反映します。';
+    $('vim-modal').classList.remove('hidden'); $('vim-modal').classList.add('flex');
+    searchContracts('').catch(() => {});
   }
   function closeEdit() { $('vim-modal').classList.add('hidden'); $('vim-modal').classList.remove('flex'); }
   function openMapModal() { $('vim-map-modal').classList.remove('hidden'); $('vim-map-modal').classList.add('flex'); }
   function closeMapModal() { $('vim-map-modal').classList.add('hidden'); $('vim-map-modal').classList.remove('flex'); }
+  async function deleteCurrentRecord() {
+    const id = $('vim-form')?.elements.id?.value;
+    if (!id) return;
+    if (!window.confirm('この台帳を削除します。よろしいですか？')) return;
+    try {
+      await json(`/tools/car_inspe/api/records/${id}`, { method: 'DELETE' });
+      closeEdit();
+      showStatus('台帳を削除しました。', 'success');
+      await load();
+    } catch (e) {
+      showStatus(e.message || '削除に失敗しました。', 'error');
+    }
+  }
   $('vim-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const form = ev.currentTarget;
     const data = Object.fromEntries(new FormData(form).entries());
     const id = data.id; delete data.id;
+    const method = id ? 'PUT' : 'POST';
+    const url = id ? `/tools/car_inspe/api/records/${id}` : '/tools/car_inspe/api/records';
     try {
-      await json(`/tools/car_inspe/api/records/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+      let response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      let payload = {};
+      try { payload = await response.json(); } catch (_) { payload = {}; }
+      if (response.status === 409 && payload.requires_confirmation) {
+        const missing = (payload.missing_contracts || []).join(', ');
+        if (!window.confirm(`現場リストPLUSに無い契約コードです: ${missing}\n確認して台帳へ保存しますか？`)) return;
+        data.confirm_missing_site = true;
+        response = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        try { payload = await response.json(); } catch (_) { payload = {}; }
+      }
+      if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
       closeEdit();
-      showStatus('台帳を更新しました。', 'success');
+      showStatus(id ? '台帳を更新しました。' : '台帳に追加しました。', 'success');
       await load();
     } catch (e) {
-      showStatus(e.message || '台帳の更新に失敗しました。', 'error');
+      showStatus(e.message || '保存に失敗しました。', 'error');
     }
   });
   $('vim-map-upload').addEventListener('click', async () => {
@@ -228,8 +356,11 @@
     load().catch((e) => showStatus(e.message || '読み込みに失敗しました。', 'error'));
   }));
   ['vim-close', 'vim-cancel'].forEach((id) => $(id).addEventListener('click', closeEdit));
+  $('vim-add-record')?.addEventListener('click', openAdd);
   $('vim-open-map').addEventListener('click', openMapModal);
   $('vim-map-close').addEventListener('click', closeMapModal);
+  $('vim-status-filter')?.addEventListener('change', () => load().catch((e) => showStatus(e.message || '読み込みに失敗しました。', 'error')));
+  ensureManageEnhancements();
   load().catch((e) => showStatus(e.message || '読み込みに失敗しました。', 'error'));
 })();
 </script>
