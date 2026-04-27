@@ -1,14 +1,273 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="mx-auto max-w-5xl space-y-6 pb-10">
-  <section class="dstt-hero" style="background: linear-gradient(135deg, #b91c1c 0%, #ea580c 55%, #f59e0b 100%);">
+<style>
+  .ci-shell {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding-bottom: 2.5rem;
+  }
+  .ci-panel {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, .08);
+  }
+  .ci-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+  }
+  .ci-grid {
+    display: grid;
+    grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
+    gap: 1rem;
+  }
+  .ci-section-title {
+    color: #334155;
+    font-size: .9rem;
+    font-weight: 700;
+    margin-bottom: .45rem;
+  }
+  .ci-field {
+    display: grid;
+    gap: .28rem;
+  }
+  .ci-field label {
+    color: #475569;
+    font-size: .78rem;
+    font-weight: 700;
+  }
+  .ci-field input,
+  .ci-field select {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: .55rem .65rem;
+    font-size: .88rem;
+    width: 100%;
+    background: #fff;
+  }
+  .ci-drop {
+    border: 2px dashed #cbd5e1;
+    border-radius: 8px;
+    background: #f8fafc;
+    padding: 1.35rem;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .ci-drop:hover,
+  .ci-drop.dragover {
+    border-color: #ea580c;
+    background: #fff7ed;
+  }
+  .ci-btn {
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: .58rem .85rem;
+    font-size: .86rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .ci-btn:disabled {
+    opacity: .48;
+    cursor: not-allowed;
+  }
+  .ci-btn-primary {
+    background: #ea580c;
+    color: #fff;
+  }
+  .ci-btn-primary:hover:not(:disabled) {
+    background: #c2410c;
+  }
+  .ci-btn-secondary {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #334155;
+  }
+  .ci-btn-secondary:hover:not(:disabled) {
+    background: #f1f5f9;
+  }
+  .ci-btn-danger {
+    background: #fee2e2;
+    border-color: #fecaca;
+    color: #991b1b;
+  }
+  .ci-row-list {
+    display: grid;
+    gap: .55rem;
+    max-height: 520px;
+    overflow: auto;
+  }
+  .ci-row {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: .75rem;
+    cursor: pointer;
+    background: #fff;
+  }
+  .ci-row.active {
+    border-color: #ea580c;
+    box-shadow: 0 0 0 3px rgba(234, 88, 12, .16);
+  }
+  .ci-row-head {
+    display: flex;
+    justify-content: space-between;
+    gap: .75rem;
+    align-items: flex-start;
+  }
+  .ci-filename {
+    color: #0f172a;
+    font-size: .9rem;
+    font-weight: 700;
+    word-break: break-all;
+  }
+  .ci-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: .18rem .5rem;
+    font-size: .72rem;
+    font-weight: 700;
+  }
+  .ci-badge-ready {
+    background: #dcfce7;
+    color: #166534;
+  }
+  .ci-badge-review {
+    background: #fef3c7;
+    color: #92400e;
+  }
+  .ci-badge-unmatched {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+  .ci-kv {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .45rem;
+    margin-top: .6rem;
+    color: #475569;
+    font-size: .78rem;
+  }
+  .ci-kv strong {
+    display: block;
+    color: #64748b;
+    font-size: .7rem;
+  }
+  .ci-preview-wrap {
+    background: #0f172a;
+    border-radius: 8px;
+    min-height: 430px;
+    overflow: auto;
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 1rem;
+  }
+  .ci-preview-img {
+    max-width: 100%;
+    height: auto;
+    background: #fff;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .25);
+  }
+  .ci-select-stage {
+    position: relative;
+    display: inline-block;
+    line-height: 0;
+  }
+  .ci-select-stage img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    background: #fff;
+  }
+  .ci-region-box {
+    position: absolute;
+    border: 3px solid #2563eb;
+    background: rgba(37, 99, 235, .12);
+    pointer-events: none;
+  }
+  .ci-region-box.expiry_date {
+    border-color: #dc2626;
+    background: rgba(220, 38, 38, .12);
+  }
+  .ci-drag-box {
+    position: absolute;
+    border: 2px dashed #f59e0b;
+    background: rgba(245, 158, 11, .14);
+    pointer-events: none;
+  }
+  .ci-empty {
+    color: #64748b;
+    font-size: .9rem;
+    padding: 2rem;
+    text-align: center;
+  }
+  .ci-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .75rem;
+  }
+  .ci-region-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .45rem;
+  }
+  .ci-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .78rem;
+  }
+  .ci-table th,
+  .ci-table td {
+    border-bottom: 1px solid #e5e7eb;
+    padding: .45rem .5rem;
+    text-align: left;
+  }
+  .ci-table th {
+    background: #f8fafc;
+    color: #475569;
+    font-weight: 700;
+  }
+  .ci-help {
+    color: #64748b;
+    font-size: .76rem;
+    line-height: 1.55;
+  }
+  .ci-status {
+    min-height: 1.3rem;
+    color: #475569;
+    font-size: .82rem;
+  }
+  .ci-status.error {
+    color: #b91c1c;
+    font-weight: 700;
+  }
+  .ci-status.success {
+    color: #15803d;
+    font-weight: 700;
+  }
+  @media (max-width: 1024px) {
+    .ci-grid,
+    .ci-detail-grid {
+      grid-template-columns: 1fr;
+    }
+    .ci-region-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+</style>
+
+<div class="ci-shell space-y-6">
+  <section class="dstt-hero" style="background: linear-gradient(135deg, #991b1b 0%, #ea580c 54%, #f59e0b 100%);">
     <div class="dstt-hero-grid">
       <div class="dstt-hero-copy">
         <div class="dstt-hero-pill">VEHICLE INSPECTION</div>
         <div>
-          <h1 class="dstt-hero-title">車検証ツール</h1>
-          <p class="dstt-hero-subtitle">車検証PDFをOCRで読み取り、車検満了日・登録番号・保管場所を含むファイル名へ自動変換します。</p>
+          <h1 class="dstt-hero-title">車検証管理ツール</h1>
+          <p class="dstt-hero-subtitle">車検証PDFを読み取り、CSVの車両台帳と照合。結果を確認・補正してから業務用ファイル名で出力します。</p>
         </div>
       </div>
       <div class="dstt-hero-meta">
@@ -17,52 +276,871 @@
           <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
         </div>
         <div class="dstt-hero-card">
-          <div class="dstt-hero-card-label">FORMAT</div>
-          <div class="dstt-hero-card-value">満了日_ID_保管場所_登録番号.pdf</div>
+          <div class="dstt-hero-card-label">FLOW</div>
+          <div class="dstt-hero-card-value">解析 / 確認 / 出力</div>
+          <div class="dstt-hero-card-note">OCR範囲調整と台帳照合に対応</div>
         </div>
       </div>
     </div>
   </section>
 
-<div class="max-w-xl mx-auto bg-white rounded-xl shadow p-6">
+  <div class="ci-grid">
+    <aside class="space-y-4">
+      <div class="ci-panel p-4 space-y-4">
+        <div>
+          <div class="ci-section-title">アップロード</div>
+          <form id="analyzeForm" class="space-y-3">
+            <div id="pdfDrop" class="ci-drop">
+              <input id="pdfInput" name="pdf_files" type="file" accept=".pdf" multiple required class="hidden">
+              <div class="font-semibold text-slate-700">車検証PDFを選択</div>
+              <div class="ci-help mt-1">複数ファイルをまとめて解析できます。</div>
+              <div id="pdfNames" class="ci-help mt-2">未選択</div>
+            </div>
+            <div class="ci-field">
+              <label for="csvInput">車両台帳CSV</label>
+              <input id="csvInput" name="csv_file" type="file" accept=".csv" required>
+            </div>
+            <div class="ci-field">
+              <label for="presetSelect">OCRプリセット</label>
+              <select id="presetSelect" name="preset">
+                <option value="">手動指定</option>
+              </select>
+            </div>
+            <div class="ci-field">
+              <label for="regionModeSelect">複数PDFのOCR範囲</label>
+              <select id="regionModeSelect">
+                <option value="all">最初のPDFの範囲を全ファイルへ適用</option>
+                <option value="per_file">1ファイルずつ範囲を指定</option>
+              </select>
+            </div>
+            <div class="ci-field">
+              <label for="modeSelect">処理モード</label>
+              <select id="modeSelect">
+                <option value="review">確認してから出力</option>
+                <option value="auto">解析後すぐ出力</option>
+              </select>
+            </div>
+            <button id="analyzeBtn" type="submit" class="ci-btn ci-btn-primary w-full">解析開始</button>
+          </form>
+          <div id="uploadStatus" class="ci-status mt-3"></div>
+        </div>
 
-  {% if error %}
-    <div class="mb-4 text-red-600 font-semibold">
-      ⚠️ {{ error }}
-    </div>
-  {% endif %}
+        <div class="border-t pt-4">
+          <div class="ci-section-title">出力名ルール</div>
+          <div class="ci-field">
+            <label for="filenameTemplate">テンプレート</label>
+            <input id="filenameTemplate" value="{expiry}_{vehicle_id}_{location}_{registration}.pdf">
+          </div>
+          <p class="ci-help mt-2">標準: 満了日_契約コード_現場名_登録番号.pdf。使える項目: {expiry}, {vehicle_id}, {location}, {registration}, {original}, {today}</p>
+        </div>
 
-  <form method="POST" enctype="multipart/form-data">
-    <div class="mb-4">
-      <label class="block mb-1 font-semibold">自動車検査証記録事項（PDF）:</label>
-      <input type="file" name="pdf_files" multiple accept=".pdf" required class="w-full">
-    </div>
+        <div class="border-t pt-4">
+          <div class="ci-section-title">CSV判定</div>
+          <div id="csvSummary" class="ci-help">CSVを解析すると列判定結果が表示されます。</div>
+        </div>
+      </div>
 
-    <div class="mb-4">
-      <label class="block mb-1 font-semibold">設定ファイル（CSV）:</label>
-      <input type="file" name="csv_file" accept=".csv" required class="w-full">
-    </div>
+      <div class="ci-panel p-4">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <div class="ci-section-title mb-0">解析結果</div>
+            <div id="rowSummary" class="ci-help">未解析</div>
+          </div>
+          <button id="downloadBtn" type="button" class="ci-btn ci-btn-primary" disabled>出力</button>
+        </div>
+        <div id="rowList" class="ci-row-list">
+          <div class="ci-empty">PDFとCSVをアップロードしてください。</div>
+        </div>
+      </div>
+    </aside>
 
-    <div class="mb-4">
-      <label class="block mb-1 font-semibold">OCRプリセット:</label>
-      <select name="preset" class="w-full border rounded p-2">
-        <option value="旧車検証_電子PDF">旧車検証_電子PDF</option>
-        <option value="新車検証_電子PDF">新車検証_電子PDF</option>
-      </select>
-    </div>
+    <main class="space-y-4">
+      <div class="ci-panel p-4">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+          <div>
+            <div class="ci-section-title mb-0">確認・補正</div>
+            <div id="activeName" class="ci-help">行を選択してください。</div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button id="rematchBtn" type="button" class="ci-btn ci-btn-secondary" disabled>台帳再照合</button>
+            <button id="reanalyzeBtn" type="button" class="ci-btn ci-btn-secondary" disabled>範囲で再OCR</button>
+            <button id="savePresetBtn" type="button" class="ci-btn ci-btn-secondary" disabled>範囲を保存</button>
+          </div>
+        </div>
 
-    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-      実行＆ダウンロード
-    </button>
-  </form>
+        <div class="ci-detail-grid">
+          <div class="ci-field">
+            <label for="registrationInput">登録番号</label>
+            <input id="registrationInput" disabled>
+          </div>
+          <div class="ci-field">
+            <label for="expiryInput">満了日</label>
+            <input id="expiryInput" placeholder="YYYYMMDD" disabled>
+          </div>
+          <div class="ci-field">
+            <label for="vehicleIdInput">契約コード</label>
+            <input id="vehicleIdInput" disabled>
+          </div>
+          <div class="ci-field">
+            <label for="locationInput">現場名</label>
+            <input id="locationInput" disabled>
+          </div>
+        </div>
 
-  <div class="mt-6 text-sm text-gray-600">
-    <p>・PDFは1ページのみ対応</p>
-    <p>・OCRプリセットに応じて座標が変更されます</p>
-    <p>・CSVは「ID,登録番号末尾4桁,保管場所」の形式</p>
-    <p>・ファイル名：<code>車検満了日_ID_保管場所_登録番号.pdf</code></p>
-    <p>・失敗時はエラーメッセージが記載されたテキストファイルがダウンロードされます</p>
+        <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="ci-card p-3">
+            <div class="ci-section-title">OCR範囲</div>
+            <div class="grid grid-cols-1 gap-3">
+              <div>
+                <div class="ci-help font-semibold mb-1">登録番号</div>
+                <div class="ci-region-grid">
+                  <input class="region-input" data-region="reg_number" data-index="0" placeholder="x1" disabled>
+                  <input class="region-input" data-region="reg_number" data-index="1" placeholder="y1" disabled>
+                  <input class="region-input" data-region="reg_number" data-index="2" placeholder="x2" disabled>
+                  <input class="region-input" data-region="reg_number" data-index="3" placeholder="y2" disabled>
+                </div>
+              </div>
+              <div>
+                <div class="ci-help font-semibold mb-1">満了日</div>
+                <div class="ci-region-grid">
+                  <input class="region-input" data-region="expiry_date" data-index="0" placeholder="x1" disabled>
+                  <input class="region-input" data-region="expiry_date" data-index="1" placeholder="y1" disabled>
+                  <input class="region-input" data-region="expiry_date" data-index="2" placeholder="x2" disabled>
+                  <input class="region-input" data-region="expiry_date" data-index="3" placeholder="y2" disabled>
+                </div>
+              </div>
+            </div>
+            <p class="ci-help mt-3">スキャン位置がずれる場合は座標を調整して再OCRできます。</p>
+          </div>
+          <div class="ci-card p-3">
+            <div class="ci-section-title">候補・照合</div>
+            <div id="candidateBox" class="ci-help">候補は解析後に表示されます。</div>
+          </div>
+        </div>
+
+        <div class="mt-4">
+          <div class="ci-field">
+            <label for="outputNameInput">出力ファイル名プレビュー</label>
+            <input id="outputNameInput" disabled>
+          </div>
+        </div>
+        <div id="detailStatus" class="ci-status mt-3"></div>
+      </div>
+
+      <div class="ci-panel p-4">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <div class="ci-section-title mb-0">PDFプレビュー</div>
+            <div class="ci-help">解析前に先頭PDFでOCR範囲を指定できます。解析後は選択行の確認プレビューを表示します。</div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button id="prevPreviewBtn" type="button" class="ci-btn ci-btn-secondary" disabled>前のPDF</button>
+            <button id="nextPreviewBtn" type="button" class="ci-btn ci-btn-secondary" disabled>次のPDF</button>
+            <button id="selectRegBtn" type="button" class="ci-btn ci-btn-secondary" disabled>登録番号を指定</button>
+            <button id="selectExpiryBtn" type="button" class="ci-btn ci-btn-secondary" disabled>満了日を指定</button>
+            <button id="resetPreRegionsBtn" type="button" class="ci-btn ci-btn-secondary" disabled>プリセットに戻す</button>
+          </div>
+        </div>
+        <div id="previewWrap" class="ci-preview-wrap">
+          <div class="ci-empty text-slate-300">解析結果を選択するとプレビューを表示します。</div>
+        </div>
+      </div>
+    </main>
   </div>
 </div>
-</div>
+
+<script>
+(() => {
+  const state = {
+    sessionId: null,
+    rows: [],
+    activeIndex: -1,
+    presets: {},
+    defaultTemplate: '{expiry}_{vehicle_id}_{location}_{registration}.pdf',
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const analyzeForm = $('analyzeForm');
+  const pdfDrop = $('pdfDrop');
+  const pdfInput = $('pdfInput');
+  const pdfNames = $('pdfNames');
+  const csvInput = $('csvInput');
+  const presetSelect = $('presetSelect');
+  const regionModeSelect = $('regionModeSelect');
+  const modeSelect = $('modeSelect');
+  const uploadStatus = $('uploadStatus');
+  const rowList = $('rowList');
+  const rowSummary = $('rowSummary');
+  const downloadBtn = $('downloadBtn');
+  const activeName = $('activeName');
+  const registrationInput = $('registrationInput');
+  const expiryInput = $('expiryInput');
+  const vehicleIdInput = $('vehicleIdInput');
+  const locationInput = $('locationInput');
+  const outputNameInput = $('outputNameInput');
+  const candidateBox = $('candidateBox');
+  const detailStatus = $('detailStatus');
+  const previewWrap = $('previewWrap');
+  const filenameTemplate = $('filenameTemplate');
+  const csvSummary = $('csvSummary');
+  const reanalyzeBtn = $('reanalyzeBtn');
+  const rematchBtn = $('rematchBtn');
+  const savePresetBtn = $('savePresetBtn');
+  const selectRegBtn = $('selectRegBtn');
+  const selectExpiryBtn = $('selectExpiryBtn');
+  const resetPreRegionsBtn = $('resetPreRegionsBtn');
+  const prevPreviewBtn = $('prevPreviewBtn');
+  const nextPreviewBtn = $('nextPreviewBtn');
+  state.prePreview = null;
+  state.previews = [];
+  state.preFileRegions = [];
+  state.preFileIndex = 0;
+  state.preAnalyzeRegions = null;
+  state.preSelectField = 'reg_number';
+  state.preDrag = null;
+  state.canManagePresets = false;
+
+  function setStatus(el, text, kind = '') {
+    el.textContent = text || '';
+    el.className = `ci-status ${kind}`;
+  }
+
+  function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value == null ? '' : String(value);
+    return div.innerHTML;
+  }
+
+  function badge(row) {
+    if (row.status === 'ready') return '<span class="ci-badge ci-badge-ready">出力可</span>';
+    if (row.match_status === 'unmatched') return '<span class="ci-badge ci-badge-unmatched">未照合</span>';
+    return '<span class="ci-badge ci-badge-review">要確認</span>';
+  }
+
+  function buildName(row) {
+    const clean = (value, fallback) => {
+      const text = String(value || '').normalize('NFKC').replace(/\s+/g, '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/_+/g, '_').replace(/^[._ ]+|[._ ]+$/g, '');
+      return text || fallback;
+    };
+    const values = {
+      expiry: clean(row.expiry_date, '満了日未確認'),
+      vehicle_id: clean(row.vehicle_id, '契約コード未確認'),
+      location: clean(row.location, '現場名未確認'),
+      registration: clean(row.registration_number, '登録番号未確認'),
+      original: clean((row.original_name || '').replace(/\.pdf$/i, ''), 'source'),
+      today: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
+    };
+    let template = filenameTemplate.value || state.defaultTemplate;
+    let name = template.replace(/\{(expiry|vehicle_id|location|registration|original|today)\}/g, (_, key) => values[key]);
+    name = name.replace(/\.pdf$/i, '');
+    return `${clean(name, '車検証')}.pdf`;
+  }
+
+  function refreshSummary() {
+    if (!state.rows.length) {
+      rowSummary.textContent = '未解析';
+      downloadBtn.disabled = true;
+      return;
+    }
+    const ready = state.rows.filter((row) => row.status === 'ready').length;
+    const review = state.rows.length - ready;
+    rowSummary.textContent = `${state.rows.length}件 / 出力可 ${ready}件 / 要確認 ${review}件`;
+    downloadBtn.disabled = false;
+  }
+
+  function renderRows() {
+    refreshSummary();
+    if (!state.rows.length) {
+      rowList.innerHTML = '<div class="ci-empty">PDFとCSVをアップロードしてください。</div>';
+      return;
+    }
+    rowList.innerHTML = state.rows.map((row, index) => `
+      <div class="ci-row ${index === state.activeIndex ? 'active' : ''}" data-index="${index}">
+        <div class="ci-row-head">
+          <div class="ci-filename">${escapeHtml(row.original_name)}</div>
+          ${badge(row)}
+        </div>
+        <div class="ci-kv">
+          <div><strong>登録番号</strong>${escapeHtml(row.registration_number || '-')}</div>
+          <div><strong>満了日</strong>${escapeHtml(row.expiry_date || '-')}</div>
+          <div><strong>契約コード</strong>${escapeHtml(row.vehicle_id || '-')}</div>
+          <div><strong>現場名</strong>${escapeHtml(row.location || '-')}</div>
+        </div>
+      </div>
+    `).join('');
+    rowList.querySelectorAll('.ci-row').forEach((node) => {
+      node.addEventListener('click', () => selectRow(Number(node.dataset.index)));
+    });
+  }
+
+  function currentRow() {
+    return state.rows[state.activeIndex] || null;
+  }
+
+  function setInputsEnabled(enabled) {
+    [registrationInput, expiryInput, vehicleIdInput, locationInput].forEach((input) => input.disabled = !enabled);
+    document.querySelectorAll('.region-input').forEach((input) => input.disabled = !enabled);
+    reanalyzeBtn.disabled = !enabled;
+    rematchBtn.disabled = !enabled;
+    savePresetBtn.disabled = !enabled || !state.canManagePresets;
+  }
+
+  function fillRegionInputs(row) {
+    const regions = row?.regions || {};
+    document.querySelectorAll('.region-input').forEach((input) => {
+      const region = input.dataset.region;
+      const index = Number(input.dataset.index);
+      input.value = Array.isArray(regions[region]) ? regions[region][index] : '';
+    });
+  }
+
+  function readRegions() {
+    const regions = { reg_number: [0, 0, 0, 0], expiry_date: [0, 0, 0, 0] };
+    document.querySelectorAll('.region-input').forEach((input) => {
+      regions[input.dataset.region][Number(input.dataset.index)] = Number(input.value || 0);
+    });
+    return regions;
+  }
+
+  function renderCandidates(row) {
+    if (!row) {
+      candidateBox.textContent = '候補は解析後に表示されます。';
+      return;
+    }
+    const regCandidates = (row.candidate_texts?.reg_number || []).slice(0, 4);
+    const dateCandidates = (row.candidate_texts?.expiry_date || []).slice(0, 4);
+    const matches = row.match_candidates || [];
+    candidateBox.innerHTML = `
+      <div class="space-y-3">
+        <div>
+          <div class="font-semibold text-slate-600 mb-1">OCR候補</div>
+          <div>登録番号: ${regCandidates.length ? regCandidates.map(escapeHtml).join(' / ') : '-'}</div>
+          <div>満了日: ${dateCandidates.length ? dateCandidates.map(escapeHtml).join(' / ') : '-'}</div>
+        </div>
+        <div>
+          <div class="font-semibold text-slate-600 mb-1">台帳候補</div>
+          ${matches.length ? `
+            <table class="ci-table">
+              <thead><tr><th>契約コード</th><th>末尾</th><th>現場名</th><th></th></tr></thead>
+              <tbody>
+                ${matches.map((item, idx) => `
+                  <tr>
+                    <td>${escapeHtml(item.vehicle_id)}</td>
+                    <td>${escapeHtml(item.suffix)}</td>
+                    <td>${escapeHtml(item.location)}</td>
+                    <td><button type="button" class="ci-btn ci-btn-secondary match-pick" data-index="${idx}">採用</button></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          ` : '<div>該当候補なし</div>'}
+        </div>
+      </div>
+    `;
+    candidateBox.querySelectorAll('.match-pick').forEach((button) => {
+      button.addEventListener('click', () => {
+        const match = matches[Number(button.dataset.index)];
+        if (!match) return;
+        vehicleIdInput.value = match.vehicle_id || '';
+        locationInput.value = match.location || '';
+        updateActiveFromInputs();
+      });
+    });
+  }
+
+  function renderPreview(row) {
+    if (!row?.preview) {
+      previewWrap.innerHTML = '<div class="ci-empty text-slate-300">プレビューを表示できません。</div>';
+      return;
+    }
+    previewWrap.innerHTML = `<img class="ci-preview-img" src="${row.preview}" alt="車検証プレビュー">`;
+  }
+
+  function scaledRegionsForPreview(regions) {
+    const scale = state.prePreview?.scale || 1;
+    const output = {};
+    Object.entries(regions || {}).forEach(([key, box]) => {
+      output[key] = box.map((value) => Math.round(Number(value || 0) * scale));
+    });
+    return output;
+  }
+
+  function sourceRegionsFromPreview(regions) {
+    const scale = state.prePreview?.scale || 1;
+    const output = {};
+    Object.entries(regions || {}).forEach(([key, box]) => {
+      output[key] = box.map((value) => Math.round(Number(value || 0) / scale));
+    });
+    return output;
+  }
+
+  function cloneRegions(regions) {
+    if (!regions) return null;
+    const output = {};
+    ['reg_number', 'expiry_date'].forEach((key) => {
+      if (Array.isArray(regions[key])) {
+        output[key] = regions[key].map((value) => Number(value || 0));
+      }
+    });
+    return Object.keys(output).length ? output : null;
+  }
+
+  function hasCompleteRegions(regions) {
+    return ['reg_number', 'expiry_date'].every((key) => {
+      const box = regions?.[key];
+      return Array.isArray(box) && box.length === 4 && Number(box[2]) > Number(box[0]) && Number(box[3]) > Number(box[1]);
+    });
+  }
+
+  function activePreRegions() {
+    if (regionModeSelect.value === 'per_file') {
+      return state.preFileRegions[state.preFileIndex] || state.prePreview?.regions || {};
+    }
+    return state.preAnalyzeRegions || state.prePreview?.regions || {};
+  }
+
+  function setActivePreRegions(regions) {
+    const cloned = cloneRegions(regions) || {};
+    if (regionModeSelect.value === 'per_file') {
+      state.preFileRegions[state.preFileIndex] = cloned;
+      return;
+    }
+    state.preAnalyzeRegions = cloned;
+  }
+
+  function resetPreAnalyzeState(keepRows = false) {
+    state.prePreview = null;
+    state.previews = [];
+    state.preFileRegions = [];
+    state.preFileIndex = 0;
+    state.preAnalyzeRegions = null;
+    state.preDrag = null;
+    if (!keepRows) {
+      state.rows = [];
+      state.sessionId = null;
+      state.activeIndex = -1;
+    }
+  }
+
+  function previewFiles() {
+    return Array.from(pdfInput.files || []);
+  }
+
+  function setPrePreviewButtons(enabled) {
+    const files = previewFiles();
+    selectRegBtn.disabled = !enabled;
+    selectExpiryBtn.disabled = !enabled;
+    resetPreRegionsBtn.disabled = !enabled;
+    prevPreviewBtn.disabled = !enabled || state.preFileIndex <= 0;
+    nextPreviewBtn.disabled = !enabled || state.preFileIndex >= files.length - 1;
+  }
+
+  function renderPreAnalyzePreview() {
+    if (!state.prePreview) {
+      previewWrap.innerHTML = '<div class="ci-empty text-slate-300">PDFを選択すると解析前プレビューを表示します。</div>';
+      setPrePreviewButtons(false);
+      return;
+    }
+    setPrePreviewButtons(true);
+    const files = previewFiles();
+    const currentFile = files[state.preFileIndex];
+    const modeText = regionModeSelect.value === 'per_file'
+      ? `${state.preFileIndex + 1}/${files.length} のPDFに適用`
+      : `1枚目の指定を全${files.length || 1}件に適用`;
+    const regions = scaledRegionsForPreview(activePreRegions());
+    previewWrap.innerHTML = `
+      <div class="ci-help mb-2">${escapeHtml(modeText)}${currentFile ? `: ${escapeHtml(currentFile.name)}` : ''}</div>
+      <div class="ci-select-stage" id="preSelectStage">
+        <img id="preSelectImage" src="${state.prePreview.image}" alt="解析前PDFプレビュー" width="${state.prePreview.preview_width}" height="${state.prePreview.preview_height}">
+        ${Object.entries(regions).map(([key, box]) => `
+          <div class="ci-region-box ${key}" style="left:${(box[0] / state.prePreview.preview_width) * 100}%;top:${(box[1] / state.prePreview.preview_height) * 100}%;width:${(Math.max(1, box[2] - box[0]) / state.prePreview.preview_width) * 100}%;height:${(Math.max(1, box[3] - box[1]) / state.prePreview.preview_height) * 100}%"></div>
+        `).join('')}
+      </div>
+    `;
+    const stage = $('preSelectStage');
+    const image = $('preSelectImage');
+    let dragBox = null;
+
+    function pointFromEvent(event) {
+      const rect = image.getBoundingClientRect();
+      const scaleX = state.prePreview.preview_width / rect.width;
+      const scaleY = state.prePreview.preview_height / rect.height;
+      return {
+        x: Math.max(0, Math.min(state.prePreview.preview_width, (event.clientX - rect.left) * scaleX)),
+        y: Math.max(0, Math.min(state.prePreview.preview_height, (event.clientY - rect.top) * scaleY)),
+      };
+    }
+
+    stage.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      const start = pointFromEvent(event);
+      state.preDrag = { start, current: start };
+      dragBox = document.createElement('div');
+      dragBox.className = 'ci-drag-box';
+      stage.appendChild(dragBox);
+      stage.setPointerCapture(event.pointerId);
+    });
+    stage.addEventListener('pointermove', (event) => {
+      if (!state.preDrag || !dragBox) return;
+      state.preDrag.current = pointFromEvent(event);
+      const x1 = Math.min(state.preDrag.start.x, state.preDrag.current.x);
+      const y1 = Math.min(state.preDrag.start.y, state.preDrag.current.y);
+      const x2 = Math.max(state.preDrag.start.x, state.preDrag.current.x);
+      const y2 = Math.max(state.preDrag.start.y, state.preDrag.current.y);
+      dragBox.style.left = `${(x1 / state.prePreview.preview_width) * 100}%`;
+      dragBox.style.top = `${(y1 / state.prePreview.preview_height) * 100}%`;
+      dragBox.style.width = `${(Math.max(1, x2 - x1) / state.prePreview.preview_width) * 100}%`;
+      dragBox.style.height = `${(Math.max(1, y2 - y1) / state.prePreview.preview_height) * 100}%`;
+    });
+    stage.addEventListener('pointerup', (event) => {
+      if (!state.preDrag) return;
+      const current = pointFromEvent(event);
+      const box = [
+        Math.min(state.preDrag.start.x, current.x),
+        Math.min(state.preDrag.start.y, current.y),
+        Math.max(state.preDrag.start.x, current.x),
+        Math.max(state.preDrag.start.y, current.y),
+      ];
+      state.preDrag = null;
+      if (box[2] - box[0] < 8 || box[3] - box[1] < 8) {
+        renderPreAnalyzePreview();
+        return;
+      }
+      const previewRegions = scaledRegionsForPreview(activePreRegions());
+      previewRegions[state.preSelectField] = box.map((value) => Math.round(value));
+      setActivePreRegions(sourceRegionsFromPreview(previewRegions));
+      renderPreAnalyzePreview();
+      setStatus(uploadStatus, `${state.preSelectField === 'reg_number' ? '登録番号' : '満了日'}のOCR範囲を指定しました。`, 'success');
+    });
+  }
+
+  async function loadPreAnalyzePreview(index = state.preFileIndex) {
+    const files = previewFiles();
+    if (!files.length) {
+      resetPreAnalyzeState(true);
+      renderPreAnalyzePreview();
+      return;
+    }
+    state.preFileIndex = Math.max(0, Math.min(index, files.length - 1));
+    if (state.previews[state.preFileIndex]) {
+      state.prePreview = state.previews[state.preFileIndex];
+      if (regionModeSelect.value === 'per_file' && !state.preFileRegions[state.preFileIndex]) {
+        state.preFileRegions[state.preFileIndex] = cloneRegions(state.prePreview.regions) || {};
+      }
+      state.activeIndex = -1;
+      activeName.textContent = '解析前プレビューでOCR範囲を指定できます。';
+      setInputsEnabled(false);
+      renderRows();
+      renderPreAnalyzePreview();
+      return;
+    }
+    setStatus(uploadStatus, `解析前プレビューを生成しています... (${state.preFileIndex + 1}/${files.length})`);
+    const formData = new FormData();
+    formData.append('pdf_file', files[state.preFileIndex]);
+    formData.append('preset', presetSelect.value);
+    try {
+      const response = await fetch('/tools/car_inspe/api/preview', { method: 'POST', body: formData });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'プレビュー生成に失敗しました。');
+      state.prePreview = data;
+      state.previews[state.preFileIndex] = data;
+      if (regionModeSelect.value === 'per_file') {
+        state.preFileRegions[state.preFileIndex] = cloneRegions(data.regions) || {};
+      } else if (!state.preAnalyzeRegions) {
+        state.preAnalyzeRegions = cloneRegions(data.regions) || {};
+      }
+      state.activeIndex = -1;
+      activeName.textContent = '解析前プレビューでOCR範囲を指定できます。';
+      setInputsEnabled(false);
+      renderRows();
+      renderPreAnalyzePreview();
+      setStatus(uploadStatus, '解析前プレビューを表示しました。', 'success');
+    } catch (error) {
+      state.prePreview = null;
+      renderPreAnalyzePreview();
+      setStatus(uploadStatus, error.message, 'error');
+    }
+  }
+
+  function selectRow(index) {
+    state.activeIndex = index;
+    const row = currentRow();
+    setInputsEnabled(Boolean(row));
+    if (!row) return;
+    activeName.textContent = row.original_name || '';
+    registrationInput.value = row.registration_number || '';
+    expiryInput.value = row.expiry_date || '';
+    vehicleIdInput.value = row.vehicle_id || '';
+    locationInput.value = row.location || '';
+    outputNameInput.value = buildName(row);
+    fillRegionInputs(row);
+    renderCandidates(row);
+    renderPreview(row);
+    setPrePreviewButtons(false);
+    setStatus(detailStatus, row.message || '');
+    renderRows();
+  }
+
+  function updateActiveFromInputs() {
+    const row = currentRow();
+    if (!row) return;
+    row.registration_number = registrationInput.value.trim();
+    row.expiry_date = expiryInput.value.trim();
+    row.vehicle_id = vehicleIdInput.value.trim();
+    row.location = locationInput.value.trim();
+    row.regions = readRegions();
+    row.output_name = buildName(row);
+    row.status = row.registration_number && row.expiry_date && row.vehicle_id && row.location ? 'ready' : 'needs_review';
+    outputNameInput.value = row.output_name;
+    renderRows();
+  }
+
+  [registrationInput, expiryInput, vehicleIdInput, locationInput, filenameTemplate].forEach((input) => {
+    input.addEventListener('input', updateActiveFromInputs);
+  });
+  document.querySelectorAll('.region-input').forEach((input) => input.addEventListener('input', updateActiveFromInputs));
+
+  async function loadPresets() {
+    const response = await fetch('/tools/car_inspe/api/presets');
+    const data = await response.json();
+    const options = ['<option value="">手動指定</option>'].concat(
+      data.presets.map((preset) => `<option value="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}${preset.custom ? '（管理者）' : ''}</option>`)
+    );
+    presetSelect.innerHTML = options.join('');
+    state.presets = Object.fromEntries(data.presets.map((preset) => [preset.name, preset]));
+    state.canManagePresets = Boolean(data.can_manage);
+    if (data.default) presetSelect.value = data.default;
+    savePresetBtn.title = state.canManagePresets ? '' : 'プリセット保存は管理者のみ利用できます。';
+    savePresetBtn.classList.toggle('hidden', !state.canManagePresets);
+    setInputsEnabled(Boolean(currentRow()));
+  }
+
+  pdfDrop.addEventListener('click', () => pdfInput.click());
+  ['dragenter', 'dragover'].forEach((eventName) => {
+    pdfDrop.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      pdfDrop.classList.add('dragover');
+    });
+  });
+  ['dragleave', 'drop'].forEach((eventName) => {
+    pdfDrop.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      pdfDrop.classList.remove('dragover');
+    });
+  });
+  pdfDrop.addEventListener('drop', (event) => {
+    pdfInput.files = event.dataTransfer.files;
+    updatePdfNames();
+  });
+  pdfInput.addEventListener('change', updatePdfNames);
+  presetSelect.addEventListener('change', () => {
+    resetPreAnalyzeState(true);
+    if (previewFiles().length && !state.rows.length) {
+      loadPreAnalyzePreview(0);
+    }
+  });
+  regionModeSelect.addEventListener('change', () => {
+    if (state.prePreview && regionModeSelect.value === 'per_file' && !state.preFileRegions[state.preFileIndex]) {
+      state.preFileRegions[state.preFileIndex] = cloneRegions(state.preAnalyzeRegions || state.prePreview.regions) || {};
+    }
+    if (state.prePreview && regionModeSelect.value === 'all' && !state.preAnalyzeRegions) {
+      state.preAnalyzeRegions = cloneRegions(state.preFileRegions[state.preFileIndex] || state.prePreview.regions) || {};
+    }
+    renderPreAnalyzePreview();
+  });
+  prevPreviewBtn.addEventListener('click', () => loadPreAnalyzePreview(state.preFileIndex - 1));
+  nextPreviewBtn.addEventListener('click', () => loadPreAnalyzePreview(state.preFileIndex + 1));
+  selectRegBtn.addEventListener('click', () => {
+    state.preSelectField = 'reg_number';
+    setStatus(uploadStatus, '登録番号の範囲をドラッグしてください。');
+  });
+  selectExpiryBtn.addEventListener('click', () => {
+    state.preSelectField = 'expiry_date';
+    setStatus(uploadStatus, '満了日の範囲をドラッグしてください。');
+  });
+  resetPreRegionsBtn.addEventListener('click', () => {
+    if (!state.prePreview) return;
+    setActivePreRegions(state.prePreview.regions);
+    renderPreAnalyzePreview();
+    setStatus(uploadStatus, 'OCR範囲をプリセットに戻しました。', 'success');
+  });
+
+  function updatePdfNames() {
+    const names = Array.from(pdfInput.files || []).map((file) => file.name);
+    pdfNames.textContent = names.length ? names.join(' / ') : '未選択';
+    resetPreAnalyzeState();
+    renderRows();
+    loadPreAnalyzePreview(0);
+  }
+
+  analyzeForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setStatus(uploadStatus, '解析しています...');
+    const files = previewFiles();
+    if (!presetSelect.value && regionModeSelect.value === 'all' && !hasCompleteRegions(state.preAnalyzeRegions)) {
+      setStatus(uploadStatus, '手動指定では、登録番号と満了日のOCR範囲を指定してください。', 'error');
+      await loadPreAnalyzePreview(0);
+      return;
+    }
+    if (!presetSelect.value && regionModeSelect.value === 'per_file') {
+      const missingIndex = files.findIndex((_file, index) => !hasCompleteRegions(state.preFileRegions[index]));
+      if (missingIndex >= 0) {
+        setStatus(uploadStatus, `${missingIndex + 1}件目の登録番号と満了日のOCR範囲を指定してください。`, 'error');
+        await loadPreAnalyzePreview(missingIndex);
+        return;
+      }
+    }
+    const formData = new FormData();
+    files.forEach((file) => formData.append('pdf_files', file));
+    if (csvInput.files[0]) formData.append('csv_file', csvInput.files[0]);
+    formData.append('preset', presetSelect.value);
+    formData.append('region_mode', regionModeSelect.value);
+    formData.append('preview_ids', JSON.stringify(state.previews.map((preview) => preview?.preview_id || null)));
+    if (regionModeSelect.value === 'per_file') {
+      formData.append('file_regions', JSON.stringify(state.preFileRegions));
+    } else if (state.preAnalyzeRegions) {
+      formData.append('regions', JSON.stringify(state.preAnalyzeRegions));
+    }
+    try {
+      const response = await fetch('/tools/car_inspe/api/analyze', { method: 'POST', body: formData });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '解析に失敗しました。');
+      state.sessionId = data.session_id;
+      state.rows = data.rows || [];
+      state.defaultTemplate = data.filename_template || state.defaultTemplate;
+      filenameTemplate.value = state.defaultTemplate;
+      csvSummary.textContent = `${data.csv.count}件 / 文字コード ${data.csv.encoding} / ${data.csv.has_header ? '列名あり' : '列名なし'}`;
+      setStatus(uploadStatus, '解析が完了しました。', 'success');
+      renderRows();
+      selectRow(0);
+      if (modeSelect.value === 'auto') {
+        await finalize();
+      }
+    } catch (error) {
+      setStatus(uploadStatus, error.message, 'error');
+    }
+  });
+
+  rematchBtn.addEventListener('click', async () => {
+    const row = currentRow();
+    if (!row) return;
+    updateActiveFromInputs();
+    setStatus(detailStatus, '台帳を再照合しています...');
+    try {
+      const response = await fetch('/tools/car_inspe/api/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: state.sessionId, registration_number: row.registration_number }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '照合に失敗しました。');
+      row.match_candidates = data.match.candidates || [];
+      row.match_status = data.match.status;
+      if (data.match.best) {
+        row.vehicle_id = data.match.best.vehicle_id || '';
+        row.location = data.match.best.location || '';
+      }
+      setStatus(detailStatus, data.match.best ? '台帳候補を反映しました。' : '該当候補がありません。', data.match.best ? 'success' : 'error');
+      selectRow(state.activeIndex);
+    } catch (error) {
+      setStatus(detailStatus, error.message, 'error');
+    }
+  });
+
+  reanalyzeBtn.addEventListener('click', async () => {
+    const row = currentRow();
+    if (!row) return;
+    setStatus(detailStatus, '指定範囲で再OCRしています...');
+    try {
+      const response = await fetch('/tools/car_inspe/api/reanalyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: state.sessionId,
+          file_id: row.file_id,
+          preset: presetSelect.value,
+          regions: readRegions(),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '再OCRに失敗しました。');
+      state.rows[state.activeIndex] = data.row;
+      setStatus(detailStatus, '再OCRが完了しました。', 'success');
+      selectRow(state.activeIndex);
+    } catch (error) {
+      setStatus(detailStatus, error.message, 'error');
+    }
+  });
+
+  savePresetBtn.addEventListener('click', async () => {
+    if (!state.canManagePresets) {
+      setStatus(detailStatus, 'プリセットを保存できるのは管理者のみです。', 'error');
+      return;
+    }
+    const name = window.prompt('保存するプリセット名を入力してください。');
+    if (!name) return;
+    const row = currentRow();
+    if (!row) return;
+    try {
+      const response = await fetch('/tools/car_inspe/api/presets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, dpi: state.presets[row.preset]?.dpi || 300, regions: readRegions() }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '保存に失敗しました。');
+      await loadPresets();
+      presetSelect.value = data.name;
+      setStatus(detailStatus, 'OCR範囲プリセットを保存しました。', 'success');
+    } catch (error) {
+      setStatus(detailStatus, error.message, 'error');
+    }
+  });
+
+  async function finalize() {
+    state.rows.forEach((_, index) => {
+      if (index === state.activeIndex) updateActiveFromInputs();
+      state.rows[index].output_name = buildName(state.rows[index]);
+    });
+    setStatus(uploadStatus, '出力を作成しています...');
+    const response = await fetch('/tools/car_inspe/api/finalize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: state.sessionId,
+        rows: state.rows,
+        filename_template: filenameTemplate.value || state.defaultTemplate,
+      }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || '出力に失敗しました。');
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^"]+)"?/);
+    const filename = decodeURIComponent(match?.[1] || match?.[2] || 'vehicle_inspection_output.zip');
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setStatus(uploadStatus, '出力が完了しました。', 'success');
+  }
+
+  downloadBtn.addEventListener('click', async () => {
+    try {
+      await finalize();
+    } catch (error) {
+      setStatus(uploadStatus, error.message, 'error');
+    }
+  });
+
+  setInputsEnabled(false);
+  loadPresets().catch(() => setStatus(uploadStatus, 'プリセットの読み込みに失敗しました。', 'error'));
+})();
+</script>
 {% endblock %}
