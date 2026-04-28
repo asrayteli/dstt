@@ -600,11 +600,12 @@
       vehicle_id: clean(row.vehicle_id, '契約コード未確認'),
       location: clean(row.location, '現場名未確認'),
       registration: clean(row.registration_number, '登録番号未確認'),
-      original: clean((row.original_name || '').replace(/\.pdf$/i, ''), 'source'),
+      original: clean((row.original_name || '').replace(/\.pdf$/i, ''), '元ファイル'),
       today: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
     };
     let template = filenameTemplate.value || state.defaultTemplate;
     let name = template.replace(/\{(expiry|vehicle_id|location|registration|original|today)\}/g, (_, key) => values[key]);
+    name = name.replace(/\{[^{}]*\}/g, '');
     name = name.replace(/\.pdf$/i, '');
     return `${clean(name, '車検証')}.pdf`;
   }

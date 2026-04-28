@@ -140,6 +140,7 @@
   const esc = (v) => { const d = document.createElement('div'); d.textContent = v == null ? '' : String(v); return d.innerHTML; };
   const linkBadge = (r) => r.siteplus_linked ? '<span class="vim-badge vim-linked">PLUS連携</span>' : '<span class="vim-badge vim-unlinked">未連携</span>';
   const badge = (s) => s === 'expired' ? '<span class="vim-badge vim-expired">期限切れ</span>' : s === 'active' ? '<span class="vim-badge vim-active">有効</span>' : '<span class="vim-badge vim-unknown">未登録</span>';
+  const pendingBadge = (r) => r.is_pending ? '<span class="vim-badge vim-unknown">車検証未登録</span>' : '';
   function ensureManageEnhancements() {
     const form = $('vim-form');
     if (!form || form.dataset.enhanced === '1') return;
@@ -243,24 +244,25 @@
     $('vim-count').textContent = `${state.records.length}件`;
     $('vim-s-contracts').textContent = data.summary?.contracts ?? '-';
     $('vim-s-records').textContent = data.summary?.records ?? '-';
-    $('vim-body').innerHTML = state.records.map((r) => `
+    $('vim-body').innerHTML = state.records.map((r, idx) => `
       <tr>
-        <td>${badge(r.status)} ${linkBadge(r)}</td><td>${esc(r.contract_code)}</td><td>${esc(r.vehicle_number)}</td><td>${esc(r.expiry_date || '-')}</td>
+        <td>${badge(r.status)} ${linkBadge(r)} ${pendingBadge(r)}</td><td>${esc(r.contract_code)}</td><td>${esc(r.vehicle_number)}</td><td>${esc(r.expiry_date || '-')}</td>
         <td>${esc(r.registration_number || '-')}</td><td>${esc(r.first_registration_month || '-')}</td><td>${esc(r.passenger_capacity || '-')}</td>
         <td>${esc(r.displacement || '-')}</td><td>${esc(r.site_name || '-')}</td>
         <td>${r.has_pdf ? `<a class="text-sky-700 font-bold" href="/tools/car_inspe/api/records/${r.id}/download">DL</a>` : '-'}</td>
-        <td><button class="vim-btn" data-edit="${r.id}">編集</button></td>
+        <td><button class="vim-btn" data-edit-index="${idx}">${r.is_pending ? '車検証登録' : '編集'}</button></td>
       </tr>`).join('') || '<tr><td colspan="11" class="text-center text-slate-500">データがありません</td></tr>';
-    document.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => openEdit(Number(b.dataset.edit))));
+    document.querySelectorAll('[data-edit-index]').forEach((b) => b.addEventListener('click', () => openEditByIndex(Number(b.dataset.editIndex))));
   }
-  function openEdit(id) {
+  function openEditByIndex(index) {
     ensureManageEnhancements();
-    const r = state.records.find((x) => x.id === id); if (!r) return;
+    const r = state.records[index]; if (!r) return;
     const form = $('vim-form');
     form.reset();
     Object.keys(r).forEach((k) => { if (form.elements[k]) form.elements[k].value = r[k] || ''; });
-    form.elements.id.value = r.id;
-    $('vim-delete')?.classList.remove('hidden');
+    form.elements.id.value = r.id || '';
+    if (r.id) $('vim-delete')?.classList.remove('hidden');
+    else $('vim-delete')?.classList.add('hidden');
     if (r.siteplus_contract) applyContract(r.siteplus_contract);
     else if ($('vim-contract-note')) $('vim-contract-note').textContent = '現場リストPLUSに未連携です。保存時に確認が必要です。';
     $('vim-modal').classList.remove('hidden'); $('vim-modal').classList.add('flex');
