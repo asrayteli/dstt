@@ -32,7 +32,7 @@ SESSION_TTL_SECONDS = 60 * 60 * 6
 
 COORD_PRESETS = {}
 DEFAULT_MANUAL_DPI = 300
-DEFAULT_FILENAME_TEMPLATE = "{expiry}_{vehicle_id}_{location}_{registration}.pdf"
+DEFAULT_FILENAME_TEMPLATE = "{満了日}_{契約コード}_{現場名}_{登録番号}.pdf"
 
 # Tesseract セットアップは初回呼び出しのみ実施し、以降はキャッシュを使う。
 _TESSERACT_READY = None
@@ -1250,19 +1250,32 @@ def normalize_expiry_for_filename(value):
 def build_output_filename(row, template=DEFAULT_FILENAME_TEMPLATE):
     expiry = normalize_expiry_for_filename(row.get("expiry_date"))
     registration = clean_registration_number(row.get("registration_number", ""))
+    expiry_part = sanitize_filename_part(expiry, "満了日未確認")
+    contract_part = sanitize_filename_part(row.get("vehicle_id"), "契約コード未確認")
+    location_part = sanitize_filename_part(row.get("location"), "現場名未確認")
+    registration_part = sanitize_filename_part(registration, "登録番号未確認")
+    original_part = sanitize_filename_part(os.path.splitext(row.get("original_name", ""))[0], "元ファイル")
+    today_part = datetime.now().strftime("%Y%m%d")
     values = {
-        "expiry": sanitize_filename_part(expiry, "満了日未確認"),
-        "vehicle_id": sanitize_filename_part(row.get("vehicle_id"), "契約コード未確認"),
-        "location": sanitize_filename_part(row.get("location"), "現場名未確認"),
-        "registration": sanitize_filename_part(registration, "登録番号未確認"),
-        "original": sanitize_filename_part(os.path.splitext(row.get("original_name", ""))[0], "source"),
-        "today": datetime.now().strftime("%Y%m%d"),
+        "満了日": expiry_part,
+        "契約コード": contract_part,
+        "現場名": location_part,
+        "登録番号": registration_part,
+        "元ファイル名": original_part,
+        "今日の日付": today_part,
+        "expiry": expiry_part,
+        "vehicle_id": contract_part,
+        "location": location_part,
+        "registration": registration_part,
+        "original": original_part,
+        "today": today_part,
     }
     template = (template or DEFAULT_FILENAME_TEMPLATE).strip()
     try:
         filename = template.format(**values)
     except (KeyError, ValueError):
         filename = DEFAULT_FILENAME_TEMPLATE.format(**values)
+    filename = re.sub(r"\{[^{}]*\}", "", filename)
     if not filename.lower().endswith(".pdf"):
         filename += ".pdf"
     filename = sanitize_filename_part(filename, "車検証.pdf")
@@ -1844,7 +1857,7 @@ def api_finalize():
             info.date_time = datetime.now().timetuple()[:6]
             with open(source_path, "rb") as f:
                 zipf.writestr(info, f.read())
-    return send_file_and_cleanup(zip_path, session_dir, as_attachment=True, download_name="vehicle_inspection_output.zip")
+    return send_file_and_cleanup(zip_path, session_dir, as_attachment=True, download_name="車検証PDF.zip")
 
 
 @car_inspe_bp.route("/api/records", methods=["GET"])
@@ -1867,8 +1880,13 @@ def api_records():
     records = query.order_by(VehicleInspectionRecord.expiry_date.asc(), VehicleInspectionRecord.contract_code.asc()).all()
     today = datetime.now().strftime("%Y%m%d")
     enriched = []
+    seen_keys = set()
     for record in records:
         item = enrich_vehicle_record(record)
+        seen_keys.add((
+            str(item.get("contract_code") or "").strip(),
+            str(item.get("vehicle_number") or "").strip(),
+        ))
         expiry = item.get("expiry_date") or ""
         item["status"] = "unknown"
         if expiry:
@@ -1876,6 +1894,57 @@ def api_records():
         if status and item["status"] != status:
             continue
         enriched.append(item)
+
+    siteplus_query = SiteContractMaster.query.filter(
+        SiteContractMaster.is_active.is_(True),
+        SiteContractMaster.vehicle_number.isnot(None),
+        SiteContractMaster.vehicle_number != "",
+    )
+    if q:
+        like = f"%{q}%"
+        siteplus_query = siteplus_query.filter(
+            or_(
+                SiteContractMaster.contract_code.ilike(like),
+                SiteContractMaster.vehicle_number.ilike(like),
+                SiteContractMaster.site_name.ilike(like),
+            )
+        )
+    siteplus_rows = siteplus_query.order_by(SiteContractMaster.contract_code.asc()).all()
+    for row in siteplus_rows:
+        contract_code = str(row.contract_code or "").strip()
+        vehicle_number = str(row.vehicle_number or "").strip()
+        if not contract_code or not vehicle_number:
+            continue
+        if (contract_code, vehicle_number) in seen_keys:
+            continue
+        seen_keys.add((contract_code, vehicle_number))
+        if status and status != "unknown":
+            continue
+        enriched.append({
+            "id": None,
+            "contract_code": contract_code,
+            "vehicle_number": vehicle_number,
+            "registration_number": "",
+            "expiry_date": "",
+            "first_registration_month": "",
+            "passenger_capacity": "",
+            "displacement": "",
+            "site_name": row.site_name or "",
+            "original_filename": "",
+            "stored_filename": "",
+            "has_pdf": False,
+            "uploaded_by": "",
+            "uploaded_at": None,
+            "updated_at": None,
+            "source": "siteplus",
+            "notes": "",
+            "siteplus_linked": True,
+            "siteplus_contract": serialize_siteplus_contract(row),
+            "siteplus_vehicle_number": vehicle_number,
+            "status": "unknown",
+            "is_pending": True,
+        })
+
     return jsonify({
         "records": enriched,
         "count": len(enriched),

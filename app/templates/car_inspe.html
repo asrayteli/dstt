@@ -345,9 +345,9 @@
           <div class="ci-section-title">出力名ルール</div>
           <div class="ci-field">
             <label for="filenameTemplate">テンプレート</label>
-            <input id="filenameTemplate" value="{expiry}_{vehicle_id}_{location}_{registration}.pdf">
+            <input id="filenameTemplate" value="{満了日}_{契約コード}_{現場名}_{登録番号}.pdf">
           </div>
-          <p class="ci-help mt-2">標準: 満了日_契約コード_現場名_登録番号.pdf。使える項目: {expiry}, {vehicle_id}, {location}, {registration}, {original}, {today}</p>
+          <p class="ci-help mt-2">標準: 満了日_契約コード_現場名_登録番号.pdf。使える項目: {満了日}, {契約コード}, {現場名}, {登録番号}, {元ファイル名}, {今日の日付}</p>
         </div>
 
         <div class="border-t pt-4">
@@ -514,7 +514,7 @@
     rows: [],
     activeIndex: -1,
     presets: {},
-    defaultTemplate: '{expiry}_{vehicle_id}_{location}_{registration}.pdf',
+    defaultTemplate: '{満了日}_{契約コード}_{現場名}_{登録番号}.pdf',
   };
 
   const $ = (id) => document.getElementById(id);
@@ -595,16 +595,28 @@
       const text = String(value || '').normalize('NFKC').replace(/\s+/g, '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/_+/g, '_').replace(/^[._ ]+|[._ ]+$/g, '');
       return text || fallback;
     };
+    const expiry = clean(row.expiry_date, '満了日未確認');
+    const contract = clean(row.vehicle_id, '契約コード未確認');
+    const location = clean(row.location, '現場名未確認');
+    const registration = clean(row.registration_number, '登録番号未確認');
+    const original = clean((row.original_name || '').replace(/\.pdf$/i, ''), '元ファイル');
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const values = {
-      expiry: clean(row.expiry_date, '満了日未確認'),
-      vehicle_id: clean(row.vehicle_id, '契約コード未確認'),
-      location: clean(row.location, '現場名未確認'),
-      registration: clean(row.registration_number, '登録番号未確認'),
-      original: clean((row.original_name || '').replace(/\.pdf$/i, ''), 'source'),
-      today: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
+      '満了日': expiry,
+      '契約コード': contract,
+      '現場名': location,
+      '登録番号': registration,
+      '元ファイル名': original,
+      '今日の日付': today,
+      'expiry': expiry,
+      'vehicle_id': contract,
+      'location': location,
+      'registration': registration,
+      'original': original,
+      'today': today,
     };
     let template = filenameTemplate.value || state.defaultTemplate;
-    let name = template.replace(/\{(expiry|vehicle_id|location|registration|original|today)\}/g, (_, key) => values[key]);
+    let name = template.replace(/\{([^{}]+)\}/g, (match, key) => Object.prototype.hasOwnProperty.call(values, key) ? values[key] : '');
     name = name.replace(/\.pdf$/i, '');
     return `${clean(name, '車検証')}.pdf`;
   }

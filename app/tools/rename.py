@@ -107,6 +107,7 @@ def apply_rename(filename, mode, opts, index):
             result = result.replace("{upper}", name.upper())
             result = result.replace("{lower}", name.lower())
             result = result.replace("{i}", str(index))
+            result = re.sub(r"\{[^{}]*\}", "", result)
             return result
         except Exception:
             return filename
@@ -152,7 +153,7 @@ def rename_tool():
             file.save(temp_file_path)
             zipf.write(temp_file_path, arcname=new_name)
 
-    return send_file(zip_path, as_attachment=True, download_name="renamed_files.zip")
+    return send_file(zip_path, as_attachment=True, download_name="リネーム済みファイル.zip")
 
 
 @rename_bp.route("/preview", methods=["POST"])
