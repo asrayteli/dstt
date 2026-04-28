@@ -32,7 +32,7 @@ SESSION_TTL_SECONDS = 60 * 60 * 6
 
 COORD_PRESETS = {}
 DEFAULT_MANUAL_DPI = 300
-DEFAULT_FILENAME_TEMPLATE = "{expiry}_{vehicle_id}_{location}_{registration}.pdf"
+DEFAULT_FILENAME_TEMPLATE = "{満了日}_{契約コード}_{現場名}_{登録番号}.pdf"
 
 # Tesseract セットアップは初回呼び出しのみ実施し、以降はキャッシュを使う。
 _TESSERACT_READY = None
@@ -1250,13 +1250,25 @@ def normalize_expiry_for_filename(value):
 def build_output_filename(row, template=DEFAULT_FILENAME_TEMPLATE):
     expiry = normalize_expiry_for_filename(row.get("expiry_date"))
     registration = clean_registration_number(row.get("registration_number", ""))
+    expiry_part = sanitize_filename_part(expiry, "満了日未確認")
+    contract_part = sanitize_filename_part(row.get("vehicle_id"), "契約コード未確認")
+    location_part = sanitize_filename_part(row.get("location"), "現場名未確認")
+    registration_part = sanitize_filename_part(registration, "登録番号未確認")
+    original_part = sanitize_filename_part(os.path.splitext(row.get("original_name", ""))[0], "元ファイル")
+    today_part = datetime.now().strftime("%Y%m%d")
     values = {
-        "expiry": sanitize_filename_part(expiry, "満了日未確認"),
-        "vehicle_id": sanitize_filename_part(row.get("vehicle_id"), "契約コード未確認"),
-        "location": sanitize_filename_part(row.get("location"), "現場名未確認"),
-        "registration": sanitize_filename_part(registration, "登録番号未確認"),
-        "original": sanitize_filename_part(os.path.splitext(row.get("original_name", ""))[0], "元ファイル"),
-        "today": datetime.now().strftime("%Y%m%d"),
+        "満了日": expiry_part,
+        "契約コード": contract_part,
+        "現場名": location_part,
+        "登録番号": registration_part,
+        "元ファイル名": original_part,
+        "今日の日付": today_part,
+        "expiry": expiry_part,
+        "vehicle_id": contract_part,
+        "location": location_part,
+        "registration": registration_part,
+        "original": original_part,
+        "today": today_part,
     }
     template = (template or DEFAULT_FILENAME_TEMPLATE).strip()
     try:
