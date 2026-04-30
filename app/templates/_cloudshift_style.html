@@ -397,6 +397,11 @@
     padding: 14px;
   }
 
+  .cloud-check-project-item.is-shared {
+    border-color: #d8c9ff;
+    background: linear-gradient(180deg, #ffffff 0%, #f8f5ff 100%);
+  }
+
   .cloud-check-project-item.is-selected {
     border-color: var(--cloud-primary);
     box-shadow: 0 14px 28px rgba(45, 111, 182, 0.1);
@@ -563,10 +568,28 @@
   }
 
   .cloud-editor-heading h2 {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
     margin: 0 0 6px;
     font-size: 24px;
     font-weight: 900;
     letter-spacing: -0.02em;
+  }
+
+  .cloud-editor-title-month {
+    color: var(--cloud-ink);
+  }
+
+  .cloud-unsaved-indicator {
+    border-radius: 999px;
+    background: #fee2e2;
+    color: #b91c1c;
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    padding: 5px 9px;
   }
 
   .cloud-editor-heading p {

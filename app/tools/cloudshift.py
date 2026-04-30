@@ -233,6 +233,11 @@ def _month_key(year: int, month: int) -> str:
     return f"{year:04d}-{month:02d}"
 
 
+def _current_month_key() -> str:
+    today = date.today()
+    return _month_key(today.year, today.month)
+
+
 def _parse_month_key(month_key: str) -> tuple[int, int]:
     year_text, month_text = month_key.split("-", 1)
     return int(year_text), int(month_text)
@@ -4950,10 +4955,11 @@ def _project_detail_payload(
     active_month_key = None
     month_data = None
     if month_keys:
-        active_month_key = selected_month_key or month_keys[-1]
+        current_month_key = _current_month_key()
+        active_month_key = selected_month_key or (current_month_key if current_month_key in month_keys else month_keys[-1])
         month_data = project["months"].get(active_month_key)
         if not month_data:
-            active_month_key = month_keys[-1]
+            active_month_key = current_month_key if current_month_key in month_keys else month_keys[-1]
             month_data = project["months"][active_month_key]
     return {
         "project": {
