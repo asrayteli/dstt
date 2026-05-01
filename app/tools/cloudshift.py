@@ -123,7 +123,8 @@ PERSON_ASSIST_KIND_LABELS = {
 PERSON_ASSIST_AUTO_ROLE_TYPE = "backup"
 SHIFT_SYNC_SCENE_SOURCE = "scene_shift"
 SHIFT_SYNC_PERSON_SOURCE = "person_shift"
-SHIFT_SYNC_SOURCE_TYPES = {SHIFT_SYNC_SCENE_SOURCE, SHIFT_SYNC_PERSON_SOURCE}
+SHIFT_SYNC_MASTER_SOURCE = "master_shift"
+SHIFT_SYNC_SOURCE_TYPES = {SHIFT_SYNC_SCENE_SOURCE, SHIFT_SYNC_PERSON_SOURCE, SHIFT_SYNC_MASTER_SOURCE}
 
 
 class CloudShiftError(Exception):
@@ -279,8 +280,8 @@ def _sanitize_title(value: str) -> str:
 
 def _sanitize_mode(value: str) -> str:
     mode = (value or "").strip().lower()
-    if mode not in {"scene", "person"}:
-        raise CloudShiftError("mode は scene または person のみ対応です", 400)
+    if mode not in {"scene", "person", "master"}:
+        raise CloudShiftError("mode は scene、person、master のみ対応です", 400)
     return mode
 
 
@@ -646,6 +647,171 @@ def _site_storage_fields(site_ref: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _split_master_ref_text(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        text = str(value or "").strip()
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                raw_items = parsed
+            else:
+                raw_items = []
+                for line in text.replace("、", ",").replace("\r", "\n").split("\n"):
+                    raw_items.extend(line.split(","))
+        else:
+            raw_items = []
+            for line in text.replace("、", ",").replace("\r", "\n").split("\n"):
+                raw_items.extend(line.split(","))
+    items: list[str] = []
+    for item in raw_items:
+        if isinstance(item, dict):
+            candidate = str(
+                item.get("employee_number")
+                or item.get("site_row_id")
+                or item.get("site_id")
+                or item.get("id")
+                or ""
+            ).strip()
+        else:
+            candidate = str(item or "").strip()
+        if candidate and candidate not in items:
+            items.append(candidate)
+    return items
+
+
+def _sanitize_master_target_type(value: Any) -> str:
+    target_type = str(value or "").strip().lower()
+    if target_type in {"person", "people"}:
+        return "person"
+    if target_type in {"scene", "site", "sites"}:
+        return "scene"
+    raise CloudShiftError("マスターシフトの対象種別は 個人 または 現場 を選択してください", 400)
+
+
+def _master_payload_items(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    text = str(value or "").strip()
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            return parsed
+    return _split_master_ref_text(value)
+
+
+def _master_people_from_payload(value: Any) -> list[dict[str, str]]:
+    people: list[dict[str, str]] = []
+    seen: set[str] = set()
+    raw_items = _master_payload_items(value)
+    for item in raw_items:
+        if isinstance(item, dict):
+            number = _sanitize_employee_number(item.get("employee_number"))
+            name = str(item.get("name") or item.get("employee_name") or "").strip()
+        else:
+            number = _sanitize_employee_number(item)
+            name = ""
+        if not number or number in seen:
+            continue
+        seen.add(number)
+        people.append({"employee_number": number, "name": name or _employee_label_for_number(number)})
+    return people
+
+
+def _site_reference_from_master_ref(value: Any) -> dict[str, Any] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    site = None
+    if text.isdigit():
+        site = db.session.get(Site, int(text))
+    if site is None:
+        site = Site.query.filter_by(site_id=text).first()
+    if site is None:
+        site = Site.query.filter(Site.site_name == text).first()
+    if site is None:
+        raise CloudShiftError(f"マスターシフトの現場 {text} が見つかりません", 400)
+    if not site.is_active:
+        raise CloudShiftError(f"無効化された現場は選択できません: {site.site_id or site.site_name}", 400)
+    return _load_site_reference(site.id, require_active=True)
+
+
+def _master_sites_from_payload(value: Any) -> list[dict[str, Any]]:
+    sites: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    raw_items = _master_payload_items(value)
+    for item in raw_items:
+        if isinstance(item, dict):
+            ref = item.get("site_row_id") or item.get("id") or item.get("site_id") or item.get("site_name")
+        else:
+            ref = item
+        site_ref = _site_reference_from_master_ref(ref)
+        if not site_ref:
+            continue
+        site_row_id = int(site_ref["site_row_id"])
+        if site_row_id in seen:
+            continue
+        seen.add(site_row_id)
+        sites.append(site_ref)
+    return sites
+
+
+def _master_people_text(project: dict[str, Any]) -> str:
+    return "\n".join(
+        str(item.get("employee_number") or "").strip()
+        for item in (project.get("master_people") or [])
+        if isinstance(item, dict) and str(item.get("employee_number") or "").strip()
+    )
+
+
+def _master_sites_text(project: dict[str, Any]) -> str:
+    return "\n".join(
+        str(item.get("site_row_id") or item.get("site_id") or "").strip()
+        for item in (project.get("master_sites") or [])
+        if isinstance(item, dict) and str(item.get("site_row_id") or item.get("site_id") or "").strip()
+    )
+
+
+def _master_target_type_for_project(project: dict[str, Any]) -> str:
+    raw_target_type = str(project.get("master_target_type") or "").strip().lower()
+    if raw_target_type in {"person", "scene"}:
+        return raw_target_type
+    if project.get("master_people"):
+        return "person"
+    return "scene"
+
+
+def _master_scope_from_payload(data: Any, *, existing: dict[str, Any] | None = None) -> tuple[str, list[dict[str, str]], list[dict[str, Any]]]:
+    getter = data.get if hasattr(data, "get") else lambda key, default=None: default
+    target_type = _sanitize_master_target_type(
+        getter("master_target_type", _master_target_type_for_project(existing or {}))
+    )
+    raw_people = getter("master_people", _master_people_text(existing or {}))
+    raw_sites = getter("master_sites", _master_sites_text(existing or {}))
+    people = _master_people_from_payload(raw_people)
+    sites = _master_sites_from_payload(raw_sites)
+    if target_type == "person":
+        if sites:
+            raise CloudShiftError("個人マスターには現場を登録できません", 400)
+        if not people:
+            raise CloudShiftError("個人マスターには人物を1件以上登録してください", 400)
+        return target_type, people, []
+    if people:
+        raise CloudShiftError("現場マスターには人物を登録できません", 400)
+    if not sites:
+        raise CloudShiftError("現場マスターには現場を1件以上登録してください", 400)
+    return target_type, [], sites
+
+
 def _format_entry_value(option_key: Any, name: Any) -> str:
     safe_name = str(name or "").strip()
     if not safe_name:
@@ -859,6 +1025,9 @@ def _build_month_payload(
 
 def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
     month_keys = _sort_month_keys(list((project.get("months") or {}).keys()))
+    master_people = [item for item in (project.get("master_people") or []) if isinstance(item, dict)]
+    master_sites = [item for item in (project.get("master_sites") or []) if isinstance(item, dict)]
+    master_target_type = _master_target_type_for_project(project)
     summary = {
         "id": project["id"],
         "title": project["title"],
@@ -871,6 +1040,16 @@ def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
         "created_at": project.get("created_at"),
         "updated_at": project.get("updated_at"),
         "site": _project_site_payload(project),
+        "master": {
+            "target_type": master_target_type,
+            "target_label": "個人" if master_target_type == "person" else "現場",
+            "people": master_people,
+            "sites": master_sites,
+            "people_count": len(master_people),
+            "site_count": len(master_sites),
+            "people_text": _master_people_text(project),
+            "sites_text": _master_sites_text(project),
+        },
     }
     share_status = _share_status_for_current_user(project)
     if share_status:
@@ -2295,6 +2474,200 @@ def _build_scene_synced_entry_from_person(
     return _scene_entry_with_siteplus_defaults(target_project, synced)
 
 
+def _build_person_synced_entry_from_master(
+    source_project: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    month_key: str,
+    day_key: str,
+) -> dict[str, Any]:
+    option_key, _ = _entry_option_and_name(entry)
+    source_entry_id = str(entry.get("id") or "").strip()
+    site_link = _entry_site_link_fields(entry)
+    site_name = str(site_link.get("site_name") or "").strip()
+    return {
+        "id": _sync_entry_id(SHIFT_SYNC_MASTER_SOURCE, source_project.get("id"), "person", month_key, day_key, source_entry_id),
+        "value": _format_entry_value(option_key, site_name),
+        "comment": str(entry.get("comment") or "").strip(),
+        "employee_number": "",
+        "site_row_id": str(site_link.get("site_row_id") or ""),
+        "site_id": str(site_link.get("site_id") or "").strip(),
+        "site_name": site_name,
+        "site_branch_row_id": "",
+        "site_branch": "",
+        "sync_source_type": SHIFT_SYNC_MASTER_SOURCE,
+        "sync_source_project_id": str(source_project.get("id") or ""),
+        "sync_source_project_title": str(source_project.get("title") or ""),
+        "sync_source_month_key": month_key,
+        "sync_source_day": day_key,
+        "sync_source_entry_id": source_entry_id,
+    }
+
+
+def _build_scene_synced_entry_from_master(
+    source_project: dict[str, Any],
+    target_project: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    month_key: str,
+    day_key: str,
+) -> dict[str, Any]:
+    option_key, employee_name = _entry_option_and_name(entry)
+    source_entry_id = str(entry.get("id") or "").strip()
+    branch_fields = _scene_branch_fields_for_option(target_project, option_key)
+    synced = {
+        "id": _sync_entry_id(SHIFT_SYNC_MASTER_SOURCE, source_project.get("id"), "scene", month_key, day_key, source_entry_id),
+        "value": _format_entry_value(option_key, employee_name),
+        "comment": str(entry.get("comment") or "").strip(),
+        "employee_number": str(entry.get("employee_number") or "").strip(),
+        "site_row_id": "",
+        "site_id": "",
+        "site_name": "",
+        "site_branch_row_id": branch_fields["site_branch_row_id"],
+        "site_branch": branch_fields["site_branch"],
+        "sync_source_type": SHIFT_SYNC_MASTER_SOURCE,
+        "sync_source_project_id": str(source_project.get("id") or ""),
+        "sync_source_project_title": str(source_project.get("title") or ""),
+        "sync_source_month_key": month_key,
+        "sync_source_day": day_key,
+        "sync_source_entry_id": source_entry_id,
+    }
+    return _scene_entry_with_siteplus_defaults(target_project, synced)
+
+
+def _matching_master_project_ids_for_person_project(person_project: dict[str, Any]) -> list[str]:
+    """個人シフト帳が登録されている個人型マスターのIDリストを返す。"""
+    employee_number = str(person_project.get("employee_number") or "").strip()
+    employee_name = _normalized_person_title(str(person_project.get("title") or ""))
+    result: list[str] = []
+    for project in _iter_project_summaries():
+        if project.get("mode") != "master":
+            continue
+        if _master_target_type_for_project(project) != "person":
+            continue
+        master_people = [item for item in (project.get("master_people") or []) if isinstance(item, dict)]
+        people_numbers = {str(item.get("employee_number") or "").strip() for item in master_people}
+        people_names = {_normalized_person_title(item.get("name")) for item in master_people if str(item.get("name") or "").strip()}
+        if (employee_number and employee_number in people_numbers) or (employee_name and employee_name in people_names):
+            project_id = str(project.get("id") or "").strip()
+            if project_id:
+                result.append(project_id)
+    return result
+
+
+def _matching_master_project_ids_for_scene_project(scene_project: dict[str, Any]) -> list[str]:
+    """現場シフト帳が登録されている現場型マスターのIDリストを返す。"""
+    site_row_id = _coerce_site_row_id(scene_project.get("site_row_id"))
+    site_id = str(scene_project.get("site_id") or "").strip()
+    site_name = _normalized_site_title(str(scene_project.get("site_name") or scene_project.get("title") or ""))
+    result: list[str] = []
+    for project in _iter_project_summaries():
+        if project.get("mode") != "master":
+            continue
+        if _master_target_type_for_project(project) != "scene":
+            continue
+        master_sites = [item for item in (project.get("master_sites") or []) if isinstance(item, dict)]
+        site_row_ids = {_coerce_site_row_id(item.get("site_row_id")) for item in master_sites}
+        site_ids = {str(item.get("site_id") or "").strip() for item in master_sites}
+        site_names = {_normalized_site_title(item.get("site_name")) for item in master_sites if str(item.get("site_name") or "").strip()}
+        if (
+            (site_row_id is not None and site_row_id in site_row_ids)
+            or (site_id and site_id in site_ids)
+            or (site_name and site_name in site_names)
+        ):
+            project_id = str(project.get("id") or "").strip()
+            if project_id:
+                result.append(project_id)
+    return result
+
+
+def _build_master_synced_entry_from_person(
+    source_project: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    month_key: str,
+    day_key: str,
+) -> dict[str, Any]:
+    """個人シフトのネイティブエントリからマスター形式の同期エントリを生成する。"""
+    option_key, _ = _entry_option_and_name(entry)
+    source_entry_id = str(entry.get("id") or "").strip()
+    site_link = _entry_site_link_fields(entry)
+    return {
+        "id": _sync_entry_id(SHIFT_SYNC_PERSON_SOURCE, source_project.get("id"), "master", month_key, day_key, source_entry_id),
+        "value": _format_entry_value(option_key, str(source_project.get("title") or "").strip()),
+        "comment": str(entry.get("comment") or "").strip(),
+        "employee_number": str(source_project.get("employee_number") or "").strip(),
+        "site_row_id": str(_coerce_site_row_id(site_link.get("site_row_id")) or ""),
+        "site_id": str(site_link.get("site_id") or "").strip(),
+        "site_name": str(site_link.get("site_name") or "").strip(),
+        "site_branch_row_id": "",
+        "site_branch": "",
+        "sync_source_type": SHIFT_SYNC_PERSON_SOURCE,
+        "sync_source_project_id": str(source_project.get("id") or ""),
+        "sync_source_project_title": str(source_project.get("title") or ""),
+        "sync_source_month_key": month_key,
+        "sync_source_day": day_key,
+        "sync_source_entry_id": source_entry_id,
+    }
+
+
+def _build_master_synced_entry_from_scene(
+    source_project: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    month_key: str,
+    day_key: str,
+) -> dict[str, Any]:
+    """現場シフトのネイティブエントリからマスター形式の同期エントリを生成する。"""
+    option_key, employee_name = _entry_option_and_name(entry)
+    source_entry_id = str(entry.get("id") or "").strip()
+    return {
+        "id": _sync_entry_id(SHIFT_SYNC_SCENE_SOURCE, source_project.get("id"), "master", month_key, day_key, source_entry_id),
+        "value": _format_entry_value(option_key, employee_name),
+        "comment": str(entry.get("comment") or "").strip(),
+        "employee_number": str(entry.get("employee_number") or "").strip(),
+        "site_row_id": str(_coerce_site_row_id(source_project.get("site_row_id")) or ""),
+        "site_id": str(source_project.get("site_id") or "").strip(),
+        "site_name": str(source_project.get("site_name") or "").strip(),
+        "site_branch_row_id": "",
+        "site_branch": "",
+        "sync_source_type": SHIFT_SYNC_SCENE_SOURCE,
+        "sync_source_project_id": str(source_project.get("id") or ""),
+        "sync_source_project_title": str(source_project.get("title") or ""),
+        "sync_source_month_key": month_key,
+        "sync_source_day": day_key,
+        "sync_source_entry_id": source_entry_id,
+    }
+
+
+def _master_entry_is_in_scope(source_project: dict[str, Any], entry: dict[str, Any]) -> bool:
+    target_type = _master_target_type_for_project(source_project)
+    master_people = [item for item in (source_project.get("master_people") or []) if isinstance(item, dict)]
+    if target_type == "person":
+        employee_number = str(entry.get("employee_number") or "").strip()
+        _, employee_name = _entry_option_and_name(entry)
+        normalized_name = _normalized_person_title(employee_name)
+        people_numbers = {str(item.get("employee_number") or "").strip() for item in master_people}
+        people_names = {_normalized_person_title(item.get("name")) for item in master_people if str(item.get("name") or "").strip()}
+        if not ((employee_number and employee_number in people_numbers) or (normalized_name and normalized_name in people_names)):
+            return False
+        return True
+
+    master_sites = [item for item in (source_project.get("master_sites") or []) if isinstance(item, dict)]
+    site_link = _entry_site_link_fields(entry)
+    site_row_id = _coerce_site_row_id(site_link.get("site_row_id"))
+    site_id = str(site_link.get("site_id") or "").strip()
+    site_name = _normalized_site_title(site_link.get("site_name"))
+    site_row_ids = {_coerce_site_row_id(item.get("site_row_id")) for item in master_sites}
+    site_ids = {str(item.get("site_id") or "").strip() for item in master_sites}
+    site_names = {_normalized_site_title(item.get("site_name")) for item in master_sites if str(item.get("site_name") or "").strip()}
+    return (
+        (site_row_id is not None and site_row_id in site_row_ids)
+        or (site_id and site_id in site_ids)
+        or (site_name and site_name in site_names)
+    )
+
+
 def _desired_shift_sync_entries_by_target(
     source_project: dict[str, Any],
     month_key: str,
@@ -2305,24 +2678,66 @@ def _desired_shift_sync_entries_by_target(
     entries_per_day = _normalize_entries(month_data.get("entries_per_day"), month_data["year"], month_data["month"])
     for day_key, entries in entries_per_day.items():
         for entry in entries:
-            if _entry_is_shift_synced(entry):
-                continue
+            is_synced = _entry_is_shift_synced(entry)
+            is_from_master = str(entry.get("sync_source_type") or "") == SHIFT_SYNC_MASTER_SOURCE
             option_key, entry_name = _entry_option_and_name(entry)
             if mode == "scene":
                 if not entry_name:
                     continue
-                for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, entry):
-                    desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
-                        _build_person_synced_entry_from_scene(source_project, entry, month_key=month_key, day_key=day_key)
-                    )
+                if not is_synced:
+                    for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, entry):
+                        desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                            _build_person_synced_entry_from_scene(source_project, entry, month_key=month_key, day_key=day_key)
+                        )
+                if not is_from_master:
+                    for target_project_id in _matching_master_project_ids_for_scene_project(source_project):
+                        desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                            _build_master_synced_entry_from_scene(source_project, entry, month_key=month_key, day_key=day_key)
+                        )
             elif mode == "person":
                 if option_key in LEAVE_OPTION_MAPPINGS:
                     continue
                 site_link = _entry_site_link_fields(entry)
                 if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
                     continue
+                if not is_synced:
+                    for target_project_id in _matching_scene_project_ids_for_person_entry(source_project, entry):
+                        desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(entry)
+                if not is_from_master:
+                    for target_project_id in _matching_master_project_ids_for_person_project(source_project):
+                        desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                            _build_master_synced_entry_from_person(source_project, entry, month_key=month_key, day_key=day_key)
+                        )
+            elif mode == "master":
+                if is_synced:
+                    continue
+                if option_key in LEAVE_OPTION_MAPPINGS:
+                    continue
+                if not entry_name:
+                    continue
+                site_link = _entry_site_link_fields(entry)
+                if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
+                    continue
+                for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, entry):
+                    desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                        _build_person_synced_entry_from_master(
+                            source_project,
+                            entry,
+                            month_key=month_key,
+                            day_key=day_key,
+                        )
+                    )
                 for target_project_id in _matching_scene_project_ids_for_person_entry(source_project, entry):
-                    desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(entry)
+                    target_project = _load_project(target_project_id)
+                    desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                        _build_scene_synced_entry_from_master(
+                            source_project,
+                            target_project,
+                            entry,
+                            month_key=month_key,
+                            day_key=day_key,
+                        )
+                    )
     return desired
 
 
@@ -2422,9 +2837,13 @@ def _resync_shift_month(source_project: dict[str, Any], month_key: str, *, actor
     if not month_data:
         return
     desired_by_target = _desired_shift_sync_entries_by_target(source_project, month_key, month_data)
+    source_mode = str(source_project.get("mode") or "")
     relevant_target_ids = set(desired_by_target.keys())
     for project in _iter_project_summaries():
-        if project.get("mode") == source_project.get("mode"):
+        project_mode = str(project.get("mode") or "")
+        if project_mode == "master" and source_mode == "master":
+            continue
+        if project_mode != "master" and project_mode == source_mode:
             continue
         project_id = str(project.get("id") or "").strip()
         if not project_id:
@@ -2454,6 +2873,16 @@ def _refresh_shift_sync_for_target_month(target_project: dict[str, Any], month_k
     if not month_key or month_key not in (target_project.get("months") or {}):
         return
     target_mode = str(target_project.get("mode") or "")
+    if target_mode == "master":
+        master_target_type = _master_target_type_for_project(target_project)
+        expected_source_mode = "person" if master_target_type == "person" else "scene"
+        for source_project in _iter_project_summaries():
+            if str(source_project.get("mode") or "") != expected_source_mode:
+                continue
+            if month_key not in (source_project.get("months") or {}):
+                continue
+            _resync_shift_month(source_project, month_key, actor_name=actor_name)
+        return
     for source_project in _iter_project_summaries():
         if str(source_project.get("mode") or "") == target_mode:
             continue
@@ -2473,8 +2902,12 @@ def _refresh_shift_sync_for_target_project(target_project: dict[str, Any], *, ac
 
 
 def _remove_shift_sync_for_month(source_project: dict[str, Any], month_key: str, *, actor_name: str) -> None:
+    source_mode = str(source_project.get("mode") or "")
     for project in _iter_project_summaries():
-        if project.get("mode") == source_project.get("mode"):
+        project_mode = str(project.get("mode") or "")
+        if project_mode == "master" and source_mode == "master":
+            continue
+        if project_mode != "master" and project_mode == source_mode:
             continue
         project_id = str(project.get("id") or "").strip()
         if not project_id:
@@ -5053,6 +5486,8 @@ def api_conflict_check():
     compare_payloads: list[dict[str, Any]] = []
     for project_id in project_ids:
         project = _owner_project_or_404(project_id)
+        if project.get("mode") == "master":
+            raise CloudShiftError("マスターシフトは重複チェックの対象外です", 400)
         month_data = (project.get("months") or {}).get(month_key)
         if not month_data:
             raise CloudShiftError(f"{project['title']} に {month_key} の月データがありません", 400)
@@ -5101,6 +5536,11 @@ def api_create():
     site_ref = None
     if mode == "scene":
         site_ref = _load_site_reference(_sanitize_site_row_id(request.form.get("site_row_id")), require_active=True)
+    master_target_type = ""
+    master_people: list[dict[str, str]] = []
+    master_sites: list[dict[str, Any]] = []
+    if mode == "master":
+        master_target_type, master_people, master_sites = _master_scope_from_payload(request.form)
 
     project_id = _project_id()
     month_key = _month_key(year, month)
@@ -5111,6 +5551,9 @@ def api_create():
         "mode": mode,
         "employee_number": employee_number if mode == "person" else "",
         **_site_storage_fields(site_ref if mode == "scene" else None),
+        "master_target_type": master_target_type,
+        "master_people": master_people,
+        "master_sites": master_sites,
         "view_token": _share_token(),
         "edit_token": _share_token(),
         "created_at": _utcnow_iso(),
@@ -5143,6 +5586,21 @@ def api_create():
                 "changes": [f"現場を {site_ref['site_id']} / {site_ref['site_name']} に設定"],
             },
         )
+    if mode == "master":
+        _append_history(
+            project_id,
+            {
+                "timestamp": _utcnow_iso(),
+                "editor_name": _user_label(),
+                "editor_type": "owner",
+                "action": "master_scope_updated",
+                "month_key": None,
+                "changes": [
+                    f"{'個人' if master_target_type == 'person' else '現場'}マスター対象を "
+                    f"{len(master_people) if master_target_type == 'person' else len(master_sites)}件 に設定"
+                ],
+            },
+        )
     if project["mode"] == "scene":
         _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
         _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
@@ -5156,6 +5614,9 @@ def api_create():
 @login_required
 def api_project_detail(project_id: str):
     project, access_role = _project_for_current_user_or_404(project_id)
+    if project.get("mode") == "master" and access_role == "owner":
+        _refresh_shift_sync_for_target_project(project, actor_name=_user_label())
+        project, access_role = _project_for_current_user_or_404(project_id)
     selected_month_key = request.args.get("month_key")
     payload = _project_detail_payload(project, selected_month_key, include_draft=access_role == "owner")
     payload["access_role"] = access_role
@@ -5177,6 +5638,9 @@ def api_project_meta(project_id: str):
         old_title = project["title"]
         old_employee_number = str(project.get("employee_number") or "")
         old_site = _project_site_payload(project)
+        old_master_target_type = _master_target_type_for_project(project)
+        old_master_people = [dict(item) for item in (project.get("master_people") or []) if isinstance(item, dict)]
+        old_master_sites = [dict(item) for item in (project.get("master_sites") or []) if isinstance(item, dict)]
         new_employee_number = _sanitize_employee_number(data.get("employee_number", project.get("employee_number", "")))
         if project.get("mode") != "person":
             new_employee_number = ""
@@ -5184,6 +5648,11 @@ def api_project_meta(project_id: str):
         if project.get("mode") == "scene":
             incoming_site_row_id = data.get("site_row_id", project.get("site_row_id"))
             new_site_ref = _load_site_reference(_sanitize_site_row_id(incoming_site_row_id), require_active=True)
+        new_master_target_type = old_master_target_type
+        new_master_people = project.get("master_people") or []
+        new_master_sites = project.get("master_sites") or []
+        if project.get("mode") == "master":
+            new_master_target_type, new_master_people, new_master_sites = _master_scope_from_payload(data, existing=project)
         metadata_changed = False
         if new_title != project["title"]:
             project["title"] = new_title
@@ -5199,6 +5668,15 @@ def api_project_meta(project_id: str):
         ):
             project.update(next_site_fields)
             metadata_changed = True
+        if project.get("mode") == "master" and (
+            new_master_target_type != old_master_target_type
+            or new_master_people != old_master_people
+            or new_master_sites != old_master_sites
+        ):
+            project["master_target_type"] = new_master_target_type
+            project["master_people"] = new_master_people
+            project["master_sites"] = new_master_sites
+            metadata_changed = True
         if metadata_changed:
             _save_project(project)
             changes = []
@@ -5212,6 +5690,15 @@ def api_project_meta(project_id: str):
                     changes.append(f"現場を {next_site.get('site_id')} / {next_site.get('site_name')} に設定")
                 elif old_site.get("site_row_id"):
                     changes.append("現場設定を解除")
+            if project.get("mode") == "master" and (
+                new_master_target_type != old_master_target_type
+                or new_master_people != old_master_people
+                or new_master_sites != old_master_sites
+            ):
+                changes.append(
+                    f"{'個人' if new_master_target_type == 'person' else '現場'}マスター対象を "
+                    f"{len(new_master_people) if new_master_target_type == 'person' else len(new_master_sites)}件 に更新"
+                )
             if not changes:
                 changes.append("メタ情報を更新")
             _append_history(

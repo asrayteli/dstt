@@ -349,6 +349,176 @@ def test_account_share_same_office_lists_shared_project(tmp_path):
     assert projects[0]["access_role"] == "viewer"
 
 
+def test_master_shift_syncs_to_person_and_scene_projects(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    with client.application.app_context():
+        site = Site(
+            site_id="S001",
+            site_name="Master Site",
+            site_manager_last="Owner",
+            site_manager_first="Manager",
+            site_manager_id="9001",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.commit()
+        site_row_id = site.id
+
+    person = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    scene = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Master Site",
+            "mode": "scene",
+            "site_row_id": str(site_row_id),
+            "year": "2026",
+            "month": "4",
+        },
+    ).get_json()["project"]
+    master = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "April Master",
+            "mode": "master",
+            "master_target_type": "person",
+            "master_people": json.dumps([{"employee_number": "1001", "name": "Alice"}]),
+            "year": "2026",
+            "month": "4",
+        },
+    ).get_json()["project"]
+
+    master_id = master["project"]["id"]
+    master_entries = dict(master["month"]["entries_per_day"])
+    master_entries["1"] = [
+        {
+            "id": "master-1",
+            "value": "!A!Alice",
+            "comment": "from master",
+            "employee_number": "1001",
+            "site_row_id": str(site_row_id),
+            "site_id": "S001",
+            "site_name": "Master Site",
+        }
+    ]
+
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{master_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": master_entries, "base_month": master["month"]},
+    )
+    assert save_response.status_code == 200
+
+    person_detail = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{person['project']['id']}",
+        query_string={"month_key": "2026-04"},
+    ).get_json()
+    person_entry = person_detail["month"]["entries_per_day"]["1"][0]
+    assert person_entry["value"] == "!A!Master Site"
+    assert person_entry["site_row_id"] == str(site_row_id)
+    assert person_entry["sync_source_type"] == "master_shift"
+
+    scene_detail = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene['project']['id']}",
+        query_string={"month_key": "2026-04"},
+    ).get_json()
+    scene_entry = scene_detail["month"]["entries_per_day"]["1"][0]
+    assert scene_entry["value"] == "!A!Alice"
+    assert scene_entry["employee_number"] == "1001"
+    assert scene_entry["sync_source_type"] == "master_shift"
+
+
+def test_master_shift_rejects_mixed_people_and_sites(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    with client.application.app_context():
+        site = Site(
+            site_id="S002",
+            site_name="Mixed Site",
+            site_manager_last="Owner",
+            site_manager_first="Manager",
+            site_manager_id="9002",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.commit()
+        site_row_id = site.id
+
+    response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Mixed Master",
+            "mode": "master",
+            "master_target_type": "person",
+            "master_people": json.dumps([{"employee_number": "1001", "name": "Alice"}]),
+            "master_sites": json.dumps([{"site_row_id": str(site_row_id), "site_id": "S002", "site_name": "Mixed Site"}]),
+            "year": "2026",
+            "month": "4",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "個人マスターには現場を登録できません" in response.get_json()["error"]
+
+
+def test_master_shift_targets_can_be_edited_later(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    with client.application.app_context():
+        site = Site(
+            site_id="S003",
+            site_name="Editable Site",
+            site_manager_last="Owner",
+            site_manager_first="Manager",
+            site_manager_id="9003",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.commit()
+        site_row_id = site.id
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Editable Master",
+            "mode": "master",
+            "master_target_type": "person",
+            "master_people": json.dumps([{"employee_number": "1001", "name": "Alice"}]),
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert create_response.status_code == 200
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    update_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/meta",
+        json={
+            "title": "Editable Master",
+            "master_target_type": "scene",
+            "master_people": "",
+            "master_sites": json.dumps([{"site_row_id": str(site_row_id), "site_id": "S003", "site_name": "Editable Site"}]),
+        },
+    )
+
+    assert update_response.status_code == 200
+    master = update_response.get_json()["project"]["project"]["master"]
+    assert master["target_type"] == "scene"
+    assert master["site_count"] == 1
+    assert master["people_count"] == 0
+
+
 def test_owner_can_compare_own_cloudshift_projects_for_conflicts(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()

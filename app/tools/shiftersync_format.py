@@ -194,7 +194,7 @@ def serialize_entry_rows(
 
     rows: list[list[Any]] = [
         header,
-        ["日付", "出勤者" if mode == "scene" else "現場"],
+        ["日付", "出勤者" if mode in {"scene", "master"} else "現場"],
     ]
 
     comment_rows: list[list[Any]] = []
@@ -288,8 +288,8 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         raise ValueError("ShifterSync CSV のヘッダーが不正です")
 
     mode = str(rows[0][0]).strip().lower()
-    if mode not in {"scene", "person"}:
-        raise ValueError("mode は scene または person だけ対応しています")
+    if mode not in {"scene", "person", "master"}:
+        raise ValueError("mode は scene、person、master だけ対応しています")
 
     try:
         year, month = validate_year_month(rows[0][1], rows[0][2])

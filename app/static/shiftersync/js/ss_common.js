@@ -46,10 +46,11 @@ const ShifterSync = (function() {
   const siteNameRowPrefix = '#site_name';
   const siteBranchRowIdRowPrefix = '#site_branch_row_id';
   const siteBranchRowPrefix = '#site_branch';
-  const shiftSyncSourceTypes = ['scene_shift', 'person_shift'];
+  const shiftSyncSourceTypes = ['scene_shift', 'person_shift', 'master_shift'];
 
   const state = {
     mode: 'scene',
+    masterTargetType: '',
     year: null,
     month: null,
     name: null,
@@ -414,11 +415,36 @@ const ShifterSync = (function() {
     return state.mode === 'scene';
   }
 
+  function isMasterMode() {
+    return state.mode === 'master';
+  }
+
+  function masterTargetTypeValue() {
+    if (!isMasterMode()) {
+      return '';
+    }
+    return state.masterTargetType === 'scene' ? 'scene' : 'person';
+  }
+
+  function isMasterPersonType() {
+    return isMasterMode() && masterTargetTypeValue() === 'person';
+  }
+
+  function isMasterSceneType() {
+    return isMasterMode() && masterTargetTypeValue() === 'scene';
+  }
+
   function isEntryEmployeeSearchEnabled() {
+    if (isMasterMode()) {
+      return masterTargetTypeValue() === 'person';
+    }
     return isSceneMode();
   }
 
   function isEntrySiteSearchEnabled() {
+    if (isMasterMode()) {
+      return masterTargetTypeValue() === 'scene';
+    }
     return isPersonMode();
   }
 
@@ -1047,21 +1073,35 @@ const ShifterSync = (function() {
         branch_label: '',
         branch_missing: false,
         branch_issue_label: '',
-        branch_issue_tone: ''
+        branch_issue_tone: '',
+        sync_source_label: ''
       };
     }
     const parsed = parseEntryValue(normalized.value);
     const branchState = entryBranchState(normalized);
     const branchIssue = entryBranchIssue(normalized);
     const baseTitle = parsed.optionKey ? `${parsed.name} ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : parsed.name;
+    const displayTitle = isMasterMode() && normalized.site_name && !isMasterSceneType() ? `${baseTitle} / ${normalized.site_name}` : baseTitle;
+    let syncSourceLabel = '';
+    if (isMasterMode() && isSyncedEntry(normalized)) {
+      const sourceTitle = String(normalized.sync_source_project_title || '').trim();
+      const sourceType = String(normalized.sync_source_type || '').trim();
+      const sourceKindLabel = sourceType === 'scene_shift' ? '現場シフト' : sourceType === 'person_shift' ? '個人シフト' : '同期';
+      if (sourceTitle) {
+        syncSourceLabel = `${sourceKindLabel}: ${sourceTitle}`;
+      } else {
+        syncSourceLabel = `${sourceKindLabel}から反映`;
+      }
+    }
     return {
-      title: branchState.site_branch ? `${baseTitle} / 枝${branchState.site_branch}` : baseTitle,
+      title: branchState.site_branch ? `${displayTitle} / 枝${branchState.site_branch}` : displayTitle,
       comment: normalized.comment || '',
       employee_number: normalized.employee_number || '',
       branch_label: branchState.label,
       branch_missing: branchState.is_missing,
       branch_issue_label: branchIssue.label,
-      branch_issue_tone: branchIssue.tone
+      branch_issue_tone: branchIssue.tone,
+      sync_source_label: syncSourceLabel
     };
   }
 
@@ -1251,6 +1291,9 @@ const ShifterSync = (function() {
             .addClass('entry-item-main')
             .append(
               $('<div>').addClass('entry-item-title').text(parts.title),
+              parts.sync_source_label
+                ? $('<div>').addClass('entry-item-sync-source').text(parts.sync_source_label)
+                : null,
               parts.branch_issue_label
                 ? $('<div>').addClass(`entry-item-status is-${parts.branch_issue_tone || 'warning'}`).text(parts.branch_issue_label)
                 : null,
@@ -1315,10 +1358,13 @@ const ShifterSync = (function() {
 
     const inputGroup = $('<div>').addClass('input-group');
     const inputRow = $('<div>').addClass('input-row');
+    const nameInputPlaceholder = isMasterSceneType()
+      ? '\u73fe\u5834\u540d'
+      : (isSceneMode() || isMasterPersonType() ? '\u4eba\u7269\u540d' : '\u73fe\u5834\u540d');
     const nameInput = $('<input>')
       .attr('type', 'text')
       .addClass('entry-input')
-      .attr('placeholder', state.mode === 'scene' ? '\u4eba\u7269\u540d' : '\u73fe\u5834\u540d')
+      .attr('placeholder', nameInputPlaceholder)
       .attr('data-day', day);
     if (isEntryEmployeeSearchEnabled()) {
       nameInput
@@ -1335,6 +1381,7 @@ const ShifterSync = (function() {
       .attr('data-day', day)
       .text('\u8ffd\u52a0');
     inputRow.append(nameInput, addBtn);
+    const masterSiteInput = null;
 
     const commentInput = $('<textarea>')
       .addClass('entry-comment-input')
@@ -1379,7 +1426,11 @@ const ShifterSync = (function() {
     const controlsGrid = $('<div>').addClass('day-controls-grid');
     controlsGrid.append(optionBtn, toolDetailBtn, copyInput, copyBtn);
 
-    inputGroup.append(inputRow, selectionNote, candidatePanel, commentInput, controlsGrid);
+    inputGroup.append(inputRow);
+    if (masterSiteInput) {
+      inputGroup.append(masterSiteInput);
+    }
+    inputGroup.append(selectionNote, candidatePanel, commentInput, controlsGrid);
     dayBox.append(inputGroup);
     return dayBox;
   }
@@ -1832,7 +1883,8 @@ const ShifterSync = (function() {
 
     const options = getSelectedOptionsForDay(dayKey);
     const autoBranchFields = isSceneMode() ? autoBranchFieldsForOption(options[0] || null) : { site_branch_row_id: '', site_branch: '' };
-    const selectedSite = isPersonMode() ? getSelectedSiteDataForInput(nameInput) : { site_row_id: '', site_id: '', site_name: '' };
+    const useSiteSearch = isPersonMode() || isMasterSceneType();
+    const selectedSite = useSiteSearch ? getSelectedSiteDataForInput(nameInput) : { site_row_id: '', site_id: '', site_name: '' };
     const entry = normalizeEntry({
       id: makeEntryId(),
       value: formatEntryValue(options[0] || null, name),
@@ -1840,7 +1892,7 @@ const ShifterSync = (function() {
       employee_number: getSelectedEmployeeNumberForInput(nameInput),
       site_row_id: selectedSite.site_row_id,
       site_id: selectedSite.site_id,
-      site_name: selectedSite.site_name,
+      site_name: isMasterSceneType() ? (selectedSite.site_name || name) : selectedSite.site_name,
       site_branch_row_id: autoBranchFields.site_branch_row_id,
       site_branch: autoBranchFields.site_branch
     });
@@ -2192,12 +2244,21 @@ const ShifterSync = (function() {
     };
 
     if (!state.editable || syncedEntry) {
+      const syncSourceTitle = String(entry.sync_source_project_title || '').trim();
+      const syncSourceType = String(entry.sync_source_type || '').trim();
+      const syncSourceKindLabel = syncSourceType === 'scene_shift' ? '\u73fe\u5834\u30b7\u30d5\u30c8' : syncSourceType === 'person_shift' ? '\u500b\u4eba\u30b7\u30d5\u30c8' : syncSourceType === 'master_shift' ? '\u30de\u30b9\u30bf\u30fc\u30b7\u30d5\u30c8' : '';
+      const syncSourceMonth = String(entry.sync_source_month_key || '').trim();
+      const syncSourceDay = String(entry.sync_source_day || '').trim();
       body.html(`
         <div class="ss-detail-form">
           ${syncedEntry ? `
             <div class="ss-detail-field">
-              <div class="ss-detail-label">\u540c\u671f</div>
-              <div class="ss-detail-static">\u81ea\u52d5\u53cd\u6620\u30a8\u30f3\u30c8\u30ea\u3067\u3059\u3002\u7de8\u96c6\u306f\u5143\u306e\u30b7\u30d5\u30c8\u5074\u3067\u884c\u3063\u3066\u304f\u3060\u3055\u3044\u3002</div>
+              <div class="ss-detail-label">\u540c\u671f\u30b7\u30d5\u30c8\u5143</div>
+              <div class="ss-detail-static">
+                ${syncSourceTitle ? `<strong>${escapeHtml(syncSourceTitle)}</strong>${syncSourceKindLabel ? `\uff08${escapeHtml(syncSourceKindLabel)}\uff09` : ''}` : (syncSourceKindLabel ? escapeHtml(`${syncSourceKindLabel}\u304b\u3089\u53cd\u6620`) : '\u81ea\u52d5\u53cd\u6620\u30a8\u30f3\u30c8\u30ea\u3067\u3059')}
+                ${syncSourceMonth || syncSourceDay ? `<div class="ss-detail-empty-text">${escapeHtml([syncSourceMonth, syncSourceDay ? `${syncSourceDay}\u65e5` : ''].filter(Boolean).join(' / '))}</div>` : ''}
+                <div class="ss-detail-empty-text">\u7de8\u96c6\u306f\u5143\u306e\u30b7\u30d5\u30c8\u5074\u3067\u884c\u3063\u3066\u304f\u3060\u3055\u3044\u3002</div>
+              </div>
             </div>
           ` : ''}
           <div class="ss-detail-field">
@@ -2269,6 +2330,12 @@ const ShifterSync = (function() {
             ${availableOptionKeys.map((key) => `<option value="${key}" ${key === parsed.optionKey ? 'selected' : ''}>${escapeHtml(allOptionMappings[key] || key)}</option>`).join('')}
           </select>
         </div>
+        ${isMasterMode() ? `
+          <div class="ss-detail-field">
+            <label class="ss-detail-label" for="ss-entry-modal-master-site">\u73fe\u5834\u540d</label>
+            <input id="ss-entry-modal-master-site" class="ss-detail-input" type="text" value="${escapeHtml(entry.site_name || '')}">
+          </div>
+        ` : ''}
         <div class="ss-detail-field">
           <label class="ss-detail-label" for="ss-entry-modal-comment">\u30b3\u30e1\u30f3\u30c8</label>
           <textarea id="ss-entry-modal-comment" class="ss-detail-textarea" rows="4">${escapeHtml(entry.comment)}</textarea>
@@ -2333,6 +2400,11 @@ const ShifterSync = (function() {
     const $nameInput = $('#ss-entry-modal-name');
     const employeeNumber = getSelectedEmployeeNumberForInput($nameInput);
     const selectedSiteForSave = isPersonMode() ? getSelectedSiteDataForInput($nameInput) : { site_row_id: '', site_id: '', site_name: '' };
+    const masterSiteName = isMasterMode() ? String($('#ss-entry-modal-master-site').val() || '').trim() : '';
+    if (isMasterMode() && !masterSiteName) {
+      alert('\u73fe\u5834\u540d\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044');
+      return;
+    }
     const siteBranchSelect = $('#ss-entry-modal-site-branch');
     const siteBranchRowId = siteBranchSelect.length ? normalizeSiteBranchRowId(siteBranchSelect.val()) : '';
     const selectedBranch = siteBranchSelect.length ? siteBranchSelect.find('option:selected') : $();
@@ -2350,7 +2422,7 @@ const ShifterSync = (function() {
         employee_number: employeeNumber,
         site_row_id: selectedSiteForSave.site_row_id,
         site_id: selectedSiteForSave.site_id,
-        site_name: selectedSiteForSave.site_name,
+        site_name: isMasterMode() ? masterSiteName : selectedSiteForSave.site_name,
         site_branch_row_id: siteBranchRowId,
         site_branch: siteBranch
       });
