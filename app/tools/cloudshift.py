@@ -26,6 +26,8 @@ from flask import (
 )
 from flask_login import current_user, login_required
 from openpyxl import Workbook
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
@@ -144,6 +146,84 @@ def _handle_http_error(error: HTTPException):
     if request.path.startswith("/tools/shiftersync/cloudshift/api/"):
         return jsonify({"error": error.description or error.name}), error.code or 500
     return error
+
+
+def _ensure_cloudshift_runtime_schema() -> None:
+    if current_app.extensions.get("cloudshift_runtime_schema_ready"):
+        return
+
+    db.create_all()
+    inspector = inspect(db.engine)
+    tables = set(inspector.get_table_names())
+    alters: list[str] = []
+    post_updates: list[str] = []
+
+    if "cloudshift_projects" in tables:
+        project_cols = {c["name"] for c in inspector.get_columns("cloudshift_projects")}
+        if "site_manager_id" not in project_cols:
+            alters.append("ALTER TABLE cloudshift_projects ADD COLUMN site_manager_id VARCHAR(20)")
+        if "site_manager_name" not in project_cols:
+            alters.append("ALTER TABLE cloudshift_projects ADD COLUMN site_manager_name VARCHAR(200)")
+        if "account_shares" not in project_cols:
+            alters.append("ALTER TABLE cloudshift_projects ADD COLUMN account_shares JSON")
+            post_updates.append("UPDATE cloudshift_projects SET account_shares = '{}' WHERE account_shares IS NULL")
+        if "assist" not in project_cols:
+            alters.append("ALTER TABLE cloudshift_projects ADD COLUMN assist JSON")
+            post_updates.append("UPDATE cloudshift_projects SET assist = '{}' WHERE assist IS NULL")
+        if "extra_data" not in project_cols:
+            alters.append("ALTER TABLE cloudshift_projects ADD COLUMN extra_data JSON")
+            post_updates.append("UPDATE cloudshift_projects SET extra_data = '{}' WHERE extra_data IS NULL")
+
+    if "cloudshift_months" in tables:
+        month_cols = {c["name"] for c in inspector.get_columns("cloudshift_months")}
+        if "draft_entries_per_day" not in month_cols:
+            alters.append("ALTER TABLE cloudshift_months ADD COLUMN draft_entries_per_day JSON")
+            post_updates.append("UPDATE cloudshift_months SET draft_entries_per_day = '{}' WHERE draft_entries_per_day IS NULL")
+        if "revision" not in month_cols:
+            alters.append("ALTER TABLE cloudshift_months ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+        if "revision_snapshots" not in month_cols:
+            alters.append("ALTER TABLE cloudshift_months ADD COLUMN revision_snapshots JSON")
+            post_updates.append("UPDATE cloudshift_months SET revision_snapshots = '{}' WHERE revision_snapshots IS NULL")
+
+    if "cloudshift_history" in tables:
+        history_cols = {c["name"] for c in inspector.get_columns("cloudshift_history")}
+        if "changes" not in history_cols:
+            alters.append("ALTER TABLE cloudshift_history ADD COLUMN changes JSON")
+            post_updates.append("UPDATE cloudshift_history SET changes = '[]' WHERE changes IS NULL")
+        if "payload" not in history_cols:
+            alters.append("ALTER TABLE cloudshift_history ADD COLUMN payload JSON")
+            post_updates.append("UPDATE cloudshift_history SET payload = '{}' WHERE payload IS NULL")
+
+    if alters or post_updates:
+        _run_cloudshift_schema_statements(alters, ignore_duplicates=True)
+        _run_cloudshift_schema_statements(post_updates)
+
+    current_app.extensions["cloudshift_runtime_schema_ready"] = True
+
+
+def _cloudshift_duplicate_schema_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "duplicate column" in message
+        or "already exists" in message
+        or "duplicate column name" in message
+    )
+
+
+def _run_cloudshift_schema_statements(statements: list[str], *, ignore_duplicates: bool = False) -> None:
+    for sql in statements:
+        try:
+            with db.engine.begin() as conn:
+                conn.execute(text(sql))
+        except SQLAlchemyError as exc:
+            if ignore_duplicates and _cloudshift_duplicate_schema_error(exc):
+                continue
+            raise
+
+
+@cloudshift_bp.before_request
+def _ensure_cloudshift_schema_before_request():
+    _ensure_cloudshift_runtime_schema()
 
 
 def _utcnow_iso() -> str:

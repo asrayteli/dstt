@@ -2,6 +2,7 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
@@ -12,6 +13,26 @@ from .versioning import calculate_repo_version
 
 from .models import db
 login_manager = LoginManager()
+
+
+def _is_duplicate_schema_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "duplicate column" in message
+        or "already exists" in message
+        or "duplicate column name" in message
+    )
+
+
+def _run_schema_statements(statements: list[str], *, ignore_duplicates: bool = False) -> None:
+    for sql in statements:
+        try:
+            with db.engine.begin() as conn:
+                conn.execute(text(sql))
+        except SQLAlchemyError as exc:
+            if ignore_duplicates and _is_duplicate_schema_error(exc):
+                continue
+            raise
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -58,6 +79,7 @@ def _ensure_access_control_schema(app):
 
         inspector = inspect(db.engine)
         alters = []
+        post_updates = []
 
         user_columns = {c["name"] for c in inspector.get_columns("users")}
         if "is_admin" not in user_columns:
@@ -100,37 +122,43 @@ def _ensure_access_control_schema(app):
             if "site_manager_name" not in project_cols:
                 alters.append("ALTER TABLE cloudshift_projects ADD COLUMN site_manager_name VARCHAR(200)")
             if "account_shares" not in project_cols:
-                alters.append("ALTER TABLE cloudshift_projects ADD COLUMN account_shares JSON NOT NULL DEFAULT '{}'")
+                alters.append("ALTER TABLE cloudshift_projects ADD COLUMN account_shares JSON")
+                post_updates.append("UPDATE cloudshift_projects SET account_shares = '{}' WHERE account_shares IS NULL")
             if "assist" not in project_cols:
-                alters.append("ALTER TABLE cloudshift_projects ADD COLUMN assist JSON NOT NULL DEFAULT '{}'")
+                alters.append("ALTER TABLE cloudshift_projects ADD COLUMN assist JSON")
+                post_updates.append("UPDATE cloudshift_projects SET assist = '{}' WHERE assist IS NULL")
             if "extra_data" not in project_cols:
-                alters.append("ALTER TABLE cloudshift_projects ADD COLUMN extra_data JSON NOT NULL DEFAULT '{}'")
+                alters.append("ALTER TABLE cloudshift_projects ADD COLUMN extra_data JSON")
+                post_updates.append("UPDATE cloudshift_projects SET extra_data = '{}' WHERE extra_data IS NULL")
 
         if "cloudshift_months" in inspector.get_table_names():
             month_cols = {c["name"] for c in inspector.get_columns("cloudshift_months")}
             if "draft_entries_per_day" not in month_cols:
-                alters.append("ALTER TABLE cloudshift_months ADD COLUMN draft_entries_per_day JSON NOT NULL DEFAULT '{}'")
+                alters.append("ALTER TABLE cloudshift_months ADD COLUMN draft_entries_per_day JSON")
+                post_updates.append("UPDATE cloudshift_months SET draft_entries_per_day = '{}' WHERE draft_entries_per_day IS NULL")
             if "revision" not in month_cols:
                 alters.append("ALTER TABLE cloudshift_months ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
             if "revision_snapshots" not in month_cols:
-                alters.append("ALTER TABLE cloudshift_months ADD COLUMN revision_snapshots JSON NOT NULL DEFAULT '{}'")
+                alters.append("ALTER TABLE cloudshift_months ADD COLUMN revision_snapshots JSON")
+                post_updates.append("UPDATE cloudshift_months SET revision_snapshots = '{}' WHERE revision_snapshots IS NULL")
 
         if "cloudshift_history" in inspector.get_table_names():
             history_cols = {c["name"] for c in inspector.get_columns("cloudshift_history")}
             if "changes" not in history_cols:
-                alters.append("ALTER TABLE cloudshift_history ADD COLUMN changes JSON NOT NULL DEFAULT '[]'")
+                alters.append("ALTER TABLE cloudshift_history ADD COLUMN changes JSON")
+                post_updates.append("UPDATE cloudshift_history SET changes = '[]' WHERE changes IS NULL")
             if "payload" not in history_cols:
-                alters.append("ALTER TABLE cloudshift_history ADD COLUMN payload JSON NOT NULL DEFAULT '{}'")
+                alters.append("ALTER TABLE cloudshift_history ADD COLUMN payload JSON")
+                post_updates.append("UPDATE cloudshift_history SET payload = '{}' WHERE payload IS NULL")
 
         if "vehicle_inspection_records" in inspector.get_table_names():
             vehicle_inspection_cols = {c["name"] for c in inspector.get_columns("vehicle_inspection_records")}
             if "model_type" in vehicle_inspection_cols:
                 alters.append("ALTER TABLE vehicle_inspection_records DROP COLUMN model_type")
 
-        if alters:
-            with db.engine.begin() as conn:
-                for sql in alters:
-                    conn.execute(text(sql))
+        if alters or post_updates:
+            _run_schema_statements(alters, ignore_duplicates=True)
+            _run_schema_statements(post_updates)
 
         # 旧来の固定管理者IDを is_admin=True に昇格
         from .access_control import ensure_legacy_admin_flag

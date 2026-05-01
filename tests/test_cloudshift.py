@@ -1,5 +1,6 @@
 import sys
 import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
@@ -107,6 +108,48 @@ def _load_leave_calendar(tmp_path, calendar_id, year_month):
     if not path.exists():
         return {"leaves": []}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _create_legacy_cloudshift_tables(db_path):
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE cloudshift_projects (
+                id VARCHAR(24) PRIMARY KEY,
+                owner_user_id VARCHAR(80) NOT NULL,
+                title VARCHAR(200) NOT NULL,
+                mode VARCHAR(20) NOT NULL,
+                employee_number VARCHAR(40) NOT NULL DEFAULT '',
+                site_row_id INTEGER,
+                site_id VARCHAR(20),
+                site_name VARCHAR(200),
+                view_token VARCHAR(128) NOT NULL,
+                edit_token VARCHAR(128) NOT NULL,
+                created_at VARCHAR(32) NOT NULL,
+                updated_at VARCHAR(32) NOT NULL
+            );
+            CREATE TABLE cloudshift_months (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id VARCHAR(24) NOT NULL,
+                year INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                capacity_enabled BOOLEAN NOT NULL DEFAULT 0,
+                required_capacity INTEGER NOT NULL DEFAULT 0,
+                entries_per_day JSON NOT NULL DEFAULT '{}',
+                created_at VARCHAR(32) NOT NULL,
+                updated_at VARCHAR(32) NOT NULL
+            );
+            CREATE TABLE cloudshift_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id VARCHAR(24) NOT NULL,
+                timestamp VARCHAR(32) NOT NULL,
+                editor_name VARCHAR(100) NOT NULL DEFAULT '',
+                editor_type VARCHAR(30) NOT NULL DEFAULT '',
+                action VARCHAR(60) NOT NULL DEFAULT '',
+                month_key VARCHAR(7)
+            );
+            """
+        )
 
 
 def test_owner_can_create_and_public_view_can_read(tmp_path):
@@ -433,6 +476,62 @@ def test_master_shift_syncs_to_person_and_scene_projects(tmp_path):
     assert scene_entry["employee_name"] == "Alice"
     assert scene_entry["employee_number"] == "1001"
     assert scene_entry["sync_source_type"] == "master_shift"
+
+
+def test_scene_master_create_recovers_legacy_cloudshift_schema(tmp_path):
+    module = _load_cloudshift_module()
+    db_path = tmp_path / "legacy-cloudshift.db"
+    _create_legacy_cloudshift_tables(db_path)
+
+    app = Flask(__name__, root_path=str(tmp_path), instance_path=str(tmp_path / "instance"))
+    app.secret_key = "test"
+    app.config["TESTING"] = True
+    app.config["LOGIN_DISABLED"] = True
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path.as_posix()}"
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    db.init_app(app)
+    app.register_blueprint(module.cloudshift_bp)
+    module.current_user = _owner()
+
+    with app.app_context():
+        db.create_all()
+        site = Site(
+            site_id="S900",
+            site_name="Production Legacy Site",
+            site_manager_last="Owner",
+            site_manager_first="Manager",
+            site_manager_id="9900",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.commit()
+        site_row_id = site.id
+
+    client = app.test_client()
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Legacy Scene Master",
+            "mode": "master",
+            "master_target_type": "scene",
+            "master_sites": json.dumps(
+                [{"site_row_id": str(site_row_id), "site_id": "S900", "site_name": "Production Legacy Site"}]
+            ),
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert create_response.status_code == 200
+
+    project_id = create_response.get_json()["project"]["project"]["id"]
+    detail_response = client.get(f"/tools/shiftersync/cloudshift/api/project/{project_id}")
+    assert detail_response.status_code == 200
+    project = detail_response.get_json()["project"]
+    assert project["mode"] == "master"
+    assert project["master"]["target_type"] == "scene"
+    assert project["master"]["site_count"] == 1
 
 
 def test_cloudshift_site_link_uses_latest_site_record(tmp_path):
