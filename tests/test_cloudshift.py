@@ -469,6 +469,20 @@ def test_master_shift_rejects_mixed_people_and_sites(tmp_path):
     assert "個人マスターには現場を登録できません" in response.get_json()["error"]
 
 
+def test_master_shift_create_form_uses_hidden_target_type_input():
+    html = (ROOT / "app" / "templates" / "cloudshift.html").read_text(encoding="utf-8")
+    script = (ROOT / "app" / "templates" / "_cloudshift_script.html").read_text(encoding="utf-8")
+
+    assert 'id="cloud-create-master-target-type-input"' in html
+    assert 'name="master_target_type"' in html
+    assert 'id="cloud-create-master-target-type"' in html
+    assert (
+        '<select id="cloud-create-master-target-type" name="master_target_type"'
+        not in html
+    ), "対象種別 select は disabled 化されると送信から外れるため name 属性を持たせない"
+    assert "cloud-create-master-target-type-input" in script
+
+
 def test_master_shift_create_infers_target_type_when_field_missing(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
