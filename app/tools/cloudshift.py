@@ -2844,6 +2844,24 @@ def _matching_master_project_ids_for_person_project(person_project: dict[str, An
     return result
 
 
+def _person_project_matches_master_scope(master_project: dict[str, Any], person_project: dict[str, Any]) -> bool:
+    if _master_target_type_for_project(master_project) != "person":
+        return False
+    employee_number = str(person_project.get("employee_number") or "").strip()
+    employee_name = _normalized_person_title(str(person_project.get("title") or ""))
+    master_people = [item for item in (master_project.get("master_people") or []) if isinstance(item, dict)]
+    people_numbers = {str(item.get("employee_number") or "").strip() for item in master_people}
+    people_names = {
+        _normalized_person_title(item.get("name"))
+        for item in master_people
+        if str(item.get("name") or "").strip()
+    }
+    return bool(
+        (employee_number and employee_number in people_numbers)
+        or (employee_name and employee_name in people_names)
+    )
+
+
 def _matching_master_project_ids_for_scene_project(scene_project: dict[str, Any]) -> list[str]:
     """現場シフト帳が登録されている現場型マスターのIDリストを返す。"""
     site_row_id = _coerce_site_row_id(scene_project.get("site_row_id"))
@@ -2868,6 +2886,27 @@ def _matching_master_project_ids_for_scene_project(scene_project: dict[str, Any]
             if project_id:
                 result.append(project_id)
     return result
+
+
+def _scene_project_matches_master_scope(master_project: dict[str, Any], scene_project: dict[str, Any]) -> bool:
+    if _master_target_type_for_project(master_project) != "scene":
+        return False
+    site_row_id = _coerce_site_row_id(scene_project.get("site_row_id"))
+    site_id = str(scene_project.get("site_id") or "").strip()
+    site_name = _normalized_site_title(str(scene_project.get("site_name") or scene_project.get("title") or ""))
+    master_sites = [item for item in (master_project.get("master_sites") or []) if isinstance(item, dict)]
+    site_row_ids = {_coerce_site_row_id(item.get("site_row_id")) for item in master_sites}
+    site_ids = {str(item.get("site_id") or "").strip() for item in master_sites}
+    site_names = {
+        _normalized_site_title(item.get("site_name"))
+        for item in master_sites
+        if str(item.get("site_name") or "").strip()
+    }
+    return bool(
+        (site_row_id is not None and site_row_id in site_row_ids)
+        or (site_id and site_id in site_ids)
+        or (site_name and site_name in site_names)
+    )
 
 
 def _build_master_synced_entry_from_person(
@@ -3127,6 +3166,156 @@ def _replace_shift_synced_entries_in_target_project(
     return True
 
 
+def _desired_master_entries_from_source(
+    master_project: dict[str, Any],
+    source_project: dict[str, Any],
+    month_key: str,
+) -> dict[str, list[dict[str, Any]]]:
+    source_month = (source_project.get("months") or {}).get(month_key)
+    if not source_month:
+        return {}
+    source_mode = str(source_project.get("mode") or "")
+    if source_mode == "person":
+        if not _person_project_matches_master_scope(master_project, source_project):
+            return {}
+        entries_per_day = _normalize_entries(
+            source_month.get("entries_per_day"),
+            source_month["year"],
+            source_month["month"],
+        )
+        desired: dict[str, list[dict[str, Any]]] = {}
+        for day_key, entries in entries_per_day.items():
+            for entry in entries:
+                if str(entry.get("sync_source_type") or "") == SHIFT_SYNC_MASTER_SOURCE:
+                    continue
+                option_key, _ = _entry_option_and_name(entry)
+                if option_key in LEAVE_OPTION_MAPPINGS:
+                    continue
+                site_link = _entry_site_link_fields(entry)
+                if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
+                    continue
+                desired.setdefault(day_key, []).append(
+                    _build_master_synced_entry_from_person(
+                        source_project,
+                        entry,
+                        month_key=month_key,
+                        day_key=day_key,
+                    )
+                )
+        return desired
+
+    if source_mode == "scene":
+        if not _scene_project_matches_master_scope(master_project, source_project):
+            return {}
+        entries_per_day = _normalize_entries(
+            source_month.get("entries_per_day"),
+            source_month["year"],
+            source_month["month"],
+        )
+        desired = {}
+        for day_key, entries in entries_per_day.items():
+            for entry in entries:
+                if str(entry.get("sync_source_type") or "") == SHIFT_SYNC_MASTER_SOURCE:
+                    continue
+                _, entry_name = _entry_option_and_name(entry)
+                if not entry_name:
+                    continue
+                desired.setdefault(day_key, []).append(
+                    _build_master_synced_entry_from_scene(
+                        source_project,
+                        entry,
+                        month_key=month_key,
+                        day_key=day_key,
+                    )
+                )
+        return desired
+
+    return {}
+
+
+def _refresh_master_shift_from_sources(
+    target_project: dict[str, Any],
+    month_key: str,
+    *,
+    actor_name: str,
+) -> bool:
+    if str(target_project.get("mode") or "") != "master":
+        return False
+    current_month = (target_project.get("months") or {}).get(month_key)
+    if not current_month:
+        return False
+
+    master_target_type = _master_target_type_for_project(target_project)
+    expected_source_mode = "person" if master_target_type == "person" else "scene"
+    expected_sync_source = SHIFT_SYNC_PERSON_SOURCE if expected_source_mode == "person" else SHIFT_SYNC_SCENE_SOURCE
+    year = int(current_month["year"])
+    month = int(current_month["month"])
+    desired_by_day: dict[str, list[dict[str, Any]]] = _empty_entries_for_month(year, month)
+    source_count = 0
+    desired_count = 0
+
+    for source_project in _iter_project_summaries():
+        if str(source_project.get("id") or "") == str(target_project.get("id") or ""):
+            continue
+        if str(source_project.get("mode") or "") != expected_source_mode:
+            continue
+        if month_key not in (source_project.get("months") or {}):
+            continue
+        source_desired = _desired_master_entries_from_source(target_project, source_project, month_key)
+        if not source_desired:
+            continue
+        source_count += 1
+        for day_key, entries in source_desired.items():
+            desired_by_day.setdefault(day_key, []).extend(entries)
+            desired_count += len(entries)
+
+    current_entries = _normalize_entries(current_month.get("entries_per_day"), year, month)
+    next_entries_per_day: dict[str, list[dict[str, Any]]] = {}
+    for day_key in _empty_entries_for_month(year, month):
+        preserved = [
+            dict(entry)
+            for entry in current_entries.get(day_key, [])
+            if not (
+                _entry_is_shift_synced(entry)
+                and str(entry.get("sync_source_type") or "") == expected_sync_source
+                and str(entry.get("sync_source_month_key") or "") == month_key
+            )
+        ]
+        next_entries_per_day[day_key] = preserved + desired_by_day.get(day_key, [])
+
+    incoming_month = {
+        "year": year,
+        "month": month,
+        "required_capacity": int(current_month.get("required_capacity", 0) or 0),
+        "entries_per_day": next_entries_per_day,
+    }
+    merged = _merge_month_payload(current_month, incoming_month, _snapshot_month_payload(current_month))
+    changes = _describe_month_changes(current_month, merged)
+    if not changes:
+        return False
+
+    snapshots = dict(current_month.get("revision_snapshots") or {})
+    snapshots[str(int(current_month.get("revision", 1)))] = _snapshot_month_payload(current_month)
+    merged["revision_snapshots"] = _trim_revision_snapshots(snapshots)
+    target_project.setdefault("months", {})[month_key] = merged
+    _save_project(target_project)
+    _append_history(
+        target_project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": actor_name,
+            "editor_type": "auto",
+            "action": "shift_sync",
+            "month_key": month_key,
+            "changes": [
+                f"マスター対象 {source_count} 件からシフトを自動反映",
+                f"同期エントリ {desired_count} 件",
+            ],
+        },
+    )
+    return True
+
+
 def _resync_shift_month(source_project: dict[str, Any], month_key: str, *, actor_name: str) -> None:
     month_data = (source_project.get("months") or {}).get(month_key)
     if not month_data:
@@ -3169,14 +3358,7 @@ def _refresh_shift_sync_for_target_month(target_project: dict[str, Any], month_k
         return
     target_mode = str(target_project.get("mode") or "")
     if target_mode == "master":
-        master_target_type = _master_target_type_for_project(target_project)
-        expected_source_mode = "person" if master_target_type == "person" else "scene"
-        for source_project in _iter_project_summaries():
-            if str(source_project.get("mode") or "") != expected_source_mode:
-                continue
-            if month_key not in (source_project.get("months") or {}):
-                continue
-            _resync_shift_month(source_project, month_key, actor_name=actor_name)
+        _refresh_master_shift_from_sources(target_project, month_key, actor_name=actor_name)
         return
     for source_project in _iter_project_summaries():
         if str(source_project.get("mode") or "") == target_mode:
@@ -5900,7 +6082,8 @@ def api_create():
         _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
         _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
     try:
-        _resync_shift_month(project, month_key, actor_name=_user_label())
+        if project["mode"] != "master":
+            _resync_shift_month(project, month_key, actor_name=_user_label())
         _refresh_shift_sync_for_target_month(project, month_key, actor_name=_user_label())
     except CloudShiftError:
         raise

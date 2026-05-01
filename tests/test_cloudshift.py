@@ -736,6 +736,69 @@ def test_person_master_sync_uses_latest_site_link(tmp_path):
     assert master_entry["site_name"] == "New Master Site"
 
 
+def test_scene_master_create_collects_existing_scene_shift_without_broad_resync(tmp_path, monkeypatch):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    with client.application.app_context():
+        site = Site(
+            site_id="S030",
+            site_name="Scoped Scene",
+            site_manager_last="Owner",
+            site_manager_first="Manager",
+            site_manager_id="9030",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.commit()
+        site_row_id = site.id
+
+    scene = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Scoped Scene",
+            "mode": "scene",
+            "site_row_id": str(site_row_id),
+            "year": "2026",
+            "month": "4",
+        },
+    ).get_json()["project"]
+    scene_entries = dict(scene["month"]["entries_per_day"])
+    scene_entries["1"] = [{"id": "scene-1", "value": "!A!Alice", "employee_number": "1001"}]
+    scene_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene['project']['id']}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": scene_entries, "base_month": scene["month"]},
+    )
+    assert scene_save.status_code == 200
+
+    def fail_broad_resync(*args, **kwargs):
+        raise AssertionError("broad resync should not run when refreshing a master target")
+
+    monkeypatch.setattr(module, "_resync_shift_month", fail_broad_resync)
+    master_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Scoped Scene Master",
+            "mode": "master",
+            "master_target_type": "scene",
+            "master_sites": json.dumps(
+                [{"site_row_id": str(site_row_id), "site_id": "S030", "site_name": "Scoped Scene"}]
+            ),
+            "year": "2026",
+            "month": "4",
+        },
+    )
+
+    assert master_response.status_code == 200
+    master_month = master_response.get_json()["project"]["month"]
+    master_entry = master_month["entries_per_day"]["1"][0]
+    assert master_entry["value"] == "!A!Alice"
+    assert master_entry["site_row_id"] == str(site_row_id)
+    assert master_entry["sync_source_type"] == "scene_shift"
+
+
 def test_master_shift_rejects_mixed_people_and_sites(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
