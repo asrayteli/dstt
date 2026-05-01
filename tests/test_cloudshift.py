@@ -469,6 +469,61 @@ def test_master_shift_rejects_mixed_people_and_sites(tmp_path):
     assert "個人マスターには現場を登録できません" in response.get_json()["error"]
 
 
+def test_master_shift_create_infers_target_type_when_field_missing(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    with client.application.app_context():
+        site = Site(
+            site_id="S099",
+            site_name="Inferred Site",
+            site_manager_last="Owner",
+            site_manager_first="Manager",
+            site_manager_id="9099",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.commit()
+        site_row_id = site.id
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Person Master Inferred",
+            "mode": "master",
+            "master_people": json.dumps([{"employee_number": "1001", "name": "Alice"}]),
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert person_response.status_code == 200
+    person_master = person_response.get_json()["project"]["project"]
+    assert person_master["master"]["target_type"] == "person"
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Scene Master Inferred",
+            "mode": "master",
+            "master_sites": json.dumps([
+                {"site_row_id": str(site_row_id), "site_id": "S099", "site_name": "Inferred Site"}
+            ]),
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert scene_response.status_code == 200
+    scene_master = scene_response.get_json()["project"]["project"]
+    assert scene_master["master"]["target_type"] == "scene"
+
+    detail = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_master['id']}"
+    )
+    assert detail.status_code == 200
+
+
 def test_master_shift_targets_can_be_edited_later(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
