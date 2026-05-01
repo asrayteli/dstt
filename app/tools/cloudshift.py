@@ -1165,6 +1165,31 @@ def _validate_year_month(year: Any, month: Any) -> tuple[int, int]:
     return year_value, month_value
 
 
+def _decode_json_storage_value(value: Any) -> Any:
+    current = value
+    for _ in range(2):
+        if not isinstance(current, str):
+            return current
+        text_value = current.strip()
+        if not text_value:
+            return None
+        try:
+            current = json.loads(text_value)
+        except json.JSONDecodeError:
+            return current
+    return current
+
+
+def _json_dict(value: Any) -> dict[str, Any]:
+    decoded = _decode_json_storage_value(value)
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _json_list(value: Any) -> list[Any]:
+    decoded = _decode_json_storage_value(value)
+    return decoded if isinstance(decoded, list) else []
+
+
 def _empty_entries_for_month(year: int, month: int) -> dict[str, list[dict[str, str]]]:
     return {str(day): [] for day in range(1, monthrange(year, month)[1] + 1)}
 
@@ -1356,13 +1381,13 @@ def _db_project_to_dict(row: CloudShiftProject) -> dict[str, Any]:
         "site_manager_name": row.site_manager_name or "",
         "view_token": row.view_token,
         "edit_token": row.edit_token,
-        "account_shares": row.account_shares or {},
-        "assist": row.assist or {},
+        "account_shares": _json_dict(row.account_shares),
+        "assist": _json_dict(row.assist),
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "months": {},
     }
-    for key, value in (row.extra_data or {}).items():
+    for key, value in _json_dict(row.extra_data).items():
         if key not in project:
             project[key] = value
     for month_row in row.months:
@@ -1372,12 +1397,12 @@ def _db_project_to_dict(row: CloudShiftProject) -> dict[str, Any]:
             "month": month_row.month,
             "capacity_enabled": bool(month_row.capacity_enabled),
             "required_capacity": int(month_row.required_capacity or 0),
-            "entries_per_day": month_row.entries_per_day or {},
-            "draft_entries_per_day": month_row.draft_entries_per_day or {},
+            "entries_per_day": _json_dict(month_row.entries_per_day),
+            "draft_entries_per_day": _json_dict(month_row.draft_entries_per_day),
             "revision": int(month_row.revision or 1),
             "created_at": month_row.created_at,
             "updated_at": month_row.updated_at,
-            "revision_snapshots": month_row.revision_snapshots or {},
+            "revision_snapshots": _json_dict(month_row.revision_snapshots),
         }
     return project
 
@@ -1405,8 +1430,8 @@ def _upsert_project_to_db(project: dict[str, Any]) -> None:
     row.site_manager_name = str(project.get("site_manager_name") or "")
     row.view_token = str(project.get("view_token") or "")
     row.edit_token = str(project.get("edit_token") or "")
-    row.account_shares = project.get("account_shares") if isinstance(project.get("account_shares"), dict) else {}
-    row.assist = project.get("assist") if isinstance(project.get("assist"), dict) else {}
+    row.account_shares = _json_dict(project.get("account_shares"))
+    row.assist = _json_dict(project.get("assist"))
     row.extra_data = {key: value for key, value in project.items() if key not in _PROJECT_STORAGE_KEYS}
     row.created_at = str(project.get("created_at") or _utcnow_iso())
     row.updated_at = str(project.get("updated_at") or _utcnow_iso())
@@ -1415,7 +1440,9 @@ def _upsert_project_to_db(project: dict[str, Any]) -> None:
         db.session.delete(month_row)
     db.session.flush()
 
-    for month_key, month_data in (project.get("months") or {}).items():
+    for month_key, month_data in _json_dict(project.get("months")).items():
+        if not isinstance(month_data, dict):
+            continue
         try:
             year = int(month_data.get("year"))
             month = int(month_data.get("month"))
@@ -1438,7 +1465,7 @@ def _upsert_project_to_db(project: dict[str, Any]) -> None:
                 entries_per_day=normalized_entries,
                 draft_entries_per_day=normalized_draft_entries,
                 revision=int(month_data.get("revision", 1) or 1),
-                revision_snapshots=month_data.get("revision_snapshots") or {},
+                revision_snapshots=_json_dict(month_data.get("revision_snapshots")),
                 created_at=str(month_data.get("created_at") or _utcnow_iso()),
                 updated_at=str(month_data.get("updated_at") or _utcnow_iso()),
             )
@@ -1495,7 +1522,7 @@ def _load_history(project_id: str) -> list[dict[str, Any]]:
     if row is not None:
         rows = []
         for item in CloudShiftHistory.query.filter_by(project_id=project_id).order_by(CloudShiftHistory.timestamp.desc(), CloudShiftHistory.id.desc()).all():
-            payload = dict(item.payload or {})
+            payload = _json_dict(item.payload)
             payload.update(
                 {
                     "timestamp": item.timestamp,
@@ -1503,7 +1530,7 @@ def _load_history(project_id: str) -> list[dict[str, Any]]:
                     "editor_type": item.editor_type,
                     "action": item.action,
                     "month_key": item.month_key,
-                    "changes": item.changes or [],
+                    "changes": _json_list(item.changes),
                 }
             )
             rows.append(payload)

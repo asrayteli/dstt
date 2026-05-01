@@ -534,6 +534,68 @@ def test_scene_master_create_recovers_legacy_cloudshift_schema(tmp_path):
     assert project["master"]["site_count"] == 1
 
 
+def test_master_project_read_accepts_json_columns_as_strings(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    with client.application.app_context():
+        site = Site(
+            site_id="S901",
+            site_name="String JSON Site",
+            site_manager_last="Owner",
+            site_manager_first="Manager",
+            site_manager_id="9901",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.commit()
+        site_row_id = site.id
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "String JSON Master",
+            "mode": "master",
+            "master_target_type": "scene",
+            "master_sites": json.dumps(
+                [{"site_row_id": str(site_row_id), "site_id": "S901", "site_name": "String JSON Site"}]
+            ),
+            "year": "2026",
+            "month": "4",
+        },
+    )
+    assert create_response.status_code == 200
+    project_id = create_response.get_json()["project"]["project"]["id"]
+
+    with client.application.app_context():
+        project_row = db.session.get(module.CloudShiftProject, project_id)
+        project_row.account_shares = json.dumps(project_row.account_shares or {}, ensure_ascii=False)
+        project_row.assist = json.dumps(project_row.assist or {}, ensure_ascii=False)
+        project_row.extra_data = json.dumps(project_row.extra_data or {}, ensure_ascii=False)
+        month_row = project_row.months[0]
+        month_row.entries_per_day = json.dumps(month_row.entries_per_day or {}, ensure_ascii=False)
+        month_row.draft_entries_per_day = json.dumps(month_row.draft_entries_per_day or {}, ensure_ascii=False)
+        month_row.revision_snapshots = json.dumps(month_row.revision_snapshots or {}, ensure_ascii=False)
+        history_row = module.CloudShiftHistory.query.filter_by(project_id=project_id).first()
+        history_row.changes = json.dumps(history_row.changes or [], ensure_ascii=False)
+        history_row.payload = json.dumps(history_row.payload or {}, ensure_ascii=False)
+        db.session.commit()
+        db.session.expunge_all()
+
+    detail_response = client.get(f"/tools/shiftersync/cloudshift/api/project/{project_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.get_json()
+    assert detail["project"]["master"]["target_type"] == "scene"
+    assert detail["project"]["master"]["site_count"] == 1
+    assert isinstance(detail["month"]["entries_per_day"], dict)
+
+    history_response = client.get(f"/tools/shiftersync/cloudshift/api/project/{project_id}/history")
+    assert history_response.status_code == 200
+    assert isinstance(history_response.get_json()["history"][0]["changes"], list)
+
+
 def test_cloudshift_site_link_uses_latest_site_record(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
