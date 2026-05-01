@@ -39,6 +39,7 @@ const ShifterSync = (function() {
   const vehicleOptionKeys = ['M', 'C', 'O', 'W', 'V'];
   const vehicleNumberOptionKeys = ['N1', 'N2', 'N3', 'N4', 'N5'];
   const commentRowPrefix = '#comment';
+  const employeeNameRowPrefix = '#employee_name';
   const employeeNumberRowPrefix = '#employee_number';
   const projectEmployeeNumberRowPrefix = '#project_employee_number';
   const siteRowIdRowPrefix = '#site_row_id';
@@ -51,6 +52,8 @@ const ShifterSync = (function() {
   const state = {
     mode: 'scene',
     masterTargetType: '',
+    masterPeople: [],
+    masterSites: [],
     year: null,
     month: null,
     name: null,
@@ -297,6 +300,7 @@ const ShifterSync = (function() {
         id: makeEntryId(),
         value,
         comment: '',
+        employee_name: '',
         employee_number: '',
         site_row_id: '',
         site_id: '',
@@ -321,6 +325,7 @@ const ShifterSync = (function() {
       id: String(entry.id || makeEntryId()),
       value,
       comment: String(entry.comment || '').trim(),
+      employee_name: String(entry.employee_name || entry.employeeName || '').trim(),
       employee_number: String(entry.employee_number || entry.employeeNumber || '').trim(),
       site_row_id: normalizeSiteRowId(entry.site_row_id || entry.siteRowId || ''),
       site_id: String(entry.site_id || entry.siteId || '').trim(),
@@ -346,6 +351,7 @@ const ShifterSync = (function() {
       id: withNewId ? makeEntryId() : normalized.id,
       value: normalized.value,
       comment: normalized.comment,
+      employee_name: normalized.employee_name,
       employee_number: normalized.employee_number,
       site_row_id: normalized.site_row_id,
       site_id: normalized.site_id,
@@ -511,6 +517,25 @@ const ShifterSync = (function() {
     };
   }
 
+  function normalizeMasterPerson(candidate) {
+    const normalized = normalizeEmployeeCandidate(candidate);
+    if (normalized) {
+      return normalized;
+    }
+    if (!candidate || typeof candidate !== 'object') {
+      return null;
+    }
+    const employeeNumber = String(candidate.employee_number || candidate.employeeNumber || '').trim();
+    const employeeName = String(candidate.name || candidate.employee_name || candidate.employeeName || '').trim();
+    if (!employeeNumber || !employeeName) {
+      return null;
+    }
+    return {
+      employee_number: employeeNumber,
+      employee_name: employeeName
+    };
+  }
+
   function normalizeSiteCandidate(candidate) {
     if (!candidate || typeof candidate !== 'object') {
       return null;
@@ -527,6 +552,46 @@ const ShifterSync = (function() {
       site_name: siteName,
       active_branch_count: parseInt(candidate.active_branch_count || candidate.activeBranchCount || '0', 10) || 0
     };
+  }
+
+  function normalizeMasterSite(candidate) {
+    return normalizeSiteCandidate(candidate);
+  }
+
+  function currentMasterPeople() {
+    return Array.isArray(state.masterPeople) ? state.masterPeople.map(normalizeMasterPerson).filter(Boolean) : [];
+  }
+
+  function currentMasterSites() {
+    return Array.isArray(state.masterSites) ? state.masterSites.map(normalizeMasterSite).filter(Boolean) : [];
+  }
+
+  function masterPersonMatches(candidate, input) {
+    const person = normalizeMasterPerson(candidate);
+    const selectedNumber = String(input && input.employee_number || '').trim();
+    const selectedName = String(input && input.employee_name || '').trim();
+    if (!person) {
+      return false;
+    }
+    return (
+      (selectedNumber && person.employee_number === selectedNumber)
+      || (selectedName && person.employee_name === selectedName)
+    );
+  }
+
+  function masterSiteMatches(candidate, input) {
+    const site = normalizeMasterSite(candidate);
+    const selectedRowId = normalizeSiteRowId(input && input.site_row_id || '');
+    const selectedSiteId = String(input && input.site_id || '').trim();
+    const selectedSiteName = String(input && input.site_name || '').trim();
+    if (!site) {
+      return false;
+    }
+    return (
+      (selectedRowId && site.site_row_id === selectedRowId)
+      || (selectedSiteId && site.site_id === selectedSiteId)
+      || (selectedSiteName && site.site_name === selectedSiteName)
+    );
   }
 
   function getSelectedSiteDataForInput($input) {
@@ -652,9 +717,15 @@ const ShifterSync = (function() {
       gap: '6px'
     });
 
-    const normalizedCandidates = Array.isArray(candidates)
+    let normalizedCandidates = Array.isArray(candidates)
       ? candidates.map((item) => normalizeEmployeeCandidate(item)).filter(Boolean)
       : [];
+    if (String($input.attr('data-master-scope') || '') === 'person') {
+      const masterPeople = currentMasterPeople();
+      normalizedCandidates = normalizedCandidates.filter((candidate) => (
+        masterPeople.some((person) => masterPersonMatches(person, candidate))
+      ));
+    }
 
     if (!normalizedCandidates.length) {
       list.append(
@@ -691,7 +762,8 @@ const ShifterSync = (function() {
           .on('mousedown', function(event) {
             event.preventDefault();
           })
-          .on('click', function() {
+          .on('click', function(event) {
+            event.stopPropagation();
             setEmployeeSelectionForInput($input, candidate);
           });
         list.append(button);
@@ -737,7 +809,7 @@ const ShifterSync = (function() {
   }
 
   function scheduleEmployeeSearchForInput($input) {
-    if (!isEntryEmployeeSearchEnabled() || !$input || !$input.length) {
+    if (!$input || !$input.length) {
       return;
     }
 
@@ -793,7 +865,7 @@ const ShifterSync = (function() {
 
   function scheduleEmployeeSearchForModal() {
     const $input = $('#ss-entry-modal-name');
-    if (!isEntryEmployeeSearchEnabled() || !$input.length) {
+    if (!$input.length || !$input.hasClass('ss-employee-search-input')) {
       return;
     }
 
@@ -891,9 +963,15 @@ const ShifterSync = (function() {
       display: 'grid',
       gap: '6px'
     });
-    const normalizedCandidates = Array.isArray(candidates)
+    let normalizedCandidates = Array.isArray(candidates)
       ? candidates.map((item) => normalizeSiteCandidate(item)).filter(Boolean)
       : [];
+    if (String($input.attr('data-master-scope') || '') === 'site') {
+      const masterSites = currentMasterSites();
+      normalizedCandidates = normalizedCandidates.filter((candidate) => (
+        masterSites.some((site) => masterSiteMatches(site, candidate))
+      ));
+    }
     if (!normalizedCandidates.length) {
       list.append(
         $('<div>')
@@ -930,7 +1008,8 @@ const ShifterSync = (function() {
           .on('mousedown', function(event) {
             event.preventDefault();
           })
-          .on('click', function() {
+          .on('click', function(event) {
+            event.stopPropagation();
             setSiteSelectionForInput($input, candidate);
           });
         list.append(button);
@@ -944,9 +1023,6 @@ const ShifterSync = (function() {
     if (!key) {
       return [];
     }
-    if (siteSearchCache.has(key)) {
-      return siteSearchCache.get(key);
-    }
     const response = await fetch(`/tools/siteplus/api/cloudshift/sites?q=${encodeURIComponent(key)}`, {
       credentials: 'same-origin',
       headers: {
@@ -958,12 +1034,11 @@ const ShifterSync = (function() {
     }
     const payload = await response.json();
     const candidates = Array.isArray(payload.sites) ? payload.sites : [];
-    siteSearchCache.set(key, candidates);
     return candidates;
   }
 
   function scheduleSiteSearchForInput($input) {
-    if (!isEntrySiteSearchEnabled() || !$input || !$input.length) {
+    if (!$input || !$input.length) {
       return;
     }
     const query = String($input.val() || '').trim();
@@ -1014,7 +1089,7 @@ const ShifterSync = (function() {
 
   function scheduleSiteSearchForModal() {
     const $input = $('#ss-entry-modal-name');
-    if (!isEntrySiteSearchEnabled() || !$input.length) {
+    if (!$input.length || !$input.hasClass('ss-site-search-input')) {
       return;
     }
     const query = String($input.val() || '').trim();
@@ -1074,16 +1149,21 @@ const ShifterSync = (function() {
         branch_missing: false,
         branch_issue_label: '',
         branch_issue_tone: '',
-        sync_source_label: ''
+        sync_source_label: '',
+        sync_source_tone: ''
       };
     }
     const parsed = parseEntryValue(normalized.value);
     const branchState = entryBranchState(normalized);
     const branchIssue = entryBranchIssue(normalized);
-    const baseTitle = parsed.optionKey ? `${parsed.name} ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : parsed.name;
-    const displayTitle = isMasterMode() && normalized.site_name && !isMasterSceneType() ? `${baseTitle} / ${normalized.site_name}` : baseTitle;
+    const titleName = isMasterPersonType() && normalized.site_name ? normalized.site_name : parsed.name;
+    const displayTitle = parsed.optionKey ? `${titleName} ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : titleName;
     let syncSourceLabel = '';
-    if (isMasterMode() && isSyncedEntry(normalized)) {
+    let syncSourceTone = '';
+    if (isMasterMode() && !isSyncedEntry(normalized)) {
+      syncSourceLabel = '\u30de\u30b9\u30bf\u30fc';
+      syncSourceTone = 'master-local';
+    } else if (isMasterMode() && isSyncedEntry(normalized)) {
       const sourceTitle = String(normalized.sync_source_project_title || '').trim();
       const sourceType = String(normalized.sync_source_type || '').trim();
       const sourceKindLabel = sourceType === 'scene_shift' ? '現場シフト' : sourceType === 'person_shift' ? '個人シフト' : '同期';
@@ -1101,7 +1181,8 @@ const ShifterSync = (function() {
       branch_missing: branchState.is_missing,
       branch_issue_label: branchIssue.label,
       branch_issue_tone: branchIssue.tone,
-      sync_source_label: syncSourceLabel
+      sync_source_label: syncSourceLabel,
+      sync_source_tone: syncSourceTone
     };
   }
 
@@ -1125,6 +1206,26 @@ const ShifterSync = (function() {
       return '';
     }
     return currentName === selectedName ? selectedNumber : '';
+  }
+
+  function getSelectedEmployeeNameForInput($input) {
+    if (!$input || !$input.length) {
+      return '';
+    }
+    const selectedName = String($input.attr('data-selected-employee-name') || '').trim();
+    const currentName = String($input.val() || '').trim();
+    return currentName && selectedName && currentName === selectedName ? selectedName : '';
+  }
+
+  function selectedMasterPersonIsAllowed($input) {
+    return currentMasterPeople().some((person) => masterPersonMatches(person, {
+      employee_number: getSelectedEmployeeNumberForInput($input),
+      employee_name: getSelectedEmployeeNameForInput($input)
+    }));
+  }
+
+  function selectedMasterSiteIsAllowed($input) {
+    return currentMasterSites().some((site) => masterSiteMatches(site, getSelectedSiteDataForInput($input)));
   }
 
   function csvEscape(value) {
@@ -1292,7 +1393,7 @@ const ShifterSync = (function() {
             .append(
               $('<div>').addClass('entry-item-title').text(parts.title),
               parts.sync_source_label
-                ? $('<div>').addClass('entry-item-sync-source').text(parts.sync_source_label)
+                ? $('<div>').addClass(`entry-item-sync-source${parts.sync_source_tone ? ` is-${parts.sync_source_tone}` : ''}`).text(parts.sync_source_label)
                 : null,
               parts.branch_issue_label
                 ? $('<div>').addClass(`entry-item-status is-${parts.branch_issue_tone || 'warning'}`).text(parts.branch_issue_label)
@@ -1359,18 +1460,18 @@ const ShifterSync = (function() {
     const inputGroup = $('<div>').addClass('input-group');
     const inputRow = $('<div>').addClass('input-row');
     const nameInputPlaceholder = isMasterSceneType()
-      ? '\u73fe\u5834\u540d'
-      : (isSceneMode() || isMasterPersonType() ? '\u4eba\u7269\u540d' : '\u73fe\u5834\u540d');
+      ? '\u4eba\u7269\u540d'
+      : (isSceneMode() ? '\u4eba\u7269\u540d' : '\u73fe\u5834\u540d');
     const nameInput = $('<input>')
       .attr('type', 'text')
       .addClass('entry-input')
       .attr('placeholder', nameInputPlaceholder)
       .attr('data-day', day);
-    if (isEntryEmployeeSearchEnabled()) {
+    if (isSceneMode() || isMasterSceneType()) {
       nameInput
         .addClass('ss-employee-search-input')
         .attr('data-search-kind', 'day');
-    } else if (isEntrySiteSearchEnabled()) {
+    } else if (isPersonMode() || isMasterPersonType()) {
       nameInput
         .addClass('ss-site-search-input')
         .attr('data-search-kind', 'day');
@@ -1381,7 +1482,25 @@ const ShifterSync = (function() {
       .attr('data-day', day)
       .text('\u8ffd\u52a0');
     inputRow.append(nameInput, addBtn);
-    const masterSiteInput = null;
+    const masterSideInput = isMasterMode()
+      ? $('<input>')
+        .attr('type', 'text')
+        .addClass('entry-site-input entry-master-side-input')
+        .attr('placeholder', isMasterSceneType() ? '\u73fe\u5834\u540d' : '\u4eba\u7269\u540d')
+        .attr('data-day', day)
+        .attr('data-search-kind', 'day')
+      : null;
+    if (masterSideInput) {
+      if (isMasterSceneType()) {
+        masterSideInput
+          .addClass('ss-site-search-input')
+          .attr('data-master-scope', 'site');
+      } else {
+        masterSideInput
+          .addClass('ss-employee-search-input')
+          .attr('data-master-scope', 'person');
+      }
+    }
 
     const commentInput = $('<textarea>')
       .addClass('entry-comment-input')
@@ -1427,8 +1546,8 @@ const ShifterSync = (function() {
     controlsGrid.append(optionBtn, toolDetailBtn, copyInput, copyBtn);
 
     inputGroup.append(inputRow);
-    if (masterSiteInput) {
-      inputGroup.append(masterSiteInput);
+    if (masterSideInput) {
+      inputGroup.append(masterSideInput);
     }
     inputGroup.append(selectionNote, candidatePanel, commentInput, controlsGrid);
     dayBox.append(inputGroup);
@@ -1528,6 +1647,7 @@ const ShifterSync = (function() {
 
   function clearEventHandlers() {
     $(document).off('keydown', '.entry-input');
+    $(document).off('keydown', '.entry-master-side-input');
     $(document).off('keydown', '.entry-comment-input');
     $(document).off('keydown', '#ss-entry-modal-comment');
     $(document).off('keydown', '.copy-input');
@@ -1727,6 +1847,13 @@ const ShifterSync = (function() {
       }
     });
 
+    $(document).on('keydown', '.entry-master-side-input', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addEntry($(this).attr('data-day'));
+      }
+    });
+
     $(document).on('keydown', '.entry-comment-input', function(e) {
       if (e.key !== 'Enter') {
         return;
@@ -1753,16 +1880,10 @@ const ShifterSync = (function() {
     });
 
     $(document).on('input', '.ss-employee-search-input', function() {
-      if (!isEntryEmployeeSearchEnabled()) {
-        return;
-      }
       scheduleEmployeeSearchForInput($(this));
     });
 
     $(document).on('input', '.ss-site-search-input', function() {
-      if (!isEntrySiteSearchEnabled()) {
-        return;
-      }
       scheduleSiteSearchForInput($(this));
     });
 
@@ -1875,24 +1996,55 @@ const ShifterSync = (function() {
   function addEntry(day) {
     const dayKey = String(day);
     const nameInput = $(`.entry-input[data-day='${dayKey}']`);
+    const masterSideInput = $(`.entry-master-side-input[data-day='${dayKey}']`);
     const commentInput = $(`.entry-comment-input[data-day='${dayKey}']`);
     const name = nameInput.val().trim();
-    if (!name) {
+    const sideName = masterSideInput.length ? masterSideInput.val().trim() : '';
+    if (!name || (isMasterMode() && !sideName)) {
       return;
     }
 
     const options = getSelectedOptionsForDay(dayKey);
     const autoBranchFields = isSceneMode() ? autoBranchFieldsForOption(options[0] || null) : { site_branch_row_id: '', site_branch: '' };
-    const useSiteSearch = isPersonMode() || isMasterSceneType();
-    const selectedSite = useSiteSearch ? getSelectedSiteDataForInput(nameInput) : { site_row_id: '', site_id: '', site_name: '' };
+    let entryName = name;
+    let employeeName = isSceneMode() ? name : '';
+    let employeeNumber = getSelectedEmployeeNumberForInput(nameInput);
+    let selectedSite = isPersonMode() ? getSelectedSiteDataForInput(nameInput) : { site_row_id: '', site_id: '', site_name: '' };
+    let siteNameForEntry = selectedSite.site_name;
+
+    if (isMasterSceneType()) {
+      const siteInput = masterSideInput;
+      selectedSite = getSelectedSiteDataForInput(siteInput);
+      if (!selectedSite.site_name || !selectedMasterSiteIsAllowed(siteInput)) {
+        alert('\u30de\u30b9\u30bf\u30fc\u306b\u767b\u9332\u3055\u308c\u3066\u3044\u308b\u73fe\u5834\u3092\u9078\u629e\u3057\u3066\u304f\u3060\u3055\u3044');
+        return;
+      }
+      employeeName = name;
+      employeeNumber = getSelectedEmployeeNumberForInput(nameInput);
+      siteNameForEntry = selectedSite.site_name;
+    } else if (isMasterPersonType()) {
+      const siteInput = nameInput;
+      const personInput = masterSideInput;
+      selectedSite = getSelectedSiteDataForInput(siteInput);
+      if (!selectedMasterPersonIsAllowed(personInput)) {
+        alert('\u30de\u30b9\u30bf\u30fc\u306b\u767b\u9332\u3055\u308c\u3066\u3044\u308b\u4eba\u7269\u3092\u9078\u629e\u3057\u3066\u304f\u3060\u3055\u3044');
+        return;
+      }
+      entryName = name;
+      employeeName = getSelectedEmployeeNameForInput(personInput) || sideName;
+      employeeNumber = getSelectedEmployeeNumberForInput(personInput);
+      siteNameForEntry = selectedSite.site_name || name;
+    }
+
     const entry = normalizeEntry({
       id: makeEntryId(),
-      value: formatEntryValue(options[0] || null, name),
+      value: formatEntryValue(options[0] || null, entryName),
       comment: commentInput.val().trim(),
-      employee_number: getSelectedEmployeeNumberForInput(nameInput),
+      employee_name: employeeName,
+      employee_number: employeeNumber,
       site_row_id: selectedSite.site_row_id,
       site_id: selectedSite.site_id,
-      site_name: isMasterSceneType() ? (selectedSite.site_name || name) : selectedSite.site_name,
+      site_name: siteNameForEntry,
       site_branch_row_id: autoBranchFields.site_branch_row_id,
       site_branch: autoBranchFields.site_branch
     });
@@ -1906,6 +2058,11 @@ const ShifterSync = (function() {
     updateEntryDisplay(dayKey);
     updateCapacityWarning(dayKey);
     nameInput.val('').focus();
+    if (masterSideInput.length) {
+      masterSideInput.val('');
+      clearEmployeeSelectionForInput(masterSideInput);
+      clearSiteSelectionForInput(masterSideInput);
+    }
     commentInput.val('');
     clearEmployeeSelectionForInput(nameInput);
     clearSiteSelectionForInput(nameInput);
@@ -2242,6 +2399,8 @@ const ShifterSync = (function() {
       site_id: String(entry.site_id || '').trim(),
       site_name: String(entry.site_name || parsed.name || '').trim()
     };
+    const detailNameLabel = isMasterPersonType() ? '\u73fe\u5834\u540d' : '\u540d\u524d';
+    const detailName = isMasterPersonType() ? (selectedSite.site_name || parsed.name) : parsed.name;
 
     if (!state.editable || syncedEntry) {
       const syncSourceTitle = String(entry.sync_source_project_title || '').trim();
@@ -2262,8 +2421,8 @@ const ShifterSync = (function() {
             </div>
           ` : ''}
           <div class="ss-detail-field">
-            <div class="ss-detail-label">\u540d\u524d</div>
-            <div class="ss-detail-static">${escapeHtml(parsed.name)}</div>
+            <div class="ss-detail-label">${escapeHtml(detailNameLabel)}</div>
+            <div class="ss-detail-static">${escapeHtml(detailName)}</div>
           </div>
           <div class="ss-detail-field">
             <div class="ss-detail-label">\u30aa\u30d7\u30b7\u30e7\u30f3</div>
@@ -2306,19 +2465,35 @@ const ShifterSync = (function() {
     }
 
     const availableOptionKeys = getSelectableOptionKeysForMode(state.mode);
+    const modalPrimaryLabel = isMasterSceneType() || isSceneMode() ? '\u4eba\u7269\u540d' : '\u73fe\u5834\u540d';
+    const modalSideLabel = isMasterSceneType() ? '\u73fe\u5834\u540d' : '\u4eba\u7269\u540d';
+    const modalPrimaryName = isMasterPersonType() ? (selectedSite.site_name || parsed.name) : parsed.name;
+    const modalSideName = isMasterSceneType()
+      ? (selectedSite.site_name || '')
+      : (entry.employee_name || (entry.employee_number ? parsed.name : ''));
+    const modalPrimaryClasses = [
+      'ss-detail-input',
+      (isSceneMode() || isMasterSceneType()) ? 'ss-employee-search-input' : '',
+      (isPersonMode() || isMasterPersonType()) ? 'ss-site-search-input' : ''
+    ].filter(Boolean).join(' ');
+    const modalSideClasses = [
+      'ss-detail-input',
+      isMasterSceneType() ? 'ss-site-search-input' : 'ss-employee-search-input'
+    ].filter(Boolean).join(' ');
     body.html(`
       <div class="ss-detail-form">
         <input type="hidden" id="ss-entry-modal-day" value="${day}">
         <input type="hidden" id="ss-entry-modal-id" value="${escapeHtml(entry.id)}">
         <input type="hidden" id="ss-entry-modal-employee-number" value="${escapeHtml(entry.employee_number || '')}">
+        <input type="hidden" id="ss-entry-modal-employee-name" value="${escapeHtml(entry.employee_name || '')}">
         <div class="ss-detail-field">
-          <label class="ss-detail-label" for="ss-entry-modal-name">\u540d\u524d</label>
+          <label class="ss-detail-label" for="ss-entry-modal-name">${escapeHtml(modalPrimaryLabel)}</label>
           <input
             id="ss-entry-modal-name"
-            class="ss-detail-input${isEntryEmployeeSearchEnabled() ? ' ss-employee-search-input' : ''}${isEntrySiteSearchEnabled() ? ' ss-site-search-input' : ''}"
+            class="${modalPrimaryClasses}"
             type="text"
-            value="${escapeHtml(parsed.name)}"
-            ${isEntryEmployeeSearchEnabled() || isEntrySiteSearchEnabled() ? 'data-search-kind="modal"' : ''}
+            value="${escapeHtml(modalPrimaryName)}"
+            ${isSceneMode() || isPersonMode() || isMasterMode() ? 'data-search-kind="modal"' : ''}
           >
           <div id="ss-entry-modal-selected-note" class="ss-selected-note${entry.employee_number || selectedSite.site_id ? '' : ' ss-hidden'}">${entry.employee_number ? `選択中: ${escapeHtml(parsed.name)} / ${escapeHtml(entry.employee_number)}` : selectedSite.site_id ? `選択中: ${escapeHtml([selectedSite.site_id, selectedSite.site_name].filter(Boolean).join(' / '))}` : ''}</div>
           <div id="ss-entry-modal-candidate-panel" class="ss-candidate-panel ss-hidden" data-search-kind="modal"></div>
@@ -2332,8 +2507,15 @@ const ShifterSync = (function() {
         </div>
         ${isMasterMode() ? `
           <div class="ss-detail-field">
-            <label class="ss-detail-label" for="ss-entry-modal-master-site">\u73fe\u5834\u540d</label>
-            <input id="ss-entry-modal-master-site" class="ss-detail-input" type="text" value="${escapeHtml(entry.site_name || '')}">
+            <label class="ss-detail-label" for="ss-entry-modal-master-side">${escapeHtml(modalSideLabel)}</label>
+            <input
+              id="ss-entry-modal-master-side"
+              class="${modalSideClasses}"
+              type="text"
+              value="${escapeHtml(modalSideName)}"
+              data-search-kind="modal"
+              ${isMasterSceneType() ? 'data-master-scope="site"' : 'data-master-scope="person"'}
+            >
           </div>
         ` : ''}
         <div class="ss-detail-field">
@@ -2364,19 +2546,32 @@ const ShifterSync = (function() {
       </div>
     `);
 
-    if (isEntryEmployeeSearchEnabled() && entry.employee_number) {
-      const $modalNameInput = $('#ss-entry-modal-name');
+    const $modalNameInput = $('#ss-entry-modal-name');
+    const $modalSideInput = $('#ss-entry-modal-master-side');
+    if ((isSceneMode() || isMasterSceneType()) && entry.employee_number) {
       $modalNameInput.attr('data-employee-number', String(entry.employee_number || ''));
-      $modalNameInput.attr('data-selected-employee-name', parsed.name);
+      $modalNameInput.attr('data-selected-employee-name', modalPrimaryName);
       $modalNameInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     }
 
-    if (isEntrySiteSearchEnabled() && (selectedSite.site_row_id || selectedSite.site_id)) {
-      const $modalNameInput = $('#ss-entry-modal-name');
+    if ((isPersonMode() || isMasterPersonType()) && (selectedSite.site_row_id || selectedSite.site_id)) {
       $modalNameInput.attr('data-site-row-id', selectedSite.site_row_id);
       $modalNameInput.attr('data-site-id', selectedSite.site_id);
-      $modalNameInput.attr('data-selected-site-name', selectedSite.site_name || parsed.name);
+      $modalNameInput.attr('data-selected-site-name', selectedSite.site_name || modalPrimaryName);
       $modalNameInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    }
+
+    if (isMasterSceneType() && $modalSideInput.length && (selectedSite.site_row_id || selectedSite.site_id)) {
+      $modalSideInput.attr('data-site-row-id', selectedSite.site_row_id);
+      $modalSideInput.attr('data-site-id', selectedSite.site_id);
+      $modalSideInput.attr('data-selected-site-name', selectedSite.site_name || modalSideName);
+      $modalSideInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    }
+
+    if (isMasterPersonType() && $modalSideInput.length && entry.employee_number) {
+      $modalSideInput.attr('data-employee-number', String(entry.employee_number || ''));
+      $modalSideInput.attr('data-selected-employee-name', modalSideName);
+      $modalSideInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     }
 
     if (canChooseBranch) {
@@ -2398,12 +2593,40 @@ const ShifterSync = (function() {
     const optionKey = $('#ss-entry-modal-option').val() || null;
     const comment = $('#ss-entry-modal-comment').val().trim();
     const $nameInput = $('#ss-entry-modal-name');
-    const employeeNumber = getSelectedEmployeeNumberForInput($nameInput);
-    const selectedSiteForSave = isPersonMode() ? getSelectedSiteDataForInput($nameInput) : { site_row_id: '', site_id: '', site_name: '' };
-    const masterSiteName = isMasterMode() ? String($('#ss-entry-modal-master-site').val() || '').trim() : '';
-    if (isMasterMode() && !masterSiteName) {
-      alert('\u73fe\u5834\u540d\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044');
-      return;
+    const $sideInput = $('#ss-entry-modal-master-side');
+    const sideName = $sideInput.length ? String($sideInput.val() || '').trim() : '';
+    let entryName = name;
+    let employeeName = isSceneMode() ? name : '';
+    let employeeNumber = getSelectedEmployeeNumberForInput($nameInput);
+    let selectedSiteForSave = isPersonMode() ? getSelectedSiteDataForInput($nameInput) : { site_row_id: '', site_id: '', site_name: '' };
+    let siteNameForSave = selectedSiteForSave.site_name;
+    if (isMasterSceneType()) {
+      if (!sideName) {
+        alert('\u73fe\u5834\u540d\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044');
+        return;
+      }
+      selectedSiteForSave = getSelectedSiteDataForInput($sideInput);
+      if (!selectedSiteForSave.site_name || !selectedMasterSiteIsAllowed($sideInput)) {
+        alert('\u30de\u30b9\u30bf\u30fc\u306b\u767b\u9332\u3055\u308c\u3066\u3044\u308b\u73fe\u5834\u3092\u9078\u629e\u3057\u3066\u304f\u3060\u3055\u3044');
+        return;
+      }
+      employeeName = name;
+      employeeNumber = getSelectedEmployeeNumberForInput($nameInput);
+      siteNameForSave = selectedSiteForSave.site_name;
+    } else if (isMasterPersonType()) {
+      if (!sideName) {
+        alert('\u4eba\u7269\u540d\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044');
+        return;
+      }
+      if (!selectedMasterPersonIsAllowed($sideInput)) {
+        alert('\u30de\u30b9\u30bf\u30fc\u306b\u767b\u9332\u3055\u308c\u3066\u3044\u308b\u4eba\u7269\u3092\u9078\u629e\u3057\u3066\u304f\u3060\u3055\u3044');
+        return;
+      }
+      selectedSiteForSave = getSelectedSiteDataForInput($nameInput);
+      entryName = name;
+      employeeName = getSelectedEmployeeNameForInput($sideInput) || sideName;
+      employeeNumber = getSelectedEmployeeNumberForInput($sideInput);
+      siteNameForSave = selectedSiteForSave.site_name || name;
     }
     const siteBranchSelect = $('#ss-entry-modal-site-branch');
     const siteBranchRowId = siteBranchSelect.length ? normalizeSiteBranchRowId(siteBranchSelect.val()) : '';
@@ -2417,12 +2640,13 @@ const ShifterSync = (function() {
       }
       return normalizeEntry({
         id: entry.id,
-        value: formatEntryValue(optionKey, name),
+        value: formatEntryValue(optionKey, entryName),
         comment,
+        employee_name: employeeName,
         employee_number: employeeNumber,
         site_row_id: selectedSiteForSave.site_row_id,
         site_id: selectedSiteForSave.site_id,
-        site_name: isMasterMode() ? masterSiteName : selectedSiteForSave.site_name,
+        site_name: siteNameForSave,
         site_branch_row_id: siteBranchRowId,
         site_branch: siteBranch
       });
@@ -2525,6 +2749,7 @@ const ShifterSync = (function() {
     ];
 
     const commentRows = [];
+    const employeeNameRows = [];
     const employeeNumberRows = [];
     const siteRowIdRows = [];
     const siteIdRows = [];
@@ -2541,6 +2766,9 @@ const ShifterSync = (function() {
         entries.forEach((entry, index) => {
           if (entry.comment) {
             commentRows.push([commentRowPrefix, day, index, entry.comment]);
+          }
+          if (entry.employee_name) {
+            employeeNameRows.push([employeeNameRowPrefix, day, index, entry.employee_name]);
           }
           if (entry.employee_number) {
             employeeNumberRows.push([employeeNumberRowPrefix, day, index, entry.employee_number]);
@@ -2565,6 +2793,7 @@ const ShifterSync = (function() {
 
     return rows
       .concat(commentRows)
+      .concat(employeeNameRows)
       .concat(employeeNumberRows)
       .concat(siteRowIdRows)
       .concat(siteIdRows)

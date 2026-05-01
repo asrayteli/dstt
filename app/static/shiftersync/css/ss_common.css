@@ -508,6 +508,11 @@ h1, h2, h3 {
     padding: 2px 8px;
 }
 
+.entry-item-sync-source.is-master-local {
+    background: #dcfce7;
+    color: #166534;
+}
+
 .entry-item-comment.is-empty {
     color: #9c9f98;
 }

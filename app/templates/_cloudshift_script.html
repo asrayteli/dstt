@@ -1077,9 +1077,6 @@
 
     async function fetchSiteCandidates(query) {
       const key = String(query || '').trim();
-      if (siteSearchCache.has(key)) {
-        return siteSearchCache.get(key);
-      }
       const response = await fetch(`/tools/siteplus/api/cloudshift/sites?q=${encodeURIComponent(key)}`, {
         credentials: 'same-origin',
         headers: { Accept: 'application/json' }
@@ -1089,7 +1086,6 @@
       }
       const payload = await response.json();
       const candidates = Array.isArray(payload.sites) ? payload.sites : [];
-      siteSearchCache.set(key, candidates);
       return candidates;
     }
 
@@ -5593,6 +5589,8 @@
       buildCalendarHost('cloud-editor-panel');
       ShifterSync.setState('mode', project.mode);
       ShifterSync.setState('masterTargetType', project.mode === 'master' ? ((project.master && project.master.target_type) || 'person') : '');
+      ShifterSync.setState('masterPeople', project.mode === 'master' && project.master ? (project.master.people || []) : []);
+      ShifterSync.setState('masterSites', project.mode === 'master' && project.master ? (project.master.sites || []) : []);
       ShifterSync.setState('name', project.title);
       ShifterSync.setState('capacityEnabled', (parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0) > 0);
       ShifterSync.setState('requiredCapacity', parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0);
@@ -6350,6 +6348,12 @@
           event.preventDefault();
           if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずに新しいシフト帳を作成すると、このセッションでの編集内容は失われます。続行しますか？')) return;
           const formData = new FormData(event.currentTarget);
+          if (formData.get('mode') === 'master') {
+            const targets = state.masterTargets.create || { targetType: 'person', people: [], sites: [] };
+            formData.set('master_target_type', targets.targetType === 'scene' ? 'scene' : 'person');
+            formData.set('master_people', targets.targetType === 'person' ? JSON.stringify(targets.people || []) : '');
+            formData.set('master_sites', targets.targetType === 'scene' ? JSON.stringify(targets.sites || []) : '');
+          }
           const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
           state.projectPayload = unwrapProjectPayload(data);
           state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
