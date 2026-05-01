@@ -596,6 +596,20 @@ def test_master_project_read_accepts_json_columns_as_strings(tmp_path):
     assert isinstance(history_response.get_json()["history"][0]["changes"], list)
 
 
+def test_unexpected_cloudshift_api_error_prints_to_server_console(tmp_path, capsys):
+    module, client = _build_client(tmp_path)
+
+    with client.application.test_request_context("/tools/shiftersync/cloudshift/api/project/broken"):
+        response, status_code = module._handle_unexpected_cloudshift_error(RuntimeError("boom"))
+
+    assert status_code == 500
+    assert response.get_json()["error"] == "CloudShift内部エラー: RuntimeError: boom"
+    captured = capsys.readouterr()
+    assert "[CloudShift API ERROR]" in captured.err
+    assert "GET /tools/shiftersync/cloudshift/api/project/broken" in captured.err
+    assert "RuntimeError: boom" in captured.err
+
+
 def test_cloudshift_site_link_uses_latest_site_record(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()

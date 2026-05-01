@@ -5,8 +5,10 @@ import hashlib
 import json
 import os
 import secrets
+import sys
 import tempfile
 import time
+import traceback
 from calendar import monthrange
 from contextlib import contextmanager
 from copy import copy
@@ -146,6 +148,24 @@ def _handle_http_error(error: HTTPException):
     if request.path.startswith("/tools/shiftersync/cloudshift/api/"):
         return jsonify({"error": error.description or error.name}), error.code or 500
     return error
+
+
+@cloudshift_bp.errorhandler(Exception)
+def _handle_unexpected_cloudshift_error(error: Exception):
+    if request.path.startswith("/tools/shiftersync/cloudshift/api/"):
+        try:
+            db.session.rollback()
+        except Exception as rollback_error:
+            print(
+                f"[CloudShift API ERROR] db.session.rollback failed: {type(rollback_error).__name__}: {rollback_error}",
+                file=sys.stderr,
+            )
+        print("[CloudShift API ERROR]", file=sys.stderr)
+        print(f"{request.method} {request.path}", file=sys.stderr)
+        print(f"{type(error).__name__}: {error}", file=sys.stderr)
+        traceback.print_exception(type(error), error, error.__traceback__, file=sys.stderr)
+        return jsonify({"error": f"CloudShift内部エラー: {type(error).__name__}: {error}"}), 500
+    raise error
 
 
 def _ensure_cloudshift_runtime_schema() -> None:
