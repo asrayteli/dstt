@@ -55,6 +55,18 @@
         monthKey: '',
         selectedProjectIds: null,
         result: null
+      },
+      masterTargets: {
+        create: {
+          targetType: 'person',
+          people: [],
+          sites: []
+        },
+        project: {
+          targetType: 'person',
+          people: [],
+          sites: []
+        }
       }
     };
     const employeeSearchCache = new Map();
@@ -342,11 +354,15 @@
     }
 
     function modeLabel(mode) {
-      return mode === 'scene' ? '現場' : '個人';
+      if (mode === 'scene') return '現場';
+      if (mode === 'master') return 'マスター';
+      return '個人';
     }
 
     function modeLongLabel(mode) {
-      return mode === 'scene' ? '現場シフト' : '個人シフト';
+      if (mode === 'scene') return '現場シフト';
+      if (mode === 'master') return 'マスターシフト';
+      return '個人シフト';
     }
 
     function projectAccessRole(project) {
@@ -726,6 +742,217 @@
       };
     }
 
+    function masterFieldRefs(kind) {
+      if (kind === 'create') {
+        return {
+          field: $('cloud-create-master-field'),
+          targetType: $('cloud-create-master-target-type'),
+          query: $('cloud-create-master-query'),
+          candidates: $('cloud-create-master-candidates'),
+          selected: $('cloud-create-master-selected'),
+          people: $('cloud-create-master-people'),
+          sites: $('cloud-create-master-sites')
+        };
+      }
+      return {
+        field: $('cloud-project-master-field'),
+        targetType: $('cloud-project-master-target-type'),
+        query: $('cloud-project-master-query'),
+        candidates: $('cloud-project-master-candidates'),
+        selected: $('cloud-project-master-selected'),
+        people: $('cloud-project-master-people'),
+        sites: $('cloud-project-master-sites')
+      };
+    }
+
+    function normalizeMasterPerson(item) {
+      if (!item || typeof item !== 'object') return null;
+      const employeeNumber = String(item.employee_number || item.employeeNumber || '').trim();
+      const name = String(item.name || item.employee_name || item.employeeName || '').trim();
+      if (!employeeNumber) return null;
+      return { employee_number: employeeNumber, name: name || employeeNumber };
+    }
+
+    function normalizeMasterSite(item) {
+      if (!item || typeof item !== 'object') return null;
+      const siteRowId = String(item.site_row_id || item.id || item.siteRowId || '').trim();
+      const siteId = String(item.site_id || item.siteId || '').trim();
+      const siteName = String(item.site_name || item.siteName || '').trim();
+      if (!siteRowId && !siteId) return null;
+      return {
+        site_row_id: siteRowId,
+        site_id: siteId,
+        site_name: siteName,
+        active_branch_count: parseInt(item.active_branch_count || item.activeBranchCount || '0', 10) || 0
+      };
+    }
+
+    function setMasterTargets(kind, targetType, people, sites) {
+      const nextType = targetType === 'scene' ? 'scene' : 'person';
+      state.masterTargets[kind] = {
+        targetType: nextType,
+        people: nextType === 'person' ? (Array.isArray(people) ? people.map(normalizeMasterPerson).filter(Boolean) : []) : [],
+        sites: nextType === 'scene' ? (Array.isArray(sites) ? sites.map(normalizeMasterSite).filter(Boolean) : []) : []
+      };
+      const refs = masterFieldRefs(kind);
+      if (refs.query) refs.query.value = '';
+      renderMasterTargets(kind);
+    }
+
+    function syncMasterTargetHiddenInputs(kind) {
+      const refs = masterFieldRefs(kind);
+      const targets = state.masterTargets[kind] || { targetType: 'person', people: [], sites: [] };
+      if (refs.targetType) refs.targetType.value = targets.targetType;
+      if (refs.people) refs.people.value = targets.targetType === 'person' ? JSON.stringify(targets.people) : '';
+      if (refs.sites) refs.sites.value = targets.targetType === 'scene' ? JSON.stringify(targets.sites) : '';
+    }
+
+    function renderMasterTargets(kind) {
+      const refs = masterFieldRefs(kind);
+      const targets = state.masterTargets[kind] || { targetType: 'person', people: [], sites: [] };
+      syncMasterTargetHiddenInputs(kind);
+      if (refs.query) {
+        refs.query.placeholder = targets.targetType === 'person' ? '社員名または社員番号で検索' : '契約番号または現場名で検索';
+      }
+      if (refs.selected) {
+        const items = targets.targetType === 'person' ? targets.people : targets.sites;
+        refs.selected.innerHTML = items.length ? items.map((item, index) => {
+          const label = targets.targetType === 'person'
+            ? `${item.name || item.employee_number} / ${item.employee_number}`
+            : `${item.site_id || item.site_row_id} / ${item.site_name || ''}`;
+          return `
+            <span class="cloud-master-chip">
+              ${escapeHtml(label)}
+              <button type="button" data-master-remove="${index}" aria-label="削除">×</button>
+            </span>
+          `;
+        }).join('') : '<span class="cloud-note-chip">まだ選択されていません</span>';
+      }
+      if (refs.candidates) {
+        refs.candidates.innerHTML = '';
+        refs.candidates.classList.add('cloud-hidden');
+      }
+    }
+
+    function addMasterTarget(kind, item) {
+      const targets = state.masterTargets[kind] || { targetType: 'person', people: [], sites: [] };
+      if (targets.targetType === 'person') {
+        const normalized = normalizeMasterPerson(item);
+        if (!normalized) return;
+        if (!targets.people.some((person) => person.employee_number === normalized.employee_number)) {
+          targets.people.push(normalized);
+        }
+      } else {
+        const normalized = normalizeMasterSite(item);
+        if (!normalized) return;
+        const key = normalized.site_row_id || normalized.site_id;
+        if (!targets.sites.some((site) => (site.site_row_id || site.site_id) === key)) {
+          targets.sites.push(normalized);
+        }
+      }
+      state.masterTargets[kind] = targets;
+      const refs = masterFieldRefs(kind);
+      if (refs.query) refs.query.value = '';
+      renderMasterTargets(kind);
+      if (kind === 'create') refreshCreateMasterTypeLock();
+    }
+
+    function removeMasterTarget(kind, index) {
+      const targets = state.masterTargets[kind] || { targetType: 'person', people: [], sites: [] };
+      const list = targets.targetType === 'person' ? targets.people : targets.sites;
+      if (index < 0 || index >= list.length) return;
+      list.splice(index, 1);
+      renderMasterTargets(kind);
+      if (kind === 'create') refreshCreateMasterTypeLock();
+    }
+
+    async function searchMasterTargets(kind) {
+      const refs = masterFieldRefs(kind);
+      const targets = state.masterTargets[kind] || { targetType: 'person', people: [], sites: [] };
+      const query = refs.query ? refs.query.value.trim() : '';
+      if (!refs.candidates || !query) {
+        if (refs.candidates) refs.candidates.classList.add('cloud-hidden');
+        return;
+      }
+      const items = targets.targetType === 'person'
+        ? (await fetchEmployeeCandidates(query)).map(normalizeMasterPerson).filter(Boolean)
+        : (await fetchSiteCandidates(query)).map(normalizeMasterSite).filter(Boolean);
+      if (!items.length) {
+        refs.candidates.innerHTML = '<div class="cloud-empty-state compact"><p>候補が見つかりません。</p></div>';
+      } else {
+        refs.candidates.innerHTML = items.slice(0, 10).map((item, index) => {
+          const label = targets.targetType === 'person'
+            ? `${item.name || item.employee_number} / ${item.employee_number}`
+            : `${item.site_id || item.site_row_id} / ${item.site_name || ''}`;
+          return `<button type="button" class="cloud-master-candidate" data-master-candidate="${index}">${escapeHtml(label)}</button>`;
+        }).join('');
+        refs.candidates.querySelectorAll('[data-master-candidate]').forEach((button) => {
+          button.addEventListener('click', () => {
+            const selected = items[parseInt(button.getAttribute('data-master-candidate') || '-1', 10)];
+            addMasterTarget(kind, selected);
+          });
+        });
+      }
+      refs.candidates.classList.remove('cloud-hidden');
+    }
+
+    function applyMasterTypeLock(kind, lockedType) {
+      const refs = masterFieldRefs(kind);
+      if (!refs.targetType) return;
+      const selectEl = refs.targetType;
+      const parent = selectEl.closest('label') || selectEl.parentElement;
+      if (!parent) return;
+      let display = parent.querySelector('.cloud-master-type-display');
+      if (lockedType) {
+        selectEl.style.display = 'none';
+        selectEl.disabled = true;
+        if (!display) {
+          display = document.createElement('span');
+          display.className = 'cloud-master-type-display cloud-input';
+          parent.appendChild(display);
+        }
+        display.textContent = lockedType === 'scene' ? '現場マスター（変更不可）' : '個人マスター（変更不可）';
+        display.style.display = '';
+      } else {
+        selectEl.style.display = '';
+        selectEl.disabled = false;
+        if (display) display.style.display = 'none';
+      }
+    }
+
+    function refreshCreateMasterTypeLock() {
+      const targets = state.masterTargets.create || { targetType: 'person', people: [], sites: [] };
+      const hasItems = (targets.people && targets.people.length > 0) || (targets.sites && targets.sites.length > 0);
+      const refs = masterFieldRefs('create');
+      if (!refs.targetType) return;
+      refs.targetType.disabled = hasItems;
+      refs.targetType.title = hasItems ? '登録済みの対象を全て削除すると再選択できます' : '';
+    }
+
+    function bindMasterTargetControls(kind) {
+      const refs = masterFieldRefs(kind);
+      if (!refs.field) return;
+      if (refs.targetType) {
+        refs.targetType.addEventListener('change', () => {
+          setMasterTargets(kind, refs.targetType.value === 'scene' ? 'scene' : 'person', [], []);
+        });
+      }
+      if (refs.query) {
+        refs.query.addEventListener('input', () => {
+          window.clearTimeout(refs.query._masterTimer);
+          refs.query._masterTimer = window.setTimeout(() => searchMasterTargets(kind).catch((error) => showFlash(error.message, 'error')), 220);
+        });
+      }
+      if (refs.selected) {
+        refs.selected.addEventListener('click', (event) => {
+          const button = event.target.closest('[data-master-remove]');
+          if (!button) return;
+          removeMasterTarget(kind, parseInt(button.getAttribute('data-master-remove') || '-1', 10));
+        });
+      }
+      renderMasterTargets(kind);
+    }
+
     function titleFieldMode(kind) {
       if (kind === 'create') {
         return $('cloud-create-mode') ? $('cloud-create-mode').value : 'scene';
@@ -759,7 +986,9 @@
     function setTitleFieldMode(kind) {
       const refs = titleFieldRefs(kind);
       const siteRefs = siteFieldRefs(kind);
+      const masterRefs = masterFieldRefs(kind);
       const isPerson = titleFieldMode(kind) === 'person';
+      const isMaster = titleFieldMode(kind) === 'master';
       if (refs.label) {
         refs.label.textContent = isPerson ? '社員' : 'タイトル';
       }
@@ -775,16 +1004,20 @@
         }
       }
       if (siteRefs.field) {
-        siteRefs.field.classList.toggle('cloud-hidden', isPerson);
+        siteRefs.field.classList.toggle('cloud-hidden', isPerson || isMaster);
+      }
+      if (masterRefs.field) {
+        masterRefs.field.classList.toggle('cloud-hidden', !isMaster);
+        if (isMaster) renderMasterTargets(kind);
       }
       if (kind === 'create') {
-        if ($('cloud-create-pick-site')) $('cloud-create-pick-site').classList.toggle('cloud-hidden', isPerson);
-        if ($('cloud-create-clear-site')) $('cloud-create-clear-site').classList.toggle('cloud-hidden', isPerson);
+        if ($('cloud-create-pick-site')) $('cloud-create-pick-site').classList.toggle('cloud-hidden', isPerson || isMaster);
+        if ($('cloud-create-clear-site')) $('cloud-create-clear-site').classList.toggle('cloud-hidden', isPerson || isMaster);
       } else {
-        if ($('cloud-project-pick-site')) $('cloud-project-pick-site').classList.toggle('cloud-hidden', isPerson);
-        if ($('cloud-project-clear-site')) $('cloud-project-clear-site').classList.toggle('cloud-hidden', isPerson);
+        if ($('cloud-project-pick-site')) $('cloud-project-pick-site').classList.toggle('cloud-hidden', isPerson || isMaster);
+        if ($('cloud-project-clear-site')) $('cloud-project-clear-site').classList.toggle('cloud-hidden', isPerson || isMaster);
       }
-      if (isPerson) {
+      if (isPerson || isMaster) {
         clearSiteSelection(kind);
       }
     }
@@ -810,6 +1043,8 @@
         refs.panel.classList.add('cloud-hidden');
       }
       clearSiteSelection('create');
+      setMasterTargets('create', 'person', [], []);
+      refreshCreateMasterTypeLock();
       setTitleFieldMode('create');
     }
 
@@ -4197,7 +4432,13 @@
         return;
       }
 
+      const masterProjects = state.projects.filter((project) => project.access_role !== 'viewer' && project.mode === 'master');
       const groups = [
+        ...(
+          masterProjects.length
+            ? [{ key: 'master', title: 'マスターシフト', projects: masterProjects }]
+            : []
+        ),
         { key: 'person', title: '個人シフト', projects: state.projects.filter((project) => project.access_role !== 'viewer' && project.mode === 'person') },
         { key: 'scene', title: '現場シフト', projects: state.projects.filter((project) => project.access_role !== 'viewer' && project.mode === 'scene') },
         { key: 'shared', title: '共有されたシフト', projects: state.projects.filter((project) => project.access_role === 'viewer') }
@@ -4205,12 +4446,15 @@
 
       function projectCard(project) {
         const shareText = shareBadgeText(project);
+        const masterInfo = project.master || {};
+        const masterTargetLabel = masterInfo.target_label || (masterInfo.target_type === 'scene' ? '現場' : '個人');
+        const masterTargetCount = masterInfo.target_type === 'scene' ? (masterInfo.site_count || 0) : (masterInfo.people_count || 0);
         return `
-          <article class="cloud-project-item${currentProject() && currentProject().id === project.id ? ' active' : ''}${project.access_role === 'viewer' ? ' is-shared' : ''}" data-project-id="${project.id}">
+          <article class="cloud-project-item${currentProject() && currentProject().id === project.id ? ' active' : ''}${project.access_role === 'viewer' ? ' is-shared' : ''}${project.mode === 'master' ? ' is-master' : ''}" data-project-id="${project.id}">
             <div class="cloud-project-card-head">
               <div>
                 <h3>${escapeHtml(project.title)}</h3>
-                <p>${modeLongLabel(project.mode)} / ${project.month_count}か月${project.mode === 'scene' ? ` / ${escapeHtml(project.site && project.site.site_id ? project.site.site_id : '現場未設定')}` : ''}</p>
+                <p>${modeLongLabel(project.mode)} / ${project.month_count}か月${project.mode === 'scene' ? ` / ${escapeHtml(project.site && project.site.site_id ? project.site.site_id : '現場未設定')}` : ''}${project.mode === 'master' ? ` / ${escapeHtml(masterTargetLabel)} ${escapeHtml(String(masterTargetCount))}件` : ''}</p>
               </div>
               <span class="cloud-badge">${project.latest_month_key ? escapeHtml(formatMonthKey(project.latest_month_key)) : '未作成月'}</span>
             </div>
@@ -5348,6 +5592,7 @@
 
       buildCalendarHost('cloud-editor-panel');
       ShifterSync.setState('mode', project.mode);
+      ShifterSync.setState('masterTargetType', project.mode === 'master' ? ((project.master && project.master.target_type) || 'person') : '');
       ShifterSync.setState('name', project.title);
       ShifterSync.setState('capacityEnabled', (parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0) > 0);
       ShifterSync.setState('requiredCapacity', parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0);
@@ -5392,6 +5637,15 @@
       if ($('cloud-project-selected-note')) {
         $('cloud-project-selected-note').textContent = project.employee_number ? `社員番号: ${project.employee_number}` : '';
       }
+      if (project.mode === 'master') {
+        const masterInfo = project.master || {};
+        const masterType = masterInfo.target_type === 'scene' ? 'scene' : 'person';
+        setMasterTargets('project', masterType, masterInfo.people || [], masterInfo.sites || []);
+        applyMasterTypeLock('project', masterType);
+      } else {
+        setMasterTargets('project', 'person', [], []);
+        applyMasterTypeLock('project', null);
+      }
       setTitleFieldMode('project');
       if (project.mode === 'scene') {
         applySiteSelection('project', project.site || {});
@@ -5404,12 +5658,16 @@
       if ($('cloud-project-badges')) {
         const shareText = shareBadgeText(project);
         const draftChanged = draftHasChanges(month);
+        const masterInfo = project.master || {};
+        const masterTargetLabel = masterInfo.target_label || (masterInfo.target_type === 'scene' ? '現場' : '個人');
+        const masterTargetCount = masterInfo.target_type === 'scene' ? (masterInfo.site_count || 0) : (masterInfo.people_count || 0);
         $('cloud-project-badges').innerHTML = `
           <span class="cloud-badge">${modeLongLabel(project.mode)}</span>
           ${shareText ? `<span class="cloud-badge ${project.access_role === 'viewer' ? 'shared' : 'shared-owner'}">${escapeHtml(shareText)}</span>` : ''}
           <span class="cloud-badge">${(project.month_keys || []).length}か月</span>
           ${draftChanged ? `<span class="cloud-badge cloud-draft-badge">仮保存あり</span>` : ''}
           ${project.mode === 'scene' ? `<span class="cloud-badge">${escapeHtml(project.site && project.site.site_id ? `${project.site.site_id} / ${project.site.site_name || ''}` : '現場未設定')}</span>` : ''}
+          ${project.mode === 'master' ? `<span class="cloud-badge cloud-badge-master">${escapeHtml(masterTargetLabel)} ${escapeHtml(String(masterTargetCount))}件</span>` : ''}
           <span class="cloud-badge">${escapeHtml(project.updated_at || '')}</span>
         `;
       }
@@ -6135,7 +6393,10 @@
             body: {
               title: $('cloud-project-title').value.trim(),
               employee_number: $('cloud-project-employee-number') ? $('cloud-project-employee-number').value.trim() : '',
-              site_row_id: $('cloud-project-site-row-id') ? $('cloud-project-site-row-id').value.trim() : ''
+              site_row_id: $('cloud-project-site-row-id') ? $('cloud-project-site-row-id').value.trim() : '',
+              master_target_type: $('cloud-project-master-target-type') ? $('cloud-project-master-target-type').value : '',
+              master_people: $('cloud-project-master-people') ? $('cloud-project-master-people').value : '',
+              master_sites: $('cloud-project-master-sites') ? $('cloud-project-master-sites').value : ''
             }
           }));
           state.projectPayload = payload;
@@ -6174,6 +6435,8 @@
           setTitleFieldMode('create');
         });
       }
+      bindMasterTargetControls('create');
+      bindMasterTargetControls('project');
 
       const createPickSite = $('cloud-create-pick-site');
       if (createPickSite) {

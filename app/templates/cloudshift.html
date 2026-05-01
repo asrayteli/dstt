@@ -67,6 +67,7 @@
             <select id="cloud-create-mode" name="mode" class="cloud-input">
               <option value="scene">現場シフト</option>
               <option value="person">個人シフト</option>
+              <option value="master">マスターシフト</option>
             </select>
           </label>
           <label class="cloud-field">
@@ -91,6 +92,26 @@
             </div>
             <div id="cloud-create-site-note" class="cloud-field-note"></div>
           </label>
+          <div id="cloud-create-master-field" class="cloud-field cloud-field-wide cloud-hidden">
+            <span>マスター対象</span>
+            <div class="cloud-master-picker">
+              <label class="cloud-field">
+                <span>対象種別</span>
+                <select id="cloud-create-master-target-type" name="master_target_type" class="cloud-input">
+                  <option value="person">個人</option>
+                  <option value="scene">現場</option>
+                </select>
+              </label>
+              <label class="cloud-field">
+                <span>検索</span>
+                <input id="cloud-create-master-query" class="cloud-input" type="text" autocomplete="off">
+              </label>
+              <div id="cloud-create-master-candidates" class="cloud-input-panel wide cloud-hidden"></div>
+              <div id="cloud-create-master-selected" class="cloud-master-selected"></div>
+              <input id="cloud-create-master-people" name="master_people" type="hidden">
+              <input id="cloud-create-master-sites" name="master_sites" type="hidden">
+            </div>
+          </div>
         </div>
         <div class="cloud-actions">
           <button type="submit" class="cloud-btn primary">作成して編集へ進む</button>
@@ -157,6 +178,26 @@
               <button id="cloud-project-clear-site" type="button" class="cloud-btn ghost">解除</button>
             </div>
             <div id="cloud-project-site-note" class="cloud-field-note"></div>
+            <div id="cloud-project-master-field" class="cloud-field cloud-field-wide cloud-hidden">
+              <span>マスター対象</span>
+              <div class="cloud-master-picker">
+                <label class="cloud-field">
+                  <span>対象種別</span>
+                  <select id="cloud-project-master-target-type" class="cloud-input">
+                    <option value="person">個人</option>
+                    <option value="scene">現場</option>
+                  </select>
+                </label>
+                <label class="cloud-field">
+                  <span>検索</span>
+                  <input id="cloud-project-master-query" class="cloud-input" type="text" autocomplete="off">
+                </label>
+                <div id="cloud-project-master-candidates" class="cloud-input-panel wide cloud-hidden"></div>
+                <div id="cloud-project-master-selected" class="cloud-master-selected"></div>
+                <input id="cloud-project-master-people" type="hidden">
+                <input id="cloud-project-master-sites" type="hidden">
+              </div>
+            </div>
             <div id="cloud-project-candidate-panel" class="cloud-input-panel wide cloud-hidden"></div>
             <div id="cloud-project-selected-note" class="cloud-field-note"></div>
             <button id="cloud-save-title" type="button" class="cloud-btn secondary">タイトル保存</button>

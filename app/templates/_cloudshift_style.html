@@ -390,6 +390,11 @@
     background: linear-gradient(180deg, #ffffff 0%, #f8f5ff 100%);
   }
 
+  .cloud-project-item.is-master {
+    border-color: #c7b7ff;
+    background: linear-gradient(180deg, #ffffff 0%, #f5f0ff 100%);
+  }
+
   .cloud-check-project-item {
     border: 1px solid var(--cloud-line);
     border-radius: 18px;
@@ -485,6 +490,12 @@
 
   .cloud-badge.shared,
   .cloud-badge.shared-owner {
+    background: #f1e8ff;
+    border-color: #d8c9ff;
+    color: #6b21a8;
+  }
+
+  .cloud-badge-master {
     background: #f1e8ff;
     border-color: #d8c9ff;
     color: #6b21a8;
@@ -716,6 +727,84 @@
 
   .cloud-input-panel.wide {
     min-width: min(360px, 100%);
+  }
+
+  .cloud-master-picker {
+    display: grid;
+    grid-template-columns: minmax(160px, 220px) minmax(220px, 1fr);
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .cloud-master-picker .cloud-input-panel,
+  .cloud-master-selected {
+    grid-column: 1 / -1;
+  }
+
+  .cloud-master-selected {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 34px;
+    align-items: center;
+  }
+
+  .cloud-master-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    border: 1px solid #d8c9ff;
+    border-radius: 999px;
+    background: #f5f0ff;
+    color: #6b21a8;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.35;
+    padding: 7px 9px 7px 11px;
+  }
+
+  .cloud-master-chip button {
+    appearance: none;
+    border: 0;
+    border-radius: 999px;
+    background: #e7d8ff;
+    color: #5b21b6;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 900;
+    line-height: 1;
+    width: 20px;
+    height: 20px;
+  }
+
+  .cloud-master-type-display {
+    background: #f5f3ff;
+    border: 1px solid #c4b5fd;
+    color: #5b21b6;
+    font-weight: 700;
+    cursor: not-allowed;
+    user-select: none;
+  }
+
+  .cloud-master-candidate {
+    width: 100%;
+    appearance: none;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--cloud-text);
+    cursor: pointer;
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 10px;
+    text-align: left;
+  }
+
+  .cloud-master-candidate:hover {
+    background: #f5f0ff;
+    color: #6b21a8;
   }
 
   .cloud-field-note {
@@ -2040,6 +2129,7 @@
     }
 
     .cloud-form-grid,
+    .cloud-master-picker,
     .cloud-tool-dock {
       grid-template-columns: 1fr;
     }

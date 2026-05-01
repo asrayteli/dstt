@@ -151,6 +151,7 @@ h1, h2, h3 {
 .form-input,
 .form-select,
 .entry-input,
+.entry-site-input,
 .entry-comment-input,
 .copy-input,
 .ss-detail-input,
@@ -176,6 +177,7 @@ h1, h2, h3 {
 .form-input:focus,
 .form-select:focus,
 .entry-input:focus,
+.entry-site-input:focus,
 .entry-comment-input:focus,
 .copy-input:focus,
 .ss-detail-input:focus,
@@ -491,6 +493,19 @@ h1, h2, h3 {
 .entry-item-status.is-danger {
     background: #ffe0e0;
     color: #9b3434;
+}
+
+.entry-item-sync-source {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    margin-top: 3px;
+    border-radius: 999px;
+    background: #e0e7ff;
+    color: #3730a3;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
 }
 
 .entry-item-comment.is-empty {
