@@ -97,7 +97,7 @@
             <div class="cloud-master-picker">
               <label class="cloud-field">
                 <span>対象種別</span>
-                <select id="cloud-create-master-target-type" name="master_target_type" class="cloud-input">
+                <select id="cloud-create-master-target-type" class="cloud-input">
                   <option value="person">個人</option>
                   <option value="scene">現場</option>
                 </select>
@@ -108,6 +108,7 @@
               </label>
               <div id="cloud-create-master-candidates" class="cloud-input-panel wide cloud-hidden"></div>
               <div id="cloud-create-master-selected" class="cloud-master-selected"></div>
+              <input id="cloud-create-master-target-type-input" name="master_target_type" type="hidden">
               <input id="cloud-create-master-people" name="master_people" type="hidden">
               <input id="cloud-create-master-sites" name="master_sites" type="hidden">
             </div>
