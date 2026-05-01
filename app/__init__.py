@@ -93,6 +93,35 @@ def _ensure_access_control_schema(app):
             if "vehicle_number_updated_at" not in contract_cols:
                 alters.append("ALTER TABLE site_contract_master ADD COLUMN vehicle_number_updated_at DATETIME")
 
+        if "cloudshift_projects" in inspector.get_table_names():
+            project_cols = {c["name"] for c in inspector.get_columns("cloudshift_projects")}
+            if "site_manager_id" not in project_cols:
+                alters.append("ALTER TABLE cloudshift_projects ADD COLUMN site_manager_id VARCHAR(20)")
+            if "site_manager_name" not in project_cols:
+                alters.append("ALTER TABLE cloudshift_projects ADD COLUMN site_manager_name VARCHAR(200)")
+            if "account_shares" not in project_cols:
+                alters.append("ALTER TABLE cloudshift_projects ADD COLUMN account_shares JSON NOT NULL DEFAULT '{}'")
+            if "assist" not in project_cols:
+                alters.append("ALTER TABLE cloudshift_projects ADD COLUMN assist JSON NOT NULL DEFAULT '{}'")
+            if "extra_data" not in project_cols:
+                alters.append("ALTER TABLE cloudshift_projects ADD COLUMN extra_data JSON NOT NULL DEFAULT '{}'")
+
+        if "cloudshift_months" in inspector.get_table_names():
+            month_cols = {c["name"] for c in inspector.get_columns("cloudshift_months")}
+            if "draft_entries_per_day" not in month_cols:
+                alters.append("ALTER TABLE cloudshift_months ADD COLUMN draft_entries_per_day JSON NOT NULL DEFAULT '{}'")
+            if "revision" not in month_cols:
+                alters.append("ALTER TABLE cloudshift_months ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+            if "revision_snapshots" not in month_cols:
+                alters.append("ALTER TABLE cloudshift_months ADD COLUMN revision_snapshots JSON NOT NULL DEFAULT '{}'")
+
+        if "cloudshift_history" in inspector.get_table_names():
+            history_cols = {c["name"] for c in inspector.get_columns("cloudshift_history")}
+            if "changes" not in history_cols:
+                alters.append("ALTER TABLE cloudshift_history ADD COLUMN changes JSON NOT NULL DEFAULT '[]'")
+            if "payload" not in history_cols:
+                alters.append("ALTER TABLE cloudshift_history ADD COLUMN payload JSON NOT NULL DEFAULT '{}'")
+
         if "vehicle_inspection_records" in inspector.get_table_names():
             vehicle_inspection_cols = {c["name"] for c in inspector.get_columns("vehicle_inspection_records")}
             if "model_type" in vehicle_inspection_cols:

@@ -21,7 +21,10 @@
       "Bash(grep -n \"</script>$\\\\|^</div>\" H:/DSTT/dstt/app/templates/workday.html)",
       "Bash(python -m pytest tests/test_car_inspe_ocr.py -x -q)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('app/tools/car_inspe.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
-      "Bash(python -m pytest tests/ -x -q)"
+      "Bash(python -m pytest tests/ -x -q)",
+      "Bash(python -m pytest tests/test_cloudshift.py -x -q)",
+      "Bash(git checkout *)",
+      "Bash(gh auth *)"
     ]
   }
 }

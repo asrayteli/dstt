@@ -9,6 +9,7 @@ from typing import Any
 
 
 COMMENT_ROW_PREFIX = "#comment"
+EMPLOYEE_NAME_ROW_PREFIX = "#employee_name"
 EMPLOYEE_NUMBER_ROW_PREFIX = "#employee_number"
 PROJECT_EMPLOYEE_NUMBER_ROW_PREFIX = "#project_employee_number"
 SITE_ROW_ID_ROW_PREFIX = "#site_row_id"
@@ -102,6 +103,7 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         value = str(raw.get("value", "")).strip()
         if not value:
             return {}
+        employee_name = str(raw.get("employee_name", raw.get("employeeName", "")) or "").strip()
         employee_number = str(raw.get("employee_number", raw.get("employeeNumber", "")) or "").strip()
         site_branch_row_id = _normalize_site_branch_row_id(
             raw.get("site_branch_row_id", raw.get("siteBranchRowId", ""))
@@ -114,6 +116,7 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
             "id": str(raw.get("id") or generate_entry_id()),
             "value": value,
             "comment": str(raw.get("comment", "") or "").strip(),
+            "employee_name": employee_name,
             "employee_number": employee_number,
             "site_row_id": site_row_id,
             "site_id": site_id,
@@ -135,6 +138,7 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         "id": generate_entry_id(),
         "value": value,
         "comment": "",
+        "employee_name": "",
         "employee_number": "",
         "site_row_id": "",
         "site_id": "",
@@ -198,6 +202,7 @@ def serialize_entry_rows(
     ]
 
     comment_rows: list[list[Any]] = []
+    employee_name_rows: list[list[Any]] = []
     employee_number_rows: list[list[Any]] = []
     site_row_id_rows: list[list[Any]] = []
     site_id_rows: list[list[Any]] = []
@@ -215,6 +220,10 @@ def serialize_entry_rows(
                 continue
             if entry.get("comment"):
                 comment_rows.append([COMMENT_ROW_PREFIX, day, index, entry["comment"]])
+            if entry.get("employee_name"):
+                employee_name_rows.append(
+                    [EMPLOYEE_NAME_ROW_PREFIX, day, index, entry["employee_name"]]
+                )
             if entry.get("employee_number"):
                 employee_number_rows.append(
                     [EMPLOYEE_NUMBER_ROW_PREFIX, day, index, entry["employee_number"]]
@@ -247,6 +256,7 @@ def serialize_entry_rows(
     return (
         rows
         + comment_rows
+        + employee_name_rows
         + employee_number_rows
         + site_row_id_rows
         + site_id_rows
@@ -306,6 +316,7 @@ def parse_csv_text(text: str) -> dict[str, Any]:
 
     entries_per_day = empty_entries_for_month(year, month)
     comment_rows: list[list[str]] = []
+    employee_name_rows: list[list[str]] = []
     employee_number_rows: list[list[str]] = []
     site_row_id_rows: list[list[str]] = []
     site_id_rows: list[list[str]] = []
@@ -326,6 +337,7 @@ def parse_csv_text(text: str) -> dict[str, Any]:
                     {
                         "value": cell,
                         "comment": "",
+                        "employee_name": "",
                         "employee_number": "",
                         "site_branch_row_id": "",
                         "site_branch": "",
@@ -337,6 +349,9 @@ def parse_csv_text(text: str) -> dict[str, Any]:
             continue
         if head == COMMENT_ROW_PREFIX:
             comment_rows.append(row)
+            continue
+        if head == EMPLOYEE_NAME_ROW_PREFIX:
+            employee_name_rows.append(row)
             continue
         if head == EMPLOYEE_NUMBER_ROW_PREFIX:
             employee_number_rows.append(row)
@@ -382,6 +397,18 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
             continue
         entries_per_day[day_key][index]["employee_number"] = str(row[3] or "").strip()
+
+    for row in employee_name_rows:
+        if len(row) < 4:
+            continue
+        try:
+            day_key = str(int(row[1]))
+            index = int(row[2])
+        except (TypeError, ValueError):
+            continue
+        if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
+            continue
+        entries_per_day[day_key][index]["employee_name"] = str(row[3] or "").strip()
 
     for row in site_row_id_rows:
         if len(row) < 4:

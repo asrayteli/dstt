@@ -362,6 +362,25 @@ def _linked_site_snapshot_payload(site_row_id: Any, site_id: Any, site_name: Any
     }
 
 
+def _latest_site_link_fields(site_row_id: Any, site_id: Any, site_name: Any) -> dict[str, str]:
+    if _coerce_site_row_id(site_row_id) is None:
+        site_id_text = str(site_id or "").strip()
+        if site_id_text:
+            site = Site.query.filter_by(site_id=site_id_text).first()
+            if site:
+                return {
+                    "site_row_id": str(site.id),
+                    "site_id": str(site.site_id or "").strip(),
+                    "site_name": str(site.site_name or "").strip(),
+                }
+    snapshot = _linked_site_snapshot_payload(site_row_id, site_id, site_name)
+    return {
+        "site_row_id": str(snapshot.get("site_row_id") or ""),
+        "site_id": str(snapshot.get("site_id") or "").strip(),
+        "site_name": str(snapshot.get("site_name") or "").strip(),
+    }
+
+
 def _project_site_payload(project: dict[str, Any]) -> dict[str, Any]:
     return _linked_site_snapshot_payload(
         project.get("site_row_id"),
@@ -775,7 +794,16 @@ def _master_people_text(project: dict[str, Any]) -> str:
 
 def _master_sites_text(project: dict[str, Any]) -> str:
     return "\n".join(
-        str(item.get("site_row_id") or item.get("site_id") or "").strip()
+        str(
+            _latest_site_link_fields(
+                item.get("site_row_id"),
+                item.get("site_id"),
+                item.get("site_name"),
+            ).get("site_row_id")
+            or item.get("site_row_id")
+            or item.get("site_id")
+            or ""
+        ).strip()
         for item in (project.get("master_sites") or [])
         if isinstance(item, dict) and str(item.get("site_row_id") or item.get("site_id") or "").strip()
     )
@@ -794,6 +822,17 @@ def _master_scope_from_payload(data: Any, *, existing: dict[str, Any] | None = N
     getter = data.get if hasattr(data, "get") else lambda key, default=None: default
     raw_people = getter("master_people", _master_people_text(existing or {}))
     raw_sites = getter("master_sites", _master_sites_text(existing or {}))
+    raw_target_type = getter("master_target_type", "")
+    if str(raw_target_type or "").strip():
+        target_type = _sanitize_master_target_type(raw_target_type)
+    elif existing:
+        target_type = _master_target_type_for_project(existing)
+    elif _master_payload_items(raw_people):
+        target_type = "person"
+    elif _master_payload_items(raw_sites):
+        target_type = "scene"
+    else:
+        target_type = "scene"
     people = _master_people_from_payload(raw_people)
     sites = _master_sites_from_payload(raw_sites)
     raw_target_type = str(getter("master_target_type", "") or "").strip().lower()
@@ -833,6 +872,16 @@ def _entry_option_and_name(entry: dict[str, Any]) -> tuple[str, str]:
     return str(option_key or "").strip().upper(), str(raw_name or "").strip()
 
 
+def _entry_employee_name(entry: dict[str, Any]) -> str:
+    if not isinstance(entry, dict):
+        return ""
+    stored = str(entry.get("employee_name") or entry.get("employeeName") or "").strip()
+    if stored:
+        return stored
+    _, raw_name = _entry_option_and_name(entry)
+    return raw_name
+
+
 def _entry_is_shift_synced(entry: dict[str, Any] | None) -> bool:
     if not isinstance(entry, dict):
         return False
@@ -846,11 +895,19 @@ def _entry_site_link_fields(entry: dict[str, Any] | None) -> dict[str, str | Non
     site_id = str(entry.get("site_id") or "").strip()
     option_key, raw_name = _entry_option_and_name(entry)
     site_name = str(entry.get("site_name") or "").strip() or raw_name
-    if site_row_id is not None:
+    if site_row_id is not None or site_id:
+        latest = _latest_site_link_fields(site_row_id, site_id, site_name)
+        latest_row_id = _coerce_site_row_id(latest.get("site_row_id"))
+        if latest_row_id is None and site_row_id is None:
+            return {
+                "site_row_id": None,
+                "site_id": site_id,
+                "site_name": site_name,
+            }
         return {
-            "site_row_id": site_row_id,
-            "site_id": site_id,
-            "site_name": site_name,
+            "site_row_id": latest_row_id,
+            "site_id": latest.get("site_id") or site_id,
+            "site_name": latest.get("site_name") or site_name,
         }
     if site_id or site_name:
         return {
@@ -932,7 +989,35 @@ def _scene_entry_with_siteplus_defaults(project: dict[str, Any], entry: dict[str
 
 def _normalize_person_entry_site_link(entry: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(entry or {})
-    _, name = _entry_option_and_name(normalized)
+    option_key, name = _entry_option_and_name(normalized)
+    site_row_id = _coerce_site_row_id(normalized.get("site_row_id"))
+    if site_row_id is not None:
+        latest = _latest_site_link_fields(
+            site_row_id,
+            normalized.get("site_id"),
+            normalized.get("site_name") or name,
+        )
+        normalized["site_row_id"] = latest["site_row_id"]
+        normalized["site_id"] = latest["site_id"]
+        normalized["site_name"] = latest["site_name"] or name
+        if normalized["site_name"]:
+            normalized["value"] = _format_entry_value(option_key, normalized["site_name"])
+        return normalized
+
+    if str(normalized.get("site_id") or "").strip():
+        latest = _latest_site_link_fields(
+            None,
+            normalized.get("site_id"),
+            normalized.get("site_name") or name,
+        )
+        if latest.get("site_row_id"):
+            normalized["site_row_id"] = latest["site_row_id"]
+            normalized["site_id"] = latest["site_id"]
+            normalized["site_name"] = latest["site_name"] or name
+            if normalized["site_name"]:
+                normalized["value"] = _format_entry_value(option_key, normalized["site_name"])
+            return normalized
+
     site_link = _entry_site_link_fields(normalized)
     stored_site_name = str(site_link.get("site_name") or "").strip()
     if stored_site_name and _normalized_site_title(stored_site_name) != _normalized_site_title(name):
@@ -968,6 +1053,8 @@ def _prepared_local_entries_for_month(
                 next_entry = _scene_entry_with_siteplus_defaults(project, next_entry)
             elif str(project.get("mode") or "") == "person":
                 next_entry = _normalize_person_entry_site_link(next_entry)
+            if _entry_value_uses_site_link(project, next_entry):
+                next_entry = _entry_with_latest_site_link(next_entry, project)
             local_entries.append(next_entry)
         synced_entries = [dict(entry) for entry in normalized_current.get(day_key, []) if _entry_is_shift_synced(entry)]
         combined[day_key] = local_entries + synced_entries
@@ -1034,7 +1121,18 @@ def _build_month_payload(
 def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
     month_keys = _sort_month_keys(list((project.get("months") or {}).keys()))
     master_people = [item for item in (project.get("master_people") or []) if isinstance(item, dict)]
-    master_sites = [item for item in (project.get("master_sites") or []) if isinstance(item, dict)]
+    master_sites = [
+        {
+            **item,
+            **_latest_site_link_fields(
+                item.get("site_row_id"),
+                item.get("site_id"),
+                item.get("site_name"),
+            ),
+        }
+        for item in (project.get("master_sites") or [])
+        if isinstance(item, dict)
+    ]
     master_target_type = _master_target_type_for_project(project)
     summary = {
         "id": project["id"],
@@ -1079,13 +1177,67 @@ def _project_public_urls(project: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _client_month_payload(month_data: dict[str, Any] | None, *, include_draft: bool = False) -> dict[str, Any] | None:
+def _entry_value_uses_site_link(project: dict[str, Any] | None, entry: dict[str, Any]) -> bool:
+    if not project or not _coerce_site_row_id(entry.get("site_row_id")):
+        return False
+    option_key, _ = _entry_option_and_name(entry)
+    if option_key in LEAVE_OPTION_MAPPINGS:
+        return False
+    mode = str(project.get("mode") or "").strip()
+    if mode == "person":
+        return True
+    return mode == "master" and _master_target_type_for_project(project) == "person"
+
+
+def _entry_with_latest_site_link(entry: dict[str, Any], project: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(entry, dict):
+        return entry
+    site_row_id = _coerce_site_row_id(entry.get("site_row_id"))
+    if site_row_id is None and not str(entry.get("site_id") or "").strip():
+        return dict(entry)
+
+    updated = dict(entry)
+    latest = _latest_site_link_fields(
+        site_row_id,
+        entry.get("site_id"),
+        entry.get("site_name"),
+    )
+    updated["site_row_id"] = latest["site_row_id"]
+    updated["site_id"] = latest["site_id"]
+    updated["site_name"] = latest["site_name"]
+    if latest["site_name"] and _entry_value_uses_site_link(project, updated):
+        option_key, _ = _entry_option_and_name(updated)
+        updated["value"] = _format_entry_value(option_key, latest["site_name"])
+    return updated
+
+
+def _entries_with_latest_site_links(entries_per_day: Any, project: dict[str, Any] | None) -> Any:
+    if not isinstance(entries_per_day, dict):
+        return entries_per_day
+    return {
+        str(day): [
+            _entry_with_latest_site_link(entry, project) if isinstance(entry, dict) else entry
+            for entry in (entries if isinstance(entries, list) else [])
+        ]
+        for day, entries in entries_per_day.items()
+    }
+
+
+def _client_month_payload(
+    month_data: dict[str, Any] | None,
+    *,
+    include_draft: bool = False,
+    project: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     if not month_data:
         return None
     payload = dict(month_data)
     payload.pop("revision_snapshots", None)
+    payload["entries_per_day"] = _entries_with_latest_site_links(payload.get("entries_per_day"), project)
     if not include_draft:
         payload.pop("draft_entries_per_day", None)
+    else:
+        payload["draft_entries_per_day"] = _entries_with_latest_site_links(payload.get("draft_entries_per_day"), project)
     return payload
 
 
@@ -1507,7 +1659,7 @@ def _month_detail(project: dict[str, Any], month_key: str) -> dict[str, Any]:
             "month_keys": _sort_month_keys(list((project.get("months") or {}).keys())),
             "urls": _project_public_urls(project),
         },
-        "month": _client_month_payload(month_data),
+        "month": _client_month_payload(month_data, project=project),
         "month_key": month_key,
     }
 
@@ -1713,7 +1865,7 @@ def _merge_month_payload(
 
 
 def _snapshot_month_payload(month_data: dict[str, Any]) -> dict[str, Any]:
-    return _client_month_payload(month_data, include_draft=False) or {}
+    return _client_month_payload(month_data, include_draft=False, project=None) or {}
 
 
 def _trim_revision_snapshots(snapshots: dict[str, Any]) -> dict[str, Any]:
@@ -2384,7 +2536,7 @@ def _iter_project_summaries() -> list[dict[str, Any]]:
 
 def _matching_person_project_ids_for_scene_entry(source_project: dict[str, Any], entry: dict[str, Any]) -> list[str]:
     employee_number = str(entry.get("employee_number") or "").strip()
-    _, employee_name = _entry_option_and_name(entry)
+    employee_name = _entry_employee_name(entry)
     matches: list[str] = []
     fallback_matches: list[str] = []
     normalized_employee_name = _normalized_person_title(employee_name)
@@ -2520,13 +2672,15 @@ def _build_scene_synced_entry_from_master(
     month_key: str,
     day_key: str,
 ) -> dict[str, Any]:
-    option_key, employee_name = _entry_option_and_name(entry)
+    option_key, _ = _entry_option_and_name(entry)
+    employee_name = _entry_employee_name(entry)
     source_entry_id = str(entry.get("id") or "").strip()
     branch_fields = _scene_branch_fields_for_option(target_project, option_key)
     synced = {
         "id": _sync_entry_id(SHIFT_SYNC_MASTER_SOURCE, source_project.get("id"), "scene", month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, employee_name),
         "comment": str(entry.get("comment") or "").strip(),
+        "employee_name": employee_name,
         "employee_number": str(entry.get("employee_number") or "").strip(),
         "site_row_id": "",
         "site_id": "",
@@ -2600,10 +2754,13 @@ def _build_master_synced_entry_from_person(
     option_key, _ = _entry_option_and_name(entry)
     source_entry_id = str(entry.get("id") or "").strip()
     site_link = _entry_site_link_fields(entry)
+    site_name = str(site_link.get("site_name") or "").strip()
+    employee_name = str(source_project.get("title") or "").strip()
     return {
         "id": _sync_entry_id(SHIFT_SYNC_PERSON_SOURCE, source_project.get("id"), "master", month_key, day_key, source_entry_id),
-        "value": _format_entry_value(option_key, str(source_project.get("title") or "").strip()),
+        "value": _format_entry_value(option_key, site_name),
         "comment": str(entry.get("comment") or "").strip(),
+        "employee_name": employee_name,
         "employee_number": str(source_project.get("employee_number") or "").strip(),
         "site_row_id": str(_coerce_site_row_id(site_link.get("site_row_id")) or ""),
         "site_id": str(site_link.get("site_id") or "").strip(),
@@ -2633,6 +2790,7 @@ def _build_master_synced_entry_from_scene(
         "id": _sync_entry_id(SHIFT_SYNC_SCENE_SOURCE, source_project.get("id"), "master", month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, employee_name),
         "comment": str(entry.get("comment") or "").strip(),
+        "employee_name": employee_name,
         "employee_number": str(entry.get("employee_number") or "").strip(),
         "site_row_id": str(_coerce_site_row_id(source_project.get("site_row_id")) or ""),
         "site_id": str(source_project.get("site_id") or "").strip(),
@@ -2653,7 +2811,7 @@ def _master_entry_is_in_scope(source_project: dict[str, Any], entry: dict[str, A
     master_people = [item for item in (source_project.get("master_people") or []) if isinstance(item, dict)]
     if target_type == "person":
         employee_number = str(entry.get("employee_number") or "").strip()
-        _, employee_name = _entry_option_and_name(entry)
+        employee_name = _entry_employee_name(entry)
         normalized_name = _normalized_person_title(employee_name)
         people_numbers = {str(item.get("employee_number") or "").strip() for item in master_people}
         people_names = {_normalized_person_title(item.get("name")) for item in master_people if str(item.get("name") or "").strip()}
@@ -2723,6 +2881,8 @@ def _desired_shift_sync_entries_by_target(
                     continue
                 if not entry_name:
                     continue
+                if not _master_entry_is_in_scope(source_project, entry):
+                    continue
                 site_link = _entry_site_link_fields(entry)
                 if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
                     continue
@@ -2781,7 +2941,7 @@ def _replace_shift_synced_entries_in_target_project(
             if not _sync_entry_matches_source(entry, str(source_project.get("id") or ""), month_key)
         ]
         desired_for_day = desired_entries_by_day.get(day_key, [])
-        if str(source_project.get("mode") or "") == "person":
+        if str(source_project.get("mode") or "") == "person" and str(target_project.get("mode") or "") == "scene":
             desired = [
                 _build_scene_synced_entry_from_person(
                     source_project,
@@ -5410,7 +5570,7 @@ def _project_detail_payload(
             "urls": _project_public_urls(project),
         },
         "active_month_key": active_month_key,
-        "month": _client_month_payload(month_data, include_draft=include_draft),
+        "month": _client_month_payload(month_data, include_draft=include_draft, project=project),
     }
 
 
@@ -6102,7 +6262,7 @@ def api_save_month(project_id: str, year: int, month: int):
         month_payload = _save_month_in_project(project, year, month, payload, _user_label(), "owner")
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=_user_label())
-    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True), "project": _project_detail_payload(project, month_key, include_draft=True)})
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/draft", methods=["PUT"])
@@ -6113,7 +6273,7 @@ def api_save_month_draft(project_id: str, year: int, month: int):
         project = _owner_project_or_404(project_id)
         month_payload = _save_draft_month_in_project(project, year, month, payload, _user_label(), "owner")
     month_key = _month_key(year, month)
-    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True), "project": _project_detail_payload(project, month_key, include_draft=True)})
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/draft", methods=["DELETE"])
@@ -6123,7 +6283,7 @@ def api_clear_month_draft(project_id: str, year: int, month: int):
         project = _owner_project_or_404(project_id)
         month_payload = _clear_draft_month_in_project(project, year, month, _user_label(), "owner")
     month_key = _month_key(year, month)
-    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True), "project": _project_detail_payload(project, month_key, include_draft=True)})
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/draft/publish", methods=["POST"])
@@ -6134,7 +6294,7 @@ def api_publish_month_draft(project_id: str, year: int, month: int):
         month_payload = _publish_draft_month_in_project(project, year, month, _user_label(), "owner")
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=_user_label())
-    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True), "project": _project_detail_payload(project, month_key, include_draft=True)})
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>", methods=["DELETE"])
@@ -6236,7 +6396,7 @@ def api_restore_month_revision(project_id: str, year: int, month: int):
         project = _owner_project_or_404(project_id)
         month_payload = _restore_month_revision_in_project(project, year, month, revision, _user_label(), "owner")
     month_key = _month_key(year, month)
-    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True), "project": _project_detail_payload(project, month_key, include_draft=True)})
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/summary", methods=["GET", "POST"])
@@ -6711,6 +6871,10 @@ def _send_month_export(project: dict[str, Any], month_key: str, export_format: s
     month_data = (project.get("months") or {}).get(month_key)
     if not month_data:
         abort(404)
+    export_month_data = {
+        **month_data,
+        "entries_per_day": _entries_with_latest_site_links(month_data.get("entries_per_day"), project),
+    }
     filename_base = _safe_download_stem(
         f"{project['mode']},{month_data['year']},{month_data['month']},{project['title']}"
     )
@@ -6718,7 +6882,7 @@ def _send_month_export(project: dict[str, Any], month_key: str, export_format: s
         csv_text = _csv_text_for_month(
             project["title"],
             project["mode"],
-            month_data,
+            export_month_data,
             str(project.get("employee_number") or ""),
         )
         return send_file(
@@ -6731,7 +6895,7 @@ def _send_month_export(project: dict[str, Any], month_key: str, export_format: s
         workbook_bytes = _xlsx_bytes_for_month(
             project["title"],
             project["mode"],
-            month_data,
+            export_month_data,
             str(project.get("employee_number") or ""),
         )
         return send_file(
@@ -6741,7 +6905,7 @@ def _send_month_export(project: dict[str, Any], month_key: str, export_format: s
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     if export_format == "calendar_png":
-        png_bytes = _calendar_png_bytes_for_month(project["title"], project["mode"], month_data)
+        png_bytes = _calendar_png_bytes_for_month(project["title"], project["mode"], export_month_data)
         return send_file(
             png_bytes,
             as_attachment=True,
@@ -6814,7 +6978,7 @@ def api_public_save_month(token: str, year: int, month: int):
         month_payload = _save_month_in_project(project, year, month, payload, actor_name, actor_type)
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=actor_name)
-    return jsonify({"success": True, "month": _client_month_payload(month_payload), "project": _project_detail_payload(project, month_key)})
+    return jsonify({"success": True, "month": _client_month_payload(month_payload, project=project), "project": _project_detail_payload(project, month_key)})
 
 
 @cloudshift_bp.route("/api/public/edit/<token>/assist")
