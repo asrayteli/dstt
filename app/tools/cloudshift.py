@@ -835,6 +835,17 @@ def _master_scope_from_payload(data: Any, *, existing: dict[str, Any] | None = N
         target_type = "scene"
     people = _master_people_from_payload(raw_people)
     sites = _master_sites_from_payload(raw_sites)
+    raw_target_type = str(getter("master_target_type", "") or "").strip().lower()
+    if raw_target_type:
+        target_type = _sanitize_master_target_type(raw_target_type)
+    elif people and not sites:
+        target_type = "person"
+    elif sites and not people:
+        target_type = "scene"
+    else:
+        target_type = _sanitize_master_target_type(
+            _master_target_type_for_project(existing or {})
+        )
     if target_type == "person":
         if sites:
             raise CloudShiftError("個人マスターには現場を登録できません", 400)
@@ -5761,8 +5772,15 @@ def api_create():
     if project["mode"] == "scene":
         _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
         _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
-    _resync_shift_month(project, month_key, actor_name=_user_label())
-    _refresh_shift_sync_for_target_month(project, month_key, actor_name=_user_label())
+    try:
+        _resync_shift_month(project, month_key, actor_name=_user_label())
+        _refresh_shift_sync_for_target_month(project, month_key, actor_name=_user_label())
+    except CloudShiftError:
+        raise
+    except Exception:
+        current_app.logger.exception(
+            "CloudShift auto-sync failed after creating project %s", project_id
+        )
     project = _load_project(project_id)
     return jsonify({"success": True, "project": _project_detail_payload(project, include_draft=True)})
 
@@ -5772,7 +5790,14 @@ def api_create():
 def api_project_detail(project_id: str):
     project, access_role = _project_for_current_user_or_404(project_id)
     if project.get("mode") == "master" and access_role == "owner":
-        _refresh_shift_sync_for_target_project(project, actor_name=_user_label())
+        try:
+            _refresh_shift_sync_for_target_project(project, actor_name=_user_label())
+        except CloudShiftError:
+            raise
+        except Exception:
+            current_app.logger.exception(
+                "CloudShift master shift auto-resync failed for project %s", project_id
+            )
         project, access_role = _project_for_current_user_or_404(project_id)
     selected_month_key = request.args.get("month_key")
     payload = _project_detail_payload(project, selected_month_key, include_draft=access_role == "owner")

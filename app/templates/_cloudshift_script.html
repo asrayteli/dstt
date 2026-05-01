@@ -803,6 +803,10 @@
       const refs = masterFieldRefs(kind);
       const targets = state.masterTargets[kind] || { targetType: 'person', people: [], sites: [] };
       if (refs.targetType) refs.targetType.value = targets.targetType;
+      if (kind === 'create') {
+        const hiddenType = $('cloud-create-master-target-type-input');
+        if (hiddenType) hiddenType.value = targets.targetType;
+      }
       if (refs.people) refs.people.value = targets.targetType === 'person' ? JSON.stringify(targets.people) : '';
       if (refs.sites) refs.sites.value = targets.targetType === 'scene' ? JSON.stringify(targets.sites) : '';
     }
