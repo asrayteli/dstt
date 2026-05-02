@@ -1,18 +1,25 @@
-from flask import Blueprint, render_template, request, send_file, redirect, url_for, abort, jsonify, session
-import os, uuid, hashlib, json, io, base64, zipfile, string, random
+from flask import Blueprint, render_template, request, send_file, url_for, jsonify, session
+import os, uuid, hashlib, hmac, json, io, base64, zipfile, string, random, logging, threading, time
 from datetime import datetime, timedelta
-from werkzeug.utils import secure_filename
-import qrcode
 from flask_login import login_required, current_user
-from apscheduler.schedulers.background import BackgroundScheduler
+
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+except ImportError:  # pragma: no cover - optional dependency fallback
+    BackgroundScheduler = None
 
 share_bp = Blueprint("share", __name__, url_prefix="/tools/share")
+logger = logging.getLogger(__name__)
 
 # 絶対パスで保存場所を指定
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "..", "shared_files")
 META_PATH = os.path.join(UPLOAD_DIR, "meta.json")
 MAX_FILE_SIZE = 10 * 1024**3  # 10GB
+_CLEANUP_LOCK_PATH = os.path.join(UPLOAD_DIR, ".cleanup.lock")
+_CLEANUP_LOCK_STALE_SECONDS = 2 * 60 * 60
+_scheduler = None
+_scheduler_lock = threading.Lock()
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -24,8 +31,57 @@ def load_meta():
         return json.load(f)
 
 def save_meta(meta):
-    with open(META_PATH, "w", encoding="utf-8") as f:
+    tmp_path = f"{META_PATH}.{os.getpid()}.{threading.get_ident()}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)
+    os.replace(tmp_path, META_PATH)
+
+
+def _acquire_cleanup_lock():
+    try:
+        fd = os.open(_CLEANUP_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode("ascii", errors="ignore"))
+        return fd
+    except FileExistsError:
+        try:
+            if time.time() - os.path.getmtime(_CLEANUP_LOCK_PATH) > _CLEANUP_LOCK_STALE_SECONDS:
+                os.remove(_CLEANUP_LOCK_PATH)
+                return _acquire_cleanup_lock()
+        except OSError:
+            return None
+        return None
+
+
+def _release_cleanup_lock(fd):
+    try:
+        os.close(fd)
+    finally:
+        try:
+            os.remove(_CLEANUP_LOCK_PATH)
+        except FileNotFoundError:
+            pass
+
+
+def _issue_download_token(uid):
+    token = uuid.uuid4().hex
+    tokens = dict(session.get("download_tokens") or {})
+    tokens[token] = uid
+    session["download_tokens"] = tokens
+    session.modified = True
+    return token
+
+
+def _make_qr_data(download_url):
+    try:
+        import qrcode
+    except ImportError:
+        logger.warning("qrcode is not installed; FILE POST QR preview is disabled")
+        return None
+
+    qr = qrcode.make(download_url)
+    qr_buffer = io.BytesIO()
+    qr.save(qr_buffer, format="PNG")
+    return base64.b64encode(qr_buffer.getvalue()).decode("utf-8")
 
 # --- 5桁表示ID生成（衝突チェック付き）---
 def generate_display_id():
@@ -45,38 +101,96 @@ def generate_display_id():
 # --- 期限切れファイルを削除 ---
 def cleanup_expired_files():
     """期限切れファイルとメタデータを削除"""
+    lock_fd = _acquire_cleanup_lock()
+    if lock_fd is None:
+        return
     meta = load_meta()
     updated_meta = {}
+    expired_uids = []
     now = datetime.utcnow()
 
-    for uid, info in meta.items():
-        if datetime.fromisoformat(info["expires_at"]) < now:
-            # 複数ファイルに対応
-            if "files" in info:  # 新形式
-                for file_info in info["files"]:
-                    file_path = os.path.join(UPLOAD_DIR, file_info["stored_name"])
+    try:
+        for uid, info in meta.items():
+            try:
+                expired = datetime.fromisoformat(info["expires_at"]) < now
+            except (KeyError, TypeError, ValueError):
+                logger.warning("Skipping shared file cleanup for invalid metadata uid=%s", uid)
+                updated_meta[uid] = info
+                continue
+
+            if expired:
+                expired_uids.append(uid)
+                # 複数ファイルに対応
+                if "files" in info:  # 新形式
+                    for file_info in info["files"]:
+                        file_path = os.path.join(UPLOAD_DIR, file_info["stored_name"])
+                        try:
+                            os.remove(file_path)
+                        except FileNotFoundError:
+                            pass
+                else:  # 旧形式（互換性のため）
+                    file_path = os.path.join(UPLOAD_DIR, info.get("stored_filename", ""))
                     try:
                         os.remove(file_path)
                     except FileNotFoundError:
                         pass
-            else:  # 旧形式（互換性のため）
-                file_path = os.path.join(UPLOAD_DIR, info.get("stored_filename", ""))
-                try:
-                    os.remove(file_path)
-                except FileNotFoundError:
-                    pass
+            else:
+                updated_meta[uid] = info
+
+        latest_meta = load_meta()
+        if latest_meta == meta:
+            save_meta(updated_meta)
         else:
-            updated_meta[uid] = info
+            for uid in expired_uids:
+                latest_info = latest_meta.get(uid)
+                try:
+                    if latest_info and datetime.fromisoformat(latest_info["expires_at"]) < now:
+                        latest_meta.pop(uid, None)
+                except (KeyError, TypeError, ValueError):
+                    pass
+            save_meta(latest_meta)
+    finally:
+        _release_cleanup_lock(lock_fd)
 
-    save_meta(updated_meta)
 
-# 自動クリーンアップのスケジューラー設定
-scheduler = BackgroundScheduler()
-scheduler.add_job(func=cleanup_expired_files, trigger="interval", hours=1)
-scheduler.start()
+def _config_bool(app, key, env_key, default=True):
+    value = app.config.get(key)
+    if value is None:
+        value = os.environ.get(env_key)
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
-# 起動時にも一度実行
-cleanup_expired_files()
+
+def init_share_cleanup(app):
+    if app.config.get("TESTING"):
+        return
+    if not _config_bool(app, "SHARE_CLEANUP_SCHEDULER_ENABLED", "DSTT_SHARE_CLEANUP_SCHEDULER", True):
+        return
+
+    cleanup_expired_files()
+
+    if BackgroundScheduler is None:
+        logger.warning("APScheduler is not installed; shared file cleanup scheduler is disabled")
+        return
+
+    global _scheduler
+    with _scheduler_lock:
+        if _scheduler and _scheduler.running:
+            return
+        _scheduler = BackgroundScheduler()
+        _scheduler.add_job(
+            func=cleanup_expired_files,
+            trigger="interval",
+            hours=1,
+            id="share_cleanup_expired_files",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+        _scheduler.start()
 
 
 @share_bp.route("/", methods=["GET", "POST"])
@@ -160,10 +274,7 @@ def upload_share():
         download_url = url_for("share.download_file", uid=uid, _external=True)
 
         # QRコード生成（保存せずにBase64エンコード）
-        qr = qrcode.make(download_url)
-        qr_buffer = io.BytesIO()
-        qr.save(qr_buffer, format="PNG")
-        qr_data = base64.b64encode(qr_buffer.getvalue()).decode("utf-8")
+        qr_data = _make_qr_data(download_url)
 
     return render_template("share.html", download_url=download_url, qr_data=qr_data, display_id=display_id)
 
@@ -343,41 +454,20 @@ def delete_file(uid):
 @share_bp.route("/api/verify_password/<uid>", methods=["POST"])
 def verify_password(uid):
     """パスワード検証API（JavaScript用）"""
-    print(f"[DEBUG] verify_password called: uid={uid}")
-
     meta = load_meta()
     file_info = meta.get(uid)
 
     if not file_info:
-        print(f"[DEBUG] UID not found: {uid}")
         return jsonify({"success": False, "error": "無効なUID"}), 404
 
-    has_password = bool(file_info.get("password_hash"))
-    print(f"[DEBUG] File has password: {has_password}")
-
     if not file_info.get("password_hash"):
-        # パスワード不要の場合も一時トークン発行
-        token = uuid.uuid4().hex
-        if 'download_tokens' not in session:
-            session['download_tokens'] = {}
-        session['download_tokens'][token] = uid
-        session.modified = True
-        print(f"[DEBUG] Token generated (no password): {token}")
-        return jsonify({"success": True, "token": token})
+        return jsonify({"success": True, "token": _issue_download_token(uid)})
 
-    password = request.json.get("password", "")
+    payload = request.get_json(silent=True) or {}
+    password = payload.get("password", "")
     input_hash = hashlib.sha256(password.encode()).hexdigest()
 
-    if input_hash == file_info["password_hash"]:
-        # 一時ダウンロードトークンを発行（ワンタイム）
-        token = uuid.uuid4().hex
-        if 'download_tokens' not in session:
-            session['download_tokens'] = {}
-        session['download_tokens'][token] = uid
-        session.modified = True
-        print(f"[DEBUG] Token generated (password correct): {token}, stored for uid: {uid}")
-        print(f"[DEBUG] Session tokens after generation: {list(session['download_tokens'].keys())}")
-        return jsonify({"success": True, "token": token})
+    if hmac.compare_digest(input_hash, file_info["password_hash"]):
+        return jsonify({"success": True, "token": _issue_download_token(uid)})
     else:
-        print(f"[DEBUG] Password incorrect")
         return jsonify({"success": False, "error": "パスワードが違います"})

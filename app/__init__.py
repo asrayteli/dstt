@@ -298,8 +298,9 @@ def create_app(test_config=None):
     app.register_blueprint(pdf_power_bp)
 
     try:
-        from .tools.share import share_bp
+        from .tools.share import share_bp, init_share_cleanup
         app.register_blueprint(share_bp)
+        init_share_cleanup(app)
     except ModuleNotFoundError:
         if not app.config.get("TESTING"):
             raise

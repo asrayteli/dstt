@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from functools import lru_cache
 import re
 import subprocess
 
@@ -57,12 +58,13 @@ def _classify_commit(message: str) -> str | None:
     return None
 
 
-def calculate_repo_version(repo_root: Path, base_version: str = "1.0.0") -> str:
+@lru_cache(maxsize=8)
+def _calculate_repo_version_cached(repo_root: str, base_version: str) -> str:
     major, minor, patch = (int(part) for part in base_version.split("."))
     try:
         output = subprocess.check_output(
             ["git", "log", "--pretty=%s", "--reverse"],
-            cwd=str(repo_root),
+            cwd=repo_root,
             text=True,
         )
     except (subprocess.SubprocessError, FileNotFoundError, ValueError):
@@ -81,3 +83,7 @@ def calculate_repo_version(repo_root: Path, base_version: str = "1.0.0") -> str:
             patch += 1
 
     return f"v{major}.{minor}.{patch}"
+
+
+def calculate_repo_version(repo_root: Path, base_version: str = "1.0.0") -> str:
+    return _calculate_repo_version_cached(str(repo_root.resolve()), base_version)

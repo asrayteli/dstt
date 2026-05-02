@@ -194,11 +194,20 @@ def user_branch_codes(user=None) -> set[str]:
     return {r.code for r in rows if r.code}
 
 
-def _user_satisfies_group_rule(user, rule: GroupToolPermission) -> bool:
+def _user_satisfies_group_rule(
+    user,
+    rule: GroupToolPermission,
+    branch_ids: set[int] | None = None,
+    office_ids: set[int] | None = None,
+    dept_ids: set[int] | None = None,
+) -> bool:
     """グループ付与ルールがユーザーの所属範囲を満たすか判定。"""
-    branch_ids = user_branch_ids(user)
-    office_ids = user_office_ids(user)
-    dept_ids = user_department_ids(user)
+    if branch_ids is None:
+        branch_ids = user_branch_ids(user)
+    if office_ids is None:
+        office_ids = user_office_ids(user)
+    if dept_ids is None:
+        dept_ids = user_department_ids(user)
 
     if rule.branch_id is not None and int(rule.branch_id) not in branch_ids:
         return False
@@ -216,10 +225,13 @@ def _user_satisfies_group_rule(user, rule: GroupToolPermission) -> bool:
 def _group_granted_tool_keys(user) -> set[str]:
     if user is None or not getattr(user, "is_authenticated", False):
         return set()
+    branch_ids = user_branch_ids(user)
+    office_ids = user_office_ids(user)
+    dept_ids = user_department_ids(user)
     rules = GroupToolPermission.query.all()
     keys: set[str] = set()
     for rule in rules:
-        if _user_satisfies_group_rule(user, rule):
+        if _user_satisfies_group_rule(user, rule, branch_ids, office_ids, dept_ids):
             keys.add(rule.tool_key)
     return keys
 

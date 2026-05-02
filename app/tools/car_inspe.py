@@ -918,9 +918,10 @@ def extract_with_preset(pdf_path, preset_name, custom_regions=None, image_path=N
         draw.rectangle(clipped_box, outline="red", width=3)
         if text:
             draw.text((clipped_box[0], max(0, clipped_box[1] - 30)), f"{key}: {text}", fill="red", font=font)
-    debug_path = os.path.join(tempfile.gettempdir(), "debug_ocr_area.png")
-    img.save(debug_path)
-    logger.info("OCR領域の可視化画像を保存: %s", debug_path)
+    if os.environ.get("DSTT_OCR_DEBUG_PREVIEW", "").strip().lower() in {"1", "true", "yes", "on"}:
+        debug_path = os.path.join(tempfile.gettempdir(), "debug_ocr_area.png")
+        img.save(debug_path)
+        logger.info("OCR debug preview saved: %s", debug_path)
     result["_raw"] = raw_result
     result["_scores"] = scores
     result["_candidates"] = candidates_by_field

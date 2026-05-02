@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DSTT - ユーザー登録</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="fixed top-4 right-4 z-40 text-xs text-gray-500 bg-white/80 px-2 py-1 rounded-md shadow-sm">
+    Version {{ app_version }}
+  </div>
+
+  <div class="max-w-sm mx-auto mt-10 p-6 bg-white shadow rounded-lg">
+    <img src="{{ url_for('static', filename='img/head.png') }}" alt="DSTT Logo">
+    <h2 class="text-xl font-bold text-gray-800 mt-4 mb-6">ユーザー登録</h2>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="space-y-2 mb-4">
+          {% for category, message in messages %}
+            <div class="text-sm rounded px-3 py-2 {% if category == 'error' %}bg-red-50 text-red-700{% else %}bg-blue-50 text-blue-700{% endif %}">
+              {{ message }}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <form action="{{ url_for('auth.register') }}" method="POST" class="space-y-4">
+      <div>
+        <label for="username" class="block text-sm font-medium text-gray-600">ユーザー名</label>
+        <input type="text" id="username" name="username" class="w-full border rounded px-3 py-2 mt-1" required autocomplete="username">
+      </div>
+
+      <div>
+        <label for="password" class="block text-sm font-medium text-gray-600">パスワード</label>
+        <input type="password" id="password" name="password" class="w-full border rounded px-3 py-2 mt-1" required autocomplete="new-password">
+      </div>
+
+      <div>
+        <label for="confirm" class="block text-sm font-medium text-gray-600">パスワード確認</label>
+        <input type="password" id="confirm" name="confirm" class="w-full border rounded px-3 py-2 mt-1" required autocomplete="new-password">
+      </div>
+
+      <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded mt-4">登録する</button>
+    </form>
+
+    <p class="mt-4 text-sm text-center">
+      <a href="{{ url_for('auth.login') }}" class="text-blue-600 hover:underline">ログインへ戻る</a>
+    </p>
+  </div>
+</body>
+</html>
