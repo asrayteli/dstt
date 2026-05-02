@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sys
 
 from flask import Flask, render_template, render_template_string
@@ -42,6 +43,22 @@ def test_base_template_renders_shared_sidebar_links():
 
     assert "/tools/color_extract" in html
     assert "/tools/powerstamp" in html
+    assert "/static/img/apple-touch-icon.png" in html
+    assert "/static/site.webmanifest" in html
+
+
+def test_web_manifest_declares_home_screen_icons():
+    manifest_path = ROOT / "app" / "static" / "site.webmanifest"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    icons = {icon["sizes"]: icon for icon in manifest["icons"]}
+
+    assert icons["256x256"]["src"] == "/static/img/favicon.ico"
+    assert icons["180x180"]["src"] == "/static/img/apple-touch-icon.png"
+    assert icons["192x192"]["src"] == "/static/img/android-chrome-192x192.png"
+    assert icons["512x512"]["src"] == "/static/img/android-chrome-512x512.png"
+    for icon in icons.values():
+        icon_path = ROOT / "app" / icon["src"].lstrip("/")
+        assert icon_path.exists()
 
 
 def test_dashboard_uses_shared_navigation_order():
