@@ -69,6 +69,14 @@
     return state.projectPayload ? state.projectPayload.active_month_key : null;
   }
 
+  function setCloudShiftTitle(project) {
+    if (project && project.title) {
+      document.title = `DSTT - CS - ${project.title}`;
+      return;
+    }
+    document.title = 'DSTT - CloudShift';
+  }
+
   function parseMonthKey(monthKey) {
     const match = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
     if (!match) return null;
@@ -241,6 +249,7 @@
   function applyProjectPayload(payload) {
     state.projectPayload = payload;
     state.baseMonth = payload && payload.month ? deepClone(payload.month) : null;
+    setCloudShiftTitle(payload && payload.project);
   }
 
   async function loadProjects(selectId) {
@@ -390,6 +399,7 @@
     await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}`, { method: 'DELETE' });
     state.projectPayload = null;
     state.baseMonth = null;
+    setCloudShiftTitle(null);
     syncWorkspaceVisibility(false);
     await loadProjects();
     renderHistory([]);

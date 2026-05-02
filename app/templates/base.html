@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DSTT - DaishintoTools</title>
+  {% set resolved_page_title = page_title|default(default_page_title() if default_page_title is defined else "DSTT - DaishintoTools", true) %}
+  <title>{{ resolved_page_title }}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/flowbite@2.2.1/dist/flowbite.min.js"></script>
   <style>

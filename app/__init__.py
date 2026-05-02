@@ -14,6 +14,47 @@ from .versioning import calculate_repo_version
 from .models import db
 login_manager = LoginManager()
 
+DEFAULT_PAGE_TITLE = "DSTT - DaishintoTools"
+
+
+def _format_page_title(tool_name: str | None) -> str:
+    if not tool_name:
+        return DEFAULT_PAGE_TITLE
+    return f"DSTT - {tool_name}"
+
+
+def _path_matches_prefix(path: str, prefix: str) -> bool:
+    return path == prefix or path.startswith(f"{prefix}/")
+
+
+def _tool_name_for_path(path: str) -> str | None:
+    special_paths = (
+        ("/tools/shiftersync/cloudshift", "CloudShift"),
+        ("/tools/shiftersync/check", "ShifterSync"),
+        ("/tools/shiftersync/create", "ShifterSync"),
+        ("/tools/shiftersync/upload", "ShifterSync"),
+        ("/tools/shiftersync/calendar", "ShifterSync"),
+        ("/admin/announcements", "お知らせ管理"),
+        ("/admin", "管理画面"),
+    )
+    for prefix, name in special_paths:
+        if _path_matches_prefix(path, prefix):
+            return name
+
+    for item in sorted(NAV_ITEMS, key=lambda nav_item: len(nav_item["href"]), reverse=True):
+        if _path_matches_prefix(path, item["href"]):
+            return item["label"]
+    return None
+
+
+def resolve_page_title() -> str:
+    from flask import request
+
+    path = request.path or "/"
+    if path == "/":
+        return DEFAULT_PAGE_TITLE
+    return _format_page_title(_tool_name_for_path(path))
+
 
 def _is_duplicate_schema_error(exc: Exception) -> bool:
     message = str(exc).lower()
@@ -217,6 +258,7 @@ def create_app(test_config=None):
             "current_user_is_admin": is_admin_user(),
             "current_user_id": uid,
             "app_version": app.config.get("APP_VERSION", "v1.0.0"),
+            "default_page_title": resolve_page_title,
         }
 
     # トップページ
