@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='powervote/powervote.css') }}?v=20260504-menu">
+
+<div id="powervote-app" class="powervote-shell" data-api-base="/tools/powervote/api">
+  <section class="dstt-hero powervote-hero">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">POWER VOTE</div>
+        <div>
+          <h1 class="dstt-hero-title">PowerVote</h1>
+          <p class="dstt-hero-subtitle">社内の参加意思表明、同意、アンケートを自由なフォームで集めます。作成はDSTTユーザー、回答はURLを知っている人ならアカウントなしで送信できます。</p>
+        </div>
+        <div class="dstt-hero-actions">
+          <button id="pv-create-form" type="button" class="dstt-hero-btn dstt-hero-btn-light">新規作成</button>
+          <button id="pv-refresh" type="button" class="dstt-hero-btn dstt-hero-btn-ghost">更新</button>
+        </div>
+      </div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">MODE</div>
+          <div class="dstt-hero-card-value">Creator Workspace</div>
+          <div class="dstt-hero-card-note">公開URLとQRを発行できます。</div>
+        </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">ANSWER</div>
+          <div class="dstt-hero-card-value">No DSTT Login</div>
+          <div class="dstt-hero-card-note">Cookieで簡易的な重複回答を抑止します。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="pv-workspace">
+    <aside class="pv-list-panel">
+      <div class="pv-panel-head">
+        <h2>フォーム</h2>
+        <span id="pv-form-count">0</span>
+      </div>
+      <div id="pv-form-list" class="pv-form-list"></div>
+    </aside>
+
+    <section class="pv-editor-panel">
+      <div id="pv-empty-state" class="pv-empty-state">
+        <h2>PowerVoteを作成してください</h2>
+        <p>タイトル、質問、公開設定をまとめて編集できます。</p>
+      </div>
+
+      <div id="pv-editor" class="pv-editor hidden">
+        <div class="pv-editor-toolbar">
+          <div>
+            <span id="pv-save-state" class="pv-save-state">未保存</span>
+            <h2 id="pv-editor-title">PowerVote</h2>
+          </div>
+          <div class="pv-toolbar-actions">
+            <button id="pv-builder-tab" type="button" class="pv-tab active">作成</button>
+            <button id="pv-results-tab" type="button" class="pv-tab">回答</button>
+            <button id="pv-preview-form" type="button" class="pv-secondary">プレビュー</button>
+            <button id="pv-template-menu" type="button" class="pv-secondary">テンプレート</button>
+            <button id="pv-flow-editor" type="button" class="pv-primary">フローで作成</button>
+            <button id="pv-save" type="button" class="pv-primary">保存</button>
+            <button id="pv-delete-form" type="button" class="pv-danger">削除</button>
+          </div>
+        </div>
+
+        <div id="pv-builder-view" class="pv-builder-view">
+          <div class="pv-card pv-form-settings">
+            <div class="pv-grid-two">
+              <label>
+                <span>タイトル</span>
+                <input id="pv-title" type="text" maxlength="200">
+              </label>
+              <label>
+                <span>公開状態</span>
+                <select id="pv-status">
+                  <option value="draft">下書き</option>
+                  <option value="open">受付中</option>
+                  <option value="closed">締切</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              <span>説明</span>
+              <textarea id="pv-description" rows="3"></textarea>
+            </label>
+            <div class="pv-grid-four">
+              <label>
+                <span>回答者情報</span>
+                <select id="pv-identity-mode">
+                  <option value="anonymous">匿名</option>
+                  <option value="optional">名前任意</option>
+                  <option value="required">名前必須</option>
+                </select>
+              </label>
+              <label class="pv-check">
+                <input id="pv-anonymous" type="checkbox">
+                <span>回答者名を保存しない</span>
+              </label>
+              <label class="pv-check">
+                <input id="pv-cookie-limit" type="checkbox">
+                <span>同一ブラウザ1回まで</span>
+              </label>
+              <label>
+                <span>テーマ色</span>
+                <input id="pv-accent" type="color" value="#2563eb">
+              </label>
+            </div>
+            <div class="pv-share-box">
+              <div>
+                <span>公開URL</span>
+                <a id="pv-public-url" href="#" target="_blank" rel="noopener noreferrer"></a>
+              </div>
+              <div class="pv-share-actions">
+                <button id="pv-copy-url" type="button">URLコピー</button>
+                <button id="pv-show-qr" type="button">QR表示</button>
+                <button id="pv-regenerate-token" type="button">URL再発行</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="pv-builder-actions">
+            <button type="button" data-add-question="short_text">短文</button>
+            <button type="button" data-add-question="long_text">長文</button>
+            <button type="button" data-add-question="single_choice">単一選択</button>
+            <button type="button" data-add-question="multi_choice">複数選択</button>
+            <button type="button" data-add-question="rating">評価</button>
+            <button type="button" data-add-question="number">数値</button>
+            <button type="button" data-add-question="date">日付</button>
+            <button type="button" data-add-question="time">時刻</button>
+            <button type="button" data-add-question="email">メール</button>
+            <button type="button" data-add-question="phone">電話</button>
+            <button type="button" data-add-question="url">URL</button>
+            <button type="button" data-add-question="consent">同意</button>
+            <button type="button" data-add-question="info">見出し・説明</button>
+          </div>
+
+          <div id="pv-question-list" class="pv-question-list"></div>
+        </div>
+
+        <div id="pv-results-view" class="pv-results-view hidden">
+          <div class="pv-card pv-results-head">
+            <div>
+              <span>回答数</span>
+              <strong id="pv-response-count">0</strong>
+            </div>
+            <div class="pv-results-actions">
+              <button id="pv-load-results" type="button">再集計</button>
+              <a id="pv-export-csv" href="#">CSV出力</a>
+            </div>
+          </div>
+          <div id="pv-results-summary" class="pv-results-summary"></div>
+          <div id="pv-response-list" class="pv-response-list"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="pv-qr-modal" class="pv-modal hidden" role="dialog" aria-modal="true">
+    <div class="pv-modal-card">
+      <button id="pv-close-qr" type="button" class="pv-modal-close" aria-label="閉じる">×</button>
+      <h2>公開QR</h2>
+      <img id="pv-qr-image" alt="PowerVote QR">
+      <p id="pv-qr-url"></p>
+    </div>
+  </div>
+
+  <div id="pv-template-modal" class="pv-modal hidden" role="dialog" aria-modal="true">
+    <div class="pv-modal-card pv-template-modal-card">
+      <button id="pv-close-template" type="button" class="pv-modal-close" aria-label="閉じる">×</button>
+      <h2>テンプレート</h2>
+      <p>用途に近い形を選ぶと、質問をまとめて配置できます。</p>
+      <div class="pv-template-list">
+        <button type="button" data-template="attendance">参加確認</button>
+        <button type="button" data-template="consent">同意確認</button>
+        <button type="button" data-template="survey">満足度調査</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='powervote/powervote.js') }}?v=20260504-menu"></script>
+{% endblock %}

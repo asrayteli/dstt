@@ -125,4 +125,11 @@ NAV_ITEMS = (
         "label": "現場リストPLUS",
         "description": "契約番号と枝番号をAPI前提で管理する現場マスタ",
     },
+    {
+        "key": "powervote",
+        "href": "/tools/powervote",
+        "icon": "🖐",
+        "label": "PowerVote",
+        "description": "自由度の高い投票・アンケート収集ツール",
+    },
 )

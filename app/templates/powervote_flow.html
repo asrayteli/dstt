@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='powervote/powervote.css') }}?v=20260504-menu">
+<link rel="stylesheet" href="{{ url_for('static', filename='powervote/powervote_flow.css') }}?v=20260504-menu">
+
+<div id="pv-flow-app" class="pv-flow-shell" data-form-id="{{ form_id }}" data-api-base="/tools/powervote/api">
+  <header class="pv-flow-toolbar">
+    <div>
+      <span id="pv-flow-state">読み込み中</span>
+      <h1 id="pv-flow-title">PowerVote Flow</h1>
+    </div>
+    <div class="pv-flow-actions">
+      <button id="pv-flow-zoom-out" type="button" aria-label="縮小">−</button>
+      <span id="pv-flow-zoom-label">100%</span>
+      <button id="pv-flow-zoom-in" type="button" aria-label="拡大">＋</button>
+      <button id="pv-flow-zoom-reset" type="button">等倍</button>
+      <button type="button" data-flow-add="single_choice">単一選択</button>
+      <button type="button" data-flow-add="short_text">短文</button>
+      <button type="button" data-flow-add="long_text">長文</button>
+      <button type="button" data-flow-add="consent">同意</button>
+      <button type="button" data-flow-add="info">説明</button>
+      <button id="pv-flow-save" type="button" class="pv-primary">保存</button>
+    </div>
+  </header>
+
+  <div class="pv-flow-layout">
+    <section id="pv-flow-canvas-wrap" class="pv-flow-canvas-wrap" aria-label="質問の流れ">
+      <div id="pv-flow-zoom-layer" class="pv-flow-zoom-layer">
+        <div id="pv-flow-world" class="pv-flow-world">
+          <svg id="pv-flow-lines" class="pv-flow-lines" aria-hidden="true"></svg>
+          <div id="pv-flow-canvas" class="pv-flow-canvas"></div>
+        </div>
+      </div>
+    </section>
+    <aside id="pv-flow-inspector" class="pv-flow-inspector">
+      <h2>質問</h2>
+      <div id="pv-flow-empty">質問カードを選択してください。右クリックから質問追加や整列もできます。</div>
+      <div id="pv-flow-edit" class="hidden">
+        <label>
+          <span>質問文</span>
+          <input id="pv-flow-node-title" type="text" maxlength="300">
+        </label>
+        <label>
+          <span>補足説明</span>
+          <textarea id="pv-flow-node-description" rows="3"></textarea>
+        </label>
+        <label>
+          <span>種類</span>
+          <select id="pv-flow-node-type">
+            <option value="short_text">短文</option>
+            <option value="long_text">長文</option>
+            <option value="single_choice">単一選択</option>
+            <option value="multi_choice">複数選択</option>
+            <option value="number">数値</option>
+            <option value="rating">評価</option>
+            <option value="date">日付</option>
+            <option value="time">時刻</option>
+            <option value="email">メール</option>
+            <option value="phone">電話</option>
+            <option value="url">URL</option>
+            <option value="consent">同意</option>
+            <option value="info">説明</option>
+            <option value="partition">パーテーション</option>
+          </select>
+        </label>
+        <label>
+          <span>回答</span>
+          <select id="pv-flow-node-required">
+            <option value="false">任意回答</option>
+            <option value="true">回答必須</option>
+          </select>
+        </label>
+        <div id="pv-flow-options"></div>
+        <div class="pv-flow-inspector-actions">
+          <button id="pv-flow-add-option" type="button">選択肢を追加</button>
+          <button id="pv-flow-delete-node" type="button" class="pv-danger">削除</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='powervote/powervote_flow.js') }}?v=20260504-menu"></script>
+{% endblock %}
