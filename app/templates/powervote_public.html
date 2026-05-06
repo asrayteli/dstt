@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page_title }}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='powervote/powervote_public.css') }}">
+</head>
+<body>
+  <main id="pv-public-app" data-submit-url="{{ submit_url }}" data-answered="{{ '1' if answered else '0' }}" data-preview-mode="{{ '1' if preview_mode|default(false) else '0' }}">
+    <script id="pv-public-payload" type="application/json">{{ form_payload|tojson }}</script>
+    <section class="pv-public-card">
+      <div id="pv-public-header" class="pv-public-header">
+        <div class="pv-public-brand">PowerVote</div>
+        <h1 id="pv-public-title"></h1>
+        <p id="pv-public-description"></p>
+      </div>
+      <div id="pv-public-status" class="pv-public-status hidden"></div>
+      <form id="pv-public-form" class="pv-public-form"></form>
+    </section>
+  </main>
+<script src="{{ url_for('static', filename='powervote/powervote_public.js') }}?v=20260504-hardening"></script>
+</body>
+</html>

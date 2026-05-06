@@ -208,6 +208,74 @@ class PasswordVaultItem(db.Model):
     vault = db.relationship('PasswordVault', back_populates='items')
 
 
+class PowerVoteForm(db.Model):
+    """PowerVote form owned by a DSTT user."""
+
+    __tablename__ = 'powervote_forms'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    owner_user_id = db.Column(db.String(80), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False, default='Untitled PowerVote')
+    description = db.Column(db.Text, nullable=False, default='')
+    status = db.Column(db.String(20), nullable=False, default='draft', index=True)
+    public_token = db.Column(db.String(128), nullable=False, unique=True, index=True)
+    is_anonymous = db.Column(db.Boolean, nullable=False, default=True)
+    identity_mode = db.Column(db.String(20), nullable=False, default='anonymous')
+    cookie_limit_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    result_visibility = db.Column(db.String(20), nullable=False, default='creator_only')
+    theme = db.Column(db.JSON, nullable=False, default=dict)
+    settings = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    questions = db.relationship(
+        'PowerVoteQuestion',
+        back_populates='form',
+        cascade='all, delete-orphan',
+        order_by='PowerVoteQuestion.sort_order',
+    )
+    responses = db.relationship(
+        'PowerVoteResponse',
+        back_populates='form',
+        cascade='all, delete-orphan',
+        order_by='PowerVoteResponse.submitted_at.desc()',
+    )
+
+
+class PowerVoteQuestion(db.Model):
+    """Flexible PowerVote question block."""
+
+    __tablename__ = 'powervote_questions'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    form_id = db.Column(db.Integer, db.ForeignKey('powervote_forms.id'), nullable=False, index=True)
+    question_type = db.Column(db.String(40), nullable=False, default='short_text')
+    title = db.Column(db.String(300), nullable=False, default='')
+    description = db.Column(db.Text, nullable=False, default='')
+    is_required = db.Column(db.Boolean, nullable=False, default=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    options = db.Column(db.JSON, nullable=False, default=list)
+    settings = db.Column(db.JSON, nullable=False, default=dict)
+
+    form = db.relationship('PowerVoteForm', back_populates='questions')
+
+
+class PowerVoteResponse(db.Model):
+    """Submitted answers for a PowerVote form."""
+
+    __tablename__ = 'powervote_responses'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    form_id = db.Column(db.Integer, db.ForeignKey('powervote_forms.id'), nullable=False, index=True)
+    respondent_name = db.Column(db.String(200), nullable=False, default='')
+    respondent_email = db.Column(db.String(200), nullable=False, default='')
+    respondent_cookie_id = db.Column(db.String(128), nullable=False, default='', index=True)
+    answers = db.Column(db.JSON, nullable=False, default=dict)
+    submitted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    form = db.relationship('PowerVoteForm', back_populates='responses')
+
+
 class GroupToolPermission(db.Model):
     """支店/営業所/担当による一括ツールアクセス権付与。
     branch_id, office_id, department_id のうちNULLは「任意」を意味する。
