@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', filename='powervote/powervote.css') }}?v=20260504-menu">
+<link rel="stylesheet" href="{{ url_for('static', filename='powervote/powervote.css') }}?v=20260508-powervote">
 
 <div id="powervote-app" class="powervote-shell" data-api-base="/tools/powervote/api">
   <section class="dstt-hero powervote-hero">
@@ -84,6 +84,9 @@
               <span>説明</span>
               <textarea id="pv-description" rows="3"></textarea>
             </label>
+            <div class="pv-format-row" aria-label="説明文の書式">
+              <button id="pv-description-edit-rich" type="button" class="pv-secondary">詳細編集</button>
+            </div>
             <div class="pv-grid-four">
               <label>
                 <span>回答者情報</span>
@@ -105,8 +108,19 @@
                 <span>テーマ色</span>
                 <input id="pv-accent" type="color" value="#2563eb">
               </label>
+              <label>
+                <span>基礎文字色</span>
+                <input id="pv-base-text" type="color" value="#0f172a">
+              </label>
             </div>
             <div class="pv-share-box">
+              <label class="pv-shared-editors">
+                <span>編集できるDSTTユーザー</span>
+                <input id="pv-shared-editor-search" type="search" placeholder="表示名で検索">
+                <input id="pv-shared-editors" type="hidden">
+              </label>
+              <div id="pv-shared-editor-results" class="pv-shared-editor-results"></div>
+              <div id="pv-shared-editor-list" class="pv-shared-editor-list"></div>
               <div>
                 <span>公開URL</span>
                 <a id="pv-public-url" href="#" target="_blank" rel="noopener noreferrer"></a>
@@ -179,5 +193,5 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='powervote/powervote.js') }}?v=20260504-menu"></script>
+<script src="{{ url_for('static', filename='powervote/powervote.js') }}?v=20260508-powervote"></script>
 {% endblock %}

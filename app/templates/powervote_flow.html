@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', filename='powervote/powervote.css') }}?v=20260504-menu">
-<link rel="stylesheet" href="{{ url_for('static', filename='powervote/powervote_flow.css') }}?v=20260504-menu">
+<link rel="stylesheet" href="{{ url_for('static', filename='powervote/powervote.css') }}?v=20260508-powervote">
+<link rel="stylesheet" href="{{ url_for('static', filename='powervote/powervote_flow.css') }}?v=20260508-powervote">
 
 <div id="pv-flow-app" class="pv-flow-shell" data-form-id="{{ form_id }}" data-api-base="/tools/powervote/api">
   <header class="pv-flow-toolbar">
@@ -45,6 +45,7 @@
           <span>補足説明</span>
           <textarea id="pv-flow-node-description" rows="3"></textarea>
         </label>
+        <div id="pv-flow-description-tools" class="pv-flow-format-row"></div>
         <label>
           <span>種類</span>
           <select id="pv-flow-node-type">
@@ -72,6 +73,7 @@
           </select>
         </label>
         <div id="pv-flow-options"></div>
+        <div id="pv-flow-settings"></div>
         <div class="pv-flow-inspector-actions">
           <button id="pv-flow-add-option" type="button">選択肢を追加</button>
           <button id="pv-flow-delete-node" type="button" class="pv-danger">削除</button>
@@ -81,5 +83,5 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='powervote/powervote_flow.js') }}?v=20260504-menu"></script>
+<script src="{{ url_for('static', filename='powervote/powervote_flow.js') }}?v=20260508-powervote"></script>
 {% endblock %}

@@ -65,6 +65,7 @@ body {
   display: grid;
   gap: 1rem;
   padding: 1rem;
+  color: var(--pv-base-text, #0f172a);
 }
 
 .pv-public-question,
@@ -83,6 +84,7 @@ body {
 .pv-public-question h2,
 .pv-public-section h2 {
   margin: 0;
+  color: var(--pv-base-text, #0f172a);
   font-size: 1rem;
   line-height: 1.5;
 }
@@ -95,12 +97,25 @@ body {
 .pv-public-question p,
 .pv-public-section p {
   margin: 0.35rem 0 0.75rem;
-  color: #64748b;
+  color: var(--pv-base-text, #64748b);
   font-size: 0.88rem;
   line-height: 1.6;
 }
 
+.pv-rich-text {
+  white-space: pre-wrap;
+}
+
+.pv-rich-text img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
 .pv-public-question input[type="text"],
+.pv-public-question input[type="email"],
+.pv-public-question input[type="tel"],
+.pv-public-question input[type="url"],
 .pv-public-question input[type="number"],
 .pv-public-question input[type="date"],
 .pv-public-question textarea,
@@ -134,6 +149,7 @@ body {
   border-radius: 8px;
   background: #f8fafc;
   padding: 0.75rem;
+  color: var(--pv-base-text, #0f172a);
   font-weight: 700;
 }
 

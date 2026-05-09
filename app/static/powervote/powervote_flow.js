@@ -101,6 +101,27 @@
         { id: uid(), label: "いいえ" },
       ];
     }
+    if (type === "short_text") {
+      question.settings.placeholder = "";
+      question.settings.min_length = "";
+      question.settings.max_length = 200;
+    }
+    if (type === "long_text") {
+      question.settings.placeholder = "";
+      question.settings.min_length = "";
+      question.settings.max_length = 2000;
+    }
+    if (type === "number") {
+      question.settings.min = "";
+      question.settings.max = "";
+      question.settings.integer_only = false;
+    }
+    if (type === "rating") {
+      question.settings.min = 1;
+      question.settings.max = 5;
+      question.settings.min_label = "低い";
+      question.settings.max_label = "高い";
+    }
     if (type === "consent") {
       question.title = "内容に同意します";
       question.required = true;
@@ -137,6 +158,200 @@
     const refs = [questionRef(question)];
     if (question.id != null) refs.push(String(question.id));
     return refs;
+  }
+
+  function descriptionFormat(question) {
+    return question?.settings?.description_format || {};
+  }
+
+  function normalizeRichColor(value) {
+    const color = String(value || "").trim();
+    const hex = color.match(/^#[0-9a-fA-F]{6}$/);
+    if (hex) return color.toLowerCase();
+    const rgb = color.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/i);
+    if (!rgb) return "";
+    return `#${rgb.slice(1, 4).map((part) => {
+      const value = Math.max(0, Math.min(255, Number(part) || 0));
+      return value.toString(16).padStart(2, "0");
+    }).join("")}`;
+  }
+
+  function richImageSettings(node) {
+    const style = String(node.getAttribute("style") || "");
+    const widthMatch = style.match(/(?:^|;)\s*width\s*:\s*(\d{1,3})%\s*(?:;|$)/i);
+    const rawWidth = node.getAttribute("data-width") || (widthMatch ? widthMatch[1] : "100");
+    const width = Math.max(10, Math.min(100, Number(rawWidth) || 100));
+    const rawAlign = (node.getAttribute("data-align") || "").toLowerCase();
+    let align = ["left", "center", "right"].includes(rawAlign) ? rawAlign : "left";
+    if (!rawAlign) {
+      const normalizedStyle = style.toLowerCase();
+      const leftAuto = /margin-left\s*:\s*auto/.test(normalizedStyle);
+      const rightAuto = /margin-right\s*:\s*auto/.test(normalizedStyle);
+      if (leftAuto && rightAuto) align = "center";
+      else if (leftAuto) align = "right";
+    }
+    return { width, align };
+  }
+
+  function applyRichImageStyle(img, width = 100, align = "left") {
+    const normalizedWidth = Math.max(10, Math.min(100, Number(width) || 100));
+    const normalizedAlign = ["left", "center", "right"].includes(align) ? align : "left";
+    img.dataset.width = String(normalizedWidth);
+    img.dataset.align = normalizedAlign;
+    img.style.width = `${normalizedWidth}%`;
+    img.style.height = "auto";
+    img.style.maxWidth = "100%";
+    img.style.display = "block";
+    if (normalizedAlign === "center") {
+      img.style.marginLeft = "auto";
+      img.style.marginRight = "auto";
+    } else if (normalizedAlign === "right") {
+      img.style.marginLeft = "auto";
+      img.style.marginRight = "0";
+    } else {
+      img.style.marginLeft = "0";
+      img.style.marginRight = "auto";
+    }
+  }
+
+  function selectionInside(editor) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) return null;
+    return range;
+  }
+
+  function insertNodeAtSelection(editor, node) {
+    editor.focus();
+    const range = selectionInside(editor);
+    if (!range) {
+      editor.appendChild(node);
+      return;
+    }
+    range.deleteContents();
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function selectedRichText(editor) {
+    const range = selectionInside(editor);
+    return range ? String(range.toString() || "").trim() : "";
+  }
+
+  function sanitizeRichHtml(html) {
+    const template = document.createElement("template");
+    template.innerHTML = String(html || "");
+    const fragment = document.createDocumentFragment();
+    function walk(node, parent) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        parent.appendChild(document.createTextNode(node.textContent || ""));
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName.toLowerCase();
+      if (tag === "script" || tag === "style") return;
+      let nextParent = parent;
+      if (tag === "strong" || tag === "b") {
+        nextParent = document.createElement("strong");
+        parent.appendChild(nextParent);
+      } else if (tag === "u") {
+        nextParent = document.createElement("u");
+        parent.appendChild(nextParent);
+      } else if (tag === "span" || tag === "font") {
+        const styleMatch = String(node.getAttribute("style") || "").match(/(?:^|;)\s*color\s*:\s*([^;]+)\s*(?:;|$)/i);
+        const color = normalizeRichColor(styleMatch ? styleMatch[1] : node.getAttribute("color") || "");
+        const span = document.createElement("span");
+        if (color) span.style.color = color;
+        if (span.getAttribute("style")) {
+          nextParent = span;
+          parent.appendChild(span);
+        }
+      } else if (tag === "a") {
+        const href = node.getAttribute("href") || "";
+        if (/^(https?:\/\/|mailto:)/i.test(href)) {
+          const a = document.createElement("a");
+          a.href = href;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          nextParent = a;
+          parent.appendChild(a);
+        }
+      } else if (tag === "img") {
+        const src = node.getAttribute("src") || "";
+        if (/^\/tools\/powervote\/uploads\/\d+\/[A-Za-z0-9_.-]+$/.test(src)) {
+          const img = document.createElement("img");
+          img.src = src;
+          img.alt = node.getAttribute("alt") || "";
+          const settings = richImageSettings(node);
+          applyRichImageStyle(img, settings.width, settings.align);
+          parent.appendChild(img);
+        }
+        return;
+      } else if (tag === "br") {
+        parent.appendChild(document.createElement("br"));
+        return;
+      } else if (tag === "div" || tag === "p") {
+        const styleMatch = String(node.getAttribute("style") || "").match(/(?:^|;)\s*text-align\s*:\s*(left|center|right)\s*(?:;|$)/i);
+        const align = styleMatch ? styleMatch[1].toLowerCase() : (node.getAttribute("align") || "").toLowerCase();
+        if (parent.childNodes.length) parent.appendChild(document.createElement("br"));
+        if (["left", "center", "right"].includes(align)) {
+          const div = document.createElement("div");
+          div.style.textAlign = align;
+          nextParent = div;
+          parent.appendChild(div);
+        }
+      }
+      Array.from(node.childNodes).forEach((child) => walk(child, nextParent));
+    }
+    Array.from(template.content.childNodes).forEach((node) => walk(node, fragment));
+    const wrap = document.createElement("div");
+    wrap.appendChild(fragment);
+    return wrap.innerHTML;
+  }
+
+  function plainTextFromHtml(html) {
+    const div = document.createElement("div");
+    div.innerHTML = sanitizeRichHtml(html);
+    return div.innerText || div.textContent || "";
+  }
+
+  function richDescriptionHtml(question) {
+    return question?.settings?.description_html || "";
+  }
+
+  async function uploadRichImage(file) {
+    const formData = new FormData();
+    formData.append("image", file);
+    const response = await fetch(`${apiBase}/forms/${formId}/images`, {
+      method: "POST",
+      body: formData,
+      headers: { Accept: "application/json" },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || "画像アップロードに失敗しました。");
+    }
+    return payload.url;
+  }
+
+  function applyDescription(element, question) {
+    element.replaceChildren();
+    const html = richDescriptionHtml(question);
+    if (html) {
+      element.innerHTML = sanitizeRichHtml(html);
+    } else {
+      element.textContent = question.description || "";
+    }
+  }
+
+  function setQuestionSetting(question, key, value) {
+    question.settings = question.settings || {};
+    question.settings[key] = value;
   }
 
   function questionByRef(ref) {
@@ -258,7 +473,7 @@
       node.querySelector(".pv-flow-required-badge").textContent = requiredLabel;
       node.querySelector(".pv-flow-required-badge").classList.toggle("optional", !question.required);
       node.querySelector("h3").textContent = question.title || "質問";
-      node.querySelector("p").textContent = question.description || "";
+      applyDescription(node.querySelector("p"), question);
       node.querySelector(".pv-flow-next-label").textContent = `次: ${targetLabel(question.settings?.default_next || "")}`;
       const options = node.querySelector(".pv-flow-node-options");
       (question.options || []).forEach((option) => {
@@ -361,7 +576,159 @@
     $("pv-flow-node-description").value = selected.description || "";
     $("pv-flow-node-type").value = selected.type;
     $("pv-flow-node-required").value = selected.required ? "true" : "false";
+    renderDescriptionTools(selected);
     renderOptionsEditor(selected);
+    renderQuestionSettings(selected);
+  }
+
+  function renderDescriptionTools(question) {
+    const wrap = $("pv-flow-description-tools");
+    wrap.replaceChildren();
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.textContent = "詳細編集";
+    edit.addEventListener("click", () => openRichDescriptionDialog(question));
+    wrap.appendChild(edit);
+  }
+
+  function openRichDescriptionDialog(question) {
+    const overlay = document.createElement("div");
+    overlay.className = "pv-flow-rich-dialog";
+    overlay.innerHTML = `
+      <div class="pv-flow-rich-dialog-card" role="dialog" aria-modal="true">
+        <div class="pv-flow-rich-dialog-head">
+          <h2>補足説明を編集</h2>
+          <button type="button" data-rich-close aria-label="閉じる">×</button>
+        </div>
+        <div class="pv-flow-rich-toolbar">
+          <button type="button" data-rich-bold><strong>B</strong></button>
+          <button type="button" data-rich-underline><u>U</u></button>
+          <button type="button" data-rich-link>リンク</button>
+          <button type="button" data-rich-image>画像</button>
+          <button type="button" data-rich-align="left">左</button>
+          <button type="button" data-rich-align="center">中央</button>
+          <button type="button" data-rich-align="right">右</button>
+          <label><span>色</span><input type="color" data-rich-color value="#2563eb"></label>
+          <span class="pv-flow-rich-image-tools" data-rich-image-tools hidden>
+            <label><span>画像幅</span><input type="range" min="10" max="100" value="100" data-rich-image-width></label>
+            <button type="button" data-rich-image-align="left">画像左</button>
+            <button type="button" data-rich-image-align="center">画像中央</button>
+            <button type="button" data-rich-image-align="right">画像右</button>
+          </span>
+          <input type="file" data-rich-image-input accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+        </div>
+        <div class="pv-flow-rich-editor" contenteditable="true"></div>
+        <div class="pv-flow-rich-dialog-actions">
+          <button type="button" data-rich-cancel>キャンセル</button>
+          <button type="button" class="pv-primary" data-rich-save>反映</button>
+        </div>
+      </div>
+    `;
+    const editor = overlay.querySelector(".pv-flow-rich-editor");
+    editor.innerHTML = sanitizeRichHtml(richDescriptionHtml(question));
+    if (!editor.innerHTML && question.description) {
+      String(question.description).split("\n").forEach((line, index) => {
+        if (index > 0) editor.appendChild(document.createElement("br"));
+        editor.appendChild(document.createTextNode(line));
+      });
+    }
+    const close = () => overlay.remove();
+    overlay.querySelector("[data-rich-bold]").addEventListener("click", () => {
+      editor.focus();
+      document.execCommand("bold", false);
+    });
+    overlay.querySelector("[data-rich-underline]").addEventListener("click", () => {
+      editor.focus();
+      document.execCommand("underline", false);
+    });
+    overlay.querySelector("[data-rich-link]").addEventListener("click", () => {
+      const label = window.prompt("表示名を入力してください", selectedRichText(editor) || "");
+      if (!label) return;
+      const href = window.prompt("URLを入力してください", "https://");
+      if (!href || !/^(https?:\/\/|mailto:)/i.test(href)) return;
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = label;
+      insertNodeAtSelection(editor, link);
+    });
+    overlay.querySelectorAll("[data-rich-align]").forEach((button) => {
+      button.addEventListener("click", () => {
+        editor.focus();
+        const command = { left: "justifyLeft", center: "justifyCenter", right: "justifyRight" }[button.dataset.richAlign];
+        document.execCommand(command, false);
+      });
+    });
+    const imageInput = overlay.querySelector("[data-rich-image-input]");
+    const imageTools = overlay.querySelector("[data-rich-image-tools]");
+    const imageWidth = overlay.querySelector("[data-rich-image-width]");
+    let selectedImage = null;
+    const selectImage = (img) => {
+      if (selectedImage) selectedImage.classList.remove("pv-rich-image-selected");
+      selectedImage = img;
+      if (!selectedImage) {
+        imageTools.hidden = true;
+        return;
+      }
+      const settings = richImageSettings(selectedImage);
+      applyRichImageStyle(selectedImage, settings.width, settings.align);
+      selectedImage.classList.add("pv-rich-image-selected");
+      imageWidth.value = String(settings.width);
+      imageTools.hidden = false;
+    };
+    editor.addEventListener("click", (event) => {
+      selectImage(event.target instanceof HTMLImageElement ? event.target : null);
+    });
+    imageWidth.addEventListener("input", () => {
+      if (!selectedImage) return;
+      applyRichImageStyle(selectedImage, imageWidth.value, selectedImage.dataset.align || "left");
+    });
+    overlay.querySelectorAll("[data-rich-image-align]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (!selectedImage) return;
+        applyRichImageStyle(selectedImage, imageWidth.value, button.dataset.richImageAlign);
+      });
+    });
+    overlay.querySelector("[data-rich-image]").addEventListener("click", () => imageInput.click());
+    imageInput.addEventListener("change", async () => {
+      const file = imageInput.files?.[0];
+      if (!file) return;
+      try {
+        const url = await uploadRichImage(file);
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = file.name || "";
+        applyRichImageStyle(img, 100, "left");
+        insertNodeAtSelection(editor, img);
+        selectImage(img);
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        imageInput.value = "";
+      }
+    });
+    overlay.querySelector("[data-rich-color]").addEventListener("input", (event) => {
+      editor.focus();
+      document.execCommand("foreColor", false, event.target.value);
+    });
+    overlay.querySelector("[data-rich-close]").addEventListener("click", close);
+    overlay.querySelector("[data-rich-cancel]").addEventListener("click", close);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close();
+    });
+    overlay.querySelector("[data-rich-save]").addEventListener("click", () => {
+      const cleanHtml = sanitizeRichHtml(editor.innerHTML);
+      question.description = plainTextFromHtml(cleanHtml);
+      question.settings = question.settings || {};
+      question.settings.description_html = cleanHtml;
+      $("pv-flow-node-description").value = question.description;
+      setDirty(true);
+      close();
+      render();
+    });
+    document.body.appendChild(overlay);
+    editor.focus();
   }
 
   function renderOptionsEditor(question) {
@@ -389,7 +756,8 @@
       labelInput.addEventListener("input", () => {
         option.label = labelInput.value;
         setDirty(true);
-        render();
+        renderCanvas();
+        drawLines();
       });
       const remove = document.createElement("button");
       remove.type = "button";
@@ -410,6 +778,52 @@
       }
       wrap.appendChild(box);
     });
+  }
+
+  function renderQuestionSettings(question) {
+    const wrap = $("pv-flow-settings");
+    wrap.replaceChildren();
+    if (question.type === "rating") {
+      wrap.appendChild(settingsGrid(question, ["min", "max", "min_label", "max_label"]));
+    } else if (question.type === "number") {
+      wrap.appendChild(settingsGrid(question, ["min", "max", "integer_only"]));
+    } else if (["short_text", "long_text", "email", "phone", "url"].includes(question.type)) {
+      wrap.appendChild(settingsGrid(question, ["placeholder", "min_length", "max_length"]));
+    }
+  }
+
+  function settingsGrid(question, keys) {
+    const grid = document.createElement("div");
+    grid.className = "pv-flow-settings-grid";
+    const labels = {
+      placeholder: "入力例",
+      min_length: "最小文字数",
+      max_length: "最大文字数",
+      min: "最小値",
+      max: "最大値",
+      min_label: "最小側ラベル",
+      max_label: "最大側ラベル",
+      integer_only: "整数のみ",
+    };
+    keys.forEach((key) => {
+      const label = document.createElement("label");
+      const span = document.createElement("span");
+      span.textContent = labels[key] || key;
+      const input = document.createElement("input");
+      input.type = key === "integer_only" ? "checkbox" : ["min", "max", "min_length", "max_length"].includes(key) ? "number" : "text";
+      if (key === "integer_only") {
+        input.checked = Boolean(question.settings && question.settings[key]);
+      } else {
+        input.value = question.settings && question.settings[key] != null ? question.settings[key] : "";
+      }
+      input.addEventListener("input", () => {
+        setQuestionSetting(question, key, key === "integer_only" ? input.checked : input.value);
+        setDirty(true);
+      });
+      label.append(span, input);
+      grid.appendChild(label);
+    });
+    return grid;
   }
 
   function drawLines() {
@@ -1079,6 +1493,7 @@
     const selected = state.form.questions[state.selectedIndex];
     if (!selected) return;
     selected[field] = value;
+    if (field === "description" && selected.settings) delete selected.settings.description_html;
     setDirty(true);
     render();
   }

@@ -41,6 +41,231 @@
     return question.settings?.flow?.key || (question.id != null ? String(question.id) : ensureFlowKey(question));
   }
 
+  function ensureFormSettings() {
+    state.selected.settings = state.selected.settings || {};
+    return state.selected.settings;
+  }
+
+  function appendTextWithBreaks(parent, text) {
+    String(text || "").split("\n").forEach((line, lineIndex) => {
+      if (lineIndex > 0) parent.appendChild(document.createElement("br"));
+      const parts = line.split(/(\*\*[^*]+\*\*)/g);
+      parts.forEach((part) => {
+        if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+          const strong = document.createElement("strong");
+          strong.textContent = part.slice(2, -2);
+          parent.appendChild(strong);
+        } else if (part) {
+          parent.appendChild(document.createTextNode(part));
+        }
+      });
+    });
+  }
+
+  function normalizeRichColor(value) {
+    const color = String(value || "").trim();
+    const hex = color.match(/^#[0-9a-fA-F]{6}$/);
+    if (hex) return color.toLowerCase();
+    const rgb = color.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/i);
+    if (!rgb) return "";
+    return `#${rgb.slice(1, 4).map((part) => {
+      const value = Math.max(0, Math.min(255, Number(part) || 0));
+      return value.toString(16).padStart(2, "0");
+    }).join("")}`;
+  }
+
+  function richImageSettings(node) {
+    const style = String(node.getAttribute("style") || "");
+    const widthMatch = style.match(/(?:^|;)\s*width\s*:\s*(\d{1,3})%\s*(?:;|$)/i);
+    const rawWidth = node.getAttribute("data-width") || (widthMatch ? widthMatch[1] : "100");
+    const width = Math.max(10, Math.min(100, Number(rawWidth) || 100));
+    const rawAlign = (node.getAttribute("data-align") || "").toLowerCase();
+    let align = ["left", "center", "right"].includes(rawAlign) ? rawAlign : "left";
+    if (!rawAlign) {
+      const normalizedStyle = style.toLowerCase();
+      const leftAuto = /margin-left\s*:\s*auto/.test(normalizedStyle);
+      const rightAuto = /margin-right\s*:\s*auto/.test(normalizedStyle);
+      if (leftAuto && rightAuto) align = "center";
+      else if (leftAuto) align = "right";
+    }
+    return { width, align };
+  }
+
+  function applyRichImageStyle(img, width = 100, align = "left") {
+    const normalizedWidth = Math.max(10, Math.min(100, Number(width) || 100));
+    const normalizedAlign = ["left", "center", "right"].includes(align) ? align : "left";
+    img.dataset.width = String(normalizedWidth);
+    img.dataset.align = normalizedAlign;
+    img.style.width = `${normalizedWidth}%`;
+    img.style.height = "auto";
+    img.style.maxWidth = "100%";
+    img.style.display = "block";
+    if (normalizedAlign === "center") {
+      img.style.marginLeft = "auto";
+      img.style.marginRight = "auto";
+    } else if (normalizedAlign === "right") {
+      img.style.marginLeft = "auto";
+      img.style.marginRight = "0";
+    } else {
+      img.style.marginLeft = "0";
+      img.style.marginRight = "auto";
+    }
+  }
+
+  function selectionInside(editor) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) return null;
+    return range;
+  }
+
+  function insertNodeAtSelection(editor, node) {
+    editor.focus();
+    const range = selectionInside(editor);
+    if (!range) {
+      editor.appendChild(node);
+      return;
+    }
+    range.deleteContents();
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function selectedRichText(editor) {
+    const range = selectionInside(editor);
+    return range ? String(range.toString() || "").trim() : "";
+  }
+
+  function sanitizeRichHtml(html) {
+    const template = document.createElement("template");
+    template.innerHTML = String(html || "");
+    const fragment = document.createDocumentFragment();
+
+    function walk(node, parent) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        parent.appendChild(document.createTextNode(node.textContent || ""));
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName.toLowerCase();
+      if (tag === "script" || tag === "style") return;
+      let nextParent = parent;
+      if (tag === "strong" || tag === "b") {
+        nextParent = document.createElement("strong");
+        parent.appendChild(nextParent);
+      } else if (tag === "u") {
+        nextParent = document.createElement("u");
+        parent.appendChild(nextParent);
+      } else if (tag === "span" || tag === "font") {
+        const styleMatch = String(node.getAttribute("style") || "").match(/(?:^|;)\s*color\s*:\s*([^;]+)\s*(?:;|$)/i);
+        const attrColor = node.getAttribute("color") || "";
+        const color = normalizeRichColor(styleMatch ? styleMatch[1] : attrColor);
+        const span = document.createElement("span");
+        if (color) span.style.color = color;
+        if (span.getAttribute("style")) {
+          nextParent = span;
+          parent.appendChild(span);
+        }
+      } else if (tag === "a") {
+        const href = node.getAttribute("href") || "";
+        if (/^(https?:\/\/|mailto:)/i.test(href)) {
+          const a = document.createElement("a");
+          a.href = href;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          nextParent = a;
+          parent.appendChild(a);
+        }
+      } else if (tag === "img") {
+        const src = node.getAttribute("src") || "";
+        if (/^\/tools\/powervote\/uploads\/\d+\/[A-Za-z0-9_.-]+$/.test(src)) {
+          const img = document.createElement("img");
+          img.src = src;
+          img.alt = node.getAttribute("alt") || "";
+          const settings = richImageSettings(node);
+          applyRichImageStyle(img, settings.width, settings.align);
+          parent.appendChild(img);
+        }
+        return;
+      } else if (tag === "br") {
+        parent.appendChild(document.createElement("br"));
+        return;
+      } else if (tag === "div" || tag === "p") {
+        const styleMatch = String(node.getAttribute("style") || "").match(/(?:^|;)\s*text-align\s*:\s*(left|center|right)\s*(?:;|$)/i);
+        const align = styleMatch ? styleMatch[1].toLowerCase() : (node.getAttribute("align") || "").toLowerCase();
+        if (parent.childNodes.length) parent.appendChild(document.createElement("br"));
+        if (["left", "center", "right"].includes(align)) {
+          const div = document.createElement("div");
+          div.style.textAlign = align;
+          nextParent = div;
+          parent.appendChild(div);
+        }
+      }
+      Array.from(node.childNodes).forEach((child) => walk(child, nextParent));
+    }
+
+    Array.from(template.content.childNodes).forEach((node) => walk(node, fragment));
+    const wrap = document.createElement("div");
+    wrap.appendChild(fragment.cloneNode(true));
+    return wrap.innerHTML;
+  }
+
+  function plainTextFromHtml(html) {
+    const div = document.createElement("div");
+    div.innerHTML = sanitizeRichHtml(html);
+    return div.innerText || div.textContent || "";
+  }
+
+  async function uploadRichImage(file) {
+    if (!state.selected) throw new Error("フォームを選択してください。");
+    const formData = new FormData();
+    formData.append("image", file);
+    const response = await fetch(`${apiBase}/forms/${state.selected.id}/images`, {
+      method: "POST",
+      body: formData,
+      headers: { Accept: "application/json" },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || "画像アップロードに失敗しました。");
+    }
+    return payload.url;
+  }
+
+  function richDescriptionHtml(source) {
+    return source?.settings?.description_html || "";
+  }
+
+  function baseTextColor(form = state.selected) {
+    return normalizeRichColor(form?.theme?.base_text || "#0f172a") || "#0f172a";
+  }
+
+  function applyFormattedText(element, text, source = {}, inheritedColor = "") {
+    element.replaceChildren();
+    element.classList.add("pv-rich-text");
+    const html = richDescriptionHtml(source);
+    const baseColor = normalizeRichColor(inheritedColor || source?.theme?.base_text || "");
+    element.style.color = baseColor || "";
+    if (html) {
+      element.innerHTML = sanitizeRichHtml(html);
+      return;
+    }
+    appendTextWithBreaks(element, text);
+    const format = source?.settings?.description_format || {};
+    element.style.fontWeight = format.bold ? "800" : "";
+    element.style.color = normalizeRichColor(format.color) || baseColor || "";
+  }
+
+  function setQuestionSetting(question, key, value) {
+    question.settings = question.settings || {};
+    question.settings[key] = value;
+  }
+
   function setDirty(dirty) {
     state.dirty = dirty;
     $("pv-save-state").textContent = dirty ? "未保存" : "保存済み";
@@ -71,10 +296,10 @@
     };
     if (type === "short_text") {
       base.title = "お名前または回答";
-      base.settings = { placeholder: "", max_length: 200 };
+      base.settings = { placeholder: "", min_length: "", max_length: 200 };
     } else if (type === "long_text") {
       base.title = "補足事項";
-      base.settings = { placeholder: "", max_length: 2000 };
+      base.settings = { placeholder: "", min_length: "", max_length: 2000 };
     } else if (type === "single_choice" || type === "multi_choice") {
       base.title = type === "single_choice" ? "選択してください" : "該当するものを選んでください";
       base.options = [{ id: uid(), label: "選択肢1" }, { id: uid(), label: "選択肢2" }];
@@ -83,7 +308,7 @@
       base.settings = { min: 1, max: 5, min_label: "低い", max_label: "高い" };
     } else if (type === "number") {
       base.title = "数値を入力してください";
-      base.settings = { min: "", max: "" };
+      base.settings = { min: "", max: "", integer_only: false };
     } else if (type === "date") {
       base.title = "日付を選択してください";
     } else if (type === "time") {
@@ -156,10 +381,12 @@
     state.forms.forEach((form) => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "pv-form-item" + (state.selected && state.selected.id === form.id ? " active" : "");
+      button.className = "pv-form-item" + (state.selected && state.selected.id === form.id ? " active" : "") + (form.is_shared_to_me ? " shared" : "");
       button.innerHTML = "<strong></strong><span></span>";
       button.querySelector("strong").textContent = form.title;
-      button.querySelector("span").textContent = `${statusLabel(form.status)} / 回答 ${form.response_count || 0}件`;
+      button.querySelector("span").textContent = form.is_shared_to_me
+        ? `${statusLabel(form.status)} / ${form.owner_display_name || form.owner_user_id}さんから共有`
+        : `${statusLabel(form.status)} / 回答 ${form.response_count || 0}件`;
       button.addEventListener("click", () => selectForm(form.id));
       list.appendChild(button);
     });
@@ -170,26 +397,46 @@
     const form = state.selected;
     $("pv-title").value = form.title || "";
     $("pv-description").value = form.description || "";
+    $("pv-description").dataset.plainEdited = "0";
     $("pv-status").value = form.status || "draft";
     $("pv-identity-mode").value = form.identity_mode || "anonymous";
     $("pv-anonymous").checked = Boolean(form.is_anonymous);
     $("pv-cookie-limit").checked = Boolean(form.cookie_limit_enabled);
     $("pv-accent").value = (form.theme && form.theme.accent) || "#2563eb";
+    $("pv-base-text").value = baseTextColor(form);
     $("pv-public-url").href = form.public_url;
     $("pv-public-url").textContent = form.public_url;
+    $("pv-shared-editors").value = (form.shared_editors || form.settings?.shared_editors || []).join(",");
+    $("pv-shared-editor-search").disabled = form.can_manage_shares === false;
     $("pv-editor-title").textContent = form.title || "PowerVote";
     $("pv-export-csv").href = `${apiBase}/forms/${form.id}/export.csv`;
+    renderSharedEditors();
   }
 
   function readFormInputs() {
     if (!state.selected) return;
     state.selected.title = $("pv-title").value.trim();
-    state.selected.description = $("pv-description").value.trim();
+    state.selected.description = $("pv-description").value;
     state.selected.status = $("pv-status").value;
     state.selected.identity_mode = $("pv-identity-mode").value;
     state.selected.is_anonymous = $("pv-anonymous").checked;
     state.selected.cookie_limit_enabled = $("pv-cookie-limit").checked;
-    state.selected.theme = { ...(state.selected.theme || {}), accent: $("pv-accent").value };
+    state.selected.theme = {
+      ...(state.selected.theme || {}),
+      accent: $("pv-accent").value,
+      base_text: $("pv-base-text").value,
+    };
+    const settings = ensureFormSettings();
+    if ($("pv-description").dataset.plainEdited === "1") {
+      delete settings.description_html;
+    }
+    if (state.selected.can_manage_shares !== false) {
+      settings.shared_editors = $("pv-shared-editors").value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      state.selected.shared_editors = settings.shared_editors;
+    }
   }
 
   function normalizeQuestionType(question) {
@@ -257,9 +504,10 @@
         </div>
         <div class="pv-question-body">
           <label><span>補足説明</span><textarea data-field="description" rows="2"></textarea></label>
+          <div class="pv-description-tools"></div>
           <div class="pv-dynamic"></div>
           <details>
-            <summary>こだわり設定</summary>
+            <summary>詳細JSON（上級者向け）</summary>
             <label><span>詳細データ</span><textarea data-field="settings-json" rows="4"></textarea></label>
           </details>
           <div class="pv-question-actions">
@@ -276,6 +524,7 @@
       card.querySelector('[data-field="description"]').value = question.description || "";
       card.querySelector('[data-field="settings-json"]').value = JSON.stringify(question.settings || {}, null, 2);
       bindQuestionCard(card, question, index);
+      renderDescriptionTools(card.querySelector(".pv-description-tools"), question);
       renderDynamicSettings(card.querySelector(".pv-dynamic"), question);
       list.appendChild(card);
     });
@@ -287,7 +536,10 @@
       input.addEventListener("input", () => {
         const field = input.dataset.field;
         if (field === "title") question.title = input.value;
-        if (field === "description") question.description = input.value;
+        if (field === "description") {
+          question.description = input.value;
+          if (question.settings) delete question.settings.description_html;
+        }
         if (field === "required") question.required = input.value === "true";
         if (field === "type") {
           const replacement = questionTemplate(input.value);
@@ -344,6 +596,164 @@
     });
   }
 
+  function openRichTextDialog({ title, text, html, onCommit }) {
+    const overlay = document.createElement("div");
+    overlay.className = "pv-rich-dialog";
+    overlay.innerHTML = `
+      <div class="pv-rich-dialog-card" role="dialog" aria-modal="true">
+        <div class="pv-rich-dialog-head">
+          <h2></h2>
+          <button type="button" data-rich-close aria-label="閉じる">×</button>
+        </div>
+        <div class="pv-rich-toolbar">
+          <button type="button" data-rich-bold><strong>B</strong></button>
+          <button type="button" data-rich-underline><u>U</u></button>
+          <button type="button" data-rich-link>リンク</button>
+          <button type="button" data-rich-image>画像</button>
+          <button type="button" data-rich-align="left">左</button>
+          <button type="button" data-rich-align="center">中央</button>
+          <button type="button" data-rich-align="right">右</button>
+          <label><span>色</span><input type="color" data-rich-color value="#2563eb"></label>
+          <span class="pv-rich-image-tools" data-rich-image-tools hidden>
+            <label><span>画像幅</span><input type="range" min="10" max="100" value="100" data-rich-image-width></label>
+            <button type="button" data-rich-image-align="left">画像左</button>
+            <button type="button" data-rich-image-align="center">画像中央</button>
+            <button type="button" data-rich-image-align="right">画像右</button>
+          </span>
+          <input type="file" data-rich-image-input accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+        </div>
+        <div class="pv-rich-editor" contenteditable="true"></div>
+        <div class="pv-rich-dialog-actions">
+          <button type="button" data-rich-cancel>キャンセル</button>
+          <button type="button" class="pv-primary" data-rich-save>反映</button>
+        </div>
+      </div>
+    `;
+    overlay.querySelector("h2").textContent = title;
+    const editor = overlay.querySelector(".pv-rich-editor");
+    const close = () => overlay.remove();
+    editor.innerHTML = sanitizeRichHtml(html) || "";
+    if (!editor.innerHTML && text) appendTextWithBreaks(editor, text);
+    overlay.querySelector("[data-rich-bold]").addEventListener("click", () => {
+      editor.focus();
+      document.execCommand("bold", false);
+    });
+    overlay.querySelector("[data-rich-underline]").addEventListener("click", () => {
+      editor.focus();
+      document.execCommand("underline", false);
+    });
+    overlay.querySelector("[data-rich-link]").addEventListener("click", () => {
+      const label = window.prompt("表示名を入力してください", selectedRichText(editor) || "");
+      if (!label) return;
+      const href = window.prompt("URLを入力してください", "https://");
+      if (!href || !/^(https?:\/\/|mailto:)/i.test(href)) return;
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = label;
+      insertNodeAtSelection(editor, link);
+    });
+    overlay.querySelectorAll("[data-rich-align]").forEach((button) => {
+      button.addEventListener("click", () => {
+        editor.focus();
+        const command = { left: "justifyLeft", center: "justifyCenter", right: "justifyRight" }[button.dataset.richAlign];
+        document.execCommand(command, false);
+      });
+    });
+    const imageInput = overlay.querySelector("[data-rich-image-input]");
+    const imageTools = overlay.querySelector("[data-rich-image-tools]");
+    const imageWidth = overlay.querySelector("[data-rich-image-width]");
+    let selectedImage = null;
+    const selectImage = (img) => {
+      if (selectedImage) selectedImage.classList.remove("pv-rich-image-selected");
+      selectedImage = img;
+      if (!selectedImage) {
+        imageTools.hidden = true;
+        return;
+      }
+      const settings = richImageSettings(selectedImage);
+      applyRichImageStyle(selectedImage, settings.width, settings.align);
+      selectedImage.classList.add("pv-rich-image-selected");
+      imageWidth.value = String(settings.width);
+      imageTools.hidden = false;
+    };
+    editor.addEventListener("click", (event) => {
+      selectImage(event.target instanceof HTMLImageElement ? event.target : null);
+    });
+    imageWidth.addEventListener("input", () => {
+      if (!selectedImage) return;
+      applyRichImageStyle(selectedImage, imageWidth.value, selectedImage.dataset.align || "left");
+    });
+    overlay.querySelectorAll("[data-rich-image-align]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (!selectedImage) return;
+        applyRichImageStyle(selectedImage, imageWidth.value, button.dataset.richImageAlign);
+      });
+    });
+    overlay.querySelector("[data-rich-image]").addEventListener("click", () => imageInput.click());
+    imageInput.addEventListener("change", async () => {
+      const file = imageInput.files?.[0];
+      if (!file) return;
+      try {
+        const url = await uploadRichImage(file);
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = file.name || "";
+        applyRichImageStyle(img, 100, "left");
+        insertNodeAtSelection(editor, img);
+        selectImage(img);
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        imageInput.value = "";
+      }
+    });
+    overlay.querySelector("[data-rich-color]").addEventListener("input", (event) => {
+      editor.focus();
+      document.execCommand("foreColor", false, event.target.value);
+    });
+    overlay.querySelector("[data-rich-close]").addEventListener("click", close);
+    overlay.querySelector("[data-rich-cancel]").addEventListener("click", close);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close();
+    });
+    overlay.querySelector("[data-rich-save]").addEventListener("click", () => {
+      const cleanHtml = sanitizeRichHtml(editor.innerHTML);
+      onCommit({
+        html: cleanHtml,
+        text: plainTextFromHtml(cleanHtml),
+      });
+      close();
+    });
+    document.body.appendChild(overlay);
+    editor.focus();
+  }
+
+  function renderDescriptionTools(container, question) {
+    if (!container) return;
+    container.className = "pv-format-row pv-description-tools";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "pv-secondary";
+    edit.textContent = "詳細編集";
+    edit.addEventListener("click", () => {
+      openRichTextDialog({
+        title: "補足説明を編集",
+        text: question.description || "",
+        html: richDescriptionHtml(question),
+        onCommit: ({ html, text }) => {
+          question.description = text;
+          question.settings = question.settings || {};
+          question.settings.description_html = html;
+          setDirty(true);
+          renderQuestionList();
+        },
+      });
+    });
+    container.appendChild(edit);
+  }
+
   function renderDynamicSettings(container, question) {
     container.replaceChildren();
     if (question.type === "single_choice" || question.type === "multi_choice") {
@@ -387,9 +797,9 @@
     } else if (question.type === "rating") {
       container.appendChild(settingsGrid(question, ["min", "max", "min_label", "max_label"]));
     } else if (question.type === "number") {
-      container.appendChild(settingsGrid(question, ["min", "max"]));
+      container.appendChild(settingsGrid(question, ["min", "max", "integer_only"]));
     } else if (["short_text", "long_text", "email", "phone", "url"].includes(question.type)) {
-      container.appendChild(settingsGrid(question, ["placeholder", "max_length"]));
+      container.appendChild(settingsGrid(question, ["placeholder", "min_length", "max_length"]));
     }
   }
 
@@ -456,16 +866,30 @@
   function settingsGrid(question, keys) {
     const grid = document.createElement("div");
     grid.className = "pv-settings-grid";
+    const labels = {
+      placeholder: "入力例",
+      min_length: "最小文字数",
+      max_length: "最大文字数",
+      min: "最小値",
+      max: "最大値",
+      min_label: "最小側ラベル",
+      max_label: "最大側ラベル",
+      integer_only: "整数のみ",
+    };
     keys.forEach((key) => {
       const label = document.createElement("label");
       const span = document.createElement("span");
-      span.textContent = key === "placeholder" ? "入力例" : key === "max_length" ? "最大文字数" : key;
+      span.textContent = labels[key] || key;
       const input = document.createElement("input");
-      input.type = key.includes("max") || key.includes("min") ? "number" : "text";
-      input.value = question.settings && question.settings[key] != null ? question.settings[key] : "";
+      input.type = key === "integer_only" ? "checkbox" : ["min", "max", "min_length", "max_length"].includes(key) ? "number" : "text";
+      if (key === "integer_only") {
+        input.checked = Boolean(question.settings && question.settings[key]);
+      } else {
+        input.value = question.settings && question.settings[key] != null ? question.settings[key] : "";
+      }
       input.addEventListener("input", () => {
         question.settings = question.settings || {};
-        question.settings[key] = input.value;
+        question.settings[key] = key === "integer_only" ? input.checked : input.value;
         setDirty(true);
         renderPreview();
       });
@@ -480,19 +904,27 @@
     if (!wrap || !state.selected) return;
     readFormInputs();
     wrap.replaceChildren();
+    const baseColor = baseTextColor();
+    wrap.style.setProperty("--pv-base-text", baseColor);
     $("pv-preview-count").textContent = `${state.selected.questions.filter((q) => !isAnswerlessQuestion(q)).length}問`;
 
     const titleBlock = document.createElement("section");
     titleBlock.className = "pv-preview-title";
     titleBlock.innerHTML = "<h3></h3><p></p>";
     titleBlock.querySelector("h3").textContent = state.selected.title || "タイトル";
-    titleBlock.querySelector("p").textContent = state.selected.description || "説明文";
+    applyFormattedText(
+      titleBlock.querySelector("p"),
+      state.selected.description || "説明文",
+      state.selected,
+      baseColor,
+    );
     wrap.appendChild(titleBlock);
 
     state.selected.questions.forEach((question) => {
       const block = document.createElement("section");
       block.className = "pv-preview-block";
       const heading = document.createElement("h4");
+      heading.style.color = baseColor;
       heading.textContent = question.title || (question.type === "info" ? "見出し" : "質問文");
       if (question.required && question.type !== "info") {
         const required = document.createElement("span");
@@ -503,7 +935,7 @@
       block.appendChild(heading);
       if (question.description) {
         const desc = document.createElement("p");
-        desc.textContent = question.description;
+        applyFormattedText(desc, question.description, question, baseColor);
         block.appendChild(desc);
       }
       if (question.type === "partition") {
@@ -520,6 +952,7 @@
         (question.options || []).forEach((option) => {
           const row = document.createElement("div");
           row.className = "pv-preview-option";
+          row.style.color = baseColor;
           row.innerHTML = `<span class="pv-preview-dot ${question.type === "multi_choice" ? "square" : ""}"></span><span></span>`;
           row.querySelector("span:last-child").textContent = option.label || "選択肢";
           block.appendChild(row);
@@ -532,6 +965,7 @@
       } else if (question.type === "consent") {
         const row = document.createElement("div");
         row.className = "pv-preview-option";
+        row.style.color = baseColor;
         row.innerHTML = '<span class="pv-preview-dot square"></span><span>同意する</span>';
         block.appendChild(row);
       } else {
@@ -691,6 +1125,78 @@
     return option ? option.label : String(id == null ? "" : id);
   }
 
+  function sharedEditorDetails() {
+    if (Array.isArray(state.selected.shared_editor_details)) return state.selected.shared_editor_details;
+    const details = [];
+    const byUsername = new Map();
+    (state.selected.shared_editors || state.selected.settings?.shared_editors || []).forEach((username) => {
+      if (!byUsername.has(username)) byUsername.set(username, { username, name: username });
+    });
+    details.push(...byUsername.values());
+    state.selected.shared_editor_details = details;
+    return details;
+  }
+
+  function syncSharedEditorHidden() {
+    const usernames = sharedEditorDetails().map((user) => user.username);
+    $("pv-shared-editors").value = usernames.join(",");
+    state.selected.shared_editors = usernames;
+    ensureFormSettings().shared_editors = usernames;
+  }
+
+  function renderSharedEditors() {
+    if (!state.selected) return;
+    const list = $("pv-shared-editor-list");
+    list.replaceChildren();
+    sharedEditorDetails().forEach((user) => {
+      const pill = document.createElement("span");
+      pill.className = "pv-shared-editor-pill";
+      const name = document.createElement("strong");
+      name.textContent = user.name || user.username;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "×";
+      remove.disabled = state.selected.can_manage_shares === false;
+      remove.addEventListener("click", () => {
+        state.selected.shared_editor_details = sharedEditorDetails().filter((item) => item.username !== user.username);
+        syncSharedEditorHidden();
+        renderSharedEditors();
+        setDirty(true);
+      });
+      pill.append(name, remove);
+      list.appendChild(pill);
+    });
+    syncSharedEditorHidden();
+  }
+
+  function addSharedEditor(user) {
+    state.selected.shared_editor_details = sharedEditorDetails();
+    if (!state.selected.shared_editor_details.some((item) => item.username === user.username)) {
+      state.selected.shared_editor_details.push(user);
+      syncSharedEditorHidden();
+      renderSharedEditors();
+      setDirty(true);
+    }
+  }
+
+  async function searchSharedEditors(query) {
+    const results = $("pv-shared-editor-results");
+    results.replaceChildren();
+    if (!query.trim() || !state.selected || state.selected.can_manage_shares === false) return;
+    const payload = await api(`/users?query=${encodeURIComponent(query.trim())}`);
+    (payload.users || []).forEach((user) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = user.name || user.username;
+      button.addEventListener("click", () => {
+        addSharedEditor(user);
+        $("pv-shared-editor-search").value = "";
+        results.replaceChildren();
+      });
+      results.appendChild(button);
+    });
+  }
+
   function switchView(view) {
     state.view = view;
     $("pv-builder-view").classList.toggle("hidden", view !== "builder");
@@ -833,10 +1339,47 @@
       });
     });
 
-    ["pv-title", "pv-description", "pv-status", "pv-identity-mode", "pv-anonymous", "pv-cookie-limit", "pv-accent"].forEach((id) => {
+    $("pv-description-edit-rich").addEventListener("click", () => {
+      if (!state.selected) return;
+      openRichTextDialog({
+        title: "説明文を編集",
+        text: state.selected.description || "",
+        html: richDescriptionHtml(state.selected),
+        onCommit: ({ html, text }) => {
+          state.selected.description = text;
+          $("pv-description").value = text;
+          $("pv-description").dataset.plainEdited = "0";
+          const settings = ensureFormSettings();
+          settings.description_html = html;
+          setDirty(true);
+          renderPreview();
+        },
+      });
+    });
+
+    let sharedSearchTimer = null;
+    $("pv-shared-editor-search").addEventListener("input", () => {
+      clearTimeout(sharedSearchTimer);
+      const query = $("pv-shared-editor-search").value;
+      sharedSearchTimer = setTimeout(() => {
+        searchSharedEditors(query).catch((error) => alert(error.message));
+      }, 180);
+    });
+
+    [
+      "pv-title",
+      "pv-description",
+      "pv-status",
+      "pv-identity-mode",
+      "pv-anonymous",
+      "pv-cookie-limit",
+      "pv-accent",
+      "pv-base-text",
+    ].forEach((id) => {
       $(id).addEventListener("input", () => {
+        if (id === "pv-description") $("pv-description").dataset.plainEdited = "1";
         readFormInputs();
-        syncEditorInputs();
+        if (id !== "pv-description") syncEditorInputs();
         setDirty(true);
         renderPreview();
       });

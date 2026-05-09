@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import sys
 from pathlib import Path
 
@@ -36,11 +37,11 @@ def app_ctx(tmp_path, monkeypatch):
         yield app
 
 
-def _create_user(app_ctx, username="alice"):
+def _create_user(app_ctx, username="alice", name="Alice"):
     from app.models import User, db
 
     with app_ctx.app_context():
-        user = User(username=username, password_hash="hash", name="Alice")
+        user = User(username=username, password_hash="hash", name=name)
         db.session.add(user)
         db.session.commit()
         return user.username
@@ -441,3 +442,222 @@ def test_powervote_bad_numeric_settings_do_not_crash_submission(app_ctx):
     )
 
     assert response.status_code == 201
+
+
+def test_powervote_text_and_number_limits_are_enforced(app_ctx):
+    username = _create_user(app_ctx)
+    client = app_ctx.test_client()
+    _login(client, username)
+
+    form = client.post("/tools/powervote/api/forms", json={"title": "Limits"}).get_json()["form"]
+    form["status"] = "open"
+    form["questions"] = [
+        {
+            "id": None,
+            "type": "short_text",
+            "title": "Code",
+            "description": "",
+            "required": True,
+            "sort_order": 0,
+            "options": [],
+            "settings": {"min_length": 3, "max_length": 5},
+        },
+        {
+            "id": None,
+            "type": "number",
+            "title": "Count",
+            "description": "",
+            "required": True,
+            "sort_order": 1,
+            "options": [],
+            "settings": {"min": 1, "max": 10, "integer_only": True},
+        },
+    ]
+    form = client.put(f"/tools/powervote/api/forms/{form['id']}", json=form).get_json()["form"]
+    text_id = str(form["questions"][0]["id"])
+    number_id = str(form["questions"][1]["id"])
+
+    too_short = client.post(
+        f"/vote/{form['public_token']}/submit",
+        json={"answers": {text_id: "ab", number_id: "3"}},
+    )
+    assert too_short.status_code == 400
+
+    decimal = client.post(
+        f"/vote/{form['public_token']}/submit",
+        json={"answers": {text_id: "abcd", number_id: "3.5"}},
+    )
+    assert decimal.status_code == 400
+
+    ok = client.post(
+        f"/vote/{form['public_token']}/submit",
+        json={"answers": {text_id: "abcd", number_id: "3"}},
+    )
+    assert ok.status_code == 201
+
+
+def test_powervote_shared_editor_can_open_and_update_form(app_ctx):
+    owner = _create_user(app_ctx, "owner", "Owner User")
+    editor = _create_user(app_ctx, "editor", "編集 太郎")
+    client = app_ctx.test_client()
+    _login(client, owner)
+
+    form = client.post("/tools/powervote/api/forms", json={"title": "Shared"}).get_json()["form"]
+    form["settings"] = {"shared_editors": [editor]}
+    saved = client.put(f"/tools/powervote/api/forms/{form['id']}", json=form)
+    assert saved.status_code == 200
+
+    editor_client = app_ctx.test_client()
+    _login(editor_client, editor)
+    listed = editor_client.get("/tools/powervote/api/forms")
+    assert listed.status_code == 200
+    listed_form = listed.get_json()["forms"][0]
+    assert listed_form["id"] == form["id"]
+    assert listed_form["is_shared_to_me"] is True
+    assert listed_form["owner_display_name"] == "Owner User"
+
+    shared_form = editor_client.get(f"/tools/powervote/api/forms/{form['id']}").get_json()["form"]
+    shared_form["title"] = "Edited by shared user"
+    updated = editor_client.put(f"/tools/powervote/api/forms/{form['id']}", json=shared_form)
+    assert updated.status_code == 200
+    assert updated.get_json()["form"]["title"] == "Edited by shared user"
+
+
+def test_powervote_user_search_uses_display_name(app_ctx):
+    owner = _create_user(app_ctx, "owner", "Owner User")
+    _create_user(app_ctx, "editor-login", "共有 花子")
+    client = app_ctx.test_client()
+    _login(client, owner)
+
+    response = client.get("/tools/powervote/api/users?query=花子")
+
+    assert response.status_code == 200
+    users = response.get_json()["users"]
+    assert users == [{"username": "editor-login", "name": "共有 花子"}]
+
+
+def test_powervote_description_preserves_newlines(app_ctx):
+    username = _create_user(app_ctx)
+    client = app_ctx.test_client()
+    _login(client, username)
+
+    form = client.post("/tools/powervote/api/forms", json={"title": "Description"}).get_json()["form"]
+    form["description"] = "line 1\nline 2"
+    form["questions"] = [
+        {
+            "id": None,
+            "type": "info",
+            "title": "Info",
+            "description": "first\nsecond",
+            "required": False,
+            "sort_order": 0,
+            "options": [],
+            "settings": {"description_format": {"bold": True, "color": "#123456"}},
+        }
+    ]
+
+    updated = client.put(f"/tools/powervote/api/forms/{form['id']}", json=form)
+    assert updated.status_code == 200
+    payload = updated.get_json()["form"]
+    assert payload["description"] == "line 1\nline 2"
+    assert payload["questions"][0]["description"] == "first\nsecond"
+    assert payload["questions"][0]["settings"]["description_format"]["bold"] is True
+
+
+def test_powervote_description_html_is_sanitized(app_ctx):
+    username = _create_user(app_ctx)
+    client = app_ctx.test_client()
+    _login(client, username)
+
+    form = client.post("/tools/powervote/api/forms", json={"title": "Rich"}).get_json()["form"]
+    form["settings"] = {
+        "description_html": (
+            '<div style="text-align: center"><span style="color: rgb(255, 0, 0)">赤</span>'
+            '<script>alert(1)</script><strong>太字</strong><u>下線</u>'
+            '<a href="https://example.com">リンク</a><ul><li>項目</li></ul></div>'
+        )
+    }
+    form["questions"] = [
+        {
+            "id": None,
+            "type": "info",
+            "title": "Info",
+            "description": "plain",
+            "required": False,
+            "sort_order": 0,
+            "options": [],
+            "settings": {
+                "description_html": '<font color="#0000ff">青</font><img src=x onerror=alert(1)>'
+            },
+        }
+    ]
+
+    response = client.put(f"/tools/powervote/api/forms/{form['id']}", json=form)
+
+    assert response.status_code == 200
+    payload = response.get_json()["form"]
+    assert "<script" not in payload["settings"]["description_html"]
+    assert 'style="color: #ff0000"' in payload["settings"]["description_html"]
+    assert "<u>下線</u>" in payload["settings"]["description_html"]
+    assert '<a href="https://example.com" target="_blank" rel="noopener noreferrer">リンク</a>' in payload["settings"]["description_html"]
+    assert "<ul" not in payload["settings"]["description_html"]
+    assert "<li" not in payload["settings"]["description_html"]
+    assert "項目" in payload["settings"]["description_html"]
+    assert 'style="text-align: center"' in payload["settings"]["description_html"]
+    assert "<img" not in payload["questions"][0]["settings"]["description_html"]
+    assert 'style="color: #0000ff"' in payload["questions"][0]["settings"]["description_html"]
+
+
+def test_powervote_theme_sanitizes_base_text_color(app_ctx):
+    username = _create_user(app_ctx)
+    client = app_ctx.test_client()
+    _login(client, username)
+
+    form = client.post("/tools/powervote/api/forms", json={"title": "Theme"}).get_json()["form"]
+    assert form["theme"]["base_text"] == "#0f172a"
+    form["theme"] = {"accent": "#123456", "base_text": "rgb(12, 34, 56)"}
+
+    response = client.put(f"/tools/powervote/api/forms/{form['id']}", json=form)
+
+    assert response.status_code == 200
+    assert response.get_json()["form"]["theme"] == {
+        "accent": "#123456",
+        "base_text": "#0c2238",
+    }
+
+
+def test_powervote_image_upload_is_served_and_deleted_with_form(app_ctx):
+    username = _create_user(app_ctx)
+    client = app_ctx.test_client()
+    _login(client, username)
+
+    form = client.post("/tools/powervote/api/forms", json={"title": "Images"}).get_json()["form"]
+    upload = client.post(
+        f"/tools/powervote/api/forms/{form['id']}/images",
+        data={"image": (io.BytesIO(b"fake-png"), "sample.png")},
+        content_type="multipart/form-data",
+    )
+    assert upload.status_code == 200
+    url = upload.get_json()["url"]
+    assert url.startswith(f"/tools/powervote/uploads/{form['id']}/")
+    assert client.get(url).status_code == 200
+
+    form["settings"] = {
+        "description_html": f'<img src="{url}" alt="sample" data-width="55" data-align="center">'
+    }
+    updated = client.put(f"/tools/powervote/api/forms/{form['id']}", json=form)
+    assert updated.status_code == 200
+    image_html = updated.get_json()["form"]["settings"]["description_html"]
+    assert f'<img src="{url}" alt="sample"' in image_html
+    assert 'data-width="55"' in image_html
+    assert 'data-align="center"' in image_html
+    assert "width: 55%" in image_html
+    assert "margin-left: auto" in image_html
+    assert "margin-right: auto" in image_html
+
+    upload_dir = Path(app_ctx.instance_path) / "powervote_uploads" / f"form_{form['id']}"
+    assert upload_dir.exists()
+
+    delete = client.delete(f"/tools/powervote/api/forms/{form['id']}")
+    assert delete.status_code == 200
+    assert not upload_dir.exists()
