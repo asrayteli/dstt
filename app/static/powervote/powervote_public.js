@@ -15,9 +15,16 @@
   let nextButton = null;
   let submitButton = null;
 
-  document.getElementById("pv-public-title").textContent = form.title || "PowerVote";
-  document.getElementById("pv-public-description").textContent = form.description || "";
   const accent = (form.theme && form.theme.accent) || "#2563eb";
+  const baseText = normalizeRichColor(form.theme?.base_text || "#0f172a") || "#0f172a";
+  app.style.setProperty("--pv-base-text", baseText);
+  document.getElementById("pv-public-title").textContent = form.title || "PowerVote";
+  applyFormattedText(
+    document.getElementById("pv-public-description"),
+    form.description || "",
+    form,
+    baseText,
+  );
   document.getElementById("pv-public-header").style.background = accent;
   document.querySelector(".pv-public-submit")?.style.setProperty("background", accent);
 
@@ -33,6 +40,159 @@
     return option ? option.label : id;
   }
 
+  function appendTextWithBreaks(parent, text) {
+    String(text || "").split("\n").forEach((line, lineIndex) => {
+      if (lineIndex > 0) parent.appendChild(document.createElement("br"));
+      const parts = line.split(/(\*\*[^*]+\*\*)/g);
+      parts.forEach((part) => {
+        if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+          const strong = document.createElement("strong");
+          strong.textContent = part.slice(2, -2);
+          parent.appendChild(strong);
+        } else if (part) {
+          parent.appendChild(document.createTextNode(part));
+        }
+      });
+    });
+  }
+
+  function normalizeRichColor(value) {
+    const color = String(value || "").trim();
+    const hex = color.match(/^#[0-9a-fA-F]{6}$/);
+    if (hex) return color.toLowerCase();
+    const rgb = color.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/i);
+    if (!rgb) return "";
+    return `#${rgb.slice(1, 4).map((part) => {
+      const value = Math.max(0, Math.min(255, Number(part) || 0));
+      return value.toString(16).padStart(2, "0");
+    }).join("")}`;
+  }
+
+  function richImageSettings(node) {
+    const style = String(node.getAttribute("style") || "");
+    const widthMatch = style.match(/(?:^|;)\s*width\s*:\s*(\d{1,3})%\s*(?:;|$)/i);
+    const rawWidth = node.getAttribute("data-width") || (widthMatch ? widthMatch[1] : "100");
+    const width = Math.max(10, Math.min(100, Number(rawWidth) || 100));
+    const rawAlign = (node.getAttribute("data-align") || "").toLowerCase();
+    let align = ["left", "center", "right"].includes(rawAlign) ? rawAlign : "left";
+    if (!rawAlign) {
+      const normalizedStyle = style.toLowerCase();
+      const leftAuto = /margin-left\s*:\s*auto/.test(normalizedStyle);
+      const rightAuto = /margin-right\s*:\s*auto/.test(normalizedStyle);
+      if (leftAuto && rightAuto) align = "center";
+      else if (leftAuto) align = "right";
+    }
+    return { width, align };
+  }
+
+  function applyRichImageStyle(img, width = 100, align = "left") {
+    const normalizedWidth = Math.max(10, Math.min(100, Number(width) || 100));
+    const normalizedAlign = ["left", "center", "right"].includes(align) ? align : "left";
+    img.dataset.width = String(normalizedWidth);
+    img.dataset.align = normalizedAlign;
+    img.style.width = `${normalizedWidth}%`;
+    img.style.height = "auto";
+    img.style.maxWidth = "100%";
+    img.style.display = "block";
+    if (normalizedAlign === "center") {
+      img.style.marginLeft = "auto";
+      img.style.marginRight = "auto";
+    } else if (normalizedAlign === "right") {
+      img.style.marginLeft = "auto";
+      img.style.marginRight = "0";
+    } else {
+      img.style.marginLeft = "0";
+      img.style.marginRight = "auto";
+    }
+  }
+
+  function sanitizeRichHtml(html) {
+    const template = document.createElement("template");
+    template.innerHTML = String(html || "");
+    const fragment = document.createDocumentFragment();
+    function walk(node, parent) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        parent.appendChild(document.createTextNode(node.textContent || ""));
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName.toLowerCase();
+      if (tag === "script" || tag === "style") return;
+      let nextParent = parent;
+      if (tag === "strong" || tag === "b") {
+        nextParent = document.createElement("strong");
+        parent.appendChild(nextParent);
+      } else if (tag === "u") {
+        nextParent = document.createElement("u");
+        parent.appendChild(nextParent);
+      } else if (tag === "span" || tag === "font") {
+        const styleMatch = String(node.getAttribute("style") || "").match(/(?:^|;)\s*color\s*:\s*([^;]+)\s*(?:;|$)/i);
+        const color = normalizeRichColor(styleMatch ? styleMatch[1] : node.getAttribute("color") || "");
+        const span = document.createElement("span");
+        if (color) span.style.color = color;
+        if (span.getAttribute("style")) {
+          nextParent = span;
+          parent.appendChild(span);
+        }
+      } else if (tag === "a") {
+        const href = node.getAttribute("href") || "";
+        if (/^(https?:\/\/|mailto:)/i.test(href)) {
+          const a = document.createElement("a");
+          a.href = href;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          nextParent = a;
+          parent.appendChild(a);
+        }
+      } else if (tag === "img") {
+        const src = node.getAttribute("src") || "";
+        if (/^\/tools\/powervote\/uploads\/\d+\/[A-Za-z0-9_.-]+$/.test(src)) {
+          const img = document.createElement("img");
+          img.src = src;
+          img.alt = node.getAttribute("alt") || "";
+          const settings = richImageSettings(node);
+          applyRichImageStyle(img, settings.width, settings.align);
+          parent.appendChild(img);
+        }
+        return;
+      } else if (tag === "br") {
+        parent.appendChild(document.createElement("br"));
+        return;
+      } else if (tag === "div" || tag === "p") {
+        const styleMatch = String(node.getAttribute("style") || "").match(/(?:^|;)\s*text-align\s*:\s*(left|center|right)\s*(?:;|$)/i);
+        const align = styleMatch ? styleMatch[1].toLowerCase() : (node.getAttribute("align") || "").toLowerCase();
+        if (parent.childNodes.length) parent.appendChild(document.createElement("br"));
+        if (["left", "center", "right"].includes(align)) {
+          const div = document.createElement("div");
+          div.style.textAlign = align;
+          nextParent = div;
+          parent.appendChild(div);
+        }
+      }
+      Array.from(node.childNodes).forEach((child) => walk(child, nextParent));
+    }
+    Array.from(template.content.childNodes).forEach((node) => walk(node, fragment));
+    const wrap = document.createElement("div");
+    wrap.appendChild(fragment);
+    return wrap.innerHTML;
+  }
+
+  function applyFormattedText(element, text, source = {}, inheritedColor = "") {
+    element.replaceChildren();
+    element.classList.add("pv-rich-text");
+    const richHtml = source?.settings?.description_html || "";
+    const color = normalizeRichColor(inheritedColor || source?.theme?.base_text || baseText);
+    element.style.color = color || "";
+    if (richHtml) {
+      element.innerHTML = sanitizeRichHtml(richHtml);
+      return;
+    }
+    appendTextWithBreaks(element, text);
+    const format = source?.settings?.description_format || {};
+    element.style.fontWeight = format.bold ? "800" : "";
+    element.style.color = normalizeRichColor(format.color) || color || "";
+  }
+
   function questionTitle(question) {
     const wrap = document.createElement("div");
     const h2 = document.createElement("h2");
@@ -46,7 +206,7 @@
     wrap.appendChild(h2);
     if (question.description) {
       const p = document.createElement("p");
-      p.textContent = question.description;
+      applyFormattedText(p, question.description, question, baseText);
       wrap.appendChild(p);
     }
     return wrap;
@@ -98,17 +258,20 @@
       control.type = question.type === "email" ? "email" : question.type === "url" ? "url" : question.type === "phone" ? "tel" : "text";
       control.placeholder = settings.placeholder || "";
       control.maxLength = Number(settings.max_length || 5000);
+      if (settings.min_length !== "" && settings.min_length != null) control.minLength = Number(settings.min_length);
       control.required = Boolean(question.required);
     } else if (question.type === "long_text") {
       control = document.createElement("textarea");
       control.placeholder = settings.placeholder || "";
       control.maxLength = Number(settings.max_length || 5000);
+      if (settings.min_length !== "" && settings.min_length != null) control.minLength = Number(settings.min_length);
       control.required = Boolean(question.required);
     } else if (question.type === "number") {
       control = document.createElement("input");
       control.type = "number";
       if (settings.min !== "" && settings.min != null) control.min = settings.min;
       if (settings.max !== "" && settings.max != null) control.max = settings.max;
+      if (settings.integer_only) control.step = "1";
       control.required = Boolean(question.required);
     } else if (question.type === "date") {
       control = document.createElement("input");

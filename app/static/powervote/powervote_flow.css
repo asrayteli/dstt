@@ -357,6 +357,141 @@
   font-size: 0.9rem;
 }
 
+.pv-flow-format-row,
+.pv-flow-settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+
+.pv-flow-check {
+  display: flex !important;
+  grid-template-columns: none !important;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem !important;
+}
+
+.pv-flow-check input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.pv-flow-rich-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 3200;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.48);
+  padding: 1rem;
+}
+
+.pv-flow-rich-dialog-card {
+  width: min(920px, 96vw);
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+  padding: 1rem;
+}
+
+.pv-flow-rich-dialog-head,
+.pv-flow-rich-toolbar,
+.pv-flow-rich-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.pv-flow-rich-dialog-head h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.pv-flow-rich-dialog-head button,
+.pv-flow-rich-toolbar button,
+.pv-flow-rich-dialog-actions button {
+  min-height: 2.25rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  padding: 0.45rem 0.75rem;
+  font-weight: 800;
+}
+
+.pv-flow-rich-toolbar {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin: 0.75rem 0;
+}
+
+.pv-flow-rich-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.pv-flow-rich-image-tools {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.pv-flow-rich-image-tools[hidden] {
+  display: none;
+}
+
+.pv-flow-rich-image-tools input[type="range"] {
+  width: 8rem;
+}
+
+.pv-flow-rich-editor {
+  min-height: 18rem;
+  max-height: min(54vh, 34rem);
+  overflow: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.9rem;
+  color: #0f172a;
+  line-height: 1.7;
+  outline: none;
+}
+
+.pv-flow-rich-editor:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.pv-flow-rich-editor img,
+.pv-flow-node p img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.pv-rich-image-selected {
+  outline: 3px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 3px;
+}
+
+.pv-flow-rich-dialog-actions {
+  justify-content: flex-end;
+  margin-top: 0.85rem;
+}
+
 .pv-flow-options-caption {
   margin: 0.45rem 0 0.6rem;
   color: #64748b;
@@ -537,6 +672,11 @@
   }
 
   .pv-flow-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .pv-flow-format-row,
+  .pv-flow-settings-grid {
     grid-template-columns: 1fr;
   }
 
