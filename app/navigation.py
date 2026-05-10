@@ -132,4 +132,11 @@ NAV_ITEMS = (
         "label": "PowerVote",
         "description": "自由度の高い投票・アンケート収集ツール",
     },
+    {
+        "key": "power_flow",
+        "href": "/tools/power_flow",
+        "icon": "🧭",
+        "label": "Power Flow",
+        "description": "フローチャートを作成・整列・出力できる作図ツール",
+    },
 )
