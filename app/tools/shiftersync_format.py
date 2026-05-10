@@ -17,6 +17,25 @@ SITE_ID_ROW_PREFIX = "#site_id"
 SITE_NAME_ROW_PREFIX = "#site_name"
 SITE_BRANCH_ROW_ID_ROW_PREFIX = "#site_branch_row_id"
 SITE_BRANCH_ROW_PREFIX = "#site_branch"
+SUBSTITUTE_REQUEST_TYPE_ROW_PREFIX = "#substitute_request_type"
+SUBSTITUTE_HELPER_EMPLOYEE_NAME_ROW_PREFIX = "#substitute_helper_employee_name"
+SUBSTITUTE_HELPER_EMPLOYEE_NUMBER_ROW_PREFIX = "#substitute_helper_employee_number"
+SUBSTITUTE_HELPER_SITE_ROW_ID_ROW_PREFIX = "#substitute_helper_site_row_id"
+SUBSTITUTE_HELPER_SITE_ID_ROW_PREFIX = "#substitute_helper_site_id"
+SUBSTITUTE_HELPER_SITE_NAME_ROW_PREFIX = "#substitute_helper_site_name"
+SUBSTITUTE_RESOLVED_ROW_PREFIX = "#substitute_resolved"
+SUBSTITUTE_REQUESTER_USER_ID_ROW_PREFIX = "#substitute_requester_user_id"
+SUBSTITUTE_REQUESTER_NAME_ROW_PREFIX = "#substitute_requester_name"
+SUBSTITUTE_REQUESTED_AT_ROW_PREFIX = "#substitute_requested_at"
+SUBSTITUTE_HELPER_USER_ID_ROW_PREFIX = "#substitute_helper_user_id"
+SUBSTITUTE_HELPER_NAME_ROW_PREFIX = "#substitute_helper_name"
+SUBSTITUTE_HELPED_AT_ROW_PREFIX = "#substitute_helped_at"
+SUBSTITUTE_SOURCE_PROJECT_ID_ROW_PREFIX = "#substitute_source_project_id"
+SUBSTITUTE_SOURCE_PROJECT_TITLE_ROW_PREFIX = "#substitute_source_project_title"
+SUBSTITUTE_SOURCE_PROJECT_MODE_ROW_PREFIX = "#substitute_source_project_mode"
+SUBSTITUTE_SOURCE_MONTH_KEY_ROW_PREFIX = "#substitute_source_month_key"
+SUBSTITUTE_SOURCE_DAY_ROW_PREFIX = "#substitute_source_day"
+SUBSTITUTE_SOURCE_ENTRY_ID_ROW_PREFIX = "#substitute_source_entry_id"
 
 SHIFT_OPTION_MAPPINGS = {
     "A": "\u5348\u524d",
@@ -98,6 +117,13 @@ def _normalize_sync_text(value: Any, *, limit: int = 120) -> str:
     return str(value or "").replace("\r", " ").replace("\n", " ").strip()[:limit]
 
 
+def _normalize_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "on"}
+
+
 def normalize_entry(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         value = str(raw.get("value", "")).strip()
@@ -112,6 +138,12 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         site_id = str(raw.get("site_id", raw.get("siteId", "")) or "").strip()
         site_name = str(raw.get("site_name", raw.get("siteName", "")) or "").strip()
         site_branch = str(raw.get("site_branch", raw.get("siteBranch", "")) or "").strip()
+        substitute_request_type = str(
+            raw.get("substitute_request_type", raw.get("substituteRequestType", ""))
+            or ""
+        ).strip().lower()
+        if substitute_request_type not in {"scene", "person"}:
+            substitute_request_type = ""
         return {
             "id": str(raw.get("id") or generate_entry_id()),
             "value": value,
@@ -129,6 +161,39 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
             "sync_source_month_key": _normalize_sync_text(raw.get("sync_source_month_key", raw.get("syncSourceMonthKey", "")), limit=20),
             "sync_source_day": _normalize_sync_text(raw.get("sync_source_day", raw.get("syncSourceDay", "")), limit=10),
             "sync_source_entry_id": _normalize_sync_text(raw.get("sync_source_entry_id", raw.get("syncSourceEntryId", "")), limit=80),
+            "substitute_request_type": substitute_request_type,
+            "substitute_helper_employee_name": _normalize_sync_text(
+                raw.get("substitute_helper_employee_name", raw.get("substituteHelperEmployeeName", "")),
+                limit=120,
+            ),
+            "substitute_helper_employee_number": _normalize_sync_text(
+                raw.get("substitute_helper_employee_number", raw.get("substituteHelperEmployeeNumber", "")),
+                limit=40,
+            ),
+            "substitute_helper_site_row_id": _normalize_site_row_id(
+                raw.get("substitute_helper_site_row_id", raw.get("substituteHelperSiteRowId", ""))
+            ),
+            "substitute_helper_site_id": _normalize_sync_text(
+                raw.get("substitute_helper_site_id", raw.get("substituteHelperSiteId", "")),
+                limit=40,
+            ),
+            "substitute_helper_site_name": _normalize_sync_text(
+                raw.get("substitute_helper_site_name", raw.get("substituteHelperSiteName", "")),
+                limit=200,
+            ),
+            "substitute_resolved": _normalize_bool(raw.get("substitute_resolved", raw.get("substituteResolved", False))),
+            "substitute_requester_user_id": _normalize_sync_text(raw.get("substitute_requester_user_id", raw.get("substituteRequesterUserId", "")), limit=80),
+            "substitute_requester_name": _normalize_sync_text(raw.get("substitute_requester_name", raw.get("substituteRequesterName", "")), limit=120),
+            "substitute_requested_at": _normalize_sync_text(raw.get("substitute_requested_at", raw.get("substituteRequestedAt", "")), limit=40),
+            "substitute_helper_user_id": _normalize_sync_text(raw.get("substitute_helper_user_id", raw.get("substituteHelperUserId", "")), limit=80),
+            "substitute_helper_name": _normalize_sync_text(raw.get("substitute_helper_name", raw.get("substituteHelperName", "")), limit=120),
+            "substitute_helped_at": _normalize_sync_text(raw.get("substitute_helped_at", raw.get("substituteHelpedAt", "")), limit=40),
+            "substitute_source_project_id": _normalize_sync_text(raw.get("substitute_source_project_id", raw.get("substituteSourceProjectId", "")), limit=80),
+            "substitute_source_project_title": _normalize_sync_text(raw.get("substitute_source_project_title", raw.get("substituteSourceProjectTitle", "")), limit=120),
+            "substitute_source_project_mode": _normalize_sync_text(raw.get("substitute_source_project_mode", raw.get("substituteSourceProjectMode", "")), limit=40),
+            "substitute_source_month_key": _normalize_sync_text(raw.get("substitute_source_month_key", raw.get("substituteSourceMonthKey", "")), limit=20),
+            "substitute_source_day": _normalize_sync_text(raw.get("substitute_source_day", raw.get("substituteSourceDay", "")), limit=10),
+            "substitute_source_entry_id": _normalize_sync_text(raw.get("substitute_source_entry_id", raw.get("substituteSourceEntryId", "")), limit=80),
         }
 
     value = str(raw or "").strip()
@@ -151,6 +216,25 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         "sync_source_month_key": "",
         "sync_source_day": "",
         "sync_source_entry_id": "",
+        "substitute_request_type": "",
+        "substitute_helper_employee_name": "",
+        "substitute_helper_employee_number": "",
+        "substitute_helper_site_row_id": "",
+        "substitute_helper_site_id": "",
+        "substitute_helper_site_name": "",
+        "substitute_resolved": False,
+        "substitute_requester_user_id": "",
+        "substitute_requester_name": "",
+        "substitute_requested_at": "",
+        "substitute_helper_user_id": "",
+        "substitute_helper_name": "",
+        "substitute_helped_at": "",
+        "substitute_source_project_id": "",
+        "substitute_source_project_title": "",
+        "substitute_source_project_mode": "",
+        "substitute_source_month_key": "",
+        "substitute_source_day": "",
+        "substitute_source_entry_id": "",
     }
 
 
@@ -209,6 +293,7 @@ def serialize_entry_rows(
     site_name_rows: list[list[Any]] = []
     site_branch_row_id_rows: list[list[Any]] = []
     site_branch_rows: list[list[Any]] = []
+    substitute_rows: list[list[Any]] = []
     for day in range(1, monthrange(year, month)[1] + 1):
         key = str(day)
         day_entries = [normalize_entry(item) for item in entries_per_day.get(key, [])]
@@ -246,6 +331,44 @@ def serialize_entry_rows(
                 )
             if entry.get("site_branch"):
                 site_branch_rows.append([SITE_BRANCH_ROW_PREFIX, day, index, entry["site_branch"]])
+            if entry.get("substitute_request_type"):
+                substitute_rows.append([SUBSTITUTE_REQUEST_TYPE_ROW_PREFIX, day, index, entry["substitute_request_type"]])
+            if entry.get("substitute_helper_employee_name"):
+                substitute_rows.append([SUBSTITUTE_HELPER_EMPLOYEE_NAME_ROW_PREFIX, day, index, entry["substitute_helper_employee_name"]])
+            if entry.get("substitute_helper_employee_number"):
+                substitute_rows.append([SUBSTITUTE_HELPER_EMPLOYEE_NUMBER_ROW_PREFIX, day, index, entry["substitute_helper_employee_number"]])
+            if entry.get("substitute_helper_site_row_id"):
+                substitute_rows.append([SUBSTITUTE_HELPER_SITE_ROW_ID_ROW_PREFIX, day, index, entry["substitute_helper_site_row_id"]])
+            if entry.get("substitute_helper_site_id"):
+                substitute_rows.append([SUBSTITUTE_HELPER_SITE_ID_ROW_PREFIX, day, index, entry["substitute_helper_site_id"]])
+            if entry.get("substitute_helper_site_name"):
+                substitute_rows.append([SUBSTITUTE_HELPER_SITE_NAME_ROW_PREFIX, day, index, entry["substitute_helper_site_name"]])
+            if entry.get("substitute_resolved"):
+                substitute_rows.append([SUBSTITUTE_RESOLVED_ROW_PREFIX, day, index, "1"])
+            if entry.get("substitute_requester_user_id"):
+                substitute_rows.append([SUBSTITUTE_REQUESTER_USER_ID_ROW_PREFIX, day, index, entry["substitute_requester_user_id"]])
+            if entry.get("substitute_requester_name"):
+                substitute_rows.append([SUBSTITUTE_REQUESTER_NAME_ROW_PREFIX, day, index, entry["substitute_requester_name"]])
+            if entry.get("substitute_requested_at"):
+                substitute_rows.append([SUBSTITUTE_REQUESTED_AT_ROW_PREFIX, day, index, entry["substitute_requested_at"]])
+            if entry.get("substitute_helper_user_id"):
+                substitute_rows.append([SUBSTITUTE_HELPER_USER_ID_ROW_PREFIX, day, index, entry["substitute_helper_user_id"]])
+            if entry.get("substitute_helper_name"):
+                substitute_rows.append([SUBSTITUTE_HELPER_NAME_ROW_PREFIX, day, index, entry["substitute_helper_name"]])
+            if entry.get("substitute_helped_at"):
+                substitute_rows.append([SUBSTITUTE_HELPED_AT_ROW_PREFIX, day, index, entry["substitute_helped_at"]])
+            if entry.get("substitute_source_project_id"):
+                substitute_rows.append([SUBSTITUTE_SOURCE_PROJECT_ID_ROW_PREFIX, day, index, entry["substitute_source_project_id"]])
+            if entry.get("substitute_source_project_title"):
+                substitute_rows.append([SUBSTITUTE_SOURCE_PROJECT_TITLE_ROW_PREFIX, day, index, entry["substitute_source_project_title"]])
+            if entry.get("substitute_source_project_mode"):
+                substitute_rows.append([SUBSTITUTE_SOURCE_PROJECT_MODE_ROW_PREFIX, day, index, entry["substitute_source_project_mode"]])
+            if entry.get("substitute_source_month_key"):
+                substitute_rows.append([SUBSTITUTE_SOURCE_MONTH_KEY_ROW_PREFIX, day, index, entry["substitute_source_month_key"]])
+            if entry.get("substitute_source_day"):
+                substitute_rows.append([SUBSTITUTE_SOURCE_DAY_ROW_PREFIX, day, index, entry["substitute_source_day"]])
+            if entry.get("substitute_source_entry_id"):
+                substitute_rows.append([SUBSTITUTE_SOURCE_ENTRY_ID_ROW_PREFIX, day, index, entry["substitute_source_entry_id"]])
 
     metadata_rows: list[list[Any]] = []
     if str(project_employee_number or "").strip():
@@ -263,6 +386,7 @@ def serialize_entry_rows(
         + site_name_rows
         + site_branch_row_id_rows
         + site_branch_rows
+        + substitute_rows
         + metadata_rows
     )
 
@@ -298,8 +422,8 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         raise ValueError("ShifterSync CSV のヘッダーが不正です")
 
     mode = str(rows[0][0]).strip().lower()
-    if mode not in {"scene", "person", "master"}:
-        raise ValueError("mode は scene、person、master だけ対応しています")
+    if mode not in {"scene", "person", "master", "substitute"}:
+        raise ValueError("mode は scene、person、master、substitute だけ対応しています")
 
     try:
         year, month = validate_year_month(rows[0][1], rows[0][2])
@@ -323,7 +447,29 @@ def parse_csv_text(text: str) -> dict[str, Any]:
     site_name_rows: list[list[str]] = []
     site_branch_row_id_rows: list[list[str]] = []
     site_branch_rows: list[list[str]] = []
+    substitute_rows: list[list[str]] = []
     project_employee_number = ""
+    substitute_row_prefixes = {
+        SUBSTITUTE_REQUEST_TYPE_ROW_PREFIX,
+        SUBSTITUTE_HELPER_EMPLOYEE_NAME_ROW_PREFIX,
+        SUBSTITUTE_HELPER_EMPLOYEE_NUMBER_ROW_PREFIX,
+        SUBSTITUTE_HELPER_SITE_ROW_ID_ROW_PREFIX,
+        SUBSTITUTE_HELPER_SITE_ID_ROW_PREFIX,
+        SUBSTITUTE_HELPER_SITE_NAME_ROW_PREFIX,
+        SUBSTITUTE_RESOLVED_ROW_PREFIX,
+        SUBSTITUTE_REQUESTER_USER_ID_ROW_PREFIX,
+        SUBSTITUTE_REQUESTER_NAME_ROW_PREFIX,
+        SUBSTITUTE_REQUESTED_AT_ROW_PREFIX,
+        SUBSTITUTE_HELPER_USER_ID_ROW_PREFIX,
+        SUBSTITUTE_HELPER_NAME_ROW_PREFIX,
+        SUBSTITUTE_HELPED_AT_ROW_PREFIX,
+        SUBSTITUTE_SOURCE_PROJECT_ID_ROW_PREFIX,
+        SUBSTITUTE_SOURCE_PROJECT_TITLE_ROW_PREFIX,
+        SUBSTITUTE_SOURCE_PROJECT_MODE_ROW_PREFIX,
+        SUBSTITUTE_SOURCE_MONTH_KEY_ROW_PREFIX,
+        SUBSTITUTE_SOURCE_DAY_ROW_PREFIX,
+        SUBSTITUTE_SOURCE_ENTRY_ID_ROW_PREFIX,
+    }
     for row in rows[2:]:
         if not row:
             continue
@@ -370,6 +516,9 @@ def parse_csv_text(text: str) -> dict[str, Any]:
             continue
         if head == SITE_BRANCH_ROW_PREFIX:
             site_branch_rows.append(row)
+            continue
+        if head in substitute_row_prefixes:
+            substitute_rows.append(row)
             continue
         if head == PROJECT_EMPLOYEE_NUMBER_ROW_PREFIX and len(row) >= 2:
             project_employee_number = str(row[1] or "").strip()
@@ -469,6 +618,46 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
             continue
         entries_per_day[day_key][index]["site_branch"] = str(row[3] or "").strip()
+
+    substitute_field_map = {
+        SUBSTITUTE_REQUEST_TYPE_ROW_PREFIX: ("substitute_request_type", lambda value: value if value in {"scene", "person"} else ""),
+        SUBSTITUTE_HELPER_EMPLOYEE_NAME_ROW_PREFIX: ("substitute_helper_employee_name", lambda value: _normalize_sync_text(value, limit=120)),
+        SUBSTITUTE_HELPER_EMPLOYEE_NUMBER_ROW_PREFIX: ("substitute_helper_employee_number", lambda value: _normalize_sync_text(value, limit=40)),
+        SUBSTITUTE_HELPER_SITE_ROW_ID_ROW_PREFIX: ("substitute_helper_site_row_id", _normalize_site_row_id),
+        SUBSTITUTE_HELPER_SITE_ID_ROW_PREFIX: ("substitute_helper_site_id", lambda value: _normalize_sync_text(value, limit=40)),
+        SUBSTITUTE_HELPER_SITE_NAME_ROW_PREFIX: ("substitute_helper_site_name", lambda value: _normalize_sync_text(value, limit=200)),
+        SUBSTITUTE_RESOLVED_ROW_PREFIX: ("substitute_resolved", _normalize_bool),
+        SUBSTITUTE_REQUESTER_USER_ID_ROW_PREFIX: ("substitute_requester_user_id", lambda value: _normalize_sync_text(value, limit=80)),
+        SUBSTITUTE_REQUESTER_NAME_ROW_PREFIX: ("substitute_requester_name", lambda value: _normalize_sync_text(value, limit=120)),
+        SUBSTITUTE_REQUESTED_AT_ROW_PREFIX: ("substitute_requested_at", lambda value: _normalize_sync_text(value, limit=40)),
+        SUBSTITUTE_HELPER_USER_ID_ROW_PREFIX: ("substitute_helper_user_id", lambda value: _normalize_sync_text(value, limit=80)),
+        SUBSTITUTE_HELPER_NAME_ROW_PREFIX: ("substitute_helper_name", lambda value: _normalize_sync_text(value, limit=120)),
+        SUBSTITUTE_HELPED_AT_ROW_PREFIX: ("substitute_helped_at", lambda value: _normalize_sync_text(value, limit=40)),
+        SUBSTITUTE_SOURCE_PROJECT_ID_ROW_PREFIX: ("substitute_source_project_id", lambda value: _normalize_sync_text(value, limit=80)),
+        SUBSTITUTE_SOURCE_PROJECT_TITLE_ROW_PREFIX: ("substitute_source_project_title", lambda value: _normalize_sync_text(value, limit=120)),
+        SUBSTITUTE_SOURCE_PROJECT_MODE_ROW_PREFIX: ("substitute_source_project_mode", lambda value: _normalize_sync_text(value, limit=40)),
+        SUBSTITUTE_SOURCE_MONTH_KEY_ROW_PREFIX: ("substitute_source_month_key", lambda value: _normalize_sync_text(value, limit=20)),
+        SUBSTITUTE_SOURCE_DAY_ROW_PREFIX: ("substitute_source_day", lambda value: _normalize_sync_text(value, limit=10)),
+        SUBSTITUTE_SOURCE_ENTRY_ID_ROW_PREFIX: ("substitute_source_entry_id", lambda value: _normalize_sync_text(value, limit=80)),
+    }
+    for row in substitute_rows:
+        if len(row) < 4:
+            continue
+        try:
+            day_key = str(int(row[1]))
+            index = int(row[2])
+        except (TypeError, ValueError):
+            continue
+        if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
+            continue
+        field = substitute_field_map.get(str(row[0]).strip())
+        if not field:
+            continue
+        key, normalizer = field
+        raw_value = str(row[3] or "").strip()
+        if key == "substitute_request_type":
+            raw_value = raw_value.lower()
+        entries_per_day[day_key][index][key] = normalizer(raw_value)
 
     return {
         "mode": mode,

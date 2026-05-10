@@ -559,9 +559,24 @@ h1, h2, h3 {
     grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
+.input-row.substitute-input-row {
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+    align-items: stretch;
+}
+
+.input-row.substitute-input-row .add-entry-btn {
+    grid-column: 1 / -1;
+    justify-self: start;
+}
+
+.entry-substitute-type {
+    width: 100%;
+    min-width: 0;
+}
+
 .day-controls-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr));
     gap: 5px;
     align-items: stretch;
 }
@@ -911,6 +926,10 @@ h1, h2, h3 {
 @container (max-width: 168px) {
     .input-row,
     .input-row.compact {
+        grid-template-columns: 1fr;
+    }
+
+    .input-row.substitute-input-row {
         grid-template-columns: 1fr;
     }
 

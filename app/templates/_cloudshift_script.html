@@ -356,26 +356,31 @@
     function modeLabel(mode) {
       if (mode === 'scene') return '現場';
       if (mode === 'master') return 'マスター';
+      if (mode === 'substitute') return '要代務';
       return '個人';
     }
 
     function modeLongLabel(mode) {
       if (mode === 'scene') return '現場シフト';
       if (mode === 'master') return 'マスターシフト';
+      if (mode === 'substitute') return '要代務シフト';
       return '個人シフト';
     }
 
     function projectAccessRole(project) {
-      return project && project.access_role === 'viewer' ? 'viewer' : 'owner';
+      if (project && project.access_role === 'viewer') return 'viewer';
+      if (project && project.access_role === 'editor') return 'editor';
+      return 'owner';
     }
 
     function canEditCurrentProject() {
-      return PAGE.type === 'owner' && projectAccessRole(currentProject()) === 'owner';
+      return PAGE.type === 'owner' && projectAccessRole(currentProject()) !== 'viewer';
     }
 
     function shareBadgeText(project) {
       if (!project || !project.share) return '';
       if (project.share.role === 'viewer') return '共有されたシフト';
+      if (project.share.role === 'editor') return '営業所共有・編集可';
       return project.share.enabled ? '共有中' : '';
     }
 
@@ -993,6 +998,7 @@
       const masterRefs = masterFieldRefs(kind);
       const isPerson = titleFieldMode(kind) === 'person';
       const isMaster = titleFieldMode(kind) === 'master';
+      const isSubstitute = titleFieldMode(kind) === 'substitute';
       if (refs.label) {
         refs.label.textContent = isPerson ? '社員' : 'タイトル';
       }
@@ -1008,20 +1014,20 @@
         }
       }
       if (siteRefs.field) {
-        siteRefs.field.classList.toggle('cloud-hidden', isPerson || isMaster);
+        siteRefs.field.classList.toggle('cloud-hidden', isPerson || isMaster || isSubstitute);
       }
       if (masterRefs.field) {
         masterRefs.field.classList.toggle('cloud-hidden', !isMaster);
         if (isMaster) renderMasterTargets(kind);
       }
       if (kind === 'create') {
-        if ($('cloud-create-pick-site')) $('cloud-create-pick-site').classList.toggle('cloud-hidden', isPerson || isMaster);
-        if ($('cloud-create-clear-site')) $('cloud-create-clear-site').classList.toggle('cloud-hidden', isPerson || isMaster);
+        if ($('cloud-create-pick-site')) $('cloud-create-pick-site').classList.toggle('cloud-hidden', isPerson || isMaster || isSubstitute);
+        if ($('cloud-create-clear-site')) $('cloud-create-clear-site').classList.toggle('cloud-hidden', isPerson || isMaster || isSubstitute);
       } else {
         if ($('cloud-project-pick-site')) $('cloud-project-pick-site').classList.toggle('cloud-hidden', isPerson || isMaster);
         if ($('cloud-project-clear-site')) $('cloud-project-clear-site').classList.toggle('cloud-hidden', isPerson || isMaster);
       }
-      if (isPerson || isMaster) {
+      if (isPerson || isMaster || isSubstitute) {
         clearSiteSelection(kind);
       }
     }
@@ -4434,6 +4440,7 @@
 
       const masterProjects = state.projects.filter((project) => project.access_role !== 'viewer' && project.mode === 'master');
       const groups = [
+        { key: 'substitute', title: '要代務シフト', projects: state.projects.filter((project) => project.access_role !== 'viewer' && project.mode === 'substitute') },
         ...(
           masterProjects.length
             ? [{ key: 'master', title: 'マスターシフト', projects: masterProjects }]
@@ -5517,7 +5524,14 @@
     }
 
     async function loadLeaveSyncCalendars(projectId) {
-      if (PAGE.type !== 'owner' || !projectId) {
+      const project = currentProject();
+      const canLoadLeaveSync = PAGE.type === 'owner'
+        && projectId
+        && project
+        && String(project.id || '') === String(projectId)
+        && projectAccessRole(project) === 'owner'
+        && isPersonProject();
+      if (!canLoadLeaveSync) {
         state.leaveSync.calendars = [];
         state.leaveSync.selectedCalendarId = '';
         renderLeaveSyncControls();
@@ -5561,6 +5575,25 @@
       }
     }
 
+    async function requestSubstituteFromEntry(context) {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month || !context || !context.entryId) {
+        return;
+      }
+      await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/substitute-request`, {
+        method: 'POST',
+        body: {
+          year: month.year,
+          month: month.month,
+          day: context.day,
+          entry_id: context.entryId
+        }
+      });
+      await loadProjects();
+      showFlash('要代務シフト帳へ代務要請を登録しました', 'success');
+    }
+
     function buildCalendarHost(targetId) {
       const host = $(targetId);
       if (!host) return;
@@ -5598,7 +5631,15 @@
       ShifterSync.setState('name', project.title);
       ShifterSync.setState('capacityEnabled', (parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0) > 0);
       ShifterSync.setState('requiredCapacity', parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0);
-      ShifterSync.buildCalendar(month.year, month.month, project.mode, displayedEntriesForMonth(month), { editable });
+      const substituteRequestEnabled = PAGE.type === 'owner'
+        && editable
+        && projectAccessRole(project) !== 'viewer'
+        && (project.mode === 'scene' || project.mode === 'person');
+      ShifterSync.buildCalendar(month.year, month.month, project.mode, displayedEntriesForMonth(month), {
+        editable,
+        substituteRequestEnabled,
+        onSubstituteRequest: substituteRequestEnabled ? requestSubstituteFromEntry : null
+      });
       applyDraftVisualState(month);
       watchDraftVisualState(month);
       watchUnsavedState();
@@ -5607,7 +5648,8 @@
     function renderWorkspace(editable) {
       const project = currentProject();
       const month = currentMonth();
-      const isOwnerEditable = editable && projectAccessRole(project) === 'owner';
+      const isOwnerEditable = editable && projectAccessRole(project) !== 'viewer';
+      const canManageProject = editable && projectAccessRole(project) === 'owner';
       if (!isOwnerEditable && state.editorMode === 'draft') {
         state.editorMode = 'normal';
       }
@@ -5632,9 +5674,9 @@
       if ($('cloud-project-title')) {
         $('cloud-project-title').value = project.title || '';
         $('cloud-project-title').dataset.selectedEmployeeName = project.title || '';
-        $('cloud-project-title').disabled = !isOwnerEditable;
+        $('cloud-project-title').disabled = !canManageProject || project.mode === 'substitute';
       }
-      if ($('cloud-save-title')) $('cloud-save-title').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-save-title')) $('cloud-save-title').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
       if ($('cloud-project-employee-number')) $('cloud-project-employee-number').value = project.employee_number || '';
       if ($('cloud-project-selected-note')) {
         $('cloud-project-selected-note').textContent = project.employee_number ? `社員番号: ${project.employee_number}` : '';
@@ -5701,20 +5743,20 @@
       if ($('cloud-add-prev-month')) $('cloud-add-prev-month').classList.toggle('cloud-hidden', !isOwnerEditable);
       if ($('cloud-add-next-month')) $('cloud-add-next-month').classList.toggle('cloud-hidden', !isOwnerEditable);
       if ($('cloud-create-first-month')) $('cloud-create-first-month').classList.toggle('cloud-hidden', !isOwnerEditable);
-      if ($('cloud-open-account-share')) $('cloud-open-account-share').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-open-account-share')) $('cloud-open-account-share').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
       if ($('cloud-open-summary')) $('cloud-open-summary').classList.toggle('cloud-hidden', !month);
       if ($('cloud-open-assist')) $('cloud-open-assist').classList.toggle('cloud-hidden', !isOwnerEditable || !isAssistAvailable());
       if ($('cloud-open-bulk-edit')) $('cloud-open-bulk-edit').classList.toggle('cloud-hidden', !month || !isOwnerEditable || (PAGE.type === 'public' && PAGE.accessMode !== 'edit'));
       if ($('cloud-open-restore')) $('cloud-open-restore').classList.toggle('cloud-hidden', !month || !isOwnerEditable);
-      if ($('cloud-project-pick-site')) $('cloud-project-pick-site').classList.toggle('cloud-hidden', !isOwnerEditable);
-      if ($('cloud-project-clear-site')) $('cloud-project-clear-site').classList.toggle('cloud-hidden', !isOwnerEditable);
-      if ($('cloud-open-view-url')) $('cloud-open-view-url').classList.toggle('cloud-hidden', !isOwnerEditable);
-      if ($('cloud-copy-view-url')) $('cloud-copy-view-url').classList.toggle('cloud-hidden', !isOwnerEditable);
-      if ($('cloud-open-edit-url')) $('cloud-open-edit-url').classList.toggle('cloud-hidden', !isOwnerEditable);
-      if ($('cloud-copy-edit-url')) $('cloud-copy-edit-url').classList.toggle('cloud-hidden', !isOwnerEditable);
-      if ($('cloud-delete-month')) $('cloud-delete-month').classList.toggle('cloud-hidden', !isOwnerEditable);
-      if ($('cloud-delete-project')) $('cloud-delete-project').classList.toggle('cloud-hidden', !isOwnerEditable);
-      if ($('cloud-regenerate-urls')) $('cloud-regenerate-urls').classList.toggle('cloud-hidden', !isOwnerEditable);
+      if ($('cloud-project-pick-site')) $('cloud-project-pick-site').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-project-clear-site')) $('cloud-project-clear-site').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-open-view-url')) $('cloud-open-view-url').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-copy-view-url')) $('cloud-copy-view-url').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-open-edit-url')) $('cloud-open-edit-url').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-copy-edit-url')) $('cloud-copy-edit-url').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-delete-month')) $('cloud-delete-month').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
+      if ($('cloud-delete-project')) $('cloud-delete-project').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
+      if ($('cloud-regenerate-urls')) $('cloud-regenerate-urls').classList.toggle('cloud-hidden', !canManageProject);
       if ($('cloud-site-warning')) {
         const showSiteWarning = project.mode === 'scene' && !(project.site && project.site.is_linked);
         $('cloud-site-warning').classList.toggle('cloud-hidden', !showSiteWarning);
@@ -5801,8 +5843,8 @@
       state.editorMode = 'normal';
       syncAssistContext();
       renderProjectList();
-      await renderWorkspaceWithSiteBranches(projectAccessRole(payload.project) === 'owner');
-      if (projectAccessRole(payload.project) === 'owner') {
+      await renderWorkspaceWithSiteBranches(projectAccessRole(payload.project) !== 'viewer');
+      if (projectAccessRole(payload.project) !== 'viewer') {
         await loadLeaveSyncCalendars(projectId);
         await loadHistory(projectId);
       } else {
@@ -6023,7 +6065,7 @@
         return;
       }
       state.editorMode = nextMode;
-      await renderWorkspaceWithSiteBranches(projectAccessRole(currentProject()) === 'owner');
+      await renderWorkspaceWithSiteBranches(projectAccessRole(currentProject()) !== 'viewer');
     }
 
     async function saveMonthPublic() {

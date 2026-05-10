@@ -128,7 +128,15 @@ PERSON_ASSIST_AUTO_ROLE_TYPE = "backup"
 SHIFT_SYNC_SCENE_SOURCE = "scene_shift"
 SHIFT_SYNC_PERSON_SOURCE = "person_shift"
 SHIFT_SYNC_MASTER_SOURCE = "master_shift"
-SHIFT_SYNC_SOURCE_TYPES = {SHIFT_SYNC_SCENE_SOURCE, SHIFT_SYNC_PERSON_SOURCE, SHIFT_SYNC_MASTER_SOURCE}
+SHIFT_SYNC_SUBSTITUTE_SOURCE = "substitute_shift"
+SHIFT_SYNC_SOURCE_TYPES = {
+    SHIFT_SYNC_SCENE_SOURCE,
+    SHIFT_SYNC_PERSON_SOURCE,
+    SHIFT_SYNC_MASTER_SOURCE,
+    SHIFT_SYNC_SUBSTITUTE_SOURCE,
+}
+SUBSTITUTE_MODE = "substitute"
+SUBSTITUTE_TITLE = "要代務シフト帳"
 
 
 class CloudShiftError(Exception):
@@ -380,8 +388,8 @@ def _sanitize_title(value: str) -> str:
 
 def _sanitize_mode(value: str) -> str:
     mode = (value or "").strip().lower()
-    if mode not in {"scene", "person", "master"}:
-        raise CloudShiftError("mode は scene、person、master のみ対応です", 400)
+    if mode not in {"scene", "person", "master", SUBSTITUTE_MODE}:
+        raise CloudShiftError("mode は scene、person、master、substitute のみ対応です", 400)
     return mode
 
 
@@ -1159,6 +1167,82 @@ def _prepared_local_entries_for_month(
         synced_entries = [dict(entry) for entry in normalized_current.get(day_key, []) if _entry_is_shift_synced(entry)]
         combined[day_key] = local_entries + synced_entries
     return combined
+
+
+def _entry_resolved_flag(entry: dict[str, Any] | None) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    value = entry.get("substitute_resolved")
+    return value is True or str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _annotate_substitute_entries_for_save(
+    project: dict[str, Any],
+    entries_per_day: dict[str, list[dict[str, Any]]],
+    previous_entries_per_day: Any,
+    *,
+    actor_name: str,
+    actor_user_id: str,
+) -> dict[str, list[dict[str, Any]]]:
+    if project.get("mode") != SUBSTITUTE_MODE:
+        return entries_per_day
+    previous = {
+        str(entry.get("id") or ""): entry
+        for entries in _json_dict(previous_entries_per_day).values()
+        if isinstance(entries, list)
+        for entry in entries
+        if isinstance(entry, dict) and str(entry.get("id") or "")
+    }
+    timestamp = _utcnow_iso()
+    annotated = {day_key: [] for day_key in entries_per_day.keys()}
+    for day_key, entries in entries_per_day.items():
+        next_entries: list[dict[str, Any]] = []
+        for entry in entries:
+            next_entry = dict(entry)
+            previous_entry = previous.get(str(next_entry.get("id") or ""))
+            if previous_entry:
+                for key in (
+                    "substitute_requester_user_id",
+                    "substitute_requester_name",
+                    "substitute_requested_at",
+                    "substitute_source_project_id",
+                    "substitute_source_project_title",
+                    "substitute_source_project_mode",
+                    "substitute_source_month_key",
+                    "substitute_source_day",
+                    "substitute_source_entry_id",
+                ):
+                    if not str(next_entry.get(key) or "").strip() and str(previous_entry.get(key) or "").strip():
+                        next_entry[key] = previous_entry.get(key)
+            if not str(next_entry.get("substitute_requester_user_id") or "").strip() and actor_user_id:
+                next_entry["substitute_requester_user_id"] = actor_user_id
+            if not str(next_entry.get("substitute_requester_name") or "").strip() and actor_name:
+                next_entry["substitute_requester_name"] = actor_name
+            if not str(next_entry.get("substitute_requested_at") or "").strip():
+                next_entry["substitute_requested_at"] = timestamp
+
+            was_resolved = _entry_resolved_flag(previous_entry)
+            is_resolved = _entry_resolved_flag(next_entry)
+            if is_resolved:
+                if not was_resolved or not str(next_entry.get("substitute_helper_user_id") or "").strip():
+                    if actor_user_id:
+                        next_entry["substitute_helper_user_id"] = actor_user_id
+                    if actor_name:
+                        next_entry["substitute_helper_name"] = actor_name
+                    next_entry["substitute_helped_at"] = timestamp
+                elif previous_entry:
+                    for key in ("substitute_helper_user_id", "substitute_helper_name", "substitute_helped_at"):
+                        if not str(next_entry.get(key) or "").strip() and str(previous_entry.get(key) or "").strip():
+                            next_entry[key] = previous_entry.get(key)
+            else:
+                next_entry["substitute_helper_user_id"] = ""
+                next_entry["substitute_helper_name"] = ""
+                next_entry["substitute_helped_at"] = ""
+            next_entries.append(next_entry)
+        annotated[day_key] = next_entries
+    return annotated
+
+
 def _sanitize_capacity(raw: Any) -> tuple[bool, int]:
     if raw in (None, "", False):
         return False, 0
@@ -1282,6 +1366,13 @@ def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
             "sites_text": _master_sites_text(project),
         },
     }
+    if project.get("mode") == SUBSTITUTE_MODE:
+        office_id = _substitute_office_id(project)
+        office_label = _office_label_map({office_id}).get(office_id, str(office_id)) if office_id else ""
+        summary["substitute"] = {
+            "office_id": office_id,
+            "office_label": office_label,
+        }
     share_status = _share_status_for_current_user(project)
     if share_status:
         summary["share"] = share_status
@@ -1659,6 +1750,40 @@ def _owner_project_or_404(project_id: str) -> dict[str, Any]:
     return project
 
 
+def _substitute_project_id(office_id: int) -> str:
+    digest = hashlib.sha1(f"substitute-office:{int(office_id)}".encode("utf-8")).hexdigest()
+    return f"sub_{digest[:16]}"
+
+
+def _substitute_request_entry_id(source_project_id: str, month_key: str, day_key: str, source_entry_id: str) -> str:
+    digest = hashlib.sha1(
+        "::".join(
+            [
+                "substitute-request",
+                str(source_project_id or ""),
+                str(month_key or ""),
+                str(day_key or ""),
+                str(source_entry_id or ""),
+            ]
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"subreq_{digest[:16]}"
+
+
+def _substitute_office_id(project: dict[str, Any]) -> int | None:
+    if project.get("mode") != SUBSTITUTE_MODE:
+        return None
+    try:
+        office_id = int(project.get("substitute_office_id") or 0)
+    except (TypeError, ValueError):
+        return None
+    return office_id if office_id > 0 else None
+
+
+def _is_substitute_project(project: dict[str, Any]) -> bool:
+    return project.get("mode") == SUBSTITUTE_MODE and _substitute_office_id(project) is not None
+
+
 def _current_share_office_ids() -> set[int]:
     return {int(office_id) for office_id in user_office_ids(current_user) if office_id is not None}
 
@@ -1731,6 +1856,9 @@ def _normalized_account_shares(project: dict[str, Any]) -> dict[str, Any]:
 def _project_is_shared_with_current_user(project: dict[str, Any]) -> bool:
     if not current_user.is_authenticated:
         return False
+    if _is_substitute_project(project):
+        office_id = _substitute_office_id(project)
+        return bool(office_id and office_id in _current_share_office_ids())
     if project.get("owner_user_id") == _user_id():
         return False
     shares = _normalized_account_shares(project)
@@ -1749,12 +1877,38 @@ def _project_for_current_user_or_404(project_id: str) -> tuple[dict[str, Any], s
     project = _load_project(project_id)
     if project.get("owner_user_id") == _user_id():
         return project, "owner"
+    if _is_substitute_project(project) and _project_is_shared_with_current_user(project):
+        return project, "editor"
     if _project_is_shared_with_current_user(project):
         return project, "viewer"
     abort(404)
 
 
+def _editable_project_or_404(project_id: str) -> tuple[dict[str, Any], str]:
+    project, access_role = _project_for_current_user_or_404(project_id)
+    if access_role not in {"owner", "editor"}:
+        abort(404)
+    return project, access_role
+
+
 def _share_status_for_current_user(project: dict[str, Any]) -> dict[str, Any] | None:
+    if _is_substitute_project(project) and _project_is_shared_with_current_user(project):
+        office_id = _substitute_office_id(project)
+        offices = _office_label_map({office_id}) if office_id else {}
+        return {
+            "role": "editor",
+            "enabled": True,
+            "settings": {
+                "office": {
+                    "enabled": True,
+                    "office_ids": [office_id] if office_id else [],
+                    "offices": [
+                        {"id": office_id, "label": offices.get(office_id, str(office_id))}
+                    ] if office_id else [],
+                },
+                "employees": [],
+            },
+        }
     if current_user.is_authenticated and project.get("owner_user_id") == _user_id():
         shares = _normalized_account_shares(project)
         enabled = bool(shares["office"].get("enabled")) or bool(shares["employees"])
@@ -1762,6 +1916,80 @@ def _share_status_for_current_user(project: dict[str, Any]) -> dict[str, Any] | 
     if _project_is_shared_with_current_user(project):
         return {"role": "viewer", "enabled": True}
     return None
+
+
+def _ensure_substitute_project_for_office_month(office_id: int, year: int, month: int) -> dict[str, Any]:
+    year, month = _validate_year_month(year, month)
+    office_id = int(office_id)
+    project_id = _substitute_project_id(office_id)
+    month_key = _month_key(year, month)
+    project = _db_project_from_id(project_id)
+    if project is None:
+        project = {
+            "id": project_id,
+            "owner_user_id": "",
+            "title": SUBSTITUTE_TITLE,
+            "mode": SUBSTITUTE_MODE,
+            "employee_number": "",
+            **_site_storage_fields(None),
+            "master_target_type": "",
+            "master_people": [],
+            "master_sites": [],
+            "substitute_office_id": office_id,
+            "view_token": _share_token(),
+            "edit_token": _share_token(),
+            "account_shares": {
+                "office": {
+                    "enabled": True,
+                    "office_ids": [office_id],
+                },
+                "employees": [],
+                "updated_at": _utcnow_iso(),
+                "updated_by": "system",
+            },
+            "created_at": _utcnow_iso(),
+            "updated_at": _utcnow_iso(),
+            "months": {
+                month_key: _build_month_payload(year, month, False, 0, {}),
+            },
+        }
+        _save_project(project)
+        db.session.expire_all()
+        return _load_project(project_id)
+
+    changed = False
+    if month_key not in (project.get("months") or {}):
+        project.setdefault("months", {})[month_key] = _build_month_payload(year, month, False, 0, {})
+        changed = True
+    project["account_shares"] = {
+        "office": {
+            "enabled": True,
+            "office_ids": [office_id],
+        },
+        "employees": [],
+        "updated_at": _utcnow_iso(),
+        "updated_by": "system",
+    }
+    if changed or project.get("account_shares"):
+        _save_project(project)
+        db.session.expire_all()
+        return _load_project(project_id)
+    return project
+
+
+def _ensure_substitute_projects_for_current_user() -> None:
+    if not current_user.is_authenticated:
+        return
+    office_ids = sorted(_current_share_office_ids())
+    if not office_ids:
+        return
+    today = date.today()
+    changed = False
+    for office_id in office_ids:
+        _ensure_substitute_project_for_office_month(int(office_id), today.year, today.month)
+        changed = True
+    if changed:
+        db.session.expire_all()
 
 
 def _find_project_by_token(token: str, token_type: str) -> dict[str, Any]:
@@ -2972,6 +3200,124 @@ def _build_master_synced_entry_from_scene(
     }
 
 
+def _substitute_request_type(entry: dict[str, Any]) -> str:
+    request_type = str(entry.get("substitute_request_type") or entry.get("substituteRequestType") or "").strip().lower()
+    if request_type in {"scene", "person"}:
+        return request_type
+    site_link = _entry_site_link_fields(entry)
+    if site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name"):
+        return "scene"
+    if str(entry.get("employee_number") or "").strip() or _entry_employee_name(entry):
+        return "person"
+    return ""
+
+
+def _substitute_assignment(entry: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(entry, dict):
+        return None
+    if entry.get("substitute_resolved") is not True and str(entry.get("substitute_resolved") or "").lower() not in {"1", "true", "yes", "on"}:
+        return None
+    request_type = _substitute_request_type(entry)
+    option_key, value_name = _entry_option_and_name(entry)
+    site_link = _entry_site_link_fields(entry)
+    employee_name = _entry_employee_name(entry)
+    employee_number = str(entry.get("employee_number") or "").strip()
+
+    if request_type == "scene":
+        helper_name = str(entry.get("substitute_helper_employee_name") or entry.get("substituteHelperEmployeeName") or "").strip()
+        helper_number = str(entry.get("substitute_helper_employee_number") or entry.get("substituteHelperEmployeeNumber") or "").strip()
+        if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
+            site_link["site_name"] = value_name
+        employee_name = helper_name
+        employee_number = helper_number
+    elif request_type == "person":
+        employee_name = employee_name or value_name
+        helper_site = _entry_site_link_fields(
+            {
+                "site_row_id": entry.get("substitute_helper_site_row_id") or entry.get("substituteHelperSiteRowId"),
+                "site_id": entry.get("substitute_helper_site_id") or entry.get("substituteHelperSiteId"),
+                "site_name": entry.get("substitute_helper_site_name") or entry.get("substituteHelperSiteName"),
+                "value": entry.get("substitute_helper_site_name") or entry.get("substituteHelperSiteName") or "",
+            }
+        )
+        site_link = helper_site
+    else:
+        return None
+
+    if not employee_name:
+        return None
+    if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
+        return None
+
+    return {
+        "option_key": option_key,
+        "employee_name": employee_name,
+        "employee_number": employee_number,
+        "site_row_id": str(site_link.get("site_row_id") or ""),
+        "site_id": str(site_link.get("site_id") or "").strip(),
+        "site_name": str(site_link.get("site_name") or "").strip(),
+        "source_entry_id": str(entry.get("id") or "").strip(),
+        "comment": str(entry.get("comment") or "").strip(),
+        "request_type": request_type,
+    }
+
+
+def _build_person_synced_entry_from_substitute(
+    source_project: dict[str, Any],
+    assignment: dict[str, Any],
+    *,
+    month_key: str,
+    day_key: str,
+) -> dict[str, Any]:
+    return {
+        "id": _sync_entry_id(SHIFT_SYNC_SUBSTITUTE_SOURCE, source_project.get("id"), "person", month_key, day_key, assignment.get("source_entry_id")),
+        "value": _format_entry_value(assignment.get("option_key"), assignment.get("site_name")),
+        "comment": assignment.get("comment") or "",
+        "employee_number": "",
+        "site_row_id": str(assignment.get("site_row_id") or ""),
+        "site_id": str(assignment.get("site_id") or ""),
+        "site_name": str(assignment.get("site_name") or ""),
+        "site_branch_row_id": "",
+        "site_branch": "",
+        "sync_source_type": SHIFT_SYNC_SUBSTITUTE_SOURCE,
+        "sync_source_project_id": str(source_project.get("id") or ""),
+        "sync_source_project_title": str(source_project.get("title") or ""),
+        "sync_source_month_key": month_key,
+        "sync_source_day": day_key,
+        "sync_source_entry_id": str(assignment.get("source_entry_id") or ""),
+    }
+
+
+def _build_scene_synced_entry_from_substitute(
+    source_project: dict[str, Any],
+    target_project: dict[str, Any],
+    assignment: dict[str, Any],
+    *,
+    month_key: str,
+    day_key: str,
+) -> dict[str, Any]:
+    branch_fields = _scene_branch_fields_for_option(target_project, assignment.get("option_key"))
+    synced = {
+        "id": _sync_entry_id(SHIFT_SYNC_SUBSTITUTE_SOURCE, source_project.get("id"), "scene", month_key, day_key, assignment.get("source_entry_id")),
+        "value": _format_entry_value(assignment.get("option_key"), assignment.get("employee_name")),
+        "comment": assignment.get("comment") or "",
+        "employee_name": str(assignment.get("employee_name") or ""),
+        "employee_number": str(assignment.get("employee_number") or ""),
+        "site_row_id": "",
+        "site_id": "",
+        "site_name": "",
+        "site_branch_row_id": branch_fields["site_branch_row_id"],
+        "site_branch": branch_fields["site_branch"],
+        "sync_source_type": SHIFT_SYNC_SUBSTITUTE_SOURCE,
+        "sync_source_project_id": str(source_project.get("id") or ""),
+        "sync_source_project_title": str(source_project.get("title") or ""),
+        "sync_source_month_key": month_key,
+        "sync_source_day": day_key,
+        "sync_source_entry_id": str(assignment.get("source_entry_id") or ""),
+    }
+    return _scene_entry_with_siteplus_defaults(target_project, synced)
+
+
 def _master_entry_is_in_scope(source_project: dict[str, Any], entry: dict[str, Any]) -> bool:
     target_type = _master_target_type_for_project(source_project)
     master_people = [item for item in (source_project.get("master_people") or []) if isinstance(item, dict)]
@@ -3068,6 +3414,43 @@ def _desired_shift_sync_entries_by_target(
                             source_project,
                             target_project,
                             entry,
+                            month_key=month_key,
+                            day_key=day_key,
+                        )
+                    )
+            elif mode == SUBSTITUTE_MODE:
+                if is_synced:
+                    continue
+                assignment = _substitute_assignment(entry)
+                if not assignment:
+                    continue
+                person_probe = {
+                    "employee_number": assignment.get("employee_number"),
+                    "employee_name": assignment.get("employee_name"),
+                    "value": _format_entry_value(assignment.get("option_key"), assignment.get("employee_name")),
+                }
+                site_probe = {
+                    "site_row_id": assignment.get("site_row_id"),
+                    "site_id": assignment.get("site_id"),
+                    "site_name": assignment.get("site_name"),
+                    "value": _format_entry_value(assignment.get("option_key"), assignment.get("site_name")),
+                }
+                for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, person_probe):
+                    desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                        _build_person_synced_entry_from_substitute(
+                            source_project,
+                            assignment,
+                            month_key=month_key,
+                            day_key=day_key,
+                        )
+                    )
+                for target_project_id in _matching_scene_project_ids_for_person_entry(source_project, site_probe):
+                    target_project = _load_project(target_project_id)
+                    desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                        _build_scene_synced_entry_from_substitute(
+                            source_project,
+                            target_project,
+                            assignment,
                             month_key=month_key,
                             day_key=day_key,
                         )
@@ -5922,6 +6305,7 @@ def public_edit(token: str):
 @cloudshift_bp.route("/api/list")
 @login_required
 def api_list():
+    _ensure_substitute_projects_for_current_user()
     owner_id = _user_id()
     projects = []
     for project in _iter_stored_projects():
@@ -5998,6 +6382,8 @@ def api_create():
         parsed = _parse_shiftersync_csv(csv_file)
         title = _sanitize_title(title_override or parsed["title"])
         mode = parsed["mode"]
+        if mode == SUBSTITUTE_MODE:
+            raise CloudShiftError("要代務シフト帳は営業所ごとに自動作成されます", 400)
         employee_number = parsed.get("employee_number", "")
         year, month = _validate_year_month(parsed["year"], parsed["month"])
         capacity_enabled = parsed["capacity_enabled"]
@@ -6006,6 +6392,8 @@ def api_create():
     else:
         title = _sanitize_title(title_override)
         mode = _sanitize_mode(request.form.get("mode"))
+        if mode == SUBSTITUTE_MODE:
+            raise CloudShiftError("要代務シフト帳は営業所ごとに自動作成されます", 400)
         employee_number = _sanitize_employee_number(request.form.get("employee_number"))
         year, month = _validate_year_month(request.form.get("year"), request.form.get("month"))
         capacity_enabled, required_capacity = _sanitize_capacity(request.form.get("required_capacity"))
@@ -6110,7 +6498,7 @@ def api_project_detail(project_id: str):
             )
         project, access_role = _project_for_current_user_or_404(project_id)
     selected_month_key = request.args.get("month_key")
-    payload = _project_detail_payload(project, selected_month_key, include_draft=access_role == "owner")
+    payload = _project_detail_payload(project, selected_month_key, include_draft=access_role in {"owner", "editor"})
     payload["access_role"] = access_role
     payload["project"]["access_role"] = access_role
     if access_role != "owner":
@@ -6373,8 +6761,8 @@ def _create_month_in_project(project: dict[str, Any], payload: dict[str, Any], a
 def api_create_month(project_id: str):
     payload = request.get_json(silent=True) or {}
     with _project_lock(project_id):
-        project = _owner_project_or_404(project_id)
-        month_payload = _create_month_in_project(project, payload, _user_label(), "owner")
+        project, access_role = _editable_project_or_404(project_id)
+        month_payload = _create_month_in_project(project, payload, _user_label(), access_role)
     month_key = _month_key(month_payload["year"], month_payload["month"])
     _resync_shift_month(project, month_key, actor_name=_user_label())
     _refresh_shift_sync_for_target_month(project, month_key, actor_name=_user_label())
@@ -6389,6 +6777,7 @@ def _save_month_in_project(
     payload: dict[str, Any],
     actor_name: str,
     actor_type: str,
+    actor_user_id: str = "",
 ) -> dict[str, Any]:
     year, month = _validate_year_month(year, month)
     month_key = _month_key(year, month)
@@ -6403,6 +6792,13 @@ def _save_month_in_project(
         payload.get("entries_per_day") or {},
         year=year,
         month=month,
+    )
+    prepared_entries = _annotate_substitute_entries_for_save(
+        project,
+        prepared_entries,
+        current_month.get("entries_per_day") or {},
+        actor_name=actor_name,
+        actor_user_id=actor_user_id,
     )
     incoming_month = {
         "year": year,
@@ -6456,6 +6852,7 @@ def _save_draft_month_in_project(
     payload: dict[str, Any],
     actor_name: str,
     actor_type: str,
+    actor_user_id: str = "",
 ) -> dict[str, Any]:
     year, month = _validate_year_month(year, month)
     month_key = _month_key(year, month)
@@ -6468,6 +6865,13 @@ def _save_draft_month_in_project(
         payload.get("entries_per_day") or {},
         year=year,
         month=month,
+    )
+    prepared_entries = _annotate_substitute_entries_for_save(
+        project,
+        prepared_entries,
+        current_month.get("draft_entries_per_day") or current_month.get("entries_per_day") or {},
+        actor_name=actor_name,
+        actor_user_id=actor_user_id,
     )
     previous_count = _draft_entry_count(current_month)
     current_month["draft_entries_per_day"] = prepared_entries
@@ -6568,8 +6972,8 @@ def _publish_draft_month_in_project(
 def api_save_month(project_id: str, year: int, month: int):
     payload = request.get_json(silent=True) or {}
     with _project_lock(project_id):
-        project = _owner_project_or_404(project_id)
-        month_payload = _save_month_in_project(project, year, month, payload, _user_label(), "owner")
+        project, access_role = _editable_project_or_404(project_id)
+        month_payload = _save_month_in_project(project, year, month, payload, _user_label(), access_role, _user_id())
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=_user_label())
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
@@ -6580,8 +6984,8 @@ def api_save_month(project_id: str, year: int, month: int):
 def api_save_month_draft(project_id: str, year: int, month: int):
     payload = request.get_json(silent=True) or {}
     with _project_lock(project_id):
-        project = _owner_project_or_404(project_id)
-        month_payload = _save_draft_month_in_project(project, year, month, payload, _user_label(), "owner")
+        project, access_role = _editable_project_or_404(project_id)
+        month_payload = _save_draft_month_in_project(project, year, month, payload, _user_label(), access_role, _user_id())
     month_key = _month_key(year, month)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
@@ -6590,8 +6994,8 @@ def api_save_month_draft(project_id: str, year: int, month: int):
 @login_required
 def api_clear_month_draft(project_id: str, year: int, month: int):
     with _project_lock(project_id):
-        project = _owner_project_or_404(project_id)
-        month_payload = _clear_draft_month_in_project(project, year, month, _user_label(), "owner")
+        project, access_role = _editable_project_or_404(project_id)
+        month_payload = _clear_draft_month_in_project(project, year, month, _user_label(), access_role)
     month_key = _month_key(year, month)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
@@ -6600,8 +7004,8 @@ def api_clear_month_draft(project_id: str, year: int, month: int):
 @login_required
 def api_publish_month_draft(project_id: str, year: int, month: int):
     with _project_lock(project_id):
-        project = _owner_project_or_404(project_id)
-        month_payload = _publish_draft_month_in_project(project, year, month, _user_label(), "owner")
+        project, access_role = _editable_project_or_404(project_id)
+        month_payload = _publish_draft_month_in_project(project, year, month, _user_label(), access_role)
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=_user_label())
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
@@ -6671,14 +7075,14 @@ def api_delete_project(project_id: str):
 @cloudshift_bp.route("/api/project/<project_id>/history")
 @login_required
 def api_history(project_id: str):
-    _owner_project_or_404(project_id)
+    _project_for_current_user_or_404(project_id)
     return jsonify({"history": _load_history(project_id)})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/revisions")
 @login_required
 def api_month_revisions(project_id: str, year: int, month: int):
-    project = _owner_project_or_404(project_id)
+    project, _ = _editable_project_or_404(project_id)
     month_key = _month_key(*_validate_year_month(year, month))
     month_data = (project.get("months") or {}).get(month_key)
     if not month_data:
@@ -6703,8 +7107,8 @@ def api_restore_month_revision(project_id: str, year: int, month: int):
         raise CloudShiftError("復元するリビジョンを指定してください", 400) from exc
 
     with _project_lock(project_id):
-        project = _owner_project_or_404(project_id)
-        month_payload = _restore_month_revision_in_project(project, year, month, revision, _user_label(), "owner")
+        project, access_role = _editable_project_or_404(project_id)
+        month_payload = _restore_month_revision_in_project(project, year, month, revision, _user_label(), access_role)
     month_key = _month_key(year, month)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
@@ -6713,8 +7117,225 @@ def api_restore_month_revision(project_id: str, year: int, month: int):
 @login_required
 def api_month_summary(project_id: str, year: int, month: int):
     project, access_role = _project_for_current_user_or_404(project_id)
-    payload = request.get_json(silent=True) if request.method == "POST" and access_role == "owner" else None
+    payload = request.get_json(silent=True) if request.method == "POST" and access_role in {"owner", "editor"} else None
     return jsonify({"success": True, "summary": _summary_month_payload(project, year, month, payload)})
+
+
+def _substitute_request_office_id(payload: dict[str, Any]) -> int:
+    office_ids = sorted(_current_share_office_ids())
+    if not office_ids:
+        raise CloudShiftError("営業所が設定されているユーザーのみ代務要請できます", 400)
+    raw_office_id = payload.get("office_id")
+    if raw_office_id not in (None, ""):
+        try:
+            office_id = int(raw_office_id)
+        except (TypeError, ValueError) as exc:
+            raise CloudShiftError("営業所の指定が不正です", 400) from exc
+        if office_id not in office_ids:
+            raise CloudShiftError("指定した営業所で代務要請する権限がありません", 403)
+        return office_id
+    return int(office_ids[0])
+
+
+def _source_entry_for_substitute_request(
+    project: dict[str, Any],
+    month_data: dict[str, Any],
+    day_key: str,
+    entry_id: str,
+) -> dict[str, Any]:
+    entries = (month_data.get("entries_per_day") or {}).get(day_key)
+    if not isinstance(entries, list):
+        raise CloudShiftError("指定日のシフトが見つかりません", 404)
+    for entry in entries:
+        if isinstance(entry, dict) and str(entry.get("id") or "") == entry_id:
+            if _entry_is_shift_synced(entry):
+                raise CloudShiftError("同期反映されたシフトからは代務要請できません", 400)
+            option_key, _ = _entry_option_and_name(entry)
+            if option_key in LEAVE_OPTION_MAPPINGS:
+                raise CloudShiftError("休暇シフトからは代務要請できません", 400)
+            return entry
+    raise CloudShiftError("指定されたシフトが見つかりません", 404)
+
+
+def _substitute_request_payload_from_source(
+    source_project: dict[str, Any],
+    source_entry: dict[str, Any],
+    *,
+    month_key: str,
+    day_key: str,
+) -> dict[str, Any]:
+    mode = str(source_project.get("mode") or "").strip()
+    option_key, entry_name = _entry_option_and_name(source_entry)
+    source_entry_id = str(source_entry.get("id") or "").strip()
+    base = {
+        "id": _substitute_request_entry_id(str(source_project.get("id") or ""), month_key, day_key, source_entry_id),
+        "comment": str(source_entry.get("comment") or "").strip(),
+        "substitute_resolved": False,
+        "substitute_requester_user_id": _user_id(),
+        "substitute_requester_name": _user_label(),
+        "substitute_requested_at": _utcnow_iso(),
+        "substitute_helper_user_id": "",
+        "substitute_helper_name": "",
+        "substitute_helped_at": "",
+        "substitute_source_project_id": str(source_project.get("id") or ""),
+        "substitute_source_project_title": str(source_project.get("title") or ""),
+        "substitute_source_project_mode": mode,
+        "substitute_source_month_key": month_key,
+        "substitute_source_day": day_key,
+        "substitute_source_entry_id": source_entry_id,
+    }
+    if mode == "scene":
+        site_link = _project_site_payload(source_project)
+        site_name = str(site_link.get("site_name") or source_project.get("site_name") or source_project.get("title") or "").strip()
+        return {
+            **base,
+            "value": _format_entry_value(option_key, site_name),
+            "employee_name": "",
+            "employee_number": "",
+            "site_row_id": str(site_link.get("site_row_id") or ""),
+            "site_id": str(site_link.get("site_id") or ""),
+            "site_name": site_name,
+            "site_branch_row_id": "",
+            "site_branch": "",
+            "substitute_request_type": "scene",
+            "substitute_helper_employee_name": "",
+            "substitute_helper_employee_number": "",
+            "substitute_helper_site_row_id": "",
+            "substitute_helper_site_id": "",
+            "substitute_helper_site_name": "",
+        }
+    if mode == "person":
+        employee_name = str(source_project.get("title") or entry_name or "").strip()
+        employee_number = str(source_project.get("employee_number") or source_entry.get("employee_number") or "").strip()
+        return {
+            **base,
+            "value": _format_entry_value(option_key, employee_name),
+            "employee_name": employee_name,
+            "employee_number": employee_number,
+            "site_row_id": "",
+            "site_id": "",
+            "site_name": "",
+            "site_branch_row_id": "",
+            "site_branch": "",
+            "substitute_request_type": "person",
+            "substitute_helper_employee_name": "",
+            "substitute_helper_employee_number": "",
+            "substitute_helper_site_row_id": "",
+            "substitute_helper_site_id": "",
+            "substitute_helper_site_name": "",
+        }
+    raise CloudShiftError("代務要請は個人シフト・現場シフトのみ対応です", 400)
+
+
+@cloudshift_bp.route("/api/project/<project_id>/substitute-request", methods=["POST"])
+@login_required
+def api_create_substitute_request(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    year, month = _validate_year_month(payload.get("year"), payload.get("month"))
+    try:
+        day = int(payload.get("day"))
+    except (TypeError, ValueError) as exc:
+        raise CloudShiftError("代務要請する日付を指定してください", 400) from exc
+    if day < 1 or day > monthrange(year, month)[1]:
+        raise CloudShiftError("代務要請する日付が不正です", 400)
+    day_key = str(day)
+    month_key = _month_key(year, month)
+    entry_id = str(payload.get("entry_id") or "").strip()
+    if not entry_id:
+        raise CloudShiftError("代務要請するシフトを指定してください", 400)
+    office_id = _substitute_request_office_id(payload)
+
+    source_project, access_role = _editable_project_or_404(project_id)
+    if source_project.get("mode") not in {"scene", "person"}:
+        raise CloudShiftError("代務要請は個人シフト・現場シフトのみ対応です", 400)
+    month_data = (source_project.get("months") or {}).get(month_key)
+    if not month_data:
+        raise CloudShiftError("対象の月が存在しません", 404)
+    source_entry = _source_entry_for_substitute_request(source_project, month_data, day_key, entry_id)
+    request_entry = _substitute_request_payload_from_source(
+        source_project,
+        source_entry,
+        month_key=month_key,
+        day_key=day_key,
+    )
+
+    substitute_project = _ensure_substitute_project_for_office_month(office_id, year, month)
+    with _project_lock(substitute_project["id"]):
+        substitute_project = _load_project(substitute_project["id"])
+        substitute_month = (substitute_project.get("months") or {}).get(month_key)
+        if not substitute_month:
+            substitute_project.setdefault("months", {})[month_key] = _build_month_payload(year, month, False, 0, {})
+            substitute_month = substitute_project["months"][month_key]
+        entries_per_day = _normalize_entries(substitute_month.get("entries_per_day"), year, month)
+        day_entries = list(entries_per_day.get(day_key) or [])
+        existing_index = next(
+            (index for index, entry in enumerate(day_entries) if str(entry.get("id") or "") == request_entry["id"]),
+            None,
+        )
+        if existing_index is None:
+            day_entries.append(request_entry)
+            history_action = "substitute_request_created"
+            history_changes = [f"{month_key} {day_key}日 に代務要請を登録"]
+        else:
+            existing = dict(day_entries[existing_index])
+            preserved = {
+                key: existing.get(key)
+                for key in (
+                    "substitute_helper_employee_name",
+                    "substitute_helper_employee_number",
+                    "substitute_helper_site_row_id",
+                    "substitute_helper_site_id",
+                    "substitute_helper_site_name",
+                    "substitute_resolved",
+                    "substitute_helper_user_id",
+                    "substitute_helper_name",
+                    "substitute_helped_at",
+                )
+                if key in existing
+            }
+            day_entries[existing_index] = {**request_entry, **preserved}
+            history_action = "substitute_request_updated"
+            history_changes = [f"{month_key} {day_key}日 の代務要請を更新"]
+        entries_per_day[day_key] = day_entries
+        substitute_month["entries_per_day"] = entries_per_day
+        substitute_month["draft_entries_per_day"] = _normalize_entries(entries_per_day, year, month)
+        substitute_month["revision"] = int(substitute_month.get("revision", 1) or 1) + 1
+        substitute_month["updated_at"] = _utcnow_iso()
+        _save_project(substitute_project)
+        _append_history(
+            substitute_project["id"],
+            {
+                "timestamp": _utcnow_iso(),
+                "editor_name": _user_label(),
+                "editor_type": access_role,
+                "action": history_action,
+                "month_key": month_key,
+                "changes": history_changes,
+                "source_project_id": project_id,
+                "source_entry_id": entry_id,
+            },
+        )
+
+    substitute_project = _load_project(substitute_project["id"])
+    _resync_shift_month(substitute_project, month_key, actor_name=_user_label())
+    substitute_project = _load_project(substitute_project["id"])
+    substitute_month = (substitute_project.get("months") or {}).get(month_key)
+    saved_entry = next(
+        (
+            entry
+            for entry in (substitute_month.get("entries_per_day") or {}).get(day_key, [])
+            if str(entry.get("id") or "") == request_entry["id"]
+        ),
+        request_entry,
+    )
+    return jsonify(
+        {
+            "success": True,
+            "substitute_project": _project_summary(substitute_project),
+            "month": _client_month_payload(substitute_month, include_draft=True, project=substitute_project),
+            "entry": saved_entry,
+        }
+    )
 
 
 @cloudshift_bp.route("/api/project/<project_id>/leave-sync/calendars")

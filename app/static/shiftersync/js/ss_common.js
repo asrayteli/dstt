@@ -47,7 +47,7 @@ const ShifterSync = (function() {
   const siteNameRowPrefix = '#site_name';
   const siteBranchRowIdRowPrefix = '#site_branch_row_id';
   const siteBranchRowPrefix = '#site_branch';
-  const shiftSyncSourceTypes = ['scene_shift', 'person_shift', 'master_shift'];
+  const shiftSyncSourceTypes = ['scene_shift', 'person_shift', 'master_shift', 'substitute_shift'];
 
   const state = {
     mode: 'scene',
@@ -69,7 +69,9 @@ const ShifterSync = (function() {
     siteContext: null,
     siteBranches: [],
     dragEntry: null,
-    suppressEntryClick: false
+    suppressEntryClick: false,
+    substituteRequestEnabled: false,
+    onSubstituteRequest: null
   };
 
   const employeeSearchCache = new Map();
@@ -313,6 +315,25 @@ const ShifterSync = (function() {
         sync_source_month_key: '',
         sync_source_day: '',
         sync_source_entry_id: '',
+        substitute_request_type: '',
+        substitute_helper_employee_name: '',
+        substitute_helper_employee_number: '',
+        substitute_helper_site_row_id: '',
+        substitute_helper_site_id: '',
+        substitute_helper_site_name: '',
+        substitute_resolved: false,
+        substitute_requester_user_id: '',
+        substitute_requester_name: '',
+        substitute_requested_at: '',
+        substitute_helper_user_id: '',
+        substitute_helper_name: '',
+        substitute_helped_at: '',
+        substitute_source_project_id: '',
+        substitute_source_project_title: '',
+        substitute_source_project_mode: '',
+        substitute_source_month_key: '',
+        substitute_source_day: '',
+        substitute_source_entry_id: '',
         cloud_draft_added: false
       };
     }
@@ -338,6 +359,27 @@ const ShifterSync = (function() {
       sync_source_month_key: String(entry.sync_source_month_key || entry.syncSourceMonthKey || '').trim(),
       sync_source_day: String(entry.sync_source_day || entry.syncSourceDay || '').trim(),
       sync_source_entry_id: String(entry.sync_source_entry_id || entry.syncSourceEntryId || '').trim(),
+      substitute_request_type: ['scene', 'person'].includes(String(entry.substitute_request_type || entry.substituteRequestType || '').trim().toLowerCase())
+        ? String(entry.substitute_request_type || entry.substituteRequestType || '').trim().toLowerCase()
+        : '',
+      substitute_helper_employee_name: String(entry.substitute_helper_employee_name || entry.substituteHelperEmployeeName || '').trim(),
+      substitute_helper_employee_number: String(entry.substitute_helper_employee_number || entry.substituteHelperEmployeeNumber || '').trim(),
+      substitute_helper_site_row_id: normalizeSiteRowId(entry.substitute_helper_site_row_id || entry.substituteHelperSiteRowId || ''),
+      substitute_helper_site_id: String(entry.substitute_helper_site_id || entry.substituteHelperSiteId || '').trim(),
+      substitute_helper_site_name: String(entry.substitute_helper_site_name || entry.substituteHelperSiteName || '').trim(),
+      substitute_resolved: entry.substitute_resolved === true || entry.substituteResolved === true || String(entry.substitute_resolved || entry.substituteResolved || '').toLowerCase() === 'true' || String(entry.substitute_resolved || entry.substituteResolved || '') === '1',
+      substitute_requester_user_id: String(entry.substitute_requester_user_id || entry.substituteRequesterUserId || '').trim(),
+      substitute_requester_name: String(entry.substitute_requester_name || entry.substituteRequesterName || '').trim(),
+      substitute_requested_at: String(entry.substitute_requested_at || entry.substituteRequestedAt || '').trim(),
+      substitute_helper_user_id: String(entry.substitute_helper_user_id || entry.substituteHelperUserId || '').trim(),
+      substitute_helper_name: String(entry.substitute_helper_name || entry.substituteHelperName || '').trim(),
+      substitute_helped_at: String(entry.substitute_helped_at || entry.substituteHelpedAt || '').trim(),
+      substitute_source_project_id: String(entry.substitute_source_project_id || entry.substituteSourceProjectId || '').trim(),
+      substitute_source_project_title: String(entry.substitute_source_project_title || entry.substituteSourceProjectTitle || '').trim(),
+      substitute_source_project_mode: String(entry.substitute_source_project_mode || entry.substituteSourceProjectMode || '').trim(),
+      substitute_source_month_key: String(entry.substitute_source_month_key || entry.substituteSourceMonthKey || '').trim(),
+      substitute_source_day: String(entry.substitute_source_day || entry.substituteSourceDay || '').trim(),
+      substitute_source_entry_id: String(entry.substitute_source_entry_id || entry.substituteSourceEntryId || '').trim(),
       cloud_draft_added: entry.cloud_draft_added === true || entry.cloudDraftAdded === true
     };
   }
@@ -364,6 +406,25 @@ const ShifterSync = (function() {
       sync_source_month_key: normalized.sync_source_month_key,
       sync_source_day: normalized.sync_source_day,
       sync_source_entry_id: normalized.sync_source_entry_id,
+      substitute_request_type: normalized.substitute_request_type,
+      substitute_helper_employee_name: normalized.substitute_helper_employee_name,
+      substitute_helper_employee_number: normalized.substitute_helper_employee_number,
+      substitute_helper_site_row_id: normalized.substitute_helper_site_row_id,
+      substitute_helper_site_id: normalized.substitute_helper_site_id,
+      substitute_helper_site_name: normalized.substitute_helper_site_name,
+      substitute_resolved: normalized.substitute_resolved === true,
+      substitute_requester_user_id: normalized.substitute_requester_user_id,
+      substitute_requester_name: normalized.substitute_requester_name,
+      substitute_requested_at: normalized.substitute_requested_at,
+      substitute_helper_user_id: normalized.substitute_helper_user_id,
+      substitute_helper_name: normalized.substitute_helper_name,
+      substitute_helped_at: normalized.substitute_helped_at,
+      substitute_source_project_id: normalized.substitute_source_project_id,
+      substitute_source_project_title: normalized.substitute_source_project_title,
+      substitute_source_project_mode: normalized.substitute_source_project_mode,
+      substitute_source_month_key: normalized.substitute_source_month_key,
+      substitute_source_day: normalized.substitute_source_day,
+      substitute_source_entry_id: normalized.substitute_source_entry_id,
       cloud_draft_added: normalized.cloud_draft_added === true
     };
   }
@@ -425,6 +486,10 @@ const ShifterSync = (function() {
     return state.mode === 'master';
   }
 
+  function isSubstituteMode() {
+    return state.mode === 'substitute';
+  }
+
   function masterTargetTypeValue() {
     if (!isMasterMode()) {
       return '';
@@ -441,6 +506,9 @@ const ShifterSync = (function() {
   }
 
   function isEntryEmployeeSearchEnabled() {
+    if (isSubstituteMode()) {
+      return true;
+    }
     if (isMasterMode()) {
       return masterTargetTypeValue() === 'person';
     }
@@ -448,6 +516,9 @@ const ShifterSync = (function() {
   }
 
   function isEntrySiteSearchEnabled() {
+    if (isSubstituteMode()) {
+      return true;
+    }
     if (isMasterMode()) {
       return masterTargetTypeValue() === 'scene';
     }
@@ -621,6 +692,9 @@ const ShifterSync = (function() {
     if (kind === 'modal') {
       return $('#ss-entry-modal-candidate-panel');
     }
+    if (kind === 'modal-helper') {
+      return $('#ss-entry-modal-helper-candidate-panel');
+    }
 
     const day = String($input.attr('data-day') || '');
     if (!day) {
@@ -637,6 +711,9 @@ const ShifterSync = (function() {
     const kind = String($input.attr('data-search-kind') || '');
     if (kind === 'modal') {
       return $('#ss-entry-modal-selected-note');
+    }
+    if (kind === 'modal-helper') {
+      return $('#ss-entry-modal-helper-selected-note');
     }
 
     const day = String($input.attr('data-day') || '');
@@ -1157,7 +1234,17 @@ const ShifterSync = (function() {
     const branchState = entryBranchState(normalized);
     const branchIssue = entryBranchIssue(normalized);
     const titleName = isMasterPersonType() && normalized.site_name ? normalized.site_name : parsed.name;
-    const displayTitle = parsed.optionKey ? `${titleName} ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : titleName;
+    let displayTitle = parsed.optionKey ? `${titleName} ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : titleName;
+    if (isSubstituteMode()) {
+      const requestLabel = normalized.substitute_request_type === 'person' ? '人不足' : '現場不足';
+      const helperLabel = normalized.substitute_request_type === 'person'
+        ? normalized.substitute_helper_site_name
+        : normalized.substitute_helper_employee_name;
+      displayTitle = `${requestLabel}: ${displayTitle}`;
+      if (helperLabel) {
+        displayTitle += ` → ${helperLabel}`;
+      }
+    }
     let syncSourceLabel = '';
     let syncSourceTone = '';
     if (isMasterMode() && !isSyncedEntry(normalized)) {
@@ -1172,6 +1259,10 @@ const ShifterSync = (function() {
       } else {
         syncSourceLabel = `${sourceKindLabel}から反映`;
       }
+    }
+    if (isSubstituteMode() && !isSyncedEntry(normalized)) {
+      syncSourceLabel = normalized.substitute_resolved ? '解決済み' : '要ヘルプ';
+      syncSourceTone = normalized.substitute_resolved ? 'master-local' : 'warning';
     }
     return {
       title: branchState.site_branch ? `${displayTitle} / 枝${branchState.site_branch}` : displayTitle,
@@ -1459,15 +1550,31 @@ const ShifterSync = (function() {
 
     const inputGroup = $('<div>').addClass('input-group');
     const inputRow = $('<div>').addClass('input-row');
-    const nameInputPlaceholder = isMasterSceneType()
-      ? '\u4eba\u7269\u540d'
-      : (isSceneMode() ? '\u4eba\u7269\u540d' : '\u73fe\u5834\u540d');
+    if (isSubstituteMode()) {
+      inputRow.addClass('substitute-input-row');
+    }
+    const substituteTypeSelect = isSubstituteMode()
+      ? $('<select>')
+        .addClass('entry-substitute-type')
+        .attr('data-day', day)
+        .append('<option value="scene">現場不足</option>')
+        .append('<option value="person">人不足</option>')
+      : null;
+    const nameInputPlaceholder = isSubstituteMode()
+      ? '不足している現場名'
+      : (isMasterSceneType()
+        ? '\u4eba\u7269\u540d'
+        : (isSceneMode() ? '\u4eba\u7269\u540d' : '\u73fe\u5834\u540d'));
     const nameInput = $('<input>')
       .attr('type', 'text')
       .addClass('entry-input')
       .attr('placeholder', nameInputPlaceholder)
       .attr('data-day', day);
-    if (isSceneMode() || isMasterSceneType()) {
+    if (isSubstituteMode()) {
+      nameInput
+        .addClass('ss-site-search-input')
+        .attr('data-search-kind', 'day');
+    } else if (isSceneMode() || isMasterSceneType()) {
       nameInput
         .addClass('ss-employee-search-input')
         .attr('data-search-kind', 'day');
@@ -1481,6 +1588,9 @@ const ShifterSync = (function() {
       .addClass('add-entry-btn')
       .attr('data-day', day)
       .text('\u8ffd\u52a0');
+    if (substituteTypeSelect) {
+      inputRow.append(substituteTypeSelect);
+    }
     inputRow.append(nameInput, addBtn);
     const masterSideInput = isMasterMode()
       ? $('<input>')
@@ -1647,6 +1757,7 @@ const ShifterSync = (function() {
 
   function clearEventHandlers() {
     $(document).off('keydown', '.entry-input');
+    $(document).off('change', '.entry-substitute-type');
     $(document).off('keydown', '.entry-master-side-input');
     $(document).off('keydown', '.entry-comment-input');
     $(document).off('keydown', '#ss-entry-modal-comment');
@@ -1673,9 +1784,29 @@ const ShifterSync = (function() {
     $(document).off('click', '.ss-entry-edit-btn');
     $(document).off('click', '.ss-entry-delete-btn');
     $(document).off('click', '.ss-entry-save-btn');
+    $(document).off('click', '.ss-entry-substitute-request-btn');
     $(document).off('change', '#ss-entry-modal-option');
     $(document).off('change', '#ss-entry-modal-site-branch');
     $(document).off('click', '.ss-open-sync-source-btn');
+  }
+
+  function applySubstituteTypeToDayInput(day) {
+    const dayKey = String(day || '');
+    const type = String($(`.entry-substitute-type[data-day='${dayKey}']`).val() || 'scene');
+    const input = $(`.entry-input[data-day='${dayKey}']`);
+    if (!input.length) {
+      return;
+    }
+    input
+      .removeClass('ss-employee-search-input ss-site-search-input')
+      .removeAttr('data-employee-number data-selected-employee-name data-site-row-id data-site-id data-selected-site-name data-search-token')
+      .attr('placeholder', type === 'person' ? '不足している人物名' : '不足している現場名')
+      .attr('data-search-kind', 'day')
+      .addClass(type === 'person' ? 'ss-employee-search-input' : 'ss-site-search-input')
+      .val('');
+    const note = $(`.ss-selected-note[data-search-kind='day'][data-day='${dayKey}']`);
+    note.text('').addClass('ss-hidden');
+    $(`.ss-candidate-panel[data-search-kind='day'][data-day='${dayKey}']`).empty().addClass('ss-hidden');
   }
 
   function attachEventHandlers() {
@@ -1847,6 +1978,10 @@ const ShifterSync = (function() {
       }
     });
 
+    $(document).on('change', '.entry-substitute-type', function() {
+      applySubstituteTypeToDayInput($(this).attr('data-day'));
+    });
+
     $(document).on('keydown', '.entry-master-side-input', function(e) {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -1898,6 +2033,14 @@ const ShifterSync = (function() {
         });
         return;
       }
+      if (kind === 'modal-helper') {
+        const $input = $('#ss-entry-modal-helper-employee');
+        setEmployeeSelectionForInput($input, {
+          employee_number: $btn.attr('data-employee-number') || '',
+          employee_name: $btn.attr('data-employee-name') || $btn.text() || ''
+        });
+        return;
+      }
 
       const day = String($btn.attr('data-day') || '');
       const $input = $(`.entry-input[data-day='${day}']`);
@@ -1918,6 +2061,10 @@ const ShifterSync = (function() {
       };
       if (kind === 'modal') {
         setSiteSelectionForInput($('#ss-entry-modal-name'), payload);
+        return;
+      }
+      if (kind === 'modal-helper') {
+        setSiteSelectionForInput($('#ss-entry-modal-helper-site'), payload);
         return;
       }
       const day = String($btn.attr('data-day') || '');
@@ -1962,6 +2109,25 @@ const ShifterSync = (function() {
 
     $(document).on('click', '.ss-entry-save-btn', function() {
       saveEntryFromModal();
+    });
+
+    $(document).on('click', '.ss-entry-substitute-request-btn', async function() {
+      const button = $(this);
+      const day = String(button.attr('data-day') || '');
+      const entryId = String(button.attr('data-entry-id') || '');
+      const entry = getDayEntries(day).find((item) => item.id === entryId);
+      if (!entry || typeof state.onSubstituteRequest !== 'function') {
+        return;
+      }
+      button.prop('disabled', true);
+      try {
+        await Promise.resolve(state.onSubstituteRequest({ day, entryId, entry: cloneEntry(entry, false) }));
+        closeModal('entry');
+      } catch (error) {
+        alert(error && error.message ? error.message : '\u4ee3\u52d9\u8981\u8acb\u306b\u5931\u6557\u3057\u307e\u3057\u305f');
+      } finally {
+        button.prop('disabled', false);
+      }
     });
 
     $(document).on('change', '#ss-entry-modal-option', function() {
@@ -2011,6 +2177,28 @@ const ShifterSync = (function() {
     let employeeNumber = getSelectedEmployeeNumberForInput(nameInput);
     let selectedSite = isPersonMode() ? getSelectedSiteDataForInput(nameInput) : { site_row_id: '', site_id: '', site_name: '' };
     let siteNameForEntry = selectedSite.site_name;
+    let substitutePayload = {};
+
+    if (isSubstituteMode()) {
+      const requestType = String($(`.entry-substitute-type[data-day='${dayKey}']`).val() || 'scene') === 'person' ? 'person' : 'scene';
+      if (requestType === 'person') {
+        employeeName = getSelectedEmployeeNameForInput(nameInput) || name;
+        employeeNumber = getSelectedEmployeeNumberForInput(nameInput);
+        selectedSite = { site_row_id: '', site_id: '', site_name: '' };
+        siteNameForEntry = '';
+        entryName = employeeName;
+      } else {
+        selectedSite = getSelectedSiteDataForInput(nameInput);
+        siteNameForEntry = selectedSite.site_name || name;
+        entryName = siteNameForEntry;
+        employeeName = '';
+        employeeNumber = '';
+      }
+      substitutePayload = {
+        substitute_request_type: requestType,
+        substitute_resolved: false
+      };
+    }
 
     if (isMasterSceneType()) {
       const siteInput = masterSideInput;
@@ -2046,7 +2234,8 @@ const ShifterSync = (function() {
       site_id: selectedSite.site_id,
       site_name: siteNameForEntry,
       site_branch_row_id: autoBranchFields.site_branch_row_id,
-      site_branch: autoBranchFields.site_branch
+      site_branch: autoBranchFields.site_branch,
+      ...substitutePayload
     });
     if (!entry) {
       return;
@@ -2399,7 +2588,28 @@ const ShifterSync = (function() {
       site_id: String(entry.site_id || '').trim(),
       site_name: String(entry.site_name || parsed.name || '').trim()
     };
-    const detailNameLabel = isMasterPersonType() ? '\u73fe\u5834\u540d' : '\u540d\u524d';
+    const helperSite = {
+      site_row_id: String(entry.substitute_helper_site_row_id || '').trim(),
+      site_id: String(entry.substitute_helper_site_id || '').trim(),
+      site_name: String(entry.substitute_helper_site_name || '').trim()
+    };
+    const substituteRequestType = entry.substitute_request_type === 'person' ? 'person' : 'scene';
+    const substituteRequesterText = [entry.substitute_requester_name || '', entry.substitute_requested_at || '']
+      .filter(Boolean)
+      .join(' / ') || '\u672a\u8a18\u9332';
+    const substituteHelperAuditText = entry.substitute_resolved
+      ? ([entry.substitute_helper_name || '', entry.substitute_helped_at || ''].filter(Boolean).join(' / ') || '\u672a\u8a18\u9332')
+      : '\u672a\u89e3\u6c7a';
+    const canRequestSubstitute = !!(
+      state.substituteRequestEnabled
+      && state.editable
+      && !syncedEntry
+      && (isSceneMode() || isPersonMode())
+      && typeof state.onSubstituteRequest === 'function'
+    );
+    const detailNameLabel = isSubstituteMode()
+      ? (substituteRequestType === 'person' ? '不足している人' : '不足している現場')
+      : (isMasterPersonType() ? '\u73fe\u5834\u540d' : '\u540d\u524d');
     const detailName = isMasterPersonType() ? (selectedSite.site_name || parsed.name) : parsed.name;
 
     if (!state.editable || syncedEntry) {
@@ -2438,6 +2648,30 @@ const ShifterSync = (function() {
               <div class="ss-detail-static">${escapeHtml([selectedSite.site_id, selectedSite.site_name].filter(Boolean).join(' / '))}</div>
             </div>
           ` : ''}
+          ${isSubstituteMode() ? `
+            <div class="ss-detail-field">
+              <div class="ss-detail-label">ヘルプ</div>
+              <div class="ss-detail-static">${
+                substituteRequestType === 'person'
+                  ? escapeHtml([helperSite.site_id, helperSite.site_name].filter(Boolean).join(' / ') || '未入力')
+                  : escapeHtml([entry.substitute_helper_employee_name || '', entry.substitute_helper_employee_number || ''].filter(Boolean).join(' / ') || '未入力')
+              }</div>
+            </div>
+            <div class="ss-detail-field">
+              <div class="ss-detail-label">状態</div>
+              <div class="ss-detail-static">${entry.substitute_resolved ? '解決済み' : '要ヘルプ'}</div>
+            </div>
+          ` : ''}
+          ${isSubstituteMode() ? `
+            <div class="ss-detail-field">
+              <div class="ss-detail-label">\u4ee3\u52d9\u3092\u8981\u3057\u3066\u3044\u308b\u4eba</div>
+              <div class="ss-detail-static">${escapeHtml(substituteRequesterText)}</div>
+            </div>
+            <div class="ss-detail-field">
+              <div class="ss-detail-label">\u30d8\u30eb\u30d7\u3092\u51fa\u3057\u305f\u4eba</div>
+              <div class="ss-detail-static">${escapeHtml(substituteHelperAuditText)}</div>
+            </div>
+          ` : ''}
           ${branchState.label ? `
             <div class="ss-detail-field">
               <div class="ss-detail-label">\u679d\u756a\u53f7</div>
@@ -2465,7 +2699,9 @@ const ShifterSync = (function() {
     }
 
     const availableOptionKeys = getSelectableOptionKeysForMode(state.mode);
-    const modalPrimaryLabel = isMasterSceneType() || isSceneMode() ? '\u4eba\u7269\u540d' : '\u73fe\u5834\u540d';
+    const modalPrimaryLabel = isSubstituteMode()
+      ? (substituteRequestType === 'person' ? '不足している人' : '不足している現場')
+      : (isMasterSceneType() || isSceneMode() ? '\u4eba\u7269\u540d' : '\u73fe\u5834\u540d');
     const modalSideLabel = isMasterSceneType() ? '\u73fe\u5834\u540d' : '\u4eba\u7269\u540d';
     const modalPrimaryName = isMasterPersonType() ? (selectedSite.site_name || parsed.name) : parsed.name;
     const modalSideName = isMasterSceneType()
@@ -2473,8 +2709,8 @@ const ShifterSync = (function() {
       : (entry.employee_name || (entry.employee_number ? parsed.name : ''));
     const modalPrimaryClasses = [
       'ss-detail-input',
-      (isSceneMode() || isMasterSceneType()) ? 'ss-employee-search-input' : '',
-      (isPersonMode() || isMasterPersonType()) ? 'ss-site-search-input' : ''
+      (isSceneMode() || isMasterSceneType() || (isSubstituteMode() && substituteRequestType === 'person')) ? 'ss-employee-search-input' : '',
+      (isPersonMode() || isMasterPersonType() || (isSubstituteMode() && substituteRequestType === 'scene')) ? 'ss-site-search-input' : ''
     ].filter(Boolean).join(' ');
     const modalSideClasses = [
       'ss-detail-input',
@@ -2493,7 +2729,7 @@ const ShifterSync = (function() {
             class="${modalPrimaryClasses}"
             type="text"
             value="${escapeHtml(modalPrimaryName)}"
-            ${isSceneMode() || isPersonMode() || isMasterMode() ? 'data-search-kind="modal"' : ''}
+            ${isSceneMode() || isPersonMode() || isMasterMode() || isSubstituteMode() ? 'data-search-kind="modal"' : ''}
           >
           <div id="ss-entry-modal-selected-note" class="ss-selected-note${entry.employee_number || selectedSite.site_id ? '' : ' ss-hidden'}">${entry.employee_number ? `選択中: ${escapeHtml(parsed.name)} / ${escapeHtml(entry.employee_number)}` : selectedSite.site_id ? `選択中: ${escapeHtml([selectedSite.site_id, selectedSite.site_name].filter(Boolean).join(' / '))}` : ''}</div>
           <div id="ss-entry-modal-candidate-panel" class="ss-candidate-panel ss-hidden" data-search-kind="modal"></div>
@@ -2518,6 +2754,51 @@ const ShifterSync = (function() {
             >
           </div>
         ` : ''}
+        ${isSubstituteMode() && substituteRequestType === 'scene' ? `
+          <div class="ss-detail-field">
+            <label class="ss-detail-label" for="ss-entry-modal-helper-employee">ヘルプに行ける人</label>
+            <input
+              id="ss-entry-modal-helper-employee"
+              class="ss-detail-input ss-employee-search-input"
+              type="text"
+              value="${escapeHtml(entry.substitute_helper_employee_name || '')}"
+              data-search-kind="modal-helper"
+            >
+            <div id="ss-entry-modal-helper-selected-note" class="ss-selected-note${entry.substitute_helper_employee_number ? '' : ' ss-hidden'}">${entry.substitute_helper_employee_number ? `選択中: ${escapeHtml(entry.substitute_helper_employee_name || '')} / ${escapeHtml(entry.substitute_helper_employee_number)}` : ''}</div>
+            <div id="ss-entry-modal-helper-candidate-panel" class="ss-candidate-panel ss-hidden" data-search-kind="modal-helper"></div>
+          </div>
+        ` : ''}
+        ${isSubstituteMode() && substituteRequestType === 'person' ? `
+          <div class="ss-detail-field">
+            <label class="ss-detail-label" for="ss-entry-modal-helper-site">ヘルプを出せる現場</label>
+            <input
+              id="ss-entry-modal-helper-site"
+              class="ss-detail-input ss-site-search-input"
+              type="text"
+              value="${escapeHtml(helperSite.site_name || '')}"
+              data-search-kind="modal-helper"
+            >
+            <div id="ss-entry-modal-helper-selected-note" class="ss-selected-note${helperSite.site_id ? '' : ' ss-hidden'}">${helperSite.site_id ? `選択中: ${escapeHtml([helperSite.site_id, helperSite.site_name].filter(Boolean).join(' / '))}` : ''}</div>
+            <div id="ss-entry-modal-helper-candidate-panel" class="ss-candidate-panel ss-hidden" data-search-kind="modal-helper"></div>
+          </div>
+        ` : ''}
+        ${isSubstituteMode() ? `
+          <div class="ss-detail-field">
+            <div class="ss-detail-label">\u4ee3\u52d9\u3092\u8981\u3057\u3066\u3044\u308b\u4eba</div>
+            <div class="ss-detail-static">${escapeHtml(substituteRequesterText)}</div>
+          </div>
+          <div class="ss-detail-field">
+            <div class="ss-detail-label">\u30d8\u30eb\u30d7\u3092\u51fa\u3057\u305f\u4eba</div>
+            <div class="ss-detail-static">${escapeHtml(substituteHelperAuditText)}</div>
+          </div>
+          <label class="ss-detail-field">
+            <span class="ss-detail-label">状態</span>
+            <label class="ss-check-row">
+              <input id="ss-entry-modal-substitute-resolved" type="checkbox" ${entry.substitute_resolved ? 'checked' : ''}>
+              <span>解決済みとして人・現場シフトへ反映</span>
+            </label>
+          </label>
+        ` : ''}
         <div class="ss-detail-field">
           <label class="ss-detail-label" for="ss-entry-modal-comment">\u30b3\u30e1\u30f3\u30c8</label>
           <textarea id="ss-entry-modal-comment" class="ss-detail-textarea" rows="4">${escapeHtml(entry.comment)}</textarea>
@@ -2541,6 +2822,7 @@ const ShifterSync = (function() {
         ` : ''}
         <div class="ss-detail-actions foot">
           <button type="button" class="btn-secondary" data-close-modal="entry">\u9589\u3058\u308b</button>
+          ${canRequestSubstitute ? `<button type="button" class="btn-secondary ss-entry-substitute-request-btn" data-day="${day}" data-entry-id="${escapeHtml(entry.id)}">\u4ee3\u52d9\u8981\u8acb</button>` : ''}
           <button type="button" class="btn-primary ss-entry-save-btn">\u4fdd\u5b58</button>
         </div>
       </div>
@@ -2548,17 +2830,32 @@ const ShifterSync = (function() {
 
     const $modalNameInput = $('#ss-entry-modal-name');
     const $modalSideInput = $('#ss-entry-modal-master-side');
-    if ((isSceneMode() || isMasterSceneType()) && entry.employee_number) {
+    if ((isSceneMode() || isMasterSceneType() || (isSubstituteMode() && substituteRequestType === 'person')) && entry.employee_number) {
       $modalNameInput.attr('data-employee-number', String(entry.employee_number || ''));
       $modalNameInput.attr('data-selected-employee-name', modalPrimaryName);
       $modalNameInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     }
 
-    if ((isPersonMode() || isMasterPersonType()) && (selectedSite.site_row_id || selectedSite.site_id)) {
+    if ((isPersonMode() || isMasterPersonType() || (isSubstituteMode() && substituteRequestType === 'scene')) && (selectedSite.site_row_id || selectedSite.site_id)) {
       $modalNameInput.attr('data-site-row-id', selectedSite.site_row_id);
       $modalNameInput.attr('data-site-id', selectedSite.site_id);
       $modalNameInput.attr('data-selected-site-name', selectedSite.site_name || modalPrimaryName);
       $modalNameInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    }
+
+    const $helperEmployeeInput = $('#ss-entry-modal-helper-employee');
+    if ($helperEmployeeInput.length && entry.substitute_helper_employee_number) {
+      $helperEmployeeInput.attr('data-employee-number', String(entry.substitute_helper_employee_number || ''));
+      $helperEmployeeInput.attr('data-selected-employee-name', String(entry.substitute_helper_employee_name || ''));
+      $helperEmployeeInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    }
+
+    const $helperSiteInput = $('#ss-entry-modal-helper-site');
+    if ($helperSiteInput.length && (helperSite.site_row_id || helperSite.site_id)) {
+      $helperSiteInput.attr('data-site-row-id', helperSite.site_row_id);
+      $helperSiteInput.attr('data-site-id', helperSite.site_id);
+      $helperSiteInput.attr('data-selected-site-name', helperSite.site_name || '');
+      $helperSiteInput.attr('data-search-token', `selected-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     }
 
     if (isMasterSceneType() && $modalSideInput.length && (selectedSite.site_row_id || selectedSite.site_id)) {
@@ -2600,6 +2897,45 @@ const ShifterSync = (function() {
     let employeeNumber = getSelectedEmployeeNumberForInput($nameInput);
     let selectedSiteForSave = isPersonMode() ? getSelectedSiteDataForInput($nameInput) : { site_row_id: '', site_id: '', site_name: '' };
     let siteNameForSave = selectedSiteForSave.site_name;
+    let substitutePayloadForSave = {};
+    const existingEntry = getDayEntries(day).find((item) => item.id === entryId) || {};
+    const substituteRequestTypeForSave = existingEntry.substitute_request_type === 'person' ? 'person' : 'scene';
+    if (isSubstituteMode()) {
+      if (substituteRequestTypeForSave === 'person') {
+        employeeName = getSelectedEmployeeNameForInput($nameInput) || name;
+        employeeNumber = getSelectedEmployeeNumberForInput($nameInput);
+        selectedSiteForSave = { site_row_id: '', site_id: '', site_name: '' };
+        siteNameForSave = '';
+        entryName = employeeName;
+        const helperSiteInput = $('#ss-entry-modal-helper-site');
+        const helperSite = getSelectedSiteDataForInput(helperSiteInput);
+        substitutePayloadForSave = {
+          substitute_request_type: 'person',
+          substitute_helper_site_row_id: helperSite.site_row_id,
+          substitute_helper_site_id: helperSite.site_id,
+          substitute_helper_site_name: helperSite.site_name || String(helperSiteInput.val() || '').trim(),
+          substitute_helper_employee_name: '',
+          substitute_helper_employee_number: '',
+          substitute_resolved: $('#ss-entry-modal-substitute-resolved').prop('checked') === true
+        };
+      } else {
+        selectedSiteForSave = getSelectedSiteDataForInput($nameInput);
+        siteNameForSave = selectedSiteForSave.site_name || name;
+        entryName = siteNameForSave;
+        employeeName = '';
+        employeeNumber = '';
+        const helperEmployeeInput = $('#ss-entry-modal-helper-employee');
+        substitutePayloadForSave = {
+          substitute_request_type: 'scene',
+          substitute_helper_employee_name: getSelectedEmployeeNameForInput(helperEmployeeInput) || String(helperEmployeeInput.val() || '').trim(),
+          substitute_helper_employee_number: getSelectedEmployeeNumberForInput(helperEmployeeInput),
+          substitute_helper_site_row_id: '',
+          substitute_helper_site_id: '',
+          substitute_helper_site_name: '',
+          substitute_resolved: $('#ss-entry-modal-substitute-resolved').prop('checked') === true
+        };
+      }
+    }
     if (isMasterSceneType()) {
       if (!sideName) {
         alert('\u73fe\u5834\u540d\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044');
@@ -2648,7 +2984,20 @@ const ShifterSync = (function() {
         site_id: selectedSiteForSave.site_id,
         site_name: siteNameForSave,
         site_branch_row_id: siteBranchRowId,
-        site_branch: siteBranch
+        site_branch: siteBranch,
+        ...substitutePayloadForSave,
+        substitute_requester_user_id: existingEntry.substitute_requester_user_id || '',
+        substitute_requester_name: existingEntry.substitute_requester_name || '',
+        substitute_requested_at: existingEntry.substitute_requested_at || '',
+        substitute_helper_user_id: existingEntry.substitute_helper_user_id || '',
+        substitute_helper_name: existingEntry.substitute_helper_name || '',
+        substitute_helped_at: existingEntry.substitute_helped_at || '',
+        substitute_source_project_id: existingEntry.substitute_source_project_id || '',
+        substitute_source_project_title: existingEntry.substitute_source_project_title || '',
+        substitute_source_project_mode: existingEntry.substitute_source_project_mode || '',
+        substitute_source_month_key: existingEntry.substitute_source_month_key || '',
+        substitute_source_day: existingEntry.substitute_source_day || '',
+        substitute_source_entry_id: existingEntry.substitute_source_entry_id || ''
       });
     });
 
@@ -2701,6 +3050,8 @@ const ShifterSync = (function() {
     state.month = month;
     state.mode = mode;
     state.editable = Object.prototype.hasOwnProperty.call(options, 'editable') ? !!options.editable : true;
+    state.substituteRequestEnabled = !!options.substituteRequestEnabled;
+    state.onSubstituteRequest = typeof options.onSubstituteRequest === 'function' ? options.onSubstituteRequest : null;
     state.holidays = new Set(
       Array.isArray(options.holidays)
         ? options.holidays.map((value) => String(value))
