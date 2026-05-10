@@ -61,6 +61,7 @@ TOOL_ACCESS_CATEGORIES: dict[str, str] = {
     "color_extract": "public",
     "powerstamp": "public",
     "powervote": "public",
+    "power_flow": "public",
     "share": "public",
     "car_inspe": "public",
     "monthly_generator": "public",

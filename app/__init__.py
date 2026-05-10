@@ -353,6 +353,9 @@ def create_app(test_config=None):
     from .tools.powervote import powervote_bp
     app.register_blueprint(powervote_bp)
 
+    from .tools.power_flow import power_flow_bp
+    app.register_blueprint(power_flow_bp)
+
     # アクセス権管理（機密ツールに before_request を紐付け）
     from flask import request as _req
     from .access_control import TOOL_ACCESS_CATEGORIES, enforce_tool_access
