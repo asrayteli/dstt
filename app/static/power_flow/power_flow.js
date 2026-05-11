@@ -827,26 +827,36 @@
   }
 
   function connectorSides(edge, from, to) {
-    const fc = center(from);
-    const tc = center(to);
     const manualPoint = storedBendPoint(edge, from, to);
     if (manualPoint) {
+      const fc = center(from);
+      const tc = center(to);
       return {
         sourceSide: sideFacingPoint(fc, manualPoint),
         targetSide: sideFacingPoint(tc, manualPoint),
       };
     }
-    const horizontal = Math.abs(tc.x - fc.x) >= Math.abs(tc.y - fc.y);
-    if (horizontal) {
-      return {
-        sourceSide: tc.x >= fc.x ? "right" : "left",
-        targetSide: tc.x >= fc.x ? "left" : "right",
-      };
-    }
-    return {
-      sourceSide: tc.y >= fc.y ? "bottom" : "top",
-      targetSide: tc.y >= fc.y ? "top" : "bottom",
-    };
+    return nearestSides(from, to);
+  }
+
+  function nearestSides(from, to) {
+    const allSides = ["top", "right", "bottom", "left"];
+    let bestDist = Infinity;
+    let bestSource = "right";
+    let bestTarget = "left";
+    allSides.forEach((srcSide) => {
+      const src = anchorPoint(from, srcSide, 0);
+      allSides.forEach((tgtSide) => {
+        const tgt = anchorPoint(to, tgtSide, 0);
+        const dist = Math.hypot(tgt.x - src.x, tgt.y - src.y);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestSource = srcSide;
+          bestTarget = tgtSide;
+        }
+      });
+    });
+    return { sourceSide: bestSource, targetSide: bestTarget };
   }
 
   function connectorPoints(edge, from, to, layout) {
@@ -1375,6 +1385,16 @@
     if (!state.drag.committed) {
       pushHistory();
       state.drag.committed = true;
+      const movedIds = new Set(state.drag.selected.map((s) => s.id));
+      state.doc.connectors.forEach((edge) => {
+        if (movedIds.has(edge.from) || movedIds.has(edge.to)) {
+          if (edge.style) {
+            delete edge.style.bendPoint;
+            delete edge.style.bendAxis;
+            delete edge.style.bend;
+          }
+        }
+      });
     }
     setDirty(true);
     render();
