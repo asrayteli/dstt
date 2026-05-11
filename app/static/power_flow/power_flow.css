@@ -391,6 +391,17 @@ button.danger,
   stroke-width: 4;
 }
 
+.pf-connector-handle {
+  fill: #ffffff;
+  stroke: #1e67c7;
+  stroke-width: 2.4;
+  cursor: grab;
+}
+
+.pf-connector-handle:active {
+  cursor: grabbing;
+}
+
 .pf-connector-preview {
   pointer-events: none;
 }

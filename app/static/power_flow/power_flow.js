@@ -6,6 +6,9 @@
   const STORAGE_KEY = "dstt.powerFlow.documents";
   const AUTOSAVE_KEY = "dstt.powerFlow.autosave";
   const SCHEMA_VERSION = 1;
+  const EDGE_SLOT_SPACING = 18;
+  const EDGE_OBSTACLE_PADDING = 18;
+  const EDGE_STUB_LENGTH = 24;
 
   const SHAPE_CATEGORIES = [
     {
@@ -137,12 +140,14 @@
     lastPointer: { x: 180, y: 160 },
     connectorPreview: null,
     marquee: null,
+    edgeDrag: null,
     searchHits: [],
     searchIndex: 0,
     rotateAction: null,
     pageBreakPreview: false,
     laneDrag: null,
     nodeClipboardData: null,
+    contextNodeId: null,
   };
 
   function uid(prefix) {
@@ -493,11 +498,12 @@
 
   function renderConnectors(target) {
     const group = el("g", { class: "pf-connectors" });
+    const layout = buildConnectorLayout();
     state.doc.connectors.forEach((edge) => {
       const from = nodeById(edge.from);
       const to = nodeById(edge.to);
       if (!from || !to) return;
-      const points = connectorPoints(from, to);
+      const points = connectorPoints(edge, from, to, layout);
       const edgeColor = edge.style?.color || theme().palette.edge;
       const markerId = arrowMarkerId(edgeColor);
       const routing = edge.style?.routing || "orthogonal";
@@ -519,13 +525,26 @@
         showContextMenu(event.clientX, event.clientY, "edge");
       });
       path.addEventListener("pointerdown", (event) => {
-        event.stopPropagation();
-        selectEdge(edge.id);
+        startEdgePointer(event, edge, points);
       });
       group.appendChild(path);
+      if (state.selectedConnectorId === edge.id && routing !== "curved") {
+        const handlePoint = connectorHandlePoint(points);
+        const handle = el("circle", {
+          class: "pf-connector-handle",
+          cx: handlePoint.x,
+          cy: handlePoint.y,
+          r: 7,
+        });
+        handle.addEventListener("pointerdown", (event) => {
+          startEdgePointer(event, edge, points);
+        });
+        group.appendChild(handle);
+      }
       if (edge.label) {
-        const mx = (points.x1 + points.x2) / 2;
-        const my = (points.y1 + points.y2) / 2 - 10;
+        const labelPoint = connectorLabelPoint(points);
+        const mx = labelPoint.x;
+        const my = labelPoint.y - 10;
         const label = textEl(mx, my, edge.label, { class: "pf-connector-label" });
         group.appendChild(label);
       }
@@ -543,10 +562,13 @@
       const cy2 = points.y2;
       return `M ${points.x1} ${points.y1} C ${cx1} ${cy1} ${cx2} ${cy2} ${points.x2} ${points.y2}`;
     }
-    if (points.x1 === points.x2 || points.y1 === points.y2) {
+    if (points.route?.length) {
+      return pathDFromPoints(points.route);
+    }
+    if (!points.manual && (points.x1 === points.x2 || points.y1 === points.y2)) {
       return `M ${points.x1} ${points.y1} L ${points.x2} ${points.y2}`;
     }
-    return `M ${points.x1} ${points.y1} L ${points.mx} ${points.y1} L ${points.mx} ${points.y2} L ${points.x2} ${points.y2}`;
+    return orthogonalPathThroughPoint(points);
   }
 
   function renderConnectorPreview(target) {
@@ -675,6 +697,7 @@
       nodeGroup.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        state.contextNodeId = node.id;
         if (!state.selectedNodeIds.includes(node.id)) {
           state.selectedNodeIds = [node.id];
           state.selectedConnectorId = null;
@@ -756,15 +779,419 @@
     return lines.length ? lines : [""];
   }
 
-  function connectorPoints(from, to) {
+  function buildConnectorLayout() {
+    const incoming = new Map();
+    const outgoing = new Map();
+    const meta = new Map();
+    state.doc.connectors.forEach((edge) => {
+      const from = nodeById(edge.from);
+      const to = nodeById(edge.to);
+      if (!from || !to) return;
+      const sides = connectorSides(edge, from, to);
+      meta.set(edge.id, sides);
+      addEdgeSlot(incoming, to.id, sides.targetSide, edge, from, to, "target");
+      addEdgeSlot(outgoing, from.id, sides.sourceSide, edge, from, to, "source");
+    });
+    return {
+      meta,
+      incoming: assignEdgeSlots(incoming),
+      outgoing: assignEdgeSlots(outgoing),
+    };
+  }
+
+  function addEdgeSlot(map, nodeId, side, edge, from, to, role) {
+    const key = `${nodeId}:${side}`;
+    const other = role === "target" ? center(from) : center(to);
+    const sortValue = side === "left" || side === "right" ? other.y : other.x;
+    if (!map.has(key)) map.set(key, { node: role === "target" ? to : from, side, items: [] });
+    map.get(key).items.push({ edgeId: edge.id, sortValue });
+  }
+
+  function assignEdgeSlots(map) {
+    const slots = new Map();
+    map.forEach(({ node, side, items }) => {
+      const extent = side === "left" || side === "right" ? node.height : node.width;
+      const sorted = [...items].sort((a, b) => a.sortValue - b.sortValue || String(a.edgeId).localeCompare(String(b.edgeId)));
+      sorted.forEach((item, index) => {
+        slots.set(item.edgeId, slotOffset(index, sorted.length, extent));
+      });
+    });
+    return slots;
+  }
+
+  function slotOffset(index, total, extent) {
+    if (total <= 1) return 0;
+    const usable = Math.max(0, extent - 28);
+    const spacing = Math.min(EDGE_SLOT_SPACING, usable / Math.max(1, total - 1));
+    return (index - (total - 1) / 2) * spacing;
+  }
+
+  function connectorSides(edge, from, to) {
     const fc = center(from);
     const tc = center(to);
+    const manualPoint = storedBendPoint(edge, from, to);
+    if (manualPoint) {
+      return {
+        sourceSide: sideFacingPoint(fc, manualPoint),
+        targetSide: sideFacingPoint(tc, manualPoint),
+      };
+    }
     const horizontal = Math.abs(tc.x - fc.x) >= Math.abs(tc.y - fc.y);
-    const x1 = horizontal ? (tc.x >= fc.x ? from.x + from.width : from.x) : fc.x;
-    const y1 = horizontal ? fc.y : (tc.y >= fc.y ? from.y + from.height : from.y);
-    const x2 = horizontal ? (tc.x >= fc.x ? to.x : to.x + to.width) : tc.x;
-    const y2 = horizontal ? tc.y : (tc.y >= fc.y ? to.y : to.y + to.height);
-    return { x1, y1, x2, y2, mx: horizontal ? (x1 + x2) / 2 : x1 };
+    if (horizontal) {
+      return {
+        sourceSide: tc.x >= fc.x ? "right" : "left",
+        targetSide: tc.x >= fc.x ? "left" : "right",
+      };
+    }
+    return {
+      sourceSide: tc.y >= fc.y ? "bottom" : "top",
+      targetSide: tc.y >= fc.y ? "top" : "bottom",
+    };
+  }
+
+  function connectorPoints(edge, from, to, layout) {
+    const sides = layout?.meta.get(edge.id) || connectorSides(edge, from, to);
+    const start = anchorPoint(from, sides.sourceSide, layout?.outgoing.get(edge.id) || 0);
+    const end = anchorPoint(to, sides.targetSide, layout?.incoming.get(edge.id) || 0);
+    const manualPoint = storedBendPoint(edge, from, to);
+    const bendPoint = manualPoint || defaultBendPoint(start, end, sides);
+    return {
+      x1: start.x,
+      y1: start.y,
+      x2: end.x,
+      y2: end.y,
+      bx: bendPoint.x,
+      by: bendPoint.y,
+      sourceSide: sides.sourceSide,
+      targetSide: sides.targetSide,
+      manual: Boolean(manualPoint),
+      route: routeConnector(edge, start, end, sides, bendPoint),
+    };
+  }
+
+  function storedBendPoint(edge, from, to) {
+    const point = edge?.style?.bendPoint;
+    const x = Number(point?.x);
+    const y = Number(point?.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+
+    const legacyAxis = edge?.style?.bendAxis;
+    const legacyBend = Number(edge?.style?.bend);
+    if (Number.isFinite(legacyBend)) {
+      const fc = center(from);
+      const tc = center(to);
+      if (legacyAxis === "x") return { x: legacyBend, y: (fc.y + tc.y) / 2 };
+      if (legacyAxis === "y") return { x: (fc.x + tc.x) / 2, y: legacyBend };
+    }
+    return null;
+  }
+
+  function defaultBendPoint(start, end, sides) {
+    return { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+  }
+
+  function sideFacingPoint(centerPoint, point) {
+    const dx = point.x - centerPoint.x;
+    const dy = point.y - centerPoint.y;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "right" : "left";
+    return dy >= 0 ? "bottom" : "top";
+  }
+
+  function anchorPoint(node, side, offset) {
+    if (side === "left" || side === "right") {
+      const limit = Math.max(0, node.height / 2 - 14);
+      return {
+        x: side === "left" ? node.x : node.x + node.width,
+        y: node.y + node.height / 2 + clamp(offset, -limit, limit),
+      };
+    }
+    const limit = Math.max(0, node.width / 2 - 14);
+    return {
+      x: node.x + node.width / 2 + clamp(offset, -limit, limit),
+      y: side === "top" ? node.y : node.y + node.height,
+    };
+  }
+
+  function connectorHandlePoint(points) {
+    if (points.route?.length >= 2) return routeMidpoint(points.route);
+    return { x: points.bx, y: points.by };
+  }
+
+  function routeMidpoint(route) {
+    let totalLen = 0;
+    for (let i = 1; i < route.length; i++) {
+      totalLen += Math.hypot(route[i].x - route[i - 1].x, route[i].y - route[i - 1].y);
+    }
+    let half = totalLen / 2;
+    for (let i = 1; i < route.length; i++) {
+      const segLen = Math.hypot(route[i].x - route[i - 1].x, route[i].y - route[i - 1].y);
+      if (half <= segLen || i === route.length - 1) {
+        const t = segLen > 0 ? half / segLen : 0;
+        return {
+          x: route[i - 1].x + (route[i].x - route[i - 1].x) * t,
+          y: route[i - 1].y + (route[i].y - route[i - 1].y) * t,
+        };
+      }
+      half -= segLen;
+    }
+    return { x: route[0].x, y: route[0].y };
+  }
+
+  function connectorLabelPoint(points) {
+    return connectorHandlePoint(points);
+  }
+
+  function routeConnector(edge, start, end, sides, bendPoint) {
+    const sourceStub = shiftPoint(start, sides.sourceSide, EDGE_STUB_LENGTH);
+    const targetStub = shiftPoint(end, sides.targetSide, EDGE_STUB_LENGTH);
+    const obstacles = connectorObstacles(edge);
+    const routed = findOrthogonalRoute(sourceStub, targetStub, bendPoint, obstacles);
+    const inner = routed?.length ? routed : [
+      sourceStub,
+      turnPointForSide(sourceStub, sides.sourceSide, bendPoint),
+      bendPoint,
+      turnPointForSide(targetStub, sides.targetSide, bendPoint),
+      targetStub,
+    ];
+    return simplifyRoute([start, ...inner, end]);
+  }
+
+  function connectorObstacles(edge) {
+    return state.doc.nodes
+      .filter((node) => node.id !== edge.from && node.id !== edge.to)
+      .map((node) => ({
+        x: node.x - EDGE_OBSTACLE_PADDING,
+        y: node.y - EDGE_OBSTACLE_PADDING,
+        width: node.width + EDGE_OBSTACLE_PADDING * 2,
+        height: node.height + EDGE_OBSTACLE_PADDING * 2,
+      }));
+  }
+
+  function findOrthogonalRoute(start, end, preferred, obstacles) {
+    const canvasW = state.doc.canvas.width;
+    const canvasH = state.doc.canvas.height;
+    const xs = uniqueNumbers([
+      start.x, end.x, preferred.x,
+      0, canvasW,
+      ...obstacles.flatMap((rect) => [rect.x, rect.x + rect.width]),
+    ].map((value) => clamp(value, 0, canvasW)));
+    const ys = uniqueNumbers([
+      start.y, end.y, preferred.y,
+      0, canvasH,
+      ...obstacles.flatMap((rect) => [rect.y, rect.y + rect.height]),
+    ].map((value) => clamp(value, 0, canvasH)));
+
+    const points = [];
+    const indexByKey = new Map();
+    xs.forEach((x) => {
+      ys.forEach((y) => {
+        addRoutePoint(points, indexByKey, { x, y }, obstacles);
+      });
+    });
+    const startIndex = addRoutePoint(points, indexByKey, start, obstacles, true);
+    const endIndex = addRoutePoint(points, indexByKey, end, obstacles, true);
+    if (startIndex < 0 || endIndex < 0) return null;
+
+    const neighbors = buildRouteNeighbors(points, obstacles);
+    return shortestRoute(points, neighbors, startIndex, endIndex, preferred);
+  }
+
+  function addRoutePoint(points, indexByKey, point, obstacles, force = false) {
+    const next = { x: roundCoord(point.x), y: roundCoord(point.y) };
+    const key = pointKey(next);
+    if (indexByKey.has(key)) return indexByKey.get(key);
+    if (!force && obstacles.some((rect) => pointInsideRect(next, rect))) return -1;
+    const index = points.length;
+    points.push(next);
+    indexByKey.set(key, index);
+    return index;
+  }
+
+  function buildRouteNeighbors(points, obstacles) {
+    const neighbors = new Map(points.map((_, index) => [index, []]));
+    const byY = new Map();
+    const byX = new Map();
+    points.forEach((point, index) => {
+      const xKey = roundCoord(point.x);
+      const yKey = roundCoord(point.y);
+      if (!byY.has(yKey)) byY.set(yKey, []);
+      if (!byX.has(xKey)) byX.set(xKey, []);
+      byY.get(yKey).push(index);
+      byX.get(xKey).push(index);
+    });
+    byY.forEach((indexes) => {
+      indexes.sort((a, b) => points[a].x - points[b].x);
+      connectRouteLine(points, neighbors, indexes, obstacles, "x");
+    });
+    byX.forEach((indexes) => {
+      indexes.sort((a, b) => points[a].y - points[b].y);
+      connectRouteLine(points, neighbors, indexes, obstacles, "y");
+    });
+    return neighbors;
+  }
+
+  function connectRouteLine(points, neighbors, indexes, obstacles, dir) {
+    for (let i = 0; i < indexes.length - 1; i += 1) {
+      const a = indexes[i];
+      const b = indexes[i + 1];
+      if (!segmentClear(points[a], points[b], obstacles)) continue;
+      const distance = manhattan(points[a], points[b]);
+      neighbors.get(a).push({ to: b, dir, distance });
+      neighbors.get(b).push({ to: a, dir, distance });
+    }
+  }
+
+  function shortestRoute(points, neighbors, startIndex, endIndex, preferred) {
+    const queue = [{ index: startIndex, dir: "", cost: 0, key: `${startIndex}|` }];
+    const dist = new Map([[`${startIndex}|`, 0]]);
+    const prev = new Map();
+    let bestKey = "";
+    while (queue.length) {
+      queue.sort((a, b) => a.cost - b.cost);
+      const current = queue.shift();
+      if (current.cost !== dist.get(current.key)) continue;
+      if (current.index === endIndex) {
+        bestKey = current.key;
+        break;
+      }
+      (neighbors.get(current.index) || []).forEach((edge) => {
+        const turnPenalty = current.dir && current.dir !== edge.dir ? 12 : 0;
+        const bias = distancePointToSegment(preferred, points[current.index], points[edge.to]) * 0.015;
+        const nextCost = current.cost + edge.distance + turnPenalty + bias;
+        const nextKey = `${edge.to}|${edge.dir}`;
+        if (nextCost >= (dist.get(nextKey) ?? Infinity)) return;
+        dist.set(nextKey, nextCost);
+        prev.set(nextKey, current.key);
+        queue.push({ index: edge.to, dir: edge.dir, cost: nextCost, key: nextKey });
+      });
+    }
+    if (!bestKey) return null;
+    const result = [];
+    let key = bestKey;
+    while (key) {
+      const index = Number(key.split("|")[0]);
+      result.push(points[index]);
+      key = prev.get(key);
+    }
+    return simplifyRoute(result.reverse());
+  }
+
+  function uniqueNumbers(values) {
+    return Array.from(new Set(values.map(roundCoord))).sort((a, b) => a - b);
+  }
+
+  function roundCoord(value) {
+    return Math.round(Number(value) * 100) / 100;
+  }
+
+  function pointKey(point) {
+    return `${roundCoord(point.x)},${roundCoord(point.y)}`;
+  }
+
+  function pointInsideRect(point, rect) {
+    return point.x > rect.x && point.x < rect.x + rect.width
+      && point.y > rect.y && point.y < rect.y + rect.height;
+  }
+
+  function segmentClear(a, b, obstacles) {
+    return !obstacles.some((rect) => segmentIntersectsRect(a, b, rect));
+  }
+
+  function segmentIntersectsRect(a, b, rect) {
+    if (Math.abs(a.y - b.y) < 0.01) {
+      const y = a.y;
+      if (y <= rect.y || y >= rect.y + rect.height) return false;
+      return rangesOverlap(Math.min(a.x, b.x), Math.max(a.x, b.x), rect.x, rect.x + rect.width);
+    }
+    if (Math.abs(a.x - b.x) < 0.01) {
+      const x = a.x;
+      if (x <= rect.x || x >= rect.x + rect.width) return false;
+      return rangesOverlap(Math.min(a.y, b.y), Math.max(a.y, b.y), rect.y, rect.y + rect.height);
+    }
+    return true;
+  }
+
+  function rangesOverlap(a1, a2, b1, b2) {
+    return Math.max(a1, b1) < Math.min(a2, b2);
+  }
+
+  function manhattan(a, b) {
+    return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+  }
+
+  function distancePointToSegment(point, a, b) {
+    if (Math.abs(a.x - b.x) < 0.01) {
+      const minY = Math.min(a.y, b.y);
+      const maxY = Math.max(a.y, b.y);
+      if (point.y >= minY && point.y <= maxY) return Math.abs(point.x - a.x);
+      return Math.min(manhattan(point, a), manhattan(point, b));
+    }
+    if (Math.abs(a.y - b.y) < 0.01) {
+      const minX = Math.min(a.x, b.x);
+      const maxX = Math.max(a.x, b.x);
+      if (point.x >= minX && point.x <= maxX) return Math.abs(point.y - a.y);
+      return Math.min(manhattan(point, a), manhattan(point, b));
+    }
+    return Math.min(manhattan(point, a), manhattan(point, b));
+  }
+
+  function simplifyRoute(route) {
+    const compact = route.filter((point, index) => {
+      if (index === 0) return true;
+      const prev = route[index - 1];
+      return Math.abs(point.x - prev.x) > 0.01 || Math.abs(point.y - prev.y) > 0.01;
+    });
+    const simplified = [];
+    compact.forEach((point) => {
+      simplified.push(point);
+      while (simplified.length >= 3) {
+        const a = simplified[simplified.length - 3];
+        const b = simplified[simplified.length - 2];
+        const c = simplified[simplified.length - 1];
+        const collinear = (Math.abs(a.x - b.x) < 0.01 && Math.abs(b.x - c.x) < 0.01)
+          || (Math.abs(a.y - b.y) < 0.01 && Math.abs(b.y - c.y) < 0.01);
+        if (!collinear) break;
+        simplified.splice(simplified.length - 2, 1);
+      }
+    });
+    return simplified;
+  }
+
+  function pathDFromPoints(route) {
+    return route.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+  }
+
+  function shiftPoint(point, side, amount) {
+    if (side === "left") return { x: clamp(point.x - amount, 0, state.doc.canvas.width), y: point.y };
+    if (side === "right") return { x: clamp(point.x + amount, 0, state.doc.canvas.width), y: point.y };
+    if (side === "top") return { x: point.x, y: clamp(point.y - amount, 0, state.doc.canvas.height) };
+    return { x: point.x, y: clamp(point.y + amount, 0, state.doc.canvas.height) };
+  }
+
+  function orthogonalPathThroughPoint(points) {
+    const bend = { x: points.bx, y: points.by };
+    const route = [
+      { x: points.x1, y: points.y1 },
+      turnPointForSide({ x: points.x1, y: points.y1 }, points.sourceSide, bend),
+      bend,
+      turnPointForSide({ x: points.x2, y: points.y2 }, points.targetSide, bend),
+      { x: points.x2, y: points.y2 },
+    ];
+    const compact = route.filter((point, index) => {
+      if (index === 0) return true;
+      const prev = route[index - 1];
+      return Math.abs(point.x - prev.x) > 0.01 || Math.abs(point.y - prev.y) > 0.01;
+    });
+    return compact.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+  }
+
+  function turnPointForSide(anchor, side, bend) {
+    if (side === "left" || side === "right") return { x: bend.x, y: anchor.y };
+    return { x: anchor.x, y: bend.y };
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
   }
 
   function center(node) {
@@ -857,6 +1284,7 @@
   function startNodePointer(event, id) {
     if (event.button !== 0) return;
     event.stopPropagation();
+    closeContextMenu();
     const point = canvasPoint(event);
     state.lastPointer = point;
     if (state.tool === "connector") {
@@ -889,6 +1317,23 @@
       .map((node) => ({ id: node.id, x: node.x, y: node.y, width: node.width, height: node.height }));
     state.drag = { mode: resizing ? "resize" : "move", start: point, selected, committed: false };
     target.ownerSVGElement.setPointerCapture(event.pointerId);
+  }
+
+  function startEdgePointer(event, edge, points) {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    closeContextMenu();
+    const point = canvasPoint(event);
+    state.selectedConnectorId = edge.id;
+    state.selectedNodeIds = [];
+    state.edgeDrag = {
+      edgeId: edge.id,
+      start: point,
+      originPoint: connectorHandlePoint(points),
+      committed: false,
+    };
+    svg.setPointerCapture(event.pointerId);
+    render();
   }
 
   function moveDrag(event) {
@@ -935,9 +1380,36 @@
     render();
   }
 
+  function moveEdgeDrag(event) {
+    if (!state.edgeDrag) return;
+    const edge = edgeById(state.edgeDrag.edgeId);
+    if (!edge) return;
+    const point = canvasPoint(event);
+    const dx = point.x - state.edgeDrag.start.x;
+    const dy = point.y - state.edgeDrag.start.y;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    if (!state.edgeDrag.committed) {
+      pushHistory();
+      state.edgeDrag.committed = true;
+    }
+    edge.style = edge.style || {};
+    edge.style.routing = "orthogonal";
+    edge.style.bendPoint = {
+      x: clamp(state.edgeDrag.originPoint.x + dx, 0, state.doc.canvas.width),
+      y: clamp(state.edgeDrag.originPoint.y + dy, 0, state.doc.canvas.height),
+    };
+    delete edge.style.bendAxis;
+    delete edge.style.bend;
+    setDirty(true);
+    render();
+  }
+
   function endDrag() {
+    const hadEdgeDrag = state.edgeDrag;
     state.drag = null;
     state.rotateAction = null;
+    state.edgeDrag = null;
+    if (hadEdgeDrag) render();
   }
 
   function connectNode(id) {
@@ -1718,6 +2190,8 @@
         items = [
           { label: `${state.selectedNodeIds.length}個のノードを選択中`, disabled: true },
           { divider: true },
+          { label: "ここから線を引く", action: "context-add-connector" },
+          { divider: true },
           { label: "左揃え", action: "align-left" },
           { label: "右揃え", action: "align-right" },
           { label: "上揃え", action: "align-top" },
@@ -2367,6 +2841,9 @@
       if (!event.target.closest(".pf-theme-wrap")) closeThemePopup();
       if (!event.target.closest("#pf-context-menu")) closeContextMenu();
     });
+    document.addEventListener("pointerdown", (event) => {
+      if (event.button === 0 && !event.target.closest("#pf-context-menu")) closeContextMenu();
+    });
     document.addEventListener("scroll", closeContextMenu, true);
     window.addEventListener("blur", closeContextMenu);
     svg.addEventListener("contextmenu", (event) => {
@@ -2392,6 +2869,7 @@
     svg.addEventListener("pointerdown", startCanvasPointer);
     svg.addEventListener("pointermove", (event) => {
       moveDrag(event);
+      moveEdgeDrag(event);
       if (state.pendingConnectorNodeId) {
         state.connectorPreview = canvasPoint(event);
         render();
@@ -2558,9 +3036,13 @@
       "context-edit-text": () => state.selectedNodeIds[0] && editNodeText(state.selectedNodeIds[0]),
       "context-edit-label": () => state.selectedConnectorId && editEdgeLabel(state.selectedConnectorId),
       "context-add-connector": () => {
-        if (state.selectedNodeIds[0]) {
-          state.pendingConnectorNodeId = state.selectedNodeIds[0];
+        const sourceId = state.contextNodeId || state.selectedNodeIds[0];
+        if (sourceId) {
           setTool("connector");
+          state.pendingConnectorNodeId = sourceId;
+          state.selectedNodeIds = [sourceId];
+          state.selectedConnectorId = null;
+          render();
         }
       },
       "align-left": () => alignSelected("left"),
