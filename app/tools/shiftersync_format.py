@@ -30,6 +30,7 @@ SUBSTITUTE_REQUESTED_AT_ROW_PREFIX = "#substitute_requested_at"
 SUBSTITUTE_HELPER_USER_ID_ROW_PREFIX = "#substitute_helper_user_id"
 SUBSTITUTE_HELPER_NAME_ROW_PREFIX = "#substitute_helper_name"
 SUBSTITUTE_HELPED_AT_ROW_PREFIX = "#substitute_helped_at"
+SUBSTITUTE_UNASSIGNED_HELPER_ROW_PREFIX = "#substitute_unassigned_helper"
 SUBSTITUTE_SOURCE_PROJECT_ID_ROW_PREFIX = "#substitute_source_project_id"
 SUBSTITUTE_SOURCE_PROJECT_TITLE_ROW_PREFIX = "#substitute_source_project_title"
 SUBSTITUTE_SOURCE_PROJECT_MODE_ROW_PREFIX = "#substitute_source_project_mode"
@@ -188,6 +189,7 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
             "substitute_helper_user_id": _normalize_sync_text(raw.get("substitute_helper_user_id", raw.get("substituteHelperUserId", "")), limit=80),
             "substitute_helper_name": _normalize_sync_text(raw.get("substitute_helper_name", raw.get("substituteHelperName", "")), limit=120),
             "substitute_helped_at": _normalize_sync_text(raw.get("substitute_helped_at", raw.get("substituteHelpedAt", "")), limit=40),
+            "substitute_unassigned_helper": _normalize_bool(raw.get("substitute_unassigned_helper", raw.get("substituteUnassignedHelper", False))),
             "substitute_source_project_id": _normalize_sync_text(raw.get("substitute_source_project_id", raw.get("substituteSourceProjectId", "")), limit=80),
             "substitute_source_project_title": _normalize_sync_text(raw.get("substitute_source_project_title", raw.get("substituteSourceProjectTitle", "")), limit=120),
             "substitute_source_project_mode": _normalize_sync_text(raw.get("substitute_source_project_mode", raw.get("substituteSourceProjectMode", "")), limit=40),
@@ -229,6 +231,7 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         "substitute_helper_user_id": "",
         "substitute_helper_name": "",
         "substitute_helped_at": "",
+        "substitute_unassigned_helper": False,
         "substitute_source_project_id": "",
         "substitute_source_project_title": "",
         "substitute_source_project_mode": "",
@@ -357,6 +360,8 @@ def serialize_entry_rows(
                 substitute_rows.append([SUBSTITUTE_HELPER_NAME_ROW_PREFIX, day, index, entry["substitute_helper_name"]])
             if entry.get("substitute_helped_at"):
                 substitute_rows.append([SUBSTITUTE_HELPED_AT_ROW_PREFIX, day, index, entry["substitute_helped_at"]])
+            if entry.get("substitute_unassigned_helper"):
+                substitute_rows.append([SUBSTITUTE_UNASSIGNED_HELPER_ROW_PREFIX, day, index, "1"])
             if entry.get("substitute_source_project_id"):
                 substitute_rows.append([SUBSTITUTE_SOURCE_PROJECT_ID_ROW_PREFIX, day, index, entry["substitute_source_project_id"]])
             if entry.get("substitute_source_project_title"):
@@ -463,6 +468,7 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         SUBSTITUTE_HELPER_USER_ID_ROW_PREFIX,
         SUBSTITUTE_HELPER_NAME_ROW_PREFIX,
         SUBSTITUTE_HELPED_AT_ROW_PREFIX,
+        SUBSTITUTE_UNASSIGNED_HELPER_ROW_PREFIX,
         SUBSTITUTE_SOURCE_PROJECT_ID_ROW_PREFIX,
         SUBSTITUTE_SOURCE_PROJECT_TITLE_ROW_PREFIX,
         SUBSTITUTE_SOURCE_PROJECT_MODE_ROW_PREFIX,
@@ -633,6 +639,7 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         SUBSTITUTE_HELPER_USER_ID_ROW_PREFIX: ("substitute_helper_user_id", lambda value: _normalize_sync_text(value, limit=80)),
         SUBSTITUTE_HELPER_NAME_ROW_PREFIX: ("substitute_helper_name", lambda value: _normalize_sync_text(value, limit=120)),
         SUBSTITUTE_HELPED_AT_ROW_PREFIX: ("substitute_helped_at", lambda value: _normalize_sync_text(value, limit=40)),
+        SUBSTITUTE_UNASSIGNED_HELPER_ROW_PREFIX: ("substitute_unassigned_helper", _normalize_bool),
         SUBSTITUTE_SOURCE_PROJECT_ID_ROW_PREFIX: ("substitute_source_project_id", lambda value: _normalize_sync_text(value, limit=80)),
         SUBSTITUTE_SOURCE_PROJECT_TITLE_ROW_PREFIX: ("substitute_source_project_title", lambda value: _normalize_sync_text(value, limit=120)),
         SUBSTITUTE_SOURCE_PROJECT_MODE_ROW_PREFIX: ("substitute_source_project_mode", lambda value: _normalize_sync_text(value, limit=40)),

@@ -13,6 +13,7 @@
       draftVisualObserver: null,
       unsavedObserver: null,
       unsavedBaseline: null,
+      pendingSubstituteRequests: [],
       syncReturnContext: null,
       guestName: PAGE.authenticatedEditorName || '',
       assist: {
@@ -525,12 +526,103 @@
       return parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0;
     }
 
+    function monthKeyForValue(month) {
+      return month ? `${month.year}-${String(month.month).padStart(2, '0')}` : '';
+    }
+
+    function samePendingSubstituteRequest(left, right) {
+      return String(left && left.project_id || '') === String(right && right.project_id || '')
+        && String(left && left.month_key || '') === String(right && right.month_key || '')
+        && String(left && left.day || '') === String(right && right.day || '')
+        && String(left && left.entry_id || '') === String(right && right.entry_id || '');
+    }
+
+    function currentPendingSubstituteRequests() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) return [];
+      const projectId = String(project.id || '');
+      const monthKey = currentMonthKey() || monthKeyForValue(month);
+      return state.pendingSubstituteRequests.filter((item) => (
+        String(item.project_id || '') === projectId
+        && String(item.month_key || '') === String(monthKey || '')
+      ));
+    }
+
+    function pendingSubstituteRequestsFingerprint() {
+      return JSON.stringify(currentPendingSubstituteRequests().map((item) => ({
+        project_id: String(item.project_id || ''),
+        month_key: String(item.month_key || ''),
+        day: String(item.day || ''),
+        entry_id: String(item.entry_id || ''),
+        option_key: String(item.option_key || ''),
+        comment: String(item.comment || '')
+      })));
+    }
+
+    function normalizePendingSubstituteRequest(context) {
+      const project = currentProject();
+      const month = currentMonth();
+      const day = String(context && context.day ? context.day : '').trim();
+      if (!project || !month || !day) return null;
+      return {
+        project_id: String(project.id || ''),
+        month_key: currentMonthKey() || monthKeyForValue(month),
+        year: month.year,
+        month: month.month,
+        day,
+        entry_id: String(context.entryId || ''),
+        option_key: String(context.optionKey || ''),
+        comment: String(context.comment || '')
+      };
+    }
+
+    function queuePendingSubstituteRequest(context) {
+      const item = normalizePendingSubstituteRequest(context);
+      if (!item) return 0;
+      const index = state.pendingSubstituteRequests.findIndex((candidate) => samePendingSubstituteRequest(candidate, item));
+      if (index >= 0) {
+        state.pendingSubstituteRequests.splice(index, 1, item);
+      } else {
+        state.pendingSubstituteRequests.push(item);
+      }
+      return currentPendingSubstituteRequests().length;
+    }
+
+    function clearPendingSubstituteRequests() {
+      state.pendingSubstituteRequests = [];
+    }
+
+    async function submitPendingSubstituteRequestsForCurrentMonth() {
+      const project = currentProject();
+      if (!project) return 0;
+      const pending = currentPendingSubstituteRequests();
+      let submitted = 0;
+      for (const item of pending) {
+        await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/substitute-request`, {
+          method: 'POST',
+          body: {
+            year: item.year,
+            month: item.month,
+            day: item.day,
+            entry_id: item.entry_id || '',
+            option_key: item.option_key || '',
+            comment: item.comment || ''
+          }
+        });
+        submitted += 1;
+        state.pendingSubstituteRequests = state.pendingSubstituteRequests.filter((candidate) => !samePendingSubstituteRequest(candidate, item));
+      }
+      return submitted;
+    }
+
     function resetUnsavedBaseline() {
       state.unsavedBaseline = currentMonth()
         ? {
             entries: editingEntriesFingerprint(currentEditingEntries()),
             requiredCapacity: currentRequiredCapacityValue(),
-            editorMode: state.editorMode
+            editorMode: state.editorMode,
+            substituteRequests: pendingSubstituteRequestsFingerprint()
           }
         : null;
     }
@@ -541,7 +633,10 @@
       if (editingEntriesFingerprint(currentEditingEntries()) !== state.unsavedBaseline.entries) {
         return true;
       }
-      return currentRequiredCapacityValue() !== state.unsavedBaseline.requiredCapacity;
+      if (currentRequiredCapacityValue() !== state.unsavedBaseline.requiredCapacity) {
+        return true;
+      }
+      return pendingSubstituteRequestsFingerprint() !== state.unsavedBaseline.substituteRequests;
     }
 
     function updateUnsavedIndicator() {
@@ -695,6 +790,48 @@
       return parsed ? `${parsed.year}年${parsed.month}月` : '未選択';
     }
 
+    function currentJstParts() {
+      const date = new Date();
+      return new Intl.DateTimeFormat('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric'
+      }).formatToParts(date).reduce((acc, part) => {
+        acc[part.type] = parseInt(part.value, 10);
+        return acc;
+      }, {});
+    }
+
+    function currentJstMonthKey() {
+      const parts = currentJstParts();
+      return `${parts.year}-${String(parts.month).padStart(2, '0')}`;
+    }
+
+    function formatTimestamp(value) {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      const normalized = text.includes('T') ? text : text.replace(' ', 'T');
+      const date = new Date(normalized);
+      if (Number.isNaN(date.getTime())) return text;
+      const parts = new Intl.DateTimeFormat('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).formatToParts(date).reduce((acc, part) => {
+        acc[part.type] = part.value;
+        return acc;
+      }, {});
+      return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+    }
+
+    window.CLOUDSHIFT_FORMAT_TIMESTAMP = formatTimestamp;
+
     function nextMonthKey(monthKey, delta) {
       const parsed = parseMonthKey(monthKey);
       if (!parsed) return null;
@@ -703,7 +840,7 @@
     }
 
     function promptMonthKey(defaultValue) {
-      return window.prompt('作成する年月を YYYY-MM 形式で入力してください', defaultValue || new Date().toISOString().slice(0, 7));
+      return window.prompt('作成する年月を YYYY-MM 形式で入力してください', defaultValue || currentJstMonthKey());
     }
 
     function selectedLeaveCalendarId() {
@@ -1035,12 +1172,12 @@
     function resetCreateForm() {
       const form = $('cloud-create-form');
       const refs = titleFieldRefs('create');
-      const now = new Date();
+      const now = currentJstParts();
       if (form) {
         form.reset();
       }
-      if ($('cloud-create-year')) $('cloud-create-year').value = now.getFullYear();
-      if ($('cloud-create-month')) $('cloud-create-month').value = now.getMonth() + 1;
+      if ($('cloud-create-year')) $('cloud-create-year').value = now.year;
+      if ($('cloud-create-month')) $('cloud-create-month').value = now.month;
       if ($('cloud-create-mode')) $('cloud-create-mode').value = 'scene';
       if (refs.input) {
         refs.input.value = '';
@@ -1514,8 +1651,8 @@
       if (month) {
         return `${month.year}-${String(month.month).padStart(2, '0')}-01`;
       }
-      const now = new Date();
-      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const now = currentJstParts();
+      return `${now.year}-${String(now.month).padStart(2, '0')}-${String(now.day).padStart(2, '0')}`;
     }
 
     function resetAssistState() {
@@ -4466,7 +4603,7 @@
               <span class="cloud-badge">${project.latest_month_key ? escapeHtml(formatMonthKey(project.latest_month_key)) : '未作成月'}</span>
             </div>
             <div class="cloud-project-meta">
-              <span>最終更新: ${escapeHtml(project.updated_at || '-')}</span>
+              <span>最終更新: ${escapeHtml(formatTimestamp(project.updated_at) || '-')}</span>
               ${shareText ? `<span class="cloud-badge ${project.access_role === 'viewer' ? 'shared' : 'shared-owner'}">${escapeHtml(shareText)}</span>` : ''}
             </div>
           </article>
@@ -4724,7 +4861,7 @@
 
       list.innerHTML = history.map((item) => `
         <article class="cloud-history-item">
-          <div class="cloud-badge">${escapeHtml(item.timestamp || '')} / ${escapeHtml(item.editor_name || '')}</div>
+          <div class="cloud-badge">${escapeHtml(formatTimestamp(item.timestamp))} / ${escapeHtml(item.editor_name || '')}</div>
           <ul>${(item.changes || []).map((change) => `<li>${escapeHtml(change)}</li>`).join('')}</ul>
         </article>
       `).join('');
@@ -4895,7 +5032,7 @@
       if (currentRevision && !rows.some((item) => Number(item.revision || item.version || item.rev || 0) === currentRevision)) {
         rows.unshift({
           revision: currentRevision,
-          updated_at: month.updated_at || month.created_at || '-',
+          updated_at: formatTimestamp(month.updated_at || month.created_at) || '-',
           entry_count: Object.values(month.entries_per_day || {}).reduce((total, entries) => total + (Array.isArray(entries) ? entries.length : 0), 0),
           current: true,
           note: '現在の版'
@@ -4912,7 +5049,7 @@
       const firstRestorableIndex = revisions.findIndex((revision) => !(revision.current || revision.is_current));
       return revisions.map((revision, index) => {
         const revisionNo = Number(revision.revision || revision.version || revision.rev || index + 1);
-        const updatedAt = revision.updated_at || revision.timestamp || revision.created_at || '-';
+        const updatedAt = formatTimestamp(revision.updated_at || revision.timestamp || revision.created_at) || '-';
         const entryCount = revision.entry_count ?? revision.entries_count ?? revision.total_entries ?? '';
         const commentCount = revision.comment_count ?? revision.comments_count ?? '';
         const isCurrent = !!revision.current || !!revision.is_current;
@@ -5578,20 +5715,12 @@
     async function requestSubstituteFromEntry(context) {
       const project = currentProject();
       const month = currentMonth();
-      if (!project || !month || !context || !context.entryId) {
+      if (!project || !month || !context || !context.day) {
         return;
       }
-      await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/substitute-request`, {
-        method: 'POST',
-        body: {
-          year: month.year,
-          month: month.month,
-          day: context.day,
-          entry_id: context.entryId
-        }
-      });
-      await loadProjects();
-      showFlash('要代務シフト帳へ代務要請を登録しました', 'success');
+      const pendingCount = queuePendingSubstituteRequest(context);
+      updateUnsavedIndicator();
+      showFlash(`代務要請を仮登録しました。この月を保存すると要代務シフト帳へ登録されます（保留 ${pendingCount} 件）`, 'info');
     }
 
     function buildCalendarHost(targetId) {
@@ -5712,7 +5841,7 @@
           ${draftChanged ? `<span class="cloud-badge cloud-draft-badge">仮保存あり</span>` : ''}
           ${project.mode === 'scene' ? `<span class="cloud-badge">${escapeHtml(project.site && project.site.site_id ? `${project.site.site_id} / ${project.site.site_name || ''}` : '現場未設定')}</span>` : ''}
           ${project.mode === 'master' ? `<span class="cloud-badge cloud-badge-master">${escapeHtml(masterTargetLabel)} ${escapeHtml(String(masterTargetCount))}件</span>` : ''}
-          <span class="cloud-badge">${escapeHtml(project.updated_at || '')}</span>
+          <span class="cloud-badge">${escapeHtml(formatTimestamp(project.updated_at))}</span>
         `;
       }
 
@@ -5828,10 +5957,14 @@
 
     async function selectProject(projectId, monthKey, options) {
       const settings = options || {};
-      if (!settings.skipUnsavedGuard && targetLosesCurrentEdits(projectId, monthKey) && !confirmDiscardUnsavedChanges()) {
+      const losesCurrentEdits = targetLosesCurrentEdits(projectId, monthKey);
+      if (!settings.skipUnsavedGuard && losesCurrentEdits && !confirmDiscardUnsavedChanges()) {
         if ($('cloud-month-select')) $('cloud-month-select').value = currentMonthKey() || '';
         updateUnsavedIndicator();
         return false;
+      }
+      if (losesCurrentEdits) {
+        clearPendingSubstituteRequests();
       }
       if (!settings.preserveSyncReturnContext) {
         state.syncReturnContext = null;
@@ -5856,10 +5989,14 @@
 
     async function loadPublic(monthKey, options) {
       const settings = options || {};
-      if (!settings.skipUnsavedGuard && currentMonth() && monthKey && String(monthKey) !== String(currentMonthKey() || '') && !confirmDiscardUnsavedChanges()) {
+      const losesCurrentEdits = currentMonth() && monthKey && String(monthKey) !== String(currentMonthKey() || '');
+      if (!settings.skipUnsavedGuard && losesCurrentEdits && !confirmDiscardUnsavedChanges()) {
         if ($('cloud-month-select')) $('cloud-month-select').value = currentMonthKey() || '';
         updateUnsavedIndicator();
         return false;
+      }
+      if (losesCurrentEdits) {
+        clearPendingSubstituteRequests();
       }
       const suffix = monthKey ? `?month_key=${encodeURIComponent(monthKey)}` : '';
       const payload = await requestJson(`/tools/shiftersync/cloudshift/api/public/${PAGE.accessMode}/${PAGE.token}${suffix}`);
@@ -5986,13 +6123,16 @@
       }));
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      const submittedRequests = await submitPendingSubstituteRequestsForCurrentMonth();
       await renderWorkspaceWithSiteBranches(true);
       await loadProjects();
       await loadHistory(project.id);
       if (await maybeReturnToSyncOrigin(project.id, `${month.year}-${String(month.month).padStart(2, '0')}`)) {
         return;
       }
-      showFlash('この月を保存しました', 'success');
+      showFlash(submittedRequests
+        ? `この月を保存し、代務要請 ${submittedRequests} 件を要代務シフト帳へ登録しました`
+        : 'この月を保存しました', 'success');
     }
 
     async function saveMonthDraft() {
@@ -6008,10 +6148,13 @@
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       state.editorMode = 'draft';
+      const submittedRequests = await submitPendingSubstituteRequestsForCurrentMonth();
       await renderWorkspaceWithSiteBranches(true);
       await loadProjects();
       await loadHistory(project.id);
-      showFlash('仮保存しました', 'success');
+      showFlash(submittedRequests
+        ? `仮保存し、代務要請 ${submittedRequests} 件を要代務シフト帳へ登録しました`
+        : '仮保存しました', 'success');
     }
 
     async function publishMonthDraft() {
@@ -6156,6 +6299,7 @@
       const useCopy = sourceMonthKey
         ? window.confirm(`${formatMonthKey(targetKey)} を現在の月からコピーして作成しますか？\nOK: コピー / キャンセル: 空で作成`)
         : false;
+      clearPendingSubstituteRequests();
 
       const body = {
         year: parsed.year,
@@ -6781,9 +6925,9 @@
     }
 
     async function initOwner() {
-      const now = new Date();
-      if ($('cloud-create-year')) $('cloud-create-year').value = now.getFullYear();
-      if ($('cloud-create-month')) $('cloud-create-month').value = now.getMonth() + 1;
+      const now = currentJstParts();
+      if ($('cloud-create-year')) $('cloud-create-year').value = now.year;
+      if ($('cloud-create-month')) $('cloud-create-month').value = now.month;
       setTitleFieldMode('create');
       bindOwnerEvents();
       ensureCloudActionButtons();

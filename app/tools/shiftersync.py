@@ -540,7 +540,7 @@ def _layout_png_entry_block(
         f"{entry['title']}{_comment_badge(entry['comment'])}",
         title_font,
         title_width,
-        1,
+        None,
     )
     comment_lines = _fit_calendar_lines(
         draw,
@@ -563,6 +563,65 @@ def _layout_png_entry_block(
     }
 
 
+def _pdf_text_width(text: str, font_name: str, font_size: float) -> float:
+    return pdfmetrics.stringWidth(str(text or ""), font_name, font_size)
+
+
+def _fit_pdf_lines(
+    text: str,
+    font_name: str,
+    font_size: float,
+    max_width: float,
+) -> list[str]:
+    normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return []
+
+    lines: list[str] = []
+    for paragraph in normalized.split("\n"):
+        current = ""
+        text_value = paragraph.strip()
+        if not text_value:
+            if lines:
+                lines.append("")
+            continue
+        for character in text_value:
+            candidate = f"{current}{character}"
+            if current and _pdf_text_width(candidate, font_name, font_size) > max_width:
+                lines.append(current)
+                current = character
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+    return lines
+
+
+def _layout_pdf_entry_block(
+    entry: dict[str, Any],
+    font_name: str,
+    title_width: float,
+    comment_width: float,
+) -> dict[str, Any]:
+    title_font_size = 8.5
+    comment_font_size = 7.5
+    title_lines = _fit_pdf_lines(
+        f"{entry['title']}{_comment_badge(entry['comment'])}",
+        font_name,
+        title_font_size,
+        title_width,
+    )
+    comment_lines = _fit_pdf_lines(entry["comment"], font_name, comment_font_size, comment_width)
+    block_height = max(12, len(title_lines) * 10)
+    if comment_lines:
+        block_height += 2 + len(comment_lines) * 8
+    return {
+        "title_lines": title_lines,
+        "comment_lines": comment_lines,
+        "block_height": block_height,
+    }
+
+
 def _draw_bold_calendar_text(
     draw: ImageDraw.ImageDraw,
     position: tuple[float, float],
@@ -576,9 +635,40 @@ def _draw_bold_calendar_text(
 
 
 def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None):
-    pdf = canvas.Canvas(path, pagesize=landscape(A4))
-    width, height = landscape(A4)
+    width, a4_height = landscape(A4)
     font_name = _register_pdf_font()
+
+    start_x = 34
+    cell_w = (width - 68) / 7
+    base_cell_h = 88
+    entry_gap = 3
+    title_width = cell_w - 12
+    comment_width = cell_w - 18
+
+    calendar_module = __import__("calendar")
+    weeks = calendar_module.Calendar(firstweekday=calendar_module.MONDAY).monthdayscalendar(year, month)
+    entry_layouts_by_day: dict[int, list[dict[str, Any]]] = {}
+    row_heights: list[float] = []
+    for week in weeks:
+        row_height = base_cell_h
+        for day in week:
+            if not day:
+                continue
+            layouts = [
+                _layout_pdf_entry_block(entry, font_name, title_width, comment_width)
+                for entry in day_map.get(day, [])
+            ]
+            entry_layouts_by_day[day] = layouts
+            content_height = 0
+            for index, layout in enumerate(layouts):
+                if index > 0:
+                    content_height += entry_gap
+                content_height += layout["block_height"]
+            row_height = max(row_height, 31 + content_height + 8)
+        row_heights.append(row_height)
+
+    height = max(a4_height, 118 + 26 + 28 + sum(row_heights) + 34)
+    pdf = canvas.Canvas(str(path), pagesize=(width, height))
 
     pdf.setFillColor(HexColor("#4f5a54"))
     pdf.rect(0, height - 72, width, 72, fill=1)
@@ -591,10 +681,7 @@ def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None
     pdf.setFont(font_name, 9)
     pdf.drawCentredString(width / 2, height - 60, _calendar_issued_text())
 
-    start_x = 34
     start_y = height - 118
-    cell_w = (width - 68) / 7
-    cell_h = 88
 
     pdf.setFont(font_name, 12)
     for column, day_name in enumerate(_calendar_weekdays()):
@@ -604,12 +691,12 @@ def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None
         pdf.setFillColor(HexColor("#43463f"))
         pdf.drawCentredString(x + cell_w / 2, start_y + 8, day_name)
 
-    calendar_module = __import__("calendar")
-    weeks = calendar_module.Calendar(firstweekday=calendar_module.MONDAY).monthdayscalendar(year, month)
+    current_top = start_y - 28
     for week_index, week in enumerate(weeks):
+        cell_h = row_heights[week_index]
+        y = current_top - cell_h
         for column, day in enumerate(week):
             x = start_x + column * cell_w
-            y = start_y - 28 - week_index * cell_h
             day_kind = _calendar_day_kind(year, month, day) if day else "weekday"
             if not day:
                 fill_color = HexColor("#ececec")
@@ -645,21 +732,22 @@ def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None
             pdf.setFont(font_name, 11)
             pdf.drawString(x + 6, y + cell_h - 16, str(day))
 
-            for line_index, entry in enumerate(entries[:4]):
-                line_y = y + cell_h - 30 - line_index * 14
-                title_text = entry["title"]
-                if len(title_text) > 15:
-                    title_text = f"{title_text[:15]}..."
+            cursor_y = y + cell_h - 30
+            for layout in entry_layouts_by_day.get(day, []):
                 pdf.setFont(font_name, 8.5)
                 pdf.setFillColor(HexColor("#111111"))
-                pdf.drawString(x + 6, line_y, f"{title_text}{_comment_badge(entry['comment'])}")
-                if entry["comment"]:
-                    comment_text = entry["comment"]
-                    if len(comment_text) > 16:
-                        comment_text = f"{comment_text[:16]}..."
+                for title_line in layout["title_lines"]:
+                    pdf.drawString(x + 6, cursor_y, title_line)
+                    cursor_y -= 10
+                if layout["comment_lines"]:
+                    cursor_y -= 1
                     pdf.setFont(font_name, 7.5)
                     pdf.setFillColor(HexColor("#111111"))
-                    pdf.drawString(x + 10, line_y - 9, comment_text)
+                    for comment_line in layout["comment_lines"]:
+                        pdf.drawString(x + 10, cursor_y, comment_line)
+                        cursor_y -= 8
+                cursor_y -= entry_gap
+        current_top = y
 
     pdf.save()
 

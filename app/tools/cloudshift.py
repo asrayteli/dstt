@@ -12,7 +12,7 @@ import traceback
 from calendar import monthrange
 from contextlib import contextmanager
 from copy import copy
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -137,6 +137,7 @@ SHIFT_SYNC_SOURCE_TYPES = {
 }
 SUBSTITUTE_MODE = "substitute"
 SUBSTITUTE_TITLE = "要代務シフト帳"
+JST = timezone(timedelta(hours=9))
 
 
 class CloudShiftError(Exception):
@@ -255,7 +256,7 @@ def _ensure_cloudshift_schema_before_request():
 
 
 def _utcnow_iso() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(JST).replace(microsecond=0).isoformat()
 
 
 def _runtime_root() -> Path:
@@ -343,7 +344,7 @@ def _month_key(year: int, month: int) -> str:
 
 
 def _current_month_key() -> str:
-    today = date.today()
+    today = datetime.now(JST).date()
     return _month_key(today.year, today.month)
 
 
@@ -1983,7 +1984,7 @@ def _ensure_substitute_projects_for_current_user() -> None:
     office_ids = sorted(_current_share_office_ids())
     if not office_ids:
         return
-    today = date.today()
+    today = datetime.now(JST).date()
     changed = False
     for office_id in office_ids:
         _ensure_substitute_project_for_office_month(int(office_id), today.year, today.month)
@@ -3228,10 +3229,12 @@ def _substitute_assignment(entry: dict[str, Any]) -> dict[str, Any] | None:
         helper_number = str(entry.get("substitute_helper_employee_number") or entry.get("substituteHelperEmployeeNumber") or "").strip()
         if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
             site_link["site_name"] = value_name
-        employee_name = helper_name
+        employee_name = helper_name or "未設定"
         employee_number = helper_number
+        unassigned_helper = not helper_name
     elif request_type == "person":
         employee_name = employee_name or value_name
+        unassigned_helper = False
         helper_site = _entry_site_link_fields(
             {
                 "site_row_id": entry.get("substitute_helper_site_row_id") or entry.get("substituteHelperSiteRowId"),
@@ -3259,6 +3262,7 @@ def _substitute_assignment(entry: dict[str, Any]) -> dict[str, Any] | None:
         "source_entry_id": str(entry.get("id") or "").strip(),
         "comment": str(entry.get("comment") or "").strip(),
         "request_type": request_type,
+        "unassigned_helper": unassigned_helper,
     }
 
 
@@ -3303,6 +3307,7 @@ def _build_scene_synced_entry_from_substitute(
         "comment": assignment.get("comment") or "",
         "employee_name": str(assignment.get("employee_name") or ""),
         "employee_number": str(assignment.get("employee_number") or ""),
+        "substitute_unassigned_helper": bool(assignment.get("unassigned_helper")),
         "site_row_id": "",
         "site_id": "",
         "site_name": "",
@@ -3435,15 +3440,16 @@ def _desired_shift_sync_entries_by_target(
                     "site_name": assignment.get("site_name"),
                     "value": _format_entry_value(assignment.get("option_key"), assignment.get("site_name")),
                 }
-                for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, person_probe):
-                    desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
-                        _build_person_synced_entry_from_substitute(
-                            source_project,
-                            assignment,
-                            month_key=month_key,
-                            day_key=day_key,
+                if not assignment.get("unassigned_helper"):
+                    for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, person_probe):
+                        desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                            _build_person_synced_entry_from_substitute(
+                                source_project,
+                                assignment,
+                                month_key=month_key,
+                                day_key=day_key,
+                            )
                         )
-                    )
                 for target_project_id in _matching_scene_project_ids_for_person_entry(source_project, site_probe):
                     target_project = _load_project(target_project_id)
                     desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
@@ -7223,6 +7229,79 @@ def _substitute_request_payload_from_source(
             "substitute_helper_site_row_id": "",
             "substitute_helper_site_id": "",
             "substitute_helper_site_name": "",
+    }
+    raise CloudShiftError("代務要請は個人シフト・現場シフトのみ対応です", 400)
+
+
+def _substitute_request_payload_from_day(
+    source_project: dict[str, Any],
+    *,
+    month_key: str,
+    day_key: str,
+    option_key: str | None = None,
+    comment: str | None = None,
+) -> dict[str, Any]:
+    mode = str(source_project.get("mode") or "").strip()
+    normalized_option = str(option_key or "").strip().upper()
+    if normalized_option not in OPTION_LABELS:
+        normalized_option = ""
+    source_entry_id = "day"
+    base = {
+        "id": _substitute_request_entry_id(str(source_project.get("id") or ""), month_key, day_key, source_entry_id),
+        "comment": str(comment or "").strip(),
+        "substitute_resolved": False,
+        "substitute_requester_user_id": _user_id(),
+        "substitute_requester_name": _user_label(),
+        "substitute_requested_at": _utcnow_iso(),
+        "substitute_helper_user_id": "",
+        "substitute_helper_name": "",
+        "substitute_helped_at": "",
+        "substitute_source_project_id": str(source_project.get("id") or ""),
+        "substitute_source_project_title": str(source_project.get("title") or ""),
+        "substitute_source_project_mode": mode,
+        "substitute_source_month_key": month_key,
+        "substitute_source_day": day_key,
+        "substitute_source_entry_id": source_entry_id,
+    }
+    if mode == "scene":
+        site_link = _project_site_payload(source_project)
+        site_name = str(site_link.get("site_name") or source_project.get("site_name") or source_project.get("title") or "").strip()
+        return {
+            **base,
+            "value": _format_entry_value(normalized_option or None, site_name),
+            "employee_name": "",
+            "employee_number": "",
+            "site_row_id": str(site_link.get("site_row_id") or ""),
+            "site_id": str(site_link.get("site_id") or ""),
+            "site_name": site_name,
+            "site_branch_row_id": "",
+            "site_branch": "",
+            "substitute_request_type": "scene",
+            "substitute_helper_employee_name": "",
+            "substitute_helper_employee_number": "",
+            "substitute_helper_site_row_id": "",
+            "substitute_helper_site_id": "",
+            "substitute_helper_site_name": "",
+        }
+    if mode == "person":
+        employee_name = str(source_project.get("title") or "").strip()
+        employee_number = str(source_project.get("employee_number") or "").strip()
+        return {
+            **base,
+            "value": _format_entry_value(normalized_option or None, employee_name),
+            "employee_name": employee_name,
+            "employee_number": employee_number,
+            "site_row_id": "",
+            "site_id": "",
+            "site_name": "",
+            "site_branch_row_id": "",
+            "site_branch": "",
+            "substitute_request_type": "person",
+            "substitute_helper_employee_name": "",
+            "substitute_helper_employee_number": "",
+            "substitute_helper_site_row_id": "",
+            "substitute_helper_site_id": "",
+            "substitute_helper_site_name": "",
         }
     raise CloudShiftError("代務要請は個人シフト・現場シフトのみ対応です", 400)
 
@@ -7241,8 +7320,6 @@ def api_create_substitute_request(project_id: str):
     day_key = str(day)
     month_key = _month_key(year, month)
     entry_id = str(payload.get("entry_id") or "").strip()
-    if not entry_id:
-        raise CloudShiftError("代務要請するシフトを指定してください", 400)
     office_id = _substitute_request_office_id(payload)
 
     source_project, access_role = _editable_project_or_404(project_id)
@@ -7251,13 +7328,22 @@ def api_create_substitute_request(project_id: str):
     month_data = (source_project.get("months") or {}).get(month_key)
     if not month_data:
         raise CloudShiftError("対象の月が存在しません", 404)
-    source_entry = _source_entry_for_substitute_request(source_project, month_data, day_key, entry_id)
-    request_entry = _substitute_request_payload_from_source(
-        source_project,
-        source_entry,
-        month_key=month_key,
-        day_key=day_key,
-    )
+    if entry_id:
+        source_entry = _source_entry_for_substitute_request(source_project, month_data, day_key, entry_id)
+        request_entry = _substitute_request_payload_from_source(
+            source_project,
+            source_entry,
+            month_key=month_key,
+            day_key=day_key,
+        )
+    else:
+        request_entry = _substitute_request_payload_from_day(
+            source_project,
+            month_key=month_key,
+            day_key=day_key,
+            option_key=payload.get("option_key"),
+            comment=payload.get("comment"),
+        )
 
     substitute_project = _ensure_substitute_project_for_office_month(office_id, year, month)
     with _project_lock(substitute_project["id"]):
@@ -7312,7 +7398,7 @@ def api_create_substitute_request(project_id: str):
                 "month_key": month_key,
                 "changes": history_changes,
                 "source_project_id": project_id,
-                "source_entry_id": entry_id,
+                "source_entry_id": entry_id or request_entry.get("substitute_source_entry_id", ""),
             },
         )
 

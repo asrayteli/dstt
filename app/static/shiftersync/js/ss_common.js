@@ -88,6 +88,13 @@ const ShifterSync = (function() {
       .replace(/'/g, '&#39;');
   }
 
+  function formatSharedTimestamp(value) {
+    if (typeof window.CLOUDSHIFT_FORMAT_TIMESTAMP === 'function') {
+      return window.CLOUDSHIFT_FORMAT_TIMESTAMP(value);
+    }
+    return String(value || '');
+  }
+
   function insertTextAtCursor(element, text) {
     if (!element) {
       return;
@@ -328,6 +335,7 @@ const ShifterSync = (function() {
         substitute_helper_user_id: '',
         substitute_helper_name: '',
         substitute_helped_at: '',
+        substitute_unassigned_helper: false,
         substitute_source_project_id: '',
         substitute_source_project_title: '',
         substitute_source_project_mode: '',
@@ -374,6 +382,7 @@ const ShifterSync = (function() {
       substitute_helper_user_id: String(entry.substitute_helper_user_id || entry.substituteHelperUserId || '').trim(),
       substitute_helper_name: String(entry.substitute_helper_name || entry.substituteHelperName || '').trim(),
       substitute_helped_at: String(entry.substitute_helped_at || entry.substituteHelpedAt || '').trim(),
+      substitute_unassigned_helper: entry.substitute_unassigned_helper === true || entry.substituteUnassignedHelper === true || String(entry.substitute_unassigned_helper || entry.substituteUnassignedHelper || '').toLowerCase() === 'true' || String(entry.substitute_unassigned_helper || entry.substituteUnassignedHelper || '') === '1',
       substitute_source_project_id: String(entry.substitute_source_project_id || entry.substituteSourceProjectId || '').trim(),
       substitute_source_project_title: String(entry.substitute_source_project_title || entry.substituteSourceProjectTitle || '').trim(),
       substitute_source_project_mode: String(entry.substitute_source_project_mode || entry.substituteSourceProjectMode || '').trim(),
@@ -419,6 +428,7 @@ const ShifterSync = (function() {
       substitute_helper_user_id: normalized.substitute_helper_user_id,
       substitute_helper_name: normalized.substitute_helper_name,
       substitute_helped_at: normalized.substitute_helped_at,
+      substitute_unassigned_helper: normalized.substitute_unassigned_helper === true,
       substitute_source_project_id: normalized.substitute_source_project_id,
       substitute_source_project_title: normalized.substitute_source_project_title,
       substitute_source_project_mode: normalized.substitute_source_project_mode,
@@ -472,6 +482,88 @@ const ShifterSync = (function() {
 
   function clearSelectedOptionsForDay(day) {
     state.selectedOptions[String(day)] = [];
+  }
+
+  function buildSubstituteRequestContextFromDay(day, values = {}) {
+    const dayKey = String(day || '');
+    return {
+      day: dayKey,
+      optionKey: String(values.optionKey || getSelectedOptionsForDay(dayKey)[0] || ''),
+      comment: String(values.comment || '').trim()
+    };
+  }
+
+  function showSubstituteRequestPopup(day, onConfirm) {
+    const dayKey = String(day || '');
+    const overlay = $('<div>').addClass('popup-overlay ss-substitute-request-overlay');
+    const popup = $('<div>').addClass('popup-content ss-substitute-request-popup');
+    const selectedOption = getSelectedOptionsForDay(dayKey)[0] || '';
+    const optionKeys = getSelectableOptionKeysForMode(state.mode);
+    popup.append(`<div class="popup-header">${escapeHtml(dayKey)}日の代務要請</div>`);
+    const form = $('<div>').addClass('ss-substitute-request-form');
+    const optionSelect = $('<select>')
+      .addClass('ss-detail-input')
+      .attr('id', 'ss-substitute-request-option')
+      .append('<option value="">オプションなし</option>');
+    optionKeys.forEach((key) => {
+      optionSelect.append(
+        $('<option>')
+          .attr('value', key)
+          .prop('selected', key === selectedOption)
+          .text(allOptionMappings[key] || key)
+      );
+    });
+    const commentInput = $('<textarea>')
+      .addClass('ss-detail-textarea')
+      .attr('id', 'ss-substitute-request-comment')
+      .attr('rows', 4)
+      .attr('placeholder', 'コメント');
+    form.append(
+      $('<label>').addClass('ss-detail-field').append(
+        $('<span>').addClass('ss-detail-label').text('オプション'),
+        optionSelect
+      ),
+      $('<label>').addClass('ss-detail-field').append(
+        $('<span>').addClass('ss-detail-label').text('コメント'),
+        commentInput
+      )
+    );
+    const footer = $('<div>').addClass('popup-footer');
+    const cancelButton = $('<button>')
+      .addClass('popup-clear-btn')
+      .attr('type', 'button')
+      .text('キャンセル')
+      .on('click', function() {
+        overlay.remove();
+      });
+    const confirmButton = $('<button>')
+      .addClass('popup-confirm-btn')
+      .attr('type', 'button')
+      .text('要請する')
+      .on('click', async function() {
+        confirmButton.prop('disabled', true);
+        try {
+          await Promise.resolve(onConfirm(buildSubstituteRequestContextFromDay(dayKey, {
+            optionKey: optionSelect.val() || '',
+            comment: commentInput.val() || ''
+          })));
+          overlay.remove();
+          closeModal('day');
+        } catch (error) {
+          alert(error && error.message ? error.message : '\u4ee3\u52d9\u8981\u8acb\u306b\u5931\u6557\u3057\u307e\u3057\u305f');
+          confirmButton.prop('disabled', false);
+        }
+      });
+    footer.append(cancelButton, confirmButton);
+    popup.append(form, footer);
+    overlay.append(popup);
+    $('body').append(overlay);
+    commentInput.focus();
+    overlay.on('click', function(e) {
+      if (e.target === overlay[0]) {
+        overlay.remove();
+      }
+    });
   }
 
   function isPersonMode() {
@@ -1226,6 +1318,8 @@ const ShifterSync = (function() {
         branch_missing: false,
         branch_issue_label: '',
         branch_issue_tone: '',
+        entry_status_label: '',
+        entry_status_tone: '',
         sync_source_label: '',
         sync_source_tone: ''
       };
@@ -1262,8 +1356,11 @@ const ShifterSync = (function() {
     }
     if (isSubstituteMode() && !isSyncedEntry(normalized)) {
       syncSourceLabel = normalized.substitute_resolved ? '解決済み' : '要ヘルプ';
-      syncSourceTone = normalized.substitute_resolved ? 'master-local' : 'warning';
+      syncSourceTone = normalized.substitute_resolved ? 'substitute-resolved' : 'warning';
     }
+    const isUnassignedSubstituteSync = isSyncedEntry(normalized)
+      && String(normalized.sync_source_type || '') === 'substitute_shift'
+      && normalized.substitute_unassigned_helper === true;
     return {
       title: branchState.site_branch ? `${displayTitle} / 枝${branchState.site_branch}` : displayTitle,
       comment: normalized.comment || '',
@@ -1272,6 +1369,8 @@ const ShifterSync = (function() {
       branch_missing: branchState.is_missing,
       branch_issue_label: branchIssue.label,
       branch_issue_tone: branchIssue.tone,
+      entry_status_label: isUnassignedSubstituteSync ? '未設定' : '',
+      entry_status_tone: isUnassignedSubstituteSync ? 'danger' : '',
       sync_source_label: syncSourceLabel,
       sync_source_tone: syncSourceTone
     };
@@ -1488,6 +1587,9 @@ const ShifterSync = (function() {
                 : null,
               parts.branch_issue_label
                 ? $('<div>').addClass(`entry-item-status is-${parts.branch_issue_tone || 'warning'}`).text(parts.branch_issue_label)
+                : null,
+              parts.entry_status_label
+                ? $('<div>').addClass(`entry-item-status is-${parts.entry_status_tone || 'warning'}`).text(parts.entry_status_label)
                 : null,
               $('<div>').addClass(`entry-item-comment${parts.comment ? '' : ' is-empty'}`).text(parts.comment ? getCommentPreview(parts.comment) : '\u30b3\u30e1\u30f3\u30c8\u306a\u3057')
             )
@@ -1784,6 +1886,7 @@ const ShifterSync = (function() {
     $(document).off('click', '.ss-entry-edit-btn');
     $(document).off('click', '.ss-entry-delete-btn');
     $(document).off('click', '.ss-entry-save-btn');
+    $(document).off('click', '.ss-day-substitute-request-btn');
     $(document).off('click', '.ss-entry-substitute-request-btn');
     $(document).off('change', '#ss-entry-modal-option');
     $(document).off('change', '#ss-entry-modal-site-branch');
@@ -2109,6 +2212,14 @@ const ShifterSync = (function() {
 
     $(document).on('click', '.ss-entry-save-btn', function() {
       saveEntryFromModal();
+    });
+
+    $(document).on('click', '.ss-day-substitute-request-btn', async function() {
+      const day = String($(this).attr('data-day') || '');
+      if (!day || typeof state.onSubstituteRequest !== 'function') {
+        return;
+      }
+      showSubstituteRequestPopup(day, (context) => state.onSubstituteRequest(context));
     });
 
     $(document).on('click', '.ss-entry-substitute-request-btn', async function() {
@@ -2551,6 +2662,14 @@ const ShifterSync = (function() {
       }).join('');
     }
 
+    if (state.substituteRequestEnabled && state.editable && (state.mode === 'scene' || state.mode === 'person') && typeof state.onSubstituteRequest === 'function') {
+      html += `
+        <div class="ss-detail-assist-action">
+          <button type="button" class="btn-secondary ss-day-substitute-request-btn" data-day="${day}">\u4ee3\u52d9\u8981\u8acb</button>
+        </div>
+      `;
+    }
+
     if (state.editable && (state.mode === 'scene' || state.mode === 'person')) {
       html += `
         <div class="ss-detail-assist-action">
@@ -2594,19 +2713,13 @@ const ShifterSync = (function() {
       site_name: String(entry.substitute_helper_site_name || '').trim()
     };
     const substituteRequestType = entry.substitute_request_type === 'person' ? 'person' : 'scene';
-    const substituteRequesterText = [entry.substitute_requester_name || '', entry.substitute_requested_at || '']
+    const substituteRequesterText = [entry.substitute_requester_name || '', formatSharedTimestamp(entry.substitute_requested_at)]
       .filter(Boolean)
       .join(' / ') || '\u672a\u8a18\u9332';
     const substituteHelperAuditText = entry.substitute_resolved
-      ? ([entry.substitute_helper_name || '', entry.substitute_helped_at || ''].filter(Boolean).join(' / ') || '\u672a\u8a18\u9332')
+      ? ([entry.substitute_helper_name || '', formatSharedTimestamp(entry.substitute_helped_at)].filter(Boolean).join(' / ') || '\u672a\u8a18\u9332')
       : '\u672a\u89e3\u6c7a';
-    const canRequestSubstitute = !!(
-      state.substituteRequestEnabled
-      && state.editable
-      && !syncedEntry
-      && (isSceneMode() || isPersonMode())
-      && typeof state.onSubstituteRequest === 'function'
-    );
+    const canRequestSubstitute = false;
     const detailNameLabel = isSubstituteMode()
       ? (substituteRequestType === 'person' ? '不足している人' : '不足している現場')
       : (isMasterPersonType() ? '\u73fe\u5834\u540d' : '\u540d\u524d');
@@ -2925,9 +3038,14 @@ const ShifterSync = (function() {
         employeeName = '';
         employeeNumber = '';
         const helperEmployeeInput = $('#ss-entry-modal-helper-employee');
+        const helperEmployeeName = getSelectedEmployeeNameForInput(helperEmployeeInput) || String(helperEmployeeInput.val() || '').trim();
+        const isResolvedWithoutHelper = $('#ss-entry-modal-substitute-resolved').prop('checked') === true && !helperEmployeeName;
+        if (isResolvedWithoutHelper && !window.confirm('ヘルプに行ける人が未入力です。元の現場シフトへ「未設定」として反映しますか？')) {
+          return;
+        }
         substitutePayloadForSave = {
           substitute_request_type: 'scene',
-          substitute_helper_employee_name: getSelectedEmployeeNameForInput(helperEmployeeInput) || String(helperEmployeeInput.val() || '').trim(),
+          substitute_helper_employee_name: helperEmployeeName,
           substitute_helper_employee_number: getSelectedEmployeeNumberForInput(helperEmployeeInput),
           substitute_helper_site_row_id: '',
           substitute_helper_site_id: '',

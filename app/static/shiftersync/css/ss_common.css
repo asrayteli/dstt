@@ -513,6 +513,11 @@ h1, h2, h3 {
     color: #166534;
 }
 
+.entry-item-sync-source.is-substitute-resolved {
+    background: #d9f99d;
+    color: #3f6212;
+}
+
 .entry-item-comment.is-empty {
     color: #9c9f98;
 }
@@ -724,6 +729,17 @@ h1, h2, h3 {
 .popup-content {
     max-height: calc(100dvh - 32px);
     overflow: auto;
+}
+
+.ss-substitute-request-popup {
+    width: min(460px, 100%);
+}
+
+.ss-substitute-request-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 14px;
 }
 
 .popup-section {
