@@ -129,11 +129,13 @@ SHIFT_SYNC_SCENE_SOURCE = "scene_shift"
 SHIFT_SYNC_PERSON_SOURCE = "person_shift"
 SHIFT_SYNC_MASTER_SOURCE = "master_shift"
 SHIFT_SYNC_SUBSTITUTE_SOURCE = "substitute_shift"
+SHIFT_SYNC_SUBSTITUTE_REQUEST_SOURCE = "substitute_request"
 SHIFT_SYNC_SOURCE_TYPES = {
     SHIFT_SYNC_SCENE_SOURCE,
     SHIFT_SYNC_PERSON_SOURCE,
     SHIFT_SYNC_MASTER_SOURCE,
     SHIFT_SYNC_SUBSTITUTE_SOURCE,
+    SHIFT_SYNC_SUBSTITUTE_REQUEST_SOURCE,
 }
 SUBSTITUTE_MODE = "substitute"
 SUBSTITUTE_TITLE = "要代務シフト帳"
@@ -1440,6 +1442,50 @@ def _entries_with_latest_site_links(entries_per_day: Any, project: dict[str, Any
     }
 
 
+def _pending_substitute_request_entries_for_month(
+    project: dict[str, Any] | None,
+    month_data: dict[str, Any] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    if not project or not month_data or project.get("mode") not in {"scene", "person"}:
+        return {}
+    project_id = str(project.get("id") or "").strip()
+    if not project_id:
+        return {}
+    month_key = _month_key(month_data["year"], month_data["month"])
+    result = _empty_entries_for_month(month_data["year"], month_data["month"])
+    for substitute_project in _iter_stored_projects():
+        if str(substitute_project.get("mode") or "") != SUBSTITUTE_MODE:
+            continue
+        substitute_month = (substitute_project.get("months") or {}).get(month_key)
+        if not substitute_month:
+            continue
+        entries_per_day = _normalize_entries(
+            substitute_month.get("entries_per_day"),
+            month_data["year"],
+            month_data["month"],
+        )
+        for day_key, entries in entries_per_day.items():
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                if str(entry.get("substitute_source_project_id") or "") != project_id:
+                    continue
+                if str(entry.get("substitute_source_month_key") or "") != month_key:
+                    continue
+                if _entry_resolved_flag(entry):
+                    continue
+                display_entry = dict(entry)
+                display_entry["id"] = f"substitute-request-display-{display_entry.get('id') or project_id}-{day_key}"
+                display_entry["sync_source_type"] = SHIFT_SYNC_SUBSTITUTE_REQUEST_SOURCE
+                display_entry["sync_source_project_id"] = str(substitute_project.get("id") or "")
+                display_entry["sync_source_project_title"] = str(substitute_project.get("title") or SUBSTITUTE_TITLE)
+                display_entry["sync_source_month_key"] = month_key
+                display_entry["sync_source_day"] = str(day_key)
+                display_entry["sync_source_entry_id"] = str(entry.get("id") or "")
+                result.setdefault(str(day_key), []).append(display_entry)
+    return {day_key: entries for day_key, entries in result.items() if entries}
+
+
 def _client_month_payload(
     month_data: dict[str, Any] | None,
     *,
@@ -1451,6 +1497,10 @@ def _client_month_payload(
     payload = dict(month_data)
     payload.pop("revision_snapshots", None)
     payload["entries_per_day"] = _entries_with_latest_site_links(payload.get("entries_per_day"), project)
+    payload["pending_substitute_entries_per_day"] = _entries_with_latest_site_links(
+        _pending_substitute_request_entries_for_month(project, month_data),
+        project,
+    )
     if not include_draft:
         payload.pop("draft_entries_per_day", None)
     else:
