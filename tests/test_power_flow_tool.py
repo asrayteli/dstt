@@ -50,7 +50,7 @@ def _login(client, username: str):
         session["_fresh"] = True
 
 
-def test_power_flow_page_loads_phase2_editor(app_ctx):
+def test_power_flow_page_loads_launcher_and_editor(app_ctx):
     username = _create_user(app_ctx)
     client = app_ctx.test_client()
     _login(client, username)
@@ -59,12 +59,19 @@ def test_power_flow_page_loads_phase2_editor(app_ctx):
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "power-flow-app" in html
-    assert "はい/いいえ" in html
-    assert "ミニマップ" in html
-    assert "SVG" in html
-    assert "PDF" in html
-    assert "power_flow/power_flow.js" in html
+    assert "power-flow-launcher" in html
+    assert "PowerFlow" in html
+    assert "pf-launch-new" in html
+    assert "pf-launch-saved-list" in html
+    assert "pf-launch-import" in html
+
+    editor_response = client.get("/tools/power_flow/editor")
+    assert editor_response.status_code == 200
+    editor_html = editor_response.get_data(as_text=True)
+    assert "power-flow-app" in editor_html
+    assert "SVG" in editor_html
+    assert "PDF" in editor_html
+    assert "power_flow/power_flow.js" in editor_html
 
 
 def test_power_flow_is_public_navigation_tool():

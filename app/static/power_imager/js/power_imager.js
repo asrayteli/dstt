@@ -28,6 +28,7 @@
     setupKeyboardShortcuts();
     setupPanelCollapse();
     checkURLParams();
+    await loadLaunchImage();
     showWelcome();
   }
 
@@ -135,6 +136,36 @@
       PICanvasEngine.setCanvasSize(parseInt(w), parseInt(h));
       PICanvasEngine.fitToViewport();
     }
+  }
+
+  async function loadLaunchImage() {
+    const key = 'dstt.powerImager.launchImage';
+    let payload = null;
+    try {
+      const raw = sessionStorage.getItem(key);
+      sessionStorage.removeItem(key);
+      if (raw) payload = JSON.parse(raw);
+    } catch (error) {
+      payload = null;
+    }
+    if (!payload || !payload.dataURL) return;
+
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = payload.dataURL;
+    }).catch(() => null);
+    if (!img.complete || !img.naturalWidth) return;
+
+    const size = PICanvasEngine.getCanvasSize();
+    if (img.width > size.width || img.height > size.height) {
+      PICanvasEngine.setCanvasSize(Math.max(img.width, size.width), Math.max(img.height, size.height));
+    }
+    PILayerManager.addImageLayer(img, payload.name || 'Imported Image');
+    PICanvasEngine.fitToViewport();
+    PIHistoryManager.push('画像読み込み');
+    PILayerManager.requestRender();
   }
 
   function showWelcome() {
