@@ -356,6 +356,9 @@ def create_app(test_config=None):
     from .tools.power_flow import power_flow_bp
     app.register_blueprint(power_flow_bp)
 
+    from .tools.power_imager import power_imager_bp
+    app.register_blueprint(power_imager_bp)
+
     # アクセス権管理（機密ツールに before_request を紐付け）
     from flask import request as _req
     from .access_control import TOOL_ACCESS_CATEGORIES, enforce_tool_access
@@ -370,6 +373,7 @@ def create_app(test_config=None):
         # CloudShiftはShifterSyncのサブ機能なので、ShifterSync権限で判定する
         "cloudshift": "shiftersync",
         "subject_analysis_tool": "subject_analysis_tool",
+        "power_imager": "power_imager",
     }
     _EXEMPT_PATH_PREFIXES = (
         "/tools/shiftersync/download/",

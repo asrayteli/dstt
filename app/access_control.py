@@ -62,6 +62,7 @@ TOOL_ACCESS_CATEGORIES: dict[str, str] = {
     "powerstamp": "public",
     "powervote": "public",
     "power_flow": "public",
+    "power_imager": "sensitive",
     "share": "public",
     "car_inspe": "public",
     "monthly_generator": "public",

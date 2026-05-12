@@ -1,0 +1,162 @@
+/* --- Modal --- */
+#modal-overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.6); z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+#modal-overlay.hidden { display: none; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+#active-modal {
+  background: var(--pi-surface); border-radius: 12px;
+  padding: 24px; min-width: 340px; max-width: 500px;
+  max-height: 80vh; overflow-y: auto;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+}
+#active-modal h2 {
+  font-size: 16px; font-weight: 700; margin-bottom: 12px;
+  color: var(--pi-text);
+}
+#active-modal p {
+  font-size: 13px; color: var(--pi-text-dim); margin-bottom: 16px;
+}
+
+.modal-form-group {
+  margin-bottom: 12px;
+}
+.modal-form-group label {
+  display: block; font-size: 12px; color: var(--pi-text-dim);
+  margin-bottom: 4px;
+}
+.modal-form-group input,
+.modal-form-group select {
+  width: 100%; padding: 6px 8px;
+  background: var(--pi-bg); color: var(--pi-text);
+  border: 1px solid var(--pi-border); border-radius: 4px;
+  font-size: 13px; outline: none;
+}
+.modal-form-group input:focus,
+.modal-form-group select:focus {
+  border-color: var(--pi-accent);
+}
+
+.modal-actions {
+  display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;
+}
+.modal-btn {
+  padding: 7px 18px; border: none; border-radius: 6px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.modal-btn-primary {
+  background: var(--pi-accent); color: #fff;
+}
+.modal-btn-primary:hover { background: var(--pi-accent-hover); }
+.modal-btn-secondary {
+  background: var(--pi-surface2); color: var(--pi-text);
+}
+.modal-btn-secondary:hover { background: var(--pi-border); }
+
+/* --- Adjustment Sliders in Modal --- */
+.adj-slider-group {
+  margin-bottom: 10px;
+}
+.adj-slider-label {
+  display: flex; justify-content: space-between; font-size: 12px;
+  margin-bottom: 4px; color: var(--pi-text-dim);
+}
+.adj-slider {
+  width: 100%; height: 4px; -webkit-appearance: none; appearance: none;
+  background: var(--pi-border); border-radius: 2px; outline: none;
+}
+.adj-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px;
+  border-radius: 50%; background: var(--pi-accent); cursor: pointer;
+}
+
+/* --- Size Presets --- */
+.size-presets {
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0;
+}
+.size-preset-btn {
+  padding: 5px 12px; border: 1px solid var(--pi-border); border-radius: 6px;
+  background: transparent; color: var(--pi-text-dim); cursor: pointer;
+  font-size: 12px;
+}
+.size-preset-btn:hover {
+  background: var(--pi-accent); color: #fff; border-color: var(--pi-accent);
+}
+
+/* --- Topbar Dropdown Menus --- */
+.topbar-menu-btn {
+  padding: 4px 10px; border: none; border-radius: 4px;
+  background: transparent; color: var(--pi-text); cursor: pointer;
+  font-size: 13px; position: relative;
+}
+.topbar-menu-btn:hover { background: var(--pi-surface2); }
+
+.topbar-dropdown {
+  position: absolute; top: 100%; left: 0;
+  background: var(--pi-surface); border: 1px solid var(--pi-border);
+  border-radius: 6px; min-width: 180px; padding: 4px 0;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4); z-index: 500;
+}
+.topbar-dropdown.hidden { display: none; }
+
+.topbar-dropdown-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 14px; cursor: pointer; font-size: 12px; color: var(--pi-text);
+  border: none; background: transparent; width: 100%; text-align: left;
+}
+.topbar-dropdown-item:hover { background: var(--pi-accent); color: #fff; }
+.topbar-dropdown-item .shortcut {
+  font-size: 11px; color: var(--pi-text-dim); margin-left: 16px;
+}
+.topbar-dropdown-item:hover .shortcut { color: rgba(255,255,255,0.7); }
+.topbar-dropdown-sep {
+  height: 1px; background: var(--pi-border); margin: 4px 0;
+}
+
+/* --- Welcome Guide --- */
+#welcome-guide {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.7); z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+}
+#welcome-guide.hidden { display: none; }
+.welcome-card {
+  background: var(--pi-surface); border-radius: 16px;
+  padding: 32px; max-width: 480px; text-align: center;
+}
+.welcome-card h2 { font-size: 22px; margin-bottom: 8px; }
+.welcome-card p { color: var(--pi-text-dim); margin-bottom: 20px; font-size: 14px; }
+.welcome-card .welcome-actions { display: flex; gap: 10px; justify-content: center; }
+.welcome-card .welcome-actions button {
+  padding: 10px 24px; border: none; border-radius: 8px;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+
+/* --- Progress Bar --- */
+#progress-overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5); z-index: 3000;
+  display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px;
+}
+#progress-overlay.hidden { display: none; }
+.progress-bar-container {
+  width: 300px; height: 8px; background: var(--pi-border); border-radius: 4px; overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%; background: var(--pi-accent); border-radius: 4px; transition: width 0.3s;
+}
+.progress-label { color: var(--pi-text); font-size: 14px; }
+
+/* --- Back to DSTT button --- */
+.back-to-dstt {
+  padding: 4px 10px; border: none; border-radius: 4px;
+  background: transparent; color: var(--pi-text-dim); cursor: pointer;
+  font-size: 12px; display: flex; align-items: center; gap: 4px;
+  margin-right: 8px;
+}
+.back-to-dstt:hover { background: var(--pi-surface2); color: var(--pi-text); }
