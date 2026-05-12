@@ -139,4 +139,11 @@ NAV_ITEMS = (
         "label": "Power Flow",
         "description": "フローチャートを作成・整列・出力できる作図ツール",
     },
+    {
+        "key": "power_imager",
+        "href": "/tools/power_imager",
+        "icon": "🖼️",
+        "label": "PowerImager",
+        "description": "画像に関することなら何でもできる、超親切な画像編集ツール",
+    },
 )

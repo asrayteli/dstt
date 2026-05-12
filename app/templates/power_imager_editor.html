@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PowerImager Editor</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='power_imager/css/editor.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='power_imager/css/toolbar.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='power_imager/css/panels.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='power_imager/css/dialogs.css') }}">
+</head>
+<body>
+
+<div id="pi-app">
+
+  <!-- ===== TOPBAR ===== -->
+  <div id="pi-topbar">
+    <button id="back-to-dstt" class="back-to-dstt" title="DSTTに戻る">← DSTT</button>
+
+    <div style="position:relative;">
+      <button class="topbar-menu-btn" data-menu="menu-file">ファイル</button>
+      <div id="menu-file" class="topbar-dropdown hidden">
+        <button class="topbar-dropdown-item" data-action="new">新規キャンバス<span class="shortcut">Ctrl+N</span></button>
+        <button class="topbar-dropdown-item" data-action="open">画像を開く<span class="shortcut">Ctrl+O</span></button>
+        <div class="topbar-dropdown-sep"></div>
+        <button class="topbar-dropdown-item" data-action="save">プロジェクト保存<span class="shortcut">Ctrl+S</span></button>
+        <button class="topbar-dropdown-item" data-action="export">エクスポート</button>
+      </div>
+    </div>
+
+    <div style="position:relative;">
+      <button class="topbar-menu-btn" data-menu="menu-edit">編集</button>
+      <div id="menu-edit" class="topbar-dropdown hidden">
+        <button class="topbar-dropdown-item" data-action="undo">元に戻す<span class="shortcut">Ctrl+Z</span></button>
+        <button class="topbar-dropdown-item" data-action="redo">やり直す<span class="shortcut">Ctrl+Y</span></button>
+        <div class="topbar-dropdown-sep"></div>
+        <button class="topbar-dropdown-item" data-action="copy">コピー<span class="shortcut">Ctrl+C</span></button>
+        <button class="topbar-dropdown-item" data-action="paste">ペースト<span class="shortcut">Ctrl+V</span></button>
+        <div class="topbar-dropdown-sep"></div>
+        <button class="topbar-dropdown-item" data-action="resize">キャンバスサイズ変更</button>
+      </div>
+    </div>
+
+    <div style="position:relative;">
+      <button class="topbar-menu-btn" data-menu="menu-image">画像</button>
+      <div id="menu-image" class="topbar-dropdown hidden">
+        <button class="topbar-dropdown-item" data-action="flip-h">左右反転</button>
+        <button class="topbar-dropdown-item" data-action="flip-v">上下反転</button>
+        <div class="topbar-dropdown-sep"></div>
+        <button class="topbar-dropdown-item" data-action="rotate-cw">90°右回転</button>
+        <button class="topbar-dropdown-item" data-action="rotate-ccw">90°左回転</button>
+      </div>
+    </div>
+
+    <div style="position:relative;">
+      <button class="topbar-menu-btn" data-menu="menu-adjust">調整</button>
+      <div id="menu-adjust" class="topbar-dropdown hidden">
+        <button class="topbar-dropdown-item" data-action="brightness">明るさ・コントラスト</button>
+        <button class="topbar-dropdown-item" data-action="hue">色相・彩度</button>
+        <button class="topbar-dropdown-item" data-action="levels">レベル補正</button>
+        <button class="topbar-dropdown-item" data-action="color-balance">カラーバランス</button>
+      </div>
+    </div>
+
+    <div style="position:relative;">
+      <button class="topbar-menu-btn" data-menu="menu-filter">フィルタ</button>
+      <div id="menu-filter" class="topbar-dropdown hidden">
+        <button class="topbar-dropdown-item" data-action="blur">ぼかし</button>
+        <button class="topbar-dropdown-item" data-action="sharpen">シャープ</button>
+        <button class="topbar-dropdown-item" data-action="mosaic">モザイク</button>
+        <button class="topbar-dropdown-item" data-action="noise">ノイズ除去</button>
+        <div class="topbar-dropdown-sep"></div>
+        <button class="topbar-dropdown-item" data-action="grayscale">グレースケール</button>
+        <button class="topbar-dropdown-item" data-action="sepia">セピア</button>
+        <button class="topbar-dropdown-item" data-action="invert">色反転</button>
+      </div>
+    </div>
+
+    <div style="position:relative;">
+      <button class="topbar-menu-btn" data-menu="menu-view">表示</button>
+      <div id="menu-view" class="topbar-dropdown hidden">
+        <button class="topbar-dropdown-item" data-action="fit">画面に合わせる</button>
+        <button class="topbar-dropdown-item" data-action="zoom-in">拡大<span class="shortcut">Ctrl++</span></button>
+        <button class="topbar-dropdown-item" data-action="zoom-out">縮小<span class="shortcut">Ctrl+-</span></button>
+      </div>
+    </div>
+
+    <div style="flex:1;"></div>
+
+    <button class="quick-action-btn" onclick="PITopbar.handleAction('undo')" title="元に戻す">↩</button>
+    <button class="quick-action-btn" onclick="PITopbar.handleAction('redo')" title="やり直す">↪</button>
+    <button class="quick-action-btn" onclick="PITopbar.handleAction('fit')" title="画面に合わせる">⊞</button>
+
+    <div class="mode-toggle">
+      <span>初級</span>
+      <label class="mode-toggle-switch">
+        <input type="checkbox" id="mode-toggle-input">
+        <span class="mode-toggle-slider"></span>
+      </label>
+      <span>上級</span>
+    </div>
+  </div>
+
+  <!-- ===== LEFT TOOLBAR ===== -->
+  <div id="pi-toolbar">
+    <div class="toolbar-tools">
+      <button class="tool-btn" data-tool="move" title="移動 (V)">✥</button>
+      <button class="tool-btn" data-tool="select" title="選択 (M)">⬚</button>
+      <button class="tool-btn" data-tool="crop" title="切り抜き (C)">⛶</button>
+      <div class="toolbar-separator"></div>
+      <button class="tool-btn" data-tool="brush" title="ブラシ (B)">✎</button>
+      <button class="tool-btn" data-tool="eraser" title="消しゴム (E)">◻</button>
+      <button class="tool-btn" data-tool="fill" title="塗りつぶし (G)">⬛</button>
+      <div class="toolbar-separator"></div>
+      <button class="tool-btn" data-tool="text" title="テキスト (T)">T</button>
+      <button class="tool-btn" data-tool="shape" title="図形 (U)">▢</button>
+      <div class="toolbar-separator"></div>
+      <button class="tool-btn" data-tool="eyedropper" title="スポイト (I)">💧</button>
+      <button class="tool-btn" data-tool="screenshot" title="スクリーンショット">📷</button>
+    </div>
+    <div class="toolbar-bottom">
+      <div class="color-swatches">
+        <div class="color-swatch-fg">
+          <input type="color" id="fg-color-input" value="#000000" title="前景色">
+        </div>
+        <div class="color-swatch-bg">
+          <input type="color" id="bg-color-input" value="#ffffff" title="背景色">
+        </div>
+        <button id="swap-colors" title="色を入れ替え">⇄</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== CANVAS VIEWPORT ===== -->
+  <div id="pi-viewport">
+    <div class="canvas-wrapper">
+      <canvas id="display-canvas"></canvas>
+      <canvas id="overlay-canvas"></canvas>
+      <div id="text-edit-overlay" class="hidden"></div>
+      <div id="crop-overlay" class="hidden"></div>
+    </div>
+  </div>
+
+  <!-- ===== RIGHT PANEL ===== -->
+  <div id="pi-panel">
+    <div class="panel-section">
+      <div class="panel-header">
+        <span>プロパティ</span>
+        <span class="collapse-arrow">▾</span>
+      </div>
+      <div class="panel-body" id="property-panel-body"></div>
+    </div>
+    <div class="panel-section">
+      <div class="panel-header">
+        <span>レイヤー</span>
+        <span class="collapse-arrow">▾</span>
+      </div>
+      <div class="panel-body" id="layer-panel-body"></div>
+    </div>
+    <div class="panel-section">
+      <div class="panel-header">
+        <span>履歴</span>
+        <span class="collapse-arrow">▾</span>
+      </div>
+      <div class="panel-body" id="history-panel-body"></div>
+    </div>
+  </div>
+
+  <!-- ===== STATUSBAR ===== -->
+  <div id="pi-statusbar">
+    <span>座標: <span id="sb-coord">0, 0</span></span>
+    <span>サイズ: <span id="sb-size">800 x 600</span></span>
+    <span>ズーム: <span id="sb-zoom">100%</span></span>
+    <span>ツール: <span id="sb-tool">move</span></span>
+    <span>モード: <span id="sb-mode">初級</span></span>
+  </div>
+
+</div>
+
+<!-- ===== MODAL ===== -->
+<div id="modal-overlay" class="hidden">
+  <div id="active-modal"></div>
+</div>
+
+<!-- ===== WELCOME GUIDE ===== -->
+<div id="welcome-guide" class="hidden">
+  <div class="welcome-card">
+    <h2>PowerImager へようこそ!</h2>
+    <p>画像編集に必要な機能がすべて揃っています。<br>まずはキャンバスに画像をドラッグ＆ドロップ、<br>または「ファイル」メニューから始めましょう。</p>
+    <div class="welcome-actions">
+      <button class="welcome-start-btn" style="background:var(--pi-accent);color:#fff;">はじめる</button>
+      <button class="welcome-skip-btn" style="background:var(--pi-surface2);color:var(--pi-text);">スキップ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PROGRESS ===== -->
+<div id="progress-overlay" class="hidden">
+  <div class="progress-label">処理中...</div>
+  <div class="progress-bar-container"><div class="progress-bar-fill" style="width:0%"></div></div>
+</div>
+
+<!-- ===== HIDDEN FILE INPUT ===== -->
+<input type="file" id="file-input" accept="image/*" style="display:none;">
+
+<!-- ===== SCRIPTS (dependency order) ===== -->
+<script src="{{ url_for('static', filename='power_imager/js/core/event-bus.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/utils/math-utils.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/utils/color-utils.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/utils/font-loader.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/utils/image-io.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/core/canvas-engine.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/core/layer-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/core/history-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/core/project-store.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/modal.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/tool-base.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/move-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/select-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/crop-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/brush-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/eraser-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/text-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/shape-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/fill-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/eyedropper-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/screenshot-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/adjustments/brightness-contrast.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/adjustments/hue-saturation.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/adjustments/color-balance.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/adjustments/levels.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/filters/blur.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/filters/sharpen.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/filters/mosaic.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/filters/noise.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/filters/filter-worker.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/toolbar.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/topbar.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/property-panel.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/layer-panel.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/history-panel.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/statusbar.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/mode-switcher.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/tooltip-guide.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/power_imager.js') }}"></script>
+
+</body>
+</html>
