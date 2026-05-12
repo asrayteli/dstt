@@ -581,7 +581,7 @@ h1, h2, h3 {
 
 .day-controls-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 5.25rem), 1fr));
     gap: 5px;
     align-items: stretch;
 }
@@ -939,7 +939,7 @@ h1, h2, h3 {
     animation: ssFadeUp 0.22s ease-out;
 }
 
-@container (max-width: 168px) {
+@container (max-width: 132px) {
     .input-row,
     .input-row.compact {
         grid-template-columns: 1fr;

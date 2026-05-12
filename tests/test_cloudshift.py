@@ -537,6 +537,12 @@ def test_scene_shift_can_create_substitute_request_entry(tmp_path):
     assert occupied_day_entry["substitute_source_day"] == "2"
     assert occupied_day_entry["substitute_source_entry_id"] == "day"
 
+    source_detail = client.get(f"/tools/shiftersync/cloudshift/api/project/{scene_id}?month_key=2026-05").get_json()
+    pending_entries = source_detail["month"]["pending_substitute_entries_per_day"]
+    assert pending_entries["2"][0]["sync_source_type"] == "substitute_request"
+    assert pending_entries["2"][0]["substitute_source_entry_id"] == "scene-entry-1"
+    assert pending_entries["3"][0]["value"] == "!P!Alpha Site"
+
 
 def test_resolved_substitute_shift_syncs_to_person_and_scene_projects(tmp_path):
     module, client = _build_client(tmp_path)

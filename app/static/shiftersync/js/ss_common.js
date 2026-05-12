@@ -47,7 +47,7 @@ const ShifterSync = (function() {
   const siteNameRowPrefix = '#site_name';
   const siteBranchRowIdRowPrefix = '#site_branch_row_id';
   const siteBranchRowPrefix = '#site_branch';
-  const shiftSyncSourceTypes = ['scene_shift', 'person_shift', 'master_shift', 'substitute_shift'];
+  const shiftSyncSourceTypes = ['scene_shift', 'person_shift', 'master_shift', 'substitute_shift', 'substitute_request'];
 
   const state = {
     mode: 'scene',
@@ -1344,6 +1344,9 @@ const ShifterSync = (function() {
     if (isMasterMode() && !isSyncedEntry(normalized)) {
       syncSourceLabel = '\u30de\u30b9\u30bf\u30fc';
       syncSourceTone = 'master-local';
+    } else if (String(normalized.sync_source_type || '') === 'substitute_request') {
+      syncSourceLabel = '代務要請中';
+      syncSourceTone = 'warning';
     } else if (isMasterMode() && isSyncedEntry(normalized)) {
       const sourceTitle = String(normalized.sync_source_project_title || '').trim();
       const sourceType = String(normalized.sync_source_type || '').trim();
