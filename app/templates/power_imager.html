@@ -1,117 +1,339 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-  .pi-launcher { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+  .pi-launcher {
+    display: grid;
+    gap: 1.25rem;
+  }
+
   .pi-hero {
-    background: linear-gradient(135deg, #7c6ff7 0%, #5a4fcf 50%, #4a3fbf 100%);
-    border-radius: 20px; padding: 40px 32px; color: #fff; margin-bottom: 24px;
-    box-shadow: 0 12px 40px rgba(124,111,247,0.25);
+    background: linear-gradient(135deg, #0f766e 0%, #2563eb 52%, #9333ea 100%);
   }
-  .pi-hero h1 { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
-  .pi-hero p { font-size: 15px; opacity: 0.9; margin-bottom: 20px; }
-  .pi-hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
-  .pi-hero-btn {
-    padding: 10px 24px; border: none; border-radius: 10px;
-    font-size: 14px; font-weight: 700; cursor: pointer;
-    display: inline-flex; align-items: center; gap: 6px;
-  }
-  .pi-hero-btn-primary { background: #fff; color: #7c6ff7; }
-  .pi-hero-btn-primary:hover { background: #f0eeff; }
-  .pi-hero-btn-secondary { background: rgba(255,255,255,0.2); color: #fff; }
-  .pi-hero-btn-secondary:hover { background: rgba(255,255,255,0.3); }
 
-  .pi-section-title { font-size: 18px; font-weight: 700; margin-bottom: 12px; color: #1e293b; }
-  .pi-projects { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
+  .pi-main {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .pi-action-grid {
+    display: grid;
+    gap: 0.85rem;
+  }
+
+  .pi-action-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .pi-panel,
+  .pi-action-card,
   .pi-project-card {
-    background: #fff; border-radius: 12px; overflow: hidden; cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08); transition: transform 0.15s, box-shadow 0.15s;
+    border: 1px solid #d7dfeb;
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 14px 34px rgba(20, 32, 54, 0.08);
   }
-  .pi-project-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.12); }
-  .pi-project-thumb {
-    width: 100%; height: 120px; object-fit: cover; background: #f1f5f9;
-    display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 32px;
-  }
-  .pi-project-thumb img { width: 100%; height: 100%; object-fit: cover; }
-  .pi-project-info { padding: 10px 12px; }
-  .pi-project-name { font-weight: 600; font-size: 13px; color: #1e293b; }
-  .pi-project-date { font-size: 11px; color: #94a3b8; margin-top: 2px; }
 
-  .pi-guide { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
-  .pi-guide-item {
-    background: #fff; border-radius: 12px; padding: 20px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  .pi-panel {
+    padding: 1.15rem;
   }
-  .pi-guide-icon { font-size: 28px; margin-bottom: 8px; }
-  .pi-guide-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; color: #1e293b; }
-  .pi-guide-desc { font-size: 13px; color: #64748b; line-height: 1.5; }
-  .pi-empty-msg { color: #94a3b8; font-size: 14px; padding: 16px 0; }
+
+  .pi-panel + .pi-panel {
+    margin-top: 1rem;
+  }
+
+  .pi-panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.8rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .pi-kicker {
+    color: #2563eb;
+    font-size: 0.7rem;
+    font-weight: 900;
+    letter-spacing: 0.16em;
+  }
+
+  .pi-panel h2,
+  .pi-action-card h3 {
+    margin: 0.4rem 0 0;
+    color: #101a2c;
+    font-weight: 900;
+  }
+
+  .pi-panel h2 {
+    font-size: 1.2rem;
+  }
+
+  .pi-action-card h3 {
+    font-size: 1rem;
+  }
+
+  .pi-panel p,
+  .pi-action-card p {
+    margin: 0.55rem 0 0;
+    color: #647087;
+    font-size: 0.86rem;
+    line-height: 1.6;
+  }
+
+  .pi-action-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 210px;
+    padding: 1rem;
+  }
+
+  .pi-action-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 8px;
+    background: #eef5ff;
+    color: #1d4ed8;
+    font-weight: 900;
+  }
+
+  .pi-action-btn,
+  .pi-file-btn,
+  .pi-small-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.45rem;
+    border: 1px solid #c5cfdd;
+    border-radius: 7px;
+    background: #ffffff;
+    color: #26344d;
+    padding: 0.58rem 0.85rem;
+    font-size: 0.84rem;
+    font-weight: 900;
+    cursor: pointer;
+    transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  }
+
+  .pi-action-btn,
+  .pi-file-btn {
+    margin-top: auto;
+  }
+
+  .pi-action-btn.primary {
+    border-color: #2563eb;
+    background: #2563eb;
+    color: #ffffff;
+  }
+
+  .pi-action-btn.primary:hover {
+    background: #1d4ed8;
+  }
+
+  .pi-action-btn:hover,
+  .pi-file-btn:hover,
+  .pi-small-btn:hover,
+  .pi-project-card:hover {
+    border-color: #3674c9;
+    color: #1d5fad;
+    background: #f3f8ff;
+  }
+
+  .pi-file-btn {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .pi-file-btn input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .pi-projects {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.8rem;
+  }
+
+  .pi-project-card {
+    overflow: hidden;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .pi-project-thumb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 4 / 3;
+    background: #eef2f7;
+    color: #94a3b8;
+    font-size: 0.8rem;
+    font-weight: 900;
+  }
+
+  .pi-project-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .pi-project-info {
+    padding: 0.72rem 0.8rem;
+  }
+
+  .pi-project-name {
+    color: #172033;
+    font-size: 0.88rem;
+    font-weight: 900;
+  }
+
+  .pi-project-date {
+    margin-top: 0.24rem;
+    color: #647087;
+    font-size: 0.76rem;
+  }
+
+  .pi-empty-msg,
+  .pi-message {
+    color: #647087;
+    font-size: 0.86rem;
+    line-height: 1.6;
+  }
+
+  .pi-message {
+    min-height: 1.4rem;
+    color: #b42323;
+  }
+
+  @media (max-width: 1180px) {
+    .pi-action-grid {
+      grid-template-columns: 1fr;
+    }
+  }
 </style>
 
 <div class="pi-launcher">
-  <div class="pi-hero">
-    <h1>PowerImager</h1>
-    <p>画像に関することなら何でもできる、超親切な画像編集ツール</p>
-    <div class="pi-hero-actions">
-      <button class="pi-hero-btn pi-hero-btn-primary" onclick="openEditor()">新規作成</button>
-      <button class="pi-hero-btn pi-hero-btn-primary" onclick="openEditorWithSize()">サイズ指定で作成</button>
-      <button class="pi-hero-btn pi-hero-btn-secondary" onclick="document.getElementById('launcher-file-input').click()">画像を開く</button>
+  <section class="dstt-hero pi-hero">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">POWER IMAGER</div>
+        <div>
+          <h1 class="dstt-hero-title">PowerImager</h1>
+          <p class="dstt-hero-subtitle">画像の切り抜き、注釈、調整、フィルタ、レイヤー編集をまとめて扱うDSTTの画像編集ツールです。作業内容を選んでから編集画面へ進みます。</p>
+        </div>
+      </div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">LOGIN</div>
+          <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
+        </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">OUTPUT</div>
+          <div class="dstt-hero-card-value">PNG / JPEG / WebP</div>
+          <div class="dstt-hero-card-note">編集後の画像を書き出し可能</div>
+        </div>
+        <div class="dstt-hero-card is-wide">
+          <div class="dstt-hero-card-label">WORKSPACE</div>
+          <div class="dstt-hero-card-value">Layer / Filter / Capture</div>
+          <div class="dstt-hero-card-note">レイヤー、調整、スクリーンショット、描画ツールを同じ画面で操作できます。</div>
+        </div>
+      </div>
     </div>
-    <input type="file" id="launcher-file-input" accept="image/*" style="display:none;">
-  </div>
+  </section>
 
-  <h2 class="pi-section-title">最近のプロジェクト</h2>
-  <div id="recent-projects" class="pi-projects">
-    <p class="pi-empty-msg">まだプロジェクトはありません</p>
-  </div>
+  <main class="pi-main">
+    <section class="pi-panel">
+      <div class="pi-panel-head">
+        <div>
+          <span class="pi-kicker">START</span>
+          <h2>作業を開始</h2>
+        </div>
+      </div>
+      <div class="pi-action-grid">
+        <article class="pi-action-card">
+          <span class="pi-action-mark">N</span>
+          <h3>新規作成</h3>
+          <p>白いキャンバスから始めます。サイズは編集画面でも変更できます。</p>
+          <button type="button" class="pi-action-btn primary" onclick="openEditor()">新規作成</button>
+        </article>
+        <article class="pi-action-card">
+          <span class="pi-action-mark">S</span>
+          <h3>サイズ指定で作成</h3>
+          <p>用途に合わせた幅と高さを指定して、最初から必要なキャンバスで開きます。</p>
+          <button type="button" class="pi-action-btn" onclick="openEditorWithSize()">サイズ指定</button>
+        </article>
+        <article class="pi-action-card">
+          <span class="pi-action-mark">I</span>
+          <h3>画像を開く</h3>
+          <p>PNG、JPEG、WebPなどの画像を読み込み、レイヤーとして配置して編集します。</p>
+          <label class="pi-file-btn">
+            画像を選択
+            <input type="file" id="launcher-file-input" accept="image/*">
+          </label>
+          <p id="pi-launch-message" class="pi-message" role="status"></p>
+        </article>
+      </div>
+    </section>
 
-  <h2 class="pi-section-title">クイックガイド</h2>
-  <div class="pi-guide">
-    <div class="pi-guide-item">
-      <div class="pi-guide-icon">🖼️</div>
-      <div class="pi-guide-title">画像を開く</div>
-      <div class="pi-guide-desc">「画像を開く」ボタンか、エディタ上にドラッグ＆ドロップで画像を読み込めます。</div>
-    </div>
-    <div class="pi-guide-item">
-      <div class="pi-guide-icon">🎨</div>
-      <div class="pi-guide-title">描画ツール</div>
-      <div class="pi-guide-desc">ブラシ、図形、テキスト、塗りつぶしなど多彩なツールで編集できます。</div>
-    </div>
-    <div class="pi-guide-item">
-      <div class="pi-guide-icon">📷</div>
-      <div class="pi-guide-title">スクリーンショット</div>
-      <div class="pi-guide-desc">画面をキャプチャして直接編集できます。切り抜き＆注釈に最適。</div>
-    </div>
-    <div class="pi-guide-item">
-      <div class="pi-guide-icon">💾</div>
-      <div class="pi-guide-title">保存＆エクスポート</div>
-      <div class="pi-guide-desc">プロジェクトはブラウザに保存。PNG/JPEG/WebPでエクスポートできます。</div>
-    </div>
-  </div>
+    <section class="pi-panel">
+      <div class="pi-panel-head">
+        <div>
+          <span class="pi-kicker">RECENT</span>
+          <h2>最近のプロジェクト</h2>
+        </div>
+        <button id="pi-refresh-projects" type="button" class="pi-small-btn">更新</button>
+      </div>
+      <div id="recent-projects" class="pi-projects">
+        <p class="pi-empty-msg">保存済みプロジェクトはまだありません。</p>
+      </div>
+    </section>
+  </main>
 </div>
 
 <script>
-  function openEditor() {
-    window.open('{{ url_for("power_imager.power_imager_editor") }}', '_blank',
-      'width=1280,height=800,menubar=no,toolbar=no,location=no,status=no');
+  const editorUrl = '{{ url_for("power_imager.power_imager_editor") }}';
+  const launchImageKey = 'dstt.powerImager.launchImage';
+
+  function openEditor(query) {
+    window.location.href = editorUrl + (query || '');
   }
 
   function openEditorWithSize() {
-    const w = prompt('幅 (px):', '1920');
-    const h = prompt('高さ (px):', '1080');
+    const w = prompt('幅(px):', '1920');
+    const h = prompt('高さ(px):', '1080');
     if (w && h) {
-      window.open('{{ url_for("power_imager.power_imager_editor") }}?w=' + w + '&h=' + h, '_blank',
-        'width=1280,height=800,menubar=no,toolbar=no,location=no,status=no');
+      openEditor('?w=' + encodeURIComponent(w) + '&h=' + encodeURIComponent(h));
     }
   }
 
   document.getElementById('launcher-file-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    window.open('{{ url_for("power_imager.power_imager_editor") }}', '_blank',
-      'width=1280,height=800,menubar=no,toolbar=no,location=no,status=no');
+    const message = document.getElementById('pi-launch-message');
+    const reader = new FileReader();
+    reader.onload = () => {
+      sessionStorage.setItem(launchImageKey, JSON.stringify({
+        name: file.name,
+        type: file.type,
+        dataURL: String(reader.result || '')
+      }));
+      openEditor('?from=image');
+    };
+    reader.onerror = () => {
+      message.textContent = '画像を読み込めませんでした。';
+    };
+    reader.readAsDataURL(file);
   });
 
-  (async function loadRecentProjects() {
+  function openProject(id) {
+    openEditor('?project=' + encodeURIComponent(id));
+  }
+
+  async function loadRecentProjects() {
     try {
       const req = indexedDB.open('PowerImagerDB', 1);
       req.onupgradeneeded = (e) => {
@@ -126,41 +348,51 @@
         getAll.onsuccess = () => {
           const projects = getAll.result || [];
           const container = document.getElementById('recent-projects');
-          if (projects.length === 0) return;
-          container.innerHTML = '';
-          projects.sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt)).slice(0, 8).forEach(p => {
-            const card = document.createElement('div');
+          container.replaceChildren();
+          if (projects.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'pi-empty-msg';
+            empty.textContent = '保存済みプロジェクトはまだありません。';
+            container.appendChild(empty);
+            return;
+          }
+          projects.sort((a, b) => new Date(b.savedAt || 0) - new Date(a.savedAt || 0)).slice(0, 8).forEach((project) => {
+            const card = document.createElement('button');
+            card.type = 'button';
             card.className = 'pi-project-card';
-            card.onclick = () => {
-              window.open('{{ url_for("power_imager.power_imager_editor") }}?project=' + encodeURIComponent(p.id), '_blank',
-                'width=1280,height=800,menubar=no,toolbar=no,location=no,status=no');
-            };
-            const thumbDiv = document.createElement('div');
-            thumbDiv.className = 'pi-project-thumb';
-            if (p.thumbnail) {
+            card.onclick = () => openProject(project.id);
+
+            const thumb = document.createElement('div');
+            thumb.className = 'pi-project-thumb';
+            if (project.thumbnail) {
               const img = document.createElement('img');
-              img.src = p.thumbnail;
-              thumbDiv.appendChild(img);
+              img.src = project.thumbnail;
+              img.alt = '';
+              thumb.appendChild(img);
             } else {
-              thumbDiv.textContent = '🖼️';
+              thumb.textContent = 'NO PREVIEW';
             }
+
             const info = document.createElement('div');
             info.className = 'pi-project-info';
             const name = document.createElement('div');
             name.className = 'pi-project-name';
-            name.textContent = p.name || p.id;
+            name.textContent = project.name || project.id;
             const date = document.createElement('div');
             date.className = 'pi-project-date';
-            date.textContent = p.savedAt ? new Date(p.savedAt).toLocaleString('ja-JP') : '';
-            info.appendChild(name);
-            info.appendChild(date);
-            card.appendChild(thumbDiv);
-            card.appendChild(info);
+            date.textContent = project.savedAt ? new Date(project.savedAt).toLocaleString('ja-JP') : '';
+            info.append(name, date);
+            card.append(thumb, info);
             container.appendChild(card);
           });
         };
       };
-    } catch (e) { console.log('IndexedDB not available'); }
-  })();
+    } catch (error) {
+      console.log('IndexedDB not available');
+    }
+  }
+
+  document.getElementById('pi-refresh-projects')?.addEventListener('click', loadRecentProjects);
+  loadRecentProjects();
 </script>
 {% endblock %}

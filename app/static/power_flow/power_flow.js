@@ -5,6 +5,8 @@
   const SVG_NS = "http://www.w3.org/2000/svg";
   const STORAGE_KEY = "dstt.powerFlow.documents";
   const AUTOSAVE_KEY = "dstt.powerFlow.autosave";
+  const LAUNCH_DOC_KEY = "dstt.powerFlow.launchDoc";
+  const LAUNCH_MODE_KEY = "dstt.powerFlow.launchMode";
   const SCHEMA_VERSION = 1;
   const EDGE_SLOT_SPACING = 18;
   const EDGE_OBSTACLE_PADDING = 18;
@@ -3288,15 +3290,42 @@
     });
   }
 
-  function boot() {
-    bindUi();
+  function consumeLaunchState() {
+    let doc = null;
+    let mode = "";
     try {
-      const saved = JSON.parse(localStorage.getItem(AUTOSAVE_KEY) || "null");
-      if (saved && Array.isArray(saved.nodes) && Array.isArray(saved.connectors)) {
-        state.doc = { ...createBlankDoc(), ...saved };
+      mode = sessionStorage.getItem(LAUNCH_MODE_KEY) || "";
+      const rawDoc = sessionStorage.getItem(LAUNCH_DOC_KEY);
+      sessionStorage.removeItem(LAUNCH_MODE_KEY);
+      sessionStorage.removeItem(LAUNCH_DOC_KEY);
+      if (rawDoc) {
+        const parsed = JSON.parse(rawDoc);
+        if (parsed && Array.isArray(parsed.nodes) && Array.isArray(parsed.connectors)) {
+          doc = { ...createBlankDoc(), ...parsed, schemaVersion: SCHEMA_VERSION };
+        }
       }
     } catch (error) {
+      doc = null;
+    }
+    return { mode, doc };
+  }
+
+  function boot() {
+    bindUi();
+    const launch = consumeLaunchState();
+    if (launch.doc) {
+      state.doc = launch.doc;
+    } else if (launch.mode === "new") {
       state.doc = createBlankDoc();
+    } else {
+      try {
+        const saved = JSON.parse(localStorage.getItem(AUTOSAVE_KEY) || "null");
+        if (saved && Array.isArray(saved.nodes) && Array.isArray(saved.connectors)) {
+          state.doc = { ...createBlankDoc(), ...saved };
+        }
+      } catch (error) {
+        state.doc = createBlankDoc();
+      }
     }
     $("pf-title").value = state.doc.title || "新しいフロー";
     render();
