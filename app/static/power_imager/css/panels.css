@@ -10,7 +10,7 @@
 .layer-item .layer-thumb {
   width: 32px; height: 32px; border-radius: 3px;
   background: var(--pi-bg); border: 1px solid var(--pi-border);
-  object-fit: contain; image-rendering: pixelated; flex-shrink: 0;
+  object-fit: contain; image-rendering: auto; flex-shrink: 0;
 }
 .layer-item .layer-name {
   flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -147,6 +147,7 @@
 
 .advanced-only { display: none; }
 body.advanced-mode .advanced-only { display: block; }
+body.advanced-mode .topbar-dropdown-item.advanced-only { display: flex; }
 
 /* --- History Panel --- */
 .history-list { display: flex; flex-direction: column; gap: 1px; }

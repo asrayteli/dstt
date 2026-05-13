@@ -114,6 +114,21 @@
   font-size: 11px; color: var(--pi-text-dim); margin-left: 16px;
 }
 .topbar-dropdown-item:hover .shortcut { color: rgba(255,255,255,0.7); }
+.topbar-dropdown .advanced-only { display: none !important; }
+body.pro-mode .topbar-dropdown .advanced-only,
+body.advanced-mode .topbar-dropdown .advanced-only { display: flex !important; }
+.topbar-dropdown-sep.advanced-only { display: none !important; }
+body.pro-mode .topbar-dropdown-sep.advanced-only,
+body.advanced-mode .topbar-dropdown-sep.advanced-only { display: block !important; }
+.pi-menu-tooltip {
+  position: fixed; z-index: 1200; max-width: 260px;
+  padding: 8px 10px; border: 1px solid var(--pi-border); border-radius: 6px;
+  background: rgba(24,24,40,0.96); color: var(--pi-text);
+  font-size: 12px; line-height: 1.5; box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  pointer-events: none; opacity: 0; transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.pi-menu-tooltip.visible { opacity: 1; transform: translateY(0); }
 .topbar-dropdown-sep {
   height: 1px; background: var(--pi-border); margin: 4px 0;
 }

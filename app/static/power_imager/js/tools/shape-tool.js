@@ -19,6 +19,7 @@ window.PIShapeTool = new (class extends PIToolBase {
   onMouseMove(e) {
     if (!this.drawing) return;
     const ctx = PICanvasEngine.getOverlayCtx();
+    PICanvasEngine.configureContext(ctx);
     PICanvasEngine.clearOverlay();
     const fgColor = document.getElementById('fg-color-input').value;
     const bgColor = document.getElementById('bg-color-input').value;
@@ -34,6 +35,7 @@ window.PIShapeTool = new (class extends PIToolBase {
     const bgColor = document.getElementById('bg-color-input').value;
     const ctx = layer.ctx;
     ctx.save();
+    PICanvasEngine.configureContext(ctx);
     ctx.translate(-layer.x, -layer.y);
     this.drawShapeOnCtx(ctx, this.startX, this.startY, e.canvasX, e.canvasY, fgColor, bgColor, e.shiftKey);
     ctx.restore();
@@ -42,6 +44,9 @@ window.PIShapeTool = new (class extends PIToolBase {
   }
   drawShapeOnCtx(ctx, x1, y1, x2, y2, fgColor, bgColor, shiftKey) {
     ctx.save();
+    PICanvasEngine.configureContext(ctx);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     const x = Math.min(x1, x2), y = Math.min(y1, y2);
     let w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
     if (shiftKey) { const s = Math.min(w, h); w = s; h = s; }

@@ -24,8 +24,13 @@ window.PIMosaicFilter = {
     });
   },
   apply(layer, blockSize) {
-    const w = layer.canvas.width, h = layer.canvas.height;
-    const imgData = layer.ctx.getImageData(0, 0, w, h);
+    const bounds = PISelection.getLayerBounds(layer);
+    if (!bounds && PISelection.has()) return;
+    const x0 = bounds ? bounds.x : 0;
+    const y0 = bounds ? bounds.y : 0;
+    const w = bounds ? bounds.w : layer.canvas.width;
+    const h = bounds ? bounds.h : layer.canvas.height;
+    const imgData = layer.ctx.getImageData(x0, y0, w, h);
     const d = imgData.data;
     const bs = Math.max(2, blockSize);
     for (let by = 0; by < h; by += bs) {
@@ -33,19 +38,22 @@ window.PIMosaicFilter = {
         let r = 0, g = 0, b = 0, count = 0;
         for (let y = by; y < Math.min(by + bs, h); y++) {
           for (let x = bx; x < Math.min(bx + bs, w); x++) {
+            if (!PISelection.contains(bounds, x0 + x, y0 + y)) continue;
             const i = (y * w + x) * 4;
             r += d[i]; g += d[i + 1]; b += d[i + 2]; count++;
           }
         }
+        if (!count) continue;
         r = Math.round(r / count); g = Math.round(g / count); b = Math.round(b / count);
         for (let y = by; y < Math.min(by + bs, h); y++) {
           for (let x = bx; x < Math.min(bx + bs, w); x++) {
+            if (!PISelection.contains(bounds, x0 + x, y0 + y)) continue;
             const i = (y * w + x) * 4;
             d[i] = r; d[i + 1] = g; d[i + 2] = b;
           }
         }
       }
     }
-    layer.ctx.putImageData(imgData, 0, 0);
+    layer.ctx.putImageData(imgData, x0, y0);
   }
 };

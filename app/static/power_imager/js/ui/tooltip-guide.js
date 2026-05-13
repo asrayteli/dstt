@@ -24,7 +24,7 @@ window.PITooltipGuide = (function () {
     document.body.appendChild(toastEl);
 
     PIEventBus.on('tool:activated', (d) => {
-      if (PIModeSwitcher.getMode() !== 'beginner') return;
+      if (PIModeSwitcher.getMode() !== 'normal') return;
       showTip(d.name);
     });
 

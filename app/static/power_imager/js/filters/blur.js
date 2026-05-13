@@ -26,12 +26,14 @@ window.PIBlurFilter = {
   apply(layer, radius) {
     const ctx = layer.ctx;
     ctx.save();
+    PICanvasEngine.configureContext(ctx);
     ctx.filter = 'blur(' + radius + 'px)';
     const temp = document.createElement('canvas');
     temp.width = layer.canvas.width; temp.height = layer.canvas.height;
-    temp.getContext('2d').drawImage(layer.canvas, 0, 0);
-    ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
-    ctx.drawImage(temp, 0, 0);
+    const tctx = temp.getContext('2d');
+    PICanvasEngine.configureContext(tctx);
+    tctx.drawImage(layer.canvas, 0, 0);
+    PISelection.putCanvasEffect(layer, temp);
     ctx.restore();
   }
 };

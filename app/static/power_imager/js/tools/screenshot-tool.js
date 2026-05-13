@@ -24,6 +24,7 @@ window.PIScreenshotTool = new (class extends PIToolBase {
       const canvas = document.createElement('canvas');
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext('2d');
+      PICanvasEngine.configureContext(ctx);
       ctx.drawImage(video, 0, 0, w, h);
 
       track.stop();

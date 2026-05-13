@@ -26,6 +26,8 @@
         <div class="topbar-dropdown-sep"></div>
         <button class="topbar-dropdown-item" data-action="save">プロジェクト保存<span class="shortcut">Ctrl+S</span></button>
         <button class="topbar-dropdown-item" data-action="export">エクスポート</button>
+        <div class="topbar-dropdown-sep"></div>
+        <button class="topbar-dropdown-item" data-action="document-dpi">DPI設定</button>
       </div>
     </div>
 
@@ -39,6 +41,8 @@
         <button class="topbar-dropdown-item" data-action="paste">ペースト<span class="shortcut">Ctrl+V</span></button>
         <div class="topbar-dropdown-sep"></div>
         <button class="topbar-dropdown-item" data-action="resize">キャンバスサイズ変更</button>
+        <button class="topbar-dropdown-item" data-action="trim-transparent">透明余白をトリム</button>
+        <button class="topbar-dropdown-item" data-action="flatten">レイヤーを統合</button>
       </div>
     </div>
 
@@ -56,10 +60,22 @@
     <div style="position:relative;">
       <button class="topbar-menu-btn" data-menu="menu-adjust">調整</button>
       <div id="menu-adjust" class="topbar-dropdown hidden">
+        <button class="topbar-dropdown-item" data-action="auto-contrast">自動コントラスト</button>
+        <button class="topbar-dropdown-item" data-action="auto-levels">自動レベル</button>
+        <button class="topbar-dropdown-item" data-action="white-balance">自動ホワイトバランス</button>
+        <div class="topbar-dropdown-sep"></div>
         <button class="topbar-dropdown-item" data-action="brightness">明るさ・コントラスト</button>
         <button class="topbar-dropdown-item" data-action="hue">色相・彩度</button>
+        <button class="topbar-dropdown-item" data-action="vibrance">自然な彩度</button>
+        <button class="topbar-dropdown-item" data-action="temperature">色温度 / 色かぶり</button>
         <button class="topbar-dropdown-item" data-action="levels">レベル補正</button>
         <button class="topbar-dropdown-item" data-action="color-balance">カラーバランス</button>
+        <div class="topbar-dropdown-sep advanced-only"></div>
+        <button class="topbar-dropdown-item advanced-only" data-action="curves">トーンカーブ</button>
+        <button class="topbar-dropdown-item advanced-only" data-action="exposure">露光 / ガンマ</button>
+        <button class="topbar-dropdown-item advanced-only" data-action="channel-mixer">チャンネルミキサー</button>
+        <button class="topbar-dropdown-item advanced-only" data-action="threshold">しきい値</button>
+        <button class="topbar-dropdown-item advanced-only" data-action="posterize">ポスタライズ</button>
       </div>
     </div>
 
@@ -70,6 +86,14 @@
         <button class="topbar-dropdown-item" data-action="sharpen">シャープ</button>
         <button class="topbar-dropdown-item" data-action="mosaic">モザイク</button>
         <button class="topbar-dropdown-item" data-action="noise">ノイズ除去</button>
+        <button class="topbar-dropdown-item" data-action="glow">ソフトグロー</button>
+        <button class="topbar-dropdown-item" data-action="edge-detect">輪郭抽出</button>
+        <div class="topbar-dropdown-sep advanced-only"></div>
+        <button class="topbar-dropdown-item advanced-only" data-action="unsharp-mask">アンシャープマスク</button>
+        <button class="topbar-dropdown-item advanced-only" data-action="high-pass">ハイパス</button>
+        <button class="topbar-dropdown-item advanced-only" data-action="emboss">エンボス</button>
+        <button class="topbar-dropdown-item advanced-only" data-action="halftone">ハーフトーン</button>
+        <button class="topbar-dropdown-item advanced-only" data-action="vignette">ビネット</button>
         <div class="topbar-dropdown-sep"></div>
         <button class="topbar-dropdown-item" data-action="grayscale">グレースケール</button>
         <button class="topbar-dropdown-item" data-action="sepia">セピア</button>
@@ -93,12 +117,12 @@
     <button class="quick-action-btn" onclick="PITopbar.handleAction('fit')" title="画面に合わせる">⊞</button>
 
     <div class="mode-toggle">
-      <span>初級</span>
+      <span>通常</span>
       <label class="mode-toggle-switch">
         <input type="checkbox" id="mode-toggle-input">
         <span class="mode-toggle-slider"></span>
       </label>
-      <span>上級</span>
+      <span>PRO</span>
     </div>
   </div>
 
@@ -111,6 +135,7 @@
       <div class="toolbar-separator"></div>
       <button class="tool-btn" data-tool="brush" title="ブラシ (B)">✎</button>
       <button class="tool-btn" data-tool="eraser" title="消しゴム (E)">◻</button>
+      <button class="tool-btn" data-tool="retouch" title="レタッチ">◐</button>
       <button class="tool-btn" data-tool="fill" title="塗りつぶし (G)">⬛</button>
       <div class="toolbar-separator"></div>
       <button class="tool-btn" data-tool="text" title="テキスト (T)">T</button>
@@ -171,9 +196,11 @@
   <div id="pi-statusbar">
     <span>座標: <span id="sb-coord">0, 0</span></span>
     <span>サイズ: <span id="sb-size">800 x 600</span></span>
+    <span>DPI: <span id="sb-dpi">96</span></span>
+    <span>印刷サイズ: <span id="sb-print-size">211.7 x 158.8 mm</span></span>
     <span>ズーム: <span id="sb-zoom">100%</span></span>
     <span>ツール: <span id="sb-tool">move</span></span>
-    <span>モード: <span id="sb-mode">初級</span></span>
+    <span>モード: <span id="sb-mode">通常</span></span>
   </div>
 
 </div>
@@ -221,6 +248,7 @@
 <script src="{{ url_for('static', filename='power_imager/js/tools/crop-tool.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/tools/brush-tool.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/tools/eraser-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/retouch-tool.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/tools/text-tool.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/tools/shape-tool.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/tools/fill-tool.js') }}"></script>
@@ -230,10 +258,14 @@
 <script src="{{ url_for('static', filename='power_imager/js/adjustments/hue-saturation.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/adjustments/color-balance.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/adjustments/levels.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/adjustments/quick-adjustments.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/adjustments/advanced-adjustments.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/filters/blur.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/filters/sharpen.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/filters/mosaic.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/filters/noise.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/filters/creative-filters.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/filters/advanced-filters.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/filters/filter-worker.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/ui/toolbar.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/ui/topbar.js') }}"></script>

@@ -1,7 +1,7 @@
 /* PowerImager — ProjectStore: プロジェクト保存 (IndexedDB) */
 window.PIProjectStore = (function () {
   const DB_NAME = 'PowerImagerDB';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   const STORE_NAME = 'projects';
   let db = null;
 
@@ -61,6 +61,7 @@ window.PIProjectStore = (function () {
     const thumbnail = document.createElement('canvas');
     thumbnail.width = 160; thumbnail.height = 120;
     const tctx = thumbnail.getContext('2d');
+    PICanvasEngine.configureContext(tctx);
     const scale = Math.min(160 / flat.width, 120 / flat.height);
     const tw = flat.width * scale, th = flat.height * scale;
     tctx.drawImage(flat, (160 - tw) / 2, (120 - th) / 2, tw, th);
@@ -76,6 +77,7 @@ window.PIProjectStore = (function () {
       id: name || 'project_' + Date.now(),
       name: name || '無題プロジェクト',
       width: size.width, height: size.height,
+      dpi: PICanvasEngine.getDpi(),
       thumbnail: thumbnail.toDataURL('image/jpeg', 0.7),
       layers: layerData,
       savedAt: new Date().toISOString()
@@ -89,6 +91,7 @@ window.PIProjectStore = (function () {
     if (!project) return null;
 
     PILayerManager.clear();
+    PICanvasEngine.setDpi(project.dpi || 96);
     PICanvasEngine.setCanvasSize(project.width, project.height);
 
     for (const ld of project.layers) {

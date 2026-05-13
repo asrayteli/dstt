@@ -1,29 +1,31 @@
-/* PowerImager — ModeSwitcher: 初級/上級モード */
+/* PowerImager - ModeSwitcher: Normal / PRO mode */
 window.PIModeSwitcher = (function () {
-  let isAdvanced = false;
+  let isPro = false;
 
   function init() {
-    isAdvanced = localStorage.getItem('pi-advanced-mode') === 'true';
+    isPro = localStorage.getItem('pi-advanced-mode') === 'true' || localStorage.getItem('pi-pro-mode') === 'true';
     apply();
 
     const toggle = document.getElementById('mode-toggle-input');
     if (toggle) {
-      toggle.checked = isAdvanced;
+      toggle.checked = isPro;
       toggle.addEventListener('change', () => {
-        isAdvanced = toggle.checked;
-        localStorage.setItem('pi-advanced-mode', isAdvanced);
+        isPro = toggle.checked;
+        localStorage.setItem('pi-pro-mode', isPro);
+        localStorage.setItem('pi-advanced-mode', isPro);
         apply();
       });
     }
   }
 
   function apply() {
-    document.body.classList.toggle('advanced-mode', isAdvanced);
-    PIStatusbar.setMode(isAdvanced ? '上級' : '初級');
-    PIEventBus.emit('mode:changed', isAdvanced);
+    document.body.classList.toggle('advanced-mode', isPro);
+    document.body.classList.toggle('pro-mode', isPro);
+    PIStatusbar.setMode(isPro ? 'PRO' : '通常');
+    PIEventBus.emit('mode:changed', isPro);
   }
 
-  function getMode() { return isAdvanced ? 'advanced' : 'beginner'; }
+  function getMode() { return isPro ? 'pro' : 'normal'; }
 
   return { init, getMode };
 })();

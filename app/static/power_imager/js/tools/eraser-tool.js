@@ -33,6 +33,7 @@ window.PIEraserTool = new (class extends PIToolBase {
   erase(layer, x1, y1, x2, y2) {
     const ctx = layer.ctx;
     ctx.save();
+    PICanvasEngine.configureContext(ctx);
     ctx.globalCompositeOperation = 'destination-out';
     ctx.strokeStyle = 'rgba(0,0,0,1)';
     ctx.lineWidth = this.eraserSize;

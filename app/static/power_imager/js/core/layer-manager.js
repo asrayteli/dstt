@@ -14,9 +14,11 @@ window.PILayerManager = (function () {
     const h = height || size.height;
     const canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    PICanvasEngine.configureContext(ctx);
     return {
       id: ++idCounter, name: name || 'Layer ' + idCounter,
-      canvas: canvas, ctx: canvas.getContext('2d'),
+      canvas: canvas, ctx: ctx,
       x: 0, y: 0, visible: true, locked: false,
       opacity: 1, blendMode: 'source-over',
       type: 'raster', textData: null
@@ -35,6 +37,7 @@ window.PILayerManager = (function () {
     const layer = createLayer(name || 'Image');
     layer.canvas.width = img.width || img.naturalWidth;
     layer.canvas.height = img.height || img.naturalHeight;
+    PICanvasEngine.configureContext(layer.ctx);
     layer.ctx.drawImage(img, 0, 0);
     layers.push(layer);
     activeIndex = layers.length - 1;
@@ -58,6 +61,7 @@ window.PILayerManager = (function () {
     const td = layer.textData;
     const tempCanvas = document.createElement('canvas');
     const tempCtx = tempCanvas.getContext('2d');
+    PICanvasEngine.configureContext(tempCtx);
 
     let fontStr = '';
     if (td.italic) fontStr += 'italic ';
@@ -78,6 +82,7 @@ window.PILayerManager = (function () {
     layer.canvas.width = totalW;
     layer.canvas.height = totalH;
     const ctx = layer.ctx;
+    PICanvasEngine.configureContext(ctx);
 
     ctx.font = fontStr;
     ctx.textBaseline = 'top';
@@ -134,6 +139,7 @@ window.PILayerManager = (function () {
     const dup = createLayer(src.name + ' copy');
     dup.canvas.width = src.canvas.width;
     dup.canvas.height = src.canvas.height;
+    PICanvasEngine.configureContext(dup.ctx);
     dup.ctx.drawImage(src.canvas, 0, 0);
     dup.x = src.x; dup.y = src.y;
     dup.opacity = src.opacity; dup.blendMode = src.blendMode;
@@ -157,6 +163,7 @@ window.PILayerManager = (function () {
     const upper = layers[index];
     const lower = layers[index - 1];
     lower.ctx.save();
+    PICanvasEngine.configureContext(lower.ctx);
     lower.ctx.globalAlpha = upper.opacity;
     lower.ctx.globalCompositeOperation = upper.blendMode || 'source-over';
     lower.ctx.drawImage(upper.canvas, upper.x - lower.x, upper.y - lower.y);
@@ -171,6 +178,7 @@ window.PILayerManager = (function () {
     const result = document.createElement('canvas');
     result.width = size.width; result.height = size.height;
     const ctx = result.getContext('2d');
+    PICanvasEngine.configureContext(ctx);
     layers.forEach(l => {
       if (!l.visible) return;
       ctx.save();
@@ -192,9 +200,11 @@ window.PILayerManager = (function () {
     return layers.map(l => {
       const c = document.createElement('canvas');
       c.width = l.canvas.width; c.height = l.canvas.height;
-      c.getContext('2d').drawImage(l.canvas, 0, 0);
+      const ctx = c.getContext('2d');
+      PICanvasEngine.configureContext(ctx);
+      ctx.drawImage(l.canvas, 0, 0);
       return {
-        id: l.id, name: l.name, canvas: c, ctx: c.getContext('2d'),
+        id: l.id, name: l.name, canvas: c, ctx: ctx,
         x: l.x, y: l.y, visible: l.visible, locked: l.locked,
         opacity: l.opacity, blendMode: l.blendMode,
         type: l.type, textData: l.textData ? { ...l.textData } : null
@@ -206,9 +216,11 @@ window.PILayerManager = (function () {
     layers = snap.map(s => {
       const c = document.createElement('canvas');
       c.width = s.canvas.width; c.height = s.canvas.height;
-      c.getContext('2d').drawImage(s.canvas, 0, 0);
+      const ctx = c.getContext('2d');
+      PICanvasEngine.configureContext(ctx);
+      ctx.drawImage(s.canvas, 0, 0);
       return {
-        id: s.id, name: s.name, canvas: c, ctx: c.getContext('2d'),
+        id: s.id, name: s.name, canvas: c, ctx: ctx,
         x: s.x, y: s.y, visible: s.visible, locked: s.locked,
         opacity: s.opacity, blendMode: s.blendMode,
         type: s.type, textData: s.textData ? { ...s.textData } : null
