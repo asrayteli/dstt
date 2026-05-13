@@ -1472,11 +1472,10 @@ def _pending_substitute_request_entries_for_month(
                     continue
                 if str(entry.get("substitute_source_month_key") or "") != month_key:
                     continue
-                if _entry_resolved_flag(entry):
-                    continue
                 display_entry = dict(entry)
                 display_entry["id"] = f"substitute-request-display-{display_entry.get('id') or project_id}-{day_key}"
                 display_entry["sync_source_type"] = SHIFT_SYNC_SUBSTITUTE_REQUEST_SOURCE
+                display_entry["substitute_resolved"] = _entry_resolved_flag(entry)
                 display_entry["sync_source_project_id"] = str(substitute_project.get("id") or "")
                 display_entry["sync_source_project_title"] = str(substitute_project.get("title") or SUBSTITUTE_TITLE)
                 display_entry["sync_source_month_key"] = month_key

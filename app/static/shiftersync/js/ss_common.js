@@ -1312,6 +1312,7 @@ const ShifterSync = (function() {
     if (!normalized) {
       return {
         title: '',
+        title_tone: '',
         comment: '',
         employee_number: '',
         branch_label: '',
@@ -1328,7 +1329,16 @@ const ShifterSync = (function() {
     const branchState = entryBranchState(normalized);
     const branchIssue = entryBranchIssue(normalized);
     const titleName = isMasterPersonType() && normalized.site_name ? normalized.site_name : parsed.name;
-    let displayTitle = parsed.optionKey ? `${titleName} ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : titleName;
+    const isSubstituteRequestDisplay = String(normalized.sync_source_type || '') === 'substitute_request';
+    const isPendingSubstituteRequest = isSubstituteRequestDisplay && !normalized.substitute_resolved;
+    let displayTitle;
+    let titleTone = '';
+    if (isPendingSubstituteRequest) {
+      displayTitle = parsed.optionKey ? `要請中 ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : '要請中';
+      titleTone = 'substitute-pending';
+    } else {
+      displayTitle = parsed.optionKey ? `${titleName} ${allOptionMappings[parsed.optionKey] || parsed.optionKey}` : titleName;
+    }
     if (isSubstituteMode()) {
       const requestLabel = normalized.substitute_request_type === 'person' ? '人不足' : '現場不足';
       const helperLabel = normalized.substitute_request_type === 'person'
@@ -1344,9 +1354,9 @@ const ShifterSync = (function() {
     if (isMasterMode() && !isSyncedEntry(normalized)) {
       syncSourceLabel = '\u30de\u30b9\u30bf\u30fc';
       syncSourceTone = 'master-local';
-    } else if (String(normalized.sync_source_type || '') === 'substitute_request') {
-      syncSourceLabel = '代務要請中';
-      syncSourceTone = 'warning';
+    } else if (isSubstituteRequestDisplay) {
+      syncSourceLabel = normalized.substitute_resolved ? '解決済み' : '要請中';
+      syncSourceTone = normalized.substitute_resolved ? 'substitute-resolved' : 'substitute-pending';
     } else if (isMasterMode() && isSyncedEntry(normalized)) {
       const sourceTitle = String(normalized.sync_source_project_title || '').trim();
       const sourceType = String(normalized.sync_source_type || '').trim();
@@ -1366,6 +1376,7 @@ const ShifterSync = (function() {
       && normalized.substitute_unassigned_helper === true;
     return {
       title: branchState.site_branch ? `${displayTitle} / 枝${branchState.site_branch}` : displayTitle,
+      title_tone: titleTone,
       comment: normalized.comment || '',
       employee_number: normalized.employee_number || '',
       branch_label: branchState.label,
@@ -1584,7 +1595,7 @@ const ShifterSync = (function() {
           $('<div>')
             .addClass('entry-item-main')
             .append(
-              $('<div>').addClass('entry-item-title').text(parts.title),
+              $('<div>').addClass(`entry-item-title${parts.title_tone ? ` is-${parts.title_tone}` : ''}`).text(parts.title),
               parts.sync_source_label
                 ? $('<div>').addClass(`entry-item-sync-source${parts.sync_source_tone ? ` is-${parts.sync_source_tone}` : ''}`).text(parts.sync_source_label)
                 : null,
@@ -2639,7 +2650,7 @@ const ShifterSync = (function() {
               <div>
                 <div class="ss-detail-label">\u30a8\u30f3\u30c8\u30ea ${index + 1}</div>
                 <div class="ss-detail-value-row">
-                  <div class="ss-detail-value">${escapeHtml(parts.title)}</div>
+                  <div class="ss-detail-value${parts.title_tone ? ` is-${escapeHtml(parts.title_tone)}` : ''}">${escapeHtml(parts.title)}</div>
                   ${parts.branch_issue_label ? `<span class="ss-issue-pill is-${escapeHtml(parts.branch_issue_tone || 'warning')}">${escapeHtml(parts.branch_issue_label)}</span>` : ''}
                 </div>
               </div>

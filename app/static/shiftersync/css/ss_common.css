@@ -466,6 +466,25 @@ h1, h2, h3 {
     color: var(--ss-ink);
 }
 
+.entry-item-title.is-substitute-pending {
+    align-self: flex-start;
+    display: inline-block;
+    background: #fb923c;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+.ss-detail-value.is-substitute-pending {
+    align-self: flex-start;
+    display: inline-block;
+    background: #fb923c;
+    color: #fff;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+}
+
 .entry-item-comment {
     margin-top: 2px;
     color: var(--ss-muted);
@@ -516,6 +535,11 @@ h1, h2, h3 {
 .entry-item-sync-source.is-substitute-resolved {
     background: #d9f99d;
     color: #3f6212;
+}
+
+.entry-item-sync-source.is-substitute-pending {
+    background: #ffedd5;
+    color: #c2410c;
 }
 
 .entry-item-comment.is-empty {
