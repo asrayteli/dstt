@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto space-y-6 pb-10">
-  <section class="dstt-hero" style="background: linear-gradient(135deg, #065f46 0%, #059669 50%, #34d399 100%);">
+<div class="max-w-6xl mx-auto space-y-6 pb-10">
+  <section class="dstt-hero" style="background: linear-gradient(135deg, #047857 0%, #0f766e 48%, #2563eb 100%);">
     <div class="dstt-hero-grid">
       <div class="dstt-hero-copy">
         <div class="dstt-hero-pill">FILE POST</div>
         <div>
           <h1 class="dstt-hero-title">FILE POST</h1>
-          <p class="dstt-hero-subtitle">ファイルをアップロードして共有URLを発行。パスワード保護にも対応した社内向けファイル共有ツールです。</p>
+          <p class="dstt-hero-subtitle">大容量ファイルを50MBずつ安全に送り、共有URL・QR・プレビュー付きで受け渡しできます。</p>
         </div>
       </div>
       <div class="dstt-hero-meta">
@@ -19,205 +19,470 @@
         <div class="dstt-hero-card">
           <div class="dstt-hero-card-label">CAPACITY</div>
           <div class="dstt-hero-card-value">最大 10GB</div>
-          <div class="dstt-hero-card-note">複数ファイル選択可</div>
+          <div class="dstt-hero-card-note">50MB分割アップロード</div>
         </div>
       </div>
     </div>
   </section>
 
-<div class="bg-white p-6 rounded-xl shadow">
+  <section class="bg-white rounded-xl shadow p-6">
+    <form method="POST" enctype="multipart/form-data" id="filepostUploadForm" class="space-y-5">
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="shareTitle" class="block mb-1 font-semibold text-slate-800">共有タイトル</label>
+          <input id="shareTitle" name="title" type="text" maxlength="120" class="w-full border rounded px-3 py-2" placeholder="例: A社提出資料">
+        </div>
+        <div>
+          <label for="zipName" class="block mb-1 font-semibold text-slate-800">まとめZIP名</label>
+          <input id="zipName" name="zip_name" type="text" maxlength="120" class="w-full border rounded px-3 py-2" placeholder="例: A社提出資料.zip">
+        </div>
+      </div>
 
-  <form method="POST" enctype="multipart/form-data" id="filepostUploadForm">
-    <div class="mb-4">
-      <label class="block mb-1 font-semibold">共有ファイル:</label>
-      <input type="file" name="files" multiple required class="w-full border rounded px-2 py-1">
-      <p class="text-sm text-gray-500 mt-1">※ 最大 10GB まで、複数ファイル選択可能</p>
-    </div>
+      <div>
+        <label for="memo" class="block mb-1 font-semibold text-slate-800">メモ</label>
+        <input id="memo" name="memo" type="text" maxlength="200" class="w-full border rounded px-3 py-2" placeholder="相手に伝えたい補足">
+      </div>
 
-    <div class="mb-4">
-      <label class="block mb-1 font-semibold">パスワード（任意）:</label>
-      <input type="text" name="password" class="w-full border rounded px-2 py-1" placeholder="未設定の場合は空欄のままでOK">
-    </div>
+      <div class="grid gap-4 md:grid-cols-3">
+        <div>
+          <label for="expiresMode" class="block mb-1 font-semibold text-slate-800">有効期限</label>
+          <select id="expiresMode" name="expires_mode" class="w-full border rounded px-3 py-2">
+            <option value="1h">1時間</option>
+            <option value="today">今日中</option>
+            <option value="3d">3日</option>
+            <option value="7d" selected>7日</option>
+            <option value="14d">14日</option>
+            <option value="custom">任意日時</option>
+          </select>
+        </div>
+        <div id="customExpiresWrap" class="hidden">
+          <label for="expiresAtCustom" class="block mb-1 font-semibold text-slate-800">任意日時</label>
+          <input id="expiresAtCustom" name="expires_at_custom" type="datetime-local" class="w-full border rounded px-3 py-2">
+        </div>
+        <div>
+          <label for="password" class="block mb-1 font-semibold text-slate-800">パスワード</label>
+          <input id="password" name="password" type="text" class="w-full border rounded px-3 py-2" placeholder="未設定なら空欄">
+        </div>
+      </div>
 
-    <div class="mb-4">
-      <label class="block mb-1 font-semibold">メモ（任意）:</label>
-      <input type="text" name="memo" class="w-full border rounded px-2 py-1" placeholder="例: プロジェクトA資料" maxlength="100">
-    </div>
+      <div id="dropZone" class="border-2 border-dashed border-emerald-300 rounded-xl p-7 bg-emerald-50/60 text-center transition">
+        <input id="fileInput" type="file" name="files" multiple required class="sr-only">
+        <p class="text-lg font-semibold text-slate-800">ファイルをここにドラッグ&ドロップ</p>
+        <p class="text-sm text-slate-600 mt-1">画像とPDFは共有一覧でプレビューできます。PDFは先頭1ページのみ表示します。</p>
+        <label for="fileInput" class="inline-flex mt-4 bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700 cursor-pointer">ファイルを選択</label>
+      </div>
 
-    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full">
-      アップロードして共有URL生成
-    </button>
-  </form>
+      <div id="selectedFiles" class="hidden border rounded-lg overflow-hidden"></div>
+
+      <div id="uploadProgress" class="hidden rounded-lg border border-blue-200 bg-blue-50 p-4">
+        <div class="flex justify-between text-sm font-semibold text-blue-900">
+          <span id="uploadStatus">アップロード準備中</span>
+          <span id="uploadPercent">0%</span>
+        </div>
+        <div class="mt-3 h-3 rounded-full bg-white overflow-hidden">
+          <div id="uploadBar" class="h-full bg-blue-600 transition-all" style="width: 0%;"></div>
+        </div>
+        <p id="uploadDetail" class="mt-2 text-sm text-blue-800"></p>
+      </div>
+
+      <div id="uploadResult" class="hidden rounded-lg border border-emerald-200 bg-emerald-50 p-4"></div>
+
+      <button id="uploadButton" type="submit" class="bg-blue-600 text-white px-4 py-3 rounded hover:bg-blue-700 w-full font-semibold">
+        アップロードして共有URL取得
+      </button>
+    </form>
+  </section>
 
   {% if download_url %}
-  <div class="mt-8 border-t pt-6">
-    <h3 class="text-lg font-semibold mb-2">✅ アップロード完了！</h3>
-
+  <section class="bg-white rounded-xl shadow p-6">
+    <h2 class="text-xl font-bold mb-3">アップロード完了</h2>
     {% if display_id %}
-    <div class="mb-4">
-      <label class="block mb-1 font-semibold">共有ID:</label>
-      <p class="text-3xl font-mono font-bold text-blue-600">{{ display_id }}</p>
-    </div>
+    <p class="text-sm text-slate-600">共有ID</p>
+    <p class="text-3xl font-mono font-bold text-blue-600 mb-4">{{ display_id }}</p>
     {% endif %}
-
-    <label class="block mb-1 font-semibold">共有URL:</label>
-    <input type="text" readonly value="{{ download_url }}" class="w-full border px-2 py-1 text-blue-800 mb-4 bg-gray-50" onclick="this.select()">
-
-    <label class="block mb-2 font-semibold">QRコード:</label>
+    <label class="block mb-1 font-semibold">共有URL</label>
+    <input type="text" readonly value="{{ download_url }}" class="w-full border px-3 py-2 text-blue-800 mb-4 bg-gray-50" onclick="this.select()">
+    {% if qr_data %}
     <img src="data:image/png;base64,{{ qr_data }}" alt="QRコード" class="mx-auto w-48 h-48 border p-2 rounded">
-  </div>
+    {% endif %}
+  </section>
   {% endif %}
 
-  <!-- ファイルリスト表示エリア -->
-  <div class="mt-8 border-t pt-6">
-    <h3 class="text-xl font-bold mb-4">📁 共有ファイル一覧</h3>
+  <section class="bg-white rounded-xl shadow p-6">
+    <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+      <div>
+        <h2 class="text-xl font-bold">共有ファイル一覧</h2>
+        <p class="text-sm text-slate-500">画像はそのまま、PDFは先頭1ページをプレビューします。</p>
+      </div>
+      <button type="button" id="reloadList" class="border border-slate-300 px-3 py-2 rounded hover:bg-slate-50">再読み込み</button>
+    </div>
     <div id="fileList" class="text-gray-500">読み込み中...</div>
-  </div>
-</div>
+  </section>
 </div>
 
 <script>
+const FILEPOST = {
+  chunkSize: {{ chunk_size|int }},
+  maxSize: {{ max_file_size|int }},
+  selectedFiles: []
+};
 
-// ページ読み込み時にファイルリスト取得
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', () => {
+  const fileInput = document.getElementById('fileInput');
+  const dropZone = document.getElementById('dropZone');
+  const form = document.getElementById('filepostUploadForm');
+  const expiresMode = document.getElementById('expiresMode');
+  const reloadList = document.getElementById('reloadList');
+
   loadFileList();
+  updateCustomExpiry();
 
-  const uploadForm = document.getElementById('filepostUploadForm');
-  if (uploadForm) {
-    uploadForm.addEventListener('submit', function() {
-      if (window.DSTTLoading && typeof window.DSTTLoading.show === 'function') {
-        window.DSTTLoading.show({
-          message: 'ファイルをアップロードしています...',
-          detail: 'ファイルサイズによっては時間がかかる場合があります'
-        });
-      }
+  fileInput.addEventListener('change', () => {
+    setSelectedFiles(Array.from(fileInput.files || []));
+  });
+  expiresMode.addEventListener('change', updateCustomExpiry);
+  reloadList.addEventListener('click', loadFileList);
+
+  ['dragenter', 'dragover'].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropZone.classList.add('border-blue-400', 'bg-blue-50');
     });
-  }
+  });
+  ['dragleave', 'drop'].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropZone.classList.remove('border-blue-400', 'bg-blue-50');
+    });
+  });
+  dropZone.addEventListener('drop', (event) => {
+    const files = Array.from(event.dataTransfer.files || []);
+    fileInput.files = makeFileList(files);
+    setSelectedFiles(files);
+  });
+
+  form.addEventListener('submit', (event) => {
+    if (!window.FormData || !window.XMLHttpRequest || !window.Blob) {
+      return;
+    }
+    event.preventDefault();
+    uploadSelectedFiles().catch((error) => {
+      showUploadError(error.message || 'アップロードに失敗しました。');
+    });
+  });
 });
 
-// ファイルリスト取得・表示
+function updateCustomExpiry() {
+  const wrap = document.getElementById('customExpiresWrap');
+  wrap.classList.toggle('hidden', document.getElementById('expiresMode').value !== 'custom');
+}
+
+function makeFileList(files) {
+  const dt = new DataTransfer();
+  files.forEach((file) => dt.items.add(file));
+  return dt.files;
+}
+
+function setSelectedFiles(files) {
+  FILEPOST.selectedFiles = files;
+  renderSelectedFiles();
+}
+
+function renderSelectedFiles() {
+  const box = document.getElementById('selectedFiles');
+  const files = FILEPOST.selectedFiles;
+  if (!files.length) {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  const rows = files.map((file, index) => `
+    <div class="grid grid-cols-[1fr_auto] gap-3 px-4 py-3 border-t first:border-t-0 text-sm">
+      <div class="min-w-0">
+        <div class="font-medium text-slate-800 truncate">${escapeHtml(file.name)}</div>
+        <div class="text-slate-500">${escapeHtml(file.type || '種類不明')}</div>
+      </div>
+      <div class="text-slate-600 whitespace-nowrap">${formatSize(file.size)}</div>
+    </div>
+  `).join('');
+
+  box.innerHTML = `
+    <div class="bg-slate-50 px-4 py-3 flex justify-between text-sm font-semibold text-slate-700">
+      <span>${files.length}件のファイル</span>
+      <span>合計 ${formatSize(total)}</span>
+    </div>
+    ${rows}
+  `;
+  box.classList.remove('hidden');
+}
+
+async function uploadSelectedFiles() {
+  const files = FILEPOST.selectedFiles;
+  if (!files.length) throw new Error('ファイルを選択してください。');
+
+  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+  if (totalSize > FILEPOST.maxSize) throw new Error('アップロードできるファイルは合計10GBまでです。');
+
+  setUploadBusy(true);
+  showProgress(0, 'アップロードセッションを作成中', '');
+
+  const initPayload = {
+    title: document.getElementById('shareTitle').value,
+    memo: document.getElementById('memo').value,
+    zip_name: document.getElementById('zipName').value,
+    password: document.getElementById('password').value,
+    expires_mode: document.getElementById('expiresMode').value,
+    expires_at_custom: normalizedCustomExpiry(),
+    files: files.map((file) => ({ name: file.name, size: file.size, type: file.type }))
+  };
+
+  const initResponse = await fetch('/tools/share/api/chunk/init', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(initPayload)
+  });
+  const initData = await parseJsonResponse(initResponse);
+  if (!initResponse.ok || !initData.success) throw new Error(initData.error || 'アップロードを開始できませんでした。');
+
+  const uploadId = initData.upload_id;
+  let uploadedBytes = 0;
+
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+    const file = files[fileIndex];
+    const chunkCount = Math.max(1, Math.ceil(file.size / FILEPOST.chunkSize));
+    for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+      const start = chunkIndex * FILEPOST.chunkSize;
+      const end = Math.min(file.size, start + FILEPOST.chunkSize);
+      const chunk = file.slice(start, end);
+      const label = `${file.name} (${chunkIndex + 1}/${chunkCount})`;
+      await uploadChunkWithRetry(uploadId, fileIndex, chunkIndex, chunk, file.name, (loaded) => {
+        const current = Math.min(totalSize, uploadedBytes + loaded);
+        const percent = totalSize ? Math.round((current / totalSize) * 100) : 100;
+        showProgress(percent, 'アップロード中', label);
+      });
+      uploadedBytes += chunk.size;
+      const percent = totalSize ? Math.round((uploadedBytes / totalSize) * 100) : 100;
+      showProgress(percent, 'アップロード中', label);
+    }
+  }
+
+  showProgress(100, 'ファイルを結合中', 'サーバー側でチャンクを結合しています。');
+  const completeResponse = await fetch('/tools/share/api/chunk/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ upload_id: uploadId })
+  });
+  const completeData = await parseJsonResponse(completeResponse);
+  if (!completeResponse.ok || !completeData.success) throw new Error(completeData.error || 'ファイルの結合に失敗しました。');
+
+  renderUploadResult(completeData);
+  document.getElementById('filepostUploadForm').reset();
+  setSelectedFiles([]);
+  updateCustomExpiry();
+  await loadFileList();
+  setUploadBusy(false);
+}
+
+async function uploadChunkWithRetry(uploadId, fileIndex, chunkIndex, chunk, filename, onProgress) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await uploadChunk(uploadId, fileIndex, chunkIndex, chunk, filename, onProgress);
+    } catch (error) {
+      lastError = error;
+      showProgress(null, 'チャンクを再試行中', `${filename} / ${attempt}回目`);
+      await sleep(700 * attempt);
+    }
+  }
+  throw lastError || new Error('チャンクアップロードに失敗しました。');
+}
+
+function uploadChunk(uploadId, fileIndex, chunkIndex, chunk, filename, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData();
+    formData.append('upload_id', uploadId);
+    formData.append('file_index', String(fileIndex));
+    formData.append('chunk_index', String(chunkIndex));
+    formData.append('chunk', chunk, filename);
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded);
+    };
+    xhr.onload = () => {
+      let data = {};
+      try {
+        data = JSON.parse(xhr.responseText || '{}');
+      } catch (error) {
+        reject(new Error('サーバー応答を読み取れませんでした。'));
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+        resolve(data);
+      } else {
+        reject(new Error(data.error || `チャンク送信に失敗しました。HTTP ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('通信に失敗しました。'));
+    xhr.open('POST', '/tools/share/api/chunk/upload');
+    xhr.send(formData);
+  });
+}
+
+function renderUploadResult(data) {
+  const box = document.getElementById('uploadResult');
+  box.innerHTML = `
+    <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+      <div>
+        <div class="text-sm text-emerald-700 font-semibold">アップロード完了</div>
+        <div class="text-3xl font-mono font-bold text-blue-700">${escapeHtml(data.display_id || '')}</div>
+        <input type="text" readonly value="${escapeAttr(data.download_url || '')}" class="mt-2 w-full md:w-[34rem] border px-3 py-2 text-blue-800 bg-white rounded" onclick="this.select()">
+      </div>
+      ${data.qr_data ? `<img src="data:image/png;base64,${escapeAttr(data.qr_data)}" alt="QRコード" class="w-32 h-32 border p-2 rounded bg-white">` : ''}
+    </div>
+  `;
+  box.classList.remove('hidden');
+}
+
+function normalizedCustomExpiry() {
+  const value = document.getElementById('expiresAtCustom').value;
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
 async function loadFileList() {
   try {
     const response = await fetch('/tools/share/api/list');
     const files = await response.json();
-
     const listDiv = document.getElementById('fileList');
 
-    if (files.length === 0) {
-      listDiv.innerHTML = '<p class="text-gray-500">共有ファイルはありません</p>';
+    if (!Array.isArray(files) || files.length === 0) {
+      listDiv.innerHTML = '<p class="text-gray-500">共有ファイルはありません。</p>';
       return;
     }
 
-    let html = '<div class="space-y-4">';
-
-    files.forEach(file => {
-      // ISO文字列にZを付けてUTC時刻であることを明示
-      const expiresAt = new Date(file.expires_at.endsWith('Z') ? file.expires_at : file.expires_at + 'Z');
-      const createdAt = new Date(file.created_at.endsWith('Z') ? file.created_at : file.created_at + 'Z');
-      const currentUsername = '{{ current_user.username if current_user.is_authenticated else "" }}';
-      const isOwner = file.uploader === currentUsername;
-
-      html += `
-        <div class="border rounded p-4 hover:shadow-md transition">
-          <div class="flex items-start justify-between">
-            <div class="flex-1">
-              <div class="flex items-center gap-3 mb-2">
-                <span class="text-2xl font-mono font-bold text-blue-600">${file.display_id}</span>
-                ${file.has_password ? '<span class="text-sm bg-yellow-100 text-yellow-800 px-2 py-1 rounded">🔐 パスワード保護</span>' : ''}
-                ${isOwner ? '<span class="text-sm bg-green-100 text-green-800 px-2 py-1 rounded">自分</span>' : ''}
-              </div>
-
-              ${file.memo ? `<p class="text-gray-700 mb-2"><strong>メモ:</strong> ${escapeHtml(file.memo)}</p>` : ''}
-
-              <p class="text-sm text-gray-600">
-                アップロード: ${file.uploader} | ${formatDate(createdAt)}
-              </p>
-              <p class="text-sm text-gray-600">
-                有効期限: ${formatDate(expiresAt)} | ファイル数: ${file.file_count} | 合計サイズ: ${formatSize(file.total_size)}
-              </p>
-
-              <!-- ファイル詳細リスト -->
-              <div class="mt-3 bg-gray-50 p-3 rounded">
-                <p class="text-sm font-semibold mb-2">📎 ファイル:</p>
-                ${file.files.map((f, idx) => `
-                  <div class="flex justify-between items-center text-sm py-1">
-                    <span class="text-gray-700">${escapeHtml(f.original_name)} (${formatSize(f.size)})</span>
-                    <button onclick="downloadSingleFile('${file.uid}', ${idx}, ${file.has_password})"
-                            class="text-blue-600 hover:text-blue-800 text-xs underline">
-                      ダウンロード
-                    </button>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          </div>
-
-          <!-- アクションボタン -->
-          <div class="mt-4 flex gap-2">
-            <button onclick="downloadAllFiles('${file.uid}', ${file.has_password})"
-                    class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
-              ${file.file_count > 1 ? '全ファイルをZIPでダウンロード' : 'ダウンロード'}
-            </button>
-            ${isOwner ? `
-              <button onclick="deleteFile('${file.uid}')"
-                      class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 text-sm">
-                削除
-              </button>
-            ` : ''}
-          </div>
-        </div>
-      `;
-    });
-
-    html += '</div>';
-    listDiv.innerHTML = html;
-
+    listDiv.innerHTML = `<div class="space-y-4">${files.map(renderShareItem).join('')}</div>`;
   } catch (error) {
-    console.error('ファイルリスト取得エラー:', error);
-    document.getElementById('fileList').innerHTML = '<p class="text-red-600">ファイルリストの取得に失敗しました</p>';
+    console.error('FILE POST list error:', error);
+    document.getElementById('fileList').innerHTML = '<p class="text-red-600">ファイルリストの取得に失敗しました。</p>';
   }
 }
 
-// 個別ファイルダウンロード
-function downloadSingleFile(uid, fileIndex, hasPassword) {
-  // パスワード保護の有無に関わらず、直接URLに遷移
-  // サーバー側でパスワード画面を表示するか判断
+function renderShareItem(file) {
+  const expiresAt = new Date(file.expires_at.endsWith('Z') ? file.expires_at : `${file.expires_at}Z`);
+  const createdAt = new Date(file.created_at.endsWith('Z') ? file.created_at : `${file.created_at}Z`);
+  const currentUsername = '{{ current_user.username if current_user.is_authenticated else "" }}';
+  const isOwner = file.uploader === currentUsername;
+  const title = file.title || file.memo || file.display_id;
+
+  return `
+    <article class="border rounded-lg p-4 hover:shadow-md transition">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2 mb-2">
+            <span class="text-2xl font-mono font-bold text-blue-600">${escapeHtml(file.display_id)}</span>
+            <span class="font-semibold text-slate-800">${escapeHtml(title)}</span>
+            ${file.has_password ? '<span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">パスワードあり</span>' : ''}
+            ${isOwner ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">自分</span>' : ''}
+          </div>
+          ${file.memo ? `<p class="text-sm text-slate-700 mb-2">${escapeHtml(file.memo)}</p>` : ''}
+          <p class="text-sm text-slate-600">アップロード: ${escapeHtml(file.uploader)} | ${formatDate(createdAt)}</p>
+          <p class="text-sm text-slate-600">有効期限: ${formatDate(expiresAt)} | ファイル数: ${file.file_count} | 合計: ${formatSize(file.total_size)}</p>
+          ${file.zip_name ? `<p class="text-sm text-slate-600">ZIP名: ${escapeHtml(file.zip_name)}</p>` : ''}
+        </div>
+        <div class="flex gap-2">
+          <button onclick="downloadAllFiles('${escapeJs(file.uid)}')" class="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 text-sm whitespace-nowrap">
+            ${file.file_count > 1 ? 'ZIPでDL' : 'DL'}
+          </button>
+          ${isOwner ? `<button onclick="deleteFile('${escapeJs(file.uid)}')" class="bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 text-sm">削除</button>` : ''}
+        </div>
+      </div>
+      <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        ${(file.files || []).map((item, idx) => renderFileDetail(file.uid, item, idx, file.has_password)).join('')}
+      </div>
+    </article>
+  `;
+}
+
+function renderFileDetail(uid, item, idx, hasPassword) {
+  const preview = item.preview_url
+    ? `<img src="${escapeAttr(item.preview_url)}" alt="${escapeAttr(item.original_name)}" class="w-24 h-24 object-cover rounded border bg-slate-100">`
+    : `<div class="w-24 h-24 rounded border bg-slate-100 flex items-center justify-center text-xs text-slate-500 text-center px-2">${hasPassword ? '要確認' : 'Previewなし'}</div>`;
+  return `
+    <div class="flex gap-3 rounded-lg bg-slate-50 p-3">
+      ${preview}
+      <div class="min-w-0 flex-1">
+        <div class="font-medium text-sm text-slate-800 break-words">${escapeHtml(item.original_name)}</div>
+        <div class="text-xs text-slate-500 mt-1">${formatSize(item.size || 0)}</div>
+        <button onclick="downloadSingleFile('${escapeJs(uid)}', ${idx})" class="mt-2 text-blue-700 hover:text-blue-900 text-xs underline">個別ダウンロード</button>
+      </div>
+    </div>
+  `;
+}
+
+function downloadSingleFile(uid, fileIndex) {
   window.location.href = `/tools/share/download/${uid}/${fileIndex}`;
 }
 
-// 全ファイルダウンロード
-function downloadAllFiles(uid, hasPassword) {
-  // パスワード保護の有無に関わらず、直接URLに遷移
-  // サーバー側でパスワード画面を表示するか判断
+function downloadAllFiles(uid) {
   window.location.href = `/tools/share/download/${uid}`;
 }
 
-// ファイル削除
 async function deleteFile(uid) {
-  if (!confirm('本当にこのファイルを削除しますか？')) {
-    return;
-  }
-
+  if (!confirm('この共有ファイルを削除しますか？')) return;
   try {
-    const response = await fetch(`/tools/share/api/delete/${uid}`, {
-      method: 'POST'
-    });
-
+    const response = await fetch(`/tools/share/api/delete/${uid}`, { method: 'POST' });
     const result = await response.json();
-
-    if (result.success) {
-      alert('削除しました');
-      loadFileList(); // リスト再読み込み
-    } else {
-      alert('削除に失敗しました: ' + (result.error || '不明なエラー'));
-    }
+    if (!response.ok || !result.success) throw new Error(result.error || '削除に失敗しました。');
+    await loadFileList();
   } catch (error) {
-    console.error('削除エラー:', error);
-    alert('削除に失敗しました');
+    alert(error.message || '削除に失敗しました。');
   }
 }
 
-// ユーティリティ関数
+async function parseJsonResponse(response) {
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch (error) {
+    return { success: false, error: text || 'サーバー応答を読み取れませんでした。' };
+  }
+}
+
+function showProgress(percent, status, detail) {
+  const wrap = document.getElementById('uploadProgress');
+  const bar = document.getElementById('uploadBar');
+  const percentText = document.getElementById('uploadPercent');
+  wrap.classList.remove('hidden');
+  if (percent !== null) {
+    const safePercent = Math.max(0, Math.min(100, percent));
+    bar.style.width = `${safePercent}%`;
+    percentText.textContent = `${safePercent}%`;
+  }
+  document.getElementById('uploadStatus').textContent = status;
+  document.getElementById('uploadDetail').textContent = detail || '';
+}
+
+function showUploadError(message) {
+  setUploadBusy(false);
+  const box = document.getElementById('uploadResult');
+  box.innerHTML = `<p class="text-red-700 font-semibold">${escapeHtml(message)}</p>`;
+  box.className = 'rounded-lg border border-red-200 bg-red-50 p-4';
+  box.classList.remove('hidden');
+}
+
+function setUploadBusy(isBusy) {
+  document.getElementById('uploadButton').disabled = isBusy;
+  document.getElementById('uploadButton').classList.toggle('opacity-60', isBusy);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function formatDate(date) {
   return date.toLocaleString('ja-JP', {
     year: 'numeric',
@@ -229,17 +494,25 @@ function formatDate(date) {
 }
 
 function formatSize(bytes) {
-  if (bytes === 0) return '0 B';
+  if (!bytes) return '0 B';
   const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
+  return `${(bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 2)} ${sizes[i]}`;
 }
 
 function escapeHtml(text) {
   const div = document.createElement('div');
-  div.textContent = text;
+  div.textContent = text == null ? '' : String(text);
   return div.innerHTML;
+}
+
+function escapeAttr(text) {
+  return escapeHtml(text).replace(/"/g, '&quot;');
+}
+
+function escapeJs(text) {
+  return String(text || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 </script>
 {% endblock %}
