@@ -1355,8 +1355,11 @@ const ShifterSync = (function() {
       syncSourceLabel = '\u30de\u30b9\u30bf\u30fc';
       syncSourceTone = 'master-local';
     } else if (isSubstituteRequestDisplay) {
-      syncSourceLabel = normalized.substitute_resolved ? '解決済み' : '要請中';
-      syncSourceTone = normalized.substitute_resolved ? 'substitute-resolved' : 'substitute-pending';
+      syncSourceLabel = normalized.substitute_resolved ? '解決済み' : '';
+      syncSourceTone = normalized.substitute_resolved ? 'substitute-resolved' : '';
+    } else if (String(normalized.sync_source_type || '') === 'substitute_shift' && normalized.substitute_resolved) {
+      syncSourceLabel = '解決済み';
+      syncSourceTone = 'substitute-resolved';
     } else if (isMasterMode() && isSyncedEntry(normalized)) {
       const sourceTitle = String(normalized.sync_source_project_title || '').trim();
       const sourceType = String(normalized.sync_source_type || '').trim();

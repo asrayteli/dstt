@@ -1167,8 +1167,31 @@ def _prepared_local_entries_for_month(
             if _entry_value_uses_site_link(project, next_entry):
                 next_entry = _entry_with_latest_site_link(next_entry, project)
             local_entries.append(next_entry)
+        incoming_local_ids = {
+            str(entry.get("id") or "").strip()
+            for entry in local_entries
+            if str(entry.get("id") or "").strip()
+        }
+        project_id = str(project.get("id") or "").strip()
+        superseded_source_ids = {
+            str(entry.get("substitute_source_entry_id") or "").strip()
+            for entry in normalized_current.get(day_key, [])
+            if isinstance(entry, dict)
+            and str(entry.get("sync_source_type") or "") == SHIFT_SYNC_SUBSTITUTE_SOURCE
+            and _entry_resolved_flag(entry)
+            and str(entry.get("substitute_source_project_id") or "").strip() == project_id
+            and str(entry.get("substitute_source_entry_id") or "").strip()
+            and str(entry.get("substitute_source_entry_id") or "").strip() != "day"
+        }
+        hidden_local_entries = [
+            dict(entry)
+            for entry in normalized_current.get(day_key, [])
+            if not _entry_is_shift_synced(entry)
+            and str(entry.get("id") or "").strip() in superseded_source_ids
+            and str(entry.get("id") or "").strip() not in incoming_local_ids
+        ]
         synced_entries = [dict(entry) for entry in normalized_current.get(day_key, []) if _entry_is_shift_synced(entry)]
-        combined[day_key] = local_entries + synced_entries
+        combined[day_key] = local_entries + hidden_local_entries + synced_entries
     return combined
 
 
@@ -1442,6 +1465,38 @@ def _entries_with_latest_site_links(entries_per_day: Any, project: dict[str, Any
     }
 
 
+def _entries_without_substitute_superseded_sources(
+    entries_per_day: Any,
+    project: dict[str, Any] | None,
+) -> Any:
+    if not isinstance(entries_per_day, dict) or not project:
+        return entries_per_day
+    project_id = str(project.get("id") or "").strip()
+    if not project_id:
+        return entries_per_day
+    filtered: dict[str, list[dict[str, Any]]] = {}
+    for day_key, entries in entries_per_day.items():
+        day_entries = [entry for entry in (entries if isinstance(entries, list) else []) if isinstance(entry, dict)]
+        superseded_source_ids = {
+            str(entry.get("substitute_source_entry_id") or "").strip()
+            for entry in day_entries
+            if str(entry.get("sync_source_type") or "") == SHIFT_SYNC_SUBSTITUTE_SOURCE
+            and _entry_resolved_flag(entry)
+            and str(entry.get("substitute_source_project_id") or "").strip() == project_id
+            and str(entry.get("substitute_source_entry_id") or "").strip()
+            and str(entry.get("substitute_source_entry_id") or "").strip() != "day"
+        }
+        if not superseded_source_ids:
+            filtered[str(day_key)] = day_entries
+            continue
+        filtered[str(day_key)] = [
+            entry
+            for entry in day_entries
+            if str(entry.get("id") or "").strip() not in superseded_source_ids
+        ]
+    return filtered
+
+
 def _pending_substitute_request_entries_for_month(
     project: dict[str, Any] | None,
     month_data: dict[str, Any] | None,
@@ -1472,6 +1527,18 @@ def _pending_substitute_request_entries_for_month(
                     continue
                 if str(entry.get("substitute_source_month_key") or "") != month_key:
                     continue
+                source_entry_id = str(entry.get("substitute_source_entry_id") or "").strip()
+                if _entry_resolved_flag(entry):
+                    source_day_entries = (month_data.get("entries_per_day") or {}).get(str(day_key), [])
+                    has_resolved_sync_entry = any(
+                        isinstance(source_entry, dict)
+                        and str(source_entry.get("sync_source_type") or "") == SHIFT_SYNC_SUBSTITUTE_SOURCE
+                        and str(source_entry.get("substitute_source_project_id") or "") == project_id
+                        and str(source_entry.get("substitute_source_entry_id") or "").strip() == source_entry_id
+                        for source_entry in (source_day_entries if isinstance(source_day_entries, list) else [])
+                    )
+                    if has_resolved_sync_entry:
+                        continue
                 display_entry = dict(entry)
                 display_entry["id"] = f"substitute-request-display-{display_entry.get('id') or project_id}-{day_key}"
                 display_entry["sync_source_type"] = SHIFT_SYNC_SUBSTITUTE_REQUEST_SOURCE
@@ -1496,6 +1563,7 @@ def _client_month_payload(
     payload = dict(month_data)
     payload.pop("revision_snapshots", None)
     payload["entries_per_day"] = _entries_with_latest_site_links(payload.get("entries_per_day"), project)
+    payload["entries_per_day"] = _entries_without_substitute_superseded_sources(payload.get("entries_per_day"), project)
     payload["pending_substitute_entries_per_day"] = _entries_with_latest_site_links(
         _pending_substitute_request_entries_for_month(project, month_data),
         project,
@@ -1504,6 +1572,7 @@ def _client_month_payload(
         payload.pop("draft_entries_per_day", None)
     else:
         payload["draft_entries_per_day"] = _entries_with_latest_site_links(payload.get("draft_entries_per_day"), project)
+        payload["draft_entries_per_day"] = _entries_without_substitute_superseded_sources(payload.get("draft_entries_per_day"), project)
     return payload
 
 
@@ -3312,6 +3381,16 @@ def _substitute_assignment(entry: dict[str, Any]) -> dict[str, Any] | None:
         "comment": str(entry.get("comment") or "").strip(),
         "request_type": request_type,
         "unassigned_helper": unassigned_helper,
+        "substitute_source_project_id": str(entry.get("substitute_source_project_id") or "").strip(),
+        "substitute_source_project_mode": str(entry.get("substitute_source_project_mode") or "").strip(),
+        "substitute_source_month_key": str(entry.get("substitute_source_month_key") or "").strip(),
+        "substitute_source_day": str(entry.get("substitute_source_day") or "").strip(),
+        "substitute_source_entry_id": str(entry.get("substitute_source_entry_id") or "").strip(),
+        "substitute_helper_employee_name": str(entry.get("substitute_helper_employee_name") or entry.get("substituteHelperEmployeeName") or "").strip(),
+        "substitute_helper_employee_number": str(entry.get("substitute_helper_employee_number") or entry.get("substituteHelperEmployeeNumber") or "").strip(),
+        "substitute_helper_site_row_id": str(entry.get("substitute_helper_site_row_id") or entry.get("substituteHelperSiteRowId") or "").strip(),
+        "substitute_helper_site_id": str(entry.get("substitute_helper_site_id") or entry.get("substituteHelperSiteId") or "").strip(),
+        "substitute_helper_site_name": str(entry.get("substitute_helper_site_name") or entry.get("substituteHelperSiteName") or "").strip(),
     }
 
 
@@ -3338,6 +3417,16 @@ def _build_person_synced_entry_from_substitute(
         "sync_source_month_key": month_key,
         "sync_source_day": day_key,
         "sync_source_entry_id": str(assignment.get("source_entry_id") or ""),
+        "substitute_request_type": str(assignment.get("request_type") or ""),
+        "substitute_resolved": True,
+        "substitute_source_project_id": str(assignment.get("substitute_source_project_id") or ""),
+        "substitute_source_project_mode": str(assignment.get("substitute_source_project_mode") or ""),
+        "substitute_source_month_key": str(assignment.get("substitute_source_month_key") or month_key),
+        "substitute_source_day": str(assignment.get("substitute_source_day") or day_key),
+        "substitute_source_entry_id": str(assignment.get("substitute_source_entry_id") or ""),
+        "substitute_helper_site_row_id": str(assignment.get("substitute_helper_site_row_id") or ""),
+        "substitute_helper_site_id": str(assignment.get("substitute_helper_site_id") or ""),
+        "substitute_helper_site_name": str(assignment.get("substitute_helper_site_name") or ""),
     }
 
 
@@ -3368,6 +3457,15 @@ def _build_scene_synced_entry_from_substitute(
         "sync_source_month_key": month_key,
         "sync_source_day": day_key,
         "sync_source_entry_id": str(assignment.get("source_entry_id") or ""),
+        "substitute_request_type": str(assignment.get("request_type") or ""),
+        "substitute_resolved": True,
+        "substitute_source_project_id": str(assignment.get("substitute_source_project_id") or ""),
+        "substitute_source_project_mode": str(assignment.get("substitute_source_project_mode") or ""),
+        "substitute_source_month_key": str(assignment.get("substitute_source_month_key") or month_key),
+        "substitute_source_day": str(assignment.get("substitute_source_day") or day_key),
+        "substitute_source_entry_id": str(assignment.get("substitute_source_entry_id") or ""),
+        "substitute_helper_employee_name": str(assignment.get("substitute_helper_employee_name") or assignment.get("employee_name") or ""),
+        "substitute_helper_employee_number": str(assignment.get("substitute_helper_employee_number") or assignment.get("employee_number") or ""),
     }
     return _scene_entry_with_siteplus_defaults(target_project, synced)
 
@@ -3538,7 +3636,6 @@ def _replace_shift_synced_entries_in_target_project(
     )
     next_entries_per_day = _empty_entries_for_month(year, month)
     has_desired_entries = any(desired_entries_by_day.get(day_key) for day_key in next_entries_per_day.keys())
-
     for day_key in next_entries_per_day.keys():
         preserved = [
             dict(entry) for entry in current_entries_per_day.get(day_key, [])

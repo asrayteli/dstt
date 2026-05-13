@@ -668,6 +668,124 @@ def test_resolved_substitute_shift_syncs_to_person_and_scene_projects(tmp_path):
     assert {item["entry"] for item in conflict_payload["conflicts"]} == {"!A!Alice", "!E!Alice"}
 
 
+def test_resolved_scene_substitute_request_replaces_source_entry(tmp_path):
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        branch = AccessBranch(name="Tokyo", code="TK")
+        db.session.add(branch)
+        db.session.flush()
+        office = AccessOffice(branch_id=branch.id, name="Shinjuku", code="S01")
+        site = Site(
+            site_id="S201",
+            site_name="Gamma Site",
+            site_manager_last="Manager",
+            site_manager_first="Two",
+            site_manager_id="M02",
+            site_register="tester",
+            site_updater="tester",
+            office_code="S01",
+            is_active=True,
+        )
+        db.session.add_all([office, site])
+        db.session.flush()
+        site_branch = SiteBranch(
+            site_row_id=site.id,
+            site_branch="001",
+            cloudshift_option_key="A",
+            site_register="tester",
+            site_updater="tester",
+            is_active=True,
+        )
+        db.session.add(site_branch)
+        db.session.commit()
+        office_id = office.id
+        site_row_id = site.id
+
+    owner = _owner()
+    owner.office_id = office_id
+    module.current_user = owner
+    scene = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Gamma Site", "mode": "scene", "site_row_id": str(site_row_id), "year": "2026", "month": "5"},
+    ).get_json()["project"]
+    scene_id = scene["project"]["id"]
+    scene_entries = dict(scene["month"]["entries_per_day"])
+    scene_entries["8"] = [
+        {
+            "id": "scene-entry-needs-help",
+            "value": "!A!未設定",
+            "comment": "TEST",
+            "employee_name": "未設定",
+            "employee_number": "",
+        }
+    ]
+    save_scene = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/5",
+        json={"required_capacity": 0, "entries_per_day": scene_entries, "base_month": scene["month"]},
+    )
+    assert save_scene.status_code == 200
+
+    request_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/substitute-request",
+        json={"year": 2026, "month": 5, "day": 8, "entry_id": "scene-entry-needs-help"},
+    )
+    assert request_response.status_code == 200
+    request_payload = request_response.get_json()
+    substitute_project_id = request_payload["substitute_project"]["id"]
+    substitute_month = request_payload["month"]
+    substitute_entries = dict(substitute_month["entries_per_day"])
+    substitute_entries["8"][0] = {
+        **substitute_entries["8"][0],
+        "substitute_helper_employee_name": "Bob",
+        "substitute_helper_employee_number": "2002",
+        "substitute_resolved": True,
+    }
+
+    resolve_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{substitute_project_id}/month/2026/5",
+        json={"required_capacity": 0, "entries_per_day": substitute_entries, "base_month": substitute_month},
+    )
+    assert resolve_response.status_code == 200
+
+    source_detail = client.get(f"/tools/shiftersync/cloudshift/api/project/{scene_id}?month_key=2026-05").get_json()
+    source_day_entries = source_detail["month"]["entries_per_day"]["8"]
+    assert len(source_day_entries) == 1
+    source_entry = source_day_entries[0]
+    assert source_entry["value"] == "!A!Bob"
+    assert source_entry["comment"] == "TEST"
+    assert source_entry["employee_number"] == "2002"
+    assert source_entry["site_branch"] == "001"
+    assert source_entry["sync_source_type"] == "substitute_shift"
+    assert source_entry["substitute_resolved"] is True
+    assert source_entry["substitute_source_project_id"] == scene_id
+    assert source_entry["substitute_source_entry_id"] == "scene-entry-needs-help"
+    assert "8" not in source_detail["month"]["pending_substitute_entries_per_day"]
+
+    resolved_substitute_month = resolve_response.get_json()["month"]
+    unresolved_substitute_entries = dict(resolved_substitute_month["entries_per_day"])
+    unresolved_substitute_entries["8"][0] = {
+        **unresolved_substitute_entries["8"][0],
+        "substitute_resolved": False,
+    }
+    unresolve_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{substitute_project_id}/month/2026/5",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": unresolved_substitute_entries,
+            "base_month": resolved_substitute_month,
+        },
+    )
+    assert unresolve_response.status_code == 200
+
+    unresolved_source_detail = client.get(f"/tools/shiftersync/cloudshift/api/project/{scene_id}?month_key=2026-05").get_json()
+    unresolved_source_entries = unresolved_source_detail["month"]["entries_per_day"]["8"]
+    assert len(unresolved_source_entries) == 1
+    assert unresolved_source_entries[0]["value"] == "!A!未設定"
+    assert unresolved_source_entries[0]["id"] == "scene-entry-needs-help"
+    pending_entries = unresolved_source_detail["month"]["pending_substitute_entries_per_day"]["8"]
+    assert pending_entries[0]["substitute_resolved"] is False
+
+
 def test_master_shift_syncs_to_person_and_scene_projects(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
