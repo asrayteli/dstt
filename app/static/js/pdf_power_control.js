@@ -553,6 +553,9 @@
       state.busy = true;
       updateSelectionSummary();
       setStatus("PDFを書き出しています...");
+      const loadingHandle = window.DSTTLoading && typeof window.DSTTLoading.show === 'function'
+        ? window.DSTTLoading.show({ message: "PDFを書き出しています...", detail: "ページ数に応じて時間がかかる場合があります" })
+        : null;
 
       try {
         const plan = buildPlan();
@@ -587,6 +590,11 @@
       } finally {
         state.busy = false;
         updateSelectionSummary();
+        if (typeof loadingHandle === 'function') {
+          loadingHandle();
+        } else if (window.DSTTLoading && typeof window.DSTTLoading.hide === 'function') {
+          window.DSTTLoading.hide();
+        }
       }
     };
 

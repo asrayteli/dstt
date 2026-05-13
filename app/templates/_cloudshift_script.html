@@ -5833,7 +5833,7 @@
         return;
       }
       const pendingCount = queuePendingSubstituteRequest(context);
-      replaceCalendarEntries(displayedEntriesForMonth(month));
+      replaceCalendarEntries(mergeSubstituteRequestDisplays(currentEntriesSnapshot(), month));
       updateUnsavedIndicator();
       showFlash(`代務要請を仮登録しました。この月を保存すると要代務シフト帳へ登録されます（保留 ${pendingCount} 件）`, 'info');
     }
