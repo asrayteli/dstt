@@ -102,6 +102,7 @@ window.PICropTool = new (class extends PIToolBase {
   }
   drawCrop() {
     const ctx = PICanvasEngine.getOverlayCtx();
+    PICanvasEngine.configureContext(ctx);
     const size = PICanvasEngine.getCanvasSize();
     PICanvasEngine.clearOverlay();
     if (!this.cropRect) return;
@@ -141,8 +142,10 @@ window.PICropTool = new (class extends PIToolBase {
       const newCanvas = document.createElement('canvas');
       newCanvas.width = rw; newCanvas.height = rh;
       const nctx = newCanvas.getContext('2d');
+      PICanvasEngine.configureContext(nctx);
       nctx.drawImage(layer.canvas, layer.x - rx, layer.y - ry);
       layer.canvas.width = rw; layer.canvas.height = rh;
+      PICanvasEngine.configureContext(layer.ctx);
       layer.ctx.drawImage(newCanvas, 0, 0);
       layer.x = 0; layer.y = 0;
     });

@@ -26,16 +26,19 @@ window.PIHueSaturation = {
     });
   },
   apply(layer, hueShift, satShift, lightShift) {
-    const imgData = layer.ctx.getImageData(0, 0, layer.canvas.width, layer.canvas.height);
-    const d = imgData.data;
-    for (let i = 0; i < d.length; i += 4) {
-      const hsl = PIColorUtils.rgbToHsl(d[i], d[i + 1], d[i + 2]);
-      hsl.h = (hsl.h + hueShift + 360) % 360;
-      hsl.s = PIMathUtils.clamp(hsl.s + satShift, 0, 100);
-      hsl.l = PIMathUtils.clamp(hsl.l + lightShift, 0, 100);
-      const rgb = PIColorUtils.hslToRgb(hsl.h, hsl.s, hsl.l);
-      d[i] = rgb.r; d[i + 1] = rgb.g; d[i + 2] = rgb.b;
-    }
-    layer.ctx.putImageData(imgData, 0, 0);
+    PISelection.applyImageData(layer, (d, ox, oy, w, h, bounds) => {
+      for (let i = 0; i < d.length; i += 4) {
+        const p = i / 4;
+        const x = ox + (p % w);
+        const y = oy + Math.floor(p / w);
+        if (!PISelection.contains(bounds, x, y)) continue;
+        const hsl = PIColorUtils.rgbToHsl(d[i], d[i + 1], d[i + 2]);
+        hsl.h = (hsl.h + hueShift + 360) % 360;
+        hsl.s = PIMathUtils.clamp(hsl.s + satShift, 0, 100);
+        hsl.l = PIMathUtils.clamp(hsl.l + lightShift, 0, 100);
+        const rgb = PIColorUtils.hslToRgb(hsl.h, hsl.s, hsl.l);
+        d[i] = rgb.r; d[i + 1] = rgb.g; d[i + 2] = rgb.b;
+      }
+    });
   }
 };

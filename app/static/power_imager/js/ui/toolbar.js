@@ -10,6 +10,7 @@ window.PIToolbar = (function () {
     toolMap['crop'] = PICropTool;
     toolMap['brush'] = PIBrushTool;
     toolMap['eraser'] = PIEraserTool;
+    toolMap['retouch'] = PIRetouchTool;
     toolMap['text'] = PITextTool;
     toolMap['shape'] = PIShapeTool;
     toolMap['fill'] = PIFillTool;

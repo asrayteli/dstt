@@ -41,7 +41,7 @@ html, body {
 #pi-toolbar .toolbar-bottom { flex-shrink: 0; padding: 4px 0 6px; display: flex; justify-content: center; }
 #pi-viewport { grid-area: viewport; overflow: hidden; position: relative; background: #181828; cursor: crosshair; }
 #pi-panel { grid-area: panel; background: var(--pi-surface); border-left: 1px solid var(--pi-border); display: flex; flex-direction: column; overflow-y: auto; z-index: 90; }
-#pi-statusbar { grid-area: statusbar; background: var(--pi-surface); border-top: 1px solid var(--pi-border); display: flex; align-items: center; padding: 0 10px; gap: 16px; font-size: 11px; color: var(--pi-text-dim); z-index: 100; }
+#pi-statusbar { grid-area: statusbar; background: var(--pi-surface); border-top: 1px solid var(--pi-border); display: flex; align-items: center; padding: 0 10px; gap: 16px; font-size: 11px; color: var(--pi-text-dim); z-index: 100; overflow-x: auto; white-space: nowrap; }
 
 /* Canvas viewport checkerboard */
 #pi-viewport .canvas-wrapper {
@@ -58,7 +58,7 @@ html, body {
 
 #display-canvas, #overlay-canvas {
   position: absolute; top: 0; left: 0;
-  image-rendering: pixelated;
+  image-rendering: auto;
 }
 #overlay-canvas { pointer-events: none; }
 

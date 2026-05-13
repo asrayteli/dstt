@@ -36,6 +36,7 @@ window.PIBrushTool = new (class extends PIToolBase {
     const ctx = layer.ctx;
     const color = document.getElementById('fg-color-input').value;
     ctx.save();
+    PICanvasEngine.configureContext(ctx);
     if (this.brushType === 'pen') {
       ctx.globalAlpha = this.brushOpacity;
       ctx.strokeStyle = color;

@@ -74,6 +74,7 @@ window.PILayerPanel = (function () {
       thumb.className = 'layer-thumb';
       thumb.width = 32; thumb.height = 32;
       const tctx = thumb.getContext('2d');
+      PICanvasEngine.configureContext(tctx);
       const scale = Math.min(32 / layer.canvas.width, 32 / layer.canvas.height);
       const tw = layer.canvas.width * scale, th = layer.canvas.height * scale;
       tctx.drawImage(layer.canvas, (32 - tw) / 2, (32 - th) / 2, tw, th);

@@ -26,18 +26,21 @@ window.PILevels = {
     });
   },
   apply(layer, shadows, midtones, highlights) {
-    const imgData = layer.ctx.getImageData(0, 0, layer.canvas.width, layer.canvas.height);
-    const d = imgData.data;
     const range = Math.max(1, highlights - shadows);
     const gamma = midtones / 128;
-    for (let i = 0; i < d.length; i += 4) {
-      for (let c = 0; c < 3; c++) {
-        let v = (d[i + c] - shadows) / range;
-        v = PIMathUtils.clamp(v, 0, 1);
-        v = Math.pow(v, 1 / gamma);
-        d[i + c] = Math.round(v * 255);
+    PISelection.applyImageData(layer, (d, ox, oy, w, h, bounds) => {
+      for (let i = 0; i < d.length; i += 4) {
+        const p = i / 4;
+        const x = ox + (p % w);
+        const y = oy + Math.floor(p / w);
+        if (!PISelection.contains(bounds, x, y)) continue;
+        for (let c = 0; c < 3; c++) {
+          let v = (d[i + c] - shadows) / range;
+          v = PIMathUtils.clamp(v, 0, 1);
+          v = Math.pow(v, 1 / gamma);
+          d[i + c] = Math.round(v * 255);
+        }
       }
-    }
-    layer.ctx.putImageData(imgData, 0, 0);
+    });
   }
 };

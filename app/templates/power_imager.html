@@ -305,8 +305,9 @@
   function openEditorWithSize() {
     const w = prompt('幅(px):', '1920');
     const h = prompt('高さ(px):', '1080');
+    const dpi = prompt('DPI:', '96');
     if (w && h) {
-      openEditor('?w=' + encodeURIComponent(w) + '&h=' + encodeURIComponent(h));
+      openEditor('?w=' + encodeURIComponent(w) + '&h=' + encodeURIComponent(h) + '&dpi=' + encodeURIComponent(dpi || '96'));
     }
   }
 

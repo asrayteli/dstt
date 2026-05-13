@@ -144,6 +144,6 @@ NAV_ITEMS = (
         "href": "/tools/power_imager",
         "icon": "🖼️",
         "label": "PowerImager",
-        "description": "画像に関することなら何でもできる、超親切な画像編集ツール",
+        "description": "プロレベルの画像編集をここに",
     },
 )

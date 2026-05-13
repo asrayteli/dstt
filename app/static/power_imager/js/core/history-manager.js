@@ -15,6 +15,7 @@ window.PIHistoryManager = (function () {
       states = states.slice(0, index + 1);
     }
     states.push({ label, snap, canvasSize: { ...canvasSize } });
+    states[states.length - 1].dpi = PICanvasEngine.getDpi();
     if (states.length > MAX) states.shift();
     index = states.length - 1;
     PIEventBus.emit('history:changed', { states, index });
@@ -48,6 +49,7 @@ window.PIHistoryManager = (function () {
         PICanvasEngine.setCanvasSize(state.canvasSize.width, state.canvasSize.height);
       }
     }
+    if (state.dpi) PICanvasEngine.setDpi(state.dpi);
     PILayerManager.restore(state.snap);
   }
 

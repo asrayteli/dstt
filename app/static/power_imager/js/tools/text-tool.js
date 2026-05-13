@@ -4,6 +4,13 @@ window.PITextTool = new (class extends PIToolBase {
     super('text', 'text');
     this.editingLayer = null;
     this.isEditing = false;
+    this.pendingDragLayer = null;
+    this.draggingLayer = false;
+    this.dragStartX = 0;
+    this.dragStartY = 0;
+    this.layerStartX = 0;
+    this.layerStartY = 0;
+    this.dragThreshold = 4;
     this.textData = {
       text: '', fontFamily: 'sans-serif', size: 32,
       color: '#000000', bold: false, italic: false,
@@ -23,26 +30,88 @@ window.PITextTool = new (class extends PIToolBase {
 
   deactivate() {
     super.deactivate();
+    this.pendingDragLayer = null;
+    this.draggingLayer = false;
     this.cancelEdit();
   }
 
   onMouseDown(e) {
     if (this.isEditing) return;
 
-    this.textData.x = e.canvasX;
-    this.textData.y = e.canvasY;
-
     const existingTextLayer = this.findTextLayerAt(e.canvasX, e.canvasY);
     if (existingTextLayer) {
-      this.editingLayer = existingTextLayer;
-      this.textData = { ...existingTextLayer.textData };
-      this.showEditBox();
+      const idx = PILayerManager.getAll().indexOf(existingTextLayer);
+      if (idx >= 0) PILayerManager.setActiveIndex(idx);
+      this.pendingDragLayer = existingTextLayer;
+      this.draggingLayer = false;
+      this.dragStartX = e.canvasX;
+      this.dragStartY = e.canvasY;
+      this.layerStartX = existingTextLayer.x;
+      this.layerStartY = existingTextLayer.y;
       return;
     }
 
+    this.textData.x = e.canvasX;
+    this.textData.y = e.canvasY;
     this.editingLayer = null;
     this.textData.text = '';
     this.showEditBox();
+  }
+
+  onMouseMove(e) {
+    if (this.isEditing) return;
+
+    if (this.pendingDragLayer) {
+      const dx = e.canvasX - this.dragStartX;
+      const dy = e.canvasY - this.dragStartY;
+      if (!this.draggingLayer && Math.hypot(dx, dy) >= this.dragThreshold) {
+        this.draggingLayer = true;
+        const vp = PICanvasEngine.getViewport();
+        if (vp) vp.style.cursor = 'move';
+      }
+      if (this.draggingLayer) {
+        this.moveTextLayer(this.pendingDragLayer, this.layerStartX + dx, this.layerStartY + dy);
+      }
+      return;
+    }
+
+    const vp = PICanvasEngine.getViewport();
+    if (vp) vp.style.cursor = this.findTextLayerAt(e.canvasX, e.canvasY) ? 'move' : this.cursor;
+  }
+
+  onMouseUp(e) {
+    if (!this.pendingDragLayer) return;
+    const layer = this.pendingDragLayer;
+    this.pendingDragLayer = null;
+
+    if (this.draggingLayer) {
+      this.draggingLayer = false;
+      this.moveTextLayer(layer, layer.x, layer.y, true);
+      PIHistoryManager.push('テキスト移動');
+      PIEventBus.emit('tool:properties-changed');
+      const vp = PICanvasEngine.getViewport();
+      if (vp) vp.style.cursor = this.findTextLayerAt(e.canvasX, e.canvasY) ? 'move' : this.cursor;
+      return;
+    }
+
+    this.editingLayer = layer;
+    this.textData = { ...layer.textData, x: layer.x, y: layer.y };
+    this.showEditBox();
+  }
+
+  moveTextLayer(layer, x, y, final) {
+    if (!layer || layer.locked) return;
+    layer.x = x;
+    layer.y = y;
+    if (layer.textData) {
+      layer.textData = { ...layer.textData, x, y };
+    }
+    if (final) {
+      layer.x = Math.round(layer.x);
+      layer.y = Math.round(layer.y);
+      if (layer.textData) layer.textData = { ...layer.textData, x: layer.x, y: layer.y };
+    }
+    PILayerManager.requestRender();
   }
 
   findTextLayerAt(x, y) {

@@ -26,13 +26,16 @@ window.PIColorBalance = {
     });
   },
   apply(layer, r, g, b) {
-    const imgData = layer.ctx.getImageData(0, 0, layer.canvas.width, layer.canvas.height);
-    const d = imgData.data;
-    for (let i = 0; i < d.length; i += 4) {
-      d[i] = PIMathUtils.clamp(d[i] + r, 0, 255);
-      d[i + 1] = PIMathUtils.clamp(d[i + 1] + g, 0, 255);
-      d[i + 2] = PIMathUtils.clamp(d[i + 2] + b, 0, 255);
-    }
-    layer.ctx.putImageData(imgData, 0, 0);
+    PISelection.applyImageData(layer, (d, ox, oy, w, h, bounds) => {
+      for (let i = 0; i < d.length; i += 4) {
+        const p = i / 4;
+        const x = ox + (p % w);
+        const y = oy + Math.floor(p / w);
+        if (!PISelection.contains(bounds, x, y)) continue;
+        d[i] = PIMathUtils.clamp(d[i] + r, 0, 255);
+        d[i + 1] = PIMathUtils.clamp(d[i + 1] + g, 0, 255);
+        d[i + 2] = PIMathUtils.clamp(d[i + 2] + b, 0, 255);
+      }
+    });
   }
 };
