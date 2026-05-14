@@ -126,6 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadFileList();
   updateCustomExpiry();
+  applyCustomExpiryMax();
 
   fileInput.addEventListener('change', () => {
     setSelectedFiles(Array.from(fileInput.files || []));
@@ -165,6 +166,17 @@ document.addEventListener('DOMContentLoaded', () => {
 function updateCustomExpiry() {
   const wrap = document.getElementById('customExpiresWrap');
   wrap.classList.toggle('hidden', document.getElementById('expiresMode').value !== 'custom');
+}
+
+function applyCustomExpiryMax() {
+  const input = document.getElementById('expiresAtCustom');
+  if (!input) return;
+  const now = new Date();
+  const max = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+  const tzOffset = max.getTimezoneOffset() * 60000;
+  input.max = new Date(max.getTime() - tzOffset).toISOString().slice(0, 16);
+  const minOffset = now.getTimezoneOffset() * 60000;
+  input.min = new Date(now.getTime() - minOffset).toISOString().slice(0, 16);
 }
 
 function makeFileList(files) {

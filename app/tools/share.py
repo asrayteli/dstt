@@ -17,11 +17,13 @@ import threading
 import time
 import uuid
 import zipfile
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Blueprint, jsonify, render_template, request, send_file, session, url_for
 from flask_login import current_user, login_required
+from werkzeug.security import check_password_hash, generate_password_hash
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -40,10 +42,54 @@ MAX_CHUNK_SIZE = CHUNK_SIZE + (2 * 1024**2)
 _CLEANUP_LOCK_PATH = os.path.join(UPLOAD_DIR, ".cleanup.lock")
 _CLEANUP_LOCK_STALE_SECONDS = 2 * 60 * 60
 _CHUNK_SESSION_TTL_SECONDS = 24 * 60 * 60
+_META_LOCK_PATH = os.path.join(UPLOAD_DIR, ".meta.lock")
+_META_LOCK_STALE_SECONDS = 60
+_META_LOCK_TIMEOUT_SECONDS = 30.0
+MAX_EXPIRES_DAYS = 90
+DOWNLOAD_TOKEN_TTL_SECONDS = 60 * 60
+DOWNLOAD_TOKEN_MAX_PER_SESSION = 32
 _scheduler = None
 _scheduler_lock = threading.Lock()
+_meta_lock = threading.RLock()
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+@contextmanager
+def _meta_critical_section(timeout: float = _META_LOCK_TIMEOUT_SECONDS):
+    with _meta_lock:
+        deadline = time.time() + timeout
+        fd = None
+        while True:
+            try:
+                fd = os.open(_META_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                break
+            except FileExistsError:
+                try:
+                    if time.time() - os.path.getmtime(_META_LOCK_PATH) > _META_LOCK_STALE_SECONDS:
+                        os.remove(_META_LOCK_PATH)
+                        continue
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    pass
+                if time.time() > deadline:
+                    raise TimeoutError("Failed to acquire shared meta lock")
+                time.sleep(0.05)
+        try:
+            try:
+                os.write(fd, str(os.getpid()).encode("ascii", errors="ignore"))
+            except OSError:
+                pass
+            yield
+        finally:
+            try:
+                os.close(fd)
+            finally:
+                try:
+                    os.remove(_META_LOCK_PATH)
+                except FileNotFoundError:
+                    pass
 
 
 def load_meta():
@@ -134,18 +180,61 @@ def _is_current_uploader(info: dict) -> bool:
     return bool(username and username == info.get("uploader"))
 
 
+def _prune_download_tokens(tokens: dict) -> dict:
+    now = time.time()
+    cleaned = {}
+    for token, info in tokens.items():
+        if not isinstance(info, dict):
+            continue
+        try:
+            expires_at = float(info.get("expires_at") or 0)
+        except (TypeError, ValueError):
+            continue
+        if expires_at <= now:
+            continue
+        cleaned[token] = {"uid": str(info.get("uid") or ""), "expires_at": expires_at}
+    if len(cleaned) > DOWNLOAD_TOKEN_MAX_PER_SESSION:
+        cleaned = dict(
+            sorted(cleaned.items(), key=lambda kv: kv[1]["expires_at"], reverse=True)[:DOWNLOAD_TOKEN_MAX_PER_SESSION]
+        )
+    return cleaned
+
+
 def _issue_download_token(uid):
+    tokens = _prune_download_tokens(dict(session.get("download_tokens") or {}))
     token = uuid.uuid4().hex
-    tokens = dict(session.get("download_tokens") or {})
-    tokens[token] = uid
+    tokens[token] = {"uid": uid, "expires_at": time.time() + DOWNLOAD_TOKEN_TTL_SECONDS}
     session["download_tokens"] = tokens
     session.modified = True
     return token
 
 
 def _has_download_token(uid: str) -> bool:
-    tokens = session.get("download_tokens") or {}
-    return uid in tokens.values()
+    raw = session.get("download_tokens") or {}
+    tokens = _prune_download_tokens(dict(raw))
+    if tokens != raw:
+        session["download_tokens"] = tokens
+        session.modified = True
+    for info in tokens.values():
+        if info.get("uid") == uid:
+            return True
+    return False
+
+
+def _hash_password(password: str) -> str:
+    return generate_password_hash(password, method="pbkdf2:sha256", salt_length=16)
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    if not stored_hash:
+        return False
+    if "$" in stored_hash or stored_hash.startswith("pbkdf2:") or stored_hash.startswith("scrypt:"):
+        try:
+            return check_password_hash(stored_hash, password)
+        except Exception:
+            return False
+    legacy = hashlib.sha256(password.encode()).hexdigest()
+    return hmac.compare_digest(legacy, stored_hash)
 
 
 def _can_preview(uid: str, info: dict) -> bool:
@@ -190,20 +279,9 @@ def _release_cleanup_lock(fd):
             pass
 
 
-def generate_display_id():
-    meta = load_meta()
-    existing_ids = {info.get("display_id") for info in meta.values() if info.get("display_id")}
-
-    for _ in range(100):
-        display_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
-        if display_id not in existing_ids:
-            return display_id
-
-    return "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-
-
 def _resolve_expires_at(mode: str | None, custom_value: str | None = None) -> datetime:
     now = datetime.utcnow()
+    max_dt = now + timedelta(days=MAX_EXPIRES_DAYS)
     mode = (mode or "7d").strip().lower()
     if mode == "1h":
         return now + timedelta(hours=1)
@@ -219,7 +297,7 @@ def _resolve_expires_at(mode: str | None, custom_value: str | None = None) -> da
             if parsed.tzinfo is not None:
                 parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
             if parsed > now:
-                return parsed
+                return min(parsed, max_dt)
         except ValueError:
             pass
     return now + timedelta(days=7)
@@ -382,29 +460,39 @@ def _create_share_record(
     expires_mode: str,
     expires_at_custom: str | None = None,
 ) -> dict:
-    uid = uuid.uuid4().hex[:8]
-    meta = load_meta()
-    while uid in meta:
-        uid = uuid.uuid4().hex[:8]
-
-    display_id = generate_display_id()
     now = datetime.utcnow()
     expires_at = _resolve_expires_at(expires_mode, expires_at_custom)
-    password_hash = hashlib.sha256(password.encode()).hexdigest() if password else None
+    password_hash = _hash_password(password) if password else None
 
-    meta[uid] = {
-        "display_id": display_id,
-        "title": _safe_text(title, 120),
-        "memo": _safe_text(memo, 200),
-        "zip_name": _safe_text(zip_name, 120),
-        "uploader": _current_username() or "unknown",
-        "password_hash": password_hash,
-        "expires_at": expires_at.isoformat(),
-        "created_at": now.isoformat(),
-        "expires_mode": expires_mode or "7d",
-        "files": files,
-    }
-    save_meta(meta)
+    with _meta_critical_section():
+        meta = load_meta()
+        uid = uuid.uuid4().hex[:8]
+        while uid in meta:
+            uid = uuid.uuid4().hex[:8]
+
+        existing_ids = {info.get("display_id") for info in meta.values() if info.get("display_id")}
+        display_id = None
+        for _ in range(100):
+            candidate = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
+            if candidate not in existing_ids:
+                display_id = candidate
+                break
+        if display_id is None:
+            display_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+        meta[uid] = {
+            "display_id": display_id,
+            "title": _safe_text(title, 120),
+            "memo": _safe_text(memo, 200),
+            "zip_name": _safe_text(zip_name, 120),
+            "uploader": _current_username() or "unknown",
+            "password_hash": password_hash,
+            "expires_at": expires_at.isoformat(),
+            "created_at": now.isoformat(),
+            "expires_mode": expires_mode or "7d",
+            "files": files,
+        }
+        save_meta(meta)
 
     download_url = url_for("share.download_file", uid=uid, _external=True)
     return {
@@ -684,8 +772,7 @@ def _check_download_password(uid: str, file_info: dict, file_index: int | None =
         return render_template("share_password.html", uid=uid, file_index=file_index)
 
     input_pass = request.form.get("password", "")
-    input_hash = hashlib.sha256(input_pass.encode()).hexdigest()
-    if not hmac.compare_digest(input_hash, file_info["password_hash"]):
+    if not _verify_password(input_pass, file_info.get("password_hash", "")):
         return render_template("share_password.html", uid=uid, file_index=file_index, error="パスワードが違います。")
     _issue_download_token(uid)
     return None
@@ -835,7 +922,7 @@ def get_file_list():
                 "has_password": bool(info.get("password_hash")),
                 "expires_at": info["expires_at"],
                 "created_at": info.get("created_at", info["expires_at"]),
-                "download_url": url_for("share.download_file", uid=uid),
+                "download_url": url_for("share.download_file", uid=uid, _external=True),
             }
         )
 
@@ -846,24 +933,25 @@ def get_file_list():
 @share_bp.route("/api/delete/<uid>", methods=["POST"])
 @login_required
 def delete_file(uid):
-    meta = load_meta()
-    file_info = meta.get(uid)
+    with _meta_critical_section():
+        meta = load_meta()
+        file_info = meta.get(uid)
 
-    if not file_info:
-        return jsonify({"success": False, "error": "ファイルが見つかりません。"}), 404
+        if not file_info:
+            return jsonify({"success": False, "error": "ファイルが見つかりません。"}), 404
 
-    if not _is_current_uploader(file_info):
-        return jsonify({"success": False, "error": "削除権限がありません。"}), 403
+        if not _is_current_uploader(file_info):
+            return jsonify({"success": False, "error": "削除権限がありません。"}), 403
 
-    for item in _files_for_info(file_info):
-        file_path = os.path.join(UPLOAD_DIR, item.get("stored_name", ""))
-        try:
-            os.remove(file_path)
-        except FileNotFoundError:
-            pass
+        for item in _files_for_info(file_info):
+            file_path = os.path.join(UPLOAD_DIR, item.get("stored_name", ""))
+            try:
+                os.remove(file_path)
+            except FileNotFoundError:
+                pass
 
-    del meta[uid]
-    save_meta(meta)
+        del meta[uid]
+        save_meta(meta)
     return jsonify({"success": True})
 
 
@@ -880,8 +968,7 @@ def verify_password(uid):
 
     payload = request.get_json(silent=True) or {}
     password = payload.get("password", "")
-    input_hash = hashlib.sha256(password.encode()).hexdigest()
 
-    if hmac.compare_digest(input_hash, file_info["password_hash"]):
+    if _verify_password(password, file_info.get("password_hash", "")):
         return jsonify({"success": True, "token": _issue_download_token(uid)})
     return jsonify({"success": False, "error": "パスワードが違います。"})
