@@ -13,6 +13,7 @@ import random
 import re
 import shutil
 import string
+import tempfile
 import threading
 import time
 import uuid
@@ -969,37 +970,40 @@ def _check_download_password(uid: str, file_info: dict, file_index: int | None =
     return None
 
 
-class _ZipStreamBuffer:
-    """A write-only, non-seekable file-like used as a sink for zipfile."""
+def _rfc5987_filename(value: str) -> str:
+    from urllib.parse import quote
 
-    def __init__(self) -> None:
-        self._buf = bytearray()
-        self._pos = 0
-
-    def write(self, data) -> int:
-        self._buf.extend(data)
-        self._pos += len(data)
-        return len(data)
-
-    def flush(self) -> None:  # pragma: no cover - required interface
-        pass
-
-    def tell(self) -> int:
-        return self._pos
-
-    def seekable(self) -> bool:
-        return False
-
-    def drain(self) -> bytes:
-        out = bytes(self._buf)
-        self._buf.clear()
-        return out
+    return quote(value, safe="")
 
 
 def _stream_single_file_response(uid: str, file_data: dict):
+    """Serve a single stored file as an attachment.
+
+    For plain files we delegate to send_file so the WSGI server (gunicorn)
+    can use its wsgi.file_wrapper / socket.sendfile() fast path. That avoids
+    Python iterating over every chunk, which under a sync worker would
+    block the arbiter's notify timer and trigger a 502 on timeout.
+
+    Encrypted-at-rest files (DSE\x01 magic) still need in-process
+    decryption, so they fall through to a generator.
+    """
     file_path = os.path.join(UPLOAD_DIR, file_data["stored_name"])
     if not os.path.exists(file_path):
         return "ファイルが見つかりません。", 404
+
+    download_name = file_data.get("original_name") or "download"
+    mimetype = file_data.get("mime_type") or mimetypes.guess_type(download_name)[0] or "application/octet-stream"
+
+    if not share_crypto.is_encrypted_file(file_path):
+        response = send_file(
+            file_path,
+            as_attachment=True,
+            download_name=download_name,
+            mimetype=mimetype,
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        _increment_download_count(uid)
+        return response
 
     def generate():
         try:
@@ -1009,74 +1013,105 @@ def _stream_single_file_response(uid: str, file_data: dict):
             logger.exception("FILE POST single download stream failed uid=%s", uid)
             return
 
-    encoded = _safe_original_name(file_data.get("original_name") or "download")
-    quoted = _rfc5987_filename(encoded)
+    safe_name = _safe_original_name(download_name).replace('"', '')
+    quoted = _rfc5987_filename(safe_name)
     headers = {
-        "Content-Disposition": f"attachment; filename=\"{encoded}\"; filename*=UTF-8''{quoted}",
+        "Content-Disposition": f"attachment; filename=\"{safe_name}\"; filename*=UTF-8''{quoted}",
         "X-Content-Type-Options": "nosniff",
     }
     size = file_data.get("size")
     if isinstance(size, int) and size >= 0:
         headers["Content-Length"] = str(size)
-    mimetype = file_data.get("mime_type") or mimetypes.guess_type(file_data.get("original_name") or "")[0] or "application/octet-stream"
     response = Response(stream_with_context(generate()), mimetype=mimetype, headers=headers)
     _increment_download_count(uid)
     return response
 
 
+def _zip_tmp_dir() -> str:
+    path = os.path.join(UPLOAD_DIR, ".zip_tmp")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _cleanup_stale_zip_tmp(max_age_seconds: int = 3 * 60 * 60) -> None:
+    """Remove abandoned ZIP temp files older than max_age_seconds."""
+    root = os.path.join(UPLOAD_DIR, ".zip_tmp")
+    if not os.path.isdir(root):
+        return
+    now = time.time()
+    for entry in os.scandir(root):
+        try:
+            if entry.is_file() and now - entry.stat().st_mtime > max_age_seconds:
+                os.remove(entry.path)
+        except OSError:
+            continue
+
+
 def _stream_zip_response(uid: str, file_info: dict, files: list[dict]):
+    """Build a multi-file archive on disk and stream it with send_file.
+
+    Building to disk (rather than yielding from a Python ZipFile object) keeps
+    sync gunicorn workers responsive: the slow transfer phase is handled by
+    send_file/wsgi.file_wrapper using sendfile() where supported.
+    ZIP_STORED (no compression) keeps the build phase fast — share content is
+    usually already-compressed media, so STORED is comparable in size.
+    """
     fallback = file_info.get("title") or f"{file_info.get('display_id', uid)}_files"
     download_name = _safe_zip_name(file_info.get("zip_name"), fallback)
 
-    def generate():
-        sink = _ZipStreamBuffer()
-        try:
-            with zipfile.ZipFile(sink, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
-                used_names = set()
-                for item in files:
-                    file_path = os.path.join(UPLOAD_DIR, item["stored_name"])
-                    if not os.path.exists(file_path):
-                        continue
-                    arcname = item["original_name"]
-                    if arcname in used_names:
-                        base, ext = os.path.splitext(arcname)
-                        counter = 2
-                        while f"{base}_{counter}{ext}" in used_names:
-                            counter += 1
-                        arcname = f"{base}_{counter}{ext}"
-                    used_names.add(arcname)
+    _cleanup_stale_zip_tmp()
+    tmp_dir = _zip_tmp_dir()
+    fd, tmp_path = tempfile.mkstemp(prefix="dl_", suffix=".zip", dir=tmp_dir)
+    os.close(fd)
+
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+            used_names = set()
+            for item in files:
+                file_path = os.path.join(UPLOAD_DIR, item["stored_name"])
+                if not os.path.exists(file_path):
+                    continue
+                arcname = item["original_name"]
+                if arcname in used_names:
+                    base, ext = os.path.splitext(arcname)
+                    counter = 2
+                    while f"{base}_{counter}{ext}" in used_names:
+                        counter += 1
+                    arcname = f"{base}_{counter}{ext}"
+                used_names.add(arcname)
+                if share_crypto.is_encrypted_file(file_path):
                     zinfo = zipfile.ZipInfo(filename=arcname)
-                    zinfo.compress_type = zipfile.ZIP_DEFLATED
+                    zinfo.compress_type = zipfile.ZIP_STORED
                     with zf.open(zinfo, mode="w", force_zip64=True) as entry:
                         for chunk in _iter_file_plaintext(file_path):
                             entry.write(chunk)
-                            out = sink.drain()
-                            if out:
-                                yield out
-                    out = sink.drain()
-                    if out:
-                        yield out
-            tail = sink.drain()
-            if tail:
-                yield tail
-        except Exception:
-            logger.exception("FILE POST zip stream failed uid=%s", uid)
-            return
+                else:
+                    zf.write(file_path, arcname=arcname)
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except FileNotFoundError:
+            pass
+        logger.exception("FILE POST zip build failed uid=%s", uid)
+        return "ZIPの作成に失敗しました。", 500
 
-    quoted = _rfc5987_filename(download_name)
-    headers = {
-        "Content-Disposition": f"attachment; filename=\"{download_name}\"; filename*=UTF-8''{quoted}",
-        "X-Content-Type-Options": "nosniff",
-    }
-    response = Response(stream_with_context(generate()), mimetype="application/zip", headers=headers)
+    response = send_file(
+        tmp_path,
+        as_attachment=True,
+        download_name=download_name,
+        mimetype="application/zip",
+    )
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+
+    @response.call_on_close
+    def _cleanup():
+        try:
+            os.remove(tmp_path)
+        except FileNotFoundError:
+            pass
+
     _increment_download_count(uid)
     return response
-
-
-def _rfc5987_filename(value: str) -> str:
-    from urllib.parse import quote
-
-    return quote(value, safe="")
 
 
 def _download_guard(file_info: dict):
