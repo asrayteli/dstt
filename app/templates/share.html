@@ -8,7 +8,7 @@
         <div class="dstt-hero-pill">FILE POST</div>
         <div>
           <h1 class="dstt-hero-title">FILE POST</h1>
-          <p class="dstt-hero-subtitle">大容量ファイルを50MBずつ安全に送り、共有URL・QR・プレビュー付きで受け渡しできます。</p>
+          <p class="dstt-hero-subtitle">10GBまでの大容量ファイルに対応。共有URL・QR・プレビュー付きで受け渡しできます。</p>
         </div>
       </div>
       <div class="dstt-hero-meta">
@@ -19,7 +19,7 @@
         <div class="dstt-hero-card">
           <div class="dstt-hero-card-label">CAPACITY</div>
           <div class="dstt-hero-card-value">最大 10GB</div>
-          <div class="dstt-hero-card-note">50MB分割アップロード</div>
+          <div class="dstt-hero-card-note">大容量ファイルに対応</div>
         </div>
       </div>
     </div>
@@ -29,17 +29,17 @@
     <form method="POST" enctype="multipart/form-data" id="filepostUploadForm" class="space-y-5">
       <div class="grid gap-4 md:grid-cols-2">
         <div>
-          <label for="shareTitle" class="block mb-1 font-semibold text-slate-800">共有タイトル</label>
+          <label for="shareTitle" class="block mb-1 font-semibold text-slate-800">共有タイトル <span class="text-xs font-normal text-slate-500 ml-1">(任意)</span></label>
           <input id="shareTitle" name="title" type="text" maxlength="120" class="w-full border rounded px-3 py-2" placeholder="例: A社提出資料">
         </div>
         <div>
-          <label for="zipName" class="block mb-1 font-semibold text-slate-800">まとめZIP名</label>
+          <label for="zipName" class="block mb-1 font-semibold text-slate-800">まとめZIP名 <span class="text-xs font-normal text-slate-500 ml-1">(任意)</span></label>
           <input id="zipName" name="zip_name" type="text" maxlength="120" class="w-full border rounded px-3 py-2" placeholder="例: A社提出資料.zip">
         </div>
       </div>
 
       <div>
-        <label for="memo" class="block mb-1 font-semibold text-slate-800">メモ</label>
+        <label for="memo" class="block mb-1 font-semibold text-slate-800">メモ <span class="text-xs font-normal text-slate-500 ml-1">(任意)</span></label>
         <input id="memo" name="memo" type="text" maxlength="200" class="w-full border rounded px-3 py-2" placeholder="相手に伝えたい補足">
       </div>
 
@@ -60,7 +60,7 @@
           <input id="expiresAtCustom" name="expires_at_custom" type="datetime-local" class="w-full border rounded px-3 py-2">
         </div>
         <div>
-          <label for="password" class="block mb-1 font-semibold text-slate-800">パスワード</label>
+          <label for="password" class="block mb-1 font-semibold text-slate-800">パスワード <span class="text-xs font-normal text-slate-500 ml-1">(任意)</span></label>
           <input id="password" name="password" type="text" class="w-full border rounded px-3 py-2" placeholder="未設定なら空欄">
         </div>
       </div>
@@ -73,17 +73,6 @@
       </div>
 
       <div id="selectedFiles" class="hidden border rounded-lg overflow-hidden"></div>
-
-      <div id="uploadProgress" class="hidden rounded-lg border border-blue-200 bg-blue-50 p-4">
-        <div class="flex justify-between text-sm font-semibold text-blue-900">
-          <span id="uploadStatus">アップロード準備中</span>
-          <span id="uploadPercent">0%</span>
-        </div>
-        <div class="mt-3 h-3 rounded-full bg-white overflow-hidden">
-          <div id="uploadBar" class="h-full bg-blue-600 transition-all" style="width: 0%;"></div>
-        </div>
-        <p id="uploadDetail" class="mt-2 text-sm text-blue-800"></p>
-      </div>
 
       <div id="uploadResult" class="hidden rounded-lg border border-emerald-200 bg-emerald-50 p-4"></div>
 
@@ -124,6 +113,7 @@
 const FILEPOST = {
   chunkSize: {{ chunk_size|int }},
   maxSize: {{ max_file_size|int }},
+  currentUsername: {{ (current_user.username if current_user.is_authenticated else '') | tojson }},
   selectedFiles: []
 };
 
@@ -225,64 +215,68 @@ async function uploadSelectedFiles() {
   const totalSize = files.reduce((sum, file) => sum + file.size, 0);
   if (totalSize > FILEPOST.maxSize) throw new Error('アップロードできるファイルは合計10GBまでです。');
 
+  const loading = openLoading('アップロード準備中', '');
   setUploadBusy(true);
-  showProgress(0, 'アップロードセッションを作成中', '');
 
-  const initPayload = {
-    title: document.getElementById('shareTitle').value,
-    memo: document.getElementById('memo').value,
-    zip_name: document.getElementById('zipName').value,
-    password: document.getElementById('password').value,
-    expires_mode: document.getElementById('expiresMode').value,
-    expires_at_custom: normalizedCustomExpiry(),
-    files: files.map((file) => ({ name: file.name, size: file.size, type: file.type }))
-  };
+  try {
+    const initPayload = {
+      title: document.getElementById('shareTitle').value,
+      memo: document.getElementById('memo').value,
+      zip_name: document.getElementById('zipName').value,
+      password: document.getElementById('password').value,
+      expires_mode: document.getElementById('expiresMode').value,
+      expires_at_custom: normalizedCustomExpiry(),
+      files: files.map((file) => ({ name: file.name, size: file.size, type: file.type }))
+    };
 
-  const initResponse = await fetch('/tools/share/api/chunk/init', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(initPayload)
-  });
-  const initData = await parseJsonResponse(initResponse);
-  if (!initResponse.ok || !initData.success) throw new Error(initData.error || 'アップロードを開始できませんでした。');
+    const initResponse = await fetch('/tools/share/api/chunk/init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(initPayload)
+    });
+    const initData = await parseJsonResponse(initResponse);
+    if (!initResponse.ok || !initData.success) throw new Error(initData.error || 'アップロードを開始できませんでした。');
 
-  const uploadId = initData.upload_id;
-  let uploadedBytes = 0;
+    const uploadId = initData.upload_id;
+    let uploadedBytes = 0;
 
-  for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
-    const file = files[fileIndex];
-    const chunkCount = Math.max(1, Math.ceil(file.size / FILEPOST.chunkSize));
-    for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
-      const start = chunkIndex * FILEPOST.chunkSize;
-      const end = Math.min(file.size, start + FILEPOST.chunkSize);
-      const chunk = file.slice(start, end);
-      const label = `${file.name} (${chunkIndex + 1}/${chunkCount})`;
-      await uploadChunkWithRetry(uploadId, fileIndex, chunkIndex, chunk, file.name, (loaded) => {
-        const current = Math.min(totalSize, uploadedBytes + loaded);
-        const percent = totalSize ? Math.round((current / totalSize) * 100) : 100;
-        showProgress(percent, 'アップロード中', label);
-      });
-      uploadedBytes += chunk.size;
-      const percent = totalSize ? Math.round((uploadedBytes / totalSize) * 100) : 100;
-      showProgress(percent, 'アップロード中', label);
+    for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+      const file = files[fileIndex];
+      const chunkCount = Math.max(1, Math.ceil(file.size / FILEPOST.chunkSize));
+      for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+        const start = chunkIndex * FILEPOST.chunkSize;
+        const end = Math.min(file.size, start + FILEPOST.chunkSize);
+        const chunk = file.slice(start, end);
+        const label = `${file.name} (${chunkIndex + 1}/${chunkCount})`;
+        await uploadChunkWithRetry(uploadId, fileIndex, chunkIndex, chunk, file.name, (loaded) => {
+          const current = Math.min(totalSize, uploadedBytes + loaded);
+          const percent = totalSize ? Math.round((current / totalSize) * 100) : 100;
+          updateLoading(`アップロード中 ${percent}%`, label);
+        });
+        uploadedBytes += chunk.size;
+        const percent = totalSize ? Math.round((uploadedBytes / totalSize) * 100) : 100;
+        updateLoading(`アップロード中 ${percent}%`, label);
+      }
     }
+
+    updateLoading('ファイルを結合中', 'サーバー側でチャンクを結合しています。');
+    const completeResponse = await fetch('/tools/share/api/chunk/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ upload_id: uploadId })
+    });
+    const completeData = await parseJsonResponse(completeResponse);
+    if (!completeResponse.ok || !completeData.success) throw new Error(completeData.error || 'ファイルの結合に失敗しました。');
+
+    renderUploadResult(completeData);
+    document.getElementById('filepostUploadForm').reset();
+    setSelectedFiles([]);
+    updateCustomExpiry();
+    await loadFileList();
+  } finally {
+    loading.close();
+    setUploadBusy(false);
   }
-
-  showProgress(100, 'ファイルを結合中', 'サーバー側でチャンクを結合しています。');
-  const completeResponse = await fetch('/tools/share/api/chunk/complete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ upload_id: uploadId })
-  });
-  const completeData = await parseJsonResponse(completeResponse);
-  if (!completeResponse.ok || !completeData.success) throw new Error(completeData.error || 'ファイルの結合に失敗しました。');
-
-  renderUploadResult(completeData);
-  document.getElementById('filepostUploadForm').reset();
-  setSelectedFiles([]);
-  updateCustomExpiry();
-  await loadFileList();
-  setUploadBusy(false);
 }
 
 async function uploadChunkWithRetry(uploadId, fileIndex, chunkIndex, chunk, filename, onProgress) {
@@ -292,7 +286,7 @@ async function uploadChunkWithRetry(uploadId, fileIndex, chunkIndex, chunk, file
       return await uploadChunk(uploadId, fileIndex, chunkIndex, chunk, filename, onProgress);
     } catch (error) {
       lastError = error;
-      showProgress(null, 'チャンクを再試行中', `${filename} / ${attempt}回目`);
+      updateLoading('チャンクを再試行中', `${filename} / ${attempt}回目`);
       await sleep(700 * attempt);
     }
   }
@@ -374,9 +368,9 @@ async function loadFileList() {
 function renderShareItem(file) {
   const expiresAt = new Date(file.expires_at.endsWith('Z') ? file.expires_at : `${file.expires_at}Z`);
   const createdAt = new Date(file.created_at.endsWith('Z') ? file.created_at : `${file.created_at}Z`);
-  const currentUsername = '{{ current_user.username if current_user.is_authenticated else "" }}';
-  const isOwner = file.uploader === currentUsername;
+  const isOwner = file.uploader === FILEPOST.currentUsername;
   const title = file.title || file.memo || file.display_id;
+  const shareUrl = absoluteShareUrl(file.download_url);
 
   return `
     <article class="border rounded-lg p-4 hover:shadow-md transition">
@@ -393,11 +387,19 @@ function renderShareItem(file) {
           <p class="text-sm text-slate-600">有効期限: ${formatDate(expiresAt)} | ファイル数: ${file.file_count} | 合計: ${formatSize(file.total_size)}</p>
           ${file.zip_name ? `<p class="text-sm text-slate-600">ZIP名: ${escapeHtml(file.zip_name)}</p>` : ''}
         </div>
-        <div class="flex gap-2">
-          <button onclick="downloadAllFiles('${escapeJs(file.uid)}')" class="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 text-sm whitespace-nowrap">
+        <div class="flex flex-wrap gap-2">
+          <button type="button" onclick="downloadAllFiles('${escapeJs(file.uid)}')" class="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 text-sm whitespace-nowrap">
             ${file.file_count > 1 ? 'ZIPでDL' : 'DL'}
           </button>
-          ${isOwner ? `<button onclick="deleteFile('${escapeJs(file.uid)}')" class="bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 text-sm">削除</button>` : ''}
+          <button type="button" onclick="toggleShareLink('${escapeJs(file.uid)}')" class="border border-slate-300 text-slate-700 bg-white px-3 py-2 rounded hover:bg-slate-50 text-sm whitespace-nowrap">共有リンクを再表示</button>
+          ${isOwner ? `<button type="button" onclick="deleteFile('${escapeJs(file.uid)}')" class="bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 text-sm">削除</button>` : ''}
+        </div>
+      </div>
+      <div id="shareLink-${escapeAttr(file.uid)}" class="hidden mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <label class="block text-xs font-semibold text-slate-600 mb-1">共有URL</label>
+        <div class="flex gap-2">
+          <input type="text" readonly value="${escapeAttr(shareUrl)}" class="flex-1 border px-3 py-2 text-blue-800 bg-white rounded text-sm" onclick="this.select()">
+          <button type="button" onclick="copyShareLink('${escapeJs(file.uid)}', this)" class="bg-emerald-600 text-white px-3 py-2 rounded hover:bg-emerald-700 text-sm whitespace-nowrap">コピー</button>
         </div>
       </div>
       <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -417,10 +419,57 @@ function renderFileDetail(uid, item, idx, hasPassword) {
       <div class="min-w-0 flex-1">
         <div class="font-medium text-sm text-slate-800 break-words">${escapeHtml(item.original_name)}</div>
         <div class="text-xs text-slate-500 mt-1">${formatSize(item.size || 0)}</div>
-        <button onclick="downloadSingleFile('${escapeJs(uid)}', ${idx})" class="mt-2 text-blue-700 hover:text-blue-900 text-xs underline">個別ダウンロード</button>
+        <button type="button" onclick="downloadSingleFile('${escapeJs(uid)}', ${idx})" class="mt-2 inline-flex items-center bg-blue-600 text-white hover:bg-blue-700 text-sm font-semibold px-3 py-1.5 rounded">個別ダウンロード</button>
       </div>
     </div>
   `;
+}
+
+function toggleShareLink(uid) {
+  const wrap = document.getElementById(`shareLink-${uid}`);
+  if (!wrap) return;
+  wrap.classList.toggle('hidden');
+}
+
+function copyShareLink(uid, button) {
+  const wrap = document.getElementById(`shareLink-${uid}`);
+  if (!wrap) return;
+  const input = wrap.querySelector('input');
+  if (!input) return;
+  const text = input.value;
+  const onSuccess = () => {
+    const original = button.textContent;
+    button.textContent = 'コピー済み';
+    button.disabled = true;
+    setTimeout(() => {
+      button.textContent = original;
+      button.disabled = false;
+    }, 1500);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(onSuccess).catch(() => fallbackCopy(input, onSuccess));
+  } else {
+    fallbackCopy(input, onSuccess);
+  }
+}
+
+function fallbackCopy(input, onSuccess) {
+  input.focus();
+  input.select();
+  try {
+    if (document.execCommand('copy')) onSuccess();
+  } catch (error) {
+    /* ignore */
+  }
+}
+
+function absoluteShareUrl(url) {
+  if (!url) return '';
+  try {
+    return new URL(url, window.location.origin).toString();
+  } catch (error) {
+    return url;
+  }
 }
 
 function downloadSingleFile(uid, fileIndex) {
@@ -452,22 +501,21 @@ async function parseJsonResponse(response) {
   }
 }
 
-function showProgress(percent, status, detail) {
-  const wrap = document.getElementById('uploadProgress');
-  const bar = document.getElementById('uploadBar');
-  const percentText = document.getElementById('uploadPercent');
-  wrap.classList.remove('hidden');
-  if (percent !== null) {
-    const safePercent = Math.max(0, Math.min(100, percent));
-    bar.style.width = `${safePercent}%`;
-    percentText.textContent = `${safePercent}%`;
+function openLoading(message, detail) {
+  if (window.DSTTLoading && typeof window.DSTTLoading.show === 'function') {
+    const close = window.DSTTLoading.show({ message: message, detail: detail });
+    return { close: close };
   }
-  document.getElementById('uploadStatus').textContent = status;
-  document.getElementById('uploadDetail').textContent = detail || '';
+  return { close: () => {} };
+}
+
+function updateLoading(message, detail) {
+  if (window.DSTTLoading && typeof window.DSTTLoading.setText === 'function') {
+    window.DSTTLoading.setText(message, detail);
+  }
 }
 
 function showUploadError(message) {
-  setUploadBusy(false);
   const box = document.getElementById('uploadResult');
   box.innerHTML = `<p class="text-red-700 font-semibold">${escapeHtml(message)}</p>`;
   box.className = 'rounded-lg border border-red-200 bg-red-50 p-4';
