@@ -11,7 +11,7 @@ NAV_ITEMS = (
         "href": "/tools/calc",
         "icon": "🧮",
         "label": "電卓",
-        "description": "最もシンプルな電卓",
+        "description": "まぁまぁ便利な電卓",
     },
     {
         "key": "rename",

@@ -1,14 +1,16 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="mx-auto max-w-5xl space-y-6 pb-10">
-  <section class="dstt-hero" style="background: linear-gradient(135deg, #4338ca 0%, #6366f1 55%, #8b5cf6 100%);">
+<link rel="stylesheet" href="{{ url_for('static', filename='calc/calc.css') }}">
+
+<div class="calc-page mx-auto max-w-7xl space-y-4 pb-6" data-calc-root>
+  <section class="dstt-hero calc-hero">
     <div class="dstt-hero-grid">
       <div class="dstt-hero-copy">
         <div class="dstt-hero-pill">CALCULATOR</div>
         <div>
           <h1 class="dstt-hero-title">電卓</h1>
-          <p class="dstt-hero-subtitle">最もシンプルな四則演算電卓。キーボード入力にも対応し、計算履歴を即座に振り返れます。</p>
+          <p class="dstt-hero-subtitle">四則演算、税、時間、メモリをまとめて扱えます。</p>
         </div>
       </div>
       <div class="dstt-hero-meta">
@@ -17,90 +19,128 @@
           <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
         </div>
         <div class="dstt-hero-card">
-          <div class="dstt-hero-card-label">SHORTCUT</div>
-          <div class="dstt-hero-card-value">Enter で計算 / Esc でクリア</div>
+          <div class="dstt-hero-card-label">MEMORY</div>
+          <div class="dstt-hero-card-value" data-memory-display>0</div>
         </div>
       </div>
     </div>
   </section>
 
-<div class="max-w-md mx-auto bg-white rounded-xl shadow p-6">
+  <div class="calc-shell">
+    <section class="calc-main-panel">
+      <div class="calc-mode-tabs" role="tablist" aria-label="電卓モード">
+        <button type="button" class="is-active" data-calc-mode="basic">通常</button>
+        <button type="button" data-calc-mode="tax">税計算</button>
+        <button type="button" data-calc-mode="time">時間計算</button>
+      </div>
 
-  <!-- 表示領域 -->
-  <input id="display" type="text" readonly class="w-full mb-4 text-right text-2xl p-2 border rounded bg-gray-50" />
+      <div class="calc-mode-panel is-active" data-calc-panel="basic">
+        <div class="calc-display" aria-live="polite">
+          <div class="calc-expression" data-expression>0</div>
+          <div class="calc-result" data-result>0</div>
+          <div class="calc-status" data-status></div>
+        </div>
 
-  <!-- ボタン -->
-  <div class="grid grid-cols-4 gap-2 mb-4">
-    {% for row in [
-      ['7','8','9','/'],
-      ['4','5','6','*'],
-      ['1','2','3','-'],
-      ['0','.','','+']
-    ] %}
-      {% for item in row %}
-        <button onclick="press('{{ item }}')" class="bg-blue-600 text-white p-4 rounded hover:bg-blue-700 text-xl">{{ item }}</button>
-      {% endfor %}
-    {% endfor %}
-    <button onclick="clearDisplay()" class="col-span-2 bg-red-600 text-white p-4 rounded hover:bg-red-700 text-xl">C</button>
-    <button onclick="press('(')" class="bg-gray-300 p-4 rounded hover:bg-gray-400 text-xl">(</button>
-    <button onclick="press(')')" class="bg-gray-300 p-4 rounded hover:bg-gray-400 text-xl">)</button>
-    <button onclick="press('=')" class="col-span-4 bg-green-600 text-white p-4 rounded hover:bg-green-700 text-xl">Enter</button>
-  </div>
+        <div class="calc-keypad" aria-label="通常計算キー">
+          {% for key in [
+            {'label': 'AC', 'token': 'clear', 'tone': 'danger'},
+            {'label': '←', 'token': 'backspace', 'tone': 'soft'},
+            {'label': '(', 'token': '(', 'tone': 'soft'},
+            {'label': ')', 'token': ')', 'tone': 'soft'},
+            {'label': 'MC', 'token': 'memory-clear', 'tone': 'memory'},
+            {'label': 'MR', 'token': 'memory-recall', 'tone': 'memory'},
+            {'label': 'M-', 'token': 'memory-subtract', 'tone': 'memory'},
+            {'label': 'M+', 'token': 'memory-add', 'tone': 'memory'},
+            {'label': '7', 'token': '7'},
+            {'label': '8', 'token': '8'},
+            {'label': '9', 'token': '9'},
+            {'label': '÷', 'token': '/', 'tone': 'operator'},
+            {'label': '4', 'token': '4'},
+            {'label': '5', 'token': '5'},
+            {'label': '6', 'token': '6'},
+            {'label': '×', 'token': '*', 'tone': 'operator'},
+            {'label': '1', 'token': '1'},
+            {'label': '2', 'token': '2'},
+            {'label': '3', 'token': '3'},
+            {'label': '-', 'token': '-', 'tone': 'operator'},
+            {'label': '±', 'token': 'sign', 'tone': 'soft'},
+            {'label': '0', 'token': '0'},
+            {'label': '.', 'token': '.'},
+            {'label': '+', 'token': '+', 'tone': 'operator'},
+            {'label': '%', 'token': '%', 'tone': 'soft'},
+            {'label': 'コピー', 'token': 'copy', 'tone': 'soft'},
+            {'label': '=', 'token': 'equals', 'tone': 'equals', 'wide': true}
+          ] %}
+            <button
+              type="button"
+              class="calc-key {% if key.tone %}is-{{ key.tone }}{% endif %} {% if key.wide %}is-wide{% endif %}"
+              data-calc-token="{{ key.token }}"
+            >{{ key.label }}</button>
+          {% endfor %}
+        </div>
+      </div>
 
-  <!-- 計算履歴 -->
-  <div>
-    <h3 class="text-lg font-semibold mb-2">📜 履歴</h3>
-    <ul id="history" class="text-sm text-gray-700 list-disc pl-4 max-h-40 overflow-y-auto">
-      <!-- 履歴がここに追加されます -->
-    </ul>
+      <div class="calc-mode-panel" data-calc-panel="tax">
+        <div class="calc-tool-card">
+          <label class="calc-field">
+            <span>金額</span>
+            <input type="number" inputmode="decimal" step="any" data-tax-amount placeholder="1000">
+          </label>
+          <div class="calc-tax-grid">
+            <label class="calc-field">
+              <span>税率</span>
+              <select data-tax-rate>
+                <option value="10">10%</option>
+                <option value="8">8%</option>
+                <option value="custom">カスタム</option>
+              </select>
+            </label>
+            <label class="calc-field">
+              <span>カスタム税率</span>
+              <input type="number" inputmode="decimal" step="0.1" data-tax-custom-rate placeholder="12">
+            </label>
+          </div>
+          <div class="calc-actions">
+            <button type="button" data-tax-action="included">税込</button>
+            <button type="button" data-tax-action="excluded">税抜</button>
+          </div>
+          <div class="calc-tax-result" data-tax-result>金額を入力してください。</div>
+        </div>
+      </div>
+
+      <div class="calc-mode-panel" data-calc-panel="time">
+        <div class="calc-tool-card">
+          <label class="calc-field">
+            <span>時間式</span>
+            <input type="text" data-time-expression placeholder="1:30+0:45">
+          </label>
+          <div class="calc-time-pad">
+            {% for token in ['7','8','9',':','4','5','6','+','1','2','3','-','0','00','←','⌫'] %}
+              <button type="button" data-time-token="{{ token }}">{{ token }}</button>
+            {% endfor %}
+          </div>
+          <div class="calc-actions">
+            <button type="button" data-time-clear>AC</button>
+            <button type="button" data-time-calc>=</button>
+            <button type="button" data-time-copy>コピー</button>
+          </div>
+          <div class="calc-tax-result" data-time-result>0:00</div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="calc-side-panel">
+      <div class="calc-side-header">
+        <h2>履歴</h2>
+        <button type="button" data-history-clear>全消去</button>
+      </div>
+      <div class="calc-history-list" data-history-list>
+        <p class="calc-empty">履歴はありません。</p>
+      </div>
+    </aside>
   </div>
 </div>
-</div>
 
-<script>
-  const display = document.getElementById('display');
-  const history = document.getElementById('history');
-
-  function press(val) {
-    if (val === '=') {
-      try {
-        const expression = display.value;
-        const result = eval(expression);
-        display.value = result;
-        appendHistory(expression, result);
-      } catch (e) {
-        display.value = 'エラー';
-      }
-    } else {
-      display.value += val;
-    }
-  }
-
-  function clearDisplay() {
-    display.value = '';
-  }
-
-  function appendHistory(expression, result) {
-    const li = document.createElement('li');
-    li.textContent = `${expression} = ${result}`;
-    history.prepend(li);  // 新しい履歴は上に追加
-  }
-
-  // キーボード入力対応
-  document.addEventListener('keydown', function (e) {
-    const key = e.key;
-
-    // 有効なキー
-    if ('0123456789+-*/().'.includes(key)) {
-      display.value += key;
-    } else if (key === 'Enter') {
-      e.preventDefault();  // Enterキーのデフォルト動作を防ぐ
-      press('=');
-    } else if (key === 'Backspace') {
-      display.value = display.value.slice(0, -1);
-    } else if (key === 'Escape') {
-      clearDisplay();
-    }
-  });
-</script>
+<script src="{{ url_for('static', filename='calc/calc_engine.js') }}"></script>
+<script src="{{ url_for('static', filename='calc/calc_ui.js') }}"></script>
 {% endblock %}
