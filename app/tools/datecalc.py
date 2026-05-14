@@ -1,56 +1,37 @@
-﻿from flask import Blueprint, render_template, request
-from datetime import datetime, timedelta, time
-import calendar
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
+
+from flask import Blueprint, render_template, request
 from flask_login import login_required
+
+from app.services.datecalc_service import (
+    DateCalcInputError,
+    WEEKDAY_LABELS,
+    calculate_addsub,
+    calculate_date_count,
+    calculate_diff,
+    calculate_month_shift,
+    parse_date_local,
+    parse_datetime_local,
+    parse_exact_dates,
+    parse_int,
+    parse_month_days,
+    parse_optional_date_local,
+    selected_weekdays,
+)
 
 
 datecalc_bp = Blueprint("datecalc", __name__, url_prefix="/tools/datecalc")
 
-WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"]
 
-
-def parse_datetime_local(value: str) -> datetime:
-    return datetime.strptime(value, "%Y-%m-%dT%H:%M")
-
-
-def parse_date_local(value: str) -> datetime:
-    return datetime.strptime(value, "%Y-%m-%d")
-
-
-def format_datetime(dt: datetime, output_format: str) -> str:
-    if output_format == "slash":
-        return dt.strftime("%Y/%m/%d %H:%M")
-    if output_format == "iso":
-        return dt.strftime("%Y-%m-%dT%H:%M")
-    return dt.strftime("%Y-%m-%d %H:%M")
-
-
-def add_years_months(base: datetime, years: int, months: int, keep_month_end: bool) -> datetime:
-    total_month = base.month - 1 + months + years * 12
-    new_year = base.year + total_month // 12
-    new_month = total_month % 12 + 1
-
-    last_day_target = calendar.monthrange(new_year, new_month)[1]
-    is_base_month_end = base.day == calendar.monthrange(base.year, base.month)[1]
-
-    if keep_month_end and is_base_month_end:
-        day = last_day_target
-    else:
-        day = min(base.day, last_day_target)
-
-    return base.replace(year=new_year, month=new_month, day=day)
-
-
-def to_sunday_start_weekday(dt: datetime) -> int:
-    return (dt.weekday() + 1) % 7
-
-
-def build_default_form_state():
+def build_default_form_state() -> dict:
     now = datetime.now().replace(second=0, microsecond=0)
+    tomorrow = now + timedelta(days=1)
     return {
         "base_datetime": now.strftime("%Y-%m-%dT%H:%M"),
-        "date1": now.strftime("%Y-%m-%d"),
-        "date2": (now + timedelta(days=1)).strftime("%Y-%m-%d"),
+        "diff_start_datetime": now.strftime("%Y-%m-%dT%H:%M"),
+        "diff_end_datetime": tomorrow.strftime("%Y-%m-%dT%H:%M"),
         "operation": "add",
         "years": 0,
         "months": 0,
@@ -62,101 +43,82 @@ def build_default_form_state():
         "month_base_date": now.strftime("%Y-%m-%d"),
         "month_shift": 1,
         "keep_month_end": True,
+        "count_start_date": "",
+        "count_end_date": "",
+        "count_weekdays": [],
+        "count_month_days": "",
+        "count_exact_dates": "",
+        "count_japan_holidays": True,
     }
 
 
-def update_form_state_from_request(form, state):
-    state["base_datetime"] = form.get("base_datetime") or state["base_datetime"]
-    state["date1"] = form.get("date1") or state["date1"]
-    state["date2"] = form.get("date2") or state["date2"]
-    state["operation"] = form.get("operation") or state["operation"]
-    state["output_format"] = form.get("output_format") or state["output_format"]
-    state["month_base_date"] = form.get("month_base_date") or state["month_base_date"]
+def update_form_state_from_request(form, state: dict) -> None:
+    text_fields = [
+        "base_datetime",
+        "diff_start_datetime",
+        "diff_end_datetime",
+        "operation",
+        "output_format",
+        "month_base_date",
+        "count_start_date",
+        "count_end_date",
+        "count_month_days",
+        "count_exact_dates",
+    ]
+    for key in text_fields:
+        if key in form:
+            state[key] = form.get(key) or ""
 
     for key in ["years", "months", "days", "hours", "minutes", "month_shift"]:
-        try:
-            state[key] = int(form.get(key) or 0)
-        except ValueError:
-            state[key] = 0
+        if key in form:
+            state[key] = form.get(key) or 0
 
     state["absolute_diff"] = form.get("absolute_diff") == "on"
     state["keep_month_end"] = form.get("keep_month_end") == "on"
+    state["count_japan_holidays"] = form.get("count_japan_holidays") == "on"
+    state["count_weekdays"] = sorted(selected_weekdays(form.getlist("count_weekdays[]")))
 
 
-def handle_addsub(form_state):
-    base = parse_datetime_local(form_state["base_datetime"])
-    sign = 1 if form_state["operation"] == "add" else -1
+def build_result(mode: str, form_state: dict):
+    if mode == "addsub":
+        return calculate_addsub(
+            base=parse_datetime_local(form_state["base_datetime"], "base_datetime"),
+            operation=form_state["operation"],
+            years=parse_int(form_state["years"], "years"),
+            months=parse_int(form_state["months"], "months"),
+            days=parse_int(form_state["days"], "days"),
+            hours=parse_int(form_state["hours"], "hours"),
+            minutes=parse_int(form_state["minutes"], "minutes"),
+            output_format=form_state["output_format"],
+            keep_month_end=form_state["keep_month_end"],
+        )
 
-    shifted = add_years_months(
-        base,
-        years=sign * form_state["years"],
-        months=sign * form_state["months"],
-        keep_month_end=True,
-    )
+    if mode == "diff":
+        return calculate_diff(
+            start_dt=parse_datetime_local(form_state["diff_start_datetime"], "diff_start_datetime"),
+            end_dt=parse_datetime_local(form_state["diff_end_datetime"], "diff_end_datetime"),
+            absolute=form_state["absolute_diff"],
+        )
 
-    delta = timedelta(
-        days=sign * form_state["days"],
-        hours=sign * form_state["hours"],
-        minutes=sign * form_state["minutes"],
-    )
+    if mode == "month_shift":
+        return calculate_month_shift(
+            base_date=parse_date_local(form_state["month_base_date"], "month_base_date"),
+            month_shift=parse_int(form_state["month_shift"], "month_shift"),
+            keep_month_end=form_state["keep_month_end"],
+        )
 
-    result_dt = shifted + delta
-    display = format_datetime(result_dt, form_state["output_format"])
+    if mode == "count":
+        today = date.today()
+        return calculate_date_count(
+            start_date=parse_optional_date_local(form_state["count_start_date"], today, "count_start_date"),
+            end_date=parse_optional_date_local(form_state["count_end_date"], today, "count_end_date"),
+            weekdays=set(form_state["count_weekdays"]),
+            month_days=parse_month_days(form_state["count_month_days"], "count_month_days"),
+            exact_dates=parse_exact_dates(form_state["count_exact_dates"], "count_exact_dates"),
+            include_japan_holidays=form_state["count_japan_holidays"],
+        )
 
-    return {
-        "title": "加算・減算結果",
-        "summary": display,
-        "details": [
-            f"曜日: {WEEKDAY_LABELS[to_sunday_start_weekday(result_dt)]}",
-            f"UNIX: {int(result_dt.timestamp())}",
-        ],
-    }
-
-
-def handle_date_diff(form_state):
-    d1 = parse_date_local(form_state["date1"]).date()
-    d2 = parse_date_local(form_state["date2"]).date()
-
-    raw_days = (d2 - d1).days
-    days = abs(raw_days) if form_state["absolute_diff"] else raw_days
-
-    if raw_days > 0:
-        relation = "日時2が後"
-    elif raw_days < 0:
-        relation = "日時2が前"
-    else:
-        relation = "同日"
-
-    return {
-        "title": "日付差分結果",
-        "summary": f"{days}日",
-        "details": [
-            f"{d1.strftime('%Y-%m-%d')} から {d2.strftime('%Y-%m-%d')}",
-            f"判定: {relation}",
-        ],
-    }
-
-
-def handle_month_shift(form_state):
-    base = parse_date_local(form_state["month_base_date"])
-    base_dt = datetime.combine(base.date(), time(0, 0))
-
-    shifted = add_years_months(
-        base_dt,
-        years=0,
-        months=form_state["month_shift"],
-        keep_month_end=form_state["keep_month_end"],
-    )
-
-    summary = shifted.strftime("%Y-%m-%d")
-    return {
-        "title": "月単位シフト結果",
-        "summary": summary,
-        "details": [
-            f"曜日: {WEEKDAY_LABELS[to_sunday_start_weekday(shifted)]}",
-            f"月末固定: {'有効' if form_state['keep_month_end'] else '無効'}",
-        ],
-    }
+    raise DateCalcInputError("mode", "未対応の計算モードです。")
 
 
 @datecalc_bp.route("/", methods=["GET", "POST"])
@@ -164,27 +126,27 @@ def handle_month_shift(form_state):
 def datecalc():
     form_state = build_default_form_state()
     result = None
-    errors = []
+    errors: list[str] = []
+    field_errors: dict[str, str] = {}
+    active_mode = "addsub"
 
     if request.method == "POST":
-        mode = request.form.get("mode", "addsub")
+        active_mode = request.form.get("mode", "addsub")
         update_form_state_from_request(request.form, form_state)
 
         try:
-            if mode == "addsub":
-                result = handle_addsub(form_state)
-            elif mode == "diff":
-                result = handle_date_diff(form_state)
-            elif mode == "month_shift":
-                result = handle_month_shift(form_state)
-            else:
-                errors.append("未対応の計算モードです。")
-        except Exception as exc:
-            errors.append(f"入力エラー: {exc}")
+            result = build_result(active_mode, form_state)
+        except DateCalcInputError as exc:
+            field_errors[exc.field] = exc.message
+        except Exception:
+            errors.append("計算中にエラーが発生しました。入力内容を確認してください。")
 
     return render_template(
         "datecalc.html",
+        active_mode=active_mode,
         form_state=form_state,
         result=result,
         errors=errors,
+        field_errors=field_errors,
+        weekday_labels=WEEKDAY_LABELS,
     )

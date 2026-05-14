@@ -1,148 +1,306 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 
 {% block content %}
 <style>
-  .datecalc-shell {
-    background:
-      radial-gradient(1000px 500px at 8% -25%, rgba(14, 116, 144, 0.18), transparent 60%),
-      radial-gradient(820px 420px at 95% -10%, rgba(202, 138, 4, 0.18), transparent 55%),
-      linear-gradient(160deg, #f8fafc 0%, #f1f5f9 65%, #fefce8 100%);
-    border-radius: 28px;
-    padding: 28px;
-    box-shadow: 0 16px 44px rgba(15, 23, 42, 0.14);
+  .datecalc-page { color: #0f172a; }
+  .datecalc-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
   }
-
-  .panel {
-    background: rgba(255, 255, 255, 0.78);
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    border-radius: 20px;
-    backdrop-filter: blur(8px);
+  @media (min-width: 1100px) {
+    .datecalc-workspace {
+      grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr);
+      align-items: start;
+    }
   }
-
+  .dc-panel, .dc-result, .dc-history-item {
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+    background: #ffffff;
+  }
+  .dc-tab {
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #334155;
+  }
+  .dc-tab.is-active {
+    border-color: #0f766e;
+    background: #0f766e;
+    color: #ffffff;
+  }
+  .dc-form { display: none; }
+  .dc-form.is-active { display: block; }
+  .dc-input, .dc-select, .dc-textarea {
+    width: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 0.58rem 0.72rem;
+    background: #ffffff;
+  }
+  .dc-input:focus, .dc-select:focus, .dc-textarea:focus {
+    outline: 2px solid rgba(15, 118, 110, 0.24);
+    border-color: #0f766e;
+  }
+  .dc-error-input { border-color: #dc2626; }
+  .dc-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    border-radius: 8px;
+    padding: 0.55rem 0.9rem;
+    font-weight: 700;
+    transition: background-color 0.16s ease, border-color 0.16s ease;
+  }
+  .dc-button-primary { background: #0f172a; color: #ffffff; }
+  .dc-button-primary:hover { background: #1e293b; }
+  .dc-button-secondary {
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #0f172a;
+  }
+  .dc-button-secondary:hover { background: #f8fafc; }
+  .dc-chip {
+    border: 1px solid #cbd5e1;
+    border-radius: 999px;
+    background: #f8fafc;
+    padding: 0.42rem 0.74rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #334155;
+  }
+  .dc-muted-band {
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+    background: #f8fafc;
+  }
 </style>
 
-<div class="max-w-7xl mx-auto space-y-6 pb-10">
-  <section class="dstt-hero" style="background: linear-gradient(135deg, #155e75 0%, #0e7490 50%, #ca8a04 100%);">
+{% macro field_error(name) -%}
+  {% if field_errors.get(name) %}
+    <p class="mt-1 text-xs font-semibold text-red-600">{{ field_errors.get(name) }}</p>
+  {% endif %}
+{%- endmacro %}
+
+{% set active = active_mode|default('addsub') %}
+
+<div class="datecalc-page max-w-7xl mx-auto space-y-5 pb-10" data-active-mode="{{ active }}">
+  <section class="dstt-hero is-compact" style="background: #0f766e;">
     <div class="dstt-hero-grid">
       <div class="dstt-hero-copy">
         <div class="dstt-hero-pill">DATE CALCULATOR</div>
         <div>
           <h1 class="dstt-hero-title">日時計算ツール</h1>
-          <p class="dstt-hero-subtitle">日時の加算・減算、2つの日付の差分、月末調整までをまとめて扱える計算ツールです。</p>
-        </div>
-      </div>
-      <div class="dstt-hero-meta">
-        <div class="dstt-hero-card">
-          <div class="dstt-hero-card-label">LOGIN</div>
-          <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
-        </div>
-        <div class="dstt-hero-card">
-          <div class="dstt-hero-card-label">FUNCTIONS</div>
-          <div class="dstt-hero-card-value">加減算 / 差分 / 月末調整</div>
+          <p class="dstt-hero-subtitle">日時の加減算、差分、月送り、期間内の指定日カウントをまとめて扱えます。</p>
         </div>
       </div>
     </div>
   </section>
 
-<div class="datecalc-shell">
-
-  {% if errors %}
-    <div class="panel p-4 mb-4 border-red-300 text-red-700">
-      {% for err in errors %}
-        <p class="text-sm">{{ err }}</p>
-      {% endfor %}
+  <div class="dc-panel p-3">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-2" role="tablist" aria-label="計算モード">
+      <button type="button" class="dc-tab dc-button {% if active == 'addsub' %}is-active{% endif %}" data-datecalc-tab="addsub">加算・減算</button>
+      <button type="button" class="dc-tab dc-button {% if active == 'diff' %}is-active{% endif %}" data-datecalc-tab="diff">差分</button>
+      <button type="button" class="dc-tab dc-button {% if active == 'month_shift' %}is-active{% endif %}" data-datecalc-tab="month_shift">月送り</button>
+      <button type="button" class="dc-tab dc-button {% if active == 'count' %}is-active{% endif %}" data-datecalc-tab="count">指定日カウント</button>
     </div>
-  {% endif %}
+  </div>
 
-  {% if result %}
-    <div class="panel p-5 mb-5">
-      <p class="text-xs text-slate-500">{{ result.title }}</p>
-      <p class="text-3xl font-black text-slate-900 mt-1">{{ result.summary }}</p>
-      <div class="text-sm text-slate-600 mt-2 space-y-1">
-        {% for detail in result.details %}
-          <p>{{ detail }}</p>
-        {% endfor %}
+  <div class="datecalc-workspace">
+    <section class="dc-panel p-5">
+      {% if errors %}
+        <div class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
+          {% for err in errors %}
+            <p>{{ err }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <form method="POST" class="dc-form space-y-5 {% if active == 'addsub' %}is-active{% endif %}" data-datecalc-panel="addsub">
+        <input type="hidden" name="mode" value="addsub">
+        <div>
+          <h2 class="text-lg font-black">加算・減算</h2>
+          <p class="mt-1 text-sm text-slate-500">基準日時に年、月、日、時、分を足し引きします。</p>
+        </div>
+        <label class="block text-sm font-semibold">基準日時
+          <input type="datetime-local" name="base_datetime" value="{{ form_state.base_datetime }}" class="dc-input mt-1 {% if field_errors.get('base_datetime') %}dc-error-input{% endif %}" required>
+          {{ field_error('base_datetime') }}
+        </label>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {% for key, label in [('years', '年'), ('months', '月'), ('days', '日'), ('hours', '時'), ('minutes', '分')] %}
+            <label class="block text-sm font-semibold">{{ label }}
+              <input type="number" name="{{ key }}" value="{{ form_state[key] }}" class="dc-input mt-1 {% if field_errors.get(key) %}dc-error-input{% endif %}">
+              {{ field_error(key) }}
+            </label>
+          {% endfor %}
+        </div>
+        <div class="grid md:grid-cols-2 gap-3">
+          <label class="block text-sm font-semibold">操作
+            <select name="operation" class="dc-select mt-1">
+              <option value="add" {% if form_state.operation == 'add' %}selected{% endif %}>加算</option>
+              <option value="sub" {% if form_state.operation == 'sub' %}selected{% endif %}>減算</option>
+            </select>
+          </label>
+          <label class="block text-sm font-semibold">表示形式
+            <select name="output_format" class="dc-select mt-1">
+              <option value="hyphen" {% if form_state.output_format == 'hyphen' %}selected{% endif %}>YYYY-MM-DD HH:mm</option>
+              <option value="slash" {% if form_state.output_format == 'slash' %}selected{% endif %}>YYYY/MM/DD HH:mm</option>
+              <option value="iso" {% if form_state.output_format == 'iso' %}selected{% endif %}>ISO</option>
+            </select>
+          </label>
+        </div>
+        <label class="inline-flex items-center gap-2 text-sm font-semibold">
+          <input type="checkbox" name="keep_month_end" {% if form_state.keep_month_end %}checked{% endif %}>
+          月末日を維持
+        </label>
+        <button class="dc-button dc-button-primary w-full">計算する</button>
+      </form>
+
+      <form method="POST" class="dc-form space-y-5 {% if active == 'diff' %}is-active{% endif %}" data-datecalc-panel="diff">
+        <input type="hidden" name="mode" value="diff">
+        <div>
+          <h2 class="text-lg font-black">差分</h2>
+          <p class="mt-1 text-sm text-slate-500">2つの日時の差を、日数、時間、分で確認します。</p>
+        </div>
+        <div class="grid md:grid-cols-2 gap-3">
+          <label class="block text-sm font-semibold">開始日時
+            <input type="datetime-local" name="diff_start_datetime" value="{{ form_state.diff_start_datetime }}" class="dc-input mt-1 {% if field_errors.get('diff_start_datetime') %}dc-error-input{% endif %}" required>
+            {{ field_error('diff_start_datetime') }}
+          </label>
+          <label class="block text-sm font-semibold">終了日時
+            <input type="datetime-local" name="diff_end_datetime" value="{{ form_state.diff_end_datetime }}" class="dc-input mt-1 {% if field_errors.get('diff_end_datetime') %}dc-error-input{% endif %}" required>
+            {{ field_error('diff_end_datetime') }}
+          </label>
+        </div>
+        <label class="inline-flex items-center gap-2 text-sm font-semibold">
+          <input type="checkbox" name="absolute_diff" {% if form_state.absolute_diff %}checked{% endif %}>
+          絶対値で表示
+        </label>
+        <button class="dc-button dc-button-primary w-full">差分を計算</button>
+      </form>
+
+      <form method="POST" class="dc-form space-y-5 {% if active == 'month_shift' %}is-active{% endif %}" data-datecalc-panel="month_shift">
+        <input type="hidden" name="mode" value="month_shift">
+        <div>
+          <h2 class="text-lg font-black">月送り</h2>
+          <p class="mt-1 text-sm text-slate-500">請求日や更新日の月またぎを確認します。</p>
+        </div>
+        <div class="grid md:grid-cols-2 gap-3">
+          <label class="block text-sm font-semibold">基準日
+            <input type="date" name="month_base_date" value="{{ form_state.month_base_date }}" class="dc-input mt-1 {% if field_errors.get('month_base_date') %}dc-error-input{% endif %}" required>
+            {{ field_error('month_base_date') }}
+          </label>
+          <label class="block text-sm font-semibold">シフト月数
+            <input type="number" name="month_shift" value="{{ form_state.month_shift }}" class="dc-input mt-1 {% if field_errors.get('month_shift') %}dc-error-input{% endif %}">
+            {{ field_error('month_shift') }}
+          </label>
+        </div>
+        <label class="inline-flex items-center gap-2 text-sm font-semibold">
+          <input type="checkbox" name="keep_month_end" {% if form_state.keep_month_end %}checked{% endif %}>
+          月末日を維持
+        </label>
+        <button class="dc-button dc-button-primary w-full">月送りを計算</button>
+      </form>
+
+      <form method="POST" class="dc-form space-y-5 {% if active == 'count' %}is-active{% endif %}" data-datecalc-panel="count">
+        <input type="hidden" name="mode" value="count">
+        <div>
+          <h2 class="text-lg font-black">指定日カウント</h2>
+          <p class="mt-1 text-sm text-slate-500">期間内で、指定した曜日、毎月の日付、個別日付、祝日に当たる日を数えます。開始日か終了日が空なら今日として計算します。</p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-3">
+          <label class="block text-sm font-semibold">開始日
+            <input type="date" name="count_start_date" value="{{ form_state.count_start_date }}" class="dc-input mt-1 {% if field_errors.get('count_start_date') %}dc-error-input{% endif %}">
+            {{ field_error('count_start_date') }}
+          </label>
+          <label class="block text-sm font-semibold">終了日
+            <input type="date" name="count_end_date" value="{{ form_state.count_end_date }}" class="dc-input mt-1 {% if field_errors.get('count_end_date') %}dc-error-input{% endif %}">
+            {{ field_error('count_end_date') }}
+          </label>
+        </div>
+
+        <div>
+          <p class="text-sm font-semibold">数える曜日</p>
+          <div class="mt-2 grid grid-cols-7 gap-2">
+            {% for index in range(7) %}
+              <label class="flex min-h-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-sm font-bold">
+                <input type="checkbox" class="sr-only" name="count_weekdays[]" value="{{ index }}" {% if index in form_state.count_weekdays %}checked{% endif %}>
+                <span>{{ weekday_labels[index] }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-3">
+          <label class="block text-sm font-semibold">毎月の日付
+            <input type="text" name="count_month_days" value="{{ form_state.count_month_days }}" class="dc-input mt-1 {% if field_errors.get('count_month_days') %}dc-error-input{% endif %}" placeholder="5, 10, 25">
+            {{ field_error('count_month_days') }}
+          </label>
+          <label class="block text-sm font-semibold">個別日付
+            <textarea name="count_exact_dates" rows="3" class="dc-textarea mt-1 {% if field_errors.get('count_exact_dates') %}dc-error-input{% endif %}" placeholder="2026-05-14, 2026-05-20">{{ form_state.count_exact_dates }}</textarea>
+            {{ field_error('count_exact_dates') }}
+          </label>
+        </div>
+
+        <label class="inline-flex items-center gap-2 text-sm font-semibold">
+          <input type="checkbox" name="count_japan_holidays" {% if form_state.count_japan_holidays %}checked{% endif %}>
+          日本の祝日も数える
+        </label>
+
+        <button class="dc-button dc-button-primary w-full">指定日を数える</button>
+      </form>
+    </section>
+
+    <aside class="space-y-4">
+      <div class="dc-result p-5">
+        {% if result %}
+          <p class="text-xs font-black tracking-wide text-teal-700">{{ result.title }}</p>
+          <p class="mt-2 break-words text-4xl font-black text-slate-950">{{ result.summary }}</p>
+          <div class="mt-4 space-y-2 text-sm text-slate-600">
+            {% for detail in result.details %}
+              <p>{{ detail }}</p>
+            {% endfor %}
+          </div>
+          <div class="mt-4 dc-muted-band p-3 text-xs text-slate-600">
+            {{ result.input_summary }}
+          </div>
+          <div class="mt-4 grid grid-cols-2 gap-2">
+            <button type="button" class="dc-button dc-button-secondary" data-copy-result="{{ result.copy_text }}">コピー</button>
+            <button type="button" class="dc-button dc-button-secondary" data-save-history data-mode="{{ result.mode }}" data-summary="{{ result.summary }}" data-input-summary="{{ result.input_summary }}" data-copy-text="{{ result.copy_text }}">履歴に保存</button>
+          </div>
+        {% else %}
+          <p class="text-xs font-black tracking-wide text-slate-500">RESULT</p>
+          <p class="mt-2 text-2xl font-black text-slate-900">未計算</p>
+          <p class="mt-3 text-sm text-slate-500">左の入力から計算すると、ここに結果とコピー操作が出ます。</p>
+        {% endif %}
       </div>
-    </div>
-  {% endif %}
 
-  <div class="grid xl:grid-cols-2 gap-5">
-    <form method="POST" class="panel p-5 space-y-4">
-      <input type="hidden" name="mode" value="addsub">
-      <h2 class="font-bold text-slate-800">1) 日時の加算・減算</h2>
-      <p class="text-xs text-slate-500">基準日時に「年・月・日・時・分」をまとめて足し引きします。締切や実施日の試算に使えます。</p>
-      <label class="block text-sm">基準日時
-        <input type="datetime-local" name="base_datetime" value="{{ form_state.base_datetime }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2" required>
-      </label>
-      <div class="grid grid-cols-5 gap-2">
-        <label class="text-sm">年
-          <input type="number" name="years" value="{{ form_state.years }}" class="w-full mt-1 border border-slate-300 rounded-lg px-2 py-2">
-        </label>
-        <label class="text-sm">月
-          <input type="number" name="months" value="{{ form_state.months }}" class="w-full mt-1 border border-slate-300 rounded-lg px-2 py-2">
-        </label>
-        <label class="text-sm">日
-          <input type="number" name="days" value="{{ form_state.days }}" class="w-full mt-1 border border-slate-300 rounded-lg px-2 py-2">
-        </label>
-        <label class="text-sm">時
-          <input type="number" name="hours" value="{{ form_state.hours }}" class="w-full mt-1 border border-slate-300 rounded-lg px-2 py-2">
-        </label>
-        <label class="text-sm">分
-          <input type="number" name="minutes" value="{{ form_state.minutes }}" class="w-full mt-1 border border-slate-300 rounded-lg px-2 py-2">
-        </label>
+      <div class="dc-panel p-4">
+        <h2 class="text-sm font-black">プリセット</h2>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button type="button" class="dc-chip" data-preset="next-month-end">翌月末</button>
+          <button type="button" class="dc-chip" data-preset="thirty-days">30日後</button>
+          <button type="button" class="dc-chip" data-preset="this-month-weekends">今月の土日</button>
+          <button type="button" class="dc-chip" data-preset="this-month-holidays">今月の祝日</button>
+          <button type="button" class="dc-chip" data-preset="until-month-end">月末まで</button>
+        </div>
       </div>
-      <div class="grid md:grid-cols-2 gap-3">
-        <label class="text-sm">操作
-          <select name="operation" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2">
-            <option value="add" {% if form_state.operation == 'add' %}selected{% endif %}>加算</option>
-            <option value="sub" {% if form_state.operation == 'sub' %}selected{% endif %}>減算</option>
-          </select>
-        </label>
-        <label class="text-sm">表示形式
-          <select name="output_format" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2">
-            <option value="hyphen" {% if form_state.output_format == 'hyphen' %}selected{% endif %}>YYYY-MM-DD HH:mm</option>
-            <option value="slash" {% if form_state.output_format == 'slash' %}selected{% endif %}>YYYY/MM/DD HH:mm</option>
-            <option value="iso" {% if form_state.output_format == 'iso' %}selected{% endif %}>ISO</option>
-          </select>
-        </label>
+
+      <div class="dc-panel p-4">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-sm font-black">履歴</h2>
+          <button type="button" class="text-xs font-bold text-slate-500 hover:text-slate-900" data-clear-history>クリア</button>
+        </div>
+        <div class="mt-3 space-y-2" data-history-list>
+          <p class="text-sm text-slate-500">保存済みの履歴はありません。</p>
+        </div>
       </div>
-      <button class="w-full bg-slate-900 text-white rounded-lg px-4 py-2 font-semibold hover:bg-slate-800">計算する</button>
-    </form>
-
-    <form method="POST" class="panel p-5 space-y-4">
-      <input type="hidden" name="mode" value="diff">
-      <h2 class="font-bold text-slate-800">2) 日付差分</h2>
-      <p class="text-xs text-slate-500">2つの日付の差を日数で計算します。時間差は計算しません。</p>
-      <label class="block text-sm">日付1
-        <input type="date" name="date1" value="{{ form_state.date1 }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2" required>
-      </label>
-      <label class="block text-sm">日付2
-        <input type="date" name="date2" value="{{ form_state.date2 }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2" required>
-      </label>
-      <label class="flex items-center gap-2 text-sm">
-        <input type="checkbox" name="absolute_diff" {% if form_state.absolute_diff %}checked{% endif %}>
-        絶対値で表示（先後関係を無視）
-      </label>
-      <button class="w-full bg-emerald-700 text-white rounded-lg px-4 py-2 font-semibold hover:bg-emerald-600">差分計算</button>
-    </form>
-
-    <form method="POST" class="panel p-5 space-y-4">
-      <input type="hidden" name="mode" value="month_shift">
-      <h2 class="font-bold text-slate-800">3) 月単位シフト（月末対応）</h2>
-      <p class="text-xs text-slate-500">指定日を「何か月後/前」に移動します。請求日や更新日の月送り計算向けです。</p>
-      <label class="block text-sm">基準日
-        <input type="date" name="month_base_date" value="{{ form_state.month_base_date }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2" required>
-      </label>
-      <label class="block text-sm">シフト月数（未来:+ / 過去:-）
-        <input type="number" name="month_shift" value="{{ form_state.month_shift }}" class="w-full mt-1 border border-slate-300 rounded-lg px-3 py-2">
-      </label>
-      <label class="flex items-center gap-2 text-sm">
-        <input type="checkbox" name="keep_month_end" {% if form_state.keep_month_end %}checked{% endif %}>
-        月末日を維持（例: 1/31 + 1か月 = 2/末）
-      </label>
-      <button class="w-full bg-amber-600 text-white rounded-lg px-4 py-2 font-semibold hover:bg-amber-500">月シフト計算</button>
-    </form>
+    </aside>
   </div>
 </div>
-</div>
+
+<script src="{{ url_for('static', filename='datecalc/datecalc.js') }}"></script>
 {% endblock %}
