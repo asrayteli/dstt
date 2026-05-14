@@ -233,7 +233,7 @@ def create_app(test_config=None):
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"  # ログインページのエンドポイント
     login_manager.init_app(app)
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_for=1)
     
     # ユーザーログインの管理
     login_manager.login_view = "auth.login"

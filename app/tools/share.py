@@ -21,9 +21,12 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from flask import Blueprint, jsonify, render_template, request, send_file, session, url_for
+from flask import Blueprint, Response, current_app, jsonify, render_template, request, send_file, session, stream_with_context, url_for
 from flask_login import current_user, login_required
+from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
+
+from . import share_crypto
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -48,6 +51,16 @@ _META_LOCK_TIMEOUT_SECONDS = 30.0
 MAX_EXPIRES_DAYS = 90
 DOWNLOAD_TOKEN_TTL_SECONDS = 60 * 60
 DOWNLOAD_TOKEN_MAX_PER_SESSION = 32
+MAX_PREVIEW_PDF_BYTES = 50 * 1024**2
+MAX_DOWNLOAD_LIMIT = 100000
+PREVIEW_CACHE_DIR = os.path.join(UPLOAD_DIR, ".previews")
+_DOWNLOAD_SIGNER_SALT = "filepost-download-token"
+_UPLOAD_SIGNER_SALT = "filepost-chunk-upload"
+_PREVIEW_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
+    "Referrer-Policy": "no-referrer",
+}
 _scheduler = None
 _scheduler_lock = threading.Lock()
 _meta_lock = threading.RLock()
@@ -148,7 +161,11 @@ def _safe_text(value: str | None, limit: int) -> str:
 
 def _safe_original_name(filename: str | None) -> str:
     cleaned = _safe_text(filename or "file", 255)
-    cleaned = cleaned.replace("..", "").replace("/", "").replace("\\", "")
+    # Strip any directory parts (handles "..", "/", "\\", "C:\\foo\\bar", etc.).
+    cleaned = cleaned.replace("\\", "/").split("/")[-1]
+    cleaned = Path(cleaned).name
+    cleaned = re.sub(r"[\x00-\x1f]", "", cleaned)
+    cleaned = cleaned.strip(" .")
     return cleaned or "file"
 
 
@@ -180,45 +197,101 @@ def _is_current_uploader(info: dict) -> bool:
     return bool(username and username == info.get("uploader"))
 
 
-def _prune_download_tokens(tokens: dict) -> dict:
-    now = time.time()
-    cleaned = {}
-    for token, info in tokens.items():
-        if not isinstance(info, dict):
+def _download_signer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=_DOWNLOAD_SIGNER_SALT)
+
+
+def _decode_download_token(token: str) -> str | None:
+    if not isinstance(token, str):
+        return None
+    try:
+        data = _download_signer().loads(token, max_age=DOWNLOAD_TOKEN_TTL_SECONDS)
+    except SignatureExpired:
+        return None
+    except BadSignature:
+        return None
+    if isinstance(data, dict):
+        uid = data.get("uid")
+        if isinstance(uid, str):
+            return uid
+    return None
+
+
+def _prune_download_tokens(tokens: list) -> list:
+    cleaned: list[str] = []
+    for token in tokens:
+        if not isinstance(token, str):
             continue
-        try:
-            expires_at = float(info.get("expires_at") or 0)
-        except (TypeError, ValueError):
+        if _decode_download_token(token) is None:
             continue
-        if expires_at <= now:
-            continue
-        cleaned[token] = {"uid": str(info.get("uid") or ""), "expires_at": expires_at}
+        cleaned.append(token)
     if len(cleaned) > DOWNLOAD_TOKEN_MAX_PER_SESSION:
-        cleaned = dict(
-            sorted(cleaned.items(), key=lambda kv: kv[1]["expires_at"], reverse=True)[:DOWNLOAD_TOKEN_MAX_PER_SESSION]
-        )
+        cleaned = cleaned[-DOWNLOAD_TOKEN_MAX_PER_SESSION:]
     return cleaned
 
 
-def _issue_download_token(uid):
-    tokens = _prune_download_tokens(dict(session.get("download_tokens") or {}))
-    token = uuid.uuid4().hex
-    tokens[token] = {"uid": uid, "expires_at": time.time() + DOWNLOAD_TOKEN_TTL_SECONDS}
+def _normalize_session_tokens(raw) -> list:
+    if isinstance(raw, list):
+        return list(raw)
+    # legacy dict storage from earlier revisions
+    if isinstance(raw, dict):
+        return [tok for tok in raw.keys() if isinstance(tok, str)]
+    return []
+
+
+def _issue_download_token(uid: str) -> str:
+    tokens = _prune_download_tokens(_normalize_session_tokens(session.get("download_tokens")))
+    token = _download_signer().dumps({"uid": uid})
+    tokens.append(token)
+    if len(tokens) > DOWNLOAD_TOKEN_MAX_PER_SESSION:
+        tokens = tokens[-DOWNLOAD_TOKEN_MAX_PER_SESSION:]
     session["download_tokens"] = tokens
     session.modified = True
     return token
 
 
 def _has_download_token(uid: str) -> bool:
-    raw = session.get("download_tokens") or {}
-    tokens = _prune_download_tokens(dict(raw))
+    raw = _normalize_session_tokens(session.get("download_tokens"))
+    tokens = _prune_download_tokens(raw)
     if tokens != raw:
         session["download_tokens"] = tokens
         session.modified = True
-    for info in tokens.values():
-        if info.get("uid") == uid:
+    for token in tokens:
+        if _decode_download_token(token) == uid:
             return True
     return False
+
+
+def _upload_signer() -> URLSafeSerializer:
+    return URLSafeSerializer(current_app.config["SECRET_KEY"], salt=_UPLOAD_SIGNER_SALT)
+
+
+def _sign_upload_id(inner_uuid: str, username: str) -> str:
+    return _upload_signer().dumps({"u": inner_uuid, "n": username})
+
+
+def _resolve_upload_id(token: str, username: str) -> str | None:
+    """Return the inner uuid bound to this signed token & username, or None."""
+    if not isinstance(token, str) or not token:
+        return None
+    # backwards-compat: if a bare uuid (pre-A3) is sent and the session file
+    # still exists, accept it.
+    if _valid_token(token):
+        legacy = _load_chunk_session(token)
+        if legacy and legacy.get("uploader") == username:
+            return token
+    try:
+        data = _upload_signer().loads(token)
+    except BadSignature:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("n") != username:
+        return None
+    inner = data.get("u")
+    if not isinstance(inner, str) or not _valid_token(inner):
+        return None
+    return inner
 
 
 def _hash_password(password: str) -> str:
@@ -450,19 +523,34 @@ def init_share_cleanup(app):
         _scheduler.start()
 
 
+def _coerce_max_downloads(value) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return min(parsed, MAX_DOWNLOAD_LIMIT)
+
+
 def _create_share_record(
     *,
     files: list[dict],
     title: str,
     memo: str,
     zip_name: str,
-    password: str,
+    password: str = "",
+    password_hash: str | None = None,
     expires_mode: str,
     expires_at_custom: str | None = None,
+    max_downloads: int | None = None,
 ) -> dict:
     now = datetime.utcnow()
     expires_at = _resolve_expires_at(expires_mode, expires_at_custom)
-    password_hash = _hash_password(password) if password else None
+    if password_hash is None:
+        password_hash = _hash_password(password) if password else None
 
     with _meta_critical_section():
         meta = load_meta()
@@ -491,6 +579,9 @@ def _create_share_record(
             "created_at": now.isoformat(),
             "expires_mode": expires_mode or "7d",
             "files": files,
+            "download_count": 0,
+            "max_downloads": _coerce_max_downloads(max_downloads),
+            "revoked_at": None,
         }
         save_meta(meta)
 
@@ -502,6 +593,73 @@ def _create_share_record(
         "qr_data": _make_qr_data(download_url),
         "expires_at": expires_at.isoformat(),
     }
+
+
+def _is_revoked(info: dict) -> bool:
+    return bool(info.get("revoked_at"))
+
+
+def _is_expired(info: dict) -> bool:
+    try:
+        return datetime.utcnow() > datetime.fromisoformat(info["expires_at"])
+    except (KeyError, TypeError, ValueError):
+        return True
+
+
+def _download_limit_reached(info: dict) -> bool:
+    cap = info.get("max_downloads")
+    if cap is None or cap == "":
+        return False
+    try:
+        cap_int = int(cap)
+    except (TypeError, ValueError):
+        return False
+    if cap_int <= 0:
+        return False
+    try:
+        used = int(info.get("download_count") or 0)
+    except (TypeError, ValueError):
+        used = 0
+    return used >= cap_int
+
+
+def _increment_download_count(uid: str) -> None:
+    with _meta_critical_section():
+        meta = load_meta()
+        info = meta.get(uid)
+        if not info:
+            return
+        try:
+            info["download_count"] = int(info.get("download_count") or 0) + 1
+        except (TypeError, ValueError):
+            info["download_count"] = 1
+        meta[uid] = info
+        save_meta(meta)
+
+
+def _store_uploaded_payload(src_path: str, dst_path: str) -> None:
+    """Move (or encrypt) a finalised plaintext file at src_path to dst_path."""
+    if share_crypto.encryption_enabled():
+        share_crypto.encrypt_file(src_path, dst_path)
+        try:
+            os.remove(src_path)
+        except FileNotFoundError:
+            pass
+    else:
+        os.replace(src_path, dst_path)
+
+
+def _iter_file_plaintext(path: str):
+    return share_crypto.iter_plaintext(path)
+
+
+def _read_file_plaintext(path: str, max_bytes: int | None = None) -> bytes:
+    buf = bytearray()
+    for chunk in _iter_file_plaintext(path):
+        buf.extend(chunk)
+        if max_bytes is not None and len(buf) > max_bytes:
+            raise ValueError("plaintext exceeds max_bytes")
+    return bytes(buf)
 
 
 @share_bp.route("/", methods=["GET", "POST"])
@@ -523,6 +681,7 @@ def upload_share():
         zip_name = request.form.get("zip_name", "").strip()
         expires_mode = request.form.get("expires_mode", "7d")
         expires_at_custom = request.form.get("expires_at_custom")
+        max_downloads = _coerce_max_downloads(request.form.get("max_downloads"))
 
         if not files or all(f.filename == "" for f in files):
             return "ファイルを選択してください。", 400
@@ -537,16 +696,23 @@ def upload_share():
             ext = _safe_extension(original_name)
             stored_filename = f"{uid_for_storage}_{idx}{ext}"
             save_path = os.path.join(UPLOAD_DIR, stored_filename)
-            file.save(save_path)
-
-            file_size = os.path.getsize(save_path)
+            tmp_plain = f"{save_path}.{os.getpid()}.{threading.get_ident()}.plain.tmp"
+            file.save(tmp_plain)
+            file_size = os.path.getsize(tmp_plain)
             total_size += file_size
+            if file_size <= 0:
+                try:
+                    os.remove(tmp_plain)
+                except FileNotFoundError:
+                    pass
+                return "0バイトのファイルはアップロードできません。", 400
             if total_size > MAX_FILE_SIZE:
                 try:
-                    os.remove(save_path)
+                    os.remove(tmp_plain)
                 except FileNotFoundError:
                     pass
                 return "アップロードできるファイルは合計10GBまでです。", 413
+            _store_uploaded_payload(tmp_plain, save_path)
 
             file_list.append(
                 {
@@ -554,6 +720,7 @@ def upload_share():
                     "stored_name": stored_filename,
                     "size": file_size,
                     "mime_type": file.mimetype or mimetypes.guess_type(original_name)[0] or "",
+                    "encrypted": share_crypto.encryption_enabled(),
                 }
             )
 
@@ -568,6 +735,7 @@ def upload_share():
             password=password,
             expires_mode=expires_mode,
             expires_at_custom=expires_at_custom,
+            max_downloads=max_downloads,
         )
         download_url = result["download_url"]
         qr_data = result["qr_data"]
@@ -598,8 +766,8 @@ def init_chunk_upload():
             size = int(raw.get("size", 0))
         except (TypeError, ValueError):
             return jsonify({"success": False, "error": "ファイルサイズが不正です。"}), 400
-        if size < 0:
-            return jsonify({"success": False, "error": "ファイルサイズが不正です。"}), 400
+        if size <= 0:
+            return jsonify({"success": False, "error": "0バイトのファイルはアップロードできません。"}), 400
         total_size += size
         if total_size > MAX_FILE_SIZE:
             return jsonify({"success": False, "error": "アップロードできるファイルは合計10GBまでです。"}), 413
@@ -614,21 +782,33 @@ def init_chunk_upload():
             }
         )
 
-    upload_id = uuid.uuid4().hex
+    inner_id = uuid.uuid4().hex
+    uploader = _current_username() or "unknown"
+    raw_password = str(payload.get("password") or "")
     session_payload = {
-        "upload_id": upload_id,
-        "uploader": _current_username() or "unknown",
+        "upload_id": inner_id,
+        "uploader": uploader,
         "created_at": datetime.utcnow().isoformat(),
         "title": _safe_text(payload.get("title"), 120),
         "memo": _safe_text(payload.get("memo"), 200),
         "zip_name": _safe_text(payload.get("zip_name"), 120),
         "expires_mode": _safe_text(payload.get("expires_mode") or "7d", 20),
         "expires_at_custom": _safe_text(payload.get("expires_at_custom"), 40),
-        "password": str(payload.get("password") or ""),
+        "password_hash": _hash_password(raw_password) if raw_password else None,
+        "max_downloads": _coerce_max_downloads(payload.get("max_downloads")),
         "files": files,
     }
-    _save_chunk_session(upload_id, session_payload)
-    return jsonify({"success": True, "upload_id": upload_id, "chunk_size": CHUNK_SIZE})
+    _save_chunk_session(inner_id, session_payload)
+    signed = _sign_upload_id(inner_id, uploader)
+    # `upload_id` stays the inner uuid so older clients (and direct file-path
+    # access from tests) keep working; `signed_upload_id` is what
+    # security-conscious clients should round-trip.
+    return jsonify({
+        "success": True,
+        "upload_id": inner_id,
+        "signed_upload_id": signed,
+        "chunk_size": CHUNK_SIZE,
+    })
 
 
 @share_bp.route("/api/chunk/upload", methods=["POST"])
@@ -637,17 +817,22 @@ def upload_chunk():
     if request.content_length and request.content_length > MAX_CHUNK_SIZE:
         return jsonify({"success": False, "error": "チャンクサイズが大きすぎます。"}), 413
 
-    upload_id = request.form.get("upload_id", "")
+    signed_upload_id = request.form.get("upload_id", "")
     try:
         file_index = int(request.form.get("file_index", ""))
         chunk_index = int(request.form.get("chunk_index", ""))
     except ValueError:
         return jsonify({"success": False, "error": "チャンク情報が不正です。"}), 400
 
+    username = _current_username() or "unknown"
+    upload_id = _resolve_upload_id(signed_upload_id, username)
+    if not upload_id:
+        return jsonify({"success": False, "error": "アップロード権限がありません。"}), 403
+
     upload_session = _load_chunk_session(upload_id)
     if not upload_session:
         return jsonify({"success": False, "error": "アップロードセッションが見つかりません。"}), 404
-    if upload_session.get("uploader") != (_current_username() or "unknown"):
+    if upload_session.get("uploader") != username:
         return jsonify({"success": False, "error": "アップロード権限がありません。"}), 403
     if file_index < 0 or file_index >= len(upload_session.get("files", [])):
         return jsonify({"success": False, "error": "ファイル番号が不正です。"}), 400
@@ -680,11 +865,15 @@ def upload_chunk():
 @login_required
 def complete_chunk_upload():
     payload = request.get_json(silent=True) or {}
-    upload_id = payload.get("upload_id", "")
+    signed_upload_id = payload.get("upload_id", "")
+    username = _current_username() or "unknown"
+    upload_id = _resolve_upload_id(signed_upload_id, username)
+    if not upload_id:
+        return jsonify({"success": False, "error": "アップロード権限がありません。"}), 403
     upload_session = _load_chunk_session(upload_id)
     if not upload_session:
         return jsonify({"success": False, "error": "アップロードセッションが見つかりません。"}), 404
-    if upload_session.get("uploader") != (_current_username() or "unknown"):
+    if upload_session.get("uploader") != username:
         return jsonify({"success": False, "error": "アップロード権限がありません。"}), 403
 
     for file_index, file_meta in enumerate(upload_session.get("files", [])):
@@ -719,9 +908,9 @@ def complete_chunk_upload():
             ext = _safe_extension(file_meta["original_name"])
             stored_name = f"{storage_uid}_{file_index}{ext}"
             final_path = os.path.join(UPLOAD_DIR, stored_name)
-            tmp_final_path = f"{final_path}.{os.getpid()}.{threading.get_ident()}.tmp"
+            tmp_plain_path = f"{final_path}.{os.getpid()}.{threading.get_ident()}.plain.tmp"
             written_size = 0
-            with open(tmp_final_path, "wb") as final:
+            with open(tmp_plain_path, "wb") as final:
                 for chunk_index in range(expected_chunks):
                     chunk_path = os.path.join(chunk_dir, f"{chunk_index}.part")
                     written_size += os.path.getsize(chunk_path)
@@ -731,11 +920,11 @@ def complete_chunk_upload():
             expected_size = int(file_meta.get("size") or 0)
             if written_size != expected_size:
                 try:
-                    os.remove(tmp_final_path)
+                    os.remove(tmp_plain_path)
                 except FileNotFoundError:
                     pass
                 return jsonify({"success": False, "error": f"{file_meta['original_name']} の結合サイズが一致しません。"}), 400
-            os.replace(tmp_final_path, final_path)
+            _store_uploaded_payload(tmp_plain_path, final_path)
 
             stored_files.append(
                 {
@@ -743,6 +932,7 @@ def complete_chunk_upload():
                     "stored_name": stored_name,
                     "size": written_size,
                     "mime_type": file_meta.get("mime_type", ""),
+                    "encrypted": share_crypto.encryption_enabled(),
                 }
             )
 
@@ -751,9 +941,10 @@ def complete_chunk_upload():
             title=upload_session.get("title", ""),
             memo=upload_session.get("memo", ""),
             zip_name=upload_session.get("zip_name", ""),
-            password=upload_session.get("password", ""),
+            password_hash=upload_session.get("password_hash"),
             expires_mode=upload_session.get("expires_mode", "7d"),
             expires_at_custom=upload_session.get("expires_at_custom", ""),
+            max_downloads=upload_session.get("max_downloads"),
         )
         completed = True
     finally:
@@ -778,6 +969,126 @@ def _check_download_password(uid: str, file_info: dict, file_index: int | None =
     return None
 
 
+class _ZipStreamBuffer:
+    """A write-only, non-seekable file-like used as a sink for zipfile."""
+
+    def __init__(self) -> None:
+        self._buf = bytearray()
+        self._pos = 0
+
+    def write(self, data) -> int:
+        self._buf.extend(data)
+        self._pos += len(data)
+        return len(data)
+
+    def flush(self) -> None:  # pragma: no cover - required interface
+        pass
+
+    def tell(self) -> int:
+        return self._pos
+
+    def seekable(self) -> bool:
+        return False
+
+    def drain(self) -> bytes:
+        out = bytes(self._buf)
+        self._buf.clear()
+        return out
+
+
+def _stream_single_file_response(uid: str, file_data: dict):
+    file_path = os.path.join(UPLOAD_DIR, file_data["stored_name"])
+    if not os.path.exists(file_path):
+        return "ファイルが見つかりません。", 404
+
+    def generate():
+        try:
+            for chunk in _iter_file_plaintext(file_path):
+                yield chunk
+        except Exception:
+            logger.exception("FILE POST single download stream failed uid=%s", uid)
+            return
+
+    encoded = _safe_original_name(file_data.get("original_name") or "download")
+    quoted = _rfc5987_filename(encoded)
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"{encoded}\"; filename*=UTF-8''{quoted}",
+        "X-Content-Type-Options": "nosniff",
+    }
+    size = file_data.get("size")
+    if isinstance(size, int) and size >= 0:
+        headers["Content-Length"] = str(size)
+    mimetype = file_data.get("mime_type") or mimetypes.guess_type(file_data.get("original_name") or "")[0] or "application/octet-stream"
+    response = Response(stream_with_context(generate()), mimetype=mimetype, headers=headers)
+    _increment_download_count(uid)
+    return response
+
+
+def _stream_zip_response(uid: str, file_info: dict, files: list[dict]):
+    fallback = file_info.get("title") or f"{file_info.get('display_id', uid)}_files"
+    download_name = _safe_zip_name(file_info.get("zip_name"), fallback)
+
+    def generate():
+        sink = _ZipStreamBuffer()
+        try:
+            with zipfile.ZipFile(sink, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+                used_names = set()
+                for item in files:
+                    file_path = os.path.join(UPLOAD_DIR, item["stored_name"])
+                    if not os.path.exists(file_path):
+                        continue
+                    arcname = item["original_name"]
+                    if arcname in used_names:
+                        base, ext = os.path.splitext(arcname)
+                        counter = 2
+                        while f"{base}_{counter}{ext}" in used_names:
+                            counter += 1
+                        arcname = f"{base}_{counter}{ext}"
+                    used_names.add(arcname)
+                    zinfo = zipfile.ZipInfo(filename=arcname)
+                    zinfo.compress_type = zipfile.ZIP_DEFLATED
+                    with zf.open(zinfo, mode="w", force_zip64=True) as entry:
+                        for chunk in _iter_file_plaintext(file_path):
+                            entry.write(chunk)
+                            out = sink.drain()
+                            if out:
+                                yield out
+                    out = sink.drain()
+                    if out:
+                        yield out
+            tail = sink.drain()
+            if tail:
+                yield tail
+        except Exception:
+            logger.exception("FILE POST zip stream failed uid=%s", uid)
+            return
+
+    quoted = _rfc5987_filename(download_name)
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"{download_name}\"; filename*=UTF-8''{quoted}",
+        "X-Content-Type-Options": "nosniff",
+    }
+    response = Response(stream_with_context(generate()), mimetype="application/zip", headers=headers)
+    _increment_download_count(uid)
+    return response
+
+
+def _rfc5987_filename(value: str) -> str:
+    from urllib.parse import quote
+
+    return quote(value, safe="")
+
+
+def _download_guard(file_info: dict):
+    if _is_revoked(file_info):
+        return "この共有は所有者により取り消されました。", 410
+    if _is_expired(file_info):
+        return "このファイルのダウンロード期限は過ぎています。", 410
+    if _download_limit_reached(file_info):
+        return "ダウンロード回数の上限に達しました。", 410
+    return None
+
+
 @share_bp.route("/download/<uid>", methods=["GET", "POST"])
 def download_file(uid):
     meta = load_meta()
@@ -785,8 +1096,9 @@ def download_file(uid):
     if not file_info:
         return "無効なURLです。", 404
 
-    if datetime.utcnow() > datetime.fromisoformat(file_info["expires_at"]):
-        return "このファイルのダウンロード期限は過ぎています。", 410
+    blocked = _download_guard(file_info)
+    if blocked is not None:
+        return blocked
 
     password_response = _check_download_password(uid, file_info)
     if password_response is not None:
@@ -794,32 +1106,8 @@ def download_file(uid):
 
     files = _files_for_info(file_info)
     if len(files) == 1:
-        file_path = os.path.join(UPLOAD_DIR, files[0]["stored_name"])
-        if not os.path.exists(file_path):
-            return "ファイルが見つかりません。", 404
-        return send_file(file_path, as_attachment=True, download_name=files[0]["original_name"])
-
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        used_names = set()
-        for item in files:
-            file_path = os.path.join(UPLOAD_DIR, item["stored_name"])
-            if not os.path.exists(file_path):
-                continue
-            arcname = item["original_name"]
-            if arcname in used_names:
-                base, ext = os.path.splitext(arcname)
-                counter = 2
-                while f"{base}_{counter}{ext}" in used_names:
-                    counter += 1
-                arcname = f"{base}_{counter}{ext}"
-            used_names.add(arcname)
-            zip_file.write(file_path, arcname=arcname)
-
-    zip_buffer.seek(0)
-    fallback = file_info.get("title") or f"{file_info.get('display_id', uid)}_files"
-    download_name = _safe_zip_name(file_info.get("zip_name"), fallback)
-    return send_file(zip_buffer, as_attachment=True, download_name=download_name, mimetype="application/zip")
+        return _stream_single_file_response(uid, files[0])
+    return _stream_zip_response(uid, file_info, files)
 
 
 @share_bp.route("/download/<uid>/<int:file_index>", methods=["GET", "POST"])
@@ -829,8 +1117,9 @@ def download_single_file(uid, file_index):
     if not file_info:
         return "無効なURLです。", 404
 
-    if datetime.utcnow() > datetime.fromisoformat(file_info["expires_at"]):
-        return "このファイルのダウンロード期限は過ぎています。", 410
+    blocked = _download_guard(file_info)
+    if blocked is not None:
+        return blocked
 
     password_response = _check_download_password(uid, file_info, file_index=file_index)
     if password_response is not None:
@@ -840,11 +1129,47 @@ def download_single_file(uid, file_index):
     if file_index < 0 or file_index >= len(files):
         return "ファイルが見つかりません。", 404
 
-    file_data = files[file_index]
-    file_path = os.path.join(UPLOAD_DIR, file_data["stored_name"])
-    if not os.path.exists(file_path):
-        return "ファイルが見つかりません。", 404
-    return send_file(file_path, as_attachment=True, download_name=file_data["original_name"])
+    return _stream_single_file_response(uid, files[file_index])
+
+
+def _preview_response(payload: bytes, mimetype: str):
+    response = Response(payload, mimetype=mimetype)
+    for header, value in _PREVIEW_HEADERS.items():
+        response.headers[header] = value
+    response.headers["Cache-Control"] = "private, max-age=60"
+    return response
+
+
+def _cached_pdf_preview(uid: str, file_index: int, file_path: str) -> bytes | None:
+    os.makedirs(PREVIEW_CACHE_DIR, exist_ok=True)
+    cache_path = os.path.join(PREVIEW_CACHE_DIR, f"{uid}_{file_index}.png")
+    try:
+        src_mtime = os.path.getmtime(file_path)
+    except OSError:
+        return None
+    try:
+        if os.path.getmtime(cache_path) >= src_mtime:
+            with open(cache_path, "rb") as f:
+                return f.read()
+    except OSError:
+        pass
+    return None
+
+
+def _store_pdf_preview(uid: str, file_index: int, payload: bytes) -> None:
+    os.makedirs(PREVIEW_CACHE_DIR, exist_ok=True)
+    cache_path = os.path.join(PREVIEW_CACHE_DIR, f"{uid}_{file_index}.png")
+    tmp_path = f"{cache_path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp_path, "wb") as f:
+            f.write(payload)
+        os.replace(tmp_path, cache_path)
+    except OSError:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except FileNotFoundError:
+                pass
 
 
 @share_bp.route("/preview/<uid>/<int:file_index>", methods=["GET"])
@@ -853,7 +1178,9 @@ def preview_file(uid, file_index):
     file_info = meta.get(uid)
     if not file_info:
         return "無効なURLです。", 404
-    if datetime.utcnow() > datetime.fromisoformat(file_info["expires_at"]):
+    if _is_revoked(file_info):
+        return "この共有は取り消されました。", 410
+    if _is_expired(file_info):
         return "このファイルの期限は過ぎています。", 410
     if not _can_preview(uid, file_info):
         return "プレビューにはパスワード確認が必要です。", 403
@@ -871,14 +1198,39 @@ def preview_file(uid, file_index):
     if not os.path.exists(file_path):
         return "ファイルが見つかりません。", 404
 
+    declared_size = item.get("size")
+    if not isinstance(declared_size, int):
+        declared_size = None
+
     if kind == "image":
         mimetype = item.get("mime_type") or mimetypes.guess_type(item.get("original_name", ""))[0] or "image/jpeg"
-        return send_file(file_path, mimetype=mimetype, as_attachment=False, download_name=item["original_name"])
+        try:
+            payload = _read_file_plaintext(file_path)
+        except Exception:
+            logger.exception("FILE POST image preview decryption failed uid=%s", uid)
+            return "プレビューを表示できません。", 500
+        return _preview_response(payload, mimetype)
+
+    # PDF — cap input size to protect the renderer.
+    if declared_size is not None and declared_size > MAX_PREVIEW_PDF_BYTES:
+        return "プレビューできるPDFサイズの上限(50MB)を超えています。", 415
+
+    cached = _cached_pdf_preview(uid, file_index, file_path)
+    if cached is not None:
+        return _preview_response(cached, "image/png")
+
+    try:
+        plaintext = _read_file_plaintext(file_path, max_bytes=MAX_PREVIEW_PDF_BYTES)
+    except ValueError:
+        return "プレビューできるPDFサイズの上限(50MB)を超えています。", 415
+    except Exception:
+        logger.exception("FILE POST PDF preview read failed uid=%s", uid)
+        return "PDFプレビューを作成できませんでした。", 500
 
     try:
         import fitz
 
-        doc = fitz.open(file_path)
+        doc = fitz.open(stream=plaintext, filetype="pdf")
         if doc.page_count < 1:
             doc.close()
             return "PDFにページがありません。", 415
@@ -890,7 +1242,8 @@ def preview_file(uid, file_index):
         logger.exception("Failed to render FILE POST PDF preview uid=%s file_index=%s", uid, file_index)
         return "PDFプレビューを作成できませんでした。", 500
 
-    return send_file(io.BytesIO(data), mimetype="image/png", as_attachment=False, download_name="preview.png")
+    _store_pdf_preview(uid, file_index, data)
+    return _preview_response(data, "image/png")
 
 
 @share_bp.route("/api/list", methods=["GET"])
@@ -923,11 +1276,165 @@ def get_file_list():
                 "expires_at": info["expires_at"],
                 "created_at": info.get("created_at", info["expires_at"]),
                 "download_url": url_for("share.download_file", uid=uid, _external=True),
+                "download_count": int(info.get("download_count") or 0),
+                "max_downloads": info.get("max_downloads"),
+                "revoked_at": info.get("revoked_at"),
             }
         )
 
     file_list.sort(key=lambda x: x["created_at"], reverse=True)
     return jsonify(file_list)
+
+
+def _require_owner_share(uid: str):
+    meta = load_meta()
+    info = meta.get(uid)
+    if not info:
+        return None, None, (jsonify({"success": False, "error": "ファイルが見つかりません。"}), 404)
+    if not _is_current_uploader(info):
+        return None, None, (jsonify({"success": False, "error": "権限がありません。"}), 403)
+    return meta, info, None
+
+
+@share_bp.route("/api/share/<uid>/revoke", methods=["POST"])
+@login_required
+def revoke_share(uid):
+    with _meta_critical_section():
+        meta, info, err = _require_owner_share(uid)
+        if err is not None:
+            return err
+        info["revoked_at"] = datetime.utcnow().isoformat()
+        meta[uid] = info
+        save_meta(meta)
+    return jsonify({"success": True, "revoked_at": info["revoked_at"]})
+
+
+@share_bp.route("/api/share/<uid>/extend", methods=["POST"])
+@login_required
+def extend_share(uid):
+    payload = request.get_json(silent=True) or {}
+    raw_value = payload.get("expires_at_custom") or payload.get("expires_at")
+    if not raw_value:
+        return jsonify({"success": False, "error": "有効期限が指定されていません。"}), 400
+    new_expires = _resolve_expires_at("custom", str(raw_value))
+    now = datetime.utcnow()
+    if new_expires <= now:
+        return jsonify({"success": False, "error": "有効期限は現在より後に設定してください。"}), 400
+    with _meta_critical_section():
+        meta, info, err = _require_owner_share(uid)
+        if err is not None:
+            return err
+        info["expires_at"] = new_expires.isoformat()
+        info["revoked_at"] = None
+        meta[uid] = info
+        save_meta(meta)
+    return jsonify({"success": True, "expires_at": info["expires_at"]})
+
+
+@share_bp.route("/api/share/<uid>/limits", methods=["POST"])
+@login_required
+def update_share_limits(uid):
+    payload = request.get_json(silent=True) or {}
+    if "max_downloads" not in payload:
+        return jsonify({"success": False, "error": "max_downloads が指定されていません。"}), 400
+    new_cap = _coerce_max_downloads(payload.get("max_downloads"))
+    with _meta_critical_section():
+        meta, info, err = _require_owner_share(uid)
+        if err is not None:
+            return err
+        info["max_downloads"] = new_cap
+        meta[uid] = info
+        save_meta(meta)
+    return jsonify({"success": True, "max_downloads": new_cap})
+
+
+@share_bp.route("/api/chunk/status", methods=["GET"])
+@login_required
+def chunk_status():
+    signed = request.args.get("upload_id", "")
+    username = _current_username() or "unknown"
+    upload_id = _resolve_upload_id(signed, username)
+    if not upload_id:
+        return jsonify({"success": False, "error": "アップロードセッションが見つかりません。"}), 404
+    upload_session = _load_chunk_session(upload_id)
+    if not upload_session or upload_session.get("uploader") != username:
+        return jsonify({"success": False, "error": "アップロードセッションが見つかりません。"}), 404
+    progress = []
+    for file_index, file_meta in enumerate(upload_session.get("files", [])):
+        chunk_dir = os.path.join(_chunk_session_dir(upload_id), f"file_{file_index}")
+        uploaded = []
+        if os.path.isdir(chunk_dir):
+            for entry in os.scandir(chunk_dir):
+                if entry.is_file() and entry.name.endswith(".part"):
+                    try:
+                        uploaded.append(int(entry.name[:-5]))
+                    except ValueError:
+                        continue
+        uploaded.sort()
+        progress.append({
+            "original_name": file_meta.get("original_name", ""),
+            "size": int(file_meta.get("size") or 0),
+            "chunk_count": int(file_meta.get("chunk_count") or 1),
+            "uploaded": uploaded,
+        })
+    return jsonify({
+        "success": True,
+        "upload_id": signed,
+        "chunk_size": CHUNK_SIZE,
+        "files": progress,
+        "title": upload_session.get("title", ""),
+        "created_at": upload_session.get("created_at", ""),
+    })
+
+
+@share_bp.route("/api/chunk/incomplete", methods=["GET"])
+@login_required
+def list_incomplete_uploads():
+    username = _current_username() or "unknown"
+    root = _chunk_root()
+    incomplete = []
+    if not os.path.isdir(root):
+        return jsonify(incomplete)
+    for entry in os.scandir(root):
+        if not entry.is_dir():
+            continue
+        upload_id = entry.name
+        if not _valid_token(upload_id):
+            continue
+        upload_session = _load_chunk_session(upload_id)
+        if not upload_session or upload_session.get("uploader") != username:
+            continue
+        files = upload_session.get("files", [])
+        total = sum(int(f.get("size") or 0) for f in files)
+        uploaded_bytes = 0
+        per_file = []
+        for file_index, file_meta in enumerate(files):
+            chunk_dir = os.path.join(_chunk_session_dir(upload_id), f"file_{file_index}")
+            uploaded_chunks = 0
+            if os.path.isdir(chunk_dir):
+                for f in os.scandir(chunk_dir):
+                    if f.is_file() and f.name.endswith(".part"):
+                        uploaded_chunks += 1
+                        try:
+                            uploaded_bytes += f.stat().st_size
+                        except OSError:
+                            continue
+            per_file.append({
+                "original_name": file_meta.get("original_name", ""),
+                "size": int(file_meta.get("size") or 0),
+                "chunk_count": int(file_meta.get("chunk_count") or 1),
+                "uploaded_chunks": uploaded_chunks,
+            })
+        incomplete.append({
+            "upload_id": _sign_upload_id(upload_id, username),
+            "title": upload_session.get("title", ""),
+            "created_at": upload_session.get("created_at", ""),
+            "total_size": total,
+            "uploaded_bytes": min(uploaded_bytes, total),
+            "files": per_file,
+        })
+    incomplete.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return jsonify(incomplete)
 
 
 @share_bp.route("/api/delete/<uid>", methods=["POST"])
