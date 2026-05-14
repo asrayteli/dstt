@@ -8,7 +8,9 @@ backlog = 2048
 workers = multiprocessing.cpu_count() * 2 + 1
 worker_class = "sync"
 worker_connections = 1000
-timeout = 30
+# Allow long-running downloads. Sync workers stay busy for the whole transfer,
+# so this needs to cover a worst-case slow client receiving a multi-GB share.
+timeout = 600
 keepalive = 2
 
 # Restart workers after this many requests, to help prevent memory leaks
