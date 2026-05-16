@@ -44,7 +44,7 @@ def test_powerstamp_screen_is_available():
     html = response.get_data(as_text=True)
     assert "PowerSTAMP" in html
     assert "実寸PDFを開く（印刷用）" in html
-    assert "サイズ推定" in html
+    assert "detectedSize" in html
     assert "JPG/PNG/PDF" in html
     assert "長3封筒" in html
     assert "角2封筒" in html
@@ -55,6 +55,10 @@ def test_powerstamp_screen_is_available():
     assert "社員名簿PLUS" in html
     assert "plusEmployeeSearchInput" in html
     assert "applyPlusEmployeeBtn" in html
+    assert "undoBtn" in html
+    assert "redoBtn" in html
+    assert "saveLocalTemplateBtn" in html
+    assert "selectedPropertiesPanel" in html
     assert "別タブプレビュー" not in html
     assert "実物照合タブ" not in html
     assert "saveTemplateBtn" not in html
@@ -130,3 +134,15 @@ def test_powerstamp_preview_and_verify_routes_are_removed():
 
     assert client.get("/tools/powerstamp/preview").status_code == 404
     assert client.get("/tools/powerstamp/verify").status_code == 404
+
+
+def test_powerstamp_manual_matches_current_screen():
+    from app.manuals import get_manual
+
+    manual = get_manual("powerstamp")
+    text = "\n".join(manual["steps"])
+
+    assert "Undo / Redo" in text
+    assert "選択中の編集" in text
+    assert "別タブでプレビュー" not in text
+    assert "見比べタブ" not in text

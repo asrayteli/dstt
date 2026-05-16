@@ -23,6 +23,11 @@
   const applyCalibrationOnExport = document.getElementById('applyCalibrationOnExport');
   const templateSelect = document.getElementById('templateSelect');
   const loadTemplateBtn = document.getElementById('loadTemplateBtn');
+  const localTemplateName = document.getElementById('localTemplateName');
+  const saveLocalTemplateBtn = document.getElementById('saveLocalTemplateBtn');
+  const deleteLocalTemplateBtn = document.getElementById('deleteLocalTemplateBtn');
+  const undoBtn = document.getElementById('undoBtn');
+  const redoBtn = document.getElementById('redoBtn');
   const useAnchorOrigin = document.getElementById('useAnchorOrigin');
   const setAnchorBtn = document.getElementById('setAnchorBtn');
   const anchorStatus = document.getElementById('anchorStatus');
@@ -44,6 +49,15 @@
   const plusEmployeeSelect = document.getElementById('plusEmployeeSelect');
   const applyPlusEmployeeBtn = document.getElementById('applyPlusEmployeeBtn');
   const plusEmployeeStatus = document.getElementById('plusEmployeeStatus');
+  const selectedStampType = document.getElementById('selectedStampType');
+  const selectedXInput = document.getElementById('selectedXInput');
+  const selectedYInput = document.getElementById('selectedYInput');
+  const selectedWidthInput = document.getElementById('selectedWidthInput');
+  const selectedHeightInput = document.getElementById('selectedHeightInput');
+  const selectedTextContentInput = document.getElementById('selectedTextContentInput');
+  const selectedFontSizeInput = document.getElementById('selectedFontSizeInput');
+  const selectedTextColorInput = document.getElementById('selectedTextColorInput');
+  const selectedFontFamilyInput = document.getElementById('selectedFontFamilyInput');
 
   if (!stage || !stageViewport || !guideLayer || !overlayLayer || !backgroundLayer || !detectedSize || !detectedFileType) {
     return;
@@ -72,6 +86,8 @@
   const ZOOM_MAX = 4;
   const ZOOM_STEP = 0.1;
   const MAX_EXACT_PDF_PIXELS = 50_000_000;
+  const HISTORY_LIMIT = 60;
+  const LOCAL_TEMPLATE_KEY = 'powerstamp.localTemplates.v1';
 
   let anchorPoint = null;
   let waitingAnchorPick = false;
@@ -85,6 +101,9 @@
   let colorDialogInput = null;
   let activeTemplateName = '';
   let plusEmployeeResults = [];
+  let historyStack = [];
+  let historyIndex = -1;
+  let isRestoringHistory = false;
 
   function clearGuide() {
     if (guideLayer) guideLayer.innerHTML = '';
@@ -341,6 +360,22 @@
     return getOutputDpi() / 25.4;
   }
 
+  function isActiveKaku2Envelope() {
+    const name = String(activeTemplateName || '').toLowerCase();
+    if (name.includes('角2') || name.includes('kaku2')) return true;
+
+    const w = Number(activePaper?.w_mm || 0);
+    const h = Number(activePaper?.h_mm || 0);
+    const close = (a, b) => Math.abs(a - b) < 1;
+    return (close(w, 240) && close(h, 332)) || (close(w, 332) && close(h, 240));
+  }
+
+  function recipientFontSizeForActiveEnvelope() {
+    const baseMm = isActiveKaku2Envelope() ? 6.4 : 5.4;
+    const maxPx = isActiveKaku2Envelope() ? 96 : 84;
+    return Math.round(clampNumber(canvasPxPerMmY() * baseMm, 18, maxPx, 42));
+  }
+
   function applyPlusEmployeeToEnvelope(employee) {
     const lines = buildEmployeeEnvelopeLines(employee);
     if (!employee || !lines.length) {
@@ -359,7 +394,7 @@
     clearAutoRecipientStamps();
 
     const canvas = getStagePixelSize();
-    const fontSize = Math.round(clampNumber(canvasPxPerMmY() * 5.4, 18, 84, 42));
+    const fontSize = recipientFontSizeForActiveEnvelope();
     const lineHeight = Math.round(fontSize * 1.45);
     const boxW = Math.round(canvas.width * 0.76);
     const boxH = Math.max(lineHeight, lineHeight * lines.length);
@@ -389,6 +424,7 @@
       ? '郵便番号と宛名を反映しました'
       : '宛名を反映しました（郵便番号なし）';
     setPlusEmployeeStatus(postalMessage, postal ? 'ok' : 'warn');
+    pushHistorySnapshot();
   }
 
   function renderGuide(guide, paper = null) {
@@ -762,6 +798,111 @@
     detectedFileType.textContent = `ファイルタイプ: ${typeText}`;
   }
 
+  function getRenderedStampSize(item) {
+    if (!item) return { width: 0, height: 0 };
+    const rect = item.getBoundingClientRect();
+    const scale = zoom || 1;
+    return {
+      width: parseFloat(item.style.width || '0') || Math.max(1, rect.width / scale),
+      height: parseFloat(item.style.height || '0') || Math.max(1, rect.height / scale),
+    };
+  }
+
+  function setPropertyInputsDisabled(disabled) {
+    [
+      selectedXInput,
+      selectedYInput,
+      selectedWidthInput,
+      selectedHeightInput,
+      selectedTextContentInput,
+      selectedFontSizeInput,
+      selectedTextColorInput,
+      selectedFontFamilyInput,
+    ].forEach((input) => {
+      if (input) input.disabled = disabled;
+    });
+  }
+
+  function updatePropertiesPanel() {
+    if (!selectedStampType) return;
+
+    if (!selected) {
+      selectedStampType.textContent = '未選択';
+      setPropertyInputsDisabled(true);
+      [
+        selectedXInput,
+        selectedYInput,
+        selectedWidthInput,
+        selectedHeightInput,
+        selectedTextContentInput,
+        selectedFontSizeInput,
+      ].forEach((input) => {
+        if (input) input.value = '';
+      });
+      return;
+    }
+
+    const type = selected.dataset.stampType || (selected.tagName === 'IMG' ? 'image' : 'text');
+    const size = getRenderedStampSize(selected);
+    const computed = window.getComputedStyle(selected);
+    selectedStampType.textContent = type === 'text' ? 'テキスト' : type === 'shape' ? '図形' : '画像';
+    setPropertyInputsDisabled(false);
+
+    if (selectedXInput) selectedXInput.value = String(Math.round((parseFloat(selected.style.left || '0')) * 10) / 10);
+    if (selectedYInput) selectedYInput.value = String(Math.round((parseFloat(selected.style.top || '0')) * 10) / 10);
+    if (selectedWidthInput) selectedWidthInput.value = String(Math.round(size.width * 10) / 10);
+    if (selectedHeightInput) selectedHeightInput.value = String(Math.round(size.height * 10) / 10);
+
+    const isText = type === 'text';
+    if (selectedTextContentInput) {
+      selectedTextContentInput.disabled = !isText;
+      selectedTextContentInput.value = isText ? (selected.textContent || '') : '';
+    }
+    if (selectedFontSizeInput) {
+      selectedFontSizeInput.disabled = !isText;
+      selectedFontSizeInput.value = isText ? String(Math.round(parseFloat(computed.fontSize || '24'))) : '';
+    }
+    if (selectedTextColorInput) {
+      selectedTextColorInput.disabled = !isText;
+      selectedTextColorInput.value = rgbToHex(selected.style.color || computed.color || '#111111') || '#111111';
+    }
+    if (selectedFontFamilyInput) {
+      selectedFontFamilyInput.disabled = !isText;
+      if (isText) {
+        const family = selected.style.fontFamily || textFontFamily?.value || '"Noto Sans JP", sans-serif';
+        selectedFontFamilyInput.value = Array.from(selectedFontFamilyInput.options).some((opt) => opt.value === family)
+          ? family
+          : "'Noto Sans JP', sans-serif";
+      }
+    }
+  }
+
+  function applySelectedPropertiesFromPanel() {
+    if (!selected) return;
+    const x = Number(selectedXInput?.value);
+    const y = Number(selectedYInput?.value);
+    const w = Number(selectedWidthInput?.value);
+    const h = Number(selectedHeightInput?.value);
+
+    if (Number.isFinite(x)) selected.style.left = `${x}px`;
+    if (Number.isFinite(y)) selected.style.top = `${y}px`;
+    if (Number.isFinite(w) && w > 0) selected.style.width = `${w}px`;
+    if (Number.isFinite(h) && h > 0) selected.style.height = `${h}px`;
+
+    if (selected.dataset.stampType === 'text') {
+      if (selectedTextContentInput) selected.textContent = selectedTextContentInput.value || '';
+      const fontSize = Number(selectedFontSizeInput?.value);
+      if (Number.isFinite(fontSize) && fontSize >= 8) selected.style.fontSize = `${fontSize}px`;
+      if (selectedTextColorInput?.value) selected.style.color = selectedTextColorInput.value;
+      if (selectedFontFamilyInput?.value) selected.style.fontFamily = selectedFontFamilyInput.value;
+      ensureResizeHandle(selected);
+    }
+
+    clampItemWithinStage(selected);
+    updatePropertiesPanel();
+    pushHistorySnapshot();
+  }
+
   function selectItem(item) {
     document.querySelectorAll('.stamp-item').forEach((el) => el.classList.remove('selected'));
     selected = item;
@@ -772,6 +913,7 @@
         textVertical.checked = mode.startsWith('vertical');
       }
     }
+    updatePropertiesPanel();
   }
 
   function setTextDirection(node, vertical) {
@@ -849,6 +991,8 @@
       if (next === null) return;
       item.textContent = next;
       ensureResizeHandle(item);
+      updatePropertiesPanel();
+      pushHistorySnapshot();
     });
   }
 
@@ -967,6 +1111,7 @@
     if (!node) return false;
     overlayLayer.appendChild(node);
     selectItem(node);
+    pushHistorySnapshot();
     return true;
   }
 
@@ -1023,6 +1168,7 @@
         node.style.top = `${point.y}px`;
         overlayLayer.appendChild(node);
         selectItem(node);
+        pushHistorySnapshot();
         return;
       }
 
@@ -1035,6 +1181,7 @@
             node.style.top = `${point.y}px`;
             overlayLayer.appendChild(node);
             selectItem(node);
+            pushHistorySnapshot();
             return;
           }
         } catch (_) {}
@@ -1046,6 +1193,7 @@
             node.style.top = `${point.y}px`;
             overlayLayer.appendChild(node);
             selectItem(node);
+            pushHistorySnapshot();
           }
         }
         return;
@@ -1065,6 +1213,8 @@
         const toVertical = !mode.startsWith('vertical');
         setTextDirection(target, toVertical);
         if (textVertical) textVertical.checked = toVertical;
+        updatePropertiesPanel();
+        pushHistorySnapshot();
         return;
       }
 
@@ -1076,6 +1226,8 @@
       if (action === 'delete-text') {
         target.remove();
         if (selected === target) selected = null;
+        updatePropertiesPanel();
+        pushHistorySnapshot();
       }
     });
 
@@ -1112,6 +1264,8 @@
         contextColorTarget.style.color = colorDialogInput.value;
         dialog.classList.add('hidden');
         contextColorTarget = null;
+        updatePropertiesPanel();
+        pushHistorySnapshot();
       }
     });
 
@@ -1174,6 +1328,137 @@
       node.style.top = `${Math.max(0, Number(stamp.top || 0))}px`;
       overlayLayer.appendChild(node);
     }
+    updatePropertiesPanel();
+  }
+
+  function captureHistorySnapshot() {
+    return JSON.stringify({ stamps: serializeAllStamps() });
+  }
+
+  function updateHistoryButtons() {
+    if (undoBtn) undoBtn.disabled = historyIndex <= 0;
+    if (redoBtn) redoBtn.disabled = historyIndex < 0 || historyIndex >= historyStack.length - 1;
+  }
+
+  function pushHistorySnapshot() {
+    if (isRestoringHistory) return;
+    const snapshot = captureHistorySnapshot();
+    if (historyStack[historyIndex] === snapshot) {
+      updateHistoryButtons();
+      return;
+    }
+
+    historyStack = historyStack.slice(0, historyIndex + 1);
+    historyStack.push(snapshot);
+    if (historyStack.length > HISTORY_LIMIT) {
+      historyStack.shift();
+    }
+    historyIndex = historyStack.length - 1;
+    updateHistoryButtons();
+  }
+
+  function restoreHistoryIndex(nextIndex) {
+    if (nextIndex < 0 || nextIndex >= historyStack.length) return;
+    isRestoringHistory = true;
+    try {
+      const parsed = JSON.parse(historyStack[nextIndex] || '{}');
+      restoreAllStamps(parsed.stamps || []);
+      selectItem(null);
+      historyIndex = nextIndex;
+    } finally {
+      isRestoringHistory = false;
+      updateHistoryButtons();
+    }
+  }
+
+  function undoHistory() {
+    restoreHistoryIndex(historyIndex - 1);
+  }
+
+  function redoHistory() {
+    restoreHistoryIndex(historyIndex + 1);
+  }
+
+  function getLocalTemplates() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(LOCAL_TEMPLATE_KEY) || '[]');
+      return Array.isArray(parsed) ? parsed.filter((tpl) => tpl && tpl.id && tpl.name) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function setLocalTemplates(templates) {
+    localStorage.setItem(LOCAL_TEMPLATE_KEY, JSON.stringify(templates));
+  }
+
+  function serializeCurrentTemplateData() {
+    return {
+      version: 1,
+      sourceSize,
+      canvas: getStagePixelSize(),
+      calibration: getCalibration(),
+      stamps: serializeAllStamps(),
+      guide: activeGuide,
+      paper: activePaper || getSelectedPaperDefinition(),
+    };
+  }
+
+  async function saveLocalTemplate() {
+    const name = (localTemplateName?.value || activeTemplateName || '').trim();
+    if (!name) {
+      alert('保存名を入力してください');
+      return;
+    }
+
+    const selectedId = templateSelect?.value || '';
+    const templates = getLocalTemplates();
+    const now = new Date().toISOString();
+    const existingIndex = selectedId.startsWith('local:')
+      ? templates.findIndex((tpl) => tpl.id === selectedId)
+      : templates.findIndex((tpl) => tpl.name === name);
+    const next = {
+      id: existingIndex >= 0 ? templates[existingIndex].id : `local:${Date.now()}`,
+      name,
+      owner: 'LOCAL',
+      updated_at: now,
+      created_at: existingIndex >= 0 ? templates[existingIndex].created_at : now,
+      data: serializeCurrentTemplateData(),
+    };
+
+    if (existingIndex >= 0) {
+      templates[existingIndex] = next;
+    } else {
+      templates.push(next);
+    }
+    templates.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+    setLocalTemplates(templates);
+    activeTemplateName = name;
+    await refreshTemplateList(next.id);
+  }
+
+  async function deleteLocalTemplate() {
+    const id = templateSelect?.value || '';
+    if (!id.startsWith('local:')) {
+      alert('削除できるのは保存済みのローカルテンプレートだけです');
+      return;
+    }
+    const templates = getLocalTemplates().filter((tpl) => tpl.id !== id);
+    setLocalTemplates(templates);
+    if (localTemplateName) localTemplateName.value = '';
+    await refreshTemplateList();
+  }
+
+  function loadLocalTemplate(id) {
+    const tpl = getLocalTemplates().find((item) => item.id === id);
+    if (!tpl) {
+      alert('ローカルテンプレートが見つかりません');
+      return false;
+    }
+    applyTemplateData(tpl.name, tpl.data || {});
+    if (localTemplateName) localTemplateName.value = tpl.name || '';
+    pushHistorySnapshot();
+    return true;
   }
 
   async function refreshTemplateList(selectId = null) {
@@ -1194,25 +1479,25 @@
       templateSelect.appendChild(opt);
     }
 
+    const localTemplates = getLocalTemplates();
+    if (localTemplates.length) {
+      const group = document.createElement('optgroup');
+      group.label = '保存済み';
+      for (const tpl of localTemplates) {
+        const opt = document.createElement('option');
+        opt.value = tpl.id;
+        opt.textContent = tpl.name;
+        group.appendChild(opt);
+      }
+      templateSelect.appendChild(group);
+    }
+
     if (selectId) templateSelect.value = selectId;
   }
 
-  async function loadTemplate() {
-    const id = templateSelect?.value;
-    if (!id) {
-      alert('テンプレートを選択してください');
-      return;
-    }
-
-    const res = await fetch(`/tools/powerstamp/api/templates/${id}`);
-    const json = await res.json();
-    if (!res.ok || !json.template) {
-      alert(json.error || 'テンプレート読込に失敗しました');
-      return;
-    }
-
-    const data = json.template.data || {};
-    activeTemplateName = json.template.name || '';
+  function applyTemplateData(name, data) {
+    activeTemplateName = name || '';
+    if (localTemplateName) localTemplateName.value = activeTemplateName;
     const canvas = data.canvas || {};
     if (canvas.width && canvas.height) setCanvasSize(canvas.width, canvas.height);
 
@@ -1243,6 +1528,29 @@
     renderGuide(activeGuide, activePaper);
     updatePostalCodePanel();
     if (postalCodeInput?.value && !postalCodePanel?.classList.contains('hidden')) triggerPostalCodeApply();
+  }
+
+  async function loadTemplate() {
+    const id = templateSelect?.value;
+    if (!id) {
+      alert('テンプレートを選択してください');
+      return;
+    }
+
+    if (id.startsWith('local:')) {
+      loadLocalTemplate(id);
+      return;
+    }
+
+    const res = await fetch(`/tools/powerstamp/api/templates/${id}`);
+    const json = await res.json();
+    if (!res.ok || !json.template) {
+      alert(json.error || 'テンプレート読込に失敗しました');
+      return;
+    }
+
+    applyTemplateData(json.template.name || '', json.template.data || {});
+    pushHistorySnapshot();
   }
 
     stage.addEventListener('click', (event) => {
@@ -1307,10 +1615,15 @@ document.addEventListener('mousemove', (event) => {
   });
 
   document.addEventListener('mouseup', () => {
+    const movedItem = dragState?.item || resizeState?.item || null;
     dragState = null;
     if (resizeState) {
       clampItemWithinStage(resizeState.item);
       resizeState = null;
+    }
+    if (movedItem) {
+      updatePropertiesPanel();
+      pushHistorySnapshot();
     }
   });
 
@@ -1331,6 +1644,24 @@ document.addEventListener('mousemove', (event) => {
     if (event.key === 'Delete' && selected) {
       selected.remove();
       selected = null;
+      updatePropertiesPanel();
+      pushHistorySnapshot();
+      return;
+    }
+
+    if (withMeta && key === 'z') {
+      event.preventDefault();
+      if (event.shiftKey) {
+        redoHistory();
+      } else {
+        undoHistory();
+      }
+      return;
+    }
+
+    if (withMeta && key === 'y') {
+      event.preventDefault();
+      redoHistory();
       return;
     }
 
@@ -1438,6 +1769,7 @@ document.addEventListener('mousemove', (event) => {
     const div = createTextStamp();
     overlayLayer.appendChild(div);
     selectItem(div);
+    pushHistorySnapshot();
   });
 
   toggleSelectedTextDirectionBtn?.addEventListener('click', () => {
@@ -1449,6 +1781,8 @@ document.addEventListener('mousemove', (event) => {
     const toVertical = !mode.startsWith('vertical');
     setTextDirection(selected, toVertical);
     if (textVertical) textVertical.checked = toVertical;
+    updatePropertiesPanel();
+    pushHistorySnapshot();
   });
 
   document.getElementById('addShapeBtn').addEventListener('click', () => {
@@ -1462,6 +1796,7 @@ document.addEventListener('mousemove', (event) => {
     makeDraggable(shape);
     overlayLayer.appendChild(shape);
     selectItem(shape);
+    pushHistorySnapshot();
   });
 
   document.getElementById('addImageBtn').addEventListener('click', () => {
@@ -1481,6 +1816,7 @@ document.addEventListener('mousemove', (event) => {
       makeDraggable(img);
       overlayLayer.appendChild(img);
       selectItem(img);
+      pushHistorySnapshot();
     };
     reader.readAsDataURL(file);
   });
@@ -1488,6 +1824,7 @@ document.addEventListener('mousemove', (event) => {
   document.getElementById('clearBtn').addEventListener('click', () => {
     overlayLayer.innerHTML = '';
     selectItem(null);
+    pushHistorySnapshot();
   });
 
   async function openExactPdfForPrint(win) {
@@ -1566,6 +1903,24 @@ document.addEventListener('mousemove', (event) => {
   zoomInBtn?.addEventListener('click', () => setZoom(zoom + ZOOM_STEP));
   zoomOutBtn?.addEventListener('click', () => setZoom(zoom - ZOOM_STEP));
   zoomResetBtn?.addEventListener('click', () => setZoom(1));
+  undoBtn?.addEventListener('click', undoHistory);
+  redoBtn?.addEventListener('click', redoHistory);
+  saveLocalTemplateBtn?.addEventListener('click', () => {
+    saveLocalTemplate().catch((e) => alert(`テンプレート保存エラー: ${e.message}`));
+  });
+  deleteLocalTemplateBtn?.addEventListener('click', () => {
+    deleteLocalTemplate().catch((e) => alert(`テンプレート削除エラー: ${e.message}`));
+  });
+  [
+    selectedXInput,
+    selectedYInput,
+    selectedWidthInput,
+    selectedHeightInput,
+    selectedTextContentInput,
+    selectedFontSizeInput,
+    selectedTextColorInput,
+    selectedFontFamilyInput,
+  ].forEach((input) => input?.addEventListener('change', applySelectedPropertiesFromPanel));
   zoomFitBtn?.addEventListener('click', () => {
     autoFitOnResize = true;
     fitStageToScreen();
@@ -1576,7 +1931,14 @@ document.addEventListener('mousemove', (event) => {
   });
   paperSizeSelect?.addEventListener('change', updateCustomPaperVisibility);
   templateSelect?.addEventListener('change', () => {
-    if (!templateSelect.value) return;
+    if (!templateSelect.value) {
+      if (localTemplateName) localTemplateName.value = '';
+      return;
+    }
+    if (templateSelect.value.startsWith('local:')) {
+      const tpl = getLocalTemplates().find((item) => item.id === templateSelect.value);
+      if (localTemplateName) localTemplateName.value = tpl?.name || '';
+    }
     loadTemplate().catch((e) => alert(`テンプレ読込エラー: ${e.message}`));
   });
   outsideAreaColorInput?.addEventListener('input', () => {
@@ -1612,7 +1974,10 @@ document.addEventListener('mousemove', (event) => {
     loadTemplate().catch((e) => alert(`テンプレ読込エラー: ${e.message}`));
   });
 
-  applyPostalCodeBtn?.addEventListener('click', triggerPostalCodeApply);
+  applyPostalCodeBtn?.addEventListener('click', () => {
+    triggerPostalCodeApply();
+    pushHistorySnapshot();
+  });
   postalCodeInput?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -1803,9 +2168,11 @@ document.addEventListener('mousemove', (event) => {
   setAnchorUI(null);
   updateCustomPaperVisibility();
   updatePostalCodePanel();
+  updatePropertiesPanel();
   loadCalibration();
   loadOutsideAreaColor();
   applyZoom();
+  pushHistorySnapshot();
   refreshTemplateList().catch(() => {});
 
   window.addEventListener('resize', () => {

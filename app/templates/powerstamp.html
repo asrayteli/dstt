@@ -1,249 +1,254 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto space-y-6 pb-10">
-  <section class="dstt-hero" style="background: linear-gradient(135deg, #92400e 0%, #d97706 50%, #fcd34d 100%);">
+<div class="powerstamp-app">
+  <section class="dstt-hero powerstamp-hero" style="background: linear-gradient(135deg, #92400e 0%, #d97706 50%, #fcd34d 100%);">
     <div class="dstt-hero-grid">
       <div class="dstt-hero-copy">
         <div class="dstt-hero-pill">POWER STAMP</div>
         <div>
           <h1 class="dstt-hero-title">PowerSTAMP</h1>
-          <p class="dstt-hero-subtitle">スキャン画像・PDF を背景として読み込み、その上に文字・図形・画像を重ねます。印刷時は背景を除外し、追加したスタンプのみを出力します。</p>
+          <p class="dstt-hero-subtitle">スキャン画像・PDFを背景にして、文字・図形・画像を正確な位置へ重ねます。印刷用PDFでは背景を除外し、追加したスタンプだけを出力します。</p>
         </div>
       </div>
       <div class="dstt-hero-meta">
         <div class="dstt-hero-card">
-          <div class="dstt-hero-card-label">LOGIN</div>
-          <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
+          <div class="dstt-hero-card-label">STATUS</div>
+          <div id="detectedSize" class="dstt-hero-card-value">未読込</div>
         </div>
         <div class="dstt-hero-card">
           <div class="dstt-hero-card-label">INPUT</div>
-          <div class="dstt-hero-card-value">JPG / PNG / PDF</div>
+          <div id="detectedFileType" class="dstt-hero-card-value">JPG / PNG / PDF</div>
         </div>
       </div>
     </div>
   </section>
 
-  <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 grid xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.9fr)_minmax(0,1.5fr)] gap-4">
-    <div class="space-y-3">
-      <label class="block text-sm font-medium mb-1">背景ファイル（JPG/PNG/PDF）</label>
-      <input id="backgroundInput" type="file" accept="image/*,.pdf,application/pdf" class="w-full text-sm" />
-      <p class="text-xs text-slate-500">PDFは1ページ目を背景表示します。</p>
-      <div class="pt-3 border-t border-slate-200">
-        <label class="block text-sm font-medium mb-1">定型テンプレート</label>
-        <div class="flex flex-wrap gap-2">
-          <select id="templateSelect" class="min-w-0 flex-1 border rounded px-2 py-2 text-sm"></select>
-          <button id="loadTemplateBtn" class="px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800 text-sm">読込</button>
-        </div>
-      </div>
+  <div class="powerstamp-toolbar">
+    <div class="powerstamp-toolbar-group">
+      <button id="undoBtn" class="powerstamp-btn powerstamp-btn-muted" disabled>Undo</button>
+      <button id="redoBtn" class="powerstamp-btn powerstamp-btn-muted" disabled>Redo</button>
+      <button id="clearBtn" class="powerstamp-btn powerstamp-btn-danger">全削除</button>
     </div>
 
-    <div class="space-y-3">
-      <label class="block text-sm font-medium mb-1">キャンバスサイズ(px)</label>
-      <div class="flex gap-2">
-        <input id="canvasWidth" type="number" value="1200" min="100" class="w-full border rounded px-2 py-1" />
-        <input id="canvasHeight" type="number" value="1700" min="100" class="w-full border rounded px-2 py-1" />
-      </div>
-      <button id="resizeCanvasBtn" class="px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800 text-sm">適用</button>
+    <div class="powerstamp-toolbar-group powerstamp-zoom-group">
+      <button id="zoomOutBtn" class="powerstamp-icon-btn" title="縮小">-</button>
+      <button id="zoomResetBtn" class="powerstamp-btn powerstamp-btn-muted">100%</button>
+      <button id="zoomInBtn" class="powerstamp-icon-btn" title="拡大">+</button>
+      <button id="zoomFitBtn" class="powerstamp-btn powerstamp-btn-muted">Fit</button>
+      <input id="zoomSlider" type="range" min="5" max="400" step="5" value="100" title="表示倍率(%)" />
+      <span id="zoomLabel">100%</span>
     </div>
 
-    <div class="rounded border border-slate-200 bg-slate-50 p-3">
-      <div class="flex flex-wrap items-start gap-4">
-        <div class="min-w-[15rem] flex-1 space-y-1">
-          <p class="text-sm font-semibold text-slate-800">サイズ推定</p>
-          <p id="detectedSize" class="text-sm text-slate-700">未読込</p>
-          <p id="detectedFileType" class="text-xs text-slate-600">ファイルタイプ: 未判定</p>
-          <p class="text-[11px] leading-snug text-slate-500">画像はpx、PDFはpt基準です。印刷は右の用紙寸法で実寸PDF化します。</p>
-        </div>
-        <div class="min-w-[19rem] flex-[1.2] space-y-2 border-t border-slate-200 pt-3 sm:border-t-0 sm:border-l sm:pl-4 sm:pt-0">
-          <p class="text-xs font-medium text-slate-700">出力サイズ</p>
-          <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-700">
-            <label class="flex items-center gap-2">
-              <input type="radio" name="exportSizeMode" value="source">
-              原稿サイズ
-            </label>
-            <label class="flex items-center gap-2">
-              <input type="radio" name="exportSizeMode" value="canvas">
-              キャンバス
-            </label>
-            <label class="flex items-center gap-2">
-              <input type="radio" name="exportSizeMode" value="paper" checked>
-              用紙指定
-            </label>
-          </div>
-          <div class="flex flex-wrap items-center gap-2 text-xs">
-            <select id="paperSizeSelect" class="border rounded px-2 py-1">
-              <option value="A4">A4</option>
-              <option value="A3">A3</option>
-              <option value="A5">A5</option>
-              <option value="A6">A6</option>
-              <option value="B4">B4</option>
-              <option value="B5">B5</option>
-              <option value="NAGA3">長3封筒</option>
-              <option value="KAKU2">角2封筒</option>
-              <option value="CUSTOM">カスタム</option>
-            </select>
-            <select id="paperOrientation" class="border rounded px-2 py-1">
-              <option value="portrait">縦</option>
-              <option value="landscape">横</option>
-            </select>
-            <label class="paper-custom-field hidden">W(mm)</label>
-            <input id="customPaperWidthMm" type="number" value="210" min="10" max="600" step="0.1" class="paper-custom-field hidden w-20 border rounded px-2 py-1" />
-            <label class="paper-custom-field hidden">H(mm)</label>
-            <input id="customPaperHeightMm" type="number" value="297" min="10" max="600" step="0.1" class="paper-custom-field hidden w-20 border rounded px-2 py-1" />
-            <label>DPI</label>
-            <input id="paperDpiInput" type="number" value="300" min="72" max="1200" class="w-20 border rounded px-2 py-1" />
-          </div>
-        </div>
-      </div>
+    <div class="powerstamp-toolbar-group powerstamp-toolbar-actions">
+      <button id="exportBtn" class="powerstamp-btn powerstamp-btn-success">透過PNG保存</button>
+      <button id="printBtn" class="powerstamp-btn powerstamp-btn-primary">実寸PDFを開く（印刷用）</button>
     </div>
   </div>
 
-  <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 flex flex-wrap items-center gap-2">
-    <button id="printBtn" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">実寸PDFを開く（印刷用）</button>
-    <button id="exportBtn" class="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700">透過PNG保存</button>
-    <button id="clearBtn" class="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-700">全削除</button>
+  <div class="powerstamp-layout">
+    <aside class="powerstamp-sidebar powerstamp-sidebar-left">
+      <section class="powerstamp-panel">
+        <h2>読込</h2>
+        <label class="powerstamp-field">
+          <span>背景ファイル（JPG/PNG/PDF）</span>
+          <input id="backgroundInput" type="file" accept="image/*,.pdf,application/pdf" />
+        </label>
+        <div class="powerstamp-grid-2">
+          <label class="powerstamp-field">
+            <span>幅(px)</span>
+            <input id="canvasWidth" type="number" value="1200" min="100" />
+          </label>
+          <label class="powerstamp-field">
+            <span>高さ(px)</span>
+            <input id="canvasHeight" type="number" value="1700" min="100" />
+          </label>
+        </div>
+        <button id="resizeCanvasBtn" class="powerstamp-btn powerstamp-btn-muted powerstamp-full">適用</button>
+      </section>
 
-    <div class="ml-auto flex flex-wrap items-center gap-2 text-sm">
-      <span class="text-gray-600">表示倍率</span>
-      <button id="zoomOutBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">−</button>
-      <button id="zoomResetBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">100%</button>
-      <button id="zoomInBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">＋</button>
-      <button id="zoomFitBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">Fit</button>
-      <input id="zoomSlider" type="range" min="5" max="400" step="5" value="100" class="w-36" title="表示拡大率(%)" />
-      <span id="zoomLabel" class="w-14 text-right font-semibold text-gray-700">100%</span>
-      <details class="powerstamp-compact-details ml-2">
-        <summary>細かい補正</summary>
-        <div class="powerstamp-compact-details-body">
-          <div class="flex flex-wrap items-center gap-2 text-xs">
-            <span class="text-gray-600">編集外背景</span>
-            <input id="outsideAreaColor" type="color" value="#f3f4f6" class="w-10 h-8 border rounded bg-white" title="編集対象外エリアの色" />
-            <button id="outsideAreaColorResetBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50 text-xs">リセット</button>
-          </div>
-          <div class="flex flex-wrap items-center gap-2 text-xs">
-            <span class="text-gray-600">精度補正</span>
-            <label class="text-xs text-gray-600">X</label>
-            <input id="calibOffsetX" type="number" value="0" step="0.1" class="w-20 border rounded px-2 py-1" title="Xオフセット(px)">
-            <label class="text-xs text-gray-600">Y</label>
-            <input id="calibOffsetY" type="number" value="0" step="0.1" class="w-20 border rounded px-2 py-1" title="Yオフセット(px)">
-            <label class="text-xs text-gray-600">SX%</label>
-            <input id="calibScaleX" type="number" value="100" step="0.1" class="w-20 border rounded px-2 py-1" title="Xスケール(%)">
-            <label class="text-xs text-gray-600">SY%</label>
-            <input id="calibScaleY" type="number" value="100" step="0.1" class="w-20 border rounded px-2 py-1" title="Yスケール(%)">
-            <button id="calibResetBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">補正リセット</button>
-          </div>
-          <div class="flex flex-wrap items-center gap-2 text-xs">
-            <label class="flex items-center gap-1 text-xs text-gray-700">
-              <input id="applyCalibrationOnExport" type="checkbox">
-              補正を出力に適用
+      <section class="powerstamp-panel">
+        <h2>テンプレート</h2>
+        <div class="powerstamp-row">
+          <select id="templateSelect"></select>
+          <button id="loadTemplateBtn" class="powerstamp-btn powerstamp-btn-muted">読込</button>
+        </div>
+        <div class="powerstamp-row">
+          <input id="localTemplateName" type="text" placeholder="保存名" />
+          <button id="saveLocalTemplateBtn" class="powerstamp-btn powerstamp-btn-accent">保存</button>
+          <button id="deleteLocalTemplateBtn" class="powerstamp-btn powerstamp-btn-muted">削除</button>
+        </div>
+      </section>
+
+      <section class="powerstamp-panel">
+        <h2>追加</h2>
+        <details open>
+          <summary>テキスト</summary>
+          <div class="powerstamp-stack">
+            <input id="textContent" type="text" value="入力文字" />
+            <div class="powerstamp-row">
+              <input id="textSize" type="number" value="32" min="8" />
+              <input id="textColor" type="color" value="#1f2937" />
+            </div>
+            <select id="textFontFamily">
+              <option value="'Noto Sans JP', sans-serif">Noto Sans JP</option>
+              <option value="'Yu Gothic', 'YuGothic', sans-serif">Yu Gothic</option>
+              <option value="'Meiryo', sans-serif">Meiryo</option>
+              <option value="'MS PGothic', 'MS Gothic', sans-serif">MS Gothic</option>
+              <option value="serif">Serif</option>
+              <option value="sans-serif">Sans Serif</option>
+            </select>
+            <label class="powerstamp-check">
+              <input id="textVertical" type="checkbox" />
+              <span>縦書き</span>
             </label>
-            <label class="flex items-center gap-1 text-xs text-gray-700">
-              <input id="useAnchorOrigin" type="checkbox">
-              左上基準点を使う
-            </label>
-            <button id="setAnchorBtn" class="px-3 py-1 rounded border bg-white hover:bg-gray-50">基準点を設定</button>
-            <span id="anchorStatus" class="text-xs text-gray-600">未設定</span>
+            <button id="addTextBtn" class="powerstamp-btn powerstamp-btn-muted powerstamp-full">テキスト配置</button>
+          </div>
+        </details>
+
+        <details>
+          <summary>図形</summary>
+          <div class="powerstamp-stack">
+            <div class="powerstamp-row">
+              <select id="shapeType">
+                <option value="rect">四角形</option>
+                <option value="ellipse">楕円</option>
+              </select>
+              <input id="shapeStroke" type="color" value="#2563eb" />
+              <input id="shapeFill" type="color" value="#93c5fd" />
+            </div>
+            <div class="powerstamp-grid-2">
+              <input id="shapeWidth" type="number" value="180" min="10" />
+              <input id="shapeHeight" type="number" value="80" min="10" />
+            </div>
+            <button id="addShapeBtn" class="powerstamp-btn powerstamp-btn-muted powerstamp-full">図形配置</button>
+          </div>
+        </details>
+
+        <details>
+          <summary>画像</summary>
+          <div class="powerstamp-stack">
+            <div class="powerstamp-row">
+              <input id="stampImageInput" type="file" accept="image/*" />
+              <input id="imageScale" type="number" value="100" min="10" title="%" />
+            </div>
+            <button id="addImageBtn" class="powerstamp-btn powerstamp-btn-muted powerstamp-full">画像配置</button>
+          </div>
+        </details>
+
+        <div id="postalCodePanel" class="powerstamp-postal hidden">
+          <h3>封筒の郵便番号（7桁）</h3>
+          <div class="powerstamp-row">
+            <input id="postalCodeInput" type="text" inputmode="numeric" maxlength="7" placeholder="1234567" />
+            <button id="applyPostalCodeBtn" class="powerstamp-btn powerstamp-btn-success">反映</button>
           </div>
         </div>
-      </details>
-    </div>
-  </div>
+      </section>
 
-  <details class="powerstamp-collapsible bg-white rounded-lg shadow-sm border border-slate-200">
-    <summary>社員名簿PLUS連携</summary>
-    <div class="powerstamp-collapsible-body">
-      <div class="flex flex-wrap items-end gap-3">
-        <div class="w-64 max-w-full">
-          <label class="block text-sm font-medium mb-1">検索</label>
-          <input id="plusEmployeeSearchInput" type="text" placeholder="社員番号・氏名・カナ" class="w-full border rounded px-2 py-1 text-sm" />
-        </div>
-        <button id="plusEmployeeSearchBtn" class="px-3 py-2 rounded bg-cyan-700 text-white hover:bg-cyan-800 text-sm">検索</button>
-        <div class="min-w-[18rem] flex-1">
-          <label class="block text-sm font-medium mb-1">従業員</label>
-          <select id="plusEmployeeSelect" class="w-full border rounded px-2 py-2 text-sm">
+      <details class="powerstamp-panel powerstamp-collapsible">
+        <summary>社員名簿PLUS連携</summary>
+        <div class="powerstamp-stack">
+          <input id="plusEmployeeSearchInput" type="text" placeholder="社員番号・氏名・カナ" />
+          <button id="plusEmployeeSearchBtn" class="powerstamp-btn powerstamp-btn-muted powerstamp-full">検索</button>
+          <select id="plusEmployeeSelect">
             <option value="">従業員を検索してください</option>
           </select>
+          <button id="applyPlusEmployeeBtn" class="powerstamp-btn powerstamp-btn-success powerstamp-full">封筒へ反映</button>
+          <p id="plusEmployeeStatus"></p>
         </div>
-        <button id="applyPlusEmployeeBtn" class="px-3 py-2 rounded bg-cyan-600 text-white hover:bg-cyan-700 text-sm">封筒へ反映</button>
-        <p id="plusEmployeeStatus" class="text-xs text-gray-500 min-w-[12rem]"></p>
-      </div>
-    </div>
-  </details>
+      </details>
+    </aside>
 
-  <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 grid lg:grid-cols-4 gap-4">
-    <div class="space-y-3">
-      <h2 class="font-semibold">テキスト追加</h2>
-      <input id="textContent" type="text" value="入力文字" class="w-full border rounded px-2 py-1" />
-      <div class="flex gap-2">
-        <input id="textSize" type="number" value="32" min="8" class="w-full border rounded px-2 py-1" />
-        <input id="textColor" type="color" value="#1f2937" class="w-16 h-10 border rounded" />
+    <main id="stageScroll" class="powerstamp-stage-scroll">
+      <div id="stageViewport" class="relative mx-auto" style="width:1200px;height:1700px;">
+        <div id="stage" class="relative border border-dashed border-gray-400 bg-white" style="width:1200px;height:1700px; transform-origin: top left;">
+          <img id="backgroundLayer" class="absolute inset-0 w-full h-full object-fill pointer-events-none select-none" alt="背景" />
+          <div id="guideLayer" class="absolute inset-0 pointer-events-none"></div>
+          <div id="overlayLayer" class="absolute inset-0"></div>
+          <div id="anchorMarker" class="absolute hidden" style="width:14px;height:14px;border:2px solid #ef4444;border-radius:9999px;transform:translate(-7px,-7px);pointer-events:none;z-index:20;"></div>
+        </div>
       </div>
-      <select id="textFontFamily" class="w-full border rounded px-2 py-1 text-sm">
-        <option value="'Noto Sans JP', sans-serif">Noto Sans JP</option>
-        <option value="'Yu Gothic', 'YuGothic', sans-serif">Yu Gothic</option>
-        <option value="'Meiryo', sans-serif">Meiryo</option>
-        <option value="'MS PGothic', 'MS Gothic', sans-serif">MS Gothic</option>
-        <option value="serif">Serif</option>
-        <option value="sans-serif">Sans Serif</option>
-      </select>
-      <label class="flex items-center gap-2 text-sm text-gray-700">
-        <input id="textVertical" type="checkbox" />
-        縦書きで追加
-      </label>
-      <button id="toggleSelectedTextDirectionBtn" class="w-full px-3 py-2 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm">選択中テキストの縦横を切替</button>
-      <button id="addTextBtn" class="w-full px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800">テキスト配置</button>
-    </div>
+    </main>
 
-    <div class="space-y-3">
-      <h2 class="font-semibold">図形追加</h2>
-      <div class="flex gap-2">
-        <select id="shapeType" class="w-full border rounded px-2 py-1">
-          <option value="rect">四角形</option>
-          <option value="ellipse">楕円</option>
+    <aside class="powerstamp-sidebar powerstamp-sidebar-right">
+      <section id="selectedPropertiesPanel" class="powerstamp-panel">
+        <h2>選択中の編集</h2>
+        <p id="selectedStampType" class="powerstamp-muted-text">未選択</p>
+        <div class="powerstamp-grid-2">
+          <label class="powerstamp-field">X<input id="selectedXInput" type="number" step="0.1" disabled></label>
+          <label class="powerstamp-field">Y<input id="selectedYInput" type="number" step="0.1" disabled></label>
+          <label class="powerstamp-field">W<input id="selectedWidthInput" type="number" min="1" step="0.1" disabled></label>
+          <label class="powerstamp-field">H<input id="selectedHeightInput" type="number" min="1" step="0.1" disabled></label>
+        </div>
+        <textarea id="selectedTextContentInput" rows="3" disabled></textarea>
+        <div class="powerstamp-row">
+          <input id="selectedFontSizeInput" type="number" min="8" disabled>
+          <input id="selectedTextColorInput" type="color" disabled>
+        </div>
+        <select id="selectedFontFamilyInput" disabled>
+          <option value="'Noto Sans JP', sans-serif">Noto Sans JP</option>
+          <option value="'Yu Gothic', 'YuGothic', sans-serif">Yu Gothic</option>
+          <option value="'Meiryo', sans-serif">Meiryo</option>
+          <option value="'MS PGothic', 'MS Gothic', sans-serif">MS Gothic</option>
+          <option value="serif">Serif</option>
+          <option value="sans-serif">Sans Serif</option>
         </select>
-        <input id="shapeStroke" type="color" value="#2563eb" class="w-16 h-10 border rounded" />
-        <input id="shapeFill" type="color" value="#93c5fd" class="w-16 h-10 border rounded" />
-      </div>
-      <div class="flex gap-2">
-        <input id="shapeWidth" type="number" value="180" min="10" class="w-full border rounded px-2 py-1" />
-        <input id="shapeHeight" type="number" value="80" min="10" class="w-full border rounded px-2 py-1" />
-      </div>
-      <button id="addShapeBtn" class="w-full px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800">図形配置</button>
-    </div>
+        <button id="toggleSelectedTextDirectionBtn" class="powerstamp-btn powerstamp-btn-muted powerstamp-full">縦横切替</button>
+      </section>
 
-    <div class="space-y-3 lg:col-span-2">
-      <h2 class="font-semibold">画像スタンプ追加</h2>
-      <div class="flex gap-2">
-        <input id="stampImageInput" type="file" accept="image/*" class="w-full text-sm" />
-        <input id="imageScale" type="number" value="100" min="10" class="w-24 border rounded px-2 py-1" title="%" />
-      </div>
-      <button id="addImageBtn" class="px-3 py-2 rounded bg-slate-700 text-white hover:bg-slate-800">画像配置</button>
-
-      <div id="postalCodePanel" class="pt-2 border-t border-gray-200 hidden">
-        <h3 class="font-medium text-sm mb-2">封筒向け 郵便番号（7桁）</h3>
-        <div class="flex gap-2 items-center">
-          <input id="postalCodeInput" type="text" inputmode="numeric" maxlength="7" placeholder="1234567" class="w-40 border rounded px-2 py-1 text-sm" />
-          <button id="applyPostalCodeBtn" class="px-3 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-sm">郵便番号を反映</button>
+      <section class="powerstamp-panel">
+        <h2>出力サイズ</h2>
+        <div class="powerstamp-radio-list">
+          <label><input type="radio" name="exportSizeMode" value="source"> 元サイズ</label>
+          <label><input type="radio" name="exportSizeMode" value="canvas"> キャンバス</label>
+          <label><input type="radio" name="exportSizeMode" value="paper" checked> 用紙指定</label>
         </div>
-        <p class="text-xs text-gray-500 mt-1">封筒テンプレート読込後、この欄の数字を変更するだけで郵便番号欄に自動配置します。</p>
-      </div>
+        <div class="powerstamp-grid-2">
+          <select id="paperSizeSelect">
+            <option value="A4">A4</option>
+            <option value="A3">A3</option>
+            <option value="A5">A5</option>
+            <option value="A6">A6</option>
+            <option value="B4">B4</option>
+            <option value="B5">B5</option>
+            <option value="NAGA3">長3封筒</option>
+            <option value="KAKU2">角2封筒</option>
+            <option value="CUSTOM">カスタム</option>
+          </select>
+          <select id="paperOrientation">
+            <option value="portrait">縦</option>
+            <option value="landscape">横</option>
+          </select>
+        </div>
+        <div class="powerstamp-grid-2">
+          <label class="paper-custom-field powerstamp-field hidden">W(mm)<input id="customPaperWidthMm" type="number" value="210" min="10" max="600" step="0.1" /></label>
+          <label class="paper-custom-field powerstamp-field hidden">H(mm)<input id="customPaperHeightMm" type="number" value="297" min="10" max="600" step="0.1" /></label>
+        </div>
+        <label class="powerstamp-field">DPI<input id="paperDpiInput" type="number" value="300" min="72" max="1200" /></label>
+      </section>
 
-      <p class="text-xs text-gray-500">選択中スタンプはドラッグ移動、Deleteで削除。Ctrl/Cmd + C でコピー、Ctrl/Cmd + V で貼り付けできます。</p>
-    </div>
-  </div>
-
-  <div id="stageScroll" class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 overflow-auto powerstamp-stage-scroll">
-    <div id="stageViewport" class="relative mx-auto" style="width:1200px;height:1700px;">
-      <div id="stage" class="relative border border-dashed border-gray-400 bg-white" style="width:1200px;height:1700px; transform-origin: top left;">
-        <img id="backgroundLayer" class="absolute inset-0 w-full h-full object-fill pointer-events-none select-none" alt="背景" />
-        <div id="guideLayer" class="absolute inset-0 pointer-events-none"></div>
-        <div id="overlayLayer" class="absolute inset-0"></div>
-        <div id="anchorMarker" class="absolute hidden" style="width:14px;height:14px;border:2px solid #ef4444;border-radius:9999px;transform:translate(-7px,-7px);pointer-events:none;z-index:20;"></div>
-      </div>
-    </div>
+      <details class="powerstamp-panel powerstamp-collapsible">
+        <summary>補正</summary>
+        <div class="powerstamp-stack">
+          <label class="powerstamp-field">画面外の色<input id="outsideAreaColor" type="color" value="#f3f4f6" /></label>
+          <button id="outsideAreaColorResetBtn" class="powerstamp-btn powerstamp-btn-muted powerstamp-full">色をリセット</button>
+          <div class="powerstamp-grid-2">
+            <label class="powerstamp-field">X<input id="calibOffsetX" type="number" value="0" step="0.1"></label>
+            <label class="powerstamp-field">Y<input id="calibOffsetY" type="number" value="0" step="0.1"></label>
+            <label class="powerstamp-field">SX%<input id="calibScaleX" type="number" value="100" step="0.1"></label>
+            <label class="powerstamp-field">SY%<input id="calibScaleY" type="number" value="100" step="0.1"></label>
+          </div>
+          <label class="powerstamp-check"><input id="applyCalibrationOnExport" type="checkbox"><span>出力に補正を適用</span></label>
+          <label class="powerstamp-check"><input id="useAnchorOrigin" type="checkbox"><span>左上基準を使う</span></label>
+          <button id="setAnchorBtn" class="powerstamp-btn powerstamp-btn-muted powerstamp-full">基準位置を設定</button>
+          <button id="calibResetBtn" class="powerstamp-btn powerstamp-btn-muted powerstamp-full">補正リセット</button>
+          <span id="anchorStatus" class="powerstamp-muted-text">未設定</span>
+        </div>
+      </details>
+    </aside>
   </div>
 </div>
 
 <link rel="stylesheet" href="{{ url_for('static', filename='css/powerstamp.css') }}">
-<script src="{{ url_for('static', filename='js/powerstamp.js') }}?v=20260423b" defer></script>
+<script src="{{ url_for('static', filename='js/powerstamp.js') }}?v=20260516a" defer></script>
 {% endblock %}
