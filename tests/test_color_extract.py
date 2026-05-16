@@ -238,6 +238,25 @@ def test_auto_tune_returns_suggestion(client):
     assert 0 <= data["suggested_tolerance"] <= 120
 
 
+@pytest.mark.parametrize(
+    "preset",
+    ["stamp_red", "blue_pen", "highlighter", "keep_black_text", "whiten_background"],
+)
+def test_preview_accepts_supported_presets(client, preset):
+    payload = {
+        "mode": "exclude",
+        "preset": preset,
+        "target_colors": json.dumps(["#ff0000"]),
+        "tolerance": "30",
+        "transparent_output": "true",
+        "file": (io.BytesIO(_make_sample_png_bytes()), f"{preset}.png"),
+    }
+    response = client.post("/tools/color_extract/preview", data=payload, content_type="multipart/form-data")
+
+    assert response.status_code == 200
+    assert response.content_type.startswith("image/png")
+
+
 def test_stamp_red_preset_can_reduce_red_noise(client):
     img = Image.new("RGBA", (30, 20), (255, 255, 255, 255))
     for x in range(5, 25):

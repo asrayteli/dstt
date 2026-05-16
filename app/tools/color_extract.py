@@ -165,8 +165,16 @@ def _parse_settings(
         )
 
     preset = (form.get("preset") or "none").strip().lower()
-    if preset not in {"none", "stamp_red"}:
-        raise ValueError("preset は none / stamp_red を指定してください。")
+    supported_presets = {
+        "none",
+        "stamp_red",
+        "blue_pen",
+        "highlighter",
+        "keep_black_text",
+        "whiten_background",
+    }
+    if preset not in supported_presets:
+        raise ValueError("preset の指定が不正です。")
 
     color_metric = (form.get("color_metric") or "deltae").strip().lower()
     if color_metric not in {"deltae", "rgb"}:

@@ -247,6 +247,42 @@ def _apply_preset_options(
             min(lightness_max, 240),
             max(min_component_area, 30),
         )
+    if preset == "blue_pen":
+        return (
+            True,
+            True,
+            max(saturation_min, 30),
+            max(lightness_min, 15),
+            min(lightness_max, 245),
+            max(min_component_area, 20),
+        )
+    if preset == "highlighter":
+        return (
+            True,
+            True,
+            max(saturation_min, 25),
+            max(lightness_min, 110),
+            lightness_max,
+            max(min_component_area, 20),
+        )
+    if preset == "keep_black_text":
+        return (
+            enable_preprocess,
+            True,
+            saturation_min,
+            lightness_min,
+            min(lightness_max, 120),
+            max(min_component_area, 8),
+        )
+    if preset == "whiten_background":
+        return (
+            enable_preprocess,
+            True,
+            saturation_min,
+            max(lightness_min, 170),
+            lightness_max,
+            min_component_area,
+        )
     raise ValueError("Unsupported preset")
 
 
@@ -754,7 +790,6 @@ def suggest_tolerance(
             "p20": float(p20),
         },
     }
-
 
 
 
