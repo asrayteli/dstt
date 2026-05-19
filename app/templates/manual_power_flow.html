@@ -1,0 +1,1383 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  html { scroll-behavior: smooth; }
+
+  /* ===== Sticky nav ===== */
+  .mfp-nav {
+    position: sticky; top: 0; z-index: 40;
+    background: #fff; border-bottom: 2px solid #e2e8f0;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .mfp-nav::-webkit-scrollbar { display: none; }
+  .mfp-nav-inner {
+    display: flex; min-width: max-content;
+    padding: 0 12px; max-width: 960px; margin: 0 auto;
+  }
+  .mfp-nav-link {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 12px 14px; font-size: 13px; font-weight: 700;
+    color: #64748b; border-bottom: 3px solid transparent;
+    text-decoration: none; white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .mfp-nav-link:hover { color: #0f766e; }
+  .mfp-nav-link.mfp-active { color: #0f766e; border-bottom-color: #0f766e; }
+
+  /* ===== Layout ===== */
+  .mfp-wrap { max-width: 960px; margin: 0 auto; padding: 0 16px 80px; }
+  .mfp-section { padding-top: 52px; }
+  .mfp-section-header {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 24px; padding-bottom: 16px;
+    border-bottom: 2px solid #f1f5f9;
+  }
+  .mfp-section-icon {
+    display: flex; align-items: center; justify-content: center;
+    width: 52px; height: 52px; border-radius: 16px;
+    font-size: 26px; flex-shrink: 0;
+  }
+  .mfp-section-title { font-size: 22px; font-weight: 900; color: #0f172a; margin: 0 0 4px; }
+  .mfp-section-desc  { font-size: 14px; color: #64748b; margin: 0; line-height: 1.6; }
+
+  /* ===== Cards ===== */
+  .mfp-card {
+    background: #fff; border: 1px solid #e2e8f0;
+    border-radius: 16px; padding: 22px 24px;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+    margin-bottom: 12px;
+  }
+  .mfp-card-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 10px; display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ===== Feature grid ===== */
+  .mfp-feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 12px;
+  }
+  .mfp-feat-card {
+    background: #fff; border: 1px solid #e2e8f0;
+    border-radius: 14px; padding: 18px 14px;
+    text-align: center; transition: box-shadow 0.15s;
+  }
+  .mfp-feat-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,0.10); }
+  .mfp-feat-emoji { font-size: 30px; line-height: 1; margin-bottom: 8px; }
+  .mfp-feat-name { font-size: 13px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+  .mfp-feat-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  /* ===== Step cards ===== */
+  .mfp-step {
+    display: flex; gap: 16px; background: #fff;
+    border: 1px solid #e2e8f0; border-radius: 16px;
+    padding: 20px; margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(15,23,42,0.04);
+  }
+  .mfp-step-badge {
+    display: flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; border-radius: 50%;
+    font-size: 16px; font-weight: 900; flex-shrink: 0;
+    background: linear-gradient(135deg, #0f766e, #0d9488); color: #fff;
+  }
+  .mfp-step-body { flex: 1; min-width: 0; }
+  .mfp-step-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .mfp-step-text { font-size: 14px; color: #475569; line-height: 1.7; margin: 0; }
+
+  /* ===== Callouts ===== */
+  .mfp-tip {
+    background: #f0fdf4; border-left: 4px solid #22c55e;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #166534;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mfp-warn {
+    background: #fff7ed; border-left: 4px solid #f97316;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #9a3412;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mfp-note {
+    background: #eff6ff; border-left: 4px solid #3b82f6;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #1e40af;
+    line-height: 1.65; margin: 8px 0;
+  }
+
+  /* ===== Tags ===== */
+  .mfp-tag {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700;
+  }
+  .mfp-tag-green  { background: #dcfce7; color: #16a34a; }
+  .mfp-tag-blue   { background: #dbeafe; color: #1d4ed8; }
+  .mfp-tag-orange { background: #ffedd5; color: #ea580c; }
+  .mfp-tag-red    { background: #fee2e2; color: #dc2626; }
+  .mfp-tag-purple { background: #f3e8ff; color: #7e22ce; }
+  .mfp-tag-yellow { background: #fef9c3; color: #a16207; }
+  .mfp-tag-gray   { background: #f1f5f9; color: #475569; }
+  .mfp-tag-teal   { background: #ccfbf1; color: #0f766e; }
+
+  /* ===== Bullet list ===== */
+  .mfp-ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+  .mfp-ul li {
+    display: flex; gap: 8px; align-items: flex-start;
+    font-size: 14px; color: #334155; line-height: 1.6;
+  }
+  .mfp-ul li::before {
+    content: "▶"; color: #0f766e; font-size: 10px;
+    margin-top: 4px; flex-shrink: 0;
+  }
+
+  /* ===== Option table ===== */
+  .mfp-opt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .mfp-opt-table th {
+    background: #f8fafc; padding: 10px 12px;
+    text-align: left; font-size: 12px; font-weight: 700;
+    color: #64748b; border-bottom: 1px solid #e2e8f0;
+  }
+  .mfp-opt-table td {
+    padding: 10px 12px; border-bottom: 1px solid #f1f5f9;
+    color: #334155; vertical-align: top; line-height: 1.6;
+  }
+  .mfp-opt-table td:first-child { font-weight: 700; color: #0f172a; white-space: nowrap; }
+  .mfp-opt-table tr:last-child td { border-bottom: 0; }
+
+  /* ===== Kbd ===== */
+  .mfp-kbd {
+    display: inline-block; background: #f1f5f9;
+    border: 1px solid #cbd5e1; border-bottom: 2px solid #94a3b8;
+    border-radius: 5px; padding: 2px 7px; font-family: monospace;
+    font-size: 12px; color: #1e293b; white-space: nowrap;
+  }
+
+  /* ===== Divider ===== */
+  .mfp-divider { border: 0; border-top: 1px solid #f1f5f9; margin: 18px 0; }
+
+  /* ===== Grid 2col / 3col ===== */
+  .mfp-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .mfp-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 600px) {
+    .mfp-grid2, .mfp-grid3 { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    .mfp-grid3 { grid-template-columns: 1fr 1fr; }
+  }
+
+  /* ===== Accordion ===== */
+  .mfp-acc-item {
+    border: 1px solid #e2e8f0; border-radius: 13px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .mfp-acc-trigger {
+    width: 100%; text-align: left; padding: 15px 18px;
+    background: #fff; border: 0; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 700; color: #0f172a;
+    line-height: 1.5; gap: 12px;
+  }
+  .mfp-acc-trigger:hover { background: #f8fafc; }
+  .mfp-acc-q { flex: 1; text-align: left; }
+  .mfp-acc-arrow { font-size: 11px; color: #94a3b8; transition: transform 0.2s; flex-shrink: 0; }
+  .mfp-acc-item.mfp-open .mfp-acc-arrow { transform: rotate(180deg); }
+  .mfp-acc-body { display: none; padding: 2px 18px 15px; font-size: 14px; color: #475569; line-height: 1.75; }
+  .mfp-acc-item.mfp-open .mfp-acc-body { display: block; }
+
+  /* ===== Modal ===== */
+  .mfp-modal-ov {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.52);
+    z-index: 200; display: flex; align-items: center;
+    justify-content: center; padding: 16px;
+  }
+  .mfp-modal-ov.mfp-hidden { display: none !important; }
+  .mfp-modal-box {
+    background: #fff; border-radius: 20px;
+    max-width: 600px; width: 100%;
+    max-height: 88vh; overflow-y: auto;
+    padding: 28px;
+    box-shadow: 0 28px 56px rgba(0,0,0,0.22);
+    animation: mfp-modal-in 0.18s ease;
+  }
+  @keyframes mfp-modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .mfp-modal-head {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; margin-bottom: 18px;
+  }
+  .mfp-modal-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; line-height: 1.4; }
+  .mfp-modal-close {
+    border: 0; background: #f1f5f9; border-radius: 9px;
+    width: 34px; height: 34px; cursor: pointer;
+    font-size: 16px; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+    color: #64748b; margin-left: 12px;
+  }
+  .mfp-modal-close:hover { background: #e2e8f0; }
+
+  /* ===== Popup button ===== */
+  .mfp-popup-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px; border: 1.5px solid #cbd5e1;
+    border-radius: 9px; background: #f8fafc;
+    font-size: 12px; font-weight: 700; color: #0f766e;
+    cursor: pointer; margin: 4px 0; transition: background 0.15s;
+  }
+  .mfp-popup-btn:hover { background: #f0fdf4; border-color: #6ee7b7; }
+
+  /* ===== Hero ===== */
+  .mfp-hero-bar {
+    background: linear-gradient(135deg, #0f766e 0%, #0d9488 48%, #0369a1 100%);
+    padding: 40px 24px 36px; text-align: center; color: #fff;
+  }
+  .mfp-hero-bar h1 { font-size: 34px; font-weight: 900; margin: 0 0 6px; }
+  .mfp-hero-bar p { font-size: 15px; opacity: 0.9; margin: 0 0 22px; }
+  .mfp-hero-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .mfp-hero-btn {
+    padding: 11px 22px; border-radius: 12px;
+    font-size: 14px; font-weight: 700; text-decoration: none;
+    border: 2px solid #fff; transition: opacity 0.15s;
+  }
+  .mfp-hero-btn:hover { opacity: 0.85; }
+  .mfp-hero-btn-primary  { background: #fff; color: #0f766e; }
+  .mfp-hero-btn-secondary { background: transparent; color: #fff; }
+
+  /* ===== Screen layout diagram ===== */
+  .pf-screen-diagram {
+    border: 2px solid #e2e8f0; border-radius: 14px;
+    overflow: hidden; font-size: 12px; font-weight: 700;
+    margin: 12px 0;
+  }
+  .pf-screen-toolbar {
+    background: #f1f5f9; border-bottom: 1px solid #e2e8f0;
+    padding: 10px 14px; color: #334155; text-align: center;
+  }
+  .pf-screen-body { display: flex; }
+  .pf-screen-left {
+    background: #f8fafc; border-right: 1px solid #e2e8f0;
+    padding: 12px; width: 90px; flex-shrink: 0;
+    color: #475569; text-align: center; font-size: 11px;
+  }
+  .pf-screen-canvas {
+    flex: 1; background: #fbfcfe; padding: 12px;
+    color: #94a3b8; text-align: center; font-size: 11px;
+    min-height: 80px; display: flex; align-items: center; justify-content: center;
+  }
+  .pf-screen-right {
+    background: #f8fafc; border-left: 1px solid #e2e8f0;
+    padding: 12px; width: 90px; flex-shrink: 0;
+    color: #475569; text-align: center; font-size: 11px;
+  }
+  .pf-screen-statusbar {
+    background: #f1f5f9; border-top: 1px solid #e2e8f0;
+    padding: 6px 14px; color: #64748b; text-align: center; font-size: 11px;
+  }
+
+  /* ===== Shape grid ===== */
+  .pf-shape-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .pf-shape-cell {
+    border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 10px 12px; background: #fff;
+    text-align: center;
+  }
+  .pf-shape-icon { font-size: 11px; font-weight: 900; color: #334155; margin-bottom: 3px; }
+  .pf-shape-name { font-size: 12px; color: #64748b; line-height: 1.4; }
+
+  /* ===== Theme grid ===== */
+  .pf-theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 10px; margin-top: 10px;
+  }
+  .pf-theme-card {
+    border-radius: 12px; overflow: hidden;
+    border: 2px solid #e2e8f0; cursor: default;
+    font-size: 12px; font-weight: 700; text-align: center;
+  }
+  .pf-theme-preview { height: 40px; }
+  .pf-theme-label { padding: 6px; color: #334155; }
+
+  /* ===== Sublist ===== */
+  .mfp-sublist { padding-left: 18px; margin: 6px 0; }
+  .mfp-sublist li { font-size: 13.5px; color: #475569; margin: 4px 0; line-height: 1.6; }
+
+  /* ===== Format badge ===== */
+  .mfp-fmt-row {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    align-items: center; font-size: 13.5px; color: #475569; padding: 8px 0;
+  }
+  .mfp-fmt-badge {
+    background: #f1f5f9; border: 1px solid #e2e8f0;
+    border-radius: 7px; padding: 3px 9px;
+    font-size: 12px; font-weight: 700; color: #0f172a; font-family: monospace;
+  }
+</style>
+
+<!-- ===== Hero ===== -->
+<div class="mfp-hero-bar">
+  <h1>🔀 PowerFlow マニュアル</h1>
+  <p>業務フロー・手順書・判断分岐図をブラウザだけで高品質に作成。外部サービス不要。</p>
+  <div class="mfp-hero-btns">
+    <a href="/tools/power_flow" class="mfp-hero-btn mfp-hero-btn-primary">ツールを開く</a>
+    <a href="/" class="mfp-hero-btn mfp-hero-btn-secondary">ダッシュボードへ戻る</a>
+  </div>
+</div>
+
+<!-- ===== Sticky nav ===== -->
+<div class="mfp-nav" id="mfpNav">
+  <div class="mfp-nav-inner">
+    <a href="#overview"  class="mfp-nav-link" data-section="overview">📋 概要</a>
+    <a href="#screen"    class="mfp-nav-link" data-section="screen">🖥️ 画面の見方</a>
+    <a href="#shapes"    class="mfp-nav-link" data-section="shapes">🔷 図形</a>
+    <a href="#connectors" class="mfp-nav-link" data-section="connectors">➡️ コネクタ</a>
+    <a href="#edit"      class="mfp-nav-link" data-section="edit">✏️ 編集・操作</a>
+    <a href="#templates" class="mfp-nav-link" data-section="templates">📂 テンプレート</a>
+    <a href="#design"    class="mfp-nav-link" data-section="design">🎨 デザイン</a>
+    <a href="#swimlane"  class="mfp-nav-link" data-section="swimlane">🏊 スイムレーン</a>
+    <a href="#save"      class="mfp-nav-link" data-section="save">💾 保存・出力</a>
+    <a href="#shortcuts" class="mfp-nav-link" data-section="shortcuts">⌨️ ショートカット</a>
+    <a href="#faq"       class="mfp-nav-link" data-section="faq">❓ よくある質問</a>
+  </div>
+</div>
+
+<!-- ===== Main content ===== -->
+<div class="mfp-wrap">
+
+  <!-- ========== 概要 ========== -->
+  <section id="overview" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#ccfbf1">📋</div>
+      <div>
+        <h2 class="mfp-section-title">PowerFlow でできること</h2>
+        <p class="mfp-section-desc">業務フロー・判断分岐・手順書・システム処理などのフローチャートを、外部サービスを使わずDSTT内で作成・保存・出力できます。</p>
+      </div>
+    </div>
+
+    <div class="mfp-feat-grid">
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🔷</div>
+        <div class="mfp-feat-name">豊富な図形</div>
+        <div class="mfp-feat-desc">18種の標準図形＋事故対応向け特殊図形</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">➡️</div>
+        <div class="mfp-feat-name">多彩なコネクタ</div>
+        <div class="mfp-feat-desc">直線・折れ線・曲線・点線・ラベル付き</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">📂</div>
+        <div class="mfp-feat-name">テンプレート</div>
+        <div class="mfp-feat-desc">事故対応・スイムレーン・判断分岐など4種</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🏊</div>
+        <div class="mfp-feat-name">スイムレーン</div>
+        <div class="mfp-feat-desc">担当者・部署・システム別のレーン管理</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🎨</div>
+        <div class="mfp-feat-name">5テーマ</div>
+        <div class="mfp-feat-desc">標準・シンプル・モノクロ・注意喚起・ダーク</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🗺️</div>
+        <div class="mfp-feat-name">ミニマップ</div>
+        <div class="mfp-feat-desc">大きな図の全体像を確認しながら作業</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">💾</div>
+        <div class="mfp-feat-name">ブラウザ保存</div>
+        <div class="mfp-feat-desc">ログイン不要でブラウザ内に自動保存</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">📤</div>
+        <div class="mfp-feat-name">PNG/SVG/PDF/JSON</div>
+        <div class="mfp-feat-desc">4形式で出力。選択範囲のみも可能</div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px">
+      <table class="mfp-opt-table">
+        <thead><tr><th>項目</th><th>仕様</th></tr></thead>
+        <tbody>
+          <tr><td>保存場所</td><td>ブラウザのlocalStorage（同じブラウザ・端末で利用可）</td></tr>
+          <tr><td>ファイル形式</td><td>PowerFlow専用JSON（<code style="font-family:monospace;font-size:12px">.powerflow.json</code>）</td></tr>
+          <tr><td>出力形式</td><td>PNG・SVG・PDF・JSON（全体/選択範囲/現在表示範囲）</td></tr>
+          <tr><td>キャンバスサイズ</td><td>A4縦・A4横・A3縦・A3横・B5縦・B5横から選択可能</td></tr>
+          <tr><td>グリッドサイズ</td><td>8 / 16 / 24 / 32 / 48 px から選択</td></tr>
+          <tr><td>Undo/Redo履歴</td><td>最大80操作</td></tr>
+          <tr><td>外部サービス依存</td><td>なし。すべてDSTT内・ブラウザ内で完結</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== 画面の見方 ========== -->
+  <section id="screen" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#ccfbf1">🖥️</div>
+      <div>
+        <h2 class="mfp-section-title">画面の見方（編集画面）</h2>
+        <p class="mfp-section-desc">起動画面で「新規作成」またはファイルを選択すると、5エリアで構成される編集画面が開きます。</p>
+      </div>
+    </div>
+
+    <!-- 画面レイアウト図 -->
+    <div class="pf-screen-diagram">
+      <div class="pf-screen-toolbar">🔼 上部ツールバー — 新規・保存・Undo/Redo・ズーム・整列・テーマ・出力・印刷</div>
+      <div class="pf-screen-body">
+        <div class="pf-screen-left">
+          ← 左<br>サイドバー<br><br>図形<br>パレット<br>/<br>テンプレート
+        </div>
+        <div class="pf-screen-canvas">
+          🗺️ メインキャンバス<br><br>フローチャートを描く作業エリア<br>グリッド・スナップ・ミニマップ
+        </div>
+        <div class="pf-screen-right">
+          右 →<br>サイドバー<br><br>インスペクター<br>（選択中<br>オブジェクト<br>の設定）
+        </div>
+      </div>
+      <div class="pf-screen-statusbar">🔽 下部ステータスバー — 選択数・ズーム率・保存状態・操作ヒント</div>
+    </div>
+
+    <div class="mfp-grid2" style="margin-top:12px">
+      <div class="mfp-card" style="margin:0">
+        <div class="mfp-card-title">🔼 上部ツールバー</div>
+        <ul class="mfp-ul">
+          <li>ツール選択（選択・線・パン）</li>
+          <li>グリッド・スナップのオン/オフ</li>
+          <li>タイトル入力</li>
+          <li>Undo / Redo（履歴最大80）</li>
+          <li>ズーム（スライダー・プリセット）</li>
+          <li>自動整列（縦/横/等間隔）</li>
+          <li>テーマ切替・スタイルコピー/貼り付け</li>
+          <li>スイムレーン追加</li>
+          <li>警告チェック</li>
+          <li>出力メニュー・印刷</li>
+          <li>保存・開く</li>
+        </ul>
+      </div>
+      <div class="mfp-card" style="margin:0">
+        <div class="mfp-card-title">🔷 左サイドバー（図形パレット）</div>
+        <ul class="mfp-ul">
+          <li>基本・特殊・その他の3カテゴリに図形が並ぶ</li>
+          <li>クリックすると最後にクリックした位置またはキャンバス中央付近に図形を追加</li>
+          <li>テンプレートタブでテンプレートを選んで開ける</li>
+        </ul>
+        <hr class="mfp-divider">
+        <div class="mfp-card-title">🔧 右サイドバー（インスペクター）</div>
+        <ul class="mfp-ul">
+          <li>図形または線を選択すると内容が変わる</li>
+          <li>テキスト・色・サイズ・枠線・影の設定</li>
+          <li>コネクタのスタイル・ラベルの設定</li>
+          <li>表示順（最前面/最背面）・ロック</li>
+          <li>図形の検索機能</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">🗺️ ミニマップ</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">キャンバス右下に小さな全体図が表示されます。大きなフローチャートでも全体の位置を把握しながら作業できます。</p>
+      <ul class="mfp-ul">
+        <li>ミニマップ上でクリックまたはドラッグすると、その位置へキャンバスが移動します</li>
+        <li>現在の表示範囲が青い枠で示されます</li>
+        <li>ミニマップは常に表示されます（非表示設定はありません）</li>
+      </ul>
+    </div>
+
+    <!-- 起動画面 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">🚀 起動画面（ランチャー）の操作</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">PowerFlowを開くと最初に表示される起動画面から、作業を開始する方法を選びます。</p>
+      <table class="mfp-opt-table">
+        <thead><tr><th>操作</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr><td>新規作成</td><td>空白のキャンバスで編集画面が開きます</td></tr>
+          <tr><td>保存したものを開く</td><td>ブラウザに保存済みのフロー一覧から選んで開きます</td></tr>
+          <tr><td>ファイルを読み込む</td><td><code style="font-family:monospace;font-size:12px">.powerflow.json</code>ファイルを選択して編集画面で開きます</td></tr>
+          <tr><td>更新ボタン</td><td>ブラウザ保存一覧を最新状態に更新します</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-note" style="margin-top:10px">
+        ✅ 保存済みのフローにはタイトルと最終更新日時が表示されます。名前変更・複製・削除も一覧から操作できます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 図形 ========== -->
+  <section id="shapes" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#ccfbf1">🔷</div>
+      <div>
+        <h2 class="mfp-section-title">図形の種類と操作</h2>
+        <p class="mfp-section-desc">PowerFlowには18種類の図形があります。左サイドバーの図形パレットから選んでキャンバスに追加します。</p>
+      </div>
+    </div>
+
+    <!-- 図形カタログ -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">
+        🔷 基本図形カタログ
+        <button class="mfp-popup-btn" onclick="openModal('modalShapeCatalog')" style="margin-left:auto">全図形一覧を見る ▼</button>
+      </div>
+      <div class="pf-shape-grid">
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">⬭ 楕円</div>
+          <div class="pf-shape-name">開始/終了<br><span class="mfp-tag mfp-tag-green">startEnd</span></div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">▭ 長方形</div>
+          <div class="pf-shape-name">処理<br><span class="mfp-tag mfp-tag-blue">process</span></div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">◇ ひし形</div>
+          <div class="pf-shape-name">分岐（判断）<br><span class="mfp-tag mfp-tag-yellow">decision</span></div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">▱ 平行四辺形</div>
+          <div class="pf-shape-name">入出力<br><span class="mfp-tag mfp-tag-gray">io</span></div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">🗃️</div>
+          <div class="pf-shape-name">データ<br><span class="mfp-tag mfp-tag-gray">data</span></div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">📝 角丸付箋</div>
+          <div class="pf-shape-name">注記<br><span class="mfp-tag mfp-tag-yellow">note</span></div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">⚠️ ! 赤枠</div>
+          <div class="pf-shape-name">注意<br><span class="mfp-tag mfp-tag-red">warning</span></div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">TEL アイコン</div>
+          <div class="pf-shape-name">電話<br><span class="mfp-tag mfp-tag-blue">phone</span></div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">@ アイコン</div>
+          <div class="pf-shape-name">メール<br><span class="mfp-tag mfp-tag-blue">mail</span></div>
+        </div>
+      </div>
+      <hr class="mfp-divider">
+      <div style="font-size:13px;font-weight:800;color:#334155;margin-bottom:8px">🚗 特殊・事故対応向け図形</div>
+      <div class="pf-shape-grid">
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">CAR</div>
+          <div class="pf-shape-name">車<br><span class="mfp-tag mfp-tag-gray">car</span></div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">POL</div>
+          <div class="pf-shape-name">警察<br><span class="mfp-tag mfp-tag-blue">police</span></div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">H</div>
+          <div class="pf-shape-name">病院<br><span class="mfp-tag mfp-tag-green">hospital</span></div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">INS</div>
+          <div class="pf-shape-name">保険<br><span class="mfp-tag mfp-tag-purple">insurance</span></div>
+        </div>
+      </div>
+      <hr class="mfp-divider">
+      <div style="font-size:13px;font-weight:800;color:#334155;margin-bottom:8px">その他の図形</div>
+      <div class="pf-shape-grid">
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">DB</div>
+          <div class="pf-shape-name">データベース</div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">⚙️</div>
+          <div class="pf-shape-name">手作業</div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">📄</div>
+          <div class="pf-shape-name">書類</div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">IMG</div>
+          <div class="pf-shape-name">画像</div>
+        </div>
+        <div class="pf-shape-cell">
+          <div class="pf-shape-icon">SUB</div>
+          <div class="pf-shape-name">サブフロー</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 図形操作 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">🖱️ 図形の基本操作</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>操作</th><th>方法</th></tr></thead>
+        <tbody>
+          <tr><td>追加</td><td>左サイドバーの図形ボタンをクリック（最後のポインタ位置近くに追加）</td></tr>
+          <tr><td>選択</td><td>クリックで単一選択。Shift+クリックで複数選択</td></tr>
+          <tr><td>複数選択（矩形）</td><td>キャンバスの空白エリアをドラッグして矩形で囲む</td></tr>
+          <tr><td>移動</td><td>図形をドラッグ。スナップが有効だとグリッドに吸着</td></tr>
+          <tr><td>リサイズ</td><td>図形を選択すると四隅と各辺にハンドルが表示される。ドラッグでサイズ変更</td></tr>
+          <tr><td>テキスト編集</td><td>図形をダブルクリックするとテキスト入力モードになる</td></tr>
+          <tr><td>複製</td><td><span class="mfp-kbd">Ctrl+D</span> またはコンテキストメニュー→「複製」</td></tr>
+          <tr><td>削除</td><td>選択して <span class="mfp-kbd">Delete</span> キー</td></tr>
+          <tr><td>回転</td><td>コンテキストメニュー→「回転」、または右サイドバーで角度入力</td></tr>
+          <tr><td>ロック</td><td>右サイドバーの「ロック」ボタン。移動・リサイズを防ぐ</td></tr>
+          <tr><td>前面/背面</td><td>右サイドバーまたは右クリックメニューで表示順を変更</td></tr>
+          <tr><td>コピー/貼り付け</td><td><span class="mfp-kbd">Ctrl+C</span> / <span class="mfp-kbd">Ctrl+V</span>。接続線も維持されます</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-tip" style="margin-top:10px">
+        💡 「分岐（判断）」ノードを選択すると、右サイドバーに「はい/いいえ自動生成」ボタンが表示されます。クリックするとはい・いいえのノードと接続線が自動生成されます。
+      </div>
+    </div>
+
+    <!-- 自動整列 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">📐 自動整列と配置補助</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">上部ツールバーの整列メニューで選択中の図形をきれいに並べられます。</p>
+      <table class="mfp-opt-table">
+        <thead><tr><th>操作</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr><td>縦整列（上→下）</td><td>選択図形を縦方向（上から下へ）に均等な間隔で並べ直します</td></tr>
+          <tr><td>横整列（左→右）</td><td>選択図形を横方向（左から右へ）に均等な間隔で並べ直します</td></tr>
+          <tr><td>等間隔（縦）</td><td>選択図形の縦方向間隔を等間隔にします</td></tr>
+          <tr><td>等間隔（横）</td><td>選択図形の横方向間隔を等間隔にします</td></tr>
+          <tr><td>グリッド</td><td>グリッド線の表示/非表示。チェックボックスで切替</td></tr>
+          <tr><td>スナップ</td><td>グリッドへの吸着のオン/オフ。細かい位置調整にはオフが便利</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== コネクタ ========== -->
+  <section id="connectors" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#ccfbf1">➡️</div>
+      <div>
+        <h2 class="mfp-section-title">コネクタ（接続線）の使い方</h2>
+        <p class="mfp-section-desc">図形と図形を線でつなぎます。ラベル付きの分岐線や点線など、7種類のプリセットスタイルがあります。</p>
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">🔗 コネクタの引き方</div>
+      <div class="mfp-step" style="border:0;padding:0;box-shadow:none;margin:0">
+        <div class="mfp-step-badge" style="width:28px;height:28px;font-size:13px">1</div>
+        <div class="mfp-step-body">
+          <div class="mfp-step-title" style="font-size:14px">上部ツールバーの「線」ツールを選択する</div>
+          <p class="mfp-step-text">「線」ボタンをクリックするか、<span class="mfp-kbd">L</span>キーを押すと線ツールに切り替わります。</p>
+        </div>
+      </div>
+      <hr class="mfp-divider">
+      <div class="mfp-step" style="border:0;padding:0;box-shadow:none;margin:0">
+        <div class="mfp-step-badge" style="width:28px;height:28px;font-size:13px">2</div>
+        <div class="mfp-step-body">
+          <div class="mfp-step-title" style="font-size:14px">開始ノードをクリックする</div>
+          <p class="mfp-step-text">矢印の始点にしたい図形をクリックします。図形がハイライトされます。</p>
+        </div>
+      </div>
+      <hr class="mfp-divider">
+      <div class="mfp-step" style="border:0;padding:0;box-shadow:none;margin:0">
+        <div class="mfp-step-badge" style="width:28px;height:28px;font-size:13px">3</div>
+        <div class="mfp-step-body">
+          <div class="mfp-step-title" style="font-size:14px">接続先ノードをクリックする</div>
+          <p class="mfp-step-text">矢印の終点にしたい図形をクリックするとコネクタが引かれます。</p>
+        </div>
+      </div>
+      <div class="mfp-tip" style="margin-top:10px">
+        💡 図形を移動しても接続線は自動的に追従します。接続先が外れることはありません。
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">🎨 コネクタのスタイル（プリセット）</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>プリセット名</th><th>見た目</th><th>用途</th></tr></thead>
+        <tbody>
+          <tr><td>標準</td><td>実線・折れ線・矢印（終端）</td><td>通常のフロー</td></tr>
+          <tr><td>太線</td><td>太い実線・折れ線</td><td>主要な流れを強調</td></tr>
+          <tr><td>細線</td><td>細い実線・折れ線</td><td>補助的な接続</td></tr>
+          <tr><td>点線</td><td>点線・折れ線</td><td>任意・補足の流れ</td></tr>
+          <tr><td>強調（赤）</td><td>赤い実線・折れ線</td><td>警告・緊急の流れ</td></tr>
+          <tr><td>補助（青点）</td><td>青い点線・折れ線</td><td>参考・オプションの流れ</td></tr>
+          <tr><td>曲線</td><td>実線・ベジェ曲線</td><td>柔らかい印象を出したいとき</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-note" style="margin-top:10px">
+        ✅ コネクタを選択すると右サイドバーでスタイル・色・太さ・ラベルを個別にカスタマイズできます。
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">🏷️ ラベル付きコネクタ</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">コネクタを選択して右サイドバーの「ラベル」欄にテキストを入力すると、線の中央付近にラベルが表示されます。</p>
+      <ul class="mfp-ul">
+        <li>分岐ノード（判断）から出る線には「はい」「いいえ」などのラベルを付けましょう</li>
+        <li>ラベルのない分岐線は「警告」に表示されます</li>
+        <li>コネクタを選択した状態でドラッグすると経路を調整できます（折れ線の屈曲点を移動）</li>
+      </ul>
+    </div>
+  </section>
+
+
+  <!-- ========== 編集・操作 ========== -->
+  <section id="edit" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#ccfbf1">✏️</div>
+      <div>
+        <h2 class="mfp-section-title">編集・操作の詳細</h2>
+        <p class="mfp-section-desc">テキスト編集、コピー/貼り付け、検索、ズームなど便利な編集機能を説明します。</p>
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">✍️ テキストの編集</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">図形内のテキストはダブルクリックで編集できます。</p>
+      <table class="mfp-opt-table">
+        <thead><tr><th>操作</th><th>方法</th></tr></thead>
+        <tbody>
+          <tr><td>テキスト編集開始</td><td>図形をダブルクリック。インラインでテキスト入力モードになります</td></tr>
+          <tr><td>改行</td><td>Enter キー（編集モード中）</td></tr>
+          <tr><td>編集終了</td><td>図形の外をクリック、または Esc キー</td></tr>
+          <tr><td>フォントサイズ変更</td><td>右サイドバーの「文字サイズ」スライダーで変更</td></tr>
+          <tr><td>文字色変更</td><td>右サイドバーの「文字色」カラーピッカーで変更</td></tr>
+          <tr><td>太字 / 斜体 / 下線</td><td>右サイドバーのテキスト書式ボタンで適用</td></tr>
+          <tr><td>横位置</td><td>右サイドバーで「左・中央・右」を選択</td></tr>
+          <tr><td>縦位置</td><td>右サイドバーで「上・中央・下」を選択</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">🔍 図形の検索・ジャンプ</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">右サイドバーの「検索」欄にキーワードを入力すると、一致する図形を見つけてキャンバス上でハイライトできます。</p>
+      <ul class="mfp-ul">
+        <li>Enter で次のヒットへ、Shift+Enter で前のヒットへ移動</li>
+        <li>ヒットした図形が画面中央に自動スクロールします</li>
+        <li>大きなフロー図でのノード探しに便利です</li>
+      </ul>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">⚠️ 警告チェック機能</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">上部ツールバーの「警告」ボタンを押すと、フローチャートの品質問題を自動で検出します。</p>
+      <table class="mfp-opt-table">
+        <thead><tr><th>警告の種類</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>ラベルなし分岐線</td><td>判断ノードから出る線にラベルがない</td></tr>
+          <tr><td>未接続ノード</td><td>線が1本も接続されていない図形がある</td></tr>
+          <tr><td>開始/終了ノード欠如</td><td>「開始/終了」タイプの図形がない</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">🔎 ズームとパン操作</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>操作</th><th>方法</th></tr></thead>
+        <tbody>
+          <tr><td>拡大</td><td><span class="mfp-kbd">Ctrl++</span> またはツールバーのズームスライダー</td></tr>
+          <tr><td>縮小</td><td><span class="mfp-kbd">Ctrl+-</span> またはツールバーのズームスライダー</td></tr>
+          <tr><td>全体表示</td><td><span class="mfp-kbd">Ctrl+0</span> またはズームプリセット「全体」</td></tr>
+          <tr><td>パン（画面移動）</td><td>ツールバーの「パン」ツール選択後にドラッグ、またはスペースキー長押し中にドラッグ</td></tr>
+          <tr><td>マウスホイール</td><td>ホイールで拡大/縮小</td></tr>
+          <tr><td>ズームプリセット</td><td>25% / 50% / 75% / 100% / 125% / 150% / 200% から選択</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">📋 右クリックコンテキストメニュー</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">図形または線を右クリックするとコンテキストメニューが表示されます。</p>
+      <div class="mfp-grid2">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">図形の右クリックメニュー</div>
+          <ul class="mfp-ul">
+            <li>複製 / 削除</li>
+            <li>前面へ / 背面へ</li>
+            <li>最前面へ / 最背面へ</li>
+            <li>ロック / ロック解除</li>
+            <li>スタイルをコピー</li>
+          </ul>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">線の右クリックメニュー</div>
+          <ul class="mfp-ul">
+            <li>削除</li>
+            <li>線のスタイル変更</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== テンプレート ========== -->
+  <section id="templates" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#ccfbf1">📂</div>
+      <div>
+        <h2 class="mfp-section-title">テンプレート</h2>
+        <p class="mfp-section-desc">よく使うフローの雛形をテンプレートとして用意しています。左サイドバーの「テンプレート」タブから選択して開けます。</p>
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">📋 テンプレート一覧</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>テンプレート名</th><th>内容</th><th>おすすめ用途</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>空白</td>
+            <td>何も配置されていない白紙のキャンバス</td>
+            <td>完全に一から作りたい場合</td>
+          </tr>
+          <tr>
+            <td>基本フローチャート</td>
+            <td>開始→処理→分岐→完了の4ノードの基本構成</td>
+            <td>汎用的なフロー作成のスタート地点</td>
+          </tr>
+          <tr>
+            <td>車の事故対応</td>
+            <td>事故発生〜警察・救急・保険・レッカー〜完了の縦型フロー。注意喚起テーマ適用済み</td>
+            <td>事故発生時の対応手順書・緊急マニュアル</td>
+          </tr>
+          <tr>
+            <td>スイムレーン付き</td>
+            <td>担当者・管理者・システムの3レーン構成の申請フロー</td>
+            <td>部署・担当者・システムをまたぐ業務フロー</td>
+          </tr>
+          <tr>
+            <td>はい/いいえ判断</td>
+            <td>開始→判断ノード→はい/いいえ分岐→完了の基本構成</td>
+            <td>条件分岐フロー・トラブルシューティング</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="mfp-note" style="margin-top:10px">
+        ✅ テンプレートを開くと現在の作業が上書きされます。事前に保存してからテンプレートを選んでください。
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">🚗 車の事故対応テンプレートの特長</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">「注意喚起」テーマが自動適用された、緊急時対応専用のテンプレートです。</p>
+      <ul class="mfp-ul">
+        <li>事故発生→安全確認→けが人確認→救急/警察連絡→相手方情報確認→写真撮影→保険連絡→レッカー手配→記録・書類の流れ</li>
+        <li>車・病院・警察・保険の特殊図形アイコンが活用されています</li>
+        <li>赤系のテーマ（注意喚起）で印刷しても目立つデザイン</li>
+        <li>電話番号や連絡先などのメモを注記図形に入れて使うことができます</li>
+      </ul>
+    </div>
+  </section>
+
+
+  <!-- ========== デザイン ========== -->
+  <section id="design" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#ccfbf1">🎨</div>
+      <div>
+        <h2 class="mfp-section-title">デザインとテーマ</h2>
+        <p class="mfp-section-desc">5種類のテーマから見た目を切り替えられます。図形ごとに色やスタイルを個別設定することも可能です。</p>
+      </div>
+    </div>
+
+    <!-- テーマ -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">🎨 テーマ一覧</div>
+      <div class="pf-theme-grid">
+        <div class="pf-theme-card">
+          <div class="pf-theme-preview" style="background:#fbfcfe;border-bottom:1px solid #e2e8f0"></div>
+          <div class="pf-theme-label">標準</div>
+        </div>
+        <div class="pf-theme-card">
+          <div class="pf-theme-preview" style="background:#ffffff;border-bottom:1px solid #e2e8f0"></div>
+          <div class="pf-theme-label">シンプル</div>
+        </div>
+        <div class="pf-theme-card">
+          <div class="pf-theme-preview" style="background:#ffffff;border-bottom:1px solid #111"></div>
+          <div class="pf-theme-label">モノクロ</div>
+        </div>
+        <div class="pf-theme-card">
+          <div class="pf-theme-preview" style="background:#fffdf8;border-bottom:2px solid #b53b32"></div>
+          <div class="pf-theme-label">注意喚起</div>
+        </div>
+        <div class="pf-theme-card">
+          <div class="pf-theme-preview" style="background:#202733;border-bottom:1px solid #8fb7e6"></div>
+          <div class="pf-theme-label" style="color:#334155">ダーク</div>
+        </div>
+      </div>
+      <hr class="mfp-divider">
+      <p style="font-size:14px;color:#475569;margin:0">テーマは上部ツールバーの「テーマ」ドロップダウンから切り替えます。テーマを変更すると、個別スタイルを設定していない図形・線の色が一括で変わります。</p>
+      <div class="mfp-tip" style="margin-top:10px">
+        💡 「モノクロ」テーマは白黒印刷に最適です。「注意喚起」テーマは赤系で目立つ緊急時マニュアルに向いています。
+      </div>
+    </div>
+
+    <!-- 個別スタイル -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">🖌️ 図形の個別スタイル設定</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">図形を選択すると右サイドバーでスタイルを細かく設定できます。</p>
+      <table class="mfp-opt-table">
+        <thead><tr><th>設定項目</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>塗り色</td><td>図形の背景色をカラーピッカーで設定</td></tr>
+          <tr><td>枠線色</td><td>枠線の色をカラーピッカーで設定</td></tr>
+          <tr><td>枠線太さ</td><td>1〜10pxの範囲でスライダー調整</td></tr>
+          <tr><td>点線</td><td>枠線を実線/点線に切り替え</td></tr>
+          <tr><td>角丸</td><td>0〜40pxの範囲で角丸を設定</td></tr>
+          <tr><td>影</td><td>ドロップシャドウのオン/オフ</td></tr>
+          <tr><td>透明度</td><td>0〜100%で図形の不透明度を設定</td></tr>
+          <tr><td>幅 / 高さ</td><td>数値入力で正確なサイズを指定</td></tr>
+          <tr><td>X / Y座標</td><td>数値入力で正確な位置を指定</td></tr>
+          <tr><td>回転角度</td><td>0〜360°で回転角度を入力</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- スタイルコピー -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">📋 スタイルのコピー/貼り付け</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">ある図形のスタイルを他の図形に一括適用できます。</p>
+      <ul class="mfp-ul">
+        <li>スタイルをコピーしたい図形を選択し、上部の「スタイルコピー」ボタンを押します</li>
+        <li>次に適用先の図形を選択し、「スタイル貼り付け」ボタンを押します</li>
+        <li>複数図形を選択してから「スタイル貼り付け」を押すと一括適用できます</li>
+      </ul>
+    </div>
+
+    <!-- キャンバス設定 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title" style="justify-content:space-between">
+        <span>📐 キャンバスサイズの設定</span>
+        <button class="mfp-popup-btn" onclick="openModal('modalCanvas')">サイズ一覧を見る ▼</button>
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">上部ツールバーの「キャンバス」設定でサイズを変更できます。印刷出力に合わせてサイズを選びましょう。</p>
+      <ul class="mfp-ul">
+        <li>A4縦・A4横・A3縦・A3横・B5縦・B5横から選択</li>
+        <li>グリッドサイズも 8/16/24/32/48px から選択可能</li>
+        <li>出力時のページ分割プレビューも確認できます（「ページ分割」ボタン）</li>
+      </ul>
+    </div>
+  </section>
+
+
+  <!-- ========== スイムレーン ========== -->
+  <section id="swimlane" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#ccfbf1">🏊</div>
+      <div>
+        <h2 class="mfp-section-title">スイムレーン</h2>
+        <p class="mfp-section-desc">担当者・部署・システムなど役割別に水平のレーンを追加し、図形を役割ごとに整理できます。</p>
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">➕ スイムレーンの追加</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">上部ツールバーの「レーン追加」ボタンを押すと、キャンバスの下部に新しいレーンが追加されます。</p>
+      <ul class="mfp-ul">
+        <li>レーンにはデフォルトで「レーン 1」「レーン 2」… と名前が付きます</li>
+        <li>レーン名は左側の名前ラベルをダブルクリックして編集できます</li>
+        <li>右サイドバーのレーン管理パネルで一覧表示・順序変更・削除が可能</li>
+      </ul>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">⚙️ スイムレーンの設定</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>操作</th><th>方法</th></tr></thead>
+        <tbody>
+          <tr><td>レーン名の変更</td><td>レーン名ラベルをダブルクリック、またはレーン管理パネルで編集</td></tr>
+          <tr><td>レーンの高さ変更</td><td>レーン下端のリサイズハンドルをドラッグ</td></tr>
+          <tr><td>レーンの背景色変更</td><td>レーン管理パネルでカラーピッカーから選択</td></tr>
+          <tr><td>レーンの順序変更</td><td>レーン管理パネルの上下矢印ボタン</td></tr>
+          <tr><td>レーンの削除</td><td>レーン管理パネルの削除ボタン（レーン内の図形は残ります）</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-tip" style="margin-top:10px">
+        💡 図形をレーン内にドラッグすると、レーンの色に合わせて自動でスナップします。レーンをまたぐコネクタも自由に引けます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 保存・出力 ========== -->
+  <section id="save" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#ccfbf1">💾</div>
+      <div>
+        <h2 class="mfp-section-title">保存・出力・印刷</h2>
+        <p class="mfp-section-desc">フローチャートはブラウザ内に保存できるほか、PNG/SVG/PDF/JSONで書き出し、印刷することもできます。</p>
+      </div>
+    </div>
+
+    <!-- 保存 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">💾 保存の仕組み</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">PowerFlowの保存はブラウザのlocalStorageに行われます。DSTTサーバーへのアップロードは不要です。</p>
+      <table class="mfp-opt-table">
+        <thead><tr><th>操作</th><th>方法・説明</th></tr></thead>
+        <tbody>
+          <tr><td>保存</td><td><span class="mfp-kbd">Ctrl+S</span> またはツールバーの「保存」ボタン。現在のタイトルで上書き保存されます</td></tr>
+          <tr><td>自動保存</td><td>編集するたびにブラウザのlocalStorageに自動バックアップされます（タイトルバーに「保存済み/未保存」表示）</td></tr>
+          <tr><td>保存一覧</td><td>ツールバーの「開く」→「保存済み一覧」でブラウザに保存されたフローを確認</td></tr>
+          <tr><td>名前変更</td><td>保存一覧から対象フローの「名前変更」を操作</td></tr>
+          <tr><td>複製</td><td>保存一覧から「複製」で同じ内容のフローを別名で保存</td></tr>
+          <tr><td>削除</td><td>保存一覧から「削除」でブラウザから完全に削除</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-warn" style="margin-top:10px">
+        ⚠️ ブラウザのキャッシュ・ローカルストレージをクリアすると保存データが消えます。大切なフローはJSON書き出しでバックアップしてください。
+      </div>
+    </div>
+
+    <!-- 出力 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title" style="justify-content:space-between">
+        <span>📤 出力形式</span>
+        <button class="mfp-popup-btn" onclick="openModal('modalExport')">出力形式の詳細を見る ▼</button>
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">上部ツールバーの「出力」メニューから書き出し形式を選べます。</p>
+      <div class="mfp-fmt-row">
+        <span style="font-weight:700;color:#334155">対応形式：</span>
+        <span class="mfp-fmt-badge">PNG</span>
+        <span class="mfp-fmt-badge">SVG</span>
+        <span class="mfp-fmt-badge">PDF</span>
+        <span class="mfp-fmt-badge">JSON</span>
+      </div>
+      <hr class="mfp-divider">
+      <table class="mfp-opt-table">
+        <thead><tr><th>オプション</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr><td>選択範囲のみ出力</td><td>オンにすると選択中の図形・線のみを切り抜いて出力します</td></tr>
+          <tr><td>全体出力</td><td>キャンバス全体を出力します（デフォルト）</td></tr>
+          <tr><td>透過背景PNG</td><td>PNG出力時に背景を透過できます</td></tr>
+          <tr><td>余白設定</td><td>出力時の上下左右の余白をピクセル数で指定</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 印刷 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">🖨️ 印刷</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">上部ツールバーの「印刷」ボタン（または <span class="mfp-kbd">Ctrl+P</span>）でブラウザの印刷ダイアログが開きます。</p>
+      <ul class="mfp-ul">
+        <li>A4/A3縦横に合わせてキャンバスサイズを設定しておくと、印刷時のズレが少なくなります</li>
+        <li>「ページ分割」プレビューで用紙に合わせたページ区切りを確認できます</li>
+        <li>モノクロ印刷の場合は「モノクロ」テーマを使用すると読みやすい印刷結果になります</li>
+      </ul>
+      <div class="mfp-tip" style="margin-top:10px">
+        💡 PDF出力はフローチャートをA4/A3サイズのPDFとして保存したいときに使います。共有や配布に向いています。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== ショートカット ========== -->
+  <section id="shortcuts" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#ccfbf1">⌨️</div>
+      <div>
+        <h2 class="mfp-section-title">キーボードショートカット</h2>
+        <p class="mfp-section-desc">よく使う操作をキーボードで素早く実行できます。</p>
+      </div>
+    </div>
+
+    <div class="mfp-grid2">
+      <div class="mfp-card" style="margin:0">
+        <div class="mfp-card-title">📋 基本操作</div>
+        <table class="mfp-opt-table">
+          <thead><tr><th>ショートカット</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr><td><span class="mfp-kbd">Ctrl+Z</span></td><td>Undo（操作を戻す）</td></tr>
+            <tr><td><span class="mfp-kbd">Ctrl+Y</span></td><td>Redo（操作をやり直す）</td></tr>
+            <tr><td><span class="mfp-kbd">Ctrl+S</span></td><td>保存</td></tr>
+            <tr><td><span class="mfp-kbd">Ctrl+A</span></td><td>全選択</td></tr>
+            <tr><td><span class="mfp-kbd">Ctrl+C</span></td><td>コピー</td></tr>
+            <tr><td><span class="mfp-kbd">Ctrl+V</span></td><td>貼り付け</td></tr>
+            <tr><td><span class="mfp-kbd">Ctrl+X</span></td><td>切り取り</td></tr>
+            <tr><td><span class="mfp-kbd">Ctrl+D</span></td><td>複製</td></tr>
+            <tr><td><span class="mfp-kbd">Delete</span></td><td>削除（選択中の図形/線）</td></tr>
+            <tr><td><span class="mfp-kbd">Esc</span></td><td>選択解除 / 編集モード終了</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <div class="mfp-card" style="margin:0 0 12px">
+          <div class="mfp-card-title">🔍 表示・移動</div>
+          <table class="mfp-opt-table">
+            <thead><tr><th>ショートカット</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td><span class="mfp-kbd">Ctrl++</span></td><td>拡大</td></tr>
+              <tr><td><span class="mfp-kbd">Ctrl+-</span></td><td>縮小</td></tr>
+              <tr><td><span class="mfp-kbd">Ctrl+0</span></td><td>全体表示</td></tr>
+              <tr><td><span class="mfp-kbd">Ctrl+P</span></td><td>印刷</td></tr>
+              <tr><td><span class="mfp-kbd">Space（長押し）</span></td><td>パン（画面移動）モード</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="mfp-card" style="margin:0">
+          <div class="mfp-card-title">⬆️ 図形の微調整</div>
+          <table class="mfp-opt-table">
+            <thead><tr><th>ショートカット</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td><span class="mfp-kbd">↑↓←→</span></td><td>選択図形を1グリッド分ずつ移動</td></tr>
+              <tr><td><span class="mfp-kbd">Shift+↑↓←→</span></td><td>選択図形を5グリッド分ずつ移動</td></tr>
+              <tr><td><span class="mfp-kbd">Enter</span></td><td>図形のテキスト編集を開始</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== よくある質問 ========== -->
+  <section id="faq" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#ccfbf1">❓</div>
+      <div>
+        <h2 class="mfp-section-title">よくある質問</h2>
+        <p class="mfp-section-desc">困ったときはこちらを確認してください。</p>
+      </div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">線が引けません。どうすれば？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">上部ツールバーの「線」ツールが選択されているか確認してください。現在のツールが「選択」になっている場合は「線」をクリックするか、Lキーを押して切り替えてください。線ツールで開始ノード→終了ノードの順にクリックすると線が引かれます。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">図形が思った位置に置けません</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">「スナップ」機能が有効だとグリッドに吸着します。細かい位置に置きたい場合は上部ツールバーのスナップチェックボックスをオフにしてください。または、図形を選択して右サイドバーのX/Y座標欄に数値を直接入力することで正確な位置を指定できます。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">出力範囲が正しくありません（余白が多い/狭い）</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">「選択範囲のみ出力」がオンになっていないか確認してください。全体を出力したい場合はオフにします。また余白設定で出力時の余白量を調整できます。選択中の図形だけを出力したい場合は先に図形を選択してから「選択範囲のみ出力」をオンにして出力してください。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">ブラウザ保存したフローが見つかりません</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">保存は同じブラウザ・同じ端末のlocalStorageに保存されます。別の端末やブラウザでは表示されません。異なる環境で使いたい場合はJSONで書き出し、別の環境でファイルを読み込んでください。ブラウザのキャッシュをクリアするとデータが失われる場合があります。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">外部サービスは必要ですか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">不要です。PowerFlowの編集・保存・出力はすべてブラウザとDSTT内で完結します。インターネット接続はDSTTへのアクセスに必要ですが、外部の作図サービスや追加ツールは一切必要ありません。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">選択した部分だけ画像にできますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">はい。出力したい図形を選択してから、上部の「出力」メニューで「選択範囲のみ出力」をオンにしてPNG・SVG・PDFを書き出してください。選択範囲外の図形は含まれません。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">事故対応テンプレートはどこにありますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">左サイドバーの「テンプレート」タブを選択し、「車の事故対応」を選んでください。事故発生〜完了までの縦型フローが自動配置され、注意喚起（赤系）テーマが適用されます。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">Undo（Ctrl+Z）が効かなくなりました</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">Undo履歴は最大80操作です。80操作を超えた古い操作は履歴から消えます。また保存操作はUndoの対象外です。テンプレートを開いた後などUndoで戻れない場合は、保存済みのJSONファイルから復元してください。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">PDF出力の品質が悪い（文字がぼける）</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">PDFはフローチャートを画像として変換したものです。キャンバスサイズを印刷したい用紙サイズ（A4縦など）に合わせておくと出力品質が向上します。文字が小さすぎると印刷でつぶれることがあるので、10px以上のフォントサイズをお勧めします。SVG出力はベクター形式なので、拡大しても劣化しません。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">スイムレーンをまたいで線を引けますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">はい。スイムレーンをまたぐコネクタも自由に引けます。異なるレーンにある図形を線ツールでつないでください。担当者間のやり取りや部署をまたぐ情報の流れを表現できます。</div>
+    </div>
+  </section>
+
+</div><!-- /mfp-wrap -->
+
+
+<!-- ===== MODAL: 図形カタログ ===== -->
+<div id="modalShapeCatalog" class="mfp-modal-ov mfp-hidden">
+  <div class="mfp-modal-box">
+    <div class="mfp-modal-head">
+      <h3 class="mfp-modal-title">🔷 全図形一覧</h3>
+      <button class="mfp-modal-close" onclick="closeModal('modalShapeCatalog')">✕</button>
+    </div>
+    <table class="mfp-opt-table">
+      <thead><tr><th>カテゴリ</th><th>図形名</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="9">基本</td><td>開始/終了</td><td>フローの開始点・終了点</td></tr>
+        <tr><td>処理</td><td>一般的な処理・手順</td></tr>
+        <tr><td>分岐（判断）</td><td>条件判断・はい/いいえ</td></tr>
+        <tr><td>入出力</td><td>データの入力・出力</td></tr>
+        <tr><td>データ</td><td>データストレージ・参照</td></tr>
+        <tr><td>注記</td><td>メモ・補足説明</td></tr>
+        <tr><td>注意</td><td>警告・重要な注意事項</td></tr>
+        <tr><td>電話</td><td>電話連絡・TEL操作</td></tr>
+        <tr><td>メール</td><td>メール送受信</td></tr>
+        <tr><td rowspan="4">特殊</td><td>車</td><td>車両・事故対応</td></tr>
+        <tr><td>警察</td><td>警察への連絡・対応</td></tr>
+        <tr><td>病院</td><td>医療機関・救急</td></tr>
+        <tr><td>保険</td><td>保険会社への連絡</td></tr>
+        <tr><td rowspan="5">その他</td><td>データベース</td><td>DB・データ蓄積</td></tr>
+        <tr><td>手作業</td><td>人が行う手動作業</td></tr>
+        <tr><td>書類</td><td>帳票・ドキュメント</td></tr>
+        <tr><td>画像</td><td>画像・写真の参照</td></tr>
+        <tr><td>サブフロー</td><td>別フローへの参照</td></tr>
+      </tbody>
+    </table>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mfp-popup-btn" onclick="closeModal('modalShapeCatalog')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: キャンバスサイズ ===== -->
+<div id="modalCanvas" class="mfp-modal-ov mfp-hidden">
+  <div class="mfp-modal-box">
+    <div class="mfp-modal-head">
+      <h3 class="mfp-modal-title">📐 キャンバスサイズ一覧</h3>
+      <button class="mfp-modal-close" onclick="closeModal('modalCanvas')">✕</button>
+    </div>
+    <table class="mfp-opt-table">
+      <thead><tr><th>サイズ名</th><th>幅 × 高さ（px）</th><th>おすすめ用途</th></tr></thead>
+      <tbody>
+        <tr><td>A4 縦</td><td>794 × 1,123</td><td>標準の縦型フローチャート・印刷</td></tr>
+        <tr><td>A4 横</td><td>1,123 × 794</td><td>横型・スイムレーンフロー・印刷</td></tr>
+        <tr><td>A3 縦</td><td>1,123 × 1,587</td><td>大きな縦型フロー・詳細手順書</td></tr>
+        <tr><td>A3 横</td><td>1,587 × 1,123</td><td>大きな横型フロー・全体図</td></tr>
+        <tr><td>B5 縦</td><td>665 × 945</td><td>小型の手順書・メモ</td></tr>
+        <tr><td>B5 横</td><td>945 × 665</td><td>小型の横型フロー</td></tr>
+      </tbody>
+    </table>
+    <div class="mfp-tip" style="margin-top:12px">
+      💡 キャンバスサイズは印刷用紙と合わせておくと、印刷時にきれいに収まります。
+    </div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mfp-popup-btn" onclick="closeModal('modalCanvas')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: 出力形式の詳細 ===== -->
+<div id="modalExport" class="mfp-modal-ov mfp-hidden">
+  <div class="mfp-modal-box">
+    <div class="mfp-modal-head">
+      <h3 class="mfp-modal-title">📤 出力形式の詳細</h3>
+      <button class="mfp-modal-close" onclick="closeModal('modalExport')">✕</button>
+    </div>
+    <table class="mfp-opt-table">
+      <thead><tr><th>形式</th><th>特徴</th><th>おすすめ用途</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>PNG</td>
+          <td>ラスター画像。透過背景オプションあり。高解像度出力可</td>
+          <td>ドキュメントへの貼り付け・共有</td>
+        </tr>
+        <tr>
+          <td>SVG</td>
+          <td>ベクター画像。拡大しても劣化しない。テキスト・パスが保持される</td>
+          <td>印刷物・Webサイトへの組み込み</td>
+        </tr>
+        <tr>
+          <td>PDF</td>
+          <td>印刷に最適。フローチャートを画像としてPDF化</td>
+          <td>配布・保存・印刷</td>
+        </tr>
+        <tr>
+          <td>JSON</td>
+          <td>PowerFlow専用形式。フロー全体のデータを保持。再編集可能</td>
+          <td>バックアップ・別端末への移行・共有</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mfp-popup-btn" onclick="closeModal('modalExport')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+  function toggleAcc(btn) {
+    btn.closest('.mfp-acc-item').classList.toggle('mfp-open');
+  }
+  function openModal(id) {
+    document.getElementById(id).classList.remove('mfp-hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.add('mfp-hidden');
+    document.body.style.overflow = '';
+  }
+  document.querySelectorAll('.mfp-modal-ov').forEach(function(ov) {
+    ov.addEventListener('click', function(e) { if (e.target === ov) closeModal(ov.id); });
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.mfp-modal-ov:not(.mfp-hidden)').forEach(function(ov) {
+        closeModal(ov.id);
+      });
+    }
+  });
+  (function() {
+    var sections = document.querySelectorAll('.mfp-section[id]');
+    var navLinks = document.querySelectorAll('.mfp-nav-link[data-section]');
+    function onScroll() {
+      var scrollY = window.pageYOffset;
+      var active = null;
+      sections.forEach(function(sec) {
+        var top = sec.getBoundingClientRect().top + scrollY - 100;
+        if (scrollY >= top) active = sec.id;
+      });
+      navLinks.forEach(function(lnk) {
+        lnk.classList.toggle('mfp-active', lnk.dataset.section === active);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>
+{% endblock %}

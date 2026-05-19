@@ -1,0 +1,1132 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  html { scroll-behavior: smooth; }
+
+  /* ===== Sticky nav ===== */
+  .mfp-nav {
+    position: sticky; top: 0; z-index: 40;
+    background: #fff; border-bottom: 2px solid #e2e8f0;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .mfp-nav::-webkit-scrollbar { display: none; }
+  .mfp-nav-inner {
+    display: flex; min-width: max-content;
+    padding: 0 12px; max-width: 960px; margin: 0 auto;
+  }
+  .mfp-nav-link {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 12px 14px; font-size: 13px; font-weight: 700;
+    color: #64748b; border-bottom: 3px solid transparent;
+    text-decoration: none; white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .mfp-nav-link:hover { color: #2563eb; }
+  .mfp-nav-link.mfp-active { color: #2563eb; border-bottom-color: #2563eb; }
+
+  /* ===== Layout ===== */
+  .mfp-wrap { max-width: 960px; margin: 0 auto; padding: 0 16px 80px; }
+  .mfp-section { padding-top: 52px; }
+  .mfp-section-header {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 24px; padding-bottom: 16px;
+    border-bottom: 2px solid #f1f5f9;
+  }
+  .mfp-section-icon {
+    display: flex; align-items: center; justify-content: center;
+    width: 52px; height: 52px; border-radius: 16px;
+    font-size: 26px; flex-shrink: 0;
+  }
+  .mfp-section-title { font-size: 22px; font-weight: 900; color: #0f172a; margin: 0 0 4px; }
+  .mfp-section-desc  { font-size: 14px; color: #64748b; margin: 0; line-height: 1.6; }
+
+  /* ===== Cards ===== */
+  .mfp-card {
+    background: #fff; border: 1px solid #e2e8f0;
+    border-radius: 16px; padding: 22px 24px;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+    margin-bottom: 12px;
+  }
+  .mfp-card-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 10px; display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ===== Feature grid ===== */
+  .mfp-feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 12px;
+  }
+  .mfp-feat-card {
+    background: #fff; border: 1px solid #e2e8f0;
+    border-radius: 14px; padding: 18px 14px;
+    text-align: center; transition: box-shadow 0.15s;
+  }
+  .mfp-feat-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,0.10); }
+  .mfp-feat-emoji { font-size: 30px; line-height: 1; margin-bottom: 8px; }
+  .mfp-feat-name { font-size: 13px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+  .mfp-feat-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  /* ===== Step cards ===== */
+  .mfp-step {
+    display: flex; gap: 16px; background: #fff;
+    border: 1px solid #e2e8f0; border-radius: 16px;
+    padding: 20px; margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(15,23,42,0.04);
+  }
+  .mfp-step-badge {
+    display: flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; border-radius: 50%;
+    font-size: 16px; font-weight: 900; flex-shrink: 0;
+    background: linear-gradient(135deg, #2563eb, #3b82f6); color: #fff;
+  }
+  .mfp-step-body { flex: 1; min-width: 0; }
+  .mfp-step-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .mfp-step-text { font-size: 14px; color: #475569; line-height: 1.7; margin: 0; }
+
+  /* ===== Callouts ===== */
+  .mfp-tip {
+    background: #eff6ff; border-left: 4px solid #3b82f6;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #1e40af;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mfp-warn {
+    background: #fff7ed; border-left: 4px solid #f97316;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #9a3412;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mfp-note {
+    background: #f0fdf4; border-left: 4px solid #22c55e;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #166534;
+    line-height: 1.65; margin: 8px 0;
+  }
+
+  /* ===== Tags ===== */
+  .mfp-tag {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700;
+  }
+  .mfp-tag-green  { background: #dcfce7; color: #16a34a; }
+  .mfp-tag-blue   { background: #dbeafe; color: #1d4ed8; }
+  .mfp-tag-orange { background: #ffedd5; color: #ea580c; }
+  .mfp-tag-red    { background: #fee2e2; color: #dc2626; }
+  .mfp-tag-purple { background: #f3e8ff; color: #7e22ce; }
+  .mfp-tag-yellow { background: #fef9c3; color: #a16207; }
+  .mfp-tag-gray   { background: #f1f5f9; color: #475569; }
+
+  /* ===== Bullet list ===== */
+  .mfp-ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+  .mfp-ul li {
+    display: flex; gap: 8px; align-items: flex-start;
+    font-size: 14px; color: #334155; line-height: 1.6;
+  }
+  .mfp-ul li::before {
+    content: "▶"; color: #2563eb; font-size: 10px;
+    margin-top: 4px; flex-shrink: 0;
+  }
+
+  /* ===== Option table ===== */
+  .mfp-opt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .mfp-opt-table th {
+    background: #f8fafc; padding: 10px 12px;
+    text-align: left; font-size: 12px; font-weight: 700;
+    color: #64748b; border-bottom: 1px solid #e2e8f0;
+  }
+  .mfp-opt-table td {
+    padding: 10px 12px; border-bottom: 1px solid #f1f5f9;
+    color: #334155; vertical-align: top; line-height: 1.6;
+  }
+  .mfp-opt-table td:first-child { font-weight: 700; color: #0f172a; white-space: nowrap; }
+  .mfp-opt-table tr:last-child td { border-bottom: 0; }
+
+  /* ===== Divider ===== */
+  .mfp-divider { border: 0; border-top: 1px solid #f1f5f9; margin: 18px 0; }
+
+  /* ===== Grid 2col ===== */
+  .mfp-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .mfp-grid2 { grid-template-columns: 1fr; } }
+
+  /* ===== Accordion ===== */
+  .mfp-acc-item {
+    border: 1px solid #e2e8f0; border-radius: 13px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .mfp-acc-trigger {
+    width: 100%; text-align: left; padding: 15px 18px;
+    background: #fff; border: 0; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 700; color: #0f172a;
+    line-height: 1.5; gap: 12px;
+  }
+  .mfp-acc-trigger:hover { background: #f8fafc; }
+  .mfp-acc-q { flex: 1; text-align: left; }
+  .mfp-acc-arrow { font-size: 11px; color: #94a3b8; transition: transform 0.2s; flex-shrink: 0; }
+  .mfp-acc-item.mfp-open .mfp-acc-arrow { transform: rotate(180deg); }
+  .mfp-acc-body { display: none; padding: 2px 18px 15px; font-size: 14px; color: #475569; line-height: 1.75; }
+  .mfp-acc-item.mfp-open .mfp-acc-body { display: block; }
+
+  /* ===== Modal ===== */
+  .mfp-modal-ov {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.52);
+    z-index: 200; display: flex; align-items: center;
+    justify-content: center; padding: 16px;
+  }
+  .mfp-modal-ov.mfp-hidden { display: none !important; }
+  .mfp-modal-box {
+    background: #fff; border-radius: 20px;
+    max-width: 580px; width: 100%;
+    max-height: 88vh; overflow-y: auto;
+    padding: 28px;
+    box-shadow: 0 28px 56px rgba(0,0,0,0.22);
+    animation: mfp-modal-in 0.18s ease;
+  }
+  @keyframes mfp-modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .mfp-modal-head {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; margin-bottom: 18px;
+  }
+  .mfp-modal-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; line-height: 1.4; }
+  .mfp-modal-close {
+    border: 0; background: #f1f5f9; border-radius: 9px;
+    width: 34px; height: 34px; cursor: pointer;
+    font-size: 16px; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+    color: #64748b; margin-left: 12px;
+  }
+  .mfp-modal-close:hover { background: #e2e8f0; }
+
+  /* ===== Popup button ===== */
+  .mfp-popup-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px; border: 1.5px solid #cbd5e1;
+    border-radius: 9px; background: #f8fafc;
+    font-size: 12px; font-weight: 700; color: #2563eb;
+    cursor: pointer; margin: 4px 0; transition: background 0.15s;
+  }
+  .mfp-popup-btn:hover { background: #eff6ff; border-color: #93c5fd; }
+
+  /* ===== Hero ===== */
+  .mfp-hero-bar {
+    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 48%, #7c3aed 100%);
+    padding: 40px 24px 36px; text-align: center; color: #fff;
+  }
+  .mfp-hero-bar h1 { font-size: 34px; font-weight: 900; margin: 0 0 6px; }
+  .mfp-hero-bar p { font-size: 15px; opacity: 0.9; margin: 0 0 22px; }
+  .mfp-hero-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .mfp-hero-btn {
+    padding: 11px 22px; border-radius: 12px;
+    font-size: 14px; font-weight: 700; text-decoration: none;
+    border: 2px solid #fff; transition: opacity 0.15s;
+  }
+  .mfp-hero-btn:hover { opacity: 0.85; }
+  .mfp-hero-btn-primary  { background: #fff; color: #2563eb; }
+  .mfp-hero-btn-secondary { background: transparent; color: #fff; }
+
+  /* ===== Question type grid ===== */
+  .pv-qtype-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .pv-qtype-card {
+    border: 1px solid #e2e8f0; border-radius: 12px;
+    padding: 14px 16px; background: #fff;
+  }
+  .pv-qtype-label { font-size: 13px; font-weight: 800; color: #0f172a; margin-bottom: 4px; }
+  .pv-qtype-desc  { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  /* ===== Status flow ===== */
+  .pv-status-row {
+    display: flex; gap: 0; align-items: stretch;
+    border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;
+    margin: 12px 0;
+  }
+  .pv-status-cell {
+    flex: 1; padding: 14px 12px; text-align: center;
+    border-right: 1px solid #e2e8f0; background: #fff;
+  }
+  .pv-status-cell:last-child { border-right: 0; }
+  .pv-status-cell.active { background: #eff6ff; }
+  .pv-status-name { font-size: 13px; font-weight: 800; color: #0f172a; }
+  .pv-status-note { font-size: 11px; color: #64748b; margin-top: 3px; line-height: 1.4; }
+
+  /* ===== Flow diagram ===== */
+  .pv-flow-diagram {
+    background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 12px; padding: 16px;
+    font-size: 13px; color: #334155;
+  }
+  .pv-flow-node {
+    display: inline-block; padding: 6px 14px;
+    border: 2px solid #2563eb; border-radius: 8px;
+    background: #eff6ff; color: #1d4ed8; font-weight: 700; font-size: 13px;
+  }
+  .pv-flow-arrow { color: #94a3b8; font-size: 16px; margin: 0 8px; }
+
+  /* ===== Sublist ===== */
+  .mfp-sublist { padding-left: 18px; margin: 6px 0; }
+  .mfp-sublist li { font-size: 13.5px; color: #475569; margin: 4px 0; line-height: 1.6; }
+</style>
+
+<!-- ===== Hero ===== -->
+<div class="mfp-hero-bar">
+  <h1>📊 PowerVote マニュアル</h1>
+  <p>アンケート・投票・同意フォームを作成し、URLで集める。作成はDSTTログイン必須・回答はアカウント不要。</p>
+  <div class="mfp-hero-btns">
+    <a href="/tools/powervote" class="mfp-hero-btn mfp-hero-btn-primary">ツールを開く</a>
+    <a href="/" class="mfp-hero-btn mfp-hero-btn-secondary">ダッシュボードへ戻る</a>
+  </div>
+</div>
+
+<!-- ===== Sticky nav ===== -->
+<div class="mfp-nav" id="mfpNav">
+  <div class="mfp-nav-inner">
+    <a href="#overview"   class="mfp-nav-link" data-section="overview">📋 概要</a>
+    <a href="#create"     class="mfp-nav-link" data-section="create">✏️ フォームを作る</a>
+    <a href="#qtypes"     class="mfp-nav-link" data-section="qtypes">🔢 質問の種類</a>
+    <a href="#settings"   class="mfp-nav-link" data-section="settings">⚙️ 質問の設定</a>
+    <a href="#publish"    class="mfp-nav-link" data-section="publish">🚀 公開・共有</a>
+    <a href="#respondent" class="mfp-nav-link" data-section="respondent">🙋 回答者の操作</a>
+    <a href="#results"    class="mfp-nav-link" data-section="results">📈 結果・集計</a>
+    <a href="#floweditor" class="mfp-nav-link" data-section="floweditor">🔀 フローで作成</a>
+    <a href="#faq"        class="mfp-nav-link" data-section="faq">❓ よくある質問</a>
+  </div>
+</div>
+
+<!-- ===== Main content ===== -->
+<div class="mfp-wrap">
+
+  <!-- ========== 概要 ========== -->
+  <section id="overview" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#dbeafe">📋</div>
+      <div>
+        <h2 class="mfp-section-title">PowerVote でできること</h2>
+        <p class="mfp-section-desc">参加確認・同意取得・アンケートなど様々な目的のフォームを自由に作成し、公開URLやQRコードで回答を集めます。回答者にDSTTアカウントは不要です。</p>
+      </div>
+    </div>
+
+    <div class="mfp-feat-grid">
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">📝</div>
+        <div class="mfp-feat-name">14種類の質問</div>
+        <div class="mfp-feat-desc">短文・選択・評価・同意など多彩な質問タイプ</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🔀</div>
+        <div class="mfp-feat-name">分岐ロジック</div>
+        <div class="mfp-feat-desc">回答内容で次の質問を変える条件分岐</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🔗</div>
+        <div class="mfp-feat-name">公開URL・QR</div>
+        <div class="mfp-feat-desc">URLとQRコードで誰でも回答できる</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🕵️</div>
+        <div class="mfp-feat-name">匿名設定</div>
+        <div class="mfp-feat-desc">回答者名を保存しない匿名モード</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🎨</div>
+        <div class="mfp-feat-name">テーマ色</div>
+        <div class="mfp-feat-desc">アクセントカラーをカスタマイズ</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">📊</div>
+        <div class="mfp-feat-name">集計・CSV出力</div>
+        <div class="mfp-feat-desc">リアルタイム集計とCSVダウンロード</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">👥</div>
+        <div class="mfp-feat-name">共同編集</div>
+        <div class="mfp-feat-desc">他のDSTTユーザーと一緒に編集できる</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🖼️</div>
+        <div class="mfp-feat-name">画像埋め込み</div>
+        <div class="mfp-feat-desc">説明文に画像を挿入して視覚的に</div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px">
+      <table class="mfp-opt-table">
+        <thead><tr><th>項目</th><th>仕様</th></tr></thead>
+        <tbody>
+          <tr><td>タイトル</td><td>最大 200 文字</td></tr>
+          <tr><td>説明文</td><td>最大 5,000 文字（リッチテキストHTMLは最大 20,000 文字）</td></tr>
+          <tr><td>質問タイトル</td><td>最大 300 文字</td></tr>
+          <tr><td>選択肢数</td><td>最大 200 件</td></tr>
+          <tr><td>共同編集者</td><td>最大 100 名</td></tr>
+          <tr><td>画像アップロード</td><td>最大 5 MB（PNG / JPEG / GIF / WebP）</td></tr>
+          <tr><td>回答者へのDSTTアカウント</td><td>不要。公開URLを知っていれば誰でも回答可能</td></tr>
+          <tr><td>重複回答防止</td><td>同一ブラウザのCookieによる簡易制限（オプション）</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== フォームを作る ========== -->
+  <section id="create" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#dbeafe">✏️</div>
+      <div>
+        <h2 class="mfp-section-title">フォームを作る</h2>
+        <p class="mfp-section-desc">新規作成から公開まで4ステップで完了します。</p>
+      </div>
+    </div>
+
+    <div class="mfp-step">
+      <div class="mfp-step-badge">1</div>
+      <div class="mfp-step-body">
+        <div class="mfp-step-title">新規作成を押す</div>
+        <p class="mfp-step-text">画面上部の「新規作成」ボタンを押すと、タイトル「新しいPowerVote」のフォームが左側一覧に追加され、エディタが開きます。</p>
+        <div class="mfp-tip" style="margin-top:10px">
+          💡 テンプレートを活用する場合は、新規作成直後に「テンプレート」ボタンから用途に合った雛形を読み込めます。
+        </div>
+      </div>
+    </div>
+
+    <div class="mfp-step">
+      <div class="mfp-step-badge">2</div>
+      <div class="mfp-step-body">
+        <div class="mfp-step-title">フォームの基本設定を行う</div>
+        <p class="mfp-step-text">エディタ上部の設定エリアで、フォームのタイトル・説明・公開状態・回答者情報・テーマ色などを設定します。</p>
+        <hr class="mfp-divider">
+        <table class="mfp-opt-table">
+          <thead><tr><th style="width:150px">設定項目</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr><td>タイトル</td><td>フォームの名前。一覧にも表示されます（最大200文字）</td></tr>
+            <tr><td>公開状態</td><td>下書き・受付中・締切。「受付中」のみ回答可能</td></tr>
+            <tr><td>説明</td><td>フォーム全体への説明文。改行や書式設定も可能</td></tr>
+            <tr><td>詳細編集</td><td>説明文をリッチテキストで編集（太字・色・画像挿入など）</td></tr>
+            <tr><td>回答者情報</td><td>匿名 / 名前任意 / 名前必須 の3段階</td></tr>
+            <tr><td>回答者名を保存しない</td><td>オンにすると名前・メールは保存されません</td></tr>
+            <tr><td>同一ブラウザ1回まで</td><td>Cookie による簡易的な重複回答防止</td></tr>
+            <tr><td>テーマ色</td><td>ボタンや強調色をカスタマイズ</td></tr>
+            <tr><td>基礎文字色</td><td>フォーム全体の基本テキスト色</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mfp-step">
+      <div class="mfp-step-badge">3</div>
+      <div class="mfp-step-body">
+        <div class="mfp-step-title">質問を追加する</div>
+        <p class="mfp-step-text">設定エリアの下に並ぶ質問タイプボタン（短文・長文・単一選択…）を押すと質問が追加されます。<br>各質問カードで質問文・補足説明・必須設定・オプション設定を編集します。</p>
+        <div class="mfp-note" style="margin-top:10px">
+          ✅ 質問の並び替えはドラッグ＆ドロップで行います。各カードの左端ハンドル（⠿）を掴んで上下に移動してください。
+        </div>
+      </div>
+    </div>
+
+    <div class="mfp-step">
+      <div class="mfp-step-badge">4</div>
+      <div class="mfp-step-body">
+        <div class="mfp-step-title">保存して公開する</div>
+        <p class="mfp-step-text">「保存」ボタンを押してフォームを保存します。回答を受け付けるには、公開状態を「受付中」にして保存してください。</p>
+        <hr class="mfp-divider">
+        <div class="pv-status-row">
+          <div class="pv-status-cell">
+            <div class="pv-status-name">📝 下書き</div>
+            <div class="pv-status-note">公開URLにアクセスしても回答不可</div>
+          </div>
+          <div class="pv-status-cell active">
+            <div class="pv-status-name">✅ 受付中</div>
+            <div class="pv-status-note">公開URLから回答できる状態</div>
+          </div>
+          <div class="pv-status-cell">
+            <div class="pv-status-name">🔒 締切</div>
+            <div class="pv-status-note">受付終了。過去の回答は参照可能</div>
+          </div>
+        </div>
+        <div class="mfp-warn" style="margin-top:8px">
+          ⚠️ 公開状態が「下書き」または「締切」の場合、公開URLにアクセスしても回答フォームは表示されません。
+        </div>
+      </div>
+    </div>
+
+    <!-- テンプレート -->
+    <div class="mfp-card">
+      <div class="mfp-card-title" style="justify-content:space-between">
+        <span>📋 テンプレートから始める</span>
+        <button class="mfp-popup-btn" onclick="openModal('modalTemplates')">テンプレート一覧を見る ▼</button>
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">「テンプレート」ボタンを押すと、用途別の雛形から質問セットをまとめて配置できます。既存の質問に追加される形で読み込まれます。</p>
+      <ul class="mfp-ul">
+        <li>テンプレートを読み込んだ後でも、質問を自由に追加・削除・編集できます</li>
+        <li>テンプレートを選ぶと既存の質問はそのままで末尾に追加されます</li>
+      </ul>
+    </div>
+
+    <!-- フォーム管理 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">📁 フォームの管理（左側一覧）</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>表示内容</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr><td>フォーム名</td><td>設定したタイトルが表示されます</td></tr>
+          <tr><td>公開状態</td><td>下書き・受付中・締切のいずれかが表示されます</td></tr>
+          <tr><td>回答件数</td><td>自分のフォームは「回答 N件」が表示されます</td></tr>
+          <tr><td>共有バッジ</td><td>他ユーザーから共有されたフォームは「〇〇さんから共有」と表示されます</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-tip" style="margin-top:10px">
+        💡 フォームを削除するには、エディタ内の「削除」ボタンを押します。削除すると全回答データも消えます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 質問の種類 ========== -->
+  <section id="qtypes" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#dbeafe">🔢</div>
+      <div>
+        <h2 class="mfp-section-title">質問の種類（14種類）</h2>
+        <p class="mfp-section-desc">PowerVoteでは14種類の質問タイプを組み合わせてフォームを構成します。</p>
+      </div>
+    </div>
+
+    <div class="pv-qtype-grid">
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">📝 短文</div>
+        <div class="pv-qtype-desc">1行のテキスト入力。名前・件名・キーワードなど短い回答に</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">📄 長文</div>
+        <div class="pv-qtype-desc">複数行のテキスト入力。意見・感想・詳細説明など長い回答に</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">🔘 単一選択</div>
+        <div class="pv-qtype-desc">複数の選択肢から1つだけ選ぶ。分岐ロジックに対応</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">☑️ 複数選択</div>
+        <div class="pv-qtype-desc">複数の選択肢から複数選べる。チェックボックス形式</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">⭐ 評価</div>
+        <div class="pv-qtype-desc">数値スケールで評価。最小値・最大値・ラベルを設定可能</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">🔢 数値</div>
+        <div class="pv-qtype-desc">数値の入力。最小・最大・整数のみの制限を設定可能</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">📅 日付</div>
+        <div class="pv-qtype-desc">カレンダーから日付を選ぶ。参加日・締切日など</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">🕐 時刻</div>
+        <div class="pv-qtype-desc">時刻を入力。開始時間・希望時間帯など</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">📧 メール</div>
+        <div class="pv-qtype-desc">メールアドレス形式を検証して入力させる</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">📞 電話</div>
+        <div class="pv-qtype-desc">電話番号を入力するテキストフィールド</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">🌐 URL</div>
+        <div class="pv-qtype-desc">https://から始まるURLを入力させる</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">✅ 同意</div>
+        <div class="pv-qtype-desc">チェックボックスで同意を確認する。必須にすることが多い</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">ℹ️ 見出し・説明</div>
+        <div class="pv-qtype-desc">回答不要の説明文や見出し。セクション区切りに使う</div>
+      </div>
+      <div class="pv-qtype-card">
+        <div class="pv-qtype-label">➡️ パーテーション</div>
+        <div class="pv-qtype-desc">フローエディタ専用。回答の流れをページ区切りで制御</div>
+      </div>
+    </div>
+
+    <div class="mfp-card" style="margin-top:16px">
+      <div class="mfp-card-title">🗒️ 各質問タイプの設定オプション</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>タイプ</th><th>設定できる内容</th></tr></thead>
+        <tbody>
+          <tr><td>短文 / 長文 / 電話</td><td>最小文字数・最大文字数・入力例（プレースホルダー）</td></tr>
+          <tr><td>メール</td><td>最小文字数・最大文字数・入力例</td></tr>
+          <tr><td>URL</td><td>最小文字数・最大文字数・入力例</td></tr>
+          <tr><td>数値</td><td>最小値・最大値・整数のみフラグ</td></tr>
+          <tr><td>評価</td><td>最小値・最大値・最小ラベル・最大ラベル</td></tr>
+          <tr><td>単一選択 / 複数選択</td><td>選択肢のラベルを追加・削除・並び替え（最大200件）</td></tr>
+          <tr><td>単一選択</td><td>各選択肢ごとの分岐先（フローエディタ）</td></tr>
+          <tr><td>パーテーション</td><td>「次のページへ」ボタンのラベル</td></tr>
+          <tr><td>すべて</td><td>質問文（最大300文字）・補足説明（最大5,000文字）・必須/任意</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== 質問の設定 ========== -->
+  <section id="settings" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#dbeafe">⚙️</div>
+      <div>
+        <h2 class="mfp-section-title">質問の設定と分岐</h2>
+        <p class="mfp-section-desc">質問カードの詳細設定、必須設定、分岐ロジックについて説明します。</p>
+      </div>
+    </div>
+
+    <!-- 質問カードの操作 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">📝 質問カードの操作方法</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>操作</th><th>方法</th></tr></thead>
+        <tbody>
+          <tr><td>並び替え</td><td>カード左端の⠿ハンドルをドラッグして上下に移動</td></tr>
+          <tr><td>削除</td><td>カード右上の「削除」ボタン（またはゴミ箱アイコン）</td></tr>
+          <tr><td>必須設定</td><td>各カードの「必須」トグルをオンにする</td></tr>
+          <tr><td>補足説明</td><td>質問タイトルの下の説明欄に入力（改行・太字などの書式あり）</td></tr>
+          <tr><td>選択肢の追加</td><td>「選択肢を追加」リンクまたはボタンをクリック</td></tr>
+          <tr><td>選択肢の並び替え</td><td>選択肢の⠿ハンドルをドラッグ</td></tr>
+          <tr><td>こだわり設定</td><td>「こだわり設定」を開くと文字数制限・入力例などの詳細設定</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-tip" style="margin-top:10px">
+        💡 「見出し・説明」タイプは回答不要です。必須フラグは設定できません。説明文や区切りとして使います。
+      </div>
+    </div>
+
+    <!-- 分岐ロジック -->
+    <div class="mfp-card">
+      <div class="mfp-card-title" style="justify-content:space-between">
+        <span>🔀 分岐ロジック（条件分岐）</span>
+        <button class="mfp-popup-btn" onclick="openModal('modalBranch')">分岐の設定方法を見る ▼</button>
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">「単一選択」タイプの質問では、各選択肢ごとに「次に進む質問」を設定できます。回答に応じてフォームの流れを変えられます。</p>
+      <div class="pv-flow-diagram">
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+          <span class="pv-flow-node">参加できますか？</span>
+          <span class="pv-flow-arrow">→</span>
+          <span style="font-size:12px;color:#64748b">「参加する」を選ぶ</span>
+          <span class="pv-flow-arrow">→</span>
+          <span class="pv-flow-node">参加者名を入力</span>
+        </div>
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
+          <span class="pv-flow-node">参加できますか？</span>
+          <span class="pv-flow-arrow">→</span>
+          <span style="font-size:12px;color:#64748b">「参加しない」を選ぶ</span>
+          <span class="pv-flow-arrow">→</span>
+          <span class="pv-flow-node" style="background:#fee2e2;color:#dc2626;border-color:#dc2626">回答終了</span>
+        </div>
+      </div>
+      <ul class="mfp-ul" style="margin-top:12px">
+        <li>分岐は「単一選択」タイプのみ設定可能です</li>
+        <li>各選択肢に「次の質問」または「回答終了」を指定できます</li>
+        <li>分岐を設定しない選択肢は、順番どおり次の質問へ進みます</li>
+        <li>「フローで作成」エディタを使うと分岐の流れを視覚的に確認しながら編集できます</li>
+      </ul>
+      <div class="mfp-note" style="margin-top:10px">
+        ✅ 分岐ロジックを使うと「参加しない人には詳細質問を省く」「同意しない場合は即終了」など、回答者に最適な流れを作れます。
+      </div>
+    </div>
+
+    <!-- リッチテキスト説明 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">🎨 リッチテキスト編集（詳細編集）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">フォームの説明文と各質問の補足説明は「詳細編集」ボタンでリッチテキストモードに切り替えられます。</p>
+      <table class="mfp-opt-table">
+        <thead><tr><th>機能</th><th>操作</th></tr></thead>
+        <tbody>
+          <tr><td>太字</td><td>テキストを選択して B ボタンをクリック（または** テキスト **）</td></tr>
+          <tr><td>下線</td><td>テキストを選択して U ボタンをクリック</td></tr>
+          <tr><td>文字色</td><td>テキストを選択してカラーパレットから選択</td></tr>
+          <tr><td>テキスト配置</td><td>左揃え・中央・右揃えを選択</td></tr>
+          <tr><td>リンク</td><td>URLを入力してリンクを挿入（https://またはmailto:）</td></tr>
+          <tr><td>画像</td><td>PNG/JPEG/GIF/WebP（最大5MB）をアップロード・挿入</td></tr>
+          <tr><td>画像サイズ・配置</td><td>挿入した画像の幅（10〜100%）と左/中央/右を設定</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-warn" style="margin-top:10px">
+        ⚠️ リッチテキストモードで編集中にプレーンテキストの「説明」欄を編集すると、リッチテキストの内容が失われます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 公開・共有 ========== -->
+  <section id="publish" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#dbeafe">🚀</div>
+      <div>
+        <h2 class="mfp-section-title">公開・共有</h2>
+        <p class="mfp-section-desc">フォームを公開状態にして、URLやQRコードで回答者に共有します。</p>
+      </div>
+    </div>
+
+    <!-- 公開URL -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">🔗 公開URL とQRコード</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">フォームを作成すると自動的に一意の公開URLが割り当てられます。このURLを回答者に共有します。</p>
+      <table class="mfp-opt-table">
+        <thead><tr><th>操作</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr><td>URLコピー</td><td>公開URLをクリップボードにコピーします</td></tr>
+          <tr><td>QR表示</td><td>公開URLのQRコードをモーダルで表示します。スマートフォンのカメラで読み取れます</td></tr>
+          <tr><td>URL再発行</td><td>新しいURLに変更します。古いURLは即座に無効になります</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-warn" style="margin-top:10px">
+        ⚠️ 「URL再発行」を押すと以前のURLは使えなくなります。すでに共有したURLがある場合は新しいURLを再送してください。
+      </div>
+    </div>
+
+    <!-- プレビュー -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">👁️ プレビューで確認する</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">「プレビュー」ボタンを押すと、公開フォームと同じ見た目でフォームを確認できます。下書き状態のフォームでもプレビュー確認が可能です。</p>
+      <ul class="mfp-ul">
+        <li>プレビューでは実際に回答を送信することはできません（回答が保存されません）</li>
+        <li>テーマ色・質問の順番・分岐の流れを公開前に確認できます</li>
+        <li>スマートフォンでの見た目を確認したい場合は、公開URLを「下書き」のまま開いてください（回答は送信できません）</li>
+      </ul>
+    </div>
+
+    <!-- 共同編集 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">👥 他のDSTTユーザーと共同編集する</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">フォームの作成者（オーナー）は、他のDSTTユーザーにフォームの編集権限を付与できます。</p>
+      <div class="mfp-grid2">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">編集者の追加方法</div>
+          <ul class="mfp-ul">
+            <li>「編集できるDSTTユーザー」欄の検索ボックスに表示名を入力</li>
+            <li>候補が表示されたら名前を選択して追加</li>
+            <li>追加済みの編集者一覧が下に表示されます</li>
+          </ul>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">共同編集者の権限</div>
+          <ul class="mfp-ul">
+            <li>フォームの内容・質問の編集ができます</li>
+            <li>URLの再発行はできません（オーナー専用）</li>
+            <li>フォームの削除はできません（オーナー専用）</li>
+            <li>左側一覧で「〇〇さんから共有」と表示されます</li>
+          </ul>
+        </div>
+      </div>
+      <div class="mfp-note" style="margin-top:10px">
+        ✅ 共同編集者の追加・削除ができるのはオーナーのみです。最大100名まで追加できます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 回答者の操作 ========== -->
+  <section id="respondent" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#dbeafe">🙋</div>
+      <div>
+        <h2 class="mfp-section-title">回答者の操作</h2>
+        <p class="mfp-section-desc">公開URLを開いた回答者側の操作フローと、回答に関するルールを説明します。</p>
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">📬 回答者の操作フロー</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0">
+        <div style="background:#eff6ff;border:2px solid #2563eb;border-radius:10px;padding:10px 16px;text-align:center;min-width:80px">
+          <div style="font-size:20px">🔗</div>
+          <div style="font-size:12px;font-weight:700;color:#1d4ed8">URLを開く</div>
+        </div>
+        <div style="font-size:20px;color:#94a3b8">→</div>
+        <div style="background:#eff6ff;border:2px solid #2563eb;border-radius:10px;padding:10px 16px;text-align:center;min-width:80px">
+          <div style="font-size:20px">✏️</div>
+          <div style="font-size:12px;font-weight:700;color:#1d4ed8">質問に回答</div>
+        </div>
+        <div style="font-size:20px;color:#94a3b8">→</div>
+        <div style="background:#eff6ff;border:2px solid #2563eb;border-radius:10px;padding:10px 16px;text-align:center;min-width:80px">
+          <div style="font-size:20px">📤</div>
+          <div style="font-size:12px;font-weight:700;color:#1d4ed8">送信</div>
+        </div>
+        <div style="font-size:20px;color:#94a3b8">→</div>
+        <div style="background:#dcfce7;border:2px solid #16a34a;border-radius:10px;padding:10px 16px;text-align:center;min-width:80px">
+          <div style="font-size:20px">✅</div>
+          <div style="font-size:12px;font-weight:700;color:#166534">完了</div>
+        </div>
+      </div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>場面</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr><td>フォームを開く</td><td>DSTTアカウント不要。公開URLにアクセスするだけで表示されます</td></tr>
+          <tr><td>名前の入力</td><td>回答者情報の設定によって「任意」「必須」「非表示（匿名）」が変わります</td></tr>
+          <tr><td>必須質問</td><td>必須項目が未入力のまま送信しようとするとエラーが表示されます</td></tr>
+          <tr><td>分岐の適用</td><td>単一選択の回答に応じて次に表示される質問が変わります</td></tr>
+          <tr><td>回答の送信</td><td>「送信」ボタンを押すと回答が記録されます</td></tr>
+          <tr><td>送信後の画面</td><td>「回答を受け付けました」メッセージが表示されます</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">🚫 回答できないケース</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>状況</th><th>回答者に表示される内容</th></tr></thead>
+        <tbody>
+          <tr><td>フォームが「下書き」または「締切」</td><td>「このPowerVoteは現在回答を受け付けていません」</td></tr>
+          <tr><td>同一ブラウザ1回制限を突破しようとした</td><td>「このブラウザではすでに回答済みです」</td></tr>
+          <tr><td>無効なURL</td><td>404エラーページが表示されます</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-note" style="margin-top:10px">
+        ✅ 「同一ブラウザ1回まで」はCookieによる制限です。別のブラウザや、Cookieを削除した場合は再度回答できます。厳密な本人確認ではありません。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 結果・集計 ========== -->
+  <section id="results" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#dbeafe">📈</div>
+      <div>
+        <h2 class="mfp-section-title">結果・集計</h2>
+        <p class="mfp-section-desc">エディタの「回答」タブで集計結果と個別回答を確認できます。CSV出力にも対応しています。</p>
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">📊 集計の見方（回答タブ）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">エディタ上部の「回答」タブを押すと、集計ビューに切り替わります。</p>
+      <table class="mfp-opt-table">
+        <thead><tr><th>表示内容</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr><td>回答数</td><td>現在の総回答件数が表示されます</td></tr>
+          <tr><td>再集計</td><td>「再集計」ボタンで最新の回答データを取得します</td></tr>
+          <tr><td>選択・評価・同意</td><td>各選択肢の回答数が一覧表示されます</td></tr>
+          <tr><td>数値</td><td>回答件数・最小値・最大値・平均値が表示されます</td></tr>
+          <tr><td>テキスト</td><td>最新50件の回答テキストが表示されます</td></tr>
+          <tr><td>個別回答</td><td>回答ごとに回答者名・メール・送信日時・全回答内容が確認できます</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-note" style="margin-top:10px">
+        ✅ 集計は作成者（およびフォームの編集共有者）のみが確認できます。回答者には集計結果は表示されません。
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">📥 CSV出力</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">「回答」タブの「CSV出力」リンクを押すと、全回答データをCSVファイルとしてダウンロードできます。</p>
+      <table class="mfp-opt-table">
+        <thead><tr><th>CSVの列</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>submitted_at</td><td>回答の送信日時（ISO 8601形式）</td></tr>
+          <tr><td>respondent_name</td><td>回答者名（匿名フォームは空欄）</td></tr>
+          <tr><td>respondent_email</td><td>回答者メール（設定していない場合は空欄）</td></tr>
+          <tr><td>各質問タイトル</td><td>各質問の回答値。選択式は選択肢のラベル、複数選択はカンマ区切り</td></tr>
+        </tbody>
+      </table>
+      <div class="mfp-tip" style="margin-top:10px">
+        💡 CSVはExcelやGoogleスプレッドシートで直接開けます。BOM付きUTF-8形式のため、Excelでも文字化けしません。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== フローで作成 ========== -->
+  <section id="floweditor" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#dbeafe">🔀</div>
+      <div>
+        <h2 class="mfp-section-title">フローで作成（フローエディタ）</h2>
+        <p class="mfp-section-desc">「フローで作成」ボタンを押すと、質問をカードとして並べ、回答の流れを線で視覚的に確認しながら編集できる専用エディタが開きます。</p>
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">🖥️ フローエディタの画面構成</div>
+      <div class="mfp-grid2">
+        <div style="background:#f8fafc;border-radius:12px;padding:14px">
+          <div style="font-size:13px;font-weight:800;color:#1d4ed8;margin-bottom:8px">🗺️ キャンバス（左側）</div>
+          <ul class="mfp-ul">
+            <li>質問がカードとして表示されます</li>
+            <li>カード間を線で繋いで流れを設定します</li>
+            <li>ズームイン/アウトで全体・詳細を確認</li>
+            <li>右クリックで質問の追加・整列メニュー</li>
+          </ul>
+        </div>
+        <div style="background:#f8fafc;border-radius:12px;padding:14px">
+          <div style="font-size:13px;font-weight:800;color:#1d4ed8;margin-bottom:8px">🔧 インスペクター（右側）</div>
+          <ul class="mfp-ul">
+            <li>選択した質問カードの詳細編集</li>
+            <li>質問文・補足説明・種類・必須/任意</li>
+            <li>選択肢の追加・削除（選択式のみ）</li>
+            <li>質問の削除ボタン</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">➕ 質問の追加方法（フローエディタ）</div>
+      <ul class="mfp-ul">
+        <li>上部ツールバーの「単一選択」「短文」「長文」「同意」「説明」ボタンで追加できます</li>
+        <li>キャンバス上で右クリックするとコンテキストメニューから追加できます</li>
+        <li>追加した質問カードはドラッグで自由に配置できます</li>
+      </ul>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">🔀 分岐の設定方法（フローエディタ）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">フローエディタでは、質問間を矢印で繋ぐことで「次に進む質問」を設定できます。</p>
+      <ul class="mfp-ul">
+        <li>「単一選択」カードの各選択肢ポートから矢印を引いて次の質問に繋ぎます</li>
+        <li>「回答終了」ノードに繋ぐと、その選択肢の回答後にフォームが終了します</li>
+        <li>繋がっていない選択肢は順番に次の質問へ進む（デフォルト動作）</li>
+        <li>フローの流れは保存ボタンで通常のエディタにも反映されます</li>
+      </ul>
+      <div class="mfp-note" style="margin-top:10px">
+        ✅ フローエディタで設定した分岐は通常の「作成」タブの質問にも適用されます。両方の編集が連動しています。
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">⌨️ フローエディタのズーム操作</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>操作</th><th>方法</th></tr></thead>
+        <tbody>
+          <tr><td>拡大</td><td>＋ボタンをクリック</td></tr>
+          <tr><td>縮小</td><td>−ボタンをクリック</td></tr>
+          <tr><td>等倍に戻す</td><td>「等倍」ボタンをクリック</td></tr>
+          <tr><td>スクロール</td><td>マウスホイールまたはトラックパッドでスクロール</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== よくある質問 ========== -->
+  <section id="faq" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#dbeafe">❓</div>
+      <div>
+        <h2 class="mfp-section-title">よくある質問</h2>
+        <p class="mfp-section-desc">困ったときはこちらを確認してください。</p>
+      </div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">回答者にDSTTアカウントは必要ですか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">必要ありません。公開URLを知っていればブラウザから直接回答できます。DSTTへのログインはフォームの作成・編集・結果確認をする側にのみ必要です。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">1人1回の回答制限はできますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">「同一ブラウザ1回まで」チェックボックスをオンにすると、同じブラウザからの2回目の送信をCookieで制限できます。ただし別ブラウザやCookieを削除した場合には制限できません。厳密な本人確認ではありません。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">公開URLで回答できない場合はどうすれば？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">公開状態が「受付中」になっているか確認してください。「下書き」または「締切」の場合は、エディタで「受付中」に変更して保存してください。また「URL再発行」を押した場合は新しいURLを共有し直してください。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">選択式の質問が保存できません</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">単一選択・複数選択タイプには選択肢が1つ以上必要です。選択肢を追加してから保存してください。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">フォームを削除すると回答データも消えますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">はい。フォームを削除すると、そのフォームに紐づく全回答データも完全に削除されます。削除前にCSVで回答データをエクスポートすることをおすすめします。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">結果は回答者にも見えますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">現在は作成者（と共同編集者）のみが確認できます。回答者は自分の回答送信後に完了メッセージが表示されるだけで、集計結果は見られません。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">分岐はどのタイプの質問に設定できますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">分岐（条件分岐）を設定できるのは「単一選択」タイプのみです。各選択肢ごとに次の質問または回答終了を指定できます。フローエディタを使うと視覚的に確認しながら設定できます。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">回答者情報（名前）を取得したい場合はどうすれば？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">フォームの「回答者情報」設定を「名前必須」にすると、回答送信時に名前の入力が必須になります。「名前任意」では入力しなくても送信できます。「匿名」では名前欄が表示されず保存されません。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">URLを変えずにフォーム内容を編集できますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">はい。「URL再発行」を押さない限り、フォーム内容を何度編集・保存してもURLは変わりません。受付中のまま質問を修正することも可能です。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">パーテーションとは何ですか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">フローエディタで使用できる特殊な質問タイプです。フォームのページを区切り、「次のページへ」ボタンを表示させます。フローの分岐の区切り点として活用できます。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">説明文に画像を入れることはできますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">はい。フォームの説明文や各質問の補足説明で「詳細編集」を開くと、画像アップロード機能が使えます。PNG/JPEG/GIF/WebP（最大5MB）をアップロードして埋め込めます。</div>
+    </div>
+  </section>
+
+</div><!-- /mfp-wrap -->
+
+
+<!-- ===== MODAL: テンプレート ===== -->
+<div id="modalTemplates" class="mfp-modal-ov mfp-hidden">
+  <div class="mfp-modal-box">
+    <div class="mfp-modal-head">
+      <h3 class="mfp-modal-title">📋 テンプレート一覧</h3>
+      <button class="mfp-modal-close" onclick="closeModal('modalTemplates')">✕</button>
+    </div>
+    <table class="mfp-opt-table">
+      <thead><tr><th>テンプレート名</th><th>含まれる質問</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>参加確認</td>
+          <td>参加できますか？（単一選択）・参加者名（短文）・連絡事項（長文）</td>
+          <td>イベント・会議の出欠確認</td>
+        </tr>
+        <tr>
+          <td>同意確認</td>
+          <td>確認事項（見出し）・同意します（同意）・氏名（短文）</td>
+          <td>規約同意・確認書</td>
+        </tr>
+        <tr>
+          <td>満足度調査</td>
+          <td>全体の満足度（評価）・また利用したいですか？（単一選択）・改善してほしいこと（長文）</td>
+          <td>アンケート・フィードバック</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="mfp-note" style="margin-top:12px">
+      ✅ テンプレートを適用すると、既存の質問は残したまま末尾に質問が追加されます。
+    </div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mfp-popup-btn" onclick="closeModal('modalTemplates')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: 分岐設定 ===== -->
+<div id="modalBranch" class="mfp-modal-ov mfp-hidden">
+  <div class="mfp-modal-box">
+    <div class="mfp-modal-head">
+      <h3 class="mfp-modal-title">🔀 分岐の設定方法</h3>
+      <button class="mfp-modal-close" onclick="closeModal('modalBranch')">✕</button>
+    </div>
+    <p style="font-size:14px;color:#475569;margin:0 0 14px">分岐の設定は「フローで作成」エディタまたは各質問の「こだわり設定」から行えます。</p>
+    <div style="background:#f8fafc;border-radius:12px;padding:14px;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:800;color:#334155;margin-bottom:8px">方法① フローエディタで設定する（推奨）</div>
+      <ul class="mfp-ul">
+        <li>「フローで作成」ボタンを押してフローエディタを開きます</li>
+        <li>「単一選択」カードの各選択肢のポートから矢印を引いて次の質問に繋ぎます</li>
+        <li>回答終了にしたい場合は「__end__」ノードに繋ぎます</li>
+        <li>保存すると通常のエディタにも反映されます</li>
+      </ul>
+    </div>
+    <div style="background:#f8fafc;border-radius:12px;padding:14px">
+      <div style="font-size:13px;font-weight:800;color:#334155;margin-bottom:8px">方法② こだわり設定から設定する</div>
+      <ul class="mfp-ul">
+        <li>単一選択の質問カードで「こだわり設定」を開きます</li>
+        <li>各選択肢の「分岐先」欄に次の質問を指定します</li>
+        <li>「__end__」を指定すると回答終了になります</li>
+      </ul>
+    </div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mfp-popup-btn" onclick="closeModal('modalBranch')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+  function toggleAcc(btn) {
+    btn.closest('.mfp-acc-item').classList.toggle('mfp-open');
+  }
+  function openModal(id) {
+    document.getElementById(id).classList.remove('mfp-hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.add('mfp-hidden');
+    document.body.style.overflow = '';
+  }
+  document.querySelectorAll('.mfp-modal-ov').forEach(function(ov) {
+    ov.addEventListener('click', function(e) { if (e.target === ov) closeModal(ov.id); });
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.mfp-modal-ov:not(.mfp-hidden)').forEach(function(ov) {
+        closeModal(ov.id);
+      });
+    }
+  });
+  (function() {
+    var sections = document.querySelectorAll('.mfp-section[id]');
+    var navLinks = document.querySelectorAll('.mfp-nav-link[data-section]');
+    function onScroll() {
+      var scrollY = window.pageYOffset;
+      var active = null;
+      sections.forEach(function(sec) {
+        var top = sec.getBoundingClientRect().top + scrollY - 100;
+        if (scrollY >= top) active = sec.id;
+      });
+      navLinks.forEach(function(lnk) {
+        lnk.classList.toggle('mfp-active', lnk.dataset.section === active);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>
+{% endblock %}
