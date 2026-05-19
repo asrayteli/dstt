@@ -1,0 +1,1189 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  html { scroll-behavior: smooth; }
+
+  /* ===== Sticky nav ===== */
+  .mfp-nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: #fff;
+    border-bottom: 2px solid #e2e8f0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .mfp-nav::-webkit-scrollbar { display: none; }
+  .mfp-nav-inner {
+    display: flex;
+    min-width: max-content;
+    padding: 0 12px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .mfp-nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #64748b;
+    border-bottom: 3px solid transparent;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .mfp-nav-link:hover { color: #047857; }
+  .mfp-nav-link.mfp-active { color: #047857; border-bottom-color: #047857; }
+
+  /* ===== Layout ===== */
+  .mfp-wrap {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 16px 80px;
+  }
+  .mfp-section { padding-top: 52px; }
+  .mfp-section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #f1f5f9;
+  }
+  .mfp-section-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    font-size: 26px;
+    flex-shrink: 0;
+  }
+  .mfp-section-title { font-size: 22px; font-weight: 900; color: #0f172a; margin: 0 0 4px; }
+  .mfp-section-desc  { font-size: 14px; color: #64748b; margin: 0; line-height: 1.6; }
+
+  /* ===== Cards ===== */
+  .mfp-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 22px 24px;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+    margin-bottom: 12px;
+  }
+  .mfp-card-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ===== Feature grid ===== */
+  .mfp-feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 12px;
+  }
+  .mfp-feat-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 18px 14px;
+    text-align: center;
+    transition: box-shadow 0.15s;
+  }
+  .mfp-feat-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,0.10); }
+  .mfp-feat-emoji { font-size: 30px; line-height: 1; margin-bottom: 8px; }
+  .mfp-feat-name { font-size: 13px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+  .mfp-feat-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  /* ===== Step cards ===== */
+  .mfp-step {
+    display: flex;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(15,23,42,0.04);
+  }
+  .mfp-step-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    font-size: 16px; font-weight: 900;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #047857, #059669);
+    color: #fff;
+  }
+  .mfp-step-body { flex: 1; min-width: 0; }
+  .mfp-step-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 6px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .mfp-step-text { font-size: 14px; color: #475569; line-height: 1.7; margin: 0; }
+
+  /* ===== Callouts ===== */
+  .mfp-tip {
+    background: #f0fdf4; border-left: 4px solid #22c55e;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #166534;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mfp-warn {
+    background: #fff7ed; border-left: 4px solid #f97316;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #9a3412;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mfp-note {
+    background: #eff6ff; border-left: 4px solid #3b82f6;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #1e40af;
+    line-height: 1.65; margin: 8px 0;
+  }
+
+  /* ===== Tags ===== */
+  .mfp-tag {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700;
+  }
+  .mfp-tag-green  { background: #dcfce7; color: #16a34a; }
+  .mfp-tag-blue   { background: #dbeafe; color: #1d4ed8; }
+  .mfp-tag-orange { background: #ffedd5; color: #ea580c; }
+  .mfp-tag-red    { background: #fee2e2; color: #dc2626; }
+  .mfp-tag-purple { background: #f3e8ff; color: #7e22ce; }
+  .mfp-tag-yellow { background: #fef9c3; color: #a16207; }
+  .mfp-tag-gray   { background: #f1f5f9; color: #475569; }
+  .mfp-tag-teal   { background: #ccfbf1; color: #0f766e; }
+
+  /* ===== Bullet list ===== */
+  .mfp-ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+  .mfp-ul li {
+    display: flex; gap: 8px; align-items: flex-start;
+    font-size: 14px; color: #334155; line-height: 1.6;
+  }
+  .mfp-ul li::before {
+    content: "▶"; color: #047857; font-size: 10px;
+    margin-top: 4px; flex-shrink: 0;
+  }
+
+  /* ===== Option table ===== */
+  .mfp-opt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .mfp-opt-table th {
+    background: #f8fafc; padding: 10px 12px;
+    text-align: left; font-size: 12px; font-weight: 700;
+    color: #64748b; border-bottom: 1px solid #e2e8f0;
+  }
+  .mfp-opt-table td {
+    padding: 10px 12px; border-bottom: 1px solid #f1f5f9;
+    color: #334155; vertical-align: top; line-height: 1.6;
+  }
+  .mfp-opt-table td:first-child { font-weight: 700; color: #0f172a; white-space: nowrap; }
+  .mfp-opt-table tr:last-child td { border-bottom: 0; }
+
+  /* ===== Divider ===== */
+  .mfp-divider { border: 0; border-top: 1px solid #f1f5f9; margin: 18px 0; }
+
+  /* ===== Grid 2col ===== */
+  .mfp-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .mfp-grid2 { grid-template-columns: 1fr; } }
+
+  /* ===== Expiry grid ===== */
+  .mfp-expiry-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  @media (min-width: 560px) { .mfp-expiry-grid { grid-template-columns: repeat(6, 1fr); } }
+  .mfp-expiry-cell {
+    border: 2px solid #e2e8f0; border-radius: 12px;
+    padding: 12px 8px; text-align: center;
+  }
+  .mfp-expiry-cell.mfp-default { border-color: #059669; background: #f0fdf4; }
+  .mfp-expiry-label { font-size: 13px; font-weight: 800; color: #0f172a; }
+  .mfp-expiry-note  { font-size: 11px; color: #64748b; margin-top: 3px; }
+  .mfp-default-badge {
+    display: inline-block; margin-top: 5px;
+    background: #d1fae5; color: #065f46;
+    font-size: 10px; font-weight: 700;
+    border-radius: 9999px; padding: 2px 7px;
+  }
+
+  /* ===== Format badge ===== */
+  .mfp-fmt-row {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    align-items: center; font-size: 13.5px; color: #475569; padding: 8px 0;
+  }
+  .mfp-fmt-badge {
+    background: #f1f5f9; border: 1px solid #e2e8f0;
+    border-radius: 7px; padding: 3px 9px;
+    font-size: 12px; font-weight: 700; color: #0f172a; font-family: monospace;
+  }
+
+  /* ===== Popup button ===== */
+  .mfp-popup-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px; border: 1.5px solid #cbd5e1;
+    border-radius: 9px; background: #f8fafc;
+    font-size: 12px; font-weight: 700; color: #047857;
+    cursor: pointer; margin: 4px 0; transition: background 0.15s;
+  }
+  .mfp-popup-btn:hover { background: #f0fdf4; border-color: #6ee7b7; }
+
+  /* ===== Accordion ===== */
+  .mfp-acc-item {
+    border: 1px solid #e2e8f0; border-radius: 13px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .mfp-acc-trigger {
+    width: 100%; text-align: left; padding: 15px 18px;
+    background: #fff; border: 0; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 700; color: #0f172a;
+    line-height: 1.5; gap: 12px;
+  }
+  .mfp-acc-trigger:hover { background: #f8fafc; }
+  .mfp-acc-q { flex: 1; text-align: left; }
+  .mfp-acc-arrow { font-size: 11px; color: #94a3b8; transition: transform 0.2s; flex-shrink: 0; }
+  .mfp-acc-item.mfp-open .mfp-acc-arrow { transform: rotate(180deg); }
+  .mfp-acc-body { display: none; padding: 2px 18px 15px; font-size: 14px; color: #475569; line-height: 1.75; }
+  .mfp-acc-item.mfp-open .mfp-acc-body { display: block; }
+
+  /* ===== Modal ===== */
+  .mfp-modal-ov {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.52);
+    z-index: 200; display: flex; align-items: center;
+    justify-content: center; padding: 16px;
+  }
+  .mfp-modal-ov.mfp-hidden { display: none !important; }
+  .mfp-modal-box {
+    background: #fff; border-radius: 20px;
+    max-width: 560px; width: 100%;
+    max-height: 88vh; overflow-y: auto;
+    padding: 28px;
+    box-shadow: 0 28px 56px rgba(0,0,0,0.22);
+    animation: mfp-modal-in 0.18s ease;
+  }
+  @keyframes mfp-modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .mfp-modal-head {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; margin-bottom: 18px;
+  }
+  .mfp-modal-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; line-height: 1.4; }
+  .mfp-modal-close {
+    border: 0; background: #f1f5f9; border-radius: 9px;
+    width: 34px; height: 34px; cursor: pointer;
+    font-size: 16px; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+    color: #64748b; margin-left: 12px;
+  }
+  .mfp-modal-close:hover { background: #e2e8f0; }
+
+  /* ===== Hero ===== */
+  .mfp-hero-bar {
+    background: linear-gradient(135deg, #047857 0%, #0f766e 48%, #2563eb 100%);
+    padding: 40px 24px 36px; text-align: center; color: #fff;
+  }
+  .mfp-hero-bar h1 { font-size: 34px; font-weight: 900; margin: 0 0 6px; }
+  .mfp-hero-bar p { font-size: 15px; opacity: 0.9; margin: 0 0 22px; }
+  .mfp-hero-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .mfp-hero-btn {
+    padding: 11px 22px; border-radius: 12px;
+    font-size: 14px; font-weight: 700; text-decoration: none;
+    border: 2px solid #fff; transition: opacity 0.15s;
+  }
+  .mfp-hero-btn:hover { opacity: 0.85; }
+  .mfp-hero-btn-primary  { background: #fff; color: #047857; }
+  .mfp-hero-btn-secondary { background: transparent; color: #fff; }
+
+  /* ===== Status badge row (download view) ===== */
+  .mfp-dl-card {
+    background: linear-gradient(135deg, #047857, #0f766e);
+    border-radius: 16px; padding: 20px 22px; color: #fff;
+    margin-bottom: 12px;
+  }
+  .mfp-dl-id   { font-size: 28px; font-weight: 900; font-family: monospace; letter-spacing: 0.12em; }
+  .mfp-dl-meta { font-size: 13px; opacity: 0.85; margin-top: 6px; }
+  .mfp-dl-info-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    background: #fff; border: 1px solid #e2e8f0;
+    border-radius: 12px; padding: 14px; margin-bottom: 10px;
+  }
+  .mfp-dl-info-label { font-size: 11px; color: #94a3b8; }
+  .mfp-dl-info-val   { font-size: 14px; font-weight: 700; color: #0f172a; }
+
+  /* ===== Chunk progress mockup ===== */
+  .mfp-progress-bar-wrap { background: #e2e8f0; border-radius: 9999px; height: 10px; overflow: hidden; margin: 8px 0; }
+  .mfp-progress-bar-fill { height: 100%; background: linear-gradient(90deg, #047857, #059669); border-radius: 9999px; width: 65%; }
+  .mfp-progress-text { font-size: 12px; color: #475569; }
+
+  /* ===== Sublist ===== */
+  .mfp-sublist { padding-left: 18px; margin: 6px 0; }
+  .mfp-sublist li { font-size: 13.5px; color: #475569; margin: 4px 0; line-height: 1.6; }
+</style>
+
+<!-- ===== Hero ===== -->
+<div class="mfp-hero-bar">
+  <h1>📪 FILE POST マニュアル</h1>
+  <p>大容量ファイルを安全・簡単に共有。QRコード・パスワード・有効期限をフル活用しましょう。</p>
+  <div class="mfp-hero-btns">
+    <a href="/tools/share" class="mfp-hero-btn mfp-hero-btn-primary">ツールを開く</a>
+    <a href="/" class="mfp-hero-btn mfp-hero-btn-secondary">ダッシュボードへ戻る</a>
+  </div>
+</div>
+
+<!-- ===== Sticky nav ===== -->
+<div class="mfp-nav" id="mfpNav">
+  <div class="mfp-nav-inner">
+    <a href="#overview"  class="mfp-nav-link" data-section="overview">📋 概要</a>
+    <a href="#upload"    class="mfp-nav-link" data-section="upload">📤 アップロード</a>
+    <a href="#share"     class="mfp-nav-link" data-section="share">📬 共有と受け取り</a>
+    <a href="#manage"    class="mfp-nav-link" data-section="manage">⚙️ 共有の管理</a>
+    <a href="#resume"    class="mfp-nav-link" data-section="resume">🔄 中断と再開</a>
+    <a href="#security"  class="mfp-nav-link" data-section="security">🔒 セキュリティ</a>
+    <a href="#faq"       class="mfp-nav-link" data-section="faq">❓ よくある質問</a>
+  </div>
+</div>
+
+<!-- ===== Main content ===== -->
+<div class="mfp-wrap">
+
+  <!-- ========== 概要 ========== -->
+  <section id="overview" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#d1fae5">📋</div>
+      <div>
+        <h2 class="mfp-section-title">FILE POST でできること</h2>
+        <p class="mfp-section-desc">ファイルをアップロードして共有URL・QRコードで相手に渡せるツールです。最大10GBの大容量に対応し、有効期限・パスワード・DL回数の上限を組み合わせて安全に管理できます。</p>
+      </div>
+    </div>
+
+    <div class="mfp-feat-grid">
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">📦</div>
+        <div class="mfp-feat-name">大容量対応</div>
+        <div class="mfp-feat-desc">1共有あたり最大10GBまで送れます</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🔗</div>
+        <div class="mfp-feat-name">共有URL・QR</div>
+        <div class="mfp-feat-desc">URLとQRコードで誰でも受け取れます</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🔒</div>
+        <div class="mfp-feat-name">パスワード保護</div>
+        <div class="mfp-feat-desc">ダウンロード前にパスワード確認が入ります</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">⏱️</div>
+        <div class="mfp-feat-name">有効期限</div>
+        <div class="mfp-feat-desc">1時間〜90日先まで自由に設定できます</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">📊</div>
+        <div class="mfp-feat-name">DL回数制限</div>
+        <div class="mfp-feat-desc">何回ダウンロードされたか把握できます</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🖼️</div>
+        <div class="mfp-feat-name">プレビュー</div>
+        <div class="mfp-feat-desc">画像とPDFはサムネイルを自動表示します</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🔄</div>
+        <div class="mfp-feat-name">中断・再開</div>
+        <div class="mfp-feat-desc">通信が切れても途中から続けられます</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">📁</div>
+        <div class="mfp-feat-name">複数ファイル</div>
+        <div class="mfp-feat-desc">複数ファイルをまとめて1つの共有にできます</div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px">
+      <table class="mfp-opt-table">
+        <thead><tr><th>項目</th><th>制限・仕様</th></tr></thead>
+        <tbody>
+          <tr><td>最大ファイルサイズ</td><td>1共有あたり合計 <strong>10 GB</strong>（ファイル数の上限なし）</td></tr>
+          <tr><td>チャンクサイズ</td><td>50 MB 単位で分割送信されます（ネットワーク負荷軽減と中断対策）</td></tr>
+          <tr><td>有効期限の最大値</td><td>現在から <strong>90日先</strong> まで指定できます</td></tr>
+          <tr><td>DLカウント上限</td><td>1〜100,000 回（空欄で無制限）</td></tr>
+          <tr><td>共有タイトル・ZIP名</td><td>それぞれ最大 120 文字</td></tr>
+          <tr><td>メモ</td><td>最大 200 文字</td></tr>
+          <tr><td>プレビュー対応形式</td><td>画像（JPEG・PNG・GIF・WebP・BMP）、PDF（先頭1ページ・50 MB以内）</td></tr>
+          <tr><td>中断状態の保持期間</td><td>24 時間（それ以降は自動で破棄されます）</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== アップロード ========== -->
+  <section id="upload" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#d1fae5">📤</div>
+      <div>
+        <h2 class="mfp-section-title">ファイルをアップロードする</h2>
+        <p class="mfp-section-desc">3ステップでアップロードを完了できます。設定はすべて任意です。必要な項目だけ入力して使えます。</p>
+      </div>
+    </div>
+
+    <!-- Step 1: 設定 -->
+    <div class="mfp-step">
+      <div class="mfp-step-badge">1</div>
+      <div class="mfp-step-body">
+        <div class="mfp-step-title">
+          共有の設定を入力する
+          <span class="mfp-tag mfp-tag-gray">すべて任意</span>
+        </div>
+        <p class="mfp-step-text">画面上部のフォームで、共有に関する情報を設定します。何も入力しなくてもアップロードできます。</p>
+        <hr class="mfp-divider">
+
+        <div class="mfp-card" style="margin:10px 0 8px">
+          <div class="mfp-card-title" style="justify-content:space-between">
+            <span>📝 基本情報</span>
+            <button class="mfp-popup-btn" onclick="openModal('modalBasicInfo')">詳しく見る ▼</button>
+          </div>
+          <table class="mfp-opt-table">
+            <thead><tr><th style="width:140px">項目名</th><th>説明</th></tr></thead>
+            <tbody>
+              <tr><td>共有タイトル</td><td>一覧での見分けに使うラベルです。省略すると共有IDが代わりに表示されます。（最大120文字）</td></tr>
+              <tr><td>まとめZIP名</td><td>複数ファイルをZIPでまとめてダウンロードするときのファイル名です。省略すると自動で付けられます。（最大120文字）</td></tr>
+              <tr><td>メモ</td><td>受け取る相手への補足メッセージです。ダウンロード確認画面と一覧に表示されます。（最大200文字）</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="mfp-card" style="margin:8px 0">
+          <div class="mfp-card-title" style="justify-content:space-between">
+            <span>⏱️ 有効期限</span>
+            <button class="mfp-popup-btn" onclick="openModal('modalExpiry')">期限の選択肢を見る ▼</button>
+          </div>
+          <p style="font-size:14px;color:#475569;margin:0 0 10px">共有URLが有効な期間を選びます。期限を過ぎると受け取る側はダウンロードできなくなります。</p>
+          <div class="mfp-expiry-grid">
+            <div class="mfp-expiry-cell"><div class="mfp-expiry-label">1時間</div><div class="mfp-expiry-note">急ぎの受け渡しに</div></div>
+            <div class="mfp-expiry-cell"><div class="mfp-expiry-label">今日中</div><div class="mfp-expiry-note">当日内に受け取ってもらう</div></div>
+            <div class="mfp-expiry-cell"><div class="mfp-expiry-label">3日</div><div class="mfp-expiry-note">短期間の共有に</div></div>
+            <div class="mfp-expiry-cell mfp-default"><div class="mfp-expiry-label">7日</div><div class="mfp-default-badge">初期値</div></div>
+            <div class="mfp-expiry-cell"><div class="mfp-expiry-label">14日</div><div class="mfp-expiry-note">2週間の共有に</div></div>
+            <div class="mfp-expiry-cell"><div class="mfp-expiry-label">任意日時</div><div class="mfp-expiry-note">最大90日先まで指定</div></div>
+          </div>
+        </div>
+
+        <div class="mfp-card" style="margin:8px 0">
+          <div class="mfp-card-title">📊 ダウンロード回数の上限</div>
+          <p style="font-size:14px;color:#475569;margin:0">空欄で無制限。1〜100,000 の範囲で設定できます。上限に達すると以降のダウンロード・プレビューができなくなります。後から変更できます。</p>
+          <div class="mfp-tip" style="margin-top:10px">
+            💡 上限を設定しておくと一覧でダウンロード回数が確認でき、「相手が受け取ったかどうか」の目安になります。
+          </div>
+        </div>
+
+        <div class="mfp-card" style="margin:8px 0">
+          <div class="mfp-card-title">🔒 パスワード</div>
+          <p style="font-size:14px;color:#475569;margin:0">設定すると、ダウンロード前に受け取る側がパスワードを入力する必要があります。空欄のままでも共有できます。</p>
+          <div class="mfp-warn" style="margin-top:10px">
+            ⚠️ アップロード後にパスワードを変更することはできません。変更が必要な場合は削除して再アップロードしてください。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: ファイル選択 -->
+    <div class="mfp-step">
+      <div class="mfp-step-badge">2</div>
+      <div class="mfp-step-body">
+        <div class="mfp-step-title">
+          ファイルを選択する
+          <span class="mfp-tag mfp-tag-blue">複数ファイル対応</span>
+        </div>
+        <p class="mfp-step-text">緑の点線枠にファイルをドラッグ＆ドロップするか、「ファイルを選択」ボタンで選択します。複数ファイルを一度に選べます。</p>
+        <hr class="mfp-divider">
+        <div class="mfp-grid2" style="margin-top:8px">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">ドラッグ＆ドロップ</div>
+            <ul class="mfp-ul">
+              <li>ブラウザ外のフォルダからファイルを枠内にドラッグして離します</li>
+              <li>枠が青くハイライトされたらドロップできます</li>
+            </ul>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">ファイルを選択ボタン</div>
+            <ul class="mfp-ul">
+              <li>緑のボタンをクリックしてファイル選択ダイアログを開きます</li>
+              <li>Ctrl（Mac: ⌘）を押しながら選択すると複数ファイルを選べます</li>
+            </ul>
+          </div>
+        </div>
+        <hr class="mfp-divider">
+        <ul class="mfp-ul">
+          <li>ファイルを選択すると「件数・ファイル名・合計サイズ」の一覧が表示されます。内容を確認してください。</li>
+          <li>ファイルの種類は問いません（画像・PDF・動画・アーカイブ・オフィス文書など何でも可）</li>
+          <li>1共有の合計が10 GBを超える場合はエラーになります。ファイルを分けて共有してください。</li>
+        </ul>
+        <div class="mfp-tip" style="margin-top:10px">
+          💡 画像（JPEG・PNG・GIF・WebP・BMP）とPDF（50 MB以内・先頭1ページ）はアップロード後に一覧でプレビューが自動表示されます。
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: アップロード実行 -->
+    <div class="mfp-step">
+      <div class="mfp-step-badge">3</div>
+      <div class="mfp-step-body">
+        <div class="mfp-step-title">
+          アップロードを実行する
+          <span class="mfp-tag mfp-tag-green">自動チャンク分割</span>
+        </div>
+        <p class="mfp-step-text">「アップロードして共有URL取得」ボタンを押すとアップロードが始まります。ファイルは50 MBのチャンク（断片）に分割されて送信されます。</p>
+        <hr class="mfp-divider">
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:12px">
+          <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:8px">アップロード進捗の表示例</div>
+          <div class="mfp-progress-bar-wrap"><div class="mfp-progress-bar-fill"></div></div>
+          <div class="mfp-progress-text">アップロード中 65% · report_2024.pdf · 325 MB / 500 MB · 12.4 MB/s · 残り 14秒</div>
+        </div>
+        <ul class="mfp-ul">
+          <li>進捗バーにファイル名・転送済みサイズ・転送速度・残り時間がリアルタイムで表示されます</li>
+          <li>複数ファイルがある場合はファイルごとに順番にアップロードされます</li>
+          <li>ネットワーク切断など一時的なエラーは自動で最大3回リトライされます</li>
+          <li>アップロード完了後は自動的に共有URLが表示されます</li>
+        </ul>
+        <div class="mfp-note" style="margin-top:10px">
+          ℹ️ チャンク分割により、大容量ファイルでも途中でブラウザが応答不能になりにくくなっています。また途中で通信が切れても再開できます（→「<a href="#resume" style="color:#047857">中断と再開</a>」を参照）。
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 共有と受け取り ========== -->
+  <section id="share" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#d1fae5">📬</div>
+      <div>
+        <h2 class="mfp-section-title">共有URLと受け取りの流れ</h2>
+        <p class="mfp-section-desc">アップロード完了後に表示される共有ID・URL・QRコードを相手に渡します。相手は専用の確認画面からダウンロードします。</p>
+      </div>
+    </div>
+
+    <!-- アップロード完了後 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">✅ アップロード完了後に表示されるもの</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th style="width:120px">表示内容</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>共有ID <span class="mfp-tag mfp-tag-teal">5文字</span></td>
+            <td>この共有を識別するアルファベット・数字5文字のIDです。相手への案内や問い合わせ時に使えます。</td>
+          </tr>
+          <tr>
+            <td>共有URL</td>
+            <td>クリックで全選択できます。このURLを相手に送ると受け取れます。URLにはIDが含まれています。</td>
+          </tr>
+          <tr>
+            <td>QRコード</td>
+            <td>スマートフォンのカメラで読み取るだけでURLが開きます。その場でスマートフォンに渡すときに便利です。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="mfp-tip" style="margin-top:10px">
+        💡 URLを閉じてしまっても、画面下部の「共有ファイル一覧」から「共有リンクを再表示」でいつでも確認できます。
+      </div>
+    </div>
+
+    <!-- ダウンロード確認画面 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">📥 受け取る側のダウンロード確認画面</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">受け取った人が共有URLを開くと「ダウンロード確認画面」が表示されます。</p>
+
+      <!-- 模擬ダウンロード画面 -->
+      <div class="mfp-dl-card">
+        <div style="font-size:11px;font-weight:700;opacity:0.7;letter-spacing:0.1em;text-transform:uppercase">共有ID</div>
+        <div class="mfp-dl-id">A3K9M</div>
+        <div style="font-size:16px;font-weight:700;margin-top:2px">2025年度　提出資料</div>
+        <div class="mfp-dl-meta">こちらのファイルをご確認ください。よろしくお願いします。</div>
+      </div>
+      <div class="mfp-dl-info-grid">
+        <div><div class="mfp-dl-info-label">共有者</div><div class="mfp-dl-info-val">yamada</div></div>
+        <div><div class="mfp-dl-info-label">有効期限</div><div class="mfp-dl-info-val">2025/06/01 17:00</div></div>
+        <div><div class="mfp-dl-info-label">ファイル数</div><div class="mfp-dl-info-val">3件</div></div>
+        <div><div class="mfp-dl-info-label">合計サイズ</div><div class="mfp-dl-info-val">2.4 GB</div></div>
+      </div>
+
+      <ul class="mfp-ul" style="margin-top:12px">
+        <li>共有ID・タイトル・メモ・共有者・有効期限・ファイル一覧が表示されます</li>
+        <li>確認画面が表示されてから約1秒後にダウンロードが自動的に始まります</li>
+        <li>ブラウザ設定でブロックされた場合は「ダウンロード」ボタンを手動で押します</li>
+      </ul>
+    </div>
+
+    <!-- 1ファイルと複数ファイル -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">1ファイル共有 と 複数ファイル共有 の違い</div>
+      <div class="mfp-grid2">
+        <div style="background:#f0fdf4;border-radius:12px;padding:14px">
+          <div style="font-size:13px;font-weight:800;color:#166534;margin-bottom:8px">📄 1ファイルの場合</div>
+          <ul class="mfp-ul">
+            <li>確認画面でファイル名とサイズが表示されます</li>
+            <li>そのままそのファイルが自動ダウンロードされます</li>
+          </ul>
+        </div>
+        <div style="background:#eff6ff;border-radius:12px;padding:14px">
+          <div style="font-size:13px;font-weight:800;color:#1d4ed8;margin-bottom:8px">📁 複数ファイルの場合</div>
+          <ul class="mfp-ul">
+            <li>全ファイルの一覧が表示されます</li>
+            <li>自動ダウンロードは全ファイルをまとめた ZIPです</li>
+            <li>各ファイル行の「個別DL」リンクで1つずつ受け取ることもできます</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- パスワード保護 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title" style="justify-content:space-between">
+        <span>🔒 パスワードが設定されている場合の受け取り方</span>
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">URLを開くと先にパスワード入力画面が表示されます。正しいパスワードを入力して「確認してダウンロードへ」を押すと、ダウンロード確認画面に進みます。</p>
+      <ul class="mfp-ul">
+        <li>パスワードが間違っている場合はエラーが表示され、再度入力できます</li>
+        <li>パスワードありの共有は一覧でプレビューが表示されません（パスワード入力後に表示されます）</li>
+        <li>セキュリティ上、URLとパスワードは別々の手段（例：URL はメール・パスワードは SMS）で送ると安全です</li>
+      </ul>
+    </div>
+
+    <!-- エラーケース -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">⚠️ ダウンロードできない場合のエラー表示</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>状態</th><th>確認画面に表示されること</th><th>対処</th></tr></thead>
+        <tbody>
+          <tr><td>有効期限切れ</td><td>期限切れを示すエラー</td><td>オーナーに再共有を依頼してください</td></tr>
+          <tr><td>取り消し済み</td><td>取り消し済みを示すエラー</td><td>オーナーに再共有を依頼してください</td></tr>
+          <tr><td>DL上限到達</td><td>上限到達を示すエラー</td><td>オーナーが「DL上限変更」で上限を増やすと再びダウンロードできます</td></tr>
+          <tr><td>無効なURL</td><td>共有が見つからないエラー</td><td>URLが正しいか確認してください</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== 共有の管理 ========== -->
+  <section id="manage" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#d1fae5">⚙️</div>
+      <div>
+        <h2 class="mfp-section-title">共有の管理</h2>
+        <p class="mfp-section-desc">画面下部の「共有ファイル一覧」では全ユーザーの共有を確認できます。自分がアップロードした共有のみ管理操作が行えます。</p>
+      </div>
+    </div>
+
+    <!-- 共有ファイル一覧の見方 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">📋 共有ファイル一覧の見方</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">画面下部に全ユーザーの共有が新しい順に表示されます。各共有カードには以下の情報が含まれます。</p>
+      <table class="mfp-opt-table">
+        <thead><tr><th>表示内容</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr><td>共有ID</td><td>青色の大きな5文字コードです</td></tr>
+          <tr><td>タイトル / メモ</td><td>設定した名前や補足メッセージです</td></tr>
+          <tr><td><span class="mfp-tag mfp-tag-yellow">パスワードあり</span></td><td>パスワードが設定されている共有に表示されます</td></tr>
+          <tr><td><span class="mfp-tag mfp-tag-green">自分</span></td><td>自分がアップロードした共有に表示されます</td></tr>
+          <tr><td><span class="mfp-tag mfp-tag-red">取り消し済み</span></td><td>取り消し操作をした共有に表示されます</td></tr>
+          <tr><td>アップロード情報</td><td>アップロード者・日時・有効期限・ファイル数・合計サイズが表示されます</td></tr>
+          <tr><td>DLカウント</td><td>「ダウンロード: N回 (上限なし)」または「N / M回」の形で表示されます</td></tr>
+          <tr><td>ZIP名</td><td>まとめZIP名を設定した場合に表示されます</td></tr>
+          <tr><td>プレビュー</td><td>画像・PDFのサムネイルが各ファイルカードに表示されます</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- プレビュー -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">🖼️ ファイルプレビュー</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">対応ファイルは一覧で自動的にサムネイルプレビューが表示されます。</p>
+      <div class="mfp-fmt-row">
+        <span style="font-weight:700;color:#334155">プレビュー対応：</span>
+        <span class="mfp-fmt-badge">JPEG</span>
+        <span class="mfp-fmt-badge">PNG</span>
+        <span class="mfp-fmt-badge">GIF</span>
+        <span class="mfp-fmt-badge">WebP</span>
+        <span class="mfp-fmt-badge">BMP</span>
+        <span class="mfp-fmt-badge">PDF（先頭1ページ・50MB以内）</span>
+      </div>
+      <ul class="mfp-ul" style="margin-top:10px">
+        <li>上記以外のファイル形式はプレビュー非対応で「Previewなし」と表示されます</li>
+        <li>パスワードが設定された共有は「要確認」と表示され、プレビューは表示されません</li>
+        <li>PDFが50 MBを超える場合もプレビューは表示されません</li>
+      </ul>
+    </div>
+
+    <!-- オーナー専用操作 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">👤 オーナー専用の管理ボタン（自分がアップロードした共有のみ）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 14px">「自分」バッジが付いた共有にのみ以下の管理ボタンが表示されます。</p>
+      <div style="display:grid;gap:10px">
+
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px">
+          <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+            <span style="background:#d1fae5;color:#047857;font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px">期限延長</span>
+            有効期限を延長する
+          </div>
+          <ul class="mfp-ul">
+            <li>ボタンを押すと新しい有効期限を入力するダイアログが表示されます</li>
+            <li>現在から最大90日先まで指定できます</li>
+            <li>短縮（前倒し）はできません。延長のみ可能です</li>
+          </ul>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px">
+          <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+            <span style="background:#f1f5f9;color:#475569;font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px">DL上限変更</span>
+            ダウンロード上限を変更する
+          </div>
+          <ul class="mfp-ul">
+            <li>ボタンを押すと新しい上限数を入力するダイアログが表示されます</li>
+            <li>空欄または 0 を入力すると無制限になります</li>
+            <li>上限に達してダウンロードできなくなった共有も、ここで上限を増やすと再び使えるようになります</li>
+          </ul>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px">
+          <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+            <span style="background:#ffedd5;color:#ea580c;font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px">取り消し</span>
+            共有を即座に無効化する
+          </div>
+          <ul class="mfp-ul">
+            <li>即座に共有を無効化します。取り消し後はダウンロード・プレビューができなくなります</li>
+            <li>一覧には「取り消し済み」バッジ付きで残ります（確認のため）</li>
+          </ul>
+          <div class="mfp-warn" style="margin-top:10px">
+            ⚠️ 取り消しは元に戻せません。ダウンロードを停止させたいときに使います。ファイルをサーバーから削除したい場合は「削除」を使ってください。
+          </div>
+        </div>
+
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px">
+          <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+            <span style="background:#fee2e2;color:#dc2626;font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px">削除</span>
+            共有とファイルを完全に削除する
+          </div>
+          <ul class="mfp-ul">
+            <li>共有情報とサーバー上のファイルをすべて削除します</li>
+            <li>削除後は一覧からも消え、共有URLも無効になります</li>
+          </ul>
+          <div class="mfp-warn" style="margin-top:10px">
+            ⚠️ 削除したファイルは復元できません。取り消しとは異なり一覧からも消えます。
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 共有リンクの再表示 -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">🔗 共有リンクを再表示する（全員使用可）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">アップロード直後の画面を閉じてしまっても、一覧の各共有カードにある「共有リンクを再表示」ボタンを押すとURLがいつでも確認できます。</p>
+      <ul class="mfp-ul">
+        <li>URLが表示されるのでクリックで全選択し、コピーしてください</li>
+        <li>「コピー」ボタンを押すとクリップボードに自動でコピーされます</li>
+        <li>自分以外の共有でも「共有リンクを再表示」は使えます</li>
+      </ul>
+    </div>
+
+    <!-- ダウンロードボタン -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">⬇️ 一覧から直接ダウンロードする</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">一覧の「DL」または「ZIPでDL」ボタンを押すと、共有URLを開かずにそのまま自分でダウンロードできます。</p>
+      <ul class="mfp-ul">
+        <li>1ファイルの共有は「DL」、複数ファイルの共有は「ZIPでDL」ボタンが表示されます</li>
+        <li>各ファイルカードの「個別ダウンロード」ボタンで1ファイルずつ取得することもできます</li>
+        <li>取り消し済みの共有はダウンロードボタンが表示されません</li>
+      </ul>
+    </div>
+  </section>
+
+
+  <!-- ========== 中断と再開 ========== -->
+  <section id="resume" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#d1fae5">🔄</div>
+      <div>
+        <h2 class="mfp-section-title">アップロードの中断と再開</h2>
+        <p class="mfp-section-desc">ファイルは50 MBのチャンクに分割されて送信されます。通信が途切れた場合でも、同じファイルを選択し直すだけで中断箇所から続きを再開できます。</p>
+      </div>
+    </div>
+
+    <!-- チャンク送信の仕組み -->
+    <div class="mfp-card">
+      <div class="mfp-card-title">🔧 チャンク分割送信の仕組み</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">大きいファイルを一度に送ると通信が不安定なときに全体を最初からやり直す必要があります。FILE POST では50 MB単位でチャンクに分割して送信し、途中から再開できるようになっています。</p>
+      <ul class="mfp-ul">
+        <li>ファイルは自動的に50 MBのブロック（チャンク）に分割されます</li>
+        <li>各チャンクが正常に受信されるとサーバー側で記録されます</li>
+        <li>送信済みチャンクの記録はブラウザの localStorage に保存されます</li>
+        <li>チャンクアップロードは一時的なネットワークエラーに対して最大3回自動リトライされます</li>
+      </ul>
+    </div>
+
+    <!-- 再開の手順 -->
+    <div class="mfp-step">
+      <div class="mfp-step-badge">1</div>
+      <div class="mfp-step-body">
+        <div class="mfp-step-title">中断したアップロードを確認する</div>
+        <p class="mfp-step-text">アップロードが途中で止まった場合、画面に「未完了のアップロード」セクションが表示されます（ページ再読み込み後も表示されます）。</p>
+        <ul class="mfp-ul" style="margin-top:10px">
+          <li>タイトル・作成日時・進捗（○ MB / ○ MB）・進捗バーが表示されます</li>
+          <li>「再読み込み」ボタンで最新の状態を確認できます</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="mfp-step">
+      <div class="mfp-step-badge">2</div>
+      <div class="mfp-step-body">
+        <div class="mfp-step-title">同じファイルを選択して再開する</div>
+        <p class="mfp-step-text">中断したときと同じファイル（ファイル名とサイズが一致するもの）を選択してアップロードボタンを押します。</p>
+        <ul class="mfp-ul" style="margin-top:10px">
+          <li>「前回中断したアップロードを再開しますか？」という確認ダイアログが表示されます</li>
+          <li>「OK」を押すと中断した箇所から続きを再開します</li>
+          <li>「キャンセル」を押すと最初からやり直します</li>
+        </ul>
+        <div class="mfp-tip" style="margin-top:10px">
+          💡 ファイル名やサイズが違うと別のファイルと判断され、最初からアップロードになります。同じファイルを正確に選択してください。
+        </div>
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">⏰ 中断状態の保持期間と破棄</div>
+      <ul class="mfp-ul">
+        <li>未完了アップロードの状態はサーバーに <strong>24時間</strong> 保持されます</li>
+        <li>24時間を過ぎると自動的に破棄され、再開はできません</li>
+        <li>「未完了のアップロード」セクションの「破棄」ボタンを押すと、ブラウザ上の記録を手動で削除できます</li>
+      </ul>
+      <div class="mfp-note" style="margin-top:10px">
+        ℹ️ 「破棄」はブラウザ上のローカル記録を削除するだけです。サーバー上の一時データは24時間後に自動削除されます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== セキュリティ ========== -->
+  <section id="security" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#d1fae5">🔒</div>
+      <div>
+        <h2 class="mfp-section-title">セキュリティと安全な利用</h2>
+        <p class="mfp-section-desc">FILE POST は複数の仕組みでファイルを保護します。機密性の高いファイルを共有する際はパスワードと短い有効期限の組み合わせをおすすめします。</p>
+      </div>
+    </div>
+
+    <div class="mfp-feat-grid" style="margin-bottom:16px">
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🔐</div>
+        <div class="mfp-feat-name">保存時暗号化</div>
+        <div class="mfp-feat-desc">AES-256-GCM でサーバー保存ファイルを暗号化</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🔑</div>
+        <div class="mfp-feat-name">PW ハッシュ化</div>
+        <div class="mfp-feat-desc">パスワードは pbkdf2:sha256 でハッシュ保存</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">🎟️</div>
+        <div class="mfp-feat-name">DLトークン</div>
+        <div class="mfp-feat-desc">ダウンロードURLは1時間有効の署名付きトークンを使用</div>
+      </div>
+      <div class="mfp-feat-card">
+        <div class="mfp-feat-emoji">⏱️</div>
+        <div class="mfp-feat-name">有効期限管理</div>
+        <div class="mfp-feat-desc">期限切れファイルは自動クリーンアップされます</div>
+      </div>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">🛡️ セキュリティ仕様の詳細</div>
+      <table class="mfp-opt-table">
+        <thead><tr><th>項目</th><th>仕様</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>ファイル暗号化</td>
+            <td>保存ファイルは <strong>AES-256-GCM</strong> で暗号化されます。ファイルごとに個別の鍵が派生するため、ファイル間の情報漏えいはありません。</td>
+          </tr>
+          <tr>
+            <td>パスワード保存</td>
+            <td>設定したパスワードはそのままサーバーに保存されません。<strong>pbkdf2:sha256</strong> でハッシュ化して保存されます。管理者もパスワードの原文を確認できません。</td>
+          </tr>
+          <tr>
+            <td>ダウンロードトークン</td>
+            <td>ダウンロードURLは有効期限 <strong>1時間</strong> の署名付きトークン（URLSafeTimedSerializer）を使用します。トークンの不正改ざんを検出できます。</td>
+          </tr>
+          <tr>
+            <td>プレビューヘッダー</td>
+            <td>プレビュー画像の配信には <code>Content-Security-Policy: sandbox</code> などのセキュリティヘッダーが付加されます。</td>
+          </tr>
+          <tr>
+            <td>自動クリーンアップ</td>
+            <td>有効期限が切れたファイルはスケジューラによって定期的にサーバーから削除されます。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mfp-card">
+      <div class="mfp-card-title">💡 安全な共有のポイント</div>
+      <ul class="mfp-ul">
+        <li>機密ファイルを共有するときは必ずパスワードを設定し、URLとパスワードを別々の手段で伝えましょう</li>
+        <li>有効期限は短めに設定し、受け取った後は「削除」して不要な公開状態を解消しましょう</li>
+        <li>ダウンロード回数の上限を設定して、想定外の多重ダウンロードを防ぎましょう</li>
+        <li>パスワードは忘れないようにしてください。設定したパスワードは確認する方法がありません</li>
+        <li>不要になった共有はすぐに「削除」してサーバー上のファイルを消しましょう</li>
+      </ul>
+    </div>
+  </section>
+
+
+  <!-- ========== よくある質問 ========== -->
+  <section id="faq" class="mfp-section">
+    <div class="mfp-section-header">
+      <div class="mfp-section-icon" style="background:#d1fae5">❓</div>
+      <div>
+        <h2 class="mfp-section-title">よくある質問</h2>
+        <p class="mfp-section-desc">使い方で迷ったときはこちらを確認してください。</p>
+      </div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">パスワードは必ず設定しないといけませんか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">いいえ。パスワードは任意です。空欄のままでも共有できます。パスワードなしの場合、URLを知っている人は誰でもダウンロードできます。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">共有URLを開いたらダウンロードが自動で始まりません。どうすれば？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">ブラウザの自動ダウンロード設定でブロックされている可能性があります。確認画面の「ダウンロード」ボタンを手動で押してください。ボタンを押すと必ずダウンロードが開始されます。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">複数ファイルをひとつの共有でまとめられますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">はい。ファイルを複数選択してアップロードすると、1つの共有としてまとめて管理できます。受け取る側の確認画面からZIPでまとめてダウンロードするか、各ファイルの「個別DL」で1つずつ受け取れます。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">アップロード後にパスワードや有効期限を変えられますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">有効期限の延長とダウンロード上限の変更はできます。パスワードの変更はできません。パスワードを変更する必要がある場合は「削除」してから再アップロードし、新しいパスワードを設定してください。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">自分がアップロードしたファイルだけ削除できますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">はい。「削除」ボタンは自分がアップロードした共有（「自分」バッジが付いているもの）にのみ表示されます。他のユーザーがアップロードしたものは削除できません。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">ダウンロード回数の上限を超えたらどうなりますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">上限に達するとそれ以降のダウンロード・プレビューができなくなります。オーナーが「DL上限変更」で上限を増やすか、空欄（無制限）に変更することで再びダウンロードできるようになります。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">共有の有効期限を後から延長できますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">はい。自分がアップロードした共有に限り、一覧の「期限延長」ボタンから最大90日先まで延長できます。短縮（前倒し）はできません。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">大きいファイルのアップロードが途中で止まりました。最初からやり直しですか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">いいえ。同じファイルをもう一度選択してアップロードを開始すると「前回中断したアップロードを再開しますか？」と確認が出ます。「OK」を選ぶと中断箇所から再開できます（24時間以内）。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">共有URLを閉じてしまった後、URLをもう一度確認できますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">はい。画面下部の「共有ファイル一覧」から対象の共有を見つけ、「共有リンクを再表示」ボタンを押すとURLを確認・コピーできます。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">パスワードを設定した共有のパスワードを後から確認できますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">いいえ。設定されたパスワードはハッシュ化して保存されるため、管理者を含め誰もパスワードの原文を確認することはできません。パスワードを忘れた場合は共有を削除して再アップロードし、新しいパスワードを設定してください。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">取り消しと削除はどう違いますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">「取り消し」は共有を無効化しますが、一覧には「取り消し済み」として残ります。ファイルはサーバーに残っています。「削除」は共有情報とサーバー上のファイルをすべて完全に削除し、一覧からも消えます。「取り消し」は確認のための記録を残したいとき、「削除」はファイルを完全に消したいときに使ってください。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">プレビューが表示されない場合はどうすれば？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">プレビュー対応形式は画像（JPEG・PNG・GIF・WebP・BMP）とPDF（50 MB以内、先頭1ページ）のみです。それ以外のファイル形式、50 MBを超えるPDF、パスワードが設定された共有のファイルはプレビューが表示されません。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">QRコードはどう使えますか？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">スマートフォンのカメラアプリでQRコードを読み取ると、共有URLが開きます。文字でURLを送る手段がない場合や、その場でスマートフォンに渡したい場合にとても便利です。</div>
+    </div>
+
+    <div class="mfp-acc-item">
+      <button class="mfp-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mfp-acc-q">10 GBを超えるファイルをアップロードしたいのですが？</span>
+        <span class="mfp-acc-arrow">▼</span>
+      </button>
+      <div class="mfp-acc-body">1共有あたりの上限は合計10 GBです。これを超える場合はファイルを分割（例：Zipファイルを複数に分ける）してから、複数回に分けて共有してください。</div>
+    </div>
+
+  </section>
+
+</div><!-- /mfp-wrap -->
+
+
+<!-- ===== MODAL: 基本情報 ===== -->
+<div id="modalBasicInfo" class="mfp-modal-ov mfp-hidden">
+  <div class="mfp-modal-box">
+    <div class="mfp-modal-head">
+      <h3 class="mfp-modal-title">📝 基本情報の設定項目</h3>
+      <button class="mfp-modal-close" onclick="closeModal('modalBasicInfo')">✕</button>
+    </div>
+    <table class="mfp-opt-table">
+      <thead><tr><th>項目</th><th>詳細</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>共有タイトル</td>
+          <td>一覧での見分けに使うラベルです。最大120文字。省略すると共有IDが代わりに使われます。例：「A社向け提出資料」「2025年6月_写真」など。</td>
+        </tr>
+        <tr>
+          <td>まとめZIP名</td>
+          <td>複数ファイルをZIPでダウンロードするときのファイル名です。最大120文字。省略するとシステムが自動で付けます。<br>例：<code style="font-family:monospace;font-size:12px">A社提出資料.zip</code></td>
+        </tr>
+        <tr>
+          <td>メモ</td>
+          <td>受け取る相手への補足メッセージです。最大200文字。ダウンロード確認画面と一覧の両方に表示されます。例：「こちらのファイルをご確認ください」</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mfp-popup-btn" onclick="closeModal('modalBasicInfo')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: 有効期限 ===== -->
+<div id="modalExpiry" class="mfp-modal-ov mfp-hidden">
+  <div class="mfp-modal-box">
+    <div class="mfp-modal-head">
+      <h3 class="mfp-modal-title">⏱️ 有効期限の選択肢</h3>
+      <button class="mfp-modal-close" onclick="closeModal('modalExpiry')">✕</button>
+    </div>
+    <table class="mfp-opt-table">
+      <thead><tr><th>選択肢</th><th>期限</th><th>おすすめ用途</th></tr></thead>
+      <tbody>
+        <tr><td>1時間</td><td>今から1時間後</td><td>急ぎの受け渡し、すぐに受け取ってもらえる場合</td></tr>
+        <tr><td>今日中</td><td>当日の23:59:59</td><td>同日中に受け取ってもらえる場合</td></tr>
+        <tr><td>3日</td><td>今から72時間後</td><td>短期間の共有</td></tr>
+        <tr><td>7日 <span class="mfp-tag mfp-tag-green">初期値</span></td><td>今から7日後</td><td>通常の共有。特に急がない場合はこれで十分</td></tr>
+        <tr><td>14日</td><td>今から14日後</td><td>受け取るタイミングが不確かな場合</td></tr>
+        <tr><td>任意日時</td><td>指定した日時まで（最大90日先）</td><td>期限を細かく指定したい場合</td></tr>
+      </tbody>
+    </table>
+    <div class="mfp-tip" style="margin-top:12px">
+      💡 期限が切れる前に「期限延長」ボタンで延長できます（最大90日先まで）。
+    </div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mfp-popup-btn" onclick="closeModal('modalExpiry')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+  /* ---- Accordion ---- */
+  function toggleAcc(btn) {
+    btn.closest('.mfp-acc-item').classList.toggle('mfp-open');
+  }
+
+  /* ---- Modal ---- */
+  function openModal(id) {
+    document.getElementById(id).classList.remove('mfp-hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.add('mfp-hidden');
+    document.body.style.overflow = '';
+  }
+  document.querySelectorAll('.mfp-modal-ov').forEach(function(ov) {
+    ov.addEventListener('click', function(e) {
+      if (e.target === ov) closeModal(ov.id);
+    });
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.mfp-modal-ov:not(.mfp-hidden)').forEach(function(ov) {
+        closeModal(ov.id);
+      });
+    }
+  });
+
+  /* ---- Sticky nav active highlight ---- */
+  (function() {
+    var sections = document.querySelectorAll('.mfp-section[id]');
+    var navLinks = document.querySelectorAll('.mfp-nav-link[data-section]');
+    function onScroll() {
+      var scrollY = window.pageYOffset;
+      var active = null;
+      sections.forEach(function(sec) {
+        var top = sec.getBoundingClientRect().top + scrollY - 100;
+        if (scrollY >= top) active = sec.id;
+      });
+      navLinks.forEach(function(lnk) {
+        lnk.classList.toggle('mfp-active', lnk.dataset.section === active);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>
+{% endblock %}
