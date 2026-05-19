@@ -1,0 +1,1425 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  html { scroll-behavior: smooth; }
+
+  /* Sticky nav */
+  .mpdf-nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: #fff;
+    border-bottom: 2px solid #e2e8f0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .mpdf-nav::-webkit-scrollbar { display: none; }
+  .mpdf-nav-inner {
+    display: flex;
+    min-width: max-content;
+    padding: 0 12px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .mpdf-nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #64748b;
+    border-bottom: 3px solid transparent;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .mpdf-nav-link:hover { color: #dc2626; }
+  .mpdf-nav-link.mpdf-active { color: #dc2626; border-bottom-color: #dc2626; }
+
+  /* Layout */
+  .mpdf-wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 16px 80px;
+  }
+  .mpdf-section {
+    padding-top: 52px;
+  }
+  .mpdf-section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #f1f5f9;
+  }
+  .mpdf-section-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    font-size: 26px;
+    flex-shrink: 0;
+  }
+  .mpdf-section-title {
+    font-size: 22px;
+    font-weight: 900;
+    color: #0f172a;
+    margin: 0 0 4px;
+  }
+  .mpdf-section-desc {
+    font-size: 14px;
+    color: #64748b;
+    margin: 0;
+    line-height: 1.6;
+  }
+
+  /* Cards */
+  .mpdf-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 22px 24px;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+    margin-bottom: 12px;
+  }
+  .mpdf-card-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Feature grid */
+  .mpdf-feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  .mpdf-feat-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 18px 14px;
+    text-align: center;
+    transition: box-shadow 0.15s;
+  }
+  .mpdf-feat-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,0.10); }
+  .mpdf-feat-emoji { font-size: 30px; line-height: 1; margin-bottom: 8px; }
+  .mpdf-feat-name { font-size: 13px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+  .mpdf-feat-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  /* Step cards */
+  .mpdf-step {
+    display: flex;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(15,23,42,0.04);
+  }
+  .mpdf-step-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    font-size: 16px;
+    font-weight: 900;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #991b1b, #dc2626);
+    color: #fff;
+  }
+  .mpdf-step-body { flex: 1; min-width: 0; }
+  .mpdf-step-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0 0 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .mpdf-step-text { font-size: 14px; color: #475569; line-height: 1.7; margin: 0; }
+
+  /* Callouts */
+  .mpdf-tip {
+    background: #f0fdf4;
+    border-left: 4px solid #22c55e;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px;
+    font-size: 13.5px;
+    color: #166534;
+    line-height: 1.65;
+    margin: 8px 0;
+  }
+  .mpdf-warn {
+    background: #fff7ed;
+    border-left: 4px solid #f97316;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px;
+    font-size: 13.5px;
+    color: #9a3412;
+    line-height: 1.65;
+    margin: 8px 0;
+  }
+  .mpdf-note {
+    background: #eff6ff;
+    border-left: 4px solid #3b82f6;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px;
+    font-size: 13.5px;
+    color: #1e40af;
+    line-height: 1.65;
+    margin: 8px 0;
+  }
+
+  /* Detail popup button */
+  .mpdf-popup-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 9px;
+    background: #f8fafc;
+    font-size: 12px;
+    font-weight: 700;
+    color: #1d4ed8;
+    cursor: pointer;
+    margin: 4px 0;
+    transition: background 0.15s;
+  }
+  .mpdf-popup-btn:hover { background: #eff6ff; border-color: #93c5fd; }
+
+  /* Compression level grid */
+  .mpdf-compress-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  @media (min-width: 560px) {
+    .mpdf-compress-grid { grid-template-columns: repeat(4, 1fr); }
+  }
+  .mpdf-compress-card {
+    border: 2px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 16px 10px;
+    text-align: center;
+    transition: border-color 0.15s;
+  }
+  .mpdf-compress-card:hover { border-color: #93c5fd; }
+  .mpdf-compress-card.mpdf-recommended {
+    border-color: #3b82f6;
+    background: #eff6ff;
+  }
+  .mpdf-compress-level { font-size: 14px; font-weight: 800; margin: 0 0 6px; }
+  .mpdf-compress-detail { font-size: 12px; color: #64748b; line-height: 1.6; }
+  .mpdf-compress-rec-badge {
+    display: inline-block;
+    margin-top: 6px;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 9999px;
+    padding: 2px 8px;
+  }
+
+  /* Bullet list */
+  .mpdf-ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 7px;
+  }
+  .mpdf-ul li {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    font-size: 14px;
+    color: #334155;
+    line-height: 1.6;
+  }
+  .mpdf-ul li::before {
+    content: "▶";
+    color: #dc2626;
+    font-size: 10px;
+    margin-top: 4px;
+    flex-shrink: 0;
+  }
+
+  /* Option table */
+  .mpdf-opt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .mpdf-opt-table th {
+    background: #f8fafc;
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .mpdf-opt-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #334155;
+    vertical-align: top;
+    line-height: 1.6;
+  }
+  .mpdf-opt-table td:first-child { font-weight: 700; color: #0f172a; white-space: nowrap; }
+  .mpdf-opt-table tr:last-child td { border-bottom: 0; }
+
+  /* Tag/chip */
+  .mpdf-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .mpdf-tag-red { background: #fee2e2; color: #dc2626; }
+  .mpdf-tag-blue { background: #dbeafe; color: #1d4ed8; }
+  .mpdf-tag-green { background: #dcfce7; color: #16a34a; }
+  .mpdf-tag-purple { background: #f3e8ff; color: #7e22ce; }
+  .mpdf-tag-orange { background: #ffedd5; color: #ea580c; }
+  .mpdf-tag-teal { background: #ccfbf1; color: #0f766e; }
+  .mpdf-tag-gray { background: #f1f5f9; color: #475569; }
+
+  /* Accordion */
+  .mpdf-acc-item {
+    border: 1px solid #e2e8f0;
+    border-radius: 13px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  .mpdf-acc-trigger {
+    width: 100%;
+    text-align: left;
+    padding: 15px 18px;
+    background: #fff;
+    border: 0;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.5;
+    gap: 12px;
+  }
+  .mpdf-acc-trigger:hover { background: #f8fafc; }
+  .mpdf-acc-q { flex: 1; text-align: left; }
+  .mpdf-acc-arrow { font-size: 11px; color: #94a3b8; transition: transform 0.2s; flex-shrink: 0; }
+  .mpdf-acc-item.mpdf-open .mpdf-acc-arrow { transform: rotate(180deg); }
+  .mpdf-acc-body {
+    display: none;
+    padding: 2px 18px 15px;
+    font-size: 14px;
+    color: #475569;
+    line-height: 1.75;
+  }
+  .mpdf-acc-item.mpdf-open .mpdf-acc-body { display: block; }
+
+  /* Modal overlay */
+  .mpdf-modal-ov {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.52);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .mpdf-modal-ov.mpdf-hidden { display: none !important; }
+  .mpdf-modal-box {
+    background: #fff;
+    border-radius: 20px;
+    max-width: 540px;
+    width: 100%;
+    max-height: 88vh;
+    overflow-y: auto;
+    padding: 28px;
+    box-shadow: 0 28px 56px rgba(0,0,0,0.22);
+    animation: mpdf-modal-in 0.18s ease;
+  }
+  @keyframes mpdf-modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .mpdf-modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 18px;
+  }
+  .mpdf-modal-title {
+    font-size: 18px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0;
+    line-height: 1.4;
+  }
+  .mpdf-modal-close {
+    border: 0;
+    background: #f1f5f9;
+    border-radius: 9px;
+    width: 34px;
+    height: 34px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: #64748b;
+    margin-left: 12px;
+  }
+  .mpdf-modal-close:hover { background: #e2e8f0; }
+  .mpdf-modal-section { margin-bottom: 16px; }
+  .mpdf-modal-section-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0 0 8px;
+  }
+
+  /* Grid 2col */
+  .mpdf-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 500px) { .mpdf-grid2 { grid-template-columns: 1fr; } }
+
+  /* Toolbar chip */
+  .mpdf-tbchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 7px;
+    padding: 4px 9px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+    margin: 2px;
+  }
+  .mpdf-tbchip-primary {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+    color: #fff;
+  }
+
+  /* Right-click menu mockup */
+  .mpdf-rcmenu {
+    display: inline-grid;
+    gap: 0;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 20px rgba(15,23,42,0.12);
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .mpdf-rcmenu-item {
+    padding: 9px 16px;
+    background: #fff;
+    color: #1f3f7e;
+    border-bottom: 1px solid #f1f5f9;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .mpdf-rcmenu-item:last-child { border-bottom: 0; }
+
+  /* Sub list */
+  .mpdf-sublist { padding-left: 18px; margin: 6px 0; }
+  .mpdf-sublist li { font-size: 13.5px; color: #475569; margin: 4px 0; line-height: 1.6; }
+
+  /* Hero */
+  .mpdf-hero-bar {
+    background: linear-gradient(135deg, #991b1b 0%, #dc2626 50%, #f97316 100%);
+    padding: 40px 24px 36px;
+    text-align: center;
+    color: #fff;
+  }
+  .mpdf-hero-bar h1 { font-size: 34px; font-weight: 900; margin: 0 0 6px; }
+  .mpdf-hero-bar p { font-size: 15px; opacity: 0.9; margin: 0 0 22px; }
+  .mpdf-hero-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .mpdf-hero-btn {
+    padding: 11px 22px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+    border: 2px solid #fff;
+    transition: opacity 0.15s;
+  }
+  .mpdf-hero-btn:hover { opacity: 0.85; }
+  .mpdf-hero-btn-primary { background: #fff; color: #dc2626; }
+  .mpdf-hero-btn-secondary { background: transparent; color: #fff; }
+
+  /* Divider */
+  .mpdf-divider { border: 0; border-top: 1px solid #f1f5f9; margin: 18px 0; }
+
+  /* Format badge row */
+  .mpdf-fmt-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    font-size: 13.5px;
+    color: #475569;
+    padding: 8px 0;
+  }
+  .mpdf-fmt-badge {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 7px;
+    padding: 3px 9px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #0f172a;
+    font-family: monospace;
+  }
+
+  /* Table of positions */
+  .mpdf-pos-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    width: 150px;
+    margin: 0 auto;
+  }
+  .mpdf-pos-cell {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 6px 4px;
+    text-align: center;
+    font-size: 11px;
+    color: #64748b;
+  }
+  .mpdf-pos-cell.mpdf-pos-center {
+    background: #dbeafe;
+    border-color: #93c5fd;
+    color: #1d4ed8;
+    font-weight: 700;
+  }
+</style>
+
+<!-- Hero -->
+<div class="mpdf-hero-bar">
+  <h1>📄 PowerPDF マニュアル</h1>
+  <p>PDFの操作ならPowerPDF。並び替えから編集、圧縮から抽出。できないことはありません。</p>
+  <div class="mpdf-hero-btns">
+    <a href="/tools/pdf_power" class="mpdf-hero-btn mpdf-hero-btn-primary">ツールを開く</a>
+    <a href="/" class="mpdf-hero-btn mpdf-hero-btn-secondary">ダッシュボードへ戻る</a>
+  </div>
+</div>
+
+<!-- Sticky nav -->
+<div class="mpdf-nav" id="mpdfNav">
+  <div class="mpdf-nav-inner">
+    <a href="#overview" class="mpdf-nav-link" data-section="overview">📋 概要</a>
+    <a href="#control" class="mpdf-nav-link" data-section="control">🗂️ コントロール</a>
+    <a href="#convert" class="mpdf-nav-link" data-section="convert">🖼️ PDF変換</a>
+    <a href="#compress" class="mpdf-nav-link" data-section="compress">📉 圧縮</a>
+    <a href="#extract" class="mpdf-nav-link" data-section="extract">🔍 テキスト抽出</a>
+    <a href="#editor" class="mpdf-nav-link" data-section="editor">✏️ 編集</a>
+    <a href="#faq" class="mpdf-nav-link" data-section="faq">❓ よくある質問</a>
+  </div>
+</div>
+
+<!-- Main content -->
+<div class="mpdf-wrap">
+
+  <!-- ========== 概要 ========== -->
+  <section id="overview" class="mpdf-section">
+    <div class="mpdf-section-header">
+      <div class="mpdf-section-icon" style="background:#fee2e2">📋</div>
+      <div>
+        <h2 class="mpdf-section-title">PowerPDF でできること</h2>
+        <p class="mpdf-section-desc">5つの機能をタブで切り替えて使います。上限ファイルサイズは 1ファイルあたり 100MB です。</p>
+      </div>
+    </div>
+
+    <div class="mpdf-feat-grid">
+      <div class="mpdf-feat-card">
+        <div class="mpdf-feat-emoji">🗂️</div>
+        <div class="mpdf-feat-name">コントロール</div>
+        <div class="mpdf-feat-desc">複数PDFを並べ替え・ページ選択・回転して1つのPDFに出力</div>
+      </div>
+      <div class="mpdf-feat-card">
+        <div class="mpdf-feat-emoji">🖼️</div>
+        <div class="mpdf-feat-name">PDF変換</div>
+        <div class="mpdf-feat-desc">画像・テキスト・WordをPDFへ、またはPDFから各形式へ変換</div>
+      </div>
+      <div class="mpdf-feat-card">
+        <div class="mpdf-feat-emoji">📉</div>
+        <div class="mpdf-feat-name">圧縮</div>
+        <div class="mpdf-feat-desc">4段階のレベルでPDFのファイルサイズを削減</div>
+      </div>
+      <div class="mpdf-feat-card">
+        <div class="mpdf-feat-emoji">🔍</div>
+        <div class="mpdf-feat-name">テキスト抽出</div>
+        <div class="mpdf-feat-desc">PDFからテキストや埋め込み画像を抽出、キーワード検索も可能</div>
+      </div>
+      <div class="mpdf-feat-card">
+        <div class="mpdf-feat-emoji">✏️</div>
+        <div class="mpdf-feat-name">編集</div>
+        <div class="mpdf-feat-desc">テキスト・図形・画像を追加してPDFをその場で編集</div>
+      </div>
+    </div>
+
+    <div class="mpdf-note" style="margin-top:16px">
+      ⚠️ 各機能で使用できるファイルの上限は <strong>1ファイル 100MB</strong> です。これを超えるファイルは処理できません。
+    </div>
+  </section>
+
+
+  <!-- ========== コントロール ========== -->
+  <section id="control" class="mpdf-section">
+    <div class="mpdf-section-header">
+      <div class="mpdf-section-icon" style="background:#fee2e2">🗂️</div>
+      <div>
+        <h2 class="mpdf-section-title">コントロール</h2>
+        <p class="mpdf-section-desc">複数PDFをまとめ、ページを選択・並べ替え・回転してから出力します。3ステップのウィザード形式で進みます。</p>
+      </div>
+    </div>
+
+    <!-- Step 1 -->
+    <div class="mpdf-step">
+      <div class="mpdf-step-badge">1</div>
+      <div class="mpdf-step-body">
+        <div class="mpdf-step-title">
+          PDFを追加
+          <span class="mpdf-tag mpdf-tag-blue">複数PDF対応</span>
+        </div>
+        <p class="mpdf-step-text">PDFファイルを1つ以上追加します。ドラッグ&ドロップまたはクリックで選択できます。複数のPDFをまとめて追加することもできます。</p>
+        <hr class="mpdf-divider">
+        <ul class="mpdf-ul" style="margin-top:8px">
+          <li>追加したPDFはリストに表示されます。×ボタンで個別に削除できます。</li>
+          <li><strong>パスワード付きPDF</strong>を追加した場合、リスト上にパスワード入力欄が表示されます。そのPDFのパスワードを入力して続けてください。</li>
+          <li>パスワードを入力しなくても次のステップへ進めますが、出力時にエラーになります。</li>
+        </ul>
+        <div class="mpdf-tip" style="margin-top:10px">
+          💡 入力側のパスワードを解除するだけのことも可能です。出力設定でパスワードを設定しなければ、パスワードなしのPDFとして保存されます。
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="mpdf-step">
+      <div class="mpdf-step-badge">2</div>
+      <div class="mpdf-step-body">
+        <div class="mpdf-step-title">
+          コントロール
+          <span class="mpdf-tag mpdf-tag-green">ページ選択・並べ替え・回転</span>
+        </div>
+        <p class="mpdf-step-text">読み込まれた全PDFのページが一覧で表示されます。出力するページを選んで、順番や向きを整えます。</p>
+        <hr class="mpdf-divider">
+        <div class="mpdf-grid2" style="margin-top:8px">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">プレビュー</div>
+            <ul class="mpdf-ul">
+              <li>ページをクリックすると左側のプレビューに拡大表示されます</li>
+              <li>プレビューには現在の回転角度も反映されます</li>
+            </ul>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">ページ操作</div>
+            <ul class="mpdf-ul">
+              <li>チェックボックスで各ページの出力要否を選択</li>
+              <li>ドラッグ&ドロップでページの順序を入れ替え</li>
+            </ul>
+          </div>
+        </div>
+        <hr class="mpdf-divider">
+        <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:8px">ツールバーボタン</div>
+        <table class="mpdf-opt-table">
+          <thead><tr><th>ボタン</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr><td>すべて選択</td><td>全ページにチェックを入れます</td></tr>
+            <tr><td>すべて外す</td><td>全ページのチェックを外します</td></tr>
+            <tr><td>選択を左回転</td><td>チェック中のページを左（反時計回り）に90°回転します</td></tr>
+            <tr><td>選択を右回転</td><td>チェック中のページを右（時計回り）に90°回転します</td></tr>
+          </tbody>
+        </table>
+        <div class="mpdf-tip" style="margin-top:10px">
+          💡 回転は何度でも重ねて適用できます。180°回転させたい場合は同じ方向に2回押してください。
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="mpdf-step">
+      <div class="mpdf-step-badge">3</div>
+      <div class="mpdf-step-body">
+        <div class="mpdf-step-title">
+          出力設定
+          <span class="mpdf-tag mpdf-tag-purple">透かし・メタデータ・パスワード</span>
+        </div>
+        <p class="mpdf-step-text">出力ファイル名を設定し、必要に応じて透かし・メタデータ・パスワードを設定してから出力します。</p>
+        <hr class="mpdf-divider">
+
+        <div class="mpdf-card" style="margin:10px 0 8px">
+          <div class="mpdf-card-title">📝 出力ファイル名</div>
+          <p style="font-size:14px;color:#475569;margin:0">ダウンロード時のファイル名を入力します。デフォルトは <code style="background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px">control_output.pdf</code> です。.pdf 拡張子がない場合は自動で付加されます。</p>
+        </div>
+
+        <div class="mpdf-card" style="margin:8px 0">
+          <div class="mpdf-card-title" style="justify-content:space-between">
+            <span>💧 透かし（ウォーターマーク）</span>
+            <button class="mpdf-popup-btn" onclick="openModal('watermarkModal')">詳細設定を見る ▼</button>
+          </div>
+          <p style="font-size:14px;color:#475569;margin:0">「透かしを入れる」にチェックを入れると、指定したテキストを各ページに半透明で重ねます。「CONFIDENTIAL」「社外秘」「DRAFT」などの用途に使えます。</p>
+          <div class="mpdf-tip" style="margin-top:10px">
+            💡 詳細設定では位置・色・透明度・文字サイズ・角度・適用ページを細かく指定できます。
+          </div>
+        </div>
+
+        <div class="mpdf-card" style="margin:8px 0">
+          <div class="mpdf-card-title" style="justify-content:space-between">
+            <span>📋 メタデータ</span>
+            <button class="mpdf-popup-btn" onclick="openModal('metadataModal')">詳細を見る ▼</button>
+          </div>
+          <p style="font-size:14px;color:#475569;margin:0">PDF文書の情報（タイトル・作成者・件名・キーワード）を設定します。ファイルのプロパティとして保存され、検索ツールでの索引などに使われます。</p>
+        </div>
+
+        <div class="mpdf-card" style="margin:8px 0">
+          <div class="mpdf-card-title" style="justify-content:space-between">
+            <span>🔒 セキュリティ（パスワード）</span>
+            <button class="mpdf-popup-btn" onclick="openModal('passwordModal')">詳細を見る ▼</button>
+          </div>
+          <p style="font-size:14px;color:#475569;margin:0">「出力PDFにパスワードを設定」にチェックを入れると、開くためにパスワードが必要なPDFを作成します。<strong>AES-256暗号化</strong>を使用します。</p>
+          <div class="mpdf-warn" style="margin-top:10px">
+            ⚠️ パスワードを忘れると、そのPDFは二度と開けなくなります。必ずメモを取っておいてください。
+          </div>
+        </div>
+
+        <div style="margin-top:14px;padding:14px;background:#f8fafc;border-radius:12px;border:1px solid #e2e8f0;font-size:14px;color:#475569;line-height:1.6">
+          設定が完了したら、<strong>「選択中のページをPDFとして出力」</strong>ボタンを押してください。処理が完了すると自動的にダウンロードが始まります。
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== PDF変換 ========== -->
+  <section id="convert" class="mpdf-section">
+    <div class="mpdf-section-header">
+      <div class="mpdf-section-icon" style="background:#dbeafe">🖼️</div>
+      <div>
+        <h2 class="mpdf-section-title">PDF変換</h2>
+        <p class="mpdf-section-desc">ファイル⇄PDFの双方向変換が可能です。「変換方向」を切り替えて使います。</p>
+      </div>
+    </div>
+
+    <!-- Direction 1: File → PDF -->
+    <div class="mpdf-card">
+      <div class="mpdf-card-title">
+        <span class="mpdf-tag mpdf-tag-blue">方向 1</span>
+        ファイル → PDF に変換
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">複数のファイルを選択して、1つのPDFファイルに変換・結合します。</p>
+      <div class="mpdf-fmt-row">
+        <span style="font-weight:700;color:#334155">対応形式：</span>
+        <span class="mpdf-fmt-badge">PNG</span>
+        <span class="mpdf-fmt-badge">JPG / JPEG</span>
+        <span class="mpdf-fmt-badge">BMP</span>
+        <span class="mpdf-fmt-badge">GIF</span>
+        <span class="mpdf-fmt-badge">TXT</span>
+        <span class="mpdf-fmt-badge">DOCX</span>
+      </div>
+      <hr class="mpdf-divider">
+      <ul class="mpdf-ul">
+        <li>複数のファイルをまとめて選択すると、アップロード順に1つのPDFへ結合されます</li>
+        <li>画像ファイルは各ページに配置されます</li>
+        <li>TXT/DOCXはテキスト内容がPDFページとして変換されます（レイアウトは保持されません）</li>
+        <li>異なる形式のファイルを混在させることも可能です（例：PNG+TXT+DOCX → 1つのPDF）</li>
+      </ul>
+      <div class="mpdf-note" style="margin-top:10px">出力ファイル名: <code style="background:#dbeafe;padding:1px 5px;border-radius:4px;font-size:12px">converted_output.pdf</code></div>
+    </div>
+
+    <!-- Direction 2: PDF → File -->
+    <div class="mpdf-card">
+      <div class="mpdf-card-title">
+        <span class="mpdf-tag mpdf-tag-orange">方向 2</span>
+        PDF → ファイル に変換
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">PDFを選択し、出力形式を選んで変換します。</p>
+      <table class="mpdf-opt-table">
+        <thead><tr><th style="width:120px">出力形式</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="mpdf-tag mpdf-tag-blue">PNG画像</span></td>
+            <td>各ページを高解像度PNG画像で出力します（DPI 150相当）。複数ページの場合はZIPファイルで返却。</td>
+          </tr>
+          <tr>
+            <td><span class="mpdf-tag mpdf-tag-blue">JPG画像</span></td>
+            <td>各ページを高品質JPG画像で出力します（品質95%）。複数ページの場合はZIPファイルで返却。</td>
+          </tr>
+          <tr>
+            <td><span class="mpdf-tag mpdf-tag-green">テキスト</span></td>
+            <td>PDFのテキストを抽出して .txt ファイルで出力します。各ページの区切りが挿入されます。</td>
+          </tr>
+          <tr>
+            <td><span class="mpdf-tag mpdf-tag-purple">Word</span></td>
+            <td>PDFのテキストを抽出して .docx ファイルで出力します。ページごとに見出しとページ区切りが付きます。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="mpdf-warn" style="margin-top:12px">
+        ⚠️ テキスト・Word形式への変換は、PDFに含まれるテキストのみを抽出します。スキャン画像で構成されたPDF（画像PDF）は文字を認識できません。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 圧縮 ========== -->
+  <section id="compress" class="mpdf-section">
+    <div class="mpdf-section-header">
+      <div class="mpdf-section-icon" style="background:#f3e8ff">📉</div>
+      <div>
+        <h2 class="mpdf-section-title">圧縮</h2>
+        <p class="mpdf-section-desc">PDFファイルのサイズを削減します。4段階の圧縮レベルから選択できます。</p>
+      </div>
+    </div>
+
+    <div class="mpdf-compress-grid">
+      <div class="mpdf-compress-card">
+        <div class="mpdf-compress-level" style="color:#16a34a">軽度圧縮</div>
+        <div class="mpdf-compress-detail">
+          画質優先<br>
+          圧縮率 10〜30%<br>
+          <strong>推奨用途：</strong>印刷用・プレゼン用
+        </div>
+      </div>
+      <div class="mpdf-compress-card mpdf-recommended">
+        <div class="mpdf-compress-level" style="color:#1d4ed8">標準圧縮</div>
+        <div class="mpdf-compress-detail">
+          バランス重視<br>
+          圧縮率 30〜60%<br>
+          <strong>推奨用途：</strong>一般共有・保存
+        </div>
+        <div class="mpdf-compress-rec-badge">デフォルト</div>
+      </div>
+      <div class="mpdf-compress-card">
+        <div class="mpdf-compress-level" style="color:#ea580c">高圧縮</div>
+        <div class="mpdf-compress-detail">
+          サイズ優先<br>
+          圧縮率 60〜80%<br>
+          <strong>推奨用途：</strong>メール・Web公開
+        </div>
+      </div>
+      <div class="mpdf-compress-card">
+        <div class="mpdf-compress-level" style="color:#dc2626">最大圧縮</div>
+        <div class="mpdf-compress-detail">
+          極限サイズ<br>
+          圧縮率 80〜95%<br>
+          <strong>推奨用途：</strong>長期保存・容量節約
+        </div>
+      </div>
+    </div>
+
+    <div class="mpdf-note" style="margin-top:14px">
+      📊 圧縮完了後、<strong>「元のサイズ」「圧縮後サイズ」「削減率」</strong>がグラフと共に表示されます。
+    </div>
+    <div class="mpdf-tip" style="margin-top:8px">
+      💡 迷ったときは「標準圧縮」から始めるのがおすすめです。圧縮後のサイズが元より大きくなる場合は、自動的に元のファイルがそのまま返却されます。
+    </div>
+    <div class="mpdf-tip" style="margin-top:8px">
+      💡 スキャンで作成された画像PDF（写真・スキャン文書）は、専用の再レンダリング処理が行われるため、より大きな削減効果が得られます。
+    </div>
+
+    <div class="mpdf-card" style="margin-top:14px">
+      <div class="mpdf-card-title">🔧 圧縮の仕組み</div>
+      <ul class="mpdf-ul">
+        <li>PDF内の画像を指定品質でJPEG形式に再圧縮します</li>
+        <li>スキャンページは指定DPIで再レンダリングして軽量化します</li>
+        <li>不要な内部データ・メタデータを削除します</li>
+        <li>PDF構造を最適化してストリームを圧縮します</li>
+      </ul>
+    </div>
+  </section>
+
+
+  <!-- ========== テキスト抽出 ========== -->
+  <section id="extract" class="mpdf-section">
+    <div class="mpdf-section-header">
+      <div class="mpdf-section-icon" style="background:#ccfbf1">🔍</div>
+      <div>
+        <h2 class="mpdf-section-title">テキスト抽出</h2>
+        <p class="mpdf-section-desc">PDFからテキストと埋め込み画像を抽出します。キーワード検索も利用できます。</p>
+      </div>
+    </div>
+
+    <div class="mpdf-grid2" style="gap:12px">
+      <div class="mpdf-card">
+        <div class="mpdf-card-title">📄 基本の使い方</div>
+        <ul class="mpdf-ul">
+          <li>PDFを選択して「抽出開始」を押すだけで、全ページのテキストが.txtファイルでダウンロードされます</li>
+          <li>出力ファイルには統計情報（ページ数・文字数・行数など）も含まれます</li>
+        </ul>
+      </div>
+      <div class="mpdf-card">
+        <div class="mpdf-card-title">🔎 キーワード検索</div>
+        <ul class="mpdf-ul">
+          <li>「検索ワード」欄にキーワードを入力すると、一致した場所の<strong>ページ番号・行番号・前後の文脈</strong>をまとめてファイルに含めます</li>
+          <li>大文字・小文字は区別しません</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="mpdf-card" style="margin-top:12px">
+      <div class="mpdf-card-title">🖼️ 画像抽出オプション</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">「PDFから画像も抽出する」にチェックを入れると、PDF内に埋め込まれた画像をすべて抽出します。</p>
+      <ul class="mpdf-ul">
+        <li>画像がある場合は <code style="background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px">extracted_content.zip</code>（テキスト + 各画像ファイル）でダウンロード</li>
+        <li>画像がない場合は <code style="background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px">extracted_text.txt</code> のみでダウンロード</li>
+        <li>画像ファイル名は <code style="background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px">page_001_image_001.png</code> のように「ページ番号_画像番号」の形式になります</li>
+      </ul>
+    </div>
+
+    <div class="mpdf-card" style="margin-top:12px">
+      <div class="mpdf-card-title">📊 .txtファイルに含まれる情報</div>
+      <table class="mpdf-opt-table">
+        <tbody>
+          <tr><td>ファイルサイズ</td><td>元のPDFのバイト数</td></tr>
+          <tr><td>総ページ数</td><td>PDFの全ページ数</td></tr>
+          <tr><td>総文字数 / 総単語数 / 総行数</td><td>抽出されたテキストの統計</td></tr>
+          <tr><td>抽出方法</td><td>使用した抽出エンジン（PyMuPDF / PyPDF2）</td></tr>
+          <tr><td>キーワード一致数</td><td>キーワード検索を行った場合の一致件数</td></tr>
+          <tr><td>抽出画像数</td><td>画像抽出を行った場合の抽出枚数</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mpdf-warn" style="margin-top:12px">
+      ⚠️ スキャン画像で構成されたPDF（画像PDF）はテキストを含まないため、抽出されるテキストは「[ページX: テキストが検出されませんでした]」となります。
+    </div>
+  </section>
+
+
+  <!-- ========== 編集 ========== -->
+  <section id="editor" class="mpdf-section">
+    <div class="mpdf-section-header">
+      <div class="mpdf-section-icon" style="background:#dbeafe">✏️</div>
+      <div>
+        <h2 class="mpdf-section-title">編集</h2>
+        <p class="mpdf-section-desc">PDFにテキスト・図形・画像を追加して編集できます。参照PDFと並べて作業し、範囲コピーで内容を転用することも可能です。</p>
+      </div>
+    </div>
+
+    <!-- Step 1: Upload -->
+    <div class="mpdf-step">
+      <div class="mpdf-step-badge" style="background:linear-gradient(135deg,#1e40af,#3b82f6)">1</div>
+      <div class="mpdf-step-body">
+        <div class="mpdf-step-title">PDFをアップロード</div>
+        <p class="mpdf-step-text">ツールバーの「アップロード」ボタンから、編集対象のPDFを読み込みます。</p>
+        <hr class="mpdf-divider">
+        <table class="mpdf-opt-table">
+          <tbody>
+            <tr><td>編集PDFをアップロード</td><td>実際に書き込み・編集するPDFです。このPDFに要素を追加していきます。</td></tr>
+            <tr><td>参照PDFをアップロード</td><td>並べて確認するためのPDFです。編集対象にはなりません。参照PDFの内容を範囲コピーして編集PDFへ貼り付けることができます。</td></tr>
+            <tr><td>参照PDFを外す</td><td>読み込んだ参照PDFを削除します。</td></tr>
+          </tbody>
+        </table>
+        <div class="mpdf-tip" style="margin-top:10px">
+          💡 「専用ウィンドウ」ボタンを押すと、編集画面が別ウィンドウで表示されます。広い画面で作業したいときに便利です。
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Edit -->
+    <div class="mpdf-step">
+      <div class="mpdf-step-badge" style="background:linear-gradient(135deg,#1e40af,#3b82f6)">2</div>
+      <div class="mpdf-step-body">
+        <div class="mpdf-step-title">編集する</div>
+        <p class="mpdf-step-text">ツールバーのボタンまたは右クリックメニューから、追加したい要素を選んでPDF上に配置します。</p>
+
+        <hr class="mpdf-divider">
+        <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:8px">🖱️ ツールバー（右グループ）の操作モード</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+          <span class="mpdf-tbchip">手のひら</span>
+          <span class="mpdf-tbchip">テキスト</span>
+          <span class="mpdf-tbchip">自由描画</span>
+          <span class="mpdf-tbchip">元に戻す</span>
+          <span class="mpdf-tbchip">やり直し</span>
+        </div>
+        <table class="mpdf-opt-table">
+          <tbody>
+            <tr><td>手のひら</td><td>PDF上をドラッグしてスクロールします。要素を移動・選択する際はこのモードにします。</td></tr>
+            <tr><td>テキスト</td><td>PDF上をクリックした位置にテキストボックスを配置します。</td></tr>
+            <tr><td>自由描画</td><td>マウスを押しながら動かして、自由な形の線を描きます。</td></tr>
+            <tr><td>元に戻す</td><td>直前に追加・変更した操作を1つ取り消します。</td></tr>
+            <tr><td>やり直し</td><td>取り消した操作をやり直します。</td></tr>
+          </tbody>
+        </table>
+
+        <hr class="mpdf-divider">
+        <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:10px">🖱️ 右クリックメニュー（PDF上で右クリック）</div>
+        <p style="font-size:13.5px;color:#64748b;margin:0 0 10px">手のひらモードでPDFキャンバス上を右クリックすると、以下のメニューが表示されます。</p>
+        <div style="display:flex;justify-content:flex-start">
+          <div class="mpdf-rcmenu">
+            <div class="mpdf-rcmenu-item">📝 テキストを追加</div>
+            <div class="mpdf-rcmenu-item">⬜ 四角形を追加</div>
+            <div class="mpdf-rcmenu-item">⭕ 楕円を追加</div>
+            <div class="mpdf-rcmenu-item">➖ 線を追加（2点指定）</div>
+            <div class="mpdf-rcmenu-item">✍️ 自由描画開始</div>
+            <div class="mpdf-rcmenu-item">🖼️ 画像を追加</div>
+            <div class="mpdf-rcmenu-item">📋 範囲コピー開始</div>
+            <div class="mpdf-rcmenu-item">📄 コピー</div>
+            <div class="mpdf-rcmenu-item">📌 貼り付け</div>
+          </div>
+        </div>
+
+        <hr class="mpdf-divider">
+        <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:8px">各要素の説明</div>
+        <table class="mpdf-opt-table">
+          <tbody>
+            <tr>
+              <td>テキスト</td>
+              <td>テキストボックスを追加します。フォントサイズ・文字色をプロパティパネルで変更できます。日本語入力にも対応しています。</td>
+            </tr>
+            <tr>
+              <td>四角形</td>
+              <td>ドラッグして四角形を描きます。線色・塗り色・線幅・線種（実線/破線/点線）を設定できます。</td>
+            </tr>
+            <tr>
+              <td>楕円</td>
+              <td>ドラッグして楕円（丸）を描きます。線色・塗り色・線幅・線種を設定できます。</td>
+            </tr>
+            <tr>
+              <td>線（2点指定）</td>
+              <td>2か所をクリックして直線を引きます。ライトパネルで始点・終点を数値で精確に指定することもできます。</td>
+            </tr>
+            <tr>
+              <td>自由描画</td>
+              <td>マウスを押しながら動かして、手書き風の自由な線を描きます。線色・線幅・線種を設定できます。</td>
+            </tr>
+            <tr>
+              <td>画像</td>
+              <td>外部画像（PNG/JPG等）を読み込んでPDF上に貼り付けます。サイズと位置を調整できます。</td>
+            </tr>
+            <tr>
+              <td>範囲コピー</td>
+              <td>編集PDFまたは参照PDFの一部を矩形範囲でコピーし、任意の位置に貼り付けます。高解像度（300DPI相当）でコピーされます。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="mpdf-tip" style="margin-top:10px">
+          💡 範囲コピーは、参照PDFの一部を編集PDFへ転写するときに特に便利です。ツールバーの「参照PDFから範囲コピー」ボタンでも同じ操作ができます。
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Right panel -->
+    <div class="mpdf-step">
+      <div class="mpdf-step-badge" style="background:linear-gradient(135deg,#1e40af,#3b82f6)">3</div>
+      <div class="mpdf-step-body">
+        <div class="mpdf-step-title">編集パネルで調整する</div>
+        <p class="mpdf-step-text">画面右側の「編集パネル」では、追加した要素の細かい設定と順序（レイヤー）を管理できます。</p>
+
+        <hr class="mpdf-divider">
+        <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:8px">🗂️ レイヤー管理</div>
+        <p style="font-size:13.5px;color:#64748b;margin:0 0 8px">追加した要素はリストで管理されます。要素が重なるとき、上のレイヤーが手前に表示されます。</p>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px">
+          <span class="mpdf-tbchip">最前面</span>
+          <span class="mpdf-tbchip">最背面</span>
+          <span class="mpdf-tbchip">↑ 1段上へ</span>
+          <span class="mpdf-tbchip">↓ 1段下へ</span>
+        </div>
+
+        <hr class="mpdf-divider">
+        <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:8px">📐 数値で線を追加</div>
+        <p style="font-size:13.5px;color:#64748b;margin:0 0 8px">始点X/Y・終点X/Yを数値で指定して、精確な位置に直線を引けます。</p>
+
+        <hr class="mpdf-divider">
+        <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:8px">⚙️ 要素プロパティ（要素をクリックして選択すると表示）</div>
+        <button class="mpdf-popup-btn" onclick="openModal('propModal')">全プロパティ一覧を見る ▼</button>
+        <p style="font-size:13.5px;color:#64748b;margin-top:10px;margin-bottom:0">要素を選択すると、そのプロパティ（位置・サイズ・色・テキスト等）が表示され、数値で直接編集できます。</p>
+      </div>
+    </div>
+
+    <!-- Step 4: Export -->
+    <div class="mpdf-step">
+      <div class="mpdf-step-badge" style="background:linear-gradient(135deg,#1e40af,#3b82f6)">4</div>
+      <div class="mpdf-step-body">
+        <div class="mpdf-step-title">PDFを生成・ダウンロード</div>
+        <p class="mpdf-step-text">編集が完了したら、ツールバーの<span class="mpdf-tbchip mpdf-tbchip-primary">編集PDFを生成</span>ボタンを押してください。</p>
+        <hr class="mpdf-divider">
+        <ul class="mpdf-ul">
+          <li>追加したすべての要素が反映されたPDFが生成され、自動的にダウンロードされます</li>
+          <li>出力ファイル名: <code style="background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px">powerpdf_edited_output.pdf</code></li>
+          <li>「元に戻す」で取り消した操作は、生成後のPDFには含まれません</li>
+        </ul>
+        <div class="mpdf-note" style="margin-top:10px">
+          ℹ️ 「編集PDFを生成」はPDFファイルの<strong>ダウンロード</strong>です。ブラウザの自動保存フォルダを確認してください。
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="mpdf-card">
+      <div class="mpdf-card-title">⚙️ 設定メニュー（ツールバー「設定」ボタン）</div>
+      <table class="mpdf-opt-table">
+        <tbody>
+          <tr>
+            <td>参照PDFを表示</td>
+            <td>参照PDFのプレビューを表示/非表示します。参照PDFを読み込んでいるときのみ切り替えられます。</td>
+          </tr>
+          <tr>
+            <td>参照プレビュー配置</td>
+            <td>参照PDFを編集PDFの<strong>右側</strong>（オン）または<strong>下側</strong>（オフ）に表示します。</td>
+          </tr>
+          <tr>
+            <td>編集PDF倍率を維持</td>
+            <td>オンにすると、別のPDFを読み込んだときも現在のズーム倍率を引き継ぎます。</td>
+          </tr>
+          <tr>
+            <td>参照プレビューサイズ</td>
+            <td>参照PDFプレビューの表示幅を28%〜52%の範囲で調整します。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Zoom controls -->
+    <div class="mpdf-card" style="margin-top:12px">
+      <div class="mpdf-card-title">🔍 ズーム・ページ操作</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">編集PDF・参照PDFそれぞれに独立したズームとページ操作があります。</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <span class="mpdf-tbchip">◀ 前ページ</span>
+        <span style="font-size:13px;color:#64748b">ページ番号表示</span>
+        <span class="mpdf-tbchip">次ページ ▶</span>
+        <span class="mpdf-tbchip">− 縮小</span>
+        <span style="font-size:13px;color:#64748b">倍率表示</span>
+        <span class="mpdf-tbchip">+ 拡大</span>
+        <span class="mpdf-tbchip">プリセット選択 35%〜300%</span>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== FAQ ========== -->
+  <section id="faq" class="mpdf-section">
+    <div class="mpdf-section-header">
+      <div class="mpdf-section-icon" style="background:#f0fdf4">❓</div>
+      <div>
+        <h2 class="mpdf-section-title">よくある質問</h2>
+        <p class="mpdf-section-desc">クリックすると回答を表示します</p>
+      </div>
+    </div>
+
+    <div class="mpdf-acc-item">
+      <button class="mpdf-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mpdf-acc-q">複数のPDFをまとめて1つにできますか？</span>
+        <span class="mpdf-acc-arrow">▼</span>
+      </button>
+      <div class="mpdf-acc-body">はい。「コントロール」タブで複数のPDFを追加し、必要なページを選択してから出力するとまとまったPDFが作成されます。ファイルの追加順序・ページ選択・並べ替えは自由に行えます。</div>
+    </div>
+
+    <div class="mpdf-acc-item">
+      <button class="mpdf-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mpdf-acc-q">PDFの特定のページだけを抜き出せますか？</span>
+        <span class="mpdf-acc-arrow">▼</span>
+      </button>
+      <div class="mpdf-acc-body">はい。「コントロール」のStep 2で必要なページだけにチェックを入れ、残りのチェックを外して出力します。選択されていないページは出力に含まれません。</div>
+    </div>
+
+    <div class="mpdf-acc-item">
+      <button class="mpdf-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mpdf-acc-q">パスワード付きのPDFはどうやって処理しますか？</span>
+        <span class="mpdf-acc-arrow">▼</span>
+      </button>
+      <div class="mpdf-acc-body">「コントロール」のStep 1でPDFを追加すると、パスワードが必要なPDFのリスト上にパスワード入力欄が表示されます。PDFのパスワードを入力してから「コントロールへ進む」を押してください。出力時にパスワードを設定しなければ、パスワードが解除された状態でPDFが保存されます。</div>
+    </div>
+
+    <div class="mpdf-acc-item">
+      <button class="mpdf-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mpdf-acc-q">圧縮してもファイルサイズが変わらないことがありますか？</span>
+        <span class="mpdf-acc-arrow">▼</span>
+      </button>
+      <div class="mpdf-acc-body">はい。PDFの内容によっては圧縮効果がほとんどない、あるいは圧縮後のファイルが元より大きくなる場合があります。その場合は元のファイルがそのままダウンロードされます（削減率は0%と表示されます）。テキストだけで構成されたPDFは特に変化が少ない傾向があります。</div>
+    </div>
+
+    <div class="mpdf-acc-item">
+      <button class="mpdf-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mpdf-acc-q">編集したPDFの保存方法は？</span>
+        <span class="mpdf-acc-arrow">▼</span>
+      </button>
+      <div class="mpdf-acc-body">「編集」タブのツールバーにある青い「編集PDFを生成」ボタンを押すとダウンロードが始まります。ファイル名は <code style="background:#f1f5f9;padding:1px 5px;border-radius:4px">powerpdf_edited_output.pdf</code> です。ブラウザのダウンロードフォルダを確認してください。</div>
+    </div>
+
+    <div class="mpdf-acc-item">
+      <button class="mpdf-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mpdf-acc-q">スキャンで作成したPDF（画像PDF）からテキストを取り出せますか？</span>
+        <span class="mpdf-acc-arrow">▼</span>
+      </button>
+      <div class="mpdf-acc-body">基本的にはできません。「テキスト抽出」で処理できるのは、テキストデータとして埋め込まれているPDFのみです。スキャン画像から作られたPDFは、文字が画像として保存されているためテキストとして認識できません（各ページに「テキストが検出されませんでした」と表示されます）。</div>
+    </div>
+
+    <div class="mpdf-acc-item">
+      <button class="mpdf-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mpdf-acc-q">PDF変換でWord（.docx）に変換しましたが、レイアウトが崩れます。</span>
+        <span class="mpdf-acc-arrow">▼</span>
+      </button>
+      <div class="mpdf-acc-body">PDF→Word変換はPDFのテキストを抽出してページ区切りと見出しを付けたものです。フォント・表・レイアウト・図表などの完全な再現はできません。複雑なレイアウトのPDFでは、テキスト内容のみが取り出される形になります。</div>
+    </div>
+
+    <div class="mpdf-acc-item">
+      <button class="mpdf-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mpdf-acc-q">編集で日本語テキストを追加すると文字化けします。</span>
+        <span class="mpdf-acc-arrow">▼</span>
+      </button>
+      <div class="mpdf-acc-body">日本語テキストの描画にはサーバー上に日本語フォントが必要です。フォントが見つからない場合は代替フォント（Helvetica）が使用されるため、日本語が正しく表示されないことがあります。この場合はシステム管理者にNotoSansCJK等の日本語フォントのインストールを依頼してください。</div>
+    </div>
+
+    <div class="mpdf-acc-item">
+      <button class="mpdf-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mpdf-acc-q">ファイルサイズの上限は？</span>
+        <span class="mpdf-acc-arrow">▼</span>
+      </button>
+      <div class="mpdf-acc-body">1ファイルあたり 100MB が上限です。コントロールで複数のPDFを使う場合も、各ファイルが100MB以下である必要があります。100MBを超えるファイルはエラーになります。</div>
+    </div>
+
+    <div class="mpdf-acc-item">
+      <button class="mpdf-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mpdf-acc-q">透かしのテキストを特定のページにだけ入れられますか？</span>
+        <span class="mpdf-acc-arrow">▼</span>
+      </button>
+      <div class="mpdf-acc-body">はい。コントロールの出力設定「透かし」詳細で「適用ページ」を指定してください。「all」で全ページ、「1,3-5」のように書くと1ページ目と3〜5ページ目だけに入ります。</div>
+    </div>
+
+    <div class="mpdf-acc-item">
+      <button class="mpdf-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mpdf-acc-q">編集で追加した要素を削除するには？</span>
+        <span class="mpdf-acc-arrow">▼</span>
+      </button>
+      <div class="mpdf-acc-body">要素をクリックして選択し、右パネルに表示される「選択要素を削除」ボタン（赤いボタン）を押してください。または「元に戻す」で直前の操作を取り消すこともできます。</div>
+    </div>
+  </section>
+
+</div><!-- .mpdf-wrap -->
+
+
+<!-- ===== MODAL: Watermark ===== -->
+<div id="watermarkModal" class="mpdf-modal-ov mpdf-hidden">
+  <div class="mpdf-modal-box">
+    <div class="mpdf-modal-head">
+      <h3 class="mpdf-modal-title">💧 透かし 詳細設定</h3>
+      <button class="mpdf-modal-close" onclick="closeModal('watermarkModal')">✕</button>
+    </div>
+    <div class="mpdf-modal-section">
+      <div class="mpdf-modal-section-title">基本設定</div>
+      <table class="mpdf-opt-table">
+        <tbody>
+          <tr><td>透かしを入れる</td><td>チェックを入れると透かしが有効になります。チェックを外すと他の設定をしていても透かしは入りません。</td></tr>
+          <tr><td>文字</td><td>透かしとして表示するテキストです。例: CONFIDENTIAL、社外秘、DRAFT、複製禁止</td></tr>
+          <tr><td>適用ページ</td><td>「all」で全ページ、「1,3-5,7」のようにページ番号を指定すると特定ページのみに適用します。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="mpdf-modal-section">
+      <div class="mpdf-modal-section-title">配置</div>
+      <p style="font-size:13.5px;color:#64748b;margin:0 0 10px">10種類の配置から選べます。「全面タイル」はページ全体に繰り返し配置します。</p>
+      <div class="mpdf-pos-grid">
+        <div class="mpdf-pos-cell">左上</div>
+        <div class="mpdf-pos-cell">上中央</div>
+        <div class="mpdf-pos-cell">右上</div>
+        <div class="mpdf-pos-cell">左中央</div>
+        <div class="mpdf-pos-cell mpdf-pos-center">中央</div>
+        <div class="mpdf-pos-cell">右中央</div>
+        <div class="mpdf-pos-cell">左下</div>
+        <div class="mpdf-pos-cell">下中央</div>
+        <div class="mpdf-pos-cell">右下</div>
+      </div>
+      <p style="font-size:12px;color:#94a3b8;text-align:center;margin:6px 0 0">青枠=デフォルト（中央）。「全面タイル」はグリッドを選択外です。</p>
+    </div>
+    <div class="mpdf-modal-section">
+      <div class="mpdf-modal-section-title">見た目の調整</div>
+      <table class="mpdf-opt-table">
+        <tbody>
+          <tr><td>色</td><td>透かしの文字色です。デフォルトはライトグレー（#94a3b8）です。</td></tr>
+          <tr><td>透明度</td><td>0.05（ほぼ透明）〜1.0（不透明）の範囲で調整します。デフォルトは0.22（約22%）です。</td></tr>
+          <tr><td>文字サイズ</td><td>12〜240px の範囲で指定します。デフォルトは60pxです。</td></tr>
+          <tr><td>角度</td><td>-360〜360度の範囲で回転させます。デフォルトは45°（斜め）です。0にすると水平になります。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="mpdf-tip">💡 印鑑やスタンプのように使いたいときは、透明度を0.8〜1.0に設定すると目立ちます。</div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mpdf-popup-btn" onclick="closeModal('watermarkModal')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: Metadata ===== -->
+<div id="metadataModal" class="mpdf-modal-ov mpdf-hidden">
+  <div class="mpdf-modal-box">
+    <div class="mpdf-modal-head">
+      <h3 class="mpdf-modal-title">📋 メタデータ 詳細</h3>
+      <button class="mpdf-modal-close" onclick="closeModal('metadataModal')">✕</button>
+    </div>
+    <p style="font-size:14px;color:#475569;margin:0 0 16px;line-height:1.7">メタデータはPDFファイルのプロパティ（内部情報）として保存されます。ファイル自体の見た目には影響しませんが、ファイルの整理・検索に役立ちます。</p>
+    <table class="mpdf-opt-table">
+      <thead><tr><th>項目</th><th>説明・使用例</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>タイトル</td>
+          <td>文書のタイトルです。例：「2025年度 事業計画書」</td>
+        </tr>
+        <tr>
+          <td>作成者</td>
+          <td>文書を作成した人または組織の名前です。例：「山田 太郎」「株式会社〇〇」</td>
+        </tr>
+        <tr>
+          <td>件名</td>
+          <td>文書のテーマや用途です。例：「社内向け配布資料」「月次レポート」</td>
+        </tr>
+        <tr>
+          <td>キーワード</td>
+          <td>文書を検索するためのキーワードをカンマ区切りで入力します。例：「予算, 計画, 2025年度」</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="mpdf-note" style="margin-top:12px">
+      ℹ️ 入力しない項目は元のPDFに設定されていた値が引き継がれます（1つのPDFから出力した場合）。
+    </div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mpdf-popup-btn" onclick="closeModal('metadataModal')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: Password ===== -->
+<div id="passwordModal" class="mpdf-modal-ov mpdf-hidden">
+  <div class="mpdf-modal-box">
+    <div class="mpdf-modal-head">
+      <h3 class="mpdf-modal-title">🔒 セキュリティ（パスワード） 詳細</h3>
+      <button class="mpdf-modal-close" onclick="closeModal('passwordModal')">✕</button>
+    </div>
+    <p style="font-size:14px;color:#475569;margin:0 0 14px;line-height:1.7">出力PDFにパスワードを設定すると、そのPDFを開くためにパスワードの入力が必要になります。</p>
+    <table class="mpdf-opt-table">
+      <tbody>
+        <tr>
+          <td>暗号化方式</td>
+          <td><span class="mpdf-tag mpdf-tag-blue">AES-256</span> 現在最も安全な暗号化方式を使用します。</td>
+        </tr>
+        <tr>
+          <td>パスワードの設定</td>
+          <td>「出力PDFにパスワードを設定」にチェックを入れ、パスワードを入力します。</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="mpdf-warn" style="margin-top:12px">
+      ⚠️ <strong>パスワードは絶対に忘れないでください。</strong>PowerPDFはパスワードを記録・保存しません。忘れると復元できません。
+    </div>
+    <div class="mpdf-tip" style="margin-top:8px">
+      💡 パスワードを「解除」したい場合：コントロールのStep 1でパスワード付きPDFを読み込んでパスワードを入力し、Step 3でパスワードを設定せずに出力すると、パスワードなしのPDFが作成されます。
+    </div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mpdf-popup-btn" onclick="closeModal('passwordModal')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: Element Properties ===== -->
+<div id="propModal" class="mpdf-modal-ov mpdf-hidden">
+  <div class="mpdf-modal-box">
+    <div class="mpdf-modal-head">
+      <h3 class="mpdf-modal-title">⚙️ 要素プロパティ 一覧</h3>
+      <button class="mpdf-modal-close" onclick="closeModal('propModal')">✕</button>
+    </div>
+    <p style="font-size:14px;color:#475569;margin:0 0 14px;line-height:1.7">PDF上の要素をクリックして選択すると、右パネルにそのプロパティが表示されます。数値を直接編集して変更できます。</p>
+    <table class="mpdf-opt-table">
+      <thead><tr><th>プロパティ</th><th>説明</th></tr></thead>
+      <tbody>
+        <tr><td>種類</td><td>要素の種類（テキスト / 四角形 / 楕円 / 線 / 自由線 / 画像 / 範囲コピー）。変更不可。</td></tr>
+        <tr><td>ページ</td><td>要素が配置されているページ番号。変更すると別ページに移動します。</td></tr>
+        <tr><td>X / Y</td><td>要素の左上角のPDF座標（ポイント単位）。0.1単位で入力できます。</td></tr>
+        <tr><td>幅 / 高さ</td><td>要素のサイズ（ポイント単位）。テキスト・図形・画像・コピーで有効。</td></tr>
+        <tr><td>線幅</td><td>線・図形の枠線の太さ（0.1以上）。自由線も含みます。</td></tr>
+        <tr><td>線種</td><td>実線 / 破線 / 点線の3種類。</td></tr>
+        <tr><td>テキスト</td><td>テキスト要素の文字内容。直接編集できます。</td></tr>
+        <tr><td>文字サイズ</td><td>テキスト要素のフォントサイズ（ポイント単位）。</td></tr>
+        <tr><td>文字色</td><td>テキスト要素の文字の色。カラーピッカーで選択。</td></tr>
+        <tr><td>線色</td><td>図形・線の枠線の色。</td></tr>
+        <tr><td>塗り色</td><td>図形の塗りつぶし色。「なし（透明）」も選択できます。</td></tr>
+        <tr><td>X2 / Y2</td><td>線要素の終点座標（線のみ有効）。</td></tr>
+      </tbody>
+    </table>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mpdf-popup-btn" onclick="closeModal('propModal')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* ---- Accordion ---- */
+  function toggleAcc(btn) {
+    var item = btn.closest('.mpdf-acc-item');
+    item.classList.toggle('mpdf-open');
+  }
+
+  /* ---- Modal ---- */
+  function openModal(id) {
+    document.getElementById(id).classList.remove('mpdf-hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.add('mpdf-hidden');
+    document.body.style.overflow = '';
+  }
+  // Close on overlay click
+  document.querySelectorAll('.mpdf-modal-ov').forEach(function(ov) {
+    ov.addEventListener('click', function(e) {
+      if (e.target === ov) closeModal(ov.id);
+    });
+  });
+  // Close on Escape
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.mpdf-modal-ov:not(.mpdf-hidden)').forEach(function(ov) {
+        closeModal(ov.id);
+      });
+    }
+  });
+
+  /* ---- Sticky nav active highlight ---- */
+  (function() {
+    var sections = document.querySelectorAll('.mpdf-section[id]');
+    var navLinks = document.querySelectorAll('.mpdf-nav-link[data-section]');
+    function onScroll() {
+      var scrollY = window.pageYOffset;
+      var active = null;
+      sections.forEach(function(sec) {
+        var top = sec.getBoundingClientRect().top + scrollY - 100;
+        if (scrollY >= top) active = sec.id;
+      });
+      navLinks.forEach(function(lnk) {
+        lnk.classList.toggle('mpdf-active', lnk.dataset.section === active);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>
+{% endblock %}

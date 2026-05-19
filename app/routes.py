@@ -37,4 +37,5 @@ def tool_manual(tool_key):
         abort(404)
     if not user_has_tool_access(tool_key):
         abort(403)
-    return render_template("manual.html", manual=manual, page_title=f"DSTT - {manual['title']}")
+    template = manual.get("template", "manual.html")
+    return render_template(template, manual=manual, page_title=f"DSTT - {manual['title']}")
