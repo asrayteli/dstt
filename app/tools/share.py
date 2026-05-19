@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from flask import Blueprint, Response, current_app, jsonify, render_template, request, send_file, session, stream_with_context, url_for
+from flask import Blueprint, Response, current_app, jsonify, redirect, render_template, request, send_file, session, stream_with_context, url_for
 from flask_login import current_user, login_required
 from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -586,7 +586,7 @@ def _create_share_record(
         }
         save_meta(meta)
 
-    download_url = url_for("share.download_file", uid=uid, _external=True)
+    download_url = url_for("share.view_download", uid=uid, _external=True)
     return {
         "uid": uid,
         "display_id": display_id,
@@ -1124,6 +1124,53 @@ def _download_guard(file_info: dict):
     return None
 
 
+@share_bp.route("/view/<uid>", methods=["GET", "POST"])
+def view_download(uid):
+    meta = load_meta()
+    file_info = meta.get(uid)
+    if not file_info:
+        return render_template("share_view.html", error="無効なURLです。", file_info=None), 404
+
+    blocked = _download_guard(file_info)
+    if blocked is not None:
+        return render_template("share_view.html", error=blocked[0], file_info=None), blocked[1]
+
+    has_password = bool(file_info.get("password_hash"))
+    authenticated = not has_password or _has_download_token(uid)
+
+    if request.method == "POST":
+        input_pass = request.form.get("password", "")
+        if not _verify_password(input_pass, file_info.get("password_hash", "")):
+            files = _files_for_info(file_info)
+            view_data = _build_view_data(uid, file_info, files)
+            return render_template("share_view.html", file_info=view_data, needs_password=True, error="パスワードが違います。")
+        _issue_download_token(uid)
+        return redirect(url_for("share.view_download", uid=uid))
+
+    files = _files_for_info(file_info)
+    view_data = _build_view_data(uid, file_info, files)
+    return render_template("share_view.html", file_info=view_data, needs_password=not authenticated, error=None)
+
+
+def _build_view_data(uid: str, file_info: dict, files: list[dict]) -> dict:
+    total_size = sum(f.get("size", 0) for f in files)
+    return {
+        "uid": uid,
+        "display_id": file_info.get("display_id", uid[:5].upper()),
+        "title": file_info.get("title", ""),
+        "memo": file_info.get("memo", ""),
+        "uploader": file_info.get("uploader", ""),
+        "expires_at": file_info.get("expires_at", ""),
+        "created_at": file_info.get("created_at", ""),
+        "file_count": len(files),
+        "total_size": total_size,
+        "files": files,
+        "download_url": url_for("share.download_file", uid=uid),
+        "has_password": bool(file_info.get("password_hash")),
+        "zip_name": file_info.get("zip_name", ""),
+    }
+
+
 @share_bp.route("/download/<uid>", methods=["GET", "POST"])
 def download_file(uid):
     meta = load_meta()
@@ -1310,7 +1357,7 @@ def get_file_list():
                 "has_password": bool(info.get("password_hash")),
                 "expires_at": info["expires_at"],
                 "created_at": info.get("created_at", info["expires_at"]),
-                "download_url": url_for("share.download_file", uid=uid, _external=True),
+                "download_url": url_for("share.view_download", uid=uid, _external=True),
                 "download_count": int(info.get("download_count") or 0),
                 "max_downloads": info.get("max_downloads"),
                 "revoked_at": info.get("revoked_at"),
