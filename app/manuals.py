@@ -666,6 +666,7 @@ MANUALS: dict[str, dict] = {
     "powervote": {
         "title": "PowerVote の使い方",
         "summary": "PowerVote は、社内の参加意思表明・同意・アンケートを作成し、URLやQRで回答を集めるためのツールです。作成にはDSTTログインが必要ですが、回答者はDSTTアカウントなしで送信できます。",
+        "template": "manual_powervote.html",
         "steps": [
             "画面上部の「新規作成」を押してフォームを作ります。",
             "タイトル、説明、公開状態、匿名設定、同一ブラウザ1回までの設定を決めます。",
@@ -723,6 +724,7 @@ MANUALS: dict[str, dict] = {
     "power_flow": {
         "title": "Power Flow の使い方",
         "summary": "Power Flow は、DSTT内でフローチャートを作成する画面です。図形、線、テンプレート、スイムレーン、ミニマップ、テーマ、保存、JSON/PNG/SVG/PDF出力をまとめて使えます。",
+        "template": "manual_power_flow.html",
         "steps": [
             "左の図形パレットから図形を選び、キャンバス上をクリックして追加します。",
             "図形はドラッグで移動できます。選択中の右下ハンドルをドラッグするとサイズを変えられます。",
