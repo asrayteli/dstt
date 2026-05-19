@@ -3,8 +3,8 @@
 <style>
   html { scroll-behavior: smooth; }
 
-  /* ── Sticky navigation ── */
-  .lm-nav {
+  /* ===== Sticky nav ===== */
+  .mlm-nav {
     position: sticky;
     top: 0;
     z-index: 40;
@@ -13,20 +13,20 @@
     overflow-x: auto;
     scrollbar-width: none;
   }
-  .lm-nav::-webkit-scrollbar { display: none; }
-  .lm-nav-inner {
+  .mlm-nav::-webkit-scrollbar { display: none; }
+  .mlm-nav-inner {
     display: flex;
     min-width: max-content;
     padding: 0 12px;
     max-width: 960px;
     margin: 0 auto;
   }
-  .lm-nav-link {
+  .mlm-nav-link {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 12px 13px;
-    font-size: 12.5px;
+    padding: 12px 14px;
+    font-size: 13px;
     font-weight: 700;
     color: #64748b;
     border-bottom: 3px solid transparent;
@@ -34,717 +34,868 @@
     white-space: nowrap;
     transition: color 0.15s, border-color 0.15s;
   }
-  .lm-nav-link:hover { color: #059669; }
-  .lm-nav-link.lm-active { color: #059669; border-bottom-color: #059669; }
+  .mlm-nav-link:hover { color: #059669; }
+  .mlm-nav-link.mlm-active { color: #059669; border-bottom-color: #059669; }
 
-  /* ── Layout ── */
-  .lm-wrap {
+  /* ===== Layout ===== */
+  .mlm-wrap {
     max-width: 960px;
     margin: 0 auto;
     padding: 0 16px 80px;
   }
-
-  /* ── Hero ── */
-  .lm-hero {
-    background: linear-gradient(135deg, #047857 0%, #0d9488 50%, #14b8a6 100%);
-    border-radius: 20px;
-    padding: 36px 40px;
-    color: #fff;
-    margin-top: 24px;
-    margin-bottom: 8px;
+  .mlm-section { padding-top: 52px; }
+  .mlm-section-header {
     display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  @media (min-width: 640px) { .lm-hero { flex-direction: row; align-items: flex-start; justify-content: space-between; } }
-  .lm-hero-pill {
-    display: inline-block;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    background: rgba(255,255,255,0.2);
-    border-radius: 99px;
-    padding: 3px 12px;
-    margin-bottom: 8px;
-  }
-  .lm-hero h1 { font-size: 26px; font-weight: 900; margin: 0 0 8px; }
-  .lm-hero p  { font-size: 14px; line-height: 1.7; margin: 0; opacity: .9; }
-  .lm-hero-actions { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; margin-top: 4px; }
-  .lm-btn-white {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: #fff; color: #059669; font-weight: 700; font-size: 13px;
-    border: none; border-radius: 10px; padding: 10px 18px; cursor: pointer;
-    text-decoration: none; white-space: nowrap;
-    transition: background .15s;
-  }
-  .lm-btn-white:hover { background: #f0fdf4; }
-  .lm-btn-outline-white {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: transparent; color: #fff; font-weight: 700; font-size: 13px;
-    border: 2px solid rgba(255,255,255,.5); border-radius: 10px; padding: 8px 18px; cursor: pointer;
-    text-decoration: none; white-space: nowrap;
-    transition: border-color .15s;
-  }
-  .lm-btn-outline-white:hover { border-color: #fff; }
-
-  /* ── Sections ── */
-  .lm-section { padding-top: 56px; }
-  .lm-section-header {
-    display: flex; align-items: center; gap: 14px;
-    margin-bottom: 24px; padding-bottom: 16px;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
     border-bottom: 2px solid #f1f5f9;
   }
-  .lm-section-icon {
-    display: flex; align-items: center; justify-content: center;
-    width: 52px; height: 52px; border-radius: 16px; font-size: 26px; flex-shrink: 0;
+  .mlm-section-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    font-size: 26px;
+    flex-shrink: 0;
   }
-  .lm-section-title { font-size: 22px; font-weight: 900; color: #0f172a; margin: 0 0 4px; }
-  .lm-section-desc  { font-size: 14px; color: #64748b; margin: 0; line-height: 1.6; }
+  .mlm-section-title { font-size: 22px; font-weight: 900; color: #0f172a; margin: 0 0 4px; }
+  .mlm-section-desc  { font-size: 14px; color: #64748b; margin: 0; line-height: 1.6; }
 
-  /* ── Cards ── */
-  .lm-card {
-    background: #fff; border-radius: 16px;
+  /* ===== Cards ===== */
+  .mlm-card {
+    background: #fff;
     border: 1px solid #e2e8f0;
-    padding: 20px 24px; margin-bottom: 16px;
+    border-radius: 16px;
+    padding: 22px 24px;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+    margin-bottom: 12px;
   }
-  .lm-card-title { font-size: 15px; font-weight: 800; color: #0f172a; margin: 0 0 8px; }
-  .lm-card-body  { font-size: 14px; color: #475569; line-height: 1.8; margin: 0; }
-
-  /* ── Step list ── */
-  .lm-steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
-  .lm-steps li { display: flex; gap: 14px; align-items: flex-start; }
-  .lm-step-num {
-    flex-shrink: 0; width: 30px; height: 30px;
-    background: #dcfce7; color: #15803d;
-    border-radius: 50%; font-size: 13px; font-weight: 800;
-    display: flex; align-items: center; justify-content: center;
+  .mlm-card-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 10px;
+    display: flex; align-items: center; gap: 8px;
   }
-  .lm-step-text { font-size: 14px; color: #334155; line-height: 1.75; padding-top: 4px; }
 
-  /* ── Tip / Warning / Note boxes ── */
-  .lm-tip   { background: #f0fdf4; border-left: 4px solid #22c55e; border-radius: 0 10px 10px 0; padding: 12px 16px; margin-bottom: 12px; font-size: 14px; color: #166534; line-height: 1.7; }
-  .lm-warn  { background: #fff7ed; border-left: 4px solid #f97316; border-radius: 0 10px 10px 0; padding: 12px 16px; margin-bottom: 12px; font-size: 14px; color: #9a3412; line-height: 1.7; }
-  .lm-note  { background: #f8fafc; border-left: 4px solid #94a3b8; border-radius: 0 10px 10px 0; padding: 12px 16px; margin-bottom: 12px; font-size: 14px; color: #475569; line-height: 1.7; }
-  .lm-info  { background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 0 10px 10px 0; padding: 12px 16px; margin-bottom: 12px; font-size: 14px; color: #1e40af; line-height: 1.7; }
+  /* ===== Feature grid ===== */
+  .mlm-feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 12px;
+  }
+  .mlm-feat-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 18px 14px;
+    text-align: center;
+    transition: box-shadow 0.15s;
+  }
+  .mlm-feat-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,0.10); }
+  .mlm-feat-emoji { font-size: 30px; line-height: 1; margin-bottom: 8px; }
+  .mlm-feat-name { font-size: 13px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+  .mlm-feat-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
 
-  /* ── Grid ── */
-  .lm-grid-2 { display: grid; grid-template-columns: 1fr; gap: 16px; }
-  @media (min-width: 640px) { .lm-grid-2 { grid-template-columns: 1fr 1fr; } }
-  .lm-grid-3 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  @media (min-width: 640px) { .lm-grid-3 { grid-template-columns: repeat(3, 1fr); } }
+  /* ===== Step cards ===== */
+  .mlm-step {
+    display: flex;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(15,23,42,0.04);
+  }
+  .mlm-step-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    font-size: 16px; font-weight: 900;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #047857, #059669);
+    color: #fff;
+  }
+  .mlm-step-body { flex: 1; min-width: 0; }
+  .mlm-step-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 6px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .mlm-step-text { font-size: 14px; color: #475569; line-height: 1.7; margin: 0; }
 
-  /* ── Color swatches ── */
-  .lm-swatch {
+  /* ===== Callouts ===== */
+  .mlm-tip {
+    background: #f0fdf4; border-left: 4px solid #22c55e;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #166534;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mlm-warn {
+    background: #fff7ed; border-left: 4px solid #f97316;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #9a3412;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mlm-note {
+    background: #eff6ff; border-left: 4px solid #3b82f6;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #1e40af;
+    line-height: 1.65; margin: 8px 0;
+  }
+
+  /* ===== Tags ===== */
+  .mlm-tag {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700;
+  }
+  .mlm-tag-green  { background: #dcfce7; color: #16a34a; }
+  .mlm-tag-blue   { background: #dbeafe; color: #1d4ed8; }
+  .mlm-tag-orange { background: #ffedd5; color: #ea580c; }
+  .mlm-tag-red    { background: #fee2e2; color: #dc2626; }
+  .mlm-tag-purple { background: #f3e8ff; color: #7e22ce; }
+  .mlm-tag-yellow { background: #fef9c3; color: #a16207; }
+  .mlm-tag-gray   { background: #f1f5f9; color: #475569; }
+  .mlm-tag-teal   { background: #ccfbf1; color: #0f766e; }
+  .mlm-tag-pink   { background: #fce7f3; color: #9d174d; }
+
+  /* ===== Admin tag ===== */
+  .mlm-admin-tag {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #fef2f2; color: #dc2626;
+    font-size: 12px; font-weight: 700;
+    border: 1px solid #fecaca;
+    border-radius: 9999px; padding: 4px 12px;
+    margin-bottom: 14px;
+  }
+
+  /* ===== Bullet list ===== */
+  .mlm-ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+  .mlm-ul li {
+    display: flex; gap: 8px; align-items: flex-start;
+    font-size: 14px; color: #334155; line-height: 1.6;
+  }
+  .mlm-ul li::before {
+    content: "▶"; color: #059669; font-size: 10px;
+    margin-top: 4px; flex-shrink: 0;
+  }
+
+  /* ===== Option table ===== */
+  .mlm-opt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .mlm-opt-table th {
+    background: #f8fafc; padding: 10px 12px;
+    text-align: left; font-size: 12px; font-weight: 700;
+    color: #64748b; border-bottom: 1px solid #e2e8f0;
+  }
+  .mlm-opt-table td {
+    padding: 10px 12px; border-bottom: 1px solid #f1f5f9;
+    color: #334155; vertical-align: top; line-height: 1.6;
+  }
+  .mlm-opt-table td:first-child { font-weight: 700; color: #0f172a; white-space: nowrap; }
+  .mlm-opt-table tr:last-child td { border-bottom: 0; }
+
+  /* ===== Divider ===== */
+  .mlm-divider { border: 0; border-top: 1px solid #f1f5f9; margin: 18px 0; }
+
+  /* ===== Grid 2col ===== */
+  .mlm-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .mlm-grid2 { grid-template-columns: 1fr; } }
+
+  /* ===== Grid 3col ===== */
+  .mlm-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  @media (max-width: 480px) { .mlm-grid3 { grid-template-columns: 1fr; } }
+
+  /* ===== Leave type swatch ===== */
+  .mlm-swatch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+  }
+  .mlm-swatch {
     display: flex; align-items: center; gap: 10px;
     padding: 10px 14px; border-radius: 12px;
     border: 1px solid #e2e8f0; background: #fff;
-    font-size: 14px; font-weight: 600; color: #1e293b;
+    font-size: 13.5px; font-weight: 600; color: #1e293b;
   }
-  .lm-swatch-dot { width: 20px; height: 20px; border-radius: 6px; flex-shrink: 0; }
+  .mlm-swatch-dot { width: 18px; height: 18px; border-radius: 6px; flex-shrink: 0; }
 
-  /* ── Icon badges ── */
-  .lm-badge {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 4px 10px; border-radius: 99px;
-    font-size: 12px; font-weight: 700;
-  }
-  .lm-badge-green  { background: #dcfce7; color: #166534; }
-  .lm-badge-red    { background: #fee2e2; color: #991b1b; }
-  .lm-badge-amber  { background: #fef3c7; color: #92400e; }
-  .lm-badge-blue   { background: #dbeafe; color: #1e40af; }
-  .lm-badge-slate  { background: #f1f5f9; color: #475569; }
-
-  /* ── Icon indicator examples ── */
-  .lm-indicator-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
-  .lm-indicator-row:last-child { border-bottom: none; }
-  .lm-indicator-chip {
-    display: inline-flex; align-items: center; gap: 4px;
+  /* ===== Calendar indicator chip ===== */
+  .mlm-chip {
+    display: inline-flex; align-items: center; gap: 3px;
     background: #DC2626; color: #fff;
-    border-radius: 6px; padding: 3px 8px; font-size: 13px; font-weight: 600;
-    min-width: 80px; justify-content: center;
+    border-radius: 6px; padding: 3px 9px;
+    font-size: 13px; font-weight: 700;
+    min-width: 72px; justify-content: center;
   }
+  .mlm-indicator-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 0; border-bottom: 1px solid #f1f5f9;
+  }
+  .mlm-indicator-row:last-child { border-bottom: 0; }
 
-  /* ── Accordion ── */
-  .lm-accordion { border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; margin-bottom: 12px; }
-  .lm-accordion-head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 18px; cursor: pointer; background: #fff;
+  /* ===== Popup button ===== */
+  .mlm-popup-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px; border: 1.5px solid #cbd5e1;
+    border-radius: 9px; background: #f8fafc;
+    font-size: 12px; font-weight: 700; color: #059669;
+    cursor: pointer; margin: 4px 0; transition: background 0.15s;
+  }
+  .mlm-popup-btn:hover { background: #f0fdf4; border-color: #6ee7b7; }
+
+  /* ===== Accordion ===== */
+  .mlm-acc-item {
+    border: 1px solid #e2e8f0; border-radius: 13px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .mlm-acc-trigger {
+    width: 100%; text-align: left; padding: 15px 18px;
+    background: #fff; border: 0; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
     font-size: 14px; font-weight: 700; color: #0f172a;
-    border: none; width: 100%; text-align: left;
-    transition: background .15s;
+    line-height: 1.5; gap: 12px;
   }
-  .lm-accordion-head:hover { background: #f8fafc; }
-  .lm-accordion-arrow { font-size: 16px; transition: transform .2s; flex-shrink: 0; }
-  .lm-accordion-body { padding: 0 18px 16px; display: none; }
-  .lm-accordion.open .lm-accordion-arrow { transform: rotate(180deg); }
-  .lm-accordion.open .lm-accordion-body { display: block; }
+  .mlm-acc-trigger:hover { background: #f8fafc; }
+  .mlm-acc-q { flex: 1; text-align: left; }
+  .mlm-acc-arrow { font-size: 11px; color: #94a3b8; transition: transform 0.2s; flex-shrink: 0; }
+  .mlm-acc-item.mlm-open .mlm-acc-arrow { transform: rotate(180deg); }
+  .mlm-acc-body { display: none; padding: 2px 18px 15px; font-size: 14px; color: #475569; line-height: 1.75; }
+  .mlm-acc-item.mlm-open .mlm-acc-body { display: block; }
 
-  /* ── Field table ── */
-  .lm-field-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  .lm-field-table th { background: #f8fafc; font-weight: 700; color: #475569; padding: 8px 12px; text-align: left; border-bottom: 2px solid #e2e8f0; }
-  .lm-field-table td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; color: #334155; vertical-align: top; line-height: 1.6; }
-  .lm-field-table tr:last-child td { border-bottom: none; }
-  .lm-required { color: #ef4444; font-weight: 700; }
-
-  /* ── FAQ ── */
-  .lm-faq-item { border: 1px solid #e2e8f0; border-radius: 14px; margin-bottom: 10px; overflow: hidden; }
-  .lm-faq-q {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    padding: 14px 18px; cursor: pointer; background: #fff;
-    font-size: 14px; font-weight: 700; color: #0f172a;
-    border: none; width: 100%; text-align: left;
+  /* ===== Modal ===== */
+  .mlm-modal-ov {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.52);
+    z-index: 200; display: flex; align-items: center;
+    justify-content: center; padding: 16px;
   }
-  .lm-faq-q:hover { background: #f8fafc; }
-  .lm-faq-q-text { display: flex; align-items: flex-start; gap: 10px; }
-  .lm-faq-q-icon { color: #059669; font-size: 16px; font-weight: 900; flex-shrink: 0; margin-top: 1px; }
-  .lm-faq-arrow { font-size: 14px; transition: transform .2s; flex-shrink: 0; }
-  .lm-faq-a { padding: 0 18px 14px 18px; display: none; font-size: 14px; color: #475569; line-height: 1.75; }
-  .lm-faq-item.open .lm-faq-arrow { transform: rotate(180deg); }
-  .lm-faq-item.open .lm-faq-a { display: block; }
-
-  /* ── Admin section ── */
-  .lm-admin-tag {
-    display: inline-flex; align-items: center; gap: 5px;
-    background: #fef2f2; color: #dc2626; font-size: 12px; font-weight: 700;
-    border-radius: 99px; padding: 3px 10px; margin-bottom: 10px;
+  .mlm-modal-ov.mlm-hidden { display: none !important; }
+  .mlm-modal-box {
+    background: #fff; border-radius: 20px;
+    max-width: 560px; width: 100%;
+    max-height: 88vh; overflow-y: auto;
+    padding: 28px;
+    box-shadow: 0 28px 56px rgba(0,0,0,0.22);
+    animation: mlm-modal-in 0.18s ease;
   }
-
-  /* ── Separator ── */
-  .lm-sep { height: 1px; background: #f1f5f9; margin: 24px 0; }
-
-  /* ── Back to top ── */
-  .lm-toc { background: #f8fafc; border-radius: 16px; padding: 20px 24px; margin-top: 8px; }
-  .lm-toc-title { font-size: 13px; font-weight: 700; color: #475569; margin-bottom: 10px; }
-  .lm-toc-list { display: flex; flex-wrap: wrap; gap: 6px; }
-  .lm-toc-item {
-    font-size: 12.5px; font-weight: 600; color: #059669;
-    background: #fff; border: 1px solid #d1fae5;
-    border-radius: 99px; padding: 4px 12px; text-decoration: none;
-    transition: background .15s;
+  @keyframes mlm-modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
   }
-  .lm-toc-item:hover { background: #ecfdf5; }
-
-  @media print {
-    .lm-nav { display: none; }
-    .lm-accordion-body, .lm-faq-a { display: block !important; }
+  .mlm-modal-head {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; margin-bottom: 18px;
   }
+  .mlm-modal-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; line-height: 1.4; }
+  .mlm-modal-close {
+    border: 0; background: #f1f5f9; border-radius: 9px;
+    width: 34px; height: 34px; cursor: pointer;
+    font-size: 16px; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+    color: #64748b; margin-left: 12px;
+  }
+  .mlm-modal-close:hover { background: #e2e8f0; }
+
+  /* ===== Hero ===== */
+  .mlm-hero-bar {
+    background: linear-gradient(135deg, #047857 0%, #059669 50%, #0d9488 100%);
+    padding: 40px 24px 36px; text-align: center; color: #fff;
+  }
+  .mlm-hero-bar h1 { font-size: 34px; font-weight: 900; margin: 0 0 6px; }
+  .mlm-hero-bar p { font-size: 15px; opacity: 0.9; margin: 0 0 22px; }
+  .mlm-hero-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .mlm-hero-btn {
+    padding: 11px 22px; border-radius: 12px;
+    font-size: 14px; font-weight: 700; text-decoration: none;
+    border: 2px solid #fff; transition: opacity 0.15s;
+  }
+  .mlm-hero-btn:hover { opacity: 0.85; }
+  .mlm-hero-btn-primary  { background: #fff; color: #059669; }
+  .mlm-hero-btn-secondary { background: transparent; color: #fff; }
+
+  /* ===== Sub list ===== */
+  .mlm-sublist { padding-left: 18px; margin: 6px 0; }
+  .mlm-sublist li { font-size: 13.5px; color: #475569; margin: 4px 0; line-height: 1.6; }
+
+  /* ===== Required mark ===== */
+  .mlm-required { color: #ef4444; font-weight: 700; font-size: 11px; }
 </style>
 
-<!-- ── Sticky section nav ── -->
-<nav class="lm-nav" id="lm-nav">
-  <div class="lm-nav-inner">
-    <a class="lm-nav-link" href="#sec-intro">📋 はじめに</a>
-    <a class="lm-nav-link" href="#sec-calendar">📅 カレンダー</a>
-    <a class="lm-nav-link" href="#sec-register">✏️ 休暇登録</a>
-    <a class="lm-nav-link" href="#sec-edit">🔧 編集・確認</a>
-    <a class="lm-nav-link" href="#sec-bulk">📋 一括登録</a>
-    <a class="lm-nav-link" href="#sec-search">🔍 検索</a>
-    <a class="lm-nav-link" href="#sec-admin">🔑 管理者メニュー</a>
-    <a class="lm-nav-link" href="#sec-faq">❓ よくある質問</a>
+<!-- ===== Hero ===== -->
+<div class="mlm-hero-bar">
+  <h1>⛵ 有休共有ツール マニュアル</h1>
+  <p>チームの有給休暇・代休・各種休暇をカレンダー形式で一元管理・共有するツールの完全マニュアルです。</p>
+  <div class="mlm-hero-btns">
+    <a href="{{ manual.tool_href }}" class="mlm-hero-btn mlm-hero-btn-primary">ツールを開く</a>
+    <a href="/" class="mlm-hero-btn mlm-hero-btn-secondary">ダッシュボードへ戻る</a>
   </div>
-</nav>
+</div>
 
-<div class="lm-wrap">
-
-  <!-- ── Hero ── -->
-  <div class="lm-hero">
-    <div>
-      <span class="lm-hero-pill">LEAVE MANAGER MANUAL</span>
-      <h1>有休共有ツール<br>完全マニュアル</h1>
-      <p>チームの休暇取得状況をカレンダー形式で共有・管理するツールの<br>全機能を網羅したマニュアルです。</p>
-    </div>
-    <div class="lm-hero-actions">
-      <a href="{{ manual.tool_href }}" class="lm-btn-white">🚀 ツールを開く</a>
-      <a href="/" class="lm-btn-outline-white">← ダッシュボードへ</a>
-    </div>
+<!-- ===== Sticky nav ===== -->
+<div class="mlm-nav" id="mlmNav">
+  <div class="mlm-nav-inner">
+    <a href="#overview"  class="mlm-nav-link" data-section="overview">📋 概要</a>
+    <a href="#calendar"  class="mlm-nav-link" data-section="calendar">📅 カレンダー</a>
+    <a href="#register"  class="mlm-nav-link" data-section="register">✏️ 休暇登録</a>
+    <a href="#edit"      class="mlm-nav-link" data-section="edit">🔧 編集・確認</a>
+    <a href="#bulk"      class="mlm-nav-link" data-section="bulk">📋 一括登録</a>
+    <a href="#search"    class="mlm-nav-link" data-section="search">🔍 検索</a>
+    <a href="#admin"     class="mlm-nav-link" data-section="admin">🔑 管理者メニュー</a>
+    <a href="#faq"       class="mlm-nav-link" data-section="faq">❓ よくある質問</a>
   </div>
+</div>
 
-  <!-- ── TOC ── -->
-  <div class="lm-toc">
-    <div class="lm-toc-title">このマニュアルの内容</div>
-    <div class="lm-toc-list">
-      <a class="lm-toc-item" href="#sec-intro">📋 はじめに</a>
-      <a class="lm-toc-item" href="#sec-calendar">📅 カレンダーの見方</a>
-      <a class="lm-toc-item" href="#sec-register">✏️ 休暇の登録</a>
-      <a class="lm-toc-item" href="#sec-edit">🔧 編集・確認・削除・コピー</a>
-      <a class="lm-toc-item" href="#sec-bulk">📋 一括登録</a>
-      <a class="lm-toc-item" href="#sec-search">🔍 休暇検索</a>
-      <a class="lm-toc-item" href="#sec-admin">🔑 管理者メニュー</a>
-      <a class="lm-toc-item" href="#sec-faq">❓ よくある質問</a>
-    </div>
-  </div>
+<!-- ===== Main content ===== -->
+<div class="mlm-wrap">
 
-  <!-- ══════════════════════════════════════════ -->
-  <!-- Section 1: はじめに                        -->
-  <!-- ══════════════════════════════════════════ -->
-  <section class="lm-section" id="sec-intro">
-    <div class="lm-section-header">
-      <div class="lm-section-icon" style="background:#dcfce7;">📋</div>
+  <!-- ========== 概要 ========== -->
+  <section id="overview" class="mlm-section">
+    <div class="mlm-section-header">
+      <div class="mlm-section-icon" style="background:#d1fae5">📋</div>
       <div>
-        <h2 class="lm-section-title">はじめに</h2>
-        <p class="lm-section-desc">ツールの概要・対象ユーザー・休暇の種類について</p>
+        <h2 class="mlm-section-title">有休共有ツールでできること</h2>
+        <p class="mlm-section-desc">チームの休暇取得状況をカレンダー形式で一元管理・共有するツールです。カレンダーは複数作成でき、部署・班・プロジェクトごとに使い分けられます。</p>
       </div>
     </div>
 
-    <div class="lm-card">
-      <div class="lm-card-title">このツールでできること</div>
-      <p class="lm-card-body">有休共有ツール（有休マネージャー）は、チームの有給休暇・代休・その他の休暇をカレンダー形式で一元管理・共有するためのツールです。</p>
-      <ul style="margin:12px 0 0; padding-left:20px; font-size:14px; color:#334155; line-height:2;">
-        <li>月単位のカレンダーで、誰がいつ休暇を取るか一目で確認できます</li>
-        <li>休暇の種類・代務者・備考などの詳細情報を記録できます</li>
-        <li>「確認」機能により、上長や担当者が内容を確認した証跡を残せます</li>
-        <li>社員名簿PLUSと連携して、名前・社員番号の入力を補助します</li>
-        <li>複数のカレンダーを使い分け、部署や班ごとに管理できます</li>
+    <div class="mlm-feat-grid">
+      <div class="mlm-feat-card">
+        <div class="mlm-feat-emoji">📅</div>
+        <div class="mlm-feat-name">カレンダー表示</div>
+        <div class="mlm-feat-desc">月単位で誰がいつ休むか一目で確認できます</div>
+      </div>
+      <div class="mlm-feat-card">
+        <div class="mlm-feat-emoji">✏️</div>
+        <div class="mlm-feat-name">休暇登録</div>
+        <div class="mlm-feat-desc">日付・名前・種類・代務者などを1件ずつ登録できます</div>
+      </div>
+      <div class="mlm-feat-card">
+        <div class="mlm-feat-emoji">📋</div>
+        <div class="mlm-feat-name">一括登録</div>
+        <div class="mlm-feat-desc">複数の休暇をまとめてリストに追加してから一度に保存できます</div>
+      </div>
+      <div class="mlm-feat-card">
+        <div class="mlm-feat-emoji">📑</div>
+        <div class="mlm-feat-name">複数日コピー</div>
+        <div class="mlm-feat-desc">同じ内容の休暇を複数日付に一括コピーできます</div>
+      </div>
+      <div class="mlm-feat-card">
+        <div class="mlm-feat-emoji">✅</div>
+        <div class="mlm-feat-name">確認機能</div>
+        <div class="mlm-feat-desc">確認者・確認日時を記録して承認の証跡を残せます</div>
+      </div>
+      <div class="mlm-feat-card">
+        <div class="mlm-feat-emoji">🔍</div>
+        <div class="mlm-feat-name">休暇検索</div>
+        <div class="mlm-feat-desc">10種類の条件を組み合わせて横断検索できます</div>
+      </div>
+      <div class="mlm-feat-card">
+        <div class="mlm-feat-emoji">👤</div>
+        <div class="mlm-feat-name">社員名簿連携</div>
+        <div class="mlm-feat-desc">社員名簿PLUSから名前・社員番号を自動入力できます</div>
+      </div>
+      <div class="mlm-feat-card">
+        <div class="mlm-feat-emoji">🔑</div>
+        <div class="mlm-feat-name">権限管理</div>
+        <div class="mlm-feat-desc">カレンダー単位でアクセス権限を付与・剥奪できます</div>
+      </div>
+    </div>
+
+    <div style="margin-top: 20px">
+      <div class="mlm-card">
+        <div class="mlm-card-title" style="justify-content: space-between;">
+          <span>🎨 休暇の種類と色</span>
+          <button class="mlm-popup-btn" onclick="openModal('modalLeaveTypes')">詳細を見る ▼</button>
+        </div>
+        <p style="font-size:14px;color:#475569;margin:0 0 14px">登録できる休暇は6種類です。カレンダー上では種類ごとに色で区別されます。</p>
+        <div class="mlm-swatch-grid">
+          <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#DC2626"></div>有休（有給休暇）</div>
+          <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#10B981"></div>代休</div>
+          <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#8B5CF6"></div>慶弔休暇</div>
+          <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#F97316"></div>介護休暇</div>
+          <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#EC4899"></div>リフレッシュ休暇</div>
+          <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#0EA5E9"></div>その他</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mlm-card">
+      <div class="mlm-card-title">🔢 カレンダー上のアイコン表示の意味</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 14px">休暇バーには状態を示すアイコンが付く場合があります。</p>
+      <div class="mlm-indicator-row">
+        <div><span class="mlm-chip">✓ 田中</span></div>
+        <div style="font-size:14px;color:#334155"><strong>✓（チェックマーク）</strong>：確認済みの休暇です。確認者名・確認日時が記録されています。</div>
+      </div>
+      <div class="mlm-indicator-row">
+        <div><span class="mlm-chip">! 鈴木</span></div>
+        <div style="font-size:14px;color:#334155"><strong>!（エクスクラメーション）</strong>：代務者が設定されていない休暇です。必要な場合は編集して追加してください。</div>
+      </div>
+      <div class="mlm-indicator-row">
+        <div><span class="mlm-chip">✓! 佐藤</span></div>
+        <div style="font-size:14px;color:#334155"><strong>両方表示</strong>：確認済みだが代務者が未設定の状態です。</div>
+      </div>
+    </div>
+
+    <div class="mlm-note">
+      ℹ️ このツールを使うには、管理者から<strong>カレンダーへのアクセス権限</strong>を付与してもらう必要があります。カレンダーの選択肢が表示されない場合は管理者に連絡してください。
+    </div>
+  </section>
+
+
+  <!-- ========== カレンダーの見方と基本操作 ========== -->
+  <section id="calendar" class="mlm-section">
+    <div class="mlm-section-header">
+      <div class="mlm-section-icon" style="background:#dbeafe">📅</div>
+      <div>
+        <h2 class="mlm-section-title">カレンダーの見方と基本操作</h2>
+        <p class="mlm-section-desc">カレンダーの選択・月の切り替え・各日付の読み方について説明します。</p>
+      </div>
+    </div>
+
+    <!-- Step 1: カレンダーを選ぶ -->
+    <div class="mlm-step">
+      <div class="mlm-step-badge">1</div>
+      <div class="mlm-step-body">
+        <div class="mlm-step-title">カレンダーを選ぶ</div>
+        <p class="mlm-step-text">画面上部の「カレンダー」プルダウンから、表示したいカレンダーを選択します。カレンダーを選ぶまでは「休暇登録」「一括登録」「休暇検索」ボタンが使用できません。</p>
+        <div class="mlm-tip" style="margin-top:10px">💡 カレンダーの選択肢が表示されない場合は、管理者からアクセス権限を付与してもらってください。</div>
+      </div>
+    </div>
+
+    <!-- Step 2: 月を切り替える -->
+    <div class="mlm-step">
+      <div class="mlm-step-badge">2</div>
+      <div class="mlm-step-body">
+        <div class="mlm-step-title">月を切り替える</div>
+        <p class="mlm-step-text">3つの方法で表示する月を変更できます。</p>
+        <hr class="mlm-divider">
+        <div class="mlm-grid3">
+          <div style="background:#f8fafc;border-radius:12px;padding:14px;text-align:center">
+            <div style="font-size:22px;margin-bottom:6px">◀</div>
+            <div style="font-size:13px;font-weight:700;color:#0f172a">前月ボタン</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px">1か月前に移動します</div>
+          </div>
+          <div style="background:#f8fafc;border-radius:12px;padding:14px;text-align:center">
+            <div style="font-size:22px;margin-bottom:6px">📅</div>
+            <div style="font-size:13px;font-weight:700;color:#0f172a">月入力＋移動</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px">年月を入力して「移動」ボタンを押します</div>
+          </div>
+          <div style="background:#f8fafc;border-radius:12px;padding:14px;text-align:center">
+            <div style="font-size:22px;margin-bottom:6px">▶</div>
+            <div style="font-size:13px;font-weight:700;color:#0f172a">次月ボタン</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px">1か月後に移動します</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: カレンダーを読む -->
+    <div class="mlm-step">
+      <div class="mlm-step-badge">3</div>
+      <div class="mlm-step-body">
+        <div class="mlm-step-title">カレンダーを読む</div>
+        <p class="mlm-step-text">カレンダーは月曜始まりの7列グリッド形式です。各日付のマスには、その日に登録された休暇が色付きのバーで表示されます。</p>
+        <hr class="mlm-divider">
+        <ul class="mlm-ul">
+          <li>バーの色は休暇の種類を表します（赤＝有休、緑＝代休 など）</li>
+          <li>バーには休暇取得者名と状態アイコン（✓ / !）が表示されます</li>
+          <li>1日に4件以上登録されている場合は上位3件＋「他N名」リンクが表示されます。リンクをクリックするとその日の全件ポップアップが開きます</li>
+          <li><strong>今日の日付</strong>は青い枠で強調表示されます</li>
+          <li>前月・翌月の日付は薄いグレーで表示されます</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Step 4: 日付・バーのクリック -->
+    <div class="mlm-card">
+      <div class="mlm-card-title">🖱️ クリック操作のまとめ</div>
+      <table class="mlm-opt-table">
+        <thead><tr><th>クリック対象</th><th>結果</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>日付マス（空白エリア）</td>
+            <td>その日付があらかじめ入力された状態で「休暇登録」フォームが開きます。素早く登録したい場合に便利です。</td>
+          </tr>
+          <tr>
+            <td>休暇バー（色付きの帯）</td>
+            <td>その休暇の詳細・編集画面が開きます。自分が登録した休暇か管理者であれば編集・削除も行えます。</td>
+          </tr>
+          <tr>
+            <td>「他N名」リンク</td>
+            <td>その日に登録されている全休暇の一覧ポップアップが開きます。各行から編集・削除もできます。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== 休暇の登録 ========== -->
+  <section id="register" class="mlm-section">
+    <div class="mlm-section-header">
+      <div class="mlm-section-icon" style="background:#fef3c7">✏️</div>
+      <div>
+        <h2 class="mlm-section-title">休暇の登録</h2>
+        <p class="mlm-section-desc">1件ずつ休暇を登録する方法と、フォームの各入力項目について説明します。</p>
+      </div>
+    </div>
+
+    <!-- Step 1: 登録の開始 -->
+    <div class="mlm-step">
+      <div class="mlm-step-badge">1</div>
+      <div class="mlm-step-body">
+        <div class="mlm-step-title">
+          登録フォームを開く
+          <span class="mlm-tag mlm-tag-green">2通りの方法</span>
+        </div>
+        <p class="mlm-step-text">カレンダーを選択した状態で、以下のいずれかの方法で登録フォームを開きます。</p>
+        <hr class="mlm-divider">
+        <div class="mlm-grid2" style="margin-top:8px">
+          <div style="background:#f0fdf4;border-radius:12px;padding:14px">
+            <div style="font-size:13px;font-weight:800;color:#166534;margin-bottom:8px">方法①：ボタンから開く</div>
+            <ul class="mlm-ul">
+              <li>カレンダー下部の「➕ 休暇登録」ボタンをクリックします</li>
+              <li>日付が空白の状態でフォームが開きます</li>
+            </ul>
+          </div>
+          <div style="background:#eff6ff;border-radius:12px;padding:14px">
+            <div style="font-size:13px;font-weight:800;color:#1e40af;margin-bottom:8px">方法②：日付をクリック</div>
+            <ul class="mlm-ul">
+              <li>カレンダーの日付マスをクリックします</li>
+              <li>その日付があらかじめ入力された状態でフォームが開きます</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: 入力フォーム -->
+    <div class="mlm-step">
+      <div class="mlm-step-badge">2</div>
+      <div class="mlm-step-body">
+        <div class="mlm-step-title" style="justify-content:space-between;flex-wrap:nowrap">
+          <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">フォームに入力する <span class="mlm-tag mlm-tag-gray">すべて任意（※印は必須）</span></span>
+          <button class="mlm-popup-btn" onclick="openModal('modalFormDetail')">詳細を見る ▼</button>
+        </div>
+        <p class="mlm-step-text">以下の項目を入力します。<span class="mlm-required">※</span>が付いた項目は必須です。</p>
+        <hr class="mlm-divider">
+        <table class="mlm-opt-table">
+          <thead><tr><th>項目名</th><th>必須</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>日付</td>
+              <td><span class="mlm-required">必須</span></td>
+              <td>休暇取得日を入力します。カレンダーアイコンから選択することもできます。</td>
+            </tr>
+            <tr>
+              <td>入力モード</td>
+              <td>—</td>
+              <td><strong>自動入力</strong>（社員名簿PLUS連携）または <strong>手動入力</strong> を選択します。デフォルトは自動入力です。</td>
+            </tr>
+            <tr>
+              <td>休暇取得者名</td>
+              <td><span class="mlm-required">必須</span></td>
+              <td>休暇を取得する人の名前を入力します。自動入力モードでは入力中に候補リストが表示されます。</td>
+            </tr>
+            <tr>
+              <td>社員番号</td>
+              <td>任意</td>
+              <td>社員番号を入力します。自動入力で候補を選ぶと自動入力されます。検索時の絞り込みに役立ちます。</td>
+            </tr>
+            <tr>
+              <td>休暇種類</td>
+              <td><span class="mlm-required">必須</span></td>
+              <td>有休・代休・慶弔休暇・介護休暇・リフレッシュ休暇・その他 の6種類から選択します。</td>
+            </tr>
+            <tr>
+              <td>代務者</td>
+              <td>任意</td>
+              <td>休暇中の業務を代わりに担当する人の名前を入力します。複数人の場合はカンマ（,）または読点（、）で区切ります。例：<code>田中, 佐藤</code></td>
+            </tr>
+            <tr>
+              <td>備考</td>
+              <td>任意</td>
+              <td>補足メモを自由に入力できます。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Step 3: 社員名簿PLUS連携 -->
+    <div class="mlm-step">
+      <div class="mlm-step-badge">3</div>
+      <div class="mlm-step-body">
+        <div class="mlm-step-title">
+          社員名簿PLUS連携（自動入力モード）
+          <span class="mlm-tag mlm-tag-teal">おすすめ</span>
+        </div>
+        <p class="mlm-step-text">「自動入力」モードでは、社員名簿PLUSのデータから名前の候補を自動表示します。候補を選ぶだけで名前・社員番号が一括入力されます。</p>
+        <hr class="mlm-divider">
+        <ul class="mlm-ul">
+          <li>「休暇取得者名」欄に名前の一部を入力すると候補リストがポップアップで表示されます</li>
+          <li>候補をクリックすると名前と社員番号が自動で入力されます</li>
+          <li>「代務者」欄でも同様の候補機能が使えます。カンマの後に名前を入力すると追加候補も表示されます</li>
+        </ul>
+        <div class="mlm-tip" style="margin-top:10px">💡 社員名簿PLUSに未登録の場合は候補が表示されません。その場合は「手動入力」モードに切り替えて直接入力してください。</div>
+      </div>
+    </div>
+
+    <!-- Step 4: 重複チェック・保存 -->
+    <div class="mlm-step">
+      <div class="mlm-step-badge">4</div>
+      <div class="mlm-step-body">
+        <div class="mlm-step-title">重複チェックを確認して保存する</div>
+        <p class="mlm-step-text">「保存」ボタンを押すと重複チェックが行われます。同じ日付・同じ名前の休暇がすでに登録されている場合は確認ダイアログが表示されます。</p>
+        <hr class="mlm-divider">
+        <div class="mlm-grid2" style="margin-top:8px">
+          <div style="background:#f0fdf4;border-radius:12px;padding:14px">
+            <div style="font-size:13px;font-weight:800;color:#166534;margin-bottom:8px">「続行」を選ぶ場合</div>
+            <div style="font-size:13px;color:#334155;line-height:1.7">同一人物が同日に複数の休暇を取るケース（例：午前有休・午後代休）など、意図的な重複登録のとき</div>
+          </div>
+          <div style="background:#fff7ed;border-radius:12px;padding:14px">
+            <div style="font-size:13px;font-weight:800;color:#9a3412;margin-bottom:8px">「キャンセル」を選ぶ場合</div>
+            <div style="font-size:13px;color:#334155;line-height:1.7">誤った入力の場合はキャンセルして内容を修正してください</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 編集・確認・削除・コピー ========== -->
+  <section id="edit" class="mlm-section">
+    <div class="mlm-section-header">
+      <div class="mlm-section-icon" style="background:#fce7f3">🔧</div>
+      <div>
+        <h2 class="mlm-section-title">休暇の編集・確認・削除・コピー</h2>
+        <p class="mlm-section-desc">登録済みの休暇を開いて行える操作の一覧です。</p>
+      </div>
+    </div>
+
+    <div class="mlm-card">
+      <div class="mlm-card-title">📂 編集画面を開く方法</div>
+      <ul class="mlm-ul">
+        <li>カレンダー上の<strong>休暇バーをクリック</strong>すると編集画面が開きます</li>
+        <li>「他N名」のポップアップから<strong>「編集」ボタン</strong>を押しても開きます</li>
       </ul>
     </div>
 
-    <div class="lm-card">
-      <div class="lm-card-title">利用開始に必要なこと</div>
-      <p class="lm-card-body">このツールを使うには、管理者から<strong>カレンダーへのアクセス権限</strong>を付与してもらう必要があります。権限がない状態でログインすると、カレンダーの選択肢が表示されません。管理者に連絡してアクセスを依頼してください。</p>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">休暇の種類と色</div>
-      <p class="lm-card-body" style="margin-bottom:14px;">登録できる休暇の種類は6つあり、カレンダー上では色で区別されます。</p>
-      <div class="lm-grid-2">
-        <div class="lm-swatch"><div class="lm-swatch-dot" style="background:#DC2626;"></div>有休（有給休暇）</div>
-        <div class="lm-swatch"><div class="lm-swatch-dot" style="background:#10B981;"></div>代休</div>
-        <div class="lm-swatch"><div class="lm-swatch-dot" style="background:#8B5CF6;"></div>慶弔休暇</div>
-        <div class="lm-swatch"><div class="lm-swatch-dot" style="background:#F97316;"></div>介護休暇</div>
-        <div class="lm-swatch"><div class="lm-swatch-dot" style="background:#EC4899;"></div>リフレッシュ休暇</div>
-        <div class="lm-swatch"><div class="lm-swatch-dot" style="background:#0EA5E9;"></div>その他</div>
-      </div>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">カレンダー上のアイコンの意味</div>
-      <div class="lm-indicator-row">
-        <div class="lm-indicator-chip"><span>✓</span>田中</div>
-        <div style="font-size:14px; color:#334155;"><strong>✓（チェックマーク）</strong>：その休暇は誰かが「確認」を行い、確認者名・確認日時が記録されています。</div>
-      </div>
-      <div class="lm-indicator-row">
-        <div class="lm-indicator-chip"><span>!</span>鈴木</div>
-        <div style="font-size:14px; color:#334155;"><strong>!（エクスクラメーション）</strong>：代務者が設定されていないことを示しています。代務者が必要な場合は編集から追加してください。</div>
-      </div>
-      <div class="lm-indicator-row">
-        <div class="lm-indicator-chip">✓!佐藤</div>
-        <div style="font-size:14px; color:#334155;"><strong>両方表示の場合</strong>：確認済みだが代務者が未設定の状態です。</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ══════════════════════════════════════════ -->
-  <!-- Section 2: カレンダーの見方               -->
-  <!-- ══════════════════════════════════════════ -->
-  <section class="lm-section" id="sec-calendar">
-    <div class="lm-section-header">
-      <div class="lm-section-icon" style="background:#dbeafe;">📅</div>
-      <div>
-        <h2 class="lm-section-title">カレンダーの見方と基本操作</h2>
-        <p class="lm-section-desc">カレンダーの選択・月の移動・各日付の見方について</p>
-      </div>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">① カレンダーを選ぶ</div>
-      <p class="lm-card-body">画面上部の「カレンダー」プルダウンから、表示したいカレンダーを選びます。カレンダーを選ぶまでは「休暇登録」「一括登録」「休暇検索」のボタンが操作できない状態になっています。</p>
-      <div class="lm-tip" style="margin-top:12px;">💡 カレンダーの選択肢が表示されない場合は、管理者にアクセス権限の付与を依頼してください。</div>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">② 月を切り替える</div>
-      <p class="lm-card-body" style="margin-bottom:12px;">3つの方法で表示する月を変更できます。</p>
-      <div class="lm-grid-3">
-        <div style="background:#f8fafc;border-radius:12px;padding:14px;text-align:center;">
-          <div style="font-size:22px;margin-bottom:6px;">◀</div>
-          <div style="font-size:13px;font-weight:700;color:#0f172a;">前月ボタン</div>
-          <div style="font-size:12px;color:#64748b;margin-top:4px;">1か月前に移動</div>
-        </div>
-        <div style="background:#f8fafc;border-radius:12px;padding:14px;text-align:center;">
-          <div style="font-size:22px;margin-bottom:6px;">📅</div>
-          <div style="font-size:13px;font-weight:700;color:#0f172a;">月入力＋移動</div>
-          <div style="font-size:12px;color:#64748b;margin-top:4px;">年月を入力して「移動」</div>
-        </div>
-        <div style="background:#f8fafc;border-radius:12px;padding:14px;text-align:center;">
-          <div style="font-size:22px;margin-bottom:6px;">▶</div>
-          <div style="font-size:13px;font-weight:700;color:#0f172a;">次月ボタン</div>
-          <div style="font-size:12px;color:#64748b;margin-top:4px;">1か月後に移動</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">③ カレンダーの見方</div>
-      <p class="lm-card-body" style="margin-bottom:12px;">カレンダーは月曜始まりの7列×6行形式です。各日付マスには、その日に登録された休暇が色付きのバーで表示されます。</p>
-      <div class="lm-tip">💡 1日に4人以上の休暇が登録されている場合、カレンダーには最大3件まで表示されます。「他N名」というリンクが表示されるので、クリックすると全員の一覧がポップアップで確認できます。</div>
-      <div class="lm-note" style="margin-top:8px;">📌 今日の日付は青い枠で強調表示されます。前月・翌月の日付は灰色で薄く表示されます。</div>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">④ 日付をクリックしたとき</div>
-      <p class="lm-card-body">カレンダーの日付部分をクリックすると、その日付があらかじめ入力された状態で「休暇登録」画面が開きます。すばやく休暇を登録したいときに便利です。</p>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">⑤ 休暇アイテムをクリックしたとき</div>
-      <p class="lm-card-body">カレンダーに表示されている休暇のバーをクリックすると、その休暇の詳細・編集画面が開きます。自分が登録した休暇か管理者であれば編集・削除もできます。</p>
-    </div>
-  </section>
-
-  <!-- ══════════════════════════════════════════ -->
-  <!-- Section 3: 休暇の登録                      -->
-  <!-- ══════════════════════════════════════════ -->
-  <section class="lm-section" id="sec-register">
-    <div class="lm-section-header">
-      <div class="lm-section-icon" style="background:#fef3c7;">✏️</div>
-      <div>
-        <h2 class="lm-section-title">休暇の登録</h2>
-        <p class="lm-section-desc">1件ずつ休暇を登録する方法と入力フォームの各項目について</p>
-      </div>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">登録を開始する方法</div>
-      <p class="lm-card-body" style="margin-bottom:12px;">2つの方法から休暇登録を開始できます。</p>
-      <div class="lm-grid-2">
-        <div style="background:#f0fdf4;border-radius:12px;padding:16px;">
-          <div style="font-weight:700;font-size:14px;color:#166534;margin-bottom:8px;">方法①：ボタンから開く</div>
-          <div style="font-size:13px;color:#334155;line-height:1.7;">カレンダー下部の「➕ 休暇登録」ボタンをクリックすると、日付が未入力の状態で登録フォームが開きます。</div>
-        </div>
-        <div style="background:#eff6ff;border-radius:12px;padding:16px;">
-          <div style="font-weight:700;font-size:14px;color:#1e40af;margin-bottom:8px;">方法②：日付クリック</div>
-          <div style="font-size:13px;color:#334155;line-height:1.7;">カレンダーの日付マスをクリックすると、その日付があらかじめ入力された状態でフォームが開きます。</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">入力フォームの各項目</div>
-      <table class="lm-field-table">
-        <thead>
-          <tr><th>項目名</th><th>必須</th><th>説明</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><strong>日付</strong></td>
-            <td><span class="lm-required">必須</span></td>
-            <td>休暇を取得する日付を入力します。カレンダーアイコンから選択も可能です。</td>
-          </tr>
-          <tr>
-            <td><strong>入力モード</strong></td>
-            <td>—</td>
-            <td>
-              <strong>自動入力（社員名簿PLUS連携）</strong>：名前を入力すると候補が表示されます。候補を選ぶと名前・社員番号が自動入力されます。<br>
-              <strong>手動入力</strong>：候補機能を使わず、名前・社員番号を直接入力します。
-            </td>
-          </tr>
-          <tr>
-            <td><strong>休暇取得者名</strong></td>
-            <td><span class="lm-required">必須</span></td>
-            <td>休暇を取得する人の名前を入力します。自動入力モードでは入力中に候補が表示されます。</td>
-          </tr>
-          <tr>
-            <td><strong>社員番号</strong></td>
-            <td>任意</td>
-            <td>社員番号を入力します。自動入力で候補を選ぶと自動的に入力されます。後から検索する際に役立ちます。</td>
-          </tr>
-          <tr>
-            <td><strong>休暇種類</strong></td>
-            <td><span class="lm-required">必須</span></td>
-            <td>有休・代休・慶弔休暇・介護休暇・リフレッシュ休暇・その他の6種類から選択します。</td>
-          </tr>
-          <tr>
-            <td><strong>代務者</strong></td>
-            <td>任意</td>
-            <td>休暇中の業務を代わりに行う人の名前を入力します。複数人いる場合はカンマ（,）または読点（、）で区切って入力できます。例：<code>田中, 佐藤</code></td>
-          </tr>
-          <tr>
-            <td><strong>備考</strong></td>
-            <td>任意</td>
-            <td>メモや補足事項を自由に入力できます。</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">社員名簿PLUS連携（自動入力モード）</div>
-      <p class="lm-card-body" style="margin-bottom:12px;">自動入力モードでは、社員名簿PLUSのデータを参照して名前の候補を表示します。</p>
-      <ol class="lm-steps">
-        <li><span class="lm-step-num">1</span><span class="lm-step-text">入力モードで「自動入力（社員名簿PLUS連携）」を選択します（デフォルト）。</span></li>
-        <li><span class="lm-step-num">2</span><span class="lm-step-text">「休暇取得者名」に名前の一部を入力すると、候補リストがポップアップで表示されます。</span></li>
-        <li><span class="lm-step-num">3</span><span class="lm-step-text">候補の中から該当する社員名をクリックすると、名前と社員番号が自動で入力されます。</span></li>
-      </ol>
-      <div class="lm-tip" style="margin-top:12px;">💡 代務者の入力欄でも同様の候補機能が使えます。代務者が複数人の場合、カンマの後に名前を入力すると追加の候補が表示されます。</div>
-      <div class="lm-warn" style="margin-top:8px;">⚠️ 社員名簿PLUSにデータが登録されていない場合は候補が表示されません。その場合は「手動入力」モードに切り替えて直接入力してください。</div>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">重複チェック</div>
-      <p class="lm-card-body">同じ日付・同じ名前の休暇がすでに登録されている場合、保存時に確認ダイアログが表示されます。既存の登録内容が表示されるので、内容を確認して「続行」または「キャンセル」を選択してください。</p>
-      <div class="lm-note" style="margin-top:8px;">📌 同じ人が同じ日に複数の種類の休暇を取得する場合（例：午前有休・午後代休）などは「続行」を押して重複登録できます。</div>
-    </div>
-  </section>
-
-  <!-- ══════════════════════════════════════════ -->
-  <!-- Section 4: 編集・確認・削除・コピー         -->
-  <!-- ══════════════════════════════════════════ -->
-  <section class="lm-section" id="sec-edit">
-    <div class="lm-section-header">
-      <div class="lm-section-icon" style="background:#fce7f3;">🔧</div>
-      <div>
-        <h2 class="lm-section-title">休暇の編集・確認・削除・コピー</h2>
-        <p class="lm-section-desc">登録済みの休暇を開いて操作できる機能一覧</p>
-      </div>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">編集画面を開く</div>
-      <p class="lm-card-body">カレンダーに表示されている休暇のバーをクリックすると編集画面が開きます。「他N名」の詳細一覧から「編集」ボタンを押しても同じ画面が開きます。</p>
-    </div>
-
-    <!-- Accordion: 編集 -->
-    <div class="lm-accordion open">
-      <button class="lm-accordion-head" onclick="toggleAccordion(this.closest('.lm-accordion'))">
-        <span>✏️ 休暇情報を編集する</span>
-        <span class="lm-accordion-arrow">▼</span>
+    <!-- 編集 accordion -->
+    <div class="mlm-acc-item mlm-open">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">✏️ 休暇情報を編集する</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-accordion-body">
-        <p style="font-size:14px;color:#334155;line-height:1.75;margin:0 0 12px;">登録時と同じフォームで、日付・名前・社員番号・休暇種類・代務者・備考を変更できます。変更後「保存」を押すと更新されます。</p>
-        <div class="lm-warn">⚠️ <strong>編集できるのは</strong>、自分が登録した休暇か、管理者権限を持つユーザーのみです。他の人が登録した休暇を開いた場合、編集・削除ボタンは表示されません。</div>
-        <div class="lm-tip" style="margin-top:8px;">💡 日付を別の月に変更した場合も正しく保存されます（月をまたいだ移動に対応しています）。</div>
+      <div class="mlm-acc-body">
+        <p>登録時と同じフォームで、日付・名前・社員番号・休暇種類・代務者・備考を変更できます。変更後「保存」を押すと更新されます。</p>
+        <div class="mlm-warn" style="margin-top:8px">⚠️ 編集できるのは<strong>自分が登録した休暇</strong>、または<strong>管理者権限</strong>を持つユーザーのみです。他の人が登録した休暇を開いた場合、編集・削除ボタンは表示されません。</div>
+        <div class="mlm-tip" style="margin-top:8px">💡 日付を別の月に変更しても正しく保存されます。変更後の月のカレンダーに表示されます。</div>
+        <p style="margin-top:10px;font-size:14px;color:#334155">編集画面には「記入者」「確認者」「確認日時」も表示されます。記入者は登録したユーザーの名前（日本語名が取得できる場合はそちら）が表示されます。</p>
       </div>
     </div>
 
-    <!-- Accordion: 確認 -->
-    <div class="lm-accordion">
-      <button class="lm-accordion-head" onclick="toggleAccordion(this.closest('.lm-accordion'))">
-        <span>✅ 休暇を「確認済み」にする</span>
-        <span class="lm-accordion-arrow">▼</span>
+    <!-- 確認 accordion -->
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">✅ 休暇を「確認済み」にする</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-accordion-body">
-        <p style="font-size:14px;color:#334155;line-height:1.75;margin:0 0 12px;">編集画面下部に「この休暇を確認する」ボタンが表示されます（まだ確認されていない休暇のみ）。このボタンを押すと：</p>
-        <ul style="font-size:14px;color:#334155;line-height:2;padding-left:20px;">
-          <li>確認者のユーザーIDと確認日時が記録されます</li>
-          <li>カレンダー上の休暇バーに <strong>✓（チェックマーク）</strong> が表示されます</li>
+      <div class="mlm-acc-body">
+        <p>編集画面の下部に「この休暇を確認する」ボタンが表示されます（未確認の休暇のみ）。このボタンを押すと確認者のユーザーIDと確認日時が記録されます。</p>
+        <ul class="mlm-ul" style="margin-top:10px">
+          <li>確認後はカレンダー上の休暇バーに <strong>✓（チェックマーク）</strong> が表示されます</li>
           <li>確認者の名前は編集画面の「確認者」欄に表示されます</li>
+          <li>一度確認済みになった休暇の「確認ボタン」は非表示になります</li>
         </ul>
-        <div class="lm-info" style="margin-top:12px;">📘 確認機能は「この内容を確認しました」という証跡を残すためのものです。上長や担当者が内容を確認したことを記録するために使います。確認者は自分自身でも、登録者とは別の人でも構いません。</div>
-        <div class="lm-note" style="margin-top:8px;">📌 一度「確認済み」になった休暇は、確認ボタンが非表示になります。</div>
+        <div class="mlm-note" style="margin-top:10px">ℹ️ 確認機能は「この内容を確認しました」という証跡を残すためのものです。確認者は登録者本人でも、上長など別のユーザーでも構いません。</div>
+        <div class="mlm-warn" style="margin-top:8px">⚠️ 一度「確認済み」にした休暇を未確認に戻す機能はありません。誤って確認した場合は削除して再登録するか、管理者に相談してください。</div>
       </div>
     </div>
 
-    <!-- Accordion: 削除 -->
-    <div class="lm-accordion">
-      <button class="lm-accordion-head" onclick="toggleAccordion(this.closest('.lm-accordion'))">
-        <span>🗑️ 休暇を削除する</span>
-        <span class="lm-accordion-arrow">▼</span>
+    <!-- 削除 accordion -->
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">🗑️ 休暇を削除する</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-accordion-body">
-        <p style="font-size:14px;color:#334155;line-height:1.75;margin:0 0 12px;">編集画面左下の「削除」ボタンをクリックすると削除できます。確認ダイアログが表示されるので「OK」を押すと完全に削除されます。</p>
-        <div class="lm-warn">⚠️ <strong>削除できるのは</strong>、自分が登録した休暇か、管理者権限を持つユーザーのみです。「削除」ボタンは権限がある場合のみ表示されます。</div>
-        <div class="lm-warn" style="margin-top:8px;">⚠️ 削除した休暇は復元できません。誤って削除した場合は再度登録してください。</div>
-        <div class="lm-tip" style="margin-top:8px;">💡 「他N名」の詳細一覧からも削除できます。</div>
+      <div class="mlm-acc-body">
+        <p>編集画面左下の「削除」ボタンをクリックします。確認ダイアログが表示されるので「OK」を押すと削除されます。「他N名」の一覧からも削除できます。</p>
+        <div class="mlm-warn" style="margin-top:10px">⚠️ 削除できるのは<strong>自分が登録した休暇</strong>、または<strong>管理者権限</strong>を持つユーザーのみです。削除ボタンは権限がある場合のみ表示されます。</div>
+        <div class="mlm-warn" style="margin-top:8px">⚠️ 削除した休暇は復元できません。誤って削除した場合は再度登録してください。</div>
       </div>
     </div>
 
-    <!-- Accordion: コピー -->
-    <div class="lm-accordion">
-      <button class="lm-accordion-head" onclick="toggleAccordion(this.closest('.lm-accordion'))">
-        <span>📋 休暇を別の日付にコピーする</span>
-        <span class="lm-accordion-arrow">▼</span>
+    <!-- コピー accordion -->
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">📑 休暇を別の日付にコピーする</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-accordion-body">
-        <p style="font-size:14px;color:#334155;line-height:1.75;margin:0 0 12px;">同じ人が複数の日に休暇を取る場合に便利な機能です。一度登録した休暇を別の日にコピーできます。</p>
-        <ol class="lm-steps">
-          <li><span class="lm-step-num">1</span><span class="lm-step-text">コピーしたい休暇の編集画面を開きます。</span></li>
-          <li><span class="lm-step-num">2</span><span class="lm-step-text">右下の「📋 コピー」ボタンをクリックします（編集時のみ表示）。</span></li>
-          <li><span class="lm-step-num">3</span><span class="lm-step-text">コピー先の日付を入力します。「＋ 日付を追加」で複数の日付を一度に指定できます。</span></li>
-          <li><span class="lm-step-num">4</span><span class="lm-step-text">「コピー実行」を押すと、指定した全日付に同じ内容の休暇が登録されます。</span></li>
-        </ol>
-        <div class="lm-tip" style="margin-top:12px;">💡 名前・社員番号・休暇種類・代務者・備考はすべてコピーされます。日付だけが指定したものに変わります。</div>
+      <div class="mlm-acc-body">
+        <p>同じ人が複数の日に休暇を取る場合に便利な機能です。一度登録した休暇の内容を別日付にそのままコピーできます。</p>
+        <ul class="mlm-ul" style="margin:10px 0">
+          <li>コピーしたい休暇の編集画面を開きます</li>
+          <li>右下の「📑 コピー」ボタンをクリックします（編集画面でのみ表示）</li>
+          <li>コピー先の日付を入力します。「＋ 日付を追加」で複数の日付を一度に指定できます</li>
+          <li>「コピー実行」を押すと、指定した全日付に同じ内容の休暇が登録されます</li>
+        </ul>
+        <div class="mlm-tip" style="margin-top:8px">💡 名前・社員番号・休暇種類・代務者・備考はすべてコピーされます。日付だけが指定した日付に変わります。</div>
       </div>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">記入者・確認者情報の確認</div>
-      <p class="lm-card-body">編集画面には「記入者」「確認者」「確認日時」の情報が表示されます。記入者は休暇を登録した人のユーザー名（日本語名が取得できる場合はそちら）が表示されます。</p>
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════ -->
-  <!-- Section 5: 一括登録                        -->
-  <!-- ══════════════════════════════════════════ -->
-  <section class="lm-section" id="sec-bulk">
-    <div class="lm-section-header">
-      <div class="lm-section-icon" style="background:#ede9fe;">📋</div>
+
+  <!-- ========== 一括登録 ========== -->
+  <section id="bulk" class="mlm-section">
+    <div class="mlm-section-header">
+      <div class="mlm-section-icon" style="background:#ede9fe">📋</div>
       <div>
-        <h2 class="lm-section-title">一括登録</h2>
-        <p class="lm-section-desc">複数の休暇をまとめて登録する機能</p>
+        <h2 class="mlm-section-title">一括登録</h2>
+        <p class="mlm-section-desc">複数の休暇をリストに追加してから一度に保存できる機能です。</p>
       </div>
     </div>
 
-    <div class="lm-card">
-      <div class="lm-card-title">一括登録を開始する</div>
-      <p class="lm-card-body">カレンダー下部の「📋 一括登録」ボタンをクリックすると、一括登録モーダルが開きます。カレンダーを選択していないと操作できません。</p>
+    <div class="mlm-card">
+      <div class="mlm-card-title">📂 一括登録を開始する</div>
+      <p style="font-size:14px;color:#475569;margin:0">カレンダー下部の「📋 一括登録」ボタンをクリックすると一括登録モーダルが開きます。カレンダーが選択されていないと操作できません。</p>
     </div>
 
-    <div class="lm-card">
-      <div class="lm-card-title">一括登録の操作手順</div>
-      <ol class="lm-steps">
-        <li><span class="lm-step-num">1</span><span class="lm-step-text">画面左側のフォームに1件分の休暇情報（日付・名前・休暇種類など）を入力します。通常の登録と同じく、自動入力モードで社員名簿PLUSの候補も使えます。</span></li>
-        <li><span class="lm-step-num">2</span><span class="lm-step-text">「追加」ボタンをクリックすると、右側の「登録待ちリスト」にその休暇が追加されます。フォームは自動でリセットされます。</span></li>
-        <li><span class="lm-step-num">3</span><span class="lm-step-text">1〜2を繰り返して、登録したい全休暇を登録待ちリストに追加します。リストに追加した休暇はここではまだ保存されていません。</span></li>
-        <li><span class="lm-step-num">4</span><span class="lm-step-text">リスト右側の「✕」ボタンで個別に削除できます。間違えた場合に活用してください。</span></li>
-        <li><span class="lm-step-num">5</span><span class="lm-step-text">「一括登録実行」ボタンをクリックすると、リスト内の全休暇が一度に保存されます。</span></li>
-      </ol>
-      <div class="lm-tip" style="margin-top:12px;">💡 同じ人の複数日登録は一括登録より「コピー」機能のほうが便利な場合があります。用途に応じて使い分けてください。</div>
+    <!-- Steps -->
+    <div class="mlm-step">
+      <div class="mlm-step-badge">1</div>
+      <div class="mlm-step-body">
+        <div class="mlm-step-title">左側のフォームに1件分の情報を入力する</div>
+        <p class="mlm-step-text">モーダル左側のフォームに1件分の休暇情報を入力します。通常の登録と同じく、自動入力モードで社員名簿PLUSの候補も使えます。</p>
+      </div>
     </div>
 
-    <div class="lm-card">
-      <div class="lm-card-title">一括登録での重複チェック</div>
-      <p class="lm-card-body">一括登録の場合、各休暇について登録時に重複チェックが行われます。重複が検出された場合でも、既存の登録と併存する形で保存されます（強制保存）。</p>
+    <div class="mlm-step">
+      <div class="mlm-step-badge">2</div>
+      <div class="mlm-step-body">
+        <div class="mlm-step-title">「追加」ボタンで登録待ちリストに追加する</div>
+        <p class="mlm-step-text">「追加」ボタンをクリックすると、右側の「登録待ちリスト」にその休暇が追加されます。フォームは自動でリセットされ、次の入力に備えます。</p>
+        <div class="mlm-note" style="margin-top:10px">ℹ️ この時点ではまだデータベースには保存されていません。</div>
+      </div>
+    </div>
+
+    <div class="mlm-step">
+      <div class="mlm-step-badge">3</div>
+      <div class="mlm-step-body">
+        <div class="mlm-step-title">1〜2を繰り返して全件をリストに追加する</div>
+        <p class="mlm-step-text">登録したい全休暇をリストに追加します。リスト右側の「✕」ボタンで個別に削除できます。間違えた場合に活用してください。</p>
+      </div>
+    </div>
+
+    <div class="mlm-step">
+      <div class="mlm-step-badge">4</div>
+      <div class="mlm-step-body">
+        <div class="mlm-step-title">「一括登録実行」ボタンで保存する</div>
+        <p class="mlm-step-text">「一括登録実行」ボタンをクリックすると、リスト内の全休暇が一度に保存されます。</p>
+        <div class="mlm-tip" style="margin-top:10px">💡 同じ人の複数日登録は「コピー」機能のほうが素早い場合があります。一括登録は種類や代務者が異なる複数件を効率よく入力したいときに特に便利です。</div>
+        <div class="mlm-note" style="margin-top:8px">ℹ️ 一括登録では重複が検出されても強制的に保存されます（確認ダイアログは表示されません）。</div>
+      </div>
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════ -->
-  <!-- Section 6: 休暇検索                        -->
-  <!-- ══════════════════════════════════════════ -->
-  <section class="lm-section" id="sec-search">
-    <div class="lm-section-header">
-      <div class="lm-section-icon" style="background:#e0f2fe;">🔍</div>
+
+  <!-- ========== 休暇検索 ========== -->
+  <section id="search" class="mlm-section">
+    <div class="mlm-section-header">
+      <div class="mlm-section-icon" style="background:#e0f2fe">🔍</div>
       <div>
-        <h2 class="lm-section-title">休暇検索</h2>
-        <p class="lm-section-desc">条件を指定して過去・現在の休暇データを横断検索する機能</p>
+        <h2 class="mlm-section-title">休暇検索</h2>
+        <p class="mlm-section-desc">条件を組み合わせて、過去・現在の休暇データを横断的に検索できる機能です。</p>
       </div>
     </div>
 
-    <div class="lm-card">
-      <div class="lm-card-title">検索を開始する</div>
-      <p class="lm-card-body">カレンダー下部の「🔍 休暇検索」ボタンをクリックすると検索モーダルが開きます。検索はカレンダー単位で行われます（選択中のカレンダーのデータが対象）。</p>
+    <div class="mlm-card">
+      <div class="mlm-card-title">📂 検索を開始する</div>
+      <p style="font-size:14px;color:#475569;margin:0">カレンダー下部の「🔍 休暇検索」ボタンをクリックすると検索モーダルが開きます。検索は<strong>現在選択中のカレンダー</strong>のデータが対象です。</p>
     </div>
 
-    <div class="lm-card">
-      <div class="lm-card-title">検索条件の一覧</div>
-      <table class="lm-field-table">
-        <thead>
-          <tr><th>条件</th><th>説明</th><th>一致方法</th></tr>
-        </thead>
+    <div class="mlm-card">
+      <div class="mlm-card-title" style="justify-content:space-between">
+        <span>🔎 検索条件の一覧</span>
+        <button class="mlm-popup-btn" onclick="openModal('modalSearchDetail')">全条件の詳細を見る ▼</button>
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">条件は組み合わせて使えます。たとえば「今月の未確認の有休で代務者が未設定のもの」のような複合条件で絞り込みが可能です。</p>
+      <table class="mlm-opt-table">
+        <thead><tr><th style="width:130px">条件</th><th>説明</th><th style="width:80px">一致方式</th></tr></thead>
         <tbody>
-          <tr>
-            <td><strong>期間（開始）</strong></td>
-            <td>指定した日付以降の休暇を絞り込みます</td>
-            <td>以降</td>
-          </tr>
-          <tr>
-            <td><strong>期間（終了）</strong></td>
-            <td>指定した日付以前の休暇を絞り込みます</td>
-            <td>以前</td>
-          </tr>
-          <tr>
-            <td><strong>特定月</strong></td>
-            <td>指定した年月のデータのみを対象にします。期間（開始・終了）より優先されます</td>
-            <td>月一致</td>
-          </tr>
-          <tr>
-            <td><strong>休暇取得者名</strong></td>
-            <td>名前が完全に一致するデータを検索します。社員名簿PLUSの候補から選ぶか直接入力できます</td>
-            <td>完全一致</td>
-          </tr>
-          <tr>
-            <td><strong>社員番号</strong></td>
-            <td>社員番号の一部が含まれるデータを検索します</td>
-            <td>部分一致</td>
-          </tr>
-          <tr>
-            <td><strong>休暇種類</strong></td>
-            <td>特定の休暇種類のみに絞り込みます。「すべて」を選ぶと全種類が対象になります</td>
-            <td>完全一致</td>
-          </tr>
-          <tr>
-            <td><strong>代務者名</strong></td>
-            <td>代務者として登録されている名前が完全に一致するデータを検索します</td>
-            <td>完全一致</td>
-          </tr>
-          <tr>
-            <td><strong>確認状況</strong></td>
-            <td>「すべて」「確認済み（✓あり）」「未確認」の3つから選択できます</td>
-            <td>状態選択</td>
-          </tr>
-          <tr>
-            <td><strong>代務者設定</strong></td>
-            <td>「すべて」「設定あり」「未設定のみ（!マーク）」から選択できます</td>
-            <td>状態選択</td>
-          </tr>
-          <tr>
-            <td><strong>備考</strong></td>
-            <td>備考欄に指定した文字列が含まれるデータを検索します</td>
-            <td>部分一致</td>
-          </tr>
+          <tr><td>期間（開始）</td><td>指定日付以降の休暇を絞り込みます</td><td>以降</td></tr>
+          <tr><td>期間（終了）</td><td>指定日付以前の休暇を絞り込みます</td><td>以前</td></tr>
+          <tr><td>特定月</td><td>指定した年月のデータのみ対象にします。期間（開始・終了）より優先されます</td><td>月一致</td></tr>
+          <tr><td>休暇取得者名</td><td>名前が完全に一致するデータを検索します。社員名簿PLUSの候補も使えます</td><td>完全一致</td></tr>
+          <tr><td>社員番号</td><td>社員番号の一部が含まれるデータを検索します</td><td>部分一致</td></tr>
+          <tr><td>休暇種類</td><td>特定の休暇種類に絞り込みます。「すべて」を選ぶと全種類が対象です</td><td>完全一致</td></tr>
+          <tr><td>代務者名</td><td>代務者として登録された名前が完全に一致するデータを検索します</td><td>完全一致</td></tr>
+          <tr><td>確認状況</td><td>「すべて」「確認済み（✓あり）」「未確認」の3つから選択できます</td><td>状態選択</td></tr>
+          <tr><td>代務者設定</td><td>「すべて」「設定あり」「未設定のみ（!マーク）」から選択できます</td><td>状態選択</td></tr>
+          <tr><td>備考</td><td>備考欄に指定した文字列が含まれるデータを検索します</td><td>部分一致</td></tr>
         </tbody>
       </table>
-      <div class="lm-tip" style="margin-top:12px;">💡 条件は組み合わせて使えます。たとえば「今月の未確認の有休で代務者が未設定のもの」のような複合条件での検索が可能です。</div>
     </div>
 
-    <div class="lm-card">
-      <div class="lm-card-title">検索結果の見方</div>
-      <p class="lm-card-body" style="margin-bottom:12px;">検索結果は一覧表形式で表示されます。結果件数も併せて表示されます。</p>
-      <table class="lm-field-table">
-        <thead><tr><th>列</th><th>内容</th></tr></thead>
+    <div class="mlm-card">
+      <div class="mlm-card-title">📊 検索結果の見方</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">検索結果は一覧表形式で表示されます。結果件数も合わせて表示されます。</p>
+      <table class="mlm-opt-table">
+        <thead><tr><th>列名</th><th>内容</th></tr></thead>
         <tbody>
-          <tr><td>日付</td><td>休暇取得日（YYYY-MM-DD形式）</td></tr>
+          <tr><td>日付</td><td>休暇取得日（YYYY-MM-DD 形式）</td></tr>
           <tr><td>名前</td><td>休暇取得者名。代務者未設定の場合は「!」が表示されます</td></tr>
-          <tr><td>社員番号</td><td>登録された社員番号（未登録の場合は「-」）</td></tr>
-          <tr><td>休暇種類</td><td>色付きのバッジで休暇の種類が表示されます</td></tr>
+          <tr><td>社員番号</td><td>登録された社員番号（未登録の場合は「−」）</td></tr>
+          <tr><td>休暇種類</td><td>色付きのバッジで種類が表示されます</td></tr>
           <tr><td>代務者</td><td>代務者名（複数の場合はカンマ区切り）</td></tr>
-          <tr><td>確認</td><td>✓確認済み または 未確認</td></tr>
-          <tr><td>備考</td><td>登録された備考（未登録の場合は「-」）</td></tr>
+          <tr><td>確認</td><td>✓ 確認済み または 未確認</td></tr>
+          <tr><td>備考</td><td>登録された備考（未登録の場合は「−」）</td></tr>
         </tbody>
       </table>
-    </div>
-
-    <div class="lm-card">
-      <div class="lm-card-title">条件クリア</div>
-      <p class="lm-card-body">「条件クリア」ボタンをクリックすると、すべての検索条件がリセットされます。検索結果もクリアされます。</p>
+      <div class="mlm-tip" style="margin-top:10px">💡 「条件クリア」ボタンをクリックすると、すべての検索条件と検索結果がリセットされます。</div>
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════ -->
-  <!-- Section 7: 管理者メニュー                  -->
-  <!-- ══════════════════════════════════════════ -->
-  <section class="lm-section" id="sec-admin">
-    <div class="lm-section-header">
-      <div class="lm-section-icon" style="background:#fee2e2;">🔑</div>
+
+  <!-- ========== 管理者メニュー ========== -->
+  <section id="admin" class="mlm-section">
+    <div class="mlm-section-header">
+      <div class="mlm-section-icon" style="background:#fee2e2">🔑</div>
       <div>
-        <h2 class="lm-section-title">管理者メニュー</h2>
-        <p class="lm-section-desc">管理者権限を持つユーザーのみが使える機能</p>
+        <h2 class="mlm-section-title">管理者メニュー</h2>
+        <p class="mlm-section-desc">管理者権限を持つユーザーのみが使える機能です。カレンダーの作成・権限管理・削除が行えます。</p>
       </div>
     </div>
 
-    <div class="lm-admin-tag">🔒 このセクションは管理者のみが操作できます</div>
+    <div class="mlm-admin-tag">🔒 このセクションの操作は管理者のみが行えます</div>
 
-    <div class="lm-card">
-      <div class="lm-card-title">管理者メニューを開く</div>
-      <p class="lm-card-body">管理者権限があると、カレンダー選択欄の横に「管理者メニュー」ボタン（赤色）が表示されます。このボタンをクリックすると管理者メニューが開きます。管理者メニューには3つのタブがあります。</p>
+    <div class="mlm-card">
+      <div class="mlm-card-title">📂 管理者メニューを開く</div>
+      <p style="font-size:14px;color:#475569;margin:0">管理者権限があると、カレンダー選択欄の横に赤色の「管理者メニュー」ボタンが表示されます。このボタンをクリックすると管理者メニューが開きます。管理者メニューには3つのタブがあります。</p>
     </div>
 
-    <!-- Accordion: カレンダー作成 -->
-    <div class="lm-accordion open">
-      <button class="lm-accordion-head" onclick="toggleAccordion(this.closest('.lm-accordion'))">
-        <span>🗓️ タブ①：カレンダー作成</span>
-        <span class="lm-accordion-arrow">▼</span>
+    <!-- Tab 1: カレンダー作成 accordion -->
+    <div class="mlm-acc-item mlm-open">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">🗓️ タブ①：カレンダー作成</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-accordion-body">
-        <p style="font-size:14px;color:#334155;line-height:1.75;margin:0 0 12px;">新しいカレンダーを作成します。カレンダーは部署・班・プロジェクトごとに分けて管理できます。</p>
-        <table class="lm-field-table">
+      <div class="mlm-acc-body">
+        <p>新しいカレンダーを作成します。カレンダーは部署・班・プロジェクトごとに分けて管理できます。</p>
+        <table class="mlm-opt-table" style="margin-top:10px">
           <thead><tr><th>項目</th><th>必須</th><th>説明</th></tr></thead>
           <tbody>
             <tr>
-              <td><strong>カレンダーID</strong></td>
-              <td><span class="lm-required">必須</span></td>
+              <td>カレンダーID</td>
+              <td><span class="mlm-required">必須</span></td>
               <td>
-                システム内部のID。以下のルールがあります：
-                <ul style="margin:6px 0 0;padding-left:16px;font-size:13px;line-height:1.8;">
+                システム内部のIDです。以下のルールがあります：
+                <ul class="mlm-sublist">
                   <li>英数字（a〜z、A〜Z、0〜9）とアンダースコア（_）のみ使用可能</li>
                   <li>最大20文字</li>
                   <li>一度作成したIDは変更できません</li>
@@ -754,241 +905,425 @@
               </td>
             </tr>
             <tr>
-              <td><strong>カレンダー名</strong></td>
+              <td>カレンダー名</td>
               <td>任意</td>
-              <td>表示用の名前。日本語も使用できます。未入力の場合はカレンダーIDが表示名として使われます。例：<code>営業部</code>、<code>1班</code></td>
+              <td>画面に表示される名前です。日本語も使用できます。未入力の場合はカレンダーIDが表示名として使われます。例：<code>営業部</code>、<code>1班</code></td>
             </tr>
           </tbody>
         </table>
-        <div class="lm-note" style="margin-top:12px;">📌 カレンダーを作成した管理者には、自動的にそのカレンダーへのアクセス権限が付与されます。他のユーザーが使えるようにするには、「権限付与」タブで個別に付与してください。</div>
+        <div class="mlm-note" style="margin-top:10px">ℹ️ カレンダーを作成した管理者には、自動的にそのカレンダーへのアクセス権限が付与されます。他のユーザーが使えるようにするには「権限付与」タブで個別に付与してください。</div>
       </div>
     </div>
 
-    <!-- Accordion: 権限付与 -->
-    <div class="lm-accordion">
-      <button class="lm-accordion-head" onclick="toggleAccordion(this.closest('.lm-accordion'))">
-        <span>👤 タブ②：権限付与</span>
-        <span class="lm-accordion-arrow">▼</span>
+    <!-- Tab 2: 権限付与 accordion -->
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">👤 タブ②：権限付与</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-accordion-body">
-        <p style="font-size:14px;color:#334155;line-height:1.75;margin:0 0 16px;">ユーザーにカレンダーへのアクセス権限または管理者権限を付与します。</p>
+      <div class="mlm-acc-body">
+        <p>ユーザーにカレンダーへのアクセス権限または管理者権限を付与します。</p>
 
-        <div style="background:#fefce8;border:1px solid #fde047;border-radius:10px;padding:14px;margin-bottom:14px;">
-          <div style="font-weight:700;font-size:14px;color:#713f12;margin-bottom:10px;">カレンダーアクセス権限の付与</div>
-          <ol class="lm-steps">
-            <li><span class="lm-step-num">1</span><span class="lm-step-text">「ユーザーID」に付与したいユーザーのログインIDを入力します。</span></li>
-            <li><span class="lm-step-num">2</span><span class="lm-step-text">「カレンダー選択」から、アクセスを許可するカレンダーを選びます。</span></li>
-            <li><span class="lm-step-num">3</span><span class="lm-step-text">「付与」ボタンをクリックすると権限が即座に有効になります。</span></li>
-          </ol>
+        <div style="background:#fefce8;border:1px solid #fde047;border-radius:12px;padding:16px;margin:12px 0">
+          <div style="font-weight:800;font-size:14px;color:#713f12;margin-bottom:10px">📅 カレンダーアクセス権限の付与</div>
+          <ul class="mlm-ul">
+            <li>「ユーザーID」に付与したいユーザーのログインIDを入力します</li>
+            <li>「カレンダー選択」から、アクセスを許可するカレンダーを選択します</li>
+            <li>「付与」ボタンをクリックすると権限が即座に有効になります</li>
+          </ul>
         </div>
 
-        <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:10px;padding:14px;">
-          <div style="font-weight:700;font-size:14px;color:#9f1239;margin-bottom:10px;">管理者権限の付与</div>
-          <ol class="lm-steps">
-            <li><span class="lm-step-num">1</span><span class="lm-step-text">「ユーザーID」に付与したいユーザーのログインIDを入力します。</span></li>
-            <li><span class="lm-step-num">2</span><span class="lm-step-text">「管理者権限付与」ボタンをクリックします。確認ダイアログが表示されます。</span></li>
-            <li><span class="lm-step-num">3</span><span class="lm-step-text">「OK」を押すと管理者権限が付与されます。</span></li>
-          </ol>
-          <div class="lm-warn" style="margin-top:10px;">⚠️ 管理者権限を持つユーザーは、全カレンダーへのアクセス・カレンダー作成・権限付与・権限剥奪・カレンダー削除などの操作が行えます。信頼できるユーザーにのみ付与してください。</div>
+        <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:12px;padding:16px">
+          <div style="font-weight:800;font-size:14px;color:#9f1239;margin-bottom:10px">🔑 管理者権限の付与</div>
+          <ul class="mlm-ul">
+            <li>「ユーザーID」に付与したいユーザーのログインIDを入力します</li>
+            <li>「管理者権限付与」ボタンをクリックすると確認ダイアログが表示されます</li>
+            <li>「OK」を押すと管理者権限が付与されます</li>
+          </ul>
+          <div class="mlm-warn" style="margin-top:10px">⚠️ 管理者権限を持つユーザーは、全カレンダーへのアクセス・カレンダー作成・権限付与・権限剥奪・カレンダー削除が行えます。信頼できるユーザーにのみ付与してください。</div>
         </div>
       </div>
     </div>
 
-    <!-- Accordion: ユーザー一覧 -->
-    <div class="lm-accordion">
-      <button class="lm-accordion-head" onclick="toggleAccordion(this.closest('.lm-accordion'))">
-        <span>📊 タブ③：ユーザー一覧・権限剥奪・カレンダー削除</span>
-        <span class="lm-accordion-arrow">▼</span>
+    <!-- Tab 3: ユーザー一覧・権限剥奪・削除 accordion -->
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">📊 タブ③：ユーザー一覧・権限剥奪・カレンダー削除</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-accordion-body">
-        <p style="font-size:14px;color:#334155;line-height:1.75;margin:0 0 12px;">このタブでは、現在のユーザー権限状況の確認・権限の剥奪・カレンダーの削除が行えます。</p>
+      <div class="mlm-acc-body">
+        <p style="margin-bottom:14px">このタブでは、ユーザー権限の確認・権限の剥奪・カレンダーの完全削除が行えます。</p>
 
-        <div style="font-weight:700;font-size:14px;color:#0f172a;margin-bottom:8px;">ユーザー一覧</div>
-        <p style="font-size:14px;color:#334155;line-height:1.75;margin:0 0 12px;">全ユーザーの権限状況（管理者/一般、アクセス可能なカレンダー）が一覧表示されます。</p>
+        <div style="font-weight:800;font-size:14px;color:#0f172a;margin-bottom:6px">📋 ユーザー一覧</div>
+        <p style="font-size:14px;color:#334155;line-height:1.7;margin:0 0 14px">全ユーザーの権限状況（管理者 / 一般、アクセス可能なカレンダー）が一覧表示されます。</p>
 
-        <div style="font-weight:700;font-size:14px;color:#0f172a;margin-bottom:8px;">権限の剥奪</div>
-        <p style="font-size:14px;color:#334155;line-height:1.75;margin:0 0 12px;">一覧の「権限剥奪」ボタンをクリックすると剥奪メニューが開きます。</p>
-        <ul style="font-size:14px;color:#334155;line-height:2;padding-left:20px;margin-bottom:12px;">
-          <li><strong>管理者権限のみ剥奪</strong>：カレンダーアクセス権限はそのままに、管理者権限だけを剥奪します</li>
-          <li><strong>管理者権限＋全カレンダーアクセス権限を剥奪</strong>：全権限をまとめて剥奪します</li>
-          <li><strong>特定カレンダーの権限を剥奪</strong>：チェックボックスで指定したカレンダーのアクセス権限のみ剥奪します</li>
-        </ul>
+        <div style="font-weight:800;font-size:14px;color:#0f172a;margin-bottom:6px">🚫 権限の剥奪</div>
+        <p style="font-size:14px;color:#334155;line-height:1.7;margin:0 0 8px">一覧の「権限剥奪」ボタンをクリックすると剥奪メニューが開きます。</p>
+        <table class="mlm-opt-table" style="margin-bottom:14px">
+          <thead><tr><th>剥奪方法</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr><td>管理者権限のみ剥奪</td><td>カレンダーアクセス権限はそのままに、管理者権限だけを剥奪します</td></tr>
+            <tr><td>管理者権限＋全カレンダーアクセス権限を剥奪</td><td>全権限をまとめて剥奪します</td></tr>
+            <tr><td>特定カレンダーの権限を剥奪</td><td>チェックボックスで指定したカレンダーのアクセス権限のみ剥奪します</td></tr>
+          </tbody>
+        </table>
 
-        <div style="font-weight:700;font-size:14px;color:#0f172a;margin-bottom:8px;">カレンダーの削除</div>
-        <p style="font-size:14px;color:#334155;line-height:1.75;margin:0 0 8px;">一覧の下部にある「カレンダー削除」セクションから、カレンダーを完全に削除できます。</p>
-        <div class="lm-warn">⚠️ カレンダーを削除すると、そのカレンダーに登録されていた<strong>全ての休暇データ</strong>も完全に削除されます。削除前に件数が表示されるので必ず確認してください。削除後は復元できません。</div>
+        <div style="font-weight:800;font-size:14px;color:#0f172a;margin-bottom:6px">🗑️ カレンダーの削除</div>
+        <p style="font-size:14px;color:#334155;line-height:1.7;margin:0 0 8px">一覧下部の「カレンダー削除」セクションから、カレンダーを完全に削除できます。削除前に登録件数が表示されます。</p>
+        <div class="mlm-warn">⚠️ カレンダーを削除すると、そのカレンダーに登録されている<strong>すべての休暇データ</strong>も完全に削除されます。削除前に必ず件数確認画面を確認してください。削除後は復元できません。</div>
       </div>
     </div>
 
-    <div class="lm-card">
-      <div class="lm-card-title">DSTTシステム管理者との違い</div>
-      <p class="lm-card-body">DSTTのシステム管理者（全ツールを管理するアカウント）は、有休共有ツールにおいても自動的に管理者として扱われます。ツール独自の管理者（「管理者権限付与」で付与された管理者）と合わせて、両方が管理者権限を持ちます。</p>
+    <div class="mlm-card" style="margin-top:12px">
+      <div class="mlm-card-title">🏢 DSTTシステム管理者について</div>
+      <p style="font-size:14px;color:#475569;line-height:1.7;margin:0">DSTTのシステム全体を管理するアカウントは、有休共有ツールにおいても自動的に管理者として扱われます。ツール独自の管理者（「管理者権限付与」で付与された管理者）と合わせて、両者とも同等の管理者権限を持ちます。</p>
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════ -->
-  <!-- Section 8: よくある質問                    -->
-  <!-- ══════════════════════════════════════════ -->
-  <section class="lm-section" id="sec-faq">
-    <div class="lm-section-header">
-      <div class="lm-section-icon" style="background:#f0fdf4;">❓</div>
+
+  <!-- ========== よくある質問 ========== -->
+  <section id="faq" class="mlm-section">
+    <div class="mlm-section-header">
+      <div class="mlm-section-icon" style="background:#f0fdf4">❓</div>
       <div>
-        <h2 class="lm-section-title">よくある質問</h2>
-        <p class="lm-section-desc">操作に関するよくある疑問と解決方法</p>
+        <h2 class="mlm-section-title">よくある質問</h2>
+        <p class="mlm-section-desc">クリックすると回答を表示します。</p>
       </div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>カレンダーが選択肢に表示されません</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">カレンダーが選択肢に表示されません</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">管理者からカレンダーへのアクセス権限をもらう必要があります。ツールの管理者（または DSTT の管理者）に連絡して、対象のカレンダーへのアクセス権限を付与してもらってください。</div>
+      <div class="mlm-acc-body">管理者からカレンダーへのアクセス権限を付与してもらう必要があります。ツールの管理者（または DSTT 全体の管理者）に連絡して、対象カレンダーへのアクセス権限を付与してもらってください。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>「休暇登録」「一括登録」「休暇検索」のボタンが押せません</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">「休暇登録」「一括登録」「休暇検索」のボタンが押せません</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">カレンダーが選択されていません。まず画面上部の「カレンダー」プルダウンからカレンダーを選んでください。選択後、ボタンが操作可能になります。</div>
+      <div class="mlm-acc-body">カレンダーが選択されていないためです。まず画面上部の「カレンダー」プルダウンからカレンダーを選択してください。選択後、各ボタンが操作可能になります。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>名前の候補が表示されません</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">名前の候補リストが表示されません</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">以下を確認してください：(1) 入力モードが「自動入力（社員名簿PLUS連携）」になっているか。「手動入力」を選択していると候補は表示されません。(2) 社員名簿PLUS（Pluslist）にその社員が登録されているか。登録されていない場合は候補が出ません。その場合は「手動入力」に切り替えて直接入力してください。</div>
+      <div class="mlm-acc-body">以下の2点を確認してください。①入力モードが「自動入力（社員名簿PLUS連携）」になっているか（「手動入力」モードを選択していると候補は表示されません）。②社員名簿PLUS（Pluslist）にその社員が登録されているか（未登録の場合は候補が出ません）。登録されていない場合は「手動入力」に切り替えて直接入力してください。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>他の人が登録した休暇を編集・削除できません</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">他の人が登録した休暇を編集・削除できません</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">編集・削除できるのは「自分が登録した休暇」または「管理者権限を持つユーザー」のみです。他の人が登録した休暇を変更する必要がある場合は、その登録者または管理者に依頼してください。</div>
+      <div class="mlm-acc-body">編集・削除できるのは「自分が登録した休暇」または「管理者権限を持つユーザー」のみです。他の人が登録した休暇を変更する必要がある場合は、その登録者本人か管理者に依頼してください。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>同じ日・同じ名前で保存しようとしたら警告が出ました</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">保存しようとしたら「重複」の警告が出ました</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">同じ日付・同じ名前の休暇がすでに登録されているときに表示される警告です。既存の登録内容が確認できるので、内容を確認してください。重複登録が必要な場合（例：午前と午後で種類が違う場合）は「続行」を選んでください。誤って重複する場合は「キャンセル」を選んでください。</div>
+      <div class="mlm-acc-body">同じ日付・同じ名前の休暇がすでに登録されているときに表示される警告です。既存の登録内容が確認できます。重複登録が必要な場合（例：午前有休・午後代休）は「続行」を選んでください。誤った入力の場合は「キャンセル」を選んで内容を修正してください。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>1日に4人以上の休暇が登録されているのに3件しか表示されません</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">1日に4件以上登録したのにカレンダーに3件しか表示されません</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">カレンダー上には最大3件まで表示されます。「他N名」というリンクをクリックすると、その日のすべての休暇を一覧で確認できるポップアップが開きます。</div>
+      <div class="mlm-acc-body">カレンダー上には1日あたり最大3件まで表示されます。4件以上ある場合は「他N名」というリンクが表示されます。このリンクをクリックするとその日のすべての休暇を確認できるポップアップが開きます。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>確認済みにした休暇を「未確認」に戻せますか？</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">確認済みにした休暇を「未確認」に戻せますか？</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">現在の仕様では、一度「確認済み」にした休暇を未確認に戻す機能はありません。誤って確認した場合は、その休暇を削除して再登録するか、管理者に相談してください。</div>
+      <div class="mlm-acc-body">現在の仕様では、一度「確認済み」にした休暇を未確認に戻す機能はありません。誤って確認した場合は、その休暇を削除して再登録するか、管理者に相談してください。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>代務者を複数人設定するにはどうすればいいですか？</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">代務者を複数人設定するにはどうすればよいですか？</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">「代務者」入力欄に、カンマ（,）または読点（、）で区切って複数人を入力できます。例：「田中, 佐藤」または「田中、佐藤」のように入力してください。自動入力モードでは、カンマの後に名前を入力すると追加の候補も表示されます。</div>
+      <div class="mlm-acc-body">「代務者」入力欄にカンマ（,）または読点（、）で区切って複数人を入力できます。例：「田中, 佐藤」または「田中、佐藤」のように入力してください。自動入力モードでは、カンマの後に名前を入力すると追加候補も表示されます。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>休暇の日付を別の月に変更できますか？</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">休暇の日付を別の月に変更できますか？</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">はい、できます。編集画面で日付を別の月に変更して保存すると、自動的に正しい月のデータとして移動されます。カレンダー上も変更後の月に表示されます。</div>
+      <div class="mlm-acc-body">はい、できます。編集画面で日付を別の月に変更して保存すると、変更後の月のデータとして移動されます。カレンダー上も変更後の月に表示されます。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>過去のデータを検索する方法は？</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">過去のデータを確認・検索する方法は？</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">「🔍 休暇検索」ボタンから検索モーダルを開いてください。期間（開始・終了）や特定月を指定することで、過去のデータを横断的に検索できます。カレンダーの月移動でも過去の月を表示できます。</div>
+      <div class="mlm-acc-body">2つの方法があります。①カレンダーの月移動ボタンまたは月入力フォームで過去の月に移動する。②「🔍 休暇検索」ボタンから検索モーダルを開き、期間（開始・終了）や特定月を指定して横断的に検索する。検索機能では名前・種類・確認状況なども組み合わせて絞り込めます。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>カレンダーを削除してしまいましたが復元できますか？</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">!（エクスクラメーション）マークが表示されています</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">申し訳ありませんが、削除したカレンダーとそのデータは復元できません。誤って削除しないよう、削除前に必ずデータ件数の確認画面を確認してください。</div>
+      <div class="mlm-acc-body">代務者が設定されていないことを示しています。休暇中に業務を代わりに行う人が必要な場合は、その休暇を開いて「代務者」欄に担当者名を入力してください。「なし」「－」「未設定」「未定」などの文字が入力されている場合も未設定として扱われます。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>管理者メニューが表示されません</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">管理者メニューボタンが表示されません</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">管理者メニューは、有休共有ツールの管理者権限を持つユーザーか、DSTTシステム全体の管理者にのみ表示されます。管理者権限が必要な場合は、現在の管理者に依頼してください。</div>
+      <div class="mlm-acc-body">管理者メニューは、有休共有ツールの管理者権限を持つユーザーかDSTTシステム全体の管理者にのみ表示されます。管理者権限が必要な場合は、現在の管理者に依頼してください。</div>
     </div>
 
-    <div class="lm-faq-item">
-      <button class="lm-faq-q" onclick="toggleFaq(this.closest('.lm-faq-item'))">
-        <span class="lm-faq-q-text"><span class="lm-faq-q-icon">Q</span>!（エクスクラメーション）マークが表示されています</span>
-        <span class="lm-faq-arrow">▼</span>
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">カレンダーを削除してしまいましたが復元できますか？</span>
+        <span class="mlm-acc-arrow">▼</span>
       </button>
-      <div class="lm-faq-a">代務者が設定されていないことを示しています。休暇中に業務を代わりに行う人が必要な場合は、その休暇を開いて「代務者」欄に担当者名を入力してください。「なし」「－」「未設定」「未定」なども代務者未設定として扱われます。</div>
+      <div class="mlm-acc-body">申し訳ありませんが、削除したカレンダーとそのデータは復元できません。誤って削除しないよう、削除前に必ずデータ件数確認画面をご確認ください。</div>
     </div>
+
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">コピー機能と一括登録はどう使い分ければよいですか？</span>
+        <span class="mlm-acc-arrow">▼</span>
+      </button>
+      <div class="mlm-acc-body">「コピー」は1件の休暇を複数の日付にそのまま複製したいときに便利です（例：同一人物の連続した休暇）。「一括登録」は複数人・複数種類など内容が異なる休暇をまとめて入力したいときに便利です。用途に応じて使い分けてください。</div>
+    </div>
+
+    <div class="mlm-acc-item">
+      <button class="mlm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mlm-acc-q">社員名簿PLUSにない社員の休暇は登録できますか？</span>
+        <span class="mlm-acc-arrow">▼</span>
+      </button>
+      <div class="mlm-acc-body">はい、登録できます。入力フォームの「入力モード」で「手動入力」を選択すると、候補機能を使わずに名前・社員番号を直接入力できます。社員名簿PLUSへの登録状況に関わらず、あらゆる名前で休暇登録が可能です。</div>
+    </div>
+
   </section>
 
-  <!-- コツ・注意事項 -->
-  <section class="lm-section" id="sec-tips" style="padding-top:40px;">
-    <div class="lm-section-header">
-      <div class="lm-section-icon" style="background:#fef9c3;">💡</div>
-      <div>
-        <h2 class="lm-section-title">コツ・注意事項まとめ</h2>
-        <p class="lm-section-desc">スムーズに使うためのポイント</p>
-      </div>
-    </div>
-    <div class="lm-grid-2">
-      <div class="lm-tip">💡 名前入力は「自動入力モード」のほうが速くて正確です。社員名簿PLUSに登録されている社員であれば、名前と社員番号を自動入力できます。</div>
-      <div class="lm-tip">💡 代務者が未設定だと「!」マークが表示され、管理上見落としやすくなります。休暇登録時に代務者も入力する習慣をつけましょう。</div>
-      <div class="lm-tip">💡 月をまたいで登録する場合は「コピー」機能が便利です。一度登録した休暇をコピーして、複数の日付に展開できます。</div>
-      <div class="lm-tip">💡 「休暇検索」では月指定・種類・確認状況・代務者設定の組み合わせで絞り込みができます。月末に未確認の休暇を確認する際などに活用できます。</div>
-      <div class="lm-warn">⚠️ カレンダーの削除は取り消しできません。必ずデータ件数を確認してから削除してください。</div>
-      <div class="lm-warn">⚠️ 確認済みにした休暇は「未確認」に戻す機能がありません。確認操作は慎重に行ってください。</div>
-    </div>
-  </section>
+</div><!-- /mlm-wrap -->
 
-</div><!-- /.lm-wrap -->
+
+<!-- ===== MODAL: 休暇の種類詳細 ===== -->
+<div id="modalLeaveTypes" class="mlm-modal-ov mlm-hidden">
+  <div class="mlm-modal-box">
+    <div class="mlm-modal-head">
+      <h3 class="mlm-modal-title">🎨 休暇の種類と色一覧</h3>
+      <button class="mlm-modal-close" onclick="closeModal('modalLeaveTypes')">✕</button>
+    </div>
+    <table class="mlm-opt-table">
+      <thead><tr><th>色</th><th>休暇種類</th><th>主な用途</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span style="display:inline-block;width:16px;height:16px;background:#DC2626;border-radius:4px;vertical-align:middle"></span></td>
+          <td><strong>有休</strong>（有給休暇）</td>
+          <td>法定の有給休暇の取得</td>
+        </tr>
+        <tr>
+          <td><span style="display:inline-block;width:16px;height:16px;background:#10B981;border-radius:4px;vertical-align:middle"></span></td>
+          <td><strong>代休</strong></td>
+          <td>休日出勤の代替として取得する休暇</td>
+        </tr>
+        <tr>
+          <td><span style="display:inline-block;width:16px;height:16px;background:#8B5CF6;border-radius:4px;vertical-align:middle"></span></td>
+          <td><strong>慶弔休暇</strong></td>
+          <td>結婚・出産・葬儀などに伴う特別休暇</td>
+        </tr>
+        <tr>
+          <td><span style="display:inline-block;width:16px;height:16px;background:#F97316;border-radius:4px;vertical-align:middle"></span></td>
+          <td><strong>介護休暇</strong></td>
+          <td>家族の介護のために取得する休暇</td>
+        </tr>
+        <tr>
+          <td><span style="display:inline-block;width:16px;height:16px;background:#EC4899;border-radius:4px;vertical-align:middle"></span></td>
+          <td><strong>リフレッシュ休暇</strong></td>
+          <td>会社が独自に設ける特別休暇</td>
+        </tr>
+        <tr>
+          <td><span style="display:inline-block;width:16px;height:16px;background:#0EA5E9;border-radius:4px;vertical-align:middle"></span></td>
+          <td><strong>その他</strong></td>
+          <td>上記に当てはまらない休暇全般</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="mlm-tip" style="margin-top:12px">💡 休暇種類はカレンダー上の色で一目で判別できます。検索機能でも種類を条件に絞り込むことができます。</div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mlm-popup-btn" onclick="closeModal('modalLeaveTypes')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: 入力フォーム詳細 ===== -->
+<div id="modalFormDetail" class="mlm-modal-ov mlm-hidden">
+  <div class="mlm-modal-box">
+    <div class="mlm-modal-head">
+      <h3 class="mlm-modal-title">📝 入力フォーム 各項目の詳細</h3>
+      <button class="mlm-modal-close" onclick="closeModal('modalFormDetail')">✕</button>
+    </div>
+    <table class="mlm-opt-table">
+      <thead><tr><th>項目</th><th>詳細説明</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>日付 <span class="mlm-required">必須</span></td>
+          <td>YYYY-MM-DD 形式で入力するか、カレンダーアイコンから日付を選択します。</td>
+        </tr>
+        <tr>
+          <td>入力モード</td>
+          <td>
+            <strong>自動入力（社員名簿PLUS連携）</strong>：名前を入力中に候補リストが表示され、選択すると名前・社員番号が自動入力されます。<br>
+            <strong>手動入力</strong>：候補機能を使わず名前・社員番号を直接入力します。名簿未登録の社員を入力する場合に使います。
+          </td>
+        </tr>
+        <tr>
+          <td>休暇取得者名 <span class="mlm-required">必須</span></td>
+          <td>休暇を取得する人の名前を入力します。自動入力モードでは入力中に候補が表示されます。</td>
+        </tr>
+        <tr>
+          <td>社員番号</td>
+          <td>社員番号を入力します（任意）。自動入力で候補を選ぶと自動入力されます。検索時の絞り込みや台帳との照合に役立ちます。</td>
+        </tr>
+        <tr>
+          <td>休暇種類 <span class="mlm-required">必須</span></td>
+          <td>ドロップダウンから1種類を選択します。有休 / 代休 / 慶弔休暇 / 介護休暇 / リフレッシュ休暇 / その他 の6種類。</td>
+        </tr>
+        <tr>
+          <td>代務者</td>
+          <td>
+            休暇中の業務を代わりに担当する人の名前を入力します（任意）。<br>
+            <strong>複数人の場合</strong>：カンマ（,）または読点（、）で区切ります。例：<code>田中, 佐藤</code><br>
+            未設定のままの場合はカレンダーに「!」マークが表示されます。
+          </td>
+        </tr>
+        <tr>
+          <td>備考</td>
+          <td>補足メモを自由に入力できます（任意）。ダウンロード時の補足説明や連絡事項などに活用できます。</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mlm-popup-btn" onclick="closeModal('modalFormDetail')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: 検索条件詳細 ===== -->
+<div id="modalSearchDetail" class="mlm-modal-ov mlm-hidden">
+  <div class="mlm-modal-box">
+    <div class="mlm-modal-head">
+      <h3 class="mlm-modal-title">🔎 検索条件 全詳細</h3>
+      <button class="mlm-modal-close" onclick="closeModal('modalSearchDetail')">✕</button>
+    </div>
+    <p style="font-size:14px;color:#475569;margin:0 0 14px;line-height:1.7">条件はすべて組み合わせて使えます。空欄の条件は絞り込みに使用されません。</p>
+    <table class="mlm-opt-table">
+      <thead><tr><th>条件</th><th>説明・補足</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>期間（開始）</td>
+          <td>指定した日付以降の休暇を対象にします。終了日と組み合わせて期間を指定できます。</td>
+        </tr>
+        <tr>
+          <td>期間（終了）</td>
+          <td>指定した日付以前の休暇を対象にします。開始日と組み合わせて期間を指定できます。</td>
+        </tr>
+        <tr>
+          <td>特定月</td>
+          <td>年月（YYYY-MM）を入力すると、その月のみのデータを対象にします。<strong>期間（開始・終了）より優先</strong>されます。</td>
+        </tr>
+        <tr>
+          <td>休暇取得者名</td>
+          <td>名前が<strong>完全一致</strong>するデータを検索します。社員名簿PLUSの候補から選ぶか直接入力できます。</td>
+        </tr>
+        <tr>
+          <td>社員番号</td>
+          <td>社員番号の一部が含まれる（<strong>部分一致</strong>）データを検索します。先頭の数字だけ入力しても絞り込めます。</td>
+        </tr>
+        <tr>
+          <td>休暇種類</td>
+          <td>ドロップダウンから1種類を選択します。「すべて」を選ぶと全種類が対象になります。</td>
+        </tr>
+        <tr>
+          <td>代務者名</td>
+          <td>代務者として登録された名前が<strong>完全一致</strong>するデータを検索します。</td>
+        </tr>
+        <tr>
+          <td>確認状況</td>
+          <td>「すべて」「確認済み（✓あり）」「未確認」の3択。月末に未確認の休暇をまとめて確認する際などに便利です。</td>
+        </tr>
+        <tr>
+          <td>代務者設定</td>
+          <td>「すべて」「設定あり」「未設定のみ（!マーク）」の3択。代務者が決まっていない休暇を一覧で確認するのに便利です。</td>
+        </tr>
+        <tr>
+          <td>備考</td>
+          <td>備考欄に指定した文字列が含まれる（<strong>部分一致</strong>・大文字小文字区別なし）データを検索します。</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="mlm-tip" style="margin-top:12px">💡 活用例：「今月の未確認の有休で代務者が未設定のもの」→ 特定月 + 休暇種類：有休 + 確認状況：未確認 + 代務者設定：未設定のみ</div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mlm-popup-btn" onclick="closeModal('modalSearchDetail')">閉じる</button>
+    </div>
+  </div>
+</div>
+
 
 <script>
-  function toggleAccordion(el) { el.classList.toggle('open'); }
-  function toggleFaq(el) { el.classList.toggle('open'); }
-
-  // Active nav link on scroll
-  const sections = document.querySelectorAll('.lm-section[id]');
-  const navLinks = document.querySelectorAll('.lm-nav-link');
-
-  function updateActiveNav() {
-    let current = '';
-    sections.forEach(section => {
-      const sectionTop = section.offsetTop - 80;
-      if (window.scrollY >= sectionTop) {
-        current = section.getAttribute('id');
-      }
-    });
-    navLinks.forEach(link => {
-      link.classList.remove('lm-active');
-      if (link.getAttribute('href') === '#' + current) {
-        link.classList.add('lm-active');
-      }
-    });
+  /* ---- Accordion ---- */
+  function toggleAcc(btn) {
+    btn.closest('.mlm-acc-item').classList.toggle('mlm-open');
   }
 
-  window.addEventListener('scroll', updateActiveNav, { passive: true });
-  updateActiveNav();
+  /* ---- Modal ---- */
+  function openModal(id) {
+    document.getElementById(id).classList.remove('mlm-hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.add('mlm-hidden');
+    document.body.style.overflow = '';
+  }
+  document.querySelectorAll('.mlm-modal-ov').forEach(function(ov) {
+    ov.addEventListener('click', function(e) {
+      if (e.target === ov) closeModal(ov.id);
+    });
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.mlm-modal-ov:not(.mlm-hidden)').forEach(function(ov) {
+        closeModal(ov.id);
+      });
+    }
+  });
+
+  /* ---- Sticky nav active highlight ---- */
+  (function() {
+    var sections = document.querySelectorAll('.mlm-section[id]');
+    var navLinks = document.querySelectorAll('.mlm-nav-link[data-section]');
+    function onScroll() {
+      var scrollY = window.pageYOffset;
+      var active = null;
+      sections.forEach(function(sec) {
+        var top = sec.getBoundingClientRect().top + scrollY - 100;
+        if (scrollY >= top) active = sec.id;
+      });
+      navLinks.forEach(function(lnk) {
+        lnk.classList.toggle('mlm-active', lnk.dataset.section === active);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
 </script>
 {% endblock %}
