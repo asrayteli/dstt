@@ -1,10 +1,14 @@
-from flask import Blueprint, current_app, jsonify, render_template, request
+from flask import Blueprint, current_app, jsonify, render_template, request, send_file
 from flask_login import current_user, login_required
 import csv
+import io
 import os
 import re
 import traceback
 from datetime import datetime
+
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
 
 from app.models import SiteContractMaster
 from app.site_contract_master import VALID_SEGMENTS, ensure_contract_master_synced, manager_ids_match
@@ -37,26 +41,7 @@ def get_upload_folder():
 
 
 def load_site_mapping_from_master():
-    """現場リストPLUSの最新マスタから 契約コード -> セグメント を返す。"""
-    valid_segments = {"役員", "一般", "旅客"}
-    rows = (
-        SiteContractMaster.query
-        .filter(SiteContractMaster.is_active.is_(True))
-        .order_by(SiteContractMaster.contract_code.asc())
-        .all()
-    )
-
-    site_dict = {}
-    for row in rows:
-        contract_code = normalize_contract_code(row.contract_code)
-        segment = str(row.segment or "").strip()
-        if not contract_code or segment not in valid_segments:
-            continue
-        site_dict[contract_code] = segment
-    return site_dict
-
-
-def load_site_mapping_from_master():
+    """現場リストPLUSの最新マスタからセグメント辞書、現場マスタ、警告を返す。"""
     ensure_contract_master_synced()
 
     rows = (
@@ -130,14 +115,34 @@ def upload_files():
         if not subject_data:
             return jsonify({"error": "科目別分析表 CSV の読み込みに失敗しました"}), 400
 
+        structure_validation = validate_subject_csv_structure(subject_data, "科目別分析表")
+        if structure_validation["fatal"]:
+            try:
+                os.remove(subject_path)
+            except OSError:
+                pass
+            return jsonify({"error": structure_validation["message"]}), 400
+
         parsed_data = parse_subject_data(subject_data)
 
         prev_year_data = None
+        prev_year_validation = None
         if prev_year_subject_file and prev_year_subject_file.filename:
             prev_year_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_prev_subject.csv")
             prev_year_subject_file.save(prev_year_path)
             prev_year_csv = read_csv_with_encoding(prev_year_path)
             if prev_year_csv:
+                prev_year_validation = validate_subject_csv_structure(prev_year_csv, "前年データ")
+                if prev_year_validation["fatal"]:
+                    try:
+                        os.remove(prev_year_path)
+                    except OSError:
+                        pass
+                    try:
+                        os.remove(subject_path)
+                    except OSError:
+                        pass
+                    return jsonify({"error": prev_year_validation["message"]}), 400
                 prev_year_data = parse_subject_data(prev_year_csv)
             try:
                 os.remove(prev_year_path)
@@ -160,6 +165,16 @@ def upload_files():
             except OSError:
                 pass
 
+        validation = build_upload_validation(
+            subject_data,
+            parsed_data,
+            site_data,
+            prev_year_data or [],
+            structure_validation,
+            prev_year_validation,
+            warnings,
+        )
+
         try:
             os.remove(subject_path)
         except OSError:
@@ -179,7 +194,9 @@ def upload_files():
                     "prev_year_count": len(prev_year_data) if prev_year_data else 0,
                     "site_count": len(site_data) if site_data else 0,
                     "site_source": site_source,
-                    "warnings": warnings,
+                    "unclassified_count": validation["unmatched_site_mapping_count"],
+                    "warnings": validation["warnings"],
+                    "validation": validation,
                 },
             }
         )
@@ -241,6 +258,112 @@ def read_csv_with_encoding(file_path):
     return None
 
 
+def validate_subject_csv_structure(csv_data, label):
+    """科目別分析CSVの最低限の列構造を検証する。"""
+    if not csv_data:
+        return {"fatal": True, "message": f"{label} CSV が空です"}
+
+    header = csv_data[0] if csv_data else []
+    if len(header) < 13:
+        return {
+            "fatal": True,
+            "message": f"{label} CSV の必須列が不足しています。少なくとも13列必要です。",
+        }
+
+    short_row_count = 0
+    for row in csv_data[1:]:
+        if row and len(row) < 13:
+            short_row_count += 1
+
+    return {
+        "fatal": False,
+        "message": "",
+        "short_row_count": short_row_count,
+        "total_rows": max(len(csv_data) - 1, 0),
+    }
+
+
+def build_upload_validation(
+    subject_csv,
+    parsed_data,
+    site_mapping,
+    prev_year_data,
+    structure_validation,
+    prev_year_validation,
+    site_warnings,
+):
+    """CSV読込結果の検証情報を画面表示用metadataとして組み立てる。"""
+    contract_missing_count = 0
+    amount_conversion_error_count = 0
+
+    for index, row in enumerate(subject_csv):
+        if index == 0:
+            continue
+        if len(row) < 13:
+            continue
+        if not normalize_contract_code(row[8] if len(row) > 8 else ""):
+            contract_missing_count += 1
+        for value in row[13:]:
+            text = str(value or "").strip().replace(",", "")
+            if not text:
+                continue
+            try:
+                float(text)
+            except ValueError:
+                amount_conversion_error_count += 1
+
+    parsed_codes = {item["contract_code"] for item in parsed_data if item.get("contract_code")}
+    unmatched_site_mapping_count = len([code for code in parsed_codes if code not in site_mapping])
+
+    prev_year_keys = {
+        (item.get("contract_code"), item.get("subject_name"))
+        for item in prev_year_data
+        if item.get("contract_code") and item.get("subject_name")
+    }
+    current_keys = {
+        (item.get("contract_code"), item.get("subject_name"))
+        for item in parsed_data
+        if item.get("contract_code") and item.get("subject_name")
+    }
+    prev_year_missing_count = 0
+    if prev_year_data:
+        prev_year_missing_count = len([key for key in current_keys if key not in prev_year_keys])
+
+    warnings = []
+    if structure_validation.get("short_row_count"):
+        warnings.append(f"列不足のためスキップされた行が {structure_validation['short_row_count']} 件あります")
+    if contract_missing_count:
+        warnings.append(f"契約コードが空の行が {contract_missing_count} 件あります")
+    if amount_conversion_error_count:
+        warnings.append(f"金額へ変換できないセルが {amount_conversion_error_count} 件あります。該当セルは0として扱われます")
+    if unmatched_site_mapping_count:
+        warnings.append(f"現場マッピングに一致しない契約コードが {unmatched_site_mapping_count} 件あります")
+    if prev_year_missing_count:
+        warnings.append(f"前年データに対応行がない比較対象が {prev_year_missing_count} 件あります")
+    if prev_year_validation and prev_year_validation.get("short_row_count"):
+        warnings.append(f"前年データで列不足の行が {prev_year_validation['short_row_count']} 件あります")
+    warnings.extend(site_warnings or [])
+
+    return {
+        "row_count": len(parsed_data),
+        "prev_year_row_count": len(prev_year_data),
+        "site_mapping_count": len(site_mapping or {}),
+        "unmatched_site_mapping_count": unmatched_site_mapping_count,
+        "contract_missing_count": contract_missing_count,
+        "amount_conversion_error_count": amount_conversion_error_count,
+        "prev_year_missing_comparison_count": prev_year_missing_count,
+        "short_row_count": structure_validation.get("short_row_count", 0),
+        "warnings": warnings,
+    }
+
+
+def parse_amount_cell(value):
+    text = str(value or "").strip().replace(",", "")
+    if not text:
+        return 0
+    return float(text)
+
+
 def parse_subject_data(csv_data):
     """科目別分析表 CSV を解析して明細配列に変換する。"""
     parsed = []
@@ -281,7 +404,7 @@ def parse_subject_data(csv_data):
         amounts = []
         for col_index in range(13, len(row)):
             try:
-                amounts.append(float(row[col_index]) if row[col_index] else 0)
+                amounts.append(parse_amount_cell(row[col_index]))
             except Exception:
                 amounts.append(0)
 
@@ -327,3 +450,126 @@ def parse_site_data(csv_data):
         site_dict[contract_code] = segment
 
     return site_dict
+
+
+def summarize_by_key(results, key_getter):
+    summary = {}
+    for result in results:
+        key = key_getter(result)
+        if key not in summary:
+            summary[key] = {
+                "name": key,
+                "current": 0,
+                "comparison": 0,
+                "diff": 0,
+                "anomaly_count": 0,
+            }
+        summary[key]["current"] += float(result.get("currentValue", 0) or 0)
+        summary[key]["comparison"] += float(result.get("comparisonValue", 0) or 0)
+        summary[key]["diff"] += float(result.get("diff", 0) or 0)
+        if result.get("isAnomaly"):
+            summary[key]["anomaly_count"] += 1
+
+    for row in summary.values():
+        row["diff_rate"] = (row["diff"] / row["comparison"] * 100) if row["comparison"] else 0
+    return sorted(summary.values(), key=lambda item: abs(item["diff"]), reverse=True)
+
+
+def append_sheet(sheet, headers, rows, number_columns=None, percent_columns=None):
+    number_columns = set(number_columns or [])
+    percent_columns = set(percent_columns or [])
+    sheet.append(headers)
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="2B4058")
+        cell.alignment = Alignment(horizontal="center")
+
+    for row in rows:
+        sheet.append(row)
+
+    for row in sheet.iter_rows(min_row=2):
+        for index, cell in enumerate(row, start=1):
+            if index in number_columns:
+                cell.number_format = '#,##0'
+            if index in percent_columns:
+                cell.number_format = '0.00'
+
+    for column_cells in sheet.columns:
+        width = min(max(len(str(cell.value or "")) for cell in column_cells) + 2, 42)
+        sheet.column_dimensions[column_cells[0].column_letter].width = width
+
+
+@subject_analysis_tool_bp.route("/api/export/xlsx", methods=["POST"])
+@login_required
+def export_xlsx():
+    try:
+        payload = request.get_json(silent=True) or {}
+        results = payload.get("results") or []
+        filters = payload.get("filters") or {}
+        if not results:
+            return jsonify({"error": "エクスポートするデータがありません"}), 400
+
+        workbook = Workbook()
+        detail_sheet = workbook.active
+        detail_sheet.title = "詳細一覧"
+
+        detail_rows = []
+        for result in results:
+            item = result.get("item") or {}
+            detail_rows.append([
+                item.get("contract_code", ""),
+                item.get("site_name", ""),
+                item.get("corp_name", ""),
+                result.get("segment", "未分類"),
+                item.get("subject_name", ""),
+                f"{result.get('month')}月",
+                result.get("currentValue", 0),
+                result.get("comparisonValue", 0) if result.get("hasComparison") else None,
+                result.get("diff", 0) if result.get("hasComparison") else None,
+                result.get("diffRate", 0) if result.get("hasComparison") else None,
+            ])
+
+        append_sheet(
+            detail_sheet,
+            ["契約コード", "現場名", "法人名", "セグメント", "科目名", "月", "当期値", "比較値", "差異", "差異率(%)"],
+            detail_rows,
+            number_columns={7, 8, 9},
+            percent_columns={10},
+        )
+
+        site_sheet = workbook.create_sheet("現場別サマリー")
+        site_summary = summarize_by_key(results, lambda r: (r.get("item") or {}).get("site_name", ""))
+        append_sheet(
+            site_sheet,
+            ["現場名", "当期合計", "比較合計", "差異", "差異率(%)", "異常値件数"],
+            [[r["name"], r["current"], r["comparison"], r["diff"], r["diff_rate"], r["anomaly_count"]] for r in site_summary],
+            number_columns={2, 3, 4, 6},
+            percent_columns={5},
+        )
+
+        subject_sheet = workbook.create_sheet("科目別サマリー")
+        subject_summary = summarize_by_key(results, lambda r: (r.get("item") or {}).get("subject_name", ""))
+        append_sheet(
+            subject_sheet,
+            ["科目名", "当期合計", "比較合計", "差異", "差異率(%)", "異常値件数"],
+            [[r["name"], r["current"], r["comparison"], r["diff"], r["diff_rate"], r["anomaly_count"]] for r in subject_summary],
+            number_columns={2, 3, 4, 6},
+            percent_columns={5},
+        )
+
+        condition_sheet = workbook.create_sheet("条件")
+        condition_rows = [[key, ", ".join(map(str, value)) if isinstance(value, list) else value] for key, value in filters.items()]
+        append_sheet(condition_sheet, ["項目", "値"], condition_rows)
+
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+        return send_file(
+            buffer,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f"科目別分析_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({"error": f"Excel出力中にエラーが発生しました: {exc}"}), 500

@@ -64,55 +64,49 @@ class ExportHandler {
     }
 
     /**
-     * Excelエクスポート（HTML tableからの変換）
+     * Excelエクスポート（本物の .xlsx）
      */
-    exportToExcel() {
+    async exportToExcel() {
         const results = comparisonEngine.getResults();
         if (results.length === 0) {
             alert('エクスポートするデータがありません');
             return;
         }
 
-        // HTMLテーブルを生成
-        let html = '<table>';
-        html += '<tr>';
-        html += '<th>現場名</th>';
-        html += '<th>法人名</th>';
-        html += '<th>セグメント</th>';
-        html += '<th>科目名</th>';
-        html += '<th>月</th>';
-        html += '<th>当期値</th>';
-        html += '<th>比較値</th>';
-        html += '<th>差異</th>';
-        html += '<th>差異率(%)</th>';
-        html += '</tr>';
+        const payload = {
+            filters: typeof currentFilters !== 'undefined' ? currentFilters : {},
+            results: results.map((result) => ({
+                month: result.month,
+                currentValue: result.currentValue,
+                comparisonValue: result.comparisonValue,
+                diff: result.diff,
+                diffRate: result.diffRate,
+                hasComparison: !!result.hasComparison,
+                isAnomaly: !!result.isAnomaly,
+                segment: dataManager.rawData.siteMapping[result.item.contract_code] || '未分類',
+                item: {
+                    contract_code: result.item.contract_code,
+                    site_name: result.item.site_name,
+                    corp_name: result.item.corp_name,
+                    subject_name: result.item.subject_name,
+                    is_revenue: result.item.is_revenue
+                }
+            }))
+        };
 
-        results.forEach(result => {
-            const item = result.item;
-            const segment = dataManager.rawData.siteMapping[item.contract_code] || '未分類';
-            const hasComparison = !!result.hasComparison;
-
-            html += '<tr>';
-            html += `<td>${item.site_name}</td>`;
-            html += `<td>${item.corp_name}</td>`;
-            html += `<td>${segment}</td>`;
-            html += `<td>${item.subject_name}</td>`;
-            html += `<td>${result.month}月</td>`;
-            html += `<td>${result.currentValue}</td>`;
-            html += `<td>${hasComparison ? result.comparisonValue : '-'}</td>`;
-            html += `<td>${hasComparison ? result.diff : '-'}</td>`;
-            html += `<td>${hasComparison ? result.diffRate.toFixed(2) : '-'}</td>`;
-            html += '</tr>';
+        const response = await fetch('/tools/subject_analysis_tool/api/export/xlsx', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
         });
 
-        html += '</table>';
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Excel出力に失敗しました');
+        }
 
-        // Excel形式でダウンロード
-        const blob = new Blob([html], {
-            type: 'application/vnd.ms-excel;charset=utf-8;'
-        });
-
-        this.downloadFile(blob, '科目別分析_詳細一覧.xls');
+        const blob = await response.blob();
+        this.downloadFile(blob, '科目別分析_詳細一覧.xlsx');
     }
 
     /**
@@ -237,7 +231,10 @@ function exportToCSV() {
 }
 
 function exportToExcel() {
-    exportHandler.exportToExcel();
+    exportHandler.exportToExcel().catch((error) => {
+        alert(`Excel出力エラー: ${error.message}`);
+        console.error('Excel export error:', error);
+    });
 }
 
 function exportSiteSummaryToCSV() {

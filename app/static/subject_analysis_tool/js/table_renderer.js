@@ -8,6 +8,10 @@ class TableRenderer {
         this.sortDirection = 'asc';
         this.currentData = [];
         this.searchQuery = '';
+        this.minItemsPerPage = 3;
+        this.maxItemsPerPage = 500;
+        this.resizeFrame = null;
+        this.resizeObserver = null;
 
         // 各テーブル用の検索・ソート状態
         this.siteSummarySearch = '';
@@ -21,6 +25,73 @@ class TableRenderer {
         this.contextMenuEl = null;
         this.detailPopupEl = null;
         this.initializeDetailContextMenu();
+        this.initializeAutoPageSizing();
+    }
+
+    initializeAutoPageSizing() {
+        const setup = () => {
+            const tableContainer = this.getDetailTableContainer();
+            if (!tableContainer || typeof ResizeObserver === 'undefined') return;
+
+            this.resizeObserver = new ResizeObserver(() => {
+                if (this.resizeFrame) {
+                    cancelAnimationFrame(this.resizeFrame);
+                }
+                this.resizeFrame = requestAnimationFrame(() => {
+                    this.resizeFrame = null;
+                    this.updatePageSizeFromTableHeight(true);
+                });
+            });
+            this.resizeObserver.observe(tableContainer);
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setup, { once: true });
+        } else {
+            setup();
+        }
+    }
+
+    getDetailTableContainer() {
+        return document.querySelector('#tab-detail .table-container');
+    }
+
+    calculateItemsPerPageFromHeight() {
+        const tableContainer = this.getDetailTableContainer();
+        if (!tableContainer) return this.itemsPerPage;
+
+        const table = document.getElementById('detail-table');
+        const tbody = document.getElementById('detail-tbody');
+        const headerHeight = table?.querySelector('thead')?.getBoundingClientRect().height || 42;
+        const firstRowHeight = tbody?.querySelector('tr')?.getBoundingClientRect().height || 38;
+        const availableHeight = tableContainer.clientHeight - headerHeight - 4;
+
+        if (availableHeight <= firstRowHeight) {
+            return this.minItemsPerPage;
+        }
+
+        const calculated = Math.floor(availableHeight / firstRowHeight);
+        return Math.min(this.maxItemsPerPage, Math.max(this.minItemsPerPage, calculated));
+    }
+
+    updatePageSizeFromTableHeight(shouldRender = false) {
+        const nextItemsPerPage = this.calculateItemsPerPageFromHeight();
+        if (nextItemsPerPage === this.itemsPerPage) return false;
+
+        this.itemsPerPage = nextItemsPerPage;
+
+        const totalItems = this.applySearch(this.currentData, this.searchQuery).length;
+        const totalPages = Math.max(1, Math.ceil(totalItems / this.itemsPerPage));
+        if (this.currentPage > totalPages) {
+            this.currentPage = totalPages;
+        }
+
+        if (shouldRender && this.currentData.length > 0) {
+            const filters = filterController.getFilters();
+            this.renderDetailTable(this.currentData, filters);
+        }
+
+        return true;
     }
 
     bindSearchInput(input, onCommit) {
@@ -171,11 +242,16 @@ class TableRenderer {
 
         // 検索フィルタリング適用
         const filteredResults = this.applySearch(results, this.searchQuery);
+        this.updatePageSizeFromTableHeight(false);
 
         countEl.textContent = filteredResults.length.toLocaleString();
 
         // ソート適用
         const sortedResults = this.applySorting([...filteredResults]);
+        const totalPages = Math.max(1, Math.ceil(sortedResults.length / this.itemsPerPage));
+        if (this.currentPage > totalPages) {
+            this.currentPage = totalPages;
+        }
 
         // ページネーション適用
         const paginatedResults = this.applyPagination(sortedResults);

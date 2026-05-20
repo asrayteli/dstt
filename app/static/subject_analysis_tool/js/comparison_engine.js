@@ -213,17 +213,6 @@ class ComparisonEngine {
             const profitRate = item.revenue !== 0 ? (profit / item.revenue) * 100 : 0;
             const profitRateComparison = item.revenueComparison !== 0 ? (profitComparison / item.revenueComparison) * 100 : 0;
 
-            // デバッグ用ログ（最初の1件のみ）
-            if (Object.values(grouped).indexOf(item) === 0) {
-                console.log('[利益計算デバッグ]', {
-                    現場: item.siteName,
-                    売上: item.revenue,
-                    原価: item.cost,
-                    利益計算式: `${item.revenue} + (${item.cost})`,
-                    利益結果: profit
-                });
-            }
-
             return {
                 ...item,
                 profit: profit,

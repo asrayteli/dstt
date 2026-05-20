@@ -4,27 +4,27 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='subject_analysis_tool/css/subject_analysis_tool.css') }}">
 
 <div class="space-y-6 pb-6">
-  <section class="dstt-hero" style="background: linear-gradient(135deg, #581c87 0%, #7c3aed 50%, #c084fc 100%);">
+  <section class="dstt-hero sat-hero">
     <div class="dstt-hero-grid">
       <div class="dstt-hero-copy">
         <div class="dstt-hero-pill">SUBJECT ANALYSIS</div>
         <div>
           <h1 class="dstt-hero-title">科目別分析ツール SAT</h1>
-          <p class="dstt-hero-subtitle">月 / 現場 / 科目を切り口に収支データを横断分析。条件設定と結果を分割表示で同時に確認できます。</p>
+          <p class="dstt-hero-subtitle">月 / 現場 / 科目別に収支データを分析。読み込み後に条件設定と結果を確認できます。</p>
         </div>
         <div class="dstt-hero-actions">
           <button id="upload-btn" class="dstt-hero-btn dstt-hero-btn-light">CSVを読み込む</button>
           <button id="reset-btn" class="dstt-hero-btn dstt-hero-btn-ghost" style="display: none;">リセット</button>
         </div>
       </div>
-      <div class="dstt-hero-meta">
+        <div class="dstt-hero-meta">
         <div class="dstt-hero-card">
-          <div class="dstt-hero-card-label">LOGIN</div>
+          <div class="dstt-hero-card-label">USER</div>
           <div class="dstt-hero-card-value">{{ current_user_id or 'GUEST' }}</div>
         </div>
         <div class="dstt-hero-card">
-          <div class="dstt-hero-card-label">FILTERS</div>
-          <div class="dstt-hero-card-value">月 / 現場 / 科目</div>
+          <div class="dstt-hero-card-label">FLOW</div>
+          <div class="dstt-hero-card-value">選択 → 確認 → 分析</div>
         </div>
       </div>
     </div>
@@ -105,6 +105,13 @@
                 </div>
 
                 <div class="sidebar-footer">
+                    <div class="saved-filter-row">
+                        <input type="text" id="filter-preset-name" class="form-input" placeholder="条件名">
+                        <button class="btn btn-outline" type="button" onclick="saveCurrentFilterPreset()">保存</button>
+                    </div>
+                    <select id="filter-preset-select" class="form-input mt-2">
+                        <option value="">保存済み条件を選択</option>
+                    </select>
                     <button class="btn btn-primary w-full" onclick="applyFilters()">分析を実行</button>
                 </div>
             </aside>
@@ -112,6 +119,13 @@
             <section class="sat-right">
                 <div class="sat-conditions">
                     <section class="control-panel">
+                        <div class="template-strip">
+                            <button type="button" class="template-chip active" data-template="diff_top">前年差異トップ</button>
+                            <button type="button" class="template-chip" data-template="sales_trend">売上推移</button>
+                            <button type="button" class="template-chip" data-template="cost_increase">原価増加</button>
+                            <button type="button" class="template-chip" data-template="profit_down">利益率悪化</button>
+                            <button type="button" class="template-chip" data-template="manager">担当者別</button>
+                        </div>
                         <div class="control-row">
                             <div class="control-group">
                                 <label class="control-label">現場グループ</label>
@@ -187,6 +201,14 @@
                 </div>
 
                 <div class="sat-results">
+                    <div class="quick-view-bar compare-only">
+                        <span class="quick-view-label">クイックビュー</span>
+                        <button type="button" class="quick-view-btn" data-view="diff_abs">差異大</button>
+                        <button type="button" class="quick-view-btn" data-view="profit_worse">利益悪化</button>
+                        <button type="button" class="quick-view-btn" data-view="rate_abs">差異率大</button>
+                        <button type="button" class="quick-view-btn" data-view="anomaly">異常値</button>
+                        <button type="button" class="quick-view-btn" data-view="clear">解除</button>
+                    </div>
                     <nav class="tabs">
                         <button class="tab-btn active" data-tab="detail">詳細一覧</button>
                         <button class="tab-btn" data-tab="site-summary">現場別サマリー</button>
@@ -195,6 +217,8 @@
                         <button class="tab-btn" data-tab="chart">推移グラフ</button>
                         <button class="tab-btn compare-only" data-tab="heatmap">ヒートマップ</button>
                         <button class="tab-btn" data-tab="statistics">統計分析</button>
+                        <button id="sat-sidebar-toggle" type="button" class="result-layout-btn result-layout-first">対象選択を隠す</button>
+                        <button id="sat-conditions-toggle" type="button" class="result-layout-btn">分析条件を隠す</button>
                         <button id="result-expand-toggle" class="tab-btn tab-btn-expand" type="button">拡大</button>
                     </nav>
 
@@ -281,7 +305,15 @@
     <div id="welcome-screen" class="welcome-screen">
         <div class="welcome-content">
             <h3 class="welcome-title">科目別分析ツール SAT</h3>
-            <p class="welcome-description">CSVをドラッグ&ドロップして分析を開始できます。ファイル選択ボタンからの操作にも対応しています。</p>
+            <p class="welcome-description">CSVを選択し、読込結果を確認してから分析へ進みます。警告がある場合もここで把握できます。</p>
+
+            <div class="sat-upload-steps" aria-label="読み込みステップ">
+                <div class="sat-step active" data-step="select"><span>1</span><strong>データ選択</strong></div>
+                <div class="sat-step" data-step="review"><span>2</span><strong>読込結果確認</strong></div>
+                <div class="sat-step" data-step="analysis"><span>3</span><strong>分析開始</strong></div>
+            </div>
+
+            <div id="sat-notice" class="sat-notice hidden" role="status"></div>
 
             <form id="upload-form" class="quick-upload-form">
                 <div class="upload-mode-card">
@@ -350,8 +382,26 @@
                     </div>
                 </div>
 
+                <section id="upload-review-panel" class="upload-review-panel hidden" aria-live="polite">
+                    <div class="review-head">
+                        <div>
+                            <h4>読込結果</h4>
+                            <p>件数と警告を確認してから分析画面へ進めます。</p>
+                        </div>
+                        <button type="button" class="btn btn-outline btn-sm" id="review-back-btn">選択に戻る</button>
+                    </div>
+                    <div class="review-metrics">
+                        <div class="review-metric"><span>当期行数</span><strong id="review-current-count">0</strong></div>
+                        <div class="review-metric"><span>前年行数</span><strong id="review-prev-count">0</strong></div>
+                        <div class="review-metric"><span>現場マッピング</span><strong id="review-site-count">0</strong></div>
+                        <div class="review-metric"><span>未分類</span><strong id="review-unclassified-count">0</strong></div>
+                    </div>
+                    <div id="review-warnings" class="review-warnings"></div>
+                </section>
+
                 <div class="quick-upload-actions">
-                    <button type="submit" class="btn btn-primary btn-lg">読み込んで分析開始</button>
+                    <button type="submit" class="btn btn-primary btn-lg" id="upload-submit-btn">読込結果を確認</button>
+                    <button type="button" class="btn btn-primary btn-lg hidden" id="start-analysis-btn">分析を開始</button>
                 </div>
             </form>
         </div>

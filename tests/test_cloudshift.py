@@ -394,6 +394,283 @@ def test_account_share_same_office_lists_shared_project(tmp_path):
     assert shared_project["access_role"] == "viewer"
 
 
+def test_public_view_leave_change_request_requires_owner_setting(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    view_token = _token_from_url(payload["project"]["urls"]["view_url"])
+    month = payload["month"]
+    entry = {"id": "leave-1", "value": "!PAID!Alpha Site", "comment": ""}
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": {"1": [entry]}, "base_month": month},
+    )
+    assert save_response.status_code == 200
+
+    module.current_user = _guest()
+    denied_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/view/{view_token}/leave-change-requests",
+        json={"month_key": "2026-04", "day": 1, "entry_id": "leave-1", "requested_option_key": "COMP"},
+    )
+    assert denied_response.status_code == 403
+
+    module.current_user = _owner()
+    settings_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/settings",
+        json={"leave_change_requests_enabled": True},
+    )
+    assert settings_response.status_code == 200
+
+    module.current_user = _guest()
+    required_comment_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/view/{view_token}/leave-change-requests",
+        json={"month_key": "2026-04", "day": 1, "entry_id": "leave-1", "requested_option_key": "COMP"},
+    )
+    assert required_comment_response.status_code == 400
+    assert "コメント" in required_comment_response.get_json()["error"]
+
+    request_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/view/{view_token}/leave-change-requests",
+        json={
+            "month_key": "2026-04",
+            "day": 1,
+            "entry_id": "leave-1",
+            "requested_option_key": "COMP",
+            "request_comment": "振替休日のため",
+        },
+    )
+    assert request_response.status_code == 200
+    request_payload = request_response.get_json()["request"]
+    assert request_payload["status"] == "pending"
+    assert request_payload["old_leave_type"] == "有休"
+    assert request_payload["requested_leave_type"] == "代休"
+    assert request_payload["request_comment"] == "振替休日のため"
+
+    module.current_user = _owner()
+    detail_response = client.get(f"/tools/shiftersync/cloudshift/api/project/{project_id}")
+    assert detail_response.get_json()["project"]["shift_book"]["pending_leave_change_request_count"] == 1
+    assert detail_response.get_json()["project"]["shift_book"]["unviewed_leave_change_request_count"] == 1
+
+
+def test_owner_approved_leave_change_request_is_finalized_on_month_save(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    view_token = _token_from_url(payload["project"]["urls"]["view_url"])
+    month = payload["month"]
+    entry = {"id": "leave-1", "value": "!PAID!Alpha Site", "comment": ""}
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": {"1": [entry]}, "base_month": month},
+    )
+    assert save_response.status_code == 200
+    month = save_response.get_json()["month"]
+
+    settings_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/settings",
+        json={"leave_change_requests_enabled": True},
+    )
+    assert settings_response.status_code == 200
+    module.current_user = _guest()
+    request_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/view/{view_token}/leave-change-requests",
+        json={
+            "month_key": "2026-04",
+            "day": 1,
+            "entry_id": "leave-1",
+            "requested_option_key": "COMP",
+            "request_comment": "振替休日のため",
+        },
+    )
+    request_id = request_response.get_json()["request"]["id"]
+
+    module.current_user = _owner()
+    approved_entries = month["entries_per_day"]
+    approved_entries["1"][0]["value"] = "!COMP!Alpha Site"
+    approved_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": approved_entries,
+            "base_month": month,
+            "leave_change_request_decisions": {"approved": [request_id]},
+        },
+    )
+    assert approved_response.status_code == 200
+    saved_month = approved_response.get_json()["month"]
+    assert saved_month["entries_per_day"]["1"][0]["value"] == "!COMP!Alpha Site"
+
+    settings_after = client.get(f"/tools/shiftersync/cloudshift/api/project/{project_id}/settings")
+    requests = settings_after.get_json()["leave_change_requests"]
+    assert requests[0]["status"] == "approved"
+    assert settings_after.get_json()["pending_leave_change_request_count"] == 0
+
+
+def test_owner_viewing_leave_change_requests_clears_unviewed_count(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    view_token = _token_from_url(payload["project"]["urls"]["view_url"])
+    month = payload["month"]
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": {"1": [{"id": "leave-1", "value": "!PAID!Alpha Site", "comment": ""}]},
+            "base_month": month,
+        },
+    )
+    assert save_response.status_code == 200
+    client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/settings",
+        json={"leave_change_requests_enabled": True},
+    )
+
+    module.current_user = _guest()
+    request_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/view/{view_token}/leave-change-requests",
+        json={
+            "month_key": "2026-04",
+            "day": 1,
+            "entry_id": "leave-1",
+            "requested_option_key": "COMP",
+            "request_comment": "replacement holiday",
+        },
+    )
+    assert request_response.status_code == 200
+
+    module.current_user = _owner()
+    settings_before = client.get(f"/tools/shiftersync/cloudshift/api/project/{project_id}/settings")
+    assert settings_before.get_json()["pending_leave_change_request_count"] == 1
+    assert settings_before.get_json()["unviewed_leave_change_request_count"] == 1
+
+    viewed_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/leave-change-requests/mark-viewed",
+        json={},
+    )
+    assert viewed_response.status_code == 200
+    viewed_payload = viewed_response.get_json()
+    assert viewed_payload["pending_leave_change_request_count"] == 1
+    assert viewed_payload["unviewed_leave_change_request_count"] == 0
+    assert viewed_payload["leave_change_requests"][0]["owner_viewed_at"]
+
+
+def test_public_view_marks_pending_leave_change_request_entries(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    view_token = _token_from_url(payload["project"]["urls"]["view_url"])
+    month = payload["month"]
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": {"1": [{"id": "leave-1", "value": "!PAID!Alpha Site", "comment": ""}]},
+            "base_month": month,
+        },
+    )
+    assert save_response.status_code == 200
+    client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/settings",
+        json={"leave_change_requests_enabled": True},
+    )
+
+    module.current_user = _guest()
+    request_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/view/{view_token}/leave-change-requests",
+        json={
+            "month_key": "2026-04",
+            "day": 1,
+            "entry_id": "leave-1",
+            "requested_option_key": "COMP",
+            "request_comment": "replacement holiday",
+        },
+    )
+    request_id = request_response.get_json()["request"]["id"]
+
+    public_detail = client.get(f"/tools/shiftersync/cloudshift/api/public/view/{view_token}?month_key=2026-04")
+    assert public_detail.get_json()["viewer_capabilities"]["pending_leave_change_request_entry_ids"] == ["leave-1"]
+
+    module.current_user = _owner()
+    reject_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/leave-change-requests/{request_id}/reject",
+        json={},
+    )
+    assert reject_response.status_code == 200
+
+    module.current_user = _guest()
+    public_detail_after = client.get(f"/tools/shiftersync/cloudshift/api/public/view/{view_token}?month_key=2026-04")
+    assert public_detail_after.get_json()["viewer_capabilities"]["pending_leave_change_request_entry_ids"] == []
+
+
+def test_owner_approved_leave_change_request_must_be_reflected_in_save_payload(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    view_token = _token_from_url(payload["project"]["urls"]["view_url"])
+    month = payload["month"]
+    entry = {"id": "leave-1", "value": "!PAID!有休", "comment": ""}
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": {"1": [entry]}, "base_month": month},
+    )
+    month = save_response.get_json()["month"]
+    client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/settings",
+        json={"leave_change_requests_enabled": True},
+    )
+    module.current_user = _guest()
+    request_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/view/{view_token}/leave-change-requests",
+        json={
+            "month_key": "2026-04",
+            "day": 1,
+            "entry_id": "leave-1",
+            "requested_option_key": "COMP",
+            "request_comment": "振替休日のため",
+        },
+    )
+    request_id = request_response.get_json()["request"]["id"]
+
+    module.current_user = _owner()
+    conflict_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": month["entries_per_day"],
+            "base_month": month,
+            "leave_change_request_decisions": {"approved": [request_id]},
+        },
+    )
+    assert conflict_response.status_code == 409
+    assert "保存内容に反映" in conflict_response.get_json()["error"]
+
+
 def test_substitute_shift_board_is_auto_shared_to_office_editors(tmp_path):
     module, client = _build_client(tmp_path)
     with client.application.app_context():
