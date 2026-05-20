@@ -277,6 +277,21 @@
     align-items: stretch;
   }
 
+  .cloud-action-grid {
+    display: grid;
+    gap: 10px;
+  }
+
+  .cloud-action-group {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 10px;
+  }
+
+  .cloud-action-group .cloud-btn {
+    width: 100%;
+  }
+
   .cloud-btn {
     appearance: none;
     display: inline-flex;
@@ -707,6 +722,90 @@
     color: #b91c1c;
   }
 
+  .cloud-notify-host {
+    position: relative;
+  }
+
+  .cloud-notify-badge {
+    position: absolute;
+    top: -7px;
+    right: -7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border: 2px solid #fff;
+    border-radius: 999px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    box-shadow: 0 8px 16px rgba(185, 28, 28, 0.24);
+    pointer-events: none;
+  }
+
+  .cloud-settings-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .cloud-settings-tab {
+    position: relative;
+    border: 1px solid var(--cloud-line);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--cloud-muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    min-height: 38px;
+    padding: 0 13px;
+  }
+
+  .cloud-settings-tab.is-active {
+    border-color: var(--cloud-primary);
+    background: var(--cloud-primary);
+    color: #fff;
+  }
+
+  .cloud-settings-panel {
+    display: grid;
+    gap: 14px;
+  }
+
+  .cloud-settings-card,
+  .cloud-request-card {
+    border: 1px solid var(--cloud-line);
+    border-radius: 12px;
+    background: #fff;
+    padding: 14px;
+  }
+
+  .cloud-request-card {
+    display: grid;
+    gap: 10px;
+  }
+
+  .cloud-request-card.is-approved {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+  }
+
+  .cloud-request-card.is-rejected {
+    border-color: #fecaca;
+    background: #fff7f7;
+  }
+
+  .cloud-request-card.is-planned {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+  }
+
   .cloud-editor-actions > .cloud-field-note,
   .cloud-editor-actions > .cloud-input-panel {
     flex: 1 1 100%;
@@ -837,6 +936,10 @@
   .cloud-fold[open] {
     border-color: var(--cloud-line-strong);
     box-shadow: 0 12px 28px rgba(45, 111, 182, 0.09);
+  }
+
+  .cloud-fold-actions {
+    grid-column: span 2;
   }
 
   .cloud-fold-summary {
@@ -2133,6 +2236,10 @@
     .cloud-master-picker,
     .cloud-tool-dock {
       grid-template-columns: 1fr;
+    }
+
+    .cloud-fold-actions {
+      grid-column: span 1;
     }
 
     .cloud-sync-grid {

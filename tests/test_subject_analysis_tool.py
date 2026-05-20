@@ -14,6 +14,8 @@ SITE_PACKAGES = ROOT / "Lib" / "site-packages"
 if SITE_PACKAGES.exists() and str(SITE_PACKAGES) not in sys.path:
     sys.path.append(str(SITE_PACKAGES))
 
+from openpyxl import load_workbook
+
 from app.models import SiteContractMaster, db
 
 
@@ -122,6 +124,29 @@ def test_parse_subject_data_splits_auto_sales_by_contract_type(tmp_path):
     assert [item["amounts"][0] for item in parsed] == [100.0, 200.0]
 
 
+def test_load_site_mapping_from_master_is_single_definition():
+    source = (ROOT / "app" / "tools" / "subject_analysis_tool.py").read_text(encoding="utf-8")
+    assert source.count("def load_site_mapping_from_master(") == 1
+
+
+def test_subject_analysis_tool_rejects_short_required_columns(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _user()
+
+    response = client.post(
+        "/tools/subject_analysis_tool/api/upload",
+        data={
+            "subject_file": (io.BytesIO("a,b,c\n1,2,3\n".encode("utf-8")), "subject.csv"),
+            "site_source": "file",
+            "site_file": (io.BytesIO("contract,segment\n01234001,一般\n".encode("utf-8")), "site.csv"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    assert "必須列" in response.get_json()["error"]
+
+
 def test_subject_analysis_tool_db_mode_uses_site_contract_master(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _user()
@@ -157,6 +182,8 @@ def test_subject_analysis_tool_db_mode_uses_site_contract_master(tmp_path):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["metadata"]["site_source"] == "db"
+    assert payload["metadata"]["validation"]["row_count"] == 1
+    assert payload["metadata"]["validation"]["unmatched_site_mapping_count"] == 0
     assert payload["data"]["site_master"]["01234001"]["site_manager_id"] == "9001"
     assert payload["data"]["site_master"]["01234001"]["segment"] == "一般"
     assert payload["data"]["site_mapping"]["01234001"] == "一般"
@@ -175,3 +202,44 @@ def test_subject_analysis_tool_page_renders_site_source_modes(tmp_path):
     assert 'id="site-source-file-panel"' in html
     assert 'id="site-source-db-panel"' in html
     assert 'id="manager-id-filter"' in html
+    assert 'id="upload-review-panel"' in html
+    assert 'id="filter-preset-select"' in html
+    assert 'id="sat-sidebar-toggle"' in html
+    assert 'id="sat-conditions-toggle"' in html
+
+
+def test_subject_analysis_tool_xlsx_export(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _user()
+
+    response = client.post(
+        "/tools/subject_analysis_tool/api/export/xlsx",
+        json={
+            "filters": {"comparisonMode": "prev_year", "months": [4]},
+            "results": [
+                {
+                    "month": 4,
+                    "currentValue": 100,
+                    "comparisonValue": 80,
+                    "diff": 20,
+                    "diffRate": 25,
+                    "hasComparison": True,
+                    "isAnomaly": True,
+                    "segment": "一般",
+                    "item": {
+                        "contract_code": "01234001",
+                        "site_name": "テスト現場",
+                        "corp_name": "株式会社テスト",
+                        "subject_name": "基本請負料",
+                        "is_revenue": True,
+                    },
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    workbook = load_workbook(io.BytesIO(response.data), data_only=True)
+    assert workbook.sheetnames[:4] == ["詳細一覧", "現場別サマリー", "科目別サマリー", "条件"]
+    assert workbook["詳細一覧"]["A2"].value == "01234001"
+    assert workbook["詳細一覧"]["G2"].value == 100

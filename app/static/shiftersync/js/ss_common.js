@@ -71,7 +71,10 @@ const ShifterSync = (function() {
     dragEntry: null,
     suppressEntryClick: false,
     substituteRequestEnabled: false,
-    onSubstituteRequest: null
+    onSubstituteRequest: null,
+    leaveChangeRequestEnabled: false,
+    onLeaveChangeRequest: null,
+    leaveChangePendingRequestEntryIds: new Set()
   };
 
   const employeeSearchCache = new Map();
@@ -1393,6 +1396,13 @@ const ShifterSync = (function() {
     };
   }
 
+  function hasPendingLeaveChangeRequest(entry) {
+    return !state.editable
+      && state.leaveChangeRequestEnabled
+      && entry
+      && state.leaveChangePendingRequestEntryIds.has(String(entry.id || ''));
+  }
+
   function getCommentPreview(comment) {
     const text = String(comment || '').trim().replace(/\s*\r?\n\s*/g, ' / ');
     if (!text) {
@@ -1607,6 +1617,9 @@ const ShifterSync = (function() {
                 : null,
               parts.entry_status_label
                 ? $('<div>').addClass(`entry-item-status is-${parts.entry_status_tone || 'warning'}`).text(parts.entry_status_label)
+                : null,
+              hasPendingLeaveChangeRequest(entry)
+                ? $('<div>').addClass('entry-item-status is-warning').text('変更申請中')
                 : null,
               $('<div>').addClass(`entry-item-comment${parts.comment ? '' : ' is-empty'}`).text(parts.comment ? getCommentPreview(parts.comment) : '\u30b3\u30e1\u30f3\u30c8\u306a\u3057')
             )
@@ -1905,6 +1918,7 @@ const ShifterSync = (function() {
     $(document).off('click', '.ss-entry-save-btn');
     $(document).off('click', '.ss-day-substitute-request-btn');
     $(document).off('click', '.ss-entry-substitute-request-btn');
+    $(document).off('click', '.ss-entry-leave-change-request-btn');
     $(document).off('change', '#ss-entry-modal-option');
     $(document).off('change', '#ss-entry-modal-site-branch');
     $(document).off('click', '.ss-open-sync-source-btn');
@@ -1949,6 +1963,37 @@ const ShifterSync = (function() {
         return;
       }
       openEntryModal($(this).data('day'), $(this).data('entryId'));
+    });
+
+    $(document).on('click', '.ss-entry-leave-change-request-btn', async function() {
+      const button = $(this);
+      const day = String(button.attr('data-day') || '');
+      const entryId = String(button.attr('data-entry-id') || '');
+      const requestedOptionKey = String($('#ss-leave-change-request-option').val() || '').trim();
+      const requestComment = String($('#ss-leave-change-request-comment').val() || '').trim();
+      const entry = getDayEntries(day).find((item) => item.id === entryId);
+      if (['COMP', 'OTHER'].includes(requestedOptionKey) && !requestComment) {
+        alert('代休、その他への変更申請ではコメントを入力してください');
+        return;
+      }
+      if (!entry || !requestedOptionKey || typeof state.onLeaveChangeRequest !== 'function') {
+        return;
+      }
+      button.prop('disabled', true);
+      try {
+        await Promise.resolve(state.onLeaveChangeRequest({
+          day,
+          entryId,
+          entry: cloneEntry(entry, false),
+          requestedOptionKey,
+          requestComment
+        }));
+        closeModal('entry');
+      } catch (error) {
+        alert(error && error.message ? error.message : '休暇種別変更申請に失敗しました');
+      } finally {
+        button.prop('disabled', false);
+      }
     });
 
     if (!state.editable) {
@@ -2737,6 +2782,14 @@ const ShifterSync = (function() {
       ? ([entry.substitute_helper_name || '', formatSharedTimestamp(entry.substitute_helped_at)].filter(Boolean).join(' / ') || '\u672a\u8a18\u9332')
       : '\u672a\u89e3\u6c7a';
     const canRequestSubstitute = false;
+    const canRequestLeaveChange = !state.editable
+      && state.leaveChangeRequestEnabled
+      && isPersonMode()
+      && parsed.optionKey
+      && leaveOptionKeys.includes(parsed.optionKey)
+      && !syncedEntry
+      && !hasPendingLeaveChangeRequest(entry)
+      && typeof state.onLeaveChangeRequest === 'function';
     const detailNameLabel = isSubstituteMode()
       ? (substituteRequestType === 'person' ? '不足している人' : '不足している現場')
       : (isMasterPersonType() ? '\u73fe\u5834\u540d' : '\u540d\u524d');
@@ -2806,6 +2859,24 @@ const ShifterSync = (function() {
             <div class="ss-detail-field">
               <div class="ss-detail-label">\u679d\u756a\u53f7</div>
               <div class="ss-detail-static">${escapeHtml(branchState.label)}</div>
+            </div>
+          ` : ''}
+          ${canRequestLeaveChange ? `
+            <div class="ss-detail-field">
+              <label class="ss-detail-label" for="ss-leave-change-request-option">\u7533\u8acb\u3059\u308b\u4f11\u6687\u7a2e\u5225</label>
+              <select id="ss-leave-change-request-option" class="ss-detail-input">
+                ${leaveOptionKeys
+                  .filter((key) => key !== parsed.optionKey)
+                  .map((key) => `<option value="${key}">${escapeHtml(leaveOptionMappings[key] || key)}</option>`)
+                  .join('')}
+              </select>
+            </div>
+            <div class="ss-detail-field">
+              <label class="ss-detail-label" for="ss-leave-change-request-comment">\u7533\u8acb\u30b3\u30e1\u30f3\u30c8</label>
+              <textarea id="ss-leave-change-request-comment" class="ss-detail-textarea" rows="3" placeholder="\u7406\u7531\u3084\u88dc\u8db3\u3092\u5165\u529b\u3067\u304d\u307e\u3059\u3002\u4ee3\u4f11\u30fb\u305d\u306e\u4ed6\u306f\u5fc5\u9808\u3067\u3059\u3002"></textarea>
+            </div>
+            <div class="ss-detail-actions foot">
+              <button type="button" class="btn-primary ss-entry-leave-change-request-btn" data-day="${day}" data-entry-id="${escapeHtml(entry.id)}">\u4f11\u6687\u7a2e\u5225\u5909\u66f4\u3092\u7533\u8acb</button>
             </div>
           ` : ''}
           ${syncedEntry && canOpenSource ? `
@@ -3187,6 +3258,13 @@ const ShifterSync = (function() {
     state.editable = Object.prototype.hasOwnProperty.call(options, 'editable') ? !!options.editable : true;
     state.substituteRequestEnabled = !!options.substituteRequestEnabled;
     state.onSubstituteRequest = typeof options.onSubstituteRequest === 'function' ? options.onSubstituteRequest : null;
+    state.leaveChangeRequestEnabled = !!options.leaveChangeRequestEnabled;
+    state.onLeaveChangeRequest = typeof options.onLeaveChangeRequest === 'function' ? options.onLeaveChangeRequest : null;
+    state.leaveChangePendingRequestEntryIds = new Set(
+      Array.isArray(options.leaveChangePendingRequestEntryIds)
+        ? options.leaveChangePendingRequestEntryIds.map((value) => String(value))
+        : []
+    );
     state.holidays = new Set(
       Array.isArray(options.holidays)
         ? options.holidays.map((value) => String(value))
@@ -3292,12 +3370,22 @@ const ShifterSync = (function() {
   }
 
   function setState(key, value) {
-    state[key] = value;
+    if (key === 'leaveChangePendingRequestEntryIds') {
+      state.leaveChangePendingRequestEntryIds = new Set(
+        Array.isArray(value)
+          ? value.map((item) => String(item))
+          : value instanceof Set
+            ? Array.from(value).map((item) => String(item))
+            : []
+      );
+    } else {
+      state[key] = value;
+    }
     if (key === 'capacityEnabled' || key === 'requiredCapacity') {
       updateAllCapacityWarnings();
       updateAllBranchWarnings();
     }
-    if (key === 'siteContext' || key === 'siteBranches') {
+    if (key === 'siteContext' || key === 'siteBranches' || key === 'leaveChangePendingRequestEntryIds') {
       Object.keys(state.entriesPerDay).forEach((day) => updateEntryDisplay(day));
       updateAllBranchWarnings();
     }

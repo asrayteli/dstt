@@ -83,6 +83,7 @@ MAX_REVISION_SNAPSHOTS = 12
 OPTION_LABELS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS}
 SHIFT_TIME_OPTION_KEYS = {"A", "P", "E", "L", "TEMP"}
 VEHICLE_OPTION_KEYS = {"M", "C", "O", "W", "V", "N1", "N2", "N3", "N4", "N5"}
+LEAVE_CHANGE_REQUEST_STATUSES = {"pending", "approved", "rejected"}
 ASSIST_ROLE_LABELS = {
     "normal": "通常",
     "dedicated": "専従者",
@@ -1409,6 +1410,11 @@ def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
             if current_user.is_authenticated and project.get("owner_user_id") == _user_id()
             else "none"
         )
+    summary["shift_book"] = {
+        "settings": _shift_book_settings(project),
+        "pending_leave_change_request_count": _leave_change_request_pending_count(project),
+        "unviewed_leave_change_request_count": _leave_change_request_unviewed_count(project),
+    }
     return summary
 
 
@@ -1970,6 +1976,115 @@ def _normalized_account_shares(project: dict[str, Any]) -> dict[str, Any]:
         "updated_at": raw.get("updated_at"),
         "updated_by": raw.get("updated_by"),
     }
+
+
+def _shift_book_settings(project: dict[str, Any]) -> dict[str, Any]:
+    raw = project.get("shift_book_settings") if isinstance(project.get("shift_book_settings"), dict) else {}
+    leave_requests = raw.get("leave_change_requests") if isinstance(raw.get("leave_change_requests"), dict) else {}
+    return {
+        "leave_change_requests": {
+            "enabled": bool(leave_requests.get("enabled")),
+        }
+    }
+
+
+def _leave_change_request_pending_count(project: dict[str, Any]) -> int:
+    return sum(1 for item in _normalized_leave_change_requests(project) if item.get("status") == "pending")
+
+
+def _leave_change_request_unviewed_count(project: dict[str, Any]) -> int:
+    return sum(
+        1
+        for item in _normalized_leave_change_requests(project)
+        if item.get("status") == "pending" and not item.get("owner_viewed_at")
+    )
+
+
+def _leave_change_request_enabled(project: dict[str, Any]) -> bool:
+    settings = _shift_book_settings(project)
+    return project.get("mode") == "person" and bool(settings["leave_change_requests"]["enabled"])
+
+
+def _normalized_leave_change_requests(project: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_items = project.get("leave_change_requests") if isinstance(project.get("leave_change_requests"), list) else []
+    normalized: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        request_id = str(item.get("id") or "").strip()
+        if not request_id or request_id in seen_ids:
+            continue
+        seen_ids.add(request_id)
+        status = str(item.get("status") or "pending").strip()
+        if status not in LEAVE_CHANGE_REQUEST_STATUSES:
+            status = "pending"
+        day = item.get("day")
+        try:
+            day = int(day)
+        except (TypeError, ValueError):
+            day = 0
+        old_option_key = str(item.get("old_option_key") or "").strip().upper()
+        requested_option_key = str(item.get("requested_option_key") or "").strip().upper()
+        normalized.append(
+            {
+                "id": request_id,
+                "status": status,
+                "month_key": str(item.get("month_key") or "").strip(),
+                "day": day,
+                "entry_id": str(item.get("entry_id") or "").strip(),
+                "entry_name": str(item.get("entry_name") or "").strip(),
+                "old_option_key": old_option_key,
+                "old_leave_type": LEAVE_OPTION_MAPPINGS.get(old_option_key, old_option_key),
+                "requested_option_key": requested_option_key,
+                "requested_leave_type": LEAVE_OPTION_MAPPINGS.get(requested_option_key, requested_option_key),
+                "request_comment": str(item.get("request_comment") or "").strip(),
+                "requested_at": str(item.get("requested_at") or "").strip(),
+                "owner_viewed_at": str(item.get("owner_viewed_at") or "").strip(),
+                "decided_at": str(item.get("decided_at") or "").strip(),
+                "decided_by": str(item.get("decided_by") or "").strip(),
+                "decided_by_name": str(item.get("decided_by_name") or "").strip(),
+                "decision_reason": str(item.get("decision_reason") or "").strip(),
+            }
+        )
+    normalized.sort(key=lambda item: item.get("requested_at") or "", reverse=True)
+    normalized.sort(key=lambda item: 0 if item["status"] == "pending" else 1)
+    return normalized
+
+
+def _store_leave_change_requests(project: dict[str, Any], requests: list[dict[str, Any]]) -> None:
+    project["leave_change_requests"] = [
+        {
+            key: value
+            for key, value in item.items()
+            if value not in (None, "")
+        }
+        for item in requests
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    ]
+
+
+def _pending_leave_change_request_entry_ids(project: dict[str, Any], month_key: str) -> list[str]:
+    ids: list[str] = []
+    for item in _normalized_leave_change_requests(project):
+        entry_id = str(item.get("entry_id") or "").strip()
+        if item.get("status") == "pending" and item.get("month_key") == month_key and entry_id and entry_id not in ids:
+            ids.append(entry_id)
+    return ids
+
+
+def _mark_leave_change_requests_viewed(project: dict[str, Any]) -> bool:
+    requests = _normalized_leave_change_requests(project)
+    timestamp = _utcnow_iso()
+    changed = False
+    for item in requests:
+        if item.get("status") == "pending" and not item.get("owner_viewed_at"):
+            item["owner_viewed_at"] = timestamp
+            changed = True
+    if changed:
+        _store_leave_change_requests(project, requests)
+        _save_project(project)
+    return changed
 
 
 def _project_is_shared_with_current_user(project: dict[str, Any]) -> bool:
@@ -6344,6 +6459,212 @@ def _cloudshift_leave_rows(
     return leaves, skipped
 
 
+def _find_month_entry(
+    month_data: dict[str, Any],
+    *,
+    day: int,
+    entry_id: str,
+) -> dict[str, Any] | None:
+    entries = (month_data.get("entries_per_day") or {}).get(str(day))
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if isinstance(entry, dict) and str(entry.get("id") or "").strip() == entry_id:
+            return entry
+    return None
+
+
+def _create_leave_change_request(project: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    if not _leave_change_request_enabled(project):
+        raise CloudShiftError("このシフト帳では休暇種別変更申請が許可されていません", 403)
+
+    month_key = str(payload.get("month_key") or "").strip()
+    if not month_key:
+        raise CloudShiftError("対象月を指定してください", 400)
+    try:
+        year, month = _parse_month_key(month_key)
+        year, month = _validate_year_month(year, month)
+    except Exception as exc:
+        raise CloudShiftError("対象月が不正です", 400) from exc
+    month_key = _month_key(year, month)
+    month_data = (project.get("months") or {}).get(month_key)
+    if not month_data:
+        raise CloudShiftError("対象の月が存在しません", 404)
+
+    try:
+        day = int(payload.get("day"))
+    except (TypeError, ValueError) as exc:
+        raise CloudShiftError("日付が不正です", 400) from exc
+    if day < 1 or day > monthrange(year, month)[1]:
+        raise CloudShiftError("日付が不正です", 400)
+
+    entry_id = str(payload.get("entry_id") or "").strip()
+    requested_option_key = str(payload.get("requested_option_key") or "").strip().upper()
+    if requested_option_key not in LEAVE_OPTION_MAPPINGS:
+        raise CloudShiftError("申請する休暇種別が不正です", 400)
+    request_comment = str(payload.get("request_comment") or "").strip()[:500]
+    if requested_option_key in {"COMP", "OTHER"} and not request_comment:
+        raise CloudShiftError("代休、その他への変更申請ではコメントを入力してください", 400)
+
+    entry = _find_month_entry(month_data, day=day, entry_id=entry_id)
+    if not entry:
+        raise CloudShiftError("対象の休暇が見つかりません", 404)
+    if _entry_is_shift_synced(entry):
+        raise CloudShiftError("同期反映された休暇は申請対象外です", 400)
+
+    old_option_key, entry_name = parse_entry_value(str(entry.get("value") or ""))
+    old_option_key = str(old_option_key or "").strip().upper()
+    if old_option_key not in LEAVE_OPTION_MAPPINGS:
+        raise CloudShiftError("休暇エントリのみ申請できます", 400)
+    if requested_option_key == old_option_key:
+        raise CloudShiftError("変更前と変更後の休暇種別が同じです", 400)
+
+    for item in _normalized_leave_change_requests(project):
+        if (
+            item.get("status") == "pending"
+            and item.get("month_key") == month_key
+            and int(item.get("day") or 0) == day
+            and item.get("entry_id") == entry_id
+            and item.get("requested_option_key") == requested_option_key
+        ):
+            raise CloudShiftError("同じ休暇種別変更申請が未処理です", 409)
+
+    request_payload = {
+        "id": f"leave_req_{secrets.token_hex(8)}",
+        "status": "pending",
+        "month_key": month_key,
+        "day": day,
+        "entry_id": entry_id,
+        "entry_name": entry_name,
+        "old_option_key": old_option_key,
+        "old_leave_type": LEAVE_OPTION_MAPPINGS.get(old_option_key, old_option_key),
+        "requested_option_key": requested_option_key,
+        "requested_leave_type": LEAVE_OPTION_MAPPINGS.get(requested_option_key, requested_option_key),
+        "request_comment": request_comment,
+        "requested_at": _utcnow_iso(),
+    }
+    requests = _normalized_leave_change_requests(project)
+    requests.append(request_payload)
+    _store_leave_change_requests(project, requests)
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": request_payload["requested_at"],
+            "editor_name": "閲覧URL",
+            "editor_type": "public_viewer",
+            "action": "leave_change_requested",
+            "month_key": month_key,
+            "changes": [
+                f"{day}日の休暇種別変更申請: "
+                f"{request_payload['old_leave_type']} → {request_payload['requested_leave_type']}"
+            ]
+            + ([f"申請コメント: {request_comment}"] if request_comment else []),
+        },
+    )
+    return request_payload
+
+
+def _reject_leave_change_request(
+    project: dict[str, Any],
+    request_id: str,
+    *,
+    actor_name: str,
+    actor_user_id: str,
+    reason: str = "",
+) -> dict[str, Any]:
+    requests = _normalized_leave_change_requests(project)
+    target = None
+    for item in requests:
+        if item["id"] == request_id:
+            target = item
+            break
+    if not target:
+        raise CloudShiftError("対象の申請が見つかりません", 404)
+    if target.get("status") != "pending":
+        raise CloudShiftError("この申請は既に処理済みです", 400)
+    target["status"] = "rejected"
+    target["decided_at"] = _utcnow_iso()
+    target["decided_by"] = actor_user_id
+    target["decided_by_name"] = actor_name
+    target["decision_reason"] = reason
+    _store_leave_change_requests(project, requests)
+    _save_project(project)
+    _append_history(
+        project["id"],
+        {
+            "timestamp": target["decided_at"],
+            "editor_name": actor_name,
+            "editor_type": "owner",
+            "action": "leave_change_rejected",
+            "month_key": target.get("month_key"),
+            "changes": [
+                f"{target.get('day')}日の休暇種別変更申請を拒否: "
+                f"{target.get('old_leave_type')} → {target.get('requested_leave_type')}"
+            ],
+        },
+    )
+    return target
+
+
+def _leave_change_decision_ids(payload: dict[str, Any]) -> list[str]:
+    raw = (payload.get("leave_change_request_decisions") or {}).get("approved")
+    if not isinstance(raw, list):
+        return []
+    ids: list[str] = []
+    for item in raw:
+        request_id = str(item or "").strip()
+        if request_id and request_id not in ids:
+            ids.append(request_id)
+    return ids
+
+
+def _finalize_approved_leave_change_requests(
+    project: dict[str, Any],
+    month_key: str,
+    merged_month: dict[str, Any],
+    approved_ids: list[str],
+    *,
+    actor_name: str,
+    actor_user_id: str,
+) -> list[str]:
+    if not approved_ids:
+        return []
+    requests = _normalized_leave_change_requests(project)
+    request_map = {item["id"]: item for item in requests}
+    changes: list[str] = []
+    timestamp = _utcnow_iso()
+    for request_id in approved_ids:
+        item = request_map.get(request_id)
+        if not item:
+            raise CloudShiftError("承認対象の申請が見つかりません", 404)
+        if item.get("status") != "pending":
+            raise CloudShiftError("承認対象の申請は既に処理済みです", 400)
+        if item.get("month_key") != month_key:
+            raise CloudShiftError("承認対象の申請と保存中の月が一致しません", 409)
+        entry = _find_month_entry(
+            merged_month,
+            day=int(item.get("day") or 0),
+            entry_id=str(item.get("entry_id") or ""),
+        )
+        if not entry:
+            raise CloudShiftError("承認対象の休暇が見つかりません。再読み込みしてください", 409)
+        option_key, _ = parse_entry_value(str(entry.get("value") or ""))
+        option_key = str(option_key or "").strip().upper()
+        if option_key != item.get("requested_option_key"):
+            raise CloudShiftError("承認した休暇種別が保存内容に反映されていません", 409)
+        item["status"] = "approved"
+        item["decided_at"] = timestamp
+        item["decided_by"] = actor_user_id
+        item["decided_by_name"] = actor_name
+        changes.append(
+            f"{item.get('day')}日の休暇種別変更申請を承認: "
+            f"{item.get('old_leave_type')} → {item.get('requested_leave_type')}"
+        )
+    _store_leave_change_requests(project, requests)
+    return changes
+
+
 def _calendar_day_map(month_data: dict[str, Any]) -> dict[int, list[dict[str, str]]]:
     return {
         int(day): [
@@ -6767,8 +7088,26 @@ def api_project_meta(project_id: str):
 @cloudshift_bp.route("/api/project/<project_id>/tokens/regenerate", methods=["POST"])
 @login_required
 def api_regenerate_tokens(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    reject_pending = bool(payload.get("reject_pending_leave_change_requests"))
     with _project_lock(project_id):
         project = _owner_project_or_404(project_id)
+        changes = ["共有URLを再発行"]
+        if reject_pending:
+            requests = _normalized_leave_change_requests(project)
+            rejected_count = 0
+            timestamp = _utcnow_iso()
+            for item in requests:
+                if item.get("status") == "pending":
+                    item["status"] = "rejected"
+                    item["decided_at"] = timestamp
+                    item["decided_by"] = _user_id()
+                    item["decided_by_name"] = _user_label()
+                    item["decision_reason"] = "url_regenerated"
+                    rejected_count += 1
+            if rejected_count:
+                _store_leave_change_requests(project, requests)
+                changes.append(f"未処理の休暇種別変更申請 {rejected_count}件を破棄")
         project["view_token"] = _share_token()
         project["edit_token"] = _share_token()
         _save_project(project)
@@ -6780,10 +7119,18 @@ def api_regenerate_tokens(project_id: str):
                 "editor_type": "owner",
                 "action": "tokens_regenerated",
                 "month_key": None,
-                "changes": ["共有URLを再発行"],
+                "changes": changes,
             },
         )
-    return jsonify({"success": True, "urls": _project_public_urls(project)})
+    return jsonify(
+        {
+            "success": True,
+            "urls": _project_public_urls(project),
+            "leave_change_requests": _normalized_leave_change_requests(project),
+            "pending_leave_change_request_count": _leave_change_request_pending_count(project),
+            "unviewed_leave_change_request_count": _leave_change_request_unviewed_count(project),
+        }
+    )
 
 
 @cloudshift_bp.route("/api/project/<project_id>/account-shares", methods=["GET", "PUT"])
@@ -6863,6 +7210,98 @@ def api_project_account_shares(project_id: str):
     return jsonify({"success": True, "shares": _normalized_account_shares(project)})
 
 
+@cloudshift_bp.route("/api/project/<project_id>/settings", methods=["GET", "PUT"])
+@login_required
+def api_project_settings(project_id: str):
+    if request.method == "GET":
+        project = _owner_project_or_404(project_id)
+        return jsonify(
+            {
+                "success": True,
+                "settings": _shift_book_settings(project),
+                "leave_change_requests": _normalized_leave_change_requests(project),
+                "pending_leave_change_request_count": _leave_change_request_pending_count(project),
+                "unviewed_leave_change_request_count": _leave_change_request_unviewed_count(project),
+                "urls": _project_public_urls(project),
+            }
+        )
+
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("leave_change_requests_enabled"))
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        previous = _shift_book_settings(project)["leave_change_requests"]["enabled"]
+        project["shift_book_settings"] = {
+            **_shift_book_settings(project),
+            "leave_change_requests": {
+                "enabled": enabled,
+            },
+        }
+        _save_project(project)
+        if previous != enabled:
+            _append_history(
+                project_id,
+                {
+                    "timestamp": _utcnow_iso(),
+                    "editor_name": _user_label(),
+                    "editor_type": "owner",
+                    "action": "shift_book_settings_updated",
+                    "month_key": None,
+                    "changes": [
+                        "休暇種別変更申請を許可" if enabled else "休暇種別変更申請を停止"
+                    ],
+                },
+            )
+    return jsonify(
+        {
+            "success": True,
+            "settings": _shift_book_settings(project),
+            "leave_change_requests": _normalized_leave_change_requests(project),
+            "pending_leave_change_request_count": _leave_change_request_pending_count(project),
+            "unviewed_leave_change_request_count": _leave_change_request_unviewed_count(project),
+            "urls": _project_public_urls(project),
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/leave-change-requests/<request_id>/reject", methods=["POST"])
+@login_required
+def api_reject_leave_change_request(project_id: str, request_id: str):
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        request_payload = _reject_leave_change_request(
+            project,
+            request_id,
+            actor_name=_user_label(),
+            actor_user_id=_user_id(),
+        )
+    return jsonify(
+        {
+            "success": True,
+            "request": request_payload,
+            "leave_change_requests": _normalized_leave_change_requests(project),
+            "pending_leave_change_request_count": _leave_change_request_pending_count(project),
+            "unviewed_leave_change_request_count": _leave_change_request_unviewed_count(project),
+        }
+    )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/leave-change-requests/mark-viewed", methods=["POST"])
+@login_required
+def api_mark_leave_change_requests_viewed(project_id: str):
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        _mark_leave_change_requests_viewed(project)
+    return jsonify(
+        {
+            "success": True,
+            "leave_change_requests": _normalized_leave_change_requests(project),
+            "pending_leave_change_request_count": _leave_change_request_pending_count(project),
+            "unviewed_leave_change_request_count": _leave_change_request_unviewed_count(project),
+        }
+    )
+
+
 def _create_month_in_project(project: dict[str, Any], payload: dict[str, Any], actor_name: str, actor_type: str) -> dict[str, Any]:
     year, month = _validate_year_month(payload.get("year"), payload.get("month"))
 
@@ -6930,6 +7369,7 @@ def _save_month_in_project(
     actor_name: str,
     actor_type: str,
     actor_user_id: str = "",
+    approved_leave_change_request_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     year, month = _validate_year_month(year, month)
     month_key = _month_key(year, month)
@@ -6961,14 +7401,22 @@ def _save_month_in_project(
     merged = _merge_month_payload(current_month, incoming_month, base_month)
     merged["draft_entries_per_day"] = _normalize_entries(merged.get("entries_per_day"), year, month)
     changes = _describe_month_changes(current_month, merged)
-    if not changes:
+    decision_changes = _finalize_approved_leave_change_requests(
+        project,
+        month_key,
+        merged,
+        approved_leave_change_request_ids or [],
+        actor_name=actor_name,
+        actor_user_id=actor_user_id,
+    )
+    if not changes and not decision_changes:
         return current_month
     snapshots = dict(current_month.get("revision_snapshots") or {})
     snapshots[str(int(current_month.get("revision", 1)))] = _snapshot_month_payload(current_month)
     merged["revision_snapshots"] = _trim_revision_snapshots(snapshots)
     project["months"][month_key] = merged
     _save_project(project)
-    if changes:
+    if changes or decision_changes:
         _append_history(
             project["id"],
             {
@@ -6977,7 +7425,7 @@ def _save_month_in_project(
                 "editor_type": actor_type,
                 "action": "month_updated",
                 "month_key": month_key,
-                "changes": changes[:100],
+                "changes": (changes + decision_changes)[:100],
             },
         )
     return merged
@@ -7125,7 +7573,17 @@ def api_save_month(project_id: str, year: int, month: int):
     payload = request.get_json(silent=True) or {}
     with _project_lock(project_id):
         project, access_role = _editable_project_or_404(project_id)
-        month_payload = _save_month_in_project(project, year, month, payload, _user_label(), access_role, _user_id())
+        approved_ids = _leave_change_decision_ids(payload) if access_role == "owner" else []
+        month_payload = _save_month_in_project(
+            project,
+            year,
+            month,
+            payload,
+            _user_label(),
+            access_role,
+            _user_id(),
+            approved_leave_change_request_ids=approved_ids,
+        )
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=_user_label())
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
@@ -8097,9 +8555,37 @@ def api_public_detail(token_type: str, token: str):
         payload["project"]["urls"] = {
             "view_url": payload["project"]["urls"]["view_url"],
         }
+    payload["project"]["shift_book"] = {
+        "settings": {
+            "leave_change_requests": {
+                "enabled": _leave_change_request_enabled(project),
+            }
+        },
+        "pending_leave_change_request_count": 0,
+        "unviewed_leave_change_request_count": 0,
+    }
     payload["access_mode"] = token_type
     payload["authenticated_editor_name"] = _user_label() if current_user.is_authenticated else None
+    payload["viewer_capabilities"] = {
+        "leave_change_request": token_type == "view" and _leave_change_request_enabled(project),
+        "pending_leave_change_request_entry_ids": _pending_leave_change_request_entry_ids(
+            project,
+            str(payload.get("active_month_key") or ""),
+        )
+        if token_type == "view"
+        else [],
+    }
     return jsonify(payload)
+
+
+@cloudshift_bp.route("/api/public/view/<token>/leave-change-requests", methods=["POST"])
+def api_public_create_leave_change_request(token: str):
+    payload = request.get_json(silent=True) or {}
+    project = _find_project_by_token(token, "view")
+    with _project_lock(project["id"]):
+        project = _find_project_by_token(token, "view")
+        request_payload = _create_leave_change_request(project, payload)
+    return jsonify({"success": True, "request": request_payload})
 
 
 @cloudshift_bp.route("/api/public/view/<token>/export/<export_format>")

@@ -52,6 +52,15 @@
         calendars: [],
         selectedCalendarId: ''
       },
+      shiftBookSettings: {
+        activeTab: 'requests',
+        loaded: false,
+        settings: { leave_change_requests: { enabled: false } },
+        requests: [],
+        approvedRequestIds: [],
+        accountShares: null,
+        revisions: []
+      },
       conflictCheck: {
         mode: 'scene',
         monthKey: '',
@@ -384,6 +393,28 @@
       if (project.share.role === 'viewer') return '共有されたシフト';
       if (project.share.role === 'editor') return '営業所共有・編集可';
       return project.share.enabled ? '共有中' : '';
+    }
+
+    function unviewedLeaveChangeRequestCount(project) {
+      const shiftBook = project && project.shift_book ? project.shift_book : {};
+      return Number(shiftBook.unviewed_leave_change_request_count || 0);
+    }
+
+    function setNotificationBadge(button, count) {
+      if (!button) return;
+      button.classList.add('cloud-notify-host');
+      let badge = button.querySelector('.cloud-notify-badge');
+      if (!count || count <= 0) {
+        if (badge) badge.remove();
+        return;
+      }
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'cloud-notify-badge';
+        button.appendChild(badge);
+      }
+      badge.textContent = '!';
+      badge.setAttribute('aria-label', `${count}件の未表示申請`);
     }
 
     function isLikelyMobileDevice() {
@@ -4986,7 +5017,7 @@
         return;
       }
       const exportButton = document.getElementById('cloud-export-xlsx');
-      const row = exportButton ? exportButton.closest('.cloud-actions.compact') : null;
+      const row = exportButton ? (exportButton.closest('.cloud-action-group') || exportButton.closest('.cloud-actions.compact')) : null;
       if (!row) {
         return;
       }
@@ -4996,7 +5027,12 @@
       button.className = className;
       button.textContent = label;
       button.addEventListener('click', onClick);
-      row.appendChild(button);
+      const exportStart = row.querySelector('#cloud-export-calendar');
+      if (exportStart) {
+        row.insertBefore(button, exportStart);
+      } else {
+        row.appendChild(button);
+      }
     }
 
     function ensureCloudActionButtons() {
@@ -5021,9 +5057,6 @@
             showFlash(error.message, 'error');
           }
         });
-      }
-      if (PAGE.type === 'owner') {
-        ensureActionButton('cloud-open-restore', '復元', 'cloud-btn ghost', () => openRestoreModal().catch((error) => showFlash(error.message, 'error')));
       }
     }
 
@@ -5241,6 +5274,31 @@
         modalBody(modal).innerHTML = `<div class="cloud-empty-state"><p>${escapeHtml(error.message || 'リビジョン一覧の取得に失敗しました')}</p></div>`;
         modalFooter(modal).querySelector('[data-cloud-restore-confirm]').disabled = true;
       }
+    }
+
+    async function restoreSelectedRevisionFromSettings(modal) {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) return;
+      if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずに復元すると、このセッションでの編集内容は失われます。続行しますか？')) return;
+      const selected = modal.querySelector('input[name="cloud-restore-revision"]:checked');
+      const revision = selected ? parseInt(selected.value || '0', 10) : 0;
+      if (!revision) {
+        showFlash('復元するリビジョンを選択してください', 'error');
+        return;
+      }
+
+      const payload = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/restore`, {
+        method: 'POST',
+        body: { revision }
+      });
+      state.projectPayload = unwrapProjectPayload(payload);
+      state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
+      await renderWorkspaceWithSiteBranches(true);
+      await loadProjects();
+      await loadHistory(project.id);
+      closeCloudModal('cloud-shift-book-settings-modal');
+      showFlash(`rev ${revision} を復元しました`, 'success');
     }
 
     function buildBulkOptionSelect(mode) {
@@ -5838,6 +5896,37 @@
       showFlash(`代務要請を仮登録しました。この月を保存すると要代務シフト帳へ登録されます（保留 ${pendingCount} 件）`, 'info');
     }
 
+    async function submitLeaveChangeRequestFromPublicView(context) {
+      const monthKey = currentMonthKey();
+      if (!monthKey || !context || !context.day || !context.entryId || !context.requestedOptionKey) {
+        return;
+      }
+      await requestJson(`/tools/shiftersync/cloudshift/api/public/view/${PAGE.token}/leave-change-requests`, {
+        method: 'POST',
+        body: {
+          month_key: monthKey,
+          day: context.day,
+          entry_id: context.entryId,
+          requested_option_key: context.requestedOptionKey,
+          request_comment: context.requestComment || ''
+        }
+      });
+      if (state.projectPayload && state.projectPayload.viewer_capabilities) {
+        const pendingIds = Array.isArray(state.projectPayload.viewer_capabilities.pending_leave_change_request_entry_ids)
+          ? state.projectPayload.viewer_capabilities.pending_leave_change_request_entry_ids.slice()
+          : [];
+        if (!pendingIds.map(String).includes(String(context.entryId))) {
+          pendingIds.push(context.entryId);
+        }
+        state.projectPayload.viewer_capabilities.pending_leave_change_request_entry_ids = pendingIds;
+        if (ShifterSync.setState) {
+          ShifterSync.setState('leaveChangePendingRequestEntryIds', pendingIds);
+        }
+        replaceCalendarEntries(currentEntriesSnapshot());
+      }
+      showFlash('休暇種別変更申請を送信しました', 'success');
+    }
+
     function buildCalendarHost(targetId) {
       const host = $(targetId);
       if (!host) return;
@@ -5879,10 +5968,21 @@
         && editable
         && projectAccessRole(project) !== 'viewer'
         && (project.mode === 'scene' || project.mode === 'person');
+      const leaveChangeRequestEnabled = PAGE.type === 'public'
+        && PAGE.accessMode === 'view'
+        && project.mode === 'person'
+        && state.projectPayload
+        && state.projectPayload.viewer_capabilities
+        && state.projectPayload.viewer_capabilities.leave_change_request;
       ShifterSync.buildCalendar(month.year, month.month, project.mode, displayedEntriesForMonth(month), {
         editable,
         substituteRequestEnabled,
-        onSubstituteRequest: substituteRequestEnabled ? requestSubstituteFromEntry : null
+        onSubstituteRequest: substituteRequestEnabled ? requestSubstituteFromEntry : null,
+        leaveChangeRequestEnabled,
+        onLeaveChangeRequest: leaveChangeRequestEnabled ? submitLeaveChangeRequestFromPublicView : null,
+        leaveChangePendingRequestEntryIds: state.projectPayload && state.projectPayload.viewer_capabilities
+          ? state.projectPayload.viewer_capabilities.pending_leave_change_request_entry_ids || []
+          : []
       });
       applyDraftVisualState(month);
       watchDraftVisualState(month);
@@ -5984,14 +6084,14 @@
       if ($('cloud-publish-draft')) $('cloud-publish-draft').classList.toggle('cloud-hidden', !isOwnerEditable || !month || !draftHasChanges(month));
       if ($('cloud-clear-draft')) $('cloud-clear-draft').classList.toggle('cloud-hidden', !isOwnerEditable || !month || !draftHasChanges(month));
       if ($('cloud-workspace')) $('cloud-workspace').classList.toggle('is-draft-mode', state.editorMode === 'draft');
-      if ($('cloud-add-prev-month')) $('cloud-add-prev-month').classList.toggle('cloud-hidden', !isOwnerEditable);
-      if ($('cloud-add-next-month')) $('cloud-add-next-month').classList.toggle('cloud-hidden', !isOwnerEditable);
       if ($('cloud-create-first-month')) $('cloud-create-first-month').classList.toggle('cloud-hidden', !isOwnerEditable);
-      if ($('cloud-open-account-share')) $('cloud-open-account-share').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
+      if ($('cloud-open-shift-book-settings')) {
+        $('cloud-open-shift-book-settings').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
+        setNotificationBadge($('cloud-open-shift-book-settings'), unviewedLeaveChangeRequestCount(project));
+      }
       if ($('cloud-open-summary')) $('cloud-open-summary').classList.toggle('cloud-hidden', !month);
       if ($('cloud-open-assist')) $('cloud-open-assist').classList.toggle('cloud-hidden', !isOwnerEditable || !isAssistAvailable());
       if ($('cloud-open-bulk-edit')) $('cloud-open-bulk-edit').classList.toggle('cloud-hidden', !month || !isOwnerEditable || (PAGE.type === 'public' && PAGE.accessMode !== 'edit'));
-      if ($('cloud-open-restore')) $('cloud-open-restore').classList.toggle('cloud-hidden', !month || !isOwnerEditable);
       if ($('cloud-project-pick-site')) $('cloud-project-pick-site').classList.toggle('cloud-hidden', !canManageProject);
       if ($('cloud-project-clear-site')) $('cloud-project-clear-site').classList.toggle('cloud-hidden', !canManageProject);
       if ($('cloud-open-view-url')) $('cloud-open-view-url').classList.toggle('cloud-hidden', !canManageProject);
@@ -6037,7 +6137,10 @@
           entries_per_day: baseMonth.entries_per_day
         },
         required_capacity: parseInt(($('cloud-required-capacity') && $('cloud-required-capacity').value) || '0', 10) || 0,
-        entries_per_day: entriesWithoutSubstituteRequestDisplays(ShifterSync.getEntriesPerDay())
+        entries_per_day: entriesWithoutSubstituteRequestDisplays(ShifterSync.getEntriesPerDay()),
+        leave_change_request_decisions: {
+          approved: state.shiftBookSettings.approvedRequestIds.slice()
+        }
       };
     }
 
@@ -6089,6 +6192,7 @@
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       state.editorMode = 'normal';
+      state.shiftBookSettings.approvedRequestIds = [];
       syncAssistContext();
       renderProjectList();
       await renderWorkspaceWithSiteBranches(projectAccessRole(payload.project) !== 'viewer');
@@ -6122,6 +6226,7 @@
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       state.editorMode = 'normal';
+      state.shiftBookSettings.approvedRequestIds = [];
       syncAssistContext();
       updateCurrentProjectLabel();
       await renderWorkspaceWithSiteBranches(PAGE.accessMode === 'edit');
@@ -6236,6 +6341,7 @@
         method: 'PUT',
         body: collectMonthPayload()
       }));
+      state.shiftBookSettings.approvedRequestIds = [];
       state.projectPayload = payload;
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       const submittedRequests = await submitPendingSubstituteRequestsForCurrentMonth();
@@ -6555,12 +6661,12 @@
         .filter(Boolean);
     }
 
-    function renderAccountShareModalBody(modal, data) {
+    function accountShareFormHtml(data) {
       const shares = data.shares || {};
       const office = shares.office || {};
       const employees = Array.isArray(shares.employees) ? shares.employees : [];
       const ownerOffices = Array.isArray(data.owner_offices) ? data.owner_offices : [];
-      modalBody(modal).innerHTML = `
+      return `
         <form class="cloud-share-form">
           <p class="cloud-panel-note">DSTTアカウントを持っている人向けの共有です。共有URLはアカウントがない人向けとして残します。</p>
           <label class="cloud-share-option">
@@ -6584,6 +6690,10 @@
           </div>
         </form>
       `;
+    }
+
+    function renderAccountShareModalBody(modal, data) {
+      modalBody(modal).innerHTML = accountShareFormHtml(data);
       modalFooter(modal).innerHTML = `
         <button type="button" class="cloud-btn secondary" data-cloud-share-close>閉じる</button>
         <button type="button" class="cloud-btn primary" data-cloud-share-save>保存</button>
@@ -6628,6 +6738,379 @@
         renderWorkspace(canEditCurrentProject());
       }
       showFlash('シフト帳共有を保存しました', 'success');
+    }
+
+    async function saveAccountSharesFromSettings(modal) {
+      const project = currentProject();
+      const form = modal.querySelector('.cloud-share-form');
+      if (!project || !form) return;
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/account-shares`, {
+        method: 'PUT',
+        body: {
+          share_office: !!form.querySelector('[name="share_office"]')?.checked,
+          employee_numbers: employeeShareNumbersFromForm(form)
+        }
+      });
+      state.shiftBookSettings.accountShares = data;
+      if (state.projectPayload && state.projectPayload.project) {
+        state.projectPayload.project.share = { role: 'owner', enabled: !!(data.shares && (data.shares.office.enabled || data.shares.employees.length)), settings: data.shares };
+      }
+      await loadProjects();
+      renderShiftBookSettingsModalBody(modal);
+      renderWorkspace(canEditCurrentProject());
+      showFlash('シフト帳共有を保存しました', 'success');
+    }
+
+    function leaveRequestStatusLabel(status) {
+      if (status === 'approved') return '承認済み';
+      if (status === 'rejected') return '拒否済み';
+      return '未処理';
+    }
+
+    function currentEntryForLeaveRequest(request) {
+      const month = currentMonth();
+      if (!month || String(currentMonthKey() || '') !== String(request.month_key || '')) {
+        return null;
+      }
+      const entries = currentEntriesSnapshot();
+      const dayEntries = Array.isArray(entries[String(request.day)]) ? entries[String(request.day)] : [];
+      return dayEntries.find((entry) => String(entry && entry.id ? entry.id : '') === String(request.entry_id || '')) || null;
+    }
+
+    function renderShiftBookSettingsModalBody(modal) {
+      const project = currentProject();
+      const settings = state.shiftBookSettings.settings || { leave_change_requests: { enabled: false } };
+      const requests = state.shiftBookSettings.requests || [];
+      const unviewedCount = unviewedLeaveChangeRequestCount(project);
+      const supportsLeaveRequests = project && project.mode === 'person';
+      const hasMonth = !!currentMonth();
+      let activeTab = state.shiftBookSettings.activeTab || (supportsLeaveRequests ? 'requests' : 'share');
+      if (!supportsLeaveRequests && (activeTab === 'requests' || activeTab === 'general')) {
+        activeTab = 'share';
+      }
+      if (!hasMonth && activeTab === 'restore') {
+        activeTab = 'share';
+      }
+      state.shiftBookSettings.activeTab = activeTab;
+      const urls = (project && project.urls) || {};
+      const tabBadge = unviewedCount ? '<span class="cloud-notify-badge">!</span>' : '';
+      modalBody(modal).innerHTML = `
+        <div class="cloud-settings-tabs" role="tablist">
+          ${supportsLeaveRequests ? `<button type="button" class="cloud-settings-tab ${activeTab === 'requests' ? 'is-active' : ''} cloud-notify-host" data-shift-settings-tab="requests">休暇種別変更申請${tabBadge}</button>` : ''}
+          ${supportsLeaveRequests ? `<button type="button" class="cloud-settings-tab ${activeTab === 'general' ? 'is-active' : ''}" data-shift-settings-tab="general">申請設定</button>` : ''}
+          <button type="button" class="cloud-settings-tab ${activeTab === 'share' ? 'is-active' : ''}" data-shift-settings-tab="share">シフト帳共有</button>
+          <button type="button" class="cloud-settings-tab ${activeTab === 'urls' ? 'is-active' : ''}" data-shift-settings-tab="urls">共有URL</button>
+          ${hasMonth ? `<button type="button" class="cloud-settings-tab ${activeTab === 'restore' ? 'is-active' : ''}" data-shift-settings-tab="restore">復元</button>` : ''}
+        </div>
+        ${activeTab === 'general' && supportsLeaveRequests ? `
+          <div class="cloud-settings-panel">
+            <section class="cloud-settings-card">
+              <label class="cloud-share-option">
+                <input type="checkbox" name="leave_change_requests_enabled" ${settings.leave_change_requests && settings.leave_change_requests.enabled ? 'checked' : ''}>
+                <span>
+                  <strong>休暇種別変更申請を許可</strong>
+                  <small>閲覧URLから既存休暇の種別変更だけ申請できます。</small>
+                </span>
+              </label>
+            </section>
+          </div>
+        ` : ''}
+        ${activeTab === 'requests' ? `
+          <div class="cloud-settings-panel">
+            ${requests.length ? requests.map((request) => renderLeaveChangeRequestCard(request)).join('') : '<div class="cloud-empty-state"><p>休暇種別変更申請はありません。</p></div>'}
+          </div>
+        ` : ''}
+        ${activeTab === 'share' ? `
+          <div class="cloud-settings-panel">
+            <section class="cloud-settings-card">
+              ${accountShareFormHtml(state.shiftBookSettings.accountShares || { shares: {}, owner_offices: [] })}
+            </section>
+          </div>
+        ` : ''}
+        ${activeTab === 'urls' ? `
+          <div class="cloud-settings-panel">
+            <section class="cloud-settings-card">
+              <label class="cloud-field">
+                <span>閲覧URL</span>
+                <input class="cloud-input" type="text" value="${escapeHtml(urls.view_url || '')}" readonly>
+              </label>
+              <label class="cloud-field">
+                <span>編集URL</span>
+                <input class="cloud-input" type="text" value="${escapeHtml(urls.edit_url || '')}" readonly>
+              </label>
+              <p class="cloud-panel-note">URLを再発行すると旧URLは無効になります。未処理申請は残すか破棄するか選べます。</p>
+              <div class="cloud-actions compact">
+                <button type="button" class="cloud-btn secondary" data-shift-settings-regenerate="keep">未処理申請を残して再発行</button>
+                <button type="button" class="cloud-btn danger" data-shift-settings-regenerate="reject">未処理申請を破棄して再発行</button>
+              </div>
+            </section>
+          </div>
+        ` : ''}
+        ${activeTab === 'restore' ? `
+          <div class="cloud-settings-panel">
+            <section class="cloud-settings-card">
+              <p class="cloud-panel-note">選んだリビジョンを現在版として復元します。現在の内容は失われません。</p>
+              <div class="cloud-revision-list">${renderRestoreModalRows(state.shiftBookSettings.revisions || [])}</div>
+            </section>
+          </div>
+        ` : ''}
+      `;
+      modalFooter(modal).innerHTML = `
+        <button type="button" class="cloud-btn secondary" data-shift-settings-close>閉じる</button>
+        ${activeTab === 'general' ? '<button type="button" class="cloud-btn primary" data-shift-settings-save>保存</button>' : ''}
+        ${activeTab === 'share' ? '<button type="button" class="cloud-btn primary" data-shift-settings-save-share>共有設定を保存</button>' : ''}
+        ${activeTab === 'restore' ? '<button type="button" class="cloud-btn primary" data-shift-settings-restore>復元</button>' : ''}
+      `;
+      bindShiftBookSettingsModalEvents(modal);
+      if (activeTab === 'requests' && supportsLeaveRequests && unviewedCount > 0) {
+        markLeaveChangeRequestsViewed(modal).catch((error) => showFlash(error.message, 'error'));
+      }
+    }
+
+    function renderLeaveChangeRequestCard(request) {
+      const planned = state.shiftBookSettings.approvedRequestIds.includes(request.id);
+      const statusClass = planned ? 'is-planned' : request.status === 'approved' ? 'is-approved' : request.status === 'rejected' ? 'is-rejected' : '';
+      const sameMonth = String(currentMonthKey() || '') === String(request.month_key || '');
+      const canDecide = request.status === 'pending' && !planned;
+      return `
+        <article class="cloud-request-card ${statusClass}">
+          <div class="cloud-inline-actions" style="justify-content: space-between; align-items: flex-start;">
+            <div>
+              <div class="cloud-badge">${escapeHtml(leaveRequestStatusLabel(planned ? 'approved' : request.status))}${planned ? '（保存待ち）' : ''}</div>
+              <h4 class="cloud-section-title" style="margin: 8px 0 4px;">${escapeHtml(request.month_key || '')} / ${escapeHtml(String(request.day || ''))}日</h4>
+          <p class="cloud-panel-note">${escapeHtml(request.entry_name || '休暇')} : ${escapeHtml(request.old_leave_type || '')} → ${escapeHtml(request.requested_leave_type || '')}</p>
+              ${request.request_comment ? `<p class="cloud-panel-note">コメント: ${escapeHtml(request.request_comment)}</p>` : ''}
+              <p class="cloud-panel-note">申請日時: ${escapeHtml(formatTimestamp(request.requested_at) || request.requested_at || '-')}</p>
+            </div>
+          </div>
+          <div class="cloud-actions compact">
+            ${!sameMonth && request.status === 'pending' ? `<button type="button" class="cloud-btn secondary" data-shift-settings-open-month="${escapeHtml(request.month_key || '')}">対象月を開く</button>` : ''}
+            ${canDecide && sameMonth ? `<button type="button" class="cloud-btn primary" data-shift-settings-approve="${escapeHtml(request.id)}">許可してカレンダーへ反映</button>` : ''}
+            ${planned ? `<button type="button" class="cloud-btn ghost" data-shift-settings-undo-approve="${escapeHtml(request.id)}">許可予定を取り消す</button>` : ''}
+            ${canDecide ? `<button type="button" class="cloud-btn danger" data-shift-settings-reject="${escapeHtml(request.id)}">拒否</button>` : ''}
+          </div>
+        </article>
+      `;
+    }
+
+    function bindShiftBookSettingsModalEvents(modal) {
+      modal.querySelectorAll('[data-shift-settings-tab]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.shiftBookSettings.activeTab = button.getAttribute('data-shift-settings-tab') || 'requests';
+          renderShiftBookSettingsModalBody(modal);
+        });
+      });
+      const closeButton = modalFooter(modal).querySelector('[data-shift-settings-close]');
+      if (closeButton) closeButton.addEventListener('click', () => closeCloudModal('cloud-shift-book-settings-modal'));
+      const saveButton = modalFooter(modal).querySelector('[data-shift-settings-save]');
+      if (saveButton) {
+        saveButton.addEventListener('click', () => saveShiftBookSettings(modal).catch((error) => showFlash(error.message, 'error')));
+      }
+      const saveShareButton = modalFooter(modal).querySelector('[data-shift-settings-save-share]');
+      if (saveShareButton) {
+        saveShareButton.addEventListener('click', () => saveAccountSharesFromSettings(modal).catch((error) => showFlash(error.message, 'error')));
+      }
+      const restoreButton = modalFooter(modal).querySelector('[data-shift-settings-restore]');
+      if (restoreButton) {
+        restoreButton.addEventListener('click', () => restoreSelectedRevisionFromSettings(modal).catch((error) => showFlash(error.message, 'error')));
+      }
+      modal.querySelectorAll('[data-shift-settings-approve]').forEach((button) => {
+        button.addEventListener('click', () => approveLeaveChangeRequestInCalendar(button.getAttribute('data-shift-settings-approve'), modal));
+      });
+      modal.querySelectorAll('[data-shift-settings-undo-approve]').forEach((button) => {
+        button.addEventListener('click', () => undoApprovedLeaveChangeRequestInCalendar(button.getAttribute('data-shift-settings-undo-approve'), modal));
+      });
+      modal.querySelectorAll('[data-shift-settings-reject]').forEach((button) => {
+        button.addEventListener('click', () => rejectLeaveChangeRequest(button.getAttribute('data-shift-settings-reject'), modal).catch((error) => showFlash(error.message, 'error')));
+      });
+      modal.querySelectorAll('[data-shift-settings-open-month]').forEach((button) => {
+        button.addEventListener('click', () => {
+          closeCloudModal('cloud-shift-book-settings-modal');
+          selectProject(currentProject().id, button.getAttribute('data-shift-settings-open-month')).catch((error) => showFlash(error.message, 'error'));
+        });
+      });
+      modal.querySelectorAll('[data-shift-settings-regenerate]').forEach((button) => {
+        button.addEventListener('click', () => regenerateUrlsFromSettings(button.getAttribute('data-shift-settings-regenerate') === 'reject', modal).catch((error) => showFlash(error.message, 'error')));
+      });
+    }
+
+    function applyShiftBookSettingsPayload(data) {
+      if (!state.projectPayload || !state.projectPayload.project) return;
+      state.projectPayload.project.shift_book = {
+        ...(state.projectPayload.project.shift_book || {}),
+        settings: data.settings || state.shiftBookSettings.settings,
+        pending_leave_change_request_count: data.pending_leave_change_request_count || 0,
+        unviewed_leave_change_request_count: data.unviewed_leave_change_request_count || 0
+      };
+      if (data.urls) {
+        state.projectPayload.project.urls = data.urls;
+      }
+    }
+
+    async function loadShiftBookSettings() {
+      const project = currentProject();
+      if (!project || projectAccessRole(project) !== 'owner') return null;
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/settings`);
+      state.shiftBookSettings.loaded = true;
+      state.shiftBookSettings.settings = data.settings || { leave_change_requests: { enabled: false } };
+      state.shiftBookSettings.requests = data.leave_change_requests || [];
+      applyShiftBookSettingsPayload(data);
+      state.shiftBookSettings.accountShares = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/account-shares`);
+      const month = currentMonth();
+      if (month) {
+        try {
+          state.shiftBookSettings.revisions = await loadRevisionSnapshots(project, month);
+        } catch (_) {
+          state.shiftBookSettings.revisions = [];
+        }
+      } else {
+        state.shiftBookSettings.revisions = [];
+      }
+      return data;
+    }
+
+    async function markLeaveChangeRequestsViewed(modal) {
+      const project = currentProject();
+      if (!project || projectAccessRole(project) !== 'owner') return;
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/leave-change-requests/mark-viewed`, {
+        method: 'POST',
+        body: {}
+      });
+      state.shiftBookSettings.requests = data.leave_change_requests || state.shiftBookSettings.requests;
+      applyShiftBookSettingsPayload(data);
+      renderWorkspace(canEditCurrentProject());
+      renderShiftBookSettingsModalBody(modal);
+    }
+
+    async function openShiftBookSettingsModal() {
+      const project = currentProject();
+      if (!project || projectAccessRole(project) !== 'owner') return;
+      const modal = openCloudModal('cloud-shift-book-settings-modal', `シフト帳の設定 / ${project.title}`);
+      modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>設定を読み込み中です...</p></div>';
+      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-shift-settings-close>閉じる</button>';
+      modalFooter(modal).querySelector('[data-shift-settings-close]').addEventListener('click', () => closeCloudModal('cloud-shift-book-settings-modal'));
+      await loadShiftBookSettings();
+      if (!state.shiftBookSettings.activeTab) {
+        state.shiftBookSettings.activeTab = project.mode === 'person' ? 'requests' : 'share';
+      }
+      renderShiftBookSettingsModalBody(modal);
+      renderWorkspace(canEditCurrentProject());
+    }
+
+    async function saveShiftBookSettings(modal) {
+      const project = currentProject();
+      if (!project) return;
+      const enabled = !!modal.querySelector('[name="leave_change_requests_enabled"]')?.checked;
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/settings`, {
+        method: 'PUT',
+        body: { leave_change_requests_enabled: enabled }
+      });
+      state.shiftBookSettings.settings = data.settings || state.shiftBookSettings.settings;
+      state.shiftBookSettings.requests = data.leave_change_requests || state.shiftBookSettings.requests;
+      applyShiftBookSettingsPayload(data);
+      renderShiftBookSettingsModalBody(modal);
+      renderWorkspace(canEditCurrentProject());
+      showFlash('シフト帳の設定を保存しました', 'success');
+    }
+
+    function approveLeaveChangeRequestInCalendar(requestId, modal) {
+      const request = (state.shiftBookSettings.requests || []).find((item) => item.id === requestId);
+      if (!request) return;
+      if (String(currentMonthKey() || '') !== String(request.month_key || '')) {
+        showFlash('対象月を開いてから許可してください', 'error');
+        return;
+      }
+      const entry = currentEntryForLeaveRequest(request);
+      if (!entry) {
+        showFlash('対象の休暇が見つかりません。再読み込みしてください', 'error');
+        return;
+      }
+      const parsed = parseEntryValue(entry.value);
+      if (String(parsed.optionKey || '').toUpperCase() !== String(request.old_option_key || '').toUpperCase()) {
+        showFlash('対象の休暇種別が申請時から変わっているため許可できません', 'error');
+        return;
+      }
+      const nextEntries = currentEntriesSnapshot();
+      const dayKey = String(request.day);
+      nextEntries[dayKey] = (nextEntries[dayKey] || []).map((item) => {
+        if (String(item.id || '') !== String(request.entry_id || '')) return item;
+        return {
+          ...item,
+          value: formatEntryValue(request.requested_option_key, parsed.name)
+        };
+      });
+      replaceCalendarEntries(nextEntries);
+      if (!state.shiftBookSettings.approvedRequestIds.includes(request.id)) {
+        state.shiftBookSettings.approvedRequestIds.push(request.id);
+      }
+      updateUnsavedIndicator();
+      renderShiftBookSettingsModalBody(modal);
+      showFlash('カレンダーに反映しました。「この月を保存」で確定します。', 'info');
+    }
+
+    function undoApprovedLeaveChangeRequestInCalendar(requestId, modal) {
+      const request = (state.shiftBookSettings.requests || []).find((item) => item.id === requestId);
+      if (!request) return;
+      state.shiftBookSettings.approvedRequestIds = state.shiftBookSettings.approvedRequestIds.filter((id) => id !== requestId);
+      const entry = currentEntryForLeaveRequest(request);
+      if (entry) {
+        const parsed = parseEntryValue(entry.value);
+        if (String(parsed.optionKey || '').toUpperCase() === String(request.requested_option_key || '').toUpperCase()) {
+          const nextEntries = currentEntriesSnapshot();
+          const dayKey = String(request.day);
+          nextEntries[dayKey] = (nextEntries[dayKey] || []).map((item) => {
+            if (String(item.id || '') !== String(request.entry_id || '')) return item;
+            return {
+              ...item,
+              value: formatEntryValue(request.old_option_key, parsed.name)
+            };
+          });
+          replaceCalendarEntries(nextEntries);
+        }
+      }
+      updateUnsavedIndicator();
+      renderShiftBookSettingsModalBody(modal);
+      showFlash('許可予定を取り消しました', 'info');
+    }
+
+    async function rejectLeaveChangeRequest(requestId, modal) {
+      const project = currentProject();
+      if (!project || !requestId) return;
+      if (!window.confirm('この休暇種別変更申請を拒否しますか？')) return;
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/leave-change-requests/${requestId}/reject`, {
+        method: 'POST',
+        body: {}
+      });
+      state.shiftBookSettings.requests = data.leave_change_requests || [];
+      state.shiftBookSettings.approvedRequestIds = state.shiftBookSettings.approvedRequestIds.filter((id) => id !== requestId);
+      applyShiftBookSettingsPayload(data);
+      renderShiftBookSettingsModalBody(modal);
+      renderWorkspace(canEditCurrentProject());
+      showFlash('申請を拒否しました', 'success');
+    }
+
+    async function regenerateUrlsFromSettings(rejectPending, modal) {
+      const project = currentProject();
+      if (!project) return;
+      const pendingCount = (state.shiftBookSettings.requests || []).filter((item) => item.status === 'pending').length;
+      const actionText = rejectPending ? '未処理申請を破棄してURLを再発行します。' : '未処理申請を残してURLを再発行します。';
+      if (!window.confirm(`${actionText}\n旧URLは無効になります。よろしいですか？`)) return;
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/tokens/regenerate`, {
+        method: 'POST',
+        body: {
+          reject_pending_leave_change_requests: rejectPending
+        }
+      });
+      if (state.projectPayload && state.projectPayload.project) {
+        state.projectPayload.project.urls = data.urls || state.projectPayload.project.urls;
+        if ($('cloud-view-url')) $('cloud-view-url').value = data.urls.view_url || '';
+        if ($('cloud-edit-url')) $('cloud-edit-url').value = data.urls.edit_url || '';
+      }
+      applyShiftBookSettingsPayload(data);
+      state.shiftBookSettings.requests = data.leave_change_requests || state.shiftBookSettings.requests;
+      renderShiftBookSettingsModalBody(modal);
+      renderWorkspace(canEditCurrentProject());
+      showFlash(rejectPending && pendingCount ? '未処理申請を破棄してURLを再発行しました' : 'URLを再発行しました', 'success');
     }
 
     function bindOwnerEvents() {
@@ -6896,14 +7379,8 @@
       const nextMonth = $('cloud-next-month');
       if (nextMonth) nextMonth.addEventListener('click', () => navigateMonth(1, true).catch((error) => showFlash(error.message, 'error')));
 
-      const addPrevMonth = $('cloud-add-prev-month');
-      if (addPrevMonth) addPrevMonth.addEventListener('click', () => createMonth(nextMonthKey(currentMonthKey() || currentProject().latest_month_key, -1), true).catch((error) => showFlash(error.message, 'error')));
-
-      const addNextMonth = $('cloud-add-next-month');
-      if (addNextMonth) addNextMonth.addEventListener('click', () => createMonth(nextMonthKey(currentMonthKey() || currentProject().latest_month_key, 1), true).catch((error) => showFlash(error.message, 'error')));
-
-      const accountShare = $('cloud-open-account-share');
-      if (accountShare) accountShare.addEventListener('click', () => openAccountShareModal().catch((error) => showFlash(error.message, 'error')));
+      const shiftBookSettings = $('cloud-open-shift-book-settings');
+      if (shiftBookSettings) shiftBookSettings.addEventListener('click', () => openShiftBookSettingsModal().catch((error) => showFlash(error.message, 'error')));
 
       const createFirstMonth = $('cloud-create-first-month');
       if (createFirstMonth) {
@@ -6987,12 +7464,6 @@
 
       const nextMonth = $('cloud-next-month');
       if (nextMonth) nextMonth.addEventListener('click', () => navigateMonth(1, false).catch((error) => showFlash(error.message, 'error')));
-
-      const addPrevMonth = $('cloud-add-prev-month');
-      if (addPrevMonth) addPrevMonth.addEventListener('click', () => createMonth(nextMonthKey(currentMonthKey() || currentProject().latest_month_key, -1), false).catch((error) => showFlash(error.message, 'error')));
-
-      const addNextMonth = $('cloud-add-next-month');
-      if (addNextMonth) addNextMonth.addEventListener('click', () => createMonth(nextMonthKey(currentMonthKey() || currentProject().latest_month_key, 1), false).catch((error) => showFlash(error.message, 'error')));
 
       const createFirstMonth = $('cloud-create-first-month');
       if (createFirstMonth) {
