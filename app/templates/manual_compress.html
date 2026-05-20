@@ -1,0 +1,1131 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  /* ─── prefix: mcp- (manual compress) ─── */
+  :root {
+    --mcp-accent:  #d97706;
+    --mcp-mid:     #b45309;
+    --mcp-soft:    #fffbeb;
+    --mcp-ink:     #1c1917;
+    --mcp-muted:   #78716c;
+    --mcp-line:    #e7e5e4;
+    --mcp-ok:      #16a34a;
+    --mcp-warn:    #b45309;
+    --mcp-danger:  #dc2626;
+    --mcp-bg:      #fafaf9;
+    --mcp-zip:     #2563eb;
+    --mcp-tar:     #7c3aed;
+  }
+  .mcp-wrap { max-width: 980px; margin: 0 auto; padding: 0 1rem 4rem; }
+
+  /* Hero */
+  .mcp-hero {
+    background: linear-gradient(135deg, #92400e 0%, #d97706 50%, #fbbf24 100%);
+    border-radius: 1rem;
+    color: #fff;
+    padding: 2.5rem 2rem;
+    margin-bottom: 2rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .mcp-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.06'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  }
+  .mcp-hero-inner { position: relative; z-index: 1; }
+  .mcp-hero-pill {
+    display: inline-block;
+    background: rgba(255,255,255,.18);
+    border: 1px solid rgba(255,255,255,.32);
+    border-radius: 9999px;
+    font-size: .72rem;
+    font-weight: 800;
+    letter-spacing: .08em;
+    padding: .25rem .9rem;
+    margin-bottom: .75rem;
+  }
+  .mcp-hero h1 { margin: 0 0 .5rem; font-size: 2rem; font-weight: 900; }
+  .mcp-hero p  { margin: 0; opacity: .88; font-size: 1rem; line-height: 1.6; }
+
+  /* Sticky nav */
+  .mcp-nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(255,255,255,.95);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--mcp-line);
+    padding: 0 .5rem;
+    margin: 0 -1rem 2rem;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .mcp-nav-inner { display: inline-flex; gap: 0; }
+  .mcp-nav a {
+    display: inline-block;
+    color: var(--mcp-muted);
+    text-decoration: none;
+    font-size: .82rem;
+    font-weight: 700;
+    padding: .75rem .9rem;
+    border-bottom: 3px solid transparent;
+    transition: color .15s, border-color .15s;
+    white-space: nowrap;
+  }
+  .mcp-nav a:hover, .mcp-nav a.active {
+    color: var(--mcp-accent);
+    border-bottom-color: var(--mcp-accent);
+  }
+
+  /* Section headings */
+  .mcp-section { margin-bottom: 3rem; scroll-margin-top: 3.5rem; }
+  .mcp-section-head {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: .5rem;
+    border-bottom: 2px solid var(--mcp-line);
+  }
+  .mcp-section-num {
+    width: 2rem;
+    height: 2rem;
+    background: var(--mcp-accent);
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .78rem;
+    font-weight: 900;
+    flex-shrink: 0;
+  }
+  .mcp-section-head h2 { margin: 0; font-size: 1.2rem; font-weight: 800; color: var(--mcp-ink); }
+
+  /* Cards */
+  .mcp-card {
+    background: #fff;
+    border: 1px solid var(--mcp-line);
+    border-radius: .75rem;
+    padding: 1.25rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,.04);
+  }
+  .mcp-card + .mcp-card { margin-top: 1rem; }
+  .mcp-card-title {
+    font-size: .92rem;
+    font-weight: 800;
+    color: var(--mcp-ink);
+    margin: 0 0 .6rem;
+  }
+
+  /* Feature grid */
+  .mcp-feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .mcp-feature-item {
+    background: #fff;
+    border: 1px solid var(--mcp-line);
+    border-radius: .75rem;
+    padding: 1rem;
+    display: flex;
+    gap: .75rem;
+    align-items: flex-start;
+  }
+  .mcp-feature-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    background: var(--mcp-soft);
+    border-radius: .6rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    flex-shrink: 0;
+  }
+  .mcp-feature-body h3 { margin: 0 0 .2rem; font-size: .85rem; font-weight: 800; color: var(--mcp-ink); }
+  .mcp-feature-body p  { margin: 0; font-size: .78rem; color: var(--mcp-muted); line-height: 1.5; }
+
+  /* Steps */
+  .mcp-steps { display: flex; flex-direction: column; gap: .75rem; }
+  .mcp-step {
+    display: flex;
+    gap: .85rem;
+    align-items: flex-start;
+    background: #fff;
+    border: 1px solid var(--mcp-line);
+    border-radius: .65rem;
+    padding: 1rem;
+  }
+  .mcp-step-num {
+    width: 2rem;
+    height: 2rem;
+    background: var(--mcp-accent);
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .78rem;
+    font-weight: 900;
+    flex-shrink: 0;
+    margin-top: .1rem;
+  }
+  .mcp-step-body { flex: 1; }
+  .mcp-step-body strong { display: block; font-size: .88rem; color: var(--mcp-ink); margin-bottom: .3rem; }
+  .mcp-step-body p { margin: 0; font-size: .82rem; color: var(--mcp-muted); line-height: 1.6; }
+
+  /* Callouts */
+  .mcp-callout {
+    display: flex;
+    gap: .75rem;
+    border-radius: .65rem;
+    padding: .9rem 1rem;
+    margin: .85rem 0;
+    font-size: .83rem;
+    line-height: 1.65;
+  }
+  .mcp-callout-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: .05rem; }
+  .mcp-callout.tip   { background: var(--mcp-soft); border-left: 4px solid var(--mcp-accent); color: #78350f; }
+  .mcp-callout.warn  { background: #fff7ed; border-left: 4px solid #f97316; color: #9a3412; }
+  .mcp-callout.info  { background: #eff6ff; border-left: 4px solid #2563eb; color: #1e40af; }
+  .mcp-callout.ok    { background: #f0fdf4; border-left: 4px solid #16a34a; color: #14532d; }
+
+  /* Tables */
+  .mcp-table-wrap { overflow-x: auto; margin: .75rem 0; }
+  .mcp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .82rem;
+  }
+  .mcp-table th, .mcp-table td {
+    border: 1px solid var(--mcp-line);
+    padding: .55rem .7rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .mcp-table th {
+    background: #fafaf9;
+    font-weight: 800;
+    color: #44403c;
+    font-size: .78rem;
+  }
+  .mcp-table td { color: var(--mcp-ink); }
+  .mcp-table tr:hover td { background: #fafaf9; }
+
+  /* Format badges */
+  .mcp-fmt-badge {
+    display: inline-block;
+    font-size: .72rem;
+    font-weight: 800;
+    padding: .2rem .55rem;
+    border-radius: .35rem;
+    letter-spacing: .04em;
+  }
+  .mcp-fmt-zip  { background: #dbeafe; color: #1d4ed8; }
+  .mcp-fmt-tar  { background: #ede9fe; color: #5b21b6; }
+  .mcp-fmt-tgz  { background: #fce7f3; color: #9d174d; }
+  .mcp-fmt-tbz  { background: #dcfce7; color: #166534; }
+  .mcp-fmt-txz  { background: #ffedd5; color: #9a3412; }
+
+  /* Two-col grid for detail settings */
+  .mcp-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+    margin: .75rem 0;
+  }
+  .mcp-setting-item {
+    background: #fff;
+    border: 1px solid var(--mcp-line);
+    border-radius: .65rem;
+    padding: 1rem;
+  }
+  .mcp-setting-label {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    font-size: .85rem;
+    font-weight: 800;
+    color: var(--mcp-ink);
+    margin-bottom: .35rem;
+  }
+  .mcp-setting-label span {
+    font-size: .7rem;
+    font-weight: 700;
+    background: var(--mcp-soft);
+    color: var(--mcp-accent);
+    border: 1px solid #fde68a;
+    border-radius: .3rem;
+    padding: .1rem .4rem;
+  }
+  .mcp-setting-desc { font-size: .8rem; color: var(--mcp-muted); line-height: 1.6; }
+  .mcp-setting-desc code {
+    font-size: .78rem;
+    background: #f5f5f4;
+    border-radius: .25rem;
+    padding: .05rem .3rem;
+    font-family: monospace;
+  }
+
+  /* Preset cards */
+  .mcp-preset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: .75rem;
+    margin: .75rem 0;
+  }
+  .mcp-preset-card {
+    background: #fff;
+    border: 2px solid var(--mcp-line);
+    border-radius: .7rem;
+    padding: .9rem 1rem;
+  }
+  .mcp-preset-card h4 {
+    margin: 0 0 .4rem;
+    font-size: .85rem;
+    font-weight: 800;
+    color: var(--mcp-ink);
+  }
+  .mcp-preset-card ul {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: .78rem;
+    color: var(--mcp-muted);
+    line-height: 1.7;
+  }
+
+  /* Metrics mockup */
+  .mcp-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .6rem;
+    margin: .75rem 0;
+  }
+  .mcp-metric {
+    min-width: 120px;
+    background: #fff;
+    border: 1px solid var(--mcp-line);
+    border-radius: .55rem;
+    padding: .6rem .8rem;
+  }
+  .mcp-metric-label { font-size: .7rem; font-weight: 700; color: var(--mcp-muted); }
+  .mcp-metric-val   { font-size: .95rem; font-weight: 800; color: var(--mcp-ink); }
+
+  /* Accordion (FAQ) */
+  .mcp-acc-item {
+    border: 1px solid var(--mcp-line);
+    border-radius: .65rem;
+    margin-bottom: .5rem;
+    overflow: hidden;
+  }
+  .mcp-acc-q {
+    width: 100%;
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: .85rem 1rem;
+    text-align: left;
+    font-size: .88rem;
+    font-weight: 800;
+    color: var(--mcp-ink);
+  }
+  .mcp-acc-q:hover { background: var(--mcp-soft); }
+  .mcp-acc-chevron { color: var(--mcp-accent); font-size: .75rem; transition: transform .2s; }
+  .mcp-acc-item.open .mcp-acc-chevron { transform: rotate(180deg); }
+  .mcp-acc-a {
+    display: none;
+    padding: 0 1rem .9rem;
+    font-size: .84rem;
+    color: #44403c;
+    line-height: 1.7;
+  }
+  .mcp-acc-item.open .mcp-acc-a { display: block; }
+
+  /* Modals */
+  .mcp-modal-bg {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 9999;
+    place-items: center;
+  }
+  .mcp-modal-bg.open { display: grid; }
+  .mcp-modal {
+    background: #fff;
+    border-radius: 1rem;
+    max-width: 680px;
+    width: 90vw;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 1.75rem;
+    position: relative;
+  }
+  .mcp-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.25rem;
+  }
+  .mcp-modal-head h3 { margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--mcp-ink); }
+  .mcp-modal-close {
+    background: #f5f5f4;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    width: 2rem;
+    height: 2rem;
+    font-size: .95rem;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .mcp-modal-close:hover { background: #e7e5e4; }
+
+  /* Link button */
+  .mcp-link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    background: var(--mcp-soft);
+    border: 1px solid #fde68a;
+    border-radius: .45rem;
+    color: var(--mcp-mid);
+    cursor: pointer;
+    font-size: .8rem;
+    font-weight: 800;
+    padding: .3rem .7rem;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .mcp-link-btn:hover { background: #fef3c7; }
+
+  /* Tag */
+  .mcp-tag {
+    display: inline-block;
+    font-size: .72rem;
+    font-weight: 700;
+    padding: .15rem .45rem;
+    border-radius: .3rem;
+    margin-right: .25rem;
+  }
+  .mcp-tag-ok   { background: #dcfce7; color: #166534; }
+  .mcp-tag-warn { background: #fff7ed; color: #9a3412; }
+
+  /* File flow diagram */
+  .mcp-flow {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    flex-wrap: wrap;
+    margin: .75rem 0;
+    font-size: .82rem;
+  }
+  .mcp-flow-box {
+    background: #fff;
+    border: 1px solid var(--mcp-line);
+    border-radius: .5rem;
+    padding: .4rem .75rem;
+    font-weight: 700;
+    color: var(--mcp-ink);
+  }
+  .mcp-flow-arrow { color: var(--mcp-accent); font-size: 1.1rem; font-weight: 900; }
+
+  /* Status indicators */
+  .mcp-status-ok      { color: var(--mcp-ok);     font-weight: 800; }
+  .mcp-status-exclude { color: var(--mcp-danger); font-weight: 800; }
+
+  @media (max-width: 640px) {
+    .mcp-hero h1 { font-size: 1.5rem; }
+    .mcp-settings-grid,
+    .mcp-preset-grid,
+    .mcp-feature-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="mcp-wrap">
+
+  <!-- Hero -->
+  <div class="mcp-hero">
+    <div class="mcp-hero-inner">
+      <div class="mcp-hero-pill">FILE COMPRESS MANUAL</div>
+      <h1>ファイル圧縮ツール マニュアル</h1>
+      <p>複数のファイルやフォルダを ZIP / TAR 系形式にまとめてダウンロードできるツールです。<br>
+         除外条件・パスワード・フォルダ構造など、あらゆる設定を確認しながら出力できます。</p>
+    </div>
+  </div>
+
+  <!-- Sticky nav -->
+  <nav class="mcp-nav" id="mcpNav">
+    <div class="mcp-nav-inner">
+      <a href="#overview"   class="active">概要</a>
+      <a href="#select">ファイルの選び方</a>
+      <a href="#formats">圧縮形式</a>
+      <a href="#settings">詳細設定</a>
+      <a href="#presets">プリセット・履歴</a>
+      <a href="#preview">プレビューと出力</a>
+      <a href="#faq">FAQ</a>
+    </div>
+  </nav>
+
+  <!-- 1. 概要 -->
+  <section class="mcp-section" id="overview">
+    <div class="mcp-section-head">
+      <div class="mcp-section-num">1</div>
+      <h2>概要</h2>
+    </div>
+
+    <div class="mcp-feature-grid">
+      <div class="mcp-feature-item">
+        <div class="mcp-feature-icon">📦</div>
+        <div class="mcp-feature-body">
+          <h3>5つの形式</h3>
+          <p>ZIP・TAR・TAR.GZ・TAR.BZ2・TAR.XZ から用途に合った形式で出力できます。</p>
+        </div>
+      </div>
+      <div class="mcp-feature-item">
+        <div class="mcp-feature-icon">🔐</div>
+        <div class="mcp-feature-body">
+          <h3>ZIP パスワード</h3>
+          <p>ZIP形式にはAES-256暗号化パスワードを設定できます。</p>
+        </div>
+      </div>
+      <div class="mcp-feature-item">
+        <div class="mcp-feature-icon">🗂️</div>
+        <div class="mcp-feature-body">
+          <h3>フォルダ選択</h3>
+          <p>ファイル単体だけでなくフォルダごとドロップして、階層構造を保ったまま圧縮できます。</p>
+        </div>
+      </div>
+      <div class="mcp-feature-item">
+        <div class="mcp-feature-icon">🚫</div>
+        <div class="mcp-feature-body">
+          <h3>除外フィルター</h3>
+          <p>拡張子やワイルドカードパターンで不要ファイルを自動的に除外できます。</p>
+        </div>
+      </div>
+      <div class="mcp-feature-item">
+        <div class="mcp-feature-icon">👁️</div>
+        <div class="mcp-feature-body">
+          <h3>リアルタイムプレビュー</h3>
+          <p>設定を変えるたびに格納ファイル一覧と出力ファイル名がリアルタイムで更新されます。</p>
+        </div>
+      </div>
+      <div class="mcp-feature-item">
+        <div class="mcp-feature-icon">⚡</div>
+        <div class="mcp-feature-body">
+          <h3>プリセット・履歴</h3>
+          <p>よく使う設定をプリセットまたは自動保存される履歴からワンクリックで呼び出せます。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="mcp-card">
+      <div class="mcp-card-title">基本的な使い方の流れ</div>
+      <div class="mcp-flow">
+        <div class="mcp-flow-box">① ファイル・フォルダを追加</div>
+        <div class="mcp-flow-arrow">→</div>
+        <div class="mcp-flow-box">② 圧縮形式を選ぶ</div>
+        <div class="mcp-flow-arrow">→</div>
+        <div class="mcp-flow-box">③ 詳細設定を入力</div>
+        <div class="mcp-flow-arrow">→</div>
+        <div class="mcp-flow-box">④ プレビューで確認</div>
+        <div class="mcp-flow-arrow">→</div>
+        <div class="mcp-flow-box">⑤ 圧縮してダウンロード</div>
+      </div>
+    </div>
+
+    <div class="mcp-callout info">
+      <div class="mcp-callout-icon">ℹ️</div>
+      <div>一度に処理できるファイル数は最大 <strong>500件</strong>、合計ファイルサイズは <strong>1 GB</strong> までです。</div>
+    </div>
+  </section>
+
+  <!-- 2. ファイルの選び方 -->
+  <section class="mcp-section" id="select">
+    <div class="mcp-section-head">
+      <div class="mcp-section-num">2</div>
+      <h2>ファイルの選び方</h2>
+    </div>
+
+    <div class="mcp-steps">
+      <div class="mcp-step">
+        <div class="mcp-step-num">A</div>
+        <div class="mcp-step-body">
+          <strong>ドロップゾーンへドラッグ</strong>
+          <p>ファイルやフォルダを画面中央のドロップ枠（点線の枠）へドラッグ＆ドロップします。複数ファイルを一度にドロップできます。フォルダをドロップするとフォルダ内のファイルが全て追加され、サブフォルダの階層構造もそのまま保持されます。</p>
+        </div>
+      </div>
+      <div class="mcp-step">
+        <div class="mcp-step-num">B</div>
+        <div class="mcp-step-body">
+          <strong>クリックしてファイルを選択</strong>
+          <p>ドロップ枠をクリックするとファイル選択ダイアログが開きます。複数ファイルを選んでまとめて追加できます。</p>
+        </div>
+      </div>
+      <div class="mcp-step">
+        <div class="mcp-step-num">C</div>
+        <div class="mcp-step-body">
+          <strong>「フォルダを選択」ボタン</strong>
+          <p>ドロップ枠の下にある「フォルダを選択」ボタンをクリックすると、フォルダ選択ダイアログが開きます。フォルダ内のすべてのファイルが再帰的に追加され、フォルダの階層構造が保持されます。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="mcp-callout tip">
+      <div class="mcp-callout-icon">💡</div>
+      <div>ファイルを追加すると「ファイル詳細」テーブルに一覧が表示されます。削除したいファイルは各行の「削除」ボタンで個別に外せます。全部やり直したいときは「設定をリセット」ボタンを使います。</div>
+    </div>
+
+    <div class="mcp-card">
+      <div class="mcp-card-title">ファイル詳細テーブルの見方</div>
+      <div class="mcp-table-wrap">
+        <table class="mcp-table">
+          <thead>
+            <tr>
+              <th>列名</th>
+              <th>内容</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>名前</strong></td>
+              <td>選択したファイルの名前と、対象 / 除外の状態が表示されます。</td>
+            </tr>
+            <tr>
+              <td><strong>サイズ</strong></td>
+              <td>ファイルサイズが B / KB / MB / GB 単位で表示されます。</td>
+            </tr>
+            <tr>
+              <td><strong>格納名 / 除外理由</strong></td>
+              <td>
+                <span class="mcp-status-ok">対象</span> の場合は圧縮ファイル内での保存パスが表示されます。<br>
+                <span class="mcp-status-exclude">除外</span> の場合は除外された理由（拡張子 or パターン）が表示されます。
+              </td>
+            </tr>
+            <tr>
+              <td><strong>削除ボタン</strong></td>
+              <td>そのファイルを一覧から外して圧縮対象から除きます。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mcp-card" style="margin-top:.75rem">
+      <div class="mcp-card-title">上部ツールバーのメトリクス</div>
+      <div class="mcp-metrics">
+        <div class="mcp-metric">
+          <div class="mcp-metric-label">対象</div>
+          <div class="mcp-metric-val">8件</div>
+        </div>
+        <div class="mcp-metric">
+          <div class="mcp-metric-label">除外</div>
+          <div class="mcp-metric-val">2件</div>
+        </div>
+      </div>
+      <p style="font-size:.82rem;color:var(--mcp-muted);margin:.5rem 0 0">ヘッダー部分に「対象」（圧縮に含まれるファイル数）と「除外」（フィルターで外れたファイル数）がリアルタイムで表示されます。</p>
+      <div class="mcp-metrics" style="margin-top:.75rem">
+        <div class="mcp-metric">
+          <div class="mcp-metric-label">選択</div>
+          <div class="mcp-metric-val">10件</div>
+        </div>
+        <div class="mcp-metric">
+          <div class="mcp-metric-label">合計サイズ</div>
+          <div class="mcp-metric-val">24.3 MB</div>
+        </div>
+        <div class="mcp-metric">
+          <div class="mcp-metric-label">重複リネーム</div>
+          <div class="mcp-metric-val">1件</div>
+        </div>
+      </div>
+      <p style="font-size:.82rem;color:var(--mcp-muted);margin:.5rem 0 0">ファイル選択エリアには「選択」「合計サイズ」「重複リネーム」も表示されます。<strong>重複リネーム</strong>は、同じ名前のファイルが2つ以上あるときに自動的に <code>ファイル名 (1).ext</code> のように変えた件数です。</p>
+    </div>
+  </section>
+
+  <!-- 3. 圧縮形式 -->
+  <section class="mcp-section" id="formats">
+    <div class="mcp-section-head">
+      <div class="mcp-section-num">3</div>
+      <h2>圧縮形式</h2>
+    </div>
+
+    <p style="font-size:.88rem;color:var(--mcp-muted);margin-bottom:1rem">画面右側の「圧縮形式」ボタンから選びます。選択中の形式がハイライトされます。</p>
+
+    <div class="mcp-table-wrap">
+      <table class="mcp-table">
+        <thead>
+          <tr>
+            <th>形式</th>
+            <th>特徴</th>
+            <th>パスワード</th>
+            <th>おすすめ用途</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="mcp-fmt-badge mcp-fmt-zip">ZIP</span></td>
+            <td>最も汎用性が高く、Windows / Mac / Linux で標準対応。AES-256 暗号化パスワード設定可能。</td>
+            <td><span class="mcp-tag mcp-tag-ok">使用可</span></td>
+            <td>一般的なファイル共有、パスワード付き配布</td>
+          </tr>
+          <tr>
+            <td><span class="mcp-fmt-badge mcp-fmt-tar">TAR</span></td>
+            <td>ファイルをまとめるだけで圧縮は行わない。ファイルサイズはほぼ変わらない。</td>
+            <td><span class="mcp-tag mcp-tag-warn">使用不可</span></td>
+            <td>Linux/Unix 環境でのバックアップ、圧縮なしのまとめ</td>
+          </tr>
+          <tr>
+            <td><span class="mcp-fmt-badge mcp-fmt-tgz">TAR.GZ</span></td>
+            <td>TAR + gzip 圧縮。ZIP より若干圧縮率が高く、Linux で広く使われる。</td>
+            <td><span class="mcp-tag mcp-tag-warn">使用不可</span></td>
+            <td>Linux 向けの配布、圧縮率重視の用途</td>
+          </tr>
+          <tr>
+            <td><span class="mcp-fmt-badge mcp-fmt-tbz">TAR.BZ2</span></td>
+            <td>TAR + bzip2 圧縮。gzip より圧縮率が高いが処理に時間がかかる。</td>
+            <td><span class="mcp-tag mcp-tag-warn">使用不可</span></td>
+            <td>圧縮率を最優先し、時間を許容できる場合</td>
+          </tr>
+          <tr>
+            <td><span class="mcp-fmt-badge mcp-fmt-txz">TAR.XZ</span></td>
+            <td>TAR + xz 圧縮。最も高い圧縮率を持つが、処理時間が長い。</td>
+            <td><span class="mcp-tag mcp-tag-warn">使用不可</span></td>
+            <td>最高圧縮率が必要なアーカイブ</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mcp-callout warn">
+      <div class="mcp-callout-icon">⚠️</div>
+      <div>パスワード保護を使いたい場合は <strong>ZIP 形式を選択</strong> してください。TAR 系形式ではパスワード欄が無効になります。</div>
+    </div>
+
+    <div class="mcp-callout tip">
+      <div class="mcp-callout-icon">💡</div>
+      <div>迷ったときは <strong>ZIP（標準）</strong> を使うのがおすすめです。Windows・Mac どちらでも標準で開け、パスワードも設定できます。</div>
+    </div>
+  </section>
+
+  <!-- 4. 詳細設定 -->
+  <section class="mcp-section" id="settings">
+    <div class="mcp-section-head">
+      <div class="mcp-section-num">4</div>
+      <h2>詳細設定</h2>
+    </div>
+
+    <p style="font-size:.88rem;color:var(--mcp-muted);margin-bottom:1rem">「詳細設定」エリアの各入力欄の説明です。設定を変えるたびにプレビューが自動更新されます。</p>
+
+    <div class="mcp-settings-grid">
+      <div class="mcp-setting-item">
+        <div class="mcp-setting-label">出力ファイル名 <span>任意</span></div>
+        <div class="mcp-setting-desc">
+          ダウンロードされる圧縮ファイルの名前（拡張子なし）を入力します。<br>
+          空欄の場合は <code>dstt_compressed</code> になります。<br>
+          例: <code>2026_配布資料</code> → <code>2026_配布資料.zip</code>
+        </div>
+      </div>
+      <div class="mcp-setting-item">
+        <div class="mcp-setting-label">圧縮ファイル内のフォルダ名 <span>任意</span></div>
+        <div class="mcp-setting-desc">
+          圧縮ファイルを開いたときに、この名前のフォルダの中に全ファイルをまとめます。<br>
+          空欄の場合、ファイルはフォルダなしで直接入ります。<br>
+          例: <code>配布用データ</code> と入れると、<code>配布用データ/ファイル名.ext</code> という形で格納されます。
+        </div>
+      </div>
+      <div class="mcp-setting-item">
+        <div class="mcp-setting-label">圧縮レベル</div>
+        <div class="mcp-setting-desc">
+          <strong>標準</strong>（デフォルト）: 圧縮率と速度のバランスが取れた設定です。<br>
+          <strong>高圧縮</strong>: ファイルサイズをより小さくしますが、処理に時間がかかります。<br>
+          TAR.XZ 形式では圧縮レベルの設定は無効です。
+        </div>
+      </div>
+      <div class="mcp-setting-item">
+        <div class="mcp-setting-label">パスワード <span>ZIP のみ</span></div>
+        <div class="mcp-setting-desc">
+          ZIP 形式選択時のみ有効です。入力するとAES-256暗号化が適用されます。<br>
+          「表示」ボタンでパスワードの表示・非表示を切り替えられます。<br>
+          <strong>パスワードはサーバーに保存されません。</strong>受け取る相手にパスワードを別途伝えてください。
+        </div>
+      </div>
+      <div class="mcp-setting-item">
+        <div class="mcp-setting-label">除外拡張子 <span>任意</span></div>
+        <div class="mcp-setting-desc">
+          指定した拡張子のファイルを圧縮対象から除外します。カンマ区切りで複数指定可。<br>
+          例: <code>log,tmp,bak</code><br>
+          ドット（.）あり・なしどちらでも可: <code>.log</code> と <code>log</code> は同じ意味です。
+        </div>
+      </div>
+      <div class="mcp-setting-item">
+        <div class="mcp-setting-label">除外パターン <span>任意</span></div>
+        <div class="mcp-setting-desc">
+          ワイルドカード（<code>*</code>）を使ってファイル名や相対パス全体でフィルタリングします。カンマ区切りで複数指定可。<br>
+          例: <code>*.tmp</code>、<code>*_old.*</code>、<code>backup/*</code><br>
+          大文字・小文字の区別はありません。
+        </div>
+      </div>
+    </div>
+
+    <div class="mcp-card" style="margin-top:1rem">
+      <div class="mcp-card-title">除外フィルターの例</div>
+      <div class="mcp-table-wrap">
+        <table class="mcp-table">
+          <thead>
+            <tr>
+              <th>設定</th>
+              <th>値</th>
+              <th>除外されるファイル例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>除外拡張子</td>
+              <td><code>log,tmp</code></td>
+              <td><code>debug.log</code>、<code>work.tmp</code>、<code>app.log</code></td>
+            </tr>
+            <tr>
+              <td>除外パターン</td>
+              <td><code>*.bak</code></td>
+              <td><code>data.bak</code>、<code>config.bak</code></td>
+            </tr>
+            <tr>
+              <td>除外パターン</td>
+              <td><code>*_old.*</code></td>
+              <td><code>report_old.xlsx</code>、<code>data_old.csv</code></td>
+            </tr>
+            <tr>
+              <td>除外パターン</td>
+              <td><code>backup/*</code></td>
+              <td><code>backup/</code> フォルダ内の全ファイル</td>
+            </tr>
+            <tr>
+              <td>両方組み合わせ</td>
+              <td>除外拡張子: <code>log</code><br>除外パターン: <code>*.tmp,*_old.*</code></td>
+              <td>上記すべてのファイルが除外</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mcp-callout info">
+      <div class="mcp-callout-icon">ℹ️</div>
+      <div>同じ名前のファイルが複数ある場合は、自動的に <code>ファイル名 (1).ext</code>、<code>ファイル名 (2).ext</code> のように連番が付きます。これを「重複リネーム」と呼び、メトリクスに件数が表示されます。</div>
+    </div>
+  </section>
+
+  <!-- 5. プリセット・履歴 -->
+  <section class="mcp-section" id="presets">
+    <div class="mcp-section-head">
+      <div class="mcp-section-num">5</div>
+      <h2>プリセット・履歴</h2>
+    </div>
+
+    <h3 style="font-size:.95rem;font-weight:800;color:var(--mcp-ink);margin:0 0 .75rem">設定プリセット</h3>
+    <p style="font-size:.84rem;color:var(--mcp-muted);margin-bottom:.75rem">よく使う設定の組み合わせをワンクリックで呼び出せます。</p>
+
+    <div class="mcp-preset-grid">
+      <div class="mcp-preset-card">
+        <h4>📦 標準ZIP</h4>
+        <ul>
+          <li>形式: ZIP</li>
+          <li>圧縮レベル: 標準</li>
+          <li>除外・パスワードなし</li>
+        </ul>
+      </div>
+      <div class="mcp-preset-card">
+        <h4>🔐 パスワード付きZIP</h4>
+        <ul>
+          <li>形式: ZIP</li>
+          <li>圧縮レベル: 高圧縮</li>
+          <li>パスワード欄にフォーカス</li>
+          <li>（パスワードは自分で入力）</li>
+        </ul>
+      </div>
+      <div class="mcp-preset-card">
+        <h4>🧹 ログ除外</h4>
+        <ul>
+          <li>形式: ZIP / 標準</li>
+          <li>除外拡張子: log, tmp, bak</li>
+          <li>除外パターン: *_old.*</li>
+        </ul>
+      </div>
+      <div class="mcp-preset-card">
+        <h4>📁 配布用フォルダあり</h4>
+        <ul>
+          <li>形式: ZIP / 標準</li>
+          <li>格納フォルダ: 配布用データ</li>
+          <li>解凍後にフォルダへまとまる</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="mcp-callout tip">
+      <div class="mcp-callout-icon">💡</div>
+      <div>「パスワード付きZIP」プリセットはパスワード欄にカーソルが移動するだけで、パスワード自体は自動入力されません。必ず自分でパスワードを入力してください。</div>
+    </div>
+
+    <h3 style="font-size:.95rem;font-weight:800;color:var(--mcp-ink);margin:1.5rem 0 .75rem">設定履歴</h3>
+    <p style="font-size:.84rem;color:var(--mcp-muted);margin-bottom:.75rem">「圧縮してダウンロード」や各設定変更のたびに、現在の設定が履歴として自動保存されます（ブラウザの localStorage に最大10件）。</p>
+
+    <div class="mcp-card">
+      <div class="mcp-card-title">履歴の仕組み</div>
+      <div class="mcp-table-wrap">
+        <table class="mcp-table">
+          <thead>
+            <tr>
+              <th>操作</th>
+              <th>内容</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>履歴ボタンをクリック</td>
+              <td>その設定（形式・ファイル名・除外条件など）を一括で復元します。ファイルの選択は復元されません。</td>
+            </tr>
+            <tr>
+              <td>保存タイミング</td>
+              <td>形式変更・設定変更・ダウンロードのたびに自動保存されます。</td>
+            </tr>
+            <tr>
+              <td>ラベル</td>
+              <td>出力ファイル名を入力しているときはその名前、未入力の場合は形式名（例: <code>ZIP 設定</code>）が表示されます。</td>
+            </tr>
+            <tr>
+              <td>最大件数</td>
+              <td>最大10件。超えた場合は古いものから自動削除されます。同じ設定は重複保存されません。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. プレビューと出力 -->
+  <section class="mcp-section" id="preview">
+    <div class="mcp-section-head">
+      <div class="mcp-section-num">6</div>
+      <h2>プレビューと出力</h2>
+    </div>
+
+    <div class="mcp-card">
+      <div class="mcp-card-title">プレビューボックスの見方</div>
+      <p style="font-size:.84rem;color:var(--mcp-muted);margin:.5rem 0 .75rem">画面右側の「プレビュー」エリアで、生成されるファイル名と警告を確認できます。</p>
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:.65rem;padding:1rem;margin:.5rem 0">
+        <div style="font-size:.78rem;color:var(--mcp-muted)">生成予定ファイル</div>
+        <div style="font-size:1rem;font-weight:800;color:var(--mcp-ink);word-break:break-all">2026_配布資料.zip</div>
+        <ul style="margin:.5rem 0 0;padding-left:1.1rem;color:var(--mcp-warn);font-size:.78rem;font-weight:700">
+          <!-- 警告があればここに表示 -->
+        </ul>
+      </div>
+      <p style="font-size:.82rem;color:var(--mcp-muted);margin:.5rem 0 0">
+        プレビューに警告（黄色テキスト）が表示された場合は、設定を見直してください。例えば「対象ファイルがありません」という警告が出た場合は、除外設定が厳しすぎてすべてのファイルが除外されています。
+      </p>
+    </div>
+
+    <div class="mcp-card" style="margin-top:.75rem">
+      <div class="mcp-card-title">主な警告メッセージ</div>
+      <div class="mcp-table-wrap">
+        <table class="mcp-table">
+          <thead>
+            <tr>
+              <th>警告メッセージ</th>
+              <th>原因と対処法</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>対象ファイルがありません。</td>
+              <td>除外設定によりすべてのファイルが除外されています。除外拡張子・除外パターンを緩めてください。</td>
+            </tr>
+            <tr>
+              <td>一度に処理できるファイル数は500件までです。</td>
+              <td>選択ファイル数が500件を超えています。ファイルを減らして複数回に分けてください。</td>
+            </tr>
+            <tr>
+              <td>合計サイズは〇〇MBまでです。</td>
+              <td>合計ファイルサイズが1GBを超えています。ファイルを分けて別々に圧縮してください。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <h3 style="font-size:.95rem;font-weight:800;color:var(--mcp-ink);margin:1.5rem 0 .75rem">ダウンロードと設定リセット</h3>
+
+    <div class="mcp-steps">
+      <div class="mcp-step">
+        <div class="mcp-step-num">1</div>
+        <div class="mcp-step-body">
+          <strong>圧縮してダウンロード</strong>
+          <p>「圧縮してダウンロード」ボタンを押すと、サーバー側で圧縮処理が行われ、完了後に自動的にファイルがダウンロードされます。大きなファイルや多数のファイルがある場合は処理に時間がかかる場合があります。</p>
+        </div>
+      </div>
+      <div class="mcp-step">
+        <div class="mcp-step-num">2</div>
+        <div class="mcp-step-body">
+          <strong>設定をリセット</strong>
+          <p>「設定をリセット」ボタンを押すと、選択したファイル・すべての設定・パスワードが初期状態（ZIP・標準）に戻ります。最初からやり直したいときに使います。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="mcp-callout ok">
+      <div class="mcp-callout-icon">✅</div>
+      <div>ダウンロードされるファイル名は「プレビュー」に表示されているファイル名（例: <code>2026_配布資料.zip</code>）と同じです。ダウンロード前に必ず確認してください。</div>
+    </div>
+  </section>
+
+  <!-- 7. FAQ -->
+  <section class="mcp-section" id="faq">
+    <div class="mcp-section-head">
+      <div class="mcp-section-num">7</div>
+      <h2>よくある質問</h2>
+    </div>
+
+    <div class="mcp-acc-item">
+      <button class="mcp-acc-q" onclick="toggleAcc(this)">
+        <span>どの圧縮形式を選べばいいですか？</span>
+        <span class="mcp-acc-chevron">▼</span>
+      </button>
+      <div class="mcp-acc-a">
+        迷ったときは <strong>ZIP</strong> を選んでください。Windows・Mac・Linux どの環境でも標準で対応しており、パスワード保護も設定できます。Linux や開発環境向けには TAR.GZ が一般的です。TAR.BZ2・TAR.XZ は圧縮率を最大化したい場合に使いますが、処理時間がかかります。
+      </div>
+    </div>
+
+    <div class="mcp-acc-item">
+      <button class="mcp-acc-q" onclick="toggleAcc(this)">
+        <span>パスワードを設定したのに相手が開けません。</span>
+        <span class="mcp-acc-chevron">▼</span>
+      </button>
+      <div class="mcp-acc-a">
+        次の点を確認してください。①圧縮形式が <strong>ZIP</strong> になっているか（TAR系ではパスワードが無効です）。②パスワードを正確に共有しているか。③受け取り側の解凍ソフトが ZIP のパスワード（AES-256）に対応しているか。Windows 標準の解凍機能は古い場合に AES-256 に非対応のことがあります。7-Zip などの対応ソフトをお試しください。
+      </div>
+    </div>
+
+    <div class="mcp-acc-item">
+      <button class="mcp-acc-q" onclick="toggleAcc(this)">
+        <span>フォルダをまるごと圧縮したい。</span>
+        <span class="mcp-acc-chevron">▼</span>
+      </button>
+      <div class="mcp-acc-a">
+        「フォルダを選択」ボタンか、ドロップ枠にフォルダをドラッグすることで対応できます。フォルダ内のサブフォルダも含め、階層構造を保ったまま圧縮ファイルに追加されます。なお、圧縮ファイル内でのフォルダ名を変えたい場合は「圧縮ファイル内のフォルダ名」欄に名前を入れてください。
+      </div>
+    </div>
+
+    <div class="mcp-acc-item">
+      <button class="mcp-acc-q" onclick="toggleAcc(this)">
+        <span>「プレビュー」に「対象ファイルがありません」と出ます。</span>
+        <span class="mcp-acc-chevron">▼</span>
+      </button>
+      <div class="mcp-acc-a">
+        除外拡張子または除外パターンの設定が厳しすぎて、すべてのファイルが除外されています。除外設定の欄を確認し、不要な条件を削除または修正してください。また、ファイルをまったく追加していない場合も同じメッセージが表示されます。
+      </div>
+    </div>
+
+    <div class="mcp-acc-item">
+      <button class="mcp-acc-q" onclick="toggleAcc(this)">
+        <span>同じ名前のファイルが複数ある場合はどうなりますか？</span>
+        <span class="mcp-acc-chevron">▼</span>
+      </button>
+      <div class="mcp-acc-a">
+        2件目以降は自動的に <code>ファイル名 (1).ext</code>、<code>ファイル名 (2).ext</code> のように連番が付きます。どのファイルに連番が付いたかはファイル詳細テーブルの「格納名」列で確認できます。また、「重複リネーム」メトリクスに件数が表示されます。
+      </div>
+    </div>
+
+    <div class="mcp-acc-item">
+      <button class="mcp-acc-q" onclick="toggleAcc(this)">
+        <span>除外拡張子と除外パターンの違いは何ですか？</span>
+        <span class="mcp-acc-chevron">▼</span>
+      </button>
+      <div class="mcp-acc-a">
+        <strong>除外拡張子</strong>は拡張子だけで判定します（例: <code>log</code> と入れると <code>.log</code> 拡張子のファイルをすべて除外）。<strong>除外パターン</strong>はファイル名全体または相対パスに対してワイルドカード（<code>*</code>）でマッチングします（例: <code>*_old.*</code> は <code>data_old.csv</code> を除外）。両方を組み合わせて使うこともできます。
+      </div>
+    </div>
+
+    <div class="mcp-acc-item">
+      <button class="mcp-acc-q" onclick="toggleAcc(this)">
+        <span>TAR と TAR.GZ はどう違いますか？</span>
+        <span class="mcp-acc-chevron">▼</span>
+      </button>
+      <div class="mcp-acc-a">
+        <strong>TAR</strong> はファイルをひとつにまとめるだけで、圧縮は行いません。そのため、ファイルサイズはほぼ元のままです。<strong>TAR.GZ</strong> は TAR でまとめたあとに gzip で圧縮を行います。テキストファイルや CSS・JS などは大幅に小さくなりますが、すでに圧縮済みの画像や動画はほとんど効果がありません。
+      </div>
+    </div>
+
+    <div class="mcp-acc-item">
+      <button class="mcp-acc-q" onclick="toggleAcc(this)">
+        <span>設定履歴はいつ保存されますか？どこに保存されますか？</span>
+        <span class="mcp-acc-chevron">▼</span>
+      </button>
+      <div class="mcp-acc-a">
+        形式の選択・各設定の変更・ダウンロードボタンの押下のタイミングで自動保存されます。保存場所はお使いのブラウザの <strong>localStorage</strong> です。最大10件まで保存され、同じ設定は重複して保存されません。ブラウザのデータを削除すると履歴も消えます。
+      </div>
+    </div>
+
+    <div class="mcp-acc-item">
+      <button class="mcp-acc-q" onclick="toggleAcc(this)">
+        <span>500件を超えるファイルを圧縮したいです。</span>
+        <span class="mcp-acc-chevron">▼</span>
+      </button>
+      <div class="mcp-acc-a">
+        1回の処理で扱えるファイル数は最大500件です。500件を超える場合は、ファイルをいくつかのグループに分けて、それぞれ別々に圧縮ファイルを作成してください。合計サイズの上限（1 GB）も同様です。
+      </div>
+    </div>
+
+    <div class="mcp-acc-item">
+      <button class="mcp-acc-q" onclick="toggleAcc(this)">
+        <span>ダウンロードしたのに「開けない」と言われました。</span>
+        <span class="mcp-acc-chevron">▼</span>
+      </button>
+      <div class="mcp-acc-a">
+        次を確認してください。①パスワードを設定した ZIP の場合、パスワードが相手に正確に届いているか。②受け取り側の OS や解凍ソフトが対応しているか（TAR 系は Windows で標準対応していない場合があります。7-Zip などをご利用ください）。③ファイルが途中でダウンロードが止まっていないか（ファイルが壊れている場合は再ダウンロードをお試しください）。
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- JavaScript for nav and accordion -->
+<script>
+(function () {
+  function toggleAcc(btn) {
+    const item = btn.closest(".mcp-acc-item");
+    item.classList.toggle("open");
+  }
+  window.toggleAcc = toggleAcc;
+
+  // Sticky nav active state
+  const navLinks = document.querySelectorAll(".mcp-nav a");
+  const sections = Array.from(document.querySelectorAll(".mcp-section"));
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const id = entry.target.id;
+          navLinks.forEach((link) => {
+            link.classList.toggle("active", link.getAttribute("href") === `#${id}`);
+          });
+        }
+      });
+    },
+    { rootMargin: "-30% 0px -60% 0px" }
+  );
+
+  sections.forEach((section) => observer.observe(section));
+})();
+</script>
+{% endblock %}

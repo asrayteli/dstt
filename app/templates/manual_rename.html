@@ -1,0 +1,1034 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  html { scroll-behavior: smooth; }
+
+  /* ===== Sticky nav ===== */
+  .mrn-nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: #fff;
+    border-bottom: 2px solid #e2e8f0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .mrn-nav::-webkit-scrollbar { display: none; }
+  .mrn-nav-inner {
+    display: flex;
+    min-width: max-content;
+    padding: 0 12px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .mrn-nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #64748b;
+    border-bottom: 3px solid transparent;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .mrn-nav-link:hover { color: #2563eb; }
+  .mrn-nav-link.mrn-active { color: #2563eb; border-bottom-color: #2563eb; }
+
+  /* ===== Layout ===== */
+  .mrn-wrap {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 16px 80px;
+  }
+  .mrn-section { padding-top: 52px; }
+  .mrn-section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #f1f5f9;
+  }
+  .mrn-section-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    font-size: 26px;
+    flex-shrink: 0;
+  }
+  .mrn-section-title { font-size: 22px; font-weight: 900; color: #0f172a; margin: 0 0 4px; }
+  .mrn-section-desc  { font-size: 14px; color: #64748b; margin: 0; line-height: 1.6; }
+
+  /* ===== Cards ===== */
+  .mrn-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 22px 24px;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+    margin-bottom: 12px;
+  }
+  .mrn-card-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ===== Feature grid ===== */
+  .mrn-feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 12px;
+  }
+  .mrn-feat-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 18px 14px;
+    text-align: center;
+    transition: box-shadow 0.15s;
+  }
+  .mrn-feat-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,0.10); }
+  .mrn-feat-emoji { font-size: 30px; line-height: 1; margin-bottom: 8px; }
+  .mrn-feat-name { font-size: 13px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+  .mrn-feat-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  /* ===== Step cards ===== */
+  .mrn-step {
+    display: flex;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(15,23,42,0.04);
+  }
+  .mrn-step-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    font-size: 16px; font-weight: 900;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    color: #fff;
+  }
+  .mrn-step-body { flex: 1; min-width: 0; }
+  .mrn-step-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 6px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .mrn-step-text { font-size: 14px; color: #475569; line-height: 1.7; margin: 0; }
+
+  /* ===== Callouts ===== */
+  .mrn-tip {
+    background: #f0fdf4; border-left: 4px solid #22c55e;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #166534;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mrn-warn {
+    background: #fff7ed; border-left: 4px solid #f97316;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #9a3412;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mrn-note {
+    background: #eff6ff; border-left: 4px solid #3b82f6;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #1e40af;
+    line-height: 1.65; margin: 8px 0;
+  }
+
+  /* ===== Tags ===== */
+  .mrn-tag {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700;
+  }
+  .mrn-tag-blue   { background: #dbeafe; color: #1d4ed8; }
+  .mrn-tag-green  { background: #dcfce7; color: #16a34a; }
+  .mrn-tag-gray   { background: #f1f5f9; color: #475569; }
+  .mrn-tag-orange { background: #ffedd5; color: #ea580c; }
+
+  /* ===== Bullet list ===== */
+  .mrn-ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+  .mrn-ul li {
+    display: flex; gap: 8px; align-items: flex-start;
+    font-size: 14px; color: #334155; line-height: 1.6;
+  }
+  .mrn-ul li::before {
+    content: "▶"; color: #2563eb; font-size: 10px;
+    margin-top: 4px; flex-shrink: 0;
+  }
+
+  /* ===== Option table ===== */
+  .mrn-opt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .mrn-opt-table th {
+    background: #f8fafc; padding: 10px 12px;
+    text-align: left; font-size: 12px; font-weight: 700;
+    color: #64748b; border-bottom: 1px solid #e2e8f0;
+  }
+  .mrn-opt-table td {
+    padding: 10px 12px; border-bottom: 1px solid #f1f5f9;
+    color: #334155; vertical-align: top; line-height: 1.6;
+  }
+  .mrn-opt-table td:first-child { font-weight: 700; color: #0f172a; white-space: nowrap; }
+  .mrn-opt-table tr:last-child td { border-bottom: 0; }
+
+  /* ===== Divider ===== */
+  .mrn-divider { border: 0; border-top: 1px solid #f1f5f9; margin: 18px 0; }
+
+  /* ===== Grid 2col ===== */
+  .mrn-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .mrn-grid2 { grid-template-columns: 1fr; } }
+
+  /* ===== Mode card grid ===== */
+  .mrn-mode-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    margin: 12px 0;
+  }
+  .mrn-mode-card {
+    border: 1px solid #e2e8f0; border-radius: 12px;
+    padding: 14px; background: #fff;
+  }
+  .mrn-mode-card-head {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 14px; font-weight: 800; color: #0f172a;
+    margin-bottom: 6px;
+  }
+  .mrn-mode-card-body { font-size: 13px; color: #64748b; line-height: 1.5; }
+  .mrn-mode-card-example {
+    margin-top: 6px;
+    background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 6px; padding: 5px 8px;
+    font-size: 12px; font-family: monospace; color: #334155;
+  }
+
+  /* ===== Token badge ===== */
+  .mrn-token {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 6px;
+    background: #dbeafe; color: #1d4ed8;
+    font-size: 12px; font-weight: 700; font-family: monospace;
+  }
+
+  /* ===== Preview mock ===== */
+  .mrn-preview-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 13px;
+  }
+  .mrn-preview-row:last-child { border-bottom: 0; }
+  .mrn-preview-orig { flex: 1; color: #334155; word-break: break-all; }
+  .mrn-preview-arrow { color: #2563eb; font-weight: 700; flex-shrink: 0; }
+  .mrn-preview-new { flex: 1; color: #1d4ed8; font-weight: 700; word-break: break-all; }
+
+  /* ===== Accordion ===== */
+  .mrn-acc-item {
+    border: 1px solid #e2e8f0; border-radius: 13px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .mrn-acc-trigger {
+    width: 100%; text-align: left; padding: 15px 18px;
+    background: #fff; border: 0; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 700; color: #0f172a;
+    line-height: 1.5; gap: 12px;
+  }
+  .mrn-acc-trigger:hover { background: #f8fafc; }
+  .mrn-acc-q { flex: 1; text-align: left; }
+  .mrn-acc-arrow { font-size: 11px; color: #94a3b8; transition: transform 0.2s; flex-shrink: 0; }
+  .mrn-acc-item.mrn-open .mrn-acc-arrow { transform: rotate(180deg); }
+  .mrn-acc-body { display: none; padding: 2px 18px 15px; font-size: 14px; color: #475569; line-height: 1.75; }
+  .mrn-acc-item.mrn-open .mrn-acc-body { display: block; }
+
+  /* ===== Modal ===== */
+  .mrn-modal-ov {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.52);
+    z-index: 200; display: flex; align-items: center;
+    justify-content: center; padding: 16px;
+  }
+  .mrn-modal-ov.mrn-hidden { display: none !important; }
+  .mrn-modal-box {
+    background: #fff; border-radius: 20px;
+    max-width: 640px; width: 100%;
+    max-height: 88vh; overflow-y: auto;
+    padding: 28px;
+    box-shadow: 0 28px 56px rgba(0,0,0,0.22);
+    animation: mrn-modal-in 0.18s ease;
+  }
+  @keyframes mrn-modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .mrn-modal-head {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; margin-bottom: 18px;
+  }
+  .mrn-modal-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; line-height: 1.4; }
+  .mrn-modal-close {
+    border: 0; background: #f1f5f9; border-radius: 9px;
+    width: 34px; height: 34px; cursor: pointer;
+    font-size: 16px; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+    color: #64748b; margin-left: 12px;
+  }
+  .mrn-modal-close:hover { background: #e2e8f0; }
+
+  /* ===== Popup button ===== */
+  .mrn-popup-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px; border: 1.5px solid #cbd5e1;
+    border-radius: 9px; background: #f8fafc;
+    font-size: 12px; font-weight: 700; color: #2563eb;
+    cursor: pointer; margin: 4px 0; transition: background 0.15s;
+  }
+  .mrn-popup-btn:hover { background: #eff6ff; border-color: #93c5fd; }
+
+  /* ===== Hero ===== */
+  .mrn-hero-bar {
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 48%, #60a5fa 100%);
+    padding: 40px 24px 36px; text-align: center; color: #fff;
+  }
+  .mrn-hero-bar h1 { font-size: 34px; font-weight: 900; margin: 0 0 6px; }
+  .mrn-hero-bar p { font-size: 15px; opacity: 0.9; margin: 0 0 22px; }
+  .mrn-hero-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .mrn-hero-btn {
+    padding: 11px 22px; border-radius: 12px;
+    font-size: 14px; font-weight: 700; text-decoration: none;
+    border: 2px solid #fff; transition: opacity 0.15s;
+  }
+  .mrn-hero-btn:hover { opacity: 0.85; }
+  .mrn-hero-btn-primary  { background: #fff; color: #2563eb; }
+  .mrn-hero-btn-secondary { background: transparent; color: #fff; }
+</style>
+
+<!-- ===== Hero ===== -->
+<div class="mrn-hero-bar">
+  <h1>✏️ 一括リネーム マニュアル</h1>
+  <p>10種類の変換モードでファイル名を自由に変換。プレビューで確認してから ZIPダウンロード。</p>
+  <div class="mrn-hero-btns">
+    <a href="/tools/rename" class="mrn-hero-btn mrn-hero-btn-primary">ツールを開く</a>
+    <a href="/" class="mrn-hero-btn mrn-hero-btn-secondary">ダッシュボードへ戻る</a>
+  </div>
+</div>
+
+<!-- ===== Sticky nav ===== -->
+<div class="mrn-nav" id="mrnNav">
+  <div class="mrn-nav-inner">
+    <a href="#overview"  class="mrn-nav-link" data-section="overview">📋 概要</a>
+    <a href="#flow"      class="mrn-nav-link" data-section="flow">📖 基本の流れ</a>
+    <a href="#modes"     class="mrn-nav-link" data-section="modes">🔢 変換モード一覧</a>
+    <a href="#custom"    class="mrn-nav-link" data-section="custom">🛠️ カスタムパターン</a>
+    <a href="#common"    class="mrn-nav-link" data-section="common">⚙️ 共通オプション</a>
+    <a href="#preview"   class="mrn-nav-link" data-section="preview">👁️ プレビュー</a>
+    <a href="#faq"       class="mrn-nav-link" data-section="faq">❓ よくある質問</a>
+  </div>
+</div>
+
+<!-- ===== Main content ===== -->
+<div class="mrn-wrap">
+
+  <!-- ========== 概要 ========== -->
+  <section id="overview" class="mrn-section">
+    <div class="mrn-section-header">
+      <div class="mrn-section-icon" style="background:#dbeafe">📋</div>
+      <div>
+        <h2 class="mrn-section-title">一括リネーム でできること</h2>
+        <p class="mrn-section-desc">複数のファイルをアップロードし、10種類の変換モードから選んでファイル名を一括変換。プレビューで結果を確認してから ZIPファイルでダウンロードできます。</p>
+      </div>
+    </div>
+
+    <div class="mrn-feat-grid">
+      <div class="mrn-feat-card">
+        <div class="mrn-feat-emoji">🔢</div>
+        <div class="mrn-feat-name">10種類のモード</div>
+        <div class="mrn-feat-desc">連番・日付・置換・正規表現・挿入・削除など</div>
+      </div>
+      <div class="mrn-feat-card">
+        <div class="mrn-feat-emoji">👁️</div>
+        <div class="mrn-feat-name">ライブプレビュー</div>
+        <div class="mrn-feat-desc">設定変更のたびに変換後のファイル名を即座に確認</div>
+      </div>
+      <div class="mrn-feat-card">
+        <div class="mrn-feat-emoji">📦</div>
+        <div class="mrn-feat-name">ZIPダウンロード</div>
+        <div class="mrn-feat-desc">変換済みファイルをまとめてZIPで取得</div>
+      </div>
+      <div class="mrn-feat-card">
+        <div class="mrn-feat-emoji">🗂️</div>
+        <div class="mrn-feat-name">複数ファイル対応</div>
+        <div class="mrn-feat-desc">ドラッグ＆ドロップや選択で複数ファイル一括処理</div>
+      </div>
+      <div class="mrn-feat-card">
+        <div class="mrn-feat-emoji">🔍</div>
+        <div class="mrn-feat-name">正規表現対応</div>
+        <div class="mrn-feat-desc">高度なパターンマッチングと置換が可能</div>
+      </div>
+      <div class="mrn-feat-card">
+        <div class="mrn-feat-emoji">🛠️</div>
+        <div class="mrn-feat-name">カスタムパターン</div>
+        <div class="mrn-feat-desc">トークンを自由に組み合わせた命名ルールを作成</div>
+      </div>
+      <div class="mrn-feat-card">
+        <div class="mrn-feat-emoji">📅</div>
+        <div class="mrn-feat-name">日付フォーマット</div>
+        <div class="mrn-feat-desc">日付の形式を自由にカスタマイズ可能</div>
+      </div>
+      <div class="mrn-feat-card">
+        <div class="mrn-feat-emoji">🔡</div>
+        <div class="mrn-feat-name">大小文字変換</div>
+        <div class="mrn-feat-desc">拡張子のみの変換も含む5種の大小変換</div>
+      </div>
+    </div>
+
+    <div class="mrn-note" style="margin-top:16px">
+      ℹ️ 元のファイルは変更されません。変換後のファイル名が入ったZIPファイルをダウンロードするだけです。元のファイルは手元のままです。
+    </div>
+  </section>
+
+
+  <!-- ========== 基本の流れ ========== -->
+  <section id="flow" class="mrn-section">
+    <div class="mrn-section-header">
+      <div class="mrn-section-icon" style="background:#dbeafe">📖</div>
+      <div>
+        <h2 class="mrn-section-title">基本の流れ</h2>
+        <p class="mrn-section-desc">3ステップでファイル名を一括変換できます。</p>
+      </div>
+    </div>
+
+    <div class="mrn-step">
+      <div class="mrn-step-badge">1</div>
+      <div class="mrn-step-body">
+        <div class="mrn-step-title">ファイルを選択する</div>
+        <p class="mrn-step-text">画面中央の破線枠エリアにファイルをドラッグ＆ドロップするか、枠をクリックして選択ダイアログを開きます。複数ファイルを一度に追加できます。</p>
+        <hr class="mrn-divider">
+        <div class="mrn-grid2" style="margin-top:8px">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">ドラッグ＆ドロップ</div>
+            <ul class="mrn-ul">
+              <li>ファイルをブラウザ外からドラッグして枠内に置きます</li>
+              <li>枠がハイライトされたらドロップできます</li>
+            </ul>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">クリックして選択</div>
+            <ul class="mrn-ul">
+              <li>枠か「クリックして選択」リンクをクリック</li>
+              <li>Ctrl（Mac: ⌘）を押しながら選択で複数指定可</li>
+            </ul>
+          </div>
+        </div>
+        <hr class="mrn-divider">
+        <ul class="mrn-ul">
+          <li>追加されたファイルは枠の下にチップ（タグ）形式で一覧表示されます</li>
+          <li>各チップの「×」ボタンで個別削除、「全クリア」ボタンで全ファイルを削除できます</li>
+          <li>ファイル形式・サイズの制限はありません（どんな種類のファイルでも可）</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="mrn-step">
+      <div class="mrn-step-badge">2</div>
+      <div class="mrn-step-body">
+        <div class="mrn-step-title">変換モードを選んで設定する</div>
+        <p class="mrn-step-text">10種類の変換モードから目的に合ったものをクリックして選択します。選択すると専用の設定項目が表示されます。設定を変えるたびに下のプレビューがリアルタイムで更新されます。</p>
+        <div class="mrn-tip" style="margin-top:10px">
+          💡 モードを選ぶと画面にそのモードの説明と変換例が表示されます。どんな変換になるか迷ったときは説明を参考にしてください。
+        </div>
+      </div>
+    </div>
+
+    <div class="mrn-step">
+      <div class="mrn-step-badge">3</div>
+      <div class="mrn-step-body">
+        <div class="mrn-step-title">プレビューを確認して変換＆ダウンロード</div>
+        <p class="mrn-step-text">プレビュー表の「変更前」→「変更後」を確認し、思い通りになっていれば「変換＆ダウンロード」ボタンを押します。変換後のファイルが入ったZIPファイルがダウンロードされます。</p>
+        <div class="mrn-note" style="margin-top:10px">
+          ℹ️ ダウンロードされるファイル名は「リネーム済みファイル.zip」です。ZIPを展開すると変換後の名前のファイルが入っています。
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 変換モード一覧 ========== -->
+  <section id="modes" class="mrn-section">
+    <div class="mrn-section-header">
+      <div class="mrn-section-icon" style="background:#dbeafe">🔢</div>
+      <div>
+        <h2 class="mrn-section-title">変換モード一覧</h2>
+        <p class="mrn-section-desc">10種類の変換モードそれぞれの機能と設定内容を解説します。</p>
+      </div>
+    </div>
+
+    <!-- 連番 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">🔢 連番</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">元のファイル名を無視し、指定した接頭語と連番で統一的にリネームします。大量のファイルに通し番号を振るときに便利です。</p>
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:6px">設定項目</div>
+        <table class="mrn-opt-table">
+          <tbody>
+            <tr><td>接頭語（prefix）</td><td>ファイル名の先頭に付ける文字列です。デフォルト: <code>file_</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="background:#f1f5f9;border-radius:8px;padding:10px;font-family:monospace;font-size:13px;color:#334155">
+        例：接頭語 <code>report_</code> → 報告書.pdf, メモ.docx → report_001.pdf, report_002.docx
+      </div>
+      <div class="mrn-tip" style="margin-top:10px">
+        💡 開始番号やゼロ埋め桁数は「共通オプション」で変更できます。
+      </div>
+    </div>
+
+    <!-- 日付+連番 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">📅 日付＋連番</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">今日の日付と連番を組み合わせてリネームします。日報・議事録・日次ファイルなど日付管理したいファイルに最適です。</p>
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:6px">設定項目（このモード固有の設定はなし）</div>
+        <p style="font-size:13px;color:#475569;margin:0">日付フォーマットと開始番号・桁数は「共通オプション」で変更できます。</p>
+      </div>
+      <div style="background:#f1f5f9;border-radius:8px;padding:10px;font-family:monospace;font-size:13px;color:#334155">
+        例：報告書.pdf → 20260520_001.pdf（今日が 2026-05-20 の場合）
+      </div>
+    </div>
+
+    <!-- 文字列置換 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">🔤 文字列置換</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">ファイル名の中の特定の文字列を別の文字列に置き換えます。ファイル名の一部だけを統一したいときに使います。</p>
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:6px">設定項目</div>
+        <table class="mrn-opt-table">
+          <tbody>
+            <tr><td>置換元（探す文字列）</td><td>ファイル名から見つける文字列。該当しないファイルは変更されません。</td></tr>
+            <tr><td>置換先（変える文字列）</td><td>見つかった部分を置き換える文字列。空欄にすると削除になります。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="background:#f1f5f9;border-radius:8px;padding:10px;font-family:monospace;font-size:13px;color:#334155">
+        例：「old」→「new」 : report_old.pdf → report_new.pdf<br>
+        例：「IMG_」→「」（空欄）: IMG_0001.jpg → 0001.jpg
+      </div>
+      <div class="mrn-note" style="margin-top:10px">
+        ℹ️ 置換元に何も入力しないと、ファイル名は変更されません。拡張子も含む全ファイル名（例：report.pdf）が対象です。
+      </div>
+    </div>
+
+    <!-- 正規表現 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title" style="justify-content:space-between">
+        <span>🔍 正規表現</span>
+        <button class="mrn-popup-btn" onclick="openModal('modalRegex')">正規表現の例 ▼</button>
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">正規表現パターンを使った高度な文字列置換を行います。括弧でグループ化した部分は <code>\1</code>・<code>\2</code> で参照できます（Pythonの <code>re.sub</code> 互換）。</p>
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:6px">設定項目</div>
+        <table class="mrn-opt-table">
+          <tbody>
+            <tr><td>正規表現パターン</td><td>マッチする文字列パターンを正規表現で記述します</td></tr>
+            <tr><td>置換文字列</td><td>マッチした部分の置換後を記述します。<code>\1</code>〜<code>\9</code> でグループ参照可</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="background:#f1f5f9;border-radius:8px;padding:10px;font-family:monospace;font-size:13px;color:#334155">
+        例：パターン <code>(\d{4})(\d{2})(\d{2})</code> → 置換 <code>\1-\2-\3</code><br>
+        &nbsp;&nbsp;file_20260520.txt → file_2026-05-20.txt
+      </div>
+      <div class="mrn-warn" style="margin-top:10px">
+        ⚠️ 正規表現が無効（構文エラー）な場合、そのファイルは変換されず元のファイル名のままになります。
+      </div>
+    </div>
+
+    <!-- 元名+連番 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">➕ 元名＋連番</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">元のファイル名を残したまま、末尾（拡張子の前）に連番を付加します。バージョン管理や重複ファイルの整理に使えます。</p>
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px">
+        <p style="font-size:13px;color:#475569;margin:0">設定項目なし（共通オプションで開始番号・桁数を変更できます）</p>
+      </div>
+      <div style="background:#f1f5f9;border-radius:8px;padding:10px;font-family:monospace;font-size:13px;color:#334155">
+        例：design.png, logo.png → design_001.png, logo_002.png
+      </div>
+    </div>
+
+    <!-- 元名+日付 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">📆 元名＋日付</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">元のファイル名を残したまま、末尾に今日の日付を付加します。バックアップや日次スナップショットの命名に便利です。</p>
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px">
+        <p style="font-size:13px;color:#475569;margin:0">設定項目なし（共通オプションで日付フォーマットを変更できます）</p>
+      </div>
+      <div style="background:#f1f5f9;border-radius:8px;padding:10px;font-family:monospace;font-size:13px;color:#334155">
+        例：data.csv → data_20260520.csv
+      </div>
+    </div>
+
+    <!-- 大小変換 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">Aa 大文字/小文字変換</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">ファイル名の大文字・小文字を変換します。拡張子のみを統一する専用オプションも用意されています。</p>
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:6px">変換タイプ</div>
+        <table class="mrn-opt-table">
+          <tbody>
+            <tr><td>全て小文字</td><td>ファイル名と拡張子の両方を小文字にします<br>例：My_REPORT.PDF → my_report.pdf</td></tr>
+            <tr><td>全て大文字</td><td>ファイル名と拡張子の両方を大文字にします<br>例：my_report.pdf → MY_REPORT.PDF</td></tr>
+            <tr><td>タイトルケース</td><td>アンダースコアとハイフンを区切りとして、各単語の先頭を大文字にします<br>例：my_report_2026.pdf → My_Report_2026.pdf</td></tr>
+            <tr><td>拡張子のみ小文字</td><td>ファイル名部分はそのまま、拡張子だけ小文字に変換します<br>例：Photo.JPG → Photo.jpg</td></tr>
+            <tr><td>拡張子のみ大文字</td><td>ファイル名部分はそのまま、拡張子だけ大文字に変換します<br>例：photo.jpg → photo.JPG</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 挿入 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">📝 挿入</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">ファイル名の指定した位置（拡張子は含まない部分）にテキストを挿入します。</p>
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:6px">設定項目</div>
+        <table class="mrn-opt-table">
+          <tbody>
+            <tr><td>挿入位置</td><td>先頭から何文字目に挿入するかを数値で指定します。<br>0 = 先頭、正の数 = 先頭から数えた位置、負の数 = 末尾から数えた位置（例：-1 は末尾1文字手前）</td></tr>
+            <tr><td>挿入するテキスト</td><td>挿入する文字列を入力します。例：<code>v2_</code>、<code>_backup</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="background:#f1f5f9;border-radius:8px;padding:10px;font-family:monospace;font-size:13px;color:#334155">
+        例：位置=0, テキスト「v2_」 : report.pdf → v2_report.pdf<br>
+        例：位置=6, テキスト「_v2」 : report.pdf → report_v2.pdf
+      </div>
+    </div>
+
+    <!-- 削除 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">✂️ 削除</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">ファイル名の指定した位置から指定した文字数を削除します（拡張子は除く部分のみ対象）。不要なプレフィックスやコード番号の除去に使えます。</p>
+      <div style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:6px">設定項目</div>
+        <table class="mrn-opt-table">
+          <tbody>
+            <tr><td>開始位置</td><td>削除を始める位置（先頭から0始まり）。0 = 先頭の文字から削除。</td></tr>
+            <tr><td>削除文字数</td><td>削除する文字の数。0 の場合は何も削除しません。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="background:#f1f5f9;border-radius:8px;padding:10px;font-family:monospace;font-size:13px;color:#334155">
+        例：開始=0, 削除=4 : IMG_sunset.jpg → sunset.jpg（先頭の「IMG_」4文字を削除）<br>
+        例：開始=3, 削除=2 : abcXXdef.txt → abcdef.txt（4文字目から「XX」2文字を削除）
+      </div>
+    </div>
+
+    <!-- カスタム -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">🛠️ カスタムパターン</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">トークン（変数）を自由に組み合わせて、オリジナルの命名ルールを作れます。詳しくは「<a href="#custom" style="color:#2563eb">カスタムパターン</a>」セクションをご覧ください。</p>
+      <div style="background:#f1f5f9;border-radius:8px;padding:10px;font-family:monospace;font-size:13px;color:#334155">
+        例：パターン <code>{date}_{name}_{num}{ext}</code> → 20260520_report_001.pdf
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== カスタムパターン ========== -->
+  <section id="custom" class="mrn-section">
+    <div class="mrn-section-header">
+      <div class="mrn-section-icon" style="background:#dbeafe">🛠️</div>
+      <div>
+        <h2 class="mrn-section-title">カスタムパターン</h2>
+        <p class="mrn-section-desc">8種類のトークン（変数）を組み合わせて、完全に自由なファイル命名ルールを作れます。トークンチップをクリックするとパターン欄に直接挿入できます。</p>
+      </div>
+    </div>
+
+    <!-- トークン一覧 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">📌 使用できるトークン一覧</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">ファイル名が <code>Report_2025.pdf</code> の場合の変換例を示します。</p>
+      <table class="mrn-opt-table">
+        <thead><tr><th style="width:110px">トークン</th><th>説明</th><th>変換例</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="mrn-token">{name}</span></td>
+            <td>拡張子を除いたファイル名</td>
+            <td><code>Report_2025</code></td>
+          </tr>
+          <tr>
+            <td><span class="mrn-token">{ext}</span></td>
+            <td>拡張子（ドット付き）</td>
+            <td><code>.pdf</code></td>
+          </tr>
+          <tr>
+            <td><span class="mrn-token">{num}</span></td>
+            <td>ゼロ埋め連番（共通オプションで桁数変更可）</td>
+            <td><code>001</code>, <code>002</code>, <code>003</code>...</td>
+          </tr>
+          <tr>
+            <td><span class="mrn-token">{date}</span></td>
+            <td>今日の日付（共通オプションでフォーマット変更可）</td>
+            <td><code>20260520</code></td>
+          </tr>
+          <tr>
+            <td><span class="mrn-token">{original}</span></td>
+            <td>元のファイル名（拡張子込み）</td>
+            <td><code>Report_2025.pdf</code></td>
+          </tr>
+          <tr>
+            <td><span class="mrn-token">{upper}</span></td>
+            <td>拡張子を除いたファイル名を大文字化</td>
+            <td><code>REPORT_2025</code></td>
+          </tr>
+          <tr>
+            <td><span class="mrn-token">{lower}</span></td>
+            <td>拡張子を除いたファイル名を小文字化</td>
+            <td><code>report_2025</code></td>
+          </tr>
+          <tr>
+            <td><span class="mrn-token">{i}</span></td>
+            <td>0始まりの連番インデックス（ゼロ埋めなし）</td>
+            <td><code>0</code>, <code>1</code>, <code>2</code>...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- パターン例 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">💡 パターンの使用例</div>
+      <table class="mrn-opt-table">
+        <thead><tr><th>パターン</th><th>変換例（元: report.pdf, 2枚目）</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>{name}{ext}</code></td>
+            <td>report.pdf</td>
+            <td>変更なし（デフォルト）</td>
+          </tr>
+          <tr>
+            <td><code>{date}_{name}_{num}{ext}</code></td>
+            <td>20260520_report_002.pdf</td>
+            <td>日付＋名前＋連番</td>
+          </tr>
+          <tr>
+            <td><code>{lower}_{num}{ext}</code></td>
+            <td>report_002.pdf</td>
+            <td>小文字化＋連番</td>
+          </tr>
+          <tr>
+            <td><code>backup_{date}_{original}</code></td>
+            <td>backup_20260520_report.pdf</td>
+            <td>バックアップ用プレフィックス</td>
+          </tr>
+          <tr>
+            <td><code>{i}_{name}{ext}</code></td>
+            <td>1_report.pdf</td>
+            <td>0始まりインデックス</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="mrn-tip" style="margin-top:12px">
+        💡 カスタムパターン入力欄の上にあるトークンチップ（青いボタン）をクリックすると、カーソル位置にトークンを自動挿入できます。
+      </div>
+      <div class="mrn-note" style="margin-top:8px">
+        ℹ️ 未定義のトークン（例：<code>{abc}</code>）はパターンから自動で除去されます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 共通オプション ========== -->
+  <section id="common" class="mrn-section">
+    <div class="mrn-section-header">
+      <div class="mrn-section-icon" style="background:#dbeafe">⚙️</div>
+      <div>
+        <h2 class="mrn-section-title">共通オプション</h2>
+        <p class="mrn-section-desc">すべてのモードに影響する共通設定です。「共通オプション」をクリックして展開して設定します。</p>
+      </div>
+    </div>
+
+    <div class="mrn-card">
+      <div class="mrn-card-title">⚙️ 共通オプションの設定項目</div>
+      <table class="mrn-opt-table">
+        <thead><tr><th>項目</th><th>デフォルト値</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>開始番号</td>
+            <td>1</td>
+            <td>連番の最初の数値を指定します。例：5 にすると 005, 006... と始まります。0 を指定すると 000, 001... となります。</td>
+          </tr>
+          <tr>
+            <td>ゼロ埋め桁数</td>
+            <td>3</td>
+            <td>連番を何桁でゼロ埋めするかを指定します。例：3 → 001, 4 → 0001。1〜10 の範囲で設定できます。</td>
+          </tr>
+          <tr>
+            <td>日付フォーマット</td>
+            <td>%Y%m%d</td>
+            <td>日付の表示形式をPythonのstrftime形式で指定します。よく使う形式は右の一覧を参照してください。</td>
+          </tr>
+        </tbody>
+      </table>
+      <hr class="mrn-divider">
+      <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">よく使う日付フォーマット</div>
+      <table class="mrn-opt-table">
+        <thead><tr><th>フォーマット</th><th>表示例（2026年5月20日）</th></tr></thead>
+        <tbody>
+          <tr><td><code>%Y%m%d</code></td><td>20260520（デフォルト）</td></tr>
+          <tr><td><code>%Y-%m-%d</code></td><td>2026-05-20</td></tr>
+          <tr><td><code>%Y/%m/%d</code></td><td>2026/05/20</td></tr>
+          <tr><td><code>%Y%m</code></td><td>202605（年月のみ）</td></tr>
+          <tr><td><code>%m%d</code></td><td>0520（月日のみ）</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== プレビュー ========== -->
+  <section id="preview" class="mrn-section">
+    <div class="mrn-section-header">
+      <div class="mrn-section-icon" style="background:#dbeafe">👁️</div>
+      <div>
+        <h2 class="mrn-section-title">プレビュー</h2>
+        <p class="mrn-section-desc">ファイルを追加したり設定を変えるたびに、変換後のファイル名が自動でリアルタイムに更新されます。ダウンロード前に必ず確認しましょう。</p>
+      </div>
+    </div>
+
+    <!-- プレビュー表の見方 -->
+    <div class="mrn-card">
+      <div class="mrn-card-title">📋 プレビュー表の見方</div>
+      <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:12px">
+        <div style="background:#f8fafc;padding:8px 12px;font-size:11px;font-weight:700;color:#64748b;display:grid;grid-template-columns:40px 1fr 40px 1fr;gap:8px;text-transform:uppercase">
+          <div>#</div><div>変更前</div><div></div><div>変更後</div>
+        </div>
+        <div class="mrn-preview-row">
+          <div style="color:#94a3b8;font-size:12px;width:40px;flex-shrink:0">1</div>
+          <div class="mrn-preview-orig">report_old.pdf</div>
+          <div class="mrn-preview-arrow">➔</div>
+          <div class="mrn-preview-new">report_new.pdf</div>
+        </div>
+        <div class="mrn-preview-row">
+          <div style="color:#94a3b8;font-size:12px;width:40px;flex-shrink:0">2</div>
+          <div class="mrn-preview-orig">メモ.docx</div>
+          <div class="mrn-preview-arrow">➔</div>
+          <div class="mrn-preview-new">メモ_new.docx</div>
+        </div>
+        <div class="mrn-preview-row">
+          <div style="color:#94a3b8;font-size:12px;width:40px;flex-shrink:0">3</div>
+          <div class="mrn-preview-orig">未変更.txt</div>
+          <div style="color:#94a3b8;font-weight:700;flex-shrink:0">=</div>
+          <div style="color:#94a3b8;font-size:13px">未変更.txt</div>
+        </div>
+      </div>
+      <table class="mrn-opt-table">
+        <thead><tr><th>表示</th><th>意味</th></tr></thead>
+        <tbody>
+          <tr><td>変更前</td><td>アップロードした元のファイル名</td></tr>
+          <tr><td>➔（青矢印）</td><td>ファイル名が変更されることを示します。変更後の名前は青文字で強調表示</td></tr>
+          <tr><td>=（グレー）</td><td>変更がないことを示します（置換モードで一致しなかった場合など）</td></tr>
+        </tbody>
+      </table>
+      <div class="mrn-tip" style="margin-top:10px">
+        💡 「LIVE」バッジがプレビュー見出しに表示されているときは、リアルタイムで更新されています。設定を変えるとすぐに結果が反映されます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== よくある質問 ========== -->
+  <section id="faq" class="mrn-section">
+    <div class="mrn-section-header">
+      <div class="mrn-section-icon" style="background:#dbeafe">❓</div>
+      <div>
+        <h2 class="mrn-section-title">よくある質問</h2>
+        <p class="mrn-section-desc">使い方で迷ったときはこちらを確認してください。</p>
+      </div>
+    </div>
+
+    <div class="mrn-acc-item">
+      <button class="mrn-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mrn-acc-q">元のファイルは消えませんか？</span>
+        <span class="mrn-acc-arrow">▼</span>
+      </button>
+      <div class="mrn-acc-body">消えません。一括リネームは、変換後の名前でファイルをZIPにまとめてダウンロードするだけです。元のファイルはお手元のPCにそのまま残ります。</div>
+    </div>
+
+    <div class="mrn-acc-item">
+      <button class="mrn-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mrn-acc-q">何ファイルまで一度に処理できますか？</span>
+        <span class="mrn-acc-arrow">▼</span>
+      </button>
+      <div class="mrn-acc-body">特定の上限は設定されていませんが、大量のファイル（数百件以上）や大容量ファイルを一度に処理するとブラウザやサーバーに負荷がかかる場合があります。プレビューは何ファイルでも表示できますが、ダウンロード時は数十件ずつ分けて処理することをおすすめします。</div>
+    </div>
+
+    <div class="mrn-acc-item">
+      <button class="mrn-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mrn-acc-q">日本語のファイル名は使えますか？</span>
+        <span class="mrn-acc-arrow">▼</span>
+      </button>
+      <div class="mrn-acc-body">はい。日本語（ひらがな・カタカナ・漢字）のファイル名をそのまま使えます。ただし一部の特殊文字（&lt; &gt; : " | ? *）はOS互換のため自動で除去されます。先頭のドット（.）も除去されます。</div>
+    </div>
+
+    <div class="mrn-acc-item">
+      <button class="mrn-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mrn-acc-q">変換後のファイル名が重複するとどうなりますか？</span>
+        <span class="mrn-acc-arrow">▼</span>
+      </button>
+      <div class="mrn-acc-body">ZIP内でファイル名が重複した場合、後から追加されたファイルの名前に番号が自動付加されます。プレビューで事前に重複がないか確認してください。</div>
+    </div>
+
+    <div class="mrn-acc-item">
+      <button class="mrn-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mrn-acc-q">「変換＆ダウンロード」ボタンが押せません。</span>
+        <span class="mrn-acc-arrow">▼</span>
+      </button>
+      <div class="mrn-acc-body">ファイルが1件も追加されていない場合はボタンが無効になります。最低1つのファイルを追加してください。ファイルを追加すると自動的にボタンが有効になります。</div>
+    </div>
+
+    <div class="mrn-acc-item">
+      <button class="mrn-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mrn-acc-q">文字列置換で「見つからない」文字列を指定するとどうなりますか？</span>
+        <span class="mrn-acc-arrow">▼</span>
+      </button>
+      <div class="mrn-acc-body">その文字列が含まれないファイルは変更されず、元のファイル名のままダウンロードされます。プレビューでは「=」マークで変更なしと表示されます。</div>
+    </div>
+
+    <div class="mrn-acc-item">
+      <button class="mrn-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mrn-acc-q">正規表現モードで使える構文は何ですか？</span>
+        <span class="mrn-acc-arrow">▼</span>
+      </button>
+      <div class="mrn-acc-body">Python の <code>re.sub</code> に対応した正規表現が使えます。グループ参照は <code>\1</code>〜<code>\9</code> で行います。ただし後読み・先読みなどの複雑な構文は正しく動作しない場合があります。プレビューで必ず確認してください。パターンが無効な場合、そのファイルは変換されません。</div>
+    </div>
+
+    <div class="mrn-acc-item">
+      <button class="mrn-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mrn-acc-q">挿入モードの「位置」はどう数えますか？</span>
+        <span class="mrn-acc-arrow">▼</span>
+      </button>
+      <div class="mrn-acc-body">拡張子を除いたファイル名を対象に、先頭を0として数えます。例えば「report」というファイル名なら、0=先頭（r の前）、6=末尾（t の後）です。-1 は末尾の1文字手前（t の前）を意味します。プレビューで確認しながら調整してください。</div>
+    </div>
+
+    <div class="mrn-acc-item">
+      <button class="mrn-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mrn-acc-q">カスタムパターンで拡張子なしのファイルを処理するとどうなりますか？</span>
+        <span class="mrn-acc-arrow">▼</span>
+      </button>
+      <div class="mrn-acc-body">{ext} は拡張子がない場合は空文字列になります。{name} はファイル名全体になります。プレビューで確認してから処理してください。</div>
+    </div>
+
+  </section>
+
+</div><!-- /mrn-wrap -->
+
+
+<!-- ===== MODAL: 正規表現例 ===== -->
+<div id="modalRegex" class="mrn-modal-ov mrn-hidden">
+  <div class="mrn-modal-box">
+    <div class="mrn-modal-head">
+      <h3 class="mrn-modal-title">🔍 正規表現モードの例</h3>
+      <button class="mrn-modal-close" onclick="closeModal('modalRegex')">✕</button>
+    </div>
+    <table class="mrn-opt-table">
+      <thead><tr><th>パターン</th><th>置換文字列</th><th>変換例</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>(\d{4})(\d{2})(\d{2})</code></td>
+          <td><code>\1-\2-\3</code></td>
+          <td>file_20260520.txt → file_2026-05-20.txt</td>
+        </tr>
+        <tr>
+          <td><code>^IMG_</code></td>
+          <td>（空欄）</td>
+          <td>IMG_001.jpg → 001.jpg（先頭のIMG_を削除）</td>
+        </tr>
+        <tr>
+          <td><code>_v\d+</code></td>
+          <td>（空欄）</td>
+          <td>report_v2.pdf → report.pdf（バージョン番号を削除）</td>
+        </tr>
+        <tr>
+          <td><code>\s+</code></td>
+          <td>_</td>
+          <td>my file name.txt → my_file_name.txt（スペースをアンダースコアに）</td>
+        </tr>
+        <tr>
+          <td><code>(\w+)_(\w+)</code></td>
+          <td><code>\2_\1</code></td>
+          <td>first_second.txt → second_first.txt（2つの単語を入れ替え）</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="mrn-warn" style="margin-top:12px">
+      ⚠️ 正規表現が無効な場合、そのファイルは変換されません。プレビューで必ず確認してください。
+    </div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mrn-popup-btn" onclick="closeModal('modalRegex')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+  /* ---- Accordion ---- */
+  function toggleAcc(btn) {
+    btn.closest('.mrn-acc-item').classList.toggle('mrn-open');
+  }
+
+  /* ---- Modal ---- */
+  function openModal(id) {
+    document.getElementById(id).classList.remove('mrn-hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.add('mrn-hidden');
+    document.body.style.overflow = '';
+  }
+  document.querySelectorAll('.mrn-modal-ov').forEach(function(ov) {
+    ov.addEventListener('click', function(e) {
+      if (e.target === ov) closeModal(ov.id);
+    });
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.mrn-modal-ov:not(.mrn-hidden)').forEach(function(ov) {
+        closeModal(ov.id);
+      });
+    }
+  });
+
+  /* ---- Sticky nav active highlight ---- */
+  (function() {
+    var sections = document.querySelectorAll('.mrn-section[id]');
+    var navLinks = document.querySelectorAll('.mrn-nav-link[data-section]');
+    function onScroll() {
+      var scrollY = window.pageYOffset;
+      var active = null;
+      sections.forEach(function(sec) {
+        var top = sec.getBoundingClientRect().top + scrollY - 100;
+        if (scrollY >= top) active = sec.id;
+      });
+      navLinks.forEach(function(lnk) {
+        lnk.classList.toggle('mrn-active', lnk.dataset.section === active);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>
+{% endblock %}

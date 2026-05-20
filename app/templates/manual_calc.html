@@ -1,0 +1,997 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  html { scroll-behavior: smooth; }
+
+  /* ===== Sticky nav ===== */
+  .mcl-nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: #fff;
+    border-bottom: 2px solid #e2e8f0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .mcl-nav::-webkit-scrollbar { display: none; }
+  .mcl-nav-inner {
+    display: flex;
+    min-width: max-content;
+    padding: 0 12px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .mcl-nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #64748b;
+    border-bottom: 3px solid transparent;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .mcl-nav-link:hover { color: #4f46e5; }
+  .mcl-nav-link.mcl-active { color: #4f46e5; border-bottom-color: #4f46e5; }
+
+  /* ===== Layout ===== */
+  .mcl-wrap {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 16px 80px;
+  }
+  .mcl-section { padding-top: 52px; }
+  .mcl-section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #f1f5f9;
+  }
+  .mcl-section-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    font-size: 26px;
+    flex-shrink: 0;
+  }
+  .mcl-section-title { font-size: 22px; font-weight: 900; color: #0f172a; margin: 0 0 4px; }
+  .mcl-section-desc  { font-size: 14px; color: #64748b; margin: 0; line-height: 1.6; }
+
+  /* ===== Cards ===== */
+  .mcl-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 22px 24px;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+    margin-bottom: 12px;
+  }
+  .mcl-card-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ===== Feature grid ===== */
+  .mcl-feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 12px;
+  }
+  .mcl-feat-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 18px 14px;
+    text-align: center;
+    transition: box-shadow 0.15s;
+  }
+  .mcl-feat-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,0.10); }
+  .mcl-feat-emoji { font-size: 30px; line-height: 1; margin-bottom: 8px; }
+  .mcl-feat-name { font-size: 13px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+  .mcl-feat-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  /* ===== Step cards ===== */
+  .mcl-step {
+    display: flex;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(15,23,42,0.04);
+  }
+  .mcl-step-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    font-size: 16px; font-weight: 900;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    color: #fff;
+  }
+  .mcl-step-body { flex: 1; min-width: 0; }
+  .mcl-step-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 6px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .mcl-step-text { font-size: 14px; color: #475569; line-height: 1.7; margin: 0; }
+
+  /* ===== Callouts ===== */
+  .mcl-tip {
+    background: #f0fdf4; border-left: 4px solid #22c55e;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #166534;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mcl-warn {
+    background: #fff7ed; border-left: 4px solid #f97316;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #9a3412;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mcl-note {
+    background: #eff6ff; border-left: 4px solid #3b82f6;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #1e40af;
+    line-height: 1.65; margin: 8px 0;
+  }
+
+  /* ===== Tags ===== */
+  .mcl-tag {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700;
+  }
+  .mcl-tag-green  { background: #dcfce7; color: #16a34a; }
+  .mcl-tag-blue   { background: #dbeafe; color: #1d4ed8; }
+  .mcl-tag-indigo { background: #e0e7ff; color: #4338ca; }
+  .mcl-tag-gray   { background: #f1f5f9; color: #475569; }
+  .mcl-tag-orange { background: #ffedd5; color: #ea580c; }
+  .mcl-tag-purple { background: #f3e8ff; color: #7e22ce; }
+
+  /* ===== Bullet list ===== */
+  .mcl-ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+  .mcl-ul li {
+    display: flex; gap: 8px; align-items: flex-start;
+    font-size: 14px; color: #334155; line-height: 1.6;
+  }
+  .mcl-ul li::before {
+    content: "▶"; color: #4f46e5; font-size: 10px;
+    margin-top: 4px; flex-shrink: 0;
+  }
+
+  /* ===== Option table ===== */
+  .mcl-opt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .mcl-opt-table th {
+    background: #f8fafc; padding: 10px 12px;
+    text-align: left; font-size: 12px; font-weight: 700;
+    color: #64748b; border-bottom: 1px solid #e2e8f0;
+  }
+  .mcl-opt-table td {
+    padding: 10px 12px; border-bottom: 1px solid #f1f5f9;
+    color: #334155; vertical-align: top; line-height: 1.6;
+  }
+  .mcl-opt-table td:first-child { font-weight: 700; color: #0f172a; white-space: nowrap; }
+  .mcl-opt-table tr:last-child td { border-bottom: 0; }
+
+  /* ===== Divider ===== */
+  .mcl-divider { border: 0; border-top: 1px solid #f1f5f9; margin: 18px 0; }
+
+  /* ===== Grid 2col ===== */
+  .mcl-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .mcl-grid2 { grid-template-columns: 1fr; } }
+
+  /* ===== Key mock ===== */
+  .mcl-key-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    max-width: 280px;
+    margin: 10px 0;
+  }
+  .mcl-key {
+    display: flex; align-items: center; justify-content: center;
+    height: 44px; border-radius: 10px;
+    font-size: 14px; font-weight: 800;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc; color: #0f172a;
+  }
+  .mcl-key.is-operator { background: #ede9fe; color: #4f46e5; border-color: #c7d2fe; }
+  .mcl-key.is-danger   { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+  .mcl-key.is-equals   { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+  .mcl-key.is-memory   { background: #fef3c7; color: #d97706; border-color: #fcd34d; }
+  .mcl-key.is-soft     { background: #f1f5f9; color: #334155; border-color: #e2e8f0; }
+  .mcl-key.is-wide     { grid-column: span 2; }
+
+  /* ===== Display mock ===== */
+  .mcl-display-mock {
+    background: #0f172a; border-radius: 12px; padding: 16px 18px;
+    color: #fff; margin: 10px 0;
+  }
+  .mcl-display-expr { font-size: 13px; color: #94a3b8; font-family: monospace; min-height: 18px; }
+  .mcl-display-result { font-size: 32px; font-weight: 900; font-family: monospace; margin: 4px 0; }
+  .mcl-display-memory { font-size: 11px; color: #64748b; margin-top: 6px; }
+
+  /* ===== Accordion ===== */
+  .mcl-acc-item {
+    border: 1px solid #e2e8f0; border-radius: 13px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .mcl-acc-trigger {
+    width: 100%; text-align: left; padding: 15px 18px;
+    background: #fff; border: 0; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 700; color: #0f172a;
+    line-height: 1.5; gap: 12px;
+  }
+  .mcl-acc-trigger:hover { background: #f8fafc; }
+  .mcl-acc-q { flex: 1; text-align: left; }
+  .mcl-acc-arrow { font-size: 11px; color: #94a3b8; transition: transform 0.2s; flex-shrink: 0; }
+  .mcl-acc-item.mcl-open .mcl-acc-arrow { transform: rotate(180deg); }
+  .mcl-acc-body { display: none; padding: 2px 18px 15px; font-size: 14px; color: #475569; line-height: 1.75; }
+  .mcl-acc-item.mcl-open .mcl-acc-body { display: block; }
+
+  /* ===== Modal ===== */
+  .mcl-modal-ov {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.52);
+    z-index: 200; display: flex; align-items: center;
+    justify-content: center; padding: 16px;
+  }
+  .mcl-modal-ov.mcl-hidden { display: none !important; }
+  .mcl-modal-box {
+    background: #fff; border-radius: 20px;
+    max-width: 560px; width: 100%;
+    max-height: 88vh; overflow-y: auto;
+    padding: 28px;
+    box-shadow: 0 28px 56px rgba(0,0,0,0.22);
+    animation: mcl-modal-in 0.18s ease;
+  }
+  @keyframes mcl-modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .mcl-modal-head {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; margin-bottom: 18px;
+  }
+  .mcl-modal-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; line-height: 1.4; }
+  .mcl-modal-close {
+    border: 0; background: #f1f5f9; border-radius: 9px;
+    width: 34px; height: 34px; cursor: pointer;
+    font-size: 16px; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+    color: #64748b; margin-left: 12px;
+  }
+  .mcl-modal-close:hover { background: #e2e8f0; }
+
+  /* ===== Popup button ===== */
+  .mcl-popup-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px; border: 1.5px solid #cbd5e1;
+    border-radius: 9px; background: #f8fafc;
+    font-size: 12px; font-weight: 700; color: #4f46e5;
+    cursor: pointer; margin: 4px 0; transition: background 0.15s;
+  }
+  .mcl-popup-btn:hover { background: #eef2ff; border-color: #a5b4fc; }
+
+  /* ===== Hero ===== */
+  .mcl-hero-bar {
+    background: linear-gradient(135deg, #312e81 0%, #4f46e5 48%, #7c3aed 100%);
+    padding: 40px 24px 36px; text-align: center; color: #fff;
+  }
+  .mcl-hero-bar h1 { font-size: 34px; font-weight: 900; margin: 0 0 6px; }
+  .mcl-hero-bar p { font-size: 15px; opacity: 0.9; margin: 0 0 22px; }
+  .mcl-hero-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .mcl-hero-btn {
+    padding: 11px 22px; border-radius: 12px;
+    font-size: 14px; font-weight: 700; text-decoration: none;
+    border: 2px solid #fff; transition: opacity 0.15s;
+  }
+  .mcl-hero-btn:hover { opacity: 0.85; }
+  .mcl-hero-btn-primary  { background: #fff; color: #4f46e5; }
+  .mcl-hero-btn-secondary { background: transparent; color: #fff; }
+
+  /* ===== KB shortcut ===== */
+  .mcl-kbd {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #f1f5f9; border: 1px solid #cbd5e1;
+    border-radius: 6px; padding: 2px 7px;
+    font-size: 12px; font-weight: 700; font-family: monospace;
+    color: #0f172a;
+  }
+</style>
+
+<!-- ===== Hero ===== -->
+<div class="mcl-hero-bar">
+  <h1>🧮 電卓 マニュアル</h1>
+  <p>四則演算・税計算・時間計算・メモリ機能をひとつにまとめた高機能電卓。</p>
+  <div class="mcl-hero-btns">
+    <a href="/tools/calc" class="mcl-hero-btn mcl-hero-btn-primary">ツールを開く</a>
+    <a href="/" class="mcl-hero-btn mcl-hero-btn-secondary">ダッシュボードへ戻る</a>
+  </div>
+</div>
+
+<!-- ===== Sticky nav ===== -->
+<div class="mcl-nav" id="mclNav">
+  <div class="mcl-nav-inner">
+    <a href="#overview"  class="mcl-nav-link" data-section="overview">📋 概要</a>
+    <a href="#basic"     class="mcl-nav-link" data-section="basic">🔢 通常計算</a>
+    <a href="#memory"    class="mcl-nav-link" data-section="memory">💾 メモリ</a>
+    <a href="#tax"       class="mcl-nav-link" data-section="tax">🧾 税計算</a>
+    <a href="#time"      class="mcl-nav-link" data-section="time">⏰ 時間計算</a>
+    <a href="#history"   class="mcl-nav-link" data-section="history">📝 履歴</a>
+    <a href="#keyboard"  class="mcl-nav-link" data-section="keyboard">⌨️ キーボード</a>
+    <a href="#faq"       class="mcl-nav-link" data-section="faq">❓ よくある質問</a>
+  </div>
+</div>
+
+<!-- ===== Main content ===== -->
+<div class="mcl-wrap">
+
+  <!-- ========== 概要 ========== -->
+  <section id="overview" class="mcl-section">
+    <div class="mcl-section-header">
+      <div class="mcl-section-icon" style="background:#e0e7ff">📋</div>
+      <div>
+        <h2 class="mcl-section-title">電卓 でできること</h2>
+        <p class="mcl-section-desc">3つのモード（通常・税計算・時間計算）で日常的な計算をすべてカバーします。キーボードでも快適に操作でき、履歴に保存して再利用もできます。</p>
+      </div>
+    </div>
+
+    <div class="mcl-feat-grid">
+      <div class="mcl-feat-card">
+        <div class="mcl-feat-emoji">🔢</div>
+        <div class="mcl-feat-name">四則演算</div>
+        <div class="mcl-feat-desc">加減乗除・かっこ・小数・パーセント対応</div>
+      </div>
+      <div class="mcl-feat-card">
+        <div class="mcl-feat-emoji">💾</div>
+        <div class="mcl-feat-name">メモリ</div>
+        <div class="mcl-feat-desc">M+・M-・MR・MCで途中値を一時保存</div>
+      </div>
+      <div class="mcl-feat-card">
+        <div class="mcl-feat-emoji">🧾</div>
+        <div class="mcl-feat-name">税計算</div>
+        <div class="mcl-feat-desc">税込・税抜を瞬時に計算。カスタム税率対応</div>
+      </div>
+      <div class="mcl-feat-card">
+        <div class="mcl-feat-emoji">⏰</div>
+        <div class="mcl-feat-name">時間計算</div>
+        <div class="mcl-feat-desc">HH:MM形式で時間の足し引きが可能</div>
+      </div>
+      <div class="mcl-feat-card">
+        <div class="mcl-feat-emoji">📝</div>
+        <div class="mcl-feat-name">履歴</div>
+        <div class="mcl-feat-desc">計算結果を最大50件保存・再利用</div>
+      </div>
+      <div class="mcl-feat-card">
+        <div class="mcl-feat-emoji">⌨️</div>
+        <div class="mcl-feat-name">キーボード操作</div>
+        <div class="mcl-feat-desc">マウスレスで全操作が完結</div>
+      </div>
+      <div class="mcl-feat-card">
+        <div class="mcl-feat-emoji">📋</div>
+        <div class="mcl-feat-name">コピー</div>
+        <div class="mcl-feat-desc">結果をワンクリックでコピー</div>
+      </div>
+      <div class="mcl-feat-card">
+        <div class="mcl-feat-emoji">±</div>
+        <div class="mcl-feat-name">符号反転</div>
+        <div class="mcl-feat-desc">正負を瞬時に切り替え</div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px">
+      <div class="mcl-card">
+        <div class="mcl-card-title">🖥️ 画面の基本構成</div>
+        <table class="mcl-opt-table">
+          <thead><tr><th>エリア</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td>モードタブ</td><td>「通常」「税計算」「時間計算」の3つのタブ。クリックで切り替えます。</td></tr>
+            <tr><td>ディスプレイ（通常モード）</td><td>入力中の式（上段）と計算結果（下段大文字）が表示されます。</td></tr>
+            <tr><td>キーパッド</td><td>数字・演算子・機能ボタンが並びます。クリックまたはキーボードで操作できます。</td></tr>
+            <tr><td>メモリ表示</td><td>ヘッダーの「MEMORY」欄に現在のメモリ値が表示されます。</td></tr>
+            <tr><td>履歴パネル（右）</td><td>全モードの計算履歴が新しい順に表示されます。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 通常計算 ========== -->
+  <section id="basic" class="mcl-section">
+    <div class="mcl-section-header">
+      <div class="mcl-section-icon" style="background:#e0e7ff">🔢</div>
+      <div>
+        <h2 class="mcl-section-title">通常計算</h2>
+        <p class="mcl-section-desc">四則演算（加減乗除）を中心に、かっこ・小数・パーセント・符号反転が使えます。キーパッドかキーボードで入力できます。</p>
+      </div>
+    </div>
+
+    <!-- ディスプレイの説明 -->
+    <div class="mcl-card">
+      <div class="mcl-card-title">🖥️ ディスプレイの見方</div>
+      <div class="mcl-display-mock">
+        <div class="mcl-display-expr">1200 + 300 * 2</div>
+        <div class="mcl-display-result">1,800</div>
+        <div class="mcl-display-memory">MEMORY: 0</div>
+      </div>
+      <table class="mcl-opt-table" style="margin-top:12px">
+        <thead><tr><th>表示</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>上段（式）</td><td>現在入力中または計算した式が表示されます</td></tr>
+          <tr><td>下段（結果）</td><td>= を押した後に計算結果が大きく表示されます。カンマ区切りの数値形式です</td></tr>
+          <tr><td>ステータス</td><td>エラーメッセージが表示されます（例：「0で割ることはできません。」）</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- キーボードの説明 -->
+    <div class="mcl-card">
+      <div class="mcl-card-title" style="justify-content:space-between">
+        <span>🎹 キーパッドの各ボタン</span>
+        <button class="mcl-popup-btn" onclick="openModal('modalKeypad')">全ボタン一覧 ▼</button>
+      </div>
+
+      <div class="mcl-key-grid">
+        <div class="mcl-key is-danger">AC</div>
+        <div class="mcl-key is-soft">←</div>
+        <div class="mcl-key is-soft">(</div>
+        <div class="mcl-key is-soft">)</div>
+        <div class="mcl-key is-memory">MC</div>
+        <div class="mcl-key is-memory">MR</div>
+        <div class="mcl-key is-memory">M-</div>
+        <div class="mcl-key is-memory">M+</div>
+        <div class="mcl-key">7</div>
+        <div class="mcl-key">8</div>
+        <div class="mcl-key">9</div>
+        <div class="mcl-key is-operator">÷</div>
+        <div class="mcl-key">4</div>
+        <div class="mcl-key">5</div>
+        <div class="mcl-key">6</div>
+        <div class="mcl-key is-operator">×</div>
+        <div class="mcl-key">1</div>
+        <div class="mcl-key">2</div>
+        <div class="mcl-key">3</div>
+        <div class="mcl-key is-operator">−</div>
+        <div class="mcl-key is-soft">±</div>
+        <div class="mcl-key">0</div>
+        <div class="mcl-key">.</div>
+        <div class="mcl-key is-operator">+</div>
+        <div class="mcl-key is-soft">%</div>
+        <div class="mcl-key is-soft">コピー</div>
+        <div class="mcl-key is-equals is-wide">=</div>
+      </div>
+
+      <table class="mcl-opt-table" style="margin-top:12px">
+        <thead><tr><th style="width:80px">ボタン</th><th>機能</th></tr></thead>
+        <tbody>
+          <tr><td>AC</td><td>入力をすべてクリアして最初の状態に戻します（All Clear）</td></tr>
+          <tr><td>←</td><td>式の末尾の1文字を削除します（バックスペース）</td></tr>
+          <tr><td>( )</td><td>かっこを挿入します。計算の優先順位を指定できます（例：<code>(1+2)*3</code>）</td></tr>
+          <tr><td>±</td><td>現在の数値または結果の符号を正負に切り替えます</td></tr>
+          <tr><td>%</td><td>数値を100で割った値に変換します（例：50% → 0.5）。割引計算などに使います</td></tr>
+          <tr><td>コピー</td><td>現在の計算結果をクリップボードにコピーします</td></tr>
+          <tr><td>=</td><td>式を計算して結果を表示します</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 続けて計算 -->
+    <div class="mcl-card">
+      <div class="mcl-card-title">🔄 結果から続けて計算する</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">= を押して結果が出た後の操作には2つのパターンがあります。</p>
+      <div class="mcl-grid2">
+        <div style="background:#f0fdf4;border-radius:12px;padding:14px">
+          <div style="font-size:13px;font-weight:800;color:#166534;margin-bottom:8px">📌 数字を押した場合</div>
+          <p style="font-size:13px;color:#475569;margin:0">結果はクリアされ、新しい式の入力が始まります。<br>例：結果 <code>100</code> → <code>5</code> を押す → 式 <code>5</code> から開始</p>
+        </div>
+        <div style="background:#eff6ff;border-radius:12px;padding:14px">
+          <div style="font-size:13px;font-weight:800;color:#1d4ed8;margin-bottom:8px">📌 演算子を押した場合</div>
+          <p style="font-size:13px;color:#475569;margin:0">結果の値を使って計算が続きます。<br>例：結果 <code>100</code> → <code>+</code> を押す → <code>100 +</code> から続行</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- パーセントの使い方 -->
+    <div class="mcl-card">
+      <div class="mcl-card-title">💡 パーセント (%) の使い方</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">% ボタンは数値の直後に押すと100分の1に変換します。以下のように使います。</p>
+      <table class="mcl-opt-table">
+        <thead><tr><th>入力例</th><th>結果</th><th>用途</th></tr></thead>
+        <tbody>
+          <tr><td><code>1000 * 10%</code></td><td>100</td><td>1000 の 10% を計算</td></tr>
+          <tr><td><code>1000 + 1000 * 10%</code></td><td>1100</td><td>10% 増しを計算</td></tr>
+          <tr><td><code>1000 - 1000 * 20%</code></td><td>800</td><td>20% 引きを計算</td></tr>
+          <tr><td><code>500%</code></td><td>5</td><td>500% = 5倍</td></tr>
+        </tbody>
+      </table>
+      <div class="mcl-tip" style="margin-top:10px">
+        💡 消費税の計算（税込・税抜）は「税計算」タブを使うほうが簡単で確実です。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== メモリ ========== -->
+  <section id="memory" class="mcl-section">
+    <div class="mcl-section-header">
+      <div class="mcl-section-icon" style="background:#fef9c3">💾</div>
+      <div>
+        <h2 class="mcl-section-title">メモリ機能</h2>
+        <p class="mcl-section-desc">途中の値を一時保存して後で呼び出せます。複数の小計を積み上げるような計算に便利です。</p>
+      </div>
+    </div>
+
+    <div class="mcl-card">
+      <div class="mcl-card-title">💾 メモリボタンの機能</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 14px">通常モードのキーパッド上部に4つのメモリボタンがあります。現在のメモリ値はヘッダーの「MEMORY」欄に常時表示されます。</p>
+      <table class="mcl-opt-table">
+        <thead><tr><th style="width:80px">ボタン</th><th>機能</th><th>使い方の例</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:6px;font-weight:800">MC</span></td>
+            <td>Memory Clear — メモリを 0 にリセットします</td>
+            <td>計算をリセットして最初からやり直すとき</td>
+          </tr>
+          <tr>
+            <td><span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:6px;font-weight:800">MR</span></td>
+            <td>Memory Recall — 保存している値を式に入力します</td>
+            <td>保存した小計を別の計算に使いたいとき</td>
+          </tr>
+          <tr>
+            <td><span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:6px;font-weight:800">M−</span></td>
+            <td>Memory Subtract — 現在の入力値をメモリから引きます</td>
+            <td>複数の出費をメモリから差し引きするとき</td>
+          </tr>
+          <tr>
+            <td><span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:6px;font-weight:800">M+</span></td>
+            <td>Memory Add — 現在の入力値をメモリに足します</td>
+            <td>複数の小計をメモリに積み上げていくとき</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 使用例 -->
+    <div class="mcl-card">
+      <div class="mcl-card-title">📖 メモリの使用例</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 12px">複数の項目の合計を別々に計算してから積み上げる例：</p>
+      <table class="mcl-opt-table">
+        <thead><tr><th>操作</th><th>メモリの値</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr><td>MC を押す</td><td>0</td><td>まずメモリをクリア</td></tr>
+          <tr><td><code>1200 + 800 =</code> → M+</td><td>2,000</td><td>A商品の小計 2,000 をメモリに加算</td></tr>
+          <tr><td><code>500 * 3 =</code> → M+</td><td>3,500</td><td>B商品の小計 1,500 をメモリに追加</td></tr>
+          <tr><td><code>300 =</code> → M−</td><td>3,200</td><td>割引 300 をメモリから減算</td></tr>
+          <tr><td>MR を押す</td><td>3,200</td><td>最終合計 3,200 を式に入力</td></tr>
+        </tbody>
+      </table>
+      <div class="mcl-note" style="margin-top:10px">
+        ℹ️ M+ / M− を押したとき、= 押下後の結果がある場合はその結果値が、式入力中の場合は現在の式の値がメモリに加減算されます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 税計算 ========== -->
+  <section id="tax" class="mcl-section">
+    <div class="mcl-section-header">
+      <div class="mcl-section-icon" style="background:#fef3c7">🧾</div>
+      <div>
+        <h2 class="mcl-section-title">税計算</h2>
+        <p class="mcl-section-desc">金額と税率を入力するだけで「税込金額」「税抜金額」「税額」を瞬時に計算します。8%・10%・カスタム税率に対応しています。</p>
+      </div>
+    </div>
+
+    <div class="mcl-step">
+      <div class="mcl-step-badge">1</div>
+      <div class="mcl-step-body">
+        <div class="mcl-step-title">金額と税率を入力する</div>
+        <p class="mcl-step-text">「金額」欄に計算したい金額を入力します。「税率」欄で10%・8%・カスタムを選択します。カスタムを選ぶと任意の税率を入力できます。</p>
+        <div class="mcl-tip" style="margin-top:10px">
+          💡 カスタム税率は入力した値が自動で保存され、次回開いたときに引き継がれます。
+        </div>
+      </div>
+    </div>
+
+    <div class="mcl-step">
+      <div class="mcl-step-badge">2</div>
+      <div class="mcl-step-body">
+        <div class="mcl-step-title">「税込」または「税抜」ボタンを押す</div>
+        <p class="mcl-step-text">計算したい方向に合わせてボタンを選びます。</p>
+        <hr class="mcl-divider">
+        <div class="mcl-grid2" style="margin-top:8px">
+          <div style="background:#f0fdf4;border-radius:12px;padding:14px">
+            <div style="font-size:13px;font-weight:800;color:#166534;margin-bottom:6px">🧾 税込ボタン</div>
+            <p style="font-size:13px;color:#475569;margin:0">税抜の金額から → 税込合計を求めます<br><br>例：本体 1,000円 + 税10%<br>→ 税額 100円、税込 1,100円</p>
+          </div>
+          <div style="background:#eff6ff;border-radius:12px;padding:14px">
+            <div style="font-size:13px;font-weight:800;color:#1d4ed8;margin-bottom:6px">🧾 税抜ボタン</div>
+            <p style="font-size:13px;color:#475569;margin:0">税込の金額から → 税抜本体を求めます<br><br>例：税込 1,100円 → 税10%<br>→ 本体 1,000円、税額 100円</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 結果の見方 -->
+    <div class="mcl-card">
+      <div class="mcl-card-title">📊 結果の見方</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;font-family:monospace;font-size:14px;color:#0f172a;margin-bottom:12px;white-space:pre-line">税込: 1,100円
+税額: 100円
+本体: 1,000円</div>
+      <table class="mcl-opt-table">
+        <thead><tr><th>項目</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>税込</td><td>税を含めた合計金額（円）</td></tr>
+          <tr><td>税額</td><td>消費税の金額（円）。端数は四捨五入されます</td></tr>
+          <tr><td>本体</td><td>税を除いた本体金額（円）</td></tr>
+        </tbody>
+      </table>
+      <div class="mcl-note" style="margin-top:10px">
+        ℹ️ 税額の端数処理：「税込」計算では <code>Math.round(本体 × 税率 ÷ 100)</code>、「税抜」計算では <code>Math.round(税込 ÷ (1 + 税率 ÷ 100))</code> で計算されます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 時間計算 ========== -->
+  <section id="time" class="mcl-section">
+    <div class="mcl-section-header">
+      <div class="mcl-section-icon" style="background:#fce7f3">⏰</div>
+      <div>
+        <h2 class="mcl-section-title">時間計算</h2>
+        <p class="mcl-section-desc">「HH:MM」形式で時間を入力し、加減算・乗除算ができます。労働時間の合計や残業時間の計算などに使えます。</p>
+      </div>
+    </div>
+
+    <div class="mcl-step">
+      <div class="mcl-step-badge">1</div>
+      <div class="mcl-step-body">
+        <div class="mcl-step-title">時間式を入力する</div>
+        <p class="mcl-step-text">「時間式」欄に計算したい時間の式を入力します。時間は <code>時間:分</code> の形式（例：<code>1:30</code>）で入力します。</p>
+        <hr class="mcl-divider">
+        <table class="mcl-opt-table">
+          <thead><tr><th>入力例</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td><code>1:30 + 0:45</code></td><td>1時間30分 + 45分 = 2時間15分</td></tr>
+            <tr><td><code>8:00 - 1:30</code></td><td>8時間 − 1時間30分 = 6時間30分</td></tr>
+            <tr><td><code>0:30 * 4</code></td><td>30分 × 4 = 2時間（整数の乗算も可）</td></tr>
+            <tr><td><code>9:00 - 12:30</code></td><td>マイナスの場合は「-3:30」のように符号付きで表示</td></tr>
+            <tr><td><code>8:00 + 8:00 + 9:00</code></td><td>3つ以上を足すことも可能</td></tr>
+          </tbody>
+        </table>
+        <div class="mcl-warn" style="margin-top:10px">
+          ⚠️ 時間値は必ず <code>HH:MM</code> または <code>H:MM</code> の形式で入力してください。<code>:MM</code> は 00〜59 の範囲です。整数（例：<code>3</code>）を時間として使うことはできません。
+        </div>
+      </div>
+    </div>
+
+    <div class="mcl-step">
+      <div class="mcl-step-badge">2</div>
+      <div class="mcl-step-body">
+        <div class="mcl-step-title">時間入力パッドを使う</div>
+        <p class="mcl-step-text">画面に表示される数字パッドで入力することもできます。テキスト欄に直接キーボードで打ち込んでもかまいません。</p>
+        <hr class="mcl-divider">
+        <table class="mcl-opt-table">
+          <thead><tr><th>パッドのボタン</th><th>機能</th></tr></thead>
+          <tbody>
+            <tr><td>数字 0〜9</td><td>数字を入力します</td></tr>
+            <tr><td>:</td><td>コロン（時間と分の区切り）を入力します</td></tr>
+            <tr><td>00</td><td>「00」を入力します。分の入力を素早く行えます</td></tr>
+            <tr><td>+・−</td><td>加算・減算の演算子を入力します</td></tr>
+            <tr><td>⌫（←）</td><td>入力欄のカーソル前の1文字を削除します</td></tr>
+            <tr><td>AC</td><td>時間式の入力をすべてクリアします</td></tr>
+            <tr><td>=</td><td>時間式を計算して結果を表示します</td></tr>
+            <tr><td>コピー</td><td>結果の時間（HH:MM形式）をコピーします</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 結果の見方 -->
+    <div class="mcl-card">
+      <div class="mcl-card-title">📊 結果の見方</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;font-family:monospace;font-size:14px;color:#0f172a;margin-bottom:12px;white-space:pre-line">2:15
+135分</div>
+      <table class="mcl-opt-table">
+        <thead><tr><th>項目</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>1行目（HH:MM）</td><td>計算結果を時間:分の形式で表示します。24時間を超えても時間部分がそのまま増加します（例：25:30）</td></tr>
+          <tr><td>2行目（○分）</td><td>計算結果を分単位の整数で表示します</td></tr>
+        </tbody>
+      </table>
+      <div class="mcl-tip" style="margin-top:10px">
+        💡 「コピー」ボタンで HH:MM 形式の1行目だけがクリップボードにコピーされます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 履歴 ========== -->
+  <section id="history" class="mcl-section">
+    <div class="mcl-section-header">
+      <div class="mcl-section-icon" style="background:#e0e7ff">📝</div>
+      <div>
+        <h2 class="mcl-section-title">履歴</h2>
+        <p class="mcl-section-desc">通常・税計算・時間計算のすべての計算結果が自動的に履歴に記録されます。最大50件保存でき、再利用・コピー・削除が可能です。</p>
+      </div>
+    </div>
+
+    <div class="mcl-card">
+      <div class="mcl-card-title">📋 履歴に記録される内容</div>
+      <table class="mcl-opt-table">
+        <thead><tr><th>モード</th><th>履歴のサマリー例</th></tr></thead>
+        <tbody>
+          <tr><td>通常</td><td><code>1200+300*2 = 1,800</code></td></tr>
+          <tr><td>税計算</td><td><code>税込 1,100円</code></td></tr>
+          <tr><td>時間計算</td><td><code>1:30+0:45 = 2:15</code></td></tr>
+        </tbody>
+      </table>
+      <p style="font-size:13px;color:#64748b;margin:10px 0 0">各履歴には計算日時も表示されます。</p>
+    </div>
+
+    <div class="mcl-card">
+      <div class="mcl-card-title">⚙️ 履歴の操作</div>
+      <table class="mcl-opt-table">
+        <thead><tr><th>ボタン</th><th>機能</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>再利用</td>
+            <td>
+              その計算の入力状態を復元します。<br>
+              ・通常モード：式と結果を復元します<br>
+              ・時間計算モード：時間式を復元します<br>
+              ・税計算モード：税計算タブに切り替わります（値は復元されません）
+            </td>
+          </tr>
+          <tr>
+            <td>コピー</td>
+            <td>その計算の結果をクリップボードにコピーします</td>
+          </tr>
+          <tr>
+            <td>削除</td>
+            <td>その履歴項目を一覧から削除します</td>
+          </tr>
+          <tr>
+            <td>全消去</td>
+            <td>履歴パネル右上の「全消去」ボタンですべての履歴を一括削除します</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="mcl-note" style="margin-top:10px">
+        ℹ️ 履歴はブラウザの localStorage に保存されます。同じブラウザ・同じデバイスのみで共有されます。ブラウザのデータをクリアすると履歴も消えます。最大50件を超えると古いものから自動削除されます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== キーボード ========== -->
+  <section id="keyboard" class="mcl-section">
+    <div class="mcl-section-header">
+      <div class="mcl-section-icon" style="background:#e0e7ff">⌨️</div>
+      <div>
+        <h2 class="mcl-section-title">キーボードショートカット</h2>
+        <p class="mcl-section-desc">通常モードではキーボードで全操作が可能です。他の入力欄（テキストボックスなど）にフォーカスがない状態で有効です。</p>
+      </div>
+    </div>
+
+    <div class="mcl-card">
+      <div class="mcl-card-title">⌨️ 通常モードのキーボード操作</div>
+      <table class="mcl-opt-table">
+        <thead><tr><th>キー</th><th>機能</th></tr></thead>
+        <tbody>
+          <tr><td><span class="mcl-kbd">0</span> 〜 <span class="mcl-kbd">9</span></td><td>数字を入力します</td></tr>
+          <tr><td><span class="mcl-kbd">.</span></td><td>小数点を入力します</td></tr>
+          <tr><td><span class="mcl-kbd">+</span></td><td>加算演算子を入力します</td></tr>
+          <tr><td><span class="mcl-kbd">-</span></td><td>減算演算子を入力します（先頭で押すと負の数の入力になります）</td></tr>
+          <tr><td><span class="mcl-kbd">*</span></td><td>乗算演算子を入力します</td></tr>
+          <tr><td><span class="mcl-kbd">/</span></td><td>除算演算子を入力します</td></tr>
+          <tr><td><span class="mcl-kbd">(</span></td><td>左かっこを入力します</td></tr>
+          <tr><td><span class="mcl-kbd">)</span></td><td>右かっこを入力します</td></tr>
+          <tr><td><span class="mcl-kbd">%</span></td><td>パーセントを入力します</td></tr>
+          <tr><td><span class="mcl-kbd">Enter</span></td><td>計算を実行します（= ボタンと同じ）</td></tr>
+          <tr><td><span class="mcl-kbd">Backspace</span></td><td>末尾の1文字を削除します（← ボタンと同じ）</td></tr>
+          <tr><td><span class="mcl-kbd">Esc</span></td><td>入力をすべてクリアします（AC ボタンと同じ）</td></tr>
+        </tbody>
+      </table>
+      <div class="mcl-note" style="margin-top:10px">
+        ℹ️ 税計算や時間計算のタブに切り替えているとき、または他の入力フィールドにフォーカスがある場合は、キーボードショートカットは無効になります。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== よくある質問 ========== -->
+  <section id="faq" class="mcl-section">
+    <div class="mcl-section-header">
+      <div class="mcl-section-icon" style="background:#e0e7ff">❓</div>
+      <div>
+        <h2 class="mcl-section-title">よくある質問</h2>
+        <p class="mcl-section-desc">使い方で迷ったときはこちらを確認してください。</p>
+      </div>
+    </div>
+
+    <div class="mcl-acc-item">
+      <button class="mcl-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mcl-acc-q">マウスだけで使えますか？</span>
+        <span class="mcl-acc-arrow">▼</span>
+      </button>
+      <div class="mcl-acc-body">はい。画面のボタンをクリックするだけですべての操作ができます。キーボードは使わなくても問題ありません。</div>
+    </div>
+
+    <div class="mcl-acc-item">
+      <button class="mcl-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mcl-acc-q">キーボードでも使えますか？</span>
+        <span class="mcl-acc-arrow">▼</span>
+      </button>
+      <div class="mcl-acc-body">はい。通常モードでは数字・演算子（+ - * / % . ( )）・Enter・Backspace・Escapeがそのまま使えます。他の入力欄にフォーカスがない状態で有効です。</div>
+    </div>
+
+    <div class="mcl-acc-item">
+      <button class="mcl-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mcl-acc-q">= を押した後、そのまま数字を押すとどうなりますか？</span>
+        <span class="mcl-acc-arrow">▼</span>
+      </button>
+      <div class="mcl-acc-body">結果がクリアされ、新しい式の入力が始まります。前の結果を使って続けて計算したい場合は、演算子（+・−・×・÷）を先に押してください。そうすると前の結果を引き継いで計算が続きます。</div>
+    </div>
+
+    <div class="mcl-acc-item">
+      <button class="mcl-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mcl-acc-q">「エラー」が表示されました。どうすれば？</span>
+        <span class="mcl-acc-arrow">▼</span>
+      </button>
+      <div class="mcl-acc-body">AC ボタンを押してクリアし、もう一度入力してください。主なエラーの原因：①0で割っている（例：<code>5 / 0</code>）②かっこが閉じていない（例：<code>(1+2</code>）③演算子が連続している（例：<code>1 ++ 2</code>）④式が不完全（例：<code>1 +</code>）などです。</div>
+    </div>
+
+    <div class="mcl-acc-item">
+      <button class="mcl-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mcl-acc-q">税率は変えられますか？</span>
+        <span class="mcl-acc-arrow">▼</span>
+      </button>
+      <div class="mcl-acc-body">はい。税計算タブで 10%・8%・カスタムから選べます。カスタムを選ぶと任意の数値を入力できます。入力したカスタム税率は次回起動時も引き継がれます。</div>
+    </div>
+
+    <div class="mcl-acc-item">
+      <button class="mcl-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mcl-acc-q">時間計算で「1:30」のように入力するとはどういう意味ですか？</span>
+        <span class="mcl-acc-arrow">▼</span>
+      </button>
+      <div class="mcl-acc-body">コロンの左が「時間」、右が「分」です。<code>1:30</code> は1時間30分、<code>0:45</code> は45分、<code>10:00</code> は10時間を意味します。分の部分は 00〜59 の範囲で入力してください。</div>
+    </div>
+
+    <div class="mcl-acc-item">
+      <button class="mcl-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mcl-acc-q">時間計算で24時間を超える結果は出せますか？</span>
+        <span class="mcl-acc-arrow">▼</span>
+      </button>
+      <div class="mcl-acc-body">はい。24時間を超えても時間部分がそのまま増加します。例えば30時間は「30:00」と表示され、「翌日06:00」のようには変換されません。月次の労働時間合計などに使えます。</div>
+    </div>
+
+    <div class="mcl-acc-item">
+      <button class="mcl-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mcl-acc-q">履歴は何件まで保存されますか？</span>
+        <span class="mcl-acc-arrow">▼</span>
+      </button>
+      <div class="mcl-acc-body">最大50件まで保存されます。51件目以降は最も古い履歴から自動で削除されます。ブラウザのlocalStorageを使っているため、同じブラウザ・同じデバイスのみで閲覧できます。</div>
+    </div>
+
+    <div class="mcl-acc-item">
+      <button class="mcl-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mcl-acc-q">メモリに保存した値はどこで確認できますか？</span>
+        <span class="mcl-acc-arrow">▼</span>
+      </button>
+      <div class="mcl-acc-body">ページ上部のヘッダーエリアにある「MEMORY」という表示の横に現在のメモリ値が常時表示されます。MC（メモリクリア）を押すと 0 にリセットされます。</div>
+    </div>
+
+    <div class="mcl-acc-item">
+      <button class="mcl-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mcl-acc-q">% ボタンはどういうときに使いますか？</span>
+        <span class="mcl-acc-arrow">▼</span>
+      </button>
+      <div class="mcl-acc-body">数値を100で割った値（= 小数）に変換します。例えば <code>1000 * 10%</code> と入力すると 1000 × 0.1 = 100 が計算されます。割引計算（<code>1000 - 1000 * 20%</code> = 800）や増加計算（<code>1000 + 1000 * 5%</code> = 1050）などで活用できます。消費税計算は「税計算」タブを使うほうが便利です。</div>
+    </div>
+
+  </section>
+
+</div><!-- /mcl-wrap -->
+
+
+<!-- ===== MODAL: 全ボタン一覧 ===== -->
+<div id="modalKeypad" class="mcl-modal-ov mcl-hidden">
+  <div class="mcl-modal-box">
+    <div class="mcl-modal-head">
+      <h3 class="mcl-modal-title">🎹 通常モード 全ボタン一覧</h3>
+      <button class="mcl-modal-close" onclick="closeModal('modalKeypad')">✕</button>
+    </div>
+    <table class="mcl-opt-table">
+      <thead><tr><th>ボタン</th><th>内部トークン</th><th>機能</th></tr></thead>
+      <tbody>
+        <tr><td>AC</td><td>clear</td><td>全クリア（All Clear）</td></tr>
+        <tr><td>←</td><td>backspace</td><td>末尾1文字削除</td></tr>
+        <tr><td>( )</td><td>( / )</td><td>かっこ挿入</td></tr>
+        <tr><td>MC</td><td>memory-clear</td><td>メモリを0にリセット</td></tr>
+        <tr><td>MR</td><td>memory-recall</td><td>メモリ値を式に挿入</td></tr>
+        <tr><td>M−</td><td>memory-subtract</td><td>現在値をメモリから減算</td></tr>
+        <tr><td>M+</td><td>memory-add</td><td>現在値をメモリに加算</td></tr>
+        <tr><td>7〜0</td><td>7〜0</td><td>数字入力</td></tr>
+        <tr><td>÷</td><td>/</td><td>除算</td></tr>
+        <tr><td>×</td><td>*</td><td>乗算</td></tr>
+        <tr><td>−</td><td>-</td><td>減算</td></tr>
+        <tr><td>+</td><td>+</td><td>加算</td></tr>
+        <tr><td>.</td><td>.</td><td>小数点</td></tr>
+        <tr><td>%</td><td>%</td><td>パーセント（÷100）</td></tr>
+        <tr><td>±</td><td>sign</td><td>符号の正負切り替え</td></tr>
+        <tr><td>コピー</td><td>copy</td><td>結果をクリップボードへコピー</td></tr>
+        <tr><td>=</td><td>equals</td><td>計算実行</td></tr>
+      </tbody>
+    </table>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mcl-popup-btn" onclick="closeModal('modalKeypad')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+  /* ---- Accordion ---- */
+  function toggleAcc(btn) {
+    btn.closest('.mcl-acc-item').classList.toggle('mcl-open');
+  }
+
+  /* ---- Modal ---- */
+  function openModal(id) {
+    document.getElementById(id).classList.remove('mcl-hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.add('mcl-hidden');
+    document.body.style.overflow = '';
+  }
+  document.querySelectorAll('.mcl-modal-ov').forEach(function(ov) {
+    ov.addEventListener('click', function(e) {
+      if (e.target === ov) closeModal(ov.id);
+    });
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.mcl-modal-ov:not(.mcl-hidden)').forEach(function(ov) {
+        closeModal(ov.id);
+      });
+    }
+  });
+
+  /* ---- Sticky nav active highlight ---- */
+  (function() {
+    var sections = document.querySelectorAll('.mcl-section[id]');
+    var navLinks = document.querySelectorAll('.mcl-nav-link[data-section]');
+    function onScroll() {
+      var scrollY = window.pageYOffset;
+      var active = null;
+      sections.forEach(function(sec) {
+        var top = sec.getBoundingClientRect().top + scrollY - 100;
+        if (scrollY >= top) active = sec.id;
+      });
+      navLinks.forEach(function(lnk) {
+        lnk.classList.toggle('mcl-active', lnk.dataset.section === active);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>
+{% endblock %}

@@ -5,7 +5,8 @@ from .navigation import NAV_ITEMS
 
 MANUALS: dict[str, dict] = {
     "datecalc": {
-        "title": "datecalcの使い方",
+        "template": "manual_datecalc.html",
+        "title": "日時計算ツール マニュアル",
         "summary": "日時を足し引きしたり、2つの日付の差を見たり、月をまたいで日付をずらしたりできる画面です。3つの計算欄があり、使いたい欄だけ入力してボタンを押せば、上の結果欄に答えが出ます。",
         "steps": [
             "日時計算ツールの画面を開きます。画面の上にタイトルが出ていて、その下に3つの計算欄があります。",
@@ -35,7 +36,8 @@ MANUALS: dict[str, dict] = {
         ],
     },
     "calc": {
-        "title": "calcの使い方",
+        "template": "manual_calc.html",
+        "title": "電卓 マニュアル",
         "summary": "calc は、四則演算、税計算、時間計算をまとめて扱える電卓です。履歴やメモリも使えるので、途中の計算を残しながら進められます。",
         "steps": [
             "通常、税計算、時間計算のタブから使いたいものを選びます。",
@@ -65,7 +67,8 @@ MANUALS: dict[str, dict] = {
         ],
     },
     "rename": {
-        "title": "ファイル名をまとめて変える使い方",
+        "template": "manual_rename.html",
+        "title": "一括リネーム マニュアル",
         "summary": "ファイルを入れて、名前の変え方を選び、下の見本を見ながら調整します。問題なければ、まとめて入ったファイルを受け取れます。",
         "steps": [
             "画面を開いたら、変えたいファイルを中央の枠に入れます。枠をクリックして選ぶことも、ドラッグして置くこともできます。",
@@ -92,7 +95,8 @@ MANUALS: dict[str, dict] = {
         ],
     },
     "compress": {
-        "title": "ファイルをまとめて圧縮する",
+        "template": "manual_compress.html",
+        "title": "ファイル圧縮 マニュアル",
         "summary": "選んだファイルをひとつの圧縮ファイルにまとめて、ダウンロードできる画面です。ZIP、TAR、TAR.GZを選べます。",
         "steps": [
             "画面の中央の枠に、まとめたいファイルをドラッグします。枠をクリックして、ファイルを選ぶこともできます。",

@@ -1,0 +1,1071 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  html { scroll-behavior: smooth; }
+
+  /* ===== Sticky nav ===== */
+  .mdc-nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: #fff;
+    border-bottom: 2px solid #e2e8f0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .mdc-nav::-webkit-scrollbar { display: none; }
+  .mdc-nav-inner {
+    display: flex;
+    min-width: max-content;
+    padding: 0 12px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .mdc-nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #64748b;
+    border-bottom: 3px solid transparent;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .mdc-nav-link:hover { color: #0f766e; }
+  .mdc-nav-link.mdc-active { color: #0f766e; border-bottom-color: #0f766e; }
+
+  /* ===== Layout ===== */
+  .mdc-wrap {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 16px 80px;
+  }
+  .mdc-section { padding-top: 52px; }
+  .mdc-section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #f1f5f9;
+  }
+  .mdc-section-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    font-size: 26px;
+    flex-shrink: 0;
+  }
+  .mdc-section-title { font-size: 22px; font-weight: 900; color: #0f172a; margin: 0 0 4px; }
+  .mdc-section-desc  { font-size: 14px; color: #64748b; margin: 0; line-height: 1.6; }
+
+  /* ===== Cards ===== */
+  .mdc-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 22px 24px;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+    margin-bottom: 12px;
+  }
+  .mdc-card-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ===== Feature grid ===== */
+  .mdc-feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 12px;
+  }
+  .mdc-feat-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 18px 14px;
+    text-align: center;
+    transition: box-shadow 0.15s;
+  }
+  .mdc-feat-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,0.10); }
+  .mdc-feat-emoji { font-size: 30px; line-height: 1; margin-bottom: 8px; }
+  .mdc-feat-name { font-size: 13px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+  .mdc-feat-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  /* ===== Step cards ===== */
+  .mdc-step {
+    display: flex;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(15,23,42,0.04);
+  }
+  .mdc-step-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    font-size: 16px; font-weight: 900;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #0f766e, #0d9488);
+    color: #fff;
+  }
+  .mdc-step-body { flex: 1; min-width: 0; }
+  .mdc-step-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 6px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .mdc-step-text { font-size: 14px; color: #475569; line-height: 1.7; margin: 0; }
+
+  /* ===== Callouts ===== */
+  .mdc-tip {
+    background: #f0fdf4; border-left: 4px solid #22c55e;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #166534;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mdc-warn {
+    background: #fff7ed; border-left: 4px solid #f97316;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #9a3412;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .mdc-note {
+    background: #eff6ff; border-left: 4px solid #3b82f6;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #1e40af;
+    line-height: 1.65; margin: 8px 0;
+  }
+
+  /* ===== Tags ===== */
+  .mdc-tag {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700;
+  }
+  .mdc-tag-green  { background: #dcfce7; color: #16a34a; }
+  .mdc-tag-blue   { background: #dbeafe; color: #1d4ed8; }
+  .mdc-tag-orange { background: #ffedd5; color: #ea580c; }
+  .mdc-tag-teal   { background: #ccfbf1; color: #0f766e; }
+  .mdc-tag-gray   { background: #f1f5f9; color: #475569; }
+  .mdc-tag-purple { background: #f3e8ff; color: #7e22ce; }
+
+  /* ===== Bullet list ===== */
+  .mdc-ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+  .mdc-ul li {
+    display: flex; gap: 8px; align-items: flex-start;
+    font-size: 14px; color: #334155; line-height: 1.6;
+  }
+  .mdc-ul li::before {
+    content: "▶"; color: #0f766e; font-size: 10px;
+    margin-top: 4px; flex-shrink: 0;
+  }
+
+  /* ===== Option table ===== */
+  .mdc-opt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .mdc-opt-table th {
+    background: #f8fafc; padding: 10px 12px;
+    text-align: left; font-size: 12px; font-weight: 700;
+    color: #64748b; border-bottom: 1px solid #e2e8f0;
+  }
+  .mdc-opt-table td {
+    padding: 10px 12px; border-bottom: 1px solid #f1f5f9;
+    color: #334155; vertical-align: top; line-height: 1.6;
+  }
+  .mdc-opt-table td:first-child { font-weight: 700; color: #0f172a; white-space: nowrap; }
+  .mdc-opt-table tr:last-child td { border-bottom: 0; }
+
+  /* ===== Divider ===== */
+  .mdc-divider { border: 0; border-top: 1px solid #f1f5f9; margin: 18px 0; }
+
+  /* ===== Grid 2col ===== */
+  .mdc-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .mdc-grid2 { grid-template-columns: 1fr; } }
+
+  /* ===== Preset chip ===== */
+  .mdc-preset-chip {
+    display: inline-flex; align-items: center;
+    padding: 6px 14px; border: 1.5px solid #99f6e4;
+    border-radius: 9999px; background: #f0fdfa;
+    font-size: 13px; font-weight: 700; color: #0f766e;
+    gap: 6px;
+  }
+
+  /* ===== Mode badge ===== */
+  .mdc-mode-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px; border-radius: 10px;
+    font-size: 13px; font-weight: 800;
+    background: #ccfbf1; color: #0f766e;
+    border: 1px solid #99f6e4;
+  }
+
+  /* ===== Result mockup ===== */
+  .mdc-result-mock {
+    background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 12px; padding: 16px;
+    margin: 10px 0;
+  }
+  .mdc-result-label { font-size: 11px; font-weight: 800; color: #0f766e; letter-spacing: 0.08em; text-transform: uppercase; }
+  .mdc-result-value { font-size: 28px; font-weight: 900; color: #0f172a; margin: 4px 0; }
+  .mdc-result-detail { font-size: 13px; color: #475569; margin: 2px 0; }
+
+  /* ===== Accordion ===== */
+  .mdc-acc-item {
+    border: 1px solid #e2e8f0; border-radius: 13px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .mdc-acc-trigger {
+    width: 100%; text-align: left; padding: 15px 18px;
+    background: #fff; border: 0; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 700; color: #0f172a;
+    line-height: 1.5; gap: 12px;
+  }
+  .mdc-acc-trigger:hover { background: #f8fafc; }
+  .mdc-acc-q { flex: 1; text-align: left; }
+  .mdc-acc-arrow { font-size: 11px; color: #94a3b8; transition: transform 0.2s; flex-shrink: 0; }
+  .mdc-acc-item.mdc-open .mdc-acc-arrow { transform: rotate(180deg); }
+  .mdc-acc-body { display: none; padding: 2px 18px 15px; font-size: 14px; color: #475569; line-height: 1.75; }
+  .mdc-acc-item.mdc-open .mdc-acc-body { display: block; }
+
+  /* ===== Modal ===== */
+  .mdc-modal-ov {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.52);
+    z-index: 200; display: flex; align-items: center;
+    justify-content: center; padding: 16px;
+  }
+  .mdc-modal-ov.mdc-hidden { display: none !important; }
+  .mdc-modal-box {
+    background: #fff; border-radius: 20px;
+    max-width: 560px; width: 100%;
+    max-height: 88vh; overflow-y: auto;
+    padding: 28px;
+    box-shadow: 0 28px 56px rgba(0,0,0,0.22);
+    animation: mdc-modal-in 0.18s ease;
+  }
+  @keyframes mdc-modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .mdc-modal-head {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; margin-bottom: 18px;
+  }
+  .mdc-modal-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; line-height: 1.4; }
+  .mdc-modal-close {
+    border: 0; background: #f1f5f9; border-radius: 9px;
+    width: 34px; height: 34px; cursor: pointer;
+    font-size: 16px; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+    color: #64748b; margin-left: 12px;
+  }
+  .mdc-modal-close:hover { background: #e2e8f0; }
+
+  /* ===== Popup button ===== */
+  .mdc-popup-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px; border: 1.5px solid #cbd5e1;
+    border-radius: 9px; background: #f8fafc;
+    font-size: 12px; font-weight: 700; color: #0f766e;
+    cursor: pointer; margin: 4px 0; transition: background 0.15s;
+  }
+  .mdc-popup-btn:hover { background: #f0fdfa; border-color: #99f6e4; }
+
+  /* ===== Hero ===== */
+  .mdc-hero-bar {
+    background: linear-gradient(135deg, #0f766e 0%, #0d9488 48%, #0ea5e9 100%);
+    padding: 40px 24px 36px; text-align: center; color: #fff;
+  }
+  .mdc-hero-bar h1 { font-size: 34px; font-weight: 900; margin: 0 0 6px; }
+  .mdc-hero-bar p { font-size: 15px; opacity: 0.9; margin: 0 0 22px; }
+  .mdc-hero-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .mdc-hero-btn {
+    padding: 11px 22px; border-radius: 12px;
+    font-size: 14px; font-weight: 700; text-decoration: none;
+    border: 2px solid #fff; transition: opacity 0.15s;
+  }
+  .mdc-hero-btn:hover { opacity: 0.85; }
+  .mdc-hero-btn-primary  { background: #fff; color: #0f766e; }
+  .mdc-hero-btn-secondary { background: transparent; color: #fff; }
+
+  /* ===== Weekday grid ===== */
+  .mdc-weekday-grid {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+    margin: 8px 0;
+  }
+  .mdc-weekday-cell {
+    border: 2px solid #e2e8f0; border-radius: 10px;
+    padding: 8px 4px; text-align: center;
+    font-size: 14px; font-weight: 800; color: #334155;
+  }
+  .mdc-weekday-cell.sun { border-color: #fca5a5; background: #fff1f2; color: #dc2626; }
+  .mdc-weekday-cell.sat { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
+</style>
+
+<!-- ===== Hero ===== -->
+<div class="mdc-hero-bar">
+  <h1>🗓️ 日時計算ツール マニュアル</h1>
+  <p>日時の足し引き、差分確認、月送り、期間内の指定日カウントを4つのモードで完全網羅。</p>
+  <div class="mdc-hero-btns">
+    <a href="/tools/datecalc" class="mdc-hero-btn mdc-hero-btn-primary">ツールを開く</a>
+    <a href="/" class="mdc-hero-btn mdc-hero-btn-secondary">ダッシュボードへ戻る</a>
+  </div>
+</div>
+
+<!-- ===== Sticky nav ===== -->
+<div class="mdc-nav" id="mdcNav">
+  <div class="mdc-nav-inner">
+    <a href="#overview"    class="mdc-nav-link" data-section="overview">📋 概要</a>
+    <a href="#addsub"      class="mdc-nav-link" data-section="addsub">➕ 加算・減算</a>
+    <a href="#diff"        class="mdc-nav-link" data-section="diff">⏱️ 差分</a>
+    <a href="#monthshift"  class="mdc-nav-link" data-section="monthshift">📅 月送り</a>
+    <a href="#count"       class="mdc-nav-link" data-section="count">🔢 指定日カウント</a>
+    <a href="#preset"      class="mdc-nav-link" data-section="preset">⚡ プリセット・履歴</a>
+    <a href="#faq"         class="mdc-nav-link" data-section="faq">❓ よくある質問</a>
+  </div>
+</div>
+
+<!-- ===== Main content ===== -->
+<div class="mdc-wrap">
+
+  <!-- ========== 概要 ========== -->
+  <section id="overview" class="mdc-section">
+    <div class="mdc-section-header">
+      <div class="mdc-section-icon" style="background:#ccfbf1">📋</div>
+      <div>
+        <h2 class="mdc-section-title">日時計算ツール でできること</h2>
+        <p class="mdc-section-desc">日時にまつわる計算をすべてまとめた4モードのツールです。結果はワンクリックでコピー、履歴に保存して再利用できます。</p>
+      </div>
+    </div>
+
+    <div class="mdc-feat-grid">
+      <div class="mdc-feat-card">
+        <div class="mdc-feat-emoji">➕</div>
+        <div class="mdc-feat-name">加算・減算</div>
+        <div class="mdc-feat-desc">基準日時に年・月・日・時・分を足し引き</div>
+      </div>
+      <div class="mdc-feat-card">
+        <div class="mdc-feat-emoji">⏱️</div>
+        <div class="mdc-feat-name">差分</div>
+        <div class="mdc-feat-desc">2つの日時の差を日・時間・分で確認</div>
+      </div>
+      <div class="mdc-feat-card">
+        <div class="mdc-feat-emoji">📅</div>
+        <div class="mdc-feat-name">月送り</div>
+        <div class="mdc-feat-desc">請求日・更新日など月またぎの日付を算出</div>
+      </div>
+      <div class="mdc-feat-card">
+        <div class="mdc-feat-emoji">🔢</div>
+        <div class="mdc-feat-name">指定日カウント</div>
+        <div class="mdc-feat-desc">期間内で祝日・特定曜日・指定日を数える</div>
+      </div>
+      <div class="mdc-feat-card">
+        <div class="mdc-feat-emoji">⚡</div>
+        <div class="mdc-feat-name">プリセット</div>
+        <div class="mdc-feat-desc">よく使う計算パターンをワンクリックで設定</div>
+      </div>
+      <div class="mdc-feat-card">
+        <div class="mdc-feat-emoji">📝</div>
+        <div class="mdc-feat-name">履歴</div>
+        <div class="mdc-feat-desc">計算結果を保存・再利用（最大20件）</div>
+      </div>
+      <div class="mdc-feat-card">
+        <div class="mdc-feat-emoji">📋</div>
+        <div class="mdc-feat-name">コピー</div>
+        <div class="mdc-feat-desc">結果をクリップボードにワンクリックコピー</div>
+      </div>
+      <div class="mdc-feat-card">
+        <div class="mdc-feat-emoji">🇯🇵</div>
+        <div class="mdc-feat-name">祝日対応</div>
+        <div class="mdc-feat-desc">日本の祝日データを内蔵し自動カウント</div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px">
+      <div class="mdc-card">
+        <div class="mdc-card-title">🖥️ 画面の基本構成</div>
+        <table class="mdc-opt-table">
+          <thead><tr><th>エリア</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td>モードタブ</td><td>「加算・減算」「差分」「月送り」「指定日カウント」の4つのボタン。クリックして切り替えます。</td></tr>
+            <tr><td>入力フォーム（左）</td><td>選択中のモードの入力欄です。入力後「計算する」ボタンを押します。</td></tr>
+            <tr><td>結果パネル（右上）</td><td>計算結果が大きく表示されます。コピーボタンと履歴保存ボタンがあります。</td></tr>
+            <tr><td>プリセット（右中）</td><td>よく使う計算をワンクリックで入力欄に設定できるショートカットです。</td></tr>
+            <tr><td>履歴（右下）</td><td>保存した計算の一覧です。「再利用」で入力内容を復元できます。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 加算・減算 ========== -->
+  <section id="addsub" class="mdc-section">
+    <div class="mdc-section-header">
+      <div class="mdc-section-icon" style="background:#ccfbf1">➕</div>
+      <div>
+        <h2 class="mdc-section-title">加算・減算</h2>
+        <p class="mdc-section-desc">基準となる日時に「年・月・日・時・分」を加算または減算して、結果の日時を求めます。</p>
+      </div>
+    </div>
+
+    <!-- 使い方 -->
+    <div class="mdc-step">
+      <div class="mdc-step-badge">1</div>
+      <div class="mdc-step-body">
+        <div class="mdc-step-title">基準日時を設定する</div>
+        <p class="mdc-step-text">「基準日時」フィールドに計算の起点となる日時を入力します。カレンダーアイコンや日時ピッカーで選択できます。画面を開いたときは現在の日時が自動で入っています。</p>
+      </div>
+    </div>
+
+    <div class="mdc-step">
+      <div class="mdc-step-badge">2</div>
+      <div class="mdc-step-body">
+        <div class="mdc-step-title">足し引きする数値を入力する</div>
+        <p class="mdc-step-text">「年」「月」「日」「時」「分」の5つの欄に、それぞれ移動させたい量を入力します。使わない欄は0のままで構いません。負の数も入力できます。</p>
+        <hr class="mdc-divider">
+        <table class="mdc-opt-table">
+          <thead><tr><th>欄</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr><td>年</td><td>足し引きする年数。例：1年後 → <code>1</code></td></tr>
+            <tr><td>月</td><td>足し引きする月数。例：3か月前 → <code>-3</code>（または「減算」を選んで<code>3</code>）</td></tr>
+            <tr><td>日</td><td>足し引きする日数。例：30日後 → <code>30</code></td></tr>
+            <tr><td>時</td><td>足し引きする時間数。例：8時間後 → <code>8</code></td></tr>
+            <tr><td>分</td><td>足し引きする分数。例：90分後 → <code>90</code></td></tr>
+          </tbody>
+        </table>
+        <div class="mdc-tip" style="margin-top:10px">
+          💡 複数の欄に数値を入れると、年・月・日・時・分をまとめて計算できます。例：「1年2か月15日後」のような複合計算が一度にできます。
+        </div>
+      </div>
+    </div>
+
+    <div class="mdc-step">
+      <div class="mdc-step-badge">3</div>
+      <div class="mdc-step-body">
+        <div class="mdc-step-title">操作と表示形式を選ぶ</div>
+        <p class="mdc-step-text">「操作」で加算か減算かを選びます。「表示形式」で結果の日時フォーマットを選択します。</p>
+        <hr class="mdc-divider">
+        <div class="mdc-grid2">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">操作</div>
+            <table class="mdc-opt-table">
+              <tbody>
+                <tr><td>加算</td><td>入力値を基準日時に足します（未来方向）</td></tr>
+                <tr><td>減算</td><td>入力値を基準日時から引きます（過去方向）</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">表示形式</div>
+            <table class="mdc-opt-table">
+              <tbody>
+                <tr><td><code>YYYY-MM-DD HH:mm</code></td><td>ハイフン区切り（初期値）</td></tr>
+                <tr><td><code>YYYY/MM/DD HH:mm</code></td><td>スラッシュ区切り</td></tr>
+                <tr><td>ISO</td><td><code>YYYY-MM-DDTHH:MM</code> 形式</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mdc-step">
+      <div class="mdc-step-badge">4</div>
+      <div class="mdc-step-body">
+        <div class="mdc-step-title">月末日を維持 オプション</div>
+        <p class="mdc-step-text">月をまたぐ計算で「月末日を維持」にチェックを入れると、月末日（31日・30日など）が基準日時の場合、移動先でも月末日に丸められます。</p>
+        <hr class="mdc-divider">
+        <div class="mdc-grid2" style="margin-top:8px">
+          <div style="background:#f0fdfa;border-radius:12px;padding:14px">
+            <div style="font-size:13px;font-weight:800;color:#0f766e;margin-bottom:8px">✅ 月末日を維持 オン</div>
+            <p style="font-size:13px;color:#475569;margin:0">例：1月31日 +1か月 → <strong>2月28日</strong>（2月の月末日）</p>
+          </div>
+          <div style="background:#f8fafc;border-radius:12px;padding:14px">
+            <div style="font-size:13px;font-weight:800;color:#475569;margin-bottom:8px">☐ 月末日を維持 オフ</div>
+            <p style="font-size:13px;color:#475569;margin:0">例：1月31日 +1か月 → <strong>2月28日</strong>（31日がないため28日に丸め）</p>
+          </div>
+        </div>
+        <div class="mdc-note" style="margin-top:10px">
+          ℹ️ 「月末日を維持」は、基準日時が月の最終日の場合のみ効果があります。月の中間日（例：15日）の場合は影響しません。
+        </div>
+      </div>
+    </div>
+
+    <!-- 結果の見方 -->
+    <div class="mdc-card">
+      <div class="mdc-card-title" style="justify-content:space-between">
+        <span>📊 結果の見方</span>
+        <button class="mdc-popup-btn" onclick="openModal('modalAddsubResult')">詳しく見る ▼</button>
+      </div>
+      <div class="mdc-result-mock">
+        <div class="mdc-result-label">加算・減算結果</div>
+        <div class="mdc-result-value">2026-08-20 14:30</div>
+        <div class="mdc-result-detail">曜日: 木</div>
+        <div class="mdc-result-detail">ISO: 2026-08-20T14:30</div>
+        <div class="mdc-result-detail">月末維持: 有効</div>
+      </div>
+      <ul class="mdc-ul" style="margin-top:10px">
+        <li>結果は大きく表示され、選択した表示形式で出力されます</li>
+        <li>曜日・ISO形式・月末維持の状態が補足として表示されます</li>
+        <li>「コピー」ボタンで結果の日時文字列をクリップボードにコピーできます</li>
+        <li>「履歴に保存」ボタンで今の計算内容を後から再利用できます</li>
+      </ul>
+    </div>
+  </section>
+
+
+  <!-- ========== 差分 ========== -->
+  <section id="diff" class="mdc-section">
+    <div class="mdc-section-header">
+      <div class="mdc-section-icon" style="background:#ccfbf1">⏱️</div>
+      <div>
+        <h2 class="mdc-section-title">差分</h2>
+        <p class="mdc-section-desc">2つの日時の間隔を「○日 ○時間 ○分」の形でまとめて表示します。総日数・総時間数・総分数も確認できます。</p>
+      </div>
+    </div>
+
+    <div class="mdc-step">
+      <div class="mdc-step-badge">1</div>
+      <div class="mdc-step-body">
+        <div class="mdc-step-title">開始日時と終了日時を入力する</div>
+        <p class="mdc-step-text">「開始日時」と「終了日時」の両方を入力します。画面を開いたときは「開始 = 現在、終了 = 翌日」が自動で入っています。</p>
+        <div class="mdc-tip" style="margin-top:10px">
+          💡 開始日時と終了日時はどちらを前後にしてもかまいません。「絶対値で表示」にチェックを入れると、常に正の値で結果が出ます。
+        </div>
+      </div>
+    </div>
+
+    <div class="mdc-step">
+      <div class="mdc-step-badge">2</div>
+      <div class="mdc-step-body">
+        <div class="mdc-step-title">「絶対値で表示」オプション</div>
+        <p class="mdc-step-text">開始日時が終了日時より後の場合、結果は本来マイナスになります。「絶対値で表示」にチェックを入れると、順序を気にせず常に正の数で結果が出ます。</p>
+        <hr class="mdc-divider">
+        <div class="mdc-grid2" style="margin-top:8px">
+          <div style="background:#f0fdfa;border-radius:12px;padding:14px">
+            <div style="font-size:13px;font-weight:800;color:#0f766e;margin-bottom:8px">✅ 絶対値で表示 オン（初期値）</div>
+            <p style="font-size:13px;color:#475569;margin:0">開始 > 終了でも「3日 2時間」のように正の数で表示</p>
+          </div>
+          <div style="background:#f8fafc;border-radius:12px;padding:14px">
+            <div style="font-size:13px;font-weight:800;color:#475569;margin-bottom:8px">☐ 絶対値で表示 オフ</div>
+            <p style="font-size:13px;color:#475569;margin:0">開始 > 終了の場合「-3日 -2時間」のように符号付きで表示</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 結果の見方 -->
+    <div class="mdc-card">
+      <div class="mdc-card-title">📊 結果の見方</div>
+      <div class="mdc-result-mock">
+        <div class="mdc-result-label">差分結果</div>
+        <div class="mdc-result-value">3日 2時間 30分</div>
+        <div class="mdc-result-detail">総日数: 3.1042日</div>
+        <div class="mdc-result-detail">総時間: 74.5時間</div>
+        <div class="mdc-result-detail">総分: 4470分</div>
+        <div class="mdc-result-detail">判定: 終了日時が後</div>
+      </div>
+      <table class="mdc-opt-table" style="margin-top:12px">
+        <thead><tr><th>表示項目</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>差分（メイン）</td><td>「○日 ○時間 ○分」の形で分解して表示</td></tr>
+          <tr><td>総日数</td><td>小数点つきの合計日数（例：3.1042日）</td></tr>
+          <tr><td>総時間</td><td>小数点つきの合計時間（例：74.5時間）</td></tr>
+          <tr><td>総分</td><td>合計の分数（例：4470分）</td></tr>
+          <tr><td>判定</td><td>「終了日時が後」「終了日時が前」「同時刻」のいずれか</td></tr>
+        </tbody>
+      </table>
+      <div class="mdc-tip" style="margin-top:10px">
+        💡 「コピー」ボタンを押すと「○日 ○時間 ○分」の文字列をコピーできます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 月送り ========== -->
+  <section id="monthshift" class="mdc-section">
+    <div class="mdc-section-header">
+      <div class="mdc-section-icon" style="background:#ccfbf1">📅</div>
+      <div>
+        <h2 class="mdc-section-title">月送り</h2>
+        <p class="mdc-section-desc">基準日から指定した月数分だけ前後の日付を求めます。請求日・契約更新日・支払い期限など「月をまたぐ日付計算」に特化したモードです。</p>
+      </div>
+    </div>
+
+    <div class="mdc-step">
+      <div class="mdc-step-badge">1</div>
+      <div class="mdc-step-body">
+        <div class="mdc-step-title">基準日を入力する</div>
+        <p class="mdc-step-text">「基準日」に起点となる日付を入力します。カレンダーピッカーで選択できます。</p>
+      </div>
+    </div>
+
+    <div class="mdc-step">
+      <div class="mdc-step-badge">2</div>
+      <div class="mdc-step-body">
+        <div class="mdc-step-title">シフト月数を入力する</div>
+        <p class="mdc-step-text">「シフト月数」に移動させる月数を入力します。未来方向はプラス（例：<code>3</code>）、過去方向はマイナス（例：<code>-2</code>）を入力します。</p>
+        <div class="mdc-tip" style="margin-top:10px">
+          💡 「翌月末」プリセットを使うと、今月末を基準に翌月末を自動で設定できます。
+        </div>
+      </div>
+    </div>
+
+    <div class="mdc-step">
+      <div class="mdc-step-badge">3</div>
+      <div class="mdc-step-body">
+        <div class="mdc-step-title">「月末日を維持」オプション</div>
+        <p class="mdc-step-text">加算・減算と同様に、基準日が月末日の場合に移動先でも月末日にそろえるオプションです。毎月末払いの計算などで活用できます。</p>
+        <hr class="mdc-divider">
+        <table class="mdc-opt-table">
+          <thead><tr><th>例</th><th>月末維持 オン</th><th>月末維持 オフ</th></tr></thead>
+          <tbody>
+            <tr><td>1月31日 +1か月</td><td>2月28日（月末）</td><td>2月28日（月末に丸め）</td></tr>
+            <tr><td>3月31日 +1か月</td><td>4月30日（月末）</td><td>4月30日（月末に丸め）</td></tr>
+            <tr><td>5月31日 +2か月</td><td>7月31日（月末）</td><td>7月31日（そのまま）</td></tr>
+            <tr><td>1月30日 +1か月</td><td>2月28日（月末維持のみ）</td><td>2月28日（月末に丸め）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 結果の見方 -->
+    <div class="mdc-card">
+      <div class="mdc-card-title">📊 結果の見方</div>
+      <div class="mdc-result-mock">
+        <div class="mdc-result-label">月送り結果</div>
+        <div class="mdc-result-value">2026-06-30</div>
+        <div class="mdc-result-detail">曜日: 火</div>
+        <div class="mdc-result-detail">月末維持: 有効</div>
+        <div class="mdc-result-detail">基準日: 2026-05-31</div>
+      </div>
+      <ul class="mdc-ul" style="margin-top:10px">
+        <li>結果は <code>YYYY-MM-DD</code> 形式で表示されます</li>
+        <li>移動先の曜日・月末維持の状態・使用した基準日が補足で表示されます</li>
+        <li>「コピー」ボタンで <code>YYYY-MM-DD</code> 形式の文字列をコピーできます</li>
+      </ul>
+    </div>
+  </section>
+
+
+  <!-- ========== 指定日カウント ========== -->
+  <section id="count" class="mdc-section">
+    <div class="mdc-section-header">
+      <div class="mdc-section-icon" style="background:#ccfbf1">🔢</div>
+      <div>
+        <h2 class="mdc-section-title">指定日カウント</h2>
+        <p class="mdc-section-desc">指定した期間内で、「特定の曜日」「毎月の特定日」「個別日付」「日本の祝日」に当たる日の数を数えます。重複は自動で除外されます。</p>
+      </div>
+    </div>
+
+    <div class="mdc-step">
+      <div class="mdc-step-badge">1</div>
+      <div class="mdc-step-body">
+        <div class="mdc-step-title">期間を設定する</div>
+        <p class="mdc-step-text">「開始日」と「終了日」を入力します。どちらかまたは両方を空欄にした場合、空欄の日付は「今日」として扱われます。</p>
+        <div class="mdc-tip" style="margin-top:10px">
+          💡 開始日と終了日が逆順になっていても自動で入れ替えて正しく計算します。
+        </div>
+      </div>
+    </div>
+
+    <div class="mdc-step">
+      <div class="mdc-step-badge">2</div>
+      <div class="mdc-step-body">
+        <div class="mdc-step-title">数える条件を設定する</div>
+        <p class="mdc-step-text">4種類の条件を組み合わせてカウント対象を設定できます。複数の条件に当てはまる日は1日として数えます（重複除外）。</p>
+        <hr class="mdc-divider">
+
+        <div class="mdc-card" style="margin:10px 0 8px">
+          <div class="mdc-card-title" style="justify-content:space-between">
+            <span>📆 数える曜日</span>
+            <button class="mdc-popup-btn" onclick="openModal('modalWeekdays')">曜日について ▼</button>
+          </div>
+          <p style="font-size:14px;color:#475569;margin:0 0 10px">日・月・火・水・木・金・土の7つのボタンが表示されます。数えたい曜日をクリックして選択（水色にハイライト）します。複数選択できます。</p>
+          <div class="mdc-weekday-grid">
+            <div class="mdc-weekday-cell sun">日</div>
+            <div class="mdc-weekday-cell">月</div>
+            <div class="mdc-weekday-cell">火</div>
+            <div class="mdc-weekday-cell">水</div>
+            <div class="mdc-weekday-cell">木</div>
+            <div class="mdc-weekday-cell">金</div>
+            <div class="mdc-weekday-cell sat">土</div>
+          </div>
+          <div class="mdc-tip" style="margin-top:8px">
+            💡 土日だけを選ぶと「今月の土日は何日？」のような週末カウントができます。「今月の土日」プリセットでワンクリック設定できます。
+          </div>
+        </div>
+
+        <div class="mdc-card" style="margin:8px 0">
+          <div class="mdc-card-title">📅 毎月の日付</div>
+          <p style="font-size:14px;color:#475569;margin:0 0 8px">毎月の特定日を数えたい場合はここに入力します。複数の日はカンマ区切りで入力できます。</p>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-family:monospace;font-size:14px;color:#0f172a">
+            5, 10, 25
+          </div>
+          <p style="font-size:13px;color:#64748b;margin:8px 0 0">上記の例は「毎月5日・10日・25日に当たる日」を期間内で数えます。入力できる値は 1〜31 の整数です。</p>
+          <div class="mdc-warn" style="margin-top:8px">
+            ⚠️ 例えば「31」を指定した場合、31日がない月はカウントされません。
+          </div>
+        </div>
+
+        <div class="mdc-card" style="margin:8px 0">
+          <div class="mdc-card-title">📌 個別日付</div>
+          <p style="font-size:14px;color:#475569;margin:0 0 8px">特定の日付を直接指定してカウントしたい場合はここに入力します。カンマ区切りまたは改行で複数指定できます。</p>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-family:monospace;font-size:14px;color:#0f172a">
+            2026-05-14, 2026-05-20
+          </div>
+          <p style="font-size:13px;color:#64748b;margin:8px 0 0">形式は <code>YYYY-MM-DD</code>（例：2026-05-14）で入力してください。期間外の日付は無視されます。</p>
+        </div>
+
+        <div class="mdc-card" style="margin:8px 0">
+          <div class="mdc-card-title">🇯🇵 日本の祝日も数える</div>
+          <p style="font-size:14px;color:#475569;margin:0">チェックを入れると、期間内の日本の祝日（国民の祝日）に当たる日を自動でカウントします。祝日データはDSTTに内蔵されています。</p>
+          <div class="mdc-tip" style="margin-top:8px">
+            💡 「今月の祝日」「月末まで」プリセットではこのオプションが自動でオンになります。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 結果の見方 -->
+    <div class="mdc-card">
+      <div class="mdc-card-title" style="justify-content:space-between">
+        <span>📊 結果の見方</span>
+        <button class="mdc-popup-btn" onclick="openModal('modalCountResult')">詳細を見る ▼</button>
+      </div>
+      <div class="mdc-result-mock">
+        <div class="mdc-result-label">指定日カウント結果</div>
+        <div class="mdc-result-value">12日</div>
+        <div class="mdc-result-detail">期間: 2026-05-01 から 2026-05-31</div>
+        <div class="mdc-result-detail">期間日数: 31日</div>
+        <div class="mdc-result-detail">曜日一致: 9日 / 毎月の日付一致: 3日 / 個別日付一致: 1日 / 祝日一致: 2日</div>
+        <div class="mdc-result-detail">重複除外後: 12日</div>
+        <div class="mdc-result-detail">一致日: 2026-05-03, 2026-05-04, 2026-05-05, ... ほか2日</div>
+      </div>
+      <ul class="mdc-ul" style="margin-top:10px">
+        <li>メインの数字が「重複を除外した合計」です</li>
+        <li>条件別の内訳（曜日・毎月の日付・個別日付・祝日）がそれぞれ何日かを確認できます</li>
+        <li>一致した日付の一覧（最大20件）がプレビューとして表示されます</li>
+        <li>21件以上の場合は「ほかN日」と表示されます</li>
+      </ul>
+    </div>
+  </section>
+
+
+  <!-- ========== プリセット・履歴 ========== -->
+  <section id="preset" class="mdc-section">
+    <div class="mdc-section-header">
+      <div class="mdc-section-icon" style="background:#ccfbf1">⚡</div>
+      <div>
+        <h2 class="mdc-section-title">プリセット・履歴</h2>
+        <p class="mdc-section-desc">よく使う計算のショートカットと、過去の計算を保存・再利用する機能です。</p>
+      </div>
+    </div>
+
+    <!-- プリセット -->
+    <div class="mdc-card">
+      <div class="mdc-card-title">⚡ プリセット</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 14px">プリセットボタンを押すと、対応するモードに自動で切り替わり、入力欄が設定されます。ボタンを押した後はそのまま「計算する」ボタンを押すだけです。</p>
+      <table class="mdc-opt-table">
+        <thead><tr><th style="width:120px">プリセット名</th><th>設定されるモード</th><th>設定内容</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="mdc-preset-chip">翌月末</span></td>
+            <td>月送り</td>
+            <td>基準日 = 今月末日、シフト月数 = 1、月末日維持 = オン。「来月末は何日？」をすぐ確認できます。</td>
+          </tr>
+          <tr>
+            <td><span class="mdc-preset-chip">30日後</span></td>
+            <td>加算・減算</td>
+            <td>操作 = 加算、日 = 30。今日から30日後の日付をすぐ確認できます。基準日時は現在のまま。</td>
+          </tr>
+          <tr>
+            <td><span class="mdc-preset-chip">今月の土日</span></td>
+            <td>指定日カウント</td>
+            <td>期間 = 今月1日〜末日、曜日 = 土・日。今月の土日の日数をすぐ確認できます。</td>
+          </tr>
+          <tr>
+            <td><span class="mdc-preset-chip">今月の祝日</span></td>
+            <td>指定日カウント</td>
+            <td>期間 = 今月1日〜末日、日本の祝日 = オン。今月の祝日数をすぐ確認できます。</td>
+          </tr>
+          <tr>
+            <td><span class="mdc-preset-chip">月末まで</span></td>
+            <td>指定日カウント</td>
+            <td>期間 = 今日〜今月末日、日本の祝日 = オン。今日から月末までの祝日数を確認できます。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="mdc-tip" style="margin-top:12px">
+        💡 プリセット適用後は入力値を自由に変更できます。プリセットは「入力の出発点」として使ってください。
+      </div>
+    </div>
+
+    <!-- 履歴 -->
+    <div class="mdc-card">
+      <div class="mdc-card-title">📝 履歴機能</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 14px">計算結果を保存しておき、後から入力内容ごと復元できる機能です。ブラウザの記憶（localStorage）を使っているため、同じブラウザ・同じ端末でのみ有効です。</p>
+      <table class="mdc-opt-table">
+        <thead><tr><th>操作</th><th>説明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>履歴に保存</td>
+            <td>計算結果が表示されたあと、右パネルの「履歴に保存」ボタンを押すと保存されます。最大20件まで記憶します。21件目以降は古いものから自動で削除されます。</td>
+          </tr>
+          <tr>
+            <td>再利用</td>
+            <td>履歴一覧の「再利用」ボタンを押すと、保存時のモードと入力値がフォームに復元されます。少し修正して再計算する場合に便利です。</td>
+          </tr>
+          <tr>
+            <td>クリア</td>
+            <td>履歴パネル右上の「クリア」ボタンで、すべての履歴を一括削除します。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="mdc-note" style="margin-top:10px">
+        ℹ️ 履歴はブラウザの localStorage に保存されます。別のブラウザや別のデバイスでは履歴は共有されません。ブラウザのデータをクリアすると履歴も消えます。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== よくある質問 ========== -->
+  <section id="faq" class="mdc-section">
+    <div class="mdc-section-header">
+      <div class="mdc-section-icon" style="background:#ccfbf1">❓</div>
+      <div>
+        <h2 class="mdc-section-title">よくある質問</h2>
+        <p class="mdc-section-desc">使い方で迷ったときはこちらを確認してください。</p>
+      </div>
+    </div>
+
+    <div class="mdc-acc-item">
+      <button class="mdc-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mdc-acc-q">4つのモードは同時に使えますか？</span>
+        <span class="mdc-acc-arrow">▼</span>
+      </button>
+      <div class="mdc-acc-body">いいえ。一度に実行できるのは選択中の1つのモードだけです。ただし履歴に保存することで、複数の計算結果を残しておけます。</div>
+    </div>
+
+    <div class="mdc-acc-item">
+      <button class="mdc-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mdc-acc-q">時間を含めた差分は確認できますか？</span>
+        <span class="mdc-acc-arrow">▼</span>
+      </button>
+      <div class="mdc-acc-body">はい。「差分」モードでは開始日時と終了日時に時分まで入力でき、「○日 ○時間 ○分」の形で結果が出ます。総時間数・総分数も表示されます。</div>
+    </div>
+
+    <div class="mdc-acc-item">
+      <button class="mdc-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mdc-acc-q">1月31日に1か月足すとどうなりますか？</span>
+        <span class="mdc-acc-arrow">▼</span>
+      </button>
+      <div class="mdc-acc-body">2月31日は存在しないため、2月28日（うるう年の場合は29日）になります。「月末日を維持」がオンの場合は、移動先の月の最終日になります。オフの場合も同様に月末に丸められます。</div>
+    </div>
+
+    <div class="mdc-acc-item">
+      <button class="mdc-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mdc-acc-q">「月送り」と「加算・減算で月を足す」は何が違いますか？</span>
+        <span class="mdc-acc-arrow">▼</span>
+      </button>
+      <div class="mdc-acc-body">どちらも月の移動ができますが、「月送り」は日付（年月日）だけを扱い、「加算・減算」は時分まで含めた日時を扱います。また「月送り」は請求日・更新日の確認に特化した入力フォームになっています。年・月だけを移動させたい場合はどちらでも使えます。</div>
+    </div>
+
+    <div class="mdc-acc-item">
+      <button class="mdc-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mdc-acc-q">「指定日カウント」で複数の条件を組み合わせるとどうなりますか？</span>
+        <span class="mdc-acc-arrow">▼</span>
+      </button>
+      <div class="mdc-acc-body">各条件にそれぞれ一致した日を集め、重複を取り除いた合計が最終結果になります。例えば「毎月5日かつ土曜日」のような場合でも、その日は1日として数えます。内訳（条件別の件数）も結果に表示されます。</div>
+    </div>
+
+    <div class="mdc-acc-item">
+      <button class="mdc-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mdc-acc-q">「個別日付」の入力形式はどうすればいいですか？</span>
+        <span class="mdc-acc-arrow">▼</span>
+      </button>
+      <div class="mdc-acc-body"><code>YYYY-MM-DD</code> 形式（例：2026-05-14）で入力してください。複数の日付はカンマ区切り（例：2026-05-14, 2026-05-20）または改行で区切ることができます。全角カンマや空白でも区切れます。</div>
+    </div>
+
+    <div class="mdc-acc-item">
+      <button class="mdc-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mdc-acc-q">祝日データはどこから来ていますか？最新ですか？</span>
+        <span class="mdc-acc-arrow">▼</span>
+      </button>
+      <div class="mdc-acc-body">日本の祝日データはDSTT内に内蔵されています。データの対象年度はシステムの更新に依存します。直近の祝日や新設された祝日が含まれていない可能性もあるため、公式情報（内閣府「国民の祝日について」など）とあわせてご確認ください。</div>
+    </div>
+
+    <div class="mdc-acc-item">
+      <button class="mdc-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mdc-acc-q">履歴が消えてしまいました。どうすれば？</span>
+        <span class="mdc-acc-arrow">▼</span>
+      </button>
+      <div class="mdc-acc-body">履歴はブラウザのlocalStorageに保存されています。ブラウザのキャッシュ・Cookie・サイトデータをクリアした場合や、シークレットモードを使用した場合は履歴が消えます。復元する方法はありません。大切な計算結果は別途メモするか、コピーして保存してください。</div>
+    </div>
+
+    <div class="mdc-acc-item">
+      <button class="mdc-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mdc-acc-q">マイナスの月数やマイナスの年数は入力できますか？</span>
+        <span class="mdc-acc-arrow">▼</span>
+      </button>
+      <div class="mdc-acc-body">はい。加算・減算モードや月送りモードでは、入力欄にマイナスの値を入れることができます。例えば加算モードで「日」に「-5」と入力すると5日前の計算になります。または「操作」を「減算」に切り替えて正の値を入力する方法もあります。</div>
+    </div>
+
+    <div class="mdc-acc-item">
+      <button class="mdc-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mdc-acc-q">結果をコピーするとどんな形式でコピーされますか？</span>
+        <span class="mdc-acc-arrow">▼</span>
+      </button>
+      <div class="mdc-acc-body">モードによって異なります。「加算・減算」は選択した表示形式の日時文字列（例：<code>2026-08-20 14:30</code>）、「差分」は「○日 ○時間 ○分」の文字列、「月送り」は <code>YYYY-MM-DD</code> 形式の日付文字列、「指定日カウント」は「○日」という件数文字列がコピーされます。</div>
+    </div>
+
+  </section>
+
+</div><!-- /mdc-wrap -->
+
+
+<!-- ===== MODAL: 加算・減算結果 ===== -->
+<div id="modalAddsubResult" class="mdc-modal-ov mdc-hidden">
+  <div class="mdc-modal-box">
+    <div class="mdc-modal-head">
+      <h3 class="mdc-modal-title">📊 加算・減算の結果詳細</h3>
+      <button class="mdc-modal-close" onclick="closeModal('modalAddsubResult')">✕</button>
+    </div>
+    <table class="mdc-opt-table">
+      <thead><tr><th>項目</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td>メイン表示</td><td>選択した表示形式で結果の日時を大きく表示します</td></tr>
+        <tr><td>曜日</td><td>結果の日時の曜日（日・月・火・水・木・金・土）</td></tr>
+        <tr><td>ISO</td><td><code>YYYY-MM-DDTHH:MM</code> 形式の日時文字列（システム連携などに便利）</td></tr>
+        <tr><td>月末維持</td><td>「有効」または「無効」で現在の設定状態を表示</td></tr>
+        <tr><td>入力サマリー</td><td>「基準日時 に ○年 ○か月 ○日 ○時間 ○分を加算/減算」の形で入力内容を要約</td></tr>
+      </tbody>
+    </table>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mdc-popup-btn" onclick="closeModal('modalAddsubResult')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: 曜日選択 ===== -->
+<div id="modalWeekdays" class="mdc-modal-ov mdc-hidden">
+  <div class="mdc-modal-box">
+    <div class="mdc-modal-head">
+      <h3 class="mdc-modal-title">📆 曜日選択について</h3>
+      <button class="mdc-modal-close" onclick="closeModal('modalWeekdays')">✕</button>
+    </div>
+    <p style="font-size:14px;color:#475569;margin:0 0 14px">曜日は日本の慣習に合わせ、日曜日を先頭とした順番（日・月・火・水・木・金・土）で表示されます。</p>
+    <table class="mdc-opt-table">
+      <thead><tr><th>曜日</th><th>番号</th><th>備考</th></tr></thead>
+      <tbody>
+        <tr><td style="color:#dc2626">日</td><td>0</td><td>赤色で表示されます</td></tr>
+        <tr><td>月</td><td>1</td><td></td></tr>
+        <tr><td>火</td><td>2</td><td></td></tr>
+        <tr><td>水</td><td>3</td><td></td></tr>
+        <tr><td>木</td><td>4</td><td></td></tr>
+        <tr><td>金</td><td>5</td><td></td></tr>
+        <tr><td style="color:#1d4ed8">土</td><td>6</td><td>青色で表示されます</td></tr>
+      </tbody>
+    </table>
+    <div class="mdc-tip" style="margin-top:12px">
+      💡 選択した曜日のボタンは水色にハイライトされます。もう一度押すと選択が解除されます。
+    </div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mdc-popup-btn" onclick="closeModal('modalWeekdays')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: 指定日カウント結果詳細 ===== -->
+<div id="modalCountResult" class="mdc-modal-ov mdc-hidden">
+  <div class="mdc-modal-box">
+    <div class="mdc-modal-head">
+      <h3 class="mdc-modal-title">🔢 指定日カウント結果の詳細</h3>
+      <button class="mdc-modal-close" onclick="closeModal('modalCountResult')">✕</button>
+    </div>
+    <table class="mdc-opt-table">
+      <thead><tr><th>項目</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td>メイン（○日）</td><td>すべての条件に一致した日の合計（重複除外後）</td></tr>
+        <tr><td>期間</td><td>実際に計算に使った開始日〜終了日</td></tr>
+        <tr><td>期間日数</td><td>開始日から終了日までの総日数（両端含む）</td></tr>
+        <tr><td>曜日一致</td><td>選択した曜日に当たった日の数</td></tr>
+        <tr><td>毎月の日付一致</td><td>指定した月次日付に当たった日の数</td></tr>
+        <tr><td>個別日付一致</td><td>個別指定した日付のうち期間内にあった数</td></tr>
+        <tr><td>祝日一致</td><td>日本の祝日に当たった日の数</td></tr>
+        <tr><td>重複除外後</td><td>各条件の和集合（ユニーク件数）= メインの数字</td></tr>
+        <tr><td>一致日</td><td>条件に一致した日付を最大20件プレビュー。21件以上は「ほかN日」と表示</td></tr>
+      </tbody>
+    </table>
+    <div class="mdc-note" style="margin-top:12px">
+      ℹ️ 開始日と終了日が逆順の場合は自動で入れ替えて計算し、結果に「開始日と終了日を入れ替えて計算しました。」と表示されます。
+    </div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mdc-popup-btn" onclick="closeModal('modalCountResult')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+  /* ---- Accordion ---- */
+  function toggleAcc(btn) {
+    btn.closest('.mdc-acc-item').classList.toggle('mdc-open');
+  }
+
+  /* ---- Modal ---- */
+  function openModal(id) {
+    document.getElementById(id).classList.remove('mdc-hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.add('mdc-hidden');
+    document.body.style.overflow = '';
+  }
+  document.querySelectorAll('.mdc-modal-ov').forEach(function(ov) {
+    ov.addEventListener('click', function(e) {
+      if (e.target === ov) closeModal(ov.id);
+    });
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.mdc-modal-ov:not(.mdc-hidden)').forEach(function(ov) {
+        closeModal(ov.id);
+      });
+    }
+  });
+
+  /* ---- Sticky nav active highlight ---- */
+  (function() {
+    var sections = document.querySelectorAll('.mdc-section[id]');
+    var navLinks = document.querySelectorAll('.mdc-nav-link[data-section]');
+    function onScroll() {
+      var scrollY = window.pageYOffset;
+      var active = null;
+      sections.forEach(function(sec) {
+        var top = sec.getBoundingClientRect().top + scrollY - 100;
+        if (scrollY >= top) active = sec.id;
+      });
+      navLinks.forEach(function(lnk) {
+        lnk.classList.toggle('mdc-active', lnk.dataset.section === active);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>
+{% endblock %}
