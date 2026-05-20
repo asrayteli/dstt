@@ -1079,6 +1079,75 @@
   .pcsv-bm-item:hover { background:#dbeafe; }
   .pcsv-bm-item .bm-del { color:#ef4444; cursor:pointer; font-size:13px; }
   .pcsv-bm-label { font-size:10px; color:#6b7280; margin-left:6px; }
+
+  /* === PowerCSV hardening / workflow extensions === */
+  .pcsv-filter-row th { top: 29px; z-index: 7; padding: 2px; background: #f8fafc; }
+  .pcsv-col-filter {
+    width: 100%;
+    min-width: 72px;
+    height: 22px;
+    border: 1px solid #dbe4ee;
+    border-radius: 3px;
+    padding: 0 5px;
+    font-size: 11px;
+    outline: none;
+  }
+  .pcsv-col-filter:focus { border-color: var(--pcsv-accent); background: #fff; }
+  .pcsv-table .pcsv-frozen-col {
+    position: sticky;
+    z-index: 4;
+    box-shadow: 1px 0 0 #dbe4ee;
+  }
+  .pcsv-table thead .pcsv-frozen-col { z-index: 10; }
+  .pcsv-table .pcsv-frozen-row td:not(.row-num) {
+    position: sticky;
+    top: 58px;
+    z-index: 5;
+    box-shadow: 0 1px 0 #dbe4ee;
+  }
+  .pcsv-rule-row,
+  .pcsv-pipeline-row {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr 1.2fr auto;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .pcsv-rule-row select,
+  .pcsv-rule-row input,
+  .pcsv-pipeline-row select,
+  .pcsv-pipeline-row input {
+    font-size: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    padding: 5px 7px;
+  }
+  .pcsv-mini-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  .pcsv-mini-table th,
+  .pcsv-mini-table td {
+    border: 1px solid #e5e7eb;
+    padding: 4px 6px;
+    max-width: 170px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pcsv-mini-table th { background: #f8fafc; position: sticky; top: 0; }
+  .pcsv-diff-added { background: #dcfce7; }
+  .pcsv-diff-removed { background: #fee2e2; }
+  .pcsv-diff-changed { background: #fef3c7; }
+  .pcsv-import-preview {
+    max-height: 280px;
+    overflow: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    margin-top: 8px;
+  }
+  .pcsv-small-note { color: #64748b; font-size: 11px; line-height: 1.45; }
 </style>
 
 <!-- ===== PowerCSV エントリ画面（編集ウィンドウ以外で表示） ===== -->
@@ -1239,6 +1308,8 @@
       <div class="pcsv-search-inline" id="searchBar">
         <input type="text" class="pcsv-search-input" id="searchInput" placeholder="検索..." oninput="doSearch()">
         <span class="search-count" id="searchCount"></span>
+        <button class="pcsv-tb-btn" onclick="prevSearchMatch()" title="前の一致">前</button>
+        <button class="pcsv-tb-btn" onclick="nextSearchMatch()" title="次の一致">次</button>
         <input type="text" class="pcsv-replace-input" id="replaceInput" placeholder="置換...">
         <button class="pcsv-tb-btn" onclick="doReplaceAll()" title="全て置換">全置換</button>
         <button class="pcsv-tb-btn" onclick="closeSearch()" title="閉じる">
@@ -1286,6 +1357,25 @@
       <button class="pcsv-tb-btn" id="btnViews" onclick="openViewSaveModal()" disabled title="ビューを保存 (仮想フィルタ)" style="color:#7c3aed">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
         <span class="btn-text">👁 View</span>
+      </button>
+      <div class="pcsv-tb-sep"></div>
+      <button class="pcsv-tb-btn" id="btnRules" onclick="openRulesModal()" disabled title="検証ルールを編集">
+        <span class="btn-text">Rules</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnPipeline" onclick="openPipelineModal()" disabled title="一括変換パイプライン">
+        <span class="btn-text">Pipeline</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnSchema" onclick="openSchemaModal()" disabled title="CSVスキーマの読込/保存">
+        <span class="btn-text">Schema</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnWorkFile" onclick="openWorkFileModal()" disabled title="PowerCSV作業ファイル">
+        <span class="btn-text">Work</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnSavePreview" onclick="openSavePreviewModal()" disabled title="保存前に差分を確認">
+        <span class="btn-text">Diff保存</span>
+      </button>
+      <button class="pcsv-tb-btn" id="btnUndoHistory" onclick="openUndoHistoryModal()" disabled title="取り消し履歴">
+        <span class="btn-text">History</span>
       </button>
     </div>
   </div>
@@ -1539,6 +1629,10 @@
       <option value="&#9;">タブ</option>
       <option value=";">セミコロン (;)</option>
     </select>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
+      <input type="checkbox" id="dlProtectFormulas" checked>
+      表計算ソフトで実行される可能性があるセル (= + - @) を安全化する
+    </label>
     <div class="pcsv-modal-actions">
       <button class="pcsv-modal-btn" onclick="closeDownloadModal()">キャンセル</button>
       <button class="pcsv-modal-btn primary" onclick="doDownload()">ダウンロード</button>
@@ -1636,6 +1730,8 @@
     <h3>📊 CSV Diff — ファイル比較</h3>
     <p style="font-size:12px;color:#6b7280;margin-bottom:10px">比較するCSVファイルをアップロードしてください。現在のデータとの差分を表示します。</p>
     <input type="file" id="diffFileInput" accept=".csv,.tsv,.txt" style="margin-bottom:10px">
+    <label>キー列（任意。列名または列番号。空なら行番号で比較）</label>
+    <input type="text" id="diffKeyColumn" placeholder="例: ID / 契約コード / 1">
     <div class="pcsv-modal-actions">
       <button class="pcsv-modal-btn" onclick="closeModal('diffModal')">キャンセル</button>
       <button class="pcsv-modal-btn primary" onclick="runDiff()">比較実行</button>
@@ -1655,6 +1751,12 @@
       <div id="mergeJoinOpts" style="display:none;padding:8px;background:#f9fafb;border-radius:4px;margin:6px 0">
         <label style="font-size:11px;color:#6b7280">キー列 (現在のファイル)</label>
         <select id="mergeKeyCol"></select>
+        <label style="display:block;font-size:11px;color:#6b7280;margin-top:6px">競合時の扱い</label>
+        <select id="mergeConflictMode">
+          <option value="keep">現在の値を優先</option>
+          <option value="other">追加ファイルの値を優先</option>
+          <option value="mark">競合を [現在 | 追加] として表示</option>
+        </select>
       </div>
     </div>
     <div id="mergePreview"></div>
@@ -1684,6 +1786,175 @@
       <button class="pcsv-modal-btn" onclick="closeModal('viewSaveModal')">キャンセル</button>
       <button class="pcsv-modal-btn" onclick="previewView()" style="background:#f3e8ff;color:#7c3aed;border-color:#d8b4fe">プレビュー</button>
       <button class="pcsv-modal-btn primary" onclick="doSaveView()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import Wizard Modal -->
+<div class="pcsv-modal-overlay hidden" id="importWizardModal">
+  <div class="pcsv-modal" style="min-width:720px;max-width:900px">
+    <h3>CSV読み込みウィザード</h3>
+    <p class="pcsv-small-note">PowerCSVはここで設定した内容だけを使って読み込みます。空行や列数の扱いも、勝手に変更せず選択できます。</p>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0">
+      <label>文字コード
+        <select id="importEncoding">
+          <option value="">自動</option>
+          <option value="utf-8-sig">UTF-8 BOM</option>
+          <option value="utf-8">UTF-8</option>
+          <option value="cp932">CP932</option>
+          <option value="shift_jis">Shift_JIS</option>
+          <option value="euc-jp">EUC-JP</option>
+        </select>
+      </label>
+      <label>区切り文字
+        <select id="importDelimiter">
+          <option value="auto">自動</option>
+          <option value=",">カンマ</option>
+          <option value="\t">タブ</option>
+          <option value=";">セミコロン</option>
+          <option value="|">パイプ</option>
+        </select>
+      </label>
+      <label>ヘッダー
+        <select id="importHasHeader">
+          <option value="true">1行目を列名にする</option>
+          <option value="false">列名を自動作成</option>
+        </select>
+      </label>
+      <label>空行
+        <select id="importPreserveEmptyRows">
+          <option value="true">保持する</option>
+          <option value="false">読み込み時に除外</option>
+        </select>
+      </label>
+      <label>列数が違う行
+        <select id="importRowWidth">
+          <option value="expand">最大列数まで広げる</option>
+          <option value="pad">足りない列だけ補完</option>
+          <option value="trim">ヘッダー列数へ切り詰め</option>
+          <option value="error">警告として扱う</option>
+        </select>
+      </label>
+    </div>
+    <div id="importWizardInfo" class="pcsv-small-note"></div>
+    <div class="pcsv-import-preview" id="importPreview"></div>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('importWizardModal')">キャンセル</button>
+      <button class="pcsv-modal-btn" onclick="refreshImportPreview()">プレビュー更新</button>
+      <button class="pcsv-modal-btn primary" onclick="confirmImportWizard()">この設定で読み込む</button>
+    </div>
+  </div>
+</div>
+
+<!-- Validation Rules Modal -->
+<div class="pcsv-modal-overlay hidden" id="rulesModal">
+  <div class="pcsv-modal" style="min-width:700px;max-width:860px">
+    <h3>CSV品質チェックルール</h3>
+    <div id="rulesList"></div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="pcsv-modal-btn" onclick="addValidationRule()">+ ルール追加</button>
+      <button class="pcsv-modal-btn" onclick="exportSchemaFile()">スキーマ保存</button>
+      <button class="pcsv-modal-btn" onclick="triggerSchemaImport()">スキーマ読込</button>
+    </div>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('rulesModal')">閉じる</button>
+      <button class="pcsv-modal-btn primary" onclick="saveRulesModal()">保存して検証</button>
+    </div>
+  </div>
+</div>
+
+<!-- Transformation Pipeline Modal -->
+<div class="pcsv-modal-overlay hidden" id="pipelineModal">
+  <div class="pcsv-modal" style="min-width:720px;max-width:900px">
+    <h3>一括変換パイプライン</h3>
+    <p class="pcsv-small-note">手順を積んでからプレビューし、問題なければまとめて適用します。</p>
+    <div id="pipelineList"></div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button class="pcsv-modal-btn" onclick="addPipelineStep()">+ 手順追加</button>
+      <button class="pcsv-modal-btn" onclick="previewPipeline()">プレビュー</button>
+    </div>
+    <div id="pipelinePreview" class="pcsv-import-preview"></div>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('pipelineModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="applyPipeline()">適用</button>
+    </div>
+  </div>
+</div>
+
+<!-- Schema Modal -->
+<div class="pcsv-modal-overlay hidden" id="schemaModal">
+  <div class="pcsv-modal" style="min-width:520px">
+    <h3>CSVスキーマ</h3>
+    <p class="pcsv-small-note">列名、型ロック、検証ルールをJSONとして保存/読込できます。</p>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="triggerSchemaImport()">スキーマ読込</button>
+      <button class="pcsv-modal-btn primary" onclick="exportSchemaFile()">スキーマ保存</button>
+      <button class="pcsv-modal-btn" onclick="closeModal('schemaModal')">閉じる</button>
+    </div>
+    <input type="file" id="schemaFileInput" accept=".json,.powercsv-schema.json" style="display:none">
+  </div>
+</div>
+
+<!-- Work File Modal -->
+<div class="pcsv-modal-overlay hidden" id="workFileModal">
+  <div class="pcsv-modal" style="min-width:560px">
+    <h3>PowerCSV作業ファイル</h3>
+    <p class="pcsv-small-note">CSV本体を壊さず、数式・インスタント・ビュー・検証ルール・表示設定・変更履歴を .powercsv として保存します。</p>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="triggerWorkImport()">作業ファイル読込</button>
+      <button class="pcsv-modal-btn primary" onclick="exportWorkFile()">作業ファイル保存</button>
+      <button class="pcsv-modal-btn" onclick="closeModal('workFileModal')">閉じる</button>
+    </div>
+    <input type="file" id="workFileInput" accept=".powercsv,.json" style="display:none">
+  </div>
+</div>
+
+<!-- Save Diff Preview Modal -->
+<div class="pcsv-modal-overlay hidden" id="savePreviewModal">
+  <div class="pcsv-modal" style="min-width:760px;max-width:960px">
+    <h3>保存前差分プレビュー</h3>
+    <div id="savePreviewSummary" class="pcsv-small-note"></div>
+    <div id="savePreviewContent" class="pcsv-import-preview"></div>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('savePreviewModal')">閉じる</button>
+      <button class="pcsv-modal-btn primary" onclick="openDownloadModal()">この内容を保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Paste Preview Modal -->
+<div class="pcsv-modal-overlay hidden" id="pastePreviewModal">
+  <div class="pcsv-modal" style="min-width:720px;max-width:900px">
+    <h3>貼り付けプレビュー</h3>
+    <div id="pastePreviewInfo" class="pcsv-small-note"></div>
+    <div id="pastePreviewContent" class="pcsv-import-preview"></div>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('pastePreviewModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="confirmPastePreview()">貼り付ける</button>
+    </div>
+  </div>
+</div>
+
+<!-- Undo History Modal -->
+<div class="pcsv-modal-overlay hidden" id="undoHistoryModal">
+  <div class="pcsv-modal" style="min-width:440px">
+    <h3>取り消し履歴</h3>
+    <div id="undoHistoryContent" style="max-height:420px;overflow:auto"></div>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('undoHistoryModal')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- Change Memo Modal -->
+<div class="pcsv-modal-overlay hidden" id="memoModal">
+  <div class="pcsv-modal" style="min-width:360px">
+    <h3>変更理由メモ</h3>
+    <label>対象 <strong id="memoCellLabel"></strong></label>
+    <textarea id="memoText" style="width:100%;height:100px;border:1px solid #d1d5db;border-radius:4px;padding:8px"></textarea>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('memoModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="saveMemoModal()">保存</button>
     </div>
   </div>
 </div>
@@ -1771,6 +2042,24 @@ const S = {
   bookmarks: [],        // [{id,row,col,label}]
   bookmarkNextId: 1,
   bookmarkOpen: false,
+  // PowerCSV workflow extensions
+  originalHeaders: [],
+  originalData: [],
+  importOptions: {},
+  columnTypes: {},      // col index -> text | number | date
+  validationRules: [],  // custom schema/rule definitions
+  columnFilters: {},    // col index -> contains text
+  columnWidths: {},     // col index -> px width
+  freezeRowsCount: 0,
+  freezeColsCount: 0,
+  memos: {},            // "row,col" -> reason
+  pipelineSteps: [],
+  searchCursor: -1,
+  pendingFile: null,
+  pendingImportResult: null,
+  pendingPaste: null,
+  pendingMemoCell: null,
+  safeEditMode: true,
 };
 function hasData() { return S.headers.length > 0; }
 
@@ -1798,9 +2087,15 @@ function clearSelection() {
 
 // ========== Undo / Redo ==========
 function _serializeSets(){return{dR:[...S.disabledRows],dC:[...S.disabledCols],dCe:[...S.disabledCells],hR:[...S.hiddenRows],hC:[...S.hiddenCols],hCe:[...S.hiddenCells],
-  iR:JSON.parse(JSON.stringify(S.instant.rows)),iC:JSON.parse(JSON.stringify(S.instant.cols)),iCe:JSON.parse(JSON.stringify(S.instant.cells)),iOpt:{...S.instant.options},iRNid:S.instant.rowNextId,iCNid:S.instant.colNextId};}
+  iR:JSON.parse(JSON.stringify(S.instant.rows)),iC:JSON.parse(JSON.stringify(S.instant.cols)),iCe:JSON.parse(JSON.stringify(S.instant.cells)),iOpt:{...S.instant.options},iRNid:S.instant.rowNextId,iCNid:S.instant.colNextId,
+  views:JSON.parse(JSON.stringify(S.views)),viewsNextId:S.viewsNextId,currentView:S.currentView,columnTypes:{...S.columnTypes},validationRules:JSON.parse(JSON.stringify(S.validationRules)),
+  columnFilters:{...S.columnFilters},columnWidths:{...S.columnWidths},freezeRowsCount:S.freezeRowsCount,freezeColsCount:S.freezeColsCount,memos:JSON.parse(JSON.stringify(S.memos)),
+  journal:JSON.parse(JSON.stringify(S.journal)),pipelineSteps:JSON.parse(JSON.stringify(S.pipelineSteps))};}
 function _restoreSets(s){if(!s)return;S.disabledRows=new Set(s.dR||[]);S.disabledCols=new Set(s.dC||[]);S.disabledCells=new Set(s.dCe||[]);S.hiddenRows=new Set(s.hR||[]);S.hiddenCols=new Set(s.hC||[]);S.hiddenCells=new Set(s.hCe||[]);
-  S.instant.rows=s.iR||[];S.instant.cols=s.iC||[];S.instant.cells=s.iCe||{};if(s.iOpt)S.instant.options={...s.iOpt};if(s.iRNid)S.instant.rowNextId=s.iRNid;if(s.iCNid)S.instant.colNextId=s.iCNid;}
+  S.instant.rows=s.iR||[];S.instant.cols=s.iC||[];S.instant.cells=s.iCe||{};if(s.iOpt)S.instant.options={...s.iOpt};if(s.iRNid)S.instant.rowNextId=s.iRNid;if(s.iCNid)S.instant.colNextId=s.iCNid;
+  S.views=s.views||[];S.viewsNextId=s.viewsNextId||1;S.currentView=s.currentView??null;S.columnTypes=s.columnTypes||{};S.validationRules=s.validationRules||[];
+  S.columnFilters=s.columnFilters||{};S.columnWidths=s.columnWidths||{};S.freezeRowsCount=s.freezeRowsCount||0;S.freezeColsCount=s.freezeColsCount||0;S.memos=s.memos||{};
+  S.journal=s.journal||[];S.pipelineSteps=s.pipelineSteps||[];}
 function saveState(label) {
   S.undoStack.push({label,headers:JSON.parse(JSON.stringify(S.headers)),data:JSON.parse(JSON.stringify(S.data)),formulas:JSON.parse(JSON.stringify(S.formulas)),sets:_serializeSets()});
   if(S.undoStack.length>50) S.undoStack.shift();
@@ -1836,27 +2131,73 @@ function initUpload() {
   inp.addEventListener('change',()=>{if(inp.files.length)uploadFile(inp.files[0]);inp.value=''});
 }
 async function uploadFile(file) {
-  document.getElementById('statusMode').textContent='読込中...';
-  const fd=new FormData(); fd.append('file',file);
+  S.pendingFile=file;
+  document.getElementById('importDelimiter').value='auto';
+  document.getElementById('importEncoding').value='';
+  document.getElementById('importHasHeader').value='true';
+  document.getElementById('importPreserveEmptyRows').value='true';
+  document.getElementById('importRowWidth').value='expand';
+  openModal('importWizardModal');
+  await refreshImportPreview();
+}
+function importOptionsFromUI(){
+  return {
+    encoding:document.getElementById('importEncoding').value,
+    delimiter:document.getElementById('importDelimiter').value,
+    has_header:document.getElementById('importHasHeader').value,
+    preserve_empty_rows:document.getElementById('importPreserveEmptyRows').value,
+    row_width_strategy:document.getElementById('importRowWidth').value,
+  };
+}
+async function parsePendingFile(){
+  if(!S.pendingFile) throw new Error('No file is pending import');
+  const fd=new FormData(); fd.append('file',S.pendingFile);
+  Object.entries(importOptionsFromUI()).forEach(([k,v])=>fd.append(k,v));
+  const res=await fetch('/tools/csvtool/api/upload',{method:'POST',body:fd});
+  const j=await res.json(); if(!res.ok) throw new Error(j.error||'Upload failed');
+  return j;
+}
+async function refreshImportPreview(){
+  document.getElementById('importWizardInfo').textContent='Parsing...';
   try {
-    const res=await fetch('/tools/csvtool/api/upload',{method:'POST',body:fd});
-    const j=await res.json(); if(!res.ok) throw new Error(j.error||'アップロード失敗');
-    S.headers=j.headers; S.data=j.data; S.filename=j.filename; S.encoding=j.encoding; S.delimiter=j.delimiter;
-    S.page=1; S.selectedCell=null; S.selectedRows=new Set(); S.selectedCols=new Set(); S.multiCells=new Set(); S.selRange=null;
-    S.sortCol=-1; S.sortDir=0; S.undoStack=[]; S.redoStack=[]; S.issueMap={}; S.formulas={};
-    S.disabledRows=new Set(); S.disabledCols=new Set(); S.disabledCells=new Set();
-    S.hiddenRows=new Set(); S.hiddenCols=new Set(); S.hiddenCells=new Set(); S.dragging=false; S.dragStart=null;
-    S.instant.rows=[]; S.instant.cols=[]; S.instant.cells={}; S.instant.calcHistory=[]; S.instant.calcNextId=1; S.instant.rowNextId=1; S.instant.colNextId=1; S.instant._xData={}; S.selectedInstCell=null;
-    S.views=[]; S.viewsNextId=1; S.currentView=null; S.journal=[]; S.journalHighlight=false;
-    S.diffResult=null; S.bookmarks=[]; S.bookmarkNextId=1;
-    showEditor(); renderGrid(); updateStatus(); enableToolbar();
-    toast(`${j.filename} を読み込みました (${j.totalRows.toLocaleString()}行)`,'success');
-    document.getElementById('headerInfo').style.display='flex';
-    document.getElementById('headerFilename').textContent=j.filename;
-    document.getElementById('headerEncoding').textContent=j.encoding.toUpperCase();
-    document.getElementById('dlFilename').value=j.filename;
-  } catch(err) { toast(err.message,'error'); }
-  document.getElementById('statusMode').textContent='準備完了';
+    const j=await parsePendingFile();
+    S.pendingImportResult=j;
+    document.getElementById('importWizardInfo').textContent=`${j.filename} / ${j.encoding} / Delimiter: ${j.delimiter==='\t'?'Tab':j.delimiter} / ${j.totalRows.toLocaleString()} rows / ${j.totalColumns.toLocaleString()} cols`;
+    renderMiniTable('importPreview', j.headers, (j.data||[]).slice(0,20));
+    if(j.warnings&&j.warnings.length){document.getElementById('importWizardInfo').textContent += ` / warnings ${j.warnings.length}`;}
+  } catch(err) { document.getElementById('importWizardInfo').textContent='Parse failed'; toast(err.message,'error'); }
+}
+async function confirmImportWizard(){
+  document.getElementById('statusMode').textContent='Loading...';
+  try{
+    const j=S.pendingImportResult||await parsePendingFile();
+    loadDataset(j,{resetOriginal:true});
+    closeModal('importWizardModal');
+    toast(`${j.filename} loaded (${j.totalRows.toLocaleString()} rows)`,'success');
+  }catch(err){toast(err.message,'error');}
+  document.getElementById('statusMode').textContent='Ready';
+}
+function resetSessionState(){
+  S.page=1; S.selectedCell=null; S.selectedRows=new Set(); S.selectedCols=new Set(); S.multiCells=new Set(); S.selRange=null;
+  S.sortCol=-1; S.sortDir=0; S.undoStack=[]; S.redoStack=[]; S.issueMap={}; S.formulas={};
+  S.disabledRows=new Set(); S.disabledCols=new Set(); S.disabledCells=new Set();
+  S.hiddenRows=new Set(); S.hiddenCols=new Set(); S.hiddenCells=new Set(); S.dragging=false; S.dragStart=null;
+  S.instant.rows=[]; S.instant.cols=[]; S.instant.cells={}; S.instant.calcHistory=[]; S.instant.calcNextId=1; S.instant.rowNextId=1; S.instant.colNextId=1; S.instant._xData={}; S.selectedInstCell=null;
+  S.views=[]; S.viewsNextId=1; S.currentView=null; S.journal=[]; S.journalHighlight=false;
+  S.diffResult=null; S.bookmarks=[]; S.bookmarkNextId=1; S.columnTypes={}; S.validationRules=[]; S.columnFilters={}; S.columnWidths={}; S.freezeRowsCount=0; S.freezeColsCount=0; S.memos={}; S.pipelineSteps=[];
+}
+function loadDataset(j,{resetOriginal=false}={}){
+  const headers=j.headers||[];
+  const data=j.data||[];
+  resetSessionState();
+  S.headers=headers; S.data=data; S.filename=j.filename||S.filename||'powercsv.csv'; S.encoding=j.encoding||'utf-8'; S.delimiter=j.delimiter||',';
+  S.importOptions={hasHeader:j.hasHeader,preserveEmptyRows:j.preserveEmptyRows,rowWidthStrategy:j.rowWidthStrategy};
+  if(resetOriginal){S.originalHeaders=JSON.parse(JSON.stringify(S.headers));S.originalData=JSON.parse(JSON.stringify(S.data));}
+  showEditor(); renderGrid(); updateStatus(); enableToolbar();
+  document.getElementById('headerInfo').style.display='flex';
+  document.getElementById('headerFilename').textContent=S.filename;
+  document.getElementById('headerEncoding').textContent=String(S.encoding).toUpperCase();
+  document.getElementById('dlFilename').value=S.filename;
 }
 function showEditor() {
   document.getElementById('uploadScreen').style.display='none';
@@ -1867,34 +2208,31 @@ function openNewCSVModal(){document.getElementById('newCsvModal').classList.remo
 function doCreateNewCSV(){
   const numCols=Math.max(1,Math.min(200,parseInt(document.getElementById('newCsvCols').value)||5));
   const numRows=Math.max(0,Math.min(10000,parseInt(document.getElementById('newCsvRows').value)||10));
-  const fname=(document.getElementById('newCsvFilename').value||'新規.csv').trim();
-  S.headers=[];for(let i=0;i<numCols;i++)S.headers.push('列'+(i+1));
-  S.data=[];for(let r=0;r<numRows;r++)S.data.push(new Array(numCols).fill(''));
-  S.filename=fname; S.encoding='utf-8'; S.delimiter=',';
-  S.page=1;S.selectedCell=null;S.selectedRows=new Set();S.selectedCols=new Set();S.multiCells=new Set();S.selRange=null;
-  S.sortCol=-1;S.sortDir=0;S.undoStack=[];S.redoStack=[];S.issueMap={};S.formulas={};
-  S.disabledRows=new Set();S.disabledCols=new Set();S.disabledCells=new Set();
-  S.hiddenRows=new Set();S.hiddenCols=new Set();S.hiddenCells=new Set();S.dragging=false;S.dragStart=null;
-  S.instant.rows=[];S.instant.cols=[];S.instant.cells={};S.instant.calcHistory=[];S.instant.calcNextId=1;S.instant.rowNextId=1;S.instant.colNextId=1;S.instant._xData={};S.selectedInstCell=null;
-  S.views=[];S.viewsNextId=1;S.currentView=null;S.journal=[];S.journalHighlight=false;
-  S.diffResult=null;S.bookmarks=[];S.bookmarkNextId=1;
-  closeModal('newCsvModal');showEditor();renderGrid();updateStatus();enableToolbar();
-  document.getElementById('headerInfo').style.display='flex';
-  document.getElementById('headerFilename').textContent=fname;
-  document.getElementById('headerEncoding').textContent='UTF-8';
-  document.getElementById('dlFilename').value=fname;
-  toast(`新規CSV (${numCols}列×${numRows}行) を作成しました`,'success');
+  const fname=(document.getElementById('newCsvFilename').value||'new.csv').trim();
+  const headers=[];for(let i=0;i<numCols;i++)headers.push('?'+(i+1));
+  const data=[];for(let r=0;r<numRows;r++)data.push(new Array(numCols).fill(''));
+  loadDataset({headers,data,filename:fname,encoding:'utf-8',delimiter:',',hasHeader:true,preserveEmptyRows:true,rowWidthStrategy:'expand'},{resetOriginal:true});
+  closeModal('newCsvModal');
+  toast(`New CSV (${numCols} cols x ${numRows} rows) created`,'success');
 }
 function enableToolbar() {
   ['btnSave','btnAddRow','btnDelRow','btnAddCol','btnDelCol','btnTrim','btnDedup',
    'btnEmptyRows','btnTranspose','btnSearch','btnGoto','btnValidate','btnStats','btnInstant',
-   'btnDiff','btnMerge','btnBookmarks','btnJournal','btnViews'
+   'btnDiff','btnMerge','btnBookmarks','btnJournal','btnViews','btnRules','btnPipeline','btnSchema','btnWorkFile','btnSavePreview','btnUndoHistory'
   ].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=false;});
   updateUndoButtons();
 }
 
 // ========== Visible Row/Col Helpers ==========
-function getVisibleRows(){const a=[];for(let i=0;i<S.data.length;i++)if(!S.hiddenRows.has(i))a.push(i);return a;}
+function rowMatchesColumnFilters(row){
+  for(const [col,needle] of Object.entries(S.columnFilters||{})){
+    if(!needle) continue;
+    const val=String(row[Number(col)]||'').toLowerCase();
+    if(!val.includes(String(needle).toLowerCase())) return false;
+  }
+  return true;
+}
+function getVisibleRows(){const a=[];for(let i=0;i<S.data.length;i++)if(!S.hiddenRows.has(i)&&rowMatchesColumnFilters(S.data[i]||[]))a.push(i);return a;}
 function getVisibleCols(){const a=[];for(let i=0;i<S.headers.length;i++)if(!S.hiddenCols.has(i))a.push(i);return a;}
 function getPageData(){
   const visRows=getVisibleRows();let pageRows;
@@ -1962,6 +2300,22 @@ function _getInstantCellVal(instObj,type,idx){
 
 // ========== Grid Rendering ==========
 function renderGrid() { renderHeader(); renderBody(); renderPagination(); }
+function colWidthStyle(ci){return S.columnWidths&&S.columnWidths[ci]?`width:${Number(S.columnWidths[ci])}px;min-width:${Number(S.columnWidths[ci])}px;max-width:${Number(S.columnWidths[ci])}px;`:'';}
+function frozenLeftStyle(ci){
+  if(ci>=S.freezeColsCount) return '';
+  let left=42;
+  for(let i=0;i<ci;i++) left+=Number(S.columnWidths[i]||120);
+  return `left:${left}px;`;
+}
+function frozenTopStyle(row){return row<S.freezeRowsCount?`top:${58+(row*24)}px;`:'';}
+function colMetaBadge(ci){
+  const t=S.columnTypes[String(ci)]||S.columnTypes[ci]||'';
+  return t&&t!=='text'?` <span style="font-size:10px;color:#2563eb">[${escHtml(t)}]</span>`:'';
+}
+function updateColumnFilter(ci,value){
+  if(value) S.columnFilters[ci]=value; else delete S.columnFilters[ci];
+  S.page=1; renderBody(); renderPagination(); updateStatus();
+}
 function renderHeader() {
   const thead=document.getElementById('tableThead'), visCols=getVisibleCols();
   const vCols=_buildVisualCols(visCols);
@@ -1975,12 +2329,22 @@ function renderHeader() {
       const esc=escHtml(S.headers[i]);
       let cl=S.selectedCols.has(i)||(S.selectedCell&&S.selectedCell.col===i)||(S.selRange&&i>=S.selRange.c1&&i<=S.selRange.c2)?' col-highlight':'';
       if(S.disabledCols.has(i)) cl+=' col-disabled';
-      h+=`<th class="${cl}" data-col="${i}" onclick="onHeaderClick(${i},event)" oncontextmenu="onHeaderCtx(event,${i})" title="${esc}"><div class="th-content"><span class="th-label">${esc}</span>${arrow}</div></th>`;
+      if(i<S.freezeColsCount) cl+=' pcsv-frozen-col';
+      h+=`<th class="${cl}" style="${colWidthStyle(i)}${frozenLeftStyle(i)}" data-col="${i}" onclick="onHeaderClick(${i},event)" oncontextmenu="onHeaderCtx(event,${i})" title="${esc}"><div class="th-content"><span class="th-label">${esc}${colMetaBadge(i)}</span>${arrow}</div></th>`;
     } else {
       const ic=vc.obj;
       let cl='col-instant'+(ic.reflected?' inst-reflected':'');
       const refBadge=ic.reflected?'<span class="inst-reflected-badge">反映</span>':'';
       h+=`<th class="${cl}" data-inst-col-id="${ic.id}" oncontextmenu="onInstColCtx(event,${ic.id})" title="${escHtml(ic.header)}"><div class="th-content"><span class="th-label"><span class="inst-badge">⚡</span>${escHtml(ic.header)}${refBadge}</span></div></th>`;
+    }
+  });
+  h+='</tr><tr class="pcsv-filter-row"><th class="row-num">Filter</th>';
+  vCols.forEach(vc=>{
+    if(vc.t==='r'){
+      const i=vc.idx;
+      h+=`<th class="${i<S.freezeColsCount?'pcsv-frozen-col':''}" style="${colWidthStyle(i)}${frozenLeftStyle(i)}"><input class="pcsv-col-filter" value="${escHtml(S.columnFilters[i]||'')}" placeholder="含む..." oninput="updateColumnFilter(${i},this.value)"></th>`;
+    }else{
+      h+='<th></th>';
     }
   });
   h+='</tr>'; thead.innerHTML=h;
@@ -2002,7 +2366,7 @@ function renderBody() {
       const di=vr.idx, row=S.data[di], isRS=S.selectedRows.has(di);
       const rowHL=(S.selectedCell&&S.selectedCell.row===di)||(S.selRange&&di>=S.selRange.r1&&di<=S.selRange.r2);
       const rowDis=S.disabledRows.has(di);
-      h+=`<tr class="${isRS?'row-selected':''}" data-ridx="${di}">`;
+      h+=`<tr class="${isRS?'row-selected':''}${di<S.freezeRowsCount?' pcsv-frozen-row':''}" data-ridx="${di}">`;
       const rnCls='row-num'+(rowHL?' row-highlight':'')+(rowDis?' row-disabled':'');
       h+=`<td class="${rnCls}" onclick="toggleRowSelect(${di},event)" oncontextmenu="onRowCtx(event,${di})">${di+1}</td>`;
       for(let vci=0;vci<vCols.length;vci++){
@@ -2032,8 +2396,10 @@ function renderBody() {
           if(S.searchMatches.some(m=>m.row===di&&m.col===ci)) cls+=' cell-match';
           if(S.journalHighlight&&S.journal.some(j=>j.row===di&&j.col===ci)) cls+=' cell-changed';
           if(S.bookmarks.some(b=>b.row===di&&b.col===ci)) cls+=' cell-bookmarked';
+          if(S.memos[ik]) cls+=' cell-changed';
+          if(ci<S.freezeColsCount) cls+=' pcsv-frozen-col';
           const displayVal=S.hiddenCells.has(ik)?'':escHtml(val);
-          h+=`<td class="${cls}" data-ridx="${di}" data-cidx="${ci}" onmousedown="onCellMouseDown(${di},${ci},event)" ondblclick="startEdit(${di},${ci})" oncontextmenu="onCellCtx(event,${di},${ci})">${displayVal}</td>`;
+          h+=`<td class="${cls}" style="${colWidthStyle(ci)}${frozenLeftStyle(ci)}${frozenTopStyle(di)}" data-ridx="${di}" data-cidx="${ci}" onmousedown="onCellMouseDown(${di},${ci},event)" ondblclick="startEdit(${di},${ci})" oncontextmenu="onCellCtx(event,${di},${ci})">${displayVal}</td>`;
         } else {
           // Instant col cell for a real row
           const ic=vc.obj;
@@ -2389,6 +2755,7 @@ function evaluateFormula(formula){
     // Simple arithmetic
     try{
       const replaced=expr.replace(/([A-Za-z]+\d+)/g,(m)=>{const r=parseCellRef(m);return r?`(${parseFloat(getCellVal(r.row,r.col))||0})`:'0';});
+      if(!/^[0-9+\-*/%().\s]+$/.test(replaced)) return '#ERROR: 許可されていない数式';
       const result=Function('"use strict";return ('+replaced+')')();
       if(typeof result==='number'&&isFinite(result)) return result;
     }catch(e){}
@@ -2636,8 +3003,17 @@ async function doPaste() {
     const rows=text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
     if(rows[rows.length-1]==='') rows.pop();
     const parsed=rows.map(r=>r.split('\t'));
+    S.pendingPaste={parsed,row:S.selectedCell.row,col:S.selectedCell.col};
+    document.getElementById('pastePreviewInfo').textContent=`${parsed.length}行 × ${Math.max(...parsed.map(r=>r.length),0)}列を ${indexToColLetter(S.selectedCell.col)}${S.selectedCell.row+1} へ貼り付けます。`;
+    renderMiniTable('pastePreviewContent', parsed[0]?.map((_,i)=>`貼付${i+1}`)||[], parsed.slice(0,20));
+    openModal('pastePreviewModal');
+  }catch(e){toast('貼り付けに失敗しました','error');}
+}
+function confirmPastePreview(){
+  if(!S.pendingPaste) return;
+  const {parsed,row:sr,col:sc}=S.pendingPaste;
+  try{
     saveState('貼り付け');
-    const sr=S.selectedCell.row,sc=S.selectedCell.col;
     for(let r=0;r<parsed.length;r++){
       const tr=sr+r;
       while(tr>=S.data.length) S.data.push(new Array(S.headers.length).fill(''));
@@ -2646,6 +3022,7 @@ async function doPaste() {
         if(tc<S.headers.length) S.data[tr][tc]=parsed[r][c];
       }
     }
+    closeModal('pastePreviewModal'); S.pendingPaste=null;
     renderGrid(); updateStatus(); toast(`${parsed.length}行を貼り付けました`,'success');
   }catch(e){toast('貼り付けに失敗しました','error');}
 }
@@ -2963,11 +3340,18 @@ function closeSearch(){
   document.getElementById('searchCount').textContent='';S.searchMatches=[];renderBody();
 }
 function doSearch(){
-  const q=document.getElementById('searchInput').value; S.searchMatches=[];
+  const q=document.getElementById('searchInput').value; S.searchMatches=[]; S.searchCursor=-1;
   if(q){const l=q.toLowerCase();S.data.forEach((r,ri)=>r.forEach((c,ci)=>{if(c.toLowerCase().includes(l))S.searchMatches.push({row:ri,col:ci})}));}
   document.getElementById('searchCount').textContent=S.searchMatches.length>0?`${S.searchMatches.length}件`:(q?'0件':'');
   renderBody();
 }
+function gotoSearchCursor(){
+  if(!S.searchMatches.length)return;
+  const m=S.searchMatches[S.searchCursor];S.selectedCell={row:m.row,col:m.col};S.selRange=null;ensureCellVisible(m.row,m.col);renderGrid();updateFormulaBar();
+  document.getElementById('searchCount').textContent=`${S.searchCursor+1}/${S.searchMatches.length}件`;
+}
+function nextSearchMatch(){if(!S.searchMatches.length)doSearch();if(!S.searchMatches.length)return;S.searchCursor=(S.searchCursor+1)%S.searchMatches.length;gotoSearchCursor();}
+function prevSearchMatch(){if(!S.searchMatches.length)doSearch();if(!S.searchMatches.length)return;S.searchCursor=(S.searchCursor<=0?S.searchMatches.length:S.searchCursor)-1;gotoSearchCursor();}
 function doReplaceAll(){
   const s=document.getElementById('searchInput').value,r=document.getElementById('replaceInput').value;
   if(!s){toast('検索文字列を入力してください');return;}
@@ -3115,6 +3499,7 @@ function onCellCtx(e,row,col) {
     {label:'=COUNTIF(,) 条件カウント',action:`insertFxToCell(${row},${col},'=COUNTIF(,)')`},
   ]});
   items.push('---');
+  items.push({label:'Change memo',action:`openMemo(${row},${col})`});
   // Bookmark (C2)
   if(S.bookmarks.some(b=>b.row===row&&b.col===col)){
     items.push({label:'🔖 ブックマーク解除',action:`removeBookmarkAt(${row},${col})`});
@@ -3154,6 +3539,9 @@ function onRowCtx(e,row) {
     isRowDis?{label:'行の無効化を解除',action:`enableRow(${row})`}:{label:'行を無効化',action:`disableRow(${row})`},
     {label:'行を非表示',action:`hideRow(${row})`},
   ];
+  items.push('---');
+  items.push({label:'Freeze through this row',action:`setFreezeRows(${row})`});
+  items.push({label:'Clear freeze',action:'clearFreeze()'});
   // Instant
   items.push('---');
   const instRowSub=[
@@ -3204,6 +3592,15 @@ function onHeaderCtx(e,col) {
     items.push('---');
     items.push({label:'⚡ 2列を比較 (インスタント)',action:`createCompareColumn(${cc[0]},${cc[1]})`});
   }
+  items.push('---');
+  items.push({label:'Column type',sub:[
+    {label:'Text',action:`setColumnType(${col},'text')`},
+    {label:'Number',action:`setColumnType(${col},'number')`},
+    {label:'Date',action:`setColumnType(${col},'date')`},
+  ]});
+  items.push({label:'Set column width',action:`setColumnWidth(${col})`});
+  items.push({label:'Freeze through this column',action:`setFreezeColumns(${col})`});
+  items.push({label:'Clear freeze',action:'clearFreeze()'});
   // Instant
   items.push('---');
   const instColSub=[
@@ -3301,7 +3698,7 @@ async function runValidation(){
   const content=document.getElementById('validateContent');
   content.innerHTML='<div class="pcsv-loading"><div class="pcsv-spinner"></div>検証中...</div>';
   try{
-    const res=await fetch('/tools/csvtool/api/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headers:S.headers,data:S.data})});
+    const res=await fetch('/tools/csvtool/api/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headers:S.headers,data:S.data,rules:S.validationRules,columnTypes:S.columnTypes})});
     const j=await res.json();if(!res.ok)throw new Error(j.error||'検証失敗');
     S.issueMap={};
     j.issues.forEach(issue=>{
@@ -3345,7 +3742,7 @@ async function renderStats(){
   const content=document.getElementById('statsContent');
   content.innerHTML='<div class="pcsv-loading"><div class="pcsv-spinner"></div>分析中...</div>';
   try{
-    const res=await fetch('/tools/csvtool/api/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headers:S.headers,data:S.data})});
+    const res=await fetch('/tools/csvtool/api/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({headers:S.headers,data:S.data,rules:S.validationRules,columnTypes:S.columnTypes})});
     const j=await res.json();if(!res.ok)throw new Error(j.error);
     let h='<div class="panel-section"><div class="panel-section-title">概要</div>';
     h+=`<div class="panel-stat-row"><span class="label">行数</span><span class="value">${S.data.length.toLocaleString()}</span></div>`;
@@ -3370,13 +3767,14 @@ function closeDownloadModal(){closeModal('downloadModal');}
 async function doDownload(){
   const fn=document.getElementById('dlFilename').value.trim()||'export.csv';
   const enc=document.getElementById('dlEncoding').value,delim=document.getElementById('dlDelimiter').value;
+  const protectFormulas=document.getElementById('dlProtectFormulas')?.checked!==false;
   // Instant rows/cols are NOT in S.data/S.headers, so just restore overlay cells
   let dlHeaders=JSON.parse(JSON.stringify(S.headers));
   let dlData=JSON.parse(JSON.stringify(S.data));
   for(const ck in S.instant.cells){const[r,c]=ck.split(',').map(Number);if(r<dlData.length&&c<dlHeaders.length)dlData[r][c]=S.instant.cells[ck].original;}
   try{
     const res=await fetch('/tools/csvtool/api/download',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({headers:dlHeaders,data:dlData,encoding:enc,delimiter:delim,filename:fn})});
+      body:JSON.stringify({headers:dlHeaders,data:dlData,encoding:enc,delimiter:delim,filename:fn,protectFormulas})});
     if(!res.ok){const j=await res.json();throw new Error(j.error||'ダウンロード失敗');}
     const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;a.download=fn;a.click();URL.revokeObjectURL(url);closeDownloadModal();toast('ダウンロードしました（インスタント除外済み）','success');
@@ -4171,63 +4569,40 @@ function openDiffModal(){
   document.getElementById('diffFileInput').value='';
   openModal('diffModal');
 }
-function _parseCSVText(text){
-  const lines=text.split(/\r?\n/).filter(l=>l.trim());
-  if(!lines.length) return {headers:[],data:[]};
-  // Detect delimiter
-  const firstLine=lines[0];
-  let delim=',';
-  if(firstLine.split('\t').length>firstLine.split(',').length) delim='\t';
-  else if(firstLine.split(';').length>firstLine.split(',').length) delim=';';
-  const headers=lines[0].split(delim).map(h=>h.replace(/^"|"$/g,'').trim());
-  const data=[];
-  for(let i=1;i<lines.length;i++){
-    const row=lines[i].split(delim).map(c=>c.replace(/^"|"$/g,'').trim());
-    while(row.length<headers.length) row.push('');
-    data.push(row);
-  }
-  return {headers,data};
+function resolveColumnInput(raw, headers){
+  raw=String(raw||'').trim();
+  if(!raw)return -1;
+  const n=parseInt(raw,10);if(!isNaN(n)&&n>=1&&n<=headers.length)return n-1;
+  const byName=headers.findIndex(h=>String(h).trim()===raw);if(byName>=0)return byName;
+  const byLetter=/^[A-Za-z]+$/.test(raw)?colLetterToIndex(raw):-1;return byLetter>=0&&byLetter<headers.length?byLetter:-1;
 }
 function runDiff(){
   const fileInput=document.getElementById('diffFileInput');
-  if(!fileInput.files.length){toast('ファイルを選択してください','error');return;}
+  if(!fileInput.files.length){toast('Work file saved','error');return;}
   const reader=new FileReader();
   reader.onload=function(e){
     const parsed=_parseCSVText(e.target.result);
-    if(!parsed.headers.length){toast('CSVを解析できませんでした','error');return;}
-    // Compute diff
-    const result={added:[],deleted:[],changed:[],summary:{}};
-    const maxRows=Math.max(S.data.length,parsed.data.length);
+    if(!parsed.headers.length){toast('Could not parse CSV','error');return;}
+    const result={added:[],deleted:[],changed:[],summary:{},headerDiff:[],keyMode:false};
     const maxCols=Math.max(S.headers.length,parsed.headers.length);
-    // Header diff
-    result.headerDiff=[];
-    for(let c=0;c<maxCols;c++){
-      const h1=S.headers[c]||'';
-      const h2=parsed.headers[c]||'';
-      result.headerDiff.push({cur:h1,other:h2,match:h1===h2});
+    for(let c=0;c<maxCols;c++)result.headerDiff.push({cur:S.headers[c]||'',other:parsed.headers[c]||'',match:(S.headers[c]||'')===(parsed.headers[c]||'')});
+    const keyCol=resolveColumnInput(document.getElementById('diffKeyColumn')?.value||'',S.headers);
+    if(keyCol>=0){
+      const otherKeyCol=parsed.headers.indexOf(S.headers[keyCol]);
+      if(otherKeyCol<0){toast('The comparison file does not contain the same key column','error');return;}
+      result.keyMode=true;result.keyHeader=S.headers[keyCol];
+      const curMap=new Map(),otherMap=new Map();
+      S.data.forEach((row,i)=>curMap.set(row[keyCol]||`__row_${i}`,{row:i,data:row}));
+      parsed.data.forEach((row,i)=>otherMap.set(row[otherKeyCol]||`__row_${i}`,{row:i,data:row}));
+      const keys=new Set([...curMap.keys(),...otherMap.keys()]);
+      keys.forEach(key=>{const a=curMap.get(key),b=otherMap.get(key);if(!a&&b){result.added.push({row:b.row,key,data:b.data});return;}if(a&&!b){result.deleted.push({row:a.row,key,data:a.data});return;}const diffs=[];for(let c=0;c<maxCols;c++){const v1=a.data[c]||'',v2=b.data[c]||'';if(v1!==v2)diffs.push({col:c,cur:v1,other:v2});}if(diffs.length)result.changed.push({row:a.row,key,diffs});});
+    }else{
+      const maxRows=Math.max(S.data.length,parsed.data.length);
+      for(let r=0;r<maxRows;r++){const curRow=S.data[r],otherRow=parsed.data[r];if(!curRow&&otherRow){result.added.push({row:r,data:otherRow});continue;}if(curRow&&!otherRow){result.deleted.push({row:r,data:curRow});continue;}const diffs=[];for(let c=0;c<Math.max(curRow.length,otherRow.length);c++){const v1=curRow[c]||'',v2=otherRow[c]||'';if(v1!==v2)diffs.push({col:c,cur:v1,other:v2});}if(diffs.length)result.changed.push({row:r,diffs});}
     }
-    // Row diff
-    for(let r=0;r<maxRows;r++){
-      const curRow=S.data[r];
-      const otherRow=parsed.data[r];
-      if(!curRow&&otherRow){result.added.push({row:r,data:otherRow});continue;}
-      if(curRow&&!otherRow){result.deleted.push({row:r,data:curRow});continue;}
-      // Both exist - check cell differences
-      const cellDiffs=[];
-      for(let c=0;c<Math.max(curRow.length,otherRow.length);c++){
-        const v1=curRow[c]||'',v2=otherRow[c]||'';
-        if(v1!==v2) cellDiffs.push({col:c,cur:v1,other:v2});
-      }
-      if(cellDiffs.length) result.changed.push({row:r,diffs:cellDiffs});
-    }
-    result.summary={total:maxRows,added:result.added.length,deleted:result.deleted.length,changed:result.changed.length,identical:maxRows-result.added.length-result.deleted.length-result.changed.length};
-    S.diffResult=result;
-    closeModal('diffModal');
-    renderDiffResult();
-    // Open diff panel
-    S.diffOpen=true;
-    document.getElementById('diffPanel').classList.add('open');
-    toast(`Diff完了: ${result.changed.length}行変更, ${result.added.length}行追加, ${result.deleted.length}行削除`,'success');
+    const total=Math.max(S.data.length,parsed.data.length);
+    result.summary={total,added:result.added.length,deleted:result.deleted.length,changed:result.changed.length,identical:Math.max(0,total-result.added.length-result.deleted.length-result.changed.length)};
+    S.diffResult=result;closeModal('diffModal');renderDiffResult();S.diffOpen=true;document.getElementById('diffPanel').classList.add('open');toast(`Diff done: ${result.changed.length} changed, ${result.added.length} added, ${result.deleted.length} deleted`,'success');
   };
   reader.readAsText(fileInput.files[0]);
 }
@@ -4339,6 +4714,7 @@ function runMerge(){
       // JOIN: merge by key column
       const keyColIdx=parseInt(document.getElementById('mergeKeyCol').value);
       const keyHeader=S.headers[keyColIdx];
+      const conflictMode=document.getElementById('mergeConflictMode')?.value||'keep';
       // Find matching column in other file
       const otherKeyIdx=parsed.headers.indexOf(keyHeader);
       if(otherKeyIdx<0){toast(`キー列「${keyHeader}」が比較ファイルに見つかりません`,'error');return;}
@@ -4362,20 +4738,26 @@ function runMerge(){
         }
       });
       // Fill in data from matches
-      let matched=0;
+      let matched=0,conflicts=0;
       S.data.forEach(row=>{
         const key=row[keyColIdx]||'';
         const otherRow=lookup[key];
         if(otherRow){
           matched++;
           otherNewCols.forEach(c=>{
-            if(!row[c.destIdx])row[c.destIdx]=otherRow[c.srcIdx]||'';
+            const current=row[c.destIdx]||'', incoming=otherRow[c.srcIdx]||'';
+            if(!current) row[c.destIdx]=incoming;
+            else if(incoming && current!==incoming){
+              conflicts++;
+              if(conflictMode==='other') row[c.destIdx]=incoming;
+              else if(conflictMode==='mark') row[c.destIdx]=`[${current} | ${incoming}]`;
+            }
           });
         }
       });
       closeModal('mergeModal');
       renderGrid();updateStatus();
-      toast(`JOIN完了: ${matched}行がマッチ, ${otherNewCols.length}列を追加/更新`,'success');
+      toast(`JOIN完了: ${matched}行がマッチ, ${otherNewCols.length}列を追加/更新, 競合${conflicts}件`,'success');
     }
   };
   reader.readAsText(fileInput.files[0]);
@@ -4436,6 +4818,62 @@ function gotoBookmark(id){
   const tr=lr>=0?tbody.children[lr]:null;if(tr)tr.scrollIntoView({block:'center',behavior:'smooth'});
 }
 
+
+// ========== PowerCSV Workflow Extensions ==========
+function renderMiniTable(targetId, headers, rows){
+  const el=document.getElementById(targetId); if(!el)return;
+  let h='<table class="pcsv-mini-table"><thead><tr>';
+  (headers||[]).forEach(x=>h+=`<th>${escHtml(String(x??''))}</th>`);
+  h+='</tr></thead><tbody>';
+  (rows||[]).forEach(row=>{h+='<tr>';for(let i=0;i<(headers||[]).length;i++)h+=`<td>${escHtml(String(row?.[i]??''))}</td>`;h+='</tr>';});
+  h+='</tbody></table>'; el.innerHTML=h;
+}
+function downloadTextFile(filename, text, type='application/json'){
+  const blob=new Blob([text],{type:type+';charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);
+}
+function openWorkFileModal(){openModal('workFileModal');}
+function openSchemaModal(){openModal('schemaModal');}
+function openSavePreviewModal(){renderSavePreview();openModal('savePreviewModal');}
+function openUndoHistoryModal(){renderUndoHistory();openModal('undoHistoryModal');}
+function getWorkSnapshot(){return{app:'PowerCSV',version:1,filename:S.filename,encoding:S.encoding,delimiter:S.delimiter,headers:S.headers,data:S.data,originalHeaders:S.originalHeaders,originalData:S.originalData,formulas:S.formulas,instant:S.instant,views:S.views,viewsNextId:S.viewsNextId,currentView:S.currentView,columnTypes:S.columnTypes,validationRules:S.validationRules,columnFilters:S.columnFilters,columnWidths:S.columnWidths,freezeRowsCount:S.freezeRowsCount,freezeColsCount:S.freezeColsCount,memos:S.memos,journal:S.journal,bookmarks:S.bookmarks,importOptions:S.importOptions};}
+function exportWorkFile(){const base=(S.filename||'powercsv').replace(/\.[^.]+$/,'');downloadTextFile(`${base}.powercsv`,JSON.stringify(getWorkSnapshot(),null,2));toast('Work file saved','success');}
+function triggerWorkImport(){document.getElementById('workFileInput').click();}
+function importWorkFile(file){const reader=new FileReader();reader.onload=()=>{try{const j=JSON.parse(reader.result);loadDataset({headers:j.headers||[],data:j.data||[],filename:j.filename||file.name,encoding:j.encoding||'utf-8',delimiter:j.delimiter||','});S.originalHeaders=j.originalHeaders||JSON.parse(JSON.stringify(S.headers));S.originalData=j.originalData||JSON.parse(JSON.stringify(S.data));S.formulas=j.formulas||{};S.instant={...S.instant,...(j.instant||{})};S.views=j.views||[];S.viewsNextId=j.viewsNextId||1;S.currentView=j.currentView??null;S.columnTypes=j.columnTypes||{};S.validationRules=j.validationRules||[];S.columnFilters=j.columnFilters||{};S.columnWidths=j.columnWidths||{};S.freezeRowsCount=j.freezeRowsCount||0;S.freezeColsCount=j.freezeColsCount||0;S.memos=j.memos||{};S.journal=j.journal||[];S.bookmarks=j.bookmarks||[];S.importOptions=j.importOptions||{};renderViewsBar();renderGrid();updateStatus();closeModal('workFileModal');toast('Work file loaded','success');}catch(e){toast('Could not load work file','error');}};reader.readAsText(file);}
+function schemaSnapshot(){return{app:'PowerCSV Schema',version:1,headers:S.headers,columnTypes:S.columnTypes,validationRules:S.validationRules};}
+function exportSchemaFile(){const base=(S.filename||'powercsv').replace(/\.[^.]+$/,'');downloadTextFile(`${base}.powercsv-schema.json`,JSON.stringify(schemaSnapshot(),null,2));toast('Schema saved','success');}
+function triggerSchemaImport(){document.getElementById('schemaFileInput').click();}
+function importSchemaFile(file){const reader=new FileReader();reader.onload=()=>{try{const j=JSON.parse(reader.result);S.columnTypes=j.columnTypes||{};S.validationRules=j.validationRules||[];renderGrid();closeModal('schemaModal');renderRulesList();toast('Schema loaded','success');}catch(e){toast('Could not load schema','error');}};reader.readAsText(file);}
+function openRulesModal(){renderRulesList();openModal('rulesModal');}
+function ruleRowHtml(rule,i){
+  const colOpts=S.headers.map((h,ci)=>`<option value="${ci}"${Number(rule.col)===ci?' selected':''}>${escHtml(h)} (${indexToColLetter(ci)})</option>`).join('');
+  const typeOpts=[['required','Required'],['unique','Unique'],['number','Number'],['integer','Integer'],['date','Date'],['regex','Regex'],['length','Fixed length'],['enum','Allowed values']].map(([v,l])=>`<option value="${v}"${rule.type===v?' selected':''}>${l}</option>`).join('');
+  return `<div class="pcsv-rule-row"><select onchange="S.validationRules[${i}].col=+this.value">${colOpts}</select><select onchange="S.validationRules[${i}].type=this.value">${typeOpts}</select><input value="${escHtml(rule.value||'')}" placeholder="value / regex / A,B" oninput="S.validationRules[${i}].value=this.value"><button class="pcsv-modal-btn" onclick="removeValidationRule(${i})">Delete</button></div>`;
+}
+function renderRulesList(){const el=document.getElementById('rulesList');if(!el)return;el.innerHTML=S.validationRules.length?S.validationRules.map(ruleRowHtml).join(''):'<p class="pcsv-small-note">No rules yet.</p>';}
+function addValidationRule(){S.validationRules.push({col:0,type:'required',value:'',severity:'error'});renderRulesList();}
+function removeValidationRule(i){S.validationRules.splice(i,1);renderRulesList();}
+function saveRulesModal(){closeModal('rulesModal');runValidation();}
+function setColumnType(col,type){saveState('Column type');if(type==='text')delete S.columnTypes[col];else S.columnTypes[col]=type;renderGrid();toast('Column type updated','success');}
+function setColumnWidth(col){const current=S.columnWidths[col]||120;const raw=prompt('Column width (px)',current);if(raw===null)return;const width=Math.max(60,Math.min(600,parseInt(raw)||current));saveState('Column width');S.columnWidths[col]=width;renderGrid();}
+function setFreezeColumns(col){S.freezeColsCount=col+1;renderGrid();toast(`${S.freezeColsCount} columns frozen`,'success');}
+function setFreezeRows(row){S.freezeRowsCount=row+1;renderGrid();toast(`${S.freezeRowsCount} rows frozen`,'success');}
+function clearFreeze(){S.freezeRowsCount=0;S.freezeColsCount=0;renderGrid();toast('Freeze cleared','success');}
+function openMemo(row,col){S.pendingMemoCell={row,col};document.getElementById('memoCellLabel').textContent=indexToColLetter(col)+(row+1);document.getElementById('memoText').value=S.memos[`${row},${col}`]||'';openModal('memoModal');}
+function saveMemoModal(){if(!S.pendingMemoCell)return;const{row,col}=S.pendingMemoCell,k=`${row},${col}`,v=document.getElementById('memoText').value.trim();if(v)S.memos[k]=v;else delete S.memos[k];closeModal('memoModal');renderBody();toast('Memo saved','success');}
+function renderSavePreview(){const diff=buildDataDiff(S.originalHeaders,S.originalData,S.headers,S.data);document.getElementById('savePreviewSummary').textContent=`Changed cells ${diff.cells.length} / Added rows ${diff.addedRows.length} / Removed rows ${diff.removedRows.length} / Header changed ${diff.headerChanged?'yes':'no'}`;let h='<table class="pcsv-mini-table"><thead><tr><th>Type</th><th>Position</th><th>Before</th><th>After</th></tr></thead><tbody>';diff.cells.slice(0,300).forEach(d=>h+=`<tr class="pcsv-diff-changed"><td>Cell</td><td>${escHtml(d.pos)}</td><td>${escHtml(d.old)}</td><td>${escHtml(d.now)}</td></tr>`);diff.addedRows.slice(0,50).forEach(d=>h+=`<tr class="pcsv-diff-added"><td>Added row</td><td>${d.row+1}</td><td></td><td>${escHtml(d.data.join(', '))}</td></tr>`);diff.removedRows.slice(0,50).forEach(d=>h+=`<tr class="pcsv-diff-removed"><td>Removed row</td><td>${d.row+1}</td><td>${escHtml(d.data.join(', '))}</td><td></td></tr>`);h+='</tbody></table>';document.getElementById('savePreviewContent').innerHTML=h;}
+function buildDataDiff(oldH,oldD,newH,newD){const cells=[],addedRows=[],removedRows=[];const maxRows=Math.max(oldD?.length||0,newD?.length||0),maxCols=Math.max(oldH?.length||0,newH?.length||0);for(let r=0;r<maxRows;r++){if(r>=(oldD?.length||0)){addedRows.push({row:r,data:newD[r]||[]});continue;}if(r>=(newD?.length||0)){removedRows.push({row:r,data:oldD[r]||[]});continue;}for(let c=0;c<maxCols;c++){const a=oldD[r]?.[c]||'',b=newD[r]?.[c]||'';if(a!==b)cells.push({pos:indexToColLetter(c)+(r+1),old:String(a),now:String(b)});}}return{cells,addedRows,removedRows,headerChanged:JSON.stringify(oldH||[])!==JSON.stringify(newH||[])};}
+function renderUndoHistory(){const el=document.getElementById('undoHistoryContent');if(!S.undoStack.length){el.innerHTML='<p class="pcsv-small-note">No history yet.</p>';return;}el.innerHTML=[...S.undoStack].reverse().map((x,i)=>`<div style="padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:12px">${S.undoStack.length-i}. ${escHtml(x.label||'Change')}</div>`).join('');}
+function openPipelineModal(){if(!S.pipelineSteps.length)S.pipelineSteps=[{col:0,type:'trim',a:'',b:''}];renderPipelineList();document.getElementById('pipelinePreview').innerHTML='';openModal('pipelineModal');}
+function pipelineRowHtml(step,i){const colOpts=S.headers.map((h,ci)=>`<option value="${ci}"${Number(step.col)===ci?' selected':''}>${escHtml(h)}</option>`).join('');const typeOpts=[['trim','Trim'],['upper','Uppercase'],['lower','Lowercase'],['replace','Replace'],['zeroPad','Zero pad'],['prefix','Prefix'],['suffix','Suffix']].map(([v,l])=>`<option value="${v}"${step.type===v?' selected':''}>${l}</option>`).join('');return `<div class="pcsv-pipeline-row"><select onchange="S.pipelineSteps[${i}].col=+this.value">${colOpts}</select><select onchange="S.pipelineSteps[${i}].type=this.value">${typeOpts}</select><input value="${escHtml(step.a||'')}" placeholder="search / width / text" oninput="S.pipelineSteps[${i}].a=this.value"><button class="pcsv-modal-btn" onclick="removePipelineStep(${i})">Delete</button></div><input style="width:100%;margin:-2px 0 6px;border:1px solid #d1d5db;border-radius:4px;padding:5px 7px;font-size:12px" value="${escHtml(step.b||'')}" placeholder="replacement (replace only)" oninput="S.pipelineSteps[${i}].b=this.value">`;}
+function renderPipelineList(){document.getElementById('pipelineList').innerHTML=S.pipelineSteps.map(pipelineRowHtml).join('');}
+function addPipelineStep(){S.pipelineSteps.push({col:0,type:'trim',a:'',b:''});renderPipelineList();}
+function removePipelineStep(i){S.pipelineSteps.splice(i,1);renderPipelineList();}
+function applyStepValue(v,step){v=String(v??'');if(step.type==='trim')return v.trim();if(step.type==='upper')return v.toUpperCase();if(step.type==='lower')return v.toLowerCase();if(step.type==='replace')return (step.a||'')?v.split(step.a).join(step.b||''):v;if(step.type==='zeroPad'){const n=parseInt(step.a)||0;return v.padStart(n,'0');}if(step.type==='prefix')return String(step.a||'')+v;if(step.type==='suffix')return v+String(step.a||'');return v;}
+function previewPipeline(){const copy=JSON.parse(JSON.stringify(S.data.slice(0,20)));copy.forEach(row=>S.pipelineSteps.forEach(st=>{row[st.col]=applyStepValue(row[st.col],st);}));renderMiniTable('pipelinePreview',S.headers,copy);}
+function applyPipeline(){saveState('Transformation pipeline');S.data.forEach(row=>S.pipelineSteps.forEach(st=>{row[st.col]=applyStepValue(row[st.col],st);}));closeModal('pipelineModal');renderGrid();updateStatus();toast('Pipeline applied','success');}
+function _parseCSVText(text){const rows=[];let row=[],cell='',inQ=false,delim=null;for(let i=0;i<text.length;i++){const ch=text[i],next=text[i+1];if(ch==='"'){if(inQ&&next==='"'){cell+='"';i++;}else inQ=!inQ;}else if(!inQ&&(ch===','||ch==='\t'||ch===';'||ch==='|')){if(!delim)delim=ch;if(ch===delim){row.push(cell);cell='';}else cell+=ch;}else if(!inQ&&(ch==='\n'||ch==='\r')){if(ch==='\r'&&next==='\n')i++;row.push(cell);rows.push(row);row=[];cell='';}else cell+=ch;}if(cell!==''||row.length){row.push(cell);rows.push(row);}const headers=rows.shift()||[];const width=headers.length;rows.forEach(r=>{while(r.length<width)r.push('');});return{headers,data:rows};}
+
 // ========== Init ==========
 document.addEventListener('DOMContentLoaded',()=>{
   // editor_window モードでのみ pcsvApp を表示し、action パラメータに応じた起動を行う
@@ -4457,6 +4895,8 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.querySelectorAll('.pcsv-modal-overlay').forEach(ov=>{
     ov.addEventListener('click',e=>{if(e.target===ov)ov.classList.add('hidden')});
   });
+  document.getElementById('workFileInput')?.addEventListener('change',e=>{if(e.target.files[0])importWorkFile(e.target.files[0]);e.target.value='';});
+  document.getElementById('schemaFileInput')?.addEventListener('change',e=>{if(e.target.files[0])importSchemaFile(e.target.files[0]);e.target.value='';});
   // Global click to close context menu and fx help
   document.addEventListener('click',(e)=>{
     hideContextMenu();
