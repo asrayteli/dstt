@@ -1,5 +1,13 @@
 __pycache__/
 dstt/
+Lib/
+Include/
+Scripts/
+pyvenv.cfg
+.venv/
+venv/
+env/
+.claude/
 app/__pycache__/
 app/tools/__pycache__/
 # Runtime / generated data
@@ -8,6 +16,7 @@ app/static/calendar_outputs/*
 app/tools/__pycache__/
 .vscode
 .vscode/
+local_ai_tool_guides/
 users.db
 instance/
 *.log
