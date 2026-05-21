@@ -161,14 +161,15 @@ DSTT 内では HTML フォームから受け取り、サービス層に dict と
 | `ferry_duration_min` | int | △ | `0 ≤ Tf ≤ 1440` | 乗船時間（`is_ferry_used=True` で必須） |
 | `ferry_rest_ok` | bool | △ | — | 乗船中に 8 時間以上の休息施設が確保できる計画か（控除可否） |
 | `is_alternate_driver` | bool | ◯ | — | 交替運転者の明示配置 |
+| `has_sleeper_bed` | bool | ◯ | — | 車内に運転者用仮眠ベッド（ASV 仕様等）があるか。ツーマン拘束 19h–20h 領域の判定で使用 |
 | `is_annual_contract` | bool | ◯ | — | 年間契約特例 |
-| `annual_operating_days` | int | △ | `170 ≤ d ≤ 365` | 年間契約日数（`is_annual_contract=True` で必須） |
+| `annual_operating_days` | int | △ | スクール時 `170 ≤ d ≤ 365` / それ以外は無視 | 年間契約日数。`is_annual_contract=True` かつ `is_school_bus=True` の場合のみ必須 |
 | `is_school_bus` | bool | △ | — | スクールバス特例 |
-| `agent_commission_rate` | float | ◯ | `0 ≤ R ≤ 100` | 仲介手数料率（%） |
+| `agent_commission_rate` | float | ◯ | `0 ≤ R < 100` | 仲介手数料率（%）。100 は除外（除算不能のため） |
 | `is_special_vehicle` | bool | ◯ | — | サロン等特殊仕様 |
 | `special_vehicle_rate` | float | △ | `0 ≤ R ≤ 0.5` | 特殊仕様割増率 |
 
-> **原設計書からの変更点**: `pax_running_distance_km` と `steering_minutes` を追加（ワンマン判定の精度確保）／`overnight_days` を `operating_days` に改名（宿泊日数と乗務日数の意味衝突解消）／`ferry_rest_ok` を追加（フェリー控除の前提条件チェック）。
+> **原設計書からの変更点**: `pax_running_distance_km` と `steering_minutes` を追加（ワンマン判定の精度確保）／`overnight_days` を `operating_days` に改名（宿泊日数と乗務日数の意味衝突解消）／`ferry_rest_ok` を追加（フェリー控除の前提条件チェック）／`has_sleeper_bed` を追加（C-005/C-006 で参照するため）。
 
 ### 4.2 相関バリデーション
 
@@ -177,9 +178,10 @@ DSTT 内では HTML フォームから受け取り、サービス層に dict と
 | V-01 | `is_overnight=True` のとき `operating_days ≥ 2` | フォーム再表示＋エラー |
 | V-02 | `is_ferry_used=True` のとき `ferry_duration_min > 0` | 同上 |
 | V-03 | `is_night_run=True` のとき `night_minutes > 0` | 同上 |
-| V-04 | `is_annual_contract=True` のとき `annual_operating_days` 必須。`is_school_bus=False` ならば値は 365（または上限）固定 | 同上 |
+| V-04 | `is_annual_contract=True` かつ `is_school_bus=True` のとき `annual_operating_days` が `170 ≤ d ≤ 365` を満たす。一般年間契約（`is_school_bus=False`）では `annual_operating_days` の入力値は使用せず、固定値 365 を採用する | 同上 |
 | V-05 | `steering_minutes ≤ running_duration_min` | 同上 |
 | V-06 | `pax_running_distance_km ≤ running_distance_km` | 同上 |
+| V-07 | `agent_commission_rate < 100`（手数料 100% は不可） | 同上 |
 
 エラー時は HTTP 200 でフォームを再描画し、画面上にエラーメッセージを表示する（DSTT の他ツール踏襲）。JSON API（§7.2）の場合のみ 400 で返す。
 
@@ -192,14 +194,23 @@ DSTT 内では HTML フォームから受け取り、サービス層に dict と
 ### 5.1 走行時間の端数処理
 
 ```
-H_run        = running_duration_min / 60                # 入力時間
-H_base       = max(3.0, H_run)                          # 3時間最低保証
-H_prep       = operating_days * 2.0  if is_overnight    # 各乗務日に出発前+帰着後の合計2時間
-              else 2.0                                  # 単日運行は出庫1h+帰庫1h
-H_gross_pre  = H_base + H_prep
-H_gross      = H_gross_pre - excluded_ferry_hours       # §5.3 を反映
-H_total      = round_half_up(H_gross)                   # 30分単位（0.5基準）四捨五入
+H_run         = running_duration_min / 60                # 入力時間
+H_base        = max(3.0, H_run)                          # 3時間最低保証
+H_drive       = H_base - excluded_ferry_hours            # §5.3 のフェリー控除を走行時間側に適用
+H_drive       = max(0.0, H_drive)                        # 安全側：負値にしない
+H_prep        = operating_days * 2.0  if is_overnight    # 各乗務日に出発前+帰着後の合計2時間
+              else 2.0                                   # 単日運行は出庫1h+帰庫1h
+H_gross_pre   = H_drive + H_prep                         # 拘束時間（監査・自動ツーマン判定で使用）
+H_total       = round_half_up(H_gross_pre)               # 30分単位（0.5基準）四捨五入。基本運賃用
+H_drive_unit  = round_half_up(H_drive)                   # 交替運転者料金で使う「走行時間のみ」の丸め値
 ```
+
+| 変数 | 用途 |
+|---|---|
+| `H_drive` | フェリー控除済の純粋な走行時間。生値（小数あり）。`H_gross_pre` 算出と監査で使用 |
+| `H_gross_pre` | 点検 2h を加えた**拘束時間**。改善基準告示の判定（15h/19h 等）に使う基準値 |
+| `H_total` | 拘束時間を 30 分丸めしたもの。**時間制基本運賃 R_time の乗算対象** |
+| `H_drive_unit` | 走行時間のみを 30 分丸めしたもの。**交替時間料金 R_alt_t の乗算対象**（点検 2h を含めない仕様のため） |
 
 > **修正点**: 原設計書では `prep_hours = overnight_days * 2` としていたが、`overnight_days`（宿泊数）と「乗務日数」が混同されていた。1 泊 2 日（宿泊数 1、乗務日数 2）では `2×2=4h` が正しいため、入力名を `operating_days`（乗務日数）に統一して `operating_days × 2` とする。完全待機の中日は `operating_days` に含めない。
 
@@ -269,12 +280,14 @@ F_night = H_night * R_time * 0.20
 ```
 R_alt_d  = BLOCK_MASTER[block_id]["alt_dist_rate"]
 R_alt_t  = BLOCK_MASTER[block_id]["alt_time_rate"]
-F_alter        = D_total * R_alt_d + H_base * R_alt_t   # 点呼2hは加算しない（走行時間ベース）
-F_alter_night  = H_night * R_alt_t * 0.20               # 深夜帯がある場合のみ
+F_alter        = D_total * R_alt_d + H_drive_unit * R_alt_t   # 点検2hは加算しない（走行時間のみ）
+F_alter_night  = H_night * R_alt_t * 0.20                     # 深夜帯がある場合のみ
 F_alter_total  = F_alter + F_alter_night
 ```
 
-`alt_allowed=False`（small / commuter）の車種でツーマンが必要になった場合は C-010 エラーで停止し、料金加算は行わない。
+- **走行時間も 30 分丸め後の `H_drive_unit` を使用**する（原設計書では未丸めの `H_base` を使っており、本則の 30 分単位丸めと不整合だったため統一）。
+- フェリー控除も `H_drive_unit` 経由で反映される（基本運賃側と同じ控除を交替運転者側にも適用、二重控除はしない）。
+- `alt_allowed=False`（small / commuter）の車種でツーマンが必要になった場合は C-010 エラーで停止し、料金加算は行わない。
 
 ### 5.8 特殊車両割増
 
@@ -301,28 +314,37 @@ Max_Run_Days         = floor(D_calc * 1.4)
 
 実運行日数が `Max_Run_Days` を超過した場合、超過日 1 日ごとに通常日割計算で別途精算する旨を出力（実際の超過判定は別の運行データ照合が必要なので、本ツールでは上限値の提示にとどめる）。
 
-### 5.10 仲介手数料控除と下限割れ監査
+### 5.10 仲介手数料による下限額のアップリフト
+
+本ツールは「公示**下限**額」そのものを算定する。下限額に等しい契約金額で運行する場合、仲介手数料を差し引くと必ず下限割れする（道路運送法第 10 条「不当な割り戻し」の構造的問題）。したがって、手数料率が 0% より大きい場合は、提示すべき**最低契約金額**を以下のように引き上げる:
 
 ```
-F_tax_amount    = round_half_up(F_total_ex_tax * 0.10)    # 通貨用 half-up
-F_total_inc_tax = F_total_ex_tax + F_tax_amount
+F_total_ex_tax  = F_base + F_night + F_alter_total + F_special
+F_tax_amount    = round_half_up(F_total_ex_tax * 0.10)            # 消費税
+F_legal_inc_tax = F_total_ex_tax + F_tax_amount                   # 公示税込下限額
 
-Net_Amount = F_total_inc_tax * (1 - agent_commission_rate / 100)
-if Net_Amount < F_legal_min_inc_tax:
-    audit_logs.append(C-011)
-```
-
-`F_legal_min_inc_tax` は「同条件で算定した税込下限額」を指す。本ツールでは算定結果そのものが下限額なので `F_legal_min_inc_tax = F_total_inc_tax`、つまり手数料控除後でも `F_total_inc_tax` を下回ってはならない、と判定する（手数料分は契約金額の上乗せが必要）。
-
-### 5.11 千円未満切り捨ての請求丸めガード
-
-```
-F_round_floor = floor(F_total_inc_tax / 1000) * 1000
-if F_round_floor >= F_legal_min_inc_tax:
-    F_billing = F_round_floor                                   # 切り捨て承認
+# 手数料アップリフト：差引後にちょうど F_legal_inc_tax 以上が残る最小総額
+if agent_commission_rate > 0:
+    F_recommended = F_legal_inc_tax / (1 - agent_commission_rate / 100)
 else:
-    F_billing = ceil(F_total_inc_tax / 1000) * 1000             # 切り上げに自動修正
+    F_recommended = F_legal_inc_tax
 ```
+
+`F_legal_inc_tax` は法定下限、`F_recommended` は「手数料控除後にも下限を下回らないために事業者が提示すべき最低総額」を意味する。両者は別フィールドとしてレスポンスに返す。
+
+> **修正の背景**: 原設計書は「Net_Amount < F_legal_min なら C-011 違反」というロジックだったが、本ツールが算定するのは下限額そのものなので、手数料 > 0 のとき C-011 が**必ず**発火し、運用上意味をなさない。下限額自体を必要分だけ持ち上げる方式に改めた。C-011 は「事業者が外部入力した実提示額がアップリフト後の下限を下回る場合」に限り発火する将来拡張とし、現バージョンでは未実装とする（§6 のテーブルも更新）。
+
+### 5.11 千円単位の請求丸め
+
+商慣習として請求書は 1,000 円単位で発行されるため、丸め後の請求額が下限を割らない最小の 1,000 円倍数を求める。「切り捨てが下限割れを起こすか」のガード分岐は、下限額そのものを返す本ツールでは常に「下限割れ側」になるため意味をなさない。実装は**切り上げ一択**で十分:
+
+```
+F_billing = ceil(F_recommended / 1000) * 1000
+```
+
+これにより、`F_billing ≥ F_recommended ≥ F_legal_inc_tax` が常に保証される。
+
+> **修正の背景**: 原設計書 §5.11 の条件分岐は `F_legal_min_inc_tax = F_total_inc_tax` 前提では恒に else 側に倒れる（floor は必ず inc_tax を下回る、例外は inc_tax がちょうど 1,000 の倍数の場合のみ）。実害は出ないが「常に発火しない if」は実装上の混乱を招くため削除。事業者が**任意上乗せ後の提示額**を入力できるオプション項目を将来追加した場合に、再度ガード分岐が意味を持つ。
 
 ---
 
@@ -334,13 +356,14 @@ else:
 | C-002 | 高速道路連続 | 入力に高速比率がないため**実装は将来拡張**（入力追加時に有効化） | — |
 | C-003 | ワンマン拘束上限 | `is_alternate_driver=False` かつ `auto_alternate_driver=False` かつ `H_gross_pre > 15.0` | error |
 | C-004 | ワンマン拘束警告 | `is_alternate_driver=False` かつ `13.0 < H_gross_pre ≤ 15.0` | warning |
-| C-005 | ツーマン拘束上限 | ツーマン時 `H_gross_pre > 19.0`（ベッドなし）または `> 20.0`（ベッドあり） | error |
-| C-006 | 車内ベッド確認 | ツーマン時 `19.0 < H_gross_pre ≤ 20.0` かつ ベッド入力フラグなし | warning |
+| C-005a | ツーマン拘束絶対上限 | ツーマン時 `H_gross_pre > 20.0` | error |
+| C-005b | ツーマン拘束上限（ベッドなし） | ツーマン時 `H_gross_pre > 19.0` かつ `has_sleeper_bed=False` | error |
+| C-006 | 車内ベッド要件警告 | ツーマン時 `19.0 < H_gross_pre ≤ 20.0` かつ `has_sleeper_bed=True` | warning |
 | C-007 | 勤務間休息下限 | （入力に前日・翌日情報なし）将来拡張 | — |
 | C-008 | 勤務間休息推奨 | 同上 | — |
 | C-009 | ツーマン時定員不足 | ツーマン適用かつ `pax_count > max_capacity - alt_seat_cost`（large/medium のみ） | error |
 | C-010 | ツーマン不可車種 | `car_type ∈ {small, commuter}` かつ ツーマン必要 | error |
-| C-011 | 手数料割戻し違反 | §5.10 の条件 | error |
+| C-011 | 手数料割戻し違反 | 外部入力された実提示額 `external_quote_inc_tax` が `F_recommended` を下回る場合（**将来拡張**：現バージョンでは入力項目を持たないため発火しない。手数料による下限額の引き上げは §5.10 のアップリフトで吸収する） | — |
 
 > **修正点**: C-002／C-007／C-008 は本ツールの入力モデルだけでは厳密判定できない（路線種別や前後日の勤務情報が必要）。将来拡張として残し、現バージョンでは未実装である旨を画面上の注記に明示する。
 
@@ -373,6 +396,8 @@ else:
 
 ### 7.3 レスポンス JSON スキーマ
 
+下の例は §7.2 の入力（kanto / large / 300km / 540min / 夜間 120min / 手数料 10%）に対する**実ロジック通りの**算定結果である。各数値は §5.1–§5.11 のアルゴリズムを手計算で検証済み。
+
 ```json
 {
   "status": "success",
@@ -390,9 +415,12 @@ else:
   },
   "calc_factors": {
     "raw_running_hours": 9.0,
-    "prep_hours": 2.0,
     "ferry_excluded_hours": 0.0,
+    "drive_hours_unrounded": 9.0,
+    "prep_hours": 2.0,
+    "gross_hours_pre_round": 11.0,
     "final_calc_hours": 11,
+    "drive_calc_hours": 9,
     "final_calc_distance_km": 300,
     "night_calc_hours": 2,
     "auto_alternate_driver_applied": false,
@@ -407,8 +435,9 @@ else:
     "special_vehicle_surcharge": 0,
     "raw_total_excluding_tax": 132966,
     "consumption_tax": 13297,
-    "raw_total_including_tax": 146263,
-    "approved_rounded_billing_fare": 146000
+    "legal_minimum_including_tax": 146263,
+    "recommended_billable_including_tax": 162515,
+    "approved_rounded_billing_fare": 163000
   },
   "compliance_audit": {
     "has_errors": false,
@@ -428,7 +457,18 @@ else:
 }
 ```
 
-> **修正点**: 原設計書のキー `annual_contract_特例` は ASCII 化（`annual_contract_special`）。`audit_logs` の値欠落も修正。
+数値検算:
+
+- `base_distance_fare`: 300 × 170 = **51,000**
+- `base_time_fare`: 11 × 7,190 = **79,090**
+- `night_surcharge`: 2 × 7,190 × 0.20 = **2,876**
+- `raw_total_excluding_tax`: 51,000 + 79,090 + 2,876 = **132,966**
+- `consumption_tax`: round_half_up(132,966 × 0.10) = round_half_up(13,296.6) = **13,297**
+- `legal_minimum_including_tax`: 132,966 + 13,297 = **146,263**（公示税込下限）
+- `recommended_billable_including_tax`: 146,263 / (1 − 0.10) = 162,514.44… を1円単位 ceil → **162,515**（仲介手数料 10% 控除後も下限を割らないために必要な最低総額）
+- `approved_rounded_billing_fare`: ceil(162,515 / 1000) × 1000 = **163,000**
+
+> **修正点**: 原設計書のキー `annual_contract_特例` は ASCII 化（`annual_contract_special`）／`audit_logs` の値欠落を修正／`approved_rounded_billing_fare` を原例の 146,000 から、§5.10–§5.11 のロジックに沿った **163,000** に修正（原例は手数料アップリフトを無視し、かつ千円切り捨てで下限を割っており、二重に誤りだった）／`legal_minimum_including_tax` と `recommended_billable_including_tax` を追加し、下限額と推奨提示額を分離して可視化。
 
 ### 7.4 エラーレスポンス
 
@@ -457,9 +497,9 @@ from .bus_pricing_master import BLOCK_MASTER, CAR_MASTER
 
 
 class BusPricingInputError(ValueError):
-    def __init__(self, field: str, message: str):
+    def __init__(self, field_name: str, message: str):
         super().__init__(message)
-        self.field = field
+        self.field = field_name
         self.message = message
 
 
@@ -499,28 +539,30 @@ def calculate(params: dict[str, Any]) -> CalcResult:
     block = BLOCK_MASTER[params["block_id"]]
     car = CAR_MASTER[params["car_type"]]
 
-    # --- 5.1 時間処理 -----------------------------------------------------
+    # --- 5.1 / 5.3 時間処理 + フェリー控除 -------------------------------
     h_run = params["running_duration_min"] / 60.0
     h_base = max(3.0, h_run)
+
+    excluded_ferry = 0.0
+    if params["is_ferry_used"] and params.get("ferry_rest_ok"):
+        excluded_ferry = min(8.0, params["ferry_duration_min"] / 60.0)
+    h_drive = max(0.0, h_base - excluded_ferry)
+
     if params["is_overnight"]:
         h_prep = params["operating_days"] * 2.0
     else:
         h_prep = 2.0
-    h_gross_pre_ferry = h_base + h_prep
+    h_gross_pre = h_drive + h_prep
 
-    # --- 5.3 フェリー控除 -------------------------------------------------
-    excluded_ferry = 0.0
-    if params["is_ferry_used"] and params.get("ferry_rest_ok"):
-        excluded_ferry = min(8.0, params["ferry_duration_min"] / 60.0)
-    h_gross = h_gross_pre_ferry - excluded_ferry
-    h_total = round_half_up(h_gross)
+    h_total = round_half_up(h_gross_pre)        # 拘束時間 → 30分丸め（時間制基本運賃用）
+    h_drive_unit = round_half_up(h_drive)       # 走行時間のみ → 30分丸め（交替時間料金用）
 
     # --- 5.2 距離処理 -----------------------------------------------------
     d_total = math.ceil(params["running_distance_km"] / 10.0) * 10
 
-    # --- 5.4 ワンマン可否 --------------------------------------------------
+    # --- 5.4 ワンマン可否 -------------------------------------------------
     auto_alt = False
-    if h_gross_pre_ferry > 15.0:
+    if h_gross_pre > 15.0:
         auto_alt = True
     if not params["is_night_run"] and params["pax_running_distance_km"] > 500:
         auto_alt = True
@@ -544,12 +586,13 @@ def calculate(params: dict[str, Any]) -> CalcResult:
         h_night = round_half_up(params["night_minutes"] / 60.0)
         f_night = yen_half_up(h_night * r_time * 0.20)
 
-    # --- 5.7 交替運転者 ---------------------------------------------------
+    # --- 5.7 交替運転者料金 -----------------------------------------------
     f_alt = 0
     if is_two_man and car["alt_allowed"]:
-        f_alt = d_total * block["alt_dist_rate"] + yen_half_up(h_base * block["alt_time_rate"])
+        f_alt = d_total * block["alt_dist_rate"] + yen_half_up(h_drive_unit * block["alt_time_rate"])
         if h_night > 0:
             f_alt += yen_half_up(h_night * block["alt_time_rate"] * 0.20)
+    # alt_allowed=False の場合は C-010 監査が error を吐く（料金は加算しない）
 
     # --- 5.8 特殊車両 -----------------------------------------------------
     f_special = 0
@@ -560,15 +603,17 @@ def calculate(params: dict[str, Any]) -> CalcResult:
     # --- 税計算 -----------------------------------------------------------
     raw_ex_tax = f_base + f_night + f_alt + f_special
     tax = yen_half_up(raw_ex_tax * 0.10)
-    raw_inc_tax = raw_ex_tax + tax
+    legal_inc_tax = raw_ex_tax + tax
 
-    # --- 5.11 請求丸めガード ---------------------------------------------
-    legal_min_inc_tax = raw_inc_tax   # 算定結果自体が下限額
-    round_floor = (raw_inc_tax // 1000) * 1000
-    if round_floor >= legal_min_inc_tax:
-        billing = round_floor
+    # --- 5.10 仲介手数料アップリフト -------------------------------------
+    commission_rate = params["agent_commission_rate"]
+    if commission_rate > 0:
+        recommended_inc_tax = math.ceil(legal_inc_tax / (1 - commission_rate / 100))
     else:
-        billing = math.ceil(raw_inc_tax / 1000) * 1000
+        recommended_inc_tax = legal_inc_tax
+
+    # --- 5.11 千円単位丸め（切り上げ一択） -------------------------------
+    billing = math.ceil(recommended_inc_tax / 1000) * 1000
 
     # --- 監査 -------------------------------------------------------------
     audits = run_compliance_audits(
@@ -576,12 +621,9 @@ def calculate(params: dict[str, Any]) -> CalcResult:
         car=car,
         is_two_man=is_two_man,
         auto_alt=auto_alt,
-        h_gross_pre=h_gross_pre_ferry,
+        h_gross_pre=h_gross_pre,
         steering_minutes=params["steering_minutes"],
         running_minutes=params["running_duration_min"],
-        commission_rate=params["agent_commission_rate"],
-        raw_inc_tax=raw_inc_tax,
-        legal_min_inc_tax=legal_min_inc_tax,
     )
 
     # --- 5.9 年間契約 -----------------------------------------------------
@@ -595,6 +637,9 @@ def calculate(params: dict[str, Any]) -> CalcResult:
             d_calc = math.floor(365 * e_rate)
         annual_ex = c_daily * d_calc
         annual_inc = yen_half_up(annual_ex * 1.10)
+        # 1.4倍運行ルールを最大限活用した場合の実効値引き率
+        # = 1 − (D_calc / Max_Run_Days) = 1 − 1/1.4 ≈ 28.6%（規程定数）
+        discount_pct = round((1 - 1 / 1.4) * 1000) / 10
         annual = {
             "is_applied": True,
             "daily_rate_used": c_daily,
@@ -603,6 +648,7 @@ def calculate(params: dict[str, Any]) -> CalcResult:
             "annual_limit_subtotal": annual_ex,
             "annual_limit_including_tax": annual_inc,
             "max_run_days_allowed": math.floor(d_calc * 1.4),
+            "discount_efficiency_percentage": discount_pct,
         }
 
     return CalcResult(
@@ -614,9 +660,12 @@ def calculate(params: dict[str, Any]) -> CalcResult:
         },
         calc_factors={
             "raw_running_hours": h_run,
-            "prep_hours": h_prep,
             "ferry_excluded_hours": excluded_ferry,
+            "drive_hours_unrounded": h_drive,
+            "prep_hours": h_prep,
+            "gross_hours_pre_round": h_gross_pre,
             "final_calc_hours": h_total,
+            "drive_calc_hours": h_drive_unit,
             "final_calc_distance_km": d_total,
             "night_calc_hours": h_night,
             "auto_alternate_driver_applied": auto_alt,
@@ -631,7 +680,8 @@ def calculate(params: dict[str, Any]) -> CalcResult:
             "special_vehicle_surcharge": f_special,
             "raw_total_excluding_tax": raw_ex_tax,
             "consumption_tax": tax,
-            "raw_total_including_tax": raw_inc_tax,
+            "legal_minimum_including_tax": legal_inc_tax,
+            "recommended_billable_including_tax": recommended_inc_tax,
             "approved_rounded_billing_fare": billing,
         },
         audit_logs=audits,
@@ -694,15 +744,32 @@ def api_calculate():
 
 最低限カバーするケース:
 
-- 関東・大型・基本ケース（原設計書 §7.2 の入力で §7.3 の出力に一致）
-- 3 時間最低保証の境界（2.9h → 3.0h）
-- 距離 10km 切上げ境界（41.2km → 50km）
-- ワンマン自動切替（実車 501km、夜間 401km、拘束 15.1h、運転 9.1h）
-- ツーマン定員減算（large、定員 59 名 → ツーマン時 58 名上限）
-- 小型ツーマン不可（C-010 エラー）
-- 年間契約：一般 = `floor(365 × util_rate)`、スクール = `annual_operating_days` をそのまま
-- 千円未満切り捨てが下限割れする場合の自動切上げ
-- フェリー控除が `ferry_rest_ok=False` のとき 0、`True` のとき `min(8, ferry/60)`
+- 関東・大型・基本ケース（§7.2 の入力 → §7.3 のゴールデン値完全一致）
+- 3 時間最低保証の境界（`H_run`=2.9h → `H_base`=3.0h）
+- 距離 10km 切上げ境界（41.2km → 50km、50.0km → 50km、50.1km → 60km）
+- 拘束時間の 30 分単位丸め（11.49h → 11、11.50h → 12）
+- ワンマン自動切替 4 系統:
+  - 拘束 15.1h（`H_gross_pre > 15`）
+  - 昼間实车 501km
+  - 夜間实车 401km
+  - 実運転 9.1h
+- 各車種のツーマン時定員チェック（C-009）:
+  - large: 乗客 58 名 → OK、59 名 → error（60 − 2 = 58 上限）
+  - medium: 乗客 25 名 → OK、26 名 → error（27 − 2 = 25 上限）
+- 小型／コミューターのツーマン要求 → C-010 error
+- 拘束時間境界:
+  - ワンマン 12.9h → 警告なし、13.1h → C-004 警告、15.1h → C-003 error
+  - ツーマン 18.9h → 警告なし、19.1h かつ `has_sleeper_bed=False` → C-005b error、19.1h かつ `True` → C-006 警告、20.1h → C-005a error
+- 連続運転（C-001）: `steering_minutes`=300 かつ休憩時間 = 240−300 < 0 はバリデーション V-05 で弾く。`steering_minutes`=240 で休憩 < 30 分 → C-001 警告
+- 年間契約:
+  - 一般（kanto, util_rate=0.6758）→ `D_calc`=floor(365×0.6758)=246、`Max_Run_Days`=floor(246×1.4)=344
+  - スクール（`annual_operating_days`=200）→ `D_calc`=200、`Max_Run_Days`=floor(200×1.4)=280
+- 仲介手数料アップリフト:
+  - 0% → `recommended_inc_tax == legal_inc_tax`
+  - 10% → `recommended_inc_tax = ceil(legal_inc_tax / 0.9)`
+  - 50% → `recommended_inc_tax = ceil(legal_inc_tax / 0.5)`
+- 千円丸め: `recommended_inc_tax`=162,515 → `billing`=163,000
+- フェリー: `is_ferry_used=False` → 控除 0；`True` かつ `ferry_rest_ok=False` → 控除 0；`True`/`True` かつ 9h → 控除 8h（上限）；`True`/`True` かつ 5h → 控除 5h
 
 ---
 
@@ -731,3 +798,11 @@ def api_calculate():
 | 10 | §7 JSON | キー名 ASCII 化（`annual_contract_特例` → `annual_contract_special`）／`audit_logs` 値欠落の修正 |
 | 11 | §8 擬似コード | `false` → `False`、`audit_logs =` → `audit_logs = []`、純関数 + dataclass による DSTT 風の構造に書き換え |
 | 12 | C-011 比較対象 | 「同条件下の税込下限額」を明確化（= 算定結果そのもの） |
+| 13 | §5.10 仲介手数料 | 「Net < 下限 → C-011 違反」方式は手数料 > 0 で必発火し運用不能のため廃止。代わりに `F_recommended = F_legal / (1 − rate/100)` のアップリフト計算に変更。C-011 は外部入力された実提示額の照合用として将来拡張に降格 |
+| 14 | §5.11 千円丸め | `F_legal_min = F_total_inc_tax` 前提では分岐が常に else に倒れるため切り上げ一択に簡素化 |
+| 15 | §5.1 / §5.7 時間処理 | フェリー控除を `H_drive`（走行時間）側に適用するよう順序を整理。交替時間料金で使う時間も `H_drive_unit`（30 分丸め）に統一し、原設計書の「未丸め生値」を排除 |
+| 16 | C-005 / C-006 | 「ベッド有無」を参照するのに入力フィールドが存在しなかった矛盾を解消。`has_sleeper_bed` を入力スキーマに追加。C-005 を 20h 絶対上限 / 19h ベッドなしに分割（C-005a / C-005b） |
+| 17 | §7.3 数値例 | 原例の `approved_rounded_billing_fare: 146000` および `audit_logs: []` はロジック上不可能だったため、検算ベースで 163,000 と `[]`（手数料は C-011 ではなくアップリフトに吸収）に修正 |
+| 18 | §4.2 V-04 | 非スクール年間契約は固定 365 を使う点を明文化。`annual_operating_days` の必須化はスクールのみに限定 |
+| 19 | §8.1 軽微 | `BusPricingInputError(field, ...)` の引数名が `dataclasses.field` と衝突するため `field_name` にリネーム |
+| 20 | テスト | 境界値・カバレッジを補強し、§7.3 の検算値をゴールデン値として固定 |
