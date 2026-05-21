@@ -52,6 +52,7 @@ TOOL_ACCESS_CATEGORIES: dict[str, str] = {
     # 以下は公開（ログインで誰でも利用可）
     "datecalc": "public",
     "calc": "public",
+    "bus_pricing": "public",
     "rename": "public",
     "compress": "public",
     "csvtool": "public",

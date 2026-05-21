@@ -1,0 +1,476 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  .bp-page { color: #0f172a; }
+  .bp-shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @media (min-width: 1180px) { .bp-shell { grid-template-columns: minmax(0, 1.08fr) minmax(380px, 0.92fr); align-items: start; } }
+  .bp-panel, .bp-result, .bp-card { border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; }
+  .bp-toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+  .bp-tab { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; padding: 0.62rem 0.9rem; font-weight: 850; color: #334155; }
+  .bp-tab.is-active { background: #0f172a; border-color: #0f172a; color: #fff; }
+  .bp-step { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 999px; background: #e2e8f0; color: #0f172a; font-size: 0.78rem; font-weight: 900; }
+  .bp-tab.is-active .bp-step { background: #fff; color: #0f172a; }
+  .bp-panel-tab { display: none; }
+  .bp-panel-tab.is-active { display: block; }
+  .bp-input, .bp-select { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0.62rem 0.72rem; background: #fff; }
+  .bp-input:focus, .bp-select:focus { outline: 2px solid rgba(14, 116, 144, 0.22); border-color: #0e7490; }
+  .bp-error-input { border-color: #dc2626; }
+  .bp-button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 8px; padding: 0.55rem 0.9rem; font-weight: 850; }
+  .bp-button-primary { background: #0f172a; color: #fff; }
+  .bp-button-secondary { border: 1px solid #cbd5e1; background: #fff; color: #0f172a; }
+  .bp-detail { border: 1px solid #bae6fd; background: #f0f9ff; color: #0369a1; border-radius: 999px; padding: 0.2rem 0.55rem; font-size: 0.72rem; font-weight: 850; }
+  .bp-toggle-card { display: block; width: 100%; border: 1px solid #dbe3ee; border-radius: 8px; background: #f8fafc; padding: 0.95rem; cursor: pointer; line-height: 1.45; }
+  .bp-toggle-card.is-on { border-color: #0e7490; background: #ecfeff; }
+  .bp-toggle-card > input[type="checkbox"] { margin: 0 0.52rem 0 0; vertical-align: middle; }
+  .bp-toggle-card > b { vertical-align: middle; }
+  .bp-toggle-card > p { margin: 0.45rem 0 0 1.55rem; color: #64748b; font-size: 0.78rem; line-height: 1.45; }
+  .bp-hidden { display: none !important; }
+  .bp-help { border: 0; background: #e0f2fe; color: #075985; width: 22px; height: 22px; border-radius: 999px; font-size: 0.82rem; font-weight: 900; }
+  .bp-note { border: 1px solid #dbe3ee; border-radius: 8px; background: #f8fafc; padding: 0.85rem; color: #475569; font-size: 0.88rem; line-height: 1.65; }
+  .bp-kpi { border: 1px solid #dbe3ee; border-radius: 8px; background: #f8fafc; padding: 0.9rem; }
+  .bp-kpi-label { color: #64748b; font-size: 0.72rem; font-weight: 900; letter-spacing: 0.08em; }
+  .bp-kpi-value { margin-top: 0.28rem; font-size: 1.45rem; font-weight: 950; color: #0f172a; word-break: break-word; }
+  .bp-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .bp-table th, .bp-table td { border-bottom: 1px solid #edf2f7; padding: 0.62rem 0.35rem; text-align: left; vertical-align: top; }
+  .bp-table th { color: #64748b; font-size: 0.75rem; width: 40%; }
+  .bp-audit { border-radius: 8px; padding: 0.72rem 0.86rem; font-size: 0.88rem; font-weight: 750; }
+  .bp-audit-error { border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; }
+  .bp-audit-warning { border: 1px solid #fde68a; background: #fffbeb; color: #92400e; }
+  .bp-audit-ok { border: 1px solid #bbf7d0; background: #f0fdf4; color: #166534; }
+  .bp-modal-backdrop { position: fixed; inset: 0; z-index: 80; background: rgba(15, 23, 42, 0.48); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .bp-modal { max-width: 560px; width: 100%; border-radius: 8px; background: #fff; padding: 20px; box-shadow: 0 24px 48px rgba(15,23,42,0.22); }
+  .bp-sticky { position: sticky; top: 16px; }
+  .bp-annual-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  @media (min-width: 760px) { .bp-annual-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+  .bp-rate-band { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  @media (min-width: 760px) { .bp-rate-band { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .bp-rate-meter { width: 100%; accent-color: #0e7490; }
+</style>
+
+{% macro field_error(name) -%}
+  {% if field_errors.get(name) %}<p class="mt-1 text-xs font-semibold text-red-600">{{ field_errors.get(name) }}</p>{% endif %}
+{%- endmacro %}
+{% macro yen(value) -%}{{ "{:,}".format(value|int) }}円{%- endmacro %}
+{% macro hours(value) -%}{{ "%.1f"|format(value) }}時間{%- endmacro %}
+{% macro detail_button(title, body) -%}
+  <button type="button" class="bp-detail" data-detail-title="{{ title|e }}" data-detail-body="{{ body|e }}">詳細</button>
+{%- endmacro %}
+
+<div class="bp-page max-w-7xl mx-auto space-y-5 pb-10">
+  <section class="dstt-hero is-compact" style="background:#0e7490;">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">BUS PRICING</div>
+        <div>
+          <h1 class="dstt-hero-title">貸切料金計算ツール</h1>
+          <p class="dstt-hero-subtitle">ユーザー単価で料金を計算し、公示下限を下回る場合は赤く知らせます。</p>
+        </div>
+        <div class="dstt-hero-actions">
+          <a class="dstt-hero-btn dstt-hero-btn-light" href="{{ url_for('bus_pricing.reference') }}">ロジックと料金表</a>
+          {% if is_admin %}<a class="dstt-hero-btn dstt-hero-btn-ghost" href="{{ url_for('bus_pricing.admin') }}">単価設定</a>{% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {% if errors %}
+    <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+      {% for err in errors %}<p>{{ err.message }}</p>{% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="bp-shell">
+    <form method="POST" class="space-y-4">
+      <div class="bp-panel p-3">
+        <div class="bp-toolbar" role="tablist" aria-label="貸切料金入力ステップ">
+          <button type="button" class="bp-tab is-active" data-bp-tab="basic"><span class="bp-step">1</span>基本行程</button>
+          <button type="button" class="bp-tab" data-bp-tab="conditions"><span class="bp-step">2</span>追加条件</button>
+          <button type="button" class="bp-tab" data-bp-tab="annual"><span class="bp-step">3</span>年間契約</button>
+          <button type="button" class="bp-tab" data-bp-tab="legal"><span class="bp-step">4</span>法令判定</button>
+        </div>
+      </div>
+
+      <section class="bp-panel bp-panel-tab is-active p-5 space-y-5" data-bp-panel="basic">
+        <div>
+          <h2 class="text-xl font-black">基本行程</h2>
+          <p class="mt-1 text-sm text-slate-500">距離・時間・単価を入力して料金を計算します。</p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-3">
+          <label class="block text-sm font-semibold">運輸局ブロック
+            <select name="block_id" class="bp-select mt-1" data-block-select>
+              {% for key, block in blocks.items() %}<option value="{{ key }}" {% if form_state.block_id == key %}selected{% endif %}>{{ block.name }}</option>{% endfor %}
+            </select>
+          </label>
+          <label class="block text-sm font-semibold">車種
+            <select name="car_type" class="bp-select mt-1" data-car-select>
+              {% for key, car in cars.items() %}<option value="{{ key }}" {% if form_state.car_type == key %}selected{% endif %}>{{ car.label }}（定員 {{ car.max_capacity }}名）</option>{% endfor %}
+            </select>
+          </label>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-3">
+          <label class="block text-sm font-semibold">乗車予定人数
+            <input type="number" name="pax_count" value="{{ form_state.pax_count }}" class="bp-input mt-1 {% if field_errors.get('pax_count') %}bp-error-input{% endif %}" required>
+            {{ field_error('pax_count') }}
+          </label>
+          <label class="block text-sm font-semibold">総走行距離 / km
+            <button type="button" class="bp-help" data-help="distance">?</button>
+            <input type="number" step="0.1" name="running_distance_km" value="{{ form_state.running_distance_km }}" class="bp-input mt-1 {% if field_errors.get('running_distance_km') %}bp-error-input{% endif %}" required>
+            {{ field_error('running_distance_km') }}
+          </label>
+          <label class="block text-sm font-semibold">実車走行距離 / km
+            <button type="button" class="bp-help" data-help="paxDistance">?</button>
+            <input type="number" step="0.1" name="pax_running_distance_km" value="{{ form_state.pax_running_distance_km }}" class="bp-input mt-1 {% if field_errors.get('pax_running_distance_km') %}bp-error-input{% endif %}" required>
+            {{ field_error('pax_running_distance_km') }}
+          </label>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-3">
+          <label class="block text-sm font-semibold">総走行時間 / 分
+            <button type="button" class="bp-help" data-help="duration">?</button>
+            <input type="number" name="running_duration_min" value="{{ form_state.running_duration_min }}" class="bp-input mt-1 {% if field_errors.get('running_duration_min') %}bp-error-input{% endif %}" required>
+            {{ field_error('running_duration_min') }}
+          </label>
+          <label class="block text-sm font-semibold">キロ単価 / 円
+            <input type="number" step="1" name="custom_dist_rate" value="{{ form_state.custom_dist_rate }}" class="bp-input mt-1 {% if field_errors.get('custom_dist_rate') %}bp-error-input{% endif %}" data-dist-rate>
+            {{ field_error('custom_dist_rate') }}
+          </label>
+          <label class="block text-sm font-semibold">時間単価 / 円
+            <input type="number" step="1" name="custom_time_rate" value="{{ form_state.custom_time_rate }}" class="bp-input mt-1 {% if field_errors.get('custom_time_rate') %}bp-error-input{% endif %}" data-time-rate>
+            {{ field_error('custom_time_rate') }}
+          </label>
+        </div>
+
+        <label class="bp-toggle-card {% if form_state.use_floor_rates %}is-on{% endif %}" data-toggle-card>
+          <input type="checkbox" name="use_floor_rates" class="mr-2" data-floor-rates {% if form_state.use_floor_rates %}checked{% endif %}>
+          <b>下限で計算</b>
+          <p class="mt-1 text-xs text-slate-500">選択中のブロック・車種の公示下限単価をキロ単価と時間単価へ自動入力します。</p>
+        </label>
+      </section>
+
+      <section class="bp-panel bp-panel-tab p-5 space-y-5" data-bp-panel="conditions">
+        <div>
+          <h2 class="text-xl font-black">追加条件</h2>
+          <p class="mt-1 text-sm text-slate-500">料金に影響する条件だけをここで設定します。</p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-3">
+          <label class="bp-toggle-card {% if form_state.is_night_run %}is-on{% endif %}" data-toggle-card>
+            <input type="checkbox" name="is_night_run" class="mr-2" data-reveal="nightBox" {% if form_state.is_night_run %}checked{% endif %}>
+            <b>深夜早朝あり</b><p class="mt-1 text-xs text-slate-500">22:00〜翌5:00 を含む運行</p>
+          </label>
+          <label class="bp-toggle-card {% if form_state.is_overnight %}is-on{% endif %}" data-toggle-card>
+            <input type="checkbox" name="is_overnight" class="mr-2" data-reveal="overnightBox" {% if form_state.is_overnight %}checked{% endif %}>
+            <b>宿泊運行</b><p class="mt-1 text-xs text-slate-500">2日以上の乗務行程</p>
+          </label>
+          <label class="bp-toggle-card {% if form_state.is_alternate_driver %}is-on{% endif %}" data-toggle-card>
+            <input type="checkbox" name="is_alternate_driver" class="mr-2" data-reveal="driverBox" {% if form_state.is_alternate_driver %}checked{% endif %}>
+            <b>交替運転者</b><p class="mt-1 text-xs text-slate-500">明示的に2名乗務で見積もる</p>
+          </label>
+          <label class="bp-toggle-card {% if form_state.is_ferry_used %}is-on{% endif %}" data-toggle-card>
+            <input type="checkbox" name="is_ferry_used" class="mr-2" data-reveal="ferryBox" {% if form_state.is_ferry_used %}checked{% endif %}>
+            <b>フェリー</b><p class="mt-1 text-xs text-slate-500">利用時だけ入力</p>
+          </label>
+          <label class="bp-toggle-card {% if form_state.is_special_vehicle %}is-on{% endif %}" data-toggle-card>
+            <input type="checkbox" name="is_special_vehicle" class="mr-2" data-reveal="specialBox" {% if form_state.is_special_vehicle %}checked{% endif %}>
+            <b>特殊車両</b><p class="mt-1 text-xs text-slate-500">サロン等の特殊仕様</p>
+          </label>
+        </div>
+
+        <div id="nightBox" class="bp-card p-4 {% if not form_state.is_night_run %}bp-hidden{% endif %}">
+          <label class="block text-sm font-semibold">深夜早朝時間 / 分
+            <input type="number" name="night_minutes" value="{{ form_state.night_minutes }}" class="bp-input mt-1 {% if field_errors.get('night_minutes') %}bp-error-input{% endif %}">
+            {{ field_error('night_minutes') }}
+          </label>
+        </div>
+        <div id="overnightBox" class="bp-card p-4 {% if not form_state.is_overnight %}bp-hidden{% endif %}">
+          <label class="block text-sm font-semibold">乗務日数
+            <input type="number" name="operating_days" value="{{ form_state.operating_days }}" class="bp-input mt-1 {% if field_errors.get('operating_days') %}bp-error-input{% endif %}">
+            {{ field_error('operating_days') }}
+          </label>
+        </div>
+        <div id="driverBox" class="bp-card p-4 {% if not form_state.is_alternate_driver %}bp-hidden{% endif %}">
+          <p class="text-sm text-slate-600">交替運転者料金を加算します。仮眠ベッドなど法令判定用の項目は「法令判定」タブで設定してください。</p>
+        </div>
+        <div id="ferryBox" class="bp-card p-4 {% if not form_state.is_ferry_used %}bp-hidden{% endif %}">
+          <div class="grid md:grid-cols-2 gap-3">
+            <label class="block text-sm font-semibold">フェリー乗船時間 / 分
+              <input type="number" name="ferry_duration_min" value="{{ form_state.ferry_duration_min }}" class="bp-input mt-1 {% if field_errors.get('ferry_duration_min') %}bp-error-input{% endif %}">
+              {{ field_error('ferry_duration_min') }}
+            </label>
+            <label class="inline-flex items-start gap-2 text-sm font-semibold pt-7">
+              <input type="checkbox" name="ferry_rest_ok" class="mt-1" {% if form_state.ferry_rest_ok %}checked{% endif %}>
+              <span>船内で休息施設を確保できる</span>
+            </label>
+          </div>
+        </div>
+        <div id="specialBox" class="bp-card p-4 {% if not form_state.is_special_vehicle %}bp-hidden{% endif %}">
+          <label class="block text-sm font-semibold">特殊車両割増率
+            <input type="number" step="0.01" name="special_vehicle_rate" value="{{ form_state.special_vehicle_rate }}" class="bp-input mt-1 {% if field_errors.get('special_vehicle_rate') %}bp-error-input{% endif %}" placeholder="0.2">
+            {{ field_error('special_vehicle_rate') }}
+          </label>
+        </div>
+      </section>
+
+      <section class="bp-panel bp-panel-tab p-5 space-y-5" data-bp-panel="annual">
+        <div>
+          <h2 class="text-xl font-black">年間契約</h2>
+          <p class="mt-1 text-sm text-slate-500">年間契約として試算する場合だけオンにしてください。</p>
+        </div>
+        <label class="bp-toggle-card {% if form_state.is_annual_contract %}is-on{% endif %}" data-toggle-card>
+          <input type="checkbox" name="is_annual_contract" class="mr-2" data-reveal="annualBox" {% if form_state.is_annual_contract %}checked{% endif %}>
+          <b>年間契約で試算する</b>
+          <p class="mt-1 text-xs text-slate-500">運行予定日数と稼働率から年間下限額を確認します。</p>
+        </label>
+
+        <div id="annualBox" class="space-y-4 {% if not form_state.is_annual_contract %}bp-hidden{% endif %}">
+          <input type="hidden" name="utilization_rate_mode" value="custom">
+          <div class="bp-annual-grid">
+            <label class="block text-sm font-semibold">年間の運行予定日数
+              <input type="number" name="annual_operating_days" value="{{ form_state.annual_operating_days }}" class="bp-input mt-1 {% if field_errors.get('annual_operating_days') %}bp-error-input{% endif %}" placeholder="例: 220">
+              {{ field_error('annual_operating_days') }}
+            </label>
+            <label class="block text-sm font-semibold">今回使う稼働率
+              <input type="number" step="0.0001" name="custom_utilization_rate" value="{{ form_state.custom_utilization_rate }}" class="bp-input mt-1 {% if field_errors.get('custom_utilization_rate') %}bp-error-input{% endif %}" data-util-input placeholder="例: 0.6758">
+              {{ field_error('custom_utilization_rate') }}
+            </label>
+          </div>
+          <div class="bp-card p-4 space-y-3">
+            <div class="bp-rate-band text-sm">
+              <div>
+                <p class="text-xs font-black text-slate-500">運輸局稼働率</p>
+                <p class="mt-1 text-lg font-black" data-util-official>--</p>
+              </div>
+              <div>
+                <p class="text-xs font-black text-slate-500">今回使う稼働率</p>
+                <p class="mt-1 text-lg font-black text-cyan-700" data-util-current>--</p>
+              </div>
+              <div>
+                <p class="text-xs font-black text-slate-500">会社稼働率</p>
+                <p class="mt-1 text-lg font-black" data-util-company>--</p>
+              </div>
+            </div>
+            <input type="range" class="bp-rate-meter" data-util-slider step="0.0001">
+            <p class="text-xs leading-5 text-slate-500" data-util-note>基本行程で選んだ運輸局ブロックの稼働率と、管理者設定の会社稼働率の間で設定できます。</p>
+          </div>
+          <label class="bp-card p-4 flex items-start gap-2 text-sm font-semibold">
+            <input type="checkbox" name="is_school_bus" class="mt-1" {% if form_state.is_school_bus %}checked{% endif %}>
+            <span>スクールバスとして扱う<br><span class="text-xs font-normal text-slate-500">予定日数をそのまま算定日数にします。</span></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="bp-panel bp-panel-tab p-5 space-y-5" data-bp-panel="legal">
+        <div>
+          <h2 class="text-xl font-black">法令判定</h2>
+          <p class="mt-1 text-sm text-slate-500">料金計算には直接使わない、安全確認用の項目です。</p>
+        </div>
+        <div class="grid md:grid-cols-2 gap-3">
+          <label class="block text-sm font-semibold">実ハンドル時間 / 分
+            <button type="button" class="bp-help" data-help="steering">?</button>
+            <input type="number" name="steering_minutes" value="{{ form_state.steering_minutes }}" class="bp-input mt-1 {% if field_errors.get('steering_minutes') %}bp-error-input{% endif %}" placeholder="空欄なら未判定">
+            {{ field_error('steering_minutes') }}
+          </label>
+          <label class="bp-card p-4 flex items-start gap-2 text-sm font-semibold">
+            <input type="checkbox" name="has_sleeper_bed" class="mt-1" {% if form_state.has_sleeper_bed %}checked{% endif %}>
+            <span>運転者用仮眠ベッドあり<br><span class="text-xs font-normal text-slate-500">ツーマン拘束19時間超の判定で使います。</span></span>
+          </label>
+        </div>
+      </section>
+
+      <div class="bp-panel p-4 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+        <p class="text-sm text-slate-500">入力が終わったら計算します。下限を下回る場合は結果欄に赤く表示します。</p>
+        <button class="bp-button bp-button-primary">下限額を計算</button>
+      </div>
+    </form>
+
+    <aside class="bp-sticky space-y-4">
+      <section class="bp-result p-5">
+        {% if result %}
+          <div class="flex items-start justify-between gap-3">
+            <div><p class="text-xs font-black tracking-wide text-cyan-700">RESULT</p><h2 class="mt-1 text-xl font-black">計算結果</h2></div>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{{ result.applied_rates.block_name }} / {{ result.applied_rates.car_label }}</span>
+          </div>
+
+          {% if result.calculation_breakdown.below_floor_error %}
+            <div class="bp-audit bp-audit-error mt-4">
+              下限額エラー: 今回の税込額は公示税込下限額を {{ yen(result.calculation_breakdown.shortfall_including_tax) }} 下回っています。
+              {{ detail_button('下限額エラー', result.detail_formulas.floor) }}
+            </div>
+          {% endif %}
+
+          <div class="mt-4 space-y-2">
+            {% if not result.audit_logs %}<div class="bp-audit bp-audit-ok">法令判定のエラー・警告はありません。</div>{% endif %}
+            {% for audit in result.audit_logs %}
+              <div class="bp-audit {% if audit.level == 'error' %}bp-audit-error{% else %}bp-audit-warning{% endif %}">{{ audit.audit_id }}: {{ audit.message }}</div>
+            {% endfor %}
+          </div>
+
+          <div class="mt-4 grid sm:grid-cols-2 gap-3">
+            <div class="bp-kpi"><div class="bp-kpi-label">今回の税込額</div><div class="bp-kpi-value">{{ yen(result.calculation_breakdown.legal_minimum_including_tax) }}</div></div>
+            <div class="bp-kpi"><div class="bp-kpi-label">千円切上げ</div><div class="bp-kpi-value">{{ yen(result.calculation_breakdown.approved_rounded_billing_fare) }}</div></div>
+          </div>
+
+          <div class="mt-4 bp-card p-4">
+            <h3 class="text-sm font-black">金額内訳</h3>
+            <table class="bp-table mt-2">
+              <tbody>
+                <tr><th>キロ制運賃</th><td>{{ yen(result.calculation_breakdown.base_distance_fare) }} {{ detail_button('キロ制運賃', result.detail_formulas.distance) }}</td></tr>
+                <tr><th>時間制運賃</th><td>{{ yen(result.calculation_breakdown.base_time_fare) }} {{ detail_button('時間制運賃', result.detail_formulas.time) }}</td></tr>
+                <tr><th>深夜早朝割増</th><td>{{ yen(result.calculation_breakdown.night_surcharge) }} {{ detail_button('深夜早朝割増', result.detail_formulas.night) }}</td></tr>
+                <tr><th>交替運転者料金</th><td>{{ yen(result.calculation_breakdown.alternate_driver_fare) }} {{ detail_button('交替運転者料金', result.detail_formulas.alternate) }}</td></tr>
+                <tr><th>特殊車両割増</th><td>{{ yen(result.calculation_breakdown.special_vehicle_surcharge) }} {{ detail_button('特殊車両割増', result.detail_formulas.special) }}</td></tr>
+                <tr><th>税別合計</th><td>{{ yen(result.calculation_breakdown.raw_total_excluding_tax) }} {{ detail_button('税別合計', result.detail_formulas.subtotal) }}</td></tr>
+                <tr><th>消費税</th><td>{{ yen(result.calculation_breakdown.consumption_tax) }} {{ detail_button('消費税', result.detail_formulas.tax) }}</td></tr>
+                <tr><th>公示税込下限額</th><td>{{ yen(result.calculation_breakdown.public_floor_including_tax) }} {{ detail_button('公示税込下限額', result.detail_formulas.floor) }}</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          {% if result.annual_contract.is_applied %}
+            <div class="mt-4 bp-card p-4">
+              <h3 class="text-sm font-black">年間契約試算</h3>
+              <table class="bp-table mt-2">
+                <tbody>
+                  <tr><th>運行予定日数</th><td>{{ result.annual_contract.planned_operating_days }}日</td></tr>
+                  <tr><th>運輸局稼働率</th><td>{{ "%.2f"|format(result.annual_contract.standard_utilization_rate * 100) }}%</td></tr>
+                  <tr><th>会社稼働率</th><td>{{ "%.2f"|format(result.annual_contract.company_utilization_rate * 100) }}%</td></tr>
+                  <tr><th>今回使う稼働率</th><td>{{ "%.2f"|format(result.annual_contract.selected_utilization_rate * 100) }}%</td></tr>
+                  <tr><th>稼働率換算日数</th><td>{{ result.annual_contract.utilization_based_days }}日（{{ "%.2f"|format(result.annual_contract.selected_utilization_rate * 100) }}%）</td></tr>
+                  <tr><th>採用した算定日数</th><td>{{ result.annual_contract.calculated_operating_days }}日（{{ result.annual_contract.calculation_basis }}） {{ detail_button('年間契約の日数', result.detail_formulas.annual) }}</td></tr>
+                  <tr><th>年間税込下限額</th><td>{{ yen(result.annual_contract.annual_limit_including_tax) }}</td></tr>
+                  <tr><th>最大運行可能日数</th><td>{{ result.annual_contract.max_run_days_allowed }}日</td></tr>
+                </tbody>
+              </table>
+            </div>
+          {% endif %}
+        {% else %}
+          <p class="text-xs font-black tracking-wide text-slate-500">RESULT</p>
+          <p class="mt-2 text-2xl font-black">未計算</p>
+          <p class="mt-3 text-sm text-slate-500">まず「基本行程」に入力して計算してください。</p>
+        {% endif %}
+      </section>
+    </aside>
+  </div>
+</div>
+
+<div id="bpHelpModal" class="bp-modal-backdrop bp-hidden">
+  <div class="bp-modal">
+    <div class="flex items-start justify-between gap-3">
+      <h2 id="bpHelpTitle" class="text-lg font-black"></h2>
+      <button type="button" class="bp-button bp-button-secondary" data-help-close>閉じる</button>
+    </div>
+    <p id="bpHelpBody" class="mt-3 text-sm leading-7 text-slate-600"></p>
+  </div>
+</div>
+
+<script>
+  (function() {
+    const rateMap = {{ blocks|tojson }};
+    const help = {
+      distance: ['総走行距離 / km', '出庫地から帰庫地までの全距離です。お客様を乗せていない回送距離も含み、キロ制運賃の計算に使います。'],
+      paxDistance: ['実車走行距離 / km', 'お客様を乗せて走る距離です。ワンマン運行の上限距離判定に使います。'],
+      duration: ['総走行時間 / 分', '出庫から帰庫までの行程時間です。料金計算の時間制運賃に使います。'],
+      steering: ['実ハンドル時間 / 分', '実際に運転している時間です。待機・休憩・点呼時間は含めません。空欄なら実ハンドル時間に関する判定は行いません。']
+    };
+    const blockSelect = document.querySelector('[data-block-select]');
+    const carSelect = document.querySelector('[data-car-select]');
+    const distRate = document.querySelector('[data-dist-rate]');
+    const timeRate = document.querySelector('[data-time-rate]');
+    const floorRates = document.querySelector('[data-floor-rates]');
+    const utilInput = document.querySelector('[data-util-input]');
+    const utilSlider = document.querySelector('[data-util-slider]');
+    const utilOfficial = document.querySelector('[data-util-official]');
+    const utilCompany = document.querySelector('[data-util-company]');
+    const utilCurrent = document.querySelector('[data-util-current]');
+    const utilNote = document.querySelector('[data-util-note]');
+    const formatPercent = (value) => `${(Number(value) * 100).toFixed(2)}%`;
+    function applyFloorRates() {
+      if (!floorRates || !floorRates.checked) return;
+      const block = rateMap[blockSelect.value];
+      const car = carSelect.value;
+      distRate.value = block.dist_rate[car];
+      timeRate.value = block.time_rate[car];
+    }
+    function syncUtilBounds() {
+      if (!utilInput || !utilSlider || !blockSelect) return;
+      const block = rateMap[blockSelect.value];
+      const officialRate = Number(block.util_rate);
+      const companyRate = Number(block.company_util_rate ?? block.util_rate);
+      const minRate = Math.min(officialRate, companyRate);
+      const maxRate = Math.max(officialRate, companyRate);
+      let currentRate = Number(utilInput.value);
+      if (!currentRate || currentRate < minRate || currentRate > maxRate) {
+        currentRate = officialRate;
+      }
+      currentRate = Math.min(maxRate, Math.max(minRate, currentRate));
+      utilInput.min = minRate.toFixed(4);
+      utilInput.max = maxRate.toFixed(4);
+      utilInput.value = currentRate.toFixed(4);
+      utilSlider.min = minRate.toFixed(4);
+      utilSlider.max = maxRate.toFixed(4);
+      utilSlider.value = currentRate.toFixed(4);
+      if (utilOfficial) utilOfficial.textContent = formatPercent(officialRate);
+      if (utilCompany) utilCompany.textContent = formatPercent(companyRate);
+      if (utilCurrent) utilCurrent.textContent = formatPercent(currentRate);
+      if (utilNote) utilNote.textContent = `「${block.name}」の運輸局稼働率 ${formatPercent(officialRate)} と会社稼働率 ${formatPercent(companyRate)} の間で設定できます。`;
+    }
+    function syncUtilInputFromSlider() {
+      if (!utilInput || !utilSlider) return;
+      utilInput.value = Number(utilSlider.value).toFixed(4);
+      if (utilCurrent) utilCurrent.textContent = formatPercent(utilInput.value);
+    }
+    function syncUtilSliderFromInput() {
+      if (!utilInput || !utilSlider) return;
+      const minRate = Number(utilInput.min || 0);
+      const maxRate = Number(utilInput.max || 1);
+      const currentRate = Math.min(maxRate, Math.max(minRate, Number(utilInput.value || minRate)));
+      utilInput.value = currentRate.toFixed(4);
+      utilSlider.value = currentRate.toFixed(4);
+      if (utilCurrent) utilCurrent.textContent = formatPercent(currentRate);
+    }
+    [blockSelect, carSelect, floorRates].forEach((el) => el && el.addEventListener('change', applyFloorRates));
+    if (blockSelect) blockSelect.addEventListener('change', syncUtilBounds);
+    if (utilSlider) utilSlider.addEventListener('input', syncUtilInputFromSlider);
+    if (utilInput) utilInput.addEventListener('change', syncUtilSliderFromInput);
+    document.querySelectorAll('[data-bp-tab]').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('[data-bp-tab]').forEach((item) => item.classList.toggle('is-active', item === button));
+        document.querySelectorAll('[data-bp-panel]').forEach((panel) => panel.classList.toggle('is-active', panel.dataset.bpPanel === button.dataset.bpTab));
+      });
+    });
+    function syncReveal(input) {
+      const target = document.getElementById(input.dataset.reveal);
+      if (target) target.classList.toggle('bp-hidden', !input.checked);
+      const card = input.closest('[data-toggle-card]');
+      if (card) card.classList.toggle('is-on', input.checked);
+    }
+    document.querySelectorAll('[data-reveal]').forEach((input) => {
+      syncReveal(input);
+      input.addEventListener('change', () => syncReveal(input));
+    });
+    const modal = document.getElementById('bpHelpModal');
+    document.querySelectorAll('[data-help]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const item = help[button.dataset.help];
+        document.getElementById('bpHelpTitle').textContent = item[0];
+        document.getElementById('bpHelpBody').textContent = item[1];
+        modal.classList.remove('bp-hidden');
+      });
+    });
+    document.querySelectorAll('[data-detail-title]').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.getElementById('bpHelpTitle').textContent = button.dataset.detailTitle;
+        document.getElementById('bpHelpBody').textContent = button.dataset.detailBody;
+        modal.classList.remove('bp-hidden');
+      });
+    });
+    document.querySelector('[data-help-close]').addEventListener('click', () => modal.classList.add('bp-hidden'));
+    modal.addEventListener('click', (event) => { if (event.target === modal) modal.classList.add('bp-hidden'); });
+    applyFloorRates();
+    syncUtilBounds();
+  })();
+</script>
+{% endblock %}

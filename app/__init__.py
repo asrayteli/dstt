@@ -275,6 +275,9 @@ def create_app(test_config=None):
     from .tools.calc import calc_bp
     app.register_blueprint(calc_bp)
 
+    from .tools.bus_pricing import bus_pricing_bp
+    app.register_blueprint(bus_pricing_bp)
+
     from .tools.rename import rename_bp
     app.register_blueprint(rename_bp)
     
@@ -403,6 +406,7 @@ def create_app(test_config=None):
     # Origin/Referer の同一オリジンを確認する（両方未設定なら通過）。
     from .security.request_guard import enforce_same_origin_for_mutations
     _SAME_ORIGIN_PATH_PREFIXES = (
+        "/tools/bus_pricing/api/",
         "/tools/pluslist/api/",
         "/tools/siteplus/api/",
     )
