@@ -6,10 +6,14 @@
 @page { size: A4; margin: 12mm 14mm; }
 @media print {
   html, body { margin:0 !important; padding:0 !important; background:#fff !important; font-size:10pt !important; }
-  nav, header, footer, .no-print, .dstt-sidebar, .dstt-topbar, .est-toolbar, .est-editor-panel { display:none !important; }
+  nav, header, footer, aside, .no-print, .dstt-sidebar, .dstt-topbar, .est-toolbar, .est-editor-panel,
+  #app-sidebar, #sidebar-toggle, [id="app-sidebar"], [id="sidebar-toggle"] { display:none !important; }
+  #app-main-content, main { padding:0 !important; margin:0 !important; }
+  .flex.min-h-screen { display:block !important; }
   .est-page { padding:0 !important; max-width:none !important; }
   .est-sheet { border:none !important; box-shadow:none !important; padding:0 !important; min-height:auto !important; }
   .est-sheet * { break-inside:avoid; }
+  .block-del { display:none !important; }
 }
 
 /* ============= Page container ============= */
@@ -93,10 +97,10 @@
   <!-- ===== Toolbar ===== -->
   <div class="est-toolbar no-print">
     <div class="tb-group">
-      <a class="tb-btn" href="{{ url_for('bus_pricing.index') }}">
+      <button type="button" class="tb-btn" onclick="window.history.back()">
         <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"/></svg>
         戻る
-      </a>
+      </button>
     </div>
     <div class="tb-sep"></div>
     <div class="tb-group">
@@ -122,7 +126,7 @@
     </div>
     <div style="flex:1;"></div>
     <div class="tb-group">
-      <button type="button" class="tb-btn tb-btn-primary" onclick="window.print()">
+      <button type="button" class="tb-btn tb-btn-primary" id="btnPrintPdf">
         <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 2.75C5 1.784 5.784 1 6.75 1h6.5c.966 0 1.75.784 1.75 1.75v3.552c.377.06.734.173 1.06.33A3.75 3.75 0 0118 10.166V13.5a.75.75 0 01-.75.75h-1.5v3a.75.75 0 01-.75.75H5a.75.75 0 01-.75-.75v-3h-1.5A.75.75 0 012 13.5v-3.334a3.75 3.75 0 011.94-3.534c.326-.157.683-.27 1.06-.33V2.75zM6.5 6.19V2.75a.25.25 0 01.25-.25h6.5a.25.25 0 01.25.25v3.44H6.5zm-1 1.89v-.38h9v.38-.38 7.17h-9V8.08zm1 5.67v2.5h7v-2.5h-7z"/></svg>
         印刷 / PDF
       </button>
@@ -632,6 +636,36 @@
   });
 
   refreshTemplateSelect();
+
+  /* ============ Print / PDF ============ */
+  document.getElementById('btnPrintPdf').addEventListener('click', () => {
+    // Open a new window with only the estimate sheet content for clean printing
+    const sheetHTML = sheet.outerHTML;
+    const styles = document.querySelectorAll('style');
+    let styleHTML = '';
+    styles.forEach(s => { styleHTML += s.outerHTML; });
+
+    const printWindow = window.open('', '_blank', 'width=800,height=1100');
+    printWindow.document.write('<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>見積書</title>');
+    printWindow.document.write('<script src="https://cdn.tailwindcss.com"><\/script>');
+    printWindow.document.write(styleHTML);
+    printWindow.document.write('<style>');
+    printWindow.document.write('body{margin:0;padding:20px;background:#fff;font-family:"Noto Sans JP",sans-serif;}');
+    printWindow.document.write('.est-sheet{border:none!important;box-shadow:none!important;padding:36px 32px!important;min-height:auto!important;}');
+    printWindow.document.write('.block-del{display:none!important;}');
+    printWindow.document.write('.est-sheet.editor-mode .est-block{outline:none!important;cursor:default!important;}');
+    printWindow.document.write('@media print{body{margin:0;padding:0;} .est-sheet{padding:0!important;}}');
+    printWindow.document.write('@page{size:A4;margin:12mm 14mm;}');
+    printWindow.document.write('</style></head><body>');
+    printWindow.document.write('<div class="est-page" style="max-width:none;padding:0;">');
+    printWindow.document.write(sheetHTML);
+    printWindow.document.write('</div></body></html>');
+    printWindow.document.close();
+    // Wait for content to load then trigger print
+    printWindow.onload = function() {
+      setTimeout(() => { printWindow.print(); }, 300);
+    };
+  });
 
   /* ============ Placeholder behavior for contenteditable ============ */
   document.querySelectorAll('[contenteditable][data-placeholder]').forEach(el => {

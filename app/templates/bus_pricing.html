@@ -388,7 +388,31 @@
     document.getElementById('formDuration').value = firstV.running_duration_min || 540;
     document.getElementById('formVehiclesJson').value = JSON.stringify(vehicles);
     document.getElementById('formExpensesJson').value = JSON.stringify(expenses);
+    // Persist state so we can restore after navigating back from estimate preview
+    sessionStorage.setItem('bp_state', JSON.stringify({
+      block_id: document.getElementById('routeBlock').value,
+      vehicles: vehicles,
+      expenses: expenses
+    }));
   });
+
+  // --- Restore state from sessionStorage (when returning from estimate preview) ---
+  (function() {
+    var saved = sessionStorage.getItem('bp_state');
+    if (saved && vehicles.length === 0) {
+      try {
+        var state = JSON.parse(saved);
+        if (state.vehicles && state.vehicles.length > 0) {
+          vehicles = state.vehicles;
+          expenses = state.expenses || [];
+          var blockSel = document.getElementById('routeBlock');
+          if (state.block_id) { blockSel.value = state.block_id; }
+          renderVehicles();
+          renderExpenses();
+        }
+      } catch(e) {}
+    }
+  })();
 
   // --- Global API ---
   window.BP = {
