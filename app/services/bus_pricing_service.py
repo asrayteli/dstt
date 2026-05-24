@@ -34,6 +34,9 @@ class CalcResult:
     audit_logs: list[AuditEntry] = field(default_factory=list)
     annual_contract: dict = field(default_factory=dict)
     detail_formulas: dict = field(default_factory=dict)
+    vehicle_items: list[dict] = field(default_factory=list)
+    expense_items: list[dict] = field(default_factory=list)
+    quote_summary: dict = field(default_factory=dict)
 
     @property
     def has_errors(self) -> bool:
@@ -153,7 +156,93 @@ def validate_params(
         _range(clean["custom_dist_rate"], "custom_dist_rate", 0, 100000, "キロ単価は 0 円/km 超で入力してください。")
         _range(clean["custom_time_rate"], "custom_time_rate", 0, 1000000, "時間単価は 0 円/時 超で入力してください。")
 
+    clean["vehicle_items"] = _normalize_vehicle_items(clean, block_master, car_master)
+    clean["expense_items"] = _normalize_expense_items(clean)
+
     return clean
+
+
+def _normalize_vehicle_items(clean: dict[str, Any], block_master: dict[str, dict], car_master: dict[str, dict]) -> list[dict]:
+    raw_items = clean.get("vehicle_items") or []
+    if not isinstance(raw_items, list):
+        raw_items = []
+    block = block_master[clean["block_id"]]
+    items: list[dict] = []
+
+    for index, raw in enumerate(raw_items, start=1):
+        if not isinstance(raw, dict):
+            continue
+        quantity = _as_int(raw, "quantity", f"車両{index}の台数を入力してください。", default=0)
+        if quantity <= 0:
+            continue
+        car_type = str(raw.get("car_type") or clean["car_type"])
+        if car_type not in car_master:
+            raise BusPricingInputError("vehicle_items", f"車両{index}の車種を選択してください。")
+        pax_count = _as_int(raw, "pax_count", f"車両{index}の乗車人数を入力してください。", default=clean["pax_count"])
+        _range(quantity, "vehicle_items", 0, 99, f"車両{index}の台数は 1〜99 台で入力してください。", include_min=False)
+        _range(pax_count, "vehicle_items", 0, 100, f"車両{index}の乗車人数は 1〜100 名で入力してください。")
+        if clean["use_floor_rates"]:
+            dist_rate = block["dist_rate"][car_type]
+            time_rate = block["time_rate"][car_type]
+        else:
+            dist_rate = _as_float(raw, "custom_dist_rate", f"車両{index}のキロ単価を入力してください。", default=clean["custom_dist_rate"])
+            time_rate = _as_float(raw, "custom_time_rate", f"車両{index}の時間単価を入力してください。", default=clean["custom_time_rate"])
+            _range(dist_rate, "vehicle_items", 0, 100000, f"車両{index}のキロ単価は 0 円/km 超で入力してください。")
+            _range(time_rate, "vehicle_items", 0, 1000000, f"車両{index}の時間単価は 0 円/時 超で入力してください。")
+        items.append(
+            {
+                "line_no": len(items) + 1,
+                "label": str(raw.get("label") or "").strip(),
+                "car_type": car_type,
+                "quantity": quantity,
+                "pax_count": pax_count,
+                "custom_dist_rate": dist_rate,
+                "custom_time_rate": time_rate,
+            }
+        )
+
+    if not items:
+        items.append(
+            {
+                "line_no": 1,
+                "label": "",
+                "car_type": clean["car_type"],
+                "quantity": 1,
+                "pax_count": clean["pax_count"],
+                "custom_dist_rate": clean["custom_dist_rate"],
+                "custom_time_rate": clean["custom_time_rate"],
+            }
+        )
+
+    return items
+
+
+def _normalize_expense_items(clean: dict[str, Any]) -> list[dict]:
+    raw_items = clean.get("expense_items") or []
+    if not isinstance(raw_items, list):
+        raw_items = []
+    items: list[dict] = []
+    for index, raw in enumerate(raw_items, start=1):
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()
+        amount = _as_int(raw, "amount", f"実費{index}の金額を入力してください。", default=0)
+        if amount <= 0 and not name:
+            continue
+        if amount <= 0 and name:
+            continue
+        if not name:
+            raise BusPricingInputError("expense_items", f"実費{index}の項目名を入力してください。")
+        _range(amount, "expense_items", 0, 100000000, f"実費{index}の金額は 0 円以上で入力してください。", include_min=True)
+        items.append(
+            {
+                "line_no": len(items) + 1,
+                "name": name,
+                "amount_including_tax": amount,
+                "note": str(raw.get("note") or "").strip(),
+            }
+        )
+    return items
 
 
 def calculate(
@@ -165,8 +254,73 @@ def calculate(
     car_master = car_master or CAR_MASTER
     params = validate_params(params, block_master, car_master)
     block = block_master[params["block_id"]]
-    car = car_master[params["car_type"]]
+    vehicle_lines = []
+    for item in params["vehicle_items"]:
+        line_params = dict(params)
+        line_params.update(
+            {
+                "car_type": item["car_type"],
+                "pax_count": item["pax_count"],
+                "custom_dist_rate": item["custom_dist_rate"],
+                "custom_time_rate": item["custom_time_rate"],
+            }
+        )
+        vehicle_lines.append(
+            _calculate_vehicle_line(
+                params=line_params,
+                block=block,
+                car=car_master[item["car_type"]],
+                quantity=item["quantity"],
+                line_no=item["line_no"],
+                line_label=item["label"],
+            )
+        )
 
+    primary = vehicle_lines[0]
+    quote_summary = _build_quote_summary(vehicle_lines, params["expense_items"])
+    audits = []
+    for line in vehicle_lines:
+        prefix = f"車両{line['line_no']} {line['car_label']}"
+        if line["quantity"] > 1:
+            prefix += f" {line['quantity']}台"
+        for audit in line["audit_logs"]:
+            audits.append(AuditEntry(audit.audit_id, audit.level, f"{prefix}: {audit.message}"))
+
+    calculation_breakdown = dict(primary["calculation_breakdown"])
+    calculation_breakdown.update(
+        {
+            "vehicle_fare_including_tax": quote_summary["vehicle_fare_including_tax"],
+            "vehicle_public_floor_including_tax": quote_summary["vehicle_public_floor_including_tax"],
+            "expense_total_including_tax": quote_summary["expense_total_including_tax"],
+            "quote_total_including_tax": quote_summary["quote_total_including_tax"],
+            "quote_rounded_total_including_tax": quote_summary["quote_rounded_total_including_tax"],
+            "below_floor_error": quote_summary["below_floor_error"],
+            "shortfall_including_tax": quote_summary["shortfall_including_tax"],
+        }
+    )
+
+    return CalcResult(
+        applied_rates=primary["applied_rates"],
+        calc_factors=primary["calc_factors"],
+        calculation_breakdown=calculation_breakdown,
+        audit_logs=audits,
+        annual_contract=primary["annual_contract"],
+        detail_formulas=primary["detail_formulas"],
+        vehicle_items=vehicle_lines,
+        expense_items=params["expense_items"],
+        quote_summary=quote_summary,
+    )
+
+
+def _calculate_vehicle_line(
+    *,
+    params: dict[str, Any],
+    block: dict,
+    car: dict,
+    quantity: int,
+    line_no: int,
+    line_label: str,
+) -> dict[str, Any]:
     h_run = params["running_duration_min"] / 60.0
     h_base = max(3.0, h_run)
 
@@ -180,10 +334,8 @@ def calculate(
     h_total = round_half_up(h_gross_pre)
     h_drive_unit = round_half_up(h_drive)
     d_total = math.ceil(params["running_distance_km"] / 10.0) * 10
-
-    auto_alt_reasons = _alternate_driver_reasons(params, h_gross_pre)
-    auto_alt = bool(auto_alt_reasons)
-    is_two_man = params["is_alternate_driver"] or auto_alt
+    alternate_plan_reasons = _alternate_driver_plan_reasons(params, h_gross_pre)
+    is_two_man = params["is_alternate_driver"]
 
     public_r_dist = block["dist_rate"][params["car_type"]]
     public_r_time = block["time_rate"][params["car_type"]]
@@ -228,14 +380,20 @@ def calculate(
         params=params,
         car=car,
         is_two_man=is_two_man,
-        auto_alt=auto_alt,
-        auto_alt_reasons=auto_alt_reasons,
+        alternate_plan_reasons=alternate_plan_reasons,
         h_gross_pre=h_gross_pre,
         running_minutes=params["running_duration_min"],
         steering_minutes=params["steering_minutes"],
     )
 
     annual = _annual_contract(params, block, raw_ex_tax)
+    if annual.get("is_applied"):
+        per_vehicle_quote_inc = annual["annual_limit_including_tax"]
+        public_per_vehicle_quote_inc = yen_half_up(public_raw_ex_tax * annual["calculated_operating_days"] * 1.10)
+    else:
+        per_vehicle_quote_inc = legal_inc_tax
+        public_per_vehicle_quote_inc = public_inc_tax
+
     details = _build_detail_formulas(
         params=params,
         d_total=d_total,
@@ -265,8 +423,40 @@ def calculate(
         block=block,
     )
 
-    return CalcResult(
-        applied_rates={
+    calculation_breakdown = {
+        "base_distance_fare": f_base_dist,
+        "base_time_fare": f_base_time,
+        "base_fare_subtotal": f_base,
+        "night_surcharge": f_night,
+        "alternate_driver_fare": f_alt,
+        "special_vehicle_surcharge": f_special,
+        "raw_total_excluding_tax": raw_ex_tax,
+        "consumption_tax": tax,
+        "legal_minimum_including_tax": legal_inc_tax,
+        "recommended_billable_including_tax": legal_inc_tax,
+        "approved_rounded_billing_fare": billing,
+        "public_floor_excluding_tax": public_raw_ex_tax,
+        "public_floor_including_tax": public_inc_tax,
+        "below_floor_error": below_floor,
+        "shortfall_including_tax": max(0, public_per_vehicle_quote_inc - per_vehicle_quote_inc),
+    }
+
+    return {
+        "line_no": line_no,
+        "label": line_label,
+        "car_type": params["car_type"],
+        "car_label": car["label"],
+        "quantity": quantity,
+        "pax_count": params["pax_count"],
+        "dist_unit_yen_per_km": r_dist,
+        "time_unit_yen_per_hour": r_time,
+        "per_vehicle_quote_including_tax": per_vehicle_quote_inc,
+        "line_quote_including_tax": per_vehicle_quote_inc * quantity,
+        "per_vehicle_public_floor_including_tax": public_per_vehicle_quote_inc,
+        "line_public_floor_including_tax": public_per_vehicle_quote_inc * quantity,
+        "line_shortfall_including_tax": max(0, public_per_vehicle_quote_inc - per_vehicle_quote_inc) * quantity,
+        "below_floor_error": per_vehicle_quote_inc < public_per_vehicle_quote_inc,
+        "applied_rates": {
             "dist_unit_yen_per_km": r_dist,
             "time_unit_yen_per_hour": r_time,
             "public_dist_unit_yen_per_km": public_r_dist,
@@ -277,7 +467,7 @@ def calculate(
             "car_label": car["label"],
             "floor_rates_applied": params["use_floor_rates"],
         },
-        calc_factors={
+        "calc_factors": {
             "raw_running_hours": h_run,
             "ferry_excluded_hours": excluded_ferry,
             "drive_hours_unrounded": h_drive,
@@ -287,31 +477,38 @@ def calculate(
             "drive_calc_hours": h_drive_unit,
             "final_calc_distance_km": d_total,
             "night_calc_hours": h_night,
-            "auto_alternate_driver_applied": auto_alt,
-            "auto_alternate_driver_reasons": auto_alt_reasons,
+            "auto_alternate_driver_applied": False,
+            "auto_alternate_driver_reasons": [],
+            "alternate_driver_plan_reasons": alternate_plan_reasons,
             "alternate_driver_required": is_two_man,
         },
-        calculation_breakdown={
-            "base_distance_fare": f_base_dist,
-            "base_time_fare": f_base_time,
-            "base_fare_subtotal": f_base,
-            "night_surcharge": f_night,
-            "alternate_driver_fare": f_alt,
-            "special_vehicle_surcharge": f_special,
-            "raw_total_excluding_tax": raw_ex_tax,
-            "consumption_tax": tax,
-            "legal_minimum_including_tax": legal_inc_tax,
-            "recommended_billable_including_tax": legal_inc_tax,
-            "approved_rounded_billing_fare": billing,
-            "public_floor_excluding_tax": public_raw_ex_tax,
-            "public_floor_including_tax": public_inc_tax,
-            "below_floor_error": below_floor,
-            "shortfall_including_tax": max(0, public_inc_tax - legal_inc_tax),
-        },
-        audit_logs=audits,
-        annual_contract=annual,
-        detail_formulas=details,
-    )
+        "calculation_breakdown": calculation_breakdown,
+        "audit_logs": audits,
+        "annual_contract": annual,
+        "detail_formulas": details,
+    }
+
+
+def _build_quote_summary(vehicle_lines: list[dict], expense_items: list[dict]) -> dict[str, Any]:
+    vehicle_fare = sum(line["line_quote_including_tax"] for line in vehicle_lines)
+    vehicle_public_floor = sum(line["line_public_floor_including_tax"] for line in vehicle_lines)
+    expense_total = sum(item["amount_including_tax"] for item in expense_items)
+    rounded_vehicle_fare = math.ceil(vehicle_fare / 1000) * 1000
+    quote_total = rounded_vehicle_fare + expense_total
+    return {
+        "vehicle_count": sum(line["quantity"] for line in vehicle_lines),
+        "vehicle_line_count": len(vehicle_lines),
+        "vehicle_fare_including_tax": vehicle_fare,
+        "vehicle_public_floor_including_tax": vehicle_public_floor,
+        "vehicle_rounded_fare_including_tax": rounded_vehicle_fare,
+        "expense_total_including_tax": expense_total,
+        "quote_total_including_tax": quote_total,
+        "quote_rounded_total_including_tax": quote_total,
+        "below_floor_error": vehicle_fare < vehicle_public_floor,
+        "shortfall_including_tax": max(0, vehicle_public_floor - vehicle_fare),
+        "has_expenses": bool(expense_items),
+        "annual_applied": any(line["annual_contract"].get("is_applied") for line in vehicle_lines),
+    }
 
 
 def run_compliance_audits(
@@ -319,8 +516,7 @@ def run_compliance_audits(
     params: dict[str, Any],
     car: dict,
     is_two_man: bool,
-    auto_alt: bool,
-    auto_alt_reasons: list[str],
+    alternate_plan_reasons: list[str],
     h_gross_pre: float,
     running_minutes: int,
     steering_minutes: int,
@@ -332,7 +528,7 @@ def run_compliance_audits(
         audits.append(AuditEntry("C-001", "error", "連続運転4時間超の可能性があります。少なくとも30分以上の休憩計画を確認してください。"))
 
     if not is_two_man and h_gross_pre > 15.0:
-        audits.append(AuditEntry("C-003", "error", "ワンマン運行の1日拘束時間上限15時間を超えています。"))
+        audits.append(AuditEntry("C-003", "error", "ワンマン運行の1日拘束時間上限15時間を超えています。交替運転者、別車両、行程分割などの運行計画を確認してください。"))
     elif not is_two_man and h_gross_pre > 13.0:
         audits.append(AuditEntry("C-004", "warning", "ワンマン運行の拘束時間が13時間を超えています。14時間超の回数管理も確認してください。"))
 
@@ -344,15 +540,15 @@ def run_compliance_audits(
         audits.append(AuditEntry("C-006", "warning", "ツーマン拘束19時間超です。車内ベッド等の休息設備と実運用を必ず確認してください。"))
 
     if is_two_man and not car["alt_allowed"]:
-        audits.append(AuditEntry("C-010", "error", "小型車・コミューターはこのツールでは交替運転者配置料金の自動適用対象外です。車種または行程を見直してください。"))
+        audits.append(AuditEntry("C-010", "error", "小型車・コミューターでは交替運転者配置料金を加算できません。車種または行程を見直してください。"))
 
     if is_two_man and car["alt_allowed"]:
         max_pax = car["max_capacity"] - car["alt_seat_cost"]
         if params["pax_count"] > max_pax:
             audits.append(AuditEntry("C-009", "error", f"交替運転者を配置すると乗車可能人数は {max_pax} 名までです。"))
 
-    if auto_alt and auto_alt_reasons:
-        audits.append(AuditEntry("A-ALT", "warning", "交替運転者配置が必要な条件に該当したため、交替運転者料金を自動で含めています: " + "、".join(auto_alt_reasons)))
+    if not is_two_man and alternate_plan_reasons:
+        audits.append(AuditEntry("A-PLAN", "warning", "交替運転者・別車両・行程分割などの確認が必要な条件に該当しています。交替運転者料金は自動加算していません: " + "、".join(alternate_plan_reasons)))
 
     return audits
 
@@ -386,10 +582,13 @@ def serialize_result(
         },
         "annual_contract_special": _default_annual_contract(result.annual_contract),
         "detail_formulas": result.detail_formulas,
+        "vehicle_items": result.vehicle_items,
+        "expense_items": result.expense_items,
+        "quote_summary": result.quote_summary,
     }
 
 
-def _alternate_driver_reasons(params: dict[str, Any], h_gross_pre: float) -> list[str]:
+def _alternate_driver_plan_reasons(params: dict[str, Any], h_gross_pre: float) -> list[str]:
     reasons: list[str] = []
     if h_gross_pre > 15.0:
         reasons.append("拘束時間15時間超")

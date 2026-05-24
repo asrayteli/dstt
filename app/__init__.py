@@ -377,6 +377,7 @@ def create_app(test_config=None):
         "cloudshift": "shiftersync",
         "subject_analysis_tool": "subject_analysis_tool",
         "power_imager": "power_imager",
+        "bus_pricing": "bus_pricing",
     }
     _EXEMPT_PATH_PREFIXES = (
         "/tools/shiftersync/download/",

@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  @media print {
+    nav, header, footer, .no-print, .dstt-sidebar, .dstt-topbar { display: none !important; }
+    body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+    .est-page { padding: 0 !important; max-width: none !important; }
+    .est-sheet { border: none !important; box-shadow: none !important; padding: 32px !important; }
+    .est-actions { display: none !important; }
+  }
+  .est-page { color: #1a1a1a; max-width: 900px; margin: 0 auto; padding-bottom: 40px; }
+  .est-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: flex-end; padding: 16px 0; }
+  .est-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 8px; padding: 0.5rem 1rem; font-weight: 800; font-size: 0.88rem; transition: all 0.15s; cursor: pointer; }
+  .est-btn-back { border: 1px solid #cbd5e1; background: #fff; color: #1a1a1a; }
+  .est-btn-back:hover { background: #f8fafc; }
+  .est-btn-print { background: #0f172a; color: #fff; }
+  .est-btn-print:hover { background: #1e293b; }
+  .est-sheet { background: #fff; border: 1px solid #d4d4d8; border-radius: 4px; box-shadow: 0 4px 24px rgba(0,0,0,0.06); padding: 48px 40px; }
+  @media (max-width: 640px) { .est-sheet { padding: 24px 16px; } }
+  .est-title { font-size: 1.75rem; font-weight: 900; text-align: center; letter-spacing: 0.12em; border-bottom: 3px double #1a1a1a; padding-bottom: 12px; }
+  .est-header { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 28px; }
+  @media (max-width: 640px) { .est-header { grid-template-columns: 1fr; } }
+  .est-client { border-bottom: 1px solid #1a1a1a; padding-bottom: 4px; }
+  .est-client-name { font-size: 1.2rem; font-weight: 800; }
+  .est-company { text-align: right; font-size: 0.82rem; line-height: 1.7; }
+  @media (max-width: 640px) { .est-company { text-align: left; } }
+  .est-company-name { font-size: 1rem; font-weight: 800; }
+  .est-meta-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 20px; }
+  .est-meta-table th, .est-meta-table td { border: 1px solid #d4d4d8; padding: 6px 10px; }
+  .est-meta-table th { background: #f5f5f5; font-weight: 700; width: 28%; text-align: left; }
+  .est-grand-total { margin-top: 28px; border: 2px solid #1a1a1a; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; }
+  .est-grand-label { font-size: 0.92rem; font-weight: 800; }
+  .est-grand-value { font-size: 1.6rem; font-weight: 900; letter-spacing: 0.02em; }
+  .est-detail-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin-top: 24px; }
+  .est-detail-table th, .est-detail-table td { border: 1px solid #d4d4d8; padding: 8px 10px; vertical-align: top; }
+  .est-detail-table thead th { background: #f5f5f5; font-weight: 700; text-align: center; font-size: 0.78rem; }
+  .est-detail-table tbody td { text-align: right; }
+  .est-detail-table tbody td:first-child { text-align: left; }
+  .est-detail-table tfoot td { border-top: 2px solid #1a1a1a; font-weight: 800; }
+  .est-section-title { font-size: 0.92rem; font-weight: 800; margin-top: 32px; padding-bottom: 6px; border-bottom: 1px solid #e4e4e7; }
+  .est-notes { margin-top: 28px; font-size: 0.8rem; line-height: 1.8; color: #525252; }
+  .est-notes li { margin-bottom: 4px; }
+  .est-stamp-area { display: flex; gap: 4px; justify-content: flex-end; margin-top: 8px; }
+  .est-stamp-box { width: 56px; height: 56px; border: 1px solid #d4d4d8; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #a1a1aa; }
+  .est-warning { margin-top: 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 4px; padding: 10px 14px; font-size: 0.82rem; font-weight: 700; color: #991b1b; }
+  .est-right { text-align: right; }
+  .est-num { font-variant-numeric: tabular-nums; }
+</style>
+
+{% macro yen(value) -%}&#165;{{ "{:,}".format(value|int) }}{%- endmacro %}
+{% macro yen_plain(value) -%}{{ "{:,}".format(value|int) }}円{%- endmacro %}
+
+<div class="est-page">
+  <div class="est-actions no-print">
+    <a class="est-btn est-btn-back" href="{{ url_for('bus_pricing.index') }}">入力画面に戻る</a>
+    <button type="button" class="est-btn est-btn-print" onclick="window.print()">印刷 / PDF保存</button>
+  </div>
+
+  <div class="est-sheet">
+    <!-- Title -->
+    <h1 class="est-title">御 見 積 書</h1>
+
+    <!-- Header: client + company -->
+    <div class="est-header">
+      <div>
+        <div class="est-client">
+          <p class="est-client-name" id="estClientName" contenteditable="true" data-placeholder="クリックして宛名入力">御中</p>
+        </div>
+        <p style="margin-top:6px;font-size:0.78rem;color:#71717a;">下記の通りお見積り申し上げます。</p>
+
+        <table class="est-meta-table">
+          <tbody>
+            <tr><th>見積番号</th><td class="est-num" id="estNumber" contenteditable="true">EST-{{ result.applied_rates.block_name[:2] }}-001</td></tr>
+            <tr><th>見積日</th><td id="estDate" contenteditable="true">{{ today if today else "____年__月__日" }}</td></tr>
+            <tr><th>有効期限</th><td id="estExpiry" contenteditable="true">見積日より30日間</td></tr>
+            <tr><th>件名</th><td id="estSubject" contenteditable="true">貸切バス運行</td></tr>
+            <tr><th>運行区間</th><td id="estRoute" contenteditable="true">（ここに区間を入力）</td></tr>
+            <tr><th>運行日</th><td id="estOperDate" contenteditable="true">（ここに運行日を入力）</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <div class="est-company">
+          <p class="est-company-name" id="estCompanyName" contenteditable="true">（会社名を入力）</p>
+          <p id="estCompanyAddr" contenteditable="true">〒000-0000<br>住所を入力してください</p>
+          <p id="estCompanyTel" contenteditable="true">TEL: 000-0000-0000</p>
+          <p style="margin-top:4px;font-size:0.75rem;color:#71717a;">登録番号: T0000000000000</p>
+        </div>
+        <div class="est-stamp-area">
+          <div class="est-stamp-box">承認</div>
+          <div class="est-stamp-box">確認</div>
+          <div class="est-stamp-box">担当</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grand total -->
+    <div class="est-grand-total">
+      <span class="est-grand-label">お見積金額（税込）</span>
+      <span class="est-grand-value est-num">{{ yen(result.quote_summary.quote_total_including_tax) }}</span>
+    </div>
+
+    {% if result.calculation_breakdown.below_floor_error %}
+      <div class="est-warning">
+        注意: 本見積額は公示下限額を下回っています。単価の見直しが必要です。
+      </div>
+    {% endif %}
+
+    <!-- Vehicle details -->
+    <h3 class="est-section-title">車両運賃・料金</h3>
+    <table class="est-detail-table">
+      <thead>
+        <tr>
+          <th style="width:30%;">車種</th>
+          <th style="width:12%;">台数</th>
+          <th style="width:20%;">単価（税込）</th>
+          <th style="width:20%;">金額（税込）</th>
+          <th style="width:18%;">備考</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in result.vehicle_items %}
+          <tr>
+            <td style="text-align:left;">{{ item.car_label }}{% if item.label %}<br><span style="font-size:0.75rem;color:#71717a;">{{ item.label }}</span>{% endif %}</td>
+            <td class="est-num">{{ item.quantity }}</td>
+            <td class="est-num">{{ yen_plain(item.per_vehicle_quote_including_tax) }}</td>
+            <td class="est-num">{{ yen_plain(item.line_quote_including_tax) }}</td>
+            <td style="font-size:0.75rem;text-align:left;">{{ item.pax_count }}名乗車</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="3" class="est-right">車両運賃・料金 小計</td>
+          <td class="est-num est-right">{{ yen_plain(result.quote_summary.vehicle_rounded_fare_including_tax) }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <!-- Expense details -->
+    <h3 class="est-section-title">実費</h3>
+    <table class="est-detail-table">
+      <thead>
+        <tr>
+          <th style="width:40%;">項目</th>
+          <th style="width:25%;">金額（税込）</th>
+          <th style="width:35%;">備考</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if result.expense_items %}
+          {% for item in result.expense_items %}
+            <tr>
+              <td style="text-align:left;">{{ item.name }}</td>
+              <td class="est-num">{{ yen_plain(item.amount_including_tax) }}</td>
+              <td style="text-align:left;font-size:0.78rem;">{{ item.note or "-" }}</td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="3" style="text-align:center;color:#a1a1aa;">実費なし</td></tr>
+        {% endif %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td class="est-right">実費 小計</td>
+          <td class="est-num est-right">{{ yen_plain(result.quote_summary.expense_total_including_tax) }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <!-- Summary -->
+    <h3 class="est-section-title">合計</h3>
+    <table class="est-detail-table">
+      <tbody>
+        <tr>
+          <td style="text-align:left;width:60%;">車両運賃・料金 小計</td>
+          <td class="est-num est-right">{{ yen_plain(result.quote_summary.vehicle_rounded_fare_including_tax) }}</td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">実費 小計</td>
+          <td class="est-num est-right">{{ yen_plain(result.quote_summary.expense_total_including_tax) }}</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td style="text-align:left;font-size:1rem;">合計金額（税込）</td>
+          <td class="est-num est-right" style="font-size:1.1rem;">{{ yen_plain(result.quote_summary.quote_total_including_tax) }}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <!-- Calculation summary (smaller) -->
+    <h3 class="est-section-title">算定条件</h3>
+    <table class="est-meta-table">
+      <tbody>
+        <tr><th>運輸局ブロック</th><td>{{ result.applied_rates.block_name }}</td></tr>
+        <tr><th>総走行距離</th><td class="est-num">{{ form_state.running_distance_km }} km</td></tr>
+        <tr><th>総走行時間</th><td class="est-num">{{ form_state.running_duration_min }} 分</td></tr>
+        <tr><th>適用キロ単価</th><td class="est-num">{{ "{:,}".format(result.applied_rates.dist_unit_yen_per_km|int) }} 円/km</td></tr>
+        <tr><th>適用時間単価</th><td class="est-num">{{ "{:,}".format(result.applied_rates.time_unit_yen_per_hour|int) }} 円/時</td></tr>
+        {% if result.annual_contract.is_applied %}
+          <tr><th>年間契約</th><td>{{ result.annual_contract.calculated_operating_days }}日 / 稼働率 {{ "%.2f"|format(result.annual_contract.selected_utilization_rate * 100) }}%</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+
+    <!-- Notes -->
+    <div class="est-notes">
+      <h4 style="font-size:0.84rem;font-weight:700;color:#1a1a1a;margin-bottom:6px;">備考・特記事項</h4>
+      <ul style="padding-left:1.2em;list-style:disc;">
+        <li>車両運賃・料金は千円単位切上げにて算出しております。</li>
+        <li>高速道路料金・駐車料等の実費は別途実費精算とさせていただきます。</li>
+        <li>運行当日の交通事情により、所要時間・経路が変更になる場合があります。</li>
+        <li>キャンセル料は運行日の14日前より発生いたします。</li>
+        <li>本見積書の有効期限を過ぎた場合は、再度お見積りさせていただきます。</li>
+        <li id="estCustomNote" contenteditable="true" style="color:#0e7490;">（ここに追加の備考を入力できます）</li>
+      </ul>
+    </div>
+
+    <p style="margin-top:32px;text-align:center;font-size:0.75rem;color:#a1a1aa;">本見積書は貸切バス運賃計算ツールにより作成されました</p>
+  </div>
+</div>
+
+<script>
+(function() {
+  // Set today's date
+  const estDate = document.getElementById('estDate');
+  if (estDate && estDate.textContent.includes('____')) {
+    const now = new Date();
+    estDate.textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
+  }
+  // Placeholder behavior for contenteditable
+  document.querySelectorAll('[contenteditable][data-placeholder]').forEach(el => {
+    if (!el.textContent.trim() || el.textContent.trim() === el.dataset.placeholder) {
+      el.style.color = '#a1a1aa';
+    }
+    el.addEventListener('focus', () => {
+      if (el.textContent.trim() === el.dataset.placeholder || el.textContent.trim() === '御中') {
+        el.textContent = '';
+      }
+      el.style.color = '#1a1a1a';
+    });
+    el.addEventListener('blur', () => {
+      if (!el.textContent.trim()) {
+        el.textContent = el.dataset.placeholder;
+        el.style.color = '#a1a1aa';
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

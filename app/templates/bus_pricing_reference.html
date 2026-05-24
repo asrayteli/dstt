@@ -38,11 +38,13 @@
       <div class="rounded-lg bg-slate-50 p-4"><span class="bpr-pill">5</span><p class="mt-2">点呼点検時間を加えます。日帰りは 2時間、宿泊運行は乗務日数 × 2時間を加えます。</p></div>
       <div class="rounded-lg bg-slate-50 p-4"><span class="bpr-pill">6</span><p class="mt-2">時間制運賃を計算します。点呼点検まで含めた時間を 30分単位で四捨五入し、画面で入力した時間単価を掛けます。</p></div>
       <div class="rounded-lg bg-slate-50 p-4"><span class="bpr-pill">7</span><p class="mt-2">深夜早朝がある場合は、深夜早朝時間を丸めた時間に、時間単価の 20% を掛けて加算します。</p></div>
-      <div class="rounded-lg bg-slate-50 p-4"><span class="bpr-pill">8</span><p class="mt-2">交替運転者が必要な場合は、交替運転者用の距離料金と時間料金を加算します。ワンマン上限を超える場合は自動で必要扱いになります。</p></div>
+      <div class="rounded-lg bg-slate-50 p-4"><span class="bpr-pill">8</span><p class="mt-2">交替運転者を料金に含める場合だけ、交替運転者用の距離料金と時間料金を加算します。ワンマン上限を超える可能性がある場合でも自動加算はせず、法令判定として表示します。</p></div>
       <div class="rounded-lg bg-slate-50 p-4"><span class="bpr-pill">9</span><p class="mt-2">特殊車両割増がある場合は、キロ制運賃と時間制運賃の小計に割増率を掛けて加算します。</p></div>
       <div class="rounded-lg bg-slate-50 p-4"><span class="bpr-pill">10</span><p class="mt-2">税別合計に消費税 10% を加え、税込額を出します。さらに税込額を 1,000円単位で切り上げた額も表示します。</p></div>
       <div class="rounded-lg bg-slate-50 p-4"><span class="bpr-pill">11</span><p class="mt-2">同じ条件を公示下限単価でも計算します。ユーザー単価で計算した税込額が公示下限を下回る場合は、結果画面に「下限額エラー」を表示します。</p></div>
       <div class="rounded-lg bg-slate-50 p-4"><span class="bpr-pill">12</span><p class="mt-2">年間契約では、基本行程で選んだ運輸局ブロックの稼働率と会社稼働率の間で、今回使う稼働率を設定します。1日の税別額に採用日数を掛け、一般契約では運行予定日数と稼働率換算日数を比べて大きい方を採用します。</p></div>
+      <div class="rounded-lg bg-slate-50 p-4"><span class="bpr-pill">13</span><p class="mt-2">複数台の場合は、車両行ごとに車種・台数・単価を使って計算し、税込額を台数分だけ合算します。同車種を複数行に分けることもできます。</p></div>
+      <div class="rounded-lg bg-slate-50 p-4"><span class="bpr-pill">14</span><p class="mt-2">実費は税込額として車両運賃・料金に加算します。PDF見積書では車両明細と実費明細を分けて表示する想定です。</p></div>
     </div>
   </section>
 
@@ -58,7 +60,8 @@
           <tr><td>C-005a</td><td>ツーマン拘束時間20時間超</td><td>エラー</td></tr>
           <tr><td>C-005b</td><td>ツーマン拘束時間19時間超かつ仮眠設備なし</td><td>エラー</td></tr>
           <tr><td>C-009</td><td>交替運転者配置時の乗車可能人数超過</td><td>エラー</td></tr>
-          <tr><td>C-010</td><td>小型車・コミューターで交替運転者が必要</td><td>エラー</td></tr>
+          <tr><td>C-010</td><td>小型車・コミューターで交替運転者料金を含めた場合</td><td>エラー</td></tr>
+          <tr><td>A-PLAN</td><td>交替運転者・別車両・行程分割などの確認が必要な条件</td><td>警告</td></tr>
         </tbody>
       </table>
     </div>

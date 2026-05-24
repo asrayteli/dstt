@@ -48,11 +48,11 @@ TOOL_ACCESS_CATEGORIES: dict[str, str] = {
     "siteplus": "sensitive",             # 現場リストPLUS
     "shiftersync": "sensitive",          # ShifterSync（社員名簿/現場リストと連携、CloudShiftも包含）
     "subject_analysis_tool": "sensitive",  # 科目別分析ツール（現場リストPLUSを利用）
+    "bus_pricing": "sensitive",          # 貸切料金計算ツール
 
     # 以下は公開（ログインで誰でも利用可）
     "datecalc": "public",
     "calc": "public",
-    "bus_pricing": "public",
     "rename": "public",
     "compress": "public",
     "csvtool": "public",

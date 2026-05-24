@@ -245,16 +245,16 @@ else:
 
 ### 5.4 ワンマン運行可否の判定
 
-以下のいずれかに該当する場合、`auto_alternate_driver = True` として交替運転者料金を内部適用する。
+以下のいずれかに該当する場合、交替運転者・別車両・行程分割などの確認が必要な条件として監査に表示する。**交替運転者料金は自動適用しない**。料金に含めるのは、ユーザーが `is_alternate_driver=True` を明示した場合のみとする。
 
 | ID | 条件 | 根拠 |
 |---|---|---|
-| A-01 | `H_gross_pre > 15.0`（拘束時間 15h 超） | 改善基準告示 ワンマン拘束上限。13h は警告（C-004）に留め、自動切替は 15h 超で発動 |
+| A-01 | `H_gross_pre > 15.0`（拘束時間 15h 超） | 改善基準告示 ワンマン拘束上限。13h は警告（C-004）に留め、15h 超は C-003 として是正を促す |
 | A-02 | `is_night_run=False` かつ `pax_running_distance_km > 500` | 昼間ワンマン実車距離 500km |
 | A-03 | `is_night_run=True` かつ `pax_running_distance_km > 400` | 夜間ワンマン実車距離 400km |
 | A-04 | `steering_minutes / 60 > 9.0` | 1 日の実運転時間 9h 上限 |
 
-> **修正点**: 原設計書では自動切替閾値が `H_gross > 13.0` だったが、これは C-003/C-004 の整合性を欠く（13h は「警告」だが自動切替してしまうと警告自体が出ない）。15h 超で自動切替、13h〜15h は警告のみとする。距離判定も**実車距離**（`pax_running_distance_km`）を使用するよう修正。
+> **修正点**: 原設計書では条件該当時に交替運転者料金を自動適用していたが、実運行では別車両・行程分割・運転者交替地点などで対応する場合があるため廃止。条件該当は監査表示に留める。距離判定は**実車距離**（`pax_running_distance_km`）を使用する。
 
 連続運転時間（4h ルール）は入力分割なしでは厳密判定不能なため、C-001 の監査は「`steering_minutes` が 240 を超え、かつ休憩時間（= `running_duration_min - steering_minutes`）が 30 分未満」という近似で警告する（厳密化は将来拡張）。
 
@@ -275,7 +275,7 @@ F_night = H_night * R_time * 0.20
 
 ### 5.7 交替運転者配置料金
 
-`is_alternate_driver=True` または `auto_alternate_driver=True` のとき:
+`is_alternate_driver=True` のとき:
 
 ```
 R_alt_d  = BLOCK_MASTER[block_id]["alt_dist_rate"]
@@ -287,7 +287,7 @@ F_alter_total  = F_alter + F_alter_night
 
 - **走行時間も 30 分丸め後の `H_drive_unit` を使用**する（原設計書では未丸めの `H_base` を使っており、本則の 30 分単位丸めと不整合だったため統一）。
 - フェリー控除も `H_drive_unit` 経由で反映される（基本運賃側と同じ控除を交替運転者側にも適用、二重控除はしない）。
-- `alt_allowed=False`（small / commuter）の車種でツーマンが必要になった場合は C-010 エラーで停止し、料金加算は行わない。
+- `alt_allowed=False`（small / commuter）の車種で交替運転者料金を含めた場合は C-010 エラーで停止し、料金加算は行わない。
 
 ### 5.8 特殊車両割増
 
@@ -346,6 +346,25 @@ F_billing = ceil(F_recommended / 1000) * 1000
 
 > **修正の背景**: 原設計書 §5.11 の条件分岐は `F_legal_min_inc_tax = F_total_inc_tax` 前提では恒に else 側に倒れる（floor は必ず inc_tax を下回る、例外は inc_tax がちょうど 1,000 の倍数の場合のみ）。実害は出ないが「常に発火しない if」は実装上の混乱を招くため削除。事業者が**任意上乗せ後の提示額**を入力できるオプション項目を将来追加した場合に、再度ガード分岐が意味を持つ。
 
+### 5.12 複数台・実費・見積書プレビュー
+
+複数台見積では、`vehicle_items` の各行について同一行程・同一追加条件を使い、車種・台数・乗車人数・キロ単価・時間単価だけを行単位で差し替えて計算する。同車種を複数行に分けてもよい。
+
+```
+line_total_inc_tax = per_vehicle_quote_inc_tax * quantity
+vehicle_fare_inc_tax = sum(line_total_inc_tax)
+vehicle_rounded_fare_inc_tax = ceil(vehicle_fare_inc_tax / 1000) * 1000
+```
+
+実費は `expense_items` として税込額で受け取り、車両運賃・料金の千円切上げ後に加算する。
+
+```
+expense_total_inc_tax = sum(expense.amount_including_tax)
+quote_total_inc_tax = vehicle_rounded_fare_inc_tax + expense_total_inc_tax
+```
+
+見積書PDFは別工程で実装する。現バージョンでは `/tools/bus_pricing/estimate/preview` で `vehicle_items`、`expense_items`、`quote_summary` を使ったHTMLプレビューを表示し、PDF出力ボタンと `/tools/bus_pricing/estimate/pdf` のプレースホルダーだけを用意する。
+
 ---
 
 ## 6. コンプライアンス監査チェック
@@ -354,7 +373,7 @@ F_billing = ceil(F_recommended / 1000) * 1000
 |---|---|---|---|
 | C-001 | 連続運転時間 | `steering_minutes > 240` かつ `running_duration_min - steering_minutes < 30` | error |
 | C-002 | 高速道路連続 | 入力に高速比率がないため**実装は将来拡張**（入力追加時に有効化） | — |
-| C-003 | ワンマン拘束上限 | `is_alternate_driver=False` かつ `auto_alternate_driver=False` かつ `H_gross_pre > 15.0` | error |
+| C-003 | ワンマン拘束上限 | `is_alternate_driver=False` かつ `H_gross_pre > 15.0` | error |
 | C-004 | ワンマン拘束警告 | `is_alternate_driver=False` かつ `13.0 < H_gross_pre ≤ 15.0` | warning |
 | C-005a | ツーマン拘束絶対上限 | ツーマン時 `H_gross_pre > 20.0` | error |
 | C-005b | ツーマン拘束上限（ベッドなし） | ツーマン時 `H_gross_pre > 19.0` かつ `has_sleeper_bed=False` | error |
@@ -362,7 +381,8 @@ F_billing = ceil(F_recommended / 1000) * 1000
 | C-007 | 勤務間休息下限 | （入力に前日・翌日情報なし）将来拡張 | — |
 | C-008 | 勤務間休息推奨 | 同上 | — |
 | C-009 | ツーマン時定員不足 | ツーマン適用かつ `pax_count > max_capacity - alt_seat_cost`（large/medium のみ） | error |
-| C-010 | ツーマン不可車種 | `car_type ∈ {small, commuter}` かつ ツーマン必要 | error |
+| C-010 | ツーマン不可車種 | `car_type ∈ {small, commuter}` かつ `is_alternate_driver=True` | error |
+| A-PLAN | 交替・別車両等の確認 | 交替運転者・別車両・行程分割などの確認が必要な条件に該当。料金は自動加算しない | warning |
 | C-011 | 手数料割戻し違反 | 外部入力された実提示額 `external_quote_inc_tax` が `F_recommended` を下回る場合（**将来拡張**：現バージョンでは入力項目を持たないため発火しない。手数料による下限額の引き上げは §5.10 のアップリフトで吸収する） | — |
 
 > **修正点**: C-002／C-007／C-008 は本ツールの入力モデルだけでは厳密判定できない（路線種別や前後日の勤務情報が必要）。将来拡張として残し、現バージョンでは未実装である旨を画面上の注記に明示する。
@@ -561,16 +581,16 @@ def calculate(params: dict[str, Any]) -> CalcResult:
     d_total = math.ceil(params["running_distance_km"] / 10.0) * 10
 
     # --- 5.4 ワンマン可否 -------------------------------------------------
-    auto_alt = False
+    plan_reasons = []
     if h_gross_pre > 15.0:
-        auto_alt = True
+        plan_reasons.append("拘束時間15時間超")
     if not params["is_night_run"] and params["pax_running_distance_km"] > 500:
-        auto_alt = True
+        plan_reasons.append("昼間実車距離500km超")
     if params["is_night_run"] and params["pax_running_distance_km"] > 400:
-        auto_alt = True
+        plan_reasons.append("夜間実車距離400km超")
     if params["steering_minutes"] / 60.0 > 9.0:
-        auto_alt = True
-    is_two_man = params["is_alternate_driver"] or auto_alt
+        plan_reasons.append("実ハンドル時間9時間超")
+    is_two_man = params["is_alternate_driver"]
 
     # --- 5.5 基本運賃 -----------------------------------------------------
     r_dist = block["dist_rate"][params["car_type"]]
@@ -620,7 +640,7 @@ def calculate(params: dict[str, Any]) -> CalcResult:
         params=params,
         car=car,
         is_two_man=is_two_man,
-        auto_alt=auto_alt,
+        alternate_plan_reasons=plan_reasons,
         h_gross_pre=h_gross_pre,
         steering_minutes=params["steering_minutes"],
         running_minutes=params["running_duration_min"],
@@ -668,7 +688,8 @@ def calculate(params: dict[str, Any]) -> CalcResult:
             "drive_calc_hours": h_drive_unit,
             "final_calc_distance_km": d_total,
             "night_calc_hours": h_night,
-            "auto_alternate_driver_applied": auto_alt,
+            "auto_alternate_driver_applied": False,
+            "alternate_driver_plan_reasons": plan_reasons,
             "alternate_driver_required": is_two_man,
         },
         calculation_breakdown={
@@ -748,7 +769,7 @@ def api_calculate():
 - 3 時間最低保証の境界（`H_run`=2.9h → `H_base`=3.0h）
 - 距離 10km 切上げ境界（41.2km → 50km、50.0km → 50km、50.1km → 60km）
 - 拘束時間の 30 分単位丸め（11.49h → 11、11.50h → 12）
-- ワンマン自動切替 4 系統:
+- 交替・別車両等の確認警告 4 系統:
   - 拘束 15.1h（`H_gross_pre > 15`）
   - 昼間实车 501km
   - 夜間实车 401km

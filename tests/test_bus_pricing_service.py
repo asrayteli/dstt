@@ -102,10 +102,19 @@ def test_minimum_three_hour_drive_time_is_applied():
         {"steering_minutes": 547, "running_duration_min": 600},
     ],
 )
-def test_alternate_driver_is_auto_applied_for_risk_conditions(overrides):
+def test_alternate_driver_is_not_auto_applied_for_risk_conditions(overrides):
     result = calculate(base_params(**overrides))
 
-    assert result.calc_factors["auto_alternate_driver_applied"] is True
+    assert result.calc_factors["auto_alternate_driver_applied"] is False
+    assert result.calc_factors["alternate_driver_required"] is False
+    assert result.calculation_breakdown["alternate_driver_fare"] == 0
+    assert "A-PLAN" in audit_ids(result)
+
+
+def test_alternate_driver_fare_is_applied_only_when_user_selects_it():
+    result = calculate(base_params(is_alternate_driver=True))
+
+    assert result.calc_factors["alternate_driver_required"] is True
     assert result.calculation_breakdown["alternate_driver_fare"] > 0
 
 
@@ -201,6 +210,28 @@ def test_custom_rates_can_calculate_but_flag_floor_error():
     assert result.calculation_breakdown["shortfall_including_tax"] > 0
 
 
+def test_multi_vehicle_quote_and_expenses_are_totaled():
+    result = calculate(
+        base_params(
+            is_night_run=False,
+            night_minutes=0,
+            vehicle_items=[
+                {"car_type": "large", "quantity": 2, "pax_count": 40, "custom_dist_rate": 170, "custom_time_rate": 7190},
+                {"car_type": "medium", "quantity": 1, "pax_count": 25, "custom_dist_rate": 150, "custom_time_rate": 6070},
+            ],
+            expense_items=[
+                {"name": "高速道路料金", "amount": 30000, "note": "概算"},
+                {"name": "駐車料", "amount": 5000, "note": ""},
+            ],
+        )
+    )
+
+    assert result.quote_summary["vehicle_count"] == 3
+    assert len(result.vehicle_items) == 2
+    assert result.quote_summary["expense_total_including_tax"] == 35000
+    assert result.quote_summary["quote_total_including_tax"] == result.quote_summary["vehicle_rounded_fare_including_tax"] + 35000
+
+
 def _build_client():
     app = Flask(
         __name__,
@@ -235,5 +266,34 @@ def test_bus_pricing_page_renders():
 
     assert response.status_code == 200
     assert "貸切料金計算ツール".encode("utf-8") in response.data
-    assert "下限額を計算".encode("utf-8") in response.data
+    assert "計算する".encode("utf-8") in response.data
     assert "bus_pricing".encode("utf-8") in str(NAV_ITEMS).encode("utf-8")
+
+
+def test_estimate_preview_route_renders_quote_shell():
+    client = _build_client()
+
+    response = client.post(
+        "/tools/bus_pricing/estimate/preview",
+        data={
+            "block_id": "kanto",
+            "running_distance_km": "300",
+            "pax_running_distance_km": "260",
+            "running_duration_min": "540",
+            "steering_minutes": "",
+            "vehicle_label": ["1号車"],
+            "vehicle_car_type": ["large"],
+            "vehicle_quantity": ["1"],
+            "vehicle_pax_count": ["40"],
+            "vehicle_custom_dist_rate": ["170"],
+            "vehicle_custom_time_rate": ["7190"],
+            "expense_name": ["高速道路料金"],
+            "expense_amount": ["10000"],
+            "expense_note": ["概算"],
+            "use_floor_rates": "on",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "御 見 積 書".encode("utf-8") in response.data
+    assert "車両運賃・料金".encode("utf-8") in response.data
