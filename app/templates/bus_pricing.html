@@ -3,30 +3,29 @@
 {% block content %}
 <style>
   .bp-page { color: #0f172a; --accent: #0e7490; --accent-light: #ecfeff; }
-  .bp-route-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; border: 1px solid #dbe3ee; border-radius: 12px; background: #fff; padding: 16px 20px; }
+  .bp-route-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; border: 1px solid #dbe3ee; border-radius: 12px; background: #fff; padding: 12px 20px; }
   .bp-route-bar label { font-size: 0.78rem; font-weight: 700; color: #475569; display: flex; flex-direction: column; gap: 4px; }
-  .bp-route-bar input, .bp-route-bar select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 0.88rem; min-width: 100px; }
-  .bp-route-bar input:focus, .bp-route-bar select:focus { outline: 2px solid rgba(14,116,144,0.25); border-color: var(--accent); }
-  .bp-workspace { min-height: 120px; }
-  .bp-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
-  .bp-vehicle-card { border: 1px solid #dbe3ee; border-radius: 12px; background: #fff; padding: 18px; cursor: pointer; transition: all 0.15s; position: relative; }
+  .bp-route-bar select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 0.88rem; }
+  .bp-route-bar select:focus { outline: 2px solid rgba(14,116,144,0.25); border-color: var(--accent); }
+  .bp-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  .bp-vehicle-card { border: 1px solid #dbe3ee; border-radius: 12px; background: #fff; padding: 18px; cursor: pointer; transition: all 0.15s; }
   .bp-vehicle-card:hover { border-color: var(--accent); box-shadow: 0 4px 16px rgba(14,116,144,0.08); transform: translateY(-1px); }
   .bp-vehicle-card.has-error { border-color: #fca5a5; background: #fef2f2; }
-  .bp-card-type { font-size: 0.82rem; font-weight: 850; color: var(--accent); }
-  .bp-card-info { margin-top: 6px; font-size: 0.78rem; color: #64748b; }
+  .bp-card-type { font-size: 0.84rem; font-weight: 850; color: var(--accent); }
+  .bp-card-info { margin-top: 6px; font-size: 0.76rem; color: #64748b; line-height: 1.5; }
   .bp-card-price { margin-top: 10px; font-size: 1.2rem; font-weight: 900; }
   .bp-card-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
   .bp-badge { font-size: 0.65rem; font-weight: 800; padding: 2px 7px; border-radius: 999px; background: #f1f5f9; color: #475569; }
-  .bp-badge-active { background: var(--accent-light); color: var(--accent); }
+  .bp-badge-on { background: var(--accent-light); color: var(--accent); }
   .bp-card-actions { display: flex; gap: 6px; margin-top: 12px; }
-  .bp-card-btn { font-size: 0.72rem; font-weight: 700; padding: 4px 10px; border-radius: 6px; border: 1px solid #e2e8f0; background: #fff; color: #475569; cursor: pointer; transition: all 0.1s; }
-  .bp-card-btn:hover { background: #f8fafc; border-color: #cbd5e1; }
-  .bp-card-btn.is-danger:hover { background: #fef2f2; border-color: #fca5a5; color: #dc2626; }
+  .bp-card-btn { font-size: 0.72rem; font-weight: 700; padding: 4px 10px; border-radius: 6px; border: 1px solid #e2e8f0; background: #fff; color: #475569; cursor: pointer; }
+  .bp-card-btn:hover { background: #f8fafc; }
+  .bp-card-btn.is-danger:hover { background: #fef2f2; color: #dc2626; border-color: #fca5a5; }
   .bp-add-card { border: 2px dashed #cbd5e1; border-radius: 12px; display: flex; align-items: center; justify-content: center; min-height: 140px; cursor: pointer; transition: all 0.15s; color: #94a3b8; font-weight: 800; font-size: 0.92rem; gap: 8px; }
   .bp-add-card:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
   .bp-expenses-bar { border: 1px solid #dbe3ee; border-radius: 12px; background: #fff; padding: 16px 20px; }
-  .bp-expense-row { display: grid; grid-template-columns: 1fr 100px 1fr 32px; gap: 8px; align-items: center; margin-bottom: 8px; }
-  .bp-expense-row input { border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; font-size: 0.82rem; }
+  .bp-expense-row { display: grid; grid-template-columns: 1fr 100px 1fr 32px; gap: 8px; align-items: center; padding: 6px 0; }
+  .bp-expense-row input { border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; font-size: 0.82rem; width: 100%; }
   .bp-expense-row input:focus { outline: 2px solid rgba(14,116,144,0.2); border-color: var(--accent); }
   .bp-action-bar { position: sticky; bottom: 0; z-index: 40; border: 1px solid #dbe3ee; border-radius: 12px; background: rgba(255,255,255,0.96); backdrop-filter: blur(8px); padding: 14px 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; box-shadow: 0 -4px 20px rgba(15,23,42,0.06); }
   .bp-total-display { font-size: 1.1rem; font-weight: 900; }
@@ -39,55 +38,44 @@
   .bp-btn-secondary { border: 1px solid #cbd5e1; background: #fff; color: #0f172a; }
   .bp-btn-secondary:hover { background: #f8fafc; }
   .bp-btn-sm { min-height: 32px; padding: 4px 12px; font-size: 0.78rem; }
-
-  /* Slide panel */
-  .bp-overlay { position: fixed; inset: 0; z-index: 90; background: rgba(15,23,42,0.4); opacity: 0; pointer-events: none; transition: opacity 0.2s; }
-  .bp-overlay.is-open { opacity: 1; pointer-events: auto; }
-  .bp-slide { position: fixed; top: 0; right: 0; bottom: 0; z-index: 91; width: 420px; max-width: 92vw; background: #fff; box-shadow: -8px 0 40px rgba(15,23,42,0.12); transform: translateX(100%); transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); overflow-y: auto; }
-  .bp-slide.is-open { transform: translateX(0); }
-  .bp-slide-header { position: sticky; top: 0; z-index: 1; background: #fff; padding: 20px 24px 14px; border-bottom: 1px solid #edf2f7; display: flex; align-items: center; justify-content: space-between; }
-  .bp-slide-body { padding: 20px 24px 100px; }
-  .bp-slide-footer { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #edf2f7; padding: 14px 24px; display: flex; gap: 10px; justify-content: flex-end; }
-  .bp-field { margin-bottom: 14px; }
-  .bp-field label { display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 4px; }
-  .bp-field input, .bp-field select { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 0.88rem; }
+  /* Modal popup */
+  .bp-modal-bg { position: fixed; inset: 0; z-index: 90; background: rgba(15,23,42,0.45); display: flex; align-items: center; justify-content: center; padding: 16px; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+  .bp-modal-bg.is-open { opacity: 1; pointer-events: auto; }
+  .bp-modal { background: #fff; border-radius: 14px; box-shadow: 0 24px 60px rgba(15,23,42,0.18); width: 520px; max-width: 96vw; max-height: 88vh; display: flex; flex-direction: column; transform: scale(0.95); transition: transform 0.2s; }
+  .bp-modal-bg.is-open .bp-modal { transform: scale(1); }
+  .bp-modal-header { padding: 18px 22px 12px; border-bottom: 1px solid #edf2f7; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .bp-modal-body { padding: 18px 22px; overflow-y: auto; flex: 1; }
+  .bp-modal-footer { padding: 12px 22px 16px; border-top: 1px solid #edf2f7; display: flex; gap: 10px; justify-content: flex-end; flex-shrink: 0; }
+  .bp-field { margin-bottom: 12px; }
+  .bp-field label { display: block; font-size: 0.76rem; font-weight: 700; color: #475569; margin-bottom: 3px; }
+  .bp-field input, .bp-field select { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 7px 10px; font-size: 0.86rem; }
   .bp-field input:focus, .bp-field select:focus { outline: 2px solid rgba(14,116,144,0.2); border-color: var(--accent); }
   .bp-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .bp-toggle { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; transition: all 0.12s; margin-bottom: 8px; }
+  .bp-field-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .bp-toggle { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; transition: all 0.12s; margin-bottom: 6px; }
   .bp-toggle:hover { background: #f8fafc; }
   .bp-toggle.is-on { border-color: var(--accent); background: var(--accent-light); }
-  .bp-toggle input { flex-shrink: 0; }
-  .bp-toggle b { font-size: 0.82rem; font-weight: 700; }
-  .bp-section-label { font-size: 0.72rem; font-weight: 800; color: #94a3b8; letter-spacing: 0.08em; margin: 20px 0 8px; text-transform: uppercase; }
-  .bp-sub-fields { padding-left: 12px; border-left: 2px solid var(--accent-light); margin-bottom: 12px; }
-
-  /* Audit badges */
-  .bp-audit-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .bp-toggle b { font-size: 0.8rem; font-weight: 700; }
+  .bp-section-label { font-size: 0.7rem; font-weight: 800; color: #94a3b8; letter-spacing: 0.08em; margin: 16px 0 6px; text-transform: uppercase; }
+  .bp-sub-fields { padding-left: 10px; border-left: 2px solid var(--accent-light); margin-bottom: 10px; }
+  .bp-audit-strip { display: flex; flex-wrap: wrap; gap: 6px; }
   .bp-audit-pill { font-size: 0.72rem; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
   .bp-audit-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
   .bp-audit-warning { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
   .bp-audit-ok { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
-
-  .bp-empty-state { text-align: center; padding: 40px 20px; color: #94a3b8; }
-  .bp-empty-state p { margin-top: 8px; font-size: 0.86rem; }
-
-  @media (max-width: 640px) {
-    .bp-expense-row { grid-template-columns: 1fr; }
-    .bp-card-grid { grid-template-columns: 1fr; }
-  }
+  @media (max-width: 640px) { .bp-card-grid { grid-template-columns: 1fr; } .bp-expense-row { grid-template-columns: 1fr; } .bp-field-row, .bp-field-row3 { grid-template-columns: 1fr; } }
 </style>
 
 {% macro yen(value) -%}{{ "{:,}".format(value|int) }}円{%- endmacro %}
 
 <div class="bp-page max-w-6xl mx-auto space-y-4 pb-6">
-  <!-- Hero -->
   <section class="dstt-hero is-compact" style="background:#0e7490;">
     <div class="dstt-hero-grid">
       <div class="dstt-hero-copy">
         <div class="dstt-hero-pill">BUS PRICING</div>
         <div>
           <h1 class="dstt-hero-title">貸切料金計算ツール</h1>
-          <p class="dstt-hero-subtitle">車両を追加して、1台ずつ条件を設定。見積書までこの画面で完結します。</p>
+          <p class="dstt-hero-subtitle">車両を追加し、条件を設定して見積書を作成します。</p>
         </div>
         <div class="dstt-hero-actions">
           <a class="dstt-hero-btn dstt-hero-btn-light" href="{{ url_for('bus_pricing.reference') }}">ロジックと料金表</a>
@@ -103,70 +91,47 @@
     </div>
   {% endif %}
 
-  <!-- Route bar -->
+  <!-- Route bar: block only -->
   <div class="bp-route-bar">
     <label>運輸局ブロック
       <select id="routeBlock">
         {% for key, block in blocks.items() %}<option value="{{ key }}" {% if form_state.block_id == key %}selected{% endif %}>{{ block.name }}</option>{% endfor %}
       </select>
     </label>
-    <label>総走行距離 (km)
-      <input type="number" step="0.1" id="routeDistance" value="{{ form_state.running_distance_km }}">
-    </label>
-    <label>実車距離 (km)
-      <input type="number" step="0.1" id="routePaxDistance" value="{{ form_state.pax_running_distance_km }}">
-    </label>
-    <label>総走行時間 (分)
-      <input type="number" id="routeDuration" value="{{ form_state.running_duration_min }}">
-    </label>
+    <span style="font-size:0.78rem;color:#94a3b8;margin-left:auto;">距離・時間は各車両で設定</span>
   </div>
 
   <!-- Vehicle workspace -->
-  <div class="bp-workspace">
-    <div class="bp-card-grid" id="vehicleGrid">
-      <!-- Rendered by JS -->
-    </div>
-  </div>
+  <div class="bp-card-grid" id="vehicleGrid"></div>
 
   <!-- Expenses -->
   <div class="bp-expenses-bar">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
       <h3 style="font-size:0.86rem;font-weight:800;">実費</h3>
-      <button type="button" class="bp-btn bp-btn-secondary bp-btn-sm" onclick="addExpense()">＋ 追加</button>
+      <button type="button" class="bp-btn bp-btn-secondary bp-btn-sm" id="btnAddExpense">＋ 追加</button>
     </div>
     <div id="expenseList"></div>
   </div>
 
-  <!-- Result audit strip -->
   {% if result %}
   <div class="bp-audit-strip">
-    {% if result.calculation_breakdown.below_floor_error %}
-      <span class="bp-audit-pill bp-audit-error">下限額エラー: {{ yen(result.calculation_breakdown.shortfall_including_tax) }} 不足</span>
-    {% endif %}
-    {% for audit in result.audit_logs %}
-      <span class="bp-audit-pill {% if audit.level == 'error' %}bp-audit-error{% else %}bp-audit-warning{% endif %}">{{ audit.audit_id }}: {{ audit.message }}</span>
-    {% endfor %}
-    {% if not result.audit_logs and not result.calculation_breakdown.below_floor_error %}
-      <span class="bp-audit-pill bp-audit-ok">法令判定OK</span>
-    {% endif %}
+    {% if result.calculation_breakdown.below_floor_error %}<span class="bp-audit-pill bp-audit-error">下限額エラー: {{ yen(result.calculation_breakdown.shortfall_including_tax) }} 不足</span>{% endif %}
+    {% for audit in result.audit_logs %}<span class="bp-audit-pill {% if audit.level == 'error' %}bp-audit-error{% else %}bp-audit-warning{% endif %}">{{ audit.audit_id }}: {{ audit.message }}</span>{% endfor %}
+    {% if not result.audit_logs and not result.calculation_breakdown.below_floor_error %}<span class="bp-audit-pill bp-audit-ok">法令判定OK</span>{% endif %}
   </div>
   {% endif %}
 
   <!-- Action bar -->
   <form id="bpForm" method="POST">
     <input type="hidden" name="block_id" id="formBlock">
-    <input type="hidden" name="running_distance_km" id="formDistance">
-    <input type="hidden" name="pax_running_distance_km" id="formPaxDistance">
-    <input type="hidden" name="running_duration_min" id="formDuration">
+    <input type="hidden" name="running_distance_km" id="formDistance" value="300">
+    <input type="hidden" name="pax_running_distance_km" id="formPaxDistance" value="260">
+    <input type="hidden" name="running_duration_min" id="formDuration" value="540">
     <input type="hidden" name="vehicles_json" id="formVehiclesJson">
     <input type="hidden" name="expenses_json" id="formExpensesJson">
     <div class="bp-action-bar">
       <div class="bp-total-display">
-        {% if result %}
-          <span>合計</span>{{ yen(result.quote_summary.quote_total_including_tax) }}
-        {% else %}
-          <span>合計</span>未計算
-        {% endif %}
+        {% if result %}<span>合計</span>{{ yen(result.quote_summary.quote_total_including_tax) }}{% else %}<span>合計</span>未計算{% endif %}
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button type="submit" formaction="{{ url_for('bus_pricing.estimate_preview') }}" class="bp-btn bp-btn-estimate">見積書を作成</button>
@@ -176,113 +141,66 @@
   </form>
 </div>
 
-<!-- Slide panel overlay -->
-<div class="bp-overlay" id="panelOverlay"></div>
-<div class="bp-slide" id="slidePanel">
-  <div class="bp-slide-header">
-    <h2 style="font-size:1rem;font-weight:900;" id="panelTitle">車両を追加</h2>
-    <button type="button" class="bp-btn bp-btn-secondary bp-btn-sm" onclick="closePanel()">✕</button>
-  </div>
-  <div class="bp-slide-body">
-    <div class="bp-field">
-      <label>号車名 / ラベル（任意）</label>
-      <input type="text" id="pLabel" placeholder="例: 1号車">
+<!-- Modal popup -->
+<div class="bp-modal-bg" id="modalBg">
+  <div class="bp-modal">
+    <div class="bp-modal-header">
+      <h2 style="font-size:1rem;font-weight:900;" id="modalTitle">車両を追加</h2>
+      <button type="button" class="bp-btn bp-btn-secondary bp-btn-sm" id="btnModalClose">✕</button>
     </div>
-    <div class="bp-field-row">
-      <div class="bp-field">
-        <label>車種</label>
-        <select id="pCarType">
-          {% for key, car in cars.items() %}<option value="{{ key }}">{{ car.label }}</option>{% endfor %}
-        </select>
+    <div class="bp-modal-body">
+      <p class="bp-section-label">行程</p>
+      <div class="bp-field-row3">
+        <div class="bp-field"><label>総走行距離 (km)</label><input type="number" step="0.1" id="pDistance" value="300"></div>
+        <div class="bp-field"><label>実車距離 (km)</label><input type="number" step="0.1" id="pPaxDistance" value="260"></div>
+        <div class="bp-field"><label>走行時間 (分)</label><input type="number" id="pDuration" value="540"></div>
       </div>
-      <div class="bp-field">
-        <label>台数</label>
-        <input type="number" id="pQuantity" value="1" min="1">
-      </div>
-    </div>
-    <div class="bp-field">
-      <label>乗車人数 / 台</label>
-      <input type="number" id="pPaxCount" value="40" min="1">
-    </div>
 
-    <p class="bp-section-label">単価</p>
-    <label class="bp-toggle" id="pFloorToggle">
-      <input type="checkbox" id="pUseFloor" checked>
-      <b>下限単価で計算</b>
-    </label>
-    <div class="bp-field-row" id="pRateFields" style="display:none;">
-      <div class="bp-field"><label>キロ単価</label><input type="number" id="pDistRate" value="170"></div>
-      <div class="bp-field"><label>時間単価</label><input type="number" id="pTimeRate" value="7190"></div>
-    </div>
-
-    <p class="bp-section-label">運行条件</p>
-    <label class="bp-toggle" id="tNight">
-      <input type="checkbox" id="pNightRun">
-      <b>深夜早朝あり</b>
-    </label>
-    <div class="bp-sub-fields" id="pNightFields" style="display:none;">
-      <div class="bp-field"><label>深夜早朝時間 (分)</label><input type="number" id="pNightMin" value="0"></div>
-    </div>
-
-    <label class="bp-toggle" id="tOvernight">
-      <input type="checkbox" id="pOvernight">
-      <b>宿泊運行</b>
-    </label>
-    <div class="bp-sub-fields" id="pOvernightFields" style="display:none;">
-      <div class="bp-field"><label>乗務日数</label><input type="number" id="pDays" value="2" min="2"></div>
-    </div>
-
-    <label class="bp-toggle" id="tAlt">
-      <input type="checkbox" id="pAltDriver">
-      <b>交替運転者を加算</b>
-    </label>
-
-    <label class="bp-toggle" id="tFerry">
-      <input type="checkbox" id="pFerry">
-      <b>フェリー利用</b>
-    </label>
-    <div class="bp-sub-fields" id="pFerryFields" style="display:none;">
-      <div class="bp-field"><label>乗船時間 (分)</label><input type="number" id="pFerryMin" value="0"></div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;font-weight:600;">
-        <input type="checkbox" id="pFerryRest"> 船内休息施設あり
-      </label>
-    </div>
-
-    <label class="bp-toggle" id="tSpecial">
-      <input type="checkbox" id="pSpecial">
-      <b>特殊車両</b>
-    </label>
-    <div class="bp-sub-fields" id="pSpecialFields" style="display:none;">
-      <div class="bp-field"><label>割増率</label><input type="number" step="0.01" id="pSpecialRate" value="0.2" placeholder="0.2"></div>
-    </div>
-
-    <p class="bp-section-label">法令判定</p>
-    <div class="bp-field-row">
-      <div class="bp-field"><label>実ハンドル時間 (分)</label><input type="number" id="pSteering" value="0"></div>
-      <label class="bp-toggle" style="margin-top:18px;">
-        <input type="checkbox" id="pBed">
-        <b>仮眠ベッド</b>
-      </label>
-    </div>
-
-    <p class="bp-section-label">年間契約</p>
-    <label class="bp-toggle" id="tAnnual">
-      <input type="checkbox" id="pAnnual">
-      <b>年間契約で試算</b>
-    </label>
-    <div class="bp-sub-fields" id="pAnnualFields" style="display:none;">
+      <p class="bp-section-label">車両</p>
+      <div class="bp-field"><label>号車名（任意）</label><input type="text" id="pLabel" placeholder="例: 1号車"></div>
       <div class="bp-field-row">
-        <div class="bp-field"><label>年間運行日数</label><input type="number" id="pAnnualDays" value="220"></div>
-        <div class="bp-field"><label>稼働率</label><input type="number" step="0.0001" id="pUtilRate" value="0.6758"></div>
+        <div class="bp-field"><label>車種</label><select id="pCarType">{% for key, car in cars.items() %}<option value="{{ key }}">{{ car.label }}</option>{% endfor %}</select></div>
+        <div class="bp-field-row">
+          <div class="bp-field"><label>台数</label><input type="number" id="pQuantity" value="1" min="1"></div>
+          <div class="bp-field"><label>人数/台</label><input type="number" id="pPaxCount" value="40" min="1"></div>
+        </div>
       </div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;font-weight:600;margin-top:8px;">
-        <input type="checkbox" id="pSchool"> スクールバス
-      </label>
+
+      <p class="bp-section-label">単価</p>
+      <label class="bp-toggle" id="tFloor"><input type="checkbox" id="pUseFloor" checked><b>下限単価で計算</b></label>
+      <div class="bp-field-row" id="pRateFields" style="display:none;">
+        <div class="bp-field"><label>キロ単価</label><input type="number" id="pDistRate" value="170"></div>
+        <div class="bp-field"><label>時間単価</label><input type="number" id="pTimeRate" value="7190"></div>
+      </div>
+
+      <p class="bp-section-label">運行条件</p>
+      <label class="bp-toggle" id="tNight"><input type="checkbox" id="pNightRun"><b>深夜早朝あり</b></label>
+      <div class="bp-sub-fields" id="fNight" style="display:none;"><div class="bp-field"><label>深夜早朝時間 (分)</label><input type="number" id="pNightMin" value="0"></div></div>
+      <label class="bp-toggle" id="tOvernight"><input type="checkbox" id="pOvernight"><b>宿泊運行</b></label>
+      <div class="bp-sub-fields" id="fOvernight" style="display:none;"><div class="bp-field"><label>乗務日数</label><input type="number" id="pDays" value="2" min="2"></div></div>
+      <label class="bp-toggle" id="tAlt"><input type="checkbox" id="pAltDriver"><b>交替運転者を加算</b></label>
+      <label class="bp-toggle" id="tFerry"><input type="checkbox" id="pFerry"><b>フェリー利用</b></label>
+      <div class="bp-sub-fields" id="fFerry" style="display:none;"><div class="bp-field-row"><div class="bp-field"><label>乗船時間 (分)</label><input type="number" id="pFerryMin" value="0"></div><label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:600;padding-top:18px;"><input type="checkbox" id="pFerryRest">船内休息あり</label></div></div>
+      <label class="bp-toggle" id="tSpecial"><input type="checkbox" id="pSpecial"><b>特殊車両</b></label>
+      <div class="bp-sub-fields" id="fSpecial" style="display:none;"><div class="bp-field"><label>割増率</label><input type="number" step="0.01" id="pSpecialRate" value="0.2"></div></div>
+
+      <p class="bp-section-label">法令判定</p>
+      <div class="bp-field-row">
+        <div class="bp-field"><label>実ハンドル (分)</label><input type="number" id="pSteering" value="0"></div>
+        <label class="bp-toggle" style="margin-top:16px;"><input type="checkbox" id="pBed"><b>仮眠ベッド</b></label>
+      </div>
+
+      <p class="bp-section-label">年間契約</p>
+      <label class="bp-toggle" id="tAnnual"><input type="checkbox" id="pAnnual"><b>年間契約で試算</b></label>
+      <div class="bp-sub-fields" id="fAnnual" style="display:none;">
+        <div class="bp-field-row"><div class="bp-field"><label>年間日数</label><input type="number" id="pAnnualDays" value="220"></div><div class="bp-field"><label>稼働率</label><input type="number" step="0.0001" id="pUtilRate" value="0.6758"></div></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:600;margin-top:6px;"><input type="checkbox" id="pSchool">スクールバス</label>
+      </div>
     </div>
-  </div>
-  <div class="bp-slide-footer">
-    <button type="button" class="bp-btn bp-btn-secondary" onclick="closePanel()">キャンセル</button>
-    <button type="button" class="bp-btn bp-btn-primary" onclick="savePanel()">保存</button>
+    <div class="bp-modal-footer">
+      <button type="button" class="bp-btn bp-btn-secondary" id="btnModalCancel">キャンセル</button>
+      <button type="button" class="bp-btn bp-btn-primary" id="btnModalSave">保存</button>
+    </div>
   </div>
 </div>
 
@@ -297,14 +215,14 @@
   let expenses = {{ form_state.expense_items|tojson }};
   let editIndex = -1;
 
-  // --- Vehicle Cards ---
+  // --- Vehicles ---
   function renderVehicles() {
     const grid = document.getElementById('vehicleGrid');
     let html = '';
     vehicles.forEach((v, i) => {
       const car = CARS[v.car_type] || { label: v.car_type };
       const res = RESULTS[i] || null;
-      const price = res ? `¥${Number(res.line_quote_including_tax).toLocaleString()}` : '';
+      const price = res ? '¥' + Number(res.line_quote_including_tax).toLocaleString() : '';
       const badges = [];
       if (v.is_night_run) badges.push('深夜');
       if (v.is_overnight) badges.push('宿泊');
@@ -313,85 +231,67 @@
       if (v.is_special_vehicle) badges.push('特殊');
       if (v.is_annual_contract) badges.push('年間');
       const hasError = res && res.below_floor_error;
-      html += `
-        <div class="bp-vehicle-card ${hasError ? 'has-error' : ''}" ondblclick="editVehicle(${i})">
-          <div class="bp-card-type">${car.label}${v.label ? ' — ' + v.label : ''}</div>
-          <div class="bp-card-info">${v.quantity}台 / ${v.pax_count}名乗車${v.use_floor_rates ? ' / 下限' : ''}</div>
-          ${price ? `<div class="bp-card-price">${price}</div>` : '<div class="bp-card-price" style="color:#94a3b8;">未計算</div>'}
-          ${badges.length ? `<div class="bp-card-badges">${badges.map(b => `<span class="bp-badge bp-badge-active">${b}</span>`).join('')}</div>` : ''}
-          <div class="bp-card-actions">
-            <button type="button" class="bp-card-btn" onclick="event.stopPropagation();editVehicle(${i})">編集</button>
-            <button type="button" class="bp-card-btn" onclick="event.stopPropagation();copyVehicle(${i})">複製</button>
-            <button type="button" class="bp-card-btn is-danger" onclick="event.stopPropagation();deleteVehicle(${i})">削除</button>
-          </div>
-        </div>`;
+      html += '<div class="bp-vehicle-card ' + (hasError ? 'has-error' : '') + '" ondblclick="BP.edit(' + i + ')">' +
+        '<div class="bp-card-type">' + car.label + (v.label ? ' — ' + v.label : '') + '</div>' +
+        '<div class="bp-card-info">' + v.quantity + '台 / ' + v.pax_count + '名乗車 / ' + (v.running_distance_km||0) + 'km / ' + (v.running_duration_min||0) + '分</div>' +
+        (price ? '<div class="bp-card-price">' + price + '</div>' : '<div class="bp-card-price" style="color:#94a3b8;">未計算</div>') +
+        (badges.length ? '<div class="bp-card-badges">' + badges.map(function(b){return '<span class="bp-badge bp-badge-on">' + b + '</span>';}).join('') + '</div>' : '') +
+        '<div class="bp-card-actions">' +
+          '<button type="button" class="bp-card-btn" onclick="event.stopPropagation();BP.edit(' + i + ');">編集</button>' +
+          '<button type="button" class="bp-card-btn" onclick="event.stopPropagation();BP.copy(' + i + ');">複製</button>' +
+          '<button type="button" class="bp-card-btn is-danger" onclick="event.stopPropagation();BP.del(' + i + ');">削除</button>' +
+        '</div></div>';
     });
-    html += `<div class="bp-add-card" onclick="addVehicle()"><span style="font-size:1.4rem;">＋</span> 車両を追加</div>`;
+    html += '<div class="bp-add-card" onclick="BP.add()"><span style="font-size:1.4rem;">＋</span> 車両を追加</div>';
     grid.innerHTML = html;
-  }
-
-  function addVehicle() {
-    editIndex = -1;
-    const tpl = {...TEMPLATE};
-    const block = BLOCKS[document.getElementById('routeBlock').value];
-    if (tpl.use_floor_rates && block) {
-      tpl.custom_dist_rate = block.dist_rate[tpl.car_type];
-      tpl.custom_time_rate = block.time_rate[tpl.car_type];
-    }
-    populatePanel(tpl);
-    openPanel();
-  }
-
-  function editVehicle(i) {
-    editIndex = i;
-    populatePanel({...vehicles[i]});
-    openPanel();
-  }
-
-  function copyVehicle(i) {
-    const copy = {...vehicles[i], label: (vehicles[i].label || '') + ' (コピー)'};
-    vehicles.push(copy);
-    renderVehicles();
-  }
-
-  function deleteVehicle(i) {
-    vehicles.splice(i, 1);
-    renderVehicles();
   }
 
   // --- Expenses ---
   function renderExpenses() {
-    const container = document.getElementById('expenseList');
+    const list = document.getElementById('expenseList');
     let html = '';
-    expenses.forEach((e, i) => {
-      html += `<div class="bp-expense-row">
-        <input type="text" value="${e.name || ''}" placeholder="項目名" onchange="expenses[${i}].name=this.value">
-        <input type="number" value="${e.amount || 0}" min="0" onchange="expenses[${i}].amount=Number(this.value)">
-        <input type="text" value="${e.note || ''}" placeholder="備考" onchange="expenses[${i}].note=this.value">
-        <button type="button" class="bp-card-btn is-danger" onclick="expenses.splice(${i},1);renderExpenses();" style="width:32px;text-align:center;">✕</button>
-      </div>`;
+    expenses.forEach(function(e, i) {
+      html += '<div class="bp-expense-row">' +
+        '<input type="text" value="' + (e.name||'').replace(/"/g,'&quot;') + '" placeholder="項目名" data-exp-field="name" data-exp-idx="' + i + '">' +
+        '<input type="number" value="' + (e.amount||0) + '" min="0" data-exp-field="amount" data-exp-idx="' + i + '">' +
+        '<input type="text" value="' + (e.note||'').replace(/"/g,'&quot;') + '" placeholder="備考" data-exp-field="note" data-exp-idx="' + i + '">' +
+        '<button type="button" class="bp-card-btn is-danger" data-exp-del="' + i + '" style="width:32px;text-align:center;">✕</button>' +
+      '</div>';
     });
-    container.innerHTML = html;
+    if (!expenses.length) html = '<p style="font-size:0.82rem;color:#94a3b8;">実費なし</p>';
+    list.innerHTML = html;
   }
 
-  window.addExpense = function() {
+  // Event delegation for expenses
+  document.getElementById('expenseList').addEventListener('input', function(e) {
+    const idx = e.target.dataset.expIdx;
+    const field = e.target.dataset.expField;
+    if (idx !== undefined && field) {
+      expenses[Number(idx)][field] = field === 'amount' ? Number(e.target.value) : e.target.value;
+    }
+  });
+  document.getElementById('expenseList').addEventListener('click', function(e) {
+    const btn = e.target.closest('[data-exp-del]');
+    if (btn) { expenses.splice(Number(btn.dataset.expDel), 1); renderExpenses(); }
+  });
+  document.getElementById('btnAddExpense').addEventListener('click', function() {
     expenses.push({ name: '', amount: 0, note: '' });
     renderExpenses();
-  };
+  });
 
-  // --- Slide Panel ---
-  function openPanel() {
-    document.getElementById('panelOverlay').classList.add('is-open');
-    document.getElementById('slidePanel').classList.add('is-open');
-    document.getElementById('panelTitle').textContent = editIndex === -1 ? '車両を追加' : '車両を編集';
-  }
+  // --- Modal ---
+  const modalBg = document.getElementById('modalBg');
+  function openModal() { modalBg.classList.add('is-open'); }
+  function closeModal() { modalBg.classList.remove('is-open'); }
 
-  function closePanel() {
-    document.getElementById('panelOverlay').classList.remove('is-open');
-    document.getElementById('slidePanel').classList.remove('is-open');
-  }
+  document.getElementById('btnModalClose').addEventListener('click', closeModal);
+  document.getElementById('btnModalCancel').addEventListener('click', closeModal);
+  modalBg.addEventListener('click', function(e) { if (e.target === modalBg) closeModal(); });
 
-  function populatePanel(v) {
+  function populateModal(v) {
+    document.getElementById('pDistance').value = v.running_distance_km || 300;
+    document.getElementById('pPaxDistance').value = v.pax_running_distance_km || 260;
+    document.getElementById('pDuration').value = v.running_duration_min || 540;
     document.getElementById('pLabel').value = v.label || '';
     document.getElementById('pCarType').value = v.car_type || 'large';
     document.getElementById('pQuantity').value = v.quantity || 1;
@@ -415,11 +315,14 @@
     document.getElementById('pAnnualDays').value = v.annual_operating_days || 0;
     document.getElementById('pUtilRate').value = v.custom_utilization_rate || 0.6758;
     document.getElementById('pSchool').checked = !!v.is_school_bus;
-    syncPanelVisibility();
+    syncToggles();
   }
 
-  function readPanel() {
+  function readModal() {
     return {
+      running_distance_km: Number(document.getElementById('pDistance').value) || 300,
+      pax_running_distance_km: Number(document.getElementById('pPaxDistance').value) || 260,
+      running_duration_min: Number(document.getElementById('pDuration').value) || 540,
       label: document.getElementById('pLabel').value.trim(),
       car_type: document.getElementById('pCarType').value,
       quantity: Number(document.getElementById('pQuantity').value) || 1,
@@ -447,73 +350,54 @@
     };
   }
 
-  function savePanel() {
-    const data = readPanel();
-    if (editIndex === -1) {
-      vehicles.push(data);
-    } else {
-      vehicles[editIndex] = data;
-    }
-    closePanel();
+  document.getElementById('btnModalSave').addEventListener('click', function() {
+    const data = readModal();
+    if (editIndex === -1) vehicles.push(data); else vehicles[editIndex] = data;
+    closeModal();
     renderVehicles();
-  }
+  });
 
-  function syncPanelVisibility() {
-    document.getElementById('pRateFields').style.display = document.getElementById('pUseFloor').checked ? 'none' : 'grid';
-    document.getElementById('pNightFields').style.display = document.getElementById('pNightRun').checked ? 'block' : 'none';
-    document.getElementById('pOvernightFields').style.display = document.getElementById('pOvernight').checked ? 'block' : 'none';
-    document.getElementById('pFerryFields').style.display = document.getElementById('pFerry').checked ? 'block' : 'none';
-    document.getElementById('pSpecialFields').style.display = document.getElementById('pSpecial').checked ? 'block' : 'none';
-    document.getElementById('pAnnualFields').style.display = document.getElementById('pAnnual').checked ? 'block' : 'none';
-    // Toggle highlight
-    ['pFloorToggle', 'tNight', 'tOvernight', 'tAlt', 'tFerry', 'tSpecial', 'tAnnual'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) {
-        const cb = el.querySelector('input[type="checkbox"]');
-        el.classList.toggle('is-on', cb && cb.checked);
-      }
+  function syncToggles() {
+    const pairs = [['pUseFloor','pRateFields',true],['pNightRun','fNight',false],['pOvernight','fOvernight',false],['pFerry','fFerry',false],['pSpecial','fSpecial',false],['pAnnual','fAnnual',false]];
+    pairs.forEach(function(p) {
+      var cb = document.getElementById(p[0]), el = document.getElementById(p[1]);
+      if (cb && el) el.style.display = (p[2] ? !cb.checked : cb.checked) ? (el.classList.contains('bp-field-row') ? 'grid' : 'block') : 'none';
+    });
+    ['tFloor','tNight','tOvernight','tAlt','tFerry','tSpecial','tAnnual'].forEach(function(id) {
+      var t = document.getElementById(id); if (t) { var c = t.querySelector('input[type="checkbox"]'); t.classList.toggle('is-on', c && c.checked); }
     });
   }
-
-  // Panel toggle listeners
-  ['pUseFloor', 'pNightRun', 'pOvernight', 'pAltDriver', 'pFerry', 'pSpecial', 'pAnnual'].forEach(id => {
-    document.getElementById(id).addEventListener('change', syncPanelVisibility);
+  ['pUseFloor','pNightRun','pOvernight','pAltDriver','pFerry','pSpecial','pAnnual'].forEach(function(id) {
+    document.getElementById(id).addEventListener('change', syncToggles);
   });
 
-  // Floor rate auto-fill on car type change
-  document.getElementById('pCarType').addEventListener('change', () => {
+  // Floor rate auto-fill
+  document.getElementById('pCarType').addEventListener('change', function() {
     if (document.getElementById('pUseFloor').checked) {
-      const block = BLOCKS[document.getElementById('routeBlock').value];
-      const car = document.getElementById('pCarType').value;
-      if (block) {
-        document.getElementById('pDistRate').value = block.dist_rate[car];
-        document.getElementById('pTimeRate').value = block.time_rate[car];
-      }
+      var block = BLOCKS[document.getElementById('routeBlock').value], car = this.value;
+      if (block) { document.getElementById('pDistRate').value = block.dist_rate[car]; document.getElementById('pTimeRate').value = block.time_rate[car]; }
     }
   });
 
-  // Close panel on overlay click
-  document.getElementById('panelOverlay').addEventListener('click', closePanel);
-
-  // --- Form Submission ---
+  // --- Form submission ---
   document.getElementById('bpForm').addEventListener('submit', function() {
     document.getElementById('formBlock').value = document.getElementById('routeBlock').value;
-    document.getElementById('formDistance').value = document.getElementById('routeDistance').value;
-    document.getElementById('formPaxDistance').value = document.getElementById('routePaxDistance').value;
-    document.getElementById('formDuration').value = document.getElementById('routeDuration').value;
+    var firstV = vehicles[0] || {};
+    document.getElementById('formDistance').value = firstV.running_distance_km || 300;
+    document.getElementById('formPaxDistance').value = firstV.pax_running_distance_km || 260;
+    document.getElementById('formDuration').value = firstV.running_duration_min || 540;
     document.getElementById('formVehiclesJson').value = JSON.stringify(vehicles);
     document.getElementById('formExpensesJson').value = JSON.stringify(expenses);
   });
 
-  // Expose to global
-  window.addVehicle = addVehicle;
-  window.editVehicle = editVehicle;
-  window.copyVehicle = copyVehicle;
-  window.deleteVehicle = deleteVehicle;
-  window.savePanel = savePanel;
-  window.closePanel = closePanel;
+  // --- Global API ---
+  window.BP = {
+    add: function() { editIndex = -1; var tpl = Object.assign({}, TEMPLATE); var block = BLOCKS[document.getElementById('routeBlock').value]; if (tpl.use_floor_rates && block) { tpl.custom_dist_rate = block.dist_rate[tpl.car_type]; tpl.custom_time_rate = block.time_rate[tpl.car_type]; } populateModal(tpl); document.getElementById('modalTitle').textContent = '車両を追加'; openModal(); },
+    edit: function(i) { editIndex = i; populateModal(Object.assign({}, vehicles[i])); document.getElementById('modalTitle').textContent = '車両を編集'; openModal(); },
+    copy: function(i) { var c = Object.assign({}, vehicles[i]); c.label = (c.label||'') + ' (コピー)'; vehicles.push(c); renderVehicles(); },
+    del: function(i) { vehicles.splice(i, 1); renderVehicles(); }
+  };
 
-  // Initial render
   renderVehicles();
   renderExpenses();
 })();

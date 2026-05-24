@@ -2,237 +2,638 @@
 
 {% block content %}
 <style>
-  @media print {
-    nav, header, footer, .no-print, .dstt-sidebar, .dstt-topbar { display: none !important; }
-    body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
-    .est-page { padding: 0 !important; max-width: none !important; }
-    .est-sheet { border: none !important; box-shadow: none !important; padding: 32px !important; }
-    .est-actions { display: none !important; }
-  }
-  .est-page { color: #1a1a1a; max-width: 900px; margin: 0 auto; padding-bottom: 40px; }
-  .est-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: flex-end; padding: 16px 0; }
-  .est-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 8px; padding: 0.5rem 1rem; font-weight: 800; font-size: 0.88rem; transition: all 0.15s; cursor: pointer; }
-  .est-btn-back { border: 1px solid #cbd5e1; background: #fff; color: #1a1a1a; }
-  .est-btn-back:hover { background: #f8fafc; }
-  .est-btn-print { background: #0f172a; color: #fff; }
-  .est-btn-print:hover { background: #1e293b; }
-  .est-sheet { background: #fff; border: 1px solid #d4d4d8; border-radius: 4px; box-shadow: 0 4px 24px rgba(0,0,0,0.06); padding: 48px 40px; }
-  @media (max-width: 640px) { .est-sheet { padding: 24px 16px; } }
-  .est-title { font-size: 1.75rem; font-weight: 900; text-align: center; letter-spacing: 0.12em; border-bottom: 3px double #1a1a1a; padding-bottom: 12px; }
-  .est-header { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 28px; }
-  @media (max-width: 640px) { .est-header { grid-template-columns: 1fr; } }
-  .est-client { border-bottom: 1px solid #1a1a1a; padding-bottom: 4px; }
-  .est-client-name { font-size: 1.2rem; font-weight: 800; }
-  .est-company { text-align: right; font-size: 0.82rem; line-height: 1.7; }
-  @media (max-width: 640px) { .est-company { text-align: left; } }
-  .est-company-name { font-size: 1rem; font-weight: 800; }
-  .est-meta-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 20px; }
-  .est-meta-table th, .est-meta-table td { border: 1px solid #d4d4d8; padding: 6px 10px; }
-  .est-meta-table th { background: #f5f5f5; font-weight: 700; width: 28%; text-align: left; }
-  .est-grand-total { margin-top: 28px; border: 2px solid #1a1a1a; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; }
-  .est-grand-label { font-size: 0.92rem; font-weight: 800; }
-  .est-grand-value { font-size: 1.6rem; font-weight: 900; letter-spacing: 0.02em; }
-  .est-detail-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin-top: 24px; }
-  .est-detail-table th, .est-detail-table td { border: 1px solid #d4d4d8; padding: 8px 10px; vertical-align: top; }
-  .est-detail-table thead th { background: #f5f5f5; font-weight: 700; text-align: center; font-size: 0.78rem; }
-  .est-detail-table tbody td { text-align: right; }
-  .est-detail-table tbody td:first-child { text-align: left; }
-  .est-detail-table tfoot td { border-top: 2px solid #1a1a1a; font-weight: 800; }
-  .est-section-title { font-size: 0.92rem; font-weight: 800; margin-top: 32px; padding-bottom: 6px; border-bottom: 1px solid #e4e4e7; }
-  .est-notes { margin-top: 28px; font-size: 0.8rem; line-height: 1.8; color: #525252; }
-  .est-notes li { margin-bottom: 4px; }
-  .est-stamp-area { display: flex; gap: 4px; justify-content: flex-end; margin-top: 8px; }
-  .est-stamp-box { width: 56px; height: 56px; border: 1px solid #d4d4d8; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #a1a1aa; }
-  .est-warning { margin-top: 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 4px; padding: 10px 14px; font-size: 0.82rem; font-weight: 700; color: #991b1b; }
-  .est-right { text-align: right; }
-  .est-num { font-variant-numeric: tabular-nums; }
+/* ============= Print / A4 Layout ============= */
+@page { size: A4; margin: 12mm 14mm; }
+@media print {
+  html, body { margin:0 !important; padding:0 !important; background:#fff !important; font-size:10pt !important; }
+  nav, header, footer, .no-print, .dstt-sidebar, .dstt-topbar, .est-toolbar, .est-editor-panel { display:none !important; }
+  .est-page { padding:0 !important; max-width:none !important; }
+  .est-sheet { border:none !important; box-shadow:none !important; padding:0 !important; min-height:auto !important; }
+  .est-sheet * { break-inside:avoid; }
+}
+
+/* ============= Page container ============= */
+.est-page { color:#1a1a1a; max-width:960px; margin:0 auto; padding:16px 0 60px; font-family:'Noto Sans JP',sans-serif; }
+
+/* ============= Toolbar (above sheet) ============= */
+.est-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:12px 0; border-bottom:1px solid #e4e4e7; margin-bottom:16px; }
+.est-toolbar .tb-group { display:flex; gap:6px; align-items:center; }
+.est-toolbar .tb-sep { width:1px; height:24px; background:#d4d4d8; margin:0 8px; }
+.tb-btn { display:inline-flex; align-items:center; gap:5px; min-height:34px; border-radius:6px; padding:0 12px; font-weight:700; font-size:0.8rem; cursor:pointer; border:1px solid #cbd5e1; background:#fff; color:#334155; transition:all .12s; }
+.tb-btn:hover { background:#f1f5f9; border-color:#94a3b8; }
+.tb-btn.active { background:#0f172a; color:#fff; border-color:#0f172a; }
+.tb-btn svg { width:16px; height:16px; }
+.tb-btn-primary { background:#0f172a; color:#fff; border-color:#0f172a; }
+.tb-btn-primary:hover { background:#1e293b; }
+
+/* ============= A4 sheet ============= */
+.est-sheet { position:relative; background:#fff; border:1px solid #d4d4d8; border-radius:4px; box-shadow:0 4px 24px rgba(0,0,0,0.06); padding:36px 32px; min-height:1050px; overflow:hidden; }
+@media (max-width:640px) { .est-sheet { padding:20px 14px; min-height:auto; } }
+
+/* ============= Typography ============= */
+.est-title { font-size:1.5rem; font-weight:900; text-align:center; letter-spacing:0.12em; border-bottom:3px double #1a1a1a; padding-bottom:10px; margin:0 0 20px; }
+.est-header { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+@media (max-width:640px) { .est-header { grid-template-columns:1fr; } }
+.est-client { border-bottom:1px solid #1a1a1a; padding-bottom:3px; }
+.est-client-name { font-size:1.05rem; font-weight:800; margin:0; }
+.est-company { text-align:right; font-size:0.76rem; line-height:1.6; }
+@media (max-width:640px) { .est-company { text-align:left; } }
+.est-company-name { font-size:0.92rem; font-weight:800; margin:0; }
+.est-meta-table { width:100%; border-collapse:collapse; font-size:0.76rem; margin-top:14px; }
+.est-meta-table th, .est-meta-table td { border:1px solid #d4d4d8; padding:4px 8px; }
+.est-meta-table th { background:#f8f8f8; font-weight:700; width:26%; text-align:left; }
+.est-grand-total { margin-top:18px; border:2px solid #1a1a1a; padding:10px 16px; display:flex; align-items:center; justify-content:space-between; }
+.est-grand-label { font-size:0.84rem; font-weight:800; }
+.est-grand-value { font-size:1.35rem; font-weight:900; letter-spacing:0.02em; }
+.est-detail-table { width:100%; border-collapse:collapse; font-size:0.76rem; margin-top:16px; }
+.est-detail-table th, .est-detail-table td { border:1px solid #d4d4d8; padding:5px 8px; vertical-align:top; }
+.est-detail-table thead th { background:#f8f8f8; font-weight:700; text-align:center; font-size:0.72rem; }
+.est-detail-table tbody td { text-align:right; }
+.est-detail-table tbody td:first-child { text-align:left; }
+.est-detail-table tfoot td { border-top:2px solid #1a1a1a; font-weight:800; }
+.est-section-title { font-size:0.82rem; font-weight:800; margin:20px 0 0; padding-bottom:4px; border-bottom:1px solid #e4e4e7; }
+.est-notes { margin-top:18px; font-size:0.72rem; line-height:1.7; color:#525252; }
+.est-notes ul { padding-left:1.1em; margin:4px 0 0; }
+.est-notes li { margin-bottom:2px; }
+.est-stamp-area { display:flex; gap:3px; justify-content:flex-end; margin-top:6px; }
+.est-stamp-box { width:48px; height:48px; border:1px solid #d4d4d8; display:flex; align-items:center; justify-content:center; font-size:0.6rem; color:#a1a1aa; }
+.est-warning { margin-top:12px; background:#fef2f2; border:1px solid #fecaca; border-radius:4px; padding:8px 12px; font-size:0.76rem; font-weight:700; color:#991b1b; }
+.est-right { text-align:right; }
+.est-num { font-variant-numeric:tabular-nums; }
+
+/* ============= Editor mode ============= */
+.est-sheet.editor-mode .est-block { outline:1px dashed transparent; cursor:move; position:relative; transition:outline .1s; }
+.est-sheet.editor-mode .est-block:hover { outline:1px dashed #3b82f6; }
+.est-sheet.editor-mode .est-block.dragging { opacity:0.5; outline:2px solid #3b82f6; }
+.est-sheet.editor-mode .est-block .block-del { display:flex; }
+.block-del { display:none; position:absolute; top:-8px; right:-8px; width:20px; height:20px; border-radius:50%; background:#ef4444; color:#fff; align-items:center; justify-content:center; font-size:11px; cursor:pointer; z-index:10; line-height:1; border:2px solid #fff; }
+.block-del:hover { background:#dc2626; transform:scale(1.15); }
+
+/* ============= Snap guide lines ============= */
+.snap-line-h, .snap-line-v { position:absolute; background:#3b82f6; z-index:1000; pointer-events:none; opacity:0.7; }
+.snap-line-h { height:1px; left:0; right:0; }
+.snap-line-v { width:1px; top:0; bottom:0; }
+
+/* ============= Editor panel (right side) ============= */
+.est-editor-panel { position:fixed; top:80px; right:16px; width:220px; background:#fff; border:1px solid #e4e4e7; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.1); padding:14px; z-index:500; font-size:0.78rem; max-height:calc(100vh - 120px); overflow-y:auto; display:none; }
+.est-editor-panel.visible { display:block; }
+.est-editor-panel h4 { font-size:0.82rem; font-weight:800; margin:0 0 10px; }
+.ep-section { margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid #f4f4f5; }
+.ep-section:last-child { border-bottom:none; margin-bottom:0; padding-bottom:0; }
+.ep-label { font-size:0.7rem; font-weight:700; color:#71717a; margin-bottom:4px; }
+.ep-btn { display:block; width:100%; text-align:left; padding:6px 8px; border:1px solid #e4e4e7; border-radius:4px; background:#fafafa; cursor:pointer; font-size:0.74rem; margin-bottom:4px; transition:all .1s; }
+.ep-btn:hover { background:#eff6ff; border-color:#93c5fd; }
+.ep-select { width:100%; padding:4px 6px; border:1px solid #d4d4d8; border-radius:4px; font-size:0.74rem; }
 </style>
 
 {% macro yen(value) -%}&#165;{{ "{:,}".format(value|int) }}{%- endmacro %}
 {% macro yen_plain(value) -%}{{ "{:,}".format(value|int) }}円{%- endmacro %}
 
 <div class="est-page">
-  <div class="est-actions no-print">
-    <a class="est-btn est-btn-back" href="{{ url_for('bus_pricing.index') }}">入力画面に戻る</a>
-    <button type="button" class="est-btn est-btn-print" onclick="window.print()">印刷 / PDF保存</button>
+  <!-- ===== Toolbar ===== -->
+  <div class="est-toolbar no-print">
+    <div class="tb-group">
+      <a class="tb-btn" href="{{ url_for('bus_pricing.index') }}">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"/></svg>
+        戻る
+      </a>
+    </div>
+    <div class="tb-sep"></div>
+    <div class="tb-group">
+      <button type="button" class="tb-btn" id="btnToggleEdit">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z"/></svg>
+        編集モード
+      </button>
+      <button type="button" class="tb-btn" id="btnAddBlock">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z"/></svg>
+        要素追加
+      </button>
+    </div>
+    <div class="tb-sep"></div>
+    <div class="tb-group">
+      <button type="button" class="tb-btn" id="btnSaveTemplate">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M15.621 4.379a3 3 0 00-4.242 0l-7 7a3 3 0 004.241 4.243h.001l.497-.5a.75.75 0 011.064 1.057l-.498.501a4.5 4.5 0 01-6.364-6.364l7-7a4.5 4.5 0 016.368 6.36l-3.455 3.553A2.625 2.625 0 119.52 9.52l3.45-3.451a.75.75 0 111.061 1.06l-3.45 3.451a1.125 1.125 0 001.587 1.595l3.454-3.553a3 3 0 000-4.242z"/></svg>
+        テンプレ保存
+      </button>
+      <button type="button" class="tb-btn" id="btnLoadTemplate">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zm0 10.5a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zM2 10a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5A.75.75 0 012 10z"/></svg>
+        テンプレ読込
+      </button>
+    </div>
+    <div style="flex:1;"></div>
+    <div class="tb-group">
+      <button type="button" class="tb-btn tb-btn-primary" onclick="window.print()">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 2.75C5 1.784 5.784 1 6.75 1h6.5c.966 0 1.75.784 1.75 1.75v3.552c.377.06.734.173 1.06.33A3.75 3.75 0 0118 10.166V13.5a.75.75 0 01-.75.75h-1.5v3a.75.75 0 01-.75.75H5a.75.75 0 01-.75-.75v-3h-1.5A.75.75 0 012 13.5v-3.334a3.75 3.75 0 011.94-3.534c.326-.157.683-.27 1.06-.33V2.75zM6.5 6.19V2.75a.25.25 0 01.25-.25h6.5a.25.25 0 01.25.25v3.44H6.5zm-1 1.89v-.38h9v.38-.38 7.17h-9V8.08zm1 5.67v2.5h7v-2.5h-7z"/></svg>
+        印刷 / PDF
+      </button>
+    </div>
   </div>
 
-  <div class="est-sheet">
-    <!-- Title -->
-    <h1 class="est-title">御 見 積 書</h1>
+  <!-- ===== Editor panel ===== -->
+  <div class="est-editor-panel" id="editorPanel">
+    <h4>要素を追加</h4>
+    <div class="ep-section">
+      <div class="ep-label">セクション</div>
+      <button class="ep-btn" data-add="text">テキストブロック</button>
+      <button class="ep-btn" data-add="separator">区切り線</button>
+      <button class="ep-btn" data-add="stamp">印影欄</button>
+      <button class="ep-btn" data-add="note">備考欄</button>
+      <button class="ep-btn" data-add="table">表（カスタム）</button>
+    </div>
+    <div class="ep-section">
+      <div class="ep-label">テンプレート</div>
+      <select class="ep-select" id="templateSelect">
+        <option value="">保存済テンプレートを選択...</option>
+      </select>
+      <button class="ep-btn" id="epLoadTpl" style="margin-top:6px;">選択したテンプレを読込</button>
+      <button class="ep-btn" id="epDeleteTpl" style="color:#ef4444;">選択テンプレを削除</button>
+    </div>
+  </div>
 
-    <!-- Header: client + company -->
-    <div class="est-header">
-      <div>
-        <div class="est-client">
-          <p class="est-client-name" id="estClientName" contenteditable="true" data-placeholder="クリックして宛名入力">御中</p>
-        </div>
-        <p style="margin-top:6px;font-size:0.78rem;color:#71717a;">下記の通りお見積り申し上げます。</p>
+  <!-- ===== A4 Sheet ===== -->
+  <div class="est-sheet" id="estSheet">
 
-        <table class="est-meta-table">
-          <tbody>
-            <tr><th>見積番号</th><td class="est-num" id="estNumber" contenteditable="true">EST-{{ result.applied_rates.block_name[:2] }}-001</td></tr>
-            <tr><th>見積日</th><td id="estDate" contenteditable="true">{{ today if today else "____年__月__日" }}</td></tr>
-            <tr><th>有効期限</th><td id="estExpiry" contenteditable="true">見積日より30日間</td></tr>
-            <tr><th>件名</th><td id="estSubject" contenteditable="true">貸切バス運行</td></tr>
-            <tr><th>運行区間</th><td id="estRoute" contenteditable="true">（ここに区間を入力）</td></tr>
-            <tr><th>運行日</th><td id="estOperDate" contenteditable="true">（ここに運行日を入力）</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div>
-        <div class="est-company">
-          <p class="est-company-name" id="estCompanyName" contenteditable="true">（会社名を入力）</p>
-          <p id="estCompanyAddr" contenteditable="true">〒000-0000<br>住所を入力してください</p>
-          <p id="estCompanyTel" contenteditable="true">TEL: 000-0000-0000</p>
-          <p style="margin-top:4px;font-size:0.75rem;color:#71717a;">登録番号: T0000000000000</p>
+    <!-- Block: Title -->
+    <div class="est-block" data-block="title">
+      <span class="block-del" title="削除">&times;</span>
+      <h1 class="est-title">御 見 積 書</h1>
+    </div>
+
+    <!-- Block: Header -->
+    <div class="est-block" data-block="header">
+      <span class="block-del" title="削除">&times;</span>
+      <div class="est-header">
+        <div>
+          <div class="est-client">
+            <p class="est-client-name" contenteditable="true" data-placeholder="クリックして宛名入力">御中</p>
+          </div>
+          <p style="margin-top:4px;font-size:0.72rem;color:#71717a;">下記の通りお見積り申し上げます。</p>
+          <table class="est-meta-table">
+            <tbody>
+              <tr><th>見積番号</th><td class="est-num" contenteditable="true">EST-{{ result.applied_rates.block_name[:2] }}-001</td></tr>
+              <tr><th>見積日</th><td contenteditable="true">{{ today if today else "____年__月__日" }}</td></tr>
+              <tr><th>有効期限</th><td contenteditable="true">見積日より30日間</td></tr>
+              <tr><th>件名</th><td contenteditable="true">貸切バス運行</td></tr>
+              <tr><th>運行区間</th><td contenteditable="true">（区間を入力）</td></tr>
+              <tr><th>運行日</th><td contenteditable="true">（運行日を入力）</td></tr>
+            </tbody>
+          </table>
         </div>
-        <div class="est-stamp-area">
-          <div class="est-stamp-box">承認</div>
-          <div class="est-stamp-box">確認</div>
-          <div class="est-stamp-box">担当</div>
+        <div>
+          <div class="est-company">
+            <p class="est-company-name" contenteditable="true">（会社名を入力）</p>
+            <p contenteditable="true">〒000-0000<br>住所を入力</p>
+            <p contenteditable="true">TEL: 000-0000-0000</p>
+            <p style="margin-top:2px;font-size:0.68rem;color:#71717a;">登録番号: T0000000000000</p>
+          </div>
+          <div class="est-stamp-area">
+            <div class="est-stamp-box">承認</div>
+            <div class="est-stamp-box">確認</div>
+            <div class="est-stamp-box">担当</div>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- Grand total -->
-    <div class="est-grand-total">
-      <span class="est-grand-label">お見積金額（税込）</span>
-      <span class="est-grand-value est-num">{{ yen(result.quote_summary.quote_total_including_tax) }}</span>
+    <!-- Block: Grand total -->
+    <div class="est-block" data-block="grand-total">
+      <span class="block-del" title="削除">&times;</span>
+      <div class="est-grand-total">
+        <span class="est-grand-label">お見積金額（税込）</span>
+        <span class="est-grand-value est-num">{{ yen(result.quote_summary.quote_total_including_tax) }}</span>
+      </div>
     </div>
 
     {% if result.calculation_breakdown.below_floor_error %}
-      <div class="est-warning">
-        注意: 本見積額は公示下限額を下回っています。単価の見直しが必要です。
-      </div>
+    <div class="est-block" data-block="warning">
+      <span class="block-del" title="削除">&times;</span>
+      <div class="est-warning">注意: 本見積額は公示下限額を下回っています。単価の見直しが必要です。</div>
+    </div>
     {% endif %}
 
-    <!-- Vehicle details -->
-    <h3 class="est-section-title">車両運賃・料金</h3>
-    <table class="est-detail-table">
-      <thead>
-        <tr>
-          <th style="width:30%;">車種</th>
-          <th style="width:12%;">台数</th>
-          <th style="width:20%;">単価（税込）</th>
-          <th style="width:20%;">金額（税込）</th>
-          <th style="width:18%;">備考</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in result.vehicle_items %}
+    <!-- Block: Vehicle table -->
+    <div class="est-block" data-block="vehicles">
+      <span class="block-del" title="削除">&times;</span>
+      <h3 class="est-section-title">車両運賃・料金</h3>
+      <table class="est-detail-table">
+        <thead>
           <tr>
-            <td style="text-align:left;">{{ item.car_label }}{% if item.label %}<br><span style="font-size:0.75rem;color:#71717a;">{{ item.label }}</span>{% endif %}</td>
+            <th style="width:30%;">車種</th>
+            <th style="width:12%;">台数</th>
+            <th style="width:20%;">単価（税込）</th>
+            <th style="width:20%;">金額（税込）</th>
+            <th style="width:18%;">備考</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in result.vehicle_items %}
+          <tr>
+            <td style="text-align:left;">{{ item.car_label }}{% if item.label %}<br><span style="font-size:0.7rem;color:#71717a;">{{ item.label }}</span>{% endif %}</td>
             <td class="est-num">{{ item.quantity }}</td>
             <td class="est-num">{{ yen_plain(item.per_vehicle_quote_including_tax) }}</td>
             <td class="est-num">{{ yen_plain(item.line_quote_including_tax) }}</td>
-            <td style="font-size:0.75rem;text-align:left;">{{ item.pax_count }}名乗車</td>
+            <td style="font-size:0.7rem;text-align:left;">{{ item.pax_count }}名乗車</td>
           </tr>
-        {% endfor %}
-      </tbody>
-      <tfoot>
-        <tr>
-          <td colspan="3" class="est-right">車両運賃・料金 小計</td>
-          <td class="est-num est-right">{{ yen_plain(result.quote_summary.vehicle_rounded_fare_including_tax) }}</td>
-          <td></td>
-        </tr>
-      </tfoot>
-    </table>
-
-    <!-- Expense details -->
-    <h3 class="est-section-title">実費</h3>
-    <table class="est-detail-table">
-      <thead>
-        <tr>
-          <th style="width:40%;">項目</th>
-          <th style="width:25%;">金額（税込）</th>
-          <th style="width:35%;">備考</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% if result.expense_items %}
-          {% for item in result.expense_items %}
-            <tr>
-              <td style="text-align:left;">{{ item.name }}</td>
-              <td class="est-num">{{ yen_plain(item.amount_including_tax) }}</td>
-              <td style="text-align:left;font-size:0.78rem;">{{ item.note or "-" }}</td>
-            </tr>
           {% endfor %}
-        {% else %}
-          <tr><td colspan="3" style="text-align:center;color:#a1a1aa;">実費なし</td></tr>
-        {% endif %}
-      </tbody>
-      <tfoot>
-        <tr>
-          <td class="est-right">実費 小計</td>
-          <td class="est-num est-right">{{ yen_plain(result.quote_summary.expense_total_including_tax) }}</td>
-          <td></td>
-        </tr>
-      </tfoot>
-    </table>
-
-    <!-- Summary -->
-    <h3 class="est-section-title">合計</h3>
-    <table class="est-detail-table">
-      <tbody>
-        <tr>
-          <td style="text-align:left;width:60%;">車両運賃・料金 小計</td>
-          <td class="est-num est-right">{{ yen_plain(result.quote_summary.vehicle_rounded_fare_including_tax) }}</td>
-        </tr>
-        <tr>
-          <td style="text-align:left;">実費 小計</td>
-          <td class="est-num est-right">{{ yen_plain(result.quote_summary.expense_total_including_tax) }}</td>
-        </tr>
-      </tbody>
-      <tfoot>
-        <tr>
-          <td style="text-align:left;font-size:1rem;">合計金額（税込）</td>
-          <td class="est-num est-right" style="font-size:1.1rem;">{{ yen_plain(result.quote_summary.quote_total_including_tax) }}</td>
-        </tr>
-      </tfoot>
-    </table>
-
-    <!-- Calculation summary (smaller) -->
-    <h3 class="est-section-title">算定条件</h3>
-    <table class="est-meta-table">
-      <tbody>
-        <tr><th>運輸局ブロック</th><td>{{ result.applied_rates.block_name }}</td></tr>
-        <tr><th>総走行距離</th><td class="est-num">{{ form_state.running_distance_km }} km</td></tr>
-        <tr><th>総走行時間</th><td class="est-num">{{ form_state.running_duration_min }} 分</td></tr>
-        <tr><th>適用キロ単価</th><td class="est-num">{{ "{:,}".format(result.applied_rates.dist_unit_yen_per_km|int) }} 円/km</td></tr>
-        <tr><th>適用時間単価</th><td class="est-num">{{ "{:,}".format(result.applied_rates.time_unit_yen_per_hour|int) }} 円/時</td></tr>
-        {% if result.annual_contract.is_applied %}
-          <tr><th>年間契約</th><td>{{ result.annual_contract.calculated_operating_days }}日 / 稼働率 {{ "%.2f"|format(result.annual_contract.selected_utilization_rate * 100) }}%</td></tr>
-        {% endif %}
-      </tbody>
-    </table>
-
-    <!-- Notes -->
-    <div class="est-notes">
-      <h4 style="font-size:0.84rem;font-weight:700;color:#1a1a1a;margin-bottom:6px;">備考・特記事項</h4>
-      <ul style="padding-left:1.2em;list-style:disc;">
-        <li>車両運賃・料金は千円単位切上げにて算出しております。</li>
-        <li>高速道路料金・駐車料等の実費は別途実費精算とさせていただきます。</li>
-        <li>運行当日の交通事情により、所要時間・経路が変更になる場合があります。</li>
-        <li>キャンセル料は運行日の14日前より発生いたします。</li>
-        <li>本見積書の有効期限を過ぎた場合は、再度お見積りさせていただきます。</li>
-        <li id="estCustomNote" contenteditable="true" style="color:#0e7490;">（ここに追加の備考を入力できます）</li>
-      </ul>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3" class="est-right">車両運賃・料金 小計</td>
+            <td class="est-num est-right">{{ yen_plain(result.quote_summary.vehicle_rounded_fare_including_tax) }}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
 
-    <p style="margin-top:32px;text-align:center;font-size:0.75rem;color:#a1a1aa;">本見積書は貸切バス運賃計算ツールにより作成されました</p>
-  </div>
-</div>
+    <!-- Block: Expenses (hidden if empty) -->
+    {% if result.expense_items %}
+    <div class="est-block" data-block="expenses">
+      <span class="block-del" title="削除">&times;</span>
+      <h3 class="est-section-title">実費</h3>
+      <table class="est-detail-table">
+        <thead>
+          <tr>
+            <th style="width:40%;">項目</th>
+            <th style="width:25%;">金額（税込）</th>
+            <th style="width:35%;">備考</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in result.expense_items %}
+          <tr>
+            <td style="text-align:left;">{{ item.name }}</td>
+            <td class="est-num">{{ yen_plain(item.amount_including_tax) }}</td>
+            <td style="text-align:left;font-size:0.72rem;">{{ item.note or "-" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td class="est-right">実費 小計</td>
+            <td class="est-num est-right">{{ yen_plain(result.quote_summary.expense_total_including_tax) }}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- Block: Summary total -->
+    <div class="est-block" data-block="summary">
+      <span class="block-del" title="削除">&times;</span>
+      <h3 class="est-section-title">合計</h3>
+      <table class="est-detail-table">
+        <tbody>
+          <tr>
+            <td style="text-align:left;width:60%;">車両運賃・料金 小計</td>
+            <td class="est-num est-right">{{ yen_plain(result.quote_summary.vehicle_rounded_fare_including_tax) }}</td>
+          </tr>
+          {% if result.expense_items %}
+          <tr>
+            <td style="text-align:left;">実費 小計</td>
+            <td class="est-num est-right">{{ yen_plain(result.quote_summary.expense_total_including_tax) }}</td>
+          </tr>
+          {% endif %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td style="text-align:left;font-size:0.88rem;">合計金額（税込）</td>
+            <td class="est-num est-right" style="font-size:0.95rem;">{{ yen_plain(result.quote_summary.quote_total_including_tax) }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- Block: Conditions -->
+    <div class="est-block" data-block="conditions">
+      <span class="block-del" title="削除">&times;</span>
+      <h3 class="est-section-title">算定条件</h3>
+      <table class="est-meta-table">
+        <tbody>
+          <tr><th>運輸局ブロック</th><td>{{ result.applied_rates.block_name }}</td></tr>
+          <tr><th>適用キロ単価</th><td class="est-num">{{ "{:,}".format(result.applied_rates.dist_unit_yen_per_km|int) }} 円/km</td></tr>
+          <tr><th>適用時間単価</th><td class="est-num">{{ "{:,}".format(result.applied_rates.time_unit_yen_per_hour|int) }} 円/時</td></tr>
+          {% if result.annual_contract.is_applied %}
+          <tr><th>年間契約</th><td>{{ result.annual_contract.calculated_operating_days }}日 / 稼働率 {{ "%.2f"|format(result.annual_contract.selected_utilization_rate * 100) }}%</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Block: Notes -->
+    <div class="est-block" data-block="notes">
+      <span class="block-del" title="削除">&times;</span>
+      <div class="est-notes">
+        <h4 style="font-size:0.76rem;font-weight:700;color:#1a1a1a;margin:0 0 4px;">備考・特記事項</h4>
+        <ul>
+          <li>車両運賃・料金は千円単位切上げにて算出しております。</li>
+          <li>高速道路料金・駐車料等の実費は別途実費精算とさせていただきます。</li>
+          <li>運行当日の交通事情により、所要時間・経路が変更になる場合があります。</li>
+          <li>キャンセル料は運行日の14日前より発生いたします。</li>
+          <li>本見積書の有効期限を過ぎた場合は、再度お見積りさせていただきます。</li>
+          <li contenteditable="true" style="color:#0e7490;">（追加の備考を入力）</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Block: Footer -->
+    <div class="est-block" data-block="footer">
+      <span class="block-del" title="削除">&times;</span>
+      <p style="margin-top:24px;text-align:center;font-size:0.68rem;color:#a1a1aa;">本見積書は貸切バス運賃計算ツールにより作成されました</p>
+    </div>
+
+  </div><!-- /est-sheet -->
+</div><!-- /est-page -->
 
 <script>
-(function() {
-  // Set today's date
-  const estDate = document.getElementById('estDate');
-  if (estDate && estDate.textContent.includes('____')) {
-    const now = new Date();
-    estDate.textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
+(function(){
+  'use strict';
+  const sheet = document.getElementById('estSheet');
+  const editorPanel = document.getElementById('editorPanel');
+  const btnToggle = document.getElementById('btnToggleEdit');
+  const btnAdd = document.getElementById('btnAddBlock');
+  let editMode = false;
+
+  /* ============ Editor toggle ============ */
+  btnToggle.addEventListener('click', () => {
+    editMode = !editMode;
+    sheet.classList.toggle('editor-mode', editMode);
+    btnToggle.classList.toggle('active', editMode);
+    editorPanel.classList.toggle('visible', editMode);
+  });
+  btnAdd.addEventListener('click', () => {
+    if (!editMode) { btnToggle.click(); }
+    editorPanel.classList.add('visible');
+  });
+
+  /* ============ Delete block ============ */
+  sheet.addEventListener('click', (e) => {
+    if (e.target.classList.contains('block-del') && editMode) {
+      e.target.closest('.est-block').remove();
+    }
+  });
+
+  /* ============ Drag & Drop reorder with snap lines ============ */
+  let dragEl = null;
+  let placeholder = null;
+  let snapLinesH = [];
+  let snapLinesV = [];
+
+  function getBlockMidpoints() {
+    const blocks = [...sheet.querySelectorAll('.est-block:not(.dragging)')];
+    const sheetRect = sheet.getBoundingClientRect();
+    return blocks.map(b => {
+      const r = b.getBoundingClientRect();
+      return {
+        el: b,
+        top: r.top - sheetRect.top,
+        bottom: r.bottom - sheetRect.top,
+        midY: (r.top + r.bottom) / 2 - sheetRect.top,
+        midX: (r.left + r.right) / 2 - sheetRect.left,
+        left: r.left - sheetRect.left,
+        right: r.right - sheetRect.left,
+      };
+    });
   }
-  // Placeholder behavior for contenteditable
+
+  function clearSnapLines() {
+    snapLinesH.forEach(l => l.remove());
+    snapLinesV.forEach(l => l.remove());
+    snapLinesH = [];
+    snapLinesV = [];
+  }
+
+  function showSnapLines(dragRect) {
+    clearSnapLines();
+    const sheetRect = sheet.getBoundingClientRect();
+    const dragMidY = (dragRect.top + dragRect.bottom) / 2 - sheetRect.top;
+    const dragMidX = (dragRect.left + dragRect.right) / 2 - sheetRect.left;
+    const SNAP_THRESH = 6;
+    const midpoints = getBlockMidpoints();
+
+    midpoints.forEach(m => {
+      // Horizontal center alignment
+      if (Math.abs(m.midY - dragMidY) < SNAP_THRESH) {
+        const line = document.createElement('div');
+        line.className = 'snap-line-h';
+        line.style.top = m.midY + 'px';
+        sheet.appendChild(line);
+        snapLinesH.push(line);
+      }
+      // Top alignment
+      const dragTop = dragRect.top - sheetRect.top;
+      if (Math.abs(m.top - dragTop) < SNAP_THRESH) {
+        const line = document.createElement('div');
+        line.className = 'snap-line-h';
+        line.style.top = m.top + 'px';
+        sheet.appendChild(line);
+        snapLinesH.push(line);
+      }
+      // Vertical center
+      if (Math.abs(m.midX - dragMidX) < SNAP_THRESH) {
+        const line = document.createElement('div');
+        line.className = 'snap-line-v';
+        line.style.left = m.midX + 'px';
+        sheet.appendChild(line);
+        snapLinesV.push(line);
+      }
+    });
+
+    // Sheet center line
+    const sheetMidX = sheet.clientWidth / 2;
+    if (Math.abs(dragMidX - sheetMidX) < SNAP_THRESH) {
+      const line = document.createElement('div');
+      line.className = 'snap-line-v';
+      line.style.left = sheetMidX + 'px';
+      sheet.appendChild(line);
+      snapLinesV.push(line);
+    }
+  }
+
+  sheet.addEventListener('dragstart', (e) => {
+    if (!editMode) return;
+    const block = e.target.closest('.est-block');
+    if (!block) return;
+    dragEl = block;
+    dragEl.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+    // Create placeholder
+    placeholder = document.createElement('div');
+    placeholder.style.cssText = 'height:4px;background:#3b82f6;border-radius:2px;margin:4px 0;transition:all .1s;';
+  });
+
+  sheet.addEventListener('dragover', (e) => {
+    if (!editMode || !dragEl) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    const sheetRect = sheet.getBoundingClientRect();
+    const y = e.clientY - sheetRect.top;
+    const blocks = [...sheet.querySelectorAll('.est-block:not(.dragging)')];
+    let insertBefore = null;
+
+    for (const b of blocks) {
+      const r = b.getBoundingClientRect();
+      const midY = r.top + r.height / 2 - sheetRect.top;
+      if (y < midY) { insertBefore = b; break; }
+    }
+
+    if (placeholder.parentNode) placeholder.remove();
+    if (insertBefore) {
+      sheet.insertBefore(placeholder, insertBefore);
+    } else {
+      sheet.appendChild(placeholder);
+    }
+
+    // Show snap lines
+    const dragRect = dragEl.getBoundingClientRect();
+    showSnapLines(dragRect);
+  });
+
+  sheet.addEventListener('dragend', () => {
+    if (!dragEl) return;
+    dragEl.classList.remove('dragging');
+    // Move element to placeholder position
+    if (placeholder && placeholder.parentNode) {
+      sheet.insertBefore(dragEl, placeholder);
+      placeholder.remove();
+    }
+    dragEl = null;
+    placeholder = null;
+    clearSnapLines();
+  });
+
+  sheet.addEventListener('drop', (e) => {
+    e.preventDefault();
+  });
+
+  // Make blocks draggable when in edit mode
+  const observer = new MutationObserver(() => {
+    sheet.querySelectorAll('.est-block').forEach(b => {
+      b.draggable = editMode;
+    });
+  });
+  observer.observe(sheet, { childList: true });
+  // Also update on toggle
+  btnToggle.addEventListener('click', () => {
+    sheet.querySelectorAll('.est-block').forEach(b => {
+      b.draggable = editMode;
+    });
+  });
+
+  /* ============ Add elements ============ */
+  editorPanel.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-add]');
+    if (!btn) return;
+    const type = btn.dataset.add;
+    let html = '';
+    switch(type) {
+      case 'text':
+        html = '<div class="est-block" data-block="custom-text"><span class="block-del" title="削除">&times;</span><p contenteditable="true" style="font-size:0.82rem;padding:8px 0;">テキストを入力してください</p></div>';
+        break;
+      case 'separator':
+        html = '<div class="est-block" data-block="separator"><span class="block-del" title="削除">&times;</span><hr style="border:none;border-top:1px solid #d4d4d8;margin:12px 0;"></div>';
+        break;
+      case 'stamp':
+        html = '<div class="est-block" data-block="stamp"><span class="block-del" title="削除">&times;</span><div class="est-stamp-area"><div class="est-stamp-box">承認</div><div class="est-stamp-box">確認</div><div class="est-stamp-box">担当</div></div></div>';
+        break;
+      case 'note':
+        html = '<div class="est-block" data-block="custom-note"><span class="block-del" title="削除">&times;</span><div class="est-notes"><h4 style="font-size:0.76rem;font-weight:700;margin:0 0 4px;">追加備考</h4><ul><li contenteditable="true">ここに備考を入力</li></ul></div></div>';
+        break;
+      case 'table':
+        html = '<div class="est-block" data-block="custom-table"><span class="block-del" title="削除">&times;</span><h3 class="est-section-title" contenteditable="true">見出し</h3><table class="est-meta-table"><tbody><tr><th contenteditable="true">項目</th><td contenteditable="true">内容</td></tr><tr><th contenteditable="true">項目</th><td contenteditable="true">内容</td></tr></tbody></table></div>';
+        break;
+    }
+    if (html) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      const newBlock = tmp.firstElementChild;
+      newBlock.draggable = true;
+      sheet.appendChild(newBlock);
+      newBlock.scrollIntoView({ behavior:'smooth', block:'center' });
+    }
+  });
+
+  /* ============ Template Save / Load ============ */
+  const STORAGE_KEY = 'dstt_estimate_templates';
+
+  function getTemplates() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
+    catch { return {}; }
+  }
+  function saveTemplates(tpls) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tpls));
+  }
+  function refreshTemplateSelect() {
+    const sel = document.getElementById('templateSelect');
+    const tpls = getTemplates();
+    sel.innerHTML = '<option value="">保存済テンプレートを選択...</option>';
+    Object.keys(tpls).forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+  }
+
+  document.getElementById('btnSaveTemplate').addEventListener('click', () => {
+    const name = prompt('テンプレート名を入力してください:');
+    if (!name) return;
+    const blocks = [...sheet.querySelectorAll('.est-block')].map(b => ({
+      type: b.dataset.block,
+      html: b.outerHTML
+    }));
+    const tpls = getTemplates();
+    tpls[name] = { blocks, savedAt: new Date().toISOString() };
+    saveTemplates(tpls);
+    refreshTemplateSelect();
+    alert('テンプレートを保存しました: ' + name);
+  });
+
+  document.getElementById('btnLoadTemplate').addEventListener('click', () => {
+    if (!editMode) btnToggle.click();
+    editorPanel.classList.add('visible');
+  });
+
+  document.getElementById('epLoadTpl').addEventListener('click', () => {
+    const sel = document.getElementById('templateSelect');
+    const name = sel.value;
+    if (!name) { alert('テンプレートを選択してください。'); return; }
+    if (!confirm('現在の内容が上書きされます。よろしいですか？')) return;
+    const tpls = getTemplates();
+    const tpl = tpls[name];
+    if (!tpl) return;
+    // Clear sheet
+    sheet.querySelectorAll('.est-block').forEach(b => b.remove());
+    sheet.querySelectorAll('.snap-line-h,.snap-line-v').forEach(l => l.remove());
+    // Restore blocks
+    tpl.blocks.forEach(item => {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = item.html;
+      const block = tmp.firstElementChild;
+      if (block) {
+        block.draggable = editMode;
+        sheet.appendChild(block);
+      }
+    });
+  });
+
+  document.getElementById('epDeleteTpl').addEventListener('click', () => {
+    const sel = document.getElementById('templateSelect');
+    const name = sel.value;
+    if (!name) { alert('テンプレートを選択してください。'); return; }
+    if (!confirm('テンプレート「' + name + '」を削除しますか？')) return;
+    const tpls = getTemplates();
+    delete tpls[name];
+    saveTemplates(tpls);
+    refreshTemplateSelect();
+  });
+
+  refreshTemplateSelect();
+
+  /* ============ Placeholder behavior for contenteditable ============ */
   document.querySelectorAll('[contenteditable][data-placeholder]').forEach(el => {
     if (!el.textContent.trim() || el.textContent.trim() === el.dataset.placeholder) {
       el.style.color = '#a1a1aa';
@@ -250,6 +651,7 @@
       }
     });
   });
+
 })();
 </script>
 {% endblock %}

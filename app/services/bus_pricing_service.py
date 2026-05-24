@@ -218,12 +218,19 @@ def _normalize_vehicle_items(clean: dict[str, Any], block_master: dict[str, dict
             _range(dist_rate, "vehicle_items", 0, 100000, f"車両{index}のキロ単価は 0 円/km 超で入力してください。")
             _range(time_rate, "vehicle_items", 0, 1000000, f"車両{index}の時間単価は 0 円/時 超で入力してください。")
 
+        v_distance = _as_float(raw, "running_distance_km", "", default=clean["running_distance_km"])
+        v_pax_distance = _as_float(raw, "pax_running_distance_km", "", default=clean["pax_running_distance_km"])
+        v_duration = _as_int(raw, "running_duration_min", "", default=clean["running_duration_min"])
+
         item: dict[str, Any] = {
             "line_no": len(items) + 1,
             "label": str(raw.get("label") or "").strip(),
             "car_type": car_type,
             "quantity": quantity,
             "pax_count": pax_count,
+            "running_distance_km": v_distance,
+            "pax_running_distance_km": v_pax_distance,
+            "running_duration_min": v_duration,
             "custom_dist_rate": dist_rate,
             "custom_time_rate": time_rate,
             "use_floor_rates": vehicle_use_floor,
@@ -299,7 +306,8 @@ def calculate(
     for item in params["vehicle_items"]:
         line_params = dict(params)
         for key in ("car_type", "pax_count", "custom_dist_rate", "custom_time_rate",
-                     "use_floor_rates", *VEHICLE_CONDITION_KEYS):
+                     "use_floor_rates", "running_distance_km", "pax_running_distance_km",
+                     "running_duration_min", *VEHICLE_CONDITION_KEYS):
             if key in item:
                 line_params[key] = item[key]
         vehicle_lines.append(
