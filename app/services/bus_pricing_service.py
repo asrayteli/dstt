@@ -249,18 +249,7 @@ def _normalize_vehicle_items(clean: dict[str, Any], block_master: dict[str, dict
         items.append(item)
 
     if not items:
-        items.append(
-            {
-                "line_no": 1,
-                "label": "",
-                "car_type": clean["car_type"],
-                "quantity": 1,
-                "pax_count": clean["pax_count"],
-                "custom_dist_rate": clean["custom_dist_rate"],
-                "custom_time_rate": clean["custom_time_rate"],
-                "use_floor_rates": clean.get("use_floor_rates", False),
-            }
-        )
+        raise BusPricingInputError("vehicle_items", "車両を1台以上追加してください。")
 
     return items
 

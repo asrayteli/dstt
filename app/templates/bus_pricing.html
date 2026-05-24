@@ -388,12 +388,16 @@
     document.getElementById('formDuration').value = firstV.running_duration_min || 540;
     document.getElementById('formVehiclesJson').value = JSON.stringify(vehicles);
     document.getElementById('formExpensesJson').value = JSON.stringify(expenses);
-    // Persist state so we can restore after navigating back from estimate preview
-    sessionStorage.setItem('bp_state', JSON.stringify({
-      block_id: document.getElementById('routeBlock').value,
-      vehicles: vehicles,
-      expenses: expenses
-    }));
+    // Persist current state so we can restore after navigating back from estimate preview
+    if (vehicles.length > 0) {
+      sessionStorage.setItem('bp_state', JSON.stringify({
+        block_id: document.getElementById('routeBlock').value,
+        vehicles: vehicles,
+        expenses: expenses
+      }));
+    } else {
+      sessionStorage.removeItem('bp_state');
+    }
   });
 
   // --- Restore state from sessionStorage (when returning from estimate preview) ---

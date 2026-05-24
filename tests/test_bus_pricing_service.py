@@ -14,6 +14,11 @@ from app.services.bus_pricing_service import BusPricingInputError, calculate
 from app.tools.bus_pricing import bus_pricing_bp
 
 
+_VEHICLE_OVERRIDE_KEYS = {
+    "car_type", "pax_count", "use_floor_rates", "custom_dist_rate", "custom_time_rate",
+}
+
+
 def base_params(**overrides):
     params = {
         "block_id": "kanto",
@@ -44,6 +49,18 @@ def base_params(**overrides):
         "custom_time_rate": 7190,
     }
     params.update(overrides)
+    # Build default vehicle from params unless caller provided their own vehicle_items
+    if "vehicle_items" not in overrides:
+        params["vehicle_items"] = [
+            {
+                "car_type": params["car_type"],
+                "quantity": 1,
+                "pax_count": params["pax_count"],
+                "use_floor_rates": params["use_floor_rates"],
+                "custom_dist_rate": params["custom_dist_rate"],
+                "custom_time_rate": params["custom_time_rate"],
+            },
+        ]
     return params
 
 
