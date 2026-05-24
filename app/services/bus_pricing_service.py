@@ -162,6 +162,32 @@ def validate_params(
     return clean
 
 
+VEHICLE_CONDITION_KEYS = (
+    "is_night_run", "night_minutes", "is_overnight", "operating_days",
+    "is_alternate_driver", "is_ferry_used", "ferry_duration_min",
+    "ferry_rest_ok", "is_special_vehicle", "special_vehicle_rate",
+    "steering_minutes", "has_sleeper_bed", "is_annual_contract",
+    "annual_operating_days", "custom_utilization_rate",
+    "utilization_rate_mode", "is_school_bus",
+)
+
+VEHICLE_BOOL_CONDITION_KEYS = {
+    "is_night_run", "is_overnight", "is_alternate_driver", "is_ferry_used",
+    "ferry_rest_ok", "is_special_vehicle", "has_sleeper_bed",
+    "is_annual_contract", "is_school_bus",
+}
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.lower() not in ("", "0", "false", "no", "off")
+    return bool(value)
+
+
 def _normalize_vehicle_items(clean: dict[str, Any], block_master: dict[str, dict], car_master: dict[str, dict]) -> list[dict]:
     raw_items = clean.get("vehicle_items") or []
     if not isinstance(raw_items, list):
@@ -181,7 +207,9 @@ def _normalize_vehicle_items(clean: dict[str, Any], block_master: dict[str, dict
         pax_count = _as_int(raw, "pax_count", f"車両{index}の乗車人数を入力してください。", default=clean["pax_count"])
         _range(quantity, "vehicle_items", 0, 99, f"車両{index}の台数は 1〜99 台で入力してください。", include_min=False)
         _range(pax_count, "vehicle_items", 0, 100, f"車両{index}の乗車人数は 1〜100 名で入力してください。")
-        if clean["use_floor_rates"]:
+
+        vehicle_use_floor = _coerce_bool(raw.get("use_floor_rates", clean.get("use_floor_rates", False)))
+        if vehicle_use_floor:
             dist_rate = block["dist_rate"][car_type]
             time_rate = block["time_rate"][car_type]
         else:
@@ -189,17 +217,29 @@ def _normalize_vehicle_items(clean: dict[str, Any], block_master: dict[str, dict
             time_rate = _as_float(raw, "custom_time_rate", f"車両{index}の時間単価を入力してください。", default=clean["custom_time_rate"])
             _range(dist_rate, "vehicle_items", 0, 100000, f"車両{index}のキロ単価は 0 円/km 超で入力してください。")
             _range(time_rate, "vehicle_items", 0, 1000000, f"車両{index}の時間単価は 0 円/時 超で入力してください。")
-        items.append(
-            {
-                "line_no": len(items) + 1,
-                "label": str(raw.get("label") or "").strip(),
-                "car_type": car_type,
-                "quantity": quantity,
-                "pax_count": pax_count,
-                "custom_dist_rate": dist_rate,
-                "custom_time_rate": time_rate,
-            }
-        )
+
+        item: dict[str, Any] = {
+            "line_no": len(items) + 1,
+            "label": str(raw.get("label") or "").strip(),
+            "car_type": car_type,
+            "quantity": quantity,
+            "pax_count": pax_count,
+            "custom_dist_rate": dist_rate,
+            "custom_time_rate": time_rate,
+            "use_floor_rates": vehicle_use_floor,
+        }
+        for key in VEHICLE_CONDITION_KEYS:
+            if key in raw:
+                if key in VEHICLE_BOOL_CONDITION_KEYS:
+                    item[key] = _coerce_bool(raw[key], clean.get(key, False))
+                elif key in ("night_minutes", "operating_days", "ferry_duration_min",
+                             "steering_minutes", "annual_operating_days"):
+                    item[key] = _as_int(raw, key, "", default=clean.get(key, 0))
+                elif key in ("special_vehicle_rate", "custom_utilization_rate"):
+                    item[key] = _as_float(raw, key, "", default=clean.get(key, 0.0))
+                else:
+                    item[key] = raw[key]
+        items.append(item)
 
     if not items:
         items.append(
@@ -211,6 +251,7 @@ def _normalize_vehicle_items(clean: dict[str, Any], block_master: dict[str, dict
                 "pax_count": clean["pax_count"],
                 "custom_dist_rate": clean["custom_dist_rate"],
                 "custom_time_rate": clean["custom_time_rate"],
+                "use_floor_rates": clean.get("use_floor_rates", False),
             }
         )
 
@@ -257,14 +298,10 @@ def calculate(
     vehicle_lines = []
     for item in params["vehicle_items"]:
         line_params = dict(params)
-        line_params.update(
-            {
-                "car_type": item["car_type"],
-                "pax_count": item["pax_count"],
-                "custom_dist_rate": item["custom_dist_rate"],
-                "custom_time_rate": item["custom_time_rate"],
-            }
-        )
+        for key in ("car_type", "pax_count", "custom_dist_rate", "custom_time_rate",
+                     "use_floor_rates", *VEHICLE_CONDITION_KEYS):
+            if key in item:
+                line_params[key] = item[key]
         vehicle_lines.append(
             _calculate_vehicle_line(
                 params=line_params,

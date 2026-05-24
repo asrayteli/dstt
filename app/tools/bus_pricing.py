@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 from typing import Any
@@ -31,8 +32,8 @@ DEFAULT_FORM_STATE: dict[str, Any] = {
     "running_distance_km": "300",
     "pax_running_distance_km": "260",
     "running_duration_min": "540",
-    "steering_minutes": "",
     "pax_count": "40",
+    "steering_minutes": "",
     "is_night_run": False,
     "night_minutes": "0",
     "is_overnight": False,
@@ -52,21 +53,36 @@ DEFAULT_FORM_STATE: dict[str, Any] = {
     "use_floor_rates": True,
     "custom_dist_rate": "170",
     "custom_time_rate": "7190",
-    "vehicle_items": [
-        {"label": "", "car_type": "large", "quantity": "1", "pax_count": "40", "custom_dist_rate": "170", "custom_time_rate": "7190"},
-        {"label": "", "car_type": "medium", "quantity": "0", "pax_count": "", "custom_dist_rate": "150", "custom_time_rate": "6070"},
-        {"label": "", "car_type": "small", "quantity": "0", "pax_count": "", "custom_dist_rate": "130", "custom_time_rate": "5320"},
-        {"label": "", "car_type": "commuter", "quantity": "0", "pax_count": "", "custom_dist_rate": "120", "custom_time_rate": "4740"},
-    ],
-    "expense_items": [
-        {"name": "高速道路料金", "amount": "0", "note": ""},
-        {"name": "駐車料", "amount": "0", "note": ""},
-        {"name": "乗務員宿泊料", "amount": "0", "note": ""},
-        {"name": "ガイド料", "amount": "0", "note": ""},
-        {"name": "その他実費", "amount": "0", "note": ""},
-    ],
+    "vehicle_items": [],
+    "expense_items": [],
 }
 
+VEHICLE_TEMPLATE: dict[str, Any] = {
+    "label": "",
+    "car_type": "large",
+    "quantity": 1,
+    "pax_count": 40,
+    "use_floor_rates": True,
+    "custom_dist_rate": 170,
+    "custom_time_rate": 7190,
+    "is_night_run": False,
+    "night_minutes": 0,
+    "is_overnight": False,
+    "operating_days": 1,
+    "is_alternate_driver": False,
+    "is_ferry_used": False,
+    "ferry_duration_min": 0,
+    "ferry_rest_ok": False,
+    "is_special_vehicle": False,
+    "special_vehicle_rate": 0,
+    "steering_minutes": 0,
+    "has_sleeper_bed": False,
+    "is_annual_contract": False,
+    "annual_operating_days": 0,
+    "custom_utilization_rate": 0.6758,
+    "utilization_rate_mode": "custom",
+    "is_school_bus": False,
+}
 
 BOOL_FIELDS = {
     "is_night_run",
@@ -108,6 +124,7 @@ def index():
         errors=errors,
         field_errors=field_errors,
         is_admin=is_admin_user(),
+        vehicle_template=VEHICLE_TEMPLATE,
     )
 
 
@@ -138,6 +155,7 @@ def estimate_preview():
             errors=errors,
             field_errors=field_errors,
             is_admin=is_admin_user(),
+            vehicle_template=VEHICLE_TEMPLATE,
         )
 
     jst = timezone(timedelta(hours=9))
@@ -156,7 +174,7 @@ def estimate_pdf():
     return jsonify(
         {
             "status": "not_implemented",
-            "message": "PDF生成は次工程の実装用エンドポイントです。見積書プレビューの計算結果をここへ接続してください。",
+            "message": "PDF生成は次工程の実装用エンドポイントです。",
         }
     ), 501
 
@@ -215,27 +233,46 @@ def build_default_form_state() -> dict[str, Any]:
 
 
 def update_form_state_from_request(form, form_state: dict[str, Any]) -> None:
-    for key in form_state:
-        if key in {"vehicle_items", "expense_items"}:
-            continue
-        if key in BOOL_FIELDS:
-            form_state[key] = key in form
-        else:
-            form_state[key] = form.get(key, form_state[key])
-    form_state["vehicle_items"] = _vehicle_items_from_form(form)
-    form_state["expense_items"] = _expense_items_from_form(form)
+    for key in ("block_id", "running_distance_km", "pax_running_distance_km", "running_duration_min"):
+        form_state[key] = form.get(key, form_state[key])
+
+    vehicles_json = form.get("vehicles_json", "")
+    if vehicles_json:
+        try:
+            form_state["vehicle_items"] = json.loads(vehicles_json)
+        except (json.JSONDecodeError, TypeError):
+            form_state["vehicle_items"] = []
+    elif form.getlist("vehicle_car_type"):
+        form_state["vehicle_items"] = _vehicle_items_from_form(form)
+
+    expenses_json = form.get("expenses_json", "")
+    if expenses_json:
+        try:
+            form_state["expense_items"] = json.loads(expenses_json)
+        except (json.JSONDecodeError, TypeError):
+            form_state["expense_items"] = []
+    elif form.getlist("expense_name"):
+        form_state["expense_items"] = _expense_items_from_form(form)
 
 
 def coerce_form_to_params(form_state: dict[str, Any]) -> dict[str, Any]:
     params: dict[str, Any] = dict(form_state)
+    params["car_type"] = "large"
+    params["pax_count"] = 1
+    params["use_floor_rates"] = True
+    params["custom_dist_rate"] = 170
+    params["custom_time_rate"] = 7190
     for key in BOOL_FIELDS:
-        params[key] = bool(params.get(key))
-    active_vehicle = next((item for item in params.get("vehicle_items", []) if str(item.get("quantity") or "0") not in {"", "0"}), None)
-    if active_vehicle:
-        params["car_type"] = active_vehicle.get("car_type", params["car_type"])
-        params["pax_count"] = active_vehicle.get("pax_count") or params["pax_count"]
-        params["custom_dist_rate"] = active_vehicle.get("custom_dist_rate") or params["custom_dist_rate"]
-        params["custom_time_rate"] = active_vehicle.get("custom_time_rate") or params["custom_time_rate"]
+        if key not in ("use_floor_rates",):
+            params[key] = False
+    params["night_minutes"] = 0
+    params["operating_days"] = 1
+    params["ferry_duration_min"] = 0
+    params["steering_minutes"] = 0
+    params["special_vehicle_rate"] = 0.0
+    params["annual_operating_days"] = 0
+    params["custom_utilization_rate"] = 0.6758
+    params["utilization_rate_mode"] = "custom"
     return validate_params(params, load_effective_block_master(), CAR_MASTER)
 
 

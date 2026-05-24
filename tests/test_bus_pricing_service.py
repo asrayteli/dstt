@@ -271,7 +271,21 @@ def test_bus_pricing_page_renders():
 
 
 def test_estimate_preview_route_renders_quote_shell():
+    import json
+
     client = _build_client()
+    vehicles = [
+        {"label": "1号車", "car_type": "large", "quantity": 1, "pax_count": 40,
+         "use_floor_rates": True, "custom_dist_rate": 170, "custom_time_rate": 7190,
+         "is_night_run": False, "night_minutes": 0, "is_overnight": False,
+         "operating_days": 1, "is_alternate_driver": False, "is_ferry_used": False,
+         "ferry_duration_min": 0, "ferry_rest_ok": False, "is_special_vehicle": False,
+         "special_vehicle_rate": 0, "steering_minutes": 0, "has_sleeper_bed": False,
+         "is_annual_contract": False, "annual_operating_days": 0,
+         "custom_utilization_rate": 0.6758, "utilization_rate_mode": "custom",
+         "is_school_bus": False}
+    ]
+    expenses = [{"name": "高速道路料金", "amount": 10000, "note": "概算"}]
 
     response = client.post(
         "/tools/bus_pricing/estimate/preview",
@@ -280,17 +294,8 @@ def test_estimate_preview_route_renders_quote_shell():
             "running_distance_km": "300",
             "pax_running_distance_km": "260",
             "running_duration_min": "540",
-            "steering_minutes": "",
-            "vehicle_label": ["1号車"],
-            "vehicle_car_type": ["large"],
-            "vehicle_quantity": ["1"],
-            "vehicle_pax_count": ["40"],
-            "vehicle_custom_dist_rate": ["170"],
-            "vehicle_custom_time_rate": ["7190"],
-            "expense_name": ["高速道路料金"],
-            "expense_amount": ["10000"],
-            "expense_note": ["概算"],
-            "use_floor_rates": "on",
+            "vehicles_json": json.dumps(vehicles),
+            "expenses_json": json.dumps(expenses),
         },
     )
 
