@@ -5130,6 +5130,107 @@
       button.setAttribute('aria-pressed', selected ? 'true' : 'false');
     }
 
+    function buildBulkRangeCopyCells(month) {
+      if (!month) return '';
+      const totalDays = monthDays(month);
+      const firstDow = (new Date(month.year, month.month - 1, 1).getDay() + 6) % 7;
+      const cells = [];
+      for (let index = 0; index < firstDow; index += 1) {
+        cells.push('<div class="cloud-bulk-date-cell is-empty" aria-hidden="true"></div>');
+      }
+      for (let day = 1; day <= totalDays; day += 1) {
+        cells.push(`
+          <button
+            type="button"
+            class="cloud-bulk-date-cell"
+            data-bulk-range-copy-day="${day}"
+          >${day}</button>
+        `);
+      }
+      return cells.join('');
+    }
+
+    function bulkRangeCopyValue(form, name) {
+      const input = form.querySelector(`[name="${name}"]`);
+      const value = parseInt((input && input.value) || '0', 10);
+      return value > 0 ? value : 0;
+    }
+
+    function setBulkRangeCopyValue(form, name, value) {
+      const input = form.querySelector(`[name="${name}"]`);
+      if (input) input.value = value > 0 ? String(value) : '';
+    }
+
+    function handleBulkRangeCopyClick(form, day) {
+      if (!day) return;
+      const step = form.dataset.rangeCopyStep || 'start';
+      if (step === 'end') {
+        const start = bulkRangeCopyValue(form, 'bulk_range_copy_start');
+        if (!start) {
+          setBulkRangeCopyValue(form, 'bulk_range_copy_start', day);
+        } else if (day < start) {
+          // Clicked before the start: the earlier day becomes the new start.
+          setBulkRangeCopyValue(form, 'bulk_range_copy_start', day);
+          setBulkRangeCopyValue(form, 'bulk_range_copy_end', start);
+          form.dataset.rangeCopyStep = 'paste';
+        } else {
+          setBulkRangeCopyValue(form, 'bulk_range_copy_end', day);
+          form.dataset.rangeCopyStep = 'paste';
+        }
+      } else if (step === 'paste') {
+        setBulkRangeCopyValue(form, 'bulk_range_copy_paste', day);
+        form.dataset.rangeCopyStep = 'done';
+      } else {
+        // 'start' or restart after 'done'
+        setBulkRangeCopyValue(form, 'bulk_range_copy_start', day);
+        setBulkRangeCopyValue(form, 'bulk_range_copy_end', 0);
+        setBulkRangeCopyValue(form, 'bulk_range_copy_paste', 0);
+        form.dataset.rangeCopyStep = 'end';
+      }
+      updateBulkRangeCopyHighlights(form);
+      updateBulkPreview(form);
+    }
+
+    function resetBulkRangeCopy(form) {
+      setBulkRangeCopyValue(form, 'bulk_range_copy_start', 0);
+      setBulkRangeCopyValue(form, 'bulk_range_copy_end', 0);
+      setBulkRangeCopyValue(form, 'bulk_range_copy_paste', 0);
+      form.dataset.rangeCopyStep = 'start';
+      updateBulkRangeCopyHighlights(form);
+      updateBulkPreview(form);
+    }
+
+    function updateBulkRangeCopyHighlights(form) {
+      const start = bulkRangeCopyValue(form, 'bulk_range_copy_start');
+      const end = bulkRangeCopyValue(form, 'bulk_range_copy_end');
+      const paste = bulkRangeCopyValue(form, 'bulk_range_copy_paste');
+      const hasRange = start && end && end >= start;
+      const span = hasRange ? (end - start) : 0;
+      form.querySelectorAll('[data-bulk-range-copy-day]').forEach((cell) => {
+        const day = parseInt(cell.getAttribute('data-bulk-range-copy-day') || '0', 10);
+        cell.classList.remove('is-copy-start', 'is-copy-end', 'is-copy-range', 'is-paste-base', 'is-paste-range');
+        if (!day) return;
+        if (hasRange && day >= start && day <= end) {
+          cell.classList.add('is-copy-range');
+        }
+        if (start && day === start) cell.classList.add('is-copy-start');
+        if (end && day === end) cell.classList.add('is-copy-end');
+        if (paste) {
+          const pasteEnd = paste + span;
+          if (day === paste) cell.classList.add('is-paste-base');
+          else if (day > paste && day <= pasteEnd) cell.classList.add('is-paste-range');
+        }
+      });
+      const stepNote = form.querySelector('[data-bulk-range-copy-step]');
+      if (stepNote) {
+        const step = form.dataset.rangeCopyStep || 'start';
+        if (step === 'end') stepNote.textContent = 'カレンダーをクリック: ② コピー終了日';
+        else if (step === 'paste') stepNote.textContent = 'カレンダーをクリック: ③ ペースト基準日';
+        else if (step === 'done') stepNote.textContent = '選択完了。「適用」で貼り付けます（やり直す場合は「選択しなおす」）';
+        else stepNote.textContent = 'カレンダーをクリック: ① コピー開始日';
+      }
+    }
+
     function weekdayKeyForDay(day) {
       const month = currentMonth();
       if (!month) return null;
@@ -5358,24 +5459,48 @@
     function updateBulkFieldVisibility(form) {
       const operation = form.querySelector('[name="bulk_operation"]').value;
       const scope = form.querySelector('[name="bulk_scope"]').value;
+      const isRangeCopy = operation === 'range_copy';
       const template = form.querySelector('[data-bulk-template]');
       const copy = form.querySelector('[data-bulk-copy]');
+      const rangeCopy = form.querySelector('[data-bulk-range-copy]');
+      const scopeField = form.querySelector('[data-bulk-scope-field]');
       const ranges = form.querySelectorAll('[data-bulk-range]');
       const weekdays = form.querySelector('[data-bulk-weekdays]');
       const picked = form.querySelector('[data-bulk-picked-days]');
       const branchField = form.querySelector('[data-bulk-branch-field]');
-      template.classList.toggle('cloud-hidden', operation === 'delete' || operation === 'copy');
+      template.classList.toggle('cloud-hidden', isRangeCopy || operation === 'delete' || operation === 'copy');
       copy.classList.toggle('cloud-hidden', operation !== 'copy');
-      ranges.forEach((node) => node.classList.toggle('cloud-hidden', scope !== 'range'));
-      weekdays.classList.toggle('cloud-hidden', scope !== 'weekdays');
-      picked.classList.toggle('cloud-hidden', scope !== 'picked');
+      if (rangeCopy) rangeCopy.classList.toggle('cloud-hidden', !isRangeCopy);
+      if (scopeField) scopeField.classList.toggle('cloud-hidden', isRangeCopy);
+      ranges.forEach((node) => node.classList.toggle('cloud-hidden', isRangeCopy || scope !== 'range'));
+      weekdays.classList.toggle('cloud-hidden', isRangeCopy || scope !== 'weekdays');
+      picked.classList.toggle('cloud-hidden', isRangeCopy || scope !== 'picked');
       if (branchField) {
-        branchField.classList.toggle('cloud-hidden', operation === 'delete' || operation === 'copy' || currentProject().mode !== 'scene');
+        branchField.classList.toggle('cloud-hidden', isRangeCopy || operation === 'delete' || operation === 'copy' || currentProject().mode !== 'scene');
       }
     }
 
     function updateBulkPreview(form) {
       const preview = form.querySelector('[data-bulk-preview]');
+      if (form.querySelector('[name="bulk_operation"]').value === 'range_copy') {
+        const start = bulkRangeCopyValue(form, 'bulk_range_copy_start');
+        const end = bulkRangeCopyValue(form, 'bulk_range_copy_end');
+        const paste = bulkRangeCopyValue(form, 'bulk_range_copy_paste');
+        const month = currentMonth();
+        if (!month || !start || !end || end < start || !paste) {
+          preview.textContent = 'コピー元の範囲とペースト基準日をカレンダーで選択してください';
+          return;
+        }
+        const span = end - start;
+        const totalDays = monthDays(month);
+        const pasteEnd = paste + span;
+        const within = Math.min(pasteEnd, totalDays);
+        const skipped = pasteEnd > totalDays ? (pasteEnd - totalDays) : 0;
+        let text = `コピー元 ${start}日〜${end}日（${span + 1}日分）を ${paste}日 から貼り付け（${paste}日〜${within}日）`;
+        if (skipped) text += ` ※月末を超える ${skipped}日分はスキップ`;
+        preview.textContent = text;
+        return;
+      }
       const targetDays = selectedDaysFromBulkForm(form);
       if (!targetDays.length) {
         preview.textContent = '対象範囲を選択してください';
@@ -5554,17 +5679,65 @@
       renderSummaryModalContent(modal, summary);
     }
 
+    function applyBulkRangeCopy(form) {
+      const month = currentMonth();
+      if (!month) return;
+      const start = bulkRangeCopyValue(form, 'bulk_range_copy_start');
+      const end = bulkRangeCopyValue(form, 'bulk_range_copy_end');
+      const paste = bulkRangeCopyValue(form, 'bulk_range_copy_paste');
+      const copyMode = form.querySelector('[name="bulk_range_copy_mode"]').value;
+      if (!start || !end || end < start || !paste) {
+        showFlash('コピー開始日・終了日・ペースト基準日をカレンダーで選択してください', 'error');
+        return;
+      }
+      const totalDays = monthDays(month);
+      const currentEntries = currentEntriesSnapshot();
+      const nextEntries = deepClone(currentEntries);
+      let copiedDays = 0;
+      let copiedEntries = 0;
+      let skippedDays = 0;
+      for (let day = start; day <= end; day += 1) {
+        const target = paste + (day - start);
+        if (target < 1 || target > totalDays) {
+          skippedDays += 1;
+          continue;
+        }
+        const sourceEntries = Array.isArray(currentEntries[String(day)]) ? currentEntries[String(day)] : [];
+        const clonedEntries = sourceEntries
+          .filter((entry) => !String(entry && entry.sync_source_type ? entry.sync_source_type : '').trim())
+          .filter((entry) => !isSubstituteRequestDisplayEntry(entry))
+          .map((entry) => cloneEntryForBulk(entry));
+        const key = String(target);
+        nextEntries[key] = copyMode === 'append'
+          ? (Array.isArray(nextEntries[key]) ? nextEntries[key] : []).concat(clonedEntries)
+          : clonedEntries;
+        copiedDays += 1;
+        copiedEntries += clonedEntries.length;
+      }
+      replaceCalendarEntries(nextEntries);
+      closeCloudModal('cloud-bulk-modal');
+      let message = `${start}日〜${end}日 を ${paste}日 から ${copiedDays}日分コピーしました（${copiedEntries}件）。保存ボタンで確定してください`;
+      if (skippedDays) {
+        message += `。月末を超える ${skippedDays}日分はスキップしました`;
+      }
+      showFlash(message, 'success');
+    }
+
     function applyBulkEditFromModal(modal) {
       const form = modal.querySelector('form');
       const project = currentProject();
       if (!project || !form) return;
+      const operation = form.querySelector('[name="bulk_operation"]').value;
+      if (operation === 'range_copy') {
+        applyBulkRangeCopy(form);
+        return;
+      }
       const targetDays = selectedDaysFromBulkForm(form);
       if (!targetDays.length) {
         showFlash('対象日を選択してください', 'error');
         return;
       }
 
-      const operation = form.querySelector('[name="bulk_operation"]').value;
       const currentEntries = currentEntriesSnapshot();
       const nextEntries = deepClone(currentEntries);
 
@@ -5627,7 +5800,7 @@
       body.innerHTML = `
         <form class="cloud-bulk-form">
           <div class="cloud-bulk-grid">
-            <label class="cloud-field">
+            <label class="cloud-field" data-bulk-scope-field>
               <span>対象範囲</span>
               <select name="bulk_scope" class="cloud-input">
                 <option value="all">全日</option>
@@ -5673,6 +5846,7 @@
                 <option value="replace">置換</option>
                 <option value="delete">削除</option>
                 <option value="copy">コピー</option>
+                <option value="range_copy">範囲コピー</option>
               </select>
             </label>
             <div data-bulk-template class="cloud-bulk-template">
@@ -5717,6 +5891,38 @@
                   <option value="append">追加</option>
                 </select>
               </label>
+            </div>
+            <div data-bulk-range-copy class="cloud-bulk-range-copy cloud-hidden">
+              <div class="cloud-bulk-range-copy-head">
+                <span data-bulk-range-copy-step>カレンダーをクリック: ① コピー開始日</span>
+                <button type="button" class="cloud-btn ghost" data-bulk-range-copy-reset>選択しなおす</button>
+              </div>
+              <div class="cloud-bulk-range-copy-legend">
+                <span class="cloud-bulk-range-copy-key is-copy">コピー元</span>
+                <span class="cloud-bulk-range-copy-key is-paste">貼り付け先</span>
+              </div>
+              <div class="cloud-bulk-picked-weekdays">
+                <span>月</span>
+                <span>火</span>
+                <span>水</span>
+                <span>木</span>
+                <span>金</span>
+                <span>土</span>
+                <span>日</span>
+              </div>
+              <div class="cloud-bulk-range-copy-grid">
+                ${buildBulkRangeCopyCells(month)}
+              </div>
+              <label class="cloud-field">
+                <span>適用方法</span>
+                <select name="bulk_range_copy_mode" class="cloud-input">
+                  <option value="replace">置換</option>
+                  <option value="append">追加</option>
+                </select>
+              </label>
+              <input type="hidden" name="bulk_range_copy_start" value="">
+              <input type="hidden" name="bulk_range_copy_end" value="">
+              <input type="hidden" name="bulk_range_copy_paste" value="">
             </div>
             <div class="cloud-note-chip cloud-bulk-preview" data-bulk-preview>対象範囲を選択してください</div>
           </div>
@@ -5768,6 +5974,18 @@
           updateBulkPreview(form);
           return;
         }
+        const rangeCopyDay = event.target.closest('[data-bulk-range-copy-day]');
+        if (rangeCopyDay) {
+          event.preventDefault();
+          handleBulkRangeCopyClick(form, parseInt(rangeCopyDay.getAttribute('data-bulk-range-copy-day') || '0', 10));
+          return;
+        }
+        const rangeCopyReset = event.target.closest('[data-bulk-range-copy-reset]');
+        if (rangeCopyReset) {
+          event.preventDefault();
+          resetBulkRangeCopy(form);
+          return;
+        }
       });
       form.addEventListener('click', (event) => {
         const employeeCandidate = event.target.closest('.cloud-bulk-employee-candidate');
@@ -5791,8 +6009,10 @@
         }
       });
       applyBtn.addEventListener('click', () => applyBulkEditFromModal(modal));
+      form.dataset.rangeCopyStep = 'start';
       updateBulkFieldVisibility(form);
       updateBulkBranchOptions(form);
+      updateBulkRangeCopyHighlights(form);
       updateBulkPreview(form);
     }
 

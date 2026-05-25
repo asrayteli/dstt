@@ -1000,6 +1000,70 @@ def _entry_is_shift_synced(entry: dict[str, Any] | None) -> bool:
     return str(entry.get("sync_source_type") or "").strip() in SHIFT_SYNC_SOURCE_TYPES
 
 
+def _synced_entries_in_incoming_order(
+    synced_entries: list[dict[str, Any]],
+    incoming_day_entries: Any,
+) -> list[dict[str, Any]]:
+    """Honor a same-day client reorder of synced entries (ordering only).
+
+    Entry content always comes from ``synced_entries`` (server-authoritative); only
+    the relative order is taken from the client. Synced ids the client did not place
+    keep their server order at the end, so cross-day moves and content edits are
+    ignored — the only thing a client can influence here is same-day ordering.
+    """
+    if len(synced_entries) < 2:
+        return synced_entries
+    incoming_index: dict[str, int] = {}
+    for entry in incoming_day_entries if isinstance(incoming_day_entries, list) else []:
+        if not _entry_is_shift_synced(entry):
+            continue
+        entry_id = str(entry.get("id") or "").strip()
+        if entry_id and entry_id not in incoming_index:
+            incoming_index[entry_id] = len(incoming_index)
+    if not incoming_index:
+        return synced_entries
+
+    def _sort_key(pair: tuple[int, dict[str, Any]]) -> tuple[int, int, int]:
+        server_index, entry = pair
+        entry_id = str(entry.get("id") or "").strip()
+        if entry_id in incoming_index:
+            return (0, incoming_index[entry_id], server_index)
+        return (1, server_index, 0)
+
+    ordered = sorted(enumerate(synced_entries), key=_sort_key)
+    return [entry for _, entry in ordered]
+
+
+def _desired_synced_in_existing_order(
+    desired: list[dict[str, Any]],
+    existing_day_entries: Any,
+) -> list[dict[str, Any]]:
+    """Preserve a manually chosen synced-entry order across source re-syncs.
+
+    Rebuilt synced entries are reordered to match the order of the matching entries
+    already stored on the day; entries with no prior position keep their natural
+    (source) order at the end.
+    """
+    if len(desired) < 2:
+        return desired
+    existing_index: dict[str, int] = {}
+    for entry in existing_day_entries if isinstance(existing_day_entries, list) else []:
+        entry_id = str((entry or {}).get("id") or "").strip()
+        if entry_id and entry_id not in existing_index:
+            existing_index[entry_id] = len(existing_index)
+    if not existing_index:
+        return desired
+
+    def _sort_key(pair: tuple[int, dict[str, Any]]) -> tuple[int, int, int]:
+        natural_index, entry = pair
+        entry_id = str((entry or {}).get("id") or "").strip()
+        if entry_id in existing_index:
+            return (0, existing_index[entry_id], natural_index)
+        return (1, natural_index, 0)
+
+    return [entry for _, entry in sorted(enumerate(desired), key=_sort_key)]
+
+
 def _entry_site_link_fields(entry: dict[str, Any] | None) -> dict[str, str | None]:
     if not isinstance(entry, dict):
         return {"site_row_id": None, "site_id": "", "site_name": ""}
@@ -1192,6 +1256,7 @@ def _prepared_local_entries_for_month(
             and str(entry.get("id") or "").strip() not in incoming_local_ids
         ]
         synced_entries = [dict(entry) for entry in normalized_current.get(day_key, []) if _entry_is_shift_synced(entry)]
+        synced_entries = _synced_entries_in_incoming_order(synced_entries, normalized_incoming.get(day_key, []))
         combined[day_key] = local_entries + hidden_local_entries + synced_entries
     return combined
 
@@ -3770,6 +3835,7 @@ def _replace_shift_synced_entries_in_target_project(
             ]
         else:
             desired = [dict(entry) for entry in desired_for_day]
+        desired = _desired_synced_in_existing_order(desired, current_entries_per_day.get(day_key, []))
         next_entries_per_day[day_key] = preserved + desired
 
     if not current_month and not has_desired_entries:

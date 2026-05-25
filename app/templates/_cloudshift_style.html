@@ -1436,6 +1436,98 @@
     cursor: default;
   }
 
+  .cloud-bulk-range-copy {
+    grid-column: span 2;
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border: 1px dashed var(--cloud-line-strong);
+    border-radius: 18px;
+    background: rgba(240, 253, 244, 0.85);
+  }
+
+  .cloud-bulk-range-copy-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--cloud-text);
+  }
+
+  .cloud-bulk-range-copy-legend {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--cloud-muted);
+  }
+
+  .cloud-bulk-range-copy-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .cloud-bulk-range-copy-key::before {
+    content: '';
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    display: inline-block;
+  }
+
+  .cloud-bulk-range-copy-key.is-copy::before {
+    background: #16a34a;
+  }
+
+  .cloud-bulk-range-copy-key.is-paste::before {
+    background: #2563eb;
+  }
+
+  .cloud-bulk-range-copy-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .cloud-bulk-date-cell.is-copy-range {
+    border-color: #16a34a;
+    background: rgba(22, 163, 74, 0.16);
+    color: #14532d;
+  }
+
+  .cloud-bulk-date-cell.is-copy-start,
+  .cloud-bulk-date-cell.is-copy-end {
+    border-color: #16a34a;
+    background: #16a34a;
+    color: #fff;
+    box-shadow: 0 10px 24px rgba(22, 163, 74, 0.22);
+  }
+
+  .cloud-bulk-date-cell.is-paste-range {
+    border-color: #2563eb;
+    background: rgba(37, 99, 235, 0.16);
+    color: #1e3a8a;
+  }
+
+  .cloud-bulk-date-cell.is-paste-base {
+    border-color: #2563eb;
+    background: #2563eb;
+    color: #fff;
+    box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22);
+  }
+
+  .cloud-bulk-date-cell.is-paste-base.is-copy-start,
+  .cloud-bulk-date-cell.is-paste-base.is-copy-end,
+  .cloud-bulk-date-cell.is-paste-base.is-copy-range {
+    background: linear-gradient(135deg, #16a34a 0 50%, #2563eb 50% 100%);
+    color: #fff;
+  }
+
   .cloud-bulk-weekday {
     display: grid;
     grid-template-columns: auto 1fr;
