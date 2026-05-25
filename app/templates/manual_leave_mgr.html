@@ -412,10 +412,11 @@
           <span>🎨 休暇の種類と色</span>
           <button class="mlm-popup-btn" onclick="openModal('modalLeaveTypes')">詳細を見る ▼</button>
         </div>
-        <p style="font-size:14px;color:#475569;margin:0 0 14px">登録できる休暇は6種類です。カレンダー上では種類ごとに色で区別されます。</p>
+        <p style="font-size:14px;color:#475569;margin:0 0 14px">登録できる休暇は7種類です。カレンダー上では種類ごとに色で区別されます。</p>
         <div class="mlm-swatch-grid">
           <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#DC2626"></div>有休（有給休暇）</div>
           <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#10B981"></div>代休</div>
+          <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#64748B"></div>公休</div>
           <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#8B5CF6"></div>慶弔休暇</div>
           <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#F97316"></div>介護休暇</div>
           <div class="mlm-swatch"><div class="mlm-swatch-dot" style="background:#EC4899"></div>リフレッシュ休暇</div>
@@ -610,7 +611,7 @@
             <tr>
               <td>休暇種類</td>
               <td><span class="mlm-required">必須</span></td>
-              <td>有休・代休・慶弔休暇・介護休暇・リフレッシュ休暇・その他 の6種類から選択します。</td>
+              <td>有休・代休・公休・慶弔休暇・介護休暇・リフレッシュ休暇・その他 の7種類から選択します。</td>
             </tr>
             <tr>
               <td>代務者</td>
@@ -1137,6 +1138,11 @@
           <td>休日出勤の代替として取得する休暇</td>
         </tr>
         <tr>
+          <td><span style="display:inline-block;width:16px;height:16px;background:#64748B;border-radius:4px;vertical-align:middle"></span></td>
+          <td><strong>公休</strong></td>
+          <td>会社が定めた所定休日（有給休暇の残日数を消費しない休み）</td>
+        </tr>
+        <tr>
           <td><span style="display:inline-block;width:16px;height:16px;background:#8B5CF6;border-radius:4px;vertical-align:middle"></span></td>
           <td><strong>慶弔休暇</strong></td>
           <td>結婚・出産・葬儀などに伴う特別休暇</td>
@@ -1196,7 +1202,7 @@
         </tr>
         <tr>
           <td>休暇種類 <span class="mlm-required">必須</span></td>
-          <td>ドロップダウンから1種類を選択します。有休 / 代休 / 慶弔休暇 / 介護休暇 / リフレッシュ休暇 / その他 の6種類。</td>
+          <td>ドロップダウンから1種類を選択します。有休 / 代休 / 公休 / 慶弔休暇 / 介護休暇 / リフレッシュ休暇 / その他 の7種類。</td>
         </tr>
         <tr>
           <td>代務者</td>

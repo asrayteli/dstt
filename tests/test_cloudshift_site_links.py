@@ -685,3 +685,127 @@ def test_deleting_source_month_removes_shift_sync_entries(tmp_path):
     )
     assert person_after_delete.status_code == 200
     assert person_after_delete.get_json()["month"]["entries_per_day"]["1"] == []
+
+
+def _link_two_person_assignments_into_scene(client, *, day):
+    """Create two person projects that both sync a same-day assignment into one scene project.
+
+    Returns (scene_id, scene_month, synced_entries) for the destination scene book.
+    """
+    def _make_person(title, emp):
+        resp = client.post(
+            "/tools/shiftersync/cloudshift/api/create",
+            data={"title": title, "mode": "person", "employee_number": emp, "year": "2026", "month": "4"},
+        )
+        assert resp.status_code == 200
+        return resp.get_json()["project"]
+
+    person_a = _make_person("Worker A", "3001")
+    person_b = _make_person("Worker B", "3002")
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Scene One", "mode": "scene", "year": "2026", "month": "4", "site_row_id": str(_link_two_person_assignments_into_scene.site_row_id)},
+    )
+    assert scene_response.status_code == 200
+    scene_id = scene_response.get_json()["project"]["project"]["id"]
+
+    for person, entry_id in ((person_a, "person-a-1"), (person_b, "person-b-1")):
+        save = client.put(
+            f"/tools/shiftersync/cloudshift/api/project/{person['project']['id']}/month/2026/4",
+            json={
+                "required_capacity": 0,
+                "base_month": person["month"],
+                "entries_per_day": {
+                    str(day): [{
+                        "id": entry_id,
+                        "value": "!N1!Linked Master Site",
+                        "comment": "",
+                        "site_row_id": str(_link_two_person_assignments_into_scene.site_row_id),
+                        "site_id": "24680",
+                        "site_name": "Linked Master Site",
+                    }]
+                },
+            },
+        )
+        assert save.status_code == 200
+
+    scene_detail = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}",
+        query_string={"month_key": "2026-04"},
+    )
+    assert scene_detail.status_code == 200
+    scene_month = scene_detail.get_json()["month"]
+    synced = scene_month["entries_per_day"][str(day)]
+    assert len(synced) == 2
+    assert all(entry["sync_source_type"] == "person_shift" for entry in synced)
+    return scene_id, scene_month, synced
+
+
+def test_synced_entries_can_be_reordered_within_same_day(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    _link_two_person_assignments_into_scene.site_row_id = _create_site(
+        app, site_id="24680", site_name="Linked Master Site"
+    )
+    _create_branch(app, site_row_id=_link_two_person_assignments_into_scene.site_row_id, site_branch="001", option_key="N1")
+    client = app.test_client()
+
+    scene_id, scene_month, synced = _link_two_person_assignments_into_scene(client, day=5)
+    original_order = [entry["value"] for entry in synced]
+
+    # The destination owner reorders the two synced entries within the same day and saves.
+    reordered = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": scene_month,
+            "entries_per_day": {"5": list(reversed(synced))},
+        },
+    )
+    assert reordered.status_code == 200
+
+    after = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}",
+        query_string={"month_key": "2026-04"},
+    )
+    after_entries = after.get_json()["month"]["entries_per_day"]["5"]
+    assert [entry["value"] for entry in after_entries] == list(reversed(original_order))
+    # Content stays server-authoritative: still the two synced person_shift entries.
+    assert all(entry["sync_source_type"] == "person_shift" for entry in after_entries)
+    assert sorted(entry["value"] for entry in after_entries) == sorted(original_order)
+
+
+def test_synced_entry_cannot_be_moved_to_another_day_or_edited(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    _link_two_person_assignments_into_scene.site_row_id = _create_site(
+        app, site_id="24680", site_name="Linked Master Site"
+    )
+    _create_branch(app, site_row_id=_link_two_person_assignments_into_scene.site_row_id, site_branch="001", option_key="N1")
+    client = app.test_client()
+
+    scene_id, scene_month, synced = _link_two_person_assignments_into_scene(client, day=5)
+    moved = dict(synced[0])
+    moved["value"] = "!N1!Tampered"  # try to also change content
+
+    # Client tries to move one synced entry to day 6 and edit it; backend must reject both.
+    save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": scene_month,
+            "entries_per_day": {"5": [synced[1]], "6": [moved]},
+        },
+    )
+    assert save.status_code == 200
+
+    after = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}",
+        query_string={"month_key": "2026-04"},
+    )
+    after_per_day = after.get_json()["month"]["entries_per_day"]
+    # The synced entry stayed on day 5 (no cross-day move) and kept its original content.
+    assert len(after_per_day["5"]) == 2
+    assert "6" not in after_per_day or after_per_day["6"] == []
+    assert all("Tampered" not in entry["value"] for entry in after_per_day["5"])

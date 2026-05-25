@@ -516,6 +516,59 @@ def test_owner_approved_leave_change_request_is_finalized_on_month_save(tmp_path
     assert settings_after.get_json()["pending_leave_change_request_count"] == 0
 
 
+def test_owner_approval_reflects_request_comment_into_entry_comment(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    )
+    payload = create_response.get_json()["project"]
+    project_id = payload["project"]["id"]
+    view_token = _token_from_url(payload["project"]["urls"]["view_url"])
+    month = payload["month"]
+    entry = {"id": "leave-1", "value": "!PAID!Alpha Site", "comment": "既存メモ"}
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": {"1": [entry]}, "base_month": month},
+    )
+    month = save_response.get_json()["month"]
+
+    client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/settings",
+        json={"leave_change_requests_enabled": True},
+    )
+    module.current_user = _guest()
+    request_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/public/view/{view_token}/leave-change-requests",
+        json={
+            "month_key": "2026-04",
+            "day": 1,
+            "entry_id": "leave-1",
+            "requested_option_key": "COMP",
+            "request_comment": "振替休日のため",
+        },
+    )
+    request_id = request_response.get_json()["request"]["id"]
+
+    module.current_user = _owner()
+    approved_entries = month["entries_per_day"]
+    approved_entries["1"][0]["value"] = "!COMP!Alpha Site"
+    approved_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": approved_entries,
+            "base_month": month,
+            "leave_change_request_decisions": {"approved": [request_id]},
+        },
+    )
+    assert approved_response.status_code == 200
+    saved_entry = approved_response.get_json()["month"]["entries_per_day"]["1"][0]
+    assert saved_entry["value"] == "!COMP!Alpha Site"
+    assert saved_entry["comment"] == "既存メモ\n振替休日のため"
+
+
 def test_owner_viewing_leave_change_requests_clears_unviewed_count(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()

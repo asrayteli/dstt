@@ -460,6 +460,11 @@ h1, h2, h3 {
     color: var(--ss-accent);
 }
 
+.entry-item.is-synced-reorder .entry-drag-handle {
+    color: var(--ss-accent);
+    opacity: 0.7;
+}
+
 .entry-item-title {
     font-size: 11px;
     font-weight: 700;

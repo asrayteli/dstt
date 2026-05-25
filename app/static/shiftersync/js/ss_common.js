@@ -27,6 +27,7 @@ const ShifterSync = (function() {
   const leaveOptionMappings = {
     PAID: '\u6709\u4f11',
     COMP: '\u4ee3\u4f11',
+    PUBLIC: '\u516c\u4f11',
     CONDOLENCE: '\u6176\u5f14\u4f11\u6687',
     CARE: '\u4ecb\u8b77\u4f11\u6687',
     REFRESH: '\u30ea\u30d5\u30ec\u30c3\u30b7\u30e5\u4f11\u6687',
@@ -1587,10 +1588,14 @@ const ShifterSync = (function() {
     entries.forEach((entry) => {
       const parts = getEntryDisplayParts(entry);
       const syncedEntry = isSyncedEntry(entry);
-      const canDragEntry = state.editable && !syncedEntry;
+      const substituteRequestDisplay = String(entry.sync_source_type || '').trim() === 'substitute_request';
+      // Synced entries keep their content/day locked, but can be reordered within the same day.
+      const canDragEntry = state.editable && !substituteRequestDisplay;
+      const dragHint = syncedEntry ? '同じ日の中で並び替え' : '並び替え・別の日付へ移動';
       const item = $('<div>')
         .addClass('entry-item')
         .toggleClass('is-draggable', canDragEntry)
+        .toggleClass('is-synced-reorder', canDragEntry && syncedEntry)
         .toggleClass('is-cloud-draft-added', entry.cloud_draft_added === true)
         .toggleClass('has-branch-warning', parts.branch_issue_tone === 'warning')
         .toggleClass('has-branch-danger', parts.branch_issue_tone === 'danger')
@@ -1601,8 +1606,8 @@ const ShifterSync = (function() {
             ? $('<span>')
               .addClass('entry-drag-handle')
               .attr('role', 'button')
-              .attr('aria-label', 'ドラッグで並び替え・別の日付へ移動')
-              .attr('title', 'ドラッグで並び替え・別の日付へ移動')
+              .attr('aria-label', `ドラッグで${dragHint}`)
+              .attr('title', `ドラッグで${dragHint}`)
               .text('↕')
             : null,
           $('<div>')
