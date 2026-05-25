@@ -18,9 +18,14 @@ TEMPLATE_ROOT = ROOT / "app" / "templates"
 def _build_app():
     app = Flask(__name__, template_folder=str(TEMPLATE_ROOT))
 
+    categorized = [{"category": None, "tools": list(NAV_ITEMS)}]
+
     @app.context_processor
     def inject_navigation():
-        return {"app_navigation_items": NAV_ITEMS}
+        return {
+            "app_navigation_items": NAV_ITEMS,
+            "categorized_navigation": categorized,
+        }
 
     return app
 
@@ -38,9 +43,12 @@ def test_bus_pricing_card_is_last_navigation_item():
 
 
 def test_bus_pricing_requires_explicit_permission():
+    from app import create_app
     from app.access_control import tool_requires_permission
 
-    assert tool_requires_permission("bus_pricing")
+    app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
+    with app.app_context():
+        assert tool_requires_permission("bus_pricing")
 
 
 def test_base_template_renders_shared_sidebar_links():

@@ -24,6 +24,8 @@ from .models import (
     AccessBranch,
     AccessOffice,
     GroupToolPermission,
+    ToolCategory,
+    ToolSettings,
     User,
     UserAccessibleOffice,
     UserToolPermission,
@@ -71,6 +73,9 @@ TOOL_ACCESS_CATEGORIES: dict[str, str] = {
 
 
 def tool_category(tool_key: str) -> str:
+    ts = db.session.get(ToolSettings, tool_key)
+    if ts:
+        return ts.access_type
     return TOOL_ACCESS_CATEGORIES.get(tool_key, "public")
 
 
@@ -240,12 +245,19 @@ def _group_granted_tool_keys(user) -> set[str]:
     return keys
 
 
+def _is_tool_visible(tool_key: str) -> bool:
+    ts = db.session.get(ToolSettings, tool_key)
+    return ts.is_visible if ts else True
+
+
 def user_has_tool_access(tool_key: str, user=None) -> bool:
     user = user if user is not None else current_user
     if user is None or not getattr(user, "is_authenticated", False):
         return False
     if is_admin_user(user):
         return True
+    if not _is_tool_visible(tool_key):
+        return False
     if not tool_requires_permission(tool_key):
         return True
     if tool_key in _user_granted_tool_keys(user):
@@ -253,6 +265,12 @@ def user_has_tool_access(tool_key: str, user=None) -> bool:
     if tool_key in _group_granted_tool_keys(user):
         return True
     return False
+
+
+def _tool_visibility_map() -> dict[str, bool]:
+    """ToolSettingsからツールの公開/非公開マップを返す。未登録は公開扱い。"""
+    rows = ToolSettings.query.all()
+    return {row.tool_key: row.is_visible for row in rows}
 
 
 def get_accessible_nav_items(user=None) -> list[dict]:
@@ -266,9 +284,13 @@ def get_accessible_nav_items(user=None) -> list[dict]:
     if not admin:
         granted = set(_user_granted_tool_keys(user)) | set(_group_granted_tool_keys(user))
 
+    visibility = _tool_visibility_map()
+
     visible: list[dict] = []
     for item in NAV_ITEMS:
         tool_key = _nav_tool_key(item)
+        if not admin and not visibility.get(tool_key, True):
+            continue
         if admin:
             visible.append(item)
             continue
@@ -278,6 +300,54 @@ def get_accessible_nav_items(user=None) -> list[dict]:
         if granted is not None and tool_key in granted:
             visible.append(item)
     return visible
+
+
+def get_categorized_nav_items(user=None) -> list[dict]:
+    """カテゴリ別にグループ化されたナビゲーション一覧を返す。
+
+    Returns:
+        [
+            {"category": {"id": 1, "name": "大新東ツール"}, "tools": [nav_item, ...]},
+            {"category": {"id": 2, "name": "ファイル操作"}, "tools": [nav_item, ...]},
+            ...
+            {"category": None, "tools": [uncategorized_items...]},
+        ]
+    """
+    items = get_accessible_nav_items(user)
+    if not items:
+        return []
+
+    accessible_keys = {_nav_tool_key(item) for item in items}
+    item_map = {_nav_tool_key(item): item for item in items}
+
+    categories = ToolCategory.query.order_by(ToolCategory.sort_order, ToolCategory.id).all()
+    settings = {ts.tool_key: ts for ts in ToolSettings.query.all()}
+
+    result = []
+    placed_keys: set[str] = set()
+
+    for cat in categories:
+        cat_tools = []
+        cat_settings = sorted(
+            [ts for ts in settings.values() if ts.category_id == cat.id],
+            key=lambda ts: ts.sort_order,
+        )
+        for ts in cat_settings:
+            if ts.tool_key in accessible_keys:
+                cat_tools.append(item_map[ts.tool_key])
+                placed_keys.add(ts.tool_key)
+        if cat_tools:
+            result.append({
+                "category": {"id": cat.id, "name": cat.name},
+                "tools": cat_tools,
+            })
+
+    uncategorized = [item_map[k] for k in accessible_keys if k not in placed_keys]
+    if uncategorized:
+        ordered = [item for item in items if _nav_tool_key(item) in {_nav_tool_key(u) for u in uncategorized}]
+        result.append({"category": None, "tools": ordered})
+
+    return result
 
 
 def user_can_access_office_code(office_code: str | None, user=None) -> bool:

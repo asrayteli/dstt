@@ -75,6 +75,7 @@ def test_power_flow_page_loads_launcher_and_editor(app_ctx):
 
 
 def test_power_flow_is_public_navigation_tool():
+    from app import create_app
     from app.access_control import tool_category
     from app.manuals import get_manual
     from app.navigation import NAV_ITEMS
@@ -82,5 +83,7 @@ def test_power_flow_is_public_navigation_tool():
     item = next(nav for nav in NAV_ITEMS if nav["key"] == "power_flow")
 
     assert item["href"] == "/tools/power_flow"
-    assert tool_category("power_flow") == "public"
+    app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
+    with app.app_context():
+        assert tool_category("power_flow") == "public"
     assert get_manual("power_flow")["tool_label"] == "Power Flow"

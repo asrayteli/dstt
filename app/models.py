@@ -276,6 +276,56 @@ class PowerVoteResponse(db.Model):
     form = db.relationship('PowerVoteForm', back_populates='responses')
 
 
+class ToolCategory(db.Model):
+    """ツールカテゴリ（管理者が自由に作成・編集・削除可能）"""
+    __tablename__ = 'tool_categories'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    tool_settings = db.relationship(
+        'ToolSettings',
+        back_populates='category',
+        order_by='ToolSettings.sort_order',
+    )
+
+    def to_dict(self, include_tools=False):
+        data = {
+            'id': self.id,
+            'name': self.name,
+            'sort_order': self.sort_order,
+        }
+        if include_tools:
+            data['tools'] = [ts.to_dict() for ts in self.tool_settings]
+        return data
+
+
+class ToolSettings(db.Model):
+    """ツールごとの公開/非公開・カテゴリ紐付け・アクセス種別"""
+    __tablename__ = 'tool_settings'
+
+    tool_key = db.Column(db.String(80), primary_key=True)
+    is_visible = db.Column(db.Boolean, nullable=False, default=True)
+    access_type = db.Column(db.String(20), nullable=False, default='public')
+    category_id = db.Column(db.Integer, db.ForeignKey('tool_categories.id'), nullable=True, index=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    category = db.relationship('ToolCategory', back_populates='tool_settings')
+
+    def to_dict(self):
+        return {
+            'tool_key': self.tool_key,
+            'is_visible': self.is_visible,
+            'access_type': self.access_type,
+            'category_id': self.category_id,
+            'category_name': self.category.name if self.category else None,
+            'sort_order': self.sort_order,
+        }
+
+
 class GroupToolPermission(db.Model):
     """支店/営業所/担当による一括ツールアクセス権付与。
     branch_id, office_id, department_id のうちNULLは「任意」を意味する。
