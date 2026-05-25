@@ -11,6 +11,8 @@ from app.models import (
     AccessDepartment,
     GroupToolPermission,
     Site,
+    ToolCategory,
+    ToolSettings,
     UserAccessibleOffice,
     UserToolPermission,
 )
@@ -864,6 +866,172 @@ def list_siteplus_accessible_offices():
             if o.code
         ]
     })
+
+
+# ============================================================
+# ツールカテゴリ管理
+# ============================================================
+
+@user_management_bp.route("/api/tool-categories", methods=["GET"])
+@login_required
+def get_tool_categories():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    cats = ToolCategory.query.order_by(ToolCategory.sort_order, ToolCategory.id).all()
+    return jsonify({"categories": [c.to_dict(include_tools=True) for c in cats]})
+
+
+@user_management_bp.route("/api/tool-categories", methods=["POST"])
+@login_required
+def create_tool_category():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    data = request.get_json(force=True)
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "カテゴリ名を入力してください"}), 400
+    if ToolCategory.query.filter_by(name=name).first():
+        return jsonify({"error": "同じ名前のカテゴリが既に存在します"}), 400
+    max_order = db.session.query(db.func.max(ToolCategory.sort_order)).scalar() or 0
+    cat = ToolCategory(name=name, sort_order=max_order + 1)
+    db.session.add(cat)
+    db.session.commit()
+    return jsonify({"category": cat.to_dict(), "message": f"カテゴリ「{name}」を作成しました"})
+
+
+@user_management_bp.route("/api/tool-categories/<int:cat_id>", methods=["PUT"])
+@login_required
+def update_tool_category(cat_id):
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    cat = ToolCategory.query.get(cat_id)
+    if not cat:
+        return jsonify({"error": "カテゴリが見つかりません"}), 404
+    data = request.get_json(force=True)
+    name = data.get("name")
+    if name is not None:
+        name = name.strip()
+        if not name:
+            return jsonify({"error": "カテゴリ名を入力してください"}), 400
+        dup = ToolCategory.query.filter(ToolCategory.name == name, ToolCategory.id != cat_id).first()
+        if dup:
+            return jsonify({"error": "同じ名前のカテゴリが既に存在します"}), 400
+        cat.name = name
+    if "sort_order" in data:
+        cat.sort_order = int(data["sort_order"])
+    db.session.commit()
+    return jsonify({"category": cat.to_dict(), "message": "カテゴリを更新しました"})
+
+
+@user_management_bp.route("/api/tool-categories/<int:cat_id>", methods=["DELETE"])
+@login_required
+def delete_tool_category(cat_id):
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    cat = ToolCategory.query.get(cat_id)
+    if not cat:
+        return jsonify({"error": "カテゴリが見つかりません"}), 404
+    ToolSettings.query.filter_by(category_id=cat_id).update({"category_id": None})
+    db.session.delete(cat)
+    db.session.commit()
+    return jsonify({"message": f"カテゴリ「{cat.name}」を削除しました"})
+
+
+@user_management_bp.route("/api/tool-categories/reorder", methods=["PUT"])
+@login_required
+def reorder_tool_categories():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    data = request.get_json(force=True)
+    order = data.get("order", [])
+    for i, cat_id in enumerate(order):
+        cat = ToolCategory.query.get(int(cat_id))
+        if cat:
+            cat.sort_order = i
+    db.session.commit()
+    return jsonify({"message": "カテゴリの並び順を更新しました"})
+
+
+# ============================================================
+# ツール設定（公開/非公開 + カテゴリ割り当て）
+# ============================================================
+
+@user_management_bp.route("/api/tool-settings", methods=["GET"])
+@login_required
+def get_tool_settings():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    settings = {ts.tool_key: ts for ts in ToolSettings.query.all()}
+    items = []
+    for nav in NAV_ITEMS:
+        key = nav.get("key") or nav.get("href", "").strip("/").rsplit("/", 1)[-1]
+        ts = settings.get(key)
+        items.append({
+            "tool_key": key,
+            "label": nav.get("label"),
+            "icon": nav.get("icon"),
+            "description": nav.get("description"),
+            "access_type": ts.access_type if ts else TOOL_ACCESS_CATEGORIES.get(key, "public"),
+            "is_visible": ts.is_visible if ts else True,
+            "category_id": ts.category_id if ts else None,
+            "category_name": ts.category.name if ts and ts.category else None,
+            "sort_order": ts.sort_order if ts else 0,
+        })
+    return jsonify({"tools": items})
+
+
+@user_management_bp.route("/api/tool-settings/<tool_key>", methods=["PUT"])
+@login_required
+def update_tool_setting(tool_key):
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    data = request.get_json(force=True)
+    ts = ToolSettings.query.get(tool_key)
+    if not ts:
+        ts = ToolSettings(tool_key=tool_key)
+        db.session.add(ts)
+    if "is_visible" in data:
+        ts.is_visible = bool(data["is_visible"])
+    if "access_type" in data:
+        if data["access_type"] in ("public", "sensitive"):
+            ts.access_type = data["access_type"]
+    if "category_id" in data:
+        cat_id = _coerce_optional_int(data["category_id"])
+        if cat_id is not None and not ToolCategory.query.get(cat_id):
+            return jsonify({"error": "指定されたカテゴリが見つかりません"}), 400
+        ts.category_id = cat_id
+    if "sort_order" in data:
+        ts.sort_order = int(data["sort_order"])
+    db.session.commit()
+    return jsonify({"tool": ts.to_dict(), "message": "ツール設定を更新しました"})
+
+
+@user_management_bp.route("/api/tool-settings/bulk", methods=["PUT"])
+@login_required
+def bulk_update_tool_settings():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    data = request.get_json(force=True)
+    updates = data.get("updates", [])
+    for upd in updates:
+        key = upd.get("tool_key")
+        if not key:
+            continue
+        ts = ToolSettings.query.get(key)
+        if not ts:
+            ts = ToolSettings(tool_key=key)
+            db.session.add(ts)
+        if "is_visible" in upd:
+            ts.is_visible = bool(upd["is_visible"])
+        if "access_type" in upd:
+            if upd["access_type"] in ("public", "sensitive"):
+                ts.access_type = upd["access_type"]
+        if "category_id" in upd:
+            ts.category_id = _coerce_optional_int(upd["category_id"])
+        if "sort_order" in upd:
+            ts.sort_order = int(upd["sort_order"])
+    db.session.commit()
+    return jsonify({"message": f"{len(updates)}件のツール設定を更新しました"})
 
 
 @user_management_bp.route("/api/siteplus/sites/<int:site_row_id>/office-code", methods=["PUT"])

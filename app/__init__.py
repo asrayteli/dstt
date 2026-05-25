@@ -113,6 +113,83 @@ def _resolve_database_uri(test_config=None) -> str:
     return os.environ.get("DSTT_DATABASE_URI", "sqlite:///users.db")
 
 
+def _seed_tool_categories():
+    """カテゴリとツール設定の初期化・補完。
+
+    - 初回起動: デフォルトカテゴリとツール割り当てを作成
+    - 毎回: NAV_ITEMSにあるがToolSettingsに未登録のツールを自動補完
+    """
+    from .models import ToolCategory, ToolSettings
+    from .navigation import NAV_ITEMS
+    from .access_control import TOOL_ACCESS_CATEGORIES
+
+    if ToolCategory.query.first() is None:
+        DEFAULT_CATEGORIES = [
+            ("大新東ツール", [
+                "shiftersync", "monthly_generator", "subject_analysis_tool",
+                "pluslist", "siteplus", "leave_mgr", "bus_pricing",
+            ]),
+            ("ファイル操作", [
+                "rename", "compress", "csvtool", "pdf_power", "share",
+            ]),
+            ("計算ツール", [
+                "datecalc", "calc", "workday",
+            ]),
+            ("画像・デザイン", [
+                "color_extract", "powerstamp", "power_imager", "power_flow",
+            ]),
+            ("セキュリティ", [
+                "password_tool",
+            ]),
+            ("その他", [
+                "car_inspe", "powervote",
+            ]),
+        ]
+
+        for i, (name, tool_keys) in enumerate(DEFAULT_CATEGORIES):
+            cat = ToolCategory(name=name, sort_order=i)
+            db.session.add(cat)
+            db.session.flush()
+            for j, key in enumerate(tool_keys):
+                ts = db.session.get(ToolSettings, key)
+                if not ts:
+                    ts = ToolSettings(tool_key=key)
+                    db.session.add(ts)
+                ts.category_id = cat.id
+                ts.sort_order = j
+                ts.access_type = TOOL_ACCESS_CATEGORIES.get(key, "public")
+
+    KNOWN_DEFAULTS = {
+        "bus_pricing": "大新東ツール",
+    }
+
+    existing_keys = {ts.tool_key for ts in ToolSettings.query.all()}
+    added = False
+    for nav in NAV_ITEMS:
+        key = nav.get("key", "")
+        if key and key not in existing_keys:
+            ts = ToolSettings(
+                tool_key=key,
+                access_type=TOOL_ACCESS_CATEGORIES.get(key, "public"),
+            )
+            default_cat_name = KNOWN_DEFAULTS.get(key)
+            if default_cat_name:
+                cat = ToolCategory.query.filter_by(name=default_cat_name).first()
+                if cat:
+                    max_order = db.session.query(
+                        db.func.coalesce(db.func.max(ToolSettings.sort_order), 0)
+                    ).filter(ToolSettings.category_id == cat.id).scalar()
+                    ts.category_id = cat.id
+                    ts.sort_order = max_order + 1
+            db.session.add(ts)
+            added = True
+
+    if added:
+        db.session.commit()
+    else:
+        db.session.commit()
+
+
 def _ensure_access_control_schema(app):
     """既存DBにアクセス権管理用のテーブル/カラムを自動追加する。"""
     with app.app_context():
@@ -197,6 +274,43 @@ def _ensure_access_control_schema(app):
             if "model_type" in vehicle_inspection_cols:
                 alters.append("ALTER TABLE vehicle_inspection_records DROP COLUMN model_type")
 
+        tables = set(inspector.get_table_names())
+
+        if "tool_categories" not in tables:
+            alters.append(
+                "CREATE TABLE tool_categories ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  name VARCHAR(100) NOT NULL UNIQUE,"
+                "  sort_order INTEGER NOT NULL DEFAULT 0,"
+                "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+
+        if "tool_settings" not in tables:
+            alters.append(
+                "CREATE TABLE tool_settings ("
+                "  tool_key VARCHAR(80) PRIMARY KEY,"
+                "  is_visible BOOLEAN NOT NULL DEFAULT 1,"
+                "  access_type VARCHAR(20) NOT NULL DEFAULT 'public',"
+                "  category_id INTEGER REFERENCES tool_categories(id),"
+                "  sort_order INTEGER NOT NULL DEFAULT 0,"
+                "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        else:
+            ts_cols = {c["name"] for c in inspector.get_columns("tool_settings")}
+            if "access_type" not in ts_cols:
+                alters.append(
+                    "ALTER TABLE tool_settings ADD COLUMN access_type VARCHAR(20) NOT NULL DEFAULT 'public'"
+                )
+                from .access_control import TOOL_ACCESS_CATEGORIES
+                sensitive_keys = [k for k, v in TOOL_ACCESS_CATEGORIES.items() if v == "sensitive"]
+                if sensitive_keys:
+                    placeholders = ",".join(f"'{k}'" for k in sensitive_keys)
+                    post_updates.append(
+                        f"UPDATE tool_settings SET access_type = 'sensitive' WHERE tool_key IN ({placeholders})"
+                    )
+
         if alters or post_updates:
             _run_schema_statements(alters, ignore_duplicates=True)
             _run_schema_statements(post_updates)
@@ -207,6 +321,8 @@ def _ensure_access_control_schema(app):
             ensure_legacy_admin_flag()
         except Exception:
             db.session.rollback()
+
+        _seed_tool_categories()
 
 def create_app(test_config=None):
     app = Flask(__name__, static_folder='./static/')
@@ -245,6 +361,7 @@ def create_app(test_config=None):
     def inject_navigation():
         from .access_control import (
             get_accessible_nav_items,
+            get_categorized_nav_items,
             is_admin_user,
         )
         from flask_login import current_user
@@ -254,6 +371,7 @@ def create_app(test_config=None):
             uid = ""
         return {
             "app_navigation_items": get_accessible_nav_items(),
+            "categorized_navigation": get_categorized_nav_items(),
             "all_navigation_items": NAV_ITEMS,
             "current_user_is_admin": is_admin_user(),
             "current_user_id": uid,
@@ -364,7 +482,7 @@ def create_app(test_config=None):
 
     # アクセス権管理（機密ツールに before_request を紐付け）
     from flask import request as _req
-    from .access_control import TOOL_ACCESS_CATEGORIES, enforce_tool_access
+    from .access_control import enforce_tool_access
 
     # Blueprint毎のアクセス制御除外パスプレフィックス。
     # トークン共有等、ログインしていない外部ユーザーが利用する経路を除外する。
@@ -394,8 +512,6 @@ def create_app(test_config=None):
         bp_name = endpoint.split(".", 1)[0]
         tool_key = _BP_TO_TOOL_KEY.get(bp_name)
         if not tool_key:
-            return None
-        if TOOL_ACCESS_CATEGORIES.get(tool_key) != "sensitive":
             return None
         path = _req.path or ""
         for pref in _EXEMPT_PATH_PREFIXES:

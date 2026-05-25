@@ -149,18 +149,29 @@
           <img src="{{ url_for('static', filename='img/head.png') }}" alt="DSTT Logo">
         </a>
       </div>
-      <nav class="px-4">
+      <nav class="px-4 overflow-y-auto" style="max-height: calc(100vh - 80px);">
         <ul>
           <li class="my-2">
             <a href="/" class="block px-4 py-2 rounded hover:bg-blue-100">🏠 ダッシュボード</a>
           </li>
-          {% for item in app_navigation_items %}
-          <li class="my-2">
+          {% for group in categorized_navigation %}
+          {% if group.category %}
+          <li class="mt-4 mb-1 px-4">
+            <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">{{ group.category.name }}</span>
+          </li>
+          {% else %}
+          <li class="mt-4 mb-1 px-4">
+            <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">その他</span>
+          </li>
+          {% endif %}
+          {% for item in group.tools %}
+          <li class="my-1">
             <a
               href="{{ item.href }}"
-              class="block px-4 py-2 rounded hover:bg-blue-100 {% if request.path.startswith(item.href) %}bg-blue-50 text-blue-700 font-medium{% endif %}"
+              class="block px-4 py-1.5 rounded text-sm hover:bg-blue-100 {% if request.path.startswith(item.href) %}bg-blue-50 text-blue-700 font-medium{% endif %}"
             >{{ item.icon }} {{ item.label }}</a>
           </li>
+          {% endfor %}
           {% endfor %}
         </ul>
       </nav>

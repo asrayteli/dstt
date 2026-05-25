@@ -16,6 +16,7 @@
       <button data-tab="organization" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🏢 支店・営業所・担当</button>
       <button data-tab="siteplus-codes" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🏗️ 現場の営業所コード</button>
       <button data-tab="leavemgr-codes" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">⛵ 有休カレンダー</button>
+      <button data-tab="tool-management" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🧩 ツール管理</button>
       <button data-tab="announcements" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">📣 お知らせ</button>
     </nav>
   </div>
@@ -229,6 +230,46 @@
     </div>
   </section>
 
+  <!-- ===== ツール管理 ===== -->
+  <section id="tab-tool-management" class="admin-section hidden">
+    <div class="bg-white rounded-xl shadow p-6">
+      <h2 class="text-xl font-semibold mb-2">ツールカテゴリ・公開設定</h2>
+      <p class="text-sm text-gray-600 mb-4">
+        ツールのジャンル分け（カテゴリ）と公開/非公開を管理します。<br>
+        非公開にしたツールは一般ユーザーには表示されません（管理者は常に全ツール利用可）。
+      </p>
+
+      <!-- カテゴリ管理 -->
+      <div class="mb-6 border rounded p-4 bg-gray-50">
+        <h3 class="font-medium mb-3">カテゴリ管理</h3>
+        <div class="flex gap-2 mb-3">
+          <input id="new-cat-name" placeholder="カテゴリ名（例：大新東ツール）" class="border rounded px-3 py-2 flex-1">
+          <button id="btn-add-cat" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">＋ 追加</button>
+        </div>
+        <div id="cat-list" class="space-y-2"></div>
+      </div>
+
+      <!-- ツール一覧 -->
+      <div class="border rounded">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="p-3 text-left">ツール</th>
+              <th class="p-3 text-left">アクセス種別</th>
+              <th class="p-3 text-left">カテゴリ</th>
+              <th class="p-3 text-center w-24">公開</th>
+            </tr>
+          </thead>
+          <tbody id="tm-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="flex gap-2 justify-end mt-4">
+        <button id="btn-tm-save" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">💾 ツール設定を一括保存</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ===== お知らせ ===== -->
   <section id="tab-announcements" class="admin-section hidden">
     <div class="bg-white rounded-xl shadow p-6">
@@ -381,6 +422,7 @@ $$('.admin-tab').forEach(btn => btn.addEventListener('click', () => {
   if (tab === 'group-perms') loadGroupPerms();
   if (tab === 'siteplus-codes') loadSiteplusCodes();
   if (tab === 'leavemgr-codes') loadLeaveMgrCodes();
+  if (tab === 'tool-management') loadToolManagement();
 }));
 
 // ===== Users =====
@@ -1206,6 +1248,157 @@ async function saveLeaveCalendarCode(btn) {
     alert('保存しました');
   } catch (err) { alert('エラー: ' + err.message); }
 }
+
+// ===== Tool Management =====
+const tmState = { categories: [], tools: [] };
+
+async function loadToolManagement() {
+  const [catRes, toolRes] = await Promise.all([
+    api('/tools/user_management/api/tool-categories'),
+    api('/tools/user_management/api/tool-settings'),
+  ]);
+  tmState.categories = catRes.categories;
+  tmState.tools = toolRes.tools;
+  renderCategories();
+  renderToolSettings();
+}
+
+function renderCategories() {
+  const el = $('#cat-list');
+  if (!tmState.categories.length) {
+    el.innerHTML = '<p class="text-sm text-gray-500">カテゴリがまだありません。</p>';
+    return;
+  }
+  el.innerHTML = tmState.categories.map((c, idx) => `
+    <div class="flex items-center gap-2 bg-white border rounded p-2" data-cat-id="${c.id}">
+      <span class="cursor-grab text-gray-400" title="ドラッグで並び替え">⠿</span>
+      <span class="font-medium flex-1">${escape(c.name)}</span>
+      <span class="text-xs text-gray-500">${(c.tools || []).length} ツール</span>
+      <button onclick="editCategory(${c.id})" class="text-blue-600 text-xs hover:underline">編集</button>
+      <button onclick="deleteCategory(${c.id})" class="text-red-600 text-xs hover:underline">削除</button>
+      <button onclick="moveCategoryUp(${idx})" class="text-gray-500 text-xs" ${idx === 0 ? 'disabled' : ''}>▲</button>
+      <button onclick="moveCategoryDown(${idx})" class="text-gray-500 text-xs" ${idx === tmState.categories.length - 1 ? 'disabled' : ''}>▼</button>
+    </div>
+  `).join('');
+}
+
+function renderToolSettings() {
+  const tbody = $('#tm-tbody');
+  tbody.innerHTML = tmState.tools.map(t => {
+    const catOptions = '<option value="">（未分類）</option>' +
+      tmState.categories.map(c =>
+        `<option value="${c.id}" ${t.category_id === c.id ? 'selected' : ''}>${escape(c.name)}</option>`
+      ).join('');
+    const accessOptions = `
+      <option value="public" ${t.access_type === 'public' ? 'selected' : ''}>🌐 公開</option>
+      <option value="sensitive" ${t.access_type === 'sensitive' ? 'selected' : ''}>🔒 要許可</option>
+    `;
+    return `
+      <tr class="border-t">
+        <td class="p-3">
+          <div class="font-medium">${t.icon || ''} ${escape(t.label)}</div>
+          <div class="text-xs text-gray-500">${escape(t.description || '')}</div>
+        </td>
+        <td class="p-3">
+          <select data-key="${t.tool_key}" class="tm-access-select border rounded px-2 py-1 text-sm">
+            ${accessOptions}
+          </select>
+        </td>
+        <td class="p-3">
+          <select data-key="${t.tool_key}" class="tm-cat-select border rounded px-2 py-1 text-sm w-full">
+            ${catOptions}
+          </select>
+        </td>
+        <td class="p-3 text-center">
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" data-key="${t.tool_key}" class="tm-visible-cb sr-only peer" ${t.is_visible ? 'checked' : ''}>
+            <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+          </label>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+$('#btn-add-cat').addEventListener('click', async () => {
+  const name = $('#new-cat-name').value.trim();
+  if (!name) return alert('カテゴリ名を入力してください。');
+  try {
+    await api('/tools/user_management/api/tool-categories', {
+      method: 'POST', body: { name }
+    });
+    $('#new-cat-name').value = '';
+    loadToolManagement();
+  } catch (err) { alert('エラー: ' + err.message); }
+});
+
+async function editCategory(id) {
+  const cat = tmState.categories.find(c => c.id === id);
+  if (!cat) return;
+  const name = prompt('カテゴリ名', cat.name);
+  if (!name) return;
+  try {
+    await api(`/tools/user_management/api/tool-categories/${id}`, {
+      method: 'PUT', body: { name }
+    });
+    loadToolManagement();
+  } catch (err) { alert('エラー: ' + err.message); }
+}
+
+async function deleteCategory(id) {
+  const cat = tmState.categories.find(c => c.id === id);
+  if (!cat) return;
+  if (!confirm(`カテゴリ「${cat.name}」を削除しますか？\n所属するツールは「未分類」になります。`)) return;
+  try {
+    await api(`/tools/user_management/api/tool-categories/${id}`, { method: 'DELETE' });
+    loadToolManagement();
+  } catch (err) { alert('エラー: ' + err.message); }
+}
+
+async function moveCategoryUp(idx) {
+  if (idx <= 0) return;
+  const order = tmState.categories.map(c => c.id);
+  [order[idx - 1], order[idx]] = [order[idx], order[idx - 1]];
+  try {
+    await api('/tools/user_management/api/tool-categories/reorder', {
+      method: 'PUT', body: { order }
+    });
+    loadToolManagement();
+  } catch (err) { alert('エラー: ' + err.message); }
+}
+
+async function moveCategoryDown(idx) {
+  if (idx >= tmState.categories.length - 1) return;
+  const order = tmState.categories.map(c => c.id);
+  [order[idx], order[idx + 1]] = [order[idx + 1], order[idx]];
+  try {
+    await api('/tools/user_management/api/tool-categories/reorder', {
+      method: 'PUT', body: { order }
+    });
+    loadToolManagement();
+  } catch (err) { alert('エラー: ' + err.message); }
+}
+
+$('#btn-tm-save').addEventListener('click', async () => {
+  const updates = tmState.tools.map(t => {
+    const accessSel = document.querySelector(`.tm-access-select[data-key="${t.tool_key}"]`);
+    const catSel = document.querySelector(`.tm-cat-select[data-key="${t.tool_key}"]`);
+    const visCb = document.querySelector(`.tm-visible-cb[data-key="${t.tool_key}"]`);
+    return {
+      tool_key: t.tool_key,
+      access_type: accessSel ? accessSel.value : t.access_type,
+      category_id: catSel ? (catSel.value || null) : t.category_id,
+      is_visible: visCb ? visCb.checked : t.is_visible,
+    };
+  });
+  try {
+    await api('/tools/user_management/api/tool-settings/bulk', {
+      method: 'PUT', body: { updates }
+    });
+    alert('ツール設定を保存しました');
+    loadToolManagement();
+  } catch (err) { alert('エラー: ' + err.message); }
+});
 
 // 初期ロード
 loadUsers();

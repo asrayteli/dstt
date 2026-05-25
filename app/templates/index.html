@@ -37,24 +37,39 @@
   </script>
   {% endif %}
 
-  <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-    {% for item in app_navigation_items %}
-    <div
-      class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer"
-      onclick="window.location.href='{{ item.href }}'"
-      role="link"
-      tabindex="0"
-      onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.href='{{ item.href }}'; }"
-    >
-      <h2 class="text-lg font-semibold mb-2">{{ item.icon }} {{ item.label }}</h2>
-      <p class="text-sm text-gray-600 mb-4">{{ item.description }}</p>
-      <div class="flex items-center gap-3">
-        <a href="{{ item.href }}" class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">開く</a>
-        <a href="/manual/{{ item.key }}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="ml-auto inline-flex items-center rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">マニュアルを見る</a>
+  {% for group in categorized_navigation %}
+  <div class="mb-8">
+    {% if group.category %}
+    <h2 class="text-lg font-bold text-gray-800 mb-4">
+      {{ group.category.name }}
+      <span class="text-xs font-normal text-gray-400">({{ group.tools|length }})</span>
+    </h2>
+    {% else %}
+    <h2 class="text-lg font-bold text-gray-800 mb-4">
+      その他
+      <span class="text-xs font-normal text-gray-400">({{ group.tools|length }})</span>
+    </h2>
+    {% endif %}
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+      {% for item in group.tools %}
+      <div
+        class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer"
+        onclick="window.location.href='{{ item.href }}'"
+        role="link"
+        tabindex="0"
+        onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.href='{{ item.href }}'; }"
+      >
+        <h2 class="text-lg font-semibold mb-2">{{ item.icon }} {{ item.label }}</h2>
+        <p class="text-sm text-gray-600 mb-4">{{ item.description }}</p>
+        <div class="flex items-center gap-3">
+          <a href="{{ item.href }}" class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">開く</a>
+          <a href="/manual/{{ item.key }}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="ml-auto inline-flex items-center rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">マニュアルを見る</a>
+        </div>
       </div>
+      {% endfor %}
     </div>
-    {% endfor %}
   </div>
+  {% endfor %}
 
 
 
