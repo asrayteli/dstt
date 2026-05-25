@@ -846,6 +846,100 @@ def test_reordering_synced_entries_does_not_modify_source(tmp_path):
         assert not str(person_day[0].get("sync_source_type") or "")
 
 
+def test_synced_entry_can_be_ordered_above_a_local_entry(tmp_path):
+    # The reported scenario: a scene book has a LOCAL person (佐藤) and a SYNCED
+    # person (田中, from Tanaka's own book). The scene owner wants the synced 田中
+    # to appear ABOVE the local 佐藤.
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    site_row_id = _create_site(app, site_id="24680", site_name="Linked Master Site")
+    _create_branch(app, site_row_id=site_row_id, site_branch="001", option_key="N1")
+    client = app.test_client()
+
+    scene_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Scene A", "mode": "scene", "year": "2026", "month": "4", "site_row_id": str(site_row_id)},
+    )
+    scene_payload = scene_response.get_json()["project"]
+    scene_id = scene_payload["project"]["id"]
+    scene_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": scene_payload["month"],
+            "entries_per_day": {"1": [{"id": "local-sato", "value": "!N1!佐藤", "comment": ""}]},
+        },
+    )
+    assert scene_save.status_code == 200
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "田中", "mode": "person", "employee_number": "4001", "year": "2026", "month": "4"},
+    )
+    person_payload = person_response.get_json()["project"]
+    person_id = person_payload["project"]["id"]
+    person_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": person_payload["month"],
+            "entries_per_day": {"1": [{
+                "id": "tanaka-1",
+                "value": "!N1!Linked Master Site",
+                "comment": "",
+                "site_row_id": str(site_row_id),
+                "site_id": "24680",
+                "site_name": "Linked Master Site",
+            }]},
+        },
+    )
+    assert person_save.status_code == 200
+
+    def _scene_day():
+        detail = client.get(
+            f"/tools/shiftersync/cloudshift/api/project/{scene_id}",
+            query_string={"month_key": "2026-04"},
+        )
+        return detail.get_json()["month"]["entries_per_day"]["1"]
+
+    initial = _scene_day()
+    assert len(initial) == 2
+    # Local 佐藤 first, synced 田中 second — the starting order described in the report.
+    assert not str(initial[0].get("sync_source_type") or "") and initial[0]["value"] == "!N1!佐藤"
+    assert initial[1]["sync_source_type"] == "person_shift"
+    synced_tanaka, local_sato = initial[1], initial[0]
+
+    # Reorder so the SYNCED 田中 sits above the LOCAL 佐藤, then save from the scene book.
+    scene_month_now = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}",
+        query_string={"month_key": "2026-04"},
+    ).get_json()["month"]
+    reorder = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": scene_month_now,
+            "entries_per_day": {"1": [synced_tanaka, local_sato]},
+        },
+    )
+    assert reorder.status_code == 200
+
+    after = _scene_day()
+    # Synced 田中 is now on top of local 佐藤, and the order survives the save-time re-sync.
+    assert [entry["value"] for entry in after] == ["!N1!田中", "!N1!佐藤"]
+    assert after[0]["sync_source_type"] == "person_shift"
+    assert not str(after[1].get("sync_source_type") or "")
+
+    # The source (Tanaka's book) is unaffected.
+    tanaka_day = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}",
+        query_string={"month_key": "2026-04"},
+    ).get_json()["month"]["entries_per_day"]["1"]
+    assert len(tanaka_day) == 1
+    assert tanaka_day[0]["value"] == "!N1!Linked Master Site"
+    assert not str(tanaka_day[0].get("sync_source_type") or "")
+
+
 def test_synced_entry_cannot_be_moved_to_another_day_or_edited(tmp_path):
     module, app = _build_app(tmp_path)
     module.current_user = _owner()
