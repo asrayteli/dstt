@@ -53,12 +53,18 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
       {% for item in group.tools %}
       <div
-        class="bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer"
+        class="relative bg-white p-6 rounded-2xl shadow hover:shadow-lg transition cursor-pointer"
         onclick="window.location.href='{{ item.href }}'"
         role="link"
         tabindex="0"
         onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.href='{{ item.href }}'; }"
       >
+        {% set notification = (tool_notifications|default({})).get(item.key) %}
+        {% if notification %}
+        <span class="absolute right-4 top-4 rounded-full px-2 py-1 text-xs font-bold text-white {% if notification.severity == 'danger' %}bg-red-600{% elif notification.severity == 'warning' %}bg-amber-500{% else %}bg-blue-600{% endif %}">
+          {{ notification.label or notification.action_count or '!' }}
+        </span>
+        {% endif %}
         <h2 class="text-lg font-semibold mb-2">{{ item.icon }} {{ item.label }}</h2>
         <p class="text-sm text-gray-600 mb-4">{{ item.description }}</p>
         <div class="flex items-center gap-3">

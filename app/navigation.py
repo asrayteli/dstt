@@ -126,6 +126,13 @@ NAV_ITEMS = (
         "description": "契約番号と枝番号をAPI前提で管理する現場マスタ",
     },
     {
+        "key": "to_bell",
+        "href": "/tools/to_bell",
+        "icon": "🔔",
+        "label": "To Bell",
+        "description": "タスク、確認依頼、期限、他ツール通知をまとめて操縦する仕事の司令塔",
+    },
+    {
         "key": "powervote",
         "href": "/tools/powervote",
         "icon": "🖐",

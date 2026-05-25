@@ -69,6 +69,7 @@ TOOL_ACCESS_CATEGORIES: dict[str, str] = {
     "share": "public",
     "car_inspe": "public",
     "monthly_generator": "public",
+    "to_bell": "public",
 }
 
 

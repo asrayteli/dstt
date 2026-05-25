@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>To Bell 通知待受</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: Arial, sans-serif;
+    }
+    main {
+      width: min(340px, calc(100vw - 32px));
+      padding: 24px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 8px;
+      background: #111827;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      color: #ffffff;
+    }
+    p {
+      margin: 0 0 14px;
+      color: #cbd5e1;
+      line-height: 1.55;
+      font-size: 14px;
+    }
+    button {
+      min-height: 40px;
+      border: 0;
+      border-radius: 8px;
+      padding: 0 14px;
+      background: #2563eb;
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .status {
+      margin-top: 14px;
+      padding: 10px;
+      border-radius: 8px;
+      background: rgba(37, 99, 235, 0.12);
+      color: #bfdbfe;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>To Bell 通知待受</h1>
+    <p>この小さなウィンドウは、Windows通知だけを待ち受けます。通常のTo Bell画面より軽く、最小化して使えます。</p>
+    <button id="enable">通知を有効化</button>
+    <div class="status" id="status">準備中です。</div>
+  </main>
+  <script src="{{ url_for('static', filename='to_bell/notifier.js') }}"></script>
+</body>
+</html>

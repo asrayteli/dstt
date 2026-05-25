@@ -7,6 +7,7 @@ from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 import secrets
+from datetime import date
 from pathlib import Path
 from .navigation import NAV_ITEMS
 from .versioning import calculate_repo_version
@@ -127,7 +128,7 @@ def _seed_tool_categories():
         DEFAULT_CATEGORIES = [
             ("大新東ツール", [
                 "shiftersync", "monthly_generator", "subject_analysis_tool",
-                "pluslist", "siteplus", "leave_mgr", "bus_pricing",
+                "pluslist", "siteplus", "to_bell", "leave_mgr", "bus_pricing",
             ]),
             ("ファイル操作", [
                 "rename", "compress", "csvtool", "pdf_power", "share",
@@ -161,6 +162,7 @@ def _seed_tool_categories():
 
     KNOWN_DEFAULTS = {
         "bus_pricing": "大新東ツール",
+        "to_bell": "大新東ツール",
     }
 
     existing_keys = {ts.tool_key for ts in ToolSettings.query.all()}
@@ -465,6 +467,9 @@ def create_app(test_config=None):
     from .tools.siteplus import siteplus_bp
     app.register_blueprint(siteplus_bp)
 
+    from .tools.to_bell import to_bell_bp
+    app.register_blueprint(to_bell_bp)
+
     from .tools.color_extract import color_extract_bp
     app.register_blueprint(color_extract_bp)
 
@@ -526,6 +531,7 @@ def create_app(test_config=None):
         "/tools/bus_pricing/api/",
         "/tools/pluslist/api/",
         "/tools/siteplus/api/",
+        "/tools/to_bell/api/",
     )
 
     @app.before_request
@@ -537,6 +543,23 @@ def create_app(test_config=None):
             return None
         return enforce_same_origin_for_mutations()
 
+    @app.before_request
+    def _run_to_bell_daily_cleanup():
+        if app.config.get("TESTING") and not app.config.get("DSTT_RUN_TO_BELL_CLEANUP_IN_TESTS"):
+            return None
+        marker_path = Path(app.instance_path) / "to_bell_cleanup_last_run"
+        today_text = date.today().isoformat()
+        try:
+            if marker_path.exists() and marker_path.read_text(encoding="utf-8").strip() == today_text:
+                return None
+            from .services.to_bell_service import cleanup_expired_records
+            cleanup_expired_records()
+            marker_path.parent.mkdir(parents=True, exist_ok=True)
+            marker_path.write_text(today_text, encoding="utf-8")
+        except Exception:
+            db.session.rollback()
+        return None
+
     # 本番での暗号鍵必須化ガード（opt-in）
     if _env_bool("DSTT_REQUIRE_ENCRYPTION_KEY_ENV", False) and not app.config.get("TESTING"):
         from .security.file_crypto import EncryptionKeyMissingError, get_data_encryption_key
@@ -547,5 +570,8 @@ def create_app(test_config=None):
 
     # DBスキーマの初期化（既存DBへのカラム追加含む）
     _ensure_access_control_schema(app)
+
+    from .services.to_bell_push import init_to_bell_push_scheduler
+    init_to_bell_push_scheduler(app)
 
     return app
