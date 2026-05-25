@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  .bpa-page { color: #0f172a; }
+  .bpa-panel { border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; }
+  .bpa-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  .bpa-table th, .bpa-table td { border-bottom: 1px solid #edf2f7; padding: 0.5rem 0.35rem; text-align: left; vertical-align: middle; }
+  .bpa-table th { background: #f8fafc; color: #475569; font-size: 0.72rem; white-space: nowrap; }
+  .bpa-input { width: 100%; min-width: 74px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0.46rem 0.5rem; background: #fff; }
+  .bpa-button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 8px; padding: 0.55rem 0.9rem; font-weight: 800; }
+  .bpa-primary { background: #0f172a; color: #fff; }
+  .bpa-secondary { border: 1px solid #cbd5e1; background: #fff; color: #0f172a; }
+</style>
+
+<div class="bpa-page max-w-7xl mx-auto space-y-5 pb-10">
+  <section class="dstt-hero is-compact" style="background:#0f172a;">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">ADMIN</div>
+        <div>
+          <h1 class="dstt-hero-title">貸切料金 単価設定</h1>
+          <p class="dstt-hero-subtitle">公示運賃改定や会社稼働率の変更に備えて、管理者だけが単価を編集できます。</p>
+        </div>
+        <div class="dstt-hero-actions">
+          <a class="dstt-hero-btn dstt-hero-btn-light" href="{{ url_for('bus_pricing.index') }}">計算画面へ戻る</a>
+          <a class="dstt-hero-btn dstt-hero-btn-ghost" href="{{ url_for('bus_pricing.reference') }}">料金表を見る</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {% if saved %}
+    <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">設定を保存しました。</div>
+  {% endif %}
+  {% if reset %}
+    <div class="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm font-bold text-blue-700">標準単価へ戻しました。</div>
+  {% endif %}
+
+  <form method="POST" class="bpa-panel p-5 space-y-5">
+    <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div>
+        <h2 class="text-xl font-black">ブロック別単価</h2>
+        <p class="mt-1 text-sm text-slate-500">単価は税別です。稼働率は 0.6758 のような小数で入力してください。</p>
+      </div>
+      <button class="bpa-button bpa-primary">保存する</button>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="bpa-table">
+        <thead>
+          <tr>
+            <th>ブロック名</th><th>標準稼働率</th><th>会社稼働率</th>
+            {% for car in cars.values() %}<th>{{ car.label }} km</th><th>{{ car.label }} 時</th>{% endfor %}
+            <th>交替 km</th><th>交替 時</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for block_id, block in blocks.items() %}
+            <tr>
+              <td><input class="bpa-input" name="{{ block_id }}__name" value="{{ block.name }}"></td>
+              <td><input class="bpa-input" type="number" step="0.0001" name="{{ block_id }}__util_rate" value="{{ block.util_rate }}"></td>
+              <td><input class="bpa-input" type="number" step="0.0001" name="{{ block_id }}__company_util_rate" value="{{ block.company_util_rate }}"></td>
+              {% for car_key in cars.keys() %}
+                <td><input class="bpa-input" type="number" name="{{ block_id }}__dist__{{ car_key }}" value="{{ block.dist_rate[car_key] }}"></td>
+                <td><input class="bpa-input" type="number" name="{{ block_id }}__time__{{ car_key }}" value="{{ block.time_rate[car_key] }}"></td>
+              {% endfor %}
+              <td><input class="bpa-input" type="number" name="{{ block_id }}__alt_dist_rate" value="{{ block.alt_dist_rate }}"></td>
+              <td><input class="bpa-input" type="number" name="{{ block_id }}__alt_time_rate" value="{{ block.alt_time_rate }}"></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+      <button class="bpa-button bpa-primary">保存する</button>
+      <button class="bpa-button bpa-secondary" type="submit" name="action" value="reset" onclick="return confirm('編集した単価を破棄して標準単価へ戻しますか？')">標準単価へ戻す</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

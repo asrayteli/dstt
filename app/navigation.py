@@ -146,4 +146,11 @@ NAV_ITEMS = (
         "label": "PowerImager",
         "description": "プロレベルの画像編集をここに",
     },
+    {
+        "key": "bus_pricing",
+        "href": "/tools/bus_pricing",
+        "icon": "🚌",
+        "label": "貸切料金計算ツール",
+        "description": "貸切バスの公示下限額と改善基準告示の監査をまとめて確認",
+    },
 )
