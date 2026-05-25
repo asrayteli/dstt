@@ -6653,6 +6653,12 @@ def _finalize_approved_leave_change_requests(
         option_key = str(option_key or "").strip().upper()
         if option_key != item.get("requested_option_key"):
             raise CloudShiftError("承認した休暇種別が保存内容に反映されていません", 409)
+        request_comment = str(item.get("request_comment") or "").strip()
+        if request_comment:
+            existing_comment = str(entry.get("comment") or "").strip()
+            entry["comment"] = (
+                f"{existing_comment}\n{request_comment}" if existing_comment else request_comment
+            )
         item["status"] = "approved"
         item["decided_at"] = timestamp
         item["decided_by"] = actor_user_id

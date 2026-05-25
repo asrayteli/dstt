@@ -27,6 +27,7 @@ const ShifterSync = (function() {
   const leaveOptionMappings = {
     PAID: '\u6709\u4f11',
     COMP: '\u4ee3\u4f11',
+    PUBLIC: '\u516c\u4f11',
     CONDOLENCE: '\u6176\u5f14\u4f11\u6687',
     CARE: '\u4ecb\u8b77\u4f11\u6687',
     REFRESH: '\u30ea\u30d5\u30ec\u30c3\u30b7\u30e5\u4f11\u6687',

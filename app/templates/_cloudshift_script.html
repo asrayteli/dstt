@@ -137,6 +137,7 @@
         N5: "5号車",
         PAID: "有休",
         COMP: "代休",
+        PUBLIC: "公休",
         CONDOLENCE: "慶弔休暇",
         CARE: "介護休暇",
         REFRESH: "リフレッシュ休暇",
@@ -150,7 +151,7 @@
       }
       const sections = [{ title: "時間帯", optionKeys: ["A", "P", "E", "L", "TEMP"] }];
       if (mode === "person") {
-        sections.push({ title: "休暇種別", optionKeys: ["PAID", "COMP", "CONDOLENCE", "CARE", "REFRESH", "OTHER"] });
+        sections.push({ title: "休暇種別", optionKeys: ["PAID", "COMP", "PUBLIC", "CONDOLENCE", "CARE", "REFRESH", "OTHER"] });
       }
       sections.push(
         { title: "車両タイプ", optionKeys: ["M", "C", "O", "W", "V"] },
