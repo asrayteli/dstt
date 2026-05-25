@@ -804,6 +804,48 @@ def test_synced_entries_can_be_reordered_within_same_day(tmp_path):
     assert _scene_day_values() == ["!N1!Worker B", "!N1!Worker A"]
 
 
+def test_reordering_synced_entries_does_not_modify_source(tmp_path):
+    module, app = _build_app(tmp_path)
+    module.current_user = _owner()
+    _link_two_person_assignments_into_scene.site_row_id = _create_site(
+        app, site_id="24680", site_name="Linked Master Site"
+    )
+    _create_branch(app, site_row_id=_link_two_person_assignments_into_scene.site_row_id, site_branch="001", option_key="N1")
+    client = app.test_client()
+
+    scene_id, scene_month, synced, person_a, person_b = _link_two_person_assignments_into_scene(client, day=5)
+
+    def _person_day(person):
+        detail = client.get(
+            f"/tools/shiftersync/cloudshift/api/project/{person['project']['id']}",
+            query_string={"month_key": "2026-04"},
+        )
+        return detail.get_json()["month"]["entries_per_day"].get("5", [])
+
+    person_a_before = _person_day(person_a)
+    person_b_before = _person_day(person_b)
+
+    # Reorder the synced entries in the destination scene and save.
+    reordered = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": scene_month,
+            "entries_per_day": {"5": list(reversed(synced))},
+        },
+    )
+    assert reordered.status_code == 200
+
+    # The source person books must be untouched: same entries, content and order.
+    assert _person_day(person_a) == person_a_before
+    assert _person_day(person_b) == person_b_before
+    # Each source still holds exactly its own single local (non-synced) assignment.
+    for person_day in (person_a_before, person_b_before):
+        assert len(person_day) == 1
+        assert person_day[0]["value"] == "!N1!Linked Master Site"
+        assert not str(person_day[0].get("sync_source_type") or "")
+
+
 def test_synced_entry_cannot_be_moved_to_another_day_or_edited(tmp_path):
     module, app = _build_app(tmp_path)
     module.current_user = _owner()
