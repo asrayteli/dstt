@@ -904,3 +904,240 @@ class CloudShiftHistory(db.Model):
     payload = db.Column(db.JSON, nullable=False, default=dict)
 
     project = db.relationship('CloudShiftProject', back_populates='histories')
+
+
+class ToBellTask(db.Model):
+    """To Bell task. Phase 1 keeps visibility to task participants."""
+
+    __tablename__ = 'to_bell_tasks'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    title = db.Column(db.String(240), nullable=False)
+    description = db.Column(db.Text, nullable=False, default='')
+    status = db.Column(db.String(24), nullable=False, default='todo', index=True)
+    priority = db.Column(db.String(16), nullable=False, default='normal', index=True)
+    due_at = db.Column(db.DateTime, nullable=True, index=True)
+    start_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    created_by = db.Column(db.String(80), nullable=False, index=True)
+    assigned_to = db.Column(db.String(80), nullable=True, index=True)
+    reviewer_id = db.Column(db.String(80), nullable=True, index=True)
+    project_id = db.Column(db.Integer, nullable=True, index=True)
+    visibility_scope = db.Column(db.String(32), nullable=False, default='participants')
+    visibility_branch_id = db.Column(db.Integer, nullable=True)
+    visibility_office_id = db.Column(db.Integer, nullable=True)
+    visibility_department_id = db.Column(db.Integer, nullable=True)
+    progress_mode = db.Column(db.String(16), nullable=False, default='auto')
+    manual_progress = db.Column(db.Integer, nullable=False, default=0)
+    source_tool = db.Column(db.String(80), nullable=True, index=True)
+    source_ref_type = db.Column(db.String(80), nullable=True)
+    source_ref_id = db.Column(db.String(120), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    subtasks = db.relationship(
+        'ToBellSubtask',
+        back_populates='task',
+        cascade='all, delete-orphan',
+        order_by='ToBellSubtask.sort_order, ToBellSubtask.id',
+    )
+    comments = db.relationship(
+        'ToBellComment',
+        back_populates='task',
+        cascade='all, delete-orphan',
+        order_by='ToBellComment.created_at.desc()',
+    )
+    notifications = db.relationship(
+        'ToBellNotification',
+        back_populates='task',
+        cascade='all, delete-orphan',
+    )
+    tags = db.relationship(
+        'ToBellTag',
+        secondary='to_bell_task_tags',
+        back_populates='tasks',
+    )
+
+    def progress_percent(self) -> int:
+        if self.subtasks:
+            done = len([item for item in self.subtasks if item.is_done])
+            return int(round((done / len(self.subtasks)) * 100))
+        return max(0, min(100, int(self.manual_progress or 0)))
+
+    def to_dict(self, include_detail: bool = True) -> dict:
+        data = {
+            'id': self.id,
+            'title': self.title,
+            'description': self.description or '',
+            'status': self.status,
+            'priority': self.priority,
+            'due_at': self.due_at.isoformat() if self.due_at else None,
+            'start_at': self.start_at.isoformat() if self.start_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'created_by': self.created_by,
+            'assigned_to': self.assigned_to or '',
+            'reviewer_id': self.reviewer_id or '',
+            'project_id': self.project_id,
+            'visibility_scope': self.visibility_scope,
+            'progress_mode': self.progress_mode,
+            'manual_progress': int(self.manual_progress or 0),
+            'progress': self.progress_percent(),
+            'source_tool': self.source_tool or '',
+            'source_ref_type': self.source_ref_type or '',
+            'source_ref_id': self.source_ref_id or '',
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'tags': [tag.to_dict() for tag in self.tags],
+        }
+        if include_detail:
+            data['subtasks'] = [item.to_dict() for item in self.subtasks]
+            data['comments'] = [item.to_dict() for item in self.comments]
+        return data
+
+
+class ToBellSubtask(db.Model):
+    __tablename__ = 'to_bell_subtasks'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    task_id = db.Column(db.Integer, db.ForeignKey('to_bell_tasks.id'), nullable=False, index=True)
+    title = db.Column(db.String(240), nullable=False)
+    is_done = db.Column(db.Boolean, nullable=False, default=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    task = db.relationship('ToBellTask', back_populates='subtasks')
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'task_id': self.task_id,
+            'title': self.title,
+            'is_done': bool(self.is_done),
+            'sort_order': int(self.sort_order or 0),
+        }
+
+
+class ToBellComment(db.Model):
+    __tablename__ = 'to_bell_comments'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    task_id = db.Column(db.Integer, db.ForeignKey('to_bell_tasks.id'), nullable=False, index=True)
+    body = db.Column(db.Text, nullable=False)
+    created_by = db.Column(db.String(80), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    task = db.relationship('ToBellTask', back_populates='comments')
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'task_id': self.task_id,
+            'body': self.body,
+            'created_by': self.created_by,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ToBellTag(db.Model):
+    __tablename__ = 'to_bell_tags'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(80), nullable=False, index=True)
+    color = db.Column(db.String(20), nullable=False, default='#2563eb')
+    created_by = db.Column(db.String(80), nullable=False, index=True)
+
+    tasks = db.relationship(
+        'ToBellTask',
+        secondary='to_bell_task_tags',
+        back_populates='tags',
+    )
+
+    def to_dict(self) -> dict:
+        return {'id': self.id, 'name': self.name, 'color': self.color}
+
+
+class ToBellTaskTag(db.Model):
+    __tablename__ = 'to_bell_task_tags'
+    __table_args__ = (
+        db.UniqueConstraint('task_id', 'tag_id', name='uq_to_bell_task_tag'),
+    )
+
+    task_id = db.Column(db.Integer, db.ForeignKey('to_bell_tasks.id'), primary_key=True)
+    tag_id = db.Column(db.Integer, db.ForeignKey('to_bell_tags.id'), primary_key=True)
+
+
+class ToBellNotification(db.Model):
+    __tablename__ = 'to_bell_notifications'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(80), nullable=False, index=True)
+    task_id = db.Column(db.Integer, db.ForeignKey('to_bell_tasks.id'), nullable=True, index=True)
+    source_tool = db.Column(db.String(80), nullable=True, index=True)
+    event_type = db.Column(db.String(80), nullable=False, default='task')
+    title = db.Column(db.String(240), nullable=False)
+    body = db.Column(db.Text, nullable=False, default='')
+    href = db.Column(db.String(500), nullable=False, default='/tools/to_bell')
+    severity = db.Column(db.String(20), nullable=False, default='info')
+    is_read = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    read_at = db.Column(db.DateTime, nullable=True)
+    is_resolved = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    task = db.relationship('ToBellTask', back_populates='notifications')
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'task_id': self.task_id,
+            'source_tool': self.source_tool or '',
+            'event_type': self.event_type,
+            'title': self.title,
+            'body': self.body or '',
+            'href': self.href,
+            'severity': self.severity,
+            'is_read': bool(self.is_read),
+            'is_resolved': bool(self.is_resolved),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ToBellPushSubscription(db.Model):
+    __tablename__ = 'to_bell_push_subscriptions'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(80), nullable=False, index=True)
+    endpoint = db.Column(db.Text, nullable=False, unique=True)
+    p256dh = db.Column(db.Text, nullable=False)
+    auth = db.Column(db.Text, nullable=False)
+    user_agent = db.Column(db.Text, nullable=False, default='')
+    device_label = db.Column(db.String(120), nullable=False, default='')
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def to_subscription_info(self) -> dict:
+        return {
+            'endpoint': self.endpoint,
+            'keys': {
+                'p256dh': self.p256dh,
+                'auth': self.auth,
+            },
+        }
+
+
+class ToBellPushDelivery(db.Model):
+    __tablename__ = 'to_bell_push_deliveries'
+    __table_args__ = (
+        db.UniqueConstraint('task_id', 'user_id', 'due_at_key', name='uq_to_bell_push_delivery'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    task_id = db.Column(db.Integer, db.ForeignKey('to_bell_tasks.id'), nullable=False, index=True)
+    user_id = db.Column(db.String(80), nullable=False, index=True)
+    due_at_key = db.Column(db.String(32), nullable=False, index=True)
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    status = db.Column(db.String(30), nullable=False, default='sent')

@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='to_bell/to_bell.css') }}">
+
+<div class="tobell-shell">
+  <header class="tobell-header">
+    <div>
+      <p class="tobell-kicker">To Bell</p>
+      <h1>仕事の司令塔</h1>
+      <p>すぐ書ける Todo と、今日の要対応をひとつの画面で確認できます。</p>
+    </div>
+    <div class="tobell-header-actions">
+      <button type="button" class="tobell-btn tobell-btn-primary" id="tb-new-task">新規</button>
+      <button type="button" class="tobell-btn" id="tb-enable-windows-notify">Windows通知</button>
+      <button type="button" class="tobell-btn" id="tb-enable-push-notify">iPhone通知</button>
+      <button type="button" class="tobell-btn" id="tb-test-push-notify">テスト送信</button>
+      <button type="button" class="tobell-btn" id="tb-read-all">通知を既読</button>
+    </div>
+  </header>
+
+  <section class="tobell-quick">
+    <form id="tb-quick-form" class="tobell-quick-form">
+      <input name="title" id="tb-title" type="text" placeholder="タスク名だけで追加できます" autocomplete="off" required>
+      <input name="due_date" type="date" aria-label="通知日">
+      <input name="due_time" type="time" aria-label="通知時刻">
+      <select name="assigned_to" aria-label="担当者">
+        {% for user in users %}
+        <option value="{{ user.username }}" {% if user.username == current_user_id %}selected{% endif %}>{{ user.name or user.username }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="tobell-btn tobell-btn-primary">追加</button>
+    </form>
+  </section>
+
+  <div class="tobell-layout">
+    <aside class="tobell-sidebar">
+      <button class="tobell-filter is-active" data-filter="today">今日</button>
+      <button class="tobell-filter" data-filter="inbox">受信箱</button>
+      <button class="tobell-filter" data-filter="assigned">自分の担当</button>
+      <button class="tobell-filter" data-filter="attention">要対応</button>
+      <button class="tobell-filter" data-filter="overdue">期限切れ</button>
+      <button class="tobell-filter" data-filter="done">完了</button>
+      <div class="tobell-search">
+        <input id="tb-search" type="search" placeholder="検索">
+      </div>
+      <section class="tobell-notifications">
+        <div class="tobell-panel-title">通知</div>
+        <div id="tb-notifications"></div>
+      </section>
+    </aside>
+
+    <main class="tobell-main">
+      <div id="tb-summary" class="tobell-summary"></div>
+      <div id="tb-task-list" class="tobell-task-list"></div>
+    </main>
+
+    <aside class="tobell-detail" id="tb-detail" aria-live="polite">
+      <div class="tobell-empty">タスクを選ぶと詳細が開きます。</div>
+    </aside>
+  </div>
+</div>
+
+<template id="tb-detail-template">
+  <form class="tobell-detail-form" id="tb-detail-form">
+    <input type="hidden" name="id">
+    <label>タスク名<input name="title" required></label>
+    <label>メモ<textarea name="description" rows="4"></textarea></label>
+    <div class="tobell-detail-grid">
+      <label>状態
+        <select name="status">
+          <option value="todo">未着手</option>
+          <option value="doing">進行中</option>
+          <option value="blocked">保留</option>
+          <option value="review">確認待ち</option>
+          <option value="returned">差戻し</option>
+          <option value="done">完了</option>
+        </select>
+      </label>
+      <label>優先度
+        <select name="priority">
+          <option value="low">低</option>
+          <option value="normal">通常</option>
+          <option value="high">高</option>
+          <option value="urgent">緊急</option>
+        </select>
+      </label>
+      <label>通知日時<input name="due_at" type="datetime-local"></label>
+      <label>担当
+        <select name="assigned_to">
+          {% for user in users %}
+          <option value="{{ user.username }}">{{ user.name or user.username }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>タグ<input name="tags" placeholder="カンマ区切り"></label>
+    <div class="tobell-detail-actions">
+      <button type="submit" class="tobell-btn tobell-btn-primary">保存</button>
+      <button type="button" class="tobell-btn" data-action="complete">完了</button>
+      <button type="button" class="tobell-btn" data-action="reopen">戻す</button>
+      <button type="button" class="tobell-btn tobell-danger" data-action="archive">アーカイブ</button>
+    </div>
+  </form>
+  <section class="tobell-section">
+    <div class="tobell-panel-title">サブタスク</div>
+    <form id="tb-subtask-form" class="tobell-inline-form">
+      <input name="title" placeholder="サブタスクを追加">
+      <button type="submit" class="tobell-btn">追加</button>
+    </form>
+    <div id="tb-subtasks"></div>
+  </section>
+  <section class="tobell-section">
+    <div class="tobell-panel-title">コメント</div>
+    <form id="tb-comment-form" class="tobell-comment-form">
+      <textarea name="body" rows="3" placeholder="コメントを追加"></textarea>
+      <button type="submit" class="tobell-btn">送信</button>
+    </form>
+    <div id="tb-comments"></div>
+  </section>
+</template>
+
+<script src="{{ url_for('static', filename='to_bell/to_bell.js') }}"></script>
+{% endblock %}

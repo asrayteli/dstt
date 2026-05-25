@@ -1,0 +1,284 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
+@pytest.fixture()
+def app_ctx(tmp_path, monkeypatch):
+    from app import create_app
+    from app.models import db
+
+    db_path = tmp_path / "to_bell.db"
+    monkeypatch.chdir(tmp_path)
+    app = create_app(
+        {
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}",
+            "TESTING": True,
+            "SECRET_KEY": "test-secret",
+        }
+    )
+    with app.app_context():
+        db.drop_all()
+        db.create_all()
+    yield app
+
+
+def _create_office(app_ctx, name: str):
+    from app.models import AccessBranch, AccessOffice, db
+
+    with app_ctx.app_context():
+        branch = AccessBranch(name=f"{name}支店", code=f"{name}-b")
+        db.session.add(branch)
+        db.session.flush()
+        office = AccessOffice(branch_id=branch.id, name=f"{name}営業所", code=f"{name}-o")
+        db.session.add(office)
+        db.session.commit()
+        return office.id
+
+
+def _create_user(app_ctx, username: str, name: str | None = None, office_id: int | None = None):
+    from app.models import User, db
+
+    with app_ctx.app_context():
+        user = User(username=username, password_hash="hash", name=name or username, office_id=office_id)
+        db.session.add(user)
+        db.session.commit()
+
+
+def _login(client, username: str):
+    with client.session_transaction() as session:
+        session["_user_id"] = username
+        session["_fresh"] = True
+
+
+def test_to_bell_can_create_complete_and_comment_task(app_ctx):
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    create_response = client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "請求内容を確認", "due_at": "2026-05-26", "tags": "請求,確認"},
+    )
+    assert create_response.status_code == 201
+    task = create_response.get_json()
+    assert task["title"] == "請求内容を確認"
+    assert task["assigned_to"] == "alice"
+    assert task["tags"][0]["name"] == "請求"
+
+    subtask_response = client.post(
+        f"/tools/to_bell/api/tasks/{task['id']}/subtasks",
+        json={"title": "金額を照合"},
+    )
+    assert subtask_response.status_code == 201
+    subtask = subtask_response.get_json()
+
+    update_subtask = client.put(
+        f"/tools/to_bell/api/subtasks/{subtask['id']}",
+        json={"is_done": True},
+    )
+    assert update_subtask.status_code == 200
+
+    detail_response = client.get(f"/tools/to_bell/api/tasks/{task['id']}")
+    assert detail_response.get_json()["progress"] == 100
+
+    comment_response = client.post(
+        f"/tools/to_bell/api/tasks/{task['id']}/comments",
+        json={"body": "担当へ確認済み"},
+    )
+    assert comment_response.status_code == 201
+
+    complete_response = client.post(f"/tools/to_bell/api/tasks/{task['id']}/complete")
+    assert complete_response.status_code == 200
+    assert complete_response.get_json()["status"] == "done"
+
+
+def test_to_bell_page_renders(app_ctx):
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    response = client.get("/tools/to_bell/")
+
+    assert response.status_code == 200
+    assert "To Bell".encode("utf-8") in response.data
+    assert "/static/to_bell/to_bell.js" in response.get_data(as_text=True)
+    assert 'type="time"' in response.get_data(as_text=True)
+    assert "Windows通知" in response.get_data(as_text=True)
+    assert "iPhone通知" in response.get_data(as_text=True)
+
+
+def test_to_bell_assignment_creates_unread_notification_and_dashboard_summary(app_ctx):
+    office_id = _create_office(app_ctx, "same")
+    _create_user(app_ctx, "owner", "Owner", office_id=office_id)
+    _create_user(app_ctx, "worker", "Worker", office_id=office_id)
+
+    owner_client = app_ctx.test_client()
+    _login(owner_client, "owner")
+    response = owner_client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "月次処理", "assigned_to": "worker"},
+    )
+    assert response.status_code == 201
+
+    worker_client = app_ctx.test_client()
+    _login(worker_client, "worker")
+    notifications = worker_client.get("/tools/to_bell/api/notifications").get_json()["notifications"]
+    assert len(notifications) == 1
+    assert notifications[0]["is_read"] is False
+
+    summary = worker_client.get("/api/tool-notifications").get_json()
+    assert summary["to_bell"]["unread_count"] == 1
+    assert summary["to_bell"]["action_count"] >= 1
+
+
+def test_to_bell_tasks_are_limited_to_participants(app_ctx):
+    office_id = _create_office(app_ctx, "participants")
+    other_office_id = _create_office(app_ctx, "outside")
+    _create_user(app_ctx, "alice", office_id=office_id)
+    _create_user(app_ctx, "bob", office_id=office_id)
+    _create_user(app_ctx, "charlie", office_id=other_office_id)
+
+    client = app_ctx.test_client()
+    _login(client, "alice")
+    response = client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "内部確認", "assigned_to": "bob"},
+    )
+    task_id = response.get_json()["id"]
+
+    other_client = app_ctx.test_client()
+    _login(other_client, "charlie")
+    assert other_client.get(f"/tools/to_bell/api/tasks/{task_id}").status_code == 400
+    assert other_client.get("/tools/to_bell/api/tasks").get_json()["tasks"] == []
+
+
+def test_to_bell_rejects_assignment_outside_same_office(app_ctx):
+    owner_office = _create_office(app_ctx, "owner")
+    other_office = _create_office(app_ctx, "other")
+    _create_user(app_ctx, "owner", "Owner", office_id=owner_office)
+    _create_user(app_ctx, "same-worker", "Same", office_id=owner_office)
+    _create_user(app_ctx, "other-worker", "Other", office_id=other_office)
+
+    client = app_ctx.test_client()
+    _login(client, "owner")
+    page = client.get("/tools/to_bell/").get_data(as_text=True)
+    assert "same-worker" in page
+    assert "other-worker" not in page
+
+    rejected = client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "別営業所には出せない", "assigned_to": "other-worker"},
+    )
+    assert rejected.status_code == 400
+
+    accepted = client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "同じ営業所へ通知", "assigned_to": "same-worker"},
+    )
+    assert accepted.status_code == 201
+
+
+def test_to_bell_quick_datetime_is_optional_and_due_tasks_notify(app_ctx):
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    no_due = client.post("/tools/to_bell/api/tasks", json={"title": "あとで整理"})
+    assert no_due.status_code == 201
+    assert no_due.get_json()["due_at"] is None
+
+    with_due = client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "時間指定", "due_date": "2026-05-01", "due_time": "14:30"},
+    )
+    assert with_due.status_code == 201
+    assert with_due.get_json()["due_at"].startswith("2026-05-01T14:30")
+
+    due_tasks = client.get("/tools/to_bell/api/notifications/due-tasks").get_json()["tasks"]
+    assert any(task["title"] == "時間指定" for task in due_tasks)
+    assert all(task["title"] != "あとで整理" for task in due_tasks)
+
+
+def test_to_bell_cleanup_deletes_records_older_than_60_days(app_ctx):
+    from datetime import datetime, timedelta
+
+    from app.models import ToBellNotification, ToBellTask, db
+    from app.services.to_bell_service import cleanup_expired_records
+
+    _create_user(app_ctx, "alice", "Alice")
+    now = datetime(2026, 5, 26, 12, 0)
+    old = now - timedelta(days=61)
+    recent = now - timedelta(days=10)
+
+    with app_ctx.app_context():
+        db.session.add_all(
+            [
+                ToBellTask(title="古い完了", created_by="alice", assigned_to="alice", status="done", completed_at=old),
+                ToBellTask(title="古い未対応", created_by="alice", assigned_to="alice", status="todo", due_at=old),
+                ToBellTask(title="最近の完了", created_by="alice", assigned_to="alice", status="done", completed_at=recent),
+                ToBellNotification(user_id="alice", title="古い通知", created_at=old),
+            ]
+        )
+        db.session.commit()
+
+        result = cleanup_expired_records(now=now)
+
+        assert result["tasks"] == 2
+        assert result["notifications"] == 1
+        remaining_titles = {task.title for task in ToBellTask.query.all()}
+        assert remaining_titles == {"最近の完了"}
+
+
+def test_to_bell_notifier_and_service_worker_render(app_ctx):
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    notifier = client.get("/tools/to_bell/notifier")
+    assert notifier.status_code == 200
+    assert "通知待受" in notifier.get_data(as_text=True)
+
+    worker = client.get("/service-worker.js")
+    assert worker.status_code == 200
+    assert "self.addEventListener(\"push\"" in worker.get_data(as_text=True)
+
+
+def test_to_bell_push_subscription_endpoints(app_ctx, monkeypatch):
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    key_response = client.get("/tools/to_bell/api/push/public-key")
+    assert key_response.status_code == 200
+    assert key_response.get_json()["public_key"]
+
+    subscription = {
+        "endpoint": "https://example.test/push/1",
+        "keys": {"p256dh": "p256dh-key", "auth": "auth-key"},
+    }
+    response = client.post("/tools/to_bell/api/push/subscribe", json={"subscription": subscription})
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ok"
+
+    import app.tools.to_bell as to_bell_module
+
+    monkeypatch.setattr(to_bell_module, "send_test_push", lambda user_id: {"sent": 1, "failed": 0})
+    test_response = client.post("/tools/to_bell/api/push/test")
+    assert test_response.status_code == 200
+    assert test_response.get_json()["sent"] == 1
+
+    unsubscribe_response = client.post(
+        "/tools/to_bell/api/push/unsubscribe",
+        json={"endpoint": subscription["endpoint"]},
+    )
+    assert unsubscribe_response.status_code == 200
+    assert unsubscribe_response.get_json()["updated"] is True
