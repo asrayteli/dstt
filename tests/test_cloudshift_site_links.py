@@ -690,7 +690,8 @@ def test_deleting_source_month_removes_shift_sync_entries(tmp_path):
 def _link_two_person_assignments_into_scene(client, *, day):
     """Create two person projects that both sync a same-day assignment into one scene project.
 
-    Returns (scene_id, scene_month, synced_entries) for the destination scene book.
+    Returns (scene_id, scene_month, synced_entries, person_a, person_b) for the
+    destination scene book.
     """
     def _make_person(title, emp):
         resp = client.post(
@@ -739,7 +740,7 @@ def _link_two_person_assignments_into_scene(client, *, day):
     synced = scene_month["entries_per_day"][str(day)]
     assert len(synced) == 2
     assert all(entry["sync_source_type"] == "person_shift" for entry in synced)
-    return scene_id, scene_month, synced
+    return scene_id, scene_month, synced, person_a, person_b
 
 
 def test_synced_entries_can_be_reordered_within_same_day(tmp_path):
@@ -751,29 +752,56 @@ def test_synced_entries_can_be_reordered_within_same_day(tmp_path):
     _create_branch(app, site_row_id=_link_two_person_assignments_into_scene.site_row_id, site_branch="001", option_key="N1")
     client = app.test_client()
 
-    scene_id, scene_month, synced = _link_two_person_assignments_into_scene(client, day=5)
-    original_order = [entry["value"] for entry in synced]
+    scene_id, scene_month, synced, person_a, person_b = _link_two_person_assignments_into_scene(client, day=5)
 
-    # The destination owner reorders the two synced entries within the same day and saves.
+    # Put "Worker B" explicitly on top (the early/late ordering use case), regardless
+    # of the order the two sources happened to sync in.
+    worker_b_first = sorted(synced, key=lambda entry: entry["value"] != "!N1!Worker B")
+    assert worker_b_first[0]["value"] == "!N1!Worker B"
     reordered = client.put(
         f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
         json={
             "required_capacity": 0,
             "base_month": scene_month,
-            "entries_per_day": {"5": list(reversed(synced))},
+            "entries_per_day": {"5": worker_b_first},
         },
     )
     assert reordered.status_code == 200
 
-    after = client.get(
-        f"/tools/shiftersync/cloudshift/api/project/{scene_id}",
+    def _scene_day_values():
+        detail = client.get(
+            f"/tools/shiftersync/cloudshift/api/project/{scene_id}",
+            query_string={"month_key": "2026-04"},
+        )
+        return [entry["value"] for entry in detail.get_json()["month"]["entries_per_day"]["5"]]
+
+    # The manual order is honored after the save (and after the save-triggered re-sync).
+    assert _scene_day_values() == ["!N1!Worker B", "!N1!Worker A"]
+
+    # The order must also survive a later re-sync triggered by a source-side change.
+    person_b_month = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{person_b['project']['id']}",
         query_string={"month_key": "2026-04"},
+    ).get_json()["month"]
+    resave_b = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_b['project']['id']}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "base_month": person_b_month,
+            "entries_per_day": {
+                "5": [{
+                    "id": "person-b-1",
+                    "value": "!N1!Linked Master Site",
+                    "comment": "updated note",
+                    "site_row_id": str(_link_two_person_assignments_into_scene.site_row_id),
+                    "site_id": "24680",
+                    "site_name": "Linked Master Site",
+                }]
+            },
+        },
     )
-    after_entries = after.get_json()["month"]["entries_per_day"]["5"]
-    assert [entry["value"] for entry in after_entries] == list(reversed(original_order))
-    # Content stays server-authoritative: still the two synced person_shift entries.
-    assert all(entry["sync_source_type"] == "person_shift" for entry in after_entries)
-    assert sorted(entry["value"] for entry in after_entries) == sorted(original_order)
+    assert resave_b.status_code == 200
+    assert _scene_day_values() == ["!N1!Worker B", "!N1!Worker A"]
 
 
 def test_synced_entry_cannot_be_moved_to_another_day_or_edited(tmp_path):
@@ -785,7 +813,7 @@ def test_synced_entry_cannot_be_moved_to_another_day_or_edited(tmp_path):
     _create_branch(app, site_row_id=_link_two_person_assignments_into_scene.site_row_id, site_branch="001", option_key="N1")
     client = app.test_client()
 
-    scene_id, scene_month, synced = _link_two_person_assignments_into_scene(client, day=5)
+    scene_id, scene_month, synced, _person_a, _person_b = _link_two_person_assignments_into_scene(client, day=5)
     moved = dict(synced[0])
     moved["value"] = "!N1!Tampered"  # try to also change content
 

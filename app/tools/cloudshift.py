@@ -1034,25 +1034,27 @@ def _synced_entries_in_incoming_order(
     return [entry for _, entry in ordered]
 
 
-def _desired_synced_in_existing_order(
-    desired: list[dict[str, Any]],
+def _entries_in_existing_order(
+    entries: list[dict[str, Any]],
     existing_day_entries: Any,
 ) -> list[dict[str, Any]]:
-    """Preserve a manually chosen synced-entry order across source re-syncs.
+    """Reorder a rebuilt day list to match the order already stored on the day.
 
-    Rebuilt synced entries are reordered to match the order of the matching entries
-    already stored on the day; entries with no prior position keep their natural
-    (source) order at the end.
+    Used when synced entries are regenerated (possibly from several sources in
+    separate passes): each pass appends its own entries last, which would otherwise
+    scramble a manually chosen order. Sorting by the existing stored positions keeps
+    that order stable, while entries with no prior position (genuinely new ones) keep
+    their natural order at the end.
     """
-    if len(desired) < 2:
-        return desired
+    if len(entries) < 2:
+        return entries
     existing_index: dict[str, int] = {}
     for entry in existing_day_entries if isinstance(existing_day_entries, list) else []:
         entry_id = str((entry or {}).get("id") or "").strip()
         if entry_id and entry_id not in existing_index:
             existing_index[entry_id] = len(existing_index)
     if not existing_index:
-        return desired
+        return entries
 
     def _sort_key(pair: tuple[int, dict[str, Any]]) -> tuple[int, int, int]:
         natural_index, entry = pair
@@ -1061,7 +1063,7 @@ def _desired_synced_in_existing_order(
             return (0, existing_index[entry_id], natural_index)
         return (1, natural_index, 0)
 
-    return [entry for _, entry in sorted(enumerate(desired), key=_sort_key)]
+    return [entry for _, entry in sorted(enumerate(entries), key=_sort_key)]
 
 
 def _entry_site_link_fields(entry: dict[str, Any] | None) -> dict[str, str | None]:
@@ -3835,8 +3837,9 @@ def _replace_shift_synced_entries_in_target_project(
             ]
         else:
             desired = [dict(entry) for entry in desired_for_day]
-        desired = _desired_synced_in_existing_order(desired, current_entries_per_day.get(day_key, []))
-        next_entries_per_day[day_key] = preserved + desired
+        next_entries_per_day[day_key] = _entries_in_existing_order(
+            preserved + desired, current_entries_per_day.get(day_key, [])
+        )
 
     if not current_month and not has_desired_entries:
         return False
