@@ -419,6 +419,96 @@
   }
 }
 
+/* ===== 共有リンクのモーダル ===== */
+.tobell-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.tobell-modal[hidden] {
+  display: none;
+}
+
+.tobell-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.tobell-modal-card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 520px;
+  padding: 1.25rem;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #dbe3ef;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+}
+
+.tobell-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.tobell-modal-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.tobell-share-note {
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.tobell-share-urlrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.tobell-share-urlrow input {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.5rem 0.65rem;
+  background: #f8fafc;
+  font-size: 0.85rem;
+}
+
+.tobell-share-empty {
+  margin: 0 0 0.85rem;
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.tobell-share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 /* ===== タブレット ===== */
 @media (max-width: 1100px) {
   .tobell-layout {
@@ -432,8 +522,48 @@
 
 /* ===== スマートフォン ===== */
 @media (max-width: 760px) {
+  /* ページ全体の余白（base.html の p-8）を詰め、端末の画面高ぴったりに収める。
+     svh はモバイルのアドレスバー伸縮を考慮した安全な画面高で、縮小なしで一画面に収まる。 */
+  body.tobell-page #app-main-content {
+    height: 100svh;
+    padding: 0.55rem;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
   .tobell-shell {
-    padding-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding-bottom: 0;
+  }
+
+  /* ヘッダーとクイック追加は固定高にして、残りをタスク領域へ割り当てる */
+  .tobell-header,
+  .tobell-quick {
+    flex: 0 0 auto;
+    margin-bottom: 0.55rem;
+  }
+
+  /* レイアウトが残り高をすべて使い、内部のリストだけスクロールさせる */
+  .tobell-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .tobell-sidebar {
+    flex: 0 0 auto;
+  }
+
+  .tobell-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   /* 詳細オーバーレイ表示中は背面をスクロールさせない */
@@ -491,10 +621,6 @@
     grid-column: 1 / -1;
   }
 
-  .tobell-layout {
-    grid-template-columns: 1fr;
-  }
-
   /* フィルタを横スクロールのチップに */
   .tobell-filters {
     flex-direction: row;
@@ -516,7 +642,6 @@
   }
 
   .tobell-main {
-    min-height: 240px;
     padding: 0.85rem;
   }
 

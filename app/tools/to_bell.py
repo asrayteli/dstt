@@ -1,6 +1,16 @@
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import (
+    Blueprint,
+    abort,
+    g,
+    jsonify,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask_login import current_user, login_required
 
 from app.services.to_bell_service import (
@@ -11,7 +21,9 @@ from app.services.to_bell_service import (
     create_task,
     delete_subtask,
     delete_task,
+    get_share_token,
     get_task_for_user,
+    issue_share_token,
     list_notifications,
     list_tasks,
     list_due_notification_tasks,
@@ -22,6 +34,7 @@ from app.services.to_bell_service import (
     purge_task,
     reopen_task,
     resolve_notification,
+    revoke_share_token,
     update_subtask,
     update_task,
 )
@@ -36,12 +49,76 @@ from app.services.to_bell_push import (
 
 to_bell_bp = Blueprint("to_bell", __name__, url_prefix="/tools/to_bell")
 
+SHARE_COOKIE_NAME = "tb_share"
+SHARE_COOKIE_PATH = "/tools/to_bell"
+SHARE_COOKIE_MAX_AGE = 60 * 60 * 24 * 180  # 180日
+
+
+def _is_share_session() -> bool:
+    return bool(getattr(g, "tobell_via_share_token", False))
+
+
+def _block_share_session() -> None:
+    """共有トークンで入ったセッションには共有リンクの管理を許さない。"""
+    if _is_share_session():
+        abort(403)
+
 
 @to_bell_bp.route("/")
 @login_required
 def index():
     users = office_user_options(current_user.username)
-    return render_template("to_bell.html", users=users)
+    return render_template("to_bell.html", users=users, share_session=_is_share_session())
+
+
+@to_bell_bp.route("/s/<token>")
+def open_share(token: str):
+    """共有URL。ログイン不要で、Cookie にトークンを保存して ToBell に入る。"""
+    from app.services.to_bell_service import resolve_share_token
+
+    if resolve_share_token(token) is None:
+        abort(404)
+    response = make_response(redirect(url_for("to_bell.index")))
+    response.set_cookie(
+        SHARE_COOKIE_NAME,
+        token,
+        max_age=SHARE_COOKIE_MAX_AGE,
+        path=SHARE_COOKIE_PATH,
+        httponly=True,
+        samesite="Lax",
+        secure=request.is_secure,
+    )
+    return response
+
+
+@to_bell_bp.route("/api/share", methods=["GET"])
+@login_required
+def api_share_status():
+    _block_share_session()
+    return jsonify(_share_payload(get_share_token(current_user.username)))
+
+
+@to_bell_bp.route("/api/share/issue", methods=["POST"])
+@login_required
+def api_share_issue():
+    _block_share_session()
+    return jsonify(_share_payload(issue_share_token(current_user.username)))
+
+
+@to_bell_bp.route("/api/share/revoke", methods=["POST"])
+@login_required
+def api_share_revoke():
+    _block_share_session()
+    revoke_share_token(current_user.username)
+    return jsonify(_share_payload(get_share_token(current_user.username)))
+
+
+def _share_payload(token_row) -> dict:
+    active = bool(token_row and token_row.is_usable())
+    url = ""
+    if active:
+        url = url_for("to_bell.open_share", token=token_row.token, _external=True)
+    return {"active": active, "url": url}
 
 
 @to_bell_bp.route("/notifier")

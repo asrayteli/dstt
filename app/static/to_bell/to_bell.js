@@ -20,6 +20,7 @@
   const isMobile = () => mobileQuery.matches;
 
   document.addEventListener("DOMContentLoaded", () => {
+    document.body.classList.add("tobell-page");
     bindFilters();
     $("tb-quick-form").addEventListener("submit", createQuickTask);
     const newButton = $("tb-new-task");
@@ -29,6 +30,7 @@
     if (notifierButton) notifierButton.addEventListener("click", openWindowsNotifier);
     $("tb-test-push-notify").addEventListener("click", sendTestPush);
     $("tb-read-all").addEventListener("click", readAllNotifications);
+    initShareLink();
     $("tb-search").addEventListener("input", debounce(loadTasks, 220));
     // 端末の「戻る」操作で詳細オーバーレイを閉じる（スマホアプリ的な挙動）。
     window.addEventListener("popstate", () => {
@@ -500,6 +502,71 @@
         tag: key,
         data: { url: `/tools/to_bell?task=${task.id}` },
       });
+    }
+  }
+
+  function initShareLink() {
+    const trigger = $("tb-share-link");
+    const modal = $("tb-share-modal");
+    if (!trigger || !modal) return;
+
+    const close = () => modal.setAttribute("hidden", "");
+    trigger.addEventListener("click", () => openShareModal(modal));
+    modal.querySelectorAll("[data-share-close]").forEach((el) => el.addEventListener("click", close));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !modal.hasAttribute("hidden")) close();
+    });
+
+    $("tb-share-issue").addEventListener("click", () => mutateShare("/tools/to_bell/api/share/issue", modal, "共有リンクを発行しました。"));
+    $("tb-share-reissue").addEventListener("click", () => mutateShare("/tools/to_bell/api/share/issue", modal, "共有リンクを再発行しました。"));
+    $("tb-share-revoke").addEventListener("click", () => mutateShare("/tools/to_bell/api/share/revoke", modal, "共有リンクを無効化しました。"));
+    $("tb-share-copy").addEventListener("click", copyShareUrl);
+  }
+
+  async function openShareModal(modal) {
+    modal.removeAttribute("hidden");
+    try {
+      renderShareState(await api("/tools/to_bell/api/share"));
+    } catch (err) {
+      /* api() がトーストを表示済み */
+    }
+  }
+
+  async function mutateShare(path, modal, message) {
+    try {
+      const data = await api(path, { method: "POST" });
+      renderShareState(data);
+      showFlash(message, "success");
+    } catch (err) {
+      /* api() がトーストを表示済み */
+    }
+  }
+
+  function renderShareState(data) {
+    const active = Boolean(data && data.active);
+    const input = $("tb-share-url");
+    if (input) input.value = (data && data.url) || "";
+    document.querySelectorAll('[data-share-when="active"]').forEach((el) => {
+      el.style.display = active ? "" : "none";
+    });
+    document.querySelectorAll('[data-share-when="inactive"]').forEach((el) => {
+      el.style.display = active ? "none" : "";
+    });
+    $("tb-share-issue").style.display = active ? "none" : "";
+    $("tb-share-reissue").style.display = active ? "" : "none";
+    $("tb-share-revoke").style.display = active ? "" : "none";
+  }
+
+  async function copyShareUrl() {
+    const input = $("tb-share-url");
+    if (!input || !input.value) return;
+    try {
+      await navigator.clipboard.writeText(input.value);
+      showFlash("URLをコピーしました。", "success");
+    } catch (err) {
+      input.select();
+      document.execCommand("copy");
+      showFlash("URLをコピーしました。", "success");
     }
   }
 

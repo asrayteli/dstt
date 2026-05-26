@@ -457,3 +457,68 @@ def test_send_due_task_pushes_without_subscription_is_not_retried(app_ctx, monke
         assert result["skipped"] == 1
         delivery = ToBellPushDelivery.query.filter_by(user_id="alice").one()
         assert delivery.status == "skipped"
+
+
+def test_share_token_lets_anonymous_user_act_as_owner_on_to_bell_only(app_ctx):
+    """共有URLでログイン無しに「そのユーザーとして」ToBell のみ操作できること。"""
+    _create_user(app_ctx, "alice", "Alice")
+
+    owner = app_ctx.test_client()
+    _login(owner, "alice")
+    issued = owner.post("/tools/to_bell/api/share/issue")
+    assert issued.status_code == 200
+    payload = issued.get_json()
+    assert payload["active"] is True
+    assert "/tools/to_bell/s/" in payload["url"]
+    token = payload["url"].rsplit("/", 1)[-1]
+
+    # ログインしていない別クライアントが共有URLを開く
+    guest = app_ctx.test_client()
+    landing = guest.get(f"/tools/to_bell/s/{token}")
+    assert landing.status_code == 302
+    assert landing.headers["Location"].endswith("/tools/to_bell/")
+
+    # Cookie により alice として ToBell API を使える
+    created = guest.post("/tools/to_bell/api/tasks", json={"title": "共有から追加"})
+    assert created.status_code == 201
+    assert created.get_json()["created_by"] == "alice"
+
+    # ToBell 以外は使えない（ログインへリダイレクト）
+    other = guest.get("/", follow_redirects=False)
+    assert other.status_code in (301, 302)
+    assert "/auth/login" in other.headers["Location"]
+
+
+def test_share_session_cannot_manage_share_token(app_ctx):
+    """共有トークンで入ったセッションは共有リンクの発行・無効化ができないこと。"""
+    _create_user(app_ctx, "alice", "Alice")
+
+    owner = app_ctx.test_client()
+    _login(owner, "alice")
+    token = owner.post("/tools/to_bell/api/share/issue").get_json()["url"].rsplit("/", 1)[-1]
+
+    guest = app_ctx.test_client()
+    guest.get(f"/tools/to_bell/s/{token}")
+
+    assert guest.get("/tools/to_bell/api/share").status_code == 403
+    assert guest.post("/tools/to_bell/api/share/issue").status_code == 403
+    assert guest.post("/tools/to_bell/api/share/revoke").status_code == 403
+
+
+def test_share_token_revoke_and_reissue_invalidate_old_token(app_ctx):
+    """無効化・再発行で旧トークンが使えなくなること。"""
+    _create_user(app_ctx, "alice", "Alice")
+
+    owner = app_ctx.test_client()
+    _login(owner, "alice")
+    first = owner.post("/tools/to_bell/api/share/issue").get_json()["url"].rsplit("/", 1)[-1]
+
+    # 無効化すると旧URLは 404
+    owner.post("/tools/to_bell/api/share/revoke")
+    assert app_ctx.test_client().get(f"/tools/to_bell/s/{first}").status_code == 404
+
+    # 再発行すると新URLは有効、旧URLは無効のまま
+    second = owner.post("/tools/to_bell/api/share/issue").get_json()["url"].rsplit("/", 1)[-1]
+    assert second != first
+    assert app_ctx.test_client().get(f"/tools/to_bell/s/{second}").status_code == 302
+    assert app_ctx.test_client().get(f"/tools/to_bell/s/{first}").status_code == 404
