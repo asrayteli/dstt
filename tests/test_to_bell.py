@@ -300,3 +300,137 @@ def test_to_bell_push_subscription_endpoints(app_ctx, monkeypatch):
     )
     assert unsubscribe_response.status_code == 200
     assert unsubscribe_response.get_json()["updated"] is True
+
+
+def test_send_push_uses_fresh_vapid_claims_per_subscription(app_ctx, monkeypatch, tmp_path):
+    """配信先が異なる複数端末（例: PCとiPhone）でも、それぞれ正しい aud で署名されること。
+
+    pywebpush は渡した claims に aud を書き込む。claims を使い回すと 2 件目以降の
+    aud が 1 件目の配信先のままになり、別の push サービスで失敗する（iPhone の
+    テスト通知が「失敗」になっていた原因）。
+    """
+    from urllib.parse import urlparse
+
+    from app.models import ToBellPushSubscription, db
+    from app.services import to_bell_push
+
+    _create_user(app_ctx, "alice", "Alice")
+
+    pem = tmp_path / "vapid.pem"
+    pem.write_text("dummy-key")
+    monkeypatch.setattr(to_bell_push, "_vapid_private_key_path", lambda: pem)
+
+    class FakeWebPushException(Exception):
+        def __init__(self, message, response=None):
+            super().__init__(message)
+            self.response = response
+
+    seen = []
+
+    def fake_webpush(*, subscription_info, data, vapid_private_key, vapid_claims, ttl, timeout):
+        endpoint = subscription_info["endpoint"]
+        parsed = urlparse(endpoint)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        # pywebpush と同様に claims を破壊的に書き換える。
+        if not vapid_claims.get("aud"):
+            vapid_claims["aud"] = origin
+        seen.append((endpoint, vapid_claims["aud"]))
+        # aud が配信先 origin と一致しなければ push サービスは署名を拒否する。
+        if vapid_claims["aud"] != origin:
+            raise FakeWebPushException("VAPID audience mismatch")
+
+    monkeypatch.setattr(to_bell_push, "webpush", fake_webpush)
+    monkeypatch.setattr(to_bell_push, "WebPushException", FakeWebPushException)
+
+    with app_ctx.app_context():
+        db.session.add_all(
+            [
+                ToBellPushSubscription(
+                    user_id="alice", endpoint="https://fcm.googleapis.com/fcm/send/pc",
+                    p256dh="k", auth="a",
+                ),
+                ToBellPushSubscription(
+                    user_id="alice", endpoint="https://web.push.apple.com/iphone",
+                    p256dh="k", auth="a",
+                ),
+            ]
+        )
+        db.session.commit()
+        result = to_bell_push.send_push_to_user("alice", title="t", body="b", url="/u")
+
+    assert result == {"sent": 2, "failed": 0}
+    assert {aud for _, aud in seen} == {
+        "https://fcm.googleapis.com",
+        "https://web.push.apple.com",
+    }
+
+
+def test_send_due_task_pushes_retries_after_failure(app_ctx, monkeypatch):
+    """送信失敗は「配信済み」として確定せず、次回スケジュールで再送されること。"""
+    from datetime import datetime, timedelta
+
+    from app.models import ToBellPushDelivery, ToBellTask, db
+    from app.services import to_bell_push
+
+    _create_user(app_ctx, "alice", "Alice")
+    calls = {"n": 0}
+
+    def fake_send(user_id, *, title, body, url):
+        calls["n"] += 1
+        return {"sent": 0, "failed": 1} if calls["n"] == 1 else {"sent": 1, "failed": 0}
+
+    monkeypatch.setattr(to_bell_push, "send_push_to_user", fake_send)
+
+    with app_ctx.app_context():
+        due = datetime.now() - timedelta(minutes=5)
+        db.session.add(
+            ToBellTask(title="期限切れ", created_by="alice", assigned_to="alice", status="todo", due_at=due)
+        )
+        db.session.commit()
+
+        first = to_bell_push.send_due_task_pushes()
+        assert first["failed"] == 1
+        assert first["sent"] == 0
+
+        second = to_bell_push.send_due_task_pushes()
+        assert second["sent"] == 1
+        assert calls["n"] == 2
+
+        delivery = ToBellPushDelivery.query.filter_by(user_id="alice").one()
+        assert delivery.status == "sent"
+
+        third = to_bell_push.send_due_task_pushes()
+        assert third["skipped"] == 1
+        assert calls["n"] == 2
+
+
+def test_send_due_task_pushes_without_subscription_is_not_retried(app_ctx, monkeypatch):
+    """有効な購読が無い場合は確定状態として記録し、過去分が後から一斉配信されないこと。"""
+    from datetime import datetime, timedelta
+
+    from app.models import ToBellPushDelivery, ToBellTask, db
+    from app.services import to_bell_push
+
+    _create_user(app_ctx, "alice", "Alice")
+    calls = {"n": 0}
+
+    def fake_send(user_id, *, title, body, url):
+        calls["n"] += 1
+        return {"sent": 0, "failed": 0}
+
+    monkeypatch.setattr(to_bell_push, "send_push_to_user", fake_send)
+
+    with app_ctx.app_context():
+        due = datetime.now() - timedelta(minutes=5)
+        db.session.add(
+            ToBellTask(title="購読なし", created_by="alice", assigned_to="alice", status="todo", due_at=due)
+        )
+        db.session.commit()
+
+        to_bell_push.send_due_task_pushes()
+        result = to_bell_push.send_due_task_pushes()
+
+        assert calls["n"] == 1
+        assert result["skipped"] == 1
+        delivery = ToBellPushDelivery.query.filter_by(user_id="alice").one()
+        assert delivery.status == "skipped"
