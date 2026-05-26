@@ -135,8 +135,8 @@ def test_to_bell_page_renders(app_ctx):
     assert "To Bell".encode("utf-8") in response.data
     assert "/static/to_bell/to_bell.js" in response.get_data(as_text=True)
     assert 'type="time"' in response.get_data(as_text=True)
-    assert "通知を有効化" in response.get_data(as_text=True)
-    assert "待受ウィンドウ" in response.get_data(as_text=True)
+    assert 'id="tb-enable-push-notify"' in response.get_data(as_text=True)
+    assert 'id="tb-open-notifier"' in response.get_data(as_text=True)
     assert 'id="tb-flash"' in response.get_data(as_text=True)
     # PWA 専用リロードボタンは存在し、既定では hidden（JS が standalone 判定で表示）
     assert 'id="tb-reload"' in response.get_data(as_text=True)

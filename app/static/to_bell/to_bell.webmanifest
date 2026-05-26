@@ -24,7 +24,7 @@
     }
   ],
   "display": "standalone",
-  "start_url": "/tools/to_bell/",
+  "start_url": "/tools/to_bell/pwa",
   "scope": "/tools/to_bell/",
   "theme_color": "#2563eb",
   "background_color": "#ffffff"

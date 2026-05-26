@@ -61,9 +61,13 @@
       >
         {% set notification = (tool_notifications|default({})).get(item.key) %}
         {% if notification %}
-        <span class="absolute right-4 top-4 rounded-full px-2 py-1 text-xs font-bold text-white {% if notification.severity == 'danger' %}bg-red-600{% elif notification.severity == 'warning' %}bg-amber-500{% else %}bg-blue-600{% endif %}">
-          {{ notification.label or notification.action_count or '!' }}
-        </span>
+        <div class="absolute right-4 top-4 flex max-w-[70%] flex-wrap justify-end gap-1">
+          {% for badge in notification.badges|default([]) %}
+          <span class="rounded-full px-2 py-1 text-xs font-bold text-white {% if badge.severity == 'danger' %}bg-red-600{% elif badge.severity == 'warning' %}bg-amber-500{% else %}bg-blue-600{% endif %}">
+            {{ badge.label }}
+          </span>
+          {% endfor %}
+        </div>
         {% endif %}
         <h2 class="text-lg font-semibold mb-2">{{ item.icon }} {{ item.label }}</h2>
         <p class="text-sm text-gray-600 mb-4">{{ item.description }}</p>

@@ -509,6 +509,62 @@
   gap: 0.5rem;
 }
 
+.tobell-devices-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.tobell-device {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.65rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.tobell-device.is-disabled {
+  opacity: 0.62;
+}
+
+.tobell-device-label {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  padding: 0.45rem 0.55rem;
+  font-weight: 700;
+}
+
+.tobell-device-meta {
+  margin-top: 0.25rem;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+body.tobell-pwa-mode {
+  margin: 0;
+  background: #f8fafc;
+}
+
+body.tobell-pwa-mode #app-main-content {
+  min-height: 100svh;
+  padding: 0.65rem;
+  box-sizing: border-box;
+}
+
+body.tobell-pwa-mode .tobell-shell {
+  max-width: 760px;
+}
+
+body.tobell-pwa-mode .tobell-pc-only,
+body.tobell-pwa-mode #tb-share-link,
+body.tobell-pwa-mode #tb-test-push-notify {
+  display: none !important;
+}
+
 /* ===== タブレット ===== */
 @media (max-width: 1100px) {
   .tobell-layout {

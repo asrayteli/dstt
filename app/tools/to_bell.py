@@ -40,9 +40,12 @@ from app.services.to_bell_service import (
 )
 from app.services.to_bell_push import (
     ToBellPushUnavailable,
+    deactivate_subscription,
+    list_subscriptions,
     save_subscription,
     send_test_push,
     unsubscribe,
+    update_subscription_label,
     vapid_public_key,
 )
 
@@ -71,6 +74,13 @@ def index():
     return render_template("to_bell.html", users=users, share_session=_is_share_session())
 
 
+@to_bell_bp.route("/pwa")
+@login_required
+def pwa():
+    users = office_user_options(current_user.username)
+    return render_template("to_bell_pwa.html", users=users, share_session=_is_share_session())
+
+
 @to_bell_bp.route("/s/<token>")
 def open_share(token: str):
     """共有URL。ログイン不要で、Cookie にトークンを保存して ToBell に入る。"""
@@ -79,6 +89,26 @@ def open_share(token: str):
     if resolve_share_token(token) is None:
         abort(404)
     response = make_response(redirect(url_for("to_bell.index")))
+    response.set_cookie(
+        SHARE_COOKIE_NAME,
+        token,
+        max_age=SHARE_COOKIE_MAX_AGE,
+        path=SHARE_COOKIE_PATH,
+        httponly=True,
+        samesite="Lax",
+        secure=request.is_secure,
+    )
+    return response
+
+
+@to_bell_bp.route("/pwa/<token>")
+def open_pwa_share(token: str):
+    """PWA dedicated share URL."""
+    from app.services.to_bell_service import resolve_share_token
+
+    if resolve_share_token(token) is None:
+        abort(404)
+    response = make_response(redirect(url_for("to_bell.pwa")))
     response.set_cookie(
         SHARE_COOKIE_NAME,
         token,
@@ -116,9 +146,11 @@ def api_share_revoke():
 def _share_payload(token_row) -> dict:
     active = bool(token_row and token_row.is_usable())
     url = ""
+    pwa_url = ""
     if active:
         url = url_for("to_bell.open_share", token=token_row.token, _external=True)
-    return {"active": active, "url": url}
+        pwa_url = url_for("to_bell.open_pwa_share", token=token_row.token, _external=True)
+    return {"active": active, "url": url, "mobile_url": url, "pwa_url": pwa_url}
 
 
 @to_bell_bp.route("/notifier")
@@ -303,6 +335,30 @@ def api_push_unsubscribe():
     return jsonify({"status": "ok", "updated": unsubscribe(current_user.username, endpoint)})
 
 
+@to_bell_bp.route("/api/push/subscriptions", methods=["GET"])
+@login_required
+def api_push_subscriptions():
+    return jsonify({"subscriptions": list_subscriptions(current_user.username)})
+
+
+@to_bell_bp.route("/api/push/subscriptions/<int:subscription_id>", methods=["PUT", "DELETE"])
+@login_required
+def api_push_subscription(subscription_id: int):
+    if _is_mobile_request():
+        return jsonify({"status": "error", "message": "通知先の編集はPC版からのみ利用できます。"}), 403
+    try:
+        if request.method == "DELETE":
+            return jsonify({"status": "ok", "updated": deactivate_subscription(current_user.username, subscription_id)})
+        row = update_subscription_label(
+            current_user.username,
+            subscription_id,
+            str(_payload().get("device_label") or ""),
+        )
+        return jsonify({"status": "ok", "subscription": row})
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 404
+
+
 @to_bell_bp.route("/api/push/test", methods=["POST"])
 @login_required
 def api_push_test():
@@ -327,3 +383,8 @@ def _json_endpoint(action):
         return jsonify(result), status
     except ToBellInputError as exc:
         return jsonify({"error": exc.message, "field": exc.field}), 400
+
+
+def _is_mobile_request() -> bool:
+    ua = (request.headers.get("User-Agent", "") or "").lower()
+    return any(token in ua for token in ("iphone", "ipad", "android", "mobile"))
