@@ -34,11 +34,26 @@ def _normalize_summary(summary: dict[str, Any]) -> dict[str, Any]:
     severity = str(summary.get("severity") or "info").strip()
     if severity not in {"info", "warning", "danger"}:
         severity = "info"
+    badges = []
+    raw_badges = summary.get("badges") if isinstance(summary.get("badges"), list) else []
+    for item in raw_badges[:4]:
+        if not isinstance(item, dict):
+            continue
+        badge_label = str(item.get("label") or "").strip()
+        if not badge_label:
+            continue
+        badge_severity = str(item.get("severity") or severity).strip()
+        if badge_severity not in {"info", "warning", "danger"}:
+            badge_severity = "info"
+        badges.append({"label": badge_label, "severity": badge_severity})
+    if not badges and label:
+        badges.append({"label": label, "severity": severity})
     return {
         "unread_count": unread,
         "action_count": action,
         "label": label,
         "severity": severity,
+        "badges": badges,
         "href": str(summary.get("href") or "").strip(),
     }
 
@@ -81,6 +96,7 @@ def _shiftersync_provider(user) -> dict[str, Any]:
         "action_count": pending,
         "label": f"申請 {pending}" if pending else "未読あり",
         "severity": "warning",
+        "badges": [{"label": f"申請{pending}件", "severity": "warning"}] if pending else [],
         "href": "/tools/shiftersync/cloudshift",
     }
 

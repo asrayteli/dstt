@@ -12,7 +12,7 @@ from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
 from app.models import ToBellPushDelivery, ToBellPushSubscription, ToBellTask, db
-from app.services.to_bell_service import task_notification_targets
+from app.services.to_bell_service import has_explicit_notification_time, task_notification_targets
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -82,11 +82,37 @@ def unsubscribe(user_id: str, endpoint: str) -> bool:
     return True
 
 
+def list_subscriptions(user_id: str) -> list[dict[str, Any]]:
+    rows = ToBellPushSubscription.query.filter_by(user_id=user_id).order_by(
+        ToBellPushSubscription.is_active.desc(),
+        ToBellPushSubscription.updated_at.desc(),
+    ).all()
+    return [_subscription_payload(row) for row in rows]
+
+
+def update_subscription_label(user_id: str, subscription_id: int, label: str) -> dict[str, Any]:
+    row = ToBellPushSubscription.query.filter_by(id=subscription_id, user_id=user_id).first()
+    if row is None:
+        raise ValueError("通知先が見つかりません。")
+    row.device_label = str(label or "").strip()[:120] or _device_label(row.user_agent)
+    db.session.commit()
+    return _subscription_payload(row)
+
+
+def deactivate_subscription(user_id: str, subscription_id: int) -> bool:
+    row = ToBellPushSubscription.query.filter_by(id=subscription_id, user_id=user_id).first()
+    if row is None:
+        return False
+    row.is_active = False
+    db.session.commit()
+    return True
+
+
 def send_test_push(user_id: str) -> dict[str, int]:
     return send_push_to_user(
         user_id,
-        title="To Bell テスト通知",
-        body="iPhone/PCのプッシュ通知が有効です。",
+        title="ToBell テスト通知 from DSTT",
+        body="この端末のプッシュ通知は有効です。",
         url="/tools/to_bell",
     )
 
@@ -106,6 +132,9 @@ def send_due_task_pushes(*, now: datetime | None = None) -> dict[str, int]:
     skipped = 0
     failed = 0
     for task in tasks:
+        if not has_explicit_notification_time(task):
+            skipped += 1
+            continue
         due_key = task.due_at.isoformat(timespec="minutes") if task.due_at else ""
         for user_id in task_notification_targets(task):
             delivery = ToBellPushDelivery.query.filter_by(
@@ -120,8 +149,8 @@ def send_due_task_pushes(*, now: datetime | None = None) -> dict[str, int]:
                 continue
             result = send_push_to_user(
                 user_id,
-                title=f"To Bell: {task.title}",
-                body=f"通知日時になりました: {task.due_at.strftime('%Y-%m-%d %H:%M') if task.due_at else ''}",
+                title=f"ToBell {task.title} from DSTT",
+                body=task.description or "",
                 url=f"/tools/to_bell?task={task.id}",
             )
             sent += result["sent"]
@@ -285,6 +314,19 @@ def _device_label(user_agent: str) -> str:
     if "windows" in ua:
         return "Windows"
     return "Web Push"
+
+
+def _subscription_payload(row: ToBellPushSubscription) -> dict[str, Any]:
+    endpoint = row.endpoint or ""
+    return {
+        "id": row.id,
+        "device_label": row.device_label or _device_label(row.user_agent),
+        "user_agent": row.user_agent or "",
+        "endpoint_tail": endpoint[-18:] if endpoint else "",
+        "is_active": bool(row.is_active),
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
 
 
 def _config_bool(app, key: str, env_key: str, default: bool = True) -> bool:

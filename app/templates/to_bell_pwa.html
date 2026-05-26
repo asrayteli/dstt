@@ -1,34 +1,32 @@
-{% extends "base.html" %}
-
-{% block app_manifest %}
-<link rel="manifest" href="{{ url_for('static', filename='to_bell/to_bell.webmanifest') }}">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="To Bell">
-{% endblock %}
-
-{% block content %}
-<link rel="stylesheet" href="{{ url_for('static', filename='to_bell/to_bell.css') }}">
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>To Bell</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='to_bell/to_bell.webmanifest') }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="To Bell">
+  <link rel="stylesheet" href="{{ url_for('static', filename='to_bell/to_bell.css') }}">
+</head>
+<body class="tobell-pwa-mode" data-pwa-shell="1">
+<main id="app-main-content">
 
 <div class="tobell-shell">
   <header class="tobell-header">
     <div class="tobell-header-lead">
       <p class="tobell-kicker">Universal Task Management App</p>
       <h1>ToBell</h1>
-      <p class="tobell-header-desc">すぐ書ける Todo と、今日の要対応をひとつの画面で確認できます。</p>
     </div>
     <div class="tobell-header-actions">
       <span class="tobell-notify-status" id="tb-notify-status" data-tone="idle">通知: 未設定</span>
       <button type="button" class="tobell-btn" id="tb-reload" hidden>リロード</button>
-      <button type="button" class="tobell-btn tobell-btn-primary tobell-pc-only" id="tb-new-task">新規</button>
       <button type="button" class="tobell-btn" id="tb-enable-push-notify">通知を有効化</button>
       <button type="button" class="tobell-btn" id="tb-push-devices">通知先</button>
-      <button type="button" class="tobell-btn tobell-pc-only" id="tb-open-notifier">待受ウィンドウ</button>
-      <button type="button" class="tobell-btn" id="tb-test-push-notify">テスト送信</button>
       <button type="button" class="tobell-btn" id="tb-read-all">通知を既読</button>
-      {% if not share_session %}
-      <button type="button" class="tobell-btn" id="tb-share-link">共有リンク</button>
-      {% endif %}
     </div>
   </header>
 
@@ -59,10 +57,6 @@
       <div class="tobell-search">
         <input id="tb-search" type="search" placeholder="検索">
       </div>
-      <section class="tobell-notifications tobell-pc-only">
-        <div class="tobell-panel-title">通知</div>
-        <div id="tb-notifications"></div>
-      </section>
     </aside>
 
     <main class="tobell-main">
@@ -137,36 +131,6 @@
   </section>
 </template>
 
-{% if not share_session %}
-<div id="tb-share-modal" class="tobell-modal" hidden>
-  <div class="tobell-modal-backdrop" data-share-close></div>
-  <div class="tobell-modal-card" role="dialog" aria-modal="true" aria-labelledby="tb-share-title">
-    <div class="tobell-modal-head">
-      <h2 id="tb-share-title">ログイン不要の共有リンク</h2>
-      <button type="button" class="tobell-btn" data-share-close aria-label="閉じる">×</button>
-    </div>
-    <p class="tobell-share-note">
-      このURLを知っている人は、ログインなしで<strong>あなたとして ToBell のみ</strong>操作できます。
-      取り扱いに注意し、不要になったら必ず無効化してください。
-    </p>
-    <div class="tobell-share-urlrow" data-share-when="active">
-      <input id="tb-share-url" type="text" readonly aria-label="モバイル用リンク">
-      <button type="button" class="tobell-btn tobell-btn-primary" id="tb-share-copy">モバイル用をコピー</button>
-    </div>
-    <div class="tobell-share-urlrow" data-share-when="active">
-      <input id="tb-share-pwa-url" type="text" readonly aria-label="PWA専用リンク">
-      <button type="button" class="tobell-btn tobell-btn-primary" id="tb-share-pwa-copy">PWA専用をコピー</button>
-    </div>
-    <p class="tobell-share-empty" data-share-when="inactive">まだ共有リンクは発行されていません。</p>
-    <div class="tobell-share-actions">
-      <button type="button" class="tobell-btn tobell-btn-primary" id="tb-share-issue">発行</button>
-      <button type="button" class="tobell-btn" id="tb-share-reissue">再発行</button>
-      <button type="button" class="tobell-btn tobell-danger" id="tb-share-revoke">無効化</button>
-    </div>
-  </div>
-</div>
-{% endif %}
-
 <div id="tb-devices-modal" class="tobell-modal" hidden>
   <div class="tobell-modal-backdrop" data-devices-close></div>
   <div class="tobell-modal-card" role="dialog" aria-modal="true" aria-labelledby="tb-devices-title">
@@ -182,4 +146,6 @@
 <div id="tb-flash" class="tobell-flash info" role="status" aria-live="polite"></div>
 
 <script src="{{ url_for('static', filename='to_bell/to_bell.js') }}"></script>
-{% endblock %}
+</main>
+</body>
+</html>

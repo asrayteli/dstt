@@ -320,34 +320,64 @@ def mark_all_notifications_read(username: str) -> int:
 def notification_summary(username: str) -> dict[str, Any]:
     today_end = datetime.combine(date.today(), time.max.replace(microsecond=0))
     unread_count = ToBellNotification.query.filter_by(user_id=username, is_read=False).count()
-    due_action_count = ToBellTask.query.filter(
+    active_query = ToBellTask.query.filter(
         visible_task_filter(username),
         ToBellTask.status.notin_(["done", "archived"]),
+    )
+    due_action_count = active_query.filter(
         or_(ToBellTask.assigned_to == username, ToBellTask.reviewer_id == username, ToBellTask.due_at <= today_end),
     ).count()
     unresolved_notifications = ToBellNotification.query.filter_by(user_id=username, is_resolved=False).count()
     action_count = max(due_action_count, unresolved_notifications)
+    todo_count = active_query.filter(ToBellTask.status == "todo").count()
+    doing_count = active_query.filter(ToBellTask.status.in_(["doing", "blocked", "review", "returned"])).count()
+    urgent_count = active_query.filter(ToBellTask.priority == "urgent").count()
+    overdue_count = active_query.filter(ToBellTask.due_at < datetime.combine(date.today(), time.min)).count()
     severity = "danger" if action_count else ("warning" if unread_count else "info")
-    label = f"要対応 {action_count}" if action_count else ("未読あり" if unread_count else "")
+    badges = []
+    if urgent_count:
+        badges.append({"label": f"緊急{urgent_count}件", "severity": "danger"})
+    if overdue_count:
+        badges.append({"label": f"期限切れ{overdue_count}件", "severity": "danger"})
+    if todo_count:
+        badges.append({"label": f"未着手{todo_count}件", "severity": "info"})
+    if doing_count:
+        badges.append({"label": f"進行中{doing_count}件", "severity": "warning"})
+    if unread_count:
+        badges.append({"label": f"未読{unread_count}件", "severity": "info"})
+    label = badges[0]["label"] if badges else ""
     return {
         "unread_count": unread_count,
         "action_count": action_count,
         "label": label,
         "severity": severity,
+        "badges": badges[:4],
         "href": "/tools/to_bell?filter=attention" if action_count else "/tools/to_bell",
     }
+
+
+def has_explicit_notification_time(task: ToBellTask) -> bool:
+    """Only tasks with a user-entered time should fire push/local reminders."""
+    if task.due_at is None:
+        return False
+    return not (
+        task.due_at.hour == 23
+        and task.due_at.minute == 59
+        and task.due_at.second == 59
+    )
 
 
 def list_due_notification_tasks(username: str, *, now: datetime | None = None) -> list[ToBellTask]:
     now = now or datetime.now()
     cutoff = now - timedelta(days=60)
-    return ToBellTask.query.filter(
+    rows = ToBellTask.query.filter(
         visible_task_filter(username),
         ToBellTask.status.notin_(["done", "archived"]),
         ToBellTask.due_at.isnot(None),
         ToBellTask.due_at <= now,
         ToBellTask.due_at >= cutoff,
     ).order_by(ToBellTask.due_at.asc()).limit(30).all()
+    return [task for task in rows if has_explicit_notification_time(task)]
 
 
 def task_notification_targets(task: ToBellTask) -> set[str]:

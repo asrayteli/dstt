@@ -20,6 +20,10 @@
   const isMobile = () => mobileQuery.matches;
 
   document.addEventListener("DOMContentLoaded", () => {
+    if (isStandalone() && document.body.dataset.pwaShell !== "1") {
+      window.location.replace(`/tools/to_bell/pwa${window.location.search || ""}`);
+      return;
+    }
     document.body.classList.add("tobell-page");
     bindFilters();
     $("tb-quick-form").addEventListener("submit", createQuickTask);
@@ -34,7 +38,10 @@
     }
     const notifierButton = $("tb-open-notifier");
     if (notifierButton) notifierButton.addEventListener("click", openWindowsNotifier);
-    $("tb-test-push-notify").addEventListener("click", sendTestPush);
+    const devicesButton = $("tb-push-devices");
+    if (devicesButton) devicesButton.addEventListener("click", openDevicesModal);
+    const testPushButton = $("tb-test-push-notify");
+    if (testPushButton) testPushButton.addEventListener("click", sendTestPush);
     $("tb-read-all").addEventListener("click", readAllNotifications);
     initShareLink();
     $("tb-search").addEventListener("input", debounce(loadTasks, 220));
@@ -212,10 +219,6 @@
     event.preventDefault();
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
-    // 日付が未入力なら当日として通知する（クイック追加の既定動作）。
-    if (!String(payload.due_date || "").trim()) {
-      payload.due_date = todayIso();
-    }
     await api("/tools/to_bell/api/tasks", { method: "POST", body: payload });
     form.reset();
     await loadTasks();
@@ -292,9 +295,11 @@
   }
 
   async function loadNotifications() {
+    const container = $("tb-notifications");
+    if (!container) return;
     const data = await api("/tools/to_bell/api/notifications");
     const rows = data.notifications || [];
-    $("tb-notifications").innerHTML = rows.length ? rows.slice(0, 8).map((item) => `
+    container.innerHTML = rows.length ? rows.slice(0, 8).map((item) => `
       <div class="tobell-notification">
         <strong>${esc(item.title)}</strong>
         <div>${esc(item.body)}</div>
@@ -585,8 +590,8 @@
       const key = `toBellNotified:${task.id}:${task.due_at}`;
       if (localStorage.getItem(key)) continue;
       localStorage.setItem(key, new Date().toISOString());
-      await showLocalNotification(`To Bell: ${task.title}`, {
-        body: `${formatDue(task.due_at)} / ${statusLabel(task.status)}`,
+      await showLocalNotification(`ToBell ${task.title} from DSTT`, {
+        body: task.description || "",
         tag: key,
         data: { url: `/tools/to_bell?task=${task.id}` },
       });
@@ -609,6 +614,8 @@
     $("tb-share-reissue").addEventListener("click", () => mutateShare("/tools/to_bell/api/share/issue", modal, "共有リンクを再発行しました。"));
     $("tb-share-revoke").addEventListener("click", () => mutateShare("/tools/to_bell/api/share/revoke", modal, "共有リンクを無効化しました。"));
     $("tb-share-copy").addEventListener("click", copyShareUrl);
+    const pwaCopy = $("tb-share-pwa-copy");
+    if (pwaCopy) pwaCopy.addEventListener("click", copySharePwaUrl);
   }
 
   async function openShareModal(modal) {
@@ -633,7 +640,9 @@
   function renderShareState(data) {
     const active = Boolean(data && data.active);
     const input = $("tb-share-url");
-    if (input) input.value = (data && data.url) || "";
+    if (input) input.value = (data && (data.mobile_url || data.url)) || "";
+    const pwaInput = $("tb-share-pwa-url");
+    if (pwaInput) pwaInput.value = (data && data.pwa_url) || "";
     document.querySelectorAll('[data-share-when="active"]').forEach((el) => {
       el.style.display = active ? "" : "none";
     });
@@ -656,6 +665,74 @@
       document.execCommand("copy");
       showFlash("URLをコピーしました。", "success");
     }
+  }
+
+  async function copySharePwaUrl() {
+    const input = $("tb-share-pwa-url");
+    if (!input || !input.value) return;
+    try {
+      await navigator.clipboard.writeText(input.value);
+      showFlash("PWA専用リンクをコピーしました。", "success");
+    } catch (err) {
+      input.select();
+      document.execCommand("copy");
+      showFlash("PWA専用リンクをコピーしました。", "success");
+    }
+  }
+
+  async function openDevicesModal() {
+    const modal = $("tb-devices-modal");
+    if (!modal) return;
+    modal.removeAttribute("hidden");
+    modal.querySelectorAll("[data-devices-close]").forEach((el) => {
+      if (!el.dataset.bound) {
+        el.dataset.bound = "1";
+        el.addEventListener("click", () => modal.setAttribute("hidden", ""));
+      }
+    });
+    await loadDevices();
+  }
+
+  async function loadDevices() {
+    const list = $("tb-devices-list");
+    if (!list) return;
+    list.innerHTML = '<div class="tobell-empty">読み込み中です。</div>';
+    const data = await api("/tools/to_bell/api/push/subscriptions");
+    const rows = data.subscriptions || [];
+    if (!rows.length) {
+      list.innerHTML = '<div class="tobell-empty">登録済みの通知先はありません。</div>';
+      return;
+    }
+    const editable = !isMobile() && !isStandalone();
+    list.innerHTML = rows.map((item) => `
+      <div class="tobell-device ${item.is_active ? "" : "is-disabled"}" data-device-id="${item.id}">
+        <div class="tobell-device-main">
+          <input class="tobell-device-label" value="${esc(item.device_label)}" aria-label="通知先名" ${editable ? "" : "readonly"}>
+          <div class="tobell-device-meta">${item.is_active ? "有効" : "無効"} / ${esc(item.endpoint_tail || "")}</div>
+        </div>
+        ${editable ? `<button type="button" class="tobell-btn" data-device-save="${item.id}">保存</button>
+        <button type="button" class="tobell-btn tobell-danger" data-device-disable="${item.id}" ${item.is_active ? "" : "disabled"}>無効化</button>` : ""}
+      </div>
+    `).join("");
+    list.querySelectorAll("[data-device-save]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const row = button.closest("[data-device-id]");
+        const label = row ? row.querySelector(".tobell-device-label").value : "";
+        await api(`/tools/to_bell/api/push/subscriptions/${button.dataset.deviceSave}`, {
+          method: "PUT",
+          body: { device_label: label },
+        });
+        await loadDevices();
+        showFlash("通知先を更新しました。", "success");
+      });
+    });
+    list.querySelectorAll("[data-device-disable]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await api(`/tools/to_bell/api/push/subscriptions/${button.dataset.deviceDisable}`, { method: "DELETE" });
+        await loadDevices();
+        showFlash("通知先を無効化しました。", "success");
+      });
+    });
   }
 
   async function api(path, options) {
