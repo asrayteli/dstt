@@ -218,6 +218,12 @@ def delete_task(task: ToBellTask) -> None:
     db.session.commit()
 
 
+def purge_task(task: ToBellTask) -> None:
+    """サブタスク・コメント・通知ごとタスクを完全に削除する（元に戻せない）。"""
+    db.session.delete(task)
+    db.session.commit()
+
+
 def add_subtask(task: ToBellTask, payload: dict[str, Any]) -> ToBellSubtask:
     title = str(payload.get("title") or "").strip()
     if not title:

@@ -19,6 +19,7 @@ from app.services.to_bell_service import (
     mark_notification_read,
     notification_summary,
     office_user_options,
+    purge_task,
     reopen_task,
     resolve_notification,
     update_subtask,
@@ -90,9 +91,14 @@ def api_update_task(task_id: int):
 @to_bell_bp.route("/api/tasks/<int:task_id>", methods=["DELETE"])
 @login_required
 def api_delete_task(task_id: int):
+    hard = request.args.get("hard", "").lower() in ("1", "true", "yes")
+
     def action():
         task = get_task_for_user(task_id, current_user.username)
-        delete_task(task)
+        if hard:
+            purge_task(task)
+        else:
+            delete_task(task)
         return {"ok": True}
 
     return _json_endpoint(action)
