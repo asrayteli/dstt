@@ -516,7 +516,7 @@
 
 .tobell-device {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 0.5rem;
   align-items: center;
   padding: 0.65rem;
@@ -563,6 +563,21 @@ body.tobell-pwa-mode .tobell-pc-only,
 body.tobell-pwa-mode #tb-share-link,
 body.tobell-pwa-mode #tb-test-push-notify {
   display: none !important;
+}
+
+body.tobell-pwa-mode .tobell-quick-form {
+  grid-template-columns: 1fr 1fr;
+}
+
+body.tobell-pwa-mode .tobell-quick-form input[name="title"],
+body.tobell-pwa-mode .tobell-quick-form select[name="assigned_to"],
+body.tobell-pwa-mode .tobell-quick-form button[type="submit"] {
+  grid-column: 1 / -1;
+}
+
+body.tobell-pwa-mode .tobell-quick-form input[name="due_date"],
+body.tobell-pwa-mode .tobell-quick-form input[name="due_time"] {
+  overflow: hidden;
 }
 
 /* ===== タブレット ===== */
