@@ -17,6 +17,9 @@
       <button type="button" class="tobell-btn tobell-pc-only" id="tb-open-notifier">待受ウィンドウ</button>
       <button type="button" class="tobell-btn" id="tb-test-push-notify">テスト送信</button>
       <button type="button" class="tobell-btn" id="tb-read-all">通知を既読</button>
+      {% if not share_session %}
+      <button type="button" class="tobell-btn" id="tb-share-link">共有リンク</button>
+      {% endif %}
     </div>
   </header>
 
@@ -124,6 +127,32 @@
     <div id="tb-comments"></div>
   </section>
 </template>
+
+{% if not share_session %}
+<div id="tb-share-modal" class="tobell-modal" hidden>
+  <div class="tobell-modal-backdrop" data-share-close></div>
+  <div class="tobell-modal-card" role="dialog" aria-modal="true" aria-labelledby="tb-share-title">
+    <div class="tobell-modal-head">
+      <h2 id="tb-share-title">ログイン不要の共有リンク</h2>
+      <button type="button" class="tobell-btn" data-share-close aria-label="閉じる">×</button>
+    </div>
+    <p class="tobell-share-note">
+      このURLを知っている人は、ログインなしで<strong>あなたとして ToBell のみ</strong>操作できます。
+      取り扱いに注意し、不要になったら必ず無効化してください。
+    </p>
+    <div class="tobell-share-urlrow" data-share-when="active">
+      <input id="tb-share-url" type="text" readonly>
+      <button type="button" class="tobell-btn tobell-btn-primary" id="tb-share-copy">コピー</button>
+    </div>
+    <p class="tobell-share-empty" data-share-when="inactive">まだ共有リンクは発行されていません。</p>
+    <div class="tobell-share-actions">
+      <button type="button" class="tobell-btn tobell-btn-primary" id="tb-share-issue">発行</button>
+      <button type="button" class="tobell-btn" id="tb-share-reissue">再発行</button>
+      <button type="button" class="tobell-btn tobell-danger" id="tb-share-revoke">無効化</button>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <div id="tb-flash" class="tobell-flash info" role="status" aria-live="polite"></div>
 

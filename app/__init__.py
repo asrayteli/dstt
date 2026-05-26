@@ -359,6 +359,21 @@ def create_app(test_config=None):
     @login_manager.user_loader
     def load_user(user_id):
         return User.query.filter_by(username=user_id).first()
+
+    @login_manager.request_loader
+    def load_user_from_to_bell_share(req):
+        # 共有トークンは ToBell 配下の経路でのみ有効（他ツールには波及させない）。
+        if not (req.path or "").startswith("/tools/to_bell"):
+            return None
+        token = req.cookies.get("tb_share")
+        if not token:
+            return None
+        from flask import g
+        from .services.to_bell_service import resolve_share_token
+        user = resolve_share_token(token)
+        if user is not None:
+            g.tobell_via_share_token = True
+        return user
     @app.context_processor
     def inject_navigation():
         from .access_control import (

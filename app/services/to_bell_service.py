@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -8,6 +9,7 @@ from sqlalchemy import and_, or_
 from app.models import (
     ToBellComment,
     ToBellNotification,
+    ToBellShareToken,
     ToBellSubtask,
     ToBellTag,
     ToBellTask,
@@ -383,6 +385,49 @@ def cleanup_expired_records(*, now: datetime | None = None, retention_days: int 
 
     db.session.commit()
     return {"tasks": len(tasks), "notifications": len(notifications)}
+
+
+def get_share_token(username: str) -> ToBellShareToken | None:
+    return ToBellShareToken.query.filter_by(user_id=username).first()
+
+
+def issue_share_token(username: str) -> ToBellShareToken:
+    """共有トークンを発行（既存があれば再発行して旧トークンを無効化）する。"""
+    row = ToBellShareToken.query.filter_by(user_id=username).first()
+    if row is None:
+        row = ToBellShareToken(user_id=username)
+        db.session.add(row)
+    row.token = secrets.token_urlsafe(32)
+    row.is_revoked = False
+    row.created_at = datetime.utcnow()
+    row.last_used_at = None
+    db.session.commit()
+    return row
+
+
+def revoke_share_token(username: str) -> bool:
+    row = ToBellShareToken.query.filter_by(user_id=username).first()
+    if row is None or row.is_revoked:
+        return False
+    row.is_revoked = True
+    db.session.commit()
+    return True
+
+
+def resolve_share_token(token: str) -> User | None:
+    """共有トークンを username 経由で User に解決し、最終利用時刻を更新する。"""
+    raw = (token or "").strip()
+    if not raw:
+        return None
+    row = ToBellShareToken.query.filter_by(token=raw).first()
+    if row is None or not row.is_usable():
+        return None
+    user = User.query.filter_by(username=row.user_id).first()
+    if user is None:
+        return None
+    row.last_used_at = datetime.utcnow()
+    db.session.commit()
+    return user
 
 
 def _get_notification(notification_id: int, username: str) -> ToBellNotification:

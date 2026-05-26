@@ -1141,3 +1141,21 @@ class ToBellPushDelivery(db.Model):
     due_at_key = db.Column(db.String(32), nullable=False, index=True)
     sent_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     status = db.Column(db.String(30), nullable=False, default='sent')
+
+
+class ToBellShareToken(db.Model):
+    """ログイン不要で「そのユーザーとして ToBell のみ」操作できる共有トークン。
+
+    トークンは URL から渡され、サーバー側で username に解決される。
+    `/tools/to_bell/` 配下の経路でのみ有効（request_loader でパス制限）。"""
+    __tablename__ = 'to_bell_share_tokens'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(80), nullable=False, unique=True, index=True)
+    token = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    is_revoked = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    last_used_at = db.Column(db.DateTime, nullable=True)
+
+    def is_usable(self) -> bool:
+        return not self.is_revoked
