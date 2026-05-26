@@ -114,6 +114,7 @@ def test_to_bell_page_renders(app_ctx):
     assert 'type="time"' in response.get_data(as_text=True)
     assert "通知を有効化" in response.get_data(as_text=True)
     assert "待受ウィンドウ" in response.get_data(as_text=True)
+    assert 'id="tb-flash"' in response.get_data(as_text=True)
 
 
 def test_to_bell_assignment_creates_unread_notification_and_dashboard_summary(app_ctx):

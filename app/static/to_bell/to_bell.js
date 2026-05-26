@@ -106,9 +106,11 @@
     document.querySelectorAll("[data-complete-id]").forEach((checkbox) => {
       checkbox.addEventListener("change", async () => {
         const id = Number(checkbox.dataset.completeId);
-        await api(`/tools/to_bell/api/tasks/${id}/${checkbox.checked ? "complete" : "reopen"}`, { method: "POST" });
+        const completing = checkbox.checked;
+        await api(`/tools/to_bell/api/tasks/${id}/${completing ? "complete" : "reopen"}`, { method: "POST" });
         await loadTasks();
         await loadNotifications();
+        showFlash(completing ? "完了にしました" : "未完了に戻しました", "success");
       });
     });
   }
@@ -184,6 +186,7 @@
           body: { is_done: box.checked },
         });
         await refreshSelectedTask();
+        showFlash("サブタスクを更新しました", "success");
       });
     });
   }
@@ -208,6 +211,7 @@
     await api("/tools/to_bell/api/tasks", { method: "POST", body: payload });
     form.reset();
     await loadTasks();
+    showFlash("タスクを追加しました", "success");
   }
 
   async function saveDetail(event) {
@@ -218,6 +222,7 @@
     await api(`/tools/to_bell/api/tasks/${payload.id}`, { method: "PUT", body: payload });
     await refreshSelectedTask();
     await loadTasks();
+    showFlash("保存しました", "success");
   }
 
   async function detailAction(event) {
@@ -232,6 +237,11 @@
     }
     await loadTasks();
     await loadNotifications();
+    showFlash({
+      complete: "完了にしました",
+      reopen: "未完了に戻しました",
+      archive: "アーカイブしました",
+    }[action] || "更新しました", "success");
   }
 
   async function addSubtask(event) {
@@ -241,6 +251,7 @@
     await api(`/tools/to_bell/api/tasks/${state.selectedTaskId}/subtasks`, { method: "POST", body: { title } });
     event.currentTarget.reset();
     await refreshSelectedTask();
+    showFlash("サブタスクを追加しました", "success");
   }
 
   async function addComment(event) {
@@ -251,6 +262,7 @@
     event.currentTarget.reset();
     await refreshSelectedTask();
     await loadNotifications();
+    showFlash("コメントを送信しました", "success");
   }
 
   async function refreshSelectedTask() {
@@ -275,6 +287,7 @@
     await api("/tools/to_bell/api/notifications/read-all", { method: "POST" });
     await loadNotifications();
     await loadTasks();
+    showFlash("通知をすべて既読にしました", "success");
   }
 
   function openWindowsNotifier() {
@@ -406,7 +419,7 @@
         body: { subscription: subscription.toJSON() },
       });
       startForegroundWatch();
-      window.alert(`${result.device_label || "この端末"} の通知を有効にしました。`);
+      showFlash(`${result.device_label || "この端末"} の通知を有効にしました`, "success");
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       window.alert(`通知の有効化に失敗しました。\n${message}`);
@@ -419,7 +432,7 @@
       // プッシュ購読がまだ無い端末向けに、前面通知でも確認できるようにする。
       await showLocalNotification("To Bell テスト通知", { body: "前面通知のテストです。" });
     }
-    window.alert(`テスト通知を送信しました。送信 ${result.sent || 0}件 / 失敗 ${result.failed || 0}件`);
+    showFlash(`テスト通知を送信しました（送信 ${result.sent || 0} / 失敗 ${result.failed || 0}）`, "info");
   }
 
   async function showLocalNotification(title, options) {
@@ -490,7 +503,7 @@
     const response = await fetch(path, { ...init, headers });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      window.alert(data.error || data.message || "処理に失敗しました。");
+      showFlash(data.error || data.message || "処理に失敗しました。", "error");
       throw new Error(data.error || data.message || response.statusText);
     }
     return data;
@@ -533,6 +546,17 @@
 
   function priorityLabel(priority) {
     return { low: "低", normal: "通常", high: "高", urgent: "緊急" }[priority] || "通常";
+  }
+
+  function showFlash(message, type) {
+    const node = $("tb-flash");
+    if (!node) return;
+    node.textContent = message;
+    node.className = `tobell-flash ${type || "info"} is-visible`;
+    window.clearTimeout(showFlash._timer);
+    showFlash._timer = window.setTimeout(() => {
+      node.classList.remove("is-visible");
+    }, 2400);
   }
 
   function debounce(fn, wait) {

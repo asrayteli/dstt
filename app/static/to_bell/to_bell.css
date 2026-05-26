@@ -371,6 +371,51 @@
   color: #64748b;
 }
 
+/* 操作完了などを知らせるトースト通知 */
+.tobell-flash {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1000;
+  min-width: 220px;
+  max-width: 380px;
+  padding: 0.85rem 1.05rem;
+  border-radius: 14px;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.28);
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+
+.tobell-flash.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tobell-flash.info {
+  background: linear-gradient(135deg, #2563eb, #38bdf8);
+}
+
+.tobell-flash.success {
+  background: linear-gradient(135deg, #0f9f6e, #34d399);
+}
+
+.tobell-flash.error {
+  background: linear-gradient(135deg, #dc2626, #f97316);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tobell-flash {
+    transition: opacity 0.2s ease;
+    transform: none;
+  }
+}
+
 /* ===== タブレット ===== */
 @media (max-width: 1100px) {
   .tobell-layout {
@@ -395,6 +440,15 @@
 
   .tobell-task-list {
     overscroll-behavior: contain;
+  }
+
+  /* トーストは下部中央に幅いっぱいで表示 */
+  .tobell-flash {
+    right: 12px;
+    left: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    max-width: none;
+    text-align: center;
   }
 
   .tobell-header {
