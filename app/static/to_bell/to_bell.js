@@ -230,9 +230,18 @@
     const id = state.selectedTaskId;
     if (!id) return;
     if (action === "archive" && !window.confirm("このタスクをアーカイブしますか？")) return;
-    const path = action === "archive" ? `/tools/to_bell/api/tasks/${id}` : `/tools/to_bell/api/tasks/${id}/${action}`;
-    await api(path, { method: action === "archive" ? "DELETE" : "POST" });
+    if (action === "delete" && !window.confirm("このタスクを完全に削除します。元に戻せません。よろしいですか？")) return;
+    let path = `/tools/to_bell/api/tasks/${id}/${action}`;
+    let method = "POST";
     if (action === "archive") {
+      path = `/tools/to_bell/api/tasks/${id}`;
+      method = "DELETE";
+    } else if (action === "delete") {
+      path = `/tools/to_bell/api/tasks/${id}?hard=1`;
+      method = "DELETE";
+    }
+    await api(path, { method });
+    if (action === "archive" || action === "delete") {
       closeDetail();
     }
     await loadTasks();
@@ -241,6 +250,7 @@
       complete: "完了にしました",
       reopen: "未完了に戻しました",
       archive: "アーカイブしました",
+      delete: "削除しました",
     }[action] || "更新しました", "success");
   }
 

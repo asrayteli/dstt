@@ -133,7 +133,9 @@
 .tobell-detail select,
 .tobell-detail textarea {
   width: 100%;
+  min-width: 0; /* date/time 等のネイティブ入力がセル幅を超えて隣にかぶるのを防ぐ */
   min-height: 40px;
+  box-sizing: border-box;
   border: 1px solid #cbd5e1;
   border-radius: 10px;
   padding: 0.5rem 0.65rem;
@@ -316,6 +318,7 @@
 .tobell-detail label {
   display: grid;
   gap: 0.25rem;
+  min-width: 0; /* グリッドセル内で入力が縮めるようにする */
   color: #475569;
   font-size: 0.8rem;
   font-weight: 700;
@@ -479,13 +482,11 @@
   }
 
   .tobell-quick-form {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
-  .tobell-quick-form input[name="title"] {
-    grid-column: 1 / -1;
-  }
-
+  .tobell-quick-form input[name="title"],
+  .tobell-quick-form select[name="assigned_to"],
   .tobell-quick-form button[type="submit"] {
     grid-column: 1 / -1;
   }

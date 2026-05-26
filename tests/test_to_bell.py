@@ -101,6 +101,29 @@ def test_to_bell_can_create_complete_and_comment_task(app_ctx):
     assert complete_response.get_json()["status"] == "done"
 
 
+def test_to_bell_archive_keeps_record_but_hard_delete_removes_it(app_ctx):
+    from app.models import ToBellTask, db
+
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    first = client.post("/tools/to_bell/api/tasks", json={"title": "アーカイブ対象"}).get_json()
+    second = client.post("/tools/to_bell/api/tasks", json={"title": "削除対象"}).get_json()
+
+    archive_response = client.delete(f"/tools/to_bell/api/tasks/{first['id']}")
+    assert archive_response.status_code == 200
+    with app_ctx.app_context():
+        archived = db.session.get(ToBellTask, first["id"])
+        assert archived is not None
+        assert archived.status == "archived"
+
+    delete_response = client.delete(f"/tools/to_bell/api/tasks/{second['id']}?hard=1")
+    assert delete_response.status_code == 200
+    with app_ctx.app_context():
+        assert db.session.get(ToBellTask, second["id"]) is None
+
+
 def test_to_bell_page_renders(app_ctx):
     _create_user(app_ctx, "alice", "Alice")
     client = app_ctx.test_client()
