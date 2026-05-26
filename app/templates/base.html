@@ -143,6 +143,7 @@
 
   <div class="flex min-h-screen">
     <!-- サイドバーなど固定部分 -->
+    {% if not share_session %}
     <aside id="app-sidebar" class="w-64 bg-white shadow-lg transition-all duration-300 ease-in-out flex-shrink-0">
       <div class="p-4">
         <a href="/" class="block">
@@ -176,15 +177,18 @@
         </ul>
       </nav>
     </aside>
+    {% endif %}
 
     <!-- メインコンテンツ -->
     <main id="app-main-content" class="flex-1 p-8">
+      {% if not share_session %}
       <!-- サイドバー切り替えボタン -->
       <button id="sidebar-toggle" class="fixed top-4 z-50 p-2 bg-white rounded-lg shadow-lg hover:bg-gray-100 transition-all duration-200" title="サイドバーを切り替え" style="left: 16px;">
         <svg id="toggle-icon" class="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
         </svg>
       </button>
+      {% endif %}
       {% if request.path == "/" %}
       <div class="fixed top-4 right-4 z-40 text-xs text-gray-500 bg-white/80 px-2 py-1 rounded-md shadow-sm">
         Version {{ app_version }}
@@ -195,6 +199,7 @@
     </main>
   </div>
 
+  {% if not share_session %}
   <script>
     // サイドバーの表示状態を管理
     (function() {
@@ -239,6 +244,7 @@
       });
     })();
   </script>
+  {% endif %}
 
 </body>
 </html>

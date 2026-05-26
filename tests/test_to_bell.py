@@ -138,6 +138,8 @@ def test_to_bell_page_renders(app_ctx):
     assert "通知を有効化" in response.get_data(as_text=True)
     assert "待受ウィンドウ" in response.get_data(as_text=True)
     assert 'id="tb-flash"' in response.get_data(as_text=True)
+    # PWA 専用リロードボタンは存在し、既定では hidden（JS が standalone 判定で表示）
+    assert 'id="tb-reload"' in response.get_data(as_text=True)
 
 
 def test_to_bell_assignment_creates_unread_notification_and_dashboard_summary(app_ctx):
@@ -522,3 +524,29 @@ def test_share_token_revoke_and_reissue_invalidate_old_token(app_ctx):
     assert second != first
     assert app_ctx.test_client().get(f"/tools/to_bell/s/{second}").status_code == 302
     assert app_ctx.test_client().get(f"/tools/to_bell/s/{first}").status_code == 404
+
+
+def test_share_session_page_hides_sidebar_and_nav(app_ctx):
+    """共有リンクで開いたページにはサイドバー/他ツール導線が出ないこと。"""
+    _create_user(app_ctx, "alice", "Alice")
+
+    owner = app_ctx.test_client()
+    _login(owner, "alice")
+    token = owner.post("/tools/to_bell/api/share/issue").get_json()["url"].rsplit("/", 1)[-1]
+
+    # 通常ログインのページにはサイドバーがある
+    normal = owner.get("/tools/to_bell/")
+    normal_html = normal.get_data(as_text=True)
+    assert 'id="app-sidebar"' in normal_html
+    assert 'id="sidebar-toggle"' in normal_html
+
+    # 共有リンクのセッションではサイドバー/トグル/共有ボタンが消える
+    guest = app_ctx.test_client()
+    guest.get(f"/tools/to_bell/s/{token}")
+    shared = guest.get("/tools/to_bell/")
+    shared_html = shared.get_data(as_text=True)
+    assert 'id="app-sidebar"' not in shared_html
+    assert 'id="sidebar-toggle"' not in shared_html
+    assert 'id="tb-share-link"' not in shared_html
+    # ただし ToBell 本体は表示される
+    assert 'tobell-shell' in shared_html

@@ -25,7 +25,13 @@
     $("tb-quick-form").addEventListener("submit", createQuickTask);
     const newButton = $("tb-new-task");
     if (newButton) newButton.addEventListener("click", () => $("tb-title").focus());
-    $("tb-enable-push-notify").addEventListener("click", enablePushNotifications);
+    $("tb-enable-push-notify").addEventListener("click", toggleNotifications);
+    const reloadButton = $("tb-reload");
+    if (reloadButton && isStandalone()) {
+      // PWA（ホーム画面アプリ）にはブラウザの再読込が無いため専用ボタンを出す。
+      reloadButton.hidden = false;
+      reloadButton.addEventListener("click", () => window.location.reload());
+    }
     const notifierButton = $("tb-open-notifier");
     if (notifierButton) notifierButton.addEventListener("click", openWindowsNotifier);
     $("tb-test-push-notify").addEventListener("click", sendTestPush);
@@ -342,9 +348,59 @@
   function initNotifications() {
     updateNotifyStatus();
     // 登録は権限不要。前面通知に showNotification を使えるよう先に登録しておく。
-    registerServiceWorker().then(() => {
-      startForegroundWatch();
+    registerServiceWorker().then(async () => {
+      await refreshNotifyToggle();
+      // この端末で通知が有効（購読済み）のときだけ前面監視を動かす。
+      if ($("tb-enable-push-notify") && $("tb-enable-push-notify").dataset.state === "on") {
+        startForegroundWatch();
+      }
     });
+  }
+
+  async function refreshNotifyToggle() {
+    const button = $("tb-enable-push-notify");
+    const label = $("tb-notify-status");
+    const supported = "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
+    let subscribed = false;
+    if (supported && Notification.permission === "granted") {
+      try {
+        const registration = await registerServiceWorker();
+        subscribed = Boolean(registration && (await registration.pushManager.getSubscription()));
+      } catch (error) {
+        subscribed = false;
+      }
+    }
+    if (button) {
+      button.dataset.state = subscribed ? "on" : "off";
+      button.textContent = subscribed ? "通知を無効化" : "通知を有効化";
+    }
+    if (label) {
+      if (!("Notification" in window)) {
+        label.textContent = "通知: 非対応端末";
+        label.dataset.tone = "off";
+      } else if (Notification.permission === "denied") {
+        label.textContent = "通知: ブロック中";
+        label.dataset.tone = "off";
+      } else if (subscribed) {
+        label.textContent = "通知: 有効";
+        label.dataset.tone = "on";
+      } else if (Notification.permission === "granted") {
+        label.textContent = "通知: 停止中";
+        label.dataset.tone = "idle";
+      } else {
+        label.textContent = "通知: 未設定";
+        label.dataset.tone = "idle";
+      }
+    }
+  }
+
+  async function toggleNotifications() {
+    const button = $("tb-enable-push-notify");
+    if (button && button.dataset.state === "on") {
+      await disablePushNotifications();
+    } else {
+      await enablePushNotifications();
+    }
   }
 
   function updateNotifyStatus() {
@@ -435,6 +491,31 @@
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       window.alert(`通知の有効化に失敗しました。\n${message}`);
+    } finally {
+      await refreshNotifyToggle();
+    }
+  }
+
+  async function disablePushNotifications() {
+    try {
+      const registration = await registerServiceWorker();
+      const subscription = registration ? await registration.pushManager.getSubscription() : null;
+      if (subscription) {
+        const endpoint = subscription.endpoint;
+        try {
+          await subscription.unsubscribe();
+        } catch (error) {
+          /* ローカルの解除に失敗してもサーバ側を無効化する */
+        }
+        await api("/tools/to_bell/api/push/unsubscribe", { method: "POST", body: { endpoint } });
+      }
+      stopForegroundWatch();
+      showFlash("この端末の通知を無効にしました", "info");
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      window.alert(`通知の無効化に失敗しました。\n${message}`);
+    } finally {
+      await refreshNotifyToggle();
     }
   }
 
@@ -480,6 +561,13 @@
     if (!("Notification" in window)) return;
     foregroundTick();
     state.foregroundTimer = window.setInterval(foregroundTick, 60000);
+  }
+
+  function stopForegroundWatch() {
+    if (state.foregroundTimer) {
+      window.clearInterval(state.foregroundTimer);
+      state.foregroundTimer = 0;
+    }
   }
 
   async function foregroundTick() {
