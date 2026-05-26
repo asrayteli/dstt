@@ -124,7 +124,7 @@ def _share_payload(token_row) -> dict:
 @to_bell_bp.route("/notifier")
 @login_required
 def notifier():
-    return render_template("to_bell_notifier.html")
+    return render_template("to_bell_notifier.html", share_session=_is_share_session())
 
 
 @to_bell_bp.route("/api/tasks", methods=["GET"])
