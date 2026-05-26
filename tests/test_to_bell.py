@@ -112,8 +112,8 @@ def test_to_bell_page_renders(app_ctx):
     assert "To Bell".encode("utf-8") in response.data
     assert "/static/to_bell/to_bell.js" in response.get_data(as_text=True)
     assert 'type="time"' in response.get_data(as_text=True)
-    assert "Windows通知" in response.get_data(as_text=True)
-    assert "iPhone通知" in response.get_data(as_text=True)
+    assert "通知を有効化" in response.get_data(as_text=True)
+    assert "待受ウィンドウ" in response.get_data(as_text=True)
 
 
 def test_to_bell_assignment_creates_unread_notification_and_dashboard_summary(app_ctx):
@@ -206,6 +206,23 @@ def test_to_bell_quick_datetime_is_optional_and_due_tasks_notify(app_ctx):
     due_tasks = client.get("/tools/to_bell/api/notifications/due-tasks").get_json()["tasks"]
     assert any(task["title"] == "時間指定" for task in due_tasks)
     assert all(task["title"] != "あとで整理" for task in due_tasks)
+
+
+def test_to_bell_time_without_date_defaults_to_today(app_ctx):
+    from datetime import date
+
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    response = client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "時刻だけ指定", "due_time": "09:00"},
+    )
+    assert response.status_code == 201
+    due_at = response.get_json()["due_at"]
+    assert due_at is not None
+    assert due_at.startswith(f"{date.today().isoformat()}T09:00")
 
 
 def test_to_bell_cleanup_deletes_records_older_than_60_days(app_ctx):

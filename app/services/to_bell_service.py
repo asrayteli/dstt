@@ -52,7 +52,7 @@ def resolve_due_at(payload: dict[str, Any]) -> datetime | None:
     if not due_date and not due_time:
         return None
     if not due_date:
-        raise ToBellInputError("due_date", "通知する日付を入力してください。")
+        due_date = date.today().isoformat()
     if due_time:
         return parse_datetime(f"{due_date}T{due_time}", "due_time")
     return parse_datetime(due_date, "due_date")

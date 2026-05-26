@@ -3,6 +3,8 @@
     filter: new URLSearchParams(window.location.search).get("filter") || "today",
     selectedTaskId: Number(new URLSearchParams(window.location.search).get("task") || 0),
     tasks: [],
+    swRegistration: null,
+    foregroundTimer: 0,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -18,13 +20,15 @@
     bindFilters();
     $("tb-quick-form").addEventListener("submit", createQuickTask);
     $("tb-new-task").addEventListener("click", () => $("tb-title").focus());
-    $("tb-enable-windows-notify").addEventListener("click", openWindowsNotifier);
     $("tb-enable-push-notify").addEventListener("click", enablePushNotifications);
+    const notifierButton = $("tb-open-notifier");
+    if (notifierButton) notifierButton.addEventListener("click", openWindowsNotifier);
     $("tb-test-push-notify").addEventListener("click", sendTestPush);
     $("tb-read-all").addEventListener("click", readAllNotifications);
     $("tb-search").addEventListener("input", debounce(loadTasks, 220));
     loadTasks();
     loadNotifications();
+    initNotifications();
   });
 
   function bindFilters() {
@@ -33,6 +37,7 @@
       button.addEventListener("click", () => {
         state.filter = button.dataset.filter || "today";
         state.selectedTaskId = 0;
+        closeDetail();
         document.querySelectorAll(".tobell-filter").forEach((item) => item.classList.remove("is-active"));
         button.classList.add("is-active");
         loadTasks();
@@ -73,10 +78,10 @@
       return `
         <article class="tobell-task ${task.id === state.selectedTaskId ? "is-selected" : ""}" data-task-id="${task.id}">
           <input class="tobell-check" type="checkbox" ${done} data-complete-id="${task.id}" aria-label="完了">
-          <div>
+          <div class="tobell-task-body">
             <h3>${esc(task.title)}</h3>
             <p>${esc(task.description || "メモなし")}</p>
-            <p>${esc(statusLabel(task.status))} / ${esc(due)} / 進捗 ${Number(task.progress || 0)}%</p>
+            <p class="tobell-task-meta">${esc(statusLabel(task.status))} / ${esc(due)} / 進捗 ${Number(task.progress || 0)}%</p>
           </div>
           <span class="tobell-badge ${badgeClass}">${esc(priorityLabel(task.priority))}</span>
         </article>`;
@@ -102,6 +107,7 @@
     state.selectedTaskId = task.id;
     const fragment = $("tb-detail-template").content.cloneNode(true);
     $("tb-detail").replaceChildren(fragment);
+    document.body.classList.add("tb-detail-active");
     const form = $("tb-detail-form");
     form.elements.id.value = task.id;
     form.elements.title.value = task.title || "";
@@ -116,7 +122,16 @@
     form.addEventListener("submit", saveDetail);
     $("tb-subtask-form").addEventListener("submit", addSubtask);
     $("tb-comment-form").addEventListener("submit", addComment);
+    const backButton = $("tb-detail-back");
+    if (backButton) backButton.addEventListener("click", closeDetail);
     document.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", detailAction));
+    renderTasks();
+  }
+
+  function closeDetail() {
+    state.selectedTaskId = 0;
+    document.body.classList.remove("tb-detail-active");
+    $("tb-detail").innerHTML = '<div class="tobell-empty">タスクを選ぶと詳細が開きます。</div>';
     renderTasks();
   }
 
@@ -151,6 +166,10 @@
     event.preventDefault();
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
+    // 日付が未入力なら当日として通知する（クイック追加の既定動作）。
+    if (!String(payload.due_date || "").trim()) {
+      payload.due_date = todayIso();
+    }
     await api("/tools/to_bell/api/tasks", { method: "POST", body: payload });
     form.reset();
     await loadTasks();
@@ -174,8 +193,7 @@
     const path = action === "archive" ? `/tools/to_bell/api/tasks/${id}` : `/tools/to_bell/api/tasks/${id}/${action}`;
     await api(path, { method: action === "archive" ? "DELETE" : "POST" });
     if (action === "archive") {
-      state.selectedTaskId = 0;
-      $("tb-detail").innerHTML = '<div class="tobell-empty">タスクを選ぶと詳細が開きます。</div>';
+      closeDetail();
     }
     await loadTasks();
     await loadNotifications();
@@ -235,36 +253,187 @@
     }
   }
 
+  // ----- 通知（プッシュ / 前面）まわり -----
+
+  function isStandalone() {
+    return (
+      window.matchMedia && window.matchMedia("(display-mode: standalone)").matches
+    ) || window.navigator.standalone === true;
+  }
+
+  function isIos() {
+    return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+  }
+
+  async function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return null;
+    if (state.swRegistration) return state.swRegistration;
+    try {
+      const registration = await navigator.serviceWorker.register("/service-worker.js", { scope: "/" });
+      // iOS では active になる前に subscribe すると失敗するため、ready を待つ。
+      await navigator.serviceWorker.ready;
+      state.swRegistration = registration;
+      return registration;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function initNotifications() {
+    updateNotifyStatus();
+    // 登録は権限不要。前面通知に showNotification を使えるよう先に登録しておく。
+    registerServiceWorker().then(() => {
+      startForegroundWatch();
+    });
+  }
+
+  function updateNotifyStatus() {
+    const label = $("tb-notify-status");
+    if (!label) return;
+    if (!("Notification" in window)) {
+      label.textContent = "通知: 非対応端末";
+      label.dataset.tone = "off";
+      return;
+    }
+    if (Notification.permission === "granted") {
+      label.textContent = "通知: 有効";
+      label.dataset.tone = "on";
+    } else if (Notification.permission === "denied") {
+      label.textContent = "通知: ブロック中";
+      label.dataset.tone = "off";
+    } else {
+      label.textContent = "通知: 未設定";
+      label.dataset.tone = "idle";
+    }
+  }
+
   async function enablePushNotifications() {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-      window.alert("このブラウザではプッシュ通知を利用できません。iPhoneではホーム画面に追加したWebアプリから実行してください。");
-      return;
+    try {
+      if (!window.isSecureContext) {
+        window.alert("通知を使うには https での接続が必要です。");
+        return;
+      }
+      if (!("Notification" in window)) {
+        window.alert("このブラウザは通知に対応していません。");
+        return;
+      }
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        if (isIos() && !isStandalone()) {
+          window.alert("iPhoneでは、共有メニューから「ホーム画面に追加」したTo Bellアプリを開いてから通知を有効化してください。");
+        } else {
+          window.alert("このブラウザではプッシュ通知を利用できません。");
+        }
+        return;
+      }
+
+      // 1) 権限要求はユーザー操作直後に呼ぶ（iOS の制約）。
+      const permission = await Notification.requestPermission();
+      updateNotifyStatus();
+      if (permission !== "granted") {
+        window.alert("通知が許可されませんでした。端末の設定から通知を許可してください。");
+        return;
+      }
+
+      // 2) Service Worker を登録し、active になるまで待つ。
+      const registration = await registerServiceWorker();
+      if (!registration) {
+        window.alert("通知用のService Workerを登録できませんでした。");
+        return;
+      }
+
+      // 3) サーバの公開鍵を取得。
+      const keyData = await api("/tools/to_bell/api/push/public-key");
+      if (!keyData.public_key) {
+        window.alert(keyData.message || "プッシュ通知の公開鍵を取得できませんでした。");
+        return;
+      }
+
+      // 4) 既存購読を再利用、無ければ新規購読。
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(keyData.public_key),
+        });
+      }
+
+      const result = await api("/tools/to_bell/api/push/subscribe", {
+        method: "POST",
+        body: { subscription: subscription.toJSON() },
+      });
+      startForegroundWatch();
+      window.alert(`${result.device_label || "この端末"} の通知を有効にしました。`);
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      window.alert(`通知の有効化に失敗しました。\n${message}`);
     }
-    const permission = await Notification.requestPermission();
-    if (permission !== "granted") {
-      window.alert("通知が許可されませんでした。");
-      return;
-    }
-    const keyData = await api("/tools/to_bell/api/push/public-key");
-    if (!keyData.public_key) {
-      window.alert(keyData.message || "プッシュ通知の公開鍵を取得できませんでした。");
-      return;
-    }
-    const registration = await navigator.serviceWorker.register("/service-worker.js", { scope: "/" });
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(keyData.public_key),
-    });
-    const result = await api("/tools/to_bell/api/push/subscribe", {
-      method: "POST",
-      body: { subscription: subscription.toJSON() },
-    });
-    window.alert(`${result.device_label || "端末"} のプッシュ通知を有効にしました。`);
   }
 
   async function sendTestPush() {
     const result = await api("/tools/to_bell/api/push/test", { method: "POST" });
+    if ((result.sent || 0) === 0) {
+      // プッシュ購読がまだ無い端末向けに、前面通知でも確認できるようにする。
+      await showLocalNotification("To Bell テスト通知", { body: "前面通知のテストです。" });
+    }
     window.alert(`テスト通知を送信しました。送信 ${result.sent || 0}件 / 失敗 ${result.failed || 0}件`);
+  }
+
+  async function showLocalNotification(title, options) {
+    const opts = Object.assign(
+      {
+        icon: "/static/img/android-chrome-192x192.png",
+        badge: "/static/img/apple-touch-icon.png",
+      },
+      options || {}
+    );
+    try {
+      const registration = state.swRegistration || (await registerServiceWorker());
+      if (registration && registration.showNotification) {
+        await registration.showNotification(title, opts);
+        return true;
+      }
+    } catch (error) {
+      // フォールバックへ
+    }
+    try {
+      const note = new Notification(title, opts);
+      if (opts.data && opts.data.url) {
+        note.onclick = () => window.open(opts.data.url, "toBellMain");
+      }
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function startForegroundWatch() {
+    if (state.foregroundTimer) return;
+    if (!("Notification" in window)) return;
+    foregroundTick();
+    state.foregroundTimer = window.setInterval(foregroundTick, 60000);
+  }
+
+  async function foregroundTick() {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    let data;
+    try {
+      const response = await fetch("/tools/to_bell/api/notifications/due-tasks");
+      if (!response.ok) return;
+      data = await response.json();
+    } catch (error) {
+      return;
+    }
+    for (const task of data.tasks || []) {
+      if (!task.due_at) continue;
+      const key = `toBellNotified:${task.id}:${task.due_at}`;
+      if (localStorage.getItem(key)) continue;
+      localStorage.setItem(key, new Date().toISOString());
+      await showLocalNotification(`To Bell: ${task.title}`, {
+        body: `${formatDue(task.due_at)} / ${statusLabel(task.status)}`,
+        tag: key,
+        data: { url: `/tools/to_bell?task=${task.id}` },
+      });
+    }
   }
 
   async function api(path, options) {
@@ -277,14 +446,22 @@
     const response = await fetch(path, { ...init, headers });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      window.alert(data.error || "処理に失敗しました。");
-      throw new Error(data.error || response.statusText);
+      window.alert(data.error || data.message || "処理に失敗しました。");
+      throw new Error(data.error || data.message || response.statusText);
     }
     return data;
   }
 
   function isOverdue(task) {
     return task.due_at && task.status !== "done" && new Date(task.due_at).getTime() < Date.now();
+  }
+
+  function todayIso() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
   }
 
   function formatDue(value) {

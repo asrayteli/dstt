@@ -1,3 +1,11 @@
+self.addEventListener("install", () => {
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
 self.addEventListener("push", (event) => {
   let data = {};
   if (event.data) {
@@ -12,6 +20,8 @@ self.addEventListener("push", (event) => {
     body: data.body || "通知があります。",
     icon: data.icon || "/static/img/android-chrome-192x192.png",
     badge: data.badge || "/static/img/apple-touch-icon.png",
+    tag: data.tag || data.url || "to-bell",
+    renotify: true,
     data: {
       url: data.url || "/tools/to_bell",
     },
@@ -28,11 +38,16 @@ self.addEventListener("notificationclick", (event) => {
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       for (const client of clients) {
         if ("focus" in client && client.url.includes("/tools/to_bell")) {
-          client.navigate(url);
+          if ("navigate" in client) {
+            client.navigate(url).catch(() => {});
+          }
           return client.focus();
         }
       }
-      return self.clients.openWindow(url);
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(url);
+      }
+      return undefined;
     })
   );
 });
