@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import current_app
+from sqlalchemy.exc import IntegrityError
 
 from app.models import ToBellPushDelivery, ToBellPushSubscription, ToBellTask, db
 from app.services.to_bell_service import task_notification_targets
@@ -107,12 +108,14 @@ def send_due_task_pushes(*, now: datetime | None = None) -> dict[str, int]:
     for task in tasks:
         due_key = task.due_at.isoformat(timespec="minutes") if task.due_at else ""
         for user_id in task_notification_targets(task):
-            existing = ToBellPushDelivery.query.filter_by(
+            delivery = ToBellPushDelivery.query.filter_by(
                 task_id=task.id,
                 user_id=user_id,
                 due_at_key=due_key,
             ).first()
-            if existing:
+            # 配信済み（sent）・送信先なし（skipped）は確定状態なので再送しない。
+            # 送信失敗（failed）は一時的な障害の可能性があるため再送対象とする。
+            if delivery is not None and delivery.status != "failed":
                 skipped += 1
                 continue
             result = send_push_to_user(
@@ -121,18 +124,33 @@ def send_due_task_pushes(*, now: datetime | None = None) -> dict[str, int]:
                 body=f"通知日時になりました: {task.due_at.strftime('%Y-%m-%d %H:%M') if task.due_at else ''}",
                 url=f"/tools/to_bell?task={task.id}",
             )
-            status = "sent" if result["sent"] else "failed"
             sent += result["sent"]
             failed += result["failed"]
-            db.session.add(
-                ToBellPushDelivery(
+            if result["sent"]:
+                status = "sent"
+            elif result["failed"]:
+                # 全件失敗。配信済みとして記録せず、次回スケジュールで再送する。
+                status = "failed"
+            else:
+                # 有効な購読が無い。後から購読した端末へ過去分が一斉配信
+                # されるのを防ぐため確定状態として記録する。
+                status = "skipped"
+            if delivery is None:
+                delivery = ToBellPushDelivery(
                     task_id=task.id,
                     user_id=user_id,
                     due_at_key=due_key,
                     status=status,
                 )
-            )
-            db.session.commit()
+                db.session.add(delivery)
+            else:
+                delivery.status = status
+            try:
+                db.session.commit()
+            except IntegrityError:
+                # 複数ワーカーが同時に同じ配信を記録した場合のレース。
+                # 既に他ワーカーが確定済みなので無視してよい。
+                db.session.rollback()
     return {"sent": sent, "skipped": skipped, "failed": failed}
 
 
@@ -155,8 +173,14 @@ def send_push_to_user(user_id: str, *, title: str, body: str, url: str) -> dict[
         },
         ensure_ascii=False,
     )
-    claims = {"sub": _vapid_subject()}
+    subject = _vapid_subject()
     for subscription in subscriptions:
+        # pywebpush は渡した claims を破壊的に書き換える（配信先の origin を aud、
+        # 期限を exp として追記する）。dict を使い回すと 2 件目以降の aud が
+        # 1 件目の配信先のままになり、別の push サービス（例: iPhone は
+        # web.push.apple.com、PC は fcm.googleapis.com）で署名が一致せず失敗する。
+        # そのため購読ごとに新しい claims を渡す。
+        claims = {"sub": subject}
         try:
             webpush(
                 subscription_info=subscription.to_subscription_info(),
@@ -174,6 +198,9 @@ def send_push_to_user(user_id: str, *, title: str, body: str, url: str) -> dict[
                 subscription.is_active = False
                 db.session.commit()
             logger.warning("To Bell push failed for %s: %s", user_id, exc)
+        except Exception as exc:  # noqa: BLE001 - 1件の配信失敗で全体を止めない
+            failed += 1
+            logger.warning("To Bell push error for %s: %s", user_id, exc)
     return {"sent": sent, "failed": failed}
 
 
