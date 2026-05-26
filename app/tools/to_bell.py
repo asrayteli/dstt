@@ -41,6 +41,7 @@ from app.services.to_bell_service import (
 from app.services.to_bell_push import (
     ToBellPushUnavailable,
     deactivate_subscription,
+    delete_subscription,
     list_subscriptions,
     save_subscription,
     send_test_push,
@@ -348,6 +349,9 @@ def api_push_subscription(subscription_id: int):
         return jsonify({"status": "error", "message": "通知先の編集はPC版からのみ利用できます。"}), 403
     try:
         if request.method == "DELETE":
+            hard = request.args.get("hard", "").lower() in ("1", "true", "yes")
+            if hard:
+                return jsonify({"status": "ok", "deleted": delete_subscription(current_user.username, subscription_id)})
             return jsonify({"status": "ok", "updated": deactivate_subscription(current_user.username, subscription_id)})
         row = update_subscription_label(
             current_user.username,

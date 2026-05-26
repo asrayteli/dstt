@@ -108,6 +108,15 @@ def deactivate_subscription(user_id: str, subscription_id: int) -> bool:
     return True
 
 
+def delete_subscription(user_id: str, subscription_id: int) -> bool:
+    row = ToBellPushSubscription.query.filter_by(id=subscription_id, user_id=user_id).first()
+    if row is None:
+        return False
+    db.session.delete(row)
+    db.session.commit()
+    return True
+
+
 def send_test_push(user_id: str) -> dict[str, int]:
     return send_push_to_user(
         user_id,

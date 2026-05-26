@@ -711,7 +711,8 @@
           <div class="tobell-device-meta">${item.is_active ? "有効" : "無効"} / ${esc(item.endpoint_tail || "")}</div>
         </div>
         ${editable ? `<button type="button" class="tobell-btn" data-device-save="${item.id}">保存</button>
-        <button type="button" class="tobell-btn tobell-danger" data-device-disable="${item.id}" ${item.is_active ? "" : "disabled"}>無効化</button>` : ""}
+        <button type="button" class="tobell-btn tobell-danger" data-device-disable="${item.id}" ${item.is_active ? "" : "disabled"}>無効化</button>
+        <button type="button" class="tobell-btn tobell-danger" data-device-delete="${item.id}">削除</button>` : ""}
       </div>
     `).join("");
     list.querySelectorAll("[data-device-save]").forEach((button) => {
@@ -731,6 +732,14 @@
         await api(`/tools/to_bell/api/push/subscriptions/${button.dataset.deviceDisable}`, { method: "DELETE" });
         await loadDevices();
         showFlash("通知先を無効化しました。", "success");
+      });
+    });
+    list.querySelectorAll("[data-device-delete]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (!window.confirm("この通知先を完全に削除しますか？元に戻せません。")) return;
+        await api(`/tools/to_bell/api/push/subscriptions/${button.dataset.deviceDelete}?hard=1`, { method: "DELETE" });
+        await loadDevices();
+        showFlash("通知先を削除しました。", "success");
       });
     });
   }
