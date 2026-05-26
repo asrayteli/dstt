@@ -16,16 +16,26 @@
     "'": "&#39;",
   }[ch]));
 
+  const mobileQuery = window.matchMedia("(max-width: 760px)");
+  const isMobile = () => mobileQuery.matches;
+
   document.addEventListener("DOMContentLoaded", () => {
     bindFilters();
     $("tb-quick-form").addEventListener("submit", createQuickTask);
-    $("tb-new-task").addEventListener("click", () => $("tb-title").focus());
+    const newButton = $("tb-new-task");
+    if (newButton) newButton.addEventListener("click", () => $("tb-title").focus());
     $("tb-enable-push-notify").addEventListener("click", enablePushNotifications);
     const notifierButton = $("tb-open-notifier");
     if (notifierButton) notifierButton.addEventListener("click", openWindowsNotifier);
     $("tb-test-push-notify").addEventListener("click", sendTestPush);
     $("tb-read-all").addEventListener("click", readAllNotifications);
     $("tb-search").addEventListener("input", debounce(loadTasks, 220));
+    // 端末の「戻る」操作で詳細オーバーレイを閉じる（スマホアプリ的な挙動）。
+    window.addEventListener("popstate", () => {
+      if (document.body.classList.contains("tb-detail-active")) {
+        closeDetailDom();
+      }
+    });
     loadTasks();
     loadNotifications();
     initNotifications();
@@ -107,7 +117,7 @@
     state.selectedTaskId = task.id;
     const fragment = $("tb-detail-template").content.cloneNode(true);
     $("tb-detail").replaceChildren(fragment);
-    document.body.classList.add("tb-detail-active");
+    openDetailOverlay();
     const form = $("tb-detail-form");
     form.elements.id.value = task.id;
     form.elements.title.value = task.title || "";
@@ -128,7 +138,32 @@
     renderTasks();
   }
 
+  function openDetailOverlay() {
+    const wasActive = document.body.classList.contains("tb-detail-active");
+    document.body.classList.add("tb-detail-active");
+    // モバイルでは戻るボタンで閉じられるよう履歴エントリを1つだけ積む。
+    if (!wasActive && isMobile() && !(history.state && history.state.tbDetail)) {
+      try {
+        history.pushState({ tbDetail: true }, "");
+      } catch (error) {
+        /* 履歴操作に失敗しても致命的ではない */
+      }
+    }
+  }
+
   function closeDetail() {
+    if (
+      document.body.classList.contains("tb-detail-active")
+      && history.state
+      && history.state.tbDetail
+    ) {
+      history.back(); // popstate 経由で closeDetailDom が呼ばれる
+      return;
+    }
+    closeDetailDom();
+  }
+
+  function closeDetailDom() {
     state.selectedTaskId = 0;
     document.body.classList.remove("tb-detail-active");
     $("tb-detail").innerHTML = '<div class="tobell-empty">タスクを選ぶと詳細が開きます。</div>';
@@ -348,12 +383,21 @@
         return;
       }
 
-      // 4) 既存購読を再利用、無ければ新規購読。
+      // 4) 既存購読を再利用。ただしサーバ鍵が変わっていたら作り直す。
+      const appServerKey = urlBase64ToUint8Array(keyData.public_key);
       let subscription = await registration.pushManager.getSubscription();
+      if (subscription && !sameAppServerKey(subscription.options && subscription.options.applicationServerKey, appServerKey)) {
+        try {
+          await subscription.unsubscribe();
+        } catch (error) {
+          /* 失敗しても下で作り直す */
+        }
+        subscription = null;
+      }
       if (!subscription) {
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(keyData.public_key),
+          applicationServerKey: appServerKey,
         });
       }
 
@@ -497,6 +541,16 @@
       window.clearTimeout(timer);
       timer = window.setTimeout(fn, wait);
     };
+  }
+
+  function sameAppServerKey(existing, wanted) {
+    if (!existing) return false;
+    const current = new Uint8Array(existing);
+    if (current.length !== wanted.length) return false;
+    for (let i = 0; i < current.length; i += 1) {
+      if (current[i] !== wanted[i]) return false;
+    }
+    return true;
   }
 
   function urlBase64ToUint8Array(base64String) {
