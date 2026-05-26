@@ -91,7 +91,9 @@ def send_test_push(user_id: str) -> dict[str, int]:
 
 
 def send_due_task_pushes(*, now: datetime | None = None) -> dict[str, int]:
-    now = now or datetime.utcnow()
+    # due_at は利用者が入力したローカル時刻のナイーブな値として保存されるため、
+    # 比較も utcnow() ではなくローカルの now() を使う（時差で通知がずれる不具合を防ぐ）。
+    now = now or datetime.now()
     cutoff = now - timedelta(days=60)
     tasks = ToBellTask.query.filter(
         ToBellTask.status.notin_(["done", "archived"]),
