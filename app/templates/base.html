@@ -7,7 +7,9 @@
   <title>{{ resolved_page_title }}</title>
   <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
+  {% block app_manifest %}
   <link rel="manifest" href="{{ url_for('static', filename='site.webmanifest') }}">
+  {% endblock %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dstt_loading.css') }}">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/flowbite@2.2.1/dist/flowbite.min.js"></script>

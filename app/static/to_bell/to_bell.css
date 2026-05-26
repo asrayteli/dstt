@@ -522,57 +522,39 @@
 
 /* ===== スマートフォン ===== */
 @media (max-width: 760px) {
-  /* ページ全体の余白（base.html の p-8）を詰め、端末の画面高ぴったりに収める。
-     svh はモバイルのアドレスバー伸縮を考慮した安全な画面高で、縮小なしで一画面に収まる。 */
+  /* ページ全体の余白（base.html の p-8）を詰める。
+     縦は内容に応じて伸び、ページ全体を縦スクロールできる。横スクロールは抑止する。 */
   body.tobell-page #app-main-content {
-    height: 100svh;
+    min-height: 100svh;
     padding: 0.55rem;
     box-sizing: border-box;
-    overflow: hidden;
+    overflow-x: hidden;
   }
 
   .tobell-shell {
     display: flex;
     flex-direction: column;
-    height: 100%;
-    padding-bottom: 0;
   }
 
-  /* ヘッダーとクイック追加は固定高にして、残りをタスク領域へ割り当てる */
   .tobell-header,
   .tobell-quick {
-    flex: 0 0 auto;
     margin-bottom: 0.55rem;
   }
 
-  /* レイアウトが残り高をすべて使い、内部のリストだけスクロールさせる */
+  /* 縦に積み重ねて、内側で個別スクロールさせず、ページ全体でスクロールさせる */
   .tobell-layout {
-    flex: 1 1 auto;
-    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 0.55rem;
   }
 
-  .tobell-sidebar {
-    flex: 0 0 auto;
-  }
-
   .tobell-main {
-    flex: 1 1 auto;
     min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
   }
 
   /* 詳細オーバーレイ表示中は背面をスクロールさせない */
   body.tb-detail-active {
     overflow: hidden;
-  }
-
-  .tobell-task-list {
-    overscroll-behavior: contain;
   }
 
   /* トーストは下部中央に幅いっぱいで表示 */
@@ -598,12 +580,23 @@
     display: none;
   }
 
+  /* 操作ボタンを 2 列グリッドに整理し、サイズを揃える */
   .tobell-header-actions {
-    justify-content: flex-start;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+
+  .tobell-notify-status {
+    grid-column: 1 / -1;
+    justify-content: center;
   }
 
   .tobell-header-actions .tobell-btn {
-    flex: 1 1 auto;
+    width: 100%;
+    min-height: 44px;
+    padding: 0.5rem 0.6rem;
+    font-size: 0.85rem;
     text-align: center;
   }
 
@@ -621,19 +614,18 @@
     grid-column: 1 / -1;
   }
 
-  /* フィルタを横スクロールのチップに */
+  /* フィルタは横スクロールせず、折り返すチップにする */
   .tobell-filters {
     flex-direction: row;
+    flex-wrap: wrap;
     gap: 0.4rem;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 0.25rem;
   }
 
   .tobell-filter {
     width: auto;
     flex: 0 0 auto;
     margin-bottom: 0;
+    padding: 0.45rem 0.8rem;
     background: #f1f5f9;
   }
 
