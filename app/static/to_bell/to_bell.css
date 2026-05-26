@@ -565,8 +565,13 @@ body.tobell-pwa-mode #tb-test-push-notify {
   display: none !important;
 }
 
+body.tobell-pwa-mode .tobell-quick {
+  padding: 0.65rem;
+}
+
 body.tobell-pwa-mode .tobell-quick-form {
   grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
 }
 
 body.tobell-pwa-mode .tobell-quick-form input[name="title"],
@@ -577,6 +582,8 @@ body.tobell-pwa-mode .tobell-quick-form button[type="submit"] {
 
 body.tobell-pwa-mode .tobell-quick-form input[name="due_date"],
 body.tobell-pwa-mode .tobell-quick-form input[name="due_time"] {
+  padding-left: 0.2rem;
+  padding-right: 0.2rem;
   overflow: hidden;
 }
 

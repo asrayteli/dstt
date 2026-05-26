@@ -355,8 +355,9 @@
     // 登録は権限不要。前面通知に showNotification を使えるよう先に登録しておく。
     registerServiceWorker().then(async () => {
       await refreshNotifyToggle();
-      // この端末で通知が有効（購読済み）のときだけ前面監視を動かす。
-      if ($("tb-enable-push-notify") && $("tb-enable-push-notify").dataset.state === "on") {
+      // プッシュ購読済みならサーバーが通知するので前面監視は不要。
+      // 購読がない（権限だけ付与済み等）場合のフォールバックとして動かす。
+      if ($("tb-enable-push-notify") && $("tb-enable-push-notify").dataset.state !== "on") {
         startForegroundWatch();
       }
     });
@@ -491,7 +492,7 @@
         method: "POST",
         body: { subscription: subscription.toJSON() },
       });
-      startForegroundWatch();
+      stopForegroundWatch();
       showFlash(`${result.device_label || "この端末"} の通知を有効にしました`, "success");
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
