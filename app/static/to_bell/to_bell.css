@@ -97,6 +97,12 @@
   background: #f8fafc;
 }
 
+.tobell-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .tobell-btn-primary {
   border-color: #2563eb;
   background: #2563eb;
@@ -297,6 +303,15 @@
   margin-top: 0.1rem;
 }
 
+.tobell-btn:focus-visible,
+.tobell-filter:focus-visible,
+.tobell-task:focus-visible,
+.tobell-check:focus-visible,
+.tobell-detail-back:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 .tobell-detail-back {
   display: none;
   margin-bottom: 0.75rem;
@@ -361,6 +376,22 @@
   gap: 0.5rem;
   align-items: center;
   margin-top: 0.35rem;
+}
+
+.tobell-subtask-delete {
+  margin-left: auto;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: transparent;
+  color: #b91c1c;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tobell-subtask-delete:hover {
+  background: #fee2e2;
 }
 
 .tobell-comment,
@@ -552,6 +583,7 @@ body.tobell-pwa-mode {
 body.tobell-pwa-mode #app-main-content {
   min-height: 100svh;
   padding: 0.65rem;
+  padding-top: calc(0.65rem + env(safe-area-inset-top));
   box-sizing: border-box;
 }
 

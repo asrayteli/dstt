@@ -51,8 +51,8 @@
         closeDetailDom();
       }
     });
-    loadTasks();
-    loadNotifications();
+    loadTasks().catch(() => {});
+    loadNotifications().catch(() => {});
     initNotifications();
   });
 
@@ -112,20 +112,36 @@
         </article>`;
     }).join("");
     document.querySelectorAll("[data-task-id]").forEach((card) => {
-      card.addEventListener("click", (event) => {
+      card.setAttribute("tabindex", "0");
+      card.setAttribute("role", "button");
+      const openTask = (event) => {
         if (event.target.matches("[data-complete-id]")) return;
         const task = state.tasks.find((item) => item.id === Number(card.dataset.taskId));
         if (task) renderDetail(task);
+      };
+      card.addEventListener("click", openTask);
+      card.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openTask(event);
+        }
       });
     });
     document.querySelectorAll("[data-complete-id]").forEach((checkbox) => {
       checkbox.addEventListener("change", async () => {
         const id = Number(checkbox.dataset.completeId);
         const completing = checkbox.checked;
-        await api(`/tools/to_bell/api/tasks/${id}/${completing ? "complete" : "reopen"}`, { method: "POST" });
-        await loadTasks();
-        await loadNotifications();
-        showFlash(completing ? "完了にしました" : "未完了に戻しました", "success");
+        checkbox.disabled = true;
+        try {
+          await api(`/tools/to_bell/api/tasks/${id}/${completing ? "complete" : "reopen"}`, { method: "POST" });
+          await loadTasks();
+          await loadNotifications();
+          showFlash(completing ? "完了にしました" : "未完了に戻しました", "success");
+        } catch (error) {
+          checkbox.checked = !completing;
+        } finally {
+          checkbox.disabled = false;
+        }
       });
     });
   }
@@ -190,18 +206,39 @@
   function renderSubtasks(task) {
     const rows = task.subtasks || [];
     $("tb-subtasks").innerHTML = rows.length ? rows.map((item) => `
-      <label class="tobell-subtask">
+      <div class="tobell-subtask">
         <input type="checkbox" ${item.is_done ? "checked" : ""} data-subtask-id="${item.id}">
         <span>${esc(item.title)}</span>
-      </label>`).join("") : '<div class="tobell-empty">サブタスクはありません。</div>';
+        <button type="button" class="tobell-subtask-delete" data-subtask-delete="${item.id}" aria-label="削除">×</button>
+      </div>`).join("") : '<div class="tobell-empty">サブタスクはありません。</div>';
     document.querySelectorAll("[data-subtask-id]").forEach((box) => {
       box.addEventListener("change", async () => {
-        await api(`/tools/to_bell/api/subtasks/${box.dataset.subtaskId}`, {
-          method: "PUT",
-          body: { is_done: box.checked },
-        });
-        await refreshSelectedTask();
-        showFlash("サブタスクを更新しました", "success");
+        box.disabled = true;
+        try {
+          await api(`/tools/to_bell/api/subtasks/${box.dataset.subtaskId}`, {
+            method: "PUT",
+            body: { is_done: box.checked },
+          });
+          await refreshSelectedTask();
+          showFlash("サブタスクを更新しました", "success");
+        } catch (error) {
+          box.checked = !box.checked;
+        } finally {
+          box.disabled = false;
+        }
+      });
+    });
+    document.querySelectorAll("[data-subtask-delete]").forEach((btn) => {
+      btn.addEventListener("click", async (event) => {
+        event.preventDefault();
+        btn.disabled = true;
+        try {
+          await api(`/tools/to_bell/api/subtasks/${btn.dataset.subtaskDelete}`, { method: "DELETE" });
+          await refreshSelectedTask();
+          showFlash("サブタスクを削除しました", "success");
+        } finally {
+          btn.disabled = false;
+        }
       });
     });
   }
@@ -218,72 +255,104 @@
   async function createQuickTask(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    const payload = Object.fromEntries(new FormData(form).entries());
-    await api("/tools/to_bell/api/tasks", { method: "POST", body: payload });
-    form.reset();
-    await loadTasks();
-    showFlash("タスクを追加しました", "success");
+    const btn = form.querySelector('[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      const payload = Object.fromEntries(new FormData(form).entries());
+      await api("/tools/to_bell/api/tasks", { method: "POST", body: payload });
+      form.reset();
+      await loadTasks();
+      showFlash("タスクを追加しました", "success");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function saveDetail(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    const payload = Object.fromEntries(new FormData(form).entries());
-    payload.tags = payload.tags || "";
-    await api(`/tools/to_bell/api/tasks/${payload.id}`, { method: "PUT", body: payload });
-    await refreshSelectedTask();
-    await loadTasks();
-    showFlash("保存しました", "success");
+    const btn = form.querySelector('[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      const payload = Object.fromEntries(new FormData(form).entries());
+      payload.tags = payload.tags || "";
+      await api(`/tools/to_bell/api/tasks/${payload.id}`, { method: "PUT", body: payload });
+      await refreshSelectedTask();
+      await loadTasks();
+      showFlash("保存しました", "success");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function detailAction(event) {
-    const action = event.currentTarget.dataset.action;
+    const btn = event.currentTarget;
+    const action = btn.dataset.action;
     const id = state.selectedTaskId;
     if (!id) return;
     if (action === "archive" && !window.confirm("このタスクをアーカイブしますか？")) return;
     if (action === "delete" && !window.confirm("このタスクを完全に削除します。元に戻せません。よろしいですか？")) return;
-    let path = `/tools/to_bell/api/tasks/${id}/${action}`;
-    let method = "POST";
-    if (action === "archive") {
-      path = `/tools/to_bell/api/tasks/${id}`;
-      method = "DELETE";
-    } else if (action === "delete") {
-      path = `/tools/to_bell/api/tasks/${id}?hard=1`;
-      method = "DELETE";
+    btn.disabled = true;
+    try {
+      let path = `/tools/to_bell/api/tasks/${id}/${action}`;
+      let method = "POST";
+      if (action === "archive") {
+        path = `/tools/to_bell/api/tasks/${id}`;
+        method = "DELETE";
+      } else if (action === "delete") {
+        path = `/tools/to_bell/api/tasks/${id}?hard=1`;
+        method = "DELETE";
+      }
+      await api(path, { method });
+      if (action === "archive" || action === "delete") {
+        closeDetail();
+      }
+      await loadTasks();
+      await loadNotifications();
+      showFlash({
+        complete: "完了にしました",
+        reopen: "未完了に戻しました",
+        archive: "アーカイブしました",
+        delete: "削除しました",
+      }[action] || "更新しました", "success");
+    } finally {
+      btn.disabled = false;
     }
-    await api(path, { method });
-    if (action === "archive" || action === "delete") {
-      closeDetail();
-    }
-    await loadTasks();
-    await loadNotifications();
-    showFlash({
-      complete: "完了にしました",
-      reopen: "未完了に戻しました",
-      archive: "アーカイブしました",
-      delete: "削除しました",
-    }[action] || "更新しました", "success");
   }
 
   async function addSubtask(event) {
     event.preventDefault();
-    const title = event.currentTarget.elements.title.value.trim();
+    const form = event.currentTarget;
+    const title = form.elements.title.value.trim();
     if (!title) return;
-    await api(`/tools/to_bell/api/tasks/${state.selectedTaskId}/subtasks`, { method: "POST", body: { title } });
-    event.currentTarget.reset();
-    await refreshSelectedTask();
-    showFlash("サブタスクを追加しました", "success");
+    const btn = form.querySelector('[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      await api(`/tools/to_bell/api/tasks/${state.selectedTaskId}/subtasks`, { method: "POST", body: { title } });
+      form.reset();
+      await refreshSelectedTask();
+      showFlash("サブタスクを追加しました", "success");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function addComment(event) {
     event.preventDefault();
-    const body = event.currentTarget.elements.body.value.trim();
+    const form = event.currentTarget;
+    const body = form.elements.body.value.trim();
     if (!body) return;
-    await api(`/tools/to_bell/api/tasks/${state.selectedTaskId}/comments`, { method: "POST", body: { body } });
-    event.currentTarget.reset();
-    await refreshSelectedTask();
-    await loadNotifications();
-    showFlash("コメントを送信しました", "success");
+    const btn = form.querySelector('[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      await api(`/tools/to_bell/api/tasks/${state.selectedTaskId}/comments`, { method: "POST", body: { body } });
+      form.reset();
+      await refreshSelectedTask();
+      await loadNotifications();
+      showFlash("コメントを送信しました", "success");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function refreshSelectedTask() {
@@ -307,10 +376,16 @@
   }
 
   async function readAllNotifications() {
-    await api("/tools/to_bell/api/notifications/read-all", { method: "POST" });
-    await loadNotifications();
-    await loadTasks();
-    showFlash("通知をすべて既読にしました", "success");
+    const btn = $("tb-read-all");
+    if (btn) btn.disabled = true;
+    try {
+      await api("/tools/to_bell/api/notifications/read-all", { method: "POST" });
+      await loadNotifications();
+      await loadTasks();
+      showFlash("通知をすべて既読にしました", "success");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   function openWindowsNotifier() {
@@ -351,8 +426,6 @@
   }
 
   function initNotifications() {
-    updateNotifyStatus();
-    // 登録は権限不要。前面通知に showNotification を使えるよう先に登録しておく。
     registerServiceWorker().then(async () => {
       await refreshNotifyToggle();
       // プッシュ購読済みならサーバーが通知するので前面監視は不要。
@@ -402,10 +475,16 @@
 
   async function toggleNotifications() {
     const button = $("tb-enable-push-notify");
-    if (button && button.dataset.state === "on") {
-      await disablePushNotifications();
-    } else {
-      await enablePushNotifications();
+    if (!button) return;
+    button.disabled = true;
+    try {
+      if (button.dataset.state === "on") {
+        await disablePushNotifications();
+      } else {
+        await enablePushNotifications();
+      }
+    } finally {
+      button.disabled = false;
     }
   }
 
@@ -526,12 +605,17 @@
   }
 
   async function sendTestPush() {
-    const result = await api("/tools/to_bell/api/push/test", { method: "POST" });
-    if ((result.sent || 0) === 0) {
-      // プッシュ購読がまだ無い端末向けに、前面通知でも確認できるようにする。
-      await showLocalNotification("To Bell テスト通知", { body: "前面通知のテストです。" });
+    const btn = $("tb-test-push-notify");
+    if (btn) btn.disabled = true;
+    try {
+      const result = await api("/tools/to_bell/api/push/test", { method: "POST" });
+      if ((result.sent || 0) === 0) {
+        await showLocalNotification("To Bell テスト通知", { body: "前面通知のテストです。" });
+      }
+      showFlash(`テスト通知を送信しました（送信 ${result.sent || 0} / 失敗 ${result.failed || 0}）`, "info");
+    } finally {
+      if (btn) btn.disabled = false;
     }
-    showFlash(`テスト通知を送信しました（送信 ${result.sent || 0} / 失敗 ${result.failed || 0}）`, "info");
   }
 
   async function showLocalNotification(title, options) {
@@ -611,9 +695,12 @@
       if (event.key === "Escape" && !modal.hasAttribute("hidden")) close();
     });
 
-    $("tb-share-issue").addEventListener("click", () => mutateShare("/tools/to_bell/api/share/issue", modal, "共有リンクを発行しました。"));
-    $("tb-share-reissue").addEventListener("click", () => mutateShare("/tools/to_bell/api/share/issue", modal, "共有リンクを再発行しました。"));
-    $("tb-share-revoke").addEventListener("click", () => mutateShare("/tools/to_bell/api/share/revoke", modal, "共有リンクを無効化しました。"));
+    const issueBtn = $("tb-share-issue");
+    const reissueBtn = $("tb-share-reissue");
+    const revokeBtn = $("tb-share-revoke");
+    issueBtn.addEventListener("click", () => mutateShare("/tools/to_bell/api/share/issue", modal, "共有リンクを発行しました。", issueBtn));
+    reissueBtn.addEventListener("click", () => mutateShare("/tools/to_bell/api/share/issue", modal, "共有リンクを再発行しました。", reissueBtn));
+    revokeBtn.addEventListener("click", () => mutateShare("/tools/to_bell/api/share/revoke", modal, "共有リンクを無効化しました。", revokeBtn));
     $("tb-share-copy").addEventListener("click", copyShareUrl);
     const pwaCopy = $("tb-share-pwa-copy");
     if (pwaCopy) pwaCopy.addEventListener("click", copySharePwaUrl);
@@ -628,13 +715,16 @@
     }
   }
 
-  async function mutateShare(path, modal, message) {
+  async function mutateShare(path, modal, message, btn) {
+    if (btn) btn.disabled = true;
     try {
       const data = await api(path, { method: "POST" });
       renderShareState(data);
       showFlash(message, "success");
     } catch (err) {
       /* api() がトーストを表示済み */
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 
@@ -691,6 +781,12 @@
         el.addEventListener("click", () => modal.setAttribute("hidden", ""));
       }
     });
+    if (!modal.dataset.escBound) {
+      modal.dataset.escBound = "1";
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !modal.hasAttribute("hidden")) modal.setAttribute("hidden", "");
+      });
+    }
     await loadDevices();
   }
 
@@ -718,21 +814,31 @@
     `).join("");
     list.querySelectorAll("[data-device-save]").forEach((button) => {
       button.addEventListener("click", async () => {
-        const row = button.closest("[data-device-id]");
-        const label = row ? row.querySelector(".tobell-device-label").value : "";
-        await api(`/tools/to_bell/api/push/subscriptions/${button.dataset.deviceSave}`, {
-          method: "PUT",
-          body: { device_label: label },
-        });
-        await loadDevices();
-        showFlash("通知先を更新しました。", "success");
+        button.disabled = true;
+        try {
+          const row = button.closest("[data-device-id]");
+          const label = row ? row.querySelector(".tobell-device-label").value : "";
+          await api(`/tools/to_bell/api/push/subscriptions/${button.dataset.deviceSave}`, {
+            method: "PUT",
+            body: { device_label: label },
+          });
+          await loadDevices();
+          showFlash("通知先を更新しました。", "success");
+        } finally {
+          button.disabled = false;
+        }
       });
     });
     list.querySelectorAll("[data-device-disable]").forEach((button) => {
       button.addEventListener("click", async () => {
-        await api(`/tools/to_bell/api/push/subscriptions/${button.dataset.deviceDisable}`, { method: "DELETE" });
-        await loadDevices();
-        showFlash("通知先を無効化しました。", "success");
+        button.disabled = true;
+        try {
+          await api(`/tools/to_bell/api/push/subscriptions/${button.dataset.deviceDisable}`, { method: "DELETE" });
+          await loadDevices();
+          showFlash("通知先を無効化しました。", "success");
+        } finally {
+          button.disabled = false;
+        }
       });
     });
     list.querySelectorAll("[data-device-delete]").forEach((button) => {
@@ -763,14 +869,6 @@
 
   function isOverdue(task) {
     return task.due_at && task.status !== "done" && new Date(task.due_at).getTime() < Date.now();
-  }
-
-  function todayIso() {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
   }
 
   function formatDue(value) {
