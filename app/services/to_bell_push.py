@@ -151,11 +151,26 @@ def send_due_task_pushes(*, now: datetime | None = None) -> dict[str, int]:
                 user_id=user_id,
                 due_at_key=due_key,
             ).first()
-            # 配信済み（sent）・送信先なし（skipped）は確定状態なので再送しない。
-            # 送信失敗（failed）は一時的な障害の可能性があるため再送対象とする。
             if delivery is not None and delivery.status != "failed":
                 skipped += 1
                 continue
+            # 先にレコードを確保してから送信する。gunicorn の複数ワーカーが
+            # 同時に実行した場合、最初に INSERT/flush に成功したワーカーだけが
+            # 送信を行い、他ワーカーは IntegrityError でスキップする。
+            if delivery is None:
+                delivery = ToBellPushDelivery(
+                    task_id=task.id,
+                    user_id=user_id,
+                    due_at_key=due_key,
+                    status="pending",
+                )
+                db.session.add(delivery)
+                try:
+                    db.session.flush()
+                except IntegrityError:
+                    db.session.rollback()
+                    skipped += 1
+                    continue
             result = send_push_to_user(
                 user_id,
                 title=f"ToBell {task.title} from DSTT",
@@ -165,29 +180,14 @@ def send_due_task_pushes(*, now: datetime | None = None) -> dict[str, int]:
             sent += result["sent"]
             failed += result["failed"]
             if result["sent"]:
-                status = "sent"
+                delivery.status = "sent"
             elif result["failed"]:
-                # 全件失敗。配信済みとして記録せず、次回スケジュールで再送する。
-                status = "failed"
+                delivery.status = "failed"
             else:
-                # 有効な購読が無い。後から購読した端末へ過去分が一斉配信
-                # されるのを防ぐため確定状態として記録する。
-                status = "skipped"
-            if delivery is None:
-                delivery = ToBellPushDelivery(
-                    task_id=task.id,
-                    user_id=user_id,
-                    due_at_key=due_key,
-                    status=status,
-                )
-                db.session.add(delivery)
-            else:
-                delivery.status = status
+                delivery.status = "skipped"
             try:
                 db.session.commit()
             except IntegrityError:
-                # 複数ワーカーが同時に同じ配信を記録した場合のレース。
-                # 既に他ワーカーが確定済みなので無視してよい。
                 db.session.rollback()
     return {"sent": sent, "skipped": skipped, "failed": failed}
 
