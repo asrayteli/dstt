@@ -945,7 +945,7 @@ class ToBellTask(db.Model):
         'ToBellComment',
         back_populates='task',
         cascade='all, delete-orphan',
-        order_by='ToBellComment.created_at.desc()',
+        order_by='ToBellComment.created_at.asc()',
     )
     notifications = db.relationship(
         'ToBellNotification',

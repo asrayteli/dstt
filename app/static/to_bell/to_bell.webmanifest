@@ -1,6 +1,8 @@
 {
+  "id": "/tools/to_bell/pwa",
   "name": "To Bell",
   "short_name": "To Bell",
+  "description": "すぐ書ける Todo と、今日の要対応をひとつの画面で確認できるタスク管理アプリ",
   "icons": [
     {
       "src": "/static/img/favicon.ico",
