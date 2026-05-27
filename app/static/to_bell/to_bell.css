@@ -132,6 +132,25 @@
   gap: 0.65rem;
 }
 
+.tobell-quick-datetime {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+
+.tobell-quick-field {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.tobell-quick-field-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #64748b;
+  padding-left: 0.2rem;
+}
+
 .tobell-quick input,
 .tobell-quick select,
 .tobell-search input,
@@ -602,21 +621,9 @@ body.tobell-pwa-mode .tobell-quick {
 }
 
 body.tobell-pwa-mode .tobell-quick-form {
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 0.35rem;
-}
-
-body.tobell-pwa-mode .tobell-quick-form input[name="title"],
-body.tobell-pwa-mode .tobell-quick-form select[name="assigned_to"],
-body.tobell-pwa-mode .tobell-quick-form button[type="submit"] {
-  grid-column: 1 / -1;
-}
-
-body.tobell-pwa-mode .tobell-quick-form input[name="due_date"],
-body.tobell-pwa-mode .tobell-quick-form input[name="due_time"] {
-  padding-left: 0.2rem;
-  padding-right: 0.2rem;
-  overflow: hidden;
 }
 
 /* ===== タブレット ===== */
@@ -656,6 +663,7 @@ body.tobell-pwa-mode .tobell-quick-form input[name="due_time"] {
     display: flex;
     flex-direction: column;
     gap: 0.55rem;
+    align-items: stretch;
   }
 
   .tobell-main {
@@ -726,17 +734,18 @@ body.tobell-pwa-mode .tobell-quick-form input[name="due_time"] {
 
   /* フィルタは横スクロールせず、折り返すチップにする */
   .tobell-filters {
-    flex-direction: row;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
     gap: 0.4rem;
   }
 
   .tobell-filter {
     width: auto;
-    flex: 0 0 auto;
     margin-bottom: 0;
     padding: 0.45rem 0.8rem;
     background: #f1f5f9;
+    text-align: center;
+    white-space: normal;
   }
 
   .tobell-search {
