@@ -630,10 +630,8 @@
     form.elements.priority.value = task.priority || "normal";
     form.elements.due_at.value = task.due_at ? task.due_at.slice(0, 16) : "";
     form.elements.assigned_to.value = task.assigned_to || "";
-    if (form.elements.reviewer_id) form.elements.reviewer_id.value = task.reviewer_id || "";
     fillProjectSelect(form.elements.project_id, task.project ? task.project.id : "");
     form.elements.tags.value = (task.tags || []).map((tag) => tag.name).join(", ");
-    updateReviewActions(task);
     renderSubtasks(task);
     renderComments(task);
     renderAttachments(task);
@@ -646,19 +644,6 @@
     if (backButton) backButton.addEventListener("click", closeDetail);
     document.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", detailAction));
     renderMain();
-  }
-
-  function updateReviewActions(task) {
-    const wrap = $("tb-review-actions");
-    if (!wrap) return;
-    const isReview = task.status === "review";
-    const requestBtn = wrap.querySelector(".tobell-review-request");
-    const approveBtn = wrap.querySelector(".tobell-review-approve");
-    const returnBtn = wrap.querySelector(".tobell-review-return");
-    // 確認依頼: 完了/確認待ち以外で表示。承認・差戻し: 確認待ちのときだけ表示。
-    if (requestBtn) requestBtn.hidden = isReview || task.status === "done";
-    if (approveBtn) approveBtn.hidden = !isReview;
-    if (returnBtn) returnBtn.hidden = !isReview;
   }
 
   function renderAttachments(task) {
@@ -833,12 +818,6 @@
     }
     if (action === "archive" && !window.confirm("このタスクをアーカイブしますか？")) return;
     if (action === "delete" && !window.confirm("このタスクを完全に削除します。元に戻せません。よろしいですか？")) return;
-    let body;
-    if (action === "return") {
-      const comment = window.prompt("差戻しの理由（任意）を入力してください。");
-      if (comment === null) return;
-      body = { comment };
-    }
     btn.disabled = true;
     try {
       let path = `/tools/to_bell/api/tasks/${id}/${action}`;
@@ -850,7 +829,7 @@
         path = `/tools/to_bell/api/tasks/${id}?hard=1`;
         method = "DELETE";
       }
-      await api(path, body ? { method, body } : { method });
+      await api(path, { method });
       if (action === "archive" || action === "delete") {
         closeDetail();
       } else {
@@ -863,9 +842,6 @@
         reopen: "未完了に戻しました",
         archive: "アーカイブしました",
         delete: "削除しました",
-        "request-review": "確認を依頼しました",
-        approve: "承認しました",
-        return: "差し戻しました",
       }[action] || "更新しました", "success");
     } finally {
       btn.disabled = false;

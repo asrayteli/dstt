@@ -119,14 +119,6 @@
           {% endfor %}
         </select>
       </label>
-      <label>確認者
-        <select name="reviewer_id">
-          <option value="">未設定</option>
-          {% for user in users %}
-          <option value="{{ user.username }}">{{ user.name or user.username }}</option>
-          {% endfor %}
-        </select>
-      </label>
       <label>プロジェクト
         <select name="project_id" data-project-select>
           <option value="">なし</option>
@@ -134,11 +126,6 @@
       </label>
     </div>
     <label>タグ<input name="tags" placeholder="カンマ区切り"></label>
-    <div class="tobell-review-actions" id="tb-review-actions">
-      <button type="button" class="tobell-btn tobell-review-request" data-action="request-review">確認を依頼</button>
-      <button type="button" class="tobell-btn tobell-btn-primary tobell-review-approve" data-action="approve">承認</button>
-      <button type="button" class="tobell-btn tobell-danger tobell-review-return" data-action="return">差戻し</button>
-    </div>
     <div class="tobell-detail-actions">
       <button type="submit" class="tobell-btn tobell-btn-primary">保存</button>
       <button type="button" class="tobell-btn" data-action="complete">完了</button>

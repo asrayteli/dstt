@@ -507,69 +507,6 @@ def serialize_task(task: ToBellTask, username: str) -> dict[str, Any]:
     return data
 
 
-# ===== 確認 / 承認 / 差戻しワークフロー =====
-
-def request_review(task: ToBellTask, actor: str) -> ToBellTask:
-    if not task.reviewer_id:
-        raise ToBellInputError("reviewer_id", "確認者を指定してから確認を依頼してください。")
-    task.status = "review"
-    task.completed_at = None
-    task.updated_at = datetime.utcnow()
-    _notify(
-        [task.reviewer_id],
-        task,
-        event_type="review_request",
-        title=f"確認依頼: {task.title}",
-        body=f"{actor} さんが確認を依頼しました。",
-        severity="warning",
-        actor=actor,
-    )
-    db.session.commit()
-    return task
-
-
-def approve_task(task: ToBellTask, actor: str) -> ToBellTask:
-    _ensure_reviewer_or_owner(task, actor)
-    task.status = "done"
-    task.completed_at = datetime.utcnow()
-    task.updated_at = datetime.utcnow()
-    for notification in task.notifications:
-        notification.is_resolved = True
-        notification.resolved_at = datetime.utcnow()
-    _notify(
-        [task.created_by, task.assigned_to or ""],
-        task,
-        event_type="review_approved",
-        title=f"承認: {task.title}",
-        body=f"{actor} さんが承認しました。",
-        severity="info",
-        actor=actor,
-    )
-    db.session.commit()
-    return task
-
-
-def return_task(task: ToBellTask, actor: str, comment: str = "") -> ToBellTask:
-    _ensure_reviewer_or_owner(task, actor)
-    task.status = "returned"
-    task.completed_at = None
-    task.updated_at = datetime.utcnow()
-    body = (comment or "").strip()
-    if body:
-        db.session.add(ToBellComment(task=task, body=body[:2000], created_by=actor))
-    _notify(
-        [task.assigned_to or "", task.created_by],
-        task,
-        event_type="review_returned",
-        title=f"差戻し: {task.title}",
-        body=body[:300] or f"{actor} さんが差し戻しました。",
-        severity="danger",
-        actor=actor,
-    )
-    db.session.commit()
-    return task
-
-
 # ===== プロジェクト =====
 
 def list_projects(username: str, *, include_archived: bool = False) -> list[dict[str, Any]]:
@@ -1005,42 +942,6 @@ def _attachment_dir() -> Path:
     if override:
         return Path(override)
     return Path(__file__).resolve().parents[2] / "var" / "to_bell" / "attachments"
-
-
-def _ensure_reviewer_or_owner(task: ToBellTask, actor: str) -> None:
-    if actor not in {task.reviewer_id or "", task.created_by} and not _is_admin(actor):
-        raise ToBellInputError("review", "承認・差戻しは確認者または作成者のみ行えます。")
-
-
-def _notify(
-    targets,
-    task: ToBellTask,
-    *,
-    event_type: str,
-    title: str,
-    body: str,
-    severity: str,
-    actor: str,
-) -> None:
-    allowed = _same_office_usernames(actor)
-    seen = set()
-    for target in targets:
-        target = (target or "").strip()
-        if not target or target == actor or target in seen or target not in allowed:
-            continue
-        seen.add(target)
-        db.session.add(
-            ToBellNotification(
-                user_id=target,
-                task=task,
-                source_tool="to_bell",
-                event_type=event_type,
-                title=title[:240],
-                body=body[:300],
-                href=f"/tools/to_bell?task={task.id}",
-                severity=severity,
-            )
-        )
 
 
 def _create_assignment_notification(task: ToBellTask, actor: str) -> None:

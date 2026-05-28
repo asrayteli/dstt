@@ -512,53 +512,6 @@ def test_to_bell_project_not_visible_to_other_office(app_ctx):
     assert rejected.status_code == 400
 
 
-def test_to_bell_review_workflow_notifies_and_changes_status(app_ctx):
-    office_id = _create_office(app_ctx, "review")
-    _create_user(app_ctx, "owner", "Owner", office_id=office_id)
-    _create_user(app_ctx, "checker", "Checker", office_id=office_id)
-
-    owner = app_ctx.test_client()
-    _login(owner, "owner")
-    task = owner.post(
-        "/tools/to_bell/api/tasks",
-        json={"title": "確認してほしい", "reviewer_id": "checker"},
-    ).get_json()
-
-    requested = owner.post(f"/tools/to_bell/api/tasks/{task['id']}/request-review")
-    assert requested.status_code == 200
-    assert requested.get_json()["status"] == "review"
-
-    checker = app_ctx.test_client()
-    _login(checker, "checker")
-    notes = checker.get("/tools/to_bell/api/notifications").get_json()["notifications"]
-    assert any(note["event_type"] == "review_request" for note in notes)
-
-    # 差戻し
-    returned = checker.post(
-        f"/tools/to_bell/api/tasks/{task['id']}/return",
-        json={"comment": "金額が違います"},
-    )
-    assert returned.status_code == 200
-    assert returned.get_json()["status"] == "returned"
-    owner_notes = owner.get("/tools/to_bell/api/notifications").get_json()["notifications"]
-    assert any(note["event_type"] == "review_returned" for note in owner_notes)
-
-    # 再依頼して承認
-    owner.post(f"/tools/to_bell/api/tasks/{task['id']}/request-review")
-    approved = checker.post(f"/tools/to_bell/api/tasks/{task['id']}/approve")
-    assert approved.status_code == 200
-    assert approved.get_json()["status"] == "done"
-
-
-def test_to_bell_request_review_requires_reviewer(app_ctx):
-    _create_user(app_ctx, "alice", "Alice")
-    client = app_ctx.test_client()
-    _login(client, "alice")
-    task = client.post("/tools/to_bell/api/tasks", json={"title": "確認者なし"}).get_json()
-    rejected = client.post(f"/tools/to_bell/api/tasks/{task['id']}/request-review")
-    assert rejected.status_code == 400
-
-
 def test_to_bell_template_from_task_and_instantiate(app_ctx):
     _create_user(app_ctx, "alice", "Alice")
     client = app_ctx.test_client()

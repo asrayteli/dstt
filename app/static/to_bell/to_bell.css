@@ -984,17 +984,6 @@
   font-weight: 700;
 }
 
-/* ===== 確認ワークフローのボタン ===== */
-.tobell-review-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.tobell-review-actions .tobell-btn[hidden] {
-  display: none;
-}
-
 /* ===== 添付 ===== */
 .tobell-attachment {
   display: flex;
@@ -1151,12 +1140,6 @@ body.tobell-pwa-mode .tobell-cal-cell {
 
 body.tobell-pwa-mode .tobell-cal-task {
   font-size: 0.68rem;
-}
-
-/* PWA: 確認ワークフローのボタンは押しやすい大きさで横並び */
-body.tobell-pwa-mode .tobell-review-actions .tobell-btn {
-  flex: 1 1 auto;
-  min-height: 46px;
 }
 
 /* ===== タブレット ===== */

@@ -19,7 +19,6 @@ from app.services.to_bell_service import (
     add_attachment,
     add_comment,
     add_subtask,
-    approve_task,
     complete_task,
     create_blank_template,
     create_project,
@@ -48,9 +47,7 @@ from app.services.to_bell_service import (
     office_user_options,
     purge_task,
     reopen_task,
-    request_review,
     resolve_notification,
-    return_task,
     revoke_share_token,
     serialize_task,
     serialize_tasks,
@@ -259,37 +256,6 @@ def api_reopen_task(task_id: int):
     def action():
         task = get_task_for_user(task_id, current_user.username)
         return serialize_task(reopen_task(task), current_user.username)
-
-    return _json_endpoint(action)
-
-
-@to_bell_bp.route("/api/tasks/<int:task_id>/request-review", methods=["POST"])
-@login_required
-def api_request_review(task_id: int):
-    def action():
-        task = get_task_for_user(task_id, current_user.username)
-        return serialize_task(request_review(task, current_user.username), current_user.username)
-
-    return _json_endpoint(action)
-
-
-@to_bell_bp.route("/api/tasks/<int:task_id>/approve", methods=["POST"])
-@login_required
-def api_approve_task(task_id: int):
-    def action():
-        task = get_task_for_user(task_id, current_user.username)
-        return serialize_task(approve_task(task, current_user.username), current_user.username)
-
-    return _json_endpoint(action)
-
-
-@to_bell_bp.route("/api/tasks/<int:task_id>/return", methods=["POST"])
-@login_required
-def api_return_task(task_id: int):
-    def action():
-        task = get_task_for_user(task_id, current_user.username)
-        comment = str(_payload().get("comment") or "")
-        return serialize_task(return_task(task, current_user.username, comment), current_user.username)
 
     return _json_endpoint(action)
 
