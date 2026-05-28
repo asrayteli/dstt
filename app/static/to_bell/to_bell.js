@@ -85,6 +85,8 @@
     loadTasks().catch(() => {});
     loadNotifications().catch(() => {});
     initNotifications();
+    loadGoogleStatus().catch(() => {});
+    handleGoogleReturn();
   });
 
   function bindFilters() {
@@ -1002,6 +1004,7 @@
     fillProjectSelect(form.elements.project_id, task.project ? task.project.id : "");
     form.elements.tags.value = (task.tags || []).map((tag) => tag.name).join(", ");
     if (form.elements.pinned) form.elements.pinned.checked = !!task.pinned;
+    setupTaskCalendar(task, form);
     renderSubtasks(task);
     renderComments(task);
     renderAttachments(task);
@@ -1928,6 +1931,7 @@
         modal.querySelectorAll("[data-settings-panel]").forEach((p) => {
           p.style.display = p.dataset.settingsPanel === tab.dataset.settingsTab ? "" : "none";
         });
+        if (tab.dataset.settingsTab === "google") loadGoogleStatus(true);
       });
     });
   }
@@ -1995,6 +1999,231 @@
       // api() が flash 表示する
     } finally {
       btn.disabled = false;
+    }
+  }
+
+  // ===== Googleカレンダー連携 =====
+
+  const googleState = { status: null };
+
+  const REMINDER_PRESETS = [
+    ["none", "通知なし"],
+    ["10", "10分前"],
+    ["30", "30分前"],
+    ["60", "1時間前"],
+    ["1440", "1日前"],
+    ["10080", "1週間前"],
+  ];
+
+  function reminderOptionsHtml(selected, includeDefault) {
+    const items = includeDefault ? [["default", "共通設定に従う"], ...REMINDER_PRESETS] : REMINDER_PRESETS;
+    return items
+      .map(([value, label]) => `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`)
+      .join("");
+  }
+
+  function reminderSelectToPayload(value) {
+    if (value === "default") return "default"; // サーバー側で「個別上書きを解除」を意味する
+    if (value === "none") return [];
+    const minutes = Number(value);
+    if (!Number.isFinite(minutes)) return "default";
+    return [{ method: "popup", minutes }];
+  }
+
+  function reminderOverrideToSelect(override) {
+    if (override == null) return "default";
+    if (Array.isArray(override)) {
+      if (override.length === 0) return "none";
+      if (override.length === 1 && override[0]) {
+        const value = String(override[0].minutes);
+        if (REMINDER_PRESETS.some(([preset]) => preset === value)) return value;
+      }
+    }
+    return "default";
+  }
+
+  async function loadGoogleStatus(render) {
+    try {
+      googleState.status = await api("/tools/to_bell/api/google/status");
+    } catch (_) {
+      googleState.status = null;
+    }
+    if (render) renderGooglePanel();
+    return googleState.status;
+  }
+
+  function renderGooglePanel() {
+    const panel = $("tb-google-panel");
+    if (!panel) return;
+    const s = googleState.status;
+    if (!s) {
+      panel.innerHTML = '<div class="tobell-empty">読み込みに失敗しました</div>';
+      return;
+    }
+    if (!s.configured) {
+      panel.innerHTML = '<div class="tobell-empty">サーバー側でGoogle連携が未設定です。管理者に環境変数（DSTT_GOOGLE_CLIENT_ID / DSTT_GOOGLE_CLIENT_SECRET）の設定を依頼してください。</div>';
+      return;
+    }
+    if (!s.integration_enabled) {
+      panel.innerHTML = '<div class="tobell-empty">「DSTT連携」タブで「重要タスクをGoogleカレンダーに送る」をONにすると、ここで接続できます。</div>';
+      return;
+    }
+    if (s.connected) {
+      const reminderValue = reminderOverrideToSelect(s.default_reminders);
+      panel.innerHTML = `
+        <div class="tobell-google-account">
+          <span class="tobell-google-status is-on">接続済み</span>
+          <span class="tobell-google-email">${esc(s.google_email || "")}</span>
+          <button type="button" class="tobell-btn tobell-danger" data-gcal-disconnect>接続を解除</button>
+        </div>
+        <label class="tobell-gcal-reminder">既定のリマインダー
+          <select data-gcal-default-reminder>${reminderOptionsHtml(reminderValue, false)}</select>
+        </label>
+        <p class="tobell-share-note">各タスクの詳細で「📅 Googleカレンダーに送る」をONにすると、ここで選んだ既定リマインダーが使われます（タスクごとに上書きも可能）。</p>`;
+    } else {
+      panel.innerHTML = `
+        <div class="tobell-google-account">
+          <span class="tobell-google-status">未接続</span>
+          <a class="tobell-btn tobell-btn-primary" href="/tools/to_bell/api/google/connect">Googleアカウントを接続</a>
+        </div>
+        <p class="tobell-share-note">接続するとGoogleの同意画面が開きます。許可するとメインカレンダーへの追加が有効になります。</p>`;
+    }
+    const disconnectBtn = panel.querySelector("[data-gcal-disconnect]");
+    if (disconnectBtn) disconnectBtn.addEventListener("click", disconnectGoogle);
+    const defaultSel = panel.querySelector("[data-gcal-default-reminder]");
+    if (defaultSel) defaultSel.addEventListener("change", () => saveDefaultReminder(defaultSel));
+  }
+
+  async function saveDefaultReminder(sel) {
+    sel.disabled = true;
+    try {
+      const reminders = sel.value === "none" ? [] : [{ method: "popup", minutes: Number(sel.value) }];
+      const data = await api("/tools/to_bell/api/google/reminders", { method: "PUT", body: { reminders } });
+      if (googleState.status) googleState.status.default_reminders = data.default_reminders;
+      showFlash("既定のリマインダーを保存しました", "success");
+    } catch (_) {
+      // api() が flash 表示する
+    } finally {
+      sel.disabled = false;
+    }
+  }
+
+  async function disconnectGoogle() {
+    if (!window.confirm("Googleカレンダー連携を解除しますか？同期済みタスクのイベント参照も外れます。")) return;
+    try {
+      googleState.status = await api("/tools/to_bell/api/google/disconnect", { method: "POST" });
+      renderGooglePanel();
+      showFlash("接続を解除しました", "info");
+    } catch (_) {
+      // api() が flash 表示する
+    }
+  }
+
+  function setupTaskCalendar(task, form) {
+    const wrap = form.querySelector("[data-gcal-detail]");
+    if (!wrap) return;
+    const status = googleState.status;
+    if (!status || !status.integration_enabled) {
+      wrap.hidden = true;
+      return;
+    }
+    wrap.hidden = false;
+    const toggle = form.querySelector("[data-gcal-toggle]");
+    const reminderWrap = form.querySelector("[data-gcal-reminder-wrap]");
+    const reminderSel = form.querySelector("[data-gcal-reminder]");
+    const hint = form.querySelector("[data-gcal-hint]");
+    const synced = !!task.gcal_synced;
+    toggle.checked = synced;
+    reminderWrap.hidden = !synced;
+    reminderSel.value = reminderOverrideToSelect(task.gcal_reminder_override);
+    hint.textContent = "";
+    if (!status.connected) {
+      hint.textContent = "Googleアカウント未接続です。「設定 → Googleカレンダー」で接続してください。";
+    } else if (!task.due_at) {
+      hint.textContent = "通知日時を設定すると、カレンダーに送れます。";
+    }
+    toggle.addEventListener("change", () => toggleTaskCalendar(task, toggle, reminderSel, reminderWrap));
+    reminderSel.addEventListener("change", () => changeTaskReminder(task, toggle, reminderSel));
+  }
+
+  function applyTaskUpdate(task, updated) {
+    if (!updated) return;
+    Object.assign(task, updated);
+    const index = state.tasks.findIndex((item) => item.id === task.id);
+    if (index >= 0) state.tasks.splice(index, 1, task);
+    renderMain();
+  }
+
+  async function toggleTaskCalendar(task, toggle, reminderSel, reminderWrap) {
+    const status = googleState.status;
+    if (toggle.checked) {
+      if (!status || !status.connected) {
+        toggle.checked = false;
+        showFlash("先に「設定 → Googleカレンダー」で接続してください。", "error");
+        return;
+      }
+      if (!task.due_at) {
+        toggle.checked = false;
+        showFlash("通知日時が未設定のタスクはカレンダーに送れません。", "error");
+        return;
+      }
+    }
+    toggle.disabled = true;
+    try {
+      if (toggle.checked) {
+        const reminders = reminderSelectToPayload(reminderSel.value);
+        const data = await api(`/tools/to_bell/api/tasks/${task.id}/calendar`, { method: "POST", body: { reminders } });
+        applyTaskUpdate(task, data.task);
+        reminderWrap.hidden = false;
+        showFlash("Googleカレンダーに送りました", "success");
+      } else {
+        const data = await api(`/tools/to_bell/api/tasks/${task.id}/calendar`, { method: "DELETE" });
+        applyTaskUpdate(task, data.task);
+        reminderWrap.hidden = true;
+        showFlash("カレンダーから外しました", "info");
+      }
+    } catch (_) {
+      toggle.checked = !toggle.checked; // 失敗したら元に戻す
+    } finally {
+      toggle.disabled = false;
+    }
+  }
+
+  async function changeTaskReminder(task, toggle, reminderSel) {
+    if (!toggle.checked) return; // 未同期ならON時に反映する
+    reminderSel.disabled = true;
+    try {
+      const reminders = reminderSelectToPayload(reminderSel.value);
+      const data = await api(`/tools/to_bell/api/tasks/${task.id}/calendar`, { method: "POST", body: { reminders } });
+      applyTaskUpdate(task, data.task);
+      showFlash("リマインダーを更新しました", "success");
+    } catch (_) {
+      // api() が flash 表示する
+    } finally {
+      reminderSel.disabled = false;
+    }
+  }
+
+  function handleGoogleReturn() {
+    const params = new URLSearchParams(window.location.search);
+    const ok = params.get("google");
+    const err = params.get("google_error");
+    if (!ok && !err) return;
+    params.delete("google");
+    params.delete("google_error");
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
+    if (ok === "connected") {
+      showFlash("Googleカレンダーに接続しました", "success");
+      loadGoogleStatus().catch(() => {});
+    } else if (err) {
+      const msg = {
+        state_mismatch: "接続に失敗しました（セキュリティ検証エラー）。もう一度お試しください。",
+        no_code: "接続に失敗しました（認可コード未取得）。",
+        token_exchange: "接続に失敗しました（トークン交換エラー）。",
+        access_denied: "接続がキャンセルされました。",
+      }[err] || `接続に失敗しました（${err}）。`;
+      showFlash(msg, "error");
     }
   }
 

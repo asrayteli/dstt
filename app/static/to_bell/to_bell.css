@@ -1854,6 +1854,74 @@ body.tobell-pwa-mode .tobell-viewer-stage embed {
   cursor: not-allowed;
 }
 
+/* ===== Googleカレンダー連携 ===== */
+.tobell-google-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.tobell-google-account {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.tobell-google-status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+.tobell-google-status.is-on {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.tobell-google-email {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.9rem;
+  color: #111827;
+  word-break: break-all;
+}
+
+.tobell-gcal-reminder {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.tobell-gcal-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  margin-top: 0.4rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.tobell-gcal-hint {
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.tobell-gcal-hint:empty {
+  display: none;
+}
+
 /* ===== 紐付けモーダル ===== */
 .tobell-link-results,
 .tobell-link-current {

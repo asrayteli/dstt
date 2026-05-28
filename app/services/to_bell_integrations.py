@@ -41,6 +41,11 @@ INTEGRATION_KEYS = {
         "label": "プロジェクト/タスクを現場に紐付け",
         "description": "siteplusの現場と、ToBellのプロジェクトやタスクを多対多で紐付けます。",
     },
+    "google.calendar": {
+        "tool": "google",
+        "label": "重要タスクをGoogleカレンダーに送る",
+        "description": "選んだタスクの期限をGoogleカレンダー（メイン）にイベントとして追加します。片方向（ToBell→カレンダー）で、完了時は完了印が付きます。",
+    },
 }
 
 

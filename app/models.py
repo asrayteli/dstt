@@ -933,6 +933,9 @@ class ToBellTask(db.Model):
     source_ref_type = db.Column(db.String(80), nullable=True)
     source_ref_id = db.Column(db.String(120), nullable=True)
     pinned = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    gcal_event_id = db.Column(db.String(255), nullable=True, index=True)
+    gcal_synced_by = db.Column(db.String(80), nullable=True, index=True)
+    gcal_reminder_override = db.Column(db.JSON, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -993,6 +996,8 @@ class ToBellTask(db.Model):
             'source_ref_type': self.source_ref_type or '',
             'source_ref_id': self.source_ref_id or '',
             'pinned': bool(self.pinned),
+            'gcal_synced': bool(self.gcal_event_id),
+            'gcal_reminder_override': self.gcal_reminder_override,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'tags': [tag.to_dict() for tag in self.tags],
@@ -1150,6 +1155,31 @@ class ToBellPushDelivery(db.Model):
     due_at_key = db.Column(db.String(32), nullable=False, index=True)
     sent_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     status = db.Column(db.String(30), nullable=False, default='sent')
+
+
+class ToBellGoogleAccount(db.Model):
+    """ユーザー個人の Google アカウント接続（ToBell → Google Calendar 連携用）。
+
+    refresh_token / access_token は EncryptedText で暗号化して保存する。
+    """
+    __tablename__ = 'to_bell_google_accounts'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    username = db.Column(db.String(80), nullable=False, unique=True, index=True)
+    google_email = db.Column(db.String(255), nullable=False, default='')
+    refresh_token = db.Column(EncryptedText, nullable=True)
+    access_token = db.Column(EncryptedText, nullable=True)
+    token_expiry = db.Column(db.DateTime, nullable=True)
+    scope = db.Column(db.Text, nullable=False, default='')
+    connected_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            'connected': bool(self.refresh_token),
+            'google_email': self.google_email or '',
+            'connected_at': self.connected_at.isoformat() if self.connected_at else None,
+        }
 
 
 class ToBellShareToken(db.Model):
