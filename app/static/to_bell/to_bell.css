@@ -594,6 +594,499 @@
   font-size: 0.78rem;
 }
 
+/* ===== 表示切り替え（リスト/カンバン/カレンダー） ===== */
+.tobell-views {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  padding: 0.25rem;
+  border-radius: 12px;
+  background: #eef2f7;
+  border: 1px solid #e2e8f0;
+}
+
+.tobell-view-btn {
+  min-height: 38px;
+  padding: 0.4rem 1rem;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #475569;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tobell-view-btn.is-active {
+  background: #ffffff;
+  color: #1d4ed8;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+/* ===== プロジェクト（PC サイドバー） ===== */
+.tobell-projects {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.tobell-projects-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tobell-project-add {
+  width: 26px;
+  height: 26px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #2563eb;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tobell-project-list {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.tobell-project-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-radius: 9px;
+}
+
+.tobell-project-row.is-active {
+  background: #eff6ff;
+}
+
+.tobell-project-pick {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.5rem 0.55rem;
+  border: 0;
+  background: transparent;
+  font-weight: 700;
+  color: #334155;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tobell-project-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tobell-project-count {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 0.74rem;
+  text-align: center;
+}
+
+.tobell-project-edit {
+  padding: 0.35rem 0.45rem;
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.tobell-project-edit:hover {
+  color: #2563eb;
+}
+
+.tobell-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+/* ===== プロジェクトバー（PWA チップ） ===== */
+.tobell-project-bar {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.tobell-project-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.tobell-pchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tobell-pchip.is-active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.tobell-pchip-add {
+  font-weight: 800;
+  color: #2563eb;
+}
+
+/* タスクカード内のプロジェクト表示 */
+.tobell-task-project {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.3rem !important;
+  font-size: 0.78rem !important;
+  color: #475569 !important;
+}
+
+.tobell-chip-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.tobell-chip-clear {
+  margin-left: 0.2rem;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* ===== カンバン ===== */
+.tobell-kanban {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(230px, 1fr);
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+  align-items: start;
+}
+
+.tobell-kan-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.tobell-kan-col.is-drop {
+  border-color: #60a5fa;
+  background: #eff6ff;
+}
+
+.tobell-kan-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.75rem;
+  font-weight: 800;
+  color: #334155;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.tobell-kan-count {
+  min-width: 22px;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 0.74rem;
+  text-align: center;
+}
+
+.tobell-kan-cards {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.6rem;
+}
+
+.tobell-kan-empty {
+  padding: 0.75rem;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
+.tobell-kan-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 0.6rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.tobell-kan-card[draggable="true"] {
+  cursor: grab;
+}
+
+.tobell-kan-card.is-dragging {
+  opacity: 0.5;
+}
+
+.tobell-kan-card-body {
+  cursor: pointer;
+}
+
+.tobell-kan-card strong {
+  display: block;
+  font-size: 0.9rem;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.tobell-kan-due {
+  display: inline-block;
+  margin-top: 0.3rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.tobell-kan-due.danger {
+  color: #b91c1c;
+}
+
+.tobell-kan-move {
+  width: 100%;
+  margin-top: 0.5rem;
+  min-height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  padding: 0.3rem 0.5rem;
+  background: #f8fafc;
+  font-size: 16px;
+}
+
+/* ===== カレンダー ===== */
+.tobell-cal-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tobell-cal-month {
+  font-size: 1.05rem;
+  color: #0f172a;
+}
+
+.tobell-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px;
+  background: #e2e8f0;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.tobell-cal-weekday {
+  padding: 0.4rem;
+  background: #f1f5f9;
+  text-align: center;
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: #64748b;
+}
+
+.tobell-cal-cell {
+  min-height: 96px;
+  padding: 0.3rem;
+  background: #ffffff;
+}
+
+.tobell-cal-cell.is-empty {
+  background: #f8fafc;
+}
+
+.tobell-cal-cell.is-today {
+  background: #eff6ff;
+}
+
+.tobell-cal-daynum {
+  border: 0;
+  background: transparent;
+  font-weight: 700;
+  color: #334155;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  border-radius: 7px;
+}
+
+.tobell-cal-daynum:hover {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.tobell-cal-tasks {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.2rem;
+}
+
+.tobell-cal-task {
+  border: 0;
+  border-radius: 6px;
+  padding: 0.18rem 0.35rem;
+  background: #dbeafe;
+  color: #1e3a8a;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tobell-cal-task.danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.tobell-cal-more {
+  font-size: 0.72rem;
+  color: #64748b;
+  font-weight: 700;
+}
+
+/* ===== 確認ワークフローのボタン ===== */
+.tobell-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tobell-review-actions .tobell-btn[hidden] {
+  display: none;
+}
+
+/* ===== 添付 ===== */
+.tobell-attachment {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+
+.tobell-attachment-link {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #1d4ed8;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tobell-attachment-size {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 0.76rem;
+}
+
+/* ===== テンプレート ===== */
+.tobell-modal-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.tobell-modal-form label {
+  display: grid;
+  gap: 0.25rem;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.tobell-modal-form input,
+.tobell-modal-form select,
+.tobell-modal-form textarea {
+  width: 100%;
+  min-height: 40px;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.5rem 0.65rem;
+  font-size: 16px;
+}
+
+.tobell-template-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.tobell-template-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.tobell-template-main {
+  min-width: 0;
+}
+
+.tobell-template-main strong {
+  display: block;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.tobell-template-meta {
+  color: #64748b;
+  font-size: 0.76rem;
+}
+
+.tobell-template-create {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 0.85rem;
+}
+
 body.tobell-pwa-mode {
   margin: 0;
   background: #f8fafc;
@@ -624,6 +1117,46 @@ body.tobell-pwa-mode .tobell-quick-form {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+
+/* PWA: 表示切り替えは横幅いっぱいの大きなタブにする */
+body.tobell-pwa-mode .tobell-views,
+.tobell-views-pwa {
+  display: flex;
+  width: 100%;
+}
+
+body.tobell-pwa-mode .tobell-view-btn,
+.tobell-views-pwa .tobell-view-btn {
+  flex: 1 1 0;
+  text-align: center;
+  min-height: 44px;
+}
+
+/* PWA: カンバンは1列ずつ横スワイプで見る */
+body.tobell-pwa-mode .tobell-kanban {
+  grid-auto-columns: 84%;
+  scroll-snap-type: x mandatory;
+}
+
+body.tobell-pwa-mode .tobell-kan-col {
+  scroll-snap-align: start;
+}
+
+/* PWA: カレンダーはセルを小さく、文字を詰める */
+body.tobell-pwa-mode .tobell-cal-cell {
+  min-height: 62px;
+  padding: 0.2rem;
+}
+
+body.tobell-pwa-mode .tobell-cal-task {
+  font-size: 0.68rem;
+}
+
+/* PWA: 確認ワークフローのボタンは押しやすい大きさで横並び */
+body.tobell-pwa-mode .tobell-review-actions .tobell-btn {
+  flex: 1 1 auto;
+  min-height: 46px;
 }
 
 /* ===== タブレット ===== */
@@ -804,5 +1337,34 @@ body.tobell-pwa-mode .tobell-quick-form {
 
   .tobell-detail-actions .tobell-btn {
     flex: 1 1 auto;
+  }
+
+  /* スマホ表示のカンバン/カレンダー */
+  .tobell-views {
+    display: flex;
+    width: 100%;
+  }
+
+  .tobell-view-btn {
+    flex: 1 1 0;
+    text-align: center;
+  }
+
+  .tobell-kanban {
+    grid-auto-columns: 84%;
+    scroll-snap-type: x mandatory;
+  }
+
+  .tobell-kan-col {
+    scroll-snap-align: start;
+  }
+
+  .tobell-cal-cell {
+    min-height: 60px;
+    padding: 0.2rem;
+  }
+
+  .tobell-cal-task {
+    font-size: 0.68rem;
   }
 }

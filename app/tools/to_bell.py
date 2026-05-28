@@ -9,34 +9,55 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     url_for,
 )
 from flask_login import current_user, login_required
 
 from app.services.to_bell_service import (
     ToBellInputError,
+    add_attachment,
     add_comment,
     add_subtask,
+    approve_task,
     complete_task,
+    create_blank_template,
+    create_project,
     create_task,
+    create_template_from_task,
+    delete_attachment,
+    delete_project,
     delete_subtask,
     delete_task,
+    delete_template,
+    get_attachment_for_user,
+    get_project_for_user,
     get_share_token,
     get_task_for_user,
+    get_template_for_user,
+    instantiate_template,
     issue_share_token,
     list_notifications,
+    list_projects,
     list_tasks,
     list_due_notification_tasks,
+    list_templates,
     mark_all_notifications_read,
     mark_notification_read,
     notification_summary,
     office_user_options,
     purge_task,
     reopen_task,
+    request_review,
     resolve_notification,
+    return_task,
     revoke_share_token,
+    serialize_task,
+    serialize_tasks,
+    update_project,
     update_subtask,
     update_task,
+    update_template,
 )
 from app.services.to_bell_push import (
     ToBellPushUnavailable,
@@ -163,15 +184,17 @@ def notifier():
 @to_bell_bp.route("/api/tasks", methods=["GET"])
 @login_required
 def api_tasks():
+    username = current_user.username
     tasks = list_tasks(
-        current_user.username,
+        username,
         filter_name=request.args.get("filter", "today"),
         search=request.args.get("q", ""),
+        project_id=request.args.get("project_id"),
     )
     return jsonify(
         {
-            "tasks": [task.to_dict() for task in tasks],
-            "summary": notification_summary(current_user.username),
+            "tasks": serialize_tasks(tasks, username),
+            "summary": notification_summary(username),
         }
     )
 
@@ -179,13 +202,19 @@ def api_tasks():
 @to_bell_bp.route("/api/tasks", methods=["POST"])
 @login_required
 def api_create_task():
-    return _json_endpoint(lambda: (create_task(current_user.username, _payload()).to_dict(), 201))
+    def action():
+        task = create_task(current_user.username, _payload())
+        return serialize_task(task, current_user.username), 201
+
+    return _json_endpoint(action)
 
 
 @to_bell_bp.route("/api/tasks/<int:task_id>", methods=["GET"])
 @login_required
 def api_task_detail(task_id: int):
-    return _json_endpoint(lambda: get_task_for_user(task_id, current_user.username).to_dict())
+    return _json_endpoint(
+        lambda: serialize_task(get_task_for_user(task_id, current_user.username), current_user.username)
+    )
 
 
 @to_bell_bp.route("/api/tasks/<int:task_id>", methods=["PUT"])
@@ -193,7 +222,7 @@ def api_task_detail(task_id: int):
 def api_update_task(task_id: int):
     def action():
         task = get_task_for_user(task_id, current_user.username)
-        return update_task(task, _payload(), current_user.username).to_dict()
+        return serialize_task(update_task(task, _payload(), current_user.username), current_user.username)
 
     return _json_endpoint(action)
 
@@ -219,7 +248,7 @@ def api_delete_task(task_id: int):
 def api_complete_task(task_id: int):
     def action():
         task = get_task_for_user(task_id, current_user.username)
-        return complete_task(task).to_dict()
+        return serialize_task(complete_task(task), current_user.username)
 
     return _json_endpoint(action)
 
@@ -229,7 +258,38 @@ def api_complete_task(task_id: int):
 def api_reopen_task(task_id: int):
     def action():
         task = get_task_for_user(task_id, current_user.username)
-        return reopen_task(task).to_dict()
+        return serialize_task(reopen_task(task), current_user.username)
+
+    return _json_endpoint(action)
+
+
+@to_bell_bp.route("/api/tasks/<int:task_id>/request-review", methods=["POST"])
+@login_required
+def api_request_review(task_id: int):
+    def action():
+        task = get_task_for_user(task_id, current_user.username)
+        return serialize_task(request_review(task, current_user.username), current_user.username)
+
+    return _json_endpoint(action)
+
+
+@to_bell_bp.route("/api/tasks/<int:task_id>/approve", methods=["POST"])
+@login_required
+def api_approve_task(task_id: int):
+    def action():
+        task = get_task_for_user(task_id, current_user.username)
+        return serialize_task(approve_task(task, current_user.username), current_user.username)
+
+    return _json_endpoint(action)
+
+
+@to_bell_bp.route("/api/tasks/<int:task_id>/return", methods=["POST"])
+@login_required
+def api_return_task(task_id: int):
+    def action():
+        task = get_task_for_user(task_id, current_user.username)
+        comment = str(_payload().get("comment") or "")
+        return serialize_task(return_task(task, current_user.username, comment), current_user.username)
 
     return _json_endpoint(action)
 
@@ -268,6 +328,112 @@ def api_comments(task_id: int):
         if request.method == "POST":
             return add_comment(task, current_user.username, _payload()).to_dict(), 201
         return {"comments": [comment.to_dict() for comment in task.comments]}
+
+    return _json_endpoint(action)
+
+
+# ----- プロジェクト -----
+
+@to_bell_bp.route("/api/projects", methods=["GET", "POST"])
+@login_required
+def api_projects():
+    if request.method == "POST":
+        return _json_endpoint(lambda: (create_project(current_user.username, _payload()).to_dict(), 201))
+    include_archived = request.args.get("archived", "").lower() in ("1", "true", "yes")
+    return jsonify({"projects": list_projects(current_user.username, include_archived=include_archived)})
+
+
+@to_bell_bp.route("/api/projects/<int:project_id>", methods=["PUT", "DELETE"])
+@login_required
+def api_project(project_id: int):
+    def action():
+        project = get_project_for_user(project_id, current_user.username)
+        if request.method == "DELETE":
+            delete_project(project, current_user.username)
+            return {"ok": True}
+        return update_project(project, current_user.username, _payload()).to_dict()
+
+    return _json_endpoint(action)
+
+
+# ----- 添付ファイル -----
+
+@to_bell_bp.route("/api/tasks/<int:task_id>/attachments", methods=["POST"])
+@login_required
+def api_add_attachment(task_id: int):
+    def action():
+        task = get_task_for_user(task_id, current_user.username)
+        attachment = add_attachment(task, current_user.username, request.files.get("file"))
+        return attachment.to_dict(), 201
+
+    return _json_endpoint(action)
+
+
+@to_bell_bp.route("/api/attachments/<int:attachment_id>", methods=["GET"])
+@login_required
+def api_download_attachment(attachment_id: int):
+    try:
+        attachment = get_attachment_for_user(attachment_id, current_user.username)
+    except ToBellInputError:
+        abort(404)
+    return send_file(
+        attachment.stored_path,
+        as_attachment=True,
+        download_name=attachment.file_name,
+        mimetype=attachment.mime_type or None,
+    )
+
+
+@to_bell_bp.route("/api/attachments/<int:attachment_id>", methods=["DELETE"])
+@login_required
+def api_delete_attachment(attachment_id: int):
+    def action():
+        delete_attachment(attachment_id, current_user.username)
+        return {"ok": True}
+
+    return _json_endpoint(action)
+
+
+# ----- テンプレート -----
+
+@to_bell_bp.route("/api/templates", methods=["GET", "POST"])
+@login_required
+def api_templates():
+    if request.method == "POST":
+        return _json_endpoint(lambda: (create_blank_template(current_user.username, _payload()).to_dict(), 201))
+    return jsonify({"templates": list_templates(current_user.username)})
+
+
+@to_bell_bp.route("/api/templates/<int:template_id>", methods=["PUT", "DELETE"])
+@login_required
+def api_template(template_id: int):
+    def action():
+        template = get_template_for_user(template_id, current_user.username)
+        if request.method == "DELETE":
+            delete_template(template, current_user.username)
+            return {"ok": True}
+        return update_template(template, current_user.username, _payload()).to_dict()
+
+    return _json_endpoint(action)
+
+
+@to_bell_bp.route("/api/templates/<int:template_id>/instantiate", methods=["POST"])
+@login_required
+def api_instantiate_template(template_id: int):
+    def action():
+        template = get_template_for_user(template_id, current_user.username)
+        task = instantiate_template(template, current_user.username, _payload())
+        return serialize_task(task, current_user.username), 201
+
+    return _json_endpoint(action)
+
+
+@to_bell_bp.route("/api/tasks/<int:task_id>/template", methods=["POST"])
+@login_required
+def api_template_from_task(task_id: int):
+    def action():
+        task = get_task_for_user(task_id, current_user.username)
+        return create_template_from_task(task, current_user.username, _payload()).to_dict(), 201
 
     return _json_endpoint(action)
 

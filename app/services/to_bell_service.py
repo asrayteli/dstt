@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+import os
 import secrets
+import uuid
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import and_, or_
+from werkzeug.utils import secure_filename
 
 from app.models import (
+    ToBellAttachment,
     ToBellComment,
     ToBellNotification,
+    ToBellProject,
     ToBellShareToken,
     ToBellSubtask,
     ToBellTag,
     ToBellTask,
+    ToBellTemplate,
     User,
     db,
 )
@@ -20,6 +27,10 @@ from app.models import (
 
 VALID_STATUSES = {"todo", "doing", "blocked", "review", "returned", "done", "archived"}
 VALID_PRIORITIES = {"low", "normal", "high", "urgent"}
+VALID_PROJECT_STATUSES = {"active", "done", "archived"}
+VALID_SCOPES = {"private", "office"}
+
+ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 
 
 class ToBellInputError(ValueError):
@@ -83,10 +94,19 @@ def get_task_for_user(task_id: int, username: str) -> ToBellTask:
     return task
 
 
-def list_tasks(username: str, *, filter_name: str = "today", search: str = "") -> list[ToBellTask]:
+def list_tasks(
+    username: str,
+    *,
+    filter_name: str = "today",
+    search: str = "",
+    project_id: Any = None,
+) -> list[ToBellTask]:
     today = date.today()
     query = ToBellTask.query.filter(visible_task_filter(username))
-    if filter_name == "inbox":
+    if filter_name == "board":
+        # カンバン / カレンダー用: アーカイブ以外の参加タスクをすべて返す。
+        query = query.filter(ToBellTask.status != "archived")
+    elif filter_name == "inbox":
         query = query.filter(ToBellTask.due_at.is_(None), ToBellTask.status.in_(["todo", "doing", "blocked", "review", "returned"]))
     elif filter_name == "assigned":
         query = query.filter(ToBellTask.assigned_to == username, ToBellTask.status != "done")
@@ -115,6 +135,9 @@ def list_tasks(username: str, *, filter_name: str = "today", search: str = "") -
     if search:
         like = f"%{search.strip()}%"
         query = query.filter(or_(ToBellTask.title.ilike(like), ToBellTask.description.ilike(like)))
+    pid = _safe_int(project_id)
+    if pid:
+        query = query.filter(ToBellTask.project_id == pid)
     return query.order_by(
         ToBellTask.status == "done",
         ToBellTask.due_at.is_(None),
@@ -151,6 +174,7 @@ def create_task(username: str, payload: dict[str, Any]) -> ToBellTask:
         assigned_to=assigned_to,
         reviewer_id=reviewer_id,
         manual_progress=_int_between(payload.get("manual_progress"), 0, 100, 0),
+        project_id=_coerce_project(username, payload.get("project_id")),
         source_tool=str(payload.get("source_tool") or "").strip() or None,
         source_ref_type=str(payload.get("source_ref_type") or "").strip() or None,
         source_ref_id=str(payload.get("source_ref_id") or "").strip() or None,
@@ -191,6 +215,8 @@ def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBell
         task.reviewer_id = _coerce_same_office_user(actor, payload.get("reviewer_id"), "reviewer_id")
     if "manual_progress" in payload:
         task.manual_progress = _int_between(payload.get("manual_progress"), 0, 100, task.manual_progress)
+    if "project_id" in payload:
+        task.project_id = _coerce_project(actor, payload.get("project_id"))
     _sync_tags(task, payload.get("tags"), actor)
     task.updated_at = datetime.utcnow()
     db.session.commit()
@@ -460,6 +486,347 @@ def resolve_share_token(token: str) -> User | None:
     return user
 
 
+# ===== タスクのシリアライズ（プロジェクト情報を注入） =====
+
+def serialize_tasks(tasks: list[ToBellTask], username: str) -> list[dict[str, Any]]:
+    project_map = _project_map({task.project_id for task in tasks}, username)
+    result = []
+    for task in tasks:
+        data = task.to_dict(include_detail=True)
+        data["project"] = _project_brief(project_map.get(task.project_id))
+        result.append(data)
+    return result
+
+
+def serialize_task(task: ToBellTask, username: str) -> dict[str, Any]:
+    data = task.to_dict(include_detail=True)
+    project = None
+    if task.project_id:
+        project = _project_map({task.project_id}, username).get(task.project_id)
+    data["project"] = _project_brief(project)
+    return data
+
+
+# ===== 確認 / 承認 / 差戻しワークフロー =====
+
+def request_review(task: ToBellTask, actor: str) -> ToBellTask:
+    if not task.reviewer_id:
+        raise ToBellInputError("reviewer_id", "確認者を指定してから確認を依頼してください。")
+    task.status = "review"
+    task.completed_at = None
+    task.updated_at = datetime.utcnow()
+    _notify(
+        [task.reviewer_id],
+        task,
+        event_type="review_request",
+        title=f"確認依頼: {task.title}",
+        body=f"{actor} さんが確認を依頼しました。",
+        severity="warning",
+        actor=actor,
+    )
+    db.session.commit()
+    return task
+
+
+def approve_task(task: ToBellTask, actor: str) -> ToBellTask:
+    _ensure_reviewer_or_owner(task, actor)
+    task.status = "done"
+    task.completed_at = datetime.utcnow()
+    task.updated_at = datetime.utcnow()
+    for notification in task.notifications:
+        notification.is_resolved = True
+        notification.resolved_at = datetime.utcnow()
+    _notify(
+        [task.created_by, task.assigned_to or ""],
+        task,
+        event_type="review_approved",
+        title=f"承認: {task.title}",
+        body=f"{actor} さんが承認しました。",
+        severity="info",
+        actor=actor,
+    )
+    db.session.commit()
+    return task
+
+
+def return_task(task: ToBellTask, actor: str, comment: str = "") -> ToBellTask:
+    _ensure_reviewer_or_owner(task, actor)
+    task.status = "returned"
+    task.completed_at = None
+    task.updated_at = datetime.utcnow()
+    body = (comment or "").strip()
+    if body:
+        db.session.add(ToBellComment(task=task, body=body[:2000], created_by=actor))
+    _notify(
+        [task.assigned_to or "", task.created_by],
+        task,
+        event_type="review_returned",
+        title=f"差戻し: {task.title}",
+        body=body[:300] or f"{actor} さんが差し戻しました。",
+        severity="danger",
+        actor=actor,
+    )
+    db.session.commit()
+    return task
+
+
+# ===== プロジェクト =====
+
+def list_projects(username: str, *, include_archived: bool = False) -> list[dict[str, Any]]:
+    office_id = _user_office_id(username)
+    query = ToBellProject.query.filter(_project_visible_filter(username, office_id))
+    if not include_archived:
+        query = query.filter(ToBellProject.status != "archived")
+    projects = query.order_by(ToBellProject.status, ToBellProject.name).all()
+    result = []
+    for project in projects:
+        total = ToBellTask.query.filter(
+            ToBellTask.project_id == project.id, ToBellTask.status != "archived"
+        ).count()
+        open_count = ToBellTask.query.filter(
+            ToBellTask.project_id == project.id,
+            ToBellTask.status.notin_(["done", "archived"]),
+        ).count()
+        result.append(project.to_dict(task_count=total, open_count=open_count))
+    return result
+
+
+def get_project_for_user(project_id: int, username: str) -> ToBellProject:
+    project = db.session.get(ToBellProject, project_id)
+    if project is None or not project_visible_to(project, username):
+        raise ToBellInputError("project", "プロジェクトが見つかりません。")
+    return project
+
+
+def create_project(username: str, payload: dict[str, Any]) -> ToBellProject:
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise ToBellInputError("name", "プロジェクト名を入力してください。")
+    project = ToBellProject(
+        name=name[:160],
+        description=str(payload.get("description") or "").strip(),
+        status=_choice(payload.get("status"), VALID_PROJECT_STATUSES, "active"),
+        color=_safe_color(payload.get("color"), "#2563eb"),
+        owner_id=username,
+        visibility_scope=_choice(payload.get("visibility_scope"), VALID_SCOPES, "office"),
+        office_id=_user_office_id(username),
+    )
+    db.session.add(project)
+    db.session.commit()
+    return project
+
+
+def update_project(project: ToBellProject, username: str, payload: dict[str, Any]) -> ToBellProject:
+    if project.owner_id != username and not _is_admin(username):
+        raise ToBellInputError("project", "このプロジェクトを編集できるのは作成者のみです。")
+    if "name" in payload:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise ToBellInputError("name", "プロジェクト名を入力してください。")
+        project.name = name[:160]
+    if "description" in payload:
+        project.description = str(payload.get("description") or "").strip()
+    if "status" in payload:
+        project.status = _choice(payload.get("status"), VALID_PROJECT_STATUSES, project.status)
+    if "color" in payload:
+        project.color = _safe_color(payload.get("color"), project.color)
+    if "visibility_scope" in payload:
+        project.visibility_scope = _choice(payload.get("visibility_scope"), VALID_SCOPES, project.visibility_scope)
+    project.updated_at = datetime.utcnow()
+    db.session.commit()
+    return project
+
+
+def delete_project(project: ToBellProject, username: str) -> None:
+    if project.owner_id != username and not _is_admin(username):
+        raise ToBellInputError("project", "このプロジェクトを削除できるのは作成者のみです。")
+    ToBellTask.query.filter_by(project_id=project.id).update({"project_id": None})
+    db.session.delete(project)
+    db.session.commit()
+
+
+# ===== 添付ファイル =====
+
+def add_attachment(task: ToBellTask, username: str, file_storage) -> ToBellAttachment:
+    if file_storage is None or not getattr(file_storage, "filename", ""):
+        raise ToBellInputError("file", "ファイルを選択してください。")
+    raw_name = file_storage.filename
+    file_storage.stream.seek(0, os.SEEK_END)
+    size = file_storage.stream.tell()
+    file_storage.stream.seek(0)
+    if size <= 0:
+        raise ToBellInputError("file", "空のファイルは添付できません。")
+    if size > ATTACHMENT_MAX_BYTES:
+        raise ToBellInputError("file", "添付できるのは25MBまでです。大きいファイルはFILE POSTを利用してください。")
+    safe = secure_filename(raw_name) or "attachment"
+    stored_name = f"{uuid.uuid4().hex}_{safe}"
+    directory = _attachment_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    stored_path = directory / stored_name
+    file_storage.save(str(stored_path))
+    attachment = ToBellAttachment(
+        task=task,
+        file_name=raw_name[:255],
+        stored_path=str(stored_path),
+        mime_type=(getattr(file_storage, "mimetype", "") or "")[:120],
+        file_size=size,
+        uploaded_by=username,
+    )
+    db.session.add(attachment)
+    db.session.commit()
+    return attachment
+
+
+def get_attachment_for_user(attachment_id: int, username: str) -> ToBellAttachment:
+    attachment = db.session.get(ToBellAttachment, attachment_id)
+    if attachment is None or not task_visible_to(attachment.task, username):
+        raise ToBellInputError("attachment", "添付ファイルが見つかりません。")
+    return attachment
+
+
+def delete_attachment(attachment_id: int, username: str) -> None:
+    attachment = get_attachment_for_user(attachment_id, username)
+    try:
+        path = Path(attachment.stored_path)
+        if path.is_file():
+            path.unlink()
+    except OSError:
+        pass
+    db.session.delete(attachment)
+    db.session.commit()
+
+
+# ===== ユーザー作成テンプレート =====
+
+def list_templates(username: str) -> list[dict[str, Any]]:
+    office_id = _user_office_id(username)
+    condition = ToBellTemplate.owner_id == username
+    if office_id is not None:
+        condition = or_(
+            condition,
+            and_(
+                ToBellTemplate.scope == "office",
+                ToBellTemplate.office_id == office_id,
+                ToBellTemplate.is_hidden.is_(False),
+            ),
+        )
+    rows = ToBellTemplate.query.filter(condition).order_by(ToBellTemplate.name).all()
+    return [row.to_dict() for row in rows]
+
+
+def get_template_for_user(template_id: int, username: str) -> ToBellTemplate:
+    template = db.session.get(ToBellTemplate, template_id)
+    if template is None or not _template_visible_to(template, username):
+        raise ToBellInputError("template", "テンプレートが見つかりません。")
+    return template
+
+
+def create_blank_template(username: str, payload: dict[str, Any]) -> ToBellTemplate:
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise ToBellInputError("name", "テンプレート名を入力してください。")
+    template = ToBellTemplate(
+        name=name[:160],
+        description=str(payload.get("description") or "").strip(),
+        owner_id=username,
+        scope=_choice(payload.get("scope"), VALID_SCOPES, "private"),
+        office_id=_user_office_id(username),
+        payload=_normalize_template_payload(payload.get("payload") or {}),
+    )
+    db.session.add(template)
+    db.session.commit()
+    return template
+
+
+def create_template_from_task(task: ToBellTask, username: str, payload: dict[str, Any]) -> ToBellTemplate:
+    due_in_days = None
+    if task.due_at is not None:
+        due_in_days = max(0, (task.due_at.date() - date.today()).days)
+    template_payload = {
+        "title": task.title,
+        "description": task.description or "",
+        "priority": task.priority,
+        "tags": [tag.name for tag in task.tags],
+        "due_in_days": due_in_days,
+        "subtasks": [subtask.title for subtask in task.subtasks],
+    }
+    name = str(payload.get("name") or "").strip() or task.title
+    template = ToBellTemplate(
+        name=name[:160],
+        description=str(payload.get("description") or "").strip(),
+        owner_id=username,
+        scope=_choice(payload.get("scope"), VALID_SCOPES, "private"),
+        office_id=_user_office_id(username),
+        payload=template_payload,
+    )
+    db.session.add(template)
+    db.session.commit()
+    return template
+
+
+def update_template(template: ToBellTemplate, username: str, payload: dict[str, Any]) -> ToBellTemplate:
+    is_owner = template.owner_id == username
+    if not is_owner and not _is_admin(username):
+        raise ToBellInputError("template", "このテンプレートを編集できるのは作成者のみです。")
+    if "name" in payload and is_owner:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise ToBellInputError("name", "テンプレート名を入力してください。")
+        template.name = name[:160]
+    if "description" in payload and is_owner:
+        template.description = str(payload.get("description") or "").strip()
+    if "scope" in payload and is_owner:
+        template.scope = _choice(payload.get("scope"), VALID_SCOPES, template.scope)
+    if "payload" in payload and is_owner:
+        template.payload = _normalize_template_payload(payload.get("payload") or {})
+    if "is_hidden" in payload:
+        # 所属共有テンプレートは管理者が非表示にできる。
+        template.is_hidden = bool(payload.get("is_hidden"))
+    template.updated_at = datetime.utcnow()
+    db.session.commit()
+    return template
+
+
+def delete_template(template: ToBellTemplate, username: str) -> None:
+    if template.owner_id != username and not _is_admin(username):
+        raise ToBellInputError("template", "このテンプレートを削除できるのは作成者のみです。")
+    db.session.delete(template)
+    db.session.commit()
+
+
+def instantiate_template(template: ToBellTemplate, username: str, payload: dict[str, Any]) -> ToBellTask:
+    tpl = template.payload if isinstance(template.payload, dict) else {}
+    title = str(payload.get("title") or tpl.get("title") or "").strip() or template.name
+    due_at = None
+    if payload.get("due_at") or payload.get("due_date") or payload.get("due_time"):
+        due_at = resolve_due_at(payload)
+    elif tpl.get("due_in_days") is not None:
+        due_at = datetime.combine(
+            date.today() + timedelta(days=int(tpl.get("due_in_days") or 0)),
+            time.max.replace(microsecond=0),
+        )
+    task = ToBellTask(
+        title=title[:240],
+        description=str(tpl.get("description") or "").strip(),
+        status="todo",
+        priority=_choice(tpl.get("priority"), VALID_PRIORITIES, "normal"),
+        due_at=due_at,
+        created_by=username,
+        assigned_to=_coerce_same_office_user(username, payload.get("assigned_to") or username, "assigned_to"),
+        project_id=_coerce_project(username, payload.get("project_id")),
+    )
+    db.session.add(task)
+    db.session.flush()
+    for index, sub_title in enumerate(tpl.get("subtasks") or []):
+        clean = str(sub_title or "").strip()
+        if clean:
+            db.session.add(ToBellSubtask(task=task, title=clean[:240], sort_order=index))
+    _sync_tags(task, tpl.get("tags"), username)
+    _create_assignment_notification(task, username)
+    db.session.commit()
+    return task
+
+
 def _get_notification(notification_id: int, username: str) -> ToBellNotification:
     notification = db.session.get(ToBellNotification, notification_id)
     if notification is None or notification.user_id != username:
@@ -523,6 +890,157 @@ def _sync_tags(task: ToBellTask, raw_tags: Any, username: str) -> None:
             db.session.add(tag)
         tags.append(tag)
     task.tags = tags
+
+
+def _safe_int(value: Any) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number or None
+
+
+def _safe_color(value: Any, default: str) -> str:
+    raw = str(value or "").strip()
+    if len(raw) == 7 and raw.startswith("#") and all(ch in "0123456789abcdefABCDEF" for ch in raw[1:]):
+        return raw
+    return default
+
+
+def _user_office_id(username: str) -> int | None:
+    actor = User.query.filter_by(username=username).first()
+    return actor.office_id if actor else None
+
+
+def _is_admin(username: str) -> bool:
+    actor = User.query.filter_by(username=username).first()
+    return bool(actor and actor.is_admin)
+
+
+def project_visible_to(project: ToBellProject, username: str) -> bool:
+    if project.owner_id == username:
+        return True
+    if project.visibility_scope == "office":
+        office_id = _user_office_id(username)
+        return office_id is not None and office_id == project.office_id
+    return False
+
+
+def _project_visible_filter(username: str, office_id: int | None):
+    condition = ToBellProject.owner_id == username
+    if office_id is not None:
+        condition = or_(
+            condition,
+            and_(ToBellProject.visibility_scope == "office", ToBellProject.office_id == office_id),
+        )
+    return condition
+
+
+def _coerce_project(username: str, value: Any) -> int | None:
+    pid = _safe_int(value)
+    if pid is None:
+        return None
+    project = db.session.get(ToBellProject, pid)
+    if project is None or not project_visible_to(project, username):
+        raise ToBellInputError("project_id", "指定したプロジェクトを利用できません。")
+    return pid
+
+
+def _project_map(project_ids, username: str) -> dict[int, ToBellProject]:
+    ids = {pid for pid in project_ids if pid}
+    if not ids:
+        return {}
+    rows = ToBellProject.query.filter(ToBellProject.id.in_(ids)).all()
+    return {project.id: project for project in rows if project_visible_to(project, username)}
+
+
+def _project_brief(project: ToBellProject | None) -> dict[str, Any] | None:
+    if project is None:
+        return None
+    return {"id": project.id, "name": project.name, "color": project.color}
+
+
+def _template_visible_to(template: ToBellTemplate, username: str) -> bool:
+    if template.owner_id == username:
+        return True
+    if template.scope == "office" and not template.is_hidden:
+        office_id = _user_office_id(username)
+        return office_id is not None and office_id == template.office_id
+    return False
+
+
+def _normalize_template_payload(raw: Any) -> dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    tags = data.get("tags")
+    if isinstance(tags, str):
+        tags = [item.strip() for item in tags.replace("、", ",").split(",") if item.strip()]
+    elif isinstance(tags, list):
+        tags = [str(item).strip() for item in tags if str(item).strip()]
+    else:
+        tags = []
+    subtasks = data.get("subtasks")
+    if isinstance(subtasks, list):
+        subtasks = [str(item).strip() for item in subtasks if str(item).strip()]
+    else:
+        subtasks = []
+    due_in_days = data.get("due_in_days")
+    try:
+        due_in_days = int(due_in_days) if due_in_days not in (None, "") else None
+    except (TypeError, ValueError):
+        due_in_days = None
+    return {
+        "title": str(data.get("title") or "").strip()[:240],
+        "description": str(data.get("description") or "").strip(),
+        "priority": _choice(data.get("priority"), VALID_PRIORITIES, "normal"),
+        "tags": tags[:8],
+        "due_in_days": due_in_days,
+        "subtasks": subtasks[:20],
+    }
+
+
+def _attachment_dir() -> Path:
+    from flask import current_app
+
+    override = current_app.config.get("TO_BELL_ATTACHMENT_DIR")
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parents[2] / "var" / "to_bell" / "attachments"
+
+
+def _ensure_reviewer_or_owner(task: ToBellTask, actor: str) -> None:
+    if actor not in {task.reviewer_id or "", task.created_by} and not _is_admin(actor):
+        raise ToBellInputError("review", "承認・差戻しは確認者または作成者のみ行えます。")
+
+
+def _notify(
+    targets,
+    task: ToBellTask,
+    *,
+    event_type: str,
+    title: str,
+    body: str,
+    severity: str,
+    actor: str,
+) -> None:
+    allowed = _same_office_usernames(actor)
+    seen = set()
+    for target in targets:
+        target = (target or "").strip()
+        if not target or target == actor or target in seen or target not in allowed:
+            continue
+        seen.add(target)
+        db.session.add(
+            ToBellNotification(
+                user_id=target,
+                task=task,
+                source_tool="to_bell",
+                event_type=event_type,
+                title=title[:240],
+                body=body[:300],
+                href=f"/tools/to_bell?task={task.id}",
+                severity=severity,
+            )
+        )
 
 
 def _create_assignment_notification(task: ToBellTask, actor: str) -> None:
