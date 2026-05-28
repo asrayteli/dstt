@@ -623,10 +623,37 @@ def test_to_bell_kanban_board_and_pages_render(app_ctx):
     assert 'data-view="kanban"' in pc_page
     assert 'id="tb-templates"' in pc_page
     assert 'id="tb-project-list"' in pc_page
+    # ビューワは両ページで提供する
+    assert 'id="tb-viewer"' in pc_page
+    assert 'data-viewer-close' in pc_page
+    assert 'data-viewer-zoom="1"' in pc_page
 
     pwa_page = client.get("/tools/to_bell/pwa").get_data(as_text=True)
     assert 'id="tb-project-bar"' in pwa_page
     assert 'tobell-views-pwa' in pwa_page
+    assert 'id="tb-viewer"' in pwa_page
+    assert 'data-viewer-close' in pwa_page
+
+
+def test_to_bell_attachment_image_mime_recorded(app_ctx):
+    """画像添付のMIMEが保存され、フロントがプレビュー対象として扱えること。"""
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    task = client.post("/tools/to_bell/api/tasks", json={"title": "画像つき"}).get_json()
+    # 1x1 PNG（実体は最小限）
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+        b"\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    upload = client.post(
+        f"/tools/to_bell/api/tasks/{task['id']}/attachments",
+        data={"file": (io.BytesIO(png_bytes), "shot.png", "image/png")},
+        content_type="multipart/form-data",
+    )
+    assert upload.status_code == 201
+    assert upload.get_json()["mime_type"] == "image/png"
 
 
 def test_share_token_lets_anonymous_user_act_as_owner_on_to_bell_only(app_ctx):

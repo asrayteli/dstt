@@ -44,6 +44,7 @@
     bindViews();
     initProjectModal();
     initTemplateModal();
+    initViewer();
     $("tb-quick-form").addEventListener("submit", createQuickTask);
     const newButton = $("tb-new-task");
     if (newButton) newButton.addEventListener("click", () => $("tb-title").focus());
@@ -646,16 +647,111 @@
     renderMain();
   }
 
+  // ===== 添付ビューワ =====
+
+  const viewer = { scale: 1 };
+
+  function initViewer() {
+    const modal = $("tb-viewer");
+    if (!modal) return;
+    modal.querySelectorAll("[data-viewer-close]").forEach((el) => el.addEventListener("click", closeViewer));
+    modal.querySelectorAll("[data-viewer-zoom]").forEach((el) => {
+      el.addEventListener("click", () => setViewerScale(Number(el.dataset.viewerZoom)));
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !modal.hasAttribute("hidden")) closeViewer();
+    });
+  }
+
+  function viewerKind(attachment) {
+    const mime = (attachment.mime_type || "").toLowerCase();
+    if (mime.startsWith("image/")) return "image";
+    if (mime === "application/pdf") return "pdf";
+    const name = (attachment.file_name || "").toLowerCase();
+    if (/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(name)) return "image";
+    if (/\.pdf$/.test(name)) return "pdf";
+    return null;
+  }
+
+  function openViewer(attachment) {
+    const kind = viewerKind(attachment);
+    if (!kind) {
+      // ビューワ対象外。新規タブでブラウザに任せる。
+      window.open(attachment.href, "_blank", "noopener");
+      return;
+    }
+    viewer.scale = 1;
+    $("tb-viewer-title").textContent = attachment.file_name || "プレビュー";
+    const dl = $("tb-viewer-download");
+    dl.href = attachment.href;
+    dl.setAttribute("download", attachment.file_name || "");
+    const stage = $("tb-viewer-stage");
+    if (kind === "image") {
+      stage.innerHTML = `<img alt="${esc(attachment.file_name || "image")}">`;
+      stage.querySelector("img").src = attachment.href;
+    } else {
+      // PDF: ブラウザ内蔵ビューワを使う。Chrome系は #view=FitH で横幅にフィット。
+      const url = `${attachment.href}#view=FitH`;
+      stage.innerHTML = `<iframe title="${esc(attachment.file_name || "pdf")}"></iframe>`;
+      stage.querySelector("iframe").src = url;
+    }
+    applyViewerScale();
+    $("tb-viewer").removeAttribute("hidden");
+    document.body.classList.add("tb-viewer-active");
+  }
+
+  function closeViewer() {
+    const modal = $("tb-viewer");
+    if (!modal) return;
+    modal.setAttribute("hidden", "");
+    $("tb-viewer-stage").innerHTML = "";
+    document.body.classList.remove("tb-viewer-active");
+  }
+
+  function setViewerScale(delta) {
+    if (delta === 0) {
+      viewer.scale = 1;
+    } else {
+      const next = viewer.scale + delta * 0.25;
+      viewer.scale = Math.max(0.5, Math.min(3, next));
+    }
+    applyViewerScale();
+  }
+
+  function applyViewerScale() {
+    const stage = $("tb-viewer-stage");
+    if (stage) stage.style.transform = `scale(${viewer.scale})`;
+    const pct = $("tb-viewer-pct");
+    if (pct) pct.textContent = `${Math.round(viewer.scale * 100)}%`;
+  }
+
   function renderAttachments(task) {
     const container = $("tb-attachments");
     if (!container) return;
     const rows = task.attachments || [];
-    container.innerHTML = rows.length ? rows.map((item) => `
+    if (!rows.length) {
+      container.innerHTML = '<div class="tobell-empty">添付はありません。</div>';
+      return;
+    }
+    container.innerHTML = rows.map((item) => {
+      const previewable = viewerKind(item) ? '1' : '';
+      return `
       <div class="tobell-attachment">
-        <a href="${item.href}" class="tobell-attachment-link" target="_blank" rel="noopener">${esc(item.file_name)}</a>
+        <a href="${item.href}" class="tobell-attachment-link" data-attachment-id="${item.id}" data-viewable="${previewable}" target="_blank" rel="noopener">${esc(item.file_name)}</a>
         <span class="tobell-attachment-size">${formatFileSize(item.file_size)}</span>
         <button type="button" class="tobell-subtask-delete" data-attachment-delete="${item.id}" aria-label="削除">×</button>
-      </div>`).join("") : '<div class="tobell-empty">添付はありません。</div>';
+      </div>`;
+    }).join("");
+    container.querySelectorAll("[data-attachment-id]").forEach((link) => {
+      link.addEventListener("click", (event) => {
+        const id = Number(link.dataset.attachmentId);
+        const att = rows.find((row) => row.id === id);
+        if (att && viewerKind(att)) {
+          event.preventDefault();
+          openViewer(att);
+        }
+      });
+    });
     container.querySelectorAll("[data-attachment-delete]").forEach((button) => {
       button.addEventListener("click", async () => {
         if (!window.confirm("この添付を削除しますか？")) return;
