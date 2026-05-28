@@ -613,11 +613,14 @@ def _require_link_permission(integration_key: str) -> None:
 
 
 def _ensure_target_exists(target_type: str, target_id: int) -> None:
-    if target_type == "project":
-        get_project_for_user(target_id, current_user.username)
-    elif target_type == "task":
-        get_task_for_user(target_id, current_user.username)
-    else:
+    try:
+        if target_type == "project":
+            get_project_for_user(target_id, current_user.username)
+        elif target_type == "task":
+            get_task_for_user(target_id, current_user.username)
+        else:
+            abort(404)
+    except ToBellInputError:
         abort(404)
 
 
@@ -722,16 +725,19 @@ def api_filepost_upload():
     except (TypeError, ValueError):
         abort(400)
 
-    if target_type == "task":
-        if not integration_is_enabled(current_user.username, "filepost.attachment_overflow"):
-            abort(403, description="添付オーバー連携が無効です。")
-        get_task_for_user(target_id, current_user.username)
-    elif target_type == "project":
-        if not integration_is_enabled(current_user.username, "filepost.project_files"):
-            abort(403, description="プロジェクトFILEPOST連携が無効です。")
-        get_project_for_user(target_id, current_user.username)
-    else:
-        abort(400)
+    try:
+        if target_type == "task":
+            if not integration_is_enabled(current_user.username, "filepost.attachment_overflow"):
+                abort(403, description="添付オーバー連携が無効です。")
+            get_task_for_user(target_id, current_user.username)
+        elif target_type == "project":
+            if not integration_is_enabled(current_user.username, "filepost.project_files"):
+                abort(403, description="プロジェクトFILEPOST連携が無効です。")
+            get_project_for_user(target_id, current_user.username)
+        else:
+            abort(400)
+    except ToBellInputError:
+        abort(404)
 
     file_storage = request.files.get("file")
     if file_storage is None or not file_storage.filename:
@@ -771,12 +777,15 @@ def api_filepost_files_list():
         target_id = int(request.args.get("target_id") or 0)
     except (TypeError, ValueError):
         abort(400)
-    if target_type == "task":
-        get_task_for_user(target_id, current_user.username)
-    elif target_type == "project":
-        get_project_for_user(target_id, current_user.username)
-    else:
-        abort(400)
+    try:
+        if target_type == "task":
+            get_task_for_user(target_id, current_user.username)
+        elif target_type == "project":
+            get_project_for_user(target_id, current_user.username)
+        else:
+            abort(400)
+    except ToBellInputError:
+        abort(404)
     return jsonify({"files": list_external_files(target_type, target_id)})
 
 
