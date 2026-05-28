@@ -129,6 +129,10 @@
       </label>
     </div>
     <label>タグ<input name="tags" placeholder="カンマ区切り"></label>
+    <label class="tobell-check-line">
+      <input type="checkbox" name="pinned">
+      <span>📌 先頭に常に表示する（ピン留め）</span>
+    </label>
     <div class="tobell-detail-actions">
       <button type="submit" class="tobell-btn tobell-btn-primary">保存</button>
       <button type="button" class="tobell-btn" data-action="complete">完了</button>
@@ -201,7 +205,7 @@
       <h2 id="tb-devices-title">通知先</h2>
       <button type="button" class="tobell-btn" data-devices-close aria-label="閉じる">×</button>
     </div>
-    <p class="tobell-share-note">現在のDSTTアカウントに登録されている通知先です。名称変更と無効化はPC版からのみ行えます。</p>
+    <p class="tobell-share-note">現在のDSTTアカウントに登録されている通知先です。名称変更・無効化・削除ができます。</p>
     <div id="tb-devices-list" class="tobell-devices-list"></div>
   </div>
 </div>

@@ -26,6 +26,7 @@
       <span class="tobell-notify-status" id="tb-notify-status" data-tone="idle">通知: 未設定</span>
       <button type="button" class="tobell-btn" id="tb-reload" hidden>リロード</button>
       <button type="button" class="tobell-btn" id="tb-templates">テンプレート</button>
+      <button type="button" class="tobell-btn" id="tb-projects-manage">プロジェクト</button>
       <button type="button" class="tobell-btn" id="tb-enable-push-notify">通知を有効化</button>
       <button type="button" class="tobell-btn" id="tb-push-devices">通知先</button>
       <button type="button" class="tobell-btn" id="tb-read-all">通知を既読</button>
@@ -126,6 +127,10 @@
       </label>
     </div>
     <label>タグ<input name="tags" placeholder="カンマ区切り"></label>
+    <label class="tobell-check-line">
+      <input type="checkbox" name="pinned">
+      <span>📌 先頭に常に表示する（ピン留め）</span>
+    </label>
     <div class="tobell-detail-actions">
       <button type="submit" class="tobell-btn tobell-btn-primary">保存</button>
       <button type="button" class="tobell-btn" data-action="complete">完了</button>
@@ -168,8 +173,23 @@
       <h2 id="tb-devices-title">通知先</h2>
       <button type="button" class="tobell-btn" data-devices-close aria-label="閉じる">×</button>
     </div>
-    <p class="tobell-share-note">現在のDSTTアカウントに登録されている通知先です。名称変更と無効化はPC版からのみ行えます。</p>
+    <p class="tobell-share-note">現在のDSTTアカウントに登録されている通知先です。名称変更・無効化・削除ができます。</p>
     <div id="tb-devices-list" class="tobell-devices-list"></div>
+  </div>
+</div>
+
+<div id="tb-projects-modal" class="tobell-modal" hidden>
+  <div class="tobell-modal-backdrop" data-projects-close></div>
+  <div class="tobell-modal-card" role="dialog" aria-modal="true" aria-labelledby="tb-projects-title">
+    <div class="tobell-modal-head">
+      <h2 id="tb-projects-title">プロジェクト一覧</h2>
+      <button type="button" class="tobell-btn" data-projects-close aria-label="閉じる">×</button>
+    </div>
+    <p class="tobell-share-note">タップで絞り込み、歯車で編集、＋で新規作成。</p>
+    <div id="tb-projects-modal-list" class="tobell-project-list"></div>
+    <div class="tobell-share-actions">
+      <button type="button" class="tobell-btn tobell-btn-primary" id="tb-projects-modal-create">＋ 新規作成</button>
+    </div>
   </div>
 </div>
 
@@ -186,12 +206,41 @@
       <label>メモ<textarea name="description" rows="2"></textarea></label>
       <div class="tobell-detail-grid">
         <label>色<input name="color" type="color" value="#2563eb"></label>
+        <label>状態
+          <select name="status">
+            <option value="active">進行中</option>
+            <option value="done">完了</option>
+            <option value="archived">アーカイブ</option>
+          </select>
+        </label>
         <label>公開範囲
           <select name="visibility_scope">
             <option value="office">所属内で共有</option>
             <option value="private">自分だけ</option>
+            <option value="members">指定メンバーのみ</option>
           </select>
         </label>
+      </div>
+      <label class="tobell-check-line">
+        <input type="checkbox" name="pinned">
+        <span>先頭にピン留めする</span>
+      </label>
+      <label class="tobell-check-line">
+        <input type="checkbox" name="calendar_only">
+        <span>リスト・カンバンに表示しない（カレンダーのみ表示）</span>
+      </label>
+      <div id="tb-project-members-row" class="tobell-members-row" hidden>
+        <div class="tobell-panel-title">メンバー</div>
+        <p class="tobell-share-note">同じ営業所のユーザーから、このプロジェクトを共有する相手を選びます。</p>
+        <div id="tb-project-members-chips" class="tobell-members-chips"></div>
+        <div class="tobell-inline-form">
+          <select id="tb-project-members-pick">
+            <option value="">+ メンバーを追加</option>
+            {% for user in users %}
+            <option value="{{ user.username }}">{{ user.name or user.username }}</option>
+            {% endfor %}
+          </select>
+        </div>
       </div>
       <div class="tobell-share-actions">
         <button type="submit" class="tobell-btn tobell-btn-primary">保存</button>

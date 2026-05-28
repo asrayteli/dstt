@@ -68,6 +68,19 @@ self.addEventListener("push", (event) => {
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
+self.addEventListener("message", (event) => {
+  if (!event.data || event.data.type !== "tobell-clear-caches") return;
+  event.waitUntil(
+    caches.keys().then(function (names) {
+      return Promise.all(names.map(function (name) { return caches.delete(name); }));
+    }).then(function () {
+      if (event.ports && event.ports[0]) {
+        try { event.ports[0].postMessage({ ok: true }); } catch (e) { /* noop */ }
+      }
+    })
+  );
+});
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = event.notification.data && event.notification.data.url
