@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import sys
 from pathlib import Path
 
@@ -23,6 +24,7 @@ def app_ctx(tmp_path, monkeypatch):
             "SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path}",
             "TESTING": True,
             "SECRET_KEY": "test-secret",
+            "TO_BELL_ATTACHMENT_DIR": str(tmp_path / "attachments"),
         }
     )
     with app.app_context():
@@ -459,6 +461,172 @@ def test_send_due_task_pushes_without_subscription_is_not_retried(app_ctx, monke
         assert result["skipped"] == 1
         delivery = ToBellPushDelivery.query.filter_by(user_id="alice").one()
         assert delivery.status == "skipped"
+
+
+def test_to_bell_project_crud_and_task_assignment(app_ctx):
+    office_id = _create_office(app_ctx, "proj")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    created = client.post("/tools/to_bell/api/projects", json={"name": "月次作業", "color": "#22c55e"})
+    assert created.status_code == 201
+    project = created.get_json()
+    assert project["name"] == "月次作業"
+
+    task = client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "請求書を確認", "project_id": project["id"]},
+    ).get_json()
+    assert task["project"]["id"] == project["id"]
+    assert task["project"]["name"] == "月次作業"
+
+    projects = client.get("/tools/to_bell/api/projects").get_json()["projects"]
+    assert projects[0]["open_count"] == 1
+
+    # 更新と削除（削除してもタスクは残り、紐付けだけ外れる）
+    renamed = client.put(f"/tools/to_bell/api/projects/{project['id']}", json={"name": "月次処理"})
+    assert renamed.get_json()["name"] == "月次処理"
+
+    assert client.delete(f"/tools/to_bell/api/projects/{project['id']}").status_code == 200
+    detail = client.get(f"/tools/to_bell/api/tasks/{task['id']}").get_json()
+    assert detail["project"] is None
+    assert detail["project_id"] is None
+
+
+def test_to_bell_project_not_visible_to_other_office(app_ctx):
+    office_a = _create_office(app_ctx, "alpha")
+    office_b = _create_office(app_ctx, "beta")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_a)
+    _create_user(app_ctx, "carol", "Carol", office_id=office_b)
+
+    alice = app_ctx.test_client()
+    _login(alice, "alice")
+    project = alice.post("/tools/to_bell/api/projects", json={"name": "営業所内のみ"}).get_json()
+
+    carol = app_ctx.test_client()
+    _login(carol, "carol")
+    assert carol.get("/tools/to_bell/api/projects").get_json()["projects"] == []
+    # 別営業所のプロジェクトには紐付けられない
+    rejected = carol.post("/tools/to_bell/api/tasks", json={"title": "不可", "project_id": project["id"]})
+    assert rejected.status_code == 400
+
+
+def test_to_bell_template_from_task_and_instantiate(app_ctx):
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    task = client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "毎月の手順", "priority": "high", "tags": "月次"},
+    ).get_json()
+    client.post(f"/tools/to_bell/api/tasks/{task['id']}/subtasks", json={"title": "手順1"})
+    client.post(f"/tools/to_bell/api/tasks/{task['id']}/subtasks", json={"title": "手順2"})
+
+    template = client.post(
+        f"/tools/to_bell/api/tasks/{task['id']}/template",
+        json={"name": "月次テンプレ"},
+    )
+    assert template.status_code == 201
+    template_id = template.get_json()["id"]
+    assert template.get_json()["subtask_count"] == 2
+
+    templates = client.get("/tools/to_bell/api/templates").get_json()["templates"]
+    assert any(item["id"] == template_id for item in templates)
+
+    instance = client.post(f"/tools/to_bell/api/templates/{template_id}/instantiate")
+    assert instance.status_code == 201
+    new_task = instance.get_json()
+    assert new_task["title"] == "毎月の手順"
+    assert new_task["priority"] == "high"
+    assert len(new_task["subtasks"]) == 2
+
+    assert client.delete(f"/tools/to_bell/api/templates/{template_id}").status_code == 200
+    assert client.get("/tools/to_bell/api/templates").get_json()["templates"] == []
+
+
+def test_to_bell_blank_template_create_and_instantiate(app_ctx):
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    template = client.post("/tools/to_bell/api/templates", json={"name": "空テンプレ"})
+    assert template.status_code == 201
+    instance = client.post(
+        f"/tools/to_bell/api/templates/{template.get_json()['id']}/instantiate",
+        json={"title": "上書きタイトル"},
+    )
+    assert instance.status_code == 201
+    assert instance.get_json()["title"] == "上書きタイトル"
+
+
+def test_to_bell_attachment_upload_download_delete(app_ctx):
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    task = client.post("/tools/to_bell/api/tasks", json={"title": "添付つき"}).get_json()
+
+    upload = client.post(
+        f"/tools/to_bell/api/tasks/{task['id']}/attachments",
+        data={"file": (io.BytesIO(b"hello to bell"), "memo.txt")},
+        content_type="multipart/form-data",
+    )
+    assert upload.status_code == 201
+    attachment = upload.get_json()
+    assert attachment["file_name"] == "memo.txt"
+    assert attachment["file_size"] == len(b"hello to bell")
+
+    detail = client.get(f"/tools/to_bell/api/tasks/{task['id']}").get_json()
+    assert len(detail["attachments"]) == 1
+
+    download = client.get(f"/tools/to_bell/api/attachments/{attachment['id']}")
+    assert download.status_code == 200
+    assert download.data == b"hello to bell"
+
+    assert client.delete(f"/tools/to_bell/api/attachments/{attachment['id']}").status_code == 200
+    detail = client.get(f"/tools/to_bell/api/tasks/{task['id']}").get_json()
+    assert detail["attachments"] == []
+
+
+def test_to_bell_attachment_not_visible_to_outsider(app_ctx):
+    office_id = _create_office(app_ctx, "att")
+    other_office = _create_office(app_ctx, "att-out")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    _create_user(app_ctx, "mallory", "Mallory", office_id=other_office)
+
+    alice = app_ctx.test_client()
+    _login(alice, "alice")
+    task = alice.post("/tools/to_bell/api/tasks", json={"title": "機密添付"}).get_json()
+    attachment = alice.post(
+        f"/tools/to_bell/api/tasks/{task['id']}/attachments",
+        data={"file": (io.BytesIO(b"secret"), "secret.txt")},
+        content_type="multipart/form-data",
+    ).get_json()
+
+    mallory = app_ctx.test_client()
+    _login(mallory, "mallory")
+    assert mallory.get(f"/tools/to_bell/api/attachments/{attachment['id']}").status_code == 404
+
+
+def test_to_bell_kanban_board_and_pages_render(app_ctx):
+    _create_user(app_ctx, "alice", "Alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    client.post("/tools/to_bell/api/tasks", json={"title": "未着手タスク"})
+    board = client.get("/tools/to_bell/api/tasks?filter=board").get_json()["tasks"]
+    assert any(task["title"] == "未着手タスク" for task in board)
+
+    pc_page = client.get("/tools/to_bell/").get_data(as_text=True)
+    assert 'data-view="kanban"' in pc_page
+    assert 'id="tb-templates"' in pc_page
+    assert 'id="tb-project-list"' in pc_page
+
+    pwa_page = client.get("/tools/to_bell/pwa").get_data(as_text=True)
+    assert 'id="tb-project-bar"' in pwa_page
+    assert 'tobell-views-pwa' in pwa_page
 
 
 def test_share_token_lets_anonymous_user_act_as_owner_on_to_bell_only(app_ctx):

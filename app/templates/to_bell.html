@@ -21,6 +21,7 @@
       <span class="tobell-notify-status" id="tb-notify-status" data-tone="idle">通知: 未設定</span>
       <button type="button" class="tobell-btn" id="tb-reload" hidden>リロード</button>
       <button type="button" class="tobell-btn tobell-btn-primary tobell-pc-only" id="tb-new-task">新規</button>
+      <button type="button" class="tobell-btn" id="tb-templates">テンプレート</button>
       <button type="button" class="tobell-btn" id="tb-enable-push-notify">通知を有効化</button>
       <button type="button" class="tobell-btn" id="tb-push-devices">通知先</button>
       <button type="button" class="tobell-btn tobell-pc-only" id="tb-open-notifier">待受ウィンドウ</button>
@@ -59,6 +60,13 @@
       <div class="tobell-search">
         <input id="tb-search" type="search" placeholder="検索">
       </div>
+      <section class="tobell-projects tobell-pc-only">
+        <div class="tobell-panel-title tobell-projects-head">
+          <span>プロジェクト</span>
+          <button type="button" class="tobell-project-add" id="tb-new-project" aria-label="プロジェクトを追加">＋</button>
+        </div>
+        <div id="tb-project-list" class="tobell-project-list"></div>
+      </section>
       <section class="tobell-notifications tobell-pc-only">
         <div class="tobell-panel-title">通知</div>
         <div id="tb-notifications"></div>
@@ -66,6 +74,11 @@
     </aside>
 
     <div class="tobell-main">
+      <div class="tobell-views" id="tb-views" role="tablist" aria-label="表示切り替え">
+        <button type="button" class="tobell-view-btn is-active" data-view="list">リスト</button>
+        <button type="button" class="tobell-view-btn" data-view="kanban">カンバン</button>
+        <button type="button" class="tobell-view-btn" data-view="calendar">カレンダー</button>
+      </div>
       <div id="tb-summary" class="tobell-summary"></div>
       <div id="tb-task-list" class="tobell-task-list"></div>
     </div>
@@ -109,16 +122,30 @@
           {% endfor %}
         </select>
       </label>
+      <label>プロジェクト
+        <select name="project_id" data-project-select>
+          <option value="">なし</option>
+        </select>
+      </label>
     </div>
     <label>タグ<input name="tags" placeholder="カンマ区切り"></label>
     <div class="tobell-detail-actions">
       <button type="submit" class="tobell-btn tobell-btn-primary">保存</button>
       <button type="button" class="tobell-btn" data-action="complete">完了</button>
       <button type="button" class="tobell-btn" data-action="reopen">戻す</button>
+      <button type="button" class="tobell-btn" data-action="template">テンプレ化</button>
       <button type="button" class="tobell-btn tobell-danger" data-action="archive">アーカイブ</button>
       <button type="button" class="tobell-btn tobell-danger" data-action="delete">削除</button>
     </div>
   </form>
+  <section class="tobell-section">
+    <div class="tobell-panel-title">添付</div>
+    <form id="tb-attachment-form" class="tobell-inline-form">
+      <input name="file" type="file">
+      <button type="submit" class="tobell-btn">追加</button>
+    </form>
+    <div id="tb-attachments"></div>
+  </section>
   <section class="tobell-section">
     <div class="tobell-panel-title">サブタスク</div>
     <form id="tb-subtask-form" class="tobell-inline-form">
@@ -176,6 +203,50 @@
     </div>
     <p class="tobell-share-note">現在のDSTTアカウントに登録されている通知先です。名称変更と無効化はPC版からのみ行えます。</p>
     <div id="tb-devices-list" class="tobell-devices-list"></div>
+  </div>
+</div>
+
+<div id="tb-project-modal" class="tobell-modal" hidden>
+  <div class="tobell-modal-backdrop" data-project-close></div>
+  <div class="tobell-modal-card" role="dialog" aria-modal="true" aria-labelledby="tb-project-title">
+    <div class="tobell-modal-head">
+      <h2 id="tb-project-title">プロジェクト</h2>
+      <button type="button" class="tobell-btn" data-project-close aria-label="閉じる">×</button>
+    </div>
+    <form id="tb-project-form" class="tobell-modal-form">
+      <input type="hidden" name="id">
+      <label>プロジェクト名<input name="name" required></label>
+      <label>メモ<textarea name="description" rows="2"></textarea></label>
+      <div class="tobell-detail-grid">
+        <label>色<input name="color" type="color" value="#2563eb"></label>
+        <label>公開範囲
+          <select name="visibility_scope">
+            <option value="office">所属内で共有</option>
+            <option value="private">自分だけ</option>
+          </select>
+        </label>
+      </div>
+      <div class="tobell-share-actions">
+        <button type="submit" class="tobell-btn tobell-btn-primary">保存</button>
+        <button type="button" class="tobell-btn tobell-danger" id="tb-project-delete" hidden>削除</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="tb-template-modal" class="tobell-modal" hidden>
+  <div class="tobell-modal-backdrop" data-template-close></div>
+  <div class="tobell-modal-card" role="dialog" aria-modal="true" aria-labelledby="tb-template-title">
+    <div class="tobell-modal-head">
+      <h2 id="tb-template-title">テンプレート</h2>
+      <button type="button" class="tobell-btn" data-template-close aria-label="閉じる">×</button>
+    </div>
+    <p class="tobell-share-note">よく使うタスクをテンプレート化して、ワンタップで作成できます。テンプレートはあなた（または所属内）が作ったものだけです。</p>
+    <div id="tb-template-list" class="tobell-template-list"></div>
+    <form id="tb-template-form" class="tobell-inline-form tobell-template-create">
+      <input name="name" placeholder="空のテンプレートを作成">
+      <button type="submit" class="tobell-btn">作成</button>
+    </form>
   </div>
 </div>
 

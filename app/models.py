@@ -957,6 +957,12 @@ class ToBellTask(db.Model):
         secondary='to_bell_task_tags',
         back_populates='tasks',
     )
+    attachments = db.relationship(
+        'ToBellAttachment',
+        back_populates='task',
+        cascade='all, delete-orphan',
+        order_by='ToBellAttachment.created_at.asc()',
+    )
 
     def progress_percent(self) -> int:
         if self.subtasks:
@@ -992,6 +998,7 @@ class ToBellTask(db.Model):
         if include_detail:
             data['subtasks'] = [item.to_dict() for item in self.subtasks]
             data['comments'] = [item.to_dict() for item in self.comments]
+            data['attachments'] = [item.to_dict() for item in self.attachments]
         return data
 
 
@@ -1159,3 +1166,91 @@ class ToBellShareToken(db.Model):
 
     def is_usable(self) -> bool:
         return not self.is_revoked
+
+
+class ToBellProject(db.Model):
+    """タスクのまとまり。所属内で共有できる。"""
+    __tablename__ = 'to_bell_projects'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.Text, nullable=False, default='')
+    status = db.Column(db.String(24), nullable=False, default='active', index=True)
+    color = db.Column(db.String(20), nullable=False, default='#2563eb')
+    owner_id = db.Column(db.String(80), nullable=False, index=True)
+    visibility_scope = db.Column(db.String(32), nullable=False, default='office')
+    office_id = db.Column(db.Integer, nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def to_dict(self, *, task_count: int | None = None, open_count: int | None = None) -> dict:
+        data = {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description or '',
+            'status': self.status,
+            'color': self.color,
+            'owner_id': self.owner_id,
+            'visibility_scope': self.visibility_scope,
+        }
+        if task_count is not None:
+            data['task_count'] = task_count
+        if open_count is not None:
+            data['open_count'] = open_count
+        return data
+
+
+class ToBellAttachment(db.Model):
+    __tablename__ = 'to_bell_attachments'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    task_id = db.Column(db.Integer, db.ForeignKey('to_bell_tasks.id'), nullable=False, index=True)
+    file_name = db.Column(db.String(255), nullable=False)
+    stored_path = db.Column(db.String(500), nullable=False)
+    mime_type = db.Column(db.String(120), nullable=False, default='')
+    file_size = db.Column(db.Integer, nullable=False, default=0)
+    uploaded_by = db.Column(db.String(80), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    task = db.relationship('ToBellTask', back_populates='attachments')
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'task_id': self.task_id,
+            'file_name': self.file_name,
+            'mime_type': self.mime_type or '',
+            'file_size': int(self.file_size or 0),
+            'uploaded_by': self.uploaded_by,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'href': f'/tools/to_bell/api/attachments/{self.id}',
+        }
+
+
+class ToBellTemplate(db.Model):
+    """ユーザーが作成したテンプレートのみ保存する（サーバー側の業務テンプレートは持たない）。"""
+    __tablename__ = 'to_bell_templates'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.Text, nullable=False, default='')
+    owner_id = db.Column(db.String(80), nullable=False, index=True)
+    scope = db.Column(db.String(32), nullable=False, default='private')
+    office_id = db.Column(db.Integer, nullable=True, index=True)
+    payload = db.Column(db.JSON, nullable=False, default=dict)
+    is_hidden = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        payload = self.payload if isinstance(self.payload, dict) else {}
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description or '',
+            'owner_id': self.owner_id,
+            'scope': self.scope,
+            'is_hidden': bool(self.is_hidden),
+            'subtask_count': len(payload.get('subtasks') or []),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }

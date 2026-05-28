@@ -1,11 +1,26 @@
 (function () {
+  const params0 = new URLSearchParams(window.location.search);
   const state = {
-    filter: new URLSearchParams(window.location.search).get("filter") || "today",
-    selectedTaskId: Number(new URLSearchParams(window.location.search).get("task") || 0),
+    filter: params0.get("filter") || "today",
+    view: params0.get("view") || "list",
+    projectFilter: Number(params0.get("project_id") || 0),
+    selectedTaskId: Number(params0.get("task") || 0),
     tasks: [],
+    projects: [],
+    calMonth: startOfMonth(new Date()),
+    isPwa: document.body.classList.contains("tobell-pwa-mode"),
     swRegistration: null,
     foregroundTimer: 0,
   };
+
+  const KANBAN_COLUMNS = [
+    { key: "todo", label: "未着手" },
+    { key: "doing", label: "進行中" },
+    { key: "blocked", label: "保留" },
+    { key: "review", label: "確認待ち" },
+    { key: "returned", label: "差戻し" },
+    { key: "done", label: "完了" },
+  ];
 
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value || "").replace(/[&<>"']/g, (ch) => ({
@@ -26,9 +41,16 @@
     }
     document.body.classList.add("tobell-page");
     bindFilters();
+    bindViews();
+    initProjectModal();
+    initTemplateModal();
     $("tb-quick-form").addEventListener("submit", createQuickTask);
     const newButton = $("tb-new-task");
     if (newButton) newButton.addEventListener("click", () => $("tb-title").focus());
+    const templatesButton = $("tb-templates");
+    if (templatesButton) templatesButton.addEventListener("click", openTemplateModal);
+    const newProjectButton = $("tb-new-project");
+    if (newProjectButton) newProjectButton.addEventListener("click", () => openProjectModal());
     $("tb-enable-push-notify").addEventListener("click", toggleNotifications);
     const reloadButton = $("tb-reload");
     if (reloadButton && isStandalone()) {
@@ -51,6 +73,8 @@
         closeDetailDom();
       }
     });
+    syncViewButtons();
+    loadProjects().catch(() => {});
     loadTasks().catch(() => {});
     loadNotifications().catch(() => {});
     initNotifications();
@@ -61,24 +85,59 @@
       button.classList.toggle("is-active", button.dataset.filter === state.filter);
       button.addEventListener("click", () => {
         state.filter = button.dataset.filter || "today";
+        state.view = "list";
         state.selectedTaskId = 0;
         closeDetail();
         document.querySelectorAll(".tobell-filter").forEach((item) => item.classList.remove("is-active"));
         button.classList.add("is-active");
+        syncViewButtons();
         loadTasks();
       });
     });
   }
 
+  function bindViews() {
+    document.querySelectorAll(".tobell-view-btn").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.view = button.dataset.view || "list";
+        state.selectedTaskId = 0;
+        closeDetail();
+        syncViewButtons();
+        loadTasks();
+      });
+    });
+  }
+
+  function syncViewButtons() {
+    document.querySelectorAll(".tobell-view-btn").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.view === state.view);
+    });
+  }
+
+  function effectiveFilter() {
+    return state.view === "list" ? state.filter : "board";
+  }
+
   async function loadTasks() {
-    const params = new URLSearchParams({ filter: state.filter, q: $("tb-search").value || "" });
+    const params = new URLSearchParams({ filter: effectiveFilter(), q: $("tb-search").value || "" });
+    if (state.projectFilter) params.set("project_id", String(state.projectFilter));
     const data = await api(`/tools/to_bell/api/tasks?${params.toString()}`);
     state.tasks = data.tasks || [];
     renderSummary(data.summary || {});
-    renderTasks();
+    renderMain();
     if (state.selectedTaskId) {
       const selected = state.tasks.find((task) => task.id === state.selectedTaskId);
       if (selected) renderDetail(selected);
+    }
+  }
+
+  function renderMain() {
+    if (state.view === "kanban") {
+      renderKanban();
+    } else if (state.view === "calendar") {
+      renderCalendar();
+    } else {
+      renderTasks();
     }
   }
 
@@ -88,7 +147,15 @@
       `<span class="tobell-chip">要対応 ${Number(summary.action_count || 0)}件</span>`,
       `<span class="tobell-chip">未読 ${Number(summary.unread_count || 0)}件</span>`,
     ];
+    if (state.projectFilter) {
+      const project = state.projects.find((item) => item.id === state.projectFilter);
+      if (project) {
+        items.push(`<span class="tobell-chip tobell-chip-project"><span class="tobell-dot" style="background:${esc(project.color)}"></span>${esc(project.name)} <button type="button" class="tobell-chip-clear" id="tb-clear-project" aria-label="プロジェクト絞り込み解除">×</button></span>`);
+      }
+    }
     $("tb-summary").innerHTML = items.join("");
+    const clear = $("tb-clear-project");
+    if (clear) clear.addEventListener("click", () => selectProject(0));
   }
 
   function renderTasks() {
@@ -107,6 +174,7 @@
             <h3>${esc(task.title)}</h3>
             <p>${esc(task.description || "メモなし")}</p>
             <p class="tobell-task-meta">${esc(statusLabel(task.status))} / ${esc(due)} / 進捗 ${Number(task.progress || 0)}%</p>
+            ${projectTag(task)}
           </div>
           <span class="tobell-badge ${badgeClass}">${esc(priorityLabel(task.priority))}</span>
         </article>`;
@@ -146,6 +214,409 @@
     });
   }
 
+  function projectTag(task) {
+    if (!task.project) return "";
+    return `<p class="tobell-task-project"><span class="tobell-dot" style="background:${esc(task.project.color)}"></span>${esc(task.project.name)}</p>`;
+  }
+
+  // ===== カンバン =====
+
+  function renderKanban() {
+    const container = $("tb-task-list");
+    const board = document.createElement("div");
+    board.className = "tobell-kanban";
+    KANBAN_COLUMNS.forEach((column) => {
+      const tasks = state.tasks.filter((task) => task.status === column.key);
+      const col = document.createElement("section");
+      col.className = "tobell-kan-col";
+      col.dataset.status = column.key;
+      col.innerHTML = `
+        <header class="tobell-kan-head">${esc(column.label)}<span class="tobell-kan-count">${tasks.length}</span></header>
+        <div class="tobell-kan-cards"></div>`;
+      const cards = col.querySelector(".tobell-kan-cards");
+      if (!tasks.length) {
+        cards.innerHTML = '<div class="tobell-kan-empty">なし</div>';
+      } else {
+        tasks.forEach((task) => cards.appendChild(buildKanbanCard(task)));
+      }
+      if (!state.isPwa) bindColumnDrop(col, column.key);
+      board.appendChild(col);
+    });
+    container.replaceChildren(board);
+  }
+
+  function buildKanbanCard(task) {
+    const card = document.createElement("article");
+    card.className = "tobell-kan-card";
+    card.dataset.taskId = task.id;
+    const overdue = isOverdue(task) ? "danger" : (task.priority === "urgent" ? "danger" : (task.priority === "high" ? "warning" : ""));
+    const due = task.due_at ? formatDueShort(task.due_at) : "";
+    let moveControl = "";
+    if (state.isPwa) {
+      // スマホはドラッグの代わりにネイティブ select で状態を移動する。
+      const options = KANBAN_COLUMNS.map((column) =>
+        `<option value="${column.key}" ${column.key === task.status ? "selected" : ""}>${esc(column.label)}へ</option>`
+      ).join("");
+      moveControl = `<select class="tobell-kan-move" data-move-id="${task.id}" aria-label="状態を移動">${options}</select>`;
+    } else {
+      card.setAttribute("draggable", "true");
+    }
+    card.innerHTML = `
+      <div class="tobell-kan-card-body" data-open-id="${task.id}">
+        <strong>${esc(task.title)}</strong>
+        ${due ? `<span class="tobell-kan-due ${overdue}">${esc(due)}</span>` : ""}
+        ${projectTag(task)}
+      </div>
+      ${moveControl}`;
+    card.querySelector("[data-open-id]").addEventListener("click", () => openTaskById(task.id));
+    const move = card.querySelector("[data-move-id]");
+    if (move) {
+      move.addEventListener("change", () => changeTaskStatus(task.id, move.value));
+      move.addEventListener("click", (event) => event.stopPropagation());
+    }
+    if (!state.isPwa) {
+      card.addEventListener("dragstart", (event) => {
+        event.dataTransfer.setData("text/plain", String(task.id));
+        card.classList.add("is-dragging");
+      });
+      card.addEventListener("dragend", () => card.classList.remove("is-dragging"));
+    }
+    return card;
+  }
+
+  function bindColumnDrop(col, status) {
+    col.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      col.classList.add("is-drop");
+    });
+    col.addEventListener("dragleave", () => col.classList.remove("is-drop"));
+    col.addEventListener("drop", (event) => {
+      event.preventDefault();
+      col.classList.remove("is-drop");
+      const id = Number(event.dataTransfer.getData("text/plain"));
+      if (id) changeTaskStatus(id, status);
+    });
+  }
+
+  async function changeTaskStatus(id, status) {
+    const task = state.tasks.find((item) => item.id === id);
+    if (!task || task.status === status) return;
+    try {
+      await api(`/tools/to_bell/api/tasks/${id}`, { method: "PUT", body: { status } });
+      await loadTasks();
+      showFlash(`「${statusLabel(status)}」に移動しました`, "success");
+    } catch (error) {
+      /* api() がトーストを表示済み */
+    }
+  }
+
+  // ===== カレンダー =====
+
+  function renderCalendar() {
+    const container = $("tb-task-list");
+    const anchor = state.calMonth;
+    const year = anchor.getFullYear();
+    const month = anchor.getMonth();
+    const monthLabel = `${year}年${month + 1}月`;
+    const first = new Date(year, month, 1);
+    const startWeekday = first.getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const byDay = {};
+    let noDue = 0;
+    state.tasks.forEach((task) => {
+      if (!task.due_at) {
+        noDue += 1;
+        return;
+      }
+      const d = new Date(task.due_at);
+      if (d.getFullYear() === year && d.getMonth() === month) {
+        const key = d.getDate();
+        (byDay[key] = byDay[key] || []).push(task);
+      }
+    });
+
+    const todayStr = new Date().toDateString();
+    const cells = [];
+    for (let i = 0; i < startWeekday; i += 1) cells.push('<div class="tobell-cal-cell is-empty"></div>');
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const cellDate = new Date(year, month, day);
+      const isToday = cellDate.toDateString() === todayStr ? "is-today" : "";
+      const tasks = byDay[day] || [];
+      const limit = state.isPwa ? 2 : 4;
+      const chips = tasks.slice(0, limit).map((task) =>
+        `<button type="button" class="tobell-cal-task ${isOverdue(task) ? "danger" : ""}" data-open-id="${task.id}">${esc(task.title)}</button>`
+      ).join("");
+      const more = tasks.length > limit ? `<span class="tobell-cal-more">+${tasks.length - limit}</span>` : "";
+      const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      cells.push(`
+        <div class="tobell-cal-cell ${isToday}">
+          <button type="button" class="tobell-cal-daynum" data-add-date="${iso}" title="この日に追加">${day}</button>
+          <div class="tobell-cal-tasks">${chips}${more}</div>
+        </div>`);
+    }
+
+    const weekdays = ["日", "月", "火", "水", "木", "金", "土"]
+      .map((w) => `<div class="tobell-cal-weekday">${w}</div>`).join("");
+    container.innerHTML = `
+      <div class="tobell-cal-bar">
+        <button type="button" class="tobell-btn" data-cal-nav="-1">‹</button>
+        <strong class="tobell-cal-month">${monthLabel}</strong>
+        <button type="button" class="tobell-btn" data-cal-nav="1">›</button>
+        <button type="button" class="tobell-btn" data-cal-nav="0">今日</button>
+        ${noDue ? `<span class="tobell-chip">期日なし ${noDue}件</span>` : ""}
+      </div>
+      <div class="tobell-cal-grid">${weekdays}${cells.join("")}</div>`;
+
+    container.querySelectorAll("[data-cal-nav]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const delta = Number(button.dataset.calNav);
+        state.calMonth = delta === 0 ? startOfMonth(new Date()) : new Date(year, month + delta, 1);
+        renderCalendar();
+      });
+    });
+    container.querySelectorAll("[data-open-id]").forEach((button) => {
+      button.addEventListener("click", () => openTaskById(Number(button.dataset.openId)));
+    });
+    container.querySelectorAll("[data-add-date]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const input = document.querySelector('#tb-quick-form input[name="due_date"]');
+        if (input) input.value = button.dataset.addDate;
+        const title = $("tb-title");
+        if (title) {
+          title.focus();
+          title.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+        showFlash(`${button.dataset.addDate} の期日でタスクを追加できます`, "info");
+      });
+    });
+  }
+
+  function openTaskById(id) {
+    const task = state.tasks.find((item) => item.id === id);
+    if (task) renderDetail(task);
+  }
+
+  // ===== プロジェクト =====
+
+  async function loadProjects() {
+    try {
+      const data = await api("/tools/to_bell/api/projects");
+      state.projects = data.projects || [];
+    } catch (error) {
+      state.projects = [];
+    }
+    renderProjects();
+  }
+
+  function renderProjects() {
+    const list = $("tb-project-list");
+    if (list) {
+      const rows = state.projects.map((project) => `
+        <div class="tobell-project-row ${project.id === state.projectFilter ? "is-active" : ""}">
+          <button type="button" class="tobell-project-pick" data-project-pick="${project.id}">
+            <span class="tobell-dot" style="background:${esc(project.color)}"></span>
+            <span class="tobell-project-name">${esc(project.name)}</span>
+            <span class="tobell-project-count">${Number(project.open_count || 0)}</span>
+          </button>
+          <button type="button" class="tobell-project-edit" data-project-edit="${project.id}" aria-label="編集">⚙</button>
+        </div>`).join("");
+      list.innerHTML = rows || '<div class="tobell-empty">プロジェクトはありません。</div>';
+      list.querySelectorAll("[data-project-pick]").forEach((button) => {
+        button.addEventListener("click", () => selectProject(Number(button.dataset.projectPick)));
+      });
+      list.querySelectorAll("[data-project-edit]").forEach((button) => {
+        button.addEventListener("click", () => openProjectModal(Number(button.dataset.projectEdit)));
+      });
+    }
+    renderProjectBar();
+  }
+
+  function renderProjectBar() {
+    const bar = $("tb-project-bar");
+    if (!bar) return;
+    const chips = [`<button type="button" class="tobell-pchip ${state.projectFilter ? "" : "is-active"}" data-project-pick="0">すべて</button>`];
+    state.projects.forEach((project) => {
+      chips.push(`<button type="button" class="tobell-pchip ${project.id === state.projectFilter ? "is-active" : ""}" data-project-pick="${project.id}">
+        <span class="tobell-dot" style="background:${esc(project.color)}"></span>${esc(project.name)}</button>`);
+    });
+    chips.push('<button type="button" class="tobell-pchip tobell-pchip-add" id="tb-pchip-add" aria-label="プロジェクトを追加">＋</button>');
+    bar.innerHTML = chips.join("");
+    bar.querySelectorAll("[data-project-pick]").forEach((button) => {
+      button.addEventListener("click", () => selectProject(Number(button.dataset.projectPick)));
+    });
+    const add = $("tb-pchip-add");
+    if (add) add.addEventListener("click", () => openProjectModal());
+  }
+
+  function selectProject(id) {
+    state.projectFilter = id || 0;
+    state.selectedTaskId = 0;
+    closeDetail();
+    renderProjects();
+    loadTasks();
+  }
+
+  function initProjectModal() {
+    const modal = $("tb-project-modal");
+    if (!modal) return;
+    const close = () => modal.setAttribute("hidden", "");
+    modal.querySelectorAll("[data-project-close]").forEach((el) => el.addEventListener("click", close));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !modal.hasAttribute("hidden")) close();
+    });
+    $("tb-project-form").addEventListener("submit", saveProject);
+    $("tb-project-delete").addEventListener("click", deleteProject);
+  }
+
+  function openProjectModal(projectId) {
+    const modal = $("tb-project-modal");
+    if (!modal) return;
+    const form = $("tb-project-form");
+    form.reset();
+    const project = projectId ? state.projects.find((item) => item.id === projectId) : null;
+    form.elements.id.value = project ? project.id : "";
+    if (project) {
+      form.elements.name.value = project.name || "";
+      form.elements.description.value = project.description || "";
+      form.elements.color.value = project.color || "#2563eb";
+      form.elements.visibility_scope.value = project.visibility_scope || "office";
+    } else {
+      form.elements.color.value = "#2563eb";
+    }
+    $("tb-project-delete").hidden = !project;
+    $("tb-project-title").textContent = project ? "プロジェクトを編集" : "新規プロジェクト";
+    modal.removeAttribute("hidden");
+    form.elements.name.focus();
+  }
+
+  async function saveProject(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const id = form.elements.id.value;
+    const body = {
+      name: form.elements.name.value,
+      description: form.elements.description.value,
+      color: form.elements.color.value,
+      visibility_scope: form.elements.visibility_scope.value,
+    };
+    const btn = form.querySelector('[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      if (id) {
+        await api(`/tools/to_bell/api/projects/${id}`, { method: "PUT", body });
+      } else {
+        await api("/tools/to_bell/api/projects", { method: "POST", body });
+      }
+      $("tb-project-modal").setAttribute("hidden", "");
+      await loadProjects();
+      showFlash("プロジェクトを保存しました", "success");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function deleteProject() {
+    const id = $("tb-project-form").elements.id.value;
+    if (!id || !window.confirm("このプロジェクトを削除しますか？タスクは残り、プロジェクトの紐付けだけ外れます。")) return;
+    await api(`/tools/to_bell/api/projects/${id}`, { method: "DELETE" });
+    $("tb-project-modal").setAttribute("hidden", "");
+    if (state.projectFilter === Number(id)) state.projectFilter = 0;
+    await loadProjects();
+    await loadTasks();
+    showFlash("プロジェクトを削除しました", "info");
+  }
+
+  function fillProjectSelect(selectEl, current) {
+    if (!selectEl) return;
+    const options = ['<option value="">なし</option>'];
+    state.projects.forEach((project) => {
+      options.push(`<option value="${project.id}">${esc(project.name)}</option>`);
+    });
+    selectEl.innerHTML = options.join("");
+    selectEl.value = current ? String(current) : "";
+  }
+
+  // ===== テンプレート =====
+
+  function initTemplateModal() {
+    const modal = $("tb-template-modal");
+    if (!modal) return;
+    const close = () => modal.setAttribute("hidden", "");
+    modal.querySelectorAll("[data-template-close]").forEach((el) => el.addEventListener("click", close));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !modal.hasAttribute("hidden")) close();
+    });
+    $("tb-template-form").addEventListener("submit", createBlankTemplate);
+  }
+
+  async function openTemplateModal() {
+    const modal = $("tb-template-modal");
+    if (!modal) return;
+    modal.removeAttribute("hidden");
+    await loadTemplates();
+  }
+
+  async function loadTemplates() {
+    const list = $("tb-template-list");
+    if (!list) return;
+    list.innerHTML = '<div class="tobell-empty">読み込み中です。</div>';
+    const data = await api("/tools/to_bell/api/templates");
+    const rows = data.templates || [];
+    if (!rows.length) {
+      list.innerHTML = '<div class="tobell-empty">テンプレートはまだありません。</div>';
+      return;
+    }
+    list.innerHTML = rows.map((tpl) => `
+      <div class="tobell-template-row" data-template-id="${tpl.id}">
+        <div class="tobell-template-main">
+          <strong>${esc(tpl.name)}</strong>
+          <span class="tobell-template-meta">${tpl.scope === "office" ? "所属共有" : "自分のみ"} / サブタスク${Number(tpl.subtask_count || 0)}件</span>
+        </div>
+        <button type="button" class="tobell-btn tobell-btn-primary" data-template-use="${tpl.id}">使う</button>
+        <button type="button" class="tobell-btn tobell-danger" data-template-del="${tpl.id}" aria-label="削除">×</button>
+      </div>`).join("");
+    list.querySelectorAll("[data-template-use]").forEach((button) => {
+      button.addEventListener("click", () => instantiateTemplate(Number(button.dataset.templateUse)));
+    });
+    list.querySelectorAll("[data-template-del]").forEach((button) => {
+      button.addEventListener("click", () => deleteTemplate(Number(button.dataset.templateDel)));
+    });
+  }
+
+  async function instantiateTemplate(id) {
+    const body = {};
+    if (state.projectFilter) body.project_id = state.projectFilter;
+    await api(`/tools/to_bell/api/templates/${id}/instantiate`, { method: "POST", body });
+    $("tb-template-modal").setAttribute("hidden", "");
+    await loadTasks();
+    showFlash("テンプレートからタスクを作成しました", "success");
+  }
+
+  async function createBlankTemplate(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const name = form.elements.name.value.trim();
+    if (!name) return;
+    const btn = form.querySelector('[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      await api("/tools/to_bell/api/templates", { method: "POST", body: { name } });
+      form.reset();
+      await loadTemplates();
+      showFlash("テンプレートを作成しました", "success");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function deleteTemplate(id) {
+    if (!window.confirm("このテンプレートを削除しますか？")) return;
+    await api(`/tools/to_bell/api/templates/${id}`, { method: "DELETE" });
+    await loadTemplates();
+    showFlash("テンプレートを削除しました", "info");
+  }
+
   function renderDetail(task) {
     state.selectedTaskId = task.id;
     const fragment = $("tb-detail-template").content.cloneNode(true);
@@ -159,16 +630,67 @@
     form.elements.priority.value = task.priority || "normal";
     form.elements.due_at.value = task.due_at ? task.due_at.slice(0, 16) : "";
     form.elements.assigned_to.value = task.assigned_to || "";
+    fillProjectSelect(form.elements.project_id, task.project ? task.project.id : "");
     form.elements.tags.value = (task.tags || []).map((tag) => tag.name).join(", ");
     renderSubtasks(task);
     renderComments(task);
+    renderAttachments(task);
     form.addEventListener("submit", saveDetail);
     $("tb-subtask-form").addEventListener("submit", addSubtask);
     $("tb-comment-form").addEventListener("submit", addComment);
+    const attachmentForm = $("tb-attachment-form");
+    if (attachmentForm) attachmentForm.addEventListener("submit", uploadAttachment);
     const backButton = $("tb-detail-back");
     if (backButton) backButton.addEventListener("click", closeDetail);
     document.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", detailAction));
-    renderTasks();
+    renderMain();
+  }
+
+  function renderAttachments(task) {
+    const container = $("tb-attachments");
+    if (!container) return;
+    const rows = task.attachments || [];
+    container.innerHTML = rows.length ? rows.map((item) => `
+      <div class="tobell-attachment">
+        <a href="${item.href}" class="tobell-attachment-link" target="_blank" rel="noopener">${esc(item.file_name)}</a>
+        <span class="tobell-attachment-size">${formatFileSize(item.file_size)}</span>
+        <button type="button" class="tobell-subtask-delete" data-attachment-delete="${item.id}" aria-label="削除">×</button>
+      </div>`).join("") : '<div class="tobell-empty">添付はありません。</div>';
+    container.querySelectorAll("[data-attachment-delete]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (!window.confirm("この添付を削除しますか？")) return;
+        button.disabled = true;
+        try {
+          await api(`/tools/to_bell/api/attachments/${button.dataset.attachmentDelete}`, { method: "DELETE" });
+          await refreshSelectedTask();
+          showFlash("添付を削除しました", "info");
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
+  async function uploadAttachment(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const input = form.elements.file;
+    if (!input || !input.files || !input.files.length) {
+      showFlash("ファイルを選択してください", "error");
+      return;
+    }
+    const data = new FormData();
+    data.append("file", input.files[0]);
+    const btn = form.querySelector('[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      await api(`/tools/to_bell/api/tasks/${state.selectedTaskId}/attachments`, { method: "POST", body: data });
+      form.reset();
+      await refreshSelectedTask();
+      showFlash("添付しました", "success");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   function openDetailOverlay() {
@@ -200,7 +722,7 @@
     state.selectedTaskId = 0;
     document.body.classList.remove("tb-detail-active");
     $("tb-detail").innerHTML = '<div class="tobell-empty">タスクを選ぶと詳細が開きます。</div>';
-    renderTasks();
+    renderMain();
   }
 
   function renderSubtasks(task) {
@@ -290,6 +812,10 @@
     const action = btn.dataset.action;
     const id = state.selectedTaskId;
     if (!id) return;
+    if (action === "template") {
+      await templateFromTask(id, btn);
+      return;
+    }
     if (action === "archive" && !window.confirm("このタスクをアーカイブしますか？")) return;
     if (action === "delete" && !window.confirm("このタスクを完全に削除します。元に戻せません。よろしいですか？")) return;
     btn.disabled = true;
@@ -306,6 +832,8 @@
       await api(path, { method });
       if (action === "archive" || action === "delete") {
         closeDetail();
+      } else {
+        await refreshSelectedTask();
       }
       await loadTasks();
       await loadNotifications();
@@ -315,6 +843,18 @@
         archive: "アーカイブしました",
         delete: "削除しました",
       }[action] || "更新しました", "success");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function templateFromTask(id, btn) {
+    const name = window.prompt("テンプレート名を入力してください。", "");
+    if (name === null) return;
+    btn.disabled = true;
+    try {
+      await api(`/tools/to_bell/api/tasks/${id}/template`, { method: "POST", body: { name } });
+      showFlash("このタスクをテンプレート化しました", "success");
     } finally {
       btn.disabled = false;
     }
@@ -880,6 +1420,28 @@
     const hh = String(date.getHours()).padStart(2, "0");
     const mm = String(date.getMinutes()).padStart(2, "0");
     return `${y}-${m}-${d} ${hh}:${mm}`;
+  }
+
+  function formatDueShort(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mm = String(date.getMinutes()).padStart(2, "0");
+    const time = hh === "23" && mm === "59" ? "" : ` ${hh}:${mm}`;
+    return `${m}/${d}${time}`;
+  }
+
+  function startOfMonth(date) {
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+  }
+
+  function formatFileSize(bytes) {
+    const size = Number(bytes || 0);
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   function statusLabel(status) {
