@@ -932,6 +932,7 @@ class ToBellTask(db.Model):
     source_tool = db.Column(db.String(80), nullable=True, index=True)
     source_ref_type = db.Column(db.String(80), nullable=True)
     source_ref_id = db.Column(db.String(120), nullable=True)
+    pinned = db.Column(db.Boolean, nullable=False, default=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -991,6 +992,7 @@ class ToBellTask(db.Model):
             'source_tool': self.source_tool or '',
             'source_ref_type': self.source_ref_type or '',
             'source_ref_id': self.source_ref_id or '',
+            'pinned': bool(self.pinned),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'tags': [tag.to_dict() for tag in self.tags],

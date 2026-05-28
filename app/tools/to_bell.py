@@ -265,6 +265,22 @@ def api_reopen_task(task_id: int):
     return _json_endpoint(action)
 
 
+@to_bell_bp.route("/api/tasks/<int:task_id>/pin", methods=["POST"])
+@login_required
+def api_pin_task(task_id: int):
+    def action():
+        task = get_task_for_user(task_id, current_user.username)
+        payload = _payload()
+        desired = payload.get("pinned")
+        if desired is None:
+            task = update_task(task, {"pinned": not bool(task.pinned)}, current_user.username)
+        else:
+            task = update_task(task, {"pinned": desired}, current_user.username)
+        return serialize_task(task, current_user.username)
+
+    return _json_endpoint(action)
+
+
 @to_bell_bp.route("/api/tasks/<int:task_id>/subtasks", methods=["POST"])
 @login_required
 def api_add_subtask(task_id: int):
@@ -529,8 +545,6 @@ def api_push_subscriptions():
 @to_bell_bp.route("/api/push/subscriptions/<int:subscription_id>", methods=["PUT", "DELETE"])
 @login_required
 def api_push_subscription(subscription_id: int):
-    if _is_mobile_request():
-        return jsonify({"status": "error", "message": "通知先の編集はPC版からのみ利用できます。"}), 403
     try:
         if request.method == "DELETE":
             hard = request.args.get("hard", "").lower() in ("1", "true", "yes")
@@ -571,8 +585,3 @@ def _json_endpoint(action):
         return jsonify(result), status
     except ToBellInputError as exc:
         return jsonify({"error": exc.message, "field": exc.field}), 400
-
-
-def _is_mobile_request() -> bool:
-    ua = (request.headers.get("User-Agent", "") or "").lower()
-    return any(token in ua for token in ("iphone", "ipad", "android", "mobile"))

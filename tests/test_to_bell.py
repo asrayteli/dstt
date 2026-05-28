@@ -974,3 +974,59 @@ def test_project_bulk_assign_skips_tasks_user_cannot_edit(app_ctx):
     # Bob 側のタスクは元のまま（プロジェクト未設定）
     detail = bob_client.get(f"/tools/to_bell/api/tasks/{bob_task['id']}").get_json()
     assert detail["project"] is None
+
+
+def test_task_pin_keeps_pinned_tasks_on_top_across_filters(app_ctx):
+    office_id = _create_office(app_ctx, "pin-task")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    # 通常タスク（期日なし）
+    normal = client.post("/tools/to_bell/api/tasks", json={"title": "通常タスク"}).get_json()
+    # ピン留め用タスク（期日なし）
+    memo = client.post("/tools/to_bell/api/tasks", json={"title": "メモ的タスク"}).get_json()
+
+    # 「期日切れ」フィルタでは通常もメモも条件に合わないので何も出ない
+    overdue_before = client.get("/tools/to_bell/api/tasks?filter=overdue").get_json()
+    assert all(t["id"] != memo["id"] for t in overdue_before["tasks"])
+
+    # ピン留めON
+    pinned = client.post(f"/tools/to_bell/api/tasks/{memo['id']}/pin").get_json()
+    assert pinned["pinned"] is True
+
+    # フィルタに関係なく、ピン留めタスクが先頭に来る
+    for filter_name in ("today", "inbox", "assigned", "attention", "overdue", "done"):
+        listing = client.get(f"/tools/to_bell/api/tasks?filter={filter_name}").get_json()
+        assert listing["tasks"], f"{filter_name} で空になっている"
+        assert listing["tasks"][0]["id"] == memo["id"], f"{filter_name} で先頭がピン留めでない"
+        assert listing["tasks"][0]["pinned"] is True
+
+    # 同じエンドポイントで toggle: 解除
+    unpinned = client.post(f"/tools/to_bell/api/tasks/{memo['id']}/pin").get_json()
+    assert unpinned["pinned"] is False
+
+    # 解除後はピンの強制表示なし
+    overdue_after = client.get("/tools/to_bell/api/tasks?filter=overdue").get_json()
+    assert all(t["id"] != memo["id"] for t in overdue_after["tasks"])
+
+    # 念のため normal が残っていることも確認
+    assert client.get(f"/tools/to_bell/api/tasks/{normal['id']}").status_code == 200
+
+
+def test_task_pin_respects_explicit_value_in_payload(app_ctx):
+    office_id = _create_office(app_ctx, "pin-val")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    task = client.post("/tools/to_bell/api/tasks", json={"title": "T"}).get_json()
+    # 明示的に true を渡すと固定で true
+    pinned = client.post(f"/tools/to_bell/api/tasks/{task['id']}/pin", json={"pinned": True}).get_json()
+    assert pinned["pinned"] is True
+    # もう一度 true を渡しても true のまま
+    pinned2 = client.post(f"/tools/to_bell/api/tasks/{task['id']}/pin", json={"pinned": True}).get_json()
+    assert pinned2["pinned"] is True
+    # 明示的に false で解除
+    cleared = client.post(f"/tools/to_bell/api/tasks/{task['id']}/pin", json={"pinned": False}).get_json()
+    assert cleared["pinned"] is False

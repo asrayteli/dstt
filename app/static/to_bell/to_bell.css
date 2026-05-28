@@ -1683,3 +1683,46 @@ body.tobell-pwa-mode .tobell-viewer-stage embed {
     height: calc(100svh - 60px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   }
 }
+
+/* ===== タスクのピン留め ===== */
+.tobell-task.is-pinned {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.tobell-task-pin {
+  color: #b45309;
+}
+
+.tobell-task-pintoggle {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #cbd5e1;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.tobell-task-pintoggle:hover {
+  border-color: #f59e0b;
+  color: #d97706;
+}
+
+.tobell-task-pintoggle.is-on {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #b45309;
+}
+
+.tobell-task-pintoggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tobell-kan-card.is-pinned {
+  background: #fffbeb;
+  border-color: #fde68a;
+}

@@ -52,12 +52,16 @@
     if (templatesButton) templatesButton.addEventListener("click", openTemplateModal);
     const newProjectButton = $("tb-new-project");
     if (newProjectButton) newProjectButton.addEventListener("click", () => openProjectModal());
+    const projectsManageButton = $("tb-projects-manage");
+    if (projectsManageButton) projectsManageButton.addEventListener("click", openProjectsListModal);
+    initProjectsListModal();
     $("tb-enable-push-notify").addEventListener("click", toggleNotifications);
     const reloadButton = $("tb-reload");
     if (reloadButton && isStandalone()) {
       // PWA（ホーム画面アプリ）にはブラウザの再読込が無いため専用ボタンを出す。
+      // 押すと Service Worker キャッシュを全消去してから再読込（スーパーリロード相当）する。
       reloadButton.hidden = false;
-      reloadButton.addEventListener("click", () => window.location.reload());
+      reloadButton.addEventListener("click", () => hardReload(reloadButton));
     }
     const notifierButton = $("tb-open-notifier");
     if (notifierButton) notifierButton.addEventListener("click", openWindowsNotifier);
@@ -168,15 +172,17 @@
       const due = task.due_at ? formatDue(task.due_at) : "通知なし";
       const done = task.status === "done" ? "checked" : "";
       const badgeClass = task.priority === "urgent" || isOverdue(task) ? "danger" : (task.priority === "high" ? "warning" : "");
+      const pinned = task.pinned ? "is-pinned" : "";
       return `
-        <article class="tobell-task ${task.id === state.selectedTaskId ? "is-selected" : ""}" data-task-id="${task.id}">
+        <article class="tobell-task ${task.id === state.selectedTaskId ? "is-selected" : ""} ${pinned}" data-task-id="${task.id}">
           <input class="tobell-check" type="checkbox" ${done} data-complete-id="${task.id}" aria-label="完了">
           <div class="tobell-task-body">
-            <h3>${esc(task.title)}</h3>
+            <h3>${task.pinned ? '<span class="tobell-task-pin" aria-label="ピン留め">📌</span> ' : ""}${esc(task.title)}</h3>
             <p>${esc(task.description || "メモなし")}</p>
             <p class="tobell-task-meta">${esc(statusLabel(task.status))} / ${esc(due)} / 進捗 ${Number(task.progress || 0)}%</p>
             ${projectTag(task)}
           </div>
+          <button type="button" class="tobell-task-pintoggle ${task.pinned ? "is-on" : ""}" data-pin-id="${task.id}" aria-label="${task.pinned ? "ピン留め解除" : "ピン留め"}" title="${task.pinned ? "ピン留め解除" : "ピン留め"}">📌</button>
           <span class="tobell-badge ${badgeClass}">${esc(priorityLabel(task.priority))}</span>
         </article>`;
     }).join("");
@@ -185,6 +191,7 @@
       card.setAttribute("role", "button");
       const openTask = (event) => {
         if (event.target.matches("[data-complete-id]")) return;
+        if (event.target.matches("[data-pin-id]")) return;
         const task = state.tasks.find((item) => item.id === Number(card.dataset.taskId));
         if (task) renderDetail(task);
       };
@@ -193,6 +200,19 @@
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           openTask(event);
+        }
+      });
+    });
+    document.querySelectorAll("[data-pin-id]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const id = Number(button.dataset.pinId);
+        button.disabled = true;
+        try {
+          await api(`/tools/to_bell/api/tasks/${id}/pin`, { method: "POST" });
+          await loadTasks();
+        } finally {
+          button.disabled = false;
         }
       });
     });
@@ -262,9 +282,10 @@
     } else {
       card.setAttribute("draggable", "true");
     }
+    if (task.pinned) card.classList.add("is-pinned");
     card.innerHTML = `
       <div class="tobell-kan-card-body" data-open-id="${task.id}">
-        <strong>${esc(task.title)}</strong>
+        <strong>${task.pinned ? '<span class="tobell-task-pin" aria-label="ピン留め">📌</span> ' : ""}${esc(task.title)}</strong>
         ${due ? `<span class="tobell-kan-due ${overdue}">${esc(due)}</span>` : ""}
         ${projectTag(task)}
       </div>
@@ -433,6 +454,8 @@
       bindProjectReorder(list);
     }
     renderProjectBar();
+    const modal = $("tb-projects-modal");
+    if (modal && !modal.hasAttribute("hidden")) renderProjectsListModal();
   }
 
   let dragOrder = { id: 0, list: null };
@@ -505,6 +528,59 @@
     closeDetail();
     renderProjects();
     loadTasks();
+  }
+
+  function initProjectsListModal() {
+    const modal = $("tb-projects-modal");
+    if (!modal) return;
+    const close = () => modal.setAttribute("hidden", "");
+    modal.querySelectorAll("[data-projects-close]").forEach((el) => el.addEventListener("click", close));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !modal.hasAttribute("hidden")) close();
+    });
+    const createBtn = $("tb-projects-modal-create");
+    if (createBtn) createBtn.addEventListener("click", () => {
+      modal.setAttribute("hidden", "");
+      openProjectModal();
+    });
+  }
+
+  async function openProjectsListModal() {
+    const modal = $("tb-projects-modal");
+    if (!modal) return;
+    modal.removeAttribute("hidden");
+    await loadProjects();
+    renderProjectsListModal();
+  }
+
+  function renderProjectsListModal() {
+    const list = $("tb-projects-modal-list");
+    if (!list) return;
+    if (!state.projects.length) {
+      list.innerHTML = '<div class="tobell-empty">プロジェクトはありません。</div>';
+      return;
+    }
+    list.innerHTML = state.projects.map((project) => `
+      <div class="tobell-project-row ${project.id === state.projectFilter ? "is-active" : ""} ${project.pinned ? "is-pinned" : ""}" data-project-row="${project.id}">
+        <button type="button" class="tobell-project-pick" data-project-pick="${project.id}">
+          <span class="tobell-dot" style="background:${esc(project.color)}"></span>
+          <span class="tobell-project-name">${project.pinned ? "📌 " : ""}${esc(project.name)}</span>
+          <span class="tobell-project-count">${Number(project.open_count || 0)}</span>
+        </button>
+        <button type="button" class="tobell-project-edit" data-project-edit="${project.id}" aria-label="編集">⚙</button>
+      </div>`).join("");
+    list.querySelectorAll("[data-project-pick]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectProject(Number(button.dataset.projectPick));
+        $("tb-projects-modal").setAttribute("hidden", "");
+      });
+    });
+    list.querySelectorAll("[data-project-edit]").forEach((button) => {
+      button.addEventListener("click", () => {
+        $("tb-projects-modal").setAttribute("hidden", "");
+        openProjectModal(Number(button.dataset.projectEdit));
+      });
+    });
   }
 
   function initProjectModal() {
@@ -914,6 +990,7 @@
     form.elements.assigned_to.value = task.assigned_to || "";
     fillProjectSelect(form.elements.project_id, task.project ? task.project.id : "");
     form.elements.tags.value = (task.tags || []).map((tag) => tag.name).join(", ");
+    if (form.elements.pinned) form.elements.pinned.checked = !!task.pinned;
     renderSubtasks(task);
     renderComments(task);
     renderAttachments(task);
@@ -1175,6 +1252,7 @@
     try {
       const payload = Object.fromEntries(new FormData(form).entries());
       payload.tags = payload.tags || "";
+      payload.pinned = form.elements.pinned ? form.elements.pinned.checked : false;
       await api(`/tools/to_bell/api/tasks/${payload.id}`, { method: "PUT", body: payload });
       await refreshSelectedTask();
       await loadTasks();
@@ -1302,6 +1380,36 @@
       showFlash("通知をすべて既読にしました", "success");
     } finally {
       if (btn) btn.disabled = false;
+    }
+  }
+
+  async function hardReload(button) {
+    if (button) button.disabled = true;
+    try {
+      // 1) ブラウザの Cache Storage を全部消す。
+      if ("caches" in window) {
+        try {
+          const names = await caches.keys();
+          await Promise.all(names.map((name) => caches.delete(name)));
+        } catch (e) { /* 失敗してもリロードは試みる */ }
+      }
+      // 2) Service Worker にもキャッシュ消去を依頼（古い SW が動いている場合の保険）。
+      if ("serviceWorker" in navigator) {
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((reg) => {
+            if (reg.active) {
+              try { reg.active.postMessage({ type: "tobell-clear-caches" }); } catch (e) { /* noop */ }
+            }
+            return reg.update().catch(() => {});
+          }));
+        } catch (e) { /* noop */ }
+      }
+    } finally {
+      // 3) URL にキャッシュバスター付きで再読込。ブラウザの HTTP キャッシュも極力回避。
+      const sep = window.location.search ? "&" : "?";
+      const next = `${window.location.pathname}${window.location.search}${sep}_=${Date.now()}${window.location.hash}`;
+      window.location.replace(next);
     }
   }
 
@@ -1717,16 +1825,15 @@
       list.innerHTML = '<div class="tobell-empty">登録済みの通知先はありません。</div>';
       return;
     }
-    const editable = !isMobile() && !isStandalone();
     list.innerHTML = rows.map((item) => `
       <div class="tobell-device ${item.is_active ? "" : "is-disabled"}" data-device-id="${item.id}">
         <div class="tobell-device-main">
-          <input class="tobell-device-label" value="${esc(item.device_label)}" aria-label="通知先名" ${editable ? "" : "readonly"}>
+          <input class="tobell-device-label" value="${esc(item.device_label)}" aria-label="通知先名">
           <div class="tobell-device-meta">${item.is_active ? "有効" : "無効"} / ${esc(item.endpoint_tail || "")}</div>
         </div>
-        ${editable ? `<button type="button" class="tobell-btn" data-device-save="${item.id}">保存</button>
+        <button type="button" class="tobell-btn" data-device-save="${item.id}">保存</button>
         <button type="button" class="tobell-btn tobell-danger" data-device-disable="${item.id}" ${item.is_active ? "" : "disabled"}>無効化</button>
-        <button type="button" class="tobell-btn tobell-danger" data-device-delete="${item.id}">削除</button>` : ""}
+        <button type="button" class="tobell-btn tobell-danger" data-device-delete="${item.id}">削除</button>
       </div>
     `).join("");
     list.querySelectorAll("[data-device-save]").forEach((button) => {

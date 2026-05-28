@@ -105,11 +105,24 @@ def list_tasks(
     view: str = "list",
 ) -> list[ToBellTask]:
     today = date.today()
-    query = ToBellTask.query.filter(visible_task_filter(username))
+    base_query = ToBellTask.query.filter(visible_task_filter(username))
     pid = _safe_int(project_id)
     if view != "calendar" and not pid:
         hidden_subq = db.session.query(ToBellProject.id).filter(ToBellProject.calendar_only.is_(True))
-        query = query.filter(or_(ToBellTask.project_id.is_(None), ToBellTask.project_id.notin_(hidden_subq)))
+        base_query = base_query.filter(or_(ToBellTask.project_id.is_(None), ToBellTask.project_id.notin_(hidden_subq)))
+    if search:
+        like = f"%{search.strip()}%"
+        base_query = base_query.filter(or_(ToBellTask.title.ilike(like), ToBellTask.description.ilike(like)))
+    if pid:
+        base_query = base_query.filter(ToBellTask.project_id == pid)
+
+    # ピン留めはフィルタ条件に関わらず常に先頭に出す（アーカイブ済みは除く）。
+    pinned_tasks = base_query.filter(
+        ToBellTask.pinned.is_(True),
+        ToBellTask.status != "archived",
+    ).order_by(ToBellTask.updated_at.desc()).all()
+
+    query = base_query.filter(ToBellTask.pinned.is_(False))
     if filter_name == "board":
         # カンバン / カレンダー用: アーカイブ以外の参加タスクをすべて返す。
         query = query.filter(ToBellTask.status != "archived")
@@ -139,17 +152,13 @@ def list_tasks(
                 ToBellTask.reviewer_id == username,
             ),
         )
-    if search:
-        like = f"%{search.strip()}%"
-        query = query.filter(or_(ToBellTask.title.ilike(like), ToBellTask.description.ilike(like)))
-    if pid:
-        query = query.filter(ToBellTask.project_id == pid)
-    return query.order_by(
+    other_tasks = query.order_by(
         ToBellTask.status == "done",
         ToBellTask.due_at.is_(None),
         ToBellTask.due_at.asc(),
         ToBellTask.updated_at.desc(),
     ).all()
+    return pinned_tasks + other_tasks
 
 
 def office_user_options(username: str) -> list[User]:
@@ -184,6 +193,7 @@ def create_task(username: str, payload: dict[str, Any]) -> ToBellTask:
         source_tool=str(payload.get("source_tool") or "").strip() or None,
         source_ref_type=str(payload.get("source_ref_type") or "").strip() or None,
         source_ref_id=str(payload.get("source_ref_id") or "").strip() or None,
+        pinned=_truthy(payload.get("pinned")),
     )
     db.session.add(task)
     db.session.flush()
@@ -223,6 +233,8 @@ def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBell
         task.manual_progress = _int_between(payload.get("manual_progress"), 0, 100, task.manual_progress)
     if "project_id" in payload:
         task.project_id = _coerce_project(actor, payload.get("project_id"))
+    if "pinned" in payload:
+        task.pinned = _truthy(payload.get("pinned"))
     _sync_tags(task, payload.get("tags"), actor)
     task.updated_at = datetime.utcnow()
     db.session.commit()
