@@ -217,6 +217,22 @@
   </div>
 </div>
 
+<div id="tb-viewer" class="tobell-viewer" hidden role="dialog" aria-modal="true" aria-labelledby="tb-viewer-title">
+  <div class="tobell-viewer-head">
+    <strong class="tobell-viewer-title" id="tb-viewer-title">プレビュー</strong>
+    <div class="tobell-viewer-actions">
+      <button type="button" class="tobell-btn tobell-viewer-zoom" data-viewer-zoom="-1" aria-label="縮小">−</button>
+      <button type="button" class="tobell-btn tobell-viewer-zoom" data-viewer-zoom="0" id="tb-viewer-pct">100%</button>
+      <button type="button" class="tobell-btn tobell-viewer-zoom" data-viewer-zoom="1" aria-label="拡大">＋</button>
+      <a class="tobell-btn tobell-viewer-dl" id="tb-viewer-download" download>ダウンロード</a>
+      <button type="button" class="tobell-btn tobell-viewer-close" data-viewer-close aria-label="閉じる">×</button>
+    </div>
+  </div>
+  <div class="tobell-viewer-body" id="tb-viewer-body">
+    <div class="tobell-viewer-stage" id="tb-viewer-stage"></div>
+  </div>
+</div>
+
 <div id="tb-flash" class="tobell-flash info" role="status" aria-live="polite"></div>
 
 <script src="{{ url_for('static', filename='to_bell/to_bell.js') }}"></script>
