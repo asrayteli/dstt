@@ -1279,3 +1279,79 @@ class ToBellTemplate(db.Model):
             'subtask_count': len(payload.get('subtasks') or []),
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class ToBellUserSettings(db.Model):
+    """ToBell のユーザー個人設定。DSTT連携トグル等を保存する。"""
+    __tablename__ = 'to_bell_user_settings'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    username = db.Column(db.String(80), nullable=False, unique=True, index=True)
+    integrations = db.Column(db.JSON, nullable=False, default=dict)
+    preferences = db.Column(db.JSON, nullable=False, default=dict)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ToBellEmployeeLink(db.Model):
+    """ToBell プロジェクト/タスクと pluslist 社員の多対多紐付け。"""
+    __tablename__ = 'to_bell_employee_links'
+    __table_args__ = (
+        db.UniqueConstraint('target_type', 'target_id', 'employee_id', name='uq_tobell_employee_link'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    target_type = db.Column(db.String(16), nullable=False, index=True)  # 'project' | 'task'
+    target_id = db.Column(db.Integer, nullable=False, index=True)
+    employee_id = db.Column(db.Integer, nullable=False, index=True)
+    created_by = db.Column(db.String(80), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ToBellSiteLink(db.Model):
+    """ToBell プロジェクト/タスクと siteplus 現場の多対多紐付け。"""
+    __tablename__ = 'to_bell_site_links'
+    __table_args__ = (
+        db.UniqueConstraint('target_type', 'target_id', 'site_row_id', name='uq_tobell_site_link'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    target_type = db.Column(db.String(16), nullable=False, index=True)  # 'project' | 'task'
+    target_id = db.Column(db.Integer, nullable=False, index=True)
+    site_row_id = db.Column(db.Integer, nullable=False, index=True)
+    created_by = db.Column(db.String(80), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ToBellExternalFile(db.Model):
+    """ToBell のプロジェクト/タスクに紐付ける FILEPOST 非公開ファイル。"""
+    __tablename__ = 'to_bell_external_files'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    target_type = db.Column(db.String(16), nullable=False, index=True)  # 'project' | 'task'
+    target_id = db.Column(db.Integer, nullable=False, index=True)
+    provider = db.Column(db.String(32), nullable=False, default='filepost')
+    share_id = db.Column(db.String(80), nullable=False, index=True)
+    file_name = db.Column(db.String(255), nullable=False)
+    file_size = db.Column(db.BigInteger, nullable=False, default=0)
+    mime_type = db.Column(db.String(120), nullable=True)
+    private_url = db.Column(db.String(500), nullable=False)
+    download_token = db.Column(db.String(120), nullable=True)
+    note = db.Column(db.Text, nullable=False, default='')
+    uploaded_by = db.Column(db.String(80), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'target_type': self.target_type,
+            'target_id': self.target_id,
+            'provider': self.provider,
+            'share_id': self.share_id,
+            'file_name': self.file_name,
+            'file_size': int(self.file_size or 0),
+            'mime_type': self.mime_type or '',
+            'private_url': self.private_url,
+            'note': self.note or '',
+            'uploaded_by': self.uploaded_by,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }

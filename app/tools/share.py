@@ -596,6 +596,104 @@ def _create_share_record(
     }
 
 
+def create_internal_share(
+    *,
+    file_storage,
+    uploader: str,
+    title: str = "",
+    memo: str = "",
+    expires_mode: str = "90d",
+) -> dict:
+    """ToBell など内部ツールから呼び出す、FILEPOSTの非公開共有作成。
+
+    通常のFILEPOST UIには表示せず、戻り値の private URL のみで参照させる。
+    """
+    if file_storage is None or not getattr(file_storage, "filename", ""):
+        raise ValueError("ファイルが指定されていません")
+
+    original_name = _safe_original_name(file_storage.filename)
+    ext = _safe_extension(original_name)
+    uid_for_storage = uuid.uuid4().hex[:8]
+    stored_filename = f"{uid_for_storage}_0{ext}"
+    save_path = os.path.join(UPLOAD_DIR, stored_filename)
+    tmp_plain = f"{save_path}.{os.getpid()}.{threading.get_ident()}.plain.tmp"
+    file_storage.save(tmp_plain)
+    file_size = os.path.getsize(tmp_plain)
+    if file_size <= 0:
+        try:
+            os.remove(tmp_plain)
+        except FileNotFoundError:
+            pass
+        raise ValueError("0バイトのファイルはアップロードできません")
+    if file_size > MAX_FILE_SIZE:
+        try:
+            os.remove(tmp_plain)
+        except FileNotFoundError:
+            pass
+        raise ValueError("ファイルサイズが上限を超えています")
+    _store_uploaded_payload(tmp_plain, save_path)
+
+    file_list = [
+        {
+            "original_name": original_name,
+            "stored_name": stored_filename,
+            "size": file_size,
+            "mime_type": file_storage.mimetype or mimetypes.guess_type(original_name)[0] or "",
+            "encrypted": share_crypto.encryption_enabled(),
+        }
+    ]
+
+    now = datetime.utcnow()
+    expires_at = now + timedelta(days=MAX_EXPIRES_DAYS)
+    with _meta_critical_section():
+        meta = load_meta()
+        uid = uuid.uuid4().hex[:8]
+        while uid in meta:
+            uid = uuid.uuid4().hex[:8]
+        existing_ids = {info.get("display_id") for info in meta.values() if info.get("display_id")}
+        display_id = None
+        for _ in range(100):
+            candidate = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
+            if candidate not in existing_ids:
+                display_id = candidate
+                break
+        if display_id is None:
+            display_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        meta[uid] = {
+            "display_id": display_id,
+            "title": _safe_text(title or original_name, 120),
+            "memo": _safe_text(memo, 200),
+            "zip_name": "",
+            "uploader": uploader or "unknown",
+            "password_hash": None,
+            "expires_at": expires_at.isoformat(),
+            "created_at": now.isoformat(),
+            "expires_mode": expires_mode,
+            "files": file_list,
+            "download_count": 0,
+            "max_downloads": None,
+            "revoked_at": None,
+            "internal": True,
+            "internal_source": "tobell",
+        }
+        save_meta(meta)
+
+    try:
+        download_url = url_for("share.view_download", uid=uid, _external=True)
+    except RuntimeError:
+        download_url = f"/tools/share/view/{uid}"
+
+    return {
+        "uid": uid,
+        "display_id": display_id,
+        "download_url": download_url,
+        "file_name": original_name,
+        "file_size": file_size,
+        "mime_type": file_list[0]["mime_type"],
+        "expires_at": expires_at.isoformat(),
+    }
+
+
 def _is_revoked(info: dict) -> bool:
     return bool(info.get("revoked_at"))
 
@@ -1335,6 +1433,8 @@ def get_file_list():
     file_list = []
 
     for uid, info in meta.items():
+        if info.get("internal"):
+            continue
         try:
             if datetime.utcnow() > datetime.fromisoformat(info["expires_at"]):
                 continue

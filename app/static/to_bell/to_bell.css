@@ -1726,3 +1726,166 @@ body.tobell-pwa-mode .tobell-viewer-stage embed {
   background: #fffbeb;
   border-color: #fde68a;
 }
+
+/* ===== 設定モーダル / DSTT連携 ===== */
+.tobell-icon-btn {
+  width: 36px;
+  padding: 0;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.tobell-settings-card {
+  max-width: 640px;
+  width: 100%;
+}
+
+.tobell-settings-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 0.8rem;
+}
+
+.tobell-settings-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #4b5563;
+  border-radius: 6px 6px 0 0;
+}
+
+.tobell-settings-tab.is-active {
+  background: #fff;
+  border-color: #e5e7eb;
+  color: #111827;
+  font-weight: 600;
+}
+
+.tobell-settings-panel {
+  display: block;
+}
+
+.tobell-integration-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+
+.tobell-integration-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.8rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.tobell-integration-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.tobell-integration-label {
+  font-weight: 600;
+  color: #111827;
+  font-size: 0.95rem;
+}
+
+.tobell-integration-tool {
+  display: inline-block;
+  margin-left: 0.5rem;
+  font-size: 0.7rem;
+  background: #e0e7ff;
+  color: #3730a3;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+.tobell-integration-desc {
+  font-size: 0.82rem;
+  color: #4b5563;
+  margin-top: 0.25rem;
+}
+
+.tobell-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: #d1d5db;
+  border-radius: 999px;
+  transition: background 0.15s;
+  flex-shrink: 0;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+
+.tobell-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.15s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.tobell-switch.is-on {
+  background: #16a34a;
+}
+
+.tobell-switch.is-on::after {
+  transform: translateX(20px);
+}
+
+.tobell-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== 紐付けモーダル ===== */
+.tobell-link-results,
+.tobell-link-current {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+
+.tobell-link-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.88rem;
+}
+
+.tobell-link-row .tobell-link-sub {
+  color: #6b7280;
+  font-size: 0.78rem;
+}
+
+.tobell-link-row button {
+  white-space: nowrap;
+}
+
+.tobell-link-empty {
+  font-size: 0.82rem;
+  color: #6b7280;
+  padding: 0.3rem 0;
+}
