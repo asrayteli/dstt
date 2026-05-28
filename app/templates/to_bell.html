@@ -29,6 +29,7 @@
       <button type="button" class="tobell-btn" id="tb-read-all">通知を既読</button>
       {% if not share_session %}
       <button type="button" class="tobell-btn" id="tb-share-link">共有リンク</button>
+      <button type="button" class="tobell-btn tobell-icon-btn" id="tb-settings-open" aria-label="設定" title="設定">⚙</button>
       {% endif %}
     </div>
   </header>
@@ -138,6 +139,7 @@
       <button type="button" class="tobell-btn" data-action="complete">完了</button>
       <button type="button" class="tobell-btn" data-action="reopen">戻す</button>
       <button type="button" class="tobell-btn" data-action="template">テンプレ化</button>
+      <button type="button" class="tobell-btn" data-action="links">紐付け</button>
       <button type="button" class="tobell-btn tobell-danger" data-action="archive">アーカイブ</button>
       <button type="button" class="tobell-btn tobell-danger" data-action="delete">削除</button>
     </div>
@@ -263,6 +265,7 @@
         <button type="submit" class="tobell-btn tobell-btn-primary">保存</button>
         <button type="button" class="tobell-btn" id="tb-project-bulk-assign" hidden>既存タスクを追加</button>
         <button type="button" class="tobell-btn" id="tb-project-notify-open" hidden>プロジェクト通知</button>
+        <button type="button" class="tobell-btn" id="tb-project-links" hidden>紐付け</button>
         <button type="button" class="tobell-btn tobell-danger" id="tb-project-delete" hidden>削除</button>
       </div>
     </form>
@@ -346,6 +349,70 @@
     <div class="tobell-viewer-stage" id="tb-viewer-stage"></div>
   </div>
 </div>
+
+{% if not share_session %}
+<div id="tb-settings-modal" class="tobell-modal" hidden>
+  <div class="tobell-modal-backdrop" data-settings-close></div>
+  <div class="tobell-modal-card tobell-settings-card" role="dialog" aria-modal="true" aria-labelledby="tb-settings-title">
+    <div class="tobell-modal-head">
+      <h2 id="tb-settings-title">ToBell 設定</h2>
+      <button type="button" class="tobell-btn" data-settings-close aria-label="閉じる">×</button>
+    </div>
+    <nav class="tobell-settings-tabs" role="tablist">
+      <button type="button" class="tobell-settings-tab is-active" data-settings-tab="integrations" role="tab">DSTT連携</button>
+    </nav>
+    <section class="tobell-settings-panel" data-settings-panel="integrations">
+      <p class="tobell-share-note">
+        他のDSTTツールとの連携を、機能ごとに個別にON/OFFできます。デフォルトは全てOFFです。
+        ONにすると、対象のツールで対応する出来事が起きたときに、ToBellへ自動的にタスクや通知が追加されます。
+      </p>
+      <div id="tb-settings-integrations-list" class="tobell-integration-list">
+        <div class="tobell-empty">読み込み中…</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="tb-links-modal" class="tobell-modal" hidden>
+  <div class="tobell-modal-backdrop" data-links-close></div>
+  <div class="tobell-modal-card" role="dialog" aria-modal="true" aria-labelledby="tb-links-title">
+    <div class="tobell-modal-head">
+      <h2 id="tb-links-title">紐付け</h2>
+      <button type="button" class="tobell-btn" data-links-close aria-label="閉じる">×</button>
+    </div>
+    <p class="tobell-share-note" id="tb-links-context"></p>
+    <section class="tobell-section" data-links-kind="employees">
+      <div class="tobell-panel-title">社員（pluslist）</div>
+      <div class="tobell-inline-form">
+        <input type="search" id="tb-links-emp-q" placeholder="社員名 / 社員番号で検索">
+        <button type="button" class="tobell-btn" id="tb-links-emp-search">検索</button>
+      </div>
+      <div id="tb-links-emp-results" class="tobell-link-results"></div>
+      <div class="tobell-panel-title" style="margin-top:0.6rem;">紐付け済み</div>
+      <div id="tb-links-emp-current" class="tobell-link-current"></div>
+    </section>
+    <section class="tobell-section" data-links-kind="sites">
+      <div class="tobell-panel-title">現場（siteplus）</div>
+      <div class="tobell-inline-form">
+        <input type="search" id="tb-links-site-q" placeholder="現場名 / 現場IDで検索">
+        <button type="button" class="tobell-btn" id="tb-links-site-search">検索</button>
+      </div>
+      <div id="tb-links-site-results" class="tobell-link-results"></div>
+      <div class="tobell-panel-title" style="margin-top:0.6rem;">紐付け済み</div>
+      <div id="tb-links-site-current" class="tobell-link-current"></div>
+    </section>
+    <section class="tobell-section" data-links-kind="filepost">
+      <div class="tobell-panel-title">FILEPOST 添付（非公開URL）</div>
+      <p class="tobell-share-note">FILEPOSTでアップロードした非公開URLとして紐付けます。FILEPOSTの一覧には表示されません。</p>
+      <form id="tb-links-fp-form" class="tobell-inline-form">
+        <input type="file" name="file" id="tb-links-fp-file">
+        <button type="submit" class="tobell-btn tobell-btn-primary">アップロード</button>
+      </form>
+      <div id="tb-links-fp-current" class="tobell-link-current"></div>
+    </section>
+  </div>
+</div>
+{% endif %}
 
 <div id="tb-flash" class="tobell-flash info" role="status" aria-live="polite"></div>
 

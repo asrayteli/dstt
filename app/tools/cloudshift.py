@@ -6630,6 +6630,17 @@ def _create_leave_change_request(project: dict[str, Any], payload: dict[str, Any
             + ([f"申請コメント: {request_comment}"] if request_comment else []),
         },
     )
+    try:
+        from app.services.to_bell_hooks import on_cloudshift_leave_change_request
+
+        on_cloudshift_leave_change_request(
+            request_payload=request_payload,
+            project_title=str(project.get("title") or ""),
+            project_id=str(project.get("id") or ""),
+            creator_username=str(project.get("owner_username") or project.get("created_by") or "") or None,
+        )
+    except Exception:
+        pass
     return request_payload
 
 
@@ -8088,6 +8099,18 @@ def api_create_substitute_request(project_id: str):
                 "source_entry_id": entry_id or request_entry.get("substitute_source_entry_id", ""),
             },
         )
+        try:
+            from app.services.to_bell_hooks import on_cloudshift_substitute_updated
+
+            on_cloudshift_substitute_updated(
+                substitute_project_id=str(substitute_project.get("id") or ""),
+                substitute_project_title=str(substitute_project.get("title") or SUBSTITUTE_TITLE),
+                month_key=month_key,
+                day_key=str(day_key),
+                action=history_action,
+            )
+        except Exception:
+            pass
 
     substitute_project = _load_project(substitute_project["id"])
     _resync_shift_month(substitute_project, month_key, actor_name=_user_label())

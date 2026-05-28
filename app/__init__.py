@@ -285,6 +285,62 @@ def _ensure_access_control_schema(app):
             if "pinned" not in task_cols:
                 alters.append("ALTER TABLE to_bell_tasks ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT 0")
 
+        if "to_bell_user_settings" not in inspector.get_table_names():
+            alters.append(
+                "CREATE TABLE to_bell_user_settings ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  username VARCHAR(80) NOT NULL UNIQUE,"
+                "  integrations JSON,"
+                "  preferences JSON,"
+                "  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+
+        if "to_bell_employee_links" not in inspector.get_table_names():
+            alters.append(
+                "CREATE TABLE to_bell_employee_links ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  target_type VARCHAR(16) NOT NULL,"
+                "  target_id INTEGER NOT NULL,"
+                "  employee_id INTEGER NOT NULL,"
+                "  created_by VARCHAR(80) NOT NULL,"
+                "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  UNIQUE(target_type, target_id, employee_id)"
+                ")"
+            )
+
+        if "to_bell_site_links" not in inspector.get_table_names():
+            alters.append(
+                "CREATE TABLE to_bell_site_links ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  target_type VARCHAR(16) NOT NULL,"
+                "  target_id INTEGER NOT NULL,"
+                "  site_row_id INTEGER NOT NULL,"
+                "  created_by VARCHAR(80) NOT NULL,"
+                "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                "  UNIQUE(target_type, target_id, site_row_id)"
+                ")"
+            )
+
+        if "to_bell_external_files" not in inspector.get_table_names():
+            alters.append(
+                "CREATE TABLE to_bell_external_files ("
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "  target_type VARCHAR(16) NOT NULL,"
+                "  target_id INTEGER NOT NULL,"
+                "  provider VARCHAR(32) NOT NULL DEFAULT 'filepost',"
+                "  share_id VARCHAR(80) NOT NULL,"
+                "  file_name VARCHAR(255) NOT NULL,"
+                "  file_size BIGINT NOT NULL DEFAULT 0,"
+                "  mime_type VARCHAR(120),"
+                "  private_url VARCHAR(500) NOT NULL,"
+                "  download_token VARCHAR(120),"
+                "  note TEXT NOT NULL DEFAULT '',"
+                "  uploaded_by VARCHAR(80) NOT NULL,"
+                "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+
         if "vehicle_inspection_records" in inspector.get_table_names():
             vehicle_inspection_cols = {c["name"] for c in inspector.get_columns("vehicle_inspection_records")}
             if "model_type" in vehicle_inspection_cols:

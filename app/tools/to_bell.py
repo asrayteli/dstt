@@ -60,6 +60,26 @@ from app.services.to_bell_service import (
     update_task,
     update_template,
 )
+from app.services.to_bell_integrations import (
+    FILEPOST_OVERFLOW_THRESHOLD,
+    INTEGRATION_KEYS,
+    get_settings as get_integration_settings,
+    is_enabled as integration_is_enabled,
+    update_integrations,
+)
+from app.services.to_bell_links import (
+    add_employee_link,
+    add_external_file,
+    add_site_link,
+    list_employee_links,
+    list_external_files,
+    list_site_links,
+    remove_employee_link,
+    remove_external_file,
+    remove_site_link,
+    search_employees,
+    search_sites,
+)
 from app.services.to_bell_push import (
     ToBellPushUnavailable,
     deactivate_subscription,
@@ -568,6 +588,202 @@ def api_push_test():
         return jsonify({"status": "ok", **send_test_push(current_user.username)})
     except ToBellPushUnavailable as exc:
         return jsonify({"status": "unavailable", "message": str(exc)}), 503
+
+
+# ----- 設定 / DSTT連携 -----
+
+@to_bell_bp.route("/api/settings", methods=["GET"])
+@login_required
+def api_settings_get():
+    return jsonify(get_integration_settings(current_user.username))
+
+
+@to_bell_bp.route("/api/settings/integrations", methods=["PUT"])
+@login_required
+def api_settings_integrations():
+    return jsonify(update_integrations(current_user.username, _payload()))
+
+
+# ----- 紐付け (pluslist 社員 / siteplus 現場) -----
+
+
+def _require_link_permission(integration_key: str) -> None:
+    if not integration_is_enabled(current_user.username, integration_key):
+        abort(403, description="連携が無効です。ToBellの設定で有効化してください。")
+
+
+def _ensure_target_exists(target_type: str, target_id: int) -> None:
+    if target_type == "project":
+        get_project_for_user(target_id, current_user.username)
+    elif target_type == "task":
+        get_task_for_user(target_id, current_user.username)
+    else:
+        abort(404)
+
+
+@to_bell_bp.route("/api/links/employees", methods=["GET", "POST"])
+@login_required
+def api_employee_links():
+    _require_link_permission("pluslist.linkage")
+    if request.method == "GET":
+        target_type = request.args.get("target_type", "")
+        target_id = int(request.args.get("target_id", 0) or 0)
+        _ensure_target_exists(target_type, target_id)
+        return jsonify({"links": list_employee_links(target_type, target_id)})
+
+    payload = _payload()
+    target_type = str(payload.get("target_type") or "")
+    target_id = int(payload.get("target_id") or 0)
+    employee_id = int(payload.get("employee_id") or 0)
+    _ensure_target_exists(target_type, target_id)
+    try:
+        row = add_employee_link(target_type, target_id, employee_id, current_user.username)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"link_id": row.id}), 201
+
+
+@to_bell_bp.route("/api/links/employees/<int:link_id>", methods=["DELETE"])
+@login_required
+def api_employee_link_delete(link_id: int):
+    _require_link_permission("pluslist.linkage")
+    return jsonify({"ok": remove_employee_link(link_id)})
+
+
+@to_bell_bp.route("/api/links/employees/search", methods=["GET"])
+@login_required
+def api_employee_search():
+    _require_link_permission("pluslist.linkage")
+    return jsonify({"results": search_employees(request.args.get("q", ""))})
+
+
+@to_bell_bp.route("/api/links/sites", methods=["GET", "POST"])
+@login_required
+def api_site_links():
+    _require_link_permission("siteplus.linkage")
+    if request.method == "GET":
+        target_type = request.args.get("target_type", "")
+        target_id = int(request.args.get("target_id", 0) or 0)
+        _ensure_target_exists(target_type, target_id)
+        return jsonify({"links": list_site_links(target_type, target_id)})
+
+    payload = _payload()
+    target_type = str(payload.get("target_type") or "")
+    target_id = int(payload.get("target_id") or 0)
+    site_row_id = int(payload.get("site_row_id") or 0)
+    _ensure_target_exists(target_type, target_id)
+    try:
+        row = add_site_link(target_type, target_id, site_row_id, current_user.username)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"link_id": row.id}), 201
+
+
+@to_bell_bp.route("/api/links/sites/<int:link_id>", methods=["DELETE"])
+@login_required
+def api_site_link_delete(link_id: int):
+    _require_link_permission("siteplus.linkage")
+    return jsonify({"ok": remove_site_link(link_id)})
+
+
+@to_bell_bp.route("/api/links/sites/search", methods=["GET"])
+@login_required
+def api_site_search():
+    _require_link_permission("siteplus.linkage")
+    return jsonify({"results": search_sites(request.args.get("q", ""))})
+
+
+# ----- FILEPOST 連携 -----
+
+
+@to_bell_bp.route("/api/integrations/filepost/threshold", methods=["GET"])
+@login_required
+def api_filepost_threshold():
+    return jsonify(
+        {
+            "threshold_bytes": FILEPOST_OVERFLOW_THRESHOLD,
+            "overflow_enabled": integration_is_enabled(
+                current_user.username, "filepost.attachment_overflow"
+            ),
+            "project_files_enabled": integration_is_enabled(
+                current_user.username, "filepost.project_files"
+            ),
+        }
+    )
+
+
+@to_bell_bp.route("/api/integrations/filepost/upload", methods=["POST"])
+@login_required
+def api_filepost_upload():
+    """ToBellタスク/プロジェクトに紐付けるためのFILEPOST非公開アップロード。"""
+    target_type = str(request.form.get("target_type") or "")
+    try:
+        target_id = int(request.form.get("target_id") or 0)
+    except (TypeError, ValueError):
+        abort(400)
+
+    if target_type == "task":
+        if not integration_is_enabled(current_user.username, "filepost.attachment_overflow"):
+            abort(403, description="添付オーバー連携が無効です。")
+        get_task_for_user(target_id, current_user.username)
+    elif target_type == "project":
+        if not integration_is_enabled(current_user.username, "filepost.project_files"):
+            abort(403, description="プロジェクトFILEPOST連携が無効です。")
+        get_project_for_user(target_id, current_user.username)
+    else:
+        abort(400)
+
+    file_storage = request.files.get("file")
+    if file_storage is None or not file_storage.filename:
+        return jsonify({"error": "ファイルが指定されていません"}), 400
+
+    from app.tools.share import create_internal_share
+
+    try:
+        share_result = create_internal_share(
+            file_storage=file_storage,
+            uploader=current_user.username,
+            title=file_storage.filename,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    note = str(request.form.get("note") or "")
+    row = add_external_file(
+        target_type=target_type,
+        target_id=target_id,
+        share_id=share_result["uid"],
+        file_name=share_result["file_name"],
+        file_size=share_result["file_size"],
+        mime_type=share_result["mime_type"],
+        private_url=share_result["download_url"],
+        uploaded_by=current_user.username,
+        note=note,
+    )
+    return jsonify(row.to_dict()), 201
+
+
+@to_bell_bp.route("/api/integrations/filepost/files", methods=["GET"])
+@login_required
+def api_filepost_files_list():
+    target_type = request.args.get("target_type", "")
+    try:
+        target_id = int(request.args.get("target_id") or 0)
+    except (TypeError, ValueError):
+        abort(400)
+    if target_type == "task":
+        get_task_for_user(target_id, current_user.username)
+    elif target_type == "project":
+        get_project_for_user(target_id, current_user.username)
+    else:
+        abort(400)
+    return jsonify({"files": list_external_files(target_type, target_id)})
+
+
+@to_bell_bp.route("/api/integrations/filepost/files/<int:file_id>", methods=["DELETE"])
+@login_required
+def api_filepost_files_delete(file_id: int):
+    return jsonify({"ok": remove_external_file(file_id)})
 
 
 def _payload() -> dict:

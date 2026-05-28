@@ -71,6 +71,8 @@
     if (testPushButton) testPushButton.addEventListener("click", sendTestPush);
     $("tb-read-all").addEventListener("click", readAllNotifications);
     initShareLink();
+    initSettingsModal();
+    initLinksModal();
     $("tb-search").addEventListener("input", debounce(loadTasks, 220));
     // 端末の「戻る」操作で詳細オーバーレイを閉じる（スマホアプリ的な挙動）。
     window.addEventListener("popstate", () => {
@@ -597,6 +599,13 @@
     if (bulkButton) bulkButton.addEventListener("click", openBulkAssignModal);
     const notifyButton = $("tb-project-notify-open");
     if (notifyButton) notifyButton.addEventListener("click", openProjectNotifyModal);
+    const projectLinksButton = $("tb-project-links");
+    if (projectLinksButton) projectLinksButton.addEventListener("click", () => {
+      const id = Number($("tb-project-form").elements.id.value || 0);
+      if (!id) return;
+      const project = state.projects.find((p) => p.id === id);
+      openLinksModal("project", id, project ? project.name : `プロジェクト #${id}`);
+    });
     const scopeSelect = $("tb-project-form").elements.visibility_scope;
     if (scopeSelect) scopeSelect.addEventListener("change", () => syncMembersVisibility(scopeSelect.value));
     const memberPick = $("tb-project-members-pick");
@@ -683,6 +692,8 @@
     if (bulkButton) bulkButton.hidden = !project;
     const notifyButton = $("tb-project-notify-open");
     if (notifyButton) notifyButton.hidden = !project;
+    const projectLinksButton = $("tb-project-links");
+    if (projectLinksButton) projectLinksButton.hidden = !project;
     $("tb-project-title").textContent = project ? "プロジェクトを編集" : "新規プロジェクト";
     modal.removeAttribute("hidden");
     form.elements.name.focus();
@@ -1133,15 +1144,33 @@
       showFlash("ファイルを選択してください", "error");
       return;
     }
-    const data = new FormData();
-    data.append("file", input.files[0]);
+    const file = input.files[0];
     const btn = form.querySelector('[type="submit"]');
     if (btn) btn.disabled = true;
     try {
-      await api(`/tools/to_bell/api/tasks/${state.selectedTaskId}/attachments`, { method: "POST", body: data });
-      form.reset();
-      await refreshSelectedTask();
-      showFlash("添付しました", "success");
+      let settings = null;
+      try {
+        settings = await api("/tools/to_bell/api/integrations/filepost/threshold");
+      } catch (_) {
+        settings = null;
+      }
+      const threshold = (settings && settings.threshold_bytes) || 25 * 1024 * 1024;
+      const useFilepost = settings && settings.overflow_enabled && file.size > threshold;
+      const data = new FormData();
+      data.append("file", file);
+      if (useFilepost) {
+        data.append("target_type", "task");
+        data.append("target_id", String(state.selectedTaskId));
+        await api("/tools/to_bell/api/integrations/filepost/upload", { method: "POST", body: data });
+        form.reset();
+        await refreshSelectedTask();
+        showFlash(`大容量のためFILEPOSTへ保存しました（${formatFileSize(file.size)}）`, "success");
+      } else {
+        await api(`/tools/to_bell/api/tasks/${state.selectedTaskId}/attachments`, { method: "POST", body: data });
+        form.reset();
+        await refreshSelectedTask();
+        showFlash("添付しました", "success");
+      }
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -1269,6 +1298,11 @@
     if (!id) return;
     if (action === "template") {
       await templateFromTask(id, btn);
+      return;
+    }
+    if (action === "links") {
+      const task = state.tasks.find((t) => t.id === id);
+      openLinksModal("task", id, task ? task.title : `タスク #${id}`);
       return;
     }
     if (action === "archive" && !window.confirm("このタスクをアーカイブしますか？")) return;
@@ -1873,6 +1907,321 @@
         showFlash("通知先を削除しました。", "success");
       });
     });
+  }
+
+  // ===== 設定モーダル =====
+
+  const settingsState = { catalog: [], integrations: {} };
+
+  function initSettingsModal() {
+    const button = $("tb-settings-open");
+    if (!button) return;
+    const modal = $("tb-settings-modal");
+    if (!modal) return;
+    button.addEventListener("click", openSettingsModal);
+    modal.querySelectorAll("[data-settings-close]").forEach((el) => {
+      el.addEventListener("click", () => modal.setAttribute("hidden", ""));
+    });
+    modal.querySelectorAll("[data-settings-tab]").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        modal.querySelectorAll("[data-settings-tab]").forEach((t) => t.classList.toggle("is-active", t === tab));
+        modal.querySelectorAll("[data-settings-panel]").forEach((p) => {
+          p.style.display = p.dataset.settingsPanel === tab.dataset.settingsTab ? "" : "none";
+        });
+      });
+    });
+  }
+
+  async function openSettingsModal() {
+    const modal = $("tb-settings-modal");
+    if (!modal) return;
+    modal.removeAttribute("hidden");
+    await loadSettings();
+  }
+
+  async function loadSettings() {
+    const container = $("tb-settings-integrations-list");
+    if (!container) return;
+    container.innerHTML = '<div class="tobell-empty">読み込み中…</div>';
+    try {
+      const data = await api("/tools/to_bell/api/settings");
+      settingsState.catalog = data.catalog || [];
+      settingsState.integrations = data.integrations || {};
+      renderIntegrationList();
+    } catch (_) {
+      container.innerHTML = '<div class="tobell-empty">読み込みに失敗しました</div>';
+    }
+  }
+
+  function renderIntegrationList() {
+    const container = $("tb-settings-integrations-list");
+    if (!container) return;
+    if (!settingsState.catalog.length) {
+      container.innerHTML = '<div class="tobell-empty">連携機能はまだありません</div>';
+      return;
+    }
+    container.innerHTML = settingsState.catalog.map((item) => {
+      const on = !!settingsState.integrations[item.key];
+      return `
+        <div class="tobell-integration-row">
+          <div class="tobell-integration-meta">
+            <span class="tobell-integration-label">${esc(item.label)}</span>
+            <span class="tobell-integration-tool">${esc(item.tool)}</span>
+            <div class="tobell-integration-desc">${esc(item.description)}</div>
+          </div>
+          <button type="button" class="tobell-switch ${on ? "is-on" : ""}" data-integration-key="${esc(item.key)}" aria-pressed="${on}"></button>
+        </div>`;
+    }).join("");
+    container.querySelectorAll("[data-integration-key]").forEach((btn) => {
+      btn.addEventListener("click", () => toggleIntegration(btn));
+    });
+  }
+
+  async function toggleIntegration(btn) {
+    const key = btn.dataset.integrationKey;
+    const desired = !btn.classList.contains("is-on");
+    btn.disabled = true;
+    try {
+      const next = { ...settingsState.integrations, [key]: desired };
+      const data = await api("/tools/to_bell/api/settings/integrations", {
+        method: "PUT",
+        body: { integrations: next },
+      });
+      settingsState.integrations = data.integrations || {};
+      btn.classList.toggle("is-on", !!settingsState.integrations[key]);
+      btn.setAttribute("aria-pressed", String(!!settingsState.integrations[key]));
+      showFlash(desired ? "連携をONにしました" : "連携をOFFにしました", "success");
+    } catch (_) {
+      // api() が flash 表示する
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ===== 紐付けモーダル =====
+
+  const linksState = { targetType: "", targetId: 0, label: "" };
+
+  function initLinksModal() {
+    const modal = $("tb-links-modal");
+    if (!modal) return;
+    modal.querySelectorAll("[data-links-close]").forEach((el) => {
+      el.addEventListener("click", () => modal.setAttribute("hidden", ""));
+    });
+    const empSearch = $("tb-links-emp-search");
+    if (empSearch) empSearch.addEventListener("click", runEmployeeSearch);
+    const empQ = $("tb-links-emp-q");
+    if (empQ) empQ.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); runEmployeeSearch(); } });
+    const siteSearch = $("tb-links-site-search");
+    if (siteSearch) siteSearch.addEventListener("click", runSiteSearch);
+    const siteQ = $("tb-links-site-q");
+    if (siteQ) siteQ.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); runSiteSearch(); } });
+    const fpForm = $("tb-links-fp-form");
+    if (fpForm) fpForm.addEventListener("submit", uploadFilepostLink);
+  }
+
+  async function openLinksModal(targetType, targetId, label) {
+    const modal = $("tb-links-modal");
+    if (!modal) return;
+    linksState.targetType = targetType;
+    linksState.targetId = Number(targetId) || 0;
+    linksState.label = label || "";
+    const context = $("tb-links-context");
+    if (context) context.textContent = `紐付け対象: ${label || (targetType + ":" + targetId)}`;
+    // 連携許可状況により section の表示/非表示
+    let settings = null;
+    try { settings = await api("/tools/to_bell/api/settings"); } catch (_) { settings = null; }
+    const integrations = (settings && settings.integrations) || {};
+    modal.querySelectorAll("[data-links-kind]").forEach((sec) => {
+      const kind = sec.dataset.linksKind;
+      let enabled = false;
+      if (kind === "employees") enabled = !!integrations["pluslist.linkage"];
+      else if (kind === "sites") enabled = !!integrations["siteplus.linkage"];
+      else if (kind === "filepost") {
+        enabled = (targetType === "task" && !!integrations["filepost.attachment_overflow"]) ||
+                  (targetType === "project" && !!integrations["filepost.project_files"]);
+      }
+      sec.style.display = enabled ? "" : "none";
+    });
+    $("tb-links-emp-results").innerHTML = "";
+    $("tb-links-site-results").innerHTML = "";
+    if (integrations["pluslist.linkage"]) await loadEmployeeLinks();
+    if (integrations["siteplus.linkage"]) await loadSiteLinks();
+    const fpEnabled = (targetType === "task" && integrations["filepost.attachment_overflow"]) ||
+                     (targetType === "project" && integrations["filepost.project_files"]);
+    if (fpEnabled) await loadFilepostLinks();
+    modal.removeAttribute("hidden");
+  }
+
+  // 詳細パネルや プロジェクト編集モーダル から呼び出すための公開フック
+  window.openToBellLinks = openLinksModal;
+
+  async function loadEmployeeLinks() {
+    const container = $("tb-links-emp-current");
+    container.innerHTML = '<div class="tobell-link-empty">読み込み中…</div>';
+    try {
+      const data = await api(`/tools/to_bell/api/links/employees?target_type=${encodeURIComponent(linksState.targetType)}&target_id=${linksState.targetId}`);
+      const items = data.links || [];
+      if (!items.length) { container.innerHTML = '<div class="tobell-link-empty">紐付けはまだありません</div>'; return; }
+      container.innerHTML = items.map((row) => `
+        <div class="tobell-link-row">
+          <div>
+            <div>${esc(row.employee_name || "(無名)")} <span class="tobell-link-sub">${esc(row.employee_number || "")}</span></div>
+            <div class="tobell-link-sub">${esc(row.office_name || "")}</div>
+          </div>
+          <button type="button" class="tobell-btn tobell-danger" data-emp-unlink="${row.link_id}">解除</button>
+        </div>`).join("");
+      container.querySelectorAll("[data-emp-unlink]").forEach((b) => {
+        b.addEventListener("click", async () => {
+          b.disabled = true;
+          try { await api(`/tools/to_bell/api/links/employees/${b.dataset.empUnlink}`, { method: "DELETE" }); await loadEmployeeLinks(); }
+          finally { b.disabled = false; }
+        });
+      });
+    } catch (_) {
+      container.innerHTML = '<div class="tobell-link-empty">読み込みに失敗しました</div>';
+    }
+  }
+
+  async function runEmployeeSearch() {
+    const q = ($("tb-links-emp-q").value || "").trim();
+    const results = $("tb-links-emp-results");
+    results.innerHTML = '<div class="tobell-link-empty">検索中…</div>';
+    try {
+      const data = await api(`/tools/to_bell/api/links/employees/search?q=${encodeURIComponent(q)}`);
+      const items = data.results || [];
+      if (!items.length) { results.innerHTML = '<div class="tobell-link-empty">該当なし</div>'; return; }
+      results.innerHTML = items.map((row) => `
+        <div class="tobell-link-row">
+          <div>
+            <div>${esc(row.employee_name || "(無名)")} <span class="tobell-link-sub">${esc(row.employee_number || "")}</span></div>
+            <div class="tobell-link-sub">${esc(row.office_name || "")}</div>
+          </div>
+          <button type="button" class="tobell-btn tobell-btn-primary" data-emp-link="${row.employee_id}">紐付け</button>
+        </div>`).join("");
+      results.querySelectorAll("[data-emp-link]").forEach((b) => {
+        b.addEventListener("click", async () => {
+          b.disabled = true;
+          try {
+            await api("/tools/to_bell/api/links/employees", { method: "POST", body: {
+              target_type: linksState.targetType, target_id: linksState.targetId, employee_id: Number(b.dataset.empLink),
+            }});
+            await loadEmployeeLinks();
+            showFlash("紐付けました", "success");
+          } finally { b.disabled = false; }
+        });
+      });
+    } catch (_) {
+      results.innerHTML = '<div class="tobell-link-empty">検索に失敗しました</div>';
+    }
+  }
+
+  async function loadSiteLinks() {
+    const container = $("tb-links-site-current");
+    container.innerHTML = '<div class="tobell-link-empty">読み込み中…</div>';
+    try {
+      const data = await api(`/tools/to_bell/api/links/sites?target_type=${encodeURIComponent(linksState.targetType)}&target_id=${linksState.targetId}`);
+      const items = data.links || [];
+      if (!items.length) { container.innerHTML = '<div class="tobell-link-empty">紐付けはまだありません</div>'; return; }
+      container.innerHTML = items.map((row) => `
+        <div class="tobell-link-row">
+          <div>
+            <div>${esc(row.site_name || "(無名)")} <span class="tobell-link-sub">${esc(row.site_id || "")}</span></div>
+          </div>
+          <button type="button" class="tobell-btn tobell-danger" data-site-unlink="${row.link_id}">解除</button>
+        </div>`).join("");
+      container.querySelectorAll("[data-site-unlink]").forEach((b) => {
+        b.addEventListener("click", async () => {
+          b.disabled = true;
+          try { await api(`/tools/to_bell/api/links/sites/${b.dataset.siteUnlink}`, { method: "DELETE" }); await loadSiteLinks(); }
+          finally { b.disabled = false; }
+        });
+      });
+    } catch (_) {
+      container.innerHTML = '<div class="tobell-link-empty">読み込みに失敗しました</div>';
+    }
+  }
+
+  async function runSiteSearch() {
+    const q = ($("tb-links-site-q").value || "").trim();
+    const results = $("tb-links-site-results");
+    results.innerHTML = '<div class="tobell-link-empty">検索中…</div>';
+    try {
+      const data = await api(`/tools/to_bell/api/links/sites/search?q=${encodeURIComponent(q)}`);
+      const items = data.results || [];
+      if (!items.length) { results.innerHTML = '<div class="tobell-link-empty">該当なし</div>'; return; }
+      results.innerHTML = items.map((row) => `
+        <div class="tobell-link-row">
+          <div>
+            <div>${esc(row.site_name || "(無名)")} <span class="tobell-link-sub">${esc(row.site_id || "")}</span></div>
+          </div>
+          <button type="button" class="tobell-btn tobell-btn-primary" data-site-link="${row.site_row_id}">紐付け</button>
+        </div>`).join("");
+      results.querySelectorAll("[data-site-link]").forEach((b) => {
+        b.addEventListener("click", async () => {
+          b.disabled = true;
+          try {
+            await api("/tools/to_bell/api/links/sites", { method: "POST", body: {
+              target_type: linksState.targetType, target_id: linksState.targetId, site_row_id: Number(b.dataset.siteLink),
+            }});
+            await loadSiteLinks();
+            showFlash("紐付けました", "success");
+          } finally { b.disabled = false; }
+        });
+      });
+    } catch (_) {
+      results.innerHTML = '<div class="tobell-link-empty">検索に失敗しました</div>';
+    }
+  }
+
+  async function loadFilepostLinks() {
+    const container = $("tb-links-fp-current");
+    if (!container) return;
+    container.innerHTML = '<div class="tobell-link-empty">読み込み中…</div>';
+    try {
+      const data = await api(`/tools/to_bell/api/integrations/filepost/files?target_type=${encodeURIComponent(linksState.targetType)}&target_id=${linksState.targetId}`);
+      const items = data.files || [];
+      if (!items.length) { container.innerHTML = '<div class="tobell-link-empty">FILEPOST添付はまだありません</div>'; return; }
+      container.innerHTML = items.map((row) => `
+        <div class="tobell-link-row">
+          <div>
+            <div><a href="${esc(row.private_url)}" target="_blank" rel="noopener">${esc(row.file_name)}</a></div>
+            <div class="tobell-link-sub">${formatFileSize(row.file_size)} ・ ${esc(row.uploaded_by || "")}</div>
+          </div>
+          <button type="button" class="tobell-btn tobell-danger" data-fp-unlink="${row.id}">削除</button>
+        </div>`).join("");
+      container.querySelectorAll("[data-fp-unlink]").forEach((b) => {
+        b.addEventListener("click", async () => {
+          if (!window.confirm("このFILEPOST紐付けを解除しますか？")) return;
+          b.disabled = true;
+          try { await api(`/tools/to_bell/api/integrations/filepost/files/${b.dataset.fpUnlink}`, { method: "DELETE" }); await loadFilepostLinks(); }
+          finally { b.disabled = false; }
+        });
+      });
+    } catch (_) {
+      container.innerHTML = '<div class="tobell-link-empty">読み込みに失敗しました</div>';
+    }
+  }
+
+  async function uploadFilepostLink(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const file = $("tb-links-fp-file").files[0];
+    if (!file) { showFlash("ファイルを選択してください", "error"); return; }
+    const data = new FormData();
+    data.append("file", file);
+    data.append("target_type", linksState.targetType);
+    data.append("target_id", String(linksState.targetId));
+    const btn = form.querySelector('[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      await api("/tools/to_bell/api/integrations/filepost/upload", { method: "POST", body: data });
+      form.reset();
+      await loadFilepostLinks();
+      showFlash("FILEPOSTへアップロードしました", "success");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function api(path, options) {
