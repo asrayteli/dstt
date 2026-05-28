@@ -220,6 +220,93 @@ def test_cloudshift_substitute_update_hook_broadcasts_to_enabled_users(app_ctx):
         assert ToBellTask.query.filter_by(created_by="carol").count() == 0
 
 
+def test_save_project_fires_substitute_hook_for_all_update_paths(app_ctx):
+    """`_save_project()` レベルで一元的にフックしているため、
+    どのルート (代務要請ルート / 汎用月更新ルート / ドラフトpublish 等) でも
+    要代務プロジェクトの保存はフックを発火させる。"""
+    from app.models import ToBellTask
+    from app.services.to_bell_integrations import update_integrations
+    from app.tools.cloudshift import (
+        SUBSTITUTE_MODE, SUBSTITUTE_TITLE,
+        _build_month_payload, _save_project, _share_token, _site_storage_fields,
+        _substitute_project_id, _utcnow_iso,
+    )
+
+    _create_user(app_ctx, "alice")
+    with app_ctx.app_context():
+        update_integrations("alice", {"integrations": {"cloudshift.shift_update": True}})
+        pid = _substitute_project_id(1)
+        project = {
+            "id": pid,
+            "owner_user_id": "",
+            "title": SUBSTITUTE_TITLE,
+            "mode": SUBSTITUTE_MODE,
+            "employee_number": "",
+            **_site_storage_fields(None),
+            "master_target_type": "",
+            "master_people": [],
+            "master_sites": [],
+            "substitute_office_id": 1,
+            "view_token": _share_token(),
+            "edit_token": _share_token(),
+            "account_shares": {"office": {"enabled": True, "office_ids": [1]}, "employees": [], "updated_at": _utcnow_iso(), "updated_by": "system"},
+            "created_at": _utcnow_iso(),
+            "updated_at": _utcnow_iso(),
+            "months": {"2026-05": _build_month_payload(2026, 5, False, 0, {})},
+        }
+
+    # POSTリクエストコンテキストで _save_project を呼ぶ (= 任意のmutation routeを模擬)
+    with app_ctx.test_request_context("/", method="POST"):
+        _save_project(project)
+
+    with app_ctx.app_context():
+        tasks = ToBellTask.query.filter_by(
+            source_tool="cloudshift", source_ref_type="substitute_update"
+        ).all()
+        assert len(tasks) == 1
+        assert tasks[0].assigned_to == "alice"
+
+
+def test_save_project_during_get_does_not_fire_substitute_hook(app_ctx):
+    """GET (= 初期化系) では誤発火しない。"""
+    from app.models import ToBellTask
+    from app.services.to_bell_integrations import update_integrations
+    from app.tools.cloudshift import (
+        SUBSTITUTE_MODE, SUBSTITUTE_TITLE,
+        _build_month_payload, _save_project, _share_token, _site_storage_fields,
+        _substitute_project_id, _utcnow_iso,
+    )
+
+    _create_user(app_ctx, "alice")
+    with app_ctx.app_context():
+        update_integrations("alice", {"integrations": {"cloudshift.shift_update": True}})
+        pid = _substitute_project_id(2)
+        project = {
+            "id": pid,
+            "owner_user_id": "",
+            "title": SUBSTITUTE_TITLE,
+            "mode": SUBSTITUTE_MODE,
+            "employee_number": "",
+            **_site_storage_fields(None),
+            "master_target_type": "",
+            "master_people": [],
+            "master_sites": [],
+            "substitute_office_id": 2,
+            "view_token": _share_token(),
+            "edit_token": _share_token(),
+            "account_shares": {"office": {"enabled": True, "office_ids": [2]}, "employees": [], "updated_at": _utcnow_iso(), "updated_by": "system"},
+            "created_at": _utcnow_iso(),
+            "updated_at": _utcnow_iso(),
+            "months": {"2026-05": _build_month_payload(2026, 5, False, 0, {})},
+        }
+
+    with app_ctx.test_request_context("/api/list", method="GET"):
+        _save_project(project)
+
+    with app_ctx.app_context():
+        assert ToBellTask.query.filter_by(source_tool="cloudshift").count() == 0
+
+
 def test_filepost_threshold_endpoint_reports_feature_state(app_ctx):
     _create_user(app_ctx, "alice")
     client = app_ctx.test_client()

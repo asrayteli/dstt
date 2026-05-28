@@ -129,21 +129,31 @@ def on_cloudshift_substitute_updated(
     *,
     substitute_project_id: str,
     substitute_project_title: str,
-    month_key: str,
-    day_key: str,
-    action: str,
+    month_key: str = "",
+    day_key: str = "",
+    action: str = "updated",
 ) -> None:
-    """要代務シフト帳が更新されたとき、連携許可ユーザー全員に確認タスクを追加。"""
+    """要代務シフト帳が更新されたとき、連携許可ユーザー全員に確認タスクを追加。
+
+    同一営業日の同一プロジェクトに対しては1ユーザー1タスクのみ（dedupする）。
+    """
     integration_key = "cloudshift.shift_update"
     try:
         targets = enabled_users(integration_key)
         if not targets:
             return
-        title = f"[CloudShift] 要代務シフト帳が更新されました: {month_key} {day_key}日"
-        body = f"{substitute_project_title} の代務枠が更新（{action}）されました。内容を確認してください。"
-        href = f"/tools/shiftersync/cloudshift?project={substitute_project_id}&month={month_key}"
-        # 1回の更新につき1日単位で1タスクを作りたい（重複を避ける）
-        dedupe_id = f"{substitute_project_id}:{month_key}:{day_key}:{datetime.utcnow().strftime('%Y%m%d%H')}"
+        # 日次dedup: 1日に何度更新されても、同じプロジェクトでは1人1タスク
+        today_key = datetime.utcnow().strftime("%Y%m%d")
+        title = f"[CloudShift] 要代務シフト帳が更新されました: {substitute_project_title}"
+        if month_key or day_key:
+            body_lines = [f"更新箇所: {month_key} {day_key}日 ({action})"]
+        else:
+            body_lines = [f"更新内容: {action}"]
+        body_lines.append("ToBellで開いて確認してください。")
+        body = "\n".join(body_lines)
+        href = f"/tools/shiftersync/cloudshift?project={substitute_project_id}"
+        if month_key:
+            href += f"&month={month_key}"
         for user in targets:
             _create_task_for(
                 target_user=user,
@@ -151,7 +161,7 @@ def on_cloudshift_substitute_updated(
                 description=body,
                 source_tool="cloudshift",
                 source_ref_type="substitute_update",
-                source_ref_id=f"{user}:{dedupe_id}",
+                source_ref_id=f"{user}:{substitute_project_id}:{today_key}",
                 href=href,
                 severity="info",
                 priority="normal",
