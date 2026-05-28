@@ -995,21 +995,28 @@
     }
 
     function titleFieldRefs(kind) {
+      const inputId = kind === 'create' ? 'cloud-create-title' : 'cloud-project-title';
+      const inputEl = $(inputId);
+      const labelEl = inputEl && inputEl.closest('label') ? inputEl.closest('label').querySelector(':scope > span') : null;
       if (kind === 'create') {
         return {
-          input: $('cloud-create-title'),
+          input: inputEl,
           hidden: $('cloud-create-employee-number'),
           panel: $('cloud-create-candidate-panel'),
           note: $('cloud-create-selected-note'),
-          label: $('cloud-create-title') ? $('cloud-create-title').previousElementSibling : null
+          label: labelEl,
+          pickButton: $('cloud-create-pick-employee'),
+          clearButton: $('cloud-create-clear-employee')
         };
       }
       return {
-        input: $('cloud-project-title'),
+        input: inputEl,
         hidden: $('cloud-project-employee-number'),
         panel: $('cloud-project-candidate-panel'),
         note: $('cloud-project-selected-note'),
-        label: $('cloud-project-title') ? $('cloud-project-title').previousElementSibling : null
+        label: labelEl,
+        pickButton: $('cloud-project-pick-employee'),
+        clearButton: $('cloud-project-clear-employee')
       };
     }
 
@@ -1286,8 +1293,13 @@
         refs.label.textContent = isPerson ? '社員' : 'タイトル';
       }
       if (refs.input) {
-        refs.input.placeholder = isPerson ? '社員名' : 'タイトル';
+        refs.input.placeholder = isPerson ? '社員名（未指定なら「未割り当て」になります）' : 'タイトル';
+        if (kind === 'create') {
+          refs.input.required = !isPerson;
+        }
       }
+      if (refs.pickButton) refs.pickButton.classList.toggle('cloud-hidden', !isPerson);
+      if (refs.clearButton) refs.clearButton.classList.toggle('cloud-hidden', !isPerson);
       if (!isPerson) {
         if (refs.hidden) refs.hidden.value = '';
         if (refs.note) refs.note.textContent = '';
@@ -1491,6 +1503,92 @@
         queryInput._siteTimer = window.setTimeout(() => load().catch((error) => showFlash(error.message, 'error')), 180);
       });
       await load();
+      queryInput.focus();
+    }
+
+    function clearEmployeeSelection(kind) {
+      const refs = titleFieldRefs(kind);
+      if (refs.input) {
+        refs.input.value = '';
+        refs.input.dataset.selectedEmployeeName = '';
+      }
+      if (refs.hidden) refs.hidden.value = '';
+      if (refs.note) refs.note.textContent = '';
+      if (refs.panel) {
+        refs.panel.innerHTML = '';
+        refs.panel.classList.add('cloud-hidden');
+      }
+    }
+
+    async function openEmployeePicker(kind) {
+      const modal = openCloudModal('cloud-site-picker-modal', kind === 'create' ? '社員を選択' : '社員設定');
+      const body = modalBody(modal);
+      const footer = modalFooter(modal);
+      if (!body || !footer) return;
+
+      body.innerHTML = `
+        <div class="cloud-form">
+          <label class="cloud-field">
+            <span>社員検索</span>
+            <input id="cloud-employee-picker-query" class="cloud-input" type="text" placeholder="社員名または社員番号">
+          </label>
+          <div id="cloud-employee-picker-list" class="cloud-project-list"></div>
+        </div>
+      `;
+      footer.innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-modal-close-pick>閉じる</button>';
+      const closeBtn = footer.querySelector('[data-cloud-modal-close-pick]');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => closeCloudModal('cloud-site-picker-modal'));
+      }
+
+      const queryInput = $('cloud-employee-picker-query');
+      const list = $('cloud-employee-picker-list');
+      if (!queryInput || !list) return;
+
+      const render = (items) => {
+        const normalized = (Array.isArray(items) ? items : [])
+          .map((item) => ({
+            employee_number: String(item.employee_number || '').trim(),
+            employee_name: String(item.employee_name || '').trim()
+          }))
+          .filter((item) => item.employee_number && item.employee_name);
+        if (!normalized.length) {
+          list.innerHTML = '<div class="cloud-empty-state"><p>候補が見つかりません。</p></div>';
+          return;
+        }
+        list.innerHTML = normalized.map((item) => `
+          <article class="cloud-project-item" data-employee-pick="${escapeHtml(item.employee_number)}" data-employee-name="${escapeHtml(item.employee_name)}">
+            <div class="cloud-project-card-head">
+              <div>
+                <h3>${escapeHtml(item.employee_name)}</h3>
+                <p>社員番号: ${escapeHtml(item.employee_number)}</p>
+              </div>
+              <span class="cloud-badge">${escapeHtml(item.employee_number)}</span>
+            </div>
+          </article>
+        `).join('');
+        list.querySelectorAll('[data-employee-pick]').forEach((node) => {
+          node.addEventListener('click', () => {
+            const selected = {
+              employee_number: node.getAttribute('data-employee-pick') || '',
+              employee_name: node.getAttribute('data-employee-name') || ''
+            };
+            applyEmployeeCandidate(kind, selected);
+            closeCloudModal('cloud-site-picker-modal');
+          });
+        });
+      };
+
+      const load = async () => {
+        const items = await fetchEmployeeCandidates(queryInput.value.trim());
+        render(items);
+      };
+
+      queryInput.addEventListener('input', () => {
+        window.clearTimeout(queryInput._employeeTimer);
+        queryInput._employeeTimer = window.setTimeout(() => load().catch((error) => showFlash(error.message, 'error')), 180);
+      });
+      render([]);
       queryInput.focus();
     }
 
@@ -6276,6 +6374,7 @@
           <span class="cloud-badge">${(project.month_keys || []).length}か月</span>
           ${draftChanged ? `<span class="cloud-badge cloud-draft-badge">仮保存あり</span>` : ''}
           ${project.mode === 'scene' ? `<span class="cloud-badge">${escapeHtml(project.site && project.site.site_id ? `${project.site.site_id} / ${project.site.site_name || ''}` : '現場未設定')}</span>` : ''}
+          ${project.mode === 'person' ? `<span class="cloud-badge">${escapeHtml(project.employee_number ? `社員 ${project.employee_number}` : '社員未設定')}</span>` : ''}
           ${project.mode === 'master' ? `<span class="cloud-badge cloud-badge-master">${escapeHtml(masterTargetLabel)} ${escapeHtml(String(masterTargetCount))}件</span>` : ''}
           <span class="cloud-badge">${escapeHtml(formatTimestamp(project.updated_at))}</span>
         `;
@@ -6315,6 +6414,8 @@
       if ($('cloud-open-bulk-edit')) $('cloud-open-bulk-edit').classList.toggle('cloud-hidden', !month || !isOwnerEditable || (PAGE.type === 'public' && PAGE.accessMode !== 'edit'));
       if ($('cloud-project-pick-site')) $('cloud-project-pick-site').classList.toggle('cloud-hidden', !canManageProject);
       if ($('cloud-project-clear-site')) $('cloud-project-clear-site').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-project-pick-employee')) $('cloud-project-pick-employee').classList.toggle('cloud-hidden', !canManageProject || project.mode !== 'person');
+      if ($('cloud-project-clear-employee')) $('cloud-project-clear-employee').classList.toggle('cloud-hidden', !canManageProject || project.mode !== 'person');
       if ($('cloud-open-view-url')) $('cloud-open-view-url').classList.toggle('cloud-hidden', !canManageProject);
       if ($('cloud-copy-view-url')) $('cloud-copy-view-url').classList.toggle('cloud-hidden', !canManageProject);
       if ($('cloud-open-edit-url')) $('cloud-open-edit-url').classList.toggle('cloud-hidden', !canManageProject);
@@ -6325,6 +6426,10 @@
       if ($('cloud-site-warning')) {
         const showSiteWarning = project.mode === 'scene' && !(project.site && project.site.is_linked);
         $('cloud-site-warning').classList.toggle('cloud-hidden', !showSiteWarning);
+      }
+      if ($('cloud-person-warning')) {
+        const showPersonWarning = project.mode === 'person' && !String(project.employee_number || '').trim();
+        $('cloud-person-warning').classList.toggle('cloud-hidden', !showPersonWarning);
       }
 
       if ($('cloud-editor-title')) {
@@ -7486,6 +7591,37 @@
       if (openSitePickerButton) {
         openSitePickerButton.addEventListener('click', () => {
           openSitePicker('project').catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const createPickEmployee = $('cloud-create-pick-employee');
+      if (createPickEmployee) {
+        createPickEmployee.addEventListener('click', () => {
+          openEmployeePicker('create').catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const createClearEmployee = $('cloud-create-clear-employee');
+      if (createClearEmployee) {
+        createClearEmployee.addEventListener('click', () => clearEmployeeSelection('create'));
+      }
+
+      const projectPickEmployee = $('cloud-project-pick-employee');
+      if (projectPickEmployee) {
+        projectPickEmployee.addEventListener('click', () => {
+          openEmployeePicker('project').catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const projectClearEmployee = $('cloud-project-clear-employee');
+      if (projectClearEmployee) {
+        projectClearEmployee.addEventListener('click', () => clearEmployeeSelection('project'));
+      }
+
+      const openEmployeePickerButton = $('cloud-open-employee-picker');
+      if (openEmployeePickerButton) {
+        openEmployeePickerButton.addEventListener('click', () => {
+          openEmployeePicker('project').catch((error) => showFlash(error.message, 'error'));
         });
       }
 

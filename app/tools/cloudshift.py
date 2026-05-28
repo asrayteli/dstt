@@ -140,6 +140,7 @@ SHIFT_SYNC_SOURCE_TYPES = {
 }
 SUBSTITUTE_MODE = "substitute"
 SUBSTITUTE_TITLE = "要代務シフト帳"
+PERSON_UNASSIGNED_TITLE = "未割り当て"
 JST = timezone(timedelta(hours=9))
 
 
@@ -6926,20 +6927,26 @@ def api_create():
     csv_file = request.files.get("csv_file")
     if csv_file and csv_file.filename:
         parsed = _parse_shiftersync_csv(csv_file)
-        title = _sanitize_title(title_override or parsed["title"])
         mode = parsed["mode"]
         if mode == SUBSTITUTE_MODE:
             raise CloudShiftError("要代務シフト帳は営業所ごとに自動作成されます", 400)
+        raw_title = title_override or parsed["title"]
+        if mode == "person" and not str(raw_title or "").strip():
+            raw_title = PERSON_UNASSIGNED_TITLE
+        title = _sanitize_title(raw_title)
         employee_number = parsed.get("employee_number", "")
         year, month = _validate_year_month(parsed["year"], parsed["month"])
         capacity_enabled = parsed["capacity_enabled"]
         required_capacity = parsed["required_capacity"]
         entries = parsed["entries_per_day"]
     else:
-        title = _sanitize_title(title_override)
         mode = _sanitize_mode(request.form.get("mode"))
         if mode == SUBSTITUTE_MODE:
             raise CloudShiftError("要代務シフト帳は営業所ごとに自動作成されます", 400)
+        raw_title = title_override
+        if mode == "person" and not str(raw_title or "").strip():
+            raw_title = PERSON_UNASSIGNED_TITLE
+        title = _sanitize_title(raw_title)
         employee_number = _sanitize_employee_number(request.form.get("employee_number"))
         year, month = _validate_year_month(request.form.get("year"), request.form.get("month"))
         capacity_enabled, required_capacity = _sanitize_capacity(request.form.get("required_capacity"))
@@ -7060,7 +7067,10 @@ def api_project_meta(project_id: str):
     should_backfill_scene_person_experience = False
     with _project_lock(project_id):
         project = _owner_project_or_404(project_id)
-        new_title = _sanitize_title(data.get("title", project["title"]))
+        raw_new_title = data.get("title", project["title"])
+        if project.get("mode") == "person" and not str(raw_new_title or "").strip():
+            raw_new_title = PERSON_UNASSIGNED_TITLE
+        new_title = _sanitize_title(raw_new_title)
         old_title = project["title"]
         old_employee_number = str(project.get("employee_number") or "")
         old_site = _project_site_payload(project)

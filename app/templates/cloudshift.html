@@ -57,8 +57,12 @@
         <div class="cloud-form-grid">
           <label class="cloud-field">
             <span>タイトル</span>
-            <input id="cloud-create-title" name="title" class="cloud-input" type="text" required>
-            <input id="cloud-create-employee-number" name="employee_number" type="hidden">
+            <div class="cloud-field-stack-inline">
+              <input id="cloud-create-title" name="title" class="cloud-input" type="text">
+              <input id="cloud-create-employee-number" name="employee_number" type="hidden">
+              <button id="cloud-create-pick-employee" type="button" class="cloud-btn secondary cloud-hidden">社員を選ぶ</button>
+              <button id="cloud-create-clear-employee" type="button" class="cloud-btn ghost cloud-hidden">解除</button>
+            </div>
             <div id="cloud-create-candidate-panel" class="cloud-input-panel cloud-hidden"></div>
             <div id="cloud-create-selected-note" class="cloud-field-note"></div>
           </label>
@@ -158,6 +162,13 @@
             <button id="cloud-open-site-picker" type="button" class="cloud-btn secondary">現場を設定する</button>
           </div>
         </div>
+        <div id="cloud-person-warning" class="cloud-empty-state warning cloud-hidden">
+          <h2>社員が未設定です</h2>
+          <p>この個人シフトはまだ社員マスタと紐付いていません。後から社員を紐づけできます。</p>
+          <div class="cloud-actions">
+            <button id="cloud-open-employee-picker" type="button" class="cloud-btn secondary">社員を設定する</button>
+          </div>
+        </div>
         <div class="cloud-editor-bar">
           <div class="cloud-editor-heading">
             <h2 id="cloud-editor-title">編集</h2>
@@ -166,8 +177,12 @@
           <div class="cloud-editor-actions">
             <label class="cloud-field cloud-field-inline cloud-title-field">
               <span>タイトル</span>
-              <input id="cloud-project-title" class="cloud-input" type="text">
-              <input id="cloud-project-employee-number" type="hidden">
+              <div class="cloud-field-stack-inline">
+                <input id="cloud-project-title" class="cloud-input" type="text">
+                <input id="cloud-project-employee-number" type="hidden">
+                <button id="cloud-project-pick-employee" type="button" class="cloud-btn secondary cloud-hidden">社員を選ぶ</button>
+                <button id="cloud-project-clear-employee" type="button" class="cloud-btn ghost cloud-hidden">解除</button>
+              </div>
             </label>
             <label id="cloud-project-site-field" class="cloud-field cloud-field-inline cloud-title-field">
               <span>現場</span>
