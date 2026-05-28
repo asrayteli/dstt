@@ -1076,6 +1076,138 @@
   padding-top: 0.85rem;
 }
 
+/* ===== 添付ビューワ（画像 / PDF） ===== */
+.tobell-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 23, 42, 0.94);
+}
+
+.tobell-viewer[hidden] {
+  display: none;
+}
+
+.tobell-viewer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  padding-top: calc(0.6rem + env(safe-area-inset-top));
+  background: #0f172a;
+  color: #ffffff;
+  border-bottom: 1px solid #1e293b;
+}
+
+.tobell-viewer-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tobell-viewer-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tobell-viewer-actions .tobell-btn {
+  min-height: 40px;
+  padding: 0.4rem 0.75rem;
+  background: #1e293b;
+  color: #f1f5f9;
+  border: 1px solid #334155;
+}
+
+.tobell-viewer-actions .tobell-btn:hover {
+  background: #334155;
+}
+
+#tb-viewer-pct {
+  min-width: 64px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tobell-viewer-dl {
+  text-decoration: none;
+}
+
+.tobell-viewer-close {
+  background: #b91c1c !important;
+  border-color: #b91c1c !important;
+  color: #ffffff !important;
+  font-size: 1.15rem;
+  font-weight: 800;
+  min-width: 44px;
+  line-height: 1;
+}
+
+.tobell-viewer-close:hover {
+  background: #991b1b !important;
+}
+
+.tobell-viewer-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  background: #0f172a;
+  /* iOSのバウンス時の白縁防止 */
+  overscroll-behavior: contain;
+}
+
+.tobell-viewer-stage {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100%;
+  padding: 1rem;
+  transform-origin: center top;
+  transition: transform 0.15s ease;
+}
+
+.tobell-viewer-stage img {
+  max-width: 100%;
+  height: auto;
+  background: #ffffff;
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.tobell-viewer-stage iframe,
+.tobell-viewer-stage embed {
+  width: min(960px, 100%);
+  height: 80vh;
+  border: 0;
+  background: #ffffff;
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+body.tb-viewer-active {
+  overflow: hidden;
+}
+
+/* 添付リンクが画像/PDFのときに「クリックでプレビュー」のヒントを出す */
+.tobell-attachment-link[data-viewable="1"]::after {
+  content: "プレビュー";
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1e3a8a;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
 body.tobell-pwa-mode {
   margin: 0;
   background: #f8fafc;
@@ -1140,6 +1272,56 @@ body.tobell-pwa-mode .tobell-cal-cell {
 
 body.tobell-pwa-mode .tobell-cal-task {
   font-size: 0.68rem;
+}
+
+/* PWA: ビューワは画面いっぱい・タップしやすい大きなボタン */
+body.tobell-pwa-mode .tobell-viewer-head {
+  padding: 0.55rem 0.7rem;
+  padding-top: calc(0.55rem + env(safe-area-inset-top));
+  gap: 0.5rem;
+}
+
+body.tobell-pwa-mode .tobell-viewer-title {
+  font-size: 0.88rem;
+}
+
+body.tobell-pwa-mode .tobell-viewer-actions {
+  gap: 0.3rem;
+}
+
+body.tobell-pwa-mode .tobell-viewer-actions .tobell-btn {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.85rem;
+}
+
+body.tobell-pwa-mode .tobell-viewer-close {
+  min-width: 48px;
+  font-size: 1.3rem;
+}
+
+body.tobell-pwa-mode #tb-viewer-pct {
+  min-width: 58px;
+  padding-left: 0.4rem;
+  padding-right: 0.4rem;
+}
+
+body.tobell-pwa-mode .tobell-viewer-dl {
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+}
+
+body.tobell-pwa-mode .tobell-viewer-stage {
+  padding: 0.5rem;
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+}
+
+body.tobell-pwa-mode .tobell-viewer-stage iframe,
+body.tobell-pwa-mode .tobell-viewer-stage embed {
+  width: 100%;
+  height: calc(100svh - 60px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  border-radius: 4px;
 }
 
 /* ===== タブレット ===== */
@@ -1349,5 +1531,24 @@ body.tobell-pwa-mode .tobell-cal-task {
 
   .tobell-cal-task {
     font-size: 0.68rem;
+  }
+
+  /* スマホ版ビューワ */
+  .tobell-viewer-actions .tobell-btn {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.85rem;
+  }
+
+  .tobell-viewer-close {
+    min-width: 48px;
+    font-size: 1.3rem;
+  }
+
+  .tobell-viewer-stage iframe,
+  .tobell-viewer-stage embed {
+    width: 100%;
+    height: calc(100svh - 60px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   }
 }
