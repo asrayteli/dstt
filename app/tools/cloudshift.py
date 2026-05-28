@@ -1788,6 +1788,30 @@ def _load_project(project_id: str) -> dict[str, Any]:
 def _save_project(project: dict[str, Any]) -> None:
     project["updated_at"] = _utcnow_iso()
     _upsert_project_to_db(project)
+    _notify_tobell_on_substitute_save(project)
+
+
+def _notify_tobell_on_substitute_save(project: dict[str, Any]) -> None:
+    """要代務シフト帳のあらゆる保存経路でToBellへ通知する。失敗してもCloudShiftを止めない。
+
+    GETリクエストや非HTTPコンテキストでは発火しない（_ensure_substitute_project_for_office_month
+    のような初期化保存で誤発火しないため）。
+    """
+    if not _is_substitute_project(project):
+        return
+    try:
+        from flask import has_request_context, request
+
+        if not has_request_context() or request.method == "GET":
+            return
+        from app.services.to_bell_hooks import on_cloudshift_substitute_updated
+
+        on_cloudshift_substitute_updated(
+            substitute_project_id=str(project.get("id") or ""),
+            substitute_project_title=str(project.get("title") or SUBSTITUTE_TITLE),
+        )
+    except Exception:
+        pass
 
 
 def _append_history(project_id: str, entry: dict[str, Any]) -> None:
@@ -8099,18 +8123,6 @@ def api_create_substitute_request(project_id: str):
                 "source_entry_id": entry_id or request_entry.get("substitute_source_entry_id", ""),
             },
         )
-        try:
-            from app.services.to_bell_hooks import on_cloudshift_substitute_updated
-
-            on_cloudshift_substitute_updated(
-                substitute_project_id=str(substitute_project.get("id") or ""),
-                substitute_project_title=str(substitute_project.get("title") or SUBSTITUTE_TITLE),
-                month_key=month_key,
-                day_key=str(day_key),
-                action=history_action,
-            )
-        except Exception:
-            pass
 
     substitute_project = _load_project(substitute_project["id"])
     _resync_shift_month(substitute_project, month_key, actor_name=_user_label())
