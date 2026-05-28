@@ -2032,23 +2032,23 @@
     let settings = null;
     try { settings = await api("/tools/to_bell/api/settings"); } catch (_) { settings = null; }
     const integrations = (settings && settings.integrations) || {};
+    const fpEnabled = (targetType === "task" && !!integrations["filepost.attachment_overflow"]) ||
+                     (targetType === "project" && !!integrations["filepost.project_files"]);
+    const anyEnabled = !!integrations["pluslist.linkage"] || !!integrations["siteplus.linkage"] || fpEnabled;
+    const emptyMsg = $("tb-links-empty");
+    if (emptyMsg) emptyMsg.hidden = anyEnabled;
     modal.querySelectorAll("[data-links-kind]").forEach((sec) => {
       const kind = sec.dataset.linksKind;
       let enabled = false;
       if (kind === "employees") enabled = !!integrations["pluslist.linkage"];
       else if (kind === "sites") enabled = !!integrations["siteplus.linkage"];
-      else if (kind === "filepost") {
-        enabled = (targetType === "task" && !!integrations["filepost.attachment_overflow"]) ||
-                  (targetType === "project" && !!integrations["filepost.project_files"]);
-      }
+      else if (kind === "filepost") enabled = fpEnabled;
       sec.style.display = enabled ? "" : "none";
     });
     $("tb-links-emp-results").innerHTML = "";
     $("tb-links-site-results").innerHTML = "";
     if (integrations["pluslist.linkage"]) await loadEmployeeLinks();
     if (integrations["siteplus.linkage"]) await loadSiteLinks();
-    const fpEnabled = (targetType === "task" && integrations["filepost.attachment_overflow"]) ||
-                     (targetType === "project" && integrations["filepost.project_files"]);
     if (fpEnabled) await loadFilepostLinks();
     modal.removeAttribute("hidden");
   }

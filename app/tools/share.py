@@ -681,7 +681,7 @@ def create_internal_share(
     try:
         download_url = url_for("share.view_download", uid=uid, _external=True)
     except RuntimeError:
-        download_url = f"/tools/share/d/{uid}"
+        download_url = f"/tools/share/view/{uid}"
 
     return {
         "uid": uid,

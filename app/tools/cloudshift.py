@@ -6637,7 +6637,7 @@ def _create_leave_change_request(project: dict[str, Any], payload: dict[str, Any
             request_payload=request_payload,
             project_title=str(project.get("title") or ""),
             project_id=str(project.get("id") or ""),
-            creator_username=str(project.get("owner_username") or project.get("created_by") or "") or None,
+            creator_username=str(project.get("owner_user_id") or "") or None,
         )
     except Exception:
         pass
