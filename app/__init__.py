@@ -271,6 +271,15 @@ def _ensure_access_control_schema(app):
                 alters.append("ALTER TABLE cloudshift_history ADD COLUMN payload JSON")
                 post_updates.append("UPDATE cloudshift_history SET payload = '{}' WHERE payload IS NULL")
 
+        if "to_bell_projects" in inspector.get_table_names():
+            project_cols = {c["name"] for c in inspector.get_columns("to_bell_projects")}
+            if "calendar_only" not in project_cols:
+                alters.append("ALTER TABLE to_bell_projects ADD COLUMN calendar_only BOOLEAN NOT NULL DEFAULT 0")
+            if "pinned" not in project_cols:
+                alters.append("ALTER TABLE to_bell_projects ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT 0")
+            if "sort_order" not in project_cols:
+                alters.append("ALTER TABLE to_bell_projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+
         if "vehicle_inspection_records" in inspector.get_table_names():
             vehicle_inspection_cols = {c["name"] for c in inspector.get_columns("vehicle_inspection_records")}
             if "model_type" in vehicle_inspection_cols:

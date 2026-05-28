@@ -15,6 +15,7 @@ from app.models import (
     ToBellComment,
     ToBellNotification,
     ToBellProject,
+    ToBellProjectMember,
     ToBellShareToken,
     ToBellSubtask,
     ToBellTag,
@@ -28,7 +29,8 @@ from app.models import (
 VALID_STATUSES = {"todo", "doing", "blocked", "review", "returned", "done", "archived"}
 VALID_PRIORITIES = {"low", "normal", "high", "urgent"}
 VALID_PROJECT_STATUSES = {"active", "done", "archived"}
-VALID_SCOPES = {"private", "office"}
+VALID_SCOPES = {"private", "office", "members"}
+PROJECT_STATUS_ORDER = {"active": 0, "done": 1, "archived": 2}
 
 ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 
@@ -100,9 +102,14 @@ def list_tasks(
     filter_name: str = "today",
     search: str = "",
     project_id: Any = None,
+    view: str = "list",
 ) -> list[ToBellTask]:
     today = date.today()
     query = ToBellTask.query.filter(visible_task_filter(username))
+    pid = _safe_int(project_id)
+    if view != "calendar" and not pid:
+        hidden_subq = db.session.query(ToBellProject.id).filter(ToBellProject.calendar_only.is_(True))
+        query = query.filter(or_(ToBellTask.project_id.is_(None), ToBellTask.project_id.notin_(hidden_subq)))
     if filter_name == "board":
         # カンバン / カレンダー用: アーカイブ以外の参加タスクをすべて返す。
         query = query.filter(ToBellTask.status != "archived")
@@ -135,7 +142,6 @@ def list_tasks(
     if search:
         like = f"%{search.strip()}%"
         query = query.filter(or_(ToBellTask.title.ilike(like), ToBellTask.description.ilike(like)))
-    pid = _safe_int(project_id)
     if pid:
         query = query.filter(ToBellTask.project_id == pid)
     return query.order_by(
@@ -514,7 +520,16 @@ def list_projects(username: str, *, include_archived: bool = False) -> list[dict
     query = ToBellProject.query.filter(_project_visible_filter(username, office_id))
     if not include_archived:
         query = query.filter(ToBellProject.status != "archived")
-    projects = query.order_by(ToBellProject.status, ToBellProject.name).all()
+    projects = sorted(
+        query.all(),
+        key=lambda p: (
+            0 if p.pinned else 1,
+            PROJECT_STATUS_ORDER.get(p.status, 9),
+            int(p.sort_order or 0),
+            (p.name or "").lower(),
+            p.id,
+        ),
+    )
     result = []
     for project in projects:
         total = ToBellTask.query.filter(
@@ -547,8 +562,14 @@ def create_project(username: str, payload: dict[str, Any]) -> ToBellProject:
         owner_id=username,
         visibility_scope=_choice(payload.get("visibility_scope"), VALID_SCOPES, "office"),
         office_id=_user_office_id(username),
+        calendar_only=_truthy(payload.get("calendar_only")),
+        pinned=_truthy(payload.get("pinned")),
+        sort_order=_safe_int(payload.get("sort_order")) or 0,
     )
     db.session.add(project)
+    db.session.flush()
+    if "members" in payload:
+        _sync_project_members(project, username, payload.get("members"))
     db.session.commit()
     return project
 
@@ -569,9 +590,104 @@ def update_project(project: ToBellProject, username: str, payload: dict[str, Any
         project.color = _safe_color(payload.get("color"), project.color)
     if "visibility_scope" in payload:
         project.visibility_scope = _choice(payload.get("visibility_scope"), VALID_SCOPES, project.visibility_scope)
+    if "calendar_only" in payload:
+        project.calendar_only = _truthy(payload.get("calendar_only"))
+    if "pinned" in payload:
+        project.pinned = _truthy(payload.get("pinned"))
+    if "sort_order" in payload:
+        project.sort_order = _safe_int(payload.get("sort_order")) or 0
+    if "members" in payload:
+        _sync_project_members(project, username, payload.get("members"))
     project.updated_at = datetime.utcnow()
     db.session.commit()
     return project
+
+
+def reorder_projects(username: str, ordered_ids: Any) -> int:
+    """利用者が見られるプロジェクトを、与えられた並び順で sort_order に反映する。"""
+    if not isinstance(ordered_ids, (list, tuple)):
+        raise ToBellInputError("ordered_ids", "並び替えるプロジェクトを指定してください。")
+    office_id = _user_office_id(username)
+    visible = {
+        p.id: p
+        for p in ToBellProject.query.filter(_project_visible_filter(username, office_id)).all()
+    }
+    updated = 0
+    for index, raw in enumerate(ordered_ids):
+        pid = _safe_int(raw)
+        project = visible.get(pid) if pid else None
+        if project is None:
+            continue
+        if project.sort_order != index:
+            project.sort_order = index
+            updated += 1
+    if updated:
+        db.session.commit()
+    return updated
+
+
+def notify_project(project: ToBellProject, actor: str, payload: dict[str, Any]) -> int:
+    """プロジェクトが見える全員に通知を送る。送信者自身には送らない。"""
+    title = str(payload.get("title") or "").strip()
+    body = str(payload.get("body") or "").strip()
+    if not title:
+        raise ToBellInputError("title", "通知タイトルを入力してください。")
+    severity = _choice(payload.get("severity"), {"info", "warning", "urgent"}, "info")
+    recipients = sorted(_project_audience(project, actor) - {actor})
+    if not recipients:
+        return 0
+    href = f"/tools/to_bell?project_id={project.id}"
+    body_text = (body or project.name)[:1000]
+    for user_id in recipients:
+        db.session.add(
+            ToBellNotification(
+                user_id=user_id,
+                source_tool="to_bell",
+                event_type="project_notify",
+                title=f"[{project.name}] {title}"[:240],
+                body=body_text,
+                href=href,
+                severity=severity,
+            )
+        )
+    db.session.commit()
+    return len(recipients)
+
+
+def _project_audience(project: ToBellProject, actor: str) -> set[str]:
+    audience: set[str] = {project.owner_id}
+    if project.visibility_scope == "office" and project.office_id is not None:
+        rows = User.query.filter_by(office_id=project.office_id).all()
+        audience.update(row.username for row in rows if row.username)
+    elif project.visibility_scope == "members":
+        audience.update(member.username for member in project.members if member.username)
+    return audience
+
+
+def _sync_project_members(project: ToBellProject, actor: str, raw: Any) -> None:
+    if project.owner_id != actor and not _is_admin(actor):
+        raise ToBellInputError("members", "メンバーを変更できるのは作成者のみです。")
+    if isinstance(raw, str):
+        names_iter = [item.strip() for item in raw.replace("、", ",").split(",")]
+    elif isinstance(raw, list):
+        names_iter = [str(item).strip() for item in raw]
+    else:
+        names_iter = []
+    allowed = _same_office_usernames(actor)
+    desired: set[str] = set()
+    for name in names_iter:
+        if not name or name == project.owner_id:
+            continue
+        if name not in allowed:
+            raise ToBellInputError("members", "メンバーに指定できるのは同じ営業所内のユーザーのみです。")
+        desired.add(name)
+    existing = {m.username: m for m in project.members}
+    for username in list(existing):
+        if username not in desired:
+            db.session.delete(existing[username])
+    for username in desired:
+        if username not in existing:
+            db.session.add(ToBellProjectMember(project_id=project.id, username=username))
 
 
 def delete_project(project: ToBellProject, username: str) -> None:
@@ -580,6 +696,50 @@ def delete_project(project: ToBellProject, username: str) -> None:
     ToBellTask.query.filter_by(project_id=project.id).update({"project_id": None})
     db.session.delete(project)
     db.session.commit()
+
+
+def list_assignable_tasks(project: ToBellProject, username: str, *, search: str = "") -> list[ToBellTask]:
+    """このプロジェクトに紐づいていない、利用者が見られるタスク一覧。"""
+    query = ToBellTask.query.filter(
+        visible_task_filter(username),
+        ToBellTask.status != "archived",
+        or_(ToBellTask.project_id.is_(None), ToBellTask.project_id != project.id),
+    )
+    if search:
+        like = f"%{search.strip()}%"
+        query = query.filter(or_(ToBellTask.title.ilike(like), ToBellTask.description.ilike(like)))
+    return query.order_by(
+        ToBellTask.status == "done",
+        ToBellTask.due_at.is_(None),
+        ToBellTask.due_at.asc(),
+        ToBellTask.updated_at.desc(),
+    ).limit(300).all()
+
+
+def bulk_assign_tasks_to_project(project: ToBellProject, username: str, task_ids: Any) -> int:
+    """指定のタスクをプロジェクトに紐付け。編集権限のあるタスクだけが対象。"""
+    if not isinstance(task_ids, (list, tuple)):
+        raise ToBellInputError("task_ids", "対象タスクを指定してください。")
+    ids = []
+    for raw in task_ids:
+        pid = _safe_int(raw)
+        if pid:
+            ids.append(pid)
+    if not ids:
+        raise ToBellInputError("task_ids", "対象タスクを指定してください。")
+    tasks = ToBellTask.query.filter(ToBellTask.id.in_(ids)).all()
+    updated = 0
+    for task in tasks:
+        if not task_visible_to(task, username):
+            continue
+        if task.project_id == project.id:
+            continue
+        task.project_id = project.id
+        task.updated_at = datetime.utcnow()
+        updated += 1
+    if updated:
+        db.session.commit()
+    return updated
 
 
 # ===== 添付ファイル =====
@@ -829,6 +989,12 @@ def _sync_tags(task: ToBellTask, raw_tags: Any, username: str) -> None:
     task.tags = tags
 
 
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
 def _safe_int(value: Any) -> int | None:
     try:
         number = int(value)
@@ -860,11 +1026,19 @@ def project_visible_to(project: ToBellProject, username: str) -> bool:
     if project.visibility_scope == "office":
         office_id = _user_office_id(username)
         return office_id is not None and office_id == project.office_id
+    if project.visibility_scope == "members":
+        return any(member.username == username for member in project.members)
     return False
 
 
 def _project_visible_filter(username: str, office_id: int | None):
-    condition = ToBellProject.owner_id == username
+    member_subq = db.session.query(ToBellProjectMember.project_id).filter(
+        ToBellProjectMember.username == username
+    )
+    condition = or_(
+        ToBellProject.owner_id == username,
+        and_(ToBellProject.visibility_scope == "members", ToBellProject.id.in_(member_subq)),
+    )
     if office_id is not None:
         condition = or_(
             condition,

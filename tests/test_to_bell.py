@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -745,3 +746,231 @@ def test_share_session_page_hides_sidebar_and_nav(app_ctx):
     assert 'id="tb-share-link"' not in shared_html
     # ただし ToBell 本体は表示される
     assert 'tobell-shell' in shared_html
+
+
+def test_project_calendar_only_hides_tasks_from_list_and_kanban(app_ctx):
+    office_id = _create_office(app_ctx, "calonly")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    hidden = client.post(
+        "/tools/to_bell/api/projects",
+        json={"name": "カレンダー専用", "calendar_only": True},
+    ).get_json()
+    assert hidden["calendar_only"] is True
+
+    open_project = client.post("/tools/to_bell/api/projects", json={"name": "通常"}).get_json()
+    assert open_project["calendar_only"] is False
+
+    today = date.today().isoformat()
+    hidden_task = client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "隠れタスク", "due_date": today, "project_id": hidden["id"]},
+    ).get_json()
+    visible_task = client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "見えるタスク", "due_date": today, "project_id": open_project["id"]},
+    ).get_json()
+
+    # リスト（today フィルタ）には calendar_only プロジェクトのタスクは出てこない
+    list_titles = [task["title"] for task in client.get("/tools/to_bell/api/tasks?filter=today&view=list").get_json()["tasks"]]
+    assert "見えるタスク" in list_titles
+    assert "隠れタスク" not in list_titles
+
+    # カンバン（board フィルタ）でも隠す
+    board_titles = [task["title"] for task in client.get("/tools/to_bell/api/tasks?filter=board&view=kanban").get_json()["tasks"]]
+    assert "見えるタスク" in board_titles
+    assert "隠れタスク" not in board_titles
+
+    # カレンダーでは両方表示される
+    calendar_titles = [task["title"] for task in client.get("/tools/to_bell/api/tasks?filter=board&view=calendar").get_json()["tasks"]]
+    assert "見えるタスク" in calendar_titles
+    assert "隠れタスク" in calendar_titles
+
+    # プロジェクトで絞り込んだときは calendar_only でもリストに表示する
+    filtered_titles = [
+        task["title"]
+        for task in client.get(
+            f"/tools/to_bell/api/tasks?filter=board&view=list&project_id={hidden['id']}"
+        ).get_json()["tasks"]
+    ]
+    assert filtered_titles == ["隠れタスク"]
+
+    # 後から calendar_only を外せばリストにも復活する
+    client.put(f"/tools/to_bell/api/projects/{hidden['id']}", json={"calendar_only": False})
+    updated_titles = [task["title"] for task in client.get("/tools/to_bell/api/tasks?filter=today&view=list").get_json()["tasks"]]
+    assert "隠れタスク" in updated_titles
+    # 念のため未使用変数を握り潰す
+    assert hidden_task["id"] and visible_task["id"]
+
+
+def test_project_bulk_assign_existing_tasks(app_ctx):
+    office_id = _create_office(app_ctx, "bulk")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    _create_user(app_ctx, "bob", "Bob", office_id=office_id)
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    project = client.post("/tools/to_bell/api/projects", json={"name": "請求まとめ"}).get_json()
+    one = client.post("/tools/to_bell/api/tasks", json={"title": "請求A"}).get_json()
+    two = client.post("/tools/to_bell/api/tasks", json={"title": "請求B"}).get_json()
+    other = client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "別作業", "project_id": project["id"]},
+    ).get_json()
+
+    # 紐づいていないタスクが候補として返る
+    candidates = client.get(f"/tools/to_bell/api/projects/{project['id']}/assignable-tasks").get_json()["tasks"]
+    candidate_ids = {task["id"] for task in candidates}
+    assert one["id"] in candidate_ids
+    assert two["id"] in candidate_ids
+    assert other["id"] not in candidate_ids  # すでに紐づいているので候補に含まれない
+
+    # 一括で紐づける
+    assigned = client.post(
+        f"/tools/to_bell/api/projects/{project['id']}/assign-tasks",
+        json={"task_ids": [one["id"], two["id"]]},
+    )
+    assert assigned.status_code == 200
+    assert assigned.get_json()["updated"] == 2
+
+    after = client.get(f"/tools/to_bell/api/tasks/{one['id']}").get_json()
+    assert after["project"]["id"] == project["id"]
+
+    # 再度呼んでも、すでに紐づいているタスクは候補に出ない
+    later = client.get(f"/tools/to_bell/api/projects/{project['id']}/assignable-tasks").get_json()["tasks"]
+    assert all(task["id"] not in (one["id"], two["id"], other["id"]) for task in later)
+
+
+def test_project_pin_and_archive_ordering(app_ctx):
+    office_id = _create_office(app_ctx, "pin")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    first = client.post("/tools/to_bell/api/projects", json={"name": "通常A"}).get_json()
+    second = client.post("/tools/to_bell/api/projects", json={"name": "通常B"}).get_json()
+    third = client.post("/tools/to_bell/api/projects", json={"name": "ピン留め", "pinned": True}).get_json()
+    archived = client.post("/tools/to_bell/api/projects", json={"name": "終わったやつ", "status": "archived"}).get_json()
+
+    # 既定ではアーカイブは出てこない、ピン留めが先頭
+    names = [p["name"] for p in client.get("/tools/to_bell/api/projects").get_json()["projects"]]
+    assert names[0] == "ピン留め"
+    assert "終わったやつ" not in names
+
+    # archived=1 でアーカイブも返る
+    with_archived = client.get("/tools/to_bell/api/projects?archived=1").get_json()["projects"]
+    archived_names = [p["name"] for p in with_archived]
+    assert "終わったやつ" in archived_names
+
+    # 並び替え: 「通常B」を先頭付近に移動
+    new_order = [third["id"], second["id"], first["id"]]
+    response = client.post("/tools/to_bell/api/projects/reorder", json={"ordered_ids": new_order})
+    assert response.status_code == 200
+    after = [p["name"] for p in client.get("/tools/to_bell/api/projects").get_json()["projects"]]
+    # ピン留めが先頭、その後 ordered_ids の順
+    assert after[:3] == ["ピン留め", "通常B", "通常A"]
+
+    # 状態を archived に切り替えると一覧から消える
+    client.put(f"/tools/to_bell/api/projects/{first['id']}", json={"status": "archived"})
+    names_after = [p["name"] for p in client.get("/tools/to_bell/api/projects").get_json()["projects"]]
+    assert "通常A" not in names_after
+    assert archived["id"]  # ダミー参照
+
+
+def test_project_members_scope_visibility(app_ctx):
+    office_id = _create_office(app_ctx, "mem")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    _create_user(app_ctx, "bob", "Bob", office_id=office_id)
+    _create_user(app_ctx, "carol", "Carol", office_id=office_id)
+
+    alice = app_ctx.test_client()
+    _login(alice, "alice")
+    bob = app_ctx.test_client()
+    _login(bob, "bob")
+    carol = app_ctx.test_client()
+    _login(carol, "carol")
+
+    project = alice.post(
+        "/tools/to_bell/api/projects",
+        json={"name": "限定プロジェクト", "visibility_scope": "members", "members": ["bob"]},
+    ).get_json()
+    assert project["visibility_scope"] == "members"
+    assert project["members"] == ["bob"]
+
+    # bob はメンバーなので見える
+    bob_names = [p["name"] for p in bob.get("/tools/to_bell/api/projects").get_json()["projects"]]
+    assert "限定プロジェクト" in bob_names
+    # carol はメンバーじゃないので見えない（同じ営業所でも）
+    carol_names = [p["name"] for p in carol.get("/tools/to_bell/api/projects").get_json()["projects"]]
+    assert "限定プロジェクト" not in carol_names
+
+    # 別営業所メンバーは追加できない
+    other_office = _create_office(app_ctx, "other")
+    _create_user(app_ctx, "dave", "Dave", office_id=other_office)
+    rejected = alice.put(
+        f"/tools/to_bell/api/projects/{project['id']}",
+        json={"members": ["bob", "dave"]},
+    )
+    assert rejected.status_code == 400
+
+
+def test_project_notify_sends_notifications_to_visible_users(app_ctx):
+    office_id = _create_office(app_ctx, "notify")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    _create_user(app_ctx, "bob", "Bob", office_id=office_id)
+    _create_user(app_ctx, "carol", "Carol", office_id=office_id)
+
+    alice = app_ctx.test_client()
+    _login(alice, "alice")
+    bob = app_ctx.test_client()
+    _login(bob, "bob")
+    carol = app_ctx.test_client()
+    _login(carol, "carol")
+
+    project = alice.post(
+        "/tools/to_bell/api/projects",
+        json={"name": "通知テスト", "visibility_scope": "members", "members": ["bob"]},
+    ).get_json()
+
+    sent = alice.post(
+        f"/tools/to_bell/api/projects/{project['id']}/notify",
+        json={"title": "ヘルプお願い", "body": "今日中にお願いします"},
+    )
+    assert sent.status_code == 200
+    assert sent.get_json()["sent"] == 1
+
+    bob_notifications = bob.get("/tools/to_bell/api/notifications").get_json()["notifications"]
+    bob_titles = [n["title"] for n in bob_notifications]
+    assert any("[通知テスト]" in title and "ヘルプお願い" in title for title in bob_titles)
+
+    # メンバーじゃない carol には来ない
+    carol_notifications = carol.get("/tools/to_bell/api/notifications").get_json()["notifications"]
+    assert not any("[通知テスト]" in n["title"] for n in carol_notifications)
+
+
+def test_project_bulk_assign_skips_tasks_user_cannot_edit(app_ctx):
+    office_id = _create_office(app_ctx, "bulk2")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    _create_user(app_ctx, "bob", "Bob", office_id=office_id)
+
+    bob_client = app_ctx.test_client()
+    _login(bob_client, "bob")
+    bob_task = bob_client.post("/tools/to_bell/api/tasks", json={"title": "Bobだけのタスク"}).get_json()
+
+    alice_client = app_ctx.test_client()
+    _login(alice_client, "alice")
+    project = alice_client.post("/tools/to_bell/api/projects", json={"name": "Alice集計"}).get_json()
+
+    # Bob のタスクは Alice からは見えない → 紐づけられない（updated=0）
+    assigned = alice_client.post(
+        f"/tools/to_bell/api/projects/{project['id']}/assign-tasks",
+        json={"task_ids": [bob_task["id"]]},
+    )
+    assert assigned.status_code == 200
+    assert assigned.get_json()["updated"] == 0
+
+    # Bob 側のタスクは元のまま（プロジェクト未設定）
+    detail = bob_client.get(f"/tools/to_bell/api/tasks/{bob_task['id']}").get_json()
+    assert detail["project"] is None

@@ -1180,8 +1180,15 @@ class ToBellProject(db.Model):
     owner_id = db.Column(db.String(80), nullable=False, index=True)
     visibility_scope = db.Column(db.String(32), nullable=False, default='office')
     office_id = db.Column(db.Integer, nullable=True, index=True)
+    calendar_only = db.Column(db.Boolean, nullable=False, default=False)
+    pinned = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    members = db.relationship(
+        'ToBellProjectMember', cascade='all, delete-orphan', backref='project', lazy='selectin'
+    )
 
     def to_dict(self, *, task_count: int | None = None, open_count: int | None = None) -> dict:
         data = {
@@ -1192,12 +1199,28 @@ class ToBellProject(db.Model):
             'color': self.color,
             'owner_id': self.owner_id,
             'visibility_scope': self.visibility_scope,
+            'calendar_only': bool(self.calendar_only),
+            'pinned': bool(self.pinned),
+            'sort_order': int(self.sort_order or 0),
+            'members': [m.username for m in (self.members or [])],
         }
         if task_count is not None:
             data['task_count'] = task_count
         if open_count is not None:
             data['open_count'] = open_count
         return data
+
+
+class ToBellProjectMember(db.Model):
+    __tablename__ = 'to_bell_project_members'
+    __table_args__ = (
+        db.UniqueConstraint('project_id', 'username', name='uq_to_bell_project_member'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('to_bell_projects.id'), nullable=False, index=True)
+    username = db.Column(db.String(80), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
 class ToBellAttachment(db.Model):
