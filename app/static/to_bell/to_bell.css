@@ -654,7 +654,7 @@
 
 .tobell-project-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   border-radius: 9px;
 }
@@ -1053,6 +1053,78 @@
   color: #334155;
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+.tobell-members-row {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.55rem 0.65rem;
+  background: #f1f5f9;
+  border-radius: 10px;
+}
+
+.tobell-members-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-height: 1.5rem;
+}
+
+.tobell-empty-inline {
+  padding: 0.1rem 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.tobell-member-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  font-size: 0.78rem;
+  color: #1e293b;
+}
+
+.tobell-member-chip button {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tobell-member-chip button:hover {
+  color: #ef4444;
+}
+
+.tobell-project-row.is-pinned {
+  background: linear-gradient(0deg, rgba(250, 204, 21, 0.08), rgba(250, 204, 21, 0.08));
+}
+
+.tobell-project-row[draggable="true"] {
+  cursor: grab;
+}
+
+.tobell-project-row.is-dragging {
+  opacity: 0.5;
+}
+
+.tobell-project-row.is-drop-target {
+  outline: 2px dashed #2563eb;
+  outline-offset: -2px;
+}
+
+.tobell-project-drag {
+  color: #cbd5e1;
+  font-size: 0.85rem;
+  letter-spacing: -2px;
+  user-select: none;
+  padding-right: 0.15rem;
 }
 
 .tobell-check-line input[type="checkbox"] {

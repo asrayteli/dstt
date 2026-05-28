@@ -414,10 +414,11 @@
     const list = $("tb-project-list");
     if (list) {
       const rows = state.projects.map((project) => `
-        <div class="tobell-project-row ${project.id === state.projectFilter ? "is-active" : ""}">
+        <div class="tobell-project-row ${project.id === state.projectFilter ? "is-active" : ""} ${project.pinned ? "is-pinned" : ""}" data-project-row="${project.id}" draggable="true">
+          <span class="tobell-project-drag" aria-hidden="true">⋮⋮</span>
           <button type="button" class="tobell-project-pick" data-project-pick="${project.id}">
             <span class="tobell-dot" style="background:${esc(project.color)}"></span>
-            <span class="tobell-project-name">${esc(project.name)}</span>
+            <span class="tobell-project-name">${project.pinned ? "📌 " : ""}${esc(project.name)}</span>
             <span class="tobell-project-count">${Number(project.open_count || 0)}</span>
           </button>
           <button type="button" class="tobell-project-edit" data-project-edit="${project.id}" aria-label="編集">⚙</button>
@@ -429,8 +430,56 @@
       list.querySelectorAll("[data-project-edit]").forEach((button) => {
         button.addEventListener("click", () => openProjectModal(Number(button.dataset.projectEdit)));
       });
+      bindProjectReorder(list);
     }
     renderProjectBar();
+  }
+
+  let dragOrder = { id: 0, list: null };
+
+  function bindProjectReorder(list) {
+    list.querySelectorAll("[data-project-row]").forEach((row) => {
+      row.addEventListener("dragstart", (event) => {
+        dragOrder.id = Number(row.dataset.projectRow);
+        dragOrder.list = list;
+        row.classList.add("is-dragging");
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      });
+      row.addEventListener("dragend", () => {
+        row.classList.remove("is-dragging");
+        list.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+      });
+      row.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        if (!dragOrder.id || dragOrder.id === Number(row.dataset.projectRow)) return;
+        row.classList.add("is-drop-target");
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("is-drop-target"));
+      row.addEventListener("drop", async (event) => {
+        event.preventDefault();
+        row.classList.remove("is-drop-target");
+        const targetId = Number(row.dataset.projectRow);
+        const sourceId = dragOrder.id;
+        dragOrder.id = 0;
+        if (!sourceId || !targetId || sourceId === targetId) return;
+        await reorderProjects(sourceId, targetId);
+      });
+    });
+  }
+
+  async function reorderProjects(sourceId, targetId) {
+    const ids = state.projects.map((project) => project.id);
+    const fromIndex = ids.indexOf(sourceId);
+    const toIndex = ids.indexOf(targetId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    ids.splice(fromIndex, 1);
+    ids.splice(toIndex, 0, sourceId);
+    try {
+      await api("/tools/to_bell/api/projects/reorder", { method: "POST", body: { ordered_ids: ids } });
+      await loadProjects();
+    } catch (error) {
+      /* api() がトーストを表示済み */
+    }
   }
 
   function renderProjectBar() {
@@ -470,7 +519,62 @@
     $("tb-project-delete").addEventListener("click", deleteProject);
     const bulkButton = $("tb-project-bulk-assign");
     if (bulkButton) bulkButton.addEventListener("click", openBulkAssignModal);
+    const notifyButton = $("tb-project-notify-open");
+    if (notifyButton) notifyButton.addEventListener("click", openProjectNotifyModal);
+    const scopeSelect = $("tb-project-form").elements.visibility_scope;
+    if (scopeSelect) scopeSelect.addEventListener("change", () => syncMembersVisibility(scopeSelect.value));
+    const memberPick = $("tb-project-members-pick");
+    if (memberPick) memberPick.addEventListener("change", () => {
+      const value = memberPick.value;
+      if (value) addProjectMember(value);
+      memberPick.value = "";
+    });
     initBulkAssignModal();
+    initProjectNotifyModal();
+  }
+
+  const projectEdit = { members: new Set() };
+
+  function syncMembersVisibility(scope) {
+    const row = $("tb-project-members-row");
+    if (row) row.hidden = scope !== "members";
+  }
+
+  function renderProjectMembersChips() {
+    const wrap = $("tb-project-members-chips");
+    if (!wrap) return;
+    const names = Array.from(projectEdit.members);
+    if (!names.length) {
+      wrap.innerHTML = '<span class="tobell-empty tobell-empty-inline">メンバー未指定</span>';
+    } else {
+      wrap.innerHTML = names.map((username) => {
+        const label = lookupUserLabel(username);
+        return `<span class="tobell-member-chip"><span>${esc(label)}</span><button type="button" data-member-remove="${esc(username)}" aria-label="削除">×</button></span>`;
+      }).join("");
+      wrap.querySelectorAll("[data-member-remove]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          projectEdit.members.delete(btn.dataset.memberRemove);
+          renderProjectMembersChips();
+        });
+      });
+    }
+  }
+
+  function addProjectMember(username) {
+    if (!username) return;
+    projectEdit.members.add(username);
+    renderProjectMembersChips();
+  }
+
+  function lookupUserLabel(username) {
+    const select = $("tb-project-members-pick");
+    if (!select) return username;
+    const opt = select.querySelector(`option[value="${cssEscape(username)}"]`);
+    return opt ? (opt.textContent || username) : username;
+  }
+
+  function cssEscape(value) {
+    return String(value).replace(/[^a-zA-Z0-9_\-]/g, (ch) => `\\${ch}`);
   }
 
   function openProjectModal(projectId) {
@@ -485,14 +589,24 @@
       form.elements.description.value = project.description || "";
       form.elements.color.value = project.color || "#2563eb";
       form.elements.visibility_scope.value = project.visibility_scope || "office";
+      form.elements.status.value = project.status || "active";
       form.elements.calendar_only.checked = !!project.calendar_only;
+      form.elements.pinned.checked = !!project.pinned;
+      projectEdit.members = new Set(Array.isArray(project.members) ? project.members : []);
     } else {
       form.elements.color.value = "#2563eb";
+      form.elements.status.value = "active";
       form.elements.calendar_only.checked = false;
+      form.elements.pinned.checked = false;
+      projectEdit.members = new Set();
     }
+    syncMembersVisibility(form.elements.visibility_scope.value);
+    renderProjectMembersChips();
     $("tb-project-delete").hidden = !project;
     const bulkButton = $("tb-project-bulk-assign");
     if (bulkButton) bulkButton.hidden = !project;
+    const notifyButton = $("tb-project-notify-open");
+    if (notifyButton) notifyButton.hidden = !project;
     $("tb-project-title").textContent = project ? "プロジェクトを編集" : "新規プロジェクト";
     modal.removeAttribute("hidden");
     form.elements.name.focus();
@@ -507,7 +621,10 @@
       description: form.elements.description.value,
       color: form.elements.color.value,
       visibility_scope: form.elements.visibility_scope.value,
+      status: form.elements.status.value,
       calendar_only: form.elements.calendar_only.checked,
+      pinned: form.elements.pinned.checked,
+      members: Array.from(projectEdit.members),
     };
     const btn = form.querySelector('[type="submit"]');
     if (btn) btn.disabled = true;
@@ -534,6 +651,54 @@
     await loadProjects();
     await loadTasks();
     showFlash("プロジェクトを削除しました", "info");
+  }
+
+  function initProjectNotifyModal() {
+    const modal = $("tb-project-notify-modal");
+    if (!modal) return;
+    const close = () => modal.setAttribute("hidden", "");
+    modal.querySelectorAll("[data-notify-close]").forEach((el) => el.addEventListener("click", close));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !modal.hasAttribute("hidden")) close();
+    });
+    const form = $("tb-project-notify-form");
+    if (form) form.addEventListener("submit", submitProjectNotify);
+  }
+
+  function openProjectNotifyModal() {
+    const id = Number($("tb-project-form").elements.id.value || 0);
+    if (!id) return;
+    const modal = $("tb-project-notify-modal");
+    if (!modal) return;
+    const form = $("tb-project-notify-form");
+    if (form) {
+      form.reset();
+      form.elements.severity.value = "info";
+      form.dataset.projectId = String(id);
+    }
+    modal.removeAttribute("hidden");
+    if (form) form.elements.title.focus();
+  }
+
+  async function submitProjectNotify(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const id = Number(form.dataset.projectId || 0);
+    if (!id) return;
+    const body = {
+      title: form.elements.title.value,
+      body: form.elements.body.value,
+      severity: form.elements.severity.value,
+    };
+    const submit = form.querySelector('[type="submit"]');
+    if (submit) submit.disabled = true;
+    try {
+      const result = await api(`/tools/to_bell/api/projects/${id}/notify`, { method: "POST", body });
+      $("tb-project-notify-modal").setAttribute("hidden", "");
+      showFlash(`${Number(result.sent || 0)}人に通知を送信しました`, "success");
+    } finally {
+      if (submit) submit.disabled = false;
+    }
   }
 
   const bulkAssign = { projectId: 0, tasks: [], selected: new Set() };

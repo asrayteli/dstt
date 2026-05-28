@@ -46,9 +46,11 @@ from app.services.to_bell_service import (
     mark_all_notifications_read,
     mark_notification_read,
     notification_summary,
+    notify_project,
     office_user_options,
     purge_task,
     reopen_task,
+    reorder_projects,
     resolve_notification,
     revoke_share_token,
     serialize_task,
@@ -321,6 +323,29 @@ def api_project(project_id: int):
             delete_project(project, current_user.username)
             return {"ok": True}
         return update_project(project, current_user.username, _payload()).to_dict()
+
+    return _json_endpoint(action)
+
+
+@to_bell_bp.route("/api/projects/reorder", methods=["POST"])
+@login_required
+def api_project_reorder():
+    def action():
+        payload = _payload()
+        ordered = payload.get("ordered_ids") or payload.get("order") or []
+        updated = reorder_projects(current_user.username, ordered)
+        return {"updated": updated}
+
+    return _json_endpoint(action)
+
+
+@to_bell_bp.route("/api/projects/<int:project_id>/notify", methods=["POST"])
+@login_required
+def api_project_notify(project_id: int):
+    def action():
+        project = get_project_for_user(project_id, current_user.username)
+        sent = notify_project(project, current_user.username, _payload())
+        return {"sent": sent}
 
     return _json_endpoint(action)
 
