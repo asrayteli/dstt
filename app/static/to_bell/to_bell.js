@@ -120,7 +120,7 @@
   }
 
   async function loadTasks() {
-    const params = new URLSearchParams({ filter: effectiveFilter(), q: $("tb-search").value || "" });
+    const params = new URLSearchParams({ filter: effectiveFilter(), q: $("tb-search").value || "", view: state.view || "list" });
     if (state.projectFilter) params.set("project_id", String(state.projectFilter));
     const data = await api(`/tools/to_bell/api/tasks?${params.toString()}`);
     state.tasks = data.tasks || [];
@@ -468,6 +468,9 @@
     });
     $("tb-project-form").addEventListener("submit", saveProject);
     $("tb-project-delete").addEventListener("click", deleteProject);
+    const bulkButton = $("tb-project-bulk-assign");
+    if (bulkButton) bulkButton.addEventListener("click", openBulkAssignModal);
+    initBulkAssignModal();
   }
 
   function openProjectModal(projectId) {
@@ -482,10 +485,14 @@
       form.elements.description.value = project.description || "";
       form.elements.color.value = project.color || "#2563eb";
       form.elements.visibility_scope.value = project.visibility_scope || "office";
+      form.elements.calendar_only.checked = !!project.calendar_only;
     } else {
       form.elements.color.value = "#2563eb";
+      form.elements.calendar_only.checked = false;
     }
     $("tb-project-delete").hidden = !project;
+    const bulkButton = $("tb-project-bulk-assign");
+    if (bulkButton) bulkButton.hidden = !project;
     $("tb-project-title").textContent = project ? "プロジェクトを編集" : "新規プロジェクト";
     modal.removeAttribute("hidden");
     form.elements.name.focus();
@@ -500,6 +507,7 @@
       description: form.elements.description.value,
       color: form.elements.color.value,
       visibility_scope: form.elements.visibility_scope.value,
+      calendar_only: form.elements.calendar_only.checked,
     };
     const btn = form.querySelector('[type="submit"]');
     if (btn) btn.disabled = true;
@@ -526,6 +534,114 @@
     await loadProjects();
     await loadTasks();
     showFlash("プロジェクトを削除しました", "info");
+  }
+
+  const bulkAssign = { projectId: 0, tasks: [], selected: new Set() };
+
+  function initBulkAssignModal() {
+    const modal = $("tb-bulk-assign-modal");
+    if (!modal) return;
+    const close = () => modal.setAttribute("hidden", "");
+    modal.querySelectorAll("[data-bulk-close]").forEach((el) => el.addEventListener("click", close));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !modal.hasAttribute("hidden")) close();
+    });
+    const search = $("tb-bulk-assign-search");
+    if (search) search.addEventListener("input", debounce(loadAssignableTasks, 220));
+    const toggle = $("tb-bulk-assign-toggle");
+    if (toggle) toggle.addEventListener("click", toggleAllAssignable);
+    const submit = $("tb-bulk-assign-submit");
+    if (submit) submit.addEventListener("click", submitBulkAssign);
+  }
+
+  async function openBulkAssignModal() {
+    const id = Number($("tb-project-form").elements.id.value || 0);
+    if (!id) return;
+    bulkAssign.projectId = id;
+    bulkAssign.selected = new Set();
+    const modal = $("tb-bulk-assign-modal");
+    if (!modal) return;
+    const searchEl = $("tb-bulk-assign-search");
+    if (searchEl) searchEl.value = "";
+    modal.removeAttribute("hidden");
+    await loadAssignableTasks();
+  }
+
+  async function loadAssignableTasks() {
+    if (!bulkAssign.projectId) return;
+    const list = $("tb-bulk-assign-list");
+    if (!list) return;
+    list.innerHTML = '<div class="tobell-empty">読み込み中です。</div>';
+    const searchValue = ($("tb-bulk-assign-search") || {}).value || "";
+    const params = new URLSearchParams({ q: searchValue });
+    try {
+      const data = await api(`/tools/to_bell/api/projects/${bulkAssign.projectId}/assignable-tasks?${params.toString()}`);
+      bulkAssign.tasks = data.tasks || [];
+    } catch (error) {
+      bulkAssign.tasks = [];
+    }
+    renderAssignableTasks();
+  }
+
+  function renderAssignableTasks() {
+    const list = $("tb-bulk-assign-list");
+    if (!list) return;
+    if (!bulkAssign.tasks.length) {
+      list.innerHTML = '<div class="tobell-empty">追加できるタスクはありません。</div>';
+      return;
+    }
+    list.innerHTML = bulkAssign.tasks.map((task) => {
+      const due = task.due_at ? formatDue(task.due_at) : "通知なし";
+      const checked = bulkAssign.selected.has(task.id) ? "checked" : "";
+      const projectName = task.project ? esc(task.project.name) : "未設定";
+      return `
+        <label class="tobell-bulk-row">
+          <input type="checkbox" data-bulk-id="${task.id}" ${checked}>
+          <span class="tobell-bulk-title">${esc(task.title)}</span>
+          <span class="tobell-bulk-meta">${esc(statusLabel(task.status))} / ${esc(due)} / ${projectName}</span>
+        </label>`;
+    }).join("");
+    list.querySelectorAll("[data-bulk-id]").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const id = Number(cb.dataset.bulkId);
+        if (cb.checked) bulkAssign.selected.add(id);
+        else bulkAssign.selected.delete(id);
+      });
+    });
+  }
+
+  function toggleAllAssignable() {
+    if (!bulkAssign.tasks.length) return;
+    const allSelected = bulkAssign.tasks.every((task) => bulkAssign.selected.has(task.id));
+    if (allSelected) {
+      bulkAssign.tasks.forEach((task) => bulkAssign.selected.delete(task.id));
+    } else {
+      bulkAssign.tasks.forEach((task) => bulkAssign.selected.add(task.id));
+    }
+    renderAssignableTasks();
+  }
+
+  async function submitBulkAssign() {
+    if (!bulkAssign.projectId) return;
+    const ids = Array.from(bulkAssign.selected);
+    if (!ids.length) {
+      showFlash("追加するタスクを選んでください。", "info");
+      return;
+    }
+    const button = $("tb-bulk-assign-submit");
+    if (button) button.disabled = true;
+    try {
+      const result = await api(`/tools/to_bell/api/projects/${bulkAssign.projectId}/assign-tasks`, {
+        method: "POST",
+        body: { task_ids: ids },
+      });
+      $("tb-bulk-assign-modal").setAttribute("hidden", "");
+      await loadProjects();
+      await loadTasks();
+      showFlash(`${Number(result.updated || 0)}件のタスクを紐づけました`, "success");
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   function fillProjectSelect(selectEl, current) {

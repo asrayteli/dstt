@@ -100,9 +100,14 @@ def list_tasks(
     filter_name: str = "today",
     search: str = "",
     project_id: Any = None,
+    view: str = "list",
 ) -> list[ToBellTask]:
     today = date.today()
     query = ToBellTask.query.filter(visible_task_filter(username))
+    pid = _safe_int(project_id)
+    if view != "calendar" and not pid:
+        hidden_subq = db.session.query(ToBellProject.id).filter(ToBellProject.calendar_only.is_(True))
+        query = query.filter(or_(ToBellTask.project_id.is_(None), ToBellTask.project_id.notin_(hidden_subq)))
     if filter_name == "board":
         # カンバン / カレンダー用: アーカイブ以外の参加タスクをすべて返す。
         query = query.filter(ToBellTask.status != "archived")
@@ -135,7 +140,6 @@ def list_tasks(
     if search:
         like = f"%{search.strip()}%"
         query = query.filter(or_(ToBellTask.title.ilike(like), ToBellTask.description.ilike(like)))
-    pid = _safe_int(project_id)
     if pid:
         query = query.filter(ToBellTask.project_id == pid)
     return query.order_by(
@@ -547,6 +551,7 @@ def create_project(username: str, payload: dict[str, Any]) -> ToBellProject:
         owner_id=username,
         visibility_scope=_choice(payload.get("visibility_scope"), VALID_SCOPES, "office"),
         office_id=_user_office_id(username),
+        calendar_only=_truthy(payload.get("calendar_only")),
     )
     db.session.add(project)
     db.session.commit()
@@ -569,6 +574,8 @@ def update_project(project: ToBellProject, username: str, payload: dict[str, Any
         project.color = _safe_color(payload.get("color"), project.color)
     if "visibility_scope" in payload:
         project.visibility_scope = _choice(payload.get("visibility_scope"), VALID_SCOPES, project.visibility_scope)
+    if "calendar_only" in payload:
+        project.calendar_only = _truthy(payload.get("calendar_only"))
     project.updated_at = datetime.utcnow()
     db.session.commit()
     return project
@@ -580,6 +587,50 @@ def delete_project(project: ToBellProject, username: str) -> None:
     ToBellTask.query.filter_by(project_id=project.id).update({"project_id": None})
     db.session.delete(project)
     db.session.commit()
+
+
+def list_assignable_tasks(project: ToBellProject, username: str, *, search: str = "") -> list[ToBellTask]:
+    """このプロジェクトに紐づいていない、利用者が見られるタスク一覧。"""
+    query = ToBellTask.query.filter(
+        visible_task_filter(username),
+        ToBellTask.status != "archived",
+        or_(ToBellTask.project_id.is_(None), ToBellTask.project_id != project.id),
+    )
+    if search:
+        like = f"%{search.strip()}%"
+        query = query.filter(or_(ToBellTask.title.ilike(like), ToBellTask.description.ilike(like)))
+    return query.order_by(
+        ToBellTask.status == "done",
+        ToBellTask.due_at.is_(None),
+        ToBellTask.due_at.asc(),
+        ToBellTask.updated_at.desc(),
+    ).limit(300).all()
+
+
+def bulk_assign_tasks_to_project(project: ToBellProject, username: str, task_ids: Any) -> int:
+    """指定のタスクをプロジェクトに紐付け。編集権限のあるタスクだけが対象。"""
+    if not isinstance(task_ids, (list, tuple)):
+        raise ToBellInputError("task_ids", "対象タスクを指定してください。")
+    ids = []
+    for raw in task_ids:
+        pid = _safe_int(raw)
+        if pid:
+            ids.append(pid)
+    if not ids:
+        raise ToBellInputError("task_ids", "対象タスクを指定してください。")
+    tasks = ToBellTask.query.filter(ToBellTask.id.in_(ids)).all()
+    updated = 0
+    for task in tasks:
+        if not task_visible_to(task, username):
+            continue
+        if task.project_id == project.id:
+            continue
+        task.project_id = project.id
+        task.updated_at = datetime.utcnow()
+        updated += 1
+    if updated:
+        db.session.commit()
+    return updated
 
 
 # ===== 添付ファイル =====
@@ -827,6 +878,12 @@ def _sync_tags(task: ToBellTask, raw_tags: Any, username: str) -> None:
             db.session.add(tag)
         tags.append(tag)
     task.tags = tags
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _safe_int(value: Any) -> int | None:

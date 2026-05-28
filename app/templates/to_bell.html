@@ -226,11 +226,36 @@
           </select>
         </label>
       </div>
+      <label class="tobell-check-line">
+        <input type="checkbox" name="calendar_only">
+        <span>リスト・カンバンに表示しない（カレンダーのみ表示）</span>
+      </label>
       <div class="tobell-share-actions">
         <button type="submit" class="tobell-btn tobell-btn-primary">保存</button>
+        <button type="button" class="tobell-btn" id="tb-project-bulk-assign" hidden>既存タスクを追加</button>
         <button type="button" class="tobell-btn tobell-danger" id="tb-project-delete" hidden>削除</button>
       </div>
     </form>
+  </div>
+</div>
+
+<div id="tb-bulk-assign-modal" class="tobell-modal" hidden>
+  <div class="tobell-modal-backdrop" data-bulk-close></div>
+  <div class="tobell-modal-card" role="dialog" aria-modal="true" aria-labelledby="tb-bulk-assign-title">
+    <div class="tobell-modal-head">
+      <h2 id="tb-bulk-assign-title">既存タスクをプロジェクトに紐づけ</h2>
+      <button type="button" class="tobell-btn" data-bulk-close aria-label="閉じる">×</button>
+    </div>
+    <p class="tobell-share-note">このプロジェクトに紐づいていないタスクが表示されます。チェックして「紐づける」を押すと、選んだタスクを一括で追加します。</p>
+    <div class="tobell-inline-form">
+      <input id="tb-bulk-assign-search" type="search" placeholder="タスク名で検索">
+      <button type="button" class="tobell-btn" id="tb-bulk-assign-toggle">全選択</button>
+    </div>
+    <div id="tb-bulk-assign-list" class="tobell-bulk-list"><div class="tobell-empty">読み込み中です。</div></div>
+    <div class="tobell-share-actions">
+      <button type="button" class="tobell-btn tobell-btn-primary" id="tb-bulk-assign-submit">紐づける</button>
+      <button type="button" class="tobell-btn" data-bulk-close>キャンセル</button>
+    </div>
   </div>
 </div>
 

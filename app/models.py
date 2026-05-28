@@ -1180,6 +1180,7 @@ class ToBellProject(db.Model):
     owner_id = db.Column(db.String(80), nullable=False, index=True)
     visibility_scope = db.Column(db.String(32), nullable=False, default='office')
     office_id = db.Column(db.Integer, nullable=True, index=True)
+    calendar_only = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -1192,6 +1193,7 @@ class ToBellProject(db.Model):
             'color': self.color,
             'owner_id': self.owner_id,
             'visibility_scope': self.visibility_scope,
+            'calendar_only': bool(self.calendar_only),
         }
         if task_count is not None:
             data['task_count'] = task_count
