@@ -183,6 +183,41 @@ def test_owner_can_create_and_public_view_can_read(tmp_path):
     assert "edit_url" not in public_data["project"]["urls"]
 
 
+def test_person_shift_can_be_created_without_employee_and_linked_later(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "", "mode": "person", "year": "2026", "month": "4"},
+    )
+    assert response.status_code == 200
+    project_payload = response.get_json()["project"]
+    project = project_payload["project"]
+    assert project["mode"] == "person"
+    assert project["employee_number"] == ""
+    assert project["title"] == module.PERSON_UNASSIGNED_TITLE
+
+    project_id = project["id"]
+    link_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/meta",
+        json={"title": "Alice", "employee_number": "1001"},
+    )
+    assert link_response.status_code == 200
+    linked_project = link_response.get_json()["project"]["project"]
+    assert linked_project["title"] == "Alice"
+    assert linked_project["employee_number"] == "1001"
+
+    clear_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/meta",
+        json={"title": "", "employee_number": ""},
+    )
+    assert clear_response.status_code == 200
+    cleared_project = clear_response.get_json()["project"]["project"]
+    assert cleared_project["title"] == module.PERSON_UNASSIGNED_TITLE
+    assert cleared_project["employee_number"] == ""
+
+
 def test_owner_draft_is_hidden_from_public_until_published(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
