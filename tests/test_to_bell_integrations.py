@@ -252,7 +252,10 @@ def test_save_project_fires_substitute_hook_for_all_update_paths(app_ctx):
             "account_shares": {"office": {"enabled": True, "office_ids": [1]}, "employees": [], "updated_at": _utcnow_iso(), "updated_by": "system"},
             "created_at": _utcnow_iso(),
             "updated_at": _utcnow_iso(),
-            "months": {"2026-05": _build_month_payload(2026, 5, False, 0, {})},
+            "months": {"2026-05": _build_month_payload(2026, 5, False, 0, {
+                "15": [{"id": "e1", "value": "代務", "employee_name": "山田",
+                        "site_name": "現場A", "substitute_request_type": "person"}]
+            })},
         }
 
     # POSTリクエストコンテキストで _save_project を呼ぶ (= 任意のmutation routeを模擬)
@@ -326,3 +329,112 @@ def test_filepost_threshold_endpoint_reports_feature_state(app_ctx):
     data2 = client.get("/tools/to_bell/api/integrations/filepost/threshold").get_json()
     assert data2["overflow_enabled"] is True
     assert data2["project_files_enabled"] is False
+
+
+def test_substitute_save_with_changes_creates_detailed_memo_and_pushes(app_ctx):
+    """要代務シフト帳に新規シフト追加 →
+    (1) メモに「何月何日: 誰/どこ」が記載される
+    (2) 即時プッシュ送信が走る
+    """
+    from unittest.mock import patch
+    from app.models import AccessBranch, AccessOffice, User, ToBellTask, db
+    from app.access_control import grant_tool_access
+    from app.tools.cloudshift import _ensure_substitute_project_for_office_month, _substitute_project_id
+
+    with app_ctx.app_context():
+        branch = AccessBranch(name="b", code="B")
+        db.session.add(branch); db.session.flush()
+        office = AccessOffice(id=99, branch_id=branch.id, name="o", code="O99")
+        db.session.add(office)
+        u = User(username="alice", password_hash="x", name="Alice", office_id=99)
+        db.session.add(u); db.session.commit()
+        grant_tool_access(u.id, ["shiftersync"], "system")
+
+    c = app_ctx.test_client()
+    with c.session_transaction() as s:
+        s["_user_id"] = "alice"; s["_fresh"] = True
+    c.put("/tools/to_bell/api/settings/integrations",
+          json={"integrations": {"cloudshift.shift_update": True}})
+
+    with app_ctx.app_context():
+        with app_ctx.test_request_context("/api/list", method="GET"):
+            _ensure_substitute_project_for_office_month(office_id=99, year=2026, month=5)
+        pid = _substitute_project_id(99)
+
+    push_calls = []
+    def fake_push(user_id, *, title, body, url):
+        push_calls.append({"user": user_id, "title": title, "body": body, "url": url})
+        return {"sent": 1, "failed": 0}
+
+    with patch("app.services.to_bell_push.send_push_to_user", side_effect=fake_push):
+        resp = c.put(f"/tools/shiftersync/cloudshift/api/project/{pid}/month/2026/5", json={
+            "capacity_enabled": False, "required_capacity": 0,
+            "entries_per_day": {
+                "15": [{"id": "r1", "value": "代務要請", "employee_name": "山田太郎",
+                        "site_name": "現場A", "substitute_request_type": "person"}],
+                "20": [{"id": "r2", "value": "代務要請", "site_name": "現場B",
+                        "substitute_request_type": "scene", "substitute_unassigned_helper": True}],
+            },
+        })
+        assert resp.status_code == 200
+
+    with app_ctx.app_context():
+        tasks = ToBellTask.query.filter_by(source_tool="cloudshift",
+                                           source_ref_type="substitute_update",
+                                           assigned_to="alice").all()
+        assert len(tasks) == 1
+        memo = tasks[0].description
+        assert "5月15日" in memo and "山田太郎" in memo and "現場A" in memo
+        assert "5月20日" in memo and "現場B" in memo and "代務者未設定" in memo
+
+    # 即時プッシュが1回送られている
+    assert len(push_calls) == 1
+    assert push_calls[0]["user"] == "alice"
+    assert "山田太郎" in push_calls[0]["body"]
+
+
+def test_substitute_save_with_no_changes_does_not_push(app_ctx):
+    """差分なし保存ではプッシュもタスクも増えない。"""
+    from unittest.mock import patch
+    from app.models import AccessBranch, AccessOffice, User, ToBellTask, db
+    from app.access_control import grant_tool_access
+    from app.tools.cloudshift import _ensure_substitute_project_for_office_month, _substitute_project_id
+
+    with app_ctx.app_context():
+        branch = AccessBranch(name="b", code="Bx")
+        db.session.add(branch); db.session.flush()
+        office = AccessOffice(id=88, branch_id=branch.id, name="o", code="O88")
+        db.session.add(office)
+        u = User(username="alice", password_hash="x", name="Alice", office_id=88)
+        db.session.add(u); db.session.commit()
+        grant_tool_access(u.id, ["shiftersync"], "system")
+
+    c = app_ctx.test_client()
+    with c.session_transaction() as s:
+        s["_user_id"] = "alice"; s["_fresh"] = True
+    c.put("/tools/to_bell/api/settings/integrations",
+          json={"integrations": {"cloudshift.shift_update": True}})
+
+    with app_ctx.app_context():
+        with app_ctx.test_request_context("/api/list", method="GET"):
+            _ensure_substitute_project_for_office_month(office_id=88, year=2026, month=5)
+        pid = _substitute_project_id(88)
+
+    payload = {
+        "capacity_enabled": False, "required_capacity": 0,
+        "entries_per_day": {"10": [{"id": "x1", "value": "代務",
+                                    "employee_name": "佐藤", "site_name": "現場X",
+                                    "substitute_request_type": "person"}]},
+    }
+    push_calls = []
+    def fake_push(user_id, *, title, body, url):
+        push_calls.append(user_id); return {"sent": 1, "failed": 0}
+
+    with patch("app.services.to_bell_push.send_push_to_user", side_effect=fake_push):
+        c.put(f"/tools/shiftersync/cloudshift/api/project/{pid}/month/2026/5", json=payload)
+        c.put(f"/tools/shiftersync/cloudshift/api/project/{pid}/month/2026/5", json=payload)
+
+    with app_ctx.app_context():
+        assert ToBellTask.query.filter_by(source_tool="cloudshift").count() == 1
+    # 1回目だけ
+    assert len(push_calls) == 1

@@ -1786,12 +1786,94 @@ def _load_project(project_id: str) -> dict[str, Any]:
 
 
 def _save_project(project: dict[str, Any]) -> None:
+    # 要代務シフト帳の変更差分を計算するため、保存前に旧状態を取得しておく。
+    old_entries_by_month: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    if _is_substitute_project(project):
+        try:
+            from flask import has_request_context, request
+
+            if has_request_context() and request.method != "GET":
+                old = _db_project_from_id(project["id"])
+                if old:
+                    for mk, mdata in (old.get("months") or {}).items():
+                        old_entries_by_month[str(mk)] = dict((mdata or {}).get("entries_per_day") or {})
+        except Exception:
+            old_entries_by_month = {}
+
     project["updated_at"] = _utcnow_iso()
     _upsert_project_to_db(project)
-    _notify_tobell_on_substitute_save(project)
+    _notify_tobell_on_substitute_save(project, old_entries_by_month)
 
 
-def _notify_tobell_on_substitute_save(project: dict[str, Any]) -> None:
+_SUBSTITUTE_DIFF_KEYS = (
+    "employee_name", "employee_number",
+    "site_name", "site_id", "site_row_id",
+    "option_key", "request_type", "substitute_request_type",
+    "substitute_resolved",
+    "substitute_helper_employee_name", "substitute_helper_employee_number",
+    "substitute_helper_site_name", "substitute_helper_site_id",
+    "comment", "value",
+    "substitute_source_project_title", "substitute_source_project_id",
+    "substitute_source_month_key", "substitute_source_day",
+)
+
+
+def _substitute_entries_differ(old: dict[str, Any], new: dict[str, Any]) -> bool:
+    for key in _SUBSTITUTE_DIFF_KEYS:
+        if str(old.get(key) or "") != str(new.get(key) or ""):
+            return True
+    return False
+
+
+def _format_substitute_entry_label(entry: dict[str, Any]) -> str:
+    """エントリから「誰の/どこの」要請かをまとめた1行ラベルを作る。"""
+    parts: list[str] = []
+    person = (entry.get("employee_name") or "").strip()
+    site = (entry.get("site_name") or "").strip()
+    request_type = (entry.get("substitute_request_type") or entry.get("request_type") or "").strip()
+    option = (entry.get("option_key") or "").strip()
+    if not option:
+        # value="A-名前" のように埋め込まれている場合は parse_entry_value で取り出す
+        try:
+            parsed_option, _ = parse_entry_value(str(entry.get("value") or ""))
+            option = str(parsed_option or "").strip().upper()
+        except Exception:
+            option = ""
+    helper = (entry.get("substitute_helper_employee_name") or "").strip()
+    helper_site = (entry.get("substitute_helper_site_name") or "").strip()
+    is_unassigned_helper = bool(entry.get("substitute_unassigned_helper"))
+
+    if request_type == "person":
+        # 個人型: 「誰が」 「どこへ」(任意)
+        if person:
+            parts.append(person)
+        if site:
+            parts.append(f"→ {site}")
+    elif request_type == "scene":
+        # 現場型: 「どこへ」 「誰が代務」(任意/未設定可)
+        if site:
+            parts.append(site)
+        if is_unassigned_helper or not helper:
+            parts.append("(代務者未設定)")
+        elif helper_site and helper_site != site:
+            parts.append(f"← {helper}({helper_site})")
+        else:
+            parts.append(f"← {helper}")
+    else:
+        # フォールバック: 取れる情報を並べる
+        if person:
+            parts.append(person)
+        if site:
+            parts.append(site)
+    if option:
+        parts.append(f"[{option}]")
+    return " ".join(parts).strip() or "(内容不明)"
+
+
+def _notify_tobell_on_substitute_save(
+    project: dict[str, Any],
+    old_entries_by_month: dict[str, dict[str, list[dict[str, Any]]]] | None = None,
+) -> None:
     """要代務シフト帳のあらゆる保存経路でToBellへ通知する。失敗してもCloudShiftを止めない。
 
     GETリクエストや非HTTPコンテキストでは発火しない（_ensure_substitute_project_for_office_month
@@ -1804,11 +1886,43 @@ def _notify_tobell_on_substitute_save(project: dict[str, Any]) -> None:
 
         if not has_request_context() or request.method == "GET":
             return
+
+        # 旧状態と比較して、本当に変更があったときだけ通知する
+        changes: list[dict[str, Any]] = []
+        old_by_month = old_entries_by_month or {}
+        new_months = project.get("months") or {}
+        seen_months = set(old_by_month.keys()) | set(new_months.keys())
+        for mk in sorted(seen_months):
+            new_entries = (new_months.get(mk) or {}).get("entries_per_day") or {}
+            old_entries = old_by_month.get(mk) or {}
+            day_keys = set(old_entries.keys()) | set(new_entries.keys())
+            for dk in sorted(day_keys, key=lambda x: int(x) if str(x).isdigit() else 9999):
+                old_list = old_entries.get(dk) or []
+                new_list = new_entries.get(dk) or []
+                old_by_id = {str(e.get("id") or ""): e for e in old_list if e.get("id")}
+                new_by_id = {str(e.get("id") or ""): e for e in new_list if e.get("id")}
+                for eid, entry in new_by_id.items():
+                    if eid not in old_by_id:
+                        changes.append({"action": "added", "month_key": str(mk), "day_key": str(dk),
+                                        "label": _format_substitute_entry_label(entry)})
+                    elif _substitute_entries_differ(old_by_id[eid], entry):
+                        changes.append({"action": "modified", "month_key": str(mk), "day_key": str(dk),
+                                        "label": _format_substitute_entry_label(entry)})
+                for eid, entry in old_by_id.items():
+                    if eid not in new_by_id:
+                        changes.append({"action": "removed", "month_key": str(mk), "day_key": str(dk),
+                                        "label": _format_substitute_entry_label(entry)})
+
+        if not changes:
+            # 差分なし（タイトル変更や付帯情報の更新のみ）→ 通知しない
+            return
+
         from app.services.to_bell_hooks import on_cloudshift_substitute_updated
 
         on_cloudshift_substitute_updated(
             substitute_project_id=str(project.get("id") or ""),
             substitute_project_title=str(project.get("title") or SUBSTITUTE_TITLE),
+            changes=changes,
         )
     except Exception:
         pass
