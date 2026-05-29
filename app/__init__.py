@@ -291,6 +291,13 @@ def _ensure_access_control_schema(app):
             if "gcal_reminder_override" not in task_cols:
                 alters.append("ALTER TABLE to_bell_tasks ADD COLUMN gcal_reminder_override JSON")
 
+        if "to_bell_google_accounts" in inspector.get_table_names():
+            gaccount_cols = {c["name"] for c in inspector.get_columns("to_bell_google_accounts")}
+            if "calendar_sync_token" not in gaccount_cols:
+                alters.append("ALTER TABLE to_bell_google_accounts ADD COLUMN calendar_sync_token TEXT")
+            if "last_import_at" not in gaccount_cols:
+                alters.append("ALTER TABLE to_bell_google_accounts ADD COLUMN last_import_at DATETIME")
+
         if "to_bell_user_settings" not in inspector.get_table_names():
             alters.append(
                 "CREATE TABLE to_bell_user_settings ("

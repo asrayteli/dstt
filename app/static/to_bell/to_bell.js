@@ -2052,6 +2052,34 @@
     return googleState.status;
   }
 
+  const IMPORT_MODE_OPTIONS = [
+    ["tb_suffix", "末尾が「TB」の予定のみ"],
+    ["organizer", "自分が主催の予定のみ"],
+    ["all", "すべての予定"],
+  ];
+  const IMPORT_INTERVAL_OPTIONS = [
+    ["manual", "手動のみ"],
+    ["15m", "15分ごと"],
+    ["1h", "1時間ごと"],
+    ["3h", "3時間ごと"],
+    ["6h", "6時間ごと"],
+    ["12h", "12時間ごと"],
+    ["1d", "1日ごと"],
+  ];
+
+  function gcalSelectHtml(options, selected, attr) {
+    return `<select ${attr}>${options
+      .map(([value, label]) => `<option value="${value}"${value === selected ? " selected" : ""}>${esc(label)}</option>`)
+      .join("")}</select>`;
+  }
+
+  function formatImportTime(iso) {
+    if (!iso) return "未実行";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "未実行";
+    return d.toLocaleString();
+  }
+
   function renderGooglePanel() {
     const panel = $("tb-google-panel");
     if (!panel) return;
@@ -2064,34 +2092,95 @@
       panel.innerHTML = '<div class="tobell-empty">サーバー側でGoogle連携が未設定です。管理者に環境変数（DSTT_GOOGLE_CLIENT_ID / DSTT_GOOGLE_CLIENT_SECRET）の設定を依頼してください。</div>';
       return;
     }
-    if (!s.integration_enabled) {
-      panel.innerHTML = '<div class="tobell-empty">「DSTT連携」タブで「重要タスクをGoogleカレンダーに送る」をONにすると、ここで接続できます。</div>';
+    const sendOn = !!s.integration_enabled;
+    const importOn = !!s.import_enabled;
+    if (!sendOn && !importOn) {
+      panel.innerHTML = '<div class="tobell-empty">「DSTT連携」タブで「重要タスクをGoogleカレンダーに送る」または「Googleカレンダーの予定をタスクに取り込む」をONにすると、ここで接続できます。</div>';
       return;
     }
-    if (s.connected) {
-      const reminderValue = reminderOverrideToSelect(s.default_reminders);
-      panel.innerHTML = `
-        <div class="tobell-google-account">
-          <span class="tobell-google-status is-on">接続済み</span>
-          <span class="tobell-google-email">${esc(s.google_email || "")}</span>
-          <button type="button" class="tobell-btn tobell-danger" data-gcal-disconnect>接続を解除</button>
-        </div>
-        <label class="tobell-gcal-reminder">既定のリマインダー
-          <select data-gcal-default-reminder>${reminderOptionsHtml(reminderValue, false)}</select>
-        </label>
-        <p class="tobell-share-note">各タスクの詳細で「📅 Googleカレンダーに送る」をONにすると、ここで選んだ既定リマインダーが使われます（タスクごとに上書きも可能）。</p>`;
-    } else {
+    if (!s.connected) {
       panel.innerHTML = `
         <div class="tobell-google-account">
           <span class="tobell-google-status">未接続</span>
           <a class="tobell-btn tobell-btn-primary" href="/tools/to_bell/api/google/connect">Googleアカウントを接続</a>
         </div>
-        <p class="tobell-share-note">接続するとGoogleの同意画面が開きます。許可するとメインカレンダーへの追加が有効になります。</p>`;
+        <p class="tobell-share-note">接続するとGoogleの同意画面が開きます。許可するとカレンダーへの送信・取り込みが有効になります。</p>`;
+      return;
     }
+    let html = `
+      <div class="tobell-google-account">
+        <span class="tobell-google-status is-on">接続済み</span>
+        <span class="tobell-google-email">${esc(s.google_email || "")}</span>
+        <button type="button" class="tobell-btn tobell-danger" data-gcal-disconnect>接続を解除</button>
+      </div>`;
+    if (sendOn) {
+      const reminderValue = reminderOverrideToSelect(s.default_reminders);
+      html += `
+        <label class="tobell-gcal-reminder">既定のリマインダー（送信）
+          <select data-gcal-default-reminder>${reminderOptionsHtml(reminderValue, false)}</select>
+        </label>
+        <p class="tobell-share-note">各タスクの詳細で「📅 Googleカレンダーに送る」をONにすると、ここで選んだ既定リマインダーが使われます（タスクごとに上書きも可能）。</p>`;
+    }
+    if (importOn) {
+      html += `
+        <div class="tobell-panel-title" style="margin-top:0.8rem;">カレンダーから取り込み</div>
+        <label class="tobell-gcal-reminder">取り込む予定
+          ${gcalSelectHtml(IMPORT_MODE_OPTIONS, s.import_mode || "tb_suffix", "data-gcal-import-mode")}
+        </label>
+        <label class="tobell-gcal-reminder">取り込み間隔
+          ${gcalSelectHtml(IMPORT_INTERVAL_OPTIONS, s.import_interval || "15m", "data-gcal-import-interval")}
+        </label>
+        <div class="tobell-google-account" style="margin-top:0.4rem;">
+          <button type="button" class="tobell-btn tobell-btn-primary" data-gcal-import-now>今すぐ取り込み</button>
+          <span class="tobell-share-note" style="margin:0;">最終取り込み: ${esc(formatImportTime(s.last_import_at))}</span>
+        </div>
+        <p class="tobell-share-note">「末尾が「TB」の予定のみ」を選ぶと、予定名の最後に TB が付いた予定だけを取り込みます。予定の変更・キャンセルにも追従します。</p>`;
+    }
+    panel.innerHTML = html;
     const disconnectBtn = panel.querySelector("[data-gcal-disconnect]");
     if (disconnectBtn) disconnectBtn.addEventListener("click", disconnectGoogle);
     const defaultSel = panel.querySelector("[data-gcal-default-reminder]");
     if (defaultSel) defaultSel.addEventListener("change", () => saveDefaultReminder(defaultSel));
+    const modeSel = panel.querySelector("[data-gcal-import-mode]");
+    if (modeSel) modeSel.addEventListener("change", () => saveImportSetting({ mode: modeSel.value }, modeSel));
+    const intervalSel = panel.querySelector("[data-gcal-import-interval]");
+    if (intervalSel) intervalSel.addEventListener("change", () => saveImportSetting({ interval: intervalSel.value }, intervalSel));
+    const importBtn = panel.querySelector("[data-gcal-import-now]");
+    if (importBtn) importBtn.addEventListener("click", () => runImportNow(importBtn));
+  }
+
+  async function saveImportSetting(body, el) {
+    if (el) el.disabled = true;
+    try {
+      const data = await api("/tools/to_bell/api/google/import-settings", { method: "PUT", body });
+      if (googleState.status) Object.assign(googleState.status, data);
+      showFlash("取り込み設定を保存しました", "success");
+    } catch (_) {
+      // api() が flash 表示する
+    } finally {
+      if (el) el.disabled = false;
+    }
+  }
+
+  async function runImportNow(btn) {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "取り込み中…";
+    }
+    try {
+      const data = await api("/tools/to_bell/api/google/import", { method: "POST" });
+      if (data && data.status) googleState.status = data.status;
+      const r = (data && data.result) || {};
+      showFlash(`取り込み完了: 新規${r.created || 0} / 更新${r.updated || 0} / 完了${r.completed || 0}`, "success");
+      renderGooglePanel();
+      await loadTasks();
+    } catch (_) {
+      // api() が flash 表示する
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "今すぐ取り込み";
+      }
+    }
   }
 
   async function saveDefaultReminder(sel) {

@@ -265,6 +265,17 @@ def init_to_bell_push_scheduler(app) -> None:
             coalesce=True,
             replace_existing=True,
         )
+        # Google Calendar → ToBell の取り込み。15分間隔で1度だけ起床し、
+        # 各ユーザーの選択間隔（手動/15分〜1日）に達した人だけを差分取得で処理する。
+        _scheduler.add_job(
+            func=lambda: _run_gcal_import_job(app),
+            trigger="interval",
+            minutes=15,
+            id="to_bell_gcal_import",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
         _scheduler.start()
 
 
@@ -275,6 +286,17 @@ def _run_due_push_job(app) -> None:
         except Exception as exc:
             db.session.rollback()
             logger.warning("To Bell push scheduler failed: %s", exc)
+
+
+def _run_gcal_import_job(app) -> None:
+    with app.app_context():
+        try:
+            from app.services.to_bell_calendar_import import run_due_imports
+
+            run_due_imports()
+        except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            logger.warning("To Bell calendar import scheduler failed: %s", exc)
 
 
 def _load_or_create_vapid():
