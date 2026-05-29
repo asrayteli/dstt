@@ -58,6 +58,8 @@ DEFAULT_INTERVAL = "15m"
 # 初回（syncToken なし）の取り込み窓。
 _INITIAL_PAST_DAYS = 7
 _INITIAL_FUTURE_DAYS = 90
+# 1回の取り込みで辿るページ数の安全弁（250件/ページ）。
+_MAX_PAGES = 200
 
 # 末尾「TB」マーカー。予定名の末尾が TB（スペース有無は問わない）なら取り込む。
 _TB_SUFFIX_RE = re.compile(r"TB$", re.IGNORECASE)
@@ -172,26 +174,37 @@ def _events_get(account: ToBellGoogleAccount, params: dict[str, Any]) -> dict[st
 
 
 def _fetch_events(account: ToBellGoogleAccount, sync_token: Optional[str]) -> tuple[list[dict[str, Any]], Optional[str]]:
-    """全ページを取得し (events, next_sync_token) を返す。"""
+    """全ページを取得し (events, next_sync_token) を返す。
+
+    Google の events.list は incremental sync 時、syncToken/pageToken 以外の
+    クエリパラメータを初回リクエストと完全に一致させる必要がある（不一致は 410 ではなく 400）。
+    また orderBy は syncToken と併用できない。そこで両経路で常に
+    ``singleEvents=true`` / ``showDeleted=true`` を送り、orderBy は使わない。
+    時間窓(timeMin/timeMax)は初回(フル)のみ付け、syncToken 側へは付けない
+    （フルで確立した制約はトークンに引き継がれる）。
+    """
     events: list[dict[str, Any]] = []
     next_sync_token: Optional[str] = None
     page_token: Optional[str] = None
     # 初回（フル）取得の時間窓はページングを通して固定する。
-    # ページ間で timeMin/timeMax が変わると Google がエラーを返すため、ループ前に確定させる。
+    # ページ間で timeMin/timeMax が変わると Google がページング要求を拒否するため、ループ前に確定させる。
     now = datetime.utcnow()
     time_min = _rfc3339_utc(now - timedelta(days=_INITIAL_PAST_DAYS))
     time_max = _rfc3339_utc(now + timedelta(days=_INITIAL_FUTURE_DAYS))
-    # 無限ループ防止に上限ページ数を設ける。
-    for _ in range(40):
-        params: dict[str, Any] = {"maxResults": 250, "singleEvents": "true"}
+    pages = 0
+    while True:
+        pages += 1
+        # showDeleted=true でキャンセル(status=cancelled)も受け取り、追従処理に回す。
+        params: dict[str, Any] = {
+            "maxResults": 250,
+            "singleEvents": "true",
+            "showDeleted": "true",
+        }
         if sync_token:
             params["syncToken"] = sync_token
-            params["showDeleted"] = "true"  # キャンセル(status=cancelled)も受け取る
         else:
             params["timeMin"] = time_min
             params["timeMax"] = time_max
-            params["showDeleted"] = "false"
-            params["orderBy"] = "startTime"
         if page_token:
             params["pageToken"] = page_token
         data = _events_get(account, params)
@@ -200,6 +213,13 @@ def _fetch_events(account: ToBellGoogleAccount, sync_token: Optional[str]) -> tu
         page_token = data.get("nextPageToken")
         if not page_token:
             break
+        if pages >= _MAX_PAGES:  # 安全弁（90日窓では十分）。超過時は警告し、トークンは保存しない。
+            logger.warning(
+                "Calendar取り込みのページ数が上限(%d)に達しました。次回フル再取得します（user=%s）。",
+                _MAX_PAGES,
+                account.username,
+            )
+            return events, None
     return events, next_sync_token
 
 
@@ -390,9 +410,21 @@ def import_for_user(username: str) -> dict[str, int]:
         db.session.commit()
         events, next_token = _fetch_events(account, None)
 
-    summary = {"created": 0, "updated": 0, "completed": 0, "skipped": 0}
+    summary = {"created": 0, "updated": 0, "completed": 0, "skipped": 0, "failed": 0}
     for event in events:
-        _process_event(username, event, mode, summary)
+        # 1イベントの失敗(DB制約など)でバッチ全体を巻き込まないようセーブポイントで隔離する。
+        # こうしないと例外でコミットできず syncToken が前進せず、毎回同じ不正イベントで詰まる。
+        try:
+            with db.session.begin_nested():
+                _process_event(username, event, mode, summary)
+        except Exception:  # noqa: BLE001
+            summary["failed"] += 1
+            logger.warning(
+                "Calendarイベントの取り込みに失敗しました（user=%s, event=%s）",
+                username,
+                event.get("id"),
+                exc_info=True,
+            )
 
     if next_token:
         account.calendar_sync_token = next_token

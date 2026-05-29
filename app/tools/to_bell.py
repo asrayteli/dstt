@@ -693,6 +693,8 @@ def api_google_reminders():
 @to_bell_bp.route("/api/google/import-settings", methods=["PUT"])
 @login_required
 def api_google_import_settings():
+    _block_share_session()
+
     def action():
         payload = _payload()
         if "mode" in payload:

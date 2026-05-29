@@ -458,6 +458,91 @@ def test_incremental_sync_sends_synctoken_with_pagetoken(app_ctx, monkeypatch):
     assert fake.calls[1]["params"]["pageToken"] == "p2"
 
 
+def test_initial_full_sync_uses_consistent_params(app_ctx, monkeypatch):
+    from app.services import to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice")  # syncToken 無し
+    with app_ctx.app_context():
+        imp.set_import_mode("alice", "all")
+
+    fake = FakeGet([{"items": [], "nextSyncToken": "t"}])
+    _patch_get(monkeypatch, fake)
+    with app_ctx.app_context():
+        imp.import_for_user("alice")
+
+    p = fake.calls[0]["params"]
+    assert p["singleEvents"] == "true"
+    assert p["showDeleted"] == "true"  # 初回からキャンセルも見える＝増分と一致
+    assert "orderBy" not in p          # orderBy は syncToken と併用不可なので一切使わない
+    assert "syncToken" not in p
+    assert "timeMin" in p and "timeMax" in p
+
+
+def test_incremental_sync_params_match_initial(app_ctx, monkeypatch):
+    from app.services import to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice", sync_token="prev")
+    with app_ctx.app_context():
+        imp.set_import_mode("alice", "all")
+
+    fake = FakeGet([{"items": [], "nextSyncToken": "t"}])
+    _patch_get(monkeypatch, fake)
+    with app_ctx.app_context():
+        imp.import_for_user("alice")
+
+    p = fake.calls[0]["params"]
+    assert p["singleEvents"] == "true"
+    assert p["showDeleted"] == "true"
+    assert "orderBy" not in p
+    assert p["syncToken"] == "prev"
+    # syncToken 利用時は時間窓を再送しない（重複/不整合パラメータを避ける）。
+    assert "timeMin" not in p and "timeMax" not in p
+
+
+def test_one_bad_event_does_not_abort_batch(app_ctx, monkeypatch):
+    from app.models import ToBellTask
+    from app.services import to_bell_calendar, to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice")
+    with app_ctx.app_context():
+        imp.set_import_mode("alice", "all")
+
+    fake = FakeGet([
+        {
+            "items": [
+                _event("e1", "良い予定", start={"date": "2026-06-01"}),
+                _event("e2", "壊れた予定", start={"date": "2026-06-02"}),
+            ],
+            "nextSyncToken": "tok",
+        }
+    ])
+    _patch_get(monkeypatch, fake)
+
+    orig = imp._process_event
+
+    def patched(username, event, mode, summary):
+        if event.get("id") == "e2":
+            raise RuntimeError("boom")
+        return orig(username, event, mode, summary)
+
+    monkeypatch.setattr(imp, "_process_event", patched)
+
+    with app_ctx.app_context():
+        summary = imp.import_for_user("alice")
+        assert summary["created"] == 1
+        assert summary["failed"] == 1
+        # 不正イベントがあっても良いイベントは保存され、syncToken も前進する（詰まらない）。
+        assert ToBellTask.query.count() == 1
+        account = to_bell_calendar.get_account("alice")
+        assert account.calendar_sync_token == "tok"
+
+
 def test_import_requires_integration_enabled(app_ctx):
     from app.services import to_bell_calendar_import as imp
     from app.services.to_bell_calendar import ToBellCalendarError
