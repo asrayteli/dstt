@@ -176,6 +176,11 @@ def _fetch_events(account: ToBellGoogleAccount, sync_token: Optional[str]) -> tu
     events: list[dict[str, Any]] = []
     next_sync_token: Optional[str] = None
     page_token: Optional[str] = None
+    # 初回（フル）取得の時間窓はページングを通して固定する。
+    # ページ間で timeMin/timeMax が変わると Google がエラーを返すため、ループ前に確定させる。
+    now = datetime.utcnow()
+    time_min = _rfc3339_utc(now - timedelta(days=_INITIAL_PAST_DAYS))
+    time_max = _rfc3339_utc(now + timedelta(days=_INITIAL_FUTURE_DAYS))
     # 無限ループ防止に上限ページ数を設ける。
     for _ in range(40):
         params: dict[str, Any] = {"maxResults": 250, "singleEvents": "true"}
@@ -183,9 +188,8 @@ def _fetch_events(account: ToBellGoogleAccount, sync_token: Optional[str]) -> tu
             params["syncToken"] = sync_token
             params["showDeleted"] = "true"  # キャンセル(status=cancelled)も受け取る
         else:
-            now = datetime.utcnow()
-            params["timeMin"] = _rfc3339_utc(now - timedelta(days=_INITIAL_PAST_DAYS))
-            params["timeMax"] = _rfc3339_utc(now + timedelta(days=_INITIAL_FUTURE_DAYS))
+            params["timeMin"] = time_min
+            params["timeMax"] = time_max
             params["showDeleted"] = "false"
             params["orderBy"] = "startTime"
         if page_token:

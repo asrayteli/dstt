@@ -398,6 +398,66 @@ def test_expired_sync_token_triggers_full_resync(app_ctx, monkeypatch):
 
 # ---------- ガード ----------
 
+def test_full_sync_pagination_keeps_window_stable(app_ctx, monkeypatch):
+    from app.models import ToBellTask
+    from app.services import to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice")  # syncToken 無し → フル取得
+    with app_ctx.app_context():
+        imp.set_import_mode("alice", "all")
+
+    fake = FakeGet([
+        {
+            "items": [_event("e1", "予定1", start={"date": "2026-06-01"})],
+            "nextPageToken": "page-2",
+        },
+        {
+            "items": [_event("e2", "予定2", start={"date": "2026-06-02"})],
+            "nextSyncToken": "final",
+        },
+    ])
+    _patch_get(monkeypatch, fake)
+
+    with app_ctx.app_context():
+        summary = imp.import_for_user("alice")
+        assert summary["created"] == 2
+        assert ToBellTask.query.count() == 2
+
+    # 2ページとも同じ時間窓で要求し、2ページ目は pageToken を使う。
+    assert len(fake.calls) == 2
+    assert fake.calls[0]["params"]["timeMin"] == fake.calls[1]["params"]["timeMin"]
+    assert fake.calls[0]["params"]["timeMax"] == fake.calls[1]["params"]["timeMax"]
+    assert "pageToken" not in fake.calls[0]["params"]
+    assert fake.calls[1]["params"]["pageToken"] == "page-2"
+
+
+def test_incremental_sync_sends_synctoken_with_pagetoken(app_ctx, monkeypatch):
+    from app.services import to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice", sync_token="prev-token")
+    with app_ctx.app_context():
+        imp.set_import_mode("alice", "all")
+
+    fake = FakeGet([
+        {"items": [_event("e1", "A", start={"date": "2026-06-01"})], "nextPageToken": "p2"},
+        {"items": [_event("e2", "B", start={"date": "2026-06-02"})], "nextSyncToken": "next"},
+    ])
+    _patch_get(monkeypatch, fake)
+
+    with app_ctx.app_context():
+        imp.import_for_user("alice")
+
+    # 増分取得では全ページで syncToken を維持し、2ページ目で pageToken を併用する（公式パターン）。
+    assert fake.calls[0]["params"]["syncToken"] == "prev-token"
+    assert "timeMin" not in fake.calls[0]["params"]
+    assert fake.calls[1]["params"]["syncToken"] == "prev-token"
+    assert fake.calls[1]["params"]["pageToken"] == "p2"
+
+
 def test_import_requires_integration_enabled(app_ctx):
     from app.services import to_bell_calendar_import as imp
     from app.services.to_bell_calendar import ToBellCalendarError
