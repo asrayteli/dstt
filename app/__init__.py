@@ -284,6 +284,12 @@ def _ensure_access_control_schema(app):
             task_cols = {c["name"] for c in inspector.get_columns("to_bell_tasks")}
             if "pinned" not in task_cols:
                 alters.append("ALTER TABLE to_bell_tasks ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT 0")
+            if "gcal_event_id" not in task_cols:
+                alters.append("ALTER TABLE to_bell_tasks ADD COLUMN gcal_event_id VARCHAR(255)")
+            if "gcal_synced_by" not in task_cols:
+                alters.append("ALTER TABLE to_bell_tasks ADD COLUMN gcal_synced_by VARCHAR(80)")
+            if "gcal_reminder_override" not in task_cols:
+                alters.append("ALTER TABLE to_bell_tasks ADD COLUMN gcal_reminder_override JSON")
 
         if "to_bell_user_settings" not in inspector.get_table_names():
             alters.append(

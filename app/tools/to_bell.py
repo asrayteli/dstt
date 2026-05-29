@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import secrets
+
 from flask import (
     Blueprint,
     abort,
@@ -10,6 +12,7 @@ from flask import (
     render_template,
     request,
     send_file,
+    session,
     url_for,
 )
 from flask_login import current_user, login_required
@@ -67,6 +70,9 @@ from app.services.to_bell_integrations import (
     is_enabled as integration_is_enabled,
     update_integrations,
 )
+from app.services import google_oauth
+from app.services import to_bell_calendar
+from app.services.to_bell_calendar import ToBellCalendarError
 from app.services.to_bell_links import (
     add_employee_link,
     add_external_file,
@@ -244,7 +250,9 @@ def api_task_detail(task_id: int):
 def api_update_task(task_id: int):
     def action():
         task = get_task_for_user(task_id, current_user.username)
-        return serialize_task(update_task(task, _payload(), current_user.username), current_user.username)
+        task = update_task(task, _payload(), current_user.username)
+        to_bell_calendar.on_task_changed(task)
+        return serialize_task(task, current_user.username)
 
     return _json_endpoint(action)
 
@@ -256,6 +264,7 @@ def api_delete_task(task_id: int):
 
     def action():
         task = get_task_for_user(task_id, current_user.username)
+        to_bell_calendar.on_task_deleted(task)
         if hard:
             purge_task(task)
         else:
@@ -270,7 +279,9 @@ def api_delete_task(task_id: int):
 def api_complete_task(task_id: int):
     def action():
         task = get_task_for_user(task_id, current_user.username)
-        return serialize_task(complete_task(task), current_user.username)
+        task = complete_task(task)
+        to_bell_calendar.on_task_changed(task)
+        return serialize_task(task, current_user.username)
 
     return _json_endpoint(action)
 
@@ -280,7 +291,9 @@ def api_complete_task(task_id: int):
 def api_reopen_task(task_id: int):
     def action():
         task = get_task_for_user(task_id, current_user.username)
-        return serialize_task(reopen_task(task), current_user.username)
+        task = reopen_task(task)
+        to_bell_calendar.on_task_changed(task)
+        return serialize_task(task, current_user.username)
 
     return _json_endpoint(action)
 
@@ -602,6 +615,112 @@ def api_settings_get():
 @login_required
 def api_settings_integrations():
     return jsonify(update_integrations(current_user.username, _payload()))
+
+
+# ----- Google Calendar 連携 -----
+
+_GCAL_STATE_KEY = "tb_gcal_oauth_state"
+
+
+def _google_callback_uri() -> str:
+    return url_for("to_bell.api_google_callback", _external=True)
+
+
+@to_bell_bp.route("/api/google/status", methods=["GET"])
+@login_required
+def api_google_status():
+    return jsonify(to_bell_calendar.connection_status(current_user.username))
+
+
+@to_bell_bp.route("/api/google/connect", methods=["GET"])
+@login_required
+def api_google_connect():
+    """同意画面へリダイレクトする。"""
+    _block_share_session()
+    if not google_oauth.is_configured():
+        abort(503, description="Google連携が未設定です（環境変数 DSTT_GOOGLE_CLIENT_ID / SECRET）。")
+    state = secrets.token_urlsafe(24)
+    session[_GCAL_STATE_KEY] = state
+    return redirect(google_oauth.build_auth_url(state, _google_callback_uri()))
+
+
+@to_bell_bp.route("/api/google/callback", methods=["GET"])
+@login_required
+def api_google_callback():
+    """Google からのコールバック。state 検証 → token 交換 → 保存。"""
+    _block_share_session()
+    expected = session.pop(_GCAL_STATE_KEY, None)
+    received = request.args.get("state")
+    error = request.args.get("error")
+    base_url = url_for("to_bell.index")
+    if error:
+        return redirect(f"{base_url}?google_error={error}")
+    if not expected or not received or expected != received:
+        return redirect(f"{base_url}?google_error=state_mismatch")
+    code = request.args.get("code")
+    if not code:
+        return redirect(f"{base_url}?google_error=no_code")
+    try:
+        token_response = google_oauth.exchange_code(code, _google_callback_uri())
+        to_bell_calendar.store_connection(current_user.username, token_response)
+    except google_oauth.GoogleOAuthError:
+        return redirect(f"{base_url}?google_error=token_exchange")
+    return redirect(f"{base_url}?google=connected")
+
+
+@to_bell_bp.route("/api/google/disconnect", methods=["POST"])
+@login_required
+def api_google_disconnect():
+    _block_share_session()
+    to_bell_calendar.disconnect(current_user.username)
+    return jsonify(to_bell_calendar.connection_status(current_user.username))
+
+
+@to_bell_bp.route("/api/google/reminders", methods=["PUT"])
+@login_required
+def api_google_reminders():
+    def action():
+        reminders = _payload().get("reminders")
+        saved = to_bell_calendar.set_default_reminders(current_user.username, reminders)
+        return {"default_reminders": saved}
+
+    return _calendar_endpoint(action)
+
+
+@to_bell_bp.route("/api/tasks/<int:task_id>/calendar", methods=["POST"])
+@login_required
+def api_task_calendar_enable(task_id: int):
+    def action():
+        task = get_task_for_user(task_id, current_user.username)
+        reminder_override = _payload().get("reminders")
+        result = to_bell_calendar.enable_for_task(task, current_user.username, reminder_override)
+        return {**result, "task": serialize_task(task, current_user.username)}
+
+    return _calendar_endpoint(action)
+
+
+@to_bell_bp.route("/api/tasks/<int:task_id>/calendar", methods=["DELETE"])
+@login_required
+def api_task_calendar_disable(task_id: int):
+    def action():
+        task = get_task_for_user(task_id, current_user.username)
+        result = to_bell_calendar.disable_for_task(task, current_user.username)
+        return {**result, "task": serialize_task(task, current_user.username)}
+
+    return _calendar_endpoint(action)
+
+
+def _calendar_endpoint(action):
+    try:
+        result = action()
+        status = 200
+        if isinstance(result, tuple):
+            result, status = result
+        return jsonify(result), status
+    except ToBellInputError as exc:
+        return jsonify({"error": exc.message, "field": exc.field}), 400
+    except ToBellCalendarError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 # ----- 紐付け (pluslist 社員 / siteplus 現場) -----

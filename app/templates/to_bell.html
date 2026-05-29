@@ -134,6 +134,24 @@
       <input type="checkbox" name="pinned">
       <span>📌 先頭に常に表示する（ピン留め）</span>
     </label>
+    <div class="tobell-gcal-detail" data-gcal-detail hidden>
+      <label class="tobell-check-line">
+        <input type="checkbox" name="gcal_synced" data-gcal-toggle>
+        <span>📅 Googleカレンダーに送る</span>
+      </label>
+      <label class="tobell-gcal-reminder" data-gcal-reminder-wrap hidden>リマインダー
+        <select name="gcal_reminder" data-gcal-reminder>
+          <option value="default">共通設定に従う</option>
+          <option value="none">通知なし</option>
+          <option value="10">10分前</option>
+          <option value="30">30分前</option>
+          <option value="60">1時間前</option>
+          <option value="1440">1日前</option>
+          <option value="10080">1週間前</option>
+        </select>
+      </label>
+      <div class="tobell-gcal-hint" data-gcal-hint></div>
+    </div>
     <div class="tobell-detail-actions">
       <button type="submit" class="tobell-btn tobell-btn-primary">保存</button>
       <button type="button" class="tobell-btn" data-action="complete">完了</button>
@@ -360,6 +378,7 @@
     </div>
     <nav class="tobell-settings-tabs" role="tablist">
       <button type="button" class="tobell-settings-tab is-active" data-settings-tab="integrations" role="tab">DSTT連携</button>
+      <button type="button" class="tobell-settings-tab" data-settings-tab="google" role="tab">Googleカレンダー</button>
     </nav>
     <section class="tobell-settings-panel" data-settings-panel="integrations">
       <p class="tobell-share-note">
@@ -367,6 +386,16 @@
         ONにすると、対象のツールで対応する出来事が起きたときに、ToBellへ自動的にタスクや通知が追加されます。
       </p>
       <div id="tb-settings-integrations-list" class="tobell-integration-list">
+        <div class="tobell-empty">読み込み中…</div>
+      </div>
+    </section>
+    <section class="tobell-settings-panel" data-settings-panel="google" style="display:none">
+      <p class="tobell-share-note">
+        選んだタスクの期限を、あなたのGoogleカレンダー（メイン）にイベントとして追加します。
+        連携は片方向（ToBell→カレンダー）で、タスクを完了するとイベントに完了印が付きます。
+        まず「DSTT連携」タブで「重要タスクをGoogleカレンダーに送る」をONにしてから、ここで接続してください。
+      </p>
+      <div id="tb-google-panel" class="tobell-google-panel">
         <div class="tobell-empty">読み込み中…</div>
       </div>
     </section>

@@ -28,6 +28,12 @@ python run.py
 - `DSTT_ALLOW_SELF_REGISTRATION`: 自己登録の許可
 - `DSTT_SESSION_COOKIE_SECURE`: Secure Cookie の有効化
 - `DSTT_DATA_ENCRYPTION_KEY`: 暗号化対象データ用キー
+- `DSTT_GOOGLE_CLIENT_ID` / `DSTT_GOOGLE_CLIENT_SECRET`: ToBell の Google カレンダー連携用 OAuth クライアント情報
+- `DSTT_TIMEZONE`: カレンダー連携で使うタイムゾーン（既定 `Asia/Tokyo`）
+
+### ToBell の Google カレンダー連携
+
+ToBell のタスク期限を、利用者個人の Google カレンダー（メイン）へ片方向で送れます。利用するには Google Cloud で OAuth クライアント（種別: ウェブアプリケーション）を作成し、上記の環境変数を設定してください。リダイレクト URI には `https://<ホスト>/tools/to_bell/api/google/callback` を登録します。連携はユーザーごとにオプトイン（既定 OFF）で、ToBell の「設定 → DSTT連携」で有効化したうえで「Googleカレンダー」タブから各自のアカウントを接続します。
 
 ## テスト
 
