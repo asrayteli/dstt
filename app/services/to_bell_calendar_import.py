@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 from datetime import date, datetime, time, timedelta
 from typing import Any, Optional
 
@@ -333,14 +334,13 @@ def _process_event(username: str, event: dict[str, Any], mode: str, summary: dic
         return
 
     summary_text = str(event.get("summary") or "")
-    if not _matches_mode(event, mode, summary_text):
-        summary["skipped"] += 1
-        return
-
     due_at = _event_due_at(event)
     title = _title_for(event, mode, summary_text)
     description = _description_for(event)
 
+    # 既に取り込み済みのタスクは、現在のフィルタに合致しなくても追従（更新）する。
+    # 例: 末尾「TB」を後から外しても、一度タスク化したものは更新・完了に追い続ける
+    # （フィルタは「新規に取り込むか」だけを決め、既存タスクを放置・分裂させない）。
     if existing is not None:
         if existing.status == "archived":  # ユーザーが削除済み → 復活させない
             summary["skipped"] += 1
@@ -360,6 +360,11 @@ def _process_event(username: str, event: dict[str, Any], mode: str, summary: dic
             summary["updated"] += 1
         else:
             summary["skipped"] += 1
+        return
+
+    # 新規作成はフィルタ（取り込み範囲）に合致する場合のみ。
+    if not _matches_mode(event, mode, summary_text):
+        summary["skipped"] += 1
         return
 
     task = ToBellTask(
@@ -388,10 +393,27 @@ def _process_event(username: str, event: dict[str, Any], mode: str, summary: dic
             severity="info",
         )
     )
+    db.session.flush()  # ここで通知INSERTも検証し、失敗をセーブポイント内に閉じ込める
     summary["created"] += 1
 
 
 # ----- 公開API -----
+
+# 同一ユーザーの取り込みが「今すぐ取り込み」ボタンとスケジューラで同時に走り、
+# 同じ予定を二重作成するのを防ぐためのプロセス内ロック（per-username）。
+# 既定構成は単一ワーカーのため、これで実質的に取り込みが直列化される。
+_import_locks: dict[str, "threading.Lock"] = {}
+_import_locks_guard = threading.Lock()
+
+
+def _user_import_lock(username: str) -> "threading.Lock":
+    with _import_locks_guard:
+        lock = _import_locks.get(username)
+        if lock is None:
+            lock = threading.Lock()
+            _import_locks[username] = lock
+        return lock
+
 
 def import_for_user(username: str) -> dict[str, int]:
     """1ユーザー分の取り込みを実行する（ユーザー操作・スケジューラ共通）。"""
@@ -401,36 +423,50 @@ def import_for_user(username: str) -> dict[str, int]:
     if account is None or not account.refresh_token:
         raise ToBellCalendarError("Googleアカウントが未接続です。設定から接続してください。")
 
+    with _user_import_lock(username):  # 手動/スケジューラの同時実行による二重作成を防ぐ
+        return _run_import(account, username)
+
+
+def _run_import(account: ToBellGoogleAccount, username: str) -> dict[str, int]:
     mode = get_import_mode(username)
     sync_token = account.calendar_sync_token
     try:
-        events, next_token = _fetch_events(account, sync_token)
-    except _SyncTokenExpired:
-        account.calendar_sync_token = None
-        db.session.commit()
-        events, next_token = _fetch_events(account, None)
-
-    summary = {"created": 0, "updated": 0, "completed": 0, "skipped": 0, "failed": 0}
-    for event in events:
-        # 1イベントの失敗(DB制約など)でバッチ全体を巻き込まないようセーブポイントで隔離する。
-        # こうしないと例外でコミットできず syncToken が前進せず、毎回同じ不正イベントで詰まる。
         try:
-            with db.session.begin_nested():
-                _process_event(username, event, mode, summary)
-        except Exception:  # noqa: BLE001
-            summary["failed"] += 1
-            logger.warning(
-                "Calendarイベントの取り込みに失敗しました（user=%s, event=%s）",
-                username,
-                event.get("id"),
-                exc_info=True,
-            )
+            events, next_token = _fetch_events(account, sync_token)
+        except _SyncTokenExpired:
+            account.calendar_sync_token = None
+            db.session.commit()
+            events, next_token = _fetch_events(account, None)
 
-    if next_token:
-        account.calendar_sync_token = next_token
-    account.last_import_at = datetime.utcnow()
-    db.session.commit()
-    return summary
+        summary = {"created": 0, "updated": 0, "completed": 0, "skipped": 0, "failed": 0}
+        for event in events:
+            # 1イベントの失敗(DB制約など)でバッチ全体を巻き込まないようセーブポイントで隔離する。
+            # こうしないと例外でコミットできず syncToken が前進せず、毎回同じ不正イベントで詰まる。
+            # カウンタはセーブポイント前にスナップショットし、失敗時は巻き戻して二重計上を防ぐ。
+            before = dict(summary)
+            try:
+                with db.session.begin_nested():
+                    _process_event(username, event, mode, summary)
+            except Exception:  # noqa: BLE001
+                summary.clear()
+                summary.update(before)
+                summary["failed"] += 1
+                logger.warning(
+                    "Calendarイベントの取り込みに失敗しました（user=%s, event=%s）",
+                    username,
+                    event.get("id"),
+                    exc_info=True,
+                )
+
+        if next_token:
+            account.calendar_sync_token = next_token
+        account.last_import_at = datetime.utcnow()
+        db.session.commit()
+        return summary
+    except Exception:
+        # 想定外の失敗（最終コミット失敗など）でセッションを汚したまま返さない。
+        db.session.rollback()
+        raise
 
 
 def run_due_imports(*, now: datetime | None = None) -> dict[str, int]:

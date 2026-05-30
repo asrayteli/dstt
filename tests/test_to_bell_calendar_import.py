@@ -543,6 +543,66 @@ def test_one_bad_event_does_not_abort_batch(app_ctx, monkeypatch):
         assert account.calendar_sync_token == "tok"
 
 
+def test_tb_marker_removed_still_follows_existing_task(app_ctx, monkeypatch):
+    from app.models import ToBellTask
+    from app.services import to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice")  # 既定モード tb_suffix
+
+    fake = FakeGet([
+        {"items": [_event("e1", "請求書 TB", start={"date": "2026-06-01"})], "nextSyncToken": "t1"},
+        # 後から「TB」を外して名称変更（予定はアクティブのまま）。
+        {"items": [_event("e1", "請求書（確定）", start={"date": "2026-06-02"})], "nextSyncToken": "t2"},
+    ])
+    _patch_get(monkeypatch, fake)
+
+    with app_ctx.app_context():
+        imp.import_for_user("alice")
+        s2 = imp.import_for_user("alice")
+        # 一度取り込んだタスクはフィルタに合致しなくなっても放置せず追従する。
+        assert s2["updated"] == 1
+        assert ToBellTask.query.count() == 1
+        task = ToBellTask.query.first()
+        assert task.title == "請求書（確定）"
+        assert task.due_at == datetime(2026, 6, 2, 23, 59, 59)
+
+
+def test_counter_not_double_counted_on_savepoint_failure(app_ctx, monkeypatch):
+    from app.models import ToBellTask
+    from app.services import to_bell_calendar, to_bell_calendar_import as imp
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice")
+    with app_ctx.app_context():
+        imp.set_import_mode("alice", "all")
+
+    fake = FakeGet([
+        {"items": [_event("e1", "予定", start={"date": "2026-06-01"})], "nextSyncToken": "tok"}
+    ])
+    _patch_get(monkeypatch, fake)
+
+    # カウンタを進めた後に失敗するケース（セーブポイント解放時のflush失敗を模擬）。
+    def patched(username, event, mode, summary):
+        summary["created"] += 1
+        raise RuntimeError("fail after increment")
+
+    monkeypatch.setattr(imp, "_process_event", patched)
+
+    with app_ctx.app_context():
+        summary = imp.import_for_user("alice")
+        # created は巻き戻され、failed だけが計上される（二重計上しない）。
+        assert summary["created"] == 0
+        assert summary["failed"] == 1
+        assert ToBellTask.query.count() == 0
+        # それでも syncToken と last_import_at は前進する（詰まらない）。
+        account = to_bell_calendar.get_account("alice")
+        assert account.calendar_sync_token == "tok"
+        assert account.last_import_at is not None
+
+
 def test_import_requires_integration_enabled(app_ctx):
     from app.services import to_bell_calendar_import as imp
     from app.services.to_bell_calendar import ToBellCalendarError
