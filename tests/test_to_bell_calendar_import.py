@@ -603,6 +603,34 @@ def test_counter_not_double_counted_on_savepoint_failure(app_ctx, monkeypatch):
         assert account.last_import_at is not None
 
 
+def test_imported_task_cannot_be_sent_back_to_calendar(app_ctx, monkeypatch):
+    """取り込んだタスクは送信トグルを有効化できない（二重イベント防止）。"""
+    from app.models import ToBellTask
+    from app.services import to_bell_calendar, to_bell_calendar_import as imp
+    from app.services.to_bell_calendar import ToBellCalendarError
+    from app.services.to_bell_integrations import update_integrations
+
+    _create_user(app_ctx, "alice")
+    _enable_import(app_ctx, "alice")
+    _connect_account(app_ctx, "alice")
+    with app_ctx.app_context():
+        imp.set_import_mode("alice", "all")
+        # 送信側の連携も有効にしておく（それでも取り込み由来は送れない）。
+        update_integrations("alice", {"integrations": {"google.calendar": True}})
+
+    fake = FakeGet([{"items": [_event("e1", "予定", start={"date": "2026-06-01"})], "nextSyncToken": "t"}])
+    _patch_get(monkeypatch, fake)
+
+    with app_ctx.app_context():
+        imp.import_for_user("alice")
+        task = ToBellTask.query.first()
+        assert task.source_tool == "google"
+        with pytest.raises(ToBellCalendarError):
+            to_bell_calendar.enable_for_task(task, "alice")
+        # カレンダーへの書き込みは起きていない。
+        assert task.gcal_event_id is None
+
+
 def test_import_requires_integration_enabled(app_ctx):
     from app.services import to_bell_calendar_import as imp
     from app.services.to_bell_calendar import ToBellCalendarError

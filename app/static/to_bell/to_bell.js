@@ -2156,7 +2156,11 @@
       if (googleState.status) Object.assign(googleState.status, data);
       showFlash("取り込み設定を保存しました", "success");
     } catch (_) {
-      // api() が flash 表示する
+      // api() が flash 表示する。保存に失敗したらセレクト表示を元の値へ戻す。
+      if (el && googleState.status) {
+        if ("mode" in body) el.value = googleState.status.import_mode || "tb_suffix";
+        if ("interval" in body) el.value = googleState.status.import_interval || "15m";
+      }
     } finally {
       if (el) el.disabled = false;
     }
@@ -2221,6 +2225,16 @@
     const reminderWrap = form.querySelector("[data-gcal-reminder-wrap]");
     const reminderSel = form.querySelector("[data-gcal-reminder]");
     const hint = form.querySelector("[data-gcal-hint]");
+    // Googleカレンダーから取り込んだタスクは送り返せない（二重イベント・編集分岐を防ぐ）。
+    const imported = task.source_tool === "google" && task.source_ref_type === "calendar_event";
+    if (imported) {
+      toggle.checked = false;
+      toggle.disabled = true;
+      reminderWrap.hidden = true;
+      hint.textContent = "このタスクはGoogleカレンダーから取り込んだ予定のため、カレンダーへの送信はできません。";
+      return;
+    }
+    toggle.disabled = false;
     const synced = !!task.gcal_synced;
     toggle.checked = synced;
     reminderWrap.hidden = !synced;
