@@ -1172,6 +1172,11 @@ class ToBellGoogleAccount(db.Model):
     token_expiry = db.Column(db.DateTime, nullable=True)
     scope = db.Column(db.Text, nullable=False, default='')
     connected_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    # Google Calendar → ToBell 取り込み用の状態。
+    # calendar_sync_token: incremental sync の nextSyncToken（無ければ初回は時間窓で取得）。
+    # last_import_at: 最終取り込み時刻（ユーザー選択の取り込み間隔の判定に使う）。
+    calendar_sync_token = db.Column(db.Text, nullable=True)
+    last_import_at = db.Column(db.DateTime, nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     def to_dict(self) -> dict:

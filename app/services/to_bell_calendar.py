@@ -323,6 +323,10 @@ def enable_for_task(task: ToBellTask, username: str, reminder_override: Any = No
     """タスクをカレンダーに追加（既にあれば更新）。"""
     if not is_enabled(username, INTEGRATION_KEY):
         raise ToBellCalendarError("Googleカレンダー連携が無効です。設定で有効化してください。")
+    # Googleカレンダーから取り込んだタスクは送り返さない。
+    # 送ると同じ予定が二重に作られ、編集が分岐するため（取り込み元イベントとは別の新規イベントになる）。
+    if task.source_tool == "google" and task.source_ref_type == "calendar_event":
+        raise ToBellCalendarError("このタスクはGoogleカレンダーから取り込んだ予定です。カレンダーへ送り返すことはできません。")
     account = get_account(username)
     if account is None or not account.refresh_token:
         raise ToBellCalendarError("Googleアカウントが未接続です。設定から接続してください。")

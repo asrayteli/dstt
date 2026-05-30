@@ -46,6 +46,11 @@ INTEGRATION_KEYS = {
         "label": "重要タスクをGoogleカレンダーに送る",
         "description": "選んだタスクの期限をGoogleカレンダー（メイン）にイベントとして追加します。片方向（ToBell→カレンダー）で、完了時は完了印が付きます。",
     },
+    "google.calendar_import": {
+        "tool": "google",
+        "label": "Googleカレンダーの予定をタスクに取り込む",
+        "description": "Googleカレンダー（メイン）の予定を定期的に取り込み、ToBellタスクを自動作成します。片方向（カレンダー→ToBell）。取り込む範囲（末尾TBの予定のみ／自分が主催／全予定）と間隔（手動／15分〜1日）は設定で選べます。予定の変更・キャンセルにも追従します。",
+    },
 }
 
 

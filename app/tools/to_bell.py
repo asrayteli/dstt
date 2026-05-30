@@ -72,6 +72,7 @@ from app.services.to_bell_integrations import (
 )
 from app.services import google_oauth
 from app.services import to_bell_calendar
+from app.services import to_bell_calendar_import
 from app.services.to_bell_calendar import ToBellCalendarError
 from app.services.to_bell_links import (
     add_employee_link,
@@ -629,7 +630,9 @@ def _google_callback_uri() -> str:
 @to_bell_bp.route("/api/google/status", methods=["GET"])
 @login_required
 def api_google_status():
-    return jsonify(to_bell_calendar.connection_status(current_user.username))
+    status = to_bell_calendar.connection_status(current_user.username)
+    status.update(to_bell_calendar_import.import_status(current_user.username))
+    return jsonify(status)
 
 
 @to_bell_bp.route("/api/google/connect", methods=["GET"])
@@ -683,6 +686,38 @@ def api_google_reminders():
         reminders = _payload().get("reminders")
         saved = to_bell_calendar.set_default_reminders(current_user.username, reminders)
         return {"default_reminders": saved}
+
+    return _calendar_endpoint(action)
+
+
+@to_bell_bp.route("/api/google/import-settings", methods=["PUT"])
+@login_required
+def api_google_import_settings():
+    _block_share_session()
+
+    def action():
+        payload = _payload()
+        if "mode" in payload:
+            to_bell_calendar_import.set_import_mode(current_user.username, payload.get("mode"))
+        if "interval" in payload:
+            to_bell_calendar_import.set_import_interval(current_user.username, payload.get("interval"))
+        return to_bell_calendar_import.import_status(current_user.username)
+
+    return _calendar_endpoint(action)
+
+
+@to_bell_bp.route("/api/google/import", methods=["POST"])
+@login_required
+def api_google_import_now():
+    """「今すぐ取り込み」。間隔に関係なく即時実行する。"""
+    _block_share_session()
+
+    def action():
+        result = to_bell_calendar_import.import_for_user(current_user.username)
+        return {"result": result, "status": {
+            **to_bell_calendar.connection_status(current_user.username),
+            **to_bell_calendar_import.import_status(current_user.username),
+        }}
 
     return _calendar_endpoint(action)
 
