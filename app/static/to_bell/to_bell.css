@@ -1738,6 +1738,15 @@ body.tobell-pwa-mode .tobell-viewer-stage embed {
 .tobell-settings-card {
   max-width: 640px;
   width: 100%;
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Keep the header and tab bar pinned while the settings content scrolls. */
+.tobell-settings-card .tobell-modal-head,
+.tobell-settings-card .tobell-settings-tabs {
+  flex: 0 0 auto;
 }
 
 .tobell-settings-tabs {
@@ -1767,6 +1776,10 @@ body.tobell-pwa-mode .tobell-viewer-stage embed {
 
 .tobell-settings-panel {
   display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .tobell-integration-list {
