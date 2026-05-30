@@ -1,0 +1,1127 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  html { scroll-behavior: smooth; }
+
+  /* Sticky nav */
+  .mtb-nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: #fff;
+    border-bottom: 2px solid #e2e8f0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .mtb-nav::-webkit-scrollbar { display: none; }
+  .mtb-nav-inner {
+    display: flex;
+    min-width: max-content;
+    padding: 0 12px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .mtb-nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #64748b;
+    border-bottom: 3px solid transparent;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .mtb-nav-link:hover { color: #2563eb; }
+  .mtb-nav-link.mtb-active { color: #2563eb; border-bottom-color: #2563eb; }
+
+  /* Layout */
+  .mtb-wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 16px 80px;
+  }
+  .mtb-section {
+    padding-top: 52px;
+  }
+  .mtb-section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #f1f5f9;
+  }
+  .mtb-section-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    font-size: 26px;
+    flex-shrink: 0;
+  }
+  .mtb-section-title {
+    font-size: 22px;
+    font-weight: 900;
+    color: #0f172a;
+    margin: 0 0 4px;
+  }
+  .mtb-section-desc {
+    font-size: 14px;
+    color: #64748b;
+    margin: 0;
+    line-height: 1.6;
+  }
+
+  /* Cards */
+  .mtb-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 22px 24px;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+    margin-bottom: 12px;
+  }
+  .mtb-card-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Feature grid */
+  .mtb-feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  .mtb-feat-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 18px 14px;
+    text-align: center;
+    transition: box-shadow 0.15s;
+  }
+  .mtb-feat-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,0.10); }
+  .mtb-feat-emoji { font-size: 30px; line-height: 1; margin-bottom: 8px; }
+  .mtb-feat-name { font-size: 13px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+  .mtb-feat-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  /* Step cards */
+  .mtb-step {
+    display: flex;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(15,23,42,0.04);
+  }
+  .mtb-step-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    font-size: 16px;
+    font-weight: 900;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #1e3a8a, #2563eb);
+    color: #fff;
+  }
+  .mtb-step-body { flex: 1; min-width: 0; }
+  .mtb-step-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0 0 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .mtb-step-text { font-size: 14px; color: #475569; line-height: 1.7; margin: 0; }
+
+  /* Callouts */
+  .mtb-tip {
+    background: #f0fdf4;
+    border-left: 4px solid #22c55e;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px;
+    font-size: 13.5px;
+    color: #166534;
+    line-height: 1.65;
+    margin: 8px 0;
+  }
+  .mtb-warn {
+    background: #fff7ed;
+    border-left: 4px solid #f97316;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px;
+    font-size: 13.5px;
+    color: #9a3412;
+    line-height: 1.65;
+    margin: 8px 0;
+  }
+  .mtb-note {
+    background: #eff6ff;
+    border-left: 4px solid #3b82f6;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px;
+    font-size: 13.5px;
+    color: #1e40af;
+    line-height: 1.65;
+    margin: 8px 0;
+  }
+
+  /* Detail popup button */
+  .mtb-popup-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 9px;
+    background: #f8fafc;
+    font-size: 12px;
+    font-weight: 700;
+    color: #1d4ed8;
+    cursor: pointer;
+    margin: 4px 0;
+    transition: background 0.15s;
+  }
+  .mtb-popup-btn:hover { background: #eff6ff; border-color: #93c5fd; }
+
+  /* Bullet list */
+  .mtb-ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 7px;
+  }
+  .mtb-ul li {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    font-size: 14px;
+    color: #334155;
+    line-height: 1.6;
+  }
+  .mtb-ul li::before {
+    content: "▶";
+    color: #2563eb;
+    font-size: 10px;
+    margin-top: 4px;
+    flex-shrink: 0;
+  }
+
+  /* Option table */
+  .mtb-opt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .mtb-opt-table th {
+    background: #f8fafc;
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .mtb-opt-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #334155;
+    vertical-align: top;
+    line-height: 1.6;
+  }
+  .mtb-opt-table td:first-child { font-weight: 700; color: #0f172a; white-space: nowrap; }
+  .mtb-opt-table tr:last-child td { border-bottom: 0; }
+
+  /* Tag/chip */
+  .mtb-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .mtb-tag-red { background: #fee2e2; color: #dc2626; }
+  .mtb-tag-blue { background: #dbeafe; color: #1d4ed8; }
+  .mtb-tag-green { background: #dcfce7; color: #16a34a; }
+  .mtb-tag-purple { background: #f3e8ff; color: #7e22ce; }
+  .mtb-tag-orange { background: #ffedd5; color: #ea580c; }
+  .mtb-tag-teal { background: #ccfbf1; color: #0f766e; }
+  .mtb-tag-gray { background: #f1f5f9; color: #475569; }
+
+  /* Accordion */
+  .mtb-acc-item {
+    border: 1px solid #e2e8f0;
+    border-radius: 13px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  .mtb-acc-trigger {
+    width: 100%;
+    text-align: left;
+    padding: 15px 18px;
+    background: #fff;
+    border: 0;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.5;
+    gap: 12px;
+  }
+  .mtb-acc-trigger:hover { background: #f8fafc; }
+  .mtb-acc-q { flex: 1; text-align: left; }
+  .mtb-acc-arrow { font-size: 11px; color: #94a3b8; transition: transform 0.2s; flex-shrink: 0; }
+  .mtb-acc-item.mtb-open .mtb-acc-arrow { transform: rotate(180deg); }
+  .mtb-acc-body {
+    display: none;
+    padding: 2px 18px 15px;
+    font-size: 14px;
+    color: #475569;
+    line-height: 1.75;
+  }
+  .mtb-acc-item.mtb-open .mtb-acc-body { display: block; }
+
+  /* Modal overlay */
+  .mtb-modal-ov {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.52);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .mtb-modal-ov.mtb-hidden { display: none !important; }
+  .mtb-modal-box {
+    background: #fff;
+    border-radius: 20px;
+    max-width: 540px;
+    width: 100%;
+    max-height: 88vh;
+    overflow-y: auto;
+    padding: 28px;
+    box-shadow: 0 28px 56px rgba(0,0,0,0.22);
+    animation: mtb-modal-in 0.18s ease;
+  }
+  @keyframes mtb-modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .mtb-modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 18px;
+  }
+  .mtb-modal-title {
+    font-size: 18px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0;
+    line-height: 1.4;
+  }
+  .mtb-modal-close {
+    border: 0;
+    background: #f1f5f9;
+    border-radius: 9px;
+    width: 34px;
+    height: 34px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: #64748b;
+    margin-left: 12px;
+  }
+  .mtb-modal-close:hover { background: #e2e8f0; }
+  .mtb-modal-section { margin-bottom: 16px; }
+  .mtb-modal-section-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0 0 8px;
+  }
+
+  /* Grid 2col */
+  .mtb-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 500px) { .mtb-grid2 { grid-template-columns: 1fr; } }
+
+  /* Toolbar chip */
+  .mtb-tbchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 7px;
+    padding: 4px 9px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+    margin: 2px;
+  }
+  .mtb-tbchip-primary {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+  }
+
+  /* Divider */
+  .mtb-divider { border: 0; border-top: 1px solid #f1f5f9; margin: 18px 0; }
+
+  /* Hero */
+  .mtb-hero-bar {
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #38bdf8 100%);
+    padding: 40px 24px 36px;
+    text-align: center;
+    color: #fff;
+  }
+  .mtb-hero-bar h1 { font-size: 34px; font-weight: 900; margin: 0 0 6px; }
+  .mtb-hero-bar p { font-size: 15px; opacity: 0.92; margin: 0 0 22px; }
+  .mtb-hero-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .mtb-hero-btn {
+    padding: 11px 22px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+    border: 2px solid #fff;
+    transition: opacity 0.15s;
+  }
+  .mtb-hero-btn:hover { opacity: 0.85; }
+  .mtb-hero-btn-primary { background: #fff; color: #2563eb; }
+  .mtb-hero-btn-secondary { background: transparent; color: #fff; }
+
+  /* Inline code */
+  .mtb-code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+
+<!-- Hero -->
+<div class="mtb-hero-bar">
+  <h1>🔔 ToBell マニュアル</h1>
+  <p>タスク・期限・担当・通知をひとつの画面で。思いついた仕事を書き留め、今日やることへ育てる仕事の司令塔です。</p>
+  <div class="mtb-hero-btns">
+    <a href="/tools/to_bell" class="mtb-hero-btn mtb-hero-btn-primary">ツールを開く</a>
+    <a href="/" class="mtb-hero-btn mtb-hero-btn-secondary">ダッシュボードへ戻る</a>
+  </div>
+</div>
+
+<!-- Sticky nav -->
+<div class="mtb-nav" id="mtbNav">
+  <div class="mtb-nav-inner">
+    <a href="#overview" class="mtb-nav-link" data-section="overview">📋 概要</a>
+    <a href="#tasks" class="mtb-nav-link" data-section="tasks">✅ タスク</a>
+    <a href="#views" class="mtb-nav-link" data-section="views">🗂️ 表示と絞り込み</a>
+    <a href="#projects" class="mtb-nav-link" data-section="projects">📁 プロジェクト</a>
+    <a href="#templates" class="mtb-nav-link" data-section="templates">⚡ テンプレート</a>
+    <a href="#notify" class="mtb-nav-link" data-section="notify">🔔 通知</a>
+    <a href="#integrations" class="mtb-nav-link" data-section="integrations">🔗 連携・設定</a>
+    <a href="#gcal" class="mtb-nav-link" data-section="gcal">📅 カレンダー</a>
+    <a href="#share" class="mtb-nav-link" data-section="share">📲 共有</a>
+    <a href="#faq" class="mtb-nav-link" data-section="faq">❓ よくある質問</a>
+  </div>
+</div>
+
+<!-- Main content -->
+<div class="mtb-wrap">
+
+  <!-- ========== 概要 ========== -->
+  <section id="overview" class="mtb-section">
+    <div class="mtb-section-header">
+      <div class="mtb-section-icon" style="background:#dbeafe">📋</div>
+      <div>
+        <h2 class="mtb-section-title">ToBell でできること</h2>
+        <p class="mtb-section-desc">タスク管理を中心に、プロジェクト・テンプレート・通知・他ツール連携・Googleカレンダーまでをひとつにまとめたツールです。まずはタスク名だけで気軽に追加できます。</p>
+      </div>
+    </div>
+
+    <div class="mtb-feat-grid">
+      <div class="mtb-feat-card">
+        <div class="mtb-feat-emoji">✅</div>
+        <div class="mtb-feat-name">タスク管理</div>
+        <div class="mtb-feat-desc">タスク名だけで追加し、期限・担当・サブタスク・コメントへ育てる</div>
+      </div>
+      <div class="mtb-feat-card">
+        <div class="mtb-feat-emoji">🗂️</div>
+        <div class="mtb-feat-name">3つの表示</div>
+        <div class="mtb-feat-desc">リスト・カンバン・カレンダーを切り替えて確認</div>
+      </div>
+      <div class="mtb-feat-card">
+        <div class="mtb-feat-emoji">📁</div>
+        <div class="mtb-feat-name">プロジェクト</div>
+        <div class="mtb-feat-desc">タスクをまとめ、所属内で共有・通知できる</div>
+      </div>
+      <div class="mtb-feat-card">
+        <div class="mtb-feat-emoji">⚡</div>
+        <div class="mtb-feat-name">テンプレート</div>
+        <div class="mtb-feat-desc">よく使うタスクをワンタップで作成</div>
+      </div>
+      <div class="mtb-feat-card">
+        <div class="mtb-feat-emoji">🔔</div>
+        <div class="mtb-feat-name">通知</div>
+        <div class="mtb-feat-desc">アプリ内・Windows・iPhoneへプッシュ通知</div>
+      </div>
+      <div class="mtb-feat-card">
+        <div class="mtb-feat-emoji">🔗</div>
+        <div class="mtb-feat-name">DSTT連携</div>
+        <div class="mtb-feat-desc">社員・現場・FILEPOST・他ツールと紐付け</div>
+      </div>
+      <div class="mtb-feat-card">
+        <div class="mtb-feat-emoji">📅</div>
+        <div class="mtb-feat-name">Googleカレンダー</div>
+        <div class="mtb-feat-desc">タスクを送る／予定を取り込む</div>
+      </div>
+      <div class="mtb-feat-card">
+        <div class="mtb-feat-emoji">📲</div>
+        <div class="mtb-feat-name">共有リンク</div>
+        <div class="mtb-feat-desc">ログイン不要のリンクでスマホからも操作</div>
+      </div>
+    </div>
+
+    <div class="mtb-note" style="margin-top:16px">
+      ℹ️ 画面はおおまかに、上部の<strong>クイック追加欄</strong>、左の<strong>サイドバー（フィルタ・検索・プロジェクト・通知）</strong>、中央の<strong>タスク一覧</strong>、右の<strong>詳細パネル</strong>で構成されています。スマホでは縦に並び、タスクを選ぶと詳細が開きます。
+    </div>
+    <div class="mtb-tip" style="margin-top:8px">
+      💡 通知や担当に指定できる相手、プロジェクト・テンプレートの共有先は、いずれも<strong>同じ営業所内のユーザー</strong>に限られます。
+    </div>
+  </section>
+
+
+  <!-- ========== タスク ========== -->
+  <section id="tasks" class="mtb-section">
+    <div class="mtb-section-header">
+      <div class="mtb-section-icon" style="background:#dcfce7">✅</div>
+      <div>
+        <h2 class="mtb-section-title">タスクの基本</h2>
+        <p class="mtb-section-desc">タスク名だけで追加 → 詳細で育てる → 完了、が基本の流れです。4つのステップで見ていきます。</p>
+      </div>
+    </div>
+
+    <!-- Step 1 -->
+    <div class="mtb-step">
+      <div class="mtb-step-badge">1</div>
+      <div class="mtb-step-body">
+        <div class="mtb-step-title">
+          クイック追加
+          <span class="mtb-tag mtb-tag-blue">タスク名だけでOK</span>
+        </div>
+        <p class="mtb-step-text">画面上部の入力欄にタスク名を入れて「追加」を押すだけで登録できます。必要なら同じ行で通知日・通知時刻・担当者も指定できます。</p>
+        <hr class="mtb-divider">
+        <table class="mtb-opt-table">
+          <thead><tr><th>入力欄</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr><td>タスク名</td><td>必須。これだけで追加できます。</td></tr>
+            <tr><td>通知日</td><td>未入力なら当日扱い。日付を入れるとその日が通知日になります。</td></tr>
+            <tr><td>通知時刻</td><td>日付と時刻を入れると、その日時を通知タイミングとして扱います。</td></tr>
+            <tr><td>担当者</td><td>同じ営業所内のユーザーから選べます。初期値は自分です。</td></tr>
+          </tbody>
+        </table>
+        <div class="mtb-tip" style="margin-top:10px">
+          💡 思いついた作業はタスク名だけで先に入れておき、あとから「受信箱」で期限や担当を整理すると楽です。
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="mtb-step">
+      <div class="mtb-step-badge">2</div>
+      <div class="mtb-step-body">
+        <div class="mtb-step-title">
+          詳細を開いて編集
+          <span class="mtb-tag mtb-tag-green">状態・優先度・期限・担当・タグ</span>
+        </div>
+        <p class="mtb-step-text">中央の一覧でタスクを選ぶと、右側（スマホでは下）に詳細が開きます。タイトル・メモのほか、状態・優先度・通知日時・担当・プロジェクト・タグを編集して「保存」します。</p>
+        <hr class="mtb-divider">
+        <div class="mtb-grid2">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">状態（6種類）</div>
+            <table class="mtb-opt-table">
+              <tbody>
+                <tr><td>未着手</td><td>まだ着手していない</td></tr>
+                <tr><td>進行中</td><td>作業中</td></tr>
+                <tr><td>保留</td><td>一時的に止めている</td></tr>
+                <tr><td>確認待ち</td><td>相手の確認を待っている</td></tr>
+                <tr><td>差戻し</td><td>やり直しが必要</td></tr>
+                <tr><td>完了</td><td>終わったタスク</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">優先度（4種類）</div>
+            <table class="mtb-opt-table">
+              <tbody>
+                <tr><td>通常</td><td>標準</td></tr>
+                <tr><td>低</td><td>急がない</td></tr>
+                <tr><td>高</td><td>優先して対応</td></tr>
+                <tr><td>緊急</td><td>最優先</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <hr class="mtb-divider">
+        <ul class="mtb-ul">
+          <li><strong>タグ</strong>はカンマ区切りで複数付けられます。</li>
+          <li><strong>📌 ピン留め</strong>にチェックを入れると、一覧の先頭に常に表示されます。</li>
+          <li><strong>プロジェクト</strong>を選ぶと、そのタスクをプロジェクトにまとめられます。</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="mtb-step">
+      <div class="mtb-step-badge">3</div>
+      <div class="mtb-step-body">
+        <div class="mtb-step-title">
+          サブタスク・添付・コメントで肉付け
+          <span class="mtb-tag mtb-tag-purple">進捗・ファイル・連絡</span>
+        </div>
+        <p class="mtb-step-text">詳細の下部には「添付」「サブタスク」「コメント」のセクションがあります。</p>
+        <hr class="mtb-divider">
+        <table class="mtb-opt-table">
+          <tbody>
+            <tr><td>サブタスク</td><td>細かい作業を追加すると、完了数から<strong>進捗率が自動表示</strong>されます。</td></tr>
+            <tr><td>添付</td><td>ファイルを追加できます（1ファイル<strong>25MBまで</strong>）。大きいファイルはFILEPOSTを利用してください。</td></tr>
+            <tr><td>コメント</td><td>連絡事項を残せます。関係者には<strong>アプリ内通知</strong>が作られます。</td></tr>
+          </tbody>
+        </table>
+        <div class="mtb-note" style="margin-top:10px">
+          ℹ️ 添付した画像やPDFはその場でプレビュー表示でき、拡大・縮小やダウンロードができます。
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4 -->
+    <div class="mtb-step">
+      <div class="mtb-step-badge">4</div>
+      <div class="mtb-step-body">
+        <div class="mtb-step-title">完了・その他の操作</div>
+        <p class="mtb-step-text">一覧の完了チェック、または詳細の各ボタンでタスクを操作します。</p>
+        <hr class="mtb-divider">
+        <table class="mtb-opt-table">
+          <thead><tr><th>ボタン</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr><td>保存</td><td>編集内容を確定します。</td></tr>
+            <tr><td>完了</td><td>タスクを完了にします。一覧のチェックでも同じです。</td></tr>
+            <tr><td>戻す</td><td>間違えて完了したときに未着手へ戻します。</td></tr>
+            <tr><td>テンプレ化</td><td>このタスクをテンプレートとして保存します。</td></tr>
+            <tr><td>紐付け</td><td>社員・現場・FILEPOSTファイルと紐付けます（連携の有効化が必要）。</td></tr>
+            <tr><td>アーカイブ</td><td>一覧から隠して保管します。</td></tr>
+            <tr><td>削除</td><td>タスクを削除します。</td></tr>
+          </tbody>
+        </table>
+        <div class="mtb-tip" style="margin-top:10px">
+          💡 完了済みタスク・60日を過ぎた未対応タスク・古い通知は、サーバー側で1日1回自動的に整理されます。
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 表示と絞り込み ========== -->
+  <section id="views" class="mtb-section">
+    <div class="mtb-section-header">
+      <div class="mtb-section-icon" style="background:#ccfbf1">🗂️</div>
+      <div>
+        <h2 class="mtb-section-title">表示と絞り込み</h2>
+        <p class="mtb-section-desc">フィルタ・検索・3つの表示モードを使って、見たいタスクだけを素早く確認します。</p>
+      </div>
+    </div>
+
+    <div class="mtb-card">
+      <div class="mtb-card-title">🔎 サイドバーのフィルタ</div>
+      <table class="mtb-opt-table">
+        <thead><tr><th style="width:110px">フィルタ</th><th>表示されるタスク</th></tr></thead>
+        <tbody>
+          <tr><td>今日</td><td>今日が通知日（期限）のタスク。</td></tr>
+          <tr><td>受信箱</td><td>未整理のタスク。まず取り込んで整理する場所。</td></tr>
+          <tr><td>自分の担当</td><td>担当者が自分のタスク。</td></tr>
+          <tr><td>要対応</td><td>期限が今日以前・担当が自分・確認者が自分のタスクが集まります。</td></tr>
+          <tr><td>期限切れ</td><td>通知日（期限）を過ぎた未完了タスク。</td></tr>
+          <tr><td>完了</td><td>完了したタスク。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mtb-card">
+      <div class="mtb-card-title">🖥️ 表示モード</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+        <span class="mtb-tbchip">リスト</span>
+        <span class="mtb-tbchip">カンバン</span>
+        <span class="mtb-tbchip">カレンダー</span>
+      </div>
+      <table class="mtb-opt-table">
+        <tbody>
+          <tr><td>リスト</td><td>タスクを一覧で表示します。標準の表示です。</td></tr>
+          <tr><td>カンバン</td><td>状態ごとの列にカードを並べます。PCはカードを<strong>ドラッグ</strong>して状態を移動でき、スマホはカード下の<strong>選択メニュー</strong>で移動します。</td></tr>
+          <tr><td>カレンダー</td><td>通知日（期限）を月などのカレンダー上に並べて確認できます。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mtb-card">
+      <div class="mtb-card-title">⌨️ 検索</div>
+      <p style="font-size:14px;color:#475569;margin:0">サイドバーの検索欄にキーワードを入れると、タスク名などから絞り込めます。タスクが見つからないときは、まずフィルタと検索欄を確認してください。</p>
+    </div>
+  </section>
+
+
+  <!-- ========== プロジェクト ========== -->
+  <section id="projects" class="mtb-section">
+    <div class="mtb-section-header">
+      <div class="mtb-section-icon" style="background:#f3e8ff">📁</div>
+      <div>
+        <h2 class="mtb-section-title">プロジェクト</h2>
+        <p class="mtb-section-desc">関連するタスクをまとめて管理します。所属内での共有や、プロジェクト単位の通知もできます。</p>
+      </div>
+    </div>
+
+    <div class="mtb-step">
+      <div class="mtb-step-badge">1</div>
+      <div class="mtb-step-body">
+        <div class="mtb-step-title">プロジェクトを作る</div>
+        <p class="mtb-step-text">サイドバーの「プロジェクト」見出しの「＋」（PC）から作成します。名前・メモ・色のほか、次の設定ができます。</p>
+        <hr class="mtb-divider">
+        <table class="mtb-opt-table">
+          <tbody>
+            <tr><td>状態</td><td>進行中 / 完了 / アーカイブ。</td></tr>
+            <tr><td>公開範囲</td><td><strong>所属内で共有</strong>／<strong>自分だけ</strong>／<strong>指定メンバーのみ</strong>から選べます。「指定メンバーのみ」では同じ営業所のユーザーを選んで共有します。</td></tr>
+            <tr><td>ピン留め</td><td>サイドバーの先頭に固定表示します。</td></tr>
+            <tr><td>カレンダーのみ表示</td><td>リスト・カンバンには出さず、カレンダーだけに表示します。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mtb-step">
+      <div class="mtb-step-badge">2</div>
+      <div class="mtb-step-body">
+        <div class="mtb-step-title">タスクをまとめる・絞り込む</div>
+        <p class="mtb-step-text">タスク詳細の「プロジェクト」で個別に紐付けるほか、まとめて追加もできます。</p>
+        <hr class="mtb-divider">
+        <ul class="mtb-ul">
+          <li><strong>既存タスクを追加</strong>：プロジェクト未所属のタスクを検索し、チェックして一括で紐づけます。</li>
+          <li>絞り込みは、左の「プロジェクト」一覧（PC）や上部のチップ（スマホ）から行えます。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="mtb-step">
+      <div class="mtb-step-badge">3</div>
+      <div class="mtb-step-body">
+        <div class="mtb-step-title">プロジェクト通知を送る</div>
+        <p class="mtb-step-text">「プロジェクト通知」から、そのプロジェクトを見られる全員（自分以外）へ通知を送れます。タイトル・本文・重要度（通常／注意／緊急）を指定します。</p>
+        <div class="mtb-note" style="margin-top:10px">
+          ℹ️ プロジェクトにも「紐付け」（社員・現場・FILEPOSTファイル）があり、連携を有効化すると利用できます。
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== テンプレート ========== -->
+  <section id="templates" class="mtb-section">
+    <div class="mtb-section-header">
+      <div class="mtb-section-icon" style="background:#ffedd5">⚡</div>
+      <div>
+        <h2 class="mtb-section-title">テンプレート</h2>
+        <p class="mtb-section-desc">よく使う手順をテンプレート化して、ワンタップで同じタスクを作れます。</p>
+      </div>
+    </div>
+
+    <div class="mtb-card">
+      <div class="mtb-card-title">⚡ 作り方は2通り</div>
+      <ul class="mtb-ul">
+        <li>既存のタスク詳細から<strong>「テンプレ化」</strong>ボタンで登録する。</li>
+        <li>上部の<strong>「テンプレート」</strong>ボタンを開き、名前を入れて<strong>空のテンプレート</strong>を作る。</li>
+      </ul>
+      <hr class="mtb-divider">
+      <p style="font-size:14px;color:#475569;margin:0">登録したテンプレートは「テンプレート」一覧からワンタップで呼び出し、同じ内容のタスクをすぐ作成できます。</p>
+      <div class="mtb-tip" style="margin-top:10px">
+        💡 テンプレートは作成者本人、または所属内で共有できます（公開範囲を選べます）。サーバー側の初期テンプレートは用意していません。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 通知 ========== -->
+  <section id="notify" class="mtb-section">
+    <div class="mtb-section-header">
+      <div class="mtb-section-icon" style="background:#fee2e2">🔔</div>
+      <div>
+        <h2 class="mtb-section-title">通知</h2>
+        <p class="mtb-section-desc">アプリ内通知に加えて、Windowsの待受ウィンドウやiPhone（PWA）へのプッシュ通知を受け取れます。</p>
+      </div>
+    </div>
+
+    <div class="mtb-card">
+      <div class="mtb-card-title">🔔 アプリ内通知</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">コメントや担当・確認の指定、プロジェクト通知などはアプリ内通知として届き、サイドバーの「通知」に表示されます。</p>
+      <ul class="mtb-ul">
+        <li>上部の<strong>「通知を既読」</strong>でまとめて既読にできます。</li>
+        <li>通知が消えないときは、対象のタスクを完了するか通知を解決してください。</li>
+        <li>ダッシュボードのToBellカードには、未読通知や要対応件数のバッジが表示されます。</li>
+      </ul>
+    </div>
+
+    <div class="mtb-card">
+      <div class="mtb-card-title">💻 Windows通知（待受ウィンドウ）</div>
+      <ul class="mtb-ul">
+        <li>上部の<strong>「待受ウィンドウ」</strong>を押すと、軽い通知待受ウィンドウが開きます。</li>
+        <li>続けて<strong>「通知を有効化」</strong>でブラウザの通知を許可します。</li>
+        <li>このウィンドウを開いておくと、期限などの通知をデスクトップで受け取れます。</li>
+      </ul>
+    </div>
+
+    <div class="mtb-card">
+      <div class="mtb-card-title">📱 iPhone通知（PWA）</div>
+      <ul class="mtb-ul">
+        <li>ToBellを<strong>ホーム画面に追加したWebアプリ</strong>として開きます。</li>
+        <li><strong>「通知を有効化」</strong>を押して通知を許可します。</li>
+        <li>許可後はアプリを開きっぱなしにしなくても、Service Workerがプッシュ通知を受け取ります。</li>
+      </ul>
+      <div class="mtb-warn" style="margin-top:10px">
+        ⚠️ iPhone通知は <strong>iOS / iPadOS 16.4 以降</strong> かつ <strong>HTTPS配信</strong> が前提です。必ずホーム画面追加版から許可してください。
+      </div>
+    </div>
+
+    <div class="mtb-card">
+      <div class="mtb-card-title">⚙️ 通知先の管理・テスト</div>
+      <table class="mtb-opt-table">
+        <tbody>
+          <tr><td>通知先</td><td>現在のDSTTアカウントに登録された通知先の一覧です。名称変更・無効化・削除ができます。</td></tr>
+          <tr><td>テスト送信</td><td>通知が正しく届くかをその場で確認できます。</td></tr>
+          <tr><td>通知ステータス</td><td>画面上部の「通知: …」表示で、現在の通知設定状態がわかります。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== 連携・設定 ========== -->
+  <section id="integrations" class="mtb-section">
+    <div class="mtb-section-header">
+      <div class="mtb-section-icon" style="background:#dbeafe">🔗</div>
+      <div>
+        <h2 class="mtb-section-title">DSTT連携・設定</h2>
+        <p class="mtb-section-desc">画面右上の⚙（設定）から、他のDSTTツールとの連携を機能ごとにON/OFFできます。デフォルトはすべてOFFです。</p>
+      </div>
+    </div>
+
+    <div class="mtb-card">
+      <div class="mtb-card-title">
+        🔌 DSTT連携（設定 → 「DSTT連携」タブ）
+        <button class="mtb-popup-btn" style="margin-left:auto" onclick="openModal('integrationsModal')">全連携を一覧で見る ▼</button>
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">ONにすると、対象ツールで対応する出来事が起きたとき、ToBellへ自動でタスクや通知が追加されたり、紐付けが使えるようになります。</p>
+      <ul class="mtb-ul">
+        <li><strong>CloudShift</strong>：休暇種別変更申請の自動タスク化／要代務シフト帳更新の確認タスク化</li>
+        <li><strong>FILEPOST</strong>：25MB超の添付を自動アップロード／プロジェクトのファイル管理</li>
+        <li><strong>pluslist（社員）・siteplus（現場）</strong>：プロジェクトやタスクとの紐付け</li>
+        <li><strong>Googleカレンダー</strong>：タスクを送る／予定を取り込む</li>
+      </ul>
+    </div>
+
+    <div class="mtb-card">
+      <div class="mtb-card-title">🔗 紐付け（タスク・プロジェクトの「紐付け」ボタン）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">該当の連携をONにすると、タスクやプロジェクトの「紐付け」から次の対象とひも付けできます。</p>
+      <table class="mtb-opt-table">
+        <tbody>
+          <tr><td>社員（pluslist）</td><td>社員名・社員番号で検索して紐付けます。</td></tr>
+          <tr><td>現場（siteplus）</td><td>現場名・現場IDで検索して紐付けます。</td></tr>
+          <tr><td>FILEPOST添付</td><td>ファイルをアップロードし、非公開URLとして紐付けます。FILEPOSTの一覧には表示されません。</td></tr>
+        </tbody>
+      </table>
+      <div class="mtb-note" style="margin-top:10px">
+        ℹ️ 「紐付け可能な連携機能がありません」と出た場合は、設定（⚙）の「DSTT連携」タブで対象の連携を有効化してください。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== Googleカレンダー ========== -->
+  <section id="gcal" class="mtb-section">
+    <div class="mtb-section-header">
+      <div class="mtb-section-icon" style="background:#dcfce7">📅</div>
+      <div>
+        <h2 class="mtb-section-title">Googleカレンダー連携</h2>
+        <p class="mtb-section-desc">タスクをカレンダーへ送る（送信）と、カレンダーの予定をタスクへ取り込む（取り込み）の2方向があります。どちらも設定 → 「Googleカレンダー」タブでアカウントを接続してから使います。</p>
+      </div>
+    </div>
+
+    <div class="mtb-step">
+      <div class="mtb-step-badge">1</div>
+      <div class="mtb-step-body">
+        <div class="mtb-step-title">連携をONにしてアカウント接続</div>
+        <p class="mtb-step-text">設定（⚙）の「DSTT連携」タブで使いたい機能（送信／取り込み）をONにし、「Googleカレンダー」タブで自分のGoogleアカウントを接続します。</p>
+      </div>
+    </div>
+
+    <div class="mtb-step">
+      <div class="mtb-step-badge">2</div>
+      <div class="mtb-step-body">
+        <div class="mtb-step-title">
+          タスクをカレンダーに送る
+          <span class="mtb-tag mtb-tag-blue">ToBell → カレンダー</span>
+        </div>
+        <p class="mtb-step-text">各タスクの詳細で<strong>「📅 Googleカレンダーに送る」</strong>をONにすると、期限がGoogleカレンダー（メイン）にイベントとして追加されます。リマインダー（通知タイミング）も選べます。</p>
+        <hr class="mtb-divider">
+        <table class="mtb-opt-table">
+          <thead><tr><th>リマインダー</th><th>説明</th></tr></thead>
+          <tbody>
+            <tr><td>共通設定に従う</td><td>カレンダー連携の共通リマインダー設定を使います。</td></tr>
+            <tr><td>通知なし / 10分前 / 30分前 / 1時間前 / 1日前 / 1週間前</td><td>このタスク個別のリマインダーを指定します。</td></tr>
+          </tbody>
+        </table>
+        <div class="mtb-note" style="margin-top:10px">
+          ℹ️ 送信は<strong>片方向</strong>です。送ったタスクを編集・完了・削除するとカレンダー側にも反映されますが、カレンダー側の変更はToBellには戻りません。完了してもイベントは消えず、タイトルに完了印（✓）が付きます。
+        </div>
+      </div>
+    </div>
+
+    <div class="mtb-step">
+      <div class="mtb-step-badge">3</div>
+      <div class="mtb-step-body">
+        <div class="mtb-step-title">
+          予定をタスクに取り込む
+          <span class="mtb-tag mtb-tag-orange">カレンダー → ToBell</span>
+        </div>
+        <p class="mtb-step-text">Googleカレンダー（メイン）の予定を定期的に取り込み、ToBellタスクを自動作成します。取り込む範囲と間隔を選べます。</p>
+        <hr class="mtb-divider">
+        <table class="mtb-opt-table">
+          <tbody>
+            <tr><td>取り込む範囲</td><td>末尾に「TB」が付いた予定のみ／自分が主催する予定／すべての予定 から選べます。</td></tr>
+            <tr><td>取り込み間隔</td><td>手動／15分〜1日 から選べます。</td></tr>
+            <tr><td>変更追従</td><td>予定の変更・キャンセルにも追従します。</td></tr>
+          </tbody>
+        </table>
+        <div class="mtb-tip" style="margin-top:10px">
+          💡 こちらも片方向（カレンダー → ToBell）です。全予定を取り込むとタスクが多くなりがちなので、まずは「末尾TBの予定のみ」から始めるのがおすすめです。
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== 共有 ========== -->
+  <section id="share" class="mtb-section">
+    <div class="mtb-section-header">
+      <div class="mtb-section-icon" style="background:#f3e8ff">📲</div>
+      <div>
+        <h2 class="mtb-section-title">共有リンク</h2>
+        <p class="mtb-section-desc">ログイン不要のリンクを発行して、スマホやPWAから自分のToBellを操作できます。</p>
+      </div>
+    </div>
+
+    <div class="mtb-card">
+      <div class="mtb-card-title">📲 発行・再発行・無効化</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">上部の「共有リンク」から発行します。<strong>モバイル用</strong>と<strong>PWA専用</strong>の2つのURLをコピーできます。</p>
+      <table class="mtb-opt-table">
+        <tbody>
+          <tr><td>発行</td><td>新しい共有リンクを作成します。</td></tr>
+          <tr><td>再発行</td><td>古いリンクを無効にして新しいリンクを作り直します。</td></tr>
+          <tr><td>無効化</td><td>共有リンクを使えなくします。</td></tr>
+        </tbody>
+      </table>
+      <div class="mtb-warn" style="margin-top:10px">
+        ⚠️ このURLを知っている人は、ログインなしで<strong>あなたとしてToBellのみ</strong>を操作できます。取り扱いに注意し、不要になったら必ず無効化してください。
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== FAQ ========== -->
+  <section id="faq" class="mtb-section">
+    <div class="mtb-section-header">
+      <div class="mtb-section-icon" style="background:#f0fdf4">❓</div>
+      <div>
+        <h2 class="mtb-section-title">よくある質問</h2>
+        <p class="mtb-section-desc">クリックすると回答を表示します</p>
+      </div>
+    </div>
+
+    <div class="mtb-acc-item">
+      <button class="mtb-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mtb-acc-q">タスク名だけで登録できますか？</span>
+        <span class="mtb-acc-arrow">▼</span>
+      </button>
+      <div class="mtb-acc-body">はい。タスク名だけで追加できます。期限・担当者・メモ・タグなどは、あとから詳細パネルで自由に編集できます。</div>
+    </div>
+
+    <div class="mtb-acc-item">
+      <button class="mtb-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mtb-acc-q">タスクが見つかりません。</span>
+        <span class="mtb-acc-arrow">▼</span>
+      </button>
+      <div class="mtb-acc-body">左側のフィルタ（今日・受信箱・自分の担当・要対応・期限切れ・完了）と、検索欄を確認してください。完了済みは「完了」フィルタに、未整理のものは「受信箱」にあります。他の人に割り当てたタスクは、作成者・担当者・確認者だけが閲覧できます。</div>
+    </div>
+
+    <div class="mtb-acc-item">
+      <button class="mtb-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mtb-acc-q">通知や担当には誰を指定できますか？</span>
+        <span class="mtb-acc-arrow">▼</span>
+      </button>
+      <div class="mtb-acc-body">同じ営業所内のユーザーだけを指定できます。プロジェクトやテンプレートの共有先も同様に、所属内のユーザーが対象です。</div>
+    </div>
+
+    <div class="mtb-acc-item">
+      <button class="mtb-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mtb-acc-q">通知が消えません。</span>
+        <span class="mtb-acc-arrow">▼</span>
+      </button>
+      <div class="mtb-acc-body">対象のタスクを完了するか、通知を解決すると消えます。まとめて消したいときは上部の「通知を既読」を使ってください。</div>
+    </div>
+
+    <div class="mtb-acc-item">
+      <button class="mtb-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mtb-acc-q">iPhone通知はToBellを開きっぱなしにする必要がありますか？</span>
+        <span class="mtb-acc-arrow">▼</span>
+      </button>
+      <div class="mtb-acc-body">いいえ。ホーム画面に追加したWebアプリとして通知を許可していれば、開きっぱなしにしなくてもService Workerがプッシュ通知を受け取ります。iOS / iPadOS 16.4以降とHTTPS配信が前提です。</div>
+    </div>
+
+    <div class="mtb-acc-item">
+      <button class="mtb-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mtb-acc-q">Googleカレンダー連携は双方向ですか？</span>
+        <span class="mtb-acc-arrow">▼</span>
+      </button>
+      <div class="mtb-acc-body">いいえ。送信（ToBell→カレンダー）と取り込み（カレンダー→ToBell）はそれぞれ片方向です。送信したタスクを編集・完了・削除するとカレンダー側にも反映されますが、カレンダー側の変更は送信タスクには戻りません。完了するとイベントは消えず、タイトルに完了印（✓）が付きます。</div>
+    </div>
+
+    <div class="mtb-acc-item">
+      <button class="mtb-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mtb-acc-q">大きいファイルを添付できますか？</span>
+        <span class="mtb-acc-arrow">▼</span>
+      </button>
+      <div class="mtb-acc-body">タスクへの直接添付は1ファイル25MBまでです。これを超えるファイルは、FILEPOST連携（設定の「DSTT連携」で有効化）を使うと、自動でFILEPOSTにアップロードして紐付けできます。</div>
+    </div>
+
+    <div class="mtb-acc-item">
+      <button class="mtb-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mtb-acc-q">テンプレートは用意されていますか？</span>
+        <span class="mtb-acc-arrow">▼</span>
+      </button>
+      <div class="mtb-acc-body">サーバー側の初期テンプレートはありません。よく使うタスクを「テンプレ化」して保存し、自分用または所属内で共有してください。</div>
+    </div>
+
+    <div class="mtb-acc-item">
+      <button class="mtb-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mtb-acc-q">「要対応」には何が集まりますか？</span>
+        <span class="mtb-acc-arrow">▼</span>
+      </button>
+      <div class="mtb-acc-body">期限が今日以前で、担当者が自分、または確認者が自分のタスクが集まります。まず「要対応」を見れば、今日対応すべきものを把握できます。</div>
+    </div>
+
+    <div class="mtb-acc-item">
+      <button class="mtb-acc-trigger" onclick="toggleAcc(this)">
+        <span class="mtb-acc-q">古いタスクや通知は自動で消えますか？</span>
+        <span class="mtb-acc-arrow">▼</span>
+      </button>
+      <div class="mtb-acc-body">完了済みタスク・60日を過ぎた未対応タスク・古い通知は、サーバー側で1日1回自動的に整理されます。</div>
+    </div>
+  </section>
+
+</div><!-- .mtb-wrap -->
+
+
+<!-- ===== MODAL: Integrations ===== -->
+<div id="integrationsModal" class="mtb-modal-ov mtb-hidden">
+  <div class="mtb-modal-box">
+    <div class="mtb-modal-head">
+      <h3 class="mtb-modal-title">🔌 DSTT連携 一覧</h3>
+      <button class="mtb-modal-close" onclick="closeModal('integrationsModal')">✕</button>
+    </div>
+    <p style="font-size:14px;color:#475569;margin:0 0 14px;line-height:1.7">設定（⚙）の「DSTT連携」タブで、機能ごとに個別にON/OFFできます。デフォルトはすべてOFFです。</p>
+    <table class="mtb-opt-table">
+      <thead><tr><th>連携</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td>休暇種別変更申請を自動タスク化</td><td>CloudShiftで休暇種別変更申請が起きると、即時通知付きで処理タスクをToBellに追加します。</td></tr>
+        <tr><td>要代務シフト帳の更新を確認タスク化</td><td>要代務シフト帳が更新されたら、確認を促すタスクをToBellに追加します。</td></tr>
+        <tr><td>25MB超の添付を自動でFILEPOSTへ</td><td>添付がしきい値（25MB）を超えた場合、FILEPOSTの仕組みでアップロードして紐付けます。</td></tr>
+        <tr><td>プロジェクトのFILEPOSTファイル管理</td><td>FILEPOSTでアップロードしたファイルの非公開URLを、プロジェクトに紐付けて管理します。</td></tr>
+        <tr><td>プロジェクト/タスクを社員に紐付け</td><td>pluslistの社員と、プロジェクトやタスクを多対多で紐付けます。</td></tr>
+        <tr><td>プロジェクト/タスクを現場に紐付け</td><td>siteplusの現場と、プロジェクトやタスクを多対多で紐付けます。</td></tr>
+        <tr><td>重要タスクをGoogleカレンダーに送る</td><td>選んだタスクの期限をGoogleカレンダー（メイン）にイベントとして追加します（片方向）。</td></tr>
+        <tr><td>Googleカレンダーの予定をタスクに取り込む</td><td>カレンダー（メイン）の予定を定期的に取り込み、ToBellタスクを自動作成します（片方向）。</td></tr>
+      </tbody>
+    </table>
+    <div style="text-align:right;margin-top:16px">
+      <button class="mtb-popup-btn" onclick="closeModal('integrationsModal')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* ---- Accordion ---- */
+  function toggleAcc(btn) {
+    var item = btn.closest('.mtb-acc-item');
+    item.classList.toggle('mtb-open');
+  }
+
+  /* ---- Modal ---- */
+  function openModal(id) {
+    document.getElementById(id).classList.remove('mtb-hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.add('mtb-hidden');
+    document.body.style.overflow = '';
+  }
+  // Close on overlay click
+  document.querySelectorAll('.mtb-modal-ov').forEach(function(ov) {
+    ov.addEventListener('click', function(e) {
+      if (e.target === ov) closeModal(ov.id);
+    });
+  });
+  // Close on Escape
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.mtb-modal-ov:not(.mtb-hidden)').forEach(function(ov) {
+        closeModal(ov.id);
+      });
+    }
+  });
+
+  /* ---- Sticky nav active highlight ---- */
+  (function() {
+    var sections = document.querySelectorAll('.mtb-section[id]');
+    var navLinks = document.querySelectorAll('.mtb-nav-link[data-section]');
+    function onScroll() {
+      var scrollY = window.pageYOffset;
+      var active = null;
+      sections.forEach(function(sec) {
+        var top = sec.getBoundingClientRect().top + scrollY - 100;
+        if (scrollY >= top) active = sec.id;
+      });
+      navLinks.forEach(function(lnk) {
+        lnk.classList.toggle('mtb-active', lnk.dataset.section === active);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>
+{% endblock %}
