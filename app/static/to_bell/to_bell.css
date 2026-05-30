@@ -1970,3 +1970,6 @@ body.tobell-pwa-mode .tobell-viewer-stage embed {
   color: #6b7280;
   padding: 0.3rem 0;
 }
+
+.tobell-link{color:#2563eb;text-decoration:underline;text-underline-offset:2px;word-break:break-all;overflow-wrap:anywhere;}
+.tobell-link:hover{color:#1d4ed8;}

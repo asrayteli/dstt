@@ -210,7 +210,7 @@
           <input class="tobell-check" type="checkbox" ${done} data-complete-id="${task.id}" aria-label="完了">
           <div class="tobell-task-body">
             <h3>${task.pinned ? '<span class="tobell-task-pin" aria-label="ピン留め">📌</span> ' : ""}${esc(task.title)}</h3>
-            <p>${esc(task.description || "メモなし")}</p>
+            <p>${linkify(task.description || "メモなし")}</p>
             <p class="tobell-task-meta">${esc(statusLabel(task.status))} / ${esc(due)} / 進捗 ${Number(task.progress || 0)}%</p>
             ${projectTag(task)}
           </div>
