@@ -1394,6 +1394,13 @@
     <div class="pcsv-fx-popup" id="fxHelpPopup">
       <h4>数式リファレンス (= で始めて入力)</h4>
       <div class="fx-cat">
+        <div class="fx-cat-title">式・演算子</div>
+        <div class="fx-row"><span class="fx-name">=A1+SUM(B1:B3)*2</span><span class="fx-desc">関数と四則演算を混在可</span></div>
+        <div class="fx-row"><span class="fx-name">=ROUND(AVG(A:A),1)</span><span class="fx-desc">関数のネストも可</span></div>
+        <div class="fx-row"><span class="fx-name">+ - * / ^ %</span><span class="fx-desc">四則・べき乗・剰余</span></div>
+        <div class="fx-row"><span class="fx-name">=A1&"-"&B1</span><span class="fx-desc">&amp; で文字列連結</span></div>
+      </div>
+      <div class="fx-cat">
         <div class="fx-cat-title">セル参照</div>
         <div class="fx-row"><span class="fx-name">A1</span><span class="fx-desc">列A, 行1のセル</span></div>
         <div class="fx-row"><span class="fx-name">A1:A10</span><span class="fx-desc">A1からA10の範囲</span></div>
@@ -1413,9 +1420,16 @@
       <div class="fx-cat">
         <div class="fx-cat-title">条件・検索</div>
         <div class="fx-row" onclick="insertFx('=IF(,,)')"><span class="fx-name">=IF(条件, 真, 偽)</span><span class="fx-desc">条件分岐</span></div>
+        <div class="fx-row" onclick="insertFx('=IFS(,,,)')"><span class="fx-name">=IFS(条件1,値1,…)</span><span class="fx-desc">多分岐</span></div>
+        <div class="fx-row" onclick="insertFx('=IFERROR(,)')"><span class="fx-name">=IFERROR(式, 代替)</span><span class="fx-desc">エラー時の値</span></div>
         <div class="fx-row" onclick="insertFx('=COUNTIF(,)')"><span class="fx-name">=COUNTIF(範囲, 条件)</span><span class="fx-desc">条件付きカウント</span></div>
-        <div class="fx-row" onclick="insertFx('=SUMIF(,)')"><span class="fx-name">=SUMIF(範囲, 条件)</span><span class="fx-desc">条件付き合計</span></div>
+        <div class="fx-row" onclick="insertFx('=SUMIF(,)')"><span class="fx-name">=SUMIF(範囲, 条件, [合計範囲])</span><span class="fx-desc">条件付き合計</span></div>
+        <div class="fx-row" onclick="insertFx('=SUMIFS(,,)')"><span class="fx-name">=SUMIFS(合計, 範囲, 条件,…)</span><span class="fx-desc">複数条件合計</span></div>
+        <div class="fx-row" onclick="insertFx('=COUNTIFS(,)')"><span class="fx-name">=COUNTIFS(範囲, 条件,…)</span><span class="fx-desc">複数条件カウント</span></div>
         <div class="fx-row" onclick="insertFx('=VLOOKUP(,,)')"><span class="fx-name">=VLOOKUP(値, 列, 結果列)</span><span class="fx-desc">縦検索</span></div>
+        <div class="fx-row" onclick="insertFx('=INDEX(,)')"><span class="fx-name">=INDEX(範囲, n)</span><span class="fx-desc">n番目の値</span></div>
+        <div class="fx-row" onclick="insertFx('=MATCH(,)')"><span class="fx-name">=MATCH(値, 範囲)</span><span class="fx-desc">位置を検索</span></div>
+        <div class="fx-row" onclick="insertFx('=AND(,)')"><span class="fx-name">=AND() / OR() / NOT()</span><span class="fx-desc">論理演算</span></div>
       </div>
       <div class="fx-cat">
         <div class="fx-cat-title">文字列</div>
@@ -1432,7 +1446,10 @@
       <div class="fx-cat">
         <div class="fx-cat-title">数値・日付</div>
         <div class="fx-row" onclick="insertFx('=ROUND(,)')"><span class="fx-name">=ROUND(値, 桁数)</span><span class="fx-desc">四捨五入</span></div>
+        <div class="fx-row" onclick="insertFx('=ROUNDUP(,)')"><span class="fx-name">=ROUNDUP / ROUNDDOWN</span><span class="fx-desc">切り上げ / 切り捨て</span></div>
+        <div class="fx-row" onclick="insertFx('=INT()')"><span class="fx-name">=INT(値)</span><span class="fx-desc">整数化</span></div>
         <div class="fx-row" onclick="insertFx('=ABS()')"><span class="fx-name">=ABS(値)</span><span class="fx-desc">絶対値</span></div>
+        <div class="fx-row" onclick="insertFx('=MOD(,)')"><span class="fx-name">=MOD(値, 除数)</span><span class="fx-desc">剰余</span></div>
         <div class="fx-row" onclick="insertFx('=TODAY()')"><span class="fx-name">=TODAY()</span><span class="fx-desc">今日の日付</span></div>
         <div class="fx-row" onclick="insertFx('=NOW()')"><span class="fx-name">=NOW()</span><span class="fx-desc">現在日時</span></div>
         <div class="fx-row" onclick="insertFx('=UNIQUE()')"><span class="fx-name">=UNIQUE(範囲)</span><span class="fx-desc">ユニーク値の数</span></div>
@@ -1447,10 +1464,10 @@
       <div class="pcsv-upload" id="uploadScreen">
         <div class="pcsv-upload-zone" id="uploadZone">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 0l3-3m-3 3l3 3M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          <div class="main-text">CSVファイルをドロップ</div>
+          <div class="main-text">ファイルをドロップ</div>
           <div class="sub-text">またはクリックしてファイルを選択</div>
-          <div class="sub-text" style="margin-top:12px;color:#94a3b8">対応: .csv / .tsv (UTF-8, Shift_JIS, EUC-JP 自動検出)</div>
-          <input type="file" id="fileInput" accept=".csv,.tsv,.txt">
+          <div class="sub-text" style="margin-top:12px;color:#94a3b8">対応: CSV / TSV・Excel(.xlsx)・SQLite(.db / .sqlite)　文字コード自動判定</div>
+          <input type="file" id="fileInput" accept=".csv,.tsv,.txt,.xlsx,.db,.sqlite,.sqlite3">
         </div>
         <div style="margin-top:20px;text-align:center">
           <div style="display:inline-flex;align-items:center;gap:6px;color:#94a3b8;font-size:12px;margin-bottom:8px"><span style="flex:1;height:1px;background:#e2e8f0;width:60px"></span>または<span style="flex:1;height:1px;background:#e2e8f0;width:60px"></span></div>
@@ -1610,29 +1627,73 @@
   </div>
 </div>
 
+<!-- DB Table Picker Modal -->
+<div class="pcsv-modal-overlay hidden" id="dbPickerModal">
+  <div class="pcsv-modal">
+    <h3>テーブルを選択</h3>
+    <p class="pcsv-small-note">📦 <span id="dbPickerFilename"></span></p>
+    <label>読み込むテーブル / ビュー</label>
+    <select id="dbTableSelect"></select>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('dbPickerModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="confirmDbLoad()">読み込む</button>
+    </div>
+  </div>
+</div>
+
+<!-- Excel Sheet Picker Modal -->
+<div class="pcsv-modal-overlay hidden" id="xlsxPickerModal">
+  <div class="pcsv-modal">
+    <h3>シートを選択</h3>
+    <p class="pcsv-small-note">📗 <span id="xlsxPickerFilename"></span></p>
+    <label>読み込むシート</label>
+    <select id="xlsxSheetSelect"></select>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
+      <input type="checkbox" id="xlsxHasHeader" checked> 先頭行をヘッダーとして扱う
+    </label>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('xlsxPickerModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="confirmSheetLoad()">読み込む</button>
+    </div>
+  </div>
+</div>
+
 <!-- Download Modal -->
 <div class="pcsv-modal-overlay hidden" id="downloadModal">
   <div class="pcsv-modal">
-    <h3>CSVエクスポート</h3>
+    <h3>エクスポート</h3>
+    <label>保存形式</label>
+    <select id="dlFormat" onchange="onDownloadFormatChange()">
+      <option value="csv" selected>CSV (.csv)</option>
+      <option value="xlsx">Excel (.xlsx)</option>
+      <option value="db">SQLite データベース (.db)</option>
+    </select>
     <label>ファイル名</label>
     <input type="text" id="dlFilename" value="export.csv">
-    <label>エンコーディング</label>
-    <select id="dlEncoding">
-      <option value="utf-8-sig" selected>UTF-8 (BOM付き / Excel推奨)</option>
-      <option value="utf-8">UTF-8</option>
-      <option value="shift_jis">Shift_JIS</option>
-      <option value="cp932">CP932 (Windows日本語)</option>
-    </select>
-    <label>区切り文字</label>
-    <select id="dlDelimiter">
-      <option value="," selected>カンマ (,)</option>
-      <option value="&#9;">タブ</option>
-      <option value=";">セミコロン (;)</option>
-    </select>
-    <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
-      <input type="checkbox" id="dlProtectFormulas" checked>
-      表計算ソフトで実行される可能性があるセル (= + - @) を安全化する
-    </label>
+    <div id="dlDbOptions" class="hidden">
+      <label>テーブル名</label>
+      <input type="text" id="dlTableName" value="data">
+    </div>
+    <div id="dlCsvOptions">
+      <label>エンコーディング</label>
+      <select id="dlEncoding">
+        <option value="utf-8-sig" selected>UTF-8 (BOM付き / Excel推奨)</option>
+        <option value="utf-8">UTF-8</option>
+        <option value="shift_jis">Shift_JIS</option>
+        <option value="cp932">CP932 (Windows日本語)</option>
+        <option value="euc-jp">EUC-JP</option>
+      </select>
+      <label>区切り文字</label>
+      <select id="dlDelimiter">
+        <option value="," selected>カンマ (,)</option>
+        <option value="&#9;">タブ</option>
+        <option value=";">セミコロン (;)</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
+        <input type="checkbox" id="dlProtectFormulas" checked>
+        表計算ソフトで実行される可能性があるセル (= + - @) を安全化する
+      </label>
+    </div>
     <div class="pcsv-modal-actions">
       <button class="pcsv-modal-btn" onclick="closeDownloadModal()">キャンセル</button>
       <button class="pcsv-modal-btn primary" onclick="doDownload()">ダウンロード</button>
@@ -2060,6 +2121,7 @@ const S = {
   pendingPaste: null,
   pendingMemoCell: null,
   safeEditMode: true,
+  tableName: '', sheetName: '', source: 'csv',
 };
 function hasData() { return S.headers.length > 0; }
 
@@ -2132,6 +2194,9 @@ function initUpload() {
 }
 async function uploadFile(file) {
   S.pendingFile=file;
+  const name=(file.name||'').toLowerCase();
+  if(/\.(db|sqlite|sqlite3)$/.test(name)){ await openDbPicker(file); return; }
+  if(/\.xlsx$/.test(name)){ await openSheetPicker(file); return; }
   document.getElementById('importDelimiter').value='auto';
   document.getElementById('importEncoding').value='';
   document.getElementById('importHasHeader').value='true';
@@ -2139,6 +2204,61 @@ async function uploadFile(file) {
   document.getElementById('importRowWidth').value='expand';
   openModal('importWizardModal');
   await refreshImportPreview();
+}
+// ---------- SQLite table picker ----------
+async function openDbPicker(file){
+  try{
+    const fd=new FormData();fd.append('file',file);
+    const res=await fetch('/tools/csvtool/api/db/tables',{method:'POST',body:fd});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.error||'データベースを開けませんでした');
+    S.pendingFile=file;
+    const sel=document.getElementById('dbTableSelect');
+    sel.innerHTML=j.tables.map(t=>`<option value="${escHtml(t.name)}">${escHtml(t.name)} （${t.type==='view'?'ビュー':'テーブル'} / ${t.rows==null?'?':t.rows.toLocaleString()}行 × ${t.columns.length}列）</option>`).join('');
+    document.getElementById('dbPickerFilename').textContent=file.name;
+    openModal('dbPickerModal');
+  }catch(err){ toast(err.message,'error'); }
+}
+async function confirmDbLoad(){
+  try{
+    const table=document.getElementById('dbTableSelect').value;
+    const fd=new FormData();fd.append('file',S.pendingFile);fd.append('table',table);
+    const res=await fetch('/tools/csvtool/api/db/load',{method:'POST',body:fd});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.error||'テーブルを読み込めませんでした');
+    loadDataset(j,{resetOriginal:true});
+    closeModal('dbPickerModal');
+    toast(`テーブル「${table}」を読み込みました（${j.totalRows.toLocaleString()}行）`,'success');
+    if(j.truncated) toast(`行数が上限(${(200000).toLocaleString()})に達したため一部のみ読み込みました`,'info');
+  }catch(err){ toast(err.message,'error'); }
+}
+// ---------- Excel sheet picker ----------
+async function openSheetPicker(file){
+  try{
+    const fd=new FormData();fd.append('file',file);
+    const res=await fetch('/tools/csvtool/api/xlsx/sheets',{method:'POST',body:fd});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.error||'Excelファイルを開けませんでした');
+    S.pendingFile=file;
+    const sel=document.getElementById('xlsxSheetSelect');
+    sel.innerHTML=j.sheets.map(s=>`<option value="${escHtml(s.name)}">${escHtml(s.name)} （${(s.rows||0).toLocaleString()}行 × ${s.columns||0}列）</option>`).join('');
+    document.getElementById('xlsxPickerFilename').textContent=file.name;
+    document.getElementById('xlsxHasHeader').checked=true;
+    openModal('xlsxPickerModal');
+  }catch(err){ toast(err.message,'error'); }
+}
+async function confirmSheetLoad(){
+  try{
+    const sheet=document.getElementById('xlsxSheetSelect').value;
+    const hasHeader=document.getElementById('xlsxHasHeader').checked;
+    const fd=new FormData();fd.append('file',S.pendingFile);fd.append('sheet',sheet);fd.append('has_header',hasHeader?'true':'false');
+    const res=await fetch('/tools/csvtool/api/xlsx/load',{method:'POST',body:fd});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.error||'シートを読み込めませんでした');
+    loadDataset(j,{resetOriginal:true});
+    closeModal('xlsxPickerModal');
+    toast(`シート「${sheet}」を読み込みました（${j.totalRows.toLocaleString()}行）`,'success');
+  }catch(err){ toast(err.message,'error'); }
 }
 function importOptionsFromUI(){
   return {
@@ -2191,6 +2311,7 @@ function loadDataset(j,{resetOriginal=false}={}){
   const data=j.data||[];
   resetSessionState();
   S.headers=headers; S.data=data; S.filename=j.filename||S.filename||'powercsv.csv'; S.encoding=j.encoding||'utf-8'; S.delimiter=j.delimiter||',';
+  S.tableName=j.tableName||''; S.sheetName=j.sheetName||''; S.source=j.source||'csv';
   S.importOptions={hasHeader:j.hasHeader,preserveEmptyRows:j.preserveEmptyRows,rowWidthStrategy:j.rowWidthStrategy};
   if(resetOriginal){S.originalHeaders=JSON.parse(JSON.stringify(S.headers));S.originalData=JSON.parse(JSON.stringify(S.data));}
   showEditor(); renderGrid(); updateStatus(); enableToolbar();
@@ -3106,8 +3227,13 @@ function commitEdit(row,col,newVal) {
         const o2=S.data[r][c];S.formulas[k]=newVal;try{S.data[r][c]=String(evaluateFormula(newVal));}catch(e2){S.data[r][c]='#ERROR';}if(o2!==S.data[r][c])_journalRecord(r,c,o2,S.data[r][c]);});
     }
   } else {
-    const old=S.data[row][col]; delete S.formulas[fk];
-    if(old!==newVal){saveState('セル編集');S.data[row][col]=newVal;_journalRecord(row,col,old,newVal);}
+    const old=S.data[row][col];
+    // A fan-out write (multi-cell or whole-column) also mutates data, so take
+    // an undo snapshot if the primary cell OR any fan-out target will change.
+    const fanOut=S.multiCells.size>1||S.selectedCols.size>0;
+    if(old!==newVal||fanOut) saveState('セル編集');
+    delete S.formulas[fk];
+    if(old!==newVal){S.data[row][col]=newVal;_journalRecord(row,col,old,newVal);}
     // Apply to multi-selected cells
     if(S.multiCells.size>1){
       S.multiCells.forEach(k=>{if(k===fk)return;const[r,c]=k.split(',').map(Number);
@@ -3124,19 +3250,31 @@ function commitEdit(row,col,newVal) {
 function cancelEdit() {S.editing=false;renderBody();document.getElementById('statusMode').textContent='準備完了';}
 
 // ========== Sorting ==========
+// Reorder rows by a column while keeping per-cell formulas attached to their
+// rows (formula keys are "row,col", so they must be remapped after a sort).
+function _sortRowsByCol(colIdx,dir){
+  const order=S.data.map((_,i)=>i);
+  order.sort((ia,ib)=>{
+    const a=S.data[ia],b=S.data[ib];
+    const va=(a[colIdx]||'').toLowerCase(),vb=(b[colIdx]||'').toLowerCase();
+    const na=parseFloat(va),nb=parseFloat(vb);
+    if(!isNaN(na)&&!isNaN(nb)) return (na-nb)*dir;
+    return va.localeCompare(vb,'ja')*dir;
+  });
+  const newData=order.map(i=>S.data[i]);
+  // oldRow -> newRow lookup for formula remapping.
+  const pos={}; order.forEach((oldRow,newRow)=>pos[oldRow]=newRow);
+  const nf={};
+  for(const k in S.formulas){const[r,c]=k.split(',').map(Number);if(pos[r]!=null)nf[`${pos[r]},${c}`]=S.formulas[k];}
+  S.data=newData; S.formulas=nf;
+}
 function sortByCol(colIdx) {
   if(S.sortCol===colIdx) S.sortDir=(S.sortDir+1)%3; else{S.sortCol=colIdx;S.sortDir=1;}
   if(S.sortDir===0){S.sortCol=-1;} else {
     saveState('ソート');
-    const dir=S.sortDir===1?1:-1;
-    S.data.sort((a,b)=>{
-      const va=(a[colIdx]||'').toLowerCase(),vb=(b[colIdx]||'').toLowerCase();
-      const na=parseFloat(va),nb=parseFloat(vb);
-      if(!isNaN(na)&&!isNaN(nb)) return (na-nb)*dir;
-      return va.localeCompare(vb,'ja')*dir;
-    });
+    _sortRowsByCol(colIdx,S.sortDir===1?1:-1);
   }
-  clearSelection(); S.formulas={}; renderGrid();
+  clearSelection(); renderGrid();
 }
 
 // ========== Data Operations ==========
@@ -3685,9 +3823,8 @@ function insertFxToCell(row,col,fx){
   if(pp>=0) setTimeout(()=>inp.setSelectionRange(pp+1,fx.length-1),0);
 }
 function clearCell(r,c){if(S.data[r][c]!==''||S.formulas[`${r},${c}`]){saveState('セルクリア');S.data[r][c]='';delete S.formulas[`${r},${c}`];renderBody();updateFormulaBar();}}
-function forceSortCol(ci,dir){saveState('ソート');S.sortCol=ci;S.sortDir=dir;S.formulas={};
-  const d=dir===1?1:-1;S.data.sort((a,b)=>{const va=(a[ci]||'').toLowerCase(),vb=(b[ci]||'').toLowerCase();
-  const na=parseFloat(va),nb=parseFloat(vb);if(!isNaN(na)&&!isNaN(nb))return(na-nb)*d;return va.localeCompare(vb,'ja')*d;});
+function forceSortCol(ci,dir){saveState('ソート');S.sortCol=ci;S.sortDir=dir;
+  _sortRowsByCol(ci,dir===1?1:-1);
   clearSelection();renderGrid();}
 
 // ========== Selection Summary ==========
@@ -3803,22 +3940,58 @@ async function renderStats(){
 }
 
 // ========== Download ==========
-function openDownloadModal(){openModal('downloadModal');}
+function _baseFilename(){return (S.filename||'export').replace(/\.[^.]+$/,'');}
+function openDownloadModal(){
+  // Preselect the source encoding so CSV exports honour the original charset.
+  const enc=document.getElementById('dlEncoding');
+  if(enc&&S.encoding){const want=String(S.encoding).toLowerCase();if([...enc.options].some(o=>o.value===want))enc.value=want;}
+  const tn=document.getElementById('dlTableName');
+  if(tn) tn.value=S.tableName||'data';
+  // Default the format to match the source (DB -> .db, xlsx -> Excel).
+  const fmt=document.getElementById('dlFormat');
+  if(fmt) fmt.value=S.source==='sqlite'?'db':(S.source==='xlsx'?'xlsx':'csv');
+  onDownloadFormatChange();
+  openModal('downloadModal');
+}
 function closeDownloadModal(){closeModal('downloadModal');}
+function onDownloadFormatChange(){
+  const fmt=document.getElementById('dlFormat').value;
+  const ext=fmt==='xlsx'?'.xlsx':(fmt==='db'?'.db':'.csv');
+  document.getElementById('dlFilename').value=_baseFilename()+ext;
+  document.getElementById('dlCsvOptions').classList.toggle('hidden',fmt!=='csv');
+  document.getElementById('dlDbOptions').classList.toggle('hidden',fmt!=='db');
+}
+// Build export payload with instant overlay cells restored to their originals
+// (instant rows/cols are not part of S.data/S.headers, so nothing else to strip).
+function _buildExportData(){
+  const headers=JSON.parse(JSON.stringify(S.headers));
+  const data=JSON.parse(JSON.stringify(S.data));
+  for(const ck in S.instant.cells){const[r,c]=ck.split(',').map(Number);if(r<data.length&&c<headers.length)data[r][c]=S.instant.cells[ck].original;}
+  return {headers,data};
+}
 async function doDownload(){
-  const fn=document.getElementById('dlFilename').value.trim()||'export.csv';
-  const enc=document.getElementById('dlEncoding').value,delim=document.getElementById('dlDelimiter').value;
-  const protectFormulas=document.getElementById('dlProtectFormulas')?.checked!==false;
-  // Instant rows/cols are NOT in S.data/S.headers, so just restore overlay cells
-  let dlHeaders=JSON.parse(JSON.stringify(S.headers));
-  let dlData=JSON.parse(JSON.stringify(S.data));
-  for(const ck in S.instant.cells){const[r,c]=ck.split(',').map(Number);if(r<dlData.length&&c<dlHeaders.length)dlData[r][c]=S.instant.cells[ck].original;}
+  const fmt=document.getElementById('dlFormat').value;
+  const fn=document.getElementById('dlFilename').value.trim()||(_baseFilename()+'.'+fmt);
+  const {headers,data}=_buildExportData();
+  let endpoint,payload;
+  if(fmt==='xlsx'){
+    endpoint='/tools/csvtool/api/export/xlsx';
+    payload={headers,data,filename:fn,sheetName:(S.tableName||S.sheetName||'Sheet1')};
+  }else if(fmt==='db'){
+    endpoint='/tools/csvtool/api/export/db';
+    payload={headers,data,filename:fn,tableName:document.getElementById('dlTableName').value.trim()||'data'};
+  }else{
+    endpoint='/tools/csvtool/api/download';
+    payload={headers,data,encoding:document.getElementById('dlEncoding').value,
+      delimiter:document.getElementById('dlDelimiter').value,filename:fn,
+      protectFormulas:document.getElementById('dlProtectFormulas')?.checked!==false};
+  }
   try{
-    const res=await fetch('/tools/csvtool/api/download',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({headers:dlHeaders,data:dlData,encoding:enc,delimiter:delim,filename:fn,protectFormulas})});
-    if(!res.ok){const j=await res.json();throw new Error(j.error||'ダウンロード失敗');}
+    const res=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!res.ok){const j=await res.json().catch(()=>({error:'ダウンロード失敗'}));throw new Error(j.error||'ダウンロード失敗');}
     const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download=fn;a.click();URL.revokeObjectURL(url);closeDownloadModal();toast('ダウンロードしました（インスタント除外済み）','success');
+    a.href=url;a.download=fn;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+    closeDownloadModal();toast('ダウンロードしました','success');
   }catch(err){toast(err.message,'error');}
 }
 
