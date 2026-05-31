@@ -635,6 +635,33 @@
   justify-content: space-between;
 }
 
+.tobell-notifications-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tobell-link-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tobell-link-btn:hover {
+  text-decoration: underline;
+}
+
+.tobell-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
 .tobell-project-add {
   width: 26px;
   height: 26px;
