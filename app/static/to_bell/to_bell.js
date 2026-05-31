@@ -230,7 +230,7 @@
         <article class="tobell-task ${task.id === state.selectedTaskId ? "is-selected" : ""} ${pinned}" data-task-id="${task.id}">
           <input class="tobell-check" type="checkbox" ${done} data-complete-id="${task.id}" aria-label="完了">
           <div class="tobell-task-body">
-            <h3>${task.pinned ? '<span class="tobell-task-pin" aria-label="ピン留め">📌</span> ' : ""}${esc(task.title)}</h3>
+            <h3>${task.pinned ? '<span class="tobell-task-pin" aria-hidden="true">📌</span> ' : ""}${esc(task.title)}</h3>
             <p>${linkify(task.description || "メモなし")}</p>
             <p class="tobell-task-meta">${esc(statusLabel(task.status))} / ${esc(due)} / 進捗 ${Number(task.progress || 0)}%</p>
             ${projectTag(task)}
@@ -1063,7 +1063,7 @@
     if (attachmentForm) attachmentForm.addEventListener("submit", uploadAttachment);
     const backButton = $("tb-detail-back");
     if (backButton) backButton.addEventListener("click", closeDetail);
-    document.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", detailAction));
+    $("tb-detail").querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", detailAction));
     renderMain();
   }
 
@@ -1263,14 +1263,15 @@
   }
 
   function renderSubtasks(task) {
+    const container = $("tb-subtasks");
     const rows = task.subtasks || [];
-    $("tb-subtasks").innerHTML = rows.length ? rows.map((item) => `
+    container.innerHTML = rows.length ? rows.map((item) => `
       <div class="tobell-subtask">
         <input type="checkbox" ${item.is_done ? "checked" : ""} data-subtask-id="${item.id}">
         <span>${esc(item.title)}</span>
         <button type="button" class="tobell-subtask-delete" data-subtask-delete="${item.id}" aria-label="削除">×</button>
       </div>`).join("") : '<div class="tobell-empty">サブタスクはありません。</div>';
-    document.querySelectorAll("[data-subtask-id]").forEach((box) => {
+    container.querySelectorAll("[data-subtask-id]").forEach((box) => {
       box.addEventListener("change", async () => {
         box.disabled = true;
         try {
@@ -1287,7 +1288,7 @@
         }
       });
     });
-    document.querySelectorAll("[data-subtask-delete]").forEach((btn) => {
+    container.querySelectorAll("[data-subtask-delete]").forEach((btn) => {
       btn.addEventListener("click", async (event) => {
         event.preventDefault();
         btn.disabled = true;
@@ -1773,8 +1774,23 @@
     }
   }
 
+  // 通知済みフラグ（toBellNotified:*）は放置すると localStorage に溜まり続けるため、
+  // 7日より古いエントリを掃除する。
+  function pruneNotifiedKeys() {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const stale = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith("toBellNotified:")) continue;
+      const stored = Date.parse(localStorage.getItem(key) || "");
+      if (Number.isNaN(stored) || stored < cutoff) stale.push(key);
+    }
+    stale.forEach((key) => localStorage.removeItem(key));
+  }
+
   async function foregroundTick() {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
+    pruneNotifiedKeys();
     let data;
     try {
       const response = await fetch("/tools/to_bell/api/notifications/due-tasks");
