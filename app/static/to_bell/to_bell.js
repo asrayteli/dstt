@@ -22,6 +22,15 @@
     { key: "done", label: "完了" },
   ];
 
+  // 各種マジック値の定数化（調整はここを起点に行う）
+  const DEFAULT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+  const FOREGROUND_TICK_MS = 60000;       // 前面での期限監視間隔
+  const FLASH_DURATION_MS = 2400;         // トースト表示時間
+  const SEARCH_DEBOUNCE_MS = 220;         // 検索入力のデバウンス
+  const NOTIFICATION_DISPLAY_LIMIT = 8;   // 通知パネルの表示件数
+  // FILEPOST 閾値設定はほぼ変化しないため、セッション中はキャッシュする。
+  let filepostThresholdCache = null;
+
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value || "").replace(/[&<>"']/g, (ch) => ({
     "&": "&amp;",
@@ -101,7 +110,7 @@
     initShareLink();
     initSettingsModal();
     initLinksModal();
-    $("tb-search").addEventListener("input", debounce(loadTasks, 220));
+    $("tb-search").addEventListener("input", debounce(loadTasks, SEARCH_DEBOUNCE_MS));
     // 端末の「戻る」操作で詳細オーバーレイを閉じる（スマホアプリ的な挙動）。
     window.addEventListener("popstate", () => {
       if (document.body.classList.contains("tb-detail-active")) {
@@ -840,7 +849,7 @@
       if (event.key === "Escape" && !modal.hasAttribute("hidden")) close();
     });
     const search = $("tb-bulk-assign-search");
-    if (search) search.addEventListener("input", debounce(loadAssignableTasks, 220));
+    if (search) search.addEventListener("input", debounce(loadAssignableTasks, SEARCH_DEBOUNCE_MS));
     const toggle = $("tb-bulk-assign-toggle");
     if (toggle) toggle.addEventListener("click", toggleAllAssignable);
     const submit = $("tb-bulk-assign-submit");
@@ -1190,13 +1199,16 @@
     const btn = form.querySelector('[type="submit"]');
     if (btn) btn.disabled = true;
     try {
-      let settings = null;
-      try {
-        settings = await api("/tools/to_bell/api/integrations/filepost/threshold");
-      } catch (_) {
-        settings = null;
+      let settings = filepostThresholdCache;
+      if (settings === null) {
+        try {
+          settings = await api("/tools/to_bell/api/integrations/filepost/threshold");
+          filepostThresholdCache = settings;
+        } catch (_) {
+          settings = null;
+        }
       }
-      const threshold = (settings && settings.threshold_bytes) || 25 * 1024 * 1024;
+      const threshold = (settings && settings.threshold_bytes) || DEFAULT_ATTACHMENT_MAX_BYTES;
       const useFilepost = settings && settings.overflow_enabled && file.size > threshold;
       const data = new FormData();
       data.append("file", file);
@@ -1439,7 +1451,7 @@
     if (!container) return;
     const data = await api("/tools/to_bell/api/notifications");
     const rows = data.notifications || [];
-    container.innerHTML = rows.length ? rows.slice(0, 8).map((item) => `
+    container.innerHTML = rows.length ? rows.slice(0, NOTIFICATION_DISPLAY_LIMIT).map((item) => `
       <div class="tobell-notification">
         <strong>${esc(item.title)}</strong>
         <div>${linkify(item.body)}</div>
@@ -1751,7 +1763,7 @@
     if (state.foregroundTimer) return;
     if (!("Notification" in window)) return;
     foregroundTick();
-    state.foregroundTimer = window.setInterval(foregroundTick, 60000);
+    state.foregroundTimer = window.setInterval(foregroundTick, FOREGROUND_TICK_MS);
   }
 
   function stopForegroundWatch() {
@@ -2676,7 +2688,7 @@
     window.clearTimeout(showFlash._timer);
     showFlash._timer = window.setTimeout(() => {
       node.classList.remove("is-visible");
-    }, 2400);
+    }, FLASH_DURATION_MS);
   }
 
   function debounce(fn, wait) {
