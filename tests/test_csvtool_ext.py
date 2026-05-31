@@ -219,3 +219,77 @@ def test_csv_download_preserves_encoding(csvtool_client):
     resp = csvtool_client.post("/tools/csvtool/api/download", json=payload)
     assert resp.status_code == 200
     assert "田中".encode("shift_jis") in resp.data
+
+
+# ---------- regression: bug-hunt fixes ----------
+
+def _wal_sqlite_bytes():
+    """A checkpointed WAL-mode DB returns all rows via mode=ro (no immutable)."""
+    path = Path(__file__).parent / "_wal_test.db"
+    for p in (path, Path(str(path) + "-wal"), Path(str(path) + "-shm")):
+        if p.exists():
+            p.unlink()
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("CREATE TABLE w (n INTEGER)")
+    conn.executemany("INSERT INTO w VALUES (?)", [(i,) for i in range(50)])
+    conn.commit()
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    conn.close()
+    data = path.read_bytes()
+    for p in (path, Path(str(path) + "-wal"), Path(str(path) + "-shm")):
+        if p.exists():
+            p.unlink()
+    return data
+
+
+def test_db_load_reads_wal_database(csvtool_client):
+    resp = csvtool_client.post(
+        "/tools/csvtool/api/db/load",
+        data={"file": (io.BytesIO(_wal_sqlite_bytes()), "w.db"), "table": "w"},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["totalRows"] == 50
+
+
+def test_upload_rejects_oversized_file(csvtool_client, monkeypatch):
+    import app.tools.csvtool as ct
+
+    monkeypatch.setattr(ct, "MAX_UPLOAD_BYTES", 10)
+    resp = csvtool_client.post(
+        "/tools/csvtool/api/upload",
+        data={"file": (io.BytesIO(b"a,b,c\n1,2,3\n4,5,6\n"), "big.csv")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 413
+
+
+def test_xlsx_cell_str_handles_nan_inf_and_floats():
+    from app.tools.csvtool import _xlsx_cell_to_str
+
+    assert _xlsx_cell_to_str(float("nan")) == ""
+    assert _xlsx_cell_to_str(float("inf")) == ""
+    assert _xlsx_cell_to_str(float("-inf")) == ""
+    assert _xlsx_cell_to_str(3.0) == "3"
+    assert _xlsx_cell_to_str(3.5) == "3.5"
+    assert _xlsx_cell_to_str(True) == "TRUE"
+
+
+def test_xlsx_load_drops_nan_cell(csvtool_client):
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["v"])
+    ws["A2"] = float("nan")
+    ws["A3"] = 7
+    buf = io.BytesIO()
+    wb.save(buf)
+    resp = csvtool_client.post(
+        "/tools/csvtool/api/xlsx/load",
+        data={"file": (io.BytesIO(buf.getvalue()), "n.xlsx"), "sheet": "Sheet", "has_header": "true"},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == [[""], ["7"]]

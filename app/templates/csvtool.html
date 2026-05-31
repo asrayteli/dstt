@@ -2259,6 +2259,7 @@ async function confirmSheetLoad(){
     loadDataset(j,{resetOriginal:true});
     closeModal('xlsxPickerModal');
     toast(`シート「${sheet}」を読み込みました（${j.totalRows.toLocaleString()}行）`,'success');
+    if(j.truncated) toast(`行数が上限(${(200000).toLocaleString()})に達したため一部のみ読み込みました`,'info');
   }catch(err){ toast(err.message,'error'); }
 }
 function importOptionsFromUI(){
@@ -2844,7 +2845,7 @@ function _fxTokenize(src){
 }
 function evalExpr(src){
   let toks;try{toks=_fxTokenize(src);}catch(e){return '#ERROR';}
-  let pos=0;const peek=()=>toks[pos],next=()=>toks[pos++];
+  let pos=0;const EOF={t:'eof'};const peek=()=>toks[pos]||EOF,next=()=>toks[pos++]||EOF;
   function tokenText(t){if(t.t==='str')return '"'+t.v+'"';if(t.t==='num')return String(t.v);if(t.t==='ident')return t.v;return t.v;}
   function parseComparison(){
     let left=parseConcat();

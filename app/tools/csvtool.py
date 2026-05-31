@@ -18,6 +18,23 @@ csvtool_bp = Blueprint("csvtool", __name__, url_prefix="/tools/csvtool")
 # Safety caps for table / database / spreadsheet ingestion.
 MAX_ROWS = 200_000
 MAX_COLS = 1_024
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB per uploaded file
+
+
+def _read_upload(file):
+    """Read an uploaded file, rejecting empty or oversized payloads.
+
+    Returns (bytes, None) on success or (None, (json, status)) on failure.
+    """
+    declared = request.content_length
+    if declared and declared > MAX_UPLOAD_BYTES:
+        return None, (jsonify({"error": "ファイルサイズが大きすぎます。"}), 413)
+    file_bytes = file.read(MAX_UPLOAD_BYTES + 1)
+    if not file_bytes:
+        return None, (jsonify({"error": "ファイルが空です。"}), 400)
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        return None, (jsonify({"error": "ファイルサイズが大きすぎます。"}), 413)
+    return file_bytes, None
 
 
 def column_letter(index: int) -> str:
@@ -223,9 +240,9 @@ def api_upload():
     if not file:
         return jsonify({"error": "ファイルが選択されていません。"}), 400
 
-    file_bytes = file.read()
-    if not file_bytes:
-        return jsonify({"error": "ファイルが空です。"}), 400
+    file_bytes, err = _read_upload(file)
+    if err:
+        return err
 
     try:
         parsed = _parse_csv_upload(file_bytes, request.form.to_dict())
@@ -247,7 +264,9 @@ def _open_sqlite_readonly(file_bytes: bytes) -> tuple[sqlite3.Connection, str]:
         tmp.write(file_bytes)
         tmp.flush()
         tmp.close()
-        uri = f"file:{Path(tmp.name).as_posix()}?mode=ro&immutable=1"
+        # mode=ro + query_only gives read-only access. (immutable=1 is avoided:
+        # it disables integrity checks for no extra safety here.)
+        uri = f"file:{Path(tmp.name).as_posix()}?mode=ro"
         conn = sqlite3.connect(uri, uri=True)
         conn.execute("PRAGMA query_only = ON")
         return conn, tmp.name
@@ -285,9 +304,9 @@ def api_db_tables():
     file = request.files.get("file")
     if not file:
         return jsonify({"error": "ファイルが選択されていません。"}), 400
-    file_bytes = file.read()
-    if not file_bytes:
-        return jsonify({"error": "ファイルが空です。"}), 400
+    file_bytes, err = _read_upload(file)
+    if err:
+        return err
 
     conn = None
     tmp_path = None
@@ -314,9 +333,9 @@ def api_db_load():
     table = request.form.get("table", "")
     if not file:
         return jsonify({"error": "ファイルが選択されていません。"}), 400
-    file_bytes = file.read()
-    if not file_bytes:
-        return jsonify({"error": "ファイルが空です。"}), 400
+    file_bytes, err = _read_upload(file)
+    if err:
+        return err
 
     conn = None
     tmp_path = None
@@ -378,8 +397,11 @@ def _xlsx_cell_to_str(value) -> str:
         return value.strftime("%Y-%m-%d")
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return ""  # NaN / Inf are not representable as plain numbers
+        if value.is_integer():
+            return str(int(value))
     return str(value)
 
 
@@ -389,9 +411,9 @@ def api_xlsx_sheets():
     file = request.files.get("file")
     if not file:
         return jsonify({"error": "ファイルが選択されていません。"}), 400
-    file_bytes = file.read()
-    if not file_bytes:
-        return jsonify({"error": "ファイルが空です。"}), 400
+    file_bytes, err = _read_upload(file)
+    if err:
+        return err
     try:
         wb = _load_workbook(file_bytes)
         sheets = [{"name": ws.title, "rows": ws.max_row or 0, "columns": ws.max_column or 0}
@@ -412,9 +434,9 @@ def api_xlsx_load():
     has_header = _parse_bool(request.form.get("has_header"), True)
     if not file:
         return jsonify({"error": "ファイルが選択されていません。"}), 400
-    file_bytes = file.read()
-    if not file_bytes:
-        return jsonify({"error": "ファイルが空です。"}), 400
+    file_bytes, err = _read_upload(file)
+    if err:
+        return err
 
     try:
         wb = _load_workbook(file_bytes)
@@ -425,10 +447,12 @@ def api_xlsx_load():
             sheet = ws.title
 
         rows: list[list[str]] = []
+        truncated = False
         for excel_row in ws.iter_rows(values_only=True):
-            rows.append([_xlsx_cell_to_str(v) for v in excel_row])
-            if len(rows) > MAX_ROWS:
+            if len(rows) >= MAX_ROWS:
+                truncated = True
                 break
+            rows.append([_xlsx_cell_to_str(v) for v in excel_row])
         wb.close()
     except Exception as exc:
         return jsonify({"error": f"シートを読み込めませんでした: {exc}"}), 400
@@ -454,6 +478,7 @@ def api_xlsx_load():
         "totalRows": len(data),
         "totalColumns": len(headers),
         "warnings": warnings[:200],
+        "truncated": truncated,
         "source": "xlsx",
     })
 
