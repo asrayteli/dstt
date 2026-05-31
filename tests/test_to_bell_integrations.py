@@ -144,6 +144,63 @@ def test_employee_link_lifecycle(app_ctx):
     assert delete.status_code == 200
 
 
+def test_employee_link_delete_rejects_unrelated_user(app_ctx):
+    """他人のタスクに紐づく紐付けを link_id 指定で削除できない（IDOR 対策）。"""
+    from app.models import Employee, db
+
+    _create_user(app_ctx, "alice")
+    _create_user(app_ctx, "mallory")
+
+    alice = app_ctx.test_client()
+    _login(alice, "alice")
+    alice.put(
+        "/tools/to_bell/api/settings/integrations",
+        json={"integrations": {"pluslist.linkage": True}},
+    )
+
+    with app_ctx.app_context():
+        emp = Employee(employee_number="E777", office_code="X", employee_name="社員")
+        db.session.add(emp)
+        db.session.commit()
+        emp_id = emp.id
+
+    task = alice.post("/tools/to_bell/api/tasks", json={"title": "alice secret"}).get_json()
+    add = alice.post(
+        "/tools/to_bell/api/links/employees",
+        json={"target_type": "task", "target_id": task["id"], "employee_id": emp_id},
+    )
+    link_id = add.get_json()["link_id"]
+
+    mallory = app_ctx.test_client()
+    _login(mallory, "mallory")
+    mallory.put(
+        "/tools/to_bell/api/settings/integrations",
+        json={"integrations": {"pluslist.linkage": True}},
+    )
+    # 他人のタスクに紐づくため、対象が見えず 404 で拒否される
+    rejected = mallory.delete(f"/tools/to_bell/api/links/employees/{link_id}")
+    assert rejected.status_code == 404
+
+    # 紐付けは残っている（alice からはまだ見える）
+    listing = alice.get(
+        f"/tools/to_bell/api/links/employees?target_type=task&target_id={task['id']}"
+    ).get_json()
+    assert len(listing["links"]) == 1
+
+
+def test_link_apis_reject_non_numeric_target_id(app_ctx):
+    """非数値の target_id でも 500 にならず 400 を返す。"""
+    _create_user(app_ctx, "alice")
+    client = app_ctx.test_client()
+    _login(client, "alice")
+    client.put(
+        "/tools/to_bell/api/settings/integrations",
+        json={"integrations": {"pluslist.linkage": True}},
+    )
+    resp = client.get("/tools/to_bell/api/links/employees?target_type=task&target_id=abc")
+    assert resp.status_code == 400
+
+
 def test_cloudshift_leave_change_request_hook_only_notifies_opted_in(app_ctx):
     from app.models import ToBellNotification, ToBellTask
     from app.services.to_bell_hooks import on_cloudshift_leave_change_request

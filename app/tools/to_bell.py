@@ -78,6 +78,9 @@ from app.services.to_bell_links import (
     add_employee_link,
     add_external_file,
     add_site_link,
+    get_employee_link,
+    get_external_file,
+    get_site_link,
     list_employee_links,
     list_external_files,
     list_site_links,
@@ -778,20 +781,38 @@ def _ensure_target_exists(target_type: str, target_id: int) -> None:
         abort(404)
 
 
+def _arg_int(value, default: int = 0) -> int:
+    """クエリ/フォームの数値パラメータを安全に int 化する。不正値は 400。"""
+    try:
+        return int(value if value not in (None, "") else default)
+    except (TypeError, ValueError):
+        abort(400)
+
+
+def _ensure_link_owned(row) -> None:
+    """紐付け行の対象（タスク/プロジェクト）を現在ユーザーが操作可能か検証する。
+
+    link_id だけで他人の紐付けを削除できる IDOR を防ぐため、対象の可視性を確認する。
+    """
+    if row is None:
+        abort(404)
+    _ensure_target_exists(row.target_type, row.target_id)
+
+
 @to_bell_bp.route("/api/links/employees", methods=["GET", "POST"])
 @login_required
 def api_employee_links():
     _require_link_permission("pluslist.linkage")
     if request.method == "GET":
         target_type = request.args.get("target_type", "")
-        target_id = int(request.args.get("target_id", 0) or 0)
+        target_id = _arg_int(request.args.get("target_id"))
         _ensure_target_exists(target_type, target_id)
         return jsonify({"links": list_employee_links(target_type, target_id)})
 
     payload = _payload()
     target_type = str(payload.get("target_type") or "")
-    target_id = int(payload.get("target_id") or 0)
-    employee_id = int(payload.get("employee_id") or 0)
+    target_id = _arg_int(payload.get("target_id"))
+    employee_id = _arg_int(payload.get("employee_id"))
     _ensure_target_exists(target_type, target_id)
     try:
         row = add_employee_link(target_type, target_id, employee_id, current_user.username)
@@ -804,6 +825,7 @@ def api_employee_links():
 @login_required
 def api_employee_link_delete(link_id: int):
     _require_link_permission("pluslist.linkage")
+    _ensure_link_owned(get_employee_link(link_id))
     return jsonify({"ok": remove_employee_link(link_id)})
 
 
@@ -820,14 +842,14 @@ def api_site_links():
     _require_link_permission("siteplus.linkage")
     if request.method == "GET":
         target_type = request.args.get("target_type", "")
-        target_id = int(request.args.get("target_id", 0) or 0)
+        target_id = _arg_int(request.args.get("target_id"))
         _ensure_target_exists(target_type, target_id)
         return jsonify({"links": list_site_links(target_type, target_id)})
 
     payload = _payload()
     target_type = str(payload.get("target_type") or "")
-    target_id = int(payload.get("target_id") or 0)
-    site_row_id = int(payload.get("site_row_id") or 0)
+    target_id = _arg_int(payload.get("target_id"))
+    site_row_id = _arg_int(payload.get("site_row_id"))
     _ensure_target_exists(target_type, target_id)
     try:
         row = add_site_link(target_type, target_id, site_row_id, current_user.username)
@@ -840,6 +862,7 @@ def api_site_links():
 @login_required
 def api_site_link_delete(link_id: int):
     _require_link_permission("siteplus.linkage")
+    _ensure_link_owned(get_site_link(link_id))
     return jsonify({"ok": remove_site_link(link_id)})
 
 
@@ -874,10 +897,7 @@ def api_filepost_threshold():
 def api_filepost_upload():
     """ToBellタスク/プロジェクトに紐付けるためのFILEPOST非公開アップロード。"""
     target_type = str(request.form.get("target_type") or "")
-    try:
-        target_id = int(request.form.get("target_id") or 0)
-    except (TypeError, ValueError):
-        abort(400)
+    target_id = _arg_int(request.form.get("target_id"))
 
     try:
         if target_type == "task":
@@ -927,10 +947,7 @@ def api_filepost_upload():
 @login_required
 def api_filepost_files_list():
     target_type = request.args.get("target_type", "")
-    try:
-        target_id = int(request.args.get("target_id") or 0)
-    except (TypeError, ValueError):
-        abort(400)
+    target_id = _arg_int(request.args.get("target_id"))
     try:
         if target_type == "task":
             get_task_for_user(target_id, current_user.username)
@@ -946,6 +963,7 @@ def api_filepost_files_list():
 @to_bell_bp.route("/api/integrations/filepost/files/<int:file_id>", methods=["DELETE"])
 @login_required
 def api_filepost_files_delete(file_id: int):
+    _ensure_link_owned(get_external_file(file_id))
     return jsonify({"ok": remove_external_file(file_id)})
 
 

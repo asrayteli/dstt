@@ -71,6 +71,10 @@ def add_employee_link(target_type: str, target_id: int, employee_id: int, actor:
     return row
 
 
+def get_employee_link(link_id: int) -> ToBellEmployeeLink | None:
+    return db.session.get(ToBellEmployeeLink, int(link_id))
+
+
 def remove_employee_link(link_id: int) -> bool:
     row = db.session.get(ToBellEmployeeLink, int(link_id))
     if row is None:
@@ -151,6 +155,10 @@ def add_site_link(target_type: str, target_id: int, site_row_id: int, actor: str
     return row
 
 
+def get_site_link(link_id: int) -> ToBellSiteLink | None:
+    return db.session.get(ToBellSiteLink, int(link_id))
+
+
 def remove_site_link(link_id: int) -> bool:
     row = db.session.get(ToBellSiteLink, int(link_id))
     if row is None:
@@ -215,6 +223,10 @@ def add_external_file(
     db.session.add(row)
     db.session.commit()
     return row
+
+
+def get_external_file(file_id: int) -> ToBellExternalFile | None:
+    return db.session.get(ToBellExternalFile, int(file_id))
 
 
 def remove_external_file(file_id: int) -> bool:
