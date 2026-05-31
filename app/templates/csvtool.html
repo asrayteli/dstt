@@ -1224,6 +1224,7 @@
     <div class="pcsv-header-title">PowerCSV</div>
     <div class="pcsv-header-info" id="headerInfo" style="display:none">
       <span id="headerFilename"></span>
+      <span class="tag" id="headerSource" style="display:none"></span>
       <span class="tag" id="headerEncoding"></span>
     </div>
   </div>
@@ -2318,6 +2319,11 @@ function loadDataset(j,{resetOriginal=false}={}){
   document.getElementById('headerInfo').style.display='flex';
   document.getElementById('headerFilename').textContent=S.filename;
   document.getElementById('headerEncoding').textContent=String(S.encoding).toUpperCase();
+  const srcTag=document.getElementById('headerSource');
+  if(srcTag){
+    const label=S.source==='sqlite'?('DB: '+(S.tableName||'')):(S.source==='xlsx'?('Excel: '+(S.sheetName||'')):'');
+    srcTag.textContent=label; srcTag.style.display=label?'inline-block':'none';
+  }
   document.getElementById('dlFilename').value=S.filename;
 }
 function showEditor() {
