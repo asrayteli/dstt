@@ -147,7 +147,9 @@
 
   function syncViewButtons() {
     document.querySelectorAll(".tobell-view-btn").forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.view === state.view);
+      const active = button.dataset.view === state.view;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", String(active));
     });
   }
 
@@ -158,6 +160,9 @@
   async function loadTasks() {
     const params = new URLSearchParams({ filter: effectiveFilter(), q: $("tb-search").value || "", view: state.view || "list" });
     if (state.projectFilter) params.set("project_id", String(state.projectFilter));
+    if (!state.tasks.length) {
+      $("tb-task-list").innerHTML = '<div class="tobell-empty tobell-loading">読み込み中…</div>';
+    }
     const data = await api(`/tools/to_bell/api/tasks?${params.toString()}`);
     state.tasks = data.tasks || [];
     renderSummary(data.summary || {});
@@ -196,11 +201,18 @@
   }
 
   function renderTasks() {
+    const list = $("tb-task-list");
     if (!state.tasks.length) {
-      $("tb-task-list").innerHTML = '<div class="tobell-empty">ここにはまだタスクがありません。</div>';
+      list.innerHTML =
+        '<div class="tobell-empty">' +
+        '<p>ここにはまだタスクがありません。</p>' +
+        '<button type="button" class="tobell-btn tobell-btn-primary" id="tb-empty-add">＋ 最初のタスクを追加</button>' +
+        '</div>';
+      const addBtn = $("tb-empty-add");
+      if (addBtn) addBtn.addEventListener("click", () => { const t = $("tb-title"); if (t) t.focus(); });
       return;
     }
-    $("tb-task-list").innerHTML = state.tasks.map((task) => {
+    list.innerHTML = state.tasks.map((task) => {
       const due = task.due_at ? formatDue(task.due_at) : "通知なし";
       const done = task.status === "done" ? "checked" : "";
       const badgeClass = task.priority === "urgent" || isOverdue(task) ? "danger" : (task.priority === "high" ? "warning" : "");
@@ -218,7 +230,7 @@
           <span class="tobell-badge ${badgeClass}">${esc(priorityLabel(task.priority))}</span>
         </article>`;
     }).join("");
-    document.querySelectorAll("[data-task-id]").forEach((card) => {
+    list.querySelectorAll("[data-task-id]").forEach((card) => {
       card.setAttribute("tabindex", "0");
       card.setAttribute("role", "button");
       const openTask = (event) => {
@@ -235,7 +247,7 @@
         }
       });
     });
-    document.querySelectorAll("[data-pin-id]").forEach((button) => {
+    list.querySelectorAll("[data-pin-id]").forEach((button) => {
       button.addEventListener("click", async (event) => {
         event.stopPropagation();
         const id = Number(button.dataset.pinId);
@@ -248,15 +260,14 @@
         }
       });
     });
-    document.querySelectorAll("[data-complete-id]").forEach((checkbox) => {
+    list.querySelectorAll("[data-complete-id]").forEach((checkbox) => {
       checkbox.addEventListener("change", async () => {
         const id = Number(checkbox.dataset.completeId);
         const completing = checkbox.checked;
         checkbox.disabled = true;
         try {
           await api(`/tools/to_bell/api/tasks/${id}/${completing ? "complete" : "reopen"}`, { method: "POST" });
-          await loadTasks();
-          await loadNotifications();
+          await Promise.all([loadTasks(), loadNotifications()]);
           showFlash(completing ? "完了にしました" : "未完了に戻しました", "success");
         } catch (error) {
           checkbox.checked = !completing;
@@ -1955,7 +1966,11 @@
     });
     modal.querySelectorAll("[data-settings-tab]").forEach((tab) => {
       tab.addEventListener("click", () => {
-        modal.querySelectorAll("[data-settings-tab]").forEach((t) => t.classList.toggle("is-active", t === tab));
+        modal.querySelectorAll("[data-settings-tab]").forEach((t) => {
+          const active = t === tab;
+          t.classList.toggle("is-active", active);
+          t.setAttribute("aria-selected", String(active));
+        });
         modal.querySelectorAll("[data-settings-panel]").forEach((p) => {
           p.style.display = p.dataset.settingsPanel === tab.dataset.settingsTab ? "" : "none";
         });
