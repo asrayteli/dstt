@@ -56,7 +56,7 @@ def test_upload_headerless_csv_does_not_sniff_digit_as_delimiter(csvtool_client)
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["delimiter"] == ","
-    assert payload["headers"] == ["列1", "列2", "列3"]
+    assert payload["headers"] == ["A", "B", "C"]
     assert payload["data"] == [
         ["001", "Tokyo", ""],
         ["002", "Osaka", "EXTRA"],
