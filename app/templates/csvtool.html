@@ -2998,15 +2998,16 @@ function recalcAllFormulas(){
     }
   }
   if(_changed){
-    // Did not converge within the pass budget: flag still-unstable cells.
+    // Did not converge within the pass budget -> circular references.
+    // Run one more full pass and flag every cell whose value still changes.
+    const before={};
+    for(const key of _fkeys){const[r,c]=key.split(',').map(Number);before[key]=S.data[r][c];}
     for(const key of _fkeys){
       const [r,c]=key.split(',').map(Number);
-      let a,b;
-      try{a=String(evaluateFormula(S.formulas[key]));}catch(e){a='#ERROR';}
-      S.data[r][c]=a;
-      try{b=String(evaluateFormula(S.formulas[key]));}catch(e){b='#ERROR';}
-      if(a!==b) S.data[r][c]='#CIRC!';
+      let v;try{v=String(evaluateFormula(S.formulas[key]));}catch(e){v='#ERROR';}
+      S.data[r][c]=v;
     }
+    for(const key of _fkeys){const[r,c]=key.split(',').map(Number);if(S.data[r][c]!==before[key])S.data[r][c]='#CIRC!';}
   }
   // 2. Recalculate instant row formulas
   _formulaCtxInstant=true;
