@@ -378,11 +378,18 @@ def _register_pdf_font() -> str:
         return "Helvetica"
 
 
-def _load_image_font(size: int):
+def _load_image_font(size: int, weight: int = 500):
     try:
-        return ImageFont.truetype("./app/static/fonts/NotoSansJP-VariableFont_wght.ttf", size)
+        font = ImageFont.truetype("./app/static/fonts/NotoSansJP-VariableFont_wght.ttf", size)
     except OSError:
         return ImageFont.load_default()
+    # 可変フォントの既定インスタンスは Thin(100) のため文字が薄く見える。
+    # 太めのウェイトを明示指定して視認性を上げる。
+    try:
+        font.set_variation_by_axes([weight])
+    except (AttributeError, OSError):
+        pass
+    return font
 
 
 def _calendar_weekdays() -> list[str]:
@@ -412,27 +419,27 @@ def _png_calendar_palette(kind: str) -> dict[str, str]:
             "cell_background": "#fde7ec",
             "cell_border": "#cf94a1",
             "badge_background": "#f1ccd4",
-            "badge_text": "#111111",
+            "badge_text": "#000000",
         }
     if kind == "sunday":
         return {
             "cell_background": "#fde7ec",
             "cell_border": "#cf94a1",
             "badge_background": "#f1ccd4",
-            "badge_text": "#111111",
+            "badge_text": "#000000",
         }
     if kind == "saturday":
         return {
             "cell_background": "#e4f0ff",
             "cell_border": "#86a9d2",
             "badge_background": "#cadcf3",
-            "badge_text": "#111111",
+            "badge_text": "#000000",
         }
     return {
         "cell_background": "#ffffff",
         "cell_border": "#7898bd",
         "badge_background": "#cddff2",
-        "badge_text": "#111111",
+        "badge_text": "#000000",
     }
 
 
@@ -630,8 +637,9 @@ def _draw_bold_calendar_text(
     fill: str,
     font: ImageFont.ImageFont,
 ) -> None:
-    draw.text(position, text, fill=fill, font=font)
-    draw.text((position[0] + 0.45, position[1]), text, fill=fill, font=font)
+    # フォント側で太めのウェイトを指定しているため、以前の 0.45px ずらし
+    # 二重描画(にじみの原因)はやめ、アンチエイリアスの効いた単一描画にする。
+    draw.text(position, text, fill=fill, font=font, anchor="la")
 
 
 def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None):
@@ -759,14 +767,14 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
     header_background = "#5f86b7"
     header_text = "#ffffff"
     weekday_background = "#d4e4f5"
-    weekday_text = "#111111"
+    weekday_text = "#000000"
     empty_cell_background = "#ececec"
     border_color = "#7898bd"
-    title_text_color = "#111111"
-    comment_text_color = "#111111"
+    title_text_color = "#000000"
+    comment_text_color = "#1a1a1a"
     entry_card_background = "#f5f9fe"
     entry_card_border = "#a8c0dc"
-    footer_text_color = "#111111"
+    footer_text_color = "#1a1a1a"
     shortage_border = "#d59f58"
     cell_w = (width - 80) // 7
     minimum_bottom_space = 58
@@ -784,13 +792,13 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
     title_width = cell_w - content_left_padding - content_right_padding - content_inner_padding
     comment_width = title_width - 10
 
-    title_font = _load_image_font(36)
-    header_font = _load_image_font(24)
-    day_font = _load_image_font(20)
-    text_font = _load_image_font(16)
-    comment_font = _load_image_font(14)
-    footer_font = _load_image_font(12)
-    issued_font = _load_image_font(16)
+    title_font = _load_image_font(36, weight=700)
+    header_font = _load_image_font(24, weight=700)
+    day_font = _load_image_font(20, weight=700)
+    text_font = _load_image_font(16, weight=600)
+    comment_font = _load_image_font(14, weight=500)
+    footer_font = _load_image_font(12, weight=500)
+    issued_font = _load_image_font(16, weight=500)
 
     calendar_module = __import__("calendar")
     weeks = calendar_module.Calendar(firstweekday=calendar_module.MONDAY).monthdayscalendar(year, month)
