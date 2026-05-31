@@ -22,6 +22,15 @@
     { key: "done", label: "完了" },
   ];
 
+  // 各種マジック値の定数化（調整はここを起点に行う）
+  const DEFAULT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+  const FOREGROUND_TICK_MS = 60000;       // 前面での期限監視間隔
+  const FLASH_DURATION_MS = 2400;         // トースト表示時間
+  const SEARCH_DEBOUNCE_MS = 220;         // 検索入力のデバウンス
+  const NOTIFICATION_DISPLAY_LIMIT = 8;   // 通知パネルの表示件数
+  // FILEPOST 閾値設定はほぼ変化しないため、セッション中はキャッシュする。
+  let filepostThresholdCache = null;
+
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value || "").replace(/[&<>"']/g, (ch) => ({
     "&": "&amp;",
@@ -101,7 +110,7 @@
     initShareLink();
     initSettingsModal();
     initLinksModal();
-    $("tb-search").addEventListener("input", debounce(loadTasks, 220));
+    $("tb-search").addEventListener("input", debounce(loadTasks, SEARCH_DEBOUNCE_MS));
     // 端末の「戻る」操作で詳細オーバーレイを閉じる（スマホアプリ的な挙動）。
     window.addEventListener("popstate", () => {
       if (document.body.classList.contains("tb-detail-active")) {
@@ -147,7 +156,9 @@
 
   function syncViewButtons() {
     document.querySelectorAll(".tobell-view-btn").forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.view === state.view);
+      const active = button.dataset.view === state.view;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", String(active));
     });
   }
 
@@ -158,6 +169,9 @@
   async function loadTasks() {
     const params = new URLSearchParams({ filter: effectiveFilter(), q: $("tb-search").value || "", view: state.view || "list" });
     if (state.projectFilter) params.set("project_id", String(state.projectFilter));
+    if (!state.tasks.length) {
+      $("tb-task-list").innerHTML = '<div class="tobell-empty tobell-loading">読み込み中…</div>';
+    }
     const data = await api(`/tools/to_bell/api/tasks?${params.toString()}`);
     state.tasks = data.tasks || [];
     renderSummary(data.summary || {});
@@ -196,11 +210,18 @@
   }
 
   function renderTasks() {
+    const list = $("tb-task-list");
     if (!state.tasks.length) {
-      $("tb-task-list").innerHTML = '<div class="tobell-empty">ここにはまだタスクがありません。</div>';
+      list.innerHTML =
+        '<div class="tobell-empty">' +
+        '<p>ここにはまだタスクがありません。</p>' +
+        '<button type="button" class="tobell-btn tobell-btn-primary" id="tb-empty-add">＋ 最初のタスクを追加</button>' +
+        '</div>';
+      const addBtn = $("tb-empty-add");
+      if (addBtn) addBtn.addEventListener("click", () => { const t = $("tb-title"); if (t) t.focus(); });
       return;
     }
-    $("tb-task-list").innerHTML = state.tasks.map((task) => {
+    list.innerHTML = state.tasks.map((task) => {
       const due = task.due_at ? formatDue(task.due_at) : "通知なし";
       const done = task.status === "done" ? "checked" : "";
       const badgeClass = task.priority === "urgent" || isOverdue(task) ? "danger" : (task.priority === "high" ? "warning" : "");
@@ -209,7 +230,7 @@
         <article class="tobell-task ${task.id === state.selectedTaskId ? "is-selected" : ""} ${pinned}" data-task-id="${task.id}">
           <input class="tobell-check" type="checkbox" ${done} data-complete-id="${task.id}" aria-label="完了">
           <div class="tobell-task-body">
-            <h3>${task.pinned ? '<span class="tobell-task-pin" aria-label="ピン留め">📌</span> ' : ""}${esc(task.title)}</h3>
+            <h3>${task.pinned ? '<span class="tobell-task-pin" aria-hidden="true">📌</span> ' : ""}${esc(task.title)}</h3>
             <p>${linkify(task.description || "メモなし")}</p>
             <p class="tobell-task-meta">${esc(statusLabel(task.status))} / ${esc(due)} / 進捗 ${Number(task.progress || 0)}%</p>
             ${projectTag(task)}
@@ -218,7 +239,7 @@
           <span class="tobell-badge ${badgeClass}">${esc(priorityLabel(task.priority))}</span>
         </article>`;
     }).join("");
-    document.querySelectorAll("[data-task-id]").forEach((card) => {
+    list.querySelectorAll("[data-task-id]").forEach((card) => {
       card.setAttribute("tabindex", "0");
       card.setAttribute("role", "button");
       const openTask = (event) => {
@@ -235,7 +256,7 @@
         }
       });
     });
-    document.querySelectorAll("[data-pin-id]").forEach((button) => {
+    list.querySelectorAll("[data-pin-id]").forEach((button) => {
       button.addEventListener("click", async (event) => {
         event.stopPropagation();
         const id = Number(button.dataset.pinId);
@@ -248,15 +269,14 @@
         }
       });
     });
-    document.querySelectorAll("[data-complete-id]").forEach((checkbox) => {
+    list.querySelectorAll("[data-complete-id]").forEach((checkbox) => {
       checkbox.addEventListener("change", async () => {
         const id = Number(checkbox.dataset.completeId);
         const completing = checkbox.checked;
         checkbox.disabled = true;
         try {
           await api(`/tools/to_bell/api/tasks/${id}/${completing ? "complete" : "reopen"}`, { method: "POST" });
-          await loadTasks();
-          await loadNotifications();
+          await Promise.all([loadTasks(), loadNotifications()]);
           showFlash(completing ? "完了にしました" : "未完了に戻しました", "success");
         } catch (error) {
           checkbox.checked = !completing;
@@ -829,7 +849,7 @@
       if (event.key === "Escape" && !modal.hasAttribute("hidden")) close();
     });
     const search = $("tb-bulk-assign-search");
-    if (search) search.addEventListener("input", debounce(loadAssignableTasks, 220));
+    if (search) search.addEventListener("input", debounce(loadAssignableTasks, SEARCH_DEBOUNCE_MS));
     const toggle = $("tb-bulk-assign-toggle");
     if (toggle) toggle.addEventListener("click", toggleAllAssignable);
     const submit = $("tb-bulk-assign-submit");
@@ -1043,7 +1063,7 @@
     if (attachmentForm) attachmentForm.addEventListener("submit", uploadAttachment);
     const backButton = $("tb-detail-back");
     if (backButton) backButton.addEventListener("click", closeDetail);
-    document.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", detailAction));
+    $("tb-detail").querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", detailAction));
     renderMain();
   }
 
@@ -1179,13 +1199,16 @@
     const btn = form.querySelector('[type="submit"]');
     if (btn) btn.disabled = true;
     try {
-      let settings = null;
-      try {
-        settings = await api("/tools/to_bell/api/integrations/filepost/threshold");
-      } catch (_) {
-        settings = null;
+      let settings = filepostThresholdCache;
+      if (settings === null) {
+        try {
+          settings = await api("/tools/to_bell/api/integrations/filepost/threshold");
+          filepostThresholdCache = settings;
+        } catch (_) {
+          settings = null;
+        }
       }
-      const threshold = (settings && settings.threshold_bytes) || 25 * 1024 * 1024;
+      const threshold = (settings && settings.threshold_bytes) || DEFAULT_ATTACHMENT_MAX_BYTES;
       const useFilepost = settings && settings.overflow_enabled && file.size > threshold;
       const data = new FormData();
       data.append("file", file);
@@ -1240,14 +1263,15 @@
   }
 
   function renderSubtasks(task) {
+    const container = $("tb-subtasks");
     const rows = task.subtasks || [];
-    $("tb-subtasks").innerHTML = rows.length ? rows.map((item) => `
+    container.innerHTML = rows.length ? rows.map((item) => `
       <div class="tobell-subtask">
         <input type="checkbox" ${item.is_done ? "checked" : ""} data-subtask-id="${item.id}">
         <span>${esc(item.title)}</span>
         <button type="button" class="tobell-subtask-delete" data-subtask-delete="${item.id}" aria-label="削除">×</button>
       </div>`).join("") : '<div class="tobell-empty">サブタスクはありません。</div>';
-    document.querySelectorAll("[data-subtask-id]").forEach((box) => {
+    container.querySelectorAll("[data-subtask-id]").forEach((box) => {
       box.addEventListener("change", async () => {
         box.disabled = true;
         try {
@@ -1264,7 +1288,7 @@
         }
       });
     });
-    document.querySelectorAll("[data-subtask-delete]").forEach((btn) => {
+    container.querySelectorAll("[data-subtask-delete]").forEach((btn) => {
       btn.addEventListener("click", async (event) => {
         event.preventDefault();
         btn.disabled = true;
@@ -1428,7 +1452,7 @@
     if (!container) return;
     const data = await api("/tools/to_bell/api/notifications");
     const rows = data.notifications || [];
-    container.innerHTML = rows.length ? rows.slice(0, 8).map((item) => `
+    container.innerHTML = rows.length ? rows.slice(0, NOTIFICATION_DISPLAY_LIMIT).map((item) => `
       <div class="tobell-notification">
         <strong>${esc(item.title)}</strong>
         <div>${linkify(item.body)}</div>
@@ -1740,7 +1764,7 @@
     if (state.foregroundTimer) return;
     if (!("Notification" in window)) return;
     foregroundTick();
-    state.foregroundTimer = window.setInterval(foregroundTick, 60000);
+    state.foregroundTimer = window.setInterval(foregroundTick, FOREGROUND_TICK_MS);
   }
 
   function stopForegroundWatch() {
@@ -1750,8 +1774,23 @@
     }
   }
 
+  // 通知済みフラグ（toBellNotified:*）は放置すると localStorage に溜まり続けるため、
+  // 7日より古いエントリを掃除する。
+  function pruneNotifiedKeys() {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const stale = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith("toBellNotified:")) continue;
+      const stored = Date.parse(localStorage.getItem(key) || "");
+      if (Number.isNaN(stored) || stored < cutoff) stale.push(key);
+    }
+    stale.forEach((key) => localStorage.removeItem(key));
+  }
+
   async function foregroundTick() {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
+    pruneNotifiedKeys();
     let data;
     try {
       const response = await fetch("/tools/to_bell/api/notifications/due-tasks");
@@ -1955,7 +1994,11 @@
     });
     modal.querySelectorAll("[data-settings-tab]").forEach((tab) => {
       tab.addEventListener("click", () => {
-        modal.querySelectorAll("[data-settings-tab]").forEach((t) => t.classList.toggle("is-active", t === tab));
+        modal.querySelectorAll("[data-settings-tab]").forEach((t) => {
+          const active = t === tab;
+          t.classList.toggle("is-active", active);
+          t.setAttribute("aria-selected", String(active));
+        });
         modal.querySelectorAll("[data-settings-panel]").forEach((p) => {
           p.style.display = p.dataset.settingsPanel === tab.dataset.settingsTab ? "" : "none";
         });
@@ -2661,7 +2704,7 @@
     window.clearTimeout(showFlash._timer);
     showFlash._timer = window.setTimeout(() => {
       node.classList.remove("is-visible");
-    }, 2400);
+    }, FLASH_DURATION_MS);
   }
 
   function debounce(fn, wait) {

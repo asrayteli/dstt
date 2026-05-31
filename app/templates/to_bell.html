@@ -74,9 +74,9 @@
 
     <div class="tobell-main">
       <div class="tobell-views" id="tb-views" role="tablist" aria-label="表示切り替え">
-        <button type="button" class="tobell-view-btn is-active" data-view="list">リスト</button>
-        <button type="button" class="tobell-view-btn" data-view="kanban">カンバン</button>
-        <button type="button" class="tobell-view-btn" data-view="calendar">カレンダー</button>
+        <button type="button" class="tobell-view-btn is-active" data-view="list" role="tab" aria-selected="true">リスト</button>
+        <button type="button" class="tobell-view-btn" data-view="kanban" role="tab" aria-selected="false">カンバン</button>
+        <button type="button" class="tobell-view-btn" data-view="calendar" role="tab" aria-selected="false">カレンダー</button>
       </div>
       <div id="tb-summary" class="tobell-summary"></div>
       <div id="tb-task-list" class="tobell-task-list"></div>
@@ -374,13 +374,13 @@
       <button type="button" class="tobell-btn" data-settings-close aria-label="閉じる">×</button>
     </div>
     <nav class="tobell-settings-tabs" role="tablist">
-      <button type="button" class="tobell-settings-tab is-active" data-settings-tab="notify" role="tab">通知</button>
+      <button type="button" class="tobell-settings-tab is-active" data-settings-tab="notify" role="tab" aria-selected="true">通知</button>
       {% if not share_session %}
-      <button type="button" class="tobell-settings-tab" data-settings-tab="integrations" role="tab">DSTT連携</button>
-      <button type="button" class="tobell-settings-tab" data-settings-tab="google" role="tab">Googleカレンダー</button>
+      <button type="button" class="tobell-settings-tab" data-settings-tab="integrations" role="tab" aria-selected="false">DSTT連携</button>
+      <button type="button" class="tobell-settings-tab" data-settings-tab="google" role="tab" aria-selected="false">Googleカレンダー</button>
       {% endif %}
     </nav>
-    <section class="tobell-settings-panel" data-settings-panel="notify">
+    <section class="tobell-settings-panel" data-settings-panel="notify" role="tabpanel">
       <p class="tobell-share-note">
         この端末・ブラウザへの通知（プッシュ）に関する設定です。期限が来たタスクや、他ツール連携の通知を受け取れます。
       </p>
@@ -392,7 +392,7 @@
       </div>
     </section>
     {% if not share_session %}
-    <section class="tobell-settings-panel" data-settings-panel="integrations" style="display:none">
+    <section class="tobell-settings-panel" data-settings-panel="integrations" role="tabpanel" style="display:none">
       <p class="tobell-share-note">
         他のDSTTツールとの連携を、機能ごとに個別にON/OFFできます。デフォルトは全てOFFです。
         ONにすると、対象のツールで対応する出来事が起きたときに、ToBellへ自動的にタスクや通知が追加されます。
@@ -401,7 +401,7 @@
         <div class="tobell-empty">読み込み中…</div>
       </div>
     </section>
-    <section class="tobell-settings-panel" data-settings-panel="google" style="display:none">
+    <section class="tobell-settings-panel" data-settings-panel="google" role="tabpanel" style="display:none">
       <p class="tobell-share-note">
         ToBell→カレンダー（送信）：選んだタスクの期限をGoogleカレンダー（メイン）にイベントとして追加します。完了すると完了印が付きます。<br>
         カレンダー→ToBell（取り込み）：カレンダーの予定を定期的にToBellタスクへ取り込みます。取り込む範囲と間隔はここで選べます。<br>

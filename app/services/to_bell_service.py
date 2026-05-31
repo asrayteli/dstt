@@ -7,7 +7,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from werkzeug.utils import secure_filename
 
 from app.models import (
@@ -33,6 +33,11 @@ VALID_SCOPES = {"private", "office", "members"}
 PROJECT_STATUS_ORDER = {"active": 0, "done": 1, "archived": 2}
 
 ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
+
+# 入力テキストの最大保存長（DB カラム長に合わせた切り詰め用）
+MAX_TITLE_LEN = 240
+MAX_COMMENT_PREVIEW_LEN = 300
+MAX_PROJECT_NAME_LEN = 160
 
 
 class ToBellInputError(ValueError):
@@ -179,7 +184,7 @@ def create_task(username: str, payload: dict[str, Any]) -> ToBellTask:
     reviewer_id = _coerce_same_office_user(username, payload.get("reviewer_id"), "reviewer_id")
 
     task = ToBellTask(
-        title=title[:240],
+        title=title[:MAX_TITLE_LEN],
         description=str(payload.get("description") or "").strip(),
         status=status,
         priority=priority,
@@ -208,7 +213,7 @@ def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBell
         title = str(payload.get("title") or "").strip()
         if not title:
             raise ToBellInputError("title", "タスク名を入力してください。")
-        task.title = title[:240]
+        task.title = title[:MAX_TITLE_LEN]
     if "description" in payload:
         task.description = str(payload.get("description") or "").strip()
     if "status" in payload:
@@ -275,7 +280,7 @@ def add_subtask(task: ToBellTask, payload: dict[str, Any]) -> ToBellSubtask:
     if not title:
         raise ToBellInputError("title", "サブタスク名を入力してください。")
     sort_order = len(task.subtasks)
-    subtask = ToBellSubtask(task=task, title=title[:240], sort_order=sort_order)
+    subtask = ToBellSubtask(task=task, title=title[:MAX_TITLE_LEN], sort_order=sort_order)
     db.session.add(subtask)
     db.session.commit()
     return subtask
@@ -289,7 +294,7 @@ def update_subtask(subtask_id: int, username: str, payload: dict[str, Any]) -> T
         title = str(payload.get("title") or "").strip()
         if not title:
             raise ToBellInputError("title", "サブタスク名を入力してください。")
-        subtask.title = title[:240]
+        subtask.title = title[:MAX_TITLE_LEN]
     if "is_done" in payload:
         subtask.is_done = bool(payload.get("is_done"))
     db.session.commit()
@@ -321,7 +326,7 @@ def add_comment(task: ToBellTask, username: str, payload: dict[str, Any]) -> ToB
                 source_tool="to_bell",
                 event_type="comment",
                 title=f"コメント: {task.title}",
-                body=body[:300],
+                body=body[:MAX_COMMENT_PREVIEW_LEN],
                 href=f"/tools/to_bell?task={task.id}",
                 severity="info",
             )
@@ -542,17 +547,35 @@ def list_projects(username: str, *, include_archived: bool = False) -> list[dict
             p.id,
         ),
     )
-    result = []
-    for project in projects:
-        total = ToBellTask.query.filter(
-            ToBellTask.project_id == project.id, ToBellTask.status != "archived"
-        ).count()
-        open_count = ToBellTask.query.filter(
-            ToBellTask.project_id == project.id,
-            ToBellTask.status.notin_(["done", "archived"]),
-        ).count()
-        result.append(project.to_dict(task_count=total, open_count=open_count))
-    return result
+    project_ids = [project.id for project in projects]
+    total_map: dict[int, int] = {}
+    open_map: dict[int, int] = {}
+    if project_ids:
+        # プロジェクトごとの集計を 2 クエリにまとめる（N+1 回避）
+        total_rows = (
+            db.session.query(ToBellTask.project_id, func.count(ToBellTask.id))
+            .filter(ToBellTask.project_id.in_(project_ids), ToBellTask.status != "archived")
+            .group_by(ToBellTask.project_id)
+            .all()
+        )
+        total_map = {pid: count for pid, count in total_rows}
+        open_rows = (
+            db.session.query(ToBellTask.project_id, func.count(ToBellTask.id))
+            .filter(
+                ToBellTask.project_id.in_(project_ids),
+                ToBellTask.status.notin_(["done", "archived"]),
+            )
+            .group_by(ToBellTask.project_id)
+            .all()
+        )
+        open_map = {pid: count for pid, count in open_rows}
+    return [
+        project.to_dict(
+            task_count=total_map.get(project.id, 0),
+            open_count=open_map.get(project.id, 0),
+        )
+        for project in projects
+    ]
 
 
 def get_project_for_user(project_id: int, username: str) -> ToBellProject:
@@ -567,7 +590,7 @@ def create_project(username: str, payload: dict[str, Any]) -> ToBellProject:
     if not name:
         raise ToBellInputError("name", "プロジェクト名を入力してください。")
     project = ToBellProject(
-        name=name[:160],
+        name=name[:MAX_PROJECT_NAME_LEN],
         description=str(payload.get("description") or "").strip(),
         status=_choice(payload.get("status"), VALID_PROJECT_STATUSES, "active"),
         color=_safe_color(payload.get("color"), "#2563eb"),
@@ -593,7 +616,7 @@ def update_project(project: ToBellProject, username: str, payload: dict[str, Any
         name = str(payload.get("name") or "").strip()
         if not name:
             raise ToBellInputError("name", "プロジェクト名を入力してください。")
-        project.name = name[:160]
+        project.name = name[:MAX_PROJECT_NAME_LEN]
     if "description" in payload:
         project.description = str(payload.get("description") or "").strip()
     if "status" in payload:
@@ -656,7 +679,7 @@ def notify_project(project: ToBellProject, actor: str, payload: dict[str, Any]) 
                 user_id=user_id,
                 source_tool="to_bell",
                 event_type="project_notify",
-                title=f"[{project.name}] {title}"[:240],
+                title=f"[{project.name}] {title}"[:MAX_TITLE_LEN],
                 body=body_text,
                 href=href,
                 severity=severity,
@@ -835,7 +858,7 @@ def create_blank_template(username: str, payload: dict[str, Any]) -> ToBellTempl
     if not name:
         raise ToBellInputError("name", "テンプレート名を入力してください。")
     template = ToBellTemplate(
-        name=name[:160],
+        name=name[:MAX_PROJECT_NAME_LEN],
         description=str(payload.get("description") or "").strip(),
         owner_id=username,
         scope=_choice(payload.get("scope"), VALID_SCOPES, "private"),
@@ -861,7 +884,7 @@ def create_template_from_task(task: ToBellTask, username: str, payload: dict[str
     }
     name = str(payload.get("name") or "").strip() or task.title
     template = ToBellTemplate(
-        name=name[:160],
+        name=name[:MAX_PROJECT_NAME_LEN],
         description=str(payload.get("description") or "").strip(),
         owner_id=username,
         scope=_choice(payload.get("scope"), VALID_SCOPES, "private"),
@@ -881,7 +904,7 @@ def update_template(template: ToBellTemplate, username: str, payload: dict[str, 
         name = str(payload.get("name") or "").strip()
         if not name:
             raise ToBellInputError("name", "テンプレート名を入力してください。")
-        template.name = name[:160]
+        template.name = name[:MAX_PROJECT_NAME_LEN]
     if "description" in payload and is_owner:
         template.description = str(payload.get("description") or "").strip()
     if "scope" in payload and is_owner:
@@ -915,7 +938,7 @@ def instantiate_template(template: ToBellTemplate, username: str, payload: dict[
             time.max.replace(microsecond=0),
         )
     task = ToBellTask(
-        title=title[:240],
+        title=title[:MAX_TITLE_LEN],
         description=str(tpl.get("description") or "").strip(),
         status="todo",
         priority=_choice(tpl.get("priority"), VALID_PRIORITIES, "normal"),
@@ -929,7 +952,7 @@ def instantiate_template(template: ToBellTemplate, username: str, payload: dict[
     for index, sub_title in enumerate(tpl.get("subtasks") or []):
         clean = str(sub_title or "").strip()
         if clean:
-            db.session.add(ToBellSubtask(task=task, title=clean[:240], sort_order=index))
+            db.session.add(ToBellSubtask(task=task, title=clean[:MAX_TITLE_LEN], sort_order=index))
     _sync_tags(task, tpl.get("tags"), username)
     _create_assignment_notification(task, username)
     db.session.commit()
@@ -1112,7 +1135,7 @@ def _normalize_template_payload(raw: Any) -> dict[str, Any]:
     except (TypeError, ValueError):
         due_in_days = None
     return {
-        "title": str(data.get("title") or "").strip()[:240],
+        "title": str(data.get("title") or "").strip()[:MAX_TITLE_LEN],
         "description": str(data.get("description") or "").strip(),
         "priority": _choice(data.get("priority"), VALID_PRIORITIES, "normal"),
         "tags": tags[:8],
@@ -1143,7 +1166,7 @@ def _create_assignment_notification(task: ToBellTask, actor: str) -> None:
             source_tool="to_bell",
             event_type="assigned",
             title=f"担当タスク: {task.title}",
-            body=task.description[:300],
+            body=task.description[:MAX_COMMENT_PREVIEW_LEN],
             href=f"/tools/to_bell?task={task.id}",
             severity="warning",
         )

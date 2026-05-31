@@ -1,3 +1,27 @@
+/* ===== デザイントークン =====
+   既存の配色をそのまま変数化したもの。色・角丸・影の調整は
+   原則ここを起点に行う（個別の直書きを徐々に変数へ寄せる方針）。 */
+:root {
+  --tb-primary: #2563eb;
+  --tb-primary-hover: #1d4ed8;
+  --tb-text: #172033;
+  --tb-text-strong: #0f172a;
+  --tb-text-muted: #64748b;
+  --tb-border: #e2e8f0;
+  --tb-border-strong: #cbd5e1;
+  --tb-border-card: #dbe3ef;
+  --tb-surface: #ffffff;
+  --tb-surface-soft: #f8fafc;
+  --tb-danger: #b91c1c;
+  --tb-danger-border: #fecaca;
+  --tb-danger-soft: #fee2e2;
+  --tb-radius-sm: 8px;
+  --tb-radius: 10px;
+  --tb-radius-lg: 12px;
+  --tb-radius-pill: 999px;
+  --tb-focus: 0 0 0 3px rgba(37, 99, 235, 0.35);
+}
+
 .tobell-shell {
   max-width: 1500px;
   margin: 0 auto;
@@ -114,8 +138,14 @@
 }
 
 .tobell-danger {
-  color: #b91c1c;
-  border-color: #fecaca;
+  color: var(--tb-danger);
+  border-color: var(--tb-danger-border);
+  background: var(--tb-surface);
+}
+
+.tobell-danger:hover {
+  background: var(--tb-danger-soft);
+  border-color: var(--tb-danger);
 }
 
 .tobell-quick {
@@ -326,8 +356,20 @@
 .tobell-filter:focus-visible,
 .tobell-task:focus-visible,
 .tobell-check:focus-visible,
-.tobell-detail-back:focus-visible {
-  outline: 2px solid #2563eb;
+.tobell-detail-back:focus-visible,
+.tobell-view-btn:focus-visible,
+.tobell-settings-tab:focus-visible,
+.tobell-switch:focus-visible,
+.tobell-link-btn:focus-visible,
+.tobell-pchip:focus-visible,
+.tobell-project-add:focus-visible,
+.tobell-project-pick:focus-visible,
+.tobell-cal-daynum:focus-visible,
+.tobell-kan-move:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--tb-primary);
   outline-offset: 2px;
 }
 
@@ -419,9 +461,39 @@
 }
 
 .tobell-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
   padding: 2rem 0.75rem;
   text-align: center;
-  color: #64748b;
+  color: var(--tb-text-muted);
+}
+
+.tobell-empty p {
+  margin: 0;
+}
+
+.tobell-loading {
+  position: relative;
+}
+
+.tobell-loading::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--tb-border);
+  border-top-color: var(--tb-primary);
+  border-radius: 50%;
+  animation: tobell-spin 0.7s linear infinite;
+}
+
+@keyframes tobell-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tobell-loading::before { animation: none; }
 }
 
 /* 操作完了などを知らせるトースト通知 */
@@ -727,7 +799,7 @@
   padding: 0.35rem 0.45rem;
   border: 0;
   background: transparent;
-  color: #94a3b8;
+  color: #64748b;
   cursor: pointer;
 }
 
@@ -863,7 +935,7 @@
 .tobell-kan-empty {
   padding: 0.75rem;
   text-align: center;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 0.82rem;
 }
 
@@ -1100,7 +1172,7 @@
 .tobell-empty-inline {
   padding: 0.1rem 0;
   font-size: 0.78rem;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .tobell-member-chip {
@@ -1399,14 +1471,12 @@ body.tobell-pwa-mode .tobell-quick-form {
 }
 
 /* PWA: 表示切り替えは横幅いっぱいの大きなタブにする */
-body.tobell-pwa-mode .tobell-views,
-.tobell-views-pwa {
+body.tobell-pwa-mode .tobell-views {
   display: flex;
   width: 100%;
 }
 
-body.tobell-pwa-mode .tobell-view-btn,
-.tobell-views-pwa .tobell-view-btn {
+body.tobell-pwa-mode .tobell-view-btn {
   flex: 1 1 0;
   text-align: center;
   min-height: 44px;
