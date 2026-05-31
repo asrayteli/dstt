@@ -2209,7 +2209,7 @@ function doCreateNewCSV(){
   const numCols=Math.max(1,Math.min(200,parseInt(document.getElementById('newCsvCols').value)||5));
   const numRows=Math.max(0,Math.min(10000,parseInt(document.getElementById('newCsvRows').value)||10));
   const fname=(document.getElementById('newCsvFilename').value||'new.csv').trim();
-  const headers=[];for(let i=0;i<numCols;i++)headers.push('?'+(i+1));
+  const headers=[];for(let i=0;i<numCols;i++)headers.push(indexToColLetter(i));
   const data=[];for(let r=0;r<numRows;r++)data.push(new Array(numCols).fill(''));
   loadDataset({headers,data,filename:fname,encoding:'utf-8',delimiter:',',hasHeader:true,preserveEmptyRows:true,rowWidthStrategy:'expand'},{resetOriginal:true});
   closeModal('newCsvModal');
@@ -2326,7 +2326,7 @@ function renderHeader() {
       let arrow='<svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>';
       if(S.sortCol===i&&S.sortDir===1) arrow='<svg class="sort-icon asc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>';
       else if(S.sortCol===i&&S.sortDir===2) arrow='<svg class="sort-icon desc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>';
-      const esc=escHtml(S.headers[i]);
+      const esc=escHtml(S.headers[i]!==''&&S.headers[i]!=null?S.headers[i]:indexToColLetter(i));
       let cl=S.selectedCols.has(i)||(S.selectedCell&&S.selectedCell.col===i)||(S.selRange&&i>=S.selRange.c1&&i<=S.selRange.c2)?' col-highlight':'';
       if(S.disabledCols.has(i)) cl+=' col-disabled';
       if(i<S.freezeColsCount) cl+=' pcsv-frozen-col';
@@ -2676,62 +2676,12 @@ function getRangeValues(rangeStr){
   }
   return [];
 }
-function getRangeNums(rangeStr){return getRangeValues(rangeStr).map(v=>parseFloat(v)).filter(v=>!isNaN(v));}
-function parseFormulaArgs(argsStr){
-  const args=[];let cur='',depth=0,inQ=false;
-  for(let i=0;i<argsStr.length;i++){
-    const ch=argsStr[i];
-    if(ch==='"'){inQ=!inQ;cur+=ch;}
-    else if(!inQ&&ch==='('){depth++;cur+=ch;}
-    else if(!inQ&&ch===')'){depth--;cur+=ch;}
-    else if(!inQ&&ch===','&&depth===0){args.push(cur);cur='';}
-    else{cur+=ch;}
-  }
-  if(cur) args.push(cur);
-  return args;
-}
-function resolveArg(arg){
-  arg=arg.trim();
-  if(arg.startsWith('"')&&arg.endsWith('"')) return arg.slice(1,-1);
-  // Nested formula
-  if(arg.startsWith('=')){try{return evaluateFormula(arg);}catch(e){return '#ERROR';}}
-  // Function call without =
-  const fm=arg.match(/^([A-Z_]+)\s*\((.+)\)$/is);
-  if(fm){try{return evaluateFormula('='+arg);}catch(e){return '#ERROR';}}
-  const ref=parseCellRef(arg);
-  if(ref) return getCellVal(ref.row,ref.col);
-  const n=parseFloat(arg);
-  if(!isNaN(n)&&String(n)===arg) return n;
-  return arg;
-}
-function resolveNum(arg){const v=resolveArg(arg);return parseFloat(v);}
-function resolveStr(arg){return String(resolveArg(arg));}
-function evalCondition(condStr){
-  condStr=condStr.trim();
-  const ops=['>=','<=','<>','!=','=','>','<'];
-  for(const op of ops){
-    // Find op not inside quotes
-    let inQ=false,idx=-1;
-    for(let i=0;i<condStr.length;i++){
-      if(condStr[i]==='"')inQ=!inQ;
-      if(!inQ&&condStr.substring(i,i+op.length)===op){idx=i;break;}
-    }
-    if(idx>0){
-      const left=resolveArg(condStr.substring(0,idx)),right=resolveArg(condStr.substring(idx+op.length));
-      const ln=parseFloat(left),rn=parseFloat(right),useN=!isNaN(ln)&&!isNaN(rn);
-      switch(op){
-        case '>': return useN?ln>rn:String(left)>String(right);
-        case '<': return useN?ln<rn:String(left)<String(right);
-        case '>=': return useN?ln>=rn:String(left)>=String(right);
-        case '<=': return useN?ln<=rn:String(left)<=String(right);
-        case '=': return String(left)===String(right);
-        case '<>':case '!=': return String(left)!==String(right);
-      }
-    }
-  }
-  const v=resolveArg(condStr);
-  return v&&v!=='0'&&v!=='false'&&v!=='';
-}
+function getRangeNums(rangeStr){return getRangeValues(rangeStr).map(v=>parseFloat(String(v).replace(/,/g,''))).filter(v=>!isNaN(v));}
+// ========== Formula Engine (expression parser) ==========
+// Supports mixed operators, parentheses, cell references and nested function
+// calls (e.g. =A1+SUM(B1:B3)*2, =ROUND(AVERAGE(A:A),1)).
+function _fxToNum(v){if(typeof v==='number')return v;if(typeof v==='boolean')return v?1:0;const n=parseFloat(String(v).replace(/,/g,''));return isNaN(n)?NaN:n;}
+function _fxIsErr(v){return typeof v==='string'&&v.startsWith('#');}
 function matchCriteria(value,criteria){
   const ops=['>=','<=','<>','!=','>','<','='];
   for(const op of ops){
@@ -2747,104 +2697,195 @@ function matchCriteria(value,criteria){
   }
   return value===criteria;
 }
-function evaluateFormula(formula){
-  let expr=formula.substring(1).trim();
-  const funcMatch=expr.match(/^([A-Z_]+)\s*\(([\s\S]*)\)$/i);
-  if(!funcMatch){
-    const ref=parseCellRef(expr);if(ref)return getCellVal(ref.row,ref.col);
-    // Simple arithmetic
-    try{
-      const replaced=expr.replace(/([A-Za-z]+\d+)/g,(m)=>{const r=parseCellRef(m);return r?`(${parseFloat(getCellVal(r.row,r.col))||0})`:'0';});
-      if(!/^[0-9+\-*/%().\s]+$/.test(replaced)) return '#ERROR: 許可されていない数式';
-      const result=Function('"use strict";return ('+replaced+')')();
-      if(typeof result==='number'&&isFinite(result)) return result;
-    }catch(e){}
-    return '#ERROR: 不明な数式';
+function _fxTokenize(src){
+  const toks=[];let i=0;const two=['>=','<=','<>','!='];
+  while(i<src.length){
+    const ch=src[i];
+    if(ch===' '||ch==='\t'||ch==='\n'||ch==='\r'){i++;continue;}
+    if(ch==='"'){let j=i+1,s='';while(j<src.length){if(src[j]==='"'){if(src[j+1]==='"'){s+='"';j+=2;continue;}break;}s+=src[j++];}toks.push({t:'str',v:s});i=j+1;continue;}
+    const pair=src.substr(i,2);
+    if(two.includes(pair)){toks.push({t:'op',v:pair});i+=2;continue;}
+    if(ch==='('||ch===')'||ch===','){toks.push({t:ch,v:ch});i++;continue;}
+    if(ch===':'){toks.push({t:'op',v:':'});i++;continue;}
+    if('+-*/^%=&'.includes(ch)){toks.push({t:'op',v:ch});i++;continue;}
+    if(ch==='>'||ch==='<'){toks.push({t:'op',v:ch});i++;continue;}
+    if(/[0-9.]/.test(ch)){let j=i,s='';while(j<src.length&&/[0-9.]/.test(src[j]))s+=src[j++];toks.push({t:'num',v:parseFloat(s)});i=j;continue;}
+    if(/[A-Za-z_]/.test(ch)){let j=i,s='';while(j<src.length&&/[A-Za-z0-9_]/.test(src[j]))s+=src[j++];toks.push({t:'ident',v:s});i=j;continue;}
+    throw new Error('bad char '+ch);
   }
-  const func=funcMatch[1].toUpperCase(),args=parseFormulaArgs(funcMatch[2]);
+  toks.push({t:'eof'});return toks;
+}
+function evalExpr(src){
+  let toks;try{toks=_fxTokenize(src);}catch(e){return '#ERROR';}
+  let pos=0;const peek=()=>toks[pos],next=()=>toks[pos++];
+  function tokenText(t){if(t.t==='str')return '"'+t.v+'"';if(t.t==='num')return String(t.v);if(t.t==='ident')return t.v;return t.v;}
+  function parseComparison(){
+    let left=parseConcat();
+    while(peek().t==='op'&&['=','>','<','>=','<=','<>','!='].includes(peek().v)){
+      const op=next().v;const right=parseConcat();
+      if(_fxIsErr(left))return left;if(_fxIsErr(right))return right;
+      const ln=_fxToNum(left),rn=_fxToNum(right),useN=!isNaN(ln)&&!isNaN(rn);
+      const a=useN?ln:String(left),b=useN?rn:String(right);
+      switch(op){case '=':left=(String(left)===String(right));break;
+        case '>':left=a>b;break;case '<':left=a<b;break;case '>=':left=a>=b;break;case '<=':left=a<=b;break;
+        case '<>':case '!=':left=(String(left)!==String(right));break;}
+    }
+    return left;
+  }
+  function parseConcat(){
+    let left=parseAdd();
+    while(peek().t==='op'&&peek().v==='&'){next();const right=parseAdd();if(_fxIsErr(left))return left;if(_fxIsErr(right))return right;
+      const ls=left===true?'TRUE':left===false?'FALSE':String(left);const rs=right===true?'TRUE':right===false?'FALSE':String(right);left=ls+rs;}
+    return left;
+  }
+  function parseAdd(){let left=parseMul();while(peek().t==='op'&&(peek().v==='+'||peek().v==='-')){const op=next().v;const right=parseMul();if(_fxIsErr(left))return left;if(_fxIsErr(right))return right;const ln=_fxToNum(left),rn=_fxToNum(right);if(isNaN(ln)||isNaN(rn))return '#VALUE!';left=op==='+'?ln+rn:ln-rn;}return left;}
+  function parseMul(){let left=parsePow();while(peek().t==='op'&&(peek().v==='*'||peek().v==='/'||peek().v==='%')){const op=next().v;const right=parsePow();if(_fxIsErr(left))return left;if(_fxIsErr(right))return right;const ln=_fxToNum(left),rn=_fxToNum(right);if(isNaN(ln)||isNaN(rn))return '#VALUE!';if((op==='/'||op==='%')&&rn===0)return '#DIV/0!';left=op==='*'?ln*rn:op==='/'?ln/rn:ln%rn;}return left;}
+  function parsePow(){let left=parseUnary();if(peek().t==='op'&&peek().v==='^'){next();const right=parsePow();if(_fxIsErr(left))return left;if(_fxIsErr(right))return right;const ln=_fxToNum(left),rn=_fxToNum(right);if(isNaN(ln)||isNaN(rn))return '#VALUE!';return Math.pow(ln,rn);}return left;}
+  function parseUnary(){if(peek().t==='op'&&(peek().v==='-'||peek().v==='+')){const op=next().v;const v=parseUnary();if(_fxIsErr(v))return v;const n=_fxToNum(v);if(isNaN(n))return '#VALUE!';return op==='-'?-n:n;}return parsePrimary();}
+  function parsePrimary(){
+    const tk=peek();
+    if(tk.t==='num'){next();return tk.v;}
+    if(tk.t==='str'){next();return tk.v;}
+    if(tk.t==='('){next();const v=parseComparison();if(peek().t===')')next();return v;}
+    if(tk.t==='ident'){
+      next();
+      if(peek().t==='('){
+        next();const rawArgs=[];let depth=0,cur='';
+        while(peek().t!=='eof'){
+          const t=peek();
+          if(t.t==='('){depth++;cur+=tokenText(t);next();continue;}
+          if(t.t===')'){if(depth===0){next();break;}depth--;cur+=tokenText(t);next();continue;}
+          if(t.t===','&&depth===0){rawArgs.push(cur);cur='';next();continue;}
+          cur+=tokenText(t);next();
+        }
+        if(cur!==''||rawArgs.length)rawArgs.push(cur);
+        return callFunction(tk.v.toUpperCase(),rawArgs.map(s=>s.trim()));
+      }
+      const up=tk.v.toUpperCase();
+      if(up==='TRUE')return true;if(up==='FALSE')return false;
+      const ref=parseCellRef(tk.v);
+      if(ref)return getCellVal(ref.row,ref.col);
+      return '#NAME?';
+    }
+    next();return '#ERROR';
+  }
+  return parseComparison();
+}
+function resolveArg(arg){
+  arg=String(arg).trim();
+  if(arg==='')return '';
+  if(arg.startsWith('"')&&arg.endsWith('"'))return arg.slice(1,-1);
+  const v=evalExpr(arg);
+  if(typeof v==='boolean')return v;
+  if(_fxIsErr(v)){
+    const ref=parseCellRef(arg);if(ref)return getCellVal(ref.row,ref.col);
+    // Only treat as literal text when it is a single bare token (no operators);
+    // genuine expressions like "10/0" must propagate their error (e.g. IFERROR).
+    if(!/[-+*/^%&():,<>=]/.test(arg))return arg;
+    return v;
+  }
+  return v;
+}
+function resolveNum(arg){return _fxToNum(resolveArg(arg));}
+function resolveStr(arg){const v=resolveArg(arg);return v===true?'TRUE':v===false?'FALSE':String(v);}
+function _fxTruthy(v){if(v===true)return true;if(v===false)return false;if(typeof v==='number')return v!==0;const s=String(v).trim().toLowerCase();return s!==''&&s!=='0'&&s!=='false';}
+function callFunction(func,args){
   switch(func){
-    case 'SUM':{const nums=args.flatMap(a=>getRangeNums(a));return nums.reduce((s,n)=>s+n,0);}
-    case 'AVG':case 'AVERAGE':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?nums.reduce((s,n)=>s+n,0)/nums.length:0;}
-    case 'COUNT':{return args.flatMap(a=>getRangeValues(a)).filter(v=>v.trim()!=='').length;}
-    case 'COUNTA':{return args.flatMap(a=>getRangeValues(a)).filter(v=>v.trim()!=='').length;}
-    case 'COUNTBLANK':{return args.flatMap(a=>getRangeValues(a)).filter(v=>v.trim()==='').length;}
+    case 'SUM':{return args.flatMap(a=>getRangeNums(a)).reduce((s,n)=>s+n,0);}
+    case 'PRODUCT':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?nums.reduce((s,n)=>s*n,1):0;}
+    case 'AVG':case 'AVERAGE':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?nums.reduce((s,n)=>s+n,0)/nums.length:'#DIV/0!';}
+    case 'COUNT':{return args.flatMap(a=>getRangeValues(a)).filter(v=>String(v).trim()!==''&&!isNaN(parseFloat(String(v).replace(/,/g,'')))).length;}
+    case 'COUNTA':{return args.flatMap(a=>getRangeValues(a)).filter(v=>String(v).trim()!=='').length;}
+    case 'COUNTBLANK':{return args.flatMap(a=>getRangeValues(a)).filter(v=>String(v).trim()==='').length;}
     case 'MIN':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?Math.min(...nums):0;}
     case 'MAX':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?Math.max(...nums):0;}
-    case 'MEDIAN':{
-      const nums=args.flatMap(a=>getRangeNums(a)).sort((a,b)=>a-b);if(!nums.length)return 0;
-      const mid=Math.floor(nums.length/2);return nums.length%2?nums[mid]:(nums[mid-1]+nums[mid])/2;
-    }
-    case 'STDEV':{
-      const nums=args.flatMap(a=>getRangeNums(a));if(nums.length<2)return 0;
-      const avg=nums.reduce((s,n)=>s+n,0)/nums.length;
-      return Math.sqrt(nums.reduce((s,n)=>s+Math.pow(n-avg,2),0)/(nums.length-1));
-    }
-    case 'UPPER':{if(!args.length)return '#ERROR';return resolveStr(args[0]).toUpperCase();}
-    case 'LOWER':{if(!args.length)return '#ERROR';return resolveStr(args[0]).toLowerCase();}
-    case 'TRIM':{if(!args.length)return '#ERROR';return resolveStr(args[0]).trim();}
-    case 'LEN':{if(!args.length)return '#ERROR';return resolveStr(args[0]).length;}
-    case 'CONCAT':case 'CONCATENATE':{return args.map(a=>resolveStr(a)).join('');}
-    case 'LEFT':{if(args.length<2)return '#ERROR';const t=resolveStr(args[0]),n=parseInt(resolveArg(args[1]));return t.substring(0,n);}
-    case 'RIGHT':{if(args.length<2)return '#ERROR';const t=resolveStr(args[0]),n=parseInt(resolveArg(args[1]));return t.substring(t.length-n);}
-    case 'MID':{if(args.length<3)return '#ERROR';const t=resolveStr(args[0]),st=parseInt(resolveArg(args[1]))-1,ln=parseInt(resolveArg(args[2]));return t.substring(st,st+ln);}
-    case 'SUBSTITUTE':{if(args.length<3)return '#ERROR';return resolveStr(args[0]).split(resolveStr(args[1])).join(resolveStr(args[2]));}
-    case 'IF':{
-      if(args.length<3)return '#ERROR: IF(条件,真,偽)';
-      return evalCondition(args[0])?resolveArg(args[1]):resolveArg(args[2]);
-    }
-    case 'COUNTIF':{
-      if(args.length<2)return '#ERROR';
-      const vals=getRangeValues(args[0].trim()),criteria=args[1].trim().replace(/^"|"$/g,'');
-      return vals.filter(v=>matchCriteria(v,criteria)).length;
-    }
-    case 'SUMIF':{
-      if(args.length<2)return '#ERROR';
-      const vals=getRangeValues(args[0].trim()),criteria=args[1].trim().replace(/^"|"$/g,'');
-      let sum=0;vals.forEach(v=>{if(matchCriteria(v,criteria)){const n=parseFloat(v);if(!isNaN(n))sum+=n;}});return sum;
-    }
-    case 'VLOOKUP':{
-      if(args.length<3)return '#ERROR: VLOOKUP(値,検索列,結果列)';
-      const searchVal=String(resolveArg(args[0])),
-            searchCol=/^[A-Za-z]+$/.test(args[1].trim())?colLetterToIndex(args[1].trim()):parseInt(args[1].trim())-1,
-            resultCol=/^[A-Za-z]+$/.test(args[2].trim())?colLetterToIndex(args[2].trim()):parseInt(args[2].trim())-1;
-      if(isNaN(searchCol)||isNaN(resultCol))return '#ERROR: 列指定不正';
-      for(let r=0;r<S.data.length;r++){if((S.data[r][searchCol]||'')===searchVal)return S.data[r][resultCol]||'';}
-      return '#N/A';
-    }
-    case 'ROUND':{const v=resolveNum(args[0]),d=args.length>1?parseInt(resolveArg(args[1])):0;if(isNaN(v))return '#ERROR';return parseFloat(v.toFixed(d));}
-    case 'ABS':{const v=resolveNum(args[0]);if(isNaN(v))return '#ERROR';return Math.abs(v);}
-    case 'CEILING':case 'CEIL':{const v=resolveNum(args[0]);if(isNaN(v))return '#ERROR';return Math.ceil(v);}
-    case 'FLOOR':{const v=resolveNum(args[0]);if(isNaN(v))return '#ERROR';return Math.floor(v);}
-    case 'POWER':case 'POW':{if(args.length<2)return '#ERROR';const b=resolveNum(args[0]),e=resolveNum(args[1]);return Math.pow(b,e);}
-    case 'SQRT':{const v=resolveNum(args[0]);if(isNaN(v)||v<0)return '#ERROR';return Math.sqrt(v);}
-    case 'MOD':{if(args.length<2)return '#ERROR';const a=resolveNum(args[0]),b=resolveNum(args[1]);if(b===0)return '#DIV/0!';return a%b;}
+    case 'MEDIAN':{const nums=args.flatMap(a=>getRangeNums(a)).sort((a,b)=>a-b);if(!nums.length)return 0;const mid=Math.floor(nums.length/2);return nums.length%2?nums[mid]:(nums[mid-1]+nums[mid])/2;}
+    case 'STDEV':{const nums=args.flatMap(a=>getRangeNums(a));if(nums.length<2)return 0;const avg=nums.reduce((s,n)=>s+n,0)/nums.length;return Math.sqrt(nums.reduce((s,n)=>s+Math.pow(n-avg,2),0)/(nums.length-1));}
+    case 'UPPER':return resolveStr(args[0]).toUpperCase();
+    case 'LOWER':return resolveStr(args[0]).toLowerCase();
+    case 'TRIM':return resolveStr(args[0]).trim();
+    case 'LEN':return resolveStr(args[0]).length;
+    case 'CONCAT':case 'CONCATENATE':return args.map(a=>resolveStr(a)).join('');
+    case 'LEFT':{const t=resolveStr(args[0]),n=args.length>1?parseInt(resolveArg(args[1])):1;return t.substring(0,n);}
+    case 'RIGHT':{const t=resolveStr(args[0]),n=args.length>1?parseInt(resolveArg(args[1])):1;return n>=t.length?t:t.substring(t.length-n);}
+    case 'MID':{const t=resolveStr(args[0]),st=parseInt(resolveArg(args[1]))-1,ln=parseInt(resolveArg(args[2]));return t.substring(st,st+ln);}
+    case 'SUBSTITUTE':return resolveStr(args[0]).split(resolveStr(args[1])).join(resolveStr(args[2]));
+    case 'PROPER':return resolveStr(args[0]).replace(/\b\w/g,c=>c.toUpperCase());
+    case 'REPT':return resolveStr(args[0]).repeat(Math.max(0,parseInt(resolveArg(args[1]))||0));
+    case 'IF':{if(args.length<2)return '#ERROR: IF(条件,真,偽)';const c=evalExpr(args[0]);if(_fxIsErr(c))return c;return _fxTruthy(c)?resolveArg(args[1]):(args.length>2?resolveArg(args[2]):false);}
+    case 'IFS':{for(let i=0;i+1<args.length;i+=2){const c=evalExpr(args[i]);if(_fxIsErr(c))return c;if(_fxTruthy(c))return resolveArg(args[i+1]);}return '#N/A';}
+    case 'IFERROR':{const v=resolveArg(args[0]);return _fxIsErr(v)?resolveArg(args[1]):v;}
+    case 'AND':return args.every(a=>_fxTruthy(resolveArg(a)));
+    case 'OR':return args.some(a=>_fxTruthy(resolveArg(a)));
+    case 'NOT':return !_fxTruthy(resolveArg(args[0]));
+    case 'ISBLANK':return String(resolveArg(args[0])).trim()==='';
+    case 'ISNUMBER':return !isNaN(_fxToNum(resolveArg(args[0])));
+    case 'COUNTIF':{const vals=getRangeValues(args[0]),crit=String(resolveArg(args[1]));return vals.filter(v=>matchCriteria(String(v),crit)).length;}
+    case 'SUMIF':{const vals=getRangeValues(args[0]),crit=String(resolveArg(args[1]));const sumRange=args.length>2?getRangeValues(args[2]):vals;let s=0;vals.forEach((v,i)=>{if(matchCriteria(String(v),crit)){const n=parseFloat(sumRange[i]);if(!isNaN(n))s+=n;}});return s;}
+    case 'AVERAGEIF':{const vals=getRangeValues(args[0]),crit=String(resolveArg(args[1]));const avgRange=args.length>2?getRangeValues(args[2]):vals;let s=0,c=0;vals.forEach((v,i)=>{if(matchCriteria(String(v),crit)){const n=parseFloat(avgRange[i]);if(!isNaN(n)){s+=n;c++;}}});return c?s/c:'#DIV/0!';}
+    case 'COUNTIFS':{const pairs=[];for(let i=0;i+1<args.length;i+=2)pairs.push([getRangeValues(args[i]),String(resolveArg(args[i+1]))]);if(!pairs.length||!pairs[0][0])return 0;const n=pairs[0][0].length;let cnt=0;for(let r=0;r<n;r++){if(pairs.every(([vals,crit])=>matchCriteria(String(vals[r]),crit)))cnt++;}return cnt;}
+    case 'SUMIFS':{const sumRange=getRangeValues(args[0]);const pairs=[];for(let i=1;i+1<args.length;i+=2)pairs.push([getRangeValues(args[i]),String(resolveArg(args[i+1]))]);let s=0;for(let r=0;r<sumRange.length;r++){if(pairs.every(([vals,crit])=>matchCriteria(String(vals[r]),crit))){const n=parseFloat(sumRange[r]);if(!isNaN(n))s+=n;}}return s;}
+    case 'VLOOKUP':{const searchVal=String(resolveArg(args[0]));const sc=/^[A-Za-z]+$/.test(args[1])?colLetterToIndex(args[1]):parseInt(args[1])-1;const rc=/^[A-Za-z]+$/.test(args[2])?colLetterToIndex(args[2]):parseInt(args[2])-1;if(isNaN(sc)||isNaN(rc))return '#REF!';for(let r=0;r<S.data.length;r++){if(String(getCellVal(r,sc))===searchVal)return getCellVal(r,rc);}return '#N/A';}
+    case 'MATCH':{const sv=String(resolveArg(args[0]));const vals=getRangeValues(args[1]);for(let i=0;i<vals.length;i++)if(String(vals[i])===sv)return i+1;return '#N/A';}
+    case 'INDEX':{const vals=getRangeValues(args[0]);const idx=parseInt(resolveArg(args[1]))-1;return idx>=0&&idx<vals.length?vals[idx]:'#REF!';}
+    case 'UNIQUE':case 'COUNTUNIQUE':{return new Set(args.flatMap(a=>getRangeValues(a)).filter(v=>String(v).trim()!=='')).size;}
+    case 'ROUND':{const v=resolveNum(args[0]),d=args.length>1?parseInt(resolveArg(args[1])):0;if(isNaN(v))return '#VALUE!';const m=Math.pow(10,d);return Math.round(v*m)/m;}
+    case 'ROUNDUP':{const v=resolveNum(args[0]),d=args.length>1?parseInt(resolveArg(args[1])):0;if(isNaN(v))return '#VALUE!';const m=Math.pow(10,d);return (v<0?-1:1)*Math.ceil(Math.abs(v)*m)/m;}
+    case 'ROUNDDOWN':case 'TRUNC':{const v=resolveNum(args[0]),d=args.length>1?parseInt(resolveArg(args[1])):0;if(isNaN(v))return '#VALUE!';const m=Math.pow(10,d);return (v<0?-1:1)*Math.floor(Math.abs(v)*m)/m;}
+    case 'INT':{const v=resolveNum(args[0]);if(isNaN(v))return '#VALUE!';return Math.floor(v);}
+    case 'ABS':{const v=resolveNum(args[0]);if(isNaN(v))return '#VALUE!';return Math.abs(v);}
+    case 'CEILING':case 'CEIL':{const v=resolveNum(args[0]);if(isNaN(v))return '#VALUE!';return Math.ceil(v);}
+    case 'FLOOR':{const v=resolveNum(args[0]);if(isNaN(v))return '#VALUE!';return Math.floor(v);}
+    case 'POWER':case 'POW':{const b=resolveNum(args[0]),e=resolveNum(args[1]);if(isNaN(b)||isNaN(e))return '#VALUE!';return Math.pow(b,e);}
+    case 'SQRT':{const v=resolveNum(args[0]);if(isNaN(v)||v<0)return '#NUM!';return Math.sqrt(v);}
+    case 'MOD':{const a=resolveNum(args[0]),b=resolveNum(args[1]);if(b===0)return '#DIV/0!';return a%b;}
     case 'TODAY':return new Date().toISOString().split('T')[0];
     case 'NOW':return new Date().toISOString().replace('T',' ').substring(0,19);
-    case 'UNIQUE':{return new Set(args.flatMap(a=>getRangeValues(a))).size;}
-    case 'PROPER':{return resolveStr(args[0]).replace(/\b\w/g,c=>c.toUpperCase());}
-    case 'REPT':{if(args.length<2)return '#ERROR';return resolveStr(args[0]).repeat(parseInt(resolveArg(args[1]))||0);}
-    case 'TEXT':{
-      if(!args.length)return '#ERROR';
-      const v=resolveArg(args[0]),fmt=args.length>1?resolveStr(args[1]):'';
-      if(fmt==='#,##0'){const n=parseFloat(v);return isNaN(n)?String(v):n.toLocaleString();}
-      if(fmt.includes('.')){const n=parseFloat(v),d=(fmt.split('.')[1]||'').length;return isNaN(n)?String(v):n.toFixed(d);}
-      return String(v);
-    }
-    default:return `#ERROR: 未対応関数 ${func}`;
+    case 'TEXT':{const v=resolveArg(args[0]),fmt=args.length>1?resolveStr(args[1]):'';if(fmt==='#,##0'){const n=parseFloat(v);return isNaN(n)?String(v):Math.round(n).toLocaleString('en-US');}if(fmt.includes('.')){const n=parseFloat(v),d=(fmt.split('.')[1]||'').length;return isNaN(n)?String(v):n.toFixed(d);}return String(v);}
+    default:return `#NAME?`;
   }
+}
+function evaluateFormula(formula){
+  const v=evalExpr(String(formula).substring(1).trim());
+  if(v===true)return 'TRUE';if(v===false)return 'FALSE';
+  if(typeof v==='number'&&!isFinite(v))return '#NUM!';
+  return v;
 }
 
 // ========== Formula Recalculation ==========
 let _recalcing=false, _formulaCtxInstant=false; // global context for formula evaluation chain
 function recalcAllFormulas(){
   if(_recalcing)return; _recalcing=true;
-  // 1. Recalculate real cell formulas (never in instant context)
+  // 1. Recalculate real cell formulas (never in instant context).
+  //    Re-evaluate repeatedly until the sheet stabilises, so a formula may
+  //    depend on another formula cell regardless of definition order.
+  //    If it never stabilises the references are circular -> mark #CIRC!.
   _formulaCtxInstant=false;
   for(const key in S.formulas){
     const [r,c]=key.split(',').map(Number);
-    if(r<S.data.length&&c<S.headers.length){
-      try{S.data[r][c]=String(evaluateFormula(S.formulas[key]));}catch(e){S.data[r][c]='#ERROR';}
-    }else{delete S.formulas[key];}
+    if(r>=S.data.length||c>=S.headers.length) delete S.formulas[key];
+  }
+  const _fkeys=Object.keys(S.formulas);
+  const _maxPasses=Math.min(200,_fkeys.length+2);
+  let _pass=0,_changed=true;
+  while(_changed&&_pass<_maxPasses){
+    _changed=false;_pass++;
+    for(const key of _fkeys){
+      const [r,c]=key.split(',').map(Number);
+      let v;try{v=String(evaluateFormula(S.formulas[key]));}catch(e){v='#ERROR';}
+      if(S.data[r][c]!==v){S.data[r][c]=v;_changed=true;}
+    }
+  }
+  if(_changed){
+    // Did not converge within the pass budget: flag still-unstable cells.
+    for(const key of _fkeys){
+      const [r,c]=key.split(',').map(Number);
+      let a,b;
+      try{a=String(evaluateFormula(S.formulas[key]));}catch(e){a='#ERROR';}
+      S.data[r][c]=a;
+      try{b=String(evaluateFormula(S.formulas[key]));}catch(e){b='#ERROR';}
+      if(a!==b) S.data[r][c]='#CIRC!';
+    }
   }
   // 2. Recalculate instant row formulas
   _formulaCtxInstant=true;
@@ -3194,7 +3235,7 @@ function insertColumnAt(colIdx,side) {
   const pos=side==='left'?colIdx:colIdx+1;
   const name=prompt('新しい列名を入力:');if(!name) return;
   saveState('列挿入'); adjustFormulasColInsert(pos); _adjustInstantSets('col',pos,1);
-  S.headers.splice(pos,0,name.trim()||`列${pos+1}`);
+  S.headers.splice(pos,0,name.trim()||indexToColLetter(pos));
   S.data.forEach(r=>r.splice(pos,0,''));renderGrid();updateStatus();toast('列を挿入しました','success');
 }
 function deleteSelectedColumn() {
