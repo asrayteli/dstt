@@ -22,15 +22,10 @@
       <button type="button" class="tobell-btn" id="tb-reload" hidden>リロード</button>
       <button type="button" class="tobell-btn tobell-btn-primary tobell-pc-only" id="tb-new-task">新規</button>
       <button type="button" class="tobell-btn" id="tb-templates">テンプレート</button>
-      <button type="button" class="tobell-btn" id="tb-enable-push-notify">通知を有効化</button>
-      <button type="button" class="tobell-btn" id="tb-push-devices">通知先</button>
-      <button type="button" class="tobell-btn tobell-pc-only" id="tb-open-notifier">待受ウィンドウ</button>
-      <button type="button" class="tobell-btn" id="tb-test-push-notify">テスト送信</button>
-      <button type="button" class="tobell-btn" id="tb-read-all">通知を既読</button>
       {% if not share_session %}
       <button type="button" class="tobell-btn" id="tb-share-link">共有リンク</button>
-      <button type="button" class="tobell-btn tobell-icon-btn" id="tb-settings-open" aria-label="設定" title="設定">⚙</button>
       {% endif %}
+      <button type="button" class="tobell-btn tobell-icon-btn" id="tb-settings-open" aria-label="設定" title="設定">⚙</button>
     </div>
   </header>
 
@@ -69,7 +64,10 @@
         <div id="tb-project-list" class="tobell-project-list"></div>
       </section>
       <section class="tobell-notifications tobell-pc-only">
-        <div class="tobell-panel-title">通知</div>
+        <div class="tobell-panel-title tobell-notifications-head">
+          <span>通知</span>
+          <button type="button" class="tobell-link-btn" id="tb-read-all">すべて既読</button>
+        </div>
         <div id="tb-notifications"></div>
       </section>
     </aside>
@@ -368,7 +366,6 @@
   </div>
 </div>
 
-{% if not share_session %}
 <div id="tb-settings-modal" class="tobell-modal" hidden>
   <div class="tobell-modal-backdrop" data-settings-close></div>
   <div class="tobell-modal-card tobell-settings-card" role="dialog" aria-modal="true" aria-labelledby="tb-settings-title">
@@ -377,10 +374,25 @@
       <button type="button" class="tobell-btn" data-settings-close aria-label="閉じる">×</button>
     </div>
     <nav class="tobell-settings-tabs" role="tablist">
-      <button type="button" class="tobell-settings-tab is-active" data-settings-tab="integrations" role="tab">DSTT連携</button>
+      <button type="button" class="tobell-settings-tab is-active" data-settings-tab="notify" role="tab">通知</button>
+      {% if not share_session %}
+      <button type="button" class="tobell-settings-tab" data-settings-tab="integrations" role="tab">DSTT連携</button>
       <button type="button" class="tobell-settings-tab" data-settings-tab="google" role="tab">Googleカレンダー</button>
+      {% endif %}
     </nav>
-    <section class="tobell-settings-panel" data-settings-panel="integrations">
+    <section class="tobell-settings-panel" data-settings-panel="notify">
+      <p class="tobell-share-note">
+        この端末・ブラウザへの通知（プッシュ）に関する設定です。期限が来たタスクや、他ツール連携の通知を受け取れます。
+      </p>
+      <div class="tobell-settings-actions">
+        <button type="button" class="tobell-btn tobell-btn-primary" id="tb-enable-push-notify">通知を有効化</button>
+        <button type="button" class="tobell-btn" id="tb-test-push-notify">テスト送信</button>
+        <button type="button" class="tobell-btn" id="tb-push-devices">通知先の管理</button>
+        <button type="button" class="tobell-btn tobell-pc-only" id="tb-open-notifier">待受ウィンドウ</button>
+      </div>
+    </section>
+    {% if not share_session %}
+    <section class="tobell-settings-panel" data-settings-panel="integrations" style="display:none">
       <p class="tobell-share-note">
         他のDSTTツールとの連携を、機能ごとに個別にON/OFFできます。デフォルトは全てOFFです。
         ONにすると、対象のツールで対応する出来事が起きたときに、ToBellへ自動的にタスクや通知が追加されます。
@@ -399,9 +411,11 @@
         <div class="tobell-empty">読み込み中…</div>
       </div>
     </section>
+    {% endif %}
   </div>
 </div>
 
+{% if not share_session %}
 <div id="tb-links-modal" class="tobell-modal" hidden>
   <div class="tobell-modal-backdrop" data-links-close></div>
   <div class="tobell-modal-card" role="dialog" aria-modal="true" aria-labelledby="tb-links-title">

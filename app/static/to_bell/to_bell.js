@@ -31,6 +31,34 @@
     "'": "&#39;",
   }[ch]));
 
+  // メモ・コメント内の http(s) URL を、クリックできるリンクに変換する。
+  // すべての文字列は esc() を通すので XSS にはならない（href も esc 済み・http/https 限定）。
+  const URL_RE = /(https?:\/\/[^\s<>"']+)/gi;
+  function linkify(value) {
+    const text = String(value || "");
+    let html = "";
+    let last = 0;
+    let match;
+    URL_RE.lastIndex = 0;
+    while ((match = URL_RE.exec(text)) !== null) {
+      html += esc(text.slice(last, match.index));
+      let url = match[0];
+      let trail = "";
+      // 末尾の句読点・閉じ括弧はURLから除外する（「(http://...)」「http://...。」対策）。
+      const tm = url.match(/[)\]\}.,!?;:、。）」』]+$/);
+      if (tm) {
+        trail = url.slice(url.length - tm[0].length);
+        url = url.slice(0, url.length - tm[0].length);
+      }
+      const safe = esc(url);
+      html += `<a href="${safe}" target="_blank" rel="noopener noreferrer" class="tobell-link">${safe}</a>`;
+      html += esc(trail);
+      last = match.index + match[0].length;
+    }
+    html += esc(text.slice(last));
+    return html;
+  }
+
   const mobileQuery = window.matchMedia("(max-width: 760px)");
   const isMobile = () => mobileQuery.matches;
 
@@ -182,7 +210,7 @@
           <input class="tobell-check" type="checkbox" ${done} data-complete-id="${task.id}" aria-label="完了">
           <div class="tobell-task-body">
             <h3>${task.pinned ? '<span class="tobell-task-pin" aria-label="ピン留め">📌</span> ' : ""}${esc(task.title)}</h3>
-            <p>${esc(task.description || "メモなし")}</p>
+            <p>${linkify(task.description || "メモなし")}</p>
             <p class="tobell-task-meta">${esc(statusLabel(task.status))} / ${esc(due)} / 進捗 ${Number(task.progress || 0)}%</p>
             ${projectTag(task)}
           </div>
@@ -1256,7 +1284,7 @@
     $("tb-comments").innerHTML = rows.length ? rows.map((item) => `
       <div class="tobell-comment">
         <strong>${esc(item.created_by)}</strong>
-        <div>${esc(item.body)}</div>
+        <div>${linkify(item.body)}</div>
       </div>`).join("") : '<div class="tobell-empty">コメントはありません。</div>';
   }
 
@@ -1403,7 +1431,7 @@
     container.innerHTML = rows.length ? rows.slice(0, 8).map((item) => `
       <div class="tobell-notification">
         <strong>${esc(item.title)}</strong>
-        <div>${esc(item.body)}</div>
+        <div>${linkify(item.body)}</div>
       </div>`).join("") : '<div class="tobell-empty">通知はありません。</div>';
   }
 
