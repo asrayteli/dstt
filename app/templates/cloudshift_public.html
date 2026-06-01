@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DSTT - CS - {{ project_title }}</title>
   <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+  {% if access_mode == "pwa" %}
+  <link rel="manifest" href="{{ url_for('cloudshift.public_pwa_manifest', token=token) }}">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="{{ project_title }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
+  {% endif %}
   {% include "_cloudshift_style.html" %}
 </head>
 <body class="cloud-public-page">
@@ -16,6 +24,8 @@
         <p class="cloud-page-note">
           {% if access_mode == "edit" %}
           編集URLで開いています。保存した内容が共有先に反映されます。
+          {% elif access_mode == "pwa" %}
+          ViewPWAで開いています。通知を有効にすると、当月のシフトが更新されたときにお知らせします。
           {% else %}
           閲覧URLで開いています。表示の確認と単月エクスポートができます。
           {% endif %}
@@ -33,6 +43,9 @@
         <div class="cloud-editor-actions public">
           {% if access_mode == "edit" %}
           <button id="cloud-save-month" type="button" class="cloud-btn primary">この月を保存</button>
+          {% endif %}
+          {% if access_mode == "pwa" %}
+          <button id="cloud-pwa-notify" type="button" class="cloud-btn primary" data-state="off" hidden>通知を有効化</button>
           {% endif %}
         </div>
       </div>
@@ -106,7 +119,8 @@
       type: "public",
       accessMode: "{{ access_mode }}",
       token: "{{ token }}",
-      authenticatedEditorName: {{ (authenticated_editor_name or "")|tojson }}
+      authenticatedEditorName: {{ (authenticated_editor_name or "")|tojson }},
+      pushAvailable: {{ (push_available if access_mode == "pwa" else false)|tojson }}
     };
   </script>
   {% include "_cloudshift_script.html" %}

@@ -3,6 +3,7 @@
 import io
 import hashlib
 import json
+import logging
 import os
 import secrets
 import sys
@@ -39,6 +40,7 @@ from app.models import (
     CloudShiftHistory,
     CloudShiftMonth,
     CloudShiftProject,
+    CloudShiftPwaSubscription,
     Employee,
     Site,
     SiteBranch,
@@ -76,6 +78,8 @@ except ImportError:
 
 
 cloudshift_bp = Blueprint("cloudshift", __name__, url_prefix="/tools/shiftersync/cloudshift")
+
+logger = logging.getLogger(__name__)
 
 LOCK_TIMEOUT_SECONDS = 8.0
 LOCK_POLL_SECONDS = 0.05
@@ -367,6 +371,14 @@ def _project_id() -> str:
 
 def _share_token() -> str:
     return secrets.token_urlsafe(32)
+
+
+def _ensure_pwa_token(project: dict[str, Any]) -> bool:
+    """ViewPWA 用トークンが無ければ発行する。発行したら True を返す（呼び出し側で保存）。"""
+    if str(project.get("pwa_token") or "").strip():
+        return False
+    project["pwa_token"] = _share_token()
+    return True
 
 
 def _user_id() -> str:
@@ -1485,10 +1497,15 @@ def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
 
 
 def _project_public_urls(project: dict[str, Any]) -> dict[str, str]:
-    return {
+    urls = {
         "view_url": url_for("cloudshift.public_view", token=project["view_token"], _external=True),
         "edit_url": url_for("cloudshift.public_edit", token=project["edit_token"], _external=True),
+        "pwa_url": "",
     }
+    pwa_token = str(project.get("pwa_token") or "").strip()
+    if pwa_token:
+        urls["pwa_url"] = url_for("cloudshift.public_pwa", token=pwa_token, _external=True)
+    return urls
 
 
 def _entry_value_uses_site_link(project: dict[str, Any] | None, entry: dict[str, Any]) -> bool:
@@ -2462,6 +2479,7 @@ def _ensure_substitute_project_for_office_month(office_id: int, year: int, month
             "substitute_office_id": office_id,
             "view_token": _share_token(),
             "edit_token": _share_token(),
+            "pwa_token": _share_token(),
             "account_shares": {
                 "office": {
                     "enabled": True,
@@ -2517,9 +2535,11 @@ def _ensure_substitute_projects_for_current_user() -> None:
 
 
 def _find_project_by_token(token: str, token_type: str) -> dict[str, Any]:
-    key = "view_token" if token_type == "view" else "edit_token"
+    key = {"view": "view_token", "edit": "edit_token", "pwa": "pwa_token"}.get(token_type, "edit_token")
+    token = str(token or "")
     for project in _iter_stored_projects():
-        if secrets.compare_digest(str(project.get(key, "")), token):
+        candidate = str(project.get(key, ""))
+        if candidate and secrets.compare_digest(candidate, token):
             return project
     abort(404)
 
@@ -7084,6 +7104,90 @@ def public_edit(token: str):
     )
 
 
+@cloudshift_bp.route("/pwa/<token>")
+def public_pwa(token: str):
+    """ViewPWA 専用 URL。スマホでの閲覧と更新通知の受け取りを前提にした閲覧ページ。"""
+    from app.services.cloudshift_push import push_available
+
+    project = _find_project_by_token(token, "pwa")
+    return render_template(
+        "cloudshift_public.html",
+        access_mode="pwa",
+        token=token,
+        project_title=project["title"],
+        authenticated_editor_name="",
+        push_available=push_available(),
+        shiftersync_holidays=sorted(set(JAPAN_HOLIDAYS)),
+    )
+
+
+@cloudshift_bp.route("/pwa/<token>/manifest.webmanifest")
+def public_pwa_manifest(token: str):
+    """インストール時にそのシフト帳専用アプリとして開けるよう、トークン別の manifest を返す。"""
+    project = _find_project_by_token(token, "pwa")
+    start_url = url_for("cloudshift.public_pwa", token=token, _external=False)
+    manifest = {
+        "id": start_url,
+        "name": f"CloudShift {project['title']}",
+        "short_name": (project.get("title") or "CloudShift")[:24],
+        "description": "シフト帳の最新の内容をスマホで確認し、更新通知を受け取れます。",
+        "icons": [
+            {"src": "/static/img/favicon.ico", "sizes": "256x256", "type": "image/x-icon"},
+            {"src": "/static/img/apple-touch-icon.png", "sizes": "180x180", "type": "image/png"},
+            {"src": "/static/img/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/static/img/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png"},
+        ],
+        "display": "standalone",
+        "start_url": start_url,
+        "scope": start_url,
+        "theme_color": "#2563eb",
+        "background_color": "#ffffff",
+    }
+    response = jsonify(manifest)
+    response.headers["Content-Type"] = "application/manifest+json"
+    return response
+
+
+@cloudshift_bp.route("/api/pwa/<token>/push/public-key")
+def api_pwa_push_public_key(token: str):
+    from app.services.cloudshift_push import CloudShiftPushUnavailable, vapid_public_key
+
+    _find_project_by_token(token, "pwa")
+    try:
+        return jsonify({"status": "ok", "public_key": vapid_public_key()})
+    except CloudShiftPushUnavailable as exc:
+        return jsonify({"status": "unavailable", "public_key": "", "message": str(exc)}), 503
+
+
+@cloudshift_bp.route("/api/pwa/<token>/push/subscribe", methods=["POST"])
+def api_pwa_push_subscribe(token: str):
+    from app.services.cloudshift_push import CloudShiftPushUnavailable, save_subscription
+
+    project = _find_project_by_token(token, "pwa")
+    payload = request.get_json(silent=True) or {}
+    device_id = str(payload.get("device_id") or "").strip()
+    subscription = payload.get("subscription") if isinstance(payload.get("subscription"), dict) else payload
+    try:
+        row = save_subscription(
+            str(project["id"]),
+            device_id,
+            subscription,
+            user_agent=request.headers.get("User-Agent", ""),
+        )
+        return jsonify({"status": "ok", "device_label": row.device_label})
+    except (ValueError, CloudShiftPushUnavailable) as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+
+@cloudshift_bp.route("/api/pwa/<token>/push/unsubscribe", methods=["POST"])
+def api_pwa_push_unsubscribe(token: str):
+    from app.services.cloudshift_push import unsubscribe
+
+    project = _find_project_by_token(token, "pwa")
+    device_id = str((request.get_json(silent=True) or {}).get("device_id") or "").strip()
+    return jsonify({"status": "ok", "updated": unsubscribe(str(project["id"]), device_id)})
+
+
 @cloudshift_bp.route("/api/list")
 @login_required
 def api_list():
@@ -7227,6 +7331,7 @@ def api_create():
         "master_sites": master_sites,
         "view_token": _share_token(),
         "edit_token": _share_token(),
+        "pwa_token": _share_token(),
         "created_at": _utcnow_iso(),
         "updated_at": _utcnow_iso(),
         "months": {
@@ -7304,6 +7409,12 @@ def api_project_detail(project_id: str):
                 "CloudShift master shift auto-resync failed for project %s", project_id
             )
         project, access_role = _project_for_current_user_or_404(project_id)
+    # オーナーが詳細を開いた時点で ViewPWA 用トークンを発行しておく（既存帳簿の遡及対応）。
+    if access_role == "owner" and not str(project.get("pwa_token") or "").strip():
+        with _project_lock(project_id):
+            project = _owner_project_or_404(project_id)
+            if _ensure_pwa_token(project):
+                _save_project(project)
     selected_month_key = request.args.get("month_key")
     payload = _project_detail_payload(project, selected_month_key, include_draft=access_role in {"owner", "editor"})
     payload["access_role"] = access_role
@@ -7464,6 +7575,14 @@ def api_regenerate_tokens(project_id: str):
                 changes.append(f"未処理の休暇種別変更申請 {rejected_count}件を破棄")
         project["view_token"] = _share_token()
         project["edit_token"] = _share_token()
+        project["pwa_token"] = _share_token()
+        # 旧 ViewPWA URL は無効になるため、その帳簿の PWA 購読も無効化する
+        # （古い端末が 404 になる URL へ通知され続けるのを防ぐ）。
+        deactivated = CloudShiftPwaSubscription.query.filter_by(project_id=project_id, is_active=True).update(
+            {"is_active": False}, synchronize_session=False
+        )
+        if deactivated:
+            changes.append(f"ViewPWA通知の購読 {deactivated}件を解除")
         _save_project(project)
         _append_history(
             project_id,
@@ -7921,12 +8040,73 @@ def _publish_draft_month_in_project(
     return published
 
 
+def _confirmed_entries_snapshot(project: dict[str, Any], year: int, month: int) -> dict[str, Any] | None:
+    """本保存（正式シフト）のエントリを保存前にスナップショットする。仮保存(draft)は対象外。"""
+    month_data = (project.get("months") or {}).get(_month_key(year, month))
+    if not month_data:
+        return None
+    return _normalize_entries(month_data.get("entries_per_day"), year, month)
+
+
+def _maybe_notify_pwa_month_change(
+    project: dict[str, Any],
+    year: int,
+    month: int,
+    before_entries: dict[str, Any] | None,
+    after_month: dict[str, Any] | None = None,
+) -> None:
+    """実カレンダーの当月の正式シフトが変わった場合だけ ViewPWA 購読者へ通知する。
+
+    比較対象の保存後エントリは、保存処理が返した month を優先して使う
+    （resync 等の後続処理が project を触っても判定がぶれないようにするため）。"""
+    try:
+        today = datetime.now(JST).date()
+        if (year, month) != (today.year, today.month):
+            return
+        month_data = after_month if after_month is not None else (project.get("months") or {}).get(_month_key(year, month))
+        if not month_data:
+            return
+        after_entries = _normalize_entries(month_data.get("entries_per_day"), year, month)
+        before_norm = _normalize_entries(before_entries, year, month) if before_entries is not None else None
+        if before_norm == after_entries:
+            return
+        _dispatch_pwa_shift_notification(project, year, month)
+    except Exception as exc:  # noqa: BLE001 - 通知失敗で保存処理を巻き込まない
+        logger.warning("CloudShift PWA notify skipped for %s: %s", project.get("id"), exc)
+
+
+def _dispatch_pwa_shift_notification(project: dict[str, Any], year: int, month: int) -> None:
+    from app.services.cloudshift_push import push_available, send_push_to_project_async
+
+    pwa_token = str(project.get("pwa_token") or "").strip()
+    if not pwa_token or not push_available():
+        return
+    # 購読が 1 件も無ければ送信処理自体を起こさない。
+    if not CloudShiftPwaSubscription.query.filter_by(
+        project_id=str(project["id"]),
+        is_active=True,
+    ).first():
+        return
+    month_key = _month_key(year, month)
+    title = f"{project.get('title') or 'シフト帳'} のシフトが更新されました"
+    body = f"{year}年{month}月のシフトに変更がありました。タップして最新の内容を確認してください。"
+    url = url_for("cloudshift.public_pwa", token=pwa_token, month_key=month_key, _external=False)
+    send_push_to_project_async(
+        current_app._get_current_object(),
+        str(project["id"]),
+        title=title,
+        body=body,
+        url=url,
+    )
+
+
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>", methods=["PUT"])
 @login_required
 def api_save_month(project_id: str, year: int, month: int):
     payload = request.get_json(silent=True) or {}
     with _project_lock(project_id):
         project, access_role = _editable_project_or_404(project_id)
+        before_entries = _confirmed_entries_snapshot(project, year, month)
         approved_ids = _leave_change_decision_ids(payload) if access_role == "owner" else []
         month_payload = _save_month_in_project(
             project,
@@ -7940,6 +8120,7 @@ def api_save_month(project_id: str, year: int, month: int):
         )
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=_user_label())
+    _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
@@ -7969,9 +8150,11 @@ def api_clear_month_draft(project_id: str, year: int, month: int):
 def api_publish_month_draft(project_id: str, year: int, month: int):
     with _project_lock(project_id):
         project, access_role = _editable_project_or_404(project_id)
+        before_entries = _confirmed_entries_snapshot(project, year, month)
         month_payload = _publish_draft_month_in_project(project, year, month, _user_label(), access_role)
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=_user_label())
+    _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
@@ -8021,10 +8204,13 @@ def api_delete_project(project_id: str):
             ]
         project_path = _project_path(project_id)
         history_path = _history_path(project_id)
+        # ViewPWA 購読は project へ FK を持つがリレーション未設定のため明示的に削除する
+        # （外部キー制約での削除失敗・孤立行の残留を防ぐ）。
+        CloudShiftPwaSubscription.query.filter_by(project_id=project_id).delete(synchronize_session=False)
         project_row = db.session.get(CloudShiftProject, project_id)
         if project_row is not None:
             db.session.delete(project_row)
-            db.session.commit()
+        db.session.commit()
         if project_path.exists():
             project_path.unlink()
         if history_path.exists():
@@ -8115,8 +8301,10 @@ def api_restore_month_revision(project_id: str, year: int, month: int):
 
     with _project_lock(project_id):
         project, access_role = _editable_project_or_404(project_id)
+        before_entries = _confirmed_entries_snapshot(project, year, month)
         month_payload = _restore_month_revision_in_project(project, year, month, revision, _user_label(), access_role)
     month_key = _month_key(year, month)
+    _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
@@ -8943,14 +9131,17 @@ def api_export_owner(project_id: str, export_format: str):
 
 @cloudshift_bp.route("/api/public/<token_type>/<token>")
 def api_public_detail(token_type: str, token: str):
-    if token_type not in {"view", "edit"}:
+    if token_type not in {"view", "edit", "pwa"}:
         abort(404)
     project = _find_project_by_token(token, token_type)
     month_key = request.args.get("month_key")
     payload = _project_detail_payload(project, month_key)
-    if token_type == "view":
+    # PWA は閲覧専用。共有先に公開してよい URL（自身の PWA URL）だけ残す。
+    if token_type in {"view", "pwa"}:
         payload["project"]["urls"] = {
-            "view_url": payload["project"]["urls"]["view_url"],
+            key: value
+            for key, value in payload["project"]["urls"].items()
+            if (token_type == "view" and key == "view_url") or (token_type == "pwa" and key == "pwa_url")
         }
     payload["project"]["shift_book"] = {
         "settings": {
@@ -8999,6 +9190,13 @@ def api_export_public_edit(token: str, export_format: str):
     return _send_month_export(project, month_key, export_format)
 
 
+@cloudshift_bp.route("/api/public/pwa/<token>/export/<export_format>")
+def api_export_public_pwa(token: str, export_format: str):
+    project = _find_project_by_token(token, "pwa")
+    month_key = request.args.get("month_key", "")
+    return _send_month_export(project, month_key, export_format)
+
+
 @cloudshift_bp.route("/api/public/edit/<token>/month", methods=["POST"])
 def api_public_create_month(token: str):
     payload = request.get_json(silent=True) or {}
@@ -9021,9 +9219,11 @@ def api_public_save_month(token: str, year: int, month: int):
     project = _find_project_by_token(token, "edit")
     with _project_lock(project["id"]):
         project = _find_project_by_token(token, "edit")
+        before_entries = _confirmed_entries_snapshot(project, year, month)
         month_payload = _save_month_in_project(project, year, month, payload, actor_name, actor_type)
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=actor_name)
+    _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, project=project), "project": _project_detail_payload(project, month_key)})
 
 
