@@ -7576,6 +7576,13 @@ def api_regenerate_tokens(project_id: str):
         project["view_token"] = _share_token()
         project["edit_token"] = _share_token()
         project["pwa_token"] = _share_token()
+        # 旧 ViewPWA URL は無効になるため、その帳簿の PWA 購読も無効化する
+        # （古い端末が 404 になる URL へ通知され続けるのを防ぐ）。
+        deactivated = CloudShiftPwaSubscription.query.filter_by(project_id=project_id, is_active=True).update(
+            {"is_active": False}, synchronize_session=False
+        )
+        if deactivated:
+            changes.append(f"ViewPWA通知の購読 {deactivated}件を解除")
         _save_project(project)
         _append_history(
             project_id,
@@ -8046,14 +8053,17 @@ def _maybe_notify_pwa_month_change(
     year: int,
     month: int,
     before_entries: dict[str, Any] | None,
+    after_month: dict[str, Any] | None = None,
 ) -> None:
-    """実カレンダーの当月の正式シフトが変わった場合だけ ViewPWA 購読者へ通知する。"""
+    """実カレンダーの当月の正式シフトが変わった場合だけ ViewPWA 購読者へ通知する。
+
+    比較対象の保存後エントリは、保存処理が返した month を優先して使う
+    （resync 等の後続処理が project を触っても判定がぶれないようにするため）。"""
     try:
         today = datetime.now(JST).date()
         if (year, month) != (today.year, today.month):
             return
-        month_key = _month_key(year, month)
-        month_data = (project.get("months") or {}).get(month_key)
+        month_data = after_month if after_month is not None else (project.get("months") or {}).get(_month_key(year, month))
         if not month_data:
             return
         after_entries = _normalize_entries(month_data.get("entries_per_day"), year, month)
@@ -8110,7 +8120,7 @@ def api_save_month(project_id: str, year: int, month: int):
         )
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=_user_label())
-    _maybe_notify_pwa_month_change(project, year, month, before_entries)
+    _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
@@ -8144,7 +8154,7 @@ def api_publish_month_draft(project_id: str, year: int, month: int):
         month_payload = _publish_draft_month_in_project(project, year, month, _user_label(), access_role)
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=_user_label())
-    _maybe_notify_pwa_month_change(project, year, month, before_entries)
+    _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
@@ -8194,10 +8204,13 @@ def api_delete_project(project_id: str):
             ]
         project_path = _project_path(project_id)
         history_path = _history_path(project_id)
+        # ViewPWA 購読は project へ FK を持つがリレーション未設定のため明示的に削除する
+        # （外部キー制約での削除失敗・孤立行の残留を防ぐ）。
+        CloudShiftPwaSubscription.query.filter_by(project_id=project_id).delete(synchronize_session=False)
         project_row = db.session.get(CloudShiftProject, project_id)
         if project_row is not None:
             db.session.delete(project_row)
-            db.session.commit()
+        db.session.commit()
         if project_path.exists():
             project_path.unlink()
         if history_path.exists():
@@ -8288,8 +8301,10 @@ def api_restore_month_revision(project_id: str, year: int, month: int):
 
     with _project_lock(project_id):
         project, access_role = _editable_project_or_404(project_id)
+        before_entries = _confirmed_entries_snapshot(project, year, month)
         month_payload = _restore_month_revision_in_project(project, year, month, revision, _user_label(), access_role)
     month_key = _month_key(year, month)
+    _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
@@ -9208,7 +9223,7 @@ def api_public_save_month(token: str, year: int, month: int):
         month_payload = _save_month_in_project(project, year, month, payload, actor_name, actor_type)
     month_key = _month_key(year, month)
     _resync_shift_month(project, month_key, actor_name=actor_name)
-    _maybe_notify_pwa_month_change(project, year, month, before_entries)
+    _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, project=project), "project": _project_detail_payload(project, month_key)})
 
 

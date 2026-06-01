@@ -630,6 +630,16 @@
     return output;
   }
 
+  function sameAppServerKey(existing, wanted) {
+    if (!existing) return false;
+    const current = new Uint8Array(existing);
+    if (current.length !== wanted.length) return false;
+    for (let i = 0; i < current.length; i += 1) {
+      if (current[i] !== wanted[i]) return false;
+    }
+    return true;
+  }
+
   async function registerPwaServiceWorker() {
     if (!('serviceWorker' in navigator)) return null;
     const registration = await navigator.serviceWorker.register('/cloudshift-service-worker.js', {
@@ -681,6 +691,11 @@
     }
     const appServerKey = urlBase64ToUint8Array(keyData.public_key);
     let subscription = await registration.pushManager.getSubscription();
+    if (subscription && !sameAppServerKey(subscription.options && subscription.options.applicationServerKey, appServerKey)) {
+      // 別の鍵で作られた購読は再利用できないため作り直す。
+      try { await subscription.unsubscribe(); } catch (error) { /* noop */ }
+      subscription = null;
+    }
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,

@@ -4070,3 +4070,80 @@ def test_pwa_notify_skips_draft_and_non_current_month(tmp_path, monkeypatch):
     )
     assert save_other.status_code == 200
     assert calls == []
+
+
+def test_pwa_regenerate_tokens_invalidates_old_pwa_url_and_subscriptions(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    from app.models import CloudShiftPwaSubscription
+
+    payload = _create_scene_project(client).get_json()["project"]
+    project_id = payload["project"]["id"]
+    old_pwa_token = _token_from_url(payload["project"]["urls"]["pwa_url"])
+    assert _subscribe_device(client, old_pwa_token).status_code == 200
+
+    regen = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/tokens/regenerate",
+        json={},
+    )
+    assert regen.status_code == 200
+    new_pwa_token = _token_from_url(regen.get_json()["urls"]["pwa_url"])
+    assert new_pwa_token != old_pwa_token
+
+    # 旧 PWA URL は無効
+    assert client.get(f"/tools/shiftersync/cloudshift/api/public/pwa/{old_pwa_token}").status_code == 404
+    # 新 PWA URL は有効
+    assert client.get(f"/tools/shiftersync/cloudshift/api/public/pwa/{new_pwa_token}").status_code == 200
+    # 旧購読は無効化されている
+    with client.application.app_context():
+        rows = CloudShiftPwaSubscription.query.filter_by(project_id=project_id).all()
+        assert rows and all(row.is_active is False for row in rows)
+
+
+def test_pwa_notify_fires_on_edit_url_save(tmp_path, monkeypatch):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    calls = _patch_push(monkeypatch)
+
+    year, month = _current_year_month()
+    payload = _create_scene_project(client, year=str(year), month=str(month)).get_json()["project"]
+    urls = payload["project"]["urls"]
+    pwa_token = _token_from_url(urls["pwa_url"])
+    edit_token = _token_from_url(urls["edit_url"])
+    assert _subscribe_device(client, pwa_token).status_code == 200
+
+    # 編集URL（共有先）からの当月本保存でも通知される
+    module.current_user = _guest()
+    save = client.put(
+        f"/tools/shiftersync/cloudshift/api/public/edit/{edit_token}/month/{year}/{month}",
+        json={
+            "editor_name": "Helper",
+            "base_month": _legacy_base_month(payload["month"]),
+            "required_capacity": payload["month"].get("required_capacity", 0),
+            "entries_per_day": {"3": [{"value": "A"}]},
+        },
+    )
+    assert save.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["project_id"] == project_id_of(payload)
+
+
+def project_id_of(payload):
+    return payload["project"]["id"]
+
+
+def test_pwa_subscriptions_removed_when_project_deleted(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    from app.models import CloudShiftPwaSubscription
+
+    payload = _create_scene_project(client).get_json()["project"]
+    project_id = payload["project"]["id"]
+    pwa_token = _token_from_url(payload["project"]["urls"]["pwa_url"])
+    assert _subscribe_device(client, pwa_token).status_code == 200
+    with client.application.app_context():
+        assert CloudShiftPwaSubscription.query.filter_by(project_id=project_id).count() == 1
+
+    assert client.delete(f"/tools/shiftersync/cloudshift/api/project/{project_id}").status_code == 200
+    with client.application.app_context():
+        assert CloudShiftPwaSubscription.query.filter_by(project_id=project_id).count() == 0
