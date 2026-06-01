@@ -4874,7 +4874,7 @@
               <span>最終更新: ${escapeHtml(formatTimestamp(project.updated_at) || '-')}</span>
               ${shareText ? `<span class="cloud-badge ${project.access_role === 'viewer' ? 'shared' : 'shared-owner'}">${escapeHtml(shareText)}</span>` : ''}
             </div>
-            ${project.can_hide ? `
+            ${project.access_role !== 'viewer' && project.can_hide ? `
             <div class="cloud-project-actions">
               <span class="cloud-badge duplicate-owner">他オーナーと重複</span>
               <button type="button" class="cloud-btn small ghost" data-project-hide="${project.id}">この帳簿を非表示</button>

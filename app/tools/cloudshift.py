@@ -2149,11 +2149,14 @@ def _project_link_key(project: dict[str, Any]) -> tuple[str, str] | None:
         employee_number = str(project.get("employee_number") or "").strip()
         return ("person", employee_number) if employee_number else None
     if mode == "scene":
-        site_row_id = _coerce_site_row_id(project.get("site_row_id"))
-        if site_row_id:
-            return ("scene", f"row:{site_row_id}")
+        # 現場は site_id（自然キー）を優先する。新規・レガシーいずれの帳簿でも
+        # site_id は保存されているため、同一現場の表現ゆれ（row 参照 / site_id）を
+        # 吸収して重複を確実に検知できる。
         site_id = str(project.get("site_id") or "").strip()
-        return ("scene", f"sid:{site_id}") if site_id else None
+        if site_id:
+            return ("scene", f"sid:{site_id}")
+        site_row_id = _coerce_site_row_id(project.get("site_row_id"))
+        return ("scene", f"row:{site_row_id}") if site_row_id else None
     return None
 
 
@@ -7345,11 +7348,18 @@ def api_project_meta(project_id: str):
         if project.get("mode") == "person":
             prospective_link_key = ("person", new_employee_number) if new_employee_number else None
         elif project.get("mode") == "scene":
-            new_site_row_id = _coerce_site_row_id(new_site_ref.get("site_row_id")) if new_site_ref else None
-            if new_site_row_id:
-                prospective_link_key = ("scene", f"row:{new_site_row_id}")
+            new_site_id = str(new_site_ref.get("site_id") or "").strip() if new_site_ref else ""
+            if new_site_id:
+                prospective_link_key = ("scene", f"sid:{new_site_id}")
+            else:
+                new_site_row_id = _coerce_site_row_id(new_site_ref.get("site_row_id")) if new_site_ref else None
+                if new_site_row_id:
+                    prospective_link_key = ("scene", f"row:{new_site_row_id}")
         if prospective_link_key and prospective_link_key != _project_link_key(project):
             _assert_link_key_unique(prospective_link_key, exclude_id=project_id)
+            # 別対象へ紐づけし直す＝再び使う意思があるため、非表示状態は解除する。
+            if project.get("hidden"):
+                project["hidden"] = False
         metadata_changed = False
         if new_title != project["title"]:
             project["title"] = new_title

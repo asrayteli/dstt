@@ -3820,3 +3820,51 @@ def test_hide_requires_another_owner_and_removes_from_list(tmp_path):
     # サーバー側にはまだ残っているので直接アクセスは可能。
     detail = client.get(f"/tools/shiftersync/cloudshift/api/project/{my_project_id}")
     assert detail.status_code == 200
+
+
+def test_meta_relink_to_other_owner_target_shows_owner_label(tmp_path):
+    module, client = _build_client(tmp_path)
+    # owner01 が 1001 を所持
+    module.current_user = _owner()
+    taken = _create_person_project(client, title="Alice", employee_number="1001")
+    assert taken.status_code == 200
+
+    # owner02 が別の未紐づけ個人シフトを作り、1001 に変更しようとすると拒否される
+    module.current_user = _other_owner()
+    mine = _create_person_project(client, title="", employee_number="")
+    assert mine.status_code == 200
+    mine_id = mine.get_json()["project"]["project"]["id"]
+
+    blocked = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{mine_id}/meta",
+        json={"title": "Alice", "employee_number": "1001"},
+    )
+    assert blocked.status_code == 409
+    error = blocked.get_json()["error"]
+    assert "owner01" in error
+    assert "共有してもらって" in error
+
+
+def test_relinking_hidden_project_to_new_target_unhides_it(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    mine = _create_person_project(client, title="Alice", employee_number="1001")
+    my_project_id = mine.get_json()["project"]["project"]["id"]
+    # 別オーナーが同じ社員IDを所持（レガシー重複）→ 非表示にできる状態にする。
+    _insert_duplicate_person_project(
+        client, module, owner_user_id="owner02", employee_number="1001", title="Alice Dup"
+    )
+    assert client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{my_project_id}/hide", json={}
+    ).status_code == 200
+    # 非表示中であることを確認
+    listing = client.get("/tools/shiftersync/cloudshift/api/list").get_json()["projects"]
+    assert all(item["id"] != my_project_id for item in listing)
+    # 別の社員IDに紐づけし直すと再表示される
+    relink = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{my_project_id}/meta",
+        json={"title": "Bob", "employee_number": "2002"},
+    )
+    assert relink.status_code == 200
+    listing_after = client.get("/tools/shiftersync/cloudshift/api/list").get_json()["projects"]
+    assert any(item["id"] == my_project_id for item in listing_after)
