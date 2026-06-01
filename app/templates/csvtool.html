@@ -2127,7 +2127,7 @@ const S = {
 function hasData() { return S.headers.length > 0; }
 
 // ========== Utilities ==========
-function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+function escHtml(s) { return (s===null||s===undefined||s==='') ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function toast(msg, type='info') {
   const el = document.createElement('div'); el.className='pcsv-toast '+type; el.textContent=msg;
   document.getElementById('toastContainer').appendChild(el);
