@@ -3,14 +3,50 @@ from __future__ import annotations
 import csv
 import io
 import re
+import sqlite3
+import tempfile
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime
+from pathlib import Path
 
 import chardet
 from flask import Blueprint, jsonify, render_template, request, send_file
 from flask_login import login_required
 
 csvtool_bp = Blueprint("csvtool", __name__, url_prefix="/tools/csvtool")
+
+# Safety caps for table / database / spreadsheet ingestion.
+MAX_ROWS = 200_000
+MAX_COLS = 1_024
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB per uploaded file
+
+
+def _read_upload(file):
+    """Read an uploaded file, rejecting empty or oversized payloads.
+
+    Returns (bytes, None) on success or (None, (json, status)) on failure.
+    """
+    declared = request.content_length
+    if declared and declared > MAX_UPLOAD_BYTES:
+        return None, (jsonify({"error": "ファイルサイズが大きすぎます。"}), 413)
+    file_bytes = file.read(MAX_UPLOAD_BYTES + 1)
+    if not file_bytes:
+        return None, (jsonify({"error": "ファイルが空です。"}), 400)
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        return None, (jsonify({"error": "ファイルサイズが大きすぎます。"}), 413)
+    return file_bytes, None
+
+
+def column_letter(index: int) -> str:
+    """0-based column index -> Excel style letters (0->A, 25->Z, 26->AA)."""
+    if index < 0:
+        return ""
+    letters = ""
+    index += 1
+    while index > 0:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
 
 ALLOWED_DELIMITERS = {
     ",": "comma",
@@ -108,11 +144,13 @@ def _build_headers(rows: list[list[str]], has_header: bool, width: int) -> tuple
         data = rows[:]
 
     if len(headers) < width:
-        headers.extend([f"列{idx + 1}" for idx in range(len(headers), width)])
+        headers.extend([column_letter(idx) for idx in range(len(headers), width)])
     elif len(headers) > width:
         width = len(headers)
 
-    return headers[:width], data
+    # Replace any blank header cell with its Excel-style column letter.
+    headers = [(h if str(h).strip() != "" else column_letter(idx)) for idx, h in enumerate(headers[:width])]
+    return headers, data
 
 
 def _normalize_rows(
@@ -139,8 +177,8 @@ def _normalize_rows(
             elif row_width_strategy == "trim":
                 normalized = normalized[:width]
                 warnings.append({"row": index, "type": "trimmed", "message": f"{index + 1}行目を{width}列に切り詰めました。"})
-            else:
-                normalized.extend([""] * 0)
+            # "expand" / "pad": keep the wider row as-is (width was already
+            # widened to the max in _parse_csv_upload for "expand").
         data.append(normalized)
     return data, warnings
 
@@ -191,6 +229,7 @@ def _parse_csv_upload(file_bytes: bytes, options: dict) -> dict:
         "previewRows": rows[:20],
         "rawRowCount": len(rows),
         "maxColumns": max_width,
+        "source": "csv",
     }
 
 
@@ -201,9 +240,9 @@ def api_upload():
     if not file:
         return jsonify({"error": "ファイルが選択されていません。"}), 400
 
-    file_bytes = file.read()
-    if not file_bytes:
-        return jsonify({"error": "ファイルが空です。"}), 400
+    file_bytes, err = _read_upload(file)
+    if err:
+        return err
 
     try:
         parsed = _parse_csv_upload(file_bytes, request.form.to_dict())
@@ -212,6 +251,236 @@ def api_upload():
 
     parsed["filename"] = file.filename
     return jsonify(parsed)
+
+
+# ===================== SQLite database support =====================
+
+def _open_sqlite_readonly(file_bytes: bytes) -> tuple[sqlite3.Connection, str]:
+    """Persist uploaded bytes to a temp file and open it strictly read-only."""
+    if not file_bytes.startswith(b"SQLite format 3\x00"):
+        raise ValueError("SQLite データベースファイルではありません。")
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    try:
+        tmp.write(file_bytes)
+        tmp.flush()
+        tmp.close()
+        # mode=ro + query_only gives read-only access. (immutable=1 is avoided:
+        # it disables integrity checks for no extra safety here.)
+        uri = f"file:{Path(tmp.name).as_posix()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
+        conn.execute("PRAGMA query_only = ON")
+        return conn, tmp.name
+    except Exception:
+        Path(tmp.name).unlink(missing_ok=True)
+        raise
+
+
+def _quote_ident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _list_sqlite_tables(conn: sqlite3.Connection) -> list[dict]:
+    cur = conn.execute(
+        "SELECT name, type FROM sqlite_master "
+        "WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
+    )
+    tables = []
+    for name, obj_type in cur.fetchall():
+        try:
+            count = conn.execute(f"SELECT COUNT(*) FROM {_quote_ident(name)}").fetchone()[0]
+        except sqlite3.Error:
+            count = None
+        try:
+            cols = [row[1] for row in conn.execute(f"PRAGMA table_info({_quote_ident(name)})").fetchall()]
+        except sqlite3.Error:
+            cols = []
+        tables.append({"name": name, "type": obj_type, "rows": count, "columns": cols})
+    return tables
+
+
+@csvtool_bp.route("/api/db/tables", methods=["POST"])
+@login_required
+def api_db_tables():
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "ファイルが選択されていません。"}), 400
+    file_bytes, err = _read_upload(file)
+    if err:
+        return err
+
+    conn = None
+    tmp_path = None
+    try:
+        conn, tmp_path = _open_sqlite_readonly(file_bytes)
+        tables = _list_sqlite_tables(conn)
+    except (ValueError, sqlite3.Error) as exc:
+        return jsonify({"error": f"データベースを開けませんでした: {exc}"}), 400
+    finally:
+        if conn is not None:
+            conn.close()
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    if not tables:
+        return jsonify({"error": "読み込めるテーブルがありません。"}), 400
+    return jsonify({"tables": tables, "filename": file.filename})
+
+
+@csvtool_bp.route("/api/db/load", methods=["POST"])
+@login_required
+def api_db_load():
+    file = request.files.get("file")
+    table = request.form.get("table", "")
+    if not file:
+        return jsonify({"error": "ファイルが選択されていません。"}), 400
+    file_bytes, err = _read_upload(file)
+    if err:
+        return err
+
+    conn = None
+    tmp_path = None
+    truncated = False
+    try:
+        conn, tmp_path = _open_sqlite_readonly(file_bytes)
+        valid_names = {t["name"] for t in _list_sqlite_tables(conn)}
+        if table not in valid_names:
+            return jsonify({"error": "指定されたテーブルが見つかりません。"}), 400
+
+        cur = conn.execute(f"SELECT * FROM {_quote_ident(table)} LIMIT {MAX_ROWS + 1}")
+        headers = [d[0] for d in cur.description] if cur.description else []
+        if len(headers) > MAX_COLS:
+            return jsonify({"error": f"列数が多すぎます (上限 {MAX_COLS})。"}), 400
+        rows = cur.fetchall()
+        truncated = len(rows) > MAX_ROWS
+        rows = rows[:MAX_ROWS]
+        data = [["" if v is None else str(v) for v in row] for row in rows]
+    except (ValueError, sqlite3.Error) as exc:
+        return jsonify({"error": f"テーブルを読み込めませんでした: {exc}"}), 400
+    finally:
+        if conn is not None:
+            conn.close()
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    headers = [(h if str(h).strip() != "" else column_letter(i)) for i, h in enumerate(headers)]
+    return jsonify({
+        "headers": headers,
+        "data": data,
+        "encoding": "utf-8-sig",
+        "delimiter": ",",
+        "filename": f"{Path(file.filename or 'database').stem}__{table}.csv",
+        "tableName": table,
+        "totalRows": len(data),
+        "totalColumns": len(headers),
+        "truncated": truncated,
+        "source": "sqlite",
+    })
+
+
+# ===================== Excel (.xlsx) support =====================
+
+def _load_workbook(file_bytes: bytes):
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:  # pragma: no cover - dependency declared in requirements
+        raise ValueError("Excel 読み込みライブラリ (openpyxl) が利用できません。") from exc
+    return load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+
+
+def _xlsx_cell_to_str(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        text = value.strftime("%Y-%m-%d %H:%M:%S")
+        return text[:-9] if text.endswith(" 00:00:00") else text
+    if isinstance(value, date):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return ""  # NaN / Inf are not representable as plain numbers
+        if value.is_integer():
+            return str(int(value))
+    return str(value)
+
+
+@csvtool_bp.route("/api/xlsx/sheets", methods=["POST"])
+@login_required
+def api_xlsx_sheets():
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "ファイルが選択されていません。"}), 400
+    file_bytes, err = _read_upload(file)
+    if err:
+        return err
+    try:
+        wb = _load_workbook(file_bytes)
+        sheets = [{"name": ws.title, "rows": ws.max_row or 0, "columns": ws.max_column or 0}
+                  for ws in wb.worksheets]
+        wb.close()
+    except Exception as exc:
+        return jsonify({"error": f"Excelファイルを開けませんでした: {exc}"}), 400
+    if not sheets:
+        return jsonify({"error": "シートがありません。"}), 400
+    return jsonify({"sheets": sheets, "filename": file.filename})
+
+
+@csvtool_bp.route("/api/xlsx/load", methods=["POST"])
+@login_required
+def api_xlsx_load():
+    file = request.files.get("file")
+    sheet = request.form.get("sheet", "")
+    has_header = _parse_bool(request.form.get("has_header"), True)
+    if not file:
+        return jsonify({"error": "ファイルが選択されていません。"}), 400
+    file_bytes, err = _read_upload(file)
+    if err:
+        return err
+
+    try:
+        wb = _load_workbook(file_bytes)
+        if sheet and sheet in wb.sheetnames:
+            ws = wb[sheet]
+        else:
+            ws = wb.worksheets[0]
+            sheet = ws.title
+
+        rows: list[list[str]] = []
+        truncated = False
+        for excel_row in ws.iter_rows(values_only=True):
+            if len(rows) >= MAX_ROWS:
+                truncated = True
+                break
+            rows.append([_xlsx_cell_to_str(v) for v in excel_row])
+        wb.close()
+    except Exception as exc:
+        return jsonify({"error": f"シートを読み込めませんでした: {exc}"}), 400
+
+    while rows and not any(str(c).strip() for c in rows[-1]):
+        rows.pop()
+    if not rows:
+        return jsonify({"error": "シートにデータがありません。"}), 400
+
+    width = max(len(r) for r in rows)
+    if width > MAX_COLS:
+        return jsonify({"error": f"列数が多すぎます (上限 {MAX_COLS})。"}), 400
+    headers, raw_data = _build_headers(rows, has_header, width)
+    data, warnings = _normalize_rows(raw_data, len(headers), preserve_empty_rows=True, row_width_strategy="pad")
+
+    return jsonify({
+        "headers": headers,
+        "data": data,
+        "encoding": "utf-8-sig",
+        "delimiter": ",",
+        "filename": f"{Path(file.filename or 'book').stem}__{sheet}.csv",
+        "sheetName": sheet,
+        "totalRows": len(data),
+        "totalColumns": len(headers),
+        "warnings": warnings[:200],
+        "truncated": truncated,
+        "source": "xlsx",
+    })
 
 
 def _sanitize_for_csv(value: object, *, protect_formulas: bool) -> str:
@@ -263,6 +532,108 @@ def api_download():
     )
 
 
+@csvtool_bp.route("/api/export/xlsx", methods=["POST"])
+@login_required
+def api_export_xlsx():
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({"error": "データがありません。"}), 400
+    headers = payload.get("headers", [])
+    data = payload.get("data", [])
+    filename = payload.get("filename", "power_csv_export.xlsx")
+    sheet_name = str(payload.get("sheetName") or "Sheet1")[:31] or "Sheet1"
+
+    try:
+        from openpyxl import Workbook
+    except ImportError:
+        return jsonify({"error": "Excel 書き出しライブラリ (openpyxl) が利用できません。"}), 400
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    ws.append([str(h) for h in headers])
+    for row in data:
+        ws.append([("" if c is None else str(c)) for c in row])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    if not filename.lower().endswith(".xlsx"):
+        filename += ".xlsx"
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+def _sanitize_sql_identifier(name: str, fallback: str) -> str:
+    # Identifiers are always double-quoted, so Unicode (incl. Japanese) is fine.
+    # Strip only control characters / quotes and collapse whitespace.
+    cleaned = re.sub(r'["\x00-\x1f\x7f]', "", str(name or "")).strip()
+    cleaned = re.sub(r"\s+", "_", cleaned)
+    if not cleaned:
+        return fallback
+    if cleaned[0].isdigit():
+        cleaned = f"col_{cleaned}"
+    return cleaned
+
+
+@csvtool_bp.route("/api/export/db", methods=["POST"])
+@login_required
+def api_export_db():
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({"error": "データがありません。"}), 400
+    headers = payload.get("headers", [])
+    data = payload.get("data", [])
+    filename = payload.get("filename", "power_csv_export.db")
+    table_name = _sanitize_sql_identifier(payload.get("tableName") or "data", "data")
+
+    if not headers:
+        return jsonify({"error": "ヘッダーがありません。"}), 400
+
+    # Build unique, SQL-safe column names.
+    col_names: list[str] = []
+    used: set[str] = set()
+    for idx, h in enumerate(headers):
+        base = _sanitize_sql_identifier(h, column_letter(idx))
+        candidate = base
+        suffix = 1
+        while candidate.lower() in used:
+            suffix += 1
+            candidate = f"{base}_{suffix}"
+        used.add(candidate.lower())
+        col_names.append(candidate)
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    try:
+        conn = sqlite3.connect(tmp.name)
+        cols_ddl = ", ".join(f"{_quote_ident(c)} TEXT" for c in col_names)
+        conn.execute(f"CREATE TABLE {_quote_ident(table_name)} ({cols_ddl})")
+        placeholders = ", ".join(["?"] * len(col_names))
+        insert_sql = f"INSERT INTO {_quote_ident(table_name)} VALUES ({placeholders})"
+        width = len(col_names)
+        for row in data:
+            row = list(row)[:width] + [""] * (width - len(row))
+            conn.execute(insert_sql, ["" if c is None else str(c) for c in row])
+        conn.commit()
+        conn.close()
+        raw = Path(tmp.name).read_bytes()
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
+
+    if not filename.lower().endswith((".db", ".sqlite", ".sqlite3")):
+        filename += ".db"
+    return send_file(
+        io.BytesIO(raw),
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.sqlite3",
+    )
+
+
 def _is_number(value: str) -> bool:
     if str(value).strip() == "":
         return False
@@ -307,7 +678,7 @@ def _validate_custom_rule(rule: dict, headers: list[str], data: list[list[str]],
     rule_type = rule.get("type")
     severity = rule.get("severity", "error")
     value = str(rule.get("value", ""))
-    header = headers[col] or f"列{col + 1}"
+    header = headers[col] or column_letter(col)
     seen: dict[str, int] = {}
     pattern = None
     if rule_type == "regex":

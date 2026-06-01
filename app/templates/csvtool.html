@@ -1224,6 +1224,7 @@
     <div class="pcsv-header-title">PowerCSV</div>
     <div class="pcsv-header-info" id="headerInfo" style="display:none">
       <span id="headerFilename"></span>
+      <span class="tag" id="headerSource" style="display:none"></span>
       <span class="tag" id="headerEncoding"></span>
     </div>
   </div>
@@ -1394,6 +1395,13 @@
     <div class="pcsv-fx-popup" id="fxHelpPopup">
       <h4>数式リファレンス (= で始めて入力)</h4>
       <div class="fx-cat">
+        <div class="fx-cat-title">式・演算子</div>
+        <div class="fx-row"><span class="fx-name">=A1+SUM(B1:B3)*2</span><span class="fx-desc">関数と四則演算を混在可</span></div>
+        <div class="fx-row"><span class="fx-name">=ROUND(AVG(A:A),1)</span><span class="fx-desc">関数のネストも可</span></div>
+        <div class="fx-row"><span class="fx-name">+ - * / ^ %</span><span class="fx-desc">四則・べき乗・剰余</span></div>
+        <div class="fx-row"><span class="fx-name">=A1&"-"&B1</span><span class="fx-desc">&amp; で文字列連結</span></div>
+      </div>
+      <div class="fx-cat">
         <div class="fx-cat-title">セル参照</div>
         <div class="fx-row"><span class="fx-name">A1</span><span class="fx-desc">列A, 行1のセル</span></div>
         <div class="fx-row"><span class="fx-name">A1:A10</span><span class="fx-desc">A1からA10の範囲</span></div>
@@ -1413,9 +1421,16 @@
       <div class="fx-cat">
         <div class="fx-cat-title">条件・検索</div>
         <div class="fx-row" onclick="insertFx('=IF(,,)')"><span class="fx-name">=IF(条件, 真, 偽)</span><span class="fx-desc">条件分岐</span></div>
+        <div class="fx-row" onclick="insertFx('=IFS(,,,)')"><span class="fx-name">=IFS(条件1,値1,…)</span><span class="fx-desc">多分岐</span></div>
+        <div class="fx-row" onclick="insertFx('=IFERROR(,)')"><span class="fx-name">=IFERROR(式, 代替)</span><span class="fx-desc">エラー時の値</span></div>
         <div class="fx-row" onclick="insertFx('=COUNTIF(,)')"><span class="fx-name">=COUNTIF(範囲, 条件)</span><span class="fx-desc">条件付きカウント</span></div>
-        <div class="fx-row" onclick="insertFx('=SUMIF(,)')"><span class="fx-name">=SUMIF(範囲, 条件)</span><span class="fx-desc">条件付き合計</span></div>
+        <div class="fx-row" onclick="insertFx('=SUMIF(,)')"><span class="fx-name">=SUMIF(範囲, 条件, [合計範囲])</span><span class="fx-desc">条件付き合計</span></div>
+        <div class="fx-row" onclick="insertFx('=SUMIFS(,,)')"><span class="fx-name">=SUMIFS(合計, 範囲, 条件,…)</span><span class="fx-desc">複数条件合計</span></div>
+        <div class="fx-row" onclick="insertFx('=COUNTIFS(,)')"><span class="fx-name">=COUNTIFS(範囲, 条件,…)</span><span class="fx-desc">複数条件カウント</span></div>
         <div class="fx-row" onclick="insertFx('=VLOOKUP(,,)')"><span class="fx-name">=VLOOKUP(値, 列, 結果列)</span><span class="fx-desc">縦検索</span></div>
+        <div class="fx-row" onclick="insertFx('=INDEX(,)')"><span class="fx-name">=INDEX(範囲, n)</span><span class="fx-desc">n番目の値</span></div>
+        <div class="fx-row" onclick="insertFx('=MATCH(,)')"><span class="fx-name">=MATCH(値, 範囲)</span><span class="fx-desc">位置を検索</span></div>
+        <div class="fx-row" onclick="insertFx('=AND(,)')"><span class="fx-name">=AND() / OR() / NOT()</span><span class="fx-desc">論理演算</span></div>
       </div>
       <div class="fx-cat">
         <div class="fx-cat-title">文字列</div>
@@ -1432,7 +1447,10 @@
       <div class="fx-cat">
         <div class="fx-cat-title">数値・日付</div>
         <div class="fx-row" onclick="insertFx('=ROUND(,)')"><span class="fx-name">=ROUND(値, 桁数)</span><span class="fx-desc">四捨五入</span></div>
+        <div class="fx-row" onclick="insertFx('=ROUNDUP(,)')"><span class="fx-name">=ROUNDUP / ROUNDDOWN</span><span class="fx-desc">切り上げ / 切り捨て</span></div>
+        <div class="fx-row" onclick="insertFx('=INT()')"><span class="fx-name">=INT(値)</span><span class="fx-desc">整数化</span></div>
         <div class="fx-row" onclick="insertFx('=ABS()')"><span class="fx-name">=ABS(値)</span><span class="fx-desc">絶対値</span></div>
+        <div class="fx-row" onclick="insertFx('=MOD(,)')"><span class="fx-name">=MOD(値, 除数)</span><span class="fx-desc">剰余</span></div>
         <div class="fx-row" onclick="insertFx('=TODAY()')"><span class="fx-name">=TODAY()</span><span class="fx-desc">今日の日付</span></div>
         <div class="fx-row" onclick="insertFx('=NOW()')"><span class="fx-name">=NOW()</span><span class="fx-desc">現在日時</span></div>
         <div class="fx-row" onclick="insertFx('=UNIQUE()')"><span class="fx-name">=UNIQUE(範囲)</span><span class="fx-desc">ユニーク値の数</span></div>
@@ -1447,10 +1465,10 @@
       <div class="pcsv-upload" id="uploadScreen">
         <div class="pcsv-upload-zone" id="uploadZone">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 0l3-3m-3 3l3 3M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          <div class="main-text">CSVファイルをドロップ</div>
+          <div class="main-text">ファイルをドロップ</div>
           <div class="sub-text">またはクリックしてファイルを選択</div>
-          <div class="sub-text" style="margin-top:12px;color:#94a3b8">対応: .csv / .tsv (UTF-8, Shift_JIS, EUC-JP 自動検出)</div>
-          <input type="file" id="fileInput" accept=".csv,.tsv,.txt">
+          <div class="sub-text" style="margin-top:12px;color:#94a3b8">対応: CSV / TSV・Excel(.xlsx)・SQLite(.db / .sqlite)　文字コード自動判定</div>
+          <input type="file" id="fileInput" accept=".csv,.tsv,.txt,.xlsx,.db,.sqlite,.sqlite3">
         </div>
         <div style="margin-top:20px;text-align:center">
           <div style="display:inline-flex;align-items:center;gap:6px;color:#94a3b8;font-size:12px;margin-bottom:8px"><span style="flex:1;height:1px;background:#e2e8f0;width:60px"></span>または<span style="flex:1;height:1px;background:#e2e8f0;width:60px"></span></div>
@@ -1610,29 +1628,73 @@
   </div>
 </div>
 
+<!-- DB Table Picker Modal -->
+<div class="pcsv-modal-overlay hidden" id="dbPickerModal">
+  <div class="pcsv-modal">
+    <h3>テーブルを選択</h3>
+    <p class="pcsv-small-note">📦 <span id="dbPickerFilename"></span></p>
+    <label>読み込むテーブル / ビュー</label>
+    <select id="dbTableSelect"></select>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('dbPickerModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="confirmDbLoad()">読み込む</button>
+    </div>
+  </div>
+</div>
+
+<!-- Excel Sheet Picker Modal -->
+<div class="pcsv-modal-overlay hidden" id="xlsxPickerModal">
+  <div class="pcsv-modal">
+    <h3>シートを選択</h3>
+    <p class="pcsv-small-note">📗 <span id="xlsxPickerFilename"></span></p>
+    <label>読み込むシート</label>
+    <select id="xlsxSheetSelect"></select>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
+      <input type="checkbox" id="xlsxHasHeader" checked> 先頭行をヘッダーとして扱う
+    </label>
+    <div class="pcsv-modal-actions">
+      <button class="pcsv-modal-btn" onclick="closeModal('xlsxPickerModal')">キャンセル</button>
+      <button class="pcsv-modal-btn primary" onclick="confirmSheetLoad()">読み込む</button>
+    </div>
+  </div>
+</div>
+
 <!-- Download Modal -->
 <div class="pcsv-modal-overlay hidden" id="downloadModal">
   <div class="pcsv-modal">
-    <h3>CSVエクスポート</h3>
+    <h3>エクスポート</h3>
+    <label>保存形式</label>
+    <select id="dlFormat" onchange="onDownloadFormatChange()">
+      <option value="csv" selected>CSV (.csv)</option>
+      <option value="xlsx">Excel (.xlsx)</option>
+      <option value="db">SQLite データベース (.db)</option>
+    </select>
     <label>ファイル名</label>
     <input type="text" id="dlFilename" value="export.csv">
-    <label>エンコーディング</label>
-    <select id="dlEncoding">
-      <option value="utf-8-sig" selected>UTF-8 (BOM付き / Excel推奨)</option>
-      <option value="utf-8">UTF-8</option>
-      <option value="shift_jis">Shift_JIS</option>
-      <option value="cp932">CP932 (Windows日本語)</option>
-    </select>
-    <label>区切り文字</label>
-    <select id="dlDelimiter">
-      <option value="," selected>カンマ (,)</option>
-      <option value="&#9;">タブ</option>
-      <option value=";">セミコロン (;)</option>
-    </select>
-    <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
-      <input type="checkbox" id="dlProtectFormulas" checked>
-      表計算ソフトで実行される可能性があるセル (= + - @) を安全化する
-    </label>
+    <div id="dlDbOptions" class="hidden">
+      <label>テーブル名</label>
+      <input type="text" id="dlTableName" value="data">
+    </div>
+    <div id="dlCsvOptions">
+      <label>エンコーディング</label>
+      <select id="dlEncoding">
+        <option value="utf-8-sig" selected>UTF-8 (BOM付き / Excel推奨)</option>
+        <option value="utf-8">UTF-8</option>
+        <option value="shift_jis">Shift_JIS</option>
+        <option value="cp932">CP932 (Windows日本語)</option>
+        <option value="euc-jp">EUC-JP</option>
+      </select>
+      <label>区切り文字</label>
+      <select id="dlDelimiter">
+        <option value="," selected>カンマ (,)</option>
+        <option value="&#9;">タブ</option>
+        <option value=";">セミコロン (;)</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
+        <input type="checkbox" id="dlProtectFormulas" checked>
+        表計算ソフトで実行される可能性があるセル (= + - @) を安全化する
+      </label>
+    </div>
     <div class="pcsv-modal-actions">
       <button class="pcsv-modal-btn" onclick="closeDownloadModal()">キャンセル</button>
       <button class="pcsv-modal-btn primary" onclick="doDownload()">ダウンロード</button>
@@ -2060,11 +2122,12 @@ const S = {
   pendingPaste: null,
   pendingMemoCell: null,
   safeEditMode: true,
+  tableName: '', sheetName: '', source: 'csv',
 };
 function hasData() { return S.headers.length > 0; }
 
 // ========== Utilities ==========
-function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+function escHtml(s) { return (s===null||s===undefined||s==='') ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function toast(msg, type='info') {
   const el = document.createElement('div'); el.className='pcsv-toast '+type; el.textContent=msg;
   document.getElementById('toastContainer').appendChild(el);
@@ -2132,6 +2195,9 @@ function initUpload() {
 }
 async function uploadFile(file) {
   S.pendingFile=file;
+  const name=(file.name||'').toLowerCase();
+  if(/\.(db|sqlite|sqlite3)$/.test(name)){ await openDbPicker(file); return; }
+  if(/\.xlsx$/.test(name)){ await openSheetPicker(file); return; }
   document.getElementById('importDelimiter').value='auto';
   document.getElementById('importEncoding').value='';
   document.getElementById('importHasHeader').value='true';
@@ -2139,6 +2205,62 @@ async function uploadFile(file) {
   document.getElementById('importRowWidth').value='expand';
   openModal('importWizardModal');
   await refreshImportPreview();
+}
+// ---------- SQLite table picker ----------
+async function openDbPicker(file){
+  try{
+    const fd=new FormData();fd.append('file',file);
+    const res=await fetch('/tools/csvtool/api/db/tables',{method:'POST',body:fd});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.error||'データベースを開けませんでした');
+    S.pendingFile=file;
+    const sel=document.getElementById('dbTableSelect');
+    sel.innerHTML=j.tables.map(t=>`<option value="${escHtml(t.name)}">${escHtml(t.name)} （${t.type==='view'?'ビュー':'テーブル'} / ${t.rows==null?'?':t.rows.toLocaleString()}行 × ${t.columns.length}列）</option>`).join('');
+    document.getElementById('dbPickerFilename').textContent=file.name;
+    openModal('dbPickerModal');
+  }catch(err){ toast(err.message,'error'); }
+}
+async function confirmDbLoad(){
+  try{
+    const table=document.getElementById('dbTableSelect').value;
+    const fd=new FormData();fd.append('file',S.pendingFile);fd.append('table',table);
+    const res=await fetch('/tools/csvtool/api/db/load',{method:'POST',body:fd});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.error||'テーブルを読み込めませんでした');
+    loadDataset(j,{resetOriginal:true});
+    closeModal('dbPickerModal');
+    toast(`テーブル「${table}」を読み込みました（${j.totalRows.toLocaleString()}行）`,'success');
+    if(j.truncated) toast(`行数が上限(${(200000).toLocaleString()})に達したため一部のみ読み込みました`,'info');
+  }catch(err){ toast(err.message,'error'); }
+}
+// ---------- Excel sheet picker ----------
+async function openSheetPicker(file){
+  try{
+    const fd=new FormData();fd.append('file',file);
+    const res=await fetch('/tools/csvtool/api/xlsx/sheets',{method:'POST',body:fd});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.error||'Excelファイルを開けませんでした');
+    S.pendingFile=file;
+    const sel=document.getElementById('xlsxSheetSelect');
+    sel.innerHTML=j.sheets.map(s=>`<option value="${escHtml(s.name)}">${escHtml(s.name)} （${(s.rows||0).toLocaleString()}行 × ${s.columns||0}列）</option>`).join('');
+    document.getElementById('xlsxPickerFilename').textContent=file.name;
+    document.getElementById('xlsxHasHeader').checked=true;
+    openModal('xlsxPickerModal');
+  }catch(err){ toast(err.message,'error'); }
+}
+async function confirmSheetLoad(){
+  try{
+    const sheet=document.getElementById('xlsxSheetSelect').value;
+    const hasHeader=document.getElementById('xlsxHasHeader').checked;
+    const fd=new FormData();fd.append('file',S.pendingFile);fd.append('sheet',sheet);fd.append('has_header',hasHeader?'true':'false');
+    const res=await fetch('/tools/csvtool/api/xlsx/load',{method:'POST',body:fd});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.error||'シートを読み込めませんでした');
+    loadDataset(j,{resetOriginal:true});
+    closeModal('xlsxPickerModal');
+    toast(`シート「${sheet}」を読み込みました（${j.totalRows.toLocaleString()}行）`,'success');
+    if(j.truncated) toast(`行数が上限(${(200000).toLocaleString()})に達したため一部のみ読み込みました`,'info');
+  }catch(err){ toast(err.message,'error'); }
 }
 function importOptionsFromUI(){
   return {
@@ -2191,12 +2313,18 @@ function loadDataset(j,{resetOriginal=false}={}){
   const data=j.data||[];
   resetSessionState();
   S.headers=headers; S.data=data; S.filename=j.filename||S.filename||'powercsv.csv'; S.encoding=j.encoding||'utf-8'; S.delimiter=j.delimiter||',';
+  S.tableName=j.tableName||''; S.sheetName=j.sheetName||''; S.source=j.source||'csv';
   S.importOptions={hasHeader:j.hasHeader,preserveEmptyRows:j.preserveEmptyRows,rowWidthStrategy:j.rowWidthStrategy};
   if(resetOriginal){S.originalHeaders=JSON.parse(JSON.stringify(S.headers));S.originalData=JSON.parse(JSON.stringify(S.data));}
   showEditor(); renderGrid(); updateStatus(); enableToolbar();
   document.getElementById('headerInfo').style.display='flex';
   document.getElementById('headerFilename').textContent=S.filename;
   document.getElementById('headerEncoding').textContent=String(S.encoding).toUpperCase();
+  const srcTag=document.getElementById('headerSource');
+  if(srcTag){
+    const label=S.source==='sqlite'?('DB: '+(S.tableName||'')):(S.source==='xlsx'?('Excel: '+(S.sheetName||'')):'');
+    srcTag.textContent=label; srcTag.style.display=label?'inline-block':'none';
+  }
   document.getElementById('dlFilename').value=S.filename;
 }
 function showEditor() {
@@ -2209,7 +2337,7 @@ function doCreateNewCSV(){
   const numCols=Math.max(1,Math.min(200,parseInt(document.getElementById('newCsvCols').value)||5));
   const numRows=Math.max(0,Math.min(10000,parseInt(document.getElementById('newCsvRows').value)||10));
   const fname=(document.getElementById('newCsvFilename').value||'new.csv').trim();
-  const headers=[];for(let i=0;i<numCols;i++)headers.push('?'+(i+1));
+  const headers=[];for(let i=0;i<numCols;i++)headers.push(indexToColLetter(i));
   const data=[];for(let r=0;r<numRows;r++)data.push(new Array(numCols).fill(''));
   loadDataset({headers,data,filename:fname,encoding:'utf-8',delimiter:',',hasHeader:true,preserveEmptyRows:true,rowWidthStrategy:'expand'},{resetOriginal:true});
   closeModal('newCsvModal');
@@ -2326,7 +2454,7 @@ function renderHeader() {
       let arrow='<svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>';
       if(S.sortCol===i&&S.sortDir===1) arrow='<svg class="sort-icon asc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>';
       else if(S.sortCol===i&&S.sortDir===2) arrow='<svg class="sort-icon desc" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>';
-      const esc=escHtml(S.headers[i]);
+      const esc=escHtml(S.headers[i]!==''&&S.headers[i]!=null?S.headers[i]:indexToColLetter(i));
       let cl=S.selectedCols.has(i)||(S.selectedCell&&S.selectedCell.col===i)||(S.selRange&&i>=S.selRange.c1&&i<=S.selRange.c2)?' col-highlight':'';
       if(S.disabledCols.has(i)) cl+=' col-disabled';
       if(i<S.freezeColsCount) cl+=' pcsv-frozen-col';
@@ -2676,62 +2804,12 @@ function getRangeValues(rangeStr){
   }
   return [];
 }
-function getRangeNums(rangeStr){return getRangeValues(rangeStr).map(v=>parseFloat(v)).filter(v=>!isNaN(v));}
-function parseFormulaArgs(argsStr){
-  const args=[];let cur='',depth=0,inQ=false;
-  for(let i=0;i<argsStr.length;i++){
-    const ch=argsStr[i];
-    if(ch==='"'){inQ=!inQ;cur+=ch;}
-    else if(!inQ&&ch==='('){depth++;cur+=ch;}
-    else if(!inQ&&ch===')'){depth--;cur+=ch;}
-    else if(!inQ&&ch===','&&depth===0){args.push(cur);cur='';}
-    else{cur+=ch;}
-  }
-  if(cur) args.push(cur);
-  return args;
-}
-function resolveArg(arg){
-  arg=arg.trim();
-  if(arg.startsWith('"')&&arg.endsWith('"')) return arg.slice(1,-1);
-  // Nested formula
-  if(arg.startsWith('=')){try{return evaluateFormula(arg);}catch(e){return '#ERROR';}}
-  // Function call without =
-  const fm=arg.match(/^([A-Z_]+)\s*\((.+)\)$/is);
-  if(fm){try{return evaluateFormula('='+arg);}catch(e){return '#ERROR';}}
-  const ref=parseCellRef(arg);
-  if(ref) return getCellVal(ref.row,ref.col);
-  const n=parseFloat(arg);
-  if(!isNaN(n)&&String(n)===arg) return n;
-  return arg;
-}
-function resolveNum(arg){const v=resolveArg(arg);return parseFloat(v);}
-function resolveStr(arg){return String(resolveArg(arg));}
-function evalCondition(condStr){
-  condStr=condStr.trim();
-  const ops=['>=','<=','<>','!=','=','>','<'];
-  for(const op of ops){
-    // Find op not inside quotes
-    let inQ=false,idx=-1;
-    for(let i=0;i<condStr.length;i++){
-      if(condStr[i]==='"')inQ=!inQ;
-      if(!inQ&&condStr.substring(i,i+op.length)===op){idx=i;break;}
-    }
-    if(idx>0){
-      const left=resolveArg(condStr.substring(0,idx)),right=resolveArg(condStr.substring(idx+op.length));
-      const ln=parseFloat(left),rn=parseFloat(right),useN=!isNaN(ln)&&!isNaN(rn);
-      switch(op){
-        case '>': return useN?ln>rn:String(left)>String(right);
-        case '<': return useN?ln<rn:String(left)<String(right);
-        case '>=': return useN?ln>=rn:String(left)>=String(right);
-        case '<=': return useN?ln<=rn:String(left)<=String(right);
-        case '=': return String(left)===String(right);
-        case '<>':case '!=': return String(left)!==String(right);
-      }
-    }
-  }
-  const v=resolveArg(condStr);
-  return v&&v!=='0'&&v!=='false'&&v!=='';
-}
+function getRangeNums(rangeStr){return getRangeValues(rangeStr).map(v=>parseFloat(String(v).replace(/,/g,''))).filter(v=>!isNaN(v));}
+// ========== Formula Engine (expression parser) ==========
+// Supports mixed operators, parentheses, cell references and nested function
+// calls (e.g. =A1+SUM(B1:B3)*2, =ROUND(AVERAGE(A:A),1)).
+function _fxToNum(v){if(typeof v==='number')return v;if(typeof v==='boolean')return v?1:0;const n=parseFloat(String(v).replace(/,/g,''));return isNaN(n)?NaN:n;}
+function _fxIsErr(v){return typeof v==='string'&&v.startsWith('#');}
 function matchCriteria(value,criteria){
   const ops=['>=','<=','<>','!=','>','<','='];
   for(const op of ops){
@@ -2747,104 +2825,208 @@ function matchCriteria(value,criteria){
   }
   return value===criteria;
 }
-function evaluateFormula(formula){
-  let expr=formula.substring(1).trim();
-  const funcMatch=expr.match(/^([A-Z_]+)\s*\(([\s\S]*)\)$/i);
-  if(!funcMatch){
-    const ref=parseCellRef(expr);if(ref)return getCellVal(ref.row,ref.col);
-    // Simple arithmetic
-    try{
-      const replaced=expr.replace(/([A-Za-z]+\d+)/g,(m)=>{const r=parseCellRef(m);return r?`(${parseFloat(getCellVal(r.row,r.col))||0})`:'0';});
-      if(!/^[0-9+\-*/%().\s]+$/.test(replaced)) return '#ERROR: 許可されていない数式';
-      const result=Function('"use strict";return ('+replaced+')')();
-      if(typeof result==='number'&&isFinite(result)) return result;
-    }catch(e){}
-    return '#ERROR: 不明な数式';
+function _fxTokenize(src){
+  const toks=[];let i=0;const two=['>=','<=','<>','!='];
+  while(i<src.length){
+    const ch=src[i];
+    if(ch===' '||ch==='\t'||ch==='\n'||ch==='\r'){i++;continue;}
+    if(ch==='"'){let j=i+1,s='';while(j<src.length){if(src[j]==='"'){if(src[j+1]==='"'){s+='"';j+=2;continue;}break;}s+=src[j++];}toks.push({t:'str',v:s});i=j+1;continue;}
+    const pair=src.substr(i,2);
+    if(two.includes(pair)){toks.push({t:'op',v:pair});i+=2;continue;}
+    if(ch==='('||ch===')'||ch===','){toks.push({t:ch,v:ch});i++;continue;}
+    if(ch===':'){toks.push({t:'op',v:':'});i++;continue;}
+    if('+-*/^%=&'.includes(ch)){toks.push({t:'op',v:ch});i++;continue;}
+    if(ch==='>'||ch==='<'){toks.push({t:'op',v:ch});i++;continue;}
+    if(/[0-9.]/.test(ch)){let j=i,s='';while(j<src.length&&/[0-9.]/.test(src[j]))s+=src[j++];toks.push({t:'num',v:parseFloat(s)});i=j;continue;}
+    if(/[A-Za-z_]/.test(ch)){let j=i,s='';while(j<src.length&&/[A-Za-z0-9_]/.test(src[j]))s+=src[j++];toks.push({t:'ident',v:s});i=j;continue;}
+    throw new Error('bad char '+ch);
   }
-  const func=funcMatch[1].toUpperCase(),args=parseFormulaArgs(funcMatch[2]);
+  toks.push({t:'eof'});return toks;
+}
+function evalExpr(src){
+  let toks;try{toks=_fxTokenize(src);}catch(e){return '#ERROR';}
+  let pos=0;const EOF={t:'eof'};const peek=()=>toks[pos]||EOF,next=()=>toks[pos++]||EOF;
+  function tokenText(t){if(t.t==='str')return '"'+t.v+'"';if(t.t==='num')return String(t.v);if(t.t==='ident')return t.v;return t.v;}
+  function parseComparison(){
+    let left=parseConcat();
+    while(peek().t==='op'&&['=','>','<','>=','<=','<>','!='].includes(peek().v)){
+      const op=next().v;const right=parseConcat();
+      if(_fxIsErr(left))return left;if(_fxIsErr(right))return right;
+      const ln=_fxToNum(left),rn=_fxToNum(right),useN=!isNaN(ln)&&!isNaN(rn);
+      const a=useN?ln:String(left),b=useN?rn:String(right);
+      switch(op){case '=':left=(String(left)===String(right));break;
+        case '>':left=a>b;break;case '<':left=a<b;break;case '>=':left=a>=b;break;case '<=':left=a<=b;break;
+        case '<>':case '!=':left=(String(left)!==String(right));break;}
+    }
+    return left;
+  }
+  function parseConcat(){
+    let left=parseAdd();
+    while(peek().t==='op'&&peek().v==='&'){next();const right=parseAdd();if(_fxIsErr(left))return left;if(_fxIsErr(right))return right;
+      const ls=left===true?'TRUE':left===false?'FALSE':String(left);const rs=right===true?'TRUE':right===false?'FALSE':String(right);left=ls+rs;}
+    return left;
+  }
+  function parseAdd(){let left=parseMul();while(peek().t==='op'&&(peek().v==='+'||peek().v==='-')){const op=next().v;const right=parseMul();if(_fxIsErr(left))return left;if(_fxIsErr(right))return right;const ln=_fxToNum(left),rn=_fxToNum(right);if(isNaN(ln)||isNaN(rn))return '#VALUE!';left=op==='+'?ln+rn:ln-rn;}return left;}
+  function parseMul(){let left=parsePow();while(peek().t==='op'&&(peek().v==='*'||peek().v==='/'||peek().v==='%')){const op=next().v;const right=parsePow();if(_fxIsErr(left))return left;if(_fxIsErr(right))return right;const ln=_fxToNum(left),rn=_fxToNum(right);if(isNaN(ln)||isNaN(rn))return '#VALUE!';if((op==='/'||op==='%')&&rn===0)return '#DIV/0!';left=op==='*'?ln*rn:op==='/'?ln/rn:ln%rn;}return left;}
+  function parsePow(){let left=parseUnary();if(peek().t==='op'&&peek().v==='^'){next();const right=parsePow();if(_fxIsErr(left))return left;if(_fxIsErr(right))return right;const ln=_fxToNum(left),rn=_fxToNum(right);if(isNaN(ln)||isNaN(rn))return '#VALUE!';return Math.pow(ln,rn);}return left;}
+  function parseUnary(){if(peek().t==='op'&&(peek().v==='-'||peek().v==='+')){const op=next().v;const v=parseUnary();if(_fxIsErr(v))return v;const n=_fxToNum(v);if(isNaN(n))return '#VALUE!';return op==='-'?-n:n;}return parsePrimary();}
+  function parsePrimary(){
+    const tk=peek();
+    if(tk.t==='num'){next();return tk.v;}
+    if(tk.t==='str'){next();return tk.v;}
+    if(tk.t==='('){next();const v=parseComparison();if(peek().t===')')next();return v;}
+    if(tk.t==='ident'){
+      next();
+      if(peek().t==='('){
+        next();const rawArgs=[];let depth=0,cur='';
+        while(peek().t!=='eof'){
+          const t=peek();
+          if(t.t==='('){depth++;cur+=tokenText(t);next();continue;}
+          if(t.t===')'){if(depth===0){next();break;}depth--;cur+=tokenText(t);next();continue;}
+          if(t.t===','&&depth===0){rawArgs.push(cur);cur='';next();continue;}
+          cur+=tokenText(t);next();
+        }
+        if(cur!==''||rawArgs.length)rawArgs.push(cur);
+        return callFunction(tk.v.toUpperCase(),rawArgs.map(s=>s.trim()));
+      }
+      const up=tk.v.toUpperCase();
+      if(up==='TRUE')return true;if(up==='FALSE')return false;
+      const ref=parseCellRef(tk.v);
+      if(ref)return getCellVal(ref.row,ref.col);
+      return '#NAME?';
+    }
+    next();return '#ERROR';
+  }
+  return parseComparison();
+}
+function resolveArg(arg){
+  arg=String(arg).trim();
+  if(arg==='')return '';
+  if(arg.startsWith('"')&&arg.endsWith('"'))return arg.slice(1,-1);
+  const v=evalExpr(arg);
+  if(typeof v==='boolean')return v;
+  if(_fxIsErr(v)){
+    const ref=parseCellRef(arg);if(ref)return getCellVal(ref.row,ref.col);
+    // Only treat as literal text when it is a single bare token (no operators);
+    // genuine expressions like "10/0" must propagate their error (e.g. IFERROR).
+    if(!/[-+*/^%&():,<>=]/.test(arg))return arg;
+    return v;
+  }
+  return v;
+}
+function resolveNum(arg){return _fxToNum(resolveArg(arg));}
+function resolveStr(arg){const v=resolveArg(arg);return v===true?'TRUE':v===false?'FALSE':String(v);}
+function _fxTruthy(v){if(v===true)return true;if(v===false)return false;if(typeof v==='number')return v!==0;const s=String(v).trim().toLowerCase();return s!==''&&s!=='0'&&s!=='false';}
+// Gather numbers from an argument that may be a range (A1:A3 / A), a cell ref,
+// a literal number, or an expression (e.g. B1*2). Mirrors Excel's SUM(1,A1,B1*2).
+function _fxArgNums(arg){
+  if(parseRange(String(arg).trim())) return getRangeNums(arg);
+  const v=resolveArg(arg); const n=_fxToNum(v);
+  return isNaN(n)?[]:[n];
+}
+// Gather raw values similarly (for COUNT/COUNTA/COUNTBLANK).
+function _fxArgVals(arg){
+  if(parseRange(String(arg).trim())) return getRangeValues(arg);
+  return [resolveArg(arg)];
+}
+function callFunction(func,args){
   switch(func){
-    case 'SUM':{const nums=args.flatMap(a=>getRangeNums(a));return nums.reduce((s,n)=>s+n,0);}
-    case 'AVG':case 'AVERAGE':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?nums.reduce((s,n)=>s+n,0)/nums.length:0;}
-    case 'COUNT':{return args.flatMap(a=>getRangeValues(a)).filter(v=>v.trim()!=='').length;}
-    case 'COUNTA':{return args.flatMap(a=>getRangeValues(a)).filter(v=>v.trim()!=='').length;}
-    case 'COUNTBLANK':{return args.flatMap(a=>getRangeValues(a)).filter(v=>v.trim()==='').length;}
-    case 'MIN':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?Math.min(...nums):0;}
-    case 'MAX':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?Math.max(...nums):0;}
-    case 'MEDIAN':{
-      const nums=args.flatMap(a=>getRangeNums(a)).sort((a,b)=>a-b);if(!nums.length)return 0;
-      const mid=Math.floor(nums.length/2);return nums.length%2?nums[mid]:(nums[mid-1]+nums[mid])/2;
-    }
-    case 'STDEV':{
-      const nums=args.flatMap(a=>getRangeNums(a));if(nums.length<2)return 0;
-      const avg=nums.reduce((s,n)=>s+n,0)/nums.length;
-      return Math.sqrt(nums.reduce((s,n)=>s+Math.pow(n-avg,2),0)/(nums.length-1));
-    }
-    case 'UPPER':{if(!args.length)return '#ERROR';return resolveStr(args[0]).toUpperCase();}
-    case 'LOWER':{if(!args.length)return '#ERROR';return resolveStr(args[0]).toLowerCase();}
-    case 'TRIM':{if(!args.length)return '#ERROR';return resolveStr(args[0]).trim();}
-    case 'LEN':{if(!args.length)return '#ERROR';return resolveStr(args[0]).length;}
-    case 'CONCAT':case 'CONCATENATE':{return args.map(a=>resolveStr(a)).join('');}
-    case 'LEFT':{if(args.length<2)return '#ERROR';const t=resolveStr(args[0]),n=parseInt(resolveArg(args[1]));return t.substring(0,n);}
-    case 'RIGHT':{if(args.length<2)return '#ERROR';const t=resolveStr(args[0]),n=parseInt(resolveArg(args[1]));return t.substring(t.length-n);}
-    case 'MID':{if(args.length<3)return '#ERROR';const t=resolveStr(args[0]),st=parseInt(resolveArg(args[1]))-1,ln=parseInt(resolveArg(args[2]));return t.substring(st,st+ln);}
-    case 'SUBSTITUTE':{if(args.length<3)return '#ERROR';return resolveStr(args[0]).split(resolveStr(args[1])).join(resolveStr(args[2]));}
-    case 'IF':{
-      if(args.length<3)return '#ERROR: IF(条件,真,偽)';
-      return evalCondition(args[0])?resolveArg(args[1]):resolveArg(args[2]);
-    }
-    case 'COUNTIF':{
-      if(args.length<2)return '#ERROR';
-      const vals=getRangeValues(args[0].trim()),criteria=args[1].trim().replace(/^"|"$/g,'');
-      return vals.filter(v=>matchCriteria(v,criteria)).length;
-    }
-    case 'SUMIF':{
-      if(args.length<2)return '#ERROR';
-      const vals=getRangeValues(args[0].trim()),criteria=args[1].trim().replace(/^"|"$/g,'');
-      let sum=0;vals.forEach(v=>{if(matchCriteria(v,criteria)){const n=parseFloat(v);if(!isNaN(n))sum+=n;}});return sum;
-    }
-    case 'VLOOKUP':{
-      if(args.length<3)return '#ERROR: VLOOKUP(値,検索列,結果列)';
-      const searchVal=String(resolveArg(args[0])),
-            searchCol=/^[A-Za-z]+$/.test(args[1].trim())?colLetterToIndex(args[1].trim()):parseInt(args[1].trim())-1,
-            resultCol=/^[A-Za-z]+$/.test(args[2].trim())?colLetterToIndex(args[2].trim()):parseInt(args[2].trim())-1;
-      if(isNaN(searchCol)||isNaN(resultCol))return '#ERROR: 列指定不正';
-      for(let r=0;r<S.data.length;r++){if((S.data[r][searchCol]||'')===searchVal)return S.data[r][resultCol]||'';}
-      return '#N/A';
-    }
-    case 'ROUND':{const v=resolveNum(args[0]),d=args.length>1?parseInt(resolveArg(args[1])):0;if(isNaN(v))return '#ERROR';return parseFloat(v.toFixed(d));}
-    case 'ABS':{const v=resolveNum(args[0]);if(isNaN(v))return '#ERROR';return Math.abs(v);}
-    case 'CEILING':case 'CEIL':{const v=resolveNum(args[0]);if(isNaN(v))return '#ERROR';return Math.ceil(v);}
-    case 'FLOOR':{const v=resolveNum(args[0]);if(isNaN(v))return '#ERROR';return Math.floor(v);}
-    case 'POWER':case 'POW':{if(args.length<2)return '#ERROR';const b=resolveNum(args[0]),e=resolveNum(args[1]);return Math.pow(b,e);}
-    case 'SQRT':{const v=resolveNum(args[0]);if(isNaN(v)||v<0)return '#ERROR';return Math.sqrt(v);}
-    case 'MOD':{if(args.length<2)return '#ERROR';const a=resolveNum(args[0]),b=resolveNum(args[1]);if(b===0)return '#DIV/0!';return a%b;}
+    case 'SUM':{return args.flatMap(a=>_fxArgNums(a)).reduce((s,n)=>s+n,0);}
+    case 'PRODUCT':{const nums=args.flatMap(a=>_fxArgNums(a));return nums.length?nums.reduce((s,n)=>s*n,1):0;}
+    case 'AVG':case 'AVERAGE':{const nums=args.flatMap(a=>_fxArgNums(a));return nums.length?nums.reduce((s,n)=>s+n,0)/nums.length:'#DIV/0!';}
+    case 'COUNT':{return args.flatMap(a=>_fxArgVals(a)).filter(v=>String(v).trim()!==''&&!isNaN(parseFloat(String(v).replace(/,/g,'')))).length;}
+    case 'COUNTA':{return args.flatMap(a=>_fxArgVals(a)).filter(v=>String(v).trim()!=='').length;}
+    case 'COUNTBLANK':{return args.flatMap(a=>_fxArgVals(a)).filter(v=>String(v).trim()==='').length;}
+    case 'MIN':{const nums=args.flatMap(a=>_fxArgNums(a));return nums.length?Math.min(...nums):0;}
+    case 'MAX':{const nums=args.flatMap(a=>_fxArgNums(a));return nums.length?Math.max(...nums):0;}
+    case 'MEDIAN':{const nums=args.flatMap(a=>_fxArgNums(a)).sort((a,b)=>a-b);if(!nums.length)return 0;const mid=Math.floor(nums.length/2);return nums.length%2?nums[mid]:(nums[mid-1]+nums[mid])/2;}
+    case 'STDEV':{const nums=args.flatMap(a=>_fxArgNums(a));if(nums.length<2)return 0;const avg=nums.reduce((s,n)=>s+n,0)/nums.length;return Math.sqrt(nums.reduce((s,n)=>s+Math.pow(n-avg,2),0)/(nums.length-1));}
+    case 'UPPER':return resolveStr(args[0]).toUpperCase();
+    case 'LOWER':return resolveStr(args[0]).toLowerCase();
+    case 'TRIM':return resolveStr(args[0]).trim();
+    case 'LEN':return resolveStr(args[0]).length;
+    case 'CONCAT':case 'CONCATENATE':return args.map(a=>resolveStr(a)).join('');
+    case 'LEFT':{const t=resolveStr(args[0]),n=args.length>1?parseInt(resolveArg(args[1])):1;return t.substring(0,n);}
+    case 'RIGHT':{const t=resolveStr(args[0]),n=args.length>1?parseInt(resolveArg(args[1])):1;return n>=t.length?t:t.substring(t.length-n);}
+    case 'MID':{const t=resolveStr(args[0]),st=parseInt(resolveArg(args[1]))-1,ln=parseInt(resolveArg(args[2]));return t.substring(st,st+ln);}
+    case 'SUBSTITUTE':return resolveStr(args[0]).split(resolveStr(args[1])).join(resolveStr(args[2]));
+    case 'PROPER':return resolveStr(args[0]).replace(/\b\w/g,c=>c.toUpperCase());
+    case 'REPT':return resolveStr(args[0]).repeat(Math.max(0,parseInt(resolveArg(args[1]))||0));
+    case 'IF':{if(args.length<2)return '#ERROR: IF(条件,真,偽)';const c=evalExpr(args[0]);if(_fxIsErr(c))return c;return _fxTruthy(c)?resolveArg(args[1]):(args.length>2?resolveArg(args[2]):false);}
+    case 'IFS':{for(let i=0;i+1<args.length;i+=2){const c=evalExpr(args[i]);if(_fxIsErr(c))return c;if(_fxTruthy(c))return resolveArg(args[i+1]);}return '#N/A';}
+    case 'IFERROR':{const v=resolveArg(args[0]);return _fxIsErr(v)?resolveArg(args[1]):v;}
+    case 'AND':return args.every(a=>_fxTruthy(resolveArg(a)));
+    case 'OR':return args.some(a=>_fxTruthy(resolveArg(a)));
+    case 'NOT':return !_fxTruthy(resolveArg(args[0]));
+    case 'ISBLANK':return String(resolveArg(args[0])).trim()==='';
+    case 'ISNUMBER':return !isNaN(_fxToNum(resolveArg(args[0])));
+    case 'COUNTIF':{const vals=getRangeValues(args[0]),crit=String(resolveArg(args[1]));return vals.filter(v=>matchCriteria(String(v),crit)).length;}
+    case 'SUMIF':{const vals=getRangeValues(args[0]),crit=String(resolveArg(args[1]));const sumRange=args.length>2?getRangeValues(args[2]):vals;let s=0;vals.forEach((v,i)=>{if(matchCriteria(String(v),crit)){const n=parseFloat(sumRange[i]);if(!isNaN(n))s+=n;}});return s;}
+    case 'AVERAGEIF':{const vals=getRangeValues(args[0]),crit=String(resolveArg(args[1]));const avgRange=args.length>2?getRangeValues(args[2]):vals;let s=0,c=0;vals.forEach((v,i)=>{if(matchCriteria(String(v),crit)){const n=parseFloat(avgRange[i]);if(!isNaN(n)){s+=n;c++;}}});return c?s/c:'#DIV/0!';}
+    case 'COUNTIFS':{const pairs=[];for(let i=0;i+1<args.length;i+=2)pairs.push([getRangeValues(args[i]),String(resolveArg(args[i+1]))]);if(!pairs.length||!pairs[0][0])return 0;const n=pairs[0][0].length;let cnt=0;for(let r=0;r<n;r++){if(pairs.every(([vals,crit])=>matchCriteria(String(vals[r]),crit)))cnt++;}return cnt;}
+    case 'SUMIFS':{const sumRange=getRangeValues(args[0]);const pairs=[];for(let i=1;i+1<args.length;i+=2)pairs.push([getRangeValues(args[i]),String(resolveArg(args[i+1]))]);let s=0;for(let r=0;r<sumRange.length;r++){if(pairs.every(([vals,crit])=>matchCriteria(String(vals[r]),crit))){const n=parseFloat(sumRange[r]);if(!isNaN(n))s+=n;}}return s;}
+    case 'VLOOKUP':{const searchVal=String(resolveArg(args[0]));const sc=/^[A-Za-z]+$/.test(args[1])?colLetterToIndex(args[1]):parseInt(args[1])-1;const rc=/^[A-Za-z]+$/.test(args[2])?colLetterToIndex(args[2]):parseInt(args[2])-1;if(isNaN(sc)||isNaN(rc))return '#REF!';for(let r=0;r<S.data.length;r++){if(String(getCellVal(r,sc))===searchVal)return getCellVal(r,rc);}return '#N/A';}
+    case 'MATCH':{const sv=String(resolveArg(args[0]));const vals=getRangeValues(args[1]);for(let i=0;i<vals.length;i++)if(String(vals[i])===sv)return i+1;return '#N/A';}
+    case 'INDEX':{const vals=getRangeValues(args[0]);const idx=parseInt(resolveArg(args[1]))-1;return idx>=0&&idx<vals.length?vals[idx]:'#REF!';}
+    case 'UNIQUE':case 'COUNTUNIQUE':{return new Set(args.flatMap(a=>getRangeValues(a)).filter(v=>String(v).trim()!=='')).size;}
+    case 'ROUND':{const v=resolveNum(args[0]),d=args.length>1?parseInt(resolveArg(args[1])):0;if(isNaN(v))return '#VALUE!';const m=Math.pow(10,d);return Math.round(v*m)/m;}
+    case 'ROUNDUP':{const v=resolveNum(args[0]),d=args.length>1?parseInt(resolveArg(args[1])):0;if(isNaN(v))return '#VALUE!';const m=Math.pow(10,d);return (v<0?-1:1)*Math.ceil(Math.abs(v)*m)/m;}
+    case 'ROUNDDOWN':case 'TRUNC':{const v=resolveNum(args[0]),d=args.length>1?parseInt(resolveArg(args[1])):0;if(isNaN(v))return '#VALUE!';const m=Math.pow(10,d);return (v<0?-1:1)*Math.floor(Math.abs(v)*m)/m;}
+    case 'INT':{const v=resolveNum(args[0]);if(isNaN(v))return '#VALUE!';return Math.floor(v);}
+    case 'ABS':{const v=resolveNum(args[0]);if(isNaN(v))return '#VALUE!';return Math.abs(v);}
+    case 'CEILING':case 'CEIL':{const v=resolveNum(args[0]);if(isNaN(v))return '#VALUE!';return Math.ceil(v);}
+    case 'FLOOR':{const v=resolveNum(args[0]);if(isNaN(v))return '#VALUE!';return Math.floor(v);}
+    case 'POWER':case 'POW':{const b=resolveNum(args[0]),e=resolveNum(args[1]);if(isNaN(b)||isNaN(e))return '#VALUE!';return Math.pow(b,e);}
+    case 'SQRT':{const v=resolveNum(args[0]);if(isNaN(v)||v<0)return '#NUM!';return Math.sqrt(v);}
+    case 'MOD':{const a=resolveNum(args[0]),b=resolveNum(args[1]);if(b===0)return '#DIV/0!';return a%b;}
     case 'TODAY':return new Date().toISOString().split('T')[0];
     case 'NOW':return new Date().toISOString().replace('T',' ').substring(0,19);
-    case 'UNIQUE':{return new Set(args.flatMap(a=>getRangeValues(a))).size;}
-    case 'PROPER':{return resolveStr(args[0]).replace(/\b\w/g,c=>c.toUpperCase());}
-    case 'REPT':{if(args.length<2)return '#ERROR';return resolveStr(args[0]).repeat(parseInt(resolveArg(args[1]))||0);}
-    case 'TEXT':{
-      if(!args.length)return '#ERROR';
-      const v=resolveArg(args[0]),fmt=args.length>1?resolveStr(args[1]):'';
-      if(fmt==='#,##0'){const n=parseFloat(v);return isNaN(n)?String(v):n.toLocaleString();}
-      if(fmt.includes('.')){const n=parseFloat(v),d=(fmt.split('.')[1]||'').length;return isNaN(n)?String(v):n.toFixed(d);}
-      return String(v);
-    }
-    default:return `#ERROR: 未対応関数 ${func}`;
+    case 'TEXT':{const v=resolveArg(args[0]),fmt=args.length>1?resolveStr(args[1]):'';if(fmt==='#,##0'){const n=parseFloat(v);return isNaN(n)?String(v):Math.round(n).toLocaleString('en-US');}if(fmt.includes('.')){const n=parseFloat(v),d=(fmt.split('.')[1]||'').length;return isNaN(n)?String(v):n.toFixed(d);}return String(v);}
+    default:return `#NAME?`;
   }
+}
+function evaluateFormula(formula){
+  const v=evalExpr(String(formula).substring(1).trim());
+  if(v===true)return 'TRUE';if(v===false)return 'FALSE';
+  if(typeof v==='number'&&!isFinite(v))return '#NUM!';
+  return v;
 }
 
 // ========== Formula Recalculation ==========
 let _recalcing=false, _formulaCtxInstant=false; // global context for formula evaluation chain
 function recalcAllFormulas(){
   if(_recalcing)return; _recalcing=true;
-  // 1. Recalculate real cell formulas (never in instant context)
+  // 1. Recalculate real cell formulas (never in instant context).
+  //    Re-evaluate repeatedly until the sheet stabilises, so a formula may
+  //    depend on another formula cell regardless of definition order.
+  //    If it never stabilises the references are circular -> mark #CIRC!.
   _formulaCtxInstant=false;
   for(const key in S.formulas){
     const [r,c]=key.split(',').map(Number);
-    if(r<S.data.length&&c<S.headers.length){
-      try{S.data[r][c]=String(evaluateFormula(S.formulas[key]));}catch(e){S.data[r][c]='#ERROR';}
-    }else{delete S.formulas[key];}
+    if(r>=S.data.length||c>=S.headers.length) delete S.formulas[key];
+  }
+  const _fkeys=Object.keys(S.formulas);
+  const _maxPasses=Math.min(200,_fkeys.length+2);
+  let _pass=0,_changed=true;
+  while(_changed&&_pass<_maxPasses){
+    _changed=false;_pass++;
+    for(const key of _fkeys){
+      const [r,c]=key.split(',').map(Number);
+      let v;try{v=String(evaluateFormula(S.formulas[key]));}catch(e){v='#ERROR';}
+      if(S.data[r][c]!==v){S.data[r][c]=v;_changed=true;}
+    }
+  }
+  if(_changed){
+    // Did not converge within the pass budget -> circular references.
+    // Run one more full pass and flag every cell whose value still changes.
+    const before={};
+    for(const key of _fkeys){const[r,c]=key.split(',').map(Number);before[key]=S.data[r][c];}
+    for(const key of _fkeys){
+      const [r,c]=key.split(',').map(Number);
+      let v;try{v=String(evaluateFormula(S.formulas[key]));}catch(e){v='#ERROR';}
+      S.data[r][c]=v;
+    }
+    for(const key of _fkeys){const[r,c]=key.split(',').map(Number);if(S.data[r][c]!==before[key])S.data[r][c]='#CIRC!';}
   }
   // 2. Recalculate instant row formulas
   _formulaCtxInstant=true;
@@ -3065,8 +3247,13 @@ function commitEdit(row,col,newVal) {
         const o2=S.data[r][c];S.formulas[k]=newVal;try{S.data[r][c]=String(evaluateFormula(newVal));}catch(e2){S.data[r][c]='#ERROR';}if(o2!==S.data[r][c])_journalRecord(r,c,o2,S.data[r][c]);});
     }
   } else {
-    const old=S.data[row][col]; delete S.formulas[fk];
-    if(old!==newVal){saveState('セル編集');S.data[row][col]=newVal;_journalRecord(row,col,old,newVal);}
+    const old=S.data[row][col];
+    // A fan-out write (multi-cell or whole-column) also mutates data, so take
+    // an undo snapshot if the primary cell OR any fan-out target will change.
+    const fanOut=S.multiCells.size>1||S.selectedCols.size>0;
+    if(old!==newVal||fanOut) saveState('セル編集');
+    delete S.formulas[fk];
+    if(old!==newVal){S.data[row][col]=newVal;_journalRecord(row,col,old,newVal);}
     // Apply to multi-selected cells
     if(S.multiCells.size>1){
       S.multiCells.forEach(k=>{if(k===fk)return;const[r,c]=k.split(',').map(Number);
@@ -3083,19 +3270,31 @@ function commitEdit(row,col,newVal) {
 function cancelEdit() {S.editing=false;renderBody();document.getElementById('statusMode').textContent='準備完了';}
 
 // ========== Sorting ==========
+// Reorder rows by a column while keeping per-cell formulas attached to their
+// rows (formula keys are "row,col", so they must be remapped after a sort).
+function _sortRowsByCol(colIdx,dir){
+  const order=S.data.map((_,i)=>i);
+  order.sort((ia,ib)=>{
+    const a=S.data[ia],b=S.data[ib];
+    const va=(a[colIdx]||'').toLowerCase(),vb=(b[colIdx]||'').toLowerCase();
+    const na=parseFloat(va),nb=parseFloat(vb);
+    if(!isNaN(na)&&!isNaN(nb)) return (na-nb)*dir;
+    return va.localeCompare(vb,'ja')*dir;
+  });
+  const newData=order.map(i=>S.data[i]);
+  // oldRow -> newRow lookup for formula remapping.
+  const pos={}; order.forEach((oldRow,newRow)=>pos[oldRow]=newRow);
+  const nf={};
+  for(const k in S.formulas){const[r,c]=k.split(',').map(Number);if(pos[r]!=null)nf[`${pos[r]},${c}`]=S.formulas[k];}
+  S.data=newData; S.formulas=nf;
+}
 function sortByCol(colIdx) {
   if(S.sortCol===colIdx) S.sortDir=(S.sortDir+1)%3; else{S.sortCol=colIdx;S.sortDir=1;}
   if(S.sortDir===0){S.sortCol=-1;} else {
     saveState('ソート');
-    const dir=S.sortDir===1?1:-1;
-    S.data.sort((a,b)=>{
-      const va=(a[colIdx]||'').toLowerCase(),vb=(b[colIdx]||'').toLowerCase();
-      const na=parseFloat(va),nb=parseFloat(vb);
-      if(!isNaN(na)&&!isNaN(nb)) return (na-nb)*dir;
-      return va.localeCompare(vb,'ja')*dir;
-    });
+    _sortRowsByCol(colIdx,S.sortDir===1?1:-1);
   }
-  clearSelection(); S.formulas={}; renderGrid();
+  clearSelection(); renderGrid();
 }
 
 // ========== Data Operations ==========
@@ -3194,7 +3393,7 @@ function insertColumnAt(colIdx,side) {
   const pos=side==='left'?colIdx:colIdx+1;
   const name=prompt('新しい列名を入力:');if(!name) return;
   saveState('列挿入'); adjustFormulasColInsert(pos); _adjustInstantSets('col',pos,1);
-  S.headers.splice(pos,0,name.trim()||`列${pos+1}`);
+  S.headers.splice(pos,0,name.trim()||indexToColLetter(pos));
   S.data.forEach(r=>r.splice(pos,0,''));renderGrid();updateStatus();toast('列を挿入しました','success');
 }
 function deleteSelectedColumn() {
@@ -3644,9 +3843,8 @@ function insertFxToCell(row,col,fx){
   if(pp>=0) setTimeout(()=>inp.setSelectionRange(pp+1,fx.length-1),0);
 }
 function clearCell(r,c){if(S.data[r][c]!==''||S.formulas[`${r},${c}`]){saveState('セルクリア');S.data[r][c]='';delete S.formulas[`${r},${c}`];renderBody();updateFormulaBar();}}
-function forceSortCol(ci,dir){saveState('ソート');S.sortCol=ci;S.sortDir=dir;S.formulas={};
-  const d=dir===1?1:-1;S.data.sort((a,b)=>{const va=(a[ci]||'').toLowerCase(),vb=(b[ci]||'').toLowerCase();
-  const na=parseFloat(va),nb=parseFloat(vb);if(!isNaN(na)&&!isNaN(nb))return(na-nb)*d;return va.localeCompare(vb,'ja')*d;});
+function forceSortCol(ci,dir){saveState('ソート');S.sortCol=ci;S.sortDir=dir;
+  _sortRowsByCol(ci,dir===1?1:-1);
   clearSelection();renderGrid();}
 
 // ========== Selection Summary ==========
@@ -3762,22 +3960,58 @@ async function renderStats(){
 }
 
 // ========== Download ==========
-function openDownloadModal(){openModal('downloadModal');}
+function _baseFilename(){return (S.filename||'export').replace(/\.[^.]+$/,'');}
+function openDownloadModal(){
+  // Preselect the source encoding so CSV exports honour the original charset.
+  const enc=document.getElementById('dlEncoding');
+  if(enc&&S.encoding){const want=String(S.encoding).toLowerCase();if([...enc.options].some(o=>o.value===want))enc.value=want;}
+  const tn=document.getElementById('dlTableName');
+  if(tn) tn.value=S.tableName||'data';
+  // Default the format to match the source (DB -> .db, xlsx -> Excel).
+  const fmt=document.getElementById('dlFormat');
+  if(fmt) fmt.value=S.source==='sqlite'?'db':(S.source==='xlsx'?'xlsx':'csv');
+  onDownloadFormatChange();
+  openModal('downloadModal');
+}
 function closeDownloadModal(){closeModal('downloadModal');}
+function onDownloadFormatChange(){
+  const fmt=document.getElementById('dlFormat').value;
+  const ext=fmt==='xlsx'?'.xlsx':(fmt==='db'?'.db':'.csv');
+  document.getElementById('dlFilename').value=_baseFilename()+ext;
+  document.getElementById('dlCsvOptions').classList.toggle('hidden',fmt!=='csv');
+  document.getElementById('dlDbOptions').classList.toggle('hidden',fmt!=='db');
+}
+// Build export payload with instant overlay cells restored to their originals
+// (instant rows/cols are not part of S.data/S.headers, so nothing else to strip).
+function _buildExportData(){
+  const headers=JSON.parse(JSON.stringify(S.headers));
+  const data=JSON.parse(JSON.stringify(S.data));
+  for(const ck in S.instant.cells){const[r,c]=ck.split(',').map(Number);if(r<data.length&&c<headers.length)data[r][c]=S.instant.cells[ck].original;}
+  return {headers,data};
+}
 async function doDownload(){
-  const fn=document.getElementById('dlFilename').value.trim()||'export.csv';
-  const enc=document.getElementById('dlEncoding').value,delim=document.getElementById('dlDelimiter').value;
-  const protectFormulas=document.getElementById('dlProtectFormulas')?.checked!==false;
-  // Instant rows/cols are NOT in S.data/S.headers, so just restore overlay cells
-  let dlHeaders=JSON.parse(JSON.stringify(S.headers));
-  let dlData=JSON.parse(JSON.stringify(S.data));
-  for(const ck in S.instant.cells){const[r,c]=ck.split(',').map(Number);if(r<dlData.length&&c<dlHeaders.length)dlData[r][c]=S.instant.cells[ck].original;}
+  const fmt=document.getElementById('dlFormat').value;
+  const fn=document.getElementById('dlFilename').value.trim()||(_baseFilename()+'.'+fmt);
+  const {headers,data}=_buildExportData();
+  let endpoint,payload;
+  if(fmt==='xlsx'){
+    endpoint='/tools/csvtool/api/export/xlsx';
+    payload={headers,data,filename:fn,sheetName:(S.tableName||S.sheetName||'Sheet1')};
+  }else if(fmt==='db'){
+    endpoint='/tools/csvtool/api/export/db';
+    payload={headers,data,filename:fn,tableName:document.getElementById('dlTableName').value.trim()||'data'};
+  }else{
+    endpoint='/tools/csvtool/api/download';
+    payload={headers,data,encoding:document.getElementById('dlEncoding').value,
+      delimiter:document.getElementById('dlDelimiter').value,filename:fn,
+      protectFormulas:document.getElementById('dlProtectFormulas')?.checked!==false};
+  }
   try{
-    const res=await fetch('/tools/csvtool/api/download',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({headers:dlHeaders,data:dlData,encoding:enc,delimiter:delim,filename:fn,protectFormulas})});
-    if(!res.ok){const j=await res.json();throw new Error(j.error||'ダウンロード失敗');}
+    const res=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!res.ok){const j=await res.json().catch(()=>({error:'ダウンロード失敗'}));throw new Error(j.error||'ダウンロード失敗');}
     const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download=fn;a.click();URL.revokeObjectURL(url);closeDownloadModal();toast('ダウンロードしました（インスタント除外済み）','success');
+    a.href=url;a.download=fn;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+    closeDownloadModal();toast('ダウンロードしました','success');
   }catch(err){toast(err.message,'error');}
 }
 
