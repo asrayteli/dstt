@@ -3868,3 +3868,205 @@ def test_relinking_hidden_project_to_new_target_unhides_it(tmp_path):
     assert relink.status_code == 200
     listing_after = client.get("/tools/shiftersync/cloudshift/api/list").get_json()["projects"]
     assert any(item["id"] == my_project_id for item in listing_after)
+
+
+def _create_scene_project(client, *, title="PWA Team", year="2026", month="4", capacity="2"):
+    return client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": title,
+            "mode": "scene",
+            "year": year,
+            "month": month,
+            "required_capacity": capacity,
+        },
+    )
+
+
+def _current_year_month():
+    from datetime import datetime
+
+    now = datetime.now(_cloudshift_jst())
+    return now.year, now.month
+
+
+def _cloudshift_jst():
+    from datetime import timedelta, timezone
+
+    return timezone(timedelta(hours=9))
+
+
+def test_pwa_url_issued_on_create_and_public_detail_scopes_urls(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    payload = _create_scene_project(client).get_json()["project"]
+    urls = payload["project"]["urls"]
+    assert urls["pwa_url"]
+    pwa_token = _token_from_url(urls["pwa_url"])
+    # view / edit のトークンとは別物であること
+    assert pwa_token != _token_from_url(urls["view_url"])
+    assert pwa_token != _token_from_url(urls["edit_url"])
+
+    detail = client.get(f"/tools/shiftersync/cloudshift/api/public/pwa/{pwa_token}")
+    assert detail.status_code == 200
+    detail_urls = detail.get_json()["project"]["urls"]
+    # PWA 公開レスポンスには自身の pwa_url だけが残る
+    assert "view_url" not in detail_urls
+    assert "edit_url" not in detail_urls
+    assert detail_urls.get("pwa_url")
+
+
+def test_pwa_manifest_is_token_scoped(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    urls = _create_scene_project(client, title="現場A").get_json()["project"]["project"]["urls"]
+    pwa_token = _token_from_url(urls["pwa_url"])
+
+    manifest = client.get(f"/tools/shiftersync/cloudshift/pwa/{pwa_token}/manifest.webmanifest")
+    assert manifest.status_code == 200
+    data = manifest.get_json()
+    assert pwa_token in data["start_url"]
+    assert data["scope"] == data["start_url"]
+    assert "現場A" in data["name"]
+
+
+def test_pwa_subscription_dedup_per_device(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    from app.models import CloudShiftPwaSubscription
+
+    urls = _create_scene_project(client).get_json()["project"]["project"]["urls"]
+    pwa_token = _token_from_url(urls["pwa_url"])
+    base = f"/tools/shiftersync/cloudshift/api/pwa/{pwa_token}/push"
+
+    def _subscribe(endpoint):
+        return client.post(
+            f"{base}/subscribe",
+            json={
+                "device_id": "device-1",
+                "subscription": {
+                    "endpoint": endpoint,
+                    "keys": {"p256dh": "k", "auth": "a"},
+                },
+            },
+        )
+
+    assert _subscribe("https://push.example/aaa").status_code == 200
+    # 同端末・同シフト帳で再リクエスト → 最新の endpoint で 1 件に上書き
+    assert _subscribe("https://push.example/bbb").status_code == 200
+
+    with client.application.app_context():
+        rows = CloudShiftPwaSubscription.query.all()
+        assert len(rows) == 1
+        assert rows[0].endpoint == "https://push.example/bbb"
+        assert rows[0].device_id == "device-1"
+
+    # 解除
+    assert client.post(f"{base}/unsubscribe", json={"device_id": "device-1"}).status_code == 200
+    with client.application.app_context():
+        rows = CloudShiftPwaSubscription.query.all()
+        assert rows[0].is_active is False
+
+
+def _patch_push(monkeypatch):
+    import app.services.cloudshift_push as push
+
+    calls = []
+
+    def _record(app_obj, project_id, *, title, body, url):
+        calls.append({"project_id": project_id, "title": title, "body": body, "url": url})
+
+    monkeypatch.setattr(push, "push_available", lambda: True)
+    monkeypatch.setattr(push, "send_push_to_project_async", _record)
+    return calls
+
+
+def _subscribe_device(client, pwa_token, device_id="device-1"):
+    return client.post(
+        f"/tools/shiftersync/cloudshift/api/pwa/{pwa_token}/push/subscribe",
+        json={
+            "device_id": device_id,
+            "subscription": {"endpoint": "https://push.example/x", "keys": {"p256dh": "k", "auth": "a"}},
+        },
+    )
+
+
+def test_pwa_notify_fires_only_for_current_month_confirmed_change(tmp_path, monkeypatch):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    calls = _patch_push(monkeypatch)
+
+    year, month = _current_year_month()
+    create = _create_scene_project(client, year=str(year), month=str(month))
+    payload = create.get_json()["project"]
+    project_id = payload["project"]["id"]
+    pwa_token = _token_from_url(payload["project"]["urls"]["pwa_url"])
+    assert _subscribe_device(client, pwa_token).status_code == 200
+
+    base_month = _legacy_base_month(payload["month"])
+    # 当月の本保存で実際に変更 → 通知1件
+    save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/{year}/{month}",
+        json={
+            "base_month": base_month,
+            "required_capacity": payload["month"].get("required_capacity", 0),
+            "entries_per_day": {"1": [{"value": "A"}]},
+        },
+    )
+    assert save.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["project_id"] == project_id
+    assert f"{year}年{month}月" in calls[0]["body"]
+
+    # 変更が無い保存 → 通知は増えない
+    calls.clear()
+    client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/{year}/{month}",
+        json={
+            "base_month": {"year": year, "month": month, "required_capacity": payload["month"].get("required_capacity", 0), "entries_per_day": {"1": [{"value": "A"}]}},
+            "required_capacity": payload["month"].get("required_capacity", 0),
+            "entries_per_day": {"1": [{"value": "A"}]},
+        },
+    )
+    assert calls == []
+
+
+def test_pwa_notify_skips_draft_and_non_current_month(tmp_path, monkeypatch):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    calls = _patch_push(monkeypatch)
+
+    year, month = _current_year_month()
+    create = _create_scene_project(client, year=str(year), month=str(month))
+    payload = create.get_json()["project"]
+    project_id = payload["project"]["id"]
+    pwa_token = _token_from_url(payload["project"]["urls"]["pwa_url"])
+    assert _subscribe_device(client, pwa_token).status_code == 200
+
+    # 仮保存（draft）は対象外 → 通知なし
+    draft = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/{year}/{month}/draft",
+        json={"entries_per_day": {"2": [{"value": "P"}]}},
+    )
+    assert draft.status_code == 200
+    assert calls == []
+
+    # 当月以外（翌年同月）の本保存 → 通知なし
+    other_year = year + 1
+    add = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month",
+        json={"year": other_year, "month": month, "required_capacity": 0},
+    )
+    assert add.status_code == 200
+    save_other = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/{other_year}/{month}",
+        json={
+            "base_month": {"year": other_year, "month": month, "required_capacity": 0, "entries_per_day": {}},
+            "required_capacity": 0,
+            "entries_per_day": {"1": [{"value": "A"}]},
+        },
+    )
+    assert save_other.status_code == 200
+    assert calls == []

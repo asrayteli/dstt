@@ -60,3 +60,15 @@ def service_worker():
         "to_bell/service-worker.js",
         mimetype="application/javascript",
     )
+
+
+@main.route("/cloudshift-service-worker.js")
+def cloudshift_service_worker():
+    # ルート直下で配信することで /tools/shiftersync/cloudshift/ 配下を scope に取れる。
+    response = send_from_directory(
+        current_app.static_folder,
+        "cloudshift/service-worker.js",
+        mimetype="application/javascript",
+    )
+    response.headers["Service-Worker-Allowed"] = "/tools/shiftersync/cloudshift/"
+    return response

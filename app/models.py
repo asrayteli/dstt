@@ -906,6 +906,40 @@ class CloudShiftHistory(db.Model):
     project = db.relationship('CloudShiftProject', back_populates='histories')
 
 
+class CloudShiftPwaSubscription(db.Model):
+    """CloudShift の ViewPWA 共有先が登録する Web Push 購読。
+
+    同じ端末（クライアント生成の device_id）が同じシフト帳に何度通知許可を
+    出しても 1 件に保つため、(project_id, device_id) で一意にし、再購読のたびに
+    endpoint / 鍵を最新で上書きする。"""
+
+    __tablename__ = 'cloudshift_pwa_subscriptions'
+    __table_args__ = (
+        db.UniqueConstraint('project_id', 'device_id', name='uq_cloudshift_pwa_device'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    project_id = db.Column(db.String(24), db.ForeignKey('cloudshift_projects.id'), nullable=False, index=True)
+    device_id = db.Column(db.String(64), nullable=False, index=True)
+    endpoint = db.Column(db.Text, nullable=False)
+    p256dh = db.Column(db.Text, nullable=False)
+    auth = db.Column(db.Text, nullable=False)
+    user_agent = db.Column(db.Text, nullable=False, default='')
+    device_label = db.Column(db.String(120), nullable=False, default='')
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def to_subscription_info(self) -> dict:
+        return {
+            'endpoint': self.endpoint,
+            'keys': {
+                'p256dh': self.p256dh,
+                'auth': self.auth,
+            },
+        }
+
+
 class ToBellTask(db.Model):
     """To Bell task. Phase 1 keeps visibility to task participants."""
 

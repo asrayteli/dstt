@@ -278,6 +278,8 @@
     document.getElementById('cloud-project-title').value = project.title || '';
     document.getElementById('cloud-view-url').value = project.urls.view_url || '';
     document.getElementById('cloud-edit-url').value = project.urls.edit_url || '';
+    const pwaUrlInput = document.getElementById('cloud-pwa-url');
+    if (pwaUrlInput) pwaUrlInput.value = project.urls.pwa_url || '';
     document.getElementById('cloud-project-badges').innerHTML = `
       <span class="cloud-badge">${project.mode === 'scene' ? '現場シフト' : '個人シフト'}</span>
       <span class="cloud-badge">${(project.month_keys || []).length}か月</span>
@@ -409,10 +411,12 @@
   async function regenerateUrls() {
     const project = currentProject();
     if (!project) return;
-    if (!window.confirm('閲覧URLと編集URLを再発行します。旧URLは無効になります。よろしいですか？')) return;
+    if (!window.confirm('閲覧URL・編集URL・ViewPWA URLを再発行します。旧URLは無効になります。よろしいですか？')) return;
     const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/tokens/regenerate`, { method: 'POST', body: {} });
     document.getElementById('cloud-view-url').value = data.urls.view_url || '';
     document.getElementById('cloud-edit-url').value = data.urls.edit_url || '';
+    const pwaUrlInput = document.getElementById('cloud-pwa-url');
+    if (pwaUrlInput) pwaUrlInput.value = data.urls.pwa_url || '';
     showFlash('URLを再発行しました', 'success');
   }
 
@@ -452,6 +456,10 @@
     document.getElementById('cloud-open-edit-url').addEventListener('click', () => window.open(document.getElementById('cloud-edit-url').value, '_blank', 'noopener'));
     document.getElementById('cloud-copy-view-url').addEventListener('click', async () => { await navigator.clipboard.writeText(document.getElementById('cloud-view-url').value); showFlash('閲覧URLをコピーしました', 'success'); });
     document.getElementById('cloud-copy-edit-url').addEventListener('click', async () => { await navigator.clipboard.writeText(document.getElementById('cloud-edit-url').value); showFlash('編集URLをコピーしました', 'success'); });
+    const openPwaBtn = document.getElementById('cloud-open-pwa-url');
+    if (openPwaBtn) openPwaBtn.addEventListener('click', () => window.open(document.getElementById('cloud-pwa-url').value, '_blank', 'noopener'));
+    const copyPwaBtn = document.getElementById('cloud-copy-pwa-url');
+    if (copyPwaBtn) copyPwaBtn.addEventListener('click', async () => { await navigator.clipboard.writeText(document.getElementById('cloud-pwa-url').value); showFlash('ViewPWA URLをコピーしました', 'success'); });
     document.getElementById('cloud-regenerate-urls').addEventListener('click', regenerateUrls);
     document.getElementById('cloud-save-month').addEventListener('click', saveCurrentMonthOwner);
     document.getElementById('cloud-month-select').addEventListener('change', (event) => selectProject(currentProject().id, event.target.value));
@@ -590,9 +598,153 @@
     await loadProjects();
   }
 
+  // ---- ViewPWA: 更新通知の購読 ----
+  const PWA_DEVICE_ID_KEY = 'cloudshift-pwa-device-id';
+
+  function pwaDeviceId() {
+    let id = '';
+    try {
+      id = window.localStorage.getItem(PWA_DEVICE_ID_KEY) || '';
+      if (!id) {
+        if (window.crypto && window.crypto.randomUUID) {
+          id = window.crypto.randomUUID().replace(/-/g, '');
+        } else {
+          id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        }
+        window.localStorage.setItem(PWA_DEVICE_ID_KEY, id);
+      }
+    } catch (error) {
+      id = id || (Math.random().toString(36).slice(2) + Date.now().toString(36));
+    }
+    return id;
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = window.atob(base64);
+    const output = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i += 1) {
+      output[i] = raw.charCodeAt(i);
+    }
+    return output;
+  }
+
+  async function registerPwaServiceWorker() {
+    if (!('serviceWorker' in navigator)) return null;
+    const registration = await navigator.serviceWorker.register('/cloudshift-service-worker.js', {
+      scope: '/tools/shiftersync/cloudshift/'
+    });
+    await navigator.serviceWorker.ready;
+    return registration;
+  }
+
+  async function refreshPwaNotifyButton() {
+    const button = document.getElementById('cloud-pwa-notify');
+    if (!button) return;
+    const supported = 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
+    if (!supported || !PAGE.pushAvailable) {
+      button.hidden = true;
+      return;
+    }
+    button.hidden = false;
+    let subscribed = false;
+    try {
+      const registration = await navigator.serviceWorker.getRegistration('/tools/shiftersync/cloudshift/');
+      subscribed = Boolean(registration && (await registration.pushManager.getSubscription()));
+    } catch (error) {
+      subscribed = false;
+    }
+    button.dataset.state = subscribed ? 'on' : 'off';
+    button.textContent = subscribed ? '通知を無効化' : '通知を有効化';
+  }
+
+  async function enablePwaPush() {
+    if (Notification.permission === 'denied') {
+      showFlash('ブラウザの通知がブロックされています。設定から許可してください。', 'error');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      showFlash('通知が許可されませんでした。', 'error');
+      return;
+    }
+    const registration = await registerPwaServiceWorker();
+    if (!registration) {
+      showFlash('この端末では通知を利用できません。', 'error');
+      return;
+    }
+    const keyData = await requestJson(`/tools/shiftersync/cloudshift/api/pwa/${PAGE.token}/push/public-key`);
+    if (!keyData || keyData.status !== 'ok' || !keyData.public_key) {
+      showFlash((keyData && keyData.message) || '通知の準備ができていません。', 'error');
+      return;
+    }
+    const appServerKey = urlBase64ToUint8Array(keyData.public_key);
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: appServerKey
+      });
+    }
+    await requestJson(`/tools/shiftersync/cloudshift/api/pwa/${PAGE.token}/push/subscribe`, {
+      method: 'POST',
+      body: { device_id: pwaDeviceId(), subscription: subscription.toJSON() }
+    });
+    showFlash('シフト更新の通知を有効にしました', 'success');
+    await refreshPwaNotifyButton();
+  }
+
+  async function disablePwaPush() {
+    try {
+      const registration = await navigator.serviceWorker.getRegistration('/tools/shiftersync/cloudshift/');
+      const subscription = registration ? await registration.pushManager.getSubscription() : null;
+      if (subscription) {
+        await subscription.unsubscribe();
+      }
+    } catch (error) {
+      /* 端末側の解除に失敗してもサーバー側は無効化する */
+    }
+    await requestJson(`/tools/shiftersync/cloudshift/api/pwa/${PAGE.token}/push/unsubscribe`, {
+      method: 'POST',
+      body: { device_id: pwaDeviceId() }
+    });
+    showFlash('通知を無効にしました', 'success');
+    await refreshPwaNotifyButton();
+  }
+
+  async function initPwa() {
+    const button = document.getElementById('cloud-pwa-notify');
+    if (button) {
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          if (button.dataset.state === 'on') {
+            await disablePwaPush();
+          } else {
+            await enablePwaPush();
+          }
+        } catch (error) {
+          showFlash(error.message || '通知の設定に失敗しました', 'error');
+        } finally {
+          button.disabled = false;
+        }
+      });
+    }
+    try {
+      await registerPwaServiceWorker();
+    } catch (error) {
+      /* SW 登録に失敗しても閲覧は継続できる */
+    }
+    await refreshPwaNotifyButton();
+  }
+
   async function initPublic() {
     bindPublicEvents();
     await loadPublic();
+    if (PAGE.accessMode === 'pwa') {
+      await initPwa();
+    }
   }
 
   document.addEventListener('DOMContentLoaded', () => {
