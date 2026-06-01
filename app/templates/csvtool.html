@@ -2917,18 +2917,30 @@ function resolveArg(arg){
 function resolveNum(arg){return _fxToNum(resolveArg(arg));}
 function resolveStr(arg){const v=resolveArg(arg);return v===true?'TRUE':v===false?'FALSE':String(v);}
 function _fxTruthy(v){if(v===true)return true;if(v===false)return false;if(typeof v==='number')return v!==0;const s=String(v).trim().toLowerCase();return s!==''&&s!=='0'&&s!=='false';}
+// Gather numbers from an argument that may be a range (A1:A3 / A), a cell ref,
+// a literal number, or an expression (e.g. B1*2). Mirrors Excel's SUM(1,A1,B1*2).
+function _fxArgNums(arg){
+  if(parseRange(String(arg).trim())) return getRangeNums(arg);
+  const v=resolveArg(arg); const n=_fxToNum(v);
+  return isNaN(n)?[]:[n];
+}
+// Gather raw values similarly (for COUNT/COUNTA/COUNTBLANK).
+function _fxArgVals(arg){
+  if(parseRange(String(arg).trim())) return getRangeValues(arg);
+  return [resolveArg(arg)];
+}
 function callFunction(func,args){
   switch(func){
-    case 'SUM':{return args.flatMap(a=>getRangeNums(a)).reduce((s,n)=>s+n,0);}
-    case 'PRODUCT':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?nums.reduce((s,n)=>s*n,1):0;}
-    case 'AVG':case 'AVERAGE':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?nums.reduce((s,n)=>s+n,0)/nums.length:'#DIV/0!';}
-    case 'COUNT':{return args.flatMap(a=>getRangeValues(a)).filter(v=>String(v).trim()!==''&&!isNaN(parseFloat(String(v).replace(/,/g,'')))).length;}
-    case 'COUNTA':{return args.flatMap(a=>getRangeValues(a)).filter(v=>String(v).trim()!=='').length;}
-    case 'COUNTBLANK':{return args.flatMap(a=>getRangeValues(a)).filter(v=>String(v).trim()==='').length;}
-    case 'MIN':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?Math.min(...nums):0;}
-    case 'MAX':{const nums=args.flatMap(a=>getRangeNums(a));return nums.length?Math.max(...nums):0;}
-    case 'MEDIAN':{const nums=args.flatMap(a=>getRangeNums(a)).sort((a,b)=>a-b);if(!nums.length)return 0;const mid=Math.floor(nums.length/2);return nums.length%2?nums[mid]:(nums[mid-1]+nums[mid])/2;}
-    case 'STDEV':{const nums=args.flatMap(a=>getRangeNums(a));if(nums.length<2)return 0;const avg=nums.reduce((s,n)=>s+n,0)/nums.length;return Math.sqrt(nums.reduce((s,n)=>s+Math.pow(n-avg,2),0)/(nums.length-1));}
+    case 'SUM':{return args.flatMap(a=>_fxArgNums(a)).reduce((s,n)=>s+n,0);}
+    case 'PRODUCT':{const nums=args.flatMap(a=>_fxArgNums(a));return nums.length?nums.reduce((s,n)=>s*n,1):0;}
+    case 'AVG':case 'AVERAGE':{const nums=args.flatMap(a=>_fxArgNums(a));return nums.length?nums.reduce((s,n)=>s+n,0)/nums.length:'#DIV/0!';}
+    case 'COUNT':{return args.flatMap(a=>_fxArgVals(a)).filter(v=>String(v).trim()!==''&&!isNaN(parseFloat(String(v).replace(/,/g,'')))).length;}
+    case 'COUNTA':{return args.flatMap(a=>_fxArgVals(a)).filter(v=>String(v).trim()!=='').length;}
+    case 'COUNTBLANK':{return args.flatMap(a=>_fxArgVals(a)).filter(v=>String(v).trim()==='').length;}
+    case 'MIN':{const nums=args.flatMap(a=>_fxArgNums(a));return nums.length?Math.min(...nums):0;}
+    case 'MAX':{const nums=args.flatMap(a=>_fxArgNums(a));return nums.length?Math.max(...nums):0;}
+    case 'MEDIAN':{const nums=args.flatMap(a=>_fxArgNums(a)).sort((a,b)=>a-b);if(!nums.length)return 0;const mid=Math.floor(nums.length/2);return nums.length%2?nums[mid]:(nums[mid-1]+nums[mid])/2;}
+    case 'STDEV':{const nums=args.flatMap(a=>_fxArgNums(a));if(nums.length<2)return 0;const avg=nums.reduce((s,n)=>s+n,0)/nums.length;return Math.sqrt(nums.reduce((s,n)=>s+Math.pow(n-avg,2),0)/(nums.length-1));}
     case 'UPPER':return resolveStr(args[0]).toUpperCase();
     case 'LOWER':return resolveStr(args[0]).toLowerCase();
     case 'TRIM':return resolveStr(args[0]).trim();
