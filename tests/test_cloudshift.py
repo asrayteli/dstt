@@ -3693,3 +3693,130 @@ def test_person_month_summary_separates_worksites_and_leaves(tmp_path):
     assert {item["label"]: item["count"] for item in sections["勤務帯"]} == {"午前": 1}
     assert {item["label"]: item["count"] for item in sections["休暇種別"]} == {"有休": 1, "代休": 1}
     assert {item["label"]: item["count"] for item in sections["車両"]} == {"ワゴン": 1}
+
+
+def _create_person_project(client, *, title, employee_number, year="2026", month="4"):
+    response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": title,
+            "mode": "person",
+            "employee_number": employee_number,
+            "year": year,
+            "month": month,
+        },
+    )
+    return response
+
+
+def test_same_owner_cannot_create_duplicate_person_link(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    first = _create_person_project(client, title="Alice", employee_number="1001")
+    assert first.status_code == 200
+
+    second = _create_person_project(client, title="Alice Copy", employee_number="1001")
+    assert second.status_code == 409
+    assert "1つだけ" in second.get_json()["error"]
+
+
+def test_other_owner_cannot_create_duplicate_person_link(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    first = _create_person_project(client, title="Alice", employee_number="1001")
+    assert first.status_code == 200
+
+    module.current_user = _other_owner()
+    blocked = _create_person_project(client, title="Alice Again", employee_number="1001")
+    assert blocked.status_code == 409
+    error = blocked.get_json()["error"]
+    assert "owner01" in error
+    assert "共有してもらって" in error
+
+
+def test_unassigned_person_shifts_allow_multiple(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    first = _create_person_project(client, title="", employee_number="")
+    assert first.status_code == 200
+    second = _create_person_project(client, title="", employee_number="")
+    assert second.status_code == 200
+
+
+def test_meta_relink_to_existing_target_is_rejected(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    taken = _create_person_project(client, title="Alice", employee_number="1001")
+    assert taken.status_code == 200
+
+    movable = _create_person_project(client, title="Bob", employee_number="1002")
+    assert movable.status_code == 200
+    movable_id = movable.get_json()["project"]["project"]["id"]
+
+    # 既に owner01 が 1001 を所持しているので、別シフトの紐づけを 1001 に変更するのは拒否。
+    blocked = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{movable_id}/meta",
+        json={"title": "Bob", "employee_number": "1001"},
+    )
+    assert blocked.status_code == 409
+    assert "1つだけ" in blocked.get_json()["error"]
+
+
+def _insert_duplicate_person_project(client, module, *, owner_user_id, employee_number, title):
+    with client.application.app_context():
+        now = module._utcnow_iso()
+        project = {
+            "id": module._project_id(),
+            "owner_user_id": owner_user_id,
+            "title": title,
+            "mode": "person",
+            "employee_number": employee_number,
+            "view_token": module._share_token(),
+            "edit_token": module._share_token(),
+            "created_at": now,
+            "updated_at": now,
+            "months": {
+                "2026-04": module._build_month_payload(2026, 4, False, 0, {}),
+            },
+        }
+        module._upsert_project_to_db(project)
+        return project["id"]
+
+
+def test_hide_requires_another_owner_and_removes_from_list(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    mine = _create_person_project(client, title="Alice", employee_number="1001")
+    assert mine.status_code == 200
+    my_project_id = mine.get_json()["project"]["project"]["id"]
+
+    # 他オーナーが同じ紐づけを所持していない段階では非表示にできない。
+    not_allowed = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{my_project_id}/hide",
+        json={},
+    )
+    assert not_allowed.status_code == 400
+
+    # レガシーな重複データとして、別オーナーが同じ社員IDのシフト帳を所持している状況を作る。
+    _insert_duplicate_person_project(
+        client, module, owner_user_id="owner02", employee_number="1001", title="Alice Dup"
+    )
+
+    listing = client.get("/tools/shiftersync/cloudshift/api/list").get_json()["projects"]
+    mine_summary = next(item for item in listing if item["id"] == my_project_id)
+    assert mine_summary["can_hide"] is True
+
+    hidden = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{my_project_id}/hide",
+        json={},
+    )
+    assert hidden.status_code == 200
+
+    listing_after = client.get("/tools/shiftersync/cloudshift/api/list").get_json()["projects"]
+    assert all(item["id"] != my_project_id for item in listing_after)
+
+    # サーバー側にはまだ残っているので直接アクセスは可能。
+    detail = client.get(f"/tools/shiftersync/cloudshift/api/project/{my_project_id}")
+    assert detail.status_code == 200
