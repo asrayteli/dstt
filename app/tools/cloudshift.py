@@ -2138,6 +2138,92 @@ def _employee_label_for_number(employee_number: str) -> str:
     return employee_number
 
 
+def _project_link_key(project: dict[str, Any]) -> tuple[str, str] | None:
+    """個人=社員ID、現場=現場 を一意に表す紐づけキーを返す。
+
+    紐づけが無い場合（未割り当ての個人シフト・現場未設定の現場シフト）や、
+    対象外モード（マスター・要代務）は ``None`` を返す。
+    """
+    mode = str(project.get("mode") or "").strip()
+    if mode == "person":
+        employee_number = str(project.get("employee_number") or "").strip()
+        return ("person", employee_number) if employee_number else None
+    if mode == "scene":
+        # 現場は site_id（自然キー）を優先する。新規・レガシーいずれの帳簿でも
+        # site_id は保存されているため、同一現場の表現ゆれ（row 参照 / site_id）を
+        # 吸収して重複を確実に検知できる。
+        site_id = str(project.get("site_id") or "").strip()
+        if site_id:
+            return ("scene", f"sid:{site_id}")
+        site_row_id = _coerce_site_row_id(project.get("site_row_id"))
+        return ("scene", f"row:{site_row_id}") if site_row_id else None
+    return None
+
+
+def _owner_display_label(owner_user_id: Any) -> str:
+    """オーナーの『社員ID（表示名）』を返す。表示名が取れない場合は社員IDのみ。"""
+    owner_id = str(owner_user_id or "").strip()
+    if not owner_id:
+        return "不明なユーザー"
+    name = ""
+    user = User.query.filter_by(username=owner_id).first()
+    if user and user.name and user.name != "unknown":
+        name = str(user.name)
+    if not name:
+        employee = Employee.query.filter_by(employee_number=owner_id).first()
+        if employee and employee.employee_name:
+            name = str(employee.employee_name)
+    return f"{owner_id}（{name}）" if name else owner_id
+
+
+def _find_projects_with_link_key(
+    link_key: tuple[str, str] | None, *, exclude_id: str | None = None
+) -> list[dict[str, Any]]:
+    """同一紐づけキーを持つ既存シフト帳を返す。"""
+    if not link_key:
+        return []
+    matches: list[dict[str, Any]] = []
+    for project in _iter_stored_projects():
+        if exclude_id and str(project.get("id") or "") == str(exclude_id):
+            continue
+        if _project_link_key(project) == link_key:
+            matches.append(project)
+    return matches
+
+
+def _assert_link_key_unique(
+    link_key: tuple[str, str] | None, *, exclude_id: str | None = None
+) -> None:
+    """同一紐づけのシフト帳が既に存在する場合はエラーを送出する。
+
+    - 他オーナーが所持 → 要件2: 既に作成済みである旨と社員ID＋表示名を案内
+    - 自分が所持       → 要件3: 同じ紐づけは1つだけである旨を案内
+    """
+    if not link_key:
+        return
+    current_owner = _user_id()
+    matches = _find_projects_with_link_key(link_key, exclude_id=exclude_id)
+    if not matches:
+        return
+    others = [
+        project
+        for project in matches
+        if str(project.get("owner_user_id") or "") != current_owner
+    ]
+    if others:
+        owner_label = _owner_display_label(others[0].get("owner_user_id"))
+        raise CloudShiftError(
+            f"{owner_label}さんが既に作成済みです。閲覧したい場合は共有してもらってください。",
+            409,
+        )
+    existing = matches[0]
+    raise CloudShiftError(
+        f"同じ対象のシフト帳「{existing.get('title')}」が既に存在します。"
+        "同じ紐づけのシフト帳は1つだけ作成できます。",
+        409,
+    )
+
+
 def _normalized_account_shares(project: dict[str, Any]) -> dict[str, Any]:
     raw = project.get("account_shares") if isinstance(project.get("account_shares"), dict) else {}
     office = raw.get("office") if isinstance(raw.get("office"), dict) else {}
@@ -7003,12 +7089,30 @@ def public_edit(token: str):
 def api_list():
     _ensure_substitute_projects_for_current_user()
     owner_id = _user_id()
+    all_projects = _iter_stored_projects()
+    # 同一紐づけを所持するオーナー集合を作る（複数オーナー所持の検知に使用）。
+    owners_by_link: dict[tuple[str, str], set[str]] = {}
+    for project in all_projects:
+        link_key = _project_link_key(project)
+        if link_key:
+            owners_by_link.setdefault(link_key, set()).add(str(project.get("owner_user_id") or ""))
     projects = []
-    for project in _iter_stored_projects():
+    for project in all_projects:
         is_owner = project.get("owner_user_id") == owner_id
+        # オーナー自身が一覧から非表示にしたシフト帳は除外する。
+        if is_owner and project.get("hidden"):
+            continue
         if not is_owner and not _project_is_shared_with_current_user(project):
             continue
-        projects.append(_project_summary(project))
+        summary = _project_summary(project)
+        # 自分が所持し、かつ同一紐づけを他オーナーも所持している場合のみ非表示操作を許可する。
+        can_hide = False
+        if is_owner:
+            link_key = _project_link_key(project)
+            if link_key:
+                can_hide = bool(owners_by_link.get(link_key, set()) - {owner_id})
+        summary["can_hide"] = can_hide
+        projects.append(summary)
     projects.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
     return jsonify({"projects": projects})
 
@@ -7129,6 +7233,7 @@ def api_create():
             month_key: _build_month_payload(year, month, capacity_enabled, required_capacity, entries),
         },
     }
+    _assert_link_key_unique(_project_link_key(project))
     _save_project(project)
     _append_history(
         project_id,
@@ -7238,6 +7343,23 @@ def api_project_meta(project_id: str):
         new_master_sites = project.get("master_sites") or []
         if project.get("mode") == "master":
             new_master_target_type, new_master_people, new_master_sites = _master_scope_from_payload(data, existing=project)
+        # 紐づけ（個人=社員ID／現場）が変わる場合は重複チェックを行う。
+        prospective_link_key: tuple[str, str] | None = None
+        if project.get("mode") == "person":
+            prospective_link_key = ("person", new_employee_number) if new_employee_number else None
+        elif project.get("mode") == "scene":
+            new_site_id = str(new_site_ref.get("site_id") or "").strip() if new_site_ref else ""
+            if new_site_id:
+                prospective_link_key = ("scene", f"sid:{new_site_id}")
+            else:
+                new_site_row_id = _coerce_site_row_id(new_site_ref.get("site_row_id")) if new_site_ref else None
+                if new_site_row_id:
+                    prospective_link_key = ("scene", f"row:{new_site_row_id}")
+        if prospective_link_key and prospective_link_key != _project_link_key(project):
+            _assert_link_key_unique(prospective_link_key, exclude_id=project_id)
+            # 別対象へ紐づけし直す＝再び使う意思があるため、非表示状態は解除する。
+            if project.get("hidden"):
+                project["hidden"] = False
         metadata_changed = False
         if new_title != project["title"]:
             project["title"] = new_title
@@ -7912,6 +8034,49 @@ def api_delete_project(project_id: str):
     if source_project:
         _remove_shift_sync_for_project(source_project, actor_name=_user_label())
     return jsonify({"success": True, "deleted_project_id": project["id"]})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/hide", methods=["POST"])
+@login_required
+def api_hide_project(project_id: str):
+    """同一紐づけを他オーナーも所持している場合のみ、自分の一覧から非表示にする。
+
+    DB（サーバー）からは削除せず、操作者の一覧表示からのみ除外する。これにより、
+    複数オーナーが同じ対象のシフト帳を所持してしまった場合でも、削除によって
+    サーバー上のデータが失われるのを防ぎつつ重複表示を解消できる。
+    """
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        link_key = _project_link_key(project)
+        if not link_key:
+            raise CloudShiftError(
+                "このシフト帳は非表示にできません（個人・現場の紐づけがありません）。", 400
+            )
+        others = [
+            candidate
+            for candidate in _find_projects_with_link_key(link_key, exclude_id=project_id)
+            if str(candidate.get("owner_user_id") or "") != str(project.get("owner_user_id") or "")
+        ]
+        if not others:
+            raise CloudShiftError(
+                "同じ対象のシフト帳を他のオーナーが所持していないため、非表示にできません。"
+                "（非表示にするとデータにアクセスできなくなるのを防ぐためです）",
+                400,
+            )
+        project["hidden"] = True
+        _save_project(project)
+        _append_history(
+            project_id,
+            {
+                "timestamp": _utcnow_iso(),
+                "editor_name": _user_label(),
+                "editor_type": "owner",
+                "action": "project_hidden",
+                "month_key": None,
+                "changes": ["シフト帳を自分の一覧から非表示にしました"],
+            },
+        )
+    return jsonify({"success": True, "hidden": True})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/history")

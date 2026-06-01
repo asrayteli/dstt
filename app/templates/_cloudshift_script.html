@@ -449,6 +449,30 @@
       }, 2600);
     }
 
+    // 作成・紐づけ操作のエラー（重複など）は見落とさないよう、フラッシュに加えて
+    // ダイアログでも明示する。
+    function notifyActionError(error) {
+      const message = (error && error.message) ? error.message : 'リクエストに失敗しました';
+      showFlash(message, 'error');
+      try {
+        window.alert(message);
+      } catch (_) {
+        /* noop */
+      }
+    }
+
+    // 新規作成・月追加の完了後、編集画面が画面内に確実に見えるようスクロールする。
+    function scrollEditorIntoView() {
+      const panel = document.getElementById('cloud-panel-editor');
+      if (panel && typeof panel.scrollIntoView === 'function') {
+        try {
+          panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch (_) {
+          panel.scrollIntoView();
+        }
+      }
+    }
+
     function closeLegacyDetailModals() {
       ['ss-day-detail-modal', 'ss-entry-modal'].forEach((modalId) => {
         const modal = document.getElementById(modalId);
@@ -4850,6 +4874,11 @@
               <span>最終更新: ${escapeHtml(formatTimestamp(project.updated_at) || '-')}</span>
               ${shareText ? `<span class="cloud-badge ${project.access_role === 'viewer' ? 'shared' : 'shared-owner'}">${escapeHtml(shareText)}</span>` : ''}
             </div>
+            ${project.access_role !== 'viewer' && project.can_hide ? `
+            <div class="cloud-project-actions">
+              <span class="cloud-badge duplicate-owner">他オーナーと重複</span>
+              <button type="button" class="cloud-btn small ghost" data-project-hide="${project.id}">この帳簿を非表示</button>
+            </div>` : ''}
           </article>
         `;
       }
@@ -6873,6 +6902,8 @@
         await renderWorkspaceWithSiteBranches(true);
         await loadProjects();
         await loadHistory(project.id);
+        switchTab('editor');
+        scrollEditorIntoView();
       } else {
         if (!ensureGuestName()) return;
         body.editor_name = state.guestName;
@@ -6883,9 +6914,10 @@
         state.projectPayload = payload;
         state.baseMonth = payload.month ? deepClone(payload.month) : null;
         await renderWorkspaceWithSiteBranches(true);
+        scrollEditorIntoView();
       }
 
-      showFlash(`${formatMonthKey(targetKey)} を作成しました`, 'success');
+      showFlash(`${formatMonthKey(targetKey)} を作成し、その月に移動しました`, 'success');
     }
 
     async function navigateMonth(delta, ownerMode) {
@@ -6948,6 +6980,24 @@
       updateCurrentProjectLabel();
       switchTab('list');
       showFlash('シフト表を削除しました', 'success');
+    }
+
+    // 同一紐づけを他オーナーも所持している場合のみ、自分の一覧から非表示にする。
+    // サーバーのデータは削除せず、表示からのみ除外する（誤削除によるデータ消失を防ぐ）。
+    async function hideProjectFromList(projectId) {
+      const target = (state.projects || []).find((project) => project.id === projectId);
+      const title = target ? target.title : '';
+      if (!window.confirm(
+        `シフト帳「${title}」を自分の一覧から非表示にしますか？\n` +
+        '同じ対象を他のオーナーも所持しているため、サーバー上のデータは削除されず、あなたの一覧からのみ消えます。'
+      )) return;
+      await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}/hide`, { method: 'POST', body: {} });
+      if (currentProject() && currentProject().id === projectId) {
+        state.projectPayload = null;
+        state.baseMonth = null;
+      }
+      await loadProjects();
+      showFlash('シフト帳を一覧から非表示にしました', 'success');
     }
 
     async function regenerateUrls() {
@@ -7457,6 +7507,12 @@
       const projectList = $('cloud-project-list');
       if (projectList) {
         projectList.addEventListener('click', (event) => {
+          const hideButton = event.target.closest('[data-project-hide]');
+          if (hideButton) {
+            event.stopPropagation();
+            hideProjectFromList(hideButton.getAttribute('data-project-hide')).catch((error) => notifyActionError(error));
+            return;
+          }
           const item = event.target.closest('[data-project-id]');
           if (!item) return;
           selectProject(item.getAttribute('data-project-id')).catch((error) => showFlash(error.message, 'error'));
@@ -7468,23 +7524,28 @@
         createForm.addEventListener('submit', async (event) => {
           event.preventDefault();
           if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずに新しいシフト帳を作成すると、このセッションでの編集内容は失われます。続行しますか？')) return;
-          const formData = new FormData(event.currentTarget);
-          if (formData.get('mode') === 'master') {
-            const targets = state.masterTargets.create || { targetType: 'person', people: [], sites: [] };
-            formData.set('master_target_type', targets.targetType === 'scene' ? 'scene' : 'person');
-            formData.set('master_people', targets.targetType === 'person' ? JSON.stringify(targets.people || []) : '');
-            formData.set('master_sites', targets.targetType === 'scene' ? JSON.stringify(targets.sites || []) : '');
+          try {
+            const formData = new FormData(event.currentTarget);
+            if (formData.get('mode') === 'master') {
+              const targets = state.masterTargets.create || { targetType: 'person', people: [], sites: [] };
+              formData.set('master_target_type', targets.targetType === 'scene' ? 'scene' : 'person');
+              formData.set('master_people', targets.targetType === 'person' ? JSON.stringify(targets.people || []) : '');
+              formData.set('master_sites', targets.targetType === 'scene' ? JSON.stringify(targets.sites || []) : '');
+            }
+            const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
+            state.projectPayload = unwrapProjectPayload(data);
+            state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
+            await loadProjects();
+            await loadLeaveSyncCalendars(state.projectPayload.project.id);
+            await loadHistory(state.projectPayload.project.id);
+            await renderWorkspaceWithSiteBranches(true);
+            updateCurrentProjectLabel();
+            switchTab('editor');
+            scrollEditorIntoView();
+            showFlash('シフト表を作成しました。編集画面に移動しました', 'success');
+          } catch (error) {
+            notifyActionError(error);
           }
-          const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
-          state.projectPayload = unwrapProjectPayload(data);
-          state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
-          await loadProjects();
-          await loadLeaveSyncCalendars(state.projectPayload.project.id);
-          await loadHistory(state.projectPayload.project.id);
-          await renderWorkspaceWithSiteBranches(true);
-          updateCurrentProjectLabel();
-          switchTab('editor');
-          showFlash('シフト表を作成しました', 'success');
         });
       }
 
@@ -7493,17 +7554,22 @@
         importForm.addEventListener('submit', async (event) => {
           event.preventDefault();
           if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずにCSVを取り込むと、このセッションでの編集内容は失われます。続行しますか？')) return;
-          const formData = new FormData(event.currentTarget);
-          const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
-          state.projectPayload = unwrapProjectPayload(data);
-          state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
-          await loadProjects();
-          await loadLeaveSyncCalendars(state.projectPayload.project.id);
-          await loadHistory(state.projectPayload.project.id);
-          await renderWorkspaceWithSiteBranches(true);
-          updateCurrentProjectLabel();
-          switchTab('editor');
-          showFlash('CSV を読み込みました', 'success');
+          try {
+            const formData = new FormData(event.currentTarget);
+            const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
+            state.projectPayload = unwrapProjectPayload(data);
+            state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
+            await loadProjects();
+            await loadLeaveSyncCalendars(state.projectPayload.project.id);
+            await loadHistory(state.projectPayload.project.id);
+            await renderWorkspaceWithSiteBranches(true);
+            updateCurrentProjectLabel();
+            switchTab('editor');
+            scrollEditorIntoView();
+            showFlash('CSV を読み込みました。編集画面に移動しました', 'success');
+          } catch (error) {
+            notifyActionError(error);
+          }
         });
       }
 
@@ -7513,22 +7579,26 @@
           const project = currentProject();
           if (!project) return;
           if (!confirmDiscardUnsavedChanges('未保存の変更があります。タイトル保存で画面を再読み込みすると、このセッションでの編集内容は失われます。続行しますか？')) return;
-          const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/meta`, {
-            method: 'PUT',
-            body: {
-              title: $('cloud-project-title').value.trim(),
-              employee_number: $('cloud-project-employee-number') ? $('cloud-project-employee-number').value.trim() : '',
-              site_row_id: $('cloud-project-site-row-id') ? $('cloud-project-site-row-id').value.trim() : '',
-              master_target_type: $('cloud-project-master-target-type') ? $('cloud-project-master-target-type').value : '',
-              master_people: $('cloud-project-master-people') ? $('cloud-project-master-people').value : '',
-              master_sites: $('cloud-project-master-sites') ? $('cloud-project-master-sites').value : ''
-            }
-          }));
-          state.projectPayload = payload;
-          await renderWorkspaceWithSiteBranches(true);
-          await loadProjects();
-          await loadHistory(project.id);
-          showFlash('タイトルを更新しました', 'success');
+          try {
+            const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/meta`, {
+              method: 'PUT',
+              body: {
+                title: $('cloud-project-title').value.trim(),
+                employee_number: $('cloud-project-employee-number') ? $('cloud-project-employee-number').value.trim() : '',
+                site_row_id: $('cloud-project-site-row-id') ? $('cloud-project-site-row-id').value.trim() : '',
+                master_target_type: $('cloud-project-master-target-type') ? $('cloud-project-master-target-type').value : '',
+                master_people: $('cloud-project-master-people') ? $('cloud-project-master-people').value : '',
+                master_sites: $('cloud-project-master-sites') ? $('cloud-project-master-sites').value : ''
+              }
+            }));
+            state.projectPayload = payload;
+            await renderWorkspaceWithSiteBranches(true);
+            await loadProjects();
+            await loadHistory(project.id);
+            showFlash('タイトルを更新しました', 'success');
+          } catch (error) {
+            notifyActionError(error);
+          }
         });
       }
 
