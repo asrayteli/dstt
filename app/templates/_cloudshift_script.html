@@ -6390,6 +6390,7 @@
       }
       if ($('cloud-view-url')) $('cloud-view-url').value = (project.urls && project.urls.view_url) || '';
       if ($('cloud-edit-url')) $('cloud-edit-url').value = (project.urls && project.urls.edit_url) || '';
+      if ($('cloud-pwa-url')) $('cloud-pwa-url').value = (project.urls && project.urls.pwa_url) || '';
 
       if ($('cloud-project-badges')) {
         const shareText = shareBadgeText(project);
@@ -6447,8 +6448,13 @@
       if ($('cloud-project-clear-employee')) $('cloud-project-clear-employee').classList.toggle('cloud-hidden', !canManageProject || project.mode !== 'person');
       if ($('cloud-open-view-url')) $('cloud-open-view-url').classList.toggle('cloud-hidden', !canManageProject);
       if ($('cloud-copy-view-url')) $('cloud-copy-view-url').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-regen-view-url')) $('cloud-regen-view-url').classList.toggle('cloud-hidden', !canManageProject);
       if ($('cloud-open-edit-url')) $('cloud-open-edit-url').classList.toggle('cloud-hidden', !canManageProject);
       if ($('cloud-copy-edit-url')) $('cloud-copy-edit-url').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-regen-edit-url')) $('cloud-regen-edit-url').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-open-pwa-url')) $('cloud-open-pwa-url').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-copy-pwa-url')) $('cloud-copy-pwa-url').classList.toggle('cloud-hidden', !canManageProject);
+      if ($('cloud-regen-pwa-url')) $('cloud-regen-pwa-url').classList.toggle('cloud-hidden', !canManageProject);
       if ($('cloud-delete-month')) $('cloud-delete-month').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
       if ($('cloud-delete-project')) $('cloud-delete-project').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
       if ($('cloud-regenerate-urls')) $('cloud-regenerate-urls').classList.toggle('cloud-hidden', !canManageProject);
@@ -7000,19 +7006,45 @@
       showFlash('シフト帳を一覧から非表示にしました', 'success');
     }
 
+    const SHARE_URL_LABELS = { view: '閲覧URL', edit: '編集URL', pwa: 'ViewPWA URL' };
+
+    function applyRegeneratedUrls(urls) {
+      if (!urls) return;
+      if (state.projectPayload && state.projectPayload.project) {
+        state.projectPayload.project.urls = urls;
+      }
+      if ($('cloud-view-url')) $('cloud-view-url').value = urls.view_url || '';
+      if ($('cloud-edit-url')) $('cloud-edit-url').value = urls.edit_url || '';
+      if ($('cloud-pwa-url')) $('cloud-pwa-url').value = urls.pwa_url || '';
+    }
+
     async function regenerateUrls() {
       const project = currentProject();
       if (!project) return;
-      if (!window.confirm('公開URLと編集URLを再発行しますか？既存のURLは無効になります。')) return;
+      if (!window.confirm('閲覧URL・編集URL・ViewPWA URLの3つすべてを再発行しますか？既存のURLは無効になります。')) return;
 
       const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/tokens/regenerate`, {
         method: 'POST',
         body: {}
       });
 
-      if ($('cloud-view-url')) $('cloud-view-url').value = data.urls.view_url || '';
-      if ($('cloud-edit-url')) $('cloud-edit-url').value = data.urls.edit_url || '';
-      showFlash('URLを再発行しました', 'success');
+      applyRegeneratedUrls(data.urls);
+      showFlash('共有URLを再発行しました', 'success');
+    }
+
+    async function regenerateSingleUrl(target) {
+      const project = currentProject();
+      if (!project) return;
+      const label = SHARE_URL_LABELS[target] || '共有URL';
+      if (!window.confirm(`${label}を再発行しますか？既存の${label}は無効になります（他の共有URLはそのまま使えます）。`)) return;
+
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/tokens/regenerate`, {
+        method: 'POST',
+        body: { targets: [target] }
+      });
+
+      applyRegeneratedUrls(data.urls);
+      showFlash(`${label}を再発行しました`, 'success');
     }
 
     async function copyText(text, message) {
@@ -7210,14 +7242,27 @@
                 <span>閲覧URL</span>
                 <input class="cloud-input" type="text" value="${escapeHtml(urls.view_url || '')}" readonly>
               </label>
+              <div class="cloud-actions compact">
+                <button type="button" class="cloud-btn ghost" data-shift-settings-regenerate-one="view">閲覧URLを再発行</button>
+              </div>
               <label class="cloud-field">
                 <span>編集URL</span>
                 <input class="cloud-input" type="text" value="${escapeHtml(urls.edit_url || '')}" readonly>
               </label>
-              <p class="cloud-panel-note">URLを再発行すると旧URLは無効になります。未処理申請は残すか破棄するか選べます。</p>
               <div class="cloud-actions compact">
-                <button type="button" class="cloud-btn secondary" data-shift-settings-regenerate="keep">未処理申請を残して再発行</button>
-                <button type="button" class="cloud-btn danger" data-shift-settings-regenerate="reject">未処理申請を破棄して再発行</button>
+                <button type="button" class="cloud-btn ghost" data-shift-settings-regenerate-one="edit">編集URLを再発行</button>
+              </div>
+              <label class="cloud-field">
+                <span>ViewPWA URL（スマホ閲覧・更新通知）</span>
+                <input class="cloud-input" type="text" value="${escapeHtml(urls.pwa_url || '')}" readonly>
+              </label>
+              <div class="cloud-actions compact">
+                <button type="button" class="cloud-btn ghost" data-shift-settings-regenerate-one="pwa">ViewPWA URLを再発行</button>
+              </div>
+              <p class="cloud-panel-note">各共有URLは個別に再発行できます。再発行するとその旧URLだけが無効になります。下のボタンは3つまとめて再発行し、閲覧URLの未処理申請を残すか破棄するか選べます。</p>
+              <div class="cloud-actions compact">
+                <button type="button" class="cloud-btn secondary" data-shift-settings-regenerate="keep">未処理申請を残して3つ再発行</button>
+                <button type="button" class="cloud-btn danger" data-shift-settings-regenerate="reject">未処理申請を破棄して3つ再発行</button>
               </div>
             </section>
           </div>
@@ -7307,6 +7352,9 @@
       });
       modal.querySelectorAll('[data-shift-settings-regenerate]').forEach((button) => {
         button.addEventListener('click', () => regenerateUrlsFromSettings(button.getAttribute('data-shift-settings-regenerate') === 'reject', modal).catch((error) => showFlash(error.message, 'error')));
+      });
+      modal.querySelectorAll('[data-shift-settings-regenerate-one]').forEach((button) => {
+        button.addEventListener('click', () => regenerateSingleUrlFromSettings(button.getAttribute('data-shift-settings-regenerate-one'), modal).catch((error) => showFlash(error.message, 'error')));
       });
     }
 
@@ -7477,16 +7525,29 @@
           reject_pending_leave_change_requests: rejectPending
         }
       });
-      if (state.projectPayload && state.projectPayload.project) {
-        state.projectPayload.project.urls = data.urls || state.projectPayload.project.urls;
-        if ($('cloud-view-url')) $('cloud-view-url').value = data.urls.view_url || '';
-        if ($('cloud-edit-url')) $('cloud-edit-url').value = data.urls.edit_url || '';
-      }
+      applyRegeneratedUrls(data.urls);
       applyShiftBookSettingsPayload(data);
       state.shiftBookSettings.requests = data.leave_change_requests || state.shiftBookSettings.requests;
       renderShiftBookSettingsModalBody(modal);
       renderWorkspace(canEditCurrentProject());
-      showFlash(rejectPending && pendingCount ? '未処理申請を破棄してURLを再発行しました' : 'URLを再発行しました', 'success');
+      showFlash(rejectPending && pendingCount ? '未処理申請を破棄して共有URLを再発行しました' : '共有URLを再発行しました', 'success');
+    }
+
+    async function regenerateSingleUrlFromSettings(target, modal) {
+      const project = currentProject();
+      if (!project) return;
+      const label = SHARE_URL_LABELS[target] || '共有URL';
+      if (!window.confirm(`${label}を再発行しますか？既存の${label}は無効になります（他の共有URLはそのまま使えます）。`)) return;
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/tokens/regenerate`, {
+        method: 'POST',
+        body: { targets: [target] }
+      });
+      applyRegeneratedUrls(data.urls);
+      applyShiftBookSettingsPayload(data);
+      state.shiftBookSettings.requests = data.leave_change_requests || state.shiftBookSettings.requests;
+      renderShiftBookSettingsModalBody(modal);
+      renderWorkspace(canEditCurrentProject());
+      showFlash(`${label}を再発行しました`, 'success');
     }
 
     function bindOwnerEvents() {
@@ -7613,6 +7674,21 @@
 
       const copyEdit = $('cloud-copy-edit-url');
       if (copyEdit) copyEdit.addEventListener('click', () => copyText($('cloud-edit-url').value, '編集URLをコピーしました').catch((error) => showFlash(error.message, 'error')));
+
+      const openPwa = $('cloud-open-pwa-url');
+      if (openPwa) openPwa.addEventListener('click', () => window.open($('cloud-pwa-url').value, '_blank', 'noopener'));
+
+      const copyPwa = $('cloud-copy-pwa-url');
+      if (copyPwa) copyPwa.addEventListener('click', () => copyText($('cloud-pwa-url').value, 'ViewPWA URLをコピーしました').catch((error) => showFlash(error.message, 'error')));
+
+      const regenView = $('cloud-regen-view-url');
+      if (regenView) regenView.addEventListener('click', () => regenerateSingleUrl('view').catch((error) => showFlash(error.message, 'error')));
+
+      const regenEdit = $('cloud-regen-edit-url');
+      if (regenEdit) regenEdit.addEventListener('click', () => regenerateSingleUrl('edit').catch((error) => showFlash(error.message, 'error')));
+
+      const regenPwa = $('cloud-regen-pwa-url');
+      if (regenPwa) regenPwa.addEventListener('click', () => regenerateSingleUrl('pwa').catch((error) => showFlash(error.message, 'error')));
 
       const regenerate = $('cloud-regenerate-urls');
       if (regenerate) regenerate.addEventListener('click', () => regenerateUrls().catch((error) => showFlash(error.message, 'error')));

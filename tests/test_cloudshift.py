@@ -183,6 +183,76 @@ def test_owner_can_create_and_public_view_can_read(tmp_path):
     assert "edit_url" not in public_data["project"]["urls"]
 
 
+def test_share_urls_can_be_reissued_individually(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Reissue Team", "mode": "scene", "year": "2026", "month": "4"},
+    )
+    assert create_response.status_code == 200
+    project = create_response.get_json()["project"]["project"]
+    project_id = project["id"]
+    original = {
+        "view": _token_from_url(project["urls"]["view_url"]),
+        "edit": _token_from_url(project["urls"]["edit_url"]),
+        "pwa": _token_from_url(project["urls"]["pwa_url"]),
+    }
+
+    # 閲覧URLだけ再発行する。他の2つは変わらない。
+    view_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/tokens/regenerate",
+        json={"targets": ["view"]},
+    )
+    assert view_response.status_code == 200
+    urls = view_response.get_json()["urls"]
+    assert _token_from_url(urls["view_url"]) != original["view"]
+    assert _token_from_url(urls["edit_url"]) == original["edit"]
+    assert _token_from_url(urls["pwa_url"]) == original["pwa"]
+    after_view = {key: _token_from_url(urls[f"{key}_url"]) for key in ("view", "edit", "pwa")}
+
+    # ViewPWA URLだけ再発行する。閲覧・編集URLは据え置き。
+    pwa_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/tokens/regenerate",
+        json={"targets": ["pwa"]},
+    )
+    assert pwa_response.status_code == 200
+    urls = pwa_response.get_json()["urls"]
+    assert _token_from_url(urls["view_url"]) == after_view["view"]
+    assert _token_from_url(urls["edit_url"]) == after_view["edit"]
+    assert _token_from_url(urls["pwa_url"]) != after_view["pwa"]
+
+    # 対象が空なら拒否する。
+    empty_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/tokens/regenerate",
+        json={"targets": []},
+    )
+    assert empty_response.status_code == 400
+
+
+def test_regenerate_without_targets_reissues_all_share_urls(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    create_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Reissue All", "mode": "scene", "year": "2026", "month": "4"},
+    )
+    project = create_response.get_json()["project"]["project"]
+    project_id = project["id"]
+    original = {key: _token_from_url(project["urls"][f"{key}_url"]) for key in ("view", "edit", "pwa")}
+
+    response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/tokens/regenerate",
+        json={},
+    )
+    assert response.status_code == 200
+    urls = response.get_json()["urls"]
+    for key in ("view", "edit", "pwa"):
+        assert _token_from_url(urls[f"{key}_url"]) != original[key]
+
+
 def test_person_shift_can_be_created_without_employee_and_linked_later(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
