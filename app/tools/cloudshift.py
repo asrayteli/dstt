@@ -8097,12 +8097,51 @@ def _maybe_notify_pwa_month_change(
         before_norm = _normalize_entries(before_entries, year, month) if before_entries is not None else None
         if before_norm == after_entries:
             return
-        _dispatch_pwa_shift_notification(project, year, month)
+        changes = _collect_pwa_change_descriptions(before_norm, after_entries, year, month)
+        _dispatch_pwa_shift_notification(project, year, month, changes)
     except Exception as exc:  # noqa: BLE001 - 通知失敗で保存処理を巻き込まない
         logger.warning("CloudShift PWA notify skipped for %s: %s", project.get("id"), exc)
 
 
-def _dispatch_pwa_shift_notification(project: dict[str, Any], year: int, month: int) -> None:
+PWA_NOTIFY_CHANGE_LIMIT = 3
+
+
+def _collect_pwa_change_descriptions(
+    before: dict[str, Any] | None,
+    after: dict[str, Any],
+    year: int,
+    month: int,
+) -> list[str]:
+    """通知に出すための、日単位の変更内容文字列を日付順に集める。"""
+    days = monthrange(year, month)[1]
+    descriptions: list[str] = []
+    for day in range(1, days + 1):
+        before_day = (before or {}).get(str(day), [])
+        after_day = after.get(str(day), [])
+        if before_day == after_day:
+            continue
+        descriptions.extend(_describe_day_changes(before_day, after_day, day))
+    return descriptions
+
+
+def _format_pwa_notification_body(year: int, month: int, changes: list[str]) -> str:
+    header = f"{year}年{month}月のシフトに変更がありました。"
+    if not changes:
+        return f"{header} タップして最新の内容を確認してください。"
+    visible = changes[:PWA_NOTIFY_CHANGE_LIMIT]
+    remaining = len(changes) - len(visible)
+    summary = "、".join(visible)
+    if remaining > 0:
+        summary = f"{summary} 他{remaining}件"
+    return f"{header} {summary}"
+
+
+def _dispatch_pwa_shift_notification(
+    project: dict[str, Any],
+    year: int,
+    month: int,
+    changes: list[str],
+) -> None:
     from app.services.cloudshift_push import push_available, send_push_to_project_async
 
     pwa_token = str(project.get("pwa_token") or "").strip()
@@ -8116,7 +8155,7 @@ def _dispatch_pwa_shift_notification(project: dict[str, Any], year: int, month: 
         return
     month_key = _month_key(year, month)
     title = f"{project.get('title') or 'シフト帳'} のシフトが更新されました"
-    body = f"{year}年{month}月のシフトに変更がありました。タップして最新の内容を確認してください。"
+    body = _format_pwa_notification_body(year, month, changes)
     url = url_for("cloudshift.public_pwa", token=pwa_token, month_key=month_key, _external=False)
     send_push_to_project_async(
         current_app._get_current_object(),

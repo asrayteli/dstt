@@ -604,7 +604,11 @@ def create_app(test_config=None):
         "/tools/shiftersync/download/",
         "/tools/shiftersync/cloudshift/view/",
         "/tools/shiftersync/cloudshift/edit/",
+        # ViewPWA はスマホからのインストール・閲覧と Web Push 受信を前提とした
+        # 共有先向けエンドポイント。リンクの保持が認可となるので未ログインで通す。
+        "/tools/shiftersync/cloudshift/pwa/",
         "/tools/shiftersync/cloudshift/api/public/",
+        "/tools/shiftersync/cloudshift/api/pwa/",
     )
 
     @app.before_request
