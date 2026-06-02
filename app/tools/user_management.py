@@ -9,11 +9,16 @@ from app.models import (
     AccessBranch,
     AccessOffice,
     AccessDepartment,
+    FilePostDownloadLog,
+    FilePostUploadLog,
     GroupToolPermission,
     Site,
     ToolCategory,
     ToolSettings,
+    ToBellTask,
     UserAccessibleOffice,
+    UserActivityLog,
+    UserLoginLog,
     UserToolPermission,
 )
 from app.access_control import (
@@ -32,6 +37,8 @@ from app.announcement_store import (
 import re
 import secrets
 import string
+from datetime import datetime, time
+from sqlalchemy import or_
 
 user_management_bp = Blueprint("user_management", __name__, url_prefix="/tools/user_management")
 
@@ -1167,6 +1174,324 @@ def update_leave_mgr_calendar_office_code(calendar_id):
     if not ok:
         return jsonify({"error": err or "更新に失敗しました"}), 400
     return jsonify({"success": True, "calendar_id": calendar_id, "office_code": code})
+
+
+# ============================================================
+# アクセス管理（ユーザー別ログ）
+# ============================================================
+
+
+def _dt_to_iso(value):
+    return value.isoformat() if value else None
+
+
+def _parse_datetime_param(value, *, end_of_day=False):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        if len(raw) <= 10:
+            base = datetime.fromisoformat(raw)
+            return datetime.combine(base.date(), time.max if end_of_day else time.min)
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _limit_param(default=100, maximum=500):
+    try:
+        value = int(request.args.get("limit", default))
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(maximum, value))
+
+
+def _apply_range(query, column):
+    start = _parse_datetime_param(request.args.get("from"))
+    end = _parse_datetime_param(request.args.get("to"), end_of_day=True)
+    if start is not None:
+        query = query.filter(column >= start)
+    if end is not None:
+        query = query.filter(column <= end)
+    return query
+
+
+def _tool_label_map():
+    return {
+        item.get("key") or str(item.get("href", "")).strip("/").rsplit("/", 1)[-1]: item.get("label")
+        for item in NAV_ITEMS
+    }
+
+
+@user_management_bp.route("/api/access-management/users", methods=["GET"])
+@login_required
+def access_management_users():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    users = User.query.order_by(User.name, User.username).all()
+    return jsonify({
+        "users": [
+            {
+                "id": user.id,
+                "username": user.username,
+                "display_name": user.name or user.username,
+                "label": f"{user.name or user.username}（{user.username}）",
+                "is_admin": is_admin_user(user),
+            }
+            for user in users
+        ]
+    })
+
+
+@user_management_bp.route("/api/access-management/users/<int:user_id>", methods=["GET"])
+@login_required
+def access_management_user_detail(user_id):
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({"error": "ユーザーが見つかりません"}), 404
+
+    username = user.username
+    q = str(request.args.get("q") or "").strip()
+    like = f"%{q}%"
+    limit = _limit_param()
+    tool_labels = _tool_label_map()
+
+    login_query = _apply_range(
+        UserLoginLog.query.filter_by(username=username),
+        UserLoginLog.logged_in_at,
+    )
+    if q:
+        login_query = login_query.filter(
+            or_(
+                UserLoginLog.ip_address.ilike(like),
+                UserLoginLog.user_agent.ilike(like),
+            )
+        )
+    login_logs = login_query.order_by(UserLoginLog.logged_in_at.desc()).limit(limit).all()
+
+    activity_query = _apply_range(
+        UserActivityLog.query.filter_by(username=username),
+        UserActivityLog.created_at,
+    )
+    if q:
+        activity_query = activity_query.filter(
+            or_(
+                UserActivityLog.tool_key.ilike(like),
+                UserActivityLog.tool_label.ilike(like),
+                UserActivityLog.path.ilike(like),
+                UserActivityLog.endpoint.ilike(like),
+            )
+        )
+    activity_logs = activity_query.order_by(UserActivityLog.created_at.desc()).limit(limit).all()
+
+    task_query = _apply_range(
+        ToBellTask.query.filter(
+            or_(
+                ToBellTask.created_by == username,
+                ToBellTask.assigned_to == username,
+                ToBellTask.reviewer_id == username,
+            )
+        ),
+        ToBellTask.updated_at,
+    )
+    if q:
+        task_query = task_query.filter(
+            or_(
+                ToBellTask.title.ilike(like),
+                ToBellTask.description.ilike(like),
+                ToBellTask.status.ilike(like),
+                ToBellTask.priority.ilike(like),
+                ToBellTask.source_tool.ilike(like),
+            )
+        )
+    tasks = task_query.order_by(ToBellTask.updated_at.desc()).limit(limit).all()
+
+    upload_query = _apply_range(
+        FilePostUploadLog.query.filter_by(uploader=username),
+        FilePostUploadLog.uploaded_at,
+    )
+    if q:
+        upload_query = upload_query.filter(
+            or_(
+                FilePostUploadLog.file_name.ilike(like),
+                FilePostUploadLog.share_uid.ilike(like),
+                FilePostUploadLog.display_id.ilike(like),
+            )
+        )
+    uploads = upload_query.order_by(FilePostUploadLog.uploaded_at.desc()).limit(limit).all()
+
+    download_query = _apply_range(
+        FilePostDownloadLog.query.filter(
+            or_(
+                FilePostDownloadLog.uploader == username,
+                FilePostDownloadLog.downloader == username,
+            )
+        ),
+        FilePostDownloadLog.downloaded_at,
+    )
+    if q:
+        download_query = download_query.filter(
+            or_(
+                FilePostDownloadLog.file_name.ilike(like),
+                FilePostDownloadLog.share_uid.ilike(like),
+                FilePostDownloadLog.display_id.ilike(like),
+                FilePostDownloadLog.downloader.ilike(like),
+                FilePostDownloadLog.downloader_label.ilike(like),
+                FilePostDownloadLog.ip_address.ilike(like),
+            )
+        )
+    downloads = download_query.order_by(FilePostDownloadLog.downloaded_at.desc()).limit(limit).all()
+
+    login_success_count = UserLoginLog.query.filter_by(username=username, success=True).count()
+    last_login = (
+        UserLoginLog.query.filter_by(username=username, success=True)
+        .order_by(UserLoginLog.logged_in_at.desc())
+        .first()
+    )
+    tool_total = UserActivityLog.query.filter_by(username=username).count()
+    upload_total = FilePostUploadLog.query.filter_by(uploader=username).count()
+    download_total = FilePostDownloadLog.query.filter(
+        or_(FilePostDownloadLog.uploader == username, FilePostDownloadLog.downloader == username)
+    ).count()
+    task_total = ToBellTask.query.filter(
+        or_(
+            ToBellTask.created_by == username,
+            ToBellTask.assigned_to == username,
+            ToBellTask.reviewer_id == username,
+        )
+    ).count()
+
+    tool_rows = (
+        db.session.query(UserActivityLog.tool_key, db.func.count(UserActivityLog.id))
+        .filter(UserActivityLog.username == username)
+        .group_by(UserActivityLog.tool_key)
+        .order_by(db.func.count(UserActivityLog.id).desc())
+        .limit(12)
+        .all()
+    )
+    task_status_rows = (
+        db.session.query(ToBellTask.status, db.func.count(ToBellTask.id))
+        .filter(
+            or_(
+                ToBellTask.created_by == username,
+                ToBellTask.assigned_to == username,
+                ToBellTask.reviewer_id == username,
+            )
+        )
+        .group_by(ToBellTask.status)
+        .all()
+    )
+
+    return jsonify({
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "display_name": user.name or user.username,
+            "is_admin": is_admin_user(user),
+        },
+        "summary": {
+            "last_login": _dt_to_iso(last_login.logged_in_at) if last_login else None,
+            "login_count": login_success_count,
+            "tool_activity_count": tool_total,
+            "to_bell_task_count": task_total,
+            "filepost_upload_count": upload_total,
+            "filepost_download_count": download_total,
+            "top_tools": [
+                {
+                    "tool_key": key,
+                    "tool_label": tool_labels.get(key, key),
+                    "count": count,
+                }
+                for key, count in tool_rows
+            ],
+            "task_status_counts": [
+                {"status": status or "unknown", "count": count}
+                for status, count in task_status_rows
+            ],
+        },
+        "login_logs": [
+            {
+                "id": row.id,
+                "success": bool(row.success),
+                "logged_in_at": _dt_to_iso(row.logged_in_at),
+                "ip_address": row.ip_address or "",
+                "user_agent": row.user_agent or "",
+            }
+            for row in login_logs
+        ],
+        "activity_logs": [
+            {
+                "id": row.id,
+                "tool_key": row.tool_key,
+                "tool_label": row.tool_label or tool_labels.get(row.tool_key, row.tool_key),
+                "method": row.method,
+                "path": row.path,
+                "endpoint": row.endpoint or "",
+                "status_code": row.status_code,
+                "duration_ms": row.duration_ms,
+                "ip_address": row.ip_address or "",
+                "created_at": _dt_to_iso(row.created_at),
+            }
+            for row in activity_logs
+        ],
+        "to_bell_tasks": [
+            {
+                "id": task.id,
+                "title": task.title,
+                "description": task.description or "",
+                "status": task.status,
+                "priority": task.priority,
+                "created_by": task.created_by,
+                "assigned_to": task.assigned_to or "",
+                "reviewer_id": task.reviewer_id or "",
+                "due_at": _dt_to_iso(task.due_at),
+                "completed_at": _dt_to_iso(task.completed_at),
+                "created_at": _dt_to_iso(task.created_at),
+                "updated_at": _dt_to_iso(task.updated_at),
+                "subtasks": [
+                    {"title": sub.title, "is_done": bool(sub.is_done)}
+                    for sub in task.subtasks
+                ],
+            }
+            for task in tasks
+        ],
+        "filepost_uploads": [
+            {
+                "id": row.id,
+                "share_uid": row.share_uid,
+                "display_id": row.display_id or "",
+                "file_name": row.file_name,
+                "file_index": row.file_index,
+                "file_size": int(row.file_size or 0),
+                "is_internal": bool(row.is_internal),
+                "ip_address": row.ip_address or "",
+                "uploaded_at": _dt_to_iso(row.uploaded_at),
+            }
+            for row in uploads
+        ],
+        "filepost_downloads": [
+            {
+                "id": row.id,
+                "share_uid": row.share_uid,
+                "display_id": row.display_id or "",
+                "uploader": row.uploader or "",
+                "downloader": row.downloader or "",
+                "downloader_label": row.downloader_label or "外部/匿名",
+                "file_name": row.file_name,
+                "file_index": row.file_index,
+                "download_type": row.download_type,
+                "file_size": int(row.file_size or 0),
+                "ip_address": row.ip_address or "",
+                "downloaded_at": _dt_to_iso(row.downloaded_at),
+                "role": "downloaded_by_user" if row.downloader == username else "uploaded_by_user",
+            }
+            for row in downloads
+        ],
+    })
 
 
 # ============================================================

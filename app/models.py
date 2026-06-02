@@ -165,6 +165,76 @@ class UserToolPermission(db.Model):
         }
 
 
+class UserLoginLog(db.Model):
+    """DSTT login audit log."""
+
+    __tablename__ = 'user_login_logs'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    username = db.Column(db.String(80), nullable=False, index=True)
+    success = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    logged_in_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    ip_address = db.Column(db.String(80), nullable=True)
+    user_agent = db.Column(db.Text, nullable=True)
+
+
+class UserActivityLog(db.Model):
+    """Per-user tool access log captured for admin reporting."""
+
+    __tablename__ = 'user_activity_logs'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    username = db.Column(db.String(80), nullable=False, index=True)
+    tool_key = db.Column(db.String(80), nullable=False, index=True)
+    tool_label = db.Column(db.String(120), nullable=True)
+    endpoint = db.Column(db.String(160), nullable=True)
+    method = db.Column(db.String(10), nullable=False)
+    path = db.Column(db.String(500), nullable=False)
+    status_code = db.Column(db.Integer, nullable=False, index=True)
+    duration_ms = db.Column(db.Integer, nullable=True)
+    ip_address = db.Column(db.String(80), nullable=True)
+    user_agent = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class FilePostDownloadLog(db.Model):
+    """FILE POST download audit log."""
+
+    __tablename__ = 'filepost_download_logs'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    share_uid = db.Column(db.String(32), nullable=False, index=True)
+    display_id = db.Column(db.String(32), nullable=True, index=True)
+    uploader = db.Column(db.String(80), nullable=True, index=True)
+    downloader = db.Column(db.String(80), nullable=True, index=True)
+    downloader_label = db.Column(db.String(120), nullable=True)
+    file_name = db.Column(db.String(255), nullable=False)
+    file_index = db.Column(db.Integer, nullable=True)
+    download_type = db.Column(db.String(20), nullable=False, default='file')
+    file_size = db.Column(db.BigInteger, nullable=True)
+    ip_address = db.Column(db.String(80), nullable=True)
+    user_agent = db.Column(db.Text, nullable=True)
+    downloaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class FilePostUploadLog(db.Model):
+    """FILE POST upload audit log."""
+
+    __tablename__ = 'filepost_upload_logs'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    share_uid = db.Column(db.String(32), nullable=False, index=True)
+    display_id = db.Column(db.String(32), nullable=True, index=True)
+    uploader = db.Column(db.String(80), nullable=False, index=True)
+    file_name = db.Column(db.String(255), nullable=False)
+    file_index = db.Column(db.Integer, nullable=True)
+    file_size = db.Column(db.BigInteger, nullable=True)
+    is_internal = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    ip_address = db.Column(db.String(80), nullable=True)
+    user_agent = db.Column(db.Text, nullable=True)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 class PasswordVault(db.Model):
     """Client-side encrypted password vault metadata."""
 

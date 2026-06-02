@@ -11,6 +11,7 @@
   <div class="border-b border-gray-200 mb-6">
     <nav class="flex gap-2 flex-wrap">
       <button data-tab="users" class="admin-tab px-4 py-2 border-b-2 border-red-600 text-red-700 font-medium">👤 ユーザー管理</button>
+      <button data-tab="access-management" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">📊 アクセス管理</button>
       <button data-tab="permissions" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🔐 ツールアクセス権（個人）</button>
       <button data-tab="group-perms" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🏷️ グループ付与</button>
       <button data-tab="organization" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🏢 支店・営業所・担当</button>
@@ -43,6 +44,110 @@
         </thead>
         <tbody id="users-tbody"></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- ===== アクセス管理 ===== -->
+  <section id="tab-access-management" class="admin-section hidden">
+    <div class="bg-white rounded-xl shadow p-6">
+      <div class="flex flex-col lg:flex-row lg:items-end gap-3 mb-5">
+        <div class="flex-1 min-w-[240px]">
+          <label class="block text-sm font-medium mb-1">ユーザー（表示名で選択）</label>
+          <select id="access-user-select" class="w-full border rounded px-3 py-2"></select>
+        </div>
+        <div class="flex-1 min-w-[220px]">
+          <label class="block text-sm font-medium mb-1">検索</label>
+          <input id="access-search" class="w-full border rounded px-3 py-2" placeholder="ツール名・タスク名・ファイル名・IPなど">
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">開始日</label>
+          <input id="access-from" type="date" class="border rounded px-3 py-2">
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">終了日</label>
+          <input id="access-to" type="date" class="border rounded px-3 py-2">
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">件数</label>
+          <select id="access-limit" class="border rounded px-3 py-2">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+          </select>
+        </div>
+        <button id="btn-access-load" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">表示</button>
+      </div>
+
+      <div id="access-empty" class="border rounded bg-gray-50 p-5 text-sm text-gray-600">
+        ユーザーを選択すると、ログイン日時、ツール利用、To Bellタスク、FILE POSTのアップロード/ダウンロード履歴を表示します。
+      </div>
+
+      <div id="access-content" class="hidden space-y-6">
+        <div id="access-summary" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3"></div>
+
+        <div class="border rounded overflow-hidden">
+          <div class="bg-gray-50 px-4 py-2 font-semibold">ログイン日時</div>
+          <div class="max-h-72 overflow-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-white sticky top-0 text-left">
+                <tr><th class="p-2">日時</th><th class="p-2">結果</th><th class="p-2">IP</th><th class="p-2">端末</th></tr>
+              </thead>
+              <tbody id="access-login-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="border rounded overflow-hidden">
+          <div class="bg-gray-50 px-4 py-2 font-semibold">ツール利用ログ</div>
+          <div id="access-tool-ranking" class="px-4 py-2 border-b text-xs text-gray-600"></div>
+          <div class="max-h-80 overflow-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-white sticky top-0 text-left">
+                <tr><th class="p-2">日時</th><th class="p-2">ツール</th><th class="p-2">操作</th><th class="p-2">状態</th><th class="p-2">時間</th><th class="p-2">IP</th></tr>
+              </thead>
+              <tbody id="access-activity-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="border rounded overflow-hidden">
+          <div class="bg-gray-50 px-4 py-2 font-semibold">To Bell タスク内容</div>
+          <div class="max-h-96 overflow-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-white sticky top-0 text-left">
+                <tr><th class="p-2">更新日</th><th class="p-2">件名</th><th class="p-2">内容</th><th class="p-2">状態</th><th class="p-2">担当</th><th class="p-2">期限</th></tr>
+              </thead>
+              <tbody id="access-tobell-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div class="border rounded overflow-hidden">
+            <div class="bg-gray-50 px-4 py-2 font-semibold">FILE POST アップロード</div>
+            <div class="max-h-80 overflow-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-white sticky top-0 text-left">
+                  <tr><th class="p-2">日時</th><th class="p-2">ファイル</th><th class="p-2">共有ID</th><th class="p-2">サイズ</th><th class="p-2">区分</th></tr>
+                </thead>
+                <tbody id="access-filepost-upload-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="border rounded overflow-hidden">
+            <div class="bg-gray-50 px-4 py-2 font-semibold">FILE POST ダウンロード</div>
+            <div class="max-h-80 overflow-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-white sticky top-0 text-left">
+                  <tr><th class="p-2">日時</th><th class="p-2">ファイル</th><th class="p-2">アップロード者</th><th class="p-2">ダウンロード者</th><th class="p-2">IP</th></tr>
+                </thead>
+                <tbody id="access-filepost-download-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -391,6 +496,8 @@ const state = {
   branches: [],
   tools: [],
   selectedUserId: null,
+  accessUsers: [],
+  accessDetail: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -417,6 +524,7 @@ $$('.admin-tab').forEach(btn => btn.addEventListener('click', () => {
   $$('.admin-section').forEach(sec => sec.classList.add('hidden'));
   $(`#tab-${tab}`).classList.remove('hidden');
   if (tab === 'users') loadUsers();
+  if (tab === 'access-management') loadAccessManagement();
   if (tab === 'permissions') loadPermissions();
   if (tab === 'organization') loadOrganization();
   if (tab === 'group-perms') loadGroupPerms();
@@ -458,6 +566,176 @@ function renderUsers() {
 function escape(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
+
+function fmtDate(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return escape(value);
+  return d.toLocaleString('ja-JP', { hour12: false });
+}
+
+function fmtBytes(bytes) {
+  const n = Number(bytes || 0);
+  if (!n) return '-';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = n;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx += 1;
+  }
+  return `${value.toFixed(value >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function shortText(value, max = 120) {
+  const s = String(value || '').trim();
+  if (s.length <= max) return escape(s);
+  return `${escape(s.slice(0, max))}…`;
+}
+
+function emptyRow(colspan, text = '該当するログはありません') {
+  return `<tr><td class="p-3 text-gray-500" colspan="${colspan}">${escape(text)}</td></tr>`;
+}
+
+// ===== Access Management =====
+async function loadAccessManagement() {
+  if (!state.accessUsers.length) {
+    const res = await api('/tools/user_management/api/access-management/users');
+    state.accessUsers = res.users || [];
+    const sel = $('#access-user-select');
+    sel.innerHTML = '<option value="">ユーザーを選択</option>' +
+      state.accessUsers.map(u => `<option value="${u.id}">${escape(u.label)}${u.is_admin ? ' [管理者]' : ''}</option>`).join('');
+    sel.onchange = loadSelectedAccessLogs;
+  }
+  if ($('#access-user-select').value) {
+    await loadSelectedAccessLogs();
+  }
+}
+
+function accessQuery() {
+  const params = new URLSearchParams();
+  const q = $('#access-search').value.trim();
+  const from = $('#access-from').value;
+  const to = $('#access-to').value;
+  const limit = $('#access-limit').value;
+  if (q) params.set('q', q);
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (limit) params.set('limit', limit);
+  return params.toString();
+}
+
+async function loadSelectedAccessLogs() {
+  const userId = $('#access-user-select').value;
+  if (!userId) {
+    $('#access-empty').classList.remove('hidden');
+    $('#access-content').classList.add('hidden');
+    return;
+  }
+  const suffix = accessQuery();
+  state.accessDetail = await api(`/tools/user_management/api/access-management/users/${userId}${suffix ? '?' + suffix : ''}`);
+  renderAccessManagement();
+}
+
+function renderAccessManagement() {
+  const data = state.accessDetail;
+  if (!data) return;
+  $('#access-empty').classList.add('hidden');
+  $('#access-content').classList.remove('hidden');
+
+  const summary = data.summary || {};
+  const cards = [
+    ['最終ログイン', summary.last_login ? fmtDate(summary.last_login) : '-'],
+    ['ログイン回数', summary.login_count || 0],
+    ['ツール利用', summary.tool_activity_count || 0],
+    ['To Bellタスク', summary.to_bell_task_count || 0],
+    ['FILE POST', `UP ${summary.filepost_upload_count || 0} / DL ${summary.filepost_download_count || 0}`],
+  ];
+  $('#access-summary').innerHTML = cards.map(([label, value]) => `
+    <div class="border rounded bg-gray-50 p-3">
+      <div class="text-xs text-gray-500">${escape(label)}</div>
+      <div class="text-lg font-semibold mt-1">${escape(value)}</div>
+    </div>
+  `).join('');
+
+  const tools = summary.top_tools || [];
+  $('#access-tool-ranking').innerHTML = tools.length
+    ? tools.map(t => `<span class="inline-block mr-2 mb-1 bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded">${escape(t.tool_label || t.tool_key)}: ${t.count}</span>`).join('')
+    : 'ツール利用の集計はまだありません';
+
+  const logins = data.login_logs || [];
+  $('#access-login-tbody').innerHTML = logins.length ? logins.map(row => `
+    <tr class="border-t">
+      <td class="p-2 whitespace-nowrap">${fmtDate(row.logged_in_at)}</td>
+      <td class="p-2">${row.success ? '<span class="text-green-700">成功</span>' : '<span class="text-red-700">失敗</span>'}</td>
+      <td class="p-2 font-mono text-xs">${escape(row.ip_address || '-')}</td>
+      <td class="p-2 text-xs">${shortText(row.user_agent, 90)}</td>
+    </tr>
+  `).join('') : emptyRow(4);
+
+  const activities = data.activity_logs || [];
+  $('#access-activity-tbody').innerHTML = activities.length ? activities.map(row => `
+    <tr class="border-t">
+      <td class="p-2 whitespace-nowrap">${fmtDate(row.created_at)}</td>
+      <td class="p-2">${escape(row.tool_label || row.tool_key)}</td>
+      <td class="p-2"><span class="font-mono text-xs">${escape(row.method)}</span> ${shortText(row.path, 90)}</td>
+      <td class="p-2">${row.status_code}</td>
+      <td class="p-2">${row.duration_ms == null ? '-' : escape(row.duration_ms + ' ms')}</td>
+      <td class="p-2 font-mono text-xs">${escape(row.ip_address || '-')}</td>
+    </tr>
+  `).join('') : emptyRow(6);
+
+  const tasks = data.to_bell_tasks || [];
+  $('#access-tobell-tbody').innerHTML = tasks.length ? tasks.map(task => {
+    const subtasks = (task.subtasks || []).map(s => `${s.is_done ? '✓' : '□'} ${s.title}`).join(' / ');
+    const body = [task.description, subtasks ? `サブタスク: ${subtasks}` : ''].filter(Boolean).join('\n');
+    return `
+      <tr class="border-t align-top">
+        <td class="p-2 whitespace-nowrap">${fmtDate(task.updated_at)}</td>
+        <td class="p-2 font-medium">${shortText(task.title, 80)}</td>
+        <td class="p-2 text-xs whitespace-pre-line">${shortText(body, 180)}</td>
+        <td class="p-2">${escape(task.status)} / ${escape(task.priority)}</td>
+        <td class="p-2 text-xs">作成: ${escape(task.created_by)}<br>担当: ${escape(task.assigned_to || '-')}<br>確認: ${escape(task.reviewer_id || '-')}</td>
+        <td class="p-2 whitespace-nowrap">${fmtDate(task.due_at)}</td>
+      </tr>
+    `;
+  }).join('') : emptyRow(6);
+
+  const uploads = data.filepost_uploads || [];
+  $('#access-filepost-upload-tbody').innerHTML = uploads.length ? uploads.map(row => `
+    <tr class="border-t">
+      <td class="p-2 whitespace-nowrap">${fmtDate(row.uploaded_at)}</td>
+      <td class="p-2">${shortText(row.file_name, 90)}</td>
+      <td class="p-2 font-mono text-xs">${escape(row.display_id || row.share_uid)}</td>
+      <td class="p-2">${fmtBytes(row.file_size)}</td>
+      <td class="p-2">${row.is_internal ? '内部連携' : '通常'}</td>
+    </tr>
+  `).join('') : emptyRow(5);
+
+  const downloads = data.filepost_downloads || [];
+  $('#access-filepost-download-tbody').innerHTML = downloads.length ? downloads.map(row => `
+    <tr class="border-t">
+      <td class="p-2 whitespace-nowrap">${fmtDate(row.downloaded_at)}</td>
+      <td class="p-2">${shortText(row.file_name, 90)}${row.download_type === 'zip' ? ' <span class="text-xs text-gray-500">ZIP</span>' : ''}</td>
+      <td class="p-2">${escape(row.uploader || '-')}</td>
+      <td class="p-2">${escape(row.downloader ? row.downloader : row.downloader_label || '外部/匿名')}</td>
+      <td class="p-2 font-mono text-xs">${escape(row.ip_address || '-')}</td>
+    </tr>
+  `).join('') : emptyRow(5);
+}
+
+$('#btn-access-load')?.addEventListener('click', loadSelectedAccessLogs);
+['#access-search', '#access-from', '#access-to', '#access-limit'].forEach(sel => {
+  $(sel)?.addEventListener('change', () => {
+    if ($('#access-user-select')?.value) loadSelectedAccessLogs();
+  });
+});
+$('#access-search')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    loadSelectedAccessLogs();
+  }
+});
 
 $('#btn-new-user').addEventListener('click', () => {
   $('#form-new-user').reset();

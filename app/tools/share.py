@@ -27,6 +27,8 @@ from flask_login import current_user, login_required
 from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from app.models import FilePostDownloadLog, FilePostUploadLog, db
+
 from . import share_crypto
 
 try:
@@ -191,6 +193,78 @@ def _current_username() -> str:
         return current_user.username if getattr(current_user, "is_authenticated", False) else ""
     except Exception:
         return ""
+
+
+def _current_display_name() -> str:
+    try:
+        if getattr(current_user, "is_authenticated", False):
+            return getattr(current_user, "name", "") or getattr(current_user, "username", "")
+    except Exception:
+        pass
+    return "外部/匿名"
+
+
+def _log_filepost_upload(uid: str, info: dict, files: list[dict], *, is_internal: bool = False) -> None:
+    try:
+        rows = []
+        for index, item in enumerate(files):
+            rows.append(
+                {
+                    "share_uid": uid,
+                    "display_id": info.get("display_id"),
+                    "uploader": str(info.get("uploader") or "unknown"),
+                    "file_name": str(item.get("original_name") or item.get("file_name") or "download")[:255],
+                    "file_index": index,
+                    "file_size": item.get("size"),
+                    "is_internal": bool(is_internal),
+                    "ip_address": request.remote_addr,
+                    "user_agent": request.user_agent.string,
+                }
+            )
+        if rows:
+            with db.engine.begin() as conn:
+                conn.execute(FilePostUploadLog.__table__.insert(), rows)
+    except Exception:
+        logger.exception("FILE POST upload log failed uid=%s", uid)
+
+
+def _log_filepost_download(
+    uid: str,
+    file_info: dict,
+    file_data: dict | None,
+    *,
+    download_type: str,
+    file_index: int | None = None,
+) -> None:
+    try:
+        downloader = _current_username() or None
+        if download_type == "zip":
+            file_name = _safe_zip_name(
+                file_info.get("zip_name"),
+                file_info.get("title") or f"{file_info.get('display_id', uid)}_files",
+            )
+            file_size = sum(int(item.get("size") or 0) for item in _files_for_info(file_info))
+        else:
+            file_name = str((file_data or {}).get("original_name") or "download")
+            file_size = (file_data or {}).get("size")
+        with db.engine.begin() as conn:
+            conn.execute(
+                FilePostDownloadLog.__table__.insert().values(
+                    share_uid=uid,
+                    display_id=file_info.get("display_id"),
+                    uploader=file_info.get("uploader"),
+                    downloader=downloader,
+                    downloader_label=_current_display_name(),
+                    file_name=file_name[:255],
+                    file_index=file_index,
+                    download_type=download_type,
+                    file_size=file_size,
+                    ip_address=request.remote_addr,
+                    user_agent=request.user_agent.string,
+                )
+            )
+    except Exception:
+        logger.exception("FILE POST download log failed uid=%s", uid)
 
 
 def _is_current_uploader(info: dict) -> bool:
@@ -569,7 +643,7 @@ def _create_share_record(
         if display_id is None:
             display_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-        meta[uid] = {
+        record = {
             "display_id": display_id,
             "title": _safe_text(title, 120),
             "memo": _safe_text(memo, 200),
@@ -584,7 +658,10 @@ def _create_share_record(
             "max_downloads": _coerce_max_downloads(max_downloads),
             "revoked_at": None,
         }
+        meta[uid] = record
         save_meta(meta)
+
+    _log_filepost_upload(uid, record, files, is_internal=False)
 
     download_url = url_for("share.view_download", uid=uid, _external=True)
     return {
@@ -659,7 +736,7 @@ def create_internal_share(
                 break
         if display_id is None:
             display_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        meta[uid] = {
+        record = {
             "display_id": display_id,
             "title": _safe_text(title or original_name, 120),
             "memo": _safe_text(memo, 200),
@@ -676,7 +753,10 @@ def create_internal_share(
             "internal": True,
             "internal_source": "tobell",
         }
+        meta[uid] = record
         save_meta(meta)
+
+    _log_filepost_upload(uid, record, file_list, is_internal=True)
 
     try:
         download_url = url_for("share.view_download", uid=uid, _external=True)
@@ -1074,7 +1154,13 @@ def _rfc5987_filename(value: str) -> str:
     return quote(value, safe="")
 
 
-def _stream_single_file_response(uid: str, file_data: dict):
+def _stream_single_file_response(
+    uid: str,
+    file_data: dict,
+    file_info: dict | None = None,
+    *,
+    file_index: int | None = None,
+):
     """Serve a single stored file as an attachment.
 
     For plain files we delegate to send_file so the WSGI server (gunicorn)
@@ -1101,6 +1187,8 @@ def _stream_single_file_response(uid: str, file_data: dict):
         )
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         _increment_download_count(uid)
+        if file_info is not None:
+            _log_filepost_download(uid, file_info, file_data, download_type="file", file_index=file_index)
         return response
 
     def generate():
@@ -1122,6 +1210,8 @@ def _stream_single_file_response(uid: str, file_data: dict):
         headers["Content-Length"] = str(size)
     response = Response(stream_with_context(generate()), mimetype=mimetype, headers=headers)
     _increment_download_count(uid)
+    if file_info is not None:
+        _log_filepost_download(uid, file_info, file_data, download_type="file", file_index=file_index)
     return response
 
 
@@ -1209,6 +1299,7 @@ def _stream_zip_response(uid: str, file_info: dict, files: list[dict]):
             pass
 
     _increment_download_count(uid)
+    _log_filepost_download(uid, file_info, None, download_type="zip")
     return response
 
 
@@ -1286,7 +1377,7 @@ def download_file(uid):
 
     files = _files_for_info(file_info)
     if len(files) == 1:
-        return _stream_single_file_response(uid, files[0])
+        return _stream_single_file_response(uid, files[0], file_info, file_index=0)
     return _stream_zip_response(uid, file_info, files)
 
 
@@ -1309,7 +1400,7 @@ def download_single_file(uid, file_index):
     if file_index < 0 or file_index >= len(files):
         return "ファイルが見つかりません。", 404
 
-    return _stream_single_file_response(uid, files[file_index])
+    return _stream_single_file_response(uid, files[file_index], file_info, file_index=file_index)
 
 
 def _preview_response(payload: bytes, mimetype: str):
