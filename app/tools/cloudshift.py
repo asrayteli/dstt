@@ -7128,7 +7128,9 @@ def public_pwa_manifest(token: str):
     start_url = url_for("cloudshift.public_pwa", token=token, _external=False)
     manifest = {
         "id": start_url,
-        "name": f"CloudShift {project['title']}",
+        # 通知の発信元表示（"from XXX"）を統一するため、アプリ名は固定で "DSTT" にする。
+        # 各シフト帳の識別はホーム画面アイコンのラベル（short_name）で行う。
+        "name": "DSTT",
         "short_name": (project.get("title") or "CloudShift")[:24],
         "description": "シフト帳の最新の内容をスマホで確認し、更新通知を受け取れます。",
         "icons": [
@@ -8103,7 +8105,7 @@ def _maybe_notify_pwa_month_change(
         logger.warning("CloudShift PWA notify skipped for %s: %s", project.get("id"), exc)
 
 
-PWA_NOTIFY_CHANGE_LIMIT = 3
+PWA_NOTIFY_CHANGE_LIMIT = 2
 
 
 def _collect_pwa_change_descriptions(
@@ -8127,13 +8129,13 @@ def _collect_pwa_change_descriptions(
 def _format_pwa_notification_body(year: int, month: int, changes: list[str]) -> str:
     header = f"{year}年{month}月のシフトに変更がありました。"
     if not changes:
-        return f"{header} タップして最新の内容を確認してください。"
+        return f"{header}\nタップして最新の内容を確認してください。"
+    # 2件まではすべて改行で並べ、3件以上は最初の2件＋「他N件」にまとめる。
+    if len(changes) <= PWA_NOTIFY_CHANGE_LIMIT:
+        return header + "\n" + "\n".join(changes)
     visible = changes[:PWA_NOTIFY_CHANGE_LIMIT]
     remaining = len(changes) - len(visible)
-    summary = "、".join(visible)
-    if remaining > 0:
-        summary = f"{summary} 他{remaining}件"
-    return f"{header} {summary}"
+    return header + "\n" + "\n".join(visible) + f"\n他{remaining}件"
 
 
 def _dispatch_pwa_shift_notification(

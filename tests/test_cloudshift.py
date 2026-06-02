@@ -3999,7 +3999,10 @@ def test_pwa_manifest_is_token_scoped(tmp_path):
     data = manifest.get_json()
     assert pwa_token in data["start_url"]
     assert data["scope"] == data["start_url"]
-    assert "現場A" in data["name"]
+    # 通知の発信元表示を統一するため、name は固定で "DSTT"。
+    # シフト帳の識別は short_name（ホーム画面アイコンのラベル）で行う。
+    assert data["name"] == "DSTT"
+    assert "現場A" in data["short_name"]
 
 
 def test_pwa_subscription_dedup_per_device(tmp_path):
@@ -4182,7 +4185,7 @@ def test_pwa_notify_body_lists_changes_with_overflow_summary(tmp_path, monkeypat
     pwa_token = _token_from_url(payload["project"]["urls"]["pwa_url"])
     assert _subscribe_device(client, pwa_token).status_code == 200
 
-    # 5件の追加 → 本文には最初の3件と「他2件」だけが出る
+    # 5件の追加 → 本文には最初の2件と「他3件」だけが出る
     save = client.put(
         f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/{year}/{month}",
         json={
@@ -4203,14 +4206,18 @@ def test_pwa_notify_body_lists_changes_with_overflow_summary(tmp_path, monkeypat
     assert f"{year}年{month}月" in body
     assert "3日に" in body
     assert "4日に" in body
-    assert "5日に" in body
-    # 4件目以降は「他N件」にまとめる
+    # 3件目以降は「他N件」にまとめる
+    assert "5日" not in body
     assert "6日" not in body
     assert "7日" not in body
-    assert "他2件" in body
+    assert "他3件" in body
+    # 各変更は改行で区切る
+    assert "\n3日に" in body
+    assert "\n4日に" in body
+    assert "\n他3件" in body
 
 
-def test_pwa_notify_body_lists_all_changes_when_three_or_fewer(tmp_path, monkeypatch):
+def test_pwa_notify_body_lists_all_changes_when_two_or_fewer(tmp_path, monkeypatch):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
     calls = _patch_push(monkeypatch)
@@ -4238,6 +4245,9 @@ def test_pwa_notify_body_lists_all_changes_when_three_or_fewer(tmp_path, monkeyp
     body = calls[0]["body"]
     assert "1日に" in body and "2日に" in body
     assert "他" not in body
+    # 2件は改行で区切られて全文表示される
+    assert "\n1日に" in body
+    assert "\n2日に" in body
 
 
 def test_pwa_notify_fires_on_edit_url_save(tmp_path, monkeypatch):
