@@ -7555,10 +7555,34 @@ def api_project_meta(project_id: str):
 def api_regenerate_tokens(project_id: str):
     payload = request.get_json(silent=True) or {}
     reject_pending = bool(payload.get("reject_pending_leave_change_requests"))
+    # どの共有URLを再発行するか。未指定なら従来通り3種すべてを再発行する。
+    all_targets = ("view", "edit", "pwa")
+    raw_targets = payload.get("targets")
+    if raw_targets is None:
+        targets = list(all_targets)
+    else:
+        if not isinstance(raw_targets, list):
+            raise CloudShiftError("再発行対象はリストで指定してください", 400)
+        seen: set[str] = set()
+        targets = []
+        for raw in raw_targets:
+            key = str(raw or "").strip()
+            if key in all_targets and key not in seen:
+                seen.add(key)
+                targets.append(key)
+        if not targets:
+            raise CloudShiftError("再発行する共有URLを指定してください", 400)
+    target_set = set(targets)
+    target_labels = {"view": "閲覧URL", "edit": "編集URL", "pwa": "ViewPWA URL"}
     with _project_lock(project_id):
         project = _owner_project_or_404(project_id)
-        changes = ["共有URLを再発行"]
-        if reject_pending:
+        if target_set == set(all_targets):
+            changes = ["共有URLを再発行"]
+        else:
+            ordered = [target_labels[key] for key in all_targets if key in target_set]
+            changes = ["、".join(ordered) + "を再発行"]
+        # 休暇種別変更申請は閲覧URLから届くため、閲覧URLの再発行時のみ破棄を扱う。
+        if reject_pending and "view" in target_set:
             requests = _normalized_leave_change_requests(project)
             rejected_count = 0
             timestamp = _utcnow_iso()
@@ -7573,16 +7597,19 @@ def api_regenerate_tokens(project_id: str):
             if rejected_count:
                 _store_leave_change_requests(project, requests)
                 changes.append(f"未処理の休暇種別変更申請 {rejected_count}件を破棄")
-        project["view_token"] = _share_token()
-        project["edit_token"] = _share_token()
-        project["pwa_token"] = _share_token()
-        # 旧 ViewPWA URL は無効になるため、その帳簿の PWA 購読も無効化する
-        # （古い端末が 404 になる URL へ通知され続けるのを防ぐ）。
-        deactivated = CloudShiftPwaSubscription.query.filter_by(project_id=project_id, is_active=True).update(
-            {"is_active": False}, synchronize_session=False
-        )
-        if deactivated:
-            changes.append(f"ViewPWA通知の購読 {deactivated}件を解除")
+        if "view" in target_set:
+            project["view_token"] = _share_token()
+        if "edit" in target_set:
+            project["edit_token"] = _share_token()
+        if "pwa" in target_set:
+            project["pwa_token"] = _share_token()
+            # 旧 ViewPWA URL は無効になるため、その帳簿の PWA 購読も無効化する
+            # （古い端末が 404 になる URL へ通知され続けるのを防ぐ）。
+            deactivated = CloudShiftPwaSubscription.query.filter_by(project_id=project_id, is_active=True).update(
+                {"is_active": False}, synchronize_session=False
+            )
+            if deactivated:
+                changes.append(f"ViewPWA通知の購読 {deactivated}件を解除")
         _save_project(project)
         _append_history(
             project_id,
