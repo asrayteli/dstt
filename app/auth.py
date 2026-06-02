@@ -2,7 +2,7 @@ from flask import Blueprint, abort, current_app, flash, redirect, render_templat
 from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .models import User, db
+from .models import User, UserLoginLog, db
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
@@ -21,7 +21,30 @@ def login():
         if user and check_password_hash(user.password_hash, password):
             session.clear()
             login_user(user)
+            db.session.add(
+                UserLoginLog(
+                    username=user.username,
+                    success=True,
+                    ip_address=request.remote_addr,
+                    user_agent=request.user_agent.string,
+                )
+            )
+            db.session.commit()
             return redirect(url_for("main.index"))
+
+        if username:
+            try:
+                db.session.add(
+                    UserLoginLog(
+                        username=username,
+                        success=False,
+                        ip_address=request.remote_addr,
+                        user_agent=request.user_agent.string,
+                    )
+                )
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
 
         flash("ユーザー名またはパスワードが正しくありません", "error")
 

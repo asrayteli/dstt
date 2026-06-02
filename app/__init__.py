@@ -7,12 +7,13 @@ from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 import secrets
+import time
 from datetime import date
 from pathlib import Path
 from .navigation import NAV_ITEMS
 from .versioning import calculate_repo_version
 
-from .models import db
+from .models import UserActivityLog, db
 login_manager = LoginManager()
 
 DEFAULT_PAGE_TITLE = "DSTT - DaishintoTools"
@@ -46,6 +47,15 @@ def _tool_name_for_path(path: str) -> str | None:
         if _path_matches_prefix(path, item["href"]):
             return item["label"]
     return None
+
+
+def _tool_info_for_path(path: str) -> tuple[str | None, str | None]:
+    if _path_matches_prefix(path, "/tools/user_management"):
+        return "user_management", "管理者ページ"
+    for item in sorted(NAV_ITEMS, key=lambda nav_item: len(nav_item["href"]), reverse=True):
+        if _path_matches_prefix(path, item["href"]):
+            return item.get("key"), item.get("label")
+    return None, None
 
 
 def resolve_page_title() -> str:
@@ -661,6 +671,54 @@ def create_app(test_config=None):
         except Exception:
             db.session.rollback()
         return None
+
+    @app.before_request
+    def _mark_activity_start():
+        from flask import g
+
+        g.dstt_activity_started_at = time.perf_counter()
+        return None
+
+    @app.after_request
+    def _record_tool_activity(response):
+        from flask import g, request as _request
+        from flask_login import current_user as _current_user
+
+        try:
+            path = _request.path or ""
+            if (
+                not path.startswith("/tools/")
+                or path.startswith("/tools/user_management/api/access-management")
+                or _request.method in {"HEAD", "OPTIONS"}
+            ):
+                return response
+            if not getattr(_current_user, "is_authenticated", False):
+                return response
+            tool_key, tool_label = _tool_info_for_path(path)
+            if not tool_key:
+                return response
+            started = getattr(g, "dstt_activity_started_at", None)
+            duration_ms = None
+            if started is not None:
+                duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+            with db.engine.begin() as conn:
+                conn.execute(
+                    UserActivityLog.__table__.insert().values(
+                        username=str(getattr(_current_user, "username", "") or ""),
+                        tool_key=tool_key,
+                        tool_label=tool_label,
+                        endpoint=_request.endpoint,
+                        method=_request.method,
+                        path=path[:500],
+                        status_code=int(response.status_code or 0),
+                        duration_ms=duration_ms,
+                        ip_address=_request.remote_addr,
+                        user_agent=_request.user_agent.string,
+                    )
+                )
+        except Exception:
+            pass
+        return response
 
     # 本番での暗号鍵必須化ガード（opt-in）
     if _env_bool("DSTT_REQUIRE_ENCRYPTION_KEY_ENV", False) and not app.config.get("TESTING"):
