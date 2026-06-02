@@ -4170,6 +4170,76 @@ def test_pwa_regenerate_tokens_invalidates_old_pwa_url_and_subscriptions(tmp_pat
         assert rows and all(row.is_active is False for row in rows)
 
 
+def test_pwa_notify_body_lists_changes_with_overflow_summary(tmp_path, monkeypatch):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    calls = _patch_push(monkeypatch)
+
+    year, month = _current_year_month()
+    create = _create_scene_project(client, year=str(year), month=str(month))
+    payload = create.get_json()["project"]
+    project_id = payload["project"]["id"]
+    pwa_token = _token_from_url(payload["project"]["urls"]["pwa_url"])
+    assert _subscribe_device(client, pwa_token).status_code == 200
+
+    # 5件の追加 → 本文には最初の3件と「他2件」だけが出る
+    save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/{year}/{month}",
+        json={
+            "base_month": _legacy_base_month(payload["month"]),
+            "required_capacity": payload["month"].get("required_capacity", 0),
+            "entries_per_day": {
+                "3": [{"value": "C"}],
+                "4": [{"value": "D"}],
+                "5": [{"value": "E"}],
+                "6": [{"value": "F"}],
+                "7": [{"value": "G"}],
+            },
+        },
+    )
+    assert save.status_code == 200
+    assert len(calls) == 1
+    body = calls[0]["body"]
+    assert f"{year}年{month}月" in body
+    assert "3日に" in body
+    assert "4日に" in body
+    assert "5日に" in body
+    # 4件目以降は「他N件」にまとめる
+    assert "6日" not in body
+    assert "7日" not in body
+    assert "他2件" in body
+
+
+def test_pwa_notify_body_lists_all_changes_when_three_or_fewer(tmp_path, monkeypatch):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    calls = _patch_push(monkeypatch)
+
+    year, month = _current_year_month()
+    create = _create_scene_project(client, year=str(year), month=str(month))
+    payload = create.get_json()["project"]
+    project_id = payload["project"]["id"]
+    pwa_token = _token_from_url(payload["project"]["urls"]["pwa_url"])
+    assert _subscribe_device(client, pwa_token).status_code == 200
+
+    save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/{year}/{month}",
+        json={
+            "base_month": _legacy_base_month(payload["month"]),
+            "required_capacity": payload["month"].get("required_capacity", 0),
+            "entries_per_day": {
+                "1": [{"value": "A"}],
+                "2": [{"value": "B"}],
+            },
+        },
+    )
+    assert save.status_code == 200
+    assert len(calls) == 1
+    body = calls[0]["body"]
+    assert "1日に" in body and "2日に" in body
+    assert "他" not in body
+
+
 def test_pwa_notify_fires_on_edit_url_save(tmp_path, monkeypatch):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
