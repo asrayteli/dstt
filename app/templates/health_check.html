@@ -1,0 +1,822 @@
+{% extends "base.html" %}
+{% set page_title = "健診PLUS - DSTT" %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-6" id="hc-app"
+     data-is-admin="{{ 'true' if is_admin else 'false' }}"
+     data-current-year="{{ current_year }}"
+     data-global-lead="{{ global_lead_days }}">
+
+  <!-- ヒーロー -->
+  <section class="dstt-hero" style="background:linear-gradient(135deg,#0f766e 0%,#0e7490 55%,#1d4ed8 100%);">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <span class="dstt-hero-pill">HEALTH CHECK · PLUS</span>
+        <div>
+          <h1 class="dstt-hero-title">🩺 健診PLUS</h1>
+          <p class="dstt-hero-subtitle">
+            健康診断の予約・受診・再検査・二次検査までを健診年度（4月開始）ごとに一元管理。
+            社員名簿PLUSと連携し、二次検査や深夜従事者の2回目受診はToBellで取りこぼしを防ぎます。
+          </p>
+        </div>
+        <div class="dstt-hero-actions">
+          <button type="button" class="dstt-hero-btn dstt-hero-btn-light" onclick="HC.openRecordModal()">＋ 新規登録</button>
+          <button type="button" class="dstt-hero-btn dstt-hero-btn-ghost" onclick="HC.openBulkModal()">名簿から一括起票</button>
+          <button type="button" class="dstt-hero-btn dstt-hero-btn-ghost" onclick="HC.openCarryoverModal()">前年度繰り越し</button>
+        </div>
+      </div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">受診率</div>
+          <div class="dstt-hero-card-value" id="hero-rate">—</div>
+          <div class="dstt-hero-card-note" id="hero-rate-note">対象を読み込み中…</div>
+        </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">表示年度</div>
+          <div class="dstt-hero-card-value">
+            <select id="year-select" class="bg-transparent text-white font-bold focus:outline-none cursor-pointer"></select>
+          </div>
+          <div class="dstt-hero-card-note">健診年度は4月開始です</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ダッシュボード -->
+  <section class="grid grid-cols-2 md:grid-cols-5 gap-3" id="dashboard-cards"></section>
+
+  <!-- ツールバー -->
+  <section class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 space-y-4">
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="relative flex-1 min-w-[220px]">
+        <input id="search-input" type="text" placeholder="社員名・社員番号・専従先・担当者・医療機関で検索"
+               class="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500">
+        <span class="absolute left-3 top-2.5 text-gray-400">🔍</span>
+      </div>
+      <select id="filter-office" class="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"></select>
+      <select id="filter-type" class="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
+        <option value="">区分（すべて）</option>
+        <option value="linked">名簿連携</option>
+        <option value="pre_hire">入社前</option>
+        <option value="internal">内勤者</option>
+      </select>
+      <select id="filter-status" class="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
+        <option value="">ステータス（すべて）</option>
+        <option value="未予約">未予約</option>
+        <option value="予約済">予約済</option>
+        <option value="受診済">受診済</option>
+        <option value="再検査対象">再検査対象</option>
+        <option value="二次案内済">二次案内済</option>
+        <option value="二次完了">二次完了</option>
+      </select>
+    </div>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+      <label class="inline-flex items-center gap-1.5 cursor-pointer">
+        <input type="checkbox" id="filter-night" class="rounded text-teal-600 focus:ring-teal-500"> 深夜従事者のみ
+      </label>
+      <label class="inline-flex items-center gap-1.5 cursor-pointer">
+        <input type="checkbox" id="filter-recheck" class="rounded text-teal-600 focus:ring-teal-500"> 再検査ありのみ
+      </label>
+      <label class="inline-flex items-center gap-1.5 cursor-pointer">
+        <input type="checkbox" id="filter-unassigned" class="rounded text-teal-600 focus:ring-teal-500"> 担当者未割当のみ
+      </label>
+      <div class="ml-auto flex flex-wrap items-center gap-2">
+        <button type="button" class="hc-btn-ghost" onclick="HC.resolveManagers()">担当者を自動紐付け</button>
+        <button type="button" class="hc-btn-ghost" onclick="HC.exportCsv()">CSV出力</button>
+        <button type="button" class="hc-btn-ghost" onclick="HC.openIntegrationModal()">🔔 ToBell連携</button>
+        <button type="button" class="hc-btn-ghost hc-admin-only" onclick="HC.openSettingsModal()">⚙ 設定</button>
+        <button type="button" class="hc-btn-ghost hc-admin-only" onclick="HC.openPermissionsModal()">👥 権限</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 一覧テーブル -->
+  <section class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+          <tr>
+            <th class="px-4 py-3 text-left cursor-pointer" data-sort="employee_number">社員番号</th>
+            <th class="px-4 py-3 text-left cursor-pointer" data-sort="employee_name">氏名</th>
+            <th class="px-4 py-3 text-left">専従先 / 区分</th>
+            <th class="px-4 py-3 text-left cursor-pointer" data-sort="exam_date">受診日</th>
+            <th class="px-4 py-3 text-left">ステータス</th>
+            <th class="px-4 py-3 text-left">二次/深夜</th>
+            <th class="px-4 py-3 text-left">担当者</th>
+            <th class="px-4 py-3 text-right">操作</th>
+          </tr>
+        </thead>
+        <tbody id="records-body" class="divide-y divide-gray-100"></tbody>
+      </table>
+    </div>
+    <div id="records-empty" class="hidden py-16 text-center text-gray-400">
+      <div class="text-4xl mb-2">🗂️</div>
+      <p class="text-sm">対象のレコードがありません。「新規登録」または「名簿から一括起票」で追加できます。</p>
+    </div>
+    <div class="px-4 py-3 text-xs text-gray-500 border-t border-gray-100" id="records-footer"></div>
+  </section>
+</div>
+
+<!-- ===== モーダル: レコード編集/新規 ===== -->
+<div id="record-modal" class="hc-modal hidden">
+  <div class="hc-modal-backdrop" onclick="HC.closeRecordModal()"></div>
+  <div class="hc-modal-panel max-w-3xl">
+    <div class="hc-modal-head">
+      <h2 class="text-lg font-bold text-gray-800" id="record-modal-title">健診レコード</h2>
+      <button onclick="HC.closeRecordModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+    </div>
+    <div class="hc-modal-body space-y-5" id="record-modal-body"><!-- 動的 --></div>
+    <div class="hc-modal-foot">
+      <span id="record-modal-error" class="text-sm text-red-600 mr-auto"></span>
+      <button class="hc-btn-ghost !text-red-600 !border-red-200 hidden" id="record-delete-btn" onclick="HC.deleteRecord()">削除</button>
+      <button class="hc-btn-ghost" onclick="HC.closeRecordModal()">閉じる</button>
+      <button class="hc-btn-primary" id="record-save-btn" onclick="HC.saveRecord()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== モーダル: 一括起票 ===== -->
+<div id="bulk-modal" class="hc-modal hidden">
+  <div class="hc-modal-backdrop" onclick="HC.closeBulkModal()"></div>
+  <div class="hc-modal-panel max-w-lg">
+    <div class="hc-modal-head"><h2 class="text-lg font-bold text-gray-800">名簿から一括起票</h2>
+      <button onclick="HC.closeBulkModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button></div>
+    <div class="hc-modal-body space-y-4">
+      <p class="text-sm text-gray-600">選択した年度・営業所の在籍者全員に健診レコードを作成します。既に存在するレコードはスキップされます。</p>
+      <label class="block text-sm font-medium text-gray-700">対象年度
+        <input type="number" id="bulk-year" class="hc-input mt-1"></label>
+      <div>
+        <span class="block text-sm font-medium text-gray-700 mb-1">対象営業所</span>
+        <div id="bulk-offices" class="max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-1"></div>
+      </div>
+    </div>
+    <div class="hc-modal-foot">
+      <span id="bulk-error" class="text-sm text-red-600 mr-auto"></span>
+      <button class="hc-btn-ghost" onclick="HC.closeBulkModal()">キャンセル</button>
+      <button class="hc-btn-primary" onclick="HC.runBulkCreate()">起票する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== モーダル: 繰り越し ===== -->
+<div id="carryover-modal" class="hc-modal hidden">
+  <div class="hc-modal-backdrop" onclick="HC.closeCarryoverModal()"></div>
+  <div class="hc-modal-panel max-w-md">
+    <div class="hc-modal-head"><h2 class="text-lg font-bold text-gray-800">前年度繰り越し</h2>
+      <button onclick="HC.closeCarryoverModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button></div>
+    <div class="hc-modal-body space-y-4">
+      <p class="text-sm text-gray-600">既存年度の名簿連携レコードを新年度へ複製します。固定情報（氏名・専従先・担当者・深夜区分など）のみ引き継ぎ、受診系の日付はクリアされます。</p>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="block text-sm font-medium text-gray-700">複製元
+          <input type="number" id="carry-from" class="hc-input mt-1"></label>
+        <label class="block text-sm font-medium text-gray-700">複製先
+          <input type="number" id="carry-to" class="hc-input mt-1"></label>
+      </div>
+    </div>
+    <div class="hc-modal-foot">
+      <span id="carry-error" class="text-sm text-red-600 mr-auto"></span>
+      <button class="hc-btn-ghost" onclick="HC.closeCarryoverModal()">キャンセル</button>
+      <button class="hc-btn-primary" onclick="HC.runCarryover()">複製する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== モーダル: ToBell連携（個人） ===== -->
+<div id="integration-modal" class="hc-modal hidden">
+  <div class="hc-modal-backdrop" onclick="HC.closeIntegrationModal()"></div>
+  <div class="hc-modal-panel max-w-md">
+    <div class="hc-modal-head"><h2 class="text-lg font-bold text-gray-800">🔔 ToBell連携設定</h2>
+      <button onclick="HC.closeIntegrationModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button></div>
+    <div class="hc-modal-body space-y-4">
+      <p class="text-sm text-gray-600">あなたが担当者になっている対象者について、二次検査受診推奨日（当日朝＋事前）と深夜従事者の年2回目受診を、ToBellのタスク・通知でお知らせします。<strong>この設定はあなた個人にのみ適用されます。</strong></p>
+      <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer">
+        <input type="checkbox" id="integration-toggle" class="rounded text-teal-600 focus:ring-teal-500 w-5 h-5">
+        <span class="text-sm font-medium text-gray-700">ToBellへのリマインドを有効にする</span>
+      </label>
+    </div>
+    <div class="hc-modal-foot">
+      <button class="hc-btn-ghost" onclick="HC.closeIntegrationModal()">閉じる</button>
+      <button class="hc-btn-primary" onclick="HC.saveIntegration()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== モーダル: 設定（管理者） ===== -->
+<div id="settings-modal" class="hc-modal hidden">
+  <div class="hc-modal-backdrop" onclick="HC.closeSettingsModal()"></div>
+  <div class="hc-modal-panel max-w-md">
+    <div class="hc-modal-head"><h2 class="text-lg font-bold text-gray-800">⚙ ツール設定</h2>
+      <button onclick="HC.closeSettingsModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button></div>
+    <div class="hc-modal-body space-y-4">
+      <label class="block text-sm font-medium text-gray-700">事前通知リードタイム（全体既定）
+        <div class="flex items-center gap-2 mt-1">
+          <input type="number" min="0" id="settings-lead" class="hc-input w-24">
+          <span class="text-sm text-gray-500">日前にも通知（各レコードで個別に上書き可）</span>
+        </div>
+      </label>
+    </div>
+    <div class="hc-modal-foot">
+      <button class="hc-btn-ghost" onclick="HC.closeSettingsModal()">閉じる</button>
+      <button class="hc-btn-primary" onclick="HC.saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== モーダル: 権限（管理者） ===== -->
+<div id="permissions-modal" class="hc-modal hidden">
+  <div class="hc-modal-backdrop" onclick="HC.closePermissionsModal()"></div>
+  <div class="hc-modal-panel max-w-2xl">
+    <div class="hc-modal-head"><h2 class="text-lg font-bold text-gray-800">👥 アクセス権管理</h2>
+      <button onclick="HC.closePermissionsModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button></div>
+    <div class="hc-modal-body space-y-5">
+      <p class="text-xs text-gray-500">健診PLUSは健康情報を扱うため、閲覧には個別付与が必要です（DSTT管理者は全営業所）。一般利用者は所属営業所が既定スコープになり、ここで追加の営業所を付与できます。</p>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-2 items-end p-3 bg-gray-50 rounded-lg">
+        <label class="block text-xs font-medium text-gray-600">ユーザーID
+          <input type="text" id="perm-user" class="hc-input mt-1" placeholder="社員番号など"></label>
+        <label class="block text-xs font-medium text-gray-600">付与内容
+          <select id="perm-type" class="hc-input mt-1" onchange="HC.togglePermOffice()">
+            <option value="office">営業所アクセス</option>
+            <option value="admin">健診PLUS管理者</option>
+          </select></label>
+        <div id="perm-office-wrap">
+          <label class="block text-xs font-medium text-gray-600">営業所
+            <select id="perm-office" class="hc-input mt-1"></select></label>
+        </div>
+        <div class="md:col-span-3 text-right">
+          <button class="hc-btn-primary" onclick="HC.grantPermission()">付与する</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto border border-gray-100 rounded-lg">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50 text-gray-500 text-xs"><tr>
+            <th class="px-3 py-2 text-left">ユーザー</th>
+            <th class="px-3 py-2 text-left">権限</th>
+            <th class="px-3 py-2 text-right">操作</th>
+          </tr></thead>
+          <tbody id="perm-body" class="divide-y divide-gray-100"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="hc-modal-foot">
+      <button class="hc-btn-ghost" onclick="HC.closePermissionsModal()">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- トースト -->
+<div id="hc-toast" class="fixed bottom-6 right-6 z-[60] space-y-2"></div>
+
+<style>
+  .hc-btn-primary{background:#0f766e;color:#fff;border-radius:.6rem;padding:.5rem 1rem;font-size:.825rem;font-weight:600;transition:background .15s;}
+  .hc-btn-primary:hover{background:#0d5d57;}
+  .hc-btn-ghost{background:#fff;color:#334155;border:1px solid #e2e8f0;border-radius:.6rem;padding:.45rem .85rem;font-size:.8rem;font-weight:500;transition:background .15s;}
+  .hc-btn-ghost:hover{background:#f1f5f9;}
+  .hc-input{width:100%;border:1px solid #e2e8f0;border-radius:.55rem;padding:.5rem .65rem;font-size:.85rem;}
+  .hc-input:focus{outline:none;border-color:#0f766e;box-shadow:0 0 0 2px rgba(15,118,110,.15);}
+  .hc-modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:1rem;}
+  .hc-modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);}
+  .hc-modal-panel{position:relative;background:#fff;border-radius:1rem;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 25px 60px rgba(15,23,42,.3);}
+  .hc-modal-head{display:flex;align-items:center;justify-content:space-between;padding:1.1rem 1.4rem;border-bottom:1px solid #f1f5f9;}
+  .hc-modal-body{padding:1.4rem;overflow-y:auto;}
+  .hc-modal-foot{display:flex;align-items:center;gap:.6rem;justify-content:flex-end;padding:1rem 1.4rem;border-top:1px solid #f1f5f9;}
+  .hc-pill{display:inline-flex;align-items:center;padding:.15rem .6rem;border-radius:9999px;font-size:.72rem;font-weight:600;white-space:nowrap;}
+  .hc-section-title{font-size:.7rem;font-weight:700;letter-spacing:.08em;color:#64748b;text-transform:uppercase;margin-bottom:.5rem;}
+  .hc-field-label{font-size:.75rem;font-weight:600;color:#475569;margin-bottom:.2rem;display:block;}
+  .hc-readonly{background:#f8fafc;color:#475569;}
+</style>
+
+<script>
+const HC = (function(){
+  const root = document.getElementById('hc-app');
+  const IS_ADMIN = root.dataset.isAdmin === 'true';
+  const CURRENT_YEAR = parseInt(root.dataset.currentYear, 10);
+  const GLOBAL_LEAD = parseInt(root.dataset.globalLead, 10);
+  let offices = [];
+  let usersCache = null;
+  let editingId = null;
+  let editingType = 'linked';
+  let selectedEmployee = null;
+
+  const STATUS_STYLE = {
+    '未予約':   ['#64748b','#f1f5f9'],
+    '予約済':   ['#1d4ed8','#dbeafe'],
+    '受診済':   ['#047857','#d1fae5'],
+    '再検査対象':['#b45309','#fef3c7'],
+    '二次案内済':['#6d28d9','#ede9fe'],
+    '二次完了': ['#0f766e','#ccfbf1'],
+  };
+  const TYPE_LABEL = {linked:'名簿連携', pre_hire:'入社前', internal:'内勤者'};
+
+  function api(url, opts){
+    opts = opts || {};
+    opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+    return fetch(url, opts).then(async r=>{
+      const data = await r.json().catch(()=>({}));
+      if(!r.ok) throw new Error(data.error || ('エラー ('+r.status+')'));
+      return data;
+    });
+  }
+  function toast(msg, kind){
+    const el = document.createElement('div');
+    const color = kind==='error' ? 'bg-red-600' : (kind==='warn'?'bg-amber-600':'bg-teal-700');
+    el.className = `${color} text-white text-sm px-4 py-2.5 rounded-lg shadow-lg opacity-0 transition-opacity`;
+    el.textContent = msg;
+    document.getElementById('hc-toast').appendChild(el);
+    requestAnimationFrame(()=>el.classList.add('opacity-100'));
+    setTimeout(()=>{ el.classList.remove('opacity-100'); setTimeout(()=>el.remove(), 300); }, 3200);
+  }
+  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function fmtDate(s){ return s ? s : '—'; }
+
+  // ---- 状態 ----
+  let state = { year: CURRENT_YEAR, office:'', type:'', status:'', night:false, recheck:false, unassigned:false,
+                search:'', sort_by:'employee_number', sort_order:'asc' };
+
+  function buildQuery(){
+    const p = new URLSearchParams();
+    if(state.year) p.set('year', state.year);
+    if(state.office) p.set('office', state.office);
+    if(state.type) p.set('record_type', state.type);
+    if(state.status) p.set('status', state.status);
+    if(state.night) p.set('night_only','true');
+    if(state.recheck) p.set('recheck_only','true');
+    if(state.unassigned) p.set('unassigned_only','true');
+    if(state.search) p.set('search', state.search);
+    p.set('sort_by', state.sort_by); p.set('sort_order', state.sort_order);
+    return p.toString();
+  }
+
+  // ---- 初期化 ----
+  async function init(){
+    offices = JSON.parse('{{ offices|tojson }}');
+    if(!IS_ADMIN) document.querySelectorAll('.hc-admin-only').forEach(e=>e.style.display='none');
+    populateOfficeSelects();
+    await loadYears();
+    bindEvents();
+    refresh();
+  }
+
+  function populateOfficeSelects(){
+    const fo = document.getElementById('filter-office');
+    fo.innerHTML = '<option value="">営業所（すべて）</option>' +
+      offices.map(o=>`<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join('');
+    const po = document.getElementById('perm-office');
+    if(po) po.innerHTML = offices.map(o=>`<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join('');
+  }
+
+  async function loadYears(){
+    let years = [];
+    try { years = (await api('/tools/health_check/api/years')).years || []; } catch(e){}
+    if(!years.includes(CURRENT_YEAR)) years.unshift(CURRENT_YEAR);
+    years.sort((a,b)=>b-a);
+    const sel = document.getElementById('year-select');
+    sel.innerHTML = years.map(y=>`<option value="${y}" ${y===state.year?'selected':''}>${y}年度</option>`).join('');
+  }
+
+  function bindEvents(){
+    document.getElementById('year-select').addEventListener('change', e=>{ state.year=parseInt(e.target.value,10); refresh(); });
+    document.getElementById('filter-office').addEventListener('change', e=>{ state.office=e.target.value; refresh(); });
+    document.getElementById('filter-type').addEventListener('change', e=>{ state.type=e.target.value; loadRecords(); });
+    document.getElementById('filter-status').addEventListener('change', e=>{ state.status=e.target.value; loadRecords(); });
+    document.getElementById('filter-night').addEventListener('change', e=>{ state.night=e.target.checked; loadRecords(); });
+    document.getElementById('filter-recheck').addEventListener('change', e=>{ state.recheck=e.target.checked; loadRecords(); });
+    document.getElementById('filter-unassigned').addEventListener('change', e=>{ state.unassigned=e.target.checked; loadRecords(); });
+    let t; document.getElementById('search-input').addEventListener('input', e=>{ clearTimeout(t); t=setTimeout(()=>{ state.search=e.target.value.trim(); loadRecords(); }, 300); });
+    document.querySelectorAll('th[data-sort]').forEach(th=>th.addEventListener('click', ()=>{
+      const key = th.dataset.sort;
+      if(state.sort_by===key){ state.sort_order = state.sort_order==='asc'?'desc':'asc'; }
+      else { state.sort_by=key; state.sort_order='asc'; }
+      loadRecords();
+    }));
+  }
+
+  function refresh(){ loadRecords(); loadDashboard(); }
+
+  // ---- ダッシュボード ----
+  async function loadDashboard(){
+    let d;
+    try { d = await api('/tools/health_check/api/dashboard?year='+state.year); } catch(e){ return; }
+    document.getElementById('hero-rate').textContent = d.exam_rate + '%';
+    document.getElementById('hero-rate-note').textContent = `受診 ${d.examined} / 対象 ${d.total} 名`;
+    const cards = [
+      ['対象者数', d.total, '名', '#0f766e'],
+      ['受診済', d.examined, '名', '#047857'],
+      ['再検査未完了', d.recheck_pending, '件', '#b45309'],
+      ['深夜2回目未受診', d.night_pending, '件', '#7c3aed'],
+      ['担当者未割当', d.unassigned, '件', '#dc2626'],
+    ];
+    document.getElementById('dashboard-cards').innerHTML = cards.map(([label,val,unit,color])=>`
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-3.5">
+        <div class="text-xs text-gray-500">${label}</div>
+        <div class="mt-1 text-2xl font-bold" style="color:${color}">${val}<span class="text-sm font-medium text-gray-400 ml-0.5">${unit}</span></div>
+      </div>`).join('');
+  }
+
+  // ---- 一覧 ----
+  async function loadRecords(){
+    let data;
+    try { data = await api('/tools/health_check/api/records?'+buildQuery()); }
+    catch(e){ toast(e.message,'error'); return; }
+    const body = document.getElementById('records-body');
+    const empty = document.getElementById('records-empty');
+    document.getElementById('records-footer').textContent = `${data.count} 件を表示中`;
+    if(!data.records.length){ body.innerHTML=''; empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+    body.innerHTML = data.records.map(r=>{
+      const [fg,bg] = STATUS_STYLE[r.status] || ['#475569','#f1f5f9'];
+      const badges = [];
+      if(r.is_night_worker){ const ok=!!r.exam_date_2; badges.push(`<span class="hc-pill" style="color:${ok?'#0f766e':'#7c3aed'};background:${ok?'#ccfbf1':'#ede9fe'}">深夜${ok?'2回目済':'2回目'}</span>`); }
+      if(r.needs_recheck && r.status!=='二次完了'){ badges.push(`<span class="hc-pill" style="color:#b45309;background:#fef3c7">要二次</span>`); }
+      const mgr = r.manager_user
+        ? `<span class="text-gray-700">${esc(r.manager_name||r.manager_user)}</span>`
+        : `<span class="hc-pill" style="color:#dc2626;background:#fee2e2">未割当</span>`;
+      return `<tr class="hover:bg-gray-50">
+        <td class="px-4 py-2.5 font-mono text-xs text-gray-500">${esc(r.employee_number)||'—'}</td>
+        <td class="px-4 py-2.5 font-medium text-gray-800">${esc(r.employee_name)}</td>
+        <td class="px-4 py-2.5 text-gray-600"><div>${esc(r.assignment_site)||'—'}</div><div class="text-xs text-gray-400">${TYPE_LABEL[r.record_type]||r.record_type}</div></td>
+        <td class="px-4 py-2.5 text-gray-600">${fmtDate(r.exam_date)}</td>
+        <td class="px-4 py-2.5"><span class="hc-pill" style="color:${fg};background:${bg}">${r.status}</span></td>
+        <td class="px-4 py-2.5 space-x-1">${badges.join(' ')||'<span class="text-gray-300">—</span>'}</td>
+        <td class="px-4 py-2.5">${mgr}</td>
+        <td class="px-4 py-2.5 text-right whitespace-nowrap">
+          <button class="hc-btn-ghost !py-1 !px-2.5" onclick="HC.openRecordModal(${r.id})">編集</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ---- レコードモーダル ----
+  async function openRecordModal(id){
+    editingId = id || null;
+    document.getElementById('record-modal-error').textContent='';
+    document.getElementById('record-delete-btn').classList.toggle('hidden', !id);
+    if(id){
+      let r;
+      try { r = await api('/tools/health_check/api/record/'+id); } catch(e){ toast(e.message,'error'); return; }
+      editingType = r.record_type;
+      renderRecordForm(r);
+      document.getElementById('record-modal-title').textContent = '健診レコード編集 — ' + r.employee_name;
+    } else {
+      editingType = 'linked';
+      selectedEmployee = null;
+      renderRecordForm(null);
+      document.getElementById('record-modal-title').textContent = '健診レコード 新規登録';
+    }
+    show('record-modal');
+  }
+
+  function fieldDate(label, key, val, ro){
+    return `<div><label class="hc-field-label">${label}</label>
+      <input type="date" data-field="${key}" value="${val||''}" class="hc-input ${ro?'hc-readonly':''}" ${ro?'readonly':''}></div>`;
+  }
+  function fieldText(label, key, val, ro, ph){
+    return `<div><label class="hc-field-label">${label}</label>
+      <input type="text" data-field="${key}" value="${esc(val||'')}" placeholder="${ph||''}" class="hc-input ${ro?'hc-readonly':''}" ${ro?'readonly':''}></div>`;
+  }
+
+  function renderRecordForm(r){
+    const linked = editingType === 'linked';
+    const isNew = !r;
+    let head = '';
+    if(isNew){
+      head = `<div class="space-y-3 p-3 bg-gray-50 rounded-lg">
+        <div><label class="hc-field-label">レコード区分</label>
+          <select id="new-type" class="hc-input" onchange="HC.changeNewType(this.value)">
+            <option value="linked">名簿連携（社員名簿PLUSの社員）</option>
+            <option value="pre_hire">入社前（名簿未登録）</option>
+            <option value="internal">内勤者（名簿に載らない方）</option>
+          </select></div>
+        <div><label class="hc-field-label">対象年度</label>
+          <input type="number" id="new-year" class="hc-input" value="${state.year}"></div>
+        <div id="new-linked-wrap">
+          <label class="hc-field-label">社員を検索して選択</label>
+          <input type="text" id="emp-search" class="hc-input" placeholder="社員名・社員番号で検索" autocomplete="off">
+          <div id="emp-results" class="mt-1 border border-gray-100 rounded-lg divide-y divide-gray-100 max-h-40 overflow-y-auto hidden"></div>
+          <div id="emp-selected" class="mt-2 text-sm text-teal-700 font-medium"></div>
+        </div>
+        <div id="new-manual-office" class="hidden"><label class="hc-field-label">営業所</label>
+          <select id="manual-office" class="hc-input">${offices.map(o=>`<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join('')}</select></div>
+      </div>`;
+    }
+    const d = r || {};
+    const basic = `
+      <div>
+        <div class="hc-section-title">基本情報 ${linked?'（名簿連携・自動同期）':''}</div>
+        <div class="grid grid-cols-2 gap-3">
+          ${fieldText('社員番号','employee_number', d.employee_number, linked)}
+          ${fieldText('社員名','employee_name', d.employee_name, linked)}
+          ${fieldText('社員区分','employee_type', d.employee_type, linked)}
+          ${fieldText('専従先名','assignment_site', d.assignment_site, linked)}
+          ${fieldText('管理担当名','manager_name', d.manager_name, linked)}
+          ${fieldDate('入社日付','hire_date', d.hire_date, linked)}
+        </div>
+      </div>`;
+    const exam = `
+      <div>
+        <div class="hc-section-title">受診状況</div>
+        <div class="grid grid-cols-2 gap-3">
+          ${fieldDate('予約日','reservation_date', d.reservation_date)}
+          ${fieldDate('受診日','exam_date', d.exam_date)}
+          ${fieldText('受診医療機関名','medical_institution', d.medical_institution)}
+          <div class="flex items-end gap-2 pb-1">
+            <label class="inline-flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" data-field="is_night_worker" ${d.is_night_worker?'checked':''} class="rounded text-teal-600"> 深夜従事者（年2回健診）</label>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mt-3 p-3 rounded-lg bg-violet-50/50 border border-violet-100" data-night-block>
+          <div class="col-span-2 text-xs font-semibold text-violet-700">深夜従事者の年2回目</div>
+          ${fieldDate('受診目安日（未入力時は受診日＋6か月）','exam_date_2_target', d.exam_date_2_target)}
+          ${fieldDate('受診日②（年2回目）','exam_date_2', d.exam_date_2)}
+        </div>
+      </div>`;
+    const secondary = `
+      <div>
+        <div class="hc-section-title">再検査・二次検査</div>
+        <label class="inline-flex items-center gap-2 text-sm text-gray-700 mb-2"><input type="checkbox" data-field="needs_recheck" ${d.needs_recheck?'checked':''} class="rounded text-teal-600"> 再検査あり</label>
+        <div class="grid grid-cols-2 gap-3">
+          ${fieldText('再検査項目','recheck_items', d.recheck_items)}
+          ${fieldDate('二次検査受診推奨日 🔔','secondary_recommended_date', d.secondary_recommended_date)}
+          ${fieldDate('二次検査案内送付日','secondary_guide_sent_date', d.secondary_guide_sent_date)}
+          ${fieldDate('二次検診受診日','secondary_exam_date', d.secondary_exam_date)}
+          <div class="col-span-2">${fieldText('二次検査結果','secondary_result', d.secondary_result)}</div>
+        </div>
+      </div>`;
+    const reminder = `
+      <div>
+        <div class="hc-section-title">担当者・リマインド</div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="hc-field-label">ToBell担当者（通知の宛先）</label>
+            <select id="rec-manager" class="hc-input"></select>
+            <p class="text-xs text-gray-400 mt-1">管理担当名から自動紐付け。手動でも選べます。</p></div>
+          <div><label class="hc-field-label">事前通知（このレコードの上書き）</label>
+            <input type="number" min="0" data-field="reminder_lead_days" value="${d.reminder_lead_days==null?'':d.reminder_lead_days}" placeholder="既定 ${GLOBAL_LEAD} 日前" class="hc-input">
+            <p class="text-xs text-gray-400 mt-1">当日朝9時に加え、指定日数前にも通知します。</p></div>
+          <div class="col-span-2">${fieldText('備考','remarks', d.remarks)}</div>
+        </div>
+      </div>`;
+    let attachments = '';
+    if(!isNew){
+      attachments = `
+      <div>
+        <div class="hc-section-title">健診結果の添付（pdf / jpg / png・10MBまで）</div>
+        <div id="attach-list" class="space-y-1.5 mb-2"></div>
+        <input type="file" id="attach-file" accept=".pdf,.jpg,.jpeg,.png" class="text-sm">
+        <button class="hc-btn-ghost ml-2" onclick="HC.uploadAttachment()">アップロード</button>
+      </div>`;
+    }
+    document.getElementById('record-modal-body').innerHTML = head + basic + exam + secondary + reminder + attachments;
+
+    if(isNew){ setupNewMode(); }
+    populateManagerSelect(d.manager_user);
+    if(!isNew) renderAttachments(d.attachments||[]);
+  }
+
+  function setupNewMode(){
+    const searchEl = document.getElementById('emp-search');
+    if(searchEl){
+      let t;
+      searchEl.addEventListener('input', e=>{ clearTimeout(t); t=setTimeout(()=>searchEmployees(e.target.value), 280); });
+    }
+  }
+  function changeNewType(val){
+    editingType = val;
+    document.getElementById('new-linked-wrap').classList.toggle('hidden', val!=='linked');
+    document.getElementById('new-manual-office').classList.toggle('hidden', val==='linked');
+    // 基本情報の読み取り専用切替のため再描画
+    const year = document.getElementById('new-year').value;
+    renderRecordForm(null);
+    document.getElementById('new-type').value = val;
+    document.getElementById('new-year').value = year;
+    changeNewTypeVisibility(val);
+  }
+  function changeNewTypeVisibility(val){
+    document.getElementById('new-linked-wrap').classList.toggle('hidden', val!=='linked');
+    document.getElementById('new-manual-office').classList.toggle('hidden', val==='linked');
+    setupNewMode();
+  }
+  async function searchEmployees(q){
+    const box = document.getElementById('emp-results');
+    if(!q || q.length<1){ box.classList.add('hidden'); return; }
+    let data;
+    try { data = await api('/tools/health_check/api/employees?search='+encodeURIComponent(q)); } catch(e){ return; }
+    if(!data.employees.length){ box.innerHTML='<div class="px-3 py-2 text-sm text-gray-400">該当なし</div>'; box.classList.remove('hidden'); return; }
+    box.innerHTML = data.employees.map(e=>`<div class="px-3 py-2 text-sm hover:bg-teal-50 cursor-pointer" onclick='HC.selectEmployee(${JSON.stringify(e).replace(/'/g,"&#39;")})'>
+      <span class="font-medium">${esc(e.employee_name)}</span> <span class="text-xs text-gray-400 font-mono">${esc(e.employee_number)}</span>
+      <div class="text-xs text-gray-400">${esc(e.office_name||'')} / ${esc(e.company_name||'')}</div></div>`).join('');
+    box.classList.remove('hidden');
+  }
+  function selectEmployee(e){
+    selectedEmployee = e;
+    document.getElementById('emp-results').classList.add('hidden');
+    document.getElementById('emp-search').value = '';
+    document.getElementById('emp-selected').textContent = `選択中: ${e.employee_name} (${e.employee_number}) / ${e.company_name||''}`;
+  }
+
+  async function loadUsers(){
+    if(usersCache) return usersCache;
+    try { usersCache = (await api('/tools/health_check/api/users')).users || []; } catch(e){ usersCache=[]; }
+    return usersCache;
+  }
+  async function populateManagerSelect(selected){
+    const sel = document.getElementById('rec-manager');
+    if(!sel) return;
+    const users = await loadUsers();
+    sel.innerHTML = '<option value="">（未割当）</option>' +
+      users.map(u=>`<option value="${esc(u.username)}" ${u.username===selected?'selected':''}>${esc(u.name)}（${esc(u.username)}）</option>`).join('');
+  }
+
+  function collectFields(){
+    const payload = {};
+    document.querySelectorAll('#record-modal-body [data-field]').forEach(el=>{
+      const key = el.dataset.field;
+      if(el.type==='checkbox') payload[key]=el.checked;
+      else payload[key]=el.value;
+    });
+    const mgr = document.getElementById('rec-manager');
+    if(mgr) payload.manager_user = mgr.value;
+    return payload;
+  }
+
+  async function saveRecord(){
+    const errEl = document.getElementById('record-modal-error');
+    errEl.textContent='';
+    const payload = collectFields();
+    try {
+      if(editingId){
+        await api('/tools/health_check/api/record/'+editingId, {method:'PUT', body:JSON.stringify(payload)});
+        // 担当者は専用APIで（手動上書きを明示）
+        await api('/tools/health_check/api/record/'+editingId+'/manager', {method:'PUT', body:JSON.stringify({manager_user: payload.manager_user||''})});
+        toast('保存しました');
+      } else {
+        payload.record_type = document.getElementById('new-type').value;
+        payload.target_year = parseInt(document.getElementById('new-year').value,10);
+        if(payload.record_type==='linked'){
+          if(!selectedEmployee){ errEl.textContent='社員を選択してください'; return; }
+          payload.employee_id = selectedEmployee.id;
+        } else {
+          payload.office_code = document.getElementById('manual-office').value;
+          if(!payload.employee_name){ errEl.textContent='社員名は必須です'; return; }
+        }
+        const res = await api('/tools/health_check/api/record', {method:'POST', body:JSON.stringify(payload)});
+        if(payload.manager_user){
+          await api('/tools/health_check/api/record/'+res.record.id+'/manager', {method:'PUT', body:JSON.stringify({manager_user: payload.manager_user})});
+        }
+        toast('登録しました');
+      }
+      closeRecordModal();
+      refresh();
+    } catch(e){ errEl.textContent = e.message; }
+  }
+
+  async function deleteRecord(){
+    if(!editingId) return;
+    if(!confirm('このレコードを削除します。よろしいですか？')) return;
+    try { await api('/tools/health_check/api/record/'+editingId, {method:'DELETE'}); toast('削除しました'); closeRecordModal(); refresh(); }
+    catch(e){ toast(e.message,'error'); }
+  }
+
+  // ---- 添付 ----
+  function renderAttachments(list){
+    const box = document.getElementById('attach-list');
+    if(!box) return;
+    if(!list.length){ box.innerHTML='<p class="text-xs text-gray-400">添付はまだありません。</p>'; return; }
+    box.innerHTML = list.map(a=>`<div class="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-1.5">
+      <a href="/tools/health_check/api/record/${editingId}/attachment/${a.id}" class="text-teal-700 hover:underline truncate">${esc(a.original_name)}</a>
+      <button class="text-red-500 hover:text-red-700 text-xs ml-2" onclick="HC.deleteAttachment(${a.id})">削除</button>
+    </div>`).join('');
+  }
+  async function uploadAttachment(){
+    const input = document.getElementById('attach-file');
+    if(!input.files.length){ toast('ファイルを選択してください','warn'); return; }
+    const fd = new FormData(); fd.append('file', input.files[0]);
+    try {
+      const r = await fetch('/tools/health_check/api/record/'+editingId+'/attachment', {method:'POST', body:fd});
+      const data = await r.json(); if(!r.ok) throw new Error(data.error||'アップロード失敗');
+      toast('アップロードしました');
+      const rec = await api('/tools/health_check/api/record/'+editingId);
+      renderAttachments(rec.attachments||[]);
+      input.value='';
+    } catch(e){ toast(e.message,'error'); }
+  }
+  async function deleteAttachment(aid){
+    try { await api('/tools/health_check/api/record/'+editingId+'/attachment/'+aid, {method:'DELETE'});
+      const rec = await api('/tools/health_check/api/record/'+editingId); renderAttachments(rec.attachments||[]); }
+    catch(e){ toast(e.message,'error'); }
+  }
+
+  // ---- 一括/繰り越し/紐付け ----
+  function openBulkModal(){
+    document.getElementById('bulk-year').value = state.year;
+    document.getElementById('bulk-error').textContent='';
+    document.getElementById('bulk-offices').innerHTML = offices.map(o=>`
+      <label class="flex items-center gap-2 text-sm"><input type="checkbox" value="${esc(o.code)}" class="bulk-office rounded text-teal-600" checked> ${esc(o.name)} (${esc(o.code)})</label>`).join('')
+      || '<p class="text-xs text-gray-400">利用可能な営業所がありません。</p>';
+    show('bulk-modal');
+  }
+  async function runBulkCreate(){
+    const year = parseInt(document.getElementById('bulk-year').value,10);
+    const sel = [...document.querySelectorAll('.bulk-office:checked')].map(c=>c.value);
+    if(!sel.length){ document.getElementById('bulk-error').textContent='営業所を選択してください'; return; }
+    try { const r = await api('/tools/health_check/api/bulk_create', {method:'POST', body:JSON.stringify({target_year:year, offices:sel})});
+      toast(`${r.created} 件を起票しました`); closeBulkModal(); refresh(); }
+    catch(e){ document.getElementById('bulk-error').textContent=e.message; }
+  }
+  function openCarryoverModal(){
+    document.getElementById('carry-from').value = state.year-1;
+    document.getElementById('carry-to').value = state.year;
+    document.getElementById('carry-error').textContent='';
+    show('carryover-modal');
+  }
+  async function runCarryover(){
+    const from = parseInt(document.getElementById('carry-from').value,10);
+    const to = parseInt(document.getElementById('carry-to').value,10);
+    try { const r = await api('/tools/health_check/api/carryover', {method:'POST', body:JSON.stringify({from_year:from, to_year:to})});
+      toast(`${r.created} 件を繰り越しました`); closeCarryoverModal(); await loadYears(); refresh(); }
+    catch(e){ document.getElementById('carry-error').textContent=e.message; }
+  }
+  async function resolveManagers(){
+    if(!confirm('担当者が未割当のレコードに、管理担当名から自動でDSTTユーザーを紐付けます。よろしいですか？')) return;
+    try { const r = await api('/tools/health_check/api/resolve_managers', {method:'POST', body:JSON.stringify({year:state.year})});
+      toast(`${r.resolved} 件を紐付けました`); refresh(); }
+    catch(e){ toast(e.message,'error'); }
+  }
+  function exportCsv(){
+    const p = new URLSearchParams(); p.set('year', state.year); if(state.office) p.set('office', state.office);
+    window.location = '/tools/health_check/api/export?'+p.toString();
+  }
+
+  // ---- ToBell連携（個人） ----
+  async function openIntegrationModal(){
+    try { const r = await api('/tools/health_check/api/integration'); document.getElementById('integration-toggle').checked = !!r.enabled; } catch(e){}
+    show('integration-modal');
+  }
+  async function saveIntegration(){
+    const enabled = document.getElementById('integration-toggle').checked;
+    try { await api('/tools/health_check/api/integration', {method:'POST', body:JSON.stringify({enabled})}); toast('連携設定を保存しました'); closeIntegrationModal(); }
+    catch(e){ toast(e.message,'error'); }
+  }
+
+  // ---- 設定（管理者） ----
+  async function openSettingsModal(){
+    try { const r = await api('/tools/health_check/api/settings'); document.getElementById('settings-lead').value = r.settings.global_lead_days; } catch(e){}
+    show('settings-modal');
+  }
+  async function saveSettings(){
+    const v = parseInt(document.getElementById('settings-lead').value,10);
+    try { await api('/tools/health_check/api/settings', {method:'POST', body:JSON.stringify({global_lead_days:v})}); toast('設定を保存しました'); closeSettingsModal(); }
+    catch(e){ toast(e.message,'error'); }
+  }
+
+  // ---- 権限（管理者） ----
+  async function openPermissionsModal(){ togglePermOffice(); await loadPermissions(); show('permissions-modal'); }
+  function togglePermOffice(){
+    const t = document.getElementById('perm-type').value;
+    document.getElementById('perm-office-wrap').style.visibility = t==='office'?'visible':'hidden';
+  }
+  async function loadPermissions(){
+    let data; try { data = await api('/tools/health_check/api/admin/permissions'); } catch(e){ toast(e.message,'error'); return; }
+    document.getElementById('perm-body').innerHTML = (data.users||[]).map(u=>{
+      const tags = [];
+      if(u.is_admin) tags.push('<span class="hc-pill" style="color:#0f766e;background:#ccfbf1">管理者</span>');
+      u.offices.forEach(o=>tags.push(`<span class="hc-pill" style="color:#1d4ed8;background:#dbeafe">${esc(o.name)}</span>`));
+      const ops = [];
+      if(u.is_admin) ops.push(`<button class="text-red-500 text-xs hover:underline" onclick="HC.revoke('${esc(u.user_id)}','admin')">管理者解除</button>`);
+      u.offices.forEach(o=>ops.push(`<button class="text-red-500 text-xs hover:underline" onclick="HC.revoke('${esc(u.user_id)}','office','${esc(o.code)}')">${esc(o.code)}解除</button>`));
+      return `<tr><td class="px-3 py-2 font-mono text-xs">${esc(u.user_id)}</td>
+        <td class="px-3 py-2 space-x-1">${tags.join(' ')||'<span class="text-gray-300">—</span>'}</td>
+        <td class="px-3 py-2 text-right space-x-2">${ops.join(' ')||'—'}</td></tr>`;
+    }).join('') || '<tr><td colspan="3" class="px-3 py-6 text-center text-gray-400 text-sm">付与済みのユーザーはいません</td></tr>';
+  }
+  async function grantPermission(){
+    const user_id = document.getElementById('perm-user').value.trim();
+    const grant_type = document.getElementById('perm-type').value;
+    const office_code = document.getElementById('perm-office').value;
+    if(!user_id){ toast('ユーザーIDを入力してください','warn'); return; }
+    try { await api('/tools/health_check/api/admin/grant', {method:'POST', body:JSON.stringify({user_id, grant_type, office_code})});
+      toast('付与しました'); document.getElementById('perm-user').value=''; loadPermissions(); }
+    catch(e){ toast(e.message,'error'); }
+  }
+  async function revoke(user_id, revoke_type, office_code){
+    try { await api('/tools/health_check/api/admin/revoke', {method:'POST', body:JSON.stringify({user_id, revoke_type, office_code})});
+      toast('解除しました'); loadPermissions(); }
+    catch(e){ toast(e.message,'error'); }
+  }
+
+  // ---- モーダル制御 ----
+  function show(id){ document.getElementById(id).classList.remove('hidden'); }
+  function hide(id){ document.getElementById(id).classList.add('hidden'); }
+
+  return {
+    init, openRecordModal, closeRecordModal:()=>hide('record-modal'), saveRecord, deleteRecord,
+    changeNewType, selectEmployee, uploadAttachment, deleteAttachment,
+    openBulkModal, closeBulkModal:()=>hide('bulk-modal'), runBulkCreate,
+    openCarryoverModal, closeCarryoverModal:()=>hide('carryover-modal'), runCarryover,
+    resolveManagers, exportCsv,
+    openIntegrationModal, closeIntegrationModal:()=>hide('integration-modal'), saveIntegration,
+    openSettingsModal, closeSettingsModal:()=>hide('settings-modal'), saveSettings,
+    openPermissionsModal, closePermissionsModal:()=>hide('permissions-modal'),
+    grantPermission, revoke, togglePermOffice,
+  };
+})();
+document.addEventListener('DOMContentLoaded', HC.init);
+</script>
+{% endblock %}
