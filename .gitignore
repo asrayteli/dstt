@@ -32,5 +32,10 @@ app/static/monthly_generator/uploads/*
 app/static/pluslist/pluslist_permissions.json
 app/static/pluslist/uploads/*
 !app/static/pluslist/uploads/.gitkeep
+# 健診PLUS：添付ファイル・権限/設定など実行時生成データは追跡しない
+app/static/health_check/uploads/*
+!app/static/health_check/uploads/.gitkeep
+app/static/health_check/permissions.json
+app/static/health_check/settings.json
 var/
 *.pyc

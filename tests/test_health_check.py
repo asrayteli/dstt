@@ -287,6 +287,76 @@ def test_fiscal_year_helper(tmp_path):
     assert module.current_fiscal_year(date(2026, 12, 31)) == 2026
 
 
+def test_nasva_eligibility_by_age_at_fiscal_start(tmp_path):
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+
+    with app.app_context():
+        # 2026年度4/1時点で65歳（=64歳超）になる社員
+        db.session.add(Employee(
+            employee_number="E064", office_code="100", office_name="本社営業所",
+            employee_name="高齢四郎", employee_type="正社員", company_name="大新東",
+            manager_name="管理花子", birth_date=date(1961, 4, 1),
+        ))
+        # 2026年度4/1時点で64歳ちょうど（NASVA対象外）
+        db.session.add(Employee(
+            employee_number="E063", office_code="100", office_name="本社営業所",
+            employee_name="非対象五郎", employee_type="正社員", company_name="大新東",
+            manager_name="管理花子", birth_date=date(1962, 4, 1),
+        ))
+        db.session.commit()
+
+    over = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E064",
+    }).get_json()["record"]
+    under = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E063",
+    }).get_json()["record"]
+
+    assert over["is_nasva_target"] is True
+    assert over["age_at_fiscal_start"] == 65
+    assert under["is_nasva_target"] is False
+    assert under["age_at_fiscal_start"] == 64
+
+    # NASVA日付が保存できること
+    rid = over["id"]
+    client.put(f"/tools/health_check/api/record/{rid}", json={
+        "nasva_reservation_date": "2026-05-10", "nasva_exam_date": "2026-05-20"})
+    rec = client.get(f"/tools/health_check/api/record/{rid}").get_json()
+    assert rec["nasva_reservation_date"] == "2026-05-10"
+    assert rec["nasva_exam_date"] == "2026-05-20"
+
+
+def test_nasva_attachment_category(tmp_path):
+    import io
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    with app.app_context():
+        db.session.add(Employee(
+            employee_number="E099", office_code="100", office_name="本社営業所",
+            employee_name="運転六郎", employee_type="正社員", company_name="大新東",
+            manager_name="管理花子", birth_date=date(1955, 1, 1),
+        ))
+        db.session.commit()
+
+    rid = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E099",
+    }).get_json()["record"]["id"]
+
+    res = client.post(
+        f"/tools/health_check/api/record/{rid}/attachment",
+        data={"file": (io.BytesIO(b"%PDF-1.4 test"), "nasva.pdf"), "category": "nasva"},
+        content_type="multipart/form-data",
+    )
+    assert res.status_code == 200
+    assert res.get_json()["attachment"]["category"] == "nasva"
+
+    rec = client.get(f"/tools/health_check/api/record/{rid}").get_json()
+    assert any(a["category"] == "nasva" for a in rec["attachments"])
+
+
 def test_name_normalization_matches_across_width_and_space(tmp_path):
     module, app = _build(tmp_path)
     with app.app_context():
