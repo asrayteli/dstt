@@ -1270,6 +1270,40 @@ def access_management_users():
     })
 
 
+@user_management_bp.route("/api/access-management/all-logins", methods=["GET"])
+@login_required
+def access_management_all_logins():
+    """ユーザー未選択時に表示する全ユーザーのDSTTログイン履歴"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    q = str(request.args.get("q") or "").strip()
+    like = f"%{q}%"
+    limit = _limit_param()
+
+    query = _apply_range(DsttLoginLog.query, DsttLoginLog.logged_in_at)
+    if q:
+        query = query.filter(
+            or_(
+                DsttLoginLog.username.ilike(like),
+                DsttLoginLog.name.ilike(like),
+                DsttLoginLog.ip_address.ilike(like),
+                DsttLoginLog.user_agent.ilike(like),
+            )
+        )
+    logs = (
+        query.order_by(DsttLoginLog.logged_in_at.desc(), DsttLoginLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+    return jsonify({
+        "logs": [log.to_dict() for log in logs],
+        "limit": limit,
+        "count": len(logs),
+    })
+
+
 @user_management_bp.route("/api/access-management/users/<int:user_id>", methods=["GET"])
 @login_required
 def access_management_user_detail(user_id):

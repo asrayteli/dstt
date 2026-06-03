@@ -82,8 +82,31 @@
         <button id="btn-access-load" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">表示</button>
       </div>
 
-      <div id="access-empty" class="border rounded bg-gray-50 p-5 text-sm text-gray-600">
-        ユーザーを選択すると、ログイン日時、ツール利用、To Bellタスク、FILE POSTのアップロード/ダウンロード履歴を表示します。
+      <div id="access-empty" class="space-y-3">
+        <div class="border rounded bg-gray-50 p-4 text-sm text-gray-600">
+          ユーザーを選択すると、そのユーザーのログイン日時・ツール利用・To Bellタスク・FILE POST履歴を表示します。<br>
+          未選択の場合は、全ユーザーのDSTTログイン日時を以下に表示します。
+        </div>
+        <div class="border rounded overflow-hidden">
+          <div class="bg-gray-50 px-4 py-2 font-semibold flex items-center justify-between">
+            <span>全ユーザーのDSTTログイン履歴</span>
+            <span id="access-all-logins-count" class="text-xs text-gray-500"></span>
+          </div>
+          <div class="max-h-[32rem] overflow-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-white sticky top-0 text-left">
+                <tr>
+                  <th class="p-2">ログイン日時</th>
+                  <th class="p-2">ユーザーID</th>
+                  <th class="p-2">表示名</th>
+                  <th class="p-2">IP</th>
+                  <th class="p-2">端末</th>
+                </tr>
+              </thead>
+              <tbody id="access-all-logins-tbody"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <div id="access-content" class="hidden space-y-6">
@@ -637,13 +660,30 @@ async function loadAccessManagement() {
     const res = await api('/tools/user_management/api/access-management/users');
     state.accessUsers = res.users || [];
     const sel = $('#access-user-select');
-    sel.innerHTML = '<option value="">ユーザーを選択</option>' +
+    sel.innerHTML = '<option value="">ユーザーを選択（未選択時は全ユーザーのログイン履歴）</option>' +
       state.accessUsers.map(u => `<option value="${u.id}">${escape(u.label)}${u.is_admin ? ' [管理者]' : ''}</option>`).join('');
     sel.onchange = loadSelectedAccessLogs;
   }
-  if ($('#access-user-select').value) {
-    await loadSelectedAccessLogs();
+  await loadSelectedAccessLogs();
+}
+
+async function loadAllUserLoginLogs() {
+  const suffix = accessQuery();
+  const res = await api(`/tools/user_management/api/access-management/all-logins${suffix ? '?' + suffix : ''}`);
+  const logs = res.logs || [];
+  const countEl = $('#access-all-logins-count');
+  if (countEl) {
+    countEl.textContent = `${logs.length}件${logs.length >= (res.limit || 0) ? `（上限 ${res.limit} 件）` : ''}`;
   }
+  $('#access-all-logins-tbody').innerHTML = logs.length ? logs.map(row => `
+    <tr class="border-t">
+      <td class="p-2 whitespace-nowrap">${fmtDate(row.logged_in_at)}</td>
+      <td class="p-2 font-mono text-xs">${escape(row.username || '-')}</td>
+      <td class="p-2">${escape(row.name || '-')}</td>
+      <td class="p-2 font-mono text-xs">${escape(row.ip_address || '-')}</td>
+      <td class="p-2 text-xs">${shortText(row.user_agent, 90)}</td>
+    </tr>
+  `).join('') : emptyRow(5);
 }
 
 function accessQuery() {
@@ -664,8 +704,10 @@ async function loadSelectedAccessLogs() {
   if (!userId) {
     $('#access-empty').classList.remove('hidden');
     $('#access-content').classList.add('hidden');
+    await loadAllUserLoginLogs();
     return;
   }
+  $('#access-empty').classList.add('hidden');
   const suffix = accessQuery();
   state.accessDetail = await api(`/tools/user_management/api/access-management/users/${userId}${suffix ? '?' + suffix : ''}`);
   renderAccessManagement();
@@ -760,9 +802,7 @@ function renderAccessManagement() {
 
 $('#btn-access-load')?.addEventListener('click', loadSelectedAccessLogs);
 ['#access-search', '#access-from', '#access-to', '#access-limit'].forEach(sel => {
-  $(sel)?.addEventListener('change', () => {
-    if ($('#access-user-select')?.value) loadSelectedAccessLogs();
-  });
+  $(sel)?.addEventListener('change', () => loadSelectedAccessLogs());
 });
 $('#access-search')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
