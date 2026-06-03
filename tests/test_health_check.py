@@ -225,6 +225,61 @@ def test_carryover_clears_exam_dates(tmp_path):
     assert all(r["exam_date"] is None for r in new_records)
 
 
+def test_export_honors_status_filter(tmp_path):
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100"]})
+    recs = client.get("/tools/health_check/api/records?year=2026").get_json()["records"]
+    client.put(f"/tools/health_check/api/record/{recs[0]['id']}", json={"exam_date": "2026-05-01"})
+
+    # 全件
+    full = client.get("/tools/health_check/api/export?year=2026")
+    assert full.status_code == 200
+    assert full.headers["Content-Type"].startswith("text/csv")
+    body_full = full.data.decode("utf-8-sig").strip().splitlines()
+    assert len(body_full) == 3  # ヘッダ + 2件
+
+    # 受診済のみ
+    filtered = client.get("/tools/health_check/api/export?year=2026&status=受診済")
+    body = filtered.data.decode("utf-8-sig").strip().splitlines()
+    assert len(body) == 2  # ヘッダ + 1件
+
+
+def test_dashboard_scoped_to_office(tmp_path):
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    with app.app_context():
+        db.session.add(Office(office_code="200", office_name="第二営業所", created_by="seed"))
+        db.session.add(Employee(
+            employee_number="E900", office_code="200", office_name="第二営業所",
+            employee_name="別社員", employee_type="正社員", company_name="大新東"))
+        db.session.commit()
+    client = app.test_client()
+    client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100", "200"]})
+
+    all_dash = client.get("/tools/health_check/api/dashboard?year=2026").get_json()
+    assert all_dash["total"] == 3
+    one = client.get("/tools/health_check/api/dashboard?year=2026&office=200").get_json()
+    assert one["total"] == 1
+
+
+def test_history_records_changes(tmp_path):
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    res = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "internal", "employee_name": "履歴太郎", "office_code": "100"})
+    rid = res.get_json()["record"]["id"]
+    client.put(f"/tools/health_check/api/record/{rid}", json={"exam_date": "2026-05-10"})
+
+    hist = client.get(f"/tools/health_check/api/history?record_id={rid}").get_json()["histories"]
+    actions = {h["action"] for h in hist}
+    assert "create" in actions and "update" in actions
+    exam_change = [h for h in hist if h["field_name"] == "exam_date"]
+    assert exam_change and exam_change[0]["new_value"] == "2026-05-10"
+
+
 def test_fiscal_year_helper(tmp_path):
     module, app = _build(tmp_path)
     assert module.current_fiscal_year(date(2026, 3, 31)) == 2025

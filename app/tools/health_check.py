@@ -22,6 +22,7 @@ from flask import Blueprint, render_template, request, jsonify, current_app, sen
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 from dateutil.relativedelta import relativedelta
+from sqlalchemy.orm import selectinload
 
 from app.models import (
     db,
@@ -309,13 +310,13 @@ def index():
 # レコード API
 # ============================================================
 
-@health_check_bp.route("/api/records")
-@login_required
-def api_records():
-    user_id = str(current_user.username)
+def _scoped_query(user_id: str):
+    """一覧・ダッシュボード・エクスポートで共有する絞り込み済みクエリを返す。
+    戻り値は (query, error_response)。error_response が None でなければそれを返す。
+    年度・営業所・区分・各フラグ・フリーワードを request.args から適用する。"""
     user_offices = get_user_offices(user_id)
     if not user_offices and not is_admin(user_id):
-        return jsonify({"error": "アクセス権限がありません"}), 403
+        return None, (jsonify({"error": "アクセス権限がありません"}), 403)
 
     query = HealthCheckRecord.query
     if not is_admin(user_id):
@@ -328,7 +329,7 @@ def api_records():
     office = request.args.get("office", "").strip()
     if office:
         if not has_office_access(user_id, office):
-            return jsonify({"error": "この営業所への権限がありません"}), 403
+            return None, (jsonify({"error": "この営業所への権限がありません"}), 403)
         query = query.filter(HealthCheckRecord.office_code == office)
 
     record_type = request.args.get("record_type", "").strip()
@@ -355,13 +356,24 @@ def api_records():
             HealthCheckRecord.medical_institution.like(like),
         ))
 
+    return query, None
+
+
+@health_check_bp.route("/api/records")
+@login_required
+def api_records():
+    user_id = str(current_user.username)
+    query, error = _scoped_query(user_id)
+    if error:
+        return error
+
     sort_by = request.args.get("sort_by", "employee_number")
     sort_order = request.args.get("sort_order", "asc")
     if hasattr(HealthCheckRecord, sort_by):
         col = getattr(HealthCheckRecord, sort_by)
         query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
 
-    records = query.all()
+    records = query.options(selectinload(HealthCheckRecord.attachments)).all()
     # ステータス絞り込み（算出値のため取得後にフィルタ）
     status_filter = request.args.get("status", "").strip()
     items = [r.to_dict() for r in records]
@@ -843,17 +855,9 @@ def api_users():
 @login_required
 def api_dashboard():
     user_id = str(current_user.username)
-    user_offices = get_user_offices(user_id)
-    if not user_offices and not is_admin(user_id):
-        return jsonify({"error": "アクセス権限がありません"}), 403
-
-    query = HealthCheckRecord.query
-    if not is_admin(user_id):
-        query = query.filter(HealthCheckRecord.office_code.in_(user_offices))
-    year = request.args.get("year", type=int)
-    if year:
-        query = query.filter(HealthCheckRecord.target_year == year)
-
+    query, error = _scoped_query(user_id)
+    if error:
+        return error
     records = query.all()
     status_counts: dict[str, int] = {}
     night_pending = 0
@@ -945,21 +949,14 @@ _RECORD_TYPE_LABEL = {"linked": "名簿連携", "pre_hire": "入社前", "intern
 @login_required
 def api_export():
     user_id = str(current_user.username)
-    user_offices = get_user_offices(user_id)
-    if not user_offices and not is_admin(user_id):
-        return jsonify({"error": "アクセス権限がありません"}), 403
-
-    query = HealthCheckRecord.query
-    if not is_admin(user_id):
-        query = query.filter(HealthCheckRecord.office_code.in_(user_offices))
-    year = request.args.get("year", type=int)
-    if year:
-        query = query.filter(HealthCheckRecord.target_year == year)
-    office = request.args.get("office", "").strip()
-    if office and has_office_access(user_id, office):
-        query = query.filter(HealthCheckRecord.office_code == office)
-
+    query, error = _scoped_query(user_id)
+    if error:
+        return error
     records = query.order_by(HealthCheckRecord.employee_number).all()
+    status_filter = request.args.get("status", "").strip()
+    if status_filter:
+        records = [r for r in records if r.compute_status() == status_filter]
+    year = request.args.get("year", type=int)
 
     buffer = StringIO()
     writer = csv.writer(buffer)
