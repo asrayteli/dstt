@@ -5,6 +5,7 @@ from flask_login import login_required, current_user
 from werkzeug.security import generate_password_hash
 from app.models import (
     db,
+    DsttLoginLog,
     User,
     AccessBranch,
     AccessOffice,
@@ -118,6 +119,31 @@ def get_users():
     group_rules = GroupToolPermission.query.all()
     return jsonify({
         "users": [_serialize_user(u, group_rules=group_rules) for u in users]
+    })
+
+
+@user_management_bp.route("/api/login-logs", methods=["GET"])
+@login_required
+def get_login_logs():
+    """DSTT successful login history for administrators."""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    try:
+        limit = int(request.args.get("limit", 500))
+    except (TypeError, ValueError):
+        limit = 500
+    limit = max(1, min(limit, 1000))
+
+    logs = (
+        DsttLoginLog.query
+        .order_by(DsttLoginLog.logged_in_at.desc(), DsttLoginLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return jsonify({
+        "logs": [log.to_dict() for log in logs],
+        "limit": limit,
     })
 
 

@@ -1,11 +1,16 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone
 from dateutil.relativedelta import relativedelta
 
 from .security.column_crypto import EncryptedText
 
 db = SQLAlchemy()
+JST = timezone(timedelta(hours=9))
+
+
+def jst_now():
+    return datetime.now(JST).replace(tzinfo=None)
 
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
@@ -37,6 +42,31 @@ class User(UserMixin, db.Model):
     def get_id(self):
         # usernameを返すように修正（leave_mgr.pyでcurrent_user.usernameを使用しているため）
         return str(self.username)
+
+
+class DsttLoginLog(db.Model):
+    """DSTT successful login history."""
+
+    __tablename__ = 'dstt_login_logs'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, nullable=True, index=True)
+    username = db.Column(db.String(80), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=True)
+    ip_address = db.Column(db.String(80), nullable=True)
+    user_agent = db.Column(db.String(255), nullable=True)
+    logged_in_at = db.Column(db.DateTime, default=jst_now, nullable=False, index=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'username': self.username,
+            'name': self.name or '',
+            'ip_address': self.ip_address or '',
+            'user_agent': self.user_agent or '',
+            'logged_in_at': self.logged_in_at.isoformat() if self.logged_in_at else None,
+        }
 
 
 class AccessBranch(db.Model):

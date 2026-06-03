@@ -26,7 +26,10 @@
   <section id="tab-users" class="admin-section">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-xl font-semibold">ユーザー一覧</h2>
-      <button id="btn-new-user" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">＋ 新規ユーザー作成</button>
+      <div class="flex gap-2">
+        <button id="btn-login-logs" class="bg-slate-700 text-white px-4 py-2 rounded hover:bg-slate-800">DSTTログイン履歴</button>
+        <button id="btn-new-user" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">＋ 新規ユーザー作成</button>
+      </div>
     </div>
 
     <div class="bg-white rounded-xl shadow overflow-hidden">
@@ -490,11 +493,42 @@
   </div>
 </div>
 
+<!-- ===== DSTTログイン履歴モーダル ===== -->
+<div id="modal-login-logs" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+    <div class="flex items-center justify-between gap-3 mb-4">
+      <div>
+        <h3 class="text-xl font-bold">DSTTログイン履歴</h3>
+        <p class="text-sm text-gray-500">DSTTへログインした人だけを、直近のログイン順で表示します。</p>
+      </div>
+      <div class="flex gap-2">
+        <button type="button" id="btn-refresh-login-logs" class="bg-slate-700 text-white px-4 py-2 rounded hover:bg-slate-800">更新</button>
+        <button type="button" id="btn-close-login-logs" class="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500">閉じる</button>
+      </div>
+    </div>
+    <div class="overflow-auto border rounded">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 sticky top-0 text-left">
+          <tr>
+            <th class="p-3">ログイン日時</th>
+            <th class="p-3">ユーザーID</th>
+            <th class="p-3">名前</th>
+            <th class="p-3">IP</th>
+            <th class="p-3">ブラウザ</th>
+          </tr>
+        </thead>
+        <tbody id="login-logs-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <script>
 const state = {
   users: [],
   branches: [],
   tools: [],
+  loginLogs: [],
   selectedUserId: null,
   accessUsers: [],
   accessDetail: null,
@@ -736,6 +770,47 @@ $('#access-search')?.addEventListener('keydown', (e) => {
     loadSelectedAccessLogs();
   }
 });
+function formatLoginTime(value) {
+  if (!value) return '-';
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+  if (!match) return value;
+  return `${match[1]}/${match[2]}/${match[3]} ${match[4]}:${match[5]}:${match[6]}`;
+}
+
+async function loadLoginLogs() {
+  const data = await api('/tools/user_management/api/login-logs?limit=500');
+  state.loginLogs = data.logs || [];
+  renderLoginLogs();
+}
+
+function renderLoginLogs() {
+  const tbody = $('#login-logs-tbody');
+  if (!state.loginLogs.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-gray-500">ログイン履歴はまだありません。</td></tr>';
+    return;
+  }
+  tbody.innerHTML = state.loginLogs.map(log => `
+    <tr class="border-t align-top">
+      <td class="p-3 whitespace-nowrap">${escape(formatLoginTime(log.logged_in_at))}</td>
+      <td class="p-3 font-mono">${escape(log.username)}</td>
+      <td class="p-3">${escape(log.name || '-')}</td>
+      <td class="p-3 font-mono text-xs">${escape(log.ip_address || '-')}</td>
+      <td class="p-3 text-xs text-gray-600 max-w-md break-words">${escape(log.user_agent || '-')}</td>
+    </tr>
+  `).join('');
+}
+
+$('#btn-login-logs').addEventListener('click', async () => {
+  $('#modal-login-logs').classList.remove('hidden');
+  $('#login-logs-tbody').innerHTML = '<tr><td colspan="5" class="p-6 text-center text-gray-500">読み込み中...</td></tr>';
+  try {
+    await loadLoginLogs();
+  } catch (err) {
+    $('#login-logs-tbody').innerHTML = `<tr><td colspan="5" class="p-6 text-center text-red-600">エラー: ${escape(err.message)}</td></tr>`;
+  }
+});
+$('#btn-refresh-login-logs').addEventListener('click', loadLoginLogs);
+$('#btn-close-login-logs').addEventListener('click', () => $('#modal-login-logs').classList.add('hidden'));
 
 $('#btn-new-user').addEventListener('click', () => {
   $('#form-new-user').reset();

@@ -2,10 +2,34 @@ from flask import Blueprint, abort, current_app, flash, redirect, render_templat
 from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .models import User, UserLoginLog, db
+from .models import DsttLoginLog, User, UserLoginLog, db
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
+
+
+def _record_successful_login(user: User) -> None:
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    ip_address = forwarded_for.split(",", 1)[0].strip() if forwarded_for else request.remote_addr
+    user_agent = (request.headers.get("User-Agent") or "")[:255]
+    db.session.add(
+        UserLoginLog(
+            username=user.username,
+            success=True,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+    )
+    db.session.add(
+        DsttLoginLog(
+            user_id=user.id,
+            username=user.username,
+            name=user.name,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+    )
+    db.session.commit()
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -21,15 +45,11 @@ def login():
         if user and check_password_hash(user.password_hash, password):
             session.clear()
             login_user(user)
-            db.session.add(
-                UserLoginLog(
-                    username=user.username,
-                    success=True,
-                    ip_address=request.remote_addr,
-                    user_agent=request.user_agent.string,
-                )
-            )
-            db.session.commit()
+            try:
+                _record_successful_login(user)
+            except Exception:
+                db.session.rollback()
+                current_app.logger.exception("Failed to record DSTT login log")
             return redirect(url_for("main.index"))
 
         if username:
