@@ -41,6 +41,11 @@ INTEGRATION_KEYS = {
         "label": "プロジェクト/タスクを現場に紐付け",
         "description": "siteplusの現場と、ToBellのプロジェクトやタスクを多対多で紐付けます。",
     },
+    "health_check.linkage": {
+        "tool": "health_check",
+        "label": "健診の二次検査・深夜2回目をリマインド",
+        "description": "健診PLUSで自分が担当する対象者の二次検査受診推奨日・深夜従事者の年2回目受診を、当日朝と事前にToBellのタスク／通知でお知らせします。",
+    },
     "google.calendar": {
         "tool": "google",
         "label": "重要タスクをGoogleカレンダーに送る",

@@ -173,6 +173,7 @@ def _seed_tool_categories():
     KNOWN_DEFAULTS = {
         "bus_pricing": "大新東ツール",
         "to_bell": "大新東ツール",
+        "health_check": "大新東ツール",
     }
 
     existing_keys = {ts.tool_key for ts in ToolSettings.query.all()}
@@ -575,6 +576,9 @@ def create_app(test_config=None):
     from .tools.siteplus import siteplus_bp
     app.register_blueprint(siteplus_bp)
 
+    from .tools.health_check import health_check_bp
+    app.register_blueprint(health_check_bp)
+
     from .tools.to_bell import to_bell_bp
     app.register_blueprint(to_bell_bp)
 
@@ -609,6 +613,7 @@ def create_app(test_config=None):
         "subject_analysis_tool": "subject_analysis_tool",
         "power_imager": "power_imager",
         "bus_pricing": "bus_pricing",
+        "health_check": "health_check",
     }
     _EXEMPT_PATH_PREFIXES = (
         "/tools/shiftersync/download/",
@@ -644,6 +649,7 @@ def create_app(test_config=None):
         "/tools/pluslist/api/",
         "/tools/siteplus/api/",
         "/tools/to_bell/api/",
+        "/tools/health_check/api/",
     )
 
     @app.before_request
@@ -666,6 +672,12 @@ def create_app(test_config=None):
                 return None
             from .services.to_bell_service import cleanup_expired_records
             cleanup_expired_records()
+            # 健診PLUSのリマインドを当日通知へ繰り上げる（due_at のローリング）
+            try:
+                from .services.to_bell_hooks import sweep_health_check_reminders
+                sweep_health_check_reminders()
+            except Exception:
+                db.session.rollback()
             marker_path.parent.mkdir(parents=True, exist_ok=True)
             marker_path.write_text(today_text, encoding="utf-8")
         except Exception:

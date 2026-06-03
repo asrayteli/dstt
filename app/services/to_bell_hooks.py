@@ -7,8 +7,10 @@ ONになっているユーザーにのみ通知/タスクを生成する。例�
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Any, Iterable
+
+from dateutil.relativedelta import relativedelta
 
 from app.models import ToBellNotification, ToBellTask, db
 from app.services.to_bell_integrations import enabled_users, is_enabled
@@ -276,3 +278,243 @@ def _send_immediate_push(user: str, *, title: str, body: str, url: str) -> None:
             return
     except Exception:  # noqa: BLE001
         logger.exception("CloudShift substitute_update プッシュ送信失敗")
+
+
+# ============================================================
+# 健診PLUS（health_check）→ ToBell リマインダー
+# ============================================================
+
+HEALTH_CHECK_INTEGRATION_KEY = "health_check.linkage"
+HEALTH_CHECK_DEFAULT_LEAD_DAYS = 3
+_HEALTH_CHECK_HREF = "/tools/health_check"
+
+
+def _hc_reminder_schedule(basis_date, lead_days: int | None) -> list[datetime]:
+    """基準日の 09:00 と、その lead_days 日前の 09:00 を返す（重複排除・昇順）。"""
+    times = [datetime.combine(basis_date, time(9, 0))]
+    if lead_days and lead_days > 0:
+        times.append(datetime.combine(basis_date, time(9, 0)) - timedelta(days=lead_days))
+    return sorted(set(times))
+
+
+def _hc_next_due(schedule: list[datetime], now: datetime) -> datetime:
+    """まだ来ていない（=日付が今日以降の）最も近い通知時刻を返す。
+    全て過去なら最後の時刻を返す（push は due_at 重複でスキップされる）。"""
+    today = now.date()
+    upcoming = [dt for dt in schedule if dt.date() >= today]
+    return min(upcoming) if upcoming else max(schedule)
+
+
+def _hc_night_basis(record) -> "Any":
+    """深夜2回目リマインドの基準日。未設定時は受診日＋6か月を既定とする。"""
+    if record.exam_date_2_target:
+        return record.exam_date_2_target
+    if record.exam_date:
+        return record.exam_date + relativedelta(months=6)
+    return None
+
+
+def _ensure_reminder_task(
+    *,
+    manager_user: str,
+    title: str,
+    description: str,
+    source_ref_type: str,
+    source_ref_id: str,
+    due_at: datetime,
+    priority: str = "normal",
+) -> ToBellTask | None:
+    """健診リマインドのタスクを「無ければ作成／あれば期日・宛先を更新」する。"""
+    if not manager_user:
+        return None
+    existing = ToBellTask.query.filter_by(
+        source_tool="health_check",
+        source_ref_type=source_ref_type,
+        source_ref_id=str(source_ref_id),
+    ).first()
+    if existing:
+        existing.title = title[:240]
+        existing.description = description[:2000] if description else ""
+        existing.due_at = due_at
+        existing.assigned_to = manager_user
+        existing.priority = priority
+        if existing.status in ("done", "archived"):
+            existing.status = "todo"
+            existing.completed_at = None
+        return existing
+    task = ToBellTask(
+        title=title[:240],
+        description=description[:2000] if description else "",
+        status="todo",
+        priority=priority,
+        due_at=due_at,
+        created_by=manager_user,
+        assigned_to=manager_user,
+        source_tool="health_check",
+        source_ref_type=source_ref_type,
+        source_ref_id=str(source_ref_id),
+    )
+    db.session.add(task)
+    db.session.flush()
+    db.session.add(
+        ToBellNotification(
+            user_id=manager_user,
+            task=task,
+            source_tool="health_check",
+            event_type="health_check_reminder",
+            title=title[:240],
+            body=description[:400] if description else "",
+            href=_HEALTH_CHECK_HREF,
+            severity="warning",
+        )
+    )
+    return task
+
+
+def _close_reminder_task(source_ref_type: str, source_ref_id: str) -> None:
+    """条件を満たさなくなった健診リマインドをアーカイブする。"""
+    existing = ToBellTask.query.filter_by(
+        source_tool="health_check",
+        source_ref_type=source_ref_type,
+        source_ref_id=str(source_ref_id),
+    ).first()
+    if existing and existing.status not in ("done", "archived"):
+        existing.status = "archived"
+
+
+def ensure_health_check_reminders(
+    record,
+    *,
+    global_lead_days: int = HEALTH_CHECK_DEFAULT_LEAD_DAYS,
+    now: datetime | None = None,
+    commit: bool = True,
+) -> None:
+    """健診レコードの状態から、二次検査／深夜2回目のリマインドを同期する。
+
+    通知は担当者（manager_user）が連携をオプトインしている場合のみ起票する。
+    例外は飲み込み、健診側の保存処理を妨げない。
+    """
+    now = now or datetime.now()
+    lead = record.reminder_lead_days if record.reminder_lead_days is not None else global_lead_days
+    manager = (record.manager_user or "").strip()
+    opted_in = bool(manager) and is_enabled(manager, HEALTH_CHECK_INTEGRATION_KEY)
+
+    try:
+        # --- 二次検査リマインド ---
+        secondary_active = (
+            opted_in
+            and record.needs_recheck
+            and record.secondary_recommended_date is not None
+            and record.secondary_exam_date is None
+        )
+        if secondary_active:
+            schedule = _hc_reminder_schedule(record.secondary_recommended_date, lead)
+            due_at = _hc_next_due(schedule, now)
+            body = (
+                f"{record.target_year}年度 健康診断\n"
+                f"対象者: {record.employee_name}\n"
+                f"二次検査 受診推奨日: {record.secondary_recommended_date.isoformat()}"
+            )
+            if record.recheck_items:
+                body += f"\n再検査項目: {record.recheck_items}"
+            task = _ensure_reminder_task(
+                manager_user=manager,
+                title=f"[健診] {record.employee_name} 二次検査 受診推奨",
+                description=body,
+                source_ref_type="secondary_exam",
+                source_ref_id=str(record.id),
+                due_at=due_at,
+                priority="high",
+            )
+            if task is not None:
+                db.session.flush()
+                record.secondary_task_id = task.id
+        else:
+            _close_reminder_task("secondary_exam", str(record.id))
+            record.secondary_task_id = None
+
+        # --- 深夜従事者 年2回目リマインド ---
+        night_basis = _hc_night_basis(record)
+        night_active = (
+            opted_in
+            and record.is_night_worker
+            and night_basis is not None
+            and record.exam_date_2 is None
+        )
+        if night_active:
+            schedule = _hc_reminder_schedule(night_basis, lead)
+            due_at = _hc_next_due(schedule, now)
+            body = (
+                f"{record.target_year}年度 健康診断（深夜従事者）\n"
+                f"対象者: {record.employee_name}\n"
+                f"年2回目 受診目安日: {night_basis.isoformat()}"
+            )
+            task = _ensure_reminder_task(
+                manager_user=manager,
+                title=f"[健診] {record.employee_name} 深夜従事者 2回目受診",
+                description=body,
+                source_ref_type="night_second",
+                source_ref_id=str(record.id),
+                due_at=due_at,
+                priority="normal",
+            )
+            if task is not None:
+                db.session.flush()
+                record.night2_task_id = task.id
+        else:
+            _close_reminder_task("night_second", str(record.id))
+            record.night2_task_id = None
+
+        if commit:
+            _commit_safely()
+    except Exception:  # noqa: BLE001
+        logger.exception("health_check リマインダーの同期で失敗")
+        db.session.rollback()
+
+
+def close_health_check_reminders(record_id: int, *, commit: bool = True) -> None:
+    """レコード削除時などに、紐付くリマインドをアーカイブする。"""
+    try:
+        _close_reminder_task("secondary_exam", str(record_id))
+        _close_reminder_task("night_second", str(record_id))
+        if commit:
+            _commit_safely()
+    except Exception:  # noqa: BLE001
+        logger.exception("health_check リマインダーのクローズで失敗")
+        db.session.rollback()
+
+
+def sweep_health_check_reminders(*, now: datetime | None = None) -> dict[str, int]:
+    """全レコードのリマインドを再同期する（日次実行で due_at を当日通知へ繰り上げる）。"""
+    now = now or datetime.now()
+    processed = 0
+    try:
+        from app.models import HealthCheckRecord
+        from app.tools.health_check import get_global_lead_days
+
+        global_lead = get_global_lead_days()
+        records = HealthCheckRecord.query.filter(
+            db.or_(
+                HealthCheckRecord.secondary_task_id.isnot(None),
+                HealthCheckRecord.night2_task_id.isnot(None),
+                db.and_(
+                    HealthCheckRecord.needs_recheck.is_(True),
+                    HealthCheckRecord.secondary_recommended_date.isnot(None),
+                    HealthCheckRecord.secondary_exam_date.is_(None),
+                ),
+                db.and_(
+                    HealthCheckRecord.is_night_worker.is_(True),
+                    HealthCheckRecord.exam_date_2.is_(None),
+                ),
+            )
+        ).all()
+        for record in records:
+            ensure_health_check_reminders(
+                record, global_lead_days=global_lead, now=now, commit=False
+            )
+            processed += 1
+        _commit_safely()
+    except Exception:  # noqa: BLE001
+        logger.exception("health_check リマインダーの日次スイープで失敗")
+        db.session.rollback()
+    return {"processed": processed}

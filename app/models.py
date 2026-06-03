@@ -1524,3 +1524,198 @@ class ToBellExternalFile(db.Model):
             'uploaded_by': self.uploaded_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+# ============================================================
+# 健診PLUS（health_check）
+# ============================================================
+
+class HealthCheckRecord(db.Model):
+    """健診レコード本体。対象者 × 健診年度で1レコード（年度履歴を保持）。
+
+    record_type:
+      - linked   : 社員名簿PLUS（Employee）に存在する現職社員
+      - pre_hire : 入社前健診の対象者（名簿未登録。入社後に linked へ昇格可能）
+      - internal : 名簿に載らない内勤・嘱託等
+    """
+
+    __tablename__ = 'health_check_records'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+
+    target_year = db.Column(db.Integer, nullable=False, index=True)   # 健診年度（4月開始）
+    record_type = db.Column(db.String(20), nullable=False, default='linked', index=True)
+
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=True, index=True)
+
+    # 名簿からの同期項目（手動モードでは手入力）
+    office_code = db.Column(db.String(20), nullable=True, index=True)   # アクセス制御の基準
+    employee_number = db.Column(db.String(20), nullable=True, index=True)  # ① 社員番号
+    employee_name = db.Column(db.String(100), nullable=False)              # ② 社員名
+    employee_type = db.Column(db.String(50), nullable=True)               # ③ 社員区分
+    assignment_site = db.Column(db.String(200), nullable=True)            # ④ 専従先名（法人名）
+    manager_name = db.Column(db.String(100), nullable=True)               # ⑤ 管理担当名
+    manager_user = db.Column(db.String(80), nullable=True, index=True)    # ⑤→DSTTユーザー(username)
+    hire_date = db.Column(db.Date, nullable=True)                         # ⑥ 入社日付
+    retirement_date = db.Column(db.String(50), nullable=True)            # ⑦ 退職日付
+
+    # 受診系
+    reservation_date = db.Column(db.Date, nullable=True)                 # ⑧ 予約日
+    exam_date = db.Column(db.Date, nullable=True)                        # ⑨ 受診日
+    exam_date_2 = db.Column(db.Date, nullable=True)                      # ⑩ 受診日②（深夜従事者の年2回目）
+    exam_date_2_target = db.Column(db.Date, nullable=True)               # ⑩のリマインド基準日
+    medical_institution = db.Column(db.String(200), nullable=True)       # ⑪ 受診医療機関名
+    is_night_worker = db.Column(db.Boolean, nullable=False, default=False)  # ⑫ 深夜従事者
+
+    # 再検査・二次検査
+    needs_recheck = db.Column(db.Boolean, nullable=False, default=False)    # ⑬ 再検査有無
+    recheck_items = db.Column(db.Text, nullable=True)                       # ⑭ 再検査項目
+    secondary_recommended_date = db.Column(db.Date, nullable=True)          # ⑮ 二次検査受診推奨日
+    secondary_exam_date = db.Column(db.Date, nullable=True)                 # ⑯ 二次検診受診日
+    secondary_guide_sent_date = db.Column(db.Date, nullable=True)           # ⑰ 二次検査案内送付日
+    secondary_result = db.Column(db.Text, nullable=True)                    # ⑱ 二次検査結果
+    remarks = db.Column(db.Text, nullable=True)                             # ⑲ 備考
+
+    # リマインド設定（個別上書き。Noneのときは全体既定を使う）
+    reminder_lead_days = db.Column(db.Integer, nullable=True)
+
+    # システム
+    secondary_task_id = db.Column(db.Integer, nullable=True)   # 二次検査ToBellタスクID
+    night2_task_id = db.Column(db.Integer, nullable=True)      # 深夜2回目ToBellタスクID
+    created_by = db.Column(db.String(80), nullable=True)
+    updated_by = db.Column(db.String(80), nullable=True)
+    created_at = db.Column(db.DateTime, default=jst_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=jst_now, onupdate=jst_now, nullable=False)
+
+    attachments = db.relationship(
+        'HealthCheckAttachment',
+        back_populates='record',
+        cascade='all, delete-orphan',
+        order_by='HealthCheckAttachment.created_at.asc()',
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint('target_year', 'employee_id', name='uq_health_check_year_employee'),
+    )
+
+    def compute_status(self) -> str:
+        """日付・フラグから受診ステータスを算出する。"""
+        if self.secondary_exam_date:
+            return '二次完了'
+        if self.needs_recheck:
+            if self.secondary_guide_sent_date:
+                return '二次案内済'
+            return '再検査対象'
+        if self.exam_date:
+            return '受診済'
+        if self.reservation_date:
+            return '予約済'
+        return '未予約'
+
+    def night_second_status(self) -> str | None:
+        """深夜従事者の年2回目の受診状況。対象外なら None。"""
+        if not self.is_night_worker:
+            return None
+        if self.exam_date_2:
+            return '2回目受診済'
+        if self.exam_date_2_target:
+            return '2回目予定'
+        return '2回目未設定'
+
+    def to_dict(self) -> dict:
+        def _d(value):
+            return value.isoformat() if value else None
+
+        return {
+            'id': self.id,
+            'target_year': self.target_year,
+            'record_type': self.record_type,
+            'employee_id': self.employee_id,
+            'office_code': self.office_code or '',
+            'employee_number': self.employee_number or '',
+            'employee_name': self.employee_name or '',
+            'employee_type': self.employee_type or '',
+            'assignment_site': self.assignment_site or '',
+            'manager_name': self.manager_name or '',
+            'manager_user': self.manager_user or '',
+            'hire_date': _d(self.hire_date),
+            'retirement_date': self.retirement_date or '',
+            'reservation_date': _d(self.reservation_date),
+            'exam_date': _d(self.exam_date),
+            'exam_date_2': _d(self.exam_date_2),
+            'exam_date_2_target': _d(self.exam_date_2_target),
+            'medical_institution': self.medical_institution or '',
+            'is_night_worker': bool(self.is_night_worker),
+            'needs_recheck': bool(self.needs_recheck),
+            'recheck_items': self.recheck_items or '',
+            'secondary_recommended_date': _d(self.secondary_recommended_date),
+            'secondary_exam_date': _d(self.secondary_exam_date),
+            'secondary_guide_sent_date': _d(self.secondary_guide_sent_date),
+            'secondary_result': self.secondary_result or '',
+            'remarks': self.remarks or '',
+            'reminder_lead_days': self.reminder_lead_days,
+            'status': self.compute_status(),
+            'night_second_status': self.night_second_status(),
+            'attachment_count': len(self.attachments) if self.attachments is not None else 0,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class HealthCheckAttachment(db.Model):
+    """健診結果のスキャン添付（pdf/jpg/png）。"""
+
+    __tablename__ = 'health_check_attachments'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    record_id = db.Column(db.Integer, db.ForeignKey('health_check_records.id'), nullable=False, index=True)
+    stored_path = db.Column(db.String(500), nullable=False)
+    original_name = db.Column(db.String(255), nullable=False)
+    content_type = db.Column(db.String(100), nullable=True)
+    file_size = db.Column(db.BigInteger, nullable=False, default=0)
+    uploaded_by = db.Column(db.String(80), nullable=False)
+    created_at = db.Column(db.DateTime, default=jst_now, nullable=False)
+
+    record = db.relationship('HealthCheckRecord', back_populates='attachments')
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'record_id': self.record_id,
+            'original_name': self.original_name,
+            'content_type': self.content_type or '',
+            'file_size': int(self.file_size or 0),
+            'uploaded_by': self.uploaded_by,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class HealthCheckEditHistory(db.Model):
+    """健診レコードの編集履歴。"""
+
+    __tablename__ = 'health_check_edit_histories'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    record_id = db.Column(db.Integer, nullable=True, index=True)
+    target_year = db.Column(db.Integer, nullable=True)
+    employee_name = db.Column(db.String(100), nullable=True)
+    edited_by = db.Column(db.String(80), nullable=False)
+    edited_at = db.Column(db.DateTime, default=jst_now, nullable=False, index=True)
+    action = db.Column(db.String(20), nullable=False)  # create / update / delete
+    field_name = db.Column(db.String(60), nullable=True)
+    old_value = db.Column(db.Text, nullable=True)
+    new_value = db.Column(db.Text, nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'record_id': self.record_id,
+            'target_year': self.target_year,
+            'employee_name': self.employee_name or '',
+            'edited_by': self.edited_by,
+            'edited_at': self.edited_at.isoformat() if self.edited_at else None,
+            'action': self.action,
+            'field_name': self.field_name or '',
+            'old_value': self.old_value or '',
+            'new_value': self.new_value or '',
+        }

@@ -126,6 +126,13 @@ NAV_ITEMS = (
         "description": "契約番号と枝番号をAPI前提で管理する現場マスタ",
     },
     {
+        "key": "health_check",
+        "href": "/tools/health_check",
+        "icon": "🩺",
+        "label": "健診PLUS",
+        "description": "健康診断の予約・受診・再検査・二次検査を年度ごとに抜け漏れなく管理",
+    },
+    {
         "key": "to_bell",
         "href": "/tools/to_bell",
         "icon": "🔔",

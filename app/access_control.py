@@ -51,6 +51,7 @@ TOOL_ACCESS_CATEGORIES: dict[str, str] = {
     "shiftersync": "sensitive",          # ShifterSync（社員名簿/現場リストと連携、CloudShiftも包含）
     "subject_analysis_tool": "sensitive",  # 科目別分析ツール（現場リストPLUSを利用）
     "bus_pricing": "sensitive",          # 貸切料金計算ツール
+    "health_check": "sensitive",         # 健診PLUS（健康情報＝要配慮個人情報）
 
     # 以下は公開（ログインで誰でも利用可）
     "datecalc": "public",
