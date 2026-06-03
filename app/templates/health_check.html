@@ -284,6 +284,11 @@
   .hc-section-title{font-size:.7rem;font-weight:700;letter-spacing:.08em;color:#64748b;text-transform:uppercase;margin-bottom:.5rem;}
   .hc-field-label{font-size:.75rem;font-weight:600;color:#475569;margin-bottom:.2rem;display:block;}
   .hc-readonly{background:#f8fafc;color:#475569;}
+  .hc-dropzone{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.4rem;width:100%;min-height:7rem;padding:1.25rem;border:2px dashed #cbd5e1;border-radius:.85rem;background:#f8fafc;color:#64748b;text-align:center;cursor:pointer;transition:border-color .15s,background .15s,color .15s;}
+  .hc-dropzone:hover{border-color:#0f766e;background:#f0fdfa;color:#0f766e;}
+  .hc-dropzone.is-dragover{border-color:#0f766e;background:#ccfbf1;color:#0f766e;border-style:solid;}
+  .hc-dropzone-icon{font-size:1.6rem;line-height:1;}
+  .hc-dropzone-text{font-size:.8rem;line-height:1.35;}
 </style>
 
 <script>
@@ -534,13 +539,14 @@ const HC = (function(){
       <div>
         <div class="hc-section-title">再検査・二次検査</div>
         <label class="inline-flex items-center gap-2 text-sm text-gray-700 mb-2"><input type="checkbox" data-field="needs_recheck" ${d.needs_recheck?'checked':''} class="rounded text-teal-600"> 再検査あり</label>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-2 gap-3" data-recheck-block>
           ${fieldText('再検査項目','recheck_items', d.recheck_items)}
           ${fieldDate('二次検査受診推奨日 🔔','secondary_recommended_date', d.secondary_recommended_date)}
           ${fieldDate('二次検査案内送付日','secondary_guide_sent_date', d.secondary_guide_sent_date)}
           ${fieldDate('二次検診受診日','secondary_exam_date', d.secondary_exam_date)}
           <div class="col-span-2">${fieldText('二次検査結果','secondary_result', d.secondary_result)}</div>
         </div>
+        <p class="text-xs text-gray-400" data-recheck-empty>「再検査あり」にチェックすると、再検査・二次検査の入力欄が表示されます。</p>
       </div>`;
     const reminder = `
       <div>
@@ -555,6 +561,28 @@ const HC = (function(){
           <div class="col-span-2">${fieldText('備考','remarks', d.remarks)}</div>
         </div>
       </div>`;
+    // NASVA（年度4/1基準で64歳超の運転者向け適齢診断）
+    let nasva = '';
+    if(d.is_nasva_target){
+      const age = d.age_at_fiscal_start;
+      nasva = `
+      <div class="p-3 rounded-lg bg-amber-50/60 border border-amber-200">
+        <div class="hc-section-title" style="color:#b45309">🚍 NASVA（適齢診断・年度4/1時点で ${age!=null?esc(age)+'歳':'64歳超'}）</div>
+        <div class="grid grid-cols-2 gap-3">
+          ${fieldDate('NASVA予約日','nasva_reservation_date', d.nasva_reservation_date)}
+          ${fieldDate('NASVA受診日','nasva_exam_date', d.nasva_exam_date)}
+        </div>
+        ${isNew ? '' : `<div class="mt-3">
+          <div class="hc-field-label">NASVA専用ファイル添付（pdf / jpg / png・10MBまで）</div>
+          <div id="nasva-attach-list" class="space-y-1.5 mb-2"></div>
+          <label id="nasva-attach-drop" class="hc-dropzone" for="nasva-attach-file">
+            <span class="hc-dropzone-icon">🚍⬆️</span>
+            <span class="hc-dropzone-text">NASVA関連ファイルをここにドラッグ＆ドロップ<br>またはクリックして選択</span>
+            <input type="file" id="nasva-attach-file" accept=".pdf,.jpg,.jpeg,.png" class="hidden">
+          </label>
+        </div>`}
+      </div>`;
+    }
     let attachments = '';
     let history = '';
     if(!isNew){
@@ -562,8 +590,11 @@ const HC = (function(){
       <div>
         <div class="hc-section-title">健診結果の添付（pdf / jpg / png・10MBまで）</div>
         <div id="attach-list" class="space-y-1.5 mb-2"></div>
-        <input type="file" id="attach-file" accept=".pdf,.jpg,.jpeg,.png" class="text-sm">
-        <button class="hc-btn-ghost ml-2" onclick="HC.uploadAttachment()">アップロード</button>
+        <label id="attach-drop" class="hc-dropzone" for="attach-file">
+          <span class="hc-dropzone-icon">📄⬆️</span>
+          <span class="hc-dropzone-text">ここにファイルをドラッグ＆ドロップ<br>またはクリックして選択</span>
+          <input type="file" id="attach-file" accept=".pdf,.jpg,.jpeg,.png" class="hidden">
+        </label>
       </div>`;
       history = `
       <details class="border-t border-gray-100 pt-3">
@@ -571,12 +602,28 @@ const HC = (function(){
         <div id="history-list" class="mt-2 text-xs text-gray-500">読み込み中…</div>
       </details>`;
     }
-    document.getElementById('record-modal-body').innerHTML = head + basic + exam + secondary + reminder + attachments + history;
+    document.getElementById('record-modal-body').innerHTML = head + basic + exam + nasva + secondary + reminder + attachments + history;
 
     if(isNew){ setupNewMode(); }
     populateManagerSelect(d.manager_user);
     syncNightBlock();
-    if(!isNew){ renderAttachments(d.attachments||[]); loadRecordHistory(); }
+    syncRecheckBlock();
+    if(!isNew){
+      renderAttachments(d.attachments||[]);
+      setupDropzone('attach-drop','attach-file','health');
+      setupDropzone('nasva-attach-drop','nasva-attach-file','nasva');
+      loadRecordHistory();
+    }
+  }
+
+  function syncRecheckBlock(){
+    const cb = document.querySelector('#record-modal-body [data-field="needs_recheck"]');
+    const block = document.querySelector('#record-modal-body [data-recheck-block]');
+    const empty = document.querySelector('#record-modal-body [data-recheck-empty]');
+    if(!cb || !block) return;
+    const apply = ()=>{ const on = cb.checked; block.style.display = on?'':'none'; if(empty) empty.style.display = on?'none':''; };
+    apply();
+    cb.addEventListener('change', apply);
   }
 
   function setupNewMode(){
@@ -699,7 +746,12 @@ const HC = (function(){
 
   // ---- 添付 ----
   function renderAttachments(list){
-    const box = document.getElementById('attach-list');
+    list = list || [];
+    renderAttachmentGroup('attach-list', list.filter(a=>(a.category||'health')!=='nasva'));
+    renderAttachmentGroup('nasva-attach-list', list.filter(a=>a.category==='nasva'));
+  }
+  function renderAttachmentGroup(boxId, list){
+    const box = document.getElementById(boxId);
     if(!box) return;
     if(!list.length){ box.innerHTML='<p class="text-xs text-gray-400">添付はまだありません。</p>'; return; }
     box.innerHTML = list.map(a=>`<div class="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-1.5">
@@ -707,18 +759,42 @@ const HC = (function(){
       <button class="text-red-500 hover:text-red-700 text-xs ml-2" onclick="HC.deleteAttachment(${a.id})">削除</button>
     </div>`).join('');
   }
-  async function uploadAttachment(){
-    const input = document.getElementById('attach-file');
-    if(!input.files.length){ toast('ファイルを選択してください','warn'); return; }
-    const fd = new FormData(); fd.append('file', input.files[0]);
-    try {
-      const r = await fetch('/tools/health_check/api/record/'+editingId+'/attachment', {method:'POST', body:fd});
-      const data = await r.json(); if(!r.ok) throw new Error(data.error||'アップロード失敗');
-      toast('アップロードしました');
-      const rec = await api('/tools/health_check/api/record/'+editingId);
-      renderAttachments(rec.attachments||[]);
-      input.value='';
-    } catch(e){ toast(e.message,'error'); }
+  function setupDropzone(dropId, inputId, category){
+    const drop = document.getElementById(dropId);
+    const input = document.getElementById(inputId);
+    if(!drop || !input) return;
+    input.addEventListener('change', ()=>{ if(input.files.length){ uploadFiles(input.files, category).then(()=>{ input.value=''; }); } });
+    ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('is-dragover'); }));
+    ['dragleave','dragend'].forEach(ev=>drop.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('is-dragover'); }));
+    drop.addEventListener('drop', e=>{
+      e.preventDefault(); e.stopPropagation(); drop.classList.remove('is-dragover');
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if(files && files.length){ uploadFiles(files, category); }
+    });
+  }
+  async function uploadFiles(files, category){
+    category = category || 'health';
+    if(!editingId){ toast('先にレコードを保存してください','warn'); return; }
+    let ok = 0;
+    for(const file of files){
+      const fd = new FormData(); fd.append('file', file); fd.append('category', category);
+      try {
+        const r = await fetch('/tools/health_check/api/record/'+editingId+'/attachment', {method:'POST', body:fd});
+        const data = await r.json(); if(!r.ok) throw new Error(data.error||'アップロード失敗');
+        ok++;
+      } catch(e){ toast(`${file.name}: ${e.message}`,'error'); }
+    }
+    if(ok){ toast(`${ok} 件をアップロードしました`); }
+    const rec = await api('/tools/health_check/api/record/'+editingId);
+    renderAttachments(rec.attachments||[]);
+  }
+  // 互換用：明示ボタンからの呼び出し
+  async function uploadAttachment(category){
+    category = category || 'health';
+    const input = document.getElementById(category==='nasva'?'nasva-attach-file':'attach-file');
+    if(!input || !input.files.length){ toast('ファイルを選択してください','warn'); return; }
+    await uploadFiles(input.files, category);
+    input.value='';
   }
   async function deleteAttachment(aid){
     try { await api('/tools/health_check/api/record/'+editingId+'/attachment/'+aid, {method:'DELETE'});
@@ -849,16 +925,23 @@ const HC = (function(){
   // ---- モーダル制御 ----
   function show(id){ document.getElementById(id).classList.remove('hidden'); }
   function hide(id){ document.getElementById(id).classList.add('hidden'); }
+  // クロージャ内からも呼べるよう、閉じる関数はローカル宣言にしておく
+  function closeRecordModal(){ hide('record-modal'); }
+  function closeBulkModal(){ hide('bulk-modal'); }
+  function closeCarryoverModal(){ hide('carryover-modal'); }
+  function closeIntegrationModal(){ hide('integration-modal'); }
+  function closeSettingsModal(){ hide('settings-modal'); }
+  function closePermissionsModal(){ hide('permissions-modal'); }
 
   return {
-    init, openRecordModal, closeRecordModal:()=>hide('record-modal'), saveRecord, deleteRecord,
+    init, openRecordModal, closeRecordModal, saveRecord, deleteRecord,
     changeNewType, selectEmployee, uploadAttachment, deleteAttachment,
-    openBulkModal, closeBulkModal:()=>hide('bulk-modal'), runBulkCreate,
-    openCarryoverModal, closeCarryoverModal:()=>hide('carryover-modal'), runCarryover,
+    openBulkModal, closeBulkModal, runBulkCreate,
+    openCarryoverModal, closeCarryoverModal, runCarryover,
     resolveManagers, exportCsv,
-    openIntegrationModal, closeIntegrationModal:()=>hide('integration-modal'), saveIntegration,
-    openSettingsModal, closeSettingsModal:()=>hide('settings-modal'), saveSettings,
-    openPermissionsModal, closePermissionsModal:()=>hide('permissions-modal'),
+    openIntegrationModal, closeIntegrationModal, saveIntegration,
+    openSettingsModal, closeSettingsModal, saveSettings,
+    openPermissionsModal, closePermissionsModal,
     grantPermission, revoke, togglePermOffice,
   };
 })();

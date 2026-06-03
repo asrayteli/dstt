@@ -59,6 +59,8 @@ DATE_FIELDS = {
     "secondary_recommended_date",
     "secondary_exam_date",
     "secondary_guide_sent_date",
+    "nasva_reservation_date",
+    "nasva_exam_date",
 }
 BOOL_FIELDS = {"is_night_worker", "needs_recheck"}
 TEXT_FIELDS = {
@@ -82,7 +84,10 @@ SYNCED_FIELDS = {
     "manager_name",
     "retirement_date",
     "hire_date",
+    "birth_date",
 }
+
+ATTACHMENT_CATEGORIES = {"health", "nasva"}
 
 
 # ============================================================
@@ -250,6 +255,7 @@ def sync_from_employee(record: HealthCheckRecord, employee: Employee, *, resolve
     record.manager_name = employee.manager_name
     record.hire_date = employee.hire_date
     record.retirement_date = employee.retirement_date
+    record.birth_date = employee.birth_date
     # 担当者は未解決のときのみ自動解決（手動上書きを尊重）
     if resolve_manager and not record.manager_user and employee.manager_name:
         record.manager_user = resolve_manager_user(employee.manager_name)
@@ -746,6 +752,10 @@ def api_upload_attachment(record_id):
     if not _allowed_attachment(file.filename):
         return jsonify({"error": "pdf / jpg / png のみアップロードできます"}), 400
 
+    category = (request.form.get("category") or "health").strip()
+    if category not in ATTACHMENT_CATEGORIES:
+        category = "health"
+
     file.seek(0, os.SEEK_END)
     size = file.tell()
     file.seek(0)
@@ -762,6 +772,7 @@ def api_upload_attachment(record_id):
 
     attachment = HealthCheckAttachment(
         record_id=record.id,
+        category=category,
         stored_path=rel_path,
         original_name=secure_filename(file.filename) or f"file.{ext}",
         content_type=file.mimetype,
@@ -939,6 +950,9 @@ _EXPORT_COLUMNS = [
     ("secondary_exam_date", "二次検診受診日"),
     ("secondary_guide_sent_date", "二次検査案内送付日"),
     ("secondary_result", "二次検査結果"),
+    ("birth_date", "生年月日"),
+    ("nasva_reservation_date", "NASVA予約日"),
+    ("nasva_exam_date", "NASVA受診日"),
     ("status", "受診ステータス"),
     ("remarks", "備考"),
 ]

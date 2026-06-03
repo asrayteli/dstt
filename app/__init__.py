@@ -365,6 +365,20 @@ def _ensure_access_control_schema(app):
                 ")"
             )
 
+        if "health_check_records" in inspector.get_table_names():
+            hc_cols = {c["name"] for c in inspector.get_columns("health_check_records")}
+            if "birth_date" not in hc_cols:
+                alters.append("ALTER TABLE health_check_records ADD COLUMN birth_date DATE")
+            if "nasva_reservation_date" not in hc_cols:
+                alters.append("ALTER TABLE health_check_records ADD COLUMN nasva_reservation_date DATE")
+            if "nasva_exam_date" not in hc_cols:
+                alters.append("ALTER TABLE health_check_records ADD COLUMN nasva_exam_date DATE")
+
+        if "health_check_attachments" in inspector.get_table_names():
+            hca_cols = {c["name"] for c in inspector.get_columns("health_check_attachments")}
+            if "category" not in hca_cols:
+                alters.append("ALTER TABLE health_check_attachments ADD COLUMN category VARCHAR(20) NOT NULL DEFAULT 'health'")
+
         if "vehicle_inspection_records" in inspector.get_table_names():
             vehicle_inspection_cols = {c["name"] for c in inspector.get_columns("vehicle_inspection_records")}
             if "model_type" in vehicle_inspection_cols:

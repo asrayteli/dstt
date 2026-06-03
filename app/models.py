@@ -1558,6 +1558,7 @@ class HealthCheckRecord(db.Model):
     manager_user = db.Column(db.String(80), nullable=True, index=True)    # ⑤→DSTTユーザー(username)
     hire_date = db.Column(db.Date, nullable=True)                         # ⑥ 入社日付
     retirement_date = db.Column(db.String(50), nullable=True)            # ⑦ 退職日付
+    birth_date = db.Column(db.Date, nullable=True)                       # 生年月日（名簿同期・NASVA判定用）
 
     # 受診系
     reservation_date = db.Column(db.Date, nullable=True)                 # ⑧ 予約日
@@ -1574,6 +1575,11 @@ class HealthCheckRecord(db.Model):
     secondary_exam_date = db.Column(db.Date, nullable=True)                 # ⑯ 二次検診受診日
     secondary_guide_sent_date = db.Column(db.Date, nullable=True)           # ⑰ 二次検査案内送付日
     secondary_result = db.Column(db.Text, nullable=True)                    # ⑱ 二次検査結果
+
+    # NASVA（年度4/1基準で64歳超の運転者向け適齢診断）
+    nasva_reservation_date = db.Column(db.Date, nullable=True)              # NASVA予約日
+    nasva_exam_date = db.Column(db.Date, nullable=True)                     # NASVA受診日
+
     remarks = db.Column(db.Text, nullable=True)                             # ⑲ 備考
 
     # リマインド設定（個別上書き。Noneのときは全体既定を使う）
@@ -1612,6 +1618,21 @@ class HealthCheckRecord(db.Model):
             return '予約済'
         return '未予約'
 
+    def age_at_fiscal_start(self) -> int | None:
+        """健診年度の基準日（4/1）時点の満年齢。生年月日が無ければ None。"""
+        if not self.birth_date:
+            return None
+        try:
+            reference = date(self.target_year, 4, 1)
+        except (TypeError, ValueError):
+            return None
+        return relativedelta(reference, self.birth_date).years
+
+    def is_nasva_target(self) -> bool:
+        """年度4/1基準で64歳を超える（=65歳以上）場合に NASVA 対象。"""
+        age = self.age_at_fiscal_start()
+        return age is not None and age > 64
+
     def night_second_status(self) -> str | None:
         """深夜従事者の年2回目の受診状況。対象外なら None。"""
         if not self.is_night_worker:
@@ -1640,6 +1661,7 @@ class HealthCheckRecord(db.Model):
             'manager_user': self.manager_user or '',
             'hire_date': _d(self.hire_date),
             'retirement_date': self.retirement_date or '',
+            'birth_date': _d(self.birth_date),
             'reservation_date': _d(self.reservation_date),
             'exam_date': _d(self.exam_date),
             'exam_date_2': _d(self.exam_date_2),
@@ -1652,10 +1674,14 @@ class HealthCheckRecord(db.Model):
             'secondary_exam_date': _d(self.secondary_exam_date),
             'secondary_guide_sent_date': _d(self.secondary_guide_sent_date),
             'secondary_result': self.secondary_result or '',
+            'nasva_reservation_date': _d(self.nasva_reservation_date),
+            'nasva_exam_date': _d(self.nasva_exam_date),
             'remarks': self.remarks or '',
             'reminder_lead_days': self.reminder_lead_days,
             'status': self.compute_status(),
             'night_second_status': self.night_second_status(),
+            'age_at_fiscal_start': self.age_at_fiscal_start(),
+            'is_nasva_target': self.is_nasva_target(),
             'attachment_count': len(self.attachments) if self.attachments is not None else 0,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -1669,6 +1695,7 @@ class HealthCheckAttachment(db.Model):
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     record_id = db.Column(db.Integer, db.ForeignKey('health_check_records.id'), nullable=False, index=True)
+    category = db.Column(db.String(20), nullable=False, default='health')  # 'health' | 'nasva'
     stored_path = db.Column(db.String(500), nullable=False)
     original_name = db.Column(db.String(255), nullable=False)
     content_type = db.Column(db.String(100), nullable=True)
@@ -1682,6 +1709,7 @@ class HealthCheckAttachment(db.Model):
         return {
             'id': self.id,
             'record_id': self.record_id,
+            'category': self.category or 'health',
             'original_name': self.original_name,
             'content_type': self.content_type or '',
             'file_size': int(self.file_size or 0),
