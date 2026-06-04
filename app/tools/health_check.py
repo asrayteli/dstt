@@ -28,7 +28,10 @@ from app.models import (
     db,
     Employee,
     Office,
+    Site,
     User,
+    AccessOffice,
+    AccessDepartment,
     HealthCheckRecord,
     HealthCheckAttachment,
     HealthCheckEditHistory,
@@ -49,9 +52,20 @@ ALLOWED_ATTACHMENT_EXT = {"pdf", "jpg", "jpeg", "png"}
 MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_EDIT_HISTORY = 200
 
+# 手動モード（入社前・内勤者）でレコード追加時に選べる社員区分の候補
+EMPLOYEE_TYPE_OPTIONS = [
+    "営業社員（R契約）",
+    "営業社員（P契約）",
+    "営業社員（PT契約）",
+]
+# 管理担当の候補とするDSTTユーザーの「担当」（AccessDepartment）名
+# ＝管理者ページで担当が「エリアマネージャー」に設定されているユーザー
+AREA_MANAGER_DEPARTMENT = "エリアマネージャー"
+
 # レコードの編集可能フィールド（モード共通の手入力項目）
 DATE_FIELDS = {
     "hire_date",
+    "birth_date",
     "reservation_date",
     "exam_date",
     "exam_date_2",
@@ -309,6 +323,7 @@ def index():
         offices=accessible_offices,
         current_year=current_fiscal_year(),
         global_lead_days=get_global_lead_days(),
+        employee_type_options=EMPLOYEE_TYPE_OPTIONS,
     )
 
 
@@ -860,6 +875,64 @@ def api_users():
     """担当者割当用の DSTTユーザー候補。"""
     users = User.query.order_by(User.name).all()
     return jsonify({"users": [{"username": u.username, "name": u.name or u.username} for u in users]})
+
+
+@health_check_bp.route("/api/area_managers")
+@login_required
+def api_area_managers():
+    """管理担当の候補。対象営業所に所属し、担当（AccessDepartment）が
+    「エリアマネージャー」に設定されているDSTTユーザー。
+    手動モード（入社前・内勤者）のレコード追加時に管理担当を選ぶために使う。"""
+    user_id = str(current_user.username)
+    user_offices = get_user_offices(user_id)
+    if not user_offices:
+        return jsonify({"managers": []})
+    # 指定営業所（アクセス可能なもの）に限定。未指定なら自分のスコープ全体。
+    office = request.args.get("office", "").strip()
+    offices = [office] if office and has_office_access(user_id, office) else user_offices
+
+    # 営業所コード → アクセス権営業所(AccessOffice) → その営業所の「エリアマネージャー」担当
+    office_ids = [o.id for o in AccessOffice.query.filter(AccessOffice.code.in_(offices)).all()]
+    if not office_ids:
+        return jsonify({"managers": []})
+    dept_ids = [
+        d.id for d in AccessDepartment.query.filter(
+            AccessDepartment.office_id.in_(office_ids),
+            AccessDepartment.name == AREA_MANAGER_DEPARTMENT,
+        ).all()
+    ]
+    if not dept_ids:
+        return jsonify({"managers": []})
+
+    users = (
+        User.query.filter(User.department_id.in_(dept_ids))
+        .order_by(User.name, User.username)
+        .all()
+    )
+    return jsonify({"managers": [{
+        "username": u.username,
+        "name": u.name or u.username,
+    } for u in users]})
+
+
+@health_check_bp.route("/api/sites")
+@login_required
+def api_sites():
+    """専従先名の検索候補（現場リストPLUS＝Site）。手動入力も可能なので候補提示のみ。"""
+    search = request.args.get("search", "").strip()
+    query = Site.query.filter(Site.is_active.is_(True))
+    if search:
+        query = query.filter(Site.site_name.like(f"%{search}%"))
+    sites = query.order_by(Site.site_name).limit(50).all()
+    # 同名現場（複数支店等）はまとめて1件に
+    seen: set[str] = set()
+    result = []
+    for s in sites:
+        if s.site_name in seen:
+            continue
+        seen.add(s.site_name)
+        result.append({"site_id": s.site_id, "site_name": s.site_name})
+    return jsonify({"sites": result})
 
 
 @health_check_bp.route("/api/dashboard")

@@ -14,7 +14,11 @@ from app.models import (
     db,
     Office,
     Employee,
+    Site,
     User,
+    AccessBranch,
+    AccessOffice,
+    AccessDepartment,
     HealthCheckRecord,
     ToBellTask,
     ToBellUserSettings,
@@ -355,6 +359,94 @@ def test_nasva_attachment_category(tmp_path):
 
     rec = client.get(f"/tools/health_check/api/record/{rid}").get_json()
     assert any(a["category"] == "nasva" for a in rec["attachments"])
+
+
+def test_manual_record_saves_employee_type_and_birth_date(tmp_path):
+    """手動モードでは社員区分（営業社員契約）と生年月日を入力・保存できる。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+
+    res = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "pre_hire",
+        "employee_name": "採用予定子", "office_code": "100",
+        "employee_type": "営業社員（P契約）", "birth_date": "1990-08-15",
+        "assignment_site": "現場リストの専従先", "manager_name": "エリア統括",
+    })
+    assert res.status_code == 200
+    rid = res.get_json()["record"]["id"]
+
+    rec = client.get(f"/tools/health_check/api/record/{rid}").get_json()
+    assert rec["employee_type"] == "営業社員（P契約）"
+    assert rec["birth_date"] == "1990-08-15"
+    assert rec["assignment_site"] == "現場リストの専従先"
+    assert rec["manager_name"] == "エリア統括"
+
+
+def test_area_managers_endpoint_filters_by_office_and_department(tmp_path):
+    """管理担当候補は、対象営業所で担当が「エリアマネージャー」のDSTTユーザーのみ。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    with app.app_context():
+        db.session.add(Office(office_code="200", office_name="別営業所", created_by="seed"))
+        branch = AccessBranch(name="本社支店", code="B1")
+        db.session.add(branch)
+        db.session.flush()
+        off100 = AccessOffice(branch_id=branch.id, name="本社営業所", code="100")
+        off200 = AccessOffice(branch_id=branch.id, name="別営業所", code="200")
+        db.session.add_all([off100, off200])
+        db.session.flush()
+        am100 = AccessDepartment(office_id=off100.id, name="エリアマネージャー")
+        other = AccessDepartment(office_id=off100.id, name="一般")
+        am200 = AccessDepartment(office_id=off200.id, name="エリアマネージャー")
+        db.session.add_all([am100, other, am200])
+        db.session.flush()
+        # 100のエリアマネージャー
+        db.session.add(User(username="am1", password_hash="x", name="区域真理子",
+                            office_id=off100.id, department_id=am100.id))
+        # 100だがエリアマネージャーではない
+        db.session.add(User(username="gen1", password_hash="x", name="一般花子",
+                            office_id=off100.id, department_id=other.id))
+        # 200のエリアマネージャー
+        db.session.add(User(username="am2", password_hash="x", name="他所真理子",
+                            office_id=off200.id, department_id=am200.id))
+        db.session.commit()
+    client = app.test_client()
+
+    # 営業所100を指定 → 100のエリアマネージャーのみ
+    data = client.get("/tools/health_check/api/area_managers?office=100").get_json()
+    assert {m["username"] for m in data["managers"]} == {"am1"}
+    # 営業所未指定（管理者は全営業所スコープ）→ 両営業所のエリアマネージャー
+    data_all = client.get("/tools/health_check/api/area_managers").get_json()
+    assert {m["username"] for m in data_all["managers"]} == {"am1", "am2"}
+
+
+def test_sites_endpoint_searches_active_sites(tmp_path):
+    """専従先名の候補は現場リストPLUS（Site）の有効な現場を検索して返す。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    with app.app_context():
+        db.session.add(Site(
+            site_id="A0001", site_name="さくら配送センター",
+            site_manager_last="現場", site_manager_first="太郎",
+            site_manager_id="E001", site_register="seed", site_updater="seed",
+            office_code="100", is_active=True,
+        ))
+        db.session.add(Site(
+            site_id="A0002", site_name="休止中センター",
+            site_manager_last="現場", site_manager_first="次郎",
+            site_manager_id="E002", site_register="seed", site_updater="seed",
+            office_code="100", is_active=False,
+        ))
+        db.session.commit()
+    client = app.test_client()
+
+    data = client.get("/tools/health_check/api/sites?search=さくら").get_json()
+    names = {s["site_name"] for s in data["sites"]}
+    assert "さくら配送センター" in names
+    # 無効な現場は出ない
+    data2 = client.get("/tools/health_check/api/sites?search=休止").get_json()
+    assert data2["sites"] == []
 
 
 def test_name_normalization_matches_across_width_and_space(tmp_path):

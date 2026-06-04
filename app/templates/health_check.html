@@ -297,7 +297,9 @@ const HC = (function(){
   const IS_ADMIN = root.dataset.isAdmin === 'true';
   const CURRENT_YEAR = parseInt(root.dataset.currentYear, 10);
   const GLOBAL_LEAD = parseInt(root.dataset.globalLead, 10);
+  const EMPLOYEE_TYPE_OPTIONS = JSON.parse('{{ employee_type_options|tojson }}');
   let offices = [];
+  let siteResults = [];
   let usersCache = null;
   let editingId = null;
   let editingType = 'linked';
@@ -480,6 +482,28 @@ const HC = (function(){
     return `<div><label class="hc-field-label">${label}</label>
       <input type="text" data-field="${key}" value="${esc(val||'')}" placeholder="${ph||''}" class="hc-input ${ro?'hc-readonly':''}" ${ro?'readonly':''}></div>`;
   }
+  // 候補から選ぶ select。リスト外の現在値は先頭に「（現在値）」付きで保持する。
+  function fieldSelect(label, key, val, options, hint){
+    const cur = (val && !options.includes(val))
+      ? `<option value="${esc(val)}" selected>${esc(val)}（現在値）</option>` : '';
+    const opts = options.map(o=>`<option value="${esc(o)}" ${o===val?'selected':''}>${esc(o)}</option>`).join('');
+    return `<div><label class="hc-field-label">${label}${hint?` <span class="text-xs text-gray-400">${hint}</span>`:''}</label>
+      <select data-field="${key}" class="hc-input"><option value="">（未選択）</option>${cur}${opts}</select></div>`;
+  }
+  // 専従先名：現場リストPLUSから検索しつつ、手動入力も可能なテキスト入力。
+  function fieldSiteSearch(val){
+    return `<div class="relative">
+      <label class="hc-field-label">専従先名 <span class="text-xs text-gray-400">（現場リストPLUSから検索・手動入力可）</span></label>
+      <input type="text" data-field="assignment_site" id="site-search-input" value="${esc(val||'')}" autocomplete="off"
+             placeholder="現場名で検索、または直接入力" class="hc-input">
+      <div id="site-search-results" class="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-100 rounded-lg shadow divide-y divide-gray-100 max-h-44 overflow-y-auto hidden"></div>
+    </div>`;
+  }
+  // 管理担当名：登録者の営業所のエリアマネージャーから選ぶ。候補は API で動的取得。
+  function fieldManagerName(){
+    return `<div><label class="hc-field-label">管理担当名 <span class="text-xs text-gray-400">（営業所のエリアマネージャー）</span></label>
+      <select data-field="manager_name" id="manager-name-select" class="hc-input"><option value="">（読み込み中…）</option></select></div>`;
+  }
 
   function renderRecordForm(r){
     const linked = editingType === 'linked';
@@ -506,15 +530,24 @@ const HC = (function(){
       </div>`;
     }
     const d = r || {};
+    // 社員区分・専従先名・管理担当名・生年月日は、手動モード（入社前・内勤者）では入力支援付きにする。
+    // 名簿連携は名簿から自動同期するため読み取り専用。
+    const typeField  = linked ? fieldText('社員区分','employee_type', d.employee_type, true)
+                              : fieldSelect('社員区分','employee_type', d.employee_type, EMPLOYEE_TYPE_OPTIONS);
+    const siteField  = linked ? fieldText('専従先名','assignment_site', d.assignment_site, true)
+                              : fieldSiteSearch(d.assignment_site);
+    const mgrField   = linked ? fieldText('管理担当名','manager_name', d.manager_name, true)
+                              : fieldManagerName();
     const basic = `
       <div>
         <div class="hc-section-title">基本情報 ${linked?'（名簿連携・自動同期）':''}</div>
         <div class="grid grid-cols-2 gap-3">
           ${fieldText('社員番号','employee_number', d.employee_number, linked)}
           ${fieldText('社員名','employee_name', d.employee_name, linked)}
-          ${fieldText('社員区分','employee_type', d.employee_type, linked)}
-          ${fieldText('専従先名','assignment_site', d.assignment_site, linked)}
-          ${fieldText('管理担当名','manager_name', d.manager_name, linked)}
+          ${typeField}
+          ${fieldDate('生年月日','birth_date', d.birth_date, linked)}
+          ${siteField}
+          ${mgrField}
           ${fieldDate('入社日付','hire_date', d.hire_date, linked)}
         </div>
       </div>`;
@@ -605,6 +638,7 @@ const HC = (function(){
     document.getElementById('record-modal-body').innerHTML = head + basic + exam + nasva + secondary + reminder + attachments + history;
 
     if(isNew){ setupNewMode(); }
+    if(!linked){ setupManualFields(d); }
     populateManagerSelect(d.manager_user);
     syncNightBlock();
     syncRecheckBlock();
@@ -679,6 +713,76 @@ const HC = (function(){
     setF('employee_name', e.employee_name);
     setF('assignment_site', e.company_name);
     setF('manager_name', e.manager_name);
+  }
+
+  // ---- 手動モード（入社前・内勤者）の入力支援 ----
+  function setupManualFields(d){
+    d = d || {};
+    // 専従先名：現場リストPLUSから検索
+    const siteInput = document.getElementById('site-search-input');
+    if(siteInput){
+      let t;
+      siteInput.addEventListener('input', e=>{ clearTimeout(t); t=setTimeout(()=>searchSites(e.target.value), 280); });
+      siteInput.addEventListener('blur', ()=>setTimeout(()=>{ const b=document.getElementById('site-search-results'); if(b) b.classList.add('hidden'); }, 150));
+    }
+    // 管理担当名：登録者の営業所のエリアマネージャー
+    const officeSel = document.getElementById('manual-office');
+    const office = officeSel ? officeSel.value : (d.office_code || '');
+    populateManagerNameSelect(office, d.manager_name);
+    if(officeSel){
+      officeSel.addEventListener('change', ()=>populateManagerNameSelect(officeSel.value, ''));
+    }
+  }
+  async function searchSites(q){
+    const box = document.getElementById('site-search-results');
+    if(!box) return;
+    if(!q || q.length<1){ box.classList.add('hidden'); return; }
+    let data;
+    try { data = await api('/tools/health_check/api/sites?search='+encodeURIComponent(q)); } catch(e){ return; }
+    siteResults = data.sites || [];
+    if(!siteResults.length){
+      box.innerHTML = '<div class="px-3 py-2 text-sm text-gray-400">該当なし（このまま手動入力できます）</div>';
+      box.classList.remove('hidden'); return;
+    }
+    box.innerHTML = siteResults.map((s,i)=>`<div class="px-3 py-2 text-sm hover:bg-teal-50 cursor-pointer" onmousedown="HC.selectSite(${i})">
+      <span class="font-medium">${esc(s.site_name)}</span> <span class="text-xs text-gray-400 font-mono">${esc(s.site_id)}</span></div>`).join('');
+    box.classList.remove('hidden');
+  }
+  function selectSite(idx){
+    const s = siteResults[idx];
+    if(!s) return;
+    const input = document.getElementById('site-search-input');
+    if(input) input.value = s.site_name;
+    const box = document.getElementById('site-search-results');
+    if(box) box.classList.add('hidden');
+  }
+  async function populateManagerNameSelect(office, selected){
+    const sel = document.getElementById('manager-name-select');
+    if(!sel) return;
+    let managers = [];
+    try {
+      const q = office ? ('?office='+encodeURIComponent(office)) : '';
+      managers = (await api('/tools/health_check/api/area_managers'+q)).managers || [];
+    } catch(e){ managers = []; }
+    const names = managers.map(m=>m.name);
+    let html = '<option value="">（未選択）</option>';
+    if(selected && !names.includes(selected)){
+      html += `<option value="${esc(selected)}" selected>${esc(selected)}（現在値）</option>`;
+    }
+    html += managers.map(m=>`<option value="${esc(m.name)}" data-username="${esc(m.username)}" ${m.name===selected?'selected':''}>${esc(m.name)}（${esc(m.username)}）</option>`).join('');
+    if(!managers.length){
+      html += '<option value="" disabled>この営業所に担当「エリアマネージャー」のユーザーがいません</option>';
+    }
+    sel.innerHTML = html;
+    // 既存の change リスナを避けるため、ノードを置換してから付け直す
+    const fresh = sel.cloneNode(true);
+    sel.parentNode.replaceChild(fresh, sel);
+    fresh.addEventListener('change', ()=>{
+      const opt = fresh.options[fresh.selectedIndex];
+      const uname = opt ? opt.getAttribute('data-username') : '';
+      const mgrSel = document.getElementById('rec-manager');
+      if(mgrSel && uname){ mgrSel.value = uname; }
+    });
   }
 
   async function loadUsers(){
@@ -935,7 +1039,7 @@ const HC = (function(){
 
   return {
     init, openRecordModal, closeRecordModal, saveRecord, deleteRecord,
-    changeNewType, selectEmployee, uploadAttachment, deleteAttachment,
+    changeNewType, selectEmployee, selectSite, uploadAttachment, deleteAttachment,
     openBulkModal, closeBulkModal, runBulkCreate,
     openCarryoverModal, closeCarryoverModal, runCarryover,
     resolveManagers, exportCsv,
