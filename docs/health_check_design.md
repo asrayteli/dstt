@@ -160,22 +160,27 @@
 1分間隔スケジューラ `app/services/to_bell_push.py: send_due_task_pushes()` に乗せる。
 
 ### 6.1 対象と自動起票トリガー
-レコード保存時に、次の2系統のタスクを **ensure（無ければ作成／あれば更新）**：
+レコード保存時／日次sweep時に、次の3系統のタスクを **ensure（無ければ作成／あれば更新）**：
 
-1. **二次検査リマインド**：`needs_recheck=true` かつ `secondary_recommended_date` 入力済み
-   かつ `secondary_exam_date` 未入力（未完了）→ `secondary_task_id`
-2. **深夜2回目リマインド**：`is_night_worker=true` かつ 基準日 `exam_date_2_target`
+1. **健康診断予約日リマインド**：`reservation_date` 入力済み かつ `exam_date` 未入力 → `source_ref_type="reservation"`
+2. **深夜2回目（受診日②）リマインド**：`is_night_worker=true` かつ 基準日 `exam_date_2_target`
    （未入力時は `exam_date`＋6か月を既定）が確定し、`exam_date_2` 未入力（未受診）→ `night2_task_id`
+3. **二次検査リマインド**：`needs_recheck=true` かつ `secondary_recommended_date` 入力済み
+   かつ `secondary_exam_date` 未入力（未完了）→ `secondary_task_id`
 
 ### 6.2 通知タイミング
-- **基準日当日 9:00** に通知（`due_at` = 基準日 09:00。pushは時刻明示しないと既定23:59:59で発火しないため）。
-- **追加の事前通知**：ツール全体の既定リードタイム（例：3日前）＋レコード個別の `reminder_lead_days` で上書き。
-  事前通知ぶんのタスク/通知も基準日から逆算して 9:00 に起票。
+- **対象日の前日にタスク化**（`_hc_should_materialize`：対象日 − 1日 以降に作成）。
+  まだ前日に達していない将来分のタスクは作らない（日次sweepで前日になったら起票）。
+- **対象日当日 09:00 にアラート（push）**（`due_at` = 対象日 09:00。pushは時刻明示しないと
+  既定23:59:59で発火しないため 09:00 を明示）。
+- 旧仕様の「全体既定リードタイム＋`reminder_lead_days` による事前通知」は廃止（本リマインドでは未使用）。
 
 ### 6.3 タスク内容
-- 二次検査：`title` = `[健診] {employee_name} 二次検査 受診推奨`
-- 深夜2回目：`title` = `[健診] {employee_name} 深夜従事者 2回目受診`
-- `source_tool="health_check"`、`source_ref_type` = `"secondary_exam"` / `"night_second"`、
+- タイトル・本文（通知文）は3系統とも **「{employee_name}さんの{ジャンル}になりました。」** で統一。
+  - 予約：「{employee_name}さんの健康診断予約日になりました。」
+  - 深夜2回目：「{employee_name}さんの受診日②になりました。」
+  - 二次検査：「{employee_name}さんの二次検査受診推奨日になりました。」
+- `source_tool="health_check"`、`source_ref_type` = `"reservation"` / `"night_second"` / `"secondary_exam"`、
   `source_ref_id=str(record_id)` → **重複起票を自動防止**
 - `assigned_to` = `manager_user`（自動/手動で解決済みの担当者）
 
@@ -186,8 +191,8 @@
   管理者が手動フォローできるようにする（取りこぼし防止）。
 
 ### 6.5 更新・クローズ
-- 基準日（推奨日／深夜2回目基準日）変更時 → 対応タスクの `due_at` を更新（9:00維持）。
-- 受診完了（`secondary_exam_date` / `exam_date_2` 入力）または条件解除時 → 対応タスクを完了/クローズ。
+- 対象日（予約日／深夜2回目基準日／二次検査推奨日）変更時 → 対応タスクの `due_at` を更新（前日に達していれば9:00維持、未到達なら一旦クローズ）。
+- 受診完了（`exam_date` / `exam_date_2` / `secondary_exam_date` 入力）または条件解除時 → 対応タスクを完了/クローズ。
 - レコード削除時 → 対応タスクをクローズ。
 
 ---
