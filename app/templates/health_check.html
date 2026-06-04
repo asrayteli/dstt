@@ -610,6 +610,16 @@ const HC = (function(){
       <div>
         <div class="hc-section-title">健診結果の添付（pdf / jpg / png・10MBまで）</div>
         <div id="attach-list" class="space-y-1.5 mb-2"></div>
+        <div class="flex flex-wrap items-end gap-2 mb-2">
+          <label class="text-xs text-gray-600">これからアップロードするファイルのタイトル
+            <select id="attach-title-select" class="hc-input mt-1" onchange="HC.onAttachTitleChange()">
+              <option value="健康診断結果">健康診断結果</option>
+              <option value="二次検査結果">二次検査結果</option>
+              <option value="__manual__">その他（手動入力）</option>
+            </select>
+          </label>
+          <input type="text" id="attach-title-manual" class="hc-input flex-1 min-w-[12rem] hidden" placeholder="タイトルを入力" maxlength="120">
+        </div>
         <label id="attach-drop" class="hc-dropzone" for="attach-file">
           <span class="hc-dropzone-icon">📄⬆️</span>
           <span class="hc-dropzone-text">ここにファイルをドラッグ＆ドロップ<br>またはクリックして選択</span>
@@ -836,8 +846,10 @@ const HC = (function(){
   }
 
   // ---- 添付 ----
+  let lastAttachments = [];
   function renderAttachments(list){
     list = list || [];
+    lastAttachments = list;
     renderAttachmentGroup('attach-list', list.filter(a=>(a.category||'health')!=='nasva'));
     renderAttachmentGroup('nasva-attach-list', list.filter(a=>a.category==='nasva'));
   }
@@ -845,10 +857,37 @@ const HC = (function(){
     const box = document.getElementById(boxId);
     if(!box) return;
     if(!list.length){ box.innerHTML='<p class="text-xs text-gray-400">添付はまだありません。</p>'; return; }
-    box.innerHTML = list.map(a=>`<div class="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-1.5">
-      <a href="/tools/health_check/api/record/${editingId}/attachment/${a.id}" class="text-teal-700 hover:underline truncate">${esc(a.original_name)}</a>
-      <button class="text-red-500 hover:text-red-700 text-xs ml-2" onclick="HC.deleteAttachment(${a.id})">削除</button>
-    </div>`).join('');
+    box.innerHTML = list.map(a=>{
+      const label = a.title ? esc(a.title) : esc(a.original_name);
+      const sub = a.title ? `<span class="block text-xs text-gray-400 truncate">${esc(a.original_name)}</span>` : '';
+      return `<div class="flex items-center justify-between gap-2 text-sm bg-gray-50 rounded-lg px-3 py-1.5">
+      <div class="min-w-0">
+        <a href="/tools/health_check/api/record/${editingId}/attachment/${a.id}" class="text-teal-700 hover:underline truncate block">${label}</a>
+        ${sub}
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button class="text-gray-500 hover:text-teal-700 text-xs" onclick="HC.renameAttachment(${a.id})">名称変更</button>
+        <button class="text-red-500 hover:text-red-700 text-xs" onclick="HC.deleteAttachment(${a.id})">削除</button>
+      </div>
+    </div>`;
+    }).join('');
+  }
+  // タイトル選択：「その他（手動入力）」で手動入力欄を表示
+  function onAttachTitleChange(){
+    const sel = document.getElementById('attach-title-select');
+    const manual = document.getElementById('attach-title-manual');
+    if(!sel || !manual) return;
+    const isManual = sel.value === '__manual__';
+    manual.classList.toggle('hidden', !isManual);
+    if(isManual) manual.focus();
+  }
+  function getAttachTitle(){
+    const sel = document.getElementById('attach-title-select');
+    if(!sel) return '';
+    if(sel.value === '__manual__'){
+      return (document.getElementById('attach-title-manual').value || '').trim();
+    }
+    return sel.value;
   }
   function setupDropzone(dropId, inputId, category){
     const drop = document.getElementById(dropId);
@@ -866,9 +905,11 @@ const HC = (function(){
   async function uploadFiles(files, category){
     category = category || 'health';
     if(!editingId){ toast('先にレコードを保存してください','warn'); return; }
+    // 健診結果の添付は選択中のタイトルを付与（NASVAは対象外）
+    const title = (category === 'health') ? getAttachTitle() : '';
     let ok = 0;
     for(const file of files){
-      const fd = new FormData(); fd.append('file', file); fd.append('category', category);
+      const fd = new FormData(); fd.append('file', file); fd.append('category', category); fd.append('title', title);
       try {
         const r = await fetch('/tools/health_check/api/record/'+editingId+'/attachment', {method:'POST', body:fd});
         const data = await r.json(); if(!r.ok) throw new Error(data.error||'アップロード失敗');
@@ -889,6 +930,16 @@ const HC = (function(){
   }
   async function deleteAttachment(aid){
     try { await api('/tools/health_check/api/record/'+editingId+'/attachment/'+aid, {method:'DELETE'});
+      const rec = await api('/tools/health_check/api/record/'+editingId); renderAttachments(rec.attachments||[]); }
+    catch(e){ toast(e.message,'error'); }
+  }
+  async function renameAttachment(aid){
+    const a = lastAttachments.find(x=>x.id===aid);
+    const current = a ? (a.title || '') : '';
+    const t = window.prompt('タイトルを入力してください（例：健康診断結果 / 二次検査結果。空欄でファイル名に戻ります）', current);
+    if(t === null) return; // キャンセル
+    try { await api('/tools/health_check/api/record/'+editingId+'/attachment/'+aid, {method:'PATCH', body:JSON.stringify({title:t.trim()})});
+      toast('タイトルを更新しました');
       const rec = await api('/tools/health_check/api/record/'+editingId); renderAttachments(rec.attachments||[]); }
     catch(e){ toast(e.message,'error'); }
   }
@@ -1035,6 +1086,7 @@ const HC = (function(){
   return {
     init, openRecordModal, closeRecordModal, saveRecord, deleteRecord,
     changeNewType, selectEmployee, selectSite, uploadAttachment, deleteAttachment,
+    onAttachTitleChange, renameAttachment,
     openBulkModal, closeBulkModal, runBulkCreate,
     openCarryoverModal, closeCarryoverModal, runCarryover,
     resolveManagers, exportCsv,

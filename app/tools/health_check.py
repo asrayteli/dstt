@@ -102,6 +102,15 @@ SYNCED_FIELDS = {
 }
 
 ATTACHMENT_CATEGORIES = {"health", "nasva"}
+ATTACHMENT_TITLE_MAX = 120
+
+
+def _clean_attachment_title(raw) -> str:
+    """添付タイトルを整形（空白除去・最大長制限）。空なら空文字。"""
+    title = (raw or "").strip()
+    if len(title) > ATTACHMENT_TITLE_MAX:
+        title = title[:ATTACHMENT_TITLE_MAX]
+    return title
 
 
 # ============================================================
@@ -771,6 +780,8 @@ def api_upload_attachment(record_id):
     if category not in ATTACHMENT_CATEGORIES:
         category = "health"
 
+    title = _clean_attachment_title(request.form.get("title"))
+
     file.seek(0, os.SEEK_END)
     size = file.tell()
     file.seek(0)
@@ -788,6 +799,7 @@ def api_upload_attachment(record_id):
     attachment = HealthCheckAttachment(
         record_id=record.id,
         category=category,
+        title=title,
         stored_path=rel_path,
         original_name=secure_filename(file.filename) or f"file.{ext}",
         content_type=file.mimetype,
@@ -813,6 +825,23 @@ def api_download_attachment(record_id, attachment_id):
     if not os.path.exists(abs_path):
         return jsonify({"error": "ファイルが見つかりません"}), 404
     return send_file(abs_path, as_attachment=True, download_name=attachment.original_name)
+
+
+@health_check_bp.route("/api/record/<int:record_id>/attachment/<int:attachment_id>", methods=["PATCH"])
+@login_required
+def api_update_attachment(record_id, attachment_id):
+    """添付ファイルのタイトルを更新する。"""
+    user_id = str(current_user.username)
+    attachment = db.session.get(HealthCheckAttachment, attachment_id)
+    if not attachment or attachment.record_id != record_id:
+        return jsonify({"error": "ファイルが見つかりません"}), 404
+    record = db.session.get(HealthCheckRecord, record_id)
+    if not record or not has_office_access(user_id, record.office_code):
+        return jsonify({"error": "アクセス権限がありません"}), 403
+    data = request.get_json(silent=True) or {}
+    attachment.title = _clean_attachment_title(data.get("title"))
+    db.session.commit()
+    return jsonify({"success": True, "attachment": attachment.to_dict()})
 
 
 @health_check_bp.route("/api/record/<int:record_id>/attachment/<int:attachment_id>", methods=["DELETE"])

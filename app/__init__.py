@@ -378,6 +378,8 @@ def _ensure_access_control_schema(app):
             hca_cols = {c["name"] for c in inspector.get_columns("health_check_attachments")}
             if "category" not in hca_cols:
                 alters.append("ALTER TABLE health_check_attachments ADD COLUMN category VARCHAR(20) NOT NULL DEFAULT 'health'")
+            if "title" not in hca_cols:
+                alters.append("ALTER TABLE health_check_attachments ADD COLUMN title VARCHAR(120)")
 
         if "vehicle_inspection_records" in inspector.get_table_names():
             vehicle_inspection_cols = {c["name"] for c in inspector.get_columns("vehicle_inspection_records")}
