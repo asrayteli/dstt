@@ -155,21 +155,100 @@ def test_secondary_reminder_creates_tobell_task_when_opted_in(tmp_path):
     with app.app_context():
         assert ToBellTask.query.filter_by(source_tool="health_check").count() == 0
 
-    # 再検査＋推奨日を入力 → 二次検査リマインドが起票される
+    # 再検査＋推奨日（前日に達した日付）を入力 → 二次検査リマインドが起票される
+    today = date.today().isoformat()
     client.put(f"/tools/health_check/api/record/{rid}", json={
-        "needs_recheck": True, "secondary_recommended_date": "2026-09-15"})
+        "needs_recheck": True, "secondary_recommended_date": today})
     with app.app_context():
         task = ToBellTask.query.filter_by(source_tool="health_check", source_ref_type="secondary_exam").first()
         assert task is not None
         assert task.assigned_to == "m001"
         assert task.due_at is not None
-        assert task.due_at.hour == 9  # 当日朝9時に通知が飛ぶ時刻設定
+        assert task.due_at.hour == 9  # 当日朝9時にアラート
+        # タイトル・本文は「{氏名}さんの{ジャンル}になりました。」
+        assert task.title == "社員一郎さんの二次検査受診推奨日になりました。"
+        assert task.description == "社員一郎さんの二次検査受診推奨日になりました。"
 
     # 受診完了でリマインドはアーカイブされる
     client.put(f"/tools/health_check/api/record/{rid}", json={"secondary_exam_date": "2026-09-20"})
     with app.app_context():
         task = ToBellTask.query.filter_by(source_tool="health_check", source_ref_type="secondary_exam").first()
         assert task.status == "archived"
+
+
+def test_reminders_materialize_day_before_at_nine(tmp_path):
+    """予約日・受診日②・二次検査推奨日は前日にタスク化し、当日9時にアラート。
+    本文は「{氏名}さんの{ジャンル}になりました。」。"""
+    from datetime import datetime as _dt
+    from app.services.to_bell_hooks import ensure_health_check_reminders
+
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    with app.app_context():
+        db.session.add(ToBellUserSettings(username="m001", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.commit()
+
+    res = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E001"})
+    rid = res.get_json()["record"]["id"]
+
+    def _task(ref_type):
+        return ToBellTask.query.filter_by(
+            source_tool="health_check", source_ref_type=ref_type, status="todo"
+        ).first()
+
+    with app.app_context():
+        rec = db.session.get(HealthCheckRecord, rid)
+        rec.reservation_date = date(2026, 5, 20)
+        db.session.commit()
+
+        # 2日前：まだタスク化されない
+        ensure_health_check_reminders(rec, now=_dt(2026, 5, 18, 10, 0), commit=True)
+        assert _task("reservation") is None
+
+        # 前日：タスク化され、due_at は当日9:00
+        ensure_health_check_reminders(rec, now=_dt(2026, 5, 19, 6, 0), commit=True)
+        task = _task("reservation")
+        assert task is not None
+        assert task.due_at == _dt(2026, 5, 20, 9, 0)
+        assert task.assigned_to == "m001"
+        assert task.title == "社員一郎さんの健康診断予約日になりました。"
+
+        # 受診日が入ると予約日リマインドはクローズ
+        rec.exam_date = date(2026, 5, 20)
+        db.session.commit()
+        ensure_health_check_reminders(rec, now=_dt(2026, 5, 20, 9, 0), commit=True)
+        assert _task("reservation") is None
+
+
+def test_night_second_reminder_message(tmp_path):
+    """深夜従事者の受診日②リマインドの本文ジャンルは「受診日②」。"""
+    from datetime import datetime as _dt
+    from app.services.to_bell_hooks import ensure_health_check_reminders
+
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    with app.app_context():
+        db.session.add(ToBellUserSettings(username="m001", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.commit()
+
+    res = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E001"})
+    rid = res.get_json()["record"]["id"]
+
+    with app.app_context():
+        rec = db.session.get(HealthCheckRecord, rid)
+        rec.is_night_worker = True
+        rec.exam_date_2_target = date(2026, 11, 10)
+        db.session.commit()
+        ensure_health_check_reminders(rec, now=_dt(2026, 11, 9, 8, 0), commit=True)
+        task = ToBellTask.query.filter_by(
+            source_tool="health_check", source_ref_type="night_second", status="todo").first()
+        assert task is not None
+        assert task.title == "社員一郎さんの受診日②になりました。"
+        assert task.due_at == _dt(2026, 11, 10, 9, 0)
 
 
 def test_linked_record_keeps_synced_fields(tmp_path):

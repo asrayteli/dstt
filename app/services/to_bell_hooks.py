@@ -288,21 +288,26 @@ HEALTH_CHECK_INTEGRATION_KEY = "health_check.linkage"
 HEALTH_CHECK_DEFAULT_LEAD_DAYS = 3
 _HEALTH_CHECK_HREF = "/tools/health_check"
 
+# 通知タイミング：対象日の前日にタスク化し、当日 09:00 にアラートを流す。
+HEALTH_CHECK_REMINDER_LEAD_DAYS = 1
 
-def _hc_reminder_schedule(basis_date, lead_days: int | None) -> list[datetime]:
-    """基準日の 09:00 と、その lead_days 日前の 09:00 を返す（重複排除・昇順）。"""
-    times = [datetime.combine(basis_date, time(9, 0))]
-    if lead_days and lead_days > 0:
-        times.append(datetime.combine(basis_date, time(9, 0)) - timedelta(days=lead_days))
-    return sorted(set(times))
+# 通知ジャンル（source_ref_type → 表示名）。
+# 本文・タイトルは「{氏名}さんの{ジャンル}になりました。」で統一する。
+HEALTH_CHECK_REMINDER_GENRE = {
+    "reservation": "健康診断予約日",
+    "night_second": "受診日②",
+    "secondary_exam": "二次検査受診推奨日",
+}
 
 
-def _hc_next_due(schedule: list[datetime], now: datetime) -> datetime:
-    """まだ来ていない（=日付が今日以降の）最も近い通知時刻を返す。
-    全て過去なら最後の時刻を返す（push は due_at 重複でスキップされる）。"""
-    today = now.date()
-    upcoming = [dt for dt in schedule if dt.date() >= today]
-    return min(upcoming) if upcoming else max(schedule)
+def _hc_due_at(basis_date) -> datetime:
+    """アラート時刻＝対象日の 09:00。"""
+    return datetime.combine(basis_date, time(9, 0))
+
+
+def _hc_should_materialize(basis_date, now: datetime) -> bool:
+    """タスク化の判定。対象日の前日（以降）になったら作成する。"""
+    return now.date() >= basis_date - timedelta(days=HEALTH_CHECK_REMINDER_LEAD_DAYS)
 
 
 def _hc_night_basis(record) -> "Any":
@@ -389,81 +394,69 @@ def ensure_health_check_reminders(
     now: datetime | None = None,
     commit: bool = True,
 ) -> None:
-    """健診レコードの状態から、二次検査／深夜2回目のリマインドを同期する。
+    """健診レコードの状態から、3種のリマインドを同期する。
+
+    対象日（健康診断予約日／深夜従事者の受診日②／二次検査受診推奨日）の
+    **前日にタスク化**し、対象日 **09:00** にアラート（push）を流す。
+    タスク・通知の本文は「{氏名}さんの{ジャンル}になりました。」で統一する。
 
     通知は担当者（manager_user）が連携をオプトインしている場合のみ起票する。
     例外は飲み込み、健診側の保存処理を妨げない。
+    （`global_lead_days` は後方互換のため残すが、本リマインドでは使用しない。）
     """
     now = now or datetime.now()
-    lead = record.reminder_lead_days if record.reminder_lead_days is not None else global_lead_days
     manager = (record.manager_user or "").strip()
     opted_in = bool(manager) and is_enabled(manager, HEALTH_CHECK_INTEGRATION_KEY)
 
-    try:
-        # --- 二次検査リマインド ---
-        secondary_active = (
+    def _sync(ref_type: str, basis, condition: bool, priority: str) -> "ToBellTask | None":
+        """対象日 basis の前日以降になったらタスク化（無ければ作成／あれば更新）する。
+        条件を満たさない・まだ前日に達していない場合は既存タスクをクローズする。"""
+        active = (
             opted_in
-            and record.needs_recheck
-            and record.secondary_recommended_date is not None
-            and record.secondary_exam_date is None
+            and condition
+            and basis is not None
+            and _hc_should_materialize(basis, now)
         )
-        if secondary_active:
-            schedule = _hc_reminder_schedule(record.secondary_recommended_date, lead)
-            due_at = _hc_next_due(schedule, now)
-            body = (
-                f"{record.target_year}年度 健康診断\n"
-                f"対象者: {record.employee_name}\n"
-                f"二次検査 受診推奨日: {record.secondary_recommended_date.isoformat()}"
-            )
-            if record.recheck_items:
-                body += f"\n再検査項目: {record.recheck_items}"
-            task = _ensure_reminder_task(
-                manager_user=manager,
-                title=f"[健診] {record.employee_name} 二次検査 受診推奨",
-                description=body,
-                source_ref_type="secondary_exam",
-                source_ref_id=str(record.id),
-                due_at=due_at,
-                priority="high",
-            )
-            if task is not None:
-                db.session.flush()
-                record.secondary_task_id = task.id
-        else:
-            _close_reminder_task("secondary_exam", str(record.id))
-            record.secondary_task_id = None
+        if not active:
+            _close_reminder_task(ref_type, str(record.id))
+            return None
+        message = f"{record.employee_name}さんの{HEALTH_CHECK_REMINDER_GENRE[ref_type]}になりました。"
+        return _ensure_reminder_task(
+            manager_user=manager,
+            title=message,
+            description=message,
+            source_ref_type=ref_type,
+            source_ref_id=str(record.id),
+            due_at=_hc_due_at(basis),
+            priority=priority,
+        )
 
-        # --- 深夜従事者 年2回目リマインド ---
-        night_basis = _hc_night_basis(record)
-        night_active = (
-            opted_in
-            and record.is_night_worker
-            and night_basis is not None
-            and record.exam_date_2 is None
+    try:
+        # --- 健康診断予約日 ---
+        _sync(
+            "reservation",
+            record.reservation_date,
+            record.reservation_date is not None and record.exam_date is None,
+            "normal",
         )
-        if night_active:
-            schedule = _hc_reminder_schedule(night_basis, lead)
-            due_at = _hc_next_due(schedule, now)
-            body = (
-                f"{record.target_year}年度 健康診断（深夜従事者）\n"
-                f"対象者: {record.employee_name}\n"
-                f"年2回目 受診目安日: {night_basis.isoformat()}"
-            )
-            task = _ensure_reminder_task(
-                manager_user=manager,
-                title=f"[健診] {record.employee_name} 深夜従事者 2回目受診",
-                description=body,
-                source_ref_type="night_second",
-                source_ref_id=str(record.id),
-                due_at=due_at,
-                priority="normal",
-            )
-            if task is not None:
-                db.session.flush()
-                record.night2_task_id = task.id
-        else:
-            _close_reminder_task("night_second", str(record.id))
-            record.night2_task_id = None
+        # --- 深夜従事者 年2回目（受診日②） ---
+        night_task = _sync(
+            "night_second",
+            _hc_night_basis(record),
+            bool(record.is_night_worker) and record.exam_date_2 is None,
+            "normal",
+        )
+        record.night2_task_id = night_task.id if night_task is not None else None
+        # --- 二次検査 受診推奨日 ---
+        secondary_task = _sync(
+            "secondary_exam",
+            record.secondary_recommended_date,
+            bool(record.needs_recheck)
+            and record.secondary_recommended_date is not None
+            and record.secondary_exam_date is None,
+            "high",
+        )
+        record.secondary_task_id = secondary_task.id if secondary_task is not None else None
 
         if commit:
             _commit_safely()
@@ -497,6 +490,10 @@ def sweep_health_check_reminders(*, now: datetime | None = None) -> dict[str, in
             db.or_(
                 HealthCheckRecord.secondary_task_id.isnot(None),
                 HealthCheckRecord.night2_task_id.isnot(None),
+                db.and_(
+                    HealthCheckRecord.reservation_date.isnot(None),
+                    HealthCheckRecord.exam_date.is_(None),
+                ),
                 db.and_(
                     HealthCheckRecord.needs_recheck.is_(True),
                     HealthCheckRecord.secondary_recommended_date.isnot(None),
