@@ -1696,6 +1696,7 @@ class HealthCheckAttachment(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     record_id = db.Column(db.Integer, db.ForeignKey('health_check_records.id'), nullable=False, index=True)
     category = db.Column(db.String(20), nullable=False, default='health')  # 'health' | 'nasva'
+    title = db.Column(db.String(120), nullable=True)  # 任意のタイトル（例: 健康診断結果 / 二次検査結果）
     stored_path = db.Column(db.String(500), nullable=False)
     original_name = db.Column(db.String(255), nullable=False)
     content_type = db.Column(db.String(100), nullable=True)
@@ -1710,6 +1711,7 @@ class HealthCheckAttachment(db.Model):
             'id': self.id,
             'record_id': self.record_id,
             'category': self.category or 'health',
+            'title': self.title or '',
             'original_name': self.original_name,
             'content_type': self.content_type or '',
             'file_size': int(self.file_size or 0),

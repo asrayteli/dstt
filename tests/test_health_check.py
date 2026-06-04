@@ -440,6 +440,56 @@ def test_nasva_attachment_category(tmp_path):
     assert any(a["category"] == "nasva" for a in rec["attachments"])
 
 
+def test_attachment_title_set_and_rename(tmp_path):
+    """添付ファイルにタイトル（選択肢/手動）を付与でき、後から変更できる。"""
+    import io
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    with app.app_context():
+        db.session.add(Employee(
+            employee_number="E100", office_code="100", office_name="本社営業所",
+            employee_name="健診七子", employee_type="正社員", company_name="大新東",
+            manager_name="管理花子", birth_date=date(1980, 1, 1),
+        ))
+        db.session.commit()
+
+    rid = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E100",
+    }).get_json()["record"]["id"]
+
+    # アップロード時にタイトルを付与
+    res = client.post(
+        f"/tools/health_check/api/record/{rid}/attachment",
+        data={"file": (io.BytesIO(b"%PDF-1.4 test"), "result.pdf"),
+              "category": "health", "title": "健康診断結果"},
+        content_type="multipart/form-data",
+    )
+    assert res.status_code == 200
+    att = res.get_json()["attachment"]
+    assert att["title"] == "健康診断結果"
+    aid = att["id"]
+
+    # PATCH でタイトルを変更
+    res = client.patch(
+        f"/tools/health_check/api/record/{rid}/attachment/{aid}",
+        json={"title": "二次検査結果"},
+    )
+    assert res.status_code == 200
+    assert res.get_json()["attachment"]["title"] == "二次検査結果"
+
+    # 空文字でクリアできる（ファイル名表示に戻る）
+    res = client.patch(
+        f"/tools/health_check/api/record/{rid}/attachment/{aid}",
+        json={"title": "   "},
+    )
+    assert res.status_code == 200
+    assert res.get_json()["attachment"]["title"] == ""
+
+    rec = client.get(f"/tools/health_check/api/record/{rid}").get_json()
+    assert any(a["id"] == aid for a in rec["attachments"])
+
+
 def test_manual_record_saves_employee_type_and_birth_date(tmp_path):
     """手動モードでは社員区分（営業社員契約）と生年月日を入力・保存できる。"""
     module, app = _build(tmp_path)
