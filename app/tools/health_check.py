@@ -30,6 +30,8 @@ from app.models import (
     Office,
     Site,
     User,
+    AccessOffice,
+    AccessDepartment,
     HealthCheckRecord,
     HealthCheckAttachment,
     HealthCheckEditHistory,
@@ -56,8 +58,9 @@ EMPLOYEE_TYPE_OPTIONS = [
     "営業社員（P契約）",
     "営業社員（PT契約）",
 ]
-# 管理担当の候補とする社員区分（エリアマネージャー）の判定キーワード
-AREA_MANAGER_TYPE_KEYWORD = "エリアマネージャー"
+# 管理担当の候補とするDSTTユーザーの「担当」（AccessDepartment）名
+# ＝管理者ページで担当が「エリアマネージャー」に設定されているユーザー
+AREA_MANAGER_DEPARTMENT = "エリアマネージャー"
 
 # レコードの編集可能フィールド（モード共通の手入力項目）
 DATE_FIELDS = {
@@ -877,8 +880,9 @@ def api_users():
 @health_check_bp.route("/api/area_managers")
 @login_required
 def api_area_managers():
-    """管理担当の候補。登録者の所属営業所に属し、社員区分がエリアマネージャーの社員。
-    手動モード（入社前・内勤者）のレコード追加時に管理担当名を選ぶために使う。"""
+    """管理担当の候補。対象営業所に所属し、担当（AccessDepartment）が
+    「エリアマネージャー」に設定されているDSTTユーザー。
+    手動モード（入社前・内勤者）のレコード追加時に管理担当を選ぶために使う。"""
     user_id = str(current_user.username)
     user_offices = get_user_offices(user_id)
     if not user_offices:
@@ -886,22 +890,29 @@ def api_area_managers():
     # 指定営業所（アクセス可能なもの）に限定。未指定なら自分のスコープ全体。
     office = request.args.get("office", "").strip()
     offices = [office] if office and has_office_access(user_id, office) else user_offices
-    managers = (
-        Employee.query.filter(
-            Employee.office_code.in_(offices),
-            Employee.is_deleted.is_(False),
-            Employee.employee_type.like(f"%{AREA_MANAGER_TYPE_KEYWORD}%"),
-        )
-        .order_by(Employee.office_code, Employee.employee_number)
+
+    # 営業所コード → アクセス権営業所(AccessOffice) → その営業所の「エリアマネージャー」担当
+    office_ids = [o.id for o in AccessOffice.query.filter(AccessOffice.code.in_(offices)).all()]
+    if not office_ids:
+        return jsonify({"managers": []})
+    dept_ids = [
+        d.id for d in AccessDepartment.query.filter(
+            AccessDepartment.office_id.in_(office_ids),
+            AccessDepartment.name == AREA_MANAGER_DEPARTMENT,
+        ).all()
+    ]
+    if not dept_ids:
+        return jsonify({"managers": []})
+
+    users = (
+        User.query.filter(User.department_id.in_(dept_ids))
+        .order_by(User.name, User.username)
         .all()
     )
     return jsonify({"managers": [{
-        "employee_number": e.employee_number,
-        "employee_name": e.employee_name,
-        "office_code": e.office_code,
-        "office_name": e.office_name,
-        "employee_type": e.employee_type,
-    } for e in managers]})
+        "username": u.username,
+        "name": u.name or u.username,
+    } for u in users]})
 
 
 @health_check_bp.route("/api/sites")

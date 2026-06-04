@@ -240,8 +240,9 @@
 - **手動モード（入社前・内勤者）のレコード追加の入力支援**：
   - **社員区分**：`営業社員（R契約）` / `営業社員（P契約）` / `営業社員（PT契約）` から選択（`EMPLOYEE_TYPE_OPTIONS`）。
   - **生年月日**：手入力可（年齢・NASVA判定で使用）。名簿連携は名簿から同期。
-  - **管理担当名**：登録者が所属する営業所のメンバーのうち、社員区分が
-    **エリアマネージャー**（`AREA_MANAGER_TYPE_KEYWORD`）の社員から選択（`GET /api/area_managers?office=`）。
+  - **管理担当名**：対象営業所のメンバーのうち、DSTT管理者ページで担当（`AccessDepartment`）が
+    **エリアマネージャー**（`AREA_MANAGER_DEPARTMENT`）に設定されているユーザーから選択
+    （`GET /api/area_managers?office=`）。選択すると ToBell 担当者（`manager_user`）も自動で連動。
   - **専従先名**：**現場リストPLUS（`Site`）からの検索入力**（`GET /api/sites?search=`）＋手動入力に対応。
 - 深夜2回目の基準日 `exam_date_2_target` は未入力時 `exam_date` ＋6か月を既定（運用で調整可）。
 - 添付：pdf/jpg/png・10MB。保存先 `uploads/health_check/<年度>/`。

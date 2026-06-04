@@ -764,16 +764,25 @@ const HC = (function(){
       const q = office ? ('?office='+encodeURIComponent(office)) : '';
       managers = (await api('/tools/health_check/api/area_managers'+q)).managers || [];
     } catch(e){ managers = []; }
-    const names = managers.map(m=>m.employee_name);
+    const names = managers.map(m=>m.name);
     let html = '<option value="">（未選択）</option>';
     if(selected && !names.includes(selected)){
       html += `<option value="${esc(selected)}" selected>${esc(selected)}（現在値）</option>`;
     }
-    html += managers.map(m=>`<option value="${esc(m.employee_name)}" ${m.employee_name===selected?'selected':''}>${esc(m.employee_name)}（${esc(m.employee_number)}）</option>`).join('');
+    html += managers.map(m=>`<option value="${esc(m.name)}" data-username="${esc(m.username)}" ${m.name===selected?'selected':''}>${esc(m.name)}（${esc(m.username)}）</option>`).join('');
     if(!managers.length){
-      html += '<option value="" disabled>この営業所にエリアマネージャーの登録がありません</option>';
+      html += '<option value="" disabled>この営業所に担当「エリアマネージャー」のユーザーがいません</option>';
     }
     sel.innerHTML = html;
+    // 既存の change リスナを避けるため、ノードを置換してから付け直す
+    const fresh = sel.cloneNode(true);
+    sel.parentNode.replaceChild(fresh, sel);
+    fresh.addEventListener('change', ()=>{
+      const opt = fresh.options[fresh.selectedIndex];
+      const uname = opt ? opt.getAttribute('data-username') : '';
+      const mgrSel = document.getElementById('rec-manager');
+      if(mgrSel && uname){ mgrSel.value = uname; }
+    });
   }
 
   async function loadUsers(){

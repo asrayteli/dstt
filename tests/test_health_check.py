@@ -16,6 +16,9 @@ from app.models import (
     Employee,
     Site,
     User,
+    AccessBranch,
+    AccessOffice,
+    AccessDepartment,
     HealthCheckRecord,
     ToBellTask,
     ToBellUserSettings,
@@ -380,30 +383,42 @@ def test_manual_record_saves_employee_type_and_birth_date(tmp_path):
     assert rec["manager_name"] == "エリア統括"
 
 
-def test_area_managers_endpoint_filters_by_office_and_type(tmp_path):
-    """管理担当候補は所属営業所のエリアマネージャーのみ返す。"""
+def test_area_managers_endpoint_filters_by_office_and_department(tmp_path):
+    """管理担当候補は、対象営業所で担当が「エリアマネージャー」のDSTTユーザーのみ。"""
     module, app = _build(tmp_path)
     _seed_basic(app)
     with app.app_context():
         db.session.add(Office(office_code="200", office_name="別営業所", created_by="seed"))
-        db.session.add(Employee(
-            employee_number="E100", office_code="100", office_name="本社営業所",
-            employee_name="区域真理子", employee_type="エリアマネージャー",
-        ))
-        db.session.add(Employee(
-            employee_number="E200", office_code="200", office_name="別営業所",
-            employee_name="他所真理子", employee_type="エリアマネージャー",
-        ))
+        branch = AccessBranch(name="本社支店", code="B1")
+        db.session.add(branch)
+        db.session.flush()
+        off100 = AccessOffice(branch_id=branch.id, name="本社営業所", code="100")
+        off200 = AccessOffice(branch_id=branch.id, name="別営業所", code="200")
+        db.session.add_all([off100, off200])
+        db.session.flush()
+        am100 = AccessDepartment(office_id=off100.id, name="エリアマネージャー")
+        other = AccessDepartment(office_id=off100.id, name="一般")
+        am200 = AccessDepartment(office_id=off200.id, name="エリアマネージャー")
+        db.session.add_all([am100, other, am200])
+        db.session.flush()
+        # 100のエリアマネージャー
+        db.session.add(User(username="am1", password_hash="x", name="区域真理子",
+                            office_id=off100.id, department_id=am100.id))
+        # 100だがエリアマネージャーではない
+        db.session.add(User(username="gen1", password_hash="x", name="一般花子",
+                            office_id=off100.id, department_id=other.id))
+        # 200のエリアマネージャー
+        db.session.add(User(username="am2", password_hash="x", name="他所真理子",
+                            office_id=off200.id, department_id=am200.id))
         db.session.commit()
     client = app.test_client()
 
     # 営業所100を指定 → 100のエリアマネージャーのみ
     data = client.get("/tools/health_check/api/area_managers?office=100").get_json()
-    numbers = {m["employee_number"] for m in data["managers"]}
-    assert numbers == {"E100"}
-    # 営業所未指定（管理者は全営業所スコープ）→ 両方のエリアマネージャー
+    assert {m["username"] for m in data["managers"]} == {"am1"}
+    # 営業所未指定（管理者は全営業所スコープ）→ 両営業所のエリアマネージャー
     data_all = client.get("/tools/health_check/api/area_managers").get_json()
-    assert {m["employee_number"] for m in data_all["managers"]} == {"E100", "E200"}
+    assert {m["username"] for m in data_all["managers"]} == {"am1", "am2"}
 
 
 def test_sites_endpoint_searches_active_sites(tmp_path):
