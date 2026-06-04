@@ -4048,8 +4048,14 @@ def _patch_push(monkeypatch):
 
     calls = []
 
-    def _record(app_obj, project_id, *, title, body, url):
-        calls.append({"project_id": project_id, "title": title, "body": body, "url": url})
+    def _record(app_obj, project_id, *, title, body, url, latest_only=False):
+        calls.append({
+            "project_id": project_id,
+            "title": title,
+            "body": body,
+            "url": url,
+            "latest_only": latest_only,
+        })
 
     monkeypatch.setattr(push, "push_available", lambda: True)
     monkeypatch.setattr(push, "send_push_to_project_async", _record)
@@ -4092,6 +4098,8 @@ def test_pwa_notify_fires_only_for_current_month_confirmed_change(tmp_path, monk
     assert len(calls) == 1
     assert calls[0]["project_id"] == project_id
     assert f"{year}年{month}月" in calls[0]["body"]
+    # 現場シフトは複数人が閲覧するため、通知先を制限せず全端末へ送る。
+    assert calls[0]["latest_only"] is False
 
     # 変更が無い保存 → 通知は増えない
     calls.clear()
@@ -4276,6 +4284,83 @@ def test_pwa_notify_fires_on_edit_url_save(tmp_path, monkeypatch):
     assert save.status_code == 200
     assert len(calls) == 1
     assert calls[0]["project_id"] == project_id_of(payload)
+
+
+def test_pwa_notify_for_person_shift_targets_latest_device_only(tmp_path, monkeypatch):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    calls = _patch_push(monkeypatch)
+
+    year, month = _current_year_month()
+    payload = _create_person_project(
+        client, title="Solo", employee_number="", year=str(year), month=str(month)
+    ).get_json()["project"]
+    project_id = payload["project"]["id"]
+    pwa_token = _token_from_url(payload["project"]["urls"]["pwa_url"])
+    assert _subscribe_device(client, pwa_token).status_code == 200
+
+    save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/{year}/{month}",
+        json={
+            "base_month": _legacy_base_month(payload["month"]),
+            "required_capacity": payload["month"].get("required_capacity", 0),
+            "entries_per_day": {"1": [{"value": "公"}]},
+        },
+    )
+    assert save.status_code == 200
+    assert len(calls) == 1
+    # 個人シフトは基本的に一人しか見ないため、最も直近の端末だけに送る。
+    assert calls[0]["latest_only"] is True
+
+
+def test_owner_can_manage_scene_shift_notification_targets(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    payload = _create_scene_project(client).get_json()["project"]
+    project_id = payload["project"]["id"]
+    pwa_token = _token_from_url(payload["project"]["urls"]["pwa_url"])
+    assert _subscribe_device(client, pwa_token, device_id="dev-a").status_code == 200
+    assert _subscribe_device(client, pwa_token, device_id="dev-b").status_code == 200
+
+    listed = client.get(f"/tools/shiftersync/cloudshift/api/project/{project_id}/pwa/subscriptions")
+    assert listed.status_code == 200
+    subscriptions = listed.get_json()["subscriptions"]
+    assert len(subscriptions) == 2
+    target_id = subscriptions[0]["id"]
+
+    # 通知先名の変更
+    renamed = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/pwa/subscriptions/{target_id}",
+        json={"device_label": "店長のiPhone"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.get_json()["subscription"]["device_label"] == "店長のiPhone"
+
+    # 無効化（ソフト）
+    disabled = client.delete(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/pwa/subscriptions/{target_id}"
+    )
+    assert disabled.status_code == 200
+    assert disabled.get_json()["updated"] is True
+
+    # 完全削除（ハード）
+    deleted = client.delete(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/pwa/subscriptions/{target_id}?hard=1"
+    )
+    assert deleted.status_code == 200
+    assert deleted.get_json()["deleted"] is True
+
+    remaining = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/pwa/subscriptions"
+    ).get_json()["subscriptions"]
+    assert len(remaining) == 1
+
+    # 他オーナーは通知先を閲覧・編集できない
+    module.current_user = _other_owner()
+    assert client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/pwa/subscriptions"
+    ).status_code == 404
 
 
 def project_id_of(payload):

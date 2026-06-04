@@ -7190,6 +7190,44 @@ def api_pwa_push_unsubscribe(token: str):
     return jsonify({"status": "ok", "updated": unsubscribe(str(project["id"]), device_id)})
 
 
+@cloudshift_bp.route("/api/project/<project_id>/pwa/subscriptions", methods=["GET"])
+@login_required
+def api_project_pwa_subscriptions(project_id: str):
+    """シフト帳に登録された通知先（ViewPWA 購読）の一覧。オーナーのみ。"""
+    from app.services.cloudshift_push import list_project_subscriptions
+
+    project = _owner_project_or_404(project_id)
+    return jsonify({"status": "ok", "subscriptions": list_project_subscriptions(str(project["id"]))})
+
+
+@cloudshift_bp.route(
+    "/api/project/<project_id>/pwa/subscriptions/<int:subscription_id>",
+    methods=["PUT", "DELETE"],
+)
+@login_required
+def api_project_pwa_subscription(project_id: str, subscription_id: int):
+    """通知先の名称変更・無効化・削除。オーナーのみ。"""
+    from app.services.cloudshift_push import (
+        deactivate_project_subscription,
+        delete_project_subscription,
+        update_project_subscription_label,
+    )
+
+    project = _owner_project_or_404(project_id)
+    pid = str(project["id"])
+    try:
+        if request.method == "DELETE":
+            hard = request.args.get("hard", "").lower() in ("1", "true", "yes")
+            if hard:
+                return jsonify({"status": "ok", "deleted": delete_project_subscription(pid, subscription_id)})
+            return jsonify({"status": "ok", "updated": deactivate_project_subscription(pid, subscription_id)})
+        label = str((request.get_json(silent=True) or {}).get("device_label") or "")
+        row = update_project_subscription_label(pid, subscription_id, label)
+        return jsonify({"status": "ok", "subscription": row})
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 404
+
+
 @cloudshift_bp.route("/api/list")
 @login_required
 def api_list():
@@ -8159,12 +8197,16 @@ def _dispatch_pwa_shift_notification(
     title = f"{project.get('title') or 'シフト帳'} のシフトが更新されました"
     body = _format_pwa_notification_body(year, month, changes)
     url = url_for("cloudshift.public_pwa", token=pwa_token, month_key=month_key, _external=False)
+    # 個人シフトは基本的に一人しか見ないため、最も直近に通知を有効化した端末だけに送る。
+    # 現場シフトは複数人が閲覧するため制限せず、有効な購読すべてへ送る。
+    latest_only = str(project.get("mode") or "") == "person"
     send_push_to_project_async(
         current_app._get_current_object(),
         str(project["id"]),
         title=title,
         body=body,
         url=url,
+        latest_only=latest_only,
     )
 
 

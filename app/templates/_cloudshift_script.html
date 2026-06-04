@@ -59,7 +59,8 @@
         requests: [],
         approvedRequestIds: [],
         accountShares: null,
-        revisions: []
+        revisions: [],
+        pushSubscriptions: null
       },
       conflictCheck: {
         mode: 'scene',
@@ -7191,9 +7192,14 @@
       const requests = state.shiftBookSettings.requests || [];
       const unviewedCount = unviewedLeaveChangeRequestCount(project);
       const supportsLeaveRequests = project && project.mode === 'person';
+      // 現場シフトは複数人が閲覧するため、通知先（ViewPWA 購読端末）を閲覧・編集できる。
+      const supportsPushTargets = project && project.mode === 'scene';
       const hasMonth = !!currentMonth();
       let activeTab = state.shiftBookSettings.activeTab || (supportsLeaveRequests ? 'requests' : 'share');
       if (!supportsLeaveRequests && (activeTab === 'requests' || activeTab === 'general')) {
+        activeTab = 'share';
+      }
+      if (!supportsPushTargets && activeTab === 'notify') {
         activeTab = 'share';
       }
       if (!hasMonth && activeTab === 'restore') {
@@ -7208,6 +7214,7 @@
           ${supportsLeaveRequests ? `<button type="button" class="cloud-settings-tab ${activeTab === 'general' ? 'is-active' : ''}" data-shift-settings-tab="general">申請設定</button>` : ''}
           <button type="button" class="cloud-settings-tab ${activeTab === 'share' ? 'is-active' : ''}" data-shift-settings-tab="share">シフト帳共有</button>
           <button type="button" class="cloud-settings-tab ${activeTab === 'urls' ? 'is-active' : ''}" data-shift-settings-tab="urls">共有URL</button>
+          ${supportsPushTargets ? `<button type="button" class="cloud-settings-tab ${activeTab === 'notify' ? 'is-active' : ''}" data-shift-settings-tab="notify">通知先</button>` : ''}
           ${hasMonth ? `<button type="button" class="cloud-settings-tab ${activeTab === 'restore' ? 'is-active' : ''}" data-shift-settings-tab="restore">復元</button>` : ''}
         </div>
         ${activeTab === 'general' && supportsLeaveRequests ? `
@@ -7267,6 +7274,14 @@
             </section>
           </div>
         ` : ''}
+        ${activeTab === 'notify' && supportsPushTargets ? `
+          <div class="cloud-settings-panel">
+            <section class="cloud-settings-card">
+              <p class="cloud-panel-note">ViewPWA で通知を有効化した端末の一覧です。現場シフトは複数人が閲覧するため、登録された通知先すべてへ更新通知を送ります。名称変更・無効化・削除ができます。</p>
+              <div class="cloud-devices-list">${renderCloudPushSubscriptionRows(state.shiftBookSettings.pushSubscriptions)}</div>
+            </section>
+          </div>
+        ` : ''}
         ${activeTab === 'restore' ? `
           <div class="cloud-settings-panel">
             <section class="cloud-settings-card">
@@ -7314,6 +7329,70 @@
       `;
     }
 
+    function renderCloudPushSubscriptionRows(subscriptions) {
+      if (subscriptions === null || subscriptions === undefined) {
+        return '<div class="cloud-empty-state"><p>通知先を読み込み中です...</p></div>';
+      }
+      if (!subscriptions.length) {
+        return '<div class="cloud-empty-state"><p>登録済みの通知先はありません。ViewPWAで通知を有効化すると、ここに表示されます。</p></div>';
+      }
+      return subscriptions.map((item) => `
+        <div class="cloud-device ${item.is_active ? '' : 'is-disabled'}" data-cloud-device-id="${escapeHtml(String(item.id))}">
+          <div class="cloud-device-main">
+            <input class="cloud-input cloud-device-label" value="${escapeHtml(item.device_label || '')}" aria-label="通知先名">
+            <div class="cloud-device-meta">${item.is_active ? '有効' : '無効'}${item.updated_at ? ` / 更新: ${escapeHtml(formatTimestamp(item.updated_at) || item.updated_at)}` : ''}${item.endpoint_tail ? ` / ${escapeHtml(item.endpoint_tail)}` : ''}</div>
+          </div>
+          <div class="cloud-device-actions">
+            <button type="button" class="cloud-btn small secondary" data-cloud-device-save="${escapeHtml(String(item.id))}">保存</button>
+            <button type="button" class="cloud-btn small ghost" data-cloud-device-disable="${escapeHtml(String(item.id))}" ${item.is_active ? '' : 'disabled'}>無効化</button>
+            <button type="button" class="cloud-btn small danger" data-cloud-device-delete="${escapeHtml(String(item.id))}">削除</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function reloadCloudPushSubscriptions(modal) {
+      const project = currentProject();
+      if (!project) return;
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/pwa/subscriptions`);
+      state.shiftBookSettings.pushSubscriptions = data.subscriptions || [];
+      renderShiftBookSettingsModalBody(modal);
+    }
+
+    async function saveCloudPushSubscriptionLabel(modal, subscriptionId) {
+      const project = currentProject();
+      if (!project) return;
+      const row = modal.querySelector(`[data-cloud-device-id="${subscriptionId}"]`);
+      const label = row ? (row.querySelector('.cloud-device-label').value || '') : '';
+      await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/pwa/subscriptions/${subscriptionId}`, {
+        method: 'PUT',
+        body: { device_label: label }
+      });
+      await reloadCloudPushSubscriptions(modal);
+      showFlash('通知先を更新しました', 'success');
+    }
+
+    async function disableCloudPushSubscription(modal, subscriptionId) {
+      const project = currentProject();
+      if (!project) return;
+      await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/pwa/subscriptions/${subscriptionId}`, {
+        method: 'DELETE'
+      });
+      await reloadCloudPushSubscriptions(modal);
+      showFlash('通知先を無効化しました', 'success');
+    }
+
+    async function deleteCloudPushSubscription(modal, subscriptionId) {
+      const project = currentProject();
+      if (!project) return;
+      if (!window.confirm('この通知先を完全に削除しますか？元に戻せません。')) return;
+      await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/pwa/subscriptions/${subscriptionId}?hard=1`, {
+        method: 'DELETE'
+      });
+      await reloadCloudPushSubscriptions(modal);
+      showFlash('通知先を削除しました', 'success');
+    }
+
     function bindShiftBookSettingsModalEvents(modal) {
       modal.querySelectorAll('[data-shift-settings-tab]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -7356,6 +7435,23 @@
       modal.querySelectorAll('[data-shift-settings-regenerate-one]').forEach((button) => {
         button.addEventListener('click', () => regenerateSingleUrlFromSettings(button.getAttribute('data-shift-settings-regenerate-one'), modal).catch((error) => showFlash(error.message, 'error')));
       });
+      modal.querySelectorAll('[data-cloud-device-save]').forEach((button) => {
+        button.addEventListener('click', () => {
+          button.disabled = true;
+          saveCloudPushSubscriptionLabel(modal, button.getAttribute('data-cloud-device-save'))
+            .catch((error) => { button.disabled = false; showFlash(error.message, 'error'); });
+        });
+      });
+      modal.querySelectorAll('[data-cloud-device-disable]').forEach((button) => {
+        button.addEventListener('click', () => {
+          button.disabled = true;
+          disableCloudPushSubscription(modal, button.getAttribute('data-cloud-device-disable'))
+            .catch((error) => { button.disabled = false; showFlash(error.message, 'error'); });
+        });
+      });
+      modal.querySelectorAll('[data-cloud-device-delete]').forEach((button) => {
+        button.addEventListener('click', () => deleteCloudPushSubscription(modal, button.getAttribute('data-cloud-device-delete')).catch((error) => showFlash(error.message, 'error')));
+      });
     }
 
     function applyShiftBookSettingsPayload(data) {
@@ -7389,6 +7485,17 @@
         }
       } else {
         state.shiftBookSettings.revisions = [];
+      }
+      // 現場シフトは複数人が閲覧するため、通知先（ViewPWA 購読端末）を管理できるようにする。
+      if (project.mode === 'scene') {
+        try {
+          const pushData = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/pwa/subscriptions`);
+          state.shiftBookSettings.pushSubscriptions = pushData.subscriptions || [];
+        } catch (_) {
+          state.shiftBookSettings.pushSubscriptions = [];
+        }
+      } else {
+        state.shiftBookSettings.pushSubscriptions = null;
       }
       return data;
     }
