@@ -2069,6 +2069,45 @@
     gap: 10px;
   }
 
+  .cloud-devices-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .cloud-device {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    background: #ffffff;
+  }
+
+  .cloud-device.is-disabled {
+    opacity: 0.6;
+    background: #f8fafc;
+  }
+
+  .cloud-device-main {
+    flex: 1 1 220px;
+    min-width: 180px;
+    display: grid;
+    gap: 4px;
+  }
+
+  .cloud-device-meta {
+    font-size: 0.78rem;
+    color: #64748b;
+  }
+
+  .cloud-device-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
   @media (max-width: 720px) {
     .cloud-modal-overlay-workspace {
       padding: 8px;

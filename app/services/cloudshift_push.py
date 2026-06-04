@@ -110,6 +110,68 @@ def save_subscription(
     return row
 
 
+def list_project_subscriptions(project_id: str) -> list[dict[str, Any]]:
+    """シフト帳に登録された通知先（ViewPWA 購読）の一覧を返す。"""
+    rows = (
+        CloudShiftPwaSubscription.query.filter_by(project_id=str(project_id or "").strip())
+        .order_by(
+            CloudShiftPwaSubscription.is_active.desc(),
+            CloudShiftPwaSubscription.updated_at.desc(),
+        )
+        .all()
+    )
+    return [_subscription_payload(row) for row in rows]
+
+
+def update_project_subscription_label(
+    project_id: str, subscription_id: int, label: str
+) -> dict[str, Any]:
+    row = _find_project_subscription(project_id, subscription_id)
+    if row is None:
+        raise ValueError("通知先が見つかりません。")
+    row.device_label = str(label or "").strip()[:120] or _device_label(row.user_agent)
+    db.session.commit()
+    return _subscription_payload(row)
+
+
+def deactivate_project_subscription(project_id: str, subscription_id: int) -> bool:
+    row = _find_project_subscription(project_id, subscription_id)
+    if row is None:
+        return False
+    row.is_active = False
+    db.session.commit()
+    return True
+
+
+def delete_project_subscription(project_id: str, subscription_id: int) -> bool:
+    row = _find_project_subscription(project_id, subscription_id)
+    if row is None:
+        return False
+    db.session.delete(row)
+    db.session.commit()
+    return True
+
+
+def _find_project_subscription(project_id: str, subscription_id: int):
+    return CloudShiftPwaSubscription.query.filter_by(
+        id=subscription_id,
+        project_id=str(project_id or "").strip(),
+    ).first()
+
+
+def _subscription_payload(row: CloudShiftPwaSubscription) -> dict[str, Any]:
+    endpoint = row.endpoint or ""
+    return {
+        "id": row.id,
+        "device_label": row.device_label or _device_label(row.user_agent),
+        "user_agent": row.user_agent or "",
+        "endpoint_tail": endpoint[-18:] if endpoint else "",
+        "is_active": bool(row.is_active),
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
 def unsubscribe(project_id: str, device_id: str) -> bool:
     row = CloudShiftPwaSubscription.query.filter_by(
         project_id=str(project_id or "").strip(),
@@ -122,16 +184,33 @@ def unsubscribe(project_id: str, device_id: str) -> bool:
     return True
 
 
-def send_push_to_project(project_id: str, *, title: str, body: str, url: str) -> dict[str, int]:
+def send_push_to_project(
+    project_id: str,
+    *,
+    title: str,
+    body: str,
+    url: str,
+    latest_only: bool = False,
+) -> dict[str, int]:
+    """ViewPWA 購読者へ通知を送る。
+
+    現場シフトは複数人が閲覧するため、有効な購読すべてに送る（既定）。
+    個人シフトは基本的に一人しか見ないため、``latest_only`` を指定すると
+    「最も直近に通知を有効化した端末」1 件だけに送る。
+    """
     if webpush is None:
         raise CloudShiftPushUnavailable("pywebpush がインストールされていません。")
     private_key_path = _vapid_private_key_path()
     if not private_key_path.exists():
         _load_or_create_vapid()
-    subscriptions = CloudShiftPwaSubscription.query.filter_by(
+    query = CloudShiftPwaSubscription.query.filter_by(
         project_id=str(project_id or "").strip(),
         is_active=True,
-    ).all()
+    )
+    if latest_only:
+        # 「有効化ボタンを押した最も直近のデバイス」のみを対象にする。
+        query = query.order_by(CloudShiftPwaSubscription.updated_at.desc()).limit(1)
+    subscriptions = query.all()
     sent = 0
     failed = 0
     payload = json.dumps(
@@ -172,13 +251,27 @@ def send_push_to_project(project_id: str, *, title: str, body: str, url: str) ->
     return {"sent": sent, "failed": failed}
 
 
-def send_push_to_project_async(app, project_id: str, *, title: str, body: str, url: str) -> None:
+def send_push_to_project_async(
+    app,
+    project_id: str,
+    *,
+    title: str,
+    body: str,
+    url: str,
+    latest_only: bool = False,
+) -> None:
     """保存リクエストの応答を遅らせないよう、別スレッドで送信する。"""
 
     def _worker() -> None:
         with app.app_context():
             try:
-                send_push_to_project(project_id, title=title, body=body, url=url)
+                send_push_to_project(
+                    project_id,
+                    title=title,
+                    body=body,
+                    url=url,
+                    latest_only=latest_only,
+                )
             except Exception as exc:  # noqa: BLE001
                 db.session.rollback()
                 logger.warning("CloudShift async push failed for project %s: %s", project_id, exc)
