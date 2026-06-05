@@ -104,6 +104,19 @@ SYNCED_FIELDS = {
 ATTACHMENT_CATEGORIES = {"health", "nasva"}
 ATTACHMENT_TITLE_MAX = 120
 
+# 一覧で並び替え可能な列。任意の属性名で order_by すると 500 になるため固定する。
+SORTABLE_FIELDS = {
+    "employee_number",
+    "employee_name",
+    "exam_date",
+    "reservation_date",
+    "target_year",
+    "manager_name",
+    "assignment_site",
+    "created_at",
+    "updated_at",
+}
+
 
 def _clean_attachment_title(raw) -> str:
     """添付タイトルを整形（空白除去・最大長制限）。空なら空文字。"""
@@ -399,9 +412,10 @@ def api_records():
 
     sort_by = request.args.get("sort_by", "employee_number")
     sort_order = request.args.get("sort_order", "asc")
-    if hasattr(HealthCheckRecord, sort_by):
-        col = getattr(HealthCheckRecord, sort_by)
-        query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
+    if sort_by not in SORTABLE_FIELDS:
+        sort_by = "employee_number"
+    col = getattr(HealthCheckRecord, sort_by)
+    query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
 
     records = query.options(selectinload(HealthCheckRecord.attachments)).all()
     # ステータス絞り込み（算出値のため取得後にフィルタ）

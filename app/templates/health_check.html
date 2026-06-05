@@ -15,8 +15,8 @@
         <div>
           <h1 class="dstt-hero-title">🩺 健診PLUS</h1>
           <p class="dstt-hero-subtitle">
-            健康診断の予約・受診・再検査・二次検査までを健診年度（4月開始）ごとに一元管理。
-            社員名簿PLUSと連携し、二次検査や深夜従事者の2回目受診はToBellで取りこぼしを防ぎます。
+            健康診断の予約・受診・再検査・二次検査を、健診年度（4月開始）ごとに管理します。
+            社員名簿PLUSと連携し、二次検査や深夜従事者の2回目受診はToBellでお知らせします。
           </p>
         </div>
         <div class="dstt-hero-actions">
@@ -188,25 +188,15 @@
     <!-- タブ -->
     <div class="flex flex-wrap gap-1 px-5 pt-3 border-b border-gray-100">
       <button type="button" class="hc-tab is-active" data-stab="integration" onclick="HC.switchSettingsTab('integration')">🔔 ToBell連携</button>
-      <button type="button" class="hc-tab hc-admin-only" data-stab="general" onclick="HC.switchSettingsTab('general')">⚙ ツール設定</button>
       <button type="button" class="hc-tab hc-admin-only" data-stab="permissions" onclick="HC.switchSettingsTab('permissions')">👥 アクセス権</button>
     </div>
     <div class="hc-modal-body">
       <!-- パネル: ToBell連携（個人） -->
       <div data-spanel="integration" class="space-y-4">
-        <p class="text-sm text-gray-600">あなたが担当者になっている対象者について、二次検査受診推奨日（当日朝＋事前）と深夜従事者の年2回目受診を、ToBellのタスク・通知でお知らせします。<strong>この設定はあなた個人にのみ適用されます。</strong></p>
+        <p class="text-sm text-gray-600">あなたが担当者の対象者について、健康診断の予約日・二次検査の受診推奨日・深夜従事者の2回目受診日を、当日の朝9時にToBellでお知らせします。<strong>この設定はあなた個人にだけ適用されます。</strong></p>
         <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer">
           <input type="checkbox" id="integration-toggle" class="rounded text-teal-600 focus:ring-teal-500 w-5 h-5">
           <span class="text-sm font-medium text-gray-700">ToBellへのリマインドを有効にする</span>
-        </label>
-      </div>
-      <!-- パネル: ツール設定（管理者） -->
-      <div data-spanel="general" class="space-y-4 hidden">
-        <label class="block text-sm font-medium text-gray-700">事前通知リードタイム（全体既定）
-          <div class="flex items-center gap-2 mt-1">
-            <input type="number" min="0" id="settings-lead" class="hc-input w-24">
-            <span class="text-sm text-gray-500">日前にも通知（各レコードで個別に上書き可）</span>
-          </div>
         </label>
       </div>
       <!-- パネル: アクセス権（管理者） -->
@@ -283,7 +273,6 @@ const HC = (function(){
   const root = document.getElementById('hc-app');
   const IS_ADMIN = root.dataset.isAdmin === 'true';
   const CURRENT_YEAR = parseInt(root.dataset.currentYear, 10);
-  const GLOBAL_LEAD = parseInt(root.dataset.globalLead, 10);
   const EMPLOYEE_TYPE_OPTIONS = JSON.parse('{{ employee_type_options|tojson }}');
   let offices = [];
   let siteResults = [];
@@ -320,7 +309,7 @@ const HC = (function(){
     requestAnimationFrame(()=>el.classList.add('opacity-100'));
     setTimeout(()=>{ el.classList.remove('opacity-100'); setTimeout(()=>el.remove(), 300); }, 3200);
   }
-  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function fmtDate(s){ return s ? s : '—'; }
 
   // ---- 状態 ----
@@ -570,15 +559,12 @@ const HC = (function(){
       </div>`;
     const reminder = `
       <div>
-        <div class="hc-section-title">担当者・リマインド</div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="hc-section-title">担当者</div>
+        <div class="space-y-3">
           <div><label class="hc-field-label">ToBell担当者（通知の宛先）</label>
             <select id="rec-manager" class="hc-input"></select>
-            <p class="text-xs text-gray-400 mt-1">管理担当名から自動紐付け。手動でも選べます。</p></div>
-          <div><label class="hc-field-label">事前通知（このレコードの上書き）</label>
-            <input type="number" min="0" data-field="reminder_lead_days" value="${d.reminder_lead_days==null?'':d.reminder_lead_days}" placeholder="既定 ${GLOBAL_LEAD} 日前" class="hc-input">
-            <p class="text-xs text-gray-400 mt-1">当日朝9時に加え、指定日数前にも通知します。</p></div>
-          <div class="col-span-2">${fieldText('備考','remarks', d.remarks)}</div>
+            <p class="text-xs text-gray-400 mt-1">管理担当名から自動で紐付きます。手動でも選べます。通知は対象日の朝9時に届きます。</p></div>
+          ${fieldText('備考','remarks', d.remarks)}
         </div>
       </div>`;
     // NASVA（年度4/1基準で64歳超の運転者向け適齢診断）
@@ -814,8 +800,12 @@ const HC = (function(){
     try {
       if(editingId){
         await api('/tools/health_check/api/record/'+editingId, {method:'PUT', body:JSON.stringify(payload)});
-        // 担当者は専用APIで（手動上書きを明示）
-        await api('/tools/health_check/api/record/'+editingId+'/manager', {method:'PUT', body:JSON.stringify({manager_user: payload.manager_user||''})});
+        // 担当者は専用APIで更新する。セレクトの読み込みが終わる前に保存された場合は、
+        // 既存の担当者を未割当で上書きしないよう、選択肢があるときだけ送る。
+        const mgrSel = document.getElementById('rec-manager');
+        if(mgrSel && mgrSel.options.length){
+          await api('/tools/health_check/api/record/'+editingId+'/manager', {method:'PUT', body:JSON.stringify({manager_user: mgrSel.value||''})});
+        }
         toast('保存しました');
       } else {
         payload.record_type = document.getElementById('new-type').value;
@@ -1013,7 +1003,6 @@ const HC = (function(){
     // ToBell連携（個人）は全ユーザー対象
     try { const r = await api('/tools/health_check/api/integration'); document.getElementById('integration-toggle').checked = !!r.enabled; } catch(e){}
     if(IS_ADMIN){
-      try { const r = await api('/tools/health_check/api/settings'); document.getElementById('settings-lead').value = r.settings.global_lead_days; } catch(e){}
       togglePermOffice();
       loadPermissions();
     }
@@ -1032,10 +1021,6 @@ const HC = (function(){
     if(activeSettingsTab==='integration'){
       const enabled = document.getElementById('integration-toggle').checked;
       try { await api('/tools/health_check/api/integration', {method:'POST', body:JSON.stringify({enabled})}); toast('連携設定を保存しました'); closeSettingsModal(); }
-      catch(e){ toast(e.message,'error'); }
-    } else if(activeSettingsTab==='general'){
-      const v = parseInt(document.getElementById('settings-lead').value,10);
-      try { await api('/tools/health_check/api/settings', {method:'POST', body:JSON.stringify({global_lead_days:v})}); toast('設定を保存しました'); closeSettingsModal(); }
       catch(e){ toast(e.message,'error'); }
     }
   }
