@@ -288,6 +288,34 @@ def test_person_shift_can_be_created_without_employee_and_linked_later(tmp_path)
     assert cleared_project["employee_number"] == ""
 
 
+def test_create_returns_200_even_when_post_save_sync_fails(tmp_path, monkeypatch):
+    # 保存後の付随処理（自動同期・現場バックフィル等）が失敗しても、シフト帳本体は
+    # 既に作成済みである。作成APIは 200 と利用可能なプロジェクトペイロードを返し、
+    # フロントの requestJson が例外にならないことで、編集画面への自動遷移と
+    # 右下の成功通知（青）が確実に出るようにする必要がある。
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("environment-specific sync failure")
+
+    monkeypatch.setattr(module, "_refresh_shift_sync_for_target_month", _boom)
+
+    response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Resilient", "mode": "person", "year": "2026", "month": "4"},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()["project"]
+    assert payload["project"]["title"] == "Resilient"
+    assert payload["active_month_key"] == "2026-04"
+    assert payload["month"] is not None
+
+    # 付随処理が失敗しても保存自体は成立しており、一覧から取得できる。
+    listing = client.get("/tools/shiftersync/cloudshift/api/list").get_json()
+    assert any(p["title"] == "Resilient" for p in listing["projects"])
+
+
 def test_owner_draft_is_hidden_from_public_until_published(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()
