@@ -3366,11 +3366,6 @@ def _ensure_scene_project(project: dict[str, Any]) -> None:
         raise CloudShiftError("アシスト機能は scene モード専用です", 400)
 
 
-def _ensure_person_project(project: dict[str, Any]) -> None:
-    if project.get("mode") != "person":
-        raise CloudShiftError("このアシスト機能は person モード専用です", 400)
-
-
 def _ensure_assist(project: dict[str, Any]) -> dict[str, Any]:
     assist = project.get("assist")
     if not isinstance(assist, dict):
@@ -3395,34 +3390,8 @@ def _person_assist_kind_key(kind: str) -> str:
     raise CloudShiftError("person assist 種別が不正です", 400)
 
 
-def _person_assist_kind_label(kind: str) -> str:
-    if kind == "experienced":
-        return "経験済現場"
-    if kind == "training":
-        return "研修要現場"
-    raise CloudShiftError("person assist 種別が不正です", 400)
-
-
 def _person_assist_op_label(value: Any) -> str:
     return "OPあり" if _assist_bool(value, False) else "OPなし"
-
-
-def _person_assist_site_payload(site: dict[str, Any]) -> dict[str, Any]:
-    weekday = int(site.get("weekday", 0) or 0)
-    return {
-        "id": str(site.get("id") or ""),
-        "date": str(site.get("date") or ""),
-        "weekday": weekday,
-        "weekday_label": _assist_weekday_label(weekday),
-        "site_name": str(site.get("site_name") or ""),
-        "has_op": bool(site.get("has_op", False)),
-        "op_label": _person_assist_op_label(site.get("has_op")),
-        "notes": str(site.get("notes") or ""),
-        "created_at": site.get("created_at"),
-        "updated_at": site.get("updated_at"),
-        "created_by": site.get("created_by"),
-        "updated_by": site.get("updated_by"),
-    }
 
 
 def _normalized_site_title(value: Any) -> str:
@@ -4330,6 +4299,52 @@ def _refresh_shift_sync_for_target_month(target_project: dict[str, Any], month_k
         _resync_shift_month(source_project, month_key, actor_name=actor_name)
 
 
+def _refresh_shift_sync_into_target_month(
+    target_project: dict[str, Any], month_key: str, *, actor_name: str
+) -> None:
+    """対象シフト帳『だけ』へ、他モードの既存シフトを取り込む（スコープ限定の取り込み）。
+
+    新規作成・月追加で使う取り込み処理。従来の
+    ``_refresh_shift_sync_for_target_month`` は各ソースを
+    ``_resync_shift_month`` で「全ターゲット」へ再同期するため、シフト帳が増えると
+    (ソース×ターゲット) 件のロック取得・プロジェクト読み込みが走り、作成リクエストが
+    リバースプロキシの読み取りタイムアウトに達して、本体は保存済みなのにクライアントへ
+    非JSONのエラーが返り「リクエストに失敗しました」となって編集画面へ遷移できなかった。
+
+    新規作成時に必要なのは「いま作った対象シフト帳へ既存データを取り込む」ことだけで、
+    他プロジェクト同士の再同期は不要（それぞれの保存時に維持されている）。本関数は対象
+    シフト帳のみを更新し、他プロジェクトには一切書き込まないため、件数に対して線形で済む。
+    """
+    if not month_key or month_key not in (target_project.get("months") or {}):
+        return
+    target_mode = str(target_project.get("mode") or "")
+    if target_mode == "master":
+        _refresh_master_shift_from_sources(target_project, month_key, actor_name=actor_name)
+        return
+    target_id = str(target_project.get("id") or "")
+    if not target_id:
+        return
+    for source_project in _iter_project_summaries():
+        if str(source_project.get("mode") or "") == target_mode:
+            continue
+        if str(source_project.get("id") or "") == target_id:
+            continue
+        source_month = (source_project.get("months") or {}).get(month_key)
+        if not source_month:
+            continue
+        desired_by_target = _desired_shift_sync_entries_by_target(source_project, month_key, source_month)
+        desired_for_target = desired_by_target.get(target_id)
+        if not desired_for_target:
+            continue
+        _replace_shift_synced_entries_in_target_project(
+            target_project,
+            source_project,
+            month_key,
+            desired_for_target,
+            actor_name=actor_name,
+        )
+
+
 def _resync_shift_project(source_project: dict[str, Any], *, actor_name: str) -> None:
     for month_key in _sort_month_keys(list((source_project.get("months") or {}).keys())):
         _resync_shift_month(source_project, month_key, actor_name=actor_name)
@@ -4371,256 +4386,9 @@ def _person_experience_available_from(date_text: str) -> str:
     return (parsed + timedelta(days=1)).isoformat()
 
 
-def _person_assist_site_history_label(site: dict[str, Any]) -> str:
-    return (
-        f"{site.get('date')}({_assist_weekday_label(int(site.get('weekday', 0) or 0))}) / "
-        f"{site.get('site_name')} / "
-        f"{_person_assist_op_label(site.get('has_op'))}"
-    )
-
-
-def _person_assist_site_from_payload(
-    payload: dict[str, Any],
-    *,
-    existing: dict[str, Any] | None = None,
-    actor_name: str,
-) -> dict[str, Any]:
-    date_text, parsed_date = _assist_date_parts(payload.get("date"))
-    site_name = _assist_short_text(payload.get("site_name"), "現場名", required=True, limit=120)
-    notes = _assist_long_text(payload.get("notes"))
-    has_op = _assist_bool(payload.get("has_op"), False)
-    timestamp = _utcnow_iso()
-    if existing:
-        created_at = existing.get("created_at", timestamp)
-        created_by = existing.get("created_by", actor_name)
-        site_id = str(existing.get("id") or _assist_id("psite"))
-    else:
-        created_at = timestamp
-        created_by = actor_name
-        site_id = _assist_id("psite")
-    return {
-        "id": site_id,
-        "date": date_text,
-        "weekday": parsed_date.weekday(),
-        "site_name": site_name,
-        "has_op": has_op,
-        "notes": notes,
-        "created_at": created_at,
-        "updated_at": timestamp,
-        "created_by": created_by,
-        "updated_by": actor_name,
-    }
-
-
 def _ensure_person_project(project: dict[str, Any]) -> None:
     if project.get("mode") != "person":
         raise CloudShiftError("このアシスト機能は person モード専用です", 400)
-
-
-def _person_assist_collection_key(kind: str) -> str:
-    key = PERSON_ASSIST_COLLECTION_KEYS.get(str(kind or "").strip().lower())
-    if not key:
-        raise CloudShiftError("person assist 種別が不正です", 400)
-    return key
-
-
-def _person_assist_kind_label(kind: str) -> str:
-    normalized = str(kind or "").strip().lower()
-    return PERSON_ASSIST_KIND_LABELS.get(normalized, normalized or "person assist")
-
-
-def _ensure_person_assist(project: dict[str, Any]) -> dict[str, Any]:
-    assist = project.get("assist")
-    if not isinstance(assist, dict):
-        assist = {}
-    payload = {
-        "version": int(assist.get("version", 1) or 1),
-        "experienced_sites": [
-            item for item in (assist.get("experienced_sites") or []) if isinstance(item, dict)
-        ],
-        "training_sites": [
-            item for item in (assist.get("training_sites") or []) if isinstance(item, dict)
-        ],
-    }
-    project["assist"] = payload
-    return payload
-
-
-def _person_assist_site_payload(item: dict[str, Any], *, kind: str) -> dict[str, Any]:
-    return {
-        "id": str(item.get("id") or ""),
-        "kind": str(kind or ""),
-        "kind_label": _person_assist_kind_label(kind),
-        "date": str(item.get("date") or ""),
-        "effective_from": str(item.get("effective_from") or ""),
-        "site_name": str(item.get("site_name") or ""),
-        "shift_key": str(item.get("shift_key") or ""),
-        "shift_label": _assist_shift_label(item.get("shift_key")),
-        "notes": str(item.get("notes") or ""),
-        "created_at": item.get("created_at"),
-        "updated_at": item.get("updated_at"),
-        "created_by": item.get("created_by"),
-        "updated_by": item.get("updated_by"),
-    }
-
-
-def _person_assist_bootstrap_payload(project: dict[str, Any]) -> dict[str, Any]:
-    assist = _ensure_person_assist(project)
-    experienced = [
-        _person_assist_site_payload(item, kind=PERSON_ASSIST_EXPERIENCE_KIND)
-        for item in assist["experienced_sites"]
-    ]
-    trainings = [
-        _person_assist_site_payload(item, kind=PERSON_ASSIST_TRAINING_KIND)
-        for item in assist["training_sites"]
-    ]
-    experienced.sort(key=lambda item: (item["date"], item["site_name"], item["shift_key"]), reverse=True)
-    trainings.sort(key=lambda item: (item["date"], item["site_name"], item["shift_key"]), reverse=True)
-    return {
-        "success": True,
-        "assist_mode": "person",
-        "assist": {
-            "version": assist["version"],
-            "experienced_sites": experienced,
-            "training_sites": trainings,
-        },
-        "permissions": {
-            "can_edit_experienced": True,
-            "can_edit_training": True,
-        },
-    }
-
-
-def _person_assist_site_from_payload(
-    payload: dict[str, Any],
-    *,
-    kind: str,
-    existing: dict[str, Any] | None = None,
-    actor_name: str,
-) -> dict[str, Any]:
-    date_text, parsed_date = _assist_date_parts(payload.get("date"))
-    site_name = _assist_short_text(payload.get("site_name"), "現場名", required=True, limit=120)
-    shift_key = _assist_shift_key(payload.get("shift_key"), required=False)
-    notes = _assist_long_text(payload.get("notes"))
-    timestamp = _utcnow_iso()
-    if existing:
-        created_at = existing.get("created_at", timestamp)
-        created_by = existing.get("created_by", actor_name)
-        site_id = str(existing.get("id") or _assist_id("psite"))
-    else:
-        created_at = timestamp
-        created_by = actor_name
-        site_id = _assist_id("psite")
-    return {
-        "id": site_id,
-        "kind": kind,
-        "date": date_text,
-        "effective_from": (parsed_date + timedelta(days=1)).isoformat(),
-        "site_name": site_name,
-        "shift_key": shift_key,
-        "notes": notes,
-        "created_at": created_at,
-        "updated_at": timestamp,
-        "created_by": created_by,
-        "updated_by": actor_name,
-    }
-
-
-def _person_assist_site_history_label(item: dict[str, Any]) -> str:
-    return (
-        f"{item.get('date')} / {item.get('site_name')} / "
-        f"{_assist_shift_label(item.get('shift_key'))}"
-    )
-
-
-def _person_assist_site_mutation(
-    project: dict[str, Any],
-    payload: dict[str, Any],
-    *,
-    kind: str,
-    actor_name: str,
-    actor_type: str,
-    site_id: str | None = None,
-) -> dict[str, Any]:
-    _ensure_person_project(project)
-    assist = _ensure_person_assist(project)
-    collection_key = _person_assist_collection_key(kind)
-    existing = None
-    if site_id:
-        existing = next(
-            (
-                item
-                for item in assist[collection_key]
-                if str(item.get("id") or "") == str(site_id or "")
-            ),
-            None,
-        )
-        if not existing:
-            raise CloudShiftError("対象の person assist が見つかりません", 404)
-    item = _person_assist_site_from_payload(
-        payload,
-        kind=kind,
-        existing=existing,
-        actor_name=actor_name,
-    )
-    if existing:
-        index = assist[collection_key].index(existing)
-        assist[collection_key][index] = item
-        changes = [f"{_person_assist_kind_label(kind)}を更新: {_person_assist_site_history_label(item)}"]
-    else:
-        assist[collection_key].append(item)
-        changes = [f"{_person_assist_kind_label(kind)}を登録: {_person_assist_site_history_label(item)}"]
-    _save_project(project)
-    _append_history(
-        project["id"],
-        {
-            "timestamp": _utcnow_iso(),
-            "editor_name": actor_name,
-            "editor_type": actor_type,
-            "action": "person_assist_site_saved",
-            "month_key": None,
-            "changes": changes,
-        },
-    )
-    return item
-
-
-def _person_assist_site_delete(
-    project: dict[str, Any],
-    site_id: str,
-    *,
-    kind: str,
-    actor_name: str,
-    actor_type: str,
-) -> None:
-    _ensure_person_project(project)
-    assist = _ensure_person_assist(project)
-    collection_key = _person_assist_collection_key(kind)
-    existing = next(
-        (
-            item
-            for item in assist[collection_key]
-            if str(item.get("id") or "") == str(site_id or "")
-        ),
-        None,
-    )
-    if not existing:
-        raise CloudShiftError("対象の person assist が見つかりません", 404)
-    assist[collection_key] = [
-        item for item in assist[collection_key] if str(item.get("id") or "") != str(site_id or "")
-    ]
-    _save_project(project)
-    _append_history(
-        project["id"],
-        {
-            "timestamp": _utcnow_iso(),
-            "editor_name": actor_name,
-            "editor_type": actor_type,
-            "action": "person_assist_site_deleted",
-            "month_key": None,
-            "changes": [f"{_person_assist_kind_label(kind)}を削除: {_person_assist_site_history_label(existing)}"],
-        },
-    )
 
 
 def _person_experience_source_item(project: dict[str, Any], experience_id: str) -> dict[str, Any] | None:
@@ -5372,177 +5140,6 @@ def _assist_rule_delete(project: dict[str, Any], rule_id: str, *, actor_name: st
     )
 
 
-def _person_assist_site_mutation(
-    project: dict[str, Any],
-    payload: dict[str, Any],
-    *,
-    kind: str,
-    actor_name: str,
-    actor_type: str,
-    site_id: str | None = None,
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    _ensure_person_project(project)
-    assist = _ensure_assist(project)
-    key = _person_assist_kind_key(kind)
-    existing = None
-    previous = None
-    if site_id:
-        existing = next((item for item in assist[key] if str(item.get("id") or "") == site_id), None)
-        if not existing:
-            raise CloudShiftError(f"対象の{_person_assist_kind_label(kind)}が見つかりません", 404)
-        previous = copy(existing)
-    site = _person_assist_site_from_payload(payload, existing=existing, actor_name=actor_name)
-    if existing:
-        index = assist[key].index(existing)
-        assist[key][index] = site
-        changes = [f"{_person_assist_kind_label(kind)}を更新: {_person_assist_site_history_label(site)}"]
-    else:
-        assist[key].append(site)
-        changes = [f"{_person_assist_kind_label(kind)}を登録: {_person_assist_site_history_label(site)}"]
-    _save_project(project)
-    _append_history(
-        project["id"],
-        {
-            "timestamp": _utcnow_iso(),
-            "editor_name": actor_name,
-            "editor_type": actor_type,
-            "action": f"person_assist_{kind}_saved",
-            "month_key": None,
-            "changes": changes,
-        },
-    )
-    return site, previous
-
-
-def _person_assist_site_delete(
-    project: dict[str, Any],
-    site_id: str,
-    *,
-    kind: str,
-    actor_name: str,
-    actor_type: str,
-) -> dict[str, Any]:
-    _ensure_person_project(project)
-    assist = _ensure_assist(project)
-    key = _person_assist_kind_key(kind)
-    existing = next((item for item in assist[key] if str(item.get("id") or "") == site_id), None)
-    if not existing:
-        raise CloudShiftError(f"対象の{_person_assist_kind_label(kind)}が見つかりません", 404)
-    assist[key] = [item for item in assist[key] if str(item.get("id") or "") != site_id]
-    _save_project(project)
-    _append_history(
-        project["id"],
-        {
-            "timestamp": _utcnow_iso(),
-            "editor_name": actor_name,
-            "editor_type": actor_type,
-            "action": f"person_assist_{kind}_deleted",
-            "month_key": None,
-            "changes": [f"{_person_assist_kind_label(kind)}を削除: {_person_assist_site_history_label(existing)}"],
-        },
-    )
-    return existing
-
-
-def _find_auto_scene_assist_record(
-    assist: dict[str, Any], *, source_project_id: str, source_site_id: str
-) -> dict[str, Any] | None:
-    return next(
-        (
-            item
-            for item in (assist.get("records") or [])
-            if str(item.get("source_type") or "") == "person_experience"
-            and str(item.get("source_project_id") or "") == source_project_id
-            and str(item.get("source_site_id") or "") == source_site_id
-        ),
-        None,
-    )
-
-
-def _person_experience_scene_notes(
-    source_project: dict[str, Any],
-    site: dict[str, Any],
-    *,
-    actor_name: str,
-    target_project: dict[str, Any],
-) -> str:
-    parts: list[str] = [_person_assist_op_label(site.get("has_op"))]
-    notes = str(site.get("notes") or "").strip()
-    if notes:
-        parts.append(notes)
-    if str(target_project.get("owner_user_id") or "") != str(source_project.get("owner_user_id") or ""):
-        parts.append(f"{actor_name} からの自動実績登録")
-    return "\n".join(part for part in parts if part)
-
-
-def _upsert_person_experience_scene_record(
-    target_project: dict[str, Any],
-    source_project: dict[str, Any],
-    site: dict[str, Any],
-    *,
-    actor_name: str,
-) -> str | None:
-    assist = _ensure_assist(target_project)
-    existing = _find_auto_scene_assist_record(
-        assist,
-        source_project_id=str(source_project.get("id") or ""),
-        source_site_id=str(site.get("id") or ""),
-    )
-    record = _assist_record_from_payload(
-        assist,
-        {
-            "date": _person_experience_available_from(str(site.get("date") or "")),
-            "candidate_name": source_project.get("title"),
-            "employee_number": source_project.get("employee_number"),
-            "shift_key": "",
-            "role_type": "backup",
-            "notes": _person_experience_scene_notes(
-                source_project,
-                site,
-                actor_name=actor_name,
-                target_project=target_project,
-            ),
-        },
-        existing=existing,
-        actor_name=actor_name,
-    )
-    record["source_type"] = "person_experience"
-    record["source_project_id"] = str(source_project.get("id") or "")
-    record["source_site_id"] = str(site.get("id") or "")
-    record["source_site_name"] = str(site.get("site_name") or "")
-    record["source_date"] = str(site.get("date") or "")
-    record["source_has_op"] = bool(site.get("has_op", False))
-    record["source_available_from"] = _person_experience_available_from(str(site.get("date") or ""))
-    if existing:
-        index = assist["records"].index(existing)
-        assist["records"][index] = record
-        return f"person経験済現場から自動実績を更新: {_assist_record_history_label(record)}"
-    assist["records"].append(record)
-    return f"person経験済現場から自動実績を登録: {_assist_record_history_label(record)}"
-
-
-def _remove_person_experience_scene_record(
-    target_project: dict[str, Any],
-    *,
-    source_project_id: str,
-    source_site_id: str,
-) -> str | None:
-    assist = _ensure_assist(target_project)
-    existing = _find_auto_scene_assist_record(
-        assist,
-        source_project_id=source_project_id,
-        source_site_id=source_site_id,
-    )
-    if not existing:
-        return None
-    assist["records"] = [
-        item
-        for item in assist["records"]
-        if str(item.get("id") or "") != str(existing.get("id") or "")
-    ]
-    return f"person経験済現場の自動実績を削除: {_assist_record_history_label(existing)}"
-
-
 def _person_experience_matches_scene_project(site: dict[str, Any], scene_project: dict[str, Any]) -> bool:
     site_row_id = _coerce_site_row_id(site.get("site_row_id"))
     scene_site_row_id = _coerce_site_row_id(scene_project.get("site_row_id"))
@@ -5563,131 +5160,6 @@ def _person_experience_matches_scene_project(site: dict[str, Any], scene_project
         return _normalized_site_title(scene_site_name) == normalized_site
 
     return _normalized_site_title(scene_project.get("title")) == normalized_site
-
-
-def _sync_person_experience_to_scene_projects(
-    source_project: dict[str, Any],
-    site: dict[str, Any],
-    *,
-    actor_name: str,
-) -> None:
-    normalized_site = _normalized_site_title(site.get("site_name"))
-    for target_summary in _iter_stored_projects():
-        if not target_summary or target_summary.get("mode") != "scene":
-            continue
-        target_project_id = str(target_summary.get("id") or "")
-        with _project_lock(target_project_id):
-            target_project = _load_project(target_project_id)
-            if target_project.get("mode") != "scene":
-                continue
-            if _normalized_site_title(target_project.get("title")) == normalized_site:
-                change = _upsert_person_experience_scene_record(
-                    target_project,
-                    source_project,
-                    site,
-                    actor_name=actor_name,
-                )
-            else:
-                change = _remove_person_experience_scene_record(
-                    target_project,
-                    source_project_id=str(source_project.get("id") or ""),
-                    source_site_id=str(site.get("id") or ""),
-                )
-            if not change:
-                continue
-            _save_project(target_project)
-            _append_history(
-                target_project["id"],
-                {
-                    "timestamp": _utcnow_iso(),
-                    "editor_name": actor_name,
-                    "editor_type": "auto",
-                    "action": "person_experience_sync",
-                    "month_key": None,
-                    "changes": [change],
-                },
-            )
-
-
-def _delete_person_experience_from_scene_projects(
-    source_project_id: str,
-    source_site_id: str,
-    *,
-    actor_name: str,
-) -> None:
-    for target_summary in _iter_stored_projects():
-        if not target_summary or target_summary.get("mode") != "scene":
-            continue
-        target_project_id = str(target_summary.get("id") or "")
-        with _project_lock(target_project_id):
-            target_project = _load_project(target_project_id)
-            if target_project.get("mode") != "scene":
-                continue
-            change = _remove_person_experience_scene_record(
-                target_project,
-                source_project_id=source_project_id,
-                source_site_id=source_site_id,
-            )
-            if not change:
-                continue
-            _save_project(target_project)
-            _append_history(
-                target_project["id"],
-                {
-                    "timestamp": _utcnow_iso(),
-                    "editor_name": actor_name,
-                    "editor_type": "auto",
-                    "action": "person_experience_sync_deleted",
-                    "month_key": None,
-                    "changes": [change],
-                },
-            )
-
-
-def _resync_person_experience_project(source_project: dict[str, Any], *, actor_name: str) -> None:
-    _ensure_person_project(source_project)
-    assist = _ensure_assist(source_project)
-    for site in assist.get("experienced_sites") or []:
-        _sync_person_experience_to_scene_projects(source_project, site, actor_name=actor_name)
-
-
-def _backfill_scene_project_from_person_experience(
-    scene_project: dict[str, Any], *, actor_name: str
-) -> None:
-    _ensure_scene_project(scene_project)
-    normalized_title = _normalized_site_title(scene_project.get("title"))
-    if not normalized_title:
-        return
-    changes: list[str] = []
-    for source_project in _iter_stored_projects():
-        if not source_project or source_project.get("mode") != "person":
-            continue
-        source_assist = _ensure_assist(source_project)
-        for site in source_assist.get("experienced_sites") or []:
-            if _normalized_site_title(site.get("site_name")) != normalized_title:
-                continue
-            change = _upsert_person_experience_scene_record(
-                scene_project,
-                source_project,
-                site,
-                actor_name=actor_name,
-            )
-            if change:
-                changes.append(change)
-    if not changes:
-        return
-    _save_project(scene_project)
-    _append_history(
-        scene_project["id"],
-        {
-            "timestamp": _utcnow_iso(),
-            "editor_name": actor_name,
-            "editor_type": "auto",
-            "action": "person_experience_backfill",
-            "month_key": None,
-            "changes": changes[:100],
-        },
-    )
 
 
 def _person_assist_collection_key(kind: str) -> str:
@@ -7429,7 +6901,11 @@ def api_create():
             _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
         if project["mode"] != "master":
             _resync_shift_month(project, month_key, actor_name=_user_label())
-        _refresh_shift_sync_for_target_month(project, month_key, actor_name=_user_label())
+        # 新規作成は「いま作った帳面へ既存データを取り込む」だけで十分。全プロジェクトを
+        # 相互再同期する _refresh_shift_sync_for_target_month は (プロジェクト数)^2 の
+        # ロック/読み込みになり、件数が増えると作成リクエストがタイムアウトしていたため、
+        # 対象シフト帳のみを更新するスコープ限定版を使う。
+        _refresh_shift_sync_into_target_month(project, month_key, actor_name=_user_label())
     except Exception:
         current_app.logger.exception(
             "CloudShift post-create steps failed after creating project %s", project_id
@@ -7906,7 +7382,9 @@ def api_create_month(project_id: str):
         month_payload = _create_month_in_project(project, payload, _user_label(), access_role)
     month_key = _month_key(month_payload["year"], month_payload["month"])
     _resync_shift_month(project, month_key, actor_name=_user_label())
-    _refresh_shift_sync_for_target_month(project, month_key, actor_name=_user_label())
+    # 月追加も「この帳面の新しい月へ既存データを取り込む」だけで足りるため、全プロジェクト
+    # 相互再同期（プロジェクト数の二乗）ではなくスコープ限定版で対象だけを更新する。
+    _refresh_shift_sync_into_target_month(project, month_key, actor_name=_user_label())
     project = _load_project(project_id)
     return jsonify({"success": True, "project": _project_detail_payload(project, month_key, include_draft=True)})
 
