@@ -586,3 +586,37 @@ def test_name_normalization_matches_across_width_and_space(tmp_path):
         # 全角スペース・余分な空白を含む名前でも一意解決できる
         assert module.resolve_manager_user("山田　太郎") == "u1"
         assert module.resolve_manager_user(" 山田太郎 ") == "u1"
+
+
+def test_bulk_create_excludes_retired_employees(tmp_path):
+    """退職者（retirement_date あり）は一括起票の既定対象から外す。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    with app.app_context():
+        db.session.add(Employee(
+            employee_number="E777", office_code="100", office_name="本社営業所",
+            employee_name="退職済子", employee_type="正社員", company_name="大新東",
+            manager_name="管理花子", retirement_date="2025-03-31",
+        ))
+        db.session.commit()
+    client = app.test_client()
+
+    res = client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100"]})
+    assert res.get_json()["created"] == 2  # 在籍2名のみ。退職者は除外される
+    listing = client.get("/tools/health_check/api/records?year=2026").get_json()
+    names = {r["employee_name"] for r in listing["records"]}
+    assert "退職済子" not in names
+
+
+def test_employees_candidate_includes_birth_date(tmp_path):
+    """名簿候補APIは生年月日を返す（新規登録時のNASVA判定に使う）。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    with app.app_context():
+        emp = Employee.query.filter_by(employee_number="E001").first()
+        emp.birth_date = date(1958, 5, 1)
+        db.session.commit()
+    client = app.test_client()
+    data = client.get("/tools/health_check/api/employees?search=E001").get_json()
+    target = [e for e in data["employees"] if e["employee_number"] == "E001"]
+    assert target and target[0]["birth_date"] == "1958-05-01"

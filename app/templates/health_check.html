@@ -279,6 +279,7 @@ const HC = (function(){
   let usersCache = null;
   let editingId = null;
   let editingType = 'linked';
+  let editingYear = null;
   let selectedEmployee = null;
 
   const STATUS_STYLE = {
@@ -412,12 +413,13 @@ const HC = (function(){
       const badges = [];
       if(r.is_night_worker){ const ok=!!r.exam_date_2; badges.push(`<span class="hc-pill" style="color:${ok?'#0f766e':'#7c3aed'};background:${ok?'#ccfbf1':'#ede9fe'}">深夜${ok?'2回目済':'2回目'}</span>`); }
       if(r.needs_recheck && r.status!=='二次完了'){ badges.push(`<span class="hc-pill" style="color:#b45309;background:#fef3c7">要二次</span>`); }
+      const retired = !!r.retirement_date;
       const mgr = r.manager_user
         ? `<span class="text-gray-700">${esc(r.manager_name||r.manager_user)}</span>`
         : `<span class="hc-pill" style="color:#dc2626;background:#fee2e2">未割当</span>`;
-      return `<tr class="hover:bg-gray-50">
+      return `<tr class="hover:bg-gray-50${retired?' bg-rose-50/40':''}">
         <td class="px-4 py-2.5 font-mono text-xs text-gray-500">${esc(r.employee_number)||'—'}</td>
-        <td class="px-4 py-2.5 font-medium text-gray-800">${esc(r.employee_name)}</td>
+        <td class="px-4 py-2.5 font-medium text-gray-800">${esc(r.employee_name)}${retired?' <span class="hc-pill" style="color:#b91c1c;background:#fee2e2">退職者</span>':''}</td>
         <td class="px-4 py-2.5 text-gray-600"><div>${esc(r.assignment_site)||'—'}</div><div class="text-xs text-gray-400">${TYPE_LABEL[r.record_type]||r.record_type}</div></td>
         <td class="px-4 py-2.5 text-gray-600">${fmtDate(r.exam_date)}</td>
         <td class="px-4 py-2.5"><span class="hc-pill" style="color:${fg};background:${bg}">${r.status}</span></td>
@@ -439,10 +441,12 @@ const HC = (function(){
       let r;
       try { r = await api('/tools/health_check/api/record/'+id); } catch(e){ toast(e.message,'error'); return; }
       editingType = r.record_type;
+      editingYear = r.target_year;
       renderRecordForm(r);
       document.getElementById('record-modal-title').textContent = '健診レコード編集 — ' + r.employee_name;
     } else {
       editingType = 'linked';
+      editingYear = null;
       selectedEmployee = null;
       renderRecordForm(null);
       document.getElementById('record-modal-title').textContent = '健診レコード 新規登録';
@@ -567,13 +571,13 @@ const HC = (function(){
           ${fieldText('備考','remarks', d.remarks)}
         </div>
       </div>`;
-    // NASVA（年度4/1基準で64歳超の運転者向け適齢診断）
-    let nasva = '';
-    if(d.is_nasva_target){
-      const age = d.age_at_fiscal_start;
-      nasva = `
-      <div class="p-3 rounded-lg bg-amber-50/60 border border-amber-200">
-        <div class="hc-section-title" style="color:#b45309">🚍 NASVA（適齢診断・年度4/1時点で ${age!=null?esc(age)+'歳':'64歳超'}）</div>
+    // NASVA（年度4/1基準で64歳超の運転者向け適齢診断）。
+    // 生年月日・対象年度から判定し、新規登録でも生年月日入力で表示する。
+    const nasvaActive = !!d.is_nasva_target;
+    const nasvaAge = d.age_at_fiscal_start;
+    const nasva = `
+      <div id="nasva-block" class="p-3 rounded-lg bg-amber-50/60 border border-amber-200 ${nasvaActive?'':'hidden'}">
+        <div class="hc-section-title" style="color:#b45309">🚍 NASVA（適齢診断・年度4/1時点で <span id="nasva-age">${nasvaAge!=null?esc(nasvaAge)+'歳':'64歳超'}</span>）</div>
         <div class="grid grid-cols-2 gap-3">
           ${fieldDate('NASVA予約日','nasva_reservation_date', d.nasva_reservation_date)}
           ${fieldDate('NASVA受診日','nasva_exam_date', d.nasva_exam_date)}
@@ -588,7 +592,6 @@ const HC = (function(){
           </label>
         </div>`}
       </div>`;
-    }
     let attachments = '';
     let history = '';
     if(!isNew){
@@ -620,7 +623,7 @@ const HC = (function(){
     }
     document.getElementById('record-modal-body').innerHTML = head + basic + exam + nasva + secondary + reminder + attachments + history;
 
-    if(isNew){ setupNewMode(); }
+    if(isNew){ setupNewMode(); lastAttachments = []; }
     if(!linked){ setupManualFields(d); }
     populateManagerSelect(d.manager_user);
     syncNightBlock();
@@ -631,6 +634,7 @@ const HC = (function(){
       setupDropzone('nasva-attach-drop','nasva-attach-file','nasva');
       loadRecordHistory();
     }
+    setupNasvaVisibility();
   }
 
   function syncRecheckBlock(){
@@ -641,6 +645,36 @@ const HC = (function(){
     const apply = ()=>{ const on = cb.checked; block.style.display = on?'':'none'; if(empty) empty.style.display = on?'none':''; };
     apply();
     cb.addEventListener('change', apply);
+  }
+
+  // NASVA欄の表示制御：年度4/1時点で65歳以上、または既にNASVA添付があるとき表示する。
+  function nasvaAgeAt(birthStr, year){
+    if(!birthStr || !year) return null;
+    const p = String(birthStr).split('-').map(Number);
+    if(p.length < 3 || !p[0]) return null;
+    const [by, bm, bd] = p;
+    let age = year - by;
+    if(bm > 4 || (bm === 4 && bd > 1)) age--;
+    return age;
+  }
+  function updateNasvaVisibility(){
+    const block = document.getElementById('nasva-block');
+    if(!block) return;
+    const birthEl = document.querySelector('#record-modal-body [data-field="birth_date"]');
+    const ny = document.getElementById('new-year');
+    const year = ny ? parseInt(ny.value, 10) : editingYear;
+    const age = nasvaAgeAt(birthEl ? birthEl.value : '', year);
+    const hasNasvaAttach = (lastAttachments || []).some(a=>a.category==='nasva');
+    block.classList.toggle('hidden', !((age != null && age > 64) || hasNasvaAttach));
+    const ageEl = document.getElementById('nasva-age');
+    if(ageEl) ageEl.textContent = (age != null ? age + '歳' : '64歳超');
+  }
+  function setupNasvaVisibility(){
+    const birthEl = document.querySelector('#record-modal-body [data-field="birth_date"]');
+    if(birthEl){ birthEl.addEventListener('change', updateNasvaVisibility); birthEl.addEventListener('input', updateNasvaVisibility); }
+    const ny = document.getElementById('new-year');
+    if(ny) ny.addEventListener('change', updateNasvaVisibility);
+    updateNasvaVisibility();
   }
 
   function setupNewMode(){
@@ -696,6 +730,8 @@ const HC = (function(){
     setF('employee_name', e.employee_name);
     setF('assignment_site', e.company_name);
     setF('manager_name', e.manager_name);
+    setF('birth_date', e.birth_date);
+    updateNasvaVisibility();
   }
 
   // ---- 手動モード（入社前・内勤者）の入力支援 ----
@@ -842,6 +878,7 @@ const HC = (function(){
     lastAttachments = list;
     renderAttachmentGroup('attach-list', list.filter(a=>(a.category||'health')!=='nasva'));
     renderAttachmentGroup('nasva-attach-list', list.filter(a=>a.category==='nasva'));
+    updateNasvaVisibility();
   }
   function renderAttachmentGroup(boxId, list){
     const box = document.getElementById(boxId);

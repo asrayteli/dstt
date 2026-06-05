@@ -637,9 +637,11 @@ def api_bulk_create():
     if not offices:
         return jsonify({"error": "対象営業所への権限がありません"}), 403
 
+    # 退職者（retirement_date あり）は一括起票の既定対象から外す
     employees = Employee.query.filter(
         Employee.office_code.in_(offices),
         Employee.is_deleted.is_(False),
+        db.or_(Employee.retirement_date.is_(None), Employee.retirement_date == ""),
     ).all()
 
     existing_ids = {
@@ -909,6 +911,7 @@ def api_employees():
         "office_name": e.office_name,
         "company_name": e.company_name,
         "manager_name": e.manager_name,
+        "birth_date": e.birth_date.isoformat() if e.birth_date else None,
     } for e in employees]})
 
 
