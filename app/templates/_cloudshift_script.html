@@ -522,6 +522,84 @@
       return task();
     }
 
+    // ローディングのメッセージ・説明文を更新する小ヘルパー。
+    function setLoadingDetail(message, detail) {
+      if (window.DSTTLoading && typeof window.DSTTLoading.setText === 'function') {
+        window.DSTTLoading.setText(message, detail);
+      }
+    }
+
+    // 新規作成・CSV取込の共通処理。
+    // - ローディング中はサーバーが今おこなっている処理を説明文として順次表示する。
+    // - 編集タブへ遷移するまでに 10 秒以上かかる場合は異常とみなし、進行中のリクエストを
+    //   中断してローディングを閉じ、エラーを通知する（遷移後の付随読み込みは対象外）。
+    async function runCloudCreateFlow({ buildFormData, successMessage, phases }) {
+      const TRANSITION_TIMEOUT_MS = 10000;
+      const message = 'シフト帳を作成中...';
+      const serverPhases = (phases && phases.length) ? phases : [
+        'シフト帳を保存しています...',
+        '既存の現場・個人シフトを照合して取り込んでいます...',
+        '共有用URLと編集データを準備しています...'
+      ];
+      const controller = new AbortController();
+      let timedOut = false;
+      let transitioned = false;
+      let phaseTimer = null;
+      const timeoutTimer = setTimeout(() => {
+        if (transitioned) return;
+        timedOut = true;
+        try { controller.abort(); } catch (_) { /* noop */ }
+      }, TRANSITION_TIMEOUT_MS);
+      let projectId = null;
+      try {
+        await withDsttLoading({ message, detail: serverPhases[0] }, async () => {
+          // 実際のサーバー進捗は取得できないため、想定フェーズを一定間隔で送りながら説明する。
+          let phaseIndex = 0;
+          phaseTimer = setInterval(() => {
+            phaseIndex = Math.min(phaseIndex + 1, serverPhases.length - 1);
+            setLoadingDetail(message, serverPhases[phaseIndex]);
+          }, 2500);
+
+          const formData = buildFormData();
+          const data = await requestJson('/tools/shiftersync/cloudshift/api/create', {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal
+          });
+
+          if (phaseTimer) { clearInterval(phaseTimer); phaseTimer = null; }
+          setLoadingDetail(message, '編集画面を準備しています...');
+
+          state.projectPayload = unwrapProjectPayload(data);
+          state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
+          projectId = state.projectPayload.project ? state.projectPayload.project.id : null;
+          // まず編集画面の描画と遷移を確定させる。付随的な再読み込みはローディングを
+          // 閉じたあとに行い、失敗しても遷移を妨げない。
+          await renderWorkspaceWithSiteBranches(true);
+          updateCurrentProjectLabel();
+          switchTab('editor');
+          scrollEditorIntoView();
+          transitioned = true;
+          clearTimeout(timeoutTimer);
+          showFlash(successMessage, 'success');
+        });
+      } catch (error) {
+        if (timedOut) {
+          notifyActionError(new Error('編集画面への遷移に10秒以上かかったため処理を中断しました。通信状況をご確認のうえ、シフト帳一覧を更新して作成済みかご確認ください。'));
+        } else {
+          notifyActionError(error);
+        }
+        return;
+      } finally {
+        clearTimeout(timeoutTimer);
+        if (phaseTimer) { clearInterval(phaseTimer); phaseTimer = null; }
+      }
+      // 遷移は完了済み。一覧・休暇連携・履歴の再読み込みはローディングを閉じてから実施する。
+      if (projectId) {
+        await loadProjectSidecars(projectId);
+      }
+    }
+
     function unwrapProjectPayload(payload) {
       return payload && payload.project && payload.project.project ? payload.project : payload;
     }
@@ -7720,11 +7798,14 @@
           event.preventDefault();
           if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずに新しいシフト帳を作成すると、このセッションでの編集内容は失われます。続行しますか？')) return;
           const form = event.currentTarget;
-          try {
-            await withDsttLoading({
-              message: 'シフト帳を作成中...',
-              detail: '編集画面の準備をしています'
-            }, async () => {
+          await runCloudCreateFlow({
+            successMessage: 'シフト表を作成しました。編集画面に移動しました',
+            phases: [
+              'シフト帳を保存しています...',
+              '既存の現場・個人シフトを照合して取り込んでいます...',
+              '共有用URLと編集データを準備しています...'
+            ],
+            buildFormData: () => {
               const formData = new FormData(form);
               if (formData.get('mode') === 'master') {
                 const targets = state.masterTargets.create || { targetType: 'person', people: [], sites: [] };
@@ -7732,21 +7813,9 @@
                 formData.set('master_people', targets.targetType === 'person' ? JSON.stringify(targets.people || []) : '');
                 formData.set('master_sites', targets.targetType === 'scene' ? JSON.stringify(targets.sites || []) : '');
               }
-              const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
-              state.projectPayload = unwrapProjectPayload(data);
-              state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
-              // まず編集画面の描画と遷移を確定させる。付随的な再読み込み
-              // （一覧・休暇連携・履歴）はこの後に行い、失敗しても遷移を妨げない。
-              await renderWorkspaceWithSiteBranches(true);
-              updateCurrentProjectLabel();
-              switchTab('editor');
-              scrollEditorIntoView();
-              showFlash('シフト表を作成しました。編集画面に移動しました', 'success');
-              await loadProjectSidecars(state.projectPayload.project.id);
-            });
-          } catch (error) {
-            notifyActionError(error);
-          }
+              return formData;
+            }
+          });
         });
       }
 
@@ -7756,27 +7825,15 @@
           event.preventDefault();
           if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずにCSVを取り込むと、このセッションでの編集内容は失われます。続行しますか？')) return;
           const form = event.currentTarget;
-          try {
-            await withDsttLoading({
-              message: 'シフト帳を作成中...',
-              detail: 'CSVを取り込み、編集画面の準備をしています'
-            }, async () => {
-              const formData = new FormData(form);
-              const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
-              state.projectPayload = unwrapProjectPayload(data);
-              state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
-              // まず編集画面の描画と遷移を確定させる。付随的な再読み込み
-              // （一覧・休暇連携・履歴）はこの後に行い、失敗しても遷移を妨げない。
-              await renderWorkspaceWithSiteBranches(true);
-              updateCurrentProjectLabel();
-              switchTab('editor');
-              scrollEditorIntoView();
-              showFlash('CSV を読み込みました。編集画面に移動しました', 'success');
-              await loadProjectSidecars(state.projectPayload.project.id);
-            });
-          } catch (error) {
-            notifyActionError(error);
-          }
+          await runCloudCreateFlow({
+            successMessage: 'CSV を読み込みました。編集画面に移動しました',
+            phases: [
+              'CSVを解析しています...',
+              'シフト帳を保存し、既存のシフトを照合しています...',
+              '共有用URLと編集データを準備しています...'
+            ],
+            buildFormData: () => new FormData(form)
+          });
         });
       }
 
