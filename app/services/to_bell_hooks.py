@@ -13,7 +13,7 @@ from typing import Any, Iterable
 from dateutil.relativedelta import relativedelta
 
 from app.models import ToBellNotification, ToBellTask, db
-from app.services.to_bell_integrations import enabled_users, is_enabled
+from app.services.to_bell_integrations import enabled_users, get_health_check_notify, is_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -407,12 +407,15 @@ def ensure_health_check_reminders(
     now = now or datetime.now()
     manager = (record.manager_user or "").strip()
     opted_in = bool(manager) and is_enabled(manager, HEALTH_CHECK_INTEGRATION_KEY)
+    # 担当者ごとの種別別ON/OFF（未設定は通知する）。
+    notify = get_health_check_notify(manager) if opted_in else {}
 
     def _sync(ref_type: str, basis, condition: bool, priority: str) -> "ToBellTask | None":
         """対象日 basis の前日以降になったらタスク化（無ければ作成／あれば更新）する。
         条件を満たさない・まだ前日に達していない場合は既存タスクをクローズする。"""
         active = (
             opted_in
+            and notify.get(ref_type, True)
             and condition
             and basis is not None
             and _hc_should_materialize(basis, now)

@@ -1138,16 +1138,30 @@ def api_settings():
 @health_check_bp.route("/api/integration", methods=["GET", "POST"])
 @login_required
 def api_integration():
-    """ログインユーザー個人の ToBell 連携オプトイン設定。"""
-    from app.services.to_bell_integrations import get_settings, update_integrations
+    """ログインユーザー個人の ToBell 連携設定（オプトイン＋通知種別の個別ON/OFF）。"""
+    from app.services.to_bell_integrations import (
+        get_settings,
+        update_integrations,
+        get_health_check_notify,
+        set_health_check_notify,
+    )
     user_id = str(current_user.username)
     if request.method == "POST":
         payload = request.json or {}
         enabled = bool(payload.get("enabled"))
         result = update_integrations(user_id, {"integrations": {"health_check.linkage": enabled}})
-        return jsonify({"success": True, "enabled": result["integrations"].get("health_check.linkage", False)})
+        kinds = payload.get("kinds")
+        notify = set_health_check_notify(user_id, kinds) if isinstance(kinds, dict) else get_health_check_notify(user_id)
+        return jsonify({
+            "success": True,
+            "enabled": result["integrations"].get("health_check.linkage", False),
+            "kinds": notify,
+        })
     settings = get_settings(user_id)
-    return jsonify({"enabled": settings["integrations"].get("health_check.linkage", False)})
+    return jsonify({
+        "enabled": settings["integrations"].get("health_check.linkage", False),
+        "kinds": get_health_check_notify(user_id),
+    })
 
 
 @health_check_bp.route("/api/admin/permissions")
