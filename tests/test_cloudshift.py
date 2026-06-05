@@ -1656,6 +1656,66 @@ def test_scene_master_create_collects_existing_scene_shift_without_broad_resync(
     assert master_entry["sync_source_type"] == "scene_shift"
 
 
+def test_person_create_pulls_existing_scene_shift_without_broad_resync(tmp_path, monkeypatch):
+    # 新規作成は対象シフト帳だけに既存データを取り込めば十分で、全プロジェクトを相互に
+    # 再同期する必要はない。広域再同期は (プロジェクト数)^2 のロック/読み込みになり、
+    # 件数が増えると作成リクエストがリバースプロキシのタイムアウトに達して、本体は保存
+    # 済みなのにクライアントには「リクエストに失敗しました」が返り編集画面へ遷移できない、
+    # という不具合の原因になっていた。作成時に広域 refresh を使わないことと、それでも
+    # 対象シフト帳へ既存の現場シフトが取り込まれることを検証する。
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    with client.application.app_context():
+        site = Site(
+            site_id="S045",
+            site_name="Pull Site",
+            site_manager_last="Owner",
+            site_manager_first="Manager",
+            site_manager_id="9045",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.commit()
+        site_row_id = site.id
+
+    scene = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Pull Site",
+            "mode": "scene",
+            "site_row_id": str(site_row_id),
+            "year": "2026",
+            "month": "4",
+        },
+    ).get_json()["project"]
+    scene_id = scene["project"]["id"]
+    scene_entries = dict(scene["month"]["entries_per_day"])
+    scene_entries["1"] = [{"id": "scene-1", "value": "!A!Alice", "employee_number": "1001"}]
+    scene_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": scene_entries, "base_month": scene["month"]},
+    )
+    assert scene_save.status_code == 200
+
+    def fail_broad_refresh(*args, **kwargs):
+        raise AssertionError("broad cross-project refresh must not run during create")
+
+    monkeypatch.setattr(module, "_refresh_shift_sync_for_target_month", fail_broad_refresh)
+
+    person_response = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    )
+    assert person_response.status_code == 200
+    person_month = person_response.get_json()["project"]["month"]
+    person_entry = person_month["entries_per_day"]["1"][0]
+    assert person_entry["sync_source_type"] == "scene_shift"
+    assert person_entry["sync_source_project_id"] == scene_id
+
+
 def test_master_shift_rejects_mixed_people_and_sites(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()

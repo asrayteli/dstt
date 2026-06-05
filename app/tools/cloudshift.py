@@ -4330,6 +4330,52 @@ def _refresh_shift_sync_for_target_month(target_project: dict[str, Any], month_k
         _resync_shift_month(source_project, month_key, actor_name=actor_name)
 
 
+def _refresh_shift_sync_into_target_month(
+    target_project: dict[str, Any], month_key: str, *, actor_name: str
+) -> None:
+    """対象シフト帳『だけ』へ、他モードの既存シフトを取り込む（スコープ限定の取り込み）。
+
+    新規作成・月追加で使う取り込み処理。従来の
+    ``_refresh_shift_sync_for_target_month`` は各ソースを
+    ``_resync_shift_month`` で「全ターゲット」へ再同期するため、シフト帳が増えると
+    (ソース×ターゲット) 件のロック取得・プロジェクト読み込みが走り、作成リクエストが
+    リバースプロキシの読み取りタイムアウトに達して、本体は保存済みなのにクライアントへ
+    非JSONのエラーが返り「リクエストに失敗しました」となって編集画面へ遷移できなかった。
+
+    新規作成時に必要なのは「いま作った対象シフト帳へ既存データを取り込む」ことだけで、
+    他プロジェクト同士の再同期は不要（それぞれの保存時に維持されている）。本関数は対象
+    シフト帳のみを更新し、他プロジェクトには一切書き込まないため、件数に対して線形で済む。
+    """
+    if not month_key or month_key not in (target_project.get("months") or {}):
+        return
+    target_mode = str(target_project.get("mode") or "")
+    if target_mode == "master":
+        _refresh_master_shift_from_sources(target_project, month_key, actor_name=actor_name)
+        return
+    target_id = str(target_project.get("id") or "")
+    if not target_id:
+        return
+    for source_project in _iter_project_summaries():
+        if str(source_project.get("mode") or "") == target_mode:
+            continue
+        if str(source_project.get("id") or "") == target_id:
+            continue
+        source_month = (source_project.get("months") or {}).get(month_key)
+        if not source_month:
+            continue
+        desired_by_target = _desired_shift_sync_entries_by_target(source_project, month_key, source_month)
+        desired_for_target = desired_by_target.get(target_id)
+        if not desired_for_target:
+            continue
+        _replace_shift_synced_entries_in_target_project(
+            target_project,
+            source_project,
+            month_key,
+            desired_for_target,
+            actor_name=actor_name,
+        )
+
+
 def _resync_shift_project(source_project: dict[str, Any], *, actor_name: str) -> None:
     for month_key in _sort_month_keys(list((source_project.get("months") or {}).keys())):
         _resync_shift_month(source_project, month_key, actor_name=actor_name)
@@ -7429,7 +7475,11 @@ def api_create():
             _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
         if project["mode"] != "master":
             _resync_shift_month(project, month_key, actor_name=_user_label())
-        _refresh_shift_sync_for_target_month(project, month_key, actor_name=_user_label())
+        # 新規作成は「いま作った帳面へ既存データを取り込む」だけで十分。全プロジェクトを
+        # 相互再同期する _refresh_shift_sync_for_target_month は (プロジェクト数)^2 の
+        # ロック/読み込みになり、件数が増えると作成リクエストがタイムアウトしていたため、
+        # 対象シフト帳のみを更新するスコープ限定版を使う。
+        _refresh_shift_sync_into_target_month(project, month_key, actor_name=_user_label())
     except Exception:
         current_app.logger.exception(
             "CloudShift post-create steps failed after creating project %s", project_id
@@ -7906,7 +7956,9 @@ def api_create_month(project_id: str):
         month_payload = _create_month_in_project(project, payload, _user_label(), access_role)
     month_key = _month_key(month_payload["year"], month_payload["month"])
     _resync_shift_month(project, month_key, actor_name=_user_label())
-    _refresh_shift_sync_for_target_month(project, month_key, actor_name=_user_label())
+    # 月追加も「この帳面の新しい月へ既存データを取り込む」だけで足りるため、全プロジェクト
+    # 相互再同期（プロジェクト数の二乗）ではなくスコープ限定版で対象だけを更新する。
+    _refresh_shift_sync_into_target_month(project, month_key, actor_name=_user_label())
     project = _load_project(project_id)
     return jsonify({"success": True, "project": _project_detail_payload(project, month_key, include_draft=True)})
 
