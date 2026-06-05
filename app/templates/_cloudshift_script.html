@@ -7719,25 +7719,31 @@
         createForm.addEventListener('submit', async (event) => {
           event.preventDefault();
           if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずに新しいシフト帳を作成すると、このセッションでの編集内容は失われます。続行しますか？')) return;
+          const form = event.currentTarget;
           try {
-            const formData = new FormData(event.currentTarget);
-            if (formData.get('mode') === 'master') {
-              const targets = state.masterTargets.create || { targetType: 'person', people: [], sites: [] };
-              formData.set('master_target_type', targets.targetType === 'scene' ? 'scene' : 'person');
-              formData.set('master_people', targets.targetType === 'person' ? JSON.stringify(targets.people || []) : '');
-              formData.set('master_sites', targets.targetType === 'scene' ? JSON.stringify(targets.sites || []) : '');
-            }
-            const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
-            state.projectPayload = unwrapProjectPayload(data);
-            state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
-            // まず編集画面の描画と遷移を確定させる。付随的な再読み込み
-            // （一覧・休暇連携・履歴）はこの後に行い、失敗しても遷移を妨げない。
-            await renderWorkspaceWithSiteBranches(true);
-            updateCurrentProjectLabel();
-            switchTab('editor');
-            scrollEditorIntoView();
-            showFlash('シフト表を作成しました。編集画面に移動しました', 'success');
-            await loadProjectSidecars(state.projectPayload.project.id);
+            await withDsttLoading({
+              message: 'シフト帳を作成中...',
+              detail: '編集画面の準備をしています'
+            }, async () => {
+              const formData = new FormData(form);
+              if (formData.get('mode') === 'master') {
+                const targets = state.masterTargets.create || { targetType: 'person', people: [], sites: [] };
+                formData.set('master_target_type', targets.targetType === 'scene' ? 'scene' : 'person');
+                formData.set('master_people', targets.targetType === 'person' ? JSON.stringify(targets.people || []) : '');
+                formData.set('master_sites', targets.targetType === 'scene' ? JSON.stringify(targets.sites || []) : '');
+              }
+              const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
+              state.projectPayload = unwrapProjectPayload(data);
+              state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
+              // まず編集画面の描画と遷移を確定させる。付随的な再読み込み
+              // （一覧・休暇連携・履歴）はこの後に行い、失敗しても遷移を妨げない。
+              await renderWorkspaceWithSiteBranches(true);
+              updateCurrentProjectLabel();
+              switchTab('editor');
+              scrollEditorIntoView();
+              showFlash('シフト表を作成しました。編集画面に移動しました', 'success');
+              await loadProjectSidecars(state.projectPayload.project.id);
+            });
           } catch (error) {
             notifyActionError(error);
           }
@@ -7749,19 +7755,25 @@
         importForm.addEventListener('submit', async (event) => {
           event.preventDefault();
           if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずにCSVを取り込むと、このセッションでの編集内容は失われます。続行しますか？')) return;
+          const form = event.currentTarget;
           try {
-            const formData = new FormData(event.currentTarget);
-            const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
-            state.projectPayload = unwrapProjectPayload(data);
-            state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
-            // まず編集画面の描画と遷移を確定させる。付随的な再読み込み
-            // （一覧・休暇連携・履歴）はこの後に行い、失敗しても遷移を妨げない。
-            await renderWorkspaceWithSiteBranches(true);
-            updateCurrentProjectLabel();
-            switchTab('editor');
-            scrollEditorIntoView();
-            showFlash('CSV を読み込みました。編集画面に移動しました', 'success');
-            await loadProjectSidecars(state.projectPayload.project.id);
+            await withDsttLoading({
+              message: 'シフト帳を作成中...',
+              detail: 'CSVを取り込み、編集画面の準備をしています'
+            }, async () => {
+              const formData = new FormData(form);
+              const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
+              state.projectPayload = unwrapProjectPayload(data);
+              state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
+              // まず編集画面の描画と遷移を確定させる。付随的な再読み込み
+              // （一覧・休暇連携・履歴）はこの後に行い、失敗しても遷移を妨げない。
+              await renderWorkspaceWithSiteBranches(true);
+              updateCurrentProjectLabel();
+              switchTab('editor');
+              scrollEditorIntoView();
+              showFlash('CSV を読み込みました。編集画面に移動しました', 'success');
+              await loadProjectSidecars(state.projectPayload.project.id);
+            });
           } catch (error) {
             notifyActionError(error);
           }
