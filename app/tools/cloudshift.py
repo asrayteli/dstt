@@ -7380,58 +7380,68 @@ def api_create():
     }
     _assert_link_key_unique(_project_link_key(project))
     _save_project(project)
-    _append_history(
-        project_id,
-        {
-            "timestamp": _utcnow_iso(),
-            "editor_name": _user_label(),
-            "editor_type": "owner",
-            "action": "project_created",
-            "month_key": month_key,
-            "changes": [f"{month_key} を作成"],
-        },
-    )
-    if site_ref:
-        _append_history(
-            project_id,
-            {
-                "timestamp": _utcnow_iso(),
-                "editor_name": _user_label(),
-                "editor_type": "owner",
-                "action": "site_linked",
-                "month_key": None,
-                "changes": [f"現場を {site_ref['site_id']} / {site_ref['site_name']} に設定"],
-            },
-        )
-    if mode == "master":
-        _append_history(
-            project_id,
-            {
-                "timestamp": _utcnow_iso(),
-                "editor_name": _user_label(),
-                "editor_type": "owner",
-                "action": "master_scope_updated",
-                "month_key": None,
-                "changes": [
-                    f"{'個人' if master_target_type == 'person' else '現場'}マスター対象を "
-                    f"{len(master_people) if master_target_type == 'person' else len(master_sites)}件 に設定"
-                ],
-            },
-        )
-    if project["mode"] == "scene":
-        _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
-        _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
+    # ここまでで「シフト帳本体」と最初の月の保存は完了している。
+    # これ以降の履歴追記・現場バックフィル・自動同期はあくまで付随処理であり、
+    # 失敗しても作成自体は成立している。したがって例外で作成リクエスト全体を
+    # 失敗させない（保存済みなのに 4xx/5xx が返り、フロントで requestJson が
+    # 例外となって編集画面への自動遷移や成功通知が出ない、という不具合を防ぐ）。
     try:
+        _append_history(
+            project_id,
+            {
+                "timestamp": _utcnow_iso(),
+                "editor_name": _user_label(),
+                "editor_type": "owner",
+                "action": "project_created",
+                "month_key": month_key,
+                "changes": [f"{month_key} を作成"],
+            },
+        )
+        if site_ref:
+            _append_history(
+                project_id,
+                {
+                    "timestamp": _utcnow_iso(),
+                    "editor_name": _user_label(),
+                    "editor_type": "owner",
+                    "action": "site_linked",
+                    "month_key": None,
+                    "changes": [f"現場を {site_ref['site_id']} / {site_ref['site_name']} に設定"],
+                },
+            )
+        if mode == "master":
+            _append_history(
+                project_id,
+                {
+                    "timestamp": _utcnow_iso(),
+                    "editor_name": _user_label(),
+                    "editor_type": "owner",
+                    "action": "master_scope_updated",
+                    "month_key": None,
+                    "changes": [
+                        f"{'個人' if master_target_type == 'person' else '現場'}マスター対象を "
+                        f"{len(master_people) if master_target_type == 'person' else len(master_sites)}件 に設定"
+                    ],
+                },
+            )
+        if project["mode"] == "scene":
+            _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
+            _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
         if project["mode"] != "master":
             _resync_shift_month(project, month_key, actor_name=_user_label())
         _refresh_shift_sync_for_target_month(project, month_key, actor_name=_user_label())
-    except CloudShiftError:
-        raise
     except Exception:
         current_app.logger.exception(
-            "CloudShift auto-sync failed after creating project %s", project_id
+            "CloudShift post-create steps failed after creating project %s", project_id
         )
-    project = _load_project(project_id)
+    # 付随処理で再保存されている可能性があるため読み直すが、失敗時も
+    # 作成済みのメモリ上の project にフォールバックして必ず成功応答を返す。
+    try:
+        project = _load_project(project_id) or project
+    except Exception:
+        current_app.logger.exception(
+            "CloudShift reload after create failed for project %s", project_id
+        )
     return jsonify({"success": True, "project": _project_detail_payload(project, include_draft=True)})
 
 
