@@ -6535,6 +6535,28 @@
       }
     }
 
+    // 作成・取込の完了後に行う付随的な再読み込み（一覧・休暇連携・履歴）。
+    // ここでの失敗が編集画面への遷移や本体表示を妨げないよう、個別に握りつぶす。
+    // 特に休暇連携カレンダーの取得は外部サブシステムに依存し失敗し得るため、
+    // 本処理を遷移後に分離しておくことが重要。
+    async function loadProjectSidecars(projectId) {
+      try {
+        await loadProjects();
+      } catch (error) {
+        if (window.console && console.error) console.error('loadProjects failed', error);
+      }
+      try {
+        await loadLeaveSyncCalendars(projectId);
+      } catch (error) {
+        if (window.console && console.error) console.error('loadLeaveSyncCalendars failed', error);
+      }
+      try {
+        await loadHistory(projectId);
+      } catch (error) {
+        if (window.console && console.error) console.error('loadHistory failed', error);
+      }
+    }
+
     async function selectProject(projectId, monthKey, options) {
       const settings = options || {};
       const losesCurrentEdits = targetLosesCurrentEdits(projectId, monthKey);
@@ -6906,11 +6928,16 @@
         }));
         state.projectPayload = payload;
         state.baseMonth = payload.month ? deepClone(payload.month) : null;
+        // 先に編集画面の描画と遷移を確定させ、付随的な再読み込みは後段に回す。
         await renderWorkspaceWithSiteBranches(true);
-        await loadProjects();
-        await loadHistory(project.id);
         switchTab('editor');
         scrollEditorIntoView();
+        try {
+          await loadProjects();
+        } catch (error) {
+          if (window.console && console.error) console.error('loadProjects failed', error);
+        }
+        await loadHistory(project.id);
       } else {
         if (!ensureGuestName()) return;
         body.editor_name = state.guestName;
@@ -7703,14 +7730,14 @@
             const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
             state.projectPayload = unwrapProjectPayload(data);
             state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
-            await loadProjects();
-            await loadLeaveSyncCalendars(state.projectPayload.project.id);
-            await loadHistory(state.projectPayload.project.id);
+            // まず編集画面の描画と遷移を確定させる。付随的な再読み込み
+            // （一覧・休暇連携・履歴）はこの後に行い、失敗しても遷移を妨げない。
             await renderWorkspaceWithSiteBranches(true);
             updateCurrentProjectLabel();
             switchTab('editor');
             scrollEditorIntoView();
             showFlash('シフト表を作成しました。編集画面に移動しました', 'success');
+            await loadProjectSidecars(state.projectPayload.project.id);
           } catch (error) {
             notifyActionError(error);
           }
@@ -7727,14 +7754,14 @@
             const data = await requestJson('/tools/shiftersync/cloudshift/api/create', { method: 'POST', body: formData });
             state.projectPayload = unwrapProjectPayload(data);
             state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
-            await loadProjects();
-            await loadLeaveSyncCalendars(state.projectPayload.project.id);
-            await loadHistory(state.projectPayload.project.id);
+            // まず編集画面の描画と遷移を確定させる。付随的な再読み込み
+            // （一覧・休暇連携・履歴）はこの後に行い、失敗しても遷移を妨げない。
             await renderWorkspaceWithSiteBranches(true);
             updateCurrentProjectLabel();
             switchTab('editor');
             scrollEditorIntoView();
             showFlash('CSV を読み込みました。編集画面に移動しました', 'success');
+            await loadProjectSidecars(state.projectPayload.project.id);
           } catch (error) {
             notifyActionError(error);
           }
