@@ -586,3 +586,83 @@ def test_name_normalization_matches_across_width_and_space(tmp_path):
         # 全角スペース・余分な空白を含む名前でも一意解決できる
         assert module.resolve_manager_user("山田　太郎") == "u1"
         assert module.resolve_manager_user(" 山田太郎 ") == "u1"
+
+
+def test_bulk_create_excludes_retired_employees(tmp_path):
+    """退職者（retirement_date あり）は一括起票の既定対象から外す。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    with app.app_context():
+        db.session.add(Employee(
+            employee_number="E777", office_code="100", office_name="本社営業所",
+            employee_name="退職済子", employee_type="正社員", company_name="大新東",
+            manager_name="管理花子", retirement_date="2025-03-31",
+        ))
+        db.session.commit()
+    client = app.test_client()
+
+    res = client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100"]})
+    assert res.get_json()["created"] == 2  # 在籍2名のみ。退職者は除外される
+    listing = client.get("/tools/health_check/api/records?year=2026").get_json()
+    names = {r["employee_name"] for r in listing["records"]}
+    assert "退職済子" not in names
+
+
+def test_employees_candidate_includes_birth_date(tmp_path):
+    """名簿候補APIは生年月日を返す（新規登録時のNASVA判定に使う）。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    with app.app_context():
+        emp = Employee.query.filter_by(employee_number="E001").first()
+        emp.birth_date = date(1958, 5, 1)
+        db.session.commit()
+    client = app.test_client()
+    data = client.get("/tools/health_check/api/employees?search=E001").get_json()
+    target = [e for e in data["employees"] if e["employee_number"] == "E001"]
+    assert target and target[0]["birth_date"] == "1958-05-01"
+
+
+def test_notify_kind_off_suppresses_that_reminder(tmp_path):
+    """通知種別を個別にOFFにすると、その種別のリマインドは起票されない。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    with app.app_context():
+        # 担当者 m001 はオプトイン済みだが、二次検査の通知だけOFF
+        db.session.add(ToBellUserSettings(
+            username="m001",
+            integrations={"health_check.linkage": True},
+            preferences={"health_check_notify": {"secondary_exam": False}},
+        ))
+        db.session.commit()
+
+    res = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E001"})
+    rid = res.get_json()["record"]["id"]
+
+    today = date.today().isoformat()
+    client.put(f"/tools/health_check/api/record/{rid}", json={
+        "needs_recheck": True, "secondary_recommended_date": today})
+    with app.app_context():
+        # 二次検査の通知はOFFなので起票されない
+        task = ToBellTask.query.filter_by(source_tool="health_check", source_ref_type="secondary_exam").first()
+        assert task is None
+
+
+def test_integration_api_saves_notify_kinds(tmp_path):
+    """連携APIで通知種別の個別ON/OFFを取得・保存できる。既定は全種別ON。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+
+    got = client.get("/tools/health_check/api/integration").get_json()
+    assert got["kinds"] == {"reservation": True, "night_second": True, "secondary_exam": True}
+
+    res = client.post("/tools/health_check/api/integration", json={
+        "enabled": True, "kinds": {"reservation": False}})
+    assert res.get_json()["kinds"]["reservation"] is False
+
+    got2 = client.get("/tools/health_check/api/integration").get_json()
+    assert got2["enabled"] is True
+    assert got2["kinds"]["reservation"] is False
+    assert got2["kinds"]["secondary_exam"] is True  # 指定しない種別はONのまま

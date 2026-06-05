@@ -43,8 +43,8 @@ INTEGRATION_KEYS = {
     },
     "health_check.linkage": {
         "tool": "health_check",
-        "label": "健診の二次検査・深夜2回目をリマインド",
-        "description": "健診PLUSで自分が担当する対象者の二次検査受診推奨日・深夜従事者の年2回目受診を、当日朝と事前にToBellのタスク／通知でお知らせします。",
+        "label": "健診の予約・二次検査・深夜2回目をリマインド",
+        "description": "健診PLUSで自分が担当する対象者の健康診断予約日・二次検査受診推奨日・深夜従事者の年2回目受診を、対象日の当日朝にToBellのタスク／通知でお知らせします。",
     },
     "google.calendar": {
         "tool": "google",
@@ -120,3 +120,40 @@ def enabled_users(integration_key: str) -> list[str]:
         if integrations.get(integration_key):
             result.append(row.username)
     return result
+
+
+# 健診PLUSの通知種別（source_ref_type と一致）。
+# ユーザーごとに個別ON/OFFでき、未設定は通知する（デフォルトON）。
+HEALTH_CHECK_NOTIFY_KINDS = ("reservation", "night_second", "secondary_exam")
+
+
+def get_health_check_notify(username: str) -> dict[str, bool]:
+    """健診通知の種別別ON/OFF。未設定の種別は True（通知する）。"""
+    row = ToBellUserSettings.query.filter_by(username=username).first()
+    prefs = (row.preferences if row and isinstance(row.preferences, dict) else {}) or {}
+    notify = prefs.get("health_check_notify")
+    if not isinstance(notify, dict):
+        notify = {}
+    return {kind: bool(notify.get(kind, True)) for kind in HEALTH_CHECK_NOTIFY_KINDS}
+
+
+def set_health_check_notify(username: str, kinds: Any) -> dict[str, bool]:
+    """健診通知の種別別ON/OFFを保存する。渡された種別だけ更新する。"""
+    row = _ensure_settings(username)
+    prefs = dict(row.preferences or {})
+    current = dict(prefs.get("health_check_notify") or {})
+    if isinstance(kinds, dict):
+        for kind in HEALTH_CHECK_NOTIFY_KINDS:
+            if kind in kinds:
+                current[kind] = bool(kinds[kind])
+    prefs["health_check_notify"] = current
+    row.preferences = prefs
+    db.session.commit()
+    return {kind: bool(current.get(kind, True)) for kind in HEALTH_CHECK_NOTIFY_KINDS}
+
+
+def health_check_notify_enabled(username: str, kind: str) -> bool:
+    """マスターのオプトイン かつ その種別がONのときだけ True。"""
+    if not is_enabled(username, "health_check.linkage"):
+        return False
+    return get_health_check_notify(username).get(kind, True)

@@ -104,6 +104,19 @@ SYNCED_FIELDS = {
 ATTACHMENT_CATEGORIES = {"health", "nasva"}
 ATTACHMENT_TITLE_MAX = 120
 
+# 一覧で並び替え可能な列。任意の属性名で order_by すると 500 になるため固定する。
+SORTABLE_FIELDS = {
+    "employee_number",
+    "employee_name",
+    "exam_date",
+    "reservation_date",
+    "target_year",
+    "manager_name",
+    "assignment_site",
+    "created_at",
+    "updated_at",
+}
+
 
 def _clean_attachment_title(raw) -> str:
     """添付タイトルを整形（空白除去・最大長制限）。空なら空文字。"""
@@ -399,9 +412,10 @@ def api_records():
 
     sort_by = request.args.get("sort_by", "employee_number")
     sort_order = request.args.get("sort_order", "asc")
-    if hasattr(HealthCheckRecord, sort_by):
-        col = getattr(HealthCheckRecord, sort_by)
-        query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
+    if sort_by not in SORTABLE_FIELDS:
+        sort_by = "employee_number"
+    col = getattr(HealthCheckRecord, sort_by)
+    query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
 
     records = query.options(selectinload(HealthCheckRecord.attachments)).all()
     # ステータス絞り込み（算出値のため取得後にフィルタ）
@@ -623,9 +637,11 @@ def api_bulk_create():
     if not offices:
         return jsonify({"error": "対象営業所への権限がありません"}), 403
 
+    # 退職者（retirement_date あり）は一括起票の既定対象から外す
     employees = Employee.query.filter(
         Employee.office_code.in_(offices),
         Employee.is_deleted.is_(False),
+        db.or_(Employee.retirement_date.is_(None), Employee.retirement_date == ""),
     ).all()
 
     existing_ids = {
@@ -895,6 +911,7 @@ def api_employees():
         "office_name": e.office_name,
         "company_name": e.company_name,
         "manager_name": e.manager_name,
+        "birth_date": e.birth_date.isoformat() if e.birth_date else None,
     } for e in employees]})
 
 
@@ -1121,16 +1138,30 @@ def api_settings():
 @health_check_bp.route("/api/integration", methods=["GET", "POST"])
 @login_required
 def api_integration():
-    """ログインユーザー個人の ToBell 連携オプトイン設定。"""
-    from app.services.to_bell_integrations import get_settings, update_integrations
+    """ログインユーザー個人の ToBell 連携設定（オプトイン＋通知種別の個別ON/OFF）。"""
+    from app.services.to_bell_integrations import (
+        get_settings,
+        update_integrations,
+        get_health_check_notify,
+        set_health_check_notify,
+    )
     user_id = str(current_user.username)
     if request.method == "POST":
         payload = request.json or {}
         enabled = bool(payload.get("enabled"))
         result = update_integrations(user_id, {"integrations": {"health_check.linkage": enabled}})
-        return jsonify({"success": True, "enabled": result["integrations"].get("health_check.linkage", False)})
+        kinds = payload.get("kinds")
+        notify = set_health_check_notify(user_id, kinds) if isinstance(kinds, dict) else get_health_check_notify(user_id)
+        return jsonify({
+            "success": True,
+            "enabled": result["integrations"].get("health_check.linkage", False),
+            "kinds": notify,
+        })
     settings = get_settings(user_id)
-    return jsonify({"enabled": settings["integrations"].get("health_check.linkage", False)})
+    return jsonify({
+        "enabled": settings["integrations"].get("health_check.linkage", False),
+        "kinds": get_health_check_notify(user_id),
+    })
 
 
 @health_check_bp.route("/api/admin/permissions")
