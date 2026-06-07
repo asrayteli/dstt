@@ -16,6 +16,26 @@ let searchModalDeputyTimeout = null; // 検索モーダル用代務者検索デ�
 let leaveNameBlurTimeout = null; // 休暇編集モーダル: 名前入力のblur遅延
 let leaveDeputyBlurTimeout = null; // 休暇編集モーダル: 代務者入力のblur遅延
 
+// innerHTML へ動的データ（氏名・備考など）を挿入する際の HTML エスケープ。
+// 値が null/undefined の場合は空文字として扱う。
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+// インライン onclick="fn('...')" の引数（二重引用符属性内の単一引用符 JS 文字列）として
+// 安全に埋め込むためのエスケープ。属性破壊（"）と JS 文字列破壊（' \）の両方を防ぐ。
+function escapeJsArg(value) {
+    return String(value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Initializing leave manager...');
@@ -343,8 +363,8 @@ function renderCalendar() {
             const deputyUnsetIcon = hasAssignedDeputy(leave) ? '' : '!';
             calendarHtml += `
                 <div class="leave-item" style="background-color: ${color}; color: white;" 
-                     onclick="editLeave('${leave.id}', event)" title="${leave.name} (${leave.leave_type})">
-                    ${deputyUnsetIcon}${confirmedIcon}${leave.name}
+                     onclick="editLeave('${leave.id}', event)" title="${escapeHtml(leave.name)} (${escapeHtml(leave.leave_type)})">
+                    ${deputyUnsetIcon}${confirmedIcon}${escapeHtml(leave.name)}
                 </div>
             `;
         });
@@ -730,13 +750,13 @@ function showDateDetail(dateStr, event) {
         const confirmerDisplayName = leave.confirmed_by ? getUserDisplayName(leave.confirmed_by) : null;
 
         contentHtml += '<tr>';
-        contentHtml += `<td>${deputyUnsetIcon}${leave.name}</td>`;
-        contentHtml += `<td><span class="badge" style="background-color: ${color}; color: white">${leave.leave_type}</span></td>`;
-        contentHtml += `<td>${leave.deputies ? leave.deputies.join(', ') : '-'}</td>`;
-        contentHtml += `<td><span data-username="${leave.created_by || ''}">${creatorDisplayName}</span></td>`;
-        
+        contentHtml += `<td>${deputyUnsetIcon}${escapeHtml(leave.name)}</td>`;
+        contentHtml += `<td><span class="badge" style="background-color: ${color}; color: white">${escapeHtml(leave.leave_type)}</span></td>`;
+        contentHtml += `<td>${leave.deputies ? escapeHtml(leave.deputies.join(', ')) : '-'}</td>`;
+        contentHtml += `<td><span data-username="${escapeHtml(leave.created_by || '')}">${escapeHtml(creatorDisplayName)}</span></td>`;
+
         if (leave.confirmed_by) {
-            contentHtml += `<td>✓<span data-username="${leave.confirmed_by}">${confirmerDisplayName}</span></td>`;
+            contentHtml += `<td>✓<span data-username="${escapeHtml(leave.confirmed_by)}">${escapeHtml(confirmerDisplayName)}</span></td>`;
         } else {
             contentHtml += `<td>未確認</td>`;
         }
@@ -963,7 +983,7 @@ function executeLeaveSearch() {
         .then(response => response.json())
         .then(data => {
             if (data.error) {
-                resultsContainer.innerHTML = `<div class="text-center text-red-600 py-6">${data.error}</div>`;
+                resultsContainer.innerHTML = `<div class="text-center text-red-600 py-6">${escapeHtml(data.error)}</div>`;
                 return;
             }
             renderLeaveSearchResults(data.results || []);
@@ -1001,13 +1021,13 @@ function renderLeaveSearchResults(results) {
         const deputiesText = Array.isArray(leave.deputies) && leave.deputies.length > 0 ? leave.deputies.join(', ') : '-';
 
         html += '<tr>';
-        html += `<td>${leave.date || '-'}</td>`;
-        html += `<td>${deputyUnsetIcon}${leave.name || '-'}</td>`;
-        html += `<td>${leave.employee_number || '-'}</td>`;
-        html += `<td><span class="badge" style="background-color: ${color}; color: white">${leave.leave_type || '-'}</span></td>`;
-        html += `<td>${deputiesText}</td>`;
+        html += `<td>${escapeHtml(leave.date || '-')}</td>`;
+        html += `<td>${deputyUnsetIcon}${escapeHtml(leave.name || '-')}</td>`;
+        html += `<td>${escapeHtml(leave.employee_number || '-')}</td>`;
+        html += `<td><span class="badge" style="background-color: ${color}; color: white">${escapeHtml(leave.leave_type || '-')}</span></td>`;
+        html += `<td>${escapeHtml(deputiesText)}</td>`;
         html += `<td>${confirmedText}</td>`;
-        html += `<td>${leave.remarks || '-'}</td>`;
+        html += `<td>${escapeHtml(leave.remarks || '-')}</td>`;
         html += '</tr>';
     });
 
@@ -1041,9 +1061,9 @@ function searchSearchModalEmployees(query) {
                 }
                 let html = '<div class="employee-suggestions-scroll">';
                 employees.forEach(emp => {
-                    html += `<div class="employee-suggestion-item" onclick="selectSearchEmployee('${emp.employee_name.replace(/'/g, "\\'")}')">
-                        <span class="employee-suggestion-name">${emp.employee_name}</span>
-                        <span class="employee-suggestion-number">(${emp.employee_number})</span>
+                    html += `<div class="employee-suggestion-item" onclick="selectSearchEmployee('${escapeJsArg(emp.employee_name)}')">
+                        <span class="employee-suggestion-name">${escapeHtml(emp.employee_name)}</span>
+                        <span class="employee-suggestion-number">(${escapeHtml(emp.employee_number)})</span>
                     </div>`;
                 });
                 html += '</div>';
@@ -1090,9 +1110,9 @@ function searchSearchModalDeputies(query) {
                 }
                 let html = '<div class="employee-suggestions-scroll">';
                 employees.forEach(emp => {
-                    html += `<div class="employee-suggestion-item" onclick="selectSearchDeputy('${emp.employee_name.replace(/'/g, "\\'")}')">
-                        <span class="employee-suggestion-name">${emp.employee_name}</span>
-                        <span class="employee-suggestion-number">(${emp.employee_number})</span>
+                    html += `<div class="employee-suggestion-item" onclick="selectSearchDeputy('${escapeJsArg(emp.employee_name)}')">
+                        <span class="employee-suggestion-name">${escapeHtml(emp.employee_name)}</span>
+                        <span class="employee-suggestion-number">(${escapeHtml(emp.employee_number)})</span>
                     </div>`;
                 });
                 html += '</div>';
@@ -1256,7 +1276,7 @@ function loadUsersList() {
             
             users.forEach(user => {
                 html += '<tr>';
-                html += `<td>${user.user_id}</td>`;
+                html += `<td>${escapeHtml(user.user_id)}</td>`;
                 html += `<td>`;
                 if (user.is_admin) {
                     html += '<span class="badge badge-admin">管理者</span>';
@@ -1266,7 +1286,7 @@ function loadUsersList() {
                 html += '</td>';
                 html += `<td>`;
                 if (user.calendars.length > 0) {
-                    html += user.calendars.map(cal => `${cal.name} (${cal.id})`).join(', ');
+                    html += user.calendars.map(cal => `${escapeHtml(cal.name)} (${escapeHtml(cal.id)})`).join(', ');
                 } else {
                     html += '-';
                 }
@@ -1279,7 +1299,7 @@ function loadUsersList() {
                 } else {
                     // 権限剥奪ボタン（管理者または一般ユーザーでカレンダーアクセス権限がある場合）
                     if (user.is_admin || user.calendars.length > 0) {
-                        html += `<button onclick="showRevokePermissionModal('${user.user_id}')" class="btn btn-danger btn-sm mr-2">権限剥奪</button>`;
+                        html += `<button onclick="showRevokePermissionModal('${escapeJsArg(user.user_id)}')" class="btn btn-danger btn-sm mr-2">権限剥奪</button>`;
                     }
                 }
                 
@@ -1339,7 +1359,7 @@ function showRevokePermissionModal(userId) {
             
             // ユーザー情報表示
             const userInfoHtml = `
-                <p><strong>ユーザーID:</strong> ${user.user_id}</p>
+                <p><strong>ユーザーID:</strong> ${escapeHtml(user.user_id)}</p>
                 <p><strong>現在の権限:</strong> ${user.is_admin ? '管理者' : '一般ユーザー'}</p>
             `;
             document.getElementById('revoke-user-info').innerHTML = userInfoHtml;
@@ -1360,8 +1380,8 @@ function showRevokePermissionModal(userId) {
                 user.calendars.forEach(cal => {
                     calendarHtml += `
                         <label class="flex items-center mb-2">
-                            <input type="checkbox" name="revoke-calendar" value="${cal.id}" class="mr-2">
-                            ${cal.name} (${cal.id})
+                            <input type="checkbox" name="revoke-calendar" value="${escapeHtml(cal.id)}" class="mr-2">
+                            ${escapeHtml(cal.name)} (${escapeHtml(cal.id)})
                         </label>
                     `;
                 });
@@ -1478,7 +1498,7 @@ function showDeleteCalendarModal() {
         .then(data => {
             hideAllModals();
             
-            let infoHtml = `<p><strong>削除対象:</strong> ${calendarName}</p>`;
+            let infoHtml = `<p><strong>削除対象:</strong> ${escapeHtml(calendarName)}</p>`;
             if (data.data_count > 0) {
                 infoHtml += `<p class="text-red-600 font-semibold mt-2">このカレンダーには ${data.data_count} 件の休暇データが登録されています。</p>`;
                 infoHtml += `<p class="text-red-600">削除すると復元できません。続行しますか？</p>`;
@@ -1667,9 +1687,9 @@ function displayBulkEmployeeSuggestions(employees) {
 
     let html = '<div class="employee-suggestions-scroll">';
     employees.forEach(emp => {
-        html += `<div class="employee-suggestion-item" onclick="selectBulkEmployee('${emp.employee_name}', '${emp.employee_number}')">
-            <span class="employee-suggestion-name">${emp.employee_name}</span>
-            <span class="employee-suggestion-number">(${emp.employee_number})</span>
+        html += `<div class="employee-suggestion-item" onclick="selectBulkEmployee('${escapeJsArg(emp.employee_name)}', '${escapeJsArg(emp.employee_number)}')">
+            <span class="employee-suggestion-name">${escapeHtml(emp.employee_name)}</span>
+            <span class="employee-suggestion-number">(${escapeHtml(emp.employee_number)})</span>
         </div>`;
     });
     html += '</div>';
@@ -1739,9 +1759,9 @@ function displayBulkDeputySuggestions(employees) {
 
     let html = '<div class="employee-suggestions-scroll">';
     employees.forEach(emp => {
-        html += `<div class="employee-suggestion-item" onclick="selectBulkDeputy('${emp.employee_name.replace(/'/g, "\\'")}')">
-            <span class="employee-suggestion-name">${emp.employee_name}</span>
-            <span class="employee-suggestion-number">(${emp.employee_number})</span>
+        html += `<div class="employee-suggestion-item" onclick="selectBulkDeputy('${escapeJsArg(emp.employee_name)}')">
+            <span class="employee-suggestion-name">${escapeHtml(emp.employee_name)}</span>
+            <span class="employee-suggestion-number">(${escapeHtml(emp.employee_number)})</span>
         </div>`;
     });
     html += '</div>';
@@ -1835,9 +1855,9 @@ function renderBulkRegisterList() {
     bulkRegisterList.forEach(item => {
         const color = window.leaveColors[item.leave_type] || '#6b7280';
         html += '<tr>';
-        html += `<td>${item.date}</td>`;
-        html += `<td>${item.name}${item.employee_number ? ` (${item.employee_number})` : ''}</td>`;
-        html += `<td><span class="badge" style="background-color: ${color}; color: white">${item.leave_type}</span></td>`;
+        html += `<td>${escapeHtml(item.date)}</td>`;
+        html += `<td>${escapeHtml(item.name)}${item.employee_number ? ` (${escapeHtml(item.employee_number)})` : ''}</td>`;
+        html += `<td><span class="badge" style="background-color: ${color}; color: white">${escapeHtml(item.leave_type)}</span></td>`;
         html += `<td><button onclick="removeBulkListItem(${item.id})" class="btn btn-danger btn-sm">削除</button></td>`;
         html += '</tr>';
     });
@@ -1983,15 +2003,15 @@ async function previewBulkRegister() {
 
         if (result.success) {
             html += `<td><span class="text-green-600">✓ OK</span></td>`;
-            html += `<td>${result.data.date}</td>`;
-            html += `<td>${result.data.name}</td>`;
-            html += `<td>${result.data.employee_number || '-'}</td>`;
+            html += `<td>${escapeHtml(result.data.date)}</td>`;
+            html += `<td>${escapeHtml(result.data.name)}</td>`;
+            html += `<td>${escapeHtml(result.data.employee_number || '-')}</td>`;
             const color = window.leaveColors[result.data.leave_type];
-            html += `<td><span class="badge" style="background-color: ${color}; color: white">${result.data.leave_type}</span></td>`;
-            html += `<td>${result.data.deputies.join(', ') || '-'}</td>`;
-            html += `<td>${result.data.remarks || '-'}</td>`;
+            html += `<td><span class="badge" style="background-color: ${color}; color: white">${escapeHtml(result.data.leave_type)}</span></td>`;
+            html += `<td>${escapeHtml(result.data.deputies.join(', ') || '-')}</td>`;
+            html += `<td>${escapeHtml(result.data.remarks || '-')}</td>`;
         } else {
-            html += `<td colspan="7"><span class="text-red-600">✗ エラー: ${result.error}</span></td>`;
+            html += `<td colspan="7"><span class="text-red-600">✗ エラー: ${escapeHtml(result.error)}</span></td>`;
         }
 
         html += '</tr>';
@@ -2088,11 +2108,11 @@ function showCopyLeaveModal() {
         const sourceInfo = document.getElementById('copy-source-info');
         const color = window.leaveColors[currentEditingLeave.leave_type] || '#6b7280';
 
-        let html = `<p><strong>日付:</strong> ${currentEditingLeave.date}</p>`;
-        html += `<p><strong>名前:</strong> ${currentEditingLeave.name}</p>`;
-        html += `<p><strong>休暇種類:</strong> <span class="badge" style="background-color: ${color}; color: white">${currentEditingLeave.leave_type}</span></p>`;
-        html += `<p><strong>代務者:</strong> ${currentEditingLeave.deputies ? currentEditingLeave.deputies.join(', ') : '-'}</p>`;
-        html += `<p><strong>備考:</strong> ${currentEditingLeave.remarks || '-'}</p>`;
+        let html = `<p><strong>日付:</strong> ${escapeHtml(currentEditingLeave.date)}</p>`;
+        html += `<p><strong>名前:</strong> ${escapeHtml(currentEditingLeave.name)}</p>`;
+        html += `<p><strong>休暇種類:</strong> <span class="badge" style="background-color: ${color}; color: white">${escapeHtml(currentEditingLeave.leave_type)}</span></p>`;
+        html += `<p><strong>代務者:</strong> ${currentEditingLeave.deputies ? escapeHtml(currentEditingLeave.deputies.join(', ')) : '-'}</p>`;
+        html += `<p><strong>備考:</strong> ${escapeHtml(currentEditingLeave.remarks || '-')}</p>`;
 
         sourceInfo.innerHTML = html;
 
@@ -2346,9 +2366,9 @@ function displayEmployeeSuggestions(employees) {
     let html = '<div class="employee-suggestions-scroll">';
     employees.forEach(emp => {
         html += `
-            <div class="employee-suggestion-item" onclick="selectEmployee('${emp.employee_number}', '${emp.employee_name.replace(/'/g, "\\'")}')">
-                <span class="employee-suggestion-name">${emp.employee_name}</span>
-                <span class="employee-suggestion-number">(${emp.employee_number})</span>
+            <div class="employee-suggestion-item" onclick="selectEmployee('${escapeJsArg(emp.employee_number)}', '${escapeJsArg(emp.employee_name)}')">
+                <span class="employee-suggestion-name">${escapeHtml(emp.employee_name)}</span>
+                <span class="employee-suggestion-number">(${escapeHtml(emp.employee_number)})</span>
             </div>
         `;
     });
@@ -2443,9 +2463,9 @@ function displayDeputySuggestions(employees) {
     let html = '<div class="employee-suggestions-scroll">';
     employees.forEach(emp => {
         html += `
-            <div class="employee-suggestion-item" onclick="selectDeputy('${emp.employee_name.replace(/'/g, "\\'")}')">
-                <span class="employee-suggestion-name">${emp.employee_name}</span>
-                <span class="employee-suggestion-number">(${emp.employee_number})</span>
+            <div class="employee-suggestion-item" onclick="selectDeputy('${escapeJsArg(emp.employee_name)}')">
+                <span class="employee-suggestion-name">${escapeHtml(emp.employee_name)}</span>
+                <span class="employee-suggestion-number">(${escapeHtml(emp.employee_number)})</span>
             </div>
         `;
     });
