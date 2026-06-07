@@ -614,8 +614,37 @@ def create_app(test_config=None):
     app.register_blueprint(power_imager_bp)
 
     # アクセス権管理（機密ツールに before_request を紐付け）
-    from flask import request as _req
+    from flask import request as _req, abort
     from .access_control import enforce_tool_access
+
+    # static_folder 配下に置かれている実行時データ（個人情報・権限設定など）は、
+    # 本来 Flask の /static/ 経由で無認証配信されてはならない。これらは
+    # アプリ内部のサーバ側処理や認可付き API からのみ参照され、テンプレートの
+    # 静的アセット（css/js）としては参照されない。該当パスへの直接アクセスを
+    # 404 で遮断し、URL 推測による情報漏洩を防ぐ。
+    _STATIC_BLOCKED_DIR_PREFIXES = (
+        "/static/leave_mgr/calendars/",
+        "/static/health_check/uploads/",
+        "/static/pluslist/uploads/",
+        "/static/subject_analysis_tool/uploads/",
+        "/static/monthly_generator/uploads/",
+    )
+    _STATIC_BLOCKED_SUFFIXES = (
+        "permissions.json",
+        "settings.json",
+        "calendar_meta.json",
+    )
+
+    @app.before_request
+    def _block_sensitive_static_files():
+        path = _req.path or ""
+        if not path.startswith("/static/"):
+            return None
+        if any(path.startswith(p) for p in _STATIC_BLOCKED_DIR_PREFIXES):
+            abort(404)
+        if path.endswith(_STATIC_BLOCKED_SUFFIXES):
+            abort(404)
+        return None
 
     # Blueprint毎のアクセス制御除外パスプレフィックス。
     # トークン共有等、ログインしていない外部ユーザーが利用する経路を除外する。
