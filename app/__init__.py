@@ -617,6 +617,18 @@ def create_app(test_config=None):
     from flask import request as _req, abort
     from .access_control import enforce_tool_access
 
+    # 軽量 CSRF 対策: アプリ全体の書き込み系リクエスト（不安全メソッド）に対して
+    # Origin/Referer の同一オリジンを確認する（両方未設定なら通過）。以前は一部
+    # ツールの接頭辞のみだったが、保護漏れを無くすため全体に統一適用する。
+    # CSRF は他の認可/リダイレクト系フックより先に効かせたいので最初に登録する。
+    from .security.request_guard import enforce_same_origin_for_mutations
+
+    @app.before_request
+    def _enforce_same_origin_for_mutations():
+        if app.config.get("TESTING") and not app.config.get("DSTT_ENFORCE_SAME_ORIGIN_IN_TESTS"):
+            return None
+        return enforce_same_origin_for_mutations()
+
     # static_folder 配下に置かれている実行時データ（個人情報・権限設定など）は、
     # 本来 Flask の /static/ 経由で無認証配信されてはならない。これらは
     # アプリ内部のサーバ側処理や認可付き API からのみ参照され、テンプレートの
@@ -685,26 +697,6 @@ def create_app(test_config=None):
             if path.startswith(pref):
                 return None
         return enforce_tool_access(tool_key)
-
-    # 軽量 CSRF 対策: 個人情報を扱うツールの書き込み系 API に限り
-    # Origin/Referer の同一オリジンを確認する（両方未設定なら通過）。
-    from .security.request_guard import enforce_same_origin_for_mutations
-    _SAME_ORIGIN_PATH_PREFIXES = (
-        "/tools/bus_pricing/api/",
-        "/tools/pluslist/api/",
-        "/tools/siteplus/api/",
-        "/tools/to_bell/api/",
-        "/tools/health_check/api/",
-    )
-
-    @app.before_request
-    def _enforce_same_origin_for_sensitive_apis():
-        if app.config.get("TESTING") and not app.config.get("DSTT_ENFORCE_SAME_ORIGIN_IN_TESTS"):
-            return None
-        path = _req.path or ""
-        if not any(path.startswith(p) for p in _SAME_ORIGIN_PATH_PREFIXES):
-            return None
-        return enforce_same_origin_for_mutations()
 
     @app.before_request
     def _run_to_bell_daily_cleanup():

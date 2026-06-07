@@ -384,3 +384,38 @@ def test_same_origin_check_allows_same_origin_post(tmp_path, monkeypatch):
     )
     # origin チェックを通過し、セッション欠落（400）または認証系のレスポンスになる
     assert resp.status_code != 403 or "このツール" in (resp.get_json() or {}).get("error", "")
+
+
+def test_same_origin_check_applies_to_non_tool_mutations(tmp_path, monkeypatch):
+    """旧来は接頭辞限定だった保護を全体へ統一: ツール API 以外の POST も検査される。"""
+    _stub_optional_deps()
+    monkeypatch.delenv("DSTT_DATA_ENCRYPTION_KEY_B64", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    from app import create_app
+
+    app = create_app(
+        {
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'origin3.db'}",
+            "SECRET_KEY": "test",
+            "TESTING": True,
+            "DSTT_ENFORCE_SAME_ORIGIN_IN_TESTS": True,
+        }
+    )
+    client = app.test_client()
+
+    # 旧プレフィックス外の認証フォーム POST もクロスオリジンならブロックされる
+    blocked = client.post(
+        "/auth/login",
+        data={"username": "x", "password": "y"},
+        headers={"Origin": "http://evil.example.com"},
+    )
+    assert blocked.status_code == 403
+
+    # 同一オリジンならブロックされない（403 以外）
+    allowed = client.post(
+        "/auth/login",
+        data={"username": "x", "password": "y"},
+        headers={"Origin": "http://localhost"},
+    )
+    assert allowed.status_code != 403
