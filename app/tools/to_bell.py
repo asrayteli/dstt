@@ -666,7 +666,7 @@ def api_google_callback():
     base_url = url_for("to_bell.index")
     if error:
         return redirect(f"{base_url}?google_error={error}")
-    if not expected or not received or expected != received:
+    if not expected or not received or not secrets.compare_digest(str(expected), str(received)):
         return redirect(f"{base_url}?google_error=state_mismatch")
     code = request.args.get("code")
     if not code:
