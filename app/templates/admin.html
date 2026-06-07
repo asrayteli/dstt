@@ -605,7 +605,7 @@ function renderUsers() {
   const tbody = $('#users-tbody');
   tbody.innerHTML = state.users.map(u => `
     <tr class="border-t">
-      <td class="p-3 font-mono">${u.username}${u.is_legacy_admin ? '<span class="ml-1 text-xs text-red-600">[初期管理者]</span>' : ''}</td>
+      <td class="p-3 font-mono">${escape(u.username)}${u.is_legacy_admin ? '<span class="ml-1 text-xs text-red-600">[初期管理者]</span>' : ''}</td>
       <td class="p-3">${escape(u.name)}</td>
       <td class="p-3">${u.is_admin ? '<span class="text-red-600 font-medium">✔</span>' : '-'}</td>
       <td class="p-3">${escape(u.branch_name || '-')}${u.branch_code ? ' <span class="text-xs font-mono text-blue-700">[' + escape(u.branch_code) + ']</span>' : ''}</td>
