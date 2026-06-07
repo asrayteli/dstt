@@ -231,7 +231,13 @@ def process_files():
         budget_file = request.files.get('budget_file')  # 予算ファイル
 
         # パラメータ取得
-        target_month = int(request.form.get('target_month'))  # 対象月（1-12）
+        # 対象月（1-12）。未指定や非整数で 500 を出さないよう安全に検証する。
+        try:
+            target_month = int(request.form.get('target_month'))
+        except (TypeError, ValueError):
+            return jsonify({"error": "対象月（1〜12）を正しく指定してください"}), 400
+        if not 1 <= target_month <= 12:
+            return jsonify({"error": "対象月は1〜12で指定してください"}), 400
         sheet_name = request.form.get('sheet_name')  # シート名
 
         site_source = str(request.form.get('site_source', 'file') or 'file').strip().lower()
@@ -326,10 +332,11 @@ def process_files():
 
         return jsonify(result)
 
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        traceback.print_exc()
-        return jsonify({"error": f"処理中にエラーが発生しました: {str(e)}"}), 500
+        # 詳細はサーバーログにのみ残し、クライアントには内部情報を返さない。
+        current_app.logger.exception("monthly_generator process_files failed")
+        return jsonify({"error": "処理中にエラーが発生しました。"}), 500
 
 
 def process_monthly_data(subject_path, site_path, report_path, target_month, sheet_name,

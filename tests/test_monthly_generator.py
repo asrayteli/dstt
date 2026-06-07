@@ -358,6 +358,37 @@ def test_monthly_generator_can_ignore_missing_subject_sites(tmp_path):
     ]
 
 
+def test_process_rejects_invalid_target_month_without_500(tmp_path):
+    """対象月が非整数/範囲外でも 500 にせず 400 を返す（DoS・例外漏洩防止）。"""
+    _module, app = _build_app(tmp_path)
+    client = app.test_client()
+
+    # 非整数
+    resp = client.post(
+        "/tools/monthly_generator/api/process",
+        data={"target_month": "abc", "sheet_name": "Sheet1"},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+    assert "対象月" in resp.get_json()["error"]
+
+    # 範囲外
+    resp = client.post(
+        "/tools/monthly_generator/api/process",
+        data={"target_month": "13", "sheet_name": "Sheet1"},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+
+    # 未指定
+    resp = client.post(
+        "/tools/monthly_generator/api/process",
+        data={"sheet_name": "Sheet1"},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+
+
 def test_monthly_generator_summary_js_uses_backend_keys():
     js_path = ROOT / "app" / "static" / "monthly_generator" / "js" / "monthly_generator.js"
     script = js_path.read_text(encoding="utf-8")
