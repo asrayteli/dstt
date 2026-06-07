@@ -223,7 +223,7 @@ def _load_siteplus_module():
     return module
 
 
-def _siteplus_client_with_user(tmp_path, user_id=42):
+def _siteplus_client_with_user(tmp_path, monkeypatch, user_id=42):
     module = _load_siteplus_module()
     from app.models import db, AccessBranch, AccessOffice, UserAccessibleOffice
 
@@ -263,16 +263,18 @@ def _siteplus_client_with_user(tmp_path, user_id=42):
         office_id=None,
         department_id=None,
     )
-    module.current_user = fake_user
-    # access_control.py 側の current_user も置き換える
+    # current_user を偽ユーザーに差し替える。monkeypatch を使い、テスト終了時に
+    # 必ず元へ戻す（戻さないと app.access_control.current_user がセッション全体で
+    # 偽ユーザーのまま残り、後続テストを汚染する）。
+    monkeypatch.setattr(module, "current_user", fake_user, raising=False)
     from app import access_control as _ac
-    _ac.current_user = fake_user
+    monkeypatch.setattr(_ac, "current_user", fake_user, raising=False)
     return module, app, app.test_client()
 
 
-def test_siteplus_import_rejects_forbidden_office_for_real_user(tmp_path):
+def test_siteplus_import_rejects_forbidden_office_for_real_user(tmp_path, monkeypatch):
     _stub_optional_deps()
-    module, app, client = _siteplus_client_with_user(tmp_path)
+    module, app, client = _siteplus_client_with_user(tmp_path, monkeypatch)
 
     csv_text = "\n".join(
         [
