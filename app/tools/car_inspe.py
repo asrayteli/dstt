@@ -1890,7 +1890,10 @@ def api_records():
         ))
         expiry = item.get("expiry_date") or ""
         item["status"] = "unknown"
-        if expiry:
+        # expiry_date は正常時 "YYYYMMDD" の8桁。OCR失敗時に非8桁の文字列が
+        # 入りうるため、8桁の場合のみ today との文字列比較で期限判定する
+        # （非8桁を比較すると期限切れ車両を active と誤判定する恐れがある）。
+        if re.fullmatch(r"\d{8}", expiry):
             item["status"] = "expired" if expiry < today else "active"
         if status and item["status"] != status:
             continue
