@@ -181,7 +181,9 @@ def _handle_unexpected_cloudshift_error(error: Exception):
         print(f"{request.method} {request.path}", file=sys.stderr)
         print(f"{type(error).__name__}: {error}", file=sys.stderr)
         traceback.print_exception(type(error), error, error.__traceback__, file=sys.stderr)
-        return jsonify({"error": f"CloudShift内部エラー: {type(error).__name__}: {error}"}), 500
+        # 例外の詳細（型名・メッセージ）はサーバログにのみ出力し、クライアントには
+        # 内部情報を含まない汎用メッセージを返す（公開編集経路からの情報漏洩を防ぐ）。
+        return jsonify({"error": "CloudShift内部エラーが発生しました。時間をおいて再度お試しください。"}), 500
     raise error
 
 
