@@ -2539,6 +2539,26 @@ def _ensure_substitute_projects_for_current_user() -> None:
 def _find_project_by_token(token: str, token_type: str) -> dict[str, Any]:
     key = {"view": "view_token", "edit": "edit_token", "pwa": "pwa_token"}.get(token_type, "edit_token")
     token = str(token or "")
+    if not token:
+        abort(404)
+    # view_token / edit_token は一意インデックス付きの DB カラムなので直接検索し、
+    # 全プロジェクト・全月のメモリ展開（重い線形走査）を避ける。トークンは
+    # 256bit 乱数のため等価検索でも実質的なタイミング攻撃の懸念はない。
+    if key in ("view_token", "edit_token"):
+        column = getattr(CloudShiftProject, key)
+        row = CloudShiftProject.query.filter(column == token).first()
+        if row is not None:
+            return _db_project_to_dict(row)
+        # DB に無い場合のみ、レガシー JSON ファイルを走査する（DB は再走査しない）。
+        for path in _shifts_dir().glob("*.json"):
+            project = _load_json(path)
+            if not project:
+                continue
+            candidate = str(project.get(key, ""))
+            if candidate and secrets.compare_digest(candidate, token):
+                return project
+        abort(404)
+    # pwa_token は extra_data(JSON) 内のためインデックス検索できず、従来どおり走査する。
     for project in _iter_stored_projects():
         candidate = str(project.get(key, ""))
         if candidate and secrets.compare_digest(candidate, token):
