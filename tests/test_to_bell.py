@@ -703,6 +703,34 @@ def test_share_session_cannot_manage_share_token(app_ctx):
     assert guest.post("/tools/to_bell/api/share/revoke").status_code == 403
 
 
+def test_share_session_cannot_change_account_settings(app_ctx):
+    """共有セッションは本人のアカウント設定（通知・リマインダ・プッシュ購読）を変更できないこと。"""
+    _create_user(app_ctx, "alice", "Alice")
+
+    owner = app_ctx.test_client()
+    _login(owner, "alice")
+    token = owner.post("/tools/to_bell/api/share/issue").get_json()["url"].rsplit("/", 1)[-1]
+
+    guest = app_ctx.test_client()
+    guest.get(f"/tools/to_bell/s/{token}")
+
+    # 設定変更系は 403
+    assert guest.put("/tools/to_bell/api/settings/integrations", json={}).status_code == 403
+    assert guest.put("/tools/to_bell/api/google/reminders", json={"reminders": []}).status_code == 403
+    assert guest.post(
+        "/tools/to_bell/api/push/subscribe",
+        json={"endpoint": "https://example.com/x", "keys": {"p256dh": "a", "auth": "b"}},
+    ).status_code == 403
+    assert guest.post("/tools/to_bell/api/push/unsubscribe", json={"endpoint": "x"}).status_code == 403
+    assert guest.put("/tools/to_bell/api/push/subscriptions/1", json={"device_label": "x"}).status_code == 403
+    assert guest.delete("/tools/to_bell/api/push/subscriptions/1").status_code == 403
+    assert guest.post("/tools/to_bell/api/push/test").status_code == 403
+
+    # ただしボード操作（タスク作成）と閲覧系は引き続き可能
+    assert guest.post("/tools/to_bell/api/tasks", json={"title": "共有から追加"}).status_code == 201
+    assert guest.get("/tools/to_bell/api/settings").status_code == 200
+
+
 def test_share_token_revoke_and_reissue_invalidate_old_token(app_ctx):
     """無効化・再発行で旧トークンが使えなくなること。"""
     _create_user(app_ctx, "alice", "Alice")

@@ -553,6 +553,7 @@ def api_push_public_key():
 @to_bell_bp.route("/api/push/subscribe", methods=["POST"])
 @login_required
 def api_push_subscribe():
+    _block_share_session()
     try:
         payload = _payload()
         subscription = payload.get("subscription") if isinstance(payload.get("subscription"), dict) else payload
@@ -569,6 +570,7 @@ def api_push_subscribe():
 @to_bell_bp.route("/api/push/unsubscribe", methods=["POST"])
 @login_required
 def api_push_unsubscribe():
+    _block_share_session()
     endpoint = str(_payload().get("endpoint") or "").strip()
     return jsonify({"status": "ok", "updated": unsubscribe(current_user.username, endpoint)})
 
@@ -582,6 +584,7 @@ def api_push_subscriptions():
 @to_bell_bp.route("/api/push/subscriptions/<int:subscription_id>", methods=["PUT", "DELETE"])
 @login_required
 def api_push_subscription(subscription_id: int):
+    _block_share_session()
     try:
         if request.method == "DELETE":
             hard = request.args.get("hard", "").lower() in ("1", "true", "yes")
@@ -601,6 +604,7 @@ def api_push_subscription(subscription_id: int):
 @to_bell_bp.route("/api/push/test", methods=["POST"])
 @login_required
 def api_push_test():
+    _block_share_session()
     try:
         return jsonify({"status": "ok", **send_test_push(current_user.username)})
     except ToBellPushUnavailable as exc:
@@ -618,6 +622,7 @@ def api_settings_get():
 @to_bell_bp.route("/api/settings/integrations", methods=["PUT"])
 @login_required
 def api_settings_integrations():
+    _block_share_session()
     return jsonify(update_integrations(current_user.username, _payload()))
 
 
@@ -685,6 +690,8 @@ def api_google_disconnect():
 @to_bell_bp.route("/api/google/reminders", methods=["PUT"])
 @login_required
 def api_google_reminders():
+    _block_share_session()
+
     def action():
         reminders = _payload().get("reminders")
         saved = to_bell_calendar.set_default_reminders(current_user.username, reminders)
