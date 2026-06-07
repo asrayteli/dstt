@@ -59,12 +59,14 @@ def test_date_count_counts_weekdays_month_days_exact_dates_and_holidays_without_
         include_japan_holidays=True,
     )
 
-    assert result.summary == "4日"
+    # 2026-05-01〜05-07 の祝日は 5/3(憲法記念日・日曜)・5/4(みどりの日)・
+    # 5/5(こどもの日)・5/6(振替休日) の4日。重複除外後は 5/1・5/3・5/4・5/5・5/6 の5日。
+    assert result.summary == "5日"
     assert "曜日一致: 1日" in result.details
     assert "毎月の日付一致: 1日" in result.details
     assert "個別日付一致: 1日" in result.details
-    assert "祝日一致: 3日" in result.details
-    assert "重複除外後: 4日" in result.details
+    assert "祝日一致: 4日" in result.details
+    assert "重複除外後: 5日" in result.details
 
 
 def test_date_count_swaps_reverse_range():
