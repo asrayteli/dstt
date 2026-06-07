@@ -707,8 +707,12 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
 
 
 def read_csv_with_encoding(file_path):
-    """複数のエンコーディングでCSVを読み込む"""
-    encodings = ['utf-8', 'shift_jis', 'cp932', 'utf-8-sig']
+    """複数のエンコーディングでCSVを読み込む。
+
+    utf-8-sig を最初に試すことで、BOM 付き UTF-8 の CSV を 'utf-8' で
+    読んでしまい先頭セルに \\ufeff が残る不具合を防ぐ。
+    """
+    encodings = ['utf-8-sig', 'utf-8', 'cp932', 'shift_jis']
 
     for encoding in encodings:
         try:
@@ -716,7 +720,7 @@ def read_csv_with_encoding(file_path):
                 reader = csv.reader(f)
                 data = list(reader)
                 return data
-        except:
+        except (UnicodeDecodeError, UnicodeError):
             continue
 
     return None
