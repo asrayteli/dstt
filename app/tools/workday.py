@@ -1,4 +1,4 @@
-﻿from flask import Blueprint, render_template, request, send_file
+from flask import Blueprint, render_template, request, send_file
 from datetime import datetime, timedelta
 import io
 from openpyxl import Workbook
