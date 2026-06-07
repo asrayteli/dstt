@@ -708,6 +708,17 @@ def create_app(test_config=None):
         return None
 
     @app.after_request
+    def _apply_default_security_headers(response):
+        # 全レスポンスに最低限のセキュリティヘッダを付与する。
+        # setdefault を使い、個別ルートがより厳格な値（password_tool / share の
+        # CSP・DENY 等）を設定済みの場合はそれを上書きしない。
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        # URL に共有トークンを含むツールがあるため、外部遷移時の Referer 漏洩を抑える。
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        return response
+
+    @app.after_request
     def _record_tool_activity(response):
         from flask import g, request as _request
         from flask_login import current_user as _current_user
