@@ -1,7 +1,7 @@
 # CloudShift 自動シフト作成エンジン設計書
 
 作成日: 2026-06-08  
-修正日: 2026-06-08
+修正日: 2026-06-08（既存コード調査に基づくデータ源整合の訂正を反映）
 
 ## 目的
 
@@ -26,6 +26,16 @@ CloudShift の現行アシスト機能を、単一日・単一枠の候補者検
 9. 生成品質を「充足率」「重大違反ゼロ」「公平性」「説明可能性」で測る。
 10. Phase 1 から監査ログ、性能予算、ロールアウト条件を持たせる。
 
+## 実装前提の訂正（既存コード調査反映）
+
+本設計を既存コード（`app/models.py`、`app/tools/cloudshift.py`、`app/tools/leave_mgr.py`、`app/tools/shiftersync_format.py`）と突き合わせた結果、データ源の有無に基づいて次を訂正する。これらは Phase 1 の実装可能性に直結するため、以降の各節の記述より優先する。
+
+1. **資格（qualification）はデータ源が存在しない。** 現行コードに資格マスタや社員資格情報は一切ない（`Employee` モデルにも資格項目はない）。よって `required_qualification_codes` / `qualification_codes` は「将来用の予約フィールド」にとどめ、Phase 1 では Hard Constraint にも seed/result 検証にも使わない。空でない資格要求が来た場合は `warning` として返し、配置可否には影響させない。
+2. **車両・時間オプションは Hard ではなく Soft。** 既存の `VEHICLE_OPTION_KEYS`（`M/C/O/W/V/N1..N5`）と `SHIFT_TIME_OPTION_KEYS`（`A/P/E/L/TEMP`）はシフト種別ラベルであり、「担当できるか」を表す許可データではない。現行実装ではこれらは過去実績に基づく**適性（aptitude）スコア**として扱われている（`_assist_option_aptitude_*`）。したがって `required_vehicle_options` を満たさない配置を禁止する根拠データはない。これらは Soft Constraint（適性ボーナス／不一致ペナルティ）として扱い、Hard Constraint からは外す。なお `RequiredSlot.required_count` を「オプション種別ごとに何枠必要か」で定義することは需要側の話であり、これは引き続き有効。
+3. **`Worker.active` は単一フラグから取れない。** `Employee` に `active` 真偽値はなく、`is_deleted`（Bool）と `retirement_date`（String 型で `"？退職？"` のような非正規値を含む）から導出する。退職判定は文字列を正規化したうえで保守的に行い、確実に退職と判断できる場合のみ `active=False` とする。判定不能な値は `active` を維持しつつ `warning` を出す。
+4. **`base_revision` 競合検出は新規実装。** `CloudShiftMonth.revision` は保存時にインクリメントされ `revision_snapshots` も保持されるが、`base_revision` 比較による mismatch 検出は現行 API に存在しない（既存の下書き保存はサーバー内 `_project_lock` で直列化しているだけ）。`apply-draft` での revision mismatch 検出はこの設計で新規に実装する。
+5. **fallback は `capacity_enabled` を尊重する。** `required_capacity` は `CloudShiftMonth.capacity_enabled`（Bool）で有効化される。`required_capacity` からの自動展開 fallback は `capacity_enabled=True` のときだけ行い、無効時は需要ゼロとして扱う。
+
 ## 現行構造と前提
 
 CloudShift は `CloudShiftProject` と `CloudShiftMonth` を中心に構成されている。
@@ -48,9 +58,12 @@ CloudShift は `CloudShiftProject` と `CloudShiftMonth` を中心に構成さ�
   - 既存 API で保存、クリア、公開が可能。
 - `CloudShiftMonth.required_capacity`
   - 現在は月全体の必要人数として扱われる。
-  - エンジンでは後方互換用の初期値にとどめる。
+  - `CloudShiftMonth.capacity_enabled`（Bool）で有効・無効が切り替わる。
+  - エンジンでは後方互換用の初期値にとどめ、fallback 展開は `capacity_enabled=True` のときだけ行う。
 - `CloudShiftMonth.revision`
   - `plan` から `apply-draft` までの競合検出に使う。
+  - 保存時に増加し、`CloudShiftMonth.revision_snapshots` に履歴が残る。
+  - ただし `base_revision` を受け取って mismatch を検出する仕組みは現行 API に無いため、`apply-draft` で新規実装する。
 
 現行の自動入力に使いやすい接点は `draft_entries_per_day`。生成結果は正式反映せず、まず下書きへ入れ、ユーザーが確認して公開する。
 
@@ -174,7 +187,7 @@ class ShiftEngineSettings:
     scoring_weights: ScoringWeights
 ```
 
-最小構成では `demand_rules` が未設定でも動くようにする。この場合は `CloudShiftMonth.required_capacity` を全営業日に対する同一人数として `RequiredSlot` へ展開する。ただし、この fallback は暫定扱いであり、UI では「月全体の必要人数から自動展開」と明示する。
+最小構成では `demand_rules` が未設定でも動くようにする。この場合は `capacity_enabled=True` のときに限り、`CloudShiftMonth.required_capacity` を全営業日に対する同一人数として `RequiredSlot` へ展開する。`capacity_enabled=False` の場合は需要ゼロとして扱い、勝手に配置を増やさない。この fallback は暫定扱いであり、UI では「月全体の必要人数から自動展開」と明示する。
 
 ### 需要設定
 
@@ -194,8 +207,8 @@ class DemandRule:
     required_count: int = 1
     site_branch_row_id: str = ""
     site_branch: str = ""
-    required_qualification_codes: tuple[str, ...] = ()
-    required_vehicle_options: tuple[str, ...] = ()
+    required_qualification_codes: tuple[str, ...] = ()  # 予約フィールド。資格マスタが無いため Phase 1 では Hard 化しない
+    required_vehicle_options: tuple[str, ...] = ()       # Soft（過去実績ベースの適性）として扱う。Hard にしない
     priority: int = 100
 ```
 
@@ -236,6 +249,7 @@ class PlanningPreferences:
 class ScoringWeights:
     dedicated_bonus: int = 500
     experience_bonus: int = 120
+    option_aptitude_bonus: int = 80  # 車両/時間帯オプションの過去実績適性。資格・許可の代替ではない
     preferred_weekday_bonus: int = 40
     soft_unavailable_penalty: int = 300
     consecutive_day_penalty: int = 80
@@ -323,8 +337,8 @@ class RequiredSlot:
     site_name: str = ""
     site_branch_row_id: str = ""
     site_branch: str = ""
-    required_qualification_codes: tuple[str, ...] = ()
-    required_vehicle_options: tuple[str, ...] = ()
+    required_qualification_codes: tuple[str, ...] = ()  # 予約フィールド。資格データが無いため Phase 1 では warning のみ
+    required_vehicle_options: tuple[str, ...] = ()       # Soft（適性）として扱う。Hard にしない
     time_band: str = ""
     priority: int = 100
     source: Literal["settings", "required_capacity_fallback", "existing_entry"] = "settings"
@@ -336,7 +350,7 @@ class RequiredSlot:
 
 1. `project["shift_engine"].demand_rules` がある場合は、それを最優先にする。
 2. 既存シフトを固定する場合は、既存配置分を `ExistingAssignment` として先に確保する。
-3. `demand_rules` がない場合のみ、`required_capacity` から日別の同一需要を作る。
+3. `demand_rules` がなく、かつ `capacity_enabled=True` の場合のみ、`required_capacity` から日別の同一需要を作る。
 4. 需要がゼロの日は、エンジンが勝手に配置を増やさない。
 
 ### 人員モデル
@@ -352,9 +366,9 @@ class Worker:
     office_name: str = ""
     dedicated_site_ids: tuple[str, ...] = ()
     dedicated_site_row_ids: tuple[str, ...] = ()
-    qualification_codes: tuple[str, ...] = ()
-    vehicle_options: tuple[str, ...] = ()
-    capable_shift_keys: tuple[str, ...] = ()
+    qualification_codes: tuple[str, ...] = ()  # 予約フィールド。現行コードに資格データが無い
+    vehicle_options: tuple[str, ...] = ()       # 過去実績由来の適性。Soft スコアにのみ使う
+    capable_shift_keys: tuple[str, ...] = ()    # 過去実績由来。担当可能性の証明ではなく Soft 材料
     preference: WorkerPreference | None = None
     monthly_limit: WorkerMonthlyLimit | None = None
 ```
@@ -378,7 +392,7 @@ class Worker:
 
 - `employee_number` は前後空白を除去し、空なら割当対象外にする。
 - 同じ `employee_number` が複数ソースに出た場合は 1人に統合する。
-- Employee 側で退職済み、削除済み、無効扱いの人は `active=False` とし、割当対象から外す。
+- 在籍状態は `Employee.is_deleted`（Bool）と `Employee.retirement_date`（String 型で `"？退職？"` 等の非正規値を含む）から導出する。削除済み、または正規化後に退職と確実に判断できる人は `active=False` とし、割当対象から外す。判定不能な `retirement_date` は `active` を維持しつつ `warning` を返す。
 - 名前だけ一致する候補は同一人物とみなさない。
 - `assist` 側に存在するが Employee に存在しない候補は `warning` として返す。
 
@@ -507,7 +521,7 @@ class Violation:
 
 - 固定配置同士の同日重複がない。
 - 固定配置が `hard` 休暇と衝突しない。
-- 固定配置が必須資格、枝番、時間帯条件に違反しない。
+- 固定配置が枝番条件に違反しない。資格・車両・時間帯は許可データが無いため Phase 1 では Hard 検証しない。
 - 固定配置だけで需要を超過している場合は、超過を `warning` ではなく `blocker` にする。
 
 seed が `blocker` を持つ場合、エンジンは再配置で解消しない。固定を外すよう UI で促す。
@@ -573,11 +587,12 @@ class ScoreFactor:
 - 同日同時間帯の重複禁止
 - 同じ現場内での重複禁止
 - 無効な従業員の配置禁止
-- 無効な現場、枝番、車両枠への配置禁止
+- 無効な現場、枝番への配置禁止
 - 固定既存シフトの変更禁止
-- 必須資格、車両、時間帯条件を満たさない人の配置禁止
 - `employee_number` がない候補者の自動配置禁止
 - 月次上限を超える配置禁止。ただし設定で `warning` に下げられる
+
+資格、車両、時間帯条件は許可データが現行コードに無いため Hard Constraint にしない。資格要求は `warning`、車両・時間帯は下記 Soft の適性として扱う。担当可能性をデータで保証できる仕組みができた段階で Hard 化を再検討する。
 
 ### Soft Constraints
 
@@ -585,6 +600,7 @@ class ScoreFactor:
 
 - 専従者優先
 - 過去実績者優先
+- 車両/時間帯オプションの過去実績適性（`_assist_option_aptitude_*` 相当）
 - 研修者の適度な混入
 - 希望曜日
 - `soft` 休暇、未確認休暇の回避
