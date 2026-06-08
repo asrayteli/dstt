@@ -186,6 +186,7 @@ class ShiftEngineSettings:
     default_preferences: PlanningPreferences
     worker_limits: list[WorkerLimit]
     scoring_weights: ScoringWeights
+    option_experience_policies: list[OptionExperiencePolicy]
 ```
 
 最小構成では `demand_rules` が未設定でも動くようにする。この場合は `capacity_enabled=True` のときに限り、`CloudShiftMonth.required_capacity` を全営業日に対する同一人数として `RequiredSlot` へ展開する。`capacity_enabled=False` の場合は需要ゼロとして扱い、勝手に配置を増やさない。この fallback は暫定扱いであり、UI では「月全体の必要人数から自動展開」と明示する。
@@ -271,6 +272,27 @@ class ScoringWeights:
 - バランス型
 
 内部ではプリセットを `ScoringWeights` に変換する。
+
+### オプション経験ポリシー
+
+オプション（車両・時間帯など）の扱いは 2 段構えにする。
+
+1. **オプション一致は加点（既定）。** 候補者がそのオプションを過去に担当した実績があれば、`option_aptitude_bonus` で加点する（`Worker.experienced_option_keys` または既存の `_assist_option_aptitude_*` を使う）。一致しなくても配置は禁止しない。あくまで優先度。
+2. **特定オプションだけ「未経験不可」にできる（任意）。** 現場ごとに「このオプションは経験者しか入れない」を設定したい場合に使う。`OptionExperiencePolicy` で対象オプションを `require_prior_experience=True` にすると、そのオプションの枠は当該オプション経験者だけを適格とし、未経験者は Hard で除外する。
+
+```python
+@dataclass(frozen=True)
+class OptionExperiencePolicy:
+    option_key: str                  # 例: "M"(車両), "A"(時間帯)。OPTION_LABELS のキー
+    require_prior_experience: bool   # True なら、このオプションは経験者のみ配置可（Hard）
+    site_row_id: str = ""            # 空なら全現場、指定で特定現場のみ
+    enabled: bool = True
+```
+
+- この設定の **UI は CloudShift のアシストのオプション欄から行う**。ただし保存先は `assist` JSON ではなく `project["shift_engine"].option_experience_policies` とする（「assist にエンジン設定を追記しない」原則を守る）。
+- ポリシーが無いオプションは従来どおり「一致で加点、不一致でも配置可」。
+- `require_prior_experience=True` のオプション枠で経験者が一人もいなければ、その枠は空欄（`unfilled_slot`）にし、未配置理由を「オプション未経験不可で適格者なし」とする。
+- オプション経験は `Worker.experienced_option_keys`（assist records の `shift_key` 実績から作る）で判定する。
 
 ### 現実性フィルタ（最低基準とスコア下限）
 
@@ -400,6 +422,7 @@ class Worker:
     dedicated_site_row_ids: tuple[str, ...] = ()
     experienced_site_row_ids: tuple[str, ...] = ()  # 実績のある現場（経験）。最低基準と経験点に使う
     trainee_site_row_ids: tuple[str, ...] = ()       # 研修対象の現場。include_trainees 時のみ適格に含める
+    experienced_option_keys: tuple[str, ...] = ()    # 過去に担当した option。一致で加点、未経験不可ポリシー時の適格判定に使う
     qualification_codes: tuple[str, ...] = ()  # 予約フィールド。現行コードに資格データが無い
     vehicle_options: tuple[str, ...] = ()       # 過去実績由来の適性。Soft スコアにのみ使う
     capable_shift_keys: tuple[str, ...] = ()    # 過去実績由来。担当可能性の証明ではなく Soft 材料
@@ -637,9 +660,10 @@ class ScoreFactor:
 1. 候補者がいない。
 2. 候補者はいるが全員 Hard Constraint で除外された。
 3. 候補者はいるが、専従・経験者の最低基準を満たす適格者がいない（「やったことがある人」がいない）。
-4. 候補者はいるが、最良候補のスコアが下限（`min_assignment_score`）未満で見送った。
-5. 固定配置や上限により割当余地がない。
-6. Soft Constraint を優先した結果、未充足を許可した。
+4. 候補者はいるが、オプションが「未経験不可」設定で、その経験者がいない。
+5. 候補者はいるが、最良候補のスコアが下限（`min_assignment_score`）未満で見送った。
+6. 固定配置や上限により割当余地がない。
+7. Soft Constraint を優先した結果、未充足を許可した。
 
 ## 制約分類
 
@@ -655,8 +679,9 @@ class ScoreFactor:
 - 固定既存シフトの変更禁止
 - `employee_number` がない候補者の自動配置禁止
 - 月次上限を超える配置禁止。ただし設定で `warning` に下げられる
+- 「未経験不可」に設定されたオプション枠への、当該オプション未経験者の配置禁止（`OptionExperiencePolicy` が有効な場合のみ。既定は無効＝加点扱い）
 
-資格、車両、時間帯条件は許可データが現行コードに無いため Hard Constraint にしない。資格要求は `warning`、車両・時間帯は下記 Soft の適性として扱う。担当可能性をデータで保証できる仕組みができた段階で Hard 化を再検討する。
+資格は許可データが現行コードに無いため Hard Constraint にしない（`warning` 扱い）。車両・時間帯オプションは既定では下記 Soft の適性（加点）として扱い、Hard にはしない。ただし現場ごとに `OptionExperiencePolicy` で「未経験不可」に設定したオプションだけは、上記のとおり経験者限定の Hard になる。
 
 他現場占有を Hard にしても、エンジン本体の DB 非依存は保たれる。占有データは context adapter が収集して `external_assignments` として渡し、エンジンはその入力だけを見る。
 
@@ -666,7 +691,7 @@ class ScoreFactor:
 
 - 専従者優先
 - 過去実績者優先
-- 車両/時間帯オプションの過去実績適性（`_assist_option_aptitude_*` 相当）
+- 車両/時間帯オプションの過去実績適性（オプション一致で加点。`Worker.experienced_option_keys` / `_assist_option_aptitude_*` 相当）
 - 研修者の適度な混入
 - 希望曜日
 - `soft` 休暇、未確認休暇の回避
@@ -697,6 +722,7 @@ class ScoreFactor:
 - 公平性と経験者優先の重み
 - 配置の最低基準（`eligibility_baseline`：専従/経験者のみ か 全員可）
 - 追加のスコア下限（`min_assignment_score`、任意）
+- オプション別の「未経験不可」設定（`OptionExperiencePolicy`。既定は加点のみ）
 
 ## 生成アルゴリズム
 
@@ -713,7 +739,7 @@ class ScoreFactor:
 3. 固定既存配置を seed として投入
 4. seed の Hard Constraint 違反を検証
 5. 各 slot の候補者を Hard Constraint でフィルタ（他現場占有を含む）
-6. 最低基準（`eligibility_baseline`）で適格者だけに絞る。専従でも経験者でもない候補（研修者は `include_trainees` 時のみ可）を除外する
+6. 最低基準（`eligibility_baseline`）で適格者だけに絞る。専従でも経験者でもない候補（研修者は `include_trainees` 時のみ可）を除外する。さらに、その枠のオプションが `OptionExperiencePolicy` で「未経験不可」なら、当該オプション未経験者も除外する
 7. 候補者数が少ない slot から順に並べる
 8. Soft Constraint の重みで候補者をスコアリング
 9. 決定的な tie-breaker で最良候補を選ぶ。最良候補のスコアが `min_assignment_score` 未満なら割り当てず空欄のままにする
@@ -869,7 +895,7 @@ CloudShift entry は `normalize_entries_for_month` で保持されるフィー�
 
 - NG 曜日は `UnavailableDay(strength="hard" or "soft")` ではなく、原則 `WorkerPreference.blocked_weekdays` として扱う。
 - 希望曜日は Soft Constraint にする。
-- 実績は経験点として使うが、資格や担当可能性の証明にはしない。
+- 実績は経験点として使うが、資格や担当可能性の証明にはしない。実績の現場（`site_row_id`）は `Worker.experienced_site_row_ids`、実績のオプション（`shift_key`）は `Worker.experienced_option_keys` に集約する。
 - 手動ルールは優先度と有効期間を持つ `Rule` に変換する。
 
 ## API 案
@@ -938,15 +964,15 @@ POST /tools/shiftersync/cloudshift/api/project/<project_id>/shift-engine/apply-d
 - `month`
 - `base_revision`
 - `required_slots`
-- `workers` の employee_number と active 状態
+- `workers` の employee_number、active 状態、適格性属性（`dedicated_site_row_ids`、`experienced_site_row_ids`、`trainee_site_row_ids`、`experienced_option_keys`）
 - `existing_assignments`
 - `external_assignments`
 - `unavailable_days`
 - `rules`
 - `preferences`
-- `settings.version`
+- 出力に影響する設定: `settings.version`、`scoring_weights`、`option_experience_policies`
 
-`external_assignments` は他現場の確定状況で出力が変わるため hash に含める。これにより、他現場のシフトが更新された後に古い plan を `apply-draft` で保存しようとした場合に `request_hash` 不一致で拒否できる。JSON 化は key sort し、日付は ISO 形式に統一する。UI 表示用の `explanations`、`warnings`、entry preview は hash に含めない。
+`external_assignments` は他現場の確定状況で出力が変わるため hash に含める。これにより、他現場のシフトが更新された後に古い plan を `apply-draft` で保存しようとした場合に `request_hash` 不一致で拒否できる。同様に、最低基準・オプション経験ポリシー・スコア重みは出力を変えるため hash に含め、設定変更後の古い plan を拒否する。JSON 化は key sort し、日付は ISO 形式に統一する。UI 表示用の `explanations`、`warnings`、entry preview は hash に含めない。
 
 ### plan セッション
 
@@ -1043,6 +1069,8 @@ CloudShift の現場シフト帳に「自動作成」パネルを追加する。
 
 UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目にしない。保存不可または override 必須であることを明示する。
 
+「特定オプションを未経験不可にする」設定は、自動作成パネルではなく **CloudShift アシストのオプション設定欄**から行う（オプションごとに「経験者のみ」を切り替える）。保存先は `assist` JSON ではなく `project["shift_engine"].option_experience_policies`。自動作成パネル側では、現在「未経験不可」になっているオプションを読み取り専用で表示し、空欄が増える要因として示す。
+
 ## 段階導入
 
 ### Pilot 0: 設定診断
@@ -1116,6 +1144,9 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 - 専従でも経験者でもない候補を配置せず、適格者がいない枠は空欄にする（最低基準）。
 - `include_trainees=True` のときは研修対象者も適格に含める。
 - `eligibility_baseline="any"` のときは最低基準を外し全候補を対象にする。
+- オプション一致の候補に `option_aptitude_bonus` で加点する（一致しなくても配置は禁止しない）。
+- `OptionExperiencePolicy(require_prior_experience=True)` のオプション枠では当該オプション未経験者を除外し、経験者がいなければ空欄にする。
+- ポリシーが無いオプションは未経験者でも配置できる（加点なしで配置可）。
 - 最良候補のスコアが `min_assignment_score` 未満の枠は空欄にし、未配置理由を「スコア下限未満」とする。
 - 必要人数を満たす。
 - 人員不足時に `unfilled_slots` を出し、`status="partial"` にする。
