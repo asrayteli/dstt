@@ -903,7 +903,7 @@ def extract_with_preset(pdf_path, preset_name, custom_regions=None, image_path=N
     candidates_by_field = {}
     try:
         font = ImageFont.truetype("/usr/share/fonts/truetype/fonts-japanese-gothic.ttf", 24)
-    except:
+    except Exception:
         font = None
     for key, box in regions.items():
         clipped_box = _clip_box(box, img.size)

@@ -11,6 +11,8 @@ from sqlalchemy import or_, and_
 from io import BytesIO
 import csv
 
+from app.utils.atomic_io import write_json_atomic
+
 from app.models import db, Employee, Office, UploadHistory, EditHistory, SalaryMapping, EmployeeSalary, SalaryUploadHistory
 from app.access_control import (
     is_admin_user as _is_dstt_admin,
@@ -78,8 +80,7 @@ def ensure_data_directories():
             "admins": [],
             "user_offices": {}
         }
-        with open(permissions_file, 'w', encoding='utf-8') as f:
-            json.dump(initial_permissions, f, ensure_ascii=False, indent=2)
+        write_json_atomic(permissions_file, initial_permissions)
 
 
 def load_permissions():
@@ -88,15 +89,14 @@ def load_permissions():
     try:
         with open(permissions_file, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except:
+    except Exception:
         return {"admins": [], "user_offices": {}}
 
 
 def save_permissions(permissions):
     """権限情報を保存"""
     permissions_file = os.path.join(get_data_path(), 'pluslist_permissions.json')
-    with open(permissions_file, 'w', encoding='utf-8') as f:
-        json.dump(permissions, f, ensure_ascii=False, indent=2)
+    write_json_atomic(permissions_file, permissions)
 
 
 def is_admin(user_id):
@@ -196,7 +196,7 @@ def parse_date(date_str):
     for fmt in ['%Y/%m/%d', '%Y-%m-%d', '%Y%m%d', '%Y年%m月%d日']:
         try:
             return datetime.strptime(date_str, fmt).date()
-        except:
+        except Exception:
             continue
 
     # 数値文字列の場合（シリアル値が文字列化されている）
@@ -258,11 +258,11 @@ def read_excel_file(file_path, original_filename=None):
             try:
                 # まずUTF-8 with BOMで試行
                 df = pd.read_csv(file_path, encoding='utf-8-sig', dtype=str_columns)
-            except:
+            except Exception:
                 try:
                     # UTF-8で試行
                     df = pd.read_csv(file_path, encoding='utf-8', dtype=str_columns)
-                except:
+                except Exception:
                     try:
                         # Shift-JISで試行（日本語ファイルの場合）
                         df = pd.read_csv(file_path, encoding='shift-jis', dtype=str_columns)

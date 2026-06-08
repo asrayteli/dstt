@@ -261,7 +261,7 @@ def create_preset():
                 pid = int(p.get("id", 0))
                 if pid > max_id:
                     max_id = pid
-            except:
+            except Exception:
                 pass
 
         new_preset = {
@@ -1342,7 +1342,7 @@ def normalize_value(value, field_key):
         if len(parts) == 2:
             try:
                 value = f"{int(parts[0]):02d}:{int(parts[1]):02d}"
-            except:
+            except Exception:
                 pass
 
     elif field_key == "vehicle_code":

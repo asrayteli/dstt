@@ -1609,10 +1609,10 @@ def _extract_with_pymupdf(file_path, keyword, extract_images, temp_dir):
             page_text = ""
             try:
                 page_text = page.get_text()
-            except:
+            except Exception:
                 try:
                     page_text = page.get_text("text")
-                except:
+                except Exception:
                     pass
 
             if len(page_text.strip()) < 10:
@@ -1626,7 +1626,7 @@ def _extract_with_pymupdf(file_path, keyword, extract_images, temp_dir):
                                     extracted_text += span.get("text", "")
                                 extracted_text += "\n"
                     page_text = extracted_text
-                except:
+                except Exception:
                     pass
 
             if not page_text.strip():

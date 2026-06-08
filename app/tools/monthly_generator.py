@@ -780,7 +780,7 @@ def extract_forecast_data(forecast_path, target_month, sheet_name):
                 else:
                     try:
                         value = float(value)
-                    except:
+                    except Exception:
                         value = 0
 
                 forecast_data[segment][expense_type] = value
