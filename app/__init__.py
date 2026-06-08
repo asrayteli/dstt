@@ -457,7 +457,11 @@ def _dedupe_to_bell_task_sources() -> int:
             ToBellTask.source_ref_id,
             func.min(ToBellTask.id).label("keep_id"),
         )
-        .filter(ToBellTask.source_ref_id.isnot(None))
+        .filter(
+            ToBellTask.source_tool.isnot(None),
+            ToBellTask.source_ref_type.isnot(None),
+            ToBellTask.source_ref_id.isnot(None),
+        )
         .group_by(ToBellTask.source_tool, ToBellTask.source_ref_type, ToBellTask.source_ref_id)
         .having(func.count(ToBellTask.id) > 1)
         .all()

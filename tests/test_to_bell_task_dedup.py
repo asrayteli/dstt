@@ -55,6 +55,56 @@ def test_unique_index_blocks_duplicate_source_tasks(app_ctx):
         db.session.rollback()
 
 
+def test_savepoint_recovery_on_concurrent_duplicate(app_ctx):
+    """to_bell_hooks の二重生成回復パスの中核（add+flush を begin_nested 内で行い、
+    IntegrityError 時に savepoint を巻き戻して既存を採用する）を検証する。
+
+    add を begin_nested の外に出すと巻き戻し後にセッションが復旧できず
+    PendingRollbackError になる回帰を防ぐ。
+    """
+    from sqlalchemy.exc import IntegrityError as IE
+
+    from app.models import db, ToBellTask
+
+    with app_ctx.app_context():
+        src = dict(source_tool="hk", source_ref_type="reminder", source_ref_id="rec:1")
+        db.session.add(_task(title="A", **src))
+        db.session.commit()
+
+        # 別プロセスが先に同一参照タスクを作った状況を再現（事前チェックをすり抜けた想定）。
+        task = _task(title="B", **src)
+        try:
+            with db.session.begin_nested():
+                db.session.add(task)
+                db.session.flush()
+            recovered = None
+        except IE:
+            recovered = ToBellTask.query.filter_by(**src).first()
+
+        # 既存タスクを採用でき、セッションは健全（commit 可能）、重複は増えない。
+        assert recovered is not None and recovered.title == "A"
+        db.session.commit()
+        assert ToBellTask.query.filter_by(**src).count() == 1
+
+
+def test_create_task_for_is_idempotent(app_ctx):
+    """_create_task_for を同一参照で2回呼んでも1件のみ（事前チェック経路）。"""
+    from app.models import db, ToBellTask, ToBellNotification
+    from app.services.to_bell_hooks import _create_task_for
+
+    with app_ctx.app_context():
+        kw = dict(target_user="alice", title="健診リマインド", source_tool="health_check",
+                  source_ref_type="reminder", source_ref_id="rec:9")
+        first = _create_task_for(**kw)
+        db.session.commit()
+        second = _create_task_for(**kw)
+        db.session.commit()
+        assert first.id == second.id
+        assert ToBellTask.query.filter_by(source_tool="health_check", source_ref_id="rec:9").count() == 1
+        # 通知も二重に作られない。
+        assert ToBellNotification.query.filter_by(task_id=first.id).count() == 1
+
+
 def test_manual_tasks_with_null_source_are_unaffected(app_ctx):
     from app.models import db, ToBellTask
 
@@ -64,6 +114,26 @@ def test_manual_tasks_with_null_source_are_unaffected(app_ctx):
             db.session.add(_task())
         db.session.commit()
         assert ToBellTask.query.count() == 3
+
+
+def test_dedupe_leaves_rows_with_null_components_untouched(app_ctx):
+    """source_tool/source_ref_type が NULL の行は一意制約上は別物扱い(NULLは distinct)
+    なので、統合対象から除外され削除されないことを確認する（データ損失防止）。"""
+    from app import _dedupe_to_bell_task_sources
+    from app.models import db, ToBellTask
+
+    with app_ctx.app_context():
+        db.session.execute(text("DROP INDEX IF EXISTS uq_to_bell_task_source"))
+        db.session.commit()
+
+        # source_tool が NULL の同一見え行を2件（一意制約では衝突しない組み合わせ）。
+        db.session.add(_task(title="n1", source_tool=None, source_ref_type="t", source_ref_id="x"))
+        db.session.add(_task(title="n2", source_tool=None, source_ref_type="t", source_ref_id="x"))
+        db.session.commit()
+
+        removed = _dedupe_to_bell_task_sources()
+        assert removed == 0
+        assert ToBellTask.query.filter_by(source_ref_id="x").count() == 2
 
 
 def test_dedupe_merges_duplicates_and_repoints_children(app_ctx):
