@@ -151,7 +151,7 @@ class ScoreSummary:
     changed_existing_count: int
 ```
 
-`fill_rate` は `assigned_count / required_count` とする。`fairness_index` と `weekend_balance_index` は初期実装では 0.0 から 1.0 の正規化値とし、1.0 に近いほど良い状態とする。
+`fill_rate` は `assigned_count / required_count` とする。`required_count` が 0 の場合は 0 除算を避け、`fill_rate=1.0`（需要なし＝完全充足）とする。`fairness_index` と `weekend_balance_index` は初期実装では 0.0 から 1.0 の正規化値とし、1.0 に近いほど良い状態とする。
 
 ## 推奨ファイル構成
 
@@ -319,7 +319,7 @@ class PlanningDay:
     labels: tuple[str, ...] = ()
 ```
 
-祝日、特別稼働日、休業日を後から扱えるよう、`labels` を持たせる。
+`weekday` は Python の `date.weekday()` と同じ規約（月=0 … 日=6）で持つ。これは既存の `ASSIST_WEEKDAY_LABELS`（`["月","火",…,"日"]`）と一致するため、`DemandRule.weekdays` や assist の希望/NG 曜日もこの規約に統一する。`is_holiday` は `app/tools/japan_holidays.py` の `JAPAN_HOLIDAYS` を参照して判定する。祝日、特別稼働日、休業日を後から扱えるよう、`labels` を持たせる。
 
 ### 需要モデル
 
@@ -519,7 +519,7 @@ class Violation:
 
 固定既存配置を投入した直後に `validate_seed(seed)` を実行する。
 
-- 固定配置同士の同日重複がない。
+- 固定配置同士が `is_duplicate_by_rules`（同一現場は `same_site=True`）基準で重複しない。
 - 固定配置が `hard` 休暇と衝突しない。
 - 固定配置が枝番条件に違反しない。資格・車両・時間帯は許可データが無いため Phase 1 では Hard 検証しない。
 - 固定配置だけで需要を超過している場合は、超過を `warning` ではなく `blocker` にする。
@@ -533,7 +533,7 @@ seed が `blocker` を持つ場合、エンジンは再配置で解消しない�
 - assignment が存在しない worker を参照しない。
 - assignment が存在しない slot を参照しない。
 - `hard` 休暇に配置しない。
-- 同日同時間帯の重複がない。
+- `is_duplicate_by_rules` 基準で同日重複が無い（同一現場は `same_site=True`）。
 - 固定既存配置を削除、変更していない。
 - `required_slots` と `assignments` から `unfilled_slots` が正しく計算されている。
 - `ScoreSummary` の件数が実データと一致している。
@@ -557,7 +557,7 @@ class Explanation:
 
 @dataclass(frozen=True)
 class ScoreFactor:
-    category: Literal["dedicated", "experience", "preference", "fairness", "holiday", "change", "training", "penalty"]
+    category: Literal["dedicated", "experience", "aptitude", "preference", "fairness", "holiday", "change", "training", "penalty"]
     label: str
     points: int
     detail: str = ""
@@ -584,8 +584,7 @@ class ScoreFactor:
 守れない場合は原則配置しない。
 
 - `hard` 休暇、勤務不可日の配置禁止
-- 同日同時間帯の重複禁止
-- 同じ現場内での重複禁止
+- 同日重複の禁止。一律の「同日禁止」ではなく、重複判定は `is_duplicate_by_rules(option1, option2, same_site=...)`（`app/tools/shiftersync_check.py`）に委ねる。同一現場内は `same_site=True`、他現場との判定は `same_site=False` で呼ぶ。オプションの組み合わせ次第で同日共存が許容される（例: 時間帯 `A` と `L` は共存可、`A` と `E` は重複。`V` 車両は全車両と重複。`N1..N5` は同番号のみ重複。有休系オプションは重複しない）ため、この関数を重複判定の唯一の正とする。
 - 無効な従業員の配置禁止
 - 無効な現場、枝番への配置禁止
 - 固定既存シフトの変更禁止
@@ -1023,6 +1022,7 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 - 有休共有ツールの社員番号が欠けていると品質が大きく落ちる。
 - 「未充足ゼロ」を絶対視しない。無理な配置より、未充足を明示する方が安全。
 - override は便利だが、濫用するとエンジンの信頼性が落ちる。履歴で追跡する。
+- 連勤数は対象月内の配置から数える。月初の連勤評価は前月末を含めないため、月境界の連勤は Phase 1 では近似となる点に注意する（必要なら前月末日の既存配置を追加入力する）。
 - 生成結果はあくまで下書きであり、公開前確認を省略しない。
 
 ## テスト方針
@@ -1035,7 +1035,7 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 - 曜日別、枝番別、オプション別 demand を展開できる。
 - `hard` 休暇者を配置しない。
 - 未確認休暇を設定どおり `soft` または `hard` に変換する。
-- 同日重複を作らない。
+- `is_duplicate_by_rules` 基準で同日重複を作らない（重複する組み合わせは禁止し、共存可の組み合わせは許容する）。
 - 必要人数を満たす。
 - 人員不足時に `unfilled_slots` を出し、`status="partial"` にする。
 - 専従者を優先する。
