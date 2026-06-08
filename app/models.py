@@ -1045,6 +1045,17 @@ class ToBellTask(db.Model):
 
     __tablename__ = 'to_bell_tasks'
 
+    __table_args__ = (
+        # 連携タスクの重複生成（複数 gunicorn ワーカー間の同時取り込み・フックの
+        # 二重送信）を DB レベルで防ぐ。source_ref_id が NULL の手動作成タスクは
+        # NULL 同士が distinct 扱いのため、この一意制約の影響を受けない。
+        db.Index(
+            'uq_to_bell_task_source',
+            'source_tool', 'source_ref_type', 'source_ref_id',
+            unique=True,
+        ),
+    )
+
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     title = db.Column(db.String(240), nullable=False)
     description = db.Column(db.Text, nullable=False, default='')

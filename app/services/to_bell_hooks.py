@@ -11,6 +11,7 @@ from datetime import datetime, time, timedelta
 from typing import Any, Iterable
 
 from dateutil.relativedelta import relativedelta
+from sqlalchemy.exc import IntegrityError
 
 from app.models import ToBellNotification, ToBellTask, db
 from app.services.to_bell_integrations import enabled_users, get_health_check_notify, is_enabled
@@ -54,7 +55,20 @@ def _create_task_for(
         source_ref_id=str(source_ref_id) if source_ref_id else None,
     )
     db.session.add(task)
-    db.session.flush()
+    try:
+        # 一意制約(uq_to_bell_task_source)で守られているため、別プロセス/二重送信が
+        # 同一参照タスクを同時生成すると flush で IntegrityError になる。セーブポイントで
+        # 隔離し、衝突時は相手が作った既存タスクを採用する（呼び出し元の他処理は守る）。
+        with db.session.begin_nested():
+            db.session.flush()
+    except IntegrityError:
+        if source_ref_id and source_tool:
+            return ToBellTask.query.filter_by(
+                source_tool=source_tool,
+                source_ref_type=source_ref_type,
+                source_ref_id=str(source_ref_id),
+            ).first()
+        raise
     db.session.add(
         ToBellNotification(
             user_id=target_user,
@@ -360,7 +374,16 @@ def _ensure_reminder_task(
         source_ref_id=str(source_ref_id),
     )
     db.session.add(task)
-    db.session.flush()
+    try:
+        # 一意制約(uq_to_bell_task_source)による同時生成の衝突をセーブポイントで隔離。
+        with db.session.begin_nested():
+            db.session.flush()
+    except IntegrityError:
+        return ToBellTask.query.filter_by(
+            source_tool="health_check",
+            source_ref_type=source_ref_type,
+            source_ref_id=str(source_ref_id),
+        ).first()
     db.session.add(
         ToBellNotification(
             user_id=manager_user,

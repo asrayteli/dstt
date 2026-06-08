@@ -436,6 +436,104 @@ def _ensure_access_control_schema(app):
 
         _seed_tool_categories()
 
+
+def _dedupe_to_bell_task_sources() -> int:
+    """連携タスクの (source_tool, source_ref_type, source_ref_id) 重複を統合する。
+
+    重複は最古(最小id)のタスクへ寄せ、子レコード(サブタスク/コメント/通知/
+    プッシュ配信/添付/タグ)を付け替えてから重複タスクを削除する。一意制約を
+    張る前提として既存データをクリーンにする。戻り値は削除した重複タスク数。
+    """
+    from sqlalchemy import func
+    from .models import (
+        ToBellTask, ToBellSubtask, ToBellComment, ToBellNotification,
+        ToBellPushDelivery, ToBellAttachment, ToBellTaskTag, db,
+    )
+
+    groups = (
+        db.session.query(
+            ToBellTask.source_tool,
+            ToBellTask.source_ref_type,
+            ToBellTask.source_ref_id,
+            func.min(ToBellTask.id).label("keep_id"),
+        )
+        .filter(ToBellTask.source_ref_id.isnot(None))
+        .group_by(ToBellTask.source_tool, ToBellTask.source_ref_type, ToBellTask.source_ref_id)
+        .having(func.count(ToBellTask.id) > 1)
+        .all()
+    )
+
+    removed = 0
+    # 単純な子(task_id を持つだけ)は一括で付け替える。
+    simple_children = (ToBellSubtask, ToBellComment, ToBellNotification, ToBellAttachment)
+    for source_tool, source_ref_type, source_ref_id, keep_id in groups:
+        dup_ids = [
+            row.id
+            for row in ToBellTask.query.filter(
+                ToBellTask.source_tool == source_tool,
+                ToBellTask.source_ref_type == source_ref_type,
+                ToBellTask.source_ref_id == source_ref_id,
+                ToBellTask.id != keep_id,
+            ).all()
+        ]
+        if not dup_ids:
+            continue
+        for child in simple_children:
+            child.query.filter(child.task_id.in_(dup_ids)).update(
+                {child.task_id: keep_id}, synchronize_session=False
+            )
+        # プッシュ配信は (task_id,user_id,due_at_key) が一意のため衝突を避けて移送。
+        kept_delivery_keys = {
+            (d.user_id, d.due_at_key)
+            for d in ToBellPushDelivery.query.filter_by(task_id=keep_id).all()
+        }
+        for delivery in ToBellPushDelivery.query.filter(ToBellPushDelivery.task_id.in_(dup_ids)).all():
+            key = (delivery.user_id, delivery.due_at_key)
+            if key in kept_delivery_keys:
+                db.session.delete(delivery)
+            else:
+                delivery.task_id = keep_id
+                kept_delivery_keys.add(key)
+        # タグは (task_id,tag_id) が主キーのため衝突を避けて移送。
+        kept_tag_ids = {t.tag_id for t in ToBellTaskTag.query.filter_by(task_id=keep_id).all()}
+        for tag in ToBellTaskTag.query.filter(ToBellTaskTag.task_id.in_(dup_ids)).all():
+            if tag.tag_id in kept_tag_ids:
+                db.session.delete(tag)
+            else:
+                tag.task_id = keep_id
+                kept_tag_ids.add(tag.tag_id)
+        ToBellTask.query.filter(ToBellTask.id.in_(dup_ids)).delete(synchronize_session=False)
+        removed += len(dup_ids)
+
+    db.session.commit()
+    return removed
+
+
+def _ensure_to_bell_task_source_unique_index(app):
+    """ToBell 連携タスクの参照三つ組に一意インデックスを張る（既存DB向け移行）。
+
+    既存重複は統合してからインデックスを作成する。万一失敗しても起動は止めず、
+    ログに残して継続する（新規DBはモデル定義側で作成される）。
+    """
+    with app.app_context():
+        try:
+            removed = _dedupe_to_bell_task_sources()
+            if removed:
+                app.logger.info("Merged %d duplicate ToBell source tasks before indexing", removed)
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("ToBell task source dedupe skipped due to error")
+        try:
+            _run_schema_statements([
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_to_bell_task_source "
+                "ON to_bell_tasks (source_tool, source_ref_type, source_ref_id)"
+            ])
+        except SQLAlchemyError:
+            app.logger.exception(
+                "Could not create unique index uq_to_bell_task_source; continuing without it"
+            )
+
+
 def create_app(test_config=None):
     app = Flask(__name__, static_folder='./static/')
     app_version = os.environ.get('DSTT_APP_VERSION')
@@ -790,6 +888,7 @@ def create_app(test_config=None):
 
     # DBスキーマの初期化（既存DBへのカラム追加含む）
     _ensure_access_control_schema(app)
+    _ensure_to_bell_task_source_unique_index(app)
 
     from .services.to_bell_push import init_to_bell_push_scheduler
     init_to_bell_push_scheduler(app)
