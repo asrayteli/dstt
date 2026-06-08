@@ -108,6 +108,7 @@ CloudShift は `CloudShiftProject` と `CloudShiftMonth` を中心に構成さ�
 11. サーバー上で再現できない下書きは保存しない。
 12. 生成理由は人間が読める短文と、機械検証できる構造化データの両方で持つ。
 13. 失敗時も「なぜ作れなかったか」を成果物として返す。
+14. コアは堅実な基本アルゴリズムに徹し、人間の判断が要る高レベルな調整はすべて現場ごとの任意オプションとして外出しする（「設定オプションの体系」を参照）。コア単体でも成立し、オプションで完成度を上げる二層構成にする。
 
 ## 非目標
 
@@ -187,6 +188,7 @@ class ShiftEngineSettings:
     worker_limits: list[WorkerLimit]
     scoring_weights: ScoringWeights
     option_experience_policies: list[OptionExperiencePolicy]
+    advanced_options: list[OptionToggle]   # 現場ごとの任意・拡張オプション（既定は空＝コア挙動）
 ```
 
 最小構成では `demand_rules` が未設定でも動くようにする。この場合は `capacity_enabled=True` のときに限り、`CloudShiftMonth.required_capacity` を全営業日に対する同一人数として `RequiredSlot` へ展開する。`capacity_enabled=False` の場合は需要ゼロとして扱い、勝手に配置を増やさない。この fallback は暫定扱いであり、UI では「月全体の必要人数から自動展開」と明示する。
@@ -330,7 +332,148 @@ class OptionExperiencePolicy:
 - 必須値が欠ける場合は既定値を補完する。
 - 補完した設定は自動保存しない。ユーザーが設定画面で保存した時だけ永続化する。
 
-## エンジン入出力
+## 設定オプションの体系（現場ごとの任意設定）
+
+### 思想
+
+シフトの作り方は現場の数だけある。そこでエンジンを次の 2 層に分ける。
+
+- **コア（内蔵アルゴリズム）**: どの現場でも成り立つ堅実な基本ロジック。Hard 制約の遵守、需要充足、決定性、検証、下書き保存。オプションを一切設定しなくても、コアだけで安全な下書きが作れる。
+- **オプション（現場ごとの任意設定）**: 「人が判断した方がよい」高レベルな部分を、現場ごとに ON/OFF・調整できる任意設定として外出しする。設定するほど現場の癖に寄せられるが、未設定でもコアが成立する。
+
+原則: **少しでも人間の判断が要るところはコアに固定値で埋め込まず、必ずオプションにする。** コアは「正しさ・安全・再現性」を担い、オプションは「現場ごとの好み・運用ルール」を担う。
+
+### オプション・フレームワーク
+
+オプションは個別の場当たり設定にせず、共通の枠組みで管理する。
+
+- すべてのオプションは型付き・検証付きで、`project["shift_engine"]` に保存する（`assist` JSON には保存しない）。
+- すべてのオプションに**安全な既定値**を持たせる。既定はコア挙動を変えない「中立（無効・なし）」とし、未設定でもエンジンが成立する。
+- オプションは**合成可能**にする。互いに矛盾しうる設定は、後述の優先順位で解決し、矛盾は `warning` として返す。
+- 各オプションは「分類（Hard 足切り / Soft 加点 / 需要 / 出力 / 運用）」「スコープ（現場全体 / 枝番 / オプションキー / 個人 / 曜日）」「既定値」「データ源」を明示する。
+- データ源が現行コードに無いオプションは**予約**として定義だけ置き、Phase 1 では `warning` を返して挙動には反映しない（例: 資格）。
+- 設定 schema は `ShiftEngineSettings.version` で版管理し、未知キーは捨てずに `raw_settings` 警告に出す。
+
+共通の値の持ち方（任意オプションの土台）:
+
+```python
+@dataclass(frozen=True)
+class OptionToggle:
+    key: str
+    enabled: bool = False          # 既定は無効（コア挙動）
+    scope: Literal["site", "branch", "option_key", "worker", "weekday"] = "site"
+    target: str = ""               # scope の対象（枝番/オプションキー/employee_number/曜日 など）
+    value: Any = None              # 数値・閾値・選択肢など
+    note: str = ""
+```
+
+型が定まっているオプション（需要・休暇・重みなど）は専用 dataclass を使い、汎用・将来拡張は `advanced_options: list[OptionToggle]` に逃がす。`ShiftEngineSettings` に `advanced_options` を追加し、未知の高度設定でも安全に往復・検証できるようにする。
+
+### オプション・カタログ
+
+現場ごとに設定できる任意オプションを分類して並べる。**既定列が「中立」なものは、設定しなければコア挙動のまま。** 既存実装済みの概念は「実装済み」、データ源が無いものは「予約」と記す。
+
+#### 需要・枠
+
+| オプション | 内容 | 既定 | 分類 |
+|---|---|---|---|
+| `demand_rules` | 曜日別・枝番別・オプション別・日付指定の必要人数（実装済み概念） | fallback のみ | 需要 |
+| `capacity_fallback` | `required_capacity` から全営業日へ自動展開するか | `capacity_enabled` 準拠 | 需要 |
+| `day_overrides` | 特定日の必要人数を増減（`include_dates`/`exclude_dates` 相当） | なし | 需要 |
+| `holiday_policy` | 祝日を営業/休業/別需要のどれで扱うか（`JAPAN_HOLIDAYS` 参照） | 営業日扱い | 需要 |
+| `special_workday_labels` | 特別稼働日・休業日を `PlanningDay.labels` で指定 | なし | 需要 |
+| `per_option_demand` | 車両・時間帯など option ごとの必要数 | なし | 需要 |
+
+#### 適格性（足切り）
+
+| オプション | 内容 | 既定 | 分類 |
+|---|---|---|---|
+| `eligibility_baseline` | 専従/経験者のみ か 全員可（実装済み） | 専従/経験者のみ | Hard 足切り |
+| `include_trainees` | 研修対象者も適格に含める（実装済み） | 含めない | Hard 足切り |
+| `option_experience_policies` | 特定オプションを未経験不可にする（実装済み） | なし（加点のみ） | Hard 足切り |
+| `min_assignment_score` | 追加のスコア下限（実装済み） | なし | Hard 足切り |
+| `office_filter` | 特定所属（`Employee.office_code`）のみ候補にする | なし | Hard 足切り |
+| `employee_type_filter` | 特定の社員区分（`Employee.employee_type`）に限定 | なし | Hard 足切り |
+| `candidate_allowlist` | 明示した社員番号だけを候補にする | なし | Hard 足切り |
+| `candidate_blocklist` | 明示した社員番号を候補から外す | なし | Hard 足切り |
+| `required_qualification` | 必須資格（**予約**。資格データが無い） | 無効 | 予約 |
+
+#### 休暇
+
+| オプション | 内容 | 既定 | 分類 |
+|---|---|---|---|
+| `leave_policies` | 有休種別ごとの不可強度（実装済み） | 全 `hard`/その他 `soft` | Hard/Soft |
+| `unconfirmed_leave_strength` | 未確認休暇の扱い（実装済み） | `soft` | Hard/Soft |
+| `leave_calendars` | 参照する有休共有カレンダーの選択 | ユーザー選択 | 入力 |
+| `deputy_awareness` | 代務（`deputies`）がある休暇の優先度調整 | 無効 | Soft |
+
+#### 連続性・公平性
+
+| オプション | 内容 | 既定 | 分類 |
+|---|---|---|---|
+| `max_consecutive_days` | 最大連勤数（実装済み） | なし | Soft/Hard 選択 |
+| `min_rest_days` | 連勤後に確保する休息日数 | なし | Soft |
+| `monthly_min_max` | 月内の最小/最大勤務数（実装済み） | なし | Soft/Hard 選択 |
+| `weekly_max` | 週あたり上限 | なし | Soft |
+| `consecutive_cross_month` | 連勤を前月末から数えるか（前月末を入力に含める） | 含めない（月内のみ） | Soft |
+| `fairness_scope` | 公平性を「この現場だけ」か「関連現場合算」で見るか | この現場だけ | Soft |
+| `weekend_balance` | 土日祝の偏り抑制（実装済み） | 抑制する | Soft |
+| `fixed_weekday_workers` | 特定曜日を固定担当にする（曜日×人） | なし | Soft/Hard 選択 |
+
+#### 重複・他現場
+
+| オプション | 内容 | 既定 | 分類 |
+|---|---|---|---|
+| `same_site_duplicate` | 同一現場内重複（`is_duplicate_by_rules(same_site=True)`、実装済み） | 禁止 | Hard |
+| `external_occupancy` | 他現場の同日占有を Hard 除外（実装済み） | Hard 除外 | Hard |
+| `external_occupancy_relax` | 他現場占有を現場単位で `warning` に緩める | 無効（Hard のまま） | 選択 |
+
+#### 人物単位の好み
+
+| オプション | 内容 | 既定 | 分類 |
+|---|---|---|---|
+| `worker_weight` | 特定人物を優先/抑制（個別加点・減点） | なし | Soft |
+| `pair_together` | 一緒に組ませたいペア | なし | Soft |
+| `pair_avoid` | 同日同枠に並べたくないペア | なし | Soft |
+| `pinned_assignments` | 特定日・特定枠に人を固定配置 | なし | Hard seed |
+| `forbidden_assignments` | 特定日・特定枠に人を入れない | なし | Hard |
+
+#### 既存シフト・スコア・出力
+
+| オプション | 内容 | 既定 | 分類 |
+|---|---|---|---|
+| `existing_policy` | すべて固定/手入力だけ固定/再配置候補（実装済み） | 手入力だけ固定 | 既存 |
+| `minimize_changes` | 既存・前月からの変更最小化（実装済み） | 弱く有効 | Soft |
+| `scoring_weights` / プリセット | 重み調整（実装済み） | バランス型 | Soft |
+| `allow_partial` | 未充足を許可するか（実装済み） | 許可 | 出力 |
+| `override_policy` | Hard 違反の override を誰に許すか | 管理者のみ | 運用 |
+
+### 優先順位と安全
+
+オプションが増えても破綻しないよう、評価順を固定する。
+
+1. **コアの Hard**（休暇・重複・他現場占有・固定既存・無効従業員）。これはオプションで外せない安全装置。
+2. **オプションの Hard 足切り**（適格性・未経験不可・allow/block list・office/type フィルタ・forbidden・pinned）。
+3. **需要の確定**（demand と fallback、day_overrides、holiday_policy）。
+4. **Soft スコアリング**（重み・人物単位の好み・公平性・連続性・オプション一致加点）。
+5. **下限・しきい値での足切り**（`min_assignment_score`）。
+6. **決定的 tie-breaker** と局所修復。
+
+安全原則:
+
+- どのオプションも**コアの Hard を緩めない**。緩められるのは「オプション由来の Hard を付けない/外す」方向だけ。例外的に他現場占有だけは `external_occupancy_relax` で warning へ落とせるが、これは明示設定時のみ。
+- 相反するオプション（例: allowlist と blocklist に同一人物）は、より安全側（除外）を採り `warning` を出す。
+- オプションを足切りに使った結果の空欄は、コアと同じく `unfilled_slots` に理由付きで返す。無理に埋めない。
+- すべてのオプションは出力に影響するため、`request_hash` に effective なオプション値を含め、設定変更後の古い plan を `apply-draft` で拒否する。
+
+### 設定 UI の方針
+
+- **基本パネル**: 多くの現場で使う代表オプション（需要・既存の扱い・方針プリセット・最低基準・未充足許可）だけを出す。
+- **詳細設定**: それ以外の豊富なオプションは折りたたみの詳細設定に置き、既定中立のまま隠す。設定したものだけ要約表示する。
+- **オプション横断の整合表示**: 設定が空欄を増やす要因（厳しい最低基準・未経験不可・各種フィルタ）は、自動作成パネルで「空欄が増えうる設定」として一覧表示する。
+- 一部のオプション（特定オプション未経験不可など）は、関連する既存画面（アシストのオプション欄）から設定し、保存先は `shift_engine` 設定に統一する。
+
+
 
 ### 入力モデル
 
@@ -706,7 +849,7 @@ class ScoreFactor:
 
 ### 設定化すべき制約
 
-現場ごとに違いが出るものは固定値にしない。
+現場ごとに違いが出るものは固定値にしない。代表例を挙げる（全体像は「設定オプションの体系」のカタログを正とする）。
 
 - 1日必要人数
 - 曜日別必要人数
@@ -970,9 +1113,9 @@ POST /tools/shiftersync/cloudshift/api/project/<project_id>/shift-engine/apply-d
 - `unavailable_days`
 - `rules`
 - `preferences`
-- 出力に影響する設定: `settings.version`、`scoring_weights`、`option_experience_policies`
+- 出力に影響する設定（effective なオプション値）: `settings.version`、`scoring_weights`、`option_experience_policies`、`advanced_options`、その他カタログ上の有効オプション値
 
-`external_assignments` は他現場の確定状況で出力が変わるため hash に含める。これにより、他現場のシフトが更新された後に古い plan を `apply-draft` で保存しようとした場合に `request_hash` 不一致で拒否できる。同様に、最低基準・オプション経験ポリシー・スコア重みは出力を変えるため hash に含め、設定変更後の古い plan を拒否する。JSON 化は key sort し、日付は ISO 形式に統一する。UI 表示用の `explanations`、`warnings`、entry preview は hash に含めない。
+`external_assignments` は他現場の確定状況で出力が変わるため hash に含める。これにより、他現場のシフトが更新された後に古い plan を `apply-draft` で保存しようとした場合に `request_hash` 不一致で拒否できる。同様に、出力に影響するオプション設定（最低基準・オプション経験ポリシー・スコア重み・各種フィルタ・人物単位の好み等）はすべて hash に含め、設定変更後の古い plan を拒否する。JSON 化は key sort し、日付は ISO 形式に統一する。UI 表示用の `explanations`、`warnings`、entry preview は hash に含めない。
 
 ### plan セッション
 
@@ -1159,8 +1302,14 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 - GreedyRepairSolver が `optimal` を返さない。
 - `validate_request` が不正な月、重複 worker、不正 slot を拒否する。
 - `validate_result` が存在しない worker、存在しない slot、固定配置変更を検出する。
-- `request_hash` が key sort と ISO 日付で安定する。
+- `request_hash` が key sort と ISO 日付で安定し、オプション値を変えると変化する。
 - `ScoreSummary` の件数が assignment と unfilled slots から再計算できる。
+- 任意オプションが未設定（既定中立）のときコア挙動と一致する。
+- `candidate_allowlist`/`candidate_blocklist`/`office_filter`/`employee_type_filter` が候補集合を正しく絞る。
+- 同一人物が allowlist と blocklist に入った場合は除外側を採り `warning` を出す。
+- `pinned_assignments` を seed として固定し、`forbidden_assignments` の枠に当人を入れない。
+- `pair_avoid` の 2 名を同日同枠に並べない。`pair_together` は可能なら同日に揃える。
+- オプションでコアの Hard（休暇・重複・他現場占有・固定既存）を緩められない。
 
 必須統合テスト:
 
@@ -1249,3 +1398,5 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 CloudShift の強みは、既に現場、社員、個人シフト、有休共有、下書き保存が存在すること。ここに独立エンジンを接続すれば、ユーザーが判断できる高品質な下書きを作れる。
 
 ただし、月次シフト作成で本当に重要なのは「それらしい配置」ではなく、「どの条件を守り、どの条件を妥協し、どこが未解決なのか」を明確に返すこと。エンジンは完璧な自動決定者ではなく、説明可能で検証可能な下書き生成器として設計する。
+
+目指す姿は二層構成。**コアの基本アルゴリズムは完成度を高く保ち（安全・充足・決定性・検証）、その上に現場ごとの判断を反映する豊富な任意オプションを載せる。** シフトの作り方は人の数だけあるため、高レベルな好みはコアに埋め込まず、すべてオプションとして開放する。設定しなければコアで成立し、設定するほど現場の運用に寄っていく。これにより「エンジン自体の完成度が高く、かつオプションも豊富」を両立する。
