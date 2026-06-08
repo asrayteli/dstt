@@ -35,6 +35,7 @@ CloudShift の現行アシスト機能を、単一日・単一枠の候補者検
 3. **`Worker.active` は単一フラグから取れない。** `Employee` に `active` 真偽値はなく、`is_deleted`（Bool）と `retirement_date`（String 型で `"？退職？"` のような非正規値を含む）から導出する。退職判定は文字列を正規化したうえで保守的に行い、確実に退職と判断できる場合のみ `active=False` とする。判定不能な値は `active` を維持しつつ `warning` を出す。
 4. **`base_revision` 競合検出は新規実装。** `CloudShiftMonth.revision` は保存時にインクリメントされ `revision_snapshots` も保持されるが、`base_revision` 比較による mismatch 検出は現行 API に存在しない（既存の下書き保存はサーバー内 `_project_lock` で直列化しているだけ）。`apply-draft` での revision mismatch 検出はこの設計で新規に実装する。
 5. **fallback は `capacity_enabled` を尊重する。** `required_capacity` は `CloudShiftMonth.capacity_enabled`（Bool）で有効化される。`required_capacity` からの自動展開 fallback は `capacity_enabled=True` のときだけ行い、無効時は需要ゼロとして扱う。
+6. **他現場との同日二重配置は Hard で防ぐ。** エンジンは対象シフト帳だけでなく、関連シフト帳（同 owner の他 scene project）で同じ日に確定している配置も考慮する。既存の `_assist_scene_conflict_entries` が示すとおり、このデータは到達可能。context adapter が確定 entries から `external_assignments` を収集してエンジンへ渡し、エンジンは占有 option と配置 option を `is_duplicate_by_rules(same_site=False)` で判定して、重複する候補者を Hard 除外する（例: 佐藤さんが A 現場の 1/1 に入っていれば B 現場の 1/1 では別の人を探す）。エンジン本体の DB 非依存は維持する。
 
 ## 現行構造と前提
 
@@ -98,7 +99,7 @@ CloudShift は `CloudShiftProject` と `CloudShiftMonth` を中心に構成さ�
 2. エンジン本体は Flask、SQLAlchemy、CloudShift の既存関数に依存しない。
 3. CloudShift、有休共有ツール、Employee、SitePlus からの読み込みはアダプタ層で行う。
 4. 生成結果は `draft_entries_per_day` へ保存する。
-5. 需要は `RequiredSlot`、人は `Worker`、休暇は `UnavailableDay`、既存配置は `ExistingAssignment` に正規化する。
+5. 需要は `RequiredSlot`、人は `Worker`、休暇は `UnavailableDay`、既存配置は `ExistingAssignment`、他現場占有は `ExternalAssignment` に正規化する。
 6. Hard Constraint と Soft Constraint を明確に分ける。
 7. 生成結果は必ずエンジン自身の検証を通す。
 8. 同じ入力なら同じ出力になるよう、Phase 1 は deterministic に実装する。
@@ -299,12 +300,15 @@ class ShiftPlanningRequest:
     required_slots: list[RequiredSlot]
     workers: list[Worker]
     existing_assignments: list[ExistingAssignment]
+    external_assignments: list[ExternalAssignment]
     unavailable_days: list[UnavailableDay]
     rules: list[Rule]
     preferences: PlanningPreferences
 ```
 
-重要なのは、CloudShift の `entries_per_day` をそのまま最適化しないこと。いったん「日」「必要枠」「人」「不可日」「既存配置」「制約」へ分解する。
+重要なのは、CloudShift の `entries_per_day` をそのまま最適化しないこと。いったん「日」「必要枠」「人」「不可日」「既存配置」「他シフト帳占有」「制約」へ分解する。
+
+`external_assignments` は、**対象シフト帳以外の関連シフト帳で同じ日に確定している配置**を表す。これにより「他現場で既に勤務している候補者を、対象現場の同じ日に二重配置しない」を実現する（例: 佐藤さんが A 現場の 1/1 に確定で入っていれば、B 現場の 1/1 では候補から除外して別の人を探す）。エンジン本体は DB を読まないため、この占有情報は context adapter が収集して入力として渡す。
 
 ### 日モデル
 
@@ -386,6 +390,7 @@ class Worker:
 | 希望曜日、NG 曜日 | assist profiles | Soft Constraint / preference |
 | 経験、研修 | assist records / experienced_sites / training_sites | スコア材料 |
 | 既存勤務数 | CloudShift entries / draft entries | 公平性と変更最小化 |
+| 他現場の同日確定勤務 | 同 owner の他 scene project の確定 entries | 他現場占有（`external_assignments`） |
 | 休暇 | leave_mgr | 不可日 |
 
 正規化ルール:
@@ -420,6 +425,31 @@ UI の「既存シフトの扱い」は次のように変換する。
 - すべて再配置候補: 既存配置を `replaceable`
 
 `locked` と `manual_locked` は、需要を満たす seed として先に投入する。固定配置が Hard Constraint と衝突する場合、エンジンは勝手に動かさず、`blocker` として返す。
+
+### 他シフト帳占有モデル
+
+対象シフト帳の外（関連する別 project）で、同じ日に候補者が確定勤務している占有を表す。これを使って他現場との同日二重配置を Hard で防ぐ。
+
+```python
+@dataclass(frozen=True)
+class ExternalAssignment:
+    employee_number: str
+    employee_name: str
+    date: date
+    day: int
+    shift_key: str          # option key。素の名前のみなら ""
+    project_id: str
+    project_title: str
+    source_mode: Literal["scene", "person", "substitute", "master"]
+    confirmed: bool = True
+```
+
+収集と突合のルール:
+
+- context adapter が、既存の `_assist_scene_conflict_entries` と同じ方針で収集する。すなわち**同じ `owner_user_id`** の**他 scene project**の、**対象年月の確定 `entries_per_day`**（下書きは含めない）から、`parse_entry_value` で option と氏名を取り出して作る。`person`／`substitute` モードは段階的に対象へ加える。
+- 候補者との突合は `employee_number` 一致を主とする。`employee_number` が無い占有は名前一致のみとなるため Hard 化せず `warning` として扱う（番号なし配置を自動でハード排除しない原則と揃える）。
+- 占有 option と配置しようとする option の重複判定は `is_duplicate_by_rules(candidate_option, external_option, same_site=False)` で行う。重複する場合だけ配置禁止にする。素の名前同士（option が無い）や同時間帯は重複扱いとなるため、例の「佐藤さんが A にいるので B では使えない」は満たされる。一方、`is_duplicate_by_rules` が共存可と判定する option 組み合わせ（例: 早番 `A` と遅番 `L`）は二重配置を許す。
+- `external_assignments` は出力結果（draft entry）には書き込まない。あくまで候補除外のための入力。
 
 ### 休暇、不可日モデル
 
@@ -511,6 +541,7 @@ class Violation:
 - `workers.employee_number` が重複しない。
 - `existing_assignments` の employee が worker に存在する。
 - `unavailable_days` の日付が対象月内に収まる。
+- `external_assignments` の日付が対象月内に収まる。
 - `base_revision` が正の整数。
 
 ここで失敗する場合は `status="failed"` とし、配置処理に入らない。
@@ -534,6 +565,7 @@ seed が `blocker` を持つ場合、エンジンは再配置で解消しない�
 - assignment が存在しない slot を参照しない。
 - `hard` 休暇に配置しない。
 - `is_duplicate_by_rules` 基準で同日重複が無い（同一現場は `same_site=True`）。
+- 番号で突合できる `external_assignments` と `is_duplicate_by_rules(same_site=False)` で重複する配置を作っていない。
 - 固定既存配置を削除、変更していない。
 - `required_slots` と `assignments` から `unfilled_slots` が正しく計算されている。
 - `ScoreSummary` の件数が実データと一致している。
@@ -585,6 +617,7 @@ class ScoreFactor:
 
 - `hard` 休暇、勤務不可日の配置禁止
 - 同一現場内の同日重複の禁止。一律の「同日禁止」ではなく、`is_duplicate_by_rules(option1, option2, same_site=True)`（`app/tools/shiftersync_check.py`）で判定する。オプションの組み合わせ次第で同日共存が許容される（例: 時間帯 `A` と `L` は共存可、`A` と `E` は重複。`V` 車両は全車両と重複。`N1..N5` は同番号のみ重複。有休系オプションは重複しない）ため、この関数を重複判定の唯一の正とする。
+- 他現場（関連シフト帳）との同日二重配置の禁止。`external_assignments` の占有 option と配置 option を `is_duplicate_by_rules(candidate_option, external_option, same_site=False)` で判定し、重複する候補者をその日その枠から除外する（例: 佐藤さんが A 現場の 1/1 に確定している → B 現場の 1/1 では除外して別の人を探す）。ただし `employee_number` で突合できない占有は名前一致のみのため Hard 化せず `warning` にする。
 - 無効な従業員の配置禁止
 - 無効な現場、枝番への配置禁止
 - 固定既存シフトの変更禁止
@@ -593,7 +626,7 @@ class ScoreFactor:
 
 資格、車両、時間帯条件は許可データが現行コードに無いため Hard Constraint にしない。資格要求は `warning`、車両・時間帯は下記 Soft の適性として扱う。担当可能性をデータで保証できる仕組みができた段階で Hard 化を再検討する。
 
-他現場（別 project）との同日重複は Hard にしない。エンジンは他 project を DB 直読しないため、既存アシストと同様に原則 `warning`（候補の `has_scene_conflict` 相当）として扱う。確定的に勤務不可とみなせる他現場勤務だけ、context adapter が `UnavailableDay`（`source="person_shift"`）へ変換してエンジンへ渡す。
+他現場占有を Hard にしても、エンジン本体の DB 非依存は保たれる。占有データは context adapter が収集して `external_assignments` として渡し、エンジンはその入力だけを見る。
 
 ### Soft Constraints
 
@@ -609,7 +642,7 @@ class ScoreFactor:
 - 連勤抑制
 - 土日祝の偏り抑制
 - 同一人物への集中抑制
-- 他現場との同日重複の回避（警告表示。入力済みデータに対し `is_duplicate_by_rules(same_site=False)` で評価）
+- 番号で突合できない他現場占有（名前一致のみ）の回避。Hard にできないため減点と `warning` で扱う
 - 前月、既存シフトからの変更最小化
 - 代務者より通常候補を優先
 - 手動ルールの優先順位
@@ -872,12 +905,13 @@ POST /tools/shiftersync/cloudshift/api/project/<project_id>/shift-engine/apply-d
 - `required_slots`
 - `workers` の employee_number と active 状態
 - `existing_assignments`
+- `external_assignments`
 - `unavailable_days`
 - `rules`
 - `preferences`
 - `settings.version`
 
-JSON 化は key sort し、日付は ISO 形式に統一する。UI 表示用の `explanations`、`warnings`、entry preview は hash に含めない。
+`external_assignments` は他現場の確定状況で出力が変わるため hash に含める。これにより、他現場のシフトが更新された後に古い plan を `apply-draft` で保存しようとした場合に `request_hash` 不一致で拒否できる。JSON 化は key sort し、日付は ISO 形式に統一する。UI 表示用の `explanations`、`warnings`、entry preview は hash に含めない。
 
 ### plan セッション
 
@@ -1039,6 +1073,9 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 - `hard` 休暇者を配置しない。
 - 未確認休暇を設定どおり `soft` または `hard` に変換する。
 - `is_duplicate_by_rules` 基準で同日重複を作らない（重複する組み合わせは禁止し、共存可の組み合わせは許容する）。
+- 他現場で同日に確定勤務している候補者（`external_assignments` で番号一致かつ option が重複）を、その日その枠から除外する。
+- 他現場占有でも option が共存可（例: A と L）なら除外しない。
+- 番号で突合できない他現場占有は Hard 除外せず `warning` にする。
 - 必要人数を満たす。
 - 人員不足時に `unfilled_slots` を出し、`status="partial"` にする。
 - 専従者を優先する。
@@ -1075,7 +1112,7 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 ### Step 1: 設定とモデル
 
 - `project["shift_engine"]` の設定 schema を作る。
-- `RequiredSlot`, `Worker`, `ExistingAssignment`, `UnavailableDay`, `Violation` の dataclass を作る。
+- `RequiredSlot`, `Worker`, `ExistingAssignment`, `ExternalAssignment`, `UnavailableDay`, `Violation` の dataclass を作る。
 - エンジン入力/出力の JSON 化を定義する。
 - `request_hash` と schema migration を作る。
 
@@ -1084,6 +1121,7 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 - CloudShift month から既存配置を作る。
 - `required_capacity` fallback と demand rules から `RequiredSlot` を作る。
 - Employee、SitePlus、assist から `Worker` と補助情報を作る。
+- 同 owner の他 scene project の確定 entries から `external_assignments`（他現場の同日占有）を作る。`_assist_scene_conflict_entries` の収集ロジックを再利用する。
 - 有休共有ツールから `UnavailableDay` を作る。
 - 設定診断 API と警告を作る。
 
