@@ -584,7 +584,7 @@ class ScoreFactor:
 守れない場合は原則配置しない。
 
 - `hard` 休暇、勤務不可日の配置禁止
-- 同日重複の禁止。一律の「同日禁止」ではなく、重複判定は `is_duplicate_by_rules(option1, option2, same_site=...)`（`app/tools/shiftersync_check.py`）に委ねる。同一現場内は `same_site=True`、他現場との判定は `same_site=False` で呼ぶ。オプションの組み合わせ次第で同日共存が許容される（例: 時間帯 `A` と `L` は共存可、`A` と `E` は重複。`V` 車両は全車両と重複。`N1..N5` は同番号のみ重複。有休系オプションは重複しない）ため、この関数を重複判定の唯一の正とする。
+- 同一現場内の同日重複の禁止。一律の「同日禁止」ではなく、`is_duplicate_by_rules(option1, option2, same_site=True)`（`app/tools/shiftersync_check.py`）で判定する。オプションの組み合わせ次第で同日共存が許容される（例: 時間帯 `A` と `L` は共存可、`A` と `E` は重複。`V` 車両は全車両と重複。`N1..N5` は同番号のみ重複。有休系オプションは重複しない）ため、この関数を重複判定の唯一の正とする。
 - 無効な従業員の配置禁止
 - 無効な現場、枝番への配置禁止
 - 固定既存シフトの変更禁止
@@ -592,6 +592,8 @@ class ScoreFactor:
 - 月次上限を超える配置禁止。ただし設定で `warning` に下げられる
 
 資格、車両、時間帯条件は許可データが現行コードに無いため Hard Constraint にしない。資格要求は `warning`、車両・時間帯は下記 Soft の適性として扱う。担当可能性をデータで保証できる仕組みができた段階で Hard 化を再検討する。
+
+他現場（別 project）との同日重複は Hard にしない。エンジンは他 project を DB 直読しないため、既存アシストと同様に原則 `warning`（候補の `has_scene_conflict` 相当）として扱う。確定的に勤務不可とみなせる他現場勤務だけ、context adapter が `UnavailableDay`（`source="person_shift"`）へ変換してエンジンへ渡す。
 
 ### Soft Constraints
 
@@ -607,6 +609,7 @@ class ScoreFactor:
 - 連勤抑制
 - 土日祝の偏り抑制
 - 同一人物への集中抑制
+- 他現場との同日重複の回避（警告表示。入力済みデータに対し `is_duplicate_by_rules(same_site=False)` で評価）
 - 前月、既存シフトからの変更最小化
 - 代務者より通常候補を優先
 - 手動ルールの優先順位
@@ -746,8 +749,8 @@ CloudShift entry は `normalize_entries_for_month` で保持されるフィー�
 
 生成配置は次の方針で変換する。
 
-- `id`: `engine-<request_id>-<slot_instance_id>` のように安定生成する。
-- `value`: 既存の `parse_entry_value` / 表示形式と互換にする。
+- `id`: `engine-<request_id>-<slot_instance_id>` のように安定生成する。`normalize_entry` は既存 `id` を保持するため、この id は正規化後も残る。
+- `value`: 既存の `parse_entry_value` / 表示形式と互換にする。オプション（shift_key）付き配置は `ENTRY_VALUE_PATTERN`（`^!([^!]+)!(.+)$`、すなわち `!オプション!氏名`）に従ってエンコードする。`value` は必ず非空にする。`normalize_entry` は空 `value` の entry を破棄するため、空にすると配置が黙って消えて件数が崩れる。
 - `employee_name`: `Worker.name`
 - `employee_number`: `Worker.employee_number`
 - `comment`: 短い生成理由を入れる。詳細理由は `plan` レスポンス側で表示し、entry に大量保存しない。
