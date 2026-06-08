@@ -229,7 +229,8 @@ class DemandRule:
 class PlanningPreferences:
     existing_policy: Literal["lock_all", "lock_manual", "replace_all"]
     allow_partial: bool
-    min_assignment_score: int | None       # スコア下限。これ未満の候補は配置しない（現実性フィルタ）
+    eligibility_baseline: Literal["dedicated_or_experienced", "any"]  # 配置の最低基準
+    min_assignment_score: int | None       # 追加のスコア下限（任意）。これ未満の候補も配置しない
     unconfirmed_leave_strength: Literal["hard", "soft", "info"]
     max_consecutive_days: int | None
     min_monthly_assignments: int | None
@@ -271,17 +272,33 @@ class ScoringWeights:
 
 内部ではプリセットを `ScoringWeights` に変換する。
 
-### スコア下限（現実性フィルタ）
+### 現実性フィルタ（最低基準とスコア下限）
 
-スコアが低すぎる候補を無理に配置しない。`PlanningPreferences.min_assignment_score` を下回る候補は、Hard Constraint を通っていても**その枠には割り当てない**。割り当てられる候補がいなければ、その枠は空欄（`unfilled_slot`）のままにする。これはエンジンの正常動作であり、「現実性のない配置を作るより、対象者なしを明示する」方針に従う。
+「やったことがある人」を最低基準にする。現実性のない候補を無理に配置するより、対象者なしを明示する。割り当てられる適格候補がいなければ、その枠は空欄（`unfilled_slot`）のままにする。これはエンジンの正常動作。
 
-原則:
+#### 最低基準（適格性）
 
-- `min_assignment_score` は Soft の総合スコアに対する下限であり、Hard Constraint の除外とは別物。Hard で落ちた候補は元から候補に入らない。
-- 下限未満で見送った枠は `unfilled_slots` に入れ、未配置理由を「候補はいるがスコアが下限未満（現実性なし）」とする。`status` は `partial` になりうる。
-- `allow_partial=False` でも、スコア下限による空欄は許可する。無理な配置を強制するより安全なため。ただし「下限未満を許容して埋める」モードが必要なら、`min_assignment_score=None`（無効）で運用する。
-- 既定値は設定とプリセットで決める。`None` は下限なし（従来どおり、Hard さえ通れば最良候補を割り当てる）。
-- 同点・同条件時の決定性は既存 tie-breaker を維持する。下限は割当の可否判定にのみ使う。
+`eligibility_baseline="dedicated_or_experienced"`（既定）のとき、次のいずれかを満たす候補だけを配置対象にする。満たさない候補は Hard を通っていても割り当てない。
+
+- 対象現場の**専従者**である（`Worker.dedicated_site_row_ids` に対象 `site_row_id` を含む）。
+- 対象現場の**経験者**である（`Worker.experienced_site_row_ids` に対象 `site_row_id` を含む。= 過去に実際に勤務した実績がある）。
+- `include_trainees=True` のときに限り、対象現場の**研修対象者**（`Worker.trainee_site_row_ids` に含む）も適格に加える。研修は「やったことがある」には当たらないため、明示的に許可した場合のみ。
+
+`eligibility_baseline="any"` にすると最低基準を外し、Hard を通った全候補を対象にする（従来の挙動）。
+
+最低基準は scoring の `prefer_dedicated` / `prefer_experienced`（優先度=点数）とは別物。優先度は「専従・経験者を上位に並べる」ための加点であり、最低基準は「専従でも経験者でもない人は配置しない」という適格性の足切り。
+
+#### 追加のスコア下限（任意）
+
+`min_assignment_score` を指定すると、最低基準を満たした候補の中でも総合スコアがこれ未満なら配置しない。`None` のときは無効（最低基準だけで判定）。重みに依存する補助設定であり、まずは最低基準（専従/経験）で運用する。
+
+#### 共通の原則
+
+- 足切りで見送った枠は `unfilled_slots` に入れ、未配置理由を「専従・経験者の適格候補がいない」または「スコア下限未満」とする。`status` は `partial` になりうる。
+- `allow_partial=False` でも、最低基準・スコア下限による空欄は許可する。無理な配置を強制するより安全。
+- 同点・同条件時の決定性は既存 tie-breaker を維持する。足切りは割当の可否判定にのみ使う。
+
+### 設定バージョン
 
 `ShiftEngineSettings.version` は必須とする。設定 schema を変える場合は、古い設定を読み込んだ時点で migration する。
 
@@ -381,6 +398,8 @@ class Worker:
     office_name: str = ""
     dedicated_site_ids: tuple[str, ...] = ()
     dedicated_site_row_ids: tuple[str, ...] = ()
+    experienced_site_row_ids: tuple[str, ...] = ()  # 実績のある現場（経験）。最低基準と経験点に使う
+    trainee_site_row_ids: tuple[str, ...] = ()       # 研修対象の現場。include_trainees 時のみ適格に含める
     qualification_codes: tuple[str, ...] = ()  # 予約フィールド。現行コードに資格データが無い
     vehicle_options: tuple[str, ...] = ()       # 過去実績由来の適性。Soft スコアにのみ使う
     capable_shift_keys: tuple[str, ...] = ()    # 過去実績由来。担当可能性の証明ではなく Soft 材料
@@ -399,7 +418,7 @@ class Worker:
 | 氏名、社員番号、在籍状態 | Employee | 主キーと有効性の基準 |
 | 現場、枝番、専従者 | SitePlus / CloudShift project | 専従者優先と現場リンク |
 | 希望曜日、NG 曜日 | assist profiles | Soft Constraint / preference |
-| 経験、研修 | assist records / experienced_sites / training_sites | スコア材料 |
+| 経験、研修 | assist records / experienced_sites / training_sites | 最低基準（経験＝`experienced_site_row_ids`、研修＝`trainee_site_row_ids`）とスコア材料 |
 | 既存勤務数 | CloudShift entries / draft entries | 公平性と変更最小化 |
 | 他現場の同日確定勤務 | 同 owner の他 scene project の確定 entries | 他現場占有（`external_assignments`） |
 | 休暇 | leave_mgr | 不可日 |
@@ -617,9 +636,10 @@ class ScoreFactor:
 
 1. 候補者がいない。
 2. 候補者はいるが全員 Hard Constraint で除外された。
-3. 候補者はいるが、最良候補のスコアが下限（`min_assignment_score`）未満で見送った（現実性のない配置を避けた）。
-4. 固定配置や上限により割当余地がない。
-5. Soft Constraint を優先した結果、未充足を許可した。
+3. 候補者はいるが、専従・経験者の最低基準を満たす適格者がいない（「やったことがある人」がいない）。
+4. 候補者はいるが、最良候補のスコアが下限（`min_assignment_score`）未満で見送った。
+5. 固定配置や上限により割当余地がない。
+6. Soft Constraint を優先した結果、未充足を許可した。
 
 ## 制約分類
 
@@ -675,7 +695,8 @@ class ScoreFactor:
 - 既存シフトを固定するか、上書き候補にするか
 - 専従者をどれだけ強く優先するか
 - 公平性と経験者優先の重み
-- 配置を許すスコア下限（`min_assignment_score`、現実性フィルタ）
+- 配置の最低基準（`eligibility_baseline`：専従/経験者のみ か 全員可）
+- 追加のスコア下限（`min_assignment_score`、任意）
 
 ## 生成アルゴリズム
 
@@ -692,12 +713,13 @@ class ScoreFactor:
 3. 固定既存配置を seed として投入
 4. seed の Hard Constraint 違反を検証
 5. 各 slot の候補者を Hard Constraint でフィルタ（他現場占有を含む）
-6. 候補者数が少ない slot から順に並べる
-7. Soft Constraint の重みで候補者をスコアリング
-8. 決定的な tie-breaker で最良候補を選ぶ。最良候補のスコアが `min_assignment_score` 未満なら割り当てず空欄のままにする
-9. 連勤、勤務数偏り、土日祝偏りを見て局所修復
-10. 交換で改善できる場合だけ入替。ただし入替後も両者が下限以上であること
-11. 未充足枠、違反、警告、理由を出力
+6. 最低基準（`eligibility_baseline`）で適格者だけに絞る。専従でも経験者でもない候補（研修者は `include_trainees` 時のみ可）を除外する
+7. 候補者数が少ない slot から順に並べる
+8. Soft Constraint の重みで候補者をスコアリング
+9. 決定的な tie-breaker で最良候補を選ぶ。最良候補のスコアが `min_assignment_score` 未満なら割り当てず空欄のままにする
+10. 連勤、勤務数偏り、土日祝偏りを見て局所修復
+11. 交換で改善できる場合だけ入替。ただし入替後も両者が最低基準・下限を満たすこと
+12. 未充足枠、違反、警告、理由を出力
 
 tie-breaker:
 
@@ -1003,7 +1025,8 @@ CloudShift の現場シフト帳に「自動作成」パネルを追加する。
 - 月内最大/最小勤務数
 - 土日祝の偏り抑制
 - 未確認休暇の扱い
-- 配置を許すスコア下限（現実性フィルタ。低すぎる候補は入れず空欄にする）
+- 配置の最低基準（専従・経験者のみ / 全員可。既定は専従・経験者のみ）
+- 追加のスコア下限（任意。低すぎる候補は入れず空欄にする）
 - 未充足を許可するか
 
 生成後に表示するもの:
@@ -1071,7 +1094,7 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 
 - demand rules が未整備の現場では、生成品質より設定診断を優先する。
 - 有休共有ツールの社員番号が欠けていると品質が大きく落ちる。
-- 「未充足ゼロ」を絶対視しない。無理な配置より、未充足を明示する方が安全。スコア下限により「現実性のない候補しかいない枠」は空欄で返す。下限が高すぎると空欄が増えるため、現場ごとに調整する。
+- 「未充足ゼロ」を絶対視しない。無理な配置より、未充足を明示する方が安全。最低基準（専従・経験者）により「やったことがある人がいない枠」は空欄で返す。経験者が乏しい現場では空欄が増えるため、研修者の投入（`include_trainees`）や最低基準の緩和（`eligibility_baseline="any"`）を現場ごとに判断する。
 - override は便利だが、濫用するとエンジンの信頼性が落ちる。履歴で追跡する。
 - 連勤数は対象月内の配置から数える。月初の連勤評価は前月末を含めないため、月境界の連勤は Phase 1 では近似となる点に注意する（必要なら前月末日の既存配置を追加入力する）。
 - 生成結果はあくまで下書きであり、公開前確認を省略しない。
@@ -1090,8 +1113,10 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 - 他現場で同日に確定勤務している候補者（`external_assignments` で番号一致かつ option が重複）を、その日その枠から除外する。
 - 他現場占有でも option が共存可（例: A と L）なら除外しない。
 - 番号で突合できない他現場占有は Hard 除外せず `warning` にする。
+- 専従でも経験者でもない候補を配置せず、適格者がいない枠は空欄にする（最低基準）。
+- `include_trainees=True` のときは研修対象者も適格に含める。
+- `eligibility_baseline="any"` のときは最低基準を外し全候補を対象にする。
 - 最良候補のスコアが `min_assignment_score` 未満の枠は空欄にし、未配置理由を「スコア下限未満」とする。
-- `min_assignment_score=None` のときは下限なしで従来どおり最良候補を割り当てる。
 - 必要人数を満たす。
 - 人員不足時に `unfilled_slots` を出し、`status="partial"` にする。
 - 専従者を優先する。
