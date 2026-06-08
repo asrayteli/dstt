@@ -14,6 +14,7 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy.exc import IntegrityError
 
 from app.models import ToBellNotification, ToBellTask, db
+from app.services.local_time import local_now
 from app.services.to_bell_integrations import enabled_users, get_health_check_notify, is_enabled
 
 logger = logging.getLogger(__name__)
@@ -208,7 +209,8 @@ def on_cloudshift_substitute_updated(
         title = f"[CloudShift] 要代務シフト帳が更新されました: {substitute_project_title}"
         href = f"/tools/shiftersync/cloudshift?project={substitute_project_id}"
 
-        today_key = datetime.utcnow().strftime("%Y%m%d")
+        # 「当日」は日本のローカル日付で判定する（UTCだと日付の境界がずれる）。
+        today_key = local_now().strftime("%Y%m%d")
         for user in dict.fromkeys(targets):
             _upsert_substitute_task_for_user(
                 user=user,
@@ -427,7 +429,7 @@ def ensure_health_check_reminders(
     例外は飲み込み、健診側の保存処理を妨げない。
     （`global_lead_days` は後方互換のため残すが、本リマインドでは使用しない。）
     """
-    now = now or datetime.now()
+    now = now or local_now()
     manager = (record.manager_user or "").strip()
     opted_in = bool(manager) and is_enabled(manager, HEALTH_CHECK_INTEGRATION_KEY)
     # 担当者ごとの種別別ON/OFF（未設定は通知する）。
@@ -505,7 +507,7 @@ def close_health_check_reminders(record_id: int, *, commit: bool = True) -> None
 
 def sweep_health_check_reminders(*, now: datetime | None = None) -> dict[str, int]:
     """全レコードのリマインドを再同期する（日次実行で due_at を当日通知へ繰り上げる）。"""
-    now = now or datetime.now()
+    now = now or local_now()
     processed = 0
     try:
         from app.models import HealthCheckRecord

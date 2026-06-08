@@ -5,6 +5,8 @@ import logging
 import os
 import threading
 from datetime import datetime, timedelta
+
+from app.services.local_time import local_now
 from pathlib import Path
 from typing import Any
 
@@ -168,8 +170,8 @@ def send_test_push(user_id: str) -> dict[str, int]:
 
 def send_due_task_pushes(*, now: datetime | None = None) -> dict[str, int]:
     # due_at は利用者が入力したローカル時刻のナイーブな値として保存されるため、
-    # 比較も utcnow() ではなくローカルの now() を使う（時差で通知がずれる不具合を防ぐ）。
-    now = now or datetime.now()
+    # 比較も設定タイムゾーン基準の現在時刻を使う（サーバーTZ依存で通知がずれる不具合を防ぐ）。
+    now = now or local_now()
     cutoff = now - timedelta(days=60)
     tasks = ToBellTask.query.filter(
         ToBellTask.status.notin_(["done", "archived"]),
