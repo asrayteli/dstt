@@ -153,7 +153,15 @@ class ScoreSummary:
     changed_existing_count: int
 ```
 
-`fill_rate` は `assigned_count / required_count` とする。`required_count` が 0 の場合は 0 除算を避け、`fill_rate=1.0`（需要なし＝完全充足）とする。`fairness_index` と `weekend_balance_index` は初期実装では 0.0 から 1.0 の正規化値とし、1.0 に近いほど良い状態とする。
+`fill_rate` は `assigned_count / required_count` とする。`required_count` が 0 の場合は 0 除算を避け、`fill_rate=1.0`（需要なし＝完全充足）とする。
+
+`fairness_index` と `weekend_balance_index` は 0.0〜1.0 の正規化値とし、1.0 に近いほど良い。初期実装は次で定義する（決定的・0 除算回避）。
+
+- `fairness_index = 1 - min(1, stdev(各 worker の総割当数) / max(1, mean(各 worker の総割当数)))`。割当のある worker が 1 人以下なら 1.0。
+- `weekend_balance_index = 1 - min(1, stdev(各 worker の土日祝割当数) / max(1, mean(各 worker の土日祝割当数)))`。土日祝の割当が無ければ 1.0。
+- `max_consecutive_days` は全 worker の最大連勤数。割当ゼロなら 0。
+
+これらは指標であり保存可否には影響しない。算出は割当確定後に 1 回だけ行う。
 
 ## 推奨ファイル構成
 
@@ -246,7 +254,29 @@ class PlanningPreferences:
     suppress_weekend_imbalance: bool
 ```
 
-一時的な UI 入力は `PlanningPreferences` に入れる。永続設定と UI 入力が衝突した場合は、`plan` payload に含まれる明示値を優先し、`Explanation` に「一時設定で上書き」と出す。
+`PlanningPreferences` は必ず既定値を持つ。`default_planning_preferences()` は「コア既定プロファイル」と一致する次の値を返し、未指定フィールドはこれで埋める。
+
+```python
+def default_planning_preferences() -> PlanningPreferences:
+    return PlanningPreferences(
+        existing_policy="lock_manual",
+        allow_partial=True,
+        eligibility_baseline="dedicated_or_experienced",
+        min_assignment_score=None,
+        unconfirmed_leave_strength="soft",
+        max_consecutive_days=None,        # Hard 上限は既定で無し（Soft 抑制のみ）
+        min_monthly_assignments=None,
+        max_monthly_assignments=None,
+        include_trainees=False,
+        prefer_dedicated=True,
+        prefer_experienced=True,
+        prefer_fairness=True,
+        minimize_changes=True,
+        suppress_weekend_imbalance=True,
+    )
+```
+
+一時的な UI 入力は `PlanningPreferences` に入れる。永続設定と UI 入力が衝突した場合は、`plan` payload に含まれる明示値を優先し、`Explanation` に「一時設定で上書き」と出す。優先順位は **plan の明示値 > project の `default_preferences` > `default_planning_preferences()`**。
 
 ### スコア重み
 
@@ -343,12 +373,41 @@ class OptionExperiencePolicy:
 
 原則: **少しでも人間の判断が要るところはコアに固定値で埋め込まず、必ずオプションにする。** コアは「正しさ・安全・再現性」を担い、オプションは「現場ごとの好み・運用ルール」を担う。
 
+ただしオプション＝全部 OFF ではない。設定は次の 2 クラスに分ける。
+
+- **コア既定 ON オプション**: ほとんどの現場で妥当な、エンジンが最初から有効にしておく既定値。これにより**何も設定しなくても合理的なシフトが作れる**。ユーザーは必要なら上書きする。
+- **純オプション（既定 OFF/中立）**: 現場特有の要望で、明示的に有効化したときだけ効く設定。未設定ならコア挙動を一切変えない。
+
+### コア既定プロファイル（無設定で合理的なシフトを作る）
+
+設定が一切無い現場でも、次の既定値で動く。`build_default_settings()` 相当が常にこのプロファイルを構成し、ユーザー設定はこの上に重ねる。
+
+| 設定 | 既定値（ON） | 狙い |
+|---|---|---|
+| `eligibility_baseline` | `dedicated_or_experienced` | 「やったことがある人」だけを配置し現実性を担保 |
+| `include_trainees` | `False` | 研修者は明示時のみ |
+| `leave_policies` | 有休/代休/公休/慶弔/介護/リフレッシュ=`hard`、その他=`soft` | 確定休暇は確実に避ける |
+| `unconfirmed_leave_strength` | `soft` | 未確認休暇は避けるが絶対化しない |
+| `existing_policy` | `lock_manual`（手入力だけ固定） | 人手で入れた予定は壊さない |
+| `minimize_changes` | 弱く有効 | 既存・前月から無駄に動かさない |
+| `weekend_balance` | 抑制する | 土日祝の偏りを抑える |
+| `fairness`（`prefer_fairness`） | 有効 | 勤務数の偏り・集中を抑える |
+| 連勤抑制 | 有効（Soft、`consecutive_day_penalty`） | 連勤が伸びるほど減点。Hard 上限（`max_consecutive_days`）は既定なし |
+| `scoring_weights` | バランス型（既定の `ScoringWeights`） | 専従>経験>適性>希望 の標準配分 |
+| `allow_partial` | `True` | 無理に埋めず未充足を明示 |
+| `external_occupancy` | Hard 除外 | 他現場と同日二重配置を防ぐ |
+| `same_site_duplicate` | 禁止（`is_duplicate_by_rules`） | 同一現場の重複を防ぐ |
+| 需要 fallback | demand_rules → capacity_fallback →（無ければ）前月パターン推定 | 需要未設定でも妥当な枠を用意（推定は warning 付き） |
+| `min_assignment_score` | `None` | 既定では基準（専従/経験）だけで判定 |
+
+これら以外（`office_filter`、`candidate_allowlist`、`pinned_assignments`、`option_experience_policies`、`pair_*` など）は純オプションで既定 OFF。
+
 ### オプション・フレームワーク
 
 オプションは個別の場当たり設定にせず、共通の枠組みで管理する。
 
 - すべてのオプションは型付き・検証付きで、`project["shift_engine"]` に保存する（`assist` JSON には保存しない）。
-- すべてのオプションに**安全な既定値**を持たせる。既定はコア挙動を変えない「中立（無効・なし）」とし、未設定でもエンジンが成立する。
+- 各オプションは「コア既定 ON」か「純オプション（既定 OFF/中立）」かを明示する。コア既定 ON は上記プロファイルの値、純オプションは未設定でコア挙動を変えない。
 - オプションは**合成可能**にする。互いに矛盾しうる設定は、後述の優先順位で解決し、矛盾は `warning` として返す。
 - 各オプションは「分類（Hard 足切り / Soft 加点 / 需要 / 出力 / 運用）」「スコープ（現場全体 / 枝番 / オプションキー / 個人 / 曜日）」「既定値」「データ源」を明示する。
 - データ源が現行コードに無いオプションは**予約**として定義だけ置き、Phase 1 では `warning` を返して挙動には反映しない（例: 資格）。
@@ -379,6 +438,7 @@ class OptionToggle:
 |---|---|---|---|
 | `demand_rules` | 曜日別・枝番別・オプション別・日付指定の必要人数（実装済み概念） | fallback のみ | 需要 |
 | `capacity_fallback` | `required_capacity` から全営業日へ自動展開するか | `capacity_enabled` 準拠 | 需要 |
+| `prev_month_estimate` | demand も capacity も無い時、前月確定の曜日別平均で需要を推定（warning 付き） | コア既定 ON | 需要 |
 | `day_overrides` | 特定日の必要人数を増減（`include_dates`/`exclude_dates` 相当） | なし | 需要 |
 | `holiday_policy` | 祝日を営業/休業/別需要のどれで扱うか（`JAPAN_HOLIDAYS` 参照） | 営業日扱い | 需要 |
 | `special_workday_labels` | 特別稼働日・休業日を `PlanningDay.labels` で指定 | なし | 需要 |
@@ -452,16 +512,17 @@ class OptionToggle:
 
 オプションが増えても破綻しないよう、評価順を固定する。
 
-1. **コアの Hard**（休暇・重複・他現場占有・固定既存・無効従業員）。これはオプションで外せない安全装置。
-2. **オプションの Hard 足切り**（適格性・未経験不可・allow/block list・office/type フィルタ・forbidden・pinned）。
-3. **需要の確定**（demand と fallback、day_overrides、holiday_policy）。
-4. **Soft スコアリング**（重み・人物単位の好み・公平性・連続性・オプション一致加点）。
-5. **下限・しきい値での足切り**（`min_assignment_score`）。
-6. **決定的 tie-breaker** と局所修復。
+1. **不可侵のコア Hard**（`hard` 休暇・同一現場の重複・固定既存シフトの不変更・無効従業員）。オプションで外せない安全装置。
+2. **既定 Hard だが明示設定で緩められるもの**（他現場占有。`external_occupancy_relax` を明示設定したときだけ `warning` へ降格できる）。
+3. **オプションの Hard 足切り**（適格性・未経験不可・allow/block list・office/type フィルタ・forbidden・pinned）。
+4. **需要の確定**（demand と fallback、day_overrides、holiday_policy）。
+5. **Soft スコアリング**（重み・人物単位の好み・公平性・連続性・オプション一致加点）。
+6. **下限・しきい値での足切り**（`min_assignment_score`）。
+7. **決定的 tie-breaker** と局所修復。
 
 安全原則:
 
-- どのオプションも**コアの Hard を緩めない**。緩められるのは「オプション由来の Hard を付けない/外す」方向だけ。例外的に他現場占有だけは `external_occupancy_relax` で warning へ落とせるが、これは明示設定時のみ。
+- どのオプションも**不可侵のコア Hard（上記 1）を緩めない**。緩められるのは「オプション由来の Hard を付けない/外す」方向と、他現場占有（上記 2）を明示設定で warning へ落とす場合だけ。
 - 相反するオプション（例: allowlist と blocklist に同一人物）は、より安全側（除外）を採り `warning` を出す。
 - オプションを足切りに使った結果の空欄は、コアと同じく `unfilled_slots` に理由付きで返す。無理に埋めない。
 - すべてのオプションは出力に影響するため、`request_hash` に effective なオプション値を含め、設定変更後の古い plan を `apply-draft` で拒否する。
@@ -473,7 +534,7 @@ class OptionToggle:
 - **オプション横断の整合表示**: 設定が空欄を増やす要因（厳しい最低基準・未経験不可・各種フィルタ）は、自動作成パネルで「空欄が増えうる設定」として一覧表示する。
 - 一部のオプション（特定オプション未経験不可など）は、関連する既存画面（アシストのオプション欄）から設定し、保存先は `shift_engine` 設定に統一する。
 
-
+## エンジン入出力
 
 ### 入力モデル
 
@@ -538,17 +599,20 @@ class RequiredSlot:
     required_vehicle_options: tuple[str, ...] = ()       # Soft（適性）として扱う。Hard にしない
     time_band: str = ""
     priority: int = 100
-    source: Literal["settings", "required_capacity_fallback", "existing_entry"] = "settings"
+    source: Literal["settings", "required_capacity_fallback", "prev_month_estimate", "existing_entry"] = "settings"
 ```
 
 `required_count` が 2 以上の場合、エンジン内部では割当単位として `slot_id#1`, `slot_id#2` のように展開してよい。UI と結果では元の `slot_id` に戻して表示する。
 
-需要の作り方:
+需要の作り方（上から順に評価し、最初に確定したソースを使う）:
 
-1. `project["shift_engine"].demand_rules` がある場合は、それを最優先にする。
-2. 既存シフトを固定する場合は、既存配置分を `ExistingAssignment` として先に確保する。
-3. `demand_rules` がなく、かつ `capacity_enabled=True` の場合のみ、`required_capacity` から日別の同一需要を作る。
-4. 需要がゼロの日は、エンジンが勝手に配置を増やさない。
+1. `project["shift_engine"].demand_rules` があればそれを使う（最優先、`source="settings"`）。
+2. demand_rules が無く `capacity_enabled=True` なら、`required_capacity` を全営業日へ同一人数で展開する（`source="required_capacity_fallback"`）。
+3. 1・2 のいずれも無い場合のみ、**前月の確定シフトの曜日別の平均人数**を推定需要として使う（コア既定 ON のフォールバック、`source="prev_month_estimate"`）。推定である旨を必ず `warning` で返す。前月の確定データが無ければ需要ゼロ。
+4. 既存シフトを固定する場合は、固定分（`locked`/`manual_locked`）を `ExistingAssignment` として先に確保し、その枠の `required_count` から差し引く。
+5. 需要がゼロの日は、エンジンが勝手に配置を増やさない。
+
+この順序により、何も設定していない現場でも「前月の人員規模」を出発点に妥当な下書きが作れる。前月パターンを使いたくない場合は `capacity_fallback` を明示無効化するか demand_rules を設定する。
 
 ### 人員モデル
 
@@ -565,10 +629,10 @@ class Worker:
     dedicated_site_row_ids: tuple[str, ...] = ()
     experienced_site_row_ids: tuple[str, ...] = ()  # 実績のある現場（経験）。最低基準と経験点に使う
     trainee_site_row_ids: tuple[str, ...] = ()       # 研修対象の現場。include_trainees 時のみ適格に含める
-    experienced_option_keys: tuple[str, ...] = ()    # 過去に担当した option。一致で加点、未経験不可ポリシー時の適格判定に使う
+    experienced_option_keys: tuple[str, ...] = ()    # 【正】過去に担当した option。一致で加点、未経験不可ポリシー時の適格判定に使う
     qualification_codes: tuple[str, ...] = ()  # 予約フィールド。現行コードに資格データが無い
-    vehicle_options: tuple[str, ...] = ()       # 過去実績由来の適性。Soft スコアにのみ使う
-    capable_shift_keys: tuple[str, ...] = ()    # 過去実績由来。担当可能性の証明ではなく Soft 材料
+    vehicle_options: tuple[str, ...] = ()       # 予約（legacy）。option 実績は experienced_option_keys に一本化。エンジンは参照しない
+    capable_shift_keys: tuple[str, ...] = ()    # 予約（legacy）。同上。担当可能性の証明にはしない
     preference: WorkerPreference | None = None
     monthly_limit: WorkerMonthlyLimit | None = None
 ```
@@ -721,6 +785,84 @@ class Violation:
 - `info`: 保存可
 
 `unfilled_slots` は違反ではなく、`partial` の主因として扱う。ただし UI では目立つように表示する。
+
+### 補助データ構造
+
+本文で参照する残りの型を定義する。すべて `frozen=True` の dataclass。
+
+```python
+@dataclass(frozen=True)
+class SiteRef:
+    site_row_id: str
+    site_id: str
+    site_name: str
+
+@dataclass(frozen=True)
+class Assignment:
+    assignment_id: str
+    slot_id: str            # 表示用は元 slot_id（#1 等の内部展開は戻す）
+    slot_instance_id: str   # 内部の割当単位（slot_id#n）
+    date: date
+    day: int
+    shift_key: str
+    employee_number: str
+    employee_name: str
+    score: int
+    source: Literal["engine", "existing_locked", "pinned"]
+
+@dataclass(frozen=True)
+class UnfilledSlot:
+    slot_id: str
+    date: date
+    day: int
+    shift_key: str
+    shortage: int           # 不足数（required_count - assigned）
+    reason_code: str        # 未配置理由の優先順位コード
+    reason: str
+
+@dataclass(frozen=True)
+class PlanningWarning:
+    code: str
+    message: str
+    date: date | None = None
+    employee_number: str = ""
+    slot_id: str = ""
+
+@dataclass(frozen=True)
+class WorkerPreference:
+    preferred_weekdays: tuple[int, ...] = ()   # 月=0..日=6
+    blocked_weekdays: tuple[int, ...] = ()
+    note: str = ""
+
+@dataclass(frozen=True)
+class WorkerMonthlyLimit:
+    min_assignments: int | None = None
+    max_assignments: int | None = None
+    prior_month_tail_consecutive: int = 0      # 前月末からの連勤数（consecutive_cross_month 用、既定 0）
+
+@dataclass(frozen=True)
+class WorkerLimit:
+    employee_number: str
+    min_assignments: int | None = None
+    max_assignments: int | None = None
+
+@dataclass(frozen=True)
+class LeavePolicy:
+    leave_type: str
+    strength: Literal["hard", "soft", "info"]
+
+@dataclass(frozen=True)
+class Rule:
+    rule_id: str
+    kind: Literal["pinned", "forbidden", "pair_together", "pair_avoid", "worker_weight", "fixed_weekday", "manual"]
+    enabled: bool = True
+    priority: int = 100
+    effective_from: date | None = None
+    effective_to: date | None = None
+    params: dict[str, Any] = field(default_factory=dict)   # kind ごとのパラメータ
+```
+
+`Rule` は人物単位の好み（`pair_*`、`worker_weight`、`pinned`/`forbidden`、`fixed_weekday`）と手動ルールを 1 つの型で表す。`kind` と `params` で内容を分け、`enabled`・`priority`・有効期間で制御する。`WorkerLimit`（settings 側の現場全体・個人別の上限設定）は context adapter が解決して `Worker.monthly_limit`（`WorkerMonthlyLimit`）に落とし込む。
 
 ## 検証パイプライン
 
@@ -878,26 +1020,32 @@ class ScoreFactor:
 手順:
 
 1. 入力正規化
-2. `RequiredSlot` を割当単位へ展開
-3. 固定既存配置を seed として投入
-4. seed の Hard Constraint 違反を検証
-5. 各 slot の候補者を Hard Constraint でフィルタ（他現場占有を含む）
-6. 最低基準（`eligibility_baseline`）で適格者だけに絞る。専従でも経験者でもない候補（研修者は `include_trainees` 時のみ可）を除外する。さらに、その枠のオプションが `OptionExperiencePolicy` で「未経験不可」なら、当該オプション未経験者も除外する
-7. 候補者数が少ない slot から順に並べる
-8. Soft Constraint の重みで候補者をスコアリング
-9. 決定的な tie-breaker で最良候補を選ぶ。最良候補のスコアが `min_assignment_score` 未満なら割り当てず空欄のままにする
-10. 連勤、勤務数偏り、土日祝偏りを見て局所修復
-11. 交換で改善できる場合だけ入替。ただし入替後も両者が最低基準・下限を満たすこと
-12. 未充足枠、違反、警告、理由を出力
+2. `RequiredSlot` を割当単位（`slot_id#n`）へ展開
+3. 固定既存配置（`locked`/`manual_locked`/`pinned`）を seed として投入
+4. seed の Hard Constraint 違反を検証（衝突は再配置せず `blocker`）
+5. 各 slot の候補者を **Hard Constraint** でフィルタする。次をこの順で適用:
+   - `hard` 休暇・勤務不可
+   - 同一現場の重複（`is_duplicate_by_rules(same_site=True)`）
+   - 他現場占有（`is_duplicate_by_rules(same_site=False)`。`external_occupancy_relax` 時は除外せず warning）
+   - 無効従業員・`employee_number` 無し・`forbidden_assignments`
+   - `office_filter`/`employee_type_filter`/`candidate_allowlist`/`candidate_blocklist`
+   - 月次上限到達者、`max_consecutive_days` を Hard 設定にしている場合は連勤上限到達者
+6. 最低基準（`eligibility_baseline`）で適格者に絞る。専従でも経験者でもない候補（研修者は `include_trainees` 時のみ可）を除外。枠のオプションが `OptionExperiencePolicy` で「未経験不可」なら当該オプション未経験者も除外
+7. slot を処理順に並べる。**並び順は決定的**にする: ①候補者数 昇順（最も制約が強い枠を先に）②`date` 昇順 ③`shift_key` ④`slot_instance_id`
+8. 各 slot で候補者を Soft Constraint の重みでスコアリング（slot 単位でキャッシュ）
+9. tie-breaker で最良候補を選ぶ。最良候補のスコアが `min_assignment_score` 未満、または適格者がいなければ割り当てず空欄にし、理由コードを残す
+10. 局所修復（連勤・勤務数偏り・土日祝偏り・未充足）を行う。修復は**決定的な走査順**（`date` → `slot_instance_id`）で、各反復は「総ペナルティが厳密に減る入替のみ」を採用する。改善が無くなるか `max_local_search_iterations` で停止
+11. 入替・追加配置は、入替後も両当事者が全 Hard・最低基準・`min_assignment_score` を満たす場合のみ許可
+12. 未充足枠、違反、警告、理由、`ScoreSummary` を出力
 
-tie-breaker:
+tie-breaker（候補選択の決定的順序）:
 
 1. スコア降順
-2. 今月割当数昇順
-3. 連勤数昇順
-4. `employee_number` 昇順
+2. 今月割当数 昇順（公平性）
+3. 連勤数 昇順
+4. `employee_number` 昇順（最終の絶対的決定子）
 
-この順序により、同じ入力なら同じ出力になる。
+`employee_number` 昇順が最後に必ず効くため、全段階で順序が一意に定まり、同じ入力・設定なら必ず同じ出力になる。スコア計算・ソートに集合や辞書の反復順へ依存する箇所を作らない（リストとタプルで明示ソートする）。
 
 ### Phase 2: Solver Backend
 
@@ -940,6 +1088,32 @@ Phase 1 の性能目標:
 2. 候補者数が多すぎる場合は、専従者、経験者、希望曜日一致者を優先して候補を絞る。
 3. 局所探索を省略してもよい。
 4. 省略した最適化は `warnings` に残す。
+
+## エッジケースと不変条件
+
+コアを強固にするため、次のエッジケースを明示的に定義し、テストで固定する。どの入力でも例外で落ちず、必ず `ShiftPlanningResult` を返す。
+
+入力エッジケース:
+
+- **候補者ゼロ / 全員不適格**: `assignments` 空、全 slot を `unfilled_slots`、`status="partial"`（需要があるとき）。例外にしない。
+- **需要ゼロ**: `assignments` 空、`status="feasible"`、`fill_rate=1.0`。
+- **全員 `hard` 休暇**: 全 slot 未充足、理由「候補者はいるが全員 Hard で除外」。
+- **seed が Hard 違反**（固定既存同士の重複・固定が `hard` 休暇）: 該当を `blocker`、`status="failed"` または `partial`。エンジンは固定を動かさない。
+- **`employee_number` 重複**: `validate_request` で `failed`。
+- **同一人物が allowlist と blocklist の両方**: 除外を採用し `warning`。
+- **`required_count=0` の枠**: 割当不要。fallback より優先（明示ゼロ）。
+- **月初の連勤**: `consecutive_cross_month` が無効なら前月末を数えない（既定）。有効時は `WorkerMonthlyLimit.prior_month_tail_consecutive` を起点にする。
+- **短い月 / うるう年**: `days` は `monthrange` 準拠で生成し、`required_slots` の日付は対象月内のみ。
+- **前月データ無しで需要フォールバック**: 推定できず需要ゼロ。`warning` で「需要未設定」を示す。
+
+不変条件（result 検証で必ず満たす）:
+
+- 出力の各 assignment は、ある `required_slots` の slot_instance にちょうど 1 対 1 で対応する（重複割当なし）。
+- `assigned_count + Σshortage == Σrequired_count`。
+- 固定既存（`locked`/`manual_locked`/`pinned`）は入力どおり 100% 残る。
+- 同一 worker・同一日で `is_duplicate_by_rules` が重複と判定する配置を作らない。
+- 全 `employee_number` は非空。`value` は非空（空 value は正規化で消えるため）。
+- 同じ入力・設定・revision なら、`assignments` の順序・内容・`request_hash` が完全一致する。
 
 ## CloudShift への反映設計
 
@@ -1276,6 +1450,11 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 
 必須単体テスト:
 
+- **既定設定（コア既定プロファイル）だけで、候補と需要があれば合理的な下書きが生成される。**
+- 設定が一切無く前月確定シフトがある場合、前月パターン推定で需要が作られ `prev_month_estimate` の `warning` が付く。
+- 前月データも無い場合は需要ゼロで `feasible`、例外を出さない。
+- 同じ入力・設定・revision で 2 回実行すると `assignments` と `request_hash` が完全一致する（決定性）。
+- 候補者ゼロ・需要ゼロ・全員 hard 休暇でも例外を出さず `ShiftPlanningResult` を返す。
 - `required_capacity` fallback から `RequiredSlot` を作れる。
 - 曜日別、枝番別、オプション別 demand を展開できる。
 - `hard` 休暇者を配置しない。
