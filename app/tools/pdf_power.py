@@ -909,177 +909,6 @@ def convert_pdf():
 
         return _send_path_bytes(output_path, "converted_output.pdf", "application/pdf")
 
-        # ファイル→PDF変換（既存の処理）
-        files = request.files.getlist("files")
-        if not files or not files[0].filename:
-            return jsonify({"error": "ファイルがアップロードされていません"}), 400
-
-        temp_dir = tempfile.mkdtemp()
-        output_path = os.path.join(temp_dir, "converted_output.pdf")
-
-        pdf_images = []
-
-        for file in files:
-            if not file.filename:
-                continue
-
-            filename = secure_filename(file.filename)
-            if not filename:
-                continue
-
-            ext = filename.split('.')[-1].lower()
-            file_path = os.path.join(temp_dir, filename)
-            file.save(file_path)
-
-            # ファイルサイズチェック
-            if os.path.getsize(file_path) > MAX_FILE_SIZE:
-                return jsonify({"error": f"ファイルサイズが大きすぎます（100MB以下にしてください）: {filename}"}), 400
-
-            if ext in ["png", "jpg", "jpeg", "bmp", "gif"]:
-                # 画像ファイルをPDF用に保存
-                try:
-                    img = Image.open(file_path).convert("RGB")
-                    pdf_images.append(img)
-                except Exception as e:
-                    logger.error(f"画像の処理に失敗しました: {e}")
-                    return jsonify({"error": f"画像の処理に失敗しました: {filename}"}), 400
-
-            elif ext == "txt":
-                # TXT → PDF化
-                try:
-                    c = canvas.Canvas(output_path, pagesize=letter)
-                    width, height = letter
-
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-
-                    lines = content.split('\n')
-                    y = height - 72
-                    line_height = 14
-
-                    for line in lines:
-                        if len(line) > 80:
-                            words = line.split()
-                            current_line = ""
-                            for word in words:
-                                if len(current_line + word) < 80:
-                                    current_line += word + " "
-                                else:
-                                    if current_line:
-                                        c.drawString(72, y, current_line.strip())
-                                        y -= line_height
-                                        if y < 72:
-                                            c.showPage()
-                                            y = height - 72
-                                    current_line = word + " "
-                            if current_line:
-                                c.drawString(72, y, current_line.strip())
-                                y -= line_height
-                        else:
-                            c.drawString(72, y, line)
-                            y -= line_height
-
-                        if y < 72:
-                            c.showPage()
-                            y = height - 72
-
-                    c.save()
-
-                    @after_this_request
-                    def cleanup(response):
-                        try:
-                            if temp_dir and os.path.exists(temp_dir):
-                                shutil.rmtree(temp_dir)
-                        except Exception as e:
-                            logger.error(f"一時ディレクトリの削除に失敗: {e}")
-                        return response
-
-                    return send_file(output_path, as_attachment=True, download_name="converted_output.pdf")
-
-                except Exception as e:
-                    logger.error(f"テキストファイルの処理に失敗しました: {e}")
-                    logger.error(traceback.format_exc())
-                    return jsonify({"error": f"テキストファイルの処理に失敗しました: {str(e)}"}), 400
-
-            elif ext == "docx":
-                # Word → PDF化
-                try:
-                    doc = Document(file_path)
-                    c = canvas.Canvas(output_path, pagesize=letter)
-                    width, height = letter
-                    y = height - 72
-
-                    for para in doc.paragraphs:
-                        text = para.text.strip()
-                        if text:
-                            if len(text) > 80:
-                                words = text.split()
-                                current_line = ""
-                                for word in words:
-                                    if len(current_line + word) < 80:
-                                        current_line += word + " "
-                                    else:
-                                        if current_line:
-                                            c.drawString(72, y, current_line.strip())
-                                            y -= 20
-                                            if y < 72:
-                                                c.showPage()
-                                                y = height - 72
-                                        current_line = word + " "
-                                if current_line:
-                                    c.drawString(72, y, current_line.strip())
-                                    y -= 20
-                            else:
-                                c.drawString(72, y, text)
-                                y -= 20
-
-                            if y < 72:
-                                c.showPage()
-                                y = height - 72
-
-                    c.save()
-
-                    @after_this_request
-                    def cleanup(response):
-                        try:
-                            if temp_dir and os.path.exists(temp_dir):
-                                shutil.rmtree(temp_dir)
-                        except Exception as e:
-                            logger.error(f"一時ディレクトリの削除に失敗: {e}")
-                        return response
-
-                    return send_file(output_path, as_attachment=True, download_name="converted_output.pdf")
-
-                except Exception as e:
-                    logger.error(f"Wordファイルの処理に失敗しました: {e}")
-                    logger.error(traceback.format_exc())
-                    return jsonify({"error": f"Wordファイルの処理に失敗しました: {str(e)}"}), 400
-
-            else:
-                return jsonify({"error": f"対応していないファイル形式です: {ext}. PNG, JPG, JPEG, BMP, GIF, TXT, DOCXのみ対応しています。"}), 400
-
-        # 複数画像をPDFとして結合
-        if pdf_images:
-            try:
-                pdf_images[0].save(output_path, save_all=True, append_images=pdf_images[1:])
-
-                @after_this_request
-                def cleanup(response):
-                    try:
-                        if temp_dir and os.path.exists(temp_dir):
-                            shutil.rmtree(temp_dir)
-                    except Exception as e:
-                        logger.error(f"一時ディレクトリの削除に失敗: {e}")
-                    return response
-
-                return send_file(output_path, as_attachment=True, download_name="converted_output.pdf")
-            except Exception as e:
-                logger.error(f"画像PDFの作成に失敗しました: {e}")
-                logger.error(traceback.format_exc())
-                return jsonify({"error": f"画像PDFの作成に失敗しました: {str(e)}"}), 500
-
-        return jsonify({"error": "処理するファイルが見つかりませんでした"}), 400
-
     except Exception as e:
         logger.error(f"変換処理中にエラーが発生しました: {e}")
         logger.error(traceback.format_exc())
@@ -1780,10 +1609,10 @@ def _extract_with_pymupdf(file_path, keyword, extract_images, temp_dir):
             page_text = ""
             try:
                 page_text = page.get_text()
-            except:
+            except Exception:
                 try:
                     page_text = page.get_text("text")
-                except:
+                except Exception:
                     pass
 
             if len(page_text.strip()) < 10:
@@ -1797,7 +1626,7 @@ def _extract_with_pymupdf(file_path, keyword, extract_images, temp_dir):
                                     extracted_text += span.get("text", "")
                                 extracted_text += "\n"
                     page_text = extracted_text
-                except:
+                except Exception:
                     pass
 
             if not page_text.strip():

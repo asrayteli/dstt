@@ -11,8 +11,10 @@ from datetime import datetime, time, timedelta
 from typing import Any, Iterable
 
 from dateutil.relativedelta import relativedelta
+from sqlalchemy.exc import IntegrityError
 
 from app.models import ToBellNotification, ToBellTask, db
+from app.services.local_time import local_now
 from app.services.to_bell_integrations import enabled_users, get_health_check_notify, is_enabled
 
 logger = logging.getLogger(__name__)
@@ -53,8 +55,23 @@ def _create_task_for(
         source_ref_type=source_ref_type,
         source_ref_id=str(source_ref_id) if source_ref_id else None,
     )
-    db.session.add(task)
-    db.session.flush()
+    try:
+        # 一意制約(uq_to_bell_task_source)で守られているため、別プロセス/二重送信が
+        # 同一参照タスクを同時生成すると flush で IntegrityError になる。セーブポイントで
+        # 隔離し、衝突時は相手が作った既存タスクを採用する（呼び出し元の他処理は守る）。
+        # add も begin_nested 内で行う必要がある（外に出すと savepoint 巻き戻しで
+        # セッションが復旧できず PendingRollbackError になる）。
+        with db.session.begin_nested():
+            db.session.add(task)
+            db.session.flush()
+    except IntegrityError:
+        if source_ref_id and source_tool:
+            return ToBellTask.query.filter_by(
+                source_tool=source_tool,
+                source_ref_type=source_ref_type,
+                source_ref_id=str(source_ref_id),
+            ).first()
+        raise
     db.session.add(
         ToBellNotification(
             user_id=target_user,
@@ -194,7 +211,8 @@ def on_cloudshift_substitute_updated(
         title = f"[CloudShift] 要代務シフト帳が更新されました: {substitute_project_title}"
         href = f"/tools/shiftersync/cloudshift?project={substitute_project_id}"
 
-        today_key = datetime.utcnow().strftime("%Y%m%d")
+        # 「当日」は日本のローカル日付で判定する（UTCだと日付の境界がずれる）。
+        today_key = local_now().strftime("%Y%m%d")
         for user in dict.fromkeys(targets):
             _upsert_substitute_task_for_user(
                 user=user,
@@ -359,8 +377,18 @@ def _ensure_reminder_task(
         source_ref_type=source_ref_type,
         source_ref_id=str(source_ref_id),
     )
-    db.session.add(task)
-    db.session.flush()
+    try:
+        # 一意制約(uq_to_bell_task_source)による同時生成の衝突をセーブポイントで隔離。
+        # add も begin_nested 内で行う（外に出すと巻き戻し後に復旧できない）。
+        with db.session.begin_nested():
+            db.session.add(task)
+            db.session.flush()
+    except IntegrityError:
+        return ToBellTask.query.filter_by(
+            source_tool="health_check",
+            source_ref_type=source_ref_type,
+            source_ref_id=str(source_ref_id),
+        ).first()
     db.session.add(
         ToBellNotification(
             user_id=manager_user,
@@ -404,7 +432,7 @@ def ensure_health_check_reminders(
     例外は飲み込み、健診側の保存処理を妨げない。
     （`global_lead_days` は後方互換のため残すが、本リマインドでは使用しない。）
     """
-    now = now or datetime.now()
+    now = now or local_now()
     manager = (record.manager_user or "").strip()
     opted_in = bool(manager) and is_enabled(manager, HEALTH_CHECK_INTEGRATION_KEY)
     # 担当者ごとの種別別ON/OFF（未設定は通知する）。
@@ -482,7 +510,7 @@ def close_health_check_reminders(record_id: int, *, commit: bool = True) -> None
 
 def sweep_health_check_reminders(*, now: datetime | None = None) -> dict[str, int]:
     """全レコードのリマインドを再同期する（日次実行で due_at を当日通知へ繰り上げる）。"""
-    now = now or datetime.now()
+    now = now or local_now()
     processed = 0
     try:
         from app.models import HealthCheckRecord

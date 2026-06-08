@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.utils.atomic_io import write_json_atomic
+
 leave_mgr_bp = Blueprint("leave_mgr", __name__, url_prefix="/tools/leave_mgr")
 
 # 初期管理者ID（ハードコーディング）
@@ -45,14 +47,12 @@ def ensure_data_directories():
             "admins": [],
             "user_calendars": {}
         }
-        with open(permissions_file, 'w', encoding='utf-8') as f:
-            json.dump(initial_permissions, f, ensure_ascii=False, indent=2)
-    
+        write_json_atomic(permissions_file, initial_permissions)
+
     # calendar_meta.jsonの初期化
     meta_file = os.path.join(data_path, 'calendar_meta.json')
     if not os.path.exists(meta_file):
-        with open(meta_file, 'w', encoding='utf-8') as f:
-            json.dump({}, f, ensure_ascii=False, indent=2)
+        write_json_atomic(meta_file, {})
 
 def load_permissions():
     """権限情報を読み込み"""
@@ -60,14 +60,13 @@ def load_permissions():
     try:
         with open(permissions_file, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except:
+    except Exception:
         return {"admins": [], "user_calendars": {}}
 
 def save_permissions(permissions):
     """権限情報を保存"""
     permissions_file = os.path.join(get_data_path(), 'permissions.json')
-    with open(permissions_file, 'w', encoding='utf-8') as f:
-        json.dump(permissions, f, ensure_ascii=False, indent=2)
+    write_json_atomic(permissions_file, permissions)
 
 def load_calendar_meta():
     """カレンダーメタ情報を読み込み"""
@@ -75,14 +74,13 @@ def load_calendar_meta():
     try:
         with open(meta_file, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except:
+    except Exception:
         return {}
 
 def save_calendar_meta(meta):
     """カレンダーメタ情報を保存"""
     meta_file = os.path.join(get_data_path(), 'calendar_meta.json')
-    with open(meta_file, 'w', encoding='utf-8') as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+    write_json_atomic(meta_file, meta)
 
 def is_admin(user_id):
     """管理者権限チェック。DSTT管理者 or leave_mgr独自管理者。"""
@@ -182,7 +180,7 @@ def load_calendar_data(calendar_id, year_month):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except:
+    except Exception:
         return {"leaves": []}
 
 def save_calendar_data(calendar_id, year_month, data):
@@ -191,8 +189,7 @@ def save_calendar_data(calendar_id, year_month, data):
     os.makedirs(calendars_path, exist_ok=True)
     
     file_path = os.path.join(calendars_path, f"{calendar_id}_{year_month}.json")
-    with open(file_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    write_json_atomic(file_path, data)
 
 def has_assigned_deputy(leave):
     """代務者が実質的に設定されているかを判定"""
@@ -1052,7 +1049,7 @@ def delete_calendar(calendar_id):
                     with open(file_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                         data_count += len(data.get('leaves', []))
-                except:
+                except Exception:
                     pass
     
     # 削除実行
@@ -1075,7 +1072,7 @@ def delete_calendar(calendar_id):
                 file_path = os.path.join(calendars_path, filename)
                 try:
                     os.remove(file_path)
-                except:
+                except Exception:
                     pass
     
     return jsonify({"success": True, "deleted_data_count": data_count})
@@ -1100,7 +1097,7 @@ def get_calendar_data_count(calendar_id):
                     with open(file_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                         data_count += len(data.get('leaves', []))
-                except:
+                except Exception:
                     pass
     
     return jsonify({"data_count": data_count})

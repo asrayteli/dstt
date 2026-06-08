@@ -1460,7 +1460,11 @@ def test_unexpected_cloudshift_api_error_prints_to_server_console(tmp_path, caps
         response, status_code = module._handle_unexpected_cloudshift_error(RuntimeError("boom"))
 
     assert status_code == 500
-    assert response.get_json()["error"] == "CloudShift内部エラー: RuntimeError: boom"
+    # クライアントへは内部情報を含まない汎用メッセージを返す。
+    body = response.get_json()["error"]
+    assert "CloudShift内部エラー" in body
+    assert "RuntimeError" not in body and "boom" not in body
+    # 例外の詳細はサーバログ(stderr)にのみ出力される。
     captured = capsys.readouterr()
     assert "[CloudShift API ERROR]" in captured.err
     assert "GET /tools/shiftersync/cloudshift/api/project/broken" in captured.err

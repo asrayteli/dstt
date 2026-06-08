@@ -223,7 +223,7 @@ def _load_siteplus_module():
     return module
 
 
-def _siteplus_client_with_user(tmp_path, user_id=42):
+def _siteplus_client_with_user(tmp_path, monkeypatch, user_id=42):
     module = _load_siteplus_module()
     from app.models import db, AccessBranch, AccessOffice, UserAccessibleOffice
 
@@ -263,16 +263,18 @@ def _siteplus_client_with_user(tmp_path, user_id=42):
         office_id=None,
         department_id=None,
     )
-    module.current_user = fake_user
-    # access_control.py 側の current_user も置き換える
+    # current_user を偽ユーザーに差し替える。monkeypatch を使い、テスト終了時に
+    # 必ず元へ戻す（戻さないと app.access_control.current_user がセッション全体で
+    # 偽ユーザーのまま残り、後続テストを汚染する）。
+    monkeypatch.setattr(module, "current_user", fake_user, raising=False)
     from app import access_control as _ac
-    _ac.current_user = fake_user
+    monkeypatch.setattr(_ac, "current_user", fake_user, raising=False)
     return module, app, app.test_client()
 
 
-def test_siteplus_import_rejects_forbidden_office_for_real_user(tmp_path):
+def test_siteplus_import_rejects_forbidden_office_for_real_user(tmp_path, monkeypatch):
     _stub_optional_deps()
-    module, app, client = _siteplus_client_with_user(tmp_path)
+    module, app, client = _siteplus_client_with_user(tmp_path, monkeypatch)
 
     csv_text = "\n".join(
         [
@@ -384,3 +386,38 @@ def test_same_origin_check_allows_same_origin_post(tmp_path, monkeypatch):
     )
     # origin チェックを通過し、セッション欠落（400）または認証系のレスポンスになる
     assert resp.status_code != 403 or "このツール" in (resp.get_json() or {}).get("error", "")
+
+
+def test_same_origin_check_applies_to_non_tool_mutations(tmp_path, monkeypatch):
+    """旧来は接頭辞限定だった保護を全体へ統一: ツール API 以外の POST も検査される。"""
+    _stub_optional_deps()
+    monkeypatch.delenv("DSTT_DATA_ENCRYPTION_KEY_B64", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    from app import create_app
+
+    app = create_app(
+        {
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'origin3.db'}",
+            "SECRET_KEY": "test",
+            "TESTING": True,
+            "DSTT_ENFORCE_SAME_ORIGIN_IN_TESTS": True,
+        }
+    )
+    client = app.test_client()
+
+    # 旧プレフィックス外の認証フォーム POST もクロスオリジンならブロックされる
+    blocked = client.post(
+        "/auth/login",
+        data={"username": "x", "password": "y"},
+        headers={"Origin": "http://evil.example.com"},
+    )
+    assert blocked.status_code == 403
+
+    # 同一オリジンならブロックされない（403 以外）
+    allowed = client.post(
+        "/auth/login",
+        data={"username": "x", "password": "y"},
+        headers={"Origin": "http://localhost"},
+    )
+    assert allowed.status_code != 403

@@ -24,6 +24,7 @@ from werkzeug.utils import secure_filename
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import selectinload
 
+from app.utils.atomic_io import write_json_atomic
 from app.models import (
     db,
     Employee,
@@ -142,12 +143,10 @@ def ensure_data_directories() -> None:
     os.makedirs(get_uploads_path(), exist_ok=True)
     permissions_file = os.path.join(get_data_path(), "permissions.json")
     if not os.path.exists(permissions_file):
-        with open(permissions_file, "w", encoding="utf-8") as f:
-            json.dump({"admins": [], "user_offices": {}}, f, ensure_ascii=False, indent=2)
+        write_json_atomic(permissions_file, {"admins": [], "user_offices": {}})
     settings_file = os.path.join(get_data_path(), "settings.json")
     if not os.path.exists(settings_file):
-        with open(settings_file, "w", encoding="utf-8") as f:
-            json.dump({"global_lead_days": HEALTH_CHECK_DEFAULT_LEAD_DAYS}, f, ensure_ascii=False, indent=2)
+        write_json_atomic(settings_file, {"global_lead_days": HEALTH_CHECK_DEFAULT_LEAD_DAYS})
 
 
 def load_permissions() -> dict:
@@ -159,8 +158,7 @@ def load_permissions() -> dict:
 
 
 def save_permissions(permissions: dict) -> None:
-    with open(os.path.join(get_data_path(), "permissions.json"), "w", encoding="utf-8") as f:
-        json.dump(permissions, f, ensure_ascii=False, indent=2)
+    write_json_atomic(os.path.join(get_data_path(), "permissions.json"), permissions)
 
 
 def load_settings() -> dict:
@@ -175,8 +173,7 @@ def load_settings() -> dict:
 
 
 def save_settings(settings: dict) -> None:
-    with open(os.path.join(get_data_path(), "settings.json"), "w", encoding="utf-8") as f:
-        json.dump(settings, f, ensure_ascii=False, indent=2)
+    write_json_atomic(os.path.join(get_data_path(), "settings.json"), settings)
 
 
 def get_global_lead_days() -> int:

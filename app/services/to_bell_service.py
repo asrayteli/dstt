@@ -4,6 +4,8 @@ import os
 import secrets
 import uuid
 from datetime import date, datetime, time, timedelta
+
+from app.services.local_time import local_now
 from pathlib import Path
 from typing import Any
 
@@ -417,7 +419,7 @@ def has_explicit_notification_time(task: ToBellTask) -> bool:
 
 
 def list_due_notification_tasks(username: str, *, now: datetime | None = None) -> list[ToBellTask]:
-    now = now or datetime.now()
+    now = now or local_now()
     cutoff = now - timedelta(days=60)
     rows = ToBellTask.query.filter(
         visible_task_filter(username),

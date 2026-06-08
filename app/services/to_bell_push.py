@@ -5,6 +5,8 @@ import logging
 import os
 import threading
 from datetime import datetime, timedelta
+
+from app.services.local_time import local_now
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,46 @@ except Exception:  # pragma: no cover
 logger = logging.getLogger(__name__)
 _scheduler = None
 _scheduler_lock = threading.Lock()
+
+try:
+    import fcntl  # Linux/Unix のみ。プロセス間ロックに使用。
+except Exception:  # pragma: no cover - Windows 等
+    fcntl = None
+
+
+def _run_singleton(app, lock_filename: str, job) -> None:
+    """gunicorn の複数ワーカーで同一ジョブが多重実行されないよう、OS の
+    ファイルロック（flock）で「各実行を1プロセスだけ」に限定して job を呼ぶ。
+
+    - ロックを取得できたプロセスのみが job を実行し、他プロセスは即スキップする。
+    - ロックは実行中のみ保持し終了時に解放するため、ロック保持プロセスが
+      再起動（gunicorn の max_requests 等）で消えても、次回tickで別プロセスが
+      取得でき、単一障害点にならない。
+    - fcntl が無い環境（Windows 等）ではロックなしで実行（従来動作）。
+    """
+    if fcntl is None:
+        job()
+        return
+    lock_path = os.path.join(app.instance_path, lock_filename)
+    try:
+        os.makedirs(app.instance_path, exist_ok=True)
+        handle = open(lock_path, "w")
+    except OSError:
+        # ロックファイルを用意できない場合はロックなしで実行する。
+        job()
+        return
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return  # 他プロセスが実行中 → このtickはスキップ
+        job()
+    finally:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        except Exception:
+            pass
+        handle.close()
 
 
 class ToBellPushUnavailable(RuntimeError):
@@ -128,8 +170,8 @@ def send_test_push(user_id: str) -> dict[str, int]:
 
 def send_due_task_pushes(*, now: datetime | None = None) -> dict[str, int]:
     # due_at は利用者が入力したローカル時刻のナイーブな値として保存されるため、
-    # 比較も utcnow() ではなくローカルの now() を使う（時差で通知がずれる不具合を防ぐ）。
-    now = now or datetime.now()
+    # 比較も設定タイムゾーン基準の現在時刻を使う（サーバーTZ依存で通知がずれる不具合を防ぐ）。
+    now = now or local_now()
     cutoff = now - timedelta(days=60)
     tasks = ToBellTask.query.filter(
         ToBellTask.status.notin_(["done", "archived"]),
@@ -280,23 +322,27 @@ def init_to_bell_push_scheduler(app) -> None:
 
 
 def _run_due_push_job(app) -> None:
-    with app.app_context():
-        try:
-            send_due_task_pushes()
-        except Exception as exc:
-            db.session.rollback()
-            logger.warning("To Bell push scheduler failed: %s", exc)
+    def _job():
+        with app.app_context():
+            try:
+                send_due_task_pushes()
+            except Exception as exc:
+                db.session.rollback()
+                logger.warning("To Bell push scheduler failed: %s", exc)
+    _run_singleton(app, "to_bell_due_pushes.lock", _job)
 
 
 def _run_gcal_import_job(app) -> None:
-    with app.app_context():
-        try:
-            from app.services.to_bell_calendar_import import run_due_imports
+    def _job():
+        with app.app_context():
+            try:
+                from app.services.to_bell_calendar_import import run_due_imports
 
-            run_due_imports()
-        except Exception as exc:  # noqa: BLE001
-            db.session.rollback()
-            logger.warning("To Bell calendar import scheduler failed: %s", exc)
+                run_due_imports()
+            except Exception as exc:  # noqa: BLE001
+                db.session.rollback()
+                logger.warning("To Bell calendar import scheduler failed: %s", exc)
+    _run_singleton(app, "to_bell_gcal_import.lock", _job)
 
 
 def _load_or_create_vapid():

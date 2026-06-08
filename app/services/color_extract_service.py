@@ -1,4 +1,4 @@
-﻿import io
+import io
 from typing import Sequence, Tuple
 
 import fitz

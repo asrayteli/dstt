@@ -1,9 +1,14 @@
 from flask import Blueprint, render_template, request, send_file, jsonify
-import zipfile, os, tempfile, re, unicodedata
+import io, zipfile, os, re, unicodedata
 from datetime import datetime
 from flask_login import login_required
 
 rename_bp = Blueprint("rename", __name__, url_prefix="/tools/rename")
+
+# アップロード乱用・ディスク枯渇を防ぐための上限（リネームは大量・大容量を
+# 想定しないため十分に余裕のある値）。
+MAX_RENAME_FILES = 1000
+MAX_RENAME_TOTAL_BYTES = 1024 * 1024 * 1024  # 1GB
 
 
 def safe_filename(filename):
@@ -121,7 +126,14 @@ def rename_tool():
     if request.method == "GET":
         return render_template("rename.html")
 
-    files = request.files.getlist("files")
+    files = [f for f in request.files.getlist("files") if f and f.filename]
+    if not files:
+        return jsonify({"error": "ファイルがアップロードされていません"}), 400
+    if len(files) > MAX_RENAME_FILES:
+        return jsonify({"error": f"一度に処理できるファイル数の上限（{MAX_RENAME_FILES}件）を超えています"}), 400
+    if (request.content_length or 0) > MAX_RENAME_TOTAL_BYTES:
+        return jsonify({"error": "アップロード容量の上限（1GB）を超えています"}), 400
+
     mode = request.form.get("mode", "sequential")
     opts = {
         "prefix": request.form.get("prefix", "file_"),
@@ -140,20 +152,26 @@ def rename_tool():
         "date_format": request.form.get("date_format", "%Y%m%d"),
     }
 
-    temp_dir = tempfile.mkdtemp()
-    zip_path = os.path.join(temp_dir, "renamed_files.zip")
+    # 一時ファイルを使わずメモリ上で ZIP を生成する。ディスクに痕跡を残さず、
+    # 後始末漏れによるリークも発生しない（総容量は上限でガード済み）。
+    mem = io.BytesIO()
+    try:
+        with zipfile.ZipFile(mem, "w") as zipf:
+            for i, file in enumerate(files):
+                filename = safe_filename(file.filename)
+                new_name = apply_rename(filename, mode, opts, i)
+                new_name = safe_filename(new_name) if new_name else filename
+                zipf.writestr(new_name, file.read())
+    except Exception:
+        return jsonify({"error": "リネーム処理中にエラーが発生しました"}), 500
 
-    with zipfile.ZipFile(zip_path, "w") as zipf:
-        for i, file in enumerate(files):
-            filename = safe_filename(file.filename)
-            new_name = apply_rename(filename, mode, opts, i)
-            new_name = safe_filename(new_name) if new_name else filename
-
-            temp_file_path = os.path.join(temp_dir, new_name)
-            file.save(temp_file_path)
-            zipf.write(temp_file_path, arcname=new_name)
-
-    return send_file(zip_path, as_attachment=True, download_name="リネーム済みファイル.zip")
+    mem.seek(0)
+    return send_file(
+        mem,
+        as_attachment=True,
+        download_name="リネーム済みファイル.zip",
+        mimetype="application/zip",
+    )
 
 
 @rename_bp.route("/preview", methods=["POST"])

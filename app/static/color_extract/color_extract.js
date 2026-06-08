@@ -1,4 +1,4 @@
-﻿(() => {
+(() => {
   const form = document.getElementById('colorExtractForm');
   const fileInput = document.getElementById('fileInput');
   const mode = document.getElementById('mode');
