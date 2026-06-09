@@ -155,9 +155,11 @@ class ScoreSummary:
 
 `fill_rate` は `assigned_count / required_count` とする。`required_count` が 0 の場合は 0 除算を避け、`fill_rate=1.0`（需要なし＝完全充足）とする。
 
+件数の定義（取り違え防止）: `required_count` は全 slot の `required_count` の総和（割当単位の総数）。`assigned_count` は確定した割当数。`unfilled_count` は不足ポジション数（Σ`UnfilledSlot.shortage`）であり、`assigned_count + unfilled_count == required_count` を満たす。これは `len(unfilled_slots)`（不足のある slot 数）とは異なる。
+
 `fairness_index` と `weekend_balance_index` は 0.0〜1.0 の正規化値とし、1.0 に近いほど良い。初期実装は次で定義する（決定的・0 除算回避）。
 
-- `fairness_index = 1 - min(1, pstdev(割当のある worker の総割当数) / max(1, mean(同))`。母集団は「割当が 1 件以上の worker」、`pstdev` は母標準偏差。割当のある worker が 1 人以下なら 1.0。
+- `fairness_index = 1 - min(1, pstdev(割当のある worker の総割当数) / max(1, mean(同)))`。母集団は「割当が 1 件以上の worker」、`pstdev` は母標準偏差。割当のある worker が 1 人以下なら 1.0。
 - `weekend_balance_index = 1 - min(1, pstdev(割当のある worker の土日祝割当数) / max(1, mean(同)))`。土日祝の割当が無ければ 1.0。
 - `max_consecutive_days` は全 worker の最大連勤数。割当ゼロなら 0。
 
@@ -295,6 +297,7 @@ class ScoringWeights:
     experience_bonus: int = 120
     option_aptitude_bonus: int = 80  # 車両/時間帯オプションの過去実績適性。資格・許可の代替ではない
     preferred_weekday_bonus: int = 40
+    blocked_weekday_penalty: int = 250   # NG 曜日。強めだが Hard ではない（他に回せないなら配置を許す）
     soft_unavailable_penalty: int = 300
     consecutive_day_penalty: int = 80
     monthly_imbalance_penalty: int = 60
@@ -492,9 +495,9 @@ class OptionToggle:
 
 | オプション | 内容 | 既定 | 分類 |
 |---|---|---|---|
-| `same_site_duplicate` | 同一現場内重複（`is_duplicate_by_rules(same_site=True)`、実装済み） | 禁止 | Hard |
-| `external_occupancy` | 他現場の同日占有を Hard 除外（実装済み） | Hard 除外 | Hard |
-| `external_occupancy_relax` | 他現場占有を現場単位で `warning` に緩める | 無効（Hard のまま） | 選択 |
+| `same_site_duplicate` | 同一現場内重複（`is_duplicate_by_rules(same_site=True)`、実装済み） | 禁止（**コア固定・無効化不可**） | Hard |
+| `external_occupancy` | 他現場の同日占有を Hard 除外（実装済み） | Hard 除外（コア既定。`external_occupancy_relax` でのみ緩和可） | Hard |
+| `external_occupancy_relax` | 他現場占有を現場単位で `warning` に緩める（唯一の緩和手段） | 無効（Hard のまま） | 選択 |
 
 #### 人物単位の好み
 
@@ -621,8 +624,8 @@ class RequiredSlot:
 1. `project["shift_engine"].demand_rules` があればそれを使う（最優先、`source="settings"`）。
 2. demand_rules が無く `capacity_enabled=True` なら、`required_capacity` を全営業日へ同一人数で展開する（`source="required_capacity_fallback"`）。
 3. 1・2 のいずれも無い場合のみ、**前月の確定シフトの曜日別の平均人数**を推定需要として使う（コア既定 ON のフォールバック、`source="prev_month_estimate"`）。平均は曜日ごとに `round half up` で整数化して決定的にする。推定である旨を必ず `warning` で返す。前月の確定データが無ければ需要ゼロ。
-4. 既存シフトを固定する場合は、固定分（`locked`/`manual_locked`）を `ExistingAssignment` として先に確保し、その枠の `required_count` から差し引く。
-5. 需要がゼロの日は、エンジンが勝手に配置を増やさない。
+4. 固定既存（`locked`/`manual_locked`）と `pinned` は 100% 保持する。各 slot の最終需要は `max(1〜3 で決めた需要, その slot の固定数)` とし、固定が需要を上回る場合は需要を引き上げて固定を保持し `warning` を出す（`blocker` にはしない）。固定分は seed として先に確保し、残り `required_count` を新規割当の対象にする。
+5. 固定を織り込んだ後に需要がゼロの日は、エンジンが新規配置を増やさない（固定はそのまま残す）。
 
 この順序により、何も設定していない現場でも「前月の人員規模」を出発点に妥当な下書きが作れる。前月パターンを使いたくない場合は `capacity_fallback` を明示無効化するか demand_rules を設定する。
 
@@ -904,7 +907,7 @@ class Rule:
 - 固定配置が `hard` 休暇と衝突しない。
 - 固定配置が他現場占有（`external_assignments`、`same_site=False`）と衝突しない。
 - 固定配置が枝番条件に違反しない。資格・車両・時間帯は許可データが無いため Phase 1 では Hard 検証しない。
-- 固定配置だけで需要を超過している場合は、超過を `warning` ではなく `blocker` にする。
+- 固定数が設定需要を上回る場合は、需要を固定数まで引き上げて固定を保持し `warning` とする（`blocker` にはしない。固定既存は 100% 維持する）。
 - `pinned` が `forbidden` と同一枠で矛盾する場合は `blocker`。
 
 seed が `blocker` を持つ場合、エンジンは再配置で解消しない。固定を外すよう UI で促す。
@@ -993,7 +996,8 @@ class ScoreFactor:
 - 過去実績者優先
 - 車両/時間帯オプションの過去実績適性（オプション一致で加点。`Worker.experienced_option_keys` / `_assist_option_aptitude_*` 相当）
 - 研修者の適度な混入
-- 希望曜日
+- 希望曜日（`preferred_weekdays`）の加点
+- NG 曜日（`blocked_weekdays`）の回避（`blocked_weekday_penalty` で強めに減点。ただし Hard ではない＝他に回せないなら配置を許し、空欄を増やしすぎない）
 - `soft` 休暇、未確認休暇の回避
 - 勤務日数の公平性
 - 連勤抑制
@@ -1225,8 +1229,8 @@ CloudShift entry は `normalize_entries_for_month` で保持されるフィー�
 
 移行時の注意:
 
-- NG 曜日は `UnavailableDay(strength="hard" or "soft")` ではなく、原則 `WorkerPreference.blocked_weekdays` として扱う。
-- 希望曜日は Soft Constraint にする。
+- NG 曜日は `UnavailableDay(strength="hard" or "soft")` ではなく、原則 `WorkerPreference.blocked_weekdays` として扱い、強めの Soft 減点（`blocked_weekday_penalty`）で評価する（Hard 除外にはしない。希望表明であり確定不可ではないため）。
+- 希望曜日は `WorkerPreference.preferred_weekdays` として Soft の加点にする。
 - 実績は経験点として使うが、資格や担当可能性の証明にはしない。実績の現場（`site_row_id`）は `Worker.experienced_site_row_ids`、実績のオプション（`shift_key`）は `Worker.experienced_option_keys` に集約する。
 - 手動ルールは優先度と有効期間を持つ `Rule` に変換する。
 
@@ -1491,6 +1495,8 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 - 人員不足時に `unfilled_slots` を出し、`status="partial"` にする。
 - 専従者を優先する。
 - 既存固定シフトを動かさない。
+- 固定既存が設定需要を上回る場合でも 100% 保持し、需要を引き上げて `warning` にする（`blocker` にしない）。
+- NG 曜日（`blocked_weekdays`）の候補を強く減点するが、他に回せないときは配置する（Hard ではない）。希望曜日一致は加点する。
 - 固定既存シフトが休暇と衝突した場合に重大違反を返す。
 - 最大連勤を超えた場合に回避または警告する。
 - 公平性スコアが偏りを抑える。
