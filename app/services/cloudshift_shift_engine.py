@@ -2322,3 +2322,356 @@ def plan_shifts(
 ) -> ShiftPlanningResult:
     """エンジンのメインエントリ。request だけを見て決定的に生成する。"""
     return GreedyRepairSolver(limits).solve(request)
+
+
+# ---------------------------------------------------------------------------
+# 設定の (デ)シリアライズと migration
+# ---------------------------------------------------------------------------
+
+_PREFERENCE_FIELDS = set(PlanningPreferences.__dataclass_fields__.keys())
+_KNOWN_SETTINGS_KEYS = {
+    "version", "demand_rules", "leave_policies", "default_preferences",
+    "worker_limits", "scoring_weights", "option_experience_policies",
+    "rules", "advanced_options",
+}
+
+
+def _as_int_tuple(value: Any) -> tuple[int, ...]:
+    out: list[int] = []
+    for item in value or ():
+        try:
+            out.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return tuple(out)
+
+
+def _as_str_tuple(value: Any) -> tuple[str, ...]:
+    return tuple(str(item).strip() for item in (value or ()) if str(item).strip())
+
+
+def _as_date_tuple(value: Any) -> tuple[date, ...]:
+    out: list[date] = []
+    for item in value or ():
+        d = _parse_iso_date(item)
+        if d:
+            out.append(d)
+    return tuple(out)
+
+
+def _opt_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def preferences_from_dict(raw: Any) -> PlanningPreferences:
+    """既定方針の上に dict の指定値を重ねた PlanningPreferences を返す。"""
+    base = default_planning_preferences()
+    if not isinstance(raw, dict):
+        return base
+    updates: dict[str, Any] = {}
+    for key in _PREFERENCE_FIELDS:
+        if key not in raw:
+            continue
+        value = raw[key]
+        if key in {"min_assignment_score", "max_consecutive_days",
+                   "min_monthly_assignments", "max_monthly_assignments"}:
+            updates[key] = _opt_int(value)
+        elif key in {"allow_partial", "include_trainees", "prefer_dedicated",
+                     "prefer_experienced", "prefer_fairness", "minimize_changes",
+                     "suppress_weekend_imbalance", "monthly_limit_hard",
+                     "max_consecutive_days_hard"}:
+            updates[key] = bool(value)
+        else:
+            updates[key] = value
+    return replace(base, **updates)
+
+
+def preferences_to_dict(prefs: PlanningPreferences) -> dict[str, Any]:
+    return {key: getattr(prefs, key) for key in _PREFERENCE_FIELDS}
+
+
+def scoring_weights_from_dict(raw: Any) -> ScoringWeights:
+    base = ScoringWeights()
+    if not isinstance(raw, dict):
+        return base
+    updates: dict[str, Any] = {}
+    for key in ScoringWeights.__dataclass_fields__:
+        if key in raw:
+            try:
+                updates[key] = int(raw[key])
+            except (TypeError, ValueError):
+                continue
+    return replace(base, **updates)
+
+
+def _demand_rule_from_dict(raw: dict[str, Any]) -> DemandRule:
+    return DemandRule(
+        rule_id=str(raw.get("rule_id") or ""),
+        enabled=bool(raw.get("enabled", True)),
+        weekdays=_as_int_tuple(raw.get("weekdays")),
+        include_holidays=bool(raw.get("include_holidays", False)),
+        exclude_dates=_as_date_tuple(raw.get("exclude_dates")),
+        include_dates=_as_date_tuple(raw.get("include_dates")),
+        shift_key=str(raw.get("shift_key") or ""),
+        shift_label=str(raw.get("shift_label") or ""),
+        required_count=int(raw.get("required_count", 1) or 0),
+        site_branch_row_id=str(raw.get("site_branch_row_id") or ""),
+        site_branch=str(raw.get("site_branch") or ""),
+        required_qualification_codes=_as_str_tuple(raw.get("required_qualification_codes")),
+        required_vehicle_options=_as_str_tuple(raw.get("required_vehicle_options")),
+        priority=int(raw.get("priority", 100) or 100),
+    )
+
+
+def _rule_from_dict(raw: dict[str, Any]) -> Rule:
+    return Rule(
+        rule_id=str(raw.get("rule_id") or ""),
+        kind=str(raw.get("kind") or "manual"),  # type: ignore[arg-type]
+        enabled=bool(raw.get("enabled", True)),
+        priority=int(raw.get("priority", 100) or 100),
+        effective_from=_parse_iso_date(raw.get("effective_from")),
+        effective_to=_parse_iso_date(raw.get("effective_to")),
+        params=dict(raw.get("params") or {}),
+    )
+
+
+def settings_from_dict(raw: Any) -> tuple[ShiftEngineSettings, list[PlanningWarning]]:
+    """project["shift_engine"] の dict を ShiftEngineSettings へ復元する。"""
+    warnings: list[PlanningWarning] = []
+    if not isinstance(raw, dict) or not raw:
+        return build_default_settings(), warnings
+
+    unknown = sorted(set(raw.keys()) - _KNOWN_SETTINGS_KEYS)
+    if unknown:
+        warnings.append(
+            PlanningWarning(
+                "raw_settings",
+                f"未知の設定キーがあります（無視されます）: {', '.join(unknown)}",
+            )
+        )
+
+    demand_rules = [
+        _demand_rule_from_dict(item) for item in (raw.get("demand_rules") or []) if isinstance(item, dict)
+    ]
+    leave_policies = [
+        LeavePolicy(str(item.get("leave_type") or ""), str(item.get("strength") or "soft"))  # type: ignore[arg-type]
+        for item in (raw.get("leave_policies") or []) if isinstance(item, dict)
+    ] or default_leave_policies()
+    worker_limits = [
+        WorkerLimit(
+            employee_number=str(item.get("employee_number") or ""),
+            min_assignments=_opt_int(item.get("min_assignments")),
+            max_assignments=_opt_int(item.get("max_assignments")),
+        )
+        for item in (raw.get("worker_limits") or []) if isinstance(item, dict)
+    ]
+    policies = [
+        OptionExperiencePolicy(
+            option_key=str(item.get("option_key") or ""),
+            require_prior_experience=bool(item.get("require_prior_experience", False)),
+            site_row_id=str(item.get("site_row_id") or ""),
+            enabled=bool(item.get("enabled", True)),
+        )
+        for item in (raw.get("option_experience_policies") or []) if isinstance(item, dict)
+    ]
+    rules = [_rule_from_dict(item) for item in (raw.get("rules") or []) if isinstance(item, dict)]
+    advanced = [
+        OptionToggle(
+            key=str(item.get("key") or ""),
+            enabled=bool(item.get("enabled", False)),
+            scope=str(item.get("scope") or "site"),  # type: ignore[arg-type]
+            target=str(item.get("target") or ""),
+            value=item.get("value"),
+            note=str(item.get("note") or ""),
+        )
+        for item in (raw.get("advanced_options") or []) if isinstance(item, dict)
+    ]
+
+    settings = ShiftEngineSettings(
+        version=int(raw.get("version", SETTINGS_VERSION) or SETTINGS_VERSION),
+        demand_rules=demand_rules,
+        leave_policies=leave_policies,
+        default_preferences=preferences_from_dict(raw.get("default_preferences")),
+        worker_limits=worker_limits,
+        scoring_weights=scoring_weights_from_dict(raw.get("scoring_weights")),
+        option_experience_policies=policies,
+        rules=rules,
+        advanced_options=advanced,
+    )
+    return settings, warnings
+
+
+def settings_to_dict(settings: ShiftEngineSettings) -> dict[str, Any]:
+    """ShiftEngineSettings を保存・表示用の dict へ変換する。"""
+    return {
+        "version": settings.version,
+        "demand_rules": [
+            {
+                "rule_id": r.rule_id,
+                "enabled": r.enabled,
+                "weekdays": list(r.weekdays),
+                "include_holidays": r.include_holidays,
+                "exclude_dates": [d.isoformat() for d in r.exclude_dates],
+                "include_dates": [d.isoformat() for d in r.include_dates],
+                "shift_key": r.shift_key,
+                "shift_label": r.shift_label,
+                "required_count": r.required_count,
+                "site_branch_row_id": r.site_branch_row_id,
+                "site_branch": r.site_branch,
+                "required_qualification_codes": list(r.required_qualification_codes),
+                "required_vehicle_options": list(r.required_vehicle_options),
+                "priority": r.priority,
+            }
+            for r in settings.demand_rules
+        ],
+        "leave_policies": [{"leave_type": p.leave_type, "strength": p.strength} for p in settings.leave_policies],
+        "default_preferences": preferences_to_dict(
+            settings.default_preferences or default_planning_preferences()
+        ),
+        "worker_limits": [
+            {
+                "employee_number": w.employee_number,
+                "min_assignments": w.min_assignments,
+                "max_assignments": w.max_assignments,
+            }
+            for w in settings.worker_limits
+        ],
+        "scoring_weights": {k: getattr(settings.scoring_weights, k) for k in ScoringWeights.__dataclass_fields__},
+        "option_experience_policies": [
+            {
+                "option_key": p.option_key,
+                "require_prior_experience": p.require_prior_experience,
+                "site_row_id": p.site_row_id,
+                "enabled": p.enabled,
+            }
+            for p in settings.option_experience_policies
+        ],
+        "rules": [
+            {
+                "rule_id": r.rule_id,
+                "kind": r.kind,
+                "enabled": r.enabled,
+                "priority": r.priority,
+                "effective_from": r.effective_from.isoformat() if r.effective_from else None,
+                "effective_to": r.effective_to.isoformat() if r.effective_to else None,
+                "params": r.params,
+            }
+            for r in settings.rules
+        ],
+        "advanced_options": [
+            {
+                "key": o.key,
+                "enabled": o.enabled,
+                "scope": o.scope,
+                "target": o.target,
+                "value": o.value,
+                "note": o.note,
+            }
+            for o in settings.advanced_options
+        ],
+    }
+
+
+def migrate_settings(raw: Any) -> tuple[ShiftEngineSettings, list[PlanningWarning]]:
+    """旧設定を読み込み、必須値を既定で補完する（自動保存はしない）。"""
+    return settings_from_dict(raw)
+
+
+# ---------------------------------------------------------------------------
+# 出力の dict 化（API レスポンス用。UI 表示データを含む）
+# ---------------------------------------------------------------------------
+
+
+def result_to_dict(result: ShiftPlanningResult) -> dict[str, Any]:
+    """ShiftPlanningResult を JSON 応答用 dict へ変換する。"""
+    return {
+        "request_id": result.request_id,
+        "status": result.status,
+        "solver_backend": result.solver_backend,
+        "solver_certified": result.solver_certified,
+        "base_revision": result.base_revision,
+        "request_hash": result.request_hash,
+        "assignments": [
+            {
+                "assignment_id": a.assignment_id,
+                "slot_id": a.slot_id,
+                "slot_instance_id": a.slot_instance_id,
+                "date": a.date.isoformat(),
+                "day": a.day,
+                "shift_key": a.shift_key,
+                "shift_label": a.shift_label,
+                "employee_number": a.employee_number,
+                "employee_name": a.employee_name,
+                "score": a.score,
+                "source": a.source,
+                "site_row_id": a.site_row_id,
+                "site_branch": a.site_branch,
+            }
+            for a in result.assignments
+        ],
+        "unfilled_slots": [
+            {
+                "slot_id": u.slot_id,
+                "date": u.date.isoformat(),
+                "day": u.day,
+                "shift_key": u.shift_key,
+                "shortage": u.shortage,
+                "reason_code": u.reason_code,
+                "reason": u.reason,
+            }
+            for u in result.unfilled_slots
+        ],
+        "violations": [
+            {
+                "code": v.code,
+                "severity": v.severity,
+                "message": v.message,
+                "date": v.date.isoformat() if v.date else None,
+                "employee_number": v.employee_number,
+                "slot_id": v.slot_id,
+            }
+            for v in result.violations
+        ],
+        "warnings": [
+            {
+                "code": w.code,
+                "message": w.message,
+                "date": w.date.isoformat() if w.date else None,
+                "employee_number": w.employee_number,
+                "slot_id": w.slot_id,
+            }
+            for w in result.warnings
+        ],
+        "score": {
+            "total_score": result.score.total_score,
+            "fill_rate": result.score.fill_rate,
+            "assigned_count": result.score.assigned_count,
+            "required_count": result.score.required_count,
+            "unfilled_count": result.score.unfilled_count,
+            "blocker_count": result.score.blocker_count,
+            "hard_violation_count": result.score.hard_violation_count,
+            "warning_count": result.score.warning_count,
+            "fairness_index": result.score.fairness_index,
+            "weekend_balance_index": result.score.weekend_balance_index,
+            "max_consecutive_days": result.score.max_consecutive_days,
+            "changed_existing_count": result.score.changed_existing_count,
+        },
+        "explanations": [
+            {
+                "assignment_id": ex.assignment_id,
+                "slot_id": ex.slot_id,
+                "employee_number": ex.employee_number,
+                "summary": ex.summary,
+                "factors": [
+                    {"category": f.category, "label": f.label, "points": f.points, "detail": f.detail}
+                    for f in ex.factors
+                ],
+            }
+            for ex in result.explanations
+        ],
+    }
