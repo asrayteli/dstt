@@ -34,7 +34,12 @@ def _build():
     import tempfile
 
     tmp = tempfile.mkdtemp()
-    app = Flask(__name__, root_path=tmp)
+    app = Flask(
+        __name__,
+        root_path=tmp,
+        template_folder=str(ROOT / "app" / "templates"),
+        static_folder=str(ROOT / "app" / "static"),
+    )
     app.secret_key = "test"
     app.config["TESTING"] = True
     app.config["LOGIN_DISABLED"] = True
@@ -164,6 +169,37 @@ def test_apply_draft_rejects_hash_mismatch():
               "request_hash": "deadbeef", "preferences": {"eligibility_baseline": "any"}},
     )
     assert resp.status_code == 409
+
+
+def test_preview_window_renders_for_owner():
+    module, app = _build()
+    client, project_id = _create_scene_project_with_candidate(module, app)
+    module.current_user = _owner()
+    resp = client.get(f"{BASE}/project/{project_id}/shift-engine/preview?year=2026&month=4")
+    assert resp.status_code == 200, resp.get_data(as_text=True)[:500]
+    html = resp.get_data(as_text=True)
+    # 専用プレビューUI（CloudShift UI 流用・DSTT chrome なし）であること
+    assert "cloud-engine-preview-page" in html
+    assert "engine_preview" in html
+    assert "cloud-editor-panel" in html  # CloudShift エディタのホスト
+    # DSTT サイドバー（base.html）を継承していない
+    assert "<!DOCTYPE html>" in html
+
+
+def test_preview_window_requires_editor():
+    module, app = _build()
+    client, project_id = _create_scene_project_with_candidate(module, app)
+    module.current_user = SimpleNamespace(is_authenticated=True, username="intruder", name="X")
+    resp = client.get(f"{BASE}/project/{project_id}/shift-engine/preview?year=2026&month=4")
+    assert resp.status_code == 404
+
+
+def test_preview_window_rejects_missing_month():
+    module, app = _build()
+    client, project_id = _create_scene_project_with_candidate(module, app)
+    module.current_user = _owner()
+    resp = client.get(f"{BASE}/project/{project_id}/shift-engine/preview")
+    assert resp.status_code == 404
 
 
 def test_plan_requires_editor():

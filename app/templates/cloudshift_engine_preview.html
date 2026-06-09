@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DSTT - 自動作成プレビュー - {{ project_title }}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+  {% include "_cloudshift_style.html" %}
+</head>
+<body class="cloud-public-page cloud-engine-preview-page">
+  <main class="cloud-shell cloud-public-shell">
+    <header class="cloud-hero">
+      <div class="cloud-hero-copy">
+        <div class="cloud-page-kicker">CloudShift / 自動作成プレビュー</div>
+        <h1 class="cloud-page-title">{{ project_title }}</h1>
+        <p class="cloud-page-note">
+          自動作成したシフトの確認・調整用ウィンドウです。ここで保存しない限り、正規シフト帳には反映されません。
+          何もせずに閉じると、この自動作成結果は破棄されます。
+        </p>
+      </div>
+    </header>
+
+    <section class="cloud-panel is-active cloud-panel-public">
+      <div id="cloud-se-preview-summary" class="cloud-se-preview-summary cloud-hidden"></div>
+
+      <div class="cloud-editor-bar cloud-editor-bar-public">
+        <div class="cloud-editor-heading">
+          <h2 id="cloud-editor-title">自動作成プレビュー</h2>
+          <p id="cloud-editor-meta">生成結果を読み込んでいます…</p>
+        </div>
+        <div class="cloud-editor-actions public cloud-se-preview-actions">
+          <button id="cloud-se-preview-save-draft" type="button" class="cloud-btn secondary">下書き（仮シフト）に保存</button>
+          <button id="cloud-se-preview-publish" type="button" class="cloud-btn primary">正規シフト帳に反映</button>
+          <button id="cloud-se-preview-discard" type="button" class="cloud-btn ghost">破棄して閉じる</button>
+        </div>
+      </div>
+
+      <div id="cloud-public-empty" class="cloud-empty-state cloud-hidden">
+        <h3>表示できる生成結果がありません</h3>
+        <p>自動作成パネルからもう一度プレビューを開いてください。</p>
+      </div>
+
+      <section class="cloud-calendar-stage">
+        <div id="cloud-editor-panel" class="cloud-editor-host"></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="cloud-flash" class="cloud-flash info"></div>
+
+  <script>
+    window.SHIFTERSYNC_HOLIDAYS = {{ shiftersync_holidays|tojson }};
+    window.CLOUDSHIFT_PAGE = {
+      type: "engine_preview",
+      projectId: {{ project_id|tojson }},
+      year: {{ year|tojson }},
+      month: {{ month|tojson }}
+    };
+  </script>
+  {% include "_cloudshift_script.html" %}
+</body>
+</html>

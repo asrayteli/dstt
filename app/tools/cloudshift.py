@@ -8984,6 +8984,32 @@ def api_shift_engine_apply_draft(project_id: str):
     return jsonify(result_payload)
 
 
+@cloudshift_bp.route("/project/<project_id>/shift-engine/preview", methods=["GET"])
+@login_required
+def shift_engine_preview(project_id: str):
+    """自動作成結果の確認・調整専用ウィンドウ（DSTT chrome なし、CloudShift UI 流用）。
+
+    生成シフトは client 側（localStorage）からこの画面に読み込まれ、ここで保存操作を
+    しない限り正規シフト帳には一切反映されない（閉じれば破棄）。
+    """
+    project, _access_role = _editable_project_or_404(project_id)
+    _ensure_scene_project(project)
+    try:
+        year = int(request.args.get("year"))
+        month = int(request.args.get("month"))
+    except (TypeError, ValueError):
+        abort(404)
+    year, month = _validate_year_month(year, month)
+    return render_template(
+        "cloudshift_engine_preview.html",
+        project_id=project_id,
+        project_title=project.get("title") or "名称未設定",
+        year=year,
+        month=month,
+        shiftersync_holidays=sorted(set(JAPAN_HOLIDAYS)),
+    )
+
+
 def _send_month_export(project: dict[str, Any], month_key: str, export_format: str):
     month_data = (project.get("months") or {}).get(month_key)
     if not month_data:

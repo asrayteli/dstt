@@ -387,6 +387,7 @@
     }
 
     function canEditCurrentProject() {
+      if (PAGE.type === 'engine_preview') return true;
       return PAGE.type === 'owner' && projectAccessRole(currentProject()) !== 'viewer';
     }
 
@@ -427,7 +428,7 @@
     }
 
     function applyPublicDeviceMode() {
-      if (PAGE.type !== 'public') return;
+      if (PAGE.type !== 'public' && PAGE.type !== 'engine_preview') return;
       const mobile = isLikelyMobileDevice();
       document.body.classList.toggle('cloud-device-mobile', mobile);
       document.body.classList.toggle('cloud-device-desktop', !mobile);
@@ -7870,10 +7871,10 @@
       const footer = modalFooter(modal);
       footer.innerHTML = `
         <button type="button" class="cloud-btn secondary" data-se-plan>試算する</button>
-        <button type="button" class="cloud-btn primary" data-se-apply disabled>下書きに反映</button>
+        <button type="button" class="cloud-btn primary" data-se-preview disabled>プレビューを開いて確認・反映</button>
       `;
       footer.querySelector('[data-se-plan]').addEventListener('click', () => runShiftEnginePlan(modal).catch((e) => showFlash(e.message, 'error')));
-      footer.querySelector('[data-se-apply]').addEventListener('click', () => applyShiftEngineDraft(modal).catch((e) => showFlash(e.message, 'error')));
+      footer.querySelector('[data-se-preview]').addEventListener('click', () => openShiftEnginePreviewWindow(modal));
     }
 
     function collectShiftEnginePayload(modal) {
@@ -7925,28 +7926,54 @@
           <span>公平性 ${Math.round((score.fairness_index || 0) * 100)}%</span>
           <span>差分 +${diff.added || 0} / -${diff.removed || 0} / 維持 ${diff.kept || 0}</span>
         </div>
-        ${blockers.length ? '<p class="cloud-se-error">重大違反(blocker)があるため保存できません。</p>' : ''}
-        ${hards.length && !blockers.length ? '<label class="cloud-se-check cloud-se-override"><input type="checkbox" data-se-override> Hard違反を承知で保存する（管理者のみ）</label>' : ''}
+        ${blockers.length ? '<p class="cloud-se-error">重大違反(blocker)があります。プレビューで内容を調整してください。</p>' : ''}
         ${violationHtml}
         ${unfilledHtml}
         ${warnHtml}
+        <p class="cloud-se-muted">「プレビューを開く」で別ウィンドウに表示し、確認・調整のうえ保存します（このパネルでは正規シフト帳に反映されません）。</p>
       `;
-      const applyBtn = modalFooter(modal).querySelector('[data-se-apply]');
-      applyBtn.disabled = blockers.length > 0;
+      const previewBtn = modalFooter(modal).querySelector('[data-se-preview]');
+      if (previewBtn) previewBtn.disabled = false;
     }
 
-    async function applyShiftEngineDraft(modal) {
+    function openShiftEnginePreviewWindow(modal) {
       const plan = shiftEngineState.lastPlan;
       if (!plan) { showFlash('先に試算してください', 'error'); return; }
-      const payload = collectShiftEnginePayload(modal);
-      payload.base_revision = shiftEngineState.context.base_revision;
-      payload.request_hash = plan.request_hash;
-      const overrideEl = modalBody(modal).querySelector('[data-se-override]');
-      payload.override = !!(overrideEl && overrideEl.checked);
-      await requestJson(`/tools/shiftersync/cloudshift/api/project/${shiftEngineState.projectId}/shift-engine/apply-draft`, { method: 'POST', body: payload });
-      showFlash('自動作成の結果を下書きに保存しました（「仮保存」モードで確認できます）', 'success');
+      const projectId = shiftEngineState.projectId;
+      const year = shiftEngineState.year;
+      const month = shiftEngineState.month;
+      const result = plan.result || {};
+      const score = result.score || {};
+      const payload = {
+        entries: plan.draft_preview || {},
+        request_hash: plan.request_hash,
+        summary: {
+          status: result.status,
+          fill_rate: score.fill_rate,
+          assigned_count: score.assigned_count,
+          required_count: score.required_count,
+          unfilled_count: score.unfilled_count,
+          max_consecutive_days: score.max_consecutive_days,
+          violations: result.violations || [],
+          warnings: (result.warnings || []).concat(plan.context_warnings || [])
+        },
+        created_at: new Date().toISOString()
+      };
+      try {
+        window.localStorage.setItem(`cloudshift_engine_preview:${projectId}:${year}:${month}`, JSON.stringify(payload));
+      } catch (e) {
+        showFlash('プレビューデータの保存に失敗しました', 'error');
+        return;
+      }
+      const url = `/tools/shiftersync/cloudshift/project/${projectId}/shift-engine/preview?year=${year}&month=${month}`;
+      const win = window.open(url, `cloudshift_preview_${projectId}_${year}_${month}`);
+      if (!win) {
+        showFlash('ポップアップがブロックされました。ポップアップを許可して再度お試しください。', 'error');
+        return;
+      }
+      try { win.focus(); } catch (_) { /* noop */ }
       closeCloudModal('cloud-shift-engine-modal');
-      await selectProject(shiftEngineState.projectId, currentMonthKey(), { skipUnsavedGuard: true });
+      showFlash('プレビューウィンドウを開きました。確認・調整のうえ保存してください。', 'success');
     }
 
     function bindOwnerEvents() {
@@ -8586,6 +8613,137 @@
       await refreshPwaNotifyButton();
     }
 
+    // -----------------------------------------------------------------
+    // 自動作成プレビュー（engine_preview）専用ウィンドウ
+    // 生成結果は localStorage 経由で受け取り、ここで保存操作をしない限り
+    // 正規シフト帳には一切反映されない（閉じれば破棄）。
+    // -----------------------------------------------------------------
+    function enginePreviewStorageKey(projectId, year, month) {
+      return `cloudshift_engine_preview:${projectId}:${year}:${month}`;
+    }
+
+    function readEnginePreviewData() {
+      try {
+        const raw = window.localStorage.getItem(enginePreviewStorageKey(PAGE.projectId, PAGE.year, PAGE.month));
+        return raw ? JSON.parse(raw) : null;
+      } catch (_) { return null; }
+    }
+
+    function clearEnginePreviewData() {
+      try { window.localStorage.removeItem(enginePreviewStorageKey(PAGE.projectId, PAGE.year, PAGE.month)); } catch (_) {}
+    }
+
+    function renderEnginePreviewSummary(data) {
+      const host = $('cloud-se-preview-summary');
+      if (!host) return;
+      const summary = (data && data.summary) || null;
+      if (!summary) { host.classList.add('cloud-hidden'); return; }
+      const fill = Math.round((summary.fill_rate || 0) * 100);
+      const violations = summary.violations || [];
+      const warns = summary.warnings || [];
+      const violationHtml = violations.length
+        ? `<ul class="cloud-se-violations">${violations.slice(0, 10).map((v) => `<li class="cloud-se-sev-${escapeHtml(v.severity)}">[${escapeHtml(seSevLabel(v.severity))}] ${escapeHtml(v.message)}</li>`).join('')}</ul>` : '';
+      const warnHtml = warns.length
+        ? `<details class="cloud-se-fold"><summary>警告 ${warns.length} 件</summary><ul>${warns.slice(0, 20).map((w) => `<li>${escapeHtml(w.message)}</li>`).join('')}</ul></details>` : '';
+      host.innerHTML = `
+        <div class="cloud-se-score">
+          <span class="cloud-se-badge cloud-se-status-${escapeHtml(summary.status)}">${escapeHtml(seStatusLabel(summary.status))}</span>
+          <span>充足率 ${fill}%（${summary.assigned_count}/${summary.required_count}）</span>
+          <span>未充足 ${summary.unfilled_count}</span>
+          <span>最大連勤 ${summary.max_consecutive_days}</span>
+        </div>
+        ${violationHtml}${warnHtml}
+        <p class="cloud-se-muted">内容を確認・調整し、「下書きに保存」または「正規シフト帳に反映」を押してください。何もせず閉じると破棄されます。</p>
+      `;
+      host.classList.remove('cloud-hidden');
+    }
+
+    async function initEnginePreview() {
+      applyPublicDeviceMode();
+      window.addEventListener('resize', applyPublicDeviceMode);
+      bindEnginePreviewEvents();
+      await loadEnginePreview();
+    }
+
+    async function loadEnginePreview() {
+      const monthKey = `${PAGE.year}-${String(PAGE.month).padStart(2, '0')}`;
+      const payload = unwrapProjectPayload(await requestJson(
+        `/tools/shiftersync/cloudshift/api/project/${PAGE.projectId}?month_key=${encodeURIComponent(monthKey)}`));
+      state.projectPayload = payload;
+      const data = readEnginePreviewData();
+      if (!data || !data.entries) {
+        showFlash('表示できる生成結果がありません。自動作成からやり直してください。', 'error');
+        if ($('cloud-public-empty')) $('cloud-public-empty').classList.remove('cloud-hidden');
+      } else if (state.projectPayload.month) {
+        // 生成結果を draft として注入する（サーバーには未保存）。
+        state.projectPayload.month.draft_entries_per_day = data.entries;
+      }
+      state.baseMonth = state.projectPayload.month ? deepClone(state.projectPayload.month) : null;
+      state.editorMode = 'draft';
+      syncAssistContext();
+      updateCurrentProjectLabel();
+      await renderWorkspaceWithSiteBranches(true);
+      renderEnginePreviewSummary(data);
+    }
+
+    function bindEnginePreviewEvents() {
+      const saveBtn = $('cloud-se-preview-save-draft');
+      if (saveBtn) saveBtn.addEventListener('click', () => withDsttLoading(
+        { message: '下書きに保存中…' }, () => enginePreviewSaveDraft()).catch((e) => showFlash(e.message, 'error')));
+      const pubBtn = $('cloud-se-preview-publish');
+      if (pubBtn) pubBtn.addEventListener('click', () => withDsttLoading(
+        { message: '正規シフト帳へ反映中…' }, () => enginePreviewPublish()).catch((e) => showFlash(e.message, 'error')));
+      const discardBtn = $('cloud-se-preview-discard');
+      if (discardBtn) discardBtn.addEventListener('click', () => enginePreviewDiscard());
+    }
+
+    async function enginePreviewSaveDraft() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) { showFlash('生成結果がありません', 'error'); return; }
+      const payload = unwrapProjectPayload(await requestJson(
+        `/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/draft`, {
+          method: 'PUT',
+          body: { entries_per_day: entriesWithoutSubstituteRequestDisplays(ShifterSync.getEntriesPerDay()) }
+        }));
+      state.projectPayload = payload;
+      state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      state.editorMode = 'draft';
+      await renderWorkspaceWithSiteBranches(true);
+      showFlash('下書き（仮シフト）に保存しました。正規反映は「正規シフト帳に反映」から行えます。', 'success');
+    }
+
+    async function enginePreviewPublish() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || !month) { showFlash('生成結果がありません', 'error'); return; }
+      if (!window.confirm('この内容を正規シフト帳へ反映します。現在の正式シフトは置き換わります。よろしいですか？')) return;
+      // 編集内容をまず下書きへ保存してから公開する
+      await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/draft`, {
+        method: 'PUT',
+        body: { entries_per_day: entriesWithoutSubstituteRequestDisplays(ShifterSync.getEntriesPerDay()) }
+      });
+      const payload = unwrapProjectPayload(await requestJson(
+        `/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/draft/publish`, {
+          method: 'POST', body: {}
+        }));
+      state.projectPayload = payload;
+      state.baseMonth = payload.month ? deepClone(payload.month) : null;
+      state.editorMode = 'normal';
+      clearEnginePreviewData();
+      await renderWorkspaceWithSiteBranches(true);
+      if ($('cloud-se-preview-summary')) $('cloud-se-preview-summary').classList.add('cloud-hidden');
+      showFlash('正規シフト帳へ反映しました。このウィンドウは閉じて構いません。', 'success');
+    }
+
+    function enginePreviewDiscard() {
+      clearEnginePreviewData();
+      // 未保存ガード(beforeunload)を回避してから閉じる
+      resetUnsavedBaseline();
+      window.close();
+      showFlash('自動作成結果を破棄しました。ウィンドウを閉じてください。', 'info');
+    }
+
     async function initPublic() {
       applyPublicDeviceMode();
       window.addEventListener('resize', applyPublicDeviceMode);
@@ -8623,6 +8781,8 @@
     document.addEventListener('DOMContentLoaded', () => {
       if (PAGE.type === 'owner') {
         initOwner().catch((error) => showFlash(error.message, 'error'));
+      } else if (PAGE.type === 'engine_preview') {
+        initEnginePreview().catch((error) => showFlash(error.message, 'error'));
       } else {
         initPublic().catch((error) => showFlash(error.message, 'error'));
       }
