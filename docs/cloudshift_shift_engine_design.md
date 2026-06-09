@@ -923,6 +923,7 @@ seed が `blocker` を持つ場合、エンジンは再配置で解消しない�
 - 番号で突合できる `external_assignments` と `is_duplicate_by_rules(same_site=False)` で重複する配置を作っていない。
 - 固定配置（既存ロックと `pinned`）を削除・変更していない。`pinned` は必ず配置に含まれている。
 - `forbidden_assignments` の枠に当人を配置していない。
+- その他の Hard にも違反していない: 無効従業員・無効現場/枝番への配置、月次上限超過、最低基準（`eligibility_baseline`）違反、`OptionExperiencePolicy` の未経験不可枠への未経験者配置。これらも生成時のフィルタ任せにせず、保存前に再判定する。
 - `required_slots` と `assignments` から `unfilled_slots` が正しく計算されている。
 - `ScoreSummary` の件数が実データと一致している。
 
