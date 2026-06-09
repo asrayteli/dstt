@@ -161,3 +161,82 @@ def test_request_hash_changes_with_overrides():
     r2, _, _ = ctx.build_planning_request(project, YEAR, MONTH,
                                           plan_overrides={"eligibility_baseline": "any"})
     assert e.compute_request_hash(r1) != e.compute_request_hash(r2)
+
+
+# ---------------------------------------------------------------------------
+# 回帰テスト（バグ修正の固定）
+# ---------------------------------------------------------------------------
+
+
+def test_locked_existing_worker_added_to_candidate_pool():
+    """assist に居ないロック既存の担当者も候補プールに補完され、hard 誤検出しない。"""
+    project = base_project(capacity_enabled=True, required_capacity=1,
+                           entries_per_day={"1": [{"id": "x", "value": "!A!外部太郎", "employee_number": "E999"}]})
+    request, settings, warnings = ctx.build_planning_request(project, YEAR, MONTH)
+    by_number = {w.employee_number: w for w in request.workers}
+    assert "E999" in by_number
+    assert by_number["E999"].name == "外部太郎"
+    assert "10" in by_number["E999"].experienced_site_row_ids
+    res = e.plan_shifts(request)
+    assert res.score.hard_violation_count == 0
+    assert "E999" in [a.employee_number for a in res.assignments if a.day == 1]
+
+
+def test_pinned_worker_added_to_candidate_pool():
+    project = base_project(capacity_enabled=True, required_capacity=1)
+    project["shift_engine"] = {
+        "version": 1,
+        "rules": [{"rule_id": "p1", "kind": "pinned", "enabled": True,
+                   "params": {"employee_number": "E777", "day": 1, "shift_key": ""}}],
+    }
+    request, _, _ = ctx.build_planning_request(project, YEAR, MONTH)
+    assert "E777" in {w.employee_number for w in request.workers}
+    res = e.plan_shifts(request)
+    assert "E777" in [a.employee_number for a in res.assignments if a.day == 1]
+    assert res.score.blocker_count == 0
+
+
+def test_build_request_deterministic_with_existing():
+    project = base_project(capacity_enabled=True, required_capacity=2,
+                           entries_per_day={"1": [{"id": "x", "value": "!A!外部太郎", "employee_number": "E999"}]})
+    r1, _, _ = ctx.build_planning_request(project, YEAR, MONTH)
+    r2, _, _ = ctx.build_planning_request(project, YEAR, MONTH)
+    assert e.compute_request_hash(r1) == e.compute_request_hash(r2)
+    res1 = e.plan_shifts(r1)
+    res2 = e.plan_shifts(r2)
+    assert [(a.slot_instance_id, a.employee_number) for a in res1.assignments] == \
+           [(a.slot_instance_id, a.employee_number) for a in res2.assignments]
+
+
+def test_coerce_site_row_id_normalizes_invalid():
+    assert ctx._coerce_site_row_id("10") == "10"
+    assert ctx._coerce_site_row_id("0") == ""
+    assert ctx._coerce_site_row_id("") == ""
+    assert ctx._coerce_site_row_id("abc") == ""
+    assert ctx._coerce_site_row_id(None) == ""
+
+
+def test_candidate_blocklist_excludes():
+    project = base_project()
+    project["shift_engine"] = {"version": 1, "advanced_options": [
+        {"key": "candidate_blocklist", "enabled": True, "value": ["E001"]}]}
+    request, _, _ = ctx.build_planning_request(project, YEAR, MONTH)
+    assert "E001" not in {w.employee_number for w in request.workers}
+
+
+def test_candidate_allowlist_restricts():
+    project = base_project()
+    project["shift_engine"] = {"version": 1, "advanced_options": [
+        {"key": "candidate_allowlist", "enabled": True, "value": ["E003"]}]}
+    request, _, _ = ctx.build_planning_request(project, YEAR, MONTH)
+    assert {w.employee_number for w in request.workers} == {"E003"}
+
+
+def test_allow_block_conflict_excludes_and_warns():
+    project = base_project()
+    project["shift_engine"] = {"version": 1, "advanced_options": [
+        {"key": "candidate_allowlist", "enabled": True, "value": ["E001"]},
+        {"key": "candidate_blocklist", "enabled": True, "value": ["E001"]}]}
+    request, settings, warnings = ctx.build_planning_request(project, YEAR, MONTH)
+    assert "E001" not in {w.employee_number for w in request.workers}  # 除外側を採用
+    assert any(w.code == "allow_block_conflict" for w in warnings)

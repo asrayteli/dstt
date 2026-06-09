@@ -257,6 +257,7 @@ class Worker:
     active: bool
     employee_type: str = ""
     office_name: str = ""
+    office_code: str = ""
     dedicated_site_ids: tuple[str, ...] = ()
     dedicated_site_row_ids: tuple[str, ...] = ()
     experienced_site_row_ids: tuple[str, ...] = ()
@@ -1214,12 +1215,18 @@ class GreedyRepairSolver:
             key=lambda s: (s.date, s.shift_key, s.site_branch_row_id, s.slot_id),
         )
 
-        # 固定（locked/manual_locked）と pinned を (date, shift_key) 単位に集約
-        fixed_by_key: dict[tuple[date, str], list[tuple[str, str, str]]] = {}
+        # 固定（locked/manual_locked）と pinned を (date, shift_key, 枝番) 単位に集約。
+        # 枝番を含めることで、同一日・同一 shift で枝番違いの複数 slot に
+        # 同じ固定配置を二重投入してしまう不具合を防ぐ。
+        fixed_by_key: dict[tuple[date, str, str], list[tuple[str, str, str]]] = {}
         # value: (employee_number, source, assignment_id)
         for existing in request.existing_assignments:
             if existing.lock_policy in ("locked", "manual_locked"):
-                key = (existing.date, str(existing.shift_key or "").strip())
+                key = (
+                    existing.date,
+                    str(existing.shift_key or "").strip(),
+                    str(existing.site_branch_row_id or "").strip(),
+                )
                 fixed_by_key.setdefault(key, []).append(
                     (existing.employee_number, "existing_locked", existing.assignment_id)
                 )
@@ -1229,6 +1236,7 @@ class GreedyRepairSolver:
             params = rule.params or {}
             number = str(params.get("employee_number") or "").strip()
             shift_key = str(params.get("shift_key") or "").strip()
+            branch = str(params.get("site_branch_row_id") or "").strip()
             d = _parse_iso_date(params.get("date"))
             if not d and params.get("day") is not None:
                 try:
@@ -1236,25 +1244,34 @@ class GreedyRepairSolver:
                 except (TypeError, ValueError):
                     d = None
             if number and d:
-                fixed_by_key.setdefault((d, shift_key), []).append(
+                fixed_by_key.setdefault((d, shift_key, branch), []).append(
                     (number, "pinned", rule.rule_id)
                 )
 
         # movable/replaceable の元担当（変更最小用）
-        movable_by_key: dict[tuple[date, str], list[str]] = {}
+        movable_by_key: dict[tuple[date, str, str], list[str]] = {}
         for existing in request.existing_assignments:
             if existing.lock_policy in ("movable", "replaceable"):
-                key = (existing.date, str(existing.shift_key or "").strip())
+                key = (
+                    existing.date,
+                    str(existing.shift_key or "").strip(),
+                    str(existing.site_branch_row_id or "").strip(),
+                )
                 movable_by_key.setdefault(key, []).append(existing.employee_number)
 
         instances: list[_Instance] = []
         conflicts: list[_SeedConflict] = []
-        consumed_fixed_keys: set[tuple[date, str]] = set()
 
         for slot in slots:
-            key = (slot.date, str(slot.shift_key or "").strip())
-            fixed_here = fixed_by_key.get(key, [])
-            movable_here = list(movable_by_key.get(key, []))
+            key = (slot.date, str(slot.shift_key or "").strip(), str(slot.site_branch_row_id or "").strip())
+            # 固定/movable は「消費」する。これにより同一フルキーの slot が複数あっても
+            # 同じ固定配置を二度割り当てない（最初の slot が確保する）。
+            fixed_here = list(fixed_by_key.get(key, ()))
+            if key in fixed_by_key:
+                fixed_by_key[key] = []
+            movable_here = list(movable_by_key.get(key, ()))
+            if key in movable_by_key:
+                movable_by_key[key] = []
             required = slot.required_count
             if len(fixed_here) > required:
                 warnings.append(
@@ -1266,7 +1283,6 @@ class GreedyRepairSolver:
                     )
                 )
                 required = len(fixed_here)
-            consumed_fixed_keys.add(key)
 
             for index in range(1, required + 1):
                 instance = _Instance(instance_id=f"{slot.slot_id}#{index}", slot=slot)
@@ -1280,11 +1296,11 @@ class GreedyRepairSolver:
                     instance.original_worker = movable_here[pos - len(fixed_here)]
                 instances.append(instance)
 
-        # どの slot にも一致しない固定既存は 100% 保持のため合成 slot を作る
-        for key, fixed_here in sorted(fixed_by_key.items(), key=lambda kv: (kv[0][0], kv[0][1])):
-            if key in consumed_fixed_keys:
+        # どの slot にも一致しなかった固定既存は 100% 保持のため合成 slot を作る
+        for key, fixed_here in sorted(fixed_by_key.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2])):
+            if not fixed_here:
                 continue
-            d, shift_key = key
+            d, shift_key, branch = key
             day = ctx.day_by_date.get(d)
             if day is None:
                 continue
@@ -1296,7 +1312,7 @@ class GreedyRepairSolver:
                 )
             )
             synthetic_slot = RequiredSlot(
-                slot_id=f"existing-{d.isoformat()}-{shift_key or 'none'}",
+                slot_id=f"existing-{d.isoformat()}-{shift_key or 'none'}-{branch or '0'}",
                 date=d,
                 day=day.day,
                 shift_key=shift_key,
@@ -1305,6 +1321,7 @@ class GreedyRepairSolver:
                 site_row_id=request.target_site.site_row_id,
                 site_id=request.target_site.site_id,
                 site_name=request.target_site.site_name,
+                site_branch_row_id=branch,
                 source="existing_entry",
             )
             for index, (number, source, assignment_id) in enumerate(fixed_here, start=1):
@@ -1614,6 +1631,9 @@ class GreedyRepairSolver:
             for instance in scan:
                 if instance.fixed_worker is not None:
                     continue
+                # 1 反復の途中でも時間予算を超えたら打ち切る（大規模入力の安全弁）。
+                if self._timed_out(start):
+                    return
                 slot = instance.slot
                 day = ctx.day_by_date.get(slot.date)
                 if day is None:
@@ -1623,8 +1643,12 @@ class GreedyRepairSolver:
                 option = _opt(slot.shift_key)
                 is_we = day.is_weekend or day.is_holiday
 
-                # 空き枠を埋める / 担当を入れ替える
-                static_pool = [w for w in ctx.request.workers if _static_eligible(ctx, w, slot, day)]
+                # 空き枠を埋める / 担当を入れ替える。
+                # 同コスト時の tie-break を一意にするため employee_number 昇順で走査する。
+                static_pool = sorted(
+                    (w for w in ctx.request.workers if _static_eligible(ctx, w, slot, day)),
+                    key=lambda w: w.employee_number,
+                )
                 best_choice: tuple[float, str | None, list[ScoreFactor]] | None = None
 
                 for worker in static_pool:
@@ -2126,8 +2150,10 @@ def validate_result(request: ShiftPlanningRequest, result: Any) -> list[Violatio
         month_count[number] = month_count.get(number, 0) + 1
 
         # 最低基準・未経験不可（保存前再判定）
+        # 最低基準・未経験不可はエンジンが選定した配置にのみ再判定する。
+        # 固定既存(existing_locked)・pinned は強制配置であり 100% 維持するため対象外。
         slot = _slot_for_assignment(request, assignment)
-        if slot is not None:
+        if slot is not None and assignment.source == "engine":
             worker = worker_by_number.get(number)
             if worker is not None:
                 if not _baseline_ok(worker, slot, request.preferences) and request.preferences.eligibility_baseline != "any":

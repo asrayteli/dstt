@@ -46,10 +46,12 @@ def _str(value: Any) -> str:
 
 
 def _coerce_site_row_id(value: Any) -> str:
+    # site_row_id は数値文字列。0 以下・非数値は無効として "" に正規化する
+    # （app/tools/shiftersync_format._normalize_site_row_id と同じ規約）。
     text = _str(value)
     if text.isdigit() and int(text) > 0:
         return text
-    return text if text and not text.isdigit() else (text if text else "")
+    return ""
 
 
 def _round_half_up(value: float) -> int:
@@ -267,6 +269,7 @@ def build_workers(
                 active=active,
                 employee_type=_str(getattr(emp, "employee_type", "")),
                 office_name=_str(getattr(emp, "office_name", "")),
+                office_code=_str(getattr(emp, "office_code", "")),
                 dedicated_site_row_ids=(site_row_id,) if number in dedicated_numbers and site_row_id else (),
                 experienced_site_row_ids=tuple(sorted(experienced_sites.get(number, set()))),
                 trainee_site_row_ids=tuple(sorted(trainee_sites.get(number, set()))),
@@ -320,7 +323,8 @@ def _apply_candidate_filters(
             continue
         if allowlist and number not in allowlist:
             continue
-        if office_filter and worker.office_name not in office_filter:
+        # office_filter は所属コード（Employee.office_code）で判定する
+        if office_filter and worker.office_code not in office_filter:
             continue
         if type_filter and worker.employee_type not in type_filter:
             continue
@@ -718,6 +722,43 @@ def resolve_preferences(
     return replace(base, **updates)
 
 
+def _ensure_fixed_workers_present(
+    workers: list[Worker],
+    existing: list[ExistingAssignment],
+    settings: ShiftEngineSettings,
+    site_row_id: str,
+) -> None:
+    """固定（locked/manual_locked）・pinned の担当者を候補プールに補完する。"""
+    present = {w.employee_number for w in workers}
+    name_by_number: dict[str, str] = {}
+    needed: list[str] = []
+
+    for assignment in existing:
+        if assignment.lock_policy in ("locked", "manual_locked"):
+            number = _str(assignment.employee_number)
+            if number and number not in present and number not in name_by_number:
+                name_by_number[number] = _str(assignment.employee_name) or number
+                needed.append(number)
+    for rule in settings.rules:
+        if rule.kind == "pinned" and rule.enabled:
+            number = _str(rule.params.get("employee_number"))
+            if number and number not in present and number not in name_by_number:
+                name_by_number[number] = number
+                needed.append(number)
+
+    for number in needed:
+        workers.append(
+            Worker(
+                worker_id=f"fixed-{number}",
+                employee_number=number,
+                name=name_by_number.get(number, number),
+                active=True,
+                # 固定として実配置されている＝この現場の経験者とみなす（最低基準を満たす）
+                experienced_site_row_ids=(site_row_id,) if site_row_id else (),
+            )
+        )
+
+
 def _relax_sites(settings: ShiftEngineSettings) -> tuple[str, ...]:
     sites: list[str] = []
     for opt in settings.advanced_options:
@@ -765,8 +806,14 @@ def build_planning_request(
         project, month_data, settings, days, year, month, warnings
     )
 
+    site_row_id = _coerce_site_row_id(project.get("site_row_id"))
+    # 固定既存(locked/manual_locked)・pinned の担当者は実在の配置者なので、
+    # 候補プールに居なければ補完する（経験者扱い）。これを怠ると engine の
+    # validate_result が unknown_worker(hard) を誤検出し、保存できなくなる。
+    _ensure_fixed_workers_present(workers, existing, settings, site_row_id)
+
     site = SiteRef(
-        site_row_id=_coerce_site_row_id(project.get("site_row_id")),
+        site_row_id=site_row_id,
         site_id=_str(project.get("site_id")),
         site_name=_str(project.get("site_name")),
     )

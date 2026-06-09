@@ -576,3 +576,32 @@ def test_options_cannot_relax_core_hard_leave():
     res = e.plan_shifts(make_request(slots, workers, unavailable=unavailable, preferences=prefs))
     assert res.assignments == []
     assert res.status == "partial"
+
+
+# ---------------------------------------------------------------------------
+# 回帰テスト（バグ修正の固定）
+# ---------------------------------------------------------------------------
+
+
+def test_multi_branch_locked_not_double_placed():
+    """同一日・同一shiftで枝番違いの複数slot + ロック既存 → 同一人物を二重配置しない。"""
+    slots = [make_slot(1, "A", slot_id="b1", branch="1"), make_slot(1, "A", slot_id="b2", branch="2")]
+    workers = [make_worker("E001", options=("A",)), make_worker("E002", options=("A",))]
+    existing = [e.ExistingAssignment("ex1", date(YEAR, MONTH, 1), 1, "1-A", "A", "E001", "社員E001",
+                                     "manual", "en1", "locked", site_branch_row_id="1")]
+    res = e.plan_shifts(make_request(slots, workers, existing=existing))
+    assert res.score.blocker_count == 0
+    day1 = assigned_numbers(res, day=1)
+    assert day1.count("E001") == 1  # 枝番1にのみ配置（二重配置しない）
+
+
+def test_fixed_assignment_exempt_from_baseline_recheck():
+    """固定既存(locked)は最低基準を満たさなくても hard 違反にしない（100%維持）。"""
+    slots = [make_slot(1, "A", required=1)]
+    # E900 は経験なし（最低基準を満たさない）が locked 既存として配置済み
+    workers = [make_worker("E900", experienced=(), options=())]
+    existing = [e.ExistingAssignment("ex1", date(YEAR, MONTH, 1), 1, "1-A", "A", "E900", "社員E900",
+                                     "manual", "en1", "locked")]
+    res = e.plan_shifts(make_request(slots, workers, existing=existing))
+    assert "E900" in assigned_numbers(res, day=1)
+    assert res.score.hard_violation_count == 0  # 固定は baseline 再判定の対象外
