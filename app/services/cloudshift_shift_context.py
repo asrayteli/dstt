@@ -32,8 +32,14 @@ from .cloudshift_shift_engine import (
     migrate_settings,
 )
 
+try:
+    from ..tools.shiftersync_check import LEAVE_OPTION_KEYS
+except ImportError:  # pragma: no cover
+    from app.tools.shiftersync_check import LEAVE_OPTION_KEYS  # type: ignore
+
 # 未確認休暇の既定（confirmed_by が空のとき）。設定で上書き可。
-_UNCONFIRMED_DEFAULT = "soft"
+# 休みが入っている日に自動作成がシフトを入れないことを最優先し hard とする。
+_UNCONFIRMED_DEFAULT = "hard"
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +387,12 @@ def build_existing_assignments(
                 )
                 continue
             sync_type = _str(entry.get("sync_source_type"))
+            # 有休系オプションの entry は「休みの予定」であり、自動作成が動かしては
+            # いけないため existing_policy に関わらず固定で保持する。
+            lock_policy = (
+                "locked" if shift_key in LEAVE_OPTION_KEYS
+                else _lock_policy_for(existing_policy, sync_type)
+            )
             result.append(
                 ExistingAssignment(
                     assignment_id=f"existing-{_str(entry.get('id')) or day_key}-{number}",
@@ -392,7 +404,7 @@ def build_existing_assignments(
                     employee_name=name or number,
                     source_type="manual" if not sync_type else "scene_sync",  # type: ignore[arg-type]
                     entry_id=_str(entry.get("id")),
-                    lock_policy=_lock_policy_for(existing_policy, sync_type),  # type: ignore[arg-type]
+                    lock_policy=lock_policy,  # type: ignore[arg-type]
                     site_row_id=_str(entry.get("site_row_id")) or site_row_id,
                     site_id=_str(entry.get("site_id")),
                     site_name=_str(entry.get("site_name")),
@@ -405,16 +417,22 @@ def build_existing_assignments(
 
 def build_external_assignments(
     project: dict[str, Any], year: int, month: int, warnings: list[PlanningWarning]
-) -> list[ExternalAssignment]:
-    """同 owner の他 scene project の確定配置を ExternalAssignment へ集約する。"""
+) -> tuple[list[ExternalAssignment], list[UnavailableDay]]:
+    """同 owner の他 scene project の確定配置を ExternalAssignment へ集約する。
+
+    有休系オプションの entry は他現場占有（is_duplicate_by_rules では重複しない）
+    ではなく「その人の休み」なので、hard の UnavailableDay として返す。
+    戻り値は (external_assignments, leave_unavailable_days)。
+    """
     try:
         from app.tools.cloudshift import _assist_scene_conflict_entries
     except Exception:  # pragma: no cover
-        return []
+        return [], []
 
     days = monthrange(year, month)[1]
     seen: set[tuple[str, str, str, str]] = set()
     result: list[ExternalAssignment] = []
+    leave_days: list[UnavailableDay] = []
     for day in range(1, days + 1):
         d = date(year, month, day)
         try:
@@ -430,6 +448,28 @@ def build_external_assignments(
             if key in seen:
                 continue
             seen.add(key)
+            if shift_key in LEAVE_OPTION_KEYS:
+                # 他シフト帳に休みが入っている → その日は配置対象から外す
+                if number:
+                    leave_days.append(
+                        UnavailableDay(
+                            employee_number=number,
+                            date=d,
+                            reason=f"{_str(entry.get('project_title')) or '他シフト帳'}に休み予定",
+                            source="shift_entry",
+                            strength="hard",
+                            confirmed=True,
+                        )
+                    )
+                else:
+                    warnings.append(
+                        PlanningWarning(
+                            "leave_without_number",
+                            f"社員番号のない他シフト帳の休みは自動照合しません: {d.isoformat()} {name}",
+                            date=d,
+                        )
+                    )
+                continue
             if not number:
                 warnings.append(
                     PlanningWarning(
@@ -451,6 +491,108 @@ def build_external_assignments(
                     confirmed=True,
                 )
             )
+    return result, leave_days
+
+
+def leave_days_from_existing(existing: list[ExistingAssignment]) -> list[UnavailableDay]:
+    """対象シフト帳の有休系オプション entry を hard の不可日へ変換する。
+
+    休みの予定が入っている日に、自動作成が同じ人へ勤務シフトを足さないための入力。
+    （有休系オプションは is_duplicate_by_rules では重複扱いにならないため、
+    既存配置として持つだけでは同日への新規配置を防げない。）
+    """
+    result: list[UnavailableDay] = []
+    seen: set[tuple[str, date]] = set()
+    for assignment in existing:
+        if assignment.shift_key not in LEAVE_OPTION_KEYS:
+            continue
+        number = _str(assignment.employee_number)
+        if not number:
+            continue
+        key = (number, assignment.date)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(
+            UnavailableDay(
+                employee_number=number,
+                date=assignment.date,
+                reason="このシフト帳に休み予定",
+                source="shift_entry",
+                strength="hard",
+                confirmed=True,
+            )
+        )
+    return result
+
+
+def build_person_project_leave_days(
+    project: dict[str, Any], year: int, month: int
+) -> list[UnavailableDay]:
+    """同 owner の個人シフト帳（person）に入っている休みを hard の不可日へ変換する。
+
+    個人シフト帳は 1 人＝1 帳のため、有休系オプションの entry があれば
+    その人（project.employee_number）はその日休み。
+    """
+    try:
+        from app.tools.cloudshift import _iter_stored_projects
+        from app.tools.shiftersync_format import parse_entry_value
+    except Exception:  # pragma: no cover
+        return []
+
+    owner_user_id = _str(project.get("owner_user_id"))
+    project_id = _str(project.get("id"))
+    month_key = _month_key(year, month)
+    result: list[UnavailableDay] = []
+    seen: set[tuple[str, date]] = set()
+    try:
+        others = list(_iter_stored_projects())
+    except Exception:  # pragma: no cover
+        return []
+    for other in others:
+        if not isinstance(other, dict):
+            continue
+        if _str(other.get("id")) == project_id:
+            continue
+        if _str(other.get("mode")) != "person":
+            continue
+        if owner_user_id and _str(other.get("owner_user_id")) != owner_user_id:
+            continue
+        number = _str(other.get("employee_number"))
+        if not number:
+            continue
+        month_data = (other.get("months") or {}).get(month_key)
+        if not isinstance(month_data, dict):
+            continue
+        entries_per_day = month_data.get("entries_per_day") or {}
+        for day_key, day_entries in entries_per_day.items():
+            if not isinstance(day_entries, list):
+                continue
+            try:
+                d = date(year, month, int(day_key))
+            except (TypeError, ValueError):
+                continue
+            for entry in day_entries:
+                if not isinstance(entry, dict):
+                    continue
+                shift_key, _name = parse_entry_value(entry.get("value") or "")
+                if _str(shift_key) not in LEAVE_OPTION_KEYS:
+                    continue
+                key = (number, d)
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append(
+                    UnavailableDay(
+                        employee_number=number,
+                        date=d,
+                        reason=f"{_str(other.get('title')) or '個人シフト帳'}に休み予定",
+                        source="shift_entry",
+                        strength="hard",
+                        confirmed=True,
+                    )
+                )
+    result.sort(key=lambda u: (u.employee_number, u.date))
     return result
 
 
@@ -502,7 +644,8 @@ def build_unavailable_days(
                 continue
             confirmed = bool(_str(leave.get("confirmed_by")))
             if confirmed:
-                strength = strength_by_type.get(leave_type, "soft")
+                # ポリシー未定義の種別も既定は hard（休みの日に配置しない）
+                strength = strength_by_type.get(leave_type, "hard")
             else:
                 strength = unconfirmed_strength
             result.append(
@@ -773,6 +916,30 @@ def _relax_sites(settings: ShiftEngineSettings) -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 
 
+def _coerce_fill_target_dates(
+    fill_target_days: Any, year: int, month: int
+) -> tuple[date, ...]:
+    """UI 指定の対象日（日番号 or ISO 日付の混在可）を対象月内の date へ正規化する。"""
+    if not fill_target_days:
+        return ()
+    days_in_month = monthrange(year, month)[1]
+    result: set[date] = set()
+    for item in fill_target_days:
+        d: date | None = None
+        text = _str(item)
+        if text.isdigit():
+            day = int(text)
+            if 1 <= day <= days_in_month:
+                d = date(year, month, day)
+        else:
+            d = _parse_date(item)
+            if d and (d.year != year or d.month != month):
+                d = None
+        if d is not None:
+            result.add(d)
+    return tuple(sorted(result))
+
+
 def build_planning_request(
     project: dict[str, Any],
     year: int,
@@ -780,6 +947,7 @@ def build_planning_request(
     *,
     plan_overrides: dict[str, Any] | None = None,
     calendar_ids: list[str] | None = None,
+    fill_target_days: list[Any] | None = None,
     request_id: str = "",
 ) -> tuple[ShiftPlanningRequest, ShiftEngineSettings, list[PlanningWarning]]:
     """CloudShift project から ShiftPlanningRequest を構築する。"""
@@ -798,10 +966,14 @@ def build_planning_request(
     existing = build_existing_assignments(
         project, month_data, year, month, preferences.existing_policy, warnings
     )
-    external = build_external_assignments(project, year, month, warnings)
+    external, external_leave_days = build_external_assignments(project, year, month, warnings)
     unavailable = build_unavailable_days(
         calendar_ids or [], year, month, settings, preferences.unconfirmed_leave_strength, warnings
     )
+    # 対象/関連シフト帳に入っている休み予定も hard の不可日として扱う
+    unavailable.extend(leave_days_from_existing(existing))
+    unavailable.extend(external_leave_days)
+    unavailable.extend(build_person_project_leave_days(project, year, month))
     required_slots, _demand_source = build_required_slots(
         project, month_data, settings, days, year, month, warnings
     )
@@ -837,6 +1009,7 @@ def build_planning_request(
         scoring_weights=settings.scoring_weights,
         option_experience_policies=list(settings.option_experience_policies),
         external_occupancy_relax_sites=_relax_sites(settings),
+        fill_target_dates=_coerce_fill_target_dates(fill_target_days, year, month),
     )
     return request, settings, warnings
 

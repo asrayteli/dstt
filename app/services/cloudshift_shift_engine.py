@@ -27,10 +27,13 @@ from typing import Any, Literal
 
 try:  # パッケージ／単体どちらでも読めるように両対応（既存コードと同じ流儀）
     from ..tools.japan_holidays import JAPAN_HOLIDAYS
-    from ..tools.shiftersync_check import is_duplicate_by_rules
+    from ..tools.shiftersync_check import LEAVE_OPTION_KEYS, is_duplicate_by_rules
 except ImportError:  # pragma: no cover - 単体実行時のフォールバック
     from app.tools.japan_holidays import JAPAN_HOLIDAYS  # type: ignore
-    from app.tools.shiftersync_check import is_duplicate_by_rules  # type: ignore
+    from app.tools.shiftersync_check import (  # type: ignore
+        LEAVE_OPTION_KEYS,
+        is_duplicate_by_rules,
+    )
 
 
 SOLVER_BACKEND = "greedy_repair_v1"
@@ -46,6 +49,10 @@ CONSECUTIVE_SOFT_DEFAULT = 5
 
 # 局所修復で未充足 1 件に科す擬似コスト（充足を最優先させるための支配項）。
 UNFILLED_COST = 100_000
+
+# 月次最低勤務数（min_assignments）未達の重み倍率。
+# ユーザーが明示した最低保証は、一般的な公平性ペナルティ（2 乗）より優先させる。
+UNDER_MIN_MULTIPLIER = 3
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +317,8 @@ class UnavailableDay:
     employee_number: str
     date: date
     reason: str
-    source: Literal["leave_mgr", "assist_profile", "manual_rule", "person_shift"]
+    # shift_entry: 対象/関連シフト帳の有休系オプション entry 由来の不可日
+    source: Literal["leave_mgr", "assist_profile", "manual_rule", "person_shift", "shift_entry"]
     strength: Literal["hard", "soft", "info"]
     confirmed: bool = True
 
@@ -336,6 +344,9 @@ class ShiftPlanningRequest:
     option_experience_policies: list[OptionExperiencePolicy]
     # external_occupancy を warning へ緩める現場（site_row_id の集合）。
     external_occupancy_relax_sites: tuple[str, ...] = ()
+    # 自動作成で「新規配置を作ってよい日」の集合。空なら全日が対象。
+    # 対象外の日も固定既存・休暇・連勤などの計算には全て含まれる（1か月全体で評価）。
+    fill_target_dates: tuple[date, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +490,9 @@ def default_planning_preferences() -> PlanningPreferences:
         allow_partial=True,
         eligibility_baseline="dedicated_or_experienced",
         min_assignment_score=None,
-        unconfirmed_leave_strength="soft",
+        # 有休共有ツールの休みは確認有無に関わらず既定で配置対象から外す
+        # （休みが入っている日に自動作成がシフトを入れない、を最優先する）。
+        unconfirmed_leave_strength="hard",
         max_consecutive_days=None,
         min_monthly_assignments=None,
         max_monthly_assignments=None,
@@ -495,7 +508,11 @@ def default_planning_preferences() -> PlanningPreferences:
 
 
 def default_leave_policies() -> list[LeavePolicy]:
-    """有休種別ごとの既定不可強度（確定休暇は hard、その他は soft）。"""
+    """有休種別ごとの既定不可強度。
+
+    有休共有ツールに登録された休みは、種別を問わず既定で hard（その日は
+    自動作成の配置対象から外す）。緩めたい種別だけ設定で soft/info に変える。
+    """
     return [
         LeavePolicy("有休", "hard"),
         LeavePolicy("代休", "hard"),
@@ -503,6 +520,7 @@ def default_leave_policies() -> list[LeavePolicy]:
         LeavePolicy("慶弔休暇", "hard"),
         LeavePolicy("介護休暇", "hard"),
         LeavePolicy("リフレッシュ休暇", "hard"),
+        LeavePolicy("その他", "hard"),
     ]
 
 
@@ -662,6 +680,18 @@ def validate_request(request: ShiftPlanningRequest) -> list[Violation]:
                 )
             )
 
+    # 対象日指定が対象月内に収まっているか（月外は無視されるため warning）
+    for target in request.fill_target_dates:
+        if target.year != request.year or target.month != request.month:
+            violations.append(
+                Violation(
+                    "fill_target_out_of_month",
+                    "warning",
+                    f"自動作成の対象日が対象月外です（無視されます）: {target.isoformat()}",
+                    date=target,
+                )
+            )
+
     return violations
 
 
@@ -707,6 +737,9 @@ class _Context:
         self.month = request.month
 
         self.day_by_date: dict[date, PlanningDay] = {d.date: d for d in request.days}
+        self.existing_by_id: dict[str, ExistingAssignment] = {
+            a.assignment_id: a for a in request.existing_assignments
+        }
         self.worker_by_number: dict[str, Worker] = {
             str(w.employee_number or "").strip(): w
             for w in request.workers
@@ -737,6 +770,26 @@ class _Context:
 
         self.relax_sites = set(request.external_occupancy_relax_sites)
 
+        # 新規配置の対象日（空＝全日対象）。対象外日は固定の保持と制約計算のみ行う。
+        valid_dates = set(self.day_by_date.keys())
+        self.fill_target_dates: set[date] = {
+            d for d in request.fill_target_dates if d in valid_dates
+        }
+        self.fill_all_dates = not request.fill_target_dates
+
+        # 月次最低勤務数（個人別 > 全体方針）。最低保証までの配置は「偏り」として罰しない。
+        self.min_target_by_number: dict[str, int] = {}
+        for w in request.workers:
+            limit = w.monthly_limit
+            min_target = (
+                limit.min_assignments
+                if limit and limit.min_assignments is not None
+                else request.preferences.min_monthly_assignments
+            )
+            number = str(w.employee_number or "").strip()
+            if min_target and number:
+                self.min_target_by_number[number] = min_target
+
         # ルール展開
         self.forbidden: set[tuple[str, date, str]] = set()
         self.pair_together: list[tuple[str, str]] = []
@@ -753,6 +806,10 @@ class _Context:
         self.option_policies: list[OptionExperiencePolicy] = [
             p for p in request.option_experience_policies if p.enabled and p.require_prior_experience
         ]
+
+    def is_fill_target(self, d: date) -> bool:
+        """この日に新規配置を作ってよいか（対象日指定が無ければ常に True）。"""
+        return self.fill_all_dates or d in self.fill_target_dates
 
     def _rule_active(self, rule: Rule) -> bool:
         """有効期間内かを判定（月内のどこかで有効なら True）。"""
@@ -839,6 +896,9 @@ class _PlanState:
     def add(self, instance_id: str, number: str, d: date, option: str | None, is_weekend: bool) -> None:
         self.placed[instance_id] = number
         self.day_options.setdefault(number, {}).setdefault(d, []).append(option)
+        if option in LEAVE_OPTION_KEYS:
+            # 有休系オプションは「休みの記録」。勤務日数・連勤・土日祝の計算に入れない。
+            return
         self.worked_dates.setdefault(number, set()).add(d)
         self.month_count[number] = self.month_count.get(number, 0) + 1
         if is_weekend:
@@ -853,6 +913,8 @@ class _PlanState:
             options.remove(option)
             if not options:
                 self.day_options[number].pop(d, None)
+        if option in LEAVE_OPTION_KEYS:
+            return
         # その日にもう配置が無ければ worked_dates から外す
         if not self.day_options.get(number, {}).get(d):
             self.worked_dates.get(number, set()).discard(d)
@@ -910,7 +972,12 @@ def _consecutive_run_if_placed(
     prior_tail: int,
     cross_month: bool,
 ) -> int:
-    """worker を日付 d に置いたときの、d を末尾とする連勤数。"""
+    """worker を日付 d に置いたときに d を含む連勤 run の長さ。
+
+    前方（d より後の既配置）も数える。固定既存や先に埋めた枠が月内に散らばるため、
+    後ろ向きだけ数えると「既存の連勤の直前に置いて run を橋渡しする」配置を
+    見落とし、連勤上限（Hard）も連勤ペナルティ（Soft）もすり抜けてしまう。
+    """
     run = 1
     cur = d
     while True:
@@ -922,6 +989,10 @@ def _consecutive_run_if_placed(
             cur = prev
         else:
             break
+    nxt = d + timedelta(days=1)
+    while nxt in worked_dates:
+        run += 1
+        nxt += timedelta(days=1)
     if cross_month and cur == first_day and prior_tail > 0:
         run += prior_tail
     return run
@@ -1057,13 +1128,23 @@ def _score_candidate(
         score -= penalty
         factors.append(ScoreFactor("penalty", "連勤", -penalty, f"連勤 {run} 日"))
 
-    # 月次偏り抑制（既配置が多いほど減点）
+    # 月次偏り抑制（最低保証を超えた分が多いほど減点）
+    min_target = ctx.min_target_by_number.get(number, 0)
     if prefs.prefer_fairness:
         current = state.month_count.get(number, 0)
-        if current > 0:
-            penalty = weights.monthly_imbalance_penalty * current
+        over = current - min_target
+        if over > 0:
+            penalty = weights.monthly_imbalance_penalty * over
             score -= penalty
             factors.append(ScoreFactor("fairness", "勤務数偏り", -penalty, f"今月 {current} 件"))
+
+    # 月次最低勤務数（下回っている人を優先して引き上げる）
+    if min_target:
+        current = state.month_count.get(number, 0)
+        if current < min_target:
+            bonus = weights.monthly_imbalance_penalty * UNDER_MIN_MULTIPLIER * (min_target - current)
+            score += bonus
+            factors.append(ScoreFactor("fairness", "最低勤務数未達", bonus, f"今月 {current}/{min_target} 件"))
 
     # 土日祝偏り抑制
     if prefs.suppress_weekend_imbalance and (day.is_weekend or day.is_holiday):
@@ -1221,7 +1302,11 @@ class GreedyRepairSolver:
         fixed_by_key: dict[tuple[date, str, str], list[tuple[str, str, str]]] = {}
         # value: (employee_number, source, assignment_id)
         for existing in request.existing_assignments:
-            if existing.lock_policy in ("locked", "manual_locked"):
+            lock_policy = existing.lock_policy
+            if lock_policy in ("movable", "replaceable") and not ctx.is_fill_target(existing.date):
+                # 対象外の日の既存は自動作成で動かしてはいけないため固定として扱う
+                lock_policy = "locked"
+            if lock_policy in ("locked", "manual_locked"):
                 key = (
                     existing.date,
                     str(existing.shift_key or "").strip(),
@@ -1248,10 +1333,10 @@ class GreedyRepairSolver:
                     (number, "pinned", rule.rule_id)
                 )
 
-        # movable/replaceable の元担当（変更最小用）
+        # movable/replaceable の元担当（変更最小用。対象外日は上で固定済みのため除く）
         movable_by_key: dict[tuple[date, str, str], list[str]] = {}
         for existing in request.existing_assignments:
-            if existing.lock_policy in ("movable", "replaceable"):
+            if existing.lock_policy in ("movable", "replaceable") and ctx.is_fill_target(existing.date):
                 key = (
                     existing.date,
                     str(existing.shift_key or "").strip(),
@@ -1273,7 +1358,12 @@ class GreedyRepairSolver:
             if key in movable_by_key:
                 movable_by_key[key] = []
             required = slot.required_count
-            if len(fixed_here) > required:
+            in_scope = ctx.is_fill_target(slot.date)
+            if not in_scope:
+                # 対象外の日は新規枠を作らない。固定既存の保持に必要な分だけ展開する
+                # （連勤・公平性などの制約計算には固定分が全月分そのまま入る）。
+                required = len(fixed_here)
+            elif len(fixed_here) > required:
                 warnings.append(
                     PlanningWarning(
                         "demand_raised_for_fixed",
@@ -1304,13 +1394,15 @@ class GreedyRepairSolver:
             day = ctx.day_by_date.get(d)
             if day is None:
                 continue
-            warnings.append(
-                PlanningWarning(
-                    "fixed_without_demand",
-                    f"需要に無い固定配置を保持します（{d.isoformat()} {shift_key or '指定なし'}）",
-                    date=d,
+            if shift_key not in LEAVE_OPTION_KEYS:
+                # 有休系 entry は需要に無いのが当然なので警告しない（保持はする）
+                warnings.append(
+                    PlanningWarning(
+                        "fixed_without_demand",
+                        f"需要に無い固定配置を保持します（{d.isoformat()} {shift_key or '指定なし'}）",
+                        date=d,
+                    )
                 )
-            )
             synthetic_slot = RequiredSlot(
                 slot_id=f"existing-{d.isoformat()}-{shift_key or 'none'}-{branch or '0'}",
                 date=d,
@@ -1344,8 +1436,22 @@ class GreedyRepairSolver:
         conflicts: list[_SeedConflict],
         violations: list[Violation],
     ) -> None:
-        """固定 seed を投入し、validate_seed 相当の衝突検出を行う。"""
-        # pinned と forbidden の同枠矛盾
+        """固定 seed を投入し、validate_seed 相当の衝突検出を行う。
+
+        対象外日（fill_target_dates 外）の固定は自動作成が動かせないため、
+        衝突しても blocker にせず warning として保持する（生成全体を止めない）。
+        """
+
+        def record(severity, code, message, number, slot):
+            conflicts.append(
+                _SeedConflict(severity, code, message,
+                              employee_number=number, date=slot.date, slot_id=slot.slot_id)
+            )
+            violations.append(
+                Violation(code, severity, message,
+                          employee_number=number, date=slot.date, slot_id=slot.slot_id)
+            )
+
         for instance in instances:
             if instance.fixed_worker is None:
                 continue
@@ -1355,118 +1461,54 @@ class GreedyRepairSolver:
             if day is None:
                 continue
             option = _opt(slot.shift_key)
+            option_key = str(slot.shift_key or "").strip()
+            # 有休系オプションの entry は「休みの記録」であり勤務ではない。
+            # 本人の hard 休暇と同日でも衝突ではない（むしろ整合している）。
+            is_leave_entry = option_key in LEAVE_OPTION_KEYS
+            # 対象外日の固定は動かせないため、衝突は warning で保持する。
+            severity = "blocker" if ctx.is_fill_target(slot.date) else "warning"
 
-            # forbidden と pinned の矛盾
+            blocked = False
+
+            # forbidden と pinned の矛盾（ユーザー設定同士の矛盾は常に blocker）
             if instance.fixed_source == "pinned" and (
-                number,
-                slot.date,
-                str(slot.shift_key or "").strip(),
+                number, slot.date, option_key
             ) in ctx.forbidden:
-                conflicts.append(
-                    _SeedConflict(
-                        "blocker",
-                        "pinned_forbidden_conflict",
-                        f"pinned と forbidden が同一枠で矛盾します: {number}",
-                        employee_number=number,
-                        date=slot.date,
-                        slot_id=slot.slot_id,
-                    )
-                )
-                violations.append(
-                    Violation(
-                        "pinned_forbidden_conflict",
-                        "blocker",
-                        f"pinned と forbidden が同一枠で矛盾します: {number}",
-                        employee_number=number,
-                        date=slot.date,
-                        slot_id=slot.slot_id,
-                    )
-                )
+                record("blocker", "pinned_forbidden_conflict",
+                       f"pinned と forbidden が同一枠で矛盾します: {number}", number, slot)
                 continue
 
-            # hard 休暇との衝突
-            if (number, slot.date) in ctx.hard_unavailable:
-                conflicts.append(
-                    _SeedConflict(
-                        "blocker",
-                        "seed_hard_leave",
-                        f"固定配置が hard 休暇と衝突します: {number} {slot.date.isoformat()}",
-                        employee_number=number,
-                        date=slot.date,
-                        slot_id=slot.slot_id,
-                    )
-                )
-                violations.append(
-                    Violation(
-                        "seed_hard_leave",
-                        "blocker",
-                        f"固定配置が hard 休暇と衝突します: {number} {slot.date.isoformat()}",
-                        employee_number=number,
-                        date=slot.date,
-                        slot_id=slot.slot_id,
-                    )
-                )
-                continue
+            # hard 休暇との衝突（休み記録 entry 自体は対象外）
+            if not is_leave_entry and (number, slot.date) in ctx.hard_unavailable:
+                record(severity, "seed_hard_leave",
+                       f"固定配置が hard 休暇と衝突します: {number} {slot.date.isoformat()}",
+                       number, slot)
+                blocked = severity == "blocker"
 
             # 固定同士の同日重複（same_site=True）
-            duplicate = False
-            for existing_opt in state.day_options.get(number, {}).get(slot.date, ()):  # type: ignore[arg-type]
-                if is_duplicate_by_rules(option, existing_opt, same_site=True):
-                    duplicate = True
-                    break
-            if duplicate:
-                conflicts.append(
-                    _SeedConflict(
-                        "blocker",
-                        "seed_duplicate",
-                        f"固定配置同士が同日重複します: {number} {slot.date.isoformat()}",
-                        employee_number=number,
-                        date=slot.date,
-                        slot_id=slot.slot_id,
-                    )
-                )
-                violations.append(
-                    Violation(
-                        "seed_duplicate",
-                        "blocker",
-                        f"固定配置同士が同日重複します: {number} {slot.date.isoformat()}",
-                        employee_number=number,
-                        date=slot.date,
-                        slot_id=slot.slot_id,
-                    )
-                )
-                continue
+            if not blocked:
+                for existing_opt in state.day_options.get(number, {}).get(slot.date, ()):  # type: ignore[arg-type]
+                    if is_duplicate_by_rules(option, existing_opt, same_site=True):
+                        record(severity, "seed_duplicate",
+                               f"固定配置同士が同日重複します: {number} {slot.date.isoformat()}",
+                               number, slot)
+                        blocked = severity == "blocker"
+                        break
 
             # 他現場占有との衝突（same_site=False, 番号一致のみ）
-            if slot.site_row_id not in ctx.relax_sites:
+            if not blocked and slot.site_row_id not in ctx.relax_sites:
                 for ext_opt in ctx.external_by_emp_date.get((number, slot.date), ()):  # type: ignore[arg-type]
                     if is_duplicate_by_rules(option, ext_opt, same_site=False):
-                        conflicts.append(
-                            _SeedConflict(
-                                "blocker",
-                                "seed_external_conflict",
-                                f"固定配置が他現場占有と衝突します: {number} {slot.date.isoformat()}",
-                                employee_number=number,
-                                date=slot.date,
-                                slot_id=slot.slot_id,
-                            )
-                        )
-                        violations.append(
-                            Violation(
-                                "seed_external_conflict",
-                                "blocker",
-                                f"固定配置が他現場占有と衝突します: {number} {slot.date.isoformat()}",
-                                employee_number=number,
-                                date=slot.date,
-                                slot_id=slot.slot_id,
-                            )
-                        )
-                        duplicate = True
+                        record(severity, "seed_external_conflict",
+                               f"固定配置が他現場占有と衝突します: {number} {slot.date.isoformat()}",
+                               number, slot)
+                        blocked = severity == "blocker"
                         break
-            if duplicate:
+
+            if blocked:
                 continue
 
-            # 衝突なし → 確保
+            # 確保（warning 付きの対象外日固定もそのまま保持する）
             state.add(instance.instance_id, number, slot.date, option, day.is_weekend or day.is_holiday)
 
     # -- greedy -------------------------------------------------------------
@@ -1706,10 +1748,16 @@ class GreedyRepairSolver:
             cost += weights.consecutive_day_penalty * _consecutive_excess(
                 dates, ctx.first_day, threshold, prior_tail
             )
-        # 月次偏り（Σ count^2）
+        # 月次偏り（最低保証を超えた分の Σ over^2）
         if ctx.prefs.prefer_fairness:
-            for count in state.month_count.values():
-                cost += weights.monthly_imbalance_penalty * count * count
+            for number, count in state.month_count.items():
+                over = count - ctx.min_target_by_number.get(number, 0)
+                if over > 0:
+                    cost += weights.monthly_imbalance_penalty * over * over
+        # 月次最低勤務数の不足分
+        for number, min_target in ctx.min_target_by_number.items():
+            shortfall = max(0, min_target - state.month_count.get(number, 0))
+            cost += weights.monthly_imbalance_penalty * UNDER_MIN_MULTIPLIER * shortfall
         # 土日祝偏り（Σ weekend^2）
         if ctx.prefs.suppress_weekend_imbalance:
             for count in state.weekend_count.values():
@@ -1743,6 +1791,11 @@ class GreedyRepairSolver:
             if instance.fixed_worker == number and instance.fixed_source:
                 source = instance.fixed_source
                 score = 0
+                if instance.fixed_source == "existing_locked":
+                    # 元 entry の表記（氏名）をそのまま保持する
+                    original = ctx.existing_by_id.get(instance.fixed_assignment_id)
+                    if original and original.employee_name:
+                        name = original.employee_name
             else:
                 source = "engine"
                 factors = explanations_map.get(instance.instance_id, [])
@@ -2053,6 +2106,9 @@ def validate_result(request: ShiftPlanningRequest, result: Any) -> list[Violatio
     same_day_options: dict[tuple[str, date], list[str | None]] = {}
     month_count: dict[str, int] = {}
 
+    fill_targets = set(request.fill_target_dates)
+    fill_all = not request.fill_target_dates
+
     for assignment in assignments:
         number = str(assignment.employee_number or "").strip()
         if not number:
@@ -2091,12 +2147,18 @@ def validate_result(request: ShiftPlanningRequest, result: Any) -> list[Violatio
             )
         seen_instances.add(assignment.slot_instance_id)
 
+        # 対象外日の固定既存はエンジンが動かせないため、衝突は warning に下げる。
+        in_scope = fill_all or assignment.date in fill_targets
+        hard_severity = "hard" if (in_scope or assignment.source == "engine") else "warning"
+        # 有休系オプションの entry は休みの記録であり、本人の休暇との同日は整合
+        is_leave_assignment = str(assignment.shift_key or "").strip() in LEAVE_OPTION_KEYS
+
         # hard 休暇
-        if (number, assignment.date) in hard_unavailable:
+        if not is_leave_assignment and (number, assignment.date) in hard_unavailable:
             violations.append(
                 Violation(
                     "hard_leave_assigned",
-                    "hard",
+                    hard_severity,
                     f"hard 休暇に配置しています: {number} {assignment.date.isoformat()}",
                     employee_number=number,
                     date=assignment.date,
@@ -2123,7 +2185,7 @@ def validate_result(request: ShiftPlanningRequest, result: Any) -> list[Violatio
                 violations.append(
                     Violation(
                         "same_site_duplicate",
-                        "hard",
+                        hard_severity,
                         f"同一現場で同日重複しています: {number} {assignment.date.isoformat()}",
                         employee_number=number,
                         date=assignment.date,
@@ -2138,7 +2200,7 @@ def validate_result(request: ShiftPlanningRequest, result: Any) -> list[Violatio
                     violations.append(
                         Violation(
                             "external_duplicate",
-                            "hard",
+                            hard_severity,
                             f"他現場占有と同日重複しています: {number} {assignment.date.isoformat()}",
                             employee_number=number,
                             date=assignment.date,
@@ -2147,7 +2209,8 @@ def validate_result(request: ShiftPlanningRequest, result: Any) -> list[Violatio
                     )
                     break
         same_day_options.setdefault((number, assignment.date), []).append(option)
-        month_count[number] = month_count.get(number, 0) + 1
+        if not is_leave_assignment:
+            month_count[number] = month_count.get(number, 0) + 1
 
         # 最低基準・未経験不可（保存前再判定）
         # 最低基準・未経験不可はエンジンが選定した配置にのみ再判定する。
@@ -2332,6 +2395,7 @@ def compute_request_hash(request: ShiftPlanningRequest) -> str:
             )
         ],
         "external_occupancy_relax_sites": sorted(request.external_occupancy_relax_sites),
+        "fill_target_dates": sorted(d.isoformat() for d in request.fill_target_dates),
         "settings_version": request.version,
     }
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))

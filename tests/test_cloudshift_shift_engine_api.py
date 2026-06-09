@@ -212,3 +212,24 @@ def test_plan_requires_editor():
         json={"year": 2026, "month": 4},
     )
     assert resp.status_code == 404
+
+
+def test_plan_with_target_days_limits_assignments():
+    module, app = _build()
+    client, project_id = _create_scene_project_with_candidate(module, app)
+    module.current_user = _owner()
+    resp = client.post(
+        f"{BASE}/api/project/{project_id}/shift-engine/plan",
+        json={"year": 2026, "month": 4, "preferences": {"eligibility_baseline": "any"},
+              "target_days": [1, 2, 3]},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    data = resp.get_json()
+    days = {a["day"] for a in data["result"]["assignments"]}
+    assert days <= {1, 2, 3}
+    # 対象日を変えると request_hash も変わる
+    resp_all = client.post(
+        f"{BASE}/api/project/{project_id}/shift-engine/plan",
+        json={"year": 2026, "month": 4, "preferences": {"eligibility_baseline": "any"}},
+    )
+    assert resp_all.get_json()["request_hash"] != data["request_hash"]

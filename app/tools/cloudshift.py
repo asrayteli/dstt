@@ -8815,9 +8815,11 @@ def _shift_engine_build_and_plan(project: dict[str, Any], payload: dict[str, Any
     year, month = _shift_engine_year_month(payload.get("year"), payload.get("month"))
     overrides = payload.get("preferences") if isinstance(payload.get("preferences"), dict) else {}
     calendar_ids = [str(c).strip() for c in (payload.get("calendar_ids") or []) if str(c).strip()]
+    target_days = payload.get("target_days") if isinstance(payload.get("target_days"), list) else None
 
     request_obj, settings, warnings = cs_ctx.build_planning_request(
-        project, year, month, plan_overrides=overrides, calendar_ids=calendar_ids
+        project, year, month, plan_overrides=overrides, calendar_ids=calendar_ids,
+        fill_target_days=target_days,
     )
     limits = SolverLimits()
     result = plan_shifts(request_obj, limits)
