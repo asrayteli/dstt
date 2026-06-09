@@ -6518,6 +6518,10 @@
         $('cloud-open-shift-book-settings').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
         setNotificationBadge($('cloud-open-shift-book-settings'), unviewedLeaveChangeRequestCount(project));
       }
+      if ($('cloud-open-shift-engine')) {
+        // 自動作成は現場シフト帳の所有者のみ（初期リリースは公開編集では無効）
+        $('cloud-open-shift-engine').classList.toggle('cloud-hidden', !canManageProject || project.mode !== 'scene' || !month);
+      }
       if ($('cloud-open-summary')) $('cloud-open-summary').classList.toggle('cloud-hidden', !month);
       if ($('cloud-open-assist')) $('cloud-open-assist').classList.toggle('cloud-hidden', !isOwnerEditable || !isAssistAvailable());
       if ($('cloud-open-bulk-edit')) $('cloud-open-bulk-edit').classList.toggle('cloud-hidden', !month || !isOwnerEditable || (PAGE.type === 'public' && PAGE.accessMode !== 'edit'));
@@ -7762,6 +7766,189 @@
       showFlash(`${label}を再発行しました`, 'success');
     }
 
+    // -----------------------------------------------------------------
+    // 自動シフト作成（shift-engine）UI
+    // 設計書 docs/cloudshift_shift_engine_design.md の context/plan/apply-draft を呼ぶ。
+    // -----------------------------------------------------------------
+    const shiftEngineState = { context: null, lastPlan: null, projectId: null, year: null, month: null };
+
+    function shiftEnginePrefsFromContext(context) {
+      const settings = (context && context.shift_engine_settings) || {};
+      return settings.default_preferences || {};
+    }
+
+    function seDemandLabel(source) {
+      return ({ settings: '設定', required_capacity_fallback: '必要人数から展開', prev_month_estimate: '前月推定', none: '未設定' })[source] || source || '';
+    }
+
+    function seSevLabel(s) { return ({ blocker: '重大', hard: '必須違反', warning: '警告', info: '情報' })[s] || s; }
+    function seStatusLabel(s) { return ({ feasible: '生成OK', partial: '一部未充足', failed: '生成失敗', optimal: '最適' })[s] || s; }
+    function seDateLabel(iso) { const p = String(iso || '').split('-'); return p.length === 3 ? `${parseInt(p[1], 10)}/${parseInt(p[2], 10)}` : iso; }
+
+    async function openShiftEngineModal() {
+      const project = currentProject();
+      const month = currentMonth();
+      if (!project || project.mode !== 'scene') { showFlash('自動作成は現場シフト帳で利用できます', 'error'); return; }
+      if (!month) { showFlash('対象の月がありません', 'error'); return; }
+      const modal = openCloudModal('cloud-shift-engine-modal', `自動作成 / ${project.title}`);
+      const body = modalBody(modal);
+      const footer = modalFooter(modal);
+      body.innerHTML = '<p class="cloud-se-muted">準備中…</p>';
+      footer.innerHTML = '';
+      let context;
+      try {
+        const url = `/tools/shiftersync/cloudshift/api/project/${project.id}/shift-engine/context?year=${month.year}&month=${month.month}`;
+        context = await requestJson(url);
+      } catch (error) {
+        body.innerHTML = `<p class="cloud-se-error">${escapeHtml(error.message)}</p>`;
+        return;
+      }
+      shiftEngineState.context = context;
+      shiftEngineState.lastPlan = null;
+      shiftEngineState.projectId = project.id;
+      shiftEngineState.year = month.year;
+      shiftEngineState.month = month.month;
+      renderShiftEngineForm(modal, context);
+    }
+
+    function renderShiftEngineForm(modal, context) {
+      const body = modalBody(modal);
+      const prefs = shiftEnginePrefsFromContext(context);
+      const baseline = prefs.eligibility_baseline || 'dedicated_or_experienced';
+      const existingPolicy = prefs.existing_policy || 'lock_manual';
+      const unconfirmed = prefs.unconfirmed_leave_strength || 'soft';
+      const allowPartial = prefs.allow_partial !== false;
+      const includeTrainees = !!prefs.include_trainees;
+
+      const calendars = (context.leave_calendar_options || []).map((opt) => {
+        const id = opt.id || opt.calendar_id || opt.value || '';
+        const name = opt.name || opt.label || opt.title || id;
+        return `<label class="cloud-se-check"><input type="checkbox" data-se-calendar value="${escapeHtml(String(id))}"> ${escapeHtml(String(name))}</label>`;
+      }).join('') || '<p class="cloud-se-muted">アクセスできる有休カレンダーがありません</p>';
+
+      const factors = (context.emptiness_factors || []).map((f) => `<li>${escapeHtml(f)}</li>`).join('');
+      const warnings = (context.warnings || []).map((w) => `<li>${escapeHtml(w.message)}</li>`).join('');
+
+      body.innerHTML = `
+        <div class="cloud-se-info">
+          <span>候補者 ${context.candidate_count || 0} 名（適格 ${context.eligible_candidate_count || 0} 名）</span>
+          <span>需要 ${context.required_slot_count || 0} 枠（${escapeHtml(seDemandLabel(context.demand_source))}）</span>
+          <span>他現場占有 ${context.external_assignment_count || 0} 件</span>
+          <span>固定 ${context.fixed_assignment_count || 0} 件</span>
+        </div>
+        ${factors ? `<details class="cloud-se-fold"><summary>空欄が増えうる設定（${(context.emptiness_factors || []).length}）</summary><ul>${factors}</ul></details>` : ''}
+        ${warnings ? `<details class="cloud-se-fold"><summary>設定の警告</summary><ul>${warnings}</ul></details>` : ''}
+        <div class="cloud-se-grid">
+          <label class="cloud-field"><span>配置の最低基準</span>
+            <select class="cloud-input" data-se-baseline>
+              <option value="dedicated_or_experienced"${baseline === 'dedicated_or_experienced' ? ' selected' : ''}>専従・経験者のみ（既定）</option>
+              <option value="any"${baseline === 'any' ? ' selected' : ''}>全員可</option>
+            </select></label>
+          <label class="cloud-field"><span>既存シフトの扱い</span>
+            <select class="cloud-input" data-se-existing>
+              <option value="lock_manual"${existingPolicy === 'lock_manual' ? ' selected' : ''}>手入力だけ固定（既定）</option>
+              <option value="lock_all"${existingPolicy === 'lock_all' ? ' selected' : ''}>すべて固定</option>
+              <option value="replace_all"${existingPolicy === 'replace_all' ? ' selected' : ''}>すべて再配置候補</option>
+            </select></label>
+          <label class="cloud-field"><span>未確認休暇の扱い</span>
+            <select class="cloud-input" data-se-unconfirmed>
+              <option value="soft"${unconfirmed === 'soft' ? ' selected' : ''}>避ける（既定）</option>
+              <option value="hard"${unconfirmed === 'hard' ? ' selected' : ''}>配置しない</option>
+              <option value="info"${unconfirmed === 'info' ? ' selected' : ''}>参考のみ</option>
+            </select></label>
+          <label class="cloud-field"><span>スコア下限（任意）</span>
+            <input class="cloud-input" type="number" data-se-minscore placeholder="未設定"></label>
+        </div>
+        <div class="cloud-se-checks">
+          <label class="cloud-se-check"><input type="checkbox" data-se-trainees${includeTrainees ? ' checked' : ''}> 研修者も入れる</label>
+          <label class="cloud-se-check"><input type="checkbox" data-se-partial${allowPartial ? ' checked' : ''}> 未充足を許可する</label>
+        </div>
+        <div class="cloud-field"><span>有休共有カレンダー</span><div class="cloud-se-calendars">${calendars}</div></div>
+        <div class="cloud-se-result" data-se-result></div>
+      `;
+
+      const footer = modalFooter(modal);
+      footer.innerHTML = `
+        <button type="button" class="cloud-btn secondary" data-se-plan>試算する</button>
+        <button type="button" class="cloud-btn primary" data-se-apply disabled>下書きに反映</button>
+      `;
+      footer.querySelector('[data-se-plan]').addEventListener('click', () => runShiftEnginePlan(modal).catch((e) => showFlash(e.message, 'error')));
+      footer.querySelector('[data-se-apply]').addEventListener('click', () => applyShiftEngineDraft(modal).catch((e) => showFlash(e.message, 'error')));
+    }
+
+    function collectShiftEnginePayload(modal) {
+      const body = modalBody(modal);
+      const minRaw = body.querySelector('[data-se-minscore]').value;
+      const preferences = {
+        eligibility_baseline: body.querySelector('[data-se-baseline]').value,
+        existing_policy: body.querySelector('[data-se-existing]').value,
+        unconfirmed_leave_strength: body.querySelector('[data-se-unconfirmed]').value,
+        include_trainees: body.querySelector('[data-se-trainees]').checked,
+        allow_partial: body.querySelector('[data-se-partial]').checked,
+      };
+      if (minRaw !== '' && !Number.isNaN(parseInt(minRaw, 10))) preferences.min_assignment_score = parseInt(minRaw, 10);
+      const calendar_ids = Array.from(body.querySelectorAll('[data-se-calendar]:checked')).map((el) => el.value);
+      return { year: shiftEngineState.year, month: shiftEngineState.month, preferences, calendar_ids };
+    }
+
+    async function runShiftEnginePlan(modal) {
+      const payload = collectShiftEnginePayload(modal);
+      const result = modalBody(modal).querySelector('[data-se-result]');
+      result.innerHTML = '<p class="cloud-se-muted">試算中…</p>';
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${shiftEngineState.projectId}/shift-engine/plan`, { method: 'POST', body: payload });
+      shiftEngineState.lastPlan = data;
+      renderShiftEngineResult(modal, data);
+    }
+
+    function renderShiftEngineResult(modal, data) {
+      const result = modalBody(modal).querySelector('[data-se-result]');
+      const score = data.result.score;
+      const status = data.result.status;
+      const fill = Math.round((score.fill_rate || 0) * 100);
+      const violations = data.result.violations || [];
+      const blockers = violations.filter((v) => v.severity === 'blocker');
+      const hards = violations.filter((v) => v.severity === 'hard');
+      const warns = (data.result.warnings || []).concat(data.context_warnings || []);
+      const unfilled = (data.result.unfilled_slots || []).slice(0, 12);
+
+      const violationHtml = violations.length ? `<ul class="cloud-se-violations">${violations.slice(0, 12).map((v) => `<li class="cloud-se-sev-${escapeHtml(v.severity)}">[${escapeHtml(seSevLabel(v.severity))}] ${escapeHtml(v.message)}</li>`).join('')}</ul>` : '';
+      const unfilledHtml = unfilled.length ? `<details class="cloud-se-fold" open><summary>未充足 ${score.unfilled_count} 件</summary><ul>${unfilled.map((u) => `<li>${escapeHtml(seDateLabel(u.date))} ${escapeHtml(u.shift_key || '指定なし')} ×${u.shortage}：${escapeHtml(u.reason)}</li>`).join('')}</ul></details>` : '';
+      const warnHtml = warns.length ? `<details class="cloud-se-fold"><summary>警告 ${warns.length} 件</summary><ul>${warns.slice(0, 20).map((w) => `<li>${escapeHtml(w.message)}</li>`).join('')}</ul></details>` : '';
+      const diff = data.diff || {};
+
+      result.innerHTML = `
+        <div class="cloud-se-score">
+          <span class="cloud-se-badge cloud-se-status-${escapeHtml(status)}">${escapeHtml(seStatusLabel(status))}</span>
+          <span>充足率 ${fill}%（${score.assigned_count}/${score.required_count}）</span>
+          <span>未充足 ${score.unfilled_count}</span>
+          <span>最大連勤 ${score.max_consecutive_days}</span>
+          <span>公平性 ${Math.round((score.fairness_index || 0) * 100)}%</span>
+          <span>差分 +${diff.added || 0} / -${diff.removed || 0} / 維持 ${diff.kept || 0}</span>
+        </div>
+        ${blockers.length ? '<p class="cloud-se-error">重大違反(blocker)があるため保存できません。</p>' : ''}
+        ${hards.length && !blockers.length ? '<label class="cloud-se-check cloud-se-override"><input type="checkbox" data-se-override> Hard違反を承知で保存する（管理者のみ）</label>' : ''}
+        ${violationHtml}
+        ${unfilledHtml}
+        ${warnHtml}
+      `;
+      const applyBtn = modalFooter(modal).querySelector('[data-se-apply]');
+      applyBtn.disabled = blockers.length > 0;
+    }
+
+    async function applyShiftEngineDraft(modal) {
+      const plan = shiftEngineState.lastPlan;
+      if (!plan) { showFlash('先に試算してください', 'error'); return; }
+      const payload = collectShiftEnginePayload(modal);
+      payload.base_revision = shiftEngineState.context.base_revision;
+      payload.request_hash = plan.request_hash;
+      const overrideEl = modalBody(modal).querySelector('[data-se-override]');
+      payload.override = !!(overrideEl && overrideEl.checked);
+      await requestJson(`/tools/shiftersync/cloudshift/api/project/${shiftEngineState.projectId}/shift-engine/apply-draft`, { method: 'POST', body: payload });
+      showFlash('自動作成の結果を下書きに保存しました（「仮保存」モードで確認できます）', 'success');
+      closeCloudModal('cloud-shift-engine-modal');
+      await selectProject(shiftEngineState.projectId, currentMonthKey(), { skipUnsavedGuard: true });
+    }
+
     function bindOwnerEvents() {
       document.querySelectorAll('[data-cloud-tab]').forEach((button) => {
         button.addEventListener('click', function() {
@@ -8087,6 +8274,9 @@
 
       const shiftBookSettings = $('cloud-open-shift-book-settings');
       if (shiftBookSettings) shiftBookSettings.addEventListener('click', () => openShiftBookSettingsModal().catch((error) => showFlash(error.message, 'error')));
+
+      const shiftEngineBtn = $('cloud-open-shift-engine');
+      if (shiftEngineBtn) shiftEngineBtn.addEventListener('click', () => openShiftEngineModal().catch((error) => showFlash(error.message, 'error')));
 
       const createFirstMonth = $('cloud-create-first-month');
       if (createFirstMonth) {

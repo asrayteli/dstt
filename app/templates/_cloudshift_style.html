@@ -2563,4 +2563,56 @@
   body.cloud-public-page.cloud-device-mobile .cloud-editor-host .add-entry-btn {
     min-height: 38px;
   }
+
+  /* 自動作成（shift-engine）モーダル */
+  .cloud-se-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    padding: 0.6rem 0.8rem;
+    background: #f1f5f9;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: #334155;
+    margin-bottom: 0.75rem;
+  }
+  .cloud-se-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .cloud-se-checks { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 0.75rem; }
+  .cloud-se-check { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.88rem; cursor: pointer; }
+  .cloud-se-calendars { display: flex; flex-direction: column; gap: 0.3rem; max-height: 150px; overflow-y: auto; }
+  .cloud-se-fold { margin: 0.5rem 0; font-size: 0.85rem; }
+  .cloud-se-fold summary { cursor: pointer; color: #0369a1; }
+  .cloud-se-fold ul { margin: 0.3rem 0 0; padding-left: 1.2rem; }
+  .cloud-se-muted { color: #64748b; font-size: 0.85rem; }
+  .cloud-se-error { color: #b91c1c; font-weight: 600; }
+  .cloud-se-result { margin-top: 0.75rem; }
+  .cloud-se-score {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    align-items: center;
+    padding: 0.6rem 0.8rem;
+    background: #ecfeff;
+    border: 1px solid #a5f3fc;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    margin-bottom: 0.6rem;
+  }
+  .cloud-se-badge { padding: 0.15rem 0.6rem; border-radius: 999px; font-weight: 700; font-size: 0.8rem; color: #fff; }
+  .cloud-se-status-feasible { background: #16a34a; }
+  .cloud-se-status-partial { background: #d97706; }
+  .cloud-se-status-failed { background: #dc2626; }
+  .cloud-se-status-optimal { background: #2563eb; }
+  .cloud-se-violations { list-style: none; padding: 0; margin: 0.4rem 0; font-size: 0.85rem; }
+  .cloud-se-violations li { padding: 0.25rem 0.5rem; border-radius: 6px; margin-bottom: 0.25rem; }
+  .cloud-se-sev-blocker { background: #fee2e2; color: #991b1b; font-weight: 600; }
+  .cloud-se-sev-hard { background: #ffedd5; color: #9a3412; }
+  .cloud-se-sev-warning { background: #fef9c3; color: #854d0e; }
+  .cloud-se-sev-info { background: #e0f2fe; color: #075985; }
+  .cloud-se-override { margin: 0.5rem 0; color: #9a3412; font-weight: 600; }
 </style>
