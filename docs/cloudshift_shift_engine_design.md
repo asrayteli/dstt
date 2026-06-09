@@ -1,7 +1,7 @@
 # CloudShift 自動シフト作成エンジン設計書
 
 作成日: 2026-06-08  
-修正日: 2026-06-08（既存コード調査に基づくデータ源整合の訂正を反映）
+修正日: 2026-06-08（既存コード調査による整合訂正、重複判定・他現場占有の Hard 化、最低基準＝専従/経験、オプション体系、コア既定プロファイルとアルゴリズム強化を反映）
 
 ## 目的
 
@@ -157,8 +157,8 @@ class ScoreSummary:
 
 `fairness_index` と `weekend_balance_index` は 0.0〜1.0 の正規化値とし、1.0 に近いほど良い。初期実装は次で定義する（決定的・0 除算回避）。
 
-- `fairness_index = 1 - min(1, stdev(各 worker の総割当数) / max(1, mean(各 worker の総割当数)))`。割当のある worker が 1 人以下なら 1.0。
-- `weekend_balance_index = 1 - min(1, stdev(各 worker の土日祝割当数) / max(1, mean(各 worker の土日祝割当数)))`。土日祝の割当が無ければ 1.0。
+- `fairness_index = 1 - min(1, pstdev(割当のある worker の総割当数) / max(1, mean(同))`。母集団は「割当が 1 件以上の worker」、`pstdev` は母標準偏差。割当のある worker が 1 人以下なら 1.0。
+- `weekend_balance_index = 1 - min(1, pstdev(割当のある worker の土日祝割当数) / max(1, mean(同)))`。土日祝の割当が無ければ 1.0。
 - `max_consecutive_days` は全 worker の最大連勤数。割当ゼロなら 0。
 
 これらは指標であり保存可否には影響しない。算出は割当確定後に 1 回だけ行う。
@@ -196,8 +196,16 @@ class ShiftEngineSettings:
     worker_limits: list[WorkerLimit]
     scoring_weights: ScoringWeights
     option_experience_policies: list[OptionExperiencePolicy]
-    advanced_options: list[OptionToggle]   # 現場ごとの任意・拡張オプション（既定は空＝コア挙動）
+    rules: list[Rule]                      # 人物単位の好み・固定/禁止・手動ルール（kind で分岐）
+    advanced_options: list[OptionToggle]   # 現場ごとの任意・拡張オプション（フィルタ等。既定は空＝コア挙動）
 ```
+
+各オプションの保存先:
+
+- 型が確立したもの（需要・休暇・重み・既定方針・上限・オプション経験）は専用フィールドに保存する。
+- 人物単位の好みと固定/禁止（`pinned`/`forbidden`/`pair_together`/`pair_avoid`/`worker_weight`/`fixed_weekday`/`manual`）は `rules` に保存し、`enabled` と有効期間で制御する。
+- 候補フィルタ（`office_filter`/`employee_type_filter`/`candidate_allowlist`/`candidate_blocklist`）やその他の単純トグルは `advanced_options`（`OptionToggle`）に保存する。
+- context adapter は、有効期間内の `rules` と `advanced_options` を解決して `ShiftPlanningRequest`（`rules` と、フィルタ適用済みの `workers`）に反映する。
 
 最小構成では `demand_rules` が未設定でも動くようにする。この場合は `capacity_enabled=True` のときに限り、`CloudShiftMonth.required_capacity` を全営業日に対する同一人数として `RequiredSlot` へ展開する。`capacity_enabled=False` の場合は需要ゼロとして扱い、勝手に配置を増やさない。この fallback は暫定扱いであり、UI では「月全体の必要人数から自動展開」と明示する。
 
@@ -514,7 +522,7 @@ class OptionToggle:
 
 1. **不可侵のコア Hard**（`hard` 休暇・同一現場の重複・固定既存シフトの不変更・無効従業員）。オプションで外せない安全装置。
 2. **既定 Hard だが明示設定で緩められるもの**（他現場占有。`external_occupancy_relax` を明示設定したときだけ `warning` へ降格できる）。
-3. **オプションの Hard 足切り**（適格性・未経験不可・allow/block list・office/type フィルタ・forbidden・pinned）。
+3. **オプションの Hard**: `pinned` は強制配置として seed に投入（最優先で確保）。`forbidden` は当該枠から除外。適格性（最低基準）・未経験不可・allow/block list・office/type フィルタは候補の足切り。
 4. **需要の確定**（demand と fallback、day_overrides、holiday_policy）。
 5. **Soft スコアリング**（重み・人物単位の好み・公平性・連続性・オプション一致加点）。
 6. **下限・しきい値での足切り**（`min_assignment_score`）。
@@ -558,7 +566,11 @@ class ShiftPlanningRequest:
     unavailable_days: list[UnavailableDay]
     rules: list[Rule]
     preferences: PlanningPreferences
+    scoring_weights: ScoringWeights
+    option_experience_policies: list[OptionExperiencePolicy]
 ```
+
+エンジンは純粋関数として、この request だけを見て生成する。スコアリングに必要な `scoring_weights`、オプション未経験不可の判定に必要な `option_experience_policies` も request に含める（候補フィルタ `office_filter`/`candidate_*` 等は adapter が `workers` に適用済みのため request には持たせない）。
 
 重要なのは、CloudShift の `entries_per_day` をそのまま最適化しないこと。いったん「日」「必要枠」「人」「不可日」「既存配置」「他シフト帳占有」「制約」へ分解する。
 
@@ -608,7 +620,7 @@ class RequiredSlot:
 
 1. `project["shift_engine"].demand_rules` があればそれを使う（最優先、`source="settings"`）。
 2. demand_rules が無く `capacity_enabled=True` なら、`required_capacity` を全営業日へ同一人数で展開する（`source="required_capacity_fallback"`）。
-3. 1・2 のいずれも無い場合のみ、**前月の確定シフトの曜日別の平均人数**を推定需要として使う（コア既定 ON のフォールバック、`source="prev_month_estimate"`）。推定である旨を必ず `warning` で返す。前月の確定データが無ければ需要ゼロ。
+3. 1・2 のいずれも無い場合のみ、**前月の確定シフトの曜日別の平均人数**を推定需要として使う（コア既定 ON のフォールバック、`source="prev_month_estimate"`）。平均は曜日ごとに `round half up` で整数化して決定的にする。推定である旨を必ず `warning` で返す。前月の確定データが無ければ需要ゼロ。
 4. 既存シフトを固定する場合は、固定分（`locked`/`manual_locked`）を `ExistingAssignment` として先に確保し、その枠の `required_count` から差し引く。
 5. 需要がゼロの日は、エンジンが勝手に配置を増やさない。
 
@@ -886,12 +898,14 @@ class Rule:
 
 ### seed 検証
 
-固定既存配置を投入した直後に `validate_seed(seed)` を実行する。
+固定配置（既存ロック `locked`/`manual_locked` と `pinned_assignments`）を seed として投入した直後に `validate_seed(seed)` を実行する。
 
 - 固定配置同士が `is_duplicate_by_rules`（同一現場は `same_site=True`）基準で重複しない。
 - 固定配置が `hard` 休暇と衝突しない。
+- 固定配置が他現場占有（`external_assignments`、`same_site=False`）と衝突しない。
 - 固定配置が枝番条件に違反しない。資格・車両・時間帯は許可データが無いため Phase 1 では Hard 検証しない。
 - 固定配置だけで需要を超過している場合は、超過を `warning` ではなく `blocker` にする。
+- `pinned` が `forbidden` と同一枠で矛盾する場合は `blocker`。
 
 seed が `blocker` を持つ場合、エンジンは再配置で解消しない。固定を外すよう UI で促す。
 
@@ -904,7 +918,8 @@ seed が `blocker` を持つ場合、エンジンは再配置で解消しない�
 - `hard` 休暇に配置しない。
 - `is_duplicate_by_rules` 基準で同日重複が無い（同一現場は `same_site=True`）。
 - 番号で突合できる `external_assignments` と `is_duplicate_by_rules(same_site=False)` で重複する配置を作っていない。
-- 固定既存配置を削除、変更していない。
+- 固定配置（既存ロックと `pinned`）を削除・変更していない。`pinned` は必ず配置に含まれている。
+- `forbidden_assignments` の枠に当人を配置していない。
 - `required_slots` と `assignments` から `unfilled_slots` が正しく計算されている。
 - `ScoreSummary` の件数が実データと一致している。
 
@@ -987,6 +1002,7 @@ class ScoreFactor:
 - 番号で突合できない他現場占有（名前一致のみ）の回避。Hard にできないため減点と `warning` で扱う
 - 前月、既存シフトからの変更最小化
 - 代務者より通常候補を優先
+- 人物単位の好み（`Rule`: `worker_weight` の加点/減点、`pair_together`/`pair_avoid`、`fixed_weekday`）
 - 手動ルールの優先順位
 
 ### 設定化すべき制約
@@ -1023,12 +1039,11 @@ class ScoreFactor:
 2. `RequiredSlot` を割当単位（`slot_id#n`）へ展開
 3. 固定既存配置（`locked`/`manual_locked`/`pinned`）を seed として投入
 4. seed の Hard Constraint 違反を検証（衝突は再配置せず `blocker`）
-5. 各 slot の候補者を **Hard Constraint** でフィルタする。次をこの順で適用:
+5. 各 slot の候補者を **Hard Constraint** でフィルタする（候補フィルタ `office_filter`/`employee_type_filter`/`candidate_*` は adapter が `workers` に適用済みなので、ここでは扱わない）。次をこの順で適用:
    - `hard` 休暇・勤務不可
    - 同一現場の重複（`is_duplicate_by_rules(same_site=True)`）
    - 他現場占有（`is_duplicate_by_rules(same_site=False)`。`external_occupancy_relax` 時は除外せず warning）
    - 無効従業員・`employee_number` 無し・`forbidden_assignments`
-   - `office_filter`/`employee_type_filter`/`candidate_allowlist`/`candidate_blocklist`
    - 月次上限到達者、`max_consecutive_days` を Hard 設定にしている場合は連勤上限到達者
 6. 最低基準（`eligibility_baseline`）で適格者に絞る。専従でも経験者でもない候補（研修者は `include_trainees` 時のみ可）を除外。枠のオプションが `OptionExperiencePolicy` で「未経験不可」なら当該オプション未経験者も除外
 7. slot を処理順に並べる。**並び順は決定的**にする: ①候補者数 昇順（最も制約が強い枠を先に）②`date` 昇順 ③`shift_key` ④`slot_instance_id`
@@ -1080,7 +1095,7 @@ Phase 1 の性能目標:
 - `max_candidates_per_slot`
 - `max_plan_preview_entries`
 
-これらは `PlanningPreferences` または server default として持つ。UI から通常変更できる必要はない。
+これらは server 側の安全弁設定（`SolverLimits`）として持ち、`plan` 実行時にエンジンへ渡す。`PlanningPreferences` には含めない（UI から通常変更しない運用値のため）。
 
 大量データ時の劣化方針:
 
@@ -1164,6 +1179,7 @@ CloudShift entry は `normalize_entries_for_month` で保持されるフィー�
 - `value`: 既存の `parse_entry_value` / 表示形式と互換にする。オプション（shift_key）付き配置は `ENTRY_VALUE_PATTERN`（`^!([^!]+)!(.+)$`、すなわち `!オプション!氏名`）に従ってエンコードする。`value` は必ず非空にする。`normalize_entry` は空 `value` の entry を破棄するため、空にすると配置が黙って消えて件数が崩れる。
 - `employee_name`: `Worker.name`
 - `employee_number`: `Worker.employee_number`
+- 現場リンク（`site_row_id`/`site_id`/`site_name`/`site_branch_row_id`/`site_branch`）: `Assignment` は現場項目を持たないため、割当先の `RequiredSlot` から取得して埋める。これにより entry の現場リンク・枝番が欠落しない。
 - `comment`: 短い生成理由を入れる。詳細理由は `plan` レスポンス側で表示し、entry に大量保存しない。
 - `sync_source_type`: 既存同期種別と衝突しない値を導入できるまでは空欄にする。生成由来判定は entry id prefix と下書き保存履歴で扱う。
 
@@ -1198,15 +1214,14 @@ CloudShift entry は `normalize_entries_for_month` で保持されるフィー�
 
 ## 既存アシストからの移行
 
-既存 `assist` JSON は廃止前提ではなく、移行材料として使う。
+既存 `assist` JSON は廃止前提ではなく、移行材料として使う。context adapter が次のとおり**定義済みのエンジン型・Worker フィールドへ直接集約**する（中間の独自型は作らない）。
 
-- `profiles` -> `WorkerPreference`
-- `records` -> `ExperienceRecord`
-- `rules` -> `Rule`
-- `experienced_sites` -> `ExperienceRecord`
-- `training_sites` -> `TrainingRequirement`
+- `profiles` -> `WorkerPreference`（希望/NG 曜日）
+- `records` / `experienced_sites` -> `Worker.experienced_site_row_ids`（経験現場）と `Worker.experienced_option_keys`（経験 option）
+- `training_sites` -> `Worker.trainee_site_row_ids`（研修現場）
+- `rules` -> `Rule`（手動ルール）
 
-ただし、エンジン内部では別モデルに変換する。既存 JSON を直接参照し続けない。
+ただし、エンジン内部では assist JSON を直接参照し続けない。アダプタ層で上記へ変換してから渡す。
 
 移行時の注意:
 
@@ -1232,9 +1247,11 @@ POST /tools/shiftersync/cloudshift/api/project/<project_id>/shift-engine/apply-d
 - `shift_engine` 設定
 - 有休共有カレンダー候補
 - 既存配置の件数と固定候補
-- demand fallback の有無
-- 候補者数
-- 設定不足の警告
+- demand の決定ソース（`settings` / `required_capacity_fallback` / `prev_month_estimate`）と推定なら警告
+- 適格候補者数（最低基準を満たす人数）と総候補者数
+- 他現場占有の件数
+- 空欄が増えうる設定（厳しい最低基準・未経験不可・各種フィルタ）の一覧
+- 設定不足の警告（社員番号なし候補、カレンダー未接続、demand 未整備 など）
 
 ### plan
 
@@ -1281,7 +1298,7 @@ POST /tools/shiftersync/cloudshift/api/project/<project_id>/shift-engine/apply-d
 - `month`
 - `base_revision`
 - `required_slots`
-- `workers` の employee_number、active 状態、適格性属性（`dedicated_site_row_ids`、`experienced_site_row_ids`、`trainee_site_row_ids`、`experienced_option_keys`）
+- `workers` の出力に影響する全属性（`employee_number`、`active`、`dedicated_site_row_ids`、`experienced_site_row_ids`、`trainee_site_row_ids`、`experienced_option_keys`、`preference`、`monthly_limit`）
 - `existing_assignments`
 - `external_assignments`
 - `unavailable_days`
@@ -1511,18 +1528,20 @@ UI 表示では、`blocker` と `hard` を通常の警告と同じ見た目に�
 
 ### Step 1: 設定とモデル
 
-- `project["shift_engine"]` の設定 schema を作る。
-- `RequiredSlot`, `Worker`, `ExistingAssignment`, `ExternalAssignment`, `UnavailableDay`, `Violation` の dataclass を作る。
+- `project["shift_engine"]` の設定 schema（`ShiftEngineSettings` と各サブ dataclass）を作る。
+- 入力/出力/補助の dataclass（`PlanningDay`, `RequiredSlot`, `Worker`, `ExistingAssignment`, `ExternalAssignment`, `UnavailableDay`, `Rule`, `Assignment`, `UnfilledSlot`, `Violation`, `PlanningWarning`, `ScoreSummary`, `Explanation`, `SiteRef`, `WorkerPreference`, `WorkerMonthlyLimit`, `WorkerLimit`, `LeavePolicy`, `OptionExperiencePolicy`, `OptionToggle`）を作る。
+- `build_default_settings()` / `default_planning_preferences()` でコア既定プロファイルを構成する。
 - エンジン入力/出力の JSON 化を定義する。
 - `request_hash` と schema migration を作る。
 
 ### Step 2: Context Adapter
 
-- CloudShift month から既存配置を作る。
-- `required_capacity` fallback と demand rules から `RequiredSlot` を作る。
-- Employee、SitePlus、assist から `Worker` と補助情報を作る。
+- CloudShift month から既存配置（`lock_policy` 付き）を作る。
+- 需要を作る: demand_rules → `capacity_fallback` → 前月パターン推定（`prev_month_estimate`、warning 付き）の順で `RequiredSlot` を構成する。
+- Employee、SitePlus、assist から `Worker` と補助情報（経験現場・経験 option・専従・研修・希望/NG 曜日・上限）を作る。
 - 同 owner の他 scene project の確定 entries から `external_assignments`（他現場の同日占有）を作る。`_assist_scene_conflict_entries` の収集ロジックを再利用する。
 - 有休共有ツールから `UnavailableDay` を作る。
+- 設定の `rules`（有効期間内）と `advanced_options`（フィルタ等）を解決し、`workers` のフィルタ適用と `rules` 反映を行う。
 - 設定診断 API と警告を作る。
 
 ### Step 3: 検証基盤
