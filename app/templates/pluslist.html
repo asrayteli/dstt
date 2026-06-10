@@ -825,6 +825,7 @@
                 <div class="bg-yellow-50 border border-yellow-400 rounded-lg p-4 mb-4">
                     <h4 class="font-bold text-lg mb-2">⚠️ 差分プレビュー</h4>
                     <p class="text-sm text-gray-700 mb-3">以下の変更が反映されます。確認後、「インポート実行」ボタンをクリックしてください。</p>
+                    <p class="text-xs text-gray-500 mb-3">※「退職」はファイルに含まれない既存社員です。データは削除されず、退職者フラグを立ててサーバーに保持されます（「退職者を表示」で確認できます）。</p>
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center mb-4">
                         <div class="bg-green-100 p-3 rounded">
                             <p class="text-2xl font-bold text-green-700" id="add-count">0</p>
@@ -836,7 +837,7 @@
                         </div>
                         <div class="bg-red-100 p-3 rounded">
                             <p class="text-2xl font-bold text-red-700" id="delete-count">0</p>
-                            <p class="text-sm text-red-600">削除</p>
+                            <p class="text-sm text-red-600">退職</p>
                         </div>
                         <div class="bg-gray-100 p-3 rounded">
                             <p class="text-2xl font-bold text-gray-700" id="total-count">0</p>
@@ -980,7 +981,7 @@
                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ファイル名</th>
                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">追加</th>
                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">更新</th>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">削除</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">退職</th>
                         </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200" id="history-tbody">
@@ -1401,7 +1402,7 @@ function buildSearchSelectionSummary(totalCount = null) {
 
     if (keyword) parts.push(`キーワード: ${keyword}`);
     if (officeLabel) parts.push(`営業所: ${officeLabel}`);
-    if (document.getElementById('show-deleted')?.checked) parts.push('削除済みを含む');
+    if (document.getElementById('show-deleted')?.checked) parts.push('退職者を含む');
 
     if (!isSimpleSearch) {
         const searchScope = document.getElementById('search-scope')?.value || 'all';
@@ -1642,7 +1643,14 @@ function renderEmployeeTable(employees) {
 
     employees.forEach(emp => {
         const row = document.createElement('tr');
-        row.className = emp.is_deleted ? 'bg-gray-100' : 'hover:bg-gray-50';
+        // 削除済みはグレー、退職者は淡いアンバーで区別
+        if (emp.is_deleted) {
+            row.className = 'bg-gray-100';
+        } else if (emp.is_retired) {
+            row.className = 'bg-amber-50 hover:bg-amber-100';
+        } else {
+            row.className = 'hover:bg-gray-50';
+        }
 
         // 詳細ボタンを先頭に追加
         const detailTd = document.createElement('td');
@@ -1655,10 +1663,13 @@ function renderEmployeeTable(employees) {
             const td = document.createElement('td');
             td.className = 'px-4 py-3 whitespace-nowrap text-sm';
 
-            // 氏名列の場合はカナも表示
+            // 氏名列の場合はカナも表示。退職者にはバッジを付ける
             if (col === 'employee_name') {
+                const retiredBadge = emp.is_retired
+                    ? '<span class="ml-1 inline-block px-1.5 py-0.5 text-xs rounded bg-amber-200 text-amber-800 align-middle">退職</span>'
+                    : '';
                 td.innerHTML = `
-                    <div class="text-sm font-medium text-gray-900">${emp.employee_name || ''}</div>
+                    <div class="text-sm font-medium text-gray-900">${emp.employee_name || ''}${retiredBadge}</div>
                     ${emp.employee_kana ? `<div class="text-sm text-gray-500">${emp.employee_kana}</div>` : ''}
                 `;
             } else if (col.startsWith('salary_')) {
@@ -1830,8 +1841,12 @@ async function viewEmployee(employeeNumber) {
                 `;
             }
 
+            const retiredNotice = emp.is_retired
+                ? `<div class="col-span-2 mb-2"><span class="inline-block px-2 py-1 text-sm rounded bg-amber-200 text-amber-800 font-semibold">退職者</span> <span class="text-gray-500 text-xs">（ファイルAの更新で名簿から外れたためサーバーに保持されています）</span></div>`
+                : '';
             content.innerHTML = `
                 <div class="grid grid-cols-2 gap-4 text-sm">
+                    ${retiredNotice}
                     <div><strong>社員番号:</strong> ${emp.employee_number}</div>
                     <div><strong>氏名:</strong> ${emp.employee_name}</div>
                     <div><strong>カナ:</strong> ${emp.employee_kana || ''}</div>
@@ -2141,7 +2156,7 @@ async function executeImport() {
         const data = await response.json();
 
         if (response.ok) {
-            alert(`インポート完了！\n追加: ${data.added}件\n更新: ${data.updated}件\n削除: ${data.deleted}件`);
+            alert(`インポート完了！\n追加: ${data.added}件\n更新: ${data.updated}件\n退職: ${data.deleted}件`);
             cancelUpload();
             switchTab('list');
         } else {

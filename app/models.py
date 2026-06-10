@@ -533,6 +533,7 @@ class Employee(db.Model):
 
     # システム情報
     is_deleted = db.Column(db.Boolean, default=False, index=True)  # 削除フラグ
+    is_retired = db.Column(db.Boolean, default=False, index=True)  # 退職者フラグ（ファイルA更新で名簿から外れた社員）
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -629,6 +630,7 @@ class Employee(db.Model):
             'email': self.email,
             'health_insurance': self.health_insurance,
             'is_deleted': self.is_deleted,
+            'is_retired': self.is_retired,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

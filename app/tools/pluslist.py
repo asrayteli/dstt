@@ -416,21 +416,24 @@ def detect_diff(uploaded_data, office_codes):
         else:
             # 更新チェック
             existing = existing_dict[emp_num]
-            has_changes = False
+            # 退職者として残っていた社員がファイルに復活した場合は、退職フラグを
+            # 解除するため必ず更新対象に含める
+            has_changes = bool(existing.is_retired)
 
             # 各フィールドをチェック
-            for key, value in data.items():
-                if key in ['birth_date', 'hire_date']:
-                    existing_value = getattr(existing, key)
-                    if existing_value != value:
-                        has_changes = True
-                        break
-                else:
-                    existing_value = getattr(existing, key, None)
-                    # None と空文字列を同一視
-                    if (existing_value or '') != (value or ''):
-                        has_changes = True
-                        break
+            if not has_changes:
+                for key, value in data.items():
+                    if key in ['birth_date', 'hire_date']:
+                        existing_value = getattr(existing, key)
+                        if existing_value != value:
+                            has_changes = True
+                            break
+                    else:
+                        existing_value = getattr(existing, key, None)
+                        # None と空文字列を同一視
+                        if (existing_value or '') != (value or ''):
+                            has_changes = True
+                            break
 
             if has_changes:
                 to_update.append({
@@ -438,9 +441,10 @@ def detect_diff(uploaded_data, office_codes):
                     'new_data': data
                 })
 
-    # 削除の検出（ファイルに含まれていない社員）
+    # 退職の検出（ファイルに含まれていない社員）
+    # 既に退職フラグが立っている社員は再検出しない（毎回カウントされるのを防ぐ）
     for emp_num, existing in existing_dict.items():
-        if emp_num not in uploaded_dict:
+        if emp_num not in uploaded_dict and not existing.is_retired:
             to_delete.append(existing)
 
     stats = {
@@ -542,9 +546,9 @@ def get_employees():
     # ベースクエリ
     query = Employee.query.filter(Employee.office_code.in_(user_offices))
 
-    # 削除済みフィルタ
+    # 退職者／削除済みフィルタ（既定では在籍中のみ、チェック時は退職者・削除済みも表示）
     if not show_deleted:
-        query = query.filter(Employee.is_deleted == False)
+        query = query.filter(Employee.is_deleted == False, Employee.is_retired == False)
 
     # 営業所フィルタ
     if office_filter:
@@ -904,6 +908,7 @@ def import_data():
                 for key, value in deserialized.items():
                     setattr(existing, key, value)
                 existing.is_deleted = False
+                existing.is_retired = False  # 名簿に載ったので退職フラグを解除
                 existing.updated_at = datetime.utcnow()
             elif not existing:
                 # 完全に新規の場合のみ追加
@@ -922,18 +927,21 @@ def import_data():
                 deserialized = deserialize_employee_data(update_info['new_data'])
                 for key, value in deserialized.items():
                     setattr(employee, key, value)
+                # ファイルに載っている＝在籍中なので退職フラグを解除
+                employee.is_retired = False
                 employee.updated_at = datetime.utcnow()
                 updated_count += 1
 
-        # 削除（論理削除）
+        # 退職（論理削除はせず、退職者フラグを立ててサーバーに残す）
         for emp_number in diff_result['to_delete']:
             employee = Employee.query.filter_by(
                 employee_number=emp_number,
                 is_deleted=False
             ).first()
             if employee:
-                employee.is_deleted = True
-                employee.retirement_date = "？退職？"
+                employee.is_retired = True
+                if not employee.retirement_date:
+                    employee.retirement_date = "？退職？"
                 employee.updated_at = datetime.utcnow()
                 deleted_count += 1
 
@@ -1141,7 +1149,7 @@ def export_data(format):
     query = Employee.query.filter(Employee.office_code.in_(user_offices))
 
     if not show_deleted:
-        query = query.filter(Employee.is_deleted == False)
+        query = query.filter(Employee.is_deleted == False, Employee.is_retired == False)
 
     if office_filter:
         query = query.filter(Employee.office_code == office_filter)
@@ -1671,10 +1679,11 @@ def search_employee_api():
     if not query_str:
         return jsonify([])
 
-    # 社員番号または名前で検索
+    # 社員番号または名前で検索（退職者・削除済みは在籍者として返さない）
     employees = Employee.query.filter(
         Employee.office_code.in_(user_offices),
         Employee.is_deleted == False,
+        Employee.is_retired == False,
         or_(
             Employee.employee_number.like(f"%{query_str}%"),
             Employee.employee_name.like(f"%{query_str}%"),
