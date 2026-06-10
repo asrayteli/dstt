@@ -2487,31 +2487,15 @@ def import_contact_data():
 
             try:
                 changed = False
-                # 値がある項目のみ更新し、空欄での意図しない消去を防ぐ
-                if item.get('email'):
-                    if employee.email != item['email']:
-                        record_edit_history(
-                            employee_number=employee.employee_number,
-                            user_id=user_id,
-                            action='update',
-                            field_name='email',
-                            old_value=employee.email or '',
-                            new_value=item['email']
-                        )
-                        employee.email = item['email']
-                        changed = True
-                if item.get('company_mobile'):
-                    if employee.company_mobile != item['company_mobile']:
-                        record_edit_history(
-                            employee_number=employee.employee_number,
-                            user_id=user_id,
-                            action='update',
-                            field_name='company_mobile',
-                            old_value=employee.company_mobile or '',
-                            new_value=item['company_mobile']
-                        )
-                        employee.company_mobile = item['company_mobile']
-                        changed = True
+                # 値がある項目のみ更新し、空欄での意図しない消去を防ぐ。
+                # 一括取り込みのため個別の編集履歴(EditHistory)は残さない
+                # （ファイルA/Bと同様。全体の記録は ContactUploadHistory に残す）
+                if item.get('email') and employee.email != item['email']:
+                    employee.email = item['email']
+                    changed = True
+                if item.get('company_mobile') and employee.company_mobile != item['company_mobile']:
+                    employee.company_mobile = item['company_mobile']
+                    changed = True
 
                 if changed:
                     employee.updated_at = datetime.utcnow()

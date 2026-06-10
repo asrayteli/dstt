@@ -135,6 +135,12 @@ def test_contact_upload_and_import_links_by_employee_number(tmp_path):
         assert emp.email == "taro@example.com"
         assert emp.company_mobile == "09012345678"
 
+    # 一括取り込みは個別の編集履歴(EditHistory)を残さない
+    # （グローバル50件上限の編集履歴を圧迫しないため。ファイルA/Bと同じ方針）
+    from app.models import EditHistory
+    with app.app_context():
+        assert EditHistory.query.count() == 0
+
 
 def test_contact_rejects_non_xlsx(tmp_path):
     app, module = _build_client(tmp_path)
