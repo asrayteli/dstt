@@ -704,7 +704,7 @@ const HC = (function(){
     if(!linked){ setupManualFields(d); }
     populateManagerSelect(d.manager_user);
     setupExtraNotify();
-    loadOfficersForForm(linked ? d.office_code : null);
+    loadOfficersForForm(d.office_code);
     syncNightBlock();
     syncRecheckBlock();
     if(!isNew){
@@ -800,8 +800,10 @@ const HC = (function(){
   async function loadOfficersForForm(officeCode){
     const box = document.getElementById('rec-officers');
     if(!box) return;
-    let office = officeCode;
-    if(!office){ const m = document.getElementById('manual-office'); office = m ? m.value : ''; }
+    // 営業所は (1) レコード/引数の office_code → (2) 選択中の社員 → (3) 手動モードの営業所選択 の順で確定する
+    let office = officeCode || '';
+    if(!office && selectedEmployee) office = selectedEmployee.office_code || '';
+    if(!office){ const m = document.getElementById('manual-office'); if(m) office = m.value || ''; }
     if(!office){ box.innerHTML = '<span class="text-xs text-gray-400">営業所が未確定です</span>'; return; }
     let officers = [];
     try { officers = (await api('/tools/health_check/api/office_officers?office='+encodeURIComponent(office))).officers || []; } catch(e){}
