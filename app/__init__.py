@@ -365,6 +365,15 @@ def _ensure_access_control_schema(app):
                 ")"
             )
 
+        if "employees" in inspector.get_table_names():
+            employee_cols = {c["name"] for c in inspector.get_columns("employees")}
+            if "company_mobile" not in employee_cols:
+                alters.append("ALTER TABLE employees ADD COLUMN company_mobile VARCHAR(20)")
+            if "email" not in employee_cols:
+                alters.append("ALTER TABLE employees ADD COLUMN email VARCHAR(255)")
+            if "is_retired" not in employee_cols:
+                alters.append("ALTER TABLE employees ADD COLUMN is_retired BOOLEAN NOT NULL DEFAULT 0")
+
         if "health_check_records" in inspector.get_table_names():
             hc_cols = {c["name"] for c in inspector.get_columns("health_check_records")}
             if "birth_date" not in hc_cols:
