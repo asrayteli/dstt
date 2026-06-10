@@ -337,6 +337,37 @@ def _hc_night_basis(record) -> "Any":
     return None
 
 
+def _hc_recipients(record) -> list[str]:
+    """このレコードの通知宛先（username）を重複排除して返す。
+
+    既定の宛先 = 管理担当者（manager_user）＋ 営業所の健康診断担当。
+    さらにレコード個別の追加宛先（extra_notify_users）を上乗せする。
+    実際に通知されるのは、各宛先が連携をオプトインしている場合のみ（呼び出し側で判定）。
+    """
+    recipients: list[str] = []
+    seen: set[str] = set()
+
+    def _add(user) -> None:
+        user = (user or "").strip()
+        if user and user not in seen:
+            seen.add(user)
+            recipients.append(user)
+
+    _add(getattr(record, "manager_user", None))
+    try:
+        from app.tools.health_check import get_office_health_officers
+        for user in get_office_health_officers(getattr(record, "office_code", None)):
+            _add(user)
+    except Exception:  # noqa: BLE001
+        logger.exception("健康診断担当の取得に失敗")
+    try:
+        for user in record.extra_notify_users_list():
+            _add(user)
+    except Exception:  # noqa: BLE001
+        logger.exception("追加通知先の取得に失敗")
+    return recipients
+
+
 def _ensure_reminder_task(
     *,
     manager_user: str,
@@ -404,15 +435,29 @@ def _ensure_reminder_task(
     return task
 
 
-def _close_reminder_task(source_ref_type: str, source_ref_id: str) -> None:
-    """条件を満たさなくなった健診リマインドをアーカイブする。"""
-    existing = ToBellTask.query.filter_by(
-        source_tool="health_check",
-        source_ref_type=source_ref_type,
-        source_ref_id=str(source_ref_id),
-    ).first()
-    if existing and existing.status not in ("done", "archived"):
-        existing.status = "archived"
+def _close_reminder_tasks_for_record(source_ref_type: str, record_id: int,
+                                     keep_ref_ids: "set[str] | None" = None) -> None:
+    """指定レコード・種別の健診リマインドのうち、keep_ref_ids に無いものをアーカイブする。
+
+    宛先ごとに `source_ref_id = "{record_id}:{username}"` でタスクを持つため、
+    宛先の増減・オプトアウト・条件解除に追従してクローズできる。
+    旧形式（`source_ref_id == str(record_id)`）も対象に含める。
+    """
+    keep = keep_ref_ids or set()
+    prefix = f"{record_id}:"
+    candidates = ToBellTask.query.filter(
+        ToBellTask.source_tool == "health_check",
+        ToBellTask.source_ref_type == source_ref_type,
+        db.or_(
+            ToBellTask.source_ref_id == str(record_id),
+            ToBellTask.source_ref_id.like(prefix + "%"),
+        ),
+    ).all()
+    for task in candidates:
+        if task.source_ref_id in keep:
+            continue
+        if task.status not in ("done", "archived"):
+            task.status = "archived"
 
 
 def ensure_health_check_reminders(
@@ -428,39 +473,50 @@ def ensure_health_check_reminders(
     **前日にタスク化**し、対象日 **09:00** にアラート（push）を流す。
     タスク・通知の本文は「{氏名}さんの{ジャンル}になりました。」で統一する。
 
-    通知は担当者（manager_user）が連携をオプトインしている場合のみ起票する。
+    通知は宛先（管理担当者＋営業所の健康診断担当＋レコード個別の追加宛先）のうち、
+    連携をオプトインしている人ごとに 1 タスクずつ起票する（`source_ref_id="{record_id}:{username}"`）。
     例外は飲み込み、健診側の保存処理を妨げない。
     （`global_lead_days` は後方互換のため残すが、本リマインドでは使用しない。）
     """
     now = now or local_now()
-    manager = (record.manager_user or "").strip()
-    opted_in = bool(manager) and is_enabled(manager, HEALTH_CHECK_INTEGRATION_KEY)
-    # 担当者ごとの種別別ON/OFF（未設定は通知する）。
-    notify = get_health_check_notify(manager) if opted_in else {}
+    recipients = _hc_recipients(record)
 
     def _sync(ref_type: str, basis, condition: bool, priority: str) -> "ToBellTask | None":
-        """対象日 basis の前日以降になったらタスク化（無ければ作成／あれば更新）する。
-        条件を満たさない・まだ前日に達していない場合は既存タスクをクローズする。"""
-        active = (
-            opted_in
-            and notify.get(ref_type, True)
-            and condition
+        """対象日 basis の前日以降になったら、オプトイン済みの各宛先にタスク化する。
+        条件を満たさない・まだ前日に達していない宛先のタスクはクローズする。
+        戻り値は代表タスク（*_task_id 後方互換のため）。"""
+        materialize = (
+            condition
             and basis is not None
             and _hc_should_materialize(basis, now)
         )
-        if not active:
-            _close_reminder_task(ref_type, str(record.id))
-            return None
-        message = f"{record.employee_name}さんの{HEALTH_CHECK_REMINDER_GENRE[ref_type]}になりました。"
-        return _ensure_reminder_task(
-            manager_user=manager,
-            title=message,
-            description=message,
-            source_ref_type=ref_type,
-            source_ref_id=str(record.id),
-            due_at=_hc_due_at(basis),
-            priority=priority,
-        )
+        keep_ref_ids: set[str] = set()
+        first_task: "ToBellTask | None" = None
+        if materialize:
+            message = f"{record.employee_name}さんの{HEALTH_CHECK_REMINDER_GENRE[ref_type]}になりました。"
+            due_at = _hc_due_at(basis)
+            for user in recipients:
+                if not is_enabled(user, HEALTH_CHECK_INTEGRATION_KEY):
+                    continue
+                if not get_health_check_notify(user).get(ref_type, True):
+                    continue
+                ref_id = f"{record.id}:{user}"
+                task = _ensure_reminder_task(
+                    manager_user=user,
+                    title=message,
+                    description=message,
+                    source_ref_type=ref_type,
+                    source_ref_id=ref_id,
+                    due_at=due_at,
+                    priority=priority,
+                )
+                if task is not None:
+                    keep_ref_ids.add(ref_id)
+                    if first_task is None:
+                        first_task = task
+        # 宛先から外れた／オプトアウトした／条件解除された分はクローズ
+        _close_reminder_tasks_for_record(ref_type, record.id, keep_ref_ids)
+        return first_task
 
     try:
         # --- 健康診断予約日 ---
@@ -497,10 +553,10 @@ def ensure_health_check_reminders(
 
 
 def close_health_check_reminders(record_id: int, *, commit: bool = True) -> None:
-    """レコード削除時などに、紐付くリマインドをアーカイブする。"""
+    """レコード削除時などに、紐付くリマインド（全宛先・全種別）をアーカイブする。"""
     try:
-        _close_reminder_task("secondary_exam", str(record_id))
-        _close_reminder_task("night_second", str(record_id))
+        for ref_type in ("reservation", "night_second", "secondary_exam"):
+            _close_reminder_tasks_for_record(ref_type, record_id, set())
         if commit:
             _commit_safely()
     except Exception:  # noqa: BLE001

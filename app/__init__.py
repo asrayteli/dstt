@@ -382,6 +382,14 @@ def _ensure_access_control_schema(app):
                 alters.append("ALTER TABLE health_check_records ADD COLUMN nasva_reservation_date DATE")
             if "nasva_exam_date" not in hc_cols:
                 alters.append("ALTER TABLE health_check_records ADD COLUMN nasva_exam_date DATE")
+            if "is_retired" not in hc_cols:
+                alters.append("ALTER TABLE health_check_records ADD COLUMN is_retired BOOLEAN NOT NULL DEFAULT 0")
+            if "is_exempt" not in hc_cols:
+                alters.append("ALTER TABLE health_check_records ADD COLUMN is_exempt BOOLEAN NOT NULL DEFAULT 0")
+            if "is_kintone" not in hc_cols:
+                alters.append("ALTER TABLE health_check_records ADD COLUMN is_kintone BOOLEAN NOT NULL DEFAULT 0")
+            if "extra_notify_users" not in hc_cols:
+                alters.append("ALTER TABLE health_check_records ADD COLUMN extra_notify_users TEXT")
 
         if "health_check_attachments" in inspector.get_table_names():
             hca_cols = {c["name"] for c in inspector.get_columns("health_check_attachments")}

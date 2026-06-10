@@ -1,3 +1,5 @@
+import json
+
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from datetime import datetime, date, timedelta, timezone
@@ -1592,6 +1594,7 @@ class HealthCheckRecord(db.Model):
     manager_user = db.Column(db.String(80), nullable=True, index=True)    # ⑤→DSTTユーザー(username)
     hire_date = db.Column(db.Date, nullable=True)                         # ⑥ 入社日付
     retirement_date = db.Column(db.String(50), nullable=True)            # ⑦ 退職日付
+    is_retired = db.Column(db.Boolean, nullable=False, default=False, index=True)  # 退職者フラグ（名簿PLUS同期）
     birth_date = db.Column(db.Date, nullable=True)                       # 生年月日（名簿同期・NASVA判定用）
 
     # 受診系
@@ -1615,6 +1618,14 @@ class HealthCheckRecord(db.Model):
     nasva_exam_date = db.Column(db.Date, nullable=True)                     # NASVA受診日
 
     remarks = db.Column(db.Text, nullable=True)                             # ⑲ 備考
+
+    # 区分フラグ
+    is_exempt = db.Column(db.Boolean, nullable=False, default=False)        # 受診非対象者（ヒーローの各カウント対象外）
+    is_kintone = db.Column(db.Boolean, nullable=False, default=False)       # kintone（レコード単位の任意フラグ）
+
+    # 通知の追加宛先（レコード個別。username のJSON配列）。
+    # 既定の宛先（管理担当者＋営業所の健康診断担当）に上乗せして通知する。
+    extra_notify_users = db.Column(db.Text, nullable=True)
 
     # リマインド設定（個別上書き。Noneのときは全体既定を使う）
     reminder_lead_days = db.Column(db.Integer, nullable=True)
@@ -1677,6 +1688,61 @@ class HealthCheckRecord(db.Model):
             return '2回目予定'
         return '2回目未設定'
 
+    def recheck_items_list(self) -> list[dict]:
+        """再検査項目を [{name, value}] のリストで返す。
+        旧仕様のプレーンテキストは1項目（name=本文）として後方互換で扱う。"""
+        raw = self.recheck_items
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            text = str(raw).strip()
+            return [{'name': text, 'value': ''}] if text else []
+        if not isinstance(data, list):
+            return []
+        result: list[dict] = []
+        for item in data:
+            if isinstance(item, dict):
+                name = str(item.get('name', '')).strip()
+                value = str(item.get('value', '')).strip()
+                if name or value:
+                    result.append({'name': name, 'value': value})
+            elif isinstance(item, str):
+                s = item.strip()
+                if s:
+                    result.append({'name': s, 'value': ''})
+        return result
+
+    def recheck_items_text(self) -> str:
+        """再検査項目を1行表記（CSV等の表示用）に整形する。"""
+        parts = []
+        for item in self.recheck_items_list():
+            name, value = item['name'], item['value']
+            if name and value:
+                parts.append(f'{name}：{value}')
+            else:
+                parts.append(name or value)
+        return ' / '.join(p for p in parts if p)
+
+    def extra_notify_users_list(self) -> list[str]:
+        """レコード個別の追加通知先（username）のリスト。"""
+        raw = self.extra_notify_users
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+        if not isinstance(data, list):
+            return []
+        result: list[str] = []
+        for item in data:
+            u = str(item).strip()
+            if u and u not in result:
+                result.append(u)
+        return result
+
     def to_dict(self) -> dict:
         def _d(value):
             return value.isoformat() if value else None
@@ -1695,6 +1761,7 @@ class HealthCheckRecord(db.Model):
             'manager_user': self.manager_user or '',
             'hire_date': _d(self.hire_date),
             'retirement_date': self.retirement_date or '',
+            'is_retired': bool(self.is_retired),
             'birth_date': _d(self.birth_date),
             'reservation_date': _d(self.reservation_date),
             'exam_date': _d(self.exam_date),
@@ -1704,6 +1771,7 @@ class HealthCheckRecord(db.Model):
             'is_night_worker': bool(self.is_night_worker),
             'needs_recheck': bool(self.needs_recheck),
             'recheck_items': self.recheck_items or '',
+            'recheck_items_list': self.recheck_items_list(),
             'secondary_recommended_date': _d(self.secondary_recommended_date),
             'secondary_exam_date': _d(self.secondary_exam_date),
             'secondary_guide_sent_date': _d(self.secondary_guide_sent_date),
@@ -1711,6 +1779,9 @@ class HealthCheckRecord(db.Model):
             'nasva_reservation_date': _d(self.nasva_reservation_date),
             'nasva_exam_date': _d(self.nasva_exam_date),
             'remarks': self.remarks or '',
+            'is_exempt': bool(self.is_exempt),
+            'is_kintone': bool(self.is_kintone),
+            'extra_notify_users': self.extra_notify_users_list(),
             'reminder_lead_days': self.reminder_lead_days,
             'status': self.compute_status(),
             'night_second_status': self.night_second_status(),
