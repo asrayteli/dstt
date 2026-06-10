@@ -869,3 +869,105 @@ def test_extra_notify_user_receives_reminder(tmp_path):
         active = ToBellTask.query.filter_by(
             source_tool="health_check", source_ref_type="secondary_exam", status="todo").all()
         assert {t.assigned_to for t in active} == {"m001"}
+
+
+def _setup_two_offices(app):
+    """営業所100/200 と DSTTアクセス権(AccessOffice)を用意し、社員を1名ずつ登録する。"""
+    with app.app_context():
+        db.session.add(Office(office_code="100", office_name="本社", created_by="seed"))
+        db.session.add(Office(office_code="200", office_name="第二", created_by="seed"))
+        branch = AccessBranch(name="支店", code="B1")
+        db.session.add(branch)
+        db.session.flush()
+        off100 = AccessOffice(branch_id=branch.id, name="本社", code="100")
+        off200 = AccessOffice(branch_id=branch.id, name="第二", code="200")
+        db.session.add_all([off100, off200])
+        db.session.flush()
+        db.session.add(Employee(employee_number="E1", office_code="100", office_name="本社",
+                                employee_name="社員100", company_name="大新東"))
+        db.session.add(Employee(employee_number="E2", office_code="200", office_name="第二",
+                                employee_name="社員200", company_name="大新東"))
+        u1 = User(username="u1", password_hash="x", name="一般太郎", office_id=off100.id)
+        db.session.add(u1)
+        db.session.commit()
+        return u1.id, off100.id
+
+
+def _as_user(module, *, username, uid, office_id, admin=False):
+    module._is_dstt_admin = lambda *a, **k: admin
+    module.current_user = SimpleNamespace(
+        is_authenticated=True, username=username, name=username,
+        id=uid, office_id=office_id, branch_id=None, department_id=None, is_admin=admin,
+    )
+
+
+def test_office_scope_synced_with_dstt_access(tmp_path):
+    """非管理者は DSTT で付与された営業所のレコードのみ閲覧・作成でき、他営業所は403。"""
+    module, app = _build(tmp_path, admin=False)
+    uid, off100_id = _setup_two_offices(app)
+    _as_user(module, username="u1", uid=uid, office_id=off100_id, admin=False)
+    client = app.test_client()
+
+    # 自分の営業所(100)の社員はレコード作成可
+    r100 = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E1"})
+    assert r100.status_code == 200
+    # 他営業所(200)の社員は作成不可（403）
+    r200 = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E2"})
+    assert r200.status_code == 403
+
+    listing = client.get("/tools/health_check/api/records?year=2026").get_json()
+    assert {x["office_code"] for x in listing["records"]} == {"100"}
+
+
+def test_health_admin_scoped_to_own_office(tmp_path):
+    """健診PLUS管理者は『自分の営業所』のみ管理でき、他営業所にはアクセスできない。"""
+    module, app = _build(tmp_path, admin=False)
+    uid, off100_id = _setup_two_offices(app)
+    _as_user(module, username="u1", uid=uid, office_id=off100_id, admin=False)
+    # u1 を健診PLUS管理者に指定
+    module.save_permissions({"admins": ["u1"]})
+    client = app.test_client()
+
+    # 健康診断担当の管理画面は自分の営業所(100)のみ
+    officers = client.get("/tools/health_check/api/admin/health_officers").get_json()
+    assert {o["code"] for o in officers["offices"]} == {"100"}
+
+    # 自営業所(100)の健康診断担当は設定できる
+    ok = client.post("/tools/health_check/api/admin/health_officers",
+                     json={"office_code": "100", "users": ["u1"]})
+    assert ok.status_code == 200
+    # 他営業所(200)の健康診断担当は設定できない（403）
+    ng = client.post("/tools/health_check/api/admin/health_officers",
+                     json={"office_code": "200", "users": ["u1"]})
+    assert ng.status_code == 403
+
+    # 健診PLUS管理者でも他営業所(200)のレコードにはアクセスできない
+    bad = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E2"})
+    assert bad.status_code == 403
+
+    # 健診PLUS管理者の管理（指定/解除）はDSTT管理者のみ → u1は不可
+    assert client.get("/tools/health_check/api/admin/permissions").status_code == 403
+    assert client.post("/tools/health_check/api/admin/grant", json={"user_id": "x"}).status_code == 403
+
+
+def test_dstt_admin_full_access_all_offices(tmp_path):
+    """DSTT管理者は全営業所を閲覧・編集でき、管理者指定もできる。"""
+    module, app = _build(tmp_path, admin=True)
+    _setup_two_offices(app)
+    client = app.test_client()
+    client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100", "200"]})
+    listing = client.get("/tools/health_check/api/records?year=2026").get_json()
+    assert {x["office_code"] for x in listing["records"]} == {"100", "200"}
+
+    # 全営業所の健康診断担当を管理できる
+    officers = client.get("/tools/health_check/api/admin/health_officers").get_json()
+    assert {o["code"] for o in officers["offices"]} == {"100", "200"}
+
+    # 健診PLUS管理者の指定はDSTT管理者のみ可能
+    g = client.post("/tools/health_check/api/admin/grant", json={"user_id": "u1"})
+    assert g.status_code == 200
+    perms = client.get("/tools/health_check/api/admin/permissions").get_json()
+    assert any(u["user_id"] == "u1" for u in perms["users"])
