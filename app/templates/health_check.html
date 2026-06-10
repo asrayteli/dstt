@@ -41,7 +41,12 @@
         </div>
         <div class="dstt-hero-card">
           <div class="dstt-hero-card-label">参照中の営業所</div>
-          <div class="dstt-hero-card-value text-lg leading-tight" id="hero-office">—</div>
+          <button type="button"
+                  class="dstt-hero-card-value w-full text-lg leading-tight text-left hover:underline focus:outline-none focus:ring-2 focus:ring-white/70 rounded-md"
+                  id="hero-office-button"
+                  onclick="HC.openOfficeScopeModal()">
+            <span id="hero-office">—</span>
+          </button>
           <div class="dstt-hero-card-note" id="hero-office-note">閲覧・作成・編集できる営業所のみ表示します</div>
         </div>
       </div>
@@ -220,6 +225,23 @@
       <span id="carry-error" class="text-sm text-red-600 mr-auto"></span>
       <button class="hc-btn-ghost" onclick="HC.closeCarryoverModal()">キャンセル</button>
       <button class="hc-btn-primary" onclick="HC.runCarryover()">複製する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== モーダル: 参照営業所の切り替え ===== -->
+<div id="office-scope-modal" class="hc-modal hidden" style="z-index:55;">
+  <div class="hc-modal-backdrop" onclick="HC.closeOfficeScopeModal()"></div>
+  <div class="hc-modal-panel max-w-lg">
+    <div class="hc-modal-head">
+      <h2 class="text-lg font-bold text-gray-800">参照営業所を選択</h2>
+      <button onclick="HC.closeOfficeScopeModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+    </div>
+    <div class="hc-modal-body space-y-3">
+      <div id="office-scope-options" class="space-y-2"></div>
+    </div>
+    <div class="hc-modal-foot">
+      <button class="hc-btn-ghost" onclick="HC.closeOfficeScopeModal()">閉じる</button>
     </div>
   </div>
 </div>
@@ -523,11 +545,15 @@ const HC = (function(){
 
   function updateHeroOffice(){
     const el = document.getElementById('hero-office');
+    const button = document.getElementById('hero-office-button');
     const note = document.getElementById('hero-office-note');
     if(!el) return;
     if(state.office){
       el.textContent = officeName(state.office);
       if(note) note.textContent = `営業所コード ${state.office}`;
+    } else if(offices.length === 0){
+      el.textContent = '営業所未付与';
+      if(note) note.textContent = '閲覧できる営業所がありません';
     } else if(offices.length === 1){
       el.textContent = officeName(offices[0].code);
       if(note) note.textContent = `営業所コード ${offices[0].code}`;
@@ -535,6 +561,50 @@ const HC = (function(){
       el.textContent = 'すべての営業所';
       if(note) note.textContent = `閲覧できる ${offices.length} 営業所を表示中`;
     }
+    if(button){
+      const canSwitch = offices.length > 1;
+      button.disabled = !canSwitch;
+      button.classList.toggle('cursor-pointer', canSwitch);
+      button.classList.toggle('opacity-75', !canSwitch);
+      button.title = canSwitch ? '参照営業所を切り替え' : '';
+    }
+  }
+
+  function openOfficeScopeModal(){
+    if(offices.length <= 1) return;
+    renderOfficeScopeOptions();
+    show('office-scope-modal');
+  }
+
+  function closeOfficeScopeModal(){ hide('office-scope-modal'); }
+
+  function renderOfficeScopeOptions(){
+    const box = document.getElementById('office-scope-options');
+    if(!box) return;
+    const allChecked = state.office === '';
+    const allRow = `<button type="button" class="w-full text-left p-3 border rounded-lg ${allChecked?'border-teal-500 bg-teal-50':'border-gray-100 hover:bg-gray-50'}"
+        onclick="HC.selectOfficeScope('')">
+        <span class="font-medium text-gray-800">すべての営業所</span>
+        <span class="ml-2 text-xs text-gray-400">${offices.length} 営業所</span>
+      </button>`;
+    const rows = offices.map(o=>{
+      const checked = state.office === o.code;
+      return `<button type="button" class="w-full text-left p-3 border rounded-lg ${checked?'border-teal-500 bg-teal-50':'border-gray-100 hover:bg-gray-50'}"
+          onclick="HC.selectOfficeScope('${esc(o.code)}')">
+          <span class="font-medium text-gray-800">${esc(o.name)}</span>
+          <span class="ml-2 text-xs text-gray-400 font-mono">${esc(o.code)}</span>
+        </button>`;
+    }).join('');
+    box.innerHTML = allRow + rows;
+  }
+
+  function selectOfficeScope(code){
+    state.office = code || '';
+    const filter = document.getElementById('filter-office');
+    if(filter) filter.value = state.office;
+    updateHeroOffice();
+    closeOfficeScopeModal();
+    refresh();
   }
 
   async function loadYears(){
@@ -1609,6 +1679,7 @@ const HC = (function(){
     addExtraNotify, removeExtraNotify,
     openBulkModal, closeBulkModal, runBulkCreate,
     openCarryoverModal, closeCarryoverModal, runCarryover,
+    openOfficeScopeModal, closeOfficeScopeModal, selectOfficeScope,
     resolveManagers, exportCsv,
     openColumnsModal, closeColumnsModal, selectAllColumns, resetColumns, applyColumns,
     openSettingsModal, closeSettingsModal, switchSettingsTab, saveCurrentSettings,

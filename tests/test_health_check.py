@@ -19,6 +19,7 @@ from app.models import (
     AccessBranch,
     AccessOffice,
     AccessDepartment,
+    UserAccessibleOffice,
     HealthCheckRecord,
     ToBellTask,
     ToBellUserSettings,
@@ -899,6 +900,68 @@ def _as_user(module, *, username, uid, office_id, admin=False):
         is_authenticated=True, username=username, name=username,
         id=uid, office_id=office_id, branch_id=None, department_id=None, is_admin=admin,
     )
+
+
+def test_access_office_without_records_is_available_for_manual_create(tmp_path):
+    module, app = _build(tmp_path, admin=False)
+    with app.app_context():
+        branch = AccessBranch(name="Branch", code="B300")
+        db.session.add(branch)
+        db.session.flush()
+        office = AccessOffice(branch_id=branch.id, name="Empty Office", code="300")
+        db.session.add(office)
+        db.session.flush()
+        user = User(username="empty-user", password_hash="x", name="Empty User", office_id=office.id)
+        db.session.add(user)
+        db.session.commit()
+        uid = user.id
+        office_id = office.id
+
+    _as_user(module, username="empty-user", uid=uid, office_id=office_id, admin=False)
+    client = app.test_client()
+
+    page = client.get("/tools/health_check/")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert '"code": "300"' in html
+    assert "Empty Office" in html
+
+    dashboard = client.get("/tools/health_check/api/dashboard?year=2026")
+    assert dashboard.status_code == 200
+    assert dashboard.get_json()["total"] == 0
+    listing = client.get("/tools/health_check/api/records?year=2026")
+    assert listing.status_code == 200
+    assert listing.get_json()["count"] == 0
+
+    created = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026,
+        "record_type": "pre_hire",
+        "employee_name": "Pre Hire",
+        "office_code": "300",
+    })
+    assert created.status_code == 200
+    assert created.get_json()["record"]["office_code"] == "300"
+
+
+def test_multiple_access_offices_render_hero_scope_switcher(tmp_path):
+    module, app = _build(tmp_path, admin=False)
+    uid, off100_id = _setup_two_offices(app)
+    with app.app_context():
+        off200_id = AccessOffice.query.filter_by(code="200").first().id
+        db.session.add(UserAccessibleOffice(user_id=uid, office_id=off200_id))
+        db.session.commit()
+
+    _as_user(module, username="u1", uid=uid, office_id=off100_id, admin=False)
+    client = app.test_client()
+
+    page = client.get("/tools/health_check/")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert 'id="hero-office-button"' in html
+    assert 'id="office-scope-modal"' in html
+    assert "openOfficeScopeModal" in html
+    assert '"code": "100"' in html
+    assert '"code": "200"' in html
 
 
 def test_office_scope_synced_with_dstt_access(tmp_path):

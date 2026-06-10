@@ -299,7 +299,7 @@ def get_user_offices(user_id: str) -> list[str]:
     （健診PLUS独自の付与は廃止し、DSTTのアクセス権と同期）。
     """
     if _is_dstt_admin():
-        return [o.office_code for o in Office.query.order_by(Office.office_code).all()]
+        return [o["code"] for o in _office_options()]
     user = _resolve_user(user_id)
     if user is None:
         return []
@@ -307,6 +307,34 @@ def get_user_offices(user_id: str) -> list[str]:
         return sorted({c for c in _dstt_user_office_codes(user) if c})
     except Exception:
         return []
+
+
+def _office_options(codes: list[str] | set[str] | None = None) -> list[dict[str, str]]:
+    """Return office choices from DSTT access offices, with PlusList names as fallback/override."""
+    wanted = {str(c).strip() for c in (codes or []) if str(c).strip()} if codes is not None else None
+    by_code: dict[str, dict[str, str]] = {}
+
+    access_query = AccessOffice.query.filter(AccessOffice.code.isnot(None))
+    if wanted is not None:
+        if not wanted:
+            return []
+        access_query = access_query.filter(AccessOffice.code.in_(wanted))
+    for office in access_query.order_by(AccessOffice.code, AccessOffice.name).all():
+        code = (office.code or "").strip()
+        if not code:
+            continue
+        by_code[code] = {"code": code, "name": office.name or code}
+
+    plus_query = Office.query
+    if wanted is not None:
+        plus_query = plus_query.filter(Office.office_code.in_(wanted))
+    for office in plus_query.order_by(Office.office_code).all():
+        code = (office.office_code or "").strip()
+        if not code:
+            continue
+        by_code[code] = {"code": code, "name": office.office_name or by_code.get(code, {}).get("name") or code}
+
+    return [by_code[code] for code in sorted(by_code)]
 
 
 def has_office_access(user_id: str, office_code: str | None) -> bool:
@@ -443,10 +471,8 @@ def _allowed_attachment(filename: str) -> bool:
 def index():
     ensure_data_directories()
     user_id = str(current_user.username)
-    offices = [{"code": o.office_code, "name": o.office_name}
-               for o in Office.query.order_by(Office.office_code).all()]
     user_offices = set(get_user_offices(user_id))
-    accessible_offices = [o for o in offices if is_dstt_admin() or o["code"] in user_offices]
+    accessible_offices = _office_options(None if is_dstt_admin() else user_offices)
     return render_template(
         "health_check.html",
         user_id=user_id,
@@ -1448,13 +1474,13 @@ def api_admin_health_officers():
 
     # 自分が管理できる営業所のみ返す（DSTT管理者は全営業所）
     result = []
-    for o in Office.query.order_by(Office.office_code).all():
-        if not can_admin_office(user_id, o.office_code):
+    for o in _office_options():
+        if not can_admin_office(user_id, o["code"]):
             continue
         result.append({
-            "code": o.office_code,
-            "name": o.office_name,
+            "code": o["code"],
+            "name": o["name"],
             "officers": [{"username": u, "name": _officer_user_label(u)}
-                         for u in get_office_health_officers(o.office_code)],
+                         for u in get_office_health_officers(o["code"])],
         })
     return jsonify({"offices": result})
