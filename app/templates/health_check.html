@@ -296,6 +296,23 @@
   </div>
 </div>
 
+<!-- ===== 添付ファイルプレビュー（ビューワ） ===== -->
+<div id="hc-viewer" class="hc-viewer hidden" role="dialog" aria-modal="true" aria-labelledby="hc-viewer-title">
+  <div class="hc-viewer-head">
+    <strong class="hc-viewer-title" id="hc-viewer-title">プレビュー</strong>
+    <div class="hc-viewer-actions">
+      <button type="button" class="hc-viewer-btn" onclick="HC.viewerZoom(-1)" aria-label="縮小">−</button>
+      <button type="button" class="hc-viewer-btn" id="hc-viewer-pct" onclick="HC.viewerZoom(0)">100%</button>
+      <button type="button" class="hc-viewer-btn" onclick="HC.viewerZoom(1)" aria-label="拡大">＋</button>
+      <a class="hc-viewer-btn hc-viewer-dl" id="hc-viewer-download" download>ダウンロード</a>
+      <button type="button" class="hc-viewer-btn hc-viewer-close" onclick="HC.closeViewer()" aria-label="閉じる">×</button>
+    </div>
+  </div>
+  <div class="hc-viewer-body">
+    <div class="hc-viewer-stage" id="hc-viewer-stage"></div>
+  </div>
+</div>
+
 <!-- トースト -->
 <div id="hc-toast" class="fixed bottom-6 right-6 z-[60] space-y-2"></div>
 
@@ -325,6 +342,22 @@
   .hc-dropzone.is-dragover{border-color:#0f766e;background:#ccfbf1;color:#0f766e;border-style:solid;}
   .hc-dropzone-icon{font-size:1.6rem;line-height:1;}
   .hc-dropzone-text{font-size:.8rem;line-height:1.35;}
+  /* 添付プレビュー（ToBellのビューワを参考） */
+  .hc-viewer{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;background:rgba(15,23,42,.94);}
+  .hc-viewer.hidden{display:none;}
+  .hc-viewer-head{display:flex;align-items:center;gap:.75rem;padding:.6rem .85rem;background:#0f172a;color:#fff;border-bottom:1px solid #1e293b;}
+  .hc-viewer-title{flex:1 1 auto;min-width:0;font-size:.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .hc-viewer-actions{display:flex;gap:.4rem;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end;}
+  .hc-viewer-btn{min-height:38px;padding:.4rem .75rem;background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:.5rem;font-size:.82rem;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;}
+  .hc-viewer-btn:hover{background:#334155;}
+  #hc-viewer-pct{min-width:64px;justify-content:center;font-variant-numeric:tabular-nums;}
+  .hc-viewer-close{background:#b91c1c;border-color:#b91c1c;color:#fff;font-size:1.15rem;font-weight:800;min-width:44px;line-height:1;justify-content:center;}
+  .hc-viewer-close:hover{background:#991b1b;}
+  .hc-viewer-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;background:#0f172a;overscroll-behavior:contain;}
+  .hc-viewer-stage{display:flex;justify-content:center;align-items:flex-start;min-height:100%;padding:1rem;transform-origin:center top;transition:transform .15s ease;}
+  .hc-viewer-stage img{max-width:100%;height:auto;background:#fff;border-radius:6px;box-shadow:0 10px 30px rgba(0,0,0,.4);user-select:none;-webkit-user-drag:none;}
+  .hc-viewer-stage iframe{width:min(960px,100%);height:80vh;border:0;background:#fff;border-radius:6px;box-shadow:0 10px 30px rgba(0,0,0,.4);}
+  .hc-attach-preview{color:#0f766e;}
 </style>
 
 <script>
@@ -540,6 +573,10 @@ const HC = (function(){
       loadRecords();
     });
     document.getElementById('integration-toggle').addEventListener('change', syncNotifyKindsEnabled);
+    // プレビューは Esc で閉じる
+    document.addEventListener('keydown', e=>{
+      if(e.key==='Escape' && !document.getElementById('hc-viewer').classList.contains('hidden')) closeViewer();
+    });
   }
 
   function refresh(){ loadRecords(); loadDashboard(); }
@@ -1244,17 +1281,74 @@ const HC = (function(){
     box.innerHTML = list.map(a=>{
       const label = a.title ? esc(a.title) : esc(a.original_name);
       const sub = a.title ? `<span class="block text-xs text-gray-400 truncate">${esc(a.original_name)}</span>` : '';
+      const href = `/tools/health_check/api/record/${editingId}/attachment/${a.id}`;
+      const viewable = !!attViewerKind(a);
+      // 画像/PDFはクリックでプレビュー、それ以外はダウンロード
+      const nameAttr = viewable ? `onclick="HC.previewAttachment(event, ${a.id})"` : '';
+      const previewBtn = viewable
+        ? `<button class="hc-attach-preview hover:underline text-xs" onclick="HC.previewAttachment(event, ${a.id})">🔍 プレビュー</button>`
+        : '';
       return `<div class="flex items-center justify-between gap-2 text-sm bg-gray-50 rounded-lg px-3 py-1.5">
       <div class="min-w-0">
-        <a href="/tools/health_check/api/record/${editingId}/attachment/${a.id}" class="text-teal-700 hover:underline truncate block">${label}</a>
+        <a href="${href}" ${nameAttr} class="text-teal-700 hover:underline truncate block">${label}</a>
         ${sub}
       </div>
       <div class="flex items-center gap-2 shrink-0">
+        ${previewBtn}
         <button class="text-gray-500 hover:text-teal-700 text-xs" onclick="HC.renameAttachment(${a.id})">名称変更</button>
         <button class="text-red-500 hover:text-red-700 text-xs" onclick="HC.deleteAttachment(${a.id})">削除</button>
       </div>
     </div>`;
     }).join('');
+  }
+
+  // ---- 添付プレビュー（ToBellのビューワを参考） ----
+  let viewerScale = 1;
+  function attViewerKind(a){
+    const mime = (a.content_type||'').toLowerCase();
+    if(mime.startsWith('image/')) return 'image';
+    if(mime==='application/pdf') return 'pdf';
+    const name = (a.original_name||'').toLowerCase();
+    if(/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(name)) return 'image';
+    if(/\.pdf$/.test(name)) return 'pdf';
+    return null;
+  }
+  function previewAttachment(event, aid){
+    if(event){ event.preventDefault(); }
+    const a = (lastAttachments||[]).find(x=>x.id===aid);
+    if(a) openAttachmentViewer(a);
+  }
+  function openAttachmentViewer(a){
+    const href = `/tools/health_check/api/record/${editingId}/attachment/${a.id}`;
+    const kind = attViewerKind(a);
+    if(!kind){ window.open(href, '_blank', 'noopener'); return; }
+    viewerScale = 1;
+    document.getElementById('hc-viewer-title').textContent = a.title ? `${a.title}（${a.original_name}）` : (a.original_name || 'プレビュー');
+    const dl = document.getElementById('hc-viewer-download');
+    dl.href = href; dl.setAttribute('download', a.original_name||'');
+    const stage = document.getElementById('hc-viewer-stage');
+    if(kind === 'image'){
+      stage.innerHTML = `<img alt="${esc(a.original_name||'')}">`;
+      stage.querySelector('img').src = href + '?inline=1';
+    } else {
+      // PDF: ブラウザ内蔵ビューワ。#view=FitH で横幅にフィット
+      stage.innerHTML = `<iframe title="${esc(a.original_name||'')}"></iframe>`;
+      stage.querySelector('iframe').src = href + '?inline=1#view=FitH';
+    }
+    applyViewerScale();
+    show('hc-viewer');
+  }
+  function closeViewer(){ hide('hc-viewer'); const s=document.getElementById('hc-viewer-stage'); if(s) s.innerHTML=''; }
+  function viewerZoom(delta){
+    if(delta === 0) viewerScale = 1;
+    else viewerScale = Math.max(0.5, Math.min(3, viewerScale + delta*0.25));
+    applyViewerScale();
+  }
+  function applyViewerScale(){
+    const stage = document.getElementById('hc-viewer-stage');
+    if(stage) stage.style.transform = `scale(${viewerScale})`;
+    const pct = document.getElementById('hc-viewer-pct');
+    if(pct) pct.textContent = `${Math.round(viewerScale*100)}%`;
   }
   // タイトル選択：「その他（手動入力）」で手動入力欄を表示
   function onAttachTitleChange(){
@@ -1526,6 +1620,7 @@ const HC = (function(){
     init, openRecordModal, closeRecordModal, saveRecord, deleteRecord,
     changeNewType, selectEmployee, selectSite, uploadAttachment, deleteAttachment,
     onAttachTitleChange, renameAttachment,
+    previewAttachment, closeViewer, viewerZoom,
     openRecheckModal, closeRecheckModal, addRecheckItem, removeRecheckItem, onRecheckInput, applyRecheckModal,
     addExtraNotify, removeExtraNotify,
     openBulkModal, closeBulkModal, runBulkCreate,
