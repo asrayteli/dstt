@@ -77,7 +77,7 @@ DATE_FIELDS = {
     "nasva_reservation_date",
     "nasva_exam_date",
 }
-BOOL_FIELDS = {"is_night_worker", "needs_recheck"}
+BOOL_FIELDS = {"is_night_worker", "needs_recheck", "is_exempt", "is_kintone", "is_retired"}
 TEXT_FIELDS = {
     "employee_number",
     "employee_name",
@@ -86,7 +86,6 @@ TEXT_FIELDS = {
     "manager_name",
     "retirement_date",
     "medical_institution",
-    "recheck_items",
     "secondary_result",
     "remarks",
 }
@@ -98,6 +97,7 @@ SYNCED_FIELDS = {
     "assignment_site",
     "manager_name",
     "retirement_date",
+    "is_retired",
     "hire_date",
     "birth_date",
 }
@@ -125,6 +125,79 @@ def _clean_attachment_title(raw) -> str:
     if len(title) > ATTACHMENT_TITLE_MAX:
         title = title[:ATTACHMENT_TITLE_MAX]
     return title
+
+
+RECHECK_ITEM_NAME_MAX = 120
+RECHECK_ITEM_VALUE_MAX = 500
+MAX_RECHECK_ITEMS = 50
+MAX_EXTRA_NOTIFY_USERS = 20
+
+
+def _serialize_recheck_items(raw) -> str | None:
+    """再検査項目の入力（[{name, value}] のリスト または プレーンテキスト）を
+    JSON文字列に正規化する。空なら None。"""
+    items: list[dict] = []
+    if isinstance(raw, list):
+        for entry in raw[:MAX_RECHECK_ITEMS]:
+            if isinstance(entry, dict):
+                name = str(entry.get("name", "")).strip()[:RECHECK_ITEM_NAME_MAX]
+                value = str(entry.get("value", "")).strip()[:RECHECK_ITEM_VALUE_MAX]
+            else:
+                name, value = str(entry).strip()[:RECHECK_ITEM_NAME_MAX], ""
+            if name or value:
+                items.append({"name": name, "value": value})
+    elif raw not in (None, ""):
+        # 旧仕様のプレーンテキストは1項目として保持
+        text = str(raw).strip()
+        if text:
+            items.append({"name": text[:RECHECK_ITEM_NAME_MAX], "value": ""})
+    if not items:
+        return None
+    return json.dumps(items, ensure_ascii=False)
+
+
+def _serialize_extra_notify_users(raw) -> str | None:
+    """追加通知先（username配列）を、実在ユーザーに限定してJSON文字列へ正規化する。"""
+    if not isinstance(raw, list):
+        return None
+    usernames: list[str] = []
+    for entry in raw:
+        u = str(entry).strip()
+        if u and u not in usernames:
+            usernames.append(u)
+    if not usernames:
+        return None
+    usernames = usernames[:MAX_EXTRA_NOTIFY_USERS]
+    valid = {
+        u.username
+        for u in User.query.filter(User.username.in_(usernames)).all()
+    }
+    filtered = [u for u in usernames if u in valid]
+    return json.dumps(filtered, ensure_ascii=False) if filtered else None
+
+
+def get_office_health_officers(office_code: str | None) -> list[str]:
+    """営業所の「健康診断担当」（username）一覧。設定（settings.json）から読む。
+    ToBellフックからも参照されるためモジュール関数として提供する。"""
+    code = (office_code or "").strip()
+    if not code:
+        return []
+    try:
+        with open(os.path.join(get_data_path(), "settings.json"), "r", encoding="utf-8") as f:
+            officers = json.load(f).get("health_officers")
+    except Exception:
+        return []
+    if not isinstance(officers, dict):
+        return []
+    value = officers.get(code)
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for u in value:
+        u = str(u).strip()
+        if u and u not in result:
+            result.append(u)
+    return result
 
 
 # ============================================================
@@ -288,6 +361,7 @@ def sync_from_employee(record: HealthCheckRecord, employee: Employee, *, resolve
     record.manager_name = employee.manager_name
     record.hire_date = employee.hire_date
     record.retirement_date = employee.retirement_date
+    record.is_retired = bool(employee.is_retired)
     record.birth_date = employee.birth_date
     # 担当者は未解決のときのみ自動解決（手動上書きを尊重）
     if resolve_manager and not record.manager_user and employee.manager_name:
@@ -376,6 +450,10 @@ def _scoped_query(user_id: str):
     if record_type in ("linked", "pre_hire", "internal"):
         query = query.filter(HealthCheckRecord.record_type == record_type)
 
+    # 退職者は既定で非表示（オプションで表示）
+    if request.args.get("include_retired") != "true":
+        query = query.filter(HealthCheckRecord.is_retired.is_(False))
+
     if request.args.get("night_only") == "true":
         query = query.filter(HealthCheckRecord.is_night_worker.is_(True))
     if request.args.get("recheck_only") == "true":
@@ -462,12 +540,27 @@ def _apply_payload(record: HealthCheckRecord, payload: dict, user_id: str) -> No
             record_history(record, user_id, "update", field, old_value, new_value)
             setattr(record, field, new_value)
     for field in BOOL_FIELDS:
-        if field in payload:
-            new_value = bool(payload.get(field))
-            old_value = bool(getattr(record, field))
-            if old_value != new_value:
-                record_history(record, user_id, "update", field, old_value, new_value)
-                setattr(record, field, new_value)
+        if field in skip or field not in payload:
+            continue
+        new_value = bool(payload.get(field))
+        old_value = bool(getattr(record, field))
+        if old_value != new_value:
+            record_history(record, user_id, "update", field, old_value, new_value)
+            setattr(record, field, new_value)
+    # 再検査項目（[{name, value}] のJSON。旧プレーンテキストとも互換）
+    if "recheck_items" in payload and "recheck_items" not in skip:
+        new_value = _serialize_recheck_items(payload.get("recheck_items"))
+        old_value = record.recheck_items
+        if (old_value or None) != (new_value or None):
+            record_history(record, user_id, "update", "recheck_items", old_value, new_value)
+            record.recheck_items = new_value
+    # 通知の追加宛先（レコード個別。usernameのJSON配列）
+    if "extra_notify_users" in payload and "extra_notify_users" not in skip:
+        new_value = _serialize_extra_notify_users(payload.get("extra_notify_users"))
+        old_value = record.extra_notify_users
+        if (old_value or None) != (new_value or None):
+            record_history(record, user_id, "update", "extra_notify_users", old_value, new_value)
+            record.extra_notify_users = new_value
     if "reminder_lead_days" in payload:
         raw = payload.get("reminder_lead_days")
         new_value = None
@@ -720,7 +813,11 @@ def api_carryover():
             manager_user=source.manager_user,
             hire_date=source.hire_date,
             retirement_date=source.retirement_date,
+            is_retired=source.is_retired,
             is_night_worker=source.is_night_worker,
+            is_exempt=source.is_exempt,
+            is_kintone=source.is_kintone,
+            extra_notify_users=source.extra_notify_users,
             reminder_lead_days=source.reminder_lead_days,
             created_by=user_id,
             updated_by=user_id,
@@ -985,7 +1082,10 @@ def api_dashboard():
     query, error = _scoped_query(user_id)
     if error:
         return error
-    records = query.all()
+    all_records = query.all()
+    # 受診非対象者はヒーローエリアの各カウント対象外
+    records = [r for r in all_records if not r.is_exempt]
+    exempt = len(all_records) - len(records)
     status_counts: dict[str, int] = {}
     night_pending = 0
     unassigned = 0
@@ -1008,6 +1108,7 @@ def api_dashboard():
         "recheck_pending": status_counts.get("再検査対象", 0) + status_counts.get("二次案内済", 0),
         "night_pending": night_pending,
         "unassigned": unassigned,
+        "exempt": exempt,
     })
 
 
@@ -1055,6 +1156,7 @@ _EXPORT_COLUMNS = [
     ("manager_name", "管理担当名"),
     ("hire_date", "入社日付"),
     ("retirement_date", "退職日付"),
+    ("is_retired", "退職者"),
     ("reservation_date", "予約日"),
     ("exam_date", "受診日"),
     ("exam_date_2", "受診日②(深夜2回目)"),
@@ -1069,9 +1171,12 @@ _EXPORT_COLUMNS = [
     ("birth_date", "生年月日"),
     ("nasva_reservation_date", "NASVA予約日"),
     ("nasva_exam_date", "NASVA受診日"),
+    ("is_exempt", "受診非対象"),
+    ("is_kintone", "kintone"),
     ("status", "受診ステータス"),
     ("remarks", "備考"),
 ]
+_EXPORT_BOOL_KEYS = {"is_night_worker", "needs_recheck", "is_retired", "is_exempt", "is_kintone"}
 _RECORD_TYPE_LABEL = {"linked": "名簿連携", "pre_hire": "入社前", "internal": "内勤者"}
 
 
@@ -1097,8 +1202,10 @@ def api_export():
         for key, _ in _EXPORT_COLUMNS:
             if key == "record_type":
                 row.append(_RECORD_TYPE_LABEL.get(record.record_type, record.record_type))
-            elif key in ("is_night_worker", "needs_recheck"):
+            elif key in _EXPORT_BOOL_KEYS:
                 row.append("○" if data.get(key) else "")
+            elif key == "recheck_items":
+                row.append(record.recheck_items_text())
             else:
                 row.append(data.get(key) if data.get(key) is not None else "")
         writer.writerow(row)
@@ -1230,3 +1337,85 @@ def api_admin_revoke():
                 del offices[target]
     save_permissions(permissions)
     return jsonify({"success": True})
+
+
+# ============================================================
+# 健康診断担当（営業所ごとの既定通知先）
+# ============================================================
+
+def _officer_user_label(username: str) -> str:
+    user = User.query.filter_by(username=username).first()
+    return (user.name if user and user.name else username)
+
+
+@health_check_bp.route("/api/office_officers")
+@login_required
+def api_office_officers():
+    """営業所の健康診断担当（既定の通知先）を返す。レコード編集の宛先表示に使う。"""
+    user_id = str(current_user.username)
+    office = request.args.get("office", "").strip()
+    if office and not has_office_access(user_id, office):
+        return jsonify({"officers": []})
+    officers = get_office_health_officers(office)
+    return jsonify({"officers": [
+        {"username": u, "name": _officer_user_label(u)} for u in officers
+    ]})
+
+
+@health_check_bp.route("/api/admin/health_officers", methods=["GET", "POST"])
+@login_required
+def api_admin_health_officers():
+    """営業所ごとの健康診断担当の取得・設定（健診PLUS管理者のみ）。"""
+    user_id = str(current_user.username)
+    if not is_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    settings = load_settings()
+    officers_map = settings.get("health_officers")
+    if not isinstance(officers_map, dict):
+        officers_map = {}
+
+    if request.method == "POST":
+        payload = request.json or {}
+        office_code = (payload.get("office_code") or "").strip()
+        if not office_code:
+            return jsonify({"error": "営業所コードが必要です"}), 400
+        raw_users = payload.get("users")
+        if not isinstance(raw_users, list):
+            return jsonify({"error": "担当者の指定が不正です"}), 400
+        usernames: list[str] = []
+        for entry in raw_users:
+            u = str(entry).strip()
+            if u and u not in usernames:
+                usernames.append(u)
+        valid = {u.username for u in User.query.filter(User.username.in_(usernames)).all()} if usernames else set()
+        filtered = [u for u in usernames if u in valid]
+        if filtered:
+            officers_map[office_code] = filtered
+        else:
+            officers_map.pop(office_code, None)
+        settings["health_officers"] = officers_map
+        save_settings(settings)
+        # 当該営業所のレコードは既定宛先が変わるため、リマインドを再同期する
+        try:
+            records = HealthCheckRecord.query.filter(
+                HealthCheckRecord.office_code == office_code
+            ).all()
+            for record in records:
+                ensure_health_check_reminders(record, global_lead_days=get_global_lead_days(), commit=False)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return jsonify({"success": True, "office_code": office_code,
+                        "officers": [{"username": u, "name": _officer_user_label(u)} for u in filtered]})
+
+    offices = {o.office_code: o.office_name for o in Office.query.order_by(Office.office_code).all()}
+    result = []
+    for code, name in offices.items():
+        result.append({
+            "code": code,
+            "name": name,
+            "officers": [{"username": u, "name": _officer_user_label(u)}
+                         for u in get_office_health_officers(code)],
+        })
+    return jsonify({"offices": result})

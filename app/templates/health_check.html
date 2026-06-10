@@ -80,6 +80,9 @@
       <label class="inline-flex items-center gap-1.5 cursor-pointer">
         <input type="checkbox" id="filter-unassigned" class="rounded text-teal-600 focus:ring-teal-500"> 担当者未割当のみ
       </label>
+      <label class="inline-flex items-center gap-1.5 cursor-pointer">
+        <input type="checkbox" id="filter-retired" class="rounded text-rose-600 focus:ring-rose-500"> 退職者も表示
+      </label>
       <div class="ml-auto flex flex-wrap items-center gap-2">
         <button type="button" class="hc-btn-ghost" onclick="HC.resolveManagers()">担当者を自動紐付け</button>
         <button type="button" class="hc-btn-ghost" onclick="HC.exportCsv()">CSV出力</button>
@@ -129,6 +132,26 @@
       <button class="hc-btn-ghost !text-red-600 !border-red-200 hidden" id="record-delete-btn" onclick="HC.deleteRecord()">削除</button>
       <button class="hc-btn-ghost" onclick="HC.closeRecordModal()">閉じる</button>
       <button class="hc-btn-primary" id="record-save-btn" onclick="HC.saveRecord()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== モーダル: 再検査項目（項目ごとに入力） ===== -->
+<div id="recheck-modal" class="hc-modal hidden" style="z-index:55;">
+  <div class="hc-modal-backdrop" onclick="HC.closeRecheckModal()"></div>
+  <div class="hc-modal-panel max-w-xl">
+    <div class="hc-modal-head">
+      <h2 class="text-lg font-bold text-gray-800">再検査項目</h2>
+      <button onclick="HC.closeRecheckModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+    </div>
+    <div class="hc-modal-body space-y-3">
+      <p class="text-sm text-gray-600">再検査の項目を1件ずつ追加し、それぞれに内容を入力できます。項目名はご自由に入力してください。</p>
+      <div id="recheck-rows" class="space-y-2"></div>
+      <button type="button" class="hc-btn-ghost" onclick="HC.addRecheckItem()">＋ 項目を追加</button>
+    </div>
+    <div class="hc-modal-foot">
+      <button class="hc-btn-ghost" onclick="HC.closeRecheckModal()">閉じる</button>
+      <button class="hc-btn-primary" onclick="HC.applyRecheckModal()">適用</button>
     </div>
   </div>
 </div>
@@ -188,6 +211,7 @@
     <!-- タブ -->
     <div class="flex flex-wrap gap-1 px-5 pt-3 border-b border-gray-100">
       <button type="button" class="hc-tab is-active" data-stab="integration" onclick="HC.switchSettingsTab('integration')">🔔 ToBell連携</button>
+      <button type="button" class="hc-tab hc-admin-only" data-stab="officers" onclick="HC.switchSettingsTab('officers')">🩺 健康診断担当</button>
       <button type="button" class="hc-tab hc-admin-only" data-stab="permissions" onclick="HC.switchSettingsTab('permissions')">👥 アクセス権</button>
     </div>
     <div class="hc-modal-body">
@@ -207,6 +231,11 @@
           <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
             <input type="checkbox" data-kind="secondary_exam" class="rounded text-teal-600 focus:ring-teal-500"> 🔔 二次検査の受診推奨日</label>
         </div>
+      </div>
+      <!-- パネル: 健康診断担当（管理者） -->
+      <div data-spanel="officers" class="space-y-4 hidden">
+        <p class="text-sm text-gray-600">営業所ごとに「健康診断担当」を設定します。ここで設定した担当者は、その営業所のレコードの<strong>通知の既定の宛先</strong>（管理担当者に加えて）になります。変更は即時に保存されます。</p>
+        <div id="officers-list" class="space-y-3"></div>
       </div>
       <!-- パネル: アクセス権（管理者） -->
       <div data-spanel="permissions" class="space-y-5 hidden">
@@ -290,6 +319,8 @@ const HC = (function(){
   let editingType = 'linked';
   let editingYear = null;
   let selectedEmployee = null;
+  let recheckItems = [];        // [{name, value}] 再検査項目
+  let extraNotifyUsers = [];    // 追加の通知先（username）
 
   const STATUS_STYLE = {
     '未予約':   ['#64748b','#f1f5f9'],
@@ -324,7 +355,7 @@ const HC = (function(){
 
   // ---- 状態 ----
   let state = { year: CURRENT_YEAR, office:'', type:'', status:'', night:false, recheck:false, unassigned:false,
-                search:'', sort_by:'employee_number', sort_order:'asc' };
+                retired:false, search:'', sort_by:'employee_number', sort_order:'asc' };
 
   function buildQuery(){
     const p = new URLSearchParams();
@@ -335,6 +366,7 @@ const HC = (function(){
     if(state.night) p.set('night_only','true');
     if(state.recheck) p.set('recheck_only','true');
     if(state.unassigned) p.set('unassigned_only','true');
+    if(state.retired) p.set('include_retired','true');
     if(state.search) p.set('search', state.search);
     p.set('sort_by', state.sort_by); p.set('sort_order', state.sort_order);
     return p.toString();
@@ -375,6 +407,7 @@ const HC = (function(){
     document.getElementById('filter-night').addEventListener('change', e=>{ state.night=e.target.checked; loadRecords(); });
     document.getElementById('filter-recheck').addEventListener('change', e=>{ state.recheck=e.target.checked; loadRecords(); });
     document.getElementById('filter-unassigned').addEventListener('change', e=>{ state.unassigned=e.target.checked; loadRecords(); });
+    document.getElementById('filter-retired').addEventListener('change', e=>{ state.retired=e.target.checked; loadRecords(); });
     let t; document.getElementById('search-input').addEventListener('input', e=>{ clearTimeout(t); t=setTimeout(()=>{ state.search=e.target.value.trim(); loadRecords(); }, 300); });
     document.querySelectorAll('th[data-sort]').forEach(th=>th.addEventListener('click', ()=>{
       const key = th.dataset.sort;
@@ -393,7 +426,8 @@ const HC = (function(){
     const p = new URLSearchParams(); p.set('year', state.year); if(state.office) p.set('office', state.office);
     try { d = await api('/tools/health_check/api/dashboard?'+p.toString()); } catch(e){ return; }
     document.getElementById('hero-rate').textContent = d.exam_rate + '%';
-    document.getElementById('hero-rate-note').textContent = `受診 ${d.examined} / 対象 ${d.total} 名`;
+    const exemptNote = d.exempt ? `（受診非対象 ${d.exempt} 名を除く）` : '';
+    document.getElementById('hero-rate-note').textContent = `受診 ${d.examined} / 対象 ${d.total} 名${exemptNote}`;
     const cards = [
       ['対象者数', d.total, '名', '#0f766e'],
       ['受診済', d.examined, '名', '#047857'],
@@ -423,7 +457,9 @@ const HC = (function(){
       const badges = [];
       if(r.is_night_worker){ const ok=!!r.exam_date_2; badges.push(`<span class="hc-pill" style="color:${ok?'#0f766e':'#7c3aed'};background:${ok?'#ccfbf1':'#ede9fe'}">深夜${ok?'2回目済':'2回目'}</span>`); }
       if(r.needs_recheck && r.status!=='二次完了'){ badges.push(`<span class="hc-pill" style="color:#b45309;background:#fef3c7">要二次</span>`); }
-      const retired = !!r.retirement_date;
+      if(r.is_exempt){ badges.push(`<span class="hc-pill" style="color:#475569;background:#e2e8f0">受診非対象</span>`); }
+      if(r.is_kintone){ badges.push(`<span class="hc-pill" style="color:#0369a1;background:#e0f2fe">kintone</span>`); }
+      const retired = !!r.is_retired;
       const mgr = r.manager_user
         ? `<span class="text-gray-700">${esc(r.manager_name||r.manager_user)}</span>`
         : `<span class="hc-pill" style="color:#dc2626;background:#fee2e2">未割当</span>`;
@@ -563,7 +599,13 @@ const HC = (function(){
         <div class="hc-section-title">再検査・二次検査</div>
         <label class="inline-flex items-center gap-2 text-sm text-gray-700 mb-2"><input type="checkbox" data-field="needs_recheck" ${d.needs_recheck?'checked':''} class="rounded text-teal-600"> 再検査あり</label>
         <div class="grid grid-cols-2 gap-3" data-recheck-block>
-          ${fieldText('再検査項目','recheck_items', d.recheck_items)}
+          <div class="col-span-2">
+            <label class="hc-field-label">再検査項目 <span class="text-xs text-gray-400">（項目ごとに入力）</span></label>
+            <div class="flex items-center gap-2">
+              <button type="button" class="hc-btn-ghost" onclick="HC.openRecheckModal()">📝 再検査項目を入力（<span id="recheck-count">0</span> 件）</button>
+              <span id="recheck-summary" class="text-xs text-gray-500 truncate flex-1 min-w-0"></span>
+            </div>
+          </div>
           ${fieldDate('二次検査受診推奨日 <span class="hc-bell" data-bell="secondary_exam"></span>','secondary_recommended_date', d.secondary_recommended_date)}
           ${fieldDate('二次検査案内送付日','secondary_guide_sent_date', d.secondary_guide_sent_date)}
           ${fieldDate('二次検診受診日','secondary_exam_date', d.secondary_exam_date)}
@@ -571,13 +613,35 @@ const HC = (function(){
         </div>
         <p class="text-xs text-gray-400" data-recheck-empty>「再検査あり」にチェックすると、再検査・二次検査の入力欄が表示されます。</p>
       </div>`;
+    const flags = `
+      <div>
+        <div class="hc-section-title">区分・フラグ</div>
+        <div class="flex flex-wrap gap-x-6 gap-y-2">
+          <label class="inline-flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" data-field="is_exempt" ${d.is_exempt?'checked':''} class="rounded text-teal-600"> 受診非対象者（ヒーローの各カウント対象外）</label>
+          <label class="inline-flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" data-field="is_kintone" ${d.is_kintone?'checked':''} class="rounded text-sky-600"> kintone</label>
+          ${linked
+            ? (d.is_retired ? '<span class="hc-pill" style="color:#b91c1c;background:#fee2e2">退職者（名簿PLUS同期）</span>' : '')
+            : `<label class="inline-flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" data-field="is_retired" ${d.is_retired?'checked':''} class="rounded text-rose-600"> 退職者</label>`}
+        </div>
+      </div>`;
     const reminder = `
       <div>
-        <div class="hc-section-title">担当者</div>
+        <div class="hc-section-title">通知の宛先（ToBell）</div>
         <div class="space-y-3">
-          <div><label class="hc-field-label">ToBell担当者（通知の宛先）</label>
+          <div><label class="hc-field-label">管理担当者（既定の宛先）</label>
             <select id="rec-manager" class="hc-input"></select>
             <p class="text-xs text-gray-400 mt-1">管理担当名から自動で紐付きます。手動でも選べます。通知は対象日の朝9時に届きます。</p></div>
+          <div>
+            <label class="hc-field-label">営業所の健康診断担当（既定の宛先）</label>
+            <div id="rec-officers" class="text-sm text-gray-600">—</div>
+            <p class="text-xs text-gray-400 mt-1">健診PLUS管理者が「設定 → 健康診断担当」で営業所ごとに設定します。</p>
+          </div>
+          <div>
+            <label class="hc-field-label">追加の通知先（任意・このレコードのみ）</label>
+            <div id="extra-notify-chips" class="flex flex-wrap gap-1.5 mb-1.5"></div>
+            <select id="extra-notify-add" class="hc-input"><option value="">＋ 通知先を追加…</option></select>
+          </div>
+          <p class="text-xs text-gray-400">通知は宛先それぞれがToBell連携をオプトインしている場合に届きます。</p>
           ${fieldText('備考','remarks', d.remarks)}
         </div>
       </div>`;
@@ -631,11 +695,16 @@ const HC = (function(){
         <div id="history-list" class="mt-2 text-xs text-gray-500">読み込み中…</div>
       </details>`;
     }
-    document.getElementById('record-modal-body').innerHTML = head + basic + exam + nasva + secondary + reminder + attachments + history;
+    document.getElementById('record-modal-body').innerHTML = head + basic + exam + nasva + secondary + flags + reminder + attachments + history;
 
+    recheckItems = Array.isArray(d.recheck_items_list) ? d.recheck_items_list.map(it=>({name:it.name||'', value:it.value||''})) : [];
+    updateRecheckSummary();
+    extraNotifyUsers = Array.isArray(d.extra_notify_users) ? d.extra_notify_users.slice() : [];
     if(isNew){ setupNewMode(); lastAttachments = []; }
     if(!linked){ setupManualFields(d); }
     populateManagerSelect(d.manager_user);
+    setupExtraNotify();
+    loadOfficersForForm(linked ? d.office_code : null);
     syncNightBlock();
     syncRecheckBlock();
     if(!isNew){
@@ -656,6 +725,89 @@ const HC = (function(){
     const apply = ()=>{ const on = cb.checked; block.style.display = on?'':'none'; if(empty) empty.style.display = on?'none':''; };
     apply();
     cb.addEventListener('change', apply);
+  }
+
+  // ---- 再検査項目（項目ごとに入力・ポップアップ） ----
+  function updateRecheckSummary(){
+    const items = recheckItems.filter(it=>(it.name||'').trim()||(it.value||'').trim());
+    const cnt = document.getElementById('recheck-count');
+    if(cnt) cnt.textContent = items.length;
+    const sum = document.getElementById('recheck-summary');
+    if(sum) sum.textContent = items.map(it=> it.name && it.value ? `${it.name}：${it.value}` : (it.name||it.value)).join(' / ');
+  }
+  function openRecheckModal(){ renderRecheckRows(); show('recheck-modal'); }
+  function closeRecheckModal(){ hide('recheck-modal'); }
+  function renderRecheckRows(){
+    const box = document.getElementById('recheck-rows');
+    if(!box) return;
+    if(!recheckItems.length){
+      box.innerHTML = '<p class="text-xs text-gray-400">「＋ 項目を追加」で再検査項目を追加してください。</p>';
+      return;
+    }
+    box.innerHTML = recheckItems.map((it,i)=>`
+      <div class="flex items-start gap-2">
+        <input type="text" class="hc-input" style="max-width:11rem" placeholder="項目名（例：血圧）" value="${esc(it.name||'')}" oninput="HC.onRecheckInput(${i},'name',this.value)">
+        <input type="text" class="hc-input flex-1" placeholder="内容・所見" value="${esc(it.value||'')}" oninput="HC.onRecheckInput(${i},'value',this.value)">
+        <button type="button" class="text-red-500 hover:text-red-700 text-base px-1 pt-2" onclick="HC.removeRecheckItem(${i})">×</button>
+      </div>`).join('');
+  }
+  function onRecheckInput(idx, key, val){ if(recheckItems[idx]) recheckItems[idx][key] = val; }
+  function addRecheckItem(){
+    recheckItems.push({name:'', value:''});
+    renderRecheckRows();
+    const box = document.getElementById('recheck-rows');
+    if(box){ const inputs = box.querySelectorAll('input[placeholder^="項目名"]'); if(inputs.length) inputs[inputs.length-1].focus(); }
+  }
+  function removeRecheckItem(idx){ recheckItems.splice(idx,1); renderRecheckRows(); }
+  function applyRecheckModal(){
+    recheckItems = recheckItems
+      .map(it=>({name:(it.name||'').trim(), value:(it.value||'').trim()}))
+      .filter(it=>it.name||it.value);
+    updateRecheckSummary();
+    closeRecheckModal();
+  }
+
+  // ---- 追加の通知先（レコード個別） ----
+  function setupExtraNotify(){ renderExtraNotifyChips(); populateExtraNotifyAdd(); }
+  function userLabel(username){ const u = (usersCache||[]).find(x=>x.username===username); return u ? u.name : username; }
+  function renderExtraNotifyChips(){
+    const box = document.getElementById('extra-notify-chips');
+    if(!box) return;
+    if(!extraNotifyUsers.length){ box.innerHTML = '<span class="text-xs text-gray-400">なし</span>'; return; }
+    box.innerHTML = extraNotifyUsers.map(u=>`
+      <span class="hc-pill" style="color:#0f766e;background:#ccfbf1">${esc(userLabel(u))}
+        <button type="button" class="ml-1 text-teal-700 hover:text-teal-900" onclick="HC.removeExtraNotify('${esc(u)}')">×</button></span>`).join('');
+  }
+  async function populateExtraNotifyAdd(){
+    const sel = document.getElementById('extra-notify-add');
+    if(!sel) return;
+    const users = await loadUsers();
+    const opts = users.filter(u=>!extraNotifyUsers.includes(u.username))
+      .map(u=>`<option value="${esc(u.username)}">${esc(u.name)}（${esc(u.username)}）</option>`).join('');
+    sel.innerHTML = '<option value="">＋ 通知先を追加…</option>' + opts;
+    sel.onchange = ()=>{ if(sel.value){ addExtraNotify(sel.value); sel.value=''; } };
+    renderExtraNotifyChips();  // ユーザー名解決後に表示を更新
+  }
+  function addExtraNotify(username){
+    if(!username || extraNotifyUsers.includes(username)) return;
+    extraNotifyUsers.push(username);
+    renderExtraNotifyChips(); populateExtraNotifyAdd();
+  }
+  function removeExtraNotify(username){
+    extraNotifyUsers = extraNotifyUsers.filter(u=>u!==username);
+    renderExtraNotifyChips(); populateExtraNotifyAdd();
+  }
+  async function loadOfficersForForm(officeCode){
+    const box = document.getElementById('rec-officers');
+    if(!box) return;
+    let office = officeCode;
+    if(!office){ const m = document.getElementById('manual-office'); office = m ? m.value : ''; }
+    if(!office){ box.innerHTML = '<span class="text-xs text-gray-400">営業所が未確定です</span>'; return; }
+    let officers = [];
+    try { officers = (await api('/tools/health_check/api/office_officers?office='+encodeURIComponent(office))).officers || []; } catch(e){}
+    box.innerHTML = officers.length
+      ? officers.map(o=>`<span class="hc-pill" style="color:#1d4ed8;background:#dbeafe">${esc(o.name)}</span>`).join(' ')
+      : '<span class="text-xs text-gray-400">この営業所には健康診断担当が未設定です</span>';
   }
 
   // NASVA欄の表示制御：年度4/1時点で65歳以上、または既にNASVA添付があるとき表示する。
@@ -767,6 +919,7 @@ const HC = (function(){
     setF('manager_name', e.manager_name);
     setF('birth_date', e.birth_date);
     updateNasvaVisibility();
+    loadOfficersForForm(e.office_code);
   }
 
   // ---- 手動モード（入社前・内勤者）の入力支援 ----
@@ -784,7 +937,7 @@ const HC = (function(){
     const office = officeSel ? officeSel.value : (d.office_code || '');
     populateManagerNameSelect(office, d.manager_name);
     if(officeSel){
-      officeSel.addEventListener('change', ()=>populateManagerNameSelect(officeSel.value, ''));
+      officeSel.addEventListener('change', ()=>{ populateManagerNameSelect(officeSel.value, ''); loadOfficersForForm(officeSel.value); });
     }
   }
   async function searchSites(q){
@@ -861,6 +1014,10 @@ const HC = (function(){
     });
     const mgr = document.getElementById('rec-manager');
     if(mgr) payload.manager_user = mgr.value;
+    payload.recheck_items = recheckItems
+      .filter(it=>(it.name||'').trim() || (it.value||'').trim())
+      .map(it=>({name:(it.name||'').trim(), value:(it.value||'').trim()}));
+    payload.extra_notify_users = extraNotifyUsers.slice();
     return payload;
   }
 
@@ -1082,9 +1239,51 @@ const HC = (function(){
     if(IS_ADMIN){
       togglePermOffice();
       loadPermissions();
+      loadHealthOfficers();
     }
     switchSettingsTab('integration');
     show('settings-modal');
+  }
+
+  // ---- 健康診断担当（営業所ごとの既定通知先・管理者） ----
+  let officersState = {};  // office_code -> [username]
+  async function loadHealthOfficers(){
+    let data; try { data = await api('/tools/health_check/api/admin/health_officers'); } catch(e){ return; }
+    officersState = {};
+    (data.offices||[]).forEach(o=>{ officersState[o.code] = (o.officers||[]).map(x=>x.username); });
+    renderOfficers(data.offices||[]);
+  }
+  async function renderOfficers(offices){
+    const box = document.getElementById('officers-list');
+    if(!box) return;
+    const users = await loadUsers();
+    box.innerHTML = (offices||[]).map(o=>{
+      const list = officersState[o.code] || [];
+      const chips = list.length
+        ? list.map(u=>`<span class="hc-pill" style="color:#0f766e;background:#ccfbf1">${esc(userLabel(u))}<button type="button" class="ml-1 text-teal-700 hover:text-teal-900" onclick="HC.removeOfficer('${esc(o.code)}','${esc(u)}')">×</button></span>`).join(' ')
+        : '<span class="text-xs text-gray-400">未設定</span>';
+      const opts = users.filter(u=>!list.includes(u.username))
+        .map(u=>`<option value="${esc(u.username)}">${esc(u.name)}（${esc(u.username)}）</option>`).join('');
+      return `<div class="p-3 border border-gray-100 rounded-lg">
+        <div class="text-sm font-medium text-gray-700 mb-1.5">${esc(o.name)} <span class="text-xs text-gray-400 font-mono">(${esc(o.code)})</span></div>
+        <div class="flex flex-wrap gap-1.5 mb-2">${chips}</div>
+        <select class="hc-input" onchange="HC.addOfficer('${esc(o.code)}', this.value)"><option value="">＋ 担当者を追加…</option>${opts}</select>
+      </div>`;
+    }).join('') || '<p class="text-xs text-gray-400">営業所がありません。</p>';
+  }
+  async function persistOfficers(code){
+    try { await api('/tools/health_check/api/admin/health_officers', {method:'POST', body:JSON.stringify({office_code:code, users:officersState[code]||[]})}); toast('健康診断担当を保存しました'); return true; }
+    catch(e){ toast(e.message,'error'); return false; }
+  }
+  async function addOfficer(code, username){
+    if(!username) return;
+    officersState[code] = officersState[code] || [];
+    if(!officersState[code].includes(username)) officersState[code].push(username);
+    if(await persistOfficers(code)) loadHealthOfficers();
+  }
+  async function removeOfficer(code, username){
+    officersState[code] = (officersState[code]||[]).filter(u=>u!==username);
+    if(await persistOfficers(code)) loadHealthOfficers();
   }
   function applyNotifyKinds(kinds){
     document.querySelectorAll('#notify-kinds [data-kind]').forEach(cb=>{
@@ -1102,8 +1301,8 @@ const HC = (function(){
     activeSettingsTab = tab;
     document.querySelectorAll('#settings-modal [data-stab]').forEach(b=>b.classList.toggle('is-active', b.dataset.stab===tab));
     document.querySelectorAll('#settings-modal [data-spanel]').forEach(p=>p.classList.toggle('hidden', p.dataset.spanel!==tab));
-    // アクセス権タブは即時反映のため、フッターの保存ボタンを隠す
-    document.getElementById('settings-save-btn').style.display = (tab==='permissions') ? 'none' : '';
+    // アクセス権・健康診断担当タブは即時反映のため、フッターの保存ボタンを隠す
+    document.getElementById('settings-save-btn').style.display = (tab==='permissions' || tab==='officers') ? 'none' : '';
   }
   async function saveCurrentSettings(){
     if(activeSettingsTab==='integration'){
@@ -1162,11 +1361,14 @@ const HC = (function(){
     init, openRecordModal, closeRecordModal, saveRecord, deleteRecord,
     changeNewType, selectEmployee, selectSite, uploadAttachment, deleteAttachment,
     onAttachTitleChange, renameAttachment,
+    openRecheckModal, closeRecheckModal, addRecheckItem, removeRecheckItem, onRecheckInput, applyRecheckModal,
+    addExtraNotify, removeExtraNotify,
     openBulkModal, closeBulkModal, runBulkCreate,
     openCarryoverModal, closeCarryoverModal, runCarryover,
     resolveManagers, exportCsv,
     openSettingsModal, closeSettingsModal, switchSettingsTab, saveCurrentSettings,
     grantPermission, revoke, togglePermOffice,
+    addOfficer, removeOfficer,
   };
 })();
 document.addEventListener('DOMContentLoaded', HC.init);

@@ -79,7 +79,14 @@
 | `secondary_guide_sent_date` | Date | 手入力 | ⑰ 二次検査案内送付日 |
 | `secondary_result` | Text | 手入力 | ⑱ 二次検査結果 |
 | `remarks` | Text | 手入力 | ⑲ 備考 |
+| `is_retired` | Boolean | 名簿 `is_retired` 同期 | 退職者フラグ（既定で一覧非表示。§10.3） |
+| `is_exempt` | Boolean | 手入力 | 受診非対象者（ヒーローの各カウント対象外。§10.4） |
+| `is_kintone` | Boolean | 手入力 | kintone フラグ（レコード単位の任意フラグ。§10.5） |
+| `extra_notify_users` | Text(JSON) | 手入力 | 通知の追加宛先（username配列。レコード個別。§10.2） |
 | `reminder_lead_days` | Integer (null可) | 手入力 | 追加事前通知のリードタイム（全体既定を個別上書き。§6.2） |
+
+`recheck_items`(⑭) は **`[{"name","value"}]` のJSON** を保持する（項目ごとに名称＋内容。
+旧プレーンテキストは1項目として後方互換で読む。§10.1）。
 | `status` | String(20) | 自動算出（キャッシュ） | 受診ステータス（§5） |
 | `secondary_task_id` | Integer (null可) | システム | 二次検査ToBellタスクID（更新/クローズ用） |
 | `night2_task_id` | Integer (null可) | システム | 深夜2回目ToBellタスクID |
@@ -252,3 +259,36 @@
 - 深夜2回目の基準日 `exam_date_2_target` は未入力時 `exam_date` ＋6か月を既定（運用で調整可）。
 - 添付：pdf/jpg/png・10MB。保存先 `uploads/health_check/<年度>/`。
 - ToBell通知は担当者オプトイン時のみ。未紐付け/未オプトインは健診PLUS側一覧でフォロー。
+
+---
+
+## 10. 追加仕様（機能拡張）
+
+### 10.1 再検査項目（項目ごとに入力）
+- `recheck_items` は単一テキストではなく **`[{"name","value"}]` のJSON配列**を保持。
+- 編集画面では「📝 再検査項目を入力」ボタンからポップアップを開き、**項目を1件ずつ追加**して
+  それぞれに名称（項目名）と内容を入力する。項目はユーザーが手動で追加できる。
+- 旧プレーンテキスト値は「1項目（name=本文）」として後方互換で読み込む。
+- CSV出力では `項目：内容 / 項目` の形に整形する。
+
+### 10.2 通知の宛先（複数化＋健康診断担当）
+- **既定の宛先＝管理担当者（`manager_user`）＋ 営業所の「健康診断担当」**。
+- 「健康診断担当」は **営業所ごと**に **健診PLUS管理者**が「設定 → 健康診断担当」で設定する。
+  保存先は `static/health_check/settings.json` の `health_officers: {office_code: [username,...]}`。
+- レコード個別に **追加の通知先**（`extra_notify_users`）を任意で指定できる。
+- ToBellは **宛先ごとに1タスク**起票する（`source_ref_id="{record_id}:{username}"`）。
+  実際の配信は **各宛先が連携をオプトインしている場合のみ**（健康情報のため各自オプトイン必須を踏襲）。
+- 宛先の増減・オプトアウト・条件解除に追従して、当該宛先のタスクをクローズする。
+
+### 10.3 退職者フラグ
+- 社員名簿PLUSの `Employee.is_retired` を `HealthCheckRecord.is_retired` へ同期する。
+- 一覧・ダッシュボード・エクスポートは **既定で退職者を非表示**。
+  一覧の「退職者も表示」チェック（API: `include_retired=true`）で表示する。
+
+### 10.4 受診非対象者
+- `is_exempt` をレコード単位のチェックで設定。
+- **ヒーローエリアの各カウント（対象者数・受診済・再検査未完了・深夜2回目・担当者未割当・受診率）の対象外**。
+  一覧には表示し「受診非対象」バッジを付ける。ダッシュボードは除外数を `exempt` で返す。
+
+### 10.5 kintone
+- `is_kintone` をレコード単位のチェックで設定。一覧に「kintone」バッジを付ける。

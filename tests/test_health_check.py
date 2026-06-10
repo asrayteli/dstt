@@ -60,6 +60,11 @@ def _build(tmp_path, *, admin=True):
     module._is_dstt_admin = lambda *a, **k: admin
     module.get_global_lead_days = lambda: 3
     module.current_user = SimpleNamespace(is_authenticated=True, username="tester01", name="検査太郎")
+    # ToBellフックは本物の app.tools.health_check.get_office_health_officers を呼ぶため、
+    # 同じテスト用データ領域を参照するよう本物モジュール側も合わせて差し替える。
+    import app.tools.health_check as real_hc
+    real_hc.get_data_path = lambda: str(data_dir)
+    real_hc.get_uploads_path = lambda: str(data_dir / "uploads")
     return module, app
 
 
@@ -666,3 +671,174 @@ def test_integration_api_saves_notify_kinds(tmp_path):
     assert got2["enabled"] is True
     assert got2["kinds"]["reservation"] is False
     assert got2["kinds"]["secondary_exam"] is True  # 指定しない種別はONのまま
+
+
+def test_recheck_items_structured_storage(tmp_path):
+    """再検査項目は [{name, value}] の構造で保存・取得でき、CSVには整形して出る。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    res = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "internal",
+        "employee_name": "再検太郎", "office_code": "100"})
+    rid = res.get_json()["record"]["id"]
+
+    client.put(f"/tools/health_check/api/record/{rid}", json={
+        "needs_recheck": True,
+        "recheck_items": [
+            {"name": "血圧", "value": "要再検査"},
+            {"name": "肝機能", "value": ""},
+            {"name": "", "value": ""},  # 空項目は捨てられる
+        ],
+    })
+    rec = client.get(f"/tools/health_check/api/record/{rid}").get_json()
+    assert rec["recheck_items_list"] == [
+        {"name": "血圧", "value": "要再検査"},
+        {"name": "肝機能", "value": ""},
+    ]
+
+    # CSVには「項目：内容 / 項目」の形で整形される
+    csv_body = client.get("/tools/health_check/api/export?year=2026").data.decode("utf-8-sig")
+    assert "血圧：要再検査 / 肝機能" in csv_body
+
+
+def test_recheck_items_legacy_plain_text_compat(tmp_path):
+    """旧仕様のプレーンテキストの再検査項目も1項目として読める。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    res = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "internal",
+        "employee_name": "旧子", "office_code": "100"})
+    rid = res.get_json()["record"]["id"]
+    with app.app_context():
+        rec = db.session.get(HealthCheckRecord, rid)
+        rec.recheck_items = "尿検査の再検査"  # 旧プレーンテキスト
+        db.session.commit()
+    got = client.get(f"/tools/health_check/api/record/{rid}").get_json()
+    assert got["recheck_items_list"] == [{"name": "尿検査の再検査", "value": ""}]
+
+
+def test_retired_hidden_by_default(tmp_path):
+    """退職者フラグのあるレコードは既定で非表示、include_retired=true で表示。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100"]})
+    recs = client.get("/tools/health_check/api/records?year=2026").get_json()["records"]
+    rid = recs[0]["id"]
+    with app.app_context():
+        rec = db.session.get(HealthCheckRecord, rid)
+        rec.is_retired = True
+        db.session.commit()
+
+    default = client.get("/tools/health_check/api/records?year=2026").get_json()
+    assert default["count"] == 1  # 退職者は隠れる
+    assert all(not r["is_retired"] for r in default["records"])
+
+    with_retired = client.get("/tools/health_check/api/records?year=2026&include_retired=true").get_json()
+    assert with_retired["count"] == 2
+
+
+def test_retired_synced_from_employee(tmp_path):
+    """名簿PLUSの退職者フラグ(is_retired)が健診レコードへ同期される。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    with app.app_context():
+        emp = Employee.query.filter_by(employee_number="E001").first()
+        emp.is_retired = True
+        db.session.commit()
+    client = app.test_client()
+    rec = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E001"}).get_json()["record"]
+    assert rec["is_retired"] is True
+
+
+def test_exempt_excluded_from_dashboard_counts(tmp_path):
+    """受診非対象者はヒーローエリアの各カウントから除外される。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100"]})
+    recs = client.get("/tools/health_check/api/records?year=2026").get_json()["records"]
+    client.put(f"/tools/health_check/api/record/{recs[0]['id']}", json={"is_exempt": True})
+
+    dash = client.get("/tools/health_check/api/dashboard?year=2026").get_json()
+    assert dash["total"] == 1   # 2名のうち1名は非対象で除外
+    assert dash["exempt"] == 1
+    # 非対象者も一覧には表示される
+    listing = client.get("/tools/health_check/api/records?year=2026").get_json()
+    assert listing["count"] == 2
+
+
+def test_kintone_flag_roundtrip(tmp_path):
+    """kintoneフラグをレコードごとに設定・取得できる。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    res = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "internal",
+        "employee_name": "キン子", "office_code": "100", "is_kintone": True})
+    rid = res.get_json()["record"]["id"]
+    assert res.get_json()["record"]["is_kintone"] is True
+    client.put(f"/tools/health_check/api/record/{rid}", json={"is_kintone": False})
+    assert client.get(f"/tools/health_check/api/record/{rid}").get_json()["is_kintone"] is False
+
+
+def test_health_officer_is_default_notify_recipient(tmp_path):
+    """営業所の健康診断担当も既定の通知先になり、オプトインしていれば起票される。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    with app.app_context():
+        # 健康診断担当 hofficer と、管理担当 m001 の双方がオプトイン
+        db.session.add(User(username="hofficer", password_hash="x", name="健診担当子"))
+        db.session.add(ToBellUserSettings(username="m001", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.add(ToBellUserSettings(username="hofficer", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.commit()
+
+    # 営業所100の健康診断担当として hofficer を設定
+    res = client.post("/tools/health_check/api/admin/health_officers",
+                      json={"office_code": "100", "users": ["hofficer"]})
+    assert res.status_code == 200
+
+    rid = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E001"}).get_json()["record"]["id"]
+    today = date.today().isoformat()
+    client.put(f"/tools/health_check/api/record/{rid}", json={
+        "needs_recheck": True, "secondary_recommended_date": today})
+
+    with app.app_context():
+        tasks = ToBellTask.query.filter_by(source_tool="health_check", source_ref_type="secondary_exam").all()
+        assignees = {t.assigned_to for t in tasks}
+        assert assignees == {"m001", "hofficer"}  # 管理担当＋健康診断担当の二人に届く
+
+
+def test_extra_notify_user_receives_reminder(tmp_path):
+    """レコード個別の追加通知先も、オプトインしていれば通知される。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    with app.app_context():
+        db.session.add(User(username="extra01", password_hash="x", name="追加宛先子"))
+        db.session.add(ToBellUserSettings(username="m001", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.add(ToBellUserSettings(username="extra01", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.commit()
+
+    rid = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E001"}).get_json()["record"]["id"]
+    today = date.today().isoformat()
+    client.put(f"/tools/health_check/api/record/{rid}", json={
+        "needs_recheck": True, "secondary_recommended_date": today,
+        "extra_notify_users": ["extra01"]})
+
+    with app.app_context():
+        tasks = ToBellTask.query.filter_by(source_tool="health_check", source_ref_type="secondary_exam").all()
+        assert {t.assigned_to for t in tasks} == {"m001", "extra01"}
+
+    # 追加宛先を外すと、その人のリマインドはクローズされる
+    client.put(f"/tools/health_check/api/record/{rid}", json={"extra_notify_users": []})
+    with app.app_context():
+        active = ToBellTask.query.filter_by(
+            source_tool="health_check", source_ref_type="secondary_exam", status="todo").all()
+        assert {t.assigned_to for t in active} == {"m001"}
