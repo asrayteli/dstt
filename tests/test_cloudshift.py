@@ -4293,6 +4293,101 @@ def test_pwa_notify_fires_for_person_project_when_scene_save_syncs_entry(tmp_pat
     assert [call for call in calls if call["project_id"] == person_id] == []
 
 
+def test_light_loaders_match_full_load_and_reject_save(tmp_path):
+    # 軽量ロード（一覧用・同期用）が完全ロードと同じプロジェクト集合・メタデータ・
+    # 月キーを返し、誤って保存しようとした場合は拒否されること（月データ消失の防止）。
+    import pytest
+
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    _create_person_project(client, title="Alice", employee_number="1001")
+    scene = _create_scene_project(client, year="2026", month="4").get_json()["project"]
+    scene_id = scene["project"]["id"]
+    scene_entries = dict(scene["month"]["entries_per_day"])
+    scene_entries["1"] = [{"id": "scene-1", "value": "!A!Alice", "employee_number": "1001"}]
+    save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": scene_entries, "base_month": scene["month"]},
+    )
+    assert save.status_code == 200
+
+    with client.application.app_context():
+        full = {p["id"]: p for p in module._iter_stored_projects()}
+        light = {p["id"]: p for p in module._iter_stored_projects_light()}
+        assert set(light) == set(full)
+        for project_id, project in full.items():
+            assert set(light[project_id]["months"].keys()) == set(project["months"].keys())
+            for key in ("title", "mode", "employee_number", "owner_user_id", "view_token", "edit_token", "pwa_token", "site_row_id", "site_id", "site_name"):
+                assert light[project_id].get(key) == project.get(key)
+
+        month_scoped = {p["id"]: p for p in module._iter_project_summaries_for_month("2026-04")}
+        assert set(month_scoped) == set(full)
+        for project_id, project in full.items():
+            full_month = project["months"].get("2026-04")
+            scoped_month = month_scoped[project_id]["months"].get("2026-04")
+            if full_month is None:
+                assert scoped_month is None
+            else:
+                assert scoped_month["entries_per_day"] == full_month["entries_per_day"]
+                assert scoped_month["revision"] == full_month["revision"]
+
+        # 部分ロードの dict は保存を拒否する
+        with pytest.raises(RuntimeError):
+            module._upsert_project_to_db(light[scene_id])
+        with pytest.raises(RuntimeError):
+            module._upsert_project_to_db(month_scoped[scene_id])
+
+        # 完全ロードのデータは無傷のまま
+        reloaded = module._load_project(scene_id)
+        assert reloaded["months"]["2026-04"]["entries_per_day"]["1"]
+
+
+def test_save_month_keeps_unchanged_month_rows_intact(tmp_path):
+    # 1ヶ月の保存で他の月の行が削除→再挿入されないこと（行IDと更新日時が不変）。
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    from app.models import CloudShiftMonth
+
+    scene = _create_scene_project(client, year="2026", month="4").get_json()["project"]
+    scene_id = scene["project"]["id"]
+    add = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month",
+        json={"year": 2026, "month": 5, "required_capacity": 0},
+    )
+    assert add.status_code == 200
+
+    with client.application.app_context():
+        rows_before = {
+            (row.year, row.month): (row.id, row.updated_at)
+            for row in CloudShiftMonth.query.filter_by(project_id=scene_id)
+        }
+    assert set(rows_before) == {(2026, 4), (2026, 5)}
+
+    save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={
+            "required_capacity": 0,
+            "entries_per_day": {"1": [{"id": "scene-1", "value": "!A!Alice"}]},
+            "base_month": scene["month"],
+        },
+    )
+    assert save.status_code == 200
+
+    with client.application.app_context():
+        rows_after = {
+            (row.year, row.month): (row.id, row.updated_at)
+            for row in CloudShiftMonth.query.filter_by(project_id=scene_id)
+        }
+        saved_month = module._load_project(scene_id)["months"]["2026-04"]
+    # 保存した4月も行は使い回される（id 不変）
+    assert rows_after[(2026, 4)][0] == rows_before[(2026, 4)][0]
+    # 触っていない5月は updated_at も含めて完全に不変
+    assert rows_after[(2026, 5)] == rows_before[(2026, 5)]
+    # 保存内容自体は反映されている
+    assert saved_month["entries_per_day"]["1"][0]["value"] == "!A!Alice"
+
+
 def test_restore_month_revision_resyncs_linked_projects(tmp_path):
     # リビジョン復元も正式シフトの変更なので、リンク先（個人シフト等）へ再同期されること。
     module, client = _build_client(tmp_path)
