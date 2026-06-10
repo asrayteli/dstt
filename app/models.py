@@ -525,6 +525,8 @@ class Employee(db.Model):
     # 連絡先情報
     phone_number = db.Column(db.String(20))  # 電話番号
     mobile_phone = db.Column(db.String(20))  # 携帯電話（個人）
+    company_mobile = db.Column(db.String(20))  # 会社携帯（ファイルC）
+    email = db.Column(db.String(255))  # メールアドレス（ファイルC）
 
     # その他
     health_insurance = db.Column(db.String(20))  # 健康保険加入区分
@@ -623,6 +625,8 @@ class Employee(db.Model):
             'retirement_date': self.retirement_date,
             'phone_number': self.phone_number,
             'mobile_phone': self.mobile_phone,
+            'company_mobile': self.company_mobile,
+            'email': self.email,
             'health_insurance': self.health_insurance,
             'is_deleted': self.is_deleted,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -737,6 +741,23 @@ class SalaryUploadHistory(db.Model):
 
     def __repr__(self):
         return f'<SalaryUploadHistory {self.id}: {self.filename} by {self.uploaded_by}>'
+
+
+class ContactUploadHistory(db.Model):
+    """連絡先ファイル（ファイルC: メールアドレス/会社携帯）アップロード履歴"""
+    __tablename__ = 'contact_upload_histories'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    uploaded_by = db.Column(db.String(80), nullable=False)  # アップロードユーザーID
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    filename = db.Column(db.String(255))  # ファイル名
+    success_count = db.Column(db.Integer, default=0)  # 更新件数
+    skip_count = db.Column(db.Integer, default=0)  # スキップ件数
+    error_count = db.Column(db.Integer, default=0)  # エラー件数
+    total_rows = db.Column(db.Integer, default=0)  # 総行数
+
+    def __repr__(self):
+        return f'<ContactUploadHistory {self.id}: {self.filename} by {self.uploaded_by}>'
 
 
 class Site(db.Model):

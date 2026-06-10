@@ -364,6 +364,14 @@
                             電話番号
                         </label>
                         <label class="flex items-center text-sm">
+                            <input type="checkbox" class="search-column mr-1" data-column="company_mobile">
+                            会社携帯
+                        </label>
+                        <label class="flex items-center text-sm">
+                            <input type="checkbox" class="search-column mr-1" data-column="email">
+                            メールアドレス
+                        </label>
+                        <label class="flex items-center text-sm">
                             <input type="checkbox" class="search-column mr-1" data-column="address1">
                             住所１
                         </label>
@@ -623,6 +631,14 @@
                     携帯電話
                 </label>
                 <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="company_mobile">
+                    会社携帯
+                </label>
+                <label class="flex items-center text-sm">
+                    <input type="checkbox" class="column-toggle mr-2" data-column="email">
+                    メールアドレス
+                </label>
+                <label class="flex items-center text-sm">
                     <input type="checkbox" class="column-toggle mr-2" data-column="health_insurance">
                     健康保険加入区分
                 </label>
@@ -710,6 +726,14 @@
                             <p class="text-xs text-gray-500 mt-1">対応形式: .xls のみ</p>
                         </div>
                     </label>
+                    <label class="flex items-start cursor-pointer p-3 bg-white rounded border border-gray-200 hover:border-blue-400 transition">
+                        <input type="radio" name="file-type" value="contact" class="mt-1 mr-3" onchange="toggleFileType('contact')">
+                        <div>
+                            <span class="font-medium text-gray-900">📧 ファイルC（メール・会社携帯）</span>
+                            <p class="text-sm text-gray-600 mt-1">社員番号をキーにメールアドレスと会社携帯を更新します</p>
+                            <p class="text-xs text-gray-500 mt-1">対応形式: .xlsx のみ（B列:社員番号 / D列:メール / H列:電話番号）</p>
+                        </div>
+                    </label>
                 </div>
             </div>
 
@@ -755,6 +779,35 @@
                         <li>既存の賃金データは新しいデータで置き換えられます</li>
                         <li>マッピングに登録されていない項目IDはスキップされます</li>
                         <li>Employeeテーブルに存在しない社員のデータはスキップされます</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- ファイルC用アップロードエリア -->
+            <div id="upload-area-contact" class="hidden">
+                <p class="text-gray-600 mb-4">連絡先ファイル（.xlsx形式）をアップロードしてメールアドレス・会社携帯を更新します。</p>
+                <div class="border-2 border-dashed border-indigo-300 rounded-lg p-8 text-center mb-4 bg-indigo-50" id="drop-zone-contact">
+                    <input type="file" id="file-input-contact" accept=".xlsx" class="hidden" onchange="handleContactFileSelect(event)">
+                    <div class="mb-4">
+                        <svg class="mx-auto h-12 w-12 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                        </svg>
+                    </div>
+                    <p class="text-lg mb-2 text-indigo-800">連絡先ファイルをドラッグ&ドロップ</p>
+                    <p class="text-sm text-gray-500 mb-4">または</p>
+                    <button onclick="document.getElementById('file-input-contact').click()" class="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700">
+                        ファイルを選択
+                    </button>
+                    <p class="text-xs text-gray-500 mt-4">対応形式: .xlsx のみ</p>
+                </div>
+                <div class="bg-indigo-100 border border-indigo-400 rounded-lg p-3 text-sm text-indigo-800">
+                    <p class="font-semibold mb-1">📋 ファイル仕様</p>
+                    <ul class="list-disc list-inside space-y-1">
+                        <li>1行目はヘッダーとして無視されます</li>
+                        <li>B列: 社員番号（7桁・頭の0はサーバー側で補完）</li>
+                        <li>D列: メールアドレス</li>
+                        <li>H列: 電話番号（会社携帯・11桁・頭の0はサーバー側で補完）</li>
+                        <li>社員番号で既存社員に紐付けて更新します</li>
                     </ul>
                 </div>
             </div>
@@ -846,6 +899,65 @@
                             ✅ 賃金データをインポート
                         </button>
                         <button onclick="cancelSalaryUpload()" class="flex-1 bg-gray-400 text-white px-6 py-3 rounded-md hover:bg-gray-500">
+                            ❌ キャンセル
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 連絡先データプレビューエリア（ファイルC） -->
+            <div id="contact-preview-area" class="hidden">
+                <div class="bg-indigo-50 border border-indigo-400 rounded-lg p-4 mb-4">
+                    <h4 class="font-bold text-lg mb-2">📧 連絡先データプレビュー</h4>
+                    <p class="text-sm text-gray-700 mb-3">以下のメールアドレス・会社携帯がインポートされます。確認後、「インポート実行」ボタンをクリックしてください。</p>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center mb-4">
+                        <div class="bg-green-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-green-700" id="contact-success-count">0</p>
+                            <p class="text-sm text-green-600">更新予定</p>
+                        </div>
+                        <div class="bg-yellow-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-yellow-700" id="contact-skip-count">0</p>
+                            <p class="text-sm text-yellow-600">スキップ</p>
+                        </div>
+                        <div class="bg-red-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-red-700" id="contact-error-count">0</p>
+                            <p class="text-sm text-red-600">エラー</p>
+                        </div>
+                        <div class="bg-gray-100 p-3 rounded">
+                            <p class="text-2xl font-bold text-gray-700" id="contact-total-count">0</p>
+                            <p class="text-sm text-gray-600">総行数</p>
+                        </div>
+                    </div>
+
+                    <!-- プレビュー明細 -->
+                    <div class="overflow-x-auto mb-4 max-h-64 overflow-y-auto border border-indigo-200 rounded">
+                        <table class="min-w-full divide-y divide-indigo-200 text-sm">
+                            <thead class="bg-indigo-100 sticky top-0">
+                                <tr>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-indigo-700">社員番号</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-indigo-700">氏名</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-indigo-700">メールアドレス</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-indigo-700">会社携帯</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-indigo-700">状態</th>
+                                </tr>
+                            </thead>
+                            <tbody id="contact-preview-tbody" class="bg-white divide-y divide-indigo-100"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- エラーメッセージ -->
+                    <div id="contact-errors" class="hidden mb-4">
+                        <div class="bg-red-100 border border-red-400 rounded p-3">
+                            <p class="font-semibold text-red-800 mb-2">エラー詳細</p>
+                            <ul id="contact-errors-list" class="list-disc list-inside text-sm text-red-700 max-h-32 overflow-y-auto"></ul>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4">
+                        <button onclick="executeContactImport()" class="flex-1 bg-indigo-600 text-white px-6 py-3 rounded-md hover:bg-indigo-700 font-semibold">
+                            ✅ 連絡先データをインポート
+                        </button>
+                        <button onclick="cancelContactUpload()" class="flex-1 bg-gray-400 text-white px-6 py-3 rounded-md hover:bg-gray-500">
                             ❌ キャンセル
                         </button>
                     </div>
@@ -1232,6 +1344,8 @@ const allColumns = {
     'retirement_date': '退職日付',
     'phone_number': '電話番号',
     'mobile_phone': '携帯電話',
+    'company_mobile': '会社携帯',
+    'email': 'メールアドレス',
     'health_insurance': '健康保険加入区分'
 };
 
@@ -1731,6 +1845,8 @@ async function viewEmployee(employeeNumber) {
                     <div><strong>退職日:</strong> ${emp.retirement_date || ''}</div>
                     <div><strong>携帯電話:</strong> ${emp.mobile_phone || ''}</div>
                     <div><strong>電話番号:</strong> ${emp.phone_number || ''}</div>
+                    <div><strong>会社携帯:</strong> ${emp.company_mobile || ''}</div>
+                    <div><strong>メールアドレス:</strong> ${emp.email || ''}</div>
                     <div><strong>郵便番号:</strong> ${emp.postal_code || ''}</div>
                     <div class="col-span-2"><strong>住所1:</strong> ${emp.address1 || ''}</div>
                     <div class="col-span-2"><strong>住所2:</strong> ${emp.address2 || ''}</div>
@@ -1803,6 +1919,14 @@ async function editEmployee() {
                         <div>
                             <label class="block text-sm font-medium text-gray-700">電話番号</label>
                             <input type="text" name="phone_number" value="${emp.phone_number || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">会社携帯</label>
+                            <input type="text" name="company_mobile" value="${emp.company_mobile || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">メールアドレス</label>
+                            <input type="email" name="email" value="${emp.email || ''}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700">郵便番号</label>
@@ -2616,19 +2740,27 @@ let salarySessionKey = null;
 function toggleFileType(type) {
     const employeeArea = document.getElementById('upload-area-employee');
     const salaryArea = document.getElementById('upload-area-salary');
+    const contactArea = document.getElementById('upload-area-contact');
     const previewArea = document.getElementById('preview-area');
     const salaryPreviewArea = document.getElementById('salary-preview-area');
+    const contactPreviewArea = document.getElementById('contact-preview-area');
 
     // プレビューをリセット
     previewArea.classList.add('hidden');
     salaryPreviewArea.classList.add('hidden');
+    contactPreviewArea.classList.add('hidden');
+
+    // 全アップロードエリアを一旦隠す
+    employeeArea.classList.add('hidden');
+    salaryArea.classList.add('hidden');
+    contactArea.classList.add('hidden');
 
     if (type === 'employee') {
         employeeArea.classList.remove('hidden');
-        salaryArea.classList.add('hidden');
-    } else {
-        employeeArea.classList.add('hidden');
+    } else if (type === 'salary') {
         salaryArea.classList.remove('hidden');
+    } else if (type === 'contact') {
+        contactArea.classList.remove('hidden');
     }
 }
 
@@ -2748,6 +2880,138 @@ function cancelSalaryUpload() {
     salarySessionKey = null;
     document.getElementById('salary-preview-area').classList.add('hidden');
     document.getElementById('file-input-salary').value = '';
+}
+
+// ===== 連絡先機能（ファイルC）関連 =====
+
+let contactSessionKey = null;
+
+// 連絡先ファイル選択時の処理
+function handleContactFileSelect(event) {
+    const file = event.target.files[0];
+    if (file) {
+        uploadContactFile(file);
+    }
+}
+
+// 連絡先ファイルのアップロード
+async function uploadContactFile(file) {
+    const progressArea = document.getElementById('upload-progress');
+    const progressBar = document.getElementById('progress-bar');
+    const previewArea = document.getElementById('contact-preview-area');
+
+    progressArea.classList.remove('hidden');
+    progressBar.style.width = '30%';
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        progressBar.style.width = '60%';
+
+        const response = await fetch('/tools/pluslist/api/upload-contact', {
+            method: 'POST',
+            body: formData
+        });
+
+        progressBar.style.width = '90%';
+        const data = await response.json();
+        progressBar.style.width = '100%';
+
+        if (response.ok && data.success) {
+            contactSessionKey = data.session_key;
+
+            document.getElementById('contact-success-count').textContent = data.stats.success_count;
+            document.getElementById('contact-skip-count').textContent = data.stats.skip_count;
+            document.getElementById('contact-error-count').textContent = data.stats.error_count;
+            document.getElementById('contact-total-count').textContent = data.stats.total_rows;
+
+            // 明細プレビュー
+            const tbody = document.getElementById('contact-preview-tbody');
+            tbody.innerHTML = '';
+            (data.preview || []).forEach(item => {
+                const tr = document.createElement('tr');
+                let statusHtml;
+                if (!item.employee_exists) {
+                    statusHtml = '<span class="text-red-600">社員未登録</span>';
+                } else if (!item.has_access) {
+                    statusHtml = '<span class="text-yellow-600">権限なし</span>';
+                } else {
+                    statusHtml = '<span class="text-green-600">更新</span>';
+                }
+                tr.innerHTML = `
+                    <td class="px-3 py-2 font-mono">${item.employee_number}</td>
+                    <td class="px-3 py-2">${item.employee_name || ''}</td>
+                    <td class="px-3 py-2">${item.email || '-'}</td>
+                    <td class="px-3 py-2 font-mono">${item.company_mobile || '-'}</td>
+                    <td class="px-3 py-2">${statusHtml}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // エラー表示
+            const errorsArea = document.getElementById('contact-errors');
+            const errorsList = document.getElementById('contact-errors-list');
+            if (data.errors && data.errors.length > 0) {
+                errorsList.innerHTML = data.errors.map(e => `<li>${e}</li>`).join('');
+                errorsArea.classList.remove('hidden');
+            } else {
+                errorsArea.classList.add('hidden');
+            }
+
+            previewArea.classList.remove('hidden');
+        } else {
+            alert('エラー: ' + (data.error || '不明なエラー'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    } finally {
+        setTimeout(() => {
+            progressArea.classList.add('hidden');
+            progressBar.style.width = '0%';
+        }, 500);
+    }
+}
+
+// 連絡先データのインポート実行
+async function executeContactImport() {
+    if (!contactSessionKey) {
+        alert('セッションが無効です');
+        return;
+    }
+
+    if (!confirm('連絡先データ（メールアドレス・会社携帯）をインポートしますか？')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/tools/pluslist/api/import-contact', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session_key: contactSessionKey})
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            alert(`連絡先データのインポートが完了しました！\n\n更新: ${data.stats.success_count}件\nスキップ: ${data.stats.skip_count}件\nエラー: ${data.stats.error_count}件`);
+            cancelContactUpload();
+            searchEmployees(currentPage);
+        } else {
+            alert('エラー: ' + (data.error || '不明なエラー'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('通信エラーが発生しました');
+    }
+}
+
+// 連絡先アップロードのキャンセル
+function cancelContactUpload() {
+    contactSessionKey = null;
+    document.getElementById('contact-preview-area').classList.add('hidden');
+    document.getElementById('file-input-contact').value = '';
 }
 
 // 賃金マッピング一覧の読み込み（管理者用）
@@ -2956,6 +3220,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.querySelector('input[name="file-type"][value="salary"]').checked = true;
                 toggleFileType('salary');
                 uploadSalaryFile(file);
+            }
+        });
+    }
+
+    const dropZoneContact = document.getElementById('drop-zone-contact');
+    if (dropZoneContact) {
+        dropZoneContact.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZoneContact.classList.add('border-indigo-500', 'bg-indigo-100');
+        });
+
+        dropZoneContact.addEventListener('dragleave', () => {
+            dropZoneContact.classList.remove('border-indigo-500', 'bg-indigo-100');
+        });
+
+        dropZoneContact.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZoneContact.classList.remove('border-indigo-500', 'bg-indigo-100');
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                // ファイル種別を連絡先に変更
+                document.querySelector('input[name="file-type"][value="contact"]').checked = true;
+                toggleFileType('contact');
+                uploadContactFile(file);
             }
         });
     }

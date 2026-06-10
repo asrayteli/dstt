@@ -13,7 +13,7 @@ import csv
 
 from app.utils.atomic_io import write_json_atomic
 
-from app.models import db, Employee, Office, UploadHistory, EditHistory, SalaryMapping, EmployeeSalary, SalaryUploadHistory
+from app.models import db, Employee, Office, UploadHistory, EditHistory, SalaryMapping, EmployeeSalary, SalaryUploadHistory, ContactUploadHistory
 from app.access_control import (
     is_admin_user as _is_dstt_admin,
     user_office_codes as _dstt_user_office_codes,
@@ -1263,6 +1263,8 @@ def export_data(format):
         'retirement_date': '退職日付',
         'phone_number': '電話番号',
         'mobile_phone': '携帯電話',
+        'company_mobile': '会社携帯',
+        'email': 'メールアドレス',
         'health_insurance': '健康保険加入区分'
     }
 
@@ -2211,6 +2213,341 @@ def get_salary_upload_histories():
     """賃金ファイルアップロード履歴を取得"""
     histories = SalaryUploadHistory.query.order_by(
         SalaryUploadHistory.uploaded_at.desc()
+    ).limit(100).all()
+
+    return jsonify([{
+        'id': h.id,
+        'uploaded_by': h.uploaded_by,
+        'uploaded_at': h.uploaded_at.isoformat(),
+        'filename': h.filename,
+        'success_count': h.success_count,
+        'skip_count': h.skip_count,
+        'error_count': h.error_count,
+        'total_rows': h.total_rows
+    } for h in histories])
+
+
+# ===== 連絡先情報機能（ファイルC: メールアドレス / 会社携帯） =====
+
+def _pad_leading_zeros(value, width):
+    """Excelで先頭の0が落ちた数値を文字列化し、指定桁数まで0埋めして返す。
+
+    社員番号(7桁)・電話番号(11桁)はExcel上で数値として扱われ頭の0が
+    消えてしまうため、サーバー側で数字のみを抽出して左ゼロ埋めする。
+    値が無い場合は None を返す。
+    """
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    s = str(value).strip()
+    if s == '' or s.lower() in ('nan', 'nat', 'none'):
+        return None
+
+    # Excel由来で "12345.0" のように小数点が付くケースを救済
+    if s.endswith('.0') and s[:-2].isdigit():
+        s = s[:-2]
+
+    # 数字以外（ハイフン等）は除去してから0埋め
+    digits = ''.join(ch for ch in s if ch.isdigit())
+    if digits == '':
+        return None
+
+    # 想定桁数を超える場合はゼロ埋めせずそのまま返す（切り捨てない）
+    if len(digits) >= width:
+        return digits
+    return digits.zfill(width)
+
+
+def _clean_email(value):
+    """メールアドレスセルを文字列に整形する。空欄は None。"""
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    s = str(value).strip()
+    if s == '' or s.lower() in ('nan', 'nat', 'none'):
+        return None
+    return s
+
+
+def read_contact_file(file_path, original_filename=None):
+    """
+    連絡先情報ファイル（ファイルC）を読み込む。
+    .xlsx形式のみ対応。1行目はヘッダーのため列位置で読み取る（header=None）。
+        B列(index1): 社員番号
+        D列(index3): メールアドレス
+        H列(index7): 電話番号（会社携帯）
+    """
+    if original_filename:
+        file_ext = os.path.splitext(original_filename)[1].lower()
+    else:
+        file_ext = os.path.splitext(file_path)[1].lower()
+
+    if file_ext != '.xlsx':
+        raise ValueError(f"連絡先情報ファイルは.xlsx形式のみ対応しています（現在: {file_ext}）")
+
+    try:
+        # 列位置で扱うため header=None。前ゼロ保持のため全列を文字列で読み込む
+        df = pd.read_excel(file_path, engine='openpyxl', header=None, dtype=str)
+    except Exception as e:
+        raise ValueError(f".xlsxファイルの読み込みに失敗しました: {str(e)}")
+
+    return df
+
+
+def parse_contact_row(row):
+    """
+    連絡先データ行（ファイルC）をパースする。
+    Returns: {'employee_number', 'email', 'company_mobile'}
+    """
+    def _cell(idx):
+        return row.iloc[idx] if len(row) > idx else None
+
+    return {
+        'employee_number': _pad_leading_zeros(_cell(1), 7),   # B列・7桁
+        'email': _clean_email(_cell(3)),                      # D列
+        'company_mobile': _pad_leading_zeros(_cell(7), 11),   # H列・11桁
+    }
+
+
+@pluslist_bp.route("/api/upload-contact", methods=["POST"])
+@login_required
+def upload_contact_file():
+    """連絡先情報ファイル（ファイルC）のアップロード＆プレビュー"""
+    user_id = str(current_user.username)
+    user_offices = get_user_offices(user_id)
+
+    if not user_offices:
+        return jsonify({"error": "アクセス権限がありません"}), 403
+
+    if 'file' not in request.files:
+        return jsonify({"error": "ファイルが選択されていません"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "ファイルが選択されていません"}), 400
+
+    original_filename = file.filename
+    file_ext = os.path.splitext(original_filename)[1].lower()
+
+    if file_ext != '.xlsx':
+        return jsonify({"error": "連絡先情報ファイルは.xlsx形式のみ対応しています"}), 400
+
+    temp_path = None
+    try:
+        filename = secure_filename(file.filename)
+        uploads_path = os.path.join(get_data_path(), 'uploads')
+        os.makedirs(uploads_path, exist_ok=True)
+        temp_path = os.path.join(uploads_path, f"contact_temp_{user_id}_{filename}")
+        file.save(temp_path)
+
+        df = read_contact_file(temp_path, original_filename)
+
+        # 1行目はヘッダーのためスキップ（2行目以降がデータ）
+        data_rows = df.iloc[1:] if len(df) > 0 else df
+
+        preview_data = []
+        errors = []
+        success_count = 0
+        skip_count = 0
+        error_count = 0
+
+        for idx, row in data_rows.iterrows():
+            parsed = parse_contact_row(row)
+
+            # 社員番号が無い行はスキップ（空行など）
+            if not parsed['employee_number']:
+                continue
+
+            # メール・会社携帯がいずれも無い行は対象外
+            if not parsed['email'] and not parsed['company_mobile']:
+                continue
+
+            employee = Employee.query.filter_by(
+                employee_number=parsed['employee_number'],
+                is_deleted=False
+            ).first()
+
+            employee_exists = employee is not None
+            has_access = employee_exists and employee.office_code in user_offices
+
+            preview_data.append({
+                'row_number': int(idx) + 1,
+                'employee_number': parsed['employee_number'],
+                'email': parsed['email'],
+                'company_mobile': parsed['company_mobile'],
+                'employee_name': employee.employee_name if employee_exists else '',
+                'employee_exists': employee_exists,
+                'has_access': has_access
+            })
+
+            if employee_exists and has_access:
+                success_count += 1
+            else:
+                skip_count += 1
+
+        # 元ファイルは平文で残さず削除
+        _safe_unlink(temp_path)
+        temp_path = None
+
+        if not preview_data:
+            return jsonify({
+                "error": "アップロード可能なデータがありません",
+                "details": "社員番号・メールアドレス・会社携帯のいずれも読み取れませんでした"
+            }), 400
+
+        session_key = f"contact_upload_{user_id}_{datetime.now().timestamp()}"
+        session_data = {
+            'filename': original_filename,
+            'preview_data': preview_data
+        }
+
+        session_file = _session_path(uploads_path, session_key)
+        try:
+            _encrypt_session_json(session_file, session_data)
+        except Exception:
+            _safe_unlink(session_file)
+            raise
+
+        return jsonify({
+            "success": True,
+            "session_key": session_key,
+            "preview": preview_data[:50],
+            "stats": {
+                "total_rows": len(data_rows),
+                "success_count": success_count,
+                "skip_count": skip_count,
+                "error_count": error_count
+            },
+            "errors": errors[:20]
+        })
+
+    except Exception as e:
+        try:
+            if temp_path:
+                _safe_unlink(temp_path)
+        except Exception:
+            pass
+        return jsonify({"error": f"ファイル処理エラー: {str(e)}"}), 500
+
+
+@pluslist_bp.route("/api/import-contact", methods=["POST"])
+@login_required
+def import_contact_data():
+    """連絡先データ（ファイルC）のインポート実行"""
+    user_id = str(current_user.username)
+    user_offices = set(get_user_offices(user_id))
+
+    data = request.json
+    session_key = data.get('session_key')
+
+    if not session_key:
+        return jsonify({"error": "セッションキーが必要です"}), 400
+
+    try:
+        uploads_path = os.path.join(get_data_path(), 'uploads')
+        session_file, session_data = _load_session_payload(uploads_path, session_key)
+
+        if session_data is None:
+            return jsonify({"error": "セッションが期限切れです"}), 400
+
+        preview_data = session_data['preview_data']
+
+        success_count = 0
+        skip_count = 0
+        errors = []
+
+        for item in preview_data:
+            # セッションを信用せず、権限と存在を再検証する
+            employee = Employee.query.filter_by(
+                employee_number=item['employee_number'],
+                is_deleted=False
+            ).first()
+
+            if employee is None or employee.office_code not in user_offices:
+                skip_count += 1
+                continue
+
+            try:
+                changed = False
+                # 値がある項目のみ更新し、空欄での意図しない消去を防ぐ
+                if item.get('email'):
+                    if employee.email != item['email']:
+                        record_edit_history(
+                            employee_number=employee.employee_number,
+                            user_id=user_id,
+                            action='update',
+                            field_name='email',
+                            old_value=employee.email or '',
+                            new_value=item['email']
+                        )
+                        employee.email = item['email']
+                        changed = True
+                if item.get('company_mobile'):
+                    if employee.company_mobile != item['company_mobile']:
+                        record_edit_history(
+                            employee_number=employee.employee_number,
+                            user_id=user_id,
+                            action='update',
+                            field_name='company_mobile',
+                            old_value=employee.company_mobile or '',
+                            new_value=item['company_mobile']
+                        )
+                        employee.company_mobile = item['company_mobile']
+                        changed = True
+
+                if changed:
+                    employee.updated_at = datetime.utcnow()
+                success_count += 1
+
+            except Exception as e:
+                errors.append(f"社員番号 {item['employee_number']}: {str(e)}")
+                skip_count += 1
+
+        history = ContactUploadHistory(
+            uploaded_by=user_id,
+            filename=session_data['filename'],
+            success_count=success_count,
+            skip_count=skip_count,
+            error_count=len(errors),
+            total_rows=len(preview_data)
+        )
+        db.session.add(history)
+
+        db.session.commit()
+
+        _safe_unlink(session_data.get('file_path') or "")
+        _safe_unlink(session_file)
+
+        return jsonify({
+            "success": True,
+            "stats": {
+                "success_count": success_count,
+                "skip_count": skip_count,
+                "error_count": len(errors)
+            },
+            "errors": errors[:10]
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"インポートエラー: {str(e)}"}), 500
+
+
+@pluslist_bp.route("/api/histories/contact-upload")
+@login_required
+def get_contact_upload_histories():
+    """連絡先ファイル（ファイルC）アップロード履歴を取得"""
+    histories = ContactUploadHistory.query.order_by(
+        ContactUploadHistory.uploaded_at.desc()
     ).limit(100).all()
 
     return jsonify([{
