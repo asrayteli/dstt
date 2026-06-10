@@ -4116,6 +4116,15 @@ def _replace_shift_synced_entries_in_target_project(
             ],
         },
     )
+    # 他シフト帳の保存に伴う自動反映でも、このシフト帳の ViewPWA 購読者には
+    # 「この月を保存」と同じ条件（実カレンダー当月・正式シフトの実変更）で通知する。
+    _maybe_notify_pwa_month_change(
+        target_project,
+        year,
+        month,
+        current_entries_per_day,
+        target_project["months"][month_key],
+    )
     return True
 
 
@@ -4266,6 +4275,7 @@ def _refresh_master_shift_from_sources(
             ],
         },
     )
+    _maybe_notify_pwa_month_change(target_project, year, month, current_entries, merged)
     return True
 
 
@@ -7924,6 +7934,8 @@ def api_restore_month_revision(project_id: str, year: int, month: int):
         before_entries = _confirmed_entries_snapshot(project, year, month)
         month_payload = _restore_month_revision_in_project(project, year, month, revision, _user_label(), access_role)
     month_key = _month_key(year, month)
+    # 復元も正式シフトの変更なので、保存時と同様にリンク先シフト帳へ再同期する。
+    _resync_shift_month(project, month_key, actor_name=_user_label())
     _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
