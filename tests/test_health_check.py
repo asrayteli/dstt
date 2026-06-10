@@ -495,6 +495,33 @@ def test_attachment_title_set_and_rename(tmp_path):
     assert any(a["id"] == aid for a in rec["attachments"])
 
 
+def test_attachment_inline_preview_disposition(tmp_path):
+    """?inline=1 はプレビュー用にインライン配信、既定はダウンロード（attachment）。"""
+    import io
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    rid = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "internal",
+        "employee_name": "添付子", "office_code": "100"}).get_json()["record"]["id"]
+    up = client.post(
+        f"/tools/health_check/api/record/{rid}/attachment",
+        data={"file": (io.BytesIO(b"%PDF-1.4 test"), "result.pdf"), "category": "health"},
+        content_type="multipart/form-data",
+    )
+    aid = up.get_json()["attachment"]["id"]
+
+    # 既定はダウンロード（attachment）
+    dl = client.get(f"/tools/health_check/api/record/{rid}/attachment/{aid}")
+    assert dl.status_code == 200
+    assert "attachment" in dl.headers.get("Content-Disposition", "")
+
+    # inline=1 はインライン配信（プレビュー用）
+    pv = client.get(f"/tools/health_check/api/record/{rid}/attachment/{aid}?inline=1")
+    assert pv.status_code == 200
+    assert "attachment" not in pv.headers.get("Content-Disposition", "inline")
+
+
 def test_manual_record_saves_employee_type_and_birth_date(tmp_path):
     """手動モードでは社員区分（営業社員契約）と生年月日を入力・保存できる。"""
     module, app = _build(tmp_path)

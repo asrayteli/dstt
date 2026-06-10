@@ -934,7 +934,14 @@ def api_download_attachment(record_id, attachment_id):
     abs_path = os.path.join(get_uploads_path(), attachment.stored_path)
     if not os.path.exists(abs_path):
         return jsonify({"error": "ファイルが見つかりません"}), 404
-    return send_file(abs_path, as_attachment=True, download_name=attachment.original_name)
+    # inline=1 のときはプレビュー用にブラウザ内表示（画像/PDF）。既定はダウンロード。
+    inline = request.args.get("inline") == "1"
+    return send_file(
+        abs_path,
+        as_attachment=not inline,
+        download_name=attachment.original_name,
+        mimetype=attachment.content_type or None,
+    )
 
 
 @health_check_bp.route("/api/record/<int:record_id>/attachment/<int:attachment_id>", methods=["PATCH"])
