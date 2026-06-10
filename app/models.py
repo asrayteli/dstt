@@ -4,6 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from datetime import datetime, date, timedelta, timezone
 from dateutil.relativedelta import relativedelta
+from sqlalchemy.orm import deferred
 
 from .security.column_crypto import EncryptedText
 
@@ -1008,7 +1009,9 @@ class CloudShiftMonth(db.Model):
     entries_per_day = db.Column(db.JSON, nullable=False, default=dict)
     draft_entries_per_day = db.Column(db.JSON, nullable=False, default=dict)
     revision = db.Column(db.Integer, nullable=False, default=1)
-    revision_snapshots = db.Column(db.JSON, nullable=False, default=dict)
+    # スナップショットは月データの十数倍になり得るため、必要な経路
+    # （フルロード・リビジョン操作）だけが undefer で読み込む。
+    revision_snapshots = deferred(db.Column(db.JSON, nullable=False, default=dict))
     created_at = db.Column(db.String(32), nullable=False)
     updated_at = db.Column(db.String(32), nullable=False)
 
