@@ -4,6 +4,7 @@
 {% block content %}
 <div class="max-w-7xl mx-auto space-y-6" id="hc-app"
      data-is-admin="{{ 'true' if is_admin else 'false' }}"
+     data-is-dstt-admin="{{ 'true' if is_dstt_admin else 'false' }}"
      data-current-year="{{ current_year }}"
      data-global-lead="{{ global_lead_days }}">
 
@@ -233,7 +234,7 @@
     <div class="flex flex-wrap gap-1 px-5 pt-3 border-b border-gray-100">
       <button type="button" class="hc-tab is-active" data-stab="integration" onclick="HC.switchSettingsTab('integration')">🔔 ToBell連携</button>
       <button type="button" class="hc-tab hc-admin-only" data-stab="officers" onclick="HC.switchSettingsTab('officers')">🩺 健康診断担当</button>
-      <button type="button" class="hc-tab hc-admin-only" data-stab="permissions" onclick="HC.switchSettingsTab('permissions')">👥 アクセス権</button>
+      <button type="button" class="hc-tab hc-dstt-admin-only" data-stab="permissions" onclick="HC.switchSettingsTab('permissions')">👥 健診PLUS管理者</button>
     </div>
     <div class="hc-modal-body">
       <!-- パネル: ToBell連携（個人） -->
@@ -258,30 +259,22 @@
         <p class="text-sm text-gray-600">営業所ごとに「健康診断担当」を設定します。ここで設定した担当者は、その営業所のレコードの<strong>通知の既定の宛先</strong>（管理担当者に加えて）になります。変更は即時に保存されます。</p>
         <div id="officers-list" class="space-y-3"></div>
       </div>
-      <!-- パネル: アクセス権（管理者） -->
+      <!-- パネル: 健診PLUS管理者（DSTT管理者のみ） -->
       <div data-spanel="permissions" class="space-y-5 hidden">
-        <p class="text-xs text-gray-500">健診PLUSは健康情報を扱うため、閲覧には個別付与が必要です（DSTT管理者は全営業所）。一般利用者は所属営業所が既定スコープになり、ここで追加の営業所を付与できます。</p>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-2 items-end p-3 bg-gray-50 rounded-lg">
-          <label class="block text-xs font-medium text-gray-600">ユーザーID
-            <input type="text" id="perm-user" class="hc-input mt-1" placeholder="社員番号など"></label>
-          <label class="block text-xs font-medium text-gray-600">付与内容
-            <select id="perm-type" class="hc-input mt-1" onchange="HC.togglePermOffice()">
-              <option value="office">営業所アクセス</option>
-              <option value="admin">健診PLUS管理者</option>
-            </select></label>
-          <div id="perm-office-wrap">
-            <label class="block text-xs font-medium text-gray-600">営業所
-              <select id="perm-office" class="hc-input mt-1"></select></label>
-          </div>
-          <div class="md:col-span-3 text-right">
-            <button class="hc-btn-primary" onclick="HC.grantPermission()">付与する</button>
-          </div>
+        <p class="text-xs text-gray-500">
+          営業所の閲覧・編集権限は<strong>DSTTのアクセス権（営業所の付与）と同期</strong>します。健診PLUS側での営業所付与は不要です。<br>
+          ここでは<strong>健診PLUS管理者</strong>を指定します。健診PLUS管理者は<strong>自分の営業所のみ</strong>の管理者として、その営業所の「健康診断担当」を設定できます（他営業所へはアクセスできません）。DSTT管理者は全営業所を閲覧・編集できます。
+        </p>
+        <div class="flex flex-wrap items-end gap-2 p-3 bg-gray-50 rounded-lg">
+          <label class="block text-xs font-medium text-gray-600 flex-1 min-w-[12rem]">ユーザーID（DSTTのログインID）
+            <input type="text" id="perm-user" class="hc-input mt-1" placeholder="例：社員番号"></label>
+          <button class="hc-btn-primary" onclick="HC.grantPermission()">管理者に指定</button>
         </div>
         <div class="overflow-x-auto border border-gray-100 rounded-lg">
           <table class="min-w-full text-sm">
             <thead class="bg-gray-50 text-gray-500 text-xs"><tr>
               <th class="px-3 py-2 text-left">ユーザー</th>
-              <th class="px-3 py-2 text-left">権限</th>
+              <th class="px-3 py-2 text-left">管理できる営業所（DSTTのアクセス権）</th>
               <th class="px-3 py-2 text-right">操作</th>
             </tr></thead>
             <tbody id="perm-body" class="divide-y divide-gray-100"></tbody>
@@ -363,7 +356,8 @@
 <script>
 const HC = (function(){
   const root = document.getElementById('hc-app');
-  const IS_ADMIN = root.dataset.isAdmin === 'true';
+  const IS_ADMIN = root.dataset.isAdmin === 'true';          // 健診PLUS管理者（自営業所の管理者）
+  const IS_DSTT_ADMIN = root.dataset.isDsttAdmin === 'true'; // DSTT管理者（全営業所）
   const CURRENT_YEAR = parseInt(root.dataset.currentYear, 10);
   const EMPLOYEE_TYPE_OPTIONS = JSON.parse('{{ employee_type_options|tojson }}');
   let offices = [];
@@ -512,6 +506,7 @@ const HC = (function(){
   async function init(){
     offices = JSON.parse('{{ offices|tojson }}');
     if(!IS_ADMIN) document.querySelectorAll('.hc-admin-only').forEach(e=>e.style.display='none');
+    if(!IS_DSTT_ADMIN) document.querySelectorAll('.hc-dstt-admin-only').forEach(e=>e.style.display='none');
     populateOfficeSelects();
     await loadYears();
     bindEvents();
@@ -523,8 +518,6 @@ const HC = (function(){
     const fo = document.getElementById('filter-office');
     fo.innerHTML = '<option value="">営業所（すべて）</option>' +
       offices.map(o=>`<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join('');
-    const po = document.getElementById('perm-office');
-    if(po) po.innerHTML = offices.map(o=>`<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join('');
     updateHeroOffice();
   }
 
@@ -1495,11 +1488,8 @@ const HC = (function(){
       applyNotifyKinds(r.kinds||{});
     } catch(e){}
     syncNotifyKindsEnabled();
-    if(IS_ADMIN){
-      togglePermOffice();
-      loadPermissions();
-      loadHealthOfficers();
-    }
+    if(IS_ADMIN) loadHealthOfficers();        // 健康診断担当（自営業所/全営業所）
+    if(IS_DSTT_ADMIN) loadPermissions();      // 健診PLUS管理者の管理はDSTT管理者のみ
     switchSettingsTab('integration');
     show('settings-modal');
   }
@@ -1556,7 +1546,9 @@ const HC = (function(){
     document.querySelectorAll('#notify-kinds [data-kind]').forEach(cb=>{ cb.disabled = !on; });
   }
   function switchSettingsTab(tab){
-    if(!IS_ADMIN && tab!=='integration') tab = 'integration';
+    // 健康診断担当タブは健診PLUS管理者、健診PLUS管理者タブはDSTT管理者のみ
+    if(tab==='officers' && !IS_ADMIN) tab = 'integration';
+    if(tab==='permissions' && !IS_DSTT_ADMIN) tab = 'integration';
     activeSettingsTab = tab;
     document.querySelectorAll('#settings-modal [data-stab]').forEach(b=>b.classList.toggle('is-active', b.dataset.stab===tab));
     document.querySelectorAll('#settings-modal [data-spanel]').forEach(p=>p.classList.toggle('hidden', p.dataset.spanel!==tab));
@@ -1573,36 +1565,28 @@ const HC = (function(){
     }
   }
 
-  // ---- アクセス権（管理者） ----
-  function togglePermOffice(){
-    const t = document.getElementById('perm-type').value;
-    document.getElementById('perm-office-wrap').style.visibility = t==='office'?'visible':'hidden';
-  }
+  // ---- 健診PLUS管理者の指定（DSTT管理者のみ） ----
   async function loadPermissions(){
     let data; try { data = await api('/tools/health_check/api/admin/permissions'); } catch(e){ toast(e.message,'error'); return; }
     document.getElementById('perm-body').innerHTML = (data.users||[]).map(u=>{
-      const tags = [];
-      if(u.is_admin) tags.push('<span class="hc-pill" style="color:#0f766e;background:#ccfbf1">管理者</span>');
-      u.offices.forEach(o=>tags.push(`<span class="hc-pill" style="color:#1d4ed8;background:#dbeafe">${esc(o.name)}</span>`));
-      const ops = [];
-      if(u.is_admin) ops.push(`<button class="text-red-500 text-xs hover:underline" onclick="HC.revoke('${esc(u.user_id)}','admin')">管理者解除</button>`);
-      u.offices.forEach(o=>ops.push(`<button class="text-red-500 text-xs hover:underline" onclick="HC.revoke('${esc(u.user_id)}','office','${esc(o.code)}')">${esc(o.code)}解除</button>`));
-      return `<tr><td class="px-3 py-2 font-mono text-xs">${esc(u.user_id)}</td>
-        <td class="px-3 py-2 space-x-1">${tags.join(' ')||'<span class="text-gray-300">—</span>'}</td>
-        <td class="px-3 py-2 text-right space-x-2">${ops.join(' ')||'—'}</td></tr>`;
-    }).join('') || '<tr><td colspan="3" class="px-3 py-6 text-center text-gray-400 text-sm">付与済みのユーザーはいません</td></tr>';
+      const offices = (u.offices||[]).length
+        ? (u.offices||[]).map(c=>`<span class="hc-pill" style="color:#1d4ed8;background:#dbeafe">${esc(officeName(c))}</span>`).join(' ')
+        : '<span class="text-xs text-gray-400">DSTTで営業所が未付与</span>';
+      return `<tr>
+        <td class="px-3 py-2"><span class="font-medium">${esc(u.name||u.user_id)}</span> <span class="text-xs text-gray-400 font-mono">${esc(u.user_id)}</span></td>
+        <td class="px-3 py-2 space-x-1">${offices}</td>
+        <td class="px-3 py-2 text-right"><button class="text-red-500 text-xs hover:underline" onclick="HC.revoke('${esc(u.user_id)}')">管理者を解除</button></td></tr>`;
+    }).join('') || '<tr><td colspan="3" class="px-3 py-6 text-center text-gray-400 text-sm">健診PLUS管理者はいません</td></tr>';
   }
   async function grantPermission(){
     const user_id = document.getElementById('perm-user').value.trim();
-    const grant_type = document.getElementById('perm-type').value;
-    const office_code = document.getElementById('perm-office').value;
     if(!user_id){ toast('ユーザーIDを入力してください','warn'); return; }
-    try { await api('/tools/health_check/api/admin/grant', {method:'POST', body:JSON.stringify({user_id, grant_type, office_code})});
-      toast('付与しました'); document.getElementById('perm-user').value=''; loadPermissions(); }
+    try { await api('/tools/health_check/api/admin/grant', {method:'POST', body:JSON.stringify({user_id})});
+      toast('健診PLUS管理者に指定しました'); document.getElementById('perm-user').value=''; loadPermissions(); }
     catch(e){ toast(e.message,'error'); }
   }
-  async function revoke(user_id, revoke_type, office_code){
-    try { await api('/tools/health_check/api/admin/revoke', {method:'POST', body:JSON.stringify({user_id, revoke_type, office_code})});
+  async function revoke(user_id){
+    try { await api('/tools/health_check/api/admin/revoke', {method:'POST', body:JSON.stringify({user_id})});
       toast('解除しました'); loadPermissions(); }
     catch(e){ toast(e.message,'error'); }
   }
@@ -1628,7 +1612,7 @@ const HC = (function(){
     resolveManagers, exportCsv,
     openColumnsModal, closeColumnsModal, selectAllColumns, resetColumns, applyColumns,
     openSettingsModal, closeSettingsModal, switchSettingsTab, saveCurrentSettings,
-    grantPermission, revoke, togglePermOffice,
+    grantPermission, revoke,
     addOfficer, removeOfficer,
   };
 })();
