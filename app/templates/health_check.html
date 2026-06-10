@@ -38,6 +38,11 @@
           </div>
           <div class="dstt-hero-card-note">健診年度は4月開始です</div>
         </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">参照中の営業所</div>
+          <div class="dstt-hero-card-value text-lg leading-tight" id="hero-office">—</div>
+          <div class="dstt-hero-card-note" id="hero-office-note">閲覧・作成・編集できる営業所のみ表示します</div>
+        </div>
       </div>
     </div>
   </section>
@@ -84,6 +89,7 @@
         <input type="checkbox" id="filter-retired" class="rounded text-rose-600 focus:ring-rose-500"> 退職者も表示
       </label>
       <div class="ml-auto flex flex-wrap items-center gap-2">
+        <button type="button" class="hc-btn-ghost" onclick="HC.openColumnsModal()">🗂️ 表示項目</button>
         <button type="button" class="hc-btn-ghost" onclick="HC.resolveManagers()">担当者を自動紐付け</button>
         <button type="button" class="hc-btn-ghost" onclick="HC.exportCsv()">CSV出力</button>
         <button type="button" class="hc-btn-ghost" onclick="HC.openSettingsModal()">⚙ 設定</button>
@@ -96,16 +102,7 @@
     <div class="overflow-x-auto">
       <table class="min-w-full text-sm">
         <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
-          <tr>
-            <th class="px-4 py-3 text-left cursor-pointer" data-sort="employee_number">社員番号</th>
-            <th class="px-4 py-3 text-left cursor-pointer" data-sort="employee_name">氏名</th>
-            <th class="px-4 py-3 text-left">専従先 / 区分</th>
-            <th class="px-4 py-3 text-left cursor-pointer" data-sort="exam_date">受診日</th>
-            <th class="px-4 py-3 text-left">ステータス</th>
-            <th class="px-4 py-3 text-left">二次/深夜</th>
-            <th class="px-4 py-3 text-left">担当者</th>
-            <th class="px-4 py-3 text-right">操作</th>
-          </tr>
+          <tr id="records-head"></tr>
         </thead>
         <tbody id="records-body" class="divide-y divide-gray-100"></tbody>
       </table>
@@ -152,6 +149,30 @@
     <div class="hc-modal-foot">
       <button class="hc-btn-ghost" onclick="HC.closeRecheckModal()">閉じる</button>
       <button class="hc-btn-primary" onclick="HC.applyRecheckModal()">適用</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== モーダル: 表示項目の選択 ===== -->
+<div id="columns-modal" class="hc-modal hidden" style="z-index:55;">
+  <div class="hc-modal-backdrop" onclick="HC.closeColumnsModal()"></div>
+  <div class="hc-modal-panel max-w-2xl">
+    <div class="hc-modal-head">
+      <h2 class="text-lg font-bold text-gray-800">表示項目の選択</h2>
+      <button onclick="HC.closeColumnsModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+    </div>
+    <div class="hc-modal-body space-y-3">
+      <p class="text-sm text-gray-600">一覧に表示する項目を選択してください。選択内容はこのブラウザに保存されます。</p>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="hc-btn-ghost !py-1 !px-2.5" onclick="HC.selectAllColumns(true)">すべて選択</button>
+        <button type="button" class="hc-btn-ghost !py-1 !px-2.5" onclick="HC.selectAllColumns(false)">すべて解除</button>
+        <button type="button" class="hc-btn-ghost !py-1 !px-2.5" onclick="HC.resetColumns()">既定に戻す</button>
+      </div>
+      <div id="columns-options" class="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1.5 max-h-[50vh] overflow-y-auto pr-1"></div>
+    </div>
+    <div class="hc-modal-foot">
+      <button class="hc-btn-ghost" onclick="HC.closeColumnsModal()">キャンセル</button>
+      <button class="hc-btn-primary" onclick="HC.applyColumns()">適用</button>
     </div>
   </div>
 </div>
@@ -275,6 +296,23 @@
   </div>
 </div>
 
+<!-- ===== 添付ファイルプレビュー（ビューワ） ===== -->
+<div id="hc-viewer" class="hc-viewer hidden" role="dialog" aria-modal="true" aria-labelledby="hc-viewer-title">
+  <div class="hc-viewer-head">
+    <strong class="hc-viewer-title" id="hc-viewer-title">プレビュー</strong>
+    <div class="hc-viewer-actions">
+      <button type="button" class="hc-viewer-btn" onclick="HC.viewerZoom(-1)" aria-label="縮小">−</button>
+      <button type="button" class="hc-viewer-btn" id="hc-viewer-pct" onclick="HC.viewerZoom(0)">100%</button>
+      <button type="button" class="hc-viewer-btn" onclick="HC.viewerZoom(1)" aria-label="拡大">＋</button>
+      <a class="hc-viewer-btn hc-viewer-dl" id="hc-viewer-download" download>ダウンロード</a>
+      <button type="button" class="hc-viewer-btn hc-viewer-close" onclick="HC.closeViewer()" aria-label="閉じる">×</button>
+    </div>
+  </div>
+  <div class="hc-viewer-body">
+    <div class="hc-viewer-stage" id="hc-viewer-stage"></div>
+  </div>
+</div>
+
 <!-- トースト -->
 <div id="hc-toast" class="fixed bottom-6 right-6 z-[60] space-y-2"></div>
 
@@ -304,6 +342,22 @@
   .hc-dropzone.is-dragover{border-color:#0f766e;background:#ccfbf1;color:#0f766e;border-style:solid;}
   .hc-dropzone-icon{font-size:1.6rem;line-height:1;}
   .hc-dropzone-text{font-size:.8rem;line-height:1.35;}
+  /* 添付プレビュー（ToBellのビューワを参考） */
+  .hc-viewer{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;background:rgba(15,23,42,.94);}
+  .hc-viewer.hidden{display:none;}
+  .hc-viewer-head{display:flex;align-items:center;gap:.75rem;padding:.6rem .85rem;background:#0f172a;color:#fff;border-bottom:1px solid #1e293b;}
+  .hc-viewer-title{flex:1 1 auto;min-width:0;font-size:.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .hc-viewer-actions{display:flex;gap:.4rem;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end;}
+  .hc-viewer-btn{min-height:38px;padding:.4rem .75rem;background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:.5rem;font-size:.82rem;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;}
+  .hc-viewer-btn:hover{background:#334155;}
+  #hc-viewer-pct{min-width:64px;justify-content:center;font-variant-numeric:tabular-nums;}
+  .hc-viewer-close{background:#b91c1c;border-color:#b91c1c;color:#fff;font-size:1.15rem;font-weight:800;min-width:44px;line-height:1;justify-content:center;}
+  .hc-viewer-close:hover{background:#991b1b;}
+  .hc-viewer-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;background:#0f172a;overscroll-behavior:contain;}
+  .hc-viewer-stage{display:flex;justify-content:center;align-items:flex-start;min-height:100%;padding:1rem;transform-origin:center top;transition:transform .15s ease;}
+  .hc-viewer-stage img{max-width:100%;height:auto;background:#fff;border-radius:6px;box-shadow:0 10px 30px rgba(0,0,0,.4);user-select:none;-webkit-user-drag:none;}
+  .hc-viewer-stage iframe{width:min(960px,100%);height:80vh;border:0;background:#fff;border-radius:6px;box-shadow:0 10px 30px rgba(0,0,0,.4);}
+  .hc-attach-preview{color:#0f766e;}
 </style>
 
 <script>
@@ -331,6 +385,88 @@ const HC = (function(){
     '二次完了': ['#0f766e','#ccfbf1'],
   };
   const TYPE_LABEL = {linked:'名簿連携', pre_hire:'入社前', internal:'内勤者'};
+  let officeNameMap = {};
+  function officeName(code){ return officeNameMap[code] || code || '—'; }
+
+  // ---- 一覧の表示項目（列）定義 ----
+  function statusPill(r){
+    const [fg,bg] = STATUS_STYLE[r.status] || ['#475569','#f1f5f9'];
+    return `<span class="hc-pill" style="color:${fg};background:${bg}">${r.status}</span>`;
+  }
+  function badgesHtml(r){
+    const badges = [];
+    if(r.is_night_worker){ const ok=!!r.exam_date_2; badges.push(`<span class="hc-pill" style="color:${ok?'#0f766e':'#7c3aed'};background:${ok?'#ccfbf1':'#ede9fe'}">深夜${ok?'2回目済':'2回目'}</span>`); }
+    if(r.needs_recheck && r.status!=='二次完了'){ badges.push(`<span class="hc-pill" style="color:#b45309;background:#fef3c7">要二次</span>`); }
+    if(r.is_exempt){ badges.push(`<span class="hc-pill" style="color:#475569;background:#e2e8f0">受診非対象</span>`); }
+    if(r.is_kintone){ badges.push(`<span class="hc-pill" style="color:#0369a1;background:#e0f2fe">kintone</span>`); }
+    return badges.join(' ') || '<span class="text-gray-300">—</span>';
+  }
+  function recheckText(r){
+    const list = Array.isArray(r.recheck_items_list) ? r.recheck_items_list : [];
+    if(!list.length) return '—';
+    return esc(list.map(it=> it.name && it.value ? `${it.name}：${it.value}` : (it.name||it.value)).join(' / '));
+  }
+  function mgrCell(r){
+    return r.manager_user
+      ? `<span class="text-gray-700">${esc(r.manager_name||r.manager_user)}</span>`
+      : `<span class="hc-pill" style="color:#dc2626;background:#fee2e2">未割当</span>`;
+  }
+  function dt(s){ return fmtDate(s); }
+  function ox(v){ return v ? '○' : '—'; }
+  // sort: backend SORTABLE_FIELDS に含まれる列のみ並び替え可
+  const ALL_COLUMNS = [
+    {key:'employee_number', label:'社員番号', sort:'employee_number', cls:'font-mono text-xs text-gray-500', render:r=>esc(r.employee_number)||'—'},
+    {key:'employee_name', label:'氏名', sort:'employee_name', cls:'font-medium text-gray-800', render:r=>`${esc(r.employee_name)}${r.is_retired?' <span class="hc-pill" style="color:#b91c1c;background:#fee2e2">退職者</span>':''}`},
+    {key:'assignment_site', label:'専従先名', sort:'assignment_site', render:r=>esc(r.assignment_site)||'—'},
+    {key:'record_type', label:'区分', render:r=>TYPE_LABEL[r.record_type]||r.record_type},
+    {key:'employee_type', label:'社員区分', render:r=>esc(r.employee_type)||'—'},
+    {key:'office_code', label:'営業所', render:r=>esc(officeName(r.office_code))},
+    {key:'manager_name', label:'管理担当名', sort:'manager_name', render:r=>esc(r.manager_name)||'—'},
+    {key:'manager_user', label:'担当者（通知）', render:r=>mgrCell(r)},
+    {key:'reservation_date', label:'予約日', sort:'reservation_date', render:r=>dt(r.reservation_date)},
+    {key:'exam_date', label:'受診日', sort:'exam_date', render:r=>dt(r.exam_date)},
+    {key:'status', label:'ステータス', render:r=>statusPill(r)},
+    {key:'badges', label:'二次/深夜・フラグ', render:r=>badgesHtml(r)},
+    {key:'medical_institution', label:'受診医療機関', render:r=>esc(r.medical_institution)||'—'},
+    {key:'exam_date_2', label:'受診日②（深夜2回目）', render:r=>dt(r.exam_date_2)},
+    {key:'needs_recheck', label:'再検査', render:r=>ox(r.needs_recheck)},
+    {key:'recheck_items', label:'再検査項目', render:r=>recheckText(r)},
+    {key:'secondary_recommended_date', label:'二次検査推奨日', render:r=>dt(r.secondary_recommended_date)},
+    {key:'secondary_guide_sent_date', label:'二次案内送付日', render:r=>dt(r.secondary_guide_sent_date)},
+    {key:'secondary_exam_date', label:'二次検診受診日', render:r=>dt(r.secondary_exam_date)},
+    {key:'secondary_result', label:'二次検査結果', render:r=>esc(r.secondary_result)||'—'},
+    {key:'hire_date', label:'入社日付', render:r=>dt(r.hire_date)},
+    {key:'retirement_date', label:'退職日付', render:r=>esc(r.retirement_date)||'—'},
+    {key:'birth_date', label:'生年月日', render:r=>dt(r.birth_date)},
+    {key:'is_nasva_target', label:'NASVA対象', render:r=>ox(r.is_nasva_target)},
+    {key:'nasva_reservation_date', label:'NASVA予約日', render:r=>dt(r.nasva_reservation_date)},
+    {key:'nasva_exam_date', label:'NASVA受診日', render:r=>dt(r.nasva_exam_date)},
+    {key:'is_exempt', label:'受診非対象', render:r=>ox(r.is_exempt)},
+    {key:'is_kintone', label:'kintone', render:r=>ox(r.is_kintone)},
+    {key:'is_retired', label:'退職者', render:r=>ox(r.is_retired)},
+    {key:'attachment_count', label:'添付数', render:r=>r.attachment_count||0},
+    {key:'remarks', label:'備考', render:r=>esc(r.remarks)||'—'},
+  ];
+  const COLUMN_MAP = {}; ALL_COLUMNS.forEach(c=>COLUMN_MAP[c.key]=c);
+  const DEFAULT_COLUMNS = ['employee_number','employee_name','assignment_site','record_type','exam_date','status','badges','manager_user'];
+  const COLUMNS_STORAGE_KEY = 'hc_columns_v1';
+  let visibleColumns = loadColumnPref();
+  let columnDraft = null;  // モーダル編集中の一時選択
+
+  function loadColumnPref(){
+    try {
+      const raw = localStorage.getItem(COLUMNS_STORAGE_KEY);
+      if(raw){
+        const arr = JSON.parse(raw);
+        const valid = Array.isArray(arr) ? arr.filter(k=>COLUMN_MAP[k]) : [];
+        if(valid.length) return valid;
+      }
+    } catch(e){}
+    return DEFAULT_COLUMNS.slice();
+  }
+  function saveColumnPref(){
+    try { localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(visibleColumns)); } catch(e){}
+  }
 
   function api(url, opts){
     opts = opts || {};
@@ -383,11 +519,29 @@ const HC = (function(){
   }
 
   function populateOfficeSelects(){
+    officeNameMap = {}; offices.forEach(o=>officeNameMap[o.code]=o.name);
     const fo = document.getElementById('filter-office');
     fo.innerHTML = '<option value="">営業所（すべて）</option>' +
       offices.map(o=>`<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join('');
     const po = document.getElementById('perm-office');
     if(po) po.innerHTML = offices.map(o=>`<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join('');
+    updateHeroOffice();
+  }
+
+  function updateHeroOffice(){
+    const el = document.getElementById('hero-office');
+    const note = document.getElementById('hero-office-note');
+    if(!el) return;
+    if(state.office){
+      el.textContent = officeName(state.office);
+      if(note) note.textContent = `営業所コード ${state.office}`;
+    } else if(offices.length === 1){
+      el.textContent = officeName(offices[0].code);
+      if(note) note.textContent = `営業所コード ${offices[0].code}`;
+    } else {
+      el.textContent = 'すべての営業所';
+      if(note) note.textContent = `閲覧できる ${offices.length} 営業所を表示中`;
+    }
   }
 
   async function loadYears(){
@@ -401,7 +555,7 @@ const HC = (function(){
 
   function bindEvents(){
     document.getElementById('year-select').addEventListener('change', e=>{ state.year=parseInt(e.target.value,10); refresh(); });
-    document.getElementById('filter-office').addEventListener('change', e=>{ state.office=e.target.value; refresh(); });
+    document.getElementById('filter-office').addEventListener('change', e=>{ state.office=e.target.value; updateHeroOffice(); refresh(); });
     document.getElementById('filter-type').addEventListener('change', e=>{ state.type=e.target.value; loadRecords(); });
     document.getElementById('filter-status').addEventListener('change', e=>{ state.status=e.target.value; loadRecords(); });
     document.getElementById('filter-night').addEventListener('change', e=>{ state.night=e.target.checked; loadRecords(); });
@@ -409,13 +563,20 @@ const HC = (function(){
     document.getElementById('filter-unassigned').addEventListener('change', e=>{ state.unassigned=e.target.checked; loadRecords(); });
     document.getElementById('filter-retired').addEventListener('change', e=>{ state.retired=e.target.checked; loadRecords(); });
     let t; document.getElementById('search-input').addEventListener('input', e=>{ clearTimeout(t); t=setTimeout(()=>{ state.search=e.target.value.trim(); loadRecords(); }, 300); });
-    document.querySelectorAll('th[data-sort]').forEach(th=>th.addEventListener('click', ()=>{
+    // 列ヘッダのソートはイベント委譲（ヘッダは動的生成）
+    document.getElementById('records-head').addEventListener('click', e=>{
+      const th = e.target.closest('th[data-sort]');
+      if(!th) return;
       const key = th.dataset.sort;
       if(state.sort_by===key){ state.sort_order = state.sort_order==='asc'?'desc':'asc'; }
       else { state.sort_by=key; state.sort_order='asc'; }
       loadRecords();
-    }));
+    });
     document.getElementById('integration-toggle').addEventListener('change', syncNotifyKindsEnabled);
+    // プレビューは Esc で閉じる
+    document.addEventListener('keydown', e=>{
+      if(e.key==='Escape' && !document.getElementById('hc-viewer').classList.contains('hidden')) closeViewer();
+    });
   }
 
   function refresh(){ loadRecords(); loadDashboard(); }
@@ -443,7 +604,21 @@ const HC = (function(){
   }
 
   // ---- 一覧 ----
+  function activeColumns(){
+    const cols = visibleColumns.map(k=>COLUMN_MAP[k]).filter(Boolean);
+    return cols.length ? cols : DEFAULT_COLUMNS.map(k=>COLUMN_MAP[k]);
+  }
+  function renderHead(){
+    const head = document.getElementById('records-head');
+    if(!head) return;
+    const arrow = (key)=> state.sort_by===key ? (state.sort_order==='asc'?' ▲':' ▼') : '';
+    head.innerHTML = activeColumns().map(c=>{
+      const sortable = !!c.sort;
+      return `<th class="px-4 py-3 text-left ${sortable?'cursor-pointer select-none':''}" ${sortable?`data-sort="${c.sort}"`:''}>${esc(c.label)}${sortable?arrow(c.sort):''}</th>`;
+    }).join('') + '<th class="px-4 py-3 text-right">操作</th>';
+  }
   async function loadRecords(){
+    renderHead();
     let data;
     try { data = await api('/tools/health_check/api/records?'+buildQuery()); }
     catch(e){ toast(e.message,'error'); return; }
@@ -452,30 +627,55 @@ const HC = (function(){
     document.getElementById('records-footer').textContent = `${data.count} 件を表示中`;
     if(!data.records.length){ body.innerHTML=''; empty.classList.remove('hidden'); return; }
     empty.classList.add('hidden');
+    const cols = activeColumns();
     body.innerHTML = data.records.map(r=>{
-      const [fg,bg] = STATUS_STYLE[r.status] || ['#475569','#f1f5f9'];
-      const badges = [];
-      if(r.is_night_worker){ const ok=!!r.exam_date_2; badges.push(`<span class="hc-pill" style="color:${ok?'#0f766e':'#7c3aed'};background:${ok?'#ccfbf1':'#ede9fe'}">深夜${ok?'2回目済':'2回目'}</span>`); }
-      if(r.needs_recheck && r.status!=='二次完了'){ badges.push(`<span class="hc-pill" style="color:#b45309;background:#fef3c7">要二次</span>`); }
-      if(r.is_exempt){ badges.push(`<span class="hc-pill" style="color:#475569;background:#e2e8f0">受診非対象</span>`); }
-      if(r.is_kintone){ badges.push(`<span class="hc-pill" style="color:#0369a1;background:#e0f2fe">kintone</span>`); }
       const retired = !!r.is_retired;
-      const mgr = r.manager_user
-        ? `<span class="text-gray-700">${esc(r.manager_name||r.manager_user)}</span>`
-        : `<span class="hc-pill" style="color:#dc2626;background:#fee2e2">未割当</span>`;
+      const cells = cols.map(c=>`<td class="px-4 py-2.5 text-gray-600 ${c.cls||''}">${c.render(r)}</td>`).join('');
       return `<tr class="hover:bg-gray-50${retired?' bg-rose-50/40':''}">
-        <td class="px-4 py-2.5 font-mono text-xs text-gray-500">${esc(r.employee_number)||'—'}</td>
-        <td class="px-4 py-2.5 font-medium text-gray-800">${esc(r.employee_name)}${retired?' <span class="hc-pill" style="color:#b91c1c;background:#fee2e2">退職者</span>':''}</td>
-        <td class="px-4 py-2.5 text-gray-600"><div>${esc(r.assignment_site)||'—'}</div><div class="text-xs text-gray-400">${TYPE_LABEL[r.record_type]||r.record_type}</div></td>
-        <td class="px-4 py-2.5 text-gray-600">${fmtDate(r.exam_date)}</td>
-        <td class="px-4 py-2.5"><span class="hc-pill" style="color:${fg};background:${bg}">${r.status}</span></td>
-        <td class="px-4 py-2.5 space-x-1">${badges.join(' ')||'<span class="text-gray-300">—</span>'}</td>
-        <td class="px-4 py-2.5">${mgr}</td>
+        ${cells}
         <td class="px-4 py-2.5 text-right whitespace-nowrap">
           <button class="hc-btn-ghost !py-1 !px-2.5" onclick="HC.openRecordModal(${r.id})">編集</button>
         </td>
       </tr>`;
     }).join('');
+  }
+
+  // ---- 表示項目の選択 ----
+  function openColumnsModal(){
+    columnDraft = visibleColumns.slice();
+    renderColumnsOptions();
+    show('columns-modal');
+  }
+  function closeColumnsModal(){ hide('columns-modal'); }
+  function renderColumnsOptions(){
+    const box = document.getElementById('columns-options');
+    if(!box) return;
+    box.innerHTML = ALL_COLUMNS.map(c=>`
+      <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+        <input type="checkbox" class="hc-col-opt rounded text-teal-600 focus:ring-teal-500" value="${esc(c.key)}" ${columnDraft.includes(c.key)?'checked':''}>
+        ${esc(c.label)}
+      </label>`).join('');
+    box.querySelectorAll('.hc-col-opt').forEach(cb=>cb.addEventListener('change', ()=>{
+      if(cb.checked){ if(!columnDraft.includes(cb.value)) columnDraft.push(cb.value); }
+      else { columnDraft = columnDraft.filter(k=>k!==cb.value); }
+    }));
+  }
+  function selectAllColumns(on){
+    columnDraft = on ? ALL_COLUMNS.map(c=>c.key) : [];
+    renderColumnsOptions();
+  }
+  function resetColumns(){
+    columnDraft = DEFAULT_COLUMNS.slice();
+    renderColumnsOptions();
+  }
+  function applyColumns(){
+    // 元の定義順を保つ
+    const ordered = ALL_COLUMNS.map(c=>c.key).filter(k=>columnDraft.includes(k));
+    if(!ordered.length){ toast('表示項目を1つ以上選択してください','warn'); return; }
+    visibleColumns = ordered;
+    saveColumnPref();
+    closeColumnsModal();
+    loadRecords();
   }
 
   // ---- レコードモーダル ----
@@ -704,7 +904,7 @@ const HC = (function(){
     if(!linked){ setupManualFields(d); }
     populateManagerSelect(d.manager_user);
     setupExtraNotify();
-    loadOfficersForForm(linked ? d.office_code : null);
+    loadOfficersForForm(d.office_code);
     syncNightBlock();
     syncRecheckBlock();
     if(!isNew){
@@ -800,8 +1000,10 @@ const HC = (function(){
   async function loadOfficersForForm(officeCode){
     const box = document.getElementById('rec-officers');
     if(!box) return;
-    let office = officeCode;
-    if(!office){ const m = document.getElementById('manual-office'); office = m ? m.value : ''; }
+    // 営業所は (1) レコード/引数の office_code → (2) 選択中の社員 → (3) 手動モードの営業所選択 の順で確定する
+    let office = officeCode || '';
+    if(!office && selectedEmployee) office = selectedEmployee.office_code || '';
+    if(!office){ const m = document.getElementById('manual-office'); if(m) office = m.value || ''; }
     if(!office){ box.innerHTML = '<span class="text-xs text-gray-400">営業所が未確定です</span>'; return; }
     let officers = [];
     try { officers = (await api('/tools/health_check/api/office_officers?office='+encodeURIComponent(office))).officers || []; } catch(e){}
@@ -1079,17 +1281,74 @@ const HC = (function(){
     box.innerHTML = list.map(a=>{
       const label = a.title ? esc(a.title) : esc(a.original_name);
       const sub = a.title ? `<span class="block text-xs text-gray-400 truncate">${esc(a.original_name)}</span>` : '';
+      const href = `/tools/health_check/api/record/${editingId}/attachment/${a.id}`;
+      const viewable = !!attViewerKind(a);
+      // 画像/PDFはクリックでプレビュー、それ以外はダウンロード
+      const nameAttr = viewable ? `onclick="HC.previewAttachment(event, ${a.id})"` : '';
+      const previewBtn = viewable
+        ? `<button class="hc-attach-preview hover:underline text-xs" onclick="HC.previewAttachment(event, ${a.id})">🔍 プレビュー</button>`
+        : '';
       return `<div class="flex items-center justify-between gap-2 text-sm bg-gray-50 rounded-lg px-3 py-1.5">
       <div class="min-w-0">
-        <a href="/tools/health_check/api/record/${editingId}/attachment/${a.id}" class="text-teal-700 hover:underline truncate block">${label}</a>
+        <a href="${href}" ${nameAttr} class="text-teal-700 hover:underline truncate block">${label}</a>
         ${sub}
       </div>
       <div class="flex items-center gap-2 shrink-0">
+        ${previewBtn}
         <button class="text-gray-500 hover:text-teal-700 text-xs" onclick="HC.renameAttachment(${a.id})">名称変更</button>
         <button class="text-red-500 hover:text-red-700 text-xs" onclick="HC.deleteAttachment(${a.id})">削除</button>
       </div>
     </div>`;
     }).join('');
+  }
+
+  // ---- 添付プレビュー（ToBellのビューワを参考） ----
+  let viewerScale = 1;
+  function attViewerKind(a){
+    const mime = (a.content_type||'').toLowerCase();
+    if(mime.startsWith('image/')) return 'image';
+    if(mime==='application/pdf') return 'pdf';
+    const name = (a.original_name||'').toLowerCase();
+    if(/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(name)) return 'image';
+    if(/\.pdf$/.test(name)) return 'pdf';
+    return null;
+  }
+  function previewAttachment(event, aid){
+    if(event){ event.preventDefault(); }
+    const a = (lastAttachments||[]).find(x=>x.id===aid);
+    if(a) openAttachmentViewer(a);
+  }
+  function openAttachmentViewer(a){
+    const href = `/tools/health_check/api/record/${editingId}/attachment/${a.id}`;
+    const kind = attViewerKind(a);
+    if(!kind){ window.open(href, '_blank', 'noopener'); return; }
+    viewerScale = 1;
+    document.getElementById('hc-viewer-title').textContent = a.title ? `${a.title}（${a.original_name}）` : (a.original_name || 'プレビュー');
+    const dl = document.getElementById('hc-viewer-download');
+    dl.href = href; dl.setAttribute('download', a.original_name||'');
+    const stage = document.getElementById('hc-viewer-stage');
+    if(kind === 'image'){
+      stage.innerHTML = `<img alt="${esc(a.original_name||'')}">`;
+      stage.querySelector('img').src = href + '?inline=1';
+    } else {
+      // PDF: ブラウザ内蔵ビューワ。#view=FitH で横幅にフィット
+      stage.innerHTML = `<iframe title="${esc(a.original_name||'')}"></iframe>`;
+      stage.querySelector('iframe').src = href + '?inline=1#view=FitH';
+    }
+    applyViewerScale();
+    show('hc-viewer');
+  }
+  function closeViewer(){ hide('hc-viewer'); const s=document.getElementById('hc-viewer-stage'); if(s) s.innerHTML=''; }
+  function viewerZoom(delta){
+    if(delta === 0) viewerScale = 1;
+    else viewerScale = Math.max(0.5, Math.min(3, viewerScale + delta*0.25));
+    applyViewerScale();
+  }
+  function applyViewerScale(){
+    const stage = document.getElementById('hc-viewer-stage');
+    if(stage) stage.style.transform = `scale(${viewerScale})`;
+    const pct = document.getElementById('hc-viewer-pct');
+    if(pct) pct.textContent = `${Math.round(viewerScale*100)}%`;
   }
   // タイトル選択：「その他（手動入力）」で手動入力欄を表示
   function onAttachTitleChange(){
@@ -1361,11 +1620,13 @@ const HC = (function(){
     init, openRecordModal, closeRecordModal, saveRecord, deleteRecord,
     changeNewType, selectEmployee, selectSite, uploadAttachment, deleteAttachment,
     onAttachTitleChange, renameAttachment,
+    previewAttachment, closeViewer, viewerZoom,
     openRecheckModal, closeRecheckModal, addRecheckItem, removeRecheckItem, onRecheckInput, applyRecheckModal,
     addExtraNotify, removeExtraNotify,
     openBulkModal, closeBulkModal, runBulkCreate,
     openCarryoverModal, closeCarryoverModal, runCarryover,
     resolveManagers, exportCsv,
+    openColumnsModal, closeColumnsModal, selectAllColumns, resetColumns, applyColumns,
     openSettingsModal, closeSettingsModal, switchSettingsTab, saveCurrentSettings,
     grantPermission, revoke, togglePermOffice,
     addOfficer, removeOfficer,
