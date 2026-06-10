@@ -2185,7 +2185,13 @@ def _iter_project_summaries_for_month(month_key: str, *, mode: str | None = None
     """
     year, month = _parse_month_key(month_key)
     month_rows: dict[str, dict[str, Any]] = {}
-    for month_row in CloudShiftMonth.query.filter_by(year=year, month=month).all():
+    month_query = CloudShiftMonth.query.filter_by(year=year, month=month)
+    if mode is not None:
+        # モード絞り込み時は、対象外プロジェクトの月行をロードしない。
+        month_query = month_query.join(
+            CloudShiftProject, CloudShiftMonth.project_id == CloudShiftProject.id
+        ).filter(CloudShiftProject.mode == mode)
+    for month_row in month_query.all():
         month_rows[str(month_row.project_id)] = _db_month_row_to_dict(
             month_row, include_revision_snapshots=False
         )
@@ -2193,6 +2199,7 @@ def _iter_project_summaries_for_month(month_key: str, *, mode: str | None = None
     if mode is not None:
         query = query.filter_by(mode=mode)
     projects: list[dict[str, Any]] = []
+    db_project_ids: set[str] = set()
     for row in query.all():
         project = _db_project_base_dict(row)
         month_data = month_rows.get(str(row.id))
@@ -2200,9 +2207,13 @@ def _iter_project_summaries_for_month(month_key: str, *, mode: str | None = None
             project["months"][month_key] = month_data
         project[_PARTIAL_MONTHS_KEY] = True
         projects.append(project)
+        db_project_ids.add(str(row.id))
     # レガシー JSON はモード絞り込みの有無に関わらず「DB に存在する ID」を除外する
     # （_iter_stored_projects と同じ重複排除規則を保つ）。
-    db_ids = {str(row_id) for (row_id,) in db.session.query(CloudShiftProject.id)}
+    if mode is None:
+        db_ids = db_project_ids
+    else:
+        db_ids = {str(row_id) for (row_id,) in db.session.query(CloudShiftProject.id)}
     for project in _iter_legacy_json_projects(db_ids):
         if mode is not None and str(project.get("mode") or "") != mode:
             continue
