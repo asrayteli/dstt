@@ -2642,13 +2642,24 @@
       `;
     }
 
+    function canUseShiftEngine() {
+      const project = currentProject();
+      // 自動作成は現場シフト帳の所有者のみ（初期リリースは公開編集では無効）
+      return !!(project && project.mode === 'scene' && currentMonth()
+        && PAGE.type === 'owner' && projectAccessRole(project) === 'owner');
+    }
+
     function buildAssistTabs() {
       const mode = currentAssistMode();
+      const autoCreateButton = canUseShiftEngine()
+        ? '<button type="button" class="cloud-btn primary cloud-assist-autocreate" data-assist-open-engine>自動作成</button>'
+        : '';
       if (mode === 'person') {
         return `
           <div class="cloud-assist-tabs">
             <button type="button" class="cloud-tab${state.assist.activeTab === 'register' ? ' is-active' : ''}" data-assist-tab="register">登録</button>
             <button type="button" class="cloud-tab${state.assist.activeTab === 'edit' ? ' is-active' : ''}" data-assist-tab="edit">編集</button>
+            ${autoCreateButton}
           </div>
         `;
       }
@@ -2658,6 +2669,7 @@
           <button type="button" class="cloud-tab${state.assist.activeTab === 'edit' ? ' is-active' : ''}" data-assist-tab="edit">編集</button>
           <button type="button" class="cloud-tab${state.assist.activeTab === 'search' ? ' is-active' : ''}" data-assist-tab="search">サーチ</button>
           <button type="button" class="cloud-tab${state.assist.activeTab === 'details' ? ' is-active' : ''}" data-assist-tab="details">詳細</button>
+          ${autoCreateButton}
         </div>
       `;
     }
@@ -4578,6 +4590,12 @@
 
     function bindAssistModalEvents(modal) {
       bindAssistFormEvents(modal);
+      modal.querySelectorAll('[data-assist-open-engine]').forEach((button) => {
+        button.addEventListener('click', () => {
+          closeCloudModal('cloud-assist-modal');
+          openShiftEngineModal().catch((error) => showFlash(error.message, 'error'));
+        });
+      });
       modal.querySelectorAll('[data-assist-tab]').forEach((button) => {
         button.addEventListener('click', () => {
           state.assist.activeTab = button.getAttribute('data-assist-tab') || 'register';
@@ -6519,10 +6537,6 @@
         $('cloud-open-shift-book-settings').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
         setNotificationBadge($('cloud-open-shift-book-settings'), unviewedLeaveChangeRequestCount(project));
       }
-      if ($('cloud-open-shift-engine')) {
-        // 自動作成は現場シフト帳の所有者のみ（初期リリースは公開編集では無効）
-        $('cloud-open-shift-engine').classList.toggle('cloud-hidden', !canManageProject || project.mode !== 'scene' || !month);
-      }
       if ($('cloud-open-summary')) $('cloud-open-summary').classList.toggle('cloud-hidden', !month);
       if ($('cloud-open-assist')) $('cloud-open-assist').classList.toggle('cloud-hidden', !isOwnerEditable || !isAssistAvailable());
       if ($('cloud-open-bulk-edit')) $('cloud-open-bulk-edit').classList.toggle('cloud-hidden', !month || !isOwnerEditable || (PAGE.type === 'public' && PAGE.accessMode !== 'edit'));
@@ -7771,7 +7785,7 @@
     // 自動シフト作成（shift-engine）UI
     // 設計書 docs/cloudshift_shift_engine_design.md の context/plan/apply-draft を呼ぶ。
     // -----------------------------------------------------------------
-    const shiftEngineState = { context: null, lastPlan: null, projectId: null, year: null, month: null };
+    const shiftEngineState = { context: null, lastPlan: null, projectId: null, year: null, month: null, lastTargetDayCount: null };
 
     function shiftEnginePrefsFromContext(context) {
       const settings = (context && context.shift_engine_settings) || {};
@@ -7779,12 +7793,123 @@
     }
 
     function seDemandLabel(source) {
-      return ({ settings: '設定', required_capacity_fallback: '必要人数から展開', prev_month_estimate: '前月推定', none: '未設定' })[source] || source || '';
+      return ({ settings: '設定', required_capacity_fallback: '必要人数から展開', prev_month_estimate: '前月推定', target_override: '対象日の指定人数', none: '未設定' })[source] || source || '';
+    }
+
+    function seWeekdayLabel(weekday) {
+      return ['月', '火', '水', '木', '金', '土', '日'][weekday] || '';
     }
 
     function seSevLabel(s) { return ({ blocker: '重大', hard: '必須違反', warning: '警告', info: '情報' })[s] || s; }
     function seStatusLabel(s) { return ({ feasible: '生成OK', partial: '一部未充足', failed: '生成失敗', optimal: '最適' })[s] || s; }
     function seDateLabel(iso) { const p = String(iso || '').split('-'); return p.length === 3 ? `${parseInt(p[1], 10)}/${parseInt(p[2], 10)}` : iso; }
+
+    // ---- 自動作成の対象日選択（カレンダー形式 + 曜日・プリセット） ----
+    function seDaysInMonth(year, month) { return new Date(year, month, 0).getDate(); }
+    function seWeekdayOfDay(year, month, day) { return (new Date(year, month - 1, day).getDay() + 6) % 7; }
+    function seIsHoliday(year, month, day) {
+      const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      return Array.isArray(window.SHIFTERSYNC_HOLIDAYS) && window.SHIFTERSYNC_HOLIDAYS.indexOf(iso) >= 0;
+    }
+
+    function seBuildTargetDaySection(year, month) {
+      const totalDays = seDaysInMonth(year, month);
+      const firstDow = seWeekdayOfDay(year, month, 1);
+      const weekdayLabels = ['月', '火', '水', '木', '金', '土', '日'];
+      const headCells = weekdayLabels.map((label) => `<div class="cloud-se-day-head">${label}</div>`).join('');
+      const cells = [];
+      for (let index = 0; index < firstDow; index += 1) {
+        cells.push('<div class="cloud-se-day-cell is-empty" aria-hidden="true"></div>');
+      }
+      for (let day = 1; day <= totalDays; day += 1) {
+        const weekday = seWeekdayOfDay(year, month, day);
+        const holiday = seIsHoliday(year, month, day);
+        const classes = ['cloud-se-day-cell', 'is-selected'];
+        if (holiday) classes.push('is-holiday');
+        else if (weekday === 6) classes.push('is-sunday');
+        else if (weekday === 5) classes.push('is-saturday');
+        cells.push(`
+          <button type="button" class="${classes.join(' ')}"
+            data-se-day="${day}" data-se-weekday="${weekday}" data-se-holiday="${holiday ? '1' : '0'}"
+            aria-pressed="true">${day}</button>
+        `);
+      }
+      const chips = weekdayLabels.map((label, weekday) => `
+        <button type="button" class="cloud-se-weekday-chip" data-se-weekday-chip="${weekday}">${label}</button>
+      `).join('');
+      return `
+        <div class="cloud-field cloud-se-target-days">
+          <span>自動作成の対象日（選んだ日だけシフトを埋めます。連勤などの判定は月全体で行います）</span>
+          <div class="cloud-se-day-presets">
+            <button type="button" class="cloud-btn secondary" data-se-preset="all">全日</button>
+            <button type="button" class="cloud-btn secondary" data-se-preset="weekday">平日のみ</button>
+            <button type="button" class="cloud-btn secondary" data-se-preset="weekend">土日祝のみ</button>
+            <button type="button" class="cloud-btn secondary" data-se-preset="none">全解除</button>
+            <span class="cloud-se-muted">曜日で切替:</span>
+            ${chips}
+          </div>
+          <div class="cloud-se-day-grid">${headCells}${cells.join('')}</div>
+          <p class="cloud-se-muted" data-se-target-count></p>
+          <label class="cloud-field cloud-se-target-required">
+            <span>対象日の必要人数（任意）。指定すると需要設定・前月推定より優先します。需要0で配置されない日の解決にも使えます</span>
+            <input class="cloud-input" type="number" min="1" data-se-target-required placeholder="未指定（既存の需要設定に従う）">
+          </label>
+        </div>
+      `;
+    }
+
+    function seTargetDayCells(body) {
+      return Array.from(body.querySelectorAll('[data-se-day]'));
+    }
+
+    function seSetDayCellSelected(cell, selected) {
+      cell.classList.toggle('is-selected', selected);
+      cell.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    }
+
+    function seUpdateTargetCount(body) {
+      const label = body.querySelector('[data-se-target-count]');
+      if (!label) return;
+      const cells = seTargetDayCells(body);
+      const selected = cells.filter((cell) => cell.classList.contains('is-selected')).length;
+      label.textContent = selected === cells.length
+        ? `対象: 全日（${cells.length}日）`
+        : `対象: ${selected}/${cells.length} 日`;
+    }
+
+    function seBindTargetDayEvents(body) {
+      seTargetDayCells(body).forEach((cell) => {
+        cell.addEventListener('click', () => {
+          seSetDayCellSelected(cell, !cell.classList.contains('is-selected'));
+          seUpdateTargetCount(body);
+        });
+      });
+      body.querySelectorAll('[data-se-preset]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const preset = button.getAttribute('data-se-preset');
+          seTargetDayCells(body).forEach((cell) => {
+            const weekday = parseInt(cell.getAttribute('data-se-weekday') || '0', 10);
+            const holiday = cell.getAttribute('data-se-holiday') === '1';
+            let selected = false;
+            if (preset === 'all') selected = true;
+            else if (preset === 'weekday') selected = weekday < 5 && !holiday;
+            else if (preset === 'weekend') selected = weekday >= 5 || holiday;
+            seSetDayCellSelected(cell, selected);
+          });
+          seUpdateTargetCount(body);
+        });
+      });
+      body.querySelectorAll('[data-se-weekday-chip]').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          const weekday = chip.getAttribute('data-se-weekday-chip');
+          const cells = seTargetDayCells(body).filter((cell) => cell.getAttribute('data-se-weekday') === weekday);
+          const allSelected = cells.length > 0 && cells.every((cell) => cell.classList.contains('is-selected'));
+          cells.forEach((cell) => seSetDayCellSelected(cell, !allSelected));
+          seUpdateTargetCount(body);
+        });
+      });
+      seUpdateTargetCount(body);
+    }
 
     async function openShiftEngineModal() {
       const project = currentProject();
@@ -7817,14 +7942,15 @@
       const prefs = shiftEnginePrefsFromContext(context);
       const baseline = prefs.eligibility_baseline || 'dedicated_or_experienced';
       const existingPolicy = prefs.existing_policy || 'lock_manual';
-      const unconfirmed = prefs.unconfirmed_leave_strength || 'soft';
+      const unconfirmed = prefs.unconfirmed_leave_strength || 'hard';
       const allowPartial = prefs.allow_partial !== false;
       const includeTrainees = !!prefs.include_trainees;
 
+      // 有休カレンダーは既定で全て取り込み対象にする（休みの日に配置しないため）
       const calendars = (context.leave_calendar_options || []).map((opt) => {
         const id = opt.id || opt.calendar_id || opt.value || '';
         const name = opt.name || opt.label || opt.title || id;
-        return `<label class="cloud-se-check"><input type="checkbox" data-se-calendar value="${escapeHtml(String(id))}"> ${escapeHtml(String(name))}</label>`;
+        return `<label class="cloud-se-check"><input type="checkbox" data-se-calendar value="${escapeHtml(String(id))}" checked> ${escapeHtml(String(name))}</label>`;
       }).join('') || '<p class="cloud-se-muted">アクセスできる有休カレンダーがありません</p>';
 
       const factors = (context.emptiness_factors || []).map((f) => `<li>${escapeHtml(f)}</li>`).join('');
@@ -7853,8 +7979,8 @@
             </select></label>
           <label class="cloud-field"><span>未確認休暇の扱い</span>
             <select class="cloud-input" data-se-unconfirmed>
-              <option value="soft"${unconfirmed === 'soft' ? ' selected' : ''}>避ける（既定）</option>
-              <option value="hard"${unconfirmed === 'hard' ? ' selected' : ''}>配置しない</option>
+              <option value="hard"${unconfirmed === 'hard' ? ' selected' : ''}>配置しない（既定）</option>
+              <option value="soft"${unconfirmed === 'soft' ? ' selected' : ''}>避ける（減点のみ）</option>
               <option value="info"${unconfirmed === 'info' ? ' selected' : ''}>参考のみ</option>
             </select></label>
           <label class="cloud-field"><span>スコア下限（任意）</span>
@@ -7864,9 +7990,11 @@
           <label class="cloud-se-check"><input type="checkbox" data-se-trainees${includeTrainees ? ' checked' : ''}> 研修者も入れる</label>
           <label class="cloud-se-check"><input type="checkbox" data-se-partial${allowPartial ? ' checked' : ''}> 未充足を許可する</label>
         </div>
-        <div class="cloud-field"><span>有休共有カレンダー</span><div class="cloud-se-calendars">${calendars}</div></div>
+        ${seBuildTargetDaySection(shiftEngineState.year, shiftEngineState.month)}
+        <div class="cloud-field"><span>有休共有カレンダー（チェックしたカレンダーの休みの日には配置しません）</span><div class="cloud-se-calendars">${calendars}</div></div>
         <div class="cloud-se-result" data-se-result></div>
       `;
+      seBindTargetDayEvents(body);
 
       const footer = modalFooter(modal);
       footer.innerHTML = `
@@ -7889,7 +8017,24 @@
       };
       if (minRaw !== '' && !Number.isNaN(parseInt(minRaw, 10))) preferences.min_assignment_score = parseInt(minRaw, 10);
       const calendar_ids = Array.from(body.querySelectorAll('[data-se-calendar]:checked')).map((el) => el.value);
-      return { year: shiftEngineState.year, month: shiftEngineState.month, preferences, calendar_ids };
+      const payload = { year: shiftEngineState.year, month: shiftEngineState.month, preferences, calendar_ids };
+      const dayCells = seTargetDayCells(body);
+      const selectedDays = dayCells
+        .filter((cell) => cell.classList.contains('is-selected'))
+        .map((cell) => parseInt(cell.getAttribute('data-se-day') || '0', 10))
+        .filter((day) => day > 0);
+      if (selectedDays.length === 0) {
+        throw new Error('自動作成の対象日が選択されていません。少なくとも1日選んでください');
+      }
+      if (selectedDays.length < dayCells.length) {
+        payload.target_days = selectedDays;
+      }
+      shiftEngineState.lastTargetDayCount = selectedDays.length < dayCells.length ? selectedDays.length : null;
+      const requiredRaw = body.querySelector('[data-se-target-required]');
+      if (requiredRaw && requiredRaw.value !== '' && !Number.isNaN(parseInt(requiredRaw.value, 10)) && parseInt(requiredRaw.value, 10) > 0) {
+        payload.target_required_count = parseInt(requiredRaw.value, 10);
+      }
+      return payload;
     }
 
     async function runShiftEnginePlan(modal) {
@@ -7899,6 +8044,114 @@
       const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${shiftEngineState.projectId}/shift-engine/plan`, { method: 'POST', body: payload });
       shiftEngineState.lastPlan = data;
       renderShiftEngineResult(modal, data);
+    }
+
+    function seCandidateFactorText(factors) {
+      return (factors || [])
+        .map((f) => `${f.label}${f.points > 0 ? '+' : ''}${f.points}`)
+        .join('・');
+    }
+
+    function buildShiftEngineDayDetails(data) {
+      const result = data.result || {};
+      const summaries = data.day_summary || [];
+      if (!summaries.length) return '';
+
+      const explanationByAssignment = {};
+      (result.explanations || []).forEach((ex) => { explanationByAssignment[ex.assignment_id] = ex; });
+      const assignmentsByDay = {};
+      (result.assignments || []).forEach((a) => {
+        (assignmentsByDay[a.day] = assignmentsByDay[a.day] || []).push(a);
+      });
+      const panelsByDay = {};
+      (result.candidate_panels || []).forEach((p) => {
+        (panelsByDay[p.day] = panelsByDay[p.day] || []).push(p);
+      });
+      const unfilledByDay = {};
+      (result.unfilled_slots || []).forEach((u) => {
+        (unfilledByDay[u.day] = unfilledByDay[u.day] || []).push(u);
+      });
+
+      const rows = summaries
+        .filter((s) => s.in_scope && (s.demand > 0 || s.unfilled > 0 || s.no_demand
+          || (assignmentsByDay[s.day] || []).length))
+        .map((s) => {
+          const assignments = assignmentsByDay[s.day] || [];
+          const dayLabel = `${parseInt(String(s.date).split('-')[1], 10)}/${s.day}(${seWeekdayLabel(s.weekday)}${s.is_holiday ? '・祝' : ''})`;
+          const needsAttention = s.no_demand || s.unfilled > 0;
+
+          if (s.no_demand) {
+            return `
+              <details class="cloud-se-dayrow is-warn">
+                <summary>${escapeHtml(dayLabel)} <strong>需要0</strong> — この日は配置されません</summary>
+                <div class="cloud-se-dayrow-body">
+                  <p class="cloud-se-error">必要人数が設定されていない日です（運転士がいないのではなく、埋めるべき枠が0件）。</p>
+                  <p class="cloud-se-muted">対処: 上の「対象日の必要人数」に人数を入れて再試算するか、シフト帳の必要人数・需要設定・前月実績を確認してください。</p>
+                </div>
+              </details>
+            `;
+          }
+
+          const chips = assignments.map((a) => {
+            const fixed = a.source !== 'engine';
+            const label = `${a.shift_key ? `${a.shift_key} ` : ''}${a.employee_name || a.employee_number}`;
+            return `<span class="cloud-se-assign-chip${fixed ? ' is-fixed' : ''}">${escapeHtml(label)}${fixed ? '🔒' : ''}</span>`;
+          }).join(' ');
+
+          const reasonLines = assignments
+            .filter((a) => a.source === 'engine')
+            .map((a) => {
+              const ex = explanationByAssignment[a.assignment_id];
+              const why = ex ? (seCandidateFactorText(ex.factors) || ex.summary) : '';
+              return `<li><strong>${escapeHtml(a.employee_name || a.employee_number)}</strong>（${a.score}点）${why ? `: ${escapeHtml(why)}` : ''}</li>`;
+            }).join('');
+
+          const panelBlocks = (panelsByDay[s.day] || []).map((p) => {
+            const candidateRows = (p.candidates || []).map((c) => `
+              <li class="${c.selected ? 'is-selected-candidate' : ''}">
+                ${c.selected ? '★ ' : ''}${escapeHtml(c.name || c.employee_number)} ${c.score}点
+                ${c.factors && c.factors.length ? `<span class="cloud-se-muted">（${escapeHtml(seCandidateFactorText(c.factors))}）</span>` : ''}
+              </li>
+            `).join('');
+            const excludedText = (p.excluded || []).map((e) => `${e.label}${e.count}名`).join('・');
+            const heading = `${p.shift_key ? `${p.shift_key} ` : ''}枠${p.selected_employee_number ? '' : '（未充足）'}`;
+            return `
+              <div class="cloud-se-panel">
+                <div class="cloud-se-panel-title">${escapeHtml(heading)} <span class="cloud-se-muted">配置可能 ${p.eligible_count} 名</span></div>
+                ${candidateRows ? `<ul class="cloud-se-candidates">${candidateRows}</ul>` : '<p class="cloud-se-muted">配置可能な候補がいません</p>'}
+                ${excludedText ? `<p class="cloud-se-muted">候補外: ${escapeHtml(excludedText)}</p>` : ''}
+              </div>
+            `;
+          }).join('');
+
+          const unfilledLines = (unfilledByDay[s.day] || [])
+            .map((u) => `<li class="cloud-se-sev-warning">×${u.shortage} ${escapeHtml(u.shift_key || '指定なし')}: ${escapeHtml(u.reason)}</li>`)
+            .join('');
+
+          return `
+            <details class="cloud-se-dayrow${needsAttention ? ' is-warn' : ''}">
+              <summary>
+                ${escapeHtml(dayLabel)} 需要${s.demand}
+                / 配置${s.engine_count + s.fixed_count}（自動${s.engine_count}・固定${s.fixed_count}${s.leave_count ? `・休み${s.leave_count}` : ''}）
+                ${s.unfilled > 0 ? `/ <strong>未充足${s.unfilled}</strong>` : ''}
+                ${chips ? `<span class="cloud-se-chiprow">${chips}</span>` : ''}
+              </summary>
+              <div class="cloud-se-dayrow-body">
+                ${reasonLines ? `<p class="cloud-se-panel-title">選定理由</p><ul class="cloud-se-reasons">${reasonLines}</ul>` : ''}
+                ${unfilledLines ? `<ul class="cloud-se-violations">${unfilledLines}</ul>` : ''}
+                ${panelBlocks ? `<p class="cloud-se-panel-title">候補の比較（その日の他の候補と除外理由）</p>${panelBlocks}` : ''}
+              </div>
+            </details>
+          `;
+        });
+
+      if (!rows.length) return '';
+      return `
+        <details class="cloud-se-fold" open>
+          <summary>日別の結果（行をクリックすると選定理由・候補比較を表示）</summary>
+          <div class="cloud-se-days">${rows.join('')}</div>
+        </details>
+      `;
     }
 
     function renderShiftEngineResult(modal, data) {
@@ -7913,13 +8166,15 @@
       const unfilled = (data.result.unfilled_slots || []).slice(0, 12);
 
       const violationHtml = violations.length ? `<ul class="cloud-se-violations">${violations.slice(0, 12).map((v) => `<li class="cloud-se-sev-${escapeHtml(v.severity)}">[${escapeHtml(seSevLabel(v.severity))}] ${escapeHtml(v.message)}</li>`).join('')}</ul>` : '';
-      const unfilledHtml = unfilled.length ? `<details class="cloud-se-fold" open><summary>未充足 ${score.unfilled_count} 件</summary><ul>${unfilled.map((u) => `<li>${escapeHtml(seDateLabel(u.date))} ${escapeHtml(u.shift_key || '指定なし')} ×${u.shortage}：${escapeHtml(u.reason)}</li>`).join('')}</ul></details>` : '';
+      const dayDetailsHtml = buildShiftEngineDayDetails(data);
+      const unfilledHtml = unfilled.length ? `<details class="cloud-se-fold"><summary>未充足 ${score.unfilled_count} 件</summary><ul>${unfilled.map((u) => `<li>${escapeHtml(seDateLabel(u.date))} ${escapeHtml(u.shift_key || '指定なし')} ×${u.shortage}：${escapeHtml(u.reason)}</li>`).join('')}</ul></details>` : '';
       const warnHtml = warns.length ? `<details class="cloud-se-fold"><summary>警告 ${warns.length} 件</summary><ul>${warns.slice(0, 20).map((w) => `<li>${escapeHtml(w.message)}</li>`).join('')}</ul></details>` : '';
       const diff = data.diff || {};
 
       result.innerHTML = `
         <div class="cloud-se-score">
           <span class="cloud-se-badge cloud-se-status-${escapeHtml(status)}">${escapeHtml(seStatusLabel(status))}</span>
+          ${shiftEngineState.lastTargetDayCount ? `<span>対象日 ${shiftEngineState.lastTargetDayCount} 日のみ</span>` : ''}
           <span>充足率 ${fill}%（${score.assigned_count}/${score.required_count}）</span>
           <span>未充足 ${score.unfilled_count}</span>
           <span>最大連勤 ${score.max_consecutive_days}</span>
@@ -7928,6 +8183,7 @@
         </div>
         ${blockers.length ? '<p class="cloud-se-error">重大違反(blocker)があります。プレビューで内容を調整してください。</p>' : ''}
         ${violationHtml}
+        ${dayDetailsHtml}
         ${unfilledHtml}
         ${warnHtml}
         <p class="cloud-se-muted">「プレビューを開く」で別ウィンドウに表示し、確認・調整のうえ保存します（このパネルでは正規シフト帳に反映されません）。</p>
@@ -8301,9 +8557,6 @@
 
       const shiftBookSettings = $('cloud-open-shift-book-settings');
       if (shiftBookSettings) shiftBookSettings.addEventListener('click', () => openShiftBookSettingsModal().catch((error) => showFlash(error.message, 'error')));
-
-      const shiftEngineBtn = $('cloud-open-shift-engine');
-      if (shiftEngineBtn) shiftEngineBtn.addEventListener('click', () => openShiftEngineModal().catch((error) => showFlash(error.message, 'error')));
 
       const createFirstMonth = $('cloud-create-first-month');
       if (createFirstMonth) {

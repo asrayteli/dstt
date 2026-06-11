@@ -240,3 +240,200 @@ def test_allow_block_conflict_excludes_and_warns():
     request, settings, warnings = ctx.build_planning_request(project, YEAR, MONTH)
     assert "E001" not in {w.employee_number for w in request.workers}  # 除外側を採用
     assert any(w.code == "allow_block_conflict" for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# 休み（有休系オプション entry・有休共有ツール）の扱い
+# ---------------------------------------------------------------------------
+
+
+def test_leave_entry_locked_and_blocks_same_day_assignment():
+    """対象シフト帳の有休 entry は固定保持され、その日は本人へ新規配置しない。"""
+    project = base_project(capacity_enabled=True, required_capacity=1,
+                           entries_per_day={
+                               "1": [{"id": "lv1", "value": "!PAID!佐藤", "employee_number": "E001",
+                                      "sync_source_type": "person_sync"}],
+                           })
+    request, settings, warnings = ctx.build_planning_request(project, YEAR, MONTH)
+    # 有休 entry は同期由来でも locked
+    leave = [a for a in request.existing_assignments if a.shift_key == "PAID"]
+    assert leave and leave[0].lock_policy == "locked"
+    # hard の不可日になっている
+    assert any(u.employee_number == "E001" and u.date == date(YEAR, MONTH, 1)
+               and u.strength == "hard" and u.source == "shift_entry"
+               for u in request.unavailable_days)
+
+    result = e.plan_shifts(request)
+    assert result.score.blocker_count == 0
+    day1 = [a for a in result.assignments if a.day == 1]
+    # 有休 entry は保持されるが、E001 への勤務シフトは入らない
+    assert any(a.shift_key == "PAID" and a.employee_number == "E001" for a in day1)
+    assert not any(a.shift_key != "PAID" and a.employee_number == "E001" for a in day1)
+    # 下書きにも有休 entry が残る
+    draft = apply_mod.build_draft_entries(request, result)
+    assert any(en["value"] == "!PAID!佐藤" for en in draft.get("1", []))
+
+
+def test_external_leave_entry_becomes_hard_unavailable(monkeypatch):
+    """他の現場シフト帳に入っている休みは hard の不可日になる。"""
+    from app.tools import cloudshift as cs
+
+    def fake_conflicts(project, target_date):
+        if target_date == date(YEAR, MONTH, 2):
+            return [{"project_id": "P2", "project_title": "B現場", "shift_key": "PAID",
+                     "shift_label": "有休", "entry_name": "佐藤", "employee_number": "E001"}]
+        return []
+
+    monkeypatch.setattr(cs, "_assist_scene_conflict_entries", fake_conflicts)
+    warnings: list = []
+    external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
+    assert external == []
+    assert len(leave_days) == 1
+    u = leave_days[0]
+    assert (u.employee_number, u.date, u.strength, u.source) == \
+        ("E001", date(YEAR, MONTH, 2), "hard", "shift_entry")
+
+
+def test_person_project_leave_days(monkeypatch):
+    """同 owner の個人シフト帳の休みは hard の不可日になる。"""
+    from app.tools import cloudshift as cs
+
+    person_project = {
+        "id": "PP1",
+        "mode": "person",
+        "owner_user_id": "u1",
+        "employee_number": "E001",
+        "title": "佐藤の個人シフト",
+        "months": {MONTH_KEY: {"entries_per_day": {
+            "3": [{"id": "x", "value": "!COMP!代休"}],
+            "4": [{"id": "y", "value": "!A!A現場"}],
+        }}},
+    }
+    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [person_project])
+    leave_days = ctx.build_person_project_leave_days(base_project(), YEAR, MONTH)
+    assert len(leave_days) == 1
+    assert leave_days[0].employee_number == "E001"
+    assert leave_days[0].date == date(YEAR, MONTH, 3)
+    assert leave_days[0].strength == "hard"
+
+
+def test_unknown_leave_type_defaults_to_hard(monkeypatch):
+    """ポリシー未定義の休暇種別も既定で hard（休みの日に配置しない）。"""
+    from app.tools import leave_mgr
+
+    monkeypatch.setattr(leave_mgr, "load_calendar_data", lambda cid, ym: {
+        "leaves": [
+            {"date": f"{YEAR}-{MONTH:02d}-05", "employee_number": "E001",
+             "leave_type": "特別休暇", "confirmed_by": "admin"},
+            {"date": f"{YEAR}-{MONTH:02d}-06", "employee_number": "E001",
+             "leave_type": "有休", "confirmed_by": ""},  # 未確認
+        ]
+    })
+    settings, _ = e.migrate_settings(None)
+    warnings: list = []
+    days = ctx.build_unavailable_days(["cal1"], YEAR, MONTH, settings,
+                                      e.default_planning_preferences().unconfirmed_leave_strength,
+                                      warnings)
+    strengths = {(u.date.day): u.strength for u in days}
+    assert strengths[5] == "hard"  # 未知の種別
+    assert strengths[6] == "hard"  # 未確認も既定 hard
+
+
+# ---------------------------------------------------------------------------
+# 対象日指定（fill_target_days）
+# ---------------------------------------------------------------------------
+
+
+def test_coerce_fill_target_dates():
+    dates = ctx._coerce_fill_target_dates([1, "2", f"{YEAR}-{MONTH:02d}-03", "bad", 99,
+                                           f"{YEAR}-12-01"], YEAR, MONTH)
+    assert dates == (date(YEAR, MONTH, 1), date(YEAR, MONTH, 2), date(YEAR, MONTH, 3))
+    assert ctx._coerce_fill_target_dates(None, YEAR, MONTH) == ()
+
+
+def test_fill_target_days_passed_to_request():
+    project = base_project(capacity_enabled=True, required_capacity=1)
+    request, _, _ = ctx.build_planning_request(project, YEAR, MONTH, fill_target_days=[1, 2])
+    assert request.fill_target_dates == (date(YEAR, MONTH, 1), date(YEAR, MONTH, 2))
+    result = e.plan_shifts(request)
+    assert sorted({a.day for a in result.assignments}) == [1, 2]
+
+
+def test_target_required_count_overrides_demand():
+    """対象日の必要人数指定が需要設定（capacity）より優先される。"""
+    project = base_project(capacity_enabled=True, required_capacity=1)
+    request, _, warnings = ctx.build_planning_request(
+        project, YEAR, MONTH, fill_target_days=[2, 3], target_required_count=2)
+    by_date = {}
+    for s in request.required_slots:
+        by_date[s.date] = by_date.get(s.date, 0) + s.required_count
+    assert by_date[date(YEAR, MONTH, 2)] == 2
+    assert by_date[date(YEAR, MONTH, 3)] == 2
+    assert by_date[date(YEAR, MONTH, 1)] == 1  # 対象外日は元の需要のまま
+    assert any(s.source == "target_override" for s in request.required_slots)
+    assert any(w.code == "target_required_override" for w in warnings)
+
+
+def test_target_required_count_creates_demand_when_none():
+    """需要ゼロ（前月データ無し・capacity無効）でも対象日+人数指定で枠が作られる。"""
+    project = base_project()
+    request, _, _ = ctx.build_planning_request(
+        project, YEAR, MONTH, fill_target_days=[5], target_required_count=1)
+    target = [s for s in request.required_slots if s.date == date(YEAR, MONTH, 5)]
+    assert len(target) == 1 and target[0].required_count == 1
+    result = e.plan_shifts(request)
+    assert [a.day for a in result.assignments] == [5]
+
+
+def test_thursday_friday_not_filled_is_diagnosed_and_fixable():
+    """「対象日なのに木金が配置されない」の再現と診断・解決。
+
+    前月実績が月〜水しかない現場では、前月推定の需要が木金=0 になり
+    対象日にしても配置されない。これをバグではなく診断可能な状態にし、
+    対象日の必要人数指定で解決できることを固定する。
+    """
+    project = base_project()
+    # 前月(2026-06)の実績: 月火水のみ勤務（木金土日は空）
+    prev_entries = {}
+    for d in range(1, 31):
+        if date(2026, 6, d).weekday() in (0, 1, 2):
+            prev_entries[str(d)] = [{"id": f"p{d}", "value": "!A!佐藤", "employee_number": "E001"}]
+    project["months"]["2026-06"] = {"entries_per_day": prev_entries}
+
+    # 2026-07 の最初の木金 = 2日(木), 3日(金)
+    thu, fri = 2, 3
+    assert date(YEAR, MONTH, thu).weekday() == 3
+    assert date(YEAR, MONTH, fri).weekday() == 4
+
+    # 再現: 木金を対象日にしても、前月推定の需要が 0 のため配置されない
+    request, _, _ = ctx.build_planning_request(project, YEAR, MONTH,
+                                               fill_target_days=[thu, fri])
+    result = e.plan_shifts(request)
+    assert result.assignments == []
+    # 診断: 需要 0 の対象日として明確に警告される
+    no_demand = [w for w in result.warnings if w.code == "target_day_no_demand"]
+    assert {w.date for w in no_demand} == {date(YEAR, MONTH, thu), date(YEAR, MONTH, fri)}
+    summaries = e.build_day_summaries(request, result)
+    assert all(s["no_demand"] for s in summaries if s["day"] in (thu, fri))
+
+    # 解決: 対象日の必要人数を指定すれば木金が埋まる
+    request2, _, _ = ctx.build_planning_request(project, YEAR, MONTH,
+                                                fill_target_days=[thu, fri],
+                                                target_required_count=1)
+    result2 = e.plan_shifts(request2)
+    assert sorted({a.day for a in result2.assignments}) == [thu, fri]
+
+
+def test_prev_month_estimate_ignores_leave_entries():
+    """前月推定は有休系 entry を勤務として数えない。"""
+    project = base_project()
+    prev_entries = {}
+    for d in range(1, 31):
+        prev_entries[str(d)] = [
+            {"id": f"w{d}", "value": "!A!佐藤", "employee_number": "E001"},
+            {"id": f"l{d}", "value": "!PAID!鈴木", "employee_number": "E002"},  # 休み
+        ]
+    project["months"]["2026-06"] = {"entries_per_day": prev_entries}
+    request, _, _ = ctx.build_planning_request(project, YEAR, MONTH)
+    # 有休を除いた 1 名/日 が推定需要になる
+    assert all(s.required_count == 1 for s in request.required_slots)
