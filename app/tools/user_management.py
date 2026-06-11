@@ -38,7 +38,7 @@ from app.announcement_store import (
 import re
 import secrets
 import string
-from datetime import datetime, time
+from datetime import datetime, time, timedelta, timezone
 from sqlalchemy import or_
 
 user_management_bp = Blueprint("user_management", __name__, url_prefix="/tools/user_management")
@@ -1207,8 +1207,20 @@ def update_leave_mgr_calendar_office_code(calendar_id):
 # ============================================================
 
 
+JST = timezone(timedelta(hours=9))
+
+
 def _dt_to_iso(value):
     return value.isoformat() if value else None
+
+
+def _utc_to_jst_iso(value):
+    """Serialize UTC-stored audit timestamps as JST without rewriting stored data."""
+    if not value:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(JST).isoformat(timespec="seconds")
 
 
 def _parse_datetime_param(value, *, end_of_day=False):
@@ -1232,9 +1244,14 @@ def _limit_param(default=100, maximum=500):
     return max(1, min(maximum, value))
 
 
-def _apply_range(query, column):
+def _apply_range(query, column, *, stored_as_utc=True):
     start = _parse_datetime_param(request.args.get("from"))
     end = _parse_datetime_param(request.args.get("to"), end_of_day=True)
+    if stored_as_utc:
+        if start is not None:
+            start = start - timedelta(hours=9)
+        if end is not None:
+            end = end - timedelta(hours=9)
     if start is not None:
         query = query.filter(column >= start)
     if end is not None:
@@ -1281,7 +1298,7 @@ def access_management_all_logins():
     like = f"%{q}%"
     limit = _limit_param()
 
-    query = _apply_range(DsttLoginLog.query, DsttLoginLog.logged_in_at)
+    query = _apply_range(DsttLoginLog.query, DsttLoginLog.logged_in_at, stored_as_utc=False)
     if q:
         query = query.filter(
             or_(
@@ -1454,7 +1471,7 @@ def access_management_user_detail(user_id):
             "is_admin": is_admin_user(user),
         },
         "summary": {
-            "last_login": _dt_to_iso(last_login.logged_in_at) if last_login else None,
+            "last_login": _utc_to_jst_iso(last_login.logged_in_at) if last_login else None,
             "login_count": login_success_count,
             "tool_activity_count": tool_total,
             "to_bell_task_count": task_total,
@@ -1477,7 +1494,7 @@ def access_management_user_detail(user_id):
             {
                 "id": row.id,
                 "success": bool(row.success),
-                "logged_in_at": _dt_to_iso(row.logged_in_at),
+                "logged_in_at": _utc_to_jst_iso(row.logged_in_at),
                 "ip_address": row.ip_address or "",
                 "user_agent": row.user_agent or "",
             }
@@ -1494,7 +1511,7 @@ def access_management_user_detail(user_id):
                 "status_code": row.status_code,
                 "duration_ms": row.duration_ms,
                 "ip_address": row.ip_address or "",
-                "created_at": _dt_to_iso(row.created_at),
+                "created_at": _utc_to_jst_iso(row.created_at),
             }
             for row in activity_logs
         ],
@@ -1509,9 +1526,9 @@ def access_management_user_detail(user_id):
                 "assigned_to": task.assigned_to or "",
                 "reviewer_id": task.reviewer_id or "",
                 "due_at": _dt_to_iso(task.due_at),
-                "completed_at": _dt_to_iso(task.completed_at),
-                "created_at": _dt_to_iso(task.created_at),
-                "updated_at": _dt_to_iso(task.updated_at),
+                "completed_at": _utc_to_jst_iso(task.completed_at),
+                "created_at": _utc_to_jst_iso(task.created_at),
+                "updated_at": _utc_to_jst_iso(task.updated_at),
                 "subtasks": [
                     {"title": sub.title, "is_done": bool(sub.is_done)}
                     for sub in task.subtasks
@@ -1529,7 +1546,7 @@ def access_management_user_detail(user_id):
                 "file_size": int(row.file_size or 0),
                 "is_internal": bool(row.is_internal),
                 "ip_address": row.ip_address or "",
-                "uploaded_at": _dt_to_iso(row.uploaded_at),
+                "uploaded_at": _utc_to_jst_iso(row.uploaded_at),
             }
             for row in uploads
         ],
@@ -1546,7 +1563,7 @@ def access_management_user_detail(user_id):
                 "download_type": row.download_type,
                 "file_size": int(row.file_size or 0),
                 "ip_address": row.ip_address or "",
-                "downloaded_at": _dt_to_iso(row.downloaded_at),
+                "downloaded_at": _utc_to_jst_iso(row.downloaded_at),
                 "role": "downloaded_by_user" if row.downloader == username else "uploaded_by_user",
             }
             for row in downloads

@@ -1,52 +1,243 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="max-w-6xl mx-auto">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold">🔧 管理者ページ</h1>
-    <a href="/" class="text-blue-600 hover:underline">← ダッシュボードへ戻る</a>
+<style>
+  .admin-shell {
+    --admin-ink: #172033;
+    --admin-muted: #64748b;
+    --admin-line: #dbe3ef;
+    --admin-soft: #f8fafc;
+    color: var(--admin-ink);
+    width: 100%;
+  }
+  #app-main-content {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+  .admin-tabbar {
+    scrollbar-width: thin;
+  }
+  .admin-tab {
+    white-space: nowrap;
+  }
+  .admin-users-scroll {
+    overflow-x: auto;
+  }
+  .admin-users-grid {
+    min-width: 1260px;
+  }
+  .admin-users-head {
+    background: #f8fafc;
+    border-bottom: 1px solid var(--admin-line);
+  }
+  .admin-users-head table,
+  .admin-users-body table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+  .admin-users-head th {
+    background: #f8fafc;
+    color: #0f172a;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .admin-users-body {
+    max-height: calc(100vh - 22rem);
+    min-height: 22rem;
+    overflow-y: auto;
+    background: #fff;
+  }
+  .admin-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.5rem;
+    border-radius: 9999px;
+    border: 1px solid var(--admin-line);
+    padding: 0.15rem 0.55rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.2;
+    background: #fff;
+  }
+  .admin-chip.is-warn {
+    border-color: #fecaca;
+    background: #fff1f2;
+    color: #be123c;
+  }
+  .admin-chip.is-ok {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+  }
+  .admin-action {
+    min-height: 2rem;
+  }
+  .admin-reset-button {
+    min-width: 4.5rem;
+    white-space: nowrap;
+  }
+  @media (max-width: 768px) {
+    #app-sidebar {
+      display: none !important;
+    }
+    #sidebar-toggle {
+      left: 0.75rem !important;
+    }
+    #app-main-content {
+      padding: 1rem !important;
+    }
+    .admin-shell > .flex:first-of-type {
+      padding-left: 2.5rem;
+    }
+    .admin-users-body {
+      max-height: none;
+      min-height: 0;
+    }
+    .admin-shell h1 {
+      font-size: 1.75rem;
+      line-height: 1.25;
+    }
+  }
+</style>
+
+<div class="admin-shell max-w-[1600px] mx-auto">
+  <div class="flex flex-col gap-4 mb-5 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <p class="text-xs font-semibold tracking-[0.18em] text-slate-500 uppercase">DSTT Admin</p>
+      <h1 class="text-3xl font-bold mt-1">管理者ページ</h1>
+      <p class="text-sm text-slate-500 mt-2">ユーザー、権限、ログをここで横断管理します。ログ日時はJSTで表示します。</p>
+    </div>
+    <a href="/" class="inline-flex items-center justify-center border border-slate-300 bg-white px-4 py-2 rounded text-sm font-medium hover:bg-slate-50">ダッシュボードへ戻る</a>
   </div>
 
   <!-- タブナビゲーション -->
-  <div class="border-b border-gray-200 mb-6">
-    <nav class="flex gap-2 flex-wrap">
-      <button data-tab="users" class="admin-tab px-4 py-2 border-b-2 border-red-600 text-red-700 font-medium">👤 ユーザー管理</button>
-      <button data-tab="access-management" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">📊 アクセス管理</button>
-      <button data-tab="permissions" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🔐 ツールアクセス権（個人）</button>
-      <button data-tab="group-perms" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🏷️ グループ付与</button>
-      <button data-tab="organization" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🏢 支店・営業所・担当</button>
-      <button data-tab="siteplus-codes" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🏗️ 現場の営業所コード</button>
-      <button data-tab="leavemgr-codes" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">⛵ 有休カレンダー</button>
-      <button data-tab="tool-management" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">🧩 ツール管理</button>
-      <button data-tab="announcements" class="admin-tab px-4 py-2 border-b-2 border-transparent text-gray-600 hover:text-gray-900">📣 お知らせ</button>
+  <div class="sticky top-0 z-20 bg-gray-100/95 backdrop-blur border-b border-gray-200 mb-6 py-2">
+    <nav class="admin-tabbar flex gap-2 overflow-x-auto">
+      <button data-tab="users" class="admin-tab px-4 py-2 rounded border border-red-200 bg-red-50 text-red-700 font-medium">ユーザー管理</button>
+      <button data-tab="access-management" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">アクセス管理</button>
+      <button data-tab="permissions" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">個人アクセス権</button>
+      <button data-tab="group-perms" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">グループ付与</button>
+      <button data-tab="organization" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">支店・営業所・担当</button>
+      <button data-tab="siteplus-codes" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">現場コード</button>
+      <button data-tab="leavemgr-codes" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">有休カレンダー</button>
+      <button data-tab="tool-management" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">ツール管理</button>
+      <button data-tab="announcements" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">お知らせ</button>
     </nav>
   </div>
 
   <!-- ===== ユーザー管理 ===== -->
   <section id="tab-users" class="admin-section">
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl font-semibold">ユーザー一覧</h2>
-      <div class="flex gap-2">
+    <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start mb-4">
+      <div>
+        <h2 class="text-xl font-semibold">ユーザー一覧</h2>
+        <p class="text-sm text-slate-500 mt-1">検索・所属・権限で絞り込み、対象ユーザーの編集、ログ確認、権限設定へ直接移動できます。</p>
+      </div>
+      <div class="flex flex-wrap gap-2 xl:justify-end">
         <button id="btn-login-logs" class="bg-slate-700 text-white px-4 py-2 rounded hover:bg-slate-800">DSTTログイン履歴</button>
-        <button id="btn-new-user" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">＋ 新規ユーザー作成</button>
+        <button id="btn-new-user" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">新規ユーザー作成</button>
       </div>
     </div>
 
-    <div class="bg-white rounded-xl shadow overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-left">
-          <tr>
-            <th class="p-3">ユーザーID</th>
-            <th class="p-3">日本語名</th>
-            <th class="p-3">管理者</th>
-            <th class="p-3">支店</th>
-            <th class="p-3">営業所</th>
-            <th class="p-3">担当</th>
-            <th class="p-3 text-right">操作</th>
-          </tr>
-        </thead>
-        <tbody id="users-tbody"></tbody>
-      </table>
+    <div id="user-summary" class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4"></div>
+
+    <div class="bg-white border border-slate-200 rounded shadow-sm p-4 mb-4">
+      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.5fr)_repeat(5,minmax(140px,1fr))_auto] xl:items-end">
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">検索</label>
+          <input id="user-search" class="w-full border rounded px-3 py-2" placeholder="ID・名前・支店・営業所・担当・コード">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">支店</label>
+          <select id="user-filter-branch" class="w-full border rounded px-3 py-2"></select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">営業所</label>
+          <select id="user-filter-office" class="w-full border rounded px-3 py-2"></select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">権限</label>
+          <select id="user-filter-role" class="w-full border rounded px-3 py-2">
+            <option value="all">すべて</option>
+            <option value="admin">管理者のみ</option>
+            <option value="member">一般のみ</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">所属状態</label>
+          <select id="user-filter-status" class="w-full border rounded px-3 py-2">
+            <option value="all">すべて</option>
+            <option value="missing-office">営業所未設定</option>
+            <option value="extra-office">追加営業所あり</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">表示件数</label>
+          <select id="user-page-size" class="w-full border rounded px-3 py-2">
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </div>
+        <button id="btn-user-reset" type="button" class="admin-reset-button border border-slate-300 bg-white px-4 py-2 rounded hover:bg-slate-50">解除</button>
+      </div>
+    </div>
+
+    <div class="bg-white rounded shadow-sm border border-slate-200 overflow-hidden">
+      <div class="px-4 py-3 border-b bg-slate-50 flex flex-wrap items-center justify-between gap-3">
+        <div id="user-result-count" class="text-sm font-medium text-slate-700"></div>
+        <div class="flex items-center gap-2">
+          <button id="user-prev-page" type="button" class="border border-slate-300 bg-white px-3 py-1.5 rounded text-sm hover:bg-slate-50">前へ</button>
+          <span id="user-page-label" class="text-sm text-slate-600 min-w-24 text-center"></span>
+          <button id="user-next-page" type="button" class="border border-slate-300 bg-white px-3 py-1.5 rounded text-sm hover:bg-slate-50">次へ</button>
+        </div>
+      </div>
+      <div class="admin-users-scroll">
+        <div class="admin-users-grid">
+          <div class="admin-users-head">
+            <table class="text-sm">
+              <colgroup>
+                <col style="width: 170px;">
+                <col style="width: 150px;">
+                <col style="width: 90px;">
+                <col style="width: 160px;">
+                <col style="width: 170px;">
+                <col style="width: 130px;">
+                <col style="width: 190px;">
+                <col style="width: 300px;">
+              </colgroup>
+              <thead class="text-left">
+                <tr>
+                  <th class="p-3">ユーザーID</th>
+                  <th class="p-3">日本語名</th>
+                  <th class="p-3">管理者</th>
+                  <th class="p-3">支店</th>
+                  <th class="p-3">営業所</th>
+                  <th class="p-3">担当</th>
+                  <th class="p-3">個人/グループ権限</th>
+                  <th class="p-3 text-right">操作</th>
+                </tr>
+              </thead>
+            </table>
+          </div>
+          <div class="admin-users-body">
+            <table class="text-sm">
+              <colgroup>
+                <col style="width: 170px;">
+                <col style="width: 150px;">
+                <col style="width: 90px;">
+                <col style="width: 160px;">
+                <col style="width: 170px;">
+                <col style="width: 130px;">
+                <col style="width: 190px;">
+                <col style="width: 300px;">
+              </colgroup>
+              <tbody id="users-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -56,6 +247,7 @@
       <div class="flex flex-col lg:flex-row lg:items-end gap-3 mb-5">
         <div class="flex-1 min-w-[240px]">
           <label class="block text-sm font-medium mb-1">ユーザー（表示名で選択）</label>
+          <input id="access-user-filter" class="w-full border rounded px-3 py-2 mb-2" placeholder="ユーザーID・表示名で絞り込み">
           <select id="access-user-select" class="w-full border rounded px-3 py-2"></select>
         </div>
         <div class="flex-1 min-w-[220px]">
@@ -190,7 +382,10 @@
 
       <div class="mb-4 flex items-center gap-3">
         <label class="text-sm font-medium">ユーザーを選択:</label>
-        <select id="perm-user-select" class="border rounded px-3 py-2 flex-1 max-w-md"></select>
+        <div class="flex-1 max-w-2xl grid gap-2 sm:grid-cols-[minmax(180px,1fr)_minmax(240px,1.5fr)]">
+          <input id="perm-user-filter" class="border rounded px-3 py-2" placeholder="ユーザーID・名前で検索">
+          <select id="perm-user-select" class="border rounded px-3 py-2"></select>
+        </div>
       </div>
 
       <div id="perm-tool-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4"></div>
@@ -522,7 +717,7 @@
     <div class="flex items-center justify-between gap-3 mb-4">
       <div>
         <h3 class="text-xl font-bold">DSTTログイン履歴</h3>
-        <p class="text-sm text-gray-500">DSTTへログインした人だけを、直近のログイン順で表示します。</p>
+        <p class="text-sm text-gray-500">DSTTへログインした人だけを、直近のログイン順で表示します。日時はJSTです。</p>
       </div>
       <div class="flex gap-2">
         <button type="button" id="btn-refresh-login-logs" class="bg-slate-700 text-white px-4 py-2 rounded hover:bg-slate-800">更新</button>
@@ -555,6 +750,8 @@ const state = {
   selectedUserId: null,
   accessUsers: [],
   accessDetail: null,
+  userPage: 1,
+  userPageSize: 50,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -570,14 +767,15 @@ async function api(url, options = {}) {
 }
 
 // ===== Tabs =====
-$$('.admin-tab').forEach(btn => btn.addEventListener('click', () => {
+function activateAdminTab(tab) {
+  const btn = document.querySelector(`.admin-tab[data-tab="${tab}"]`);
+  if (!btn) return;
   $$('.admin-tab').forEach(b => {
-    b.classList.remove('border-red-600', 'text-red-700', 'font-medium');
+    b.classList.remove('border-red-200', 'bg-red-50', 'text-red-700', 'font-medium');
     b.classList.add('border-transparent', 'text-gray-600');
   });
-  btn.classList.add('border-red-600', 'text-red-700', 'font-medium');
+  btn.classList.add('border-red-200', 'bg-red-50', 'text-red-700', 'font-medium');
   btn.classList.remove('border-transparent', 'text-gray-600');
-  const tab = btn.dataset.tab;
   $$('.admin-section').forEach(sec => sec.classList.add('hidden'));
   $(`#tab-${tab}`).classList.remove('hidden');
   if (tab === 'users') loadUsers();
@@ -588,7 +786,9 @@ $$('.admin-tab').forEach(btn => btn.addEventListener('click', () => {
   if (tab === 'siteplus-codes') loadSiteplusCodes();
   if (tab === 'leavemgr-codes') loadLeaveMgrCodes();
   if (tab === 'tool-management') loadToolManagement();
-}));
+}
+
+$$('.admin-tab').forEach(btn => btn.addEventListener('click', () => activateAdminTab(btn.dataset.tab)));
 
 // ===== Users =====
 async function loadUsers() {
@@ -598,26 +798,121 @@ async function loadUsers() {
   ]);
   state.users = u.users;
   state.branches = o.branches;
+  populateUserFilters();
   renderUsers();
+}
+
+function populateUserFilters() {
+  const branchSel = $('#user-filter-branch');
+  const officeSel = $('#user-filter-office');
+  if (!branchSel || !officeSel) return;
+  const currentBranch = branchSel.value || 'all';
+  const currentOffice = officeSel.value || 'all';
+  branchSel.innerHTML = '<option value="all">すべて</option><option value="none">未設定</option>' +
+    state.branches.map(b => `<option value="${b.id}">${escape(b.name)}${b.code ? ' [' + escape(b.code) + ']' : ''}</option>`).join('');
+  const offices = [];
+  state.branches.forEach(b => (b.offices || []).forEach(o => offices.push({ ...o, branch_name: b.name })));
+  officeSel.innerHTML = '<option value="all">すべて</option><option value="none">未設定</option>' +
+    offices.map(o => `<option value="${o.id}">${escape(o.branch_name)} / ${escape(o.name)}${o.code ? ' [' + escape(o.code) + ']' : ''}</option>`).join('');
+  branchSel.value = [...branchSel.options].some(o => o.value === currentBranch) ? currentBranch : 'all';
+  officeSel.value = [...officeSel.options].some(o => o.value === currentOffice) ? currentOffice : 'all';
+}
+
+function userSearchText(u) {
+  return [
+    u.username, u.name, u.branch_name, u.branch_code, u.office_name,
+    u.office_code, u.department_name,
+  ].map(v => String(v || '').toLowerCase()).join(' ');
+}
+
+function filteredUsers() {
+  const q = ($('#user-search')?.value || '').trim().toLowerCase();
+  const branch = $('#user-filter-branch')?.value || 'all';
+  const office = $('#user-filter-office')?.value || 'all';
+  const role = $('#user-filter-role')?.value || 'all';
+  const status = $('#user-filter-status')?.value || 'all';
+  return state.users.filter(u => {
+    if (q && !userSearchText(u).includes(q)) return false;
+    if (branch === 'none' && u.branch_id) return false;
+    if (branch !== 'all' && branch !== 'none' && String(u.branch_id || '') !== branch) return false;
+    if (office === 'none' && u.office_id) return false;
+    if (office !== 'all' && office !== 'none' && String(u.office_id || '') !== office) return false;
+    if (role === 'admin' && !u.is_admin) return false;
+    if (role === 'member' && u.is_admin) return false;
+    if (status === 'missing-office' && u.office_id) return false;
+    if (status === 'extra-office' && !(u.extra_office_ids || []).length) return false;
+    return true;
+  });
+}
+
+function renderUserSummary(users) {
+  const total = state.users.length;
+  const admins = state.users.filter(u => u.is_admin).length;
+  const missingOffice = state.users.filter(u => !u.office_id).length;
+  const extraOffice = state.users.filter(u => (u.extra_office_ids || []).length).length;
+  const cards = [
+    ['総ユーザー', total],
+    ['表示中', users.length],
+    ['管理者', admins],
+    ['営業所未設定', missingOffice],
+    ['追加営業所あり', extraOffice],
+  ];
+  $('#user-summary').innerHTML = cards.map(([label, value]) => `
+    <div class="border border-slate-200 rounded bg-white p-3 shadow-sm">
+      <div class="text-xs font-semibold text-slate-500">${escape(label)}</div>
+      <div class="text-2xl font-bold mt-1">${escape(value)}</div>
+    </div>
+  `).join('');
 }
 
 function renderUsers() {
   const tbody = $('#users-tbody');
-  tbody.innerHTML = state.users.map(u => `
-    <tr class="border-t">
-      <td class="p-3 font-mono">${escape(u.username)}${u.is_legacy_admin ? '<span class="ml-1 text-xs text-red-600">[初期管理者]</span>' : ''}</td>
+  const rows = filteredUsers();
+  renderUserSummary(rows);
+  const pageSize = Number($('#user-page-size')?.value || state.userPageSize || 50);
+  state.userPageSize = pageSize;
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  state.userPage = Math.min(Math.max(1, state.userPage || 1), totalPages);
+  const start = (state.userPage - 1) * pageSize;
+  const pageRows = rows.slice(start, start + pageSize);
+  $('#user-result-count').textContent = rows.length
+    ? `${rows.length}件中 ${start + 1}-${start + pageRows.length}件を表示`
+    : '該当するユーザーはありません';
+  $('#user-page-label').textContent = `${state.userPage} / ${totalPages}`;
+  $('#user-prev-page').disabled = state.userPage <= 1;
+  $('#user-next-page').disabled = state.userPage >= totalPages;
+  $('#user-prev-page').classList.toggle('opacity-40', state.userPage <= 1);
+  $('#user-next-page').classList.toggle('opacity-40', state.userPage >= totalPages);
+  if (!pageRows.length) {
+    tbody.innerHTML = '<tr><td class="p-8 text-center text-gray-500" colspan="8">条件に合うユーザーはいません。</td></tr>';
+    return;
+  }
+  tbody.innerHTML = pageRows.map(u => {
+    const personalCount = (u.tool_keys || []).length;
+    const groupCount = (u.group_tool_keys || []).length;
+    return `
+    <tr class="border-t hover:bg-slate-50 align-top">
+      <td class="p-3 font-mono whitespace-nowrap">${escape(u.username)}${u.is_legacy_admin ? '<span class="admin-chip is-warn ml-2">初期管理者</span>' : ''}</td>
       <td class="p-3">${escape(u.name)}</td>
-      <td class="p-3">${u.is_admin ? '<span class="text-red-600 font-medium">✔</span>' : '-'}</td>
+      <td class="p-3">${u.is_admin ? '<span class="admin-chip is-warn">管理者</span>' : '<span class="admin-chip">一般</span>'}</td>
       <td class="p-3">${escape(u.branch_name || '-')}${u.branch_code ? ' <span class="text-xs font-mono text-blue-700">[' + escape(u.branch_code) + ']</span>' : ''}</td>
       <td class="p-3">${escape(u.office_name || '-')}${u.office_code ? ' <span class="text-xs font-mono text-blue-700">[' + escape(u.office_code) + ']</span>' : ''}</td>
       <td class="p-3">${escape(u.department_name || '-')}</td>
-      <td class="p-3 text-right">
-        <button onclick="openEditUser(${u.id})" class="bg-blue-500 text-white px-2 py-1 rounded text-xs">編集</button>
-        <button onclick="openChangePw(${u.id})" class="bg-gray-500 text-white px-2 py-1 rounded text-xs">パスワード</button>
-        <button onclick="deleteUser(${u.id})" class="bg-red-500 text-white px-2 py-1 rounded text-xs" ${u.is_legacy_admin ? 'disabled' : ''}>削除</button>
+      <td class="p-3 whitespace-nowrap">
+        <span class="admin-chip is-ok">個人 ${personalCount}</span>
+        <span class="admin-chip ml-1">グループ ${groupCount}</span>
+      </td>
+      <td class="p-3">
+        <div class="flex flex-wrap justify-end gap-1.5 min-w-64">
+          <button onclick="openEditUser(${u.id})" class="admin-action bg-blue-600 text-white px-2.5 py-1 rounded text-xs hover:bg-blue-700">編集</button>
+          <button onclick="openUserPermissions(${u.id})" class="admin-action bg-indigo-600 text-white px-2.5 py-1 rounded text-xs hover:bg-indigo-700">権限</button>
+          <button onclick="openUserAccess(${u.id})" class="admin-action bg-slate-700 text-white px-2.5 py-1 rounded text-xs hover:bg-slate-800">ログ</button>
+          <button onclick="openChangePw(${u.id})" class="admin-action bg-gray-500 text-white px-2.5 py-1 rounded text-xs hover:bg-gray-600">PW</button>
+          <button onclick="deleteUser(${u.id})" class="admin-action bg-red-500 text-white px-2.5 py-1 rounded text-xs hover:bg-red-600 disabled:opacity-40" ${u.is_legacy_admin ? 'disabled' : ''}>削除</button>
+        </div>
       </td>
     </tr>
-  `).join('');
+  `}).join('');
 }
 
 function escape(s) {
@@ -626,9 +921,14 @@ function escape(s) {
 
 function fmtDate(value) {
   if (!value) return '-';
+  const raw = String(value);
+  if (!/[zZ]|[+-]\d{2}:\d{2}$/.test(raw)) {
+    const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (match) return `${match[1]}/${match[2]}/${match[3]} ${match[4]}:${match[5]}:${match[6] || '00'}`;
+  }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return escape(value);
-  return d.toLocaleString('ja-JP', { hour12: false });
+  return d.toLocaleString('ja-JP', { hour12: false, timeZone: 'Asia/Tokyo' });
 }
 
 function fmtBytes(bytes) {
@@ -659,12 +959,28 @@ async function loadAccessManagement() {
   if (!state.accessUsers.length) {
     const res = await api('/tools/user_management/api/access-management/users');
     state.accessUsers = res.users || [];
-    const sel = $('#access-user-select');
-    sel.innerHTML = '<option value="">ユーザーを選択（未選択時は全ユーザーのログイン履歴）</option>' +
-      state.accessUsers.map(u => `<option value="${u.id}">${escape(u.label)}${u.is_admin ? ' [管理者]' : ''}</option>`).join('');
-    sel.onchange = loadSelectedAccessLogs;
+    renderAccessUserOptions();
+    $('#access-user-select').onchange = loadSelectedAccessLogs;
+    if ($('#access-user-filter')) $('#access-user-filter').oninput = () => {
+      const current = $('#access-user-select').value;
+      renderAccessUserOptions(current);
+    };
   }
   await loadSelectedAccessLogs();
+}
+
+function renderAccessUserOptions(selectedValue = '') {
+  const sel = $('#access-user-select');
+  const q = ($('#access-user-filter')?.value || '').trim().toLowerCase();
+  const users = state.accessUsers.filter(u => {
+    if (!q) return true;
+    return [u.username, u.display_name, u.label].map(v => String(v || '').toLowerCase()).join(' ').includes(q);
+  });
+  sel.innerHTML = '<option value="">ユーザーを選択（未選択時は全ユーザーのログイン履歴）</option>' +
+    users.map(u => `<option value="${u.id}">${escape(u.label)}${u.is_admin ? ' [管理者]' : ''}</option>`).join('');
+  if (selectedValue && users.some(u => String(u.id) === String(selectedValue))) {
+    sel.value = String(selectedValue);
+  }
 }
 
 async function loadAllUserLoginLogs() {
@@ -811,10 +1127,7 @@ $('#access-search')?.addEventListener('keydown', (e) => {
   }
 });
 function formatLoginTime(value) {
-  if (!value) return '-';
-  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
-  if (!match) return value;
-  return `${match[1]}/${match[2]}/${match[3]} ${match[4]}:${match[5]}:${match[6]}`;
+  return fmtDate(value);
 }
 
 async function loadLoginLogs() {
@@ -1019,6 +1332,58 @@ async function deleteUser(userId) {
   } catch (err) { alert('エラー: ' + err.message); }
 }
 
+function resetUserPageAndRender() {
+  state.userPage = 1;
+  renderUsers();
+}
+
+['#user-search', '#user-filter-branch', '#user-filter-office', '#user-filter-role', '#user-filter-status', '#user-page-size'].forEach(sel => {
+  $(sel)?.addEventListener('input', resetUserPageAndRender);
+  $(sel)?.addEventListener('change', resetUserPageAndRender);
+});
+
+$('#btn-user-reset')?.addEventListener('click', () => {
+  $('#user-search').value = '';
+  $('#user-filter-branch').value = 'all';
+  $('#user-filter-office').value = 'all';
+  $('#user-filter-role').value = 'all';
+  $('#user-filter-status').value = 'all';
+  $('#user-page-size').value = '50';
+  resetUserPageAndRender();
+});
+
+$('#user-prev-page')?.addEventListener('click', () => {
+  state.userPage = Math.max(1, state.userPage - 1);
+  renderUsers();
+});
+
+$('#user-next-page')?.addEventListener('click', () => {
+  state.userPage += 1;
+  renderUsers();
+});
+
+async function openUserAccess(userId) {
+  activateAdminTab('access-management');
+  await loadAccessManagement();
+  if ($('#access-user-filter')) {
+    $('#access-user-filter').value = '';
+    renderAccessUserOptions(String(userId));
+  }
+  $('#access-user-select').value = String(userId);
+  await loadSelectedAccessLogs();
+}
+
+async function openUserPermissions(userId) {
+  activateAdminTab('permissions');
+  await loadPermissions();
+  if ($('#perm-user-filter')) {
+    $('#perm-user-filter').value = '';
+    renderPermissionUserOptions(String(userId));
+  }
+  $('#perm-user-select').value = String(userId);
+  renderPermissionGrid();
+}
+
 // ===== Permissions =====
 async function loadPermissions() {
   const [u, t] = await Promise.all([
@@ -1028,11 +1393,27 @@ async function loadPermissions() {
   state.users = u.users;
   state.tools = t.tools;
 
-  const sel = $('#perm-user-select');
-  sel.innerHTML = '<option value="">（ユーザーを選択）</option>' +
-    state.users.map(u => `<option value="${u.id}">${escape(u.username)} (${escape(u.name)})${u.is_admin ? ' [管理者]' : ''}</option>`).join('');
-  sel.onchange = renderPermissionGrid;
+  renderPermissionUserOptions();
+  $('#perm-user-select').onchange = renderPermissionGrid;
+  if ($('#perm-user-filter')) $('#perm-user-filter').oninput = () => {
+    const current = $('#perm-user-select').value;
+    renderPermissionUserOptions(current);
+  };
   $('#perm-tool-grid').innerHTML = '<p class="text-sm text-gray-500 col-span-full">上のセレクトでユーザーを選んでください。</p>';
+}
+
+function renderPermissionUserOptions(selectedValue = '') {
+  const sel = $('#perm-user-select');
+  const q = ($('#perm-user-filter')?.value || '').trim().toLowerCase();
+  const users = state.users.filter(u => {
+    if (!q) return true;
+    return [u.username, u.name, u.branch_name, u.office_name].map(v => String(v || '').toLowerCase()).join(' ').includes(q);
+  });
+  sel.innerHTML = '<option value="">（ユーザーを選択）</option>' +
+    users.map(u => `<option value="${u.id}">${escape(u.username)} (${escape(u.name)})${u.is_admin ? ' [管理者]' : ''}</option>`).join('');
+  if (selectedValue && users.some(u => String(u.id) === String(selectedValue))) {
+    sel.value = String(selectedValue);
+  }
 }
 
 function formatGroupScope(src) {
