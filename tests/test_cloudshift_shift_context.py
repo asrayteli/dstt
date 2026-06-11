@@ -437,3 +437,44 @@ def test_prev_month_estimate_ignores_leave_entries():
     request, _, _ = ctx.build_planning_request(project, YEAR, MONTH)
     # 有休を除いた 1 名/日 が推定需要になる
     assert all(s.required_count == 1 for s in request.required_slots)
+
+
+# ---------------------------------------------------------------------------
+# 代務（SUB）/ 研修（TRAIN）の経験レベル
+# ---------------------------------------------------------------------------
+
+
+def test_role_option_records_split_experience_levels():
+    """アシスト実績の SUB は経験へ、TRAIN は研修済みへ振り分けられる。"""
+    project = base_project()
+    project["assist"]["records"] = [
+        {"employee_number": "E201", "shift_key": "SUB"},
+        {"employee_number": "E202", "shift_key": "TRAIN"},
+        {"employee_number": "E203", "shift_key": "A"},
+    ]
+    settings, _ = e.migrate_settings(None)
+    warnings: list = []
+    workers = {w.employee_number: w for w in ctx.build_workers(project, settings, warnings)}
+    assert "10" in workers["E201"].experienced_site_row_ids  # 代務=実績
+    assert "10" not in workers["E201"].trained_site_row_ids
+    assert "10" in workers["E202"].trained_site_row_ids      # 研修=研修済み
+    assert "10" not in workers["E202"].experienced_site_row_ids
+    assert "10" in workers["E203"].experienced_site_row_ids
+    # SUB/TRAIN はオプション適性（時間帯・車両）には入れない
+    assert "SUB" not in workers["E201"].experienced_option_keys
+    assert "TRAIN" not in workers["E202"].experienced_option_keys
+    assert "A" in workers["E203"].experienced_option_keys
+
+
+def test_role_option_entries_derive_experience_directly():
+    """アシスト未登録でも、entry の SUB/TRAIN オプションから直接経験を導出する。"""
+    project = base_project(entries_per_day={
+        "1": [{"id": "s1", "value": "!SUB!田中", "employee_number": "E301"}],
+        "2": [{"id": "t1", "value": "!TRAIN!山田", "employee_number": "E302"}],
+    })
+    settings, _ = e.migrate_settings(None)
+    warnings: list = []
+    workers = {w.employee_number: w for w in ctx.build_workers(project, settings, warnings)}
+    assert "10" in workers["E301"].experienced_site_row_ids
+    assert "10" in workers["E302"].trained_site_row_ids
+    assert workers["E301"].name == "田中"

@@ -8,6 +8,7 @@ try:
     from .shiftersync_format import (
         LEAVE_OPTION_MAPPINGS,
         OPTION_MAPPINGS,
+        ROLE_OPTION_MAPPINGS,
         entry_display_text,
         entry_name_for_comparison,
         entry_option_and_name,
@@ -16,6 +17,7 @@ except ImportError:
     from app.tools.shiftersync_format import (  # type: ignore
         LEAVE_OPTION_MAPPINGS,
         OPTION_MAPPINGS,
+        ROLE_OPTION_MAPPINGS,
         entry_display_text,
         entry_name_for_comparison,
         entry_option_and_name,
@@ -34,6 +36,8 @@ TIME_CONFLICT_RULES = {
 }
 VEHICLE_OPTIONS = {"M", "C", "O", "W", "V"}
 LEAVE_OPTION_KEYS = set(LEAVE_OPTION_MAPPINGS.keys())
+# 代務・研修は終日の勤務拘束として扱う（休暇以外のあらゆる予定と重複）
+ROLE_OPTION_KEYS = set(ROLE_OPTION_MAPPINGS.keys())
 
 
 def is_duplicate_by_rules(
@@ -41,6 +45,10 @@ def is_duplicate_by_rules(
 ) -> bool:
     if option1 in LEAVE_OPTION_KEYS or option2 in LEAVE_OPTION_KEYS:
         return False
+
+    # 代務・研修は終日拘束。休暇以外のどの予定とも同日共存できない。
+    if option1 in ROLE_OPTION_KEYS or option2 in ROLE_OPTION_KEYS:
+        return True
 
     if option1 == TEMPORARY_OPTION or option2 == TEMPORARY_OPTION:
         return same_site and option1 == option2 == TEMPORARY_OPTION
