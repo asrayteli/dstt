@@ -888,3 +888,42 @@ def test_swap_pass_reduces_weekend_imbalance():
             weekend_by_worker[a.employee_number] = weekend_by_worker.get(a.employee_number, 0) + 1
     # 土日が 1 人に集中しない
     assert max(weekend_by_worker.values()) == 1, weekend_by_worker
+
+
+# ---------------------------------------------------------------------------
+# 研修済み（trained）レベル
+# ---------------------------------------------------------------------------
+
+
+def test_trained_worker_is_eligible_with_lower_score():
+    """研修済みは既定の最低基準で適格になり、実績（代務含む）より低い点になる。"""
+    from dataclasses import replace as dc_replace
+    slots = [make_slot(1, required=2)]
+    experienced = make_worker("E001")  # 実績あり
+    trained = dc_replace(make_worker("E002", experienced=()), trained_site_row_ids=("10",))
+    res = e.plan_shifts(make_request(slots, [experienced, trained]))
+    assert set(assigned_numbers(res, day=1)) == {"E001", "E002"}
+    factors_by_number = {}
+    for panel in res.candidate_panels:
+        for c in panel.candidates:
+            factors_by_number.setdefault(c.employee_number, set()).update(f.label for f in c.factors)
+    assert "経験者" in factors_by_number["E001"]
+    assert "研修済み" in factors_by_number["E002"]
+
+
+def test_trained_only_worker_not_excluded_by_baseline():
+    from dataclasses import replace as dc_replace
+    slots = [make_slot(1)]
+    trained = dc_replace(make_worker("E001", experienced=()), trained_site_row_ids=("10",))
+    res = e.plan_shifts(make_request(slots, [trained]))
+    assert assigned_numbers(res, day=1) == ["E001"]
+
+
+def test_trained_sites_affect_request_hash():
+    from dataclasses import replace as dc_replace
+    slots = [make_slot(1)]
+    base = make_worker("E001")
+    with_trained = dc_replace(base, trained_site_row_ids=("10",))
+    h1 = e.compute_request_hash(make_request(slots, [base]))
+    h2 = e.compute_request_hash(make_request(slots, [with_trained]))
+    assert h1 != h2

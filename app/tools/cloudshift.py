@@ -64,10 +64,12 @@ try:
         serialize_entry_rows,
     )
     from .shiftersync_check import compare_shift_payloads, is_duplicate_by_rules
+    from .shiftersync_format import ROLE_OPTION_MAPPINGS
     from .japan_holidays import JAPAN_HOLIDAYS
 except ImportError:
     from app.tools.shiftersync_format import (  # type: ignore
         LEAVE_OPTION_MAPPINGS,
+        ROLE_OPTION_MAPPINGS,
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         normalize_entries_for_month,
@@ -122,6 +124,17 @@ PERSON_ASSIST_SITE_LABELS = {
     "training": "研修要現場",
 }
 PERSON_ASSIST_AUTO_SOURCE = "person_experience"
+# 役割オプション（代務 SUB / 研修 TRAIN）からの実績自動登録
+ROLE_OPTION_KEYS = set(ROLE_OPTION_MAPPINGS.keys())
+ROLE_OPTION_ASSIST_SOURCE = "role_option_experience"
+ROLE_OPTION_SUBSTITUTE_KEY = "SUB"
+ROLE_OPTION_TRAINING_KEY = "TRAIN"
+# 役割実績は「現場習熟」を表すため曜日・オプションに依存させず固定点+鮮度で評価する。
+# 代務（SUB）= 一人で勤務した実績。通常実績と同格のベース点
+#   （順序: 実績の完全一致 130 > 代務 115 > 実績の曜日一致 65 > 研修 60 > 曜日不一致 35）。
+ASSIST_SUBSTITUTE_RECORD_POINTS = 100
+# 研修（TRAIN）= 教わったが一人ではやっていない状態。代務より一段低い。
+ASSIST_TRAINING_RECORD_POINTS = 45
 PERSON_ASSIST_EXPERIENCE_KIND = "experienced"
 PERSON_ASSIST_TRAINING_KIND = "training"
 PERSON_ASSIST_COLLECTION_KEYS = {
@@ -4923,11 +4936,25 @@ def _assist_record_payload(record: dict[str, Any]) -> dict[str, Any]:
         "role_type": str(record.get("role_type") or "normal"),
         "role_label": ASSIST_ROLE_LABELS.get(str(record.get("role_type") or "normal"), "通常"),
         "notes": str(record.get("notes") or ""),
+        "source_type": str(record.get("source_type") or ""),
+        "source_label": _assist_record_source_label(record),
         "created_at": record.get("created_at"),
         "updated_at": record.get("updated_at"),
         "created_by": record.get("created_by"),
         "updated_by": record.get("updated_by"),
     }
+
+
+def _assist_record_source_label(record: dict[str, Any]) -> str:
+    """実績の登録元ラベル（自動登録のものをUIで区別表示する）。"""
+    source_type = str(record.get("source_type") or "")
+    if source_type == ROLE_OPTION_ASSIST_SOURCE:
+        option_key = str(record.get("shift_key") or "").strip().upper()
+        label = ROLE_OPTION_MAPPINGS.get(option_key, "役割")
+        return f"自動登録（シフトの{label}オプション）"
+    if source_type == PERSON_ASSIST_AUTO_SOURCE:
+        return "自動登録（個人シフトの経験済現場）"
+    return ""
 
 
 def _assist_rule_payload(rule: dict[str, Any]) -> dict[str, Any]:
@@ -5770,6 +5797,134 @@ def _remove_person_experience_scene_record(
     return f"person経験済現場の自動実績を削除: {_assist_record_history_label(existing)}"
 
 
+def _role_option_entries_for_month(
+    month_data: dict[str, Any], year: int, month: int
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """対象月の確定 entry から 代務/研修 オプションの実績を (社員番号, option) 単位で集約する。"""
+    aggregated: dict[tuple[str, str], dict[str, Any]] = {}
+    for day_key, day_entries in (month_data.get("entries_per_day") or {}).items():
+        if not isinstance(day_entries, list):
+            continue
+        try:
+            day = int(day_key)
+        except (TypeError, ValueError):
+            continue
+        for entry in day_entries:
+            if not isinstance(entry, dict):
+                continue
+            option, name = parse_entry_value(str(entry.get("value") or ""))
+            option_key = str(option or "").strip().upper()
+            if option_key not in ROLE_OPTION_KEYS:
+                continue
+            number = str(entry.get("employee_number") or "").strip()
+            if not number:
+                continue
+            date_text = f"{year:04d}-{month:02d}-{day:02d}"
+            bucket = aggregated.setdefault(
+                (number, option_key),
+                {
+                    "employee_number": number,
+                    "shift_key": option_key,
+                    "candidate_name": str(name or "").strip() or number,
+                    "latest_date": date_text,
+                    "count": 0,
+                },
+            )
+            bucket["count"] += 1
+            if date_text >= bucket["latest_date"]:
+                bucket["latest_date"] = date_text
+                if str(name or "").strip():
+                    bucket["candidate_name"] = str(name or "").strip()
+    return aggregated
+
+
+def _sync_role_option_experience_for_month(
+    project: dict[str, Any], year: int, month: int, *, actor_name: str
+) -> list[str]:
+    """scene シフトの 代務/研修 オプション entry をアシスト実績へ自動登録する。
+
+    目的: ユーザーが entry に 代務（SUB）/ 研修（TRAIN）オプションを付けるだけで
+    経験がサーバーへ自動登録され、自動作成（shift-engine）の適格判定・点数に
+    反映されるようにする（手動登録の手間を省く）。
+
+    安全原則:
+    - 集約単位は (社員番号, オプション, 月) で 1 実績。date はその月の最新該当日。
+    - source_type=ROLE_OPTION_ASSIST_SOURCE の自動実績のみ追加・更新・削除する。
+      手動登録や person 連携（person_experience）の実績には一切触れない。
+    - 削除は「対象月の自動実績のうち、entry が無くなったもの」だけ。他の月は触れない。
+    - この関数は project dict を書き換えるだけで保存はしない（呼び出し元の
+      _save_project と同一トランザクションで永続化し、DB 書き込みを増やさない）。
+    """
+    if str(project.get("mode") or "") != "scene":
+        return []
+    month_key = _month_key(year, month)
+    month_data = (project.get("months") or {}).get(month_key)
+    if not isinstance(month_data, dict):
+        return []
+
+    current = _role_option_entries_for_month(month_data, year, month)
+    assist = _ensure_assist(project)
+
+    existing_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in (assist.get("records") or []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("source_type") or "") != ROLE_OPTION_ASSIST_SOURCE:
+            continue
+        if str(item.get("source_month_key") or "") != month_key:
+            continue
+        key = (
+            str(item.get("employee_number") or "").strip(),
+            str(item.get("shift_key") or "").strip().upper(),
+        )
+        existing_by_key.setdefault(key, item)
+
+    changes: list[str] = []
+    for key in sorted(current.keys()):
+        info = current[key]
+        existing = existing_by_key.pop(key, None)
+        label = ROLE_OPTION_MAPPINGS.get(info["shift_key"], info["shift_key"])
+        record = _assist_record_from_payload(
+            assist,
+            {
+                "date": info["latest_date"],
+                "candidate_name": info["candidate_name"],
+                "employee_number": info["employee_number"],
+                "shift_key": info["shift_key"],
+                # 代務は一人で勤務した「実績」（通常実績と同格）。研修も role は
+                # normal とし、点数差は検索側の研修専用スコアで付ける。
+                "role_type": "normal",
+                "notes": f"シフトの{label}オプションから自動登録（{month_key}: {info['count']}回）",
+            },
+            existing=existing,
+            actor_name=actor_name,
+        )
+        record["source_type"] = ROLE_OPTION_ASSIST_SOURCE
+        record["source_month_key"] = month_key
+        record["source_occurrences"] = int(info["count"])
+        if existing:
+            index = assist["records"].index(existing)
+            if assist["records"][index] != record:
+                assist["records"][index] = record
+                changes.append(f"{label}実績を自動更新: {_assist_record_history_label(record)}")
+        else:
+            assist["records"].append(record)
+            changes.append(f"{label}実績を自動登録: {_assist_record_history_label(record)}")
+
+    # entry が消えた分（この月の自動実績のみ）を削除する
+    for key in sorted(existing_by_key.keys()):
+        stale = existing_by_key[key]
+        assist["records"] = [
+            item
+            for item in (assist.get("records") or [])
+            if str(item.get("id") or "") != str(stale.get("id") or "")
+        ]
+        label = ROLE_OPTION_MAPPINGS.get(str(stale.get("shift_key") or "").strip().upper(), "役割")
+        changes.append(f"{label}実績の自動登録を解除: {_assist_record_history_label(stale)}")
+
+    return changes
+
+
 def _sync_person_experience_to_scene_projects(
     source_project: dict[str, Any],
     site: dict[str, Any],
@@ -6226,6 +6381,47 @@ def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str
             candidate_category_totals[record_aptitude_category] = (
                 candidate_category_totals.get(record_aptitude_category, 0) + 1
             )
+        record_role_option = record_shift_key.strip().upper()
+        if record_role_option in ROLE_OPTION_KEYS:
+            # 役割実績（代務/研修）は曜日・オプションに依存しない「現場習熟」として
+            # 固定点 + 鮮度で評価する。代務（一人で勤務した実績）> 研修（教わったのみ）。
+            if days_ago > 365:
+                continue
+            is_substitute = record_role_option == ROLE_OPTION_SUBSTITUTE_KEY
+            base_points = (
+                ASSIST_SUBSTITUTE_RECORD_POINTS if is_substitute
+                else ASSIST_TRAINING_RECORD_POINTS
+            )
+            recency_bonus = _assist_record_recency_bonus(days_ago, "weekday")
+            points = base_points + recency_bonus
+            item = upsert_result(
+                str(record.get("candidate_id") or ""),
+                str(record.get("candidate_name") or ""),
+                str(record.get("employee_number") or ""),
+            )
+            item["score"] += points
+            item["matched_record_count"] += 1
+            if is_substitute:
+                item["reasons"].append(f"{record_date_text} の代務実績（一人で勤務した実績）")
+            else:
+                item["reasons"].append(f"{record_date_text} の研修実績（研修済み・一人での実績はまだ）")
+            item["breakdown"].append(
+                {
+                    "category": "record",
+                    "label": "代務実績" if is_substitute else "研修実績",
+                    "match_scope": "substitute" if is_substitute else "training",
+                    "match_label": "代務" if is_substitute else "研修済み",
+                    "role_type": "normal",
+                    "role_label": "代務" if is_substitute else "研修",
+                    "base_points": base_points,
+                    "recency_bonus": recency_bonus,
+                    "days_ago": days_ago,
+                    "points": points,
+                    "formula": f"{base_points} + {recency_bonus}",
+                    "context": f"{record_date_text} / {record_shift_label}",
+                }
+            )
+            continue
         if weekday_matches:
             match_scope = _assist_match_scope(shift_key, record_shift_key)
         else:
@@ -6391,6 +6587,16 @@ def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str
             "single_record_other_weekday_max": _assist_record_points("dedicated", 0, "other_weekday"),
             "role_scores": ASSIST_ROLE_SCORES,
             "match_scopes": ASSIST_MATCH_SCOPE_LABELS,
+            "substitute_record": {
+                "base_points": ASSIST_SUBSTITUTE_RECORD_POINTS,
+                "formula": f"{ASSIST_SUBSTITUTE_RECORD_POINTS} + 曜日一致と同じ鮮度ボーナス",
+                "note": "代務（SUB）実績。一人で勤務した実績のため通常実績と同格（曜日に依存しない）",
+            },
+            "training_record": {
+                "base_points": ASSIST_TRAINING_RECORD_POINTS,
+                "formula": f"{ASSIST_TRAINING_RECORD_POINTS} + 曜日一致と同じ鮮度ボーナス",
+                "note": "研修（TRAIN）実績。教わったが一人での実績はまだ無い状態（代務より低い）",
+            },
             "priority_bonus": {
                 "formula": "max(0, 40 - ((priority - 1) * 5))",
                 "first_priority": 40,
@@ -7189,6 +7395,22 @@ def api_create():
         if project["mode"] == "scene":
             _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
             _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
+            # CSV 取り込みなどで作成直後から entry がある場合に備え、
+            # 代務/研修オプションの経験自動登録も全月分を実行する
+            role_changes: list[str] = []
+            for created_month_key, created_month in sorted((project.get("months") or {}).items()):
+                if not isinstance(created_month, dict):
+                    continue
+                role_changes.extend(
+                    _sync_role_option_experience_for_month(
+                        project,
+                        int(created_month.get("year") or 0),
+                        int(created_month.get("month") or 0),
+                        actor_name=_user_label(),
+                    )
+                )
+            if role_changes:
+                _save_project(project)
         if project["mode"] != "master":
             _resync_shift_month(project, month_key, actor_name=_user_label())
         # 新規作成は「いま作った帳面へ既存データを取り込む」だけで十分。全プロジェクトを
@@ -7733,8 +7955,16 @@ def _save_month_in_project(
     snapshots[str(int(current_month.get("revision", 1)))] = _snapshot_month_payload(current_month)
     merged["revision_snapshots"] = _trim_revision_snapshots(snapshots)
     project["months"][month_key] = merged
+    # 代務/研修オプションの経験自動登録（同一保存に相乗りし、追加の DB 書き込みはしない）
+    try:
+        assist_changes = _sync_role_option_experience_for_month(
+            project, year, month, actor_name=actor_name
+        )
+    except Exception:  # pragma: no cover - 自動登録の失敗で保存自体は止めない
+        logger.exception("role option experience sync failed (project=%s)", project.get("id"))
+        assist_changes = []
     _save_project(project)
-    if changes or decision_changes:
+    if changes or decision_changes or assist_changes:
         _append_history(
             project["id"],
             {
@@ -7743,7 +7973,7 @@ def _save_month_in_project(
                 "editor_type": actor_type,
                 "action": "month_updated",
                 "month_key": month_key,
-                "changes": (changes + decision_changes)[:100],
+                "changes": (changes + decision_changes + assist_changes)[:100],
             },
         )
     return merged
@@ -8984,7 +9214,11 @@ def _shift_engine_eligible_count(request_obj, include_trainees: bool) -> int:
     for worker in request_obj.workers:
         if not worker.active:
             continue
-        if site in worker.dedicated_site_row_ids or site in worker.experienced_site_row_ids:
+        if (
+            site in worker.dedicated_site_row_ids
+            or site in worker.experienced_site_row_ids
+            or site in worker.trained_site_row_ids
+        ):
             count += 1
         elif include_trainees and site in worker.trainee_site_row_ids:
             count += 1

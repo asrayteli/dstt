@@ -136,6 +136,8 @@
         N3: "3号車",
         N4: "4号車",
         N5: "5号車",
+        SUB: "代務",
+        TRAIN: "研修",
         PAID: "有休",
         COMP: "代休",
         PUBLIC: "公休",
@@ -156,7 +158,8 @@
       }
       sections.push(
         { title: "車両タイプ", optionKeys: ["M", "C", "O", "W", "V"] },
-        { title: "車番", optionKeys: ["N1", "N2", "N3", "N4", "N5"] }
+        { title: "車番", optionKeys: ["N1", "N2", "N3", "N4", "N5"] },
+        { title: "役割", optionKeys: ["SUB", "TRAIN"] }
       );
       return sections;
     }
@@ -2884,6 +2887,7 @@
               <span class="cloud-note-chip">ルール ${counts.rules}件</span>
               ${permissions.can_edit_rules ? '' : '<span class="cloud-note-chip">編集者はルールを閲覧のみできます</span>'}
             </div>
+            ${showRuleForm ? '' : '<p class="cloud-panel-note">シフトの予定に「代務」「研修」オプションを付けると、保存時に実績がここへ自動登録されます（手動登録は不要）。代務は一人で勤務した実績、研修は教わった段階として点数に差が付きます。</p>'}
             ${showRuleForm ? buildAssistRuleForm(null, 'assist-create-rule', 'ルールを登録') : buildAssistRecordForm(null, 'assist-create-record', '実績を登録')}
           </div>
         </div>
@@ -3759,11 +3763,12 @@
       }
       const records = filteredAssistRecords();
       list.innerHTML = records.length ? records.map((record) => `
-        <article class="cloud-assist-card">
+        <article class="cloud-assist-card${record.source_label ? ' is-auto-record' : ''}">
           <div class="cloud-assist-card-head">
             <div>
               <h4>${escapeHtml(record.candidate_name || '-')}</h4>
               <p>${escapeHtml(`${record.date} (${record.weekday_label}) / ${record.shift_label} / ${record.role_label}`)}</p>
+              ${record.source_label ? `<span class="cloud-assist-auto-badge">${escapeHtml(record.source_label)}</span>` : ''}
             </div>
             <div class="cloud-actions compact">
               <button type="button" class="cloud-btn secondary" data-assist-edit-record="${escapeHtml(record.id)}">編集</button>
