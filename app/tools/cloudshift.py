@@ -8820,6 +8820,7 @@ def _shift_engine_build_and_plan(project: dict[str, Any], payload: dict[str, Any
     request_obj, settings, warnings = cs_ctx.build_planning_request(
         project, year, month, plan_overrides=overrides, calendar_ids=calendar_ids,
         fill_target_days=target_days,
+        target_required_count=payload.get("target_required_count"),
     )
     limits = SolverLimits()
     result = plan_shifts(request_obj, limits)
@@ -8828,7 +8829,7 @@ def _shift_engine_build_and_plan(project: dict[str, Any], payload: dict[str, Any
 
 def _shift_engine_plan(project: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     _ensure_scene_project(project)
-    from app.services.cloudshift_shift_engine import result_to_dict
+    from app.services.cloudshift_shift_engine import build_day_summaries, result_to_dict
     from app.services import cloudshift_shift_apply as cs_apply
 
     year, month, request_obj, settings, warnings, result = _shift_engine_build_and_plan(project, payload)
@@ -8847,6 +8848,7 @@ def _shift_engine_plan(project: dict[str, Any], payload: dict[str, Any]) -> dict
         "draft_preview": draft_preview,
         "draft_preview_count": cs_apply.preview_entry_count(draft_preview),
         "diff": _shift_engine_diff(request_obj, result),
+        "day_summary": build_day_summaries(request_obj, result),
         "context_warnings": [{"code": w.code, "message": w.message} for w in warnings],
         "perf_warnings": perf_warnings,
     }

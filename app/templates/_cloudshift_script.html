@@ -7793,7 +7793,11 @@
     }
 
     function seDemandLabel(source) {
-      return ({ settings: '設定', required_capacity_fallback: '必要人数から展開', prev_month_estimate: '前月推定', none: '未設定' })[source] || source || '';
+      return ({ settings: '設定', required_capacity_fallback: '必要人数から展開', prev_month_estimate: '前月推定', target_override: '対象日の指定人数', none: '未設定' })[source] || source || '';
+    }
+
+    function seWeekdayLabel(weekday) {
+      return ['月', '火', '水', '木', '金', '土', '日'][weekday] || '';
     }
 
     function seSevLabel(s) { return ({ blocker: '重大', hard: '必須違反', warning: '警告', info: '情報' })[s] || s; }
@@ -7846,6 +7850,10 @@
           </div>
           <div class="cloud-se-day-grid">${headCells}${cells.join('')}</div>
           <p class="cloud-se-muted" data-se-target-count></p>
+          <label class="cloud-field cloud-se-target-required">
+            <span>対象日の必要人数（任意）。指定すると需要設定・前月推定より優先します。需要0で配置されない日の解決にも使えます</span>
+            <input class="cloud-input" type="number" min="1" data-se-target-required placeholder="未指定（既存の需要設定に従う）">
+          </label>
         </div>
       `;
     }
@@ -8022,6 +8030,10 @@
         payload.target_days = selectedDays;
       }
       shiftEngineState.lastTargetDayCount = selectedDays.length < dayCells.length ? selectedDays.length : null;
+      const requiredRaw = body.querySelector('[data-se-target-required]');
+      if (requiredRaw && requiredRaw.value !== '' && !Number.isNaN(parseInt(requiredRaw.value, 10)) && parseInt(requiredRaw.value, 10) > 0) {
+        payload.target_required_count = parseInt(requiredRaw.value, 10);
+      }
       return payload;
     }
 
@@ -8032,6 +8044,114 @@
       const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${shiftEngineState.projectId}/shift-engine/plan`, { method: 'POST', body: payload });
       shiftEngineState.lastPlan = data;
       renderShiftEngineResult(modal, data);
+    }
+
+    function seCandidateFactorText(factors) {
+      return (factors || [])
+        .map((f) => `${f.label}${f.points > 0 ? '+' : ''}${f.points}`)
+        .join('・');
+    }
+
+    function buildShiftEngineDayDetails(data) {
+      const result = data.result || {};
+      const summaries = data.day_summary || [];
+      if (!summaries.length) return '';
+
+      const explanationByAssignment = {};
+      (result.explanations || []).forEach((ex) => { explanationByAssignment[ex.assignment_id] = ex; });
+      const assignmentsByDay = {};
+      (result.assignments || []).forEach((a) => {
+        (assignmentsByDay[a.day] = assignmentsByDay[a.day] || []).push(a);
+      });
+      const panelsByDay = {};
+      (result.candidate_panels || []).forEach((p) => {
+        (panelsByDay[p.day] = panelsByDay[p.day] || []).push(p);
+      });
+      const unfilledByDay = {};
+      (result.unfilled_slots || []).forEach((u) => {
+        (unfilledByDay[u.day] = unfilledByDay[u.day] || []).push(u);
+      });
+
+      const rows = summaries
+        .filter((s) => s.in_scope && (s.demand > 0 || s.unfilled > 0 || s.no_demand
+          || (assignmentsByDay[s.day] || []).length))
+        .map((s) => {
+          const assignments = assignmentsByDay[s.day] || [];
+          const dayLabel = `${parseInt(String(s.date).split('-')[1], 10)}/${s.day}(${seWeekdayLabel(s.weekday)}${s.is_holiday ? '・祝' : ''})`;
+          const needsAttention = s.no_demand || s.unfilled > 0;
+
+          if (s.no_demand) {
+            return `
+              <details class="cloud-se-dayrow is-warn">
+                <summary>${escapeHtml(dayLabel)} <strong>需要0</strong> — この日は配置されません</summary>
+                <div class="cloud-se-dayrow-body">
+                  <p class="cloud-se-error">必要人数が設定されていない日です（運転士がいないのではなく、埋めるべき枠が0件）。</p>
+                  <p class="cloud-se-muted">対処: 上の「対象日の必要人数」に人数を入れて再試算するか、シフト帳の必要人数・需要設定・前月実績を確認してください。</p>
+                </div>
+              </details>
+            `;
+          }
+
+          const chips = assignments.map((a) => {
+            const fixed = a.source !== 'engine';
+            const label = `${a.shift_key ? `${a.shift_key} ` : ''}${a.employee_name || a.employee_number}`;
+            return `<span class="cloud-se-assign-chip${fixed ? ' is-fixed' : ''}">${escapeHtml(label)}${fixed ? '🔒' : ''}</span>`;
+          }).join(' ');
+
+          const reasonLines = assignments
+            .filter((a) => a.source === 'engine')
+            .map((a) => {
+              const ex = explanationByAssignment[a.assignment_id];
+              const why = ex ? (seCandidateFactorText(ex.factors) || ex.summary) : '';
+              return `<li><strong>${escapeHtml(a.employee_name || a.employee_number)}</strong>（${a.score}点）${why ? `: ${escapeHtml(why)}` : ''}</li>`;
+            }).join('');
+
+          const panelBlocks = (panelsByDay[s.day] || []).map((p) => {
+            const candidateRows = (p.candidates || []).map((c) => `
+              <li class="${c.selected ? 'is-selected-candidate' : ''}">
+                ${c.selected ? '★ ' : ''}${escapeHtml(c.name || c.employee_number)} ${c.score}点
+                ${c.factors && c.factors.length ? `<span class="cloud-se-muted">（${escapeHtml(seCandidateFactorText(c.factors))}）</span>` : ''}
+              </li>
+            `).join('');
+            const excludedText = (p.excluded || []).map((e) => `${e.label}${e.count}名`).join('・');
+            const heading = `${p.shift_key ? `${p.shift_key} ` : ''}枠${p.selected_employee_number ? '' : '（未充足）'}`;
+            return `
+              <div class="cloud-se-panel">
+                <div class="cloud-se-panel-title">${escapeHtml(heading)} <span class="cloud-se-muted">配置可能 ${p.eligible_count} 名</span></div>
+                ${candidateRows ? `<ul class="cloud-se-candidates">${candidateRows}</ul>` : '<p class="cloud-se-muted">配置可能な候補がいません</p>'}
+                ${excludedText ? `<p class="cloud-se-muted">候補外: ${escapeHtml(excludedText)}</p>` : ''}
+              </div>
+            `;
+          }).join('');
+
+          const unfilledLines = (unfilledByDay[s.day] || [])
+            .map((u) => `<li class="cloud-se-sev-warning">×${u.shortage} ${escapeHtml(u.shift_key || '指定なし')}: ${escapeHtml(u.reason)}</li>`)
+            .join('');
+
+          return `
+            <details class="cloud-se-dayrow${needsAttention ? ' is-warn' : ''}">
+              <summary>
+                ${escapeHtml(dayLabel)} 需要${s.demand}
+                / 配置${s.engine_count + s.fixed_count}（自動${s.engine_count}・固定${s.fixed_count}${s.leave_count ? `・休み${s.leave_count}` : ''}）
+                ${s.unfilled > 0 ? `/ <strong>未充足${s.unfilled}</strong>` : ''}
+                ${chips ? `<span class="cloud-se-chiprow">${chips}</span>` : ''}
+              </summary>
+              <div class="cloud-se-dayrow-body">
+                ${reasonLines ? `<p class="cloud-se-panel-title">選定理由</p><ul class="cloud-se-reasons">${reasonLines}</ul>` : ''}
+                ${unfilledLines ? `<ul class="cloud-se-violations">${unfilledLines}</ul>` : ''}
+                ${panelBlocks ? `<p class="cloud-se-panel-title">候補の比較（その日の他の候補と除外理由）</p>${panelBlocks}` : ''}
+              </div>
+            </details>
+          `;
+        });
+
+      if (!rows.length) return '';
+      return `
+        <details class="cloud-se-fold" open>
+          <summary>日別の結果（行をクリックすると選定理由・候補比較を表示）</summary>
+          <div class="cloud-se-days">${rows.join('')}</div>
+        </details>
+      `;
     }
 
     function renderShiftEngineResult(modal, data) {
@@ -8046,7 +8166,8 @@
       const unfilled = (data.result.unfilled_slots || []).slice(0, 12);
 
       const violationHtml = violations.length ? `<ul class="cloud-se-violations">${violations.slice(0, 12).map((v) => `<li class="cloud-se-sev-${escapeHtml(v.severity)}">[${escapeHtml(seSevLabel(v.severity))}] ${escapeHtml(v.message)}</li>`).join('')}</ul>` : '';
-      const unfilledHtml = unfilled.length ? `<details class="cloud-se-fold" open><summary>未充足 ${score.unfilled_count} 件</summary><ul>${unfilled.map((u) => `<li>${escapeHtml(seDateLabel(u.date))} ${escapeHtml(u.shift_key || '指定なし')} ×${u.shortage}：${escapeHtml(u.reason)}</li>`).join('')}</ul></details>` : '';
+      const dayDetailsHtml = buildShiftEngineDayDetails(data);
+      const unfilledHtml = unfilled.length ? `<details class="cloud-se-fold"><summary>未充足 ${score.unfilled_count} 件</summary><ul>${unfilled.map((u) => `<li>${escapeHtml(seDateLabel(u.date))} ${escapeHtml(u.shift_key || '指定なし')} ×${u.shortage}：${escapeHtml(u.reason)}</li>`).join('')}</ul></details>` : '';
       const warnHtml = warns.length ? `<details class="cloud-se-fold"><summary>警告 ${warns.length} 件</summary><ul>${warns.slice(0, 20).map((w) => `<li>${escapeHtml(w.message)}</li>`).join('')}</ul></details>` : '';
       const diff = data.diff || {};
 
@@ -8062,6 +8183,7 @@
         </div>
         ${blockers.length ? '<p class="cloud-se-error">重大違反(blocker)があります。プレビューで内容を調整してください。</p>' : ''}
         ${violationHtml}
+        ${dayDetailsHtml}
         ${unfilledHtml}
         ${warnHtml}
         <p class="cloud-se-muted">「プレビューを開く」で別ウィンドウに表示し、確認・調整のうえ保存します（このパネルでは正規シフト帳に反映されません）。</p>

@@ -357,3 +357,83 @@ def test_fill_target_days_passed_to_request():
     assert request.fill_target_dates == (date(YEAR, MONTH, 1), date(YEAR, MONTH, 2))
     result = e.plan_shifts(request)
     assert sorted({a.day for a in result.assignments}) == [1, 2]
+
+
+def test_target_required_count_overrides_demand():
+    """対象日の必要人数指定が需要設定（capacity）より優先される。"""
+    project = base_project(capacity_enabled=True, required_capacity=1)
+    request, _, warnings = ctx.build_planning_request(
+        project, YEAR, MONTH, fill_target_days=[2, 3], target_required_count=2)
+    by_date = {}
+    for s in request.required_slots:
+        by_date[s.date] = by_date.get(s.date, 0) + s.required_count
+    assert by_date[date(YEAR, MONTH, 2)] == 2
+    assert by_date[date(YEAR, MONTH, 3)] == 2
+    assert by_date[date(YEAR, MONTH, 1)] == 1  # 対象外日は元の需要のまま
+    assert any(s.source == "target_override" for s in request.required_slots)
+    assert any(w.code == "target_required_override" for w in warnings)
+
+
+def test_target_required_count_creates_demand_when_none():
+    """需要ゼロ（前月データ無し・capacity無効）でも対象日+人数指定で枠が作られる。"""
+    project = base_project()
+    request, _, _ = ctx.build_planning_request(
+        project, YEAR, MONTH, fill_target_days=[5], target_required_count=1)
+    target = [s for s in request.required_slots if s.date == date(YEAR, MONTH, 5)]
+    assert len(target) == 1 and target[0].required_count == 1
+    result = e.plan_shifts(request)
+    assert [a.day for a in result.assignments] == [5]
+
+
+def test_thursday_friday_not_filled_is_diagnosed_and_fixable():
+    """「対象日なのに木金が配置されない」の再現と診断・解決。
+
+    前月実績が月〜水しかない現場では、前月推定の需要が木金=0 になり
+    対象日にしても配置されない。これをバグではなく診断可能な状態にし、
+    対象日の必要人数指定で解決できることを固定する。
+    """
+    project = base_project()
+    # 前月(2026-06)の実績: 月火水のみ勤務（木金土日は空）
+    prev_entries = {}
+    for d in range(1, 31):
+        if date(2026, 6, d).weekday() in (0, 1, 2):
+            prev_entries[str(d)] = [{"id": f"p{d}", "value": "!A!佐藤", "employee_number": "E001"}]
+    project["months"]["2026-06"] = {"entries_per_day": prev_entries}
+
+    # 2026-07 の最初の木金 = 2日(木), 3日(金)
+    thu, fri = 2, 3
+    assert date(YEAR, MONTH, thu).weekday() == 3
+    assert date(YEAR, MONTH, fri).weekday() == 4
+
+    # 再現: 木金を対象日にしても、前月推定の需要が 0 のため配置されない
+    request, _, _ = ctx.build_planning_request(project, YEAR, MONTH,
+                                               fill_target_days=[thu, fri])
+    result = e.plan_shifts(request)
+    assert result.assignments == []
+    # 診断: 需要 0 の対象日として明確に警告される
+    no_demand = [w for w in result.warnings if w.code == "target_day_no_demand"]
+    assert {w.date for w in no_demand} == {date(YEAR, MONTH, thu), date(YEAR, MONTH, fri)}
+    summaries = e.build_day_summaries(request, result)
+    assert all(s["no_demand"] for s in summaries if s["day"] in (thu, fri))
+
+    # 解決: 対象日の必要人数を指定すれば木金が埋まる
+    request2, _, _ = ctx.build_planning_request(project, YEAR, MONTH,
+                                                fill_target_days=[thu, fri],
+                                                target_required_count=1)
+    result2 = e.plan_shifts(request2)
+    assert sorted({a.day for a in result2.assignments}) == [thu, fri]
+
+
+def test_prev_month_estimate_ignores_leave_entries():
+    """前月推定は有休系 entry を勤務として数えない。"""
+    project = base_project()
+    prev_entries = {}
+    for d in range(1, 31):
+        prev_entries[str(d)] = [
+            {"id": f"w{d}", "value": "!A!佐藤", "employee_number": "E001"},
+            {"id": f"l{d}", "value": "!PAID!鈴木", "employee_number": "E002"},  # 休み
+        ]
+    project["months"]["2026-06"] = {"entries_per_day": prev_entries}
+    request, _, _ = ctx.build_planning_request(project, YEAR, MONTH)
+    # 有休を除いた 1 名/日 が推定需要になる
+    assert all(s.required_count == 1 for s in request.required_slots)

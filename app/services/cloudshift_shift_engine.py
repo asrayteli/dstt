@@ -50,6 +50,9 @@ CONSECUTIVE_SOFT_DEFAULT = 5
 # 局所修復で未充足 1 件に科す擬似コスト（充足を最優先させるための支配項）。
 UNFILLED_COST = 100_000
 
+# 候補パネル（枠ごとの候補比較）に載せる候補数の上限。
+PANEL_MAX_CANDIDATES = 5
+
 # 月次最低勤務数（min_assignments）未達の重み倍率。
 # ユーザーが明示した最低保証は、一般的な公平性ペナルティ（2 乗）より優先させる。
 UNDER_MIN_MULTIPLIER = 3
@@ -238,7 +241,8 @@ class RequiredSlot:
     time_band: str = ""
     priority: int = 100
     source: Literal[
-        "settings", "required_capacity_fallback", "prev_month_estimate", "existing_entry"
+        "settings", "required_capacity_fallback", "prev_month_estimate",
+        "existing_entry", "target_override",
     ] = "settings"
 
 
@@ -441,6 +445,37 @@ class ScoreSummary:
 
 
 @dataclass(frozen=True)
+class CandidateScore:
+    """候補パネルの 1 候補（最終状態での counterfactual スコア）。"""
+
+    employee_number: str
+    name: str
+    score: int
+    selected: bool
+    factors: list[ScoreFactor] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SlotCandidatePanel:
+    """「なぜこの人が選ばれたか・他に誰が候補だったか」を枠単位で表す。
+
+    候補スコアは最終結果の状態（当該枠の配置だけ外した counterfactual）で
+    再計算するため、配置時点ではなく確定結果に対する説明になる。
+    """
+
+    slot_instance_id: str
+    slot_id: str
+    date: date
+    day: int
+    shift_key: str
+    shift_label: str
+    selected_employee_number: str  # 空 = 未充足
+    candidates: list[CandidateScore] = field(default_factory=list)
+    excluded_counts: dict[str, int] = field(default_factory=dict)  # 除外理由コード -> 人数
+    eligible_count: int = 0
+
+
+@dataclass(frozen=True)
 class ShiftPlanningResult:
     request_id: str
     status: Literal["feasible", "partial", "failed", "optimal"]
@@ -454,6 +489,7 @@ class ShiftPlanningResult:
     score: ScoreSummary
     explanations: list[Explanation]
     request_hash: str = ""
+    candidate_panels: list[SlotCandidatePanel] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -1045,19 +1081,46 @@ def _hard_ok(
     return True, ""
 
 
-def _static_eligible(ctx: _Context, worker: Worker, slot: RequiredSlot, day: PlanningDay) -> bool:
-    """状態に依存しない適格性（在籍・番号・hard 休暇・最低基準・未経験不可・静的 forbidden）。"""
+def _static_exclusion_reason(
+    ctx: _Context, worker: Worker, slot: RequiredSlot, day: PlanningDay
+) -> str | None:
+    """状態に依存しない除外理由コード（None = 適格）。
+
+    在籍・番号・hard 休暇・最低基準・未経験不可を区別して返し、
+    候補パネルの除外内訳（「なぜこの人は候補に出ないか」）に使う。
+    """
     if not worker.active:
-        return False
+        return "inactive"
     if not worker.employee_number:
-        return False
+        return "no_number"
     if (worker.employee_number, day.date) in ctx.hard_unavailable:
-        return False
+        return "hard_leave"
     if not _baseline_ok(worker, slot, ctx.prefs):
-        return False
+        return "baseline"
     if not _option_experience_ok(worker, slot, ctx.option_policies):
-        return False
-    return True
+        return "option_experience"
+    return None
+
+
+def _static_eligible(ctx: _Context, worker: Worker, slot: RequiredSlot, day: PlanningDay) -> bool:
+    """状態に依存しない適格性（在籍・番号・hard 休暇・最低基準・未経験不可）。"""
+    return _static_exclusion_reason(ctx, worker, slot, day) is None
+
+
+# 候補パネルの除外理由コード → 人間向けラベル
+EXCLUSION_LABELS: dict[str, str] = {
+    "inactive": "在籍対象外",
+    "no_number": "社員番号なし",
+    "hard_leave": "休暇・休み",
+    "baseline": "専従・経験なし",
+    "option_experience": "オプション未経験",
+    "forbidden": "配置禁止ルール",
+    "dup_same_site": "同日に配置済み",
+    "external_dup": "他現場で勤務",
+    "monthly_max": "月次上限到達",
+    "consecutive_max": "連勤上限",
+    "below_min_score": "スコア下限未満",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1241,20 +1304,27 @@ class GreedyRepairSolver:
 
         seed_blocked = any(c.severity == "blocker" for c in seed_conflicts)
 
+        # 対象日に新規枠が無い場合の診断警告（「対象日なのに配置されない」の最多原因）
+        warnings.extend(self._target_day_warnings(ctx, instances))
+
         # 3) 貪欲割当
         explanations_map: dict[str, list[ScoreFactor]] = {}
         unfilled_reason: dict[str, tuple[str, str]] = {}
         if not seed_blocked:
             self._greedy_assign(ctx, state, instances, explanations_map, unfilled_reason, start)
-            # 4) 局所修復
+            # 4) 局所修復（再配置・救済移動・入替）
             self._local_repair(ctx, state, instances, explanations_map, start)
 
-        # 5) 出力組み立て
+        # 5) 候補パネル（最終状態での counterfactual 比較）と説明の再構築
+        panels = self._build_candidate_panels(ctx, state, instances, explanations_map)
+        panel_by_instance = {p.slot_instance_id: p for p in panels}
+
+        # 6) 出力組み立て
         assignments = self._build_assignments(ctx, state, instances, explanations_map)
-        unfilled = self._build_unfilled(ctx, state, instances, unfilled_reason)
+        unfilled = self._build_unfilled(ctx, state, instances, unfilled_reason, panel_by_instance)
         explanations = self._build_explanations(assignments, explanations_map)
 
-        # 6) result 検証（plan 後に必ず通す）
+        # 7) result 検証（plan 後に必ず通す）
         violations.extend(validate_result(request, _ResultView(assignments, unfilled)))
 
         score = self._score_summary(ctx, state, instances, assignments, unfilled, violations, warnings)
@@ -1280,7 +1350,37 @@ class GreedyRepairSolver:
             score=score,
             explanations=explanations,
             request_hash=request_hash,
+            candidate_panels=panels,
         )
+
+    def _target_day_warnings(
+        self, ctx: _Context, instances: list[_Instance]
+    ) -> list[PlanningWarning]:
+        """対象日指定があるとき、新規に埋められる枠が無い対象日を警告する。"""
+        if ctx.fill_all_dates:
+            return []
+        open_dates: set[date] = set()
+        any_dates: set[date] = set()
+        for instance in instances:
+            any_dates.add(instance.slot.date)
+            if instance.fixed_worker is None:
+                open_dates.add(instance.slot.date)
+        warnings: list[PlanningWarning] = []
+        for d in sorted(ctx.fill_target_dates):
+            if d in open_dates:
+                continue
+            if d in any_dates:
+                message = (
+                    f"対象日 {d.isoformat()} は固定済みの配置のみで、新規に埋める枠がありません"
+                    "（需要が固定分で充足済み）"
+                )
+            else:
+                message = (
+                    f"対象日 {d.isoformat()} は必要人数が 0 のため配置されません"
+                    "（需要設定・必要人数・前月実績を確認してください）"
+                )
+            warnings.append(PlanningWarning("target_day_no_demand", message, date=d))
+        return warnings
 
     # -- seed / instances ---------------------------------------------------
 
@@ -1662,85 +1762,38 @@ class GreedyRepairSolver:
         explanations_map: dict[str, list[ScoreFactor]],
         start: float,
     ) -> None:
-        """決定的な走査で総ペナルティが厳密に減る入替・追加のみ採用する。"""
-        scan = sorted(instances, key=lambda i: (i.slot.date, i.instance_id))
+        """決定的な走査で総ペナルティが厳密に減る変更のみ採用する局所修復。
+
+        3 種類の近傍を順に試す:
+        1. reassign: 1 枠の担当を別候補へ置き換える（空き枠の充足を含む）
+        2. relocate: 未充足枠へ他枠の担当を移し、空いた枠を別候補で埋め直す
+           （貪欲が「後の枠でしか使えない人」を先に消費した場合の救済）
+        3. swap: 2 枠の担当を入れ替える（公平性・連勤・土日祝の偏りの解消）
+        """
         for _iteration in range(self.limits.max_local_search_iterations):
             if self._timed_out(start):
                 return
-            improved = False
-            current_cost = self._global_cost(ctx, state, instances)
-
-            for instance in scan:
-                if instance.fixed_worker is not None:
-                    continue
-                # 1 反復の途中でも時間予算を超えたら打ち切る（大規模入力の安全弁）。
-                if self._timed_out(start):
-                    return
-                slot = instance.slot
-                day = ctx.day_by_date.get(slot.date)
-                if day is None:
-                    continue
-
-                current_worker = state.placed.get(instance.instance_id)
-                option = _opt(slot.shift_key)
-                is_we = day.is_weekend or day.is_holiday
-
-                # 空き枠を埋める / 担当を入れ替える。
-                # 同コスト時の tie-break を一意にするため employee_number 昇順で走査する。
-                static_pool = sorted(
-                    (w for w in ctx.request.workers if _static_eligible(ctx, w, slot, day)),
-                    key=lambda w: w.employee_number,
-                )
-                best_choice: tuple[float, str | None, list[ScoreFactor]] | None = None
-
-                for worker in static_pool:
-                    number = worker.employee_number
-                    if number == current_worker:
-                        continue
-                    # 一旦現担当を外して評価
-                    if current_worker is not None:
-                        state.remove(instance.instance_id, day.date, option, is_we)
-                    ok, _r = _hard_ok(ctx, state, worker, slot, day)
-                    if not ok:
-                        if current_worker is not None:
-                            state.add(instance.instance_id, current_worker, day.date, option, is_we)
-                        continue
-                    score, factors = _score_candidate(ctx, state, instance, worker, day)
-                    min_score = ctx.prefs.min_assignment_score
-                    state.add(instance.instance_id, number, day.date, option, is_we)
-                    candidate_cost = self._global_cost(ctx, state, instances)
-                    state.remove(instance.instance_id, day.date, option, is_we)
-                    if current_worker is not None:
-                        state.add(instance.instance_id, current_worker, day.date, option, is_we)
-                    if min_score is not None and score < min_score:
-                        continue
-                    if candidate_cost < current_cost - 1e-9:
-                        if best_choice is None or candidate_cost < best_choice[0]:
-                            best_choice = (candidate_cost, number, factors)
-
-                if best_choice is not None:
-                    _cost, number, factors = best_choice
-                    if number is not None:
-                        if current_worker is not None:
-                            state.remove(instance.instance_id, day.date, option, is_we)
-                        state.add(instance.instance_id, number, day.date, option, is_we)
-                        explanations_map[instance.instance_id] = factors
-                        improved = True
-                        current_cost = self._global_cost(ctx, state, instances)
-
+            improved = self._reassign_pass(ctx, state, instances, explanations_map, start)
+            improved = self._relocate_pass(ctx, state, instances, explanations_map, start) or improved
+            improved = self._swap_pass(ctx, state, instances, explanations_map, start) or improved
             if not improved:
                 return
 
-    def _global_cost(self, ctx: _Context, state: _PlanState, instances: list[_Instance]) -> float:
-        """局所探索用の総コスト（充足を支配項、その他は Soft ペナルティの近似）。"""
-        filled = len(state.placed)
-        total_instances = len(instances)
-        cost = UNFILLED_COST * (total_instances - filled)
+    def _worker_soft_cost(self, ctx: _Context, state: _PlanState, number: str) -> float:
+        """1 人分の Soft コスト（連勤・偏り・最低不足・土日祝）。
 
+        局所修復の差分評価用。配置変更で影響を受けるのは当事者の worker だけ
+        なので、全体コストを再計算せずこの値の差分で判定する。
+        """
         weights = ctx.weights
-        # 連勤コスト
-        threshold = ctx.prefs.max_consecutive_days if ctx.prefs.max_consecutive_days else CONSECUTIVE_SOFT_DEFAULT
-        for number, dates in state.worked_dates.items():
+        cost = 0.0
+        dates = state.worked_dates.get(number)
+        if dates:
+            threshold = (
+                ctx.prefs.max_consecutive_days
+                if ctx.prefs.max_consecutive_days
+                else CONSECUTIVE_SOFT_DEFAULT
+            )
             worker = ctx.worker_by_number.get(number)
             prior_tail = 0
             if worker and worker.monthly_limit:
@@ -1748,28 +1801,431 @@ class GreedyRepairSolver:
             cost += weights.consecutive_day_penalty * _consecutive_excess(
                 dates, ctx.first_day, threshold, prior_tail
             )
-        # 月次偏り（最低保証を超えた分の Σ over^2）
+        count = state.month_count.get(number, 0)
+        min_target = ctx.min_target_by_number.get(number, 0)
         if ctx.prefs.prefer_fairness:
-            for number, count in state.month_count.items():
-                over = count - ctx.min_target_by_number.get(number, 0)
-                if over > 0:
-                    cost += weights.monthly_imbalance_penalty * over * over
-        # 月次最低勤務数の不足分
-        for number, min_target in ctx.min_target_by_number.items():
-            shortfall = max(0, min_target - state.month_count.get(number, 0))
+            over = count - min_target
+            if over > 0:
+                cost += weights.monthly_imbalance_penalty * over * over
+        if min_target:
+            shortfall = max(0, min_target - count)
             cost += weights.monthly_imbalance_penalty * UNDER_MIN_MULTIPLIER * shortfall
-        # 土日祝偏り（Σ weekend^2）
         if ctx.prefs.suppress_weekend_imbalance:
-            for count in state.weekend_count.values():
-                cost += weights.weekend_imbalance_penalty * count * count
-        # 変更コスト
-        if ctx.prefs.minimize_changes:
-            for instance in instances:
-                if instance.original_worker:
-                    placed = state.placed.get(instance.instance_id)
-                    if placed != instance.original_worker:
-                        cost += weights.change_penalty
+            weekend = state.weekend_count.get(number, 0)
+            if weekend:
+                cost += weights.weekend_imbalance_penalty * weekend * weekend
         return cost
+
+    @staticmethod
+    def _change_penalty(ctx: _Context, instance: _Instance, number: str | None) -> int:
+        """instance を number（None=空欄）にしたときの変更最小化ペナルティ。"""
+        if not ctx.prefs.minimize_changes or not instance.original_worker:
+            return 0
+        return 0 if number == instance.original_worker else ctx.weights.change_penalty
+
+    def _reassign_pass(
+        self,
+        ctx: _Context,
+        state: _PlanState,
+        instances: list[_Instance],
+        explanations_map: dict[str, list[ScoreFactor]],
+        start: float,
+    ) -> bool:
+        scan = sorted(instances, key=lambda i: (i.slot.date, i.instance_id))
+        improved = False
+        min_score = ctx.prefs.min_assignment_score
+
+        for instance in scan:
+            if instance.fixed_worker is not None:
+                continue
+            # 1 パスの途中でも時間予算を超えたら打ち切る（大規模入力の安全弁）。
+            if self._timed_out(start):
+                return improved
+            slot = instance.slot
+            day = ctx.day_by_date.get(slot.date)
+            if day is None:
+                continue
+
+            current_worker = state.placed.get(instance.instance_id)
+            option = _opt(slot.shift_key)
+            is_we = day.is_weekend or day.is_holiday
+
+            # この枠を空けた状態を基準に、候補ごとの差分コストで評価する
+            # （影響を受けるのは候補本人の Soft コストと未充足数・変更数のみ）。
+            if current_worker is not None:
+                state.remove(instance.instance_id, day.date, option, is_we)
+            empty_change = self._change_penalty(ctx, instance, None)
+
+            def delta_for(number: str) -> float:
+                before = self._worker_soft_cost(ctx, state, number)
+                state.add(instance.instance_id, number, day.date, option, is_we)
+                after = self._worker_soft_cost(ctx, state, number)
+                state.remove(instance.instance_id, day.date, option, is_we)
+                return (
+                    (after - before)
+                    - UNFILLED_COST
+                    + self._change_penalty(ctx, instance, number)
+                    - empty_change
+                )
+
+            reference_delta = 0.0
+            if current_worker is not None:
+                reference_delta = delta_for(current_worker)
+
+            # 同コスト時の tie-break を一意にするため employee_number 昇順で走査する。
+            static_pool = sorted(
+                (w for w in ctx.request.workers if _static_eligible(ctx, w, slot, day)),
+                key=lambda w: w.employee_number,
+            )
+            best_choice: tuple[float, str, list[ScoreFactor]] | None = None
+
+            for worker in static_pool:
+                number = worker.employee_number
+                if number == current_worker:
+                    continue
+                ok, _r = _hard_ok(ctx, state, worker, slot, day)
+                if not ok:
+                    continue
+                score, factors = _score_candidate(ctx, state, instance, worker, day)
+                if min_score is not None and score < min_score:
+                    continue
+                delta = delta_for(number)
+                if delta < reference_delta - 1e-9:
+                    if best_choice is None or delta < best_choice[0]:
+                        best_choice = (delta, number, factors)
+
+            if best_choice is not None:
+                _delta, number, factors = best_choice
+                state.add(instance.instance_id, number, day.date, option, is_we)
+                explanations_map[instance.instance_id] = factors
+                improved = True
+            elif current_worker is not None:
+                state.add(instance.instance_id, current_worker, day.date, option, is_we)
+
+        return improved
+
+    def _relocate_pass(
+        self,
+        ctx: _Context,
+        state: _PlanState,
+        instances: list[_Instance],
+        explanations_map: dict[str, list[ScoreFactor]],
+        start: float,
+    ) -> bool:
+        """未充足枠の救済: 他枠の担当者を未充足枠へ移し、空いた枠を埋め直す。
+
+        貪欲法は「その枠でしか使えない人」を先の枠で消費してしまうことがある
+        （例: スコア下限や NG 曜日で他の候補が使えない枠）。担当の付け替え＋
+        埋め直しの 2 手で総コストが厳密に減る場合のみ採用する。
+        """
+        scan = sorted(instances, key=lambda i: (i.slot.date, i.instance_id))
+        improved = False
+
+        for unfilled in scan:
+            if self._timed_out(start):
+                return improved
+            if unfilled.fixed_worker is not None or state.placed.get(unfilled.instance_id):
+                continue
+            slot_u = unfilled.slot
+            day_u = ctx.day_by_date.get(slot_u.date)
+            if day_u is None or not ctx.is_fill_target(slot_u.date):
+                continue
+            opt_u = _opt(slot_u.shift_key)
+            we_u = day_u.is_weekend or day_u.is_holiday
+            min_score = ctx.prefs.min_assignment_score
+            applied = False
+
+            for donor in scan:
+                if applied:
+                    break
+                if donor.fixed_worker is not None or donor.instance_id == unfilled.instance_id:
+                    continue
+                donor_number = state.placed.get(donor.instance_id)
+                if not donor_number:
+                    continue
+                worker = ctx.worker_by_number.get(donor_number)
+                if worker is None or not _static_eligible(ctx, worker, slot_u, day_u):
+                    continue
+                slot_d = donor.slot
+                day_d = ctx.day_by_date.get(slot_d.date)
+                if day_d is None:
+                    continue
+                opt_d = _opt(slot_d.shift_key)
+                we_d = day_d.is_weekend or day_d.is_holiday
+
+                # 差分コスト評価: 影響を受けるのは donor 本人・埋め直し候補・未充足数・変更数のみ
+                donor_cost_before = self._worker_soft_cost(ctx, state, donor_number)
+
+                # donor を外し、未充足枠へ移せるか検証
+                state.remove(donor.instance_id, slot_d.date, opt_d, we_d)
+                ok, _r = _hard_ok(ctx, state, worker, slot_u, day_u)
+                score_u, factors_u = (0, [])
+                if ok:
+                    score_u, factors_u = _score_candidate(ctx, state, unfilled, worker, day_u)
+                    if min_score is not None and score_u < min_score:
+                        ok = False
+                if not ok:
+                    state.add(donor.instance_id, donor_number, slot_d.date, opt_d, we_d)
+                    continue
+                state.add(unfilled.instance_id, donor_number, slot_u.date, opt_u, we_u)
+
+                # 空いた donor 枠を最良候補で埋め直す（埋まらなくても可。コストで判定）
+                refill: tuple[int, Worker, list[ScoreFactor]] | None = None
+                for cand in sorted(
+                    (w for w in ctx.request.workers if _static_eligible(ctx, w, slot_d, day_d)),
+                    key=lambda w: w.employee_number,
+                ):
+                    ok2, _r2 = _hard_ok(ctx, state, cand, slot_d, day_d)
+                    if not ok2:
+                        continue
+                    score2, factors2 = _score_candidate(ctx, state, donor, cand, day_d)
+                    if min_score is not None and score2 < min_score:
+                        continue
+                    if refill is None or score2 > refill[0]:
+                        refill = (score2, cand, factors2)
+                refill_cost_before = (
+                    self._worker_soft_cost(ctx, state, refill[1].employee_number)
+                    if refill is not None else 0.0
+                )
+                if refill is not None:
+                    state.add(donor.instance_id, refill[1].employee_number, slot_d.date, opt_d, we_d)
+
+                donor_cost_after = self._worker_soft_cost(ctx, state, donor_number)
+                refill_cost_after = (
+                    self._worker_soft_cost(ctx, state, refill[1].employee_number)
+                    if refill is not None else 0.0
+                )
+                delta = (
+                    (donor_cost_after - donor_cost_before)
+                    + (refill_cost_after - refill_cost_before)
+                    + UNFILLED_COST * ((0 if refill is not None else 1) - 1)
+                    + self._change_penalty(ctx, unfilled, donor_number)
+                    - self._change_penalty(ctx, unfilled, None)
+                    + self._change_penalty(
+                        ctx, donor, refill[1].employee_number if refill is not None else None
+                    )
+                    - self._change_penalty(ctx, donor, donor_number)
+                )
+                if delta < -1e-9:
+                    explanations_map[unfilled.instance_id] = factors_u
+                    if refill is not None:
+                        explanations_map[donor.instance_id] = refill[2]
+                    improved = True
+                    applied = True
+                else:
+                    # 巻き戻し
+                    if refill is not None:
+                        state.remove(donor.instance_id, slot_d.date, opt_d, we_d)
+                    state.remove(unfilled.instance_id, slot_u.date, opt_u, we_u)
+                    state.add(donor.instance_id, donor_number, slot_d.date, opt_d, we_d)
+
+        return improved
+
+    def _swap_pass(
+        self,
+        ctx: _Context,
+        state: _PlanState,
+        instances: list[_Instance],
+        explanations_map: dict[str, list[ScoreFactor]],
+        start: float,
+    ) -> bool:
+        """2 枠の担当入替（2-opt）。reassign 単体では直せない偏りを解消する。"""
+        placed_instances = [
+            i for i in sorted(instances, key=lambda i: (i.slot.date, i.instance_id))
+            if i.fixed_worker is None and state.placed.get(i.instance_id)
+        ]
+        improved = False
+        min_score = ctx.prefs.min_assignment_score
+
+        for a_index, inst_a in enumerate(placed_instances):
+            if self._timed_out(start):
+                return improved
+            for inst_b in placed_instances[a_index + 1:]:
+                number_a = state.placed.get(inst_a.instance_id)
+                number_b = state.placed.get(inst_b.instance_id)
+                if not number_a or not number_b or number_a == number_b:
+                    continue
+                worker_a = ctx.worker_by_number.get(number_a)
+                worker_b = ctx.worker_by_number.get(number_b)
+                if worker_a is None or worker_b is None:
+                    continue
+                slot_a, slot_b = inst_a.slot, inst_b.slot
+                day_a = ctx.day_by_date.get(slot_a.date)
+                day_b = ctx.day_by_date.get(slot_b.date)
+                if day_a is None or day_b is None:
+                    continue
+                if not _static_eligible(ctx, worker_b, slot_a, day_a):
+                    continue
+                if not _static_eligible(ctx, worker_a, slot_b, day_b):
+                    continue
+                opt_a, opt_b = _opt(slot_a.shift_key), _opt(slot_b.shift_key)
+                we_a = day_a.is_weekend or day_a.is_holiday
+                we_b = day_b.is_weekend or day_b.is_holiday
+
+                # 差分コスト評価: 影響は当事者 2 名の Soft コストと変更数のみ
+                cost_before = (
+                    self._worker_soft_cost(ctx, state, number_a)
+                    + self._worker_soft_cost(ctx, state, number_b)
+                )
+                state.remove(inst_a.instance_id, slot_a.date, opt_a, we_a)
+                state.remove(inst_b.instance_id, slot_b.date, opt_b, we_b)
+                accepted = False
+                ok_b, _r = _hard_ok(ctx, state, worker_b, slot_a, day_a)
+                if ok_b:
+                    score_a, factors_a = _score_candidate(ctx, state, inst_a, worker_b, day_a)
+                    state.add(inst_a.instance_id, number_b, slot_a.date, opt_a, we_a)
+                    ok_a, _r2 = _hard_ok(ctx, state, worker_a, slot_b, day_b)
+                    if ok_a:
+                        score_b, factors_b = _score_candidate(ctx, state, inst_b, worker_a, day_b)
+                        if (min_score is None or (score_a >= min_score and score_b >= min_score)):
+                            state.add(inst_b.instance_id, number_a, slot_b.date, opt_b, we_b)
+                            cost_after = (
+                                self._worker_soft_cost(ctx, state, number_a)
+                                + self._worker_soft_cost(ctx, state, number_b)
+                            )
+                            delta = (
+                                cost_after - cost_before
+                                + self._change_penalty(ctx, inst_a, number_b)
+                                - self._change_penalty(ctx, inst_a, number_a)
+                                + self._change_penalty(ctx, inst_b, number_a)
+                                - self._change_penalty(ctx, inst_b, number_b)
+                            )
+                            if delta < -1e-9:
+                                explanations_map[inst_a.instance_id] = factors_a
+                                explanations_map[inst_b.instance_id] = factors_b
+                                improved = True
+                                accepted = True
+                            else:
+                                state.remove(inst_b.instance_id, slot_b.date, opt_b, we_b)
+                    if not accepted:
+                        state.remove(inst_a.instance_id, slot_a.date, opt_a, we_a)
+                if not accepted:
+                    state.add(inst_a.instance_id, number_a, slot_a.date, opt_a, we_a)
+                    state.add(inst_b.instance_id, number_b, slot_b.date, opt_b, we_b)
+
+        return improved
+
+    def _global_cost(self, ctx: _Context, state: _PlanState, instances: list[_Instance]) -> float:
+        """総コストの参照実装（充足を支配項、その他は Soft ペナルティの近似）。
+
+        局所修復は性能のため差分評価（`_worker_soft_cost` と `_change_penalty`）で
+        判定するが、その差分が常にこの全体コストの差と一致するよう、定義を
+        ここに一本化している（テストの整合検証用にも使う）。
+        """
+        cost = UNFILLED_COST * (len(instances) - len(state.placed))
+        numbers = (
+            set(state.worked_dates)
+            | set(state.month_count)
+            | set(state.weekend_count)
+            | set(ctx.min_target_by_number)
+        )
+        for number in sorted(numbers):
+            cost += self._worker_soft_cost(ctx, state, number)
+        for instance in instances:
+            cost += self._change_penalty(ctx, instance, state.placed.get(instance.instance_id))
+        return cost
+
+    # -- candidate panels (説明・候補比較) -----------------------------------
+
+    def _build_candidate_panels(
+        self,
+        ctx: _Context,
+        state: _PlanState,
+        instances: list[_Instance],
+        explanations_map: dict[str, list[ScoreFactor]],
+    ) -> list[SlotCandidatePanel]:
+        """最終結果に対する候補比較パネルを枠単位で構築する。
+
+        各枠について「当該枠の配置だけ外した状態」で全候補を再評価し、
+        選ばれた人・他の候補のスコア・除外された人の理由内訳を返す。
+        explanations_map も最終状態のスコア要因で更新する（配置時点の値より正確）。
+        """
+        panels: list[SlotCandidatePanel] = []
+        ordered = sorted(instances, key=lambda i: (i.slot.date, i.slot.shift_key, i.instance_id))
+        for instance in ordered:
+            if instance.fixed_worker is not None:
+                continue  # 固定枠は強制配置のため候補比較の対象外
+            slot = instance.slot
+            day = ctx.day_by_date.get(slot.date)
+            if day is None:
+                continue
+            option = _opt(slot.shift_key)
+            is_we = day.is_weekend or day.is_holiday
+            placed = state.placed.get(instance.instance_id)
+            if placed is not None:
+                state.remove(instance.instance_id, slot.date, option, is_we)
+
+            scored: list[tuple[int, Worker, list[ScoreFactor]]] = []
+            excluded: dict[str, int] = {}
+            for worker in ctx.request.workers:
+                reason = _static_exclusion_reason(ctx, worker, slot, day)
+                if reason is None:
+                    ok, dynamic_reason = _hard_ok(ctx, state, worker, slot, day)
+                    if not ok:
+                        reason = dynamic_reason
+                if reason:
+                    excluded[reason] = excluded.get(reason, 0) + 1
+                    continue
+                score, factors = _score_candidate(ctx, state, instance, worker, day)
+                scored.append((score, worker, factors))
+
+            # スコア下限未満は除外内訳へ（選ばれた本人は表示のため残す）
+            min_score = ctx.prefs.min_assignment_score
+            if min_score is not None:
+                below = [
+                    item for item in scored
+                    if item[0] < min_score and item[1].employee_number != placed
+                ]
+                if below:
+                    excluded["below_min_score"] = excluded.get("below_min_score", 0) + len(below)
+                    scored = [
+                        item for item in scored
+                        if item[0] >= min_score or item[1].employee_number == placed
+                    ]
+
+            scored.sort(key=lambda item: (
+                -item[0], state.month_count.get(item[1].employee_number, 0), item[1].employee_number
+            ))
+            eligible_count = len(scored)
+
+            top = scored[:PANEL_MAX_CANDIDATES]
+            if placed is not None and all(w.employee_number != placed for _s, w, _f in top):
+                for item in scored:
+                    if item[1].employee_number == placed:
+                        top = top + [item]
+                        break
+
+            candidates: list[CandidateScore] = []
+            placed_factors: list[ScoreFactor] | None = None
+            for score, worker, factors in top:
+                selected = worker.employee_number == placed
+                if selected:
+                    placed_factors = factors
+                top_factors = sorted(factors, key=lambda f: -abs(f.points))[:3]
+                candidates.append(
+                    CandidateScore(worker.employee_number, worker.name, score, selected, top_factors)
+                )
+
+            if placed is not None:
+                state.add(instance.instance_id, placed, slot.date, option, is_we)
+                if placed_factors is not None:
+                    explanations_map[instance.instance_id] = placed_factors
+
+            panels.append(
+                SlotCandidatePanel(
+                    slot_instance_id=instance.instance_id,
+                    slot_id=slot.slot_id,
+                    date=slot.date,
+                    day=slot.day,
+                    shift_key=slot.shift_key,
+                    shift_label=slot.shift_label,
+                    selected_employee_number=placed or "",
+                    candidates=candidates,
+                    excluded_counts=dict(sorted(excluded.items())),
+                    eligible_count=eligible_count,
+                )
+            )
+        return panels
 
     # -- output -------------------------------------------------------------
 
@@ -1829,19 +2285,31 @@ class GreedyRepairSolver:
         state: _PlanState,
         instances: list[_Instance],
         unfilled_reason: dict[str, tuple[str, str]],
+        panel_by_instance: dict[str, SlotCandidatePanel] | None = None,
     ) -> list[UnfilledSlot]:
         # slot_id ごとに不足数を集計
         shortage_by_slot: dict[str, int] = {}
         reason_by_slot: dict[str, tuple[str, str]] = {}
+        breakdown_by_slot: dict[str, str] = {}
         slot_meta: dict[str, RequiredSlot] = {}
         for instance in instances:
             slot_meta[instance.slot.slot_id] = instance.slot
             if state.placed.get(instance.instance_id):
                 continue
-            shortage_by_slot[instance.slot.slot_id] = shortage_by_slot.get(instance.slot.slot_id, 0) + 1
+            slot_id = instance.slot.slot_id
+            shortage_by_slot[slot_id] = shortage_by_slot.get(slot_id, 0) + 1
             reason = unfilled_reason.get(instance.instance_id)
-            if reason and instance.slot.slot_id not in reason_by_slot:
-                reason_by_slot[instance.slot.slot_id] = reason
+            if reason and slot_id not in reason_by_slot:
+                reason_by_slot[slot_id] = reason
+            # 候補パネルがあれば除外内訳（休暇◯名・他現場◯名…）を理由に添える
+            if panel_by_instance and slot_id not in breakdown_by_slot:
+                panel = panel_by_instance.get(instance.instance_id)
+                if panel and panel.excluded_counts:
+                    parts = [
+                        f"{EXCLUSION_LABELS.get(code, code)}{count}名"
+                        for code, count in panel.excluded_counts.items()
+                    ]
+                    breakdown_by_slot[slot_id] = "・".join(parts)
 
         unfilled: list[UnfilledSlot] = []
         for slot_id, shortage in shortage_by_slot.items():
@@ -1849,6 +2317,9 @@ class GreedyRepairSolver:
             reason_code, reason = reason_by_slot.get(
                 slot_id, ("partial_allowed", REASON_MESSAGES["partial_allowed"])
             )
+            breakdown = breakdown_by_slot.get(slot_id)
+            if breakdown:
+                reason = f"{reason}（内訳: {breakdown}）"
             unfilled.append(
                 UnfilledSlot(
                     slot_id=slot_id,
@@ -2764,4 +3235,93 @@ def result_to_dict(result: ShiftPlanningResult) -> dict[str, Any]:
             }
             for ex in result.explanations
         ],
+        "candidate_panels": [
+            {
+                "slot_instance_id": p.slot_instance_id,
+                "slot_id": p.slot_id,
+                "date": p.date.isoformat(),
+                "day": p.day,
+                "shift_key": p.shift_key,
+                "shift_label": p.shift_label,
+                "selected_employee_number": p.selected_employee_number,
+                "eligible_count": p.eligible_count,
+                "candidates": [
+                    {
+                        "employee_number": c.employee_number,
+                        "name": c.name,
+                        "score": c.score,
+                        "selected": c.selected,
+                        "factors": [
+                            {"label": f.label, "points": f.points, "detail": f.detail}
+                            for f in c.factors
+                        ],
+                    }
+                    for c in p.candidates
+                ],
+                "excluded": [
+                    {"code": code, "label": EXCLUSION_LABELS.get(code, code), "count": count}
+                    for code, count in p.excluded_counts.items()
+                ],
+            }
+            for p in result.candidate_panels
+        ],
     }
+
+
+def build_day_summaries(
+    request: ShiftPlanningRequest, result: ShiftPlanningResult
+) -> list[dict[str, Any]]:
+    """UI の日別診断用サマリ（需要・配置・未充足・対象内外）を日ごとに返す。
+
+    「対象日なのに配置されない」原因（需要 0 / 候補全滅 / 固定で充足済み）を
+    そのまま画面に出せる形にする。
+    """
+    targets = set(request.fill_target_dates)
+    fill_all = not request.fill_target_dates
+
+    demand_by_date: dict[date, int] = {}
+    for slot in request.required_slots:
+        demand_by_date[slot.date] = demand_by_date.get(slot.date, 0) + max(0, slot.required_count)
+
+    engine_by_date: dict[date, int] = {}
+    fixed_by_date: dict[date, int] = {}
+    leave_by_date: dict[date, int] = {}
+    for assignment in result.assignments:
+        if str(assignment.shift_key or "").strip() in LEAVE_OPTION_KEYS:
+            leave_by_date[assignment.date] = leave_by_date.get(assignment.date, 0) + 1
+        elif assignment.source == "engine":
+            engine_by_date[assignment.date] = engine_by_date.get(assignment.date, 0) + 1
+        else:
+            fixed_by_date[assignment.date] = fixed_by_date.get(assignment.date, 0) + 1
+
+    unfilled_by_date: dict[date, int] = {}
+    reasons_by_date: dict[date, list[str]] = {}
+    for u in result.unfilled_slots:
+        unfilled_by_date[u.date] = unfilled_by_date.get(u.date, 0) + u.shortage
+        reasons = reasons_by_date.setdefault(u.date, [])
+        if u.reason and u.reason not in reasons:
+            reasons.append(u.reason)
+
+    summaries: list[dict[str, Any]] = []
+    for day in request.days:
+        in_scope = fill_all or day.date in targets
+        demand = demand_by_date.get(day.date, 0)
+        summaries.append(
+            {
+                "day": day.day,
+                "date": day.date.isoformat(),
+                "weekday": day.weekday,
+                "is_holiday": day.is_holiday,
+                "is_weekend": day.is_weekend,
+                "in_scope": in_scope,
+                "demand": demand,
+                "engine_count": engine_by_date.get(day.date, 0),
+                "fixed_count": fixed_by_date.get(day.date, 0),
+                "leave_count": leave_by_date.get(day.date, 0),
+                "unfilled": unfilled_by_date.get(day.date, 0),
+                "unfilled_reasons": reasons_by_date.get(day.date, []),
+                # 対象日なのに需要が無い＝「配置されない」の最多原因
+                "no_demand": bool(in_scope and demand == 0),
+            }
+        )
+    return summaries

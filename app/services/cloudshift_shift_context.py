@@ -786,7 +786,7 @@ def _slots_from_demand_rules(rules, days, site_row_id, site_id, site_name) -> li
 
 
 def _slots_from_prev_month(project, days, year, month, site_row_id, site_id, site_name) -> list[RequiredSlot]:
-    from app.tools.shiftersync_format import normalize_entries_for_month
+    from app.tools.shiftersync_format import normalize_entries_for_month, parse_entry_value
 
     prev_year, prev_month = _prev_month(year, month)
     prev_data = (project.get("months") or {}).get(_month_key(prev_year, prev_month))
@@ -794,12 +794,16 @@ def _slots_from_prev_month(project, days, year, month, site_row_id, site_id, sit
         return []
     prev_entries = normalize_entries_for_month(prev_data.get("entries_per_day"), prev_year, prev_month)
 
-    # 前月の曜日別平均人数
+    # 前月の曜日別平均人数（有休系 entry は勤務ではないため数えない）
     by_weekday_counts: dict[int, list[int]] = {}
     prev_days = monthrange(prev_year, prev_month)[1]
     for day in range(1, prev_days + 1):
         d = date(prev_year, prev_month, day)
-        count = len(prev_entries.get(str(day)) or [])
+        count = 0
+        for entry in (prev_entries.get(str(day)) or []):
+            option, _name = parse_entry_value(entry.get("value") or "")
+            if _str(option) not in LEAVE_OPTION_KEYS:
+                count += 1
         by_weekday_counts.setdefault(d.weekday(), []).append(count)
 
     avg_by_weekday: dict[int, int] = {}
@@ -940,6 +944,63 @@ def _coerce_fill_target_dates(
     return tuple(sorted(result))
 
 
+def _apply_target_required_override(
+    required_slots: list[RequiredSlot],
+    target_dates: tuple[date, ...],
+    target_required_count: Any,
+    days,
+    project: dict[str, Any],
+    warnings: list[PlanningWarning],
+) -> list[RequiredSlot]:
+    """対象日の「オプション指定なしの必要人数」を UI 指定値で上書きする。
+
+    需要設定が無い・前月推定が 0 の日でも、ユーザーが対象日と人数を明示すれば
+    その日を埋められるようにする（「対象日なのに需要 0 で配置されない」の救済）。
+    オプション別・枝番別の需要 slot はそのまま残す。
+    """
+    try:
+        count = int(target_required_count)
+    except (TypeError, ValueError):
+        return required_slots
+    if count <= 0:
+        return required_slots
+
+    # 対象日指定が無ければ全日へ適用
+    dates = set(target_dates) if target_dates else {d.date for d in days}
+    day_by_date = {d.date: d for d in days}
+    site_row_id = _coerce_site_row_id(project.get("site_row_id"))
+
+    kept = [
+        s for s in required_slots
+        if not (s.date in dates and not s.shift_key and not s.site_branch_row_id)
+    ]
+    for d in sorted(dates):
+        day = day_by_date.get(d)
+        if day is None:
+            continue
+        kept.append(
+            RequiredSlot(
+                slot_id=f"target-{d.isoformat()}",
+                date=d,
+                day=day.day,
+                shift_key="",
+                shift_label="",
+                required_count=count,
+                site_row_id=site_row_id,
+                site_id=_str(project.get("site_id")),
+                site_name=_str(project.get("site_name")),
+                source="target_override",
+            )
+        )
+    warnings.append(
+        PlanningWarning(
+            "target_required_override",
+            f"対象日の必要人数を {count} 名で指定したため、既存の需要設定より優先します",
+        )
+    )
+    return kept
+
+
 def build_planning_request(
     project: dict[str, Any],
     year: int,
@@ -948,6 +1009,7 @@ def build_planning_request(
     plan_overrides: dict[str, Any] | None = None,
     calendar_ids: list[str] | None = None,
     fill_target_days: list[Any] | None = None,
+    target_required_count: Any = None,
     request_id: str = "",
 ) -> tuple[ShiftPlanningRequest, ShiftEngineSettings, list[PlanningWarning]]:
     """CloudShift project から ShiftPlanningRequest を構築する。"""
@@ -977,6 +1039,11 @@ def build_planning_request(
     required_slots, _demand_source = build_required_slots(
         project, month_data, settings, days, year, month, warnings
     )
+    fill_target_dates = _coerce_fill_target_dates(fill_target_days, year, month)
+    if target_required_count is not None:
+        required_slots = _apply_target_required_override(
+            required_slots, fill_target_dates, target_required_count, days, project, warnings
+        )
 
     site_row_id = _coerce_site_row_id(project.get("site_row_id"))
     # 固定既存(locked/manual_locked)・pinned の担当者は実在の配置者なので、
@@ -1009,7 +1076,7 @@ def build_planning_request(
         scoring_weights=settings.scoring_weights,
         option_experience_policies=list(settings.option_experience_policies),
         external_occupancy_relax_sites=_relax_sites(settings),
-        fill_target_dates=_coerce_fill_target_dates(fill_target_days, year, month),
+        fill_target_dates=fill_target_dates,
     )
     return request, settings, warnings
 

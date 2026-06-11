@@ -233,3 +233,22 @@ def test_plan_with_target_days_limits_assignments():
         json={"year": 2026, "month": 4, "preferences": {"eligibility_baseline": "any"}},
     )
     assert resp_all.get_json()["request_hash"] != data["request_hash"]
+
+
+def test_plan_returns_day_summary_and_candidate_panels():
+    module, app = _build()
+    client, project_id = _create_scene_project_with_candidate(module, app)
+    module.current_user = _owner()
+    resp = client.post(
+        f"{BASE}/api/project/{project_id}/shift-engine/plan",
+        json={"year": 2026, "month": 4, "preferences": {"eligibility_baseline": "any"},
+              "target_days": [1, 2], "target_required_count": 1},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    data = resp.get_json()
+    summary = {s["day"]: s for s in data["day_summary"]}
+    assert summary[1]["in_scope"] is True and summary[1]["demand"] == 1
+    assert summary[3]["in_scope"] is False
+    panels = data["result"]["candidate_panels"]
+    assert panels and panels[0]["candidates"]
+    assert any(c["selected"] for p in panels for c in p["candidates"])

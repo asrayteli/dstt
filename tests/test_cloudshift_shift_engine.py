@@ -791,3 +791,100 @@ def test_min_monthly_assignments_prioritizes_under_target():
     for a in res.assignments:
         counts[a.employee_number] = counts.get(a.employee_number, 0) + 1
     assert counts.get("E001", 0) == 3
+
+
+# ---------------------------------------------------------------------------
+# 候補パネル・日別サマリ・診断警告
+# ---------------------------------------------------------------------------
+
+
+def test_candidate_panels_show_selected_and_excluded():
+    """候補パネルが「選ばれた人・他候補・除外内訳」を返す。"""
+    slots = [make_slot(1)]
+    workers = [
+        make_worker("E001", dedicated=("10",)),
+        make_worker("E002"),
+        make_worker("E003", experienced=()),  # 最低基準を満たさない
+    ]
+    unavailable = [e.UnavailableDay("E002", date(YEAR, MONTH, 1), "有休", "leave_mgr", "hard")]
+    res = e.plan_shifts(make_request(slots, workers, unavailable=unavailable))
+    assert len(res.candidate_panels) == 1
+    panel = res.candidate_panels[0]
+    assert panel.selected_employee_number == "E001"
+    selected = [c for c in panel.candidates if c.selected]
+    assert len(selected) == 1 and selected[0].employee_number == "E001"
+    assert selected[0].score > 0 and selected[0].factors
+    assert panel.excluded_counts.get("hard_leave") == 1
+    assert panel.excluded_counts.get("baseline") == 1
+    assert panel.eligible_count == 1
+
+
+def test_candidate_panel_for_unfilled_slot():
+    """未充足枠もパネルを持ち、未充足理由に除外内訳が付く。"""
+    slots = [make_slot(1)]
+    workers = [make_worker("E001")]
+    unavailable = [e.UnavailableDay("E001", date(YEAR, MONTH, 1), "有休", "leave_mgr", "hard")]
+    res = e.plan_shifts(make_request(slots, workers, unavailable=unavailable))
+    assert res.status == "partial"
+    panel = res.candidate_panels[0]
+    assert panel.selected_employee_number == ""
+    assert panel.excluded_counts.get("hard_leave") == 1
+    assert "休暇・休み1名" in res.unfilled_slots[0].reason
+
+
+def test_target_day_no_demand_warning():
+    """対象日に需要が無いとき、明確な診断警告を返す（木金が埋まらない問題の可視化）。"""
+    slots = [make_slot(1)]  # 1日だけ需要がある
+    workers = [make_worker("E001")]
+    req = _with_targets(make_request(slots, workers), 1, 2, 3)
+    res = e.plan_shifts(req)
+    no_demand = [w for w in res.warnings if w.code == "target_day_no_demand"]
+    assert {w.date for w in no_demand} == {date(YEAR, MONTH, 2), date(YEAR, MONTH, 3)}
+    assert "必要人数が 0" in no_demand[0].message
+
+
+def test_day_summaries_flag_no_demand_days():
+    slots = [make_slot(1, required=2)]
+    workers = [make_worker("E001"), make_worker("E002")]
+    req = _with_targets(make_request(slots, workers), 1, 2)
+    res = e.plan_shifts(req)
+    summaries = e.build_day_summaries(req, res)
+    by_day = {s["day"]: s for s in summaries}
+    assert by_day[1]["demand"] == 2 and by_day[1]["engine_count"] == 2
+    assert by_day[2]["no_demand"] is True and by_day[2]["in_scope"] is True
+    assert by_day[3]["in_scope"] is False
+
+
+def test_relocate_pass_rescues_unfilled_slot():
+    """貪欲が唯一の適格者を先に消費しても、救済移動で両枠を埋める。"""
+    # d1, d2 に 1 枠ずつ。E001 は max 1。E002 は d2 の曜日が NG で
+    # スコア下限 100 を割るため d2 に置けない。
+    # 貪欲: d1 → E001（高スコア）、d2 → E001 上限到達・E002 下限未満 → 未充足。
+    # 救済: E001 を d2 へ移し、d1 を E002 で埋め直す。
+    d2_weekday = date(YEAR, MONTH, 2).weekday()
+    slots = [make_slot(1), make_slot(2)]
+    workers = [
+        make_worker("E001", dedicated=("10",), max_assignments=1),
+        make_worker("E002", blocked=(d2_weekday,)),
+    ]
+    from dataclasses import replace as dc_replace
+    prefs = dc_replace(e.default_planning_preferences(), min_assignment_score=100)
+    res = e.plan_shifts(make_request(slots, workers, preferences=prefs))
+    assert res.status == "feasible", [u.reason for u in res.unfilled_slots]
+    assert assigned_numbers(res, day=1) == ["E002"]
+    assert assigned_numbers(res, day=2) == ["E001"]
+
+
+def test_swap_pass_reduces_weekend_imbalance():
+    """入替（2-opt）が土日祝の偏りを解消できる。"""
+    # 4(土), 5(日), 6(月), 7(火) に 1 枠ずつ（2026-07: 4=土, 5=日）。
+    # E001 を土日に固定したくなる状況を作り、入替で分散されることを確認。
+    slots = [make_slot(d) for d in (4, 5, 6, 7)]
+    workers = [make_worker("E001"), make_worker("E002")]
+    res = e.plan_shifts(make_request(slots, workers))
+    weekend_by_worker = {}
+    for a in res.assignments:
+        if a.day in (4, 5):
+            weekend_by_worker[a.employee_number] = weekend_by_worker.get(a.employee_number, 0) + 1
+    # 土日が 1 人に集中しない
+    assert max(weekend_by_worker.values()) == 1, weekend_by_worker
