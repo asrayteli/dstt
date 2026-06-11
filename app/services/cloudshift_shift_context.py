@@ -129,9 +129,10 @@ def _derive_active(emp: Any, warnings: list[PlanningWarning], number: str) -> bo
 def _role_option_sites_from_entries(
     project: dict[str, Any],
 ) -> tuple[dict[str, set[str]], dict[str, set[str]], dict[str, str]]:
-    """全月の確定 entry の役割オプションから経験を直接導出する。
+    """全月の確定 entry の第二オプション（代務/研修）から経験を直接導出する。
 
-    SUB（代務）= 一人で勤務した実績 → 経験現場、TRAIN（研修）= 研修済み現場。
+    SUB（代務）= 一人で勤務した実績、TRAIN（研修）= 研修済み。いずれも要件どおり
+    アシストの「経験済み現場」へも反映するため experienced へ含める。
     戻り値は (経験 {社員番号: {site_row_id}}, 研修済み {同}, 氏名 {社員番号: 氏名})。
     """
     experienced: dict[str, set[str]] = {}
@@ -141,7 +142,7 @@ def _role_option_sites_from_entries(
     if not site_row_id:
         return experienced, trained, names
     try:
-        from app.tools.shiftersync_format import parse_entry_value
+        from app.tools.shiftersync_format import entry_second_option, parse_entry_value
     except Exception:  # pragma: no cover
         return experienced, trained, names
 
@@ -154,17 +155,17 @@ def _role_option_sites_from_entries(
             for entry in day_entries:
                 if not isinstance(entry, dict):
                     continue
-                option, name = parse_entry_value(entry.get("value") or "")
-                key = _str(option).upper()
+                key = entry_second_option(entry)
                 if key not in ROLE_OPTION_KEYS:
                     continue
                 number = _str(entry.get("employee_number"))
                 if not number:
                     continue
+                # 代務・研修いずれも「経験済み現場」へ反映する（要件4/5）。
+                experienced.setdefault(number, set()).add(site_row_id)
                 if key == _ROLE_OPTION_TRAINING:
                     trained.setdefault(number, set()).add(site_row_id)
-                else:
-                    experienced.setdefault(number, set()).add(site_row_id)
+                _option, name = parse_entry_value(entry.get("value") or "")
                 if _str(name):
                     names.setdefault(number, _str(name))
     return experienced, trained, names
@@ -262,6 +263,16 @@ def build_workers(
         trained_sites.setdefault(number, set()).update(sites)
     for number, name in entry_names.items():
         names.setdefault(number, name)
+
+    # 研修要現場（trainee）から、経験済み・研修済みになった現場を除く（要件5）。
+    # 保存前の試算でも研修要が残らないようにする。
+    for number, sites in list(trainee_sites.items()):
+        done = experienced_sites.get(number, set()) | trained_sites.get(number, set())
+        remaining = sites - done
+        if remaining:
+            trainee_sites[number] = remaining
+        else:
+            trainee_sites.pop(number, None)
 
     # プロファイル（希望/NG 曜日・氏名）
     for item in (assist.get("profiles") or []):
