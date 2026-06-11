@@ -133,6 +133,9 @@ class ScoringWeights:
 
     dedicated_bonus: int = 500
     experience_bonus: int = 120
+    # 研修（TRAIN オプション）を受けた現場。「教わったが一人ではやっていない」
+    # 状態のため、実績（代務 SUB を含む）より一段低い習熟度として加点する
+    trained_site_bonus: int = 60
     option_aptitude_bonus: int = 80
     preferred_weekday_bonus: int = 40
     blocked_weekday_penalty: int = 250
@@ -271,7 +274,11 @@ class Worker:
     office_code: str = ""
     dedicated_site_ids: tuple[str, ...] = ()
     dedicated_site_row_ids: tuple[str, ...] = ()
+    # 実績のある現場。代務（SUB）で一人で勤務した現場も「実績」としてここに入る
     experienced_site_row_ids: tuple[str, ...] = ()
+    # 研修（TRAIN）を受けた現場（研修済み）。「教わったが一人ではやっていない」
+    # ため実績より一段低い習熟度で適格になる
+    trained_site_row_ids: tuple[str, ...] = ()
     trainee_site_row_ids: tuple[str, ...] = ()
     experienced_option_keys: tuple[str, ...] = ()
     qualification_codes: tuple[str, ...] = ()  # 予約
@@ -971,13 +978,16 @@ def _site_match(values: tuple[str, ...], site_row_id: str) -> bool:
 
 
 def _baseline_ok(worker: Worker, slot: RequiredSlot, prefs: PlanningPreferences) -> bool:
-    """配置の最低基準（専従/経験、研修は include_trainees 時のみ）。"""
+    """配置の最低基準（専従/実績/研修済み、要研修者は include_trainees 時のみ）。"""
     if prefs.eligibility_baseline == "any":
         return True
     site = slot.site_row_id
     if _site_match(worker.dedicated_site_row_ids, site):
         return True
     if _site_match(worker.experienced_site_row_ids, site):
+        return True
+    # 研修済み（教わった現場）も「現場を知っている人」として適格
+    if _site_match(worker.trained_site_row_ids, site):
         return True
     if prefs.include_trainees and _site_match(worker.trainee_site_row_ids, site):
         return True
@@ -1143,19 +1153,25 @@ def _score_candidate(
     if prefs.prefer_dedicated and _site_match(worker.dedicated_site_row_ids, slot.site_row_id):
         score += weights.dedicated_bonus
         factors.append(ScoreFactor("dedicated", "専従者", weights.dedicated_bonus, "対象現場の専従者"))
-    # 経験者優先
-    if prefs.prefer_experienced and _site_match(worker.experienced_site_row_ids, slot.site_row_id):
-        score += weights.experience_bonus
-        factors.append(ScoreFactor("experience", "経験者", weights.experience_bonus, "対象現場の経験あり"))
+    # 現場習熟度（実績（代務含む）> 研修済み。重複加点せず上位のみ）
+    if prefs.prefer_experienced:
+        if _site_match(worker.experienced_site_row_ids, slot.site_row_id):
+            score += weights.experience_bonus
+            factors.append(ScoreFactor("experience", "経験者", weights.experience_bonus, "対象現場の実績あり（代務含む）"))
+        elif _site_match(worker.trained_site_row_ids, slot.site_row_id):
+            score += weights.trained_site_bonus
+            factors.append(ScoreFactor("experience", "研修済み", weights.trained_site_bonus, "研修を受けた現場（一人での実績はまだ）"))
     # オプション適性（過去実績）
     option = str(slot.shift_key or "").strip()
     if option and option in worker.experienced_option_keys:
         score += weights.option_aptitude_bonus
         factors.append(ScoreFactor("aptitude", "オプション適性", weights.option_aptitude_bonus, f"{option} の実績あり"))
-    # 研修者の減点（やや抑制）
-    if _site_match(worker.trainee_site_row_ids, slot.site_row_id) and not _site_match(
-        worker.experienced_site_row_ids, slot.site_row_id
-    ) and not _site_match(worker.dedicated_site_row_ids, slot.site_row_id):
+    # 要研修者の減点（現場をまだ知らない人。実績・研修済みの人は対象外）
+    if _site_match(worker.trainee_site_row_ids, slot.site_row_id) and not (
+        _site_match(worker.experienced_site_row_ids, slot.site_row_id)
+        or _site_match(worker.dedicated_site_row_ids, slot.site_row_id)
+        or _site_match(worker.trained_site_row_ids, slot.site_row_id)
+    ):
         score -= weights.trainee_penalty
         factors.append(ScoreFactor("training", "研修者", -weights.trainee_penalty, "経験前の研修対象"))
 
@@ -2823,6 +2839,7 @@ def compute_request_hash(request: ShiftPlanningRequest) -> str:
                 "active": worker.active,
                 "dedicated_site_row_ids": sorted(worker.dedicated_site_row_ids),
                 "experienced_site_row_ids": sorted(worker.experienced_site_row_ids),
+                "trained_site_row_ids": sorted(worker.trained_site_row_ids),
                 "trainee_site_row_ids": sorted(worker.trainee_site_row_ids),
                 "experienced_option_keys": sorted(worker.experienced_option_keys),
                 "preference": _jsonify(worker.preference),

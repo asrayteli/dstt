@@ -3,10 +3,12 @@
 健康診断の進捗を「予約 → 受診 → 再検査 → 二次検査完了」まで追跡する管理ツール。
 社員名簿PLUS（Employee）と連携し、対象者×健診年度で1レコードを保持する。
 
-アクセス制御は pluslist と同じ方針:
-  - DSTT管理者は全営業所。
-  - 一般利用者は「所属する支店/営業所のコード（＝既定スコープ）」＋
-    「health_check 独自の個別付与」の和集合。
+アクセス制御（健康情報＝要配慮個人情報のため厳格に運用）:
+  - 営業所スコープは **DSTTのアクセス権と完全に同期**する（健診PLUS独自の付与は廃止）。
+    すなわち閲覧・作成・編集できるのは「DSTTで本人に付与された営業所」のみ。
+  - DSTT管理者は全営業所を閲覧・編集できる。
+  - 健診PLUS管理者は「自分の営業所」の管理者（健康診断担当の設定等）に限る。
+    他営業所へはアクセスできない。
 通知（ToBell連携）は担当者個人のオプトイン時のみ起票する。
 """
 from __future__ import annotations
@@ -77,7 +79,7 @@ DATE_FIELDS = {
     "nasva_reservation_date",
     "nasva_exam_date",
 }
-BOOL_FIELDS = {"is_night_worker", "needs_recheck"}
+BOOL_FIELDS = {"is_night_worker", "needs_recheck", "is_exempt", "is_kintone", "is_retired"}
 TEXT_FIELDS = {
     "employee_number",
     "employee_name",
@@ -86,7 +88,6 @@ TEXT_FIELDS = {
     "manager_name",
     "retirement_date",
     "medical_institution",
-    "recheck_items",
     "secondary_result",
     "remarks",
 }
@@ -98,6 +99,7 @@ SYNCED_FIELDS = {
     "assignment_site",
     "manager_name",
     "retirement_date",
+    "is_retired",
     "hire_date",
     "birth_date",
 }
@@ -127,6 +129,79 @@ def _clean_attachment_title(raw) -> str:
     return title
 
 
+RECHECK_ITEM_NAME_MAX = 120
+RECHECK_ITEM_VALUE_MAX = 500
+MAX_RECHECK_ITEMS = 50
+MAX_EXTRA_NOTIFY_USERS = 20
+
+
+def _serialize_recheck_items(raw) -> str | None:
+    """再検査項目の入力（[{name, value}] のリスト または プレーンテキスト）を
+    JSON文字列に正規化する。空なら None。"""
+    items: list[dict] = []
+    if isinstance(raw, list):
+        for entry in raw[:MAX_RECHECK_ITEMS]:
+            if isinstance(entry, dict):
+                name = str(entry.get("name", "")).strip()[:RECHECK_ITEM_NAME_MAX]
+                value = str(entry.get("value", "")).strip()[:RECHECK_ITEM_VALUE_MAX]
+            else:
+                name, value = str(entry).strip()[:RECHECK_ITEM_NAME_MAX], ""
+            if name or value:
+                items.append({"name": name, "value": value})
+    elif raw not in (None, ""):
+        # 旧仕様のプレーンテキストは1項目として保持
+        text = str(raw).strip()
+        if text:
+            items.append({"name": text[:RECHECK_ITEM_NAME_MAX], "value": ""})
+    if not items:
+        return None
+    return json.dumps(items, ensure_ascii=False)
+
+
+def _serialize_extra_notify_users(raw) -> str | None:
+    """追加通知先（username配列）を、実在ユーザーに限定してJSON文字列へ正規化する。"""
+    if not isinstance(raw, list):
+        return None
+    usernames: list[str] = []
+    for entry in raw:
+        u = str(entry).strip()
+        if u and u not in usernames:
+            usernames.append(u)
+    if not usernames:
+        return None
+    usernames = usernames[:MAX_EXTRA_NOTIFY_USERS]
+    valid = {
+        u.username
+        for u in User.query.filter(User.username.in_(usernames)).all()
+    }
+    filtered = [u for u in usernames if u in valid]
+    return json.dumps(filtered, ensure_ascii=False) if filtered else None
+
+
+def get_office_health_officers(office_code: str | None) -> list[str]:
+    """営業所の「健康診断担当」（username）一覧。設定（settings.json）から読む。
+    ToBellフックからも参照されるためモジュール関数として提供する。"""
+    code = (office_code or "").strip()
+    if not code:
+        return []
+    try:
+        with open(os.path.join(get_data_path(), "settings.json"), "r", encoding="utf-8") as f:
+            officers = json.load(f).get("health_officers")
+    except Exception:
+        return []
+    if not isinstance(officers, dict):
+        return []
+    value = officers.get(code)
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for u in value:
+        u = str(u).strip()
+        if u and u not in result:
+            result.append(u)
+    return result
+
+
 # ============================================================
 # データ領域・設定・権限
 # ============================================================
@@ -143,18 +218,23 @@ def ensure_data_directories() -> None:
     os.makedirs(get_uploads_path(), exist_ok=True)
     permissions_file = os.path.join(get_data_path(), "permissions.json")
     if not os.path.exists(permissions_file):
-        write_json_atomic(permissions_file, {"admins": [], "user_offices": {}})
+        write_json_atomic(permissions_file, {"admins": []})
     settings_file = os.path.join(get_data_path(), "settings.json")
     if not os.path.exists(settings_file):
         write_json_atomic(settings_file, {"global_lead_days": HEALTH_CHECK_DEFAULT_LEAD_DAYS})
 
 
 def load_permissions() -> dict:
+    """健診PLUSの管理者(admins)のみを保持する。
+    旧バージョンの user_offices（独自営業所付与）は廃止（DSTTのアクセス権に同期）。"""
     try:
         with open(os.path.join(get_data_path(), "permissions.json"), "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            if isinstance(data, dict):
+                return {"admins": list(data.get("admins", []) or [])}
     except Exception:
-        return {"admins": [], "user_offices": {}}
+        pass
+    return {"admins": []}
 
 
 def save_permissions(permissions: dict) -> None:
@@ -188,35 +268,95 @@ def get_global_lead_days() -> int:
     return HEALTH_CHECK_DEFAULT_LEAD_DAYS
 
 
-def is_admin(user_id: str) -> bool:
-    """DSTT管理者 か health_check 独自管理者。"""
+def is_dstt_admin() -> bool:
+    """DSTT全体の管理者。全営業所を閲覧・編集できる。"""
+    return bool(_is_dstt_admin())
+
+
+def is_health_admin(user_id: str) -> bool:
+    """健診PLUS管理者か。DSTT管理者、または健診PLUSで管理者指定された人。
+
+    注意: 健診PLUS管理者は『自分の営業所』の管理者であり、これ自体は
+    他営業所へのアクセス権を与えない（営業所スコープは DSTT のアクセス権に同期）。
+    管理操作（健康診断担当の設定など）の可否は can_admin_office で判定する。
+    """
     if _is_dstt_admin():
         return True
     return user_id in load_permissions().get("admins", [])
 
 
+def _resolve_user(user_id: str):
+    """user_id（username）から User を解決する。current_user を優先。"""
+    if getattr(current_user, "is_authenticated", False) and getattr(current_user, "username", None) == user_id:
+        return current_user
+    return User.query.filter_by(username=user_id).first()
+
+
 def get_user_offices(user_id: str) -> list[str]:
     """アクセス可能な営業所コード一覧。
-    DSTT管理者は全営業所。それ以外は「所属営業所コード（既定）」＋「独自付与」の和集合。"""
-    if is_admin(user_id):
-        return [o.office_code for o in Office.query.all()]
-    permissions = load_permissions()
-    codes = set(permissions.get("user_offices", {}).get(user_id, []))
+
+    DSTT管理者は全営業所。それ以外は **DSTTで本人に付与された営業所のみ**
+    （健診PLUS独自の付与は廃止し、DSTTのアクセス権と同期）。
+    """
+    if _is_dstt_admin():
+        return [o["code"] for o in _office_options()]
+    user = _resolve_user(user_id)
+    if user is None:
+        return []
     try:
-        if getattr(current_user, "is_authenticated", False) and getattr(current_user, "username", None) == user_id:
-            codes |= set(_dstt_user_office_codes(current_user))
+        return sorted({c for c in _dstt_user_office_codes(user) if c})
     except Exception:
-        pass
-    return sorted(codes)
+        return []
+
+
+def _office_options(codes: list[str] | set[str] | None = None) -> list[dict[str, str]]:
+    """Return office choices from DSTT access offices, with PlusList names as fallback/override."""
+    wanted = {str(c).strip() for c in (codes or []) if str(c).strip()} if codes is not None else None
+    by_code: dict[str, dict[str, str]] = {}
+
+    access_query = AccessOffice.query.filter(AccessOffice.code.isnot(None))
+    if wanted is not None:
+        if not wanted:
+            return []
+        access_query = access_query.filter(AccessOffice.code.in_(wanted))
+    for office in access_query.order_by(AccessOffice.code, AccessOffice.name).all():
+        code = (office.code or "").strip()
+        if not code:
+            continue
+        by_code[code] = {"code": code, "name": office.name or code}
+
+    plus_query = Office.query
+    if wanted is not None:
+        plus_query = plus_query.filter(Office.office_code.in_(wanted))
+    for office in plus_query.order_by(Office.office_code).all():
+        code = (office.office_code or "").strip()
+        if not code:
+            continue
+        by_code[code] = {"code": code, "name": office.office_name or by_code.get(code, {}).get("name") or code}
+
+    return [by_code[code] for code in sorted(by_code)]
 
 
 def has_office_access(user_id: str, office_code: str | None) -> bool:
-    if is_admin(user_id):
+    """その営業所のレコードを閲覧・作成・編集できるか。"""
+    if _is_dstt_admin():
         return True
     code = (office_code or "").strip()
     if not code:
         return False
     return code in get_user_offices(user_id)
+
+
+def can_admin_office(user_id: str, office_code: str | None) -> bool:
+    """その営業所で健診PLUSの管理操作（健康診断担当の設定）ができるか。
+
+    DSTT管理者は全営業所。健診PLUS管理者は『自分の営業所』のみ。
+    """
+    if _is_dstt_admin():
+        return True
+    if user_id not in load_permissions().get("admins", []):
+        return False
+    return has_office_access(user_id, office_code)
 
 
 # ============================================================
@@ -288,6 +428,7 @@ def sync_from_employee(record: HealthCheckRecord, employee: Employee, *, resolve
     record.manager_name = employee.manager_name
     record.hire_date = employee.hire_date
     record.retirement_date = employee.retirement_date
+    record.is_retired = bool(employee.is_retired)
     record.birth_date = employee.birth_date
     # 担当者は未解決のときのみ自動解決（手動上書きを尊重）
     if resolve_manager and not record.manager_user and employee.manager_name:
@@ -330,15 +471,14 @@ def _allowed_attachment(filename: str) -> bool:
 def index():
     ensure_data_directories()
     user_id = str(current_user.username)
-    offices = [{"code": o.office_code, "name": o.office_name}
-               for o in Office.query.order_by(Office.office_code).all()]
-    user_offices = get_user_offices(user_id)
-    accessible_offices = [o for o in offices if is_admin(user_id) or o["code"] in user_offices]
+    user_offices = set(get_user_offices(user_id))
+    accessible_offices = _office_options(None if is_dstt_admin() else user_offices)
     return render_template(
         "health_check.html",
         user_id=user_id,
         user_name=getattr(current_user, "name", "") or user_id,
-        is_admin=is_admin(user_id),
+        is_admin=is_health_admin(user_id),
+        is_dstt_admin=is_dstt_admin(),
         offices=accessible_offices,
         current_year=current_fiscal_year(),
         global_lead_days=get_global_lead_days(),
@@ -355,11 +495,12 @@ def _scoped_query(user_id: str):
     戻り値は (query, error_response)。error_response が None でなければそれを返す。
     年度・営業所・区分・各フラグ・フリーワードを request.args から適用する。"""
     user_offices = get_user_offices(user_id)
-    if not user_offices and not is_admin(user_id):
+    if not user_offices and not is_dstt_admin():
         return None, (jsonify({"error": "アクセス権限がありません"}), 403)
 
     query = HealthCheckRecord.query
-    if not is_admin(user_id):
+    if not is_dstt_admin():
+        # 自分がDSTTでアクセス権を持つ営業所のレコードに限定
         query = query.filter(HealthCheckRecord.office_code.in_(user_offices))
 
     year = request.args.get("year", type=int)
@@ -375,6 +516,10 @@ def _scoped_query(user_id: str):
     record_type = request.args.get("record_type", "").strip()
     if record_type in ("linked", "pre_hire", "internal"):
         query = query.filter(HealthCheckRecord.record_type == record_type)
+
+    # 退職者は既定で非表示（オプションで表示）
+    if request.args.get("include_retired") != "true":
+        query = query.filter(HealthCheckRecord.is_retired.is_(False))
 
     if request.args.get("night_only") == "true":
         query = query.filter(HealthCheckRecord.is_night_worker.is_(True))
@@ -462,12 +607,27 @@ def _apply_payload(record: HealthCheckRecord, payload: dict, user_id: str) -> No
             record_history(record, user_id, "update", field, old_value, new_value)
             setattr(record, field, new_value)
     for field in BOOL_FIELDS:
-        if field in payload:
-            new_value = bool(payload.get(field))
-            old_value = bool(getattr(record, field))
-            if old_value != new_value:
-                record_history(record, user_id, "update", field, old_value, new_value)
-                setattr(record, field, new_value)
+        if field in skip or field not in payload:
+            continue
+        new_value = bool(payload.get(field))
+        old_value = bool(getattr(record, field))
+        if old_value != new_value:
+            record_history(record, user_id, "update", field, old_value, new_value)
+            setattr(record, field, new_value)
+    # 再検査項目（[{name, value}] のJSON。旧プレーンテキストとも互換）
+    if "recheck_items" in payload and "recheck_items" not in skip:
+        new_value = _serialize_recheck_items(payload.get("recheck_items"))
+        old_value = record.recheck_items
+        if (old_value or None) != (new_value or None):
+            record_history(record, user_id, "update", "recheck_items", old_value, new_value)
+            record.recheck_items = new_value
+    # 通知の追加宛先（レコード個別。usernameのJSON配列）
+    if "extra_notify_users" in payload and "extra_notify_users" not in skip:
+        new_value = _serialize_extra_notify_users(payload.get("extra_notify_users"))
+        old_value = record.extra_notify_users
+        if (old_value or None) != (new_value or None):
+            record_history(record, user_id, "update", "extra_notify_users", old_value, new_value)
+            record.extra_notify_users = new_value
     if "reminder_lead_days" in payload:
         raw = payload.get("reminder_lead_days")
         new_value = None
@@ -692,7 +852,7 @@ def api_carryover():
         HealthCheckRecord.record_type == "linked",
         HealthCheckRecord.employee_id.isnot(None),
     )
-    if not is_admin(user_id):
+    if not is_dstt_admin():
         query = query.filter(HealthCheckRecord.office_code.in_(accessible or ["__none__"]))
 
     existing_ids = {
@@ -720,7 +880,11 @@ def api_carryover():
             manager_user=source.manager_user,
             hire_date=source.hire_date,
             retirement_date=source.retirement_date,
+            is_retired=source.is_retired,
             is_night_worker=source.is_night_worker,
+            is_exempt=source.is_exempt,
+            is_kintone=source.is_kintone,
+            extra_notify_users=source.extra_notify_users,
             reminder_lead_days=source.reminder_lead_days,
             created_by=user_id,
             updated_by=user_id,
@@ -752,7 +916,7 @@ def api_resolve_managers():
     )
     if year:
         query = query.filter(HealthCheckRecord.target_year == int(year))
-    if not is_admin(user_id):
+    if not is_dstt_admin():
         query = query.filter(HealthCheckRecord.office_code.in_(accessible or ["__none__"]))
 
     name_index = _build_user_name_index()
@@ -837,7 +1001,14 @@ def api_download_attachment(record_id, attachment_id):
     abs_path = os.path.join(get_uploads_path(), attachment.stored_path)
     if not os.path.exists(abs_path):
         return jsonify({"error": "ファイルが見つかりません"}), 404
-    return send_file(abs_path, as_attachment=True, download_name=attachment.original_name)
+    # inline=1 のときはプレビュー用にブラウザ内表示（画像/PDF）。既定はダウンロード。
+    inline = request.args.get("inline") == "1"
+    return send_file(
+        abs_path,
+        as_attachment=not inline,
+        download_name=attachment.original_name,
+        mimetype=attachment.content_type or None,
+    )
 
 
 @health_check_bp.route("/api/record/<int:record_id>/attachment/<int:attachment_id>", methods=["PATCH"])
@@ -985,7 +1156,10 @@ def api_dashboard():
     query, error = _scoped_query(user_id)
     if error:
         return error
-    records = query.all()
+    all_records = query.all()
+    # 受診非対象者はヒーローエリアの各カウント対象外
+    records = [r for r in all_records if not r.is_exempt]
+    exempt = len(all_records) - len(records)
     status_counts: dict[str, int] = {}
     night_pending = 0
     unassigned = 0
@@ -1008,6 +1182,7 @@ def api_dashboard():
         "recheck_pending": status_counts.get("再検査対象", 0) + status_counts.get("二次案内済", 0),
         "night_pending": night_pending,
         "unassigned": unassigned,
+        "exempt": exempt,
     })
 
 
@@ -1016,7 +1191,7 @@ def api_dashboard():
 def api_years():
     user_id = str(current_user.username)
     query = db.session.query(HealthCheckRecord.target_year).distinct()
-    if not is_admin(user_id):
+    if not is_dstt_admin():
         user_offices = get_user_offices(user_id)
         query = query.filter(HealthCheckRecord.office_code.in_(user_offices or ["__none__"]))
     years = sorted({row[0] for row in query.all()}, reverse=True)
@@ -1033,7 +1208,8 @@ def api_history():
             return jsonify({"error": "アクセス権限がありません"}), 403
         rows = (HealthCheckEditHistory.query.filter_by(record_id=record_id)
                 .order_by(HealthCheckEditHistory.edited_at.desc()).limit(100).all())
-    elif is_admin(str(current_user.username)):
+    elif is_dstt_admin():
+        # 全営業所横断の履歴閲覧は DSTT管理者のみ
         rows = (HealthCheckEditHistory.query
                 .order_by(HealthCheckEditHistory.edited_at.desc()).limit(100).all())
     else:
@@ -1055,6 +1231,7 @@ _EXPORT_COLUMNS = [
     ("manager_name", "管理担当名"),
     ("hire_date", "入社日付"),
     ("retirement_date", "退職日付"),
+    ("is_retired", "退職者"),
     ("reservation_date", "予約日"),
     ("exam_date", "受診日"),
     ("exam_date_2", "受診日②(深夜2回目)"),
@@ -1069,9 +1246,12 @@ _EXPORT_COLUMNS = [
     ("birth_date", "生年月日"),
     ("nasva_reservation_date", "NASVA予約日"),
     ("nasva_exam_date", "NASVA受診日"),
+    ("is_exempt", "受診非対象"),
+    ("is_kintone", "kintone"),
     ("status", "受診ステータス"),
     ("remarks", "備考"),
 ]
+_EXPORT_BOOL_KEYS = {"is_night_worker", "needs_recheck", "is_retired", "is_exempt", "is_kintone"}
 _RECORD_TYPE_LABEL = {"linked": "名簿連携", "pre_hire": "入社前", "internal": "内勤者"}
 
 
@@ -1097,8 +1277,10 @@ def api_export():
         for key, _ in _EXPORT_COLUMNS:
             if key == "record_type":
                 row.append(_RECORD_TYPE_LABEL.get(record.record_type, record.record_type))
-            elif key in ("is_night_worker", "needs_recheck"):
+            elif key in _EXPORT_BOOL_KEYS:
                 row.append("○" if data.get(key) else "")
+            elif key == "recheck_items":
+                row.append(record.recheck_items_text())
             else:
                 row.append(data.get(key) if data.get(key) is not None else "")
         writer.writerow(row)
@@ -1118,7 +1300,8 @@ def api_export():
 def api_settings():
     user_id = str(current_user.username)
     if request.method == "POST":
-        if not is_admin(user_id):
+        # ツール全体の設定変更は DSTT管理者のみ
+        if not is_dstt_admin():
             return jsonify({"error": "管理者権限が必要です"}), 403
         payload = request.json or {}
         settings = load_settings()
@@ -1164,19 +1347,18 @@ def api_integration():
 @health_check_bp.route("/api/admin/permissions")
 @login_required
 def api_admin_permissions():
-    user_id = str(current_user.username)
-    if not is_admin(user_id):
-        return jsonify({"error": "管理者権限が必要です"}), 403
+    """健診PLUS管理者の一覧。営業所スコープはDSTTのアクセス権に同期するため、
+    ここでは管理者(admins)の指定のみを扱う。DSTT管理者のみ閲覧・変更できる。"""
+    if not is_dstt_admin():
+        return jsonify({"error": "DSTT管理者権限が必要です"}), 403
     permissions = load_permissions()
-    offices = {o.office_code: o.office_name for o in Office.query.all()}
-    all_users = set(permissions.get("user_offices", {}).keys()) | set(permissions.get("admins", []))
     result = []
-    for uid in sorted(all_users):
+    for uid in sorted(set(permissions.get("admins", []))):
+        user = User.query.filter_by(username=uid).first()
         result.append({
             "user_id": uid,
-            "is_admin": uid in permissions.get("admins", []),
-            "offices": [{"code": c, "name": offices.get(c, c)}
-                        for c in permissions.get("user_offices", {}).get(uid, [])],
+            "name": (user.name if user and user.name else uid),
+            "offices": sorted(get_user_offices(uid)),
         })
     return jsonify({"users": result})
 
@@ -1184,26 +1366,19 @@ def api_admin_permissions():
 @health_check_bp.route("/api/admin/grant", methods=["POST"])
 @login_required
 def api_admin_grant():
-    user_id = str(current_user.username)
-    if not is_admin(user_id):
-        return jsonify({"error": "管理者権限が必要です"}), 403
+    """ユーザーを健診PLUS管理者に指定する（DSTT管理者のみ）。
+    営業所アクセスはDSTTのアクセス権に同期するため、ここでは付与しない。"""
+    if not is_dstt_admin():
+        return jsonify({"error": "DSTT管理者権限が必要です"}), 403
     payload = request.json or {}
     target = (payload.get("user_id") or "").strip()
     if not target:
         return jsonify({"error": "ユーザーIDが必要です"}), 400
-    grant_type = payload.get("grant_type", "office")
+    if not User.query.filter_by(username=target).first():
+        return jsonify({"error": "指定のユーザーが存在しません"}), 400
     permissions = load_permissions()
-    if grant_type == "admin":
-        if target not in permissions.setdefault("admins", []):
-            permissions["admins"].append(target)
-    else:
-        office_code = (payload.get("office_code") or "").strip()
-        if not office_code:
-            return jsonify({"error": "営業所コードが必要です"}), 400
-        offices = permissions.setdefault("user_offices", {})
-        offices.setdefault(target, [])
-        if office_code not in offices[target]:
-            offices[target].append(office_code)
+    if target not in permissions.setdefault("admins", []):
+        permissions["admins"].append(target)
     save_permissions(permissions)
     return jsonify({"success": True})
 
@@ -1211,22 +1386,101 @@ def api_admin_grant():
 @health_check_bp.route("/api/admin/revoke", methods=["POST"])
 @login_required
 def api_admin_revoke():
-    user_id = str(current_user.username)
-    if not is_admin(user_id):
-        return jsonify({"error": "管理者権限が必要です"}), 403
+    """健診PLUS管理者の指定を解除する（DSTT管理者のみ）。"""
+    if not is_dstt_admin():
+        return jsonify({"error": "DSTT管理者権限が必要です"}), 403
     payload = request.json or {}
     target = (payload.get("user_id") or "").strip()
-    revoke_type = payload.get("revoke_type", "office")
     permissions = load_permissions()
-    if revoke_type == "admin":
-        if target in permissions.get("admins", []):
-            permissions["admins"].remove(target)
-    else:
-        office_code = (payload.get("office_code") or "").strip()
-        offices = permissions.get("user_offices", {})
-        if target in offices and office_code in offices[target]:
-            offices[target].remove(office_code)
-            if not offices[target]:
-                del offices[target]
+    if target in permissions.get("admins", []):
+        permissions["admins"].remove(target)
     save_permissions(permissions)
     return jsonify({"success": True})
+
+
+# ============================================================
+# 健康診断担当（営業所ごとの既定通知先）
+# ============================================================
+
+def _officer_user_label(username: str) -> str:
+    user = User.query.filter_by(username=username).first()
+    return (user.name if user and user.name else username)
+
+
+@health_check_bp.route("/api/office_officers")
+@login_required
+def api_office_officers():
+    """営業所の健康診断担当（既定の通知先）を返す。レコード編集の宛先表示に使う。"""
+    user_id = str(current_user.username)
+    office = request.args.get("office", "").strip()
+    if office and not has_office_access(user_id, office):
+        return jsonify({"officers": []})
+    officers = get_office_health_officers(office)
+    return jsonify({"officers": [
+        {"username": u, "name": _officer_user_label(u)} for u in officers
+    ]})
+
+
+@health_check_bp.route("/api/admin/health_officers", methods=["GET", "POST"])
+@login_required
+def api_admin_health_officers():
+    """営業所ごとの健康診断担当の取得・設定。
+    DSTT管理者は全営業所、健診PLUS管理者は自分の営業所のみ。"""
+    user_id = str(current_user.username)
+    if not is_health_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    settings = load_settings()
+    officers_map = settings.get("health_officers")
+    if not isinstance(officers_map, dict):
+        officers_map = {}
+
+    if request.method == "POST":
+        payload = request.json or {}
+        office_code = (payload.get("office_code") or "").strip()
+        if not office_code:
+            return jsonify({"error": "営業所コードが必要です"}), 400
+        # 自分が管理できる営業所か（DSTT管理者は全営業所、健診PLUS管理者は自営業所のみ）
+        if not can_admin_office(user_id, office_code):
+            return jsonify({"error": "この営業所を管理する権限がありません"}), 403
+        raw_users = payload.get("users")
+        if not isinstance(raw_users, list):
+            return jsonify({"error": "担当者の指定が不正です"}), 400
+        usernames: list[str] = []
+        for entry in raw_users:
+            u = str(entry).strip()
+            if u and u not in usernames:
+                usernames.append(u)
+        valid = {u.username for u in User.query.filter(User.username.in_(usernames)).all()} if usernames else set()
+        filtered = [u for u in usernames if u in valid]
+        if filtered:
+            officers_map[office_code] = filtered
+        else:
+            officers_map.pop(office_code, None)
+        settings["health_officers"] = officers_map
+        save_settings(settings)
+        # 当該営業所のレコードは既定宛先が変わるため、リマインドを再同期する
+        try:
+            records = HealthCheckRecord.query.filter(
+                HealthCheckRecord.office_code == office_code
+            ).all()
+            for record in records:
+                ensure_health_check_reminders(record, global_lead_days=get_global_lead_days(), commit=False)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return jsonify({"success": True, "office_code": office_code,
+                        "officers": [{"username": u, "name": _officer_user_label(u)} for u in filtered]})
+
+    # 自分が管理できる営業所のみ返す（DSTT管理者は全営業所）
+    result = []
+    for o in _office_options():
+        if not can_admin_office(user_id, o["code"]):
+            continue
+        result.append({
+            "code": o["code"],
+            "name": o["name"],
+            "officers": [{"username": u, "name": _officer_user_label(u)}
+                         for u in get_office_health_officers(o["code"])],
+        })
+    return jsonify({"offices": result})

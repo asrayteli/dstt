@@ -19,6 +19,7 @@ from app.models import (
     AccessBranch,
     AccessOffice,
     AccessDepartment,
+    UserAccessibleOffice,
     HealthCheckRecord,
     ToBellTask,
     ToBellUserSettings,
@@ -60,6 +61,11 @@ def _build(tmp_path, *, admin=True):
     module._is_dstt_admin = lambda *a, **k: admin
     module.get_global_lead_days = lambda: 3
     module.current_user = SimpleNamespace(is_authenticated=True, username="tester01", name="検査太郎")
+    # ToBellフックは本物の app.tools.health_check.get_office_health_officers を呼ぶため、
+    # 同じテスト用データ領域を参照するよう本物モジュール側も合わせて差し替える。
+    import app.tools.health_check as real_hc
+    real_hc.get_data_path = lambda: str(data_dir)
+    real_hc.get_uploads_path = lambda: str(data_dir / "uploads")
     return module, app
 
 
@@ -490,6 +496,33 @@ def test_attachment_title_set_and_rename(tmp_path):
     assert any(a["id"] == aid for a in rec["attachments"])
 
 
+def test_attachment_inline_preview_disposition(tmp_path):
+    """?inline=1 はプレビュー用にインライン配信、既定はダウンロード（attachment）。"""
+    import io
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    rid = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "internal",
+        "employee_name": "添付子", "office_code": "100"}).get_json()["record"]["id"]
+    up = client.post(
+        f"/tools/health_check/api/record/{rid}/attachment",
+        data={"file": (io.BytesIO(b"%PDF-1.4 test"), "result.pdf"), "category": "health"},
+        content_type="multipart/form-data",
+    )
+    aid = up.get_json()["attachment"]["id"]
+
+    # 既定はダウンロード（attachment）
+    dl = client.get(f"/tools/health_check/api/record/{rid}/attachment/{aid}")
+    assert dl.status_code == 200
+    assert "attachment" in dl.headers.get("Content-Disposition", "")
+
+    # inline=1 はインライン配信（プレビュー用）
+    pv = client.get(f"/tools/health_check/api/record/{rid}/attachment/{aid}?inline=1")
+    assert pv.status_code == 200
+    assert "attachment" not in pv.headers.get("Content-Disposition", "inline")
+
+
 def test_manual_record_saves_employee_type_and_birth_date(tmp_path):
     """手動モードでは社員区分（営業社員契約）と生年月日を入力・保存できる。"""
     module, app = _build(tmp_path)
@@ -666,3 +699,338 @@ def test_integration_api_saves_notify_kinds(tmp_path):
     assert got2["enabled"] is True
     assert got2["kinds"]["reservation"] is False
     assert got2["kinds"]["secondary_exam"] is True  # 指定しない種別はONのまま
+
+
+def test_recheck_items_structured_storage(tmp_path):
+    """再検査項目は [{name, value}] の構造で保存・取得でき、CSVには整形して出る。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    res = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "internal",
+        "employee_name": "再検太郎", "office_code": "100"})
+    rid = res.get_json()["record"]["id"]
+
+    client.put(f"/tools/health_check/api/record/{rid}", json={
+        "needs_recheck": True,
+        "recheck_items": [
+            {"name": "血圧", "value": "要再検査"},
+            {"name": "肝機能", "value": ""},
+            {"name": "", "value": ""},  # 空項目は捨てられる
+        ],
+    })
+    rec = client.get(f"/tools/health_check/api/record/{rid}").get_json()
+    assert rec["recheck_items_list"] == [
+        {"name": "血圧", "value": "要再検査"},
+        {"name": "肝機能", "value": ""},
+    ]
+
+    # CSVには「項目：内容 / 項目」の形で整形される
+    csv_body = client.get("/tools/health_check/api/export?year=2026").data.decode("utf-8-sig")
+    assert "血圧：要再検査 / 肝機能" in csv_body
+
+
+def test_recheck_items_legacy_plain_text_compat(tmp_path):
+    """旧仕様のプレーンテキストの再検査項目も1項目として読める。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    res = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "internal",
+        "employee_name": "旧子", "office_code": "100"})
+    rid = res.get_json()["record"]["id"]
+    with app.app_context():
+        rec = db.session.get(HealthCheckRecord, rid)
+        rec.recheck_items = "尿検査の再検査"  # 旧プレーンテキスト
+        db.session.commit()
+    got = client.get(f"/tools/health_check/api/record/{rid}").get_json()
+    assert got["recheck_items_list"] == [{"name": "尿検査の再検査", "value": ""}]
+
+
+def test_retired_hidden_by_default(tmp_path):
+    """退職者フラグのあるレコードは既定で非表示、include_retired=true で表示。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100"]})
+    recs = client.get("/tools/health_check/api/records?year=2026").get_json()["records"]
+    rid = recs[0]["id"]
+    with app.app_context():
+        rec = db.session.get(HealthCheckRecord, rid)
+        rec.is_retired = True
+        db.session.commit()
+
+    default = client.get("/tools/health_check/api/records?year=2026").get_json()
+    assert default["count"] == 1  # 退職者は隠れる
+    assert all(not r["is_retired"] for r in default["records"])
+
+    with_retired = client.get("/tools/health_check/api/records?year=2026&include_retired=true").get_json()
+    assert with_retired["count"] == 2
+
+
+def test_retired_synced_from_employee(tmp_path):
+    """名簿PLUSの退職者フラグ(is_retired)が健診レコードへ同期される。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    with app.app_context():
+        emp = Employee.query.filter_by(employee_number="E001").first()
+        emp.is_retired = True
+        db.session.commit()
+    client = app.test_client()
+    rec = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E001"}).get_json()["record"]
+    assert rec["is_retired"] is True
+
+
+def test_exempt_excluded_from_dashboard_counts(tmp_path):
+    """受診非対象者はヒーローエリアの各カウントから除外される。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100"]})
+    recs = client.get("/tools/health_check/api/records?year=2026").get_json()["records"]
+    client.put(f"/tools/health_check/api/record/{recs[0]['id']}", json={"is_exempt": True})
+
+    dash = client.get("/tools/health_check/api/dashboard?year=2026").get_json()
+    assert dash["total"] == 1   # 2名のうち1名は非対象で除外
+    assert dash["exempt"] == 1
+    # 非対象者も一覧には表示される
+    listing = client.get("/tools/health_check/api/records?year=2026").get_json()
+    assert listing["count"] == 2
+
+
+def test_kintone_flag_roundtrip(tmp_path):
+    """kintoneフラグをレコードごとに設定・取得できる。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    res = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "internal",
+        "employee_name": "キン子", "office_code": "100", "is_kintone": True})
+    rid = res.get_json()["record"]["id"]
+    assert res.get_json()["record"]["is_kintone"] is True
+    client.put(f"/tools/health_check/api/record/{rid}", json={"is_kintone": False})
+    assert client.get(f"/tools/health_check/api/record/{rid}").get_json()["is_kintone"] is False
+
+
+def test_health_officer_is_default_notify_recipient(tmp_path):
+    """営業所の健康診断担当も既定の通知先になり、オプトインしていれば起票される。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    with app.app_context():
+        # 健康診断担当 hofficer と、管理担当 m001 の双方がオプトイン
+        db.session.add(User(username="hofficer", password_hash="x", name="健診担当子"))
+        db.session.add(ToBellUserSettings(username="m001", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.add(ToBellUserSettings(username="hofficer", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.commit()
+
+    # 営業所100の健康診断担当として hofficer を設定
+    res = client.post("/tools/health_check/api/admin/health_officers",
+                      json={"office_code": "100", "users": ["hofficer"]})
+    assert res.status_code == 200
+
+    rid = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E001"}).get_json()["record"]["id"]
+    today = date.today().isoformat()
+    client.put(f"/tools/health_check/api/record/{rid}", json={
+        "needs_recheck": True, "secondary_recommended_date": today})
+
+    with app.app_context():
+        tasks = ToBellTask.query.filter_by(source_tool="health_check", source_ref_type="secondary_exam").all()
+        assignees = {t.assigned_to for t in tasks}
+        assert assignees == {"m001", "hofficer"}  # 管理担当＋健康診断担当の二人に届く
+
+
+def test_extra_notify_user_receives_reminder(tmp_path):
+    """レコード個別の追加通知先も、オプトインしていれば通知される。"""
+    module, app = _build(tmp_path)
+    _seed_basic(app)
+    client = app.test_client()
+    with app.app_context():
+        db.session.add(User(username="extra01", password_hash="x", name="追加宛先子"))
+        db.session.add(ToBellUserSettings(username="m001", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.add(ToBellUserSettings(username="extra01", integrations={"health_check.linkage": True}, preferences={}))
+        db.session.commit()
+
+    rid = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E001"}).get_json()["record"]["id"]
+    today = date.today().isoformat()
+    client.put(f"/tools/health_check/api/record/{rid}", json={
+        "needs_recheck": True, "secondary_recommended_date": today,
+        "extra_notify_users": ["extra01"]})
+
+    with app.app_context():
+        tasks = ToBellTask.query.filter_by(source_tool="health_check", source_ref_type="secondary_exam").all()
+        assert {t.assigned_to for t in tasks} == {"m001", "extra01"}
+
+    # 追加宛先を外すと、その人のリマインドはクローズされる
+    client.put(f"/tools/health_check/api/record/{rid}", json={"extra_notify_users": []})
+    with app.app_context():
+        active = ToBellTask.query.filter_by(
+            source_tool="health_check", source_ref_type="secondary_exam", status="todo").all()
+        assert {t.assigned_to for t in active} == {"m001"}
+
+
+def _setup_two_offices(app):
+    """営業所100/200 と DSTTアクセス権(AccessOffice)を用意し、社員を1名ずつ登録する。"""
+    with app.app_context():
+        db.session.add(Office(office_code="100", office_name="本社", created_by="seed"))
+        db.session.add(Office(office_code="200", office_name="第二", created_by="seed"))
+        branch = AccessBranch(name="支店", code="B1")
+        db.session.add(branch)
+        db.session.flush()
+        off100 = AccessOffice(branch_id=branch.id, name="本社", code="100")
+        off200 = AccessOffice(branch_id=branch.id, name="第二", code="200")
+        db.session.add_all([off100, off200])
+        db.session.flush()
+        db.session.add(Employee(employee_number="E1", office_code="100", office_name="本社",
+                                employee_name="社員100", company_name="大新東"))
+        db.session.add(Employee(employee_number="E2", office_code="200", office_name="第二",
+                                employee_name="社員200", company_name="大新東"))
+        u1 = User(username="u1", password_hash="x", name="一般太郎", office_id=off100.id)
+        db.session.add(u1)
+        db.session.commit()
+        return u1.id, off100.id
+
+
+def _as_user(module, *, username, uid, office_id, admin=False):
+    module._is_dstt_admin = lambda *a, **k: admin
+    module.current_user = SimpleNamespace(
+        is_authenticated=True, username=username, name=username,
+        id=uid, office_id=office_id, branch_id=None, department_id=None, is_admin=admin,
+    )
+
+
+def test_access_office_without_records_is_available_for_manual_create(tmp_path):
+    module, app = _build(tmp_path, admin=False)
+    with app.app_context():
+        branch = AccessBranch(name="Branch", code="B300")
+        db.session.add(branch)
+        db.session.flush()
+        office = AccessOffice(branch_id=branch.id, name="Empty Office", code="300")
+        db.session.add(office)
+        db.session.flush()
+        user = User(username="empty-user", password_hash="x", name="Empty User", office_id=office.id)
+        db.session.add(user)
+        db.session.commit()
+        uid = user.id
+        office_id = office.id
+
+    _as_user(module, username="empty-user", uid=uid, office_id=office_id, admin=False)
+    client = app.test_client()
+
+    page = client.get("/tools/health_check/")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert '"code": "300"' in html
+    assert "Empty Office" in html
+
+    dashboard = client.get("/tools/health_check/api/dashboard?year=2026")
+    assert dashboard.status_code == 200
+    assert dashboard.get_json()["total"] == 0
+    listing = client.get("/tools/health_check/api/records?year=2026")
+    assert listing.status_code == 200
+    assert listing.get_json()["count"] == 0
+
+    created = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026,
+        "record_type": "pre_hire",
+        "employee_name": "Pre Hire",
+        "office_code": "300",
+    })
+    assert created.status_code == 200
+    assert created.get_json()["record"]["office_code"] == "300"
+
+
+def test_multiple_access_offices_render_hero_scope_switcher(tmp_path):
+    module, app = _build(tmp_path, admin=False)
+    uid, off100_id = _setup_two_offices(app)
+    with app.app_context():
+        off200_id = AccessOffice.query.filter_by(code="200").first().id
+        db.session.add(UserAccessibleOffice(user_id=uid, office_id=off200_id))
+        db.session.commit()
+
+    _as_user(module, username="u1", uid=uid, office_id=off100_id, admin=False)
+    client = app.test_client()
+
+    page = client.get("/tools/health_check/")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert 'id="hero-office-button"' in html
+    assert 'id="office-scope-modal"' in html
+    assert "openOfficeScopeModal" in html
+    assert '"code": "100"' in html
+    assert '"code": "200"' in html
+
+
+def test_office_scope_synced_with_dstt_access(tmp_path):
+    """非管理者は DSTT で付与された営業所のレコードのみ閲覧・作成でき、他営業所は403。"""
+    module, app = _build(tmp_path, admin=False)
+    uid, off100_id = _setup_two_offices(app)
+    _as_user(module, username="u1", uid=uid, office_id=off100_id, admin=False)
+    client = app.test_client()
+
+    # 自分の営業所(100)の社員はレコード作成可
+    r100 = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E1"})
+    assert r100.status_code == 200
+    # 他営業所(200)の社員は作成不可（403）
+    r200 = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E2"})
+    assert r200.status_code == 403
+
+    listing = client.get("/tools/health_check/api/records?year=2026").get_json()
+    assert {x["office_code"] for x in listing["records"]} == {"100"}
+
+
+def test_health_admin_scoped_to_own_office(tmp_path):
+    """健診PLUS管理者は『自分の営業所』のみ管理でき、他営業所にはアクセスできない。"""
+    module, app = _build(tmp_path, admin=False)
+    uid, off100_id = _setup_two_offices(app)
+    _as_user(module, username="u1", uid=uid, office_id=off100_id, admin=False)
+    # u1 を健診PLUS管理者に指定
+    module.save_permissions({"admins": ["u1"]})
+    client = app.test_client()
+
+    # 健康診断担当の管理画面は自分の営業所(100)のみ
+    officers = client.get("/tools/health_check/api/admin/health_officers").get_json()
+    assert {o["code"] for o in officers["offices"]} == {"100"}
+
+    # 自営業所(100)の健康診断担当は設定できる
+    ok = client.post("/tools/health_check/api/admin/health_officers",
+                     json={"office_code": "100", "users": ["u1"]})
+    assert ok.status_code == 200
+    # 他営業所(200)の健康診断担当は設定できない（403）
+    ng = client.post("/tools/health_check/api/admin/health_officers",
+                     json={"office_code": "200", "users": ["u1"]})
+    assert ng.status_code == 403
+
+    # 健診PLUS管理者でも他営業所(200)のレコードにはアクセスできない
+    bad = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026, "record_type": "linked", "employee_number": "E2"})
+    assert bad.status_code == 403
+
+    # 健診PLUS管理者の管理（指定/解除）はDSTT管理者のみ → u1は不可
+    assert client.get("/tools/health_check/api/admin/permissions").status_code == 403
+    assert client.post("/tools/health_check/api/admin/grant", json={"user_id": "x"}).status_code == 403
+
+
+def test_dstt_admin_full_access_all_offices(tmp_path):
+    """DSTT管理者は全営業所を閲覧・編集でき、管理者指定もできる。"""
+    module, app = _build(tmp_path, admin=True)
+    _setup_two_offices(app)
+    client = app.test_client()
+    client.post("/tools/health_check/api/bulk_create", json={"target_year": 2026, "offices": ["100", "200"]})
+    listing = client.get("/tools/health_check/api/records?year=2026").get_json()
+    assert {x["office_code"] for x in listing["records"]} == {"100", "200"}
+
+    # 全営業所の健康診断担当を管理できる
+    officers = client.get("/tools/health_check/api/admin/health_officers").get_json()
+    assert {o["code"] for o in officers["offices"]} == {"100", "200"}
+
+    # 健診PLUS管理者の指定はDSTT管理者のみ可能
+    g = client.post("/tools/health_check/api/admin/grant", json={"user_id": "u1"})
+    assert g.status_code == 200
+    perms = client.get("/tools/health_check/api/admin/permissions").get_json()
+    assert any(u["user_id"] == "u1" for u in perms["users"])

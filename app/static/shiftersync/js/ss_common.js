@@ -21,7 +21,9 @@ const ShifterSync = (function() {
     N2: '2\u53f7\u8eca',
     N3: '3\u53f7\u8eca',
     N4: '4\u53f7\u8eca',
-    N5: '5\u53f7\u8eca'
+    N5: '5\u53f7\u8eca',
+    SUB: '\u4ee3\u52d9',
+    TRAIN: '\u7814\u4fee'
   };
 
   const leaveOptionMappings = {
@@ -39,6 +41,7 @@ const ShifterSync = (function() {
   const leaveOptionKeys = Object.keys(leaveOptionMappings);
   const vehicleOptionKeys = ['M', 'C', 'O', 'W', 'V'];
   const vehicleNumberOptionKeys = ['N1', 'N2', 'N3', 'N4', 'N5'];
+  const roleOptionKeys = ['SUB', 'TRAIN'];
   const commentRowPrefix = '#comment';
   const employeeNameRowPrefix = '#employee_name';
   const employeeNumberRowPrefix = '#employee_number';
@@ -653,7 +656,8 @@ const ShifterSync = (function() {
     }
     sections.push(
       { title: '\u8eca\u4e21\u30bf\u30a4\u30d7', optionKeys: vehicleOptionKeys },
-      { title: '\u8eca\u756a\u53f7', optionKeys: vehicleNumberOptionKeys }
+      { title: '\u8eca\u756a\u53f7', optionKeys: vehicleNumberOptionKeys },
+      { title: '\u5f79\u5272', optionKeys: roleOptionKeys }
     );
     return sections;
   }
@@ -663,7 +667,7 @@ const ShifterSync = (function() {
     if (mode === 'person') {
       keys.push(...leaveOptionKeys);
     }
-    keys.push(...vehicleOptionKeys, ...vehicleNumberOptionKeys);
+    keys.push(...vehicleOptionKeys, ...vehicleNumberOptionKeys, ...roleOptionKeys);
     return keys;
   }
 

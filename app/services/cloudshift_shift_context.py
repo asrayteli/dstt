@@ -33,9 +33,16 @@ from .cloudshift_shift_engine import (
 )
 
 try:
-    from ..tools.shiftersync_check import LEAVE_OPTION_KEYS
+    from ..tools.shiftersync_check import LEAVE_OPTION_KEYS, ROLE_OPTION_KEYS
 except ImportError:  # pragma: no cover
-    from app.tools.shiftersync_check import LEAVE_OPTION_KEYS  # type: ignore
+    from app.tools.shiftersync_check import (  # type: ignore
+        LEAVE_OPTION_KEYS,
+        ROLE_OPTION_KEYS,
+    )
+
+# 役割オプション → 経験レベル（SUB=代務は一人で勤務した「実績」、TRAIN=研修済み）
+_ROLE_OPTION_SUBSTITUTE = "SUB"
+_ROLE_OPTION_TRAINING = "TRAIN"
 
 # 未確認休暇の既定（confirmed_by が空のとき）。設定で上書き可。
 # 休みが入っている日に自動作成がシフトを入れないことを最優先し hard とする。
@@ -119,6 +126,50 @@ def _derive_active(emp: Any, warnings: list[PlanningWarning], number: str) -> bo
 # ---------------------------------------------------------------------------
 
 
+def _role_option_sites_from_entries(
+    project: dict[str, Any],
+) -> tuple[dict[str, set[str]], dict[str, set[str]], dict[str, str]]:
+    """全月の確定 entry の役割オプションから経験を直接導出する。
+
+    SUB（代務）= 一人で勤務した実績 → 経験現場、TRAIN（研修）= 研修済み現場。
+    戻り値は (経験 {社員番号: {site_row_id}}, 研修済み {同}, 氏名 {社員番号: 氏名})。
+    """
+    experienced: dict[str, set[str]] = {}
+    trained: dict[str, set[str]] = {}
+    names: dict[str, str] = {}
+    site_row_id = _coerce_site_row_id(project.get("site_row_id"))
+    if not site_row_id:
+        return experienced, trained, names
+    try:
+        from app.tools.shiftersync_format import parse_entry_value
+    except Exception:  # pragma: no cover
+        return experienced, trained, names
+
+    for month_data in (project.get("months") or {}).values():
+        if not isinstance(month_data, dict):
+            continue
+        for day_entries in (month_data.get("entries_per_day") or {}).values():
+            if not isinstance(day_entries, list):
+                continue
+            for entry in day_entries:
+                if not isinstance(entry, dict):
+                    continue
+                option, name = parse_entry_value(entry.get("value") or "")
+                key = _str(option).upper()
+                if key not in ROLE_OPTION_KEYS:
+                    continue
+                number = _str(entry.get("employee_number"))
+                if not number:
+                    continue
+                if key == _ROLE_OPTION_TRAINING:
+                    trained.setdefault(number, set()).add(site_row_id)
+                else:
+                    experienced.setdefault(number, set()).add(site_row_id)
+                if _str(name):
+                    names.setdefault(number, _str(name))
+    return experienced, trained, names
+
+
 def _load_employees(numbers: set[str]) -> dict[str, Any]:
     """Employee を employee_number で引けるようにする（DB 不在なら空）。"""
     if not numbers:
@@ -144,6 +195,7 @@ def build_workers(
     dedicated_numbers: set[str] = set()
     names: dict[str, str] = {}
     experienced_sites: dict[str, set[str]] = {}
+    trained_sites: dict[str, set[str]] = {}  # 研修済み（TRAIN オプション由来）
     trainee_sites: dict[str, set[str]] = {}
     option_keys: dict[str, set[str]] = {}
     preferred: dict[str, tuple[int, ...]] = {}
@@ -183,18 +235,33 @@ def build_workers(
         if number and srid:
             trainee_sites.setdefault(number, set()).add(srid)
 
-    # 実績（この現場の経験 + 経験オプション）
+    # 実績（この現場の経験 + 経験オプション）。
+    # 研修（TRAIN）実績は「教わったが一人ではやっていない」ため研修済みへ、
+    # 代務（SUB）実績は一人で勤務した実績として経験へ振り分ける。
     for item in (assist.get("records") or []):
         if not isinstance(item, dict):
             continue
         number = _str(item.get("employee_number"))
         if not number:
             continue
+        shift_key = _str(item.get("shift_key")).upper()
         if site_row_id:
-            experienced_sites.setdefault(number, set()).add(site_row_id)
-        shift_key = _str(item.get("shift_key"))
-        if shift_key:
+            if shift_key == _ROLE_OPTION_TRAINING:
+                trained_sites.setdefault(number, set()).add(site_row_id)
+            else:
+                experienced_sites.setdefault(number, set()).add(site_row_id)
+        if shift_key and shift_key not in ROLE_OPTION_KEYS:
             option_keys.setdefault(number, set()).add(shift_key)
+
+    # シフト entry の 代務/研修 オプションからも直接導出する。
+    # アシストへの自動登録前（保存直後の試算など）でも経験として扱えるようにする。
+    entry_experienced, entry_trained, entry_names = _role_option_sites_from_entries(project)
+    for number, sites in entry_experienced.items():
+        experienced_sites.setdefault(number, set()).update(sites)
+    for number, sites in entry_trained.items():
+        trained_sites.setdefault(number, set()).update(sites)
+    for number, name in entry_names.items():
+        names.setdefault(number, name)
 
     # プロファイル（希望/NG 曜日・氏名）
     for item in (assist.get("profiles") or []):
@@ -211,6 +278,7 @@ def build_workers(
     candidate_numbers = (
         set(dedicated_numbers)
         | set(experienced_sites)
+        | set(trained_sites)
         | set(trainee_sites)
         | set(option_keys)
         | set(preferred)
@@ -278,6 +346,7 @@ def build_workers(
                 office_code=_str(getattr(emp, "office_code", "")),
                 dedicated_site_row_ids=(site_row_id,) if number in dedicated_numbers and site_row_id else (),
                 experienced_site_row_ids=tuple(sorted(experienced_sites.get(number, set()))),
+                trained_site_row_ids=tuple(sorted(trained_sites.get(number, set()))),
                 trainee_site_row_ids=tuple(sorted(trainee_sites.get(number, set()))),
                 experienced_option_keys=tuple(sorted(option_keys.get(number, set()))),
                 preference=pref,

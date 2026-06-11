@@ -21,6 +21,8 @@ from flask import (
     Blueprint,
     abort,
     current_app,
+    g,
+    has_request_context,
     jsonify,
     render_template,
     request,
@@ -31,6 +33,7 @@ from flask_login import current_user, login_required
 from openpyxl import Workbook
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import selectinload, undefer
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
@@ -61,10 +64,12 @@ try:
         serialize_entry_rows,
     )
     from .shiftersync_check import compare_shift_payloads, is_duplicate_by_rules
+    from .shiftersync_format import ROLE_OPTION_MAPPINGS
     from .japan_holidays import JAPAN_HOLIDAYS
 except ImportError:
     from app.tools.shiftersync_format import (  # type: ignore
         LEAVE_OPTION_MAPPINGS,
+        ROLE_OPTION_MAPPINGS,
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         normalize_entries_for_month,
@@ -119,6 +124,17 @@ PERSON_ASSIST_SITE_LABELS = {
     "training": "研修要現場",
 }
 PERSON_ASSIST_AUTO_SOURCE = "person_experience"
+# 役割オプション（代務 SUB / 研修 TRAIN）からの実績自動登録
+ROLE_OPTION_KEYS = set(ROLE_OPTION_MAPPINGS.keys())
+ROLE_OPTION_ASSIST_SOURCE = "role_option_experience"
+ROLE_OPTION_SUBSTITUTE_KEY = "SUB"
+ROLE_OPTION_TRAINING_KEY = "TRAIN"
+# 役割実績は「現場習熟」を表すため曜日・オプションに依存させず固定点+鮮度で評価する。
+# 代務（SUB）= 一人で勤務した実績。通常実績と同格のベース点
+#   （順序: 実績の完全一致 130 > 代務 115 > 実績の曜日一致 65 > 研修 60 > 曜日不一致 35）。
+ASSIST_SUBSTITUTE_RECORD_POINTS = 100
+# 研修（TRAIN）= 教わったが一人ではやっていない状態。代務より一段低い。
+ASSIST_TRAINING_RECORD_POINTS = 45
 PERSON_ASSIST_EXPERIENCE_KIND = "experienced"
 PERSON_ASSIST_TRAINING_KIND = "training"
 PERSON_ASSIST_COLLECTION_KEYS = {
@@ -435,6 +451,22 @@ def _coerce_site_row_id(value: Any) -> int | None:
         return None
 
 
+def _request_scoped_cache(name: str) -> dict | None:
+    """同一リクエスト内で結果を使い回すためのキャッシュ。
+
+    現場マスター（Site/SiteBranch）は CloudShift のリクエスト中に変更されないため、
+    エントリ単位・プロジェクト単位で繰り返される現場リンク解決のDB参照を
+    リクエスト内で1回に抑える。リクエスト外（スクリプト・スレッド）では使わない。
+    """
+    if not has_request_context():
+        return None
+    cache = getattr(g, name, None)
+    if cache is None:
+        cache = {}
+        setattr(g, name, cache)
+    return cache
+
+
 def _load_site_reference(site_row_id: int | None, *, require_active: bool) -> dict[str, Any] | None:
     if not site_row_id:
         return None
@@ -455,6 +487,19 @@ def _load_site_reference(site_row_id: int | None, *, require_active: bool) -> di
 
 def _linked_site_snapshot_payload(site_row_id: Any, site_id: Any, site_name: Any) -> dict[str, Any]:
     normalized_site_row_id = _coerce_site_row_id(site_row_id)
+    cache = _request_scoped_cache("_cloudshift_site_snapshot_cache")
+    cache_key = (normalized_site_row_id, str(site_id or "").strip(), str(site_name or "").strip())
+    if cache is not None and cache_key in cache:
+        return dict(cache[cache_key])
+    payload = _linked_site_snapshot_payload_uncached(normalized_site_row_id, site_id, site_name)
+    if cache is not None:
+        cache[cache_key] = dict(payload)
+    return payload
+
+
+def _linked_site_snapshot_payload_uncached(
+    normalized_site_row_id: int | None, site_id: Any, site_name: Any
+) -> dict[str, Any]:
     snapshot = {
         "site_row_id": normalized_site_row_id,
         "site_id": str(site_id or "").strip(),
@@ -490,6 +535,21 @@ def _linked_site_snapshot_payload(site_row_id: Any, site_id: Any, site_name: Any
 
 
 def _latest_site_link_fields(site_row_id: Any, site_id: Any, site_name: Any) -> dict[str, str]:
+    cache = _request_scoped_cache("_cloudshift_site_link_fields_cache")
+    cache_key = (
+        _coerce_site_row_id(site_row_id),
+        str(site_id or "").strip(),
+        str(site_name or "").strip(),
+    )
+    if cache is not None and cache_key in cache:
+        return dict(cache[cache_key])
+    fields = _latest_site_link_fields_uncached(site_row_id, site_id, site_name)
+    if cache is not None:
+        cache[cache_key] = dict(fields)
+    return fields
+
+
+def _latest_site_link_fields_uncached(site_row_id: Any, site_id: Any, site_name: Any) -> dict[str, str]:
     if _coerce_site_row_id(site_row_id) is None:
         site_id_text = str(site_id or "").strip()
         if site_id_text:
@@ -1599,7 +1659,8 @@ def _pending_substitute_request_entries_for_month(
         return {}
     month_key = _month_key(month_data["year"], month_data["month"])
     result = _empty_entries_for_month(month_data["year"], month_data["month"])
-    for substitute_project in _iter_stored_projects():
+    # 対象月の要代務シフト帳だけを軽量ロードする（全プロジェクト・全月の展開を避ける）。
+    for substitute_project in _iter_project_summaries_for_month(month_key, mode=SUBSTITUTE_MODE):
         if str(substitute_project.get("mode") or "") != SUBSTITUTE_MODE:
             continue
         substitute_month = (substitute_project.get("months") or {}).get(month_key)
@@ -1688,7 +1749,19 @@ _PROJECT_STORAGE_KEYS = {
 }
 
 
-def _db_project_to_dict(row: CloudShiftProject) -> dict[str, Any]:
+# 月データを持たない軽量ロードであることを示すマーカー。
+# このマーカーが付いた dict を保存すると月データが消えるため、保存処理で拒否する。
+_PARTIAL_MONTHS_KEY = "_partial_months"
+
+# フルロード時は months と遅延カラムの revision_snapshots をまとめて読み、
+# 行ごとの遅延クエリ（N+1）を避ける。
+_FULL_PROJECT_LOAD_OPTIONS = (
+    selectinload(CloudShiftProject.months).undefer(CloudShiftMonth.revision_snapshots),
+)
+
+
+def _db_project_base_dict(row: CloudShiftProject) -> dict[str, Any]:
+    """プロジェクト行から月データ以外を dict 化する（months は空で初期化）。"""
     project = {
         "id": row.id,
         "owner_user_id": row.owner_user_id,
@@ -1711,31 +1784,52 @@ def _db_project_to_dict(row: CloudShiftProject) -> dict[str, Any]:
     for key, value in _json_dict(row.extra_data).items():
         if key not in project:
             project[key] = value
+    return project
+
+
+def _db_month_row_to_dict(month_row: CloudShiftMonth, *, include_revision_snapshots: bool = True) -> dict[str, Any]:
+    month_data = {
+        "year": month_row.year,
+        "month": month_row.month,
+        "capacity_enabled": bool(month_row.capacity_enabled),
+        "required_capacity": int(month_row.required_capacity or 0),
+        "entries_per_day": _json_dict(month_row.entries_per_day),
+        "draft_entries_per_day": _json_dict(month_row.draft_entries_per_day),
+        "revision": int(month_row.revision or 1),
+        "created_at": month_row.created_at,
+        "updated_at": month_row.updated_at,
+    }
+    if include_revision_snapshots:
+        month_data["revision_snapshots"] = _json_dict(month_row.revision_snapshots)
+    return month_data
+
+
+def _db_project_to_dict(row: CloudShiftProject) -> dict[str, Any]:
+    project = _db_project_base_dict(row)
     for month_row in row.months:
         month_key = _month_key(month_row.year, month_row.month)
-        project["months"][month_key] = {
-            "year": month_row.year,
-            "month": month_row.month,
-            "capacity_enabled": bool(month_row.capacity_enabled),
-            "required_capacity": int(month_row.required_capacity or 0),
-            "entries_per_day": _json_dict(month_row.entries_per_day),
-            "draft_entries_per_day": _json_dict(month_row.draft_entries_per_day),
-            "revision": int(month_row.revision or 1),
-            "created_at": month_row.created_at,
-            "updated_at": month_row.updated_at,
-            "revision_snapshots": _json_dict(month_row.revision_snapshots),
-        }
+        project["months"][month_key] = _db_month_row_to_dict(month_row)
     return project
 
 
 def _db_project_from_id(project_id: str) -> dict[str, Any] | None:
-    row = db.session.get(CloudShiftProject, project_id)
+    row = (
+        CloudShiftProject.query.options(*_FULL_PROJECT_LOAD_OPTIONS)
+        .filter_by(id=project_id)
+        .first()
+    )
     if not row:
         return None
     return _db_project_to_dict(row)
 
 
 def _upsert_project_to_db(project: dict[str, Any]) -> None:
+    if project.get(_PARTIAL_MONTHS_KEY):
+        # 軽量ロード（月データなし/対象月のみ）の dict を保存すると月データが
+        # 消えてしまうため、ここで確実に拒否する。
+        raise RuntimeError(
+            "CloudShift: 軽量ロードされたプロジェクトは保存できません。_load_project で完全ロードしてください。"
+        )
     row = db.session.get(CloudShiftProject, project["id"])
     if row is None:
         row = CloudShiftProject(id=project["id"])
@@ -1757,10 +1851,9 @@ def _upsert_project_to_db(project: dict[str, Any]) -> None:
     row.created_at = str(project.get("created_at") or _utcnow_iso())
     row.updated_at = str(project.get("updated_at") or _utcnow_iso())
 
-    for month_row in list(row.months):
-        db.session.delete(month_row)
-    db.session.flush()
-
+    # 全月の削除→再挿入ではなく、変更のあった月だけを更新する
+    # （1ヶ月の保存で全月の行を書き直さない）。
+    desired_months: dict[tuple[int, int], dict[str, Any]] = {}
     for month_key, month_data in _json_dict(project.get("months")).items():
         if not isinstance(month_data, dict):
             continue
@@ -1776,21 +1869,34 @@ def _upsert_project_to_db(project: dict[str, Any]) -> None:
             else normalized_entries
         )
         normalized_draft_entries = _normalize_entries(draft_source, year, month)
-        db.session.add(
-            CloudShiftMonth(
-                project_id=project["id"],
-                year=year,
-                month=month,
-                capacity_enabled=bool(month_data.get("capacity_enabled")),
-                required_capacity=int(month_data.get("required_capacity", 0) or 0),
-                entries_per_day=normalized_entries,
-                draft_entries_per_day=normalized_draft_entries,
-                revision=int(month_data.get("revision", 1) or 1),
-                revision_snapshots=_json_dict(month_data.get("revision_snapshots")),
-                created_at=str(month_data.get("created_at") or _utcnow_iso()),
-                updated_at=str(month_data.get("updated_at") or _utcnow_iso()),
-            )
-        )
+        desired_months[(year, month)] = {
+            "capacity_enabled": bool(month_data.get("capacity_enabled")),
+            "required_capacity": int(month_data.get("required_capacity", 0) or 0),
+            "entries_per_day": normalized_entries,
+            "draft_entries_per_day": normalized_draft_entries,
+            "revision": int(month_data.get("revision", 1) or 1),
+            "revision_snapshots": _json_dict(month_data.get("revision_snapshots")),
+            "created_at": str(month_data.get("created_at") or _utcnow_iso()),
+            "updated_at": str(month_data.get("updated_at") or _utcnow_iso()),
+        }
+
+    existing_month_rows = {
+        (month_row.year, month_row.month): month_row
+        for month_row in CloudShiftMonth.query.filter_by(project_id=project["id"])
+        .options(undefer(CloudShiftMonth.revision_snapshots))
+        .all()
+    }
+    for key, month_row in existing_month_rows.items():
+        if key not in desired_months:
+            db.session.delete(month_row)
+    for (year, month), values in desired_months.items():
+        month_row = existing_month_rows.get((year, month))
+        if month_row is None:
+            db.session.add(CloudShiftMonth(project_id=project["id"], year=year, month=month, **values))
+            continue
+        for field, value in values.items():
+            if getattr(month_row, field) != value:
+                setattr(month_row, field, value)
     db.session.commit()
 
 
@@ -2015,7 +2121,11 @@ def _load_history(project_id: str) -> list[dict[str, Any]]:
 def _iter_stored_projects() -> list[dict[str, Any]]:
     projects: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
-    for row in CloudShiftProject.query.order_by(CloudShiftProject.updated_at.desc()).all():
+    for row in (
+        CloudShiftProject.query.options(*_FULL_PROJECT_LOAD_OPTIONS)
+        .order_by(CloudShiftProject.updated_at.desc())
+        .all()
+    ):
         project = _db_project_to_dict(row)
         projects.append(project)
         seen_ids.add(str(project.get("id") or ""))
@@ -2028,6 +2138,99 @@ def _iter_stored_projects() -> list[dict[str, Any]]:
             continue
         projects.append(project)
         seen_ids.add(project_id)
+    return projects
+
+
+def _iter_legacy_json_projects(seen_ids: set[str]) -> list[dict[str, Any]]:
+    """DB 未移行のレガシー JSON プロジェクトを返す（DB に存在する ID は除外）。"""
+    projects: list[dict[str, Any]] = []
+    for path in _shifts_dir().glob("*.json"):
+        project = _load_json(path)
+        if not project:
+            continue
+        project_id = str(project.get("id") or path.stem)
+        if project_id in seen_ids:
+            continue
+        projects.append(project)
+        seen_ids.add(project_id)
+    return projects
+
+
+def _iter_stored_projects_light() -> list[dict[str, Any]]:
+    """一覧表示・トークン走査向けの軽量ロード。
+
+    月データの中身（エントリ・スナップショット）は読み込まず、月キーだけを
+    {month_key: {"year", "month"}} のスタブとして持たせる。_iter_stored_projects()
+    と同じ並び順・同じ重複排除（DB優先）で返す。
+
+    返却される dict は _PARTIAL_MONTHS_KEY マーカー付きで、保存しようとすると
+    _upsert_project_to_db が拒否する（月データの消失防止）。
+    """
+    month_stubs: dict[str, dict[str, dict[str, int]]] = {}
+    for project_id, year, month in db.session.query(
+        CloudShiftMonth.project_id, CloudShiftMonth.year, CloudShiftMonth.month
+    ):
+        month_stubs.setdefault(str(project_id), {})[_month_key(year, month)] = {
+            "year": int(year),
+            "month": int(month),
+        }
+    projects: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for row in CloudShiftProject.query.order_by(CloudShiftProject.updated_at.desc()).all():
+        project = _db_project_base_dict(row)
+        project["months"] = month_stubs.get(str(row.id), {})
+        project[_PARTIAL_MONTHS_KEY] = True
+        projects.append(project)
+        seen_ids.add(str(project.get("id") or ""))
+    projects.extend(_iter_legacy_json_projects(seen_ids))
+    return projects
+
+
+def _iter_project_summaries_for_month(month_key: str, *, mode: str | None = None) -> list[dict[str, Any]]:
+    """同期処理向け: 全プロジェクトを「指定月の月データのみ」付きでロードする。
+
+    シフト間同期は対象月しか参照しないため、全月のエントリとリビジョン
+    スナップショットの読み込み（プロジェクト数×月数の JSON デコード）を省く。
+    months には指定月が存在する場合のみその月が入る（スナップショットは含まない）。
+
+    返却される dict は _PARTIAL_MONTHS_KEY マーカー付きで、保存しようとすると
+    _upsert_project_to_db が拒否する（月データの消失防止）。
+    """
+    year, month = _parse_month_key(month_key)
+    month_rows: dict[str, dict[str, Any]] = {}
+    month_query = CloudShiftMonth.query.filter_by(year=year, month=month)
+    if mode is not None:
+        # モード絞り込み時は、対象外プロジェクトの月行をロードしない。
+        month_query = month_query.join(
+            CloudShiftProject, CloudShiftMonth.project_id == CloudShiftProject.id
+        ).filter(CloudShiftProject.mode == mode)
+    for month_row in month_query.all():
+        month_rows[str(month_row.project_id)] = _db_month_row_to_dict(
+            month_row, include_revision_snapshots=False
+        )
+    query = CloudShiftProject.query.order_by(CloudShiftProject.updated_at.desc())
+    if mode is not None:
+        query = query.filter_by(mode=mode)
+    projects: list[dict[str, Any]] = []
+    db_project_ids: set[str] = set()
+    for row in query.all():
+        project = _db_project_base_dict(row)
+        month_data = month_rows.get(str(row.id))
+        if month_data is not None:
+            project["months"][month_key] = month_data
+        project[_PARTIAL_MONTHS_KEY] = True
+        projects.append(project)
+        db_project_ids.add(str(row.id))
+    # レガシー JSON はモード絞り込みの有無に関わらず「DB に存在する ID」を除外する
+    # （_iter_stored_projects と同じ重複排除規則を保つ）。
+    if mode is None:
+        db_ids = db_project_ids
+    else:
+        db_ids = {str(row_id) for (row_id,) in db.session.query(CloudShiftProject.id)}
+    for project in _iter_legacy_json_projects(db_ids):
+        if mode is not None and str(project.get("mode") or "") != mode:
+            continue
+        projects.append(project)
     return projects
 
 
@@ -2546,7 +2749,11 @@ def _find_project_by_token(token: str, token_type: str) -> dict[str, Any]:
     # 256bit 乱数のため等価検索でも実質的なタイミング攻撃の懸念はない。
     if key in ("view_token", "edit_token"):
         column = getattr(CloudShiftProject, key)
-        row = CloudShiftProject.query.filter(column == token).first()
+        row = (
+            CloudShiftProject.query.options(*_FULL_PROJECT_LOAD_OPTIONS)
+            .filter(column == token)
+            .first()
+        )
         if row is not None:
             return _db_project_to_dict(row)
         # DB に無い場合のみ、レガシー JSON ファイルを走査する（DB は再走査しない）。
@@ -2558,10 +2765,15 @@ def _find_project_by_token(token: str, token_type: str) -> dict[str, Any]:
             if candidate and secrets.compare_digest(candidate, token):
                 return project
         abort(404)
-    # pwa_token は extra_data(JSON) 内のためインデックス検索できず、従来どおり走査する。
-    for project in _iter_stored_projects():
+    # pwa_token は extra_data(JSON) 内のためインデックス検索できず走査が必要だが、
+    # トークン照合に月データは不要なので軽量ロードで走査し、一致した1件だけ
+    # _load_project で完全ロードして返す。
+    for project in _iter_stored_projects_light():
         candidate = str(project.get(key, ""))
         if candidate and secrets.compare_digest(candidate, token):
+            if project.get(_PARTIAL_MONTHS_KEY):
+                return _load_project(str(project.get("id") or ""))
+            # レガシー JSON 由来は元から完全ロード済みなのでそのまま返す。
             return project
     abort(404)
 
@@ -3424,13 +3636,18 @@ def _iter_project_summaries() -> list[dict[str, Any]]:
     return _iter_stored_projects()
 
 
-def _matching_person_project_ids_for_scene_entry(source_project: dict[str, Any], entry: dict[str, Any]) -> list[str]:
+def _matching_person_project_ids_for_scene_entry(
+    source_project: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    summaries: list[dict[str, Any]] | None = None,
+) -> list[str]:
     employee_number = str(entry.get("employee_number") or "").strip()
     employee_name = _entry_employee_name(entry)
     matches: list[str] = []
     fallback_matches: list[str] = []
     normalized_employee_name = _normalized_person_title(employee_name)
-    for project in _iter_project_summaries():
+    for project in summaries if summaries is not None else _iter_project_summaries():
         if project.get("mode") != "person":
             continue
         project_id = str(project.get("id") or "").strip()
@@ -3446,7 +3663,12 @@ def _matching_person_project_ids_for_scene_entry(source_project: dict[str, Any],
     return fallback_matches if len(fallback_matches) == 1 else []
 
 
-def _matching_scene_project_ids_for_person_entry(source_project: dict[str, Any], entry: dict[str, Any]) -> list[str]:
+def _matching_scene_project_ids_for_person_entry(
+    source_project: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    summaries: list[dict[str, Any]] | None = None,
+) -> list[str]:
     option_key, site_name_from_value = _entry_option_and_name(entry)
     if option_key in LEAVE_OPTION_MAPPINGS:
         return []
@@ -3454,7 +3676,7 @@ def _matching_scene_project_ids_for_person_entry(source_project: dict[str, Any],
     if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
         site_link["site_name"] = site_name_from_value
     matches: list[str] = []
-    for project in _iter_project_summaries():
+    for project in summaries if summaries is not None else _iter_project_summaries():
         if project.get("mode") != "scene":
             continue
         if _person_experience_matches_scene_project(site_link, project):
@@ -3587,12 +3809,16 @@ def _build_scene_synced_entry_from_master(
     return _scene_entry_with_siteplus_defaults(target_project, synced)
 
 
-def _matching_master_project_ids_for_person_project(person_project: dict[str, Any]) -> list[str]:
+def _matching_master_project_ids_for_person_project(
+    person_project: dict[str, Any],
+    *,
+    summaries: list[dict[str, Any]] | None = None,
+) -> list[str]:
     """個人シフト帳が登録されている個人型マスターのIDリストを返す。"""
     employee_number = str(person_project.get("employee_number") or "").strip()
     employee_name = _normalized_person_title(str(person_project.get("title") or ""))
     result: list[str] = []
-    for project in _iter_project_summaries():
+    for project in summaries if summaries is not None else _iter_project_summaries():
         if project.get("mode") != "master":
             continue
         if _master_target_type_for_project(project) != "person":
@@ -3625,13 +3851,17 @@ def _person_project_matches_master_scope(master_project: dict[str, Any], person_
     )
 
 
-def _matching_master_project_ids_for_scene_project(scene_project: dict[str, Any]) -> list[str]:
+def _matching_master_project_ids_for_scene_project(
+    scene_project: dict[str, Any],
+    *,
+    summaries: list[dict[str, Any]] | None = None,
+) -> list[str]:
     """現場シフト帳が登録されている現場型マスターのIDリストを返す。"""
     site_row_id = _coerce_site_row_id(scene_project.get("site_row_id"))
     site_id = str(scene_project.get("site_id") or "").strip()
     site_name = _normalized_site_title(str(scene_project.get("site_name") or scene_project.get("title") or ""))
     result: list[str] = []
-    for project in _iter_project_summaries():
+    for project in summaries if summaries is not None else _iter_project_summaries():
         if project.get("mode") != "master":
             continue
         if _master_target_type_for_project(project) != "scene":
@@ -3918,9 +4148,24 @@ def _desired_shift_sync_entries_by_target(
     source_project: dict[str, Any],
     month_key: str,
     month_data: dict[str, Any],
+    *,
+    summaries: list[dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
     desired: dict[str, dict[str, list[dict[str, Any]]]] = {}
     mode = str(source_project.get("mode") or "")
+    # マッチング先候補の一覧はエントリごとではなく1回だけロードする
+    # （エントリ数×プロジェクト数×月数のフルロードを避ける）。
+    if summaries is None:
+        summaries = _iter_project_summaries_for_month(month_key)
+    # master/要代務モードで参照するターゲット帳の完全ロードもエントリ単位ではなく
+    # ターゲット帳ごとに1回へメモ化する（読み取り専用の参照のみ）。
+    loaded_targets: dict[str, dict[str, Any]] = {}
+
+    def _target_project(project_id: str) -> dict[str, Any]:
+        if project_id not in loaded_targets:
+            loaded_targets[project_id] = _load_project(project_id)
+        return loaded_targets[project_id]
+
     entries_per_day = _normalize_entries(month_data.get("entries_per_day"), month_data["year"], month_data["month"])
     for day_key, entries in entries_per_day.items():
         for entry in entries:
@@ -3931,12 +4176,12 @@ def _desired_shift_sync_entries_by_target(
                 if not entry_name:
                     continue
                 if not is_synced:
-                    for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, entry):
+                    for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, entry, summaries=summaries):
                         desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
                             _build_person_synced_entry_from_scene(source_project, entry, month_key=month_key, day_key=day_key)
                         )
                 if not is_from_master:
-                    for target_project_id in _matching_master_project_ids_for_scene_project(source_project):
+                    for target_project_id in _matching_master_project_ids_for_scene_project(source_project, summaries=summaries):
                         desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
                             _build_master_synced_entry_from_scene(source_project, entry, month_key=month_key, day_key=day_key)
                         )
@@ -3947,10 +4192,10 @@ def _desired_shift_sync_entries_by_target(
                 if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
                     continue
                 if not is_synced:
-                    for target_project_id in _matching_scene_project_ids_for_person_entry(source_project, entry):
+                    for target_project_id in _matching_scene_project_ids_for_person_entry(source_project, entry, summaries=summaries):
                         desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(entry)
                 if not is_from_master:
-                    for target_project_id in _matching_master_project_ids_for_person_project(source_project):
+                    for target_project_id in _matching_master_project_ids_for_person_project(source_project, summaries=summaries):
                         desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
                             _build_master_synced_entry_from_person(source_project, entry, month_key=month_key, day_key=day_key)
                         )
@@ -3966,7 +4211,7 @@ def _desired_shift_sync_entries_by_target(
                 site_link = _entry_site_link_fields(entry)
                 if not (site_link.get("site_row_id") or site_link.get("site_id") or site_link.get("site_name")):
                     continue
-                for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, entry):
+                for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, entry, summaries=summaries):
                     desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
                         _build_person_synced_entry_from_master(
                             source_project,
@@ -3975,8 +4220,8 @@ def _desired_shift_sync_entries_by_target(
                             day_key=day_key,
                         )
                     )
-                for target_project_id in _matching_scene_project_ids_for_person_entry(source_project, entry):
-                    target_project = _load_project(target_project_id)
+                for target_project_id in _matching_scene_project_ids_for_person_entry(source_project, entry, summaries=summaries):
+                    target_project = _target_project(target_project_id)
                     desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
                         _build_scene_synced_entry_from_master(
                             source_project,
@@ -4004,7 +4249,7 @@ def _desired_shift_sync_entries_by_target(
                     "value": _format_entry_value(assignment.get("option_key"), assignment.get("site_name")),
                 }
                 if not assignment.get("unassigned_helper"):
-                    for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, person_probe):
+                    for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, person_probe, summaries=summaries):
                         desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
                             _build_person_synced_entry_from_substitute(
                                 source_project,
@@ -4013,8 +4258,8 @@ def _desired_shift_sync_entries_by_target(
                                 day_key=day_key,
                             )
                         )
-                for target_project_id in _matching_scene_project_ids_for_person_entry(source_project, site_probe):
-                    target_project = _load_project(target_project_id)
+                for target_project_id in _matching_scene_project_ids_for_person_entry(source_project, site_probe, summaries=summaries):
+                    target_project = _target_project(target_project_id)
                     desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
                         _build_scene_synced_entry_from_substitute(
                             source_project,
@@ -4116,6 +4361,15 @@ def _replace_shift_synced_entries_in_target_project(
             ],
         },
     )
+    # 他シフト帳の保存に伴う自動反映でも、このシフト帳の ViewPWA 購読者には
+    # 「この月を保存」と同じ条件（実カレンダー当月・正式シフトの実変更）で通知する。
+    _maybe_notify_pwa_month_change(
+        target_project,
+        year,
+        month,
+        current_entries_per_day,
+        target_project["months"][month_key],
+    )
     return True
 
 
@@ -4207,7 +4461,7 @@ def _refresh_master_shift_from_sources(
     source_count = 0
     desired_count = 0
 
-    for source_project in _iter_project_summaries():
+    for source_project in _iter_project_summaries_for_month(month_key):
         if str(source_project.get("id") or "") == str(target_project.get("id") or ""):
             continue
         if str(source_project.get("mode") or "") != expected_source_mode:
@@ -4266,6 +4520,7 @@ def _refresh_master_shift_from_sources(
             ],
         },
     )
+    _maybe_notify_pwa_month_change(target_project, year, month, current_entries, merged)
     return True
 
 
@@ -4273,10 +4528,14 @@ def _resync_shift_month(source_project: dict[str, Any], month_key: str, *, actor
     month_data = (source_project.get("months") or {}).get(month_key)
     if not month_data:
         return
-    desired_by_target = _desired_shift_sync_entries_by_target(source_project, month_key, month_data)
+    # 対象月だけを持つ軽量一覧を1回ロードし、マッチングと既存同期の検出で共有する。
+    summaries = _iter_project_summaries_for_month(month_key)
+    desired_by_target = _desired_shift_sync_entries_by_target(
+        source_project, month_key, month_data, summaries=summaries
+    )
     source_mode = str(source_project.get("mode") or "")
     relevant_target_ids = set(desired_by_target.keys())
-    for project in _iter_project_summaries():
+    for project in summaries:
         project_mode = str(project.get("mode") or "")
         if project_mode == "master" and source_mode == "master":
             continue
@@ -4313,7 +4572,7 @@ def _refresh_shift_sync_for_target_month(target_project: dict[str, Any], month_k
     if target_mode == "master":
         _refresh_master_shift_from_sources(target_project, month_key, actor_name=actor_name)
         return
-    for source_project in _iter_project_summaries():
+    for source_project in _iter_project_summaries_for_month(month_key):
         if str(source_project.get("mode") or "") == target_mode:
             continue
         if month_key not in (source_project.get("months") or {}):
@@ -4346,7 +4605,10 @@ def _refresh_shift_sync_into_target_month(
     target_id = str(target_project.get("id") or "")
     if not target_id:
         return
-    for source_project in _iter_project_summaries():
+    # ソース候補とマッチング先候補は同じ一覧でよいので、1回ロードして使い回す
+    # （マッチングはプロジェクトのメタデータしか参照しないため途中の書き込みの影響を受けない）。
+    summaries = _iter_project_summaries_for_month(month_key)
+    for source_project in summaries:
         if str(source_project.get("mode") or "") == target_mode:
             continue
         if str(source_project.get("id") or "") == target_id:
@@ -4354,7 +4616,9 @@ def _refresh_shift_sync_into_target_month(
         source_month = (source_project.get("months") or {}).get(month_key)
         if not source_month:
             continue
-        desired_by_target = _desired_shift_sync_entries_by_target(source_project, month_key, source_month)
+        desired_by_target = _desired_shift_sync_entries_by_target(
+            source_project, month_key, source_month, summaries=summaries
+        )
         desired_for_target = desired_by_target.get(target_id)
         if not desired_for_target:
             continue
@@ -4379,7 +4643,9 @@ def _refresh_shift_sync_for_target_project(target_project: dict[str, Any], *, ac
 
 def _remove_shift_sync_for_month(source_project: dict[str, Any], month_key: str, *, actor_name: str) -> None:
     source_mode = str(source_project.get("mode") or "")
-    for project in _iter_project_summaries():
+    source_id = str(source_project.get("id") or "")
+    year, month = _parse_month_key(month_key)
+    for project in _iter_project_summaries_for_month(month_key):
         project_mode = str(project.get("mode") or "")
         if project_mode == "master" and source_mode == "master":
             continue
@@ -4387,6 +4653,20 @@ def _remove_shift_sync_for_month(source_project: dict[str, Any], month_key: str,
             continue
         project_id = str(project.get("id") or "").strip()
         if not project_id:
+            continue
+        # このソース由来の同期エントリを持たない帳面は除去対象が無く、
+        # _replace_shift_synced_entries_in_target_project も変更なしで終わるため、
+        # ロック取得と完全ロードを省く。
+        target_month = (project.get("months") or {}).get(month_key)
+        if not target_month:
+            continue
+        target_entries = _normalize_entries(target_month.get("entries_per_day"), year, month)
+        has_sync_from_source = any(
+            _sync_entry_matches_source(entry, source_id, month_key)
+            for entries in target_entries.values()
+            for entry in entries
+        )
+        if not has_sync_from_source:
             continue
         with _project_lock(project_id):
             target_project = _load_project(project_id)
@@ -4656,11 +4936,25 @@ def _assist_record_payload(record: dict[str, Any]) -> dict[str, Any]:
         "role_type": str(record.get("role_type") or "normal"),
         "role_label": ASSIST_ROLE_LABELS.get(str(record.get("role_type") or "normal"), "通常"),
         "notes": str(record.get("notes") or ""),
+        "source_type": str(record.get("source_type") or ""),
+        "source_label": _assist_record_source_label(record),
         "created_at": record.get("created_at"),
         "updated_at": record.get("updated_at"),
         "created_by": record.get("created_by"),
         "updated_by": record.get("updated_by"),
     }
+
+
+def _assist_record_source_label(record: dict[str, Any]) -> str:
+    """実績の登録元ラベル（自動登録のものをUIで区別表示する）。"""
+    source_type = str(record.get("source_type") or "")
+    if source_type == ROLE_OPTION_ASSIST_SOURCE:
+        option_key = str(record.get("shift_key") or "").strip().upper()
+        label = ROLE_OPTION_MAPPINGS.get(option_key, "役割")
+        return f"自動登録（シフトの{label}オプション）"
+    if source_type == PERSON_ASSIST_AUTO_SOURCE:
+        return "自動登録（個人シフトの経験済現場）"
+    return ""
 
 
 def _assist_rule_payload(rule: dict[str, Any]) -> dict[str, Any]:
@@ -5503,6 +5797,134 @@ def _remove_person_experience_scene_record(
     return f"person経験済現場の自動実績を削除: {_assist_record_history_label(existing)}"
 
 
+def _role_option_entries_for_month(
+    month_data: dict[str, Any], year: int, month: int
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """対象月の確定 entry から 代務/研修 オプションの実績を (社員番号, option) 単位で集約する。"""
+    aggregated: dict[tuple[str, str], dict[str, Any]] = {}
+    for day_key, day_entries in (month_data.get("entries_per_day") or {}).items():
+        if not isinstance(day_entries, list):
+            continue
+        try:
+            day = int(day_key)
+        except (TypeError, ValueError):
+            continue
+        for entry in day_entries:
+            if not isinstance(entry, dict):
+                continue
+            option, name = parse_entry_value(str(entry.get("value") or ""))
+            option_key = str(option or "").strip().upper()
+            if option_key not in ROLE_OPTION_KEYS:
+                continue
+            number = str(entry.get("employee_number") or "").strip()
+            if not number:
+                continue
+            date_text = f"{year:04d}-{month:02d}-{day:02d}"
+            bucket = aggregated.setdefault(
+                (number, option_key),
+                {
+                    "employee_number": number,
+                    "shift_key": option_key,
+                    "candidate_name": str(name or "").strip() or number,
+                    "latest_date": date_text,
+                    "count": 0,
+                },
+            )
+            bucket["count"] += 1
+            if date_text >= bucket["latest_date"]:
+                bucket["latest_date"] = date_text
+                if str(name or "").strip():
+                    bucket["candidate_name"] = str(name or "").strip()
+    return aggregated
+
+
+def _sync_role_option_experience_for_month(
+    project: dict[str, Any], year: int, month: int, *, actor_name: str
+) -> list[str]:
+    """scene シフトの 代務/研修 オプション entry をアシスト実績へ自動登録する。
+
+    目的: ユーザーが entry に 代務（SUB）/ 研修（TRAIN）オプションを付けるだけで
+    経験がサーバーへ自動登録され、自動作成（shift-engine）の適格判定・点数に
+    反映されるようにする（手動登録の手間を省く）。
+
+    安全原則:
+    - 集約単位は (社員番号, オプション, 月) で 1 実績。date はその月の最新該当日。
+    - source_type=ROLE_OPTION_ASSIST_SOURCE の自動実績のみ追加・更新・削除する。
+      手動登録や person 連携（person_experience）の実績には一切触れない。
+    - 削除は「対象月の自動実績のうち、entry が無くなったもの」だけ。他の月は触れない。
+    - この関数は project dict を書き換えるだけで保存はしない（呼び出し元の
+      _save_project と同一トランザクションで永続化し、DB 書き込みを増やさない）。
+    """
+    if str(project.get("mode") or "") != "scene":
+        return []
+    month_key = _month_key(year, month)
+    month_data = (project.get("months") or {}).get(month_key)
+    if not isinstance(month_data, dict):
+        return []
+
+    current = _role_option_entries_for_month(month_data, year, month)
+    assist = _ensure_assist(project)
+
+    existing_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in (assist.get("records") or []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("source_type") or "") != ROLE_OPTION_ASSIST_SOURCE:
+            continue
+        if str(item.get("source_month_key") or "") != month_key:
+            continue
+        key = (
+            str(item.get("employee_number") or "").strip(),
+            str(item.get("shift_key") or "").strip().upper(),
+        )
+        existing_by_key.setdefault(key, item)
+
+    changes: list[str] = []
+    for key in sorted(current.keys()):
+        info = current[key]
+        existing = existing_by_key.pop(key, None)
+        label = ROLE_OPTION_MAPPINGS.get(info["shift_key"], info["shift_key"])
+        record = _assist_record_from_payload(
+            assist,
+            {
+                "date": info["latest_date"],
+                "candidate_name": info["candidate_name"],
+                "employee_number": info["employee_number"],
+                "shift_key": info["shift_key"],
+                # 代務は一人で勤務した「実績」（通常実績と同格）。研修も role は
+                # normal とし、点数差は検索側の研修専用スコアで付ける。
+                "role_type": "normal",
+                "notes": f"シフトの{label}オプションから自動登録（{month_key}: {info['count']}回）",
+            },
+            existing=existing,
+            actor_name=actor_name,
+        )
+        record["source_type"] = ROLE_OPTION_ASSIST_SOURCE
+        record["source_month_key"] = month_key
+        record["source_occurrences"] = int(info["count"])
+        if existing:
+            index = assist["records"].index(existing)
+            if assist["records"][index] != record:
+                assist["records"][index] = record
+                changes.append(f"{label}実績を自動更新: {_assist_record_history_label(record)}")
+        else:
+            assist["records"].append(record)
+            changes.append(f"{label}実績を自動登録: {_assist_record_history_label(record)}")
+
+    # entry が消えた分（この月の自動実績のみ）を削除する
+    for key in sorted(existing_by_key.keys()):
+        stale = existing_by_key[key]
+        assist["records"] = [
+            item
+            for item in (assist.get("records") or [])
+            if str(item.get("id") or "") != str(stale.get("id") or "")
+        ]
+        label = ROLE_OPTION_MAPPINGS.get(str(stale.get("shift_key") or "").strip().upper(), "役割")
+        changes.append(f"{label}実績の自動登録を解除: {_assist_record_history_label(stale)}")
+
+    return changes
+
+
 def _sync_person_experience_to_scene_projects(
     source_project: dict[str, Any],
     site: dict[str, Any],
@@ -5959,6 +6381,47 @@ def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str
             candidate_category_totals[record_aptitude_category] = (
                 candidate_category_totals.get(record_aptitude_category, 0) + 1
             )
+        record_role_option = record_shift_key.strip().upper()
+        if record_role_option in ROLE_OPTION_KEYS:
+            # 役割実績（代務/研修）は曜日・オプションに依存しない「現場習熟」として
+            # 固定点 + 鮮度で評価する。代務（一人で勤務した実績）> 研修（教わったのみ）。
+            if days_ago > 365:
+                continue
+            is_substitute = record_role_option == ROLE_OPTION_SUBSTITUTE_KEY
+            base_points = (
+                ASSIST_SUBSTITUTE_RECORD_POINTS if is_substitute
+                else ASSIST_TRAINING_RECORD_POINTS
+            )
+            recency_bonus = _assist_record_recency_bonus(days_ago, "weekday")
+            points = base_points + recency_bonus
+            item = upsert_result(
+                str(record.get("candidate_id") or ""),
+                str(record.get("candidate_name") or ""),
+                str(record.get("employee_number") or ""),
+            )
+            item["score"] += points
+            item["matched_record_count"] += 1
+            if is_substitute:
+                item["reasons"].append(f"{record_date_text} の代務実績（一人で勤務した実績）")
+            else:
+                item["reasons"].append(f"{record_date_text} の研修実績（研修済み・一人での実績はまだ）")
+            item["breakdown"].append(
+                {
+                    "category": "record",
+                    "label": "代務実績" if is_substitute else "研修実績",
+                    "match_scope": "substitute" if is_substitute else "training",
+                    "match_label": "代務" if is_substitute else "研修済み",
+                    "role_type": "normal",
+                    "role_label": "代務" if is_substitute else "研修",
+                    "base_points": base_points,
+                    "recency_bonus": recency_bonus,
+                    "days_ago": days_ago,
+                    "points": points,
+                    "formula": f"{base_points} + {recency_bonus}",
+                    "context": f"{record_date_text} / {record_shift_label}",
+                }
+            )
+            continue
         if weekday_matches:
             match_scope = _assist_match_scope(shift_key, record_shift_key)
         else:
@@ -6124,6 +6587,16 @@ def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str
             "single_record_other_weekday_max": _assist_record_points("dedicated", 0, "other_weekday"),
             "role_scores": ASSIST_ROLE_SCORES,
             "match_scopes": ASSIST_MATCH_SCOPE_LABELS,
+            "substitute_record": {
+                "base_points": ASSIST_SUBSTITUTE_RECORD_POINTS,
+                "formula": f"{ASSIST_SUBSTITUTE_RECORD_POINTS} + 曜日一致と同じ鮮度ボーナス",
+                "note": "代務（SUB）実績。一人で勤務した実績のため通常実績と同格（曜日に依存しない）",
+            },
+            "training_record": {
+                "base_points": ASSIST_TRAINING_RECORD_POINTS,
+                "formula": f"{ASSIST_TRAINING_RECORD_POINTS} + 曜日一致と同じ鮮度ボーナス",
+                "note": "研修（TRAIN）実績。教わったが一人での実績はまだ無い状態（代務より低い）",
+            },
             "priority_bonus": {
                 "formula": "max(0, 40 - ((priority - 1) * 5))",
                 "first_priority": 40,
@@ -6727,7 +7200,8 @@ def api_project_pwa_subscription(project_id: str, subscription_id: int):
 def api_list():
     _ensure_substitute_projects_for_current_user()
     owner_id = _user_id()
-    all_projects = _iter_stored_projects()
+    # 一覧表示に月の中身は不要（月キーのみ使用）なので軽量ロードで済ませる。
+    all_projects = _iter_stored_projects_light()
     # 同一紐づけを所持するオーナー集合を作る（複数オーナー所持の検知に使用）。
     owners_by_link: dict[tuple[str, str], set[str]] = {}
     for project in all_projects:
@@ -6921,6 +7395,22 @@ def api_create():
         if project["mode"] == "scene":
             _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
             _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
+            # CSV 取り込みなどで作成直後から entry がある場合に備え、
+            # 代務/研修オプションの経験自動登録も全月分を実行する
+            role_changes: list[str] = []
+            for created_month_key, created_month in sorted((project.get("months") or {}).items()):
+                if not isinstance(created_month, dict):
+                    continue
+                role_changes.extend(
+                    _sync_role_option_experience_for_month(
+                        project,
+                        int(created_month.get("year") or 0),
+                        int(created_month.get("month") or 0),
+                        actor_name=_user_label(),
+                    )
+                )
+            if role_changes:
+                _save_project(project)
         if project["mode"] != "master":
             _resync_shift_month(project, month_key, actor_name=_user_label())
         # 新規作成は「いま作った帳面へ既存データを取り込む」だけで十分。全プロジェクトを
@@ -7465,8 +7955,16 @@ def _save_month_in_project(
     snapshots[str(int(current_month.get("revision", 1)))] = _snapshot_month_payload(current_month)
     merged["revision_snapshots"] = _trim_revision_snapshots(snapshots)
     project["months"][month_key] = merged
+    # 代務/研修オプションの経験自動登録（同一保存に相乗りし、追加の DB 書き込みはしない）
+    try:
+        assist_changes = _sync_role_option_experience_for_month(
+            project, year, month, actor_name=actor_name
+        )
+    except Exception:  # pragma: no cover - 自動登録の失敗で保存自体は止めない
+        logger.exception("role option experience sync failed (project=%s)", project.get("id"))
+        assist_changes = []
     _save_project(project)
-    if changes or decision_changes:
+    if changes or decision_changes or assist_changes:
         _append_history(
             project["id"],
             {
@@ -7475,7 +7973,7 @@ def _save_month_in_project(
                 "editor_type": actor_type,
                 "action": "month_updated",
                 "month_key": month_key,
-                "changes": (changes + decision_changes)[:100],
+                "changes": (changes + decision_changes + assist_changes)[:100],
             },
         )
     return merged
@@ -7924,6 +8422,8 @@ def api_restore_month_revision(project_id: str, year: int, month: int):
         before_entries = _confirmed_entries_snapshot(project, year, month)
         month_payload = _restore_month_revision_in_project(project, year, month, revision, _user_label(), access_role)
     month_key = _month_key(year, month)
+    # 復元も正式シフトの変更なので、保存時と同様にリンク先シフト帳へ再同期する。
+    _resync_shift_month(project, month_key, actor_name=_user_label())
     _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
@@ -8714,7 +9214,11 @@ def _shift_engine_eligible_count(request_obj, include_trainees: bool) -> int:
     for worker in request_obj.workers:
         if not worker.active:
             continue
-        if site in worker.dedicated_site_row_ids or site in worker.experienced_site_row_ids:
+        if (
+            site in worker.dedicated_site_row_ids
+            or site in worker.experienced_site_row_ids
+            or site in worker.trained_site_row_ids
+        ):
             count += 1
         elif include_trainees and site in worker.trainee_site_row_ids:
             count += 1
