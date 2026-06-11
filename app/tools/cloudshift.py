@@ -8963,6 +8963,327 @@ def api_assist_owner_search(project_id: str):
     return jsonify(_assist_search(project, payload))
 
 
+# ---------------------------------------------------------------------------
+# 自動シフト作成エンジン（shift-engine）API
+# 設計書 docs/cloudshift_shift_engine_design.md の context / plan / apply-draft に対応。
+# ---------------------------------------------------------------------------
+
+
+def _shift_engine_year_month(value_year: Any, value_month: Any) -> tuple[int, int]:
+    try:
+        year = int(value_year)
+        month = int(value_month)
+    except (TypeError, ValueError):
+        raise CloudShiftError("year と month を指定してください", 400)
+    return _validate_year_month(year, month)
+
+
+def _shift_engine_eligible_count(request_obj, include_trainees: bool) -> int:
+    site = request_obj.target_site.site_row_id
+    count = 0
+    for worker in request_obj.workers:
+        if not worker.active:
+            continue
+        if site in worker.dedicated_site_row_ids or site in worker.experienced_site_row_ids:
+            count += 1
+        elif include_trainees and site in worker.trainee_site_row_ids:
+            count += 1
+    return count
+
+
+def _shift_engine_emptiness_factors(settings) -> list[str]:
+    """空欄が増えうる設定を人間向けに列挙する。"""
+    from app.services.cloudshift_shift_engine import default_planning_preferences
+
+    factors: list[str] = []
+    prefs = settings.default_preferences or default_planning_preferences()
+    if prefs.eligibility_baseline == "dedicated_or_experienced":
+        factors.append("最低基準: 専従・経験者のみ（やったことがない人は空欄）")
+    if prefs.min_assignment_score is not None:
+        factors.append(f"スコア下限: {prefs.min_assignment_score} 未満は空欄")
+    for policy in settings.option_experience_policies:
+        if policy.enabled and policy.require_prior_experience:
+            factors.append(f"未経験不可オプション: {policy.option_key}")
+    for opt in settings.advanced_options:
+        if not opt.enabled:
+            continue
+        if opt.key in {"office_filter", "employee_type_filter", "candidate_allowlist", "candidate_blocklist"}:
+            factors.append(f"候補フィルタ: {opt.key}")
+    return factors
+
+
+def _shift_engine_context(project: dict[str, Any], year: int, month: int) -> dict[str, Any]:
+    _ensure_scene_project(project)
+    from app.services import cloudshift_shift_context as cs_ctx
+    from app.services.cloudshift_shift_engine import settings_to_dict
+
+    month_key = _month_key(year, month)
+    month_data = (project.get("months") or {}).get(month_key)
+    if not month_data:
+        raise CloudShiftError("対象の月が存在しません", 404)
+
+    request_obj, settings, warnings = cs_ctx.build_planning_request(project, year, month)
+    demand_source = cs_ctx.build_demand_source(project, year, month)
+    include_trainees = request_obj.preferences.include_trainees
+
+    fixed_count = sum(
+        1 for a in request_obj.existing_assignments if a.lock_policy in ("locked", "manual_locked")
+    )
+
+    calendar_options: list[dict[str, str]] = []
+    try:
+        from app.tools import leave_mgr
+
+        calendar_options = leave_mgr.get_cloudshift_calendar_options(_user_id())
+    except Exception:  # pragma: no cover
+        calendar_options = []
+
+    return {
+        "project_id": project.get("id"),
+        "title": project.get("title"),
+        "mode": project.get("mode"),
+        "year": year,
+        "month": month,
+        "month_key": month_key,
+        "base_revision": int(month_data.get("revision") or 1),
+        "capacity_enabled": bool(month_data.get("capacity_enabled")),
+        "required_capacity": int(month_data.get("required_capacity") or 0),
+        "shift_engine_settings": settings_to_dict(settings),
+        "leave_calendar_options": calendar_options,
+        "demand_source": demand_source,
+        "required_slot_count": sum(s.required_count for s in request_obj.required_slots),
+        "candidate_count": len(request_obj.workers),
+        "eligible_candidate_count": _shift_engine_eligible_count(request_obj, include_trainees),
+        "existing_assignment_count": len(request_obj.existing_assignments),
+        "fixed_assignment_count": fixed_count,
+        "external_assignment_count": len(request_obj.external_assignments),
+        "emptiness_factors": _shift_engine_emptiness_factors(settings),
+        "warnings": [{"code": w.code, "message": w.message} for w in warnings],
+    }
+
+
+def _shift_engine_diff(request_obj, result) -> dict[str, int]:
+    """既存(entries_per_day)と生成結果の差分件数。"""
+    existing_keys = {
+        (a.employee_number, a.date.isoformat(), a.shift_key) for a in request_obj.existing_assignments
+    }
+    result_keys = {
+        (a.employee_number, a.date.isoformat(), a.shift_key) for a in result.assignments
+    }
+    return {
+        "added": len(result_keys - existing_keys),
+        "removed": len(existing_keys - result_keys),
+        "kept": len(existing_keys & result_keys),
+    }
+
+
+def _shift_engine_build_and_plan(project: dict[str, Any], payload: dict[str, Any]):
+    """plan / apply-draft 共通の request 構築 + 生成。"""
+    from app.services import cloudshift_shift_context as cs_ctx
+    from app.services.cloudshift_shift_engine import SolverLimits, plan_shifts
+
+    year, month = _shift_engine_year_month(payload.get("year"), payload.get("month"))
+    overrides = payload.get("preferences") if isinstance(payload.get("preferences"), dict) else {}
+    calendar_ids = [str(c).strip() for c in (payload.get("calendar_ids") or []) if str(c).strip()]
+    target_days = payload.get("target_days") if isinstance(payload.get("target_days"), list) else None
+
+    request_obj, settings, warnings = cs_ctx.build_planning_request(
+        project, year, month, plan_overrides=overrides, calendar_ids=calendar_ids,
+        fill_target_days=target_days,
+        target_required_count=payload.get("target_required_count"),
+    )
+    limits = SolverLimits()
+    result = plan_shifts(request_obj, limits)
+    return year, month, request_obj, settings, warnings, result
+
+
+def _shift_engine_plan(project: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    _ensure_scene_project(project)
+    from app.services.cloudshift_shift_engine import build_day_summaries, result_to_dict
+    from app.services import cloudshift_shift_apply as cs_apply
+
+    year, month, request_obj, settings, warnings, result = _shift_engine_build_and_plan(project, payload)
+
+    draft_preview = cs_apply.build_draft_entries(request_obj, result)
+    perf_warnings: list[dict[str, str]] = []
+    if len(request_obj.workers) > 300 or sum(s.required_count for s in request_obj.required_slots) > 500:
+        perf_warnings.append({
+            "code": "large_input",
+            "message": "候補者または需要が多く、生成に時間がかかる場合があります",
+        })
+
+    return {
+        "result": result_to_dict(result),
+        "request_hash": result.request_hash,
+        "draft_preview": draft_preview,
+        "draft_preview_count": cs_apply.preview_entry_count(draft_preview),
+        "diff": _shift_engine_diff(request_obj, result),
+        "day_summary": build_day_summaries(request_obj, result),
+        "context_warnings": [{"code": w.code, "message": w.message} for w in warnings],
+        "perf_warnings": perf_warnings,
+    }
+
+
+def _shift_engine_reject(project_id: str, month_key: str, action_detail: str, reason: str) -> None:
+    """重大操作の拒否を履歴に残す。"""
+    try:
+        _append_history(
+            project_id,
+            {
+                "timestamp": _utcnow_iso(),
+                "editor_name": _user_label(),
+                "editor_type": _user_id(),
+                "action": "shift_engine_draft_rejected",
+                "month_key": month_key,
+                "changes": [f"{action_detail}: {reason}"],
+            },
+        )
+    except Exception:  # pragma: no cover
+        pass
+
+
+def _shift_engine_apply_draft(project: dict[str, Any], payload: dict[str, Any], access_role: str) -> dict[str, Any]:
+    _ensure_scene_project(project)
+    from app.services import cloudshift_shift_apply as cs_apply
+    from app.services.cloudshift_shift_engine import result_to_dict
+
+    year, month, request_obj, settings, warnings, result = _shift_engine_build_and_plan(project, payload)
+    month_key = _month_key(year, month)
+    month_data = (project.get("months") or {}).get(month_key)
+    if not month_data:
+        raise CloudShiftError("対象の月が存在しません", 404)
+
+    current_revision = int(month_data.get("revision") or 1)
+    base_revision = payload.get("base_revision")
+    try:
+        base_revision = int(base_revision)
+    except (TypeError, ValueError):
+        raise CloudShiftError("base_revision が必要です", 400)
+
+    # revision 競合検出
+    if base_revision != current_revision:
+        _shift_engine_reject(project["id"], month_key, "apply-draft",
+                             f"revision mismatch (base={base_revision}, current={current_revision})")
+        raise CloudShiftError("対象月が他の操作で更新されています。再計算してください", 409)
+
+    # request_hash 不一致（入力・設定が変わった）
+    client_hash = str(payload.get("request_hash") or "")
+    if client_hash and client_hash != result.request_hash:
+        _shift_engine_reject(project["id"], month_key, "apply-draft", "request_hash mismatch")
+        raise CloudShiftError("設定または他現場の状況が変化しています。再計算してください", 409)
+
+    override = bool(payload.get("override"))
+    blocker_count = result.score.blocker_count
+    hard_count = result.score.hard_violation_count
+
+    if blocker_count > 0:
+        _shift_engine_reject(project["id"], month_key, "apply-draft", f"blocker={blocker_count}")
+        raise CloudShiftError("重大な違反(blocker)があるため保存できません", 400)
+
+    if hard_count > 0:
+        if not override:
+            _shift_engine_reject(project["id"], month_key, "apply-draft", f"hard={hard_count} (override 無し)")
+            raise CloudShiftError("Hard 違反があります。保存には override が必要です", 400)
+        if access_role != "owner":
+            _shift_engine_reject(project["id"], month_key, "apply-draft", "override は管理者のみ")
+            raise CloudShiftError("override による保存は管理者のみ可能です", 403)
+
+    # 下書きへ変換して保存
+    draft_payload = cs_apply.build_draft_payload(request_obj, result)
+    saved_month = _save_draft_month_in_project(
+        project, year, month, draft_payload, _user_label(), access_role, _user_id()
+    )
+
+    # 監査ログ
+    _append_history(
+        project["id"],
+        {
+            "timestamp": _utcnow_iso(),
+            "editor_name": _user_label(),
+            "editor_type": access_role,
+            "action": "shift_engine_draft_applied",
+            "month_key": month_key,
+            "changes": [
+                f"自動作成: 充足 {result.score.assigned_count}/{result.score.required_count}、"
+                f"未充足 {result.score.unfilled_count}、変更 {result.score.changed_existing_count}"
+                + ("（override）" if override else "")
+            ],
+            "payload": {
+                "request_hash": result.request_hash,
+                "solver_backend": result.solver_backend,
+                "status": result.status,
+                "assigned_count": result.score.assigned_count,
+                "unfilled_count": result.score.unfilled_count,
+                "blocker_count": blocker_count,
+                "hard_violation_count": hard_count,
+                "warning_count": result.score.warning_count,
+                "override": override,
+                "changed_existing_count": result.score.changed_existing_count,
+            },
+        },
+    )
+
+    return {
+        "success": True,
+        "status": result.status,
+        "request_hash": result.request_hash,
+        "score": result_to_dict(result)["score"],
+        "month": _client_month_payload(saved_month, include_draft=True, project=project),
+    }
+
+
+@cloudshift_bp.route("/api/project/<project_id>/shift-engine/context", methods=["GET"])
+@login_required
+def api_shift_engine_context(project_id: str):
+    project, _access_role = _project_for_current_user_or_404(project_id)
+    year, month = _shift_engine_year_month(request.args.get("year"), request.args.get("month"))
+    return jsonify(_shift_engine_context(project, year, month))
+
+
+@cloudshift_bp.route("/api/project/<project_id>/shift-engine/plan", methods=["POST"])
+@login_required
+def api_shift_engine_plan(project_id: str):
+    project, _access_role = _editable_project_or_404(project_id)
+    payload = request.get_json(silent=True) or {}
+    return jsonify(_shift_engine_plan(project, payload))
+
+
+@cloudshift_bp.route("/api/project/<project_id>/shift-engine/apply-draft", methods=["POST"])
+@login_required
+def api_shift_engine_apply_draft(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project, access_role = _editable_project_or_404(project_id)
+        result_payload = _shift_engine_apply_draft(project, payload, access_role)
+    return jsonify(result_payload)
+
+
+@cloudshift_bp.route("/project/<project_id>/shift-engine/preview", methods=["GET"])
+@login_required
+def shift_engine_preview(project_id: str):
+    """自動作成結果の確認・調整専用ウィンドウ（DSTT chrome なし、CloudShift UI 流用）。
+
+    生成シフトは client 側（localStorage）からこの画面に読み込まれ、ここで保存操作を
+    しない限り正規シフト帳には一切反映されない（閉じれば破棄）。
+    """
+    project, _access_role = _editable_project_or_404(project_id)
+    _ensure_scene_project(project)
+    try:
+        year = int(request.args.get("year"))
+        month = int(request.args.get("month"))
+    except (TypeError, ValueError):
+        abort(404)
+    year, month = _validate_year_month(year, month)
+    return render_template(
+        "cloudshift_engine_preview.html",
+        project_id=project_id,
+        project_title=project.get("title") or "名称未設定",
+        year=year,
+        month=month,
+        shiftersync_holidays=sorted(set(JAPAN_HOLIDAYS)),
+    )
+
+
 def _send_month_export(project: dict[str, Any], month_key: str, export_format: str):
     month_data = (project.get("months") or {}).get(month_key)
     if not month_data:
