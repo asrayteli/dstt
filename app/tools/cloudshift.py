@@ -55,8 +55,10 @@ from app.models import (
 try:
     from .shiftersync_format import (
         LEAVE_OPTION_MAPPINGS,
+        SECOND_OPTION_MAPPINGS,
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
+        entry_second_option,
         normalize_entries_for_month,
         parse_csv_text,
         parse_entry_value,
@@ -70,8 +72,10 @@ except ImportError:
     from app.tools.shiftersync_format import (  # type: ignore
         LEAVE_OPTION_MAPPINGS,
         ROLE_OPTION_MAPPINGS,
+        SECOND_OPTION_MAPPINGS,
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
+        entry_second_option,
         normalize_entries_for_month,
         parse_csv_text,
         parse_entry_value,
@@ -89,7 +93,7 @@ logger = logging.getLogger(__name__)
 LOCK_TIMEOUT_SECONDS = 8.0
 LOCK_POLL_SECONDS = 0.05
 MAX_REVISION_SNAPSHOTS = 12
-OPTION_LABELS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS}
+OPTION_LABELS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS, **SECOND_OPTION_MAPPINGS}
 SHIFT_TIME_OPTION_KEYS = {"A", "P", "E", "L", "TEMP"}
 VEHICLE_OPTION_KEYS = {"M", "C", "O", "W", "V", "N1", "N2", "N3", "N4", "N5"}
 LEAVE_CHANGE_REQUEST_STATUSES = {"pending", "approved", "rejected"}
@@ -5800,7 +5804,7 @@ def _remove_person_experience_scene_record(
 def _role_option_entries_for_month(
     month_data: dict[str, Any], year: int, month: int
 ) -> dict[tuple[str, str], dict[str, Any]]:
-    """対象月の確定 entry から 代務/研修 オプションの実績を (社員番号, option) 単位で集約する。"""
+    """対象月の確定 entry から 代務/研修「第二オプション」の実績を (社員番号, option) 単位で集約する。"""
     aggregated: dict[tuple[str, str], dict[str, Any]] = {}
     for day_key, day_entries in (month_data.get("entries_per_day") or {}).items():
         if not isinstance(day_entries, list):
@@ -5812,10 +5816,10 @@ def _role_option_entries_for_month(
         for entry in day_entries:
             if not isinstance(entry, dict):
                 continue
-            option, name = parse_entry_value(str(entry.get("value") or ""))
-            option_key = str(option or "").strip().upper()
+            option_key = entry_second_option(entry)
             if option_key not in ROLE_OPTION_KEYS:
                 continue
+            _option, name = parse_entry_value(str(entry.get("value") or ""))
             number = str(entry.get("employee_number") or "").strip()
             if not number:
                 continue
@@ -5841,17 +5845,22 @@ def _role_option_entries_for_month(
 def _sync_role_option_experience_for_month(
     project: dict[str, Any], year: int, month: int, *, actor_name: str
 ) -> list[str]:
-    """scene シフトの 代務/研修 オプション entry をアシスト実績へ自動登録する。
+    """scene シフトの 代務/研修「第二オプション」entry をアシストへ自動反映する。
 
-    目的: ユーザーが entry に 代務（SUB）/ 研修（TRAIN）オプションを付けるだけで
+    目的: ユーザーが entry に 代務（SUB）/ 研修（TRAIN）第二オプションを付けるだけで
     経験がサーバーへ自動登録され、自動作成（shift-engine）の適格判定・点数に
     反映されるようにする（手動登録の手間を省く）。
 
+    反映内容:
+    - 代務 → 対象ユーザーの「実績」（record）＋アシストの「経験済み現場」。
+    - 研修 → 対象ユーザーの「研修済み現場」（TRAIN record）＋「経験済み現場」、
+      かつ「研修要現場」一覧に該当があれば削除する。
+
     安全原則:
     - 集約単位は (社員番号, オプション, 月) で 1 実績。date はその月の最新該当日。
-    - source_type=ROLE_OPTION_ASSIST_SOURCE の自動実績のみ追加・更新・削除する。
+    - source_type=ROLE_OPTION_ASSIST_SOURCE の自動レコード/現場のみ追加・更新・削除する。
       手動登録や person 連携（person_experience）の実績には一切触れない。
-    - 削除は「対象月の自動実績のうち、entry が無くなったもの」だけ。他の月は触れない。
+    - 削除は「対象月の自動分のうち、entry が無くなったもの」だけ。他の月は触れない。
     - この関数は project dict を書き換えるだけで保存はしない（呼び出し元の
       _save_project と同一トランザクションで永続化し、DB 書き込みを増やさない）。
     """
@@ -5922,7 +5931,171 @@ def _sync_role_option_experience_for_month(
         label = ROLE_OPTION_MAPPINGS.get(str(stale.get("shift_key") or "").strip().upper(), "役割")
         changes.append(f"{label}実績の自動登録を解除: {_assist_record_history_label(stale)}")
 
+    # 経験済み現場・研修要現場への反映（代務/研修いずれも「経験済み現場」へ。
+    # 研修は加えて「研修要現場」一覧から削除する）。
+    changes.extend(
+        _sync_role_option_sites_for_month(
+            project, current, month_key, actor_name=actor_name
+        )
+    )
+
     return changes
+
+
+def _sync_role_option_sites_for_month(
+    project: dict[str, Any],
+    current: dict[tuple[str, str], dict[str, Any]],
+    month_key: str,
+    *,
+    actor_name: str,
+) -> list[str]:
+    """第二オプション（代務/研修）entry をアシストの「経験済み現場」へ反映する。
+
+    - 代務（SUB）/研修（TRAIN）とも、対象ユーザー×この現場を「経験済み現場」へ自動登録。
+    - 研修（TRAIN）は加えて、同ユーザー×この現場の「研修要現場」を一覧から削除する。
+    - 自動登録分（source_type=ROLE_OPTION_ASSIST_SOURCE）のみ追加・更新・解除する。
+      手動登録の経験済み現場には触れない（研修要現場の削除は要件どおり手動分も対象）。
+    """
+    site_row_id_int = _coerce_site_row_id(project.get("site_row_id"))
+    site_row_id = str(site_row_id_int) if site_row_id_int else ""
+    assist = _ensure_assist(project)
+    changes: list[str] = []
+
+    # この月の自動経験済み現場を (社員番号, オプション) で引けるようにする
+    existing_sites: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in (assist.get("experienced_sites") or []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("source_type") or "") != ROLE_OPTION_ASSIST_SOURCE:
+            continue
+        if str(item.get("source_month_key") or "") != month_key:
+            continue
+        key = (
+            str(item.get("employee_number") or "").strip(),
+            str(item.get("shift_key") or "").strip().upper(),
+        )
+        existing_sites.setdefault(key, item)
+
+    # site_row_id が無い現場では「経験済み現場」を作れないため、自動分は一旦解除する
+    if not site_row_id:
+        for stale in existing_sites.values():
+            assist["experienced_sites"] = [
+                item
+                for item in (assist.get("experienced_sites") or [])
+                if str(item.get("id") or "") != str(stale.get("id") or "")
+            ]
+            changes.append(
+                f"経験済み現場の自動登録を解除: {_assist_record_history_label(stale)}"
+            )
+        return changes
+
+    site_id = str(project.get("site_id") or "")
+    site_name = str(project.get("site_name") or "")
+
+    for key in sorted(current.keys()):
+        info = current[key]
+        number = str(info["employee_number"]).strip()
+        option_key = str(info["shift_key"]).strip().upper()
+        existing = existing_sites.pop((number, option_key), None)
+        label = ROLE_OPTION_MAPPINGS.get(option_key, option_key)
+        site = _role_option_experienced_site(
+            info, site_row_id, site_id, site_name, month_key,
+            existing=existing, actor_name=actor_name,
+        )
+        if existing:
+            index = assist["experienced_sites"].index(existing)
+            if assist["experienced_sites"][index] != site:
+                assist["experienced_sites"][index] = site
+                changes.append(
+                    f"経験済み現場を自動更新（{label}）: {_assist_record_history_label(site)}"
+                )
+        else:
+            assist["experienced_sites"].append(site)
+            changes.append(
+                f"経験済み現場を自動登録（{label}）: {_assist_record_history_label(site)}"
+            )
+
+        # 研修（TRAIN）は研修要現場の一覧から該当を削除する
+        if option_key == ROLE_OPTION_TRAINING_KEY:
+            removed = [
+                item
+                for item in (assist.get("training_sites") or [])
+                if str(item.get("employee_number") or "").strip() == number
+                and str(_coerce_site_row_id(item.get("site_row_id")) or "") == site_row_id
+            ]
+            if removed:
+                removed_ids = {str(item.get("id") or "") for item in removed}
+                assist["training_sites"] = [
+                    item
+                    for item in (assist.get("training_sites") or [])
+                    if str(item.get("id") or "") not in removed_ids
+                ]
+                changes.append(
+                    f"研修要現場から削除（研修済み）: {number} / {site_name or site_row_id}"
+                )
+
+    # entry が消えた分（この月の自動経験済み現場のみ）を解除する
+    for stale in existing_sites.values():
+        assist["experienced_sites"] = [
+            item
+            for item in (assist.get("experienced_sites") or [])
+            if str(item.get("id") or "") != str(stale.get("id") or "")
+        ]
+        changes.append(
+            f"経験済み現場の自動登録を解除: {_assist_record_history_label(stale)}"
+        )
+
+    return changes
+
+
+def _role_option_experienced_site(
+    info: dict[str, Any],
+    site_row_id: str,
+    site_id: str,
+    site_name: str,
+    month_key: str,
+    *,
+    existing: dict[str, Any] | None,
+    actor_name: str,
+) -> dict[str, Any]:
+    """第二オプション由来の自動「経験済み現場」エントリを組み立てる。"""
+    option_key = str(info["shift_key"]).strip().upper()
+    label = ROLE_OPTION_MAPPINGS.get(option_key, option_key)
+    date_text = str(info.get("latest_date") or "")
+    timestamp = _utcnow_iso()
+    if existing:
+        created_at = existing.get("created_at", timestamp)
+        created_by = existing.get("created_by", actor_name)
+        site_pk = str(existing.get("id") or _assist_id("psite"))
+    else:
+        created_at = timestamp
+        created_by = actor_name
+        site_pk = _assist_id("psite")
+    try:
+        weekday = date.fromisoformat(date_text).weekday() if date_text else 0
+    except ValueError:
+        weekday = 0
+    return {
+        "id": site_pk,
+        "kind": PERSON_ASSIST_EXPERIENCE_KIND,
+        "employee_number": str(info["employee_number"]).strip(),
+        "candidate_name": str(info.get("candidate_name") or "").strip(),
+        "date": date_text,
+        "weekday": weekday,
+        "effective_from": date_text,
+        "site_row_id": site_row_id,
+        "site_id": site_id,
+        "site_name": site_name,
+        "shift_key": option_key,
+        "notes": f"シフトの{label}第二オプションから自動登録（{month_key}: {info.get('count', 0)}回）",
+        "source_type": ROLE_OPTION_ASSIST_SOURCE,
+        "source_month_key": month_key,
+        "source_occurrences": int(info.get("count", 0) or 0),
+        "created_at": created_at,
+        "updated_at": timestamp,
+        "created_by": created_by,
+        "updated_by": actor_name,
+    }
 
 
 def _sync_person_experience_to_scene_projects(

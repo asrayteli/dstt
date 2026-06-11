@@ -1797,3 +1797,48 @@ seed 検証 → 貪欲 → 修復 → result 検証のパイプライン。
 
 365 日より古い役割実績は加点しない。`score_reference` に
 `substitute_record` / `training_record` として公開する。
+
+## 2026-06-11 追補その2（代務・研修を「第二オプション」へ再設計）
+
+前項の「役割オプション」を見直し、代務・研修を entry の値とは独立した
+**第二オプション**（`second_option`）として扱うようにした。
+
+### 1. データモデル
+
+- entry に `second_option` フィールド（`''` / `SUB` / `TRAIN`）を追加。
+  `SHIFT_OPTION_MAPPINGS` から `SUB`/`TRAIN` を外し、`SECOND_OPTION_MAPPINGS`
+  に分離（`ROLE_OPTION_MAPPINGS` は同義エイリアスとして互換維持）。
+- CSV は `#second_option` 行で保持する。旧形式 `!SUB!名前` / `!TRAIN!名前` は
+  `normalize_entry` が読み込み時に `second_option` へ移行し、値は素の名前にする
+  （`_split_second_option`、冪等）。`entry_second_option()` は生データでも判定可。
+
+### 2. 重複チェックへの非干渉（要件3）
+
+- 第二オプションは entry の値に入らないため、`is_duplicate_by_rules` /
+  `compare_shift_payloads` には影響しない。`is_duplicate_by_rules` から
+  代務・研修の終日拘束ルールは撤去した（午前＋代務などの併用が可能）。
+- 第二オプションが使われるのは「アシストの経験済み現場・研修要現場・自動作成
+  エンジン・ユーザー表示」だけに限定する。
+
+### 3. アシストへの反映（要件4/5）
+
+`_sync_role_option_experience_for_month` を拡張：
+
+- 代務（SUB）→ 対象ユーザーの**実績**（record）＋ アシストの
+  **経験済み現場**（`experienced_sites` 自動エントリ）。
+- 研修（TRAIN）→ 対象ユーザーの**研修済み現場**（TRAIN record 由来）＋
+  **経験済み現場**、かつ同ユーザー×当該現場の**研修要現場**
+  （`training_sites`）を一覧から削除する。
+- 自動分は `source_type="role_option_experience"` + `source_month_key` で識別し、
+  追加・更新・解除する（研修要現場の削除のみ要件どおり手動分も対象）。
+- context adapter（`_role_option_sites_from_entries`）も `second_option` を読み、
+  代務・研修いずれも experienced に含める。研修済み・経験済みになった現場は
+  `build_workers` で研修要（trainee）から除外する。
+
+### 4. UI
+
+- ShifterSync 共通エディタ（`ss_common.js`）のエントリモーダルに
+  「第二オプション」セレクト（なし/代務/研修）を追加。カレンダーのチップに
+  代務・研修バッジを表示。役割オプションは主オプションのセクションから撤去。
+- 個人シフト帳のアシストに **「詳細」タブ**を追加し、経験済み現場・研修要現場を
+  まとめて確認できるようにした（要件6）。

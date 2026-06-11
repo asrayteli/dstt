@@ -21,10 +21,16 @@ const ShifterSync = (function() {
     N2: '2\u53f7\u8eca',
     N3: '3\u53f7\u8eca',
     N4: '4\u53f7\u8eca',
-    N5: '5\u53f7\u8eca',
+    N5: '5\u53f7\u8eca'
+  };
+
+  // \u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3\uff08\u4ee3\u52d9 SUB / \u7814\u4fee TRAIN\uff09\u3002
+  // entry \u306e\u5024\u3068\u306f\u5225\u30d5\u30a3\u30fc\u30eb\u30c9\u3068\u3057\u3066\u4fdd\u6301\u3057\u3001\u91cd\u8907\u30c1\u30a7\u30c3\u30af\u306b\u306f\u5f71\u97ff\u3055\u305b\u306a\u3044\u3002
+  const secondOptionMappings = {
     SUB: '\u4ee3\u52d9',
     TRAIN: '\u7814\u4fee'
   };
+  const secondOptionKeys = Object.keys(secondOptionMappings);
 
   const leaveOptionMappings = {
     PAID: '\u6709\u4f11',
@@ -36,13 +42,13 @@ const ShifterSync = (function() {
     OTHER: '\u305d\u306e\u4ed6'
   };
 
-  const allOptionMappings = Object.assign({}, optionMappings, leaveOptionMappings);
+  const allOptionMappings = Object.assign({}, optionMappings, secondOptionMappings, leaveOptionMappings);
   const shiftTimeOptionKeys = ['A', 'P', 'E', 'L', 'TEMP'];
   const leaveOptionKeys = Object.keys(leaveOptionMappings);
   const vehicleOptionKeys = ['M', 'C', 'O', 'W', 'V'];
   const vehicleNumberOptionKeys = ['N1', 'N2', 'N3', 'N4', 'N5'];
-  const roleOptionKeys = ['SUB', 'TRAIN'];
   const commentRowPrefix = '#comment';
+  const secondOptionRowPrefix = '#second_option';
   const employeeNameRowPrefix = '#employee_name';
   const employeeNumberRowPrefix = '#employee_number';
   const projectEmployeeNumberRowPrefix = '#project_employee_number';
@@ -136,6 +142,21 @@ const ShifterSync = (function() {
       return '';
     }
     return optionKey ? `!${optionKey}!${safeName}` : safeName;
+  }
+
+  function normalizeSecondOption(value) {
+    const key = String(value || '').trim().toUpperCase();
+    return secondOptionKeys.includes(key) ? key : '';
+  }
+
+  // 旧形式 `!SUB!名前` / `!TRAIN!名前` を value と第二オプションへ分離する。
+  function splitSecondOption(value, existingSecond) {
+    const second = normalizeSecondOption(existingSecond);
+    const parsed = parseEntryValue(value);
+    if (!second && parsed.optionKey && secondOptionKeys.includes(String(parsed.optionKey).toUpperCase())) {
+      return { value: parsed.name, secondOption: String(parsed.optionKey).toUpperCase() };
+    }
+    return { value, secondOption: second };
   }
 
   function normalizeSiteBranchRowId(value) {
@@ -308,13 +329,15 @@ const ShifterSync = (function() {
       return null;
     }
     if (typeof entry === 'string') {
-      const value = entry.trim();
-      if (!value) {
+      const trimmed = entry.trim();
+      if (!trimmed) {
         return null;
       }
+      const split = splitSecondOption(trimmed, '');
       return {
         id: makeEntryId(),
-        value,
+        value: split.value,
+        second_option: split.secondOption,
         comment: '',
         employee_name: '',
         employee_number: '',
@@ -353,13 +376,16 @@ const ShifterSync = (function() {
       };
     }
 
-    const value = String(entry.value || '').trim();
-    if (!value) {
+    const rawValue = String(entry.value || '').trim();
+    if (!rawValue) {
       return null;
     }
+    const split = splitSecondOption(rawValue, entry.second_option || entry.secondOption || '');
+    const value = split.value;
     return {
       id: String(entry.id || makeEntryId()),
       value,
+      second_option: split.secondOption,
       comment: String(entry.comment || '').trim(),
       employee_name: String(entry.employee_name || entry.employeeName || '').trim(),
       employee_number: String(entry.employee_number || entry.employeeNumber || '').trim(),
@@ -408,6 +434,7 @@ const ShifterSync = (function() {
     return {
       id: withNewId ? makeEntryId() : normalized.id,
       value: normalized.value,
+      second_option: normalized.second_option || '',
       comment: normalized.comment,
       employee_name: normalized.employee_name,
       employee_number: normalized.employee_number,
@@ -656,8 +683,7 @@ const ShifterSync = (function() {
     }
     sections.push(
       { title: '\u8eca\u4e21\u30bf\u30a4\u30d7', optionKeys: vehicleOptionKeys },
-      { title: '\u8eca\u756a\u53f7', optionKeys: vehicleNumberOptionKeys },
-      { title: '\u5f79\u5272', optionKeys: roleOptionKeys }
+      { title: '\u8eca\u756a\u53f7', optionKeys: vehicleNumberOptionKeys }
     );
     return sections;
   }
@@ -667,7 +693,7 @@ const ShifterSync = (function() {
     if (mode === 'person') {
       keys.push(...leaveOptionKeys);
     }
-    keys.push(...vehicleOptionKeys, ...vehicleNumberOptionKeys, ...roleOptionKeys);
+    keys.push(...vehicleOptionKeys, ...vehicleNumberOptionKeys);
     return keys;
   }
 
@@ -1330,10 +1356,14 @@ const ShifterSync = (function() {
         entry_status_label: '',
         entry_status_tone: '',
         sync_source_label: '',
-        sync_source_tone: ''
+        sync_source_tone: '',
+        second_option_label: ''
       };
     }
     const parsed = parseEntryValue(normalized.value);
+    const secondOptionLabel = normalized.second_option
+      ? (secondOptionMappings[normalized.second_option] || normalized.second_option)
+      : '';
     const branchState = entryBranchState(normalized);
     const branchIssue = entryBranchIssue(normalized);
     const titleName = isMasterPersonType() && normalized.site_name ? normalized.site_name : parsed.name;
@@ -1397,7 +1427,8 @@ const ShifterSync = (function() {
       entry_status_label: isUnassignedSubstituteSync ? '未設定' : '',
       entry_status_tone: isUnassignedSubstituteSync ? 'danger' : '',
       sync_source_label: syncSourceLabel,
-      sync_source_tone: syncSourceTone
+      sync_source_tone: syncSourceTone,
+      second_option_label: secondOptionLabel
     };
   }
 
@@ -1618,6 +1649,9 @@ const ShifterSync = (function() {
             .addClass('entry-item-main')
             .append(
               $('<div>').addClass(`entry-item-title${parts.title_tone ? ` is-${parts.title_tone}` : ''}`).text(parts.title),
+              parts.second_option_label
+                ? $('<span>').addClass('entry-item-second-option').text(parts.second_option_label)
+                : null,
               parts.sync_source_label
                 ? $('<div>').addClass(`entry-item-sync-source${parts.sync_source_tone ? ` is-${parts.sync_source_tone}` : ''}`).text(parts.sync_source_label)
                 : null,
@@ -2831,6 +2865,10 @@ const ShifterSync = (function() {
             <div class="ss-detail-static">${escapeHtml(optionText)}</div>
           </div>
           <div class="ss-detail-field">
+            <div class="ss-detail-label">\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3</div>
+            <div class="ss-detail-static">${escapeHtml(entry.second_option ? (secondOptionMappings[entry.second_option] || entry.second_option) : '\u306a\u3057')}</div>
+          </div>
+          <div class="ss-detail-field">
             <div class="ss-detail-label">\u30b3\u30e1\u30f3\u30c8</div>
             <div class="ss-detail-static">${entry.comment ? escapeHtml(entry.comment) : '<span class="ss-detail-empty-text">\u30b3\u30e1\u30f3\u30c8\u306a\u3057</span>'}</div>
           </div>
@@ -2950,6 +2988,14 @@ const ShifterSync = (function() {
             <option value="">\u306a\u3057</option>
             ${availableOptionKeys.map((key) => `<option value="${key}" ${key === parsed.optionKey ? 'selected' : ''}>${escapeHtml(allOptionMappings[key] || key)}</option>`).join('')}
           </select>
+        </div>
+        <div class="ss-detail-field">
+          <label class="ss-detail-label" for="ss-entry-modal-second-option">\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3</label>
+          <select id="ss-entry-modal-second-option" class="ss-detail-input">
+            <option value="">\u306a\u3057</option>
+            ${secondOptionKeys.map((key) => `<option value="${key}" ${key === normalizeSecondOption(entry.second_option) ? 'selected' : ''}>${escapeHtml(secondOptionMappings[key] || key)}</option>`).join('')}
+          </select>
+          <div class="ss-detail-empty-text">\u4ee3\u52d9\u30fb\u7814\u4fee\u306f\u300c\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3\u300d\u3067\u3059\u3002\u91cd\u8907\u30c1\u30a7\u30c3\u30af\u306b\u306f\u5f71\u97ff\u305b\u305a\u3001\u30a2\u30b7\u30b9\u30c8\u306e\u7d4c\u9a13\u30fb\u81ea\u52d5\u4f5c\u6210\u30fb\u8868\u793a\u306b\u3060\u3051\u4f7f\u3044\u307e\u3059\u3002</div>
         </div>
         ${isMasterMode() ? `
           <div class="ss-detail-field">
@@ -3098,6 +3144,7 @@ const ShifterSync = (function() {
     }
 
     const optionKey = $('#ss-entry-modal-option').val() || null;
+    const secondOption = normalizeSecondOption($('#ss-entry-modal-second-option').val());
     const comment = $('#ss-entry-modal-comment').val().trim();
     const $nameInput = $('#ss-entry-modal-name');
     const $sideInput = $('#ss-entry-modal-master-side');
@@ -3192,6 +3239,7 @@ const ShifterSync = (function() {
       return normalizeEntry({
         id: entry.id,
         value: formatEntryValue(optionKey, entryName),
+        second_option: secondOption,
         comment,
         employee_name: employeeName,
         employee_number: employeeNumber,
@@ -3322,6 +3370,7 @@ const ShifterSync = (function() {
     ];
 
     const commentRows = [];
+    const secondOptionRows = [];
     const employeeNameRows = [];
     const employeeNumberRows = [];
     const siteRowIdRows = [];
@@ -3339,6 +3388,9 @@ const ShifterSync = (function() {
         entries.forEach((entry, index) => {
           if (entry.comment) {
             commentRows.push([commentRowPrefix, day, index, entry.comment]);
+          }
+          if (entry.second_option) {
+            secondOptionRows.push([secondOptionRowPrefix, day, index, entry.second_option]);
           }
           if (entry.employee_name) {
             employeeNameRows.push([employeeNameRowPrefix, day, index, entry.employee_name]);
@@ -3366,6 +3418,7 @@ const ShifterSync = (function() {
 
     return rows
       .concat(commentRows)
+      .concat(secondOptionRows)
       .concat(employeeNameRows)
       .concat(employeeNumberRows)
       .concat(siteRowIdRows)
@@ -3408,6 +3461,14 @@ const ShifterSync = (function() {
     return Object.assign({}, allOptionMappings);
   }
 
+  function getSecondOptionMappings() {
+    return Object.assign({}, secondOptionMappings);
+  }
+
+  function getSecondOptionKeys() {
+    return secondOptionKeys.slice();
+  }
+
   function getOptionSectionsForModeExport(mode) {
     return getOptionSectionsForMode(mode).map((section) => ({
       title: section.title,
@@ -3438,6 +3499,8 @@ const ShifterSync = (function() {
     updateAllCapacityWarnings,
     updateAllBranchWarnings,
     getOptionMappings,
+    getSecondOptionMappings,
+    getSecondOptionKeys,
     getOptionSectionsForMode: getOptionSectionsForModeExport,
     openEntryModal
   };

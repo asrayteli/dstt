@@ -112,17 +112,41 @@ def test_role_options_registered_in_labels():
     assert module.OPTION_LABELS["TRAIN"] == "研修"
 
 
-def test_role_options_duplicate_rules():
-    """代務・研修は終日拘束（休暇以外のあらゆる予定と重複）。"""
-    for role in ("SUB", "TRAIN"):
-        assert is_duplicate_by_rules(role, "A") is True
-        assert is_duplicate_by_rules("M", role) is True
-        assert is_duplicate_by_rules(role, None) is True
-        assert is_duplicate_by_rules(role, role) is True
-        assert is_duplicate_by_rules(role, "TEMP") is True
-        # 休暇とは重複しない（休みの記録と共存可能、というより前段で False）
-        assert is_duplicate_by_rules(role, "PAID") is False
-    assert is_duplicate_by_rules("SUB", "TRAIN") is True
+def test_second_option_does_not_affect_duplicate_check():
+    """代務・研修は「第二オプション」。entry の値に入らないため重複判定に影響しない。"""
+    from app.tools.shiftersync_format import normalize_entry, entry_second_option
+    from app.tools.shiftersync_check import compare_shift_payloads
+
+    # 旧形式 `!SUB!名前` は正規化で第二オプションへ移行し、値は素の名前になる
+    entry = normalize_entry({"value": "!SUB!田中", "employee_number": "E1"})
+    assert entry["second_option"] == "SUB"
+    assert entry["value"] == "田中"
+    assert entry_second_option(entry) == "SUB"
+
+    # 午前シフト + 代務（第二オプション）は、重複判定では午前としてのみ扱う
+    morning_with_sub = normalize_entry(
+        {"value": "!A!田中", "second_option": "SUB", "employee_number": "E1"}
+    )
+    assert morning_with_sub["value"] == "!A!田中"
+    assert morning_with_sub["second_option"] == "SUB"
+
+    # 同日同名で「午前＋代務」と「遅番」→ A と L は共存可（第二オプションは無視）
+    payload = {
+        "mode": "scene", "year": 2026, "month": 4, "title": "S1",
+        "entries_per_day": {
+            "1": [
+                {"id": "a", "value": "!A!田中", "second_option": "SUB", "employee_number": "E1"},
+                {"id": "b", "value": "!L!田中", "employee_number": "E1"},
+            ]
+        },
+    }
+    result = compare_shift_payloads([payload])
+    same_site = [c for c in result["same_site_conflicts"] if c["date"] == 1]
+    assert same_site == []
+
+    # is_duplicate_by_rules 自体も代務/研修を終日拘束扱いしない
+    assert is_duplicate_by_rules("SUB", "A") is False
+    assert is_duplicate_by_rules("TRAIN", "M") is False
     # 既存ルールの非回帰
     assert is_duplicate_by_rules("A", "L") is False
     assert is_duplicate_by_rules("A", "E") is True
@@ -215,6 +239,66 @@ def test_employee_number_missing_is_not_registered():
     assert autos == []
 
 
+def _experienced_sites(module, app, project_id):
+    with app.app_context():
+        project = module._load_project(project_id)
+        return (project.get("assist") or {}).get("experienced_sites", []), project
+
+
+def test_second_option_reflects_experienced_sites():
+    """代務・研修いずれもアシストの「経験済み現場」へ自動反映される（要件4/5）。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    module.current_user = _owner()
+
+    _save_month_entries(module, app, client, project_id, {
+        "1": [{"id": "e1", "value": "!SUB!田中", "employee_number": "E101", "comment": ""}],
+        "2": [{"id": "e2", "value": "!TRAIN!山田", "employee_number": "E102", "comment": ""}],
+    })
+
+    sites, _ = _experienced_sites(module, app, project_id)
+    autos = [s for s in sites if s.get("source_type") == module.ROLE_OPTION_ASSIST_SOURCE]
+    by_emp = {(s["employee_number"], s["shift_key"]): s for s in autos}
+    assert set(by_emp) == {("E101", "SUB"), ("E102", "TRAIN")}
+    assert all(str(s["site_row_id"]) == "10" for s in autos)
+
+    # 代務 entry を消すと、その経験済み現場の自動分だけ解除される
+    _save_month_entries(module, app, client, project_id, {
+        "2": [{"id": "e2", "value": "!TRAIN!山田", "employee_number": "E102", "comment": ""}],
+    })
+    sites, _ = _experienced_sites(module, app, project_id)
+    autos = [s for s in sites if s.get("source_type") == module.ROLE_OPTION_ASSIST_SOURCE]
+    assert {(s["employee_number"], s["shift_key"]) for s in autos} == {("E102", "TRAIN")}
+
+
+def test_training_option_removes_training_required_site():
+    """研修第二オプションは「研修要現場」一覧から該当を削除する（要件5）。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    module.current_user = _owner()
+
+    # 事前に E102 × 現場10 の「研修要現場」を手動登録しておく
+    with app.app_context():
+        project = module._load_project(project_id)
+        assist = module._ensure_assist(project)
+        assist["training_sites"].append({
+            "id": "t1", "kind": "training", "employee_number": "E102",
+            "site_row_id": "10", "site_id": "", "site_name": "現場10",
+            "shift_key": "", "date": "2026-03-01",
+        })
+        module._save_project(project)
+
+    _save_month_entries(module, app, client, project_id, {
+        "3": [{"id": "e3", "value": "!TRAIN!山田", "employee_number": "E102", "comment": ""}],
+    })
+
+    with app.app_context():
+        project = module._load_project(project_id)
+        training = (project.get("assist") or {}).get("training_sites", [])
+    # 研修要現場から削除されている
+    assert all(t.get("id") != "t1" for t in training)
+
+
 # ---------------------------------------------------------------------------
 # 自動作成（shift-engine）への反映
 # ---------------------------------------------------------------------------
@@ -240,17 +324,17 @@ def test_role_experience_feeds_shift_engine():
     data = resp.get_json()
     engine_assignments = [a for a in data["result"]["assignments"] if a["source"] == "engine"]
     assigned_numbers = {a["employee_number"] for a in engine_assignments}
-    # 代務=実績の E101、研修済みの E102 の両方が配置対象になる
+    # 代務の E101、研修の E102 の両方が配置対象になる
     assert assigned_numbers == {"E101", "E102"}
 
-    # 候補パネルで 代務=経験者(120) > 研修済み(60) の点差が付いている
+    # 要件どおり代務・研修いずれも「経験済み現場」として反映され、経験者扱いになる
     panels = data["result"]["candidate_panels"]
     factor_labels = {
         c["employee_number"]: {f["label"] for f in c["factors"]}
         for p in panels for c in p["candidates"]
     }
     assert "経験者" in factor_labels.get("E101", set())
-    assert "研修済み" in factor_labels.get("E102", set())
+    assert "経験者" in factor_labels.get("E102", set())
 
 
 # ---------------------------------------------------------------------------

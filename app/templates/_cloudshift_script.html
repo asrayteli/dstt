@@ -158,8 +158,7 @@
       }
       sections.push(
         { title: "車両タイプ", optionKeys: ["M", "C", "O", "W", "V"] },
-        { title: "車番", optionKeys: ["N1", "N2", "N3", "N4", "N5"] },
-        { title: "役割", optionKeys: ["SUB", "TRAIN"] }
+        { title: "車番", optionKeys: ["N1", "N2", "N3", "N4", "N5"] }
       );
       return sections;
     }
@@ -2662,6 +2661,7 @@
           <div class="cloud-assist-tabs">
             <button type="button" class="cloud-tab${state.assist.activeTab === 'register' ? ' is-active' : ''}" data-assist-tab="register">登録</button>
             <button type="button" class="cloud-tab${state.assist.activeTab === 'edit' ? ' is-active' : ''}" data-assist-tab="edit">編集</button>
+            <button type="button" class="cloud-tab${state.assist.activeTab === 'details' ? ' is-active' : ''}" data-assist-tab="details">詳細</button>
             ${autoCreateButton}
           </div>
         `;
@@ -2688,7 +2688,7 @@
     function normalizeAssistUiState() {
       const permissions = state.assist.permissions || {};
       const mode = currentAssistMode();
-      const allowedTabs = mode === 'person' ? ['register', 'edit'] : ['register', 'edit', 'search', 'details'];
+      const allowedTabs = mode === 'person' ? ['register', 'edit', 'details'] : ['register', 'edit', 'search', 'details'];
       if (!allowedTabs.includes(state.assist.activeTab)) {
         state.assist.activeTab = 'register';
       }
@@ -2887,7 +2887,7 @@
               <span class="cloud-note-chip">ルール ${counts.rules}件</span>
               ${permissions.can_edit_rules ? '' : '<span class="cloud-note-chip">編集者はルールを閲覧のみできます</span>'}
             </div>
-            ${showRuleForm ? '' : '<p class="cloud-panel-note">シフトの予定に「代務」「研修」オプションを付けると、保存時に実績がここへ自動登録されます（手動登録は不要）。代務は一人で勤務した実績、研修は教わった段階として点数に差が付きます。</p>'}
+            ${showRuleForm ? '' : '<p class="cloud-panel-note">シフトの予定に「代務」「研修」の<strong>第二オプション</strong>を付けると、保存時に実績がここへ自動登録され、アシストの「経験済み現場」にも自動反映されます（手動登録は不要）。研修を付けると「研修要現場」からは自動で外れます。第二オプションは重複チェックには影響しません。</p>'}
             ${showRuleForm ? buildAssistRuleForm(null, 'assist-create-rule', 'ルールを登録') : buildAssistRecordForm(null, 'assist-create-record', '実績を登録')}
           </div>
         </div>
@@ -3343,6 +3343,70 @@
       return html;
     }
 
+    function buildAssistPersonSiteCards(sites, emptyText) {
+      if (!Array.isArray(sites) || !sites.length) {
+        return `<div class="cloud-empty-state"><p>${escapeHtml(emptyText)}</p></div>`;
+      }
+      const ordered = sites.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+      return ordered.map((site) => {
+        const shiftLabel = site.shift_label || (site.shift_key ? assistShiftLabel(site.shift_key) : ASSIST_OPTIONLESS_LABEL);
+        const autoBadge = site.source_label
+          ? `<span class="cloud-assist-auto-badge">${escapeHtml(site.source_label)}</span>`
+          : '';
+        return `
+          <article class="cloud-assist-card${site.source_label ? ' is-auto-record' : ''}">
+            <div class="cloud-assist-card-head">
+              <div>
+                <h4>${escapeHtml(site.site_name || '-')}</h4>
+                <p>${escapeHtml(`${site.date || '-'} / ${shiftLabel}`)}</p>
+                ${autoBadge}
+              </div>
+            </div>
+            <div class="cloud-assist-card-meta">
+              <span>${escapeHtml(site.site_id || '契約番号未設定')}</span>
+              <span>${escapeHtml(shiftLabel)}</span>
+            </div>
+            <p class="cloud-panel-note">${escapeHtml(site.notes || 'メモなし')}</p>
+          </article>
+        `;
+      }).join('');
+    }
+
+    function buildAssistPersonDetailsPanel() {
+      const data = currentAssistData();
+      const counts = assistCounts();
+      const experienced = Array.isArray(data.experienced_sites) ? data.experienced_sites : [];
+      const training = Array.isArray(data.training_sites) ? data.training_sites : [];
+      return `
+        <div class="cloud-assist-stack">
+          <div class="cloud-assist-section">
+            <div class="cloud-assist-subhead">
+              <div>
+                <strong>登録状況の詳細</strong>
+                <p class="cloud-panel-note">この人の「経験済み現場」と「研修要現場」を確認できます。代務・研修の第二オプションを付けたシフトは、経験済み現場として自動で反映されます。</p>
+              </div>
+            </div>
+            <div class="cloud-assist-summary-row">
+              <span class="cloud-note-chip">経験済み現場 ${counts.experienced || 0}件</span>
+              <span class="cloud-note-chip">研修要現場 ${counts.training || 0}件</span>
+            </div>
+          </div>
+          <div class="cloud-assist-section cloud-assist-section-list">
+            <div class="cloud-assist-subhead">
+              <div><strong>経験済み現場（${counts.experienced || 0}）</strong></div>
+            </div>
+            ${buildAssistPersonSiteCards(experienced, '経験済み現場はまだありません。')}
+          </div>
+          <div class="cloud-assist-section cloud-assist-section-list">
+            <div class="cloud-assist-subhead">
+              <div><strong>研修要現場（${counts.training || 0}）</strong></div>
+            </div>
+            ${buildAssistPersonSiteCards(training, '研修要現場はありません。')}
+          </div>
+        </div>
+      `;
+    }
+
     function buildAssistDetailsPanel() {
       const reference = assistScoreReference();
       const stats = assistSearchStats();
@@ -3564,6 +3628,9 @@
           </div>
           <div class="cloud-assist-panel${state.assist.activeTab === 'edit' ? ' is-active' : ''}" data-assist-panel="edit">
             ${buildAssistEditPanels()}
+          </div>
+          <div class="cloud-assist-panel${state.assist.activeTab === 'details' ? ' is-active' : ''}" data-assist-panel="details">
+            ${buildAssistPersonDetailsPanel()}
           </div>
         `
         : `

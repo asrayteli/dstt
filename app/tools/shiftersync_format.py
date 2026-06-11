@@ -37,6 +37,8 @@ SUBSTITUTE_SOURCE_PROJECT_MODE_ROW_PREFIX = "#substitute_source_project_mode"
 SUBSTITUTE_SOURCE_MONTH_KEY_ROW_PREFIX = "#substitute_source_month_key"
 SUBSTITUTE_SOURCE_DAY_ROW_PREFIX = "#substitute_source_day"
 SUBSTITUTE_SOURCE_ENTRY_ID_ROW_PREFIX = "#substitute_source_entry_id"
+# \u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3\uff08\u4ee3\u52d9\uff0f\u7814\u4fee\uff09\u306f entry \u306e\u5024\u3068\u306f\u5225\u30d5\u30a3\u30fc\u30eb\u30c9\u3068\u3057\u3066\u4fdd\u6301\u3059\u308b\u3002
+SECOND_OPTION_ROW_PREFIX = "#second_option"
 
 SHIFT_OPTION_MAPPINGS = {
     "A": "\u5348\u524d",
@@ -54,16 +56,20 @@ SHIFT_OPTION_MAPPINGS = {
     "N3": "3\u53f7\u8eca",
     "N4": "4\u53f7\u8eca",
     "N5": "5\u53f7\u8eca",
-    "SUB": "\u4ee3\u52d9",
-    "TRAIN": "\u7814\u4fee",
 }
 
-# \u5f79\u5272\u30aa\u30d7\u30b7\u30e7\u30f3\uff08\u4ee3\u52d9\u30fb\u7814\u4fee\uff09\u3002\u7d42\u65e5\u306e\u52e4\u52d9\u62d8\u675f\u3068\u3057\u3066\u6271\u3044\u3001
-# CloudShift \u30a2\u30b7\u30b9\u30c8\u306e\u7d4c\u9a13\u81ea\u52d5\u767b\u9332\uff08\u4ee3\u52d9\u5b9f\u7e3e\uff0f\u7814\u4fee\u6e08\u307f\uff09\u306e\u5165\u529b\u306b\u3082\u306a\u308b\u3002
-ROLE_OPTION_MAPPINGS = {
+# \u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3\uff08\u4ee3\u52d9 SUB\uff0f\u7814\u4fee TRAIN\uff09\u3002
+# \u901a\u5e38\u306e\u30b7\u30d5\u30c8\u30aa\u30d7\u30b7\u30e7\u30f3\u3068\u306f\u5225\u8ef8\u306e\u300c\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3\u300d\u3068\u3057\u3066 entry \u306b\u4ed8\u4e0e\u3059\u308b\u3002
+# \u30a2\u30b7\u30b9\u30c8\u306e\u7d4c\u9a13\u6e08\u307f\u73fe\u5834\uff0f\u7814\u4fee\u8981\u73fe\u5834\u30fb\u81ea\u52d5\u4f5c\u6210\u30a8\u30f3\u30b8\u30f3\u30fb\u8868\u793a\u306b\u306e\u307f\u7528\u3044\u3001
+# \u91cd\u8907\u30c1\u30a7\u30c3\u30af\uff08is_duplicate_by_rules\uff09\u306b\u306f\u4e00\u5207\u5f71\u97ff\u3055\u305b\u306a\u3044\u3002
+SECOND_OPTION_MAPPINGS = {
     "SUB": "\u4ee3\u52d9",
     "TRAIN": "\u7814\u4fee",
 }
+SECOND_OPTION_KEYS = set(SECOND_OPTION_MAPPINGS.keys())
+
+# \u65e7\u540d\uff08\u5f79\u5272\u30aa\u30d7\u30b7\u30e7\u30f3\uff09\u306e\u4e92\u63db\u30a8\u30a4\u30ea\u30a2\u30b9\u3002\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3\u3068\u540c\u4e00\u3002
+ROLE_OPTION_MAPPINGS = SECOND_OPTION_MAPPINGS
 
 LEAVE_OPTION_MAPPINGS = {
     "PAID": "\u6709\u4f11",
@@ -75,9 +81,30 @@ LEAVE_OPTION_MAPPINGS = {
     "OTHER": "\u305d\u306e\u4ed6",
 }
 
-OPTION_MAPPINGS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS}
+OPTION_MAPPINGS = {**SHIFT_OPTION_MAPPINGS, **LEAVE_OPTION_MAPPINGS, **SECOND_OPTION_MAPPINGS}
 
 ENTRY_VALUE_PATTERN = re.compile(r"^!([^!]+)!(.+)$")
+
+
+def normalize_second_option(value: Any) -> str:
+    """第二オプション値を正規化する（SUB/TRAIN のみ有効、それ以外は ""）。"""
+    key = str(value or "").strip().upper()
+    return key if key in SECOND_OPTION_KEYS else ""
+
+
+def _split_second_option(value: str, existing_second: Any) -> tuple[str, str]:
+    """entry の value と第二オプションを分離する。
+
+    新形式: value はシフトオプション、second_option は別フィールド。
+    旧形式（互換）: value が `!SUB!名前` / `!TRAIN!名前` の場合は第二オプションへ移し、
+    value は名前だけ（または素のシフト）に書き換える。
+    戻り値は (正規化後 value, 第二オプション)。
+    """
+    second = normalize_second_option(existing_second)
+    option_key, name = parse_entry_value(value)
+    if not second and option_key and str(option_key).upper() in SECOND_OPTION_KEYS:
+        return name, str(option_key).upper()
+    return value, second
 
 
 def validate_year_month(year: int, month: int) -> tuple[int, int]:
@@ -140,6 +167,9 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         value = str(raw.get("value", "")).strip()
         if not value:
             return {}
+        value, second_option = _split_second_option(
+            value, raw.get("second_option", raw.get("secondOption", ""))
+        )
         employee_name = str(raw.get("employee_name", raw.get("employeeName", "")) or "").strip()
         employee_number = str(raw.get("employee_number", raw.get("employeeNumber", "")) or "").strip()
         site_branch_row_id = _normalize_site_branch_row_id(
@@ -158,6 +188,7 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         return {
             "id": str(raw.get("id") or generate_entry_id()),
             "value": value,
+            "second_option": second_option,
             "comment": str(raw.get("comment", "") or "").strip(),
             "employee_name": employee_name,
             "employee_number": employee_number,
@@ -211,9 +242,11 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
     value = str(raw or "").strip()
     if not value:
         return {}
+    value, second_option = _split_second_option(value, "")
     return {
         "id": generate_entry_id(),
         "value": value,
+        "second_option": second_option,
         "comment": "",
         "employee_name": "",
         "employee_number": "",
@@ -299,6 +332,7 @@ def serialize_entry_rows(
     ]
 
     comment_rows: list[list[Any]] = []
+    second_option_rows: list[list[Any]] = []
     employee_name_rows: list[list[Any]] = []
     employee_number_rows: list[list[Any]] = []
     site_row_id_rows: list[list[Any]] = []
@@ -318,6 +352,10 @@ def serialize_entry_rows(
                 continue
             if entry.get("comment"):
                 comment_rows.append([COMMENT_ROW_PREFIX, day, index, entry["comment"]])
+            if entry.get("second_option"):
+                second_option_rows.append(
+                    [SECOND_OPTION_ROW_PREFIX, day, index, entry["second_option"]]
+                )
             if entry.get("employee_name"):
                 employee_name_rows.append(
                     [EMPLOYEE_NAME_ROW_PREFIX, day, index, entry["employee_name"]]
@@ -394,6 +432,7 @@ def serialize_entry_rows(
     return (
         rows
         + comment_rows
+        + second_option_rows
         + employee_name_rows
         + employee_number_rows
         + site_row_id_rows
@@ -455,6 +494,7 @@ def parse_csv_text(text: str) -> dict[str, Any]:
 
     entries_per_day = empty_entries_for_month(year, month)
     comment_rows: list[list[str]] = []
+    second_option_rows: list[list[str]] = []
     employee_name_rows: list[list[str]] = []
     employee_number_rows: list[list[str]] = []
     site_row_id_rows: list[list[str]] = []
@@ -512,6 +552,9 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         if head == COMMENT_ROW_PREFIX:
             comment_rows.append(row)
             continue
+        if head == SECOND_OPTION_ROW_PREFIX:
+            second_option_rows.append(row)
+            continue
         if head == EMPLOYEE_NAME_ROW_PREFIX:
             employee_name_rows.append(row)
             continue
@@ -550,6 +593,18 @@ def parse_csv_text(text: str) -> dict[str, Any]:
         if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
             continue
         entries_per_day[day_key][index]["comment"] = str(row[3] or "").strip()
+
+    for row in second_option_rows:
+        if len(row) < 4:
+            continue
+        try:
+            day_key = str(int(row[1]))
+            index = int(row[2])
+        except (TypeError, ValueError):
+            continue
+        if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
+            continue
+        entries_per_day[day_key][index]["second_option"] = normalize_second_option(row[3])
 
     for row in employee_number_rows:
         if len(row) < 4:
@@ -694,6 +749,9 @@ def entry_display_text(entry: Any, *, include_comment: bool = False, comment_lim
         return ""
     option_key, name = parse_entry_value(normalized["value"])
     head = f"{name} {OPTION_MAPPINGS.get(option_key, option_key)}" if option_key else name
+    second_option = normalize_second_option(normalized.get("second_option"))
+    if second_option:
+        head = f"{head}［{SECOND_OPTION_MAPPINGS.get(second_option, second_option)}］"
     comment = normalized.get("comment", "").strip()
     if not include_comment or not comment:
         return head
@@ -716,3 +774,19 @@ def entry_option_and_name(entry: Any) -> tuple[str | None, str, str]:
         return None, "", ""
     option_key, name = parse_entry_value(normalized["value"])
     return option_key, name, normalized.get("comment", "")
+
+
+def entry_second_option(entry: Any) -> str:
+    """entry の第二オプション（SUB/TRAIN）を返す。
+
+    新形式の second_option フィールドを優先し、無ければ旧形式の値（`!SUB!名前`）
+    からも導出する（保存前の生データでも判定できるようにする）。
+    """
+    if isinstance(entry, dict):
+        direct = normalize_second_option(entry.get("second_option", entry.get("secondOption", "")))
+        if direct:
+            return direct
+        option_key, _name = parse_entry_value(str(entry.get("value") or ""))
+    else:
+        option_key, _name = parse_entry_value(str(entry or ""))
+    return normalize_second_option(option_key)

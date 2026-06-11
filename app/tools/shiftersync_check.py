@@ -9,18 +9,22 @@ try:
         LEAVE_OPTION_MAPPINGS,
         OPTION_MAPPINGS,
         ROLE_OPTION_MAPPINGS,
+        SECOND_OPTION_MAPPINGS,
         entry_display_text,
         entry_name_for_comparison,
         entry_option_and_name,
+        entry_second_option,
     )
 except ImportError:
     from app.tools.shiftersync_format import (  # type: ignore
         LEAVE_OPTION_MAPPINGS,
         OPTION_MAPPINGS,
         ROLE_OPTION_MAPPINGS,
+        SECOND_OPTION_MAPPINGS,
         entry_display_text,
         entry_name_for_comparison,
         entry_option_and_name,
+        entry_second_option,
     )
 
 
@@ -36,8 +40,11 @@ TIME_CONFLICT_RULES = {
 }
 VEHICLE_OPTIONS = {"M", "C", "O", "W", "V"}
 LEAVE_OPTION_KEYS = set(LEAVE_OPTION_MAPPINGS.keys())
-# 代務・研修は終日の勤務拘束として扱う（休暇以外のあらゆる予定と重複）
+# 代務・研修は「第二オプション」。entry の値ではなく別フィールドで保持し、
+# アシスト／自動作成／表示にのみ用いる。重複チェックには影響させないため、
+# ここでは ROLE_OPTION_KEYS を判定に使わない（互換のため定義のみ残す）。
 ROLE_OPTION_KEYS = set(ROLE_OPTION_MAPPINGS.keys())
+SECOND_OPTION_KEYS = ROLE_OPTION_KEYS
 
 
 def is_duplicate_by_rules(
@@ -45,10 +52,6 @@ def is_duplicate_by_rules(
 ) -> bool:
     if option1 in LEAVE_OPTION_KEYS or option2 in LEAVE_OPTION_KEYS:
         return False
-
-    # 代務・研修は終日拘束。休暇以外のどの予定とも同日共存できない。
-    if option1 in ROLE_OPTION_KEYS or option2 in ROLE_OPTION_KEYS:
-        return True
 
     if option1 == TEMPORARY_OPTION or option2 == TEMPORARY_OPTION:
         return same_site and option1 == option2 == TEMPORARY_OPTION
@@ -120,12 +123,15 @@ def compare_shift_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
             normalized_entries = []
             for entry in entries:
                 option_key, name, comment = entry_option_and_name(entry)
+                second_option = entry_second_option(entry)
                 normalized_entries.append(
                     {
                         "original": entry["value"],
                         "display": entry_display_text(entry),
                         "comparison": entry_name_for_comparison(entry),
                         "option": option_key,
+                        "second_option": second_option,
+                        "second_option_label": SECOND_OPTION_MAPPINGS.get(second_option, ""),
                         "name": name,
                         "comment": comment,
                     }
@@ -201,5 +207,6 @@ def compare_shift_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
         "conflicts": conflicts,
         "same_site_conflicts": same_site_conflicts,
         "option_mappings": OPTION_MAPPINGS,
+        "second_option_mappings": SECOND_OPTION_MAPPINGS,
         "total_files": len(payloads),
     }
