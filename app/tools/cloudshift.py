@@ -5801,6 +5801,19 @@ def _remove_person_experience_scene_record(
     return f"person経験済現場の自動実績を削除: {_assist_record_history_label(existing)}"
 
 
+# 自動同期の差分判定で無視する揮発フィールド（保存ごとに必ず変わるため、
+# これらだけの差分では「更新」とみなさず履歴ノイズを出さない）。
+_ASSIST_AUTO_VOLATILE_KEYS = {"updated_at", "updated_by"}
+
+
+def _assist_auto_payload_changed(existing: dict[str, Any], new: dict[str, Any]) -> bool:
+    """自動同期エントリの実質的な差分があるか（揮発フィールドは無視）。"""
+    def _stable(item: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in item.items() if k not in _ASSIST_AUTO_VOLATILE_KEYS}
+
+    return _stable(existing) != _stable(new)
+
+
 def _role_option_entries_for_month(
     month_data: dict[str, Any], year: int, month: int
 ) -> dict[tuple[str, str], dict[str, Any]]:
@@ -5913,7 +5926,7 @@ def _sync_role_option_experience_for_month(
         record["source_occurrences"] = int(info["count"])
         if existing:
             index = assist["records"].index(existing)
-            if assist["records"][index] != record:
+            if _assist_auto_payload_changed(existing, record):
                 assist["records"][index] = record
                 changes.append(f"{label}実績を自動更新: {_assist_record_history_label(record)}")
         else:
@@ -6004,7 +6017,7 @@ def _sync_role_option_sites_for_month(
         )
         if existing:
             index = assist["experienced_sites"].index(existing)
-            if assist["experienced_sites"][index] != site:
+            if _assist_auto_payload_changed(existing, site):
                 assist["experienced_sites"][index] = site
                 changes.append(
                     f"経験済み現場を自動更新（{label}）: {_assist_record_history_label(site)}"
