@@ -3351,33 +3351,44 @@
       return html;
     }
 
-    function buildAssistPersonSiteCards(sites, emptyText) {
+    function buildAssistPersonSiteTable(sites, emptyText) {
       if (!Array.isArray(sites) || !sites.length) {
         return `<div class="cloud-empty-state"><p>${escapeHtml(emptyText)}</p></div>`;
       }
       const ordered = sites.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-      return ordered.map((site) => {
+      const rows = ordered.map((site) => {
         const shiftLabel = site.shift_label || (site.shift_key ? assistShiftLabel(site.shift_key) : ASSIST_OPTIONLESS_LABEL);
-        const autoBadge = site.source_label
+        const sourceCell = site.source_label
           ? `<span class="cloud-assist-auto-badge">${escapeHtml(site.source_label)}</span>`
-          : '';
+          : '手動登録';
         return `
-          <article class="cloud-assist-card${site.source_label ? ' is-auto-record' : ''}">
-            <div class="cloud-assist-card-head">
-              <div>
-                <h4>${escapeHtml(site.site_name || '-')}</h4>
-                <p>${escapeHtml(`${site.date || '-'} / ${shiftLabel}`)}</p>
-                ${autoBadge}
-              </div>
-            </div>
-            <div class="cloud-assist-card-meta">
-              <span>${escapeHtml(site.site_id || '契約番号未設定')}</span>
-              <span>${escapeHtml(shiftLabel)}</span>
-            </div>
-            <p class="cloud-panel-note">${escapeHtml(site.notes || 'メモなし')}</p>
-          </article>
+          <tr class="${site.source_label ? 'is-auto-record' : ''}">
+            <td class="cloud-assist-site-table-nowrap">${escapeHtml(site.date || '-')}</td>
+            <td>${escapeHtml(site.site_name || '-')}</td>
+            <td class="cloud-assist-site-table-nowrap">${escapeHtml(site.site_id || '未設定')}</td>
+            <td class="cloud-assist-site-table-nowrap">${escapeHtml(shiftLabel)}</td>
+            <td>${sourceCell}</td>
+            <td class="cloud-assist-site-table-notes">${escapeHtml(site.notes || '')}</td>
+          </tr>
         `;
       }).join('');
+      return `
+        <div class="cloud-assist-site-table-wrap">
+          <table class="cloud-assist-site-table">
+            <thead>
+              <tr>
+                <th>日付</th>
+                <th>現場名</th>
+                <th>契約番号</th>
+                <th>OP</th>
+                <th>登録元</th>
+                <th>メモ</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
     }
 
     function buildAssistPersonDetailsPanel() {
@@ -3386,7 +3397,7 @@
       const experienced = Array.isArray(data.experienced_sites) ? data.experienced_sites : [];
       const training = Array.isArray(data.training_sites) ? data.training_sites : [];
       return `
-        <div class="cloud-assist-stack">
+        <div class="cloud-assist-stack cloud-assist-person-stack">
           <div class="cloud-assist-section">
             <div class="cloud-assist-subhead">
               <div>
@@ -3399,17 +3410,17 @@
               <span class="cloud-note-chip">研修要現場 ${counts.training || 0}件</span>
             </div>
           </div>
-          <div class="cloud-assist-section cloud-assist-section-list">
+          <div class="cloud-assist-section">
             <div class="cloud-assist-subhead">
               <div><strong>経験済み現場（${counts.experienced || 0}）</strong></div>
             </div>
-            ${buildAssistPersonSiteCards(experienced, '経験済み現場はまだありません。')}
+            ${buildAssistPersonSiteTable(experienced, '経験済み現場はまだありません。')}
           </div>
-          <div class="cloud-assist-section cloud-assist-section-list">
+          <div class="cloud-assist-section">
             <div class="cloud-assist-subhead">
               <div><strong>研修要現場（${counts.training || 0}）</strong></div>
             </div>
-            ${buildAssistPersonSiteCards(training, '研修要現場はありません。')}
+            ${buildAssistPersonSiteTable(training, '研修要現場はありません。')}
           </div>
         </div>
       `;
