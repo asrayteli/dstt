@@ -66,6 +66,55 @@ def _write_report_xlsx(path: Path):
     workbook.close()
 
 
+def test_monthly_generator_expense_mapping_matches_current_company_rules():
+    module = _load_monthly_module()
+
+    expected_mapping = {
+        "外注費": "材料",
+        "消耗品費": "材料",
+        "保健衛生費": "材料",
+        "燃料費": "材料",
+        "タイヤ費": "材料",
+        "傭車費": "材料",
+        "被服費": "材料",
+        "修繕費": "材料",
+        "賃借料": "材料",
+        "保険料": "材料",
+        "家賃地代": "材料",
+        "減価償却費": "材料",
+        "減価償却費（ﾘｰｽ資産）": "材料",
+        "租税公課": "材料",
+        "支払手数料": "材料",
+        "材料その他": "材料",
+        "給料": "労務",
+        "賞与": "労務",
+        "賞与引当金繰入額": "労務",
+        "退職金": "労務",
+        "退職給付費用": "労務",
+        "法定福利費": "労務",
+        "福利厚生費": "労務",
+        "通勤費": "労務",
+        "労務費振替": "労務",
+        "労務費その他": "労務",
+        "雇用調整助成金": "労務",
+        "広告宣伝費": "経費",
+        "募集費": "経費",
+        "旅費交通費": "経費",
+        "水道光熱費": "経費",
+        "通信費": "経費",
+        "リース料": "経費",
+        "交際接待費": "経費",
+        "会議費": "経費",
+        "文化教育費": "経費",
+        "事故負担金": "経費",
+        "寄付金": "経費",
+        "会費": "経費",
+        "雑費": "経費",
+        "経費その他": "経費",
+    }
+
+    assert module.EXPENSE_MAPPING == expected_mapping
+
 def test_monthly_generator_db_mode_uses_site_contract_master(tmp_path):
     module, app = _build_app(tmp_path)
     subject_name = next(iter(module.EXPENSE_MAPPING.keys()))
