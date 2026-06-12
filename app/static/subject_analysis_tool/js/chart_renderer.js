@@ -227,9 +227,12 @@ class ChartRenderer {
     }
 }
 
-// グローバル関数
+// グローバル関数（グラフ種類変更時に呼ばれる）
 function renderChart() {
-    const filters = filterController.getFilters();
+    // 分析実行時のフィルターを優先する（未適用のUI変更や担当者絞り込みの解決済みコード一覧を保つため）
+    const filters = (typeof currentFilters !== 'undefined' && currentFilters)
+        ? currentFilters
+        : filterController.getFilters();
     chartRenderer.renderChart(filters);
 }
 

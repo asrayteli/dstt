@@ -82,6 +82,27 @@ def load_site_mapping_from_master():
     return site_dict, site_master, warnings
 
 
+def get_manager_contract_codes(manager_id):
+    """現場リストPLUSの最新マスタから担当者の契約コード一覧を返す。"""
+    ensure_contract_master_synced()
+    rows = (
+        SiteContractMaster.query
+        .filter(SiteContractMaster.is_active.is_(True))
+        .order_by(SiteContractMaster.contract_code.asc())
+        .all()
+    )
+
+    contract_codes = set()
+    for row in rows:
+        if not manager_ids_match(row.site_manager_id, manager_id):
+            continue
+        contract_code = normalize_contract_code(row.contract_code)
+        if not contract_code:
+            continue
+        contract_codes.add(contract_code)
+    return contract_codes
+
+
 @subject_analysis_tool_bp.route("/")
 @login_required
 def index():
@@ -96,6 +117,7 @@ def upload_files():
         prev_year_subject_file = request.files.get("prev_year_subject_file")
         site_file = request.files.get("site_file")
         site_source = str(request.form.get("site_source", "file") or "file").strip().lower()
+        manager_id = str(request.form.get("manager_id", "") or "").strip()
 
         if not subject_file:
             return jsonify({"error": "科目別分析表 CSV を選択してください"}), 400
@@ -103,6 +125,16 @@ def upload_files():
             return jsonify({"error": "site_source は file または db を指定してください"}), 400
         if site_source == "file" and (not site_file or not site_file.filename):
             return jsonify({"error": "現場表読み込みモードでは現行現場表 CSV が必要です"}), 400
+
+        # 担当者絞り込みは現場リストPLUSの最新マスタを参照する（どちらのモードでも共通）
+        manager_contract_codes = None
+        if manager_id:
+            manager_contract_codes = get_manager_contract_codes(manager_id)
+            if not manager_contract_codes:
+                return jsonify({
+                    "error": f"担当者番号 {manager_id} に紐づく現場が現場リストPLUSに見つかりません。"
+                             "担当者番号を確認するか、現場リストPLUSを同期してください"
+                }), 400
 
         upload_folder = get_upload_folder()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -125,12 +157,39 @@ def upload_files():
 
         parsed_data = parse_subject_data(subject_data)
 
+        extra_warnings = []
+        manager_filter = None
+        if manager_contract_codes is not None:
+            total_rows = len(parsed_data)
+            parsed_data = [item for item in parsed_data if item["contract_code"] in manager_contract_codes]
+            if not parsed_data:
+                try:
+                    os.remove(subject_path)
+                except OSError:
+                    pass
+                return jsonify({
+                    "error": f"担当者番号 {manager_id} の現場（{len(manager_contract_codes)}件）は"
+                             "科目別分析表に含まれていません"
+                }), 400
+            manager_filter = {
+                "manager_id": manager_id,
+                "master_contract_count": len(manager_contract_codes),
+                "matched_contract_count": len({item["contract_code"] for item in parsed_data}),
+                "excluded_row_count": total_rows - len(parsed_data),
+            }
+            extra_warnings.append(
+                f"担当者番号 {manager_id} で絞り込み: 対象現場 {manager_filter['matched_contract_count']} 件 / "
+                f"対象外の行 {manager_filter['excluded_row_count']} 件を除外しました"
+            )
+
         prev_year_data = None
         prev_year_validation = None
         if prev_year_subject_file and prev_year_subject_file.filename:
             prev_year_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_prev_subject.csv")
             prev_year_subject_file.save(prev_year_path)
             prev_year_csv = read_csv_with_encoding(prev_year_path)
+            if not prev_year_csv:
+                extra_warnings.append("前年データ CSV の読み込みに失敗したため、前年比較なしで続行します")
             if prev_year_csv:
                 prev_year_validation = validate_subject_csv_structure(prev_year_csv, "前年データ")
                 if prev_year_validation["fatal"]:
@@ -144,6 +203,11 @@ def upload_files():
                         pass
                     return jsonify({"error": prev_year_validation["message"]}), 400
                 prev_year_data = parse_subject_data(prev_year_csv)
+                if prev_year_data and manager_contract_codes is not None:
+                    prev_year_data = [
+                        item for item in prev_year_data
+                        if item["contract_code"] in manager_contract_codes
+                    ]
             try:
                 os.remove(prev_year_path)
             except OSError:
@@ -160,6 +224,8 @@ def upload_files():
             site_csv = read_csv_with_encoding(site_path)
             if site_csv:
                 site_data = parse_site_data(site_csv)
+            else:
+                extra_warnings.append("現行現場表 CSV の読み込みに失敗したため、セグメントは未分類になります")
             try:
                 os.remove(site_path)
             except OSError:
@@ -172,7 +238,7 @@ def upload_files():
             prev_year_data or [],
             structure_validation,
             prev_year_validation,
-            warnings,
+            extra_warnings + list(warnings or []),
         )
 
         try:
@@ -194,6 +260,7 @@ def upload_files():
                     "prev_year_count": len(prev_year_data) if prev_year_data else 0,
                     "site_count": len(site_data) if site_data else 0,
                     "site_source": site_source,
+                    "manager_filter": manager_filter,
                     "unclassified_count": validation["unmatched_site_mapping_count"],
                     "warnings": validation["warnings"],
                     "validation": validation,
@@ -214,28 +281,13 @@ def manager_contracts():
         if not manager_id:
             return jsonify({"error": "manager_id を指定してください"}), 400
 
-        ensure_contract_master_synced()
-        rows = (
-            SiteContractMaster.query
-            .filter(SiteContractMaster.is_active.is_(True))
-            .order_by(SiteContractMaster.contract_code.asc())
-            .all()
-        )
-
-        contract_codes = []
-        for row in rows:
-            if not manager_ids_match(row.site_manager_id, manager_id):
-                continue
-            contract_code = normalize_contract_code(row.contract_code)
-            if not contract_code:
-                continue
-            contract_codes.append(contract_code)
+        contract_codes = get_manager_contract_codes(manager_id)
 
         return jsonify(
             {
                 "manager_id": manager_id,
-                "contract_codes": sorted(set(contract_codes)),
-                "count": len(set(contract_codes)),
+                "contract_codes": sorted(contract_codes),
+                "count": len(contract_codes),
             }
         )
     except Exception as exc:
@@ -245,11 +297,12 @@ def manager_contracts():
 
 def read_csv_with_encoding(file_path):
     """複数エンコーディングで CSV を読み込む。"""
-    encodings = ["utf-8", "shift_jis", "cp932", "utf-8-sig"]
+    # utf-8 より先に utf-8-sig を試さないと BOM が先頭セルに残る
+    encodings = ["utf-8-sig", "cp932", "shift_jis", "utf-8"]
 
     for encoding in encodings:
         try:
-            with open(file_path, "r", encoding=encoding) as file:
+            with open(file_path, "r", encoding=encoding, newline="") as file:
                 reader = csv.reader(file)
                 return list(reader)
         except Exception:
@@ -365,10 +418,16 @@ def parse_amount_cell(value):
 
 
 def parse_subject_data(csv_data):
-    """科目別分析表 CSV を解析して明細配列に変換する。"""
+    """科目別分析表 CSV を解析して明細配列に変換する。
+
+    符号の扱い: CSV 上は売上・原価とも正の値。原価行のみ符号反転して
+    負の値で保持するため、利益 = 売上 + 原価（足し算）で計算できる。
+    """
     parsed = []
     indirect_cost_codes = {"間接原価", "関節原価"}
     revenue_names = {"基本請負料", "その他請負料"}
+    # 請負形態名称で売上区分を判別する科目（月次ジェネレーターと同じ扱い）
+    contract_type_sales_subjects = {"自動車売上", "旅客運送売上"}
 
     for index, row in enumerate(csv_data):
         if index == 0:
@@ -386,6 +445,9 @@ def parse_subject_data(csv_data):
         normalized_subject_code = subject_code.replace(" ", "").replace("　", "")
         is_indirect_cost = normalized_subject_code in indirect_cost_codes
 
+        # 販売費は現場収支の対象外（月次ジェネレーターと同じ扱い）
+        if normalized_subject_code == "販売費":
+            continue
         if not subject_name and not is_indirect_cost:
             continue
         if not contract_code:
@@ -395,11 +457,12 @@ def parse_subject_data(csv_data):
         if not display_subject_name and is_indirect_cost:
             display_subject_name = "間接原価"
 
-        if subject_name == "自動車売上":
+        is_contract_type_sales = subject_name in contract_type_sales_subjects
+        if is_contract_type_sales:
             if contract_type in revenue_names:
                 display_subject_name = contract_type
             elif contract_type:
-                display_subject_name = f"自動車売上({contract_type})"
+                display_subject_name = f"{subject_name}({contract_type})"
 
         amounts = []
         for col_index in range(13, len(row)):
@@ -411,7 +474,7 @@ def parse_subject_data(csv_data):
         while len(amounts) < 12:
             amounts.append(0)
 
-        is_revenue = display_subject_name in revenue_names
+        is_revenue = display_subject_name in revenue_names or is_contract_type_sales
         if not is_revenue:
             amounts = [-amount for amount in amounts]
 
@@ -452,13 +515,13 @@ def parse_site_data(csv_data):
     return site_dict
 
 
-def summarize_by_key(results, key_getter):
+def summarize_by_key(results, key_getter, label_getter=None):
     summary = {}
     for result in results:
         key = key_getter(result)
         if key not in summary:
             summary[key] = {
-                "name": key,
+                "name": label_getter(result) if label_getter else key,
                 "current": 0,
                 "comparison": 0,
                 "diff": 0,
@@ -538,7 +601,15 @@ def export_xlsx():
         )
 
         site_sheet = workbook.create_sheet("現場別サマリー")
-        site_summary = summarize_by_key(results, lambda r: (r.get("item") or {}).get("site_name", ""))
+        # 同名現場の混同を避けるため契約コードを含めたキーで集計する
+        site_summary = summarize_by_key(
+            results,
+            lambda r: (
+                (r.get("item") or {}).get("contract_code", ""),
+                (r.get("item") or {}).get("site_name", ""),
+            ),
+            lambda r: (r.get("item") or {}).get("site_name", ""),
+        )
         append_sheet(
             site_sheet,
             ["現場名", "当期合計", "比較合計", "差異", "差異率(%)", "異常値件数"],

@@ -555,6 +555,15 @@
     filter: brightness(1.08);
 }
 
+/* 詳細一覧のソート方向インジケーター */
+.data-table th.sortable.sort-asc::after {
+    content: " ▲";
+}
+
+.data-table th.sortable.sort-desc::after {
+    content: " ▼";
+}
+
 .data-table td {
     border-bottom: 1px solid #e8f0f8;
     color: #25394d;
@@ -981,6 +990,22 @@
     border-color: #bfe3cf;
 }
 
+.manager-filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-bottom: 0.55rem;
+    font-size: 0.86rem;
+    color: #25394d;
+    cursor: pointer;
+}
+
+#upload-manager-id:disabled {
+    background: #eef2f7;
+    color: #9aa9b8;
+    cursor: not-allowed;
+}
+
 .mode-help {
     margin: 0.55rem 0 0;
     color: #5e7082;
@@ -1288,7 +1313,7 @@
 }
 
 .sat-container.sat-simple-view .simple-only {
-    display: block;
+    display: inline;
 }
 
 .hidden {
