@@ -463,8 +463,13 @@
     display: none;
 }
 
+/* 詳細一覧以外のタブも縦スクロールできるようにする
+   （.tab-content は overflow: hidden のため、各ペイン側でスクロールさせる） */
 .tab-pane.active {
     display: block;
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 #tab-detail.tab-pane.active {
@@ -988,22 +993,6 @@
 .mode-note-card {
     background: #effaf5;
     border-color: #bfe3cf;
-}
-
-.manager-filter-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    margin-bottom: 0.55rem;
-    font-size: 0.86rem;
-    color: #25394d;
-    cursor: pointer;
-}
-
-#upload-manager-id:disabled {
-    background: #eef2f7;
-    color: #9aa9b8;
-    cursor: not-allowed;
 }
 
 .mode-help {

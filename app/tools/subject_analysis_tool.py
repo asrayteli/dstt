@@ -103,6 +103,57 @@ def get_manager_contract_codes(manager_id):
     return contract_codes
 
 
+def list_managers_from_master():
+    """現場リストPLUSの最新マスタから担当者一覧（番号・氏名・現場数）を返す。"""
+    ensure_contract_master_synced()
+    rows = (
+        SiteContractMaster.query
+        .filter(SiteContractMaster.is_active.is_(True))
+        .order_by(SiteContractMaster.contract_code.asc())
+        .all()
+    )
+
+    managers = {}
+    for row in rows:
+        manager_id = str(row.site_manager_id or "").strip()
+        if not manager_id:
+            continue
+        contract_code = normalize_contract_code(row.contract_code)
+        if not contract_code:
+            continue
+        entry = managers.setdefault(manager_id, {
+            "manager_id": manager_id,
+            "manager_name": str(row.site_manager_name or "").strip(),
+            "contract_codes": set(),
+        })
+        if not entry["manager_name"]:
+            entry["manager_name"] = str(row.site_manager_name or "").strip()
+        entry["contract_codes"].add(contract_code)
+
+    def sort_key(item):
+        manager_id = item["manager_id"]
+        return (0, int(manager_id)) if manager_id.isdigit() else (1, manager_id)
+
+    result = []
+    for entry in sorted(managers.values(), key=sort_key):
+        result.append({
+            "manager_id": entry["manager_id"],
+            "manager_name": entry["manager_name"],
+            "site_count": len(entry["contract_codes"]),
+        })
+    return result
+
+
+@subject_analysis_tool_bp.route("/api/managers", methods=["GET"])
+@login_required
+def managers():
+    try:
+        return jsonify({"managers": list_managers_from_master()})
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({"error": f"担当者一覧の取得に失敗しました: {exc}"}), 500
+
+
 @subject_analysis_tool_bp.route("/")
 @login_required
 def index():

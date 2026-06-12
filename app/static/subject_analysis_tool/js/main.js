@@ -13,7 +13,49 @@ const FILE_NAME_LABEL_IDS = {
 document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     showWelcomeScreen();
+    loadManagerOptions();
 });
+
+/**
+ * 現場リストPLUSの担当者一覧をサーバーから読み込み、
+ * トップページとサイドバーの選択肢に反映する。
+ */
+async function loadManagerOptions() {
+    const uploadSelect = document.getElementById('upload-manager-select');
+    const sidebarSelect = document.getElementById('manager-id-filter');
+    if (!uploadSelect && !sidebarSelect) return;
+
+    try {
+        const response = await fetch('/tools/subject_analysis_tool/api/managers');
+        const payload = await response.json();
+        if (!response.ok || payload.error) {
+            throw new Error(payload.error || '担当者一覧の取得に失敗しました。');
+        }
+        const managers = Array.isArray(payload.managers) ? payload.managers : [];
+        fillManagerSelect(uploadSelect, managers, '絞り込まない（全現場を取り込む）');
+        fillManagerSelect(sidebarSelect, managers, '絞り込まない');
+    } catch (error) {
+        console.error('Manager list load error:', error);
+        fillManagerSelect(uploadSelect, [], '絞り込まない（担当者一覧を取得できませんでした）');
+        fillManagerSelect(sidebarSelect, [], '絞り込まない（取得失敗）');
+    }
+}
+
+function fillManagerSelect(select, managers, emptyLabel) {
+    if (!select) return;
+    const current = select.value;
+    const options = [`<option value="">${escapeHtml(emptyLabel)}</option>`];
+    managers.forEach((manager) => {
+        const managerId = String(manager.manager_id || '');
+        const name = String(manager.manager_name || '').trim();
+        const label = `${managerId}${name ? ` ${name}` : ''}（${Number(manager.site_count || 0)}現場）`;
+        options.push(`<option value="${escapeHtml(managerId)}">${escapeHtml(label)}</option>`);
+    });
+    select.innerHTML = options.join('');
+    if (current && managers.some((manager) => String(manager.manager_id) === current)) {
+        select.value = current;
+    }
+}
 
 function setupEventListeners() {
     const uploadBtn = document.getElementById('upload-btn');
@@ -50,11 +92,6 @@ function setupEventListeners() {
     const siteSource = document.getElementById('site-source');
     if (siteSource) {
         siteSource.addEventListener('change', syncSiteSourceMode);
-    }
-
-    const managerFilterEnabled = document.getElementById('manager-filter-enabled');
-    if (managerFilterEnabled) {
-        managerFilterEnabled.addEventListener('change', syncManagerFilterMode);
     }
 
     setupUploadInteractions();
@@ -117,21 +154,6 @@ function setupEventListeners() {
     applyComparisonModeUI(comparisonMode ? comparisonMode.value : 'prev_year');
     syncResultLayoutToggles();
     syncSiteSourceMode();
-    syncManagerFilterMode();
-}
-
-function syncManagerFilterMode() {
-    const enabled = document.getElementById('manager-filter-enabled');
-    const managerInput = document.getElementById('upload-manager-id');
-    if (!managerInput) return;
-
-    const isEnabled = !!(enabled && enabled.checked);
-    managerInput.disabled = !isEnabled;
-    if (!isEnabled) {
-        managerInput.value = '';
-    } else {
-        managerInput.focus();
-    }
 }
 
 function syncSiteSourceMode() {
@@ -304,19 +326,14 @@ async function handleFileUpload() {
         return;
     }
 
-    const managerFilterEnabled = document.getElementById('manager-filter-enabled')?.checked || false;
-    const uploadManagerId = (document.getElementById('upload-manager-id')?.value || '').trim();
-    if (managerFilterEnabled && !uploadManagerId) {
-        showNotice('担当者絞り込みが有効です。担当者番号を入力してください。', 'error');
-        return;
-    }
+    const uploadManagerId = (document.getElementById('upload-manager-select')?.value || '').trim();
 
     const formData = new FormData();
     formData.append('subject_file', subjectFile);
     if (prevYearSubjectFile) formData.append('prev_year_subject_file', prevYearSubjectFile);
     if (siteFile) formData.append('site_file', siteFile);
     formData.append('site_source', siteSource);
-    if (managerFilterEnabled && uploadManagerId) {
+    if (uploadManagerId) {
         formData.append('manager_id', uploadManagerId);
     }
 
@@ -580,7 +597,6 @@ function resetAll() {
     if (uploadForm) uploadForm.reset();
     resetUploadLabels();
     syncSiteSourceMode();
-    syncManagerFilterMode();
 
     currentFilters = null;
     pendingUploadResult = null;

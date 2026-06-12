@@ -357,6 +357,34 @@ def test_upload_without_manager_id_keeps_all_rows(tmp_path):
     assert payload["metadata"]["current_year_count"] == 2
 
 
+def test_managers_endpoint_lists_managers_from_master(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _user()
+
+    with client.application.app_context():
+        db.session.add(_master_row("01234001", "9001", "現場A", row_id=1))
+        db.session.add(_master_row("01234002", "9001", "現場A別棟", row_id=2))
+        db.session.add(_master_row("05678001", "9002", "現場B", row_id=3))
+        db.session.commit()
+
+    response = client.get("/tools/subject_analysis_tool/api/managers")
+
+    assert response.status_code == 200
+    managers = response.get_json()["managers"]
+    assert [m["manager_id"] for m in managers] == ["9001", "9002"]
+    assert managers[0]["site_count"] == 2
+    assert managers[1]["site_count"] == 1
+    assert managers[0]["manager_name"] == "担当 太郎"
+
+
+def test_manager_ids_match_handles_excel_decimal_format():
+    from app.site_contract_master import manager_ids_match
+
+    assert manager_ids_match("9001.0", "9001")
+    assert manager_ids_match("09001", "9001.0")
+    assert not manager_ids_match("9002.0", "9001")
+
+
 def test_subject_analysis_tool_page_renders_site_source_modes(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _user()
@@ -370,8 +398,7 @@ def test_subject_analysis_tool_page_renders_site_source_modes(tmp_path):
     assert 'id="site-source-file-panel"' in html
     assert 'id="site-source-db-panel"' in html
     assert 'id="manager-id-filter"' in html
-    assert 'id="manager-filter-enabled"' in html
-    assert 'id="upload-manager-id"' in html
+    assert 'id="upload-manager-select"' in html
     assert 'id="review-manager-filter"' in html
     assert 'id="upload-review-panel"' in html
     assert 'id="filter-preset-select"' in html
