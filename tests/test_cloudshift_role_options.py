@@ -299,6 +299,136 @@ def test_training_option_removes_training_required_site():
     assert all(t.get("id") != "t1" for t in training)
 
 
+def _create_person_project(module, app, client, *, title, employee_number):
+    module.current_user = _owner()
+    resp = client.post(
+        f"{BASE}/api/create",
+        data={"title": title, "mode": "person", "year": "2026", "month": "4",
+              "employee_number": employee_number},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    return resp.get_json()["project"]["project"]["id"]
+
+
+def _person_assist_payload(client, project_id):
+    resp = client.get(f"{BASE}/api/project/{project_id}/assist")
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    return resp.get_json()["assist"]
+
+
+def test_second_option_reflects_person_book_experienced_sites():
+    """scene 帳の代務/研修は、社員番号一致の person 帳の「経験済み現場」にも反映される。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+
+    _save_month_entries(module, app, client, project_id, {
+        "1": [{"id": "e1", "value": "!SUB!三木", "employee_number": "E101", "comment": ""}],
+        "2": [{"id": "e2", "value": "!TRAIN!三木", "employee_number": "E101", "comment": ""}],
+    })
+
+    assist = _person_assist_payload(client, person_id)
+    autos = {s["shift_key"]: s for s in assist["experienced_sites"]}
+    assert set(autos) == {"SUB", "TRAIN"}
+    assert all(s["source_label"] for s in autos.values())
+    assert all(s["site_name"] == "Role Site" for s in autos.values())
+
+    # 代務 entry を消すと person 側の自動分も解除される
+    _save_month_entries(module, app, client, project_id, {
+        "2": [{"id": "e2", "value": "!TRAIN!三木", "employee_number": "E101", "comment": ""}],
+    })
+    assist = _person_assist_payload(client, person_id)
+    assert [s["shift_key"] for s in assist["experienced_sites"]] == ["TRAIN"]
+
+
+def test_training_option_removes_person_book_training_site():
+    """研修第二オプションは person 帳の「研修要現場」からも該当現場を削除する。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+
+    # person 帳に同じ現場の研修要現場を手動登録しておく（現場名で照合される）
+    with app.app_context():
+        person = module._load_project(person_id)
+        assist = module._ensure_person_assist(person)
+        assist["training_sites"].append({
+            "id": "t1", "kind": "training", "site_row_id": None, "site_id": "",
+            "site_name": "Role Site", "shift_key": "", "date": "2026-03-01",
+        })
+        module._save_project(person)
+
+    _save_month_entries(module, app, client, project_id, {
+        "3": [{"id": "e3", "value": "!TRAIN!三木", "employee_number": "E101", "comment": ""}],
+    })
+
+    assist = _person_assist_payload(client, person_id)
+    assert all(t["id"] != "t1" for t in assist["training_sites"])
+    assert [s["shift_key"] for s in assist["experienced_sites"]] == ["TRAIN"]
+
+
+def test_person_book_created_after_scene_save_is_backfilled():
+    """person 帳を後から作成しても、既存 scene 帳の代務/研修経験が取り込まれる。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    module.current_user = _owner()
+
+    _save_month_entries(module, app, client, project_id, {
+        "5": [{"id": "e1", "value": "!TRAIN!佐藤", "employee_number": "E202", "comment": ""}],
+    })
+
+    person_id = _create_person_project(module, app, client, title="佐藤 一郎", employee_number="E202")
+    assist = _person_assist_payload(client, person_id)
+    assert [s["shift_key"] for s in assist["experienced_sites"]] == ["TRAIN"]
+    assert assist["experienced_sites"][0]["source_label"]
+
+
+def test_role_option_person_site_does_not_double_count_on_scene():
+    """第二オプション由来の person 経験は scene へ person_experience として再連携しない。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+
+    _save_month_entries(module, app, client, project_id, {
+        "1": [{"id": "e1", "value": "!SUB!三木", "employee_number": "E101", "comment": ""}],
+    })
+
+    # scene 側のバックフィルを明示的に再実行しても person_experience 実績は増えない
+    with app.app_context():
+        scene = module._load_project(project_id)
+        module._backfill_scene_project_from_person_experience(scene, actor_name="tester")
+        scene = module._load_project(project_id)
+        records = (scene.get("assist") or {}).get("records", [])
+    source_types = {str(r.get("source_type") or "") for r in records}
+    assert module.PERSON_ASSIST_AUTO_SOURCE not in source_types
+    assert module.ROLE_OPTION_ASSIST_SOURCE in source_types
+
+
+def test_publish_draft_registers_role_experience():
+    """仮保存→公開のパスでも代務/研修の経験が自動登録される。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+    module.current_user = _owner()
+
+    resp = client.put(
+        f"{BASE}/api/project/{project_id}/month/2026/4/draft",
+        json={"required_capacity": 1, "entries_per_day": {
+            "1": [{"id": "e1", "value": "!SUB!三木", "employee_number": "E101", "comment": ""}],
+        }},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    # 仮保存の時点では登録されない
+    autos, _ = _auto_records(module, app, project_id)
+    assert autos == []
+
+    resp = client.post(f"{BASE}/api/project/{project_id}/month/2026/4/draft/publish")
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    autos, _ = _auto_records(module, app, project_id)
+    assert [(r["employee_number"], r["shift_key"]) for r in autos] == [("E101", "SUB")]
+    assist = _person_assist_payload(client, person_id)
+    assert [s["shift_key"] for s in assist["experienced_sites"]] == ["SUB"]
+
+
 # ---------------------------------------------------------------------------
 # 自動作成（shift-engine）への反映
 # ---------------------------------------------------------------------------

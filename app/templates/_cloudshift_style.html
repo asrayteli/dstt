@@ -1644,6 +1644,64 @@
     overflow: hidden;
   }
 
+  .cloud-assist-panel[data-assist-panel="details"] .cloud-assist-stack.cloud-assist-person-stack {
+    overflow: auto;
+    padding-right: 4px;
+  }
+
+  .cloud-assist-site-table-wrap {
+    min-width: 0;
+    overflow: auto;
+    border: 1px solid var(--cloud-line);
+    border-radius: 14px;
+    background: #fff;
+    max-height: min(48vh, 420px);
+  }
+
+  .cloud-assist-site-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 13px;
+  }
+
+  .cloud-assist-site-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: rgba(244, 248, 255, 0.98);
+    text-align: left;
+    font-size: 12px;
+    color: var(--cloud-muted);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--cloud-line);
+    white-space: nowrap;
+  }
+
+  .cloud-assist-site-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--cloud-line);
+    vertical-align: top;
+    color: var(--cloud-text);
+  }
+
+  .cloud-assist-site-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .cloud-assist-site-table tbody tr.is-auto-record td {
+    background: rgba(52, 211, 153, 0.06);
+  }
+
+  .cloud-assist-site-table-nowrap {
+    white-space: nowrap;
+  }
+
+  .cloud-assist-site-table-notes {
+    min-width: 160px;
+    color: var(--cloud-muted);
+  }
+
   .cloud-assist-details-stack {
     grid-template-rows: auto auto minmax(0, 1fr);
     height: 100%;
