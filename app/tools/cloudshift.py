@@ -3703,6 +3703,7 @@ def _build_person_synced_entry_from_scene(
     return {
         "id": _sync_entry_id(SHIFT_SYNC_SCENE_SOURCE, source_project.get("id"), month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, site_name),
+        "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_number": "",
         "site_row_id": str(_coerce_site_row_id(source_project.get("site_row_id")) or ""),
@@ -3733,6 +3734,7 @@ def _build_scene_synced_entry_from_person(
     synced = {
         "id": _sync_entry_id(SHIFT_SYNC_PERSON_SOURCE, source_project.get("id"), month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, str(source_project.get("title") or "").strip()),
+        "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_number": str(source_project.get("employee_number") or "").strip(),
         "site_row_id": "",
@@ -3764,6 +3766,7 @@ def _build_person_synced_entry_from_master(
     return {
         "id": _sync_entry_id(SHIFT_SYNC_MASTER_SOURCE, source_project.get("id"), "person", month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, site_name),
+        "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_number": "",
         "site_row_id": str(site_link.get("site_row_id") or ""),
@@ -3795,6 +3798,7 @@ def _build_scene_synced_entry_from_master(
     synced = {
         "id": _sync_entry_id(SHIFT_SYNC_MASTER_SOURCE, source_project.get("id"), "scene", month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, employee_name),
+        "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_name": employee_name,
         "employee_number": str(entry.get("employee_number") or "").strip(),
@@ -3922,6 +3926,7 @@ def _build_master_synced_entry_from_person(
     return {
         "id": _sync_entry_id(SHIFT_SYNC_PERSON_SOURCE, source_project.get("id"), "master", month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, site_name),
+        "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_name": employee_name,
         "employee_number": str(source_project.get("employee_number") or "").strip(),
@@ -3952,6 +3957,7 @@ def _build_master_synced_entry_from_scene(
     return {
         "id": _sync_entry_id(SHIFT_SYNC_SCENE_SOURCE, source_project.get("id"), "master", month_key, day_key, source_entry_id),
         "value": _format_entry_value(option_key, employee_name),
+        "second_option": entry_second_option(entry),
         "comment": str(entry.get("comment") or "").strip(),
         "employee_name": employee_name,
         "employee_number": str(entry.get("employee_number") or "").strip(),
@@ -4351,6 +4357,21 @@ def _replace_shift_synced_entries_in_target_project(
             next_entries_per_day,
         )
 
+    # 同期で entry が変わった scene 帳は、代務/研修オプションの経験自動登録も
+    # 同じ保存で反映する（person 帳に入力した第二オプションを scene 帳の保存を
+    # 待たずにアシストへ届けるため）。person 帳への再反映はここでは行わない
+    # （入力元の person 帳は自分の保存フックで自己登録済みのため）。
+    sync_assist_changes: list[str] = []
+    if str(target_project.get("mode") or "") == "scene":
+        try:
+            sync_assist_changes = _sync_role_option_experience_for_month(
+                target_project, year, month, actor_name=actor_name
+            )
+        except Exception:  # pragma: no cover - 自動登録の失敗で同期自体は止めない
+            logger.exception(
+                "role option experience sync failed during shift sync (project=%s)",
+                target_project.get("id"),
+            )
     _save_project(target_project)
     _append_history(
         target_project["id"],
@@ -4361,8 +4382,9 @@ def _replace_shift_synced_entries_in_target_project(
             "action": "shift_sync",
             "month_key": month_key,
             "changes": [
-                f"{source_project.get('title')} からシフトを自動反映"
-            ],
+                f"{source_project.get('title')} からシフトを自動反映",
+                *sync_assist_changes,
+            ][:100],
         },
     )
     # 他シフト帳の保存に伴う自動反映でも、このシフト帳の ViewPWA 購読者には
@@ -6126,6 +6148,27 @@ def _role_option_site_stub(site_row_id: str, site_id: str, site_name: str) -> di
     }
 
 
+def _role_option_site_key(site_row_id: Any, site_id: Any, site_name: Any) -> str:
+    """自動経験済み現場の重複判定に使う現場キー（row_id > 契約番号 > 正規化名）。"""
+    row_id = _coerce_site_row_id(site_row_id)
+    if row_id:
+        return f"row:{row_id}"
+    contract = str(site_id or "").strip()
+    if contract:
+        return f"id:{contract}"
+    return f"name:{_normalized_site_title(site_name)}"
+
+
+def _role_option_item_site_key(item: dict[str, Any]) -> str:
+    """既存の自動経験済み現場アイテムから現場キーを得る（旧データは現場情報から再計算）。"""
+    stored = str(item.get("source_site_key") or "").strip()
+    if stored:
+        return stored
+    return _role_option_site_key(
+        item.get("site_row_id"), item.get("site_id"), item.get("site_name")
+    )
+
+
 def _reconcile_role_option_person_sites(
     person_project: dict[str, Any],
     infos: list[dict[str, Any]],
@@ -6140,16 +6183,37 @@ def _reconcile_role_option_person_sites(
     """1 つの person 帳に対して、scene 帳×対象月の第二オプション経験を突き合わせる。"""
     assist = _ensure_person_assist(person_project)
     changes: list[str] = []
+    scene_site_key = _role_option_site_key(site_row_id, site_id, site_name)
 
+    # この scene 帳由来の自動分に加え、person 帳側の自己導出が同じ現場へ作った
+    # 自動分も現場キーで同一視する（両経路で二重表示しないため）
     existing_by_option: dict[str, dict[str, Any]] = {}
+    duplicate_items: list[dict[str, Any]] = []
     for item in assist["experienced_sites"]:
         if str(item.get("source_type") or "") != ROLE_OPTION_ASSIST_SOURCE:
             continue
-        if str(item.get("source_project_id") or "") != scene_project_id:
-            continue
         if str(item.get("source_month_key") or "") != month_key:
             continue
-        existing_by_option.setdefault(str(item.get("shift_key") or "").strip().upper(), item)
+        if (
+            str(item.get("source_project_id") or "") != scene_project_id
+            and _role_option_item_site_key(item) != scene_site_key
+        ):
+            continue
+        option_key = str(item.get("shift_key") or "").strip().upper()
+        if option_key in existing_by_option:
+            duplicate_items.append(item)
+        else:
+            existing_by_option[option_key] = item
+
+    for stale in duplicate_items:
+        assist["experienced_sites"] = [
+            item
+            for item in assist["experienced_sites"]
+            if str(item.get("id") or "") != str(stale.get("id") or "")
+        ]
+        changes.append(
+            f"経験済み現場の重複自動登録を解消: {_assist_record_history_label(stale)}"
+        )
 
     for info in infos:
         option_key = str(info["shift_key"]).strip().upper()
@@ -6160,6 +6224,7 @@ def _reconcile_role_option_person_sites(
             existing=existing, actor_name=actor_name,
         )
         site["source_project_id"] = scene_project_id
+        site["source_site_key"] = scene_site_key
         if existing:
             index = assist["experienced_sites"].index(existing)
             if _assist_auto_payload_changed(existing, site):
@@ -6258,11 +6323,15 @@ def _sync_role_option_person_sites(
         if not infos:
             # 変更がなければロックせずスキップ（解除すべき自動分があるかだけ確認）
             summary_assist = summary.get("assist") or {}
+            scene_site_key = _role_option_site_key(site_row_id, site_id, site_name)
             has_stale = any(
                 isinstance(item, dict)
                 and str(item.get("source_type") or "") == ROLE_OPTION_ASSIST_SOURCE
-                and str(item.get("source_project_id") or "") == scene_project_id
                 and str(item.get("source_month_key") or "") == month_key
+                and (
+                    str(item.get("source_project_id") or "") == scene_project_id
+                    or _role_option_item_site_key(item) == scene_site_key
+                )
                 for item in (summary_assist.get("experienced_sites") or [])
             )
             if not has_stale:
@@ -6297,6 +6366,207 @@ def _sync_role_option_person_sites(
             )
 
 
+def _role_option_person_self_entries_for_month(
+    month_data: dict[str, Any], year: int, month: int
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """person 帳自身の確定 entry から 代務/研修「第二オプション」を (現場キー, option) 単位で集約する。
+
+    person 帳の entry は現場リンク（site_row_id / site_id / 現場名）を持つため、
+    社員番号ではなく現場単位でまとめる。他帳からの同期 entry は除外する
+    （scene 帳由来の経験は scene 側の保存フックが person 帳へ反映するため）。
+    """
+    aggregated: dict[tuple[str, str], dict[str, Any]] = {}
+    for day_key, day_entries in (month_data.get("entries_per_day") or {}).items():
+        if not isinstance(day_entries, list):
+            continue
+        try:
+            day = int(day_key)
+        except (TypeError, ValueError):
+            continue
+        for entry in day_entries:
+            if not isinstance(entry, dict):
+                continue
+            if _entry_is_shift_synced(entry):
+                continue
+            option_key = entry_second_option(entry)
+            if option_key not in ROLE_OPTION_KEYS:
+                continue
+            site_link = _entry_site_link_fields(entry)
+            site_row_id = _coerce_site_row_id(site_link.get("site_row_id"))
+            site_id = str(site_link.get("site_id") or "").strip()
+            site_name = str(site_link.get("site_name") or "").strip()
+            if not (site_row_id or site_id or site_name):
+                continue
+            site_key = _role_option_site_key(site_row_id, site_id, site_name)
+            date_text = f"{year:04d}-{month:02d}-{day:02d}"
+            bucket = aggregated.setdefault(
+                (site_key, option_key),
+                {
+                    "shift_key": option_key,
+                    "site_key": site_key,
+                    "site_row_id": str(site_row_id) if site_row_id else "",
+                    "site_id": site_id,
+                    "site_name": site_name,
+                    "latest_date": date_text,
+                    "count": 0,
+                },
+            )
+            bucket["count"] += 1
+            if date_text >= bucket["latest_date"]:
+                bucket["latest_date"] = date_text
+                # 現場リンクは最新該当日の entry を優先する
+                if site_row_id or site_id or site_name:
+                    bucket["site_row_id"] = str(site_row_id) if site_row_id else ""
+                    bucket["site_id"] = site_id
+                    bucket["site_name"] = site_name
+    return aggregated
+
+
+def _sync_role_option_experience_for_person_month(
+    project: dict[str, Any], year: int, month: int, *, actor_name: str
+) -> list[str]:
+    """person 帳（個人シフト）の 代務/研修「第二オプション」を自分のアシストへ自動反映する。
+
+    個人シフト帳に直接入力した entry に 代務（SUB）/ 研修（TRAIN）を付けるだけで、
+    その人の「経験済み現場」に自動登録され、研修は同じ現場の「研修要現場」を
+    一覧から削除する。scene 帳の _sync_role_option_experience_for_month と対になる
+    person 帳側のフック。
+
+    安全原則:
+    - 他帳からの同期 entry は数えない（scene 帳側の保存フックが反映するため二重登録しない）。
+    - 同じ現場×オプション×月に scene 帳由来の自動分が既にあれば新規作成しない。
+    - source_type=ROLE_OPTION_ASSIST_SOURCE かつこの帳自身が作った自動分のみ
+      追加・更新・解除する。手動登録の経験済み現場には触れない
+      （研修要現場の削除は要件どおり手動分も対象）。
+    - この関数は project dict を書き換えるだけで保存はしない（呼び出し元の
+      _save_project と同一トランザクションで永続化する）。
+    """
+    if str(project.get("mode") or "") != "person":
+        return []
+    month_key = _month_key(year, month)
+    month_data = (project.get("months") or {}).get(month_key)
+    if not isinstance(month_data, dict):
+        return []
+
+    current = _role_option_person_self_entries_for_month(month_data, year, month)
+    assist = _ensure_person_assist(project)
+    person_project_id = str(project.get("id") or "")
+    employee_number = str(project.get("employee_number") or "").strip()
+    candidate_name = str(project.get("title") or "").strip()
+    changes: list[str] = []
+
+    # 自分（self 導出）が作った自動分と、scene 帳由来の自動分を現場キーで分けて把握する
+    own_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    scene_keys: set[tuple[str, str]] = set()
+    for item in assist["experienced_sites"]:
+        if str(item.get("source_type") or "") != ROLE_OPTION_ASSIST_SOURCE:
+            continue
+        if str(item.get("source_month_key") or "") != month_key:
+            continue
+        item_key = (
+            _role_option_item_site_key(item),
+            str(item.get("shift_key") or "").strip().upper(),
+        )
+        if str(item.get("source_project_id") or "") == person_project_id:
+            own_by_key.setdefault(item_key, item)
+        else:
+            scene_keys.add(item_key)
+
+    for key in sorted(current.keys()):
+        info = current[key]
+        option_key = str(info["shift_key"]).strip().upper()
+        label = ROLE_OPTION_MAPPINGS.get(option_key, option_key)
+        site_row_id = str(info.get("site_row_id") or "")
+        site_id = str(info.get("site_id") or "")
+        site_name = str(info.get("site_name") or "")
+        own = own_by_key.pop(key, None)
+
+        # 研修（TRAIN）はこの現場の「研修要現場」を一覧から削除する（手動分も対象）
+        if option_key == ROLE_OPTION_TRAINING_KEY:
+            site_stub = _role_option_site_stub(site_row_id, site_id, site_name)
+            removed = [
+                item
+                for item in assist["training_sites"]
+                if _person_experience_matches_scene_project(item, site_stub)
+            ]
+            if removed:
+                removed_ids = {str(item.get("id") or "") for item in removed}
+                assist["training_sites"] = [
+                    item
+                    for item in assist["training_sites"]
+                    if str(item.get("id") or "") not in removed_ids
+                ]
+                changes.append(
+                    f"研修要現場から削除（研修済み）: {site_name or site_row_id or site_id}"
+                )
+
+        # scene 帳由来の自動分が同じ現場×オプションに既にあれば二重登録しない
+        if key in scene_keys:
+            if own:
+                assist["experienced_sites"] = [
+                    item
+                    for item in assist["experienced_sites"]
+                    if str(item.get("id") or "") != str(own.get("id") or "")
+                ]
+                changes.append(
+                    f"経験済み現場の重複自動登録を解消: {_assist_record_history_label(own)}"
+                )
+            continue
+
+        site = _role_option_experienced_site(
+            {
+                "shift_key": option_key,
+                "employee_number": employee_number,
+                "candidate_name": candidate_name,
+                "latest_date": info["latest_date"],
+                "count": info["count"],
+            },
+            site_row_id,
+            site_id,
+            site_name,
+            month_key,
+            existing=own,
+            actor_name=actor_name,
+        )
+        site["source_project_id"] = person_project_id
+        site["source_site_key"] = str(info["site_key"])
+        if own:
+            index = assist["experienced_sites"].index(own)
+            if _assist_auto_payload_changed(own, site):
+                assist["experienced_sites"][index] = site
+                changes.append(
+                    f"経験済み現場を自動更新（{label}）: {_assist_record_history_label(site)}"
+                )
+        else:
+            assist["experienced_sites"].append(site)
+            changes.append(
+                f"経験済み現場を自動登録（{label}）: {_assist_record_history_label(site)}"
+            )
+
+    # entry が消えた分（この帳自身の自動分のみ）を解除する
+    for stale in own_by_key.values():
+        assist["experienced_sites"] = [
+            item
+            for item in assist["experienced_sites"]
+            if str(item.get("id") or "") != str(stale.get("id") or "")
+        ]
+        changes.append(
+            f"経験済み現場の自動登録を解除: {_assist_record_history_label(stale)}"
+        )
+    return changes
+
+
+def _sync_role_option_experience_for_book_month(
+    project: dict[str, Any], year: int, month: int, *, actor_name: str
+) -> list[str]:
+    """月保存フック: モードに応じて scene / person の経験自動登録を実行する。"""
+    if str(project.get("mode") or "") == "person":
+        return _sync_role_option_experience_for_person_month(
+            project, year, month, actor_name=actor_name
+        )
+    return _sync_role_option_experience_for_month(project, year, month, actor_name=actor_name)
+
+
 def _backfill_person_project_from_role_options(
     person_project: dict[str, Any], *, actor_name: str
 ) -> list[str]:
@@ -6307,10 +6577,22 @@ def _backfill_person_project_from_role_options(
     """
     if str(person_project.get("mode") or "") != "person":
         return []
+    changes: list[str] = []
+    # 自帳の entry（CSV 取り込み等）に付いた第二オプションも取り込む
+    for month_key, month_data in sorted((person_project.get("months") or {}).items()):
+        if not isinstance(month_data, dict):
+            continue
+        changes.extend(
+            _sync_role_option_experience_for_person_month(
+                person_project,
+                int(month_data.get("year") or 0),
+                int(month_data.get("month") or 0),
+                actor_name=actor_name,
+            )
+        )
     number = str(person_project.get("employee_number") or "").strip()
     if not number:
-        return []
-    changes: list[str] = []
+        return changes
     for scene_project in _iter_stored_projects():
         if not scene_project or scene_project.get("mode") != "scene":
             continue
@@ -8418,7 +8700,7 @@ def _save_month_in_project(
     project["months"][month_key] = merged
     # 代務/研修オプションの経験自動登録（同一保存に相乗りし、追加の DB 書き込みはしない）
     try:
-        assist_changes = _sync_role_option_experience_for_month(
+        assist_changes = _sync_role_option_experience_for_book_month(
             project, year, month, actor_name=actor_name
         )
     except Exception:  # pragma: no cover - 自動登録の失敗で保存自体は止めない
@@ -8563,7 +8845,7 @@ def _publish_draft_month_in_project(
     project["months"][month_key] = published
     # 代務/研修オプションの経験自動登録（本保存と同様、公開時にも反映する）
     try:
-        assist_changes = _sync_role_option_experience_for_month(
+        assist_changes = _sync_role_option_experience_for_book_month(
             project, year, month, actor_name=actor_name
         )
     except Exception:  # pragma: no cover - 自動登録の失敗で公開自体は止めない
