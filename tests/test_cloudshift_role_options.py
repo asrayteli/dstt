@@ -429,6 +429,83 @@ def test_publish_draft_registers_role_experience():
     assert [s["shift_key"] for s in assist["experienced_sites"]] == ["SUB"]
 
 
+def test_person_book_second_option_registers_own_sites():
+    """個人シフト帳に直接入力した代務/研修が、その人の経験済み現場へ自動登録される。"""
+    module, app = _build()
+    client = app.test_client()
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+
+    # 研修要現場を手動登録しておく（研修オプションで削除されることの検証用）
+    with app.app_context():
+        person = module._load_project(person_id)
+        assist = module._ensure_person_assist(person)
+        assist["training_sites"].append({
+            "id": "t1", "kind": "training", "site_row_id": None, "site_id": "",
+            "site_name": "千葉養護", "shift_key": "", "date": "2026-03-01",
+        })
+        module._save_project(person)
+
+    # 現場リンク付き（研修）と名前だけ（代務）の両方を直接入力
+    _save_month_entries(module, app, client, person_id, {
+        "1": [{"id": "p1", "value": "!A!千葉養護", "second_option": "TRAIN",
+               "site_name": "千葉養護", "comment": ""}],
+        "2": [{"id": "p2", "value": "!M!日本生命成田", "second_option": "SUB", "comment": ""}],
+    })
+
+    assist = _person_assist_payload(client, person_id)
+    by_site = {(s["site_name"], s["shift_key"]): s for s in assist["experienced_sites"]}
+    assert set(by_site) == {("千葉養護", "TRAIN"), ("日本生命成田", "SUB")}
+    assert all(s["source_label"] for s in by_site.values())
+    # 研修要現場から削除されている
+    assert all(t["id"] != "t1" for t in assist["training_sites"])
+
+    # 研修 entry を消すと、その自動分だけ解除される
+    _save_month_entries(module, app, client, person_id, {
+        "2": [{"id": "p2", "value": "!M!日本生命成田", "second_option": "SUB", "comment": ""}],
+    })
+    assist = _person_assist_payload(client, person_id)
+    assert {(s["site_name"], s["shift_key"]) for s in assist["experienced_sites"]} == {("日本生命成田", "SUB")}
+
+
+def test_person_book_second_option_syncs_to_scene_book():
+    """個人帳の第二オプションは同期で scene 帳へ伝わり、scene 側の実績にも自動登録される。"""
+    module, app = _build()
+    client = app.test_client()
+    module.current_user = _owner()
+    resp = client.post(
+        f"{BASE}/api/create",
+        data={"title": "千葉養護", "mode": "scene", "year": "2026", "month": "4",
+              "required_capacity": "1"},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    scene_id = resp.get_json()["project"]["project"]["id"]
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+
+    _save_month_entries(module, app, client, person_id, {
+        "1": [{"id": "p1", "value": "!A!千葉養護", "second_option": "TRAIN",
+               "site_name": "千葉養護", "comment": ""}],
+    })
+
+    with app.app_context():
+        scene = module._load_project(scene_id)
+        synced = scene["months"]["2026-04"]["entries_per_day"].get("1", [])
+    # 同期 entry に第二オプションと社員番号が引き継がれる
+    assert [(e.get("second_option"), e.get("employee_number")) for e in synced] == [("TRAIN", "E101")]
+    # scene 帳の保存を待たずに自動実績が登録される
+    autos, _ = _auto_records(module, app, scene_id)
+    assert [(r["employee_number"], r["shift_key"]) for r in autos] == [("E101", "TRAIN")]
+
+    # scene 帳を保存しても person 帳の経験済み現場は二重にならない
+    _save_month_entries(module, app, client, scene_id, {
+        "1": [{"id": "s1", "value": "!A!三木", "second_option": "TRAIN",
+               "employee_number": "E101", "comment": ""}],
+    })
+    assist = _person_assist_payload(client, person_id)
+    chiba = [s for s in assist["experienced_sites"]
+             if s["site_name"] == "千葉養護" and s["shift_key"] == "TRAIN"]
+    assert len(chiba) == 1
+
+
 # ---------------------------------------------------------------------------
 # 自動作成（shift-engine）への反映
 # ---------------------------------------------------------------------------
