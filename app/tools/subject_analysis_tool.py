@@ -82,6 +82,27 @@ def load_site_mapping_from_master():
     return site_dict, site_master, warnings
 
 
+def get_manager_contract_codes(manager_id):
+    """現場リストPLUSの最新マスタから担当者の契約コード一覧を返す。"""
+    ensure_contract_master_synced()
+    rows = (
+        SiteContractMaster.query
+        .filter(SiteContractMaster.is_active.is_(True))
+        .order_by(SiteContractMaster.contract_code.asc())
+        .all()
+    )
+
+    contract_codes = set()
+    for row in rows:
+        if not manager_ids_match(row.site_manager_id, manager_id):
+            continue
+        contract_code = normalize_contract_code(row.contract_code)
+        if not contract_code:
+            continue
+        contract_codes.add(contract_code)
+    return contract_codes
+
+
 @subject_analysis_tool_bp.route("/")
 @login_required
 def index():
@@ -96,6 +117,7 @@ def upload_files():
         prev_year_subject_file = request.files.get("prev_year_subject_file")
         site_file = request.files.get("site_file")
         site_source = str(request.form.get("site_source", "file") or "file").strip().lower()
+        manager_id = str(request.form.get("manager_id", "") or "").strip()
 
         if not subject_file:
             return jsonify({"error": "科目別分析表 CSV を選択してください"}), 400
@@ -103,6 +125,16 @@ def upload_files():
             return jsonify({"error": "site_source は file または db を指定してください"}), 400
         if site_source == "file" and (not site_file or not site_file.filename):
             return jsonify({"error": "現場表読み込みモードでは現行現場表 CSV が必要です"}), 400
+
+        # 担当者絞り込みは現場リストPLUSの最新マスタを参照する（どちらのモードでも共通）
+        manager_contract_codes = None
+        if manager_id:
+            manager_contract_codes = get_manager_contract_codes(manager_id)
+            if not manager_contract_codes:
+                return jsonify({
+                    "error": f"担当者番号 {manager_id} に紐づく現場が現場リストPLUSに見つかりません。"
+                             "担当者番号を確認するか、現場リストPLUSを同期してください"
+                }), 400
 
         upload_folder = get_upload_folder()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -126,6 +158,30 @@ def upload_files():
         parsed_data = parse_subject_data(subject_data)
 
         extra_warnings = []
+        manager_filter = None
+        if manager_contract_codes is not None:
+            total_rows = len(parsed_data)
+            parsed_data = [item for item in parsed_data if item["contract_code"] in manager_contract_codes]
+            if not parsed_data:
+                try:
+                    os.remove(subject_path)
+                except OSError:
+                    pass
+                return jsonify({
+                    "error": f"担当者番号 {manager_id} の現場（{len(manager_contract_codes)}件）は"
+                             "科目別分析表に含まれていません"
+                }), 400
+            manager_filter = {
+                "manager_id": manager_id,
+                "master_contract_count": len(manager_contract_codes),
+                "matched_contract_count": len({item["contract_code"] for item in parsed_data}),
+                "excluded_row_count": total_rows - len(parsed_data),
+            }
+            extra_warnings.append(
+                f"担当者番号 {manager_id} で絞り込み: 対象現場 {manager_filter['matched_contract_count']} 件 / "
+                f"対象外の行 {manager_filter['excluded_row_count']} 件を除外しました"
+            )
+
         prev_year_data = None
         prev_year_validation = None
         if prev_year_subject_file and prev_year_subject_file.filename:
@@ -147,6 +203,11 @@ def upload_files():
                         pass
                     return jsonify({"error": prev_year_validation["message"]}), 400
                 prev_year_data = parse_subject_data(prev_year_csv)
+                if prev_year_data and manager_contract_codes is not None:
+                    prev_year_data = [
+                        item for item in prev_year_data
+                        if item["contract_code"] in manager_contract_codes
+                    ]
             try:
                 os.remove(prev_year_path)
             except OSError:
@@ -199,6 +260,7 @@ def upload_files():
                     "prev_year_count": len(prev_year_data) if prev_year_data else 0,
                     "site_count": len(site_data) if site_data else 0,
                     "site_source": site_source,
+                    "manager_filter": manager_filter,
                     "unclassified_count": validation["unmatched_site_mapping_count"],
                     "warnings": validation["warnings"],
                     "validation": validation,
@@ -219,28 +281,13 @@ def manager_contracts():
         if not manager_id:
             return jsonify({"error": "manager_id を指定してください"}), 400
 
-        ensure_contract_master_synced()
-        rows = (
-            SiteContractMaster.query
-            .filter(SiteContractMaster.is_active.is_(True))
-            .order_by(SiteContractMaster.contract_code.asc())
-            .all()
-        )
-
-        contract_codes = []
-        for row in rows:
-            if not manager_ids_match(row.site_manager_id, manager_id):
-                continue
-            contract_code = normalize_contract_code(row.contract_code)
-            if not contract_code:
-                continue
-            contract_codes.append(contract_code)
+        contract_codes = get_manager_contract_codes(manager_id)
 
         return jsonify(
             {
                 "manager_id": manager_id,
-                "contract_codes": sorted(set(contract_codes)),
-                "count": len(set(contract_codes)),
+                "contract_codes": sorted(contract_codes),
+                "count": len(contract_codes),
             }
         )
     except Exception as exc:

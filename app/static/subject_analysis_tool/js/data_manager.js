@@ -313,15 +313,25 @@ class DataManager {
             months = [],
             segments = [],
             managerId = '',
-            allowedContractCodes = []
+            allowedContractCodes = null
         } = filters;
-        const allowedSet = new Set((allowedContractCodes || []).map((code) => String(code || '').trim()).filter(Boolean));
+        // 担当者の契約コード一覧（API解決済み）。配列が渡された場合のみ有効。
+        const hasAllowedList = Array.isArray(allowedContractCodes);
+        const allowedSet = new Set(
+            (hasAllowedList ? allowedContractCodes : []).map((code) => String(code || '').trim()).filter(Boolean)
+        );
 
         let filteredData = this.rawData.currentYear.filter(item => {
             const contractCode = String(item.contract_code || '').trim();
 
-            if (allowedSet.size > 0 && !allowedSet.has(contractCode)) {
-                return false;
+            // 担当者フィルタ
+            // API解決済みの契約コード一覧を優先する。siteMaster による照合は
+            // 現場リストPLUS参照モードでしか機能しないため、一覧がない場合のみの代替とする。
+            if (hasAllowedList) {
+                if (!allowedSet.has(contractCode)) return false;
+            } else if (managerId) {
+                const siteMaster = this.rawData.siteMaster[item.contract_code] || {};
+                if (!this.managerIdsMatch(siteMaster.site_manager_id, managerId)) return false;
             }
 
             // 現場フィルタ
@@ -339,11 +349,6 @@ class DataManager {
             if (segments.length > 0) {
                 const segment = this.rawData.siteMapping[item.contract_code];
                 if (!segment || !segments.includes(segment)) return false;
-            }
-
-            if (managerId) {
-                const siteMaster = this.rawData.siteMaster[item.contract_code] || {};
-                if (!this.managerIdsMatch(siteMaster.site_manager_id, managerId)) return false;
             }
 
             return true;

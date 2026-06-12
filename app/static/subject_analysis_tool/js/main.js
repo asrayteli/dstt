@@ -52,6 +52,11 @@ function setupEventListeners() {
         siteSource.addEventListener('change', syncSiteSourceMode);
     }
 
+    const managerFilterEnabled = document.getElementById('manager-filter-enabled');
+    if (managerFilterEnabled) {
+        managerFilterEnabled.addEventListener('change', syncManagerFilterMode);
+    }
+
     setupUploadInteractions();
     setupPresetInteractions();
     setupTemplateInteractions();
@@ -112,6 +117,21 @@ function setupEventListeners() {
     applyComparisonModeUI(comparisonMode ? comparisonMode.value : 'prev_year');
     syncResultLayoutToggles();
     syncSiteSourceMode();
+    syncManagerFilterMode();
+}
+
+function syncManagerFilterMode() {
+    const enabled = document.getElementById('manager-filter-enabled');
+    const managerInput = document.getElementById('upload-manager-id');
+    if (!managerInput) return;
+
+    const isEnabled = !!(enabled && enabled.checked);
+    managerInput.disabled = !isEnabled;
+    if (!isEnabled) {
+        managerInput.value = '';
+    } else {
+        managerInput.focus();
+    }
 }
 
 function syncSiteSourceMode() {
@@ -284,11 +304,21 @@ async function handleFileUpload() {
         return;
     }
 
+    const managerFilterEnabled = document.getElementById('manager-filter-enabled')?.checked || false;
+    const uploadManagerId = (document.getElementById('upload-manager-id')?.value || '').trim();
+    if (managerFilterEnabled && !uploadManagerId) {
+        showNotice('担当者絞り込みが有効です。担当者番号を入力してください。', 'error');
+        return;
+    }
+
     const formData = new FormData();
     formData.append('subject_file', subjectFile);
     if (prevYearSubjectFile) formData.append('prev_year_subject_file', prevYearSubjectFile);
     if (siteFile) formData.append('site_file', siteFile);
     formData.append('site_source', siteSource);
+    if (managerFilterEnabled && uploadManagerId) {
+        formData.append('manager_id', uploadManagerId);
+    }
 
     showLoading();
 
@@ -350,6 +380,14 @@ function renderUploadReview(metadata) {
     setText('review-prev-count', metadata.prev_year_count || validation.prev_year_row_count || 0);
     setText('review-site-count', metadata.site_count || validation.site_mapping_count || 0);
     setText('review-unclassified-count', metadata.unclassified_count || validation.unmatched_site_mapping_count || 0);
+
+    const managerFilterEl = document.getElementById('review-manager-filter');
+    if (managerFilterEl) {
+        const managerFilter = metadata.manager_filter;
+        managerFilterEl.textContent = managerFilter
+            ? `${managerFilter.manager_id}（現場${Number(managerFilter.matched_contract_count || 0).toLocaleString()}件）`
+            : 'なし';
+    }
 
     const warnings = Array.isArray(metadata.warnings) ? metadata.warnings : [];
     const warningEl = document.getElementById('review-warnings');
@@ -432,6 +470,11 @@ async function applyFilters() {
     try {
         if (filters.managerId) {
             const managerContracts = await resolveManagerScopedContracts(filters.managerId);
+            if (!Array.isArray(managerContracts) || managerContracts.length === 0) {
+                hideLoading();
+                alert(`担当者番号 ${filters.managerId} に紐づく現場が現場リストPLUSに見つかりません。`);
+                return;
+            }
             filters.allowedContractCodes = managerContracts;
         }
 
@@ -537,6 +580,7 @@ function resetAll() {
     if (uploadForm) uploadForm.reset();
     resetUploadLabels();
     syncSiteSourceMode();
+    syncManagerFilterMode();
 
     currentFilters = null;
     pendingUploadResult = null;

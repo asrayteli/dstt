@@ -327,6 +327,19 @@
                     </select>
                     <p class="mode-help">現行現場表を使う場合は現場表読み込みモード、現場リストPLUSの最新セグメントを使う場合は現場リストPLUS参照モードを選択します。</p>
                 </div>
+
+                <div class="upload-mode-card">
+                    <div class="drop-head">
+                        <span>担当者絞り込み</span>
+                        <span class="drop-badge optional">任意</span>
+                    </div>
+                    <label class="manager-filter-toggle">
+                        <input type="checkbox" id="manager-filter-enabled">
+                        <span>担当者番号で現場を絞り込んで取り込む</span>
+                    </label>
+                    <input type="text" id="upload-manager-id" class="form-input" placeholder="担当者番号（例: 9001）" disabled>
+                    <p class="mode-help">現場リストPLUSの最新マスタに登録されている担当者番号に紐づく現場だけを取り込みます。どちらの参照方法でも利用できます。</p>
+                </div>
                 <div class="quick-upload-grid">
                     <div class="drop-card required">
                         <div class="drop-head">
@@ -395,6 +408,7 @@
                         <div class="review-metric"><span>前年行数</span><strong id="review-prev-count">0</strong></div>
                         <div class="review-metric"><span>現場マッピング</span><strong id="review-site-count">0</strong></div>
                         <div class="review-metric"><span>未分類</span><strong id="review-unclassified-count">0</strong></div>
+                        <div class="review-metric"><span>担当者絞込</span><strong id="review-manager-filter">なし</strong></div>
                     </div>
                     <div id="review-warnings" class="review-warnings"></div>
                 </section>

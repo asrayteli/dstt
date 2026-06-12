@@ -248,6 +248,115 @@ def test_subject_analysis_tool_db_mode_uses_site_contract_master(tmp_path):
     assert payload["data"]["site_mapping"]["01234001"] == "一般"
 
 
+def _master_row(contract_code, manager_id, site_name="テスト現場", row_id=1):
+    return SiteContractMaster(
+        contract_code=contract_code,
+        site_row_id=row_id,
+        site_branch_row_id=row_id,
+        site_id=contract_code[:5],
+        site_branch=contract_code[5:],
+        site_name=site_name,
+        site_manager_id=manager_id,
+        site_manager_name="担当 太郎",
+        segment="一般",
+        cloudshift_option_key="PENDING",
+        is_active=True,
+        source="siteplus",
+    )
+
+
+def _two_site_subject_csv_bytes():
+    header = [f"h{i}" for i in range(25)]
+    rows = []
+    for contract_code, site_name in [("01234001", "現場A"), ("05678001", "現場B")]:
+        row = [""] * 25
+        row[5] = "基本請負料"
+        row[8] = contract_code
+        row[9] = "株式会社テスト"
+        row[10] = site_name
+        row[11] = "CODE"
+        row[12] = "基本請負料"
+        row[13] = "100"
+        rows.append(row)
+    csv_text = ",".join(header) + "\n" + "\n".join(",".join(row) for row in rows) + "\n"
+    return csv_text.encode("utf-8")
+
+
+def test_upload_manager_filter_limits_rows_to_manager_sites(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _user()
+
+    with client.application.app_context():
+        db.session.add(_master_row("01234001", "9001", "現場A", row_id=1))
+        db.session.add(_master_row("05678001", "9002", "現場B", row_id=2))
+        db.session.commit()
+
+    response = client.post(
+        "/tools/subject_analysis_tool/api/upload",
+        data={
+            "subject_file": (io.BytesIO(_two_site_subject_csv_bytes()), "subject.csv"),
+            "site_source": "db",
+            "manager_id": "9001",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    codes = {item["contract_code"] for item in payload["data"]["current_year"]}
+    assert codes == {"01234001"}
+    manager_filter = payload["metadata"]["manager_filter"]
+    assert manager_filter["manager_id"] == "9001"
+    assert manager_filter["matched_contract_count"] == 1
+    assert manager_filter["excluded_row_count"] == 1
+
+
+def test_upload_manager_filter_rejects_unknown_manager(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _user()
+
+    with client.application.app_context():
+        db.session.add(_master_row("01234001", "9001"))
+        db.session.commit()
+
+    response = client.post(
+        "/tools/subject_analysis_tool/api/upload",
+        data={
+            "subject_file": (io.BytesIO(_subject_csv_bytes()), "subject.csv"),
+            "site_source": "db",
+            "manager_id": "9999",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    assert "担当者番号" in response.get_json()["error"]
+
+
+def test_upload_without_manager_id_keeps_all_rows(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _user()
+
+    with client.application.app_context():
+        db.session.add(_master_row("01234001", "9001", "現場A", row_id=1))
+        db.session.add(_master_row("05678001", "9002", "現場B", row_id=2))
+        db.session.commit()
+
+    response = client.post(
+        "/tools/subject_analysis_tool/api/upload",
+        data={
+            "subject_file": (io.BytesIO(_two_site_subject_csv_bytes()), "subject.csv"),
+            "site_source": "db",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["metadata"]["manager_filter"] is None
+    assert payload["metadata"]["current_year_count"] == 2
+
+
 def test_subject_analysis_tool_page_renders_site_source_modes(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _user()
@@ -261,6 +370,9 @@ def test_subject_analysis_tool_page_renders_site_source_modes(tmp_path):
     assert 'id="site-source-file-panel"' in html
     assert 'id="site-source-db-panel"' in html
     assert 'id="manager-id-filter"' in html
+    assert 'id="manager-filter-enabled"' in html
+    assert 'id="upload-manager-id"' in html
+    assert 'id="review-manager-filter"' in html
     assert 'id="upload-review-panel"' in html
     assert 'id="filter-preset-select"' in html
     assert 'id="sat-sidebar-toggle"' in html
