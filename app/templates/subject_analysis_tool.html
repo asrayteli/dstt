@@ -241,15 +241,15 @@
                                 <table id="detail-table" class="data-table">
                                     <thead>
                                         <tr>
-                                            <th class="sortable" data-column="site_name">現場名</th>
-                                            <th class="sortable" data-column="corp_name">法人名</th>
-                                            <th class="sortable" data-column="segment">セグメント</th>
-                                            <th class="sortable" data-column="subject_name">科目</th>
-                                            <th class="sortable" data-column="month">月</th>
-                                            <th class="sortable" data-column="current_value">当期値</th>
-                                            <th class="sortable compare-only" data-column="comparison_value">比較値</th>
-                                            <th class="sortable compare-only" data-column="diff">差異</th>
-                                            <th class="sortable compare-only" data-column="diff_rate">差異率(%)</th>
+                                            <th class="sortable" data-column="site_name" data-help="対象となる現場（契約コード）の名称です。">現場名</th>
+                                            <th class="sortable" data-column="corp_name" data-help="現場を契約している法人（顧客）の名称です。">法人名</th>
+                                            <th class="sortable" data-column="segment" data-help="契約コードから判定した区分です。現場リストPLUS参照モードでは最新マスタ、現場表モードでは現場マッピングを参照します。">セグメント</th>
+                                            <th class="sortable" data-column="subject_name" data-help="収支科目の名称です（基本請負料・人件費 など）。">科目</th>
+                                            <th class="sortable" data-column="month" data-help="データの対象月です。">月</th>
+                                            <th class="sortable" data-column="current_value" data-help="読み込んだ当期CSVの、その月・科目の金額です。原価科目は符号反転され、マイナス値で表示されます。">当期値</th>
+                                            <th class="sortable compare-only" data-column="comparison_value" data-help="比較モードに応じた比較元の金額です（前年同月・基準月・累計 など）。単純表示モードでは比較しません。">比較値</th>
+                                            <th class="sortable compare-only" data-column="diff" data-help="当期値 − 比較値。プラスは増加、マイナスは減少を表します。">差異</th>
+                                            <th class="sortable compare-only" data-column="diff_rate" data-help="差異 ÷ 比較値 × 100。比較値が0の場合は0%になります。">差異率(%)</th>
                                         </tr>
                                     </thead>
                                     <tbody id="detail-tbody"></tbody>
