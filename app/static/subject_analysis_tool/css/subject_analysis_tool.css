@@ -555,6 +555,15 @@
     filter: brightness(1.08);
 }
 
+/* 詳細一覧のソート方向インジケーター */
+.data-table th.sortable.sort-asc::after {
+    content: " ▲";
+}
+
+.data-table th.sortable.sort-desc::after {
+    content: " ▼";
+}
+
 .data-table td {
     border-bottom: 1px solid #e8f0f8;
     color: #25394d;
@@ -1288,7 +1297,7 @@
 }
 
 .sat-container.sat-simple-view .simple-only {
-    display: block;
+    display: inline;
 }
 
 .hidden {

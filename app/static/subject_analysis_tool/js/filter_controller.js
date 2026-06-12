@@ -1,5 +1,15 @@
 // フィルターコントローラー - サイドバーの絞り込みUIを制御
 
+// 現場名・科目名に引用符やタグが含まれてもHTMLが壊れないようにエスケープする
+function escapeFilterHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 class FilterController {
     constructor() {
         this.selectedMonths = [];
@@ -37,11 +47,11 @@ class FilterController {
             // 5桁グループ化モード：ツリー構造で表示
             const grouped5Digit = dataManager.getSites5DigitGrouped();
 
-            Object.keys(grouped5Digit).sort().forEach(segment => {
+            Object.keys(grouped5Digit).sort().forEach((segment, segmentIndex) => {
                 html += `
                     <div class="subject-group">
                         <div class="subject-group-title" onclick="toggleGroup(this)">
-                            ${segment} (${grouped5Digit[segment].length})
+                            ${escapeFilterHtml(segment)} (${grouped5Digit[segment].length})
                         </div>
                         <div class="subject-group-items">
                 `;
@@ -50,20 +60,21 @@ class FilterController {
                     const code5 = group.code5;
                     const segmentKey = group.segment || segment;
                     const groupKey = `5digit:${code5}:${segmentKey}`;
-                    const treeId = `children-${code5}-${segmentKey}-${groupIndex}`;
+                    // id や inline onclick で安全に使えるよう英数字のみで構成する
+                    const treeId = `children-${code5}-${segmentIndex}-${groupIndex}`;
                     const allChecked = this.selectedSites.includes(groupKey);
 
                     html += `
                         <div class="site-item site-group-5digit">
                             <input type="checkbox"
                                    class="site-checkbox site-checkbox-5digit"
-                                   value="${groupKey}"
-                                   data-segment="${segment}"
-                                   data-group-key="${groupKey}"
+                                   value="${escapeFilterHtml(groupKey)}"
+                                   data-segment="${escapeFilterHtml(segment)}"
+                                   data-group-key="${escapeFilterHtml(groupKey)}"
                                    ${allChecked ? 'checked' : ''}
                                    onchange="filterController.handle5DigitCheckboxChange(this)">
                             <span onclick="filterController.toggle8DigitChildren('${treeId}')" style="cursor: pointer;">
-                                <span id="expand-icon-${treeId}">▶</span> ${group.corpName}（${group.children.length}拠点）
+                                <span id="expand-icon-${treeId}">▶</span> ${escapeFilterHtml(group.corpName)}（${group.children.length}拠点）
                             </span>
                         </div>
                         <div id="${treeId}" class="site-8digit-children" style="display: none; margin-left: 20px;">
@@ -76,12 +87,12 @@ class FilterController {
                             <div class="site-item">
                                 <input type="checkbox"
                                        class="site-checkbox site-checkbox-8digit"
-                                       value="${siteKey}"
-                                       data-segment="${segment}"
-                                       data-group-key="${groupKey}"
+                                       value="${escapeFilterHtml(siteKey)}"
+                                       data-segment="${escapeFilterHtml(segment)}"
+                                       data-group-key="${escapeFilterHtml(groupKey)}"
                                        ${checked ? 'checked' : ''}
                                        onchange="filterController.handle8DigitCheckboxChange(this)">
-                                <span>${site.displayName}</span>
+                                <span>${escapeFilterHtml(site.displayName)}</span>
                             </div>
                         `;
                     });
@@ -110,7 +121,7 @@ class FilterController {
                 html += `
                     <div class="subject-group">
                         <div class="subject-group-title" onclick="toggleGroup(this)">
-                            ${segment} (${groupedSites[segment].length})
+                            ${escapeFilterHtml(segment)} (${groupedSites[segment].length})
                         </div>
                         <div class="subject-group-items">
                 `;
@@ -122,10 +133,10 @@ class FilterController {
                         <div class="site-item">
                             <input type="checkbox"
                                    class="site-checkbox"
-                                   value="${siteKey}"
-                                   data-segment="${site.segment}"
+                                   value="${escapeFilterHtml(siteKey)}"
+                                   data-segment="${escapeFilterHtml(site.segment)}"
                                    ${checked ? 'checked' : ''}>
-                            <span>${site.displayName}</span>
+                            <span>${escapeFilterHtml(site.displayName)}</span>
                         </div>
                     `;
                 });
@@ -157,7 +168,7 @@ class FilterController {
             html += `
                 <div class="subject-group">
                     <div class="subject-group-title" onclick="toggleGroup(this)">
-                        ${groupName} (${subjectGroups[groupName].length})
+                        ${escapeFilterHtml(groupName)} (${subjectGroups[groupName].length})
                     </div>
                     <div class="subject-group-items">
             `;
@@ -167,9 +178,9 @@ class FilterController {
                     <div class="subject-item">
                         <input type="checkbox"
                                class="subject-checkbox"
-                               value="${subject}"
-                               data-group="${groupName}">
-                        <span>${subject}</span>
+                               value="${escapeFilterHtml(subject)}"
+                               data-group="${escapeFilterHtml(groupName)}">
+                        <span>${escapeFilterHtml(subject)}</span>
                     </div>
                 `;
             });

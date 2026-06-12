@@ -28,7 +28,7 @@ class ExportHandler {
         const rows = [headers];
         results.forEach(result => {
             const item = result.item;
-            const segment = dataManager.rawData.siteMapping[item.contract_code] || '未分類';
+            const segment = dataManager.getSegment(item.contract_code);
             const hasComparison = !!result.hasComparison;
 
             rows.push([
@@ -83,7 +83,7 @@ class ExportHandler {
                 diffRate: result.diffRate,
                 hasComparison: !!result.hasComparison,
                 isAnomaly: !!result.isAnomaly,
-                segment: dataManager.rawData.siteMapping[result.item.contract_code] || '未分類',
+                segment: dataManager.getSegment(result.item.contract_code),
                 item: {
                     contract_code: result.item.contract_code,
                     site_name: result.item.site_name,

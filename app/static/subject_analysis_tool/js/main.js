@@ -103,8 +103,8 @@ function setupEventListeners() {
         detailSearch.addEventListener('input', (e) => {
             tableRenderer.searchQuery = e.target.value;
             if (currentFilters) {
-                const results = comparisonEngine.executeComparison(currentFilters);
-                tableRenderer.renderDetailTable(results, currentFilters);
+                tableRenderer.currentPage = 1;
+                tableRenderer.renderDetailTable(comparisonEngine.getResults(), currentFilters);
             }
         });
     }
@@ -417,8 +417,8 @@ async function applyFilters() {
         return;
     }
 
-    if (filters.comparisonMode === 'prev_year' && !dataManager.hasPrevYearData()) {
-        alert('前年比較には前年データが必要です。');
+    if ((filters.comparisonMode === 'prev_year' || filters.comparisonMode === 'cumulative') && !dataManager.hasPrevYearData()) {
+        alert('前年比較・累計比較には前年データが必要です。');
         return;
     }
 
@@ -478,6 +478,7 @@ function applyQuickView(view) {
     if (!results.length || !currentFilters) return;
 
     if (view === 'clear') {
+        tableRenderer.currentPage = 1;
         tableRenderer.sortColumn = null;
         tableRenderer.renderDetailTable(results, currentFilters);
         switchTab('detail');

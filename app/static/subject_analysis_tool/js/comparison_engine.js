@@ -150,11 +150,10 @@ class ComparisonEngine {
     /**
      * 利益分析データを生成
      *
-     * 重要: 利益の定義について
-     * - CSV上: 売上=正（収入）, 原価=負（支出）
-     * - 符号反転処理: 表示用に原価を正に変換済み
-     * - 利益計算: 利益 = 売上 - 原価（引き算）
-     * - 原価は符号反転済みの正の値として扱う
+     * 符号の扱い:
+     * - CSV上は売上・原価とも正の値
+     * - サーバー側の解析時に原価行のみ符号反転し、負の値で保持している
+     * - そのため 利益 = 売上 + 原価（足し算）で計算する
      */
     getProfitAnalysis() {
         if (this.comparisonResults.length === 0) {
@@ -180,27 +179,26 @@ class ComparisonEngine {
                     contractCode: result.item.contract_code,
                     siteName: result.item.site_name,
                     corpName: result.item.corp_name,
-                    segment: dataManager.rawData.siteMapping[result.item.contract_code] || '未分類',
+                    segment: dataManager.getSegment(result.item.contract_code),
                     month: result.month,
                     revenue: 0,  // 売上（正）
-                    revenueComparison: 0,  // 売上（正）
-                    cost: 0,  // 原価（符号反転済みの正）
-                    costComparison: 0,  // 原価（符号反転済みの正）
+                    revenueComparison: 0,
+                    cost: 0,  // 原価（符号反転済みの負の値）
+                    costComparison: 0,
                     comparisonLabel: result.comparisonLabel
                 };
             }
-            grouped[key].revenue += result.currentValue;  // 売上（正）を加算
-            grouped[key].revenueComparison += result.comparisonValue;  // 売上（正）を加算
+            grouped[key].revenue += result.currentValue;
+            grouped[key].revenueComparison += result.comparisonValue;
         });
 
-        // 原価を集計（符号反転済みの正の値として扱う）
+        // 原価を集計（符号反転済みの負の値のまま加算）
         costResults.forEach(result => {
             const key = `${result.item.contract_code}|${result.month}`;
             if (!grouped[key]) {
                 // 売上がない現場はスキップ
                 return;
             }
-            // 原価は既に符号反転済み（正の値）
             grouped[key].cost += result.currentValue;
             grouped[key].costComparison += result.comparisonValue;
         });
@@ -248,7 +246,7 @@ class ComparisonEngine {
                     siteName: result.item.site_name,
                     corpName: result.item.corp_name,
                     contractCode: result.item.contract_code,
-                    segment: dataManager.rawData.siteMapping[result.item.contract_code] || '未分類',
+                    segment: dataManager.getSegment(result.item.contract_code),
                     totalCurrent: 0,
                     totalComparison: 0,
                     totalDiff: 0,
@@ -380,29 +378,29 @@ class ComparisonEngine {
                 sum: this.sum(currentValues),
                 avg: this.average(currentValues),
                 median: this.median(currentValues),
-                max: Math.max(...currentValues),
-                min: Math.min(...currentValues),
+                max: this.maxOf(currentValues),
+                min: this.minOf(currentValues),
                 stdDev: this.standardDeviation(currentValues),
                 q1: q1,
                 q3: q3,
                 iqr: iqr,
-                range: Math.max(...currentValues) - Math.min(...currentValues),
+                range: this.maxOf(currentValues) - this.minOf(currentValues),
                 variance: this.variance(currentValues)
             },
             comparisonValue: {
                 sum: this.sum(comparisonValues),
                 avg: this.average(comparisonValues),
                 median: this.median(comparisonValues),
-                max: Math.max(...comparisonValues),
-                min: Math.min(...comparisonValues),
+                max: this.maxOf(comparisonValues),
+                min: this.minOf(comparisonValues),
                 stdDev: this.standardDeviation(comparisonValues)
             },
             diff: {
                 sum: this.sum(diffs),
                 avg: this.average(diffs),
                 median: this.median(diffs),
-                max: Math.max(...diffs),
-                min: Math.min(...diffs),
+                max: this.maxOf(diffs),
+                min: this.minOf(diffs),
                 stdDev: this.standardDeviation(diffs),
                 positiveCount: diffs.filter(d => d > 0).length,
                 negativeCount: diffs.filter(d => d < 0).length,
@@ -411,8 +409,8 @@ class ComparisonEngine {
             diffRate: {
                 avg: this.average(diffRates),
                 median: this.median(diffRates),
-                max: Math.max(...diffRates),
-                min: Math.min(...diffRates),
+                max: this.maxOf(diffRates),
+                min: this.minOf(diffRates),
                 stdDev: this.standardDeviation(diffRates)
             },
             revenue: revenueValues.length > 0 ? {
@@ -432,8 +430,11 @@ class ComparisonEngine {
      * 累計比較モード用の統計データを計算
      */
     calculateCumulativeStatistics(filters) {
-        const { months, sites, subjects, segments } = filters;
-        const currentData = dataManager.getData({ sites, subjects, months, segments });
+        const { months, sites, subjects, segments, managerId, allowedContractCodes, siteGroupMode } = filters;
+        let currentData = dataManager.getData({ sites, subjects, months, segments, managerId, allowedContractCodes });
+        if (siteGroupMode === '5digit') {
+            currentData = dataManager.groupDataBy5Digit(currentData);
+        }
         const cumulativeResults = [];
 
         // 選択された最大月を特定（累計の対象月）
@@ -450,8 +451,10 @@ class ComparisonEngine {
             // 当期の累計値を計算
             const currentCumulative = dataManager.calculateCumulative(item.amounts, maxMonth);
 
-            // 前年の累計値を計算
-            const prevYearItem = dataManager.getPrevYearData(item.contract_code, item.subject_name);
+            // 前年の累計値を計算（5桁集約時は前年側も同様に合算）
+            const prevYearItem = siteGroupMode === '5digit'
+                ? dataManager.getPrevYearData5Digit(item.contract_code, item.subject_name)
+                : dataManager.getPrevYearData(item.contract_code, item.subject_name);
             let comparisonCumulative = 0;
             if (prevYearItem) {
                 comparisonCumulative = dataManager.calculateCumulative(prevYearItem.amounts, maxMonth);
@@ -477,8 +480,8 @@ class ComparisonEngine {
      * 月次推移データを生成（グラフ用）
      */
     getMonthlyTrend(filters) {
-        const { sites, subjects } = filters;
-        const currentData = dataManager.getData({ sites, subjects });
+        const { sites, subjects, segments, managerId, allowedContractCodes } = filters;
+        const currentData = dataManager.getData({ sites, subjects, segments, managerId, allowedContractCodes });
 
         const monthOrder = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
         const trend = {
@@ -512,6 +515,25 @@ class ComparisonEngine {
 
     sum(arr) {
         return arr.reduce((sum, val) => sum + val, 0);
+    }
+
+    // Math.max(...arr) は要素数が多いとスタック上限で落ちるためループで求める
+    maxOf(arr) {
+        if (arr.length === 0) return 0;
+        let max = arr[0];
+        for (const val of arr) {
+            if (val > max) max = val;
+        }
+        return max;
+    }
+
+    minOf(arr) {
+        if (arr.length === 0) return 0;
+        let min = arr[0];
+        for (const val of arr) {
+            if (val < min) min = val;
+        }
+        return min;
     }
 
     average(arr) {

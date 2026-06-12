@@ -96,6 +96,21 @@ class DataManager {
     }
 
     /**
+     * 契約コードからセグメントを解決する。
+     * 8桁コードはマッピングを直接参照し、5桁集約コードは配下の多数決で決める。
+     */
+    getSegment(contractCode) {
+        const code = String(contractCode || '');
+        if (this.rawData.siteMapping[code]) {
+            return this.rawData.siteMapping[code];
+        }
+        if (code.length === 5) {
+            return this.getSegmentFor5Digit(code);
+        }
+        return '未分類';
+    }
+
+    /**
      * 5桁コードのセグメントを多数決で決定
      */
     getSegmentFor5Digit(code5) {

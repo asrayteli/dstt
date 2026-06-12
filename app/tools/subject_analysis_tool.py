@@ -125,12 +125,15 @@ def upload_files():
 
         parsed_data = parse_subject_data(subject_data)
 
+        extra_warnings = []
         prev_year_data = None
         prev_year_validation = None
         if prev_year_subject_file and prev_year_subject_file.filename:
             prev_year_path = os.path.join(upload_folder, f"{user_id}_{timestamp}_prev_subject.csv")
             prev_year_subject_file.save(prev_year_path)
             prev_year_csv = read_csv_with_encoding(prev_year_path)
+            if not prev_year_csv:
+                extra_warnings.append("前年データ CSV の読み込みに失敗したため、前年比較なしで続行します")
             if prev_year_csv:
                 prev_year_validation = validate_subject_csv_structure(prev_year_csv, "前年データ")
                 if prev_year_validation["fatal"]:
@@ -160,6 +163,8 @@ def upload_files():
             site_csv = read_csv_with_encoding(site_path)
             if site_csv:
                 site_data = parse_site_data(site_csv)
+            else:
+                extra_warnings.append("現行現場表 CSV の読み込みに失敗したため、セグメントは未分類になります")
             try:
                 os.remove(site_path)
             except OSError:
@@ -172,7 +177,7 @@ def upload_files():
             prev_year_data or [],
             structure_validation,
             prev_year_validation,
-            warnings,
+            extra_warnings + list(warnings or []),
         )
 
         try:
@@ -245,11 +250,12 @@ def manager_contracts():
 
 def read_csv_with_encoding(file_path):
     """複数エンコーディングで CSV を読み込む。"""
-    encodings = ["utf-8", "shift_jis", "cp932", "utf-8-sig"]
+    # utf-8 より先に utf-8-sig を試さないと BOM が先頭セルに残る
+    encodings = ["utf-8-sig", "cp932", "shift_jis", "utf-8"]
 
     for encoding in encodings:
         try:
-            with open(file_path, "r", encoding=encoding) as file:
+            with open(file_path, "r", encoding=encoding, newline="") as file:
                 reader = csv.reader(file)
                 return list(reader)
         except Exception:
@@ -365,10 +371,16 @@ def parse_amount_cell(value):
 
 
 def parse_subject_data(csv_data):
-    """科目別分析表 CSV を解析して明細配列に変換する。"""
+    """科目別分析表 CSV を解析して明細配列に変換する。
+
+    符号の扱い: CSV 上は売上・原価とも正の値。原価行のみ符号反転して
+    負の値で保持するため、利益 = 売上 + 原価（足し算）で計算できる。
+    """
     parsed = []
     indirect_cost_codes = {"間接原価", "関節原価"}
     revenue_names = {"基本請負料", "その他請負料"}
+    # 請負形態名称で売上区分を判別する科目（月次ジェネレーターと同じ扱い）
+    contract_type_sales_subjects = {"自動車売上", "旅客運送売上"}
 
     for index, row in enumerate(csv_data):
         if index == 0:
@@ -386,6 +398,9 @@ def parse_subject_data(csv_data):
         normalized_subject_code = subject_code.replace(" ", "").replace("　", "")
         is_indirect_cost = normalized_subject_code in indirect_cost_codes
 
+        # 販売費は現場収支の対象外（月次ジェネレーターと同じ扱い）
+        if normalized_subject_code == "販売費":
+            continue
         if not subject_name and not is_indirect_cost:
             continue
         if not contract_code:
@@ -395,11 +410,12 @@ def parse_subject_data(csv_data):
         if not display_subject_name and is_indirect_cost:
             display_subject_name = "間接原価"
 
-        if subject_name == "自動車売上":
+        is_contract_type_sales = subject_name in contract_type_sales_subjects
+        if is_contract_type_sales:
             if contract_type in revenue_names:
                 display_subject_name = contract_type
             elif contract_type:
-                display_subject_name = f"自動車売上({contract_type})"
+                display_subject_name = f"{subject_name}({contract_type})"
 
         amounts = []
         for col_index in range(13, len(row)):
@@ -411,7 +427,7 @@ def parse_subject_data(csv_data):
         while len(amounts) < 12:
             amounts.append(0)
 
-        is_revenue = display_subject_name in revenue_names
+        is_revenue = display_subject_name in revenue_names or is_contract_type_sales
         if not is_revenue:
             amounts = [-amount for amount in amounts]
 
@@ -452,13 +468,13 @@ def parse_site_data(csv_data):
     return site_dict
 
 
-def summarize_by_key(results, key_getter):
+def summarize_by_key(results, key_getter, label_getter=None):
     summary = {}
     for result in results:
         key = key_getter(result)
         if key not in summary:
             summary[key] = {
-                "name": key,
+                "name": label_getter(result) if label_getter else key,
                 "current": 0,
                 "comparison": 0,
                 "diff": 0,
@@ -538,7 +554,15 @@ def export_xlsx():
         )
 
         site_sheet = workbook.create_sheet("現場別サマリー")
-        site_summary = summarize_by_key(results, lambda r: (r.get("item") or {}).get("site_name", ""))
+        # 同名現場の混同を避けるため契約コードを含めたキーで集計する
+        site_summary = summarize_by_key(
+            results,
+            lambda r: (
+                (r.get("item") or {}).get("contract_code", ""),
+                (r.get("item") or {}).get("site_name", ""),
+            ),
+            lambda r: (r.get("item") or {}).get("site_name", ""),
+        )
         append_sheet(
             site_sheet,
             ["現場名", "当期合計", "比較合計", "差異", "差異率(%)", "異常値件数"],

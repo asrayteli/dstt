@@ -124,6 +124,65 @@ def test_parse_subject_data_splits_auto_sales_by_contract_type(tmp_path):
     assert [item["amounts"][0] for item in parsed] == [100.0, 200.0]
 
 
+def _subject_row(contract_type="", subject_code="", subject_name="", amount="100", contract_code="01234001"):
+    row = [""] * 25
+    row[5] = contract_type
+    row[8] = contract_code
+    row[9] = "株式会社テスト"
+    row[10] = "テスト現場"
+    row[11] = subject_code
+    row[12] = subject_name
+    row[13] = amount
+    return row
+
+
+def _csv_from_rows(rows):
+    header = [f"h{i}" for i in range(25)]
+    return [header] + rows
+
+
+def test_parse_subject_data_skips_sales_expense_rows():
+    module = _load_sat_module()
+    parsed = module.parse_subject_data(
+        _csv_from_rows([
+            _subject_row(subject_code="販売費", subject_name="給料", amount="500"),
+            _subject_row(subject_code="CODE", subject_name="給料", amount="300"),
+        ])
+    )
+
+    assert len(parsed) == 1
+    assert parsed[0]["subject_name"] == "給料"
+    # 原価行は符号反転されて負の値で保持される
+    assert parsed[0]["amounts"][0] == -300.0
+    assert parsed[0]["is_revenue"] is False
+
+
+def test_parse_subject_data_passenger_sales_treated_as_revenue():
+    module = _load_sat_module()
+    parsed = module.parse_subject_data(
+        _csv_from_rows([
+            _subject_row(contract_type="基本請負料", subject_name="旅客運送売上", amount="400"),
+            _subject_row(contract_type="特殊形態", subject_name="自動車売上", amount="250"),
+        ])
+    )
+
+    assert [item["subject_name"] for item in parsed] == ["基本請負料", "自動車売上(特殊形態)"]
+    assert all(item["is_revenue"] for item in parsed)
+    # 売上行は符号反転されない
+    assert [item["amounts"][0] for item in parsed] == [400.0, 250.0]
+
+
+def test_read_csv_with_encoding_strips_utf8_bom(tmp_path):
+    module = _load_sat_module()
+    csv_path = tmp_path / "bom.csv"
+    csv_path.write_bytes("﻿ヘッダ,2\nデータ,3\n".encode("utf-8"))
+
+    csv_data = module.read_csv_with_encoding(csv_path)
+
+    assert csv_data[0][0] == "ヘッダ"
+    assert csv_data[1][0] == "データ"
+
+
 def test_load_site_mapping_from_master_is_single_definition():
     source = (ROOT / "app" / "tools" / "subject_analysis_tool.py").read_text(encoding="utf-8")
     assert source.count("def load_site_mapping_from_master(") == 1

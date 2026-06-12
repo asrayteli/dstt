@@ -87,11 +87,43 @@ class TableRenderer {
         }
 
         if (shouldRender && this.currentData.length > 0) {
-            const filters = filterController.getFilters();
-            this.renderDetailTable(this.currentData, filters);
+            this.renderDetailTable(this.currentData, this.getActiveFilters());
         }
 
         return true;
+    }
+
+    /**
+     * 適用済みのフィルター（分析実行時のもの）を返す。
+     * 未適用のUI変更を拾わないよう、画面上の値ではなく currentFilters を優先する。
+     */
+    getActiveFilters() {
+        if (typeof currentFilters !== 'undefined' && currentFilters) {
+            return currentFilters;
+        }
+        return filterController.getFilters();
+    }
+
+    /**
+     * HTMLテキスト用エスケープ（現場名等にタグ・引用符が含まれても崩れないように）
+     */
+    escapeText(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    /**
+     * HTML属性値用エスケープ（シングル/ダブルクォート両方を無害化）
+     */
+    escapeAttr(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     bindSearchInput(input, onCommit) {
@@ -191,7 +223,8 @@ class TableRenderer {
                 if (!tooltipDataStr) return;
 
                 try {
-                    const data = JSON.parse(tooltipDataStr.replace(/&quot;/g, '"'));
+                    // getAttribute はHTMLエンティティを復号済みの文字列を返す
+                    const data = JSON.parse(tooltipDataStr);
                     this.showContextMenu(e.clientX, e.clientY, () => {
                         this.showDetailPopup(e.clientX, e.clientY, contentBuilder(data));
                     });
@@ -236,7 +269,8 @@ class TableRenderer {
         if (results.length === 0) {
             const colSpan = isSimpleMode ? 6 : 9;
             tbody.innerHTML = `<tr><td colspan="${colSpan}" class="text-center text-gray-500">データがありません</td></tr>`;
-            countEl.textContent = '0';
+            if (countEl) countEl.textContent = '0';
+            this.renderPagination(0);
             return;
         }
 
@@ -260,7 +294,7 @@ class TableRenderer {
         let html = '';
         paginatedResults.forEach((result, index) => {
             const item = result.item;
-            const segment = dataManager.rawData.siteMapping[item.contract_code] || '未分類';
+            const segment = dataManager.getSegment(item.contract_code);
 
             // ハイライトクラス決定
             let highlightClass = '';
@@ -288,6 +322,10 @@ class TableRenderer {
                 comparisonValueDisplay = '-';
                 diffDisplay = '-';
                 diffRateDisplay = '-';
+            } else if (filters.displayMode === 'value_diff') {
+                diffRateDisplay = '-';
+            } else if (filters.displayMode === 'value_rate') {
+                diffDisplay = '-';
             } else if (filters.displayMode === 'diff_only') {
                 currentValueDisplay = '-';
                 comparisonValueDisplay = '-';
@@ -312,14 +350,14 @@ class TableRenderer {
                 diffRate: result.diffRate,
                 hasComparison: !!result.hasComparison,
                 isRevenue: item.is_revenue
-            }).replace(/"/g, '&quot;');
+            });
 
             html += `
-                <tr class="${highlightClass}" data-tooltip='${tooltipData}' data-row-index="${index}">
-                    <td>${item.site_name}</td>
-                    <td>${item.corp_name}</td>
-                    <td>${segment}</td>
-                    <td>${item.subject_name}</td>
+                <tr class="${highlightClass}" data-tooltip="${this.escapeAttr(tooltipData)}" data-row-index="${index}">
+                    <td>${this.escapeText(item.site_name)}</td>
+                    <td>${this.escapeText(item.corp_name)}</td>
+                    <td>${this.escapeText(segment)}</td>
+                    <td>${this.escapeText(item.subject_name)}</td>
                     <td>${result.month}月</td>
                     <td class="text-right">${currentValueDisplay}</td>
                     <td class="text-right compare-only">${comparisonValueDisplay}</td>
@@ -361,10 +399,10 @@ class TableRenderer {
                     <div class="summary-card-header" onclick="toggleSummaryCard(${index})">
                         <div>
                             <div class="summary-card-title">
-                                ${site.siteName} (${site.corpName})
+                                ${this.escapeText(site.siteName)} (${this.escapeText(site.corpName)})
                             </div>
                             <div class="text-sm text-gray-600">
-                                ${site.segment}
+                                ${this.escapeText(site.segment)}
                                 <span class="compare-only"> | 異常値: ${site.anomalyCount}件</span>
                                 <span class="simple-only"> | 単純表示</span>
                             </div>
@@ -412,11 +450,11 @@ class TableRenderer {
                     diffRate: result.diffRate,
                     hasComparison: !!result.hasComparison,
                     isRevenue: result.item.is_revenue
-                }).replace(/"/g, '&quot;');
+                });
 
                 html += `
-                    <tr class="${highlightClass}" data-tooltip='${tooltipData}'>
-                        <td>${result.item.subject_name}</td>
+                    <tr class="${highlightClass}" data-tooltip="${this.escapeAttr(tooltipData)}">
+                        <td>${this.escapeText(result.item.subject_name)}</td>
                         <td>${result.month}月</td>
                         <td class="text-right">${this.formatNumber(result.currentValue)}</td>
                         <td class="text-right compare-only">${this.formatNumber(result.comparisonValue)}</td>
@@ -498,7 +536,7 @@ class TableRenderer {
 
         let html = `
             <div class="mb-4">
-                <input type="text" id="subject-summary-search" placeholder="科目名で検索..." class="form-input" style="max-width: 300px;" value="${this.subjectSummarySearch}">
+                <input type="text" id="subject-summary-search" placeholder="科目名で検索..." class="form-input" style="max-width: 300px;" value="${this.escapeAttr(this.subjectSummarySearch)}">
             </div>
             <table class="data-table">
                 <thead>
@@ -535,11 +573,11 @@ class TableRenderer {
                 avgComparison: subject.totalComparison / subject.siteCount,
                 avgDiff: subject.totalDiff / subject.siteCount,
                 hasComparison: !isSimpleMode
-            }).replace(/"/g, '&quot;');
+            });
 
             html += `
-                <tr class="${highlightClass}" data-tooltip='${tooltipData}'>
-                    <td>${subject.subjectName}</td>
+                <tr class="${highlightClass}" data-tooltip="${this.escapeAttr(tooltipData)}">
+                    <td>${this.escapeText(subject.subjectName)}</td>
                     <td class="text-right">${subject.siteCount}</td>
                     <td class="text-right compare-only">${subject.anomalyCount}</td>
                     <td class="text-right">${this.formatNumber(subject.totalCurrent)}</td>
@@ -556,6 +594,16 @@ class TableRenderer {
         `;
 
         container.innerHTML = html;
+
+        // 再描画後もソートインジケーターを維持
+        if (this.subjectSummarySortColumn) {
+            const indicator = container.querySelector(
+                `.sortable-subject[data-column="${this.subjectSummarySortColumn}"] .sort-indicator`
+            );
+            if (indicator) {
+                indicator.textContent = this.subjectSummarySortDirection === 'asc' ? ' ▲' : ' ▼';
+            }
+        }
 
         // ツールチップ設定
         this.setupSubjectSummaryTooltipListeners();
@@ -873,7 +921,16 @@ class TableRenderer {
             return;
         }
 
-        if (!profitData || profitData.length === 0) {
+        if (profitData && profitData.error) {
+            container.innerHTML = `
+                <div class="bg-yellow-50 border border-yellow-200 rounded p-4 text-center">
+                    <p class="text-yellow-800 font-semibold">⚠️ ${this.escapeText(profitData.error)}</p>
+                </div>
+            `;
+            return;
+        }
+
+        if (!profitData || !Array.isArray(profitData) || profitData.length === 0) {
             container.innerHTML = '<p class="text-center text-gray-500">データがありません</p>';
             return;
         }
@@ -911,7 +968,7 @@ class TableRenderer {
 
         let html = `
             <div class="mb-4">
-                <input type="text" id="profit-search" placeholder="現場名・法人名・月で検索..." class="form-input" style="max-width: 300px;" value="${this.profitSearch}">
+                <input type="text" id="profit-search" placeholder="現場名・法人名・月で検索..." class="form-input" style="max-width: 300px;" value="${this.escapeAttr(this.profitSearch)}">
             </div>
             <div class="stats-grid mb-6">
                 <div class="stat-card">
@@ -989,12 +1046,12 @@ class TableRenderer {
                 profitRateComparison: item.profitRateComparison,
                 comparisonLabel: item.comparisonLabel,
                 hasComparison: !isSimpleMode
-            }).replace(/"/g, '&quot;');
+            });
 
             html += `
-                <tr class="${highlightClass}" data-tooltip='${tooltipData}'>
-                    <td>${item.siteName}</td>
-                    <td>${item.corpName}</td>
+                <tr class="${highlightClass}" data-tooltip="${this.escapeAttr(tooltipData)}">
+                    <td>${this.escapeText(item.siteName)}</td>
+                    <td>${this.escapeText(item.corpName)}</td>
                     <td>${item.month}月</td>
                     <td class="text-right text-green-600">${this.formatNumber(item.revenue)}</td>
                     <td class="text-right text-orange-600">${this.formatNumber(item.cost)}</td>
@@ -1021,6 +1078,16 @@ class TableRenderer {
         `;
 
         container.innerHTML = html;
+
+        // 再描画後もソートインジケーターを維持
+        if (this.profitSortColumn) {
+            const indicator = container.querySelector(
+                `.sortable-profit[data-column="${this.profitSortColumn}"] .sort-indicator`
+            );
+            if (indicator) {
+                indicator.textContent = this.profitSortDirection === 'asc' ? ' ▲' : ' ▼';
+            }
+        }
 
         // ツールチップ設定
         this.setupProfitTooltipListeners();
@@ -1073,7 +1140,7 @@ class TableRenderer {
         const lowerQuery = query.toLowerCase();
         return data.filter(result => {
             const item = result.item;
-            const segment = dataManager.rawData.siteMapping[item.contract_code] || '未分類';
+            const segment = dataManager.getSegment(item.contract_code);
 
             return (
                 item.site_name.toLowerCase().includes(lowerQuery) ||
@@ -1104,8 +1171,8 @@ class TableRenderer {
                     bVal = b.item.corp_name;
                     break;
                 case 'segment':
-                    aVal = dataManager.rawData.siteMapping[a.item.contract_code] || '未分類';
-                    bVal = dataManager.rawData.siteMapping[b.item.contract_code] || '未分類';
+                    aVal = dataManager.getSegment(a.item.contract_code);
+                    bVal = dataManager.getSegment(b.item.contract_code);
                     break;
                 case 'subject_name':
                     aVal = a.item.subject_name;
@@ -1203,14 +1270,17 @@ class TableRenderer {
      */
     goToPage(page) {
         this.currentPage = page;
-        const filters = filterController.getFilters();
-        this.renderDetailTable(this.currentData, filters);
+        this.renderDetailTable(this.currentData, this.getActiveFilters());
     }
 
     /**
      * ソートリスナー設定
+     * 詳細一覧のヘッダーは再描画されないため、多重登録を避けて一度だけバインドする。
      */
     setupSortListeners() {
+        if (this.sortListenersBound) return;
+        this.sortListenersBound = true;
+
         document.querySelectorAll('.sortable').forEach(th => {
             th.addEventListener('click', () => {
                 const column = th.dataset.column;
@@ -1227,8 +1297,7 @@ class TableRenderer {
                 });
                 th.classList.add(`sort-${this.sortDirection}`);
 
-                const filters = filterController.getFilters();
-                this.renderDetailTable(this.currentData, filters);
+                this.renderDetailTable(this.currentData, this.getActiveFilters());
             });
         });
     }
@@ -1353,11 +1422,12 @@ class TableRenderer {
      * 科目別サマリーのリスナー設定
      */
     setupSubjectSummaryListeners(summary, filters) {
-        // 検索ボックス
+        // 検索ボックス（再描画で入力欄が作り直されるためフォーカスを戻す）
         const searchInput = document.getElementById('subject-summary-search');
         this.bindSearchInput(searchInput, (value) => {
             this.subjectSummarySearch = value;
             this.renderSubjectSummary(summary, filters);
+            this.restoreSearchFocus('subject-summary-search');
         });
 
         // ソートヘッダー
@@ -1371,16 +1441,24 @@ class TableRenderer {
                     this.subjectSummarySortDirection = 'asc';
                 }
 
-                // ソートインジケーター更新
-                document.querySelectorAll('.sortable-subject .sort-indicator').forEach(indicator => {
-                    indicator.textContent = '';
-                });
-                const indicator = th.querySelector('.sort-indicator');
-                indicator.textContent = this.subjectSummarySortDirection === 'asc' ? ' ▲' : ' ▼';
-
                 this.renderSubjectSummary(summary, filters);
             });
         });
+    }
+
+    /**
+     * 再描画で作り直された検索欄へフォーカスとカーソル位置を戻す
+     */
+    restoreSearchFocus(inputId) {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        input.focus();
+        const length = input.value.length;
+        try {
+            input.setSelectionRange(length, length);
+        } catch (_error) {
+            // setSelectionRange非対応のinput型では無視
+        }
     }
 
     /**
@@ -1405,11 +1483,12 @@ class TableRenderer {
      * 利益分析のリスナー設定
      */
     setupProfitListeners(profitData, filters) {
-        // 検索ボックス
+        // 検索ボックス（再描画で入力欄が作り直されるためフォーカスを戻す）
         const searchInput = document.getElementById('profit-search');
         this.bindSearchInput(searchInput, (value) => {
             this.profitSearch = value;
             this.renderProfitAnalysis(profitData, filters);
+            this.restoreSearchFocus('profit-search');
         });
 
         // ソートヘッダー
@@ -1422,13 +1501,6 @@ class TableRenderer {
                     this.profitSortColumn = column;
                     this.profitSortDirection = 'asc';
                 }
-
-                // ソートインジケーター更新
-                document.querySelectorAll('.sortable-profit .sort-indicator').forEach(indicator => {
-                    indicator.textContent = '';
-                });
-                const indicator = th.querySelector('.sort-indicator');
-                indicator.textContent = this.profitSortDirection === 'asc' ? ' ▲' : ' ▼';
 
                 this.renderProfitAnalysis(profitData, filters);
             });
