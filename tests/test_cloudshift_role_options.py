@@ -506,6 +506,61 @@ def test_person_book_second_option_syncs_to_scene_book():
     assert len(chiba) == 1
 
 
+def test_person_book_save_reads_whole_month_including_synced_entries():
+    """月保存時は編集中の月全体を読み直し、同期 entry の研修/代務も
+    （entry に変更がなくても）反映する。"""
+    module, app = _build()
+    client = app.test_client()
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+
+    with app.app_context():
+        person = module._load_project(person_id)
+        assist = module._ensure_person_assist(person)
+        assist["training_sites"].append({
+            "id": "t1", "kind": "training", "site_row_id": None, "site_id": "",
+            "site_name": "千葉養護", "shift_key": "", "date": "2026-03-01",
+        })
+        # 旧データ相当: scene 帳から同期済みの研修 entry（アシスト未反映）を直接持たせる
+        person["months"]["2026-04"]["entries_per_day"]["10"] = [{
+            "id": "sync_legacy", "value": "!A!千葉養護", "second_option": "TRAIN",
+            "comment": "", "employee_number": "", "site_name": "千葉養護",
+            "sync_source_type": module.SHIFT_SYNC_SCENE_SOURCE,
+            "sync_source_project_id": "legacy-scene", "sync_source_month_key": "2026-04",
+            "sync_source_day": "10", "sync_source_entry_id": "legacy-entry",
+        }]
+        module._save_project(person)
+
+    # entry を変更しない保存（同期 entry はサーバー側で保持される）
+    _save_month_entries(module, app, client, person_id, {})
+
+    assist = _person_assist_payload(client, person_id)
+    assert {(s["site_name"], s["shift_key"]) for s in assist["experienced_sites"]} == {("千葉養護", "TRAIN")}
+    assert all(s["source_label"] for s in assist["experienced_sites"])
+    # 研修要現場からも削除されている
+    assert all(t["id"] != "t1" for t in assist["training_sites"])
+
+
+def test_scene_save_without_entry_changes_still_registers_role_options():
+    """entry に変更のない保存でも、月全体を読み直して代務/研修を反映する（scene 帳）。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app)
+    module.current_user = _owner()
+    # 保存フックを通さずに entry を直接持たせる（過去の反映漏れ相当）
+    with app.app_context():
+        project = module._load_project(project_id)
+        project["months"]["2026-04"]["entries_per_day"]["1"] = [
+            {"id": "e1", "value": "!SUB!田中", "employee_number": "E101", "comment": ""},
+        ]
+        module._save_project(project)
+
+    # 同一内容の保存（変更なし）
+    _save_month_entries(module, app, client, project_id, {
+        "1": [{"id": "e1", "value": "!SUB!田中", "employee_number": "E101", "comment": ""}],
+    })
+    autos, _ = _auto_records(module, app, project_id)
+    assert [(r["employee_number"], r["shift_key"]) for r in autos] == [("E101", "SUB")]
+
+
 # ---------------------------------------------------------------------------
 # 自動作成（shift-engine）への反映
 # ---------------------------------------------------------------------------
