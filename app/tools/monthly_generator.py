@@ -580,9 +580,12 @@ def process_monthly_data(subject_path, site_path, report_path, target_month, she
         aggregated[segment][expense_category] += month_amount
         aggregated[segment][f"{expense_category}合算"] += cumulative_amount
 
-    # エラーチェック - 経費対照表に見つからない科目
-    for subject in unknown_subjects:
-        errors.append(f"科目が経費対照表に見つかりません: {subject}")
+    # 経費対照表に見つからない科目は計上対象外として無視し、警告で通知する。
+    if unknown_subjects:
+        ignored_subjects = "、".join(sorted(unknown_subjects))
+        warnings.append(
+            f"経費対照表に未登録のため、以下の科目は計上せず無視しました: {ignored_subjects}"
+        )
 
     # ステップ6: 前年データ処理（オプション）
     prev_year_aggregated = None
