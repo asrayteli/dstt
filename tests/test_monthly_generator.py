@@ -115,6 +115,62 @@ def test_monthly_generator_expense_mapping_matches_current_company_rules():
 
     assert module.EXPENSE_MAPPING == expected_mapping
 
+
+def test_monthly_generator_ignores_unknown_subjects_with_warning(tmp_path):
+    module, app = _build_app(tmp_path)
+
+    subject_path = tmp_path / "subject_unknown.csv"
+    site_path = tmp_path / "site_unknown.csv"
+    report_path = tmp_path / "report_unknown.xlsx"
+
+    header = [f"h{i}" for i in range(25)]
+    known_row = [""] * 25
+    known_row[5] = "契約種別"
+    known_row[8] = "01234001"
+    known_row[9] = "株式会社テスト"
+    known_row[10] = "テスト現場"
+    known_row[11] = "SUBJ"
+    known_row[12] = "雑費"
+    known_row[13] = "100"
+
+    ignored_row = [""] * 25
+    ignored_row[5] = "契約種別"
+    ignored_row[8] = "01234001"
+    ignored_row[9] = "株式会社テスト"
+    ignored_row[10] = "テスト現場"
+    ignored_row[11] = "SUBJ"
+    ignored_row[12] = "新聞図書費"
+    ignored_row[13] = "50"
+
+    ignored_row_2 = ignored_row.copy()
+    ignored_row_2[12] = "運賃"
+    ignored_row_2[13] = "75"
+
+    rows = [header, known_row, ignored_row, ignored_row_2]
+    subject_path.write_text(
+        "\n".join(",".join(row) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+    site_path.write_text("契約コード,セグメント\n01234001,一般\n", encoding="utf-8")
+    _write_report_xlsx(report_path)
+
+    with app.app_context():
+        result = module.process_monthly_data(
+            str(subject_path),
+            str(site_path),
+            str(report_path),
+            4,
+            "Sheet1",
+        )
+
+    assert result["success"] is True
+    assert result["data"]["一般"]["経費"] == 100
+    assert "warnings" in result
+    assert (
+        "経費対照表に未登録のため、以下の科目は計上せず無視しました: 新聞図書費、運賃"
+        in result["warnings"]
+    )
+
 def test_monthly_generator_db_mode_uses_site_contract_master(tmp_path):
     module, app = _build_app(tmp_path)
     subject_name = next(iter(module.EXPENSE_MAPPING.keys()))
