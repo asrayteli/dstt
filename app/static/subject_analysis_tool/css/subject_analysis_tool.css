@@ -1261,6 +1261,25 @@
     pointer-events: auto;
 }
 
+/* テーブルヘッダーのホバー補足ツールチップ */
+.sat-header-help {
+    position: fixed;
+    z-index: 1201;
+}
+
+.sat-header-help-body {
+    max-width: 300px;
+    line-height: 1.5;
+    color: #e5edf6;
+    font-weight: 400;
+    white-space: normal;
+}
+
+/* ソート不可のヘッダーは補足ありを示すヘルプカーソルにする */
+.data-table th[data-help]:not(.sortable):not(.sortable-subject):not(.sortable-profit) {
+    cursor: help;
+}
+
 .result-focus-backdrop {
     position: fixed;
     inset: 0;

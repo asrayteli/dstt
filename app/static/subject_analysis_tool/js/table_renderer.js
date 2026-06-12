@@ -24,8 +24,77 @@ class TableRenderer {
 
         this.contextMenuEl = null;
         this.detailPopupEl = null;
+        this.headerHelpEl = null;
+        this.headerHelpAnchor = null;
         this.initializeDetailContextMenu();
+        this.initializeHeaderHelpTooltip();
         this.initializeAutoPageSizing();
+    }
+
+    /**
+     * テーブルのヘッダーにカーソルを載せたとき、その項目が示す内容と
+     * 計算方法を補足するツールチップを表示する。
+     *
+     * 詳細一覧のヘッダーは静的HTML、その他のタブはJSで再描画されるため、
+     * document へのイベント委譲で一度だけ登録しておく。
+     */
+    initializeHeaderHelpTooltip() {
+        document.addEventListener('mouseover', (e) => {
+            const th = e.target.closest && e.target.closest('th[data-help]');
+            if (!th || th === this.headerHelpAnchor) return;
+            this.showHeaderHelp(th);
+        });
+
+        document.addEventListener('mouseout', (e) => {
+            if (!this.headerHelpAnchor) return;
+            const th = e.target.closest && e.target.closest('th[data-help]');
+            if (!th) return;
+            // ヘッダー内の子要素（ソート記号など）への移動では消さない
+            if (e.relatedTarget && th.contains(e.relatedTarget)) return;
+            this.hideHeaderHelp();
+        });
+
+        document.addEventListener('click', () => this.hideHeaderHelp());
+        window.addEventListener('scroll', () => this.hideHeaderHelp(), true);
+    }
+
+    showHeaderHelp(th) {
+        this.hideHeaderHelp();
+
+        const help = th.getAttribute('data-help');
+        if (!help) return;
+
+        // ソート記号などを除いた純粋な見出しテキストをタイトルにする
+        const titleClone = th.cloneNode(true);
+        titleClone.querySelectorAll('.sort-indicator').forEach(el => el.remove());
+        const title = titleClone.textContent.trim();
+
+        const tip = document.createElement('div');
+        tip.className = 'tooltip sat-header-help';
+        tip.innerHTML = `
+            <div class="tooltip-content">
+                <div class="tooltip-label">${this.escapeText(title)}</div>
+                <div class="sat-header-help-body">${this.escapeText(help)}</div>
+            </div>
+        `;
+        document.body.appendChild(tip);
+
+        // ヘッダーの直下を基準に、画面内へ収まる位置を計算する
+        const rect = th.getBoundingClientRect();
+        const pos = this.calculateTooltipPosition(rect.left + rect.width / 2, rect.bottom, tip);
+        tip.style.left = `${pos.x}px`;
+        tip.style.top = `${pos.y}px`;
+
+        this.headerHelpEl = tip;
+        this.headerHelpAnchor = th;
+    }
+
+    hideHeaderHelp() {
+        if (this.headerHelpEl) {
+            this.headerHelpEl.remove();
+            this.headerHelpEl = null;
+        }
+        this.headerHelpAnchor = null;
     }
 
     initializeAutoPageSizing() {
@@ -420,12 +489,12 @@ class TableRenderer {
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th>科目</th>
-                                    <th>月</th>
-                                    <th>当期値</th>
-                                    <th class="compare-only">比較値</th>
-                                    <th class="compare-only">差異</th>
-                                    <th class="compare-only">差異率</th>
+                                    <th data-help="収支科目の名称です（基本請負料・人件費 など）。">科目</th>
+                                    <th data-help="データの対象月です。">月</th>
+                                    <th data-help="当期CSVの、その月・科目の金額です。原価科目は符号反転済みのマイナス値で表示されます。">当期値</th>
+                                    <th class="compare-only" data-help="比較モードに応じた比較元の金額です（前年同月・基準月 など）。">比較値</th>
+                                    <th class="compare-only" data-help="当期値 − 比較値。プラスは増加、マイナスは減少を表します。">差異</th>
+                                    <th class="compare-only" data-help="差異 ÷ 比較値 × 100。比較値が0の場合は0%になります。">差異率</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -541,13 +610,13 @@ class TableRenderer {
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th class="sortable-subject" data-column="subjectName">科目名 <span class="sort-indicator"></span></th>
-                        <th class="sortable-subject" data-column="siteCount">現場数 <span class="sort-indicator"></span></th>
-                        <th class="sortable-subject compare-only" data-column="anomalyCount">異常値件数 <span class="sort-indicator"></span></th>
-                        <th class="sortable-subject" data-column="totalCurrent">当期合計 <span class="sort-indicator"></span></th>
-                        <th class="sortable-subject compare-only" data-column="totalComparison">比較合計 <span class="sort-indicator"></span></th>
-                        <th class="sortable-subject compare-only" data-column="totalDiff">差異 <span class="sort-indicator"></span></th>
-                        <th class="sortable-subject compare-only" data-column="totalDiffRate">差異率 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject" data-column="subjectName" data-help="収支科目の名称です。同じ科目を全現場・全選択月で集約した行です。">科目名 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject" data-column="siteCount" data-help="その科目のデータを持つ現場（契約コード）の数です。">現場数 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject compare-only" data-column="anomalyCount" data-help="差異が閾値（差異率・差異金額）を超えた件数です。判定条件（AND/OR）に従って数えます。">異常値件数 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject" data-column="totalCurrent" data-help="その科目の当期値を、選択した全現場・全月で合計した金額です。原価科目は符号反転済みのマイナス値で集計されます。">当期合計 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject compare-only" data-column="totalComparison" data-help="その科目の比較値（前年同月など）を、選択した全現場・全月で合計した金額です。">比較合計 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject compare-only" data-column="totalDiff" data-help="当期合計 − 比較合計。プラスは増加、マイナスは減少を表します。">差異 <span class="sort-indicator"></span></th>
+                        <th class="sortable-subject compare-only" data-column="totalDiffRate" data-help="差異 ÷ 比較合計 × 100。比較合計が0の場合は0%になります。">差異率 <span class="sort-indicator"></span></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1005,17 +1074,17 @@ class TableRenderer {
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th class="sortable-profit" data-column="siteName">現場名 <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit" data-column="corpName">法人名 <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit" data-column="month">月 <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit" data-column="revenue">売上 <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit" data-column="cost">原価 <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit" data-column="profit">利益 <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit" data-column="profitRate">利益率(%) <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit compare-only" data-column="profitComparison">比較利益 <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit compare-only" data-column="profitRateComparison">比較利益率(%) <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit compare-only" data-column="profitDiff">利益差異 <span class="sort-indicator"></span></th>
-                            <th class="sortable-profit compare-only" data-column="profitRateDiff">利益率差異 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="siteName" data-help="対象となる現場の名称です。利益は現場×月の単位で集計しています。">現場名 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="corpName" data-help="現場を契約している法人（顧客）の名称です。">法人名 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="month" data-help="データの対象月です。">月 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="revenue" data-help="売上科目（基本請負料・その他請負料）の当期値を、その現場・月で合計した金額です。">売上 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="cost" data-help="売上以外の科目（原価）の当期値を合計した金額です。符号反転済みのため、マイナス値で表示されます。">原価 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="profit" data-help="売上 ＋ 原価。原価はマイナス値で保持しているため、実質は「売上 − 原価」になります。">利益 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit" data-column="profitRate" data-help="利益 ÷ 売上 × 100。売上が0の場合は0%になります。">利益率(%) <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit compare-only" data-column="profitComparison" data-help="比較元（前年同月など）の「比較売上 ＋ 比較原価」で求めた利益です。">比較利益 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit compare-only" data-column="profitRateComparison" data-help="比較利益 ÷ 比較売上 × 100。比較元の利益率です。">比較利益率(%) <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit compare-only" data-column="profitDiff" data-help="当期利益 − 比較利益。プラスは利益増、マイナスは利益減を表します。">利益差異 <span class="sort-indicator"></span></th>
+                            <th class="sortable-profit compare-only" data-column="profitRateDiff" data-help="当期利益率 − 比較利益率。単位はポイント（%pt）です。">利益率差異 <span class="sort-indicator"></span></th>
                         </tr>
                     </thead>
                     <tbody>
