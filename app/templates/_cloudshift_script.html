@@ -255,10 +255,16 @@
       return Array.from({ length: monthDays(month) }, (_, index) => String(index + 1));
     }
 
+    function normalizeSecondOptionKey(value) {
+      const key = String(value || '').trim().toUpperCase();
+      return key === 'SUB' || key === 'TRAIN' ? key : '';
+    }
+
     function createBulkEntryFromForm(dayKey, refs) {
       const name = refs.nameInput ? refs.nameInput.value.trim() : '';
       if (!name) return null;
       const optionKey = refs.optionSelect ? refs.optionSelect.value : '';
+      const secondOption = refs.secondOptionSelect ? normalizeSecondOptionKey(refs.secondOptionSelect.value) : '';
       const comment = refs.commentInput ? refs.commentInput.value.trim() : '';
       const employeeNumber = refs.employeeInput
         ? refs.employeeInput.value.trim()
@@ -276,6 +282,7 @@
       return {
         id: makeEntryId(),
         value: formatEntryValue(optionKey || null, name),
+        second_option: secondOption,
         comment,
         employee_number: employeeNumber,
         site_branch_row_id: autoBranchFields.site_branch_row_id,
@@ -287,6 +294,7 @@
       return {
         id: makeEntryId(),
         value: String(entry && entry.value ? entry.value : '').trim(),
+        second_option: normalizeSecondOptionKey(entry && (entry.second_option || entry.secondOption || '')),
         comment: String(entry && entry.comment ? entry.comment : '').trim(),
         employee_number: String(entry && entry.employee_number ? entry.employee_number : '').trim(),
         site_branch_row_id: normalizeSiteBranchRowId(entry && (entry.site_branch_row_id || entry.siteBranchRowId || '')),
@@ -6062,6 +6070,7 @@
           nameInput: form.querySelector('[name="bulk_name"]'),
           commentInput: form.querySelector('[name="bulk_comment"]'),
           optionSelect: form.querySelector('[name="bulk_option"]'),
+          secondOptionSelect: form.querySelector('[name="bulk_second_option"]'),
           employeeInput: form.querySelector('[name="bulk_employee_number"]'),
           branchSelect: form.querySelector('[name="bulk_site_branch_row_id"]')
         });
@@ -6163,6 +6172,15 @@
                   <option value="">なし</option>
                   ${buildBulkOptionSelect(project.mode)}
                 </select>
+              </label>
+              <label class="cloud-field">
+                <span>第二オプション</span>
+                <select name="bulk_second_option" class="cloud-input">
+                  <option value="">なし</option>
+                  <option value="SUB">代務</option>
+                  <option value="TRAIN">研修</option>
+                </select>
+                <div class="cloud-inline-note">代務・研修は重複チェックに影響せず、アシストの経験済み現場・自動作成へ反映されます</div>
               </label>
               <label class="cloud-field${project.mode === 'scene' ? '' : ' cloud-hidden'}" data-bulk-branch-field>
                 <span>枝番号</span>
