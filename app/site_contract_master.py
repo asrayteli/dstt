@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from app.models import Site, SiteBranch, SiteContractMaster, db
 
 
@@ -32,6 +34,9 @@ def normalize_manager_id(value) -> str:
     text = str(value or "").strip()
     if not text:
         return ""
+    # Excel経由で "9001.0" のような小数表記になった番号も同一視する
+    if re.fullmatch(r"\d+\.0+", text):
+        text = text.split(".", 1)[0]
     if text.isdigit():
         return text.lstrip("0") or "0"
     return text
