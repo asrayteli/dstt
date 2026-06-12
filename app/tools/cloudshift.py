@@ -6372,8 +6372,9 @@ def _role_option_person_self_entries_for_month(
     """person 帳自身の確定 entry から 代務/研修「第二オプション」を (現場キー, option) 単位で集約する。
 
     person 帳の entry は現場リンク（site_row_id / site_id / 現場名）を持つため、
-    社員番号ではなく現場単位でまとめる。他帳からの同期 entry は除外する
-    （scene 帳由来の経験は scene 側の保存フックが person 帳へ反映するため）。
+    社員番号ではなく現場単位でまとめる。月の保存時に「編集中の月全体」を読み込んで
+    反映する方針のため、手入力 entry も他帳からの同期 entry も区別せずすべて数える
+    （scene 帳由来の自動分との二重登録は反映側で現場キーにより防ぐ）。
     """
     aggregated: dict[tuple[str, str], dict[str, Any]] = {}
     for day_key, day_entries in (month_data.get("entries_per_day") or {}).items():
@@ -6385,8 +6386,6 @@ def _role_option_person_self_entries_for_month(
             continue
         for entry in day_entries:
             if not isinstance(entry, dict):
-                continue
-            if _entry_is_shift_synced(entry):
                 continue
             option_key = entry_second_option(entry)
             if option_key not in ROLE_OPTION_KEYS:
@@ -6427,14 +6426,14 @@ def _sync_role_option_experience_for_person_month(
 ) -> list[str]:
     """person 帳（個人シフト）の 代務/研修「第二オプション」を自分のアシストへ自動反映する。
 
-    個人シフト帳に直接入力した entry に 代務（SUB）/ 研修（TRAIN）を付けるだけで、
-    その人の「経験済み現場」に自動登録され、研修は同じ現場の「研修要現場」を
-    一覧から削除する。scene 帳の _sync_role_option_experience_for_month と対になる
-    person 帳側のフック。
+    月の保存時に「編集中の月全体」を読み込み、代務（SUB）/ 研修（TRAIN）が付いた
+    entry があれば（手入力・他帳からの同期を問わず）その人の「経験済み現場」に
+    自動登録し、研修は同じ現場の「研修要現場」を一覧から削除する。
+    scene 帳の _sync_role_option_experience_for_month と対になる person 帳側のフック。
 
     安全原則:
-    - 他帳からの同期 entry は数えない（scene 帳側の保存フックが反映するため二重登録しない）。
-    - 同じ現場×オプション×月に scene 帳由来の自動分が既にあれば新規作成しない。
+    - 同じ現場×オプション×月に scene 帳由来の自動分が既にあれば新規作成しない
+      （二重登録防止。scene 帳の保存フックも同じ現場キーで反映するため）。
     - source_type=ROLE_OPTION_ASSIST_SOURCE かつこの帳自身が作った自動分のみ
       追加・更新・解除する。手動登録の経験済み現場には触れない
       （研修要現場の削除は要件どおり手動分も対象）。
@@ -8693,6 +8692,28 @@ def _save_month_in_project(
         actor_user_id=actor_user_id,
     )
     if not changes and not decision_changes:
+        # entry に変更がなくても、保存が押されたら編集中の月全体を読み直し、
+        # 代務/研修オプションの経験反映だけは実行する（過去の反映漏れの取り込み口）
+        try:
+            assist_changes = _sync_role_option_experience_for_book_month(
+                project, year, month, actor_name=actor_name
+            )
+        except Exception:  # pragma: no cover - 自動登録の失敗で保存自体は止めない
+            logger.exception("role option experience sync failed (project=%s)", project.get("id"))
+            assist_changes = []
+        if assist_changes:
+            _save_project(project)
+            _append_history(
+                project["id"],
+                {
+                    "timestamp": _utcnow_iso(),
+                    "editor_name": actor_name,
+                    "editor_type": actor_type,
+                    "action": "role_option_sync",
+                    "month_key": month_key,
+                    "changes": assist_changes[:100],
+                },
+            )
         return current_month
     snapshots = dict(current_month.get("revision_snapshots") or {})
     snapshots[str(int(current_month.get("revision", 1)))] = _snapshot_month_payload(current_month)
