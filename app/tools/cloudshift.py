@@ -8423,11 +8423,14 @@ def api_project_meta(project_id: str):
                 or old_site.get("site_row_id") != next_site.get("site_row_id")
                 or str(old_site.get("site_id") or "") != str(next_site.get("site_id") or "")
             )
+            if should_backfill_scene_person_experience:
+                # これらは project 自身を再保存するため、ロック外で実行すると
+                # 並行保存を取りこぼす。いずれも他帳のロックを取得しない
+                # （project のみ書き込む）ためロック内で実施して安全に整合させる。
+                _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
+                _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
     if should_resync_person_experience:
         _resync_person_experience_project(project, actor_name=_user_label())
-    if should_backfill_scene_person_experience:
-        _backfill_scene_project_from_person_experience(project, actor_name=_user_label())
-        _backfill_scene_project_from_siteplus_dedicated(project, actor_name=_user_label())
     if metadata_changed:
         _resync_shift_project(project, actor_name=_user_label())
         _refresh_shift_sync_for_target_project(project, actor_name=_user_label())
@@ -8739,11 +8742,13 @@ def api_create_month(project_id: str):
     with _project_lock(project_id):
         project, access_role = _editable_project_or_404(project_id)
         month_payload = _create_month_in_project(project, payload, _user_label(), access_role)
-    month_key = _month_key(month_payload["year"], month_payload["month"])
+        month_key = _month_key(month_payload["year"], month_payload["month"])
+        # 既存データの取り込みは対象帳（project 自身）への書き込みのため、ロック内で
+        # 実施してロック外保存によるロストアップデートを防ぐ。この取り込みは他帳の
+        # ロックを取得しない（対象帳のみ書き込む）ため、デッドロックの懸念はない。
+        _refresh_shift_sync_into_target_month(project, month_key, actor_name=_user_label())
+    # 他帳への押し出しは各対象を自前のロックで更新するためロック外で行う。
     _resync_shift_month(project, month_key, actor_name=_user_label())
-    # 月追加も「この帳面の新しい月へ既存データを取り込む」だけで足りるため、全プロジェクト
-    # 相互再同期（プロジェクト数の二乗）ではなくスコープ限定版で対象だけを更新する。
-    _refresh_shift_sync_into_target_month(project, month_key, actor_name=_user_label())
     project = _load_project(project_id)
     return jsonify({"success": True, "project": _project_detail_payload(project, month_key, include_draft=True)})
 
@@ -9830,7 +9835,9 @@ def api_assist_owner_create_experienced_site(project_id: str):
         {
             "success": True,
             "site": _person_assist_site_payload(site),
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
@@ -9854,7 +9861,9 @@ def api_assist_owner_update_experienced_site(project_id: str, site_id: str):
         {
             "success": True,
             "site": _person_assist_site_payload(site),
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
@@ -9875,7 +9884,9 @@ def api_assist_owner_delete_experienced_site(project_id: str, site_id: str):
     return jsonify(
         {
             "success": True,
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
@@ -9897,7 +9908,9 @@ def api_assist_owner_create_training_site(project_id: str):
         {
             "success": True,
             "site": _person_assist_site_payload(site),
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
@@ -9920,7 +9933,9 @@ def api_assist_owner_update_training_site(project_id: str, site_id: str):
         {
             "success": True,
             "site": _person_assist_site_payload(site),
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
@@ -9940,7 +9955,9 @@ def api_assist_owner_delete_training_site(project_id: str, site_id: str):
     return jsonify(
         {
             "success": True,
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
@@ -10670,7 +10687,9 @@ def api_public_create_experienced_site(token: str):
         {
             "success": True,
             "site": _person_assist_site_payload(site),
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
@@ -10695,7 +10714,9 @@ def api_public_update_experienced_site(token: str, site_id: str):
         {
             "success": True,
             "site": _person_assist_site_payload(site),
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
@@ -10718,7 +10739,9 @@ def api_public_delete_experienced_site(token: str, site_id: str):
     return jsonify(
         {
             "success": True,
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
@@ -10741,7 +10764,9 @@ def api_public_create_training_site(token: str):
         {
             "success": True,
             "site": _person_assist_site_payload(site),
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
@@ -10765,7 +10790,9 @@ def api_public_update_training_site(token: str, site_id: str):
         {
             "success": True,
             "site": _person_assist_site_payload(site),
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
@@ -10787,7 +10814,9 @@ def api_public_delete_training_site(token: str, site_id: str):
     return jsonify(
         {
             "success": True,
-            "assist": _assist_bootstrap_payload(project, can_edit_records=True, can_edit_rules=False)["assist"],
+            "assist": _assist_bootstrap_for_project(
+                project, can_edit_records=True, can_edit_rules=False, can_edit_sites=True
+            )["assist"],
         }
     )
 
