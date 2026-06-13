@@ -561,6 +561,81 @@ def test_scene_save_without_entry_changes_still_registers_role_options():
     assert [(r["employee_number"], r["shift_key"]) for r in autos] == [("E101", "SUB")]
 
 
+def test_no_duplicate_when_scene_book_is_site_linked():
+    """person 帳の現場名のみ entry と、現場マスター連携済み scene 帳の自動分が重複しない。
+
+    自己導出の現場キーは name ベース、scene 帳側は site_row_id ベースになるため、
+    文字列キー比較だと同じ現場でも一致しない。ペアワイズ照合で片側欠落を吸収する。
+    """
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+
+    # 個人帳に現場名のみ（現場リンクなし）の研修 entry を直接入力
+    _save_month_entries(module, app, client, person_id, {
+        "1": [{"id": "p1", "value": "!A!Role Site", "second_option": "TRAIN", "comment": ""}],
+    })
+    assist = _person_assist_payload(client, person_id)
+    assert [(s["site_name"], s["shift_key"]) for s in assist["experienced_sites"]] == [("Role Site", "TRAIN")]
+
+    # scene 帳（site_row_id=10）側でも同じ人の研修 entry を保存しても重複しない
+    _save_month_entries(module, app, client, project_id, {
+        "1": [{"id": "s1", "value": "!A!三木", "second_option": "TRAIN",
+               "employee_number": "E101", "comment": ""}],
+    })
+    assist = _person_assist_payload(client, person_id)
+    trains = [s for s in assist["experienced_sites"]
+              if s["site_name"] == "Role Site" and s["shift_key"] == "TRAIN"]
+    assert len(trains) == 1
+
+
+def test_scene_save_does_not_remove_other_books_auto_sites():
+    """scene 帳の保存は、他帳（自己導出）が作った自動経験済み現場を削除しない。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+
+    # 個人帳の手入力 entry から自己導出で経験を登録
+    _save_month_entries(module, app, client, person_id, {
+        "1": [{"id": "p1", "value": "!A!Role Site", "second_option": "TRAIN", "comment": ""}],
+    })
+    assist = _person_assist_payload(client, person_id)
+    assert len(assist["experienced_sites"]) == 1
+
+    # 同じ現場の scene 帳を「該当 entry なし」で保存しても、自己導出分は残る
+    _save_month_entries(module, app, client, project_id, {})
+    assist = _person_assist_payload(client, person_id)
+    assert [(s["site_name"], s["shift_key"]) for s in assist["experienced_sites"]] == [("Role Site", "TRAIN")]
+
+
+def test_substitute_superseded_entry_is_not_counted():
+    """代行で解決済みの元 entry（実働なし）は経験として数えない。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    module.current_user = _owner()
+
+    # e1 は研修予定だったが、代行（要代務）で解決済み → 隠し entry になっている
+    with app.app_context():
+        project = module._load_project(project_id)
+        project["months"]["2026-04"]["entries_per_day"]["1"] = [
+            {"id": "e1", "value": "!A!山田", "second_option": "TRAIN",
+             "employee_number": "E102", "comment": ""},
+            {"id": "cover1", "value": "!A!代行者", "employee_number": "E900",
+             "sync_source_type": module.SHIFT_SYNC_SUBSTITUTE_SOURCE,
+             "substitute_resolved": True,
+             "substitute_source_project_id": project_id,
+             "substitute_source_entry_id": "e1",
+             "comment": ""},
+        ]
+        changes = module._sync_role_option_experience_for_month(
+            project, 2026, 4, actor_name="tester"
+        )
+        module._save_project(project)
+    assert changes == []
+    autos, _ = _auto_records(module, app, project_id)
+    assert autos == []
+
+
 # ---------------------------------------------------------------------------
 # 自動作成（shift-engine）への反映
 # ---------------------------------------------------------------------------
