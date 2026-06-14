@@ -6,6 +6,7 @@ from werkzeug.security import generate_password_hash
 from app.models import (
     db,
     DsttLoginLog,
+    InboundMail,
     MailMessage,
     User,
     AccessBranch,
@@ -24,6 +25,7 @@ from app.models import (
     UserToolPermission,
 )
 from app.services import mail_service
+from app.services import mail_inbox
 from app.access_control import (
     TOOL_ACCESS_CATEGORIES,
     _user_satisfies_group_rule,
@@ -1722,6 +1724,114 @@ def mail_resend(message_id):
     send_now = bool(data.get("send_now", True)) and mail_service.is_mail_configured()
     mail_service.requeue_message(message, send_now=send_now)
     return jsonify({"success": True, "message": message.to_dict()})
+
+
+# ============================================================
+# DSTT 共通メール基盤・受信トレイ（Webメーラー / 管理者）
+# ============================================================
+
+@user_management_bp.route("/api/mail/inbox/status", methods=["GET"])
+@login_required
+def mail_inbox_status():
+    """IMAP 受信設定の状況と未読件数を返す（管理者のみ）。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    settings = mail_inbox.inbox_settings()
+    unread = InboundMail.query.filter_by(is_read=False).count()
+    total = InboundMail.query.count()
+    return jsonify({
+        "configured": mail_inbox.is_inbox_configured(),
+        "host": settings["host"],
+        "port": settings["port"],
+        "security": settings["security"],
+        "user": settings["user"],
+        "mailbox": settings["mailbox"],
+        "unread": unread,
+        "total": total,
+    })
+
+
+@user_management_bp.route("/api/mail/inbox", methods=["GET"])
+@login_required
+def mail_inbox_list():
+    """受信トレイの一覧（本文なし）を返す（管理者のみ）。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    try:
+        limit = min(200, max(1, int(request.args.get("limit", 50))))
+    except (TypeError, ValueError):
+        limit = 50
+    query = InboundMail.query
+    if (request.args.get("unread") or "").strip() in {"1", "true", "yes"}:
+        query = query.filter_by(is_read=False)
+    search = (request.args.get("q") or "").strip()
+    if search:
+        like = f"%{search}%"
+        query = query.filter(
+            or_(
+                InboundMail.subject.ilike(like),
+                InboundMail.from_address.ilike(like),
+                InboundMail.from_name.ilike(like),
+            )
+        )
+    rows = query.order_by(InboundMail.received_at.desc()).limit(limit).all()
+    return jsonify({"messages": [m.to_dict() for m in rows]})
+
+
+@user_management_bp.route("/api/mail/inbox/<int:mail_id>", methods=["GET"])
+@login_required
+def mail_inbox_detail(mail_id):
+    """受信メール本文を返す。既読化する（管理者のみ）。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    row = db.session.get(InboundMail, mail_id)
+    if row is None:
+        return jsonify({"error": "メールが見つかりません"}), 404
+    if not row.is_read:
+        row.is_read = True
+        db.session.commit()
+    return jsonify({"message": row.to_dict(include_body=True)})
+
+
+@user_management_bp.route("/api/mail/inbox/<int:mail_id>/read", methods=["POST"])
+@login_required
+def mail_inbox_mark_read(mail_id):
+    """既読/未読を切り替える（管理者のみ）。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    row = db.session.get(InboundMail, mail_id)
+    if row is None:
+        return jsonify({"error": "メールが見つかりません"}), 404
+    data = request.get_json(silent=True) or {}
+    row.is_read = bool(data.get("read", True))
+    db.session.commit()
+    return jsonify({"success": True, "is_read": row.is_read})
+
+
+@user_management_bp.route("/api/mail/inbox/<int:mail_id>", methods=["DELETE"])
+@login_required
+def mail_inbox_delete(mail_id):
+    """受信メールを削除する（管理者のみ）。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    row = db.session.get(InboundMail, mail_id)
+    if row is None:
+        return jsonify({"error": "メールが見つかりません"}), 404
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({"success": True})
+
+
+@user_management_bp.route("/api/mail/inbox/poll", methods=["POST"])
+@login_required
+def mail_inbox_poll():
+    """IMAP から今すぐ新着を取り込む（管理者のみ）。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    if not mail_inbox.is_inbox_configured():
+        return jsonify({"error": "IMAP が未設定です（DSTT_IMAP_HOST / DSTT_IMAP_USER / DSTT_IMAP_PASSWORD を設定してください）。"}), 400
+    summary = mail_inbox.fetch_new_messages()
+    return jsonify({"success": True, "summary": summary})
 
 
 # ============================================================

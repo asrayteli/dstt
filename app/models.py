@@ -1013,6 +1013,68 @@ class MailMessage(db.Model):
         }
 
 
+class InboundMail(db.Model):
+    """DSTT 共通メール基盤の受信トレイ（IMAP 取り込み）。
+
+    ``app.services.mail_inbox`` が IMAP サーバーを定期ポーリングし、新着メールを
+    パースしてこのテーブルへ保存する。管理者ページの Webメーラーから閲覧する。
+    本文は肥大化を避けるため上限付きで保存し、添付はメタ情報のみ保持する。
+    """
+    __tablename__ = 'inbound_mails'
+    __table_args__ = (
+        db.UniqueConstraint('mailbox', 'imap_uid', name='uq_inbound_mailbox_uid'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    mailbox = db.Column(db.String(120), nullable=False, default='INBOX', index=True)
+    imap_uid = db.Column(db.String(40), nullable=False, index=True)
+    message_id = db.Column(db.String(500), index=True)
+    from_address = db.Column(db.String(255), index=True)
+    from_name = db.Column(db.String(255))
+    to_address = db.Column(db.String(1000))
+    cc = db.Column(db.String(1000))
+    subject = db.Column(db.String(500))
+    body_text = db.Column(db.Text)
+    body_html = db.Column(db.Text)
+    size_bytes = db.Column(db.Integer, nullable=False, default=0)
+    has_attachments = db.Column(db.Boolean, nullable=False, default=False)
+    attachments = db.Column(db.Text)  # JSON: [{"name","size","content_type"}]
+    is_read = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    sent_at = db.Column(db.DateTime, index=True)       # 送信元ヘッダの Date
+    received_at = db.Column(db.DateTime, nullable=False, default=jst_now, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=jst_now)
+
+    def attachment_list(self):
+        if not self.attachments:
+            return []
+        try:
+            data = json.loads(self.attachments)
+            return data if isinstance(data, list) else []
+        except (ValueError, TypeError):
+            return []
+
+    def to_dict(self, *, include_body: bool = False):
+        data = {
+            'id': self.id,
+            'mailbox': self.mailbox,
+            'from_address': self.from_address or '',
+            'from_name': self.from_name or '',
+            'to_address': self.to_address or '',
+            'cc': self.cc or '',
+            'subject': self.subject or '(件名なし)',
+            'size_bytes': self.size_bytes or 0,
+            'has_attachments': bool(self.has_attachments),
+            'attachments': self.attachment_list(),
+            'is_read': bool(self.is_read),
+            'sent_at': self.sent_at.isoformat() if self.sent_at else None,
+            'received_at': self.received_at.isoformat() if self.received_at else None,
+        }
+        if include_body:
+            data['body_text'] = self.body_text or ''
+            data['body_html'] = self.body_html or ''
+        return data
+
+
 class DriverVehicleProfile(db.Model):
     """運転士（自社社員）1人のマイカー管理プロファイル。社員1人＝1台。
 

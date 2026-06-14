@@ -60,7 +60,29 @@ $env:DSTT_MAIL_FROM = "your-account@gmail.com"
 $env:DSTT_MAIL_FROM_NAME = "DSTT 自動通知"
 ```
 
-設定が済めば、**管理者ページ →「メール送信」タブ**から任意の宛先へメールを送信でき、送信キューの状態確認・失敗分の再送も行えます。送信状況の確認だけなら未設定でも開けます（保留として積まれます）。
+#### メール受信（IMAP）
+
+送信（SMTP）の対として、IMAP でメールを受信して管理者ページの **Webメーラー** で閲覧・返信できます。受信は `app/services/mail_inbox.py` がバックグラウンドで定期ポーリングし、`inbound_mails` テーブルへ保存します（IMAP UID で冪等取り込み。サーバー側の既読は変更せず、既読状態はアプリ内で保持）。**未設定でもアプリは壊れず、受信が無効になるだけです。**
+
+| 環境変数 | 説明 | 既定 |
+| --- | --- | --- |
+| `DSTT_IMAP_HOST` | IMAP ホスト名（未設定なら受信無効） | （なし） |
+| `DSTT_IMAP_PORT` | ポート | security に応じ 993/143 |
+| `DSTT_IMAP_USER` / `DSTT_IMAP_PASSWORD` | ログイン情報 | （なし） |
+| `DSTT_IMAP_SECURITY` | `ssl` / `starttls` / `none` | `ssl` |
+| `DSTT_IMAP_MAILBOX` | 取り込むメールボックス | `INBOX` |
+| `DSTT_IMAP_POLL_INTERVAL_SECONDS` | ポーリング間隔秒（最小30） | `300` |
+| `DSTT_IMAP_FETCH_LIMIT` | 1回の取り込み最大件数 | `50` |
+| `DSTT_IMAP_RETENTION` | 受信トレイ保持件数（0で無制限） | `1000` |
+| `DSTT_MAIL_INBOX_SCHEDULER` | 受信ポーリングの有効/無効 | 有効 |
+
+設定が済めば、**管理者ページ →「Webメーラー」タブ**で次のことができます。
+
+- **受信トレイ**: 新着の取り込み（「今すぐ受信」）、一覧・本文閲覧（HTML は sandbox iframe で安全に表示）、既読化、検索、返信、削除。
+- **新規作成**: 任意の宛先（複数可）へ送信、または予約キュー投入。
+- **送信キュー**: 送信状況の確認と、失敗・保留分の再送。
+
+送信・受信とも未設定でもタブは開けます（送信分は保留として積まれます）。
 
 ### ToBell の Google カレンダー連携
 

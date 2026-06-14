@@ -123,7 +123,7 @@
       <button data-tab="leavemgr-codes" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">有休カレンダー</button>
       <button data-tab="tool-management" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">ツール管理</button>
       <button data-tab="announcements" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">お知らせ</button>
-      <button data-tab="mail" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">メール送信</button>
+      <button data-tab="mail" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">Webメーラー</button>
     </nav>
   </div>
 
@@ -608,92 +608,122 @@
     </div>
   </section>
 
-  <!-- ===== メール送信 ===== -->
+  <!-- ===== Webメーラー ===== -->
   <section id="tab-mail" class="admin-section hidden">
-    <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] items-start">
-      <!-- 左: 作成フォーム -->
-      <div class="bg-white rounded-xl shadow p-6 space-y-4">
-        <div>
-          <h2 class="text-xl font-semibold">メール送信</h2>
-          <p class="text-sm text-slate-500 mt-1">DSTT 共通メール基盤を使い、任意の宛先へメールを送信します。宛先は複数指定でき、1宛先につき1通をキューに積みます。</p>
-        </div>
-
-        <div id="mail-status-banner" class="rounded-lg border px-4 py-3 text-sm bg-slate-50 border-slate-200 text-slate-600">
-          送信設定を確認中…
-        </div>
-
-        <form id="form-mail-send" class="space-y-3">
-          <div>
-            <label class="block text-sm font-medium mb-1">宛先（必須）</label>
-            <textarea name="to" rows="2" required placeholder="taro@example.com, hanako@example.com&#10;（カンマ・空白・改行区切りで複数可）" class="w-full border rounded px-3 py-2 text-sm"></textarea>
-          </div>
-          <div class="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label class="block text-sm font-medium mb-1">CC</label>
-              <input name="cc" class="w-full border rounded px-3 py-2 text-sm" placeholder="任意（複数可）">
-            </div>
-            <div>
-              <label class="block text-sm font-medium mb-1">BCC</label>
-              <input name="bcc" class="w-full border rounded px-3 py-2 text-sm" placeholder="任意（複数可）">
-            </div>
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">返信先（Reply-To）</label>
-            <input name="reply_to" class="w-full border rounded px-3 py-2 text-sm" placeholder="任意">
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">件名（必須）</label>
-            <input name="subject" required class="w-full border rounded px-3 py-2 text-sm">
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">本文</label>
-            <textarea name="body_text" rows="8" class="w-full border rounded px-3 py-2 text-sm" placeholder="プレーンテキスト本文"></textarea>
-          </div>
-          <div>
-            <label class="inline-flex items-center gap-2 text-sm font-medium">
-              <input type="checkbox" id="mail-html-toggle"> HTML 本文も付ける（対応クライアントで優先表示）
-            </label>
-            <textarea name="body_html" rows="5" class="w-full border rounded px-3 py-2 text-sm mt-2 hidden" id="mail-html-area" placeholder="<p>HTML 本文</p>"></textarea>
-          </div>
-          <div class="flex flex-wrap items-center gap-4 pt-1">
-            <label class="inline-flex items-center gap-2 text-sm">
-              <input type="radio" name="dispatch" value="now" checked> 今すぐ送信
-            </label>
-            <label class="inline-flex items-center gap-2 text-sm">
-              <input type="radio" name="dispatch" value="queue"> キューに積む（スケジューラが送信）
-            </label>
-          </div>
-          <div class="flex gap-2 pt-1">
-            <button type="submit" id="btn-mail-send" class="bg-red-600 text-white px-5 py-2 rounded hover:bg-red-700 disabled:opacity-50">送信</button>
-            <button type="button" id="btn-mail-reset" class="border border-slate-300 bg-white px-4 py-2 rounded hover:bg-slate-50">クリア</button>
-          </div>
-          <div id="mail-send-result" class="text-sm"></div>
-        </form>
+    <div class="flex flex-col gap-4">
+      <!-- 設定状況バナー -->
+      <div class="grid gap-3 lg:grid-cols-2">
+        <div id="mail-status-banner" class="rounded-lg border px-4 py-3 text-sm bg-slate-50 border-slate-200 text-slate-600">送信設定を確認中…</div>
+        <div id="mail-inbox-banner" class="rounded-lg border px-4 py-3 text-sm bg-slate-50 border-slate-200 text-slate-600">受信設定を確認中…</div>
       </div>
 
-      <!-- 右: 送信キュー -->
-      <div class="bg-white rounded-xl shadow p-6">
-        <div class="flex items-center justify-between gap-3 mb-3">
-          <div>
-            <h2 class="text-xl font-semibold">送信キュー（最新50件）</h2>
-            <p class="text-sm text-slate-500 mt-1">基盤全体の送信状況です。失敗・保留分はここから再送できます。</p>
+      <!-- サブナビ -->
+      <nav class="flex gap-2 border-b border-slate-200">
+        <button data-mailview="inbox" class="mail-subtab px-4 py-2 text-sm font-medium border-b-2 border-red-500 text-red-700">📥 受信トレイ <span id="mail-unread-pill" class="hidden ml-1 inline-block bg-red-600 text-white rounded-full px-2 text-xs"></span></button>
+        <button data-mailview="compose" class="mail-subtab px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-800">✉️ 新規作成</button>
+        <button data-mailview="outbox" class="mail-subtab px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-800">📤 送信キュー</button>
+      </nav>
+
+      <!-- 受信トレイ -->
+      <div id="mailview-inbox" class="mail-subview">
+        <div class="bg-white rounded-xl shadow p-4">
+          <div class="flex flex-wrap items-center gap-2 mb-3">
+            <button type="button" id="btn-inbox-poll" class="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 disabled:opacity-50">📨 今すぐ受信</button>
+            <button type="button" id="btn-inbox-refresh" class="bg-slate-700 text-white px-3 py-1.5 rounded text-sm hover:bg-slate-800">更新</button>
+            <label class="inline-flex items-center gap-1 text-sm ml-1"><input type="checkbox" id="inbox-unread-only"> 未読のみ</label>
+            <input id="inbox-search" placeholder="差出人・件名で検索" class="border rounded px-3 py-1.5 text-sm ml-auto w-56">
           </div>
-          <button type="button" id="btn-mail-refresh" class="bg-slate-700 text-white px-3 py-1.5 rounded text-sm hover:bg-slate-800">更新</button>
+          <div class="grid lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] gap-4 items-start">
+            <div class="border rounded overflow-auto max-h-[70vh]" id="inbox-list"></div>
+            <div class="border rounded p-4 min-h-[300px] max-h-[70vh] overflow-auto" id="inbox-detail">
+              <p class="text-gray-400 text-sm">左の一覧からメールを選ぶと内容が表示されます。</p>
+            </div>
+          </div>
         </div>
-        <div class="overflow-auto border rounded max-h-[70vh]">
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50 sticky top-0 text-left">
-              <tr>
-                <th class="p-2">日時</th>
-                <th class="p-2">宛先</th>
-                <th class="p-2">件名</th>
-                <th class="p-2">分類</th>
-                <th class="p-2">状態</th>
-                <th class="p-2">操作</th>
-              </tr>
-            </thead>
-            <tbody id="mail-messages-tbody"></tbody>
-          </table>
+      </div>
+
+      <!-- 新規作成 -->
+      <div id="mailview-compose" class="mail-subview hidden">
+        <div class="bg-white rounded-xl shadow p-6 space-y-4 max-w-3xl">
+          <div>
+            <h2 class="text-xl font-semibold">メール作成</h2>
+            <p class="text-sm text-slate-500 mt-1">宛先は複数指定でき、1宛先につき1通をキューに積みます。</p>
+          </div>
+          <form id="form-mail-send" class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium mb-1">宛先（必須）</label>
+              <textarea name="to" rows="2" required placeholder="taro@example.com, hanako@example.com&#10;（カンマ・空白・改行区切りで複数可）" class="w-full border rounded px-3 py-2 text-sm"></textarea>
+            </div>
+            <div class="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm font-medium mb-1">CC</label>
+                <input name="cc" class="w-full border rounded px-3 py-2 text-sm" placeholder="任意（複数可）">
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">BCC</label>
+                <input name="bcc" class="w-full border rounded px-3 py-2 text-sm" placeholder="任意（複数可）">
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">返信先（Reply-To）</label>
+              <input name="reply_to" class="w-full border rounded px-3 py-2 text-sm" placeholder="任意">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">件名（必須）</label>
+              <input name="subject" required class="w-full border rounded px-3 py-2 text-sm">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">本文</label>
+              <textarea name="body_text" rows="8" class="w-full border rounded px-3 py-2 text-sm" placeholder="プレーンテキスト本文"></textarea>
+            </div>
+            <div>
+              <label class="inline-flex items-center gap-2 text-sm font-medium">
+                <input type="checkbox" id="mail-html-toggle"> HTML 本文も付ける（対応クライアントで優先表示）
+              </label>
+              <textarea name="body_html" rows="5" class="w-full border rounded px-3 py-2 text-sm mt-2 hidden" id="mail-html-area" placeholder="<p>HTML 本文</p>"></textarea>
+            </div>
+            <div class="flex flex-wrap items-center gap-4 pt-1">
+              <label class="inline-flex items-center gap-2 text-sm">
+                <input type="radio" name="dispatch" value="now" checked> 今すぐ送信
+              </label>
+              <label class="inline-flex items-center gap-2 text-sm">
+                <input type="radio" name="dispatch" value="queue"> キューに積む（スケジューラが送信）
+              </label>
+            </div>
+            <div class="flex gap-2 pt-1">
+              <button type="submit" id="btn-mail-send" class="bg-red-600 text-white px-5 py-2 rounded hover:bg-red-700 disabled:opacity-50">送信</button>
+              <button type="button" id="btn-mail-reset" class="border border-slate-300 bg-white px-4 py-2 rounded hover:bg-slate-50">クリア</button>
+            </div>
+            <div id="mail-send-result" class="text-sm"></div>
+          </form>
+        </div>
+      </div>
+
+      <!-- 送信キュー -->
+      <div id="mailview-outbox" class="mail-subview hidden">
+        <div class="bg-white rounded-xl shadow p-6">
+          <div class="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <h2 class="text-xl font-semibold">送信キュー（最新50件）</h2>
+              <p class="text-sm text-slate-500 mt-1">基盤全体の送信状況です。失敗・保留分はここから再送できます。</p>
+            </div>
+            <button type="button" id="btn-mail-refresh" class="bg-slate-700 text-white px-3 py-1.5 rounded text-sm hover:bg-slate-800">更新</button>
+          </div>
+          <div class="overflow-auto border rounded max-h-[70vh]">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-50 sticky top-0 text-left">
+                <tr>
+                  <th class="p-2">日時</th>
+                  <th class="p-2">宛先</th>
+                  <th class="p-2">件名</th>
+                  <th class="p-2">分類</th>
+                  <th class="p-2">状態</th>
+                  <th class="p-2">操作</th>
+                </tr>
+              </thead>
+              <tbody id="mail-messages-tbody"></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -2282,8 +2312,173 @@ function mailStatusBadge(status) {
   return `<span class="inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}">${escape(label)}</span>`;
 }
 
+let mailTabInitDone = false;
 async function loadMailTab() {
-  await Promise.all([loadMailStatus(), loadMailMessages()]);
+  if (!mailTabInitDone) { setupMailSubtabs(); mailTabInitDone = true; }
+  await Promise.all([loadMailStatus(), loadMailInboxStatus(), loadInbox(), loadMailMessages()]);
+}
+
+// ===== Webメーラー: サブタブ =====
+function setupMailSubtabs() {
+  $$('.mail-subtab').forEach(btn => btn.addEventListener('click', () => activateMailView(btn.dataset.mailview)));
+}
+function activateMailView(view) {
+  $$('.mail-subtab').forEach(b => {
+    const on = b.dataset.mailview === view;
+    b.classList.toggle('border-red-500', on);
+    b.classList.toggle('text-red-700', on);
+    b.classList.toggle('border-transparent', !on);
+    b.classList.toggle('text-gray-500', !on);
+  });
+  $$('.mail-subview').forEach(v => v.classList.add('hidden'));
+  $(`#mailview-${view}`).classList.remove('hidden');
+  if (view === 'inbox') loadInbox();
+  if (view === 'outbox') loadMailMessages();
+}
+
+// ===== Webメーラー: 受信トレイ =====
+const inboxState = { messages: [], selectedId: null };
+
+async function loadMailInboxStatus() {
+  const banner = $('#mail-inbox-banner');
+  try {
+    const s = await api('/tools/user_management/api/mail/inbox/status');
+    const pill = $('#mail-unread-pill');
+    if (s.unread > 0) { pill.textContent = s.unread; pill.classList.remove('hidden'); }
+    else pill.classList.add('hidden');
+    if (s.configured) {
+      banner.className = 'rounded-lg border px-4 py-3 text-sm bg-green-50 border-green-200 text-green-800';
+      banner.innerHTML = `📥 受信可能（${escape(s.user)} @ ${escape(s.host)}:${escape(s.port)} / ${escape(s.mailbox)}）　未読 <b>${s.unread}</b> / 全 ${s.total} 件`;
+    } else {
+      banner.className = 'rounded-lg border px-4 py-3 text-sm bg-amber-50 border-amber-200 text-amber-800';
+      banner.innerHTML = '⚠️ IMAP（受信）が未設定です。<code>DSTT_IMAP_HOST</code> / <code>DSTT_IMAP_USER</code> / <code>DSTT_IMAP_PASSWORD</code> を設定すると受信できます。';
+    }
+  } catch (err) {
+    banner.className = 'rounded-lg border px-4 py-3 text-sm bg-red-50 border-red-200 text-red-700';
+    banner.textContent = '受信設定の取得に失敗しました: ' + err.message;
+  }
+}
+
+async function loadInbox() {
+  const list = $('#inbox-list');
+  if (!list) return;
+  const params = new URLSearchParams({ limit: '100' });
+  if ($('#inbox-unread-only')?.checked) params.set('unread', '1');
+  const q = $('#inbox-search')?.value.trim();
+  if (q) params.set('q', q);
+  try {
+    const data = await api('/tools/user_management/api/mail/inbox?' + params.toString());
+    inboxState.messages = data.messages || [];
+    renderInboxList();
+  } catch (err) {
+    list.innerHTML = `<p class="p-4 text-sm text-red-500">${escape(err.message)}</p>`;
+  }
+}
+
+function renderInboxList() {
+  const list = $('#inbox-list');
+  if (!inboxState.messages.length) {
+    list.innerHTML = '<p class="p-4 text-sm text-gray-400">受信メールはありません。「今すぐ受信」で取り込めます。</p>';
+    return;
+  }
+  list.innerHTML = inboxState.messages.map(m => {
+    const sel = m.id === inboxState.selectedId ? 'bg-red-50' : 'hover:bg-slate-50';
+    const weight = m.is_read ? 'font-normal text-slate-600' : 'font-semibold text-slate-900';
+    const dot = m.is_read ? '' : '<span class="inline-block w-2 h-2 bg-red-500 rounded-full mr-1 align-middle"></span>';
+    const clip = m.has_attachments ? ' 📎' : '';
+    return `<button type="button" data-id="${m.id}" class="inbox-row block w-full text-left px-3 py-2 border-b ${sel}">
+      <div class="flex justify-between gap-2 text-xs text-slate-400"><span class="truncate">${escape(m.from_name || m.from_address)}</span><span class="whitespace-nowrap">${fmtDate(m.received_at)}</span></div>
+      <div class="${weight} text-sm truncate">${dot}${escape(m.subject)}${clip}</div>
+    </button>`;
+  }).join('');
+}
+
+async function openMail(id) {
+  inboxState.selectedId = id;
+  renderInboxList();
+  const detail = $('#inbox-detail');
+  detail.innerHTML = '<p class="text-sm text-slate-400">読み込み中…</p>';
+  try {
+    const data = await api(`/tools/user_management/api/mail/inbox/${id}`);
+    const m = data.message;
+    const atts = (m.attachments || []).map(a => `<li class="text-xs text-slate-500">📎 ${escape(a.name)}（${fmtBytes(a.size)} / ${escape(a.content_type)}）</li>`).join('');
+    let bodyHtml;
+    if (m.body_html) {
+      // 受信HTMLは sandbox iframe に隔離して描画（スクリプト/同一オリジン不許可）。
+      bodyHtml = `<iframe sandbox class="w-full bg-white border rounded" style="min-height:360px" srcdoc="${escapeAttr(m.body_html)}"></iframe>`;
+    } else {
+      bodyHtml = `<pre class="whitespace-pre-wrap break-words text-sm text-slate-800">${escape(m.body_text || '(本文なし)')}</pre>`;
+    }
+    detail.innerHTML = `
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <h3 class="text-lg font-semibold break-words">${escape(m.subject)}</h3>
+        <div class="flex gap-2 shrink-0">
+          <button id="btn-mail-reply" class="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700">返信</button>
+          <button id="btn-mail-del" class="border border-slate-300 px-3 py-1.5 rounded text-sm hover:bg-slate-50">削除</button>
+        </div>
+      </div>
+      <div class="text-sm text-slate-600 space-y-0.5 mb-3 border-b pb-3">
+        <div><span class="text-slate-400">From:</span> ${escape(m.from_name ? m.from_name + ' <' + m.from_address + '>' : m.from_address)}</div>
+        <div><span class="text-slate-400">To:</span> ${escape(m.to_address || '-')}</div>
+        ${m.cc ? `<div><span class="text-slate-400">Cc:</span> ${escape(m.cc)}</div>` : ''}
+        <div><span class="text-slate-400">日時:</span> ${fmtDate(m.sent_at || m.received_at)}</div>
+      </div>
+      ${atts ? `<ul class="mb-3 space-y-0.5">${atts}</ul>` : ''}
+      <div>${bodyHtml}</div>`;
+    $('#btn-mail-reply').addEventListener('click', () => replyTo(m));
+    $('#btn-mail-del').addEventListener('click', () => deleteMail(m.id));
+    loadMailInboxStatus();
+  } catch (err) {
+    detail.innerHTML = `<p class="text-sm text-red-500">${escape(err.message)}</p>`;
+  }
+}
+
+function replyTo(m) {
+  const form = $('#form-mail-send');
+  form.to.value = m.from_address || '';
+  form.subject.value = /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject;
+  const quoted = (m.body_text || '').split('\n').map(l => '> ' + l).join('\n');
+  form.body_text.value = `\n\n----- 元のメッセージ -----\n差出人: ${m.from_name || m.from_address}\n件名: ${m.subject}\n\n${quoted}`;
+  activateMailView('compose');
+  form.body_text.focus();
+  form.body_text.setSelectionRange(0, 0);
+}
+
+async function deleteMail(id) {
+  if (!confirm('この受信メールを削除しますか？')) return;
+  try {
+    await api(`/tools/user_management/api/mail/inbox/${id}`, { method: 'DELETE' });
+    inboxState.selectedId = null;
+    $('#inbox-detail').innerHTML = '<p class="text-gray-400 text-sm">左の一覧からメールを選ぶと内容が表示されます。</p>';
+    await Promise.all([loadInbox(), loadMailInboxStatus()]);
+  } catch (err) { alert('削除に失敗しました: ' + err.message); }
+}
+
+$('#inbox-list')?.addEventListener('click', (e) => {
+  const row = e.target.closest('.inbox-row');
+  if (row) openMail(Number(row.dataset.id));
+});
+$('#btn-inbox-refresh')?.addEventListener('click', () => { loadInbox(); loadMailInboxStatus(); });
+$('#inbox-unread-only')?.addEventListener('change', loadInbox);
+let inboxSearchTimer = null;
+$('#inbox-search')?.addEventListener('input', () => { clearTimeout(inboxSearchTimer); inboxSearchTimer = setTimeout(loadInbox, 300); });
+$('#btn-inbox-poll')?.addEventListener('click', async () => {
+  const btn = $('#btn-inbox-poll');
+  btn.disabled = true; btn.textContent = '受信中…';
+  try {
+    const res = await api('/tools/user_management/api/mail/inbox/poll', { method: 'POST', body: {} });
+    const s = res.summary || {};
+    await Promise.all([loadInbox(), loadMailInboxStatus()]);
+    btn.textContent = `📨 今すぐ受信`;
+    if (!s.stored) alert('新着メールはありませんでした。');
+  } catch (err) {
+    alert('受信に失敗しました: ' + err.message);
+    btn.textContent = '📨 今すぐ受信';
+  } finally { btn.disabled = false; }
+});
+
+function escapeAttr(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 async function loadMailStatus() {

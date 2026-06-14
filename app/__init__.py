@@ -910,6 +910,10 @@ def create_app(test_config=None):
     from .services.mail_service import init_mail_scheduler
     init_mail_scheduler(app)
 
+    # DSTT 共通メール基盤の受信（IMAP）ポーリングスケジューラ。
+    from .services.mail_inbox import init_inbox_scheduler
+    init_inbox_scheduler(app)
+
     # 運転士マイカー書類の期限通知スケジューラ（メールはキュー経由で送信）。
     from .services.driver_doc_notify import init_driver_doc_scheduler
     init_driver_doc_scheduler(app)
