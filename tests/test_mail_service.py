@@ -123,3 +123,19 @@ def test_queue_mail_skips_empty_recipient(app):
     with app.app_context():
         assert mail_service.queue_mail("", "件名", "本文") is None
         assert MailMessage.query.count() == 0
+
+
+def test_send_now_while_unconfigured_holds_as_queued(app, monkeypatch):
+    """即時送信(send_now)でも SMTP 未設定なら skipped で失わず queued 保留にする。"""
+    with app.app_context():
+        msg = mail_service.send_mail_now("a@example.com", "件名", "本文")
+        assert msg is not None
+        # skipped（再送不可）ではなく queued のまま。設定投入後に自動送信される。
+        assert msg.status == mail_service.STATUS_QUEUED
+        assert msg.attempts == 0
+        # 後から SMTP 設定 → ディスパッチで送信される。
+        app.config["MAIL_HOST"] = "smtp.example.com"
+        app.config["MAIL_FROM"] = "noreply@example.com"
+        monkeypatch.setattr(mail_service, "_send_smtp", lambda message, settings: None)
+        assert mail_service.dispatch_pending()["sent"] == 1
+        assert MailMessage.query.first().status == mail_service.STATUS_SENT

@@ -308,9 +308,12 @@ def _dispatch_one(message: MailMessage, settings: dict[str, Any] | None = None) 
     if settings is None:
         settings = mail_settings()
     if not (settings["host"] and settings["from_address"]):
-        message.status = STATUS_SKIPPED
-        message.last_error = "SMTP が未設定のため送信できません（DSTT_SMTP_HOST / DSTT_MAIL_FROM）。"
-        logger.warning("メール送信スキップ（SMTP未設定）: to=%s subject=%s", message.to_address, message.subject)
+        # SMTP 未設定時は "安全な保留"。skipped（再送不可）にして失うのではなく、
+        # queued のまま据え置く。即時送信(send_now)経路でも、設定が後追いで入れば
+        # スケジューラ（dispatch_pending）が自動送信する。両経路で挙動を一致させる。
+        message.status = STATUS_QUEUED
+        message.last_error = "SMTP 未設定のため保留中です（DSTT_SMTP_HOST / DSTT_MAIL_FROM を設定してください）。"
+        logger.warning("メール送信を保留（SMTP未設定）: to=%s subject=%s", message.to_address, message.subject)
         return False
 
     message.attempts = (message.attempts or 0) + 1
