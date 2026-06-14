@@ -673,16 +673,8 @@ def create_app(test_config=None):
             raise
 
     try:
-        from .tools.car_inspe import car_inspe_bp, warmup_tesseract
+        from .tools.car_inspe import car_inspe_bp
         app.register_blueprint(car_inspe_bp)
-        # Tesseract をバックグラウンドで予熱し、初回 OCR の体感速度を改善する。
-        if not app.config.get("TESTING"):
-            import threading as _threading
-            _threading.Thread(
-                target=warmup_tesseract,
-                name="car_inspe_tesseract_warmup",
-                daemon=True,
-            ).start()
     except ModuleNotFoundError:
         if not app.config.get("TESTING"):
             raise
@@ -913,5 +905,13 @@ def create_app(test_config=None):
 
     from .services.to_bell_push import init_to_bell_push_scheduler
     init_to_bell_push_scheduler(app)
+
+    # DSTT 共通メール送信基盤のキュー送信スケジューラ。
+    from .services.mail_service import init_mail_scheduler
+    init_mail_scheduler(app)
+
+    # 運転士マイカー書類の期限通知スケジューラ（メールはキュー経由で送信）。
+    from .services.driver_doc_notify import init_driver_doc_scheduler
+    init_driver_doc_scheduler(app)
 
     return app

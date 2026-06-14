@@ -959,6 +959,170 @@ class VehicleInspectionRecord(db.Model):
         }
 
 
+class MailMessage(db.Model):
+    """DSTT 共通メール送信基盤のメッセージキュー。
+
+    各ツールは ``app.services.mail_service.queue_mail()`` でこのテーブルに
+    メールを積み、スケジューラ（または即時送信）が ``dispatch_pending()`` で
+    SMTP 実送信する。``dedupe_key`` により同一通知の二重送信を防ぐ。
+    車検証ツールに限らず DSTT 全体から再利用できる汎用基盤。
+    """
+    __tablename__ = 'mail_messages'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    category = db.Column(db.String(50), nullable=False, default='general', index=True)
+    to_address = db.Column(db.String(255), nullable=False, index=True)
+    to_name = db.Column(db.String(200))
+    cc = db.Column(db.String(1000))
+    bcc = db.Column(db.String(1000))
+    reply_to = db.Column(db.String(255))
+    subject = db.Column(db.String(500), nullable=False)
+    body_text = db.Column(db.Text, nullable=False, default='')
+    body_html = db.Column(db.Text)
+    # queued / sending / sent / failed / skipped / canceled
+    status = db.Column(db.String(20), nullable=False, default='queued', index=True)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    max_attempts = db.Column(db.Integer, nullable=False, default=5)
+    last_error = db.Column(db.Text)
+    dedupe_key = db.Column(db.String(255), unique=True, index=True)
+    related_type = db.Column(db.String(50), index=True)
+    related_key = db.Column(db.String(120), index=True)
+    scheduled_at = db.Column(db.DateTime, index=True)  # None=即時対象
+    sent_at = db.Column(db.DateTime)
+    created_by = db.Column(db.String(80))
+    created_at = db.Column(db.DateTime, nullable=False, default=jst_now, index=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=jst_now, onupdate=jst_now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'category': self.category,
+            'to_address': self.to_address,
+            'to_name': self.to_name or '',
+            'subject': self.subject,
+            'status': self.status,
+            'attempts': self.attempts,
+            'last_error': self.last_error or '',
+            'dedupe_key': self.dedupe_key or '',
+            'related_type': self.related_type or '',
+            'related_key': self.related_key or '',
+            'scheduled_at': self.scheduled_at.isoformat() if self.scheduled_at else None,
+            'sent_at': self.sent_at.isoformat() if self.sent_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class DriverVehicleProfile(db.Model):
+    """運転士（自社社員）1人のマイカー管理プロファイル。社員1人＝1台。
+
+    社員名簿PLUS（``employees``）の社員番号と紐づけ、車検証・自賠責保険・
+    任意保険・運転免許証の期限と書類PDFを ``DriverDocument`` 子テーブルで管理する。
+    """
+    __tablename__ = 'driver_vehicle_profiles'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    employee_number = db.Column(db.String(20), nullable=False, unique=True, index=True)
+    employee_name = db.Column(db.String(100))   # 社員名スナップショット
+    office_code = db.Column(db.String(20), index=True)
+    office_name = db.Column(db.String(100))
+    # 通知先メール（社員名簿の値を初期値とし、上書き可能）
+    email = db.Column(db.String(255))
+    notify_enabled = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    # マイカー情報
+    car_maker = db.Column(db.String(100))
+    car_name = db.Column(db.String(100))
+    registration_number = db.Column(db.String(80), index=True)  # 登録番号/ナンバー
+    notes = db.Column(db.Text)
+    created_by = db.Column(db.String(80))
+    created_at = db.Column(db.DateTime, nullable=False, default=jst_now)
+    updated_at = db.Column(db.DateTime, nullable=False, default=jst_now, onupdate=jst_now)
+
+    documents = db.relationship(
+        'DriverDocument',
+        back_populates='profile',
+        cascade='all, delete-orphan',
+        order_by='DriverDocument.doc_type',
+    )
+
+    def to_dict(self, *, include_documents=True):
+        data = {
+            'id': self.id,
+            'employee_number': self.employee_number,
+            'employee_name': self.employee_name or '',
+            'office_code': self.office_code or '',
+            'office_name': self.office_name or '',
+            'email': self.email or '',
+            'notify_enabled': bool(self.notify_enabled),
+            'car_maker': self.car_maker or '',
+            'car_name': self.car_name or '',
+            'registration_number': self.registration_number or '',
+            'notes': self.notes or '',
+            'created_by': self.created_by or '',
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+        if include_documents:
+            data['documents'] = {doc.doc_type: doc.to_dict() for doc in self.documents}
+        return data
+
+
+class DriverDocument(db.Model):
+    """運転士マイカーの証類（車検証 / 自賠責保険証 / 任意保険証 / 運転免許証）。"""
+    __tablename__ = 'driver_documents'
+    __table_args__ = (
+        db.UniqueConstraint('profile_id', 'doc_type', name='uq_driver_document_profile_type'),
+    )
+
+    DOC_TYPES = ('inspection', 'liability_insurance', 'voluntary_insurance', 'license')
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    profile_id = db.Column(
+        db.Integer,
+        db.ForeignKey('driver_vehicle_profiles.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    doc_type = db.Column(db.String(30), nullable=False, index=True)
+    expiry_date = db.Column(db.String(8), index=True)   # YYYYMMDD
+    issued_date = db.Column(db.String(8))               # YYYYMMDD
+    document_number = db.Column(db.String(120))         # 証券番号 / 免許証番号 等
+    issuer = db.Column(db.String(200))                  # 保険会社 / 公安委員会 等
+    original_filename = db.Column(db.String(255))
+    stored_filename = db.Column(db.String(255))
+    stored_path = db.Column(db.String(500))
+    notes = db.Column(db.Text)
+    # 期限通知の二重送信防止用ステージ（送信済みの「残り日数しきい値」）
+    last_notified_stage = db.Column(db.Integer)
+    last_notified_at = db.Column(db.DateTime)
+    uploaded_by = db.Column(db.String(80))
+    uploaded_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, nullable=False, default=jst_now)
+    updated_at = db.Column(db.DateTime, nullable=False, default=jst_now, onupdate=jst_now)
+
+    profile = db.relationship('DriverVehicleProfile', back_populates='documents')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'profile_id': self.profile_id,
+            'doc_type': self.doc_type,
+            'expiry_date': self.expiry_date or '',
+            'issued_date': self.issued_date or '',
+            'document_number': self.document_number or '',
+            'issuer': self.issuer or '',
+            'original_filename': self.original_filename or '',
+            'stored_filename': self.stored_filename or '',
+            'has_pdf': bool(self.stored_path),
+            'notes': self.notes or '',
+            'last_notified_stage': self.last_notified_stage,
+            'last_notified_at': self.last_notified_at.isoformat() if self.last_notified_at else None,
+            'uploaded_by': self.uploaded_by or '',
+            'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class CloudShiftProject(db.Model):
     __tablename__ = 'cloudshift_projects'
 
