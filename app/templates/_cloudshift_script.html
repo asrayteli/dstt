@@ -3351,7 +3351,8 @@
       return html;
     }
 
-    function buildAssistPersonSiteTable(sites, emptyText) {
+    function buildAssistPersonSiteTable(sites, emptyText, options) {
+      const expanded = !!(options && options.expanded);
       if (!Array.isArray(sites) || !sites.length) {
         return `<div class="cloud-empty-state"><p>${escapeHtml(emptyText)}</p></div>`;
       }
@@ -3373,7 +3374,7 @@
         `;
       }).join('');
       return `
-        <div class="cloud-assist-site-table-wrap">
+        <div class="cloud-assist-site-table-wrap${expanded ? ' is-expanded' : ''}">
           <table class="cloud-assist-site-table">
             <thead>
               <tr>
@@ -3389,6 +3390,26 @@
           </table>
         </div>
       `;
+    }
+
+    function openAssistSiteDetailPopup(siteType) {
+      const data = currentAssistData();
+      const counts = assistCounts();
+      const isTraining = siteType === 'training';
+      const sites = isTraining
+        ? (Array.isArray(data.training_sites) ? data.training_sites : [])
+        : (Array.isArray(data.experienced_sites) ? data.experienced_sites : []);
+      const typeLabel = isTraining ? '研修要現場' : '経験済み現場';
+      const count = isTraining ? (counts.training || 0) : (counts.experienced || 0);
+      const emptyText = isTraining ? '研修要現場はありません。' : '経験済み現場はまだありません。';
+      const modal = openCloudModal('cloud-assist-site-detail-modal', `${typeLabel}（${count}）`);
+      const panel = modal.querySelector('.cloud-modal-panel');
+      if (panel) panel.classList.add('cloud-modal-panel-wide');
+      modalBody(modal).innerHTML = buildAssistPersonSiteTable(sites, emptyText, { expanded: true });
+      const footer = modalFooter(modal);
+      footer.innerHTML = '<button type="button" class="cloud-btn secondary" data-assist-site-detail-close>閉じる</button>';
+      const closeBtn = footer.querySelector('[data-assist-site-detail-close]');
+      if (closeBtn) closeBtn.addEventListener('click', () => closeCloudModal('cloud-assist-site-detail-modal'));
     }
 
     function buildAssistPersonDetailsPanel() {
@@ -3413,12 +3434,14 @@
           <div class="cloud-assist-section">
             <div class="cloud-assist-subhead">
               <div><strong>経験済み現場（${counts.experienced || 0}）</strong></div>
+              <button type="button" class="cloud-btn secondary cloud-assist-expand-btn" data-assist-expand-sites="experienced">拡大表示</button>
             </div>
             ${buildAssistPersonSiteTable(experienced, '経験済み現場はまだありません。')}
           </div>
           <div class="cloud-assist-section">
             <div class="cloud-assist-subhead">
               <div><strong>研修要現場（${counts.training || 0}）</strong></div>
+              <button type="button" class="cloud-btn secondary cloud-assist-expand-btn" data-assist-expand-sites="training">拡大表示</button>
             </div>
             ${buildAssistPersonSiteTable(training, '研修要現場はありません。')}
           </div>
@@ -4691,6 +4714,11 @@
         button.addEventListener('click', () => {
           state.assist.activeTab = button.getAttribute('data-assist-tab') || 'register';
           renderAssistModalContent(modal);
+        });
+      });
+      modal.querySelectorAll('[data-assist-expand-sites]').forEach((button) => {
+        button.addEventListener('click', () => {
+          openAssistSiteDetailPopup(button.getAttribute('data-assist-expand-sites') || 'experienced');
         });
       });
       modal.querySelectorAll('[data-assist-register-view]').forEach((button) => {

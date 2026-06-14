@@ -1702,6 +1702,38 @@
     color: var(--cloud-muted);
   }
 
+  .cloud-assist-expand-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+    flex: 0 0 auto;
+  }
+
+  .cloud-modal-panel-wide {
+    width: min(1200px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    max-height: min(92vh, 1040px);
+    max-height: min(92dvh, 1040px);
+  }
+
+  /* 拡大ポップアップ内では高さ上限を外し、モーダル本体側でスクロールさせる */
+  .cloud-assist-site-table-wrap.is-expanded {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .cloud-assist-site-table-wrap.is-expanded .cloud-assist-site-table {
+    font-size: 14px;
+  }
+
+  .cloud-assist-site-table-wrap.is-expanded .cloud-assist-site-table th {
+    font-size: 13px;
+    padding: 12px 14px;
+  }
+
+  .cloud-assist-site-table-wrap.is-expanded .cloud-assist-site-table td {
+    padding: 12px 14px;
+  }
+
   .cloud-assist-details-stack {
     grid-template-rows: auto auto minmax(0, 1fr);
     height: 100%;
