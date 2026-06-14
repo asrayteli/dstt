@@ -33,14 +33,48 @@ def test_queue_mail_dedupe_returns_existing_row(app):
         assert MailMessage.query.count() == 1
 
 
-def test_dispatch_skips_when_smtp_unconfigured(app):
+def test_dispatch_holds_when_smtp_unconfigured(app):
+    """SMTP 未設定時は失わず queued のまま保留する（"安全な保留"）。"""
     with app.app_context():
         mail_service.queue_mail("a@example.com", "件名", "本文")
         summary = mail_service.dispatch_pending()
-        assert summary["skipped"] == 1
         assert summary["sent"] == 0
+        assert summary["held"] == 1
         row = MailMessage.query.first()
-        assert row.status == mail_service.STATUS_SKIPPED
+        # skipped で失わず、設定後に送信できるよう queued のまま据え置く。
+        assert row.status == mail_service.STATUS_QUEUED
+        assert row.attempts == 0
+
+
+def test_held_mail_sends_after_smtp_configured(app, monkeypatch):
+    """未設定時に保留したメールは、設定が入れば次の tick で送信される。"""
+    with app.app_context():
+        mail_service.queue_mail("a@example.com", "件名", "本文")
+        assert mail_service.dispatch_pending()["held"] == 1
+        # ここで SMTP 設定が後追いで投入されたとみなす。
+        app.config["MAIL_HOST"] = "smtp.example.com"
+        app.config["MAIL_FROM"] = "noreply@example.com"
+        monkeypatch.setattr(mail_service, "_send_smtp", lambda message, settings: None)
+        summary = mail_service.dispatch_pending()
+        assert summary["sent"] == 1
+        assert MailMessage.query.first().status == mail_service.STATUS_SENT
+
+
+def test_requeue_message_resets_and_sends(app, monkeypatch):
+    app.config["MAIL_HOST"] = "smtp.example.com"
+    app.config["MAIL_FROM"] = "noreply@example.com"
+    with app.app_context():
+        msg = mail_service.queue_mail("a@example.com", "件名", "本文")
+        msg.status = mail_service.STATUS_FAILED
+        msg.attempts = 5
+        msg.last_error = "boom"
+        db.session.commit()
+        monkeypatch.setattr(mail_service, "_send_smtp", lambda message, settings: None)
+        mail_service.requeue_message(msg, send_now=True)
+        row = MailMessage.query.first()
+        assert row.status == mail_service.STATUS_SENT
+        assert row.attempts == 1
+        assert row.last_error is None
 
 
 def test_dispatch_sends_when_configured(app, monkeypatch):

@@ -6,6 +6,7 @@ from werkzeug.security import generate_password_hash
 from app.models import (
     db,
     DsttLoginLog,
+    MailMessage,
     User,
     AccessBranch,
     AccessOffice,
@@ -22,6 +23,7 @@ from app.models import (
     UserLoginLog,
     UserToolPermission,
 )
+from app.services import mail_service
 from app.access_control import (
     TOOL_ACCESS_CATEGORIES,
     _user_satisfies_group_rule,
@@ -1569,6 +1571,157 @@ def access_management_user_detail(user_id):
             for row in downloads
         ],
     })
+
+
+# ============================================================
+# DSTT 共通メール送信基盤（管理者）
+# ============================================================
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _parse_recipients(raw) -> tuple[list[str], list[str]]:
+    """カンマ/空白/改行/セミコロン区切りの宛先文字列を分解する。
+
+    戻り値は (正常なアドレス一覧, 形式不正なアドレス一覧)。重複は除去する。
+    """
+    text = str(raw or "")
+    tokens = [t.strip() for t in re.split(r"[\s,;]+", text) if t.strip()]
+    valid: list[str] = []
+    invalid: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        key = token.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        (valid if _EMAIL_RE.match(token) else invalid).append(token)
+    return valid, invalid
+
+
+def _clean_address_list(raw) -> str | None:
+    """CC/BCC など複数アドレス入力を正規化してカンマ連結で返す（無ければ None）。"""
+    valid, _ = _parse_recipients(raw)
+    return ", ".join(valid) if valid else None
+
+
+@user_management_bp.route("/api/mail/status", methods=["GET"])
+@login_required
+def mail_status():
+    """SMTP 設定状況とスケジューラ設定を返す（管理者のみ）。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    settings = mail_service.mail_settings()
+    return jsonify({
+        "configured": mail_service.is_mail_configured(),
+        "host": settings["host"],
+        "port": settings["port"],
+        "security": settings["security"],
+        "from_address": settings["from_address"],
+        "from_name": settings["from_name"],
+        "auth_user": settings["user"],
+    })
+
+
+@user_management_bp.route("/api/mail/messages", methods=["GET"])
+@login_required
+def mail_messages():
+    """直近のメールキューを返す（送信状況のモニタ用、管理者のみ）。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    try:
+        limit = min(200, max(1, int(request.args.get("limit", 50))))
+    except (TypeError, ValueError):
+        limit = 50
+    status = (request.args.get("status") or "").strip()
+    query = MailMessage.query
+    if status:
+        query = query.filter(MailMessage.status == status)
+    rows = query.order_by(MailMessage.created_at.desc()).limit(limit).all()
+    return jsonify({"messages": [m.to_dict() for m in rows]})
+
+
+@user_management_bp.route("/api/mail/send", methods=["POST"])
+@login_required
+def mail_send():
+    """管理者が任意の宛先へメールを送信（または予約キュー投入）する。
+
+    宛先は複数指定可能。1宛先につき :class:`MailMessage` を1件キューに積み、
+    各宛先ごとに送達状況を追跡できるようにする。
+    """
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    data = request.get_json(silent=True) or {}
+    recipients, invalid = _parse_recipients(data.get("to", ""))
+    if invalid:
+        return jsonify({"error": "宛先の形式が正しくありません: " + ", ".join(invalid)}), 400
+    if not recipients:
+        return jsonify({"error": "宛先メールアドレスを入力してください"}), 400
+    if len(recipients) > 200:
+        return jsonify({"error": "一度に送信できる宛先は200件までです"}), 400
+
+    subject = str(data.get("subject", "")).strip()
+    if not subject:
+        return jsonify({"error": "件名を入力してください"}), 400
+    body_text = str(data.get("body_text", "") or data.get("body", ""))
+    body_html = (data.get("body_html") or "").strip() or None
+    if not body_text.strip() and not body_html:
+        return jsonify({"error": "本文を入力してください"}), 400
+
+    cc = _clean_address_list(data.get("cc"))
+    bcc = _clean_address_list(data.get("bcc"))
+    reply_to = _clean_address_list(data.get("reply_to"))
+    send_now = bool(data.get("send_now", False))
+    configured = mail_service.is_mail_configured()
+    actor = getattr(current_user, "username", None)
+
+    queued = 0
+    sent = 0
+    results = []
+    for addr in recipients:
+        message = mail_service.queue_mail(
+            addr,
+            subject,
+            body_text,
+            body_html=body_html,
+            cc=cc,
+            bcc=bcc,
+            reply_to=reply_to,
+            category="admin_manual",
+            created_by=actor,
+            send_now=send_now and configured,
+        )
+        if message is None:
+            continue
+        queued += 1
+        if message.status == mail_service.STATUS_SENT:
+            sent += 1
+        results.append(message.to_dict())
+
+    return jsonify({
+        "success": True,
+        "configured": configured,
+        "queued": queued,
+        "sent": sent,
+        "send_now": send_now,
+        "messages": results,
+    })
+
+
+@user_management_bp.route("/api/mail/messages/<int:message_id>/resend", methods=["POST"])
+@login_required
+def mail_resend(message_id):
+    """失敗/保留/キャンセル済みメッセージを再送対象として queued に戻す（管理者のみ）。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    message = db.session.get(MailMessage, message_id)
+    if message is None:
+        return jsonify({"error": "メッセージが見つかりません"}), 404
+    data = request.get_json(silent=True) or {}
+    send_now = bool(data.get("send_now", True)) and mail_service.is_mail_configured()
+    mail_service.requeue_message(message, send_now=send_now)
+    return jsonify({"success": True, "message": message.to_dict()})
 
 
 # ============================================================

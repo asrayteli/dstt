@@ -123,6 +123,7 @@
       <button data-tab="leavemgr-codes" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">有休カレンダー</button>
       <button data-tab="tool-management" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">ツール管理</button>
       <button data-tab="announcements" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">お知らせ</button>
+      <button data-tab="mail" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">メール送信</button>
     </nav>
   </div>
 
@@ -606,6 +607,97 @@
       <p class="text-gray-600">お知らせ管理は専用ページでご利用ください。</p>
     </div>
   </section>
+
+  <!-- ===== メール送信 ===== -->
+  <section id="tab-mail" class="admin-section hidden">
+    <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] items-start">
+      <!-- 左: 作成フォーム -->
+      <div class="bg-white rounded-xl shadow p-6 space-y-4">
+        <div>
+          <h2 class="text-xl font-semibold">メール送信</h2>
+          <p class="text-sm text-slate-500 mt-1">DSTT 共通メール基盤を使い、任意の宛先へメールを送信します。宛先は複数指定でき、1宛先につき1通をキューに積みます。</p>
+        </div>
+
+        <div id="mail-status-banner" class="rounded-lg border px-4 py-3 text-sm bg-slate-50 border-slate-200 text-slate-600">
+          送信設定を確認中…
+        </div>
+
+        <form id="form-mail-send" class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium mb-1">宛先（必須）</label>
+            <textarea name="to" rows="2" required placeholder="taro@example.com, hanako@example.com&#10;（カンマ・空白・改行区切りで複数可）" class="w-full border rounded px-3 py-2 text-sm"></textarea>
+          </div>
+          <div class="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium mb-1">CC</label>
+              <input name="cc" class="w-full border rounded px-3 py-2 text-sm" placeholder="任意（複数可）">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">BCC</label>
+              <input name="bcc" class="w-full border rounded px-3 py-2 text-sm" placeholder="任意（複数可）">
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">返信先（Reply-To）</label>
+            <input name="reply_to" class="w-full border rounded px-3 py-2 text-sm" placeholder="任意">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">件名（必須）</label>
+            <input name="subject" required class="w-full border rounded px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">本文</label>
+            <textarea name="body_text" rows="8" class="w-full border rounded px-3 py-2 text-sm" placeholder="プレーンテキスト本文"></textarea>
+          </div>
+          <div>
+            <label class="inline-flex items-center gap-2 text-sm font-medium">
+              <input type="checkbox" id="mail-html-toggle"> HTML 本文も付ける（対応クライアントで優先表示）
+            </label>
+            <textarea name="body_html" rows="5" class="w-full border rounded px-3 py-2 text-sm mt-2 hidden" id="mail-html-area" placeholder="<p>HTML 本文</p>"></textarea>
+          </div>
+          <div class="flex flex-wrap items-center gap-4 pt-1">
+            <label class="inline-flex items-center gap-2 text-sm">
+              <input type="radio" name="dispatch" value="now" checked> 今すぐ送信
+            </label>
+            <label class="inline-flex items-center gap-2 text-sm">
+              <input type="radio" name="dispatch" value="queue"> キューに積む（スケジューラが送信）
+            </label>
+          </div>
+          <div class="flex gap-2 pt-1">
+            <button type="submit" id="btn-mail-send" class="bg-red-600 text-white px-5 py-2 rounded hover:bg-red-700 disabled:opacity-50">送信</button>
+            <button type="button" id="btn-mail-reset" class="border border-slate-300 bg-white px-4 py-2 rounded hover:bg-slate-50">クリア</button>
+          </div>
+          <div id="mail-send-result" class="text-sm"></div>
+        </form>
+      </div>
+
+      <!-- 右: 送信キュー -->
+      <div class="bg-white rounded-xl shadow p-6">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <h2 class="text-xl font-semibold">送信キュー（最新50件）</h2>
+            <p class="text-sm text-slate-500 mt-1">基盤全体の送信状況です。失敗・保留分はここから再送できます。</p>
+          </div>
+          <button type="button" id="btn-mail-refresh" class="bg-slate-700 text-white px-3 py-1.5 rounded text-sm hover:bg-slate-800">更新</button>
+        </div>
+        <div class="overflow-auto border rounded max-h-[70vh]">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 sticky top-0 text-left">
+              <tr>
+                <th class="p-2">日時</th>
+                <th class="p-2">宛先</th>
+                <th class="p-2">件名</th>
+                <th class="p-2">分類</th>
+                <th class="p-2">状態</th>
+                <th class="p-2">操作</th>
+              </tr>
+            </thead>
+            <tbody id="mail-messages-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
 </div>
 
 <!-- ===== 新規ユーザーモーダル ===== -->
@@ -786,6 +878,7 @@ function activateAdminTab(tab) {
   if (tab === 'siteplus-codes') loadSiteplusCodes();
   if (tab === 'leavemgr-codes') loadLeaveMgrCodes();
   if (tab === 'tool-management') loadToolManagement();
+  if (tab === 'mail') loadMailTab();
 }
 
 $$('.admin-tab').forEach(btn => btn.addEventListener('click', () => activateAdminTab(btn.dataset.tab)));
@@ -2172,6 +2265,140 @@ $('#btn-tm-save').addEventListener('click', async () => {
     alert('ツール設定を保存しました');
     loadToolManagement();
   } catch (err) { alert('エラー: ' + err.message); }
+});
+
+// ===== メール送信 =====
+const MAIL_STATUS_BADGE = {
+  queued:   ['キュー', 'bg-amber-100 text-amber-700'],
+  sending:  ['送信中', 'bg-blue-100 text-blue-700'],
+  sent:     ['送信済', 'bg-green-100 text-green-700'],
+  failed:   ['失敗',   'bg-red-100 text-red-700'],
+  skipped:  ['保留',   'bg-slate-200 text-slate-700'],
+  canceled: ['取消',   'bg-slate-200 text-slate-500'],
+};
+
+function mailStatusBadge(status) {
+  const [label, cls] = MAIL_STATUS_BADGE[status] || [status, 'bg-slate-100 text-slate-600'];
+  return `<span class="inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}">${escape(label)}</span>`;
+}
+
+async function loadMailTab() {
+  await Promise.all([loadMailStatus(), loadMailMessages()]);
+}
+
+async function loadMailStatus() {
+  const banner = $('#mail-status-banner');
+  try {
+    const s = await api('/tools/user_management/api/mail/status');
+    if (s.configured) {
+      banner.className = 'rounded-lg border px-4 py-3 text-sm bg-green-50 border-green-200 text-green-800';
+      banner.innerHTML = `✅ 送信可能です（送信元 <b>${escape(s.from_name ? s.from_name + ' <' + s.from_address + '>' : s.from_address)}</b> / ${escape(s.host)}:${escape(s.port)} ${escape(s.security)}）`;
+    } else {
+      banner.className = 'rounded-lg border px-4 py-3 text-sm bg-amber-50 border-amber-200 text-amber-800';
+      banner.innerHTML = '⚠️ SMTP が未設定です。送信内容はキューに保留され、<code>DSTT_SMTP_HOST</code> / <code>DSTT_MAIL_FROM</code> を設定すると自動的に送信されます。';
+    }
+  } catch (err) {
+    banner.className = 'rounded-lg border px-4 py-3 text-sm bg-red-50 border-red-200 text-red-700';
+    banner.textContent = '設定状況の取得に失敗しました: ' + err.message;
+  }
+}
+
+async function loadMailMessages() {
+  const tbody = $('#mail-messages-tbody');
+  try {
+    const data = await api('/tools/user_management/api/mail/messages?limit=50');
+    const rows = data.messages || [];
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-gray-400">まだ送信履歴はありません。</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(m => {
+      const resendable = ['failed', 'skipped', 'canceled'].includes(m.status);
+      const err = m.last_error ? `<div class="text-xs text-red-500 mt-0.5 break-all">${escape(m.last_error)}</div>` : '';
+      const action = resendable
+        ? `<button class="mail-resend bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700" data-id="${m.id}">再送</button>`
+        : '<span class="text-gray-300 text-xs">—</span>';
+      return `<tr class="border-t align-top">
+        <td class="p-2 whitespace-nowrap">${fmtDate(m.created_at)}</td>
+        <td class="p-2 break-all">${escape(m.to_address)}</td>
+        <td class="p-2">${escape(m.subject)}</td>
+        <td class="p-2 whitespace-nowrap"><span class="text-xs text-slate-500">${escape(m.category)}</span></td>
+        <td class="p-2 whitespace-nowrap">${mailStatusBadge(m.status)}${err}</td>
+        <td class="p-2 whitespace-nowrap">${action}</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-red-500">${escape(err.message)}</td></tr>`;
+  }
+}
+
+$('#mail-html-toggle')?.addEventListener('change', (e) => {
+  $('#mail-html-area').classList.toggle('hidden', !e.target.checked);
+});
+
+$('#btn-mail-reset')?.addEventListener('click', () => {
+  $('#form-mail-send').reset();
+  $('#mail-html-area').classList.add('hidden');
+  $('#mail-send-result').textContent = '';
+});
+
+$('#btn-mail-refresh')?.addEventListener('click', loadMailMessages);
+
+$('#form-mail-send')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const result = $('#mail-send-result');
+  const sendNow = form.querySelector('input[name="dispatch"]:checked')?.value === 'now';
+  const payload = {
+    to: form.to.value,
+    cc: form.cc.value,
+    bcc: form.bcc.value,
+    reply_to: form.reply_to.value,
+    subject: form.subject.value,
+    body_text: form.body_text.value,
+    body_html: $('#mail-html-toggle').checked ? form.body_html.value : '',
+    send_now: sendNow,
+  };
+  const btn = $('#btn-mail-send');
+  btn.disabled = true;
+  result.textContent = '送信中…';
+  result.className = 'text-sm text-slate-500';
+  try {
+    const res = await api('/tools/user_management/api/mail/send', { method: 'POST', body: payload });
+    let msg;
+    if (!res.configured) {
+      msg = `📥 ${res.queued}件をキューに保留しました（SMTP未設定のため、設定後に自動送信されます）。`;
+    } else if (sendNow) {
+      msg = `✅ ${res.sent}/${res.queued}件を送信しました。`;
+    } else {
+      msg = `📥 ${res.queued}件をキューに積みました。スケジューラが順次送信します。`;
+    }
+    result.textContent = msg;
+    result.className = 'text-sm text-green-700';
+    form.body_text.value = '';
+    if ($('#mail-html-toggle').checked) form.body_html.value = '';
+    loadMailMessages();
+  } catch (err) {
+    result.textContent = 'エラー: ' + err.message;
+    result.className = 'text-sm text-red-600';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.mail-resend');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    await api(`/tools/user_management/api/mail/messages/${btn.dataset.id}/resend`, { method: 'POST', body: { send_now: true } });
+    loadMailMessages();
+  } catch (err) {
+    alert('再送に失敗しました: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = '再送';
+  }
 });
 
 // 初期ロード

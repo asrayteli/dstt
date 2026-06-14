@@ -225,6 +225,25 @@ def send_mail_now(to_address: str, subject: str, body_text: str, **kwargs) -> Ma
     return queue_mail(to_address, subject, body_text, **kwargs)
 
 
+def requeue_message(message: MailMessage, *, send_now: bool = False, commit: bool = True) -> MailMessage:
+    """既存メッセージ（failed/skipped/canceled 等）を再送対象として queued に戻す。
+
+    試行回数・エラー・予約時刻をリセットし、``send_now=True`` なら即時送信を試みる。
+    管理画面からの「再送」操作や、SMTP 設定後の手動リカバリで利用する。
+    """
+    message.status = STATUS_QUEUED
+    message.attempts = 0
+    message.last_error = None
+    message.scheduled_at = None
+    if commit:
+        db.session.commit()
+    if send_now:
+        _dispatch_one(message)
+        if commit:
+            db.session.commit()
+    return message
+
+
 def _build_email(message: MailMessage, settings: dict[str, Any]) -> EmailMessage:
     email = EmailMessage()
     from_address = settings["from_address"]
@@ -320,7 +339,26 @@ def dispatch_pending(limit: int = DEFAULT_DISPATCH_LIMIT, now=None) -> dict[str,
     """送信待ち（queued/再試行可能なfailed）かつ予約時刻到来済みのメールを送信する。"""
     now = now or local_now()
     settings = mail_settings()
-    summary = {"selected": 0, "sent": 0, "failed": 0, "skipped": 0}
+    summary = {"selected": 0, "sent": 0, "failed": 0, "skipped": 0, "held": 0}
+
+    # SMTP 未設定時は「安全な保留」: 送信待ちメールに触れず queued のまま据え置く。
+    # こうしておけば、運用設定（DSTT_SMTP_*）が後追いで入った時点で自動的に送信
+    # される（skipped にして失わない）。基盤先行構築の運用を壊さないための要。
+    if not (settings["host"] and settings["from_address"]):
+        held = (
+            MailMessage.query
+            .filter(MailMessage.status.in_(RETRYABLE_STATUSES))
+            .filter(MailMessage.attempts < MailMessage.max_attempts)
+            .filter((MailMessage.scheduled_at.is_(None)) | (MailMessage.scheduled_at <= now))
+            .count()
+        )
+        summary["held"] = held
+        if held:
+            logger.warning(
+                "SMTP 未設定のためメール %s 件を保留中です（DSTT_SMTP_HOST / DSTT_MAIL_FROM を設定してください）。",
+                held,
+            )
+        return summary
 
     query = (
         MailMessage.query
