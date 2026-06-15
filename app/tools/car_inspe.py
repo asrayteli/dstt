@@ -1,9 +1,13 @@
-"""運転士マイカー管理ツール（旧: 現場車両の車検証ツール）。
+"""マイカー管理ツール（旧: 現場車両の車検証ツール）。
 
 自社社員（運転士）のマイカーについて、車検証・自賠責保険証・任意保険証・
 運転免許証の有効期限と書類PDFを管理する。社員名簿PLUS（``employees``）と
 社員番号で紐づけ、期限が近づくと登録メールアドレスへ自動通知する
 （通知は ``app.services.driver_doc_notify`` ＋ ``app.services.mail_service``）。
+
+データは健診PLUSと同様に「営業所（office_code）」単位でアクセス制御する。
+DSTT管理者は全営業所、それ以外のユーザーは自分のアクセス可能な営業所の
+データのみ閲覧・編集できる。
 
 社員1人＝1台（1プロファイル）。初版はOCRを行わず、手動入力＋PDF保存。
 """
@@ -22,8 +26,15 @@ from flask_login import current_user, login_required
 from sqlalchemy import or_
 from werkzeug.utils import secure_filename
 
-from app.access_control import is_admin_user
-from app.models import DriverDocument, DriverVehicleProfile, Employee, db
+from app.access_control import is_admin_user, user_office_codes
+from app.models import (
+    AccessOffice,
+    DriverDocument,
+    DriverVehicleProfile,
+    Employee,
+    Office,
+    db,
+)
 from app.services import mail_service
 
 car_inspe_bp = Blueprint("car_inspe", __name__, url_prefix="/tools/car_inspe")
@@ -150,6 +161,7 @@ def serialize_profile(profile: DriverVehicleProfile, today: str) -> dict:
         if doc is not None:
             doc["status"] = status
             doc["expiry_display"] = format_date_display(expiry)
+            doc["issued_display"] = format_date_display((doc or {}).get("issued_date", ""))
         if re.fullmatch(r"\d{8}", expiry or ""):
             if nearest is None or expiry < nearest:
                 nearest = expiry
@@ -177,12 +189,130 @@ def employee_to_option(emp: Employee) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# 営業所アクセス制御（健診PLUSと同じDSTTアクセス権に同期）
+# --------------------------------------------------------------------------- #
+def _is_admin() -> bool:
+    """DSTT管理者か。管理者は全営業所のデータにアクセスできる。"""
+    return is_admin_user(current_user)
+
+
+def _office_codes() -> set[str]:
+    """ログインユーザーがアクセスできる営業所コード集合（コード無しは除外）。"""
+    return {c for c in (user_office_codes(current_user) or set()) if c}
+
+
+def _accessible_codes_or_none() -> set[str] | None:
+    """データ絞り込み用。管理者は None（=全件）、それ以外は営業所コード集合。"""
+    if _is_admin():
+        return None
+    return _office_codes()
+
+
+def _can_access_office(office_code) -> bool:
+    """その営業所のデータを閲覧・編集できるか。
+    - 管理者は常に可。
+    - コード未設定（None/空）のデータは管理者のみ（誤公開防止）。
+    - それ以外は自分のアクセス可能営業所コードに含まれていれば可。"""
+    if _is_admin():
+        return True
+    code = (office_code or "").strip()
+    if not code:
+        return False
+    return code in _office_codes()
+
+
+def _office_options(codes=None) -> list[dict]:
+    """営業所の選択肢を構築する。
+
+    DSTTのアクセス権営業所（``AccessOffice`` の code→name）を土台に、
+    社員名簿PLUSの ``Office``（office_code→office_name）で名称を補足/上書きする。
+    ``codes`` を指定するとその集合に限定する（非管理者向け）。空集合なら []。
+    """
+    wanted = None if codes is None else {str(c).strip() for c in codes if str(c).strip()}
+    if wanted is not None and not wanted:
+        return []
+    by_code: dict[str, dict] = {}
+
+    access_query = AccessOffice.query.filter(AccessOffice.code.isnot(None))
+    if wanted is not None:
+        access_query = access_query.filter(AccessOffice.code.in_(wanted))
+    for office in access_query.all():
+        code = (office.code or "").strip()
+        if code:
+            by_code[code] = {"code": code, "name": office.name or code}
+
+    plus_query = Office.query
+    if wanted is not None:
+        plus_query = plus_query.filter(Office.office_code.in_(wanted))
+    for office in plus_query.all():
+        code = (office.office_code or "").strip()
+        if code:
+            name = office.office_name or by_code.get(code, {}).get("name") or code
+            by_code[code] = {"code": code, "name": name}
+
+    return [by_code[c] for c in sorted(by_code)]
+
+
+def _backfill_office_codes() -> None:
+    """営業所コードが空のプロファイルを、社員名簿の現在の所属で補完する。
+
+    旧データ（営業所スコープ導入前）でも正しく絞り込めるようにするための保険。
+    対象が無ければ即return（追加コストはほぼ無し）。"""
+    missing = DriverVehicleProfile.query.filter(
+        or_(
+            DriverVehicleProfile.office_code.is_(None),
+            DriverVehicleProfile.office_code == "",
+        )
+    ).all()
+    if not missing:
+        return
+    numbers = {p.employee_number for p in missing}
+    employees = {
+        e.employee_number: e
+        for e in Employee.query.filter(Employee.employee_number.in_(numbers)).all()
+    }
+    changed = False
+    for profile in missing:
+        emp = employees.get(profile.employee_number)
+        if emp and (emp.office_code or "").strip():
+            profile.office_code = (emp.office_code or "").strip()
+            if not (profile.office_name or "").strip():
+                profile.office_name = emp.office_name or ""
+            changed = True
+    if changed:
+        db.session.commit()
+
+
+def _scoped_profile_query():
+    """ユーザーのアクセス範囲に絞った DriverVehicleProfile クエリを返す。
+    アクセス可能営業所が無い非管理者は None を返す（呼び出し側で空扱い）。"""
+    codes = _accessible_codes_or_none()
+    query = DriverVehicleProfile.query
+    if codes is not None:
+        if not codes:
+            return None
+        query = query.filter(DriverVehicleProfile.office_code.in_(codes))
+    return query
+
+
+def _get_profile_scoped(profile_id):
+    """プロファイルを取得しつつ営業所アクセス権を検証する。"""
+    profile = db.session.get(DriverVehicleProfile, profile_id)
+    if profile is None:
+        return None, (jsonify({"error": "対象の運転士が見つかりません。"}), 404)
+    if not _can_access_office(profile.office_code):
+        return None, (jsonify({"error": "この運転士へのアクセス権限がありません。"}), 403)
+    return profile, None
+
+
+# --------------------------------------------------------------------------- #
 # 社員検索（社員名簿PLUS 連携）
 # --------------------------------------------------------------------------- #
 @car_inspe_bp.route("/api/employees", methods=["GET"])
 @login_required
 def api_employees():
     q = normalize_text(request.args.get("q", ""))
+    office = normalize_text(request.args.get("office", ""))
     try:
         limit = int(request.args.get("limit", 30) or 30)
     except (TypeError, ValueError):
@@ -193,6 +323,18 @@ def api_employees():
         Employee.is_deleted.isnot(True),
         Employee.is_retired.isnot(True),
     )
+
+    # 営業所スコープ: 非管理者は自分のアクセス可能営業所の社員のみ。
+    codes = _accessible_codes_or_none()
+    if codes is not None:
+        if not codes:
+            return jsonify({"employees": [], "count": 0})
+        query = query.filter(Employee.office_code.in_(codes))
+    if office:
+        if not _can_access_office(office):
+            return jsonify({"error": "この営業所へのアクセス権限がありません。"}), 403
+        query = query.filter(Employee.office_code == office)
+
     if q:
         like = f"%{q}%"
         query = query.filter(
@@ -222,9 +364,29 @@ def api_employees():
 @car_inspe_bp.route("/api/drivers", methods=["GET"])
 @login_required
 def api_list_drivers():
+    _backfill_office_codes()
     q = normalize_text(request.args.get("q", ""))
     status = normalize_text(request.args.get("status", ""))
-    query = DriverVehicleProfile.query
+    office = normalize_text(request.args.get("office", ""))
+
+    empty_summary = {"drivers": 0, "expired": 0, "expiring": 0, "incomplete": 0}
+    query = _scoped_profile_query()
+    if query is None:
+        # アクセス可能な営業所が割り当てられていない非管理者。
+        return jsonify({
+            "drivers": [],
+            "count": 0,
+            "summary": empty_summary,
+            "mail_configured": mail_service.is_mail_configured(),
+            "can_admin": _is_admin(),
+            "no_office": True,
+        })
+
+    if office:
+        if not _can_access_office(office):
+            return jsonify({"error": "この営業所へのアクセス権限がありません。"}), 403
+        query = query.filter(DriverVehicleProfile.office_code == office)
+
     if q:
         like = f"%{q}%"
         query = query.filter(
@@ -236,24 +398,28 @@ def api_list_drivers():
                 DriverVehicleProfile.email.ilike(like),
             )
         )
-    profiles = query.order_by(DriverVehicleProfile.employee_number.asc()).all()
+    profiles = query.order_by(
+        DriverVehicleProfile.office_code.asc(),
+        DriverVehicleProfile.employee_number.asc(),
+    ).all()
     today = datetime.now().strftime("%Y%m%d")
-    drivers = [serialize_profile(profile, today) for profile in profiles]
-    if status:
-        drivers = [d for d in drivers if d["status"] == status]
+    all_drivers = [serialize_profile(profile, today) for profile in profiles]
 
+    # サマリーは絞り込み（営業所・キーワード）後・状態フィルタ前の集合で集計する。
     summary = {
-        "drivers": DriverVehicleProfile.query.count(),
-        "expired": sum(1 for d in drivers if d["status"] == "expired"),
-        "expiring": sum(1 for d in drivers if d["status"] == "expiring"),
-        "incomplete": sum(1 for d in drivers if d["status"] == "incomplete"),
+        "drivers": len(all_drivers),
+        "expired": sum(1 for d in all_drivers if d["status"] == "expired"),
+        "expiring": sum(1 for d in all_drivers if d["status"] == "expiring"),
+        "incomplete": sum(1 for d in all_drivers if d["status"] == "incomplete"),
     }
+    drivers = [d for d in all_drivers if d["status"] == status] if status else all_drivers
+
     return jsonify({
         "drivers": drivers,
         "count": len(drivers),
         "summary": summary,
         "mail_configured": mail_service.is_mail_configured(),
-        "can_admin": is_admin_user(),
+        "can_admin": _is_admin(),
     })
 
 
@@ -268,6 +434,9 @@ def api_create_driver():
     employee = Employee.query.filter_by(employee_number=employee_number).first()
     if employee is None:
         return jsonify({"error": f"社員番号 {employee_number} が社員名簿PLUSに見つかりません。"}), 404
+
+    if not _can_access_office(employee.office_code):
+        return jsonify({"error": "この社員の営業所への登録権限がありません。"}), 403
 
     existing = DriverVehicleProfile.query.filter_by(employee_number=employee_number).first()
     if existing is not None:
@@ -295,9 +464,9 @@ def api_create_driver():
 @car_inspe_bp.route("/api/drivers/<int:profile_id>", methods=["GET"])
 @login_required
 def api_get_driver(profile_id):
-    profile = db.session.get(DriverVehicleProfile, profile_id)
-    if profile is None:
-        return jsonify({"error": "対象の運転士が見つかりません。"}), 404
+    profile, error = _get_profile_scoped(profile_id)
+    if error:
+        return error
     today = datetime.now().strftime("%Y%m%d")
     return jsonify({"driver": serialize_profile(profile, today)})
 
@@ -305,9 +474,9 @@ def api_get_driver(profile_id):
 @car_inspe_bp.route("/api/drivers/<int:profile_id>", methods=["PUT"])
 @login_required
 def api_update_driver(profile_id):
-    profile = db.session.get(DriverVehicleProfile, profile_id)
-    if profile is None:
-        return jsonify({"error": "対象の運転士が見つかりません。"}), 404
+    profile, error = _get_profile_scoped(profile_id)
+    if error:
+        return error
     data = request.get_json(silent=True) or {}
     if "email" in data:
         profile.email = normalize_text(data.get("email", ""))
@@ -329,9 +498,9 @@ def api_update_driver(profile_id):
 @car_inspe_bp.route("/api/drivers/<int:profile_id>", methods=["DELETE"])
 @login_required
 def api_delete_driver(profile_id):
-    profile = db.session.get(DriverVehicleProfile, profile_id)
-    if profile is None:
-        return jsonify({"error": "対象の運転士が見つかりません。"}), 404
+    profile, error = _get_profile_scoped(profile_id)
+    if error:
+        return error
     db.session.delete(profile)
     db.session.commit()
     # 保存済みPDFディレクトリも削除。
@@ -343,21 +512,167 @@ def api_delete_driver(profile_id):
 
 
 # --------------------------------------------------------------------------- #
+# 一括起票（社員名簿PLUSから）
+# --------------------------------------------------------------------------- #
+@car_inspe_bp.route("/api/bulk/candidates", methods=["GET"])
+@login_required
+def api_bulk_candidates():
+    """指定営業所の在籍社員一覧（未登録/登録済みフラグ付き）を返す。"""
+    office = normalize_text(request.args.get("office", ""))
+    if not office:
+        return jsonify({"error": "営業所を指定してください。"}), 400
+    if not _can_access_office(office):
+        return jsonify({"error": "この営業所へのアクセス権限がありません。"}), 403
+
+    q = normalize_text(request.args.get("q", ""))
+    query = Employee.query.filter(
+        Employee.is_deleted.isnot(True),
+        Employee.is_retired.isnot(True),
+        Employee.office_code == office,
+    )
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            or_(
+                Employee.employee_number.ilike(like),
+                Employee.employee_name.ilike(like),
+                Employee.employee_kana.ilike(like),
+            )
+        )
+    rows = query.order_by(Employee.employee_number.asc()).all()
+    linked = {
+        row[0]
+        for row in DriverVehicleProfile.query.with_entities(DriverVehicleProfile.employee_number).all()
+    }
+    employees = []
+    registered = 0
+    for emp in rows:
+        option = employee_to_option(emp)
+        option["has_profile"] = emp.employee_number in linked
+        if option["has_profile"]:
+            registered += 1
+        employees.append(option)
+    return jsonify({
+        "employees": employees,
+        "count": len(employees),
+        "registered": registered,
+        "unregistered": len(employees) - registered,
+    })
+
+
+@car_inspe_bp.route("/api/bulk", methods=["POST"])
+@login_required
+def api_bulk_create():
+    """社員名簿PLUSから営業所単位で運転士を一括起票する。
+
+    body:
+      office: 対象営業所コード（必須・アクセス権必要）
+      employee_numbers: 起票する社員番号の配列（指定者のみ起票）
+      all_in_office: true のとき、当該営業所の在籍者全員を起票
+    既に登録済みの社員はスキップする。"""
+    data = request.get_json(silent=True) or {}
+    office = normalize_text(data.get("office", ""))
+    if not office:
+        return jsonify({"error": "営業所を指定してください。"}), 400
+    if not _can_access_office(office):
+        return jsonify({"error": "この営業所への登録権限がありません。"}), 403
+
+    numbers = data.get("employee_numbers")
+    all_in_office = bool(data.get("all_in_office"))
+
+    query = Employee.query.filter(
+        Employee.is_deleted.isnot(True),
+        Employee.is_retired.isnot(True),
+        Employee.office_code == office,
+    )
+    if isinstance(numbers, list) and numbers:
+        wanted = {normalize_text(n) for n in numbers if normalize_text(n)}
+        if not wanted:
+            return jsonify({"error": "登録対象の社員を選択してください。"}), 400
+        query = query.filter(Employee.employee_number.in_(wanted))
+    elif not all_in_office:
+        return jsonify({"error": "登録対象の社員を選択してください。"}), 400
+
+    employees = query.order_by(Employee.employee_number.asc()).all()
+    if not employees:
+        return jsonify({"success": True, "created": 0, "skipped": 0})
+
+    linked = {
+        row[0]
+        for row in DriverVehicleProfile.query.with_entities(DriverVehicleProfile.employee_number).all()
+    }
+    actor = _actor()
+    created = 0
+    skipped = 0
+    for emp in employees:
+        if emp.employee_number in linked:
+            skipped += 1
+            continue
+        profile = DriverVehicleProfile(
+            employee_number=emp.employee_number,
+            employee_name=emp.employee_name or "",
+            office_code=emp.office_code or "",
+            office_name=emp.office_name or "",
+            email=emp.email or "",
+            notify_enabled=True,
+            created_by=actor,
+        )
+        db.session.add(profile)
+        linked.add(emp.employee_number)
+        created += 1
+    if created:
+        db.session.commit()
+    return jsonify({"success": True, "created": created, "skipped": skipped})
+
+
+@car_inspe_bp.route("/api/resync", methods=["POST"])
+@login_required
+def api_resync_roster():
+    """登録済みプロファイルの氏名・営業所を社員名簿PLUSの現在値へ同期する。
+
+    社員の異動・改名を反映する。通知先メール等の個別設定は変更しない。
+    アクセス範囲内のプロファイルのみを対象とする。"""
+    query = _scoped_profile_query()
+    if query is None:
+        return jsonify({"success": True, "updated": 0})
+    profiles = query.all()
+    numbers = {p.employee_number for p in profiles}
+    employees = (
+        {e.employee_number: e for e in Employee.query.filter(Employee.employee_number.in_(numbers)).all()}
+        if numbers
+        else {}
+    )
+    updated = 0
+    for profile in profiles:
+        emp = employees.get(profile.employee_number)
+        if emp is None:
+            continue
+        new_name = emp.employee_name or ""
+        new_office_code = (emp.office_code or "").strip()
+        new_office_name = emp.office_name or ""
+        if (
+            (profile.employee_name or "") != new_name
+            or (profile.office_code or "") != new_office_code
+            or (profile.office_name or "") != new_office_name
+        ):
+            profile.employee_name = new_name
+            profile.office_code = new_office_code
+            profile.office_name = new_office_name
+            updated += 1
+    if updated:
+        db.session.commit()
+    return jsonify({"success": True, "updated": updated})
+
+
+# --------------------------------------------------------------------------- #
 # 書類（車検証 / 自賠責 / 任意保険 / 免許証）
 # --------------------------------------------------------------------------- #
-def _get_profile_or_404(profile_id):
-    profile = db.session.get(DriverVehicleProfile, profile_id)
-    if profile is None:
-        return None, (jsonify({"error": "対象の運転士が見つかりません。"}), 404)
-    return profile, None
-
-
 @car_inspe_bp.route("/api/drivers/<int:profile_id>/documents/<doc_type>", methods=["POST"])
 @login_required
 def api_save_document(profile_id, doc_type):
     if doc_type not in DOC_TYPES:
         return jsonify({"error": "不明な書類種別です。"}), 400
-    profile, error = _get_profile_or_404(profile_id)
+    profile, error = _get_profile_scoped(profile_id)
     if error:
         return error
 
@@ -430,7 +745,7 @@ def api_save_document(profile_id, doc_type):
 def api_delete_document(profile_id, doc_type):
     if doc_type not in DOC_TYPES:
         return jsonify({"error": "不明な書類種別です。"}), 400
-    profile, error = _get_profile_or_404(profile_id)
+    profile, error = _get_profile_scoped(profile_id)
     if error:
         return error
     doc = DriverDocument.query.filter_by(profile_id=profile.id, doc_type=doc_type).first()
@@ -454,6 +769,9 @@ def api_download_document(doc_id):
     doc = db.session.get(DriverDocument, doc_id)
     if doc is None or not doc.stored_path or not os.path.exists(doc.stored_path):
         return jsonify({"error": "書類ファイルが見つかりません。"}), 404
+    profile = db.session.get(DriverVehicleProfile, doc.profile_id)
+    if profile is None or not _can_access_office(profile.office_code):
+        return jsonify({"error": "この書類へのアクセス権限がありません。"}), 403
     download_name = doc.original_filename or doc.stored_filename or os.path.basename(doc.stored_path)
     return send_file(doc.stored_path, as_attachment=True, download_name=download_name)
 
@@ -469,14 +787,14 @@ def api_mail_status():
         "configured": mail_service.is_mail_configured(),
         "host": settings["host"],
         "from_address": settings["from_address"],
-        "can_admin": is_admin_user(),
+        "can_admin": _is_admin(),
     })
 
 
 @car_inspe_bp.route("/api/test-mail", methods=["POST"])
 @login_required
 def api_test_mail():
-    if not is_admin_user():
+    if not _is_admin():
         return jsonify({"error": "テスト送信は管理者のみ利用できます。"}), 403
     data = request.get_json(silent=True) or {}
     to_address = normalize_text(data.get("to", ""))
@@ -486,7 +804,7 @@ def api_test_mail():
         return jsonify({"error": "SMTPが未設定です（DSTT_SMTP_HOST / DSTT_MAIL_FROM を設定してください）。"}), 400
     message = mail_service.send_mail_now(
         to_address,
-        "【テスト送信】運転士マイカー管理ツール",
+        "【テスト送信】マイカー管理ツール",
         "これは DSTT メール送信基盤のテストメールです。\nこのメールが届いていれば送信設定は正常です。",
         category="test",
         created_by=_actor(),
@@ -504,4 +822,15 @@ def api_test_mail():
 @car_inspe_bp.route("/", methods=["GET"])
 @login_required
 def car_inspection():
-    return render_template("car_inspe.html", error=None)
+    admin = _is_admin()
+    codes = _accessible_codes_or_none()
+    offices = _office_options(None if admin else codes)
+    can_bulk = admin or bool(codes)
+    return render_template(
+        "car_inspe.html",
+        error=None,
+        offices=offices,
+        is_admin=admin,
+        can_bulk=can_bulk,
+        no_office=(not admin and not codes),
+    )

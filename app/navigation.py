@@ -80,8 +80,8 @@ NAV_ITEMS = (
         "key": "car_inspe",
         "href": "/tools/car_inspe",
         "icon": "🚗",
-        "label": "運転士マイカー管理",
-        "description": "運転士の車検証・自賠責・任意保険・免許証の期限を管理し、期限前にメール通知",
+        "label": "マイカー管理ツール",
+        "description": "営業所ごとに運転士の車検証・自賠責・任意保険・免許証の期限を管理し、期限前にメール通知",
     },
     {
         "key": "shiftersync",
