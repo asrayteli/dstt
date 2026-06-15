@@ -3139,6 +3139,10 @@ def _restore_month_revision_in_project(
     restored["month"] = month
     restored["capacity_enabled"] = bool(restored.get("required_capacity", 0) > 0)
     restored["entries_per_day"] = _normalize_entries(restored.get("entries_per_day"), year, month)
+    # 復元は live を過去リビジョンへ戻す操作。未公開の下書き（WIP）は別物として保全し、
+    # 利用者の意図しないサイレントな下書き消失を避ける（スナップショットは draft を含まない）。
+    if "draft_entries_per_day" in current_month:
+        restored["draft_entries_per_day"] = current_month["draft_entries_per_day"]
     restored["revision"] = current_revision + 1
     restored["created_at"] = current_month.get("created_at", _utcnow_iso())
     restored["updated_at"] = _utcnow_iso()
@@ -4385,6 +4389,11 @@ def _replace_shift_synced_entries_in_target_project(
             "entries_per_day": next_entries_per_day,
         }
         merged = _merge_month_payload(current_month, incoming_month, _snapshot_month_payload(current_month))
+        # 同期反映は live entry の差し替えのみ。target の未公開下書き（手動 WIP・自動作成の
+        # 下書き）を失わないよう、既存の下書きを引き継ぐ（_merge_month_payload は draft を
+        # 持たないため、引き継がないと upsert で live にフォールバックして消える）。
+        if "draft_entries_per_day" in current_month:
+            merged["draft_entries_per_day"] = current_month["draft_entries_per_day"]
         entry_changes = _describe_month_changes(current_month, merged)
         if entry_changes:
             snapshots = dict(current_month.get("revision_snapshots") or {})
@@ -4561,6 +4570,9 @@ def _refresh_master_shift_from_sources(
         "entries_per_day": next_entries_per_day,
     }
     merged = _merge_month_payload(current_month, incoming_month, _snapshot_month_payload(current_month))
+    # マスター帳の未公開下書きを同期反映で失わないよう、既存の下書きを引き継ぐ。
+    if "draft_entries_per_day" in current_month:
+        merged["draft_entries_per_day"] = current_month["draft_entries_per_day"]
     changes = _describe_month_changes(current_month, merged)
     if not changes:
         return False
@@ -8886,10 +8898,16 @@ def _publish_draft_month_in_project(
     if not _month_draft_has_changes(current_month, year, month):
         return current_month
 
+    # 公開直前にサーバー権威の同期 entry を取り直してから正式へ昇格する。
+    # 下書き保存後にソース側で変化・削除された同期 entry を、下書きの固着値ではなく
+    # 現在値で反映する（古い/削除済みの同期 entry の復活を防ぐ）。
+    published_entries = _prepared_local_entries_for_month(
+        project, current_month, draft_entries, year=year, month=month
+    )
     published = {
         **current_month,
-        "entries_per_day": draft_entries,
-        "draft_entries_per_day": draft_entries,
+        "entries_per_day": published_entries,
+        "draft_entries_per_day": published_entries,
         "revision": int(current_month.get("revision", 1) or 1) + 1,
         "updated_at": _utcnow_iso(),
     }
