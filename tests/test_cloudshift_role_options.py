@@ -702,3 +702,86 @@ def test_assist_search_scores_substitute_above_training():
     assert any("研修実績" in reason for reason in candidates["E102"]["reasons"])
     train_breakdown = [b for b in candidates["E102"]["breakdown"] if b["label"] == "研修実績"]
     assert train_breakdown and train_breakdown[0]["base_points"] == module.ASSIST_TRAINING_RECORD_POINTS
+
+
+# ---------------------------------------------------------------------------
+# 現場帳の「経験したことがある人」集計（要件2）
+# ---------------------------------------------------------------------------
+
+
+def _scene_assist_payload(client, project_id):
+    resp = client.get(f"{BASE}/api/project/{project_id}/assist")
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    return resp.get_json()["assist"]
+
+
+def test_scene_experienced_people_aggregates_role_options():
+    """現場帳の代務/研修は『経験したことがある人』へ社員ごとに集約される。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    module.current_user = _owner()
+
+    _save_month_entries(module, app, client, project_id, {
+        "1": [{"id": "e1", "value": "!A!田中", "second_option": "SUB",
+               "employee_number": "E101", "comment": ""}],
+        "2": [{"id": "e2", "value": "!A!田中", "second_option": "SUB",
+               "employee_number": "E101", "comment": ""}],
+        "3": [{"id": "e3", "value": "!TRAIN!山田", "employee_number": "E102", "comment": ""}],
+    })
+
+    assist = _scene_assist_payload(client, project_id)
+    people = {p["employee_number"]: p for p in assist["experienced_people"]}
+    assert set(people) == {"E101", "E102"}
+    # 代務（SUB）を 2 日 → 実働 2 回・経験あり扱い
+    assert people["E101"]["record_count"] == 2
+    assert people["E101"]["trained_only"] is False
+    assert people["E101"]["experience_label"] == "経験あり"
+    assert people["E101"]["latest_date"] == "2026-04-02"
+    assert "代務" in people["E101"]["shift_labels"]
+    # 研修（TRAIN）のみ → 研修済み扱い
+    assert people["E102"]["trained_only"] is True
+    assert people["E102"]["experience_label"] == "研修済み"
+
+    # 代務 entry を全部消すと、その人は経験者一覧から外れる（自動解除）
+    _save_month_entries(module, app, client, project_id, {
+        "3": [{"id": "e3", "value": "!TRAIN!山田", "employee_number": "E102", "comment": ""}],
+    })
+    assist = _scene_assist_payload(client, project_id)
+    assert [p["employee_number"] for p in assist["experienced_people"]] == ["E102"]
+
+
+def test_scene_experienced_people_includes_manual_records():
+    """手動登録の実績も『経験したことがある人』に含まれ、名前のみでも集計される。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    module.current_user = _owner()
+
+    with app.app_context():
+        project = module._load_project(project_id)
+        assist = module._ensure_assist(project)
+        manual = module._assist_record_from_payload(
+            assist,
+            {"date": "2026-04-05", "candidate_name": "手動太郎",
+             "employee_number": "", "shift_key": "A", "role_type": "normal",
+             "notes": "手動登録"},
+            actor_name="tester",
+        )
+        assist["records"].append(manual)
+        module._save_project(project)
+
+    assist = _scene_assist_payload(client, project_id)
+    names = {p["candidate_name"]: p for p in assist["experienced_people"]}
+    assert "手動太郎" in names
+    assert names["手動太郎"]["employee_number"] == ""
+    assert names["手動太郎"]["record_count"] == 1
+    assert names["手動太郎"]["trained_only"] is False
+
+
+def test_person_book_payload_has_no_experienced_people_key():
+    """個人帳のアシストには『経験したことがある人』キーは付かない（現場帳専用）。"""
+    module, app = _build()
+    client = app.test_client()
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+    assist = _person_assist_payload(client, person_id)
+    assert "experienced_people" not in assist
+    assert "experienced_sites" in assist

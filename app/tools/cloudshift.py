@@ -5029,6 +5029,78 @@ def _assist_rule_payload(rule: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _scene_experienced_people(assist: dict[str, Any]) -> list[dict[str, Any]]:
+    """現場シフト帳の『経験したことがある人』を集計する（要件2）。
+
+    アシスト実績（records）を社員番号（無ければ氏名）ごとに 1 件へまとめ、その現場での
+    実績数・最終実績日・経験したオプション・登録元を返す。自動作成エンジン（build_workers）
+    が経験者判定に使うのと同じ records を材料にするため、表示と自動作成の経験者像が一致する。
+    """
+    people: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for record in (assist.get("records") or []):
+        if not isinstance(record, dict):
+            continue
+        number = str(record.get("employee_number") or "").strip()
+        name = str(record.get("candidate_name") or "").strip()
+        if not number and not name:
+            continue
+        key = f"num:{number}" if number else f"name:{name.lower()}"
+        person = people.get(key)
+        if person is None:
+            person = {
+                "employee_number": number,
+                "candidate_name": name,
+                "record_count": 0,
+                "latest_date": "",
+                "shift_keys": [],
+                "source_types": set(),
+                "trained_only": True,
+            }
+            people[key] = person
+            order.append(key)
+        if number and not person["employee_number"]:
+            person["employee_number"] = number
+        if name and not person["candidate_name"]:
+            person["candidate_name"] = name
+        # 役割オプション由来の実績は日数を source_occurrences に畳んで持つため、
+        # 実績数は「件数」ではなく実働回数（occurrences）で数える。
+        try:
+            occurrences = int(record.get("source_occurrences") or 1)
+        except (TypeError, ValueError):
+            occurrences = 1
+        person["record_count"] += max(1, occurrences)
+        date_value = str(record.get("date") or "").strip()
+        if date_value > person["latest_date"]:
+            person["latest_date"] = date_value
+        shift_key = str(record.get("shift_key") or "").strip().upper()
+        if shift_key and shift_key not in person["shift_keys"]:
+            person["shift_keys"].append(shift_key)
+        if shift_key != ROLE_OPTION_TRAINING_KEY:
+            person["trained_only"] = False
+        source_type = str(record.get("source_type") or "").strip()
+        if source_type:
+            person["source_types"].add(source_type)
+
+    result: list[dict[str, Any]] = []
+    for key in order:
+        person = people[key]
+        result.append({
+            "employee_number": person["employee_number"],
+            "candidate_name": person["candidate_name"] or person["employee_number"] or "名称未設定",
+            "record_count": person["record_count"],
+            "latest_date": person["latest_date"],
+            "shift_keys": person["shift_keys"],
+            "shift_labels": [_assist_shift_label(item) for item in person["shift_keys"]],
+            "trained_only": bool(person["trained_only"]),
+            "experience_label": "研修済み" if person["trained_only"] else "経験あり",
+            "has_auto_source": ROLE_OPTION_ASSIST_SOURCE in person["source_types"]
+            or PERSON_ASSIST_AUTO_SOURCE in person["source_types"],
+        })
+    result.sort(key=lambda item: (item["latest_date"], item["record_count"], item["candidate_name"]), reverse=True)
+    return result
+
+
 def _assist_bootstrap_payload(project: dict[str, Any], *, can_edit_records: bool, can_edit_rules: bool) -> dict[str, Any]:
     assist = _ensure_assist(project)
     profiles = [_assist_profile_payload(item) for item in assist["profiles"]]
@@ -5036,6 +5108,7 @@ def _assist_bootstrap_payload(project: dict[str, Any], *, can_edit_records: bool
     rules = [_assist_rule_payload(item) for item in assist["rules"]]
     experienced_sites = [_person_assist_site_payload(item) for item in assist["experienced_sites"]]
     training_sites = [_person_assist_site_payload(item) for item in assist["training_sites"]]
+    experienced_people = _scene_experienced_people(assist)
     profiles.sort(key=lambda item: (not item["active"], item["name"], item["employee_number"]))
     records.sort(key=lambda item: (item["date"], item["shift_key"], item["candidate_name"]), reverse=True)
     rules.sort(
@@ -5057,6 +5130,7 @@ def _assist_bootstrap_payload(project: dict[str, Any], *, can_edit_records: bool
             "rules": rules,
             "experienced_sites": experienced_sites,
             "training_sites": training_sites,
+            "experienced_people": experienced_people,
         },
         "permissions": {
             "can_edit_records": bool(can_edit_records),
