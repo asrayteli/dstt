@@ -245,6 +245,68 @@ def test_get_driver_outside_scope_is_forbidden(client):
     assert http.delete(f"/tools/car_inspe/api/drivers/{created['id']}").status_code == 403
 
 
+def test_update_outside_scope_is_forbidden(client):
+    app, http = client
+    add_employee(app, number="2001", office_code="0002", office_name="営業所2")
+    created = http.post("/tools/car_inspe/api/drivers", json={"employee_number": "2001"}).get_json()["driver"]
+
+    off1 = setup_office(app, "0001", "営業所1")
+    setup_office(app, "0002", "営業所2")
+    login_office_user(app, off1)
+
+    assert http.put(f"/tools/car_inspe/api/drivers/{created['id']}", json={"car_maker": "X"}).status_code == 403
+
+
+def test_document_save_outside_scope_is_forbidden(client):
+    app, http = client
+    add_employee(app, number="2001", office_code="0002", office_name="営業所2")
+    created = http.post("/tools/car_inspe/api/drivers", json={"employee_number": "2001"}).get_json()["driver"]
+
+    off1 = setup_office(app, "0001", "営業所1")
+    setup_office(app, "0002", "営業所2")
+    login_office_user(app, off1)
+
+    res = http.post(
+        f"/tools/car_inspe/api/drivers/{created['id']}/documents/inspection",
+        data={"expiry_date": "2030-01-01"},
+        content_type="multipart/form-data",
+    )
+    assert res.status_code == 403
+
+
+def test_document_download_outside_scope_is_forbidden(client):
+    app, http = client
+    add_employee(app, number="2001", office_code="0002", office_name="営業所2")
+    created = http.post("/tools/car_inspe/api/drivers", json={"employee_number": "2001"}).get_json()["driver"]
+    doc = http.post(
+        f"/tools/car_inspe/api/drivers/{created['id']}/documents/license",
+        data={"expiry_date": "2030-01-31", "file": (io.BytesIO(b"%PDF-1.4 x"), "l.pdf")},
+        content_type="multipart/form-data",
+    ).get_json()["driver"]["documents"]["license"]
+
+    off1 = setup_office(app, "0001", "営業所1")
+    setup_office(app, "0002", "営業所2")
+    login_office_user(app, off1)
+
+    assert http.get(f"/tools/car_inspe/api/documents/{doc['id']}/download").status_code == 403
+
+
+def test_bulk_ignores_employees_outside_target_office(client):
+    app, http = client
+    add_employee(app, number="1001", office_code="0001", office_name="営業所1")
+    add_employee(app, number="2001", office_code="0002", office_name="営業所2")
+
+    off1 = setup_office(app, "0001", "営業所1")
+    login_office_user(app, off1)
+
+    # 別営業所(0002)の社員番号を混ぜても、対象営業所(0001)の社員以外は起票されない。
+    res = http.post("/tools/car_inspe/api/bulk", json={"office": "0001", "employee_numbers": ["1001", "2001"]})
+    assert res.status_code == 200
+    assert res.get_json()["created"] == 1
+    nums = {d["employee_number"] for d in http.get("/tools/car_inspe/api/drivers").get_json()["drivers"]}
+    assert nums == {"1001"}
+
+
 def test_no_office_user_sees_empty(client):
     app, http = client
     add_employee(app, number="1001", office_code="0001")
