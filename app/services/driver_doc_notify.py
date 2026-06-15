@@ -95,7 +95,7 @@ def _build_message(profile: DriverVehicleProfile, doc: DriverDocument, days_left
         "",
         "更新手続きのご準備をお願いいたします。",
         "",
-        "※このメールは運転士マイカー管理ツールから自動送信されています。",
+        "※このメールはマイカー管理ツールから自動送信されています。",
     ]
     return subject, "\n".join(lines)
 

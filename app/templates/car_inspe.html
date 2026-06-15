@@ -28,7 +28,7 @@
   .dm-modal-card { width: 100%; max-width: 720px; max-height: calc(100vh - 2rem); display: flex; flex-direction: column; background: #fff; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,.3); }
   .dm-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.1rem; border-bottom: 1px solid #e2e8f0; }
   .dm-modal-body { padding: 1.1rem; overflow-y: auto; }
-  .dm-modal-foot { display: flex; gap: .5rem; justify-content: flex-end; padding: 1rem 1.1rem; border-top: 1px solid #e2e8f0; }
+  .dm-modal-foot { display: flex; gap: .5rem; justify-content: flex-end; padding: 1rem 1.1rem; border-top: 1px solid #e2e8f0; flex-wrap: wrap; }
   .dm-label { display: block; font-size: .76rem; font-weight: 700; color: #475569; margin-bottom: .25rem; }
   .dm-doc-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: .8rem; margin-bottom: .7rem; }
   .dm-doc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .55rem; }
@@ -38,23 +38,34 @@
   .dm-emp-option[disabled] { opacity: .5; cursor: not-allowed; }
   .dm-msg { font-size: .85rem; }
   .dm-toggle { display: inline-flex; align-items: center; gap: .4rem; font-size: .8rem; font-weight: 700; color: #334155; }
+  .dm-cand-row { display: flex; align-items: center; gap: .6rem; border: 1px solid #e2e8f0; border-radius: 8px; padding: .45rem .6rem; margin-bottom: .35rem; font-size: .82rem; }
+  .dm-cand-row.is-registered { background: #f8fafc; color: #94a3b8; }
+  .dm-cand-row label { display: flex; align-items: center; gap: .6rem; cursor: pointer; flex: 1; }
+  .dm-cand-row.is-registered label { cursor: default; }
+  .dm-scope { display: inline-flex; align-items: center; gap: .35rem; font-size: .78rem; font-weight: 700; color: #0c4a6e; background: #e0f2fe; border: 1px solid #bae6fd; border-radius: 999px; padding: .12rem .6rem; }
 </style>
 
 <div class="dm-wrap space-y-5">
   <section class="dstt-hero" style="background: linear-gradient(135deg, #075985 0%, #0f766e 60%, #15803d 100%);">
     <div class="dstt-hero-grid">
       <div class="dstt-hero-copy">
-        <div class="dstt-hero-pill">DRIVER VEHICLE</div>
+        <div class="dstt-hero-pill">MY CAR</div>
         <div>
-          <h1 class="dstt-hero-title">運転士マイカー管理</h1>
-          <p class="dstt-hero-subtitle">運転士（社員）のマイカーの車検証・自賠責・任意保険・運転免許証の期限と書類を管理。期限が近づくと登録メールへ自動通知します。</p>
+          <h1 class="dstt-hero-title">マイカー管理ツール</h1>
+          <p class="dstt-hero-subtitle">運転士（社員）のマイカーの車検証・自賠責・任意保険・運転免許証の期限と書類を、営業所ごとに管理。期限が近づくと登録メールへ自動通知します。</p>
         </div>
         <div class="dstt-hero-actions">
           <button id="dm-add" type="button" class="dstt-hero-btn dstt-hero-btn-light">運転士を追加</button>
+          <button id="dm-bulk" type="button" class="dstt-hero-btn dstt-hero-btn-light">営業所から一括登録</button>
           <button id="dm-refresh" type="button" class="dstt-hero-btn dstt-hero-btn-ghost">更新</button>
         </div>
       </div>
       <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">SCOPE</div>
+          <div id="dm-scope-state" class="dstt-hero-card-value">—</div>
+          <div class="dstt-hero-card-note">参照中の営業所</div>
+        </div>
         <div class="dstt-hero-card">
           <div class="dstt-hero-card-label">MAIL</div>
           <div id="dm-mail-state" class="dstt-hero-card-value">確認中…</div>
@@ -64,11 +75,18 @@
     </div>
   </section>
 
+  <div id="dm-no-office" class="hidden dm-panel p-4 text-sm" style="border-color:#fecaca;background:#fef2f2;color:#991b1b;">
+    アクセス可能な営業所が割り当てられていません。マイカー管理ツールを利用するには、管理者に営業所の割り当てを依頼してください。
+  </div>
+
   <div class="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
     <aside class="space-y-4">
       <div class="dm-panel p-4 space-y-3">
         <div class="text-sm font-bold text-slate-700">検索・絞り込み</div>
         <input id="dm-q" class="dm-input" placeholder="社員番号 / 氏名 / 所属 / ナンバー / メール">
+        <select id="dm-office" class="dm-select">
+          <option value="">営業所（すべて）</option>
+        </select>
         <select id="dm-status" class="dm-select">
           <option value="">すべての状態</option>
           <option value="expired">期限切れあり</option>
@@ -84,6 +102,13 @@
         <div><div class="text-xs text-slate-500">期限切れ</div><div id="dm-s-expired" class="text-xl font-bold text-rose-600">-</div></div>
         <div><div class="text-xs text-slate-500">期限間近</div><div id="dm-s-expiring" class="text-xl font-bold text-amber-600">-</div></div>
         <div><div class="text-xs text-slate-500">書類不足</div><div id="dm-s-incomplete" class="text-xl font-bold text-slate-600">-</div></div>
+      </div>
+
+      <div class="dm-panel p-4 space-y-2">
+        <div class="text-sm font-bold text-slate-700">データ管理</div>
+        <button id="dm-resync" class="dm-btn w-full">社員名簿PLUSと同期</button>
+        <div class="text-xs text-slate-500">登録済み運転士の氏名・所属を名簿の最新に合わせます（異動・改名を反映）。</div>
+        <div id="dm-resync-result" class="text-xs text-slate-500"></div>
       </div>
 
       <div id="dm-admin-box" class="dm-panel p-4 space-y-2 hidden">
@@ -127,6 +152,40 @@
     <div class="dm-modal-body">
       <input id="dm-emp-q" class="dm-input mb-3" placeholder="社員番号 / 氏名 / カナで検索">
       <div id="dm-emp-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 一括起票モーダル -->
+<div id="dm-bulk-modal" class="dm-modal">
+  <div class="dm-modal-card">
+    <div class="dm-modal-head">
+      <div>
+        <div class="font-bold text-slate-900">営業所から一括登録</div>
+        <div class="text-xs text-slate-500">社員名簿PLUSの在籍者から、全員または指定者をまとめて起票します。</div>
+      </div>
+      <button type="button" class="dm-btn" data-close="dm-bulk-modal">閉じる</button>
+    </div>
+    <div class="dm-modal-body space-y-3">
+      <div class="dm-grid-2">
+        <div>
+          <label class="dm-label">対象営業所</label>
+          <select id="dm-bulk-office" class="dm-select"></select>
+        </div>
+        <div>
+          <label class="dm-label">名簿内検索（任意）</label>
+          <input id="dm-bulk-q" class="dm-input" placeholder="社員番号 / 氏名 / カナ">
+        </div>
+      </div>
+      <div class="flex items-center justify-between text-xs text-slate-500">
+        <label class="dm-toggle"><input id="dm-bulk-all-check" type="checkbox"> 未登録の社員をすべて選択</label>
+        <span id="dm-bulk-summary"></span>
+      </div>
+      <div id="dm-bulk-list" style="max-height: 360px; overflow:auto;"></div>
+    </div>
+    <div class="dm-modal-foot">
+      <button type="button" class="dm-btn" data-close="dm-bulk-modal">閉じる</button>
+      <button type="button" id="dm-bulk-add-selected" class="dm-btn dm-btn-primary">選択した社員を登録</button>
     </div>
   </div>
 </div>
@@ -195,9 +254,14 @@
   const STATUS_LABELS = {
     active: '有効', expiring: '期限間近', expired: '期限切れ', incomplete: '書類不足', missing: '未登録',
   };
-  const state = { drivers: [], canAdmin: false, current: null, empTimer: null };
+  const OFFICES = JSON.parse('{{ offices|tojson }}' || '[]');
+  const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+  const CAN_BULK = {{ 'true' if can_bulk else 'false' }};
+  const NO_OFFICE = {{ 'true' if no_office else 'false' }};
+  const state = { drivers: [], canAdmin: false, current: null, empTimer: null, bulkTimer: null, bulkCandidates: [] };
 
   const esc = (v) => { const d = document.createElement('div'); d.textContent = v == null ? '' : String(v); return d.innerHTML; };
+  const officeLabel = (o) => `${o.name}（${o.code}）`;
 
   function statusBadge(status) {
     const cls = { active: 'dm-active', expiring: 'dm-expiring', expired: 'dm-expired', incomplete: 'dm-incomplete', missing: 'dm-missing' }[status] || 'dm-missing';
@@ -238,10 +302,32 @@
   function openModal(id) { $(id).classList.add('open'); }
   function closeModal(id) { $(id).classList.remove('open'); }
 
+  function setupScope() {
+    // 営業所フィルタとヒーローの「参照中の営業所」表示
+    const sel = $('dm-office');
+    sel.innerHTML = `<option value="">営業所（すべて）</option>` +
+      OFFICES.map((o) => `<option value="${esc(o.code)}">${esc(officeLabel(o))}</option>`).join('');
+    const scope = $('dm-scope-state');
+    if (IS_ADMIN) scope.textContent = '全営業所';
+    else if (OFFICES.length === 0) scope.textContent = '割当なし';
+    else if (OFFICES.length === 1) scope.textContent = OFFICES[0].name;
+    else scope.textContent = `${OFFICES.length}営業所`;
+
+    if (NO_OFFICE) {
+      $('dm-no-office').classList.remove('hidden');
+      $('dm-add').disabled = true;
+      $('dm-bulk').disabled = true;
+    }
+    if (!CAN_BULK) $('dm-bulk').style.display = 'none';
+  }
+
   function renderTable() {
     const body = $('dm-body');
     if (!state.drivers.length) {
-      body.innerHTML = '<tr><td colspan="11" class="text-center text-slate-500 py-6">運転士が登録されていません。「運転士を追加」から登録してください。</td></tr>';
+      const msg = NO_OFFICE
+        ? 'アクセス可能な営業所がありません。管理者にお問い合わせください。'
+        : '運転士が登録されていません。「運転士を追加」または「営業所から一括登録」から登録してください。';
+      body.innerHTML = `<tr><td colspan="11" class="text-center text-slate-500 py-6">${esc(msg)}</td></tr>`;
       return;
     }
     body.innerHTML = state.drivers.map((d, idx) => `
@@ -264,6 +350,7 @@
   async function load() {
     const params = new URLSearchParams();
     if ($('dm-q').value) params.set('q', $('dm-q').value);
+    if ($('dm-office').value) params.set('office', $('dm-office').value);
     if ($('dm-status').value) params.set('status', $('dm-status').value);
     const data = await api(`/tools/car_inspe/api/drivers?${params.toString()}`);
     state.drivers = data.drivers || [];
@@ -314,6 +401,67 @@
     }
   }
 
+  // ---- 一括起票 ----
+  function openBulk() {
+    const sel = $('dm-bulk-office');
+    sel.innerHTML = OFFICES.map((o) => `<option value="${esc(o.code)}">${esc(officeLabel(o))}</option>`).join('');
+    $('dm-bulk-q').value = '';
+    $('dm-bulk-all-check').checked = false;
+    $('dm-bulk-list').innerHTML = '';
+    $('dm-bulk-summary').textContent = '';
+    openModal('dm-bulk-modal');
+    if (OFFICES.length) loadBulkCandidates().catch((e) => { $('dm-bulk-list').innerHTML = `<div class="text-rose-600 text-sm">${esc(e.message)}</div>`; });
+  }
+  function scheduleBulkSearch() {
+    window.clearTimeout(state.bulkTimer);
+    state.bulkTimer = window.setTimeout(() => loadBulkCandidates().catch((e) => { $('dm-bulk-list').innerHTML = `<div class="text-rose-600 text-sm">${esc(e.message)}</div>`; }), 220);
+  }
+  async function loadBulkCandidates() {
+    const office = $('dm-bulk-office').value;
+    if (!office) { $('dm-bulk-list').innerHTML = '<div class="text-sm text-slate-500">営業所を選択してください。</div>'; return; }
+    const q = $('dm-bulk-q').value.trim();
+    const data = await api(`/tools/car_inspe/api/bulk/candidates?office=${encodeURIComponent(office)}&q=${encodeURIComponent(q)}`);
+    state.bulkCandidates = data.employees || [];
+    renderBulkList(data);
+  }
+  function renderBulkList(data) {
+    const list = state.bulkCandidates;
+    $('dm-bulk-summary').textContent = `在籍 ${data.count ?? list.length}名 / 未登録 ${data.unregistered ?? 0}名`;
+    if (!list.length) { $('dm-bulk-list').innerHTML = '<div class="text-sm text-slate-500">対象の社員が見つかりません。</div>'; return; }
+    $('dm-bulk-list').innerHTML = list.map((e, i) => `
+      <div class="dm-cand-row ${e.has_profile ? 'is-registered' : ''}">
+        <label>
+          <input type="checkbox" data-cand="${i}" ${e.has_profile ? 'disabled' : ''}>
+          <span><strong>${esc(e.employee_number)}</strong> ${esc(e.employee_name)}
+          ${e.email ? '' : '<span class="text-amber-600 text-xs">（メール未登録）</span>'}</span>
+        </label>
+        ${e.has_profile ? '<span class="text-xs">登録済み</span>' : ''}
+      </div>`).join('');
+    $('dm-bulk-all-check').checked = false;
+  }
+  function selectedBulkNumbers() {
+    return Array.from($('dm-bulk-list').querySelectorAll('[data-cand]:checked'))
+      .map((cb) => state.bulkCandidates[Number(cb.dataset.cand)]?.employee_number)
+      .filter(Boolean);
+  }
+  async function bulkRegister() {
+    const office = $('dm-bulk-office').value;
+    if (!office) { showMessage('営業所を選択してください。', 'error'); return; }
+    const numbers = selectedBulkNumbers();
+    if (!numbers.length) { $('dm-bulk-summary').textContent = '登録する社員を選択してください。'; return; }
+    try {
+      const data = await api('/tools/car_inspe/api/bulk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ office, employee_numbers: numbers }),
+      });
+      closeModal('dm-bulk-modal');
+      showMessage(`一括登録: ${data.created}名を登録しました${data.skipped ? `（${data.skipped}名は登録済みのためスキップ）` : ''}。`, 'success');
+      await load();
+    } catch (e) {
+      showMessage(e.message, 'error');
+    }
+  }
+
   // ---- 運転士編集 ----
   function openEdit(driver) {
     state.current = driver;
@@ -345,9 +493,10 @@
           </div>
           <div class="dm-grid-2">
             <div><label class="dm-label">有効期限</label><input class="dm-input" data-field="expiry_date" placeholder="2027-03-31" value="${esc(doc.expiry_display || '')}"></div>
+            <div><label class="dm-label">発行/交付日（任意）</label><input class="dm-input" data-field="issued_date" placeholder="2025-04-01" value="${esc(doc.issued_display || '')}"></div>
             <div><label class="dm-label">番号（証券/免許番号）</label><input class="dm-input" data-field="document_number" value="${esc(doc.document_number || '')}"></div>
             <div><label class="dm-label">発行元 / 保険会社</label><input class="dm-input" data-field="issuer" value="${esc(doc.issuer || '')}"></div>
-            <div><label class="dm-label">書類ファイル（PDF/画像）</label><input class="dm-input" type="file" data-field="file" accept=".pdf,.png,.jpg,.jpeg"></div>
+            <div class="col-span-2"><label class="dm-label">書類ファイル（PDF/画像）</label><input class="dm-input" type="file" data-field="file" accept=".pdf,.png,.jpg,.jpeg"></div>
             <div class="col-span-2"><label class="dm-label">メモ</label><input class="dm-input" data-field="notes" value="${esc(doc.notes || '')}"></div>
           </div>
           <div class="mt-2 text-right"><button type="button" class="dm-btn dm-btn-primary" data-doc-save="${type}">この書類を保存</button></div>
@@ -357,16 +506,12 @@
     box.querySelectorAll('[data-doc-del]').forEach((b) => b.addEventListener('click', () => deleteDoc(b.dataset.docDel)));
   }
 
-  function refreshCurrent() {
-    const updated = state.drivers.find((d) => d.id === state.current?.id);
-    if (updated) { state.current = updated; renderDocEditors(updated); }
-  }
-
   async function saveDoc(type) {
     const card = $('dm-docs').querySelector(`[data-doc="${type}"]`);
     if (!card || !state.current) return;
     const fd = new FormData();
     fd.append('expiry_date', card.querySelector('[data-field="expiry_date"]').value);
+    fd.append('issued_date', card.querySelector('[data-field="issued_date"]').value);
     fd.append('document_number', card.querySelector('[data-field="document_number"]').value);
     fd.append('issuer', card.querySelector('[data-field="issuer"]').value);
     fd.append('notes', card.querySelector('[data-field="notes"]').value);
@@ -430,6 +575,18 @@
     }
   }
 
+  async function resync() {
+    const result = $('dm-resync-result');
+    result.textContent = '同期中…'; result.style.color = '#475569';
+    try {
+      const data = await api('/tools/car_inspe/api/resync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      result.textContent = `同期完了：${data.updated}件を更新しました。`; result.style.color = '#15803d';
+      await load();
+    } catch (e) {
+      result.textContent = e.message; result.style.color = '#b91c1c';
+    }
+  }
+
   async function testMail() {
     const to = $('dm-test-to').value.trim();
     const result = $('dm-test-result');
@@ -446,18 +603,28 @@
   }
 
   // ---- イベント ----
-  $('dm-add').addEventListener('click', () => { $('dm-emp-q').value = ''; $('dm-emp-list').innerHTML = ''; openModal('dm-emp-modal'); searchEmployees().catch(() => {}); });
+  $('dm-add').addEventListener('click', () => { if ($('dm-add').disabled) return; $('dm-emp-q').value = ''; $('dm-emp-list').innerHTML = ''; openModal('dm-emp-modal'); searchEmployees().catch(() => {}); });
+  $('dm-bulk').addEventListener('click', () => { if ($('dm-bulk').disabled) return; openBulk(); });
   $('dm-refresh').addEventListener('click', () => load().catch((e) => showMessage(e.message, 'error')));
   $('dm-search').addEventListener('click', () => load().catch((e) => showMessage(e.message, 'error')));
   $('dm-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') load().catch((err) => showMessage(err.message, 'error')); });
+  $('dm-office').addEventListener('change', () => load().catch((e) => showMessage(e.message, 'error')));
   $('dm-status').addEventListener('change', () => load().catch((e) => showMessage(e.message, 'error')));
   $('dm-emp-q').addEventListener('input', scheduleEmpSearch);
+  $('dm-bulk-office').addEventListener('change', () => loadBulkCandidates().catch((e) => { $('dm-bulk-list').innerHTML = `<div class="text-rose-600 text-sm">${esc(e.message)}</div>`; }));
+  $('dm-bulk-q').addEventListener('input', scheduleBulkSearch);
+  $('dm-bulk-all-check').addEventListener('change', (e) => {
+    $('dm-bulk-list').querySelectorAll('[data-cand]:not([disabled])').forEach((cb) => { cb.checked = e.target.checked; });
+  });
+  $('dm-bulk-add-selected').addEventListener('click', bulkRegister);
   $('dm-save-driver').addEventListener('click', saveDriver);
   $('dm-delete-driver').addEventListener('click', deleteDriver);
+  $('dm-resync').addEventListener('click', resync);
   $('dm-test-send').addEventListener('click', testMail);
   document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => closeModal(b.dataset.close)));
   document.querySelectorAll('.dm-modal').forEach((m) => m.addEventListener('click', (e) => { if (e.target === m) closeModal(m.id); }));
 
+  setupScope();
   load().catch((e) => showMessage(e.message || '読み込みに失敗しました。', 'error'));
 })();
 </script>
