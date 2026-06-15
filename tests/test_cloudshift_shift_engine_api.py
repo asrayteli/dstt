@@ -252,3 +252,70 @@ def test_plan_returns_day_summary_and_candidate_panels():
     panels = data["result"]["candidate_panels"]
     assert panels and panels[0]["candidates"]
     assert any(c["selected"] for p in panels for c in p["candidates"])
+
+
+# ---------------------------------------------------------------------------
+# 自動作成の下書きと同期 entry の二重化防止（リグレッション）
+# ---------------------------------------------------------------------------
+
+
+def _synced_entry(entry_id, number, value="!A!佐藤", day="1"):
+    return {
+        "id": entry_id, "value": value, "employee_number": number, "comment": "",
+        "sync_source_type": "person_shift", "sync_source_project_id": "person-1",
+        "sync_source_month_key": "2026-04", "sync_source_day": day, "sync_source_entry_id": "pe1",
+    }
+
+
+def test_strip_engine_draft_synced_collisions_dedups_by_number_and_id():
+    """下書きの衝突除去: 同期 entry と同一社員 or 同一 id の下書き行を落とす。"""
+    module, _app = _build()
+    current = {"1": [_synced_entry("sync_abcd", "E1")]}
+    draft = {"1": [
+        {"id": "engine-r-s1", "value": "!A!佐藤", "employee_number": "E1", "sync_source_type": ""},
+        {"id": "sync_abcd", "value": "!A!佐藤", "employee_number": "E1", "sync_source_type": ""},
+        {"id": "engine-r-s2", "value": "!A!田中", "employee_number": "E2", "sync_source_type": ""},
+    ]}
+    stripped = module._strip_engine_draft_synced_collisions(draft, current)
+    numbers = [e["employee_number"] for e in stripped["1"]]
+    assert numbers == ["E2"]  # E1（同期社員）と sync_abcd（同期id）は落ちる
+    # 同期 entry の無い日・現場では下書きは不変
+    assert module._strip_engine_draft_synced_collisions({"2": draft["1"]}, {}) == {"2": draft["1"]}
+
+
+def test_apply_draft_does_not_duplicate_synced_entries():
+    """同期 entry のある日に自動作成しても、保存後に同一社員が二重化しない。"""
+    module, app = _build()
+    client, project_id = _create_scene_project_with_candidate(module, app)
+    module.current_user = _owner()
+
+    # 個人帳から同期された想定の entry を 1 日に置く（サーバー権威・同期）
+    with app.app_context():
+        project = module._load_project(project_id)
+        project["months"]["2026-04"]["entries_per_day"]["1"] = [_synced_entry("sync_e001_d1", "E001")]
+        module._save_project(project)
+
+    ctx = client.get(f"{BASE}/api/project/{project_id}/shift-engine/context?year=2026&month=4").get_json()
+    plan = client.post(
+        f"{BASE}/api/project/{project_id}/shift-engine/plan",
+        json={"year": 2026, "month": 4, "preferences": {"eligibility_baseline": "any"}},
+    ).get_json()
+    apply_resp = client.post(
+        f"{BASE}/api/project/{project_id}/shift-engine/apply-draft",
+        json={"year": 2026, "month": 4, "base_revision": ctx["base_revision"],
+              "request_hash": plan["request_hash"], "preferences": {"eligibility_baseline": "any"}},
+    )
+    assert apply_resp.status_code == 200, apply_resp.get_data(as_text=True)
+
+    with app.app_context():
+        project = module._load_project(project_id)
+        draft = project["months"]["2026-04"].get("draft_entries_per_day") or {}
+    # どの日でも同一社員番号が 2 回以上出ない
+    for day_key, entries in draft.items():
+        numbers = [e.get("employee_number") for e in entries if e.get("employee_number")]
+        assert len(numbers) == len(set(numbers)), f"day {day_key} に社員重複: {numbers}"
+    # 同期 entry のあった 1 日は、サーバー権威の同期 entry が保持され E001 は 1 件のみ
+    day1 = draft.get("1") or []
+    e001 = [e for e in day1 if e.get("employee_number") == "E001"]
+    assert len(e001) == 1
+    assert e001[0].get("sync_source_type") == "person_shift"

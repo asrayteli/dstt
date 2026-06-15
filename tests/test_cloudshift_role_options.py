@@ -785,3 +785,29 @@ def test_person_book_payload_has_no_experienced_people_key():
     assist = _person_assist_payload(client, person_id)
     assert "experienced_people" not in assist
     assert "experienced_sites" in assist
+
+
+def test_scene_experienced_people_merges_name_only_into_numbered():
+    """同じ人の『番号付き実績』と『同名・番号なし実績』は 1 行に集約される（二重表示防止）。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    module.current_user = _owner()
+
+    with app.app_context():
+        project = module._load_project(project_id)
+        assist = module._ensure_assist(project)
+        for emp, when in (("E101", "2026-04-10"), ("", "2026-04-12")):
+            rec = module._assist_record_from_payload(
+                assist,
+                {"date": when, "candidate_name": "田中", "employee_number": emp,
+                 "shift_key": "A", "role_type": "normal", "notes": ""},
+                actor_name="tester",
+            )
+            assist["records"].append(rec)
+        module._save_project(project)
+
+    assist = _scene_assist_payload(client, project_id)
+    tanaka = [p for p in assist["experienced_people"] if p["candidate_name"] == "田中"]
+    assert len(tanaka) == 1  # 番号なし実績が一意な本人へ寄せられ、二重表示にならない
+    assert tanaka[0]["employee_number"] == "E101"
+    assert tanaka[0]["record_count"] == 2

@@ -1341,6 +1341,46 @@ def _prepared_local_entries_for_month(
     return combined
 
 
+def _strip_engine_draft_synced_collisions(
+    draft_entries: dict[str, Any],
+    current_entries_per_day: Any,
+) -> dict[str, list[dict[str, Any]]]:
+    """自動作成の下書きから、サーバー同期 entry と衝突する行を取り除く。
+
+    下書き（build_draft_entries）は月全体を local entry として表現するが、保存時の
+    merge（_prepared_local_entries_for_month）はサーバー権威の同期 entry を常に再付与する。
+    そのため同期済み社員や同期 entry id をそのまま下書きに残すと、保存後にその社員/ID が
+    二重化する（同一人物の二重配置・同一 id の二重化）。同期 entry はその日のサーバー側を
+    正とし、下書き側の衝突分（同一社員番号 or 同一 entry id）を落として重複を防ぐ。
+    同期 entry の無い日・現場では下書きは変化しない（通常運用への影響なし）。
+    """
+    current = current_entries_per_day if isinstance(current_entries_per_day, dict) else {}
+    result: dict[str, list[dict[str, Any]]] = {}
+    for day_key, entries in (draft_entries or {}).items():
+        synced_numbers: set[str] = set()
+        synced_ids: set[str] = set()
+        for entry in (current.get(day_key) or []):
+            if not isinstance(entry, dict) or not _entry_is_shift_synced(entry):
+                continue
+            number = str(entry.get("employee_number") or "").strip()
+            if number:
+                synced_numbers.add(number)
+            entry_id = str(entry.get("id") or "").strip()
+            if entry_id:
+                synced_ids.add(entry_id)
+        kept: list[dict[str, Any]] = []
+        for entry in (entries or []):
+            if not isinstance(entry, dict):
+                continue
+            number = str(entry.get("employee_number") or "").strip()
+            entry_id = str(entry.get("id") or "").strip()
+            if (number and number in synced_numbers) or (entry_id and entry_id in synced_ids):
+                continue
+            kept.append(entry)
+        result[str(day_key)] = kept
+    return result
+
+
 def _entry_resolved_flag(entry: dict[str, Any] | None) -> bool:
     if not isinstance(entry, dict):
         return False
@@ -5034,18 +5074,34 @@ def _scene_experienced_people(assist: dict[str, Any]) -> list[dict[str, Any]]:
 
     アシスト実績（records）を社員番号（無ければ氏名）ごとに 1 件へまとめ、その現場での
     実績数・最終実績日・経験したオプション・登録元を返す。自動作成エンジン（build_workers）
-    が経験者判定に使うのと同じ records を材料にするため、表示と自動作成の経験者像が一致する。
+    と同じ records を材料にするため、ここに出る『経験者』は自動作成の経験者判定と同じ顔ぶれ
+    になる（実績数は実働回数の目安で、エンジン内部スコアの件数とは別物）。
     """
-    people: dict[str, dict[str, Any]] = {}
-    order: list[str] = []
-    for record in (assist.get("records") or []):
-        if not isinstance(record, dict):
-            continue
+    records = [item for item in (assist.get("records") or []) if isinstance(item, dict)]
+    # 番号なし実績を本人へ寄せるため、氏名→社員番号の対応を作る（一意に定まる場合のみ）。
+    # これで「同じ人の一部の実績だけ番号付き」でも 1 行に集約でき、二重表示を防ぐ。
+    name_numbers: dict[str, set[str]] = {}
+    for record in records:
         number = str(record.get("employee_number") or "").strip()
         name = str(record.get("candidate_name") or "").strip()
+        if number and name:
+            name_numbers.setdefault(name, set()).add(number)
+    name_to_number = {
+        name: next(iter(numbers))
+        for name, numbers in name_numbers.items()
+        if len(numbers) == 1
+    }
+
+    people: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for record in records:
+        number = str(record.get("employee_number") or "").strip()
+        name = str(record.get("candidate_name") or "").strip()
+        if not number and name:
+            number = name_to_number.get(name, "")
         if not number and not name:
             continue
-        key = f"num:{number}" if number else f"name:{name.lower()}"
+        key = f"num:{number}" if number else f"name:{name}"
         person = people.get(key)
         if person is None:
             person = {
@@ -10389,6 +10445,12 @@ def _shift_engine_apply_draft(project: dict[str, Any], payload: dict[str, Any], 
 
     # 下書きへ変換して保存
     draft_payload = cs_apply.build_draft_payload(request_obj, result)
+    # 同期 entry はサーバー側を正とし、下書き側の衝突分を落として二重化を防ぐ
+    # （保存時の merge が同期 entry を再付与するため、下書きへ残すと社員/ID が二重になる）。
+    draft_payload["entries_per_day"] = _strip_engine_draft_synced_collisions(
+        draft_payload.get("entries_per_day") or {},
+        month_data.get("entries_per_day") or {},
+    )
     saved_month = _save_draft_month_in_project(
         project, year, month, draft_payload, _user_label(), access_role, _user_id()
     )
