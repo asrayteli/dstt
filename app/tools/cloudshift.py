@@ -2785,7 +2785,9 @@ def _ensure_substitute_projects_for_current_user() -> None:
 
 
 def _find_project_by_token(token: str, token_type: str) -> dict[str, Any]:
-    key = {"view": "view_token", "edit": "edit_token", "pwa": "pwa_token"}.get(token_type, "edit_token")
+    key = {"view": "view_token", "edit": "edit_token", "pwa": "pwa_token"}.get(token_type)
+    if key is None:
+        abort(404)
     token = str(token or "")
     if not token:
         abort(404)
