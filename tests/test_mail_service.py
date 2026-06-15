@@ -125,6 +125,15 @@ def test_queue_mail_skips_empty_recipient(app):
         assert MailMessage.query.count() == 0
 
 
+def test_build_email_sets_date_and_message_id(app):
+    """Date / Message-ID を付与し、Message-ID のドメインを From に揃える。"""
+    with app.app_context():
+        msg = mail_service.queue_mail("to@example.com", "件名", "本文")
+        email = mail_service._build_email(msg, {"from_address": "info@daishinto.co.jp", "from_name": "大新東"})
+        assert email["Date"]
+        assert email["Message-ID"] and email["Message-ID"].endswith("@daishinto.co.jp>")
+
+
 def test_send_now_while_unconfigured_holds_as_queued(app, monkeypatch):
     """即時送信(send_now)でも SMTP 未設定なら skipped で失わず queued 保留にする。"""
     with app.app_context():
