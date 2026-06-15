@@ -319,3 +319,40 @@ def test_apply_draft_does_not_duplicate_synced_entries():
     e001 = [e for e in day1 if e.get("employee_number") == "E001"]
     assert len(e001) == 1
     assert e001[0].get("sync_source_type") == "person_shift"
+
+
+def test_engine_preview_draft_save_does_not_duplicate_synced():
+    """実クライアント経路（plan の draft_preview → 通常の下書き保存）でも同期 entry が二重化しない。"""
+    module, app = _build()
+    client, project_id = _create_scene_project_with_candidate(module, app)
+    module.current_user = _owner()
+
+    with app.app_context():
+        project = module._load_project(project_id)
+        project["months"]["2026-04"]["entries_per_day"]["1"] = [_synced_entry("sync_e001_d1", "E001")]
+        module._save_project(project)
+
+    plan = client.post(
+        f"{BASE}/api/project/{project_id}/shift-engine/plan",
+        json={"year": 2026, "month": 4, "preferences": {"eligibility_baseline": "any"}},
+    ).get_json()
+    draft_preview = plan.get("draft_preview") or {}
+    # 同期 entry と衝突する engine 行は draft_preview から除かれている
+    assert all(e.get("employee_number") != "E001" for e in (draft_preview.get("1") or []))
+
+    # プレビュー編集 → 通常の下書き保存（PUT /draft）
+    put = client.put(
+        f"{BASE}/api/project/{project_id}/month/2026/4/draft",
+        json={"entries_per_day": draft_preview},
+    )
+    assert put.status_code == 200, put.get_data(as_text=True)
+
+    with app.app_context():
+        project = module._load_project(project_id)
+        draft = project["months"]["2026-04"].get("draft_entries_per_day") or {}
+    for day_key, entries in draft.items():
+        numbers = [e.get("employee_number") for e in entries if e.get("employee_number")]
+        assert len(numbers) == len(set(numbers)), f"day {day_key} に社員重複: {numbers}"
+    day1 = draft.get("1") or []
+    e001 = [e for e in day1 if e.get("employee_number") == "E001"]
+    assert len(e001) == 1 and e001[0].get("sync_source_type") == "person_shift"

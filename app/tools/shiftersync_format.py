@@ -343,13 +343,15 @@ def serialize_entry_rows(
     substitute_rows: list[list[Any]] = []
     for day in range(1, monthrange(year, month)[1] + 1):
         key = str(day)
-        day_entries = [normalize_entry(item) for item in entries_per_day.get(key, [])]
-        visible_entries = [entry["value"] for entry in day_entries if entry]
-        if visible_entries:
-            rows.append([day, *visible_entries])
+        # 空 value の entry は value 行・メタデータ行の双方から同じ基準で除外し、
+        # 列位置とメタデータ index（#second_option 等）を常に一致させる（添字ズレ防止）。
+        day_entries = [
+            entry for entry in (normalize_entry(item) for item in entries_per_day.get(key, []))
+            if entry
+        ]
+        if day_entries:
+            rows.append([day, *[entry["value"] for entry in day_entries]])
         for index, entry in enumerate(day_entries):
-            if not entry:
-                continue
             if entry.get("comment"):
                 comment_rows.append([COMMENT_ROW_PREFIX, day, index, entry["comment"]])
             if entry.get("second_option"):

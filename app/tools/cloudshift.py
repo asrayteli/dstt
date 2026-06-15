@@ -4769,205 +4769,6 @@ def _person_experience_source_item(project: dict[str, Any], experience_id: str) 
     )
 
 
-def _person_experience_sync_note(actor_name: str, notes: str) -> str:
-    base = f"{str(actor_name or '').strip() or 'user'} からの自動実績登録"
-    extra = str(notes or "").strip()
-    return f"{base}\n{extra}" if extra else base
-
-
-def _person_experience_sync_source(person_project: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "type": "person_experience",
-        "person_project_id": str(person_project.get("id") or ""),
-        "experience_id": str(item.get("id") or ""),
-        "site_name": str(item.get("site_name") or ""),
-    }
-
-
-def _is_person_experience_synced_record(
-    record: dict[str, Any], person_project_id: str, experience_id: str
-) -> bool:
-    source = record.get("sync_source")
-    if not isinstance(source, dict):
-        return False
-    return (
-        str(source.get("type") or "") == "person_experience"
-        and str(source.get("person_project_id") or "") == str(person_project_id or "")
-        and str(source.get("experience_id") or "") == str(experience_id or "")
-    )
-
-
-def _remove_person_experience_synced_records(
-    scene_project: dict[str, Any],
-    person_project_id: str,
-    experience_id: str,
-    *,
-    actor_name: str,
-) -> bool:
-    assist = _ensure_assist(scene_project)
-    existing = [
-        item
-        for item in (assist.get("records") or [])
-        if _is_person_experience_synced_record(item, person_project_id, experience_id)
-    ]
-    if not existing:
-        return False
-    assist["records"] = [
-        item
-        for item in (assist.get("records") or [])
-        if not _is_person_experience_synced_record(item, person_project_id, experience_id)
-    ]
-    _save_project(scene_project)
-    _append_history(
-        scene_project["id"],
-        {
-            "timestamp": _utcnow_iso(),
-            "editor_name": actor_name,
-            "editor_type": "system",
-            "action": "assist_record_deleted",
-            "month_key": None,
-            "changes": [
-                f"person 経験済現場との自動連携を解除: {_assist_record_history_label(item)}"
-                for item in existing
-            ][:20],
-        },
-    )
-    return True
-
-
-def _upsert_person_experience_synced_record(
-    scene_project: dict[str, Any],
-    person_project: dict[str, Any],
-    experience: dict[str, Any],
-    *,
-    actor_name: str,
-) -> bool:
-    assist = _ensure_assist(scene_project)
-    existing = next(
-        (
-            item
-            for item in (assist.get("records") or [])
-            if _is_person_experience_synced_record(
-                item,
-                str(person_project.get("id") or ""),
-                str(experience.get("id") or ""),
-            )
-        ),
-        None,
-    )
-    record = _assist_record_from_payload(
-        assist,
-        {
-            "date": str(experience.get("effective_from") or experience.get("date") or ""),
-            "candidate_name": person_project.get("title"),
-            "employee_number": person_project.get("employee_number"),
-            "shift_key": experience.get("shift_key"),
-            "role_type": PERSON_ASSIST_AUTO_ROLE_TYPE,
-            "notes": _person_experience_sync_note(actor_name, str(experience.get("notes") or "")),
-        },
-        existing=existing,
-        actor_name=actor_name,
-    )
-    record["sync_source"] = _person_experience_sync_source(person_project, experience)
-    changed = False
-    if existing:
-        index = assist["records"].index(existing)
-        if assist["records"][index] != record:
-            assist["records"][index] = record
-            changed = True
-    else:
-        assist["records"].append(record)
-        changed = True
-    if not changed:
-        return False
-    _save_project(scene_project)
-    _append_history(
-        scene_project["id"],
-        {
-            "timestamp": _utcnow_iso(),
-            "editor_name": actor_name,
-            "editor_type": "system",
-            "action": "assist_record_saved",
-            "month_key": None,
-            "changes": [f"person 経験済現場から自動実績登録: {_assist_record_history_label(record)}"],
-        },
-    )
-    return True
-
-
-def _resync_person_experience_targets(person_project_id: str, experience_id: str, actor_name: str) -> None:
-    person_project = _load_project(person_project_id)
-    experience = (
-        _person_experience_source_item(person_project, experience_id)
-        if isinstance(person_project, dict)
-        else None
-    )
-    # 第二オプション由来の自動経験は scene へ連携しない（二重加点防止）
-    if experience and str(experience.get("source_type") or "") == ROLE_OPTION_ASSIST_SOURCE:
-        experience = None
-    experience_site_name = str(experience.get("site_name") or "").strip() if experience else ""
-    for scene_project in _iter_stored_projects():
-        if not scene_project or scene_project.get("mode") != "scene":
-            continue
-        scene_project_id = str(scene_project.get("id") or "")
-        with _project_lock(scene_project_id):
-            scene_project = _load_project(scene_project_id)
-            if scene_project.get("mode") != "scene":
-                continue
-            title_matches = (
-                bool(experience)
-                and str(scene_project.get("title") or "").strip() == experience_site_name
-            )
-            if title_matches:
-                _upsert_person_experience_synced_record(
-                    scene_project,
-                    person_project,
-                    experience,
-                    actor_name=actor_name,
-                )
-            else:
-                _remove_person_experience_synced_records(
-                    scene_project,
-                    person_project_id,
-                    experience_id,
-                    actor_name=actor_name,
-                )
-
-
-def _sync_scene_project_from_person_experiences(scene_project_id: str, actor_name: str) -> None:
-    with _project_lock(scene_project_id):
-        scene_project = _load_project(scene_project_id)
-        if scene_project.get("mode") != "scene":
-            return
-        target_title = str(scene_project.get("title") or "").strip()
-        for person_project in _iter_stored_projects():
-            if not person_project or person_project.get("mode") != "person":
-                continue
-            assist = _ensure_person_assist(person_project)
-            for experience in assist.get("experienced_sites") or []:
-                if str(experience.get("site_name") or "").strip() != target_title:
-                    continue
-                _upsert_person_experience_synced_record(
-                    scene_project,
-                    person_project,
-                    experience,
-                    actor_name=actor_name,
-                )
-
-
-def _resync_person_project_experiences(person_project_id: str, actor_name: str) -> None:
-    person_project = _load_json(_project_path(person_project_id))
-    if not person_project or person_project.get("mode") != "person":
-        return
-    assist = _ensure_person_assist(person_project)
-    for experience in assist.get("experienced_sites") or []:
-        _resync_person_experience_targets(
-            str(person_project.get("id") or ""),
-            str(experience.get("id") or ""),
-            actor_name,
-        )
-
-
 def _assist_profile_payload(profile: dict[str, Any]) -> dict[str, Any]:
     preferred_weekdays = _assist_weekday_values(profile.get("preferred_weekdays"), "希望曜日")
     blocked_weekdays = _assist_weekday_values(profile.get("blocked_weekdays"), "NG曜日")
@@ -10360,6 +10161,12 @@ def _shift_engine_plan(project: dict[str, Any], payload: dict[str, Any]) -> dict
     year, month, request_obj, settings, warnings, result = _shift_engine_build_and_plan(project, payload)
 
     draft_preview = cs_apply.build_draft_entries(request_obj, result)
+    # 同期 entry はサーバー権威。プレビュー（→下書き保存）で二重化しないよう、
+    # 下書きから同期 entry と衝突する行（同一社員番号 or 同一 id）を落とす。
+    _plan_month = (project.get("months") or {}).get(_month_key(year, month)) or {}
+    draft_preview = _strip_engine_draft_synced_collisions(
+        draft_preview, _plan_month.get("entries_per_day") or {}
+    )
     perf_warnings: list[dict[str, str]] = []
     if len(request_obj.workers) > 300 or sum(s.required_count for s in request_obj.required_slots) > 500:
         perf_warnings.append({
@@ -10421,9 +10228,10 @@ def _shift_engine_apply_draft(project: dict[str, Any], payload: dict[str, Any], 
                              f"revision mismatch (base={base_revision}, current={current_revision})")
         raise CloudShiftError("対象月が他の操作で更新されています。再計算してください", 409)
 
-    # request_hash 不一致（入力・設定が変わった）
+    # request_hash 不一致（入力・設定が変わった）。設計書どおり省略も拒否し、
+    # plan で得た hash を必須にして古い plan の反映を防ぐ。
     client_hash = str(payload.get("request_hash") or "")
-    if client_hash and client_hash != result.request_hash:
+    if not client_hash or client_hash != result.request_hash:
         _shift_engine_reject(project["id"], month_key, "apply-draft", "request_hash mismatch")
         raise CloudShiftError("設定または他現場の状況が変化しています。再計算してください", 409)
 
