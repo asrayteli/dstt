@@ -63,6 +63,7 @@
   .bp-audit-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
   .bp-audit-warning { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
   .bp-audit-ok { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+  .bp-audit-note { font-size: 0.72rem; color: #94a3b8; line-height: 1.5; margin: 2px 2px 0; }
   @media (max-width: 640px) { .bp-card-grid { grid-template-columns: 1fr; } .bp-expense-row { grid-template-columns: 1fr; } .bp-field-row, .bp-field-row3 { grid-template-columns: 1fr; } }
 </style>
 
@@ -120,6 +121,12 @@
     {% if not result.audit_logs and not result.calculation_breakdown.below_floor_error %}<span class="bp-audit-pill bp-audit-ok">法令判定OK</span>{% endif %}
   </div>
   {% endif %}
+
+  <p class="bp-audit-note">
+    自動判定の対象外: C-002 高速道路連続運転、C-007・C-008 勤務間休息は、
+    路線種別や前後日の勤務情報が必要なため本ツールでは自動判定していません（将来拡張）。
+    該当する運行では別途ご確認ください。
+  </p>
 
   <!-- Action bar -->
   <form id="bpForm" method="POST">
