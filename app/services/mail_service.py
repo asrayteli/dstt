@@ -29,7 +29,7 @@ import os
 import smtplib
 import threading
 from email.message import EmailMessage
-from email.utils import formataddr
+from email.utils import formataddr, formatdate, make_msgid
 from typing import Any
 
 from flask import current_app
@@ -260,6 +260,12 @@ def _build_email(message: MailMessage, settings: dict[str, Any]) -> EmailMessage
     if message.reply_to:
         email["Reply-To"] = message.reply_to
     email["Subject"] = message.subject
+    # Date / Message-ID は smtplib では自動付与されない。これらが欠けると
+    # 受信側のスパム判定が厳しくなる（迷惑メール行きの一因）ため明示的に付ける。
+    # Message-ID のドメインは From のドメインに揃え、認証/整合性チェックに資する。
+    email["Date"] = formatdate(localtime=True)
+    from_domain = from_address.split("@")[-1].strip() if "@" in (from_address or "") else None
+    email["Message-ID"] = make_msgid(domain=from_domain or None)
     email.set_content(message.body_text or "")
     if message.body_html:
         email.add_alternative(message.body_html, subtype="html")
