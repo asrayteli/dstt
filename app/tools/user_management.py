@@ -1663,10 +1663,11 @@ def mail_send():
     if len(recipients) > 200:
         return jsonify({"error": "一度に送信できる宛先は200件までです"}), 400
 
-    subject = str(data.get("subject", "")).strip()
+    # 明示的な JSON null を文字列 "None" 化しないよう `or ""` で先に潰してから str 化する。
+    subject = str(data.get("subject") or "").strip()
     if not subject:
         return jsonify({"error": "件名を入力してください"}), 400
-    body_text = str(data.get("body_text", "") or data.get("body", ""))
+    body_text = str(data.get("body_text") or data.get("body") or "")
     body_html = (data.get("body_html") or "").strip() or None
     if not body_text.strip() and not body_html:
         return jsonify({"error": "本文を入力してください"}), 400

@@ -99,6 +99,23 @@ def test_send_requires_subject_and_body(client):
     assert res.status_code == 400
 
 
+def test_send_treats_json_null_subject_body_as_empty(client):
+    """JSON の明示 null を文字列 "None" 扱いせず、空入力として弾く。"""
+    app, http = client
+    # body が null → 本文未入力として 400（"None" を本文にしない）
+    res = http.post("/tools/user_management/api/mail/send",
+                    json={"to": "a@example.com", "subject": "件名", "body": None})
+    assert res.status_code == 400
+    assert "本文" in res.get_json()["error"]
+    # subject が null → 件名未入力として 400
+    res2 = http.post("/tools/user_management/api/mail/send",
+                     json={"to": "a@example.com", "subject": None, "body_text": "本文"})
+    assert res2.status_code == 400
+    assert "件名" in res2.get_json()["error"]
+    with app.app_context():
+        assert MailMessage.query.count() == 0
+
+
 def test_resend_requeues_message(client, monkeypatch):
     app, http = client
     with app.app_context():
