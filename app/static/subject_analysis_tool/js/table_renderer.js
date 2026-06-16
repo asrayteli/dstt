@@ -556,7 +556,7 @@ class TableRenderer {
             const signNote = data.isRevenue ? '' : '（符号反転済み）';
             const comparisonHtml = data.hasComparison
                 ? `
-                    <div class="tooltip-row"><span class="tooltip-key">比較元 (${data.comparisonLabel}):</span><span class="tooltip-value">${this.formatNumber(data.comparisonValue)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">比較元 (${this.escapeText(data.comparisonLabel)}):</span><span class="tooltip-value">${this.formatNumber(data.comparisonValue)}円</span></div>
                     <div class="tooltip-row"><span class="tooltip-key">差異:</span><span class="tooltip-value" style="color: ${data.diff >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diff, true)}円</span></div>
                     <div class="tooltip-row"><span class="tooltip-key">差異率:</span><span class="tooltip-value" style="color: ${data.diffRate >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diffRate, true)}%</span></div>
                 `
@@ -565,8 +565,8 @@ class TableRenderer {
             return `
                 <div class="tooltip-content">
                     <div class="tooltip-label">📊 現場別比較情報 ${signNote}</div>
-                    <div class="tooltip-row"><span class="tooltip-key">現場:</span><span class="tooltip-value">${data.siteName}</span></div>
-                    <div class="tooltip-row"><span class="tooltip-key">科目:</span><span class="tooltip-value">${data.subject} (${typeLabel})</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">現場:</span><span class="tooltip-value">${this.escapeText(data.siteName)}</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">科目:</span><span class="tooltip-value">${this.escapeText(data.subject)} (${typeLabel})</span></div>
                     <div class="tooltip-row"><span class="tooltip-key">対象月:</span><span class="tooltip-value">${data.month}月</span></div>
                     <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
                     <div class="tooltip-row"><span class="tooltip-key">当期値:</span><span class="tooltip-value">${this.formatNumber(data.currentValue)}円</span></div>
@@ -701,7 +701,7 @@ class TableRenderer {
             return `
                 <div class="tooltip-content">
                     <div class="tooltip-label">📋 科目別サマリー詳細</div>
-                    <div class="tooltip-row"><span class="tooltip-key">科目:</span><span class="tooltip-value">${data.subjectName}</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">科目:</span><span class="tooltip-value">${this.escapeText(data.subjectName)}</span></div>
                     <div class="tooltip-row"><span class="tooltip-key">対象現場数:</span><span class="tooltip-value">${data.siteCount}現場</span></div>
                     <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
                     <div class="tooltip-row"><span class="tooltip-key">当期合計:</span><span class="tooltip-value">${this.formatNumber(data.totalCurrent)}円</span></div>
@@ -1173,7 +1173,7 @@ class TableRenderer {
             const comparisonHtml = data.hasComparison
                 ? `
                     <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
-                    <div class="tooltip-row"><span class="tooltip-key">比較元 (${data.comparisonLabel}):</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">比較元 (${this.escapeText(data.comparisonLabel)}):</span></div>
                     <div class="tooltip-row"><span class="tooltip-key">  売上:</span><span class="tooltip-value">${this.formatNumber(data.revenueComparison)}円</span></div>
                     <div class="tooltip-row"><span class="tooltip-key">  原価:</span><span class="tooltip-value">${this.formatNumber(data.costComparison)}円</span></div>
                     <div class="tooltip-row"><span class="tooltip-key">  利益:</span><span class="tooltip-value">${this.formatNumber(data.profitComparison, true)}円</span></div>
@@ -1187,7 +1187,7 @@ class TableRenderer {
             return `
                 <div class="tooltip-content">
                     <div class="tooltip-label">💰 利益分析詳細</div>
-                    <div class="tooltip-row"><span class="tooltip-key">現場:</span><span class="tooltip-value">${data.siteName}</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">現場:</span><span class="tooltip-value">${this.escapeText(data.siteName)}</span></div>
                     <div class="tooltip-row"><span class="tooltip-key">対象月:</span><span class="tooltip-value">${data.month}月</span></div>
                     <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
                     <div class="tooltip-row"><span class="tooltip-key">当期売上:</span><span class="tooltip-value">${this.formatNumber(data.revenue)}円</span></div>
@@ -1380,7 +1380,7 @@ class TableRenderer {
             const signNote = data.isRevenue ? '' : '（符号反転済み）';
             const comparisonHtml = data.hasComparison
                 ? `
-                    <div class="tooltip-row"><span class="tooltip-key">比較元 (${data.comparisonLabel}):</span><span class="tooltip-value">${this.formatNumber(data.comparisonValue)}円</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">比較元 (${this.escapeText(data.comparisonLabel)}):</span><span class="tooltip-value">${this.formatNumber(data.comparisonValue)}円</span></div>
                     <div class="tooltip-row"><span class="tooltip-key">差異:</span><span class="tooltip-value" style="color: ${data.diff >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diff, true)}円</span></div>
                     <div class="tooltip-row"><span class="tooltip-key">差異率:</span><span class="tooltip-value" style="color: ${data.diffRate >= 0 ? '#fca5a5' : '#93c5fd'}">${this.formatNumber(data.diffRate, true)}%</span></div>
                 `
@@ -1391,8 +1391,8 @@ class TableRenderer {
             return `
                 <div class="tooltip-content">
                     <div class="tooltip-label">📊 比較情報 ${signNote}</div>
-                    <div class="tooltip-row"><span class="tooltip-key">現場:</span><span class="tooltip-value">${data.siteName}</span></div>
-                    <div class="tooltip-row"><span class="tooltip-key">科目:</span><span class="tooltip-value">${data.subject} (${typeLabel})</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">現場:</span><span class="tooltip-value">${this.escapeText(data.siteName)}</span></div>
+                    <div class="tooltip-row"><span class="tooltip-key">科目:</span><span class="tooltip-value">${this.escapeText(data.subject)} (${typeLabel})</span></div>
                     <div class="tooltip-row"><span class="tooltip-key">対象月:</span><span class="tooltip-value">${data.month}月</span></div>
                     <hr style="border-color: rgba(255,255,255,0.2); margin: 0.5rem 0;">
                     <div class="tooltip-row"><span class="tooltip-key">当期値:</span><span class="tooltip-value">${this.formatNumber(data.currentValue)}円</span></div>

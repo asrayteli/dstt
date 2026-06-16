@@ -431,7 +431,11 @@ def api_create_driver():
     if not employee_number:
         return jsonify({"error": "社員番号は必須です。社員名簿PLUSから選択してください。"}), 400
 
-    employee = Employee.query.filter_by(employee_number=employee_number).first()
+    employee = Employee.query.filter(
+        Employee.employee_number == employee_number,
+        Employee.is_deleted.isnot(True),
+        Employee.is_retired.isnot(True),
+    ).first()
     if employee is None:
         return jsonify({"error": f"社員番号 {employee_number} が社員名簿PLUSに見つかりません。"}), 404
 

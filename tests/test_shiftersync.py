@@ -162,6 +162,34 @@ def test_save_entry_modal_does_not_open_day_detail_popup():
     assert "openDayDetail(day);" not in save_entry_block
 
 
+def test_upload_parser_preserves_extended_csv_metadata_rows():
+    script = (ROOT / "app" / "static" / "shiftersync" / "js" / "ss_upload.js").read_text(encoding="utf-8")
+    assert "const supportedModes = ['scene', 'person', 'master', 'substitute'];" in script
+    assert "!['scene', 'person'].includes(mode)" not in script
+    for prefix in [
+        "#second_option",
+        "#employee_name",
+        "#site_row_id",
+        "#site_id",
+        "#site_name",
+        "#site_branch_row_id",
+        "#site_branch",
+        "#substitute_request_type",
+        "#substitute_resolved",
+        "#substitute_source_entry_id",
+    ]:
+        assert prefix in script
+
+
+def test_frontend_csv_export_preserves_substitute_metadata_rows():
+    script = (ROOT / "app" / "static" / "shiftersync" / "js" / "ss_common.js").read_text(encoding="utf-8")
+    start = script.index("function buildCSV()")
+    end = script.index("function setState", start)
+    build_csv_block = script[start:end]
+    assert "substituteMetadataRows" in build_csv_block
+    assert ".concat(substituteRows)" in build_csv_block
+
+
 def test_calendar_day_kind_distinguishes_saturday_sunday_and_holiday():
     assert _calendar_day_kind(2026, 3, 20) == "holiday"
     assert _calendar_day_kind(2026, 3, 21) == "saturday"

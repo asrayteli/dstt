@@ -44,6 +44,13 @@ def test_parse_recipients_splits_and_validates():
     assert invalid == ["broken-address"]
 
 
+def test_announcement_admin_escapes_rendered_content():
+    template = (ROOT / "app" / "templates" / "admin_announcements.html").read_text(encoding="utf-8")
+    assert "function escapeHtml" in template
+    assert "${escapeHtml(item.title)}" in template
+    assert "${escapeHtml(item.content)}" in template
+
+
 def test_send_holds_when_unconfigured(client):
     app, http = client
     res = http.post("/tools/user_management/api/mail/send", json={

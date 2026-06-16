@@ -169,6 +169,66 @@ def test_to_bell_assignment_creates_unread_notification_and_dashboard_summary(ap
     assert summary["to_bell"]["action_count"] >= 1
 
 
+def test_to_bell_update_assignment_notifies_and_put_done_resolves(app_ctx):
+    from app.models import ToBellNotification, db
+
+    office_id = _create_office(app_ctx, "updateassign")
+    _create_user(app_ctx, "owner", "Owner", office_id=office_id)
+    _create_user(app_ctx, "worker", "Worker", office_id=office_id)
+
+    owner_client = app_ctx.test_client()
+    _login(owner_client, "owner")
+    task = owner_client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "Follow up", "assigned_to": "owner"},
+    ).get_json()
+
+    updated = owner_client.put(
+        f"/tools/to_bell/api/tasks/{task['id']}",
+        json={"assigned_to": "worker"},
+    )
+    assert updated.status_code == 200
+    with app_ctx.app_context():
+        note = ToBellNotification.query.filter_by(task_id=task["id"], user_id="worker").one()
+        assert note.is_resolved is False
+
+    done = owner_client.put(
+        f"/tools/to_bell/api/tasks/{task['id']}",
+        json={"status": "done"},
+    )
+    assert done.status_code == 200
+    with app_ctx.app_context():
+        db.session.expire_all()
+        note = ToBellNotification.query.filter_by(task_id=task["id"], user_id="worker").one()
+        assert note.is_resolved is True
+
+    review_task = owner_client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "Needs review", "assigned_to": "owner", "reviewer_id": "worker"},
+    ).get_json()
+    with app_ctx.app_context():
+        reviewer_note = ToBellNotification.query.filter_by(
+            task_id=review_task["id"], user_id="worker", event_type="reviewer"
+        ).one()
+        assert reviewer_note.is_resolved is False
+
+    done_reassign_task = owner_client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "Done while assigning", "assigned_to": "owner"},
+    ).get_json()
+    done_reassign = owner_client.put(
+        f"/tools/to_bell/api/tasks/{done_reassign_task['id']}",
+        json={"status": "done", "assigned_to": "worker", "reviewer_id": "worker"},
+    )
+    assert done_reassign.status_code == 200
+    with app_ctx.app_context():
+        fresh_notes = ToBellNotification.query.filter_by(
+            task_id=done_reassign_task["id"], user_id="worker"
+        ).all()
+        assert fresh_notes
+        assert all(note.is_resolved for note in fresh_notes)
+
+
 def test_to_bell_tasks_are_limited_to_participants(app_ctx):
     office_id = _create_office(app_ctx, "participants")
     other_office_id = _create_office(app_ctx, "outside")

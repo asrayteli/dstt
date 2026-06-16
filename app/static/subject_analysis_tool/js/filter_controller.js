@@ -10,6 +10,14 @@ function escapeFilterHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function escapeCssAttrValue(value) {
+    const text = String(value ?? '');
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+        return window.CSS.escape(text);
+    }
+    return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\]/g, '\\]');
+}
+
 class FilterController {
     constructor() {
         this.selectedMonths = [];
@@ -393,7 +401,8 @@ class FilterController {
         const isChecked = checkbox.checked;
 
         // 配下の8桁チェックボックスを全て同じ状態にする
-        const children = document.querySelectorAll(`.site-checkbox-8digit[data-group-key="${groupKey}"]`);
+        const safeGroupKey = escapeCssAttrValue(groupKey);
+        const children = document.querySelectorAll(`.site-checkbox-8digit[data-group-key="${safeGroupKey}"]`);
         children.forEach(child => {
             child.checked = isChecked;
         });
@@ -408,12 +417,13 @@ class FilterController {
         const groupKey = checkbox.dataset.groupKey;
 
         // 同じグループの8桁チェックボックスの状態を確認
-        const children = document.querySelectorAll(`.site-checkbox-8digit[data-group-key="${groupKey}"]`);
+        const safeGroupKey = escapeCssAttrValue(groupKey);
+        const children = document.querySelectorAll(`.site-checkbox-8digit[data-group-key="${safeGroupKey}"]`);
         const allChecked = Array.from(children).every(cb => cb.checked);
         const noneChecked = Array.from(children).every(cb => !cb.checked);
 
         // 5桁チェックボックスの状態を更新
-        const parent5Digit = document.querySelector(`.site-checkbox-5digit[data-group-key="${groupKey}"]`);
+        const parent5Digit = document.querySelector(`.site-checkbox-5digit[data-group-key="${safeGroupKey}"]`);
         if (parent5Digit) {
             if (allChecked) {
                 parent5Digit.checked = true;
