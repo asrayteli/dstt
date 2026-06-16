@@ -2679,6 +2679,7 @@
         <div class="cloud-assist-tabs">
           <button type="button" class="cloud-tab${state.assist.activeTab === 'register' ? ' is-active' : ''}" data-assist-tab="register">登録</button>
           <button type="button" class="cloud-tab${state.assist.activeTab === 'edit' ? ' is-active' : ''}" data-assist-tab="edit">編集</button>
+          <button type="button" class="cloud-tab${state.assist.activeTab === 'people' ? ' is-active' : ''}" data-assist-tab="people">現場経験者</button>
           <button type="button" class="cloud-tab${state.assist.activeTab === 'search' ? ' is-active' : ''}" data-assist-tab="search">サーチ</button>
           <button type="button" class="cloud-tab${state.assist.activeTab === 'details' ? ' is-active' : ''}" data-assist-tab="details">詳細</button>
           ${autoCreateButton}
@@ -2697,7 +2698,7 @@
     function normalizeAssistUiState() {
       const permissions = state.assist.permissions || {};
       const mode = currentAssistMode();
-      const allowedTabs = mode === 'person' ? ['register', 'edit', 'details'] : ['register', 'edit', 'search', 'details'];
+      const allowedTabs = mode === 'person' ? ['register', 'edit', 'details'] : ['register', 'edit', 'people', 'search', 'details'];
       if (!allowedTabs.includes(state.assist.activeTab)) {
         state.assist.activeTab = 'register';
       }
@@ -3397,7 +3398,7 @@
     function buildAssistScenePeopleTable(people, options) {
       const expanded = !!(options && options.expanded);
       if (!Array.isArray(people) || !people.length) {
-        return '<div class="cloud-empty-state"><p>経験したことがある人はまだいません。シフトに「代務」「研修」の第二オプションを付けるか、実績を登録すると自動で集計されます。</p></div>';
+        return '<div class="cloud-empty-state"><p>現場経験者はまだいません。シフトに「代務」「研修」の第二オプションを付けるか、実績を登録すると自動で集計されます。</p></div>';
       }
       const rows = people.map((person) => {
         const optionText = Array.isArray(person.shift_labels) && person.shift_labels.length
@@ -3439,7 +3440,7 @@
     function openAssistScenePeopleDetailPopup() {
       const data = currentAssistData();
       const people = Array.isArray(data.experienced_people) ? data.experienced_people : [];
-      const modal = openCloudModal('cloud-assist-people-detail-modal', `経験したことがある人（${people.length}）`);
+      const modal = openCloudModal('cloud-assist-people-detail-modal', `現場経験者（${people.length}）`);
       const panel = modal.querySelector('.cloud-modal-panel');
       if (panel) panel.classList.add('cloud-modal-panel-wide');
       modalBody(modal).innerHTML = buildAssistScenePeopleTable(people, { expanded: true });
@@ -3449,20 +3450,22 @@
       if (closeBtn) closeBtn.addEventListener('click', () => closeCloudModal('cloud-assist-people-detail-modal'));
     }
 
-    function buildAssistScenePeopleSection() {
+    function buildAssistScenePeoplePanel() {
       const counts = assistCounts();
       const data = currentAssistData();
       const people = Array.isArray(data.experienced_people) ? data.experienced_people : [];
       return `
-        <div class="cloud-assist-section">
-          <div class="cloud-assist-subhead">
-            <div>
-              <strong>経験したことがある人（${counts.experienced_people || 0}）</strong>
-              <p class="cloud-panel-note">この現場で実績のある人を一覧します。「誰が行ったことあるかな」の確認に使えます。代務・研修の第二オプションや実績登録から自動で集計され、同じ材料が自動作成の経験者判定にも使われます。</p>
+        <div class="cloud-assist-stack cloud-assist-people-stack">
+          <div class="cloud-assist-section cloud-assist-people-section">
+            <div class="cloud-assist-subhead">
+              <div>
+                <strong>現場経験者（${counts.experienced_people || 0}）</strong>
+                <p class="cloud-panel-note">この現場で実績のある人の一覧です。自動作成の経験者判定にも使われます。</p>
+              </div>
+              ${people.length ? '<button type="button" class="cloud-btn secondary cloud-assist-expand-btn" data-assist-expand-people>拡大表示</button>' : ''}
             </div>
-            <button type="button" class="cloud-btn secondary cloud-assist-expand-btn" data-assist-expand-people>拡大表示</button>
+            ${buildAssistScenePeopleTable(people, { expanded: true })}
           </div>
-          ${buildAssistScenePeopleTable(people)}
         </div>
       `;
     }
@@ -3682,7 +3685,6 @@
       `;
       return `
         <div class="cloud-assist-stack cloud-assist-details-stack">
-          ${buildAssistScenePeopleSection()}
           ${buildAssistDetailAccordion(
             'overview',
             '点数の見方',
@@ -3757,6 +3759,9 @@
           </div>
           <div class="cloud-assist-panel${state.assist.activeTab === 'edit' ? ' is-active' : ''}" data-assist-panel="edit">
             ${buildAssistEditPanels()}
+          </div>
+          <div class="cloud-assist-panel${state.assist.activeTab === 'people' ? ' is-active' : ''}" data-assist-panel="people">
+            ${buildAssistScenePeoplePanel()}
           </div>
           <div class="cloud-assist-panel${state.assist.activeTab === 'search' ? ' is-active' : ''}" data-assist-panel="search">
             ${buildAssistSearchPanel()}
@@ -4982,7 +4987,8 @@
       modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>アシストデータを読み込み中です...</p></div>';
       modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-assist-close>閉じる</button>';
       modalFooter(modal).querySelector('[data-cloud-assist-close]').addEventListener('click', () => closeCloudModal('cloud-assist-modal'));
-      await ensureAssistLoaded(false);
+      // アシストを開くたびに最新の集計（現場経験者など）を取り直す。
+      await ensureAssistLoaded(true);
       if (next.autoSearch) {
         await executeAssistSearch(state.assist.searchForm || {});
       }
