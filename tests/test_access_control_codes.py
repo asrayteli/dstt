@@ -273,3 +273,60 @@ def test_user_with_office_does_not_auto_inherit_branch_offices(app_ctx):
         db.session.commit()
 
         assert user_office_codes(u) == {"S01"}
+
+
+def test_dynamic_sensitive_tool_can_be_assigned_by_admin_api(app_ctx):
+    from app.models import db, User, UserToolPermission
+
+    with app_ctx.app_context():
+        admin = User(username="admin", password_hash="x", is_admin=True)
+        user = User(username="target", password_hash="x")
+        db.session.add_all([admin, user])
+        db.session.commit()
+        target_id = user.id
+
+    client = app_ctx.test_client()
+    with client.session_transaction() as session:
+        session["_user_id"] = "admin"
+        session["_fresh"] = True
+
+    setting = client.put(
+        "/tools/user_management/api/tool-settings/datecalc",
+        json={"access_type": "sensitive"},
+    )
+    assert setting.status_code == 200
+
+    update = client.put(
+        f"/tools/user_management/api/users/{target_id}/tools",
+        json={"tool_keys": ["datecalc"]},
+    )
+    assert update.status_code == 200
+
+    with app_ctx.app_context():
+        assert UserToolPermission.query.filter_by(user_id=target_id, tool_key="datecalc").one()
+
+
+def test_tool_settings_reject_malformed_category_id(app_ctx):
+    from app.models import db, User
+
+    with app_ctx.app_context():
+        admin = User(username="admin", password_hash="x", is_admin=True)
+        db.session.add(admin)
+        db.session.commit()
+
+    client = app_ctx.test_client()
+    with client.session_transaction() as session:
+        session["_user_id"] = "admin"
+        session["_fresh"] = True
+
+    single = client.put(
+        "/tools/user_management/api/tool-settings/datecalc",
+        json={"category_id": "abc"},
+    )
+    assert single.status_code == 400
+
+    bulk = client.put(
+        "/tools/user_management/api/tool-settings/bulk",
+        json={"updates": [{"tool_key": "datecalc", "category_id": "abc"}]},
+    )
+    assert bulk.status_code == 400

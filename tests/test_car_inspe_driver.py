@@ -129,6 +129,23 @@ def test_create_rejects_unknown_and_duplicate(client):
     assert dup.status_code == 409
 
 
+def test_create_rejects_deleted_or_retired_employee(client):
+    app, http = client
+    with app.app_context():
+        db.session.add(Employee(
+            employee_number="9001",
+            employee_name="Retired",
+            office_code="0001",
+            office_name="Office",
+            is_deleted=True,
+            is_retired=True,
+        ))
+        db.session.commit()
+
+    response = http.post("/tools/car_inspe/api/drivers", json={"employee_number": "9001"})
+    assert response.status_code == 404
+
+
 def test_employee_search_marks_linked(client):
     app, http = client
     add_employee(app)

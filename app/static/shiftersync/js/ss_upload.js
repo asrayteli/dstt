@@ -1,7 +1,52 @@
 $(document).ready(function() {
   const commentRowPrefix = '#comment';
+  const secondOptionRowPrefix = '#second_option';
+  const employeeNameRowPrefix = '#employee_name';
   const employeeNumberRowPrefix = '#employee_number';
   const projectEmployeeNumberRowPrefix = '#project_employee_number';
+  const siteRowIdRowPrefix = '#site_row_id';
+  const siteIdRowPrefix = '#site_id';
+  const siteNameRowPrefix = '#site_name';
+  const siteBranchRowIdRowPrefix = '#site_branch_row_id';
+  const siteBranchRowPrefix = '#site_branch';
+  const metadataFieldByPrefix = {
+    [secondOptionRowPrefix]: 'second_option',
+    [employeeNameRowPrefix]: 'employee_name',
+    [employeeNumberRowPrefix]: 'employee_number',
+    [siteRowIdRowPrefix]: 'site_row_id',
+    [siteIdRowPrefix]: 'site_id',
+    [siteNameRowPrefix]: 'site_name',
+    [siteBranchRowIdRowPrefix]: 'site_branch_row_id',
+    [siteBranchRowPrefix]: 'site_branch',
+    '#substitute_request_type': 'substitute_request_type',
+    '#substitute_helper_employee_name': 'substitute_helper_employee_name',
+    '#substitute_helper_employee_number': 'substitute_helper_employee_number',
+    '#substitute_helper_site_row_id': 'substitute_helper_site_row_id',
+    '#substitute_helper_site_id': 'substitute_helper_site_id',
+    '#substitute_helper_site_name': 'substitute_helper_site_name',
+    '#substitute_resolved': 'substitute_resolved',
+    '#substitute_requester_user_id': 'substitute_requester_user_id',
+    '#substitute_requester_name': 'substitute_requester_name',
+    '#substitute_requested_at': 'substitute_requested_at',
+    '#substitute_helper_user_id': 'substitute_helper_user_id',
+    '#substitute_helper_name': 'substitute_helper_name',
+    '#substitute_helped_at': 'substitute_helped_at',
+    '#substitute_unassigned_helper': 'substitute_unassigned_helper',
+    '#substitute_source_project_id': 'substitute_source_project_id',
+    '#substitute_source_project_title': 'substitute_source_project_title',
+    '#substitute_source_project_mode': 'substitute_source_project_mode',
+    '#substitute_source_month_key': 'substitute_source_month_key',
+    '#substitute_source_day': 'substitute_source_day',
+    '#substitute_source_entry_id': 'substitute_source_entry_id'
+  };
+  const booleanMetadataFields = new Set(['substitute_resolved', 'substitute_unassigned_helper']);
+  const supportedModes = ['scene', 'person', 'master', 'substitute'];
+  const modeLabels = {
+    scene: '現場シフト',
+    person: '個人シフト',
+    master: 'マスターシフト',
+    substitute: '代務シフト'
+  };
 
   function escapeHtml(value) {
     return String(value || '')
@@ -84,7 +129,14 @@ $(document).ready(function() {
       id: `upload-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       value: String(entry || '').trim(),
       comment: '',
-      employee_number: ''
+      second_option: '',
+      employee_name: '',
+      employee_number: '',
+      site_row_id: '',
+      site_id: '',
+      site_name: '',
+      site_branch_row_id: '',
+      site_branch: ''
     };
   }
 
@@ -101,12 +153,11 @@ $(document).ready(function() {
     const name = header[3].trim();
     const requiredCapacity = header.length >= 5 ? parseInt(header[4], 10) || 0 : 0;
     const entriesPerDay = {};
-    const commentRows = [];
-    const employeeNumberRows = [];
+    const metadataRows = [];
     let targetEmployeeNumber = '';
 
-    if (!['scene', 'person'].includes(mode)) {
-      throw new Error('mode は scene または person のみ対応です');
+    if (!supportedModes.includes(mode)) {
+      throw new Error('mode は scene / person / master / substitute に対応です');
     }
     if (!year || year < 1900 || year > 2100) {
       throw new Error('年は 1900 から 2100 の範囲で指定してください');
@@ -127,19 +178,19 @@ $(document).ready(function() {
         return;
       }
       if (row[0] === commentRowPrefix) {
-        commentRows.push(row);
-        return;
-      }
-      if (row[0] === employeeNumberRowPrefix) {
-        employeeNumberRows.push(row);
+        metadataRows.push(row);
         return;
       }
       if (row[0] === projectEmployeeNumberRowPrefix) {
         targetEmployeeNumber = row[1] || '';
+        return;
+      }
+      if (metadataFieldByPrefix[row[0]]) {
+        metadataRows.push(row);
       }
     });
 
-    commentRows.forEach((row) => {
+    metadataRows.forEach((row) => {
       if (row.length < 4) {
         return;
       }
@@ -148,19 +199,13 @@ $(document).ready(function() {
       if (!entriesPerDay[day] || Number.isNaN(index) || !entriesPerDay[day][index]) {
         return;
       }
-      entriesPerDay[day][index].comment = row[3] || '';
-    });
-
-    employeeNumberRows.forEach((row) => {
-      if (row.length < 4) {
+      const field = row[0] === commentRowPrefix ? 'comment' : metadataFieldByPrefix[row[0]];
+      if (!field) {
         return;
       }
-      const day = String(parseInt(row[1], 10));
-      const index = parseInt(row[2], 10);
-      if (!entriesPerDay[day] || Number.isNaN(index) || !entriesPerDay[day][index]) {
-        return;
-      }
-      entriesPerDay[day][index].employee_number = row[3] || '';
+      entriesPerDay[day][index][field] = booleanMetadataFields.has(field)
+        ? ['1', 'true', 'TRUE'].includes(String(row[3] || '').trim())
+        : (row[3] || '');
     });
 
     return {
@@ -192,7 +237,7 @@ $(document).ready(function() {
         <div class="ss-summary-grid" style="margin-bottom: 18px;">
           <div class="ss-summary-item">
             <div class="ss-summary-label">種別</div>
-            <div class="ss-summary-value">${payload.mode === 'scene' ? '現場シフト' : '個人シフト'}</div>
+            <div class="ss-summary-value">${escapeHtml(modeLabels[payload.mode] || payload.mode)}</div>
           </div>
           <div class="ss-summary-item">
             <div class="ss-summary-label">対象</div>

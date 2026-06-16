@@ -66,6 +66,20 @@ def _subject_csv_bytes(contract_type="基本請負料", subject_name="基本請�
     return csv_text.encode("utf-8")
 
 
+def test_sat_renderers_escape_csv_derived_html():
+    chart = (ROOT / "app" / "static" / "subject_analysis_tool" / "js" / "chart_renderer.js").read_text(encoding="utf-8")
+    table = (ROOT / "app" / "static" / "subject_analysis_tool" / "js" / "table_renderer.js").read_text(encoding="utf-8")
+    assert "escapeText(site)" in chart
+    assert "this.escapeText(data.siteName)" in table
+    assert "this.escapeText(data.subjectName)" in table
+
+
+def test_sat_filter_escapes_css_attribute_selectors():
+    script = (ROOT / "app" / "static" / "subject_analysis_tool" / "js" / "filter_controller.js").read_text(encoding="utf-8")
+    assert "escapeCssAttrValue" in script
+    assert 'data-group-key="${safeGroupKey}"' in script
+
+
 def test_parse_subject_data_splits_auto_sales_by_contract_type(tmp_path):
     module = _load_sat_module()
     csv_text = (

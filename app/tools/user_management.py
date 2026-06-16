@@ -32,6 +32,7 @@ from app.access_control import (
     is_admin_user,
     is_legacy_admin_username,
     set_tool_access,
+    tool_category,
 )
 from app.navigation import NAV_ITEMS
 from app.announcement_store import (
@@ -58,6 +59,15 @@ def generate_random_password(length=12):
     alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
     password = ''.join(secrets.choice(alphabet) for i in range(length))
     return password
+
+
+def _assignable_tool_keys() -> set[str]:
+    keys = set()
+    for nav in NAV_ITEMS:
+        key = nav.get("key") or nav.get("href", "").strip("/").rsplit("/", 1)[-1]
+        if key and tool_category(key) == "sensitive":
+            keys.add(key)
+    return keys
 
 
 def _user_matching_group_rules(user: User, rules) -> dict:
@@ -442,7 +452,7 @@ def update_user_tools(user_id):
         return jsonify({"error": "tool_keysはリストで指定してください"}), 400
 
     # sensitiveカテゴリのみ付与対象（publicは常時アクセス可能）
-    sensitive_keys = {k for k, c in TOOL_ACCESS_CATEGORIES.items() if c == "sensitive"}
+    sensitive_keys = _assignable_tool_keys()
     desired = {str(k).strip() for k in tool_keys if str(k).strip() in sensitive_keys}
 
     try:
@@ -740,7 +750,7 @@ def get_tools_catalog():
             "icon": nav.get("icon"),
             "description": nav.get("description"),
             "href": nav.get("href"),
-            "category": TOOL_ACCESS_CATEGORIES.get(key, "public"),
+            "category": tool_category(key),
         })
     return jsonify({"tools": items})
 
@@ -757,6 +767,15 @@ def _coerce_optional_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_optional_category_id(value):
+    if value in (None, "", "null", "None"):
+        return None, None
+    try:
+        return int(value), None
+    except (TypeError, ValueError):
+        return None, "category_idは数値で指定してください"
 
 
 def _validate_group_scope(branch_id, office_id, department_id):
@@ -802,7 +821,7 @@ def create_group_tool_permission():
     tool_key = str(data.get("tool_key", "")).strip()
     if not tool_key:
         return jsonify({"error": "tool_keyは必須です"}), 400
-    sensitive_keys = {k for k, c in TOOL_ACCESS_CATEGORIES.items() if c == "sensitive"}
+    sensitive_keys = _assignable_tool_keys()
     if tool_key not in sensitive_keys:
         return jsonify({"error": f"{tool_key} はグループ付与対象のツールではありません"}), 400
 
@@ -1033,7 +1052,9 @@ def update_tool_setting(tool_key):
         if data["access_type"] in ("public", "sensitive"):
             ts.access_type = data["access_type"]
     if "category_id" in data:
-        cat_id = _coerce_optional_int(data["category_id"])
+        cat_id, error = _coerce_optional_category_id(data["category_id"])
+        if error:
+            return jsonify({"error": error}), 400
         if cat_id is not None and not ToolCategory.query.get(cat_id):
             return jsonify({"error": "指定されたカテゴリが見つかりません"}), 400
         ts.category_id = cat_id
@@ -1064,7 +1085,12 @@ def bulk_update_tool_settings():
             if upd["access_type"] in ("public", "sensitive"):
                 ts.access_type = upd["access_type"]
         if "category_id" in upd:
-            ts.category_id = _coerce_optional_int(upd["category_id"])
+            cat_id, error = _coerce_optional_category_id(upd["category_id"])
+            if error:
+                return jsonify({"error": error}), 400
+            if cat_id is not None and not ToolCategory.query.get(cat_id):
+                return jsonify({"error": "指定されたカテゴリが見つかりません"}), 400
+            ts.category_id = cat_id
         if "sort_order" in upd:
             ts.sort_order = int(upd["sort_order"])
     db.session.commit()

@@ -9,6 +9,15 @@ class ChartRenderer {
         ];
     }
 
+    escapeText(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     /**
      * グラフを描画
      */
@@ -151,7 +160,7 @@ class ChartRenderer {
         html += '</tr></thead><tbody>';
 
         Array.from(sites).forEach(site => {
-            html += `<tr><td class="heatmap-header">${site}</td>`;
+            html += `<tr><td class="heatmap-header">${this.escapeText(site)}</td>`;
 
             months.forEach(month => {
                 const data = matrix[site][month];
@@ -174,7 +183,7 @@ class ChartRenderer {
                 }
 
                 html += `<td class="heatmap-cell" style="background-color: ${bgColor};"
-                         title="${site} ${month}月: ${textContent}">
+                         title="${this.escapeText(site)} ${month}月: ${this.escapeText(textContent)}">
                          ${textContent}
                          </td>`;
             });

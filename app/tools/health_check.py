@@ -158,7 +158,7 @@ def _serialize_recheck_items(raw) -> str | None:
     return json.dumps(items, ensure_ascii=False)
 
 
-def _serialize_extra_notify_users(raw) -> str | None:
+def _serialize_extra_notify_users(raw, office_code: str | None = None) -> str | None:
     """追加通知先（username配列）を、実在ユーザーに限定してJSON文字列へ正規化する。"""
     if not isinstance(raw, list):
         return None
@@ -170,10 +170,11 @@ def _serialize_extra_notify_users(raw) -> str | None:
     if not usernames:
         return None
     usernames = usernames[:MAX_EXTRA_NOTIFY_USERS]
-    valid = {
-        u.username
-        for u in User.query.filter(User.username.in_(usernames)).all()
-    }
+    users = User.query.filter(User.username.in_(usernames)).all()
+    code = (office_code or "").strip()
+    if code and not _is_dstt_admin():
+        users = [u for u in users if code in _dstt_user_office_codes(u)]
+    valid = {u.username for u in users}
     filtered = [u for u in usernames if u in valid]
     return json.dumps(filtered, ensure_ascii=False) if filtered else None
 
@@ -432,7 +433,100 @@ def sync_from_employee(record: HealthCheckRecord, employee: Employee, *, resolve
     record.birth_date = employee.birth_date
     # 担当者は未解決のときのみ自動解決（手動上書きを尊重）
     if resolve_manager and not record.manager_user and employee.manager_name:
-        record.manager_user = resolve_manager_user(employee.manager_name)
+        manager_user = resolve_manager_user(employee.manager_name)
+        record.manager_user = manager_user if _manager_user_allowed(manager_user, employee.office_code) else None
+
+
+def _linked_employee(record: HealthCheckRecord) -> Employee | None:
+    if record.record_type == "linked" and record.employee_id:
+        return db.session.get(Employee, record.employee_id)
+    return None
+
+
+def _record_access_office(record: HealthCheckRecord) -> str | None:
+    employee = _linked_employee(record)
+    if employee:
+        return employee.office_code
+    return record.office_code
+
+
+def _sync_linked_record(record: HealthCheckRecord) -> bool:
+    employee = _linked_employee(record)
+    if not employee:
+        return False
+    before = (
+        record.office_code,
+        record.employee_number,
+        record.employee_name,
+        record.employee_type,
+        record.assignment_site,
+        record.manager_name,
+        record.hire_date,
+        record.retirement_date,
+        bool(record.is_retired),
+        record.birth_date,
+        record.manager_user,
+        record.extra_notify_users,
+    )
+    sync_from_employee(record, employee)
+    if not _manager_user_allowed(record.manager_user, record.office_code):
+        record.manager_user = None
+    if record.extra_notify_users:
+        try:
+            notify_users = json.loads(record.extra_notify_users)
+        except Exception:
+            notify_users = []
+        record.extra_notify_users = _serialize_extra_notify_users(notify_users, record.office_code)
+    after = (
+        record.office_code,
+        record.employee_number,
+        record.employee_name,
+        record.employee_type,
+        record.assignment_site,
+        record.manager_name,
+        record.hire_date,
+        record.retirement_date,
+        bool(record.is_retired),
+        record.birth_date,
+        record.manager_user,
+        record.extra_notify_users,
+    )
+    return before != after
+
+
+def _manager_user_allowed(username: str, office_code: str | None) -> bool:
+    username = (username or "").strip()
+    if not username:
+        return True
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return False
+    code = (office_code or "").strip()
+    if not code or _is_dstt_admin():
+        return True
+    try:
+        return code in _dstt_user_office_codes(user)
+    except Exception:
+        return bool(user.user_office and user.user_office.code == code)
+
+
+def _check_record_access(user_id: str, record: HealthCheckRecord | None, *, sync: bool = True) -> bool:
+    if not record:
+        return False
+    if not has_office_access(user_id, _record_access_office(record)):
+        return False
+    if sync and _sync_linked_record(record):
+        db.session.commit()
+    return True
+
+
+def _sync_record_list(records: list[HealthCheckRecord]) -> None:
+    changed = False
+    for record in records:
+        if _sync_linked_record(record):
+            changed = True
+    if changed:
+        db.session.commit()
 
 
 def record_history(record: HealthCheckRecord | None, user_id: str, action: str,
@@ -498,10 +592,24 @@ def _scoped_query(user_id: str):
     if not user_offices and not is_dstt_admin():
         return None, (jsonify({"error": "アクセス権限がありません"}), 403)
 
-    query = HealthCheckRecord.query
+    query = HealthCheckRecord.query.outerjoin(Employee, HealthCheckRecord.employee_id == Employee.id)
     if not is_dstt_admin():
-        # 自分がDSTTでアクセス権を持つ営業所のレコードに限定
-        query = query.filter(HealthCheckRecord.office_code.in_(user_offices))
+        query = query.filter(db.or_(
+            db.and_(
+                HealthCheckRecord.record_type == "linked",
+                HealthCheckRecord.employee_id.isnot(None),
+                Employee.id.isnot(None),
+                Employee.office_code.in_(user_offices),
+            ),
+            db.and_(
+                db.or_(
+                    HealthCheckRecord.record_type != "linked",
+                    HealthCheckRecord.employee_id.is_(None),
+                    Employee.id.is_(None),
+                ),
+                HealthCheckRecord.office_code.in_(user_offices),
+            ),
+        ))
 
     year = request.args.get("year", type=int)
     if year:
@@ -511,7 +619,22 @@ def _scoped_query(user_id: str):
     if office:
         if not has_office_access(user_id, office):
             return None, (jsonify({"error": "この営業所への権限がありません"}), 403)
-        query = query.filter(HealthCheckRecord.office_code == office)
+        query = query.filter(db.or_(
+            db.and_(
+                HealthCheckRecord.record_type == "linked",
+                HealthCheckRecord.employee_id.isnot(None),
+                Employee.id.isnot(None),
+                Employee.office_code == office,
+            ),
+            db.and_(
+                db.or_(
+                    HealthCheckRecord.record_type != "linked",
+                    HealthCheckRecord.employee_id.is_(None),
+                    Employee.id.is_(None),
+                ),
+                HealthCheckRecord.office_code == office,
+            ),
+        ))
 
     record_type = request.args.get("record_type", "").strip()
     if record_type in ("linked", "pre_hire", "internal"):
@@ -560,6 +683,7 @@ def api_records():
     query = query.order_by(col.desc() if sort_order == "desc" else col.asc())
 
     records = query.options(selectinload(HealthCheckRecord.attachments)).all()
+    _sync_record_list(records)
     # ステータス絞り込み（算出値のため取得後にフィルタ）
     status_filter = request.args.get("status", "").strip()
     items = [r.to_dict() for r in records]
@@ -576,7 +700,7 @@ def api_record(record_id):
     record = db.session.get(HealthCheckRecord, record_id)
     if not record:
         return jsonify({"error": "レコードが見つかりません"}), 404
-    if not has_office_access(user_id, record.office_code):
+    if not _check_record_access(user_id, record):
         return jsonify({"error": "アクセス権限がありません"}), 403
     data = record.to_dict()
     data["attachments"] = [a.to_dict() for a in record.attachments]
@@ -623,7 +747,7 @@ def _apply_payload(record: HealthCheckRecord, payload: dict, user_id: str) -> No
             record.recheck_items = new_value
     # 通知の追加宛先（レコード個別。usernameのJSON配列）
     if "extra_notify_users" in payload and "extra_notify_users" not in skip:
-        new_value = _serialize_extra_notify_users(payload.get("extra_notify_users"))
+        new_value = _serialize_extra_notify_users(payload.get("extra_notify_users"), record.office_code)
         old_value = record.extra_notify_users
         if (old_value or None) != (new_value or None):
             record_history(record, user_id, "update", "extra_notify_users", old_value, new_value)
@@ -687,7 +811,8 @@ def api_create_record():
             return jsonify({"error": "この営業所への権限がありません"}), 403
         record.office_code = office_code
         record.employee_name = name
-        record.manager_user = resolve_manager_user(payload.get("manager_name"))
+        manager_user = resolve_manager_user(payload.get("manager_name"))
+        record.manager_user = manager_user if _manager_user_allowed(manager_user, office_code) else None
 
     _apply_payload(record, payload, user_id)
     db.session.add(record)
@@ -705,15 +830,10 @@ def api_update_record(record_id):
     record = db.session.get(HealthCheckRecord, record_id)
     if not record:
         return jsonify({"error": "レコードが見つかりません"}), 404
-    if not has_office_access(user_id, record.office_code):
+    if not _check_record_access(user_id, record):
         return jsonify({"error": "アクセス権限がありません"}), 403
 
     payload = request.json or {}
-    # 名簿連携レコードは固定情報を最新へ同期（手動モードは手入力を反映）
-    if record.record_type == "linked" and record.employee_id:
-        employee = db.session.get(Employee, record.employee_id)
-        if employee:
-            sync_from_employee(record, employee)
 
     _apply_payload(record, payload, user_id)
     record.updated_by = user_id
@@ -729,7 +849,7 @@ def api_delete_record(record_id):
     record = db.session.get(HealthCheckRecord, record_id)
     if not record:
         return jsonify({"error": "レコードが見つかりません"}), 404
-    if not has_office_access(user_id, record.office_code):
+    if not _check_record_access(user_id, record):
         return jsonify({"error": "アクセス権限がありません"}), 403
 
     close_health_check_reminders(record.id, commit=False)
@@ -753,15 +873,14 @@ def api_set_manager(record_id):
     record = db.session.get(HealthCheckRecord, record_id)
     if not record:
         return jsonify({"error": "レコードが見つかりません"}), 404
-    if not has_office_access(user_id, record.office_code):
+    if not _check_record_access(user_id, record):
         return jsonify({"error": "アクセス権限がありません"}), 403
 
     payload = request.json or {}
     username = (payload.get("manager_user") or "").strip()
     if username:
-        user = User.query.filter_by(username=username).first()
-        if not user:
-            return jsonify({"error": "指定のユーザーが存在しません"}), 400
+        if not _manager_user_allowed(username, record.office_code):
+            return jsonify({"error": "指定のユーザーが存在しないか、この営業所に割り当てできません"}), 400
     old = record.manager_user
     record.manager_user = username or None
     record_history(record, user_id, "update", "manager_user", old, record.manager_user)
@@ -823,7 +942,8 @@ def api_bulk_create():
         )
         sync_from_employee(record, employee, resolve_manager=False)
         if employee.manager_name:
-            record.manager_user = resolve_manager_user(employee.manager_name, name_index)
+            username = resolve_manager_user(employee.manager_name, name_index)
+            record.manager_user = username if _manager_user_allowed(username, record.office_code) else None
         db.session.add(record)
         created += 1
 
@@ -847,13 +967,16 @@ def api_carryover():
         return jsonify({"error": "複製元と複製先の年度が同じです"}), 400
 
     accessible = set(get_user_offices(user_id))
-    query = HealthCheckRecord.query.filter(
+    query = HealthCheckRecord.query.outerjoin(Employee, HealthCheckRecord.employee_id == Employee.id).filter(
         HealthCheckRecord.target_year == from_year,
         HealthCheckRecord.record_type == "linked",
         HealthCheckRecord.employee_id.isnot(None),
     )
     if not is_dstt_admin():
-        query = query.filter(HealthCheckRecord.office_code.in_(accessible or ["__none__"]))
+        query = query.filter(db.or_(
+            db.and_(Employee.id.isnot(None), Employee.office_code.in_(accessible or ["__none__"])),
+            db.and_(Employee.id.is_(None), HealthCheckRecord.office_code.in_(accessible or ["__none__"])),
+        ))
 
     existing_ids = {
         r.employee_id
@@ -894,6 +1017,14 @@ def api_carryover():
             employee = db.session.get(Employee, record.employee_id)
             if employee:
                 sync_from_employee(record, employee, resolve_manager=False)
+        if not _manager_user_allowed(record.manager_user, record.office_code):
+            record.manager_user = None
+        if record.extra_notify_users:
+            try:
+                notify_users = json.loads(record.extra_notify_users)
+            except Exception:
+                notify_users = []
+            record.extra_notify_users = _serialize_extra_notify_users(notify_users, record.office_code)
         db.session.add(record)
         created += 1
 
@@ -911,19 +1042,35 @@ def api_resolve_managers():
     year = payload.get("year")
 
     accessible = set(get_user_offices(user_id))
-    query = HealthCheckRecord.query.filter(
+    query = HealthCheckRecord.query.outerjoin(Employee, HealthCheckRecord.employee_id == Employee.id).filter(
         db.or_(HealthCheckRecord.manager_user.is_(None), HealthCheckRecord.manager_user == "")
     )
     if year:
         query = query.filter(HealthCheckRecord.target_year == int(year))
     if not is_dstt_admin():
-        query = query.filter(HealthCheckRecord.office_code.in_(accessible or ["__none__"]))
+        query = query.filter(db.or_(
+            db.and_(
+                HealthCheckRecord.record_type == "linked",
+                HealthCheckRecord.employee_id.isnot(None),
+                Employee.id.isnot(None),
+                Employee.office_code.in_(accessible or ["__none__"]),
+            ),
+            db.and_(
+                db.or_(
+                    HealthCheckRecord.record_type != "linked",
+                    HealthCheckRecord.employee_id.is_(None),
+                    Employee.id.is_(None),
+                ),
+                HealthCheckRecord.office_code.in_(accessible or ["__none__"]),
+            ),
+        ))
 
     name_index = _build_user_name_index()
     resolved = 0
     for record in query.all():
+        _sync_linked_record(record)
         username = resolve_manager_user(record.manager_name, name_index)
-        if username:
+        if username and _manager_user_allowed(username, record.office_code):
             record.manager_user = username
             ensure_health_check_reminders(record, global_lead_days=get_global_lead_days(), commit=False)
             resolved += 1
@@ -942,7 +1089,7 @@ def api_upload_attachment(record_id):
     record = db.session.get(HealthCheckRecord, record_id)
     if not record:
         return jsonify({"error": "レコードが見つかりません"}), 404
-    if not has_office_access(user_id, record.office_code):
+    if not _check_record_access(user_id, record):
         return jsonify({"error": "アクセス権限がありません"}), 403
 
     if "file" not in request.files:
@@ -996,7 +1143,7 @@ def api_download_attachment(record_id, attachment_id):
     if not attachment or attachment.record_id != record_id:
         return jsonify({"error": "ファイルが見つかりません"}), 404
     record = db.session.get(HealthCheckRecord, record_id)
-    if not record or not has_office_access(user_id, record.office_code):
+    if not _check_record_access(user_id, record):
         return jsonify({"error": "アクセス権限がありません"}), 403
     abs_path = os.path.join(get_uploads_path(), attachment.stored_path)
     if not os.path.exists(abs_path):
@@ -1020,7 +1167,7 @@ def api_update_attachment(record_id, attachment_id):
     if not attachment or attachment.record_id != record_id:
         return jsonify({"error": "ファイルが見つかりません"}), 404
     record = db.session.get(HealthCheckRecord, record_id)
-    if not record or not has_office_access(user_id, record.office_code):
+    if not _check_record_access(user_id, record):
         return jsonify({"error": "アクセス権限がありません"}), 403
     data = request.get_json(silent=True) or {}
     attachment.title = _clean_attachment_title(data.get("title"))
@@ -1036,7 +1183,7 @@ def api_delete_attachment(record_id, attachment_id):
     if not attachment or attachment.record_id != record_id:
         return jsonify({"error": "ファイルが見つかりません"}), 404
     record = db.session.get(HealthCheckRecord, record_id)
-    if not record or not has_office_access(user_id, record.office_code):
+    if not _check_record_access(user_id, record):
         return jsonify({"error": "アクセス権限がありません"}), 403
     try:
         os.remove(os.path.join(get_uploads_path(), attachment.stored_path))
@@ -1087,7 +1234,16 @@ def api_employees():
 @login_required
 def api_users():
     """担当者割当用の DSTTユーザー候補。"""
-    users = User.query.order_by(User.name).all()
+    user_id = str(current_user.username)
+    query = User.query
+    allowed_offices = None
+    if not is_dstt_admin():
+        allowed_offices = set(get_user_offices(user_id))
+        if not allowed_offices:
+            return jsonify({"users": []})
+    users = query.order_by(User.name, User.username).all()
+    if allowed_offices is not None:
+        users = [u for u in users if set(_dstt_user_office_codes(u)) & allowed_offices]
     return jsonify({"users": [{"username": u.username, "name": u.name or u.username} for u in users]})
 
 
@@ -1157,6 +1313,7 @@ def api_dashboard():
     if error:
         return error
     all_records = query.all()
+    _sync_record_list(all_records)
     # 受診非対象者はヒーローエリアの各カウント対象外
     records = [r for r in all_records if not r.is_exempt]
     exempt = len(all_records) - len(records)
@@ -1190,10 +1347,29 @@ def api_dashboard():
 @login_required
 def api_years():
     user_id = str(current_user.username)
-    query = db.session.query(HealthCheckRecord.target_year).distinct()
+    query = (
+        db.session.query(HealthCheckRecord.target_year)
+        .outerjoin(Employee, HealthCheckRecord.employee_id == Employee.id)
+        .distinct()
+    )
     if not is_dstt_admin():
         user_offices = get_user_offices(user_id)
-        query = query.filter(HealthCheckRecord.office_code.in_(user_offices or ["__none__"]))
+        query = query.filter(db.or_(
+            db.and_(
+                HealthCheckRecord.record_type == "linked",
+                HealthCheckRecord.employee_id.isnot(None),
+                Employee.id.isnot(None),
+                Employee.office_code.in_(user_offices or ["__none__"]),
+            ),
+            db.and_(
+                db.or_(
+                    HealthCheckRecord.record_type != "linked",
+                    HealthCheckRecord.employee_id.is_(None),
+                    Employee.id.is_(None),
+                ),
+                HealthCheckRecord.office_code.in_(user_offices or ["__none__"]),
+            ),
+        ))
     years = sorted({row[0] for row in query.all()}, reverse=True)
     return jsonify({"years": years})
 
@@ -1204,7 +1380,7 @@ def api_history():
     record_id = request.args.get("record_id", type=int)
     if record_id:
         record = db.session.get(HealthCheckRecord, record_id)
-        if not record or not has_office_access(str(current_user.username), record.office_code):
+        if not _check_record_access(str(current_user.username), record):
             return jsonify({"error": "アクセス権限がありません"}), 403
         rows = (HealthCheckEditHistory.query.filter_by(record_id=record_id)
                 .order_by(HealthCheckEditHistory.edited_at.desc()).limit(100).all())
@@ -1263,6 +1439,7 @@ def api_export():
     if error:
         return error
     records = query.order_by(HealthCheckRecord.employee_number).all()
+    _sync_record_list(records)
     status_filter = request.args.get("status", "").strip()
     if status_filter:
         records = [r for r in records if r.compute_status() == status_filter]
@@ -1461,9 +1638,24 @@ def api_admin_health_officers():
         save_settings(settings)
         # 当該営業所のレコードは既定宛先が変わるため、リマインドを再同期する
         try:
-            records = HealthCheckRecord.query.filter(
-                HealthCheckRecord.office_code == office_code
-            ).all()
+            records = HealthCheckRecord.query.outerjoin(
+                Employee, HealthCheckRecord.employee_id == Employee.id
+            ).filter(db.or_(
+                db.and_(
+                    HealthCheckRecord.record_type == "linked",
+                    HealthCheckRecord.employee_id.isnot(None),
+                    Employee.id.isnot(None),
+                    Employee.office_code == office_code,
+                ),
+                db.and_(
+                    db.or_(
+                        HealthCheckRecord.record_type != "linked",
+                        HealthCheckRecord.employee_id.is_(None),
+                        Employee.id.is_(None),
+                    ),
+                    HealthCheckRecord.office_code == office_code,
+                ),
+            )).all()
             for record in records:
                 ensure_health_check_reminders(record, global_lead_days=get_global_lead_days(), commit=False)
             db.session.commit()

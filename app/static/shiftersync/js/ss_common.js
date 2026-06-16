@@ -58,6 +58,28 @@ const ShifterSync = (function() {
   const siteBranchRowIdRowPrefix = '#site_branch_row_id';
   const siteBranchRowPrefix = '#site_branch';
   const shiftSyncSourceTypes = ['scene_shift', 'person_shift', 'master_shift', 'substitute_shift', 'substitute_request'];
+  const substituteMetadataRows = [
+    ['#substitute_request_type', 'substitute_request_type'],
+    ['#substitute_helper_employee_name', 'substitute_helper_employee_name'],
+    ['#substitute_helper_employee_number', 'substitute_helper_employee_number'],
+    ['#substitute_helper_site_row_id', 'substitute_helper_site_row_id'],
+    ['#substitute_helper_site_id', 'substitute_helper_site_id'],
+    ['#substitute_helper_site_name', 'substitute_helper_site_name'],
+    ['#substitute_resolved', 'substitute_resolved', true],
+    ['#substitute_requester_user_id', 'substitute_requester_user_id'],
+    ['#substitute_requester_name', 'substitute_requester_name'],
+    ['#substitute_requested_at', 'substitute_requested_at'],
+    ['#substitute_helper_user_id', 'substitute_helper_user_id'],
+    ['#substitute_helper_name', 'substitute_helper_name'],
+    ['#substitute_helped_at', 'substitute_helped_at'],
+    ['#substitute_unassigned_helper', 'substitute_unassigned_helper', true],
+    ['#substitute_source_project_id', 'substitute_source_project_id'],
+    ['#substitute_source_project_title', 'substitute_source_project_title'],
+    ['#substitute_source_project_mode', 'substitute_source_project_mode'],
+    ['#substitute_source_month_key', 'substitute_source_month_key'],
+    ['#substitute_source_day', 'substitute_source_day'],
+    ['#substitute_source_entry_id', 'substitute_source_entry_id']
+  ];
 
   const state = {
     mode: 'scene',
@@ -3454,6 +3476,7 @@ const ShifterSync = (function() {
     const siteNameRows = [];
     const siteBranchRowIdRows = [];
     const siteBranchRows = [];
+    const substituteRows = [];
     Object.keys(state.entriesPerDay)
       .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
       .forEach((day) => {
@@ -3489,6 +3512,15 @@ const ShifterSync = (function() {
           if (entry.site_branch) {
             siteBranchRows.push([siteBranchRowPrefix, day, index, entry.site_branch]);
           }
+          substituteMetadataRows.forEach(([prefix, field, isBoolean]) => {
+            if (isBoolean) {
+              if (entry[field]) {
+                substituteRows.push([prefix, day, index, '1']);
+              }
+            } else if (entry[field]) {
+              substituteRows.push([prefix, day, index, entry[field]]);
+            }
+          });
         });
       });
 
@@ -3502,6 +3534,7 @@ const ShifterSync = (function() {
       .concat(siteNameRows)
       .concat(siteBranchRowIdRows)
       .concat(siteBranchRows)
+      .concat(substituteRows)
       .concat(state.mode === 'person' && state.targetEmployeeNumber ? [[projectEmployeeNumberRowPrefix, state.targetEmployeeNumber]] : [])
       .map((row) => row.map((cell) => csvEscape(cell)).join(','))
       .join('\n');
