@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from flask import Flask
 from openpyxl import Workbook
 
-from app.models import Employee, Office, db
+from app.models import ContactUploadHistory, Employee, Office, SalaryUploadHistory, db
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -154,3 +154,34 @@ def test_contact_rejects_non_xlsx(tmp_path):
     )
     assert resp.status_code == 400
     assert ".xlsx" in resp.get_json()["error"]
+
+
+def test_upload_histories_are_limited_to_owner_for_non_admin(tmp_path):
+    app, module = _build_client(tmp_path)
+    with app.app_context():
+        db.session.add_all([
+            SalaryUploadHistory(uploaded_by="tester", filename="own_salary.xlsx", success_count=1),
+            SalaryUploadHistory(uploaded_by="other", filename="other_salary.xlsx", success_count=1),
+            ContactUploadHistory(uploaded_by="tester", filename="own_contact.xlsx", success_count=1),
+            ContactUploadHistory(uploaded_by="other", filename="other_contact.xlsx", success_count=1),
+        ])
+        db.session.commit()
+
+    module.is_admin = lambda _user_id: False
+    client = app.test_client()
+
+    salary_response = client.get("/tools/pluslist/api/histories/salary-upload")
+    assert salary_response.status_code == 200
+    assert [row["filename"] for row in salary_response.get_json()] == ["own_salary.xlsx"]
+
+    contact_response = client.get("/tools/pluslist/api/histories/contact-upload")
+    assert contact_response.status_code == 200
+    assert [row["filename"] for row in contact_response.get_json()] == ["own_contact.xlsx"]
+
+    module.is_admin = lambda _user_id: True
+    admin_salary_response = client.get("/tools/pluslist/api/histories/salary-upload")
+    assert admin_salary_response.status_code == 200
+    assert {row["filename"] for row in admin_salary_response.get_json()} == {
+        "own_salary.xlsx",
+        "other_salary.xlsx",
+    }

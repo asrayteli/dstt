@@ -27,11 +27,12 @@ from app.models import (
 from app.services import mail_service
 from app.services import mail_inbox
 from app.access_control import (
-    TOOL_ACCESS_CATEGORIES,
     _user_satisfies_group_rule,
     is_admin_user,
     is_legacy_admin_username,
     set_tool_access,
+    tool_category,
+    tool_requires_permission,
 )
 from app.navigation import NAV_ITEMS
 from app.announcement_store import (
@@ -58,6 +59,18 @@ def generate_random_password(length=12):
     alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
     password = ''.join(secrets.choice(alphabet) for i in range(length))
     return password
+
+
+def _nav_tool_key(nav):
+    return nav.get("key") or nav.get("href", "").strip("/").rsplit("/", 1)[-1]
+
+
+def _sensitive_tool_keys():
+    return {
+        key
+        for nav in NAV_ITEMS
+        if (key := _nav_tool_key(nav)) and tool_requires_permission(key)
+    }
 
 
 def _user_matching_group_rules(user: User, rules) -> dict:
@@ -442,7 +455,7 @@ def update_user_tools(user_id):
         return jsonify({"error": "tool_keysはリストで指定してください"}), 400
 
     # sensitiveカテゴリのみ付与対象（publicは常時アクセス可能）
-    sensitive_keys = {k for k, c in TOOL_ACCESS_CATEGORIES.items() if c == "sensitive"}
+    sensitive_keys = _sensitive_tool_keys()
     desired = {str(k).strip() for k in tool_keys if str(k).strip() in sensitive_keys}
 
     try:
@@ -733,14 +746,14 @@ def get_tools_catalog():
 
     items = []
     for nav in NAV_ITEMS:
-        key = nav.get("key") or nav.get("href", "").strip("/").rsplit("/", 1)[-1]
+        key = _nav_tool_key(nav)
         items.append({
             "key": key,
             "label": nav.get("label"),
             "icon": nav.get("icon"),
             "description": nav.get("description"),
             "href": nav.get("href"),
-            "category": TOOL_ACCESS_CATEGORIES.get(key, "public"),
+            "category": tool_category(key),
         })
     return jsonify({"tools": items})
 
@@ -802,7 +815,7 @@ def create_group_tool_permission():
     tool_key = str(data.get("tool_key", "")).strip()
     if not tool_key:
         return jsonify({"error": "tool_keyは必須です"}), 400
-    sensitive_keys = {k for k, c in TOOL_ACCESS_CATEGORIES.items() if c == "sensitive"}
+    sensitive_keys = _sensitive_tool_keys()
     if tool_key not in sensitive_keys:
         return jsonify({"error": f"{tool_key} はグループ付与対象のツールではありません"}), 400
 
@@ -1008,7 +1021,7 @@ def get_tool_settings():
             "label": nav.get("label"),
             "icon": nav.get("icon"),
             "description": nav.get("description"),
-            "access_type": ts.access_type if ts else TOOL_ACCESS_CATEGORIES.get(key, "public"),
+            "access_type": ts.access_type if ts else tool_category(key),
             "is_visible": ts.is_visible if ts else True,
             "category_id": ts.category_id if ts else None,
             "category_name": ts.category.name if ts and ts.category else None,

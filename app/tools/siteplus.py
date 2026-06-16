@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, abort, current_app, jsonify, render_template, request
 from flask_login import current_user, login_required
-from sqlalchemy import func, or_
+from sqlalchemy import false, func, or_
 
 from app.models import Employee, Site, SiteBranch, SiteContractMaster, db
 from app.site_contract_master import ensure_contract_master_synced
@@ -72,6 +72,57 @@ def _accessible_office_rows() -> list:
 
 def _accessible_office_codes() -> set[str]:
     return {row.code for row in _accessible_office_rows() if row.code}
+
+
+def _is_restricted_user() -> bool:
+    from app.access_control import is_admin_user
+
+    return getattr(current_user, "id", None) is not None and not is_admin_user()
+
+
+def _can_access_office_code(code: str | None) -> bool:
+    if not _is_restricted_user():
+        return True
+    text = str(code or "").strip()
+    return bool(text) and text in _accessible_office_codes()
+
+
+def _can_access_site(site: Site | None) -> bool:
+    return site is not None and _can_access_office_code(site.office_code)
+
+
+def _get_site_for_current_user_or_404(site_row_id: int) -> Site:
+    site = _get_site_or_404(site_row_id)
+    if not _can_access_site(site):
+        abort(403)
+    return site
+
+
+def _get_branch_for_current_user_or_404(branch_id: int) -> SiteBranch:
+    branch = _get_branch_or_404(branch_id)
+    if not _can_access_site(branch.site):
+        abort(403)
+    return branch
+
+
+def _scope_contract_master_query(query):
+    if not _is_restricted_user():
+        return query
+    allowed = _accessible_office_codes()
+    if not allowed:
+        return query.filter(false())
+    return query.join(Site, SiteContractMaster.site_row_id == Site.id).filter(
+        Site.office_code.in_(allowed)
+    )
+
+
+def _get_contract_master_for_current_user_or_404(contract_code: str) -> SiteContractMaster:
+    row = db.session.get(SiteContractMaster, str(contract_code or "").strip())
+    if row is None:
+        abort(404)
+    if not _can_access_site(db.session.get(Site, row.site_row_id)):
+        abort(403)
+    return row
 
 
 def _validate_assignable_office_code(code: str) -> str:
@@ -465,6 +516,8 @@ def _site_payload_from_request(data: dict, *, existing: Site | None = None) -> d
 
     if office_code is not None:
         office_code = _validate_assignable_office_code(office_code)
+    if _is_restricted_user() and not _can_access_office_code(office_code):
+        raise ValueError("アクセス可能な営業所コードを指定してください")
 
     query = Site.query.filter(Site.site_id == site_id)
     if existing is not None:
@@ -735,6 +788,7 @@ def api_contract_master():
     if manager_id:
         query = query.filter(SiteContractMaster.site_manager_id.ilike(f"%{manager_id}%"))
 
+    query = _scope_contract_master_query(query)
     items = query.order_by(SiteContractMaster.contract_code.asc()).all()
     return jsonify({"items": [_serialize_contract_master_row(item) for item in items], "count": len(items)})
 
@@ -750,9 +804,7 @@ def api_contract_master_sync():
 @siteplus_bp.route("/api/contract-master/<contract_code>/dedicated-candidates")
 @login_required
 def api_contract_master_dedicated_candidates(contract_code: str):
-    row = db.session.get(SiteContractMaster, str(contract_code or "").strip())
-    if row is None:
-        abort(404)
+    row = _get_contract_master_for_current_user_or_404(contract_code)
     return jsonify(
         {
             "contract_code": row.contract_code,
@@ -769,9 +821,7 @@ def api_contract_master_dedicated_candidates(contract_code: str):
 @siteplus_bp.route("/api/contract-master/<contract_code>/dedicated", methods=["PUT"])
 @login_required
 def api_contract_master_set_dedicated(contract_code: str):
-    row = db.session.get(SiteContractMaster, str(contract_code or "").strip())
-    if row is None:
-        abort(404)
+    row = _get_contract_master_for_current_user_or_404(contract_code)
 
     data = request.get_json(silent=True) or {}
     delete_mode = str(data.get("mode") or "soft").strip().lower()
@@ -818,9 +868,7 @@ def api_contract_master_set_dedicated(contract_code: str):
 @login_required
 def api_contract_master_set_segment(contract_code: str):
     ensure_contract_master_synced()
-    row = db.session.get(SiteContractMaster, str(contract_code or "").strip())
-    if row is None:
-        abort(404)
+    row = _get_contract_master_for_current_user_or_404(contract_code)
 
     data = request.get_json(silent=True) or {}
     try:
@@ -838,9 +886,7 @@ def api_contract_master_set_segment(contract_code: str):
 @login_required
 def api_contract_master_set_vehicle_number(contract_code: str):
     ensure_contract_master_synced()
-    row = db.session.get(SiteContractMaster, str(contract_code or "").strip())
-    if row is None:
-        abort(404)
+    row = _get_contract_master_for_current_user_or_404(contract_code)
 
     data = request.get_json(silent=True) or {}
     vehicle_number = str(data.get("vehicle_number", "") or "").strip()
@@ -854,7 +900,7 @@ def api_contract_master_set_vehicle_number(contract_code: str):
 @siteplus_bp.route("/api/sites/<int:site_row_id>/segments", methods=["PUT"])
 @login_required
 def api_site_set_segments(site_row_id: int):
-    site = _get_site_or_404(site_row_id)
+    site = _get_site_for_current_user_or_404(site_row_id)
     _upsert_contract_master_for_site(site)
 
     data = request.get_json(silent=True) or {}
@@ -894,7 +940,7 @@ def api_site_set_segments(site_row_id: int):
 @login_required
 def api_site_detail(site_row_id: int):
     include_inactive = _parse_bool(request.args.get("include_inactive"), default=True)
-    site = _get_site_or_404(site_row_id)
+    site = _get_site_for_current_user_or_404(site_row_id)
     return jsonify({"site": _serialize_site(site, include_inactive_branches=include_inactive)})
 
 
@@ -938,7 +984,7 @@ def api_site_create():
 @siteplus_bp.route("/api/sites/<int:site_row_id>/preview", methods=["PUT"])
 @login_required
 def api_site_update_preview(site_row_id: int):
-    site = _get_site_or_404(site_row_id)
+    site = _get_site_for_current_user_or_404(site_row_id)
     data = request.get_json(silent=True) or {}
     try:
         payload = _site_payload_from_request(data, existing=site)
@@ -950,7 +996,7 @@ def api_site_update_preview(site_row_id: int):
 @siteplus_bp.route("/api/sites/<int:site_row_id>", methods=["PUT"])
 @login_required
 def api_site_update(site_row_id: int):
-    site = _get_site_or_404(site_row_id)
+    site = _get_site_for_current_user_or_404(site_row_id)
     data = request.get_json(silent=True) or {}
     try:
         payload = _site_payload_from_request(data, existing=site)
@@ -978,7 +1024,7 @@ def api_site_update(site_row_id: int):
 @siteplus_bp.route("/api/sites/<int:site_row_id>", methods=["DELETE"])
 @login_required
 def api_site_delete(site_row_id: int):
-    site = _get_site_or_404(site_row_id)
+    site = _get_site_for_current_user_or_404(site_row_id)
     data = request.get_json(silent=True) or {}
     delete_mode = str(data.get("mode") or "soft").strip().lower()
     if delete_mode not in {"soft", "hard"}:
@@ -1014,7 +1060,7 @@ def api_site_delete(site_row_id: int):
 @siteplus_bp.route("/api/sites/<int:site_row_id>/branches/preview", methods=["POST"])
 @login_required
 def api_branch_create_preview(site_row_id: int):
-    site = _get_site_or_404(site_row_id)
+    site = _get_site_for_current_user_or_404(site_row_id)
     data = request.get_json(silent=True) or {}
     try:
         payload = _branch_payload_from_request(data, site)
@@ -1026,7 +1072,7 @@ def api_branch_create_preview(site_row_id: int):
 @siteplus_bp.route("/api/sites/<int:site_row_id>/branches", methods=["GET"])
 @login_required
 def api_branch_list(site_row_id: int):
-    site = _get_site_or_404(site_row_id)
+    site = _get_site_for_current_user_or_404(site_row_id)
     include_inactive = _parse_bool(request.args.get("include_inactive"), default=True)
     branches = [branch.to_dict() for branch in site.branches if include_inactive or branch.is_active]
     return jsonify({"site_row_id": site.id, "branches": branches})
@@ -1035,7 +1081,7 @@ def api_branch_list(site_row_id: int):
 @siteplus_bp.route("/api/sites/<int:site_row_id>/branches", methods=["POST"])
 @login_required
 def api_branch_create(site_row_id: int):
-    site = _get_site_or_404(site_row_id)
+    site = _get_site_for_current_user_or_404(site_row_id)
     if not site.is_active:
         return jsonify({"error": "無効化された現場には枝番号を追加できません"}), 400
 
@@ -1062,7 +1108,7 @@ def api_branch_create(site_row_id: int):
 @siteplus_bp.route("/api/branches/<int:branch_id>/preview", methods=["PUT"])
 @login_required
 def api_branch_update_preview(branch_id: int):
-    branch = _get_branch_or_404(branch_id)
+    branch = _get_branch_for_current_user_or_404(branch_id)
     data = request.get_json(silent=True) or {}
     try:
         payload = _branch_payload_from_request(data, branch.site, existing=branch)
@@ -1074,7 +1120,7 @@ def api_branch_update_preview(branch_id: int):
 @siteplus_bp.route("/api/branches/<int:branch_id>", methods=["PUT"])
 @login_required
 def api_branch_update(branch_id: int):
-    branch = _get_branch_or_404(branch_id)
+    branch = _get_branch_for_current_user_or_404(branch_id)
     data = request.get_json(silent=True) or {}
     try:
         payload = _branch_payload_from_request(data, branch.site, existing=branch)
@@ -1096,7 +1142,7 @@ def api_branch_update(branch_id: int):
 @siteplus_bp.route("/api/branches/<int:branch_id>", methods=["DELETE"])
 @login_required
 def api_branch_delete(branch_id: int):
-    branch = _get_branch_or_404(branch_id)
+    branch = _get_branch_for_current_user_or_404(branch_id)
     data = request.get_json(silent=True) or {}
     delete_mode = str(data.get("mode") or "soft").strip().lower()
     if delete_mode not in {"soft", "hard"}:
@@ -1172,6 +1218,7 @@ def api_import_site_table():
         "vehicle_number_updated": 0,
         "errors": [],
     }
+    processed_contract_codes: set[str] = set()
 
     for row_index, row in enumerate(rows[1:], start=2):
         if not row or not any(str(cell or "").strip() for cell in row):
@@ -1228,6 +1275,11 @@ def api_import_site_table():
                 db.session.flush()
                 summary["site_created"] += 1
             else:
+                if restrict_to_accessible and not _can_access_site(site):
+                    summary["office_code_forbidden"] += 1
+                    raise ValueError(
+                        f"既存現場 '{site.site_id}' へのアクセス権限がないため更新できません"
+                    )
                 updated = False
                 if site.site_name != site_name:
                     site.site_name = site_name
@@ -1271,11 +1323,19 @@ def api_import_site_table():
                 summary["branch_created"] += 1
 
             summary["processed_rows"] += 1
+            processed_contract_codes.add(contract_code)
         except ValueError as exc:
             summary["errors"].append({"row": row_index, "message": str(exc)})
 
     _sync_contract_master()
-    segment_summary = _update_contract_master_segments(rows, source="siteplus")
+    segment_rows = rows
+    if restrict_to_accessible:
+        header = rows[:1]
+        segment_rows = header + [
+            row for row in rows[1:]
+            if str(row[0] if row else "").strip() in processed_contract_codes
+        ]
+    segment_summary = _update_contract_master_segments(segment_rows, source="siteplus")
     summary["segment_created"] = segment_summary["created"]
     summary["segment_updated"] = segment_summary["updated"]
     summary["segment_skipped"] = segment_summary["skipped"]
@@ -1285,6 +1345,8 @@ def api_import_site_table():
         contract_code = str(row[0] or "").strip()
         vehicle_number = str(row[7] or "").strip()
         if not contract_code or not vehicle_number:
+            continue
+        if restrict_to_accessible and contract_code not in processed_contract_codes:
             continue
         master_row = db.session.get(SiteContractMaster, contract_code)
         if master_row is None:
@@ -1303,6 +1365,12 @@ def api_import_site_table():
 def api_cloudshift_sites():
     q = str(request.args.get("q", "") or "").strip()
     query = Site.query.filter(Site.is_active.is_(True))
+    if _is_restricted_user():
+        allowed = _accessible_office_codes()
+        if not allowed:
+            query = query.filter(false())
+        else:
+            query = query.filter(Site.office_code.in_(allowed))
     if q:
         like = f"%{q}%"
         query = query.filter(or_(Site.site_id.ilike(like), Site.site_name.ilike(like)))
@@ -1331,6 +1399,8 @@ def api_cloudshift_branches(site_id: str):
         return jsonify({"error": str(exc)}), 400
 
     site = Site.query.filter_by(site_id=normalized_site_id, is_active=True).first_or_404()
+    if not _can_access_site(site):
+        abort(403)
     branches = [
         {
             **branch.to_dict(),

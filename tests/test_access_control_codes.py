@@ -18,6 +18,7 @@ def _stub_optional_deps():
 
     openpyxl = types.ModuleType("openpyxl")
     openpyxl.Workbook = object
+    openpyxl.load_workbook = lambda *_args, **_kwargs: None
 
     styles = types.ModuleType("openpyxl.styles")
     styles.Font = object
@@ -273,3 +274,71 @@ def test_user_with_office_does_not_auto_inherit_branch_offices(app_ctx):
         db.session.commit()
 
         assert user_office_codes(u) == {"S01"}
+
+
+def _login(client, user):
+    with client.session_transaction() as sess:
+        sess["_user_id"] = user.get_id()
+        sess["_fresh"] = True
+
+
+def test_car_inspe_is_blocked_by_sensitive_tool_guard(app_ctx):
+    from app.models import db, User
+
+    with app_ctx.app_context():
+        user = _mk_user(username="driver_admin")
+        db.session.add(user)
+        db.session.commit()
+        user_id = user.id
+
+    client = app_ctx.test_client()
+    with app_ctx.app_context():
+        user = db.session.get(User, user_id)
+        _login(client, user)
+
+    response = client.get("/tools/car_inspe/")
+    assert response.status_code == 403
+
+
+def test_dynamic_sensitive_tool_settings_drive_grant_apis(app_ctx):
+    from app.models import db, AccessBranch, AccessOffice, GroupToolPermission, ToolSettings, User, UserToolPermission
+
+    with app_ctx.app_context():
+        admin = _mk_user(username="admin", is_admin=True)
+        staff = _mk_user(username="staff")
+        branch = AccessBranch(name="Main", code="B01")
+        db.session.add_all([admin, staff, branch])
+        db.session.flush()
+        office = AccessOffice(branch_id=branch.id, name="Office", code="S01")
+        db.session.add(office)
+        setting = db.session.get(ToolSettings, "powervote")
+        if setting is None:
+            setting = ToolSettings(tool_key="powervote")
+            db.session.add(setting)
+        setting.access_type = "sensitive"
+        db.session.commit()
+        admin_id = admin.id
+        staff_id = staff.id
+        branch_id = branch.id
+
+    client = app_ctx.test_client()
+    with app_ctx.app_context():
+        _login(client, db.session.get(User, admin_id))
+
+    response = client.put(
+        f"/tools/user_management/api/users/{staff_id}/tools",
+        json={"tool_keys": ["powervote"]},
+    )
+    assert response.status_code == 200, response.get_data(as_text=True)
+
+    with app_ctx.app_context():
+        assert UserToolPermission.query.filter_by(user_id=staff_id, tool_key="powervote").first() is not None
+
+    group_response = client.post(
+        "/tools/user_management/api/group-tool-permissions",
+        json={"tool_key": "powervote", "branch_id": branch_id},
+    )
+    assert group_response.status_code == 200, group_response.get_data(as_text=True)
+
+    with app_ctx.app_context():
+        assert GroupToolPermission.query.filter_by(tool_key="powervote", branch_id=branch_id).first() is not None
