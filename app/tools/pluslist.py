@@ -2220,7 +2220,11 @@ def get_employee_salaries(employee_number):
 @login_required
 def get_salary_upload_histories():
     """賃金ファイルアップロード履歴を取得"""
-    histories = SalaryUploadHistory.query.order_by(
+    user_id = str(current_user.username)
+    query = SalaryUploadHistory.query
+    if not is_admin(user_id):
+        query = query.filter_by(uploaded_by=user_id)
+    histories = query.order_by(
         SalaryUploadHistory.uploaded_at.desc()
     ).limit(100).all()
 
@@ -2539,7 +2543,11 @@ def import_contact_data():
 @login_required
 def get_contact_upload_histories():
     """連絡先ファイル（ファイルC）アップロード履歴を取得"""
-    histories = ContactUploadHistory.query.order_by(
+    user_id = str(current_user.username)
+    query = ContactUploadHistory.query
+    if not is_admin(user_id):
+        query = query.filter_by(uploaded_by=user_id)
+    histories = query.order_by(
         ContactUploadHistory.uploaded_at.desc()
     ).limit(100).all()
 

@@ -15,7 +15,7 @@ SITE_PACKAGES = ROOT / "Lib" / "site-packages"
 if SITE_PACKAGES.exists() and str(SITE_PACKAGES) not in sys.path:
     sys.path.append(str(SITE_PACKAGES))
 
-from app.models import Employee, Office, SiteBranch, SiteContractMaster, db
+from app.models import AccessBranch, AccessOffice, Employee, Office, SiteBranch, SiteContractMaster, db
 
 
 def _load_siteplus_module():
@@ -82,6 +82,19 @@ def _user(user_id="tester01"):
     return SimpleNamespace(is_authenticated=True, username=user_id, name="Test User")
 
 
+def _restricted_user(office_id, user_id=42, username="office_user"):
+    return SimpleNamespace(
+        is_authenticated=True,
+        id=user_id,
+        username=username,
+        name="Office User",
+        is_admin=False,
+        office_id=office_id,
+        branch_id=None,
+        department_id=None,
+    )
+
+
 def test_siteplus_can_create_site_and_branch_with_zero_padding(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _user()
@@ -120,6 +133,158 @@ def test_siteplus_can_create_site_and_branch_with_zero_padding(tmp_path):
     sites = list_response.get_json()["sites"]
     assert len(sites) == 1
     assert sites[0]["branches"][0]["site_branch"] == "001"
+
+
+def test_siteplus_direct_apis_reject_sites_outside_office_scope(tmp_path, monkeypatch):
+    module, client = _build_client(tmp_path)
+    import app.access_control as access_control
+
+    with client.application.app_context():
+        branch = AccessBranch(name="Main", code="B01")
+        db.session.add(branch)
+        db.session.flush()
+        own_office = AccessOffice(branch_id=branch.id, name="Own", code="S01")
+        other_office = AccessOffice(branch_id=branch.id, name="Other", code="S02")
+        db.session.add_all([own_office, other_office])
+        db.session.flush()
+
+        own_site = module.Site(
+            site_id="10001",
+            site_name="Own Site",
+            site_manager_last="Own",
+            site_manager_first="Manager",
+            site_manager_id="9001",
+            office_code="S01",
+            site_register="seed",
+            site_updater="seed",
+            is_active=True,
+        )
+        other_site = module.Site(
+            site_id="20002",
+            site_name="Other Site",
+            site_manager_last="Other",
+            site_manager_first="Manager",
+            site_manager_id="9002",
+            office_code="S02",
+            site_register="seed",
+            site_updater="seed",
+            is_active=True,
+        )
+        db.session.add_all([own_site, other_site])
+        db.session.flush()
+        own_branch = SiteBranch(
+            site_row_id=own_site.id,
+            site_branch="001",
+            cloudshift_option_key="PENDING",
+            site_register="seed",
+            site_updater="seed",
+            is_active=True,
+        )
+        other_branch = SiteBranch(
+            site_row_id=other_site.id,
+            site_branch="001",
+            cloudshift_option_key="PENDING",
+            site_register="seed",
+            site_updater="seed",
+            is_active=True,
+        )
+        db.session.add_all([own_branch, other_branch])
+        db.session.flush()
+        module._upsert_contract_master_for_site(own_site)
+        module._upsert_contract_master_for_site(other_site)
+        db.session.commit()
+        own_office_id = own_office.id
+        own_site_id = own_site.id
+        other_site_id = other_site.id
+        other_branch_id = other_branch.id
+
+    restricted = _restricted_user(own_office_id)
+    module.current_user = restricted
+    monkeypatch.setattr(access_control, "current_user", restricted, raising=False)
+
+    sites_response = client.get("/tools/siteplus/api/sites")
+    assert sites_response.status_code == 200
+    assert [site["site_id"] for site in sites_response.get_json()["sites"]] == ["10001"]
+
+    assert client.get(f"/tools/siteplus/api/sites/{own_site_id}").status_code == 200
+    assert client.get(f"/tools/siteplus/api/sites/{other_site_id}").status_code == 403
+    assert client.put(
+        f"/tools/siteplus/api/sites/{other_site_id}",
+        json={
+            "site_id": "20002",
+            "site_name": "Changed",
+            "site_manager_last": "Other",
+            "site_manager_first": "Manager",
+            "site_manager_id": "9002",
+            "confirm_changes": True,
+        },
+    ).status_code == 403
+    assert client.delete(
+        f"/tools/siteplus/api/sites/{other_site_id}",
+        json={"confirm": True},
+    ).status_code == 403
+    assert client.get(f"/tools/siteplus/api/sites/{other_site_id}/branches").status_code == 403
+    assert client.put(
+        f"/tools/siteplus/api/branches/{other_branch_id}",
+        json={"site_branch": "002", "confirm_changes": True},
+    ).status_code == 403
+
+    contracts_response = client.get("/tools/siteplus/api/contract-master")
+    assert contracts_response.status_code == 200
+    assert [item["contract_code"] for item in contracts_response.get_json()["items"]] == ["10001001"]
+    assert client.put(
+        "/tools/siteplus/api/contract-master/20002001/segment",
+        json={"segment": ""},
+    ).status_code == 403
+
+    cloudshift_sites = client.get("/tools/siteplus/api/cloudshift/sites")
+    assert cloudshift_sites.status_code == 200
+    assert [site["site_id"] for site in cloudshift_sites.get_json()["sites"]] == ["10001"]
+    assert client.get("/tools/siteplus/api/cloudshift/sites/20002/branches").status_code == 403
+
+
+def test_siteplus_restricted_create_requires_accessible_office_code(tmp_path, monkeypatch):
+    module, client = _build_client(tmp_path)
+    import app.access_control as access_control
+
+    with client.application.app_context():
+        branch = AccessBranch(name="Main", code="B01")
+        db.session.add(branch)
+        db.session.flush()
+        own_office = AccessOffice(branch_id=branch.id, name="Own", code="S01")
+        other_office = AccessOffice(branch_id=branch.id, name="Other", code="S02")
+        db.session.add_all([own_office, other_office])
+        db.session.commit()
+        own_office_id = own_office.id
+
+    restricted = _restricted_user(own_office_id)
+    module.current_user = restricted
+    monkeypatch.setattr(access_control, "current_user", restricted, raising=False)
+
+    base_payload = {
+        "site_id": "30003",
+        "site_name": "Scoped",
+        "site_manager_last": "Scope",
+        "site_manager_first": "User",
+        "site_manager_id": "9003",
+    }
+
+    missing_office = client.post("/tools/siteplus/api/sites", json=base_payload)
+    assert missing_office.status_code == 400
+    assert "営業所コード" in missing_office.get_json()["error"]
+
+    other_office_response = client.post(
+        "/tools/siteplus/api/sites",
+        json={**base_payload, "office_code": "S02"},
+    )
+    assert other_office_response.status_code == 400
+
+    own_office_response = client.post(
+        "/tools/siteplus/api/sites",
+        json={**base_payload, "office_code": "S01"},
+    )
+    assert own_office_response.status_code == 200
+    assert own_office_response.get_json()["site"]["office_code"] == "S01"
 
 
 def test_siteplus_page_renders(tmp_path):
