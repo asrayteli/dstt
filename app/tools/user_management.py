@@ -27,7 +27,6 @@ from app.models import (
 from app.services import mail_service
 from app.services import mail_inbox
 from app.access_control import (
-    TOOL_ACCESS_CATEGORIES,
     _user_satisfies_group_rule,
     is_admin_user,
     is_legacy_admin_username,
@@ -61,10 +60,14 @@ def generate_random_password(length=12):
     return password
 
 
+def _nav_tool_key(nav):
+    return nav.get("key") or nav.get("href", "").strip("/").rsplit("/", 1)[-1]
+
+
 def _assignable_tool_keys() -> set[str]:
     keys = set()
     for nav in NAV_ITEMS:
-        key = nav.get("key") or nav.get("href", "").strip("/").rsplit("/", 1)[-1]
+        key = _nav_tool_key(nav)
         if key and tool_category(key) == "sensitive":
             keys.add(key)
     return keys
@@ -743,7 +746,7 @@ def get_tools_catalog():
 
     items = []
     for nav in NAV_ITEMS:
-        key = nav.get("key") or nav.get("href", "").strip("/").rsplit("/", 1)[-1]
+        key = _nav_tool_key(nav)
         items.append({
             "key": key,
             "label": nav.get("label"),
@@ -1027,7 +1030,7 @@ def get_tool_settings():
             "label": nav.get("label"),
             "icon": nav.get("icon"),
             "description": nav.get("description"),
-            "access_type": ts.access_type if ts else TOOL_ACCESS_CATEGORIES.get(key, "public"),
+            "access_type": ts.access_type if ts else tool_category(key),
             "is_visible": ts.is_visible if ts else True,
             "category_id": ts.category_id if ts else None,
             "category_name": ts.category.name if ts and ts.category else None,

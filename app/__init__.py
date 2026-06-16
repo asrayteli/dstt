@@ -782,6 +782,7 @@ def create_app(test_config=None):
         "power_imager": "power_imager",
         "bus_pricing": "bus_pricing",
         "health_check": "health_check",
+        "car_inspe": "car_inspe",
     }
     _EXEMPT_PATH_PREFIXES = (
         "/tools/shiftersync/download/",
