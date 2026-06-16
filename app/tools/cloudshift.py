@@ -1341,6 +1341,46 @@ def _prepared_local_entries_for_month(
     return combined
 
 
+def _strip_engine_draft_synced_collisions(
+    draft_entries: dict[str, Any],
+    current_entries_per_day: Any,
+) -> dict[str, list[dict[str, Any]]]:
+    """自動作成の下書きから、サーバー同期 entry と衝突する行を取り除く。
+
+    下書き（build_draft_entries）は月全体を local entry として表現するが、保存時の
+    merge（_prepared_local_entries_for_month）はサーバー権威の同期 entry を常に再付与する。
+    そのため同期済み社員や同期 entry id をそのまま下書きに残すと、保存後にその社員/ID が
+    二重化する（同一人物の二重配置・同一 id の二重化）。同期 entry はその日のサーバー側を
+    正とし、下書き側の衝突分（同一社員番号 or 同一 entry id）を落として重複を防ぐ。
+    同期 entry の無い日・現場では下書きは変化しない（通常運用への影響なし）。
+    """
+    current = current_entries_per_day if isinstance(current_entries_per_day, dict) else {}
+    result: dict[str, list[dict[str, Any]]] = {}
+    for day_key, entries in (draft_entries or {}).items():
+        synced_numbers: set[str] = set()
+        synced_ids: set[str] = set()
+        for entry in (current.get(day_key) or []):
+            if not isinstance(entry, dict) or not _entry_is_shift_synced(entry):
+                continue
+            number = str(entry.get("employee_number") or "").strip()
+            if number:
+                synced_numbers.add(number)
+            entry_id = str(entry.get("id") or "").strip()
+            if entry_id:
+                synced_ids.add(entry_id)
+        kept: list[dict[str, Any]] = []
+        for entry in (entries or []):
+            if not isinstance(entry, dict):
+                continue
+            number = str(entry.get("employee_number") or "").strip()
+            entry_id = str(entry.get("id") or "").strip()
+            if (number and number in synced_numbers) or (entry_id and entry_id in synced_ids):
+                continue
+            kept.append(entry)
+        result[str(day_key)] = kept
+    return result
+
+
 def _entry_resolved_flag(entry: dict[str, Any] | None) -> bool:
     if not isinstance(entry, dict):
         return False
@@ -2745,7 +2785,9 @@ def _ensure_substitute_projects_for_current_user() -> None:
 
 
 def _find_project_by_token(token: str, token_type: str) -> dict[str, Any]:
-    key = {"view": "view_token", "edit": "edit_token", "pwa": "pwa_token"}.get(token_type, "edit_token")
+    key = {"view": "view_token", "edit": "edit_token", "pwa": "pwa_token"}.get(token_type)
+    if key is None:
+        abort(404)
     token = str(token or "")
     if not token:
         abort(404)
@@ -3097,6 +3139,10 @@ def _restore_month_revision_in_project(
     restored["month"] = month
     restored["capacity_enabled"] = bool(restored.get("required_capacity", 0) > 0)
     restored["entries_per_day"] = _normalize_entries(restored.get("entries_per_day"), year, month)
+    # 復元は live を過去リビジョンへ戻す操作。未公開の下書き（WIP）は別物として保全し、
+    # 利用者の意図しないサイレントな下書き消失を避ける（スナップショットは draft を含まない）。
+    if "draft_entries_per_day" in current_month:
+        restored["draft_entries_per_day"] = current_month["draft_entries_per_day"]
     restored["revision"] = current_revision + 1
     restored["created_at"] = current_month.get("created_at", _utcnow_iso())
     restored["updated_at"] = _utcnow_iso()
@@ -4343,6 +4389,11 @@ def _replace_shift_synced_entries_in_target_project(
             "entries_per_day": next_entries_per_day,
         }
         merged = _merge_month_payload(current_month, incoming_month, _snapshot_month_payload(current_month))
+        # 同期反映は live entry の差し替えのみ。target の未公開下書き（手動 WIP・自動作成の
+        # 下書き）を失わないよう、既存の下書きを引き継ぐ（_merge_month_payload は draft を
+        # 持たないため、引き継がないと upsert で live にフォールバックして消える）。
+        if "draft_entries_per_day" in current_month:
+            merged["draft_entries_per_day"] = current_month["draft_entries_per_day"]
         entry_changes = _describe_month_changes(current_month, merged)
         if entry_changes:
             snapshots = dict(current_month.get("revision_snapshots") or {})
@@ -4519,6 +4570,9 @@ def _refresh_master_shift_from_sources(
         "entries_per_day": next_entries_per_day,
     }
     merged = _merge_month_payload(current_month, incoming_month, _snapshot_month_payload(current_month))
+    # マスター帳の未公開下書きを同期反映で失わないよう、既存の下書きを引き継ぐ。
+    if "draft_entries_per_day" in current_month:
+        merged["draft_entries_per_day"] = current_month["draft_entries_per_day"]
     changes = _describe_month_changes(current_month, merged)
     if not changes:
         return False
@@ -4729,205 +4783,6 @@ def _person_experience_source_item(project: dict[str, Any], experience_id: str) 
     )
 
 
-def _person_experience_sync_note(actor_name: str, notes: str) -> str:
-    base = f"{str(actor_name or '').strip() or 'user'} からの自動実績登録"
-    extra = str(notes or "").strip()
-    return f"{base}\n{extra}" if extra else base
-
-
-def _person_experience_sync_source(person_project: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "type": "person_experience",
-        "person_project_id": str(person_project.get("id") or ""),
-        "experience_id": str(item.get("id") or ""),
-        "site_name": str(item.get("site_name") or ""),
-    }
-
-
-def _is_person_experience_synced_record(
-    record: dict[str, Any], person_project_id: str, experience_id: str
-) -> bool:
-    source = record.get("sync_source")
-    if not isinstance(source, dict):
-        return False
-    return (
-        str(source.get("type") or "") == "person_experience"
-        and str(source.get("person_project_id") or "") == str(person_project_id or "")
-        and str(source.get("experience_id") or "") == str(experience_id or "")
-    )
-
-
-def _remove_person_experience_synced_records(
-    scene_project: dict[str, Any],
-    person_project_id: str,
-    experience_id: str,
-    *,
-    actor_name: str,
-) -> bool:
-    assist = _ensure_assist(scene_project)
-    existing = [
-        item
-        for item in (assist.get("records") or [])
-        if _is_person_experience_synced_record(item, person_project_id, experience_id)
-    ]
-    if not existing:
-        return False
-    assist["records"] = [
-        item
-        for item in (assist.get("records") or [])
-        if not _is_person_experience_synced_record(item, person_project_id, experience_id)
-    ]
-    _save_project(scene_project)
-    _append_history(
-        scene_project["id"],
-        {
-            "timestamp": _utcnow_iso(),
-            "editor_name": actor_name,
-            "editor_type": "system",
-            "action": "assist_record_deleted",
-            "month_key": None,
-            "changes": [
-                f"person 経験済現場との自動連携を解除: {_assist_record_history_label(item)}"
-                for item in existing
-            ][:20],
-        },
-    )
-    return True
-
-
-def _upsert_person_experience_synced_record(
-    scene_project: dict[str, Any],
-    person_project: dict[str, Any],
-    experience: dict[str, Any],
-    *,
-    actor_name: str,
-) -> bool:
-    assist = _ensure_assist(scene_project)
-    existing = next(
-        (
-            item
-            for item in (assist.get("records") or [])
-            if _is_person_experience_synced_record(
-                item,
-                str(person_project.get("id") or ""),
-                str(experience.get("id") or ""),
-            )
-        ),
-        None,
-    )
-    record = _assist_record_from_payload(
-        assist,
-        {
-            "date": str(experience.get("effective_from") or experience.get("date") or ""),
-            "candidate_name": person_project.get("title"),
-            "employee_number": person_project.get("employee_number"),
-            "shift_key": experience.get("shift_key"),
-            "role_type": PERSON_ASSIST_AUTO_ROLE_TYPE,
-            "notes": _person_experience_sync_note(actor_name, str(experience.get("notes") or "")),
-        },
-        existing=existing,
-        actor_name=actor_name,
-    )
-    record["sync_source"] = _person_experience_sync_source(person_project, experience)
-    changed = False
-    if existing:
-        index = assist["records"].index(existing)
-        if assist["records"][index] != record:
-            assist["records"][index] = record
-            changed = True
-    else:
-        assist["records"].append(record)
-        changed = True
-    if not changed:
-        return False
-    _save_project(scene_project)
-    _append_history(
-        scene_project["id"],
-        {
-            "timestamp": _utcnow_iso(),
-            "editor_name": actor_name,
-            "editor_type": "system",
-            "action": "assist_record_saved",
-            "month_key": None,
-            "changes": [f"person 経験済現場から自動実績登録: {_assist_record_history_label(record)}"],
-        },
-    )
-    return True
-
-
-def _resync_person_experience_targets(person_project_id: str, experience_id: str, actor_name: str) -> None:
-    person_project = _load_project(person_project_id)
-    experience = (
-        _person_experience_source_item(person_project, experience_id)
-        if isinstance(person_project, dict)
-        else None
-    )
-    # 第二オプション由来の自動経験は scene へ連携しない（二重加点防止）
-    if experience and str(experience.get("source_type") or "") == ROLE_OPTION_ASSIST_SOURCE:
-        experience = None
-    experience_site_name = str(experience.get("site_name") or "").strip() if experience else ""
-    for scene_project in _iter_stored_projects():
-        if not scene_project or scene_project.get("mode") != "scene":
-            continue
-        scene_project_id = str(scene_project.get("id") or "")
-        with _project_lock(scene_project_id):
-            scene_project = _load_project(scene_project_id)
-            if scene_project.get("mode") != "scene":
-                continue
-            title_matches = (
-                bool(experience)
-                and str(scene_project.get("title") or "").strip() == experience_site_name
-            )
-            if title_matches:
-                _upsert_person_experience_synced_record(
-                    scene_project,
-                    person_project,
-                    experience,
-                    actor_name=actor_name,
-                )
-            else:
-                _remove_person_experience_synced_records(
-                    scene_project,
-                    person_project_id,
-                    experience_id,
-                    actor_name=actor_name,
-                )
-
-
-def _sync_scene_project_from_person_experiences(scene_project_id: str, actor_name: str) -> None:
-    with _project_lock(scene_project_id):
-        scene_project = _load_project(scene_project_id)
-        if scene_project.get("mode") != "scene":
-            return
-        target_title = str(scene_project.get("title") or "").strip()
-        for person_project in _iter_stored_projects():
-            if not person_project or person_project.get("mode") != "person":
-                continue
-            assist = _ensure_person_assist(person_project)
-            for experience in assist.get("experienced_sites") or []:
-                if str(experience.get("site_name") or "").strip() != target_title:
-                    continue
-                _upsert_person_experience_synced_record(
-                    scene_project,
-                    person_project,
-                    experience,
-                    actor_name=actor_name,
-                )
-
-
-def _resync_person_project_experiences(person_project_id: str, actor_name: str) -> None:
-    person_project = _load_json(_project_path(person_project_id))
-    if not person_project or person_project.get("mode") != "person":
-        return
-    assist = _ensure_person_assist(person_project)
-    for experience in assist.get("experienced_sites") or []:
-        _resync_person_experience_targets(
-            str(person_project.get("id") or ""),
-            str(experience.get("id") or ""),
-            actor_name,
-        )
-
-
 def _assist_profile_payload(profile: dict[str, Any]) -> dict[str, Any]:
     preferred_weekdays = _assist_weekday_values(profile.get("preferred_weekdays"), "希望曜日")
     blocked_weekdays = _assist_weekday_values(profile.get("blocked_weekdays"), "NG曜日")
@@ -5029,6 +4884,94 @@ def _assist_rule_payload(rule: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _scene_experienced_people(assist: dict[str, Any]) -> list[dict[str, Any]]:
+    """現場シフト帳の『経験したことがある人』を集計する（要件2）。
+
+    アシスト実績（records）を社員番号（無ければ氏名）ごとに 1 件へまとめ、その現場での
+    実績数・最終実績日・経験したオプション・登録元を返す。自動作成エンジン（build_workers）
+    と同じ records を材料にするため、ここに出る『経験者』は自動作成の経験者判定と同じ顔ぶれ
+    になる（実績数は実働回数の目安で、エンジン内部スコアの件数とは別物）。
+    """
+    records = [item for item in (assist.get("records") or []) if isinstance(item, dict)]
+    # 番号なし実績を本人へ寄せるため、氏名→社員番号の対応を作る（一意に定まる場合のみ）。
+    # これで「同じ人の一部の実績だけ番号付き」でも 1 行に集約でき、二重表示を防ぐ。
+    name_numbers: dict[str, set[str]] = {}
+    for record in records:
+        number = str(record.get("employee_number") or "").strip()
+        name = str(record.get("candidate_name") or "").strip()
+        if number and name:
+            name_numbers.setdefault(name, set()).add(number)
+    name_to_number = {
+        name: next(iter(numbers))
+        for name, numbers in name_numbers.items()
+        if len(numbers) == 1
+    }
+
+    people: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for record in records:
+        number = str(record.get("employee_number") or "").strip()
+        name = str(record.get("candidate_name") or "").strip()
+        if not number and name:
+            number = name_to_number.get(name, "")
+        if not number and not name:
+            continue
+        key = f"num:{number}" if number else f"name:{name}"
+        person = people.get(key)
+        if person is None:
+            person = {
+                "employee_number": number,
+                "candidate_name": name,
+                "record_count": 0,
+                "latest_date": "",
+                "shift_keys": [],
+                "source_types": set(),
+                "trained_only": True,
+            }
+            people[key] = person
+            order.append(key)
+        if number and not person["employee_number"]:
+            person["employee_number"] = number
+        if name and not person["candidate_name"]:
+            person["candidate_name"] = name
+        # 役割オプション由来の実績は日数を source_occurrences に畳んで持つため、
+        # 実績数は「件数」ではなく実働回数（occurrences）で数える。
+        try:
+            occurrences = int(record.get("source_occurrences") or 1)
+        except (TypeError, ValueError):
+            occurrences = 1
+        person["record_count"] += max(1, occurrences)
+        date_value = str(record.get("date") or "").strip()
+        if date_value > person["latest_date"]:
+            person["latest_date"] = date_value
+        shift_key = str(record.get("shift_key") or "").strip().upper()
+        if shift_key and shift_key not in person["shift_keys"]:
+            person["shift_keys"].append(shift_key)
+        if shift_key != ROLE_OPTION_TRAINING_KEY:
+            person["trained_only"] = False
+        source_type = str(record.get("source_type") or "").strip()
+        if source_type:
+            person["source_types"].add(source_type)
+
+    result: list[dict[str, Any]] = []
+    for key in order:
+        person = people[key]
+        result.append({
+            "employee_number": person["employee_number"],
+            "candidate_name": person["candidate_name"] or person["employee_number"] or "名称未設定",
+            "record_count": person["record_count"],
+            "latest_date": person["latest_date"],
+            "shift_keys": person["shift_keys"],
+            "shift_labels": [_assist_shift_label(item) for item in person["shift_keys"]],
+            "trained_only": bool(person["trained_only"]),
+            "experience_label": "研修済み" if person["trained_only"] else "経験あり",
+            "has_auto_source": ROLE_OPTION_ASSIST_SOURCE in person["source_types"]
+            or PERSON_ASSIST_AUTO_SOURCE in person["source_types"],
+        })
+    result.sort(key=lambda item: (item["latest_date"], item["record_count"], item["candidate_name"]), reverse=True)
+    return result
+
+
 def _assist_bootstrap_payload(project: dict[str, Any], *, can_edit_records: bool, can_edit_rules: bool) -> dict[str, Any]:
     assist = _ensure_assist(project)
     profiles = [_assist_profile_payload(item) for item in assist["profiles"]]
@@ -5036,6 +4979,7 @@ def _assist_bootstrap_payload(project: dict[str, Any], *, can_edit_records: bool
     rules = [_assist_rule_payload(item) for item in assist["rules"]]
     experienced_sites = [_person_assist_site_payload(item) for item in assist["experienced_sites"]]
     training_sites = [_person_assist_site_payload(item) for item in assist["training_sites"]]
+    experienced_people = _scene_experienced_people(assist)
     profiles.sort(key=lambda item: (not item["active"], item["name"], item["employee_number"]))
     records.sort(key=lambda item: (item["date"], item["shift_key"], item["candidate_name"]), reverse=True)
     rules.sort(
@@ -5057,6 +5001,7 @@ def _assist_bootstrap_payload(project: dict[str, Any], *, can_edit_records: bool
             "rules": rules,
             "experienced_sites": experienced_sites,
             "training_sites": training_sites,
+            "experienced_people": experienced_people,
         },
         "permissions": {
             "can_edit_records": bool(can_edit_records),
@@ -8953,10 +8898,16 @@ def _publish_draft_month_in_project(
     if not _month_draft_has_changes(current_month, year, month):
         return current_month
 
+    # 公開直前にサーバー権威の同期 entry を取り直してから正式へ昇格する。
+    # 下書き保存後にソース側で変化・削除された同期 entry を、下書きの固着値ではなく
+    # 現在値で反映する（古い/削除済みの同期 entry の復活を防ぐ）。
+    published_entries = _prepared_local_entries_for_month(
+        project, current_month, draft_entries, year=year, month=month
+    )
     published = {
         **current_month,
-        "entries_per_day": draft_entries,
-        "draft_entries_per_day": draft_entries,
+        "entries_per_day": published_entries,
+        "draft_entries_per_day": published_entries,
         "revision": int(current_month.get("revision", 1) or 1) + 1,
         "updated_at": _utcnow_iso(),
     }
@@ -10230,6 +10181,12 @@ def _shift_engine_plan(project: dict[str, Any], payload: dict[str, Any]) -> dict
     year, month, request_obj, settings, warnings, result = _shift_engine_build_and_plan(project, payload)
 
     draft_preview = cs_apply.build_draft_entries(request_obj, result)
+    # 同期 entry はサーバー権威。プレビュー（→下書き保存）で二重化しないよう、
+    # 下書きから同期 entry と衝突する行（同一社員番号 or 同一 id）を落とす。
+    _plan_month = (project.get("months") or {}).get(_month_key(year, month)) or {}
+    draft_preview = _strip_engine_draft_synced_collisions(
+        draft_preview, _plan_month.get("entries_per_day") or {}
+    )
     perf_warnings: list[dict[str, str]] = []
     if len(request_obj.workers) > 300 or sum(s.required_count for s in request_obj.required_slots) > 500:
         perf_warnings.append({
@@ -10291,9 +10248,10 @@ def _shift_engine_apply_draft(project: dict[str, Any], payload: dict[str, Any], 
                              f"revision mismatch (base={base_revision}, current={current_revision})")
         raise CloudShiftError("対象月が他の操作で更新されています。再計算してください", 409)
 
-    # request_hash 不一致（入力・設定が変わった）
+    # request_hash 不一致（入力・設定が変わった）。設計書どおり省略も拒否し、
+    # plan で得た hash を必須にして古い plan の反映を防ぐ。
     client_hash = str(payload.get("request_hash") or "")
-    if client_hash and client_hash != result.request_hash:
+    if not client_hash or client_hash != result.request_hash:
         _shift_engine_reject(project["id"], month_key, "apply-draft", "request_hash mismatch")
         raise CloudShiftError("設定または他現場の状況が変化しています。再計算してください", 409)
 
@@ -10315,6 +10273,12 @@ def _shift_engine_apply_draft(project: dict[str, Any], payload: dict[str, Any], 
 
     # 下書きへ変換して保存
     draft_payload = cs_apply.build_draft_payload(request_obj, result)
+    # 同期 entry はサーバー側を正とし、下書き側の衝突分を落として二重化を防ぐ
+    # （保存時の merge が同期 entry を再付与するため、下書きへ残すと社員/ID が二重になる）。
+    draft_payload["entries_per_day"] = _strip_engine_draft_synced_collisions(
+        draft_payload.get("entries_per_day") or {},
+        month_data.get("entries_per_day") or {},
+    )
     saved_month = _save_draft_month_in_project(
         project, year, month, draft_payload, _user_label(), access_role, _user_id()
     )

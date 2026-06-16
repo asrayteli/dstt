@@ -2056,7 +2056,8 @@
       return {
         profiles: [],
         records: [],
-        rules: []
+        rules: [],
+        experienced_people: []
       };
     }
 
@@ -2739,7 +2740,8 @@
       return {
         records: Array.isArray(data.records) ? data.records.length : 0,
         rules: Array.isArray(data.rules) ? data.rules.length : 0,
-        profiles: Array.isArray(data.profiles) ? data.profiles.length : 0
+        profiles: Array.isArray(data.profiles) ? data.profiles.length : 0,
+        experienced_people: Array.isArray(data.experienced_people) ? data.experienced_people.length : 0
       };
     }
 
@@ -3392,6 +3394,79 @@
       `;
     }
 
+    function buildAssistScenePeopleTable(people, options) {
+      const expanded = !!(options && options.expanded);
+      if (!Array.isArray(people) || !people.length) {
+        return '<div class="cloud-empty-state"><p>経験したことがある人はまだいません。シフトに「代務」「研修」の第二オプションを付けるか、実績を登録すると自動で集計されます。</p></div>';
+      }
+      const rows = people.map((person) => {
+        const optionText = Array.isArray(person.shift_labels) && person.shift_labels.length
+          ? person.shift_labels.join('、')
+          : '-';
+        const badge = person.trained_only
+          ? '<span class="cloud-assist-people-badge is-trained">研修済み</span>'
+          : '<span class="cloud-assist-people-badge is-experienced">経験あり</span>';
+        return `
+          <tr>
+            <td>${escapeHtml(person.candidate_name || '-')}</td>
+            <td class="cloud-assist-site-table-nowrap">${escapeHtml(person.employee_number || '未設定')}</td>
+            <td class="cloud-assist-site-table-nowrap">${badge}</td>
+            <td class="cloud-assist-site-table-nowrap">${escapeHtml(String(person.record_count || 0))}件</td>
+            <td class="cloud-assist-site-table-nowrap">${escapeHtml(person.latest_date || '-')}</td>
+            <td>${escapeHtml(optionText)}</td>
+          </tr>
+        `;
+      }).join('');
+      return `
+        <div class="cloud-assist-site-table-wrap${expanded ? ' is-expanded' : ''}">
+          <table class="cloud-assist-site-table">
+            <thead>
+              <tr>
+                <th>名前</th>
+                <th>社員番号</th>
+                <th>経験</th>
+                <th>実績数</th>
+                <th>最終実績日</th>
+                <th>経験オプション</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function openAssistScenePeopleDetailPopup() {
+      const data = currentAssistData();
+      const people = Array.isArray(data.experienced_people) ? data.experienced_people : [];
+      const modal = openCloudModal('cloud-assist-people-detail-modal', `経験したことがある人（${people.length}）`);
+      const panel = modal.querySelector('.cloud-modal-panel');
+      if (panel) panel.classList.add('cloud-modal-panel-wide');
+      modalBody(modal).innerHTML = buildAssistScenePeopleTable(people, { expanded: true });
+      const footer = modalFooter(modal);
+      footer.innerHTML = '<button type="button" class="cloud-btn secondary" data-assist-people-detail-close>閉じる</button>';
+      const closeBtn = footer.querySelector('[data-assist-people-detail-close]');
+      if (closeBtn) closeBtn.addEventListener('click', () => closeCloudModal('cloud-assist-people-detail-modal'));
+    }
+
+    function buildAssistScenePeopleSection() {
+      const counts = assistCounts();
+      const data = currentAssistData();
+      const people = Array.isArray(data.experienced_people) ? data.experienced_people : [];
+      return `
+        <div class="cloud-assist-section">
+          <div class="cloud-assist-subhead">
+            <div>
+              <strong>経験したことがある人（${counts.experienced_people || 0}）</strong>
+              <p class="cloud-panel-note">この現場で実績のある人を一覧します。「誰が行ったことあるかな」の確認に使えます。代務・研修の第二オプションや実績登録から自動で集計され、同じ材料が自動作成の経験者判定にも使われます。</p>
+            </div>
+            <button type="button" class="cloud-btn secondary cloud-assist-expand-btn" data-assist-expand-people>拡大表示</button>
+          </div>
+          ${buildAssistScenePeopleTable(people)}
+        </div>
+      `;
+    }
+
     function openAssistSiteDetailPopup(siteType) {
       const data = currentAssistData();
       const counts = assistCounts();
@@ -3607,6 +3682,7 @@
       `;
       return `
         <div class="cloud-assist-stack cloud-assist-details-stack">
+          ${buildAssistScenePeopleSection()}
           ${buildAssistDetailAccordion(
             'overview',
             '点数の見方',
@@ -4719,6 +4795,11 @@
       modal.querySelectorAll('[data-assist-expand-sites]').forEach((button) => {
         button.addEventListener('click', () => {
           openAssistSiteDetailPopup(button.getAttribute('data-assist-expand-sites') || 'experienced');
+        });
+      });
+      modal.querySelectorAll('[data-assist-expand-people]').forEach((button) => {
+        button.addEventListener('click', () => {
+          openAssistScenePeopleDetailPopup();
         });
       });
       modal.querySelectorAll('[data-assist-register-view]').forEach((button) => {

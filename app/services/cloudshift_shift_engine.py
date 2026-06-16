@@ -2946,6 +2946,12 @@ def _opt_int(value: Any) -> int | None:
         return None
 
 
+def _int_or(value: Any, default: int) -> int:
+    """数値化できない保存値（破損・手編集）でも例外を出さず default に落とす。"""
+    parsed = _opt_int(value)
+    return default if parsed is None else parsed
+
+
 def preferences_from_dict(raw: Any) -> PlanningPreferences:
     """既定方針の上に dict の指定値を重ねた PlanningPreferences を返す。"""
     base = default_planning_preferences()
@@ -2997,12 +3003,12 @@ def _demand_rule_from_dict(raw: dict[str, Any]) -> DemandRule:
         include_dates=_as_date_tuple(raw.get("include_dates")),
         shift_key=str(raw.get("shift_key") or ""),
         shift_label=str(raw.get("shift_label") or ""),
-        required_count=int(raw.get("required_count", 1) or 0),
+        required_count=_int_or(raw.get("required_count", 1) or 0, 0),
         site_branch_row_id=str(raw.get("site_branch_row_id") or ""),
         site_branch=str(raw.get("site_branch") or ""),
         required_qualification_codes=_as_str_tuple(raw.get("required_qualification_codes")),
         required_vehicle_options=_as_str_tuple(raw.get("required_vehicle_options")),
-        priority=int(raw.get("priority", 100) or 100),
+        priority=_int_or(raw.get("priority", 100) or 100, 100),
     )
 
 
@@ -3011,7 +3017,7 @@ def _rule_from_dict(raw: dict[str, Any]) -> Rule:
         rule_id=str(raw.get("rule_id") or ""),
         kind=str(raw.get("kind") or "manual"),  # type: ignore[arg-type]
         enabled=bool(raw.get("enabled", True)),
-        priority=int(raw.get("priority", 100) or 100),
+        priority=_int_or(raw.get("priority", 100) or 100, 100),
         effective_from=_parse_iso_date(raw.get("effective_from")),
         effective_to=_parse_iso_date(raw.get("effective_to")),
         params=dict(raw.get("params") or {}),

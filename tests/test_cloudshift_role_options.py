@@ -702,3 +702,181 @@ def test_assist_search_scores_substitute_above_training():
     assert any("研修実績" in reason for reason in candidates["E102"]["reasons"])
     train_breakdown = [b for b in candidates["E102"]["breakdown"] if b["label"] == "研修実績"]
     assert train_breakdown and train_breakdown[0]["base_points"] == module.ASSIST_TRAINING_RECORD_POINTS
+
+
+# ---------------------------------------------------------------------------
+# 現場帳の「経験したことがある人」集計（要件2）
+# ---------------------------------------------------------------------------
+
+
+def _scene_assist_payload(client, project_id):
+    resp = client.get(f"{BASE}/api/project/{project_id}/assist")
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    return resp.get_json()["assist"]
+
+
+def test_scene_experienced_people_aggregates_role_options():
+    """現場帳の代務/研修は『経験したことがある人』へ社員ごとに集約される。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    module.current_user = _owner()
+
+    _save_month_entries(module, app, client, project_id, {
+        "1": [{"id": "e1", "value": "!A!田中", "second_option": "SUB",
+               "employee_number": "E101", "comment": ""}],
+        "2": [{"id": "e2", "value": "!A!田中", "second_option": "SUB",
+               "employee_number": "E101", "comment": ""}],
+        "3": [{"id": "e3", "value": "!TRAIN!山田", "employee_number": "E102", "comment": ""}],
+    })
+
+    assist = _scene_assist_payload(client, project_id)
+    people = {p["employee_number"]: p for p in assist["experienced_people"]}
+    assert set(people) == {"E101", "E102"}
+    # 代務（SUB）を 2 日 → 実働 2 回・経験あり扱い
+    assert people["E101"]["record_count"] == 2
+    assert people["E101"]["trained_only"] is False
+    assert people["E101"]["experience_label"] == "経験あり"
+    assert people["E101"]["latest_date"] == "2026-04-02"
+    assert "代務" in people["E101"]["shift_labels"]
+    # 研修（TRAIN）のみ → 研修済み扱い
+    assert people["E102"]["trained_only"] is True
+    assert people["E102"]["experience_label"] == "研修済み"
+
+    # 代務 entry を全部消すと、その人は経験者一覧から外れる（自動解除）
+    _save_month_entries(module, app, client, project_id, {
+        "3": [{"id": "e3", "value": "!TRAIN!山田", "employee_number": "E102", "comment": ""}],
+    })
+    assist = _scene_assist_payload(client, project_id)
+    assert [p["employee_number"] for p in assist["experienced_people"]] == ["E102"]
+
+
+def test_scene_experienced_people_includes_manual_records():
+    """手動登録の実績も『経験したことがある人』に含まれ、名前のみでも集計される。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    module.current_user = _owner()
+
+    with app.app_context():
+        project = module._load_project(project_id)
+        assist = module._ensure_assist(project)
+        manual = module._assist_record_from_payload(
+            assist,
+            {"date": "2026-04-05", "candidate_name": "手動太郎",
+             "employee_number": "", "shift_key": "A", "role_type": "normal",
+             "notes": "手動登録"},
+            actor_name="tester",
+        )
+        assist["records"].append(manual)
+        module._save_project(project)
+
+    assist = _scene_assist_payload(client, project_id)
+    names = {p["candidate_name"]: p for p in assist["experienced_people"]}
+    assert "手動太郎" in names
+    assert names["手動太郎"]["employee_number"] == ""
+    assert names["手動太郎"]["record_count"] == 1
+    assert names["手動太郎"]["trained_only"] is False
+
+
+def test_person_book_payload_has_no_experienced_people_key():
+    """個人帳のアシストには『経験したことがある人』キーは付かない（現場帳専用）。"""
+    module, app = _build()
+    client = app.test_client()
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+    assist = _person_assist_payload(client, person_id)
+    assert "experienced_people" not in assist
+    assert "experienced_sites" in assist
+
+
+def test_scene_experienced_people_merges_name_only_into_numbered():
+    """同じ人の『番号付き実績』と『同名・番号なし実績』は 1 行に集約される（二重表示防止）。"""
+    module, app = _build()
+    client, project_id = _create_scene_project(module, app, site_row_id="10")
+    module.current_user = _owner()
+
+    with app.app_context():
+        project = module._load_project(project_id)
+        assist = module._ensure_assist(project)
+        for emp, when in (("E101", "2026-04-10"), ("", "2026-04-12")):
+            rec = module._assist_record_from_payload(
+                assist,
+                {"date": when, "candidate_name": "田中", "employee_number": emp,
+                 "shift_key": "A", "role_type": "normal", "notes": ""},
+                actor_name="tester",
+            )
+            assist["records"].append(rec)
+        module._save_project(project)
+
+    assist = _scene_assist_payload(client, project_id)
+    tanaka = [p for p in assist["experienced_people"] if p["candidate_name"] == "田中"]
+    assert len(tanaka) == 1  # 番号なし実績が一意な本人へ寄せられ、二重表示にならない
+    assert tanaka[0]["employee_number"] == "E101"
+    assert tanaka[0]["record_count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# 同期反映・公開の下書き保全（リグレッション）
+# ---------------------------------------------------------------------------
+
+
+def _synced_from(source_id, entry_id="syn1", value="!A!三木", number="E101", comment="v1"):
+    return {
+        "id": entry_id, "value": value, "employee_number": number, "comment": comment,
+        "sync_source_type": module_SHIFT_SYNC_SCENE if False else "scene_shift",
+        "sync_source_project_id": source_id, "sync_source_month_key": "2026-04",
+        "sync_source_day": "1", "sync_source_entry_id": "s1",
+    }
+
+
+def test_resync_preserves_target_unpublished_draft():
+    """他帳の保存に伴う同期反映で、対象帳の未公開下書き（WIP）が消えない（データ損失防止）。"""
+    module, app = _build()
+    client, scene_id = _create_scene_project(module, app, site_row_id="10")
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+
+    with app.app_context():
+        scene = module._load_project(scene_id)
+        person = module._load_project(person_id)
+        synced = _synced_from(scene_id)
+        person["months"]["2026-04"]["entries_per_day"] = {"1": [dict(synced)]}
+        person["months"]["2026-04"]["draft_entries_per_day"] = {
+            "1": [dict(synced)],
+            "2": [{"id": "p-wip-2", "value": "!A!WIP", "comment": "未公開の自動作成下書き"}],
+        }
+        module._save_project(person)
+        # 同期反映（ソース側の変更が target へ伝播）
+        with module._project_lock(person_id):
+            target = module._load_project(person_id)
+            module._replace_shift_synced_entries_in_target_project(
+                target, scene, "2026-04", {"1": [dict(synced, comment="v2-changed")]}, actor_name="t"
+            )
+        person = module._load_project(person_id)
+        draft = person["months"]["2026-04"].get("draft_entries_per_day") or {}
+        live = person["months"]["2026-04"].get("entries_per_day") or {}
+    # 未公開の WIP 下書きが保全される
+    assert any(e.get("id") == "p-wip-2" for e in draft.get("2", []))
+    # live 側は同期の更新が反映される
+    assert any(e.get("comment") == "v2-changed" for e in live.get("1", []))
+
+
+def test_publish_remerges_current_synced_entries():
+    """公開時はサーバー権威の同期 entry を取り直し、下書きの固着・削除済み同期を持ち込まない。"""
+    module, app = _build()
+    client, scene_id = _create_scene_project(module, app, site_row_id="10")
+    person_id = _create_person_project(module, app, client, title="三木 利秋", employee_number="E101")
+
+    with app.app_context():
+        person = module._load_project(person_id)
+        synced = _synced_from(scene_id)
+        # live からは同期 entry が消えた（ソース側削除が反映済み）が、下書きには固着で残っている
+        person["months"]["2026-04"]["entries_per_day"] = {"1": []}
+        person["months"]["2026-04"]["draft_entries_per_day"] = {
+            "1": [dict(synced)],
+            "2": [{"id": "p-local-2", "value": "!A!ローカル", "comment": ""}],
+        }
+        module._save_project(person)
+        published = module._publish_draft_month_in_project(person, 2026, 4, "t", "owner")
+        live = published.get("entries_per_day") or {}
+    # 削除済みの同期 entry は公開で復活しない
+    assert all(e.get("id") != "syn1" for e in live.get("1", []))
+    # ローカルの下書き内容は公開される
+    assert any(e.get("id") == "p-local-2" for e in live.get("2", []))

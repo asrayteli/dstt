@@ -74,6 +74,7 @@ const ShifterSync = (function() {
     requiredCapacity: 0,
     editable: true,
     selectedOptions: {},
+    selectedSecondOptions: {},
     modalDay: null,
     modalEntryId: null,
     siteContext: null,
@@ -516,6 +517,18 @@ const ShifterSync = (function() {
 
   function clearSelectedOptionsForDay(day) {
     state.selectedOptions[String(day)] = [];
+  }
+
+  function getSelectedSecondOptionForDay(day) {
+    return normalizeSecondOption(state.selectedSecondOptions[String(day)] || '');
+  }
+
+  function setSelectedSecondOptionForDay(day, key) {
+    state.selectedSecondOptions[String(day)] = normalizeSecondOption(key);
+  }
+
+  function clearSelectedSecondOptionForDay(day) {
+    state.selectedSecondOptions[String(day)] = '';
   }
 
   function buildSubstituteRequestContextFromDay(day, values = {}) {
@@ -2443,6 +2456,7 @@ const ShifterSync = (function() {
     const entry = normalizeEntry({
       id: makeEntryId(),
       value: formatEntryValue(options[0] || null, entryName),
+      second_option: getSelectedSecondOptionForDay(dayKey),
       comment: commentInput.val().trim(),
       employee_name: employeeName,
       employee_number: employeeNumber,
@@ -2472,6 +2486,7 @@ const ShifterSync = (function() {
     clearEmployeeSelectionForInput(nameInput);
     clearSiteSelectionForInput(nameInput);
     clearSelectedOptionsForDay(dayKey);
+    clearSelectedSecondOptionForDay(dayKey);
     updateOptionSelectButton(dayKey);
   }
 
@@ -2590,6 +2605,47 @@ const ShifterSync = (function() {
     overlay.find('.option-btn').each(function() {
       $(this).toggleClass('selected', $(this).attr('data-option') === selected);
     });
+    updateSecondOptionButtonStates(dayKey, overlay);
+  }
+
+  function createSecondOptionSection(dayKey) {
+    const section = $('<div>').addClass('popup-section');
+    section.append('<div class="popup-section-title">代務・研修</div>');
+    const grid = $('<div>').addClass('option-buttons');
+    secondOptionKeys.forEach((key) => {
+      const btn = $('<button>')
+        .attr('type', 'button')
+        .addClass('option-btn second-option-btn')
+        .attr('data-day', dayKey)
+        .attr('data-second-option', key)
+        .text(secondOptionMappings[key] || key)
+        .on('click', function() {
+          if (getSelectedSecondOptionForDay(dayKey) === key) {
+            clearSelectedSecondOptionForDay(dayKey);
+          } else {
+            setSelectedSecondOptionForDay(dayKey, key);
+          }
+          updateSecondOptionButtonStates(dayKey, $(this).closest('.popup-overlay'));
+        });
+      grid.append(btn);
+    });
+    section.append(grid);
+    section.append(
+      $('<div>')
+        .addClass('popup-section-note')
+        .text('代務・研修は第二オプションです。重複チェックには影響せず、アシストの経験・自動作成・表示に使います。')
+    );
+    return section;
+  }
+
+  function updateSecondOptionButtonStates(dayKey, overlay) {
+    if (!overlay || !overlay.length) {
+      return;
+    }
+    const selected = getSelectedSecondOptionForDay(dayKey);
+    overlay.find('.second-option-btn').each(function() {
+      $(this).toggleClass('selected', $(this).attr('data-second-option') === selected);
+    });
   }
 
   function updateOptionSelectButton(day) {
@@ -2598,23 +2654,41 @@ const ShifterSync = (function() {
       return;
     }
     const selected = getSelectedOptionsForDay(day)[0];
-    if (!selected) {
+    const second = getSelectedSecondOptionForDay(day);
+    const labels = [];
+    if (selected) {
+      labels.push(allOptionMappings[selected] || selected);
+    }
+    if (second) {
+      labels.push(secondOptionMappings[second] || second);
+    }
+    if (!labels.length) {
       btn.html('<span>\u8a2d\u5b9a</span><span>OP\u7121\u3057</span>');
       btn.removeClass('has-options');
       return;
     }
-    btn.html(`<span>\u8a2d\u5b9a</span><span>${allOptionMappings[selected] || selected}</span>`);
+    btn.html(`<span>\u8a2d\u5b9a</span><span>${escapeHtml(labels.join(' \uff0b '))}</span>`);
     btn.addClass('has-options');
   }
 
   function showOptionPopup(day) {
     const dayKey = String(day);
     const overlay = $('<div>').addClass('popup-overlay');
-    const popup = $('<div>').addClass('popup-content');
+    const popup = $('<div>').addClass('popup-content ss-option-popup');
     popup.append('<div class="popup-header">\u30aa\u30d7\u30b7\u30e7\u30f3\u9078\u629e</div>');
+
+    // \u7b2c\u4e00\u30aa\u30d7\u30b7\u30e7\u30f3\uff08\u5de6\uff09\u3068\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3\uff08\u53f3\uff09\u3092\u6a2a\u4e26\u3073\u306b\u3059\u308b\u3002
+    const columns = $('<div>').addClass('ss-option-popup-columns');
+    const firstCol = $('<div>').addClass('ss-option-popup-col ss-option-popup-col-first');
+    firstCol.append('<div class="ss-option-popup-col-title">\u7b2c\u4e00\u30aa\u30d7\u30b7\u30e7\u30f3</div>');
     getOptionSectionsForMode(state.mode).forEach((section) => {
-      popup.append(createOptionSection(section.title, section.optionKeys, dayKey));
+      firstCol.append(createOptionSection(section.title, section.optionKeys, dayKey));
     });
+    const secondCol = $('<div>').addClass('ss-option-popup-col ss-option-popup-col-second');
+    secondCol.append('<div class="ss-option-popup-col-title">\u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3</div>');
+    secondCol.append(createSecondOptionSection(dayKey));
+    columns.append(firstCol, secondCol);
+    popup.append(columns);
 
     const footer = $('<div>').addClass('popup-footer');
     footer.append(
@@ -2623,6 +2697,7 @@ const ShifterSync = (function() {
         .text('\u30af\u30ea\u30a2')
         .on('click', function() {
           clearSelectedOptionsForDay(dayKey);
+          clearSelectedSecondOptionForDay(dayKey);
           updateOptionButtonStates(dayKey, overlay);
         })
     );
@@ -3331,6 +3406,7 @@ const ShifterSync = (function() {
     );
     state.entriesPerDay = {};
     state.selectedOptions = {};
+    state.selectedSecondOptions = {};
 
     ensureModalScaffold();
     bindModalEvents();
