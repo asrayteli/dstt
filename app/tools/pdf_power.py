@@ -7,8 +7,12 @@ import zipfile
 import json
 import textwrap
 import uuid
+import csv
+import difflib
+import math
+import re
 from werkzeug.utils import secure_filename
-from PIL import Image
+from PIL import Image, ImageChops, ImageStat
 from docx import Document
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
@@ -332,7 +336,7 @@ def _collect_affected_pages_for_edit(operations, total_pages, reference_total_pa
             raise ValueError(f"Operation {idx} format is invalid.")
 
         op_type = op.get("type")
-        if op_type in {"add_text", "add_shape", "add_image", "add_freehand"}:
+        if op_type in {"add_text", "add_shape", "add_image", "add_freehand", "redact_area"}:
             affected["edit"].add(_parse_page_number(op.get("page"), total_pages))
         elif op_type == "copy_region_paste":
             source_document = _normalize_edit_source_document(op.get("source_document"))
@@ -379,6 +383,22 @@ def _send_path_bytes(file_path, download_name, mimetype=None):
         download_name=download_name,
         mimetype=mimetype,
     )
+
+
+def _cleanup_temp_dir(temp_dir):
+    if temp_dir and os.path.exists(temp_dir):
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as e:
+            logger.error(f"一時ディレクトリの削除に失敗: {e}")
+
+
+def _close_fitz_document(doc):
+    if doc is not None:
+        try:
+            doc.close()
+        except Exception as e:
+            logger.warning(f"PDFドキュメントのクローズに失敗: {e}")
 
 
 def _read_text_file(file_path):
@@ -655,6 +675,7 @@ def convert_from_pdf():
     PDF→画像/TXT/DOCXの逆変換
     """
     temp_dir = None
+    doc = None
     try:
         file = request.files.get("pdf_file")
         if not file or not file.filename:
@@ -714,6 +735,7 @@ def convert_from_pdf():
                 output_files.append({"path": image_path, "name": image_filename})
 
             doc.close()
+            doc = None
 
             # 複数ファイルをZIPにまとめる
             if len(output_files) > 1:
@@ -756,6 +778,7 @@ def convert_from_pdf():
                 all_text.append("\n\n")
 
             doc.close()
+            doc = None
 
             txt_path = os.path.join(temp_dir, "converted_output.txt")
             with open(txt_path, 'w', encoding='utf-8') as f:
@@ -794,6 +817,7 @@ def convert_from_pdf():
                     docx_doc.add_page_break()
 
             doc.close()
+            doc = None
 
             docx_path = os.path.join(temp_dir, "converted_output.docx")
             docx_doc.save(docx_path)
@@ -818,7 +842,8 @@ def convert_from_pdf():
         logger.error(traceback.format_exc())
         return jsonify({"error": f"変換処理中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        pass
+        _close_fitz_document(doc)
+        _cleanup_temp_dir(temp_dir)
 
 
 @pdf_power_bp.route("/convert", methods=["POST"])
@@ -914,8 +939,7 @@ def convert_pdf():
         logger.error(traceback.format_exc())
         return jsonify({"error": f"変換処理中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        # after_this_requestがない場合のフォールバック
-        pass
+        _cleanup_temp_dir(temp_dir)
 
 
 # ========================================
@@ -951,6 +975,8 @@ def split_or_merge_pdf():
             # ファイルサイズチェック
             if os.path.getsize(file_path) > MAX_FILE_SIZE:
                 return jsonify({"error": f"ファイルサイズが大きすぎます（100MB以下にしてください）: {filename}"}), 400
+            if not _validate_pdf_file(file_path):
+                return jsonify({"error": f"PDFファイルが破損しているか、読み取れません: {filename}"}), 400
 
             file_paths.append(file_path)
 
@@ -1033,7 +1059,7 @@ def split_or_merge_pdf():
         logger.error(traceback.format_exc())
         return jsonify({"error": f"PDF操作中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        pass
+        _cleanup_temp_dir(temp_dir)
 
 
 # ========================================
@@ -1171,12 +1197,14 @@ def process_control_pdf():
                 source_doc.close()
             except Exception:
                 pass
+        _cleanup_temp_dir(temp_dir)
 
 
 @pdf_power_bp.route("/compress", methods=["POST"])
 @login_required
 def compress_pdf():
     temp_dir = None
+    test_doc = None
     try:
         file = request.files.get("pdf")
         if not file or not file.filename:
@@ -1204,6 +1232,7 @@ def compress_pdf():
             if test_doc.page_count == 0:
                 return jsonify({"error": "PDFファイルが空です"}), 400
             test_doc.close()
+            test_doc = None
         except Exception as e:
             return jsonify({"error": f"PDFファイルが破損しています: {str(e)}"}), 400
 
@@ -1247,6 +1276,7 @@ def compress_pdf():
         logger.error(traceback.format_exc())
         return jsonify({"error": f"圧縮処理中にエラーが発生しました: {str(e)}"}), 500
     finally:
+        _close_fitz_document(test_doc)
         if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
@@ -1495,7 +1525,7 @@ def extract_text():
         logger.error(traceback.format_exc())
         return jsonify({"error": f"予期しないエラーが発生しました: {str(e)}"}), 500
     finally:
-        pass
+        _cleanup_temp_dir(temp_dir)
 
 
 def _temp_input_pdf_path(temp_dir):
@@ -1934,6 +1964,7 @@ def rotate_pdf():
     finally:
         if doc is not None:
             doc.close()
+        _cleanup_temp_dir(temp_dir)
 
 
 # ========================================
@@ -2033,7 +2064,7 @@ def password_protect():
         logger.error(traceback.format_exc())
         return jsonify({"error": f"パスワード処理中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        pass
+        _cleanup_temp_dir(temp_dir)
 
 
 # ========================================
@@ -2044,6 +2075,7 @@ def password_protect():
 def edit_metadata():
     """PDFメタデータの編集"""
     temp_dir = None
+    doc = None
     try:
         file = request.files.get("pdf")
         if not file or not file.filename:
@@ -2083,6 +2115,7 @@ def edit_metadata():
             doc.set_metadata(metadata)
             doc.save(output_path)
             doc.close()
+            doc = None
 
             @after_this_request
             def cleanup(response):
@@ -2105,7 +2138,8 @@ def edit_metadata():
         logger.error(traceback.format_exc())
         return jsonify({"error": f"メタデータ編集中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        pass
+        _close_fitz_document(doc)
+        _cleanup_temp_dir(temp_dir)
 
 
 # ========================================
@@ -2116,6 +2150,7 @@ def edit_metadata():
 def add_watermark():
     """PDFに透かしを追加"""
     temp_dir = None
+    doc = None
     try:
         file = request.files.get("pdf")
         if not file or not file.filename:
@@ -2154,6 +2189,7 @@ def add_watermark():
 
             doc.save(output_path)
             doc.close()
+            doc = None
 
             @after_this_request
             def cleanup(response):
@@ -2176,7 +2212,8 @@ def add_watermark():
         logger.error(traceback.format_exc())
         return jsonify({"error": f"透かし処理中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        pass
+        _close_fitz_document(doc)
+        _cleanup_temp_dir(temp_dir)
 
 
 # ========================================
@@ -2210,6 +2247,8 @@ def page_operations():
         # ファイルサイズチェック
         if os.path.getsize(input_path) > MAX_FILE_SIZE:
             return jsonify({"error": "ファイルサイズが大きすぎます（100MB以下にしてください）"}), 400
+        if not _validate_pdf_file(input_path):
+            return jsonify({"error": "PDFファイルが破損しているか、読み取れません"}), 400
 
         try:
             reader = PdfReader(input_path)
@@ -2261,7 +2300,7 @@ def page_operations():
         logger.error(traceback.format_exc())
         return jsonify({"error": f"ページ操作中にエラーが発生しました: {str(e)}"}), 500
     finally:
-        pass
+        _cleanup_temp_dir(temp_dir)
 
 
 # ========================================
@@ -2468,6 +2507,33 @@ def edit_pdf_overlay():
                     dashes=_dash_pattern(str(op.get("stroke_style", "solid")).lower()),
                 )
                 shape.commit(overlay=True)
+
+            elif op_type == "redact_area":
+                page_idx = _parse_page_number(op.get("page"), total_pages)
+                page = doc[page_idx]
+                rect = _to_pdf_rect(
+                    page,
+                    _round_to_tenth(op.get("x", 0)),
+                    _round_to_tenth(op.get("y", 0)),
+                    max(_round_to_tenth(op.get("width", 120)), 1),
+                    max(_round_to_tenth(op.get("height", 40)), 1),
+                )
+                fill = _parse_color_hex(op.get("fill_color", "#000000"), (0, 0, 0)) or (0, 0, 0)
+                label = str(op.get("label", "") or "")
+                page.add_redact_annot(
+                    rect,
+                    text=label or None,
+                    fontname="helv",
+                    fontsize=max(_round_to_tenth(op.get("font_size", 10)), 1),
+                    fill=fill,
+                    text_color=(1, 1, 1),
+                    cross_out=False,
+                )
+                page.apply_redactions(
+                    images=fitz.PDF_REDACT_IMAGE_PIXELS,
+                    graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED,
+                    text=fitz.PDF_REDACT_TEXT_REMOVE,
+                )
 
             elif op_type == "copy_region_paste":
                 source_document = _normalize_edit_source_document(op.get("source_document"))
