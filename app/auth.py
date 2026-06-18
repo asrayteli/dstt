@@ -1,3 +1,6 @@
+from time import monotonic, sleep
+from urllib.parse import urlsplit
+
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -7,11 +10,77 @@ from .models import DsttLoginLog, User, UserLoginLog, db
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
+_FAILED_LOGIN_ATTEMPTS: dict[tuple[str, str], list[float]] = {}
+
+
+def _client_ip() -> str | None:
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return request.remote_addr
+
+
+def _user_agent() -> str:
+    return (request.headers.get("User-Agent") or "")[:255]
+
+
+def _is_safe_next_url(target: str | None) -> bool:
+    if not target:
+        return False
+    parts = urlsplit(target)
+    if parts.scheme or parts.netloc:
+        return False
+    return target.startswith("/") and not target.startswith("//")
+
+
+def _next_url() -> str:
+    candidate = request.values.get("next") or session.get("login_next")
+    if _is_safe_next_url(candidate):
+        session["login_next"] = candidate
+        return candidate
+    session.pop("login_next", None)
+    return ""
+
+
+def _consume_next_url() -> str:
+    target = _next_url()
+    session.pop("login_next", None)
+    return target or url_for("main.index")
+
+
+def _failure_key(username: str) -> tuple[str, str]:
+    return ((_client_ip() or ""), username.lower())
+
+
+def _register_failed_attempt(username: str) -> None:
+    if not username:
+        return
+
+    window_seconds = int(current_app.config.get("LOGIN_FAILURE_WINDOW_SECONDS", 300))
+    key = _failure_key(username)
+    now = monotonic()
+    attempts = [
+        stamp
+        for stamp in _FAILED_LOGIN_ATTEMPTS.get(key, [])
+        if now - stamp <= window_seconds
+    ]
+    attempts.append(now)
+    _FAILED_LOGIN_ATTEMPTS[key] = attempts[-20:]
+
+    threshold = int(current_app.config.get("LOGIN_FAILURE_DELAY_THRESHOLD", 3))
+    delay = float(current_app.config.get("LOGIN_FAILURE_DELAY_SECONDS", 0.6))
+    if len(attempts) >= threshold and delay > 0 and not current_app.config.get("TESTING"):
+        sleep(min(delay * (len(attempts) - threshold + 1), 2.0))
+
+
+def _clear_failed_attempts(username: str) -> None:
+    if username:
+        _FAILED_LOGIN_ATTEMPTS.pop(_failure_key(username), None)
+
 
 def _record_successful_login(user: User) -> None:
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    ip_address = forwarded_for.split(",", 1)[0].strip() if forwarded_for else request.remote_addr
-    user_agent = (request.headers.get("User-Agent") or "")[:255]
+    ip_address = _client_ip()
+    user_agent = _user_agent()
     db.session.add(
         UserLoginLog(
             username=user.username,
@@ -32,43 +101,53 @@ def _record_successful_login(user: User) -> None:
     db.session.commit()
 
 
+def _record_failed_login(username: str) -> None:
+    db.session.add(
+        UserLoginLog(
+            username=username[:80],
+            success=False,
+            ip_address=_client_ip(),
+            user_agent=_user_agent(),
+        )
+    )
+    db.session.commit()
+
+
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for("main.index"))
+        return redirect(_consume_next_url())
+
+    next_url = _next_url()
 
     if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        remember = request.form.get("remember") == "1"
 
         user = User.query.filter_by(username=username).first()
         if user and check_password_hash(user.password_hash, password):
             session.clear()
-            login_user(user)
+            login_user(user, remember=remember)
+            _clear_failed_attempts(username)
             try:
                 _record_successful_login(user)
             except Exception:
                 db.session.rollback()
                 current_app.logger.exception("Failed to record DSTT login log")
-            return redirect(url_for("main.index"))
+            return redirect(_consume_next_url())
 
         if username:
+            _register_failed_attempt(username)
             try:
-                db.session.add(
-                    UserLoginLog(
-                        username=username,
-                        success=False,
-                        ip_address=request.remote_addr,
-                        user_agent=request.user_agent.string,
-                    )
-                )
-                db.session.commit()
+                _record_failed_login(username)
             except Exception:
                 db.session.rollback()
 
         flash("ユーザー名またはパスワードが正しくありません", "error")
+        next_url = _next_url()
 
-    return render_template("login.html")
+    return render_template("login.html", next_url=next_url)
 
 
 @auth_bp.route("/logout")

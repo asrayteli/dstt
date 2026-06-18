@@ -104,6 +104,89 @@ def test_successful_login_records_dstt_login_log(app_ctx):
         assert before_jst <= logs[0].logged_in_at <= after_jst
 
 
+def test_failed_login_shows_message_and_records_forwarded_ip(app_ctx):
+    from app.models import UserLoginLog
+
+    with app_ctx.app_context():
+        _create_user("alice", name="Alice")
+
+    client = app_ctx.test_client()
+    response = client.post(
+        "/auth/login",
+        data={"username": "alice", "password": "wrong"},
+        headers={"X-Forwarded-For": "198.51.100.7, 10.0.0.1", "User-Agent": "pytest-browser"},
+    )
+
+    assert response.status_code == 200
+    assert "ユーザー名またはパスワードが正しくありません".encode("utf-8") in response.data
+    with app_ctx.app_context():
+        log = UserLoginLog.query.filter_by(username="alice", success=False).one()
+        assert log.ip_address == "198.51.100.7"
+        assert log.user_agent == "pytest-browser"
+
+
+def test_login_redirects_to_safe_next_url(app_ctx):
+    with app_ctx.app_context():
+        _create_user("alice", name="Alice")
+
+    client = app_ctx.test_client()
+    response = client.post(
+        "/auth/login?next=/tools/calc",
+        data={"username": "alice", "password": "secret"},
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/tools/calc"
+
+
+def test_login_rejects_external_next_url(app_ctx):
+    with app_ctx.app_context():
+        _create_user("alice", name="Alice")
+
+    client = app_ctx.test_client()
+    response = client.post(
+        "/auth/login?next=https://evil.example.com/",
+        data={"username": "alice", "password": "secret"},
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/"
+
+
+def test_login_can_issue_remember_cookie(app_ctx):
+    with app_ctx.app_context():
+        _create_user("alice", name="Alice")
+
+    client = app_ctx.test_client()
+    response = client.post(
+        "/auth/login",
+        data={"username": "alice", "password": "secret", "remember": "1"},
+    )
+
+    assert response.status_code == 302
+    assert any(cookie.startswith("remember_token=") for cookie in response.headers.getlist("Set-Cookie"))
+
+
+def test_login_required_redirect_does_not_show_information_message(app_ctx):
+    client = app_ctx.test_client()
+
+    response = client.get("/", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert "ログインしてください。".encode("utf-8") not in response.data
+    assert b"Please log in to access this page." not in response.data
+
+
+def test_login_page_uses_single_visible_logo_image(app_ctx):
+    client = app_ctx.test_client()
+
+    response = client.get("/auth/login")
+
+    assert response.status_code == 200
+    assert response.data.count(b"<img") == 1
+    assert b"Please log in to access this page." not in response.data
+
+
 def test_admin_login_logs_api_returns_recent_first(app_ctx):
     from app.models import DsttLoginLog, db
 
