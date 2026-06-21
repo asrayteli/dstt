@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import fitz
+import pikepdf
 from flask import Flask
 from PIL import Image
 
@@ -89,6 +90,34 @@ def test_powerstamp_exact_pdf_uses_requested_mm_page_size():
         assert abs(page.rect.height - (235 * 72 / 25.4)) < 0.01
     finally:
         doc.close()
+
+
+def test_powerstamp_exact_pdf_disables_viewer_print_scaling():
+    module = _load_powerstamp_module()
+    app = _make_test_app(module)
+    client = app.test_client()
+
+    response = client.post(
+        "/tools/powerstamp/api/exact-pdf",
+        json={
+            "image": _transparent_png_data_url(),
+            "page": {"w_mm": 120, "h_mm": 235},
+            "filename": "stamp.pdf",
+        },
+    )
+
+    assert response.status_code == 200
+    with pikepdf.Pdf.open(io.BytesIO(response.data)) as pdf:
+        prefs = pdf.Root.get("/ViewerPreferences")
+        assert prefs is not None
+        assert prefs["/PrintScaling"] == pikepdf.Name("/None")
+        assert prefs["/PickTrayByPDFSize"] is True
+
+        page = pdf.pages[0]
+        assert list(page.CropBox) == list(page.MediaBox)
+        assert list(page.TrimBox) == list(page.MediaBox)
+        assert list(page.BleedBox) == list(page.MediaBox)
+        assert list(page.ArtBox) == list(page.MediaBox)
 
 
 def test_powerstamp_seed_templates_include_exact_papers_and_zip_guides():
