@@ -1294,6 +1294,35 @@ class CloudShiftPwaSubscription(db.Model):
         }
 
 
+class CloudShiftTemplate(db.Model):
+    """現場シフト / 個人シフトの「1か月分」を再利用できるテンプレートとして保存する。
+
+    アシストモーダルの「テンプレート」から、別ウィンドウのカレンダーで 1 か月分を
+    作成して保存し、任意の対象月へ「日付基準」または「曜日基準」で反映できる。
+    プロジェクト（その現場・その人のシフト帳）に紐付き、所有者のみが管理する。
+    PwaSubscription と同様に親プロジェクトへ FK を持つがリレーションは張らず、
+    プロジェクト削除時は明示的に削除する（読み込み負荷と孤立行の双方を避ける）。"""
+
+    __tablename__ = 'cloudshift_templates'
+
+    id = db.Column(db.String(24), primary_key=True)
+    project_id = db.Column(db.String(24), db.ForeignKey('cloudshift_projects.id'), nullable=False, index=True)
+    owner_user_id = db.Column(db.String(80), nullable=False, index=True)
+    name = db.Column(db.String(200), nullable=False, default='')
+    mode = db.Column(db.String(20), nullable=False, default='scene')
+    # 既定の反映基準: 'date'（日付基準）/ 'weekday'（曜日基準）。反映時に上書き可。
+    basis = db.Column(db.String(20), nullable=False, default='date')
+    # テンプレートを作成した代表月（カレンダー編集の基準）。
+    representative_year = db.Column(db.Integer, nullable=False, default=0)
+    representative_month = db.Column(db.Integer, nullable=False, default=0)
+    # 日(1..31)をキーにしたエントリ配列。曜日基準では各曜日の初出日からパターンを導出する。
+    slots = db.Column(db.JSON, nullable=False, default=dict)
+    # 反映時の既定オプション（祝日の扱い・上書き方法・対象日フィルタなど）。
+    options = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.String(32), nullable=False)
+    updated_at = db.Column(db.String(32), nullable=False, index=True)
+
+
 class ToBellTask(db.Model):
     """To Bell task. Phase 1 keeps visibility to task participants."""
 
