@@ -10,7 +10,7 @@
     year: parseInt(CONFIG.defaultYear, 10) || new Date().getFullYear(),
     month: parseInt(CONFIG.defaultMonth, 10) || (new Date().getMonth() + 1),
     saving: false,
-    dirtySinceSave: false
+    savedFingerprint: ''
   };
 
   function $(id) {
@@ -121,6 +121,30 @@
     ShifterSync.buildCalendar(state.year, state.month, MODE, initialData || {}, { editable: true });
   }
 
+  // 入力内容の指紋。保存時点と比較して未保存変更の有無を判定する（閲覧だけでは変化しない）。
+  function currentFingerprint() {
+    try {
+      return JSON.stringify({
+        name: String($('tpl-name').value || '').trim(),
+        basis: readBasis(),
+        options: readOptions(),
+        year: state.year,
+        month: state.month,
+        entries: ShifterSync.getEntriesPerDay ? ShifterSync.getEntriesPerDay() : {}
+      });
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function markSavedBaseline() {
+    state.savedFingerprint = currentFingerprint();
+  }
+
+  function hasUnsavedChanges() {
+    return state.savedFingerprint !== currentFingerprint();
+  }
+
   function syncYearMonthInputs() {
     $('tpl-year').value = state.year;
     $('tpl-month').value = state.month;
@@ -211,7 +235,7 @@
           /* URL 更新に失敗しても致命的ではない */
         }
       }
-      state.dirtySinceSave = false;
+      markSavedBaseline();
       setStatus(`保存しました（${template ? template.filled_day_count : 0} 日分）`);
       showFlash('テンプレートを保存しました', 'success');
       notifyOpener(template);
@@ -272,18 +296,11 @@
       ShifterSync.setState('name', $('tpl-name').value || '');
     });
     window.addEventListener('beforeunload', (event) => {
-      if (state.dirtySinceSave) {
+      if (hasUnsavedChanges()) {
         event.preventDefault();
         event.returnValue = '';
       }
     });
-    // カレンダー編集を検知して未保存フラグを立てる（保存忘れ警告用）。
-    const host = document.querySelector('.cloud-editor-host');
-    if (host) {
-      host.addEventListener('click', () => {
-        state.dirtySinceSave = true;
-      });
-    }
   }
 
   async function init() {
@@ -311,6 +328,8 @@
       }
     }
     buildCalendar(initialData);
+    // 読み込み直後（=保存済み状態）を基準にして、以降の編集だけを未保存として扱う。
+    markSavedBaseline();
   }
 
   document.addEventListener('DOMContentLoaded', () => {

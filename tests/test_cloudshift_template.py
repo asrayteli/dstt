@@ -540,6 +540,63 @@ def test_create_template_requires_name(tmp_path):
     assert response.status_code == 400
 
 
+def test_templates_rejected_for_non_scene_person_mode(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id = _create_project(client, year=2026, month=4)
+
+    # DB 上でモードを master に差し替えて、テンプレート系のガードを直接検証する。
+    with client.application.app_context():
+        row = db.session.get(module.CloudShiftProject, project_id)
+        row.mode = "master"
+        db.session.commit()
+
+    create = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/templates",
+        json={
+            "name": "x",
+            "basis": "date",
+            "representative_year": 2026,
+            "representative_month": 4,
+            "entries_per_day": {"1": [{"value": "A"}]},
+        },
+    )
+    assert create.status_code == 400
+    page = client.get(f"/tools/shiftersync/cloudshift/project/{project_id}/template-editor")
+    assert page.status_code == 404
+
+
+def test_apply_invalid_options_fall_back_to_defaults(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id = _create_project(client, year=2026, month=4)
+    _create_month(client, project_id, 2026, 5)
+    template = _create_template(
+        client,
+        project_id,
+        {
+            "name": "既定フォールバック",
+            "basis": "date",
+            "representative_year": 2026,
+            "representative_month": 4,
+            "entries_per_day": {"1": [{"value": "A"}]},
+            "options": {"apply_mode": "overwrite", "target_filter": "all"},
+        },
+    )
+    # 不正な basis / apply_mode を渡しても 500 にならず既定にフォールバックする
+    response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/templates/{template['id']}/apply",
+        json={"year": 2026, "month": 5, "basis": "bogus", "apply_mode": "nonsense", "target_filter": "weird"},
+    )
+    assert response.status_code == 200, response.get_data(as_text=True)
+    data = response.get_json()
+    assert data["basis"] == "date"  # 既定（テンプレートの basis）
+    assert data["options"]["apply_mode"] == "overwrite"
+    assert data["options"]["target_filter"] == "all"
+    entries = _get_month_entries(client, project_id, "2026-05")
+    assert _values(entries["1"]) == ["A"]
+
+
 def test_apply_requires_existing_target_month(tmp_path):
     module, client = _build_client(tmp_path)
     module.current_user = _owner()

@@ -2667,8 +2667,13 @@
     }
 
     function isTemplateFeatureAvailable() {
-      // テンプレートは現場 / 個人シフト帳の所有者のみ（公開編集では無効）。
-      return PAGE.type === 'owner' && (currentAssistMode() === 'scene' || currentAssistMode() === 'person');
+      // テンプレートは現場 / 個人シフト帳の「真の所有者」のみ（公開編集・共有編集・閲覧では無効）。
+      // master / substitute など他モードや、共有された editor/viewer では API が 404 になるため除外する。
+      const project = currentProject();
+      return !!(project
+        && (project.mode === 'scene' || project.mode === 'person')
+        && PAGE.type === 'owner'
+        && projectAccessRole(project) === 'owner');
     }
 
     function buildAssistTabs() {
