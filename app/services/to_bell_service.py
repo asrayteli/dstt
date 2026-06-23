@@ -140,14 +140,14 @@ def list_tasks(
     elif filter_name == "inbox":
         query = query.filter(ToBellTask.due_at.is_(None), ToBellTask.status.in_(["todo", "doing", "blocked", "review", "returned"]))
     elif filter_name == "assigned":
-        query = query.filter(ToBellTask.assigned_to == username, ToBellTask.status != "done")
+        query = query.filter(ToBellTask.assigned_to == username, ToBellTask.status.notin_(["done", "archived"]))
     elif filter_name == "overdue":
-        query = query.filter(ToBellTask.due_at < datetime.combine(today, time.min), ToBellTask.status != "done")
+        query = query.filter(ToBellTask.due_at < datetime.combine(today, time.min), ToBellTask.status.notin_(["done", "archived"]))
     elif filter_name == "done":
         query = query.filter(ToBellTask.status == "done")
     elif filter_name == "attention":
         query = query.filter(
-            ToBellTask.status != "done",
+            ToBellTask.status.notin_(["done", "archived"]),
             or_(
                 ToBellTask.assigned_to == username,
                 ToBellTask.reviewer_id == username,
@@ -156,7 +156,7 @@ def list_tasks(
         )
     else:
         query = query.filter(
-            ToBellTask.status != "archived",
+            ToBellTask.status.notin_(["done", "archived"]),
             or_(
                 ToBellTask.due_at <= datetime.combine(today, time.max.replace(microsecond=0)),
                 ToBellTask.assigned_to == username,

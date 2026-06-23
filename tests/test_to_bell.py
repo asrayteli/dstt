@@ -1118,3 +1118,67 @@ def test_task_pin_respects_explicit_value_in_payload(app_ctx):
     # 明示的に false で解除
     cleared = client.post(f"/tools/to_bell/api/tasks/{task['id']}/pin", json={"pinned": False}).get_json()
     assert cleared["pinned"] is False
+
+
+def test_active_filters_exclude_done_and_archived(app_ctx):
+    """今日フィルタに完了が溜まらず、担当/要対応/期限切れにアーカイブが漏れないこと。"""
+    from datetime import timedelta
+
+    office_id = _create_office(app_ctx, "active-filter")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    today = date.today().isoformat()
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+    # アクティブ（各フィルタに出るはず）
+    active_today = client.post(
+        "/tools/to_bell/api/tasks", json={"title": "今日やる", "due_date": today}
+    ).get_json()
+    active_overdue = client.post(
+        "/tools/to_bell/api/tasks", json={"title": "期限切れだが対応中", "due_date": yesterday}
+    ).get_json()
+    # 完了（done のみに出る。今日には溜まらない）
+    done_task = client.post(
+        "/tools/to_bell/api/tasks", json={"title": "完了済み", "due_date": today, "status": "done"}
+    ).get_json()
+    # アーカイブ済み（期限切れ・自分担当でも、どのアクティブフィルタにも出ない）
+    archived_task = client.post(
+        "/tools/to_bell/api/tasks", json={"title": "アーカイブ済み", "due_date": yesterday, "status": "archived"}
+    ).get_json()
+
+    def ids(filter_name):
+        listing = client.get(f"/tools/to_bell/api/tasks?filter={filter_name}").get_json()
+        return {task["id"] for task in listing["tasks"]}
+
+    # 今日: アクティブは出る／完了・アーカイブは出ない
+    today_ids = ids("today")
+    assert active_today["id"] in today_ids
+    assert active_overdue["id"] in today_ids
+    assert done_task["id"] not in today_ids
+    assert archived_task["id"] not in today_ids
+
+    # 自分の担当: アクティブのみ（完了・アーカイブを除外）
+    assigned_ids = ids("assigned")
+    assert active_today["id"] in assigned_ids
+    assert done_task["id"] not in assigned_ids
+    assert archived_task["id"] not in assigned_ids
+
+    # 要対応: アクティブのみ（完了・アーカイブを除外）
+    attention_ids = ids("attention")
+    assert active_today["id"] in attention_ids
+    assert done_task["id"] not in attention_ids
+    assert archived_task["id"] not in attention_ids
+
+    # 期限切れ: 期限切れのアクティブのみ（完了・アーカイブを除外）
+    overdue_ids = ids("overdue")
+    assert active_overdue["id"] in overdue_ids
+    assert done_task["id"] not in overdue_ids
+    assert archived_task["id"] not in overdue_ids
+
+    # 完了: 完了タスクだけが出る
+    done_ids = ids("done")
+    assert done_task["id"] in done_ids
+    assert active_today["id"] not in done_ids
+    assert archived_task["id"] not in done_ids
