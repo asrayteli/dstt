@@ -3044,6 +3044,33 @@ def _merge_month_payload(
     return merged
 
 
+def _carry_forward_draft_entries(
+    merged: dict[str, Any],
+    current_month: dict[str, Any],
+    year: int,
+    month: int,
+) -> None:
+    """live(正式)を書き換えた月へ、下書き(draft)を引き継ぐ。
+
+    同期反映・マスター集約・リビジョン復元のように、ユーザーの操作とは別に live を
+    書き換える経路で使う。``_merge_month_payload`` は draft を持たないため、ここで
+    引き継がないと upsert 時に live へフォールバックして下書きが失われる。
+
+    引き継ぎ方は下書きの状態で変える:
+      - ユーザーが明示的に作成した未公開の下書きがある（draft != live）場合のみ、
+        その下書きを保持してWIPを守る。
+      - 下書き未使用（draft == live）の場合は、書き換え後の live に追従させる。
+        こうしないと、外部同期などで live だけが変わったときに draft != live となり、
+        ユーザーが仮保存していないのに「仮保存あり」状態になってしまう。
+    """
+    if "draft_entries_per_day" not in current_month:
+        return
+    if _month_draft_has_changes(current_month, year, month):
+        merged["draft_entries_per_day"] = current_month["draft_entries_per_day"]
+    else:
+        merged["draft_entries_per_day"] = _normalize_entries(merged.get("entries_per_day"), year, month)
+
+
 def _snapshot_month_payload(month_data: dict[str, Any]) -> dict[str, Any]:
     return _client_month_payload(month_data, include_draft=False, project=None) or {}
 
@@ -3141,8 +3168,8 @@ def _restore_month_revision_in_project(
     restored["entries_per_day"] = _normalize_entries(restored.get("entries_per_day"), year, month)
     # 復元は live を過去リビジョンへ戻す操作。未公開の下書き（WIP）は別物として保全し、
     # 利用者の意図しないサイレントな下書き消失を避ける（スナップショットは draft を含まない）。
-    if "draft_entries_per_day" in current_month:
-        restored["draft_entries_per_day"] = current_month["draft_entries_per_day"]
+    # 下書き未使用なら復元後の live に追従させ、意図しない「仮保存あり」を作らない。
+    _carry_forward_draft_entries(restored, current_month, year, month)
     restored["revision"] = current_revision + 1
     restored["created_at"] = current_month.get("created_at", _utcnow_iso())
     restored["updated_at"] = _utcnow_iso()
@@ -4392,8 +4419,8 @@ def _replace_shift_synced_entries_in_target_project(
         # 同期反映は live entry の差し替えのみ。target の未公開下書き（手動 WIP・自動作成の
         # 下書き）を失わないよう、既存の下書きを引き継ぐ（_merge_month_payload は draft を
         # 持たないため、引き継がないと upsert で live にフォールバックして消える）。
-        if "draft_entries_per_day" in current_month:
-            merged["draft_entries_per_day"] = current_month["draft_entries_per_day"]
+        # 下書き未使用なら同期後の live に追従させ、外部同期で意図しない「仮保存あり」を作らない。
+        _carry_forward_draft_entries(merged, current_month, year, month)
         entry_changes = _describe_month_changes(current_month, merged)
         if entry_changes:
             snapshots = dict(current_month.get("revision_snapshots") or {})
@@ -4571,8 +4598,8 @@ def _refresh_master_shift_from_sources(
     }
     merged = _merge_month_payload(current_month, incoming_month, _snapshot_month_payload(current_month))
     # マスター帳の未公開下書きを同期反映で失わないよう、既存の下書きを引き継ぐ。
-    if "draft_entries_per_day" in current_month:
-        merged["draft_entries_per_day"] = current_month["draft_entries_per_day"]
+    # 下書き未使用なら同期後の live に追従させ、意図しない「仮保存あり」を作らない。
+    _carry_forward_draft_entries(merged, current_month, year, month)
     changes = _describe_month_changes(current_month, merged)
     if not changes:
         return False

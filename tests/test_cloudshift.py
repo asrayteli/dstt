@@ -1516,6 +1516,110 @@ def test_master_draft_does_not_propagate_to_sources_until_published(tmp_path):
     assert _master_day_values(client, scene_id, 1) == ["!A!Alice"]
 
 
+def _person_scene_for_external_sync(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    with client.application.app_context():
+        site = Site(
+            site_id="S001",
+            site_name="Master Site",
+            site_manager_last="Owner",
+            site_manager_first="Manager",
+            site_manager_id="9001",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.commit()
+        site_row_id = site.id
+
+    person = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    scene = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={
+            "title": "Master Site",
+            "mode": "scene",
+            "site_row_id": str(site_row_id),
+            "year": "2026",
+            "month": "4",
+        },
+    ).get_json()["project"]
+    return module, client, person, scene
+
+
+def _owner_month(client, project_id, *, month_key="2026-04"):
+    return client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}",
+        query_string={"month_key": month_key},
+    ).get_json()["month"]
+
+
+def test_external_sync_does_not_create_phantom_draft_on_person(tmp_path):
+    """個人シフトへ外部から同期エントリが来ても、勝手に『仮保存』状態にならない。
+
+    ユーザーが仮保存を一切していない個人シフト帳では、現場側の本保存で流れ込む
+    同期エントリは live(正式) と draft(仮保存) の両方へ反映され、両者が一致した
+    まま（=「仮保存あり」表示にならない）でなければならない。"""
+    module, client, person, scene = _person_scene_for_external_sync(tmp_path)
+    person_id = person["project"]["id"]
+    scene_id = scene["project"]["id"]
+
+    # 個人側は仮保存していない時点では draft == live。
+    before = _owner_month(client, person_id)
+    assert before["draft_entries_per_day"] == before["entries_per_day"]
+
+    # 現場で Alice を本保存 → 個人シフトへ同期される。
+    scene_entries = dict(scene["month"]["entries_per_day"])
+    scene_entries["1"] = [{"id": "scene-1", "value": "!A!Alice", "employee_number": "1001"}]
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": scene_entries, "base_month": scene["month"]},
+    )
+    assert save_response.status_code == 200
+
+    after = _owner_month(client, person_id)
+    # live に同期エントリが入ること。
+    assert [e["value"] for e in after["entries_per_day"]["1"]] == ["!A!Master Site"]
+    # 同期エントリは draft にも反映され、draft == live のままで「仮保存あり」にならないこと。
+    assert after["draft_entries_per_day"] == after["entries_per_day"]
+
+
+def test_external_sync_preserves_existing_person_draft(tmp_path):
+    """ユーザーが明示的に作成した仮保存は、外部同期が来ても失われない（データ損失防止）。"""
+    module, client, person, scene = _person_scene_for_external_sync(tmp_path)
+    person_id = person["project"]["id"]
+    scene_id = scene["project"]["id"]
+
+    # 個人シフトで明示的に仮保存（5日に私用休み）。
+    person_month = _owner_month(client, person_id)
+    draft_entries = dict(person_month["draft_entries_per_day"])
+    draft_entries["5"] = [{"id": "my-draft", "value": "!休!", "comment": "私用"}]
+    draft_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4/draft",
+        json={"entries_per_day": draft_entries},
+    )
+    assert draft_response.status_code == 200
+
+    # その状態で現場が Alice を本保存 → 個人へ同期。
+    scene_entries = dict(scene["month"]["entries_per_day"])
+    scene_entries["1"] = [{"id": "scene-1", "value": "!A!Alice", "employee_number": "1001"}]
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": scene_entries, "base_month": scene["month"]},
+    )
+    assert save_response.status_code == 200
+
+    after = _owner_month(client, person_id)
+    # ユーザーの仮保存（5日の休み）が残っていること。
+    assert [e["value"] for e in after["draft_entries_per_day"].get("5", [])] == ["!休!"]
+    # 現場の割当は live(正式) へ反映されていること。
+    assert [e["value"] for e in after["entries_per_day"]["1"]] == ["!A!Master Site"]
+
+
 def test_scene_master_create_recovers_legacy_cloudshift_schema(tmp_path):
     module = _load_cloudshift_module()
     db_path = tmp_path / "legacy-cloudshift.db"
