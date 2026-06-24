@@ -67,3 +67,25 @@ def test_public_interactive_elements_have_handlers_or_form_binding():
         if f"'{button_id}'" not in script and f'"{button_id}"' not in script
     ]
     assert not unwired, f"公開ページのボタンがスクリプトで配線されていない: {unwired}"
+
+
+def test_bulk_copy_paths_filter_synced_and_substitute_entries():
+    """一括コピー（範囲コピー・単日コピー）の両方が、同期ミラーや代務要請の
+    表示専用エントリを複製対象から除外していること。
+
+    範囲コピーだけがフィルタし、単日コピーがフィルタしないと、読み取り専用の
+    ミラーや申請プレースホルダを実体エントリとして複製してしまう不具合になる。
+    両経路で共通ヘルパー bulkCopyableSourceEntries を経由することで担保する。
+    """
+    script = _script_text()
+
+    # 共通フィルタヘルパーが定義され、複数のコピー経路から使われていること。
+    assert "function bulkCopyableSourceEntries(" in script
+    # 定義1 + 範囲コピー + 単日コピー = 最低3回出現する。
+    assert script.count("bulkCopyableSourceEntries(") >= 3
+
+    # 単日コピーが、生の sourceEntries を無条件に map する旧実装に戻っていないこと。
+    assert (
+        "const sourceEntries = bulkCopyableSourceEntries(currentEntries[String(sourceDay)])"
+        in script
+    )

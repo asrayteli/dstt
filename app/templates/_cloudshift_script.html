@@ -305,6 +305,14 @@
       };
     }
 
+    // 一括コピーの元データから、外部同期エントリと代務要請の表示専用エントリを除外する。
+    // （読み取り専用のミラーや申請プレースホルダを実体としてコピーしてしまわないようにする）
+    function bulkCopyableSourceEntries(entries) {
+      return (Array.isArray(entries) ? entries : [])
+        .filter((entry) => !String(entry && entry.sync_source_type ? entry.sync_source_type : '').trim())
+        .filter((entry) => !isSubstituteRequestDisplayEntry(entry));
+    }
+
     function ensureCloudModal(modalId, titleText) {
       let modal = document.getElementById(modalId);
       if (modal) {
@@ -6440,10 +6448,7 @@
           continue;
         }
         const sourceEntries = Array.isArray(currentEntries[String(day)]) ? currentEntries[String(day)] : [];
-        const clonedEntries = sourceEntries
-          .filter((entry) => !String(entry && entry.sync_source_type ? entry.sync_source_type : '').trim())
-          .filter((entry) => !isSubstituteRequestDisplayEntry(entry))
-          .map((entry) => cloneEntryForBulk(entry));
+        const clonedEntries = bulkCopyableSourceEntries(sourceEntries).map((entry) => cloneEntryForBulk(entry));
         const key = String(target);
         nextEntries[key] = copyMode === 'append'
           ? (Array.isArray(nextEntries[key]) ? nextEntries[key] : []).concat(clonedEntries)
@@ -6485,7 +6490,8 @@
       } else if (operation === 'copy') {
         const sourceDay = parseInt(form.querySelector('[name="bulk_copy_source_day"]').value || '0', 10);
         const copyMode = form.querySelector('[name="bulk_copy_mode"]').value;
-        const sourceEntries = Array.isArray(currentEntries[String(sourceDay)]) ? currentEntries[String(sourceDay)] : [];
+        // 範囲コピーと同様、同期ミラー・代務要請の表示専用エントリは複製対象から外す。
+        const sourceEntries = bulkCopyableSourceEntries(currentEntries[String(sourceDay)]);
         if (!sourceDay || !sourceEntries.length) {
           showFlash('コピー元の日にデータがありません', 'error');
           return;
