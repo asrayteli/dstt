@@ -9163,6 +9163,34 @@
       const nextMonth = $('cloud-next-month');
       if (nextMonth) nextMonth.addEventListener('click', () => navigateMonth(1, false).catch((error) => showFlash(error.message, 'error')));
 
+      // 編集URLの「前月を追加」「翌月を追加」は、未作成の前後月を明示的に作成する。
+      // （前の月へ/次の月へは移動が主目的だが、こちらは常に作成を試みる）
+      const addPrevMonth = $('cloud-add-prev-month');
+      if (addPrevMonth) {
+        addPrevMonth.addEventListener('click', () => {
+          const base = currentMonthKey() || (currentProject() && currentProject().latest_month_key);
+          const target = nextMonthKey(base, -1);
+          if (!target) {
+            showFlash('追加する月を特定できませんでした', 'error');
+            return;
+          }
+          createMonth(target, false).catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const addNextMonth = $('cloud-add-next-month');
+      if (addNextMonth) {
+        addNextMonth.addEventListener('click', () => {
+          const base = currentMonthKey() || (currentProject() && currentProject().latest_month_key);
+          const target = nextMonthKey(base, 1);
+          if (!target) {
+            showFlash('追加する月を特定できませんでした', 'error');
+            return;
+          }
+          createMonth(target, false).catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
       const createFirstMonth = $('cloud-create-first-month');
       if (createFirstMonth) {
         createFirstMonth.addEventListener('click', () => {
