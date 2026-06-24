@@ -5441,7 +5441,7 @@
       if (!list) return;
 
       if (!state.projects.length) {
-        list.innerHTML = '<div class="cloud-empty-state"><p>まだシフト表がありません。</p></div>';
+        list.innerHTML = '<div class="cloud-empty-state"><p>まだシフト帳がありません。</p></div>';
         return;
       }
 
@@ -5493,7 +5493,7 @@
           </div>
           ${group.projects.length
             ? `<div class="cloud-project-group-grid">${group.projects.map(projectCard).join('')}</div>`
-            : '<div class="cloud-empty-state compact"><p>該当するシフト表はありません。</p></div>'}
+            : '<div class="cloud-empty-state compact"><p>該当するシフト帳はありません。</p></div>'}
         </section>
       `).join('');
     }
@@ -7625,7 +7625,7 @@
       const project = currentProject();
       if (!project) return;
       if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずにこのシフト帳を削除すると、このセッションでの編集内容は失われます。続行しますか？')) return;
-      if (!window.confirm(`シフト案件「${project.title}」を削除しますか？`)) return;
+      if (!window.confirm(`シフト帳「${project.title}」を削除しますか？`)) return;
 
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}`, { method: 'DELETE' });
       state.projectPayload = null;
@@ -7638,7 +7638,7 @@
       renderWorkspace(true);
       updateCurrentProjectLabel();
       switchTab('list');
-      showFlash('シフト表を削除しました', 'success');
+      showFlash('シフト帳を削除しました', 'success');
     }
 
     // 同一紐づけを他オーナーも所持している場合のみ、自分の一覧から非表示にする。
@@ -8380,7 +8380,7 @@
           <p class="cloud-se-muted" data-se-target-count></p>
           <label class="cloud-field cloud-se-target-required">
             <span>対象日の必要人数（任意）。指定すると需要設定・前月推定より優先します。需要0で配置されない日の解決にも使えます</span>
-            <input class="cloud-input" type="number" min="1" data-se-target-required placeholder="未指定（既存の需要設定に従う）">
+            <input class="cloud-input" type="number" min="1" max="99" data-se-target-required placeholder="未指定（既存の需要設定に従う）">
           </label>
         </div>
       `;
@@ -8714,7 +8714,7 @@
         ${dayDetailsHtml}
         ${unfilledHtml}
         ${warnHtml}
-        <p class="cloud-se-muted">「プレビューを開く」で別ウィンドウに表示し、確認・調整のうえ保存します（このパネルでは正規シフト帳に反映されません）。</p>
+        <p class="cloud-se-muted">「プレビューを開く」で別ウィンドウに表示し、確認・調整のうえ保存します（このパネルでは正式シフトに反映されません）。</p>
       `;
       const previewBtn = modalFooter(modal).querySelector('[data-se-preview]');
       if (previewBtn) previewBtn.disabled = false;
@@ -8797,7 +8797,7 @@
           if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずに新しいシフト帳を作成すると、このセッションでの編集内容は失われます。続行しますか？')) return;
           const form = event.currentTarget;
           await runCloudCreateFlow({
-            successMessage: 'シフト表を作成しました。編集画面に移動しました',
+            successMessage: 'シフト帳を作成しました。編集画面に移動しました',
             phases: [
               'シフト帳を保存しています...',
               '既存の現場・個人シフトを照合して取り込んでいます...',
@@ -9425,7 +9425,7 @@
     // -----------------------------------------------------------------
     // 自動作成プレビュー（engine_preview）専用ウィンドウ
     // 生成結果は localStorage 経由で受け取り、ここで保存操作をしない限り
-    // 正規シフト帳には一切反映されない（閉じれば破棄）。
+    // 正式シフトには一切反映されない（閉じれば破棄）。
     // -----------------------------------------------------------------
     function enginePreviewStorageKey(projectId, year, month) {
       return `cloudshift_engine_preview:${projectId}:${year}:${month}`;
@@ -9462,7 +9462,7 @@
           <span>最大連勤 ${summary.max_consecutive_days}</span>
         </div>
         ${violationHtml}${warnHtml}
-        <p class="cloud-se-muted">内容を確認・調整し、「下書きに保存」または「正規シフト帳に反映」を押してください。何もせず閉じると破棄されます。</p>
+        <p class="cloud-se-muted">内容を確認・調整し、「仮保存」または「正式シフトに反映」を押してください。何もせず閉じると破棄されます。</p>
       `;
       host.classList.remove('cloud-hidden');
     }
@@ -9498,10 +9498,10 @@
     function bindEnginePreviewEvents() {
       const saveBtn = $('cloud-se-preview-save-draft');
       if (saveBtn) saveBtn.addEventListener('click', () => withDsttLoading(
-        { message: '下書きに保存中…' }, () => enginePreviewSaveDraft()).catch((e) => showFlash(e.message, 'error')));
+        { message: '仮保存中…' }, () => enginePreviewSaveDraft()).catch((e) => showFlash(e.message, 'error')));
       const pubBtn = $('cloud-se-preview-publish');
       if (pubBtn) pubBtn.addEventListener('click', () => withDsttLoading(
-        { message: '正規シフト帳へ反映中…' }, () => enginePreviewPublish()).catch((e) => showFlash(e.message, 'error')));
+        { message: '正式シフトへ反映中…' }, () => enginePreviewPublish()).catch((e) => showFlash(e.message, 'error')));
       const discardBtn = $('cloud-se-preview-discard');
       if (discardBtn) discardBtn.addEventListener('click', () => enginePreviewDiscard());
     }
@@ -9519,14 +9519,14 @@
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       state.editorMode = 'draft';
       await renderWorkspaceWithSiteBranches(true);
-      showFlash('下書き（仮シフト）に保存しました。正規反映は「正規シフト帳に反映」から行えます。', 'success');
+      showFlash('仮保存しました。正式に反映するには「正式シフトに反映」を押してください。', 'success');
     }
 
     async function enginePreviewPublish() {
       const project = currentProject();
       const month = currentMonth();
       if (!project || !month) { showFlash('生成結果がありません', 'error'); return; }
-      if (!window.confirm('この内容を正規シフト帳へ反映します。現在の正式シフトは置き換わります。よろしいですか？')) return;
+      if (!window.confirm('この内容を正式シフトへ反映します。現在の正式シフトは置き換わります。よろしいですか？')) return;
       // 編集内容をまず下書きへ保存してから公開する
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/draft`, {
         method: 'PUT',
@@ -9542,7 +9542,7 @@
       clearEnginePreviewData();
       await renderWorkspaceWithSiteBranches(true);
       if ($('cloud-se-preview-summary')) $('cloud-se-preview-summary').classList.add('cloud-hidden');
-      showFlash('正規シフト帳へ反映しました。このウィンドウは閉じて構いません。', 'success');
+      showFlash('正式シフトへ反映しました。このウィンドウは閉じて構いません。', 'success');
     }
 
     function enginePreviewDiscard() {

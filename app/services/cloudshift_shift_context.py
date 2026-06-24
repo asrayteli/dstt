@@ -48,6 +48,11 @@ _ROLE_OPTION_TRAINING = "TRAIN"
 # 休みが入っている日に自動作成がシフトを入れないことを最優先し hard とする。
 _UNCONFIRMED_DEFAULT = "hard"
 
+# 対象日の必要人数（UI 指定）の上限。1 日 1 現場に現実的に必要な人数を大きく
+# 超える値を許すと、日数×人数ぶんの割当インスタンスを生成してメモリ・計算資源を
+# 枯渇させられるため、必要人数入力の上限（99）に合わせてクランプする。
+_MAX_TARGET_REQUIRED_COUNT = 99
+
 
 # ---------------------------------------------------------------------------
 # 小さなユーティリティ
@@ -1044,6 +1049,8 @@ def _apply_target_required_override(
         return required_slots
     if count <= 0:
         return required_slots
+    # 過大な値による割当インスタンスの大量生成（メモリ・計算資源の枯渇）を防ぐ。
+    count = min(count, _MAX_TARGET_REQUIRED_COUNT)
 
     # 対象日指定が無ければ全日へ適用
     dates = set(target_dates) if target_dates else {d.date for d in days}
