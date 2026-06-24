@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import hashlib
 import json
@@ -66,7 +67,6 @@ try:
         normalize_entry,
         parse_csv_text,
         parse_entry_value,
-        serialize_csv_text,
         serialize_entry_rows,
     )
     from .shiftersync_check import compare_shift_payloads, is_duplicate_by_rules
@@ -85,7 +85,6 @@ except ImportError:
         normalize_entry,
         parse_csv_text,
         parse_entry_value,
-        serialize_csv_text,
         serialize_entry_rows,
     )
     from app.tools.shiftersync_check import compare_shift_payloads, is_duplicate_by_rules  # type: ignore
@@ -2873,21 +2872,32 @@ def _safe_download_stem(value: str) -> str:
     return safe
 
 
+# CSV / XLSX を表計算ソフト（Excel 等）で開いた際の数式インジェクション対策。
+# 先頭が =, +, -, @ のセル（シフト名・タイトル・コメント・氏名など利用者入力。
+# 公開編集URL経由でも入る）は ' を前置して文字列として無害化する。
+# 方針は csvtool._sanitize_for_csv と同一。day 番号などの数値セルは対象外。
+_SPREADSHEET_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def _neutralize_spreadsheet_formula(cell: Any) -> Any:
+    if isinstance(cell, str) and cell.startswith(_SPREADSHEET_FORMULA_PREFIXES):
+        return "'" + cell
+    return cell
+
+
 def _csv_text_for_month(
     project_title: str,
     project_mode: str,
     month_data: dict[str, Any],
     project_employee_number: str = "",
 ) -> str:
-    return serialize_csv_text(
-        project_mode,
-        month_data["year"],
-        month_data["month"],
-        project_title,
-        month_data.get("required_capacity", 0) if month_data.get("capacity_enabled") else 0,
-        month_data.get("entries_per_day", {}),
-        project_employee_number,
-    )
+    # serialize_csv_text と同じ書式（csv.writer / lineterminator="\n"）で出力しつつ、
+    # 各セルを数式インジェクションから無害化する。
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    for row in _csv_lines_for_month(project_title, project_mode, month_data, project_employee_number):
+        writer.writerow([_neutralize_spreadsheet_formula(cell) for cell in row])
+    return buffer.getvalue()
 
 
 def _xlsx_bytes_for_month(
@@ -2900,7 +2910,7 @@ def _xlsx_bytes_for_month(
     sheet = workbook.active
     sheet.title = f"{month_data['year']}-{month_data['month']:02d}"
     for row in _csv_lines_for_month(project_title, project_mode, month_data, project_employee_number):
-        sheet.append(row)
+        sheet.append([_neutralize_spreadsheet_formula(cell) for cell in row])
     for cell in sheet[1]:
         font = copy(cell.font)
         font.bold = True
