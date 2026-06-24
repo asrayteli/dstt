@@ -2930,7 +2930,7 @@
               <span class="cloud-note-chip">ルール ${counts.rules}件</span>
               ${permissions.can_edit_rules ? '' : '<span class="cloud-note-chip">編集者はルールを閲覧のみできます</span>'}
             </div>
-            ${showRuleForm ? '' : '<p class="cloud-panel-note">シフトの予定に「代務」「研修」の<strong>第二オプション</strong>を付けると、保存時に実績がここへ自動登録され、アシストの「経験済み現場」にも自動反映されます（手動登録は不要）。研修を付けると「研修要現場」からは自動で外れます。第二オプションは重複チェックには影響しません。</p>'}
+            ${showRuleForm ? '' : '<p class="cloud-panel-note">シフトに「代務」「研修」の<strong>第二オプション</strong>を付けて保存すると、実績がここに自動登録され、「経験済み現場」にも反映されます（手動登録は不要）。なお「研修」は登録後に「研修要現場」から自動で外れ、第二オプションは重複チェックには影響しません。</p>'}
             ${showRuleForm ? buildAssistRuleForm(null, 'assist-create-rule', 'ルールを登録') : buildAssistRecordForm(null, 'assist-create-record', '実績を登録')}
           </div>
         </div>
@@ -7647,8 +7647,8 @@
       const target = (state.projects || []).find((project) => project.id === projectId);
       const title = target ? target.title : '';
       if (!window.confirm(
-        `シフト帳「${title}」を自分の一覧から非表示にしますか？\n` +
-        '同じ対象を他のオーナーも所持しているため、サーバー上のデータは削除されず、あなたの一覧からのみ消えます。'
+        `シフト帳「${title}」を自分の一覧から非表示にします。\n` +
+        'データは消えません。自分の一覧から見えなくなるだけです。よろしいですか？'
       )) return;
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}/hide`, { method: 'POST', body: {} });
       if (currentProject() && currentProject().id === projectId) {
