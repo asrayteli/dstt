@@ -14,7 +14,7 @@
         <div class="cloud-page-kicker">CloudShift / 自動作成プレビュー</div>
         <h1 class="cloud-page-title">{{ project_title }}</h1>
         <p class="cloud-page-note">
-          自動作成したシフトの確認・調整用ウィンドウです。ここで保存しない限り、正規シフト帳には反映されません。
+          自動作成したシフトの確認・調整用ウィンドウです。ここで保存しない限り、正式シフトには反映されません。
           何もせずに閉じると、この自動作成結果は破棄されます。
         </p>
       </div>
@@ -29,8 +29,8 @@
           <p id="cloud-editor-meta">生成結果を読み込んでいます…</p>
         </div>
         <div class="cloud-editor-actions public cloud-se-preview-actions">
-          <button id="cloud-se-preview-save-draft" type="button" class="cloud-btn secondary">下書き（仮シフト）に保存</button>
-          <button id="cloud-se-preview-publish" type="button" class="cloud-btn primary">正規シフト帳に反映</button>
+          <button id="cloud-se-preview-save-draft" type="button" class="cloud-btn secondary">仮保存</button>
+          <button id="cloud-se-preview-publish" type="button" class="cloud-btn primary">正式シフトに反映</button>
           <button id="cloud-se-preview-discard" type="button" class="cloud-btn ghost">破棄して閉じる</button>
         </div>
       </div>
@@ -46,7 +46,7 @@
     </section>
   </main>
 
-  <div id="cloud-flash" class="cloud-flash info"></div>
+  <div id="cloud-flash" class="cloud-flash info" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script>
     window.SHIFTERSYNC_HOLIDAYS = {{ shiftersync_holidays|tojson }};

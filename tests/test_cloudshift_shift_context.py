@@ -224,6 +224,25 @@ def test_candidate_blocklist_excludes():
     assert "E001" not in {w.employee_number for w in request.workers}
 
 
+def test_target_required_count_is_clamped_to_safe_maximum():
+    """対象日の必要人数に過大な値を渡しても、割当インスタンスの大量生成
+    （メモリ・計算資源の枯渇）を防ぐため安全な上限にクランプされる。"""
+    project = base_project()
+    request, _, _ = ctx.build_planning_request(
+        project, YEAR, MONTH, target_required_count=200000)
+    overridden = [s for s in request.required_slots if s.source == "target_override"]
+    assert overridden, "target_override スロットが生成されるべき"
+    assert all(s.required_count <= ctx._MAX_TARGET_REQUIRED_COUNT for s in request.required_slots)
+    # 上限値そのものは通る（クランプ後の実効値が上限になる）。
+    assert max(s.required_count for s in overridden) == ctx._MAX_TARGET_REQUIRED_COUNT
+
+    # 上限以下は素通り。
+    request2, _, _ = ctx.build_planning_request(
+        project, YEAR, MONTH, target_required_count=2)
+    overridden2 = [s for s in request2.required_slots if s.source == "target_override"]
+    assert overridden2 and all(s.required_count == 2 for s in overridden2)
+
+
 def test_candidate_allowlist_restricts():
     project = base_project()
     project["shift_engine"] = {"version": 1, "advanced_options": [

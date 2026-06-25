@@ -15,6 +15,13 @@
     --cloud-danger: #bf5252;
     --cloud-danger-soft: #fff0f0;
     --cloud-shadow: 0 18px 40px rgba(47, 106, 173, 0.11);
+    /* 角丸スケール（散在していた 4〜24px の 11 種を 5 段＋ピルに整理）。 */
+    --cloud-radius-chip: 8px;   /* バッジ・小チップ（旧 4/6/8px） */
+    --cloud-radius-sm: 12px;    /* ボタン・入力・小カード（旧 10/12px） */
+    --cloud-radius-md: 16px;    /* カード（旧 14/16px） */
+    --cloud-radius-lg: 20px;    /* 大きめのセクション（旧 18/20px） */
+    --cloud-radius-xl: 24px;    /* ヒーロー・モーダル・大パネル */
+    --cloud-radius-pill: 999px; /* ピル（タブ・バッジ等） */
   }
 
   *,
@@ -60,7 +67,7 @@
   .cloud-panel {
     min-width: 0;
     border: 1px solid var(--cloud-line);
-    border-radius: 24px;
+    border-radius: var(--cloud-radius-xl);
     background: var(--cloud-panel);
     box-shadow: var(--cloud-shadow);
   }
@@ -71,13 +78,34 @@
     gap: 18px;
     align-items: flex-start;
     padding: 22px 24px;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(243, 248, 255, 0.97)),
-      var(--cloud-panel);
+    /* 主画面の DSTT 統一ヒーロー（濃いグラデ＋白文字）と見た目を揃える。 */
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+    background: linear-gradient(135deg, #0c4a6e 0%, #0369a1 50%, #06b6d4 100%);
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
   }
 
   .cloud-hero-copy {
     min-width: 0;
+  }
+
+  .cloud-hero .cloud-page-kicker {
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  .cloud-hero .cloud-page-title {
+    color: #ffffff;
+    font-weight: 700;
+  }
+
+  .cloud-hero .cloud-page-note {
+    color: rgba(255, 255, 255, 0.88);
+  }
+
+  .cloud-hero .cloud-current-project {
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
   }
 
   .cloud-page-kicker {
@@ -111,7 +139,7 @@
     min-height: 42px;
     max-width: min(420px, 100%);
     border: 1px solid var(--cloud-line);
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: rgba(255, 255, 255, 0.88);
     color: var(--cloud-muted);
     font-size: 12px;
@@ -137,7 +165,7 @@
   .cloud-tab {
     appearance: none;
     border: 1px solid var(--cloud-line);
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: rgba(255, 255, 255, 0.8);
     color: var(--cloud-text);
     cursor: pointer;
@@ -192,7 +220,7 @@
 
   .cloud-form {
     border: 1px solid var(--cloud-line);
-    border-radius: 20px;
+    border-radius: var(--cloud-radius-lg);
     background: linear-gradient(180deg, #fbfdff 0%, var(--cloud-panel-soft) 100%);
     padding: 18px;
   }
@@ -244,7 +272,7 @@
     width: 100%;
     min-width: 0;
     border: 1px solid var(--cloud-line);
-    border-radius: 12px;
+    border-radius: var(--cloud-radius-sm);
     background: #fff;
     color: var(--cloud-text);
     font-size: 14px;
@@ -298,10 +326,10 @@
     align-items: center;
     justify-content: center;
     border: 1px solid transparent;
-    border-radius: 12px;
+    border-radius: var(--cloud-radius-sm);
     cursor: pointer;
     font-size: 13px;
-    font-weight: 800;
+    font-weight: 700;
     line-height: 1;
     min-height: 42px;
     padding: 12px 15px;
@@ -387,7 +415,7 @@
 
   .cloud-project-item {
     border: 1px solid var(--cloud-line);
-    border-radius: 20px;
+    border-radius: var(--cloud-radius-lg);
     background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
     cursor: pointer;
     padding: 16px;
@@ -413,7 +441,7 @@
 
   .cloud-check-project-item {
     border: 1px solid var(--cloud-line);
-    border-radius: 18px;
+    border-radius: var(--cloud-radius-lg);
     background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
     padding: 14px;
   }
@@ -496,7 +524,7 @@
     display: inline-flex;
     align-items: center;
     border: 1px solid var(--cloud-line);
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: var(--cloud-primary-soft);
     color: var(--cloud-primary);
     font-size: 11px;
@@ -547,7 +575,7 @@
     gap: 12px;
     align-items: flex-start;
     border: 1px solid var(--cloud-line);
-    border-radius: 14px;
+    border-radius: var(--cloud-radius-md);
     padding: 14px;
     background: #fff;
   }
@@ -576,7 +604,7 @@
 
   .cloud-empty-state {
     border: 1px dashed var(--cloud-line-strong);
-    border-radius: 20px;
+    border-radius: var(--cloud-radius-lg);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(238, 246, 255, 0.9));
     padding: 34px 22px;
     text-align: center;
@@ -629,7 +657,7 @@
   }
 
   .cloud-unsaved-indicator {
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: #fee2e2;
     color: #b91c1c;
     font-size: 12px;
@@ -674,7 +702,7 @@
     display: inline-flex;
     overflow: hidden;
     border: 1px solid var(--cloud-line-strong);
-    border-radius: 8px;
+    border-radius: var(--cloud-radius-chip);
     background: #fff;
   }
 
@@ -726,7 +754,7 @@
     content: "削除あり";
     display: inline-block;
     margin-left: 6px;
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: #fee2e2;
     color: #b91c1c;
     font-size: 10px;
@@ -755,7 +783,7 @@
     width: 18px;
     height: 18px;
     border: 2px solid #fff;
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: #ef4444;
     color: #fff;
     font-size: 12px;
@@ -775,20 +803,26 @@
   .cloud-settings-tab {
     position: relative;
     border: 1px solid var(--cloud-line);
-    border-radius: 8px;
-    background: #fff;
+    border-radius: var(--cloud-radius-pill);
+    background: rgba(255, 255, 255, 0.8);
     color: var(--cloud-muted);
     cursor: pointer;
     font: inherit;
     font-size: 13px;
     font-weight: 800;
     min-height: 38px;
-    padding: 0 13px;
+    padding: 0 16px;
+    transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+  }
+
+  .cloud-settings-tab:hover {
+    border-color: var(--cloud-line-strong);
+    background: #ffffff;
   }
 
   .cloud-settings-tab.is-active {
     border-color: var(--cloud-primary);
-    background: var(--cloud-primary);
+    background: linear-gradient(180deg, #4c97e0, var(--cloud-primary));
     color: #fff;
   }
 
@@ -800,7 +834,7 @@
   .cloud-settings-card,
   .cloud-request-card {
     border: 1px solid var(--cloud-line);
-    border-radius: 12px;
+    border-radius: var(--cloud-radius-sm);
     background: #fff;
     padding: 14px;
   }
@@ -837,7 +871,7 @@
 
   .cloud-input-panel {
     border: 1px solid var(--cloud-line);
-    border-radius: 12px;
+    border-radius: var(--cloud-radius-sm);
     background: #fff;
     padding: 8px;
     max-height: 220px;
@@ -874,7 +908,7 @@
     gap: 8px;
     max-width: 100%;
     border: 1px solid #d8c9ff;
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: #f5f0ff;
     color: #6b21a8;
     font-size: 12px;
@@ -886,7 +920,7 @@
   .cloud-master-chip button {
     appearance: none;
     border: 0;
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: #e7d8ff;
     color: #5b21b6;
     cursor: pointer;
@@ -910,7 +944,7 @@
     width: 100%;
     appearance: none;
     border: 0;
-    border-radius: 10px;
+    border-radius: var(--cloud-radius-sm);
     background: transparent;
     color: var(--cloud-text);
     cursor: pointer;
@@ -947,7 +981,7 @@
   .cloud-fold {
     min-width: 0;
     border: 1px solid var(--cloud-line);
-    border-radius: 18px;
+    border-radius: var(--cloud-radius-lg);
     background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
     overflow: hidden;
   }
@@ -1031,7 +1065,7 @@
 
   .cloud-history-item {
     border: 1px solid var(--cloud-line);
-    border-radius: 16px;
+    border-radius: var(--cloud-radius-md);
     background: #fff;
     padding: 12px;
   }
@@ -1057,7 +1091,7 @@
     overflow: visible;
     max-height: none;
     border: 1px solid var(--cloud-line);
-    border-radius: 18px;
+    border-radius: var(--cloud-radius-lg);
     background: #fff;
   }
 
@@ -1172,7 +1206,7 @@
 
   .cloud-check-entry {
     border: 1px solid var(--cloud-line);
-    border-radius: 12px;
+    border-radius: var(--cloud-radius-sm);
     background: #f8fbff;
     font-size: 13px;
     line-height: 1.5;
@@ -1217,7 +1251,7 @@
     grid-template-rows: auto 1fr auto;
     gap: 16px;
     border: 1px solid var(--cloud-line);
-    border-radius: 24px;
+    border-radius: var(--cloud-radius-xl);
     background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
     box-shadow: 0 24px 60px rgba(15, 32, 52, 0.22);
     padding: 18px;
@@ -1259,6 +1293,26 @@
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 10px;
+  }
+
+  .cloud-modal-message {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--cloud-ink, #1f2d3d);
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .cloud-field-label-text {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--cloud-muted, #5b6b7b);
+  }
+
+  .cloud-prompt-error {
+    color: var(--cloud-danger, #bf5252);
+    font-weight: 700;
   }
 
   .cloud-modal-overlay-workspace {
@@ -1308,7 +1362,7 @@
   .cloud-summary-metric,
   .cloud-summary-section {
     border: 1px solid var(--cloud-line);
-    border-radius: 18px;
+    border-radius: var(--cloud-radius-lg);
     background: #fff;
     padding: 14px;
   }
@@ -1351,7 +1405,7 @@
     gap: 10px;
     align-items: center;
     border: 1px solid var(--cloud-line);
-    border-radius: 14px;
+    border-radius: var(--cloud-radius-md);
     background: var(--cloud-primary-soft);
     padding: 10px 12px;
   }
@@ -1379,7 +1433,7 @@
     gap: 12px;
     padding: 14px;
     border: 1px dashed var(--cloud-line-strong);
-    border-radius: 18px;
+    border-radius: var(--cloud-radius-lg);
     background: rgba(238, 246, 255, 0.85);
   }
 
@@ -1396,7 +1450,7 @@
     gap: 10px;
     padding: 14px;
     border: 1px dashed var(--cloud-line-strong);
-    border-radius: 18px;
+    border-radius: var(--cloud-radius-lg);
     background: rgba(255, 252, 245, 0.92);
   }
 
@@ -1428,7 +1482,7 @@
   .cloud-bulk-date-cell {
     min-height: 42px;
     border: 1px solid var(--cloud-line);
-    border-radius: 12px;
+    border-radius: var(--cloud-radius-sm);
     background: #fff;
     color: var(--cloud-text);
     font-size: 13px;
@@ -1461,7 +1515,7 @@
     gap: 10px;
     padding: 14px;
     border: 1px dashed var(--cloud-line-strong);
-    border-radius: 18px;
+    border-radius: var(--cloud-radius-lg);
     background: rgba(240, 253, 244, 0.85);
   }
 
@@ -1495,7 +1549,7 @@
     content: '';
     width: 14px;
     height: 14px;
-    border-radius: 4px;
+    border-radius: var(--cloud-radius-chip);
     display: inline-block;
   }
 
@@ -1553,7 +1607,7 @@
     gap: 8px;
     align-items: center;
     border: 1px solid var(--cloud-line);
-    border-radius: 12px;
+    border-radius: var(--cloud-radius-sm);
     background: #fff;
     padding: 10px 12px;
     font-size: 13px;
@@ -1574,7 +1628,7 @@
 
   .cloud-bulk-candidate-panel {
     border: 1px solid var(--cloud-line);
-    border-radius: 12px;
+    border-radius: var(--cloud-radius-sm);
     background: #fff;
     padding: 8px;
     max-height: 220px;
@@ -1653,7 +1707,7 @@
     min-width: 0;
     overflow: auto;
     border: 1px solid var(--cloud-line);
-    border-radius: 14px;
+    border-radius: var(--cloud-radius-md);
     background: #fff;
     max-height: min(48vh, 420px);
   }
@@ -1757,7 +1811,7 @@
     gap: 12px;
     padding: 16px;
     border: 1px solid var(--cloud-line);
-    border-radius: 18px;
+    border-radius: var(--cloud-radius-lg);
     background: rgba(255, 255, 255, 0.96);
     min-height: 0;
     min-width: 0;
@@ -1815,7 +1869,7 @@
     gap: 6px;
     padding: 8px 10px;
     border: 1px solid var(--cloud-line);
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: #fff;
     font-size: 13px;
     font-weight: 700;
@@ -1866,7 +1920,7 @@
     align-items: start;
     padding: 12px;
     border: 1px dashed var(--cloud-line-strong);
-    border-radius: 16px;
+    border-radius: var(--cloud-radius-md);
     background: rgba(244, 248, 255, 0.9);
   }
 
@@ -1875,7 +1929,7 @@
     display: grid;
     gap: 10px;
     border: 1px solid var(--cloud-line);
-    border-radius: 16px;
+    border-radius: var(--cloud-radius-md);
     background: #fff;
     padding: 14px;
   }
@@ -1889,7 +1943,7 @@
     display: grid;
     gap: 4px;
     border: 1px solid rgba(191, 82, 82, 0.2);
-    border-radius: 12px;
+    border-radius: var(--cloud-radius-sm);
     background: rgba(255, 240, 240, 0.72);
     padding: 10px 12px;
     color: var(--cloud-danger);
@@ -1924,7 +1978,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     padding: 6px 10px;
     font-size: 12px;
     font-weight: 800;
@@ -1958,7 +2012,7 @@
   .cloud-assist-score {
     min-width: min(72px, 100%);
     text-align: center;
-    border-radius: 14px;
+    border-radius: var(--cloud-radius-md);
     background: var(--cloud-primary);
     color: #fff;
     font-size: clamp(16px, 3vw, 20px);
@@ -1982,7 +2036,7 @@
     width: 100%;
     text-align: left;
     border: 1px solid var(--cloud-line);
-    border-radius: 10px;
+    border-radius: var(--cloud-radius-sm);
     background: #fff;
     color: var(--cloud-text);
     padding: 8px 10px;
@@ -2010,7 +2064,7 @@
     display: grid;
     gap: 10px;
     border: 1px solid var(--cloud-line);
-    border-radius: 16px;
+    border-radius: var(--cloud-radius-md);
     background: #fff;
     padding: 14px;
     min-width: 0;
@@ -2073,7 +2127,7 @@
     min-width: 72px;
     min-height: 38px;
     border: 1px solid var(--cloud-line);
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: var(--cloud-primary-soft);
     color: var(--cloud-primary-strong);
     font-size: 12px;
@@ -2171,7 +2225,7 @@
     gap: 10px;
     padding: 12px 14px;
     border: 1px solid #e2e8f0;
-    border-radius: 14px;
+    border-radius: var(--cloud-radius-md);
     background: #ffffff;
   }
 
@@ -2209,7 +2263,7 @@
       min-height: auto;
       max-height: calc(100vh - 16px);
       max-height: calc(100dvh - 16px);
-      border-radius: 20px;
+      border-radius: var(--cloud-radius-lg);
       padding: 14px;
     }
 
@@ -2263,7 +2317,7 @@
       max-height: calc(100vh - 16px);
       max-height: calc(100dvh - 16px);
       gap: 12px;
-      border-radius: 20px;
+      border-radius: var(--cloud-radius-lg);
       padding: 14px;
     }
 
@@ -2280,7 +2334,7 @@
     .cloud-assist-section {
       gap: 10px;
       padding: 14px;
-      border-radius: 16px;
+      border-radius: var(--cloud-radius-md);
     }
 
     .cloud-assist-card,
@@ -2290,7 +2344,7 @@
     .cloud-assist-detail-breakdown-item,
     .cloud-assist-detail-toggle {
       padding: 12px;
-      border-radius: 14px;
+      border-radius: var(--cloud-radius-md);
     }
 
     .cloud-assist-detail-grid,
@@ -2357,7 +2411,7 @@
     gap: 12px;
     align-items: start;
     border: 1px solid var(--cloud-line);
-    border-radius: 16px;
+    border-radius: var(--cloud-radius-md);
     background: #fff;
     padding: 12px 14px;
     cursor: pointer;
@@ -2383,7 +2437,7 @@
     min-width: 0;
     overflow: auto;
     border: 1px solid var(--cloud-line);
-    border-radius: 24px;
+    border-radius: var(--cloud-radius-xl);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(238, 246, 255, 0.84));
     padding: 10px;
   }
@@ -2398,7 +2452,7 @@
     min-width: 0;
     margin: 0 auto;
     padding: 14px;
-    border-radius: 20px;
+    border-radius: var(--cloud-radius-lg);
   }
 
   .cloud-editor-host .weekday-header,
@@ -2414,7 +2468,7 @@
     display: none;
     min-width: 220px;
     max-width: 360px;
-    border-radius: 14px;
+    border-radius: var(--cloud-radius-md);
     color: #fff;
     font-size: 13px;
     font-weight: 800;
@@ -2469,7 +2523,7 @@
     .cloud-panel,
     .cloud-hero {
       padding: 18px;
-      border-radius: 20px;
+      border-radius: var(--cloud-radius-lg);
     }
 
     .cloud-form-grid,
@@ -2505,7 +2559,7 @@
 
   body.cloud-public-page.cloud-device-mobile .cloud-hero,
   body.cloud-public-page.cloud-device-mobile .cloud-panel-public {
-    border-radius: 20px;
+    border-radius: var(--cloud-radius-lg);
     padding: 16px;
   }
 
@@ -2526,7 +2580,7 @@
   }
 
   body.cloud-public-page.cloud-device-mobile .cloud-tool-dock-public .cloud-fold {
-    border-radius: 16px;
+    border-radius: var(--cloud-radius-md);
     box-shadow: 0 10px 24px rgba(47, 106, 173, 0.1);
   }
 
@@ -2551,13 +2605,13 @@
 
   body.cloud-public-page.cloud-device-mobile .cloud-calendar-stage {
     padding: 10px;
-    border-radius: 20px;
+    border-radius: var(--cloud-radius-lg);
   }
 
   body.cloud-public-page.cloud-device-mobile .cloud-editor-host .container {
     width: 100%;
     padding: 12px;
-    border-radius: 18px;
+    border-radius: var(--cloud-radius-lg);
   }
 
   body.cloud-public-page.cloud-device-mobile .cloud-editor-host .weekday-header {
@@ -2578,7 +2632,7 @@
     min-height: auto;
     gap: 8px;
     padding: 12px;
-    border-radius: 16px;
+    border-radius: var(--cloud-radius-md);
     background: linear-gradient(180deg, #ffffff 0%, #f6fbff 100%);
   }
 
@@ -2597,7 +2651,7 @@
     width: fit-content;
     min-width: 72px;
     padding: 7px 10px;
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: #eaf4ff;
     font-size: 13px;
   }
@@ -2620,7 +2674,7 @@
 
   body.cloud-public-page.cloud-device-mobile .cloud-editor-host .entry-item {
     padding: 10px 11px;
-    border-radius: 12px;
+    border-radius: var(--cloud-radius-sm);
   }
 
   body.cloud-public-page.cloud-device-mobile .cloud-editor-host .entry-item-title {
@@ -2661,7 +2715,7 @@
     gap: 0.5rem 1rem;
     padding: 0.6rem 0.8rem;
     background: #f1f5f9;
-    border-radius: 8px;
+    border-radius: var(--cloud-radius-chip);
     font-size: 0.85rem;
     color: #334155;
     margin-bottom: 0.75rem;
@@ -2688,7 +2742,7 @@
     min-width: 2.1rem;
     padding: 0.25rem 0.45rem;
     border: 1px solid var(--cloud-line);
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: #fff;
     color: var(--cloud-text);
     font-size: 0.82rem;
@@ -2712,7 +2766,7 @@
   .cloud-se-day-cell {
     min-height: 34px;
     border: 1px solid var(--cloud-line);
-    border-radius: 8px;
+    border-radius: var(--cloud-radius-chip);
     background: #fff;
     color: var(--cloud-text);
     font-size: 0.82rem;
@@ -2733,7 +2787,7 @@
   .cloud-se-days { display: flex; flex-direction: column; gap: 4px; margin-top: 0.4rem; }
   .cloud-se-dayrow {
     border: 1px solid var(--cloud-line);
-    border-radius: 8px;
+    border-radius: var(--cloud-radius-chip);
     background: #fff;
     font-size: 0.85rem;
   }
@@ -2748,20 +2802,20 @@
   .cloud-se-assign-chip {
     display: inline-block;
     padding: 0.05rem 0.5rem;
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: #e0f2fe;
     color: #075985;
     font-size: 0.78rem;
     font-weight: 700;
   }
   .cloud-se-assign-chip.is-fixed { background: #f1f5f9; color: #334155; }
-  .cloud-se-panel { margin: 0.35rem 0; padding: 0.4rem 0.6rem; border: 1px solid var(--cloud-line); border-radius: 8px; }
+  .cloud-se-panel { margin: 0.35rem 0; padding: 0.4rem 0.6rem; border: 1px solid var(--cloud-line); border-radius: var(--cloud-radius-chip); }
   .cloud-se-panel-title { font-weight: 700; margin: 0.4rem 0 0.2rem; font-size: 0.84rem; }
   .cloud-se-candidates { list-style: none; margin: 0.2rem 0; padding: 0; }
   .cloud-se-candidates li { padding: 0.12rem 0.2rem; }
   .cloud-se-candidates li.is-selected-candidate {
     background: #dcfce7;
-    border-radius: 6px;
+    border-radius: var(--cloud-radius-chip);
     font-weight: 700;
   }
   .cloud-se-reasons { margin: 0.2rem 0; padding-left: 1.1rem; }
@@ -2769,7 +2823,7 @@
     display: inline-block;
     margin-top: 2px;
     padding: 0.1rem 0.5rem;
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     background: #ecfdf5;
     color: #047857;
     font-size: 0.74rem;
@@ -2779,7 +2833,7 @@
   .cloud-assist-people-badge {
     display: inline-block;
     padding: 0.1rem 0.5rem;
-    border-radius: 999px;
+    border-radius: var(--cloud-radius-pill);
     font-size: 0.74rem;
     font-weight: 700;
     white-space: nowrap;
@@ -2816,17 +2870,17 @@
     padding: 0.6rem 0.8rem;
     background: #ecfeff;
     border: 1px solid #a5f3fc;
-    border-radius: 8px;
+    border-radius: var(--cloud-radius-chip);
     font-size: 0.9rem;
     margin-bottom: 0.6rem;
   }
-  .cloud-se-badge { padding: 0.15rem 0.6rem; border-radius: 999px; font-weight: 700; font-size: 0.8rem; color: #fff; }
+  .cloud-se-badge { padding: 0.15rem 0.6rem; border-radius: var(--cloud-radius-pill); font-weight: 700; font-size: 0.8rem; color: #fff; }
   .cloud-se-status-feasible { background: #16a34a; }
   .cloud-se-status-partial { background: #d97706; }
   .cloud-se-status-failed { background: #dc2626; }
   .cloud-se-status-optimal { background: #2563eb; }
   .cloud-se-violations { list-style: none; padding: 0; margin: 0.4rem 0; font-size: 0.85rem; }
-  .cloud-se-violations li { padding: 0.25rem 0.5rem; border-radius: 6px; margin-bottom: 0.25rem; }
+  .cloud-se-violations li { padding: 0.25rem 0.5rem; border-radius: var(--cloud-radius-chip); margin-bottom: 0.25rem; }
   .cloud-se-sev-blocker { background: #fee2e2; color: #991b1b; font-weight: 600; }
   .cloud-se-sev-hard { background: #ffedd5; color: #9a3412; }
   .cloud-se-sev-warning { background: #fef9c3; color: #854d0e; }
@@ -2843,7 +2897,7 @@
   .cloud-engine-preview-page .cloud-page-note {
     background: #fffbeb;
     border: 1px solid #fde68a;
-    border-radius: 8px;
+    border-radius: var(--cloud-radius-chip);
     padding: 0.5rem 0.75rem;
     color: #92400e;
   }
@@ -2853,7 +2907,7 @@
   .cloud-template-list { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.75rem; }
   .cloud-template-item {
     border: 1px solid var(--cloud-line, rgba(96, 165, 250, 0.18));
-    border-radius: 12px;
+    border-radius: var(--cloud-radius-sm);
     padding: 0.85rem 1rem;
     background: rgba(255, 255, 255, 0.9);
   }
@@ -2875,7 +2929,7 @@
   .cloud-template-editor-page .cloud-page-note {
     background: #eff6ff;
     border: 1px solid #bfdbfe;
-    border-radius: 8px;
+    border-radius: var(--cloud-radius-chip);
     padding: 0.5rem 0.75rem;
     color: #1e3a8a;
   }
