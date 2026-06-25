@@ -775,20 +775,26 @@
   .cloud-settings-tab {
     position: relative;
     border: 1px solid var(--cloud-line);
-    border-radius: 8px;
-    background: #fff;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.8);
     color: var(--cloud-muted);
     cursor: pointer;
     font: inherit;
     font-size: 13px;
     font-weight: 800;
     min-height: 38px;
-    padding: 0 13px;
+    padding: 0 16px;
+    transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+  }
+
+  .cloud-settings-tab:hover {
+    border-color: var(--cloud-line-strong);
+    background: #ffffff;
   }
 
   .cloud-settings-tab.is-active {
     border-color: var(--cloud-primary);
-    background: var(--cloud-primary);
+    background: linear-gradient(180deg, #4c97e0, var(--cloud-primary));
     color: #fff;
   }
 

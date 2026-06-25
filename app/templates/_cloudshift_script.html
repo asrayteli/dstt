@@ -6162,11 +6162,11 @@
         const entryCount = revision.entry_count ?? revision.entries_count ?? revision.total_entries ?? '';
         const commentCount = revision.comment_count ?? revision.comments_count ?? '';
         const isCurrent = !!revision.current || !!revision.is_current;
-        const labelParts = [`rev ${revisionNo}`];
+        const labelParts = [`版 ${revisionNo}`];
         if (updatedAt && updatedAt !== '-') labelParts.push(updatedAt);
-        if (entryCount !== '') labelParts.push(`entries ${entryCount}`);
-        if (commentCount !== '') labelParts.push(`comments ${commentCount}`);
-        if (isCurrent) labelParts.push('current');
+        if (entryCount !== '') labelParts.push(`${entryCount}件`);
+        if (commentCount !== '') labelParts.push(`コメント${commentCount}件`);
+        if (isCurrent) labelParts.push('現在の版');
         return `
           <label class="cloud-revision-row">
             <input
@@ -6207,7 +6207,7 @@
       await loadProjects();
       await loadHistory(project.id);
       closeCloudModal('cloud-restore-modal');
-      showFlash(`rev ${revision} を復元しました`, 'success');
+      showFlash(`版 ${revision} を復元しました`, 'success');
     }
 
     async function openRestoreModal() {
@@ -6260,7 +6260,7 @@
       await loadProjects();
       await loadHistory(project.id);
       closeCloudModal('cloud-shift-book-settings-modal');
-      showFlash(`rev ${revision} を復元しました`, 'success');
+      showFlash(`版 ${revision} を復元しました`, 'success');
     }
 
     function buildBulkOptionSelect(mode) {
