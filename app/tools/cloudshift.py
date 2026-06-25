@@ -1837,13 +1837,22 @@ def _db_project_base_dict(row: CloudShiftProject) -> dict[str, Any]:
 
 
 def _db_month_row_to_dict(month_row: CloudShiftMonth, *, include_revision_snapshots: bool = True) -> dict[str, Any]:
+    entries_raw = _json_dict(month_row.entries_per_day)
+    draft_raw = _json_dict(month_row.draft_entries_per_day)
+    # 空の draft は「仮保存なし」を意味する（draft 列追加マイグレーションの初期値 {} や、
+    # 全日空）。live に実体があるのに空 draft をそのまま使うと draft != live となり、
+    # ユーザーが仮保存していないのに「仮保存あり」と誤表示される。空 draft は live を映し、
+    # 次回保存時に draft=live として永続化されて自己修復する。
+    # （仮保存は明示操作でのみ作る設計のため、空 draft を WIP として扱わない。）
+    if not any(isinstance(entries, list) and entries for entries in draft_raw.values()):
+        draft_raw = json.loads(json.dumps(entries_raw, ensure_ascii=False))
     month_data = {
         "year": month_row.year,
         "month": month_row.month,
         "capacity_enabled": bool(month_row.capacity_enabled),
         "required_capacity": int(month_row.required_capacity or 0),
-        "entries_per_day": _json_dict(month_row.entries_per_day),
-        "draft_entries_per_day": _json_dict(month_row.draft_entries_per_day),
+        "entries_per_day": entries_raw,
+        "draft_entries_per_day": draft_raw,
         "revision": int(month_row.revision or 1),
         "created_at": month_row.created_at,
         "updated_at": month_row.updated_at,
