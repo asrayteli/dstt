@@ -555,6 +555,43 @@ def _ensure_to_bell_task_source_unique_index(app):
             )
 
 
+def _backfill_empty_cloudshift_drafts(app):
+    """空の仮保存(draft)を正式(live)へ揃える既存DB向け一括修復。冪等。
+
+    draft 列追加マイグレーションは既存行の draft_entries_per_day を {} で初期化する。
+    CloudShift は仮保存の有無を draft と live の差分で推論するため、live に実体がある
+    のに draft が空のままだと、ユーザーが仮保存していないのに『仮保存あり』と誤表示される。
+    仮保存は明示操作でのみ作る設計のため、空 draft（リテラル {} / 全日空）の行を live に
+    揃える。実体のある draft（ユーザーの仮保存）は変更しない。失敗しても起動は止めない。
+    """
+    import json
+
+    with app.app_context():
+        try:
+            if "cloudshift_months" not in inspect(db.engine).get_table_names():
+                return
+            from .models import CloudShiftMonth
+
+            def _has_entries(value) -> bool:
+                if not isinstance(value, dict):
+                    return False
+                return any(isinstance(entries, list) and entries for entries in value.values())
+
+            healed = 0
+            for row in CloudShiftMonth.query.all():
+                if _has_entries(row.draft_entries_per_day) or not _has_entries(row.entries_per_day):
+                    continue
+                # 新しい dict を代入して SQLAlchemy の変更検知を確実にする（live の独立コピー）。
+                row.draft_entries_per_day = json.loads(json.dumps(row.entries_per_day, ensure_ascii=False))
+                healed += 1
+            if healed:
+                db.session.commit()
+                app.logger.info("CloudShift: backfilled %d month(s) with empty draft -> live", healed)
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("CloudShift empty-draft backfill skipped due to error")
+
+
 def create_app(test_config=None):
     app = Flask(__name__, static_folder='./static/')
     app_version = os.environ.get('DSTT_APP_VERSION')
@@ -907,6 +944,8 @@ def create_app(test_config=None):
     # DBスキーマの初期化（既存DBへのカラム追加含む）
     _ensure_access_control_schema(app)
     _ensure_to_bell_task_source_unique_index(app)
+    # 旧データの空 draft を live へ揃える一括修復（誤『仮保存あり』の永続的解消）。
+    _backfill_empty_cloudshift_drafts(app)
 
     from .services.to_bell_push import init_to_bell_push_scheduler
     init_to_bell_push_scheduler(app)
