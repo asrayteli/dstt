@@ -71,13 +71,34 @@
     gap: 18px;
     align-items: flex-start;
     padding: 22px 24px;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(243, 248, 255, 0.97)),
-      var(--cloud-panel);
+    /* 主画面の DSTT 統一ヒーロー（濃いグラデ＋白文字）と見た目を揃える。 */
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+    background: linear-gradient(135deg, #0c4a6e 0%, #0369a1 50%, #06b6d4 100%);
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
   }
 
   .cloud-hero-copy {
     min-width: 0;
+  }
+
+  .cloud-hero .cloud-page-kicker {
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  .cloud-hero .cloud-page-title {
+    color: #ffffff;
+    font-weight: 700;
+  }
+
+  .cloud-hero .cloud-page-note {
+    color: rgba(255, 255, 255, 0.88);
+  }
+
+  .cloud-hero .cloud-current-project {
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
   }
 
   .cloud-page-kicker {
