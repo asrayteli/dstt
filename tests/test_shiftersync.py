@@ -149,6 +149,60 @@ def test_check_temporary_option_conflicts_only_within_same_site(tmp_path):
     assert payload["conflicts"] == []
 
 
+def test_time_conflict_rules_are_order_independent():
+    """時間オプションの衝突判定が引数順に依存せず、定義表どおり評価される。
+
+    回帰: TIME_CONFLICT_RULES のキーは時系列順(A→P→E→L)で書かれているが、
+    照合は tuple(sorted(...)) でアルファベット順に正規化される。両順序が食い違う
+    ("P","L") のようなキーが辞書ミスでフォールバックに落ち、本来の衝突(True)を
+    取りこぼしていた（午後×遅番の二重出勤が衝突として検出されない）。"""
+    from app.tools.shiftersync_check import is_duplicate_by_rules
+
+    # 表に True と定義されたペアは、どちらの引数順でも衝突になること。
+    assert is_duplicate_by_rules("P", "L") is True  # 午後 × 遅番（旧バグで False）
+    assert is_duplicate_by_rules("L", "P") is True
+    assert is_duplicate_by_rules("A", "E") is True  # 午前 × 早番
+    assert is_duplicate_by_rules("E", "A") is True
+
+    # 表に False と定義されたペアは、どちらの引数順でも非衝突のままであること。
+    for a, b in (("A", "P"), ("A", "L"), ("P", "E"), ("E", "L")):
+        assert is_duplicate_by_rules(a, b) is False, (a, b)
+        assert is_duplicate_by_rules(b, a) is False, (b, a)
+
+    # 同一オプション同士は衝突。
+    for opt in ("A", "P", "E", "L"):
+        assert is_duplicate_by_rules(opt, opt) is True, opt
+
+
+def test_shiftersync_local_rules_match_check_module():
+    """shiftersync.py の重複コピーと正本 shiftersync_check.py が同じ結果を返す。"""
+    from app.tools.shiftersync import _is_duplicate_by_rules as local_rules
+    from app.tools.shiftersync_check import is_duplicate_by_rules as canonical_rules
+
+    options = ["A", "P", "E", "L", "TEMP", "N1", "N2", "V", "M", None]
+    for a in options:
+        for b in options:
+            assert local_rules(a, b) == canonical_rules(a, b), (a, b)
+            assert local_rules(a, b, same_site=True) == canonical_rules(a, b, same_site=True), (a, b)
+
+
+def test_check_afternoon_and_late_shift_conflict_same_day(tmp_path):
+    """同一人物が同日に午後(P)と遅番(L)を持つと衝突として検出される（回帰）。"""
+    _, client = _build_client(tmp_path)
+    csv_a = "scene,2026,4,Team A\n譌･莉・迴ｾ蝣ｴ\n1,!P!Alice,!L!Alice\n"
+
+    response = client.post(
+        "/tools/shiftersync/check",
+        data={"csv_files": [(io.BytesIO(csv_a.encode("utf-8-sig")), "a.csv")]},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    flagged = sorted(item["entry"] for item in payload["same_site_conflicts"])
+    assert flagged == ["!L!Alice", "!P!Alice"]
+
+
 def test_entry_display_text_places_name_before_option():
     assert entry_display_text({"value": "!A!Alice", "comment": ""}) == "Alice 午前"
 
