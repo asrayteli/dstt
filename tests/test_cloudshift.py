@@ -1655,6 +1655,33 @@ def test_external_sync_into_legacy_empty_draft_month_does_not_create_phantom_dra
     assert after["draft_entries_per_day"] == after["entries_per_day"]
 
 
+def test_save_month_returns_200_even_when_target_sync_fails(tmp_path, monkeypatch):
+    """対象帳への同期反映が失敗しても、ソース帳の保存は成立し 200 を返す。
+
+    回帰: 他帳への同期押し出しはソース保存の確定後・ロック外の best-effort 処理。
+    1 つの対象帳でロックタイムアウト/DBエラー等が起きても、ソース保存は既に成立して
+    いるためリクエストを失敗(500)させてはならない（保存済みなのに「失敗」と誤表示）。"""
+    module, client, person, scene = _person_scene_for_external_sync(tmp_path)
+    scene_id = scene["project"]["id"]
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("environment-specific sync failure")
+
+    # 他帳への同期反映だけを失敗させる（ソース自身の保存経路では呼ばれない関数）。
+    monkeypatch.setattr(module, "_replace_shift_synced_entries_in_target_project", _boom)
+
+    scene_entries = dict(scene["month"]["entries_per_day"])
+    scene_entries["1"] = [{"id": "scene-1", "value": "!A!Alice", "employee_number": "1001"}]
+    resp = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": scene_entries, "base_month": scene["month"]},
+    )
+    assert resp.status_code == 200
+    # ソース帳(現場)の保存自体は成立していること。
+    saved = resp.get_json()["month"]
+    assert saved["entries_per_day"].get("1")
+
+
 def test_legacy_empty_draft_does_not_show_as_phantom_draft(tmp_path):
     """draft_entries_per_day が空{}（draft列追加マイグレーションの初期値）でも、
     live に実体があれば『仮保存あり』にならない（draft==live で返る）。

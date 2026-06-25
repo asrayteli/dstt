@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from copy import copy
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from collections import namedtuple
 from collections.abc import Iterator
 from typing import Any
 
@@ -1155,14 +1156,43 @@ def _sync_entry_id(*parts: Any) -> str:
     return f"sync_{digest[:16]}"
 
 
-def _active_scene_branches_for_project(project: dict[str, Any]) -> list[SiteBranch]:
+# 現場リンク解決に必要な最小フィールドだけを持つ軽量レコード。SiteBranch の ORM
+# インスタンスではなくプレーンな値を保持するため、commit による expire の影響を受けず
+# リクエスト内で安全に使い回せる（属性アクセスは ORM と互換）。
+_SceneBranchInfo = namedtuple("_SceneBranchInfo", ["id", "cloudshift_option_key", "site_branch"])
+
+
+def _active_scene_branches_for_project(project: dict[str, Any]) -> list:
+    """プロジェクトの現場に紐づく有効ブランチを返す（リクエスト内キャッシュ）。
+
+    project の site_row_id は固定のため、同期エントリ構築でエントリ毎に呼ばれても
+    結果は同一。現場マスターはリクエスト中に変化しないため、site_row_id 単位で
+    結果をキャッシュし、エントリ毎の Site 取得・ブランチ走査・絞り込みの繰り返しを
+    1 回に抑える（保存処理中の autoflush 多発も避ける）。
+    """
     site_row_id = _coerce_site_row_id(project.get("site_row_id"))
     if not site_row_id:
         return []
+    cache = _request_scoped_cache("_cloudshift_active_scene_branches_cache")
+    if cache is not None and int(site_row_id) in cache:
+        return cache[int(site_row_id)]
     site = db.session.get(Site, int(site_row_id))
-    if not site:
-        return []
-    return [branch for branch in site.branches if branch.is_active]
+    branches = (
+        [
+            _SceneBranchInfo(
+                int(branch.id),
+                str(branch.cloudshift_option_key or ""),
+                str(branch.site_branch or ""),
+            )
+            for branch in site.branches
+            if branch.is_active
+        ]
+        if site
+        else []
+    )
+    if cache is not None:
+        cache[int(site_row_id)] = branches
+    return branches
 
 
 def _scene_branch_fields_for_option(project: dict[str, Any], option_key: Any) -> dict[str, str]:
@@ -4681,14 +4711,28 @@ def _resync_shift_month(source_project: dict[str, Any], month_key: str, *, actor
         if has_existing_sync:
             relevant_target_ids.add(project_id)
     for target_project_id in sorted(relevant_target_ids):
-        with _project_lock(target_project_id):
-            target_project = _load_project(target_project_id)
-            _replace_shift_synced_entries_in_target_project(
-                target_project,
-                source_project,
+        try:
+            with _project_lock(target_project_id):
+                target_project = _load_project(target_project_id)
+                _replace_shift_synced_entries_in_target_project(
+                    target_project,
+                    source_project,
+                    month_key,
+                    desired_by_target.get(target_project_id, {}),
+                    actor_name=actor_name,
+                )
+        except Exception:
+            # 同期反映はソース帳の保存が確定した後に行う best-effort な押し出し。
+            # 1 つの対象帳でロックタイムアウト/DBエラー等が起きても、(1) ソース帳の
+            # 保存は既に成立しているのでリクエストを失敗させない、(2) 他の対象帳への
+            # 反映も止めない。各対象は load→編集→保存(commit) で原子的なため、失敗した
+            # 対象は変更されずに残り、次回いずれかの保存で再同期される。失敗はログに残す。
+            db.session.rollback()
+            logger.exception(
+                "shift sync to target failed (source=%s, target=%s, month=%s)",
+                source_project.get("id"),
+                target_project_id,
                 month_key,
-                desired_by_target.get(target_project_id, {}),
-                actor_name=actor_name,
             )
 
 
