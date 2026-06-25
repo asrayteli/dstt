@@ -2014,7 +2014,151 @@ document.addEventListener('mousemove', (event) => {
     }
   });
 
-  async function drawOverlayToCanvas(ctx, outputWidth, outputHeight) {
+  const OUTPUT_STYLE_PROPERTIES = [
+    'position',
+    'left',
+    'top',
+    'right',
+    'bottom',
+    'z-index',
+    'display',
+    'box-sizing',
+    'width',
+    'height',
+    'min-width',
+    'min-height',
+    'max-width',
+    'max-height',
+    'padding',
+    'margin',
+    'overflow',
+    'align-items',
+    'justify-content',
+    'flex-direction',
+    'font-family',
+    'font-size',
+    'font-style',
+    'font-weight',
+    'font-stretch',
+    'line-height',
+    'letter-spacing',
+    'color',
+    'white-space',
+    'text-align',
+    'text-decoration',
+    'writing-mode',
+    'text-orientation',
+    'font-variant-numeric',
+    'background',
+    'background-color',
+    'background-image',
+    'background-position',
+    'background-size',
+    'background-repeat',
+    'border',
+    'border-top',
+    'border-right',
+    'border-bottom',
+    'border-left',
+    'border-radius',
+    'border-top-left-radius',
+    'border-top-right-radius',
+    'border-bottom-right-radius',
+    'border-bottom-left-radius',
+    'opacity',
+    'object-fit',
+    'object-position',
+  ];
+
+  function copyOutputStyles(source, target) {
+    const computed = window.getComputedStyle(source);
+    OUTPUT_STYLE_PROPERTIES.forEach((prop) => {
+      const value = computed.getPropertyValue(prop);
+      if (value) target.style.setProperty(prop, value);
+    });
+    target.style.cursor = 'default';
+    target.style.userSelect = 'none';
+    target.style.pointerEvents = 'none';
+    target.style.outline = 'none';
+  }
+
+  function cloneOverlayNodeForOutput(node) {
+    const clone = node.cloneNode(true);
+    clone.classList.remove('selected');
+    clone.querySelectorAll('.stamp-resize-handle').forEach((handle) => handle.remove());
+    copyOutputStyles(node, clone);
+    return clone;
+  }
+
+  function buildOverlaySvgDataUrl(stageWidth, stageHeight) {
+    const root = document.createElement('div');
+    root.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+    root.style.position = 'relative';
+    root.style.width = `${stageWidth}px`;
+    root.style.height = `${stageHeight}px`;
+    root.style.overflow = 'hidden';
+    root.style.background = 'transparent';
+
+    Array.from(overlayLayer.children).forEach((node) => {
+      root.appendChild(cloneOverlayNodeForOutput(node));
+    });
+
+    const body = new XMLSerializer().serializeToString(root);
+    const svg = [
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${stageWidth}" height="${stageHeight}" viewBox="0 0 ${stageWidth} ${stageHeight}">`,
+      `<foreignObject x="0" y="0" width="${stageWidth}" height="${stageHeight}">`,
+      body,
+      '</foreignObject>',
+      '</svg>',
+    ].join('');
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  }
+
+  function loadOutputImage(src) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Failed to render overlay image'));
+      image.src = src;
+    });
+  }
+
+  function assertImageCanBeExported(image) {
+    const scratch = document.createElement('canvas');
+    scratch.width = 1;
+    scratch.height = 1;
+    const scratchCtx = scratch.getContext('2d');
+    scratchCtx.drawImage(image, 0, 0, 1, 1);
+    scratch.toDataURL('image/png');
+  }
+
+  async function drawOverlayDomToCanvas(ctx, outputWidth, outputHeight) {
+    const { width: stageWidth, height: stageHeight } = getStagePixelSize();
+    const scaleX = outputWidth / Math.max(1, stageWidth);
+    const scaleY = outputHeight / Math.max(1, stageHeight);
+    const ax = (useAnchorOrigin?.checked && anchorPoint) ? anchorPoint.x : 0;
+    const ay = (useAnchorOrigin?.checked && anchorPoint) ? anchorPoint.y : 0;
+    const calibEnabled = !!applyCalibrationOnExport?.checked;
+    const calib = calibEnabled ? getCalibration() : { offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 };
+    const svgUrl = buildOverlaySvgDataUrl(stageWidth, stageHeight);
+    const image = await loadOutputImage(svgUrl);
+    assertImageCanBeExported(image);
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.setTransform(calib.scaleX, 0, 0, calib.scaleY, calib.offsetX, calib.offsetY);
+    ctx.drawImage(
+      image,
+      -ax * scaleX,
+      -ay * scaleY,
+      stageWidth * scaleX,
+      stageHeight * scaleY
+    );
+    ctx.restore();
+  }
+
+  async function drawOverlayToCanvasManual(ctx, outputWidth, outputHeight) {
     const { width: stageWidth, height: stageHeight } = getStagePixelSize();
     const scaleX = outputWidth / Math.max(1, stageWidth);
     const scaleY = outputHeight / Math.max(1, stageHeight);
@@ -2124,6 +2268,15 @@ document.addEventListener('mousemove', (event) => {
 
         ctx.textAlign = 'left';
       }
+    }
+  }
+
+  async function drawOverlayToCanvas(ctx, outputWidth, outputHeight) {
+    try {
+      await drawOverlayDomToCanvas(ctx, outputWidth, outputHeight);
+    } catch (error) {
+      console.warn('PowerSTAMP DOM overlay rendering failed; falling back to manual canvas renderer.', error);
+      await drawOverlayToCanvasManual(ctx, outputWidth, outputHeight);
     }
   }
 

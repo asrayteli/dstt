@@ -46,7 +46,10 @@
         searchForm: {
           target_date: '',
           shift_key: ''
-        }
+        },
+        templates: [],
+        templatesLoaded: false,
+        templateApply: null
       },
       leaveSync: {
         calendars: [],
@@ -302,6 +305,14 @@
       };
     }
 
+    // 一括コピーの元データから、外部同期エントリと代務要請の表示専用エントリを除外する。
+    // （読み取り専用のミラーや申請プレースホルダを実体としてコピーしてしまわないようにする）
+    function bulkCopyableSourceEntries(entries) {
+      return (Array.isArray(entries) ? entries : [])
+        .filter((entry) => !String(entry && entry.sync_source_type ? entry.sync_source_type : '').trim())
+        .filter((entry) => !isSubstituteRequestDisplayEntry(entry));
+    }
+
     function ensureCloudModal(modalId, titleText) {
       let modal = document.getElementById(modalId);
       if (modal) {
@@ -365,6 +376,112 @@
 
     function modalFooter(modal) {
       return modal.querySelector('[data-cloud-modal-footer]');
+    }
+
+    // ネイティブの window.confirm / prompt / alert に代わる、アプリ内デザインで
+    // 統一した確認・入力モーダル。×ボタン・背景クリック・Escでの閉じる操作は
+    // すべて「キャンセル（confirm=false / prompt=null）」として解決する。
+    function cloudConfirm(options) {
+      const opts = options || {};
+      return new Promise((resolve) => {
+        const modal = openCloudModal('cloud-confirm-modal', opts.title || '確認');
+        const body = modalBody(modal);
+        const footer = modalFooter(modal);
+        const messageHtml = escapeHtml(String(opts.message || '')).replace(/\n/g, '<br>');
+        body.innerHTML = `<p class="cloud-modal-message">${messageHtml}</p>`;
+        footer.innerHTML = `
+          <button type="button" class="cloud-btn ghost" data-cloud-confirm-cancel>${escapeHtml(opts.cancelLabel || 'キャンセル')}</button>
+          <button type="button" class="cloud-btn ${opts.danger ? 'danger' : 'primary'}" data-cloud-confirm-ok>${escapeHtml(opts.confirmLabel || 'OK')}</button>
+        `;
+        let settled = false;
+        const observer = new MutationObserver(() => {
+          if (modal.classList.contains('cloud-hidden')) finish(false);
+        });
+        function finish(value) {
+          if (settled) return;
+          settled = true;
+          observer.disconnect();
+          closeCloudModal('cloud-confirm-modal');
+          resolve(value);
+        }
+        footer.querySelector('[data-cloud-confirm-cancel]').addEventListener('click', () => finish(false));
+        const okBtn = footer.querySelector('[data-cloud-confirm-ok]');
+        okBtn.addEventListener('click', () => finish(true));
+        observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
+        try { okBtn.focus(); } catch (_) { /* noop */ }
+      });
+    }
+
+    function cloudAlert(options) {
+      const opts = options || {};
+      return cloudConfirm({
+        title: opts.title || 'お知らせ',
+        message: opts.message || '',
+        confirmLabel: opts.confirmLabel || 'OK',
+        cancelLabel: opts.confirmLabel || 'OK',
+        danger: !!opts.danger
+      }).then(() => undefined);
+    }
+
+    // 入力モーダル。OKで入力値（trim 後）、キャンセル/閉じるで null を返す。
+    // required=true のとき空入力では確定できない。type で input の種類を指定可。
+    function cloudPrompt(options) {
+      const opts = options || {};
+      return new Promise((resolve) => {
+        const modal = openCloudModal('cloud-prompt-modal', opts.title || '入力');
+        const body = modalBody(modal);
+        const footer = modalFooter(modal);
+        const inputType = opts.type || 'text';
+        const labelHtml = opts.label ? `<span class="cloud-field-label-text">${escapeHtml(opts.label)}</span>` : '';
+        const messageHtml = opts.message ? `<p class="cloud-modal-message">${escapeHtml(String(opts.message)).replace(/\n/g, '<br>')}</p>` : '';
+        body.innerHTML = `
+          ${messageHtml}
+          <label class="cloud-field">
+            ${labelHtml}
+            <input id="cloud-prompt-input" class="cloud-input" type="${escapeHtml(inputType)}"
+              value="${escapeHtml(opts.defaultValue || '')}"
+              placeholder="${escapeHtml(opts.placeholder || '')}"
+              ${opts.min ? `min="${escapeHtml(String(opts.min))}"` : ''}
+              ${opts.max ? `max="${escapeHtml(String(opts.max))}"` : ''}>
+            <span id="cloud-prompt-error" class="cloud-field-note cloud-prompt-error cloud-hidden"></span>
+          </label>
+        `;
+        footer.innerHTML = `
+          <button type="button" class="cloud-btn ghost" data-cloud-prompt-cancel>${escapeHtml(opts.cancelLabel || 'キャンセル')}</button>
+          <button type="button" class="cloud-btn primary" data-cloud-prompt-ok>${escapeHtml(opts.confirmLabel || '決定')}</button>
+        `;
+        const input = body.querySelector('#cloud-prompt-input');
+        const errorNode = body.querySelector('#cloud-prompt-error');
+        let settled = false;
+        const observer = new MutationObserver(() => {
+          if (modal.classList.contains('cloud-hidden')) finish(null);
+        });
+        function finish(value) {
+          if (settled) return;
+          settled = true;
+          observer.disconnect();
+          closeCloudModal('cloud-prompt-modal');
+          resolve(value);
+        }
+        function submit() {
+          const value = String(input.value || '').trim();
+          if (opts.required && !value) {
+            errorNode.textContent = opts.requiredMessage || '入力してください';
+            errorNode.classList.remove('cloud-hidden');
+            input.setAttribute('aria-invalid', 'true');
+            try { input.focus(); } catch (_) { /* noop */ }
+            return;
+          }
+          finish(value);
+        }
+        footer.querySelector('[data-cloud-prompt-cancel]').addEventListener('click', () => finish(null));
+        footer.querySelector('[data-cloud-prompt-ok]').addEventListener('click', submit);
+        input.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') { event.preventDefault(); submit(); }
+        });
+        observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
+        try { input.focus(); input.select(); } catch (_) { /* noop */ }
+      });
     }
 
     function escapeHtml(value) {
@@ -1100,7 +1217,16 @@
     }
 
     function promptMonthKey(defaultValue) {
-      return window.prompt('作成する年月を YYYY-MM 形式で入力してください', defaultValue || currentJstMonthKey());
+      // 月ピッカー（type="month"）で YYYY-MM を直接選ばせる。書式の手入力ミスが起きない。
+      return cloudPrompt({
+        title: '月を作成',
+        label: '作成する年月',
+        type: 'month',
+        defaultValue: defaultValue || currentJstMonthKey(),
+        confirmLabel: '作成',
+        required: true,
+        requiredMessage: '年月を選択してください'
+      });
     }
 
     function selectedLeaveCalendarId() {
@@ -2039,6 +2165,9 @@
         target_date: defaultAssistTargetDate(),
         shift_key: ''
       };
+      state.assist.templates = [];
+      state.assist.templatesLoaded = false;
+      state.assist.templateApply = null;
     }
 
     function currentAssistMode() {
@@ -2095,9 +2224,9 @@
       return state.assist.data || defaultAssistDataForMode(currentAssistMode());
     }
 
-    function assistRequestOptions(body) {
+    async function assistRequestOptions(body) {
       if (PAGE.type === 'public' && PAGE.accessMode === 'edit') {
-        if (!ensureGuestName()) {
+        if (!(await ensureGuestName())) {
           throw new Error('編集者名を入力してください');
         }
         return Object.assign({}, body, { editor_name: state.guestName });
@@ -2660,10 +2789,23 @@
         && PAGE.type === 'owner' && projectAccessRole(project) === 'owner');
     }
 
+    function isTemplateFeatureAvailable() {
+      // テンプレートは現場 / 個人シフト帳の「真の所有者」のみ（公開編集・共有編集・閲覧では無効）。
+      // master / substitute など他モードや、共有された editor/viewer では API が 404 になるため除外する。
+      const project = currentProject();
+      return !!(project
+        && (project.mode === 'scene' || project.mode === 'person')
+        && PAGE.type === 'owner'
+        && projectAccessRole(project) === 'owner');
+    }
+
     function buildAssistTabs() {
       const mode = currentAssistMode();
       const autoCreateButton = canUseShiftEngine()
         ? '<button type="button" class="cloud-btn primary cloud-assist-autocreate" data-assist-open-engine>自動作成</button>'
+        : '';
+      const templateTab = isTemplateFeatureAvailable()
+        ? `<button type="button" class="cloud-tab${state.assist.activeTab === 'template' ? ' is-active' : ''}" data-assist-tab="template">テンプレート</button>`
         : '';
       if (mode === 'person') {
         return `
@@ -2671,6 +2813,7 @@
             <button type="button" class="cloud-tab${state.assist.activeTab === 'register' ? ' is-active' : ''}" data-assist-tab="register">登録</button>
             <button type="button" class="cloud-tab${state.assist.activeTab === 'edit' ? ' is-active' : ''}" data-assist-tab="edit">編集</button>
             <button type="button" class="cloud-tab${state.assist.activeTab === 'details' ? ' is-active' : ''}" data-assist-tab="details">詳細</button>
+            ${templateTab}
             ${autoCreateButton}
           </div>
         `;
@@ -2682,6 +2825,7 @@
           <button type="button" class="cloud-tab${state.assist.activeTab === 'people' ? ' is-active' : ''}" data-assist-tab="people">現場経験者</button>
           <button type="button" class="cloud-tab${state.assist.activeTab === 'search' ? ' is-active' : ''}" data-assist-tab="search">サーチ</button>
           <button type="button" class="cloud-tab${state.assist.activeTab === 'details' ? ' is-active' : ''}" data-assist-tab="details">詳細</button>
+          ${templateTab}
           ${autoCreateButton}
         </div>
       `;
@@ -2699,6 +2843,9 @@
       const permissions = state.assist.permissions || {};
       const mode = currentAssistMode();
       const allowedTabs = mode === 'person' ? ['register', 'edit', 'details'] : ['register', 'edit', 'people', 'search', 'details'];
+      if (isTemplateFeatureAvailable()) {
+        allowedTabs.push('template');
+      }
       if (!allowedTabs.includes(state.assist.activeTab)) {
         state.assist.activeTab = 'register';
       }
@@ -2898,7 +3045,7 @@
               <span class="cloud-note-chip">ルール ${counts.rules}件</span>
               ${permissions.can_edit_rules ? '' : '<span class="cloud-note-chip">編集者はルールを閲覧のみできます</span>'}
             </div>
-            ${showRuleForm ? '' : '<p class="cloud-panel-note">シフトの予定に「代務」「研修」の<strong>第二オプション</strong>を付けると、保存時に実績がここへ自動登録され、アシストの「経験済み現場」にも自動反映されます（手動登録は不要）。研修を付けると「研修要現場」からは自動で外れます。第二オプションは重複チェックには影響しません。</p>'}
+            ${showRuleForm ? '' : '<p class="cloud-panel-note">シフトに「代務」「研修」の<strong>第二オプション</strong>を付けて保存すると、実績がここに自動登録され、「経験済み現場」にも反映されます（手動登録は不要）。なお「研修」は登録後に「研修要現場」から自動で外れ、第二オプションは重複チェックには影響しません。</p>'}
             ${showRuleForm ? buildAssistRuleForm(null, 'assist-create-rule', 'ルールを登録') : buildAssistRecordForm(null, 'assist-create-record', '実績を登録')}
           </div>
         </div>
@@ -3741,6 +3888,13 @@
       modal.classList.add('cloud-modal-overlay-workspace');
       const panel = modal.querySelector('.cloud-modal-panel');
       if (panel) panel.classList.add('cloud-modal-panel-workspace');
+      const templatePanel = isTemplateFeatureAvailable()
+        ? `
+          <div class="cloud-assist-panel${state.assist.activeTab === 'template' ? ' is-active' : ''}" data-assist-panel="template">
+            ${buildAssistTemplatePanel()}
+          </div>
+        `
+        : '';
       const panels = mode === 'person'
         ? `
           <div class="cloud-assist-panel${state.assist.activeTab === 'register' ? ' is-active' : ''}" data-assist-panel="register">
@@ -3752,6 +3906,7 @@
           <div class="cloud-assist-panel${state.assist.activeTab === 'details' ? ' is-active' : ''}" data-assist-panel="details">
             ${buildAssistPersonDetailsPanel()}
           </div>
+          ${templatePanel}
         `
         : `
           <div class="cloud-assist-panel${state.assist.activeTab === 'register' ? ' is-active' : ''}" data-assist-panel="register">
@@ -3769,6 +3924,7 @@
           <div class="cloud-assist-panel${state.assist.activeTab === 'details' ? ' is-active' : ''}" data-assist-panel="details">
             ${buildAssistDetailsPanel()}
           </div>
+          ${templatePanel}
         `;
       body.innerHTML = `
         <div class="cloud-assist-shell">
@@ -3781,10 +3937,266 @@
       if (state.assist.activeTab === 'edit') {
         renderAssistEditLists(modal);
       }
+      if (state.assist.activeTab === 'template') {
+        ensureTemplatesLoaded(modal);
+      }
     }
 
     function currentAssistModal() {
       return document.getElementById('cloud-assist-modal');
+    }
+
+    // ===== テンプレート（アシスト → テンプレート） =====
+    function templateApiBase() {
+      const project = currentProject();
+      return project ? `/tools/shiftersync/cloudshift/api/project/${project.id}/templates` : '';
+    }
+
+    function templateBasisLabel(basis) {
+      return basis === 'weekday' ? '曜日基準' : '日付基準';
+    }
+
+    async function ensureTemplatesLoaded(modal, force) {
+      if (!isTemplateFeatureAvailable()) return;
+      if (state.assist.templatesLoaded && !force) return;
+      try {
+        const data = await requestJson(templateApiBase());
+        state.assist.templates = Array.isArray(data.templates) ? data.templates : [];
+        state.assist.templatesLoaded = true;
+      } catch (error) {
+        state.assist.templates = [];
+        state.assist.templatesLoaded = true;
+        showFlash(error.message || 'テンプレートの読み込みに失敗しました', 'error');
+      }
+      const targetModal = modal || currentAssistModal();
+      if (targetModal && state.assist.activeTab === 'template') {
+        renderAssistModalContent(targetModal);
+      }
+    }
+
+    function defaultTemplateApplyTarget() {
+      const key = currentMonthKey() || (currentProject() && currentProject().latest_month_key) || '';
+      const matched = String(key).match(/^(\d{4})-(\d{2})$/);
+      if (matched) {
+        return { year: parseInt(matched[1], 10), month: parseInt(matched[2], 10) };
+      }
+      const now = new Date();
+      return { year: now.getFullYear(), month: now.getMonth() + 1 };
+    }
+
+    function buildTemplateApplyForm(template) {
+      const apply = state.assist.templateApply || {};
+      const basis = apply.basis || template.basis || 'date';
+      const options = template.options || {};
+      const applyMode = apply.apply_mode || options.apply_mode || 'overwrite';
+      const holidayMode = apply.holiday_mode || options.holiday_mode || 'as_weekday';
+      const targetFilter = apply.target_filter || options.target_filter || 'all';
+      return `
+        <form class="cloud-template-apply" data-template-apply-form="${escapeHtml(template.id)}">
+          <div class="cloud-form-grid">
+            <label class="cloud-field"><span>反映する年</span><input class="cloud-input" type="number" min="2000" max="2100" value="${apply.year}" data-template-apply-year></label>
+            <label class="cloud-field"><span>反映する月</span><input class="cloud-input" type="number" min="1" max="12" value="${apply.month}" data-template-apply-month></label>
+            <label class="cloud-field"><span>基準</span>
+              <select class="cloud-input" data-template-apply-basis>
+                <option value="date"${basis === 'date' ? ' selected' : ''}>日付基準</option>
+                <option value="weekday"${basis === 'weekday' ? ' selected' : ''}>曜日基準</option>
+              </select>
+            </label>
+            <label class="cloud-field"><span>上書き方法</span>
+              <select class="cloud-input" data-template-apply-mode>
+                <option value="overwrite"${applyMode === 'overwrite' ? ' selected' : ''}>上書き</option>
+                <option value="append"${applyMode === 'append' ? ' selected' : ''}>追加</option>
+                <option value="fill_empty"${applyMode === 'fill_empty' ? ' selected' : ''}>空き日のみ</option>
+              </select>
+            </label>
+            <label class="cloud-field"><span>対象日</span>
+              <select class="cloud-input" data-template-apply-target>
+                <option value="all"${targetFilter === 'all' ? ' selected' : ''}>すべての日</option>
+                <option value="weekday"${targetFilter === 'weekday' ? ' selected' : ''}>平日のみ</option>
+                <option value="weekend"${targetFilter === 'weekend' ? ' selected' : ''}>土日・祝</option>
+                <option value="holiday"${targetFilter === 'holiday' ? ' selected' : ''}>祝日のみ</option>
+                <option value="non_holiday"${targetFilter === 'non_holiday' ? ' selected' : ''}>祝日以外</option>
+              </select>
+            </label>
+            <label class="cloud-field cloud-template-holiday-field" data-template-holiday-field style="${basis === 'weekday' ? '' : 'display:none;'}"><span>祝日の扱い</span>
+              <select class="cloud-input" data-template-apply-holiday>
+                <option value="as_weekday"${holidayMode === 'as_weekday' ? ' selected' : ''}>その曜日として</option>
+                <option value="as_sunday"${holidayMode === 'as_sunday' ? ' selected' : ''}>日曜パターン</option>
+                <option value="skip"${holidayMode === 'skip' ? ' selected' : ''}>触らない</option>
+                <option value="clear"${holidayMode === 'clear' ? ' selected' : ''}>空にする</option>
+              </select>
+            </label>
+          </div>
+          <div class="cloud-actions compact">
+            <button type="submit" class="cloud-btn primary">この内容で反映</button>
+            <button type="button" class="cloud-btn ghost" data-template-apply-cancel>キャンセル</button>
+          </div>
+          <p class="cloud-panel-note">「上書き」は対象日の手入力予定を置き換えます（他帳から同期された予定は保持されます）。反映前に未保存の編集は保存してください。</p>
+        </form>
+      `;
+    }
+
+    function buildAssistTemplatePanel() {
+      const templates = Array.isArray(state.assist.templates) ? state.assist.templates : [];
+      const loaded = state.assist.templatesLoaded;
+      const applyId = state.assist.templateApply ? state.assist.templateApply.templateId : '';
+      const listHtml = !loaded
+        ? '<div class="cloud-empty-state"><p>テンプレートを読み込み中です…</p></div>'
+        : (templates.length === 0
+          ? '<div class="cloud-empty-state"><p>まだテンプレートがありません。「新規テンプレート作成」から、その月の予定をカレンダーで作って保存してください。</p></div>'
+          : templates.map((template) => `
+            <article class="cloud-template-item">
+              <div class="cloud-template-item-head">
+                <div>
+                  <h4 class="cloud-section-title">${escapeHtml(template.name)}</h4>
+                  <div class="cloud-meta cloud-template-meta">
+                    <span class="cloud-badge">${templateBasisLabel(template.basis)}</span>
+                    <span class="cloud-badge">${Number(template.filled_day_count || 0)}日 / ${Number(template.entry_count || 0)}件</span>
+                    ${template.representative_month_key ? `<span class="cloud-badge">代表 ${escapeHtml(template.representative_month_key)}</span>` : ''}
+                  </div>
+                </div>
+                <div class="cloud-inline-actions">
+                  <button type="button" class="cloud-btn secondary" data-template-edit="${escapeHtml(template.id)}">編集</button>
+                  <button type="button" class="cloud-btn primary" data-template-apply-open="${escapeHtml(template.id)}">反映</button>
+                  <button type="button" class="cloud-btn danger" data-template-delete="${escapeHtml(template.id)}">削除</button>
+                </div>
+              </div>
+              ${applyId === template.id ? buildTemplateApplyForm(template) : ''}
+            </article>
+          `).join(''));
+      return `
+        <div class="cloud-template-panel">
+          <div class="cloud-panel-head">
+            <div>
+              <h3>テンプレート</h3>
+              <p>その${currentAssistMode() === 'scene' ? '現場' : '人'}の 1 か月分をテンプレートにして、任意の月へ「日付基準」「曜日基準」で反映できます。作成は別ウィンドウのカレンダーで行います。</p>
+            </div>
+            <div class="cloud-inline-actions">
+              <button type="button" class="cloud-btn primary" data-template-new>新規テンプレート作成</button>
+              <button type="button" class="cloud-btn ghost" data-template-refresh>再読み込み</button>
+            </div>
+          </div>
+          <div class="cloud-template-list">${listHtml}</div>
+        </div>
+      `;
+    }
+
+    function openTemplateEditor(templateId) {
+      const project = currentProject();
+      if (!project) return;
+      let url = `/tools/shiftersync/cloudshift/project/${project.id}/template-editor`;
+      if (templateId) {
+        url += `?template_id=${encodeURIComponent(templateId)}`;
+      }
+      const win = window.open(url, `cloudshift-template-editor-${project.id}`, 'width=1100,height=900');
+      if (win) {
+        try { win.focus(); } catch (error) { /* noop */ }
+      } else {
+        showFlash('ポップアップがブロックされました。ブラウザの設定で許可してください。', 'error');
+      }
+    }
+
+    function openTemplateApplyForm(templateId) {
+      const template = (state.assist.templates || []).find((item) => item.id === templateId);
+      if (!template) return;
+      const target = defaultTemplateApplyTarget();
+      const options = template.options || {};
+      state.assist.templateApply = {
+        templateId,
+        year: target.year,
+        month: target.month,
+        basis: template.basis || 'date',
+        apply_mode: options.apply_mode || 'overwrite',
+        holiday_mode: options.holiday_mode || 'as_weekday',
+        target_filter: options.target_filter || 'all'
+      };
+      const modal = currentAssistModal();
+      if (modal) {
+        renderAssistModalContent(modal);
+      }
+    }
+
+    async function submitTemplateApply(formEl, templateId) {
+      const project = currentProject();
+      if (!project || !formEl) return;
+      if (!confirmDiscardUnsavedChanges('未保存の変更があります。テンプレートの反映は保存済みデータに対して行われ、未保存の変更は失われます。続行しますか？')) {
+        return;
+      }
+      const year = parseInt(formEl.querySelector('[data-template-apply-year]').value, 10);
+      const month = parseInt(formEl.querySelector('[data-template-apply-month]').value, 10);
+      if (!year || year < 2000 || year > 2100 || !month || month < 1 || month > 12) {
+        showFlash('反映する年月を正しく入力してください', 'error');
+        return;
+      }
+      const body = {
+        year,
+        month,
+        basis: formEl.querySelector('[data-template-apply-basis]').value,
+        apply_mode: formEl.querySelector('[data-template-apply-mode]').value,
+        holiday_mode: formEl.querySelector('[data-template-apply-holiday]').value,
+        target_filter: formEl.querySelector('[data-template-apply-target]').value
+      };
+      const result = await requestJson(`${templateApiBase()}/${templateId}/apply`, { method: 'POST', body });
+      state.assist.templateApply = null;
+      closeCloudModal('cloud-assist-modal');
+      const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+      await selectProject(project.id, monthKey, { skipUnsavedGuard: true });
+      showFlash(`テンプレートを反映しました（${Number(result.applied_days || 0)}日分）`, 'success');
+    }
+
+    async function deleteTemplate(templateId) {
+      const template = (state.assist.templates || []).find((item) => item.id === templateId);
+      const name = template ? template.name : '';
+      if (!(await cloudConfirm({ title: 'テンプレートを削除', message: `テンプレート「${name}」を削除しますか？この操作は元に戻せません。`, confirmLabel: '削除する', danger: true }))) {
+        return;
+      }
+      await requestJson(`${templateApiBase()}/${templateId}`, { method: 'DELETE' });
+      if (state.assist.templateApply && state.assist.templateApply.templateId === templateId) {
+        state.assist.templateApply = null;
+      }
+      showFlash('テンプレートを削除しました', 'success');
+      await ensureTemplatesLoaded(currentAssistModal(), true);
+    }
+
+    function bindAssistTemplateEvents(modal) {
+      const newButton = modal.querySelector('[data-template-new]');
+      if (newButton) {
+        newButton.addEventListener('click', () => openTemplateEditor(''));
+      }
+      const refreshButton = modal.querySelector('[data-template-refresh]');
+      if (refreshButton) {
+        refreshButton.addEventListener('click', () => ensureTemplatesLoaded(modal, true).catch((error) => showFlash(error.message, 'error')));
+      }
+      modal.querySelectorAll('[data-template-edit]').forEach((button) => {
+        button.addEventListener('click', () => openTemplateEditor(button.getAttribute('data-template-edit')));
+      });
+      modal.querySelectorAll('[data-template-apply-open]').forEach((button) => {
+        button.addEventListener('click', () => openTemplateApplyForm(button.getAttribute('data-template-apply-open')));
+      });
+      modal.querySelectorAll('[data-template-delete]').forEach((button) => {
+        button.addEventListener('click', () => deleteTemplate(button.getAttribute('data-template-delete')).catch((error) => showFlash(error.message, 'error')));
+      });
+      modal.querySelectorAll('[data-template-apply-cancel]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.assist.templateApply = null;
+          renderAssistModalContent(modal);
+        });
+      });
+      modal.querySelectorAll('[data-template-apply-basis]').forEach((select) => {
+        select.addEventListener('change', () => {
+          const form = select.closest('[data-template-apply-form]');
+          const holidayField = form ? form.querySelector('[data-template-holiday-field]') : null;
+          if (holidayField) {
+            holidayField.style.display = select.value === 'weekday' ? '' : 'none';
+          }
+        });
+      });
+      modal.querySelectorAll('[data-template-apply-form]').forEach((form) => {
+        form.addEventListener('submit', (event) => {
+          event.preventDefault();
+          submitTemplateApply(form, form.getAttribute('data-template-apply-form')).catch((error) => showFlash(error.message, 'error'));
+        });
+      });
     }
 
     function filteredAssistRecords() {
@@ -4378,7 +4790,7 @@
     }
 
     async function saveAssistRecord(form, recordId) {
-      const payload = assistRequestOptions(collectAssistRecordPayload(form));
+      const payload = await assistRequestOptions(collectAssistRecordPayload(form));
       const base = assistBasePath();
       const response = await requestJson(recordId ? `${base}/records/${recordId}` : `${base}/records`, {
         method: recordId ? 'PUT' : 'POST',
@@ -4397,7 +4809,7 @@
     }
 
     async function saveAssistSite(form, siteId) {
-      const payload = assistRequestOptions(collectAssistSitePayload(form));
+      const payload = await assistRequestOptions(collectAssistSitePayload(form));
       const base = assistBasePath();
       const response = await requestJson(siteId ? `${base}/sites/${siteId}` : `${base}/sites`, {
         method: siteId ? 'PUT' : 'POST',
@@ -4532,9 +4944,9 @@
     }
 
     async function deleteAssistRecord(recordId) {
-      if (!window.confirm('この実績を削除しますか？')) return;
+      if (!(await cloudConfirm({ title: '実績を削除', message: 'この実績を削除しますか？', confirmLabel: '削除する', danger: true }))) return;
       const payload = PAGE.type === 'public' && PAGE.accessMode === 'edit'
-        ? assistRequestOptions({})
+        ? await assistRequestOptions({})
         : {};
       const response = await requestJson(`${assistBasePath()}/records/${recordId}`, {
         method: 'DELETE',
@@ -4549,9 +4961,9 @@
     }
 
     async function deleteAssistSite(siteId) {
-      if (!window.confirm('この現場を削除しますか？')) return;
+      if (!(await cloudConfirm({ title: '現場を削除', message: 'この現場を削除しますか？', confirmLabel: '削除する', danger: true }))) return;
       const payload = PAGE.type === 'public' && PAGE.accessMode === 'edit'
-        ? assistRequestOptions({})
+        ? await assistRequestOptions({})
         : {};
       const response = await requestJson(`${assistBasePath()}/sites/${siteId}`, {
         method: 'DELETE',
@@ -4566,7 +4978,7 @@
     }
 
     async function deleteAssistRule(ruleId) {
-      if (!window.confirm('このシフトルールを削除しますか？')) return;
+      if (!(await cloudConfirm({ title: 'ルールを削除', message: 'このシフトルールを削除しますか？', confirmLabel: '削除する', danger: true }))) return;
       const response = await requestJson(`${assistBasePath()}/rules/${ruleId}`, {
         method: 'DELETE',
         body: {}
@@ -4785,6 +5197,7 @@
 
     function bindAssistModalEvents(modal) {
       bindAssistFormEvents(modal);
+      bindAssistTemplateEvents(modal);
       modal.querySelectorAll('[data-assist-open-engine]').forEach((button) => {
         button.addEventListener('click', () => {
           closeCloudModal('cloud-assist-modal');
@@ -5143,7 +5556,7 @@
       if (!list) return;
 
       if (!state.projects.length) {
-        list.innerHTML = '<div class="cloud-empty-state"><p>まだシフト表がありません。</p></div>';
+        list.innerHTML = '<div class="cloud-empty-state"><p>まだシフト帳がありません。</p></div>';
         return;
       }
 
@@ -5195,7 +5608,7 @@
           </div>
           ${group.projects.length
             ? `<div class="cloud-project-group-grid">${group.projects.map(projectCard).join('')}</div>`
-            : '<div class="cloud-empty-state compact"><p>該当するシフト表はありません。</p></div>'}
+            : '<div class="cloud-empty-state compact"><p>該当するシフト帳はありません。</p></div>'}
         </section>
       `).join('');
     }
@@ -5502,6 +5915,22 @@
       }
     });
 
+    // テンプレート作成ウィンドウからの保存通知を受け取り、一覧を最新化する。
+    window.addEventListener('message', (event) => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+      const data = event.data || {};
+      if (!data || data.type !== 'cloudshift-template-saved') {
+        return;
+      }
+      const project = currentProject();
+      if (!project || !data.projectId || String(data.projectId) !== String(project.id)) {
+        return;
+      }
+      ensureTemplatesLoaded(currentAssistModal(), true).catch(() => { /* 一覧更新失敗は致命的ではない */ });
+    });
+
     function currentEntriesSnapshot() {
       return ShifterSync.getEntriesPerDay ? ShifterSync.getEntriesPerDay() : {};
     }
@@ -5733,11 +6162,11 @@
         const entryCount = revision.entry_count ?? revision.entries_count ?? revision.total_entries ?? '';
         const commentCount = revision.comment_count ?? revision.comments_count ?? '';
         const isCurrent = !!revision.current || !!revision.is_current;
-        const labelParts = [`rev ${revisionNo}`];
+        const labelParts = [`版 ${revisionNo}`];
         if (updatedAt && updatedAt !== '-') labelParts.push(updatedAt);
-        if (entryCount !== '') labelParts.push(`entries ${entryCount}`);
-        if (commentCount !== '') labelParts.push(`comments ${commentCount}`);
-        if (isCurrent) labelParts.push('current');
+        if (entryCount !== '') labelParts.push(`${entryCount}件`);
+        if (commentCount !== '') labelParts.push(`コメント${commentCount}件`);
+        if (isCurrent) labelParts.push('現在の版');
         return `
           <label class="cloud-revision-row">
             <input
@@ -5778,7 +6207,7 @@
       await loadProjects();
       await loadHistory(project.id);
       closeCloudModal('cloud-restore-modal');
-      showFlash(`rev ${revision} を復元しました`, 'success');
+      showFlash(`版 ${revision} を復元しました`, 'success');
     }
 
     async function openRestoreModal() {
@@ -5831,7 +6260,7 @@
       await loadProjects();
       await loadHistory(project.id);
       closeCloudModal('cloud-shift-book-settings-modal');
-      showFlash(`rev ${revision} を復元しました`, 'success');
+      showFlash(`版 ${revision} を復元しました`, 'success');
     }
 
     function buildBulkOptionSelect(mode) {
@@ -6134,10 +6563,7 @@
           continue;
         }
         const sourceEntries = Array.isArray(currentEntries[String(day)]) ? currentEntries[String(day)] : [];
-        const clonedEntries = sourceEntries
-          .filter((entry) => !String(entry && entry.sync_source_type ? entry.sync_source_type : '').trim())
-          .filter((entry) => !isSubstituteRequestDisplayEntry(entry))
-          .map((entry) => cloneEntryForBulk(entry));
+        const clonedEntries = bulkCopyableSourceEntries(sourceEntries).map((entry) => cloneEntryForBulk(entry));
         const key = String(target);
         nextEntries[key] = copyMode === 'append'
           ? (Array.isArray(nextEntries[key]) ? nextEntries[key] : []).concat(clonedEntries)
@@ -6179,7 +6605,8 @@
       } else if (operation === 'copy') {
         const sourceDay = parseInt(form.querySelector('[name="bulk_copy_source_day"]').value || '0', 10);
         const copyMode = form.querySelector('[name="bulk_copy_mode"]').value;
-        const sourceEntries = Array.isArray(currentEntries[String(sourceDay)]) ? currentEntries[String(sourceDay)] : [];
+        // 範囲コピーと同様、同期ミラー・代務要請の表示専用エントリは複製対象から外す。
+        const sourceEntries = bulkCopyableSourceEntries(currentEntries[String(sourceDay)]);
         if (!sourceDay || !sourceEntries.length) {
           showFlash('コピー元の日にデータがありません', 'error');
           return;
@@ -6934,7 +7361,7 @@
       return `cloudshift:guest:${PAGE.token}`;
     }
 
-    function ensureGuestName() {
+    async function ensureGuestName() {
       if (PAGE.authenticatedEditorName) {
         state.guestName = PAGE.authenticatedEditorName;
         updateCurrentProjectLabel();
@@ -6946,12 +7373,20 @@
       }
 
       if (!state.guestName) {
-        const entered = window.prompt('編集者名を入力してください', '');
-        if (!entered || !entered.trim()) {
-          showFlash('編集者名を入力してください', 'error');
+        const entered = await cloudPrompt({
+          title: '編集者名の確認',
+          message: '保存すると、この名前が編集履歴と共有先に表示されます。',
+          label: '編集者名',
+          placeholder: '例：山田 太郎',
+          confirmLabel: '保存して続行',
+          required: true,
+          requiredMessage: '編集者名を入力してください'
+        });
+        if (!entered) {
+          showFlash('編集者名を入力すると保存できます', 'error');
           return false;
         }
-        state.guestName = entered.trim();
+        state.guestName = entered;
         window.localStorage.setItem(guestNameKey(), state.guestName);
       }
 
@@ -7090,7 +7525,7 @@
         showFlash('反映する仮保存の変更がありません', 'info');
         return;
       }
-      if (!window.confirm('仮保存モードの内容を正式なシフトへ反映します。現在の正式シフトは仮保存の内容で置き換わります。よろしいですか？')) return;
+      if (!(await cloudConfirm({ title: '正式シフトに反映', message: '仮保存モードの内容を正式なシフトへ反映します。現在の正式シフトは仮保存の内容で置き換わります。よろしいですか？', confirmLabel: '反映する' }))) return;
       const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/draft/publish`, {
         method: 'POST',
         body: {}
@@ -7112,7 +7547,7 @@
         showFlash('破棄する仮保存の変更がありません', 'info');
         return;
       }
-      if (!window.confirm('仮保存モードの変更を破棄し、正式シフトの内容に戻しますか？')) return;
+      if (!(await cloudConfirm({ title: '仮保存を破棄', message: '仮保存モードの変更を破棄し、正式シフトの内容に戻しますか？', confirmLabel: '破棄する', danger: true }))) return;
       const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/draft`, {
         method: 'DELETE'
       }));
@@ -7138,7 +7573,7 @@
 
     async function saveMonthPublic() {
       const month = currentMonth();
-      if (!month || !ensureGuestName()) return;
+      if (!month || !(await ensureGuestName())) return;
       if (!confirmSceneBranchSave()) return;
 
       const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/public/edit/${PAGE.token}/month/${month.year}/${month.month}`, {
@@ -7252,7 +7687,7 @@
         }
         await loadHistory(project.id);
       } else {
-        if (!ensureGuestName()) return;
+        if (!(await ensureGuestName())) return;
         body.editor_name = state.guestName;
         const payload = unwrapProjectPayload(await requestJson(`/tools/shiftersync/cloudshift/api/public/edit/${PAGE.token}/month`, {
           method: 'POST',
@@ -7297,7 +7732,7 @@
       const month = currentMonth();
       if (!project || !month) return;
       if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずにこの月を削除すると、このセッションでの編集内容は失われます。続行しますか？')) return;
-      if (!window.confirm(`${formatMonthKey(currentMonthKey())} を削除しますか？`)) return;
+      if (!(await cloudConfirm({ title: '月を削除', message: `${formatMonthKey(currentMonthKey())} を削除しますか？`, confirmLabel: '削除する', danger: true }))) return;
 
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}`, { method: 'DELETE' });
       state.projectPayload = null;
@@ -7313,7 +7748,7 @@
       const project = currentProject();
       if (!project) return;
       if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずにこのシフト帳を削除すると、このセッションでの編集内容は失われます。続行しますか？')) return;
-      if (!window.confirm(`シフト案件「${project.title}」を削除しますか？`)) return;
+      if (!(await cloudConfirm({ title: 'シフト帳を削除', message: `シフト帳「${project.title}」を完全に削除しますか？この操作は元に戻せません。`, confirmLabel: '削除する', danger: true }))) return;
 
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}`, { method: 'DELETE' });
       state.projectPayload = null;
@@ -7326,7 +7761,7 @@
       renderWorkspace(true);
       updateCurrentProjectLabel();
       switchTab('list');
-      showFlash('シフト表を削除しました', 'success');
+      showFlash('シフト帳を削除しました', 'success');
     }
 
     // 同一紐づけを他オーナーも所持している場合のみ、自分の一覧から非表示にする。
@@ -7334,10 +7769,11 @@
     async function hideProjectFromList(projectId) {
       const target = (state.projects || []).find((project) => project.id === projectId);
       const title = target ? target.title : '';
-      if (!window.confirm(
-        `シフト帳「${title}」を自分の一覧から非表示にしますか？\n` +
-        '同じ対象を他のオーナーも所持しているため、サーバー上のデータは削除されず、あなたの一覧からのみ消えます。'
-      )) return;
+      if (!(await cloudConfirm({
+        title: '一覧から非表示',
+        message: `シフト帳「${title}」を自分の一覧から非表示にします。\nデータは消えません。自分の一覧から見えなくなるだけです。よろしいですか？`,
+        confirmLabel: '非表示にする'
+      }))) return;
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}/hide`, { method: 'POST', body: {} });
       if (currentProject() && currentProject().id === projectId) {
         state.projectPayload = null;
@@ -7347,7 +7783,7 @@
       showFlash('シフト帳を一覧から非表示にしました', 'success');
     }
 
-    const SHARE_URL_LABELS = { view: '閲覧URL', edit: '編集URL', pwa: 'ViewPWA URL' };
+    const SHARE_URL_LABELS = { view: '閲覧URL', edit: '編集URL', pwa: '通知付き閲覧URL' };
 
     function applyRegeneratedUrls(urls) {
       if (!urls) return;
@@ -7362,7 +7798,7 @@
     async function regenerateUrls() {
       const project = currentProject();
       if (!project) return;
-      if (!window.confirm('閲覧URL・編集URL・ViewPWA URLの3つすべてを再発行しますか？既存のURLは無効になります。')) return;
+      if (!(await cloudConfirm({ title: '共有URLを再発行', message: '閲覧URL・編集URL・通知付き閲覧URLの3つすべてを再発行しますか？既存のURLは無効になります。', confirmLabel: '再発行する', danger: true }))) return;
 
       const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/tokens/regenerate`, {
         method: 'POST',
@@ -7377,7 +7813,7 @@
       const project = currentProject();
       if (!project) return;
       const label = SHARE_URL_LABELS[target] || '共有URL';
-      if (!window.confirm(`${label}を再発行しますか？既存の${label}は無効になります（他の共有URLはそのまま使えます）。`)) return;
+      if (!(await cloudConfirm({ title: 'URLを再発行', message: `${label}を再発行しますか？既存の${label}は無効になります（他の共有URLはそのまま使えます）。`, confirmLabel: '再発行する', danger: true }))) return;
 
       const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/tokens/regenerate`, {
         method: 'POST',
@@ -7600,11 +8036,11 @@
                 <button type="button" class="cloud-btn ghost" data-shift-settings-regenerate-one="edit">編集URLを再発行</button>
               </div>
               <label class="cloud-field">
-                <span>ViewPWA URL（スマホ閲覧・更新通知）</span>
+                <span>通知付き閲覧URL（スマホ用・更新通知）</span>
                 <input class="cloud-input" type="text" value="${escapeHtml(urls.pwa_url || '')}" readonly>
               </label>
               <div class="cloud-actions compact">
-                <button type="button" class="cloud-btn ghost" data-shift-settings-regenerate-one="pwa">ViewPWA URLを再発行</button>
+                <button type="button" class="cloud-btn ghost" data-shift-settings-regenerate-one="pwa">通知付き閲覧URLを再発行</button>
               </div>
               <p class="cloud-panel-note">各共有URLは個別に再発行できます。再発行するとその旧URLだけが無効になります。下のボタンは3つまとめて再発行し、閲覧URLの未処理申請を残すか破棄するか選べます。</p>
               <div class="cloud-actions compact">
@@ -7617,7 +8053,7 @@
         ${activeTab === 'notify' && supportsPushTargets ? `
           <div class="cloud-settings-panel">
             <section class="cloud-settings-card">
-              <p class="cloud-panel-note">ViewPWA で通知を有効化した端末の一覧です。現場シフトは複数人が閲覧するため、登録された通知先すべてへ更新通知を送ります。名称変更・無効化・削除ができます。</p>
+              <p class="cloud-panel-note">通知付き閲覧URL（PWA）で通知を有効化した端末の一覧です。現場シフトは複数人が閲覧するため、登録された通知先すべてへ更新通知を送ります。名称変更・無効化・削除ができます。</p>
               <div class="cloud-devices-list">${renderCloudPushSubscriptionRows(state.shiftBookSettings.pushSubscriptions)}</div>
             </section>
           </div>
@@ -7674,7 +8110,7 @@
         return '<div class="cloud-empty-state"><p>通知先を読み込み中です...</p></div>';
       }
       if (!subscriptions.length) {
-        return '<div class="cloud-empty-state"><p>登録済みの通知先はありません。ViewPWAで通知を有効化すると、ここに表示されます。</p></div>';
+        return '<div class="cloud-empty-state"><p>登録済みの通知先はありません。通知付き閲覧URL（PWA）で通知を有効化すると、ここに表示されます。</p></div>';
       }
       return subscriptions.map((item) => `
         <div class="cloud-device ${item.is_active ? '' : 'is-disabled'}" data-cloud-device-id="${escapeHtml(String(item.id))}">
@@ -7725,7 +8161,7 @@
     async function deleteCloudPushSubscription(modal, subscriptionId) {
       const project = currentProject();
       if (!project) return;
-      if (!window.confirm('この通知先を完全に削除しますか？元に戻せません。')) return;
+      if (!(await cloudConfirm({ title: '通知先を削除', message: 'この通知先を完全に削除しますか？元に戻せません。', confirmLabel: '削除する', danger: true }))) return;
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/pwa/subscriptions/${subscriptionId}?hard=1`, {
         method: 'DELETE'
       });
@@ -7947,7 +8383,7 @@
     async function rejectLeaveChangeRequest(requestId, modal) {
       const project = currentProject();
       if (!project || !requestId) return;
-      if (!window.confirm('この休暇種別変更申請を拒否しますか？')) return;
+      if (!(await cloudConfirm({ title: '申請を拒否', message: 'この休暇種別変更申請を拒否しますか？', confirmLabel: '拒否する', danger: true }))) return;
       const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/leave-change-requests/${requestId}/reject`, {
         method: 'POST',
         body: {}
@@ -7965,7 +8401,7 @@
       if (!project) return;
       const pendingCount = (state.shiftBookSettings.requests || []).filter((item) => item.status === 'pending').length;
       const actionText = rejectPending ? '未処理申請を破棄してURLを再発行します。' : '未処理申請を残してURLを再発行します。';
-      if (!window.confirm(`${actionText}\n旧URLは無効になります。よろしいですか？`)) return;
+      if (!(await cloudConfirm({ title: '共有URLを再発行', message: `${actionText}\n旧URLは無効になります。よろしいですか？`, confirmLabel: '再発行する', danger: true }))) return;
       const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/tokens/regenerate`, {
         method: 'POST',
         body: {
@@ -7984,7 +8420,7 @@
       const project = currentProject();
       if (!project) return;
       const label = SHARE_URL_LABELS[target] || '共有URL';
-      if (!window.confirm(`${label}を再発行しますか？既存の${label}は無効になります（他の共有URLはそのまま使えます）。`)) return;
+      if (!(await cloudConfirm({ title: 'URLを再発行', message: `${label}を再発行しますか？既存の${label}は無効になります（他の共有URLはそのまま使えます）。`, confirmLabel: '再発行する', danger: true }))) return;
       const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/tokens/regenerate`, {
         method: 'POST',
         body: { targets: [target] }
@@ -8068,7 +8504,7 @@
           <p class="cloud-se-muted" data-se-target-count></p>
           <label class="cloud-field cloud-se-target-required">
             <span>対象日の必要人数（任意）。指定すると需要設定・前月推定より優先します。需要0で配置されない日の解決にも使えます</span>
-            <input class="cloud-input" type="number" min="1" data-se-target-required placeholder="未指定（既存の需要設定に従う）">
+            <input class="cloud-input" type="number" min="1" max="99" data-se-target-required placeholder="未指定（既存の需要設定に従う）">
           </label>
         </div>
       `;
@@ -8402,7 +8838,7 @@
         ${dayDetailsHtml}
         ${unfilledHtml}
         ${warnHtml}
-        <p class="cloud-se-muted">「プレビューを開く」で別ウィンドウに表示し、確認・調整のうえ保存します（このパネルでは正規シフト帳に反映されません）。</p>
+        <p class="cloud-se-muted">「プレビューを開く」で別ウィンドウに表示し、確認・調整のうえ保存します（このパネルでは正式シフトに反映されません）。</p>
       `;
       const previewBtn = modalFooter(modal).querySelector('[data-se-preview]');
       if (previewBtn) previewBtn.disabled = false;
@@ -8485,7 +8921,7 @@
           if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずに新しいシフト帳を作成すると、このセッションでの編集内容は失われます。続行しますか？')) return;
           const form = event.currentTarget;
           await runCloudCreateFlow({
-            successMessage: 'シフト表を作成しました。編集画面に移動しました',
+            successMessage: 'シフト帳を作成しました。編集画面に移動しました',
             phases: [
               'シフト帳を保存しています...',
               '既存の現場・個人シフトを照合して取り込んでいます...',
@@ -8568,7 +9004,7 @@
       if (openPwa) openPwa.addEventListener('click', () => window.open($('cloud-pwa-url').value, '_blank', 'noopener'));
 
       const copyPwa = $('cloud-copy-pwa-url');
-      if (copyPwa) copyPwa.addEventListener('click', () => copyText($('cloud-pwa-url').value, 'ViewPWA URLをコピーしました').catch((error) => showFlash(error.message, 'error')));
+      if (copyPwa) copyPwa.addEventListener('click', () => copyText($('cloud-pwa-url').value, '通知付き閲覧URLをコピーしました').catch((error) => showFlash(error.message, 'error')));
 
       const regenView = $('cloud-regen-view-url');
       if (regenView) regenView.addEventListener('click', () => regenerateSingleUrl('view').catch((error) => showFlash(error.message, 'error')));
@@ -8776,8 +9212,8 @@
 
       const createFirstMonth = $('cloud-create-first-month');
       if (createFirstMonth) {
-        createFirstMonth.addEventListener('click', () => {
-          const monthKey = promptMonthKey();
+        createFirstMonth.addEventListener('click', async () => {
+          const monthKey = await promptMonthKey();
           if (!monthKey) return;
           createMonth(monthKey, true).catch((error) => showFlash(error.message, 'error'));
         });
@@ -8857,10 +9293,38 @@
       const nextMonth = $('cloud-next-month');
       if (nextMonth) nextMonth.addEventListener('click', () => navigateMonth(1, false).catch((error) => showFlash(error.message, 'error')));
 
+      // 編集URLの「前月を追加」「翌月を追加」は、未作成の前後月を明示的に作成する。
+      // （前の月へ/次の月へは移動が主目的だが、こちらは常に作成を試みる）
+      const addPrevMonth = $('cloud-add-prev-month');
+      if (addPrevMonth) {
+        addPrevMonth.addEventListener('click', () => {
+          const base = currentMonthKey() || (currentProject() && currentProject().latest_month_key);
+          const target = nextMonthKey(base, -1);
+          if (!target) {
+            showFlash('追加する月を特定できませんでした', 'error');
+            return;
+          }
+          createMonth(target, false).catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
+      const addNextMonth = $('cloud-add-next-month');
+      if (addNextMonth) {
+        addNextMonth.addEventListener('click', () => {
+          const base = currentMonthKey() || (currentProject() && currentProject().latest_month_key);
+          const target = nextMonthKey(base, 1);
+          if (!target) {
+            showFlash('追加する月を特定できませんでした', 'error');
+            return;
+          }
+          createMonth(target, false).catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+
       const createFirstMonth = $('cloud-create-first-month');
       if (createFirstMonth) {
-        createFirstMonth.addEventListener('click', () => {
-          const monthKey = promptMonthKey();
+        createFirstMonth.addEventListener('click', async () => {
+          const monthKey = await promptMonthKey();
           if (!monthKey) return;
           createMonth(monthKey, false).catch((error) => showFlash(error.message, 'error'));
         });
@@ -9085,7 +9549,7 @@
     // -----------------------------------------------------------------
     // 自動作成プレビュー（engine_preview）専用ウィンドウ
     // 生成結果は localStorage 経由で受け取り、ここで保存操作をしない限り
-    // 正規シフト帳には一切反映されない（閉じれば破棄）。
+    // 正式シフトには一切反映されない（閉じれば破棄）。
     // -----------------------------------------------------------------
     function enginePreviewStorageKey(projectId, year, month) {
       return `cloudshift_engine_preview:${projectId}:${year}:${month}`;
@@ -9122,7 +9586,7 @@
           <span>最大連勤 ${summary.max_consecutive_days}</span>
         </div>
         ${violationHtml}${warnHtml}
-        <p class="cloud-se-muted">内容を確認・調整し、「下書きに保存」または「正規シフト帳に反映」を押してください。何もせず閉じると破棄されます。</p>
+        <p class="cloud-se-muted">内容を確認・調整し、「仮保存」または「正式シフトに反映」を押してください。何もせず閉じると破棄されます。</p>
       `;
       host.classList.remove('cloud-hidden');
     }
@@ -9158,10 +9622,10 @@
     function bindEnginePreviewEvents() {
       const saveBtn = $('cloud-se-preview-save-draft');
       if (saveBtn) saveBtn.addEventListener('click', () => withDsttLoading(
-        { message: '下書きに保存中…' }, () => enginePreviewSaveDraft()).catch((e) => showFlash(e.message, 'error')));
+        { message: '仮保存中…' }, () => enginePreviewSaveDraft()).catch((e) => showFlash(e.message, 'error')));
       const pubBtn = $('cloud-se-preview-publish');
       if (pubBtn) pubBtn.addEventListener('click', () => withDsttLoading(
-        { message: '正規シフト帳へ反映中…' }, () => enginePreviewPublish()).catch((e) => showFlash(e.message, 'error')));
+        { message: '正式シフトへ反映中…' }, () => enginePreviewPublish()).catch((e) => showFlash(e.message, 'error')));
       const discardBtn = $('cloud-se-preview-discard');
       if (discardBtn) discardBtn.addEventListener('click', () => enginePreviewDiscard());
     }
@@ -9179,14 +9643,14 @@
       state.baseMonth = payload.month ? deepClone(payload.month) : null;
       state.editorMode = 'draft';
       await renderWorkspaceWithSiteBranches(true);
-      showFlash('下書き（仮シフト）に保存しました。正規反映は「正規シフト帳に反映」から行えます。', 'success');
+      showFlash('仮保存しました。正式に反映するには「正式シフトに反映」を押してください。', 'success');
     }
 
     async function enginePreviewPublish() {
       const project = currentProject();
       const month = currentMonth();
       if (!project || !month) { showFlash('生成結果がありません', 'error'); return; }
-      if (!window.confirm('この内容を正規シフト帳へ反映します。現在の正式シフトは置き換わります。よろしいですか？')) return;
+      if (!(await cloudConfirm({ title: '正式シフトに反映', message: 'この内容を正式シフトへ反映します。現在の正式シフトは置き換わります。よろしいですか？', confirmLabel: '反映する' }))) return;
       // 編集内容をまず下書きへ保存してから公開する
       await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/month/${month.year}/${month.month}/draft`, {
         method: 'PUT',
@@ -9202,7 +9666,7 @@
       clearEnginePreviewData();
       await renderWorkspaceWithSiteBranches(true);
       if ($('cloud-se-preview-summary')) $('cloud-se-preview-summary').classList.add('cloud-hidden');
-      showFlash('正規シフト帳へ反映しました。このウィンドウは閉じて構いません。', 'success');
+      showFlash('正式シフトへ反映しました。このウィンドウは閉じて構いません。', 'success');
     }
 
     function enginePreviewDiscard() {

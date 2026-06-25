@@ -1,38 +1,103 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DSTT - DaishintoTools</title>
-  <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/flowbite@2.2.1/dist/flowbite.min.js"></script>
-</head>
-<body class="bg-gray-100 font-sans">
-<div class="fixed top-4 right-4 z-40 text-xs text-gray-500 bg-white/80 px-2 py-1 rounded-md shadow-sm">
-  Version {{ app_version }}
-</div>
+{% extends "auth_base.html" %}
 
-    {% block content %}
-<div class="max-w-sm mx-auto mt-10 p-6 bg-white shadow rounded-lg">
-  <img src="{{ url_for('static', filename='img/head.png') }}" alt="DSTT Logo">
-  <h2 class="text-xl font-bold text-gray-800 mb-6">ログイン</h2>
-  
-  <form action="/auth/login" method="POST" class="space-y-4">
-    <div>
-      <label for="username" class="block text-sm font-medium text-gray-600">ユーザー名</label>
-      <input type="text" id="username" name="username" class="w-full border rounded px-3 py-2 mt-1" required>
-    </div>
-    
-    <div>
-      <label for="password" class="block text-sm font-medium text-gray-600">パスワード</label>
-      <input type="password" id="password" name="password" class="w-full border rounded px-3 py-2 mt-1" required>
-    </div>
+{% block title %}DSTT - ログイン{% endblock %}
 
-    <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded mt-4">ログイン</button>
-  </form>
-</div>
+{% block body %}
+<main class="login-shell" aria-labelledby="login-title">
+  <section class="login-panel">
+    <div class="login-card">
+      <div class="login-logo">
+        <img src="{{ url_for('static', filename='img/head.png') }}" alt="DSTT DaishintoTools">
+      </div>
+
+      <div class="login-heading">
+        <p class="login-kicker">DAISHINTO TOOLS</p>
+        <h1 id="login-title">ログイン</h1>
+      </div>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        <div class="flash-region" aria-live="polite" aria-atomic="true">
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="flash-message flash-{{ category }}" role="alert">
+                <span class="flash-icon" aria-hidden="true">{% if category == "info" %}i{% else %}!{% endif %}</span>
+                <span>{{ message }}</span>
+              </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+      {% endwith %}
+
+      <form action="{{ url_for('auth.login') }}" method="POST" class="login-form" data-login-form>
+        {% if next_url %}
+          <input type="hidden" name="next" value="{{ next_url }}">
+        {% endif %}
+
+        <div class="field-group">
+          <label for="username">ユーザー名</label>
+          <input
+            type="text"
+            id="username"
+            name="username"
+            value="{{ request.form.get('username', '') }}"
+            autocomplete="username"
+            autocapitalize="none"
+            spellcheck="false"
+            required
+            autofocus
+          >
+        </div>
+
+        <div class="field-group">
+          <label for="password">パスワード</label>
+          <div class="password-field">
+            <input
+              type="password"
+              id="password"
+              name="password"
+              autocomplete="current-password"
+              required
+              data-password-input
+              aria-describedby="caps-lock-warning"
+            >
+            <button
+              type="button"
+              class="password-toggle"
+              data-password-toggle
+              aria-label="パスワードを表示"
+              aria-pressed="false"
+            >
+              <svg class="icon-eye" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path d="M2.5 12s3.3-6 9.5-6 9.5 6 9.5 6-3.3 6-9.5 6-9.5-6-9.5-6Z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+              <svg class="icon-eye-off" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path d="M3 3l18 18"></path>
+                <path d="M10.6 5.2A10.7 10.7 0 0 1 12 5c6.2 0 9.5 7 9.5 7a16.3 16.3 0 0 1-3.1 4.1"></path>
+                <path d="M6.4 6.8C3.9 8.5 2.5 12 2.5 12s3.3 7 9.5 7a9.4 9.4 0 0 0 4.1-.9"></path>
+              </svg>
+            </button>
+          </div>
+          <p id="caps-lock-warning" class="field-warning" data-caps-warning hidden>Caps Lock がオンです</p>
+        </div>
+
+        <label class="remember-option">
+          <input type="checkbox" name="remember" value="1">
+          <span>ログイン状態を保持</span>
+        </label>
+
+        <button type="submit" class="login-submit" data-submit-button>
+          <span class="submit-label">ログイン</span>
+          <span class="submit-progress" aria-hidden="true"></span>
+        </button>
+      </form>
+
+      <p class="login-version">Version {{ app_version }}</p>
+    </div>
+  </section>
+</main>
 {% endblock %}
 
-</body>
-</html>
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/auth_login.js') }}" defer></script>
+{% endblock %}

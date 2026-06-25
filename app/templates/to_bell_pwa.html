@@ -27,8 +27,10 @@
       <button type="button" class="tobell-btn" id="tb-reload" hidden>リロード</button>
       <button type="button" class="tobell-btn" id="tb-templates">テンプレート</button>
       <button type="button" class="tobell-btn" id="tb-projects-manage">プロジェクト</button>
+      {% if not share_session %}
       <button type="button" class="tobell-btn" id="tb-enable-push-notify">通知を有効化</button>
       <button type="button" class="tobell-btn" id="tb-push-devices">通知先</button>
+      {% endif %}
       <button type="button" class="tobell-btn" id="tb-read-all">通知を既読</button>
     </div>
   </header>

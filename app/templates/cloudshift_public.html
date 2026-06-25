@@ -25,7 +25,7 @@
           {% if access_mode == "edit" %}
           編集URLで開いています。保存した内容が共有先に反映されます。
           {% elif access_mode == "pwa" %}
-          ViewPWAで開いています。通知を有効にすると、当月のシフトが更新されたときにお知らせします。
+          通知付き閲覧モード（PWA）で開いています。通知を有効にすると、当月のシフトが更新されたときにお知らせします。
           {% else %}
           閲覧URLで開いています。表示の確認と単月エクスポートができます。
           {% endif %}
@@ -113,7 +113,7 @@
     </section>
   </main>
 
-  <div id="cloud-flash" class="cloud-flash info"></div>
+  <div id="cloud-flash" class="cloud-flash info" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script>
     window.SHIFTERSYNC_HOLIDAYS = {{ shiftersync_holidays|tojson }};

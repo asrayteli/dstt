@@ -169,6 +169,66 @@ def test_to_bell_assignment_creates_unread_notification_and_dashboard_summary(ap
     assert summary["to_bell"]["action_count"] >= 1
 
 
+def test_to_bell_update_assignment_notifies_and_put_done_resolves(app_ctx):
+    from app.models import ToBellNotification, db
+
+    office_id = _create_office(app_ctx, "updateassign")
+    _create_user(app_ctx, "owner", "Owner", office_id=office_id)
+    _create_user(app_ctx, "worker", "Worker", office_id=office_id)
+
+    owner_client = app_ctx.test_client()
+    _login(owner_client, "owner")
+    task = owner_client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "Follow up", "assigned_to": "owner"},
+    ).get_json()
+
+    updated = owner_client.put(
+        f"/tools/to_bell/api/tasks/{task['id']}",
+        json={"assigned_to": "worker"},
+    )
+    assert updated.status_code == 200
+    with app_ctx.app_context():
+        note = ToBellNotification.query.filter_by(task_id=task["id"], user_id="worker").one()
+        assert note.is_resolved is False
+
+    done = owner_client.put(
+        f"/tools/to_bell/api/tasks/{task['id']}",
+        json={"status": "done"},
+    )
+    assert done.status_code == 200
+    with app_ctx.app_context():
+        db.session.expire_all()
+        note = ToBellNotification.query.filter_by(task_id=task["id"], user_id="worker").one()
+        assert note.is_resolved is True
+
+    review_task = owner_client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "Needs review", "assigned_to": "owner", "reviewer_id": "worker"},
+    ).get_json()
+    with app_ctx.app_context():
+        reviewer_note = ToBellNotification.query.filter_by(
+            task_id=review_task["id"], user_id="worker", event_type="reviewer"
+        ).one()
+        assert reviewer_note.is_resolved is False
+
+    done_reassign_task = owner_client.post(
+        "/tools/to_bell/api/tasks",
+        json={"title": "Done while assigning", "assigned_to": "owner"},
+    ).get_json()
+    done_reassign = owner_client.put(
+        f"/tools/to_bell/api/tasks/{done_reassign_task['id']}",
+        json={"status": "done", "assigned_to": "worker", "reviewer_id": "worker"},
+    )
+    assert done_reassign.status_code == 200
+    with app_ctx.app_context():
+        fresh_notes = ToBellNotification.query.filter_by(
+            task_id=done_reassign_task["id"], user_id="worker"
+        ).all()
+        assert fresh_notes
+        assert all(note.is_resolved for note in fresh_notes)
+
+
 def test_to_bell_tasks_are_limited_to_participants(app_ctx):
     office_id = _create_office(app_ctx, "participants")
     other_office_id = _create_office(app_ctx, "outside")
@@ -1058,3 +1118,67 @@ def test_task_pin_respects_explicit_value_in_payload(app_ctx):
     # 明示的に false で解除
     cleared = client.post(f"/tools/to_bell/api/tasks/{task['id']}/pin", json={"pinned": False}).get_json()
     assert cleared["pinned"] is False
+
+
+def test_active_filters_exclude_done_and_archived(app_ctx):
+    """今日フィルタに完了が溜まらず、担当/要対応/期限切れにアーカイブが漏れないこと。"""
+    from datetime import timedelta
+
+    office_id = _create_office(app_ctx, "active-filter")
+    _create_user(app_ctx, "alice", "Alice", office_id=office_id)
+    client = app_ctx.test_client()
+    _login(client, "alice")
+
+    today = date.today().isoformat()
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+    # アクティブ（各フィルタに出るはず）
+    active_today = client.post(
+        "/tools/to_bell/api/tasks", json={"title": "今日やる", "due_date": today}
+    ).get_json()
+    active_overdue = client.post(
+        "/tools/to_bell/api/tasks", json={"title": "期限切れだが対応中", "due_date": yesterday}
+    ).get_json()
+    # 完了（done のみに出る。今日には溜まらない）
+    done_task = client.post(
+        "/tools/to_bell/api/tasks", json={"title": "完了済み", "due_date": today, "status": "done"}
+    ).get_json()
+    # アーカイブ済み（期限切れ・自分担当でも、どのアクティブフィルタにも出ない）
+    archived_task = client.post(
+        "/tools/to_bell/api/tasks", json={"title": "アーカイブ済み", "due_date": yesterday, "status": "archived"}
+    ).get_json()
+
+    def ids(filter_name):
+        listing = client.get(f"/tools/to_bell/api/tasks?filter={filter_name}").get_json()
+        return {task["id"] for task in listing["tasks"]}
+
+    # 今日: アクティブは出る／完了・アーカイブは出ない
+    today_ids = ids("today")
+    assert active_today["id"] in today_ids
+    assert active_overdue["id"] in today_ids
+    assert done_task["id"] not in today_ids
+    assert archived_task["id"] not in today_ids
+
+    # 自分の担当: アクティブのみ（完了・アーカイブを除外）
+    assigned_ids = ids("assigned")
+    assert active_today["id"] in assigned_ids
+    assert done_task["id"] not in assigned_ids
+    assert archived_task["id"] not in assigned_ids
+
+    # 要対応: アクティブのみ（完了・アーカイブを除外）
+    attention_ids = ids("attention")
+    assert active_today["id"] in attention_ids
+    assert done_task["id"] not in attention_ids
+    assert archived_task["id"] not in attention_ids
+
+    # 期限切れ: 期限切れのアクティブのみ（完了・アーカイブを除外）
+    overdue_ids = ids("overdue")
+    assert active_overdue["id"] in overdue_ids
+    assert done_task["id"] not in overdue_ids
+    assert archived_task["id"] not in overdue_ids
+
+    # 完了: 完了タスクだけが出る
+    done_ids = ids("done")
+    assert done_task["id"] in done_ids
+    assert active_today["id"] not in done_ids
+    assert archived_task["id"] not in done_ids

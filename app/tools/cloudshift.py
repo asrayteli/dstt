@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import hashlib
 import json
@@ -45,6 +46,7 @@ from app.models import (
     CloudShiftMonth,
     CloudShiftProject,
     CloudShiftPwaSubscription,
+    CloudShiftTemplate,
     Employee,
     Site,
     SiteBranch,
@@ -60,10 +62,11 @@ try:
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         entry_second_option,
+        generate_entry_id,
         normalize_entries_for_month,
+        normalize_entry,
         parse_csv_text,
         parse_entry_value,
-        serialize_csv_text,
         serialize_entry_rows,
     )
     from .shiftersync_check import compare_shift_payloads, is_duplicate_by_rules
@@ -77,10 +80,11 @@ except ImportError:
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         entry_second_option,
+        generate_entry_id,
         normalize_entries_for_month,
+        normalize_entry,
         parse_csv_text,
         parse_entry_value,
-        serialize_csv_text,
         serialize_entry_rows,
     )
     from app.tools.shiftersync_check import compare_shift_payloads, is_duplicate_by_rules  # type: ignore
@@ -2868,21 +2872,32 @@ def _safe_download_stem(value: str) -> str:
     return safe
 
 
+# CSV / XLSX を表計算ソフト（Excel 等）で開いた際の数式インジェクション対策。
+# 先頭が =, +, -, @ のセル（シフト名・タイトル・コメント・氏名など利用者入力。
+# 公開編集URL経由でも入る）は ' を前置して文字列として無害化する。
+# 方針は csvtool._sanitize_for_csv と同一。day 番号などの数値セルは対象外。
+_SPREADSHEET_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def _neutralize_spreadsheet_formula(cell: Any) -> Any:
+    if isinstance(cell, str) and cell.startswith(_SPREADSHEET_FORMULA_PREFIXES):
+        return "'" + cell
+    return cell
+
+
 def _csv_text_for_month(
     project_title: str,
     project_mode: str,
     month_data: dict[str, Any],
     project_employee_number: str = "",
 ) -> str:
-    return serialize_csv_text(
-        project_mode,
-        month_data["year"],
-        month_data["month"],
-        project_title,
-        month_data.get("required_capacity", 0) if month_data.get("capacity_enabled") else 0,
-        month_data.get("entries_per_day", {}),
-        project_employee_number,
-    )
+    # serialize_csv_text と同じ書式（csv.writer / lineterminator="\n"）で出力しつつ、
+    # 各セルを数式インジェクションから無害化する。
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    for row in _csv_lines_for_month(project_title, project_mode, month_data, project_employee_number):
+        writer.writerow([_neutralize_spreadsheet_formula(cell) for cell in row])
+    return buffer.getvalue()
 
 
 def _xlsx_bytes_for_month(
@@ -2895,7 +2910,7 @@ def _xlsx_bytes_for_month(
     sheet = workbook.active
     sheet.title = f"{month_data['year']}-{month_data['month']:02d}"
     for row in _csv_lines_for_month(project_title, project_mode, month_data, project_employee_number):
-        sheet.append(row)
+        sheet.append([_neutralize_spreadsheet_formula(cell) for cell in row])
     for cell in sheet[1]:
         font = copy(cell.font)
         font.bold = True
@@ -3044,6 +3059,33 @@ def _merge_month_payload(
     return merged
 
 
+def _carry_forward_draft_entries(
+    merged: dict[str, Any],
+    current_month: dict[str, Any],
+    year: int,
+    month: int,
+) -> None:
+    """live(正式)を書き換えた月へ、下書き(draft)を引き継ぐ。
+
+    同期反映・マスター集約・リビジョン復元のように、ユーザーの操作とは別に live を
+    書き換える経路で使う。``_merge_month_payload`` は draft を持たないため、ここで
+    引き継がないと upsert 時に live へフォールバックして下書きが失われる。
+
+    引き継ぎ方は下書きの状態で変える:
+      - ユーザーが明示的に作成した未公開の下書きがある（draft != live）場合のみ、
+        その下書きを保持してWIPを守る。
+      - 下書き未使用（draft == live）の場合は、書き換え後の live に追従させる。
+        こうしないと、外部同期などで live だけが変わったときに draft != live となり、
+        ユーザーが仮保存していないのに「仮保存あり」状態になってしまう。
+    """
+    if "draft_entries_per_day" not in current_month:
+        return
+    if _month_draft_has_changes(current_month, year, month):
+        merged["draft_entries_per_day"] = current_month["draft_entries_per_day"]
+    else:
+        merged["draft_entries_per_day"] = _normalize_entries(merged.get("entries_per_day"), year, month)
+
+
 def _snapshot_month_payload(month_data: dict[str, Any]) -> dict[str, Any]:
     return _client_month_payload(month_data, include_draft=False, project=None) or {}
 
@@ -3141,8 +3183,8 @@ def _restore_month_revision_in_project(
     restored["entries_per_day"] = _normalize_entries(restored.get("entries_per_day"), year, month)
     # 復元は live を過去リビジョンへ戻す操作。未公開の下書き（WIP）は別物として保全し、
     # 利用者の意図しないサイレントな下書き消失を避ける（スナップショットは draft を含まない）。
-    if "draft_entries_per_day" in current_month:
-        restored["draft_entries_per_day"] = current_month["draft_entries_per_day"]
+    # 下書き未使用なら復元後の live に追従させ、意図しない「仮保存あり」を作らない。
+    _carry_forward_draft_entries(restored, current_month, year, month)
     restored["revision"] = current_revision + 1
     restored["created_at"] = current_month.get("created_at", _utcnow_iso())
     restored["updated_at"] = _utcnow_iso()
@@ -4392,8 +4434,8 @@ def _replace_shift_synced_entries_in_target_project(
         # 同期反映は live entry の差し替えのみ。target の未公開下書き（手動 WIP・自動作成の
         # 下書き）を失わないよう、既存の下書きを引き継ぐ（_merge_month_payload は draft を
         # 持たないため、引き継がないと upsert で live にフォールバックして消える）。
-        if "draft_entries_per_day" in current_month:
-            merged["draft_entries_per_day"] = current_month["draft_entries_per_day"]
+        # 下書き未使用なら同期後の live に追従させ、外部同期で意図しない「仮保存あり」を作らない。
+        _carry_forward_draft_entries(merged, current_month, year, month)
         entry_changes = _describe_month_changes(current_month, merged)
         if entry_changes:
             snapshots = dict(current_month.get("revision_snapshots") or {})
@@ -4571,8 +4613,8 @@ def _refresh_master_shift_from_sources(
     }
     merged = _merge_month_payload(current_month, incoming_month, _snapshot_month_payload(current_month))
     # マスター帳の未公開下書きを同期反映で失わないよう、既存の下書きを引き継ぐ。
-    if "draft_entries_per_day" in current_month:
-        merged["draft_entries_per_day"] = current_month["draft_entries_per_day"]
+    # 下書き未使用なら同期後の live に追従させ、意図しない「仮保存あり」を作らない。
+    _carry_forward_draft_entries(merged, current_month, year, month)
     changes = _describe_month_changes(current_month, merged)
     if not changes:
         return False
@@ -9155,6 +9197,8 @@ def api_delete_project(project_id: str):
         # ViewPWA 購読は project へ FK を持つがリレーション未設定のため明示的に削除する
         # （外部キー制約での削除失敗・孤立行の残留を防ぐ）。
         CloudShiftPwaSubscription.query.filter_by(project_id=project_id).delete(synchronize_session=False)
+        # テンプレートも同様に FK を持つがリレーション未設定のため明示的に削除する。
+        CloudShiftTemplate.query.filter_by(project_id=project_id).delete(synchronize_session=False)
         project_row = db.session.get(CloudShiftProject, project_id)
         if project_row is not None:
             db.session.delete(project_row)
@@ -10319,6 +10363,466 @@ def _shift_engine_apply_draft(project: dict[str, Any], payload: dict[str, Any], 
         "score": result_to_dict(result)["score"],
         "month": _client_month_payload(saved_month, include_draft=True, project=project),
     }
+
+
+# ==========================================================================
+# テンプレート（アシスト → テンプレート）
+#
+# 現場シフト / 個人シフトの「1 か月分」を再利用できるテンプレートとして保存し、
+# 任意の対象月へ「日付基準（date）」または「曜日基準（weekday）」で反映する。
+# 作成は別ウィンドウのカレンダー（/project/<id>/template-editor）で行う。
+# ==========================================================================
+
+TEMPLATE_BASES = {"date", "weekday"}
+TEMPLATE_APPLY_MODES = {"overwrite", "append", "fill_empty"}
+TEMPLATE_HOLIDAY_MODES = {"as_weekday", "as_sunday", "skip", "clear"}
+TEMPLATE_TARGET_FILTERS = {"all", "weekday", "weekend", "holiday", "non_holiday"}
+TEMPLATE_MODES = {"scene", "person"}
+
+# テンプレートのスロットへ保存するのは、authoring（手入力）フィールドのみ。
+# id・同期メタデータは保存せず、反映時に新しい id を採番する。
+_TEMPLATE_ENTRY_FIELDS = (
+    "value",
+    "second_option",
+    "comment",
+    "employee_name",
+    "employee_number",
+    "site_row_id",
+    "site_id",
+    "site_name",
+    "site_branch_row_id",
+    "site_branch",
+)
+
+
+def _template_id() -> str:
+    return f"tpl_{secrets.token_hex(10)}"
+
+
+def _sanitize_template_name(value: Any) -> str:
+    name = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    if not name:
+        raise CloudShiftError("テンプレート名は必須です", 400)
+    return name[:120]
+
+
+def _sanitize_template_basis(value: Any, *, default: str = "date") -> str:
+    text = str(value or "").strip().lower()
+    return text if text in TEMPLATE_BASES else default
+
+
+def _sanitize_template_apply_mode(value: Any, *, default: str = "overwrite") -> str:
+    text = str(value or "").strip().lower()
+    return text if text in TEMPLATE_APPLY_MODES else default
+
+
+def _sanitize_template_holiday_mode(value: Any, *, default: str = "as_weekday") -> str:
+    text = str(value or "").strip().lower()
+    return text if text in TEMPLATE_HOLIDAY_MODES else default
+
+
+def _sanitize_template_target_filter(value: Any, *, default: str = "all") -> str:
+    text = str(value or "").strip().lower()
+    return text if text in TEMPLATE_TARGET_FILTERS else default
+
+
+def _default_template_options() -> dict[str, str]:
+    return {"apply_mode": "overwrite", "holiday_mode": "as_weekday", "target_filter": "all"}
+
+
+def _sanitize_template_options(raw: Any) -> dict[str, str]:
+    data = raw if isinstance(raw, dict) else {}
+    return {
+        "apply_mode": _sanitize_template_apply_mode(data.get("apply_mode")),
+        "holiday_mode": _sanitize_template_holiday_mode(data.get("holiday_mode")),
+        "target_filter": _sanitize_template_target_filter(data.get("target_filter")),
+    }
+
+
+def _slim_template_entry(entry: Any) -> dict[str, Any] | None:
+    """正規化済みエントリから、保存に必要な authoring フィールドだけを残す。"""
+    normalized = normalize_entry(entry)
+    if not normalized or not str(normalized.get("value") or "").strip():
+        return None
+    slim: dict[str, Any] = {}
+    for field in _TEMPLATE_ENTRY_FIELDS:
+        val = normalized.get(field, "")
+        if val in (None, ""):
+            continue
+        slim[field] = val
+    return slim if str(slim.get("value") or "").strip() else None
+
+
+def _template_slots_from_entries(entries_per_day: Any, year: int, month: int) -> dict[str, list[dict[str, Any]]]:
+    """月の entries_per_day を、日(1..N)キーのスリムなスロットへ変換する。
+
+    サーバー同期エントリ（他帳から流れてくる行）はテンプレート化しない。"""
+    normalized = _normalize_entries(entries_per_day, year, month)
+    slots: dict[str, list[dict[str, Any]]] = {}
+    for day_key, entries in normalized.items():
+        slim_entries: list[dict[str, Any]] = []
+        for entry in entries if isinstance(entries, list) else []:
+            if _entry_is_shift_synced(entry):
+                continue
+            slim = _slim_template_entry(entry)
+            if slim:
+                slim_entries.append(slim)
+        if slim_entries:
+            slots[str(day_key)] = slim_entries
+    return slots
+
+
+def _template_apply_entry(slim: Any) -> dict[str, Any]:
+    """スロットのスリムエントリを、反映用の入力エントリ（id なし）に整える。"""
+    entry: dict[str, Any] = {}
+    if not isinstance(slim, dict):
+        return entry
+    for field in _TEMPLATE_ENTRY_FIELDS:
+        val = slim.get(field)
+        if val in (None, ""):
+            continue
+        entry[field] = val
+    return entry
+
+
+def _template_row_to_dict(row: CloudShiftTemplate, *, include_slots: bool = True) -> dict[str, Any]:
+    slots = _json_dict(row.slots)
+    filled_days = sum(1 for value in slots.values() if isinstance(value, list) and value)
+    entry_count = sum(len(value) for value in slots.values() if isinstance(value, list))
+    rep_year = int(row.representative_year or 0)
+    rep_month = int(row.representative_month or 0)
+    payload: dict[str, Any] = {
+        "id": row.id,
+        "project_id": row.project_id,
+        "name": row.name or "",
+        "mode": row.mode or "",
+        "basis": _sanitize_template_basis(row.basis),
+        "representative_year": rep_year,
+        "representative_month": rep_month,
+        "representative_month_key": _month_key(rep_year, rep_month) if rep_year and rep_month else "",
+        "options": _sanitize_template_options(row.options),
+        "filled_day_count": filled_days,
+        "entry_count": entry_count,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+    if include_slots:
+        payload["slots"] = slots
+    return payload
+
+
+def _template_row_or_404(project_id: str, template_id: str) -> CloudShiftTemplate:
+    row = db.session.get(CloudShiftTemplate, str(template_id or ""))
+    if row is None or row.project_id != project_id:
+        abort(404)
+    return row
+
+
+def _project_templates_payload(project_id: str) -> list[dict[str, Any]]:
+    rows = (
+        CloudShiftTemplate.query.filter_by(project_id=project_id)
+        .order_by(CloudShiftTemplate.updated_at.desc(), CloudShiftTemplate.id.desc())
+        .all()
+    )
+    return [_template_row_to_dict(row, include_slots=False) for row in rows]
+
+
+def _project_holiday_day_set(year: int, month: int) -> set[int]:
+    prefix = _month_key(year, month)
+    days: set[int] = set()
+    for holiday in JAPAN_HOLIDAYS:
+        text = str(holiday)
+        if text.startswith(prefix):
+            try:
+                days.add(int(text[8:10]))
+            except (TypeError, ValueError):
+                continue
+    return days
+
+
+def _template_day_in_filter(target_filter: str, weekday: int, is_holiday: bool) -> bool:
+    """対象日フィルタ（祝日は土日と同じ「休業日」側として扱う）。"""
+    if target_filter == "weekday":
+        return weekday < 5 and not is_holiday
+    if target_filter == "weekend":
+        return weekday >= 5 or is_holiday
+    if target_filter == "holiday":
+        return is_holiday
+    if target_filter == "non_holiday":
+        return not is_holiday
+    return True  # 'all'
+
+
+def _template_weekday_pattern(
+    slots: dict[str, Any], rep_year: int, rep_month: int
+) -> dict[int, list[dict[str, Any]]]:
+    """代表月のスロットから、各曜日(0=月..6=日)の初出日のパターンを導出する。"""
+    pattern: dict[int, list[dict[str, Any]]] = {}
+    if not rep_year or not rep_month:
+        return pattern
+    try:
+        rep_days = monthrange(rep_year, rep_month)[1]
+    except (TypeError, ValueError):
+        return pattern
+    for day in range(1, rep_days + 1):
+        weekday = date(rep_year, rep_month, day).weekday()
+        if weekday in pattern:
+            continue  # 各曜日は最初の出現日のみをパターンとして採用する
+        entries = slots.get(str(day))
+        pattern[weekday] = list(entries) if isinstance(entries, list) else []
+    return pattern
+
+
+def _apply_template_to_month_entries(
+    template_row: CloudShiftTemplate,
+    basis: str,
+    options: dict[str, str],
+    year: int,
+    month: int,
+    current_entries_per_day: Any,
+) -> tuple[dict[str, list[dict[str, Any]]], int]:
+    """テンプレートを対象月へ反映した entries_per_day を組み立てる。
+
+    サーバー同期エントリは常に温存し、ローカル（手入力）エントリのみを基準・
+    上書き方法・対象日フィルタに従って差し替える。"""
+    days_in_month = monthrange(year, month)[1]
+    apply_mode = options["apply_mode"]
+    holiday_mode = options["holiday_mode"]
+    target_filter = options["target_filter"]
+    holidays = _project_holiday_day_set(year, month)
+    slots = _json_dict(template_row.slots)
+    current = _normalize_entries(current_entries_per_day, year, month)
+
+    weekday_pattern: dict[int, list[dict[str, Any]]] = {}
+    if basis == "weekday":
+        weekday_pattern = _template_weekday_pattern(
+            slots,
+            int(template_row.representative_year or 0),
+            int(template_row.representative_month or 0),
+        )
+
+    result: dict[str, list[dict[str, Any]]] = {}
+    applied_days = 0
+    for day in range(1, days_in_month + 1):
+        key = str(day)
+        current_day = current.get(key) or []
+        synced = [dict(entry) for entry in current_day if _entry_is_shift_synced(entry)]
+        local = [dict(entry) for entry in current_day if not _entry_is_shift_synced(entry)]
+        weekday = date(year, month, day).weekday()
+        is_holiday = day in holidays
+
+        in_target = _template_day_in_filter(target_filter, weekday, is_holiday)
+        if basis == "weekday" and holiday_mode == "skip" and is_holiday:
+            in_target = False
+        if not in_target:
+            result[key] = local + synced
+            continue
+
+        if basis == "date":
+            pattern_source = slots.get(key)
+            pattern_source = pattern_source if isinstance(pattern_source, list) else []
+        elif is_holiday and holiday_mode == "clear":
+            pattern_source = []
+        else:
+            source_weekday = 6 if (is_holiday and holiday_mode == "as_sunday") else weekday
+            pattern_source = weekday_pattern.get(source_weekday, [])
+
+        pattern_entries = [_template_apply_entry(entry) for entry in pattern_source]
+
+        if apply_mode == "append":
+            new_local = local + pattern_entries
+            if pattern_entries:
+                applied_days += 1
+        elif apply_mode == "fill_empty":
+            if local:
+                new_local = local
+            else:
+                new_local = pattern_entries
+                if pattern_entries:
+                    applied_days += 1
+        else:  # overwrite
+            new_local = pattern_entries
+            if pattern_entries:
+                applied_days += 1
+        result[key] = new_local + synced
+    return result, applied_days
+
+
+@cloudshift_bp.route("/api/project/<project_id>/templates", methods=["GET"])
+@login_required
+def api_templates_list(project_id: str):
+    _owner_project_or_404(project_id)
+    return jsonify({"success": True, "templates": _project_templates_payload(project_id)})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/templates", methods=["POST"])
+@login_required
+def api_templates_create(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        mode = str(project.get("mode") or "")
+        if mode not in TEMPLATE_MODES:
+            raise CloudShiftError("テンプレートは現場シフト / 個人シフトでのみ作成できます", 400)
+        name = _sanitize_template_name(payload.get("name"))
+        basis = _sanitize_template_basis(payload.get("basis"))
+        rep_year, rep_month = _validate_year_month(
+            payload.get("representative_year"), payload.get("representative_month")
+        )
+        slots = _template_slots_from_entries(payload.get("entries_per_day"), rep_year, rep_month)
+        options = _sanitize_template_options(payload.get("options"))
+        timestamp = _utcnow_iso()
+        row = CloudShiftTemplate(
+            id=_template_id(),
+            project_id=project_id,
+            owner_user_id=str(project.get("owner_user_id") or _user_id()),
+            name=name,
+            mode=mode,
+            basis=basis,
+            representative_year=rep_year,
+            representative_month=rep_month,
+            slots=slots,
+            options=options,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        db.session.add(row)
+        db.session.commit()
+        template_payload = _template_row_to_dict(row)
+    return jsonify({"success": True, "template": template_payload})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/templates/<template_id>", methods=["GET"])
+@login_required
+def api_templates_get(project_id: str, template_id: str):
+    _owner_project_or_404(project_id)
+    row = _template_row_or_404(project_id, template_id)
+    return jsonify({"success": True, "template": _template_row_to_dict(row)})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/templates/<template_id>", methods=["PUT"])
+@login_required
+def api_templates_update(project_id: str, template_id: str):
+    payload = request.get_json(silent=True) or {}
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        row = _template_row_or_404(project_id, template_id)
+        if "name" in payload:
+            row.name = _sanitize_template_name(payload.get("name"))
+        if "basis" in payload:
+            row.basis = _sanitize_template_basis(payload.get("basis"), default=row.basis or "date")
+        if "options" in payload:
+            row.options = _sanitize_template_options(payload.get("options"))
+        if "entries_per_day" in payload:
+            rep_year, rep_month = _validate_year_month(
+                payload.get("representative_year", row.representative_year),
+                payload.get("representative_month", row.representative_month),
+            )
+            row.representative_year = rep_year
+            row.representative_month = rep_month
+            row.slots = _template_slots_from_entries(payload.get("entries_per_day"), rep_year, rep_month)
+        elif "representative_year" in payload or "representative_month" in payload:
+            rep_year, rep_month = _validate_year_month(
+                payload.get("representative_year", row.representative_year),
+                payload.get("representative_month", row.representative_month),
+            )
+            row.representative_year = rep_year
+            row.representative_month = rep_month
+        row.mode = str(project.get("mode") or row.mode or "")
+        row.updated_at = _utcnow_iso()
+        db.session.commit()
+        template_payload = _template_row_to_dict(row)
+    return jsonify({"success": True, "template": template_payload})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/templates/<template_id>", methods=["DELETE"])
+@login_required
+def api_templates_delete(project_id: str, template_id: str):
+    with _project_lock(project_id):
+        _owner_project_or_404(project_id)
+        row = _template_row_or_404(project_id, template_id)
+        db.session.delete(row)
+        db.session.commit()
+    return jsonify({"success": True, "deleted_template_id": template_id})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/templates/<template_id>/apply", methods=["POST"])
+@login_required
+def api_templates_apply(project_id: str, template_id: str):
+    payload = request.get_json(silent=True) or {}
+    year, month = _validate_year_month(payload.get("year"), payload.get("month"))
+    month_key = _month_key(year, month)
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        row = _template_row_or_404(project_id, template_id)
+        if str(row.mode or "") and str(project.get("mode") or "") and str(row.mode) != str(project.get("mode")):
+            raise CloudShiftError("テンプレートとシフト帳の種別が一致していません", 400)
+        current_month = (project.get("months") or {}).get(month_key)
+        if not current_month:
+            raise CloudShiftError("対象の月が存在しません。先に対象月を作成してください。", 404)
+        defaults = _sanitize_template_options(row.options)
+        basis = _sanitize_template_basis(payload.get("basis"), default=_sanitize_template_basis(row.basis))
+        options = {
+            "apply_mode": _sanitize_template_apply_mode(payload.get("apply_mode"), default=defaults["apply_mode"]),
+            "holiday_mode": _sanitize_template_holiday_mode(payload.get("holiday_mode"), default=defaults["holiday_mode"]),
+            "target_filter": _sanitize_template_target_filter(payload.get("target_filter"), default=defaults["target_filter"]),
+        }
+        new_entries, applied_days = _apply_template_to_month_entries(
+            row, basis, options, year, month, current_month.get("entries_per_day")
+        )
+        before_entries = _confirmed_entries_snapshot(project, year, month)
+        save_payload = {
+            "base_month": {
+                "year": year,
+                "month": month,
+                "required_capacity": current_month.get("required_capacity", 0),
+                "entries_per_day": current_month.get("entries_per_day") or {},
+            },
+            "required_capacity": current_month.get("required_capacity", 0),
+            "entries_per_day": new_entries,
+        }
+        month_payload = _save_month_in_project(
+            project, year, month, save_payload, _user_label(), "owner", _user_id()
+        )
+    try:
+        _sync_role_option_person_sites(project, year, month, actor_name=_user_label())
+    except Exception:  # pragma: no cover - person 連携の失敗で反映自体は止めない
+        logger.exception("role option person sync failed (project=%s)", project.get("id"))
+    _resync_shift_month(project, month_key, actor_name=_user_label())
+    _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
+    project = _load_project(project_id)
+    return jsonify(
+        {
+            "success": True,
+            "applied_days": applied_days,
+            "basis": basis,
+            "options": options,
+            "template": _template_row_to_dict(row, include_slots=False),
+            "month": _client_month_payload(month_payload, include_draft=True, project=project),
+            "project": _project_detail_payload(project, month_key, include_draft=True),
+        }
+    )
+
+
+@cloudshift_bp.route("/project/<project_id>/template-editor", methods=["GET"])
+@login_required
+def template_editor(project_id: str):
+    """テンプレート作成・編集専用ウィンドウ（DSTT chrome なし、CloudShift UI 流用）。"""
+    project = _owner_project_or_404(project_id)
+    mode = str(project.get("mode") or "")
+    if mode not in TEMPLATE_MODES:
+        abort(404)
+    now = datetime.now(JST)
+    return render_template(
+        "cloudshift_template_editor.html",
+        project_id=project_id,
+        project_title=project.get("title") or "名称未設定",
+        mode=mode,
+        site=_project_site_payload(project) if mode == "scene" else None,
+        default_year=now.year,
+        default_month=now.month,
+        shiftersync_holidays=sorted(set(JAPAN_HOLIDAYS)),
+    )
 
 
 @cloudshift_bp.route("/api/project/<project_id>/shift-engine/context", methods=["GET"])

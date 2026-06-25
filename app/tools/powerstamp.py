@@ -7,6 +7,7 @@ import os
 import json
 
 import fitz
+import pikepdf
 
 powerstamp_bp = Blueprint("powerstamp", __name__, url_prefix="/tools/powerstamp")
 
@@ -72,9 +73,28 @@ def _build_exact_pdf_from_png(png_bytes: bytes, page_w_mm: float, page_h_mm: flo
             keep_proportion=False,
             overlay=True,
         )
-        return doc.tobytes(garbage=4, deflate=True)
+        return _add_exact_print_preferences(doc.tobytes(garbage=4, deflate=True))
     finally:
         doc.close()
+
+
+def _add_exact_print_preferences(pdf_bytes: bytes) -> bytes:
+    with pikepdf.Pdf.open(io.BytesIO(pdf_bytes)) as pdf:
+        preferences = pdf.Root.get("/ViewerPreferences", pikepdf.Dictionary())
+        preferences["/PrintScaling"] = pikepdf.Name("/None")
+        preferences["/PickTrayByPDFSize"] = True
+        pdf.Root.ViewerPreferences = preferences
+
+        for page in pdf.pages:
+            media_box = page.MediaBox
+            page.CropBox = media_box
+            page.TrimBox = media_box
+            page.BleedBox = media_box
+            page.ArtBox = media_box
+
+        out = io.BytesIO()
+        pdf.save(out)
+        return out.getvalue()
 
 
 def _safe_pdf_filename(name: str | None) -> str:

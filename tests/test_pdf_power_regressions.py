@@ -103,6 +103,34 @@ def test_merge_preserves_distinct_files_even_when_names_match(client):
     doc.close()
 
 
+def test_split_rejects_invalid_pdf_content_as_validation_error(client):
+    response = client.post(
+        "/tools/pdf_power/split_merge",
+        data={
+            "mode": "split",
+            "range": "1",
+            "pdfs": [(io.BytesIO(b"%PDF-1.4\nnot-a-real-pdf"), "broken.pdf")],
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 400
+    assert "PDFファイルが破損しているか、読み取れません" in response.get_json()["error"]
+
+
+def test_page_operations_rejects_invalid_pdf_content_as_validation_error(client):
+    response = client.post(
+        "/tools/pdf_power/page_operations",
+        data={
+            "operation": "reorder",
+            "pages_order": "1",
+            "pdf": (io.BytesIO(b"%PDF-1.4\nnot-a-real-pdf"), "broken.pdf"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 400
+    assert "PDFファイルが破損しているか、読み取れません" in response.get_json()["error"]
+
+
 def test_editor_window_route_redirects_to_editor_window_mode(client):
     response = client.get("/tools/pdf_power/editor", follow_redirects=False)
     assert response.status_code == 302
@@ -256,6 +284,28 @@ def test_convert_to_pdf_handles_mixed_text_and_image_uploads(client):
     doc.close()
 
 
+def test_convert_to_pdf_cleans_temp_dir_on_validation_error(client, pdf_power_module, monkeypatch, tmp_path):
+    temp_dir = tmp_path / "powerpdf-temp"
+
+    def fake_mkdtemp():
+        temp_dir.mkdir()
+        return str(temp_dir)
+
+    monkeypatch.setattr(pdf_power_module.tempfile, "mkdtemp", fake_mkdtemp)
+
+    response = client.post(
+        "/tools/pdf_power/convert",
+        data={
+            "direction": "to_pdf",
+            "files": [(io.BytesIO(b"not-supported"), "payload.exe")],
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 400
+    assert not temp_dir.exists()
+
+
 def test_pdf_power_template_scripts_are_valid_javascript():
     node = shutil.which("node")
     if not node:
@@ -307,6 +357,30 @@ def test_pdf_power_template_loads_editor_script_once():
     assert raw.count("js/pdf_power_editor.js") == 1
 
 
+def test_editor_window_script_targets_actual_hero_class():
+    script_path = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "pdf_power_editor.js"
+    raw = script_path.read_text(encoding="utf-8")
+    assert "document.querySelector('.dstt-hero')" in raw
+    assert ".pdf-power-hero" not in raw
+
+
+def test_editor_shape_preview_uses_svg_not_css_border():
+    script_path = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "pdf_power_editor.js"
+    raw = script_path.read_text(encoding="utf-8")
+    assert "const svgEl = (tag) => document.createElementNS('http://www.w3.org/2000/svg', tag);" in raw
+    assert "item.classList.add('shape');" in raw
+    assert "svgEl(op.shape === 'ellipse' ? 'ellipse' : 'rect')" in raw
+    assert "svgEl('line')" in raw
+    assert "borderTopWidth" not in raw
+
+
+def test_editor_text_preview_line_height_matches_pymupdf_textbox():
+    template_path = Path(__file__).resolve().parents[1] / "app" / "templates" / "pdf_power.html"
+    raw = template_path.read_text(encoding="utf-8")
+    assert "line-height: 1.374;" in raw
+    assert ".overlay-item.shape" in raw
+
+
 def test_password_remove_with_wrong_password_returns_html_error_screen(client):
     protected_pdf = io.BytesIO()
     with pikepdf.open(io.BytesIO(_make_pdf("LOCKED"))) as pdf:
@@ -331,3 +405,31 @@ def test_password_remove_with_wrong_password_returns_html_error_screen(client):
     body = response.get_data(as_text=True)
     assert "入力されたパスワードが正しくありません" in body
     assert 'value="remove" checked' in body
+
+
+def test_editor_redact_operation_removes_text(client):
+    operations = [
+        {
+            "type": "redact_area",
+            "page": 1,
+            "x": 45,
+            "y": 70,
+            "width": 220,
+            "height": 40,
+            "fill_color": "#000000",
+        }
+    ]
+
+    response = client.post(
+        "/tools/pdf_power/edit",
+        data={
+            "pdf": (io.BytesIO(_make_pdf("TOP_SECRET")), "input.pdf"),
+            "operations": json.dumps(operations),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    doc = fitz.open(stream=response.data, filetype="pdf")
+    assert "TOP_SECRET" not in doc[0].get_text("text")
+    doc.close()

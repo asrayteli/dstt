@@ -1,4 +1,6 @@
 import sys
+import json
+import io
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
@@ -1034,3 +1036,126 @@ def test_dstt_admin_full_access_all_offices(tmp_path):
     assert g.status_code == 200
     perms = client.get("/tools/health_check/api/admin/permissions").get_json()
     assert any(u["user_id"] == "u1" for u in perms["users"])
+
+
+def test_extra_notify_and_manager_are_limited_to_record_office(tmp_path):
+    module, app = _build(tmp_path, admin=False)
+    uid, off100_id = _setup_two_offices(app)
+    with app.app_context():
+        off200 = AccessOffice.query.filter_by(code="200").first()
+        db.session.add(User(username="u2", password_hash="x", name="User 2", office_id=off200.id))
+        db.session.commit()
+
+    _as_user(module, username="u1", uid=uid, office_id=off100_id, admin=False)
+    client = app.test_client()
+    created = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026,
+        "record_type": "internal",
+        "employee_name": "Internal",
+        "office_code": "100",
+        "extra_notify_users": ["u1", "u2"],
+    })
+    assert created.status_code == 200
+    record = created.get_json()["record"]
+    assert record["extra_notify_users"] == ["u1"]
+
+    bad_manager = client.put(
+        f"/tools/health_check/api/record/{record['id']}/manager",
+        json={"manager_user": "u2"},
+    )
+    assert bad_manager.status_code == 400
+
+
+def test_linked_record_scope_uses_current_employee_office(tmp_path):
+    module, app = _build(tmp_path, admin=False)
+    uid, off100_id = _setup_two_offices(app)
+    with app.app_context():
+        off200 = AccessOffice.query.filter_by(code="200").first()
+        u2 = User(username="u2", password_hash="x", name="User 2", office_id=off200.id)
+        db.session.add(u2)
+        db.session.commit()
+        u2_id = u2.id
+        off200_id = off200.id
+    _as_user(module, username="u1", uid=uid, office_id=off100_id, admin=False)
+    client = app.test_client()
+
+    created = client.post("/tools/health_check/api/record", json={
+        "target_year": 2026,
+        "record_type": "linked",
+        "employee_number": "E1",
+    })
+    assert created.status_code == 200
+    record_id = created.get_json()["record"]["id"]
+    upload = client.post(
+        f"/tools/health_check/api/record/{record_id}/attachment",
+        data={"file": (io.BytesIO(b"fake-png"), "check.png")},
+        content_type="multipart/form-data",
+    )
+    assert upload.status_code == 200
+    attachment_id = upload.get_json()["attachment"]["id"]
+
+    with app.app_context():
+        emp = Employee.query.filter_by(employee_number="E1").first()
+        emp.office_code = "200"
+        emp.office_name = "Office 200"
+        db.session.commit()
+
+    listing = client.get("/tools/health_check/api/records?year=2026")
+    assert listing.status_code == 200
+    assert listing.get_json()["records"] == []
+
+    updated = client.put(f"/tools/health_check/api/record/{record_id}", json={"remarks": "old office edit"})
+    assert updated.status_code == 403
+    download_old = client.get(f"/tools/health_check/api/record/{record_id}/attachment/{attachment_id}")
+    assert download_old.status_code == 403
+    history_old = client.get(f"/tools/health_check/api/history?record_id={record_id}")
+    assert history_old.status_code == 403
+
+    _as_user(module, username="u2", uid=u2_id, office_id=off200_id, admin=False)
+    download_new = client.get(f"/tools/health_check/api/record/{record_id}/attachment/{attachment_id}")
+    assert download_new.status_code == 200
+    history_new = client.get(f"/tools/health_check/api/history?record_id={record_id}")
+    assert history_new.status_code == 200
+
+
+def test_linked_record_list_syncs_all_records_and_refilters_notify_users(tmp_path):
+    module, app = _build(tmp_path, admin=False)
+    uid, off100_id = _setup_two_offices(app)
+    with app.app_context():
+        off100 = AccessOffice.query.filter_by(code="100").first()
+        off200 = AccessOffice.query.filter_by(code="200").first()
+        db.session.add(UserAccessibleOffice(user_id=uid, office_id=off200.id))
+        db.session.add(User(username="manager100", password_hash="x", name="Manager 100", office_id=off100.id))
+        db.session.add(User(username="manager200", password_hash="x", name="Manager 200", office_id=off200.id))
+        db.session.commit()
+
+    _as_user(module, username="u1", uid=uid, office_id=off100_id, admin=False)
+    client = app.test_client()
+
+    for employee_number in ("E1", "E2"):
+        created = client.post("/tools/health_check/api/record", json={
+            "target_year": 2026,
+            "record_type": "linked",
+            "employee_number": employee_number,
+        })
+        assert created.status_code == 200
+
+    with app.app_context():
+        for number, name in (("E1", "Moved 1"), ("E2", "Moved 2")):
+            emp = Employee.query.filter_by(employee_number=number).first()
+            emp.office_code = "100"
+            emp.office_name = "Office 100"
+            emp.employee_name = name
+        HealthCheckRecord.query.filter_by(employee_number="E1").update({
+            "manager_user": "manager200",
+            "extra_notify_users": json.dumps(["manager100", "manager200"], ensure_ascii=False),
+        })
+        HealthCheckRecord.query.filter_by(employee_number="E2").update({"employee_name": "stale"})
+        db.session.commit()
+
+    listing = client.get("/tools/health_check/api/records?year=2026")
+    assert listing.status_code == 200
+    records = sorted(listing.get_json()["records"], key=lambda row: row["employee_number"])
+    assert [row["employee_name"] for row in records] == ["Moved 1", "Moved 2"]
+    assert records[0]["manager_user"] in (None, "")
+    assert records[0]["extra_notify_users"] == ["manager100"]

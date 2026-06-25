@@ -92,7 +92,8 @@
     const projectsManageButton = $("tb-projects-manage");
     if (projectsManageButton) projectsManageButton.addEventListener("click", openProjectsListModal);
     initProjectsListModal();
-    $("tb-enable-push-notify").addEventListener("click", toggleNotifications);
+    const enablePushButton = $("tb-enable-push-notify");
+    if (enablePushButton) enablePushButton.addEventListener("click", toggleNotifications);
     const reloadButton = $("tb-reload");
     if (reloadButton && isStandalone()) {
       // PWA（ホーム画面アプリ）にはブラウザの再読込が無いため専用ボタンを出す。

@@ -822,7 +822,7 @@ h1, h2, h3 {
 
 /* オプション選択ポップアップ: 第一オプションと第二オプションを横並びにする */
 .ss-option-popup {
-    width: min(680px, 100%);
+    width: min(720px, 100%);
 }
 
 .ss-option-popup-columns {
@@ -838,9 +838,17 @@ h1, h2, h3 {
     min-width: 0;
 }
 
+.ss-option-popup-col-first {
+    /* 第一オプションが残り幅いっぱいに広がり、各グループのボタンが横に流れる
+       （第二オプションに引きずられて単列化＝縦長化するのを防ぐ）。 */
+    flex: 1 1 auto;
+}
+
 .ss-option-popup-col-second {
-    flex: 0 0 auto;
-    min-width: 160px;
+    /* 第二オプションは中身（代務・研修の2ボタン＋短い注記）に対して固定の細幅にし、
+       注記の自然幅で列が膨張して右側に大きな空白を作るのを防ぐ。 */
+    flex: 0 0 200px;
+    max-width: 200px;
 }
 
 .ss-option-popup-col-title {
@@ -870,6 +878,7 @@ h1, h2, h3 {
 
     .ss-option-popup-col-second {
         min-width: 0;
+        max-width: none;
         width: 100%;
     }
 }

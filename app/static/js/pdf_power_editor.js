@@ -9,7 +9,7 @@
   const isEditorWindow = new URLSearchParams(window.location.search).get('editor_window') === '1';
   if (isEditorWindow) {
     const shell = document.querySelector('.pdf-power-shell');
-    const hero = document.querySelector('.pdf-power-hero');
+    const hero = document.querySelector('.dstt-hero');
     const root = document.getElementById('pdfPowerRoot');
     const appSidebar = document.getElementById('app-sidebar');
     const sidebarToggle = document.getElementById('sidebar-toggle');
@@ -55,6 +55,12 @@
   const deep = (value) => JSON.parse(JSON.stringify(value));
   const genId = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const styleToCss = (style) => (style === 'dashed' ? 'dashed' : style === 'dotted' ? 'dotted' : 'solid');
+  const styleToDashArray = (style, strokeWidthPx) => {
+    if (style === 'dashed') return `${Math.max(2, strokeWidthPx * 4)} ${Math.max(2, strokeWidthPx * 2)}`;
+    if (style === 'dotted') return `${Math.max(1, strokeWidthPx * 0.5)} ${Math.max(2, strokeWidthPx * 1.5)}`;
+    return '';
+  };
+  const svgEl = (tag) => document.createElementNS('http://www.w3.org/2000/svg', tag);
 
   const uploadMenuShell = get('editorUploadMenuShell');
   const uploadMenuBtn = get('uploadMenuBtn');
@@ -192,6 +198,7 @@
   let selectedIndex = -1;
   let opClipboard = null;
   let pasteOffset = 0;
+  let startRedactWhenReady = false;
 
   const historyStack = [];
   const redoStack = [];
@@ -360,6 +367,14 @@
       op.y = q1(op.y || 0);
       op.width = qMin1(op.width || 220);
       op.height = qMin1(op.height || 120);
+    } else if (op.type === 'redact_area') {
+      op.page = Number(op.page || editPageNum || 1);
+      op.x = q1(op.x || 0);
+      op.y = q1(op.y || 0);
+      op.width = qMin1(op.width || 180);
+      op.height = qMin1(op.height || 48);
+      op.fill_color = op.fill_color || '#000000';
+      op.label = op.label || '';
     } else if (op.type === 'copy_region_paste') {
       op.source_document = op.source_document === 'reference' ? 'reference' : 'edit';
       op.source_page = Number(op.source_page || editPageNum || 1);
@@ -387,6 +402,7 @@
     if (mode === 'line') return '線の終点を指定';
     if (mode === 'freehand') return '自由描画';
     if (mode === 'copy_select') return '編集PDFの範囲選択';
+    if (mode === 'redact_select') return '墨消し範囲選択';
     if (mode === 'reference_copy_select') return '参照PDFの範囲選択';
     if (mode === 'copy_paste' && copySource) {
       return copySource.source_document === 'reference' ? '参照PDFを貼り付け位置待ち' : '編集PDFを貼り付け位置待ち';
@@ -756,7 +772,9 @@
         ? 'reference_copy'
         : op.type === 'add_freehand'
           ? 'freehand'
-          : op.type;
+          : op.type === 'redact_area'
+            ? 'redact'
+            : op.type;
       row.innerHTML = `<span>${index + 1}. ${typeLabel}</span><span class="text-[10px] text-slate-500">p.${page}</span>`;
       row.dataset.idx = String(index);
       layerList.appendChild(row);
@@ -781,32 +799,70 @@
         item.style.fontSize = `${Math.max(8, editPdfToPx(op.font_size || 14))}px`;
         item.textContent = op.text || '';
       } else if (op.type === 'add_shape' && op.page === editPageNum) {
-        const cssStyle = styleToCss(op.stroke_style || 'solid');
+        item.classList.add('shape');
+        const strokeWidth = Math.max(1, editPdfToPx(op.stroke_width || 2));
+        const dashArray = styleToDashArray(op.stroke_style || 'solid', strokeWidth);
         if (op.shape === 'line') {
           const x1 = editPdfToPx(op.x1);
           const y1 = editPdfToPx(op.y1);
           const x2 = editPdfToPx(op.x2);
           const y2 = editPdfToPx(op.y2);
-          const length = Math.hypot(x2 - x1, y2 - y1);
-          const angle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
+          const minX = Math.min(x1, x2);
+          const minY = Math.min(y1, y2);
+          const pad = strokeWidth / 2;
+          const width = Math.max(1, Math.abs(x2 - x1)) + strokeWidth;
+          const height = Math.max(1, Math.abs(y2 - y1)) + strokeWidth;
           item.classList.add('line');
-          item.style.left = `${x1}px`;
-          item.style.top = `${y1}px`;
-          item.style.width = `${length}px`;
-          item.style.borderTopColor = op.stroke_color || '#1d4ed8';
-          item.style.borderTopStyle = cssStyle;
-          item.style.borderTopWidth = `${Math.max(1, editPdfToPx(op.stroke_width || 2))}px`;
-          item.style.transform = `rotate(${angle}deg)`;
+          item.style.left = `${minX - pad}px`;
+          item.style.top = `${minY - pad}px`;
+          item.style.width = `${width}px`;
+          item.style.height = `${height}px`;
+          const svg = svgEl('svg');
+          svg.setAttribute('width', String(width));
+          svg.setAttribute('height', String(height));
+          svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+          svg.style.overflow = 'visible';
+          const line = svgEl('line');
+          line.setAttribute('x1', String(x1 - minX + pad));
+          line.setAttribute('y1', String(y1 - minY + pad));
+          line.setAttribute('x2', String(x2 - minX + pad));
+          line.setAttribute('y2', String(y2 - minY + pad));
+          line.setAttribute('stroke', op.stroke_color || '#1d4ed8');
+          line.setAttribute('stroke-width', String(strokeWidth));
+          line.setAttribute('fill', 'none');
+          if (dashArray) line.setAttribute('stroke-dasharray', dashArray);
+          svg.appendChild(line);
+          item.appendChild(svg);
         } else {
           item.style.left = `${editPdfToPx(op.x)}px`;
           item.style.top = `${editPdfToPx(op.y)}px`;
           item.style.width = `${editPdfToPx(op.width)}px`;
           item.style.height = `${editPdfToPx(op.height)}px`;
-          item.style.borderColor = op.stroke_color || '#1d4ed8';
-          item.style.borderStyle = cssStyle;
-          item.style.borderWidth = `${Math.max(1, editPdfToPx(op.stroke_width || 2))}px`;
-          item.style.background = op.fill_color || 'transparent';
-          if (op.shape === 'ellipse') item.style.borderRadius = '999px';
+          const width = Math.max(1, editPdfToPx(op.width));
+          const height = Math.max(1, editPdfToPx(op.height));
+          const svg = svgEl('svg');
+          svg.setAttribute('width', String(width));
+          svg.setAttribute('height', String(height));
+          svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+          svg.style.overflow = 'visible';
+          const node = svgEl(op.shape === 'ellipse' ? 'ellipse' : 'rect');
+          if (op.shape === 'ellipse') {
+            node.setAttribute('cx', String(width / 2));
+            node.setAttribute('cy', String(height / 2));
+            node.setAttribute('rx', String(width / 2));
+            node.setAttribute('ry', String(height / 2));
+          } else {
+            node.setAttribute('x', '0');
+            node.setAttribute('y', '0');
+            node.setAttribute('width', String(width));
+            node.setAttribute('height', String(height));
+          }
+          node.setAttribute('stroke', op.stroke_color || '#1d4ed8');
+          node.setAttribute('stroke-width', String(strokeWidth));
+          node.setAttribute('fill', op.fill_color || 'transparent');
+          if (dashArray) node.setAttribute('stroke-dasharray', dashArray);
+          svg.appendChild(node);
+          item.appendChild(svg);
         }
       } else if (op.type === 'add_image' && op.page === editPageNum) {
         item.style.left = `${editPdfToPx(op.x)}px`;
@@ -816,6 +872,15 @@
         const url = imageUrlByRef.get(op.image_ref);
         item.style.background = url ? `url("${url}") center / cover no-repeat` : 'rgba(37,99,235,0.08)';
         item.style.borderColor = '#2563eb';
+      } else if (op.type === 'redact_area' && op.page === editPageNum) {
+        item.classList.add('redact');
+        item.style.left = `${editPdfToPx(op.x)}px`;
+        item.style.top = `${editPdfToPx(op.y)}px`;
+        item.style.width = `${editPdfToPx(op.width)}px`;
+        item.style.height = `${editPdfToPx(op.height)}px`;
+        item.style.background = op.fill_color || '#000000';
+        item.style.borderColor = '#dc2626';
+        item.textContent = op.label || 'REDACT';
       } else if (op.type === 'copy_region_paste' && op.target_page === editPageNum) {
         item.style.left = `${editPdfToPx(op.target_x)}px`;
         item.style.top = `${editPdfToPx(op.target_y)}px`;
@@ -935,6 +1000,15 @@
       propW.value = 0;
       propH.value = 0;
     }
+
+    if (op.type === 'redact_area') {
+      groupText.classList.remove('hidden');
+      groupShapeColors.classList.remove('hidden');
+      propText.value = op.label || '';
+      propStrokeColor.value = '#dc2626';
+      propFillColor.value = op.fill_color || '#000000';
+      propStrokeWidth.value = 1;
+    }
   };
 
   const applyPropChanges = () => {
@@ -973,6 +1047,14 @@
       op.y = value(propY);
       op.width = qMin1(value(propW));
       op.height = qMin1(value(propH));
+    } else if (op.type === 'redact_area') {
+      op.page = value(propPage);
+      op.x = value(propX);
+      op.y = value(propY);
+      op.width = qMin1(value(propW));
+      op.height = qMin1(value(propH));
+      op.label = propText.value || '';
+      op.fill_color = propFillColor.value || '#000000';
     } else if (op.type === 'copy_region_paste') {
       op.target_page = value(propPage);
       op.target_x = value(propX);
@@ -1152,6 +1234,9 @@
       freehandCurrent = null;
       updateModeBadge();
       return;
+    } else if (action === 'start_redact') {
+      startRedactMode();
+      return;
     } else if (action === 'start_copy') {
       mode = 'copy_select';
       copySource = null;
@@ -1168,6 +1253,20 @@
   const requestUpload = (target) => {
     if (target === 'reference') referencePdfInput.click();
     else editorPdfInput.click();
+  };
+
+  const startRedactMode = () => {
+    if (!editPdfDoc) {
+      startRedactWhenReady = true;
+      requestUpload('edit');
+      updateModeBadge();
+      return;
+    }
+    resetTransientModes();
+    mode = 'redact_select';
+    copySource = null;
+    updateModeBadge();
+    viewerWrap.focus();
   };
 
   const removeReferencePdf = () => {
@@ -1228,6 +1327,10 @@
       persistSettings();
       await renderEditPage();
       viewerWrap.scrollTop = 0;
+      if (startRedactWhenReady) {
+        startRedactWhenReady = false;
+        startRedactMode();
+      }
     }
   };
 
@@ -1527,7 +1630,7 @@
       if (!op) return;
       selectOp(index);
       moveDrag = { idx: index, sx: getPointFromLayer(overlayLayer, event).x, sy: getPointFromLayer(overlayLayer, event).y, moved: false };
-      if (op.type === 'add_text' || op.type === 'add_image') {
+      if (op.type === 'add_text' || op.type === 'add_image' || op.type === 'redact_area') {
         moveDrag.ox = op.x;
         moveDrag.oy = op.y;
       } else if (op.type === 'add_shape') {
@@ -1564,7 +1667,7 @@
       return;
     }
 
-    if (mode === 'copy_select' && editPdfDoc) {
+    if ((mode === 'copy_select' || mode === 'redact_select') && editPdfDoc) {
       editDragStart = getPointFromLayer(overlayLayer, event);
       dragRect.classList.remove('hidden');
       dragRect.style.left = `${editDragStart.x}px`;
@@ -1614,7 +1717,7 @@
       if (Math.abs(dx) > 0.2 || Math.abs(dy) > 0.2) moveDrag.moved = true;
       const op = ops[moveDrag.idx];
       if (!op) return;
-      if (op.type === 'add_text' || op.type === 'add_image') {
+      if (op.type === 'add_text' || op.type === 'add_image' || op.type === 'redact_area') {
         op.x = q1((moveDrag.ox ?? op.x ?? 0) + dx);
         op.y = q1((moveDrag.oy ?? op.y ?? 0) + dy);
       } else if (op.type === 'add_shape') {
@@ -1661,7 +1764,7 @@
       return;
     }
 
-    if (editDragStart && mode === 'copy_select') {
+    if (editDragStart && (mode === 'copy_select' || mode === 'redact_select')) {
       const point = getPointFromLayer(overlayLayer, event);
       const left = Math.min(editDragStart.x, point.x);
       const top = Math.min(editDragStart.y, point.y);
@@ -1704,12 +1807,34 @@
       syncEditOverlay();
       return;
     }
-    if (!editDragStart || mode !== 'copy_select') return;
+    if (!editDragStart || (mode !== 'copy_select' && mode !== 'redact_select')) return;
     const point = getPointFromLayer(overlayLayer, event);
     const left = Math.min(editDragStart.x, point.x);
     const top = Math.min(editDragStart.y, point.y);
     const width = Math.max(2, Math.abs(point.x - editDragStart.x));
     const height = Math.max(2, Math.abs(point.y - editDragStart.y));
+    if (mode === 'redact_select') {
+      commitHistory();
+      ops.push(normalizeOp({
+        type: 'redact_area',
+        page: editPageNum,
+        x: q1(editPxToPdf(left)),
+        y: q1(editPxToPdf(top)),
+        width: qMin1(editPxToPdf(width)),
+        height: qMin1(editPxToPdf(height)),
+        fill_color: '#000000',
+        label: '',
+      }));
+      editDragStart = null;
+      dragRect.classList.add('hidden');
+      resetTransientModes();
+      updateOpsField();
+      renderOps();
+      renderLayerList();
+      selectOp(ops.length - 1);
+      updateSubmitState();
+      return;
+    }
     copySource = { source_document: 'edit', page: editPageNum, x: q1(editPxToPdf(left)), y: q1(editPxToPdf(top)), w: qMin1(editPxToPdf(width)), h: qMin1(editPxToPdf(height)) };
     editDragStart = null;
     dragRect.classList.add('hidden');

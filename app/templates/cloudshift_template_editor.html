@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DSTT - テンプレート作成 - {{ project_title }}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+  {% include "_cloudshift_style.html" %}
+</head>
+<body class="cloud-public-page cloud-template-editor-page">
+  <main class="cloud-shell cloud-public-shell">
+    <header class="cloud-hero">
+      <div class="cloud-hero-copy">
+        <div class="cloud-page-kicker">CloudShift / テンプレート</div>
+        <h1 class="cloud-page-title">{{ project_title }}</h1>
+        <p class="cloud-page-note">
+          その{{ '現場' if mode == 'scene' else '人' }}の 1 か月分をカレンダーで作り、テンプレートとして保存します。
+          ここで保存しても既存のシフト帳は変わりません。反映は「アシスト → テンプレート」から行います。
+        </p>
+      </div>
+    </header>
+
+    <section class="cloud-panel is-active cloud-panel-public">
+      <form id="tpl-form" class="cloud-form">
+        <div class="cloud-form-grid">
+          <label class="cloud-field cloud-field-wide">
+            <span>テンプレート名</span>
+            <input id="tpl-name" class="cloud-input" type="text" maxlength="120" placeholder="例：通常パターン / 月初固定" required>
+          </label>
+          <label class="cloud-field">
+            <span>反映の基準</span>
+            <select id="tpl-basis" class="cloud-input">
+              <option value="date">日付基準（1日→1日…）</option>
+              <option value="weekday">曜日基準（毎週の曜日パターン）</option>
+            </select>
+          </label>
+          <label class="cloud-field">
+            <span>編集する代表月（年）</span>
+            <input id="tpl-year" class="cloud-input" type="number" min="2000" max="2100" required>
+          </label>
+          <label class="cloud-field">
+            <span>編集する代表月（月）</span>
+            <div class="cloud-field-stack-inline">
+              <input id="tpl-month" class="cloud-input" type="number" min="1" max="12" required>
+              <button id="tpl-reload-month" type="button" class="cloud-btn secondary">この月で編集</button>
+            </div>
+          </label>
+        </div>
+
+        <details class="cloud-fold" open>
+          <summary class="cloud-fold-summary">既定の反映オプション（反映時に変更できます）</summary>
+          <div class="cloud-fold-content">
+            <div class="cloud-form-grid">
+              <label class="cloud-field">
+                <span>上書き方法</span>
+                <select id="tpl-apply-mode" class="cloud-input">
+                  <option value="overwrite">上書き（その日を置き換え）</option>
+                  <option value="append">追加（既存に足す）</option>
+                  <option value="fill_empty">空き日のみ（予定が無い日だけ）</option>
+                </select>
+              </label>
+              <label class="cloud-field">
+                <span>対象日</span>
+                <select id="tpl-target-filter" class="cloud-input">
+                  <option value="all">すべての日</option>
+                  <option value="weekday">平日のみ（祝日除く）</option>
+                  <option value="weekend">土日・祝日のみ</option>
+                  <option value="holiday">祝日のみ</option>
+                  <option value="non_holiday">祝日以外</option>
+                </select>
+              </label>
+              <label id="tpl-holiday-field" class="cloud-field">
+                <span>祝日の扱い（曜日基準）</span>
+                <select id="tpl-holiday-mode" class="cloud-input">
+                  <option value="as_weekday">その曜日として扱う</option>
+                  <option value="as_sunday">日曜パターンを使う</option>
+                  <option value="skip">触らない（スキップ）</option>
+                  <option value="clear">空にする</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </details>
+
+        <p id="tpl-basis-note" class="cloud-panel-note"></p>
+
+        <div class="cloud-actions">
+          <button id="tpl-save" type="submit" class="cloud-btn primary">テンプレートを保存</button>
+          <button id="tpl-close" type="button" class="cloud-btn ghost">閉じる</button>
+          <span id="tpl-status" class="cloud-note-chip"></span>
+        </div>
+      </form>
+
+      <section class="cloud-calendar-stage">
+        <div class="cloud-editor-host">
+          <div class="container" style="padding: 18px;">
+            <div class="weekday-header">
+              <div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div><div>日</div>
+            </div>
+            <div id="shiftGrid" class="calendar-grid"></div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <div id="cloud-flash" class="cloud-flash info" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    window.SHIFTERSYNC_HOLIDAYS = {{ shiftersync_holidays|tojson }};
+    window.CS_TEMPLATE_EDITOR = {
+      projectId: {{ project_id|tojson }},
+      mode: {{ mode|tojson }},
+      site: {{ (site or none)|tojson }},
+      defaultYear: {{ default_year|tojson }},
+      defaultMonth: {{ default_month|tojson }}
+    };
+  </script>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="{{ url_for('static', filename='js/dstt_loading.js') }}"></script>
+  <script src="{{ url_for('static', filename='shiftersync/js/ss_common.js') }}"></script>
+  <script src="{{ url_for('static', filename='cloudshift/js/cloudshift_template_editor.js') }}"></script>
+</body>
+</html>

@@ -49,6 +49,10 @@ class ToBellInputError(ValueError):
         self.message = message
 
 
+def local_today() -> date:
+    return local_now().date()
+
+
 def parse_datetime(value: Any, field: str) -> datetime | None:
     if value in (None, ""):
         return None
@@ -74,7 +78,7 @@ def resolve_due_at(payload: dict[str, Any]) -> datetime | None:
     if not due_date and not due_time:
         return None
     if not due_date:
-        due_date = date.today().isoformat()
+        due_date = local_today().isoformat()
     if due_time:
         return parse_datetime(f"{due_date}T{due_time}", "due_time")
     return parse_datetime(due_date, "due_date")
@@ -111,7 +115,7 @@ def list_tasks(
     project_id: Any = None,
     view: str = "list",
 ) -> list[ToBellTask]:
-    today = date.today()
+    today = local_today()
     base_query = ToBellTask.query.filter(visible_task_filter(username))
     pid = _safe_int(project_id)
     if view != "calendar" and not pid:
@@ -136,14 +140,14 @@ def list_tasks(
     elif filter_name == "inbox":
         query = query.filter(ToBellTask.due_at.is_(None), ToBellTask.status.in_(["todo", "doing", "blocked", "review", "returned"]))
     elif filter_name == "assigned":
-        query = query.filter(ToBellTask.assigned_to == username, ToBellTask.status != "done")
+        query = query.filter(ToBellTask.assigned_to == username, ToBellTask.status.notin_(["done", "archived"]))
     elif filter_name == "overdue":
-        query = query.filter(ToBellTask.due_at < datetime.combine(today, time.min), ToBellTask.status != "done")
+        query = query.filter(ToBellTask.due_at < datetime.combine(today, time.min), ToBellTask.status.notin_(["done", "archived"]))
     elif filter_name == "done":
         query = query.filter(ToBellTask.status == "done")
     elif filter_name == "attention":
         query = query.filter(
-            ToBellTask.status != "done",
+            ToBellTask.status.notin_(["done", "archived"]),
             or_(
                 ToBellTask.assigned_to == username,
                 ToBellTask.reviewer_id == username,
@@ -152,7 +156,7 @@ def list_tasks(
         )
     else:
         query = query.filter(
-            ToBellTask.status != "archived",
+            ToBellTask.status.notin_(["done", "archived"]),
             or_(
                 ToBellTask.due_at <= datetime.combine(today, time.max.replace(microsecond=0)),
                 ToBellTask.assigned_to == username,
@@ -205,12 +209,19 @@ def create_task(username: str, payload: dict[str, Any]) -> ToBellTask:
     db.session.add(task)
     db.session.flush()
     _sync_tags(task, payload.get("tags"), username)
-    _create_assignment_notification(task, username)
+    if task.status == "done" and task.completed_at is None:
+        task.completed_at = datetime.utcnow()
+    if task.status != "done":
+        _create_assignment_notification(task, username)
+        if task.reviewer_id:
+            _create_assignment_notification(task, username, target=task.reviewer_id, event_type="reviewer", label="確認依頼")
     db.session.commit()
     return task
 
 
 def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBellTask:
+    old_assigned_to = task.assigned_to
+    old_reviewer_id = task.reviewer_id
     if "title" in payload:
         title = str(payload.get("title") or "").strip()
         if not title:
@@ -220,8 +231,9 @@ def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBell
         task.description = str(payload.get("description") or "").strip()
     if "status" in payload:
         task.status = _choice(payload.get("status"), VALID_STATUSES, task.status)
-        if task.status == "done" and task.completed_at is None:
-            task.completed_at = datetime.utcnow()
+        if task.status == "done":
+            if task.completed_at is None:
+                task.completed_at = datetime.utcnow()
         elif task.status != "done":
             task.completed_at = None
     if "priority" in payload:
@@ -243,6 +255,12 @@ def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBell
     if "pinned" in payload:
         task.pinned = _truthy(payload.get("pinned"))
     _sync_tags(task, payload.get("tags"), actor)
+    if "assigned_to" in payload and task.assigned_to != old_assigned_to:
+        _create_assignment_notification(task, actor, target=task.assigned_to, event_type="assigned", label="担当タスク")
+    if "reviewer_id" in payload and task.reviewer_id and task.reviewer_id != old_reviewer_id:
+        _create_assignment_notification(task, actor, target=task.reviewer_id, event_type="reviewer", label="確認依頼")
+    if task.status == "done":
+        _resolve_task_notifications(task)
     task.updated_at = datetime.utcnow()
     db.session.commit()
     return task
@@ -251,9 +269,7 @@ def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBell
 def complete_task(task: ToBellTask) -> ToBellTask:
     task.status = "done"
     task.completed_at = datetime.utcnow()
-    for notification in task.notifications:
-        notification.is_resolved = True
-        notification.resolved_at = datetime.utcnow()
+    _resolve_task_notifications(task)
     db.session.commit()
     return task
 
@@ -369,7 +385,8 @@ def mark_all_notifications_read(username: str) -> int:
 
 
 def notification_summary(username: str) -> dict[str, Any]:
-    today_end = datetime.combine(date.today(), time.max.replace(microsecond=0))
+    today = local_today()
+    today_end = datetime.combine(today, time.max.replace(microsecond=0))
     unread_count = ToBellNotification.query.filter_by(user_id=username, is_read=False).count()
     active_query = ToBellTask.query.filter(
         visible_task_filter(username),
@@ -383,7 +400,7 @@ def notification_summary(username: str) -> dict[str, Any]:
     todo_count = active_query.filter(ToBellTask.status == "todo").count()
     doing_count = active_query.filter(ToBellTask.status.in_(["doing", "blocked", "review", "returned"])).count()
     urgent_count = active_query.filter(ToBellTask.priority == "urgent").count()
-    overdue_count = active_query.filter(ToBellTask.due_at < datetime.combine(date.today(), time.min)).count()
+    overdue_count = active_query.filter(ToBellTask.due_at < datetime.combine(today, time.min)).count()
     severity = "danger" if action_count else ("warning" if unread_count else "info")
     badges = []
     if urgent_count:
@@ -875,7 +892,7 @@ def create_blank_template(username: str, payload: dict[str, Any]) -> ToBellTempl
 def create_template_from_task(task: ToBellTask, username: str, payload: dict[str, Any]) -> ToBellTemplate:
     due_in_days = None
     if task.due_at is not None:
-        due_in_days = max(0, (task.due_at.date() - date.today()).days)
+        due_in_days = max(0, (task.due_at.date() - local_today()).days)
     template_payload = {
         "title": task.title,
         "description": task.description or "",
@@ -936,7 +953,7 @@ def instantiate_template(template: ToBellTemplate, username: str, payload: dict[
         due_at = resolve_due_at(payload)
     elif tpl.get("due_in_days") is not None:
         due_at = datetime.combine(
-            date.today() + timedelta(days=int(tpl.get("due_in_days") or 0)),
+            local_today() + timedelta(days=int(tpl.get("due_in_days") or 0)),
             time.max.replace(microsecond=0),
         )
     task = ToBellTask(
@@ -1155,8 +1172,22 @@ def _attachment_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "var" / "to_bell" / "attachments"
 
 
-def _create_assignment_notification(task: ToBellTask, actor: str) -> None:
-    target = task.assigned_to or ""
+def _resolve_task_notifications(task: ToBellTask) -> None:
+    now = datetime.utcnow()
+    for notification in task.notifications:
+        notification.is_resolved = True
+        notification.resolved_at = now
+
+
+def _create_assignment_notification(
+    task: ToBellTask,
+    actor: str,
+    *,
+    target: str | None = None,
+    event_type: str = "assigned",
+    label: str = "担当タスク",
+) -> None:
+    target = target or task.assigned_to or ""
     if not target or target == actor:
         return
     if target not in _same_office_usernames(actor):
@@ -1166,8 +1197,8 @@ def _create_assignment_notification(task: ToBellTask, actor: str) -> None:
             user_id=target,
             task=task,
             source_tool="to_bell",
-            event_type="assigned",
-            title=f"担当タスク: {task.title}",
+            event_type=event_type,
+            title=f"{label}: {task.title}",
             body=task.description[:MAX_COMMENT_PREVIEW_LEN],
             href=f"/tools/to_bell?task={task.id}",
             severity="warning",

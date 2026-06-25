@@ -565,6 +565,9 @@ def create_app(test_config=None):
     app.config['SECRET_KEY'] = _resolve_secret_key(app, test_config)
     app.config['SQLALCHEMY_DATABASE_URI'] = _resolve_database_uri(test_config)
     app.config['ALLOW_SELF_REGISTRATION'] = _env_bool('DSTT_ALLOW_SELF_REGISTRATION', False)
+    app.config['LOGIN_FAILURE_WINDOW_SECONDS'] = int(os.environ.get('DSTT_LOGIN_FAILURE_WINDOW_SECONDS', '300'))
+    app.config['LOGIN_FAILURE_DELAY_THRESHOLD'] = int(os.environ.get('DSTT_LOGIN_FAILURE_DELAY_THRESHOLD', '3'))
+    app.config['LOGIN_FAILURE_DELAY_SECONDS'] = float(os.environ.get('DSTT_LOGIN_FAILURE_DELAY_SECONDS', '0.6'))
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = os.environ.get('DSTT_SESSION_COOKIE_SAMESITE', 'Lax')
     app.config['SESSION_COOKIE_SECURE'] = _env_bool(
@@ -580,6 +583,7 @@ def create_app(test_config=None):
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"  # ログインページのエンドポイント
     login_manager.init_app(app)
+    login_manager.login_message = None
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_for=1)
     
     # ユーザーログインの管理
