@@ -100,8 +100,64 @@ def _order_points(pts: np.ndarray) -> np.ndarray:
     return ordered
 
 
+def _largest_card_contour(work: np.ndarray):
+    """カード外形とみられる最大の輪郭を返す。複数の前処理を併用して頑健にする。
+
+    実写真では背景・影・低コントラストで Canny だけだと外形を取りこぼすことが
+    あるため、Canny に加えて Otsu 二値化（明るいカードと背景の境界）も試し、
+    妥当な面積の最大輪郭を選ぶ。
+    """
+    gray = cv2.cvtColor(work, cv2.COLOR_BGR2GRAY)
+    gray = cv2.bilateralFilter(gray, 9, 75, 75)
+    work_area = float(work.shape[0] * work.shape[1])
+
+    contours = []
+    # 方法A: 中央値ベースの自動しきい値 Canny（エッジで外形を捉える）
+    median = float(np.median(gray))
+    lower = int(max(0, 0.66 * median))
+    upper = int(min(255, 1.33 * median))
+    edged = cv2.Canny(gray, lower, upper)
+    edged = cv2.dilate(edged, np.ones((3, 3), np.uint8), iterations=1)
+    edged = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    ca, _ = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    contours.extend(ca)
+    # 方法B: Otsu 二値化（明暗どちらの背景でも拾えるよう正負両方）
+    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    for binimg in (th, cv2.bitwise_not(th)):
+        cb, _ = cv2.findContours(binimg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours.extend(cb)
+
+    best = None
+    best_area = 0.0
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        # 小さすぎ（誤検出）・大きすぎ（画像全体の枠）は除外。
+        if area < MIN_QUAD_AREA_RATIO * work_area or area > 0.985 * work_area:
+            continue
+        if area > best_area:
+            best = cnt
+            best_area = area
+    return best
+
+
+def _quad_from_contour(cnt: np.ndarray) -> np.ndarray:
+    """輪郭から4隅を得る。まず4角形近似、ダメなら最小外接の回転矩形で代用する。
+
+    回転矩形（``minAreaRect``）を使うことで、斜めに撮られたカードでも淵に沿った
+    傾きを検出でき、射影変換で垂直・平行へ（自動回転して）正面化できる。
+    """
+    peri = cv2.arcLength(cnt, True)
+    approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+    if len(approx) == 4 and cv2.isContourConvex(approx):
+        return approx.reshape(4, 2).astype("float32")
+    # 4角形に近似できない（背景が複雑・淵が一部欠ける等）ときは、淵に最もよく
+    # 沿う回転矩形の4隅を使う。これによりカードの傾きを検出して水平化できる。
+    box = cv2.boxPoints(cv2.minAreaRect(cnt))
+    return box.astype("float32")
+
+
 def _auto_detect_quad(bgr: np.ndarray) -> Optional[np.ndarray]:
-    """画像中の最大の四角形（カード外形）を検出して4点を返す。
+    """画像中のカード外形を検出して4隅を返す。
 
     見つからなければ ``None``。座標は入力 ``bgr`` のピクセル座標系で返す。
     """
@@ -109,36 +165,13 @@ def _auto_detect_quad(bgr: np.ndarray) -> Optional[np.ndarray]:
     scale = min(1.0, DETECT_MAX_EDGE / float(max(h, w)))
     work = cv2.resize(bgr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA) if scale < 1.0 else bgr
 
-    gray = cv2.cvtColor(work, cv2.COLOR_BGR2GRAY)
-    gray = cv2.bilateralFilter(gray, 9, 75, 75)
-
-    # 中央値ベースの自動しきい値で Canny をかけ、エッジを膨張させて切れを繋ぐ。
-    median = float(np.median(gray))
-    lower = int(max(0, 0.66 * median))
-    upper = int(min(255, 1.33 * median))
-    edged = cv2.Canny(gray, lower, upper)
-    edged = cv2.dilate(edged, np.ones((3, 3), np.uint8), iterations=1)
-    edged = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-
-    contours, _ = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    work_area = float(work.shape[0] * work.shape[1])
-    best: Optional[np.ndarray] = None
-    best_area = 0.0
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < MIN_QUAD_AREA_RATIO * work_area:
-            continue
-        peri = cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
-        if len(approx) == 4 and cv2.isContourConvex(approx) and area > best_area:
-            best = approx.reshape(4, 2).astype("float32")
-            best_area = area
-
-    if best is None:
+    cnt = _largest_card_contour(work)
+    if cnt is None:
         return None
+    quad = _quad_from_contour(cnt)
     if scale < 1.0:
-        best = best / scale
-    return _order_points(best)
+        quad = quad / scale
+    return _order_points(quad)
 
 
 # --------------------------------------------------------------------------- #
@@ -276,13 +309,19 @@ def process_with_points(data: bytes, points: Sequence[dict]) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 # PDF 生成（表裏をまとめて1枚のPDFへ）
 # --------------------------------------------------------------------------- #
-def build_pdf(image_paths: Sequence[str], output_path: str, *, layout: str = "stacked_a4") -> str:
-    """処理済み画像（表・裏…）を1つのPDFへ束ねて保存する。
+def build_pdf(
+    image_paths: Sequence[str],
+    output_path: str,
+    *,
+    card_size_mm: Tuple[float, float] = (85.6, 54.0),
+) -> str:
+    """処理済み画像（表・裏…）を実寸サイズで A4 1ページに配置して保存する。
 
-    ``layout="stacked_a4"`` は A4縦1ページに上から順（表→裏）で配置する。提出用の
-    コピーに近い見た目になる。画像が1枚ならページ中央に配置する。
+    免許証の実サイズ（既定 ID-1: 85.6mm×54mm）でA4へ、上から順（表→裏）に
+    横中央寄せで積む。印刷すると実物と同じ大きさで出力される。
     """
     from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
     from reportlab.pdfgen import canvas
 
     paths = [p for p in image_paths if p]
@@ -290,26 +329,18 @@ def build_pdf(image_paths: Sequence[str], output_path: str, *, layout: str = "st
         raise ScanError("PDF化する画像がありません。")
 
     page_w, page_h = A4
-    margin = 36.0          # 0.5 inch
-    gap = 24.0             # 画像間の余白
+    card_w = float(card_size_mm[0]) * mm
+    card_h = float(card_size_mm[1]) * mm
+    gap = 12 * mm           # 表裏の間隔
+    top_margin = 25 * mm    # 上端からの余白
+
     c = canvas.Canvas(output_path, pagesize=A4)
-
-    usable_w = page_w - 2 * margin
-    count = len(paths)
-    if count == 1:
-        boxes = [(margin, margin, usable_w, page_h - 2 * margin)]
-    else:
-        # 上から count 個の行に等分割（表→裏…の順）。
-        total_gap = gap * (count - 1)
-        row_h = (page_h - 2 * margin - total_gap) / count
-        boxes = []
-        for i in range(count):
-            box_y = page_h - margin - (i + 1) * row_h - i * gap
-            boxes.append((margin, box_y, usable_w, row_h))
-
-    for path, (bx, by, bw, bh) in zip(paths, boxes):
+    x = (page_w - card_w) / 2.0          # 横中央寄せ
+    y_top = page_h - top_margin          # 上端から下へ積む
+    for i, path in enumerate(paths):
+        y = y_top - card_h - i * (card_h + gap)
         c.drawImage(
-            path, bx, by, width=bw, height=bh,
+            path, x, y, width=card_w, height=card_h,
             preserveAspectRatio=True, anchor="c", mask="auto",
         )
     c.showPage()

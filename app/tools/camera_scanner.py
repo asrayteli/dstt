@@ -44,7 +44,8 @@ PRESETS: dict[str, dict] = {
             {"key": "back", "label": "裏面", "hint": "裏面（記載事項・備考）"},
         ],
         "require_all_sides": True,
-        "layout": "stacked_a4",
+        # PDFへ配置する実寸（mm）。ISO/IEC 7810 ID-1（運転免許証の実サイズ）。
+        "card_mm": (85.6, 54.0),
     },
 }
 DEFAULT_PRESET = "jp_driver_license"
@@ -402,7 +403,7 @@ def api_finalize(scan_id):
 
     output_path = os.path.join(_scan_dir(scan_id, create=True), "output.pdf")
     try:
-        scanner.build_pdf(paths, output_path, layout=preset.get("layout", "stacked_a4"))
+        scanner.build_pdf(paths, output_path, card_size_mm=tuple(preset.get("card_mm", (85.6, 54.0))))
     except scanner.ScanError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:  # noqa: BLE001
