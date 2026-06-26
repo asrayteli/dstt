@@ -1185,6 +1185,56 @@ class DriverDocument(db.Model):
         }
 
 
+class CameraScan(db.Model):
+    """カメラスキャナーで作成した1件のスキャン（表裏など複数面→1つのPDF）。
+
+    スマートフォンで撮影した写真をサーバー側で正面化・切り取りし、プリセット
+    （初版は日本の運転免許証）に従って表裏をまとめた1つのPDFを生成する。
+    作成者（ユーザー）単位でアクセスを絞り、一覧やPDFはPCからも閲覧できる。
+    画像・PDFの実体は webルート外（``var/camera_scanner/<id>/``）に保存し、
+    ここにはファイル名と状態のみを持つ。
+    """
+    __tablename__ = 'camera_scans'
+
+    PRESETS = ('jp_driver_license',)
+    STATUS_DRAFT = 'draft'
+    STATUS_COMPLETED = 'completed'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    created_by = db.Column(db.String(80), index=True)   # 所有者（ユーザーID）
+    preset_key = db.Column(db.String(40), nullable=False, default='jp_driver_license')
+    title = db.Column(db.String(120))                   # 任意の名前（氏名など）
+    status = db.Column(db.String(20), nullable=False, default=STATUS_DRAFT, index=True)
+    # 各面の保存ファイル名（var/camera_scanner/<id>/ 配下の相対名）。
+    front_original = db.Column(db.String(255))
+    front_processed = db.Column(db.String(255))
+    front_detected = db.Column(db.Boolean, default=False)
+    back_original = db.Column(db.String(255))
+    back_processed = db.Column(db.String(255))
+    back_detected = db.Column(db.Boolean, default=False)
+    output_pdf = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, nullable=False, default=jst_now)
+    updated_at = db.Column(db.DateTime, nullable=False, default=jst_now, onupdate=jst_now)
+    completed_at = db.Column(db.DateTime)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'created_by': self.created_by or '',
+            'preset_key': self.preset_key,
+            'title': self.title or '',
+            'status': self.status,
+            'has_front': bool(self.front_processed),
+            'has_back': bool(self.back_processed),
+            'front_detected': bool(self.front_detected),
+            'back_detected': bool(self.back_detected),
+            'has_pdf': bool(self.output_pdf),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+
 class CloudShiftProject(db.Model):
     __tablename__ = 'cloudshift_projects'
 

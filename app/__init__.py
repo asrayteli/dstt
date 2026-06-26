@@ -783,6 +783,9 @@ def create_app(test_config=None):
     from .tools.power_imager import power_imager_bp
     app.register_blueprint(power_imager_bp)
 
+    from .tools.camera_scanner import camera_scanner_bp
+    app.register_blueprint(camera_scanner_bp)
+
     # アクセス権管理（機密ツールに before_request を紐付け）
     from flask import request as _req, abort
     from .access_control import enforce_tool_access
@@ -842,6 +845,7 @@ def create_app(test_config=None):
         "bus_pricing": "bus_pricing",
         "health_check": "health_check",
         "car_inspe": "car_inspe",
+        "camera_scanner": "camera_scanner",
     }
     _EXEMPT_PATH_PREFIXES = (
         "/tools/shiftersync/download/",

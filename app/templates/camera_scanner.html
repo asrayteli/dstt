@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="cs-app" data-is-mobile="{{ '1' if is_mobile else '0' }}">
+  <section class="dstt-hero" style="background: linear-gradient(135deg, #0f766e 0%, #0891b2 50%, #22d3ee 100%);">
+    <div class="dstt-hero-grid">
+      <div class="dstt-hero-copy">
+        <div class="dstt-hero-pill">CAMERA SCANNER</div>
+        <div>
+          <h1 class="dstt-hero-title">📷 カメラスキャナー</h1>
+          <p class="dstt-hero-subtitle">スマートフォンで撮影した写真を、サーバー側で角度補正・切り取りしてスキャナーで読み取ったように整え、表裏をまとめた1つのPDFとして保存します。撮影はスマートフォンから、スキャン結果の閲覧・PDFダウンロードはPCからも行えます。</p>
+        </div>
+      </div>
+      <div class="dstt-hero-meta">
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">PRESET</div>
+          <div class="dstt-hero-card-value">運転免許証（表・裏）</div>
+        </div>
+        <div class="dstt-hero-card">
+          <div class="dstt-hero-card-label">SCANS</div>
+          <div id="cs-stat-count" class="dstt-hero-card-value">—</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="cs-toast" class="cs-toast" hidden></div>
+
+  {% if is_mobile %}
+  <section class="cs-card" id="cs-capture">
+    <div id="cs-start">
+      <h2 class="cs-section-title">新しいスキャン</h2>
+      <div class="cs-field">
+        <label for="cs-preset">プリセット</label>
+        <select id="cs-preset" class="cs-input">
+          {% for p in presets %}
+          <option value="{{ p.key }}" {% if p.key == default_preset %}selected{% endif %}>{{ p.label }}</option>
+          {% endfor %}
+        </select>
+        <p id="cs-preset-desc" class="cs-hint"></p>
+      </div>
+      <div class="cs-field">
+        <label for="cs-title">名前（任意）</label>
+        <input id="cs-title" class="cs-input" type="text" maxlength="120" placeholder="例: 山田太郎" />
+      </div>
+      <button id="cs-start-btn" class="cs-btn cs-btn-primary cs-btn-full">スキャンを開始</button>
+    </div>
+
+    <div id="cs-active" hidden>
+      <div class="cs-active-head">
+        <div>
+          <h2 class="cs-section-title" id="cs-active-title">スキャン中</h2>
+          <p class="cs-hint" id="cs-active-sub">各面を撮影し、必要なら四隅・向きを調整してください。</p>
+        </div>
+        <button id="cs-active-close" class="cs-btn cs-btn-muted">一覧へ</button>
+      </div>
+      <div id="cs-sides" class="cs-sides"></div>
+      <div class="cs-finalize-row">
+        <button id="cs-finalize-btn" class="cs-btn cs-btn-success cs-btn-full" disabled>PDFを作成して保存</button>
+      </div>
+    </div>
+  </section>
+  {% else %}
+  <section class="cs-card cs-pc-note">
+    <p>📱 撮影はスマートフォン（iPhone等）から行います。スマートフォンで DSTT にログインし、このカメラスキャナーを開いてください。</p>
+    <p class="cs-hint">このPC画面では、過去のスキャン結果の確認とPDFのダウンロード・削除ができます。</p>
+  </section>
+  {% endif %}
+
+  <section class="cs-card">
+    <div class="cs-list-head">
+      <h2 class="cs-section-title">スキャン結果</h2>
+      <button id="cs-refresh" class="cs-btn cs-btn-muted">更新</button>
+    </div>
+    <div id="cs-list" class="cs-list"><p class="cs-hint">読み込み中…</p></div>
+  </section>
+</div>
+
+<!-- 四隅の手動調整オーバーレイ -->
+<div id="cs-adjust" class="cs-adjust" hidden>
+  <div class="cs-adjust-inner">
+    <div class="cs-adjust-head">
+      <span>四隅をドラッグして、書類の角に合わせてください</span>
+      <button id="cs-adjust-cancel" class="cs-btn cs-btn-muted">キャンセル</button>
+    </div>
+    <div id="cs-adjust-stage" class="cs-adjust-stage">
+      <img id="cs-adjust-img" class="cs-adjust-img" alt="調整対象" />
+      <svg id="cs-adjust-svg" class="cs-adjust-svg" xmlns="http://www.w3.org/2000/svg">
+        <polygon id="cs-adjust-poly" points="" />
+        <circle class="cs-handle" data-i="0" r="16" />
+        <circle class="cs-handle" data-i="1" r="16" />
+        <circle class="cs-handle" data-i="2" r="16" />
+        <circle class="cs-handle" data-i="3" r="16" />
+      </svg>
+    </div>
+    <div class="cs-adjust-foot">
+      <button id="cs-adjust-apply" class="cs-btn cs-btn-primary cs-btn-full">この範囲で切り取る</button>
+    </div>
+  </div>
+</div>
+
+<link rel="stylesheet" href="{{ url_for('static', filename='camera_scanner/css/camera_scanner.css') }}">
+<script>
+  window.CS_CONFIG = {
+    presets: {{ presets|tojson }},
+    defaultPreset: {{ default_preset|tojson }},
+    isMobile: {{ 'true' if is_mobile else 'false' }}
+  };
+</script>
+<script src="{{ url_for('static', filename='camera_scanner/js/camera_scanner.js') }}?v=20260626a" defer></script>
+{% endblock %}

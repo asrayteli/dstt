@@ -84,6 +84,13 @@ NAV_ITEMS = (
         "description": "営業所ごとに運転士の車検証・自賠責・任意保険・免許証の期限を管理し、期限前にメール通知",
     },
     {
+        "key": "camera_scanner",
+        "href": "/tools/camera_scanner",
+        "icon": "📷",
+        "label": "カメラスキャナー",
+        "description": "スマホで免許証などを撮影し、角度補正・切り取りでスキャン風に整えて表裏1枚のPDFに",
+    },
+    {
         "key": "shiftersync",
         "href": "/tools/shiftersync",
         "icon": "👥",
