@@ -34,6 +34,22 @@ VALID_PROJECT_STATUSES = {"active", "done", "archived"}
 VALID_SCOPES = {"private", "office", "members"}
 PROJECT_STATUS_ORDER = {"active": 0, "done": 1, "archived": 2}
 
+# 他ツール（CloudShift / 健診PLUS / Googleカレンダー等）から自動生成されたタスクは
+# source_tool が設定される。これらは通常のフィルタには出さず、専用の「連携」フィルタ
+# にのみ表示し、追加から一定期間で自動削除する。
+INTEGRATION_TASK_RETENTION_DAYS = 30
+
+
+def _integration_task_clause():
+    """連携（自動生成）タスクを表す条件。source_tool が設定されているもの。"""
+    return and_(ToBellTask.source_tool.isnot(None), ToBellTask.source_tool != "")
+
+
+def _manual_task_clause():
+    """手動作成タスクを表す条件（連携タスクの否定）。"""
+    return or_(ToBellTask.source_tool.is_(None), ToBellTask.source_tool == "")
+
+
 ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
 
 # 入力テキストの最大保存長（DB カラム長に合わせた切り詰め用）
@@ -118,9 +134,16 @@ def list_tasks(
     today = local_today()
     base_query = ToBellTask.query.filter(visible_task_filter(username))
     pid = _safe_int(project_id)
-    if view != "calendar" and not pid:
-        hidden_subq = db.session.query(ToBellProject.id).filter(ToBellProject.calendar_only.is_(True))
-        base_query = base_query.filter(or_(ToBellTask.project_id.is_(None), ToBellTask.project_id.notin_(hidden_subq)))
+    is_integration_filter = filter_name == "integrations"
+    if is_integration_filter:
+        # 専用フィルタ: 連携（自動生成）タスクのみを表示する。
+        base_query = base_query.filter(_integration_task_clause())
+    else:
+        # 通常フィルタ/ビューでは連携タスクを除外する（専用フィルタにのみ出す）。
+        base_query = base_query.filter(_manual_task_clause())
+        if view != "calendar" and not pid:
+            hidden_subq = db.session.query(ToBellProject.id).filter(ToBellProject.calendar_only.is_(True))
+            base_query = base_query.filter(or_(ToBellTask.project_id.is_(None), ToBellTask.project_id.notin_(hidden_subq)))
     if search:
         like = f"%{search.strip()}%"
         base_query = base_query.filter(or_(ToBellTask.title.ilike(like), ToBellTask.description.ilike(like)))
@@ -134,7 +157,10 @@ def list_tasks(
     ).order_by(ToBellTask.updated_at.desc()).all()
 
     query = base_query.filter(ToBellTask.pinned.is_(False))
-    if filter_name == "board":
+    if filter_name == "integrations":
+        # 連携タスク専用フィルタ: アーカイブ以外の自動生成タスクを期限順にすべて返す。
+        query = query.filter(ToBellTask.status != "archived")
+    elif filter_name == "board":
         # カンバン / カレンダー用: アーカイブ以外の参加タスクをすべて返す。
         query = query.filter(ToBellTask.status != "archived")
     elif filter_name == "inbox":
@@ -293,6 +319,54 @@ def purge_task(task: ToBellTask) -> None:
     db.session.commit()
 
 
+def _match_tasks_by_name(username: str, name: str, match: str):
+    """名前でタスクを検索する。操作可能（可視）なタスクのみを対象にする。"""
+    keyword = (name or "").strip()
+    if not keyword:
+        raise ToBellInputError("name", "削除するタスク名を入力してください。")
+    query = ToBellTask.query.filter(visible_task_filter(username))
+    if match == "contains":
+        like = f"%{keyword}%"
+        query = query.filter(ToBellTask.title.ilike(like))
+    else:  # exact（既定）— 前後の空白差を吸収するため大文字小文字無視の完全一致
+        query = query.filter(func.lower(ToBellTask.title) == keyword.lower())
+    return query.order_by(ToBellTask.updated_at.desc()).all()
+
+
+def preview_tasks_by_name(username: str, name: str, match: str = "exact") -> dict[str, Any]:
+    """一括削除の事前確認。一致件数とサンプルのタイトルを返す（削除はしない）。"""
+    tasks = _match_tasks_by_name(username, name, match)
+    samples = [task.title for task in tasks[:10]]
+    return {"count": len(tasks), "samples": samples}
+
+
+def bulk_delete_tasks_by_name(username: str, name: str, match: str = "exact") -> int:
+    """名前が一致する、自分が操作可能なタスクを一括で完全削除する。
+
+    ToBell→Googleカレンダーへ送信済みのタスクは、単体削除と同様にカレンダー側の
+    イベントも削除する（gcal_event_id を持つもののみ）。連携で取り込んだだけの
+    タスクはイベントを持たないため、カレンダーには影響しない。
+    """
+    tasks = _match_tasks_by_name(username, name, match)
+    if not tasks:
+        return 0
+    try:
+        from app.services import to_bell_calendar
+    except Exception:  # noqa: BLE001 - カレンダー連携が無くても削除は続行する
+        to_bell_calendar = None
+    deleted = 0
+    for task in tasks:
+        if to_bell_calendar is not None:
+            try:
+                to_bell_calendar.on_task_deleted(task)
+            except Exception:  # noqa: BLE001 - 連携の失敗で本体削除を止めない
+                pass
+        db.session.delete(task)
+        deleted += 1
+    db.session.commit()
+    return deleted
+
+
 def add_subtask(task: ToBellTask, payload: dict[str, Any]) -> ToBellSubtask:
     title = str(payload.get("title") or "").strip()
     if not title:
@@ -388,9 +462,12 @@ def notification_summary(username: str) -> dict[str, Any]:
     today = local_today()
     today_end = datetime.combine(today, time.max.replace(microsecond=0))
     unread_count = ToBellNotification.query.filter_by(user_id=username, is_read=False).count()
+    # 連携（自動生成）タスクは通常フィルタに出さないため、サマリーの件数からも除外する
+    # （バッジ件数と画面に見えるタスクを一致させる）。
     active_query = ToBellTask.query.filter(
         visible_task_filter(username),
         ToBellTask.status.notin_(["done", "archived"]),
+        _manual_task_clause(),
     )
     due_action_count = active_query.filter(
         or_(ToBellTask.assigned_to == username, ToBellTask.reviewer_id == username, ToBellTask.due_at <= today_end),
@@ -454,9 +531,16 @@ def task_notification_targets(task: ToBellTask) -> set[str]:
     return {target for target in targets if target in creator_allowed}
 
 
-def cleanup_expired_records(*, now: datetime | None = None, retention_days: int = 60) -> dict[str, int]:
+def cleanup_expired_records(
+    *,
+    now: datetime | None = None,
+    retention_days: int = 60,
+    integration_retention_days: int = INTEGRATION_TASK_RETENTION_DAYS,
+) -> dict[str, int]:
     now = now or datetime.utcnow()
     cutoff = now - timedelta(days=retention_days)
+    integration_cutoff = now - timedelta(days=integration_retention_days)
+
     task_query = ToBellTask.query.filter(
         or_(
             and_(ToBellTask.status == "done", ToBellTask.completed_at.isnot(None), ToBellTask.completed_at <= cutoff),
@@ -464,9 +548,24 @@ def cleanup_expired_records(*, now: datetime | None = None, retention_days: int 
             and_(ToBellTask.status.notin_(["done", "archived"]), ToBellTask.due_at.isnot(None), ToBellTask.due_at <= cutoff),
         )
     )
-    tasks = task_query.all()
-    task_ids = [task.id for task in tasks]
-    for task in tasks:
+    # 連携（CloudShift / 健診PLUS / Googleカレンダー）から自動追加されたタスクは、
+    # 追加(created_at)から一定期間（既定1か月）を過ぎたら無条件で削除する。
+    # ここでの削除は ToBell の DB 行を消すだけで、Googleカレンダー側の予定には触れない
+    # （取り込みタスクは gcal_event_id を持たず、ToBell→カレンダー送信もしていないため）。
+    integration_query = ToBellTask.query.filter(
+        _integration_task_clause(),
+        ToBellTask.created_at.isnot(None),
+        ToBellTask.created_at <= integration_cutoff,
+    )
+
+    tasks: dict[int, ToBellTask] = {task.id: task for task in task_query.all()}
+    integration_count = 0
+    for task in integration_query.all():
+        if task.id not in tasks:
+            integration_count += 1
+        tasks[task.id] = task
+    task_ids = list(tasks.keys())
+    for task in tasks.values():
         db.session.delete(task)
 
     notification_query = ToBellNotification.query.filter(ToBellNotification.created_at <= cutoff)
@@ -482,7 +581,11 @@ def cleanup_expired_records(*, now: datetime | None = None, retention_days: int 
         db.session.delete(notification)
 
     db.session.commit()
-    return {"tasks": len(tasks), "notifications": len(notifications)}
+    return {
+        "tasks": len(tasks),
+        "integration_tasks": integration_count,
+        "notifications": len(notifications),
+    }
 
 
 def get_share_token(username: str) -> ToBellShareToken | None:
@@ -617,6 +720,7 @@ def create_project(username: str, payload: dict[str, Any]) -> ToBellProject:
         visibility_scope=_choice(payload.get("visibility_scope"), VALID_SCOPES, "office"),
         office_id=_user_office_id(username),
         calendar_only=_truthy(payload.get("calendar_only")),
+        due_at=resolve_due_at(payload),
         pinned=_truthy(payload.get("pinned")),
         sort_order=_safe_int(payload.get("sort_order")) or 0,
     )
@@ -646,6 +750,8 @@ def update_project(project: ToBellProject, username: str, payload: dict[str, Any
         project.visibility_scope = _choice(payload.get("visibility_scope"), VALID_SCOPES, project.visibility_scope)
     if "calendar_only" in payload:
         project.calendar_only = _truthy(payload.get("calendar_only"))
+    if "due_at" in payload or "due_date" in payload or "due_time" in payload:
+        project.due_at = resolve_due_at(payload)
     if "pinned" in payload:
         project.pinned = _truthy(payload.get("pinned"))
     if "sort_order" in payload:

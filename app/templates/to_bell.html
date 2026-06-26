@@ -52,6 +52,7 @@
         <button class="tobell-filter" data-filter="attention">要対応</button>
         <button class="tobell-filter" data-filter="overdue">期限切れ</button>
         <button class="tobell-filter" data-filter="done">完了</button>
+        <button class="tobell-filter tobell-filter-integration" data-filter="integrations" title="CloudShift・健診PLUS・Googleカレンダーから自動追加されたタスク">🔗 連携</button>
       </nav>
       <div class="tobell-search">
         <input id="tb-search" type="search" placeholder="検索">
@@ -228,6 +229,63 @@
   </div>
 </div>
 
+<div id="tb-newtask-modal" class="tobell-modal" hidden>
+  <div class="tobell-modal-backdrop" data-newtask-close></div>
+  <div class="tobell-modal-card" role="dialog" aria-modal="true" aria-labelledby="tb-newtask-title">
+    <div class="tobell-modal-head">
+      <h2 id="tb-newtask-title">新規タスク</h2>
+      <button type="button" class="tobell-btn" data-newtask-close aria-label="閉じる">×</button>
+    </div>
+    <form id="tb-newtask-form" class="tobell-modal-form">
+      <label>タスク名<input name="title" required autocomplete="off"></label>
+      <label>メモ<textarea name="description" rows="3"></textarea></label>
+      <div class="tobell-detail-grid">
+        <label>通知日<input name="due_date" type="date"></label>
+        <label>通知時刻<input name="due_time" type="time"></label>
+        <label>状態
+          <select name="status">
+            <option value="todo">未着手</option>
+            <option value="doing">進行中</option>
+            <option value="blocked">保留</option>
+            <option value="review">確認待ち</option>
+            <option value="returned">差戻し</option>
+            <option value="done">完了</option>
+          </select>
+        </label>
+        <label>優先度
+          <select name="priority">
+            <option value="normal">通常</option>
+            <option value="low">低</option>
+            <option value="high">高</option>
+            <option value="urgent">緊急</option>
+          </select>
+        </label>
+        <label>担当
+          <select name="assigned_to">
+            {% for user in users %}
+            <option value="{{ user.username }}" {% if user.username == current_user_id %}selected{% endif %}>{{ user.name or user.username }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>プロジェクト
+          <select name="project_id" data-project-select>
+            <option value="">なし</option>
+          </select>
+        </label>
+      </div>
+      <label>タグ<input name="tags" placeholder="カンマ区切り"></label>
+      <label class="tobell-check-line">
+        <input type="checkbox" name="pinned">
+        <span>📌 先頭に常に表示する（ピン留め）</span>
+      </label>
+      <div class="tobell-share-actions">
+        <button type="submit" class="tobell-btn tobell-btn-primary">追加</button>
+        <button type="button" class="tobell-btn" data-newtask-close>キャンセル</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="tb-project-modal" class="tobell-modal" hidden>
   <div class="tobell-modal-backdrop" data-project-close></div>
   <div class="tobell-modal-card" role="dialog" aria-modal="true" aria-labelledby="tb-project-title">
@@ -255,7 +313,9 @@
             <option value="members">指定メンバーのみ</option>
           </select>
         </label>
+        <label>日付（任意）<input name="due_date" type="date" aria-label="プロジェクトの日付"></label>
       </div>
+      <p class="tobell-share-note tobell-project-date-note">日付を指定すると、このプロジェクトをタスク一覧・カレンダーに1つのタスクとして表示します（クリックでプロジェクトのタスク一覧へ）。未指定なら今まで通りサイドバーのみに表示します。</p>
       <label class="tobell-check-line">
         <input type="checkbox" name="pinned">
         <span>サイドバーの先頭にピン留めする</span>
@@ -378,6 +438,7 @@
       {% if not share_session %}
       <button type="button" class="tobell-settings-tab" data-settings-tab="integrations" role="tab" aria-selected="false">DSTT連携</button>
       <button type="button" class="tobell-settings-tab" data-settings-tab="google" role="tab" aria-selected="false">Googleカレンダー</button>
+      <button type="button" class="tobell-settings-tab" data-settings-tab="maintenance" role="tab" aria-selected="false">一括削除</button>
       {% endif %}
     </nav>
     <section class="tobell-settings-panel" data-settings-panel="notify" role="tabpanel">
@@ -411,9 +472,31 @@
         <div class="tobell-empty">読み込み中…</div>
       </div>
     </section>
+    <section class="tobell-settings-panel" data-settings-panel="maintenance" role="tabpanel" style="display:none">
+      <p class="tobell-share-note">
+        タスクを「名前」でまとめて削除します。削除は元に戻せません。あなたが操作できる（作成・担当・確認者の）タスクだけが対象です。
+        実行前に必ず「件数を確認」で対象を確認してください。
+      </p>
+      <form id="tb-bulk-delete-form" class="tobell-modal-form">
+        <label>タスク名<input name="name" id="tb-bulk-delete-name" autocomplete="off" placeholder="削除したいタスク名"></label>
+        <label>一致条件
+          <select name="match" id="tb-bulk-delete-match">
+            <option value="exact">完全一致（既定）</option>
+            <option value="contains">部分一致（名前を含む）</option>
+          </select>
+        </label>
+        <div class="tobell-share-actions">
+          <button type="button" class="tobell-btn" id="tb-bulk-delete-preview">件数を確認</button>
+          <button type="button" class="tobell-btn tobell-danger" id="tb-bulk-delete-run" disabled>削除する</button>
+        </div>
+      </form>
+      <div id="tb-bulk-delete-result" class="tobell-bulk-delete-result"></div>
+    </section>
     {% endif %}
   </div>
 </div>
+
+<div id="tb-context-menu" class="tobell-context-menu" hidden role="menu" aria-label="カレンダー操作"></div>
 
 {% if not share_session %}
 <div id="tb-links-modal" class="tobell-modal" hidden>
