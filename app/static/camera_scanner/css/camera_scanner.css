@@ -101,6 +101,8 @@
   position: fixed; inset: 0; z-index: 1100;
   background: rgba(15, 23, 42, 0.92); display: flex; align-items: center; justify-content: center; padding: 12px;
 }
+/* hidden 属性のときは確実に隠す（display 指定が [hidden] のUA既定を上書きしてしまうため）。 */
+.cs-adjust[hidden] { display: none; }
 .cs-adjust-inner { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 0.75rem; }
 .cs-adjust-head { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; color: #e2e8f0; font-size: 0.85rem; }
 .cs-adjust-stage { position: relative; width: 100%; display: flex; justify-content: center; touch-action: none; }
