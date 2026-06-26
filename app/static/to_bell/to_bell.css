@@ -2070,3 +2070,117 @@ body.tobell-pwa-mode .tobell-viewer-stage embed {
 
 .tobell-link{color:#2563eb;text-decoration:underline;text-underline-offset:2px;word-break:break-all;overflow-wrap:anywhere;}
 .tobell-link:hover{color:#1d4ed8;}
+
+/* ===== 改善: 連携フィルタ / 日付付きプロジェクト / カレンダー操作メニュー / 一括削除 ===== */
+
+/* 連携（自動追加）専用フィルタ */
+.tobell-filter-integration {
+  border-top: 1px dashed #cbd5e1;
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+}
+.tobell-filter-integration.is-active {
+  background: #ecfeff;
+  color: #0e7490;
+  border-color: #67e8f9;
+}
+
+/* タスク一覧に「タスクのように」表示する日付付きプロジェクト */
+.tobell-task-as-project {
+  background: linear-gradient(180deg, #fffdf5, #fefce8);
+  border-color: #fde68a;
+}
+.tobell-task-as-project:hover {
+  border-color: #fbbf24;
+}
+.tobell-project-card-icon {
+  font-size: 1.1rem;
+  align-self: flex-start;
+  margin-top: 0.15rem;
+}
+
+/* カレンダー: セル全体を操作対象にする */
+.tobell-cal-cell[data-cell-date] {
+  cursor: context-menu;
+}
+.tobell-cal-daynum {
+  display: inline-block;
+  font-weight: 700;
+  color: #334155;
+  padding: 0.1rem 0.3rem;
+}
+.tobell-cal-project {
+  background: #fef9c3;
+  color: #854d0e;
+}
+.tobell-cal-project.danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.tobell-cal-hint {
+  font-size: 0.74rem;
+  color: #94a3b8;
+  margin-left: auto;
+}
+
+/* 右クリック（長押し）操作メニュー */
+.tobell-context-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 180px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.tobell-context-menu[hidden] {
+  display: none;
+}
+.tobell-context-item {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-radius: 7px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #1f2937;
+  cursor: pointer;
+}
+.tobell-context-item:hover {
+  background: #f1f5f9;
+}
+.tobell-context-item.tobell-danger {
+  color: #b91c1c;
+}
+.tobell-context-item.tobell-danger:hover {
+  background: #fef2f2;
+}
+
+/* 設定: 一括削除 */
+.tobell-bulk-delete-result {
+  margin-top: 0.6rem;
+}
+.tobell-bulk-delete-count {
+  font-size: 0.9rem;
+  color: #b91c1c;
+  margin: 0 0 0.4rem;
+}
+.tobell-bulk-delete-samples {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.84rem;
+  color: #334155;
+  max-height: 180px;
+  overflow: auto;
+}
+.tobell-bulk-delete-samples li {
+  margin: 0.15rem 0;
+}
+.tobell-project-date-note {
+  margin-top: -0.2rem;
+}

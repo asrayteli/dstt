@@ -1646,6 +1646,8 @@ class ToBellProject(db.Model):
     visibility_scope = db.Column(db.String(32), nullable=False, default='office')
     office_id = db.Column(db.Integer, nullable=True, index=True)
     calendar_only = db.Column(db.Boolean, nullable=False, default=False)
+    # 任意の「日付」。指定するとプロジェクトをタスクのように一覧/カレンダーへ表示する。
+    due_at = db.Column(db.DateTime, nullable=True, index=True)
     pinned = db.Column(db.Boolean, nullable=False, default=False, index=True)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -1665,6 +1667,7 @@ class ToBellProject(db.Model):
             'owner_id': self.owner_id,
             'visibility_scope': self.visibility_scope,
             'calendar_only': bool(self.calendar_only),
+            'due_at': self.due_at.isoformat() if self.due_at else None,
             'pinned': bool(self.pinned),
             'sort_order': int(self.sort_order or 0),
             'members': [m.username for m in (self.members or [])],

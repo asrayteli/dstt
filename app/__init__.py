@@ -290,6 +290,8 @@ def _ensure_access_control_schema(app):
                 alters.append("ALTER TABLE to_bell_projects ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT 0")
             if "sort_order" not in project_cols:
                 alters.append("ALTER TABLE to_bell_projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+            if "due_at" not in project_cols:
+                alters.append("ALTER TABLE to_bell_projects ADD COLUMN due_at DATETIME")
 
         if "to_bell_tasks" in inspector.get_table_names():
             task_cols = {c["name"] for c in inspector.get_columns("to_bell_tasks")}

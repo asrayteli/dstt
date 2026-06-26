@@ -23,6 +23,7 @@ from app.services.to_bell_service import (
     add_comment,
     add_subtask,
     bulk_assign_tasks_to_project,
+    bulk_delete_tasks_by_name,
     complete_task,
     create_blank_template,
     create_project,
@@ -51,6 +52,7 @@ from app.services.to_bell_service import (
     notification_summary,
     notify_project,
     office_user_options,
+    preview_tasks_by_name,
     purge_task,
     reopen_task,
     reorder_projects,
@@ -239,6 +241,32 @@ def api_create_task():
         return serialize_task(task, current_user.username), 201
 
     return _json_endpoint(action)
+
+
+@to_bell_bp.route("/api/tasks/bulk-delete", methods=["GET", "POST"])
+@login_required
+def api_bulk_delete_tasks():
+    """タスク名による一括削除（設定から使用）。
+
+    GET  … 事前確認。一致件数とサンプルを返す（削除しない）。
+    POST … 実際に削除する。
+    """
+    _block_share_session()
+
+    def _match_mode(value: str) -> str:
+        return "contains" if str(value or "").strip().lower() == "contains" else "exact"
+
+    if request.method == "GET":
+        name = request.args.get("name", "")
+        match = _match_mode(request.args.get("match"))
+        return _json_endpoint(lambda: preview_tasks_by_name(current_user.username, name, match))
+
+    payload = _payload()
+    name = payload.get("name", "")
+    match = _match_mode(payload.get("match"))
+    return _json_endpoint(
+        lambda: {"deleted": bulk_delete_tasks_by_name(current_user.username, name, match)}
+    )
 
 
 @to_bell_bp.route("/api/tasks/<int:task_id>", methods=["GET"])

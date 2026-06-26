@@ -83,8 +83,11 @@
     initTemplateModal();
     initViewer();
     $("tb-quick-form").addEventListener("submit", createQuickTask);
+    initNewTaskModal();
+    initContextMenu();
+    initBulkDelete();
     const newButton = $("tb-new-task");
-    if (newButton) newButton.addEventListener("click", () => $("tb-title").focus());
+    if (newButton) newButton.addEventListener("click", () => openNewTaskModal());
     const templatesButton = $("tb-templates");
     if (templatesButton) templatesButton.addEventListener("click", openTemplateModal);
     const newProjectButton = $("tb-new-project");
@@ -210,19 +213,65 @@
     if (clear) clear.addEventListener("click", () => selectProject(0));
   }
 
+  // 日付（due_at）を持つプロジェクトを、タスク一覧に出す対象として返す。
+  // 特定プロジェクトに絞り込み中・完了/連携フィルタでは出さない。
+  function datedProjectsForList() {
+    if (state.projectFilter) return [];
+    if (state.filter === "done" || state.filter === "integrations") return [];
+    return state.projects
+      .filter((project) => project.due_at && project.status !== "archived")
+      .slice()
+      .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime());
+  }
+
+  function projectIsOverdue(project) {
+    return project.due_at && new Date(project.due_at).getTime() < Date.now();
+  }
+
+  function projectTaskCardHtml(project) {
+    const due = formatDue(project.due_at);
+    const badgeClass = projectIsOverdue(project) ? "danger" : "";
+    return `
+      <article class="tobell-task tobell-task-as-project" data-project-card="${project.id}" tabindex="0" role="button">
+        <span class="tobell-project-card-icon" aria-hidden="true">📁</span>
+        <div class="tobell-task-body">
+          <h3><span class="tobell-dot" style="background:${esc(project.color)}"></span>${esc(project.name)}</h3>
+          <p>${esc(project.description || "プロジェクト")}</p>
+          <p class="tobell-task-meta">プロジェクト / ${esc(due)} / 未完了 ${Number(project.open_count || 0)}件</p>
+        </div>
+        <span class="tobell-badge ${badgeClass}">${badgeClass ? "期限超過" : "予定"}</span>
+      </article>`;
+  }
+
+  function bindProjectCards(list) {
+    list.querySelectorAll("[data-project-card]").forEach((card) => {
+      const open = () => selectProject(Number(card.dataset.projectCard));
+      card.addEventListener("click", open);
+      card.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
+      });
+      card.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        openContextMenu(event, projectMenuItems(Number(card.dataset.projectCard)));
+      });
+    });
+  }
+
   function renderTasks() {
     const list = $("tb-task-list");
-    if (!state.tasks.length) {
+    const projectCards = datedProjectsForList();
+    if (!state.tasks.length && !projectCards.length) {
       list.innerHTML =
         '<div class="tobell-empty">' +
         '<p>ここにはまだタスクがありません。</p>' +
         '<button type="button" class="tobell-btn tobell-btn-primary" id="tb-empty-add">＋ 最初のタスクを追加</button>' +
         '</div>';
       const addBtn = $("tb-empty-add");
-      if (addBtn) addBtn.addEventListener("click", () => { const t = $("tb-title"); if (t) t.focus(); });
+      if (addBtn) addBtn.addEventListener("click", () => openNewTaskModal());
       return;
     }
-    list.innerHTML = state.tasks.map((task) => {
+    const projectHtml = projectCards.map(projectTaskCardHtml).join("");
+    list.innerHTML = projectHtml + state.tasks.map((task) => {
       const due = task.due_at ? formatDue(task.due_at) : "通知なし";
       const done = task.status === "done" ? "checked" : "";
       const badgeClass = task.priority === "urgent" || isOverdue(task) ? "danger" : (task.priority === "high" ? "warning" : "");
@@ -286,6 +335,7 @@
         }
       });
     });
+    bindProjectCards(list);
   }
 
   function projectTag(task) {
@@ -411,6 +461,19 @@
       }
     });
 
+    // 日付付きプロジェクトもカレンダーに「タスクのように」表示する。
+    const projByDay = {};
+    if (!state.projectFilter) {
+      state.projects.forEach((project) => {
+        if (!project.due_at || project.status === "archived") return;
+        const d = new Date(project.due_at);
+        if (d.getFullYear() === year && d.getMonth() === month) {
+          const key = d.getDate();
+          (projByDay[key] = projByDay[key] || []).push(project);
+        }
+      });
+    }
+
     const todayStr = new Date().toDateString();
     const cells = [];
     for (let i = 0; i < startWeekday; i += 1) cells.push('<div class="tobell-cal-cell is-empty"></div>');
@@ -418,16 +481,20 @@
       const cellDate = new Date(year, month, day);
       const isToday = cellDate.toDateString() === todayStr ? "is-today" : "";
       const tasks = byDay[day] || [];
+      const projects = projByDay[day] || [];
       const limit = state.isPwa ? 2 : 4;
+      const projChips = projects.map((project) =>
+        `<button type="button" class="tobell-cal-task tobell-cal-project ${projectIsOverdue(project) ? "danger" : ""}" data-project-open="${project.id}" title="プロジェクト: ${esc(project.name)}">📁 ${esc(project.name)}</button>`
+      ).join("");
       const chips = tasks.slice(0, limit).map((task) =>
         `<button type="button" class="tobell-cal-task ${isOverdue(task) ? "danger" : ""}" data-open-id="${task.id}">${esc(task.title)}</button>`
       ).join("");
       const more = tasks.length > limit ? `<span class="tobell-cal-more">+${tasks.length - limit}</span>` : "";
       const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       cells.push(`
-        <div class="tobell-cal-cell ${isToday}">
-          <button type="button" class="tobell-cal-daynum" data-add-date="${iso}" title="この日に追加">${day}</button>
-          <div class="tobell-cal-tasks">${chips}${more}</div>
+        <div class="tobell-cal-cell ${isToday}" data-cell-date="${iso}" title="右クリック（長押し）で追加・操作">
+          <span class="tobell-cal-daynum">${day}</span>
+          <div class="tobell-cal-tasks">${projChips}${chips}${more}</div>
         </div>`);
     }
 
@@ -440,6 +507,7 @@
         <button type="button" class="tobell-btn" data-cal-nav="1">›</button>
         <button type="button" class="tobell-btn" data-cal-nav="0">今日</button>
         ${noDue ? `<span class="tobell-chip">期日なし ${noDue}件</span>` : ""}
+        <span class="tobell-cal-hint tobell-pc-only">セルを右クリックで追加・操作</span>
       </div>
       <div class="tobell-cal-grid">${weekdays}${cells.join("")}</div>`;
 
@@ -451,20 +519,154 @@
       });
     });
     container.querySelectorAll("[data-open-id]").forEach((button) => {
-      button.addEventListener("click", () => openTaskById(Number(button.dataset.openId)));
-    });
-    container.querySelectorAll("[data-add-date]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const input = document.querySelector('#tb-quick-form input[name="due_date"]');
-        if (input) input.value = button.dataset.addDate;
-        const title = $("tb-title");
-        if (title) {
-          title.focus();
-          title.scrollIntoView({ behavior: "smooth", block: "center" });
-        }
-        showFlash(`${button.dataset.addDate} の期日でタスクを追加できます`, "info");
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openTaskById(Number(button.dataset.openId));
+      });
+      button.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openContextMenu(event, taskMenuItems(Number(button.dataset.openId)));
       });
     });
+    container.querySelectorAll("[data-project-open]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectProject(Number(button.dataset.projectOpen));
+      });
+      button.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openContextMenu(event, projectMenuItems(Number(button.dataset.projectOpen)));
+      });
+    });
+    // 日付セル全体を対象に、右クリック（長押し）で操作メニューを開く。
+    container.querySelectorAll("[data-cell-date]").forEach((cell) => {
+      const iso = cell.dataset.cellDate;
+      cell.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        openContextMenu(event, cellMenuItems(iso));
+      });
+      // タッチ端末は右クリックが無いため、セルのタップでもメニューを開く。
+      if (isMobile()) {
+        cell.addEventListener("click", (event) => {
+          if (event.target.closest("[data-open-id], [data-project-open]")) return;
+          // 直後の document クリックで即閉じしないよう伝播を止める。
+          event.stopPropagation();
+          openContextMenu(event, cellMenuItems(iso));
+        });
+      }
+    });
+  }
+
+  // ===== カレンダーの操作メニュー（右クリック / 長押し） =====
+
+  function cellMenuItems(iso) {
+    return [
+      { label: "📝 タスクを追加", action: () => openNewTaskModal({ due_date: iso }) },
+      { label: "📁 プロジェクトを追加", action: () => openProjectModal(null, { due_date: iso }) },
+    ];
+  }
+
+  function taskMenuItems(taskId) {
+    const task = state.tasks.find((item) => item.id === taskId);
+    const done = task && task.status === "done";
+    return [
+      { label: "開く", action: () => openTaskById(taskId) },
+      {
+        label: done ? "↩ 未完了に戻す" : "✓ 完了にする",
+        action: () => toggleTaskComplete(taskId, !done),
+      },
+      { label: "🗑 タスクを削除", danger: true, action: () => deleteTaskById(taskId) },
+    ];
+  }
+
+  function projectMenuItems(projectId) {
+    return [
+      { label: "開く", action: () => selectProject(projectId) },
+      { label: "⚙ 編集", action: () => openProjectModal(projectId) },
+      { label: "🗑 プロジェクトを削除", danger: true, action: () => deleteProjectById(projectId) },
+    ];
+  }
+
+  async function toggleTaskComplete(id, completing) {
+    try {
+      await api(`/tools/to_bell/api/tasks/${id}/${completing ? "complete" : "reopen"}`, { method: "POST" });
+      await Promise.all([loadTasks(), loadNotifications()]);
+      showFlash(completing ? "完了にしました" : "未完了に戻しました", "success");
+    } catch (_) {
+      /* api() がトーストを表示済み */
+    }
+  }
+
+  async function deleteTaskById(id) {
+    if (!window.confirm("このタスクを完全に削除します。元に戻せません。よろしいですか？")) return;
+    try {
+      await api(`/tools/to_bell/api/tasks/${id}?hard=1`, { method: "DELETE" });
+      if (state.selectedTaskId === id) closeDetail();
+      await Promise.all([loadTasks(), loadNotifications()]);
+      showFlash("タスクを削除しました", "info");
+    } catch (_) {
+      /* api() がトーストを表示済み */
+    }
+  }
+
+  async function deleteProjectById(id) {
+    if (!window.confirm("このプロジェクトを削除しますか？タスクは残り、プロジェクトの紐付けだけ外れます。")) return;
+    try {
+      await api(`/tools/to_bell/api/projects/${id}`, { method: "DELETE" });
+      if (state.projectFilter === id) state.projectFilter = 0;
+      await Promise.all([loadProjects(), loadTasks()]);
+      showFlash("プロジェクトを削除しました", "info");
+    } catch (_) {
+      /* api() がトーストを表示済み */
+    }
+  }
+
+  // ===== コンテキストメニュー基盤 =====
+
+  function initContextMenu() {
+    const menu = $("tb-context-menu");
+    if (!menu) return;
+    document.addEventListener("click", (event) => {
+      if (!menu.hasAttribute("hidden") && !menu.contains(event.target)) closeContextMenu();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !menu.hasAttribute("hidden")) closeContextMenu();
+    });
+    window.addEventListener("scroll", closeContextMenu, true);
+  }
+
+  function closeContextMenu() {
+    const menu = $("tb-context-menu");
+    if (menu) menu.setAttribute("hidden", "");
+  }
+
+  function openContextMenu(event, items) {
+    const menu = $("tb-context-menu");
+    if (!menu || !items || !items.length) return;
+    menu.innerHTML = "";
+    items.forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "tobell-context-item" + (item.danger ? " tobell-danger" : "");
+      button.textContent = item.label;
+      button.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        closeContextMenu();
+        try { item.action(); } catch (_) { /* 個々の操作失敗は握りつぶす */ }
+      });
+      menu.appendChild(button);
+    });
+    // いったん表示してサイズを測り、画面内に収まるよう配置する。
+    menu.removeAttribute("hidden");
+    const px = (event.touches && event.touches[0] ? event.touches[0].clientX : event.clientX) || 0;
+    const py = (event.touches && event.touches[0] ? event.touches[0].clientY : event.clientY) || 0;
+    const rect = menu.getBoundingClientRect();
+    const x = Math.min(px, window.innerWidth - rect.width - 8);
+    const y = Math.min(py, window.innerHeight - rect.height - 8);
+    menu.style.left = `${Math.max(8, x)}px`;
+    menu.style.top = `${Math.max(8, y)}px`;
   }
 
   function openTaskById(id) {
@@ -713,7 +915,7 @@
     return String(value).replace(/[^a-zA-Z0-9_\-]/g, (ch) => `\\${ch}`);
   }
 
-  function openProjectModal(projectId) {
+  function openProjectModal(projectId, prefill) {
     const modal = $("tb-project-modal");
     if (!modal) return;
     const form = $("tb-project-form");
@@ -727,12 +929,14 @@
       form.elements.visibility_scope.value = project.visibility_scope || "office";
       form.elements.status.value = project.status || "active";
       form.elements.calendar_only.checked = !!project.calendar_only;
+      if (form.elements.due_date) form.elements.due_date.value = project.due_at ? project.due_at.slice(0, 10) : "";
       form.elements.pinned.checked = !!project.pinned;
       projectEdit.members = new Set(Array.isArray(project.members) ? project.members : []);
     } else {
       form.elements.color.value = "#2563eb";
       form.elements.status.value = "active";
       form.elements.calendar_only.checked = false;
+      if (form.elements.due_date) form.elements.due_date.value = (prefill && prefill.due_date) || "";
       form.elements.pinned.checked = false;
       projectEdit.members = new Set();
     }
@@ -761,6 +965,7 @@
       visibility_scope: form.elements.visibility_scope.value,
       status: form.elements.status.value,
       calendar_only: form.elements.calendar_only.checked,
+      due_date: form.elements.due_date ? form.elements.due_date.value : "",
       pinned: form.elements.pinned.checked,
       members: Array.from(projectEdit.members),
     };
@@ -1320,8 +1525,65 @@
     if (btn) btn.disabled = true;
     try {
       const payload = Object.fromEntries(new FormData(form).entries());
+      // プロジェクトが選択されている状態で追加したら、そのプロジェクトに自動で紐づける。
+      if (state.projectFilter) payload.project_id = state.projectFilter;
       await api("/tools/to_bell/api/tasks", { method: "POST", body: payload });
       form.reset();
+      await loadTasks();
+      showFlash("タスクを追加しました", "success");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // ===== 新規タスク モーダル（詳細を設定して追加） =====
+
+  function initNewTaskModal() {
+    const modal = $("tb-newtask-modal");
+    if (!modal) return;
+    const close = () => modal.setAttribute("hidden", "");
+    modal.querySelectorAll("[data-newtask-close]").forEach((el) => el.addEventListener("click", close));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !modal.hasAttribute("hidden")) close();
+    });
+    const form = $("tb-newtask-form");
+    if (form) form.addEventListener("submit", saveNewTask);
+  }
+
+  function openNewTaskModal(prefill) {
+    const modal = $("tb-newtask-modal");
+    const form = $("tb-newtask-form");
+    if (!modal || !form) {
+      // モーダルが無い構成では従来どおりクイック追加にフォーカスする。
+      const title = $("tb-title");
+      if (title) title.focus();
+      return;
+    }
+    form.reset();
+    const data = prefill || {};
+    if (form.elements.title) form.elements.title.value = data.title || "";
+    if (form.elements.due_date) form.elements.due_date.value = data.due_date || "";
+    if (form.elements.due_time) form.elements.due_time.value = data.due_time || "";
+    // プロジェクトが選択中なら、その紐付けを初期選択にする。
+    fillProjectSelect(form.elements.project_id, state.projectFilter || (data.project_id || ""));
+    modal.removeAttribute("hidden");
+    if (form.elements.title) form.elements.title.focus();
+  }
+
+  async function saveNewTask(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = Object.fromEntries(new FormData(form).entries());
+    payload.pinned = form.elements.pinned ? form.elements.pinned.checked : false;
+    if (!String(payload.title || "").trim()) {
+      showFlash("タスク名を入力してください", "error");
+      return;
+    }
+    const btn = form.querySelector('[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      await api("/tools/to_bell/api/tasks", { method: "POST", body: payload });
+      $("tb-newtask-modal").setAttribute("hidden", "");
       await loadTasks();
       showFlash("タスクを追加しました", "success");
     } finally {
@@ -2071,6 +2333,88 @@
       // api() が flash 表示する
     } finally {
       btn.disabled = false;
+    }
+  }
+
+  // ===== タスク一括削除（設定 → 一括削除） =====
+
+  const bulkDelete = { previewed: null };
+
+  function initBulkDelete() {
+    const nameInput = $("tb-bulk-delete-name");
+    const matchSel = $("tb-bulk-delete-match");
+    const previewBtn = $("tb-bulk-delete-preview");
+    const runBtn = $("tb-bulk-delete-run");
+    if (!nameInput || !previewBtn || !runBtn) return;
+    const invalidate = () => {
+      bulkDelete.previewed = null;
+      runBtn.disabled = true;
+      const result = $("tb-bulk-delete-result");
+      if (result) result.innerHTML = "";
+    };
+    nameInput.addEventListener("input", invalidate);
+    if (matchSel) matchSel.addEventListener("change", invalidate);
+    previewBtn.addEventListener("click", previewBulkDelete);
+    runBtn.addEventListener("click", runBulkDelete);
+    const form = $("tb-bulk-delete-form");
+    if (form) form.addEventListener("submit", (event) => { event.preventDefault(); previewBulkDelete(); });
+  }
+
+  async function previewBulkDelete() {
+    const name = ($("tb-bulk-delete-name").value || "").trim();
+    const match = ($("tb-bulk-delete-match") || {}).value || "exact";
+    const result = $("tb-bulk-delete-result");
+    const runBtn = $("tb-bulk-delete-run");
+    if (!name) {
+      showFlash("タスク名を入力してください", "error");
+      return;
+    }
+    const btn = $("tb-bulk-delete-preview");
+    if (btn) btn.disabled = true;
+    try {
+      const params = new URLSearchParams({ name, match });
+      const data = await api(`/tools/to_bell/api/tasks/bulk-delete?${params.toString()}`);
+      const count = Number(data.count || 0);
+      bulkDelete.previewed = { name, match, count };
+      if (runBtn) runBtn.disabled = count === 0;
+      if (result) {
+        if (!count) {
+          result.innerHTML = '<div class="tobell-empty">一致するタスクはありません。</div>';
+        } else {
+          const samples = (data.samples || []).map((title) => `<li>${esc(title)}</li>`).join("");
+          result.innerHTML = `
+            <p class="tobell-bulk-delete-count"><strong>${count}件</strong>のタスクが一致しました。「削除する」を押すと完全に削除します。</p>
+            <ul class="tobell-bulk-delete-samples">${samples}</ul>
+            ${count > (data.samples || []).length ? `<p class="tobell-share-note">ほか ${count - (data.samples || []).length} 件…</p>` : ""}`;
+        }
+      }
+    } catch (_) {
+      /* api() がトーストを表示済み */
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function runBulkDelete() {
+    const previewed = bulkDelete.previewed;
+    if (!previewed || !previewed.count) return;
+    if (!window.confirm(`「${previewed.name}」に一致する ${previewed.count} 件のタスクを完全に削除します。元に戻せません。よろしいですか？`)) return;
+    const runBtn = $("tb-bulk-delete-run");
+    if (runBtn) runBtn.disabled = true;
+    try {
+      const data = await api("/tools/to_bell/api/tasks/bulk-delete", {
+        method: "POST",
+        body: { name: previewed.name, match: previewed.match },
+      });
+      const result = $("tb-bulk-delete-result");
+      if (result) result.innerHTML = `<div class="tobell-empty">${Number(data.deleted || 0)}件のタスクを削除しました。</div>`;
+      bulkDelete.previewed = null;
+      const nameInput = $("tb-bulk-delete-name");
+      if (nameInput) nameInput.value = "";
+      await Promise.all([loadTasks(), loadProjects(), loadNotifications()]);
+      showFlash(`${Number(data.deleted || 0)}件のタスクを削除しました`, "success");
+    } catch (_) {
+      if (runBtn) runBtn.disabled = false;
     }
   }
 
