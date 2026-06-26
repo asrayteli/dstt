@@ -64,6 +64,13 @@ TIME_CONFLICT_RULES = {
     ("P", "L"): True,
     ("E", "L"): False,
 }
+# 上表は時系列順(A午前→P午後→E早番→L遅番)でキーを書くが、照合側は
+# tuple(sorted(...)) でアルファベット順に正規化して引く。両順序が食い違うキー
+# （例 ("P","L") → sorted=("L","P")）は辞書ミスでフォールバックに落ち、本来の
+# 衝突判定(True)を取りこぼす。照合用にキーをソート正規化した表を持つ。
+_TIME_CONFLICT_LOOKUP = {
+    tuple(sorted(pair)): value for pair, value in TIME_CONFLICT_RULES.items()
+}
 VEHICLE_OPTIONS = {"M", "C", "O", "W", "V"}
 LEAVE_OPTION_KEYS = set(LEAVE_OPTION_MAPPINGS.keys())
 JAPAN_HOLIDAYS_SET = set(JAPAN_HOLIDAYS)
@@ -157,7 +164,7 @@ def _is_duplicate_by_rules(
         if option1 not in {"A", "P", "E", "L"} or option2 not in {"A", "P", "E", "L"}:
             return False
         key = tuple(sorted((option1, option2)))
-        return TIME_CONFLICT_RULES.get(key, option1 == option2)
+        return _TIME_CONFLICT_LOOKUP.get(key, option1 == option2)
 
     if option1 in VEHICLE_OPTIONS and option2 in VEHICLE_OPTIONS:
         if option1 == "V" or option2 == "V":

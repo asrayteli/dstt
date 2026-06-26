@@ -1620,6 +1620,288 @@ def test_external_sync_preserves_existing_person_draft(tmp_path):
     assert [e["value"] for e in after["entries_per_day"]["1"]] == ["!A!Master Site"]
 
 
+def test_external_sync_into_legacy_empty_draft_month_does_not_create_phantom_draft(tmp_path):
+    """draft が空{}（旧データ）の月に外部同期が来ても、勝手に『仮保存あり』にならない。
+
+    回帰: 旧データは migration で draft={} に初期化される。この状態の月へ現場側の
+    本保存で同期エントリが流れ込むと、空 draft を WIP と誤認して保持し、同期エントリが
+    『仮保存』として固着して見える恐れがあった。空 draft は live を映し、同期後も
+    draft==live のまま（=ユーザーが仮保存していないので『仮保存あり』にならない）こと。"""
+    from app.models import CloudShiftMonth
+
+    module, client, person, scene = _person_scene_for_external_sync(tmp_path)
+    person_id = person["project"]["id"]
+    scene_id = scene["project"]["id"]
+
+    # 旧データを再現: 個人月の draft を空{}へ。
+    with client.application.app_context():
+        row = CloudShiftMonth.query.filter_by(project_id=person_id, year=2026, month=4).one()
+        row.draft_entries_per_day = {}
+        db.session.commit()
+
+    # 現場が Alice を本保存 → 個人へ同期。
+    scene_entries = dict(scene["month"]["entries_per_day"])
+    scene_entries["1"] = [{"id": "scene-1", "value": "!A!Alice", "employee_number": "1001"}]
+    save_response = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": scene_entries, "base_month": scene["month"]},
+    )
+    assert save_response.status_code == 200
+
+    after = _owner_month(client, person_id)
+    # 同期エントリは live に入ること。
+    assert [e["value"] for e in after["entries_per_day"]["1"]] == ["!A!Master Site"]
+    # 同期エントリは draft にも反映され、draft == live のまま（『仮保存あり』にならない）。
+    assert after["draft_entries_per_day"] == after["entries_per_day"]
+
+
+def test_save_month_returns_200_even_when_target_sync_fails(tmp_path, monkeypatch):
+    """対象帳への同期反映が失敗しても、ソース帳の保存は成立し 200 を返す。
+
+    回帰: 他帳への同期押し出しはソース保存の確定後・ロック外の best-effort 処理。
+    1 つの対象帳でロックタイムアウト/DBエラー等が起きても、ソース保存は既に成立して
+    いるためリクエストを失敗(500)させてはならない（保存済みなのに「失敗」と誤表示）。"""
+    module, client, person, scene = _person_scene_for_external_sync(tmp_path)
+    scene_id = scene["project"]["id"]
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("environment-specific sync failure")
+
+    # 他帳への同期反映だけを失敗させる（ソース自身の保存経路では呼ばれない関数）。
+    monkeypatch.setattr(module, "_replace_shift_synced_entries_in_target_project", _boom)
+
+    scene_entries = dict(scene["month"]["entries_per_day"])
+    scene_entries["1"] = [{"id": "scene-1", "value": "!A!Alice", "employee_number": "1001"}]
+    resp = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{scene_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": scene_entries, "base_month": scene["month"]},
+    )
+    assert resp.status_code == 200
+    # ソース帳(現場)の保存自体は成立していること。
+    saved = resp.get_json()["month"]
+    assert saved["entries_per_day"].get("1")
+
+
+def test_legacy_empty_draft_does_not_show_as_phantom_draft(tmp_path):
+    """draft_entries_per_day が空{}（draft列追加マイグレーションの初期値）でも、
+    live に実体があれば『仮保存あり』にならない（draft==live で返る）。
+
+    回帰: 旧データ（draft 列導入前に作られた月）は migration で draft={} に初期化
+    される。空 draft を『正式を空にした仮保存』ではなく『仮保存なし』として扱わないと、
+    ユーザーが仮保存していないのに永続的に『仮保存あり』表示になる。"""
+    from app.models import CloudShiftMonth
+
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    person = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    person_id = person["project"]["id"]
+
+    month = _owner_month(client, person_id)
+    entries = dict(month["entries_per_day"])
+    entries["1"] = [{"id": "e1", "value": "!A!Alice", "employee_number": "1001"}]
+    save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": entries, "base_month": month},
+    )
+    assert save.status_code == 200
+
+    # レガシー状態を再現: draft を空{}へ（draft 列追加マイグレーションの初期値）。
+    with client.application.app_context():
+        row = CloudShiftMonth.query.filter_by(project_id=person_id, year=2026, month=4).one()
+        row.draft_entries_per_day = {}
+        db.session.commit()
+
+    after = _owner_month(client, person_id)
+    assert [e["value"] for e in after["entries_per_day"]["1"]] == ["!A!Alice"]
+    # 空 draft は『仮保存なし』として live を映すべき（draft==live → 『仮保存あり』にならない）。
+    assert after["draft_entries_per_day"] == after["entries_per_day"]
+
+
+def test_backfill_empty_cloudshift_drafts_heals_legacy_rows(tmp_path):
+    """起動時 backfill が、空 draft かつ live に実体のある旧行を draft=live に修復する。"""
+    from app import _backfill_empty_cloudshift_drafts
+    from app.models import CloudShiftMonth
+
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    app = client.application
+
+    person = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    person_id = person["project"]["id"]
+
+    month = _owner_month(client, person_id)
+    entries = dict(month["entries_per_day"])
+    entries["1"] = [{"id": "e1", "value": "!A!Alice", "employee_number": "1001"}]
+    assert client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": entries, "base_month": month},
+    ).status_code == 200
+
+    # 旧データを再現: DB上の draft を空{}へ。
+    with app.app_context():
+        row = CloudShiftMonth.query.filter_by(project_id=person_id, year=2026, month=4).one()
+        row.draft_entries_per_day = {}
+        db.session.commit()
+
+    _backfill_empty_cloudshift_drafts(app)
+
+    with app.app_context():
+        row = CloudShiftMonth.query.filter_by(project_id=person_id, year=2026, month=4).one()
+        assert row.draft_entries_per_day == row.entries_per_day
+        assert [e["value"] for e in row.draft_entries_per_day["1"]] == ["!A!Alice"]
+
+    # 冪等: 2回目は変更なし（例外も出ない）。
+    _backfill_empty_cloudshift_drafts(app)
+    with app.app_context():
+        row = CloudShiftMonth.query.filter_by(project_id=person_id, year=2026, month=4).one()
+        assert row.draft_entries_per_day == row.entries_per_day
+
+
+def test_backfill_preserves_real_draft(tmp_path):
+    """実体のある仮保存（ユーザー作成）は backfill で変更されない。"""
+    from app import _backfill_empty_cloudshift_drafts
+    from app.models import CloudShiftMonth
+
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    app = client.application
+
+    person = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    person_id = person["project"]["id"]
+
+    month = _owner_month(client, person_id)
+    draft_entries = dict(month["draft_entries_per_day"])
+    draft_entries["5"] = [{"id": "my-draft", "value": "!休!", "comment": "私用"}]
+    assert client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4/draft",
+        json={"entries_per_day": draft_entries},
+    ).status_code == 200
+
+    _backfill_empty_cloudshift_drafts(app)
+
+    with app.app_context():
+        row = CloudShiftMonth.query.filter_by(project_id=person_id, year=2026, month=4).one()
+        assert [e["value"] for e in row.draft_entries_per_day.get("5", [])] == ["!休!"]
+
+
+def test_backfill_never_modifies_official_data_or_metadata(tmp_path):
+    """【データ安全性】backfill は正式 entries_per_day と各メタデータを一切変更しない。
+
+    backfill が書き込むのは仮保存 draft 列のみで、正式シフト(entries_per_day)・revision・
+    revision_snapshots・required_capacity は読み取るだけで不変であることを保証する。"""
+    import copy as _copy
+    from app import _backfill_empty_cloudshift_drafts
+    from app.models import CloudShiftMonth
+
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    app = client.application
+
+    person = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    person_id = person["project"]["id"]
+
+    # 2 回保存して revision を進め、revision_snapshots を確実に作る。
+    month = _owner_month(client, person_id)
+    entries = dict(month["entries_per_day"])
+    entries["1"] = [{"id": "e1", "value": "!A!Alice", "employee_number": "1001"}]
+    assert client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4",
+        json={"required_capacity": 3, "entries_per_day": entries, "base_month": month},
+    ).status_code == 200
+    month = _owner_month(client, person_id)
+    entries2 = dict(month["entries_per_day"])
+    entries2["2"] = [{"id": "e2", "value": "!P!Bob", "employee_number": "1002"}]
+    assert client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4",
+        json={"required_capacity": 3, "entries_per_day": entries2, "base_month": month},
+    ).status_code == 200
+
+    # migration 初期値（リテラル {}）を再現し、正式側の現状を控える。
+    with app.app_context():
+        row = CloudShiftMonth.query.filter_by(project_id=person_id, year=2026, month=4).one()
+        row.draft_entries_per_day = {}
+        db.session.commit()
+        before_live = _copy.deepcopy(row.entries_per_day)
+        before_revision = row.revision
+        before_snapshots = _copy.deepcopy(row.revision_snapshots)
+        before_capacity = row.required_capacity
+        before_capacity_enabled = row.capacity_enabled
+        before_created = row.created_at
+
+    assert before_live  # 正式に実体がある前提
+    assert before_snapshots  # スナップショットが存在する前提
+
+    _backfill_empty_cloudshift_drafts(app)
+
+    with app.app_context():
+        row = CloudShiftMonth.query.filter_by(project_id=person_id, year=2026, month=4).one()
+        # 正規データ・メタデータは一切変わらない。
+        assert row.entries_per_day == before_live
+        assert row.revision == before_revision
+        assert row.revision_snapshots == before_snapshots
+        assert row.required_capacity == before_capacity
+        assert row.capacity_enabled == before_capacity_enabled
+        assert row.created_at == before_created
+        # draft だけが live の独立コピーで埋まる（draft==live・別オブジェクト）。
+        assert row.draft_entries_per_day == row.entries_per_day
+        assert row.draft_entries_per_day is not row.entries_per_day
+
+
+def test_backfill_does_not_touch_day_keyed_empty_draft(tmp_path):
+    """【データ安全性】日付キーを持つ空 draft（ユーザー作成の可能性）は backfill で触らない。
+
+    backfill の対象は migration 初期値（None / 空 {}）のみ。正常な保存経路は draft を必ず
+    日付キー付きで書くため、{"1": [], ...} のような全日空でも日付キーを持つ draft は
+    ユーザー由来とみなして一切変更しない。"""
+    from app import _backfill_empty_cloudshift_drafts
+    from app.models import CloudShiftMonth
+
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    app = client.application
+
+    person = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Alice", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    ).get_json()["project"]
+    person_id = person["project"]["id"]
+
+    month = _owner_month(client, person_id)
+    entries = dict(month["entries_per_day"])
+    entries["1"] = [{"id": "e1", "value": "!A!Alice", "employee_number": "1001"}]
+    assert client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{person_id}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": entries, "base_month": month},
+    ).status_code == 200
+
+    # 日付キーを持つが全日空の draft（migration 初期値ではない形）を直接設定。
+    day_keyed_empty = {"1": [], "2": [], "3": []}
+    with app.app_context():
+        row = CloudShiftMonth.query.filter_by(project_id=person_id, year=2026, month=4).one()
+        row.draft_entries_per_day = dict(day_keyed_empty)
+        db.session.commit()
+
+    _backfill_empty_cloudshift_drafts(app)
+
+    with app.app_context():
+        row = CloudShiftMonth.query.filter_by(project_id=person_id, year=2026, month=4).one()
+        # backfill は触っていない（日付キー付き draft はユーザー由来として保全）。
+        assert row.draft_entries_per_day == day_keyed_empty
+
+
 def test_scene_master_create_recovers_legacy_cloudshift_schema(tmp_path):
     module = _load_cloudshift_module()
     db_path = tmp_path / "legacy-cloudshift.db"

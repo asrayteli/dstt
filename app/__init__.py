@@ -555,6 +555,59 @@ def _ensure_to_bell_task_source_unique_index(app):
             )
 
 
+def _backfill_empty_cloudshift_drafts(app):
+    """draft 列追加マイグレーションの初期値（空の仮保存）を正式(live)へ揃える一括修復。冪等。
+
+    CloudShift は仮保存の有無を draft と live の差分で推論するため、live に実体があるのに
+    draft が空のままだと、ユーザーが仮保存していないのに『仮保存あり』と誤表示される。
+    本処理はその誤表示の原因となる「migration が入れた初期値」の行だけを修復する。
+
+    安全性（正規データを絶対に失わないための設計）:
+    - 書き込むのは draft_entries_per_day（仮保存列）のみ。正式シフト entries_per_day は
+      読み取るだけで一切変更しない。revision / revision_snapshots / capacity / 各 timestamp も不変。
+    - 対象は draft が None または空 {}（= migration 初期値）の行に限定する。正常な保存経路は
+      draft を必ず日付キー付きの正規化構造で書くため、None / {} はユーザーが作成した仮保存では
+      ありえない。よってユーザーの仮保存（たとえ全日空でも日付キーを持つ）には絶対に触れない。
+    - entries_per_day が空（実体なし）の月は対象外（正式が空なら揃える必要もない）。
+    - 失敗しても rollback して起動は止めない。
+    """
+    import json
+
+    with app.app_context():
+        try:
+            if "cloudshift_months" not in inspect(db.engine).get_table_names():
+                return
+            from .models import CloudShiftMonth
+
+            def _has_entries(value) -> bool:
+                if not isinstance(value, dict):
+                    return False
+                return any(isinstance(entries, list) and entries for entries in value.values())
+
+            healed_keys: list[str] = []
+            for row in CloudShiftMonth.query.all():
+                # migration 初期値（None / 空 {}）以外は一切触れない。日付キーを持つ draft は
+                # 正常な保存・ユーザーの仮保存なので除外する。
+                if row.draft_entries_per_day not in (None, {}):
+                    continue
+                if not _has_entries(row.entries_per_day):
+                    continue
+                # 正式(live)の独立コピーを draft へ代入（live 自体は読み取りのみで不変）。
+                row.draft_entries_per_day = json.loads(json.dumps(row.entries_per_day, ensure_ascii=False))
+                healed_keys.append(f"{row.project_id}:{row.year}-{row.month:02d}")
+            if healed_keys:
+                db.session.commit()
+                app.logger.info(
+                    "CloudShift: backfilled %d month(s) with migration-default empty draft -> live (%s%s)",
+                    len(healed_keys),
+                    ", ".join(healed_keys[:20]),
+                    " ..." if len(healed_keys) > 20 else "",
+                )
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("CloudShift empty-draft backfill skipped due to error")
+
+
 def create_app(test_config=None):
     app = Flask(__name__, static_folder='./static/')
     app_version = os.environ.get('DSTT_APP_VERSION')
@@ -907,6 +960,8 @@ def create_app(test_config=None):
     # DBスキーマの初期化（既存DBへのカラム追加含む）
     _ensure_access_control_schema(app)
     _ensure_to_bell_task_source_unique_index(app)
+    # 旧データの空 draft を live へ揃える一括修復（誤『仮保存あり』の永続的解消）。
+    _backfill_empty_cloudshift_drafts(app)
 
     from .services.to_bell_push import init_to_bell_push_scheduler
     init_to_bell_push_scheduler(app)
