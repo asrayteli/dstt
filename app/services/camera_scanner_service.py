@@ -44,6 +44,9 @@ MIN_QUAD_AREA_RATIO = 0.18
 
 JPEG_QUALITY = 90
 
+# ID-1（運転免許証）の角丸半径。長辺に対する比（3.18mm / 85.6mm）。
+CORNER_RADIUS_RATIO = 3.18 / 85.6
+
 
 class ScanError(ValueError):
     """画像のデコード・処理に失敗したときに送出する。"""
@@ -78,6 +81,23 @@ def encode_jpeg(bgr: np.ndarray, quality: int = JPEG_QUALITY) -> bytes:
     if not ok:
         raise ScanError("画像のエンコードに失敗しました。")
     return buf.tobytes()
+
+
+def encode_png(img: np.ndarray) -> bytes:
+    """画像（BGR または 角丸の透明付き BGRA）を PNG バイト列へエンコードする。"""
+    ok, buf = cv2.imencode(".png", img)
+    if not ok:
+        raise ScanError("画像のエンコードに失敗しました。")
+    return buf.tobytes()
+
+
+def decode_unchanged(data: bytes) -> np.ndarray:
+    """保存済み画像をアルファ込み（BGRA可）でそのまま読み込む（回転のやり直し用）。"""
+    arr = np.frombuffer(data, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise ScanError("画像を読み込めませんでした。")
+    return img
 
 
 # --------------------------------------------------------------------------- #
@@ -232,6 +252,61 @@ def enhance_document(bgr: np.ndarray) -> np.ndarray:
     return img
 
 
+def _fine_deskew(bgr: np.ndarray, max_angle: float = 7.0) -> np.ndarray:
+    """粗く正面化したカードの残存傾きを、直線検出でさらに厳格に補正する。
+
+    画像内の支配的な直線（カードの縁・帯・文字行）を Hough 変換で拾い、軸からの
+    ずれ角の中央値だけ逆回転して縁を厳密に水平・垂直へ揃える。傾きが大きすぎる
+    （誤検出）/検出できない場合は何もしない。
+    """
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    lines = cv2.HoughLines(edges, 1, np.pi / 180.0, 110)
+    if lines is None:
+        return bgr
+    devs = []
+    for rho_theta in lines[:80]:
+        theta_deg = float(np.degrees(rho_theta[0][1]))
+        # 90 で割った余りで、水平/垂直どちらの線も「軸からのずれ」に正規化（±45度）。
+        a = theta_deg % 90.0
+        dev = a if a <= 45.0 else a - 90.0
+        if abs(dev) <= max_angle:
+            devs.append(dev)
+    if not devs:
+        return bgr
+    angle = float(np.median(devs))
+    if abs(angle) < 0.1:
+        return bgr
+    h, w = bgr.shape[:2]
+    matrix = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), angle, 1.0)
+    return cv2.warpAffine(
+        bgr, matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
+    )
+
+
+def _round_corners(bgr: np.ndarray) -> np.ndarray:
+    """ID-1（運転免許証）の角丸に合わせ、四隅を透明にした BGRA を返す。"""
+    if bgr.ndim == 3 and bgr.shape[2] == 4:
+        bgr = cv2.cvtColor(bgr, cv2.COLOR_BGRA2BGR)
+    h, w = bgr.shape[:2]
+    r = max(1, int(round(CORNER_RADIUS_RATIO * max(w, h))))
+    alpha = np.zeros((h, w), np.uint8)
+    cv2.rectangle(alpha, (r, 0), (w - r, h), 255, -1)
+    cv2.rectangle(alpha, (0, r), (w, h - r), 255, -1)
+    for cx, cy in ((r, r), (w - r - 1, r), (r, h - r - 1), (w - r - 1, h - r - 1)):
+        cv2.circle(alpha, (cx, cy), r, 255, -1)
+    bgra = cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA)
+    bgra[:, :, 3] = alpha
+    return bgra
+
+
+def _finish_card(warped: np.ndarray) -> np.ndarray:
+    """正面化済みカードを 厳格水平化 → 仕上げ → 角丸（透明）して BGRA で返す。"""
+    leveled = _fine_deskew(warped)
+    enhanced = enhance_document(leveled)
+    return _round_corners(enhanced)
+
+
 def rotate_image(bgr: np.ndarray, degrees: int) -> np.ndarray:
     """90度単位で回転する（時計回り）。0/90/180/270 以外は90度に丸める。"""
     deg = int(degrees) % 360
@@ -274,11 +349,12 @@ def process_auto(data: bytes) -> dict:
     bgr = decode_image(data)
     quad = _auto_detect_quad(bgr)
     if quad is None:
+        # 検出失敗時は全体を仕上げただけ（角丸なし）を返し、手動補正へ誘導する。
         return {"original": bgr, "processed": enhance_document(bgr), "detected": False, "quad": None}
     warped = _warp_to_card(bgr, quad)
     return {
         "original": bgr,
-        "processed": enhance_document(warped),
+        "processed": _finish_card(warped),  # 厳格水平化＋角丸（BGRA）
         "detected": True,
         "quad": _quad_to_normalized(quad, bgr.shape),
     }
@@ -303,7 +379,7 @@ def process_with_points(data: bytes, points: Sequence[dict]) -> np.ndarray:
         raise ScanError("四隅の座標が不正です。") from exc
     quad = _order_points(pts)
     warped = _warp_to_card(bgr, quad)
-    return enhance_document(warped)
+    return _finish_card(warped)  # 厳格水平化＋角丸（BGRA）
 
 
 # --------------------------------------------------------------------------- #
@@ -322,6 +398,7 @@ def build_pdf(
     """
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
+    from reportlab.lib.utils import ImageReader
     from reportlab.pdfgen import canvas
 
     paths = [p for p in image_paths if p]
@@ -338,10 +415,16 @@ def build_pdf(
     x = (page_w - card_w) / 2.0          # 横中央寄せ
     y_top = page_h - top_margin          # 上端から下へ積む
     for i, path in enumerate(paths):
+        # 角丸PNGの透明部分を白へ合成（印刷時、角丸が紙の白に溶け込む）。
+        with Image.open(path) as im:
+            rgba = im.convert("RGBA")
+            flat = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+            flat.alpha_composite(rgba)
+            reader = ImageReader(flat.convert("RGB"))
         y = y_top - card_h - i * (card_h + gap)
         c.drawImage(
-            path, x, y, width=card_w, height=card_h,
-            preserveAspectRatio=True, anchor="c", mask="auto",
+            reader, x, y, width=card_w, height=card_h,
+            preserveAspectRatio=True, anchor="c",
         )
     c.showPage()
     c.save()

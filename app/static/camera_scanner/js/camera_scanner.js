@@ -100,10 +100,13 @@
         a.rel = "noopener";
         actions.appendChild(a);
       }
-      if (IS_MOBILE && s.status !== "completed") {
-        var resume = el("button", "cs-btn cs-btn-muted cs-btn-sm", "続きから");
-        resume.dataset.act = "resume"; resume.dataset.id = s.id;
-        actions.appendChild(resume);
+      var edit = el("button", "cs-btn cs-btn-muted cs-btn-sm", "編集");
+      edit.dataset.act = "edit"; edit.dataset.id = s.id;
+      actions.appendChild(edit);
+      // 補正前の元画像の保存オプションがONなら、表/裏のダウンロードを出す。
+      if (s.keep_original) {
+        if (s.has_front) actions.appendChild(originalDlLink(s.id, "front", "原本表"));
+        if (s.has_back) actions.appendChild(originalDlLink(s.id, "back", "原本裏"));
       }
       var del = el("button", "cs-btn cs-btn-danger cs-btn-sm", "削除");
       del.dataset.act = "delete"; del.dataset.id = s.id;
@@ -113,7 +116,14 @@
     });
   }
 
-  // ---- 撮影フロー（スマホ） ----
+  function originalDlLink(id, side, label) {
+    var a = el("a", "cs-btn cs-btn-muted cs-btn-sm", esc(label));
+    a.href = "/tools/camera_scanner/api/scans/" + id + "/sides/" + side + "/original?dl=1";
+    a.target = "_blank"; a.rel = "noopener";
+    return a;
+  }
+
+  // ---- 撮影／編集フロー ----
   function showStart() {
     state.scan = null; state.quads = {};
     if ($("cs-active")) $("cs-active").hidden = true;
@@ -122,6 +132,8 @@
   function showActive() {
     if ($("cs-start")) $("cs-start").hidden = true;
     if ($("cs-active")) $("cs-active").hidden = false;
+    var keep = $("cs-active-keep-original");
+    if (keep && state.scan) keep.checked = !!state.scan.keep_original;
   }
 
   function activePreset() {
@@ -167,12 +179,17 @@
       card.appendChild(preview);
 
       var actions = el("div", "cs-side-actions");
-      var label = el("label", "cs-btn cs-btn-primary cs-capture-label", "<span>" + (has ? "撮り直す" : "撮影する") + "</span>");
-      var input = el("input");
-      input.type = "file"; input.accept = "image/*"; input.setAttribute("capture", "environment");
-      input.dataset.side = key;
-      label.appendChild(input);
-      actions.appendChild(label);
+      if (IS_MOBILE) {
+        // 撮影（カメラ）はスマートフォンのみ。
+        var label = el("label", "cs-btn cs-btn-primary cs-capture-label", "<span>" + (has ? "撮り直す" : "撮影する") + "</span>");
+        var input = el("input");
+        input.type = "file"; input.accept = "image/*"; input.setAttribute("capture", "environment");
+        input.dataset.side = key;
+        label.appendChild(input);
+        actions.appendChild(label);
+      } else if (!has) {
+        actions.appendChild(el("span", "cs-side-hint", "この面はスマホで撮影してください"));
+      }
 
       if (has) {
         var adj = el("button", "cs-btn cs-btn-muted", "四隅を調整");
@@ -200,7 +217,8 @@
   function startScan() {
     var preset = ($("cs-preset") && $("cs-preset").value) || CFG.defaultPreset;
     var title = ($("cs-title") && $("cs-title").value) || "";
-    apiJSON("/tools/camera_scanner/api/scans", { method: "POST", json: { preset_key: preset, title: title } })
+    var keep = !!($("cs-keep-original") && $("cs-keep-original").checked);
+    apiJSON("/tools/camera_scanner/api/scans", { method: "POST", json: { preset_key: preset, title: title, keep_original: keep } })
       .then(function (data) {
         state.scan = data.scan; state.quads = {};
         showActive(); renderSides();
@@ -233,6 +251,14 @@
     apiJSON("/tools/camera_scanner/api/scans/" + state.scan.id + "/sides/" + side + "/adjust",
       { method: "POST", json: { rotate: 90 } })
       .then(function (data) { state.scan = data.scan; renderSides(); })
+      .catch(function (e) { toast(e.message, true); });
+  }
+
+  function setKeepOriginal(checked) {
+    if (!state.scan) return;
+    apiJSON("/tools/camera_scanner/api/scans/" + state.scan.id,
+      { method: "PUT", json: { keep_original: !!checked } })
+      .then(function (data) { state.scan = data.scan; loadList(); })
       .catch(function (e) { toast(e.message, true); });
   }
 
@@ -367,6 +393,9 @@
     if ($("cs-active-close")) $("cs-active-close").addEventListener("click", function () { showStart(); });
     if ($("cs-finalize-btn")) $("cs-finalize-btn").addEventListener("click", finalize);
     if ($("cs-refresh")) $("cs-refresh").addEventListener("click", loadList);
+    if ($("cs-active-keep-original")) {
+      $("cs-active-keep-original").addEventListener("change", function (e) { setKeepOriginal(e.target.checked); });
+    }
 
     var sides = $("cs-sides");
     if (sides) {
@@ -391,7 +420,7 @@
       list.addEventListener("click", function (ev) {
         var btn = ev.target.closest("button[data-act]");
         if (!btn) return;
-        if (btn.dataset.act === "resume") resumeScan(btn.dataset.id);
+        if (btn.dataset.act === "edit" || btn.dataset.act === "resume") resumeScan(btn.dataset.id);
         else if (btn.dataset.act === "delete") deleteScan(btn.dataset.id);
       });
     }

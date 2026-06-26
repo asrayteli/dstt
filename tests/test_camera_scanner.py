@@ -129,11 +129,27 @@ def test_upload_side_auto_detects_and_crops(client):
     assert body["scan"]["has_front"] is True
     assert body["scan"]["front_detected"] is True
 
-    # 補正後プレビューと補正前オリジナルの両方が配信できる。
+    # 補正後プレビュー（角丸のため PNG）と補正前オリジナル（JPEG）の両方が配信できる。
     prev = http.get(f"/tools/camera_scanner/api/scans/{scan_id}/sides/front/preview")
-    assert prev.status_code == 200 and prev.data[:2] == b"\xff\xd8"  # JPEG SOI
+    assert prev.status_code == 200 and prev.data[:4] == b"\x89PNG"  # PNG signature
     orig = http.get(f"/tools/camera_scanner/api/scans/{scan_id}/sides/front/original")
-    assert orig.status_code == 200 and orig.data[:2] == b"\xff\xd8"
+    assert orig.status_code == 200 and orig.data[:2] == b"\xff\xd8"  # JPEG SOI
+
+
+def test_keep_original_option_and_download(client):
+    app, http = client
+    scan_id = http.post("/tools/camera_scanner/api/scans", json={"keep_original": True}).get_json()["scan"]["id"]
+    assert http.get(f"/tools/camera_scanner/api/scans/{scan_id}").get_json()["scan"]["keep_original"] is True
+
+    upload_side(http, scan_id, "front")
+    # 補正前の元画像をダウンロード（添付）保存できる。
+    dl = http.get(f"/tools/camera_scanner/api/scans/{scan_id}/sides/front/original?dl=1")
+    assert dl.status_code == 200 and dl.data[:2] == b"\xff\xd8"
+    assert "attachment" in (dl.headers.get("Content-Disposition", ""))
+
+    # PUT で保存オプションを切り替えられる。
+    http.put(f"/tools/camera_scanner/api/scans/{scan_id}", json={"keep_original": False})
+    assert http.get(f"/tools/camera_scanner/api/scans/{scan_id}").get_json()["scan"]["keep_original"] is False
 
 
 def test_upload_rejects_unknown_side_and_missing_file(client):

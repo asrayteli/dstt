@@ -20,6 +20,11 @@
 }
 .cs-input:focus { outline: none; border-color: #0891b2; box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.15); }
 
+.cs-check { display: flex; align-items: flex-start; gap: 0.5rem; margin: 0.4rem 0 0.9rem; font-size: 0.85rem; color: #334155; cursor: pointer; }
+.cs-check input { margin-top: 0.15rem; flex-shrink: 0; width: 18px; height: 18px; }
+.cs-dl-links { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; }
+.cs-dl-links .cs-dl-label { font-size: 0.7rem; color: #64748b; }
+
 /* ボタン */
 .cs-btn {
   display: inline-flex; align-items: center; justify-content: center;

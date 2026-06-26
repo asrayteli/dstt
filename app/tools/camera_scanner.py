@@ -61,9 +61,25 @@ def _ensure_camera_scanner_schema():
         return
     try:
         db.create_all()
+        _add_missing_columns()
     except Exception:  # noqa: BLE001 - 起動時の保険。失敗しても他機能は動かす。
-        logger.warning("camera_scans テーブルの作成に失敗しました。", exc_info=True)
+        logger.warning("camera_scans テーブルの初期化に失敗しました。", exc_info=True)
     current_app.extensions["camera_scanner_schema_ready"] = True
+
+
+def _add_missing_columns():
+    """既存 camera_scans テーブルに後付け列を冪等に追加する（簡易マイグレーション）。"""
+    from sqlalchemy import inspect as sa_inspect, text
+
+    insp = sa_inspect(db.engine)
+    if "camera_scans" not in insp.get_table_names():
+        return
+    existing = {col["name"] for col in insp.get_columns("camera_scans")}
+    if "keep_original" not in existing:
+        with db.engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE camera_scans ADD COLUMN keep_original BOOLEAN NOT NULL DEFAULT 0"
+            ))
 
 
 # --------------------------------------------------------------------------- #
@@ -191,6 +207,7 @@ def api_create_scan():
         preset_key=preset,
         title=title,
         status=CameraScan.STATUS_DRAFT,
+        keep_original=bool(data.get("keep_original", False)),
     )
     db.session.add(scan)
     db.session.commit()
@@ -215,6 +232,8 @@ def api_update_scan(scan_id):
     data = request.get_json(silent=True) or {}
     if "title" in data:
         scan.title = str(data.get("title", "") or "").strip()[:120]
+    if "keep_original" in data:
+        scan.keep_original = bool(data.get("keep_original"))
     db.session.commit()
     return jsonify({"scan": scan.to_dict()})
 
@@ -263,12 +282,12 @@ def api_upload_side(scan_id, side):
 
     scan_dir = _scan_dir(scan_id, create=True)
     original_name = f"{side}_original.jpg"
-    processed_name = f"{side}_processed.jpg"
+    processed_name = f"{side}_processed.png"   # 角丸（透明）を保つため PNG
     try:
         with open(os.path.join(scan_dir, original_name), "wb") as f:
             f.write(scanner.encode_jpeg(result["original"]))
         with open(os.path.join(scan_dir, processed_name), "wb") as f:
-            f.write(scanner.encode_jpeg(result["processed"]))
+            f.write(scanner.encode_png(result["processed"]))
     except OSError as exc:
         logger.error("スキャン画像の保存に失敗: %s", exc, exc_info=True)
         return jsonify({"error": "画像の保存に失敗しました。"}), 500
@@ -318,7 +337,8 @@ def api_adjust_side(scan_id, side):
             if not processed_path or not os.path.exists(processed_path):
                 return jsonify({"error": "先に撮影してください。"}), 400
             with open(processed_path, "rb") as f:
-                image = scanner.decode_image(f.read())
+                # 角丸（アルファ）を保ったまま読み込んで回転する。
+                image = scanner.decode_unchanged(f.read())
         if rotate is not None:
             image = scanner.rotate_image(image, int(rotate))
     except scanner.ScanError as exc:
@@ -326,10 +346,10 @@ def api_adjust_side(scan_id, side):
     except (TypeError, ValueError):
         return jsonify({"error": "補正の指定が不正です。"}), 400
 
-    processed_name = f"{side}_processed.jpg"
+    processed_name = f"{side}_processed.png"   # 角丸（透明）を保つため PNG
     try:
         with open(os.path.join(_scan_dir(scan_id, create=True), processed_name), "wb") as f:
-            f.write(scanner.encode_jpeg(image))
+            f.write(scanner.encode_png(image))
     except OSError as exc:
         logger.error("補正画像の保存に失敗: %s", exc, exc_info=True)
         return jsonify({"error": "画像の保存に失敗しました。"}), 500
@@ -349,7 +369,9 @@ def api_adjust_side(scan_id, side):
 @camera_scanner_bp.route("/api/scans/<int:scan_id>/sides/<side>/original", methods=["GET"])
 @login_required
 def api_side_original(scan_id, side):
-    return _send_side_image(scan_id, side, "original")
+    # ?dl=1 で補正前（元）画像をダウンロード保存できる。
+    as_download = request.args.get("dl") in ("1", "true", "yes")
+    return _send_side_image(scan_id, side, "original", as_attachment=as_download)
 
 
 @camera_scanner_bp.route("/api/scans/<int:scan_id>/sides/<side>/preview", methods=["GET"])
@@ -358,16 +380,24 @@ def api_side_preview(scan_id, side):
     return _send_side_image(scan_id, side, "processed")
 
 
-def _send_side_image(scan_id, side, field):
+def _send_side_image(scan_id, side, field, *, as_attachment=False):
     scan, error = _get_scan(scan_id)
     if error:
         return error
     if side not in SIDES:
         return jsonify({"error": "不明な面です。"}), 400
-    path = _side_path(scan_id, getattr(scan, f"{side}_{field}", None))
+    filename = getattr(scan, f"{side}_{field}", None)
+    path = _side_path(scan_id, filename)
     if not path or not os.path.exists(path):
         return jsonify({"error": "画像が見つかりません。"}), 404
-    response = send_file(path, mimetype="image/jpeg")
+    download_name = None
+    if as_attachment:
+        ext = os.path.splitext(filename or "")[1] or ".jpg"
+        base = (scan.title or "scan").strip() or "scan"
+        side_label = {"front": "表", "back": "裏"}.get(side, side)
+        download_name = f"{base}_{side_label}_原本{ext}"
+    # mimetype は拡張子から自動判定（original=jpg / processed=png）。
+    response = send_file(path, as_attachment=as_attachment, download_name=download_name)
     # 補正をやり直すたびに最新を表示させる。
     response.headers["Cache-Control"] = "no-store"
     return response

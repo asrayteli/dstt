@@ -43,29 +43,38 @@
         <label for="cs-title">名前（任意）</label>
         <input id="cs-title" class="cs-input" type="text" maxlength="120" placeholder="例: 山田太郎" />
       </div>
+      <label class="cs-check">
+        <input id="cs-keep-original" type="checkbox" />
+        <span>補正前の元画像（撮影したそのままの写真）も保存する</span>
+      </label>
       <button id="cs-start-btn" class="cs-btn cs-btn-primary cs-btn-full">スキャンを開始</button>
-    </div>
-
-    <div id="cs-active" hidden>
-      <div class="cs-active-head">
-        <div>
-          <h2 class="cs-section-title" id="cs-active-title">スキャン中</h2>
-          <p class="cs-hint" id="cs-active-sub">各面を撮影し、必要なら四隅・向きを調整してください。</p>
-        </div>
-        <button id="cs-active-close" class="cs-btn cs-btn-muted">一覧へ</button>
-      </div>
-      <div id="cs-sides" class="cs-sides"></div>
-      <div class="cs-finalize-row">
-        <button id="cs-finalize-btn" class="cs-btn cs-btn-success cs-btn-full" disabled>PDFを作成して保存</button>
-      </div>
     </div>
   </section>
   {% else %}
   <section class="cs-card cs-pc-note">
-    <p>📱 撮影はスマートフォン（iPhone等）から行います。スマートフォンで DSTT にログインし、このカメラスキャナーを開いてください。</p>
-    <p class="cs-hint">このPC画面では、過去のスキャン結果の確認とPDFのダウンロード・削除ができます。</p>
+    <p>📱 新規スキャンの撮影はスマートフォン（iPhone等）から行います。</p>
+    <p class="cs-hint">このPC画面では、スキャン結果の確認・PDFダウンロード・<strong>四隅の再調整</strong>・削除ができます。一覧の「編集」から調整してください。</p>
   </section>
   {% endif %}
+
+  <!-- 編集パネル（モバイル＝撮影フロー / PC＝再調整）。撮影開始または一覧「編集」で表示。 -->
+  <section class="cs-card" id="cs-active" hidden>
+    <div class="cs-active-head">
+      <div>
+        <h2 class="cs-section-title" id="cs-active-title">スキャン</h2>
+        <p class="cs-hint" id="cs-active-sub">各面を撮影し、必要なら四隅・向きを調整してください。</p>
+      </div>
+      <button id="cs-active-close" class="cs-btn cs-btn-muted">一覧へ</button>
+    </div>
+    <div id="cs-sides" class="cs-sides"></div>
+    <label class="cs-check">
+      <input id="cs-active-keep-original" type="checkbox" />
+      <span>補正前の元画像も保存する</span>
+    </label>
+    <div class="cs-finalize-row">
+      <button id="cs-finalize-btn" class="cs-btn cs-btn-success cs-btn-full" disabled>PDFを作成して保存</button>
+    </div>
+  </section>
 
   <section class="cs-card">
     <div class="cs-list-head">
