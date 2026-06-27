@@ -1213,6 +1213,8 @@ class CameraScan(db.Model):
     back_processed = db.Column(db.String(255))
     back_detected = db.Column(db.Boolean, default=False)
     output_pdf = db.Column(db.String(255))
+    # 補正前の元画像（撮影したそのままの写真）を保存対象として保持するか（任意）。
+    keep_original = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=jst_now)
     updated_at = db.Column(db.DateTime, nullable=False, default=jst_now, onupdate=jst_now)
     completed_at = db.Column(db.DateTime)
@@ -1229,6 +1231,7 @@ class CameraScan(db.Model):
             'front_detected': bool(self.front_detected),
             'back_detected': bool(self.back_detected),
             'has_pdf': bool(self.output_pdf),
+            'keep_original': bool(self.keep_original),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
