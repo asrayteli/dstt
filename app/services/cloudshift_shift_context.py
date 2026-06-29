@@ -102,14 +102,14 @@ def _derive_active(emp: Any, warnings: list[PlanningWarning], number: str) -> bo
     retirement = _str(getattr(emp, "retirement_date", ""))
     if not retirement:
         return True
-    # 明確な日付（過去）なら退職とみなす
+    # 解釈できた日付は確定的に判定する（過去・当日なら退職、未来日なら在籍）。
+    # 未来日は「判定不能」ではないため警告を出さない。
     iso = retirement.replace("/", "-")
     parts = iso.split("-")
     if len(parts) == 3 and all(p.isdigit() for p in parts):
         try:
             ret_date = date(int(parts[0]), int(parts[1]), int(parts[2]))
-            if ret_date <= date.today():
-                return False
+            return ret_date > date.today()
         except ValueError:
             pass
     # 「？退職？」等の非正規値は判定不能 → 在籍維持＋warning
@@ -510,9 +510,20 @@ def build_external_assignments(
     戻り値は (external_assignments, leave_unavailable_days)。
     """
     try:
-        from app.tools.cloudshift import _assist_scene_conflict_entries
+        from app.tools.cloudshift import (
+            _assist_scene_conflict_entries,
+            _iter_stored_projects,
+        )
     except Exception:  # pragma: no cover
         return [], []
+
+    # 月内の全日で他現場占有を引くと、_assist_scene_conflict_entries が日数ぶん
+    # DB 全件を再ロードしてしまう。プロジェクト一覧は月内で不変なので一度だけ
+    # 取得して全日で使い回す（取得失敗時は従来どおり各日でロードさせる）。
+    try:
+        stored_projects: list[dict[str, Any]] | None = list(_iter_stored_projects())
+    except Exception:  # pragma: no cover
+        stored_projects = None
 
     days = monthrange(year, month)[1]
     seen: set[tuple[str, str, str, str]] = set()
@@ -521,7 +532,7 @@ def build_external_assignments(
     for day in range(1, days + 1):
         d = date(year, month, day)
         try:
-            entries = _assist_scene_conflict_entries(project, d) or []
+            entries = _assist_scene_conflict_entries(project, d, stored_projects=stored_projects) or []
         except Exception:  # pragma: no cover
             continue
         for entry in entries:

@@ -36,6 +36,44 @@ def base_project(**months_extra):
     }
 
 
+class _FakeEmp:
+    def __init__(self, is_deleted=False, retirement_date=""):
+        self.is_deleted = is_deleted
+        self.retirement_date = retirement_date
+
+
+def test_derive_active_handles_retirement_dates():
+    from datetime import timedelta
+
+    today = date.today()
+    past = (today - timedelta(days=1)).isoformat()
+    future = (today + timedelta(days=365)).isoformat()
+
+    # 過去の退職日 → 退職（警告なし）
+    w1: list = []
+    assert ctx._derive_active(_FakeEmp(retirement_date=past), w1, "E001") is False
+    assert w1 == []
+
+    # 未来の退職日 → 在籍。判定できているため「判定不能」警告は出さない
+    w2: list = []
+    assert ctx._derive_active(_FakeEmp(retirement_date=future), w2, "E002") is True
+    assert not any(x.code == "uncertain_retirement" for x in w2)
+
+    # 「？退職？」等の非正規値 → 在籍維持＋警告
+    w3: list = []
+    assert ctx._derive_active(_FakeEmp(retirement_date="？退職？"), w3, "E003") is True
+    assert any(x.code == "uncertain_retirement" for x in w3)
+
+    # is_deleted は確実に退職
+    w4: list = []
+    assert ctx._derive_active(_FakeEmp(is_deleted=True), w4, "E004") is False
+
+    # 退職日なし → 在籍
+    w5: list = []
+    assert ctx._derive_active(_FakeEmp(retirement_date=""), w5, "E005") is True
+    assert w5 == []
+
+
 def test_workers_built_from_assist():
     project = base_project()
     settings, _ = e.migrate_settings(project.get("shift_engine"))
@@ -297,7 +335,7 @@ def test_external_leave_entry_becomes_hard_unavailable(monkeypatch):
     """他の現場シフト帳に入っている休みは hard の不可日になる。"""
     from app.tools import cloudshift as cs
 
-    def fake_conflicts(project, target_date):
+    def fake_conflicts(project, target_date, stored_projects=None):
         if target_date == date(YEAR, MONTH, 2):
             return [{"project_id": "P2", "project_title": "B現場", "shift_key": "PAID",
                      "shift_label": "有休", "entry_name": "佐藤", "employee_number": "E001"}]
@@ -311,6 +349,37 @@ def test_external_leave_entry_becomes_hard_unavailable(monkeypatch):
     u = leave_days[0]
     assert (u.employee_number, u.date, u.strength, u.source) == \
         ("E001", date(YEAR, MONTH, 2), "hard", "shift_entry")
+
+
+def test_external_assignments_loads_projects_once_per_month(monkeypatch):
+    """月内の他現場占有収集でプロジェクト一覧を毎日再ロードしない（性能回帰防止）。"""
+    from app.tools import cloudshift as cs
+
+    iter_calls = {"count": 0}
+
+    def fake_iter():
+        iter_calls["count"] += 1
+        return []
+
+    received_stored: list = []
+
+    def fake_conflicts(project, target_date, stored_projects=None):
+        received_stored.append(stored_projects)
+        return []
+
+    monkeypatch.setattr(cs, "_iter_stored_projects", fake_iter)
+    monkeypatch.setattr(cs, "_assist_scene_conflict_entries", fake_conflicts)
+
+    warnings: list = []
+    ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
+
+    # プロジェクト一覧の読み込みは月内で 1 回だけ
+    assert iter_calls["count"] == 1
+    # 取得済み一覧が全日（28〜31 日）の突合へ渡される
+    from calendar import monthrange
+
+    assert len(received_stored) == monthrange(YEAR, MONTH)[1]
+    assert all(s == [] for s in received_stored)
 
 
 def test_person_project_leave_days(monkeypatch):
