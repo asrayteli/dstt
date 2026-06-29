@@ -420,6 +420,16 @@
         <div class="csm-feat-name">マスタ連携</div>
         <div class="csm-feat-desc">社員名簿PLUS・現場リストPLUSと紐付け</div>
       </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">🗂️</div>
+        <div class="csm-feat-name">範囲一括編集</div>
+        <div class="csm-feat-desc">曜日・期間でまとめて入力・置換・削除</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">📊</div>
+        <div class="csm-feat-name">月間集計</div>
+        <div class="csm-feat-desc">担当回数や人数不足をその場で集計</div>
+      </div>
     </div>
 
     <div class="csm-card" style="margin-top:18px">
@@ -612,15 +622,25 @@
       <div class="csm-card">
         <div class="csm-card-title">🗓️ 月を切り替える・増やす</div>
         <ul class="csm-ul">
-          <li>「表示中の月」で月を選びます。</li>
-          <li>「前の月へ」「次の月へ」で移動します。</li>
-          <li>編集URLや空の状態からは「前月を追加」「翌月を追加」で月を増やせます。</li>
+          <li>「表示中の月」で、作成済みの月を切り替えます。</li>
+          <li>所有者は「前の月へ」「次の月へ」で移動します。まだ無い前月・翌月へ進むと、その月を新しく作成します（現在の月からコピーするか、空で作るかを選べます）。</li>
+          <li>公開編集URLでは「前月を追加」「翌月を追加」で前後の月を増やせます。</li>
+          <li>月が 1 つも無いときは「月を作成」から最初の月を作ります。</li>
         </ul>
       </div>
       <div class="csm-card">
         <div class="csm-card-title">👥 必要人数</div>
         <p style="font-size:13.5px;color:#475569;margin:0">その月に 1 日あたり必要な人数です。設定すると、人数が足りない日が分かりやすくなり、自動作成の需要にも使われます。0 のときは人数の判定を行いません。</p>
       </div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🗂️ 範囲一括編集</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">アクションの「範囲一括編集」から、複数の日にまとめて同じ入力を反映できます。曜日や期間で対象を絞れるので、定例の配置をまとめて入れたいときに便利です。</p>
+      <ul class="csm-ul">
+        <li><strong>対象範囲</strong>：全日 ／ 期間指定（開始日〜終了日）／ 曜日指定 ／ 土日 ／ 日付を選んで指定。</li>
+        <li><strong>操作</strong>：追加（足す）／ 置換（入れ替え）／ 削除（消す）。</li>
+      </ul>
     </div>
 
     <div class="csm-card">
@@ -689,12 +709,13 @@
 
     <div class="csm-card">
       <div class="csm-card-title">🏢 DSTTアカウントへの共有（アカウント共有）</div>
-      <p style="font-size:14px;color:#475569;margin:0 0 8px">DSTT を使う同僚には、URL ではなくアカウント単位で共有できます。共有された人は、自分の CloudShift の一覧からそのシフト帳を開けます。</p>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">DSTT を使う同僚には、URL ではなくアカウント単位で共有できます。共有された人は、自分の CloudShift の「自分のシフト帳」一覧にそのシフト帳が表示され、<strong>閲覧</strong>できます。内容を入力・編集してもらうときは編集URLを渡してください。</p>
       <ul class="csm-ul">
         <li><strong>同じ営業所内への共有</strong>：あなたの営業所権限の範囲で、同じ営業所のメンバーに共有します。</li>
         <li><strong>特定社員への共有</strong>：社員番号（DSTTアカウント）を指定して、その人だけに共有します。</li>
       </ul>
-      <div class="csm-note" style="margin-top:8px">🔐 アカウント共有は DSTT 利用者向け、共有URL は DSTT アカウントが無い人にも渡せる、と使い分けると便利です。</div>
+      <div class="csm-note" style="margin-top:8px">🔐 アカウント共有は閲覧（DSTT 利用者向け）、共有URL は閲覧／編集／通知（DSTT アカウントが無い人にも渡せる）、と使い分けると便利です。</div>
+      <div class="csm-note" style="margin-top:8px">🗂️ 同じ社員・現場のシフト帳を複数の人がそれぞれ所有してしまった場合は、一覧に「他オーナーと重複」と表示され、「この帳簿を非表示」で自分の一覧からだけ隠せます（データは消えません）。</div>
     </div>
 
     <div class="csm-card">
@@ -788,10 +809,10 @@
         <thead><tr><th style="width:150px">登録するもの</th><th>意味</th></tr></thead>
         <tbody>
           <tr><td>専従者</td><td>その現場の専従。現場リストPLUSの専従者情報からも読み込まれます。最優先の適格者です。</td></tr>
-          <tr><td>経験済み現場</td><td>過去に一人で勤務した実績のある現場。配置の適格者になります。</td></tr>
-          <tr><td>研修済み現場</td><td>研修を受けた段階の現場。実績より一段低い扱いで適格になります。</td></tr>
-          <tr><td>ルール</td><td>希望曜日・NG曜日など、手動の条件。</td></tr>
-          <tr><td>記録・プロファイル</td><td>候補者ごとの設定や過去実績の材料。</td></tr>
+          <tr><td>経験済み現場<br>（現場経験者）</td><td>過去に一人で勤務した実績のある現場・人。配置の適格者になります。代務の実績からも自動でたまります。</td></tr>
+          <tr><td>研修要現場</td><td>研修が必要な現場と、その研修候補者を登録します。研修を受けた人は適格者（実績より一段低い扱い）になります。</td></tr>
+          <tr><td>ルール</td><td>希望曜日・NG曜日など、候補者ごとの手動の条件（加点・除外）。</td></tr>
+          <tr><td>候補者プロファイル・実績</td><td>候補者ごとの設定（希望曜日・候補状態など）や、過去実績の材料。</td></tr>
         </tbody>
       </table>
       <div class="csm-tip" style="margin-top:10px">💡 シフトの entry に <strong>代務</strong> や <strong>研修</strong> を付けて保存すると、その経験が<strong>自動で登録</strong>されます。手で登録しなくても、日々の入力だけでアシストが育ちます。</div>
@@ -834,6 +855,17 @@
         </tbody>
       </table>
       <div class="csm-note" style="margin-top:8px">📅 出力は「表示中の月」が対象です。閲覧URL・編集URL からも単月で出力できます。</div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">📊 月間集計</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">アクションの「月間集計」を押すと、その月の集計をまとめて確認できます。所有者だけでなく、共有URLで見ている人も開けます。</p>
+      <ul class="csm-ul">
+        <li>勤務件数・入力のある日数・空き日数・<strong>人数が足りない日数</strong>・コメント数などの概要。</li>
+        <li>人ごとの担当回数・担当日数の一覧。</li>
+        <li>時間帯（午前・午後…）・車両・休暇種別ごとの件数。</li>
+      </ul>
+      <div class="csm-tip" style="margin-top:8px">💡 保存前の編集内容や仮保存（下書き）の状態でも集計できます。確定前に偏りや不足を確認するのに使えます。</div>
     </div>
 
     <div class="csm-card">
@@ -933,7 +965,7 @@
     <div class="csm-grid2">
       <div class="csm-card" style="margin:0">
         <div class="csm-card-title">🆕 新規シフト作成</div>
-        <p style="font-size:13.5px;color:#475569;margin:0">種別・年・月・タイトル（必要なら人数）を決めてカレンダーを作り、日ごとに入力して CSV を書き出します。</p>
+        <p style="font-size:13.5px;color:#475569;margin:0">種別・年・月・名称（現場名や氏名）・必要に応じて人数を決めてカレンダーを作り、日ごとに入力して CSV を書き出します。</p>
       </div>
       <div class="csm-card" style="margin:0">
         <div class="csm-card-title">✏️ 既存シフト編集</div>
