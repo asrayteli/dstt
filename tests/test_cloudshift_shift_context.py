@@ -563,6 +563,9 @@ def test_role_option_entries_derive_experience_directly():
     settings, _ = e.migrate_settings(None)
     warnings: list = []
     workers = {w.employee_number: w for w in ctx.build_workers(project, settings, warnings)}
-    assert "10" in workers["E301"].experienced_site_row_ids
-    assert "10" in workers["E302"].trained_site_row_ids
+    assert "10" in workers["E301"].experienced_site_row_ids  # 代務=実績
+    assert "10" not in workers["E301"].trained_site_row_ids
+    assert "10" in workers["E302"].trained_site_row_ids      # 研修=研修済み
+    # 研修(TRAIN)は実績(経験)には入れない。records 経路と同じく習熟度を一段低く保つ
+    assert "10" not in workers["E302"].experienced_site_row_ids
     assert workers["E301"].name == "田中"

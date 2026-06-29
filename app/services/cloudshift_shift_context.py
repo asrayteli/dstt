@@ -166,10 +166,14 @@ def _role_option_sites_from_entries(
                 number = _str(entry.get("employee_number"))
                 if not number:
                     continue
-                # 代務・研修いずれも「経験済み現場」へ反映する（要件4/5）。
-                experienced.setdefault(number, set()).add(site_row_id)
+                # 代務（SUB）= 一人で勤務した実績 → 経験。
+                # 研修（TRAIN）= 教わったが一人ではやっていない → 研修済みのみ。
+                # 実績(120点)と研修済み(60点)の習熟度差を保つため、TRAIN は経験へ
+                # 入れない（アシスト records 経路の振り分けと統一）。
                 if key == _ROLE_OPTION_TRAINING:
                     trained.setdefault(number, set()).add(site_row_id)
+                else:
+                    experienced.setdefault(number, set()).add(site_row_id)
                 _option, name = parse_entry_value(entry.get("value") or "")
                 if _str(name):
                     names.setdefault(number, _str(name))
