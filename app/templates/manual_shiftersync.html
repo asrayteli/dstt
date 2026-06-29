@@ -317,6 +317,22 @@
   /* ===== Sublist ===== */
   .csm-sublist { padding-left: 18px; margin: 6px 0; }
   .csm-sublist li { font-size: 13.5px; color: #475569; margin: 4px 0; line-height: 1.6; }
+
+  /* ===== Screenshot figure ===== */
+  .csm-shot { margin: 14px 0 6px; }
+  .csm-shot img {
+    width: 100%; max-width: 720px; height: auto; display: block;
+    border: 1px solid #e2e8f0; border-radius: 12px;
+    box-shadow: 0 6px 20px rgba(15,23,42,0.10);
+  }
+  .csm-shot.csm-shot-narrow img { max-width: 340px; }
+  .csm-shot figcaption {
+    font-size: 12.5px; color: #64748b; margin-top: 7px; line-height: 1.55;
+    display: flex; gap: 6px; align-items: flex-start;
+  }
+  .csm-shot figcaption::before {
+    content: "📷"; font-size: 12px; flex-shrink: 0;
+  }
 </style>
 
 <!-- ===== Hero ===== -->
@@ -549,6 +565,11 @@
       </div>
     </div>
 
+    <figure class="csm-shot">
+      <img src="{{ url_for('static', filename='cloudshift/manual/02_editor_calendar.png') }}" alt="CloudShift の編集画面" loading="lazy">
+      <figcaption>編集画面。上部にタイトル・現場、右側に「この月を保存」と通常／仮保存の切替、中央の「アクション」に月の切替・シフト帳の設定・月間集計・アシスト・範囲一括編集・各出力ボタンが並びます。下にカレンダーが続きます。</figcaption>
+    </figure>
+
     <!-- Step 1 -->
     <div class="csm-step">
       <div class="csm-step-badge">1</div>
@@ -641,6 +662,10 @@
         <li><strong>対象範囲</strong>：全日 ／ 期間指定（開始日〜終了日）／ 曜日指定 ／ 土日 ／ 日付を選んで指定。</li>
         <li><strong>操作</strong>：追加（足す）／ 置換（入れ替え）／ 削除（消す）。</li>
       </ul>
+      <figure class="csm-shot">
+        <img src="{{ url_for('static', filename='cloudshift/manual/05_bulk_edit.png') }}" alt="範囲一括編集の画面" loading="lazy">
+        <figcaption>範囲一括編集。対象範囲と操作を選び、入力名・オプション・第二オプション（代務／研修）・枝番号・コメントを設定して「適用」すると、対象の全日にまとめて反映されます。</figcaption>
+      </figure>
     </div>
 
     <div class="csm-card">
@@ -705,6 +730,10 @@
       <div class="csm-card-title">🔁 URL の再発行</div>
       <p style="font-size:14px;color:#475569;margin:0 0 8px">各 URL は「開く」「コピー」「再発行」できます。<strong>再発行するとその URL だけが無効</strong>になり、新しい URL に切り替わります。「3つすべて再発行」でまとめて作り直すこともできます。</p>
       <div class="csm-warn">⚠️ 再発行すると、前に配った URL は開けなくなります。誤って共有してしまったときは再発行で止められますが、必要な人には新しい URL を配り直してください。</div>
+      <figure class="csm-shot csm-shot-narrow">
+        <img src="{{ url_for('static', filename='cloudshift/manual/04_share_urls.png') }}" alt="共有URLパネル" loading="lazy">
+        <figcaption>編集画面の「共有URL（DSTTアカウント外向け）」を開いたところ。閲覧／編集／通知付き閲覧の各URLを「開く・コピー・再発行」でき、下の「3つすべて再発行」でまとめて作り直せます。</figcaption>
+      </figure>
     </div>
 
     <div class="csm-card">
@@ -765,8 +794,8 @@
         </div>
         <div class="csm-flow-step">
           <div class="csm-flow-num">STEP 3</div>
-          <div class="csm-flow-label">下書きへ保存</div>
-          <div class="csm-flow-note">納得したら下書きに入れます（確定シフトはまだ変わりません）</div>
+          <div class="csm-flow-label">プレビューで確認</div>
+          <div class="csm-flow-note">「プレビューを開いて確認・反映」で内容を確認し、下書きに入れます（確定シフトはまだ変わりません）</div>
         </div>
         <div class="csm-flow-step">
           <div class="csm-flow-num">STEP 4</div>
@@ -775,6 +804,10 @@
         </div>
       </div>
       <div class="csm-tip" style="margin-top:10px">💡 計算は常に 1 か月全体を見て行います。対象日を絞っても、連勤・公平性・他現場との重なりなどは月全体で判定されます。対象日指定の意味は「新しく配置してよい日」を限定することだけです。</div>
+      <figure class="csm-shot">
+        <img src="{{ url_for('static', filename='cloudshift/manual/07_auto_create.png') }}" alt="自動作成パネル" loading="lazy">
+        <figcaption>自動作成パネル。上部に候補者・需要・固定の状況、続けて「配置の最低基準」「既存シフトの扱い」「未確認休暇の扱い」などの設定。中央のカレンダーで対象日を選び（全日／平日のみ／土日祝のみ／曜日切替／個別）、下の「試算する」で結果を確認、「プレビューを開いて確認・反映」で下書きへ入れます。</figcaption>
+      </figure>
     </div>
 
     <div class="csm-grid2">
@@ -866,6 +899,10 @@
         <li>時間帯（午前・午後…）・車両・休暇種別ごとの件数。</li>
       </ul>
       <div class="csm-tip" style="margin-top:8px">💡 保存前の編集内容や仮保存（下書き）の状態でも集計できます。確定前に偏りや不足を確認するのに使えます。</div>
+      <figure class="csm-shot">
+        <img src="{{ url_for('static', filename='cloudshift/manual/06_summary.png') }}" alt="月間集計の画面" loading="lazy">
+        <figcaption>月間集計。登録件数・入力日数・空欄日数・不足日数などの概要に続き、人物別の回数、時間帯・車両・休暇種別ごとの集計が並びます。</figcaption>
+      </figure>
     </div>
 
     <div class="csm-card">
