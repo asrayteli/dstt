@@ -339,7 +339,7 @@
 <div class="csm-hero-bar">
   <div class="csm-hero-kicker">SHIFTER&nbsp;SYNC &nbsp;/&nbsp; CLOUD&nbsp;SHIFT</div>
   <h1>👥 ShifterSync マニュアル</h1>
-  <p>シフトの作成・共有・自動作成・出力までをまとめて扱えるツールです。中でも <strong>CloudShift</strong> は、本人や代理の人に URL を配ってブラウザから希望シフトを入れてもらい、重複チェック・自動作成・出力・有休連携まで一気通貫で行えるクラウド版ワークスペースです。</p>
+  <p>シフトの作成・共有・自動作成・出力までをまとめて扱えるツールです。中でも <strong>CloudShift</strong> は、本人や代理の人に URL を配ってブラウザから希望シフトを入れてもらい、重複チェック・自動作成・出力・有休連携までを続けて行えるクラウド版の画面です。</p>
   <div class="csm-hero-btns">
     <a href="/tools/shiftersync/cloudshift" class="csm-hero-btn csm-hero-btn-primary">CloudShift を開く</a>
     <a href="/tools/shiftersync" class="csm-hero-btn csm-hero-btn-secondary">ShifterSync を開く</a>
@@ -652,7 +652,7 @@
       </div>
       <div class="csm-card">
         <div class="csm-card-title">👥 必要人数</div>
-        <p style="font-size:13.5px;color:#475569;margin:0">その月に 1 日あたり必要な人数です。設定すると、人数が足りない日が分かりやすくなり、自動作成の需要にも使われます。0 のときは人数の判定を行いません。</p>
+        <p style="font-size:13.5px;color:#475569;margin:0">その月に 1 日あたり必要な人数です。設定すると、人数が足りない日が分かりやすくなり、自動作成でも使われます。0 のときは人数のチェックを行いません。</p>
       </div>
     </div>
 
@@ -916,14 +916,14 @@
       <table class="csm-opt-table">
         <thead><tr><th style="width:150px">登録するもの</th><th>意味</th></tr></thead>
         <tbody>
-          <tr><td>専従者</td><td>その現場の専従。現場リストPLUSの専従者情報からも読み込まれます。最優先の適格者です。</td></tr>
-          <tr><td>経験済み現場<br>（現場経験者）</td><td>過去に一人で勤務した実績のある現場・人。配置の適格者になります。代務の実績からも自動でたまります。</td></tr>
-          <tr><td>研修要現場</td><td>研修が必要な現場と、その研修候補者を登録します。研修を受けた人は適格者（実績より一段低い扱い）になります。</td></tr>
+          <tr><td>専従者</td><td>その現場の専従。現場リストPLUSの専従者情報からも読み込まれます。いちばん優先して配置されます。</td></tr>
+          <tr><td>経験済み現場<br>（現場経験者）</td><td>その人が過去に一人で勤務した実績のある現場。配置の候補になります。代務の実績からも自動でたまります。</td></tr>
+          <tr><td>研修要現場</td><td>研修が必要な現場と、その研修候補者を登録します。研修を受けた人も配置の候補になります（実績より一段低い扱い）。</td></tr>
           <tr><td>ルール</td><td>希望曜日・NG曜日など、候補者ごとの手動の条件（加点・除外）。</td></tr>
           <tr><td>候補者プロファイル・実績</td><td>候補者ごとの設定（希望曜日・候補状態など）や、過去実績の材料。</td></tr>
         </tbody>
       </table>
-      <div class="csm-tip" style="margin-top:10px">💡 シフトの entry に <strong>代務</strong> や <strong>研修</strong> を付けて保存すると、その経験が<strong>自動で登録</strong>されます。手で登録しなくても、日々の入力だけでアシストが育ちます。</div>
+      <div class="csm-tip" style="margin-top:10px">💡 シフトに <strong>代務</strong> や <strong>研修</strong> を付けて保存すると、その人の経験が<strong>自動で登録</strong>されます。手で登録しなくても、ふだんの入力だけでアシストの精度が上がっていきます。</div>
     </div>
 
     <div class="csm-card">
@@ -1156,7 +1156,7 @@
         <span class="csm-acc-q">対象日に指定したのにシフトが入りません。</span>
         <span class="csm-acc-arrow">▼</span>
       </button>
-      <div class="csm-acc-body">多くの場合、その日の「必要人数」が 0 になっているためです。必要人数を設定していない現場では前月の実績から需要を推定するため、前月に実績の無い曜日は需要が 0 になります。自動作成パネルで対象日の必要人数を直接指定すると、その場で埋められます。日別の結果に「需要 0」の警告が出ていないか確認してください。</div>
+      <div class="csm-acc-body">多くの場合、その日の「必要人数」が 0 になっているためです。必要人数を設定していない現場では前月の実績から必要人数を推定するため、前月に実績の無い曜日は 0 になります。自動作成パネルで対象日の必要人数を直接指定すると、その場で埋められます。日別の結果に「需要 0」の表示が出ていないか確認してください。</div>
     </div>
 
     <div class="csm-acc-item">
@@ -1172,7 +1172,7 @@
         <span class="csm-acc-q">「代務」「研修」は何のためにありますか？</span>
         <span class="csm-acc-arrow">▼</span>
       </button>
-      <div class="csm-acc-body">勤務の役割を表す第二オプションです。代務は「一人で実際に勤務した（＝実績扱い）」、研修は「教わった段階（実績より一段低い）」を意味します。entry にこれらを付けて保存すると、その人の経験が自動でアシストに登録され、候補検索や自動作成で適格者として扱われやすくなります。</div>
+      <div class="csm-acc-body">勤務の役割を表す第二オプションです。代務は「一人で実際に勤務した（＝実績扱い）」、研修は「教わった段階（実績より一段低い）」を意味します。シフトにこれらを付けて保存すると、その人の経験が自動でアシストに登録され、候補検索や自動作成で配置の候補として扱われやすくなります。</div>
     </div>
 
     <div class="csm-acc-item">
@@ -1188,7 +1188,7 @@
         <span class="csm-acc-q">テンプレートを反映すると、共有先が入れた内容は消えますか？</span>
         <span class="csm-acc-arrow">▼</span>
       </button>
-      <div class="csm-acc-body">他のシフト帳から同期された入力は常に温存され、手入力のエントリだけが差し替わります。上書き方法（置換／追加／空き日のみ）で、手入力分をどう扱うかを選べます。</div>
+      <div class="csm-acc-body">他のシフト帳から同期された入力は常に温存され、手で入力した分だけが差し替わります。上書き方法（置換／追加／空き日のみ）で、手入力分をどう扱うかを選べます。</div>
     </div>
 
     <div class="csm-acc-item">
@@ -1265,7 +1265,7 @@
         <tr><td>休暇</td><td>有休・代休・公休・慶弔休暇・介護休暇・リフレッシュ休暇・その他</td></tr>
       </tbody>
     </table>
-    <div class="csm-note" style="margin-top:12px">休暇どうしは重複になりません。代務・研修は終日の勤務として扱われ、同じ日の他の勤務（時間帯・車両・素の名前など）と重なります。臨時便（TEMP）は、同じ現場で臨時便どうしのときだけ重複とみなします。</div>
+    <div class="csm-note" style="margin-top:12px">休暇どうしは重複になりません。代務・研修は終日の勤務として扱われ、同じ日の他の勤務（時間帯・車両・名前だけの予定など）と重なります。臨時便（TEMP）は、同じ現場で臨時便どうしのときだけ重複とみなします。</div>
     <div style="text-align:right;margin-top:16px">
       <button class="csm-popup-btn" onclick="closeModal('modalOptions')">閉じる</button>
     </div>
@@ -1282,7 +1282,7 @@
     <table class="csm-opt-table">
       <thead><tr><th style="width:150px">項目</th><th>内容</th></tr></thead>
       <tbody>
-        <tr><td>対象日（プリセット）</td><td>全日／平日のみ／土日祝のみ／全解除。さらに曜日チップ（月〜日の一括切替）と、日付の個別 ON/OFF ができます。「火曜〜土曜だけ」「特定の日だけ」も指定できます。</td></tr>
+        <tr><td>対象日（プリセット）</td><td>全日／平日のみ／土日祝のみ／全解除。さらに曜日ボタン（月〜日の一括切替）と、日付を 1 日ずつオン／オフできます。「火曜〜土曜だけ」「特定の日だけ」も指定できます。</td></tr>
         <tr><td>対象日の意味</td><td>「新しく配置してよい日」の限定です。計算は常に 1 か月全体で行い、連勤・公平性・他現場との重なりなどは月全体で判定します。対象外の日の既存入力は 100% そのまま残ります。</td></tr>
         <tr><td>対象日の必要人数</td><td>対象日の「必要人数」を直接指定できます。需要 0 で入らない日をその場で解決できます。</td></tr>
         <tr><td>有休カレンダー</td><td>有休共有ツールの休みは既定で取り込み対象（チェック済み）です。取り込み方を緩めることもできます。</td></tr>
