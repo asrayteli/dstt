@@ -354,6 +354,7 @@
     <a href="#start"     class="csm-nav-link" data-section="start">🚀 はじめかた</a>
     <a href="#edit"      class="csm-nav-link" data-section="edit">📅 シフト編集</a>
     <a href="#share"     class="csm-nav-link" data-section="share">🔗 共有する</a>
+    <a href="#settings"  class="csm-nav-link" data-section="settings">⚙️ シフト帳の設定</a>
     <a href="#auto"      class="csm-nav-link" data-section="auto">🤖 自動作成・アシスト</a>
     <a href="#output"    class="csm-nav-link" data-section="output">✅ 出力・履歴・チェック</a>
     <a href="#link"      class="csm-nav-link" data-section="link">🔄 連携・代務</a>
@@ -738,7 +739,7 @@
 
     <div class="csm-card">
       <div class="csm-card-title">🏢 DSTTアカウントへの共有（アカウント共有）</div>
-      <p style="font-size:14px;color:#475569;margin:0 0 8px">DSTT を使う同僚には、URL ではなくアカウント単位で共有できます。共有された人は、自分の CloudShift の「自分のシフト帳」一覧にそのシフト帳が表示され、<strong>閲覧</strong>できます。内容を入力・編集してもらうときは編集URLを渡してください。</p>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">DSTT を使う同僚には、URL ではなくアカウント単位で共有できます（アクションの「シフト帳の設定 → シフト帳共有」で設定。→ <a href="#settings" style="color:#0369a1;font-weight:700">シフト帳の設定</a>）。共有された人は、自分の CloudShift の「自分のシフト帳」一覧にそのシフト帳が表示され、<strong>閲覧</strong>できます。内容を入力・編集してもらうときは編集URLを渡してください。</p>
       <ul class="csm-ul">
         <li><strong>同じ営業所内への共有</strong>：あなたの営業所権限の範囲で、同じ営業所のメンバーに共有します。</li>
         <li><strong>特定社員への共有</strong>：社員番号（DSTTアカウント）を指定して、その人だけに共有します。</li>
@@ -761,6 +762,55 @@
   </section>
 
 
+  <!-- ========== シフト帳の設定 ========== -->
+  <section id="settings" class="csm-section">
+    <div class="csm-section-header">
+      <div class="csm-section-icon" style="background:#e0f2fe">⚙️</div>
+      <div>
+        <h2 class="csm-section-title">シフト帳の設定（アクションの中身）</h2>
+        <p class="csm-section-desc">アクションの「シフト帳の設定」を開くと、共有・通知・復元・申請をまとめて管理するモーダルが出ます。タブはシフト帳の種別によって変わります。</p>
+      </div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🗂️ タブの一覧</div>
+      <table class="csm-opt-table">
+        <thead><tr><th style="width:170px">タブ</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>シフト帳共有</td><td>DSTTアカウント向けの共有（同じ営業所内／特定社員 社員番号）。閲覧として共有されます。</td></tr>
+          <tr><td>共有URL</td><td>閲覧／編集／通知付き閲覧の各URLの確認・コピー・再発行（個別／3つまとめて）。</td></tr>
+          <tr><td>通知先 <span class="csm-tag csm-tag-sky">現場シフトのみ</span></td><td>通知付き閲覧URL（PWA）で通知を有効化した端末の一覧。名称変更・無効化・削除ができます。更新時はここの全端末へ通知が届きます。</td></tr>
+          <tr><td>復元</td><td>保存ごとの版（リビジョン）を選んで現在版として復元します（現在の内容は失われません）。</td></tr>
+          <tr><td>休暇種別変更申請 ／ 申請設定 <span class="csm-tag csm-tag-purple">個人シフトのみ</span></td><td>閲覧者からの休暇種別変更申請の確認・却下と、「休暇種別変更申請を許可」のオン／オフ。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="csm-grid2">
+      <figure class="csm-shot">
+        <img src="{{ url_for('static', filename='cloudshift/manual/15_shift_settings.png') }}" alt="シフト帳共有タブ" loading="lazy">
+        <figcaption>「シフト帳共有」タブ。同じ営業所内、または社員番号で特定社員に共有します（閲覧）。下に現在の共有先が出ます。</figcaption>
+      </figure>
+      <figure class="csm-shot">
+        <img src="{{ url_for('static', filename='cloudshift/manual/17_settings_notify.png') }}" alt="通知先タブ" loading="lazy">
+        <figcaption>「通知先」タブ（現場シフト）。通知付き閲覧URLで通知を有効化した端末が並び、名称変更・無効化・削除ができます。</figcaption>
+      </figure>
+    </div>
+    <div class="csm-grid2">
+      <figure class="csm-shot">
+        <img src="{{ url_for('static', filename='cloudshift/manual/18_settings_restore.png') }}" alt="復元タブ" loading="lazy">
+        <figcaption>「復元」タブ。保存ごとの版を選んで「復元」すると、その版を現在版として戻せます（現在の内容は失われません）。</figcaption>
+      </figure>
+      <figure class="csm-shot">
+        <img src="{{ url_for('static', filename='cloudshift/manual/19_settings_requests.png') }}" alt="申請設定タブ（個人シフト）" loading="lazy">
+        <figcaption>「申請設定」タブ（個人シフト）。「休暇種別変更申請を許可」をオンにすると、閲覧URLの人が休暇種別の変更を申請できます。申請は「休暇種別変更申請」タブで確認します。</figcaption>
+      </figure>
+    </div>
+
+    <div class="csm-note">📌 ここに集約された各機能は、概念としては <a href="#share" style="color:#0369a1;font-weight:700">共有する</a>・<a href="#output" style="color:#0369a1;font-weight:700">出力・履歴</a>・<a href="#link" style="color:#0369a1;font-weight:700">連携・代務</a> の章でも触れています。設定・操作の入口はすべてこの「シフト帳の設定」です。</div>
+  </section>
+
+
   <!-- ========== 自動作成・アシスト ========== -->
   <section id="auto" class="csm-section">
     <div class="csm-section-header">
@@ -774,6 +824,31 @@
     <div class="csm-card">
       <div class="csm-card-title">🚪 入口：アクションの「アシスト」ボタン</div>
       <p style="font-size:14px;color:#475569;margin:0">編集画面のアクションから「アシスト」を開くと、アシストモーダルが出ます。候補者の検索や、専従・経験・研修・ルールの登録、テンプレート、そして<strong>右上の「自動作成」</strong>がここにあります。</p>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🧭 アシストモーダルのタブ（中身）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">アシストモーダルは上部のタブで切り替えます。現場シフトでは次の 6 タブ＋「自動作成」、個人シフトでは「登録・編集・詳細・テンプレート＋自動作成」が出ます。</p>
+      <figure class="csm-shot">
+        <img src="{{ url_for('static', filename='cloudshift/manual/10_assist_register.png') }}" alt="アシストモーダル（登録タブ）" loading="lazy">
+        <figcaption>アシストモーダル。上のタブ（登録／編集／現場経験者／サーチ／詳細／テンプレート）と右上の「自動作成」。画像は「登録」タブで、実績やルールを手で登録できます（代務・研修を付けたシフトを保存すれば自動でたまるので、ふだんは補助的に使います）。</figcaption>
+      </figure>
+      <table class="csm-opt-table" style="margin-top:8px">
+        <thead><tr><th style="width:130px">タブ</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>登録</td><td>実績・ルールを手で登録します（「実績登録／ルール登録」を切替）。日付・オプション・役割・候補者・メモを入れて登録。</td></tr>
+          <tr><td>編集</td><td>登録済みの実績・ルール・現場・候補者プロファイルを一覧から修正・削除します。</td></tr>
+          <tr><td>現場経験者<span class="csm-tag csm-tag-sky" style="margin-left:4px">現場のみ</span></td><td>その現場の経験者一覧。代務・研修や実績から自動で集計されます。</td></tr>
+          <tr><td>サーチ<span class="csm-tag csm-tag-sky" style="margin-left:4px">現場のみ</span></td><td>指定日の曜日とオプションから、候補者を点数付きで提案します（下の画像）。</td></tr>
+          <tr><td>詳細</td><td>専従・経験・研修・ルールなどの登録状況のまとめを確認できます。</td></tr>
+          <tr><td>テンプレート</td><td>1 か月分のテンプレートの作成・反映（現場・個人シフトの所有者のみ）。</td></tr>
+          <tr><td>自動作成</td><td>1 か月分の下書きを生成（現場シフトの所有者のみ）。前述の自動作成パネルが開きます。</td></tr>
+        </tbody>
+      </table>
+      <figure class="csm-shot">
+        <img src="{{ url_for('static', filename='cloudshift/manual/11_assist_search.png') }}" alt="アシストの候補検索（サーチ）" loading="lazy">
+        <figcaption>「サーチ」タブの候補検索。対象日とオプションを指定して「候補を検索」すると、右側に候補者が点数付きで一覧されます（1 日・1 枠ぶんの候補提案）。</figcaption>
+      </figure>
     </div>
 
     <div class="csm-card">
@@ -863,6 +938,10 @@
         <li><strong>対象日</strong>：全日／平日のみ／土日祝／祝日／祝日以外。</li>
       </ul>
       <div class="csm-note" style="margin-top:8px">🔒 テンプレート反映でも、他のシフト帳から同期された入力は常に温存され、手入力分だけが差し替わります。</div>
+      <figure class="csm-shot">
+        <img src="{{ url_for('static', filename='cloudshift/manual/13_assist_template.png') }}" alt="アシストのテンプレートタブ" loading="lazy">
+        <figcaption>「テンプレート」タブ。「新規テンプレート作成」で別ウィンドウのカレンダーを開いて 1 か月分を作って保存し、保存済みのテンプレートを対象月へ反映できます。</figcaption>
+      </figure>
     </div>
   </section>
 
@@ -907,7 +986,7 @@
 
     <div class="csm-card">
       <div class="csm-card-title">🕘 編集履歴とやり直し</div>
-      <p style="font-size:14px;color:#475569;margin:0 0 8px">「編集履歴」を開くと、いつ・誰が・何をしたかが残っています。各月には保存ごとの版（リビジョン）が記録され、<strong>過去の版に戻す（復元）</strong>こともできます。</p>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">「編集履歴」を開くと、いつ・誰が・何をしたかが残っています。各月には保存ごとの版（リビジョン）が記録され、<strong>「シフト帳の設定 → 復元」から過去の版に戻す</strong>こともできます（現在の内容は失われません。→ <a href="#settings" style="color:#0369a1;font-weight:700">シフト帳の設定</a>）。</p>
       <div class="csm-tip">💡 共有して複数人で編集していると、誰かの保存で内容が変わることがあります。おかしくなったら履歴から前の版に戻せます。</div>
     </div>
 
@@ -963,7 +1042,7 @@
 
     <div class="csm-card">
       <div class="csm-card-title">🔁 休暇種別の変更申請（シフト帳の設定）</div>
-      <p style="font-size:14px;color:#475569;margin:0 0 8px">「シフト帳の設定」で <strong>休暇種別変更申請</strong> を許可すると、閲覧URLで見ている人が「この休みの種別を変えてほしい」と申請できます。所有者には未確認・保留中の件数が表示され、申請を確認して却下などの対応ができます。</p>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px"><strong>個人シフト</strong>の「シフト帳の設定 →（申請設定）」で <strong>休暇種別変更申請</strong> を許可すると、閲覧URLで見ている人が「この休みの種別を変えてほしい」と申請できます。所有者には未確認・保留中の件数が表示され、申請を確認して却下などの対応ができます（→ くわしくは <a href="#settings" style="color:#0369a1;font-weight:700">シフト帳の設定</a>）。</p>
       <div class="csm-tip">💡 本人に閲覧URLだけ渡しておけば、「有休にしてほしい」などの希望を申請として受け取れます。編集権限を渡さずに希望だけ集めたいときに便利です。</div>
     </div>
 
