@@ -1,0 +1,1222 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  html { scroll-behavior: smooth; }
+
+  /* ===== Sticky nav ===== */
+  .csm-nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: #fff;
+    border-bottom: 2px solid #e2e8f0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .csm-nav::-webkit-scrollbar { display: none; }
+  .csm-nav-inner {
+    display: flex;
+    min-width: max-content;
+    padding: 0 12px;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+  .csm-nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #64748b;
+    border-bottom: 3px solid transparent;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .csm-nav-link:hover { color: #0369a1; }
+  .csm-nav-link.csm-active { color: #0369a1; border-bottom-color: #0369a1; }
+
+  /* ===== Layout ===== */
+  .csm-wrap {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0 16px 90px;
+  }
+  .csm-section { padding-top: 52px; }
+  .csm-section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #f1f5f9;
+  }
+  .csm-section-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    font-size: 26px;
+    flex-shrink: 0;
+  }
+  .csm-section-title { font-size: 22px; font-weight: 900; color: #0f172a; margin: 0 0 4px; }
+  .csm-section-desc  { font-size: 14px; color: #64748b; margin: 0; line-height: 1.6; }
+
+  /* ===== Cards ===== */
+  .csm-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 22px 24px;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+    margin-bottom: 12px;
+  }
+  .csm-card-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ===== Feature grid ===== */
+  .csm-feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  .csm-feat-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 18px 14px;
+    text-align: center;
+    transition: box-shadow 0.15s;
+  }
+  .csm-feat-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,0.10); }
+  .csm-feat-emoji { font-size: 30px; line-height: 1; margin-bottom: 8px; }
+  .csm-feat-name { font-size: 13px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+  .csm-feat-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+  /* ===== Step cards ===== */
+  .csm-step {
+    display: flex;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(15,23,42,0.04);
+  }
+  .csm-step-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    font-size: 16px; font-weight: 900;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #0369a1, #06b6d4);
+    color: #fff;
+  }
+  .csm-step-body { flex: 1; min-width: 0; }
+  .csm-step-title {
+    font-size: 15px; font-weight: 800; color: #0f172a;
+    margin: 0 0 6px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .csm-step-text { font-size: 14px; color: #475569; line-height: 1.7; margin: 0; }
+
+  /* ===== Callouts ===== */
+  .csm-tip {
+    background: #f0fdf4; border-left: 4px solid #22c55e;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #166534;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .csm-warn {
+    background: #fff7ed; border-left: 4px solid #f97316;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #9a3412;
+    line-height: 1.65; margin: 8px 0;
+  }
+  .csm-note {
+    background: #eff6ff; border-left: 4px solid #3b82f6;
+    border-radius: 0 10px 10px 0;
+    padding: 11px 14px; font-size: 13.5px; color: #1e40af;
+    line-height: 1.65; margin: 8px 0;
+  }
+
+  /* ===== Tags ===== */
+  .csm-tag {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700;
+  }
+  .csm-tag-green  { background: #dcfce7; color: #16a34a; }
+  .csm-tag-blue   { background: #dbeafe; color: #1d4ed8; }
+  .csm-tag-sky    { background: #e0f2fe; color: #0369a1; }
+  .csm-tag-orange { background: #ffedd5; color: #ea580c; }
+  .csm-tag-red    { background: #fee2e2; color: #dc2626; }
+  .csm-tag-purple { background: #f3e8ff; color: #7e22ce; }
+  .csm-tag-yellow { background: #fef9c3; color: #a16207; }
+  .csm-tag-gray   { background: #f1f5f9; color: #475569; }
+  .csm-tag-teal   { background: #ccfbf1; color: #0f766e; }
+
+  /* ===== Bullet list ===== */
+  .csm-ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+  .csm-ul li {
+    display: flex; gap: 8px; align-items: flex-start;
+    font-size: 14px; color: #334155; line-height: 1.6;
+  }
+  .csm-ul li::before {
+    content: "▶"; color: #0369a1; font-size: 10px;
+    margin-top: 4px; flex-shrink: 0;
+  }
+
+  /* ===== Option table ===== */
+  .csm-opt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .csm-opt-table th {
+    background: #f8fafc; padding: 10px 12px;
+    text-align: left; font-size: 12px; font-weight: 700;
+    color: #64748b; border-bottom: 1px solid #e2e8f0;
+  }
+  .csm-opt-table td {
+    padding: 10px 12px; border-bottom: 1px solid #f1f5f9;
+    color: #334155; vertical-align: top; line-height: 1.6;
+  }
+  .csm-opt-table td:first-child { font-weight: 700; color: #0f172a; white-space: nowrap; }
+  .csm-opt-table tr:last-child td { border-bottom: 0; }
+
+  /* ===== Divider ===== */
+  .csm-divider { border: 0; border-top: 1px solid #f1f5f9; margin: 18px 0; }
+
+  /* ===== Grids ===== */
+  .csm-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .csm-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 640px) { .csm-grid2, .csm-grid3 { grid-template-columns: 1fr; } }
+
+  /* ===== Mode / chip cells ===== */
+  .csm-mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  @media (max-width: 640px) { .csm-mode-grid { grid-template-columns: 1fr; } }
+  .csm-mode-cell {
+    border: 2px solid #e2e8f0; border-radius: 14px;
+    padding: 16px 14px; background: #fff;
+  }
+  .csm-mode-cell.csm-mode-scene { border-color: #38bdf8; background: #f0f9ff; }
+  .csm-mode-cell.csm-mode-person { border-color: #a78bfa; background: #faf5ff; }
+  .csm-mode-cell.csm-mode-master { border-color: #fbbf24; background: #fffbeb; }
+  .csm-mode-name { font-size: 15px; font-weight: 800; color: #0f172a; margin: 0 0 6px; }
+  .csm-mode-desc { font-size: 13px; color: #475569; line-height: 1.6; margin: 0; }
+
+  /* ===== Key badge ===== */
+  .csm-key {
+    display: inline-block;
+    background: #0f172a; color: #fff;
+    border-radius: 6px; padding: 2px 8px;
+    font-size: 12px; font-weight: 800; font-family: monospace;
+    min-width: 30px; text-align: center;
+  }
+
+  /* ===== Popup button ===== */
+  .csm-popup-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px; border: 1.5px solid #cbd5e1;
+    border-radius: 9px; background: #f8fafc;
+    font-size: 12px; font-weight: 700; color: #0369a1;
+    cursor: pointer; margin: 4px 0; transition: background 0.15s;
+  }
+  .csm-popup-btn:hover { background: #f0f9ff; border-color: #7dd3fc; }
+
+  /* ===== Accordion ===== */
+  .csm-acc-item {
+    border: 1px solid #e2e8f0; border-radius: 13px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .csm-acc-trigger {
+    width: 100%; text-align: left; padding: 15px 18px;
+    background: #fff; border: 0; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 700; color: #0f172a;
+    line-height: 1.5; gap: 12px;
+  }
+  .csm-acc-trigger:hover { background: #f8fafc; }
+  .csm-acc-q { flex: 1; text-align: left; }
+  .csm-acc-arrow { font-size: 11px; color: #94a3b8; transition: transform 0.2s; flex-shrink: 0; }
+  .csm-acc-item.csm-open .csm-acc-arrow { transform: rotate(180deg); }
+  .csm-acc-body { display: none; padding: 2px 18px 15px; font-size: 14px; color: #475569; line-height: 1.75; }
+  .csm-acc-item.csm-open .csm-acc-body { display: block; }
+
+  /* ===== Modal ===== */
+  .csm-modal-ov {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.52);
+    z-index: 200; display: flex; align-items: center;
+    justify-content: center; padding: 16px;
+  }
+  .csm-modal-ov.csm-hidden { display: none !important; }
+  .csm-modal-box {
+    background: #fff; border-radius: 20px;
+    max-width: 620px; width: 100%;
+    max-height: 88vh; overflow-y: auto;
+    padding: 28px;
+    box-shadow: 0 28px 56px rgba(0,0,0,0.22);
+    animation: csm-modal-in 0.18s ease;
+  }
+  @keyframes csm-modal-in {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .csm-modal-head {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; margin-bottom: 18px;
+  }
+  .csm-modal-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; line-height: 1.4; }
+  .csm-modal-close {
+    border: 0; background: #f1f5f9; border-radius: 9px;
+    width: 34px; height: 34px; cursor: pointer;
+    font-size: 16px; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+    color: #64748b; margin-left: 12px;
+  }
+  .csm-modal-close:hover { background: #e2e8f0; }
+
+  /* ===== Hero ===== */
+  .csm-hero-bar {
+    background: linear-gradient(135deg, #0c4a6e 0%, #0369a1 50%, #06b6d4 100%);
+    padding: 40px 24px 36px; text-align: center; color: #fff;
+  }
+  .csm-hero-kicker {
+    display: inline-block; letter-spacing: 0.18em;
+    font-size: 12px; font-weight: 800; opacity: 0.85; margin-bottom: 10px;
+  }
+  .csm-hero-bar h1 { font-size: 34px; font-weight: 900; margin: 0 0 6px; }
+  .csm-hero-bar p { font-size: 15px; opacity: 0.92; margin: 0 0 22px; max-width: 640px; margin-left: auto; margin-right: auto; line-height: 1.7; }
+  .csm-hero-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .csm-hero-btn {
+    padding: 11px 22px; border-radius: 12px;
+    font-size: 14px; font-weight: 700; text-decoration: none;
+    border: 2px solid #fff; transition: opacity 0.15s;
+  }
+  .csm-hero-btn:hover { opacity: 0.85; }
+  .csm-hero-btn-primary  { background: #fff; color: #0369a1; }
+  .csm-hero-btn-secondary { background: transparent; color: #fff; }
+
+  /* ===== Flow (numbered horizontal) ===== */
+  .csm-flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+  .csm-flow-step {
+    flex: 1; min-width: 130px;
+    background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 12px; padding: 12px 14px;
+  }
+  .csm-flow-num { font-size: 11px; font-weight: 800; color: #0369a1; }
+  .csm-flow-label { font-size: 13.5px; font-weight: 700; color: #0f172a; margin-top: 2px; }
+  .csm-flow-note { font-size: 12px; color: #64748b; margin-top: 3px; line-height: 1.5; }
+
+  /* ===== Sublist ===== */
+  .csm-sublist { padding-left: 18px; margin: 6px 0; }
+  .csm-sublist li { font-size: 13.5px; color: #475569; margin: 4px 0; line-height: 1.6; }
+</style>
+
+<!-- ===== Hero ===== -->
+<div class="csm-hero-bar">
+  <div class="csm-hero-kicker">SHIFTER&nbsp;SYNC &nbsp;/&nbsp; CLOUD&nbsp;SHIFT</div>
+  <h1>👥 ShifterSync マニュアル</h1>
+  <p>シフトの作成・共有・自動作成・出力までをまとめて扱えるツールです。中でも <strong>CloudShift</strong> は、本人や代理の人に URL を配ってブラウザから希望シフトを入れてもらい、重複チェック・自動作成・出力・有休連携まで一気通貫で行えるクラウド版ワークスペースです。</p>
+  <div class="csm-hero-btns">
+    <a href="/tools/shiftersync/cloudshift" class="csm-hero-btn csm-hero-btn-primary">CloudShift を開く</a>
+    <a href="/tools/shiftersync" class="csm-hero-btn csm-hero-btn-secondary">ShifterSync を開く</a>
+    <a href="/" class="csm-hero-btn csm-hero-btn-secondary">ダッシュボードへ戻る</a>
+  </div>
+</div>
+
+<!-- ===== Sticky nav ===== -->
+<div class="csm-nav" id="csmNav">
+  <div class="csm-nav-inner">
+    <a href="#overview"  class="csm-nav-link" data-section="overview">📋 概要</a>
+    <a href="#start"     class="csm-nav-link" data-section="start">🚀 はじめかた</a>
+    <a href="#edit"      class="csm-nav-link" data-section="edit">📅 シフト編集</a>
+    <a href="#share"     class="csm-nav-link" data-section="share">🔗 共有する</a>
+    <a href="#auto"      class="csm-nav-link" data-section="auto">🤖 自動作成・アシスト</a>
+    <a href="#output"    class="csm-nav-link" data-section="output">✅ 出力・履歴・チェック</a>
+    <a href="#link"      class="csm-nav-link" data-section="link">🔄 連携・代務</a>
+    <a href="#classic"   class="csm-nav-link" data-section="classic">📄 CSV版ツール</a>
+    <a href="#faq"       class="csm-nav-link" data-section="faq">❓ よくある質問</a>
+  </div>
+</div>
+
+<!-- ===== Main content ===== -->
+<div class="csm-wrap">
+
+  <!-- ========== 概要 ========== -->
+  <section id="overview" class="csm-section">
+    <div class="csm-section-header">
+      <div class="csm-section-icon" style="background:#e0f2fe">📋</div>
+      <div>
+        <h2 class="csm-section-title">ShifterSync / CloudShift でできること</h2>
+        <p class="csm-section-desc">ShifterSync は「作る・編集する・重複を確認する・カレンダーに出す」を集めたシフト業務のハブです。CloudShift はその中核で、シフト帳をクラウドに置き、共有・本人入力・自動作成・出力・有休連携までを 1 か所で回せます。</p>
+      </div>
+    </div>
+
+    <div class="csm-feat-grid">
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">📒</div>
+        <div class="csm-feat-name">シフト帳をクラウド管理</div>
+        <div class="csm-feat-desc">現場・個人・マスターの月別シフトを保管</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">🔗</div>
+        <div class="csm-feat-name">URL で共有</div>
+        <div class="csm-feat-desc">閲覧・編集・通知付きの 3 種類の共有URL</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">📝</div>
+        <div class="csm-feat-name">本人・代理が入力</div>
+        <div class="csm-feat-desc">編集URLでブラウザから希望シフトを入力</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">🤖</div>
+        <div class="csm-feat-name">自動作成</div>
+        <div class="csm-feat-desc">条件をもとに 1 か月分の下書きを生成</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">🧩</div>
+        <div class="csm-feat-name">テンプレート</div>
+        <div class="csm-feat-desc">1か月分を保存して別の月へ反映</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">🔍</div>
+        <div class="csm-feat-name">重複チェック</div>
+        <div class="csm-feat-desc">同じ人の重なり・人数不足を確認</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">📤</div>
+        <div class="csm-feat-name">出力</div>
+        <div class="csm-feat-desc">カレンダー画像・CSV・Excel で書き出し</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">🕘</div>
+        <div class="csm-feat-name">編集履歴</div>
+        <div class="csm-feat-desc">いつ誰が直したかを残し、復元も可能</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">⛵</div>
+        <div class="csm-feat-name">有休連携</div>
+        <div class="csm-feat-desc">休暇を有休共有ツールへ反映</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">🆘</div>
+        <div class="csm-feat-name">代務要請</div>
+        <div class="csm-feat-desc">出られない日の代わりを要請</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">📱</div>
+        <div class="csm-feat-name">スマホ通知（PWA）</div>
+        <div class="csm-feat-desc">更新があると通知が届く閲覧モード</div>
+      </div>
+      <div class="csm-feat-card">
+        <div class="csm-feat-emoji">🏢</div>
+        <div class="csm-feat-name">マスタ連携</div>
+        <div class="csm-feat-desc">社員名簿PLUS・現場リストPLUSと紐付け</div>
+      </div>
+    </div>
+
+    <div class="csm-card" style="margin-top:18px">
+      <div class="csm-card-title" style="justify-content:space-between">
+        <span>📒 3 つのシフト帳の種別（モード）</span>
+        <button class="csm-popup-btn" onclick="openModal('modalModes')">詳しく見る ▼</button>
+      </div>
+      <div class="csm-mode-grid">
+        <div class="csm-mode-cell csm-mode-scene">
+          <p class="csm-mode-name">🏗️ 現場シフト</p>
+          <p class="csm-mode-desc">1 つの現場の月間シフト。現場リストPLUSと紐付き、複数人を日ごとに配置します。<strong>自動作成・テンプレートはこの種別が中心</strong>です。</p>
+        </div>
+        <div class="csm-mode-cell csm-mode-person">
+          <p class="csm-mode-name">🙋 個人シフト</p>
+          <p class="csm-mode-desc">1 人の月間予定。社員名簿と紐付きます。休暇を有休共有ツールへ反映できるのはこの種別です。</p>
+        </div>
+        <div class="csm-mode-cell csm-mode-master">
+          <p class="csm-mode-name">🗂️ マスターシフト</p>
+          <p class="csm-mode-desc">複数の個人または現場をまとめて見る一覧型。対象を選んで横断的に確認するのに使います。</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px">
+      <table class="csm-opt-table">
+        <thead><tr><th>項目</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>入口</td><td>ダッシュボード →「ShifterSync」。ハブ画面の <strong>Shifter-Sync CloudShift</strong> ボタンから CloudShift に入ります。</td></tr>
+          <tr><td>共有URLの種類</td><td>閲覧URL・編集URL・通知付き閲覧URL（PWA）の 3 種類。<strong>DSTTアカウントが無い人にも</strong>渡せます。</td></tr>
+          <tr><td>アカウント共有</td><td>DSTT利用者には、同じ営業所内・特定社員（社員番号）への共有も可能です。</td></tr>
+          <tr><td>重複チェック</td><td>同じ年月・同じ種別のシフト帳をまとめて比較（CSV版は最大 50 ファイル）。</td></tr>
+          <tr><td>自動作成</td><td>現場シフトの所有者のみ。結果は<strong>下書き</strong>として保存し、確認後に反映します。</td></tr>
+          <tr><td>出力形式</td><td>カレンダー画像（PNG）・CSV・Excel（xlsx）。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== はじめかた ========== -->
+  <section id="start" class="csm-section">
+    <div class="csm-section-header">
+      <div class="csm-section-icon" style="background:#e0f2fe">🚀</div>
+      <div>
+        <h2 class="csm-section-title">はじめかた（最初のシフト帳を作る）</h2>
+        <p class="csm-section-desc">CloudShift には 5 つのタブがあります。まずは新しいシフト帳を 1 か月分つくり、共有や編集に進みます。</p>
+      </div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🗂️ CloudShift の 5 つのタブ</div>
+      <table class="csm-opt-table">
+        <thead><tr><th style="width:150px">タブ</th><th>役割</th></tr></thead>
+        <tbody>
+          <tr><td>自分のシフト帳</td><td>作成済みのシフト帳の一覧。選ぶと編集や共有にすぐ移れます。</td></tr>
+          <tr><td>新規作成</td><td>最初の 1 か月を作ります。前月・翌月はあとから追加できます。</td></tr>
+          <tr><td>CSV取込</td><td>ShifterSync の CSV を読み込み、そのまま CloudShift のシフト帳にします。</td></tr>
+          <tr><td>編集</td><td>カレンダーへの入力、共有、出力、履歴、自動作成などの作業場です。</td></tr>
+          <tr><td>重複チェック</td><td>同じ年月・同じ種別の自分のシフト帳を選んで重なりを確認します。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Step 1 -->
+    <div class="csm-step">
+      <div class="csm-step-badge">1</div>
+      <div class="csm-step-body">
+        <div class="csm-step-title">CloudShift を開く</div>
+        <p class="csm-step-text">ダッシュボードの「ShifterSync」を開き、ハブ画面の <strong>Shifter-Sync CloudShift</strong> ボタンを押します。画面右上の <strong>CURRENT</strong> に、いま選んでいるシフト帳が表示されます。</p>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="csm-step">
+      <div class="csm-step-badge">2</div>
+      <div class="csm-step-body">
+        <div class="csm-step-title">「新規作成」タブで種別と月を決める
+          <span class="csm-tag csm-tag-sky">現場 / 個人 / マスター</span>
+        </div>
+        <p class="csm-step-text">タイトル・種別・年・月を入力します。種別で <strong>現場シフト</strong> を選ぶと現場の選択欄、<strong>個人シフト</strong> を選ぶと社員の選択欄、<strong>マスターシフト</strong> を選ぶと対象（個人/現場）の選択欄が出ます。</p>
+        <hr class="csm-divider">
+        <ul class="csm-ul">
+          <li><strong>必要人数</strong>：その月に 1 日あたり必要な人数の目安。0 のままでも作れます（自動作成・人数不足の判定に使います）。</li>
+          <li><strong>現場</strong>（現場シフト）：「現場を選ぶ」で現場リストPLUSの現場と紐付けます。名称一致のままより、紐付けると他ユーザーとズレません。</li>
+          <li><strong>社員</strong>（個人シフト）：タイトル横の「社員を選ぶ」で社員名簿と紐付けます。</li>
+        </ul>
+        <div class="csm-tip" style="margin-top:10px">💡 迷ったら、まず <strong>現場シフト</strong> で 1 か月作ってみてください。自動作成・テンプレートなどの機能がいちばん充実しています。</div>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="csm-step">
+      <div class="csm-step-badge">3</div>
+      <div class="csm-step-body">
+        <div class="csm-step-title">「作成して編集へ進む」を押す</div>
+        <p class="csm-step-text">シフト帳が作成され、編集タブのカレンダーが開きます。ここから日ごとの入力に進みます（次の「シフト編集」を参照）。</p>
+      </div>
+    </div>
+
+    <hr class="csm-divider">
+
+    <div class="csm-card">
+      <div class="csm-card-title">📥 手元の CSV から始める（CSV取込）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">すでに ShifterSync で作った CSV があるなら、「CSV取込」タブでファイルを選ぶだけで CloudShift のシフト帳になります。タイトルを上書きしたいときだけ「タイトル上書き」に入力します（空欄なら CSV のタイトルを使います）。</p>
+      <div class="csm-note">📄 CSV は ShifterSync 形式である必要があります。Excel などで作った別形式は取り込めません。CloudShift から出した CSV はそのまま取り込めます。</div>
+    </div>
+  </section>
+
+
+  <!-- ========== シフト編集 ========== -->
+  <section id="edit" class="csm-section">
+    <div class="csm-section-header">
+      <div class="csm-section-icon" style="background:#e0f2fe">📅</div>
+      <div>
+        <h2 class="csm-section-title">シフトを編集する</h2>
+        <p class="csm-section-desc">カレンダーの日付に「だれが・どの勤務（オプション）か」を入れていきます。入力したら必ず「この月を保存」を押して確定します。</p>
+      </div>
+    </div>
+
+    <!-- Step 1 -->
+    <div class="csm-step">
+      <div class="csm-step-badge">1</div>
+      <div class="csm-step-body">
+        <div class="csm-step-title">日付に予定を追加する</div>
+        <p class="csm-step-text">各日のセルで名前を入力（社員名簿と紐付くと候補が出ます）し、必要に応じてオプションを選び、コメントを添えて「追加」します。1 日に何人でも追加できます。間違えた行はその場で削除・編集できます。</p>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="csm-step">
+      <div class="csm-step-badge">2</div>
+      <div class="csm-step-body">
+        <div class="csm-step-title">オプション（勤務の種類）を選ぶ
+          <span class="csm-tag csm-tag-blue">時間帯 / 車両 / 役割 / 休暇</span>
+        </div>
+        <p class="csm-step-text">勤務の内容はオプションで表します。時間帯・車両・役割・休暇の 4 グループがあります。</p>
+        <hr class="csm-divider">
+        <div class="csm-card" style="margin:0">
+          <div class="csm-card-title" style="justify-content:space-between">
+            <span>🏷️ オプション一覧</span>
+            <button class="csm-popup-btn" onclick="openModal('modalOptions')">全オプションを見る ▼</button>
+          </div>
+          <div class="csm-grid2">
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">時間帯</div>
+              <ul class="csm-ul">
+                <li><span class="csm-key">A</span> 午前 ／ <span class="csm-key">P</span> 午後</li>
+                <li><span class="csm-key">E</span> 早番 ／ <span class="csm-key">L</span> 遅番</li>
+                <li><span class="csm-key">TEMP</span> 臨時便</li>
+              </ul>
+              <div style="font-size:13px;font-weight:700;color:#334155;margin:10px 0 6px">役割（第二オプション）</div>
+              <ul class="csm-ul">
+                <li><span class="csm-key">代務</span> 一人で実際に勤務した（＝実績扱い）</li>
+                <li><span class="csm-key">研修</span> 教わった段階（実績より一段低い）</li>
+              </ul>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">車両</div>
+              <ul class="csm-ul">
+                <li><span class="csm-key">M</span>マイクロ <span class="csm-key">C</span>中型 <span class="csm-key">O</span>大型</li>
+                <li><span class="csm-key">W</span>ワゴン <span class="csm-key">V</span>役員車両</li>
+                <li><span class="csm-key">N1</span>〜<span class="csm-key">N5</span> 1〜5号車</li>
+              </ul>
+              <div style="font-size:13px;font-weight:700;color:#334155;margin:10px 0 6px">休暇</div>
+              <ul class="csm-ul">
+                <li>有休・代休・公休・慶弔休暇</li>
+                <li>介護休暇・リフレッシュ休暇・その他</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div class="csm-note" style="margin-top:10px">📌 <strong>役割（代務・研修）</strong>は時間帯などと別枠の「第二オプション」です。付けておくと、その人の<strong>経験が自動で登録</strong>され、アシストや自動作成の精度が上がります。</div>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="csm-step">
+      <div class="csm-step-badge">3</div>
+      <div class="csm-step-body">
+        <div class="csm-step-title">「この月を保存」で確定する
+          <span class="csm-tag csm-tag-red">保存しないと消えます</span>
+        </div>
+        <p class="csm-step-text">入力した内容は「この月を保存」を押してはじめて確定されます。保存すると編集履歴に記録され、必要人数の設定もこのとき一緒に保存されます。タイトルや現場・社員の紐付けを変えたときは「タイトル保存」を押します。</p>
+      </div>
+    </div>
+
+    <hr class="csm-divider">
+
+    <div class="csm-grid2">
+      <div class="csm-card">
+        <div class="csm-card-title">🗓️ 月を切り替える・増やす</div>
+        <ul class="csm-ul">
+          <li>「表示中の月」で月を選びます。</li>
+          <li>「前の月へ」「次の月へ」で移動します。</li>
+          <li>編集URLや空の状態からは「前月を追加」「翌月を追加」で月を増やせます。</li>
+        </ul>
+      </div>
+      <div class="csm-card">
+        <div class="csm-card-title">👥 必要人数</div>
+        <p style="font-size:13.5px;color:#475569;margin:0">その月に 1 日あたり必要な人数です。設定すると、人数が足りない日が分かりやすくなり、自動作成の需要にも使われます。0 のときは人数の判定を行いません。</p>
+      </div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title" style="justify-content:space-between">
+        <span>📝 仮保存モード（下書きで作業する）</span>
+        <span class="csm-tag csm-tag-purple">通常 ⇄ 仮保存</span>
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">確定シフトとは別に「下書き」を持てます。共有先に見せずに案を練りたいときに使います。</p>
+      <div class="csm-flow">
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 1</div>
+          <div class="csm-flow-label">「仮保存」に切替</div>
+          <div class="csm-flow-note">通常／仮保存の切替で下書き編集に入ります</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 2</div>
+          <div class="csm-flow-label">下書きを編集</div>
+          <div class="csm-flow-note">確定シフトは変えずに案を作り込みます</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 3</div>
+          <div class="csm-flow-label">シフトへ反映</div>
+          <div class="csm-flow-note">よければ確定シフトへ反映（公開）します</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">または</div>
+          <div class="csm-flow-label">仮保存を破棄</div>
+          <div class="csm-flow-note">案を捨てて確定シフトに戻します</div>
+        </div>
+      </div>
+      <div class="csm-tip" style="margin-top:10px">💡 自動作成の結果も、いったんこの「下書き」に入ります。中身を確認してから「シフトへ反映」で確定できます。</div>
+    </div>
+  </section>
+
+
+  <!-- ========== 共有する ========== -->
+  <section id="share" class="csm-section">
+    <div class="csm-section-header">
+      <div class="csm-section-icon" style="background:#e0f2fe">🔗</div>
+      <div>
+        <h2 class="csm-section-title">共有する（URL とアカウント）</h2>
+        <p class="csm-section-desc">編集画面の「共有URL（DSTTアカウント外向け）」を開くと、3 種類の URL を配れます。DSTT 利用者には、アカウント単位の共有もできます。</p>
+      </div>
+    </div>
+
+    <div class="csm-grid3">
+      <div class="csm-card" style="margin:0">
+        <div class="csm-card-title">👀 閲覧URL</div>
+        <p style="font-size:13.5px;color:#475569;margin:0">見るだけの人向け。表示の確認と、単月のエクスポートができます。設定によっては、休暇種別の変更申請を出してもらえます。</p>
+      </div>
+      <div class="csm-card" style="margin:0">
+        <div class="csm-card-title">✏️ 編集URL</div>
+        <p style="font-size:13.5px;color:#475569;margin:0">本人や代理の人が入力するため。保存した内容が共有元に反映されます。ログインしていない人は、最初の保存時に表示名を確認します。</p>
+      </div>
+      <div class="csm-card" style="margin:0">
+        <div class="csm-card-title">📱 通知付き閲覧URL（PWA）</div>
+        <p style="font-size:13.5px;color:#475569;margin:0">スマホ向けの閲覧モード。ホーム画面に追加でき、通知を有効にすると当月の更新時にお知らせが届きます。</p>
+      </div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🔁 URL の再発行</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">各 URL は「開く」「コピー」「再発行」できます。<strong>再発行するとその URL だけが無効</strong>になり、新しい URL に切り替わります。「3つすべて再発行」でまとめて作り直すこともできます。</p>
+      <div class="csm-warn">⚠️ 再発行すると、前に配った URL は開けなくなります。誤って共有してしまったときは再発行で止められますが、必要な人には新しい URL を配り直してください。</div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🏢 DSTTアカウントへの共有（アカウント共有）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">DSTT を使う同僚には、URL ではなくアカウント単位で共有できます。共有された人は、自分の CloudShift の一覧からそのシフト帳を開けます。</p>
+      <ul class="csm-ul">
+        <li><strong>同じ営業所内への共有</strong>：あなたの営業所権限の範囲で、同じ営業所のメンバーに共有します。</li>
+        <li><strong>特定社員への共有</strong>：社員番号（DSTTアカウント）を指定して、その人だけに共有します。</li>
+      </ul>
+      <div class="csm-note" style="margin-top:8px">🔐 アカウント共有は DSTT 利用者向け、共有URL は DSTT アカウントが無い人にも渡せる、と使い分けると便利です。</div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">📨 受け取った人の操作</div>
+      <table class="csm-opt-table">
+        <thead><tr><th style="width:160px">受け取った URL</th><th>できること</th></tr></thead>
+        <tbody>
+          <tr><td>閲覧URL</td><td>月を切り替えて表示。カレンダー画像・CSV・Excel の出力。（許可時）休暇種別の変更申請。</td></tr>
+          <tr><td>編集URL</td><td>上に加えて、各月の入力・保存、前月／翌月の追加。</td></tr>
+          <tr><td>通知付き閲覧URL</td><td>スマホのホーム画面に追加し、「通知を有効化」で当月更新の通知を受け取り。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ========== 自動作成・アシスト ========== -->
+  <section id="auto" class="csm-section">
+    <div class="csm-section-header">
+      <div class="csm-section-icon" style="background:#e0f2fe">🤖</div>
+      <div>
+        <h2 class="csm-section-title">自動作成とアシスト</h2>
+        <p class="csm-section-desc">条件をもとに 1 か月分のシフト下書きを作る機能です。<strong>現場シフトの所有者</strong>が、対象月がある状態で使えます（公開編集URLでは使えません）。結果は必ず下書きに入り、確認してから反映します。</p>
+      </div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🚪 入口：アクションの「アシスト」ボタン</div>
+      <p style="font-size:14px;color:#475569;margin:0">編集画面のアクションから「アシスト」を開くと、アシストモーダルが出ます。候補者の検索や、専従・経験・研修・ルールの登録、テンプレート、そして<strong>右上の「自動作成」</strong>がここにあります。</p>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title" style="justify-content:space-between">
+        <span>⚙️ 自動作成の流れ</span>
+        <button class="csm-popup-btn" onclick="openModal('modalAuto')">対象日・オプションを見る ▼</button>
+      </div>
+      <div class="csm-flow">
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 1</div>
+          <div class="csm-flow-label">対象日を選ぶ</div>
+          <div class="csm-flow-note">全日／平日のみ／土日祝のみ／個別。新規に入れてよい日を限定します</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 2</div>
+          <div class="csm-flow-label">試算する</div>
+          <div class="csm-flow-note">保存せずに結果を計算。日別の配置・理由・未充足を確認</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 3</div>
+          <div class="csm-flow-label">下書きへ保存</div>
+          <div class="csm-flow-note">納得したら下書きに入れます（確定シフトはまだ変わりません）</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 4</div>
+          <div class="csm-flow-label">シフトへ反映</div>
+          <div class="csm-flow-note">編集画面で下書きを確認し、確定シフトへ反映</div>
+        </div>
+      </div>
+      <div class="csm-tip" style="margin-top:10px">💡 計算は常に 1 か月全体を見て行います。対象日を絞っても、連勤・公平性・他現場との重なりなどは月全体で判定されます。対象日指定の意味は「新しく配置してよい日」を限定することだけです。</div>
+    </div>
+
+    <div class="csm-grid2">
+      <div class="csm-card">
+        <div class="csm-card-title">🛌 休みは自動でよける</div>
+        <p style="font-size:13.5px;color:#475569;margin:0 0 6px">休みが入っている日には、自動作成はシフトを入れません。</p>
+        <ul class="csm-ul">
+          <li>有休共有ツールの休み（既定で取り込み対象）</li>
+          <li>このシフト帳に入っている休暇オプション</li>
+          <li>同じ所有者の他の現場・個人シフトの休み</li>
+        </ul>
+      </div>
+      <div class="csm-card">
+        <div class="csm-card-title">🔎 なぜこの人？が分かる</div>
+        <p style="font-size:13.5px;color:#475569;margin:0 0 6px">試算結果は日別に展開でき、説明が見られます。</p>
+        <ul class="csm-ul">
+          <li>選ばれた人と、その理由・他の候補</li>
+          <li>外れた人の理由（休暇／他現場／重複／経験なし 等）</li>
+          <li>「必要人数が 0 で入らない日」も警告で明示</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="csm-note">📌 「対象日にしたのに入らない」ときの多くは、その日の<strong>必要人数が 0</strong> であることが原因です。自動作成パネルで対象日の必要人数を直接指定すると、その場で埋められます。</div>
+
+    <hr class="csm-divider">
+
+    <div class="csm-card">
+      <div class="csm-card-title">🎓 アシストに「経験・条件」を登録する</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">自動作成や候補検索の精度は、登録した情報で上がります。アシストモーダルから登録できます。</p>
+      <table class="csm-opt-table">
+        <thead><tr><th style="width:150px">登録するもの</th><th>意味</th></tr></thead>
+        <tbody>
+          <tr><td>専従者</td><td>その現場の専従。現場リストPLUSの専従者情報からも読み込まれます。最優先の適格者です。</td></tr>
+          <tr><td>経験済み現場</td><td>過去に一人で勤務した実績のある現場。配置の適格者になります。</td></tr>
+          <tr><td>研修済み現場</td><td>研修を受けた段階の現場。実績より一段低い扱いで適格になります。</td></tr>
+          <tr><td>ルール</td><td>希望曜日・NG曜日など、手動の条件。</td></tr>
+          <tr><td>記録・プロファイル</td><td>候補者ごとの設定や過去実績の材料。</td></tr>
+        </tbody>
+      </table>
+      <div class="csm-tip" style="margin-top:10px">💡 シフトの entry に <strong>代務</strong> や <strong>研修</strong> を付けて保存すると、その経験が<strong>自動で登録</strong>されます。手で登録しなくても、日々の入力だけでアシストが育ちます。</div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title" style="justify-content:space-between">
+        <span>🧩 テンプレート（1か月を型にして使い回す）</span>
+        <button class="csm-popup-btn" onclick="openModal('modalTemplate')">反映オプションを見る ▼</button>
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">現場・個人シフトの 1 か月分を「テンプレート」として保存し、別の月へ反映できます。アシストモーダルの「テンプレート」タブから使います（所有者のみ）。作成・編集は専用の別ウィンドウで行います。</p>
+      <ul class="csm-ul">
+        <li><strong>基準</strong>：日付基準（同じ日付へ）か、曜日基準（同じ曜日へ繰り返し）。</li>
+        <li><strong>上書き方法</strong>：置換／追加／空き日のみ。</li>
+        <li><strong>対象日</strong>：全日／平日のみ／土日祝／祝日／祝日以外。</li>
+      </ul>
+      <div class="csm-note" style="margin-top:8px">🔒 テンプレート反映でも、他のシフト帳から同期された入力は常に温存され、手入力分だけが差し替わります。</div>
+    </div>
+  </section>
+
+
+  <!-- ========== 出力・履歴・チェック ========== -->
+  <section id="output" class="csm-section">
+    <div class="csm-section-header">
+      <div class="csm-section-icon" style="background:#e0f2fe">✅</div>
+      <div>
+        <h2 class="csm-section-title">出力・履歴・重複チェック</h2>
+        <p class="csm-section-desc">できあがったシフトを書き出したり、過去の状態に戻したり、複数のシフト帳の重なりを確認したりできます。</p>
+      </div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">📤 出力する（カレンダー・CSV・Excel）</div>
+      <table class="csm-opt-table">
+        <thead><tr><th style="width:160px">ボタン</th><th>出力されるもの</th></tr></thead>
+        <tbody>
+          <tr><td>カレンダー出力</td><td>その月のカレンダー画像（PNG）。そのまま掲示・共有に使えます。</td></tr>
+          <tr><td>CSV出力</td><td>ShifterSync 形式の CSV。再取込や重複チェック、バックアップに使えます。</td></tr>
+          <tr><td>xlsx出力</td><td>Excel ファイル。表計算で加工したいときに。</td></tr>
+        </tbody>
+      </table>
+      <div class="csm-note" style="margin-top:8px">📅 出力は「表示中の月」が対象です。閲覧URL・編集URL からも単月で出力できます。</div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🕘 編集履歴とやり直し</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">「編集履歴」を開くと、いつ・誰が・何をしたかが残っています。各月には保存ごとの版（リビジョン）が記録され、<strong>過去の版に戻す（復元）</strong>こともできます。</p>
+      <div class="csm-tip">💡 共有して複数人で編集していると、誰かの保存で内容が変わることがあります。おかしくなったら履歴から前の版に戻せます。</div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🔍 重複チェック（CloudShift 内）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">「重複チェック」タブで、同じ年月・同じ種別の自分のシフト帳を選び、「比較する」を押します。同じ人が複数の現場で同じ日に入っていないか、人数が足りているかを確認できます。</p>
+      <div class="csm-flow">
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">1</div>
+          <div class="csm-flow-label">種別と年月を選ぶ</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">2</div>
+          <div class="csm-flow-label">比較対象を選択</div>
+          <div class="csm-flow-note">すべて選択／選択解除も使えます</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">3</div>
+          <div class="csm-flow-label">「比較する」</div>
+          <div class="csm-flow-note">重なり・人数不足を一覧で確認</div>
+        </div>
+      </div>
+      <div class="csm-note" style="margin-top:10px">📎 休暇どうしは重複になりません。代務・研修は終日の勤務として扱われ、同じ日の他の勤務と重なります。臨時便（TEMP）は同じ現場で臨時便どうしのときだけ重複とみなします。</div>
+    </div>
+  </section>
+
+
+  <!-- ========== 連携・代務 ========== -->
+  <section id="link" class="csm-section">
+    <div class="csm-section-header">
+      <div class="csm-section-icon" style="background:#e0f2fe">🔄</div>
+      <div>
+        <h2 class="csm-section-title">連携・代務・申請</h2>
+        <p class="csm-section-desc">CloudShift は他のツールや運用とつながります。休暇の反映、代わりの人の手配、休暇種別の変更申請などが行えます。</p>
+      </div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">⛵ 有休共有ツールへ反映（個人シフトのみ）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">個人シフトに入っている休暇を、有休共有ツール（有休マネージャー）へ反映できます。アクションの「営業所選択」で反映先の営業所を選び、「有休マネージャーに反映」を押します。</p>
+      <ul class="csm-ul">
+        <li>その月の休暇を登録し、前回反映分は置き換えます。</li>
+        <li>社員IDが未設定の行はスキップされ、件数が表示されます。</li>
+        <li>反映する営業所への権限が必要です。</li>
+      </ul>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🆘 代務要請（出られない日の代わりを頼む）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">現場シフト・個人シフトで、ある日の勤務について代わりの人を要請できます。要請内容は、その営業所の<strong>要代務シフト帳</strong>に集約され、代わりを探せるようになります。</p>
+      <div class="csm-note">📌 代務要請は現場シフト・個人シフトで使えます。要請として登録された内容は、対象の日付・勤務とともに要代務シフト帳に並びます。</div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🔁 休暇種別の変更申請（シフト帳の設定）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">「シフト帳の設定」で <strong>休暇種別変更申請</strong> を許可すると、閲覧URLで見ている人が「この休みの種別を変えてほしい」と申請できます。所有者には未確認・保留中の件数が表示され、申請を確認して却下などの対応ができます。</p>
+      <div class="csm-tip">💡 本人に閲覧URLだけ渡しておけば、「有休にしてほしい」などの希望を申請として受け取れます。編集権限を渡さずに希望だけ集めたいときに便利です。</div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🔗 マスタとの紐付け（社員名簿PLUS・現場リストPLUS）</div>
+      <div class="csm-grid2">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">現場シフト ↔ 現場リストPLUS</div>
+          <ul class="csm-ul">
+            <li>「現場を選ぶ」で現場と紐付けます。</li>
+            <li>未設定のときは警告が出ます。紐付けると枝番号や専従者を活かせます。</li>
+          </ul>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#334155;margin-bottom:6px">個人シフト ↔ 社員名簿</div>
+          <ul class="csm-ul">
+            <li>「社員を選ぶ」で社員と紐付けます。</li>
+            <li>名前の入力候補が出るようになり、有休反映の社員IDにも使われます。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ========== CSV版ツール ========== -->
+  <section id="classic" class="csm-section">
+    <div class="csm-section-header">
+      <div class="csm-section-icon" style="background:#e0f2fe">📄</div>
+      <div>
+        <h2 class="csm-section-title">ShifterSync（CSV版）のツール</h2>
+        <p class="csm-section-desc">CloudShift を使わず、CSV ファイルでやりとりする従来の機能です。ハブ画面のボタンから使えます。クラウドに保存せず、その場で作って書き出したいときに向いています。</p>
+      </div>
+    </div>
+
+    <div class="csm-grid2">
+      <div class="csm-card" style="margin:0">
+        <div class="csm-card-title">🆕 新規シフト作成</div>
+        <p style="font-size:13.5px;color:#475569;margin:0">種別・年・月・タイトル（必要なら人数）を決めてカレンダーを作り、日ごとに入力して CSV を書き出します。</p>
+      </div>
+      <div class="csm-card" style="margin:0">
+        <div class="csm-card-title">✏️ 既存シフト編集</div>
+        <p style="font-size:13.5px;color:#475569;margin:0">手元の CSV を読み込み、カレンダー上で直してから、もう一度 CSV として書き出します。</p>
+      </div>
+      <div class="csm-card" style="margin:0">
+        <div class="csm-card-title">🔍 シフト重複チェック</div>
+        <p style="font-size:13.5px;color:#475569;margin:0">比べたい CSV を複数選んで「チェック開始」。重なりや人数不足を確認します。<strong>最大 50 ファイル</strong>まで、同じ種別・同じ年月どうしで比較します。</p>
+      </div>
+      <div class="csm-card" style="margin:0">
+        <div class="csm-card-title">🗓️ カレンダー出力</div>
+        <p style="font-size:13.5px;color:#475569;margin:0">CSV を 1 つ選び、<strong>PDF か PNG</strong> を選んで作成します。表示された結果からダウンロードできます。</p>
+      </div>
+    </div>
+
+    <div class="csm-note">🔁 CSV版 と CloudShift の CSV は同じ形式です。CSV版で作って CloudShift に取り込む、CloudShift から出して CSV版で確認する、のように行き来できます。</div>
+  </section>
+
+
+  <!-- ========== FAQ ========== -->
+  <section id="faq" class="csm-section">
+    <div class="csm-section-header">
+      <div class="csm-section-icon" style="background:#e0f2fe">❓</div>
+      <div>
+        <h2 class="csm-section-title">よくある質問</h2>
+        <p class="csm-section-desc">使い方で迷ったときはこちらを確認してください。</p>
+      </div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">ShifterSync と CloudShift は何が違いますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">ShifterSync はシフト業務全体の入口（ハブ）で、CSV でやりとりする「作成・編集・重複チェック・カレンダー出力」と、クラウド版の CloudShift をまとめています。CloudShift はその中核機能で、シフト帳をクラウドに保存し、共有URL での本人入力・自動作成・出力・有休連携などを 1 か所で行えます。継続的に共有・運用するなら CloudShift、その場で 1 枚作って終わりなら CSV 版が手軽です。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">共有相手は DSTT のアカウントが必要ですか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">いいえ。閲覧URL・編集URL・通知付き閲覧URL を渡せば、DSTT アカウントが無い人でもブラウザから閲覧・入力できます。DSTT を使う同僚には、URL のほかに「同じ営業所内」「特定社員」へのアカウント共有もできます。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">編集URLを配ったら、誰が直したか分かりますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">はい。編集履歴にいつ・誰が・何をしたかが残ります。ログインしていない人が編集URLで保存するときは、最初に表示名を確認します。おかしくなったときは、月ごとの版から過去の状態に復元できます。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">配ってしまった共有URLを止めるには？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">その URL を「再発行」してください。再発行すると古い URL は無効になり、新しい URL に切り替わります。3 つまとめて作り直すこともできます。必要な相手には新しい URL を配り直してください。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">自動作成はどのシフト帳で使えますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">現場シフトの所有者が、対象月がある状態で使えます。公開編集URLからは使えません。入口は、編集画面のアクション →「アシスト」ボタン → アシストモーダル右上の「自動作成」です。結果はいったん下書きに入り、確認してから確定シフトへ反映します。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">対象日に指定したのにシフトが入りません。</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">多くの場合、その日の「必要人数」が 0 になっているためです。必要人数を設定していない現場では前月の実績から需要を推定するため、前月に実績の無い曜日は需要が 0 になります。自動作成パネルで対象日の必要人数を直接指定すると、その場で埋められます。日別の結果に「需要 0」の警告が出ていないか確認してください。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">自動作成は休みの日も埋めてしまいますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">いいえ。休みが入っている日にはシフトを入れません。有休共有ツールの休み、このシフト帳に入っている休暇、同じ所有者の他の現場・個人シフトの休みを参照して、その人をその日には配置しません。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">「代務」「研修」は何のためにありますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">勤務の役割を表す第二オプションです。代務は「一人で実際に勤務した（＝実績扱い）」、研修は「教わった段階（実績より一段低い）」を意味します。entry にこれらを付けて保存すると、その人の経験が自動でアシストに登録され、候補検索や自動作成で適格者として扱われやすくなります。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">入力したのに保存されていません。</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">カレンダーへの入力は「この月を保存」を押して確定します。タイトルや現場・社員の紐付けは「タイトル保存」です。仮保存モードで作業していた場合は、確定シフトに入れるために「シフトへ反映」が必要です。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">テンプレートを反映すると、共有先が入れた内容は消えますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">他のシフト帳から同期された入力は常に温存され、手入力のエントリだけが差し替わります。上書き方法（置換／追加／空き日のみ）で、手入力分をどう扱うかを選べます。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">休暇を有休共有ツールに反映できないのですが？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">有休反映は個人シフトのみ対応です。反映先の営業所を選び、その営業所への権限が必要です。社員IDが未設定の行はスキップされます（個人シフトを社員名簿と紐付けると社員IDが入ります）。反映するとその月の前回分は置き換えられます。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">重複チェックで「比較できない」と言われます。</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">比較は、同じ種別・同じ年月のシフト帳どうしで行います。違う種別や違う月が混ざっていると比較できません。CSV版で比較するときは、最大 50 ファイルまで、同じ種別・同じ年月のものをそろえてください。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">通知付き閲覧URL（PWA）はどう使いますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">スマホでその URL を開き、ブラウザの「ホーム画面に追加」でアプリのように設置します。開いた画面の「通知を有効化」を押すと、当月のシフトが更新されたときに通知が届きます。閲覧専用なので、内容を変えられる心配なく本人に渡せます。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">CSV版で作ったものを CloudShift に移せますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">はい。CloudShift の「CSV取込」タブで ShifterSync 形式の CSV を読み込めます。CloudShift から出した CSV も同じ形式なので、両者を行き来できます。Excel などで作った別形式の表はそのままでは取り込めません。</div>
+    </div>
+  </section>
+
+</div><!-- /csm-wrap -->
+
+
+<!-- ===== MODAL: 種別 ===== -->
+<div id="modalModes" class="csm-modal-ov csm-hidden">
+  <div class="csm-modal-box">
+    <div class="csm-modal-head">
+      <h3 class="csm-modal-title">📒 シフト帳の種別（モード）</h3>
+      <button class="csm-modal-close" onclick="closeModal('modalModes')">✕</button>
+    </div>
+    <table class="csm-opt-table">
+      <thead><tr><th>種別</th><th>使いどころ</th></tr></thead>
+      <tbody>
+        <tr><td>現場シフト</td><td>1 つの現場に、日ごと複数人を配置する月間シフト。現場リストPLUSと紐付けます。自動作成・テンプレート・代務要請に対応し、いちばん機能が充実しています。</td></tr>
+        <tr><td>個人シフト</td><td>1 人分の月間予定。社員名簿と紐付け、休暇を有休共有ツールへ反映できます。代務要請にも対応します。</td></tr>
+        <tr><td>マスターシフト</td><td>複数の個人または現場をまとめて見る一覧型。対象種別（個人／現場）を選び、対象を追加して横断的に確認します。</td></tr>
+      </tbody>
+    </table>
+    <div class="csm-note" style="margin-top:12px">このほか、代務要請を集約する「要代務シフト帳」が営業所ごとに自動で用意されます。</div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="csm-popup-btn" onclick="closeModal('modalModes')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: オプション ===== -->
+<div id="modalOptions" class="csm-modal-ov csm-hidden">
+  <div class="csm-modal-box">
+    <div class="csm-modal-head">
+      <h3 class="csm-modal-title">🏷️ オプション（勤務の種類）一覧</h3>
+      <button class="csm-modal-close" onclick="closeModal('modalOptions')">✕</button>
+    </div>
+    <table class="csm-opt-table">
+      <thead><tr><th style="width:110px">グループ</th><th>記号と意味</th></tr></thead>
+      <tbody>
+        <tr><td>時間帯</td><td><span class="csm-key">A</span>午前 <span class="csm-key">P</span>午後 <span class="csm-key">E</span>早番 <span class="csm-key">L</span>遅番 <span class="csm-key">TEMP</span>臨時便</td></tr>
+        <tr><td>車両</td><td><span class="csm-key">M</span>マイクロ <span class="csm-key">C</span>中型 <span class="csm-key">O</span>大型 <span class="csm-key">W</span>ワゴン <span class="csm-key">V</span>役員車両 <span class="csm-key">N1</span>〜<span class="csm-key">N5</span>1〜5号車</td></tr>
+        <tr><td>役割<br>（第二オプション）</td><td><span class="csm-key">代務</span>一人で実際に勤務した＝実績扱い ／ <span class="csm-key">研修</span>教わった段階＝実績より一段低い。付けると経験が自動登録されます。</td></tr>
+        <tr><td>休暇</td><td>有休・代休・公休・慶弔休暇・介護休暇・リフレッシュ休暇・その他</td></tr>
+      </tbody>
+    </table>
+    <div class="csm-note" style="margin-top:12px">休暇どうしは重複になりません。代務・研修は終日の勤務として扱われ、同じ日の他の勤務（時間帯・車両・素の名前など）と重なります。臨時便（TEMP）は、同じ現場で臨時便どうしのときだけ重複とみなします。</div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="csm-popup-btn" onclick="closeModal('modalOptions')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: 自動作成 ===== -->
+<div id="modalAuto" class="csm-modal-ov csm-hidden">
+  <div class="csm-modal-box">
+    <div class="csm-modal-head">
+      <h3 class="csm-modal-title">⚙️ 自動作成の対象日とオプション</h3>
+      <button class="csm-modal-close" onclick="closeModal('modalAuto')">✕</button>
+    </div>
+    <table class="csm-opt-table">
+      <thead><tr><th style="width:150px">項目</th><th>内容</th></tr></thead>
+      <tbody>
+        <tr><td>対象日（プリセット）</td><td>全日／平日のみ／土日祝のみ／全解除。さらに曜日チップ（月〜日の一括切替）と、日付の個別 ON/OFF ができます。「火曜〜土曜だけ」「特定の日だけ」も指定できます。</td></tr>
+        <tr><td>対象日の意味</td><td>「新しく配置してよい日」の限定です。計算は常に 1 か月全体で行い、連勤・公平性・他現場との重なりなどは月全体で判定します。対象外の日の既存入力は 100% そのまま残ります。</td></tr>
+        <tr><td>対象日の必要人数</td><td>対象日の「必要人数」を直接指定できます。需要 0 で入らない日をその場で解決できます。</td></tr>
+        <tr><td>有休カレンダー</td><td>有休共有ツールの休みは既定で取り込み対象（チェック済み）です。取り込み方を緩めることもできます。</td></tr>
+        <tr><td>試算 → 下書き</td><td>まず保存せずに試算し、日別の配置・選定理由・未充足を確認。納得したら下書きへ保存します。確定シフトは「シフトへ反映」で更新します。</td></tr>
+      </tbody>
+    </table>
+    <div class="csm-tip" style="margin-top:12px">💡 試算結果は日別に展開して、選ばれた人・他の候補・外れた理由まで確認できます。</div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="csm-popup-btn" onclick="closeModal('modalAuto')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== MODAL: テンプレート ===== -->
+<div id="modalTemplate" class="csm-modal-ov csm-hidden">
+  <div class="csm-modal-box">
+    <div class="csm-modal-head">
+      <h3 class="csm-modal-title">🧩 テンプレートの反映オプション</h3>
+      <button class="csm-modal-close" onclick="closeModal('modalTemplate')">✕</button>
+    </div>
+    <table class="csm-opt-table">
+      <thead><tr><th style="width:130px">オプション</th><th>選択肢と意味</th></tr></thead>
+      <tbody>
+        <tr><td>基準</td><td><strong>日付基準</strong>：対象月の同じ日付へ入れます。<br><strong>曜日基準</strong>：代表月の各曜日のパターンを、対象月の同じ曜日へ繰り返し入れます。</td></tr>
+        <tr><td>上書き方法</td><td><strong>置換</strong>（手入力を入れ替え）／<strong>追加</strong>（足す）／<strong>空き日のみ</strong>（空いている日だけ）。</td></tr>
+        <tr><td>対象日</td><td>全日／平日のみ（祝日除く）／土日祝／祝日／祝日以外。</td></tr>
+        <tr><td>祝日の扱い<br>（曜日基準時）</td><td>実曜日として扱う／日曜パターンにする／触らない／空にする。</td></tr>
+      </tbody>
+    </table>
+    <div class="csm-note" style="margin-top:12px">他のシフト帳から同期された入力は常に温存され、手入力分だけが差し替わります。作成・編集は専用の別ウィンドウで行い、保存すると一覧が自動更新されます。</div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="csm-popup-btn" onclick="closeModal('modalTemplate')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+  /* ---- Accordion ---- */
+  function toggleAcc(btn) {
+    btn.closest('.csm-acc-item').classList.toggle('csm-open');
+  }
+
+  /* ---- Modal ---- */
+  function openModal(id) {
+    document.getElementById(id).classList.remove('csm-hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.add('csm-hidden');
+    document.body.style.overflow = '';
+  }
+  document.querySelectorAll('.csm-modal-ov').forEach(function(ov) {
+    ov.addEventListener('click', function(e) {
+      if (e.target === ov) closeModal(ov.id);
+    });
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.csm-modal-ov:not(.csm-hidden)').forEach(function(ov) {
+        closeModal(ov.id);
+      });
+    }
+  });
+
+  /* ---- Sticky nav active highlight ---- */
+  (function() {
+    var sections = document.querySelectorAll('.csm-section[id]');
+    var navLinks = document.querySelectorAll('.csm-nav-link[data-section]');
+    function onScroll() {
+      var scrollY = window.pageYOffset;
+      var active = null;
+      sections.forEach(function(sec) {
+        var top = sec.getBoundingClientRect().top + scrollY - 100;
+        if (scrollY >= top) active = sec.id;
+      });
+      navLinks.forEach(function(lnk) {
+        lnk.classList.toggle('csm-active', lnk.dataset.section === active);
+      });
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>
+{% endblock %}
