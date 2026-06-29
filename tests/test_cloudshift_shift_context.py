@@ -404,22 +404,43 @@ def test_self_mirror_entries_excluded(monkeypatch):
     assert leave_days == []
 
 
-def test_substitute_book_leave_only(monkeypatch):
-    """要代務帳は休みのみ反映し、勤務(代務募集)は占有に数えない。"""
+def test_substitute_resolved_helper_is_occupancy(monkeypatch):
+    """要代務帳で代務者が割り当てられた（解決済み）entry は、その代務者の勤務占有になる。"""
     from app.tools import cloudshift as cs
 
     sub = {
         "id": "SB1", "mode": "substitute", "owner_user_id": "u1", "title": "要代務",
         "months": {MONTH_KEY: {"entries_per_day": {
-            "5": [{"id": "s1", "value": "!PAID!佐藤", "employee_number": "E001"}],
-            "6": [{"id": "s2", "value": "!A!佐藤", "employee_number": "E001"}],
+            # 解決済み・代務者割当 → 代務者 E001 の仕事
+            "5": [{
+                "id": "s1", "value": "!A!B現場",
+                "substitute_resolved": True, "substitute_request_type": "scene",
+                "substitute_helper_employee_number": "E001",
+                "substitute_helper_employee_name": "佐藤",
+                "site_name": "B現場",
+            }],
+            # 未解決の依頼 → まだ誰の仕事でもない（占有にしない）
+            "6": [{
+                "id": "s2", "value": "!A!C現場",
+                "substitute_resolved": False, "substitute_request_type": "scene",
+                "site_name": "C現場",
+            }],
+            # 解決済みだが代務者未割当 → 占有にしない
+            "7": [{
+                "id": "s3", "value": "!A!D現場",
+                "substitute_resolved": True, "substitute_request_type": "scene",
+                "substitute_helper_employee_number": "",
+                "substitute_helper_employee_name": "",
+                "site_name": "D現場",
+            }],
         }}},
     }
     monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [base_project(), sub])
     warnings: list = []
     external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
-    assert [u.date for u in leave_days] == [date(YEAR, MONTH, 5)]
-    assert external == []  # 勤務(代務募集)は占有にしない
+    assert leave_days == []
+    assert [(a.employee_number, a.date, a.shift_key, a.source_mode) for a in external] == \
+        [("E001", date(YEAR, MONTH, 5), "A", "substitute")]
 
 
 def test_person_book_leave_and_work(monkeypatch):

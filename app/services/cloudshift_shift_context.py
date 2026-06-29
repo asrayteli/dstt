@@ -559,12 +559,14 @@ def build_existing_assignments(
     return result
 
 
-# 勤務占有として扱うモード（実勤務が明確なもの）。
-# substitute(要代務)帳の entry は「代務募集（依頼）」を表し、employee_number が
-# 勤務者か依頼者か曖昧なため勤務占有には含めない（休みのみ反映する）。
+# 勤務占有として扱うモード。
+# - scene/person: entry の employee がそのまま勤務者。
+# - substitute(要代務): 解決済み（回答者が代務者を割り当てた）entry の代務者だけを
+#   勤務者として扱う。代務者が割り当たればその人の仕事になるため占有に含める。
+#   未割当・未解決の依頼は勤務確定でないため除外する（_substitute_assignment が判定）。
 # master(テンプレート)は実勤務ではないため一切対象外。
-_OCCUPANCY_WORK_MODES = {"scene", "person"}
-_OCCUPANCY_LEAVE_MODES = {"scene", "person", "substitute"}
+_OCCUPANCY_DIRECT_MODES = {"scene", "person"}  # entry の employee がそのまま勤務者
+_OCCUPANCY_MODES = {"scene", "person", "substitute"}
 
 
 def build_external_assignments(
@@ -574,16 +576,18 @@ def build_external_assignments(
 
     オーナーを問わず（他管理者の帳も含め）、対象月の確定シフトを走査する。
     - 勤務占有（ExternalAssignment）: 同じ人が同じ日にどこかで勤務していれば、対象
-      現場の同日配置を Hard で防ぐための入力（scene/person 帳の勤務）。
-    - 休み（UnavailableDay, hard）: どの帳でも休みが入っていればその日は配置しない
-      （scene/person/substitute 帳の有休系オプション）。
+      現場の同日配置を Hard で防ぐための入力。
+      - scene/person 帳: entry の勤務者。
+      - substitute(要代務)帳: 回答者が代務者を割り当てた（解決済み）entry の代務者
+        （その人の仕事になるため占有に数える）。
+    - 休み（UnavailableDay, hard）: scene/person 帳で休みが入っていればその日は配置しない。
     - master（テンプレート）は実勤務でないため対象外。
     - 対象シフト帳自身（同 id）と、対象帳から同期された mirror entry
       （sync_source_project_id == 対象 id）は除外し、自帳の予定で自分を締め出さない。
     戻り値は (external_assignments, leave_unavailable_days)。
     """
     try:
-        from app.tools.cloudshift import _iter_stored_projects
+        from app.tools.cloudshift import _iter_stored_projects, _substitute_assignment
         from app.tools.shiftersync_format import parse_entry_value
     except Exception:  # pragma: no cover
         return [], []
@@ -616,13 +620,32 @@ def build_external_assignments(
         )
         warnings.append(PlanningWarning(code, message, date=d))
 
+    def add_work(number, name, d, shift_key, project_id, project_title, source_mode):
+        key = (number, d, shift_key, project_id)
+        if key in seen_work:
+            return
+        seen_work.add(key)
+        external.append(
+            ExternalAssignment(
+                employee_number=number,
+                employee_name=name,
+                date=d,
+                day=d.day,
+                shift_key=shift_key,
+                project_id=project_id,
+                project_title=project_title,
+                source_mode=source_mode,
+                confirmed=True,
+            )
+        )
+
     for other in stored:
         if not isinstance(other, dict):
             continue
         if _str(other.get("id")) == target_id:
             continue
         mode = _str(other.get("mode"))
-        if mode not in _OCCUPANCY_LEAVE_MODES:
+        if mode not in _OCCUPANCY_MODES:
             continue  # master 等は対象外
         month_data = (other.get("months") or {}).get(month_key)
         if not isinstance(month_data, dict):
@@ -633,7 +656,7 @@ def build_external_assignments(
         project_id = _str(other.get("id"))
         project_title = _str(other.get("title")) or "他シフト帳"
         book_number = _str(other.get("employee_number"))  # person 帳の本人
-        count_work = mode in _OCCUPANCY_WORK_MODES
+        is_direct = mode in _OCCUPANCY_DIRECT_MODES
         for day_key, day_entries in entries_per_day.items():
             if not isinstance(day_entries, list):
                 continue
@@ -649,6 +672,21 @@ def build_external_assignments(
                 # 対象帳から同期された mirror は自帳の予定なので除外する
                 if target_id and _str(entry.get("sync_source_project_id")) == target_id:
                     continue
+
+                if not is_direct:
+                    # 要代務帳: 回答者が代務者を割り当てた（解決済み）entry の代務者を勤務扱い
+                    assignment = _substitute_assignment(entry)
+                    if not assignment or assignment.get("unassigned_helper"):
+                        continue
+                    helper = _str(assignment.get("employee_number"))
+                    if not helper:
+                        continue
+                    add_work(
+                        helper, _str(assignment.get("employee_name")), d,
+                        _str(assignment.get("option_key")), project_id, project_title, "substitute",
+                    )
+                    continue
+
                 option, name = parse_entry_value(entry.get("value") or "")
                 shift_key = _str(option)
                 number = _str(entry.get("employee_number")) or book_number
@@ -671,28 +709,10 @@ def build_external_assignments(
                         )
                     )
                     continue
-                if not count_work:
-                    continue  # substitute は休みのみ反映する
                 if not number:
                     warn("external_without_number", name, d)
                     continue
-                key = (number, d, shift_key, project_id)
-                if key in seen_work:
-                    continue
-                seen_work.add(key)
-                external.append(
-                    ExternalAssignment(
-                        employee_number=number,
-                        employee_name=name,
-                        date=d,
-                        day=d.day,
-                        shift_key=shift_key,
-                        project_id=project_id,
-                        project_title=project_title,
-                        source_mode=mode,  # type: ignore[arg-type]
-                        confirmed=True,
-                    )
-                )
+                add_work(number, name, d, shift_key, project_id, project_title, mode)
 
     external.sort(key=lambda e: (e.employee_number, e.date, e.shift_key, e.project_id))
     leave_days.sort(key=lambda u: (u.employee_number, u.date))
