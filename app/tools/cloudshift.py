@@ -6955,22 +6955,14 @@ def _rule_effective_for_date(rule: dict[str, Any], target_date: date) -> bool:
     return True
 
 
-def _assist_scene_conflict_entries(
-    project: dict[str, Any],
-    target_date: date,
-    stored_projects: list[dict[str, Any]] | None = None,
-) -> list[dict[str, str]]:
-    # 1か月分を走査する呼び出し（自動作成の他現場占有収集）では、毎日 DB 全件を
-    # 再ロードしないよう、呼び出し側が取得済みのプロジェクト一覧を渡せる。
-    # 未指定なら従来どおりこの場で読み込む（単日のアシスト用途は変更なし）。
+def _assist_scene_conflict_entries(project: dict[str, Any], target_date: date) -> list[dict[str, str]]:
     owner_user_id = str(project.get("owner_user_id") or "").strip()
     project_id = str(project.get("id") or "").strip()
     month_key = _month_key(target_date.year, target_date.month)
     day_key = str(target_date.day)
     entries: list[dict[str, str]] = []
     seen: set[tuple[str, str, str, str]] = set()
-    projects = stored_projects if stored_projects is not None else _iter_stored_projects()
-    for other_project in projects:
+    for other_project in _iter_stored_projects():
         if not other_project:
             continue
         if str(other_project.get("id") or "").strip() == project_id:

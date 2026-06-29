@@ -42,7 +42,7 @@ def make_slot(day: int, shift_key: str = "", required: int = 1, slot_id: str | N
 def make_worker(number: str, *, name: str = "", active: bool = True,
                 dedicated=(), experienced=("10",), trainee=(), options=(),
                 preferred=(), blocked=(), max_assignments=None, min_assignments=None,
-                prior_tail=0, weight=0) -> e.Worker:
+                prior_tail=0, weight=0, experience_count=0) -> e.Worker:
     pref = None
     if preferred or blocked:
         pref = e.WorkerPreference(preferred_weekdays=tuple(preferred), blocked_weekdays=tuple(blocked))
@@ -59,6 +59,7 @@ def make_worker(number: str, *, name: str = "", active: bool = True,
         experienced_site_row_ids=tuple(experienced),
         trainee_site_row_ids=tuple(trainee),
         experienced_option_keys=tuple(options),
+        site_experience_count=experience_count,
         preference=pref,
         monthly_limit=limit,
         worker_weight=weight,
@@ -323,6 +324,33 @@ def test_dedicated_preferred():
                make_worker("E002", dedicated=("10",), experienced=("10",))]
     res = e.plan_shifts(make_request(slots, workers))
     assert assigned_numbers(res) == ["E002"]
+
+
+def test_experience_count_prioritizes_higher_track_record():
+    """同じ経験者同士なら、過去の出勤実績が多い人を優先する。"""
+    slots = [make_slot(1)]
+    # 公平性で初日が分散しないよう、両者とも実績ゼロ起点・同条件にする
+    low = make_worker("E001", experience_count=1)
+    high = make_worker("E002", experience_count=20)
+    res = e.plan_shifts(make_request(slots, [low, high]))
+    assert assigned_numbers(res, day=1) == ["E002"]
+    # スコア要因に「実績の厚み」が出る
+    factors = {}
+    for panel in res.candidate_panels:
+        for c in panel.candidates:
+            factors.setdefault(c.employee_number, set()).update(f.label for f in c.factors)
+    assert "実績の厚み" in factors["E002"]
+
+
+def test_experience_count_bonus_is_capped():
+    """実績加点は上限で頭打ちになり、専従ボーナスを超えない。"""
+    weights = e.ScoringWeights()
+    veteran = make_worker("E001", experience_count=10_000)
+    dedicated = make_worker("E002", dedicated=("10",), experienced=("10",), experience_count=0)
+    slots = [make_slot(1)]
+    res = e.plan_shifts(make_request(slots, [veteran, dedicated], weights=weights))
+    # 上限(experience_count_bonus_cap) のため、専従(+500)が実績ベテランより上位
+    assert assigned_numbers(res, day=1) == ["E002"]
 
 
 def test_fairness_spreads_assignments():
