@@ -133,6 +133,11 @@ class ScoringWeights:
 
     dedicated_bonus: int = 500
     experience_bonus: int = 120
+    # 過去の出勤実績 1 回あたりの追加加点（experience_bonus への上乗せ）。
+    # 実績が多い人ほどその現場の優先度を上げる。
+    experience_count_bonus: int = 12
+    # 実績加点の上限（ベテランが他要素を支配しすぎないよう頭打ちにする）。
+    experience_count_bonus_cap: int = 180
     # 研修（TRAIN オプション）を受けた現場。「教わったが一人ではやっていない」
     # 状態のため、実績（代務 SUB を含む）より一段低い習熟度として加点する
     trained_site_bonus: int = 60
@@ -281,6 +286,9 @@ class Worker:
     trained_site_row_ids: tuple[str, ...] = ()
     trainee_site_row_ids: tuple[str, ...] = ()
     experienced_option_keys: tuple[str, ...] = ()
+    # 対象現場での過去の出勤実績数（確定シフトの回数）。実績が多い人ほど
+    # その現場の優先度を上げるために使う（experience_count_bonus で加点）。
+    site_experience_count: int = 0
     qualification_codes: tuple[str, ...] = ()  # 予約
     vehicle_options: tuple[str, ...] = ()  # 予約（legacy）
     capable_shift_keys: tuple[str, ...] = ()  # 予約（legacy）
@@ -1158,6 +1166,17 @@ def _score_candidate(
         if _site_match(worker.experienced_site_row_ids, slot.site_row_id):
             score += weights.experience_bonus
             factors.append(ScoreFactor("experience", "経験者", weights.experience_bonus, "対象現場の実績あり（代務含む）"))
+            # 実績の厚み: 過去の出勤回数が多い人ほど上乗せ（上限あり）。
+            if worker.site_experience_count > 0 and weights.experience_count_bonus > 0:
+                count_bonus = min(
+                    weights.experience_count_bonus_cap,
+                    worker.site_experience_count * weights.experience_count_bonus,
+                )
+                score += count_bonus
+                factors.append(ScoreFactor(
+                    "experience", "実績の厚み", count_bonus,
+                    f"過去 {worker.site_experience_count} 回の実績",
+                ))
         elif _site_match(worker.trained_site_row_ids, slot.site_row_id):
             score += weights.trained_site_bonus
             factors.append(ScoreFactor("experience", "研修済み", weights.trained_site_bonus, "研修を受けた現場（一人での実績はまだ）"))
@@ -2842,6 +2861,7 @@ def compute_request_hash(request: ShiftPlanningRequest) -> str:
                 "trained_site_row_ids": sorted(worker.trained_site_row_ids),
                 "trainee_site_row_ids": sorted(worker.trainee_site_row_ids),
                 "experienced_option_keys": sorted(worker.experienced_option_keys),
+                "site_experience_count": worker.site_experience_count,
                 "preference": _jsonify(worker.preference),
                 "monthly_limit": _jsonify(worker.monthly_limit),
                 "worker_weight": worker.worker_weight,

@@ -36,6 +36,44 @@ def base_project(**months_extra):
     }
 
 
+class _FakeEmp:
+    def __init__(self, is_deleted=False, retirement_date=""):
+        self.is_deleted = is_deleted
+        self.retirement_date = retirement_date
+
+
+def test_derive_active_handles_retirement_dates():
+    from datetime import timedelta
+
+    today = date.today()
+    past = (today - timedelta(days=1)).isoformat()
+    future = (today + timedelta(days=365)).isoformat()
+
+    # 過去の退職日 → 退職（警告なし）
+    w1: list = []
+    assert ctx._derive_active(_FakeEmp(retirement_date=past), w1, "E001") is False
+    assert w1 == []
+
+    # 未来の退職日 → 在籍。判定できているため「判定不能」警告は出さない
+    w2: list = []
+    assert ctx._derive_active(_FakeEmp(retirement_date=future), w2, "E002") is True
+    assert not any(x.code == "uncertain_retirement" for x in w2)
+
+    # 「？退職？」等の非正規値 → 在籍維持＋警告
+    w3: list = []
+    assert ctx._derive_active(_FakeEmp(retirement_date="？退職？"), w3, "E003") is True
+    assert any(x.code == "uncertain_retirement" for x in w3)
+
+    # is_deleted は確実に退職
+    w4: list = []
+    assert ctx._derive_active(_FakeEmp(is_deleted=True), w4, "E004") is False
+
+    # 退職日なし → 在籍
+    w5: list = []
+    assert ctx._derive_active(_FakeEmp(retirement_date=""), w5, "E005") is True
+    assert w5 == []
+
+
 def test_workers_built_from_assist():
     project = base_project()
     settings, _ = e.migrate_settings(project.get("shift_engine"))
@@ -293,17 +331,39 @@ def test_leave_entry_locked_and_blocks_same_day_assignment():
     assert any(en["value"] == "!PAID!佐藤" for en in draft.get("1", []))
 
 
-def test_external_leave_entry_becomes_hard_unavailable(monkeypatch):
-    """他の現場シフト帳に入っている休みは hard の不可日になる。"""
+def _scene_project(pid, owner, entries, title="他現場"):
+    return {
+        "id": pid, "mode": "scene", "owner_user_id": owner,
+        "site_row_id": "20", "site_id": "S2", "site_name": title, "title": title,
+        "months": {MONTH_KEY: {"entries_per_day": entries}},
+    }
+
+
+def test_external_occupancy_includes_other_owner_scene(monkeypatch):
+    """他オーナーの現場帳の同日勤務も二重配置防止の占有として取り込む。"""
     from app.tools import cloudshift as cs
 
-    def fake_conflicts(project, target_date):
-        if target_date == date(YEAR, MONTH, 2):
-            return [{"project_id": "P2", "project_title": "B現場", "shift_key": "PAID",
-                     "shift_label": "有休", "entry_name": "佐藤", "employee_number": "E001"}]
-        return []
+    other = _scene_project("P2", "OTHER_OWNER", {
+        "2": [{"id": "e1", "value": "!A!佐藤", "employee_number": "E001"}],
+    })
+    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [base_project(), other])
+    warnings: list = []
+    external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
+    assert leave_days == []
+    assert len(external) == 1
+    a = external[0]
+    assert (a.employee_number, a.date, a.shift_key, a.source_mode) == \
+        ("E001", date(YEAR, MONTH, 2), "A", "scene")
 
-    monkeypatch.setattr(cs, "_assist_scene_conflict_entries", fake_conflicts)
+
+def test_external_leave_entry_becomes_hard_unavailable(monkeypatch):
+    """他の現場シフト帳（他オーナー可）に入っている休みは hard の不可日になる。"""
+    from app.tools import cloudshift as cs
+
+    other = _scene_project("P2", "OTHER_OWNER", {
+        "2": [{"id": "e1", "value": "!PAID!佐藤", "employee_number": "E001"}],
+    })
+    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [base_project(), other])
     warnings: list = []
     external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
     assert external == []
@@ -313,27 +373,97 @@ def test_external_leave_entry_becomes_hard_unavailable(monkeypatch):
         ("E001", date(YEAR, MONTH, 2), "hard", "shift_entry")
 
 
-def test_person_project_leave_days(monkeypatch):
-    """同 owner の個人シフト帳の休みは hard の不可日になる。"""
+def test_external_assignments_loads_projects_once(monkeypatch):
+    """占有収集でプロジェクト一覧の全件ロードは 1 回だけ（性能回帰防止）。"""
+    from app.tools import cloudshift as cs
+
+    iter_calls = {"count": 0}
+
+    def fake_iter():
+        iter_calls["count"] += 1
+        return []
+
+    monkeypatch.setattr(cs, "_iter_stored_projects", fake_iter)
+    warnings: list = []
+    ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
+    assert iter_calls["count"] == 1
+
+
+def test_self_mirror_entries_excluded(monkeypatch):
+    """対象帳から同期された mirror entry は占有に数えない（自帳で自分を締め出さない）。"""
+    from app.tools import cloudshift as cs
+
+    other = _scene_project("P2", "OTHER_OWNER", {
+        "2": [{"id": "e1", "value": "!A!佐藤", "employee_number": "E001",
+               "sync_source_project_id": "P1"}],
+    })
+    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [base_project(), other])
+    warnings: list = []
+    external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
+    assert external == []
+    assert leave_days == []
+
+
+def test_substitute_resolved_helper_is_occupancy(monkeypatch):
+    """要代務帳で代務者が割り当てられた（解決済み）entry は、その代務者の勤務占有になる。"""
+    from app.tools import cloudshift as cs
+
+    sub = {
+        "id": "SB1", "mode": "substitute", "owner_user_id": "u1", "title": "要代務",
+        "months": {MONTH_KEY: {"entries_per_day": {
+            # 解決済み・代務者割当 → 代務者 E001 の仕事
+            "5": [{
+                "id": "s1", "value": "!A!B現場",
+                "substitute_resolved": True, "substitute_request_type": "scene",
+                "substitute_helper_employee_number": "E001",
+                "substitute_helper_employee_name": "佐藤",
+                "site_name": "B現場",
+            }],
+            # 未解決の依頼 → まだ誰の仕事でもない（占有にしない）
+            "6": [{
+                "id": "s2", "value": "!A!C現場",
+                "substitute_resolved": False, "substitute_request_type": "scene",
+                "site_name": "C現場",
+            }],
+            # 解決済みだが代務者未割当 → 占有にしない
+            "7": [{
+                "id": "s3", "value": "!A!D現場",
+                "substitute_resolved": True, "substitute_request_type": "scene",
+                "substitute_helper_employee_number": "",
+                "substitute_helper_employee_name": "",
+                "site_name": "D現場",
+            }],
+        }}},
+    }
+    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [base_project(), sub])
+    warnings: list = []
+    external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
+    assert leave_days == []
+    assert [(a.employee_number, a.date, a.shift_key, a.source_mode) for a in external] == \
+        [("E001", date(YEAR, MONTH, 5), "A", "substitute")]
+
+
+def test_person_book_leave_and_work(monkeypatch):
+    """個人シフト帳（他オーナー可）の休みは不可日、勤務は占有になる。"""
     from app.tools import cloudshift as cs
 
     person_project = {
         "id": "PP1",
         "mode": "person",
-        "owner_user_id": "u1",
+        "owner_user_id": "uX",
         "employee_number": "E001",
         "title": "佐藤の個人シフト",
         "months": {MONTH_KEY: {"entries_per_day": {
             "3": [{"id": "x", "value": "!COMP!代休"}],
-            "4": [{"id": "y", "value": "!A!A現場"}],
+            "4": [{"id": "y", "value": "!A!佐藤"}],
         }}},
     }
-    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [person_project])
-    leave_days = ctx.build_person_project_leave_days(base_project(), YEAR, MONTH)
-    assert len(leave_days) == 1
-    assert leave_days[0].employee_number == "E001"
-    assert leave_days[0].date == date(YEAR, MONTH, 3)
-    assert leave_days[0].strength == "hard"
+    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [base_project(), person_project])
+    warnings: list = []
+    external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
+    assert [(u.employee_number, u.date) for u in leave_days] == [("E001", date(YEAR, MONTH, 3))]
+    assert [(a.employee_number, a.date, a.shift_key) for a in external] == \
+        [("E001", date(YEAR, MONTH, 4), "A")]
 
 
 def test_unknown_leave_type_defaults_to_hard(monkeypatch):
@@ -494,6 +624,29 @@ def test_role_option_entries_derive_experience_directly():
     settings, _ = e.migrate_settings(None)
     warnings: list = []
     workers = {w.employee_number: w for w in ctx.build_workers(project, settings, warnings)}
-    assert "10" in workers["E301"].experienced_site_row_ids
-    assert "10" in workers["E302"].trained_site_row_ids
+    assert "10" in workers["E301"].experienced_site_row_ids  # 代務=実績
+    assert "10" not in workers["E301"].trained_site_row_ids
+    assert "10" in workers["E302"].trained_site_row_ids      # 研修=研修済み
+    # 研修(TRAIN)は実績(経験)には入れない。records 経路と同じく習熟度を一段低く保つ
+    assert "10" not in workers["E302"].experienced_site_row_ids
     assert workers["E301"].name == "田中"
+
+
+def test_site_experience_count_from_history():
+    """対象帳の全月の確定勤務回数が site_experience_count に入り、実績者は候補になる。"""
+    project = base_project()
+    # 別月の確定履歴（休みは実績に数えない）
+    project["months"]["2026-05"] = {"entries_per_day": {
+        "1": [{"employee_number": "E001", "value": "!A!佐藤"}],
+        "2": [{"employee_number": "E001", "value": "!A!佐藤"},
+              {"employee_number": "E901", "value": "!A!新人"}],
+        "3": [{"employee_number": "E001", "value": "!PAID!佐藤"}],  # 休みは数えない
+    }}
+    settings, _ = e.migrate_settings(None)
+    warnings: list = []
+    workers = {w.employee_number: w for w in ctx.build_workers(project, settings, warnings)}
+    assert workers["E001"].site_experience_count == 2
+    # アシスト未登録でも実績があれば候補かつ経験者として扱う
+    assert "E901" in workers
+    assert workers["E901"].site_experience_count == 1
+    assert "10" in workers["E901"].experienced_site_row_ids

@@ -102,14 +102,14 @@ def _derive_active(emp: Any, warnings: list[PlanningWarning], number: str) -> bo
     retirement = _str(getattr(emp, "retirement_date", ""))
     if not retirement:
         return True
-    # 明確な日付（過去）なら退職とみなす
+    # 解釈できた日付は確定的に判定する（過去・当日なら退職、未来日なら在籍）。
+    # 未来日は「判定不能」ではないため警告を出さない。
     iso = retirement.replace("/", "-")
     parts = iso.split("-")
     if len(parts) == 3 and all(p.isdigit() for p in parts):
         try:
             ret_date = date(int(parts[0]), int(parts[1]), int(parts[2]))
-            if ret_date <= date.today():
-                return False
+            return ret_date > date.today()
         except ValueError:
             pass
     # 「？退職？」等の非正規値は判定不能 → 在籍維持＋warning
@@ -166,14 +166,61 @@ def _role_option_sites_from_entries(
                 number = _str(entry.get("employee_number"))
                 if not number:
                     continue
-                # 代務・研修いずれも「経験済み現場」へ反映する（要件4/5）。
-                experienced.setdefault(number, set()).add(site_row_id)
+                # 代務（SUB）= 一人で勤務した実績 → 経験。
+                # 研修（TRAIN）= 教わったが一人ではやっていない → 研修済みのみ。
+                # 実績(120点)と研修済み(60点)の習熟度差を保つため、TRAIN は経験へ
+                # 入れない（アシスト records 経路の振り分けと統一）。
                 if key == _ROLE_OPTION_TRAINING:
                     trained.setdefault(number, set()).add(site_row_id)
+                else:
+                    experienced.setdefault(number, set()).add(site_row_id)
                 _option, name = parse_entry_value(entry.get("value") or "")
                 if _str(name):
                     names.setdefault(number, _str(name))
     return experienced, trained, names
+
+
+def _site_experience_counts(
+    project: dict[str, Any],
+) -> tuple[dict[str, int], dict[str, str]]:
+    """対象シフト帳の全月の確定シフトから社員ごとの出勤実績数と氏名を集める。
+
+    実績が多い人ほどその現場の優先度を上げる（エンジンの experience_count_bonus）
+    ために使う。次は実績に数えない:
+    - 有休系オプション（休み）
+    - 研修（TRAIN）= 教わったが一人での実績ではない（研修済みは別途扱う）
+    戻り値は (実績数 {社員番号: 回数}, 氏名 {社員番号: 氏名})。
+    """
+    counts: dict[str, int] = {}
+    names: dict[str, str] = {}
+    try:
+        from app.tools.shiftersync_format import entry_second_option, parse_entry_value
+    except Exception:  # pragma: no cover
+        return counts, names
+    for month_data in (project.get("months") or {}).values():
+        if not isinstance(month_data, dict):
+            continue
+        for day_entries in (month_data.get("entries_per_day") or {}).values():
+            if not isinstance(day_entries, list):
+                continue
+            for entry in day_entries:
+                if not isinstance(entry, dict):
+                    continue
+                number = _str(entry.get("employee_number"))
+                if not number:
+                    continue
+                option, name = parse_entry_value(entry.get("value") or "")
+                opt = _str(option)
+                if opt in LEAVE_OPTION_KEYS:
+                    continue
+                # 研修(TRAIN)は一人での実績ではないため実績数に数えない
+                role = _str(entry_second_option(entry)) or opt
+                if role == _ROLE_OPTION_TRAINING:
+                    continue
+                counts[number] = counts.get(number, 0) + 1
+                if _str(name):
+                    names.setdefault(number, _str(name))
+    return counts, names
 
 
 def _load_employees(numbers: set[str]) -> dict[str, Any]:
@@ -291,6 +338,16 @@ def build_workers(
         preferred[number] = tuple(int(x) for x in (item.get("preferred_weekdays") or []) if str(x).isdigit())
         blocked[number] = tuple(int(x) for x in (item.get("blocked_weekdays") or []) if str(x).isdigit())
 
+    # 対象現場での過去の出勤実績数（実績の厚みによる優先度付けに使う）
+    experience_counts, history_names = _site_experience_counts(project)
+    for number, nm in history_names.items():
+        names.setdefault(number, nm)
+    # 過去に実際に勤務した人は、アシスト未登録でも「経験者の候補」として扱う
+    # （実績がある人を確実に候補へ含め、回数で優先度を上げる）。
+    if site_row_id:
+        for number in experience_counts:
+            experienced_sites.setdefault(number, set()).add(site_row_id)
+
     candidate_numbers = (
         set(dedicated_numbers)
         | set(experienced_sites)
@@ -300,6 +357,7 @@ def build_workers(
         | set(preferred)
         | set(blocked)
         | set(names)
+        | set(experience_counts)
     )
     candidate_numbers.discard("")
 
@@ -365,6 +423,7 @@ def build_workers(
                 trained_site_row_ids=tuple(sorted(trained_sites.get(number, set()))),
                 trainee_site_row_ids=tuple(sorted(trainee_sites.get(number, set()))),
                 experienced_option_keys=tuple(sorted(option_keys.get(number, set()))),
+                site_experience_count=experience_counts.get(number, 0),
                 preference=pref,
                 monthly_limit=limit,
                 worker_weight=weight_by_number.get(number, 0),
@@ -500,83 +559,164 @@ def build_existing_assignments(
     return result
 
 
+# 勤務占有として扱うモード。
+# - scene/person: entry の employee がそのまま勤務者。
+# - substitute(要代務): 解決済み（回答者が代務者を割り当てた）entry の代務者だけを
+#   勤務者として扱う。代務者が割り当たればその人の仕事になるため占有に含める。
+#   未割当・未解決の依頼は勤務確定でないため除外する（_substitute_assignment が判定）。
+# master(テンプレート)は実勤務ではないため一切対象外。
+_OCCUPANCY_DIRECT_MODES = {"scene", "person"}  # entry の employee がそのまま勤務者
+_OCCUPANCY_MODES = {"scene", "person", "substitute"}
+
+
 def build_external_assignments(
     project: dict[str, Any], year: int, month: int, warnings: list[PlanningWarning]
 ) -> tuple[list[ExternalAssignment], list[UnavailableDay]]:
-    """同 owner の他 scene project の確定配置を ExternalAssignment へ集約する。
+    """会社全体の全シフト帳から、候補者の同日勤務占有と休みを集約する。
 
-    有休系オプションの entry は他現場占有（is_duplicate_by_rules では重複しない）
-    ではなく「その人の休み」なので、hard の UnavailableDay として返す。
+    オーナーを問わず（他管理者の帳も含め）、対象月の確定シフトを走査する。
+    - 勤務占有（ExternalAssignment）: 同じ人が同じ日にどこかで勤務していれば、対象
+      現場の同日配置を Hard で防ぐための入力。
+      - scene/person 帳: entry の勤務者。
+      - substitute(要代務)帳: 回答者が代務者を割り当てた（解決済み）entry の代務者
+        （その人の仕事になるため占有に数える）。
+    - 休み（UnavailableDay, hard）: scene/person 帳で休みが入っていればその日は配置しない。
+    - master（テンプレート）は実勤務でないため対象外。
+    - 対象シフト帳自身（同 id）と、対象帳から同期された mirror entry
+      （sync_source_project_id == 対象 id）は除外し、自帳の予定で自分を締め出さない。
     戻り値は (external_assignments, leave_unavailable_days)。
     """
     try:
-        from app.tools.cloudshift import _assist_scene_conflict_entries
+        from app.tools.cloudshift import _iter_stored_projects, _substitute_assignment
+        from app.tools.shiftersync_format import parse_entry_value
     except Exception:  # pragma: no cover
         return [], []
 
-    days = monthrange(year, month)[1]
-    seen: set[tuple[str, str, str, str]] = set()
-    result: list[ExternalAssignment] = []
+    # プロジェクト一覧は月内で不変なので一度だけ全件取得して使い回す。
+    try:
+        stored = list(_iter_stored_projects())
+    except Exception:  # pragma: no cover
+        return [], []
+
+    target_id = _str(project.get("id"))
+    month_key = _month_key(year, month)
+    days_in_month = monthrange(year, month)[1]
+
+    external: list[ExternalAssignment] = []
     leave_days: list[UnavailableDay] = []
-    for day in range(1, days + 1):
-        d = date(year, month, day)
-        try:
-            entries = _assist_scene_conflict_entries(project, d) or []
-        except Exception:  # pragma: no cover
+    seen_work: set[tuple[str, date, str, str]] = set()
+    seen_leave: set[tuple[str, date]] = set()
+    seen_warn: set[tuple[str, str]] = set()
+
+    def warn(code: str, name: str, d: date) -> None:
+        key = (code, name)
+        if key in seen_warn:
+            return
+        seen_warn.add(key)
+        message = (
+            f"社員番号のない他シフト帳の休みは自動照合しません: {name}"
+            if code == "leave_without_number"
+            else f"番号で突合できない他シフト帳の勤務は警告扱いにします: {name}"
+        )
+        warnings.append(PlanningWarning(code, message, date=d))
+
+    def add_work(number, name, d, shift_key, project_id, project_title, source_mode):
+        key = (number, d, shift_key, project_id)
+        if key in seen_work:
+            return
+        seen_work.add(key)
+        external.append(
+            ExternalAssignment(
+                employee_number=number,
+                employee_name=name,
+                date=d,
+                day=d.day,
+                shift_key=shift_key,
+                project_id=project_id,
+                project_title=project_title,
+                source_mode=source_mode,
+                confirmed=True,
+            )
+        )
+
+    for other in stored:
+        if not isinstance(other, dict):
             continue
-        for entry in entries:
-            number = _str(entry.get("employee_number"))
-            name = _str(entry.get("entry_name"))
-            shift_key = _str(entry.get("shift_key"))
-            project_id = _str(entry.get("project_id"))
-            key = (number, name, d.isoformat(), shift_key + project_id)
-            if key in seen:
+        if _str(other.get("id")) == target_id:
+            continue
+        mode = _str(other.get("mode"))
+        if mode not in _OCCUPANCY_MODES:
+            continue  # master 等は対象外
+        month_data = (other.get("months") or {}).get(month_key)
+        if not isinstance(month_data, dict):
+            continue
+        entries_per_day = month_data.get("entries_per_day") or {}
+        if not isinstance(entries_per_day, dict):
+            continue
+        project_id = _str(other.get("id"))
+        project_title = _str(other.get("title")) or "他シフト帳"
+        book_number = _str(other.get("employee_number"))  # person 帳の本人
+        is_direct = mode in _OCCUPANCY_DIRECT_MODES
+        for day_key, day_entries in entries_per_day.items():
+            if not isinstance(day_entries, list):
                 continue
-            seen.add(key)
-            if shift_key in LEAVE_OPTION_KEYS:
-                # 他シフト帳に休みが入っている → その日は配置対象から外す
-                if number:
+            try:
+                d = date(year, month, int(day_key))
+            except (TypeError, ValueError):
+                continue
+            if not (1 <= d.day <= days_in_month):
+                continue
+            for entry in day_entries:
+                if not isinstance(entry, dict):
+                    continue
+                # 対象帳から同期された mirror は自帳の予定なので除外する
+                if target_id and _str(entry.get("sync_source_project_id")) == target_id:
+                    continue
+
+                if not is_direct:
+                    # 要代務帳: 回答者が代務者を割り当てた（解決済み）entry の代務者を勤務扱い
+                    assignment = _substitute_assignment(entry)
+                    if not assignment or assignment.get("unassigned_helper"):
+                        continue
+                    helper = _str(assignment.get("employee_number"))
+                    if not helper:
+                        continue
+                    add_work(
+                        helper, _str(assignment.get("employee_name")), d,
+                        _str(assignment.get("option_key")), project_id, project_title, "substitute",
+                    )
+                    continue
+
+                option, name = parse_entry_value(entry.get("value") or "")
+                shift_key = _str(option)
+                number = _str(entry.get("employee_number")) or book_number
+                if shift_key in LEAVE_OPTION_KEYS:
+                    if not number:
+                        warn("leave_without_number", name, d)
+                        continue
+                    key = (number, d)
+                    if key in seen_leave:
+                        continue
+                    seen_leave.add(key)
                     leave_days.append(
                         UnavailableDay(
                             employee_number=number,
                             date=d,
-                            reason=f"{_str(entry.get('project_title')) or '他シフト帳'}に休み予定",
+                            reason=f"{project_title}に休み予定",
                             source="shift_entry",
                             strength="hard",
                             confirmed=True,
                         )
                     )
-                else:
-                    warnings.append(
-                        PlanningWarning(
-                            "leave_without_number",
-                            f"社員番号のない他シフト帳の休みは自動照合しません: {d.isoformat()} {name}",
-                            date=d,
-                        )
-                    )
-                continue
-            if not number:
-                warnings.append(
-                    PlanningWarning(
-                        "external_without_number",
-                        f"番号で突合できない他現場占有は警告扱いにします: {d.isoformat()} {name}",
-                        date=d,
-                    )
-                )
-            result.append(
-                ExternalAssignment(
-                    employee_number=number,
-                    employee_name=name,
-                    date=d,
-                    day=day,
-                    shift_key=shift_key,
-                    project_id=project_id,
-                    project_title=_str(entry.get("project_title")),
-                    source_mode="scene",
-                    confirmed=True,
-                )
-            )
-    return result, leave_days
+                    continue
+                if not number:
+                    warn("external_without_number", name, d)
+                    continue
+                add_work(number, name, d, shift_key, project_id, project_title, mode)
+
+    external.sort(key=lambda e: (e.employee_number, e.date, e.shift_key, e.project_id))
+    leave_days.sort(key=lambda u: (u.employee_number, u.date))
+    return external, leave_days
 
 
 def leave_days_from_existing(existing: list[ExistingAssignment]) -> list[UnavailableDay]:
@@ -608,76 +748,6 @@ def leave_days_from_existing(existing: list[ExistingAssignment]) -> list[Unavail
                 confirmed=True,
             )
         )
-    return result
-
-
-def build_person_project_leave_days(
-    project: dict[str, Any], year: int, month: int
-) -> list[UnavailableDay]:
-    """同 owner の個人シフト帳（person）に入っている休みを hard の不可日へ変換する。
-
-    個人シフト帳は 1 人＝1 帳のため、有休系オプションの entry があれば
-    その人（project.employee_number）はその日休み。
-    """
-    try:
-        from app.tools.cloudshift import _iter_stored_projects
-        from app.tools.shiftersync_format import parse_entry_value
-    except Exception:  # pragma: no cover
-        return []
-
-    owner_user_id = _str(project.get("owner_user_id"))
-    project_id = _str(project.get("id"))
-    month_key = _month_key(year, month)
-    result: list[UnavailableDay] = []
-    seen: set[tuple[str, date]] = set()
-    try:
-        others = list(_iter_stored_projects())
-    except Exception:  # pragma: no cover
-        return []
-    for other in others:
-        if not isinstance(other, dict):
-            continue
-        if _str(other.get("id")) == project_id:
-            continue
-        if _str(other.get("mode")) != "person":
-            continue
-        if owner_user_id and _str(other.get("owner_user_id")) != owner_user_id:
-            continue
-        number = _str(other.get("employee_number"))
-        if not number:
-            continue
-        month_data = (other.get("months") or {}).get(month_key)
-        if not isinstance(month_data, dict):
-            continue
-        entries_per_day = month_data.get("entries_per_day") or {}
-        for day_key, day_entries in entries_per_day.items():
-            if not isinstance(day_entries, list):
-                continue
-            try:
-                d = date(year, month, int(day_key))
-            except (TypeError, ValueError):
-                continue
-            for entry in day_entries:
-                if not isinstance(entry, dict):
-                    continue
-                shift_key, _name = parse_entry_value(entry.get("value") or "")
-                if _str(shift_key) not in LEAVE_OPTION_KEYS:
-                    continue
-                key = (number, d)
-                if key in seen:
-                    continue
-                seen.add(key)
-                result.append(
-                    UnavailableDay(
-                        employee_number=number,
-                        date=d,
-                        reason=f"{_str(other.get('title')) or '個人シフト帳'}に休み予定",
-                        source="shift_entry",
-                        strength="hard",
-                        confirmed=True,
-                    )
-                )
-    result.sort(key=lambda u: (u.employee_number, u.date))
     return result
 
 
@@ -1119,10 +1189,10 @@ def build_planning_request(
     unavailable = build_unavailable_days(
         calendar_ids or [], year, month, settings, preferences.unconfirmed_leave_strength, warnings
     )
-    # 対象/関連シフト帳に入っている休み予定も hard の不可日として扱う
+    # 対象シフト帳自身に入っている休み予定も hard の不可日として扱う
+    # （他帳・他現場・他オーナーの休みと勤務占有は build_external_assignments で集約済み）
     unavailable.extend(leave_days_from_existing(existing))
     unavailable.extend(external_leave_days)
-    unavailable.extend(build_person_project_leave_days(project, year, month))
     required_slots, _demand_source = build_required_slots(
         project, month_data, settings, days, year, month, warnings
     )

@@ -1649,9 +1649,24 @@ CloudShift の強みは、既に現場、社員、個人シフト、有休共有
   次のとおり hard の不可日（`UnavailableDay(source="shift_entry", strength="hard")`）へ変換する。
   - 対象シフト帳自身の有休系 entry（`leave_days_from_existing`）。当該 entry は existing_policy に
     関わらず locked で 100% 保持する。
-  - 同 owner の他 scene シフト帳の有休系 entry（`build_external_assignments` が外部占有と分離して返す）。
-  - 同 owner の個人シフト帳（person）の有休系 entry（`build_person_project_leave_days`。
-    個人帳は 1 人 1 帳のため project.employee_number の休みとして扱う）。
+  - 会社全体（全 owner）の現場(scene)・個人(person)シフト帳の有休系 entry
+    （`build_external_assignments` が勤務占有と分離して返す）。個人帳は 1 人 1 帳のため
+    project.employee_number の休みとして扱う。
+
+- **同日二重配置の防止（全シフト帳横断）**: `build_external_assignments` は会社全体の全シフト帳
+  （全 owner・全種別）の対象月確定シフトを 1 回のロードで走査し、候補者が同じ日にどこかで勤務して
+  いれば（`ExternalAssignment` として）対象現場の同日配置を Hard で除外する。勤務者の判定は次のとおり。
+  - scene/person 帳: entry の勤務者。
+  - 要代務(substitute)帳: 回答者が代務者を割り当てた（解決済み = `substitute_resolved` かつ
+    代務者あり）entry の代務者。割り当たればその人の仕事になるため占有に数える
+    （`_substitute_assignment` が抽出。未解決・未割当の依頼は数えない）。
+
+  master(テンプレート)は対象外。対象帳自身および対象帳から同期された mirror entry
+  （`sync_source_project_id == 対象 id`）は除外し、自帳の予定で自分を締め出さない。
+- **実績の厚みによる優先度**: 対象シフト帳の全月の確定勤務回数を `Worker.site_experience_count`
+  として読み込み（有休・研修 TRAIN は数えない）、経験者の中でも実績回数が多い人を
+  `experience_count_bonus`（上限 `experience_count_bonus_cap`）で優先する。過去に実際に勤務した人は
+  アシスト未登録でも経験者の候補として扱う。
 - **エンジン側の整合**:
   - 有休系オプションの固定 seed は本人の hard 休暇と同日でも衝突（blocker）にしない
     （休みの記録と不可日はむしろ整合している）。`validate_result` も同様に扱う。
