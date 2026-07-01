@@ -5,8 +5,9 @@ window.PIFillTool = new (class extends PIToolBase {
     this.tolerance = 32;
   }
   onMouseDown(e) {
-    const layer = PILayerManager.getActive();
+    let layer = PILayerManager.getActive();
     if (!layer || layer.locked) return;
+    layer = PILayerManager.ensurePaintable(layer);
     const color = document.getElementById('fg-color-input').value;
     const rgb = PIColorUtils.hexToRgb(color);
     const lx = Math.round(e.canvasX - layer.x);
@@ -18,6 +19,10 @@ window.PIFillTool = new (class extends PIToolBase {
   }
   floodFill(layer, sx, sy, fillRgb) {
     const w = layer.canvas.width, h = layer.canvas.height;
+    // 選択範囲があれば、その内側のみ塗る
+    const selBounds = PISelection.getLayerBounds(layer);
+    if (!selBounds && PISelection.has()) return;
+    if (selBounds && !PISelection.contains(selBounds, sx, sy)) return;
     const imgData = layer.ctx.getImageData(0, 0, w, h);
     const data = imgData.data;
     const idx = (sy * w + sx) * 4;
@@ -30,6 +35,7 @@ window.PIFillTool = new (class extends PIToolBase {
       const [x, y] = stack.pop();
       const pi = y * w + x;
       if (visited[pi]) continue;
+      if (selBounds && !PISelection.contains(selBounds, x, y)) continue;
       const i = pi * 4;
       if (Math.abs(data[i] - tr) > tol || Math.abs(data[i + 1] - tg) > tol ||
           Math.abs(data[i + 2] - tb) > tol || Math.abs(data[i + 3] - ta) > tol) continue;

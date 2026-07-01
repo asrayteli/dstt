@@ -1,7 +1,7 @@
 /* PowerImager - RetouchTool: dodge/burn/sponge/blur/sharpen brush */
 window.PIRetouchTool = new (class extends PIToolBase {
   constructor() {
-    super('retouch', 'crosshair');
+    super('retouch', 'none');
     this.drawing = false;
     this.lastX = 0;
     this.lastY = 0;
@@ -9,10 +9,12 @@ window.PIRetouchTool = new (class extends PIToolBase {
     this.strength = 35;
     this.mode = 'dodge';
   }
+  getCursorRadius() { return this.size / 2; }
 
   onMouseDown(e) {
-    const layer = PILayerManager.getActive();
+    let layer = PILayerManager.getActive();
     if (!layer || layer.locked) return;
+    layer = PILayerManager.ensurePaintable(layer);
     this.drawing = true;
     this.lastX = e.canvasX;
     this.lastY = e.canvasY;
@@ -131,7 +133,7 @@ window.PIRetouchTool = new (class extends PIToolBase {
             { label: 'シャープ', active: this.mode === 'sharpen', onClick: () => { this.mode = 'sharpen'; } }
           ]
         },
-        { type: 'slider', label: 'サイズ', key: 'size', value: this.size, min: 4, max: 180, onChange: (v) => { this.size = parseInt(v); } },
+        { type: 'slider', label: 'サイズ', key: 'size', value: this.size, min: 4, max: 300, onChange: (v) => { this.size = parseInt(v); PIEventBus.emit('brush:size-changed'); } },
         { type: 'slider', label: '強さ', key: 'strength', value: this.strength, min: 1, max: 100, unit: '%', onChange: (v) => { this.strength = parseInt(v); } }
       ]
     };

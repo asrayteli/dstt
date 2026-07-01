@@ -21,8 +21,60 @@ window.PILayerManager = (function () {
       canvas: canvas, ctx: ctx,
       x: 0, y: 0, visible: true, locked: false,
       opacity: 1, blendMode: 'source-over',
-      type: 'raster', textData: null
+      rotation: 0, scaleX: 1, scaleY: 1, clip: false, groupId: null,
+      type: 'raster', textData: null, shapeData: null, mask: null, effects: null,
+      adjustType: null, adjustParams: null
     };
+  }
+
+  // ===== レイヤーグループ（パネル上の整理・折りたたみ・一括表示） =====
+  let groups = [];
+  let groupIdCounter = 0;
+
+  function getGroups() { return groups; }
+  function getGroup(id) { return groups.find(g => g.id === id) || null; }
+  function groupMembers(id) { return layers.filter(l => l.groupId === id); }
+
+  function createGroupFromActive() {
+    const layer = getActive();
+    const id = ++groupIdCounter;
+    groups.push({ id, name: 'グループ ' + id, collapsed: false });
+    if (layer) layer.groupId = id;
+    emitChange();
+    return id;
+  }
+
+  function addActiveToGroup(groupId) {
+    const layer = getActive();
+    if (layer && getGroup(groupId)) { layer.groupId = groupId; emitChange(); }
+  }
+
+  function removeActiveFromGroup() {
+    const layer = getActive();
+    if (layer) { layer.groupId = null; emitChange(); }
+  }
+
+  function ungroup(groupId) {
+    layers.forEach(l => { if (l.groupId === groupId) l.groupId = null; });
+    groups = groups.filter(g => g.id !== groupId);
+    emitChange();
+  }
+
+  function toggleGroupCollapse(id) { const g = getGroup(id); if (g) { g.collapsed = !g.collapsed; emitChange(); } }
+  function renameGroup(id, name) { const g = getGroup(id); if (g) { g.name = name; emitChange(); } }
+  function setGroupVisible(id, vis) { layers.forEach(l => { if (l.groupId === id) l.visible = vis; }); requestRender(); emitChange(); }
+
+  // 調整レイヤー（非破壊）: 下位の合成結果に補正を適用する
+  function addAdjustmentLayer(adjustType, params, name) {
+    const layer = createLayer(name || '調整');
+    layer.type = 'adjustment';
+    layer.adjustType = adjustType;
+    layer.adjustParams = params || {};
+    // 画素は持たない（マスク/サムネ用にキャンバスは透明のまま）
+    layers.push(layer);
+    activeIndex = layers.length - 1;
+    emitChange();
+    return layer;
   }
 
   function addLayer(name, width, height) {
@@ -50,6 +102,8 @@ window.PILayerManager = (function () {
     layer.type = 'text';
     layer.textData = { ...textData };
     renderTextLayer(layer);
+    layer.x = textData.x || 0;
+    layer.y = textData.y || 0;
     layers.push(layer);
     activeIndex = layers.length - 1;
     emitChange();
@@ -121,9 +175,84 @@ window.PILayerManager = (function () {
 
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
+    // 位置はレイヤープロパティ(layer.x/y)で管理する。ここでは上書きしない。
+    resyncMask(layer);
+  }
 
-    layer.x = td.x || 0;
-    layer.y = td.y || 0;
+  // ===== 図形オブジェクトレイヤー =====
+  // shapeData は「ローカル座標（差分）」だけで完結させ、レイヤー位置に依存させない。
+  // これにより、塗り/枠/形状などの再描画でも図形が動かない。
+  const SHAPE_PAD = 48;
+
+  function addShapeLayer(shapeData) {
+    const layer = createLayer('図形');
+    layer.type = 'shape';
+    layer.shapeData = { ...shapeData };
+    renderShapeLayer(layer);
+    layer.x = Math.round((shapeData.bx || 0) - SHAPE_PAD);
+    layer.y = Math.round((shapeData.by || 0) - SHAPE_PAD);
+    layers.push(layer);
+    activeIndex = layers.length - 1;
+    emitChange();
+    return layer;
+  }
+
+  function roundedRectPath(ctx, x, y, w, h, r) {
+    const rr = Math.max(0, Math.min(r || 0, Math.min(w, h) / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+
+  function renderShapeLayer(layer) {
+    const sd = layer.shapeData;
+    if (!sd) return;
+    const isLine = sd.shapeType === 'line' || sd.shapeType === 'arrow';
+    let bw, bh;
+    if (isLine) { bw = Math.abs(sd.x2 - sd.x1); bh = Math.abs(sd.y2 - sd.y1); }
+    else { bw = sd.w; bh = sd.h; }
+    const cw = Math.max(1, Math.ceil(bw + SHAPE_PAD * 2));
+    const ch = Math.max(1, Math.ceil(bh + SHAPE_PAD * 2));
+    layer.canvas.width = cw; layer.canvas.height = ch;
+    const ctx = layer.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    PICanvasEngine.configureContext(ctx);
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const ox = SHAPE_PAD, oy = SHAPE_PAD;
+    const sw = sd.strokeWidth || 0;
+
+    if (sd.shapeType === 'rect') {
+      roundedRectPath(ctx, ox, oy, bw, bh, sd.cornerRadius || 0);
+      if (sd.fillEnabled) { ctx.fillStyle = sd.fillColor; ctx.fill(); }
+      if (sd.strokeEnabled && sw > 0) { ctx.strokeStyle = sd.strokeColor; ctx.lineWidth = sw; ctx.stroke(); }
+    } else if (sd.shapeType === 'ellipse') {
+      ctx.beginPath();
+      ctx.ellipse(ox + bw / 2, oy + bh / 2, bw / 2, bh / 2, 0, 0, Math.PI * 2);
+      if (sd.fillEnabled) { ctx.fillStyle = sd.fillColor; ctx.fill(); }
+      if (sd.strokeEnabled && sw > 0) { ctx.strokeStyle = sd.strokeColor; ctx.lineWidth = sw; ctx.stroke(); }
+    } else if (isLine) {
+      const minX = Math.min(sd.x1, sd.x2), minY = Math.min(sd.y1, sd.y2);
+      const lx1 = ox + (sd.x1 - minX), ly1 = oy + (sd.y1 - minY);
+      const lx2 = ox + (sd.x2 - minX), ly2 = oy + (sd.y2 - minY);
+      ctx.strokeStyle = sd.strokeColor; ctx.lineWidth = Math.max(1, sw);
+      ctx.beginPath(); ctx.moveTo(lx1, ly1); ctx.lineTo(lx2, ly2); ctx.stroke();
+      if (sd.shapeType === 'arrow') {
+        const angle = Math.atan2(ly2 - ly1, lx2 - lx1);
+        const headLen = 12 + sw * 2;
+        ctx.beginPath();
+        ctx.moveTo(lx2, ly2);
+        ctx.lineTo(lx2 - headLen * Math.cos(angle - Math.PI / 6), ly2 - headLen * Math.sin(angle - Math.PI / 6));
+        ctx.moveTo(lx2, ly2);
+        ctx.lineTo(lx2 - headLen * Math.cos(angle + Math.PI / 6), ly2 - headLen * Math.sin(angle + Math.PI / 6));
+        ctx.stroke();
+      }
+    }
+    resyncMask(layer);
   }
 
   function removeLayer(index) {
@@ -143,8 +272,20 @@ window.PILayerManager = (function () {
     dup.ctx.drawImage(src.canvas, 0, 0);
     dup.x = src.x; dup.y = src.y;
     dup.opacity = src.opacity; dup.blendMode = src.blendMode;
+    dup.rotation = src.rotation || 0; dup.scaleX = src.scaleX || 1; dup.scaleY = src.scaleY || 1;
+    dup.clip = !!src.clip;
+    dup.groupId = src.groupId || null;
     dup.type = src.type;
     if (src.textData) dup.textData = { ...src.textData };
+    if (src.shapeData) dup.shapeData = { ...src.shapeData };
+    if (src.effects) dup.effects = JSON.parse(JSON.stringify(src.effects));
+    if (src.adjustType) { dup.adjustType = src.adjustType; dup.adjustParams = JSON.parse(JSON.stringify(src.adjustParams || {})); }
+    if (src.mask) {
+      const mc = document.createElement('canvas');
+      mc.width = src.mask.width; mc.height = src.mask.height;
+      mc.getContext('2d').drawImage(src.mask, 0, 0);
+      dup.mask = mc;
+    }
     layers.splice(index + 1, 0, dup);
     activeIndex = index + 1;
     emitChange();
@@ -160,6 +301,9 @@ window.PILayerManager = (function () {
 
   function mergeDown(index) {
     if (index <= 0 || index >= layers.length) return;
+    // 変形を持つレイヤーは見た目どおりにラスター化してから結合する。
+    bakeLayerToRaster(layers[index]);
+    bakeLayerToRaster(layers[index - 1]);
     const upper = layers[index];
     const lower = layers[index - 1];
     lower.ctx.save();
@@ -179,15 +323,132 @@ window.PILayerManager = (function () {
     result.width = size.width; result.height = size.height;
     const ctx = result.getContext('2d');
     PICanvasEngine.configureContext(ctx);
-    layers.forEach(l => {
-      if (!l.visible) return;
-      ctx.save();
-      ctx.globalAlpha = l.opacity;
-      ctx.globalCompositeOperation = l.blendMode || 'source-over';
-      ctx.drawImage(l.canvas, l.x, l.y);
-      ctx.restore();
-    });
+    PICanvasEngine.compositeStack(ctx, layers);
     return result;
+  }
+
+  // 回転・拡縮を含むレイヤーをその見た目どおりにラスター化し、軸並行レイヤーへ戻す。
+  // 切り抜き/反転/サイズ変更/結合など、ピクセル直接操作の前に呼ぶ。
+  function maskedCanvasOf(layer) {
+    // マスクを適用した画素のコピーを返す（マスクが無ければ元canvas）
+    if (!layer.mask) return layer.canvas;
+    const c = document.createElement('canvas');
+    c.width = layer.canvas.width; c.height = layer.canvas.height;
+    const ctx = c.getContext('2d');
+    PICanvasEngine.configureContext(ctx);
+    ctx.drawImage(layer.canvas, 0, 0);
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(layer.mask, 0, 0);
+    return c;
+  }
+
+  function bakeLayerToRaster(layer) {
+    const rot = layer.rotation || 0;
+    const sx = layer.scaleX || 1, sy = layer.scaleY || 1;
+    if (rot === 0 && sx === 1 && sy === 1) {
+      if (layer.mask) {
+        // 変形は無いがマスクはあるので画素へ焼き込む
+        const baked = maskedCanvasOf(layer);
+        layer.canvas = baked;
+        layer.ctx = baked.getContext('2d');
+        PICanvasEngine.configureContext(layer.ctx);
+        layer.mask = null;
+      }
+      return layer;
+    }
+    const srcCanvas = maskedCanvasOf(layer);
+    const w = layer.canvas.width, h = layer.canvas.height;
+    // 回転後バウンディングボックス
+    const corners = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]];
+    const cos = Math.cos(rot), sin = Math.sin(rot);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    corners.forEach(([px, py]) => {
+      const X = px * sx * cos - py * sy * sin;
+      const Y = px * sx * sin + py * sy * cos;
+      minX = Math.min(minX, X); maxX = Math.max(maxX, X);
+      minY = Math.min(minY, Y); maxY = Math.max(maxY, Y);
+    });
+    const cx = layer.x + w / 2, cy = layer.y + h / 2;
+    const nw = Math.max(1, Math.ceil(maxX - minX));
+    const nh = Math.max(1, Math.ceil(maxY - minY));
+    const baked = document.createElement('canvas');
+    baked.width = nw; baked.height = nh;
+    const bctx = baked.getContext('2d');
+    PICanvasEngine.configureContext(bctx);
+    bctx.translate(nw / 2, nh / 2);
+    bctx.rotate(rot);
+    bctx.scale(sx, sy);
+    bctx.drawImage(srcCanvas, -w / 2, -h / 2);
+    layer.canvas = baked;
+    layer.ctx = baked.getContext('2d');
+    PICanvasEngine.configureContext(layer.ctx);
+    layer.x = Math.round(cx - nw / 2);
+    layer.y = Math.round(cy - nh / 2);
+    layer.rotation = 0; layer.scaleX = 1; layer.scaleY = 1;
+    layer.type = 'raster'; layer.textData = null; layer.shapeData = null;
+    layer.mask = null;
+    return layer;
+  }
+
+  // ===== レイヤーマスク（非破壊：マスクのα＝可視度） =====
+  let maskEditing = false;
+
+  function addMask(layer) {
+    if (!layer || layer.mask) return;
+    const m = document.createElement('canvas');
+    m.width = layer.canvas.width; m.height = layer.canvas.height;
+    const mctx = m.getContext('2d');
+    mctx.fillStyle = '#ffffff'; // 全面可視（α255）で開始
+    mctx.fillRect(0, 0, m.width, m.height);
+    layer.mask = m;
+    emitChange();
+  }
+
+  function removeMask(layer, apply) {
+    if (!layer || !layer.mask) return;
+    if (apply) {
+      // マスクを画素へ焼き込んでから削除
+      const ctx = layer.ctx;
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(layer.mask, 0, 0);
+      ctx.restore();
+    }
+    layer.mask = null;
+    if (getActive() !== layer) {} else if (maskEditing) maskEditing = false;
+    emitChange();
+  }
+
+  function resyncMask(layer) {
+    // レイヤーcanvasサイズ変更時にマスクを追従させる（縦横比に合わせて伸縮）
+    if (!layer.mask) return;
+    if (layer.mask.width === layer.canvas.width && layer.mask.height === layer.canvas.height) return;
+    const m = document.createElement('canvas');
+    m.width = layer.canvas.width; m.height = layer.canvas.height;
+    const mctx = m.getContext('2d');
+    PICanvasEngine.configureContext(mctx);
+    mctx.drawImage(layer.mask, 0, 0, m.width, m.height);
+    layer.mask = m;
+  }
+
+  function setMaskEditing(on) { maskEditing = !!on; PIEventBus.emit('mask:mode-changed', maskEditing); }
+  function isMaskEditing(layer) { return maskEditing && !!(layer && layer.mask) && layer === getActive(); }
+  function getMaskEditing() { return maskEditing; }
+
+  // 描画系ツールが安全に描けるよう、変形（回転/拡縮）があれば見た目どおり確定する。
+  // 透明背景のラスターはそのまま。戻り値は描画先レイヤー。
+  function ensurePaintable(layer) {
+    if (!layer) return layer;
+    const transformed = (layer.rotation || 0) !== 0 || (layer.scaleX || 1) !== 1 || (layer.scaleY || 1) !== 1;
+    if (transformed) bakeLayerToRaster(layer);
+    return layer;
+  }
+
+  // クリッピングマスクの切替（最下段は基底が無いのでクリップ不可）
+  function toggleClip(index) {
+    if (index <= 0 || index >= layers.length) return;
+    layers[index].clip = !layers[index].clip;
+    emitChange();
   }
 
   function getActive() { return layers[activeIndex] || null; }
@@ -203,11 +464,23 @@ window.PILayerManager = (function () {
       const ctx = c.getContext('2d');
       PICanvasEngine.configureContext(ctx);
       ctx.drawImage(l.canvas, 0, 0);
+      let maskCopy = null;
+      if (l.mask) {
+        maskCopy = document.createElement('canvas');
+        maskCopy.width = l.mask.width; maskCopy.height = l.mask.height;
+        maskCopy.getContext('2d').drawImage(l.mask, 0, 0);
+      }
       return {
         id: l.id, name: l.name, canvas: c, ctx: ctx,
         x: l.x, y: l.y, visible: l.visible, locked: l.locked,
         opacity: l.opacity, blendMode: l.blendMode,
-        type: l.type, textData: l.textData ? { ...l.textData } : null
+        rotation: l.rotation || 0, scaleX: l.scaleX || 1, scaleY: l.scaleY || 1, clip: !!l.clip, groupId: l.groupId || null,
+        type: l.type, textData: l.textData ? { ...l.textData } : null,
+        shapeData: l.shapeData ? { ...l.shapeData } : null,
+        mask: maskCopy,
+        effects: l.effects ? JSON.parse(JSON.stringify(l.effects)) : null,
+        adjustType: l.adjustType || null,
+        adjustParams: l.adjustParams ? JSON.parse(JSON.stringify(l.adjustParams)) : null
       };
     });
   }
@@ -219,11 +492,23 @@ window.PILayerManager = (function () {
       const ctx = c.getContext('2d');
       PICanvasEngine.configureContext(ctx);
       ctx.drawImage(s.canvas, 0, 0);
+      let maskCopy = null;
+      if (s.mask) {
+        maskCopy = document.createElement('canvas');
+        maskCopy.width = s.mask.width; maskCopy.height = s.mask.height;
+        maskCopy.getContext('2d').drawImage(s.mask, 0, 0);
+      }
       return {
         id: s.id, name: s.name, canvas: c, ctx: ctx,
         x: s.x, y: s.y, visible: s.visible, locked: s.locked,
         opacity: s.opacity, blendMode: s.blendMode,
-        type: s.type, textData: s.textData ? { ...s.textData } : null
+        rotation: s.rotation || 0, scaleX: s.scaleX || 1, scaleY: s.scaleY || 1, clip: !!s.clip, groupId: s.groupId || null,
+        type: s.type, textData: s.textData ? { ...s.textData } : null,
+        shapeData: s.shapeData ? { ...s.shapeData } : null,
+        mask: maskCopy,
+        effects: s.effects ? JSON.parse(JSON.stringify(s.effects)) : null,
+        adjustType: s.adjustType || null,
+        adjustParams: s.adjustParams ? JSON.parse(JSON.stringify(s.adjustParams)) : null
       };
     });
     if (activeIndex >= layers.length) activeIndex = layers.length - 1;
@@ -243,10 +528,15 @@ window.PILayerManager = (function () {
     layers = [];
     activeIndex = -1;
     idCounter = 0;
+    groups = [];
   }
 
   return {
     init, addLayer, addImageLayer, addTextLayer, renderTextLayer,
+    addShapeLayer, renderShapeLayer, addAdjustmentLayer, bakeLayerToRaster, ensurePaintable, SHAPE_PAD,
+    addMask, removeMask, setMaskEditing, isMaskEditing, getMaskEditing, toggleClip,
+    getGroups, getGroup, groupMembers, createGroupFromActive, addActiveToGroup,
+    removeActiveFromGroup, ungroup, toggleGroupCollapse, renameGroup, setGroupVisible,
     removeLayer, duplicateLayer, moveLayer, mergeDown, flattenAll,
     getActive, getActiveIndex, setActiveIndex, getAll, getById,
     snapshot, restore, requestRender, clear, createLayer

@@ -40,7 +40,15 @@ html, body {
 #pi-toolbar .toolbar-tools { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; overflow-y: auto; min-height: 0; width: 100%; }
 #pi-toolbar .toolbar-bottom { flex-shrink: 0; padding: 4px 0 6px; display: flex; justify-content: center; }
 #pi-viewport { grid-area: viewport; overflow: hidden; position: relative; background: #181828; cursor: crosshair; }
-#pi-panel { grid-area: panel; background: var(--pi-surface); border-left: 1px solid var(--pi-border); display: flex; flex-direction: column; overflow-y: auto; z-index: 90; }
+#pi-panel { grid-area: panel; background: var(--pi-surface); border-left: 1px solid var(--pi-border); display: flex; flex-direction: column; overflow-y: auto; z-index: 90; position: relative; }
+.panel-resizer { position: absolute; left: -3px; top: 0; width: 7px; height: 100%; cursor: ew-resize; z-index: 95; }
+.panel-resizer:hover { background: linear-gradient(90deg, transparent, rgba(124,111,247,0.5)); }
+.sb-zoom-group { display: inline-flex; gap: 2px; align-items: center; }
+.sb-zoom-btn {
+  border: 1px solid var(--pi-border); background: var(--pi-surface2); color: var(--pi-text);
+  border-radius: 3px; font-size: 10px; line-height: 1; padding: 2px 5px; cursor: pointer; min-width: 18px;
+}
+.sb-zoom-btn:hover { background: var(--pi-accent); color: #fff; border-color: var(--pi-accent); }
 #pi-statusbar { grid-area: statusbar; background: var(--pi-surface); border-top: 1px solid var(--pi-border); display: flex; align-items: center; padding: 0 10px; gap: 16px; font-size: 11px; color: var(--pi-text-dim); z-index: 100; overflow-x: auto; white-space: nowrap; }
 
 /* Canvas viewport checkerboard */
@@ -61,6 +69,56 @@ html, body {
   image-rendering: auto;
 }
 #overlay-canvas { pointer-events: none; }
+
+/* グリッド・ガイド（canvas-wrapper内なのでズームに追従） */
+#pi-guides { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 140; }
+#pi-guides .pi-grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(124,111,247,0.25) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(124,111,247,0.25) 1px, transparent 1px);
+}
+#pi-guides .pi-grid.hidden { display: none; }
+#pi-guides .pi-guide { position: absolute; pointer-events: auto; }
+#pi-guides .pi-guide-h { left: 0; width: 100%; height: 1px; border-top: 1px dashed #14b8c4; cursor: ns-resize; margin-top: -3px; padding: 3px 0; box-sizing: content-box; }
+#pi-guides .pi-guide-v { top: 0; height: 100%; width: 1px; border-left: 1px dashed #14b8c4; cursor: ew-resize; margin-left: -3px; padding: 0 3px; box-sizing: content-box; }
+
+/* ブラシ/消しゴム/レタッチのサイズを示すリングカーソル */
+#pi-brush-cursor {
+  position: absolute; pointer-events: none; z-index: 160;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.85);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.85);
+  mix-blend-mode: difference;
+}
+#pi-brush-cursor.hidden { display: none; }
+
+/* カラーパネル（HSVピッカー） */
+#pi-color-pop {
+  position: fixed; z-index: 500; width: 200px; padding: 10px;
+  background: var(--pi-surface); border: 1px solid var(--pi-border);
+  border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; gap: 8px;
+}
+#pi-color-pop.hidden { display: none; }
+#pi-color-pop .cp-sv { position: relative; width: 180px; height: 140px; cursor: crosshair; }
+#pi-color-pop .cp-sv-canvas { border-radius: 4px; display: block; }
+#pi-color-pop .cp-sv-cursor, #pi-color-pop .cp-hue-cursor {
+  position: absolute; pointer-events: none; width: 10px; height: 10px;
+  border: 2px solid #fff; border-radius: 50%; transform: translate(-5px, -5px);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.6);
+}
+#pi-color-pop .cp-hue { position: relative; width: 180px; height: 14px; cursor: ew-resize; }
+#pi-color-pop .cp-hue-canvas { border-radius: 4px; display: block; }
+#pi-color-pop .cp-hue-cursor { top: 7px; }
+#pi-color-pop .cp-row { display: flex; align-items: center; gap: 8px; }
+#pi-color-pop .cp-preview { width: 28px; height: 28px; border-radius: 4px; border: 1px solid var(--pi-border); flex-shrink: 0; }
+#pi-color-pop .cp-hex { flex: 1; background: var(--pi-surface2); border: 1px solid var(--pi-border); color: var(--pi-text); border-radius: 4px; padding: 5px 6px; font-size: 12px; text-transform: lowercase; }
+#pi-color-pop .cp-label { font-size: 10px; color: var(--pi-text-dim); margin-top: 2px; }
+#pi-color-pop .cp-recent, #pi-color-pop .cp-swatches { display: grid; grid-template-columns: repeat(10, 1fr); gap: 3px; }
+#pi-color-pop .cp-swatch { width: 100%; aspect-ratio: 1; border: 1px solid rgba(255,255,255,0.15); border-radius: 3px; cursor: pointer; padding: 0; }
+#pi-color-pop .cp-swatch:hover { outline: 2px solid var(--pi-accent); }
+#pi-color-pop .cp-empty { font-size: 10px; color: var(--pi-text-dim); }
 
 #text-edit-overlay {
   position: absolute; z-index: 200; pointer-events: auto;

@@ -26,6 +26,7 @@
         <div class="topbar-dropdown-sep"></div>
         <button class="topbar-dropdown-item" data-action="save">プロジェクト保存<span class="shortcut">Ctrl+S</span></button>
         <button class="topbar-dropdown-item" data-action="export">エクスポート</button>
+        <button class="topbar-dropdown-item" data-action="print">印刷<span class="shortcut">Ctrl+P</span></button>
         <div class="topbar-dropdown-sep"></div>
         <button class="topbar-dropdown-item" data-action="document-dpi">DPI設定</button>
       </div>
@@ -76,6 +77,14 @@
         <button class="topbar-dropdown-item advanced-only" data-action="channel-mixer">チャンネルミキサー</button>
         <button class="topbar-dropdown-item advanced-only" data-action="threshold">しきい値</button>
         <button class="topbar-dropdown-item advanced-only" data-action="posterize">ポスタライズ</button>
+        <div class="topbar-dropdown-sep"></div>
+        <button class="topbar-dropdown-item" data-action="adj-layer-brightness">調整レイヤー: 明るさ・コントラスト</button>
+        <button class="topbar-dropdown-item" data-action="adj-layer-hue">調整レイヤー: 色相・彩度</button>
+        <button class="topbar-dropdown-item" data-action="adj-layer-grayscale">調整レイヤー: グレースケール</button>
+        <button class="topbar-dropdown-item" data-action="adj-layer-sepia">調整レイヤー: セピア</button>
+        <button class="topbar-dropdown-item" data-action="adj-layer-invert">調整レイヤー: 色反転</button>
+        <button class="topbar-dropdown-item advanced-only" data-action="adj-layer-posterize">調整レイヤー: ポスタライズ</button>
+        <button class="topbar-dropdown-item advanced-only" data-action="adj-layer-threshold">調整レイヤー: しきい値</button>
       </div>
     </div>
 
@@ -107,6 +116,12 @@
         <button class="topbar-dropdown-item" data-action="fit">画面に合わせる</button>
         <button class="topbar-dropdown-item" data-action="zoom-in">拡大<span class="shortcut">Ctrl++</span></button>
         <button class="topbar-dropdown-item" data-action="zoom-out">縮小<span class="shortcut">Ctrl+-</span></button>
+        <div class="topbar-dropdown-sep"></div>
+        <button class="topbar-dropdown-item" data-action="toggle-grid">グリッド表示 切替</button>
+        <button class="topbar-dropdown-item" data-action="grid-size">グリッド間隔...</button>
+        <button class="topbar-dropdown-item" data-action="add-guide-h">水平ガイドを追加</button>
+        <button class="topbar-dropdown-item" data-action="add-guide-v">垂直ガイドを追加</button>
+        <button class="topbar-dropdown-item" data-action="clear-guides">ガイドを消去</button>
       </div>
     </div>
 
@@ -115,6 +130,7 @@
     <button class="quick-action-btn" onclick="PITopbar.handleAction('undo')" title="元に戻す">↩</button>
     <button class="quick-action-btn" onclick="PITopbar.handleAction('redo')" title="やり直す">↪</button>
     <button class="quick-action-btn" onclick="PITopbar.handleAction('fit')" title="画面に合わせる">⊞</button>
+    <button class="quick-action-btn" onclick="PITopbar.handleAction('print')" title="印刷 (Ctrl+P)">🖨</button>
 
     <div class="mode-toggle">
       <span>通常</span>
@@ -130,13 +146,16 @@
   <div id="pi-toolbar">
     <div class="toolbar-tools">
       <button class="tool-btn" data-tool="move" title="移動 (V)">✥</button>
+      <button class="tool-btn" data-tool="transform" title="変形：拡縮・回転 (Ctrl+T)">⤢</button>
       <button class="tool-btn" data-tool="select" title="選択 (M)">⬚</button>
       <button class="tool-btn" data-tool="crop" title="切り抜き (C)">⛶</button>
       <div class="toolbar-separator"></div>
       <button class="tool-btn" data-tool="brush" title="ブラシ (B)">✎</button>
       <button class="tool-btn" data-tool="eraser" title="消しゴム (E)">◻</button>
       <button class="tool-btn" data-tool="retouch" title="レタッチ">◐</button>
+      <button class="tool-btn" data-tool="clone" title="コピースタンプ（Alt+クリックで複製元）">❏</button>
       <button class="tool-btn" data-tool="fill" title="塗りつぶし (G)">⬛</button>
+      <button class="tool-btn" data-tool="gradient" title="グラデーション">▨</button>
       <div class="toolbar-separator"></div>
       <button class="tool-btn" data-tool="text" title="テキスト (T)">T</button>
       <button class="tool-btn" data-tool="shape" title="図形 (U)">▢</button>
@@ -239,6 +258,7 @@
 <script src="{{ url_for('static', filename='power_imager/js/utils/image-io.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/core/canvas-engine.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/core/layer-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/core/layer-transform.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/core/history-manager.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/core/project-store.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/ui/modal.js') }}"></script>
@@ -251,7 +271,10 @@
 <script src="{{ url_for('static', filename='power_imager/js/tools/retouch-tool.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/tools/text-tool.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/tools/shape-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/transform-tool.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/tools/fill-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/gradient-tool.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/tools/clone-stamp-tool.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/tools/eyedropper-tool.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/tools/screenshot-tool.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/adjustments/brightness-contrast.js') }}"></script>
@@ -260,6 +283,8 @@
 <script src="{{ url_for('static', filename='power_imager/js/adjustments/levels.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/adjustments/quick-adjustments.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/adjustments/advanced-adjustments.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/adjustments/curves-dialog.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/adjustments/adjustment-layer.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/filters/blur.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/filters/sharpen.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/filters/mosaic.js') }}"></script>
@@ -275,6 +300,9 @@
 <script src="{{ url_for('static', filename='power_imager/js/ui/statusbar.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/ui/mode-switcher.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/ui/tooltip-guide.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/color-panel.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/guides.js') }}"></script>
+<script src="{{ url_for('static', filename='power_imager/js/ui/brush-cursor.js') }}"></script>
 <script src="{{ url_for('static', filename='power_imager/js/power_imager.js') }}"></script>
 
 </body>

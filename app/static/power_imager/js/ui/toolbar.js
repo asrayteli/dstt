@@ -6,6 +6,7 @@ window.PIToolbar = (function () {
 
   function init() {
     toolMap['move'] = PIMoveTool;
+    toolMap['transform'] = PITransformTool;
     toolMap['select'] = PISelectTool;
     toolMap['crop'] = PICropTool;
     toolMap['brush'] = PIBrushTool;
@@ -14,6 +15,8 @@ window.PIToolbar = (function () {
     toolMap['text'] = PITextTool;
     toolMap['shape'] = PIShapeTool;
     toolMap['fill'] = PIFillTool;
+    toolMap['gradient'] = PIGradientTool;
+    toolMap['clone'] = PICloneStampTool;
     toolMap['eyedropper'] = PIEyedropperTool;
     toolMap['screenshot'] = PIScreenshotTool;
 
