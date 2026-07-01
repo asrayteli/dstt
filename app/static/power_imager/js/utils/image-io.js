@@ -353,12 +353,54 @@ window.PIImageIO = (function () {
     return 'data:' + parts.mimeType + ';base64,' + bytesToBase64(bytes);
   }
 
+  function trimCanvas(src) {
+    const w = src.width, h = src.height;
+    const data = src.getContext('2d').getImageData(0, 0, w, h).data;
+    let minX = w, minY = h, maxX = -1, maxY = -1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (data[(y * w + x) * 4 + 3] > 0) { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+    }
+    if (maxX < minX) return src;
+    const nw = maxX - minX + 1, nh = maxY - minY + 1;
+    const out = document.createElement('canvas'); out.width = nw; out.height = nh;
+    out.getContext('2d').drawImage(src, minX, minY, nw, nh, 0, 0, nw, nh);
+    return out;
+  }
+
   function exportCanvas(format, quality, options) {
-    const flat = PILayerManager.flattenAll();
+    const o = options || {};
+    let flat = PILayerManager.flattenAll();
+    // 書き出し範囲
+    if (o.region === 'selection' && window.PISelection && PISelection.has()) {
+      const bb = PISelection.bbox();
+      const maskCanvas = PISelection.getMaskCanvas();
+      if (bb && maskCanvas) {
+        const cropped = document.createElement('canvas'); cropped.width = bb.w; cropped.height = bb.h;
+        const cctx = cropped.getContext('2d');
+        PICanvasEngine.configureContext(cctx);
+        cctx.drawImage(flat, bb.x, bb.y, bb.w, bb.h, 0, 0, bb.w, bb.h);
+        cctx.globalCompositeOperation = 'destination-in';
+        cctx.drawImage(maskCanvas, -bb.x, -bb.y);
+        flat = cropped;
+      }
+    } else if (o.region === 'trim') {
+      flat = trimCanvas(flat);
+    }
+    // リサイズ
+    const scale = o.scale && o.scale > 0 ? o.scale : 1;
+    if (scale !== 1) {
+      const sc = document.createElement('canvas');
+      sc.width = Math.max(1, Math.round(flat.width * scale));
+      sc.height = Math.max(1, Math.round(flat.height * scale));
+      const scx = sc.getContext('2d');
+      PICanvasEngine.configureContext(scx);
+      scx.drawImage(flat, 0, 0, sc.width, sc.height);
+      flat = sc;
+    }
     PICanvasEngine.configureContext(flat.getContext('2d'));
     const mimeType = format === 'jpeg' ? 'image/jpeg' : format === 'webp' ? 'image/webp' : 'image/png';
     const dataURL = flat.toDataURL(mimeType, quality || 0.92);
-    return patchDpiDataURL(dataURL, format || 'png', (options && options.dpi) || PICanvasEngine.getDpi());
+    return patchDpiDataURL(dataURL, format || 'png', o.dpi || PICanvasEngine.getDpi());
   }
 
   function downloadCanvas(filename, format, quality, options) {

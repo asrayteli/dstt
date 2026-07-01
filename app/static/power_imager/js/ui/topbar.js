@@ -108,11 +108,13 @@ window.PITopbar = (function () {
   }
 
   function handleAction(action) {
+    if (action.indexOf('adj-layer-') === 0) { PIAdjustmentLayer.add(action.slice('adj-layer-'.length)); return; }
     switch (action) {
       case 'new': showNewCanvasDialog(); break;
       case 'open': document.getElementById('file-input').click(); break;
       case 'save': PIProjectStore.saveCurrentProject().then(() => PIEventBus.emit('toast', '保存しました')); break;
       case 'export': showExportDialog(); break;
+      case 'print': showPrintDialog(); break;
       case 'document-dpi': showDocumentDpiDialog(); break;
       case 'trim-transparent': trimTransparentPixels(); break;
       case 'flatten': flattenToOneLayer(); break;
@@ -142,7 +144,7 @@ window.PITopbar = (function () {
       case 'temperature': PIQuickAdjustments.showTemperatureDialog(); break;
       case 'levels': PILevels.showDialog(); break;
       case 'color-balance': PIColorBalance.showDialog(); break;
-      case 'curves': PIAdvancedAdjustments.showCurvesDialog(); break;
+      case 'curves': PICurvesDialog.show(); break;
       case 'exposure': PIAdvancedAdjustments.showExposureDialog(); break;
       case 'channel-mixer': PIQuickAdjustments.showChannelMixerDialog(); break;
       case 'threshold': PIAdvancedAdjustments.showThresholdDialog(); break;
@@ -164,6 +166,11 @@ window.PITopbar = (function () {
       case 'fit': PICanvasEngine.fitToViewport(); break;
       case 'zoom-in': PICanvasEngine.setZoom(PICanvasEngine.getZoom() * 1.25); break;
       case 'zoom-out': PICanvasEngine.setZoom(PICanvasEngine.getZoom() * 0.8); break;
+      case 'toggle-grid': { const on = PIGuides.toggleGrid(); PIEventBus.emit('toast', on ? 'グリッド表示ON' : 'グリッド表示OFF'); break; }
+      case 'grid-size': showGridSizeDialog(); break;
+      case 'add-guide-h': PIGuides.addGuide('h'); break;
+      case 'add-guide-v': PIGuides.addGuide('v'); break;
+      case 'clear-guides': PIGuides.clearGuides(); PIEventBus.emit('toast', 'ガイドを消去しました'); break;
       default: console.log('Unknown action:', action);
     }
   }
@@ -252,6 +259,7 @@ window.PITopbar = (function () {
       onConfirm: (values) => {
         const next = PICanvasEngine.normalizeCanvasSize(parseInt(values.width, 10) || size.width, parseInt(values.height, 10) || size.height);
         PILayerManager.getAll().forEach(layer => {
+          PILayerManager.bakeLayerToRaster(layer); // 変形を確定してからキャンバスサイズ変更
           const oldCanvas = layer.canvas;
           const newCanvas = document.createElement('canvas');
           newCanvas.width = next.width; newCanvas.height = next.height;
@@ -283,6 +291,15 @@ window.PITopbar = (function () {
             { value: 'webp', label: 'WebP' }
           ]
         },
+        {
+          type: 'select', label: '範囲', key: 'region', value: 'all',
+          options: [
+            { value: 'all', label: 'キャンバス全体' },
+            { value: 'selection', label: '選択範囲のみ' },
+            { value: 'trim', label: '不透明部分のみ（余白トリム）' }
+          ]
+        },
+        { type: 'slider', label: '拡大率', key: 'scale', value: 100, min: 10, max: 400, unit: '%' },
         { type: 'number', label: 'DPI', key: 'dpi', value: PICanvasEngine.getDpi(), min: 1, max: 2400 },
         { type: 'slider', label: '品質', key: 'quality', value: 92, min: 10, max: 100 }
       ],
@@ -290,13 +307,76 @@ window.PITopbar = (function () {
       onConfirm: (values) => {
         const ext = values.format || 'png';
         const filename = safeFilename(values.filename || 'image') + '.' + ext;
-        PIImageIO.downloadCanvas(filename, ext, (values.quality || 92) / 100, { dpi: values.dpi || PICanvasEngine.getDpi() });
+        PIImageIO.downloadCanvas(filename, ext, (values.quality || 92) / 100, {
+          dpi: values.dpi || PICanvasEngine.getDpi(),
+          region: values.region || 'all',
+          scale: (values.scale || 100) / 100
+        });
       }
     });
   }
 
   function safeFilename(name) {
     return String(name).replace(/[\\/:*?"<>|]+/g, '_').trim() || 'image';
+  }
+
+  function showGridSizeDialog() {
+    PIModal.show({
+      title: 'グリッド間隔',
+      content: [{ type: 'number', label: '間隔 (px)', key: 'size', value: 50, min: 2, max: 500 }],
+      confirmLabel: '適用',
+      onConfirm: (v) => { PIGuides.setGridSize(parseInt(v.size, 10) || 50); PIGuides.setGrid(true); }
+    });
+  }
+
+  function showPrintDialog() {
+    PIModal.show({
+      title: '印刷',
+      description: '編集中の画像を保存せずにそのまま印刷します。',
+      content: [
+        {
+          type: 'select', label: 'サイズ', key: 'mode', value: 'fit',
+          options: [
+            { value: 'fit', label: '用紙に合わせる' },
+            { value: 'actual', label: '実寸（DPIに従う）' }
+          ]
+        }
+      ],
+      confirmLabel: '印刷',
+      onConfirm: (v) => printImage(v.mode || 'fit')
+    });
+  }
+
+  // 統合画像を一時iframeに描き、ブラウザの印刷ダイアログを開く（保存不要）
+  function printImage(mode) {
+    const flat = PILayerManager.flattenAll();
+    const dataURL = flat.toDataURL('image/png');
+    const dpi = PICanvasEngine.getDpi() || 96;
+    const wIn = flat.width / dpi, hIn = flat.height / dpi;
+    const sizeCss = mode === 'actual'
+      ? 'width:' + wIn + 'in;height:' + hIn + 'in;max-width:100%;max-height:100%;'
+      : 'max-width:100%;max-height:100%;width:auto;height:auto;';
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>PowerImager 印刷</title><style>' +
+      '@page{margin:8mm;}html,body{margin:0;padding:0;height:100%;}' +
+      'body{display:flex;align-items:center;justify-content:center;}' +
+      'img{' + sizeCss + 'object-fit:contain;display:block;}' +
+      '</style></head><body><img src="' + dataURL + '"></body></html>');
+    doc.close();
+    const done = () => {
+      try { iframe.contentWindow.focus(); iframe.contentWindow.print(); }
+      catch (e) { console.error('印刷に失敗しました', e); }
+      setTimeout(() => { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); }, 3000);
+    };
+    const img = doc.images[0];
+    if (img && !img.complete) img.onload = () => setTimeout(done, 80);
+    else setTimeout(done, 120);
+    PIEventBus.emit('toast', '印刷ダイアログを開きます');
   }
 
   function flattenToOneLayer() {
@@ -341,6 +421,7 @@ window.PITopbar = (function () {
   function transformFlip(dir) {
     const layer = PILayerManager.getActive();
     if (!layer || layer.locked) return;
+    PILayerManager.bakeLayerToRaster(layer);
     const temp = document.createElement('canvas');
     temp.width = layer.canvas.width; temp.height = layer.canvas.height;
     const tctx = temp.getContext('2d');
@@ -363,6 +444,7 @@ window.PITopbar = (function () {
   function transformRotate(deg) {
     const layer = PILayerManager.getActive();
     if (!layer || layer.locked) return;
+    PILayerManager.bakeLayerToRaster(layer);
     const sw = layer.canvas.width, sh = layer.canvas.height;
     const isRight = Math.abs(deg) === 90;
     const nw = isRight ? sh : sw;
@@ -383,5 +465,5 @@ window.PITopbar = (function () {
     PILayerManager.requestRender();
   }
 
-  return { init, handleAction, showDocumentDpiDialog };
+  return { init, handleAction, showDocumentDpiDialog, printImage };
 })();

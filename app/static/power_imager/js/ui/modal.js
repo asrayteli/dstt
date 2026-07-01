@@ -97,11 +97,40 @@ window.PIModal = (function () {
             if (opt.value === field.value) o.selected = true;
             sel.appendChild(o);
           });
-          sel.addEventListener('change', () => { values[field.key] = sel.value; });
+          sel.addEventListener('change', () => { values[field.key] = sel.value; if (config.onPreview) config.onPreview(values); });
           fg.appendChild(lbl);
           fg.appendChild(sel);
           group.appendChild(fg);
           inputRefs[field.key] = { el: sel };
+        } else if (field.type === 'color') {
+          const fg = document.createElement('div');
+          fg.className = 'modal-form-group';
+          const lbl = document.createElement('label');
+          lbl.textContent = field.label;
+          const input = document.createElement('input');
+          input.type = 'color';
+          input.value = field.value || '#000000';
+          input.addEventListener('input', () => { values[field.key] = input.value; if (config.onPreview) config.onPreview(values); });
+          fg.appendChild(lbl);
+          fg.appendChild(input);
+          group.appendChild(fg);
+          inputRefs[field.key] = { el: input };
+        } else if (field.type === 'custom') {
+          if (typeof field.render === 'function') field.render(group, values, config);
+          inputRefs[field.key] = { el: group, custom: true };
+        } else if (field.type === 'checkbox') {
+          const row = document.createElement('label');
+          row.className = 'modal-check-row';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = !!field.value;
+          cb.addEventListener('change', () => { values[field.key] = cb.checked; if (config.onPreview) config.onPreview(values); });
+          const span = document.createElement('span');
+          span.textContent = field.label;
+          row.appendChild(cb);
+          row.appendChild(span);
+          group.appendChild(row);
+          inputRefs[field.key] = { el: cb, check: true };
         }
 
         container.appendChild(group);

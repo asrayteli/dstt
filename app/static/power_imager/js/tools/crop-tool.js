@@ -41,10 +41,14 @@ window.PICropTool = new (class extends PIToolBase {
   }
   onMouseMove(e) {
     if (this.cropping) {
-      const x = Math.min(this.startX, e.canvasX);
-      const y = Math.min(this.startY, e.canvasY);
-      const w = Math.abs(e.canvasX - this.startX);
-      const h = Math.abs(e.canvasY - this.startY);
+      let w = Math.abs(e.canvasX - this.startX);
+      let h = Math.abs(e.canvasY - this.startY);
+      if (this.aspect) {
+        // アスペクト比を固定（ドラッグ量の大きい方に合わせる）
+        if (w / this.aspect >= h) h = w / this.aspect; else w = h * this.aspect;
+      }
+      const x = e.canvasX >= this.startX ? this.startX : this.startX - w;
+      const y = e.canvasY >= this.startY ? this.startY : this.startY - h;
       this.cropRect = { x, y, w, h };
       this.drawCrop();
       return;
@@ -139,6 +143,7 @@ window.PICropTool = new (class extends PIToolBase {
     const rx = Math.round(r.x), ry = Math.round(r.y);
     const rw = Math.round(r.w), rh = Math.round(r.h);
     PILayerManager.getAll().forEach(layer => {
+      PILayerManager.bakeLayerToRaster(layer); // 回転/拡縮を見た目どおり確定してから切り抜く
       const newCanvas = document.createElement('canvas');
       newCanvas.width = rw; newCanvas.height = rh;
       const nctx = newCanvas.getContext('2d');
@@ -157,13 +162,41 @@ window.PICropTool = new (class extends PIToolBase {
     PILayerManager.requestRender();
     PIEventBus.emit('tool:properties-changed');
   }
+  cancelCrop() {
+    this.cropRect = null;
+    this.cropping = false;
+    this.dragHandle = null;
+    PICanvasEngine.clearOverlay();
+  }
+  setAspect(ratio) {
+    this.aspect = ratio;
+    if (this.cropRect && ratio) {
+      // 既存の枠にも即座に比率を反映
+      this.cropRect.h = this.cropRect.w / ratio;
+      this.drawCrop();
+    }
+    PIEventBus.emit('tool:properties-changed');
+  }
   getProperties() {
     const self = this;
+    const ar = self.aspect;
+    const isFree = !ar;
+    const near = (r) => ar && Math.abs(ar - r) < 0.001;
     return {
       title: '切り抜き',
       fields: [
         {
-          type: 'button', label: '適用', key: 'apply',
+          type: 'button-group', label: '比率', key: 'aspect',
+          buttons: [
+            { label: '自由', active: isFree, onClick: () => self.setAspect(null) },
+            { label: '1:1', active: near(1), onClick: () => self.setAspect(1) },
+            { label: '4:3', active: near(4 / 3), onClick: () => self.setAspect(4 / 3) },
+            { label: '3:2', active: near(3 / 2), onClick: () => self.setAspect(3 / 2) },
+            { label: '16:9', active: near(16 / 9), onClick: () => self.setAspect(16 / 9) }
+          ]
+        },
+        {
+          type: 'button', label: '適用 (Enter)', key: 'apply',
           onClick: () => self.applyCrop()
         },
         {

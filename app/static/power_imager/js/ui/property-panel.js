@@ -6,6 +6,8 @@ window.PIPropertyPanel = (function () {
     container = document.getElementById('property-panel-body');
     PIEventBus.on('tool:activated', () => render());
     PIEventBus.on('tool:properties-changed', () => render());
+    // アクティブレイヤーの切替に追従（選択した図形/テキストのプロパティを表示）
+    PIEventBus.on('layers:changed', () => render());
   }
 
   function render() {

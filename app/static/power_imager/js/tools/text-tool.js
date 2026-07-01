@@ -119,9 +119,8 @@ window.PITextTool = new (class extends PIToolBase {
     for (let i = layers.length - 1; i >= 0; i--) {
       const l = layers[i];
       if (l.type === 'text' && l.visible && !l.locked) {
-        if (PIMathUtils.pointInRect(x, y, l.x, l.y, l.canvas.width, l.canvas.height)) {
-          return l;
-        }
+        // 回転/拡縮を考慮した当たり判定（透明余白は除外）
+        if (PILayerTransform.hitTest(l, x, y)) return l;
       }
     }
     return null;
@@ -231,8 +230,27 @@ window.PITextTool = new (class extends PIToolBase {
     }
   }
 
+  // 選択中テキストレイヤー（編集対象）。無ければ次に作る新規テキスト設定を対象にする。
+  targetLayer() {
+    const active = PILayerManager.getActive();
+    return (active && active.type === 'text') ? active : null;
+  }
+
+  applyEdit(label) {
+    const layer = this.targetLayer();
+    if (layer) {
+      layer.name = (layer.textData.text || '').substring(0, 10);
+      PILayerManager.renderTextLayer(layer);
+      PILayerManager.requestRender();
+      if (label) PIHistoryManager.pushDebounced(label);
+    }
+  }
+
   applyPreset(preset) {
-    Object.assign(this.textData, preset);
+    const layer = this.targetLayer();
+    const target = layer ? layer.textData : this.textData;
+    Object.assign(target, preset);
+    this.applyEdit('テキスト書式');
     PIEventBus.emit('tool:properties-changed');
   }
 
@@ -240,40 +258,40 @@ window.PITextTool = new (class extends PIToolBase {
     const self = this;
     const fonts = PIFontLoader.getAvailableFonts();
     const allFonts = [...fonts.system, ...fonts.google];
+    const layer = self.targetLayer();
+    const td = layer ? layer.textData : self.textData;
+    const set = (mut, label) => { mut(); self.applyEdit(label); };
     return {
-      title: 'テキスト',
+      title: layer ? 'テキスト（編集中）' : 'テキスト（新規）',
       fields: [
         {
-          type: 'select', label: 'フォント', key: 'fontFamily', value: self.textData.fontFamily,
+          type: 'select', label: 'フォント', key: 'fontFamily', value: td.fontFamily,
           options: allFonts.map(f => ({ value: f, label: f })),
-          onChange: (v) => {
-            self.textData.fontFamily = v;
-            if (fonts.google.includes(v)) PIFontLoader.loadGoogleFont(v);
-          }
+          onChange: (v) => set(() => { td.fontFamily = v; if (fonts.google.includes(v)) PIFontLoader.loadGoogleFont(v); }, 'フォント変更')
         },
-        { type: 'slider', label: 'サイズ', key: 'size', value: self.textData.size, min: 8, max: 200, onChange: (v) => { self.textData.size = parseInt(v); } },
-        { type: 'color', label: '色', key: 'color', value: self.textData.color, onChange: (v) => { self.textData.color = v; } },
+        { type: 'slider', label: 'サイズ', key: 'size', value: td.size, min: 8, max: 400, onChange: (v) => set(() => { td.size = parseInt(v); }, 'サイズ変更') },
+        { type: 'color', label: '色', key: 'color', value: td.color, onChange: (v) => set(() => { td.color = v; }, '色変更') },
         {
           type: 'toggle-group', label: 'スタイル', key: 'style',
           toggles: [
-            { key: 'bold', label: 'B', active: self.textData.bold, onChange: (v) => { self.textData.bold = v; } },
-            { key: 'italic', label: 'I', active: self.textData.italic, onChange: (v) => { self.textData.italic = v; } },
-            { key: 'underline', label: 'U', active: self.textData.underline, onChange: (v) => { self.textData.underline = v; } }
+            { key: 'bold', label: 'B', active: td.bold, onChange: (v) => set(() => { td.bold = v; }, '太字') },
+            { key: 'italic', label: 'I', active: td.italic, onChange: (v) => set(() => { td.italic = v; }, '斜体') },
+            { key: 'underline', label: 'U', active: td.underline, onChange: (v) => set(() => { td.underline = v; }, '下線') }
           ]
         },
         {
           type: 'button-group', label: '配置', key: 'align',
           buttons: [
-            { label: '左', active: self.textData.align === 'left', onClick: () => { self.textData.align = 'left'; } },
-            { label: '中', active: self.textData.align === 'center', onClick: () => { self.textData.align = 'center'; } },
-            { label: '右', active: self.textData.align === 'right', onClick: () => { self.textData.align = 'right'; } }
+            { label: '左', active: td.align === 'left', onClick: () => set(() => { td.align = 'left'; }, '配置') },
+            { label: '中', active: td.align === 'center', onClick: () => set(() => { td.align = 'center'; }, '配置') },
+            { label: '右', active: td.align === 'right', onClick: () => set(() => { td.align = 'right'; }, '配置') }
           ]
         },
-        { type: 'slider', label: '行間', key: 'lineHeight', value: self.textData.lineHeight * 100, min: 80, max: 300, unit: '%', onChange: (v) => { self.textData.lineHeight = parseInt(v) / 100; }, advancedOnly: true },
-        { type: 'color', label: '縁取り色', key: 'strokeColor', value: self.textData.strokeColor, onChange: (v) => { self.textData.strokeColor = v; }, advancedOnly: true },
-        { type: 'slider', label: '縁取り太さ', key: 'strokeWidth', value: self.textData.strokeWidth, min: 0, max: 20, onChange: (v) => { self.textData.strokeWidth = parseInt(v); }, advancedOnly: true },
-        { type: 'color', label: '影の色', key: 'shadowColor', value: self.textData.shadowColor, onChange: (v) => { self.textData.shadowColor = v; }, advancedOnly: true },
-        { type: 'slider', label: '影ぼかし', key: 'shadowBlur', value: self.textData.shadowBlur, min: 0, max: 30, onChange: (v) => { self.textData.shadowBlur = parseInt(v); }, advancedOnly: true },
+        { type: 'slider', label: '行間', key: 'lineHeight', value: td.lineHeight * 100, min: 80, max: 300, unit: '%', onChange: (v) => set(() => { td.lineHeight = parseInt(v) / 100; }, '行間'), advancedOnly: true },
+        { type: 'color', label: '縁取り色', key: 'strokeColor', value: td.strokeColor, onChange: (v) => set(() => { td.strokeColor = v; }, '縁取り色'), advancedOnly: true },
+        { type: 'slider', label: '縁取り太さ', key: 'strokeWidth', value: td.strokeWidth, min: 0, max: 20, onChange: (v) => set(() => { td.strokeWidth = parseInt(v); }, '縁取り'), advancedOnly: true },
+        { type: 'color', label: '影の色', key: 'shadowColor', value: td.shadowColor, onChange: (v) => set(() => { td.shadowColor = v; }, '影色'), advancedOnly: true },
+        { type: 'slider', label: '影ぼかし', key: 'shadowBlur', value: td.shadowBlur, min: 0, max: 30, onChange: (v) => set(() => { td.shadowBlur = parseInt(v); }, '影'), advancedOnly: true },
         {
           type: 'preset-list', label: 'プリセット', key: 'presets',
           presets: self.presets.map(p => ({ label: p.name, onClick: () => self.applyPreset(p) }))
