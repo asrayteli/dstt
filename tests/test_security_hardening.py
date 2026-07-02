@@ -145,3 +145,27 @@ def test_non_testing_defaults_harden_session_cookies(tmp_path, monkeypatch):
     assert app.config["REMEMBER_COOKIE_HTTPONLY"] is True
     assert app.config["REMEMBER_COOKIE_SAMESITE"] == "Lax"
     assert app.config["REMEMBER_COOKIE_SECURE"] is True
+
+
+def test_sqlite_engine_has_wal_and_busy_timeout(tmp_path, monkeypatch):
+    """ファイルベース SQLite では WAL と busy_timeout が全接続に適用される。"""
+    _stub_optional_deps()
+    from app import create_app
+    from app.models import db
+    from sqlalchemy import text
+
+    monkeypatch.chdir(tmp_path)
+    app = create_app(
+        {
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'pragmas.db'}",
+            "SECRET_KEY": "test-secret",
+            "TESTING": True,
+        }
+    )
+
+    with app.app_context():
+        with db.engine.connect() as conn:
+            journal_mode = conn.execute(text("PRAGMA journal_mode")).scalar()
+            busy_timeout = conn.execute(text("PRAGMA busy_timeout")).scalar()
+    assert str(journal_mode).lower() == "wal"
+    assert int(busy_timeout) == 30000

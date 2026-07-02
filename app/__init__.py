@@ -1,17 +1,23 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 import secrets
 import time
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from .navigation import NAV_ITEMS
 from .versioning import calculate_repo_version
+
+try:
+    import fcntl
+except ImportError:  # Windows開発環境ではプロセス間ロックなしで動かす
+    fcntl = None
 
 from .models import UserActivityLog, db
 login_manager = LoginManager()
@@ -177,7 +183,6 @@ def _seed_tool_categories():
     }
 
     existing_keys = {ts.tool_key for ts in ToolSettings.query.all()}
-    added = False
     for nav in NAV_ITEMS:
         key = nav.get("key", "")
         if key and key not in existing_keys:
@@ -195,12 +200,61 @@ def _seed_tool_categories():
                     ts.category_id = cat.id
                     ts.sort_order = max_order + 1
             db.session.add(ts)
-            added = True
 
-    if added:
-        db.session.commit()
-    else:
-        db.session.commit()
+    db.session.commit()
+
+
+def _configure_sqlite_engine(app) -> None:
+    """SQLite 使用時に並行アクセス耐性を高める PRAGMA を全接続へ適用する。
+
+    gunicorn のマルチワーカー構成では複数プロセスが同一 DB ファイルへ
+    書き込むため、既定のロールバックジャーナル + busy_timeout なしでは
+    負荷時に "database is locked" が発生しうる。WAL で読み書きの並行性を
+    確保し、busy_timeout でロック競合時は即時エラーではなく待機させる。
+    """
+    if not str(app.config.get("SQLALCHEMY_DATABASE_URI", "")).startswith("sqlite"):
+        return
+
+    with app.app_context():
+        engine = db.engine
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA busy_timeout=30000")
+            # メモリDB（テスト）では WAL は効かず 'memory' が返るだけで無害。
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+        finally:
+            cursor.close()
+
+    # リスナー登録前にプールへ入った接続にも PRAGMA が効くよう作り直す。
+    # ここはまだスキーマ初期化前（最初のクエリ実行前）なので安全。
+    engine.dispose()
+
+
+@contextmanager
+def _startup_migration_lock(app):
+    """起動時スキーマ移行を全ワーカーで直列化するプロセス間ロック。
+
+    移行処理自体は冪等だが、複数ワーカーが同時に ALTER TABLE / CREATE TABLE
+    を実行すると SQLite のロック競合で起動が失敗しうる。flock の
+    ブロッキング取得で「順番待ち」にし、最初の1プロセスが実移行を行い、
+    残りは実質 no-op の検査だけを流す。fcntl が無い環境（Windows開発）では
+    従来どおりロックなしで実行する。
+    """
+    if fcntl is None:
+        yield
+        return
+    lock_path = Path(app.instance_path) / "startup_migration.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def _ensure_access_control_schema(app):
@@ -635,14 +689,11 @@ def create_app(test_config=None):
     if test_config:
         app.config.update(test_config)
     db.init_app(app)
+    _configure_sqlite_engine(app)
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"  # ログインページのエンドポイント
-    login_manager.init_app(app)
     login_manager.login_message = None
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_for=1)
-    
-    # ユーザーログインの管理
-    login_manager.login_view = "auth.login"
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -831,22 +882,18 @@ def create_app(test_config=None):
             abort(404)
         return None
 
-    # Blueprint毎のアクセス制御除外パスプレフィックス。
-    # トークン共有等、ログインしていない外部ユーザーが利用する経路を除外する。
+    # 機密ツールの Blueprint 名 → ツールキーの対応表。
+    # 手書きリストだと新しい機密ツールの登録漏れが起こりうるため、
+    # TOOL_ACCESS_CATEGORIES の sensitive 定義から自動導出する
+    # （Blueprint 名 = ツールキーの規約。例外はここに個別追記する）。
+    from .access_control import TOOL_ACCESS_CATEGORIES
     _BP_TO_TOOL_KEY = {
-        "leave_mgr": "leave_mgr",
-        "pluslist": "pluslist",
-        "siteplus": "siteplus",
-        "shiftersync": "shiftersync",
-        # CloudShiftはShifterSyncのサブ機能なので、ShifterSync権限で判定する
-        "cloudshift": "shiftersync",
-        "subject_analysis_tool": "subject_analysis_tool",
-        "power_imager": "power_imager",
-        "bus_pricing": "bus_pricing",
-        "health_check": "health_check",
-        "car_inspe": "car_inspe",
-        "camera_scanner": "camera_scanner",
+        key: key
+        for key, category in TOOL_ACCESS_CATEGORIES.items()
+        if category == "sensitive"
     }
+    # CloudShiftはShifterSyncのサブ機能なので、ShifterSync権限で判定する
+    _BP_TO_TOOL_KEY["cloudshift"] = "shiftersync"
     _EXEMPT_PATH_PREFIXES = (
         "/tools/shiftersync/download/",
         "/tools/shiftersync/cloudshift/view/",
@@ -963,11 +1010,13 @@ def create_app(test_config=None):
         except EncryptionKeyMissingError as exc:
             raise RuntimeError(str(exc))
 
-    # DBスキーマの初期化（既存DBへのカラム追加含む）
-    _ensure_access_control_schema(app)
-    _ensure_to_bell_task_source_unique_index(app)
-    # 旧データの空 draft を live へ揃える一括修復（誤『仮保存あり』の永続的解消）。
-    _backfill_empty_cloudshift_drafts(app)
+    # DBスキーマの初期化（既存DBへのカラム追加含む）。
+    # 複数ワーカーの同時起動でも競合しないよう flock で直列化する。
+    with _startup_migration_lock(app):
+        _ensure_access_control_schema(app)
+        _ensure_to_bell_task_source_unique_index(app)
+        # 旧データの空 draft を live へ揃える一括修復（誤『仮保存あり』の永続的解消）。
+        _backfill_empty_cloudshift_drafts(app)
 
     from .services.to_bell_push import init_to_bell_push_scheduler
     init_to_bell_push_scheduler(app)

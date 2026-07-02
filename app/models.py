@@ -15,6 +15,15 @@ JST = timezone(timedelta(hours=9))
 def jst_now():
     return datetime.now(JST).replace(tzinfo=None)
 
+
+def utc_now():
+    """ナイーブUTCの現在時刻。
+
+    ``datetime.utcnow()`` は Python 3.12 以降 deprecated のため、全モデルの
+    タイムスタンプ既定値はこのヘルパーへ一元化する（返る値は従来と同一）。
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
 
@@ -79,7 +88,7 @@ class AccessBranch(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
     code = db.Column(db.String(20), unique=True, nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now)
 
     offices = db.relationship(
         'AccessOffice',
@@ -111,7 +120,7 @@ class AccessOffice(db.Model):
     branch_id = db.Column(db.Integer, db.ForeignKey('access_branches.id'), nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
     code = db.Column(db.String(20), unique=True, nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now)
 
     branch = db.relationship('AccessBranch', back_populates='offices')
     departments = db.relationship(
@@ -144,7 +153,7 @@ class AccessDepartment(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     office_id = db.Column(db.Integer, db.ForeignKey('access_offices.id'), nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now)
 
     office = db.relationship('AccessOffice', back_populates='departments')
 
@@ -167,7 +176,7 @@ class UserAccessibleOffice(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     office_id = db.Column(db.Integer, db.ForeignKey('access_offices.id'), nullable=False, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now)
 
     user = db.relationship('User', backref=db.backref('extra_offices', cascade='all, delete-orphan'))
     office = db.relationship('AccessOffice')
@@ -184,7 +193,7 @@ class UserToolPermission(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     tool_key = db.Column(db.String(80), nullable=False, index=True)
     granted_by = db.Column(db.String(80), nullable=True)
-    granted_at = db.Column(db.DateTime, default=datetime.utcnow)
+    granted_at = db.Column(db.DateTime, default=utc_now)
 
     user = db.relationship('User', back_populates='tool_permissions')
 
@@ -206,7 +215,7 @@ class UserLoginLog(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     username = db.Column(db.String(80), nullable=False, index=True)
     success = db.Column(db.Boolean, nullable=False, default=True, index=True)
-    logged_in_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    logged_in_at = db.Column(db.DateTime, default=utc_now, nullable=False, index=True)
     ip_address = db.Column(db.String(80), nullable=True)
     user_agent = db.Column(db.Text, nullable=True)
 
@@ -227,7 +236,7 @@ class UserActivityLog(db.Model):
     duration_ms = db.Column(db.Integer, nullable=True)
     ip_address = db.Column(db.String(80), nullable=True)
     user_agent = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False, index=True)
 
 
 class FilePostDownloadLog(db.Model):
@@ -247,7 +256,7 @@ class FilePostDownloadLog(db.Model):
     file_size = db.Column(db.BigInteger, nullable=True)
     ip_address = db.Column(db.String(80), nullable=True)
     user_agent = db.Column(db.Text, nullable=True)
-    downloaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    downloaded_at = db.Column(db.DateTime, default=utc_now, nullable=False, index=True)
 
 
 class FilePostUploadLog(db.Model):
@@ -265,7 +274,7 @@ class FilePostUploadLog(db.Model):
     is_internal = db.Column(db.Boolean, nullable=False, default=False, index=True)
     ip_address = db.Column(db.String(80), nullable=True)
     user_agent = db.Column(db.Text, nullable=True)
-    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    uploaded_at = db.Column(db.DateTime, default=utc_now, nullable=False, index=True)
 
 
 class PasswordVault(db.Model):
@@ -280,8 +289,8 @@ class PasswordVault(db.Model):
     salt_b64 = db.Column(db.Text, nullable=False)
     check_nonce_b64 = db.Column(db.Text, nullable=False)
     check_ciphertext_b64 = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     user = db.relationship(
         'User',
@@ -305,8 +314,8 @@ class PasswordVaultItem(db.Model):
     schema_version = db.Column(db.Integer, nullable=False, default=1)
     nonce_b64 = db.Column(db.Text, nullable=False)
     ciphertext_b64 = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     vault = db.relationship('PasswordVault', back_populates='items')
 
@@ -328,8 +337,8 @@ class PowerVoteForm(db.Model):
     result_visibility = db.Column(db.String(20), nullable=False, default='creator_only')
     theme = db.Column(db.JSON, nullable=False, default=dict)
     settings = db.Column(db.JSON, nullable=False, default=dict)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     questions = db.relationship(
         'PowerVoteQuestion',
@@ -374,7 +383,7 @@ class PowerVoteResponse(db.Model):
     respondent_email = db.Column(db.String(200), nullable=False, default='')
     respondent_cookie_id = db.Column(db.String(128), nullable=False, default='', index=True)
     answers = db.Column(db.JSON, nullable=False, default=dict)
-    submitted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    submitted_at = db.Column(db.DateTime, default=utc_now, nullable=False, index=True)
 
     form = db.relationship('PowerVoteForm', back_populates='responses')
 
@@ -386,7 +395,7 @@ class ToolCategory(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now)
 
     tool_settings = db.relationship(
         'ToolSettings',
@@ -414,7 +423,7 @@ class ToolSettings(db.Model):
     access_type = db.Column(db.String(20), nullable=False, default='public')
     category_id = db.Column(db.Integer, db.ForeignKey('tool_categories.id'), nullable=True, index=True)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now)
 
     category = db.relationship('ToolCategory', back_populates='tool_settings')
 
@@ -448,7 +457,7 @@ class GroupToolPermission(db.Model):
     office_id = db.Column(db.Integer, db.ForeignKey('access_offices.id'), nullable=True, index=True)
     department_id = db.Column(db.Integer, db.ForeignKey('access_departments.id'), nullable=True, index=True)
     granted_by = db.Column(db.String(80), nullable=True)
-    granted_at = db.Column(db.DateTime, default=datetime.utcnow)
+    granted_at = db.Column(db.DateTime, default=utc_now)
 
     branch = db.relationship('AccessBranch')
     office = db.relationship('AccessOffice')
@@ -478,7 +487,7 @@ class Office(db.Model):
     office_code = db.Column(db.String(20), primary_key=True)  # 所属コード（例: 112010）
     office_name = db.Column(db.String(100), nullable=False)  # 所属名称
     created_by = db.Column(db.String(80), nullable=False)  # 作成者
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now)
 
     # リレーション
     employees = db.relationship('Employee', back_populates='office', cascade='all, delete-orphan')
@@ -537,8 +546,8 @@ class Employee(db.Model):
     # システム情報
     is_deleted = db.Column(db.Boolean, default=False, index=True)  # 削除フラグ
     is_retired = db.Column(db.Boolean, default=False, index=True)  # 退職者フラグ（ファイルA更新で名簿から外れた社員）
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now)
 
     # リレーション
     office = db.relationship('Office', back_populates='employees')
@@ -645,7 +654,7 @@ class UploadHistory(db.Model):
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     uploaded_by = db.Column(db.String(80), nullable=False)  # アップロードユーザーID
-    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    uploaded_at = db.Column(db.DateTime, default=utc_now, index=True)
     office_code = db.Column(db.String(20), nullable=False)  # 営業所コード
     filename = db.Column(db.String(255))  # ファイル名
     added_count = db.Column(db.Integer, default=0)  # 追加件数
@@ -664,7 +673,7 @@ class EditHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     employee_number = db.Column(db.String(20), db.ForeignKey('employees.employee_number'), nullable=False, index=True)
     edited_by = db.Column(db.String(80), nullable=False)  # 編集者ユーザーID
-    edited_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    edited_at = db.Column(db.DateTime, default=utc_now, index=True)
     action = db.Column(db.String(20), nullable=False)  # create / update / delete
     field_name = db.Column(db.String(100))  # 変更フィールド名
     # 個人情報を含みうるため AES-256-GCM で暗号化（既存平文レコードは自動で後方互換表示）
@@ -686,8 +695,8 @@ class SalaryMapping(db.Model):
     display_name = db.Column(db.String(100), nullable=False)  # 表示名（例: 基本給）
     column_key = db.Column(db.String(50), nullable=False, unique=True)  # DBキー（例: base_salary）
     sort_order = db.Column(db.Integer, default=0)  # 表示順
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utc_now)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now)
 
     def __repr__(self):
         return f'<SalaryMapping {self.item_id}: {self.display_name}>'
@@ -711,7 +720,7 @@ class EmployeeSalary(db.Model):
     employee_number = db.Column(db.String(20), nullable=False, index=True)  # 社員番号
     item_id = db.Column(db.String(20), db.ForeignKey('salary_mappings.item_id'), nullable=False)  # 項目ID
     amount = db.Column(db.Integer, nullable=False)  # 金額
-    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)  # アップロード日時
+    uploaded_at = db.Column(db.DateTime, default=utc_now, index=True)  # アップロード日時
     uploaded_by = db.Column(db.String(80), nullable=False)  # アップロード者
 
     # リレーション
@@ -737,7 +746,7 @@ class SalaryUploadHistory(db.Model):
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     uploaded_by = db.Column(db.String(80), nullable=False)  # アップロードユーザーID
-    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    uploaded_at = db.Column(db.DateTime, default=utc_now, index=True)
     filename = db.Column(db.String(255))  # ファイル名
     success_count = db.Column(db.Integer, default=0)  # 成功件数
     skip_count = db.Column(db.Integer, default=0)  # スキップ件数
@@ -754,7 +763,7 @@ class ContactUploadHistory(db.Model):
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     uploaded_by = db.Column(db.String(80), nullable=False)  # アップロードユーザーID
-    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    uploaded_at = db.Column(db.DateTime, default=utc_now, index=True)
     filename = db.Column(db.String(255))  # ファイル名
     success_count = db.Column(db.Integer, default=0)  # 更新件数
     skip_count = db.Column(db.Integer, default=0)  # スキップ件数
@@ -778,8 +787,8 @@ class Site(db.Model):
     site_updater = db.Column(db.String(80), nullable=False, index=True)
     office_code = db.Column(db.String(20), nullable=True, index=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utc_now)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utc_now, onupdate=utc_now)
 
     branches = db.relationship(
         'SiteBranch',
@@ -834,8 +843,8 @@ class SiteBranch(db.Model):
     site_register = db.Column(db.String(80), nullable=False, index=True)
     site_updater = db.Column(db.String(80), nullable=False, index=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utc_now)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utc_now, onupdate=utc_now)
 
     site = db.relationship('Site', back_populates='branches')
 
@@ -878,8 +887,8 @@ class SiteContractMaster(db.Model):
     vehicle_number_updated_at = db.Column(db.DateTime)
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
     source = db.Column(db.String(30), nullable=False, default='siteplus')
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utc_now)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utc_now, onupdate=utc_now)
 
     site = db.relationship('Site', foreign_keys=[site_row_id], lazy='joined')
     branch = db.relationship('SiteBranch', foreign_keys=[site_branch_row_id], lazy='joined')
@@ -932,8 +941,8 @@ class VehicleInspectionRecord(db.Model):
     stored_filename = db.Column(db.String(255))
     stored_path = db.Column(db.String(500))
     uploaded_by = db.Column(db.String(80), index=True)
-    uploaded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    uploaded_at = db.Column(db.DateTime, nullable=False, default=utc_now, index=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utc_now, onupdate=utc_now)
     source = db.Column(db.String(30), nullable=False, default='ocr')
     notes = db.Column(db.Text)
 
@@ -1334,8 +1343,8 @@ class CloudShiftPwaSubscription(db.Model):
     user_agent = db.Column(db.Text, nullable=False, default='')
     device_label = db.Column(db.String(120), nullable=False, default='')
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     def to_subscription_info(self) -> dict:
         return {
@@ -1417,8 +1426,8 @@ class ToBellTask(db.Model):
     gcal_event_id = db.Column(db.String(255), nullable=True, index=True)
     gcal_synced_by = db.Column(db.String(80), nullable=True, index=True)
     gcal_reminder_override = db.Column(db.JSON, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False, index=True)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     subtasks = db.relationship(
         'ToBellSubtask',
@@ -1498,8 +1507,8 @@ class ToBellSubtask(db.Model):
     title = db.Column(db.String(240), nullable=False)
     is_done = db.Column(db.Boolean, nullable=False, default=False)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     task = db.relationship('ToBellTask', back_populates='subtasks')
 
@@ -1520,8 +1529,8 @@ class ToBellComment(db.Model):
     task_id = db.Column(db.Integer, db.ForeignKey('to_bell_tasks.id'), nullable=False, index=True)
     body = db.Column(db.Text, nullable=False)
     created_by = db.Column(db.String(80), nullable=False, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False, index=True)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     task = db.relationship('ToBellTask', back_populates='comments')
 
@@ -1579,7 +1588,7 @@ class ToBellNotification(db.Model):
     read_at = db.Column(db.DateTime, nullable=True)
     is_resolved = db.Column(db.Boolean, nullable=False, default=False, index=True)
     resolved_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False, index=True)
 
     task = db.relationship('ToBellTask', back_populates='notifications')
 
@@ -1611,8 +1620,8 @@ class ToBellPushSubscription(db.Model):
     user_agent = db.Column(db.Text, nullable=False, default='')
     device_label = db.Column(db.String(120), nullable=False, default='')
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     def to_subscription_info(self) -> dict:
         return {
@@ -1634,7 +1643,7 @@ class ToBellPushDelivery(db.Model):
     task_id = db.Column(db.Integer, db.ForeignKey('to_bell_tasks.id'), nullable=False, index=True)
     user_id = db.Column(db.String(80), nullable=False, index=True)
     due_at_key = db.Column(db.String(32), nullable=False, index=True)
-    sent_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    sent_at = db.Column(db.DateTime, default=utc_now, nullable=False, index=True)
     status = db.Column(db.String(30), nullable=False, default='sent')
 
 
@@ -1652,13 +1661,13 @@ class ToBellGoogleAccount(db.Model):
     access_token = db.Column(EncryptedText, nullable=True)
     token_expiry = db.Column(db.DateTime, nullable=True)
     scope = db.Column(db.Text, nullable=False, default='')
-    connected_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    connected_at = db.Column(db.DateTime, default=utc_now, nullable=False)
     # Google Calendar → ToBell 取り込み用の状態。
     # calendar_sync_token: incremental sync の nextSyncToken（無ければ初回は時間窓で取得）。
     # last_import_at: 最終取り込み時刻（ユーザー選択の取り込み間隔の判定に使う）。
     calendar_sync_token = db.Column(db.Text, nullable=True)
     last_import_at = db.Column(db.DateTime, nullable=True)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     def to_dict(self) -> dict:
         return {
@@ -1679,7 +1688,7 @@ class ToBellShareToken(db.Model):
     user_id = db.Column(db.String(80), nullable=False, unique=True, index=True)
     token = db.Column(db.String(64), nullable=False, unique=True, index=True)
     is_revoked = db.Column(db.Boolean, nullable=False, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
     last_used_at = db.Column(db.DateTime, nullable=True)
 
     def is_usable(self) -> bool:
@@ -1703,8 +1712,8 @@ class ToBellProject(db.Model):
     due_at = db.Column(db.DateTime, nullable=True, index=True)
     pinned = db.Column(db.Boolean, nullable=False, default=False, index=True)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     members = db.relationship(
         'ToBellProjectMember', cascade='all, delete-orphan', backref='project', lazy='selectin'
@@ -1741,7 +1750,7 @@ class ToBellProjectMember(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     project_id = db.Column(db.Integer, db.ForeignKey('to_bell_projects.id'), nullable=False, index=True)
     username = db.Column(db.String(80), nullable=False, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
 
 
 class ToBellAttachment(db.Model):
@@ -1754,7 +1763,7 @@ class ToBellAttachment(db.Model):
     mime_type = db.Column(db.String(120), nullable=False, default='')
     file_size = db.Column(db.Integer, nullable=False, default=0)
     uploaded_by = db.Column(db.String(80), nullable=False, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
 
     task = db.relationship('ToBellTask', back_populates='attachments')
 
@@ -1783,8 +1792,8 @@ class ToBellTemplate(db.Model):
     office_id = db.Column(db.Integer, nullable=True, index=True)
     payload = db.Column(db.JSON, nullable=False, default=dict)
     is_hidden = db.Column(db.Boolean, nullable=False, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     def to_dict(self) -> dict:
         payload = self.payload if isinstance(self.payload, dict) else {}
@@ -1808,7 +1817,7 @@ class ToBellUserSettings(db.Model):
     username = db.Column(db.String(80), nullable=False, unique=True, index=True)
     integrations = db.Column(db.JSON, nullable=False, default=dict)
     preferences = db.Column(db.JSON, nullable=False, default=dict)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
 
 class ToBellEmployeeLink(db.Model):
@@ -1823,7 +1832,7 @@ class ToBellEmployeeLink(db.Model):
     target_id = db.Column(db.Integer, nullable=False, index=True)
     employee_id = db.Column(db.Integer, nullable=False, index=True)
     created_by = db.Column(db.String(80), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
 
 
 class ToBellSiteLink(db.Model):
@@ -1838,7 +1847,7 @@ class ToBellSiteLink(db.Model):
     target_id = db.Column(db.Integer, nullable=False, index=True)
     site_row_id = db.Column(db.Integer, nullable=False, index=True)
     created_by = db.Column(db.String(80), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
 
 
 class ToBellExternalFile(db.Model):
@@ -1857,7 +1866,7 @@ class ToBellExternalFile(db.Model):
     download_token = db.Column(db.String(120), nullable=True)
     note = db.Column(db.Text, nullable=False, default='')
     uploaded_by = db.Column(db.String(80), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
 
     def to_dict(self) -> dict:
         return {

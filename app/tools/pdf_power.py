@@ -21,7 +21,7 @@ from reportlab.lib.colors import Color
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from PyPDF2 import PdfReader, PdfWriter
+from pypdf import PdfReader, PdfWriter
 import fitz  # PyMuPDF
 import io
 import pikepdf
@@ -1591,12 +1591,12 @@ def _extract_text_from_pdf(file_path, keyword, extract_images, temp_dir):
         }
 
         pymupdf_result = _extract_with_pymupdf(file_path, keyword, extract_images, temp_dir)
-        pypdf2_result = _extract_with_pypdf2(file_path, keyword)
+        pypdf_result = _extract_with_pypdf(file_path, keyword)
 
         if pymupdf_result["success"] and len(pymupdf_result["text"]) > 0:
             result = pymupdf_result
-        elif pypdf2_result["success"] and len(pypdf2_result["text"]) > 0:
-            result = pypdf2_result
+        elif pypdf_result["success"] and len(pypdf_result["text"]) > 0:
+            result = pypdf_result
             if extract_images and pymupdf_result["images"]:
                 result["images"] = pymupdf_result["images"]
         else:
@@ -1699,14 +1699,14 @@ def _extract_with_pymupdf(file_path, keyword, extract_images, temp_dir):
         return result
 
 
-def _extract_with_pypdf2(file_path, keyword):
-    """PyPDF2を使用したテキスト抽出"""
+def _extract_with_pypdf(file_path, keyword):
+    """pypdf（旧PyPDF2の後継）を使用したテキスト抽出"""
     result = {
         "success": False,
         "text": "",
         "keyword_matches": [],
         "images": [],
-        "method": "PyPDF2"
+        "method": "pypdf"
     }
 
     try:
@@ -1740,8 +1740,8 @@ def _extract_with_pypdf2(file_path, keyword):
         return result
 
     except Exception as e:
-        logger.error(f"PyPDF2抽出エラー: {e}")
-        result["error"] = f"PyPDF2抽出エラー: {str(e)}"
+        logger.error(f"pypdf抽出エラー: {e}")
+        result["error"] = f"pypdf抽出エラー: {str(e)}"
         return result
 
 

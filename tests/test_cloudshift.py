@@ -4495,7 +4495,7 @@ def test_meta_relink_to_existing_target_is_rejected(tmp_path):
 
 def _insert_duplicate_person_project(client, module, *, owner_user_id, employee_number, title):
     with client.application.app_context():
-        now = module._utcnow_iso()
+        now = module._jst_now_iso()
         project = {
             "id": module._project_id(),
             "owner_user_id": owner_user_id,

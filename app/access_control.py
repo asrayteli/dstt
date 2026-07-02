@@ -34,9 +34,6 @@ from .models import (
 from .navigation import NAV_ITEMS
 
 
-LEGACY_ADMIN_USERNAME = "3243012"
-
-
 # 初期管理者ID（旧実装の互換性のためハードコーディング）
 LEGACY_ADMIN_USERNAME = "3243012"
 
@@ -99,11 +96,9 @@ def is_admin_user(user=None) -> bool:
     user = user if user is not None else current_user
     if user is None or not getattr(user, "is_authenticated", False):
         return False
+    # レガシー互換：従来の固定管理者ID
     if is_legacy_admin_username(getattr(user, "username", None)):
         return True
-    if getattr(user, "is_admin", False):
-        return True
-    # レガシー互換：従来の固定管理者ID
     return bool(getattr(user, "is_admin", False))
 
 

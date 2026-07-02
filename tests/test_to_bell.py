@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -285,12 +285,17 @@ def test_to_bell_quick_datetime_is_optional_and_due_tasks_notify(app_ctx):
     assert no_due.status_code == 201
     assert no_due.get_json()["due_at"] is None
 
+    from app.services.local_time import local_now
+
+    # 期日は「過去60日以内」が通知対象。ハードコード日付だと時間経過で
+    # 通知ウィンドウを外れてテストが腐るため、実行日基準の相対日付にする。
+    due_date = (local_now() - timedelta(days=1)).date().isoformat()
     with_due = client.post(
         "/tools/to_bell/api/tasks",
-        json={"title": "時間指定", "due_date": "2026-05-01", "due_time": "14:30"},
+        json={"title": "時間指定", "due_date": due_date, "due_time": "14:30"},
     )
     assert with_due.status_code == 201
-    assert with_due.get_json()["due_at"].startswith("2026-05-01T14:30")
+    assert with_due.get_json()["due_at"].startswith(f"{due_date}T14:30")
 
     due_tasks = client.get("/tools/to_bell/api/notifications/due-tasks").get_json()["tasks"]
     assert any(task["title"] == "時間指定" for task in due_tasks)

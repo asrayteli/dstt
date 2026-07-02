@@ -13,7 +13,7 @@ import csv
 
 from app.utils.atomic_io import write_json_atomic
 
-from app.models import db, Employee, Office, UploadHistory, EditHistory, SalaryMapping, EmployeeSalary, SalaryUploadHistory, ContactUploadHistory
+from app.models import db, Employee, Office, UploadHistory, EditHistory, SalaryMapping, EmployeeSalary, SalaryUploadHistory, ContactUploadHistory, utc_now
 from app.access_control import (
     is_admin_user as _is_dstt_admin,
     user_office_codes as _dstt_user_office_codes,
@@ -909,7 +909,7 @@ def import_data():
                     setattr(existing, key, value)
                 existing.is_deleted = False
                 existing.is_retired = False  # 名簿に載ったので退職フラグを解除
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = utc_now()
             elif not existing:
                 # 完全に新規の場合のみ追加
                 employee = Employee(**deserialized)
@@ -929,7 +929,7 @@ def import_data():
                     setattr(employee, key, value)
                 # ファイルに載っている＝在籍中なので退職フラグを解除
                 employee.is_retired = False
-                employee.updated_at = datetime.utcnow()
+                employee.updated_at = utc_now()
                 updated_count += 1
 
         # 退職（論理削除はせず、退職者フラグを立ててサーバーに残す）
@@ -942,7 +942,7 @@ def import_data():
                 employee.is_retired = True
                 if not employee.retirement_date:
                     employee.retirement_date = "？退職？"
-                employee.updated_at = datetime.utcnow()
+                employee.updated_at = utc_now()
                 deleted_count += 1
 
         # アップロード履歴を記録
@@ -1056,7 +1056,7 @@ def update_employee(employee_number):
                     )
                     setattr(employee, key, new_value)
 
-        employee.updated_at = datetime.utcnow()
+        employee.updated_at = utc_now()
         db.session.commit()
 
         return jsonify({"success": True, "employee": employee.to_dict()})
@@ -1081,7 +1081,7 @@ def delete_employee(employee_number):
 
     try:
         employee.is_deleted = True
-        employee.updated_at = datetime.utcnow()
+        employee.updated_at = utc_now()
 
         # 編集履歴を記録
         record_edit_history(
@@ -2502,7 +2502,7 @@ def import_contact_data():
                     changed = True
 
                 if changed:
-                    employee.updated_at = datetime.utcnow()
+                    employee.updated_at = utc_now()
                 success_count += 1
 
             except Exception as e:

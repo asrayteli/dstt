@@ -13,6 +13,7 @@ from sqlalchemy import and_, func, or_
 from werkzeug.utils import secure_filename
 
 from app.models import (
+    utc_now,
     ToBellAttachment,
     ToBellComment,
     ToBellNotification,
@@ -236,7 +237,7 @@ def create_task(username: str, payload: dict[str, Any]) -> ToBellTask:
     db.session.flush()
     _sync_tags(task, payload.get("tags"), username)
     if task.status == "done" and task.completed_at is None:
-        task.completed_at = datetime.utcnow()
+        task.completed_at = utc_now()
     if task.status != "done":
         _create_assignment_notification(task, username)
         if task.reviewer_id:
@@ -259,7 +260,7 @@ def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBell
         task.status = _choice(payload.get("status"), VALID_STATUSES, task.status)
         if task.status == "done":
             if task.completed_at is None:
-                task.completed_at = datetime.utcnow()
+                task.completed_at = utc_now()
         elif task.status != "done":
             task.completed_at = None
     if "priority" in payload:
@@ -287,14 +288,14 @@ def update_task(task: ToBellTask, payload: dict[str, Any], actor: str) -> ToBell
         _create_assignment_notification(task, actor, target=task.reviewer_id, event_type="reviewer", label="確認依頼")
     if task.status == "done":
         _resolve_task_notifications(task)
-    task.updated_at = datetime.utcnow()
+    task.updated_at = utc_now()
     db.session.commit()
     return task
 
 
 def complete_task(task: ToBellTask) -> ToBellTask:
     task.status = "done"
-    task.completed_at = datetime.utcnow()
+    task.completed_at = utc_now()
     _resolve_task_notifications(task)
     db.session.commit()
     return task
@@ -309,7 +310,7 @@ def reopen_task(task: ToBellTask) -> ToBellTask:
 
 def delete_task(task: ToBellTask) -> None:
     task.status = "archived"
-    task.updated_at = datetime.utcnow()
+    task.updated_at = utc_now()
     db.session.commit()
 
 
@@ -434,7 +435,7 @@ def list_notifications(username: str) -> list[ToBellNotification]:
 def mark_notification_read(notification_id: int, username: str) -> ToBellNotification:
     notification = _get_notification(notification_id, username)
     notification.is_read = True
-    notification.read_at = datetime.utcnow()
+    notification.read_at = utc_now()
     db.session.commit()
     return notification
 
@@ -442,9 +443,9 @@ def mark_notification_read(notification_id: int, username: str) -> ToBellNotific
 def resolve_notification(notification_id: int, username: str) -> ToBellNotification:
     notification = _get_notification(notification_id, username)
     notification.is_read = True
-    notification.read_at = notification.read_at or datetime.utcnow()
+    notification.read_at = notification.read_at or utc_now()
     notification.is_resolved = True
-    notification.resolved_at = datetime.utcnow()
+    notification.resolved_at = utc_now()
     db.session.commit()
     return notification
 
@@ -453,7 +454,7 @@ def mark_all_notifications_read(username: str) -> int:
     rows = ToBellNotification.query.filter_by(user_id=username, is_read=False).all()
     for row in rows:
         row.is_read = True
-        row.read_at = datetime.utcnow()
+        row.read_at = utc_now()
     db.session.commit()
     return len(rows)
 
@@ -537,7 +538,7 @@ def cleanup_expired_records(
     retention_days: int = 60,
     integration_retention_days: int = INTEGRATION_TASK_RETENTION_DAYS,
 ) -> dict[str, int]:
-    now = now or datetime.utcnow()
+    now = now or utc_now()
     cutoff = now - timedelta(days=retention_days)
     integration_cutoff = now - timedelta(days=integration_retention_days)
 
@@ -600,7 +601,7 @@ def issue_share_token(username: str) -> ToBellShareToken:
         db.session.add(row)
     row.token = secrets.token_urlsafe(32)
     row.is_revoked = False
-    row.created_at = datetime.utcnow()
+    row.created_at = utc_now()
     row.last_used_at = None
     db.session.commit()
     return row
@@ -626,7 +627,7 @@ def resolve_share_token(token: str) -> User | None:
     user = User.query.filter_by(username=row.user_id).first()
     if user is None:
         return None
-    row.last_used_at = datetime.utcnow()
+    row.last_used_at = utc_now()
     db.session.commit()
     return user
 
@@ -758,7 +759,7 @@ def update_project(project: ToBellProject, username: str, payload: dict[str, Any
         project.sort_order = _safe_int(payload.get("sort_order")) or 0
     if "members" in payload:
         _sync_project_members(project, username, payload.get("members"))
-    project.updated_at = datetime.utcnow()
+    project.updated_at = utc_now()
     db.session.commit()
     return project
 
@@ -895,7 +896,7 @@ def bulk_assign_tasks_to_project(project: ToBellProject, username: str, task_ids
         if task.project_id == project.id:
             continue
         task.project_id = project.id
-        task.updated_at = datetime.utcnow()
+        task.updated_at = utc_now()
         updated += 1
     if updated:
         db.session.commit()
@@ -1039,7 +1040,7 @@ def update_template(template: ToBellTemplate, username: str, payload: dict[str, 
     if "is_hidden" in payload:
         # 所属共有テンプレートは管理者が非表示にできる。
         template.is_hidden = bool(payload.get("is_hidden"))
-    template.updated_at = datetime.utcnow()
+    template.updated_at = utc_now()
     db.session.commit()
     return template
 
@@ -1279,7 +1280,7 @@ def _attachment_dir() -> Path:
 
 
 def _resolve_task_notifications(task: ToBellTask) -> None:
-    now = datetime.utcnow()
+    now = utc_now()
     for notification in task.notifications:
         notification.is_resolved = True
         notification.resolved_at = now

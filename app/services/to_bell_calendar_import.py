@@ -25,7 +25,7 @@ from typing import Any, Optional
 
 import requests
 
-from app.models import ToBellGoogleAccount, ToBellNotification, ToBellTask, ToBellUserSettings, db
+from app.models import ToBellGoogleAccount, ToBellNotification, ToBellTask, ToBellUserSettings, db, utc_now
 from app.services import to_bell_calendar
 from app.services.to_bell_calendar import ToBellCalendarError
 from app.services.to_bell_integrations import enabled_users, is_enabled
@@ -189,7 +189,7 @@ def _fetch_events(account: ToBellGoogleAccount, sync_token: Optional[str]) -> tu
     page_token: Optional[str] = None
     # 初回（フル）取得の時間窓はページングを通して固定する。
     # ページ間で timeMin/timeMax が変わると Google がページング要求を拒否するため、ループ前に確定させる。
-    now = datetime.utcnow()
+    now = utc_now()
     time_min = _rfc3339_utc(now - timedelta(days=_INITIAL_PAST_DAYS))
     time_max = _rfc3339_utc(now + timedelta(days=_INITIAL_FUTURE_DAYS))
     pages = 0
@@ -319,11 +319,11 @@ def _process_event(username: str, event: dict[str, Any], mode: str, summary: dic
     if event.get("status") == "cancelled":
         if existing and existing.status not in ("done", "archived"):
             existing.status = "done"
-            existing.completed_at = datetime.utcnow()
-            existing.updated_at = datetime.utcnow()
+            existing.completed_at = utc_now()
+            existing.updated_at = utc_now()
             for note in existing.notifications:
                 note.is_resolved = True
-                note.resolved_at = datetime.utcnow()
+                note.resolved_at = utc_now()
             summary["completed"] += 1
         else:
             summary["skipped"] += 1
@@ -356,7 +356,7 @@ def _process_event(username: str, event: dict[str, Any], mode: str, summary: dic
             existing.due_at = due_at
             changed = True
         if changed:
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = utc_now()
             summary["updated"] += 1
         else:
             summary["skipped"] += 1
@@ -460,7 +460,7 @@ def _run_import(account: ToBellGoogleAccount, username: str) -> dict[str, int]:
 
         if next_token:
             account.calendar_sync_token = next_token
-        account.last_import_at = datetime.utcnow()
+        account.last_import_at = utc_now()
         db.session.commit()
         return summary
     except Exception:
@@ -471,7 +471,7 @@ def _run_import(account: ToBellGoogleAccount, username: str) -> dict[str, int]:
 
 def run_due_imports(*, now: datetime | None = None) -> dict[str, int]:
     """スケジューラから呼ぶ。間隔に達したユーザーだけを取り込む。"""
-    now = now or datetime.utcnow()
+    now = now or utc_now()
     stats = {"users": 0, "ran": 0, "failed": 0}
     for username in enabled_users(INTEGRATION_KEY):
         stats["users"] += 1
