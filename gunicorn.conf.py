@@ -17,6 +17,10 @@ keepalive = 2
 max_requests = 1000
 max_requests_jitter = 100
 
+# Worker heartbeat files on tmpfs to avoid disk I/O stalls blocking the
+# arbiter's liveness checks (a common cause of spurious worker timeouts).
+worker_tmp_dir = "/dev/shm"
+
 # Log files
 errorlog = "/var/log/dstt/error.log"
 accesslog = "/var/log/dstt/access.log"

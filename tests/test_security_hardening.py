@@ -169,3 +169,22 @@ def test_sqlite_engine_has_wal_and_busy_timeout(tmp_path, monkeypatch):
             busy_timeout = conn.execute(text("PRAGMA busy_timeout")).scalar()
     assert str(journal_mode).lower() == "wal"
     assert int(busy_timeout) == 30000
+
+
+def test_hsts_header_only_on_https_requests(app_ctx):
+    """HTTPS（X-Forwarded-Proto 含む）の応答にのみ HSTS を付与する。"""
+    client = app_ctx.test_client()
+
+    plain = client.get("/auth/login")
+    assert "Strict-Transport-Security" not in plain.headers
+
+    secure = client.get(
+        "/auth/login", headers={"X-Forwarded-Proto": "https"}
+    )
+    assert secure.headers.get("Strict-Transport-Security") == "max-age=31536000"
+
+
+def test_max_content_length_default(app_ctx):
+    """リクエストボディ上限が既定で設定される（無制限にしない）。"""
+    expected = (10 * 1024 + 64) * 1024 * 1024
+    assert app_ctx.config.get("MAX_CONTENT_LENGTH") == expected

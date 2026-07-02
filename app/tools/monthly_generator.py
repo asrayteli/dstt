@@ -1073,10 +1073,19 @@ def process_prev_year_data(subject_data, site_data, target_month):
 def download_file(filename):
     """処理済みファイルのダウンロード"""
     try:
+        # パストラバーサル対策: 単一のファイル名以外（区切り文字入り等）は拒否。
+        if os.path.basename(filename) != filename or filename in {"", ".", ".."}:
+            return jsonify({"error": "ファイルが見つかりません"}), 404
+        # 所有者チェック: アップロードフォルダは全ユーザー共用で、ファイル名は
+        # 「ユーザーID_タイムスタンプ_...」の推測可能な形式のため、自分の
+        # ファイル（自ユーザーID接頭辞）以外はダウンロード・削除させない。
+        if not filename.startswith(f"{current_user.username}_"):
+            return jsonify({"error": "ファイルが見つかりません"}), 404
+
         upload_folder = get_upload_folder()
         file_path = os.path.join(upload_folder, filename)
 
-        if not os.path.exists(file_path):
+        if not os.path.isfile(file_path):
             return jsonify({"error": "ファイルが見つかりません"}), 404
 
         # ファイルをメモリに読み込む

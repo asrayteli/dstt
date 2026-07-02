@@ -39,3 +39,5 @@ app/static/health_check/permissions.json
 app/static/health_check/settings.json
 var/
 *.pyc
+app/static/subject_analysis_tool/uploads/*
+!app/static/subject_analysis_tool/uploads/.gitkeep

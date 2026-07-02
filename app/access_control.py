@@ -300,8 +300,11 @@ def get_accessible_nav_items(user=None) -> list[dict]:
     return visible
 
 
-def get_categorized_nav_items(user=None) -> list[dict]:
+def get_categorized_nav_items(user=None, items: list[dict] | None = None) -> list[dict]:
     """カテゴリ別にグループ化されたナビゲーション一覧を返す。
+
+    items に get_accessible_nav_items() の結果を渡すと再計算しない
+    （テンプレート毎レンダリングでの権限クエリ重複を避けるため）。
 
     Returns:
         [
@@ -311,7 +314,8 @@ def get_categorized_nav_items(user=None) -> list[dict]:
             {"category": None, "tools": [uncategorized_items...]},
         ]
     """
-    items = get_accessible_nav_items(user)
+    if items is None:
+        items = get_accessible_nav_items(user)
     if not items:
         return []
 

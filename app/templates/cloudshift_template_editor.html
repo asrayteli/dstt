@@ -116,7 +116,7 @@
       defaultMonth: {{ default_month|tojson }}
     };
   </script>
-  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="{{ url_for('static', filename='vendor/jquery-3.6.0.min.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dstt_loading.js') }}"></script>
   <script src="{{ url_for('static', filename='shiftersync/js/ss_common.js') }}"></script>
   <script src="{{ url_for('static', filename='cloudshift/js/cloudshift_template_editor.js') }}"></script>

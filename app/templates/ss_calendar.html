@@ -3,7 +3,7 @@
 {% block content %}
 
 <link rel="stylesheet" href="{{ url_for('static', filename='shiftersync/css/ss_calendar.css') }}">
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/jquery-3.6.0.min.js') }}"></script>
 
 <div class="min-h-screen bg-blue-100 flex items-center justify-center px-4">
   <div class="container bg-white rounded-2xl shadow-2xl p-8 w-full max-w-4xl animate-fade-in">
