@@ -237,8 +237,13 @@ def _configure_sqlite_engine(app) -> None:
         try:
             cursor.execute("PRAGMA busy_timeout=30000")
             # メモリDB（テスト）では WAL は効かず 'memory' が返るだけで無害。
+            # 一部のネットワークFS等では WAL 化に失敗しうるが、その場合でも
+            # 例外で接続を殺すと全機能が止まる。PRAGMA はベストエフォート扱いに
+            # し、失敗しても従来のジャーナルモードで動作を継続させる。
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA synchronous=NORMAL")
+        except Exception:
+            app.logger.warning("SQLite PRAGMA の適用に失敗しました（既定設定で継続）", exc_info=True)
         finally:
             cursor.close()
 
