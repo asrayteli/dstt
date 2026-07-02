@@ -17,9 +17,11 @@ keepalive = 2
 max_requests = 1000
 max_requests_jitter = 100
 
-# Worker heartbeat files on tmpfs to avoid disk I/O stalls blocking the
-# arbiter's liveness checks (a common cause of spurious worker timeouts).
-worker_tmp_dir = "/dev/shm"
+# NOTE: worker_tmp_dir はあえて既定（tempfile.gettempdir()）のままにする。
+# 以前 "/dev/shm" を指定したが、権限を drop した user から /dev/shm へ
+# heartbeat ファイルを書けない/存在しない本番環境では、ワーカーが起動直後に
+# クラッシュしてソケットは開くのに応答できず 502 になった。tmpfs 最適化より
+# 起動の確実性を優先する。
 
 # Log files
 errorlog = "/var/log/dstt/error.log"
