@@ -78,9 +78,11 @@ window.PISelectTool = new (class extends PIToolBase {
     const ctx = PICanvasEngine.getOverlayCtx();
     PICanvasEngine.clearOverlay();
     this.paintSelectionTint(ctx);
+    // 破線・線幅はズーム後の画面上で一定に見えるよう補正する
+    const z = PICanvasEngine.getZoom() || 1;
     ctx.save();
-    ctx.setLineDash([5, 3]); ctx.lineDashOffset = -this.marchOffset;
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+    ctx.setLineDash([5 / z, 3 / z]); ctx.lineDashOffset = -this.marchOffset / z;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1 / z;
     if (this.shape === 'lasso' && this.lassoPts) {
       ctx.beginPath();
       this.lassoPts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
@@ -116,10 +118,11 @@ window.PISelectTool = new (class extends PIToolBase {
     this.paintSelectionTint(ctx);
     const bb = PISelection.bbox();
     if (!bb) return;
+    const z = PICanvasEngine.getZoom() || 1;
     ctx.save();
-    ctx.setLineDash([6, 4]); ctx.lineDashOffset = -this.marchOffset;
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.strokeRect(bb.x, bb.y, bb.w, bb.h);
-    ctx.strokeStyle = '#000'; ctx.lineDashOffset = -(this.marchOffset + 6); ctx.strokeRect(bb.x, bb.y, bb.w, bb.h);
+    ctx.setLineDash([6 / z, 4 / z]); ctx.lineDashOffset = -this.marchOffset / z;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1 / z; ctx.strokeRect(bb.x, bb.y, bb.w, bb.h);
+    ctx.strokeStyle = '#000'; ctx.lineDashOffset = -(this.marchOffset + 6) / z; ctx.strokeRect(bb.x, bb.y, bb.w, bb.h);
     ctx.restore();
   }
 

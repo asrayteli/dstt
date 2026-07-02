@@ -51,6 +51,7 @@ window.PIScreenshotTool = new (class extends PIToolBase {
       PIEventBus.emit('tool:switch', 'crop');
     } catch (err) {
       console.log('Screenshot cancelled or failed:', err.message);
+      PIEventBus.emit('toast', '画面キャプチャを開始できませんでした（キャンセルまたは非対応の環境です）');
       PIEventBus.emit('tool:switch', 'move');
     }
   }

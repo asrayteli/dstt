@@ -16,10 +16,11 @@ window.PITransformTool = new (class extends PIToolBase {
 
   activate() {
     super.activate();
+    this._cr = null;
     this.redraw();
     if (!this._bound) {
       this._bound = true;
-      PIEventBus.on('layers:changed', () => { if (PIToolbar.getCurrentTool() === this) this.redraw(); });
+      PIEventBus.on('layers:changed', () => { if (PIToolbar.getCurrentTool() === this) { this._cr = null; this.redraw(); } });
       PIEventBus.on('canvas:zoom-changed', () => { if (PIToolbar.getCurrentTool() === this) this.redraw(); });
     }
   }
@@ -30,14 +31,51 @@ window.PITransformTool = new (class extends PIToolBase {
     PICanvasEngine.clearOverlay();
   }
 
+  // バウンディングボックスは「見えているコンテンツ」に沿わせる。
+  // 図形/テキストのレイヤーcanvasには透明な余白（SHAPE_PAD等）があり、
+  // canvas全体を枠にするとハンドルが図形から遠く離れてしまう。
+  contentRect(layer) {
+    const key = layer.id + ':' + layer.canvas.width + 'x' + layer.canvas.height + ':' + layer.type;
+    if (this._cr && this._cr.key === key && this._cr.layer === layer) return this._cr.rect;
+    let rect;
+    if (layer.type === 'shape' && layer.shapeData) {
+      // 図形はジオメトリから解析的に求まる（ピクセル走査不要）
+      const sd = layer.shapeData;
+      const PAD = PILayerManager.SHAPE_PAD;
+      const isLine = sd.shapeType === 'line' || sd.shapeType === 'arrow';
+      const sw = (sd.strokeEnabled || isLine) ? (sd.strokeWidth || 0) : 0;
+      let extra = sw / 2;
+      if (sd.shapeType === 'arrow') extra += 12 + (sd.strokeWidth || 0) * 2;
+      const bw = isLine ? Math.abs(sd.x2 - sd.x1) : sd.w;
+      const bh = isLine ? Math.abs(sd.y2 - sd.y1) : sd.h;
+      const x0 = Math.max(0, PAD - extra), y0 = Math.max(0, PAD - extra);
+      const x1 = Math.min(layer.canvas.width, PAD + bw + extra);
+      const y1 = Math.min(layer.canvas.height, PAD + bh + extra);
+      rect = { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+    } else if (layer.type === 'text') {
+      // テキストcanvasは小さいのでピクセル走査でも軽い
+      rect = PILayerTransform.contentLocalRect(layer);
+    } else {
+      rect = { x: 0, y: 0, w: layer.canvas.width, h: layer.canvas.height };
+    }
+    this._cr = { key, layer, rect };
+    return rect;
+  }
+
+  contentCenter(layer) {
+    const cr = this.contentRect(layer);
+    return PILayerTransform.localToCanvas(layer, cr.x + cr.w / 2, cr.y + cr.h / 2);
+  }
+
   effSize(layer) {
-    return { ew: layer.canvas.width * (layer.scaleX || 1), eh: layer.canvas.height * (layer.scaleY || 1) };
+    const cr = this.contentRect(layer);
+    return { ew: cr.w * (layer.scaleX || 1), eh: cr.h * (layer.scaleY || 1) };
   }
 
   handlePositions(layer) {
     const { ew, eh } = this.effSize(layer);
     const rot = layer.rotation || 0;
-    const c = PILayerTransform.center(layer);
+    const c = this.contentCenter(layer);
     const zoom = PICanvasEngine.getZoom();
     const rotOff = 26 / zoom;
     const local = {
@@ -50,7 +88,7 @@ window.PITransformTool = new (class extends PIToolBase {
     const out = {};
     for (const k in local) {
       const [lx, ly] = local[k];
-      out[k] = { x: c.cx + lx * cos - ly * sin, y: c.cy + lx * sin + ly * cos };
+      out[k] = { x: c.x + lx * cos - ly * sin, y: c.y + lx * sin + ly * cos };
     }
     return out;
   }
@@ -99,8 +137,9 @@ window.PITransformTool = new (class extends PIToolBase {
   }
 
   insideBox(layer, px, py) {
+    const cr = this.contentRect(layer);
     const lp = PILayerTransform.canvasToLocal(layer, px, py);
-    return lp.x >= 0 && lp.y >= 0 && lp.x <= layer.canvas.width && lp.y <= layer.canvas.height;
+    return lp.x >= cr.x && lp.y >= cr.y && lp.x <= cr.x + cr.w && lp.y <= cr.y + cr.h;
   }
 
   onMouseDown(e) {
@@ -110,20 +149,26 @@ window.PITransformTool = new (class extends PIToolBase {
       const picked = this.pickLayerAt(e.canvasX, e.canvasY);
       if (picked) { PILayerManager.setActiveIndex(PILayerManager.getAll().indexOf(picked)); layer = picked; }
     }
-    if (!layer || layer.locked) return;
+    if (!layer) return;
+    if (layer.locked) { this.warnLocked(); return; }
 
     const handle = this.hitHandle(layer, e.canvasX, e.canvasY);
-    const c = PILayerTransform.center(layer);
+    const cr = this.contentRect(layer);
+    const cc = this.contentCenter(layer);
     const base = {
       x: layer.x, y: layer.y, rotation: layer.rotation || 0,
       scaleX: layer.scaleX || 1, scaleY: layer.scaleY || 1,
-      cx: c.cx, cy: c.cy, mx: e.canvasX, my: e.canvasY,
-      ew: layer.canvas.width * (layer.scaleX || 1), eh: layer.canvas.height * (layer.scaleY || 1),
-      cw: layer.canvas.width, ch: layer.canvas.height
+      cx: cc.x, cy: cc.y, mx: e.canvasX, my: e.canvasY,
+      ew: cr.w * (layer.scaleX || 1), eh: cr.h * (layer.scaleY || 1),
+      cw: layer.canvas.width, ch: layer.canvas.height,
+      crw: cr.w, crh: cr.h,
+      // コンテンツ中心とキャンバス中心のずれ（ローカル座標・スケール前）
+      dlx: (cr.x + cr.w / 2) - layer.canvas.width / 2,
+      dly: (cr.y + cr.h / 2) - layer.canvas.height / 2
     };
     if (handle === 'rot') {
       this.mode = 'rotate';
-      base.startAngle = Math.atan2(e.canvasY - c.cy, e.canvasX - c.cx);
+      base.startAngle = Math.atan2(e.canvasY - cc.y, e.canvasX - cc.x);
       base.startRotation = layer.rotation || 0;
     } else if (handle) {
       this.mode = 'scale';
@@ -168,7 +213,7 @@ window.PITransformTool = new (class extends PIToolBase {
   applyScale(layer, e) {
     const s = this.start;
     const sign = { nw: [-1, -1], n: [0, -1], ne: [1, -1], w: [-1, 0], e: [1, 0], sw: [-1, 1], s: [0, 1], se: [1, 1] }[this.handle];
-    // マウスを「回転前のボックス座標（中心基準）」へ変換
+    // マウスを「回転前のボックス座標（コンテンツ中心基準）」へ変換
     const cos = Math.cos(-s.rotation), sin = Math.sin(-s.rotation);
     const dx = e.canvasX - s.cx, dy = e.canvasY - s.cy;
     const mx = dx * cos - dy * sin;
@@ -191,12 +236,18 @@ window.PITransformTool = new (class extends PIToolBase {
       clx = -sign[0] * s.ew / 2 + sign[0] * ew / 2;
       cly = -sign[1] * s.eh / 2 + sign[1] * eh / 2;
     }
-    // 新中心（回転を戻してキャンバス座標へ）
+    // スケールはコンテンツ寸法比＝キャンバス全体の倍率と同一
+    const nsx = ew / s.crw, nsy = eh / s.crh;
+    // 新しいコンテンツ中心（回転を戻してキャンバス座標へ）
     const c2 = Math.cos(s.rotation), s2 = Math.sin(s.rotation);
-    const ncx = s.cx + clx * c2 - cly * s2;
-    const ncy = s.cy + clx * s2 + cly * c2;
-    layer.scaleX = ew / s.cw;
-    layer.scaleY = eh / s.ch;
+    const nccx = s.cx + clx * c2 - cly * s2;
+    const nccy = s.cy + clx * s2 + cly * c2;
+    // キャンバス中心 = コンテンツ中心 − R(rot)·(中心ずれ×新スケール)
+    const ox = s.dlx * nsx, oy = s.dly * nsy;
+    const ncx = nccx - (ox * c2 - oy * s2);
+    const ncy = nccy - (ox * s2 + oy * c2);
+    layer.scaleX = nsx;
+    layer.scaleY = nsy;
     layer.x = ncx - s.cw / 2;
     layer.y = ncy - s.ch / 2;
   }

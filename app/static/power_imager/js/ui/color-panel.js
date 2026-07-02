@@ -167,7 +167,10 @@ window.PIColorPanel = (function () {
     let left = r.right + 8;
     if (left + 210 > window.innerWidth) left = r.left - 218;
     pop.style.left = Math.max(8, left) + 'px';
-    pop.style.top = Math.min(window.innerHeight - 320, Math.max(8, r.top)) + 'px';
+    // 実際の高さで画面内に収める（推定値だと下端からはみ出す）
+    pop.style.top = '0px';
+    const ph = pop.offsetHeight || 320;
+    pop.style.top = Math.min(window.innerHeight - ph - 8, Math.max(8, r.top)) + 'px';
     requestAnimationFrame(() => reflect());
   }
 

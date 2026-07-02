@@ -62,9 +62,13 @@ window.PIToolbar = (function () {
   function onViewportMouse(e) {
     if (!currentTool) return;
     if (PIModal.isOpen()) return;
-    if (_textOverlayActive) return;
     const target = e.target;
     if (target.closest('#text-edit-overlay')) return;
+    if (_textOverlayActive) {
+      // テキスト編集ボックスの外側クリック＝確定（一般的な編集ソフトの挙動）
+      if (window.PITextTool) PITextTool.commitIfEditing();
+      return;
+    }
     if (PICanvasEngine.isPanningNow()) return;
     const pos = PICanvasEngine.viewportToCanvas(e.clientX, e.clientY);
     const data = {

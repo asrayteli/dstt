@@ -11,7 +11,8 @@ window.PIEraserTool = new (class extends PIToolBase {
   getCursorRadius() { return this.eraserSize / 2; }
   onMouseDown(e) {
     let layer = PILayerManager.getActive();
-    if (!layer || layer.locked) return;
+    if (!layer) return;
+    if (layer.locked) { this.warnLocked(); return; }
     // マスク編集中はマスクへ直接描画（消しゴム＝戻す/表示）
     if (PILayerManager.isMaskEditing(layer)) {
       this.maskStroke = true; this.maskLayer = layer;
@@ -22,6 +23,7 @@ window.PIEraserTool = new (class extends PIToolBase {
       return;
     }
     layer = PILayerManager.ensurePaintable(layer);
+    if (!layer) return;
     this.erasing = true;
     // 選択範囲がある場合は範囲外を後で戻すためのバックアップを取る
     if (PISelection.has()) {

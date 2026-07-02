@@ -26,8 +26,10 @@ window.PICloneStampTool = new (class extends PIToolBase {
     }
     if (!this.source) { PIEventBus.emit('toast', 'Alt+クリックで複製元を指定してください'); return; }
     let layer = PILayerManager.getActive();
-    if (!layer || layer.locked) return;
+    if (!layer) return;
+    if (layer.locked) { this.warnLocked(); return; }
     layer = PILayerManager.ensurePaintable(layer);
+    if (!layer) return;
     this.layerRef = layer;
     // ストローク開始時のスナップショット（複製の再帰的にじみを防ぐ）
     this.snapshot = document.createElement('canvas');

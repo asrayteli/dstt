@@ -17,26 +17,26 @@ window.PILayerPanel = (function () {
 
     const actions = document.createElement('div');
     actions.className = 'layer-panel-actions';
-    const addBtn = createBtn('+', () => { PILayerManager.addLayer(); PIHistoryManager.push('レイヤー追加'); });
-    const dupBtn = createBtn('複製', () => { PILayerManager.duplicateLayer(activeIdx); PIHistoryManager.push('複製'); });
-    const delBtn = createBtn('削除', () => { PILayerManager.removeLayer(activeIdx); PIHistoryManager.push('削除'); });
-    const upBtn = createBtn('↑', () => { if (activeIdx < layers.length - 1) PILayerManager.moveLayer(activeIdx, activeIdx + 1); });
-    const downBtn = createBtn('↓', () => { if (activeIdx > 0) PILayerManager.moveLayer(activeIdx, activeIdx - 1); });
-    const mergeBtn = createBtn('統合', () => { PILayerManager.mergeDown(activeIdx); PIHistoryManager.push('統合'); });
+    const addBtn = createBtn('+', () => { PILayerManager.addLayer(); PIHistoryManager.push('レイヤー追加'); }, '新規レイヤーを追加');
+    const dupBtn = createBtn('複製', () => { PILayerManager.duplicateLayer(activeIdx); PIHistoryManager.push('複製'); }, 'アクティブレイヤーを複製');
+    const delBtn = createBtn('削除', () => { PILayerManager.removeLayer(activeIdx); PIHistoryManager.push('削除'); }, 'アクティブレイヤーを削除');
+    const upBtn = createBtn('↑', () => { if (activeIdx < layers.length - 1) PILayerManager.moveLayer(activeIdx, activeIdx + 1); }, '前面へ移動');
+    const downBtn = createBtn('↓', () => { if (activeIdx > 0) PILayerManager.moveLayer(activeIdx, activeIdx - 1); }, '背面へ移動');
+    const mergeBtn = createBtn('統合', () => { PILayerManager.mergeDown(activeIdx); PIHistoryManager.push('統合'); }, '下のレイヤーと統合');
     const maskBtn = createBtn('マスク', () => {
       const layer = PILayerManager.getActive();
       if (!layer) return;
       if (!layer.mask) { PILayerManager.addMask(layer); PILayerManager.setMaskEditing(true); PIHistoryManager.push('マスク追加'); }
       else { PILayerManager.setMaskEditing(!PILayerManager.getMaskEditing()); }
-    });
+    }, 'レイヤーマスクを追加/編集');
     const editingMask = PILayerManager.isMaskEditing(PILayerManager.getActive());
     if (editingMask) maskBtn.classList.add('active');
-    const fxBtn = createBtn('効果', () => openEffectsDialog());
+    const fxBtn = createBtn('効果', () => openEffectsDialog(), 'レイヤースタイル（影・境界線・光彩）');
     const activeFx = PILayerManager.getActive();
     if (activeFx && activeFx.effects && hasFx(activeFx.effects)) fxBtn.classList.add('active');
-    const clipBtn = createBtn('クリップ', () => { PILayerManager.toggleClip(activeIdx); PIHistoryManager.push('クリッピング'); });
+    const clipBtn = createBtn('クリップ', () => { PILayerManager.toggleClip(activeIdx); PIHistoryManager.push('クリッピング'); }, '下のレイヤーの形にクリップ');
     if (activeFx && activeFx.clip) clipBtn.classList.add('active');
-    const groupBtn = createBtn('グループ化', () => { PILayerManager.createGroupFromActive(); PIHistoryManager.push('グループ化'); });
+    const groupBtn = createBtn('グループ化', () => { PILayerManager.createGroupFromActive(); PIHistoryManager.push('グループ化'); }, 'アクティブレイヤーでグループを作成');
     actions.append(addBtn, dupBtn, delBtn, upBtn, downBtn, mergeBtn, maskBtn, fxBtn, clipBtn, groupBtn);
     container.appendChild(actions);
 
@@ -60,7 +60,7 @@ window.PILayerPanel = (function () {
     });
     blendSel.addEventListener('change', () => {
       const layer = PILayerManager.getActive();
-      if (layer) { layer.blendMode = blendSel.value; PILayerManager.requestRender(); }
+      if (layer) { layer.blendMode = blendSel.value; PILayerManager.requestRender(); PIHistoryManager.push('ブレンドモード'); }
     });
     blendDiv.appendChild(blendSel);
     container.appendChild(blendDiv);
@@ -80,6 +80,8 @@ window.PILayerPanel = (function () {
       if (layer) { layer.opacity = parseInt(opacSlider.value) / 100; PILayerManager.requestRender(); }
       opacVal.textContent = opacSlider.value + '%';
     });
+    // ドラッグ確定時に履歴へ（Ctrl+Zで戻せるように）
+    opacSlider.addEventListener('change', () => { PIHistoryManager.push('不透明度変更'); });
     opacDiv.append(opacLabel, opacSlider, opacVal);
     container.appendChild(opacDiv);
 
@@ -89,7 +91,8 @@ window.PILayerPanel = (function () {
     const makeItem = (layer, i) => {
       const item = document.createElement('div');
       item.className = 'layer-item' + (i === activeIdx ? ' active' : '');
-      item.addEventListener('click', () => PILayerManager.setActiveIndex(i));
+      // 同じレイヤーの再クリックで再レンダリングしない（ダブルクリック操作を壊さない）
+      item.addEventListener('click', () => { if (PILayerManager.getActiveIndex() !== i) PILayerManager.setActiveIndex(i); });
       if (layer.type === 'adjustment') {
         item.addEventListener('dblclick', () => { PILayerManager.setActiveIndex(i); PIAdjustmentLayer.editDialog(layer); });
       }
@@ -114,8 +117,32 @@ window.PILayerPanel = (function () {
       name.className = 'layer-name';
       const prefix = (layer.clip ? '↳ ' : '') + (layer.type === 'adjustment' ? '◐ ' : '');
       name.textContent = prefix + layer.name;
-      if (layer.clip) name.title = '下のレイヤーにクリップ中';
+      name.title = layer.clip ? '下のレイヤーにクリップ中' : 'ダブルクリックで名前を変更';
       if (layer.type === 'adjustment') name.title = 'ダブルクリックで再編集';
+      // ダブルクリックでその場リネーム（調整レイヤーは再編集ダイアログを優先）
+      if (layer.type !== 'adjustment') {
+        name.addEventListener('dblclick', (ev) => {
+          ev.stopPropagation();
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.value = layer.name;
+          name.textContent = prefix;
+          name.appendChild(input);
+          const done = (commit) => {
+            if (commit && input.value.trim()) layer.name = input.value.trim();
+            render();
+          };
+          input.addEventListener('keydown', (ke) => {
+            ke.stopPropagation();
+            if (ke.key === 'Enter' && !ke.isComposing) done(true);
+            else if (ke.key === 'Escape') done(false);
+          });
+          input.addEventListener('blur', () => done(true));
+          input.addEventListener('click', (ce) => ce.stopPropagation());
+          input.focus();
+          input.select();
+        });
+      }
 
       const actionsDiv = document.createElement('div');
       actionsDiv.className = 'layer-actions';
@@ -242,9 +269,10 @@ window.PILayerPanel = (function () {
     });
   }
 
-  function createBtn(text, onClick) {
+  function createBtn(text, onClick, title) {
     const btn = document.createElement('button');
     btn.textContent = text;
+    if (title) btn.title = title;
     btn.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
     return btn;
   }

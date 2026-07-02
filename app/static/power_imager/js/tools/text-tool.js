@@ -32,11 +32,23 @@ window.PITextTool = new (class extends PIToolBase {
     super.deactivate();
     this.pendingDragLayer = null;
     this.draggingLayer = false;
-    this.cancelEdit();
+    // ツール切替で入力中テキストが消えると入力が無駄になるため、内容があれば確定する
+    this.commitIfEditing();
+  }
+
+  commitIfEditing() {
+    if (!this.isEditing) return;
+    const ta = this._activeTextarea;
+    if (ta && ta.value.trim()) this.confirmEdit(ta.value);
+    else this.cancelEdit();
   }
 
   onMouseDown(e) {
-    if (this.isEditing) return;
+    if (this.isEditing) {
+      // 編集ボックスの外側クリック＝確定（ボックス内は stopPropagation 済み）
+      this.commitIfEditing();
+      return;
+    }
 
     const existingTextLayer = this.findTextLayerAt(e.canvasX, e.canvasY);
     if (existingTextLayer) {
@@ -134,27 +146,31 @@ window.PITextTool = new (class extends PIToolBase {
     overlay.classList.remove('hidden');
     overlay.innerHTML = '';
 
-    const pos = PICanvasEngine.canvasToViewport(this.textData.x, this.textData.y);
-    const vpRect = PICanvasEngine.getViewport().getBoundingClientRect();
-    overlay.style.left = (pos.x - vpRect.left) + 'px';
-    overlay.style.top = (pos.y - vpRect.top) + 'px';
+    // オーバーレイは .canvas-wrapper 内にあり、ズーム/パンのCSS変形を一緒に受ける。
+    // そのためキャンバス座標でそのまま配置し（クリック位置に一致）、
+    // 逆スケールをかけてUIの見た目サイズはズームに関係なく一定に保つ。
+    overlay.style.left = this.textData.x + 'px';
+    overlay.style.top = this.textData.y + 'px';
+    this.applyOverlayScale(overlay);
 
     const wrapper = document.createElement('div');
     wrapper.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
     wrapper.addEventListener('mousedown', (ev) => ev.stopPropagation());
     wrapper.addEventListener('mouseup', (ev) => ev.stopPropagation());
     wrapper.addEventListener('click', (ev) => ev.stopPropagation());
+    wrapper.addEventListener('wheel', (ev) => ev.stopPropagation());
 
     const ta = document.createElement('textarea');
     ta.className = 'text-edit-input';
     ta.value = this.textData.text;
     ta.placeholder = 'テキストを入力...';
-    const fontSize = Math.max(12, Math.min(this.textData.size * PICanvasEngine.getZoom(), 48));
     ta.style.cssText = 'min-width:220px;min-height:60px;max-width:500px;max-height:300px;' +
       'background:rgba(255,255,255,0.97);border:2px solid #7c6ff7;border-radius:6px;' +
-      'padding:8px;font-size:' + fontSize + 'px;font-family:"' + this.textData.fontFamily + '",sans-serif;' +
+      'padding:8px;font-family:"' + this.textData.fontFamily + '",sans-serif;' +
       'color:' + this.textData.color + ';resize:both;outline:none;' +
       'user-select:text;-webkit-user-select:text;cursor:text;line-height:1.4;';
+    this._activeTextarea = ta;
+    this.applyEditFontSize(ta);
     if (this.textData.bold) ta.style.fontWeight = 'bold';
     if (this.textData.italic) ta.style.fontStyle = 'italic';
 
@@ -192,10 +208,56 @@ window.PITextTool = new (class extends PIToolBase {
     wrapper.appendChild(btnRow);
     overlay.appendChild(wrapper);
 
+    // ズーム/パン中も見た目サイズと文字サイズを追従させる
+    if (!this._zoomFollow) {
+      this._zoomFollow = () => {
+        if (!this.isEditing) return;
+        const ov = document.getElementById('text-edit-overlay');
+        if (ov) this.applyOverlayScale(ov);
+        if (this._activeTextarea) this.applyEditFontSize(this._activeTextarea);
+      };
+      PIEventBus.on('canvas:zoom-changed', this._zoomFollow);
+    }
+
     requestAnimationFrame(() => {
+      this.keepEditBoxOnScreen(overlay);
       ta.focus();
       ta.setSelectionRange(ta.value.length, ta.value.length);
     });
+  }
+
+  // 逆スケール（wrapper の scale(zoom) を打ち消し、UIを常に等倍表示にする）
+  applyOverlayScale(overlay) {
+    const zoom = PICanvasEngine.getZoom() || 1;
+    overlay.style.transformOrigin = '0 0';
+    overlay.style.transform = 'scale(' + (1 / zoom) + ')';
+  }
+
+  // 入力文字は実際の描画サイズ（キャンバス上の見た目）に合わせる＝WYSIWYG。
+  // 極端なズームでも編集不能にならないよう画面上のサイズだけ最小/最大を設ける。
+  applyEditFontSize(ta) {
+    const zoom = PICanvasEngine.getZoom() || 1;
+    const px = Math.max(11, Math.min(this.textData.size * zoom, 96));
+    ta.style.fontSize = px + 'px';
+  }
+
+  // クリック位置が画面端でも、編集ボックスがビューポート外へ出ないよう寄せる
+  keepEditBoxOnScreen(overlay) {
+    const vp = PICanvasEngine.getViewport();
+    if (!vp) return;
+    const vpRect = vp.getBoundingClientRect();
+    const rect = overlay.getBoundingClientRect();
+    const zoom = PICanvasEngine.getZoom() || 1;
+    const margin = 8;
+    let dxScreen = 0, dyScreen = 0;
+    if (rect.right > vpRect.right - margin) dxScreen = (vpRect.right - margin) - rect.right;
+    if (rect.bottom > vpRect.bottom - margin) dyScreen = (vpRect.bottom - margin) - rect.bottom;
+    if (rect.left + dxScreen < vpRect.left + margin) dxScreen = (vpRect.left + margin) - rect.left;
+    if (rect.top + dyScreen < vpRect.top + margin) dyScreen = (vpRect.top + margin) - rect.top;
+    if (dxScreen === 0 && dyScreen === 0) return;
+    // overlay の left/top はキャンバス座標（wrapper 内）。画面pxはzoom倍されるので割り戻す。
+    overlay.style.left = (parseFloat(overlay.style.left) + dxScreen / zoom) + 'px';
+    overlay.style.top = (parseFloat(overlay.style.top) + dyScreen / zoom) + 'px';
   }
 
   confirmEdit(text) {
@@ -222,11 +284,13 @@ window.PITextTool = new (class extends PIToolBase {
 
   hideEditBox() {
     this.isEditing = false;
+    this._activeTextarea = null;
     PIEventBus.emit('text:overlay-active', false);
     const overlay = document.getElementById('text-edit-overlay');
     if (overlay) {
       overlay.classList.add('hidden');
       overlay.innerHTML = '';
+      overlay.style.transform = '';
     }
   }
 

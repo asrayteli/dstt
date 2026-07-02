@@ -436,11 +436,25 @@ window.PILayerManager = (function () {
   function getMaskEditing() { return maskEditing; }
 
   // 描画系ツールが安全に描けるよう、変形（回転/拡縮）があれば見た目どおり確定する。
-  // 透明背景のラスターはそのまま。戻り値は描画先レイヤー。
+  // 透明背景のラスターはそのまま。戻り値は描画先レイヤー（描画不可なら null）。
   function ensurePaintable(layer) {
-    if (!layer) return layer;
+    if (!layer) return null;
+    // 調整レイヤーは画素を持たないため描いても何も表示されない
+    if (layer.type === 'adjustment') {
+      PIEventBus.emit('toast', '調整レイヤーには描画できません。別のレイヤーを選択してください');
+      return null;
+    }
     const transformed = (layer.rotation || 0) !== 0 || (layer.scaleX || 1) !== 1 || (layer.scaleY || 1) !== 1;
-    if (transformed) bakeLayerToRaster(layer);
+    if (transformed) {
+      bakeLayerToRaster(layer);
+    } else if (layer.type === 'text' || layer.type === 'shape') {
+      // テキスト/図形の画素へ直接描くと、後の再編集（再レンダリング）で描き込みが消えてしまう。
+      // ラスター化してから描き、その旨を通知する。
+      const kind = layer.type === 'text' ? 'テキスト' : '図形';
+      layer.type = 'raster'; layer.textData = null; layer.shapeData = null;
+      PIEventBus.emit('toast', kind + 'レイヤーをラスター化して描画します（' + kind + 'としての再編集は不可）');
+      PIEventBus.emit('layers:changed', { layers: layers, activeIndex: activeIndex });
+    }
     return layer;
   }
 
