@@ -14,9 +14,9 @@ _FAILED_LOGIN_ATTEMPTS: dict[tuple[str, str], list[float]] = {}
 
 
 def _client_ip() -> str | None:
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip()
+    # ProxyFix(x_for=1) が信頼できるプロキシの付与した X-Forwarded-For を
+    # remote_addr へ反映済み。生ヘッダの左端はクライアントが自由に偽装できる
+    # ため参照しない（監査ログ汚染・ログイン失敗ディレイ回避の防止）。
     return request.remote_addr
 
 
@@ -52,6 +52,19 @@ def _failure_key(username: str) -> tuple[str, str]:
     return ((_client_ip() or ""), username.lower())
 
 
+def _prune_stale_attempts(now: float, window_seconds: int) -> None:
+    """観測窓を過ぎたキーを破棄し、辞書の無限成長を防ぐ。"""
+    if len(_FAILED_LOGIN_ATTEMPTS) < 1000:
+        return
+    stale_keys = [
+        key
+        for key, stamps in _FAILED_LOGIN_ATTEMPTS.items()
+        if not stamps or now - stamps[-1] > window_seconds
+    ]
+    for key in stale_keys:
+        _FAILED_LOGIN_ATTEMPTS.pop(key, None)
+
+
 def _register_failed_attempt(username: str) -> None:
     if not username:
         return
@@ -59,6 +72,7 @@ def _register_failed_attempt(username: str) -> None:
     window_seconds = int(current_app.config.get("LOGIN_FAILURE_WINDOW_SECONDS", 300))
     key = _failure_key(username)
     now = monotonic()
+    _prune_stale_attempts(now, window_seconds)
     attempts = [
         stamp
         for stamp in _FAILED_LOGIN_ATTEMPTS.get(key, [])
@@ -164,7 +178,9 @@ def register():
         abort(404)
 
     if request.method == "POST":
-        username = request.form.get("username")
+        # ログイン時と同じ正規化（strip）を行い、前後空白付きで登録されて
+        # ログインできなくなる事故を防ぐ。
+        username = (request.form.get("username") or "").strip()
         password = request.form.get("password")
         confirm = request.form.get("confirm")
 

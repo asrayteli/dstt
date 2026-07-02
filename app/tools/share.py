@@ -27,7 +27,7 @@ from flask_login import current_user, login_required
 from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.models import FilePostDownloadLog, FilePostUploadLog, db
+from app.models import FilePostDownloadLog, FilePostUploadLog, db, utc_now
 
 from . import share_crypto
 
@@ -428,7 +428,7 @@ def _release_cleanup_lock(fd):
 
 
 def _resolve_expires_at(mode: str | None, custom_value: str | None = None) -> datetime:
-    now = datetime.utcnow()
+    now = utc_now()
     max_dt = now + timedelta(days=MAX_EXPIRES_DAYS)
     mode = (mode or "7d").strip().lower()
     if mode == "1h":
@@ -519,7 +519,7 @@ def cleanup_expired_files():
     meta = load_meta()
     updated_meta = {}
     expired_uids = []
-    now = datetime.utcnow()
+    now = utc_now()
 
     try:
         _cleanup_stale_chunk_sessions()
@@ -622,7 +622,7 @@ def _create_share_record(
     expires_at_custom: str | None = None,
     max_downloads: int | None = None,
 ) -> dict:
-    now = datetime.utcnow()
+    now = utc_now()
     expires_at = _resolve_expires_at(expires_mode, expires_at_custom)
     if password_hash is None:
         password_hash = _hash_password(password) if password else None
@@ -720,7 +720,7 @@ def create_internal_share(
         }
     ]
 
-    now = datetime.utcnow()
+    now = utc_now()
     expires_at = now + timedelta(days=MAX_EXPIRES_DAYS)
     with _meta_critical_section():
         meta = load_meta()
@@ -780,7 +780,7 @@ def _is_revoked(info: dict) -> bool:
 
 def _is_expired(info: dict) -> bool:
     try:
-        return datetime.utcnow() > datetime.fromisoformat(info["expires_at"])
+        return utc_now() > datetime.fromisoformat(info["expires_at"])
     except (KeyError, TypeError, ValueError):
         return True
 
@@ -967,7 +967,7 @@ def init_chunk_upload():
     session_payload = {
         "upload_id": inner_id,
         "uploader": uploader,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": utc_now().isoformat(),
         "title": _safe_text(payload.get("title"), 120),
         "memo": _safe_text(payload.get("memo"), 200),
         "zip_name": _safe_text(payload.get("zip_name"), 120),
@@ -1527,7 +1527,7 @@ def get_file_list():
         if info.get("internal"):
             continue
         try:
-            if datetime.utcnow() > datetime.fromisoformat(info["expires_at"]):
+            if utc_now() > datetime.fromisoformat(info["expires_at"]):
                 continue
         except (KeyError, TypeError, ValueError):
             continue
@@ -1576,7 +1576,7 @@ def revoke_share(uid):
         meta, info, err = _require_owner_share(uid)
         if err is not None:
             return err
-        info["revoked_at"] = datetime.utcnow().isoformat()
+        info["revoked_at"] = utc_now().isoformat()
         meta[uid] = info
         save_meta(meta)
     return jsonify({"success": True, "revoked_at": info["revoked_at"]})
@@ -1590,7 +1590,7 @@ def extend_share(uid):
     if not raw_value:
         return jsonify({"success": False, "error": "有効期限が指定されていません。"}), 400
     new_expires = _resolve_expires_at("custom", str(raw_value))
-    now = datetime.utcnow()
+    now = utc_now()
     if new_expires <= now:
         return jsonify({"success": False, "error": "有効期限は現在より後に設定してください。"}), 400
     with _meta_critical_section():

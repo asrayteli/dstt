@@ -49,7 +49,14 @@ def _is_origin_allowed() -> bool:
     if method in SAFE_METHODS:
         return True
 
-    origin_host = _extract_netloc(request.headers.get("Origin"))
+    origin_raw = request.headers.get("Origin")
+    # sandboxed iframe や data: URL 由来のリクエストは "Origin: null" を送る。
+    # netloc が取れず「未設定」と同じ扱いになると素通りしてしまうため、
+    # 明示的にクロスオリジンとして拒否する。
+    if origin_raw and origin_raw.strip().lower() == "null":
+        return False
+
+    origin_host = _extract_netloc(origin_raw)
     referer_host = _extract_netloc(request.headers.get("Referer"))
     expected = _request_host()
 

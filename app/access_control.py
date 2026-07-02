@@ -34,9 +34,6 @@ from .models import (
 from .navigation import NAV_ITEMS
 
 
-LEGACY_ADMIN_USERNAME = "3243012"
-
-
 # 初期管理者ID（旧実装の互換性のためハードコーディング）
 LEGACY_ADMIN_USERNAME = "3243012"
 
@@ -99,11 +96,9 @@ def is_admin_user(user=None) -> bool:
     user = user if user is not None else current_user
     if user is None or not getattr(user, "is_authenticated", False):
         return False
+    # レガシー互換：従来の固定管理者ID
     if is_legacy_admin_username(getattr(user, "username", None)):
         return True
-    if getattr(user, "is_admin", False):
-        return True
-    # レガシー互換：従来の固定管理者ID
     return bool(getattr(user, "is_admin", False))
 
 
@@ -305,8 +300,11 @@ def get_accessible_nav_items(user=None) -> list[dict]:
     return visible
 
 
-def get_categorized_nav_items(user=None) -> list[dict]:
+def get_categorized_nav_items(user=None, items: list[dict] | None = None) -> list[dict]:
     """カテゴリ別にグループ化されたナビゲーション一覧を返す。
+
+    items に get_accessible_nav_items() の結果を渡すと再計算しない
+    （テンプレート毎レンダリングでの権限クエリ重複を避けるため）。
 
     Returns:
         [
@@ -316,7 +314,8 @@ def get_categorized_nav_items(user=None) -> list[dict]:
             {"category": None, "tools": [uncategorized_items...]},
         ]
     """
-    items = get_accessible_nav_items(user)
+    if items is None:
+        items = get_accessible_nav_items(user)
     if not items:
         return []
 

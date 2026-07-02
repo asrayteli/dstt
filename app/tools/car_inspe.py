@@ -28,6 +28,7 @@ from werkzeug.utils import secure_filename
 
 from app.access_control import is_admin_user, user_office_codes
 from app.models import (
+    utc_now,
     AccessOffice,
     DriverDocument,
     DriverVehicleProfile,
@@ -737,7 +738,7 @@ def api_save_document(profile_id, doc_type):
         doc.last_notified_at = None
 
     doc.uploaded_by = _actor()
-    doc.uploaded_at = datetime.utcnow()
+    doc.uploaded_at = utc_now()
     db.session.commit()
 
     today = datetime.now().strftime("%Y%m%d")

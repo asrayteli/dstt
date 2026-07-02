@@ -145,3 +145,46 @@ def test_non_testing_defaults_harden_session_cookies(tmp_path, monkeypatch):
     assert app.config["REMEMBER_COOKIE_HTTPONLY"] is True
     assert app.config["REMEMBER_COOKIE_SAMESITE"] == "Lax"
     assert app.config["REMEMBER_COOKIE_SECURE"] is True
+
+
+def test_sqlite_engine_has_wal_and_busy_timeout(tmp_path, monkeypatch):
+    """ファイルベース SQLite では WAL と busy_timeout が全接続に適用される。"""
+    _stub_optional_deps()
+    from app import create_app
+    from app.models import db
+    from sqlalchemy import text
+
+    monkeypatch.chdir(tmp_path)
+    app = create_app(
+        {
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'pragmas.db'}",
+            "SECRET_KEY": "test-secret",
+            "TESTING": True,
+        }
+    )
+
+    with app.app_context():
+        with db.engine.connect() as conn:
+            journal_mode = conn.execute(text("PRAGMA journal_mode")).scalar()
+            busy_timeout = conn.execute(text("PRAGMA busy_timeout")).scalar()
+    assert str(journal_mode).lower() == "wal"
+    assert int(busy_timeout) == 30000
+
+
+def test_hsts_header_only_on_https_requests(app_ctx):
+    """HTTPS（X-Forwarded-Proto 含む）の応答にのみ HSTS を付与する。"""
+    client = app_ctx.test_client()
+
+    plain = client.get("/auth/login")
+    assert "Strict-Transport-Security" not in plain.headers
+
+    secure = client.get(
+        "/auth/login", headers={"X-Forwarded-Proto": "https"}
+    )
+    assert secure.headers.get("Strict-Transport-Security") == "max-age=31536000"
+
+
+def test_max_content_length_default(app_ctx):
+    """リクエストボディ上限が既定で設定される（無制限にしない）。"""
+    expected = (10 * 1024 + 64) * 1024 * 1024
+    assert app_ctx.config.get("MAX_CONTENT_LENGTH") == expected

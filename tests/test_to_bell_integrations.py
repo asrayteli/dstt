@@ -286,7 +286,7 @@ def test_save_project_fires_substitute_hook_for_all_update_paths(app_ctx):
     from app.tools.cloudshift import (
         SUBSTITUTE_MODE, SUBSTITUTE_TITLE,
         _build_month_payload, _save_project, _share_token, _site_storage_fields,
-        _substitute_project_id, _utcnow_iso,
+        _substitute_project_id, _jst_now_iso,
     )
 
     _create_user(app_ctx, "alice")
@@ -306,9 +306,9 @@ def test_save_project_fires_substitute_hook_for_all_update_paths(app_ctx):
             "substitute_office_id": 1,
             "view_token": _share_token(),
             "edit_token": _share_token(),
-            "account_shares": {"office": {"enabled": True, "office_ids": [1]}, "employees": [], "updated_at": _utcnow_iso(), "updated_by": "system"},
-            "created_at": _utcnow_iso(),
-            "updated_at": _utcnow_iso(),
+            "account_shares": {"office": {"enabled": True, "office_ids": [1]}, "employees": [], "updated_at": _jst_now_iso(), "updated_by": "system"},
+            "created_at": _jst_now_iso(),
+            "updated_at": _jst_now_iso(),
             "months": {"2026-05": _build_month_payload(2026, 5, False, 0, {
                 "15": [{"id": "e1", "value": "代務", "employee_name": "山田",
                         "site_name": "現場A", "substitute_request_type": "person"}]
@@ -334,7 +334,7 @@ def test_save_project_during_get_does_not_fire_substitute_hook(app_ctx):
     from app.tools.cloudshift import (
         SUBSTITUTE_MODE, SUBSTITUTE_TITLE,
         _build_month_payload, _save_project, _share_token, _site_storage_fields,
-        _substitute_project_id, _utcnow_iso,
+        _substitute_project_id, _jst_now_iso,
     )
 
     _create_user(app_ctx, "alice")
@@ -354,9 +354,9 @@ def test_save_project_during_get_does_not_fire_substitute_hook(app_ctx):
             "substitute_office_id": 2,
             "view_token": _share_token(),
             "edit_token": _share_token(),
-            "account_shares": {"office": {"enabled": True, "office_ids": [2]}, "employees": [], "updated_at": _utcnow_iso(), "updated_by": "system"},
-            "created_at": _utcnow_iso(),
-            "updated_at": _utcnow_iso(),
+            "account_shares": {"office": {"enabled": True, "office_ids": [2]}, "employees": [], "updated_at": _jst_now_iso(), "updated_by": "system"},
+            "created_at": _jst_now_iso(),
+            "updated_at": _jst_now_iso(),
             "months": {"2026-05": _build_month_payload(2026, 5, False, 0, {})},
         }
 

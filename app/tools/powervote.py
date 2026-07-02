@@ -28,7 +28,7 @@ from flask import (
 )
 from flask_login import current_user, login_required
 
-from app.models import PowerVoteForm, PowerVoteQuestion, PowerVoteResponse, User, db
+from app.models import PowerVoteForm, PowerVoteQuestion, PowerVoteResponse, User, db, utc_now
 
 
 powervote_bp = Blueprint("powervote", __name__)
@@ -521,7 +521,7 @@ def _apply_form_payload(form: PowerVoteForm, payload: dict[str, Any]) -> None:
         else:
             next_settings["shared_editors"] = _shared_editors(form)
         form.settings = next_settings
-    form.updated_at = datetime.utcnow()
+    form.updated_at = utc_now()
 
 
 def _apply_questions_payload(form: PowerVoteForm, raw_questions: Any) -> None:
@@ -975,7 +975,7 @@ def uploaded_image(form_id: int, filename: str):
 def api_regenerate_token(form_id: int):
     form = _owned_form_or_404(form_id)
     form.public_token = _new_public_token()
-    form.updated_at = datetime.utcnow()
+    form.updated_at = utc_now()
     db.session.commit()
     return jsonify({"ok": True, "form": _serialize_form(form)})
 

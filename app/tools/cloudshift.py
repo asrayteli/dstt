@@ -291,7 +291,7 @@ def _ensure_cloudshift_schema_before_request():
     _ensure_cloudshift_runtime_schema()
 
 
-def _utcnow_iso() -> str:
+def _jst_now_iso() -> str:
     return datetime.now(JST).replace(microsecond=0).isoformat()
 
 
@@ -803,7 +803,7 @@ def _backfill_scene_project_from_siteplus_dedicated(
     _append_history(
         scene_project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": "auto",
             "action": "siteplus_dedicated_backfill",
@@ -839,7 +839,7 @@ def _resync_siteplus_dedicated_projects_for_site_row(
             _append_history(
                 target_project["id"],
                 {
-                    "timestamp": _utcnow_iso(),
+                    "timestamp": _jst_now_iso(),
                     "editor_name": actor_name,
                     "editor_type": "auto",
                     "action": "siteplus_dedicated_sync",
@@ -1439,7 +1439,7 @@ def _annotate_substitute_entries_for_save(
         for entry in entries
         if isinstance(entry, dict) and str(entry.get("id") or "")
     }
-    timestamp = _utcnow_iso()
+    timestamp = _jst_now_iso()
     annotated = {day_key: [] for day_key in entries_per_day.keys()}
     for day_key, entries in entries_per_day.items():
         next_entries: list[dict[str, Any]] = []
@@ -1558,7 +1558,7 @@ def _build_month_payload(
     revision: int = 1,
 ) -> dict[str, Any]:
     year, month = _validate_year_month(year, month)
-    timestamp = _utcnow_iso()
+    timestamp = _jst_now_iso()
     return {
         "year": year,
         "month": month,
@@ -1936,8 +1936,8 @@ def _upsert_project_to_db(project: dict[str, Any]) -> None:
     row.account_shares = _json_dict(project.get("account_shares"))
     row.assist = _json_dict(project.get("assist"))
     row.extra_data = {key: value for key, value in project.items() if key not in _PROJECT_STORAGE_KEYS}
-    row.created_at = str(project.get("created_at") or _utcnow_iso())
-    row.updated_at = str(project.get("updated_at") or _utcnow_iso())
+    row.created_at = str(project.get("created_at") or _jst_now_iso())
+    row.updated_at = str(project.get("updated_at") or _jst_now_iso())
 
     # 全月の削除→再挿入ではなく、変更のあった月だけを更新する
     # （1ヶ月の保存で全月の行を書き直さない）。
@@ -1964,8 +1964,8 @@ def _upsert_project_to_db(project: dict[str, Any]) -> None:
             "draft_entries_per_day": normalized_draft_entries,
             "revision": int(month_data.get("revision", 1) or 1),
             "revision_snapshots": _json_dict(month_data.get("revision_snapshots")),
-            "created_at": str(month_data.get("created_at") or _utcnow_iso()),
-            "updated_at": str(month_data.get("updated_at") or _utcnow_iso()),
+            "created_at": str(month_data.get("created_at") or _jst_now_iso()),
+            "updated_at": str(month_data.get("updated_at") or _jst_now_iso()),
         }
 
     existing_month_rows = {
@@ -2013,7 +2013,7 @@ def _save_project(project: dict[str, Any]) -> None:
         except Exception:
             old_entries_by_month = {}
 
-    project["updated_at"] = _utcnow_iso()
+    project["updated_at"] = _jst_now_iso()
     _upsert_project_to_db(project)
     _notify_tobell_on_substitute_save(project, old_entries_by_month)
 
@@ -2152,7 +2152,7 @@ def _append_history(project_id: str, entry: dict[str, Any]) -> None:
         db.session.add(
             CloudShiftHistory(
                 project_id=project_id,
-                timestamp=str(entry.get("timestamp") or _utcnow_iso()),
+                timestamp=str(entry.get("timestamp") or _jst_now_iso()),
                 editor_name=str(entry.get("editor_name") or ""),
                 editor_type=str(entry.get("editor_type") or ""),
                 action=str(entry.get("action") or ""),
@@ -2360,7 +2360,7 @@ def migrate_cloudshift_json_to_db(*, dry_run: bool = False) -> dict[str, Any]:
                         db.session.add(
                             CloudShiftHistory(
                                 project_id=project_id,
-                                timestamp=str(entry.get("timestamp") or _utcnow_iso()),
+                                timestamp=str(entry.get("timestamp") or _jst_now_iso()),
                                 editor_name=str(entry.get("editor_name") or ""),
                                 editor_type=str(entry.get("editor_type") or ""),
                                 action=str(entry.get("action") or ""),
@@ -2675,7 +2675,7 @@ def _pending_leave_change_request_entry_ids(project: dict[str, Any], month_key: 
 
 def _mark_leave_change_requests_viewed(project: dict[str, Any]) -> bool:
     requests = _normalized_leave_change_requests(project)
-    timestamp = _utcnow_iso()
+    timestamp = _jst_now_iso()
     changed = False
     for item in requests:
         if item.get("status") == "pending" and not item.get("owner_viewed_at"):
@@ -2779,11 +2779,11 @@ def _ensure_substitute_project_for_office_month(office_id: int, year: int, month
                     "office_ids": [office_id],
                 },
                 "employees": [],
-                "updated_at": _utcnow_iso(),
+                "updated_at": _jst_now_iso(),
                 "updated_by": "system",
             },
-            "created_at": _utcnow_iso(),
-            "updated_at": _utcnow_iso(),
+            "created_at": _jst_now_iso(),
+            "updated_at": _jst_now_iso(),
             "months": {
                 month_key: _build_month_payload(year, month, False, 0, {}),
             },
@@ -2802,7 +2802,7 @@ def _ensure_substitute_project_for_office_month(office_id: int, year: int, month
             "office_ids": [office_id],
         },
         "employees": [],
-        "updated_at": _utcnow_iso(),
+        "updated_at": _jst_now_iso(),
         "updated_by": "system",
     }
     if changed or project.get("account_shares"):
@@ -3092,8 +3092,8 @@ def _merge_month_payload(
         "required_capacity": merged_capacity if capacity_enabled else 0,
         "entries_per_day": merged_entries,
         "revision": int(current_month.get("revision", 1)) + 1,
-        "created_at": current_month.get("created_at", _utcnow_iso()),
-        "updated_at": _utcnow_iso(),
+        "created_at": current_month.get("created_at", _jst_now_iso()),
+        "updated_at": _jst_now_iso(),
     }
     return merged
 
@@ -3225,8 +3225,8 @@ def _restore_month_revision_in_project(
     # 下書き未使用なら復元後の live に追従させ、意図しない「仮保存あり」を作らない。
     _carry_forward_draft_entries(restored, current_month, year, month)
     restored["revision"] = current_revision + 1
-    restored["created_at"] = current_month.get("created_at", _utcnow_iso())
-    restored["updated_at"] = _utcnow_iso()
+    restored["created_at"] = current_month.get("created_at", _jst_now_iso())
+    restored["updated_at"] = _jst_now_iso()
 
     snapshots = dict(current_month.get("revision_snapshots") or {})
     snapshots[str(current_revision)] = _snapshot_month_payload(current_month)
@@ -3240,7 +3240,7 @@ def _restore_month_revision_in_project(
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "month_restored",
@@ -4504,7 +4504,7 @@ def _replace_shift_synced_entries_in_target_project(
     _append_history(
         target_project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": "auto",
             "action": "shift_sync",
@@ -4666,7 +4666,7 @@ def _refresh_master_shift_from_sources(
     _append_history(
         target_project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": "auto",
             "action": "shift_sync",
@@ -5147,7 +5147,7 @@ def _upsert_assist_profile(
         employee_number=number,
         candidate_name=name,
     )
-    timestamp = _utcnow_iso()
+    timestamp = _jst_now_iso()
     if profile:
         profile["name"] = name
         if number:
@@ -5203,12 +5203,12 @@ def _assist_profile_mutation(
     existing["active"] = _assist_bool(payload.get("active"), bool(existing.get("active", True)))
     existing["preferred_weekdays"] = preferred_weekdays
     existing["blocked_weekdays"] = blocked_weekdays
-    existing["updated_at"] = _utcnow_iso()
+    existing["updated_at"] = _jst_now_iso()
     _save_project(project)
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "assist_profile_saved",
@@ -5236,7 +5236,7 @@ def _assist_record_from_payload(
         candidate_name=payload.get("candidate_name"),
         employee_number=payload.get("employee_number"),
     )
-    timestamp = _utcnow_iso()
+    timestamp = _jst_now_iso()
     if existing:
         created_at = existing.get("created_at", timestamp)
         created_by = existing.get("created_by", actor_name)
@@ -5310,7 +5310,7 @@ def _assist_rule_from_payload(
     effective_to = _assist_period_value(payload.get("effective_to"))
     if effective_from and effective_to and effective_from > effective_to:
         raise CloudShiftError("ルールの適用期間が不正です", 400)
-    timestamp = _utcnow_iso()
+    timestamp = _jst_now_iso()
     if existing:
         created_at = existing.get("created_at", timestamp)
         created_by = existing.get("created_by", actor_name)
@@ -5430,7 +5430,7 @@ def _assist_record_mutation(
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "assist_record_saved",
@@ -5452,7 +5452,7 @@ def _assist_record_delete(project: dict[str, Any], record_id: str, *, actor_name
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "assist_record_deleted",
@@ -5489,7 +5489,7 @@ def _assist_rule_mutation(
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "assist_rule_saved",
@@ -5511,7 +5511,7 @@ def _assist_rule_delete(project: dict[str, Any], rule_id: str, *, actor_name: st
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "assist_rule_deleted",
@@ -5639,7 +5639,7 @@ def _person_assist_site_from_payload(
         raise CloudShiftError("person assist 種別を指定してください", 400)
     collection_key = _person_assist_collection_key(site_type)
     date_text, parsed_date = _assist_date_parts(payload.get("date"))
-    timestamp = _utcnow_iso()
+    timestamp = _jst_now_iso()
     if existing:
         created_at = existing.get("created_at", timestamp)
         created_by = existing.get("created_by", actor_name)
@@ -5720,7 +5720,7 @@ def _person_assist_site_mutation(
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "person_assist_site_saved",
@@ -5760,7 +5760,7 @@ def _person_assist_site_delete(
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "person_assist_site_deleted",
@@ -6155,7 +6155,7 @@ def _role_option_experienced_site(
     option_key = str(info["shift_key"]).strip().upper()
     label = ROLE_OPTION_MAPPINGS.get(option_key, option_key)
     date_text = str(info.get("latest_date") or "")
-    timestamp = _utcnow_iso()
+    timestamp = _jst_now_iso()
     if existing:
         created_at = existing.get("created_at", timestamp)
         created_by = existing.get("created_by", actor_name)
@@ -6472,7 +6472,7 @@ def _sync_role_option_person_sites(
             _append_history(
                 person_project["id"],
                 {
-                    "timestamp": _utcnow_iso(),
+                    "timestamp": _jst_now_iso(),
                     "editor_name": actor_name,
                     "editor_type": "auto",
                     "action": "role_option_person_sync",
@@ -6819,7 +6819,7 @@ def _sync_person_experience_to_scene_projects(
             _append_history(
                 target_project["id"],
                 {
-                    "timestamp": _utcnow_iso(),
+                    "timestamp": _jst_now_iso(),
                     "editor_name": actor_name,
                     "editor_type": "auto",
                     "action": "person_experience_sync",
@@ -6854,7 +6854,7 @@ def _delete_person_experience_from_scene_projects(
             _append_history(
                 target_project["id"],
                 {
-                    "timestamp": _utcnow_iso(),
+                    "timestamp": _jst_now_iso(),
                     "editor_name": actor_name,
                     "editor_type": "auto",
                     "action": "person_experience_sync_deleted",
@@ -6919,7 +6919,7 @@ def _backfill_scene_project_from_person_experience(
     _append_history(
         scene_project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": "auto",
             "action": "person_experience_backfill",
@@ -7681,7 +7681,7 @@ def _create_leave_change_request(project: dict[str, Any], payload: dict[str, Any
         "requested_option_key": requested_option_key,
         "requested_leave_type": LEAVE_OPTION_MAPPINGS.get(requested_option_key, requested_option_key),
         "request_comment": request_comment,
-        "requested_at": _utcnow_iso(),
+        "requested_at": _jst_now_iso(),
     }
     requests = _normalized_leave_change_requests(project)
     requests.append(request_payload)
@@ -7735,7 +7735,7 @@ def _reject_leave_change_request(
     if target.get("status") != "pending":
         raise CloudShiftError("この申請は既に処理済みです", 400)
     target["status"] = "rejected"
-    target["decided_at"] = _utcnow_iso()
+    target["decided_at"] = _jst_now_iso()
     target["decided_by"] = actor_user_id
     target["decided_by_name"] = actor_name
     target["decision_reason"] = reason
@@ -7784,7 +7784,7 @@ def _finalize_approved_leave_change_requests(
     requests = _normalized_leave_change_requests(project)
     request_map = {item["id"]: item for item in requests}
     changes: list[str] = []
-    timestamp = _utcnow_iso()
+    timestamp = _jst_now_iso()
     for request_id in approved_ids:
         item = request_map.get(request_id)
         if not item:
@@ -8201,8 +8201,8 @@ def api_create():
         "view_token": _share_token(),
         "edit_token": _share_token(),
         "pwa_token": _share_token(),
-        "created_at": _utcnow_iso(),
-        "updated_at": _utcnow_iso(),
+        "created_at": _jst_now_iso(),
+        "updated_at": _jst_now_iso(),
         "months": {
             month_key: _build_month_payload(year, month, capacity_enabled, required_capacity, entries),
         },
@@ -8218,7 +8218,7 @@ def api_create():
         _append_history(
             project_id,
             {
-                "timestamp": _utcnow_iso(),
+                "timestamp": _jst_now_iso(),
                 "editor_name": _user_label(),
                 "editor_type": "owner",
                 "action": "project_created",
@@ -8230,7 +8230,7 @@ def api_create():
             _append_history(
                 project_id,
                 {
-                    "timestamp": _utcnow_iso(),
+                    "timestamp": _jst_now_iso(),
                     "editor_name": _user_label(),
                     "editor_type": "owner",
                     "action": "site_linked",
@@ -8242,7 +8242,7 @@ def api_create():
             _append_history(
                 project_id,
                 {
-                    "timestamp": _utcnow_iso(),
+                    "timestamp": _jst_now_iso(),
                     "editor_name": _user_label(),
                     "editor_type": "owner",
                     "action": "master_scope_updated",
@@ -8290,7 +8290,7 @@ def api_create():
                 _append_history(
                     project["id"],
                     {
-                        "timestamp": _utcnow_iso(),
+                        "timestamp": _jst_now_iso(),
                         "editor_name": _user_label(),
                         "editor_type": "auto",
                         "action": "role_option_person_sync",
@@ -8447,7 +8447,7 @@ def api_project_meta(project_id: str):
             _append_history(
                 project_id,
                 {
-                    "timestamp": _utcnow_iso(),
+                    "timestamp": _jst_now_iso(),
                     "editor_name": _user_label(),
                     "editor_type": "owner",
                     "action": "title_updated",
@@ -8513,7 +8513,7 @@ def api_regenerate_tokens(project_id: str):
         if reject_pending and "view" in target_set:
             requests = _normalized_leave_change_requests(project)
             rejected_count = 0
-            timestamp = _utcnow_iso()
+            timestamp = _jst_now_iso()
             for item in requests:
                 if item.get("status") == "pending":
                     item["status"] = "rejected"
@@ -8542,7 +8542,7 @@ def api_regenerate_tokens(project_id: str):
         _append_history(
             project_id,
             {
-                "timestamp": _utcnow_iso(),
+                "timestamp": _jst_now_iso(),
                 "editor_name": _user_label(),
                 "editor_type": "owner",
                 "action": "tokens_regenerated",
@@ -8614,7 +8614,7 @@ def api_project_account_shares(project_id: str):
                 "office_ids": sorted(owner_office_ids) if share_office else [],
             },
             "employees": employee_rows,
-            "updated_at": _utcnow_iso(),
+            "updated_at": _jst_now_iso(),
             "updated_by": _user_id(),
         }
         _save_project(project)
@@ -8627,7 +8627,7 @@ def api_project_account_shares(project_id: str):
         _append_history(
             project_id,
             {
-                "timestamp": _utcnow_iso(),
+                "timestamp": _jst_now_iso(),
                 "editor_name": _user_label(),
                 "editor_type": "owner",
                 "action": "account_share_updated",
@@ -8670,7 +8670,7 @@ def api_project_settings(project_id: str):
             _append_history(
                 project_id,
                 {
-                    "timestamp": _utcnow_iso(),
+                    "timestamp": _jst_now_iso(),
                     "editor_name": _user_label(),
                     "editor_type": "owner",
                     "action": "shift_book_settings_updated",
@@ -8764,7 +8764,7 @@ def _create_month_in_project(project: dict[str, Any], payload: dict[str, Any], a
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "month_created",
@@ -8852,7 +8852,7 @@ def _save_month_in_project(
             _append_history(
                 project["id"],
                 {
-                    "timestamp": _utcnow_iso(),
+                    "timestamp": _jst_now_iso(),
                     "editor_name": actor_name,
                     "editor_type": actor_type,
                     "action": "role_option_sync",
@@ -8874,7 +8874,7 @@ def _save_month_in_project(
         _append_history(
             project["id"],
             {
-                "timestamp": _utcnow_iso(),
+                "timestamp": _jst_now_iso(),
                 "editor_name": actor_name,
                 "editor_type": actor_type,
                 "action": "month_updated",
@@ -8929,13 +8929,13 @@ def _save_draft_month_in_project(
     )
     previous_count = _draft_entry_count(current_month)
     current_month["draft_entries_per_day"] = prepared_entries
-    current_month["updated_at"] = _utcnow_iso()
+    current_month["updated_at"] = _jst_now_iso()
     _save_project(project)
     next_count = _draft_entry_count(current_month)
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "month_draft_saved",
@@ -8960,12 +8960,12 @@ def _clear_draft_month_in_project(
         raise CloudShiftError("対象の月が存在しません", 404)
     previous_count = _draft_entry_count(current_month)
     current_month["draft_entries_per_day"] = _normalize_entries(current_month.get("entries_per_day"), year, month)
-    current_month["updated_at"] = _utcnow_iso()
+    current_month["updated_at"] = _jst_now_iso()
     _save_project(project)
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "month_draft_cleared",
@@ -9004,7 +9004,7 @@ def _publish_draft_month_in_project(
         "entries_per_day": published_entries,
         "draft_entries_per_day": published_entries,
         "revision": int(current_month.get("revision", 1) or 1) + 1,
-        "updated_at": _utcnow_iso(),
+        "updated_at": _jst_now_iso(),
     }
     snapshots = dict(current_month.get("revision_snapshots") or {})
     snapshots[str(int(current_month.get("revision", 1) or 1))] = _snapshot_month_payload(current_month)
@@ -9021,7 +9021,7 @@ def _publish_draft_month_in_project(
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": actor_name,
             "editor_type": actor_type,
             "action": "month_draft_published",
@@ -9217,7 +9217,7 @@ def api_delete_month(project_id: str, year: int, month: int):
         _append_history(
             project_id,
             {
-                "timestamp": _utcnow_iso(),
+                "timestamp": _jst_now_iso(),
                 "editor_name": _user_label(),
                 "editor_type": "owner",
                 "action": "month_deleted",
@@ -9299,7 +9299,7 @@ def api_hide_project(project_id: str):
         _append_history(
             project_id,
             {
-                "timestamp": _utcnow_iso(),
+                "timestamp": _jst_now_iso(),
                 "editor_name": _user_label(),
                 "editor_type": "owner",
                 "action": "project_hidden",
@@ -9415,7 +9415,7 @@ def _substitute_request_payload_from_source(
         "substitute_resolved": False,
         "substitute_requester_user_id": _user_id(),
         "substitute_requester_name": _user_label(),
-        "substitute_requested_at": _utcnow_iso(),
+        "substitute_requested_at": _jst_now_iso(),
         "substitute_helper_user_id": "",
         "substitute_helper_name": "",
         "substitute_helped_at": "",
@@ -9488,7 +9488,7 @@ def _substitute_request_payload_from_day(
         "substitute_resolved": False,
         "substitute_requester_user_id": _user_id(),
         "substitute_requester_name": _user_label(),
-        "substitute_requested_at": _utcnow_iso(),
+        "substitute_requested_at": _jst_now_iso(),
         "substitute_helper_user_id": "",
         "substitute_helper_name": "",
         "substitute_helped_at": "",
@@ -9622,12 +9622,12 @@ def api_create_substitute_request(project_id: str):
         substitute_month["entries_per_day"] = entries_per_day
         substitute_month["draft_entries_per_day"] = _normalize_entries(entries_per_day, year, month)
         substitute_month["revision"] = int(substitute_month.get("revision", 1) or 1) + 1
-        substitute_month["updated_at"] = _utcnow_iso()
+        substitute_month["updated_at"] = _jst_now_iso()
         _save_project(substitute_project)
         _append_history(
             substitute_project["id"],
             {
-                "timestamp": _utcnow_iso(),
+                "timestamp": _jst_now_iso(),
                 "editor_name": _user_label(),
                 "editor_type": access_role,
                 "action": history_action,
@@ -9727,7 +9727,7 @@ def api_leave_sync(project_id: str, year: int, month: int):
     _append_history(
         project_id,
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": _user_label(),
             "editor_type": "owner",
             "action": "leave_sync",
@@ -10309,7 +10309,7 @@ def _shift_engine_reject(project_id: str, month_key: str, action_detail: str, re
         _append_history(
             project_id,
             {
-                "timestamp": _utcnow_iso(),
+                "timestamp": _jst_now_iso(),
                 "editor_name": _user_label(),
                 "editor_type": _user_id(),
                 "action": "shift_engine_draft_rejected",
@@ -10384,7 +10384,7 @@ def _shift_engine_apply_draft(project: dict[str, Any], payload: dict[str, Any], 
     _append_history(
         project["id"],
         {
-            "timestamp": _utcnow_iso(),
+            "timestamp": _jst_now_iso(),
             "editor_name": _user_label(),
             "editor_type": access_role,
             "action": "shift_engine_draft_applied",
@@ -10724,7 +10724,7 @@ def api_templates_create(project_id: str):
         )
         slots = _template_slots_from_entries(payload.get("entries_per_day"), rep_year, rep_month)
         options = _sanitize_template_options(payload.get("options"))
-        timestamp = _utcnow_iso()
+        timestamp = _jst_now_iso()
         row = CloudShiftTemplate(
             id=_template_id(),
             project_id=project_id,
@@ -10782,7 +10782,7 @@ def api_templates_update(project_id: str, template_id: str):
             row.representative_year = rep_year
             row.representative_month = rep_month
         row.mode = str(project.get("mode") or row.mode or "")
-        row.updated_at = _utcnow_iso()
+        row.updated_at = _jst_now_iso()
         db.session.commit()
         template_payload = _template_row_to_dict(row)
     return jsonify({"success": True, "template": template_payload})

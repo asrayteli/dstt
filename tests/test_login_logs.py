@@ -89,7 +89,7 @@ def test_successful_login_records_dstt_login_log(app_ctx):
     response = client.post(
         "/auth/login",
         data={"username": "alice", "password": "secret"},
-        headers={"X-Forwarded-For": "203.0.113.10, 10.0.0.1", "User-Agent": "pytest-browser"},
+        headers={"X-Forwarded-For": "spoofed-by-client, 203.0.113.10", "User-Agent": "pytest-browser"},
     )
     after_jst = datetime.utcnow() + timedelta(hours=9)
 
@@ -114,7 +114,7 @@ def test_failed_login_shows_message_and_records_forwarded_ip(app_ctx):
     response = client.post(
         "/auth/login",
         data={"username": "alice", "password": "wrong"},
-        headers={"X-Forwarded-For": "198.51.100.7, 10.0.0.1", "User-Agent": "pytest-browser"},
+        headers={"X-Forwarded-For": "spoofed-by-client, 198.51.100.7", "User-Agent": "pytest-browser"},
     )
 
     assert response.status_code == 200

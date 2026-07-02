@@ -421,3 +421,29 @@ def test_same_origin_check_applies_to_non_tool_mutations(tmp_path, monkeypatch):
         headers={"Origin": "http://localhost"},
     )
     assert allowed.status_code != 403
+
+
+def test_same_origin_check_blocks_null_origin_post(tmp_path, monkeypatch):
+    """sandboxed iframe 等が送る "Origin: null" は未設定扱いにせず拒否する。"""
+    _stub_optional_deps()
+    monkeypatch.delenv("DSTT_DATA_ENCRYPTION_KEY_B64", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    from app import create_app
+
+    app = create_app(
+        {
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'origin4.db'}",
+            "SECRET_KEY": "test",
+            "TESTING": True,
+            "DSTT_ENFORCE_SAME_ORIGIN_IN_TESTS": True,
+            "LOGIN_DISABLED": True,
+        }
+    )
+    client = app.test_client()
+    resp = client.post(
+        "/tools/pluslist/api/import",
+        json={"session_key": "x"},
+        headers={"Origin": "null"},
+    )
+    assert resp.status_code == 403

@@ -511,3 +511,71 @@ def test_monthly_generator_summary_js_uses_backend_keys():
     assert "window.progressHideTimeout" in script
     assert "renderSegmentContractCodes" in script
     assert "対象契約コード" in script
+
+
+def _build_full_app(tmp_path, monkeypatch):
+    """本物の create_app + ログインで download の認可を検証するためのアプリ。"""
+    import pytest  # noqa: F401
+    from werkzeug.security import generate_password_hash
+
+    from app import create_app
+    from app.models import User, db as app_db
+
+    monkeypatch.chdir(tmp_path)
+    app = create_app(
+        {
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{(tmp_path / 'mg_auth.db').as_posix()}",
+            "TESTING": True,
+            "SECRET_KEY": "test-secret",
+        }
+    )
+    with app.app_context():
+        app_db.drop_all()
+        app_db.create_all()
+        for name in ("alice", "bob"):
+            app_db.session.add(
+                User(username=name, password_hash=generate_password_hash("secret"), name=name)
+            )
+        app_db.session.commit()
+    return app
+
+
+def _login_as(client, username):
+    response = client.post(
+        "/auth/login", data={"username": username, "password": "secret"}
+    )
+    assert response.status_code == 302
+
+
+def test_download_rejects_other_users_files_and_traversal(tmp_path, monkeypatch):
+    """出力ファイルは所有者（ファイル名の自ユーザーID接頭辞）のみ取得・削除できる。"""
+    app = _build_full_app(tmp_path, monkeypatch)
+
+    module = _load_monthly_module()
+    with app.app_context():
+        upload_folder = Path(module.get_upload_folder())
+    target = upload_folder / "alice_20260101000000_report_output.xlsx"
+    target.write_bytes(b"secret-xlsx")
+
+    # 他ユーザー（bob）はファイル名を知っていても取得できない
+    client = app.test_client()
+    _login_as(client, "bob")
+    denied = client.get(
+        "/tools/monthly_generator/api/download/alice_20260101000000_report_output.xlsx"
+    )
+    assert denied.status_code == 404
+    assert target.exists()  # 削除もされない
+
+    # パストラバーサル形のファイル名は拒否
+    traversal = client.get("/tools/monthly_generator/api/download/..")
+    assert traversal.status_code == 404
+
+    # 所有者（alice）は取得でき、取得後にファイルは削除される
+    client2 = app.test_client()
+    _login_as(client2, "alice")
+    allowed = client2.get(
+        "/tools/monthly_generator/api/download/alice_20260101000000_report_output.xlsx"
+    )
+    assert allowed.status_code == 200
+    assert allowed.data == b"secret-xlsx"
+    assert not target.exists()

@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 import requests
 
-from app.models import ToBellGoogleAccount, ToBellTask, ToBellUserSettings, db
+from app.models import ToBellGoogleAccount, ToBellTask, ToBellUserSettings, db, utc_now
 from app.services import google_oauth
 from app.services.to_bell_integrations import is_enabled
 from app.services.to_bell_service import has_explicit_notification_time
@@ -91,12 +91,12 @@ def store_connection(username: str, token_response: dict[str, Any]) -> ToBellGoo
     if refresh_token:  # 再同意時など、refresh_token が来たときだけ更新する
         account.refresh_token = refresh_token
     account.access_token = access_token or account.access_token
-    account.token_expiry = datetime.utcnow() + timedelta(seconds=max(0, expires_in - 60)) if expires_in else None
+    account.token_expiry = utc_now() + timedelta(seconds=max(0, expires_in - 60)) if expires_in else None
     account.scope = scope or account.scope
     if email:
         account.google_email = email
     if account.connected_at is None:
-        account.connected_at = datetime.utcnow()
+        account.connected_at = utc_now()
     db.session.commit()
     return account
 
@@ -121,7 +121,7 @@ def valid_access_token(account: ToBellGoogleAccount) -> str:
     """期限切れなら refresh して有効な access_token を返す。"""
     if account is None or not account.refresh_token:
         raise ToBellCalendarError("Googleアカウントが未接続です。")
-    now = datetime.utcnow()
+    now = utc_now()
     if account.access_token and account.token_expiry and account.token_expiry > now:
         return account.access_token
     return _refresh(account)
@@ -137,7 +137,7 @@ def _refresh(account: ToBellGoogleAccount) -> str:
     if not access_token:
         raise ToBellCalendarError("access_token を更新できませんでした。再接続が必要です。")
     account.access_token = access_token
-    account.token_expiry = datetime.utcnow() + timedelta(seconds=max(0, expires_in - 60)) if expires_in else None
+    account.token_expiry = utc_now() + timedelta(seconds=max(0, expires_in - 60)) if expires_in else None
     db.session.commit()
     return access_token
 
@@ -237,7 +237,7 @@ def _event_body(task: ToBellTask, username: str) -> dict[str, Any]:
         body["start"] = {"dateTime": start.replace(microsecond=0).isoformat(), "timeZone": tz}
         body["end"] = {"dateTime": end.replace(microsecond=0).isoformat(), "timeZone": tz}
     else:
-        day = (task.due_at or datetime.utcnow()).date()
+        day = (task.due_at or utc_now()).date()
         body["start"] = {"date": day.isoformat()}
         body["end"] = {"date": (day + timedelta(days=1)).isoformat()}
 

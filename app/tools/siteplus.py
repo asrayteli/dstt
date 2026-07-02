@@ -8,7 +8,7 @@ from flask import Blueprint, abort, current_app, jsonify, render_template, reque
 from flask_login import current_user, login_required
 from sqlalchemy import false, func, or_
 
-from app.models import Employee, Site, SiteBranch, SiteContractMaster, db
+from app.models import Employee, Site, SiteBranch, SiteContractMaster, db, utc_now
 from app.site_contract_master import ensure_contract_master_synced
 
 try:
@@ -842,7 +842,7 @@ def api_contract_master_set_dedicated(contract_code: str):
         row.dedicated_employee_name = None
 
     row.dedicated_updated_by = _user_id()
-    row.dedicated_updated_at = datetime.utcnow()
+    row.dedicated_updated_at = utc_now()
     db.session.commit()
     warning = None
     cloudshift_synced = True
@@ -892,7 +892,7 @@ def api_contract_master_set_vehicle_number(contract_code: str):
     vehicle_number = str(data.get("vehicle_number", "") or "").strip()
     row.vehicle_number = vehicle_number or None
     row.vehicle_number_updated_by = _user_id()
-    row.vehicle_number_updated_at = datetime.utcnow()
+    row.vehicle_number_updated_at = utc_now()
     db.session.commit()
     return jsonify({"success": True, "item": _serialize_contract_master_row(row)})
 
@@ -1354,7 +1354,7 @@ def api_import_site_table():
         if master_row.vehicle_number != vehicle_number:
             master_row.vehicle_number = vehicle_number
             master_row.vehicle_number_updated_by = actor
-            master_row.vehicle_number_updated_at = datetime.utcnow()
+            master_row.vehicle_number_updated_at = utc_now()
             summary["vehicle_number_updated"] += 1
     db.session.commit()
     return jsonify({"success": True, "summary": summary})

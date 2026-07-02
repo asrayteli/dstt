@@ -30,6 +30,13 @@ python run.py
 - `DSTT_DATA_ENCRYPTION_KEY`: 暗号化対象データ用キー
 - `DSTT_GOOGLE_CLIENT_ID` / `DSTT_GOOGLE_CLIENT_SECRET`: ToBell の Google カレンダー連携用 OAuth クライアント情報
 - `DSTT_TIMEZONE`: カレンダー連携で使うタイムゾーン（既定 `Asia/Tokyo`）
+- `DSTT_MAX_CONTENT_LENGTH_MB`: リクエストボディ上限（MB）。既定は FILE POST の1リクエスト最大に合わせた `10304`（≒10GiB+余裕）。`0` で無制限
+- `DSTT_ACTIVITY_LOG_RETENTION_DAYS`: ツール利用ログ（user_activity_logs）の保持日数。設定すると日次で期限切れ行を削除。未設定/`0` は無制限保持
+- `DSTT_ENABLE_HSTS`: HTTPS応答への Strict-Transport-Security 付与（既定有効。`0` で無効）
+
+### SQLite 運用メモ
+
+本番既定の SQLite は WAL モードで動作します（`users.db` の隣に `-wal` / `-shm` ファイルが生成されます）。DB をファイルコピーでバックアップする場合は 3 ファイルをセットで取るか、`sqlite3 users.db ".backup backup.db"` を使ってください。
 
 ### DSTT 共通メール送信基盤（SMTP）
 

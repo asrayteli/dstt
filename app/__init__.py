@@ -1,17 +1,23 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from .models import User
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 import secrets
 import time
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from .navigation import NAV_ITEMS
 from .versioning import calculate_repo_version
+
+try:
+    import fcntl
+except ImportError:  # Windows開発環境ではプロセス間ロックなしで動かす
+    fcntl = None
 
 from .models import UserActivityLog, db
 login_manager = LoginManager()
@@ -29,6 +35,13 @@ def _path_matches_prefix(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(f"{prefix}/")
 
 
+# NAV_ITEMS は起動後不変。リクエスト毎（after_request のアクティビティ記録や
+# ページタイトル解決）に毎回ソートしないよう、起動時に一度だけ前計算する。
+_NAV_ITEMS_BY_HREF_LENGTH = tuple(
+    sorted(NAV_ITEMS, key=lambda nav_item: len(nav_item["href"]), reverse=True)
+)
+
+
 def _tool_name_for_path(path: str) -> str | None:
     special_paths = (
         ("/tools/shiftersync/cloudshift", "CloudShift"),
@@ -43,7 +56,7 @@ def _tool_name_for_path(path: str) -> str | None:
         if _path_matches_prefix(path, prefix):
             return name
 
-    for item in sorted(NAV_ITEMS, key=lambda nav_item: len(nav_item["href"]), reverse=True):
+    for item in _NAV_ITEMS_BY_HREF_LENGTH:
         if _path_matches_prefix(path, item["href"]):
             return item["label"]
     return None
@@ -52,7 +65,7 @@ def _tool_name_for_path(path: str) -> str | None:
 def _tool_info_for_path(path: str) -> tuple[str | None, str | None]:
     if _path_matches_prefix(path, "/tools/user_management"):
         return "user_management", "管理者ページ"
-    for item in sorted(NAV_ITEMS, key=lambda nav_item: len(nav_item["href"]), reverse=True):
+    for item in _NAV_ITEMS_BY_HREF_LENGTH:
         if _path_matches_prefix(path, item["href"]):
             return item.get("key"), item.get("label")
     return None, None
@@ -104,6 +117,12 @@ def _load_or_create_local_secret(app: Flask) -> str:
     secret_path.parent.mkdir(parents=True, exist_ok=True)
     secret_key = secrets.token_urlsafe(48)
     secret_path.write_text(secret_key, encoding="utf-8")
+    try:
+        # セッション署名鍵なので所有者以外から読めないようにする
+        # （data_encryption.key と同じ扱い）。
+        os.chmod(secret_path, 0o600)
+    except OSError:
+        pass
     return secret_key
 
 
@@ -177,7 +196,6 @@ def _seed_tool_categories():
     }
 
     existing_keys = {ts.tool_key for ts in ToolSettings.query.all()}
-    added = False
     for nav in NAV_ITEMS:
         key = nav.get("key", "")
         if key and key not in existing_keys:
@@ -195,12 +213,61 @@ def _seed_tool_categories():
                     ts.category_id = cat.id
                     ts.sort_order = max_order + 1
             db.session.add(ts)
-            added = True
 
-    if added:
-        db.session.commit()
-    else:
-        db.session.commit()
+    db.session.commit()
+
+
+def _configure_sqlite_engine(app) -> None:
+    """SQLite 使用時に並行アクセス耐性を高める PRAGMA を全接続へ適用する。
+
+    gunicorn のマルチワーカー構成では複数プロセスが同一 DB ファイルへ
+    書き込むため、既定のロールバックジャーナル + busy_timeout なしでは
+    負荷時に "database is locked" が発生しうる。WAL で読み書きの並行性を
+    確保し、busy_timeout でロック競合時は即時エラーではなく待機させる。
+    """
+    if not str(app.config.get("SQLALCHEMY_DATABASE_URI", "")).startswith("sqlite"):
+        return
+
+    with app.app_context():
+        engine = db.engine
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA busy_timeout=30000")
+            # メモリDB（テスト）では WAL は効かず 'memory' が返るだけで無害。
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+        finally:
+            cursor.close()
+
+    # リスナー登録前にプールへ入った接続にも PRAGMA が効くよう作り直す。
+    # ここはまだスキーマ初期化前（最初のクエリ実行前）なので安全。
+    engine.dispose()
+
+
+@contextmanager
+def _startup_migration_lock(app):
+    """起動時スキーマ移行を全ワーカーで直列化するプロセス間ロック。
+
+    移行処理自体は冪等だが、複数ワーカーが同時に ALTER TABLE / CREATE TABLE
+    を実行すると SQLite のロック競合で起動が失敗しうる。flock の
+    ブロッキング取得で「順番待ち」にし、最初の1プロセスが実移行を行い、
+    残りは実質 no-op の検査だけを流す。fcntl が無い環境（Windows開発）では
+    従来どおりロックなしで実行する。
+    """
+    if fcntl is None:
+        yield
+        return
+    lock_path = Path(app.instance_path) / "startup_migration.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def _ensure_access_control_schema(app):
@@ -620,6 +687,15 @@ def create_app(test_config=None):
     app.config['SECRET_KEY'] = _resolve_secret_key(app, test_config)
     app.config['SQLALCHEMY_DATABASE_URI'] = _resolve_database_uri(test_config)
     app.config['ALLOW_SELF_REGISTRATION'] = _env_bool('DSTT_ALLOW_SELF_REGISTRATION', False)
+    # リクエストボディの全体上限（未設定だと無制限で、巨大ボディ送信による
+    # ディスク/メモリ枯渇の DoS が可能）。FILE POST の1リクエスト最大
+    # （10GiB + チャンク余裕）を既定とし、環境変数で調整・0で無効化できる。
+    try:
+        _max_content_mb = int(os.environ.get('DSTT_MAX_CONTENT_LENGTH_MB', str(10 * 1024 + 64)))
+    except ValueError:
+        _max_content_mb = 10 * 1024 + 64
+    if _max_content_mb > 0:
+        app.config['MAX_CONTENT_LENGTH'] = _max_content_mb * 1024 * 1024
     app.config['LOGIN_FAILURE_WINDOW_SECONDS'] = int(os.environ.get('DSTT_LOGIN_FAILURE_WINDOW_SECONDS', '300'))
     app.config['LOGIN_FAILURE_DELAY_THRESHOLD'] = int(os.environ.get('DSTT_LOGIN_FAILURE_DELAY_THRESHOLD', '3'))
     app.config['LOGIN_FAILURE_DELAY_SECONDS'] = float(os.environ.get('DSTT_LOGIN_FAILURE_DELAY_SECONDS', '0.6'))
@@ -635,14 +711,11 @@ def create_app(test_config=None):
     if test_config:
         app.config.update(test_config)
     db.init_app(app)
+    _configure_sqlite_engine(app)
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"  # ログインページのエンドポイント
-    login_manager.init_app(app)
     login_manager.login_message = None
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_for=1)
-    
-    # ユーザーログインの管理
-    login_manager.login_view = "auth.login"
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -674,9 +747,12 @@ def create_app(test_config=None):
             uid = current_user.username if current_user.is_authenticated else ""
         except Exception:
             uid = ""
+        # アクセス可能ツールの解決は複数の権限クエリを伴うため、
+        # 1回だけ計算してカテゴリ分けにも使い回す。
+        accessible_items = get_accessible_nav_items()
         return {
-            "app_navigation_items": get_accessible_nav_items(),
-            "categorized_navigation": get_categorized_nav_items(),
+            "app_navigation_items": accessible_items,
+            "categorized_navigation": get_categorized_nav_items(items=accessible_items),
             "all_navigation_items": NAV_ITEMS,
             "current_user_is_admin": is_admin_user(),
             "current_user_id": uid,
@@ -831,22 +907,18 @@ def create_app(test_config=None):
             abort(404)
         return None
 
-    # Blueprint毎のアクセス制御除外パスプレフィックス。
-    # トークン共有等、ログインしていない外部ユーザーが利用する経路を除外する。
+    # 機密ツールの Blueprint 名 → ツールキーの対応表。
+    # 手書きリストだと新しい機密ツールの登録漏れが起こりうるため、
+    # TOOL_ACCESS_CATEGORIES の sensitive 定義から自動導出する
+    # （Blueprint 名 = ツールキーの規約。例外はここに個別追記する）。
+    from .access_control import TOOL_ACCESS_CATEGORIES
     _BP_TO_TOOL_KEY = {
-        "leave_mgr": "leave_mgr",
-        "pluslist": "pluslist",
-        "siteplus": "siteplus",
-        "shiftersync": "shiftersync",
-        # CloudShiftはShifterSyncのサブ機能なので、ShifterSync権限で判定する
-        "cloudshift": "shiftersync",
-        "subject_analysis_tool": "subject_analysis_tool",
-        "power_imager": "power_imager",
-        "bus_pricing": "bus_pricing",
-        "health_check": "health_check",
-        "car_inspe": "car_inspe",
-        "camera_scanner": "camera_scanner",
+        key: key
+        for key, category in TOOL_ACCESS_CATEGORIES.items()
+        if category == "sensitive"
     }
+    # CloudShiftはShifterSyncのサブ機能なので、ShifterSync権限で判定する
+    _BP_TO_TOOL_KEY["cloudshift"] = "shiftersync"
     _EXEMPT_PATH_PREFIXES = (
         "/tools/shiftersync/download/",
         "/tools/shiftersync/cloudshift/view/",
@@ -873,14 +945,49 @@ def create_app(test_config=None):
                 return None
         return enforce_tool_access(tool_key)
 
+    # 日次クリーンアップ実施済み日のプロセス内キャッシュ。
+    # 毎リクエストのマーカーファイル stat/read を避け、当日分は即 return する
+    # （ワーカー間の重複はファイルマーカー側で従来どおり防ぐ）。
+    _daily_cleanup_state = {"done_for": None}
+
+    try:
+        _activity_retention_days = int(
+            os.environ.get("DSTT_ACTIVITY_LOG_RETENTION_DAYS", "0")
+        )
+    except ValueError:
+        _activity_retention_days = 0
+
+    def _sweep_activity_logs() -> None:
+        """user_activity_logs の保持期間スイープ（opt-in）。
+
+        アクティビティログは /tools/ 配下の全リクエストで1行増える
+        高頻度テーブルのため、放置すると無制限に肥大する。
+        DSTT_ACTIVITY_LOG_RETENTION_DAYS（日数）を設定した場合のみ、
+        日次で期限切れ行を削除する。未設定/0 は従来どおり無制限保持。
+        """
+        if _activity_retention_days <= 0:
+            return
+        from datetime import timedelta
+        from .models import utc_now
+        cutoff = utc_now() - timedelta(days=_activity_retention_days)
+        deleted = UserActivityLog.query.filter(
+            UserActivityLog.created_at < cutoff
+        ).delete(synchronize_session=False)
+        db.session.commit()
+        if deleted:
+            app.logger.info("Activity log retention: removed %d rows", deleted)
+
     @app.before_request
     def _run_to_bell_daily_cleanup():
         if app.config.get("TESTING") and not app.config.get("DSTT_RUN_TO_BELL_CLEANUP_IN_TESTS"):
             return None
-        marker_path = Path(app.instance_path) / "to_bell_cleanup_last_run"
         today_text = date.today().isoformat()
+        if _daily_cleanup_state["done_for"] == today_text:
+            return None
+        marker_path = Path(app.instance_path) / "to_bell_cleanup_last_run"
         try:
             if marker_path.exists() and marker_path.read_text(encoding="utf-8").strip() == today_text:
+                _daily_cleanup_state["done_for"] = today_text
                 return None
             from .services.to_bell_service import cleanup_expired_records
             cleanup_expired_records()
@@ -890,8 +997,13 @@ def create_app(test_config=None):
                 sweep_health_check_reminders()
             except Exception:
                 db.session.rollback()
+            try:
+                _sweep_activity_logs()
+            except Exception:
+                db.session.rollback()
             marker_path.parent.mkdir(parents=True, exist_ok=True)
             marker_path.write_text(today_text, encoding="utf-8")
+            _daily_cleanup_state["done_for"] = today_text
         except Exception:
             db.session.rollback()
         return None
@@ -903,6 +1015,8 @@ def create_app(test_config=None):
         g.dstt_activity_started_at = time.perf_counter()
         return None
 
+    _hsts_enabled = _env_bool("DSTT_ENABLE_HSTS", True)
+
     @app.after_request
     def _apply_default_security_headers(response):
         # 全レスポンスに最低限のセキュリティヘッダを付与する。
@@ -912,6 +1026,14 @@ def create_app(test_config=None):
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         # URL に共有トークンを含むツールがあるため、外部遷移時の Referer 漏洩を抑える。
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        # HTTPS で届いたリクエスト（ProxyFix 経由の X-Forwarded-Proto 含む）にのみ
+        # HSTS を付与し、以後の平文アクセスへの格下げを防ぐ。HTTP 併用ホストへは
+        # 影響しない。不要なら DSTT_ENABLE_HSTS=0 で無効化できる。
+        from flask import request as _hsts_req
+        if _hsts_enabled and _hsts_req.is_secure:
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000"
+            )
         return response
 
     @app.after_request
@@ -963,11 +1085,13 @@ def create_app(test_config=None):
         except EncryptionKeyMissingError as exc:
             raise RuntimeError(str(exc))
 
-    # DBスキーマの初期化（既存DBへのカラム追加含む）
-    _ensure_access_control_schema(app)
-    _ensure_to_bell_task_source_unique_index(app)
-    # 旧データの空 draft を live へ揃える一括修復（誤『仮保存あり』の永続的解消）。
-    _backfill_empty_cloudshift_drafts(app)
+    # DBスキーマの初期化（既存DBへのカラム追加含む）。
+    # 複数ワーカーの同時起動でも競合しないよう flock で直列化する。
+    with _startup_migration_lock(app):
+        _ensure_access_control_schema(app)
+        _ensure_to_bell_task_source_unique_index(app)
+        # 旧データの空 draft を live へ揃える一括修復（誤『仮保存あり』の永続的解消）。
+        _backfill_empty_cloudshift_drafts(app)
 
     from .services.to_bell_push import init_to_bell_push_scheduler
     init_to_bell_push_scheduler(app)
