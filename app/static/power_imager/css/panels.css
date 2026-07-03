@@ -1,5 +1,12 @@
 /* --- Layer Panel --- */
-.layer-list { display: flex; flex-direction: column; gap: 2px; }
+.layer-list { display: flex; flex-direction: column; gap: 2px; position: relative; }
+.layer-item.drag-source { opacity: 0.45; }
+.layer-drop-indicator {
+  position: absolute; left: 2px; right: 2px; height: 2px;
+  background: var(--pi-accent); border-radius: 1px;
+  box-shadow: 0 0 4px var(--pi-accent);
+  pointer-events: none; z-index: 5;
+}
 .layer-item {
   display: flex; align-items: center; gap: 6px; padding: 4px 6px;
   border-radius: 4px; cursor: pointer; font-size: 12px;
