@@ -91,7 +91,20 @@ def _user_matching_group_rules(user: User, rules) -> dict:
     return matched
 
 
-def _serialize_user(user: User, group_rules=None) -> dict:
+def _last_login_map() -> dict:
+    """ユーザー名ごとの最終ログイン日時（DsttLoginLog由来）を返す。"""
+    rows = (
+        db.session.query(
+            DsttLoginLog.username,
+            db.func.max(DsttLoginLog.logged_in_at),
+        )
+        .group_by(DsttLoginLog.username)
+        .all()
+    )
+    return {username: logged_in_at for username, logged_in_at in rows}
+
+
+def _serialize_user(user: User, group_rules=None, last_login_map=None) -> dict:
     extra_offices = (
         UserAccessibleOffice.query.filter_by(user_id=user.id).all()
         if user.id is not None
@@ -100,6 +113,7 @@ def _serialize_user(user: User, group_rules=None) -> dict:
     if group_rules is None:
         group_rules = GroupToolPermission.query.all()
     group_sources = _user_matching_group_rules(user, group_rules)
+    last_login = (last_login_map or {}).get(user.username)
     return {
         "id": user.id,
         "username": user.username,
@@ -118,6 +132,7 @@ def _serialize_user(user: User, group_rules=None) -> dict:
         "tool_keys": [p.tool_key for p in user.tool_permissions],
         "group_tool_keys": list(group_sources.keys()),
         "group_tool_sources": group_sources,
+        "last_login_at": last_login.isoformat() if last_login else None,
     }
 
 
@@ -134,8 +149,12 @@ def get_users():
 
     users = User.query.order_by(User.username).all()
     group_rules = GroupToolPermission.query.all()
+    last_logins = _last_login_map()
     return jsonify({
-        "users": [_serialize_user(u, group_rules=group_rules) for u in users]
+        "users": [
+            _serialize_user(u, group_rules=group_rules, last_login_map=last_logins)
+            for u in users
+        ]
     })
 
 

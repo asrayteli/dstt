@@ -24,7 +24,7 @@
     overflow-x: auto;
   }
   .admin-users-grid {
-    min-width: 1260px;
+    min-width: 1115px;
   }
   .admin-users-head {
     background: #f8fafc;
@@ -76,6 +76,87 @@
   .admin-reset-button {
     min-width: 4.5rem;
     white-space: nowrap;
+  }
+  .admin-users-head th.admin-col-actions,
+  .admin-users-body td.admin-col-actions {
+    position: sticky;
+    right: 0;
+    background: #fff;
+    box-shadow: inset 1px 0 0 var(--admin-line);
+  }
+  .admin-users-head th.admin-col-actions {
+    background: #f8fafc;
+  }
+  .admin-users-body tr:hover td.admin-col-actions {
+    background: #f8fafc;
+  }
+  .admin-sort-th {
+    cursor: pointer;
+    user-select: none;
+  }
+  .admin-sort-th:hover {
+    color: #b91c1c;
+  }
+  .admin-sort-arrow {
+    opacity: 0.35;
+    font-size: 0.7em;
+    margin-left: 0.15rem;
+  }
+  .admin-sort-th.is-active {
+    color: #b91c1c;
+  }
+  .admin-sort-th.is-active .admin-sort-arrow {
+    opacity: 1;
+  }
+  .admin-summary-card[data-filter] {
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .admin-summary-card[data-filter]:hover {
+    border-color: #fca5a5;
+    background: #fff7f7;
+  }
+  .admin-summary-card.is-active {
+    border-color: #ef4444;
+    background: #fef2f2;
+  }
+  #admin-toasts {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+    max-width: min(24rem, calc(100vw - 2rem));
+    pointer-events: none;
+  }
+  .admin-toast {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    border-radius: 0.5rem;
+    padding: 0.65rem 0.95rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    line-height: 1.4;
+    color: #fff;
+    box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.3);
+    animation: admin-toast-in 0.18s ease-out;
+    pointer-events: auto;
+    word-break: break-word;
+  }
+  .admin-toast.is-success { background: #15803d; }
+  .admin-toast.is-error { background: #b91c1c; }
+  .admin-toast.is-info { background: #334155; }
+  .admin-toast.is-leaving {
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 0.25s, transform 0.25s;
+  }
+  @keyframes admin-toast-in {
+    from { opacity: 0; transform: translateY(10px); }
   }
   @media (max-width: 768px) {
     #app-sidebar {
@@ -135,6 +216,7 @@
         <p class="text-sm text-slate-500 mt-1">検索・所属・権限で絞り込み、対象ユーザーの編集、ログ確認、権限設定へ直接移動できます。</p>
       </div>
       <div class="flex flex-wrap gap-2 xl:justify-end">
+        <button id="btn-users-csv" class="border border-slate-300 bg-white px-4 py-2 rounded hover:bg-slate-50" title="現在の絞り込み結果をCSVでダウンロード">CSV出力</button>
         <button id="btn-login-logs" class="bg-slate-700 text-white px-4 py-2 rounded hover:bg-slate-800">DSTTログイン履歴</button>
         <button id="btn-new-user" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">新規ユーザー作成</button>
       </div>
@@ -199,25 +281,27 @@
           <div class="admin-users-head">
             <table class="text-sm">
               <colgroup>
-                <col style="width: 170px;">
+                <col style="width: 135px;">
+                <col style="width: 110px;">
+                <col style="width: 86px;">
+                <col style="width: 115px;">
+                <col style="width: 125px;">
+                <col style="width: 88px;">
                 <col style="width: 150px;">
-                <col style="width: 90px;">
-                <col style="width: 160px;">
-                <col style="width: 170px;">
                 <col style="width: 130px;">
-                <col style="width: 190px;">
-                <col style="width: 300px;">
+                <col style="width: 176px;">
               </colgroup>
               <thead class="text-left">
                 <tr>
-                  <th class="p-3">ユーザーID</th>
-                  <th class="p-3">日本語名</th>
-                  <th class="p-3">管理者</th>
-                  <th class="p-3">支店</th>
-                  <th class="p-3">営業所</th>
+                  <th class="p-3 admin-sort-th" data-sort="username">ユーザーID<span class="admin-sort-arrow">↕</span></th>
+                  <th class="p-3 admin-sort-th" data-sort="name">日本語名<span class="admin-sort-arrow">↕</span></th>
+                  <th class="p-3 admin-sort-th" data-sort="role">管理者<span class="admin-sort-arrow">↕</span></th>
+                  <th class="p-3 admin-sort-th" data-sort="branch">支店<span class="admin-sort-arrow">↕</span></th>
+                  <th class="p-3 admin-sort-th" data-sort="office">営業所<span class="admin-sort-arrow">↕</span></th>
                   <th class="p-3">担当</th>
                   <th class="p-3">個人/グループ権限</th>
-                  <th class="p-3 text-right">操作</th>
+                  <th class="p-3 admin-sort-th" data-sort="last_login">最終ログイン<span class="admin-sort-arrow">↕</span></th>
+                  <th class="p-3 text-right admin-col-actions">操作</th>
                 </tr>
               </thead>
             </table>
@@ -225,14 +309,15 @@
           <div class="admin-users-body">
             <table class="text-sm">
               <colgroup>
-                <col style="width: 170px;">
+                <col style="width: 135px;">
+                <col style="width: 110px;">
+                <col style="width: 86px;">
+                <col style="width: 115px;">
+                <col style="width: 125px;">
+                <col style="width: 88px;">
                 <col style="width: 150px;">
-                <col style="width: 90px;">
-                <col style="width: 160px;">
-                <col style="width: 170px;">
                 <col style="width: 130px;">
-                <col style="width: 190px;">
-                <col style="width: 300px;">
+                <col style="width: 176px;">
               </colgroup>
               <tbody id="users-tbody"></tbody>
             </table>
@@ -262,6 +347,15 @@
         <div>
           <label class="block text-sm font-medium mb-1">終了日</label>
           <input id="access-to" type="date" class="border rounded px-3 py-2">
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">期間</label>
+          <div class="flex gap-1">
+            <button type="button" class="access-preset border border-slate-300 bg-white px-2 py-2 rounded text-xs hover:bg-slate-50" data-days="0">今日</button>
+            <button type="button" class="access-preset border border-slate-300 bg-white px-2 py-2 rounded text-xs hover:bg-slate-50" data-days="7">7日</button>
+            <button type="button" class="access-preset border border-slate-300 bg-white px-2 py-2 rounded text-xs hover:bg-slate-50" data-days="30">30日</button>
+            <button type="button" class="access-preset border border-slate-300 bg-white px-2 py-2 rounded text-xs hover:bg-slate-50" data-days="all">全て</button>
+          </div>
         </div>
         <div>
           <label class="block text-sm font-medium mb-1">件数</label>
@@ -601,10 +695,35 @@
   <section id="tab-announcements" class="admin-section hidden">
     <div class="bg-white rounded-xl shadow p-6">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-semibold">お知らせ管理</h2>
-        <a href="/tools/user_management/announcements" class="text-blue-600 hover:underline">専用ページを開く →</a>
+        <div>
+          <h2 class="text-xl font-semibold">お知らせ管理</h2>
+          <p class="text-sm text-slate-500 mt-1">全ユーザーのダッシュボードに表示されるお知らせを配信・管理します。</p>
+        </div>
+        <a href="/tools/user_management/announcements" class="text-blue-600 hover:underline text-sm whitespace-nowrap">専用ページを開く →</a>
       </div>
-      <p class="text-gray-600">お知らせ管理は専用ページでご利用ください。</p>
+
+      <div class="border rounded p-4 mb-6 bg-gray-50">
+        <h3 class="font-medium mb-3">➕ 新しいお知らせを配信</h3>
+        <form id="form-announcement" class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium mb-1">タイトル（任意）</label>
+            <input name="title" class="w-full border rounded px-3 py-2" placeholder="未入力の場合は「お知らせ」になります">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">本文（必須）</label>
+            <textarea name="content" rows="4" required class="w-full border rounded px-3 py-2" placeholder="お知らせの内容を入力してください"></textarea>
+          </div>
+          <div class="text-right">
+            <button type="submit" class="bg-red-600 text-white px-5 py-2 rounded hover:bg-red-700">配信</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-medium">配信済みのお知らせ</h3>
+        <span id="announcement-count" class="text-xs text-gray-500"></span>
+      </div>
+      <div id="announcement-list" class="space-y-3"></div>
     </div>
   </section>
 
@@ -863,6 +982,33 @@
   </div>
 </div>
 
+<!-- ===== 資格情報表示モーダル（新規作成・PW変更後） ===== -->
+<div id="modal-credential" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
+    <h3 id="credential-title" class="text-xl font-bold mb-2">✅ ユーザーを作成しました</h3>
+    <p class="text-sm text-gray-600 mb-4">以下の内容を本人に伝えてください。<b>この画面を閉じるとパスワードは再表示できません。</b></p>
+    <div class="space-y-2 mb-4">
+      <div class="flex items-center justify-between border rounded px-3 py-2 bg-gray-50">
+        <div>
+          <div class="text-xs text-gray-500">ユーザーID</div>
+          <div id="credential-username" class="font-mono font-semibold"></div>
+        </div>
+      </div>
+      <div class="flex items-center justify-between border rounded px-3 py-2 bg-gray-50">
+        <div>
+          <div class="text-xs text-gray-500">パスワード</div>
+          <div id="credential-password" class="font-mono font-semibold"></div>
+        </div>
+        <button type="button" id="btn-copy-credential" class="border border-slate-300 bg-white px-3 py-1.5 rounded text-sm hover:bg-slate-50 whitespace-nowrap">コピー</button>
+      </div>
+    </div>
+    <button type="button" id="btn-close-credential" class="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">閉じる</button>
+  </div>
+</div>
+
+<!-- ===== トースト通知 ===== -->
+<div id="admin-toasts" aria-live="polite"></div>
+
 <script>
 const state = {
   users: [],
@@ -874,6 +1020,7 @@ const state = {
   accessDetail: null,
   userPage: 1,
   userPageSize: 50,
+  userSort: { key: null, dir: 1 },
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -888,8 +1035,43 @@ async function api(url, options = {}) {
   return json;
 }
 
+// ===== トースト通知 =====
+function toast(message, type = 'success', duration = 3600) {
+  const box = $('#admin-toasts');
+  if (!box) { alert(message); return; }
+  const icons = { success: '✅', error: '⚠️', info: 'ℹ️' };
+  const el = document.createElement('div');
+  el.className = `admin-toast is-${type}`;
+  el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  el.innerHTML = `<span>${icons[type] || ''}</span><span></span>`;
+  el.lastElementChild.textContent = message;
+  box.appendChild(el);
+  const remove = () => {
+    el.classList.add('is-leaving');
+    setTimeout(() => el.remove(), 260);
+  };
+  el.addEventListener('click', remove);
+  setTimeout(remove, type === 'error' ? Math.max(duration, 6000) : duration);
+}
+const toastError = (err) => toast(typeof err === 'string' ? err : `エラー: ${err.message}`, 'error');
+
+// ===== モーダル共通（Esc / 背景クリックで閉じる） =====
+// 資格情報モーダルはパスワード再表示不可のため誤操作で閉じない
+const MODAL_KEEP_OPEN = new Set(['modal-credential']);
+document.addEventListener('click', (e) => {
+  const overlay = e.target.closest('[id^="modal-"]');
+  if (overlay && e.target === overlay && !MODAL_KEEP_OPEN.has(overlay.id)) {
+    overlay.classList.add('hidden');
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const open = $$('[id^="modal-"]').filter(m => !m.classList.contains('hidden') && !MODAL_KEEP_OPEN.has(m.id));
+  if (open.length) open[open.length - 1].classList.add('hidden');
+});
+
 // ===== Tabs =====
-function activateAdminTab(tab) {
+function activateAdminTab(tab, opts = {}) {
   const btn = document.querySelector(`.admin-tab[data-tab="${tab}"]`);
   if (!btn) return;
   $$('.admin-tab').forEach(b => {
@@ -898,8 +1080,13 @@ function activateAdminTab(tab) {
   });
   btn.classList.add('border-red-200', 'bg-red-50', 'text-red-700', 'font-medium');
   btn.classList.remove('border-transparent', 'text-gray-600');
+  btn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   $$('.admin-section').forEach(sec => sec.classList.add('hidden'));
   $(`#tab-${tab}`).classList.remove('hidden');
+  if (!opts.skipHash) {
+    const hash = tab === 'users' ? '' : `#tab=${tab}`;
+    if (location.hash !== hash) history.replaceState(null, '', location.pathname + location.search + hash);
+  }
   if (tab === 'users') loadUsers();
   if (tab === 'access-management') loadAccessManagement();
   if (tab === 'permissions') loadPermissions();
@@ -908,10 +1095,17 @@ function activateAdminTab(tab) {
   if (tab === 'siteplus-codes') loadSiteplusCodes();
   if (tab === 'leavemgr-codes') loadLeaveMgrCodes();
   if (tab === 'tool-management') loadToolManagement();
+  if (tab === 'announcements') loadAnnouncements();
   if (tab === 'mail') loadMailTab();
 }
 
+function tabFromHash() {
+  const m = location.hash.match(/tab=([\w-]+)/);
+  return m ? m[1] : 'users';
+}
+
 $$('.admin-tab').forEach(btn => btn.addEventListener('click', () => activateAdminTab(btn.dataset.tab)));
+window.addEventListener('hashchange', () => activateAdminTab(tabFromHash(), { skipHash: true }));
 
 // ===== Users =====
 async function loadUsers() {
@@ -973,25 +1167,90 @@ function renderUserSummary(users) {
   const admins = state.users.filter(u => u.is_admin).length;
   const missingOffice = state.users.filter(u => !u.office_id).length;
   const extraOffice = state.users.filter(u => (u.extra_office_ids || []).length).length;
+  const roleSel = $('#user-filter-role')?.value || 'all';
+  const statusSel = $('#user-filter-status')?.value || 'all';
   const cards = [
-    ['総ユーザー', total],
-    ['表示中', users.length],
-    ['管理者', admins],
-    ['営業所未設定', missingOffice],
-    ['追加営業所あり', extraOffice],
+    ['総ユーザー', total, null, false],
+    ['表示中', users.length, null, false],
+    ['管理者', admins, 'admin', roleSel === 'admin'],
+    ['営業所未設定', missingOffice, 'missing-office', statusSel === 'missing-office'],
+    ['追加営業所あり', extraOffice, 'extra-office', statusSel === 'extra-office'],
   ];
-  $('#user-summary').innerHTML = cards.map(([label, value]) => `
-    <div class="border border-slate-200 rounded bg-white p-3 shadow-sm">
+  $('#user-summary').innerHTML = cards.map(([label, value, filter, active]) => `
+    <div class="admin-summary-card border border-slate-200 rounded bg-white p-3 shadow-sm ${active ? 'is-active' : ''}"
+         ${filter ? `data-filter="${filter}" title="クリックで絞り込み" role="button" tabindex="0"` : ''}>
       <div class="text-xs font-semibold text-slate-500">${escape(label)}</div>
       <div class="text-2xl font-bold mt-1">${escape(value)}</div>
     </div>
   `).join('');
 }
 
+// サマリーカードのクリックで該当フィルタをトグル適用
+$('#user-summary')?.addEventListener('click', (e) => {
+  const card = e.target.closest('.admin-summary-card[data-filter]');
+  if (!card) return;
+  const filter = card.dataset.filter;
+  if (filter === 'admin') {
+    const sel = $('#user-filter-role');
+    sel.value = sel.value === 'admin' ? 'all' : 'admin';
+  } else {
+    const sel = $('#user-filter-status');
+    sel.value = sel.value === filter ? 'all' : filter;
+  }
+  resetUserPageAndRender();
+});
+
+const USER_SORT_ACCESSORS = {
+  username: u => (u.username || '').toLowerCase(),
+  name: u => (u.name || '').toLowerCase(),
+  role: u => (u.is_admin ? 0 : 1),
+  branch: u => (u.branch_name || '').toLowerCase() || '￿',
+  office: u => (u.office_name || '').toLowerCase() || '￿',
+  last_login: u => u.last_login_at || '',
+};
+
+function sortedFilteredUsers() {
+  const rows = filteredUsers();
+  const { key, dir } = state.userSort;
+  const accessor = USER_SORT_ACCESSORS[key];
+  if (!accessor) return rows;
+  return [...rows].sort((a, b) => {
+    const va = accessor(a);
+    const vb = accessor(b);
+    if (va < vb) return -dir;
+    if (va > vb) return dir;
+    return 0;
+  });
+}
+
+function updateSortIndicators() {
+  $$('.admin-sort-th').forEach(th => {
+    const active = th.dataset.sort === state.userSort.key;
+    th.classList.toggle('is-active', active);
+    const arrow = th.querySelector('.admin-sort-arrow');
+    if (arrow) arrow.textContent = active ? (state.userSort.dir === 1 ? '▲' : '▼') : '↕';
+  });
+}
+
+$$('.admin-sort-th').forEach(th => th.addEventListener('click', () => {
+  const key = th.dataset.sort;
+  if (state.userSort.key === key) {
+    // 昇順 → 降順 → 解除 の3状態トグル
+    if (state.userSort.dir === 1) state.userSort.dir = -1;
+    else state.userSort = { key: null, dir: 1 };
+  } else {
+    // 最終ログインは新しい順が自然なため初回クリックで降順にする
+    state.userSort = { key, dir: key === 'last_login' ? -1 : 1 };
+  }
+  state.userPage = 1;
+  renderUsers();
+}));
+
 function renderUsers() {
   const tbody = $('#users-tbody');
-  const rows = filteredUsers();
+  const rows = sortedFilteredUsers();
   renderUserSummary(rows);
+  updateSortIndicators();
   const pageSize = Number($('#user-page-size')?.value || state.userPageSize || 50);
   state.userPageSize = pageSize;
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
@@ -1007,7 +1266,7 @@ function renderUsers() {
   $('#user-prev-page').classList.toggle('opacity-40', state.userPage <= 1);
   $('#user-next-page').classList.toggle('opacity-40', state.userPage >= totalPages);
   if (!pageRows.length) {
-    tbody.innerHTML = '<tr><td class="p-8 text-center text-gray-500" colspan="8">条件に合うユーザーはいません。</td></tr>';
+    tbody.innerHTML = '<tr><td class="p-8 text-center text-gray-500" colspan="9">条件に合うユーザーはいません。</td></tr>';
     return;
   }
   tbody.innerHTML = pageRows.map(u => {
@@ -1025,8 +1284,11 @@ function renderUsers() {
         <span class="admin-chip is-ok">個人 ${personalCount}</span>
         <span class="admin-chip ml-1">グループ ${groupCount}</span>
       </td>
-      <td class="p-3">
-        <div class="flex flex-wrap justify-end gap-1.5 min-w-64">
+      <td class="p-3 whitespace-nowrap" title="${u.last_login_at ? escape(fmtDate(u.last_login_at)) : 'ログイン記録なし'}">
+        ${u.last_login_at ? `<div>${fmtRelative(u.last_login_at)}</div><div class="text-xs text-slate-400">${fmtDateMin(u.last_login_at)}</div>` : '<span class="text-slate-400">-</span>'}
+      </td>
+      <td class="p-3 admin-col-actions">
+        <div class="flex flex-wrap justify-end gap-1.5">
           <button onclick="openEditUser(${u.id})" class="admin-action bg-blue-600 text-white px-2.5 py-1 rounded text-xs hover:bg-blue-700">編集</button>
           <button onclick="openUserPermissions(${u.id})" class="admin-action bg-indigo-600 text-white px-2.5 py-1 rounded text-xs hover:bg-indigo-700">権限</button>
           <button onclick="openUserAccess(${u.id})" class="admin-action bg-slate-700 text-white px-2.5 py-1 rounded text-xs hover:bg-slate-800">ログ</button>
@@ -1037,6 +1299,44 @@ function renderUsers() {
     </tr>
   `}).join('');
 }
+
+// ===== CSVエクスポート =====
+function exportUsersCsv() {
+  const rows = sortedFilteredUsers();
+  if (!rows.length) { toast('出力対象のユーザーがいません。', 'info'); return; }
+  const header = ['ユーザーID', '日本語名', '権限', '支店', '支店コード', '営業所', '営業所コード', '担当', '個人権限数', 'グループ権限数', '最終ログイン'];
+  const csvCell = (v) => {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [header.map(csvCell).join(',')];
+  rows.forEach(u => {
+    lines.push([
+      u.username,
+      u.name,
+      u.is_admin ? '管理者' : '一般',
+      u.branch_name || '',
+      u.branch_code || '',
+      u.office_name || '',
+      u.office_code || '',
+      u.department_name || '',
+      (u.tool_keys || []).length,
+      (u.group_tool_keys || []).length,
+      u.last_login_at ? fmtDate(u.last_login_at) : '',
+    ].map(csvCell).join(','));
+  });
+  // Excel で文字化けしないよう BOM 付き UTF-8 で出力
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  a.href = URL.createObjectURL(blob);
+  a.download = `dstt_users_${stamp}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast(`${rows.length}件のユーザーをCSV出力しました。`);
+}
+$('#btn-users-csv')?.addEventListener('click', exportUsersCsv);
 
 function escape(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -1052,6 +1352,31 @@ function fmtDate(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return escape(value);
   return d.toLocaleString('ja-JP', { hour12: false, timeZone: 'Asia/Tokyo' });
+}
+
+function fmtDateMin(value) {
+  // 分精度の短い日時表示（一覧セル用）
+  return fmtDate(value).replace(/:\d{2}$/, '');
+}
+
+function fmtRelative(value) {
+  if (!value) return '-';
+  let raw = String(value);
+  // TZサフィックスの無い日時はJST保存値として解釈する
+  if (!/[zZ]|[+-]\d{2}:\d{2}$/.test(raw)) raw += '+09:00';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return '-';
+  const diffMs = Date.now() - d.getTime();
+  if (diffMs < 60000) return 'たった今';
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 60) return `${mins}分前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}時間前`;
+  const days = Math.floor(hours / 24);
+  if (days < 31) return `${days}日前`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}ヶ月前`;
+  return `${Math.floor(months / 12)}年前`;
 }
 
 function fmtBytes(bytes) {
@@ -1243,6 +1568,28 @@ $('#btn-access-load')?.addEventListener('click', loadSelectedAccessLogs);
 ['#access-search', '#access-from', '#access-to', '#access-limit'].forEach(sel => {
   $(sel)?.addEventListener('change', () => loadSelectedAccessLogs());
 });
+
+// 期間プリセット（今日 / 7日 / 30日 / 全て）
+$$('.access-preset').forEach(btn => btn.addEventListener('click', () => {
+  const days = btn.dataset.days;
+  const toLocalIso = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  };
+  if (days === 'all') {
+    $('#access-from').value = '';
+    $('#access-to').value = '';
+  } else {
+    const today = new Date();
+    const from = new Date();
+    from.setDate(today.getDate() - Number(days));
+    $('#access-from').value = toLocalIso(from);
+    $('#access-to').value = toLocalIso(today);
+  }
+  loadSelectedAccessLogs();
+}));
 $('#access-search')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
@@ -1298,11 +1645,45 @@ $('#btn-gen-pw').addEventListener('click', async () => {
   $('#form-new-user [name=password]').value = password;
 });
 
+// ===== 資格情報表示モーダル =====
+function showCredentialModal(title, username, password) {
+  $('#credential-title').textContent = title;
+  $('#credential-username').textContent = username;
+  $('#credential-password').textContent = password;
+  $('#modal-credential').classList.remove('hidden');
+}
+async function copyTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) {
+    // 非HTTPS環境等でclipboard APIが使えない場合のフォールバック
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+}
+$('#btn-copy-credential')?.addEventListener('click', async () => {
+  const username = $('#credential-username').textContent;
+  const password = $('#credential-password').textContent;
+  const ok = await copyTextToClipboard(`ユーザーID: ${username}\nパスワード: ${password}`);
+  if (ok) toast('ID・パスワードをコピーしました。');
+  else toastError('コピーに失敗しました。手動で控えてください。');
+});
+$('#btn-close-credential')?.addEventListener('click', () => $('#modal-credential').classList.add('hidden'));
+
 $('#form-new-user').addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
   try {
-    const res = await api('/tools/user_management/api/users', {
+    await api('/tools/user_management/api/users', {
       method: 'POST',
       body: {
         username: fd.get('username'),
@@ -1311,10 +1692,10 @@ $('#form-new-user').addEventListener('submit', async (e) => {
         is_admin: !!fd.get('is_admin'),
       }
     });
-    alert(res.message);
     $('#modal-new-user').classList.add('hidden');
+    showCredentialModal('✅ ユーザーを作成しました', String(fd.get('username') || ''), String(fd.get('password') || ''));
     loadUsers();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 async function openEditUser(userId) {
@@ -1413,8 +1794,9 @@ $('#form-edit-user').addEventListener('submit', async (e) => {
       body: { office_ids: getCheckedExtraOffices() }
     });
     $('#modal-edit-user').classList.add('hidden');
+    toast('ユーザー情報を保存しました。');
     loadUsers();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 async function openChangePw(userId) {
@@ -1439,9 +1821,10 @@ $('#form-change-pw').addEventListener('submit', async (e) => {
       method: 'PUT',
       body: { password: f.password.value }
     });
-    alert(res.message + '\n新しいパスワード: ' + res.new_password);
     $('#modal-change-pw').classList.add('hidden');
-  } catch (err) { alert('エラー: ' + err.message); }
+    const username = (f.user_info.value || '').split(' ')[0];
+    showCredentialModal('🔐 パスワードを変更しました', username, res.new_password || f.password.value);
+  } catch (err) { toastError(err); }
 });
 
 async function deleteUser(userId) {
@@ -1450,9 +1833,9 @@ async function deleteUser(userId) {
   if (!confirm(`ユーザー「${user.username}」（${user.name}）を削除しますか？`)) return;
   try {
     const res = await api(`/tools/user_management/api/users/${userId}`, { method: 'DELETE' });
-    alert(res.message);
+    toast(res.message);
     loadUsers();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 function resetUserPageAndRender() {
@@ -1460,8 +1843,11 @@ function resetUserPageAndRender() {
   renderUsers();
 }
 
-['#user-search', '#user-filter-branch', '#user-filter-office', '#user-filter-role', '#user-filter-status', '#user-page-size'].forEach(sel => {
-  $(sel)?.addEventListener('input', resetUserPageAndRender);
+// テキスト検索は input のみで反映する。change（blur時）も拾うと、検索直後に
+// 行内ボタンを押した際 mousedown と mouseup の間で一覧が再描画され、
+// 1回目のクリックが無効になるため。
+$('#user-search')?.addEventListener('input', resetUserPageAndRender);
+['#user-filter-branch', '#user-filter-office', '#user-filter-role', '#user-filter-status', '#user-page-size'].forEach(sel => {
   $(sel)?.addEventListener('change', resetUserPageAndRender);
 });
 
@@ -1607,16 +1993,16 @@ function renderPermissionGrid() {
 
 $('#btn-perm-save').addEventListener('click', async () => {
   const userId = parseInt($('#perm-user-select').value);
-  if (!userId) return alert('ユーザーを選択してください。');
+  if (!userId) return toast('ユーザーを選択してください。', 'info');
   const selected = $$('#perm-tool-grid .perm-cb:checked:not(:disabled)').map(cb => cb.dataset.key);
   try {
     await api(`/tools/user_management/api/users/${userId}/tools`, {
       method: 'PUT',
       body: { tool_keys: selected }
     });
-    alert('ツールアクセス権を保存しました');
+    toast('ツールアクセス権を保存しました。');
     loadPermissions();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 // ===== Organization =====
@@ -1688,13 +2074,13 @@ function renderOrganization() {
 
 $('#btn-add-branch').addEventListener('click', async () => {
   const name = $('#new-branch-name').value.trim();
-  if (!name) return alert('支店名を入力してください。');
+  if (!name) return toast('支店名を入力してください。', 'info');
   const code = (prompt('支店コード（任意。空欄可）', '') || '').trim() || null;
   try {
     await api('/tools/user_management/api/branches', { method: 'POST', body: { name, code } });
     $('#new-branch-name').value = '';
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 async function editBranch(id) {
@@ -1709,7 +2095,7 @@ async function editBranch(id) {
       body: { name, code: code.trim() || null }
     });
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 async function setBranchCode(id) {
   const cur = state.branches.find(b => b.id === id);
@@ -1721,14 +2107,14 @@ async function setBranchCode(id) {
       body: { name: cur.name, code: code.trim() || null }
     });
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 async function deleteBranch(id) {
   if (!confirm('支店を削除すると、配下の営業所・担当・所属ユーザーの紐付けも解除されます。続行しますか？')) return;
   try {
     await api(`/tools/user_management/api/branches/${id}`, { method: 'DELETE' });
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 async function addOffice(branchId) {
@@ -1740,7 +2126,7 @@ async function addOffice(branchId) {
     await api('/tools/user_management/api/offices', { method: 'POST', body: { branch_id: branchId, name, code } });
     input.value = '';
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 async function editOffice(id) {
   let cur = null;
@@ -1758,7 +2144,7 @@ async function editOffice(id) {
       body: { name, code: code.trim() || null }
     });
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 async function setOfficeCode(id) {
   let cur = null;
@@ -1774,14 +2160,14 @@ async function setOfficeCode(id) {
       body: { name: cur.name, code: code.trim() || null }
     });
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 async function deleteOffice(id) {
   if (!confirm('営業所を削除すると、配下の担当・所属ユーザーの紐付けも解除されます。続行しますか？')) return;
   try {
     await api(`/tools/user_management/api/offices/${id}`, { method: 'DELETE' });
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 async function addDepartment(officeId) {
@@ -1792,7 +2178,7 @@ async function addDepartment(officeId) {
     await api('/tools/user_management/api/departments', { method: 'POST', body: { office_id: officeId, name } });
     input.value = '';
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 async function renameDepartment(id) {
   const name = prompt('新しい担当名');
@@ -1800,14 +2186,14 @@ async function renameDepartment(id) {
   try {
     await api(`/tools/user_management/api/departments/${id}`, { method: 'PUT', body: { name } });
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 async function deleteDepartment(id) {
   if (!confirm('担当を削除すると、所属ユーザーの紐付けも解除されます。続行しますか？')) return;
   try {
     await api(`/tools/user_management/api/departments/${id}`, { method: 'DELETE' });
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 // ===== Group permissions =====
@@ -1877,18 +2263,19 @@ function renderGroupRules() {
 
 $('#btn-gp-add').addEventListener('click', async () => {
   const tool = $('#gp-tool').value;
-  if (!tool) return alert('ツールを選択してください。');
+  if (!tool) return toast('ツールを選択してください。', 'info');
   const branch = $('#gp-branch').value || null;
   const office = $('#gp-office').value || null;
   const dept = $('#gp-dept').value || null;
-  if (!branch && !office && !dept) return alert('支店・営業所・担当のいずれか1つ以上を指定してください。');
+  if (!branch && !office && !dept) return toast('支店・営業所・担当のいずれか1つ以上を指定してください。', 'info');
   try {
     await api('/tools/user_management/api/group-tool-permissions', {
       method: 'POST',
       body: { tool_key: tool, branch_id: branch, office_id: office, department_id: dept }
     });
+    toast('グループ付与を追加しました。');
     loadGroupPerms();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 async function deleteGroupRule(id) {
@@ -1896,7 +2283,7 @@ async function deleteGroupRule(id) {
   try {
     await api(`/tools/user_management/api/group-tool-permissions/${id}`, { method: 'DELETE' });
     loadGroupPerms();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 // ===== Siteplus codes =====
@@ -2046,8 +2433,8 @@ function updateSpSelectionUI() {
   if (head) head.checked = allChecked;
 }
 
-['#sp-filter', '#sp-filter-active', '#sp-filter-office'].forEach(sel => {
-  $(sel)?.addEventListener('input', renderSiteplusCodes);
+$('#sp-filter')?.addEventListener('input', renderSiteplusCodes);
+['#sp-filter-active', '#sp-filter-office'].forEach(sel => {
   $(sel)?.addEventListener('change', renderSiteplusCodes);
 });
 
@@ -2069,15 +2456,15 @@ $('#btn-sp-clear-sel')?.addEventListener('click', () => {
 });
 
 $('#btn-sp-bulk').addEventListener('click', async () => {
-  if (spState.dirty.size === 0) return alert('変更はありません。');
+  if (spState.dirty.size === 0) return toast('変更はありません。', 'info');
   const items = Array.from(spState.dirty.entries()).map(([id, office_code]) => ({ id, office_code }));
   try {
     await api('/tools/user_management/api/siteplus/sites/office-code/bulk', {
       method: 'PUT', body: { items }
     });
-    alert(`${items.length}件を更新しました。`);
+    toast(`${items.length}件を更新しました。`);
     loadSiteplusCodes();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 $('#btn-sp-bulk-edit')?.addEventListener('click', () => {
@@ -2100,7 +2487,7 @@ $('#form-sp-bulk')?.addEventListener('submit', async (e) => {
   const officeMode = form.office_code_mode.value;
   const activeMode = form.active_mode.value;
   if (officeMode === '__KEEP__' && activeMode === '__KEEP__') {
-    return alert('変更する項目を選択してください。');
+    return toast('変更する項目を選択してください。', 'info');
   }
   const ids = Array.from(spState.selected);
   const body = { ids };
@@ -2110,10 +2497,10 @@ $('#form-sp-bulk')?.addEventListener('submit', async (e) => {
     const res = await api('/tools/user_management/api/siteplus/sites/office-code/bulk', {
       method: 'PUT', body
     });
-    alert(`${res.updated || 0} 件を更新しました。`);
+    toast(`${res.updated || 0} 件を更新しました。`);
     $('#modal-sp-bulk').classList.add('hidden');
     loadSiteplusCodes();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 // ===== Leave_mgr codes =====
@@ -2142,8 +2529,8 @@ async function saveLeaveCalendarCode(btn) {
       method: 'PUT',
       body: { office_code: input.value.trim() || null }
     });
-    alert('保存しました');
-  } catch (err) { alert('エラー: ' + err.message); }
+    toast('保存しました。');
+  } catch (err) { toastError(err); }
 }
 
 // ===== Tool Management =====
@@ -2219,14 +2606,14 @@ function renderToolSettings() {
 
 $('#btn-add-cat').addEventListener('click', async () => {
   const name = $('#new-cat-name').value.trim();
-  if (!name) return alert('カテゴリ名を入力してください。');
+  if (!name) return toast('カテゴリ名を入力してください。', 'info');
   try {
     await api('/tools/user_management/api/tool-categories', {
       method: 'POST', body: { name }
     });
     $('#new-cat-name').value = '';
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 async function editCategory(id) {
@@ -2239,7 +2626,7 @@ async function editCategory(id) {
       method: 'PUT', body: { name }
     });
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 async function deleteCategory(id) {
@@ -2249,7 +2636,7 @@ async function deleteCategory(id) {
   try {
     await api(`/tools/user_management/api/tool-categories/${id}`, { method: 'DELETE' });
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 async function moveCategoryUp(idx) {
@@ -2261,7 +2648,7 @@ async function moveCategoryUp(idx) {
       method: 'PUT', body: { order }
     });
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 async function moveCategoryDown(idx) {
@@ -2273,7 +2660,7 @@ async function moveCategoryDown(idx) {
       method: 'PUT', body: { order }
     });
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 $('#btn-tm-save').addEventListener('click', async () => {
@@ -2292,9 +2679,9 @@ $('#btn-tm-save').addEventListener('click', async () => {
     await api('/tools/user_management/api/tool-settings/bulk', {
       method: 'PUT', body: { updates }
     });
-    alert('ツール設定を保存しました');
+    toast('ツール設定を保存しました。');
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 // ===== メール送信 =====
@@ -2451,7 +2838,7 @@ async function deleteMail(id) {
     inboxState.selectedId = null;
     $('#inbox-detail').innerHTML = '<p class="text-gray-400 text-sm">左の一覧からメールを選ぶと内容が表示されます。</p>';
     await Promise.all([loadInbox(), loadMailInboxStatus()]);
-  } catch (err) { alert('削除に失敗しました: ' + err.message); }
+  } catch (err) { toastError('削除に失敗しました: ' + err.message); }
 }
 
 $('#inbox-list')?.addEventListener('click', (e) => {
@@ -2470,9 +2857,9 @@ $('#btn-inbox-poll')?.addEventListener('click', async () => {
     const s = res.summary || {};
     await Promise.all([loadInbox(), loadMailInboxStatus()]);
     btn.textContent = `📨 今すぐ受信`;
-    if (!s.stored) alert('新着メールはありませんでした。');
+    if (!s.stored) toast('新着メールはありませんでした。', 'info');
   } catch (err) {
-    alert('受信に失敗しました: ' + err.message);
+    toastError('受信に失敗しました: ' + err.message);
     btn.textContent = '📨 今すぐ受信';
   } finally { btn.disabled = false; }
 });
@@ -2590,13 +2977,67 @@ document.addEventListener('click', async (e) => {
     await api(`/tools/user_management/api/mail/messages/${btn.dataset.id}/resend`, { method: 'POST', body: { send_now: true } });
     loadMailMessages();
   } catch (err) {
-    alert('再送に失敗しました: ' + err.message);
+    toastError('再送に失敗しました: ' + err.message);
     btn.disabled = false;
     btn.textContent = '再送';
   }
 });
 
-// 初期ロード
-loadUsers();
+// ===== お知らせ管理 =====
+async function loadAnnouncements() {
+  const list = $('#announcement-list');
+  try {
+    const { announcements } = await api('/tools/user_management/api/announcements');
+    const items = announcements || [];
+    $('#announcement-count').textContent = items.length ? `${items.length}件` : '';
+    if (!items.length) {
+      list.innerHTML = '<p class="text-sm text-gray-500 border rounded bg-gray-50 p-4">配信中のお知らせはありません。</p>';
+      return;
+    }
+    list.innerHTML = items.map(a => `
+      <div class="border rounded p-4 flex items-start justify-between gap-4">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-semibold">${escape(a.title || 'お知らせ')}</span>
+            <span class="text-xs text-gray-400">#${a.id}</span>
+          </div>
+          <p class="text-sm text-gray-700 mt-1 whitespace-pre-wrap break-words">${escape(a.content || '')}</p>
+          <p class="text-xs text-gray-400 mt-2">${escape(a.created_at || '')} / 配信者: ${escape(a.created_by || '-')}</p>
+        </div>
+        <button onclick="deleteAnnouncementItem(${a.id})" class="bg-red-500 text-white px-3 py-1.5 rounded text-xs hover:bg-red-600 whitespace-nowrap shrink-0">削除</button>
+      </div>
+    `).join('');
+  } catch (err) {
+    list.innerHTML = `<p class="text-sm text-red-600 border rounded bg-red-50 p-4">読み込みに失敗しました: ${escape(err.message)}</p>`;
+  }
+}
+
+$('#form-announcement')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const content = f.content.value.trim();
+  if (!content) return toast('本文を入力してください。', 'info');
+  try {
+    await api('/tools/user_management/api/announcements', {
+      method: 'POST',
+      body: { title: f.title.value.trim(), content },
+    });
+    f.reset();
+    toast('お知らせを配信しました。');
+    loadAnnouncements();
+  } catch (err) { toastError(err); }
+});
+
+async function deleteAnnouncementItem(id) {
+  if (!confirm('このお知らせを削除しますか？（全ユーザーの表示から消えます）')) return;
+  try {
+    await api(`/tools/user_management/api/announcements/${id}`, { method: 'DELETE' });
+    toast('お知らせを削除しました。');
+    loadAnnouncements();
+  } catch (err) { toastError(err); }
+}
+
+// 初期ロード（URLハッシュのタブを復元）
+activateAdminTab(tabFromHash(), { skipHash: true });
 </script>
 {% endblock %}
