@@ -13,6 +13,13 @@ window.PICropTool = new (class extends PIToolBase {
     this.cropRect = null;
     const overlay = document.getElementById('crop-overlay');
     if (overlay) overlay.classList.remove('hidden');
+    // ハンドル/枠線は画面上で一定サイズに描くため、ズーム変更時に再描画する
+    if (!this._zoomBound) {
+      this._zoomBound = true;
+      PIEventBus.on('canvas:zoom-changed', () => {
+        if (PIToolbar.getCurrentTool() === this && this.cropRect) this.drawCrop();
+      });
+    }
   }
   deactivate() {
     super.deactivate();
@@ -83,11 +90,19 @@ window.PICropTool = new (class extends PIToolBase {
   onMouseUp(e) {
     this.cropping = false;
     this.dragHandle = null;
+    // ハンドルを反対側へ超えてドラッグした場合に負のサイズを正規化する
+    const r = this.cropRect;
+    if (r) {
+      if (r.w < 0) { r.x += r.w; r.w = -r.w; }
+      if (r.h < 0) { r.y += r.h; r.h = -r.h; }
+      this.drawCrop();
+    }
   }
   hitHandle(x, y) {
     if (!this.cropRect) return null;
     const r = this.cropRect;
-    const hs = 6;
+    // 当たり判定は画面上で約8pxになるようズームで補正（縮小表示でも掴める）
+    const hs = 8 / PICanvasEngine.getZoom();
     const handles = {
       'nw': [r.x, r.y], 'n': [r.x + r.w / 2, r.y],
       'ne': [r.x + r.w, r.y], 'w': [r.x, r.y + r.h / 2],
@@ -111,13 +126,16 @@ window.PICropTool = new (class extends PIToolBase {
     PICanvasEngine.clearOverlay();
     if (!this.cropRect) return;
     const r = this.cropRect;
+    // オーバーレイはキャンバス座標系ごとズームされるため、
+    // 線幅・ハンドル・文字は 1/zoom で画面上のサイズを一定にする
+    const z = PICanvasEngine.getZoom() || 1;
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(0, 0, size.width, size.height);
     ctx.clearRect(r.x, r.y, r.w, r.h);
     ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1 / z;
+    ctx.setLineDash([4 / z, 4 / z]);
     ctx.strokeRect(r.x, r.y, r.w, r.h);
     ctx.setLineDash([]);
     const third_w = r.w / 3, third_h = r.h / 3;
@@ -133,8 +151,23 @@ window.PICropTool = new (class extends PIToolBase {
       [r.x, r.y + r.h / 2], [r.x + r.w, r.y + r.h / 2],
       [r.x, r.y + r.h], [r.x + r.w / 2, r.y + r.h], [r.x + r.w, r.y + r.h]
     ];
+    const hs = 4 / z;
     ctx.fillStyle = '#fff';
-    handles.forEach(([hx, hy]) => { ctx.fillRect(hx - 4, hy - 4, 8, 8); });
+    handles.forEach(([hx, hy]) => { ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2); });
+    // 切り抜きサイズを枠の近くに表示（確定前にpxが分かる）
+    const label = Math.round(Math.abs(r.w)) + ' × ' + Math.round(Math.abs(r.h)) + ' px';
+    const fontPx = 12 / z;
+    ctx.font = fontPx + 'px sans-serif';
+    const tw = ctx.measureText(label).width;
+    const pad = 4 / z;
+    let lx = r.x, ly = r.y - fontPx - pad * 2.5;
+    if (ly < 0) ly = r.y + pad;                      // 上に余白が無ければ枠内へ
+    lx = Math.max(0, Math.min(lx, size.width - tw - pad * 2));
+    ctx.fillStyle = 'rgba(20,20,32,0.85)';
+    ctx.fillRect(lx, ly, tw + pad * 2, fontPx + pad * 2);
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'top';
+    ctx.fillText(label, lx + pad, ly + pad);
     ctx.restore();
   }
   applyCrop() {

@@ -9,7 +9,8 @@ window.PIMoveTool = new (class extends PIToolBase {
   deactivate() { super.deactivate(); PICanvasEngine.clearOverlay(); }
   onMouseDown(e) {
     const layer = PILayerManager.getActive();
-    if (!layer || layer.locked) return;
+    if (!layer) return;
+    if (layer.locked) { this.warnLocked(); return; }
     this.dragging = true;
     this.startX = e.canvasX; this.startY = e.canvasY;
     this.layerStartX = layer.x; this.layerStartY = layer.y;
@@ -58,8 +59,8 @@ window.PIMoveTool = new (class extends PIToolBase {
     return {
       title: '移動',
       fields: [
-        { type: 'number', label: 'X', key: 'x', value: Math.round(layer.x), onChange: (v) => { layer.x = parseInt(v); PILayerManager.requestRender(); } },
-        { type: 'number', label: 'Y', key: 'y', value: Math.round(layer.y), onChange: (v) => { layer.y = parseInt(v); PILayerManager.requestRender(); } },
+        { type: 'number', label: 'X', key: 'x', value: Math.round(layer.x), onChange: (v) => { const n = parseInt(v, 10); if (Number.isFinite(n)) { layer.x = n; PILayerManager.requestRender(); } } },
+        { type: 'number', label: 'Y', key: 'y', value: Math.round(layer.y), onChange: (v) => { const n = parseInt(v, 10); if (Number.isFinite(n)) { layer.y = n; PILayerManager.requestRender(); } } },
         { type: 'button-group', label: '横整列', key: 'ha', buttons: [
           { label: '左', onClick: () => align('left') },
           { label: '中央', onClick: () => align('hcenter') },

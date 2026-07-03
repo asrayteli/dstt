@@ -1,6 +1,7 @@
 /* PowerImager — LayerPanel: レイヤーパネル */
 window.PILayerPanel = (function () {
   let container;
+  let suppressClick = false; // ドラッグ直後のclickでアクティブ切替が走らないように
 
   function init() {
     container = document.getElementById('layer-panel-body');
@@ -17,26 +18,26 @@ window.PILayerPanel = (function () {
 
     const actions = document.createElement('div');
     actions.className = 'layer-panel-actions';
-    const addBtn = createBtn('+', () => { PILayerManager.addLayer(); PIHistoryManager.push('レイヤー追加'); });
-    const dupBtn = createBtn('複製', () => { PILayerManager.duplicateLayer(activeIdx); PIHistoryManager.push('複製'); });
-    const delBtn = createBtn('削除', () => { PILayerManager.removeLayer(activeIdx); PIHistoryManager.push('削除'); });
-    const upBtn = createBtn('↑', () => { if (activeIdx < layers.length - 1) PILayerManager.moveLayer(activeIdx, activeIdx + 1); });
-    const downBtn = createBtn('↓', () => { if (activeIdx > 0) PILayerManager.moveLayer(activeIdx, activeIdx - 1); });
-    const mergeBtn = createBtn('統合', () => { PILayerManager.mergeDown(activeIdx); PIHistoryManager.push('統合'); });
+    const addBtn = createBtn('+', () => { PILayerManager.addLayer(); PIHistoryManager.push('レイヤー追加'); }, '新規レイヤーを追加');
+    const dupBtn = createBtn('複製', () => { PILayerManager.duplicateLayer(activeIdx); PIHistoryManager.push('複製'); }, 'アクティブレイヤーを複製');
+    const delBtn = createBtn('削除', () => { PILayerManager.removeLayer(activeIdx); PIHistoryManager.push('削除'); }, 'アクティブレイヤーを削除');
+    const upBtn = createBtn('↑', () => { if (activeIdx < layers.length - 1) PILayerManager.moveLayer(activeIdx, activeIdx + 1); }, '前面へ移動');
+    const downBtn = createBtn('↓', () => { if (activeIdx > 0) PILayerManager.moveLayer(activeIdx, activeIdx - 1); }, '背面へ移動');
+    const mergeBtn = createBtn('統合', () => { PILayerManager.mergeDown(activeIdx); PIHistoryManager.push('統合'); }, '下のレイヤーと統合');
     const maskBtn = createBtn('マスク', () => {
       const layer = PILayerManager.getActive();
       if (!layer) return;
       if (!layer.mask) { PILayerManager.addMask(layer); PILayerManager.setMaskEditing(true); PIHistoryManager.push('マスク追加'); }
       else { PILayerManager.setMaskEditing(!PILayerManager.getMaskEditing()); }
-    });
+    }, 'レイヤーマスクを追加/編集');
     const editingMask = PILayerManager.isMaskEditing(PILayerManager.getActive());
     if (editingMask) maskBtn.classList.add('active');
-    const fxBtn = createBtn('効果', () => openEffectsDialog());
+    const fxBtn = createBtn('効果', () => openEffectsDialog(), 'レイヤースタイル（影・境界線・光彩）');
     const activeFx = PILayerManager.getActive();
     if (activeFx && activeFx.effects && hasFx(activeFx.effects)) fxBtn.classList.add('active');
-    const clipBtn = createBtn('クリップ', () => { PILayerManager.toggleClip(activeIdx); PIHistoryManager.push('クリッピング'); });
+    const clipBtn = createBtn('クリップ', () => { PILayerManager.toggleClip(activeIdx); PIHistoryManager.push('クリッピング'); }, '下のレイヤーの形にクリップ');
     if (activeFx && activeFx.clip) clipBtn.classList.add('active');
-    const groupBtn = createBtn('グループ化', () => { PILayerManager.createGroupFromActive(); PIHistoryManager.push('グループ化'); });
+    const groupBtn = createBtn('グループ化', () => { PILayerManager.createGroupFromActive(); PIHistoryManager.push('グループ化'); }, 'アクティブレイヤーでグループを作成');
     actions.append(addBtn, dupBtn, delBtn, upBtn, downBtn, mergeBtn, maskBtn, fxBtn, clipBtn, groupBtn);
     container.appendChild(actions);
 
@@ -60,7 +61,7 @@ window.PILayerPanel = (function () {
     });
     blendSel.addEventListener('change', () => {
       const layer = PILayerManager.getActive();
-      if (layer) { layer.blendMode = blendSel.value; PILayerManager.requestRender(); }
+      if (layer) { layer.blendMode = blendSel.value; PILayerManager.requestRender(); PIHistoryManager.push('ブレンドモード'); }
     });
     blendDiv.appendChild(blendSel);
     container.appendChild(blendDiv);
@@ -80,6 +81,8 @@ window.PILayerPanel = (function () {
       if (layer) { layer.opacity = parseInt(opacSlider.value) / 100; PILayerManager.requestRender(); }
       opacVal.textContent = opacSlider.value + '%';
     });
+    // ドラッグ確定時に履歴へ（Ctrl+Zで戻せるように）
+    opacSlider.addEventListener('change', () => { PIHistoryManager.push('不透明度変更'); });
     opacDiv.append(opacLabel, opacSlider, opacVal);
     container.appendChild(opacDiv);
 
@@ -89,7 +92,18 @@ window.PILayerPanel = (function () {
     const makeItem = (layer, i) => {
       const item = document.createElement('div');
       item.className = 'layer-item' + (i === activeIdx ? ' active' : '');
-      item.addEventListener('click', () => PILayerManager.setActiveIndex(i));
+      item.dataset.idx = i;
+      // 同じレイヤーの再クリックで再レンダリングしない（ダブルクリック操作を壊さない）
+      item.addEventListener('click', () => {
+        if (suppressClick) return;
+        if (PILayerManager.getActiveIndex() !== i) PILayerManager.setActiveIndex(i);
+      });
+      // ドラッグで並べ替え（ボタン/入力欄/マスクサムネから始まるドラッグは除外）
+      item.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('button, input, .layer-mask-thumb')) return;
+        startLayerDrag(e, layer, item, listEl);
+      });
       if (layer.type === 'adjustment') {
         item.addEventListener('dblclick', () => { PILayerManager.setActiveIndex(i); PIAdjustmentLayer.editDialog(layer); });
       }
@@ -114,8 +128,32 @@ window.PILayerPanel = (function () {
       name.className = 'layer-name';
       const prefix = (layer.clip ? '↳ ' : '') + (layer.type === 'adjustment' ? '◐ ' : '');
       name.textContent = prefix + layer.name;
-      if (layer.clip) name.title = '下のレイヤーにクリップ中';
+      name.title = layer.clip ? '下のレイヤーにクリップ中' : 'ダブルクリックで名前を変更';
       if (layer.type === 'adjustment') name.title = 'ダブルクリックで再編集';
+      // ダブルクリックでその場リネーム（調整レイヤーは再編集ダイアログを優先）
+      if (layer.type !== 'adjustment') {
+        name.addEventListener('dblclick', (ev) => {
+          ev.stopPropagation();
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.value = layer.name;
+          name.textContent = prefix;
+          name.appendChild(input);
+          const done = (commit) => {
+            if (commit && input.value.trim()) layer.name = input.value.trim();
+            render();
+          };
+          input.addEventListener('keydown', (ke) => {
+            ke.stopPropagation();
+            if (ke.key === 'Enter' && !ke.isComposing) done(true);
+            else if (ke.key === 'Escape') done(false);
+          });
+          input.addEventListener('blur', () => done(true));
+          input.addEventListener('click', (ce) => ce.stopPropagation());
+          input.focus();
+          input.select();
+        });
+      }
 
       const actionsDiv = document.createElement('div');
       actionsDiv.className = 'layer-actions';
@@ -174,6 +212,94 @@ window.PILayerPanel = (function () {
     }
 
     container.appendChild(listEl);
+  }
+
+  // レイヤーのドラッグ並べ替え。挿入位置をインジケータ線で示し、
+  // ドロップ時に配列を並べ替える。グループ内の2枚に挟まれた位置へ
+  // 落とした場合のみ、そのグループへ所属させる。
+  function startLayerDrag(e, layer, itemEl, listEl) {
+    const startX = e.clientX, startY = e.clientY;
+    const state = { started: false, slot: null, vis: null, indicator: null };
+
+    const computeSlot = (clientY) => {
+      const vis = state.vis;
+      let slot = vis.length;
+      for (let k = 0; k < vis.length; k++) {
+        const r = vis[k].el.getBoundingClientRect();
+        if (clientY < r.top + r.height / 2) { slot = k; break; }
+      }
+      return slot;
+    };
+
+    const onMove = (ev) => {
+      if (!state.started) {
+        if (Math.abs(ev.clientY - startY) < 5 && Math.abs(ev.clientX - startX) < 5) return;
+        state.started = true;
+        itemEl.classList.add('drag-source');
+        document.body.style.cursor = 'grabbing';
+        state.indicator = document.createElement('div');
+        state.indicator.className = 'layer-drop-indicator';
+        listEl.appendChild(state.indicator);
+        state.vis = [...listEl.querySelectorAll('.layer-item')]
+          .filter(el => el !== itemEl)
+          .map(el => ({ el, idx: parseInt(el.dataset.idx, 10) }));
+      }
+      // パネル端に近づいたら自動スクロール
+      const panel = document.getElementById('pi-panel');
+      if (panel) {
+        const pr = panel.getBoundingClientRect();
+        if (ev.clientY < pr.top + 30) panel.scrollTop -= 10;
+        else if (ev.clientY > pr.bottom - 30) panel.scrollTop += 10;
+      }
+      state.slot = computeSlot(ev.clientY);
+      const vis = state.vis;
+      const listRect = listEl.getBoundingClientRect();
+      let y = 0;
+      if (vis.length > 0) {
+        if (state.slot < vis.length) y = vis[state.slot].el.getBoundingClientRect().top - listRect.top;
+        else { const r = vis[vis.length - 1].el.getBoundingClientRect(); y = r.bottom - listRect.top; }
+      }
+      state.indicator.style.top = (y - 1) + 'px';
+    };
+
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      itemEl.classList.remove('drag-source');
+      if (state.indicator) state.indicator.remove();
+      if (!state.started) return;
+      suppressClick = true;
+      setTimeout(() => { suppressClick = false; }, 0);
+
+      const vis = state.vis, slot = state.slot;
+      if (!vis || vis.length === 0) return;
+      const layers = PILayerManager.getAll();
+      const from = layers.indexOf(layer);
+      if (from < 0) return;
+      let to;
+      if (slot < vis.length) {
+        // vis[slot] の1つ上に置く
+        let refIdx = vis[slot].idx;
+        if (from < refIdx) refIdx--;
+        to = refIdx + 1;
+      } else {
+        // 最下段の下に置く
+        let refIdx = vis[vis.length - 1].idx;
+        if (from < refIdx) refIdx--;
+        to = refIdx;
+      }
+      const above = slot > 0 ? layers[vis[slot - 1].idx] : null;
+      const below = slot < vis.length ? layers[vis[slot].idx] : null;
+      const g = (above && below && above.groupId != null && above.groupId === below.groupId) ? above.groupId : null;
+      if (to === from && (layer.groupId || null) === (g || null)) return; // 位置も所属も変化なし
+      layer.groupId = g;
+      PILayerManager.moveLayer(from, to);
+      PIHistoryManager.push('レイヤー並べ替え');
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   }
 
   function buildGroupHeader(grp) {
@@ -242,9 +368,10 @@ window.PILayerPanel = (function () {
     });
   }
 
-  function createBtn(text, onClick) {
+  function createBtn(text, onClick, title) {
     const btn = document.createElement('button');
     btn.textContent = text;
+    if (title) btn.title = title;
     btn.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
     return btn;
   }

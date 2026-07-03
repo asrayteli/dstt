@@ -35,7 +35,8 @@ window.PIBrushTool = new (class extends PIToolBase {
     // Alt押下中は一時スポイト（描画せず前景色を採取）
     if (e.altKey) { this.pickColor(e.canvasX, e.canvasY); return; }
     let layer = PILayerManager.getActive();
-    if (!layer || layer.locked) return;
+    if (!layer) return;
+    if (layer.locked) { this.warnLocked(); return; }
     // マスク編集中はマスクへ直接描画（ブラシ＝隠す）
     if (PILayerManager.isMaskEditing(layer)) {
       this.maskStroke = true;
@@ -47,6 +48,7 @@ window.PIBrushTool = new (class extends PIToolBase {
       return;
     }
     layer = PILayerManager.ensurePaintable(layer);
+    if (!layer) return;
     this.drawing = true;
     this.layerRef = layer;
     this.cacheColor();

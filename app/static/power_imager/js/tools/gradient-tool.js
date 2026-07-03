@@ -15,8 +15,10 @@ window.PIGradientTool = new (class extends PIToolBase {
 
   onMouseDown(e) {
     let layer = PILayerManager.getActive();
-    if (!layer || layer.locked) return;
+    if (!layer) return;
+    if (layer.locked) { this.warnLocked(); return; }
     layer = PILayerManager.ensurePaintable(layer);
+    if (!layer) return;
     this.layerRef = layer;
     this.dragging = true;
     this.x1 = e.canvasX; this.y1 = e.canvasY;

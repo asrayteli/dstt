@@ -13,8 +13,10 @@ window.PIRetouchTool = new (class extends PIToolBase {
 
   onMouseDown(e) {
     let layer = PILayerManager.getActive();
-    if (!layer || layer.locked) return;
+    if (!layer) return;
+    if (layer.locked) { this.warnLocked(); return; }
     layer = PILayerManager.ensurePaintable(layer);
+    if (!layer) return;
     this.drawing = true;
     this.lastX = e.canvasX;
     this.lastY = e.canvasY;

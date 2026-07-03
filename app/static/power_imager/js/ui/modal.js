@@ -2,6 +2,8 @@
 window.PIModal = (function () {
   let overlay, container;
   let currentConfig = null;
+  let keyHandler = null;
+  let confirmAction = null, cancelAction = null;
 
   function init() {
     overlay = document.getElementById('modal-overlay');
@@ -12,9 +14,15 @@ window.PIModal = (function () {
     currentConfig = config;
     if (!overlay || !container) init();
     container.innerHTML = '';
+    container.style.transform = '';
+
+    // プレビュー付きダイアログ（調整/フィルタ等）は、暗幕で結果が見えなくなるため
+    // 背景を暗くせず右上へ寄せて表示する（キャンバスを見ながら操作できる）。
+    overlay.classList.toggle('preview-mode', typeof config.onPreview === 'function');
 
     const h2 = document.createElement('h2');
     h2.textContent = config.title;
+    makeDraggable(h2);
     container.appendChild(h2);
 
     if (config.description) {
@@ -162,15 +170,18 @@ window.PIModal = (function () {
     const actions = document.createElement('div');
     actions.className = 'modal-actions';
 
+    cancelAction = () => { hide(); if (config.onCancel) config.onCancel(); };
+    confirmAction = () => { hide(); if (config.onConfirm) config.onConfirm(values); };
+
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'modal-btn modal-btn-secondary';
     cancelBtn.textContent = 'キャンセル';
-    cancelBtn.onclick = () => { hide(); if (config.onCancel) config.onCancel(); };
+    cancelBtn.onclick = () => cancelAction && cancelAction();
 
     const confirmBtn = document.createElement('button');
     confirmBtn.className = 'modal-btn modal-btn-primary';
     confirmBtn.textContent = config.confirmLabel || '適用';
-    confirmBtn.onclick = () => { hide(); if (config.onConfirm) config.onConfirm(values); };
+    confirmBtn.onclick = () => confirmAction && confirmAction();
 
     actions.appendChild(cancelBtn);
     actions.appendChild(confirmBtn);
@@ -178,11 +189,50 @@ window.PIModal = (function () {
 
     overlay.classList.remove('hidden');
 
-    overlay.onclick = (e) => { if (e.target === overlay) { hide(); if (config.onCancel) config.onCancel(); } };
+    overlay.onclick = (e) => { if (e.target === overlay) cancelAction && cancelAction(); };
+
+    // Enter=確定 / Escape=キャンセル（IME変換中のEnterは無視）
+    if (keyHandler) document.removeEventListener('keydown', keyHandler, true);
+    keyHandler = (e) => {
+      if (!currentConfig) return;
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelAction && cancelAction(); }
+      else if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'BUTTON') {
+        e.preventDefault(); e.stopPropagation(); confirmAction && confirmAction();
+      }
+    };
+    document.addEventListener('keydown', keyHandler, true);
+
+    // 最初の入力欄へフォーカス（数値/テキストは全選択してすぐ打ち替え可能に）
+    requestAnimationFrame(() => {
+      const first = container.querySelector('input[type=number], input[type=text], select');
+      if (first) { first.focus(); if (first.select) first.select(); }
+    });
+  }
+
+  // タイトルをつかんでダイアログを移動できるようにする（プレビュー中に対象が隠れた場合の退避手段）
+  function makeDraggable(handle) {
+    handle.style.cursor = 'move';
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const m = new DOMMatrix(getComputedStyle(container).transform);
+      const startX = e.clientX - m.e, startY = e.clientY - m.f;
+      const onMove = (ev) => {
+        container.style.transform = 'translate(' + (ev.clientX - startX) + 'px,' + (ev.clientY - startY) + 'px)';
+      };
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
   }
 
   function hide() {
     if (overlay) overlay.classList.add('hidden');
+    if (keyHandler) { document.removeEventListener('keydown', keyHandler, true); keyHandler = null; }
+    confirmAction = null; cancelAction = null;
     currentConfig = null;
   }
 
