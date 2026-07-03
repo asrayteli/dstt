@@ -438,6 +438,27 @@ class ToolSettings(db.Model):
         }
 
 
+class ToolPermissionTemplate(db.Model):
+    """要許可ツールの組合せを保存し、ユーザーへ一括適用する権限テンプレート。"""
+    __tablename__ = 'tool_permission_templates'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    tool_keys = db.Column(db.JSON, nullable=False, default=list)
+    created_by = db.Column(db.String(80), nullable=True)
+    created_at = db.Column(db.DateTime, default=utc_now)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'tool_keys': list(self.tool_keys or []),
+            'created_by': self.created_by,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class GroupToolPermission(db.Model):
     """支店/営業所/担当による一括ツールアクセス権付与。
     branch_id, office_id, department_id のうちNULLは「任意」を意味する。
