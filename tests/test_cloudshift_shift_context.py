@@ -346,7 +346,7 @@ def test_external_occupancy_includes_other_owner_scene(monkeypatch):
     other = _scene_project("P2", "OTHER_OWNER", {
         "2": [{"id": "e1", "value": "!A!佐藤", "employee_number": "E001"}],
     })
-    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [base_project(), other])
+    monkeypatch.setattr(cs, "_iter_project_summaries_for_month", lambda month_key, mode=None: [base_project(), other])
     warnings: list = []
     external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
     assert leave_days == []
@@ -363,7 +363,7 @@ def test_external_leave_entry_becomes_hard_unavailable(monkeypatch):
     other = _scene_project("P2", "OTHER_OWNER", {
         "2": [{"id": "e1", "value": "!PAID!佐藤", "employee_number": "E001"}],
     })
-    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [base_project(), other])
+    monkeypatch.setattr(cs, "_iter_project_summaries_for_month", lambda month_key, mode=None: [base_project(), other])
     warnings: list = []
     external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
     assert external == []
@@ -374,16 +374,16 @@ def test_external_leave_entry_becomes_hard_unavailable(monkeypatch):
 
 
 def test_external_assignments_loads_projects_once(monkeypatch):
-    """占有収集でプロジェクト一覧の全件ロードは 1 回だけ（性能回帰防止）。"""
+    """占有収集で対象月のプロジェクト一覧ロードは 1 回だけ（性能回帰防止）。"""
     from app.tools import cloudshift as cs
 
     iter_calls = {"count": 0}
 
-    def fake_iter():
+    def fake_iter(month_key, mode=None):
         iter_calls["count"] += 1
         return []
 
-    monkeypatch.setattr(cs, "_iter_stored_projects", fake_iter)
+    monkeypatch.setattr(cs, "_iter_project_summaries_for_month", fake_iter)
     warnings: list = []
     ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
     assert iter_calls["count"] == 1
@@ -397,7 +397,7 @@ def test_self_mirror_entries_excluded(monkeypatch):
         "2": [{"id": "e1", "value": "!A!佐藤", "employee_number": "E001",
                "sync_source_project_id": "P1"}],
     })
-    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [base_project(), other])
+    monkeypatch.setattr(cs, "_iter_project_summaries_for_month", lambda month_key, mode=None: [base_project(), other])
     warnings: list = []
     external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
     assert external == []
@@ -435,7 +435,7 @@ def test_substitute_resolved_helper_is_occupancy(monkeypatch):
             }],
         }}},
     }
-    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [base_project(), sub])
+    monkeypatch.setattr(cs, "_iter_project_summaries_for_month", lambda month_key, mode=None: [base_project(), sub])
     warnings: list = []
     external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
     assert leave_days == []
@@ -458,7 +458,7 @@ def test_person_book_leave_and_work(monkeypatch):
             "4": [{"id": "y", "value": "!A!佐藤"}],
         }}},
     }
-    monkeypatch.setattr(cs, "_iter_stored_projects", lambda: [base_project(), person_project])
+    monkeypatch.setattr(cs, "_iter_project_summaries_for_month", lambda month_key, mode=None: [base_project(), person_project])
     warnings: list = []
     external, leave_days = ctx.build_external_assignments(base_project(), YEAR, MONTH, warnings)
     assert [(u.employee_number, u.date) for u in leave_days] == [("E001", date(YEAR, MONTH, 3))]

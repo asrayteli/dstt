@@ -1019,17 +1019,6 @@ def _master_scope_from_payload(data: Any, *, existing: dict[str, Any] | None = N
     getter = data.get if hasattr(data, "get") else lambda key, default=None: default
     raw_people = getter("master_people", _master_people_text(existing or {}))
     raw_sites = getter("master_sites", _master_sites_text(existing or {}))
-    raw_target_type = getter("master_target_type", "")
-    if str(raw_target_type or "").strip():
-        target_type = _sanitize_master_target_type(raw_target_type)
-    elif existing:
-        target_type = _master_target_type_for_project(existing)
-    elif _master_payload_items(raw_people):
-        target_type = "person"
-    elif _master_payload_items(raw_sites):
-        target_type = "scene"
-    else:
-        target_type = "scene"
     people = _master_people_from_payload(raw_people)
     sites = _master_sites_from_payload(raw_sites)
     raw_target_type = str(getter("master_target_type", "") or "").strip().lower()
@@ -2489,11 +2478,15 @@ def _owner_display_label(owner_user_id: Any) -> str:
 def _find_projects_with_link_key(
     link_key: tuple[str, str] | None, *, exclude_id: str | None = None
 ) -> list[dict[str, Any]]:
-    """同一紐づけキーを持つ既存シフト帳を返す。"""
+    """同一紐づけキーを持つ既存シフト帳を返す。
+
+    紐づけ判定・オーナー表示に必要なのはメタデータのみなので軽量ロードで走査する
+    （返却される dict は _PARTIAL_MONTHS_KEY 付きのため保存には使えない）。
+    """
     if not link_key:
         return []
     matches: list[dict[str, Any]] = []
-    for project in _iter_stored_projects():
+    for project in _iter_stored_projects_light():
         if exclude_id and str(project.get("id") or "") == str(exclude_id):
             continue
         if _project_link_key(project) == link_key:
@@ -2796,16 +2789,35 @@ def _ensure_substitute_project_for_office_month(office_id: int, year: int, month
     if month_key not in (project.get("months") or {}):
         project.setdefault("months", {})[month_key] = _build_month_payload(year, month, False, 0, {})
         changed = True
-    project["account_shares"] = {
-        "office": {
-            "enabled": True,
-            "office_ids": [office_id],
-        },
-        "employees": [],
-        "updated_at": _jst_now_iso(),
-        "updated_by": "system",
-    }
-    if changed or project.get("account_shares"):
+    # account_shares はシステム管理（営業所共有のみ）。既に期待どおりなら
+    # 書き換えない。ここで毎回上書き保存すると、一覧表示（GET）のたびに全営業所の
+    # 要代務帳へ DB 書き込みと updated_at 更新が走ってしまう。
+    current_shares = project.get("account_shares") if isinstance(project.get("account_shares"), dict) else {}
+    current_office = current_shares.get("office") if isinstance(current_shares.get("office"), dict) else {}
+
+    def _office_id_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    shares_in_sync = (
+        bool(current_office.get("enabled"))
+        and [_office_id_int(value) for value in (current_office.get("office_ids") or [])] == [office_id]
+        and not (current_shares.get("employees") or [])
+    )
+    if not shares_in_sync:
+        project["account_shares"] = {
+            "office": {
+                "enabled": True,
+                "office_ids": [office_id],
+            },
+            "employees": [],
+            "updated_at": _jst_now_iso(),
+            "updated_by": "system",
+        }
+        changed = True
+    if changed:
         _save_project(project)
         db.session.expire_all()
         return _load_project(project_id)
@@ -2819,12 +2831,9 @@ def _ensure_substitute_projects_for_current_user() -> None:
     if not office_ids:
         return
     today = datetime.now(JST).date()
-    changed = False
     for office_id in office_ids:
+        # 変更があった場合の expire は _ensure_substitute_project_for_office_month 側で行う。
         _ensure_substitute_project_for_office_month(int(office_id), today.year, today.month)
-        changed = True
-    if changed:
-        db.session.expire_all()
 
 
 def _find_project_by_token(token: str, token_type: str) -> dict[str, Any]:
@@ -6431,7 +6440,9 @@ def _sync_role_option_person_sites(
             info = current[key]
             by_number.setdefault(str(info["employee_number"]).strip(), []).append(info)
 
-    for summary in _iter_stored_projects():
+    # 走査に必要なのは mode・id・employee_number・assist（軽量ロードに含まれる）のみ。
+    # 実処理は _load_project で完全ロードする。
+    for summary in _iter_stored_projects_light():
         if not summary or summary.get("mode") != "person":
             continue
         person_project_id = str(summary.get("id") or "")
@@ -6792,7 +6803,8 @@ def _sync_person_experience_to_scene_projects(
         return
     if not (_coerce_site_row_id(site.get("site_row_id")) or str(site.get("site_id") or "").strip() or _normalized_site_title(site.get("site_name"))):
         return
-    for target_summary in _iter_stored_projects():
+    # 走査に必要なのは mode と id だけ。実処理は _load_project で完全ロードする。
+    for target_summary in _iter_stored_projects_light():
         if not target_summary or target_summary.get("mode") != "scene":
             continue
         target_project_id = str(target_summary.get("id") or "")
@@ -6835,7 +6847,8 @@ def _delete_person_experience_from_scene_projects(
     *,
     actor_name: str,
 ) -> None:
-    for target_summary in _iter_stored_projects():
+    # 走査に必要なのは mode と id だけ。実処理は _load_project で完全ロードする。
+    for target_summary in _iter_stored_projects_light():
         if not target_summary or target_summary.get("mode") != "scene":
             continue
         target_project_id = str(target_summary.get("id") or "")
@@ -6878,7 +6891,8 @@ def _backfill_scene_project_from_person_experience(
     assist = _ensure_assist(scene_project)
     changes: list[str] = []
     matched_keys: set[tuple[str, str]] = set()
-    for source_project in _iter_stored_projects():
+    # 参照するのは person 帳の assist とメタデータのみ（月データ不要）なので軽量ロード。
+    for source_project in _iter_stored_projects_light():
         if not source_project or source_project.get("mode") != "person":
             continue
         source_assist = _ensure_person_assist(source_project)
@@ -6962,7 +6976,8 @@ def _assist_scene_conflict_entries(project: dict[str, Any], target_date: date) -
     day_key = str(target_date.day)
     entries: list[dict[str, str]] = []
     seen: set[tuple[str, str, str, str]] = set()
-    for other_project in _iter_stored_projects():
+    # 参照するのは対象月の scene 帳のみ。全プロジェクト・全月のフルロードを避ける。
+    for other_project in _iter_project_summaries_for_month(month_key, mode="scene"):
         if not other_project:
             continue
         if str(other_project.get("id") or "").strip() == project_id:

@@ -587,19 +587,21 @@ def build_external_assignments(
     戻り値は (external_assignments, leave_unavailable_days)。
     """
     try:
-        from app.tools.cloudshift import _iter_stored_projects, _substitute_assignment
+        from app.tools.cloudshift import _iter_project_summaries_for_month, _substitute_assignment
         from app.tools.shiftersync_format import parse_entry_value
     except Exception:  # pragma: no cover
         return [], []
 
-    # プロジェクト一覧は月内で不変なので一度だけ全件取得して使い回す。
+    month_key = _month_key(year, month)
+
+    # 参照するのは対象月の entry のみなので、全プロジェクト・全月のフルロードではなく
+    # 対象月だけを持つ軽量ロードで一度だけ取得して使い回す。
     try:
-        stored = list(_iter_stored_projects())
+        stored = list(_iter_project_summaries_for_month(month_key))
     except Exception:  # pragma: no cover
         return [], []
 
     target_id = _str(project.get("id"))
-    month_key = _month_key(year, month)
     days_in_month = monthrange(year, month)[1]
 
     external: list[ExternalAssignment] = []
