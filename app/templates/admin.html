@@ -24,7 +24,7 @@
     overflow-x: auto;
   }
   .admin-users-grid {
-    min-width: 1260px;
+    min-width: 1130px;
   }
   .admin-users-head {
     background: #f8fafc;
@@ -77,6 +77,142 @@
     min-width: 4.5rem;
     white-space: nowrap;
   }
+  .admin-users-head th.admin-col-actions,
+  .admin-users-body td.admin-col-actions {
+    position: sticky;
+    right: 0;
+    background: #fff;
+    box-shadow: inset 1px 0 0 var(--admin-line);
+  }
+  .admin-users-head th.admin-col-actions {
+    background: #f8fafc;
+  }
+  .admin-users-body tr:hover td.admin-col-actions {
+    background: #f8fafc;
+  }
+  .admin-sort-th {
+    cursor: pointer;
+    user-select: none;
+  }
+  .admin-sort-th:hover {
+    color: #b91c1c;
+  }
+  .admin-sort-arrow {
+    opacity: 0.35;
+    font-size: 0.7em;
+    margin-left: 0.15rem;
+  }
+  .admin-sort-th.is-active {
+    color: #b91c1c;
+  }
+  .admin-sort-th.is-active .admin-sort-arrow {
+    opacity: 1;
+  }
+  .admin-summary-card[data-filter] {
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .admin-summary-card[data-filter]:hover {
+    border-color: #fca5a5;
+    background: #fff7f7;
+  }
+  .admin-summary-card.is-active {
+    border-color: #ef4444;
+    background: #fef2f2;
+  }
+  #admin-toasts {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+    max-width: min(24rem, calc(100vw - 2rem));
+    pointer-events: none;
+  }
+  .admin-toast {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    border-radius: 0.5rem;
+    padding: 0.65rem 0.95rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    line-height: 1.4;
+    color: #fff;
+    box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.3);
+    animation: admin-toast-in 0.18s ease-out;
+    pointer-events: auto;
+    word-break: break-word;
+  }
+  .admin-toast.is-success { background: #15803d; }
+  .admin-toast.is-error { background: #b91c1c; }
+  .admin-toast.is-info { background: #334155; }
+  .admin-toast.is-leaving {
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 0.25s, transform 0.25s;
+  }
+  @keyframes admin-toast-in {
+    from { opacity: 0; transform: translateY(10px); }
+  }
+  .stats-chart-host {
+    position: relative;
+    width: 100%;
+  }
+  .stats-bar-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 200px) 1fr;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .stats-bar-label {
+    font-size: 0.8rem;
+    color: #334155;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+  }
+  .stats-bar-track {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+  .stats-bar-fill {
+    height: 16px;
+    background: #2a78d6;
+    border-radius: 0 4px 4px 0;
+    min-width: 2px;
+    flex: none;
+  }
+  .stats-bar-value {
+    font-size: 0.75rem;
+    color: #64748b;
+    white-space: nowrap;
+  }
+  #stats-tooltip {
+    position: fixed;
+    z-index: 90;
+    background: #0f172a;
+    color: #fff;
+    border-radius: 0.4rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    pointer-events: none;
+    box-shadow: 0 8px 20px -6px rgb(0 0 0 / 0.4);
+    display: none;
+  }
+  .admin-cat-row.is-dragging {
+    opacity: 0.4;
+  }
+  .admin-cat-row {
+    cursor: grab;
+  }
   @media (max-width: 768px) {
     #app-sidebar {
       display: none !important;
@@ -116,6 +252,7 @@
     <nav class="admin-tabbar flex gap-2 overflow-x-auto">
       <button data-tab="users" class="admin-tab px-4 py-2 rounded border border-red-200 bg-red-50 text-red-700 font-medium">ユーザー管理</button>
       <button data-tab="access-management" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">アクセス管理</button>
+      <button data-tab="usage-stats" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">利用統計</button>
       <button data-tab="permissions" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">個人アクセス権</button>
       <button data-tab="group-perms" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">グループ付与</button>
       <button data-tab="organization" class="admin-tab px-4 py-2 rounded border border-transparent text-gray-600 hover:bg-white hover:text-gray-900">支店・営業所・担当</button>
@@ -135,6 +272,8 @@
         <p class="text-sm text-slate-500 mt-1">検索・所属・権限で絞り込み、対象ユーザーの編集、ログ確認、権限設定へ直接移動できます。</p>
       </div>
       <div class="flex flex-wrap gap-2 xl:justify-end">
+        <button id="btn-users-csv" class="border border-slate-300 bg-white px-4 py-2 rounded hover:bg-slate-50" title="現在の絞り込み結果をCSVでダウンロード">CSV出力</button>
+        <button id="btn-users-import" class="border border-slate-300 bg-white px-4 py-2 rounded hover:bg-slate-50" title="CSVファイルからユーザーをまとめて作成">CSV一括登録</button>
         <button id="btn-login-logs" class="bg-slate-700 text-white px-4 py-2 rounded hover:bg-slate-800">DSTTログイン履歴</button>
         <button id="btn-new-user" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">新規ユーザー作成</button>
       </div>
@@ -187,7 +326,15 @@
 
     <div class="bg-white rounded shadow-sm border border-slate-200 overflow-hidden">
       <div class="px-4 py-3 border-b bg-slate-50 flex flex-wrap items-center justify-between gap-3">
-        <div id="user-result-count" class="text-sm font-medium text-slate-700"></div>
+        <div class="flex flex-wrap items-center gap-3">
+          <div id="user-result-count" class="text-sm font-medium text-slate-700"></div>
+          <div class="flex items-center gap-2 text-sm">
+            <span id="user-sel-count" class="text-slate-600">0人選択中</span>
+            <button id="btn-user-select-filtered" type="button" class="border border-slate-300 bg-white px-2.5 py-1 rounded text-xs hover:bg-slate-50">絞り込み結果を全選択</button>
+            <button id="btn-user-clear-sel" type="button" class="border border-slate-300 bg-white px-2.5 py-1 rounded text-xs hover:bg-slate-50">選択解除</button>
+            <button id="btn-user-bulk-edit" type="button" class="bg-amber-600 text-white px-3 py-1 rounded text-xs hover:bg-amber-700 disabled:opacity-50" disabled>✏️ 選択したユーザーを一括編集</button>
+          </div>
+        </div>
         <div class="flex items-center gap-2">
           <button id="user-prev-page" type="button" class="border border-slate-300 bg-white px-3 py-1.5 rounded text-sm hover:bg-slate-50">前へ</button>
           <span id="user-page-label" class="text-sm text-slate-600 min-w-24 text-center"></span>
@@ -199,25 +346,29 @@
           <div class="admin-users-head">
             <table class="text-sm">
               <colgroup>
-                <col style="width: 170px;">
-                <col style="width: 150px;">
-                <col style="width: 90px;">
-                <col style="width: 160px;">
-                <col style="width: 170px;">
+                <col style="width: 36px;">
                 <col style="width: 130px;">
-                <col style="width: 190px;">
-                <col style="width: 300px;">
+                <col style="width: 105px;">
+                <col style="width: 86px;">
+                <col style="width: 115px;">
+                <col style="width: 125px;">
+                <col style="width: 88px;">
+                <col style="width: 145px;">
+                <col style="width: 126px;">
+                <col style="width: 176px;">
               </colgroup>
               <thead class="text-left">
                 <tr>
-                  <th class="p-3">ユーザーID</th>
-                  <th class="p-3">日本語名</th>
-                  <th class="p-3">管理者</th>
-                  <th class="p-3">支店</th>
-                  <th class="p-3">営業所</th>
+                  <th class="p-2 text-center"><input id="user-head-check" type="checkbox" title="表示中のページを全選択"></th>
+                  <th class="p-3 admin-sort-th" data-sort="username">ユーザーID<span class="admin-sort-arrow">↕</span></th>
+                  <th class="p-3 admin-sort-th" data-sort="name">日本語名<span class="admin-sort-arrow">↕</span></th>
+                  <th class="p-3 admin-sort-th" data-sort="role">管理者<span class="admin-sort-arrow">↕</span></th>
+                  <th class="p-3 admin-sort-th" data-sort="branch">支店<span class="admin-sort-arrow">↕</span></th>
+                  <th class="p-3 admin-sort-th" data-sort="office">営業所<span class="admin-sort-arrow">↕</span></th>
                   <th class="p-3">担当</th>
                   <th class="p-3">個人/グループ権限</th>
-                  <th class="p-3 text-right">操作</th>
+                  <th class="p-3 admin-sort-th" data-sort="last_login">最終ログイン<span class="admin-sort-arrow">↕</span></th>
+                  <th class="p-3 text-right admin-col-actions">操作</th>
                 </tr>
               </thead>
             </table>
@@ -225,14 +376,16 @@
           <div class="admin-users-body">
             <table class="text-sm">
               <colgroup>
-                <col style="width: 170px;">
-                <col style="width: 150px;">
-                <col style="width: 90px;">
-                <col style="width: 160px;">
-                <col style="width: 170px;">
+                <col style="width: 36px;">
                 <col style="width: 130px;">
-                <col style="width: 190px;">
-                <col style="width: 300px;">
+                <col style="width: 105px;">
+                <col style="width: 86px;">
+                <col style="width: 115px;">
+                <col style="width: 125px;">
+                <col style="width: 88px;">
+                <col style="width: 145px;">
+                <col style="width: 126px;">
+                <col style="width: 176px;">
               </colgroup>
               <tbody id="users-tbody"></tbody>
             </table>
@@ -245,7 +398,7 @@
   <!-- ===== アクセス管理 ===== -->
   <section id="tab-access-management" class="admin-section hidden">
     <div class="bg-white rounded-xl shadow p-6">
-      <div class="flex flex-col lg:flex-row lg:items-end gap-3 mb-5">
+      <div class="flex flex-col lg:flex-row lg:flex-wrap lg:items-end gap-3 mb-5">
         <div class="flex-1 min-w-[240px]">
           <label class="block text-sm font-medium mb-1">ユーザー（表示名で選択）</label>
           <input id="access-user-filter" class="w-full border rounded px-3 py-2 mb-2" placeholder="ユーザーID・表示名で絞り込み">
@@ -262,6 +415,15 @@
         <div>
           <label class="block text-sm font-medium mb-1">終了日</label>
           <input id="access-to" type="date" class="border rounded px-3 py-2">
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">期間</label>
+          <div class="flex gap-1">
+            <button type="button" class="access-preset whitespace-nowrap border border-slate-300 bg-white px-2 py-2 rounded text-xs hover:bg-slate-50" data-days="0">今日</button>
+            <button type="button" class="access-preset whitespace-nowrap border border-slate-300 bg-white px-2 py-2 rounded text-xs hover:bg-slate-50" data-days="7">7日</button>
+            <button type="button" class="access-preset whitespace-nowrap border border-slate-300 bg-white px-2 py-2 rounded text-xs hover:bg-slate-50" data-days="30">30日</button>
+            <button type="button" class="access-preset whitespace-nowrap border border-slate-300 bg-white px-2 py-2 rounded text-xs hover:bg-slate-50" data-days="all">全て</button>
+          </div>
         </div>
         <div>
           <label class="block text-sm font-medium mb-1">件数</label>
@@ -297,6 +459,27 @@
                 </tr>
               </thead>
               <tbody id="access-all-logins-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="border rounded overflow-hidden">
+          <div class="bg-gray-50 px-4 py-2 font-semibold flex items-center justify-between">
+            <span>ログイン失敗履歴</span>
+            <span id="access-failed-count" class="text-xs text-gray-500"></span>
+          </div>
+          <div id="access-failed-warn" class="hidden px-4 py-2 border-b bg-amber-50 text-amber-800 text-xs"></div>
+          <div class="max-h-80 overflow-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-white sticky top-0 text-left">
+                <tr>
+                  <th class="p-2">日時</th>
+                  <th class="p-2">ユーザーID</th>
+                  <th class="p-2">名前</th>
+                  <th class="p-2">IP</th>
+                  <th class="p-2">端末</th>
+                </tr>
+              </thead>
+              <tbody id="access-failed-tbody"></tbody>
             </table>
           </div>
         </div>
@@ -370,6 +553,52 @@
     </div>
   </section>
 
+  <!-- ===== 利用統計 ===== -->
+  <section id="tab-usage-stats" class="admin-section hidden">
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between mb-4">
+      <div>
+        <h2 class="text-xl font-semibold">利用統計</h2>
+        <p class="text-sm text-slate-500 mt-1">ツール利用ログをJST基準で集計します。管理ページ自身の操作も含まれます。</p>
+      </div>
+      <div class="flex items-center gap-1">
+        <span class="text-xs font-semibold text-slate-500 mr-1">期間</span>
+        <button type="button" class="stats-range border px-3 py-1.5 rounded text-sm bg-white border-slate-300 hover:bg-slate-50" data-days="7">7日</button>
+        <button type="button" class="stats-range border px-3 py-1.5 rounded text-sm bg-white border-slate-300 hover:bg-slate-50" data-days="30">30日</button>
+        <button type="button" class="stats-range border px-3 py-1.5 rounded text-sm bg-white border-slate-300 hover:bg-slate-50" data-days="90">90日</button>
+      </div>
+    </div>
+
+    <div id="stats-summary" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4"></div>
+
+    <div class="bg-white border border-slate-200 rounded shadow-sm p-4 mb-4">
+      <h3 class="font-semibold mb-1">日別の操作数</h3>
+      <p class="text-xs text-slate-500 mb-3">バーにカーソルを合わせると操作数と利用ユーザー数を表示します。</p>
+      <div id="stats-daily-chart" class="stats-chart-host"></div>
+      <details class="mt-3">
+        <summary class="text-xs text-slate-500 cursor-pointer select-none">表として表示</summary>
+        <div class="max-h-64 overflow-auto border rounded mt-2">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 sticky top-0 text-left"><tr><th class="p-2">日付</th><th class="p-2 text-right">操作数</th><th class="p-2 text-right">利用ユーザー数</th></tr></thead>
+            <tbody id="stats-daily-table"></tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+
+    <div class="grid xl:grid-cols-2 gap-4">
+      <div class="bg-white border border-slate-200 rounded shadow-sm p-4">
+        <h3 class="font-semibold mb-1">ツール別利用回数（上位15）</h3>
+        <p class="text-xs text-slate-500 mb-3">棒の右の数値は操作数、カッコ内は利用したユーザー数です。</p>
+        <div id="stats-tools-chart" class="space-y-1.5"></div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded shadow-sm p-4">
+        <h3 class="font-semibold mb-1">営業所別利用回数</h3>
+        <p class="text-xs text-slate-500 mb-3">ユーザーの主所属（営業所）で集計します。</p>
+        <div id="stats-offices-chart" class="space-y-1.5"></div>
+      </div>
+    </div>
+  </section>
+
   <!-- ===== ツールアクセス権 ===== -->
   <section id="tab-permissions" class="admin-section hidden">
     <div class="bg-white rounded-xl shadow p-6">
@@ -387,6 +616,17 @@
           <input id="perm-user-filter" class="border rounded px-3 py-2" placeholder="ユーザーID・名前で検索">
           <select id="perm-user-select" class="border rounded px-3 py-2"></select>
         </div>
+      </div>
+
+      <div class="mb-4 border rounded bg-slate-50 p-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="text-sm font-medium">権限テンプレート:</label>
+          <select id="perm-template-select" class="border rounded px-2 py-1.5 text-sm min-w-44"></select>
+          <button id="btn-perm-template-apply" type="button" class="border border-slate-300 bg-white px-3 py-1.5 rounded text-sm hover:bg-slate-100">チェックに反映</button>
+          <button id="btn-perm-template-save" type="button" class="border border-slate-300 bg-white px-3 py-1.5 rounded text-sm hover:bg-slate-100">現在のチェックをテンプレート保存</button>
+          <button id="btn-perm-template-delete" type="button" class="text-red-600 text-sm hover:underline">削除</button>
+        </div>
+        <p class="text-xs text-slate-500 mt-2">「チェックに反映」は画面上のチェックを書き換えるだけです。右下の「保存」で確定します。テンプレートは一括編集でも利用できます。</p>
       </div>
 
       <div id="perm-tool-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4"></div>
@@ -601,10 +841,60 @@
   <section id="tab-announcements" class="admin-section hidden">
     <div class="bg-white rounded-xl shadow p-6">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-semibold">お知らせ管理</h2>
-        <a href="/tools/user_management/announcements" class="text-blue-600 hover:underline">専用ページを開く →</a>
+        <div>
+          <h2 class="text-xl font-semibold">お知らせ管理</h2>
+          <p class="text-sm text-slate-500 mt-1">全ユーザーのダッシュボードに表示されるお知らせを配信・管理します。</p>
+        </div>
+        <a href="/tools/user_management/announcements" class="text-blue-600 hover:underline text-sm whitespace-nowrap">専用ページを開く →</a>
       </div>
-      <p class="text-gray-600">お知らせ管理は専用ページでご利用ください。</p>
+
+      <div class="border rounded p-4 mb-6 bg-gray-50">
+        <h3 class="font-medium mb-3">➕ 新しいお知らせを配信</h3>
+        <form id="form-announcement" class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium mb-1">タイトル（任意）</label>
+            <input name="title" class="w-full border rounded px-3 py-2" placeholder="未入力の場合は「お知らせ」になります">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">本文（必須）</label>
+            <textarea name="content" rows="4" required class="w-full border rounded px-3 py-2" placeholder="お知らせの内容を入力してください"></textarea>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="block text-sm font-medium mb-1">掲載期限（任意）</label>
+              <input name="expires_at" type="date" class="border rounded px-3 py-2 w-full">
+              <p class="text-xs text-gray-500 mt-1">指定した日まで表示され、翌日から自動的に配信対象外になります。</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">配信対象</label>
+              <div class="flex items-center gap-4 py-2">
+                <label class="inline-flex items-center gap-1.5 text-sm"><input type="radio" name="target_mode" value="all" checked> 全社</label>
+                <label class="inline-flex items-center gap-1.5 text-sm"><input type="radio" name="target_mode" value="scoped"> 支店・営業所を指定</label>
+              </div>
+            </div>
+          </div>
+          <div id="announcement-target-picker" class="hidden grid gap-3 sm:grid-cols-2">
+            <div>
+              <div class="text-xs font-semibold text-slate-500 mb-1">対象支店（支店全体に配信）</div>
+              <div id="announcement-target-branches" class="border rounded bg-white p-2 max-h-36 overflow-y-auto text-sm space-y-1"></div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold text-slate-500 mb-1">対象営業所（個別指定）</div>
+              <div id="announcement-target-offices" class="border rounded bg-white p-2 max-h-36 overflow-y-auto text-sm space-y-1"></div>
+            </div>
+            <p class="text-xs text-gray-500 sm:col-span-2">支店と営業所はOR条件です。ユーザーの主所属と追加営業所で判定します。</p>
+          </div>
+          <div class="text-right">
+            <button type="submit" class="bg-red-600 text-white px-5 py-2 rounded hover:bg-red-700">配信</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-medium">配信済みのお知らせ</h3>
+        <span id="announcement-count" class="text-xs text-gray-500"></span>
+      </div>
+      <div id="announcement-list" class="space-y-3"></div>
     </div>
   </section>
 
@@ -863,6 +1153,141 @@
   </div>
 </div>
 
+<!-- ===== ユーザー一括編集モーダル ===== -->
+<div id="modal-user-bulk" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+    <h3 class="text-xl font-bold mb-2">✏️ 選択したユーザーを一括編集</h3>
+    <p id="user-bulk-target" class="text-sm text-gray-600 mb-4">0人を対象とします。</p>
+    <form id="form-user-bulk" class="space-y-4">
+      <div class="border rounded p-3 bg-gray-50">
+        <label class="block text-sm font-medium mb-2">所属（支店・営業所・担当）</label>
+        <select name="org_mode" class="w-full border rounded px-3 py-2 text-sm mb-2">
+          <option value="__KEEP__">変更しない</option>
+          <option value="set">まとめて変更する</option>
+        </select>
+        <div id="user-bulk-org" class="hidden space-y-2">
+          <select name="branch_id" class="w-full border rounded px-3 py-2 text-sm"></select>
+          <select name="office_id" class="w-full border rounded px-3 py-2 text-sm"></select>
+          <select name="department_id" class="w-full border rounded px-3 py-2 text-sm"></select>
+          <p class="text-xs text-gray-500">未設定を選ぶとその項目は空になります。追加営業所（兼務）は変更しません。</p>
+        </div>
+      </div>
+      <div class="border rounded p-3 bg-gray-50">
+        <label class="block text-sm font-medium mb-2">権限テンプレート</label>
+        <select name="template_id" class="w-full border rounded px-3 py-2 text-sm mb-2">
+          <option value="">適用しない</option>
+        </select>
+        <div id="user-bulk-template-mode" class="hidden flex items-center gap-4 text-sm">
+          <label class="inline-flex items-center gap-1.5"><input type="radio" name="template_mode" value="add" checked> 既存の個人権限に追加</label>
+          <label class="inline-flex items-center gap-1.5"><input type="radio" name="template_mode" value="replace"> 個人権限を置き換え</label>
+        </div>
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button type="submit" class="bg-amber-600 text-white px-4 py-2 rounded hover:bg-amber-700 flex-1">適用</button>
+        <button type="button" id="btn-cancel-user-bulk" class="bg-gray-400 text-white px-4 py-2 rounded">キャンセル</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== ユーザーCSV一括登録モーダル ===== -->
+<div id="modal-user-import" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-3xl mx-4 max-h-[90vh] overflow-y-auto">
+    <h3 class="text-xl font-bold mb-2">📄 ユーザーCSV一括登録</h3>
+    <div class="text-sm text-gray-600 space-y-1 mb-4">
+      <p>1行目をヘッダーとしたCSVを読み込みます（UTF-8 / Shift_JIS 自動判定）。列順は自由です。</p>
+      <p class="font-mono text-xs bg-gray-50 border rounded px-2 py-1">ユーザーID, 日本語名, パスワード, 管理者, 支店, 営業所, 担当</p>
+      <p class="text-xs text-gray-500">必須はユーザーIDと日本語名。パスワード空欄は自動生成します。管理者列は 1/0。支店・営業所・担当は登録済みの名称で指定します。
+        <a href="#" id="btn-import-template" class="text-blue-600 hover:underline">テンプレートCSVをダウンロード</a></p>
+    </div>
+    <div class="flex items-center gap-2 mb-3">
+      <input type="file" id="import-file" accept=".csv,text/csv" class="text-sm">
+      <button type="button" id="btn-import-check" class="bg-slate-700 text-white px-4 py-2 rounded text-sm hover:bg-slate-800 disabled:opacity-50" disabled>検証する</button>
+    </div>
+    <div id="import-result" class="hidden mb-3"></div>
+    <div id="import-preview" class="hidden max-h-72 overflow-auto border rounded mb-3">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 sticky top-0 text-left">
+          <tr><th class="p-2 w-12">行</th><th class="p-2">ユーザーID</th><th class="p-2 w-20">判定</th><th class="p-2">内容</th></tr>
+        </thead>
+        <tbody id="import-preview-tbody"></tbody>
+      </table>
+    </div>
+    <div class="flex gap-2 pt-1">
+      <button type="button" id="btn-import-commit" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 flex-1 disabled:opacity-50" disabled>登録を実行</button>
+      <button type="button" id="btn-cancel-import" class="bg-gray-400 text-white px-4 py-2 rounded">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 組織 名称/コード編集モーダル ===== -->
+<div id="modal-org-edit" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
+    <h3 id="org-edit-title" class="text-xl font-bold mb-4">編集</h3>
+    <form id="form-org-edit" class="space-y-3">
+      <div>
+        <label id="org-edit-name-label" class="block text-sm font-medium mb-1">名称</label>
+        <input name="name" required class="w-full border rounded px-3 py-2">
+      </div>
+      <div id="org-edit-code-row">
+        <label class="block text-sm font-medium mb-1">コード（空欄で未設定）</label>
+        <input name="code" class="w-full border rounded px-3 py-2 font-mono" placeholder="例: TKY01">
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex-1">保存</button>
+        <button type="button" id="btn-cancel-org-edit" class="bg-gray-400 text-white px-4 py-2 rounded">キャンセル</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== お知らせ既読状況モーダル ===== -->
+<div id="modal-announcement-readers" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-2xl mx-4 max-h-[85vh] overflow-hidden flex flex-col">
+    <div class="flex items-center justify-between gap-3 mb-3">
+      <h3 id="announcement-readers-title" class="text-xl font-bold">既読状況</h3>
+      <button type="button" id="btn-close-announcement-readers" class="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500">閉じる</button>
+    </div>
+    <div class="grid grid-cols-2 gap-4 overflow-hidden flex-1">
+      <div class="flex flex-col overflow-hidden">
+        <div class="font-medium text-sm mb-1">未読 <span id="announcement-unread-count" class="text-red-600"></span></div>
+        <div id="announcement-unread-list" class="border rounded overflow-y-auto flex-1 text-sm divide-y"></div>
+      </div>
+      <div class="flex flex-col overflow-hidden">
+        <div class="font-medium text-sm mb-1">既読 <span id="announcement-read-count" class="text-green-700"></span></div>
+        <div id="announcement-read-list" class="border rounded overflow-y-auto flex-1 text-sm divide-y"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 資格情報表示モーダル（新規作成・PW変更後） ===== -->
+<div id="modal-credential" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
+    <h3 id="credential-title" class="text-xl font-bold mb-2">✅ ユーザーを作成しました</h3>
+    <p class="text-sm text-gray-600 mb-4">以下の内容を本人に伝えてください。<b>この画面を閉じるとパスワードは再表示できません。</b></p>
+    <div class="space-y-2 mb-4">
+      <div class="flex items-center justify-between border rounded px-3 py-2 bg-gray-50">
+        <div>
+          <div class="text-xs text-gray-500">ユーザーID</div>
+          <div id="credential-username" class="font-mono font-semibold"></div>
+        </div>
+      </div>
+      <div class="flex items-center justify-between border rounded px-3 py-2 bg-gray-50">
+        <div>
+          <div class="text-xs text-gray-500">パスワード</div>
+          <div id="credential-password" class="font-mono font-semibold"></div>
+        </div>
+        <button type="button" id="btn-copy-credential" class="border border-slate-300 bg-white px-3 py-1.5 rounded text-sm hover:bg-slate-50 whitespace-nowrap">コピー</button>
+      </div>
+    </div>
+    <button type="button" id="btn-close-credential" class="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">閉じる</button>
+  </div>
+</div>
+
+<!-- ===== トースト通知 ===== -->
+<div id="admin-toasts" aria-live="polite"></div>
+
 <script>
 const state = {
   users: [],
@@ -874,6 +1299,8 @@ const state = {
   accessDetail: null,
   userPage: 1,
   userPageSize: 50,
+  userSort: { key: null, dir: 1 },
+  userSelected: new Set(),
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -888,8 +1315,43 @@ async function api(url, options = {}) {
   return json;
 }
 
+// ===== トースト通知 =====
+function toast(message, type = 'success', duration = 3600) {
+  const box = $('#admin-toasts');
+  if (!box) { alert(message); return; }
+  const icons = { success: '✅', error: '⚠️', info: 'ℹ️' };
+  const el = document.createElement('div');
+  el.className = `admin-toast is-${type}`;
+  el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  el.innerHTML = `<span>${icons[type] || ''}</span><span></span>`;
+  el.lastElementChild.textContent = message;
+  box.appendChild(el);
+  const remove = () => {
+    el.classList.add('is-leaving');
+    setTimeout(() => el.remove(), 260);
+  };
+  el.addEventListener('click', remove);
+  setTimeout(remove, type === 'error' ? Math.max(duration, 6000) : duration);
+}
+const toastError = (err) => toast(typeof err === 'string' ? err : `エラー: ${err.message}`, 'error');
+
+// ===== モーダル共通（Esc / 背景クリックで閉じる） =====
+// 資格情報モーダルはパスワード再表示不可のため誤操作で閉じない
+const MODAL_KEEP_OPEN = new Set(['modal-credential']);
+document.addEventListener('click', (e) => {
+  const overlay = e.target.closest('[id^="modal-"]');
+  if (overlay && e.target === overlay && !MODAL_KEEP_OPEN.has(overlay.id)) {
+    overlay.classList.add('hidden');
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const open = $$('[id^="modal-"]').filter(m => !m.classList.contains('hidden') && !MODAL_KEEP_OPEN.has(m.id));
+  if (open.length) open[open.length - 1].classList.add('hidden');
+});
+
 // ===== Tabs =====
-function activateAdminTab(tab) {
+function activateAdminTab(tab, opts = {}) {
   const btn = document.querySelector(`.admin-tab[data-tab="${tab}"]`);
   if (!btn) return;
   $$('.admin-tab').forEach(b => {
@@ -898,20 +1360,33 @@ function activateAdminTab(tab) {
   });
   btn.classList.add('border-red-200', 'bg-red-50', 'text-red-700', 'font-medium');
   btn.classList.remove('border-transparent', 'text-gray-600');
+  btn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   $$('.admin-section').forEach(sec => sec.classList.add('hidden'));
   $(`#tab-${tab}`).classList.remove('hidden');
+  if (!opts.skipHash) {
+    const hash = tab === 'users' ? '' : `#tab=${tab}`;
+    if (location.hash !== hash) history.replaceState(null, '', location.pathname + location.search + hash);
+  }
   if (tab === 'users') loadUsers();
   if (tab === 'access-management') loadAccessManagement();
+  if (tab === 'usage-stats') loadUsageStats();
   if (tab === 'permissions') loadPermissions();
   if (tab === 'organization') loadOrganization();
   if (tab === 'group-perms') loadGroupPerms();
   if (tab === 'siteplus-codes') loadSiteplusCodes();
   if (tab === 'leavemgr-codes') loadLeaveMgrCodes();
   if (tab === 'tool-management') loadToolManagement();
+  if (tab === 'announcements') loadAnnouncements();
   if (tab === 'mail') loadMailTab();
 }
 
+function tabFromHash() {
+  const m = location.hash.match(/tab=([\w-]+)/);
+  return m ? m[1] : 'users';
+}
+
 $$('.admin-tab').forEach(btn => btn.addEventListener('click', () => activateAdminTab(btn.dataset.tab)));
+window.addEventListener('hashchange', () => activateAdminTab(tabFromHash(), { skipHash: true }));
 
 // ===== Users =====
 async function loadUsers() {
@@ -921,8 +1396,11 @@ async function loadUsers() {
   ]);
   state.users = u.users;
   state.branches = o.branches;
+  const validIds = new Set(state.users.map(x => x.id));
+  state.userSelected = new Set([...state.userSelected].filter(id => validIds.has(id)));
   populateUserFilters();
   renderUsers();
+  loadPermissionTemplates().catch(() => {});
 }
 
 function populateUserFilters() {
@@ -973,25 +1451,90 @@ function renderUserSummary(users) {
   const admins = state.users.filter(u => u.is_admin).length;
   const missingOffice = state.users.filter(u => !u.office_id).length;
   const extraOffice = state.users.filter(u => (u.extra_office_ids || []).length).length;
+  const roleSel = $('#user-filter-role')?.value || 'all';
+  const statusSel = $('#user-filter-status')?.value || 'all';
   const cards = [
-    ['総ユーザー', total],
-    ['表示中', users.length],
-    ['管理者', admins],
-    ['営業所未設定', missingOffice],
-    ['追加営業所あり', extraOffice],
+    ['総ユーザー', total, null, false],
+    ['表示中', users.length, null, false],
+    ['管理者', admins, 'admin', roleSel === 'admin'],
+    ['営業所未設定', missingOffice, 'missing-office', statusSel === 'missing-office'],
+    ['追加営業所あり', extraOffice, 'extra-office', statusSel === 'extra-office'],
   ];
-  $('#user-summary').innerHTML = cards.map(([label, value]) => `
-    <div class="border border-slate-200 rounded bg-white p-3 shadow-sm">
+  $('#user-summary').innerHTML = cards.map(([label, value, filter, active]) => `
+    <div class="admin-summary-card border border-slate-200 rounded bg-white p-3 shadow-sm ${active ? 'is-active' : ''}"
+         ${filter ? `data-filter="${filter}" title="クリックで絞り込み" role="button" tabindex="0"` : ''}>
       <div class="text-xs font-semibold text-slate-500">${escape(label)}</div>
       <div class="text-2xl font-bold mt-1">${escape(value)}</div>
     </div>
   `).join('');
 }
 
+// サマリーカードのクリックで該当フィルタをトグル適用
+$('#user-summary')?.addEventListener('click', (e) => {
+  const card = e.target.closest('.admin-summary-card[data-filter]');
+  if (!card) return;
+  const filter = card.dataset.filter;
+  if (filter === 'admin') {
+    const sel = $('#user-filter-role');
+    sel.value = sel.value === 'admin' ? 'all' : 'admin';
+  } else {
+    const sel = $('#user-filter-status');
+    sel.value = sel.value === filter ? 'all' : filter;
+  }
+  resetUserPageAndRender();
+});
+
+const USER_SORT_ACCESSORS = {
+  username: u => (u.username || '').toLowerCase(),
+  name: u => (u.name || '').toLowerCase(),
+  role: u => (u.is_admin ? 0 : 1),
+  branch: u => (u.branch_name || '').toLowerCase() || '￿',
+  office: u => (u.office_name || '').toLowerCase() || '￿',
+  last_login: u => u.last_login_at || '',
+};
+
+function sortedFilteredUsers() {
+  const rows = filteredUsers();
+  const { key, dir } = state.userSort;
+  const accessor = USER_SORT_ACCESSORS[key];
+  if (!accessor) return rows;
+  return [...rows].sort((a, b) => {
+    const va = accessor(a);
+    const vb = accessor(b);
+    if (va < vb) return -dir;
+    if (va > vb) return dir;
+    return 0;
+  });
+}
+
+function updateSortIndicators() {
+  $$('.admin-sort-th').forEach(th => {
+    const active = th.dataset.sort === state.userSort.key;
+    th.classList.toggle('is-active', active);
+    const arrow = th.querySelector('.admin-sort-arrow');
+    if (arrow) arrow.textContent = active ? (state.userSort.dir === 1 ? '▲' : '▼') : '↕';
+  });
+}
+
+$$('.admin-sort-th').forEach(th => th.addEventListener('click', () => {
+  const key = th.dataset.sort;
+  if (state.userSort.key === key) {
+    // 昇順 → 降順 → 解除 の3状態トグル
+    if (state.userSort.dir === 1) state.userSort.dir = -1;
+    else state.userSort = { key: null, dir: 1 };
+  } else {
+    // 最終ログインは新しい順が自然なため初回クリックで降順にする
+    state.userSort = { key, dir: key === 'last_login' ? -1 : 1 };
+  }
+  state.userPage = 1;
+  renderUsers();
+}));
+
 function renderUsers() {
   const tbody = $('#users-tbody');
-  const rows = filteredUsers();
+  const rows = sortedFilteredUsers();
   renderUserSummary(rows);
+  updateSortIndicators();
   const pageSize = Number($('#user-page-size')?.value || state.userPageSize || 50);
   state.userPageSize = pageSize;
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
@@ -1007,7 +1550,8 @@ function renderUsers() {
   $('#user-prev-page').classList.toggle('opacity-40', state.userPage <= 1);
   $('#user-next-page').classList.toggle('opacity-40', state.userPage >= totalPages);
   if (!pageRows.length) {
-    tbody.innerHTML = '<tr><td class="p-8 text-center text-gray-500" colspan="8">条件に合うユーザーはいません。</td></tr>';
+    tbody.innerHTML = '<tr><td class="p-8 text-center text-gray-500" colspan="10">条件に合うユーザーはいません。</td></tr>';
+    updateUserSelectionUI();
     return;
   }
   tbody.innerHTML = pageRows.map(u => {
@@ -1015,6 +1559,7 @@ function renderUsers() {
     const groupCount = (u.group_tool_keys || []).length;
     return `
     <tr class="border-t hover:bg-slate-50 align-top">
+      <td class="p-2 text-center"><input type="checkbox" class="user-row-check mt-1.5" data-uid="${u.id}" ${state.userSelected.has(u.id) ? 'checked' : ''}></td>
       <td class="p-3 font-mono whitespace-nowrap">${escape(u.username)}${u.is_legacy_admin ? '<span class="admin-chip is-warn ml-2">初期管理者</span>' : ''}</td>
       <td class="p-3">${escape(u.name)}</td>
       <td class="p-3">${u.is_admin ? '<span class="admin-chip is-warn">管理者</span>' : '<span class="admin-chip">一般</span>'}</td>
@@ -1025,8 +1570,11 @@ function renderUsers() {
         <span class="admin-chip is-ok">個人 ${personalCount}</span>
         <span class="admin-chip ml-1">グループ ${groupCount}</span>
       </td>
-      <td class="p-3">
-        <div class="flex flex-wrap justify-end gap-1.5 min-w-64">
+      <td class="p-3 whitespace-nowrap" title="${u.last_login_at ? escape(fmtDate(u.last_login_at)) : 'ログイン記録なし'}">
+        ${u.last_login_at ? `<div>${fmtRelative(u.last_login_at)}</div><div class="text-xs text-slate-400">${fmtDateMin(u.last_login_at)}</div>` : '<span class="text-slate-400">-</span>'}
+      </td>
+      <td class="p-3 admin-col-actions">
+        <div class="flex flex-wrap justify-end gap-1.5">
           <button onclick="openEditUser(${u.id})" class="admin-action bg-blue-600 text-white px-2.5 py-1 rounded text-xs hover:bg-blue-700">編集</button>
           <button onclick="openUserPermissions(${u.id})" class="admin-action bg-indigo-600 text-white px-2.5 py-1 rounded text-xs hover:bg-indigo-700">権限</button>
           <button onclick="openUserAccess(${u.id})" class="admin-action bg-slate-700 text-white px-2.5 py-1 rounded text-xs hover:bg-slate-800">ログ</button>
@@ -1036,7 +1584,157 @@ function renderUsers() {
       </td>
     </tr>
   `}).join('');
+  updateUserSelectionUI();
 }
+
+// ===== ユーザー複数選択・一括編集 =====
+function currentPageUsers() {
+  const rows = sortedFilteredUsers();
+  const start = (state.userPage - 1) * state.userPageSize;
+  return rows.slice(start, start + state.userPageSize);
+}
+
+function updateUserSelectionUI() {
+  const count = state.userSelected.size;
+  const label = $('#user-sel-count');
+  if (label) label.textContent = `${count}人選択中`;
+  const bulkBtn = $('#btn-user-bulk-edit');
+  if (bulkBtn) bulkBtn.disabled = count === 0;
+  const head = $('#user-head-check');
+  if (head) {
+    const page = currentPageUsers();
+    head.checked = page.length > 0 && page.every(u => state.userSelected.has(u.id));
+  }
+}
+
+$('#users-tbody')?.addEventListener('change', (e) => {
+  const cb = e.target.closest('.user-row-check');
+  if (!cb) return;
+  const uid = parseInt(cb.dataset.uid);
+  if (cb.checked) state.userSelected.add(uid);
+  else state.userSelected.delete(uid);
+  updateUserSelectionUI();
+});
+
+$('#user-head-check')?.addEventListener('change', (e) => {
+  const page = currentPageUsers();
+  page.forEach(u => {
+    if (e.target.checked) state.userSelected.add(u.id);
+    else state.userSelected.delete(u.id);
+  });
+  renderUsers();
+});
+
+$('#btn-user-select-filtered')?.addEventListener('click', () => {
+  sortedFilteredUsers().forEach(u => state.userSelected.add(u.id));
+  renderUsers();
+});
+
+$('#btn-user-clear-sel')?.addEventListener('click', () => {
+  state.userSelected.clear();
+  renderUsers();
+});
+
+$('#btn-user-bulk-edit')?.addEventListener('click', () => {
+  if (!state.userSelected.size) return;
+  const form = $('#form-user-bulk');
+  form.reset();
+  form.org_mode.value = '__KEEP__';
+  $('#user-bulk-org').classList.add('hidden');
+  $('#user-bulk-template-mode').classList.add('hidden');
+  populateBranchSelect(form.branch_id, null);
+  populateOfficeSelect(form.office_id, null, null);
+  populateDepartmentSelect(form.department_id, null, null);
+  form.branch_id.onchange = () => {
+    populateOfficeSelect(form.office_id, +form.branch_id.value || null, null);
+    populateDepartmentSelect(form.department_id, null, null);
+  };
+  form.office_id.onchange = () => {
+    populateDepartmentSelect(form.department_id, +form.office_id.value || null, null);
+  };
+  renderTemplateSelects();
+  $('#user-bulk-target').textContent = `${state.userSelected.size}人のユーザーを対象とします。`;
+  $('#modal-user-bulk').classList.remove('hidden');
+});
+
+$('#btn-cancel-user-bulk')?.addEventListener('click', () => $('#modal-user-bulk').classList.add('hidden'));
+
+$('#form-user-bulk')?.addEventListener('change', (e) => {
+  const form = e.currentTarget;
+  if (e.target.name === 'org_mode') {
+    $('#user-bulk-org').classList.toggle('hidden', form.org_mode.value !== 'set');
+  }
+  if (e.target.name === 'template_id') {
+    $('#user-bulk-template-mode').classList.toggle('hidden', !form.template_id.value);
+  }
+});
+
+$('#form-user-bulk')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const body = { user_ids: [...state.userSelected] };
+  if (form.org_mode.value === 'set') {
+    body.org = {
+      branch_id: form.branch_id.value || null,
+      office_id: form.office_id.value || null,
+      department_id: form.department_id.value || null,
+    };
+  }
+  if (form.template_id.value) {
+    body.template = {
+      id: parseInt(form.template_id.value),
+      mode: form.querySelector('input[name="template_mode"]:checked')?.value || 'add',
+    };
+  }
+  if (!body.org && !body.template) {
+    return toast('変更する項目を選択してください。', 'info');
+  }
+  try {
+    const res = await api('/tools/user_management/api/users/bulk', { method: 'PUT', body });
+    $('#modal-user-bulk').classList.add('hidden');
+    toast(`${res.updated}人のユーザーを更新しました。`);
+    state.userSelected.clear();
+    loadUsers();
+  } catch (err) { toastError(err); }
+});
+
+// ===== CSVエクスポート =====
+function exportUsersCsv() {
+  const rows = sortedFilteredUsers();
+  if (!rows.length) { toast('出力対象のユーザーがいません。', 'info'); return; }
+  const header = ['ユーザーID', '日本語名', '権限', '支店', '支店コード', '営業所', '営業所コード', '担当', '個人権限数', 'グループ権限数', '最終ログイン'];
+  const csvCell = (v) => {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [header.map(csvCell).join(',')];
+  rows.forEach(u => {
+    lines.push([
+      u.username,
+      u.name,
+      u.is_admin ? '管理者' : '一般',
+      u.branch_name || '',
+      u.branch_code || '',
+      u.office_name || '',
+      u.office_code || '',
+      u.department_name || '',
+      (u.tool_keys || []).length,
+      (u.group_tool_keys || []).length,
+      u.last_login_at ? fmtDate(u.last_login_at) : '',
+    ].map(csvCell).join(','));
+  });
+  // Excel で文字化けしないよう BOM 付き UTF-8 で出力
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  a.href = URL.createObjectURL(blob);
+  a.download = `dstt_users_${stamp}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast(`${rows.length}件のユーザーをCSV出力しました。`);
+}
+$('#btn-users-csv')?.addEventListener('click', exportUsersCsv);
 
 function escape(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -1052,6 +1750,31 @@ function fmtDate(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return escape(value);
   return d.toLocaleString('ja-JP', { hour12: false, timeZone: 'Asia/Tokyo' });
+}
+
+function fmtDateMin(value) {
+  // 分精度の短い日時表示（一覧セル用）
+  return fmtDate(value).replace(/:\d{2}$/, '');
+}
+
+function fmtRelative(value) {
+  if (!value) return '-';
+  let raw = String(value);
+  // TZサフィックスの無い日時はJST保存値として解釈する
+  if (!/[zZ]|[+-]\d{2}:\d{2}$/.test(raw)) raw += '+09:00';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return '-';
+  const diffMs = Date.now() - d.getTime();
+  if (diffMs < 60000) return 'たった今';
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 60) return `${mins}分前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}時間前`;
+  const days = Math.floor(hours / 24);
+  if (days < 31) return `${days}日前`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}ヶ月前`;
+  return `${Math.floor(months / 12)}年前`;
 }
 
 function fmtBytes(bytes) {
@@ -1125,6 +1848,37 @@ async function loadAllUserLoginLogs() {
   `).join('') : emptyRow(5);
 }
 
+async function loadFailedLogins() {
+  const suffix = accessQuery();
+  const res = await api(`/tools/user_management/api/access-management/failed-logins${suffix ? '?' + suffix : ''}`);
+  const logs = res.logs || [];
+  const countEl = $('#access-failed-count');
+  if (countEl) countEl.textContent = `${logs.length}件${logs.length >= (res.limit || 0) ? `（上限 ${res.limit} 件）` : ''}`;
+
+  const warn = $('#access-failed-warn');
+  const heavy = (res.recent_counts || []).filter(r => r.count >= 5);
+  if (warn) {
+    if (heavy.length) {
+      warn.classList.remove('hidden');
+      warn.innerHTML = '⚠️ 直近24時間に失敗が集中: ' + heavy.map(r =>
+        `<span class="font-mono">${escape(r.username)}</span>${r.registered ? '' : '<span class="text-red-600">（未登録ID）</span>'} ${r.count}回`
+      ).join('、 ');
+    } else {
+      warn.classList.add('hidden');
+    }
+  }
+
+  $('#access-failed-tbody').innerHTML = logs.length ? logs.map(row => `
+    <tr class="border-t">
+      <td class="p-2 whitespace-nowrap">${fmtDate(row.logged_in_at)}</td>
+      <td class="p-2 font-mono text-xs">${escape(row.username || '-')}${row.registered ? '' : ' <span class="admin-chip is-warn">未登録</span>'}</td>
+      <td class="p-2">${escape(row.name || '-')}</td>
+      <td class="p-2 font-mono text-xs">${escape(row.ip_address || '-')}</td>
+      <td class="p-2 text-xs">${shortText(row.user_agent, 90)}</td>
+    </tr>
+  `).join('') : emptyRow(5, 'ログイン失敗はありません');
+}
+
 function accessQuery() {
   const params = new URLSearchParams();
   const q = $('#access-search').value.trim();
@@ -1143,7 +1897,7 @@ async function loadSelectedAccessLogs() {
   if (!userId) {
     $('#access-empty').classList.remove('hidden');
     $('#access-content').classList.add('hidden');
-    await loadAllUserLoginLogs();
+    await Promise.all([loadAllUserLoginLogs(), loadFailedLogins()]);
     return;
   }
   $('#access-empty').classList.add('hidden');
@@ -1243,6 +1997,28 @@ $('#btn-access-load')?.addEventListener('click', loadSelectedAccessLogs);
 ['#access-search', '#access-from', '#access-to', '#access-limit'].forEach(sel => {
   $(sel)?.addEventListener('change', () => loadSelectedAccessLogs());
 });
+
+// 期間プリセット（今日 / 7日 / 30日 / 全て）
+$$('.access-preset').forEach(btn => btn.addEventListener('click', () => {
+  const days = btn.dataset.days;
+  const toLocalIso = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  };
+  if (days === 'all') {
+    $('#access-from').value = '';
+    $('#access-to').value = '';
+  } else {
+    const today = new Date();
+    const from = new Date();
+    from.setDate(today.getDate() - Number(days));
+    $('#access-from').value = toLocalIso(from);
+    $('#access-to').value = toLocalIso(today);
+  }
+  loadSelectedAccessLogs();
+}));
 $('#access-search')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
@@ -1298,11 +2074,45 @@ $('#btn-gen-pw').addEventListener('click', async () => {
   $('#form-new-user [name=password]').value = password;
 });
 
+// ===== 資格情報表示モーダル =====
+function showCredentialModal(title, username, password) {
+  $('#credential-title').textContent = title;
+  $('#credential-username').textContent = username;
+  $('#credential-password').textContent = password;
+  $('#modal-credential').classList.remove('hidden');
+}
+async function copyTextToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) {
+    // 非HTTPS環境等でclipboard APIが使えない場合のフォールバック
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+}
+$('#btn-copy-credential')?.addEventListener('click', async () => {
+  const username = $('#credential-username').textContent;
+  const password = $('#credential-password').textContent;
+  const ok = await copyTextToClipboard(`ユーザーID: ${username}\nパスワード: ${password}`);
+  if (ok) toast('ID・パスワードをコピーしました。');
+  else toastError('コピーに失敗しました。手動で控えてください。');
+});
+$('#btn-close-credential')?.addEventListener('click', () => $('#modal-credential').classList.add('hidden'));
+
 $('#form-new-user').addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
   try {
-    const res = await api('/tools/user_management/api/users', {
+    await api('/tools/user_management/api/users', {
       method: 'POST',
       body: {
         username: fd.get('username'),
@@ -1311,10 +2121,10 @@ $('#form-new-user').addEventListener('submit', async (e) => {
         is_admin: !!fd.get('is_admin'),
       }
     });
-    alert(res.message);
     $('#modal-new-user').classList.add('hidden');
+    showCredentialModal('✅ ユーザーを作成しました', String(fd.get('username') || ''), String(fd.get('password') || ''));
     loadUsers();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 async function openEditUser(userId) {
@@ -1413,8 +2223,9 @@ $('#form-edit-user').addEventListener('submit', async (e) => {
       body: { office_ids: getCheckedExtraOffices() }
     });
     $('#modal-edit-user').classList.add('hidden');
+    toast('ユーザー情報を保存しました。');
     loadUsers();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 async function openChangePw(userId) {
@@ -1439,9 +2250,10 @@ $('#form-change-pw').addEventListener('submit', async (e) => {
       method: 'PUT',
       body: { password: f.password.value }
     });
-    alert(res.message + '\n新しいパスワード: ' + res.new_password);
     $('#modal-change-pw').classList.add('hidden');
-  } catch (err) { alert('エラー: ' + err.message); }
+    const username = (f.user_info.value || '').split(' ')[0];
+    showCredentialModal('🔐 パスワードを変更しました', username, res.new_password || f.password.value);
+  } catch (err) { toastError(err); }
 });
 
 async function deleteUser(userId) {
@@ -1450,9 +2262,9 @@ async function deleteUser(userId) {
   if (!confirm(`ユーザー「${user.username}」（${user.name}）を削除しますか？`)) return;
   try {
     const res = await api(`/tools/user_management/api/users/${userId}`, { method: 'DELETE' });
-    alert(res.message);
+    toast(res.message);
     loadUsers();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 function resetUserPageAndRender() {
@@ -1460,8 +2272,11 @@ function resetUserPageAndRender() {
   renderUsers();
 }
 
-['#user-search', '#user-filter-branch', '#user-filter-office', '#user-filter-role', '#user-filter-status', '#user-page-size'].forEach(sel => {
-  $(sel)?.addEventListener('input', resetUserPageAndRender);
+// テキスト検索は input のみで反映する。change（blur時）も拾うと、検索直後に
+// 行内ボタンを押した際 mousedown と mouseup の間で一覧が再描画され、
+// 1回目のクリックが無効になるため。
+$('#user-search')?.addEventListener('input', resetUserPageAndRender);
+['#user-filter-branch', '#user-filter-office', '#user-filter-role', '#user-filter-status', '#user-page-size'].forEach(sel => {
   $(sel)?.addEventListener('change', resetUserPageAndRender);
 });
 
@@ -1517,6 +2332,7 @@ async function loadPermissions() {
   state.tools = t.tools;
 
   renderPermissionUserOptions();
+  loadPermissionTemplates().catch(() => {});
   $('#perm-user-select').onchange = renderPermissionGrid;
   if ($('#perm-user-filter')) $('#perm-user-filter').oninput = () => {
     const current = $('#perm-user-select').value;
@@ -1607,16 +2423,16 @@ function renderPermissionGrid() {
 
 $('#btn-perm-save').addEventListener('click', async () => {
   const userId = parseInt($('#perm-user-select').value);
-  if (!userId) return alert('ユーザーを選択してください。');
+  if (!userId) return toast('ユーザーを選択してください。', 'info');
   const selected = $$('#perm-tool-grid .perm-cb:checked:not(:disabled)').map(cb => cb.dataset.key);
   try {
     await api(`/tools/user_management/api/users/${userId}/tools`, {
       method: 'PUT',
       body: { tool_keys: selected }
     });
-    alert('ツールアクセス権を保存しました');
+    toast('ツールアクセス権を保存しました。');
     loadPermissions();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 // ===== Organization =====
@@ -1686,102 +2502,121 @@ function renderOrganization() {
   `).join('');
 }
 
-$('#btn-add-branch').addEventListener('click', async () => {
-  const name = $('#new-branch-name').value.trim();
-  if (!name) return alert('支店名を入力してください。');
-  const code = (prompt('支店コード（任意。空欄可）', '') || '').trim() || null;
+// ===== 汎用 名称/コード編集モーダル =====
+let orgEditSubmitHandler = null;
+
+function openEditModal({ title, nameLabel = '名称', name = '', showCode = true, code = '', onSubmit }) {
+  $('#org-edit-title').textContent = title;
+  $('#org-edit-name-label').textContent = nameLabel;
+  const form = $('#form-org-edit');
+  form.name.value = name;
+  form.code.value = code || '';
+  $('#org-edit-code-row').classList.toggle('hidden', !showCode);
+  orgEditSubmitHandler = onSubmit;
+  $('#modal-org-edit').classList.remove('hidden');
+  setTimeout(() => form.name.focus(), 50);
+}
+
+$('#form-org-edit')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const name = form.name.value.trim();
+  if (!name) return toast('名称を入力してください。', 'info');
+  if (!orgEditSubmitHandler) return;
   try {
-    await api('/tools/user_management/api/branches', { method: 'POST', body: { name, code } });
-    $('#new-branch-name').value = '';
-    loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+    await orgEditSubmitHandler({ name, code: form.code.value.trim() || null });
+    $('#modal-org-edit').classList.add('hidden');
+  } catch (err) { toastError(err); }
+});
+$('#btn-cancel-org-edit')?.addEventListener('click', () => $('#modal-org-edit').classList.add('hidden'));
+
+$('#btn-add-branch').addEventListener('click', () => {
+  const inputName = $('#new-branch-name').value.trim();
+  openEditModal({
+    title: '➕ 支店を追加',
+    nameLabel: '支店名',
+    name: inputName,
+    code: '',
+    onSubmit: async ({ name, code }) => {
+      await api('/tools/user_management/api/branches', { method: 'POST', body: { name, code } });
+      $('#new-branch-name').value = '';
+      toast(`支店「${name}」を追加しました。`);
+      loadOrganization();
+    },
+  });
 });
 
-async function editBranch(id) {
+function editBranch(id) {
   const cur = state.branches.find(b => b.id === id);
-  const name = prompt('支店名', cur?.name || '');
-  if (!name) return;
-  const code = prompt('支店コード（空欄で未設定）', cur?.code || '');
-  if (code === null) return;
-  try {
-    await api(`/tools/user_management/api/branches/${id}`, {
-      method: 'PUT',
-      body: { name, code: code.trim() || null }
-    });
-    loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  if (!cur) return;
+  openEditModal({
+    title: '🏢 支店を編集',
+    nameLabel: '支店名',
+    name: cur.name,
+    code: cur.code || '',
+    onSubmit: async ({ name, code }) => {
+      await api(`/tools/user_management/api/branches/${id}`, { method: 'PUT', body: { name, code } });
+      toast('支店を保存しました。');
+      loadOrganization();
+    },
+  });
 }
-async function setBranchCode(id) {
-  const cur = state.branches.find(b => b.id === id);
-  const code = prompt('支店コード（空欄で未設定）', cur?.code || '');
-  if (code === null) return;
-  try {
-    await api(`/tools/user_management/api/branches/${id}`, {
-      method: 'PUT',
-      body: { name: cur.name, code: code.trim() || null }
-    });
-    loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
-}
+const setBranchCode = editBranch;
 async function deleteBranch(id) {
   if (!confirm('支店を削除すると、配下の営業所・担当・所属ユーザーの紐付けも解除されます。続行しますか？')) return;
   try {
     await api(`/tools/user_management/api/branches/${id}`, { method: 'DELETE' });
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
-async function addOffice(branchId) {
+function addOffice(branchId) {
   const input = document.getElementById(`office-input-${branchId}`);
-  const name = input.value.trim();
-  if (!name) return;
-  const code = (prompt('営業所コード（任意。空欄可）', '') || '').trim() || null;
-  try {
-    await api('/tools/user_management/api/offices', { method: 'POST', body: { branch_id: branchId, name, code } });
-    input.value = '';
-    loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  const inputName = input ? input.value.trim() : '';
+  openEditModal({
+    title: '➕ 営業所を追加',
+    nameLabel: '営業所名',
+    name: inputName,
+    code: '',
+    onSubmit: async ({ name, code }) => {
+      await api('/tools/user_management/api/offices', { method: 'POST', body: { branch_id: branchId, name, code } });
+      if (input) input.value = '';
+      toast(`営業所「${name}」を追加しました。`);
+      loadOrganization();
+    },
+  });
 }
-async function editOffice(id) {
-  let cur = null;
+
+function findOffice(id) {
   for (const b of state.branches) {
-    const found = b.offices.find(o => o.id === id);
-    if (found) { cur = found; break; }
+    const found = (b.offices || []).find(o => o.id === id);
+    if (found) return found;
   }
-  const name = prompt('営業所名', cur?.name || '');
-  if (!name) return;
-  const code = prompt('営業所コード（空欄で未設定）', cur?.code || '');
-  if (code === null) return;
-  try {
-    await api(`/tools/user_management/api/offices/${id}`, {
-      method: 'PUT',
-      body: { name, code: code.trim() || null }
-    });
-    loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  return null;
 }
-async function setOfficeCode(id) {
-  let cur = null;
-  for (const b of state.branches) {
-    const found = b.offices.find(o => o.id === id);
-    if (found) { cur = found; break; }
-  }
-  const code = prompt('営業所コード（空欄で未設定）', cur?.code || '');
-  if (code === null) return;
-  try {
-    await api(`/tools/user_management/api/offices/${id}`, {
-      method: 'PUT',
-      body: { name: cur.name, code: code.trim() || null }
-    });
-    loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+
+function editOffice(id) {
+  const cur = findOffice(id);
+  if (!cur) return;
+  openEditModal({
+    title: '🏪 営業所を編集',
+    nameLabel: '営業所名',
+    name: cur.name,
+    code: cur.code || '',
+    onSubmit: async ({ name, code }) => {
+      await api(`/tools/user_management/api/offices/${id}`, { method: 'PUT', body: { name, code } });
+      toast('営業所を保存しました。');
+      loadOrganization();
+    },
+  });
 }
+const setOfficeCode = editOffice;
 async function deleteOffice(id) {
   if (!confirm('営業所を削除すると、配下の担当・所属ユーザーの紐付けも解除されます。続行しますか？')) return;
   try {
     await api(`/tools/user_management/api/offices/${id}`, { method: 'DELETE' });
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 async function addDepartment(officeId) {
@@ -1792,22 +2627,34 @@ async function addDepartment(officeId) {
     await api('/tools/user_management/api/departments', { method: 'POST', body: { office_id: officeId, name } });
     input.value = '';
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
-async function renameDepartment(id) {
-  const name = prompt('新しい担当名');
-  if (!name) return;
-  try {
-    await api(`/tools/user_management/api/departments/${id}`, { method: 'PUT', body: { name } });
-    loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+function renameDepartment(id) {
+  let cur = null;
+  for (const b of state.branches) {
+    for (const o of (b.offices || [])) {
+      const found = (o.departments || []).find(d => d.id === id);
+      if (found) { cur = found; break; }
+    }
+  }
+  openEditModal({
+    title: '👤 担当名を変更',
+    nameLabel: '担当名',
+    name: cur?.name || '',
+    showCode: false,
+    onSubmit: async ({ name }) => {
+      await api(`/tools/user_management/api/departments/${id}`, { method: 'PUT', body: { name } });
+      toast('担当名を変更しました。');
+      loadOrganization();
+    },
+  });
 }
 async function deleteDepartment(id) {
   if (!confirm('担当を削除すると、所属ユーザーの紐付けも解除されます。続行しますか？')) return;
   try {
     await api(`/tools/user_management/api/departments/${id}`, { method: 'DELETE' });
     loadOrganization();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 // ===== Group permissions =====
@@ -1877,18 +2724,19 @@ function renderGroupRules() {
 
 $('#btn-gp-add').addEventListener('click', async () => {
   const tool = $('#gp-tool').value;
-  if (!tool) return alert('ツールを選択してください。');
+  if (!tool) return toast('ツールを選択してください。', 'info');
   const branch = $('#gp-branch').value || null;
   const office = $('#gp-office').value || null;
   const dept = $('#gp-dept').value || null;
-  if (!branch && !office && !dept) return alert('支店・営業所・担当のいずれか1つ以上を指定してください。');
+  if (!branch && !office && !dept) return toast('支店・営業所・担当のいずれか1つ以上を指定してください。', 'info');
   try {
     await api('/tools/user_management/api/group-tool-permissions', {
       method: 'POST',
       body: { tool_key: tool, branch_id: branch, office_id: office, department_id: dept }
     });
+    toast('グループ付与を追加しました。');
     loadGroupPerms();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 async function deleteGroupRule(id) {
@@ -1896,7 +2744,7 @@ async function deleteGroupRule(id) {
   try {
     await api(`/tools/user_management/api/group-tool-permissions/${id}`, { method: 'DELETE' });
     loadGroupPerms();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 // ===== Siteplus codes =====
@@ -2046,8 +2894,8 @@ function updateSpSelectionUI() {
   if (head) head.checked = allChecked;
 }
 
-['#sp-filter', '#sp-filter-active', '#sp-filter-office'].forEach(sel => {
-  $(sel)?.addEventListener('input', renderSiteplusCodes);
+$('#sp-filter')?.addEventListener('input', renderSiteplusCodes);
+['#sp-filter-active', '#sp-filter-office'].forEach(sel => {
   $(sel)?.addEventListener('change', renderSiteplusCodes);
 });
 
@@ -2069,15 +2917,15 @@ $('#btn-sp-clear-sel')?.addEventListener('click', () => {
 });
 
 $('#btn-sp-bulk').addEventListener('click', async () => {
-  if (spState.dirty.size === 0) return alert('変更はありません。');
+  if (spState.dirty.size === 0) return toast('変更はありません。', 'info');
   const items = Array.from(spState.dirty.entries()).map(([id, office_code]) => ({ id, office_code }));
   try {
     await api('/tools/user_management/api/siteplus/sites/office-code/bulk', {
       method: 'PUT', body: { items }
     });
-    alert(`${items.length}件を更新しました。`);
+    toast(`${items.length}件を更新しました。`);
     loadSiteplusCodes();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 $('#btn-sp-bulk-edit')?.addEventListener('click', () => {
@@ -2100,7 +2948,7 @@ $('#form-sp-bulk')?.addEventListener('submit', async (e) => {
   const officeMode = form.office_code_mode.value;
   const activeMode = form.active_mode.value;
   if (officeMode === '__KEEP__' && activeMode === '__KEEP__') {
-    return alert('変更する項目を選択してください。');
+    return toast('変更する項目を選択してください。', 'info');
   }
   const ids = Array.from(spState.selected);
   const body = { ids };
@@ -2110,10 +2958,10 @@ $('#form-sp-bulk')?.addEventListener('submit', async (e) => {
     const res = await api('/tools/user_management/api/siteplus/sites/office-code/bulk', {
       method: 'PUT', body
     });
-    alert(`${res.updated || 0} 件を更新しました。`);
+    toast(`${res.updated || 0} 件を更新しました。`);
     $('#modal-sp-bulk').classList.add('hidden');
     loadSiteplusCodes();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 // ===== Leave_mgr codes =====
@@ -2142,8 +2990,8 @@ async function saveLeaveCalendarCode(btn) {
       method: 'PUT',
       body: { office_code: input.value.trim() || null }
     });
-    alert('保存しました');
-  } catch (err) { alert('エラー: ' + err.message); }
+    toast('保存しました。');
+  } catch (err) { toastError(err); }
 }
 
 // ===== Tool Management =====
@@ -2167,7 +3015,7 @@ function renderCategories() {
     return;
   }
   el.innerHTML = tmState.categories.map((c, idx) => `
-    <div class="flex items-center gap-2 bg-white border rounded p-2" data-cat-id="${c.id}">
+    <div class="admin-cat-row flex items-center gap-2 bg-white border rounded p-2" data-cat-id="${c.id}" draggable="true">
       <span class="cursor-grab text-gray-400" title="ドラッグで並び替え">⠿</span>
       <span class="font-medium flex-1">${escape(c.name)}</span>
       <span class="text-xs text-gray-500">${(c.tools || []).length} ツール</span>
@@ -2217,16 +3065,58 @@ function renderToolSettings() {
   }).join('');
 }
 
+// カテゴリのドラッグ&ドロップ並び替え（▲▼ボタンの補完）
+(() => {
+  const list = $('#cat-list');
+  if (!list) return;
+  let dragRow = null;
+  list.addEventListener('dragstart', (e) => {
+    dragRow = e.target.closest('.admin-cat-row');
+    if (!dragRow) return;
+    dragRow.classList.add('is-dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    // FirefoxはsetDataしないとドラッグが始まらない
+    e.dataTransfer.setData('text/plain', dragRow.dataset.catId || '');
+  });
+  list.addEventListener('dragover', (e) => {
+    if (!dragRow) return;
+    e.preventDefault();
+    const rows = [...list.querySelectorAll('.admin-cat-row:not(.is-dragging)')];
+    const next = rows.find(row => {
+      const rect = row.getBoundingClientRect();
+      return e.clientY < rect.top + rect.height / 2;
+    });
+    if (next) list.insertBefore(dragRow, next);
+    else list.appendChild(dragRow);
+  });
+  list.addEventListener('dragend', async () => {
+    if (!dragRow) return;
+    dragRow.classList.remove('is-dragging');
+    dragRow = null;
+    const order = [...list.querySelectorAll('.admin-cat-row')].map(row => parseInt(row.dataset.catId));
+    const current = tmState.categories.map(c => c.id);
+    if (order.length === current.length && order.every((id, i) => id === current[i])) return;
+    try {
+      await api('/tools/user_management/api/tool-categories/reorder', { method: 'PUT', body: { order } });
+      toast('カテゴリの並び順を保存しました。');
+      loadToolManagement();
+    } catch (err) {
+      toastError(err);
+      loadToolManagement();
+    }
+  });
+})();
+
 $('#btn-add-cat').addEventListener('click', async () => {
   const name = $('#new-cat-name').value.trim();
-  if (!name) return alert('カテゴリ名を入力してください。');
+  if (!name) return toast('カテゴリ名を入力してください。', 'info');
   try {
     await api('/tools/user_management/api/tool-categories', {
       method: 'POST', body: { name }
     });
     $('#new-cat-name').value = '';
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 async function editCategory(id) {
@@ -2239,7 +3129,7 @@ async function editCategory(id) {
       method: 'PUT', body: { name }
     });
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 async function deleteCategory(id) {
@@ -2249,7 +3139,7 @@ async function deleteCategory(id) {
   try {
     await api(`/tools/user_management/api/tool-categories/${id}`, { method: 'DELETE' });
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 async function moveCategoryUp(idx) {
@@ -2261,7 +3151,7 @@ async function moveCategoryUp(idx) {
       method: 'PUT', body: { order }
     });
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 async function moveCategoryDown(idx) {
@@ -2273,7 +3163,7 @@ async function moveCategoryDown(idx) {
       method: 'PUT', body: { order }
     });
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 }
 
 $('#btn-tm-save').addEventListener('click', async () => {
@@ -2292,9 +3182,9 @@ $('#btn-tm-save').addEventListener('click', async () => {
     await api('/tools/user_management/api/tool-settings/bulk', {
       method: 'PUT', body: { updates }
     });
-    alert('ツール設定を保存しました');
+    toast('ツール設定を保存しました。');
     loadToolManagement();
-  } catch (err) { alert('エラー: ' + err.message); }
+  } catch (err) { toastError(err); }
 });
 
 // ===== メール送信 =====
@@ -2451,7 +3341,7 @@ async function deleteMail(id) {
     inboxState.selectedId = null;
     $('#inbox-detail').innerHTML = '<p class="text-gray-400 text-sm">左の一覧からメールを選ぶと内容が表示されます。</p>';
     await Promise.all([loadInbox(), loadMailInboxStatus()]);
-  } catch (err) { alert('削除に失敗しました: ' + err.message); }
+  } catch (err) { toastError('削除に失敗しました: ' + err.message); }
 }
 
 $('#inbox-list')?.addEventListener('click', (e) => {
@@ -2470,9 +3360,9 @@ $('#btn-inbox-poll')?.addEventListener('click', async () => {
     const s = res.summary || {};
     await Promise.all([loadInbox(), loadMailInboxStatus()]);
     btn.textContent = `📨 今すぐ受信`;
-    if (!s.stored) alert('新着メールはありませんでした。');
+    if (!s.stored) toast('新着メールはありませんでした。', 'info');
   } catch (err) {
-    alert('受信に失敗しました: ' + err.message);
+    toastError('受信に失敗しました: ' + err.message);
     btn.textContent = '📨 今すぐ受信';
   } finally { btn.disabled = false; }
 });
@@ -2590,13 +3480,585 @@ document.addEventListener('click', async (e) => {
     await api(`/tools/user_management/api/mail/messages/${btn.dataset.id}/resend`, { method: 'POST', body: { send_now: true } });
     loadMailMessages();
   } catch (err) {
-    alert('再送に失敗しました: ' + err.message);
+    toastError('再送に失敗しました: ' + err.message);
     btn.disabled = false;
     btn.textContent = '再送';
   }
 });
 
-// 初期ロード
-loadUsers();
+// ===== お知らせ管理 =====
+const annState = { branches: [], readStatus: {} };
+
+function populateAnnouncementTargets() {
+  const branchBox = $('#announcement-target-branches');
+  const officeBox = $('#announcement-target-offices');
+  if (!branchBox || !officeBox) return;
+  const checkedBranches = new Set($$('#announcement-target-branches input:checked').map(cb => cb.value));
+  const checkedOffices = new Set($$('#announcement-target-offices input:checked').map(cb => cb.value));
+  branchBox.innerHTML = annState.branches.map(b => `
+    <label class="flex items-center gap-2">
+      <input type="checkbox" value="${b.id}" ${checkedBranches.has(String(b.id)) ? 'checked' : ''}>
+      <span>${escape(b.name)}</span>
+    </label>
+  `).join('') || '<p class="text-xs text-gray-500">支店が登録されていません。</p>';
+  const officeRows = [];
+  annState.branches.forEach(b => (b.offices || []).forEach(o => {
+    officeRows.push(`
+      <label class="flex items-center gap-2">
+        <input type="checkbox" value="${o.id}" ${checkedOffices.has(String(o.id)) ? 'checked' : ''}>
+        <span>${escape(b.name)} / ${escape(o.name)}</span>
+      </label>
+    `);
+  }));
+  officeBox.innerHTML = officeRows.join('') || '<p class="text-xs text-gray-500">営業所が登録されていません。</p>';
+}
+
+function announcementChips(a) {
+  const chips = [];
+  if (a.expires_at) {
+    chips.push(a.expired
+      ? '<span class="admin-chip" style="color:#9ca3af;">期限切れ</span>'
+      : `<span class="admin-chip">期限 ${escape(a.expires_at)}</span>`);
+  }
+  const targets = [...(a.target_branch_names || []), ...(a.target_office_names || [])];
+  chips.push(targets.length
+    ? `<span class="admin-chip is-warn" title="${escape(targets.join('、'))}">対象 ${targets.length > 2 ? escape(targets.slice(0, 2).join('、')) + ` 他${targets.length - 2}` : escape(targets.join('、'))}</span>`
+    : '<span class="admin-chip">全社</span>');
+  const st = annState.readStatus[String(a.id)];
+  if (st) {
+    chips.push(`<button type="button" onclick="openAnnouncementReaders(${a.id})" class="admin-chip is-ok hover:bg-blue-100" title="クリックで既読・未読の内訳を表示">既読 ${st.read}/${st.target}</button>`);
+  }
+  return chips.join(' ');
+}
+
+async function loadAnnouncements() {
+  const list = $('#announcement-list');
+  try {
+    const [aRes, sRes, oRes] = await Promise.all([
+      api('/tools/user_management/api/announcements'),
+      api('/tools/user_management/api/announcements/read-status'),
+      api('/tools/user_management/api/organization'),
+    ]);
+    const items = aRes.announcements || [];
+    annState.readStatus = sRes.status || {};
+    annState.branches = oRes.branches || [];
+    populateAnnouncementTargets();
+    $('#announcement-count').textContent = items.length ? `${items.length}件` : '';
+    if (!items.length) {
+      list.innerHTML = '<p class="text-sm text-gray-500 border rounded bg-gray-50 p-4">配信中のお知らせはありません。</p>';
+      return;
+    }
+    list.innerHTML = items.map(a => `
+      <div class="border rounded p-4 flex items-start justify-between gap-4 ${a.expired ? 'opacity-60' : ''}">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-semibold">${escape(a.title || 'お知らせ')}</span>
+            <span class="text-xs text-gray-400">#${a.id}</span>
+            ${announcementChips(a)}
+          </div>
+          <p class="text-sm text-gray-700 mt-1 whitespace-pre-wrap break-words">${escape(a.content || '')}</p>
+          <p class="text-xs text-gray-400 mt-2">${escape(a.created_at || '')} / 配信者: ${escape(a.created_by || '-')}</p>
+        </div>
+        <button onclick="deleteAnnouncementItem(${a.id})" class="bg-red-500 text-white px-3 py-1.5 rounded text-xs hover:bg-red-600 whitespace-nowrap shrink-0">削除</button>
+      </div>
+    `).join('');
+  } catch (err) {
+    list.innerHTML = `<p class="text-sm text-red-600 border rounded bg-red-50 p-4">読み込みに失敗しました: ${escape(err.message)}</p>`;
+  }
+}
+
+$('#form-announcement')?.addEventListener('change', (e) => {
+  if (e.target.name === 'target_mode') {
+    $('#announcement-target-picker').classList.toggle('hidden', e.target.value !== 'scoped');
+  }
+});
+
+$('#form-announcement')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const content = f.content.value.trim();
+  if (!content) return toast('本文を入力してください。', 'info');
+  const scoped = f.querySelector('input[name="target_mode"]:checked')?.value === 'scoped';
+  const targetBranchIds = scoped ? $$('#announcement-target-branches input:checked').map(cb => parseInt(cb.value)) : [];
+  const targetOfficeIds = scoped ? $$('#announcement-target-offices input:checked').map(cb => parseInt(cb.value)) : [];
+  if (scoped && !targetBranchIds.length && !targetOfficeIds.length) {
+    return toast('対象の支店または営業所を選択してください。', 'info');
+  }
+  try {
+    await api('/tools/user_management/api/announcements', {
+      method: 'POST',
+      body: {
+        title: f.title.value.trim(),
+        content,
+        expires_at: f.expires_at.value || null,
+        target_branch_ids: targetBranchIds,
+        target_office_ids: targetOfficeIds,
+      },
+    });
+    f.reset();
+    $('#announcement-target-picker').classList.add('hidden');
+    toast('お知らせを配信しました。');
+    loadAnnouncements();
+  } catch (err) { toastError(err); }
+});
+
+async function openAnnouncementReaders(id) {
+  try {
+    const res = await api(`/tools/user_management/api/announcements/${id}/readers`);
+    $('#announcement-readers-title').textContent = `既読状況: ${res.announcement?.title || ''}`;
+    const row = (u) => `<div class="px-3 py-1.5">${escape(u.name || '-')} <span class="text-xs text-slate-400 font-mono">${escape(u.username)}</span></div>`;
+    const unread = res.unread || [];
+    const readers = res.readers || [];
+    $('#announcement-unread-count').textContent = `${unread.length}人`;
+    $('#announcement-read-count').textContent = `${readers.length}人`;
+    $('#announcement-unread-list').innerHTML = unread.length ? unread.map(row).join('') : '<div class="px-3 py-2 text-slate-400">未読者はいません</div>';
+    $('#announcement-read-list').innerHTML = readers.length ? readers.map(row).join('') : '<div class="px-3 py-2 text-slate-400">既読者はまだいません</div>';
+    $('#modal-announcement-readers').classList.remove('hidden');
+  } catch (err) { toastError(err); }
+}
+$('#btn-close-announcement-readers')?.addEventListener('click', () => $('#modal-announcement-readers').classList.add('hidden'));
+
+async function deleteAnnouncementItem(id) {
+  if (!confirm('このお知らせを削除しますか？（全ユーザーの表示から消えます）')) return;
+  try {
+    await api(`/tools/user_management/api/announcements/${id}`, { method: 'DELETE' });
+    toast('お知らせを削除しました。');
+    loadAnnouncements();
+  } catch (err) { toastError(err); }
+}
+
+// ===== 利用統計 =====
+const statsState = { days: 30, data: null };
+
+function statsTooltipEl() {
+  let el = document.getElementById('stats-tooltip');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'stats-tooltip';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function showStatsTooltip(html, x, y) {
+  const el = statsTooltipEl();
+  el.innerHTML = html;
+  el.style.display = 'block';
+  const pad = 12;
+  const rect = el.getBoundingClientRect();
+  let left = x + pad;
+  if (left + rect.width > window.innerWidth - 8) left = x - rect.width - pad;
+  let top = y - rect.height - pad;
+  if (top < 8) top = y + pad;
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+}
+
+function hideStatsTooltip() {
+  const el = document.getElementById('stats-tooltip');
+  if (el) el.style.display = 'none';
+}
+
+async function loadUsageStats() {
+  $$('.stats-range').forEach(btn => {
+    const on = Number(btn.dataset.days) === statsState.days;
+    btn.classList.toggle('bg-red-50', on);
+    btn.classList.toggle('border-red-200', on);
+    btn.classList.toggle('text-red-700', on);
+    btn.classList.toggle('font-medium', on);
+    btn.classList.toggle('bg-white', !on);
+    btn.classList.toggle('border-slate-300', !on);
+  });
+  try {
+    statsState.data = await api(`/tools/user_management/api/usage-stats?days=${statsState.days}`);
+  } catch (err) {
+    toastError(err);
+    return;
+  }
+  renderStatsSummary();
+  renderDailyChart();
+  renderStatsBars('#stats-tools-chart', statsState.data.tools.map(t => ({
+    label: t.label, count: t.count, sub: `（${t.users}人）`,
+  })), 'ツール利用の記録がまだありません');
+  renderStatsBars('#stats-offices-chart', statsState.data.offices.map(o => ({
+    label: o.label, count: o.count, sub: '',
+  })), '営業所別の記録がまだありません');
+}
+
+$$('.stats-range').forEach(btn => btn.addEventListener('click', () => {
+  statsState.days = Number(btn.dataset.days) || 30;
+  loadUsageStats();
+}));
+
+function renderStatsSummary() {
+  const sm = statsState.data.summary || {};
+  const cards = [
+    ['操作数（合計）', (sm.total_actions || 0).toLocaleString()],
+    ['利用ユーザー数', `${sm.active_users || 0} / ${sm.total_users || 0}人`],
+    ['ログイン回数', (sm.login_count || 0).toLocaleString()],
+    ['最多利用ツール', sm.top_tool || '-'],
+  ];
+  $('#stats-summary').innerHTML = cards.map(([label, value]) => `
+    <div class="border border-slate-200 rounded bg-white p-3 shadow-sm">
+      <div class="text-xs font-semibold text-slate-500">${escape(label)}</div>
+      <div class="text-xl font-bold mt-1 break-words">${escape(value)}</div>
+    </div>
+  `).join('');
+}
+
+function renderDailyChart() {
+  const host = $('#stats-daily-chart');
+  const daily = statsState.data.daily || [];
+  $('#stats-daily-table').innerHTML = daily.map(d => `
+    <tr class="border-t"><td class="p-2">${escape(d.date)}</td><td class="p-2 text-right">${d.actions.toLocaleString()}</td><td class="p-2 text-right">${d.users}</td></tr>
+  `).join('');
+  if (!daily.length) {
+    host.innerHTML = '<p class="text-sm text-slate-400">データがありません。</p>';
+    return;
+  }
+  const W = 960;
+  const H = 220;
+  const padL = 44;
+  const padR = 8;
+  const padT = 10;
+  const padB = 28;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const maxVal = Math.max(1, ...daily.map(d => d.actions));
+  // きりのよい目盛り上限
+  const step = Math.pow(10, Math.floor(Math.log10(maxVal)));
+  const niceMax = Math.ceil(maxVal / step) * step;
+  const n = daily.length;
+  const band = plotW / n;
+  const barW = Math.min(24, Math.max(3, band * 0.6));
+
+  const gridLines = [];
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const value = Math.round(niceMax * i / ticks);
+    const y = padT + plotH - (plotH * i / ticks);
+    gridLines.push(`<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#e2e8f0" stroke-width="1"/>`);
+    gridLines.push(`<text x="${padL - 6}" y="${y + 3.5}" text-anchor="end" font-size="10" fill="#64748b">${value.toLocaleString()}</text>`);
+  }
+
+  // X軸ラベルは過密にならないよう間引く
+  const labelEvery = Math.max(1, Math.ceil(n / 12));
+  const bars = [];
+  daily.forEach((d, i) => {
+    const x = padL + band * i + (band - barW) / 2;
+    const h = Math.max(d.actions > 0 ? 2 : 0, plotH * d.actions / niceMax);
+    const y = padT + plotH - h;
+    if (h > 0) {
+      const r = Math.min(4, barW / 2, h);
+      bars.push(`<path d="M ${x} ${y + h} L ${x} ${y + r} Q ${x} ${y} ${x + r} ${y} L ${x + barW - r} ${y} Q ${x + barW} ${y} ${x + barW} ${y + r} L ${x + barW} ${y + h} Z" fill="#2a78d6"/>`);
+    }
+    bars.push(`<rect class="stats-day-hit" data-idx="${i}" x="${padL + band * i}" y="${padT}" width="${band}" height="${plotH}" fill="transparent"/>`);
+    if (i % labelEvery === 0) {
+      const short = d.date.slice(5).replace('-', '/');
+      bars.push(`<text x="${padL + band * i + band / 2}" y="${H - 8}" text-anchor="middle" font-size="10" fill="#64748b">${short}</text>`);
+    }
+  });
+
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="日別の操作数">
+    ${gridLines.join('')}
+    <line x1="${padL}" y1="${padT + plotH}" x2="${W - padR}" y2="${padT + plotH}" stroke="#cbd5e1" stroke-width="1"/>
+    ${bars.join('')}
+  </svg>`;
+
+  host.querySelectorAll('.stats-day-hit').forEach(hit => {
+    hit.addEventListener('mousemove', (e) => {
+      const d = daily[Number(hit.dataset.idx)];
+      if (!d) return;
+      showStatsTooltip(
+        `<b>${escape(d.date)}</b><br>操作数: ${d.actions.toLocaleString()}<br>利用ユーザー: ${d.users}人`,
+        e.clientX, e.clientY,
+      );
+    });
+    hit.addEventListener('mouseleave', hideStatsTooltip);
+  });
+}
+
+function renderStatsBars(sel, rows, emptyText) {
+  const host = $(sel);
+  if (!rows.length) {
+    host.innerHTML = `<p class="text-sm text-slate-400">${escape(emptyText)}</p>`;
+    return;
+  }
+  const max = Math.max(1, ...rows.map(r => r.count));
+  host.innerHTML = rows.map(r => `
+    <div class="stats-bar-row">
+      <div class="stats-bar-label" title="${escape(r.label)}">${escape(r.label)}</div>
+      <div class="stats-bar-track">
+        <div class="stats-bar-fill" style="width: ${Math.max(0.5, r.count / max * 72).toFixed(2)}%"></div>
+        <span class="stats-bar-value">${r.count.toLocaleString()}${escape(r.sub || '')}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ===== ユーザーCSV一括登録 =====
+const importState = { rows: [], allOk: false };
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cur = '';
+  let inQuote = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuote) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cur += '"'; i++; }
+        else inQuote = false;
+      } else cur += ch;
+    } else if (ch === '"') {
+      inQuote = true;
+    } else if (ch === ',') {
+      row.push(cur); cur = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cur); cur = '';
+      rows.push(row); row = [];
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter(r => r.some(c => String(c).trim() !== ''));
+}
+
+async function readCsvFileText(file) {
+  const buf = await file.arrayBuffer();
+  let text = new TextDecoder('utf-8').decode(buf);
+  if (text.includes('\uFFFD')) {
+    try { text = new TextDecoder('shift_jis').decode(buf); } catch (_) { /* UTF-8のまま */ }
+  }
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  return text;
+}
+
+const IMPORT_HEADER_MAP = {
+  'ユーザーid': 'username', 'username': 'username', 'id': 'username',
+  '日本語名': 'name', '名前': 'name', 'name': 'name',
+  'パスワード': 'password', 'password': 'password',
+  '管理者': 'is_admin', 'is_admin': 'is_admin', 'admin': 'is_admin',
+  '支店': 'branch', 'branch': 'branch',
+  '営業所': 'office', 'office': 'office',
+  '担当': 'department', 'department': 'department',
+};
+
+function mapImportRows(text) {
+  const table = parseCsv(text);
+  if (table.length < 2) throw new Error('ヘッダー行とデータ行が必要です');
+  const headers = table[0].map(h => IMPORT_HEADER_MAP[String(h).trim().toLowerCase()] || null);
+  if (!headers.includes('username')) throw new Error('「ユーザーID」列が見つかりません');
+  if (!headers.includes('name')) throw new Error('「日本語名」列が見つかりません');
+  return table.slice(1).map(cells => {
+    const row = {};
+    headers.forEach((key, i) => { if (key) row[key] = String(cells[i] ?? '').trim(); });
+    return row;
+  });
+}
+
+function setImportResult(html, tone = 'info') {
+  const el = $('#import-result');
+  const tones = {
+    info: 'bg-slate-50 border-slate-200 text-slate-700',
+    ok: 'bg-green-50 border-green-200 text-green-800',
+    error: 'bg-red-50 border-red-200 text-red-700',
+  };
+  el.className = `border rounded px-3 py-2 text-sm mb-3 ${tones[tone]}`;
+  el.innerHTML = html;
+  el.classList.remove('hidden');
+}
+
+function renderImportPreview(results) {
+  $('#import-preview').classList.remove('hidden');
+  $('#import-preview-tbody').innerHTML = results.map(r => `
+    <tr class="border-t ${r.ok ? '' : 'bg-red-50'}">
+      <td class="p-2 text-slate-500">${r.row}</td>
+      <td class="p-2 font-mono">${escape(r.username || '-')}</td>
+      <td class="p-2">${r.ok ? '<span class="text-green-700 font-medium">OK</span>' : '<span class="text-red-600 font-medium">エラー</span>'}</td>
+      <td class="p-2 text-xs">${r.ok ? (r.password_generated ? 'パスワード自動生成' : '') : escape(r.error || '')}</td>
+    </tr>
+  `).join('');
+}
+
+$('#btn-users-import')?.addEventListener('click', () => {
+  importState.rows = [];
+  importState.allOk = false;
+  $('#import-file').value = '';
+  $('#btn-import-check').disabled = true;
+  $('#btn-import-commit').disabled = true;
+  $('#import-result').classList.add('hidden');
+  $('#import-preview').classList.add('hidden');
+  $('#modal-user-import').classList.remove('hidden');
+});
+$('#btn-cancel-import')?.addEventListener('click', () => $('#modal-user-import').classList.add('hidden'));
+
+$('#import-file')?.addEventListener('change', (e) => {
+  $('#btn-import-check').disabled = !e.target.files?.length;
+  $('#btn-import-commit').disabled = true;
+  importState.allOk = false;
+});
+
+$('#btn-import-template')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  const csv = 'ユーザーID,日本語名,パスワード,管理者,支店,営業所,担当\r\nsample01,見本 太郎,,0,東京支店,新宿営業所,運行管理\r\n';
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'dstt_users_import_template.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+$('#btn-import-check')?.addEventListener('click', async () => {
+  const file = $('#import-file').files?.[0];
+  if (!file) return;
+  try {
+    const text = await readCsvFileText(file);
+    importState.rows = mapImportRows(text);
+  } catch (err) {
+    setImportResult(`読み込みエラー: ${escape(err.message)}`, 'error');
+    $('#import-preview').classList.add('hidden');
+    return;
+  }
+  try {
+    const res = await api('/tools/user_management/api/users/bulk-import', {
+      method: 'POST',
+      body: { rows: importState.rows, dry_run: true },
+    });
+    renderImportPreview(res.results || []);
+    importState.allOk = (res.errors === 0 && res.ok > 0);
+    $('#btn-import-commit').disabled = !importState.allOk;
+    if (importState.allOk) {
+      setImportResult(`✅ 全${res.ok}行が登録可能です。「登録を実行」を押してください。`, 'ok');
+    } else {
+      setImportResult(`⚠️ ${res.errors}行にエラーがあります（OK ${res.ok}行）。修正して再検証してください。エラーがある間は登録できません。`, 'error');
+    }
+  } catch (err) { toastError(err); }
+});
+
+$('#btn-import-commit')?.addEventListener('click', async () => {
+  if (!importState.allOk || !importState.rows.length) return;
+  const btn = $('#btn-import-commit');
+  btn.disabled = true;
+  try {
+    const res = await api('/tools/user_management/api/users/bulk-import', {
+      method: 'POST',
+      body: { rows: importState.rows, dry_run: false },
+    });
+    const created = res.created || [];
+    const csvCell = (v) => {
+      const str = String(v ?? '');
+      return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+    const lines = ['ユーザーID,日本語名,パスワード'];
+    created.forEach(c => lines.push([c.username, c.name, c.password].map(csvCell).join(',')));
+    const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'dstt_users_credentials.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setImportResult(`✅ ${created.length}人を登録し、ID・パスワード一覧CSVをダウンロードしました。<b>パスワードは再表示できないため、必ず保管してください。</b>`, 'ok');
+    $('#import-preview-tbody').innerHTML = created.map((c, i) => `
+      <tr class="border-t">
+        <td class="p-2 text-slate-500">${i + 1}</td>
+        <td class="p-2 font-mono">${escape(c.username)}</td>
+        <td class="p-2"><span class="text-green-700 font-medium">登録済</span></td>
+        <td class="p-2 text-xs font-mono">${escape(c.password)}</td>
+      </tr>
+    `).join('');
+    importState.allOk = false;
+    toast(`${created.length}人のユーザーを登録しました。`);
+    loadUsers();
+  } catch (err) {
+    toastError(err);
+    btn.disabled = false;
+  }
+});
+
+// ===== 権限テンプレート =====
+const templateState = { templates: [] };
+
+async function loadPermissionTemplates() {
+  const res = await api('/tools/user_management/api/permission-templates');
+  templateState.templates = res.templates || [];
+  renderTemplateSelects();
+}
+
+function renderTemplateSelects() {
+  const opts = templateState.templates.map(t =>
+    `<option value="${t.id}">${escape(t.name)}（${(t.tool_keys || []).length}ツール）</option>`).join('');
+  const sel = $('#perm-template-select');
+  if (sel) {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">（テンプレートを選択）</option>' + opts;
+    if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+  }
+  const bulkSel = $('#form-user-bulk [name=template_id]');
+  if (bulkSel) {
+    const cur = bulkSel.value;
+    bulkSel.innerHTML = '<option value="">適用しない</option>' + opts;
+    if ([...bulkSel.options].some(o => o.value === cur)) bulkSel.value = cur;
+  }
+}
+
+$('#btn-perm-template-apply')?.addEventListener('click', () => {
+  const id = parseInt($('#perm-template-select').value);
+  const template = templateState.templates.find(t => t.id === id);
+  if (!template) return toast('テンプレートを選択してください。', 'info');
+  const boxes = $$('#perm-tool-grid .perm-cb:not(:disabled)');
+  if (!boxes.length) return toast('先にユーザーを選択してください。', 'info');
+  const keys = new Set(template.tool_keys || []);
+  boxes.forEach(cb => { cb.checked = keys.has(cb.dataset.key); });
+  toast(`「${template.name}」を反映しました。「保存」で確定します。`, 'info');
+});
+
+$('#btn-perm-template-save')?.addEventListener('click', () => {
+  const boxes = $$('#perm-tool-grid .perm-cb:not(:disabled)');
+  if (!boxes.length) return toast('先にユーザーを選択し、チェック内容を作ってください。', 'info');
+  const checked = boxes.filter(cb => cb.checked).map(cb => cb.dataset.key);
+  const selected = templateState.templates.find(t => t.id === parseInt($('#perm-template-select').value));
+  openEditModal({
+    title: '権限テンプレートとして保存',
+    nameLabel: 'テンプレート名（既存名を指定すると上書き）',
+    name: selected?.name || '',
+    showCode: false,
+    onSubmit: async ({ name }) => {
+      const existing = templateState.templates.find(t => t.name === name);
+      if (existing) {
+        await api(`/tools/user_management/api/permission-templates/${existing.id}`, {
+          method: 'PUT', body: { name, tool_keys: checked },
+        });
+      } else {
+        await api('/tools/user_management/api/permission-templates', {
+          method: 'POST', body: { name, tool_keys: checked },
+        });
+      }
+      toast(`テンプレート「${name}」を保存しました（${checked.length}ツール）。`);
+      await loadPermissionTemplates();
+      const saved = templateState.templates.find(t => t.name === name);
+      if (saved) $('#perm-template-select').value = String(saved.id);
+    },
+  });
+});
+
+$('#btn-perm-template-delete')?.addEventListener('click', async () => {
+  const id = parseInt($('#perm-template-select').value);
+  const template = templateState.templates.find(t => t.id === id);
+  if (!template) return toast('テンプレートを選択してください。', 'info');
+  if (!confirm(`テンプレート「${template.name}」を削除しますか？\n（付与済みの個人権限には影響しません）`)) return;
+  try {
+    await api(`/tools/user_management/api/permission-templates/${id}`, { method: 'DELETE' });
+    toast('テンプレートを削除しました。');
+    loadPermissionTemplates();
+  } catch (err) { toastError(err); }
+});
+
+// 初期ロード（URLハッシュのタブを復元）
+activateAdminTab(tabFromHash(), { skipHash: true });
 </script>
 {% endblock %}

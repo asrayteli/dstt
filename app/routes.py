@@ -17,7 +17,18 @@ def index():
     user_name = current_user.name if current_user.name and current_user.name != "unknown" else "ゲスト"
     is_admin = is_admin_user()
 
-    unread = get_unread_announcements_for_user(current_user.username)
+    from .models import UserAccessibleOffice
+
+    office_ids = [current_user.office_id] if current_user.office_id else []
+    office_ids += [
+        row.office_id
+        for row in UserAccessibleOffice.query.filter_by(user_id=current_user.id).all()
+    ]
+    unread = get_unread_announcements_for_user(
+        current_user.username,
+        branch_id=current_user.branch_id,
+        office_ids=office_ids,
+    )
     if unread:
         mark_announcements_read(current_user.username, [a["id"] for a in unread if "id" in a])
 

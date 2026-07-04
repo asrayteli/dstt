@@ -17,6 +17,7 @@ from app.models import (
     GroupToolPermission,
     Site,
     ToolCategory,
+    ToolPermissionTemplate,
     ToolSettings,
     ToBellTask,
     UserAccessibleOffice,
@@ -38,6 +39,9 @@ from app.announcement_store import (
     list_announcements,
     create_announcement,
     delete_announcement,
+    is_announcement_expired,
+    announcement_matches_user,
+    get_read_usernames,
 )
 import re
 import secrets
@@ -91,7 +95,20 @@ def _user_matching_group_rules(user: User, rules) -> dict:
     return matched
 
 
-def _serialize_user(user: User, group_rules=None) -> dict:
+def _last_login_map() -> dict:
+    """ユーザー名ごとの最終ログイン日時（DsttLoginLog由来）を返す。"""
+    rows = (
+        db.session.query(
+            DsttLoginLog.username,
+            db.func.max(DsttLoginLog.logged_in_at),
+        )
+        .group_by(DsttLoginLog.username)
+        .all()
+    )
+    return {username: logged_in_at for username, logged_in_at in rows}
+
+
+def _serialize_user(user: User, group_rules=None, last_login_map=None) -> dict:
     extra_offices = (
         UserAccessibleOffice.query.filter_by(user_id=user.id).all()
         if user.id is not None
@@ -100,6 +117,7 @@ def _serialize_user(user: User, group_rules=None) -> dict:
     if group_rules is None:
         group_rules = GroupToolPermission.query.all()
     group_sources = _user_matching_group_rules(user, group_rules)
+    last_login = (last_login_map or {}).get(user.username)
     return {
         "id": user.id,
         "username": user.username,
@@ -118,6 +136,7 @@ def _serialize_user(user: User, group_rules=None) -> dict:
         "tool_keys": [p.tool_key for p in user.tool_permissions],
         "group_tool_keys": list(group_sources.keys()),
         "group_tool_sources": group_sources,
+        "last_login_at": last_login.isoformat() if last_login else None,
     }
 
 
@@ -134,8 +153,12 @@ def get_users():
 
     users = User.query.order_by(User.username).all()
     group_rules = GroupToolPermission.query.all()
+    last_logins = _last_login_map()
     return jsonify({
-        "users": [_serialize_user(u, group_rules=group_rules) for u in users]
+        "users": [
+            _serialize_user(u, group_rules=group_rules, last_login_map=last_logins)
+            for u in users
+        ]
     })
 
 
@@ -1864,6 +1887,519 @@ def mail_inbox_poll():
     return jsonify({"success": True, "summary": summary})
 
 
+
+# ============================================================
+# ユーザー一括操作（一括編集 / CSV一括登録）
+# ============================================================
+
+def _resolve_org_selection(branch_id, office_id, department_id):
+    """所属指定の整合性を検証し、正規化した (branch_id, office_id, department_id) を返す。
+
+    上位が未指定のまま下位のみ指定するケースは弾く。
+    """
+    branch = AccessBranch.query.get(branch_id) if branch_id else None
+    if branch_id and not branch:
+        raise ValueError("指定された支店が見つかりません")
+    office = AccessOffice.query.get(office_id) if office_id else None
+    if office_id and not office:
+        raise ValueError("指定された営業所が見つかりません")
+    if office and not branch:
+        raise ValueError("営業所を指定する場合は支店も指定してください")
+    if office and branch and office.branch_id != branch.id:
+        raise ValueError("営業所が指定の支店に属していません")
+    department = AccessDepartment.query.get(department_id) if department_id else None
+    if department_id and not department:
+        raise ValueError("指定された担当が見つかりません")
+    if department and not office:
+        raise ValueError("担当を指定する場合は営業所も指定してください")
+    if department and office and department.office_id != office.id:
+        raise ValueError("担当が指定の営業所に属していません")
+    return (
+        branch.id if branch else None,
+        office.id if office else None,
+        department.id if department else None,
+    )
+
+
+@user_management_bp.route("/api/users/bulk", methods=["PUT"])
+@login_required
+def bulk_update_users():
+    """選択したユーザーへ所属変更・権限テンプレート適用を一括実行する。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    data = request.json or {}
+    raw_ids = data.get("user_ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return jsonify({"error": "対象ユーザーを選択してください"}), 400
+    try:
+        ids = sorted({int(v) for v in raw_ids})
+    except (TypeError, ValueError):
+        return jsonify({"error": "user_ids の形式が不正です"}), 400
+    if len(ids) > 500:
+        return jsonify({"error": "一度に更新できるのは500人までです"}), 400
+
+    users = User.query.filter(User.id.in_(ids)).all()
+    if len(users) != len(ids):
+        return jsonify({"error": "存在しないユーザーが含まれています"}), 400
+
+    org = data.get("org")
+    template_req = data.get("template")
+    if org is None and not template_req:
+        return jsonify({"error": "変更内容が指定されていません"}), 400
+
+    branch_id = office_id = department_id = None
+    if org is not None:
+        def _oid(key):
+            value = org.get(key)
+            if value in (None, "", "null"):
+                return None
+            return int(value)
+        try:
+            branch_id, office_id, department_id = _resolve_org_selection(
+                _oid("branch_id"), _oid("office_id"), _oid("department_id")
+            )
+        except (TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc) or "所属指定が不正です"}), 400
+
+    template = None
+    template_mode = "add"
+    template_keys = set()
+    if template_req:
+        template = ToolPermissionTemplate.query.get(template_req.get("id"))
+        if not template:
+            return jsonify({"error": "権限テンプレートが見つかりません"}), 404
+        template_mode = str(template_req.get("mode", "add"))
+        if template_mode not in ("add", "replace"):
+            return jsonify({"error": "テンプレート適用モードが不正です"}), 400
+        sensitive = _assignable_tool_keys()
+        template_keys = {k for k in (template.tool_keys or []) if k in sensitive}
+
+    try:
+        for user in users:
+            if org is not None:
+                user.branch_id = branch_id
+                user.office_id = office_id
+                user.department_id = department_id
+            if template:
+                current = {perm.tool_key for perm in user.tool_permissions}
+                desired = template_keys if template_mode == "replace" else (current | template_keys)
+                set_tool_access(user.id, desired, granted_by=current_user.username)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"error": f"一括更新に失敗しました: {exc}"}), 500
+
+    return jsonify({"success": True, "updated": len(users)})
+
+
+@user_management_bp.route("/api/users/bulk-import", methods=["POST"])
+@login_required
+def bulk_import_users():
+    """CSV由来の行データからユーザーを一括作成する。
+
+    dry_run=True で検証のみ行い、全行OKの場合だけ本登録を許可する。
+    パスワード未指定の行は登録時に自動生成し、結果として返す。
+    """
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    data = request.json or {}
+    rows = data.get("rows")
+    dry_run = bool(data.get("dry_run", True))
+    if not isinstance(rows, list) or not rows:
+        return jsonify({"error": "取り込む行がありません"}), 400
+    if len(rows) > 500:
+        return jsonify({"error": "一度に取り込めるのは500行までです"}), 400
+
+    branch_by_name = {b.name: b for b in AccessBranch.query.all()}
+    office_by_key = {(o.branch_id, o.name): o for o in AccessOffice.query.all()}
+    dept_by_key = {(d.office_id, d.name): d for d in AccessDepartment.query.all()}
+    existing = {row[0] for row in db.session.query(User.username).all()}
+
+    seen: set[str] = set()
+    results = []
+    payloads = []
+    for idx, raw in enumerate(rows, start=1):
+        if not isinstance(raw, dict):
+            results.append({"row": idx, "username": "", "ok": False, "error": "行データの形式が不正です"})
+            continue
+        username = str(raw.get("username", "")).strip()
+        name = str(raw.get("name", "")).strip()
+        password = str(raw.get("password", "")).strip()
+        admin_raw = str(raw.get("is_admin", "")).strip().lower()
+        is_admin_flag = admin_raw in {"1", "true", "yes", "on", "○", "◯", "はい", "管理者"}
+        branch_name = str(raw.get("branch", "")).strip()
+        office_name = str(raw.get("office", "")).strip()
+        dept_name = str(raw.get("department", "")).strip()
+
+        errors = []
+        if not username:
+            errors.append("ユーザーIDが空です")
+        elif not re.match(r"^[a-zA-Z0-9]+$", username):
+            errors.append("ユーザーIDは英数字のみ使用可能です")
+        elif username in existing:
+            errors.append("既に存在するユーザーIDです")
+        elif username in seen:
+            errors.append("ファイル内でユーザーIDが重複しています")
+        if not name:
+            errors.append("日本語名が空です")
+
+        branch = office = dept = None
+        if office_name and not branch_name:
+            errors.append("営業所を指定する場合は支店も指定してください")
+        if dept_name and not office_name:
+            errors.append("担当を指定する場合は営業所も指定してください")
+        if branch_name:
+            branch = branch_by_name.get(branch_name)
+            if not branch:
+                errors.append(f"支店「{branch_name}」が見つかりません")
+        if branch and office_name:
+            office = office_by_key.get((branch.id, office_name))
+            if not office:
+                errors.append(f"営業所「{office_name}」が支店「{branch_name}」に見つかりません")
+        if office and dept_name:
+            dept = dept_by_key.get((office.id, dept_name))
+            if not dept:
+                errors.append(f"担当「{dept_name}」が営業所「{office_name}」に見つかりません")
+
+        if errors:
+            results.append({"row": idx, "username": username, "ok": False, "error": "、".join(errors)})
+            continue
+
+        seen.add(username)
+        results.append({
+            "row": idx,
+            "username": username,
+            "ok": True,
+            "password_generated": not password,
+        })
+        payloads.append({
+            "username": username,
+            "name": name,
+            "password": password,
+            "is_admin": is_admin_flag,
+            "branch_id": branch.id if branch else None,
+            "office_id": office.id if office else None,
+            "department_id": dept.id if dept else None,
+        })
+
+    ok_count = sum(1 for r in results if r["ok"])
+    error_count = len(results) - ok_count
+    if dry_run:
+        return jsonify({
+            "dry_run": True,
+            "results": results,
+            "ok": ok_count,
+            "errors": error_count,
+        })
+
+    if error_count:
+        return jsonify({
+            "error": "エラー行があるため取り込みを中止しました。修正して再実行してください。",
+            "results": results,
+            "ok": ok_count,
+            "errors": error_count,
+        }), 400
+
+    created = []
+    try:
+        for payload in payloads:
+            password = payload["password"] or generate_random_password()
+            user = User(
+                username=payload["username"],
+                password_hash=generate_password_hash(password),
+                name=payload["name"],
+                is_admin=payload["is_admin"] or is_legacy_admin_username(payload["username"]),
+                branch_id=payload["branch_id"],
+                office_id=payload["office_id"],
+                department_id=payload["department_id"],
+            )
+            db.session.add(user)
+            created.append({
+                "username": payload["username"],
+                "name": payload["name"],
+                "password": password,
+            })
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"error": f"一括登録に失敗しました: {exc}"}), 500
+
+    return jsonify({"success": True, "created": created})
+
+
+# ============================================================
+# 権限テンプレート
+# ============================================================
+
+@user_management_bp.route("/api/permission-templates", methods=["GET"])
+@login_required
+def list_permission_templates():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    templates = ToolPermissionTemplate.query.order_by(ToolPermissionTemplate.name).all()
+    return jsonify({"templates": [t.to_dict() for t in templates]})
+
+
+def _clean_template_payload(data, *, require_name=True):
+    name = str(data.get("name", "")).strip()
+    if require_name and not name:
+        raise ValueError("テンプレート名を入力してください")
+    if len(name) > 100:
+        raise ValueError("テンプレート名は100文字以内で入力してください")
+    keys_raw = data.get("tool_keys")
+    keys = None
+    if keys_raw is not None:
+        if not isinstance(keys_raw, list):
+            raise ValueError("tool_keys はリストで指定してください")
+        sensitive = _assignable_tool_keys()
+        keys = sorted({str(k).strip() for k in keys_raw if str(k).strip() in sensitive})
+    return name, keys
+
+
+@user_management_bp.route("/api/permission-templates", methods=["POST"])
+@login_required
+def create_permission_template():
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    data = request.json or {}
+    try:
+        name, keys = _clean_template_payload(data)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if keys is None:
+        keys = []
+    if ToolPermissionTemplate.query.filter_by(name=name).first():
+        return jsonify({"error": "同名のテンプレートが既に存在します"}), 400
+    template = ToolPermissionTemplate(
+        name=name,
+        tool_keys=keys,
+        created_by=current_user.username,
+    )
+    db.session.add(template)
+    db.session.commit()
+    return jsonify({"success": True, "template": template.to_dict()})
+
+
+@user_management_bp.route("/api/permission-templates/<int:template_id>", methods=["PUT"])
+@login_required
+def update_permission_template(template_id):
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    template = ToolPermissionTemplate.query.get(template_id)
+    if not template:
+        return jsonify({"error": "テンプレートが見つかりません"}), 404
+    data = request.json or {}
+    try:
+        name, keys = _clean_template_payload(data, require_name="name" in data)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if name:
+        dup = ToolPermissionTemplate.query.filter(
+            ToolPermissionTemplate.name == name,
+            ToolPermissionTemplate.id != template.id,
+        ).first()
+        if dup:
+            return jsonify({"error": "同名のテンプレートが既に存在します"}), 400
+        template.name = name
+    if keys is not None:
+        template.tool_keys = keys
+    db.session.commit()
+    return jsonify({"success": True, "template": template.to_dict()})
+
+
+@user_management_bp.route("/api/permission-templates/<int:template_id>", methods=["DELETE"])
+@login_required
+def delete_permission_template(template_id):
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    template = ToolPermissionTemplate.query.get(template_id)
+    if not template:
+        return jsonify({"error": "テンプレートが見つかりません"}), 404
+    db.session.delete(template)
+    db.session.commit()
+    return jsonify({"success": True})
+
+
+# ============================================================
+# ログイン失敗履歴
+# ============================================================
+
+@user_management_bp.route("/api/access-management/failed-logins", methods=["GET"])
+@login_required
+def access_management_failed_logins():
+    """失敗ログイン履歴と直近24時間の失敗回数サマリーを返す。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    limit = _limit_param(default=100, maximum=500)
+    query = UserLoginLog.query.filter(UserLoginLog.success.is_(False))
+    query = _apply_range(query, UserLoginLog.logged_in_at, stored_as_utc=True)
+    search = str(request.args.get("q", "")).strip()
+    if search:
+        like = f"%{search}%"
+        query = query.filter(or_(
+            UserLoginLog.username.ilike(like),
+            UserLoginLog.ip_address.ilike(like),
+            UserLoginLog.user_agent.ilike(like),
+        ))
+    logs = (
+        query.order_by(UserLoginLog.logged_in_at.desc(), UserLoginLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+    name_map = {u.username: (u.name or "") for u in User.query.all()}
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
+    recent_rows = (
+        db.session.query(UserLoginLog.username, db.func.count(UserLoginLog.id))
+        .filter(UserLoginLog.success.is_(False), UserLoginLog.logged_in_at >= cutoff)
+        .group_by(UserLoginLog.username)
+        .order_by(db.func.count(UserLoginLog.id).desc())
+        .all()
+    )
+    return jsonify({
+        "logs": [
+            {
+                "username": log.username,
+                "name": name_map.get(log.username, ""),
+                "registered": log.username in name_map,
+                "ip_address": log.ip_address or "",
+                "user_agent": log.user_agent or "",
+                "logged_in_at": _utc_to_jst_iso(log.logged_in_at),
+            }
+            for log in logs
+        ],
+        "recent_counts": [
+            {
+                "username": username,
+                "name": name_map.get(username, ""),
+                "registered": username in name_map,
+                "count": count,
+            }
+            for username, count in recent_rows
+        ],
+        "limit": limit,
+    })
+
+
+# ============================================================
+# 利用統計
+# ============================================================
+
+@user_management_bp.route("/api/usage-stats", methods=["GET"])
+@login_required
+def usage_stats():
+    """ツール利用ログの集計（日別・ツール別・営業所別）を返す。日付はJST基準。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    try:
+        days = int(request.args.get("days", 30))
+    except (TypeError, ValueError):
+        days = 30
+    days = max(1, min(days, 180))
+
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    today_jst = (now_utc + timedelta(hours=9)).date()
+    start_date = today_jst - timedelta(days=days - 1)
+    cutoff_utc = datetime.combine(start_date, time.min) - timedelta(hours=9)
+
+    rows = (
+        db.session.query(
+            UserActivityLog.username,
+            UserActivityLog.tool_key,
+            UserActivityLog.tool_label,
+            UserActivityLog.created_at,
+        )
+        .filter(UserActivityLog.created_at >= cutoff_utc)
+        .all()
+    )
+
+    users = User.query.all()
+    office_label_by_username = {}
+    for user in users:
+        if user.user_office:
+            label = user.user_office.name
+        elif user.branch:
+            label = f"{user.branch.name}（営業所未設定）"
+        else:
+            label = "所属未設定"
+        office_label_by_username[user.username] = label
+
+    daily = {
+        (start_date + timedelta(days=i)).isoformat(): {"users": set(), "actions": 0}
+        for i in range(days)
+    }
+    tool_counts = {}
+    office_counts = {}
+    active_users = set()
+    row_labels = {}
+    for username, tool_key, tool_label, created_at in rows:
+        jst_day = (created_at + timedelta(hours=9)).date()
+        day_key = jst_day.isoformat()
+        if day_key not in daily:
+            continue
+        bucket = daily[day_key]
+        bucket["actions"] += 1
+        bucket["users"].add(username)
+        active_users.add(username)
+        tool = tool_counts.setdefault(tool_key, {"count": 0, "users": set()})
+        tool["count"] += 1
+        tool["users"].add(username)
+        if tool_label:
+            row_labels[tool_key] = tool_label
+        office_label = office_label_by_username.get(username, "所属未設定")
+        office_counts[office_label] = office_counts.get(office_label, 0) + 1
+
+    label_map = _tool_label_map()
+    tools = sorted(
+        (
+            {
+                "key": key,
+                "label": label_map.get(key) or row_labels.get(key) or key,
+                "count": info["count"],
+                "users": len(info["users"]),
+            }
+            for key, info in tool_counts.items()
+        ),
+        key=lambda item: item["count"],
+        reverse=True,
+    )
+    offices = sorted(
+        ({"label": label, "count": count} for label, count in office_counts.items()),
+        key=lambda item: item["count"],
+        reverse=True,
+    )
+
+    login_count = (
+        DsttLoginLog.query
+        .filter(DsttLoginLog.logged_in_at >= datetime.combine(start_date, time.min))
+        .count()
+    )
+
+    total_actions = sum(bucket["actions"] for bucket in daily.values())
+    return jsonify({
+        "days": days,
+        "start_date": start_date.isoformat(),
+        "end_date": today_jst.isoformat(),
+        "daily": [
+            {"date": day, "users": len(bucket["users"]), "actions": bucket["actions"]}
+            for day, bucket in sorted(daily.items())
+        ],
+        "tools": tools[:15],
+        "offices": offices[:15],
+        "summary": {
+            "total_actions": total_actions,
+            "active_users": len(active_users),
+            "total_users": len(users),
+            "login_count": login_count,
+            "top_tool": tools[0]["label"] if tools else None,
+        },
+    })
+
+
 # ============================================================
 # 管理者ページ（HTML）
 # ============================================================
@@ -1884,12 +2420,96 @@ def announcement_admin_page():
     return render_template("admin_announcements.html")
 
 
+def _org_name_maps():
+    branch_names = {b.id: b.name for b in AccessBranch.query.all()}
+    office_names = {o.id: o.name for o in AccessOffice.query.all()}
+    return branch_names, office_names
+
+
+def _extra_office_map():
+    mapping: dict[int, list[int]] = {}
+    for row in UserAccessibleOffice.query.all():
+        mapping.setdefault(row.user_id, []).append(row.office_id)
+    return mapping
+
+
+def _announcement_target_users(item, users, extra_office_map):
+    """お知らせの対象（配信者除く）となるユーザー一覧を返す。"""
+    targets = []
+    for user in users:
+        if user.username == item.get("created_by"):
+            continue
+        office_ids = [user.office_id] if user.office_id else []
+        office_ids += extra_office_map.get(user.id, [])
+        if announcement_matches_user(item, branch_id=user.branch_id, office_ids=office_ids):
+            targets.append(user)
+    return targets
+
+
 @user_management_bp.route("/api/announcements", methods=["GET"])
 @login_required
 def get_announcements():
     if not is_admin():
         return jsonify({"error": "管理者権限が必要です"}), 403
-    return jsonify({"announcements": list_announcements()})
+    branch_names, office_names = _org_name_maps()
+    items = []
+    for item in list_announcements():
+        enriched = dict(item)
+        enriched["expired"] = is_announcement_expired(item)
+        enriched["target_branch_names"] = [
+            branch_names.get(b, f"支店#{b}") for b in item.get("target_branch_ids") or []
+        ]
+        enriched["target_office_names"] = [
+            office_names.get(o, f"営業所#{o}") for o in item.get("target_office_ids") or []
+        ]
+        items.append(enriched)
+    return jsonify({"announcements": items})
+
+
+@user_management_bp.route("/api/announcements/read-status", methods=["GET"])
+@login_required
+def announcements_read_status():
+    """お知らせごとの既読数/対象者数を返す。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    users = User.query.all()
+    extra_map = _extra_office_map()
+    status = {}
+    for item in list_announcements():
+        targets = _announcement_target_users(item, users, extra_map)
+        readers = get_read_usernames(item.get("id"))
+        read_count = sum(1 for u in targets if u.username in readers)
+        status[str(item.get("id"))] = {
+            "read": read_count,
+            "target": len(targets),
+        }
+    return jsonify({"status": status})
+
+
+@user_management_bp.route("/api/announcements/<int:announcement_id>/readers", methods=["GET"])
+@login_required
+def announcement_readers(announcement_id):
+    """お知らせの既読者・未読者の内訳を返す。"""
+    if not is_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    item = next((a for a in list_announcements() if a.get("id") == announcement_id), None)
+    if not item:
+        return jsonify({"error": "お知らせが見つかりません"}), 404
+    users = User.query.all()
+    extra_map = _extra_office_map()
+    targets = _announcement_target_users(item, users, extra_map)
+    readers = get_read_usernames(announcement_id)
+
+    def _row(user):
+        return {"username": user.username, "name": user.name or ""}
+
+    read_users = sorted((u for u in targets if u.username in readers), key=lambda u: u.username)
+    unread_users = sorted((u for u in targets if u.username not in readers), key=lambda u: u.username)
+    return jsonify({
+        "announcement": {"id": announcement_id, "title": item.get("title")},
+        "readers": [_row(u) for u in read_users],
+        "unread": [_row(u) for u in unread_users],
+    })
 
 
 @user_management_bp.route("/api/announcements", methods=["POST"])
@@ -1904,10 +2524,37 @@ def post_announcement():
     if not content:
         return jsonify({"error": "本文は必須です"}), 400
 
+    expires_at = str(data.get("expires_at", "") or "").strip() or None
+    if expires_at:
+        try:
+            datetime.strptime(expires_at, "%Y-%m-%d")
+        except ValueError:
+            return jsonify({"error": "掲載期限はYYYY-MM-DD形式で指定してください"}), 400
+
+    def _id_list(key, model, label):
+        raw = data.get(key) or []
+        if not isinstance(raw, list):
+            raise ValueError(f"{label}の指定形式が不正です")
+        ids = sorted({int(v) for v in raw})
+        found = {row.id for row in model.query.filter(model.id.in_(ids)).all()} if ids else set()
+        missing = set(ids) - found
+        if missing:
+            raise ValueError(f"存在しない{label}が含まれています")
+        return ids
+
+    try:
+        target_branch_ids = _id_list("target_branch_ids", AccessBranch, "支店")
+        target_office_ids = _id_list("target_office_ids", AccessOffice, "営業所")
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc) or "対象指定が不正です"}), 400
+
     item = create_announcement(
         title=title if title else "お知らせ",
         content=content,
         created_by=current_user.username,
+        expires_at=expires_at,
+        target_branch_ids=target_branch_ids,
+        target_office_ids=target_office_ids,
     )
     return jsonify({"success": True, "announcement": item})
 
