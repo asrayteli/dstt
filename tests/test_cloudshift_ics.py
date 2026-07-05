@@ -160,6 +160,44 @@ def test_ics_feed_rejects_unknown_and_non_pwa_tokens(app_ctx):
         assert _fetch_ics(app_ctx, token).status_code == 404
 
 
+def test_ics_feed_uids_unique_even_with_duplicate_entry_ids(app_ctx):
+    """同一日に同じ entry id が並んでも UID は一意になる。
+
+    通常の API 保存はマージ（id 単位）で同一 id を1件へ畳むため到達しないが、
+    レガシー JSON 由来など保存経路を通らないデータへの防御として、
+    重複 UID（カレンダーアプリ側で片方が黙って消える）を出さないことを
+    生成関数の単体で検証する。
+    """
+    from app.tools.cloudshift import _ics_text_for_project
+
+    project = {
+        "id": "proj-x",
+        "title": "重複IDテスト",
+        "mode": "scene",
+        "months": {
+            "2026-05": {
+                "year": 2026,
+                "month": 5,
+                "revision": 1,
+                "updated_at": "2026-05-01T09:00:00+09:00",
+                "entries_per_day": {
+                    "7": [
+                        {"id": "dup-id", "value": "!A!山田"},
+                        {"id": "dup-id", "value": "!P!佐藤"},
+                    ]
+                },
+            }
+        },
+    }
+    with app_ctx.app_context():
+        body = _ics_text_for_project(project)
+    uids = [
+        line for line in body.replace("\r\n ", "").splitlines() if line.startswith("UID:")
+    ]
+    assert len(uids) == 2
+    assert len(set(uids)) == 2
+
+
 def test_ics_lines_folded_within_75_octets(app_ctx):
     project_id, urls = _create_project(app_ctx)
     long_comment = "とても長いコメント" * 20

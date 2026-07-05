@@ -8063,7 +8063,15 @@ def _ics_text_for_project(project: dict[str, Any]) -> str:
         "X-PUBLISHED-TTL:PT6H",
     ]
     months = project.get("months") or {}
-    for month_key in _sort_month_keys(list(months.keys())):
+    # 不正な月キー（レガシー JSON の破損など）は購読フィード全体を壊さずスキップする。
+    parseable_keys = []
+    for key in months.keys():
+        try:
+            _parse_month_key(str(key))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        parseable_keys.append(str(key))
+    for month_key in _sort_month_keys(parseable_keys):
         month_data = months.get(month_key)
         if not isinstance(month_data, dict):
             continue
@@ -8077,18 +8085,29 @@ def _ics_text_for_project(project: dict[str, Any]) -> str:
         entries_per_day = _entries_with_latest_site_links(month_data.get("entries_per_day"), project)
         entries_per_day = _entries_without_substitute_superseded_sources(entries_per_day, project)
         normalized = _normalize_entries(entries_per_day, year, month)
+        seen_uids: set[str] = set()
         for day in range(1, monthrange(year, month)[1] + 1):
             for index, entry in enumerate(normalized.get(str(day)) or []):
                 summary = entry_display_text(entry)
                 if not summary:
                     continue
                 entry_id = str(entry.get("id") or "").strip() or f"idx{index}"
+                # entry id は日内の一意性が保証されない（クライアント指定値を通す）ため、
+                # 衝突時は連番を付けて UID の一意性を守る（重複 UID はカレンダー側で
+                # 片方が黙って消えるため）。
+                uid_base = f"{project_id}-{month_key}-{day}-{entry_id}"
+                uid = uid_base
+                collision = 2
+                while uid in seen_uids:
+                    uid = f"{uid_base}-{collision}"
+                    collision += 1
+                seen_uids.add(uid)
                 start = date(year, month, day)
                 end = start + timedelta(days=1)
                 lines.extend(
                     [
                         "BEGIN:VEVENT",
-                        f"UID:{_ics_escape_text(f'{project_id}-{month_key}-{day}-{entry_id}')}@cloudshift.dstt",
+                        f"UID:{_ics_escape_text(uid)}@cloudshift.dstt",
                         f"DTSTAMP:{dtstamp}",
                         f"DTSTART;VALUE=DATE:{start.strftime('%Y%m%d')}",
                         f"DTEND;VALUE=DATE:{end.strftime('%Y%m%d')}",
