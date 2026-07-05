@@ -63,7 +63,6 @@ try:
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         entry_second_option,
-        generate_entry_id,
         normalize_entries_for_month,
         normalize_entry,
         parse_csv_text,
@@ -81,7 +80,6 @@ except ImportError:
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         entry_second_option,
-        generate_entry_id,
         normalize_entries_for_month,
         normalize_entry,
         parse_csv_text,
@@ -822,7 +820,8 @@ def _resync_siteplus_dedicated_projects_for_site_row(
     if not normalized_site_row_id:
         return
     rows = _siteplus_dedicated_rows_for_site_row_id(normalized_site_row_id)
-    for target_summary in _iter_stored_projects():
+    # 走査に必要なのは mode・site_row_id・id だけ。実処理は _load_project で完全ロードする。
+    for target_summary in _iter_stored_projects_light():
         if not target_summary or target_summary.get("mode") != "scene":
             continue
         if _coerce_site_row_id(target_summary.get("site_row_id")) != normalized_site_row_id:
@@ -1019,11 +1018,14 @@ def _master_scope_from_payload(data: Any, *, existing: dict[str, Any] | None = N
     getter = data.get if hasattr(data, "get") else lambda key, default=None: default
     raw_people = getter("master_people", _master_people_text(existing or {}))
     raw_sites = getter("master_sites", _master_sites_text(existing or {}))
+    # 対象種別の妥当性は people/sites の解析より先に検証する
+    # （不正な種別＋不正な現場参照のとき、種別エラーを先に返す従来挙動を保つ）。
+    raw_target_type = str(getter("master_target_type", "") or "").strip().lower()
+    explicit_target_type = _sanitize_master_target_type(raw_target_type) if raw_target_type else ""
     people = _master_people_from_payload(raw_people)
     sites = _master_sites_from_payload(raw_sites)
-    raw_target_type = str(getter("master_target_type", "") or "").strip().lower()
-    if raw_target_type:
-        target_type = _sanitize_master_target_type(raw_target_type)
+    if explicit_target_type:
+        target_type = explicit_target_type
     elif people and not sites:
         target_type = "person"
     elif sites and not people:

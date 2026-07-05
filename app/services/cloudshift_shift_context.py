@@ -18,7 +18,6 @@ from .cloudshift_shift_engine import (
     PlanningPreferences,
     PlanningWarning,
     RequiredSlot,
-    Rule,
     ShiftEngineSettings,
     ShiftPlanningRequest,
     SiteRef,
