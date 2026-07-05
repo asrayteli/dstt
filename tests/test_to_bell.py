@@ -303,7 +303,10 @@ def test_to_bell_quick_datetime_is_optional_and_due_tasks_notify(app_ctx):
 
 
 def test_to_bell_time_without_date_defaults_to_today(app_ctx):
-    from datetime import date
+    # アプリは「今日」をアプリのタイムゾーン（既定 JST）で決めるため、期待値も
+    # 同じ基準で作る。date.today()（サーバーローカル=環境依存）を使うと、UTC と
+    # JST の日付がずれる時間帯（JST 0時〜9時）に誤って失敗する。
+    from app.services.to_bell_service import local_today
 
     _create_user(app_ctx, "alice", "Alice")
     client = app_ctx.test_client()
@@ -316,7 +319,7 @@ def test_to_bell_time_without_date_defaults_to_today(app_ctx):
     assert response.status_code == 201
     due_at = response.get_json()["due_at"]
     assert due_at is not None
-    assert due_at.startswith(f"{date.today().isoformat()}T09:00")
+    assert due_at.startswith(f"{local_today().isoformat()}T09:00")
 
 
 def test_to_bell_cleanup_deletes_records_older_than_60_days(app_ctx):

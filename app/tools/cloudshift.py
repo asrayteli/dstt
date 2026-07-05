@@ -7995,6 +7995,134 @@ def public_pwa_manifest(token: str):
     return response
 
 
+def _ics_escape_text(value: Any) -> str:
+    """RFC 5545 の TEXT 値エスケープ（\\ ; , 改行）。"""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+    return text.replace("\n", "\\n")
+
+
+def _ics_fold_line(line: str) -> str:
+    """RFC 5545 の行折り（1行75オクテット以内、継続行は先頭スペース）。"""
+    if len(line.encode("utf-8")) <= 75:
+        return line
+    parts: list[str] = []
+    current_chars: list[str] = []
+    current_octets = 0
+    budget = 75
+    for char in line:
+        char_octets = len(char.encode("utf-8"))
+        if current_octets + char_octets > budget:
+            parts.append("".join(current_chars))
+            current_chars = [char]
+            current_octets = char_octets
+            budget = 74  # 継続行は先頭の空白1オクテット分を差し引く
+        else:
+            current_chars.append(char)
+            current_octets += char_octets
+    parts.append("".join(current_chars))
+    return "\r\n ".join(parts)
+
+
+def _ics_utc_timestamp(value: Any) -> str:
+    """保存済みの ISO 日時（JST）を DTSTAMP 用の UTC 表記へ変換する。"""
+    parsed = None
+    text = str(value or "").strip()
+    if text:
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            parsed = None
+    if parsed is None:
+        parsed = datetime.now(JST)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=JST)
+    return parsed.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _ics_text_for_project(project: dict[str, Any]) -> str:
+    """シフト帳の全月を iCalendar（RFC 5545）の終日イベントへ変換する。
+
+    ViewPWA の購読フィード用。表示内容は閲覧画面と同じ整形
+    （最新現場リンクの反映・解決済み代務の元 entry 非表示）を通す。
+    UID は project×月×日×entry id で安定させ、購読側の再取得で
+    重複登録ではなく置き換え（更新）になるようにする。
+    """
+    title = str(project.get("title") or "CloudShift").strip() or "CloudShift"
+    project_id = str(project.get("id") or "")
+    lines: list[str] = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//DSTT//CloudShift//JA",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{_ics_escape_text(title)}",
+        "X-WR-TIMEZONE:Asia/Tokyo",
+        # 購読クライアントへの更新間隔ヒント（対応アプリのみ参照する）
+        "REFRESH-INTERVAL;VALUE=DURATION:PT6H",
+        "X-PUBLISHED-TTL:PT6H",
+    ]
+    months = project.get("months") or {}
+    for month_key in _sort_month_keys(list(months.keys())):
+        month_data = months.get(month_key)
+        if not isinstance(month_data, dict):
+            continue
+        try:
+            year = int(month_data.get("year"))
+            month = int(month_data.get("month"))
+        except (TypeError, ValueError):
+            continue
+        dtstamp = _ics_utc_timestamp(month_data.get("updated_at"))
+        revision = int(month_data.get("revision", 1) or 1)
+        entries_per_day = _entries_with_latest_site_links(month_data.get("entries_per_day"), project)
+        entries_per_day = _entries_without_substitute_superseded_sources(entries_per_day, project)
+        normalized = _normalize_entries(entries_per_day, year, month)
+        for day in range(1, monthrange(year, month)[1] + 1):
+            for index, entry in enumerate(normalized.get(str(day)) or []):
+                summary = entry_display_text(entry)
+                if not summary:
+                    continue
+                entry_id = str(entry.get("id") or "").strip() or f"idx{index}"
+                start = date(year, month, day)
+                end = start + timedelta(days=1)
+                lines.extend(
+                    [
+                        "BEGIN:VEVENT",
+                        f"UID:{_ics_escape_text(f'{project_id}-{month_key}-{day}-{entry_id}')}@cloudshift.dstt",
+                        f"DTSTAMP:{dtstamp}",
+                        f"DTSTART;VALUE=DATE:{start.strftime('%Y%m%d')}",
+                        f"DTEND;VALUE=DATE:{end.strftime('%Y%m%d')}",
+                        f"SUMMARY:{_ics_escape_text(summary)}",
+                        f"SEQUENCE:{revision}",
+                    ]
+                )
+                comment = str(entry.get("comment") or "").strip()
+                if comment:
+                    lines.append(f"DESCRIPTION:{_ics_escape_text(comment)}")
+                lines.append("END:VEVENT")
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(_ics_fold_line(line) for line in lines) + "\r\n"
+
+
+@cloudshift_bp.route("/pwa/<token>/calendar.ics")
+def public_pwa_calendar(token: str):
+    """ViewPWA 共有先向けの iCalendar 購読フィード。
+
+    iPhone 標準カレンダーの「照会カレンダー」や Google カレンダーの
+    「URLで追加」に登録すると、シフト帳の更新が購読側へ自動反映される。
+    認可はリンク保持（PWA トークン）で、他の PWA API と同じモデル。
+    """
+    project = _find_project_by_token(token, "pwa")
+    response = current_app.response_class(
+        _ics_text_for_project(project), mimetype="text/calendar"
+    )
+    response.headers["Content-Type"] = "text/calendar; charset=utf-8"
+    response.headers["Content-Disposition"] = 'inline; filename="cloudshift.ics"'
+    # 購読クライアントには毎回最新を取りに来させる（フィードは十分小さい）
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @cloudshift_bp.route("/api/pwa/<token>/push/public-key")
 def api_pwa_push_public_key(token: str):
     from app.services.cloudshift_push import CloudShiftPushUnavailable, vapid_public_key
