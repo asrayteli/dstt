@@ -251,7 +251,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
         <div class="qm-sec-hd" data-fold>テンプレート <span class="chev">▾</span></div>
         <div class="qm-sec-body">
           <button class="qm-tb-btn" style="width:100%;background:#2563eb;color:#fff;border-color:#2563eb;margin-bottom:6px" id="btnOpenTemplates">📁 テンプレートから作成・保存</button>
-          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnResetTemplate">運行費用の初期レイアウトに戻す</button>
+          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnResetTemplate">白紙のお見積書に戻す</button>
           <p class="qm-hint">基本テンプレート（会社共通）とマイテンプレート（この端末）を管理できます。</p>
         </div>
       </div>
@@ -326,13 +326,20 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
         <div id="myTplBody"><div class="qm-list-empty">読み込み中…</div></div>
       </div>
       <div class="qm-tpl-group">
-        <div class="qm-tpl-head"><span>標準</span></div>
+        <div class="qm-tpl-head"><span>標準（記入用ひな形）</span></div>
         <div class="qm-quote-row">
-          <div class="meta" id="tplBuiltinApply">
-            <div class="qt">運行費用の見積書（初期テンプレート）</div>
-            <div class="qd">添付見本と同じレイアウトから作成します</div>
+          <div class="meta" id="tplBlankApply">
+            <div class="qt">白紙のお見積書</div>
+            <div class="qd">宛先・差出人・金額などを空欄にした最小限のひな形</div>
           </div>
-          <button class="qm-mini" id="tplBuiltinBtn">このテンプレートで作成</button>
+          <button class="qm-mini" id="tplBlankBtn">このひな形で作成</button>
+        </div>
+        <div class="qm-quote-row">
+          <div class="meta" id="tplUnyouApply">
+            <div class="qt">運行費用の見積書（記入用ひな形）</div>
+            <div class="qd">基本事項・その他料金等の項目だけを用意した空欄のひな形</div>
+          </div>
+          <button class="qm-mini" id="tplUnyouBtn">このひな形で作成</button>
         </div>
       </div>
     </div>
@@ -388,11 +395,44 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     return '令和 '+r+' 年 '+(d.getMonth()+1)+' 月 '+d.getDate()+' 日';
   }
 
+  function basePage(){
+    return { paper:'A4', marginTop:15, marginRight:18, marginBottom:15, marginLeft:18,
+             font:'gothic', fontSize:14, textColor:'#1a1a1a', bg:'#ffffff' };
+  }
+
+  // 起動時に最初に表示される既定の見積書。個人情報は一切含めず、
+  // 記入欄だけを持つ最小限のひな形にする（会社名・住所・電話・担当者・
+  // 取引先・金額などは一切ハードコードしない）。
   function defaultDoc(){
     return {
       version:1,
-      page:{ paper:'A4', marginTop:15, marginRight:18, marginBottom:15, marginLeft:18,
-             font:'gothic', fontSize:14, textColor:'#1a1a1a', bg:'#ffffff' },
+      page:basePage(),
+      blocks:[
+        { id:uid(), type:'text', style:baseStyle({align:'right', fontSize:14, marginBottom:6}),
+          content:{ html: esc(reiwaToday()) } },
+        { id:uid(), type:'text', style:baseStyle({align:'center', fontSize:30, bold:true, letterSpacing:0.32, marginTop:4, marginBottom:20}),
+          content:{ html:'お見積書' } },
+        { id:uid(), type:'columns', style:baseStyle({marginBottom:16}),
+          content:{ gap:16, cols:[
+            { width:52, align:'left', fontSize:14,
+              html:'<span style="border-bottom:1px solid #1a1a1a;display:inline-block;min-width:170px;">&nbsp;</span>　御中<br><span style="font-size:13px;">次のとおりお見積り申し上げます。</span>' },
+            { width:48, align:'right', fontSize:13, ph:'差出人（会社名・住所・TEL・担当者）を入力', html:'' }
+          ]} },
+        { id:uid(), type:'text', style:baseStyle({align:'left', fontSize:20, bold:true, marginTop:8, marginBottom:14}),
+          content:{ html:'御見積金額　￥ ' } },
+        { id:uid(), type:'box', style:baseStyle({marginBottom:6}),
+          content:{ title:'【特記】', html:'', minHeight:150, borderColor:'#333333', borderWidth:1 } }
+      ]
+    };
+  }
+
+  // 運行費用見積書の「記入用ひな形」。項目名（ラベル）だけを持ち、
+  // 値・差出人・金額は空欄。個人情報や実データは一切含めない。
+  function unyouSkeletonDoc(){
+    const emptyRows = (labels)=> labels.map(l=>({label:l, value:''}));
+    return {
+      version:1,
+      page:basePage(),
       blocks:[
         { id:uid(), type:'text', style:baseStyle({align:'right', fontSize:14, marginBottom:6}),
           content:{ html: esc(reiwaToday()) } },
@@ -400,37 +440,22 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
           content:{ html:'お見積書' } },
         { id:uid(), type:'columns', style:baseStyle({marginBottom:14}),
           content:{ gap:16, cols:[
-            { width:50, align:'left', fontSize:13,
-              html:'<span style="font-size:18px;border-bottom:1px solid #1a1a1a;padding-bottom:2px;">株式会社　〇〇</span>　　御中<br><span style="font-size:13px;">次のとおりお見積り申し上げます。</span>' },
-            { width:50, align:'right', fontSize:13,
-              html:'<span style="font-size:15px;font-weight:700;">大新東株式会社　千葉営業所</span><br>〒262-0033　千葉市花見川区幕張本郷 7-8-10<br>TEL 043－275－4132<br>FAX 043－275－4144<br>営業担当　保永 克樹 ㊞' }
+            { width:52, align:'left', fontSize:14,
+              html:'<span style="border-bottom:1px solid #1a1a1a;display:inline-block;min-width:170px;">&nbsp;</span>　御中<br><span style="font-size:13px;">次のとおりお見積り申し上げます。</span>' },
+            { width:48, align:'right', fontSize:13, ph:'差出人（会社名・住所・TEL・担当者）を入力', html:'' }
           ]} },
-        { id:uid(), type:'text', style:baseStyle({align:'left', fontSize:22, bold:true, marginTop:6, marginBottom:10}),
-          content:{ html:'運行費用　￥ <span style="text-decoration:underline;">6,000</span> ＋ 実費（税別）' } },
+        { id:uid(), type:'text', style:baseStyle({align:'left', fontSize:20, bold:true, marginTop:6, marginBottom:10}),
+          content:{ html:'運行費用　￥ 　＋ 実費（税別）' } },
         { id:uid(), type:'text', style:baseStyle({fontSize:13, marginBottom:12}),
-          content:{ html:'（お見積書の有効期間は 60 日間とさせていただきます。）' } },
+          content:{ html:'（お見積書の有効期間は 　 日間とさせていただきます。）' } },
         { id:uid(), type:'table', style:baseStyle({marginBottom:12, fontSize:13}),
           content:{ title:'【基本事項】', labelWidth:24, labelShade:false, borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9,
-            rows:[
-              {label:'1.契約期間', value:'2026 年 7 月 1 日 ～ 2026 年 12 月 31 日'},
-              {label:'2.運行コース', value:'市川塩浜車庫 ～ 京都府　病院 ～ 地域新聞社指定地'},
-              {label:'3.運行日時', value:'2026 年 7 月　日付未定　3日間'},
-              {label:'4.走行距離', value:'合計　実走行距離'},
-              {label:'5.車両仕様', value:'フリード（管理車両）　1 台'},
-              {label:'7.営業拠点', value:'大新東㈱千葉営業所'}
-            ]} },
+            rows: emptyRows(['1.契約期間','2.運行コース','3.運行日時','4.走行距離','5.車両仕様','6.営業拠点']) } },
         { id:uid(), type:'table', style:baseStyle({marginBottom:14, fontSize:13}),
           content:{ title:'【その他料金等】', labelWidth:30, labelShade:false, borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9,
-            rows:[
-              {label:'1.超過料金', value:'￥2,500 / 1 時間当たり'},
-              {label:'2.早朝・深夜割増料金', value:'￥3,125 / 1 時間当たり'},
-              {label:'3.超過走行', value:'￥40 / 1km 当たり　※月間総走行が 3,100km を超えた場合'},
-              {label:'4.有料道路代', value:'実費'},
-              {label:'5.駐車場代', value:'実費'},
-              {label:'6.宿泊雑費', value:'￥3,000 ／ 一泊当たり'}
-            ]} },
+            rows: emptyRows(['1.超過料金','2.早朝・深夜割増料金','3.超過走行','4.有料道路代','5.駐車場代','6.宿泊雑費']) } },
         { id:uid(), type:'box', style:baseStyle({marginBottom:6}),
-          content:{ title:'【特記】', html:'', minHeight:150, borderColor:'#333333', borderWidth:1 } }
+          content:{ title:'【特記】', html:'', minHeight:120, borderColor:'#333333', borderWidth:1 } }
       ]
     };
   }
@@ -488,7 +513,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       const t = el('div','qm-text');
       t.setAttribute('data-ce','text');
       t.setAttribute('contenteditable','true');
-      if(!c.html) t.setAttribute('data-ph','テキストを入力');
+      if(!c.html) t.setAttribute('data-ph', c.ph || 'テキストを入力');
       t.innerHTML = c.html||'';
       setCss(t, styleToInnerCss(s));
       inner.appendChild(t);
@@ -502,7 +527,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
         cel.style.fontSize = (col.fontSize||13)+'px';
         cel.setAttribute('data-ce','col:'+i);
         cel.setAttribute('contenteditable','true');
-        if(!col.html) cel.setAttribute('data-ph','入力');
+        if(!col.html) cel.setAttribute('data-ph', col.ph || '入力');
         cel.innerHTML = col.html||'';
         wrap.appendChild(cel);
       });
@@ -1220,12 +1245,14 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   $('#tplModal').addEventListener('click', (e)=>{ if(e.target.id==='tplModal') closeTemplates(); });
   $('#btnSaveBaseTpl').addEventListener('click', saveBaseTemplate);
   $('#btnSaveMyTpl').addEventListener('click', saveMyTemplate);
-  $('#tplBuiltinBtn').addEventListener('click', ()=> applyDocument(defaultDoc()));
-  $('#tplBuiltinApply').addEventListener('click', ()=> applyDocument(defaultDoc()));
+  $('#tplBlankBtn').addEventListener('click', ()=> applyDocument(defaultDoc()));
+  $('#tplBlankApply').addEventListener('click', ()=> applyDocument(defaultDoc()));
+  $('#tplUnyouBtn').addEventListener('click', ()=> applyDocument(unyouSkeletonDoc()));
+  $('#tplUnyouApply').addEventListener('click', ()=> applyDocument(unyouSkeletonDoc()));
   $('#btnSave').addEventListener('click', ()=>{ dirty=true; saveNow(); });
   $('#btnUndo').addEventListener('click', doUndo);
   $('#btnRedo').addEventListener('click', doRedo);
-  $('#btnResetTemplate').addEventListener('click', ()=>{ if(!confirm('現在の内容を破棄して初期テンプレートに戻しますか？')) return; pushHistory(); state.doc=defaultDoc(); render(); buildPageSettings(); selectBlock(null); markDirty(); toast('テンプレートを読み込みました'); });
+  $('#btnResetTemplate').addEventListener('click', ()=>{ if(!confirm('現在の内容を破棄して白紙のお見積書に戻しますか？')) return; pushHistory(); state.doc=defaultDoc(); render(); buildPageSettings(); selectBlock(null); markDirty(); toast('白紙のお見積書を読み込みました'); });
   $('#btnPreview').addEventListener('click', ()=>{ const app=$('#qmApp'); app.classList.toggle('previewing'); $('#btnPreview').classList.toggle('primary', app.classList.contains('previewing')); if(app.classList.contains('previewing')) selectBlock(null); });
   $('#btnPrint').addEventListener('click', ()=>{ hideInlineBar(); if(dirty) saveNow(); setTimeout(()=>window.print(), 60); });
 
