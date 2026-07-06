@@ -9519,7 +9519,48 @@
       await refreshPwaNotifyButton();
     }
 
+    function pwaCalendarFeedPath() {
+      return `/tools/shiftersync/cloudshift/pwa/${PAGE.token}/calendar.ics`;
+    }
+
+    function openPwaCalendarSubscribe() {
+      const httpsUrl = `${location.origin}${pwaCalendarFeedPath()}`;
+      const webcalUrl = `webcal://${location.host}${pwaCalendarFeedPath()}`;
+      const modal = openCloudModal('cloud-pwa-calendar-modal', 'カレンダーに登録');
+      const body = modalBody(modal);
+      const footer = modalFooter(modal);
+      body.innerHTML = `
+        <p class="cloud-modal-message">お使いのカレンダーアプリ（iPhone標準カレンダー・Googleカレンダーなど）に、このシフト帳を「購読カレンダー」として登録できます。登録は最初の1回だけで、以後はシフトの更新が自動で反映されます（反映まで時間がかかる場合があります）。</p>
+        <div class="cloud-actions compact">
+          <a class="cloud-btn primary" href="${escapeHtml(webcalUrl)}">カレンダーアプリで登録</a>
+          <button type="button" class="cloud-btn secondary" data-pwa-calendar-copy>購読URLをコピー</button>
+        </div>
+        <p class="cloud-panel-note">iPhone/iPad は「カレンダーアプリで登録」をタップしてください。Googleカレンダーは「他のカレンダー → URLで追加」にコピーしたURLを貼り付けてください。</p>
+      `;
+      footer.innerHTML = '<button type="button" class="cloud-btn ghost" data-pwa-calendar-close>閉じる</button>';
+      footer.querySelector('[data-pwa-calendar-close]').addEventListener('click', () => closeCloudModal('cloud-pwa-calendar-modal'));
+      body.querySelector('[data-pwa-calendar-copy]').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(httpsUrl);
+          showFlash('購読URLをコピーしました', 'success');
+        } catch (error) {
+          showFlash(`コピーできませんでした。URL: ${httpsUrl}`, 'error');
+        }
+      });
+    }
+
     async function initPwa() {
+      const calendarButton = $('cloud-pwa-calendar');
+      if (calendarButton && !calendarButton.dataset.pwaBound) {
+        calendarButton.dataset.pwaBound = '1';
+        calendarButton.addEventListener('click', () => {
+          try {
+            openPwaCalendarSubscribe();
+          } catch (error) {
+            showFlash(error.message || 'カレンダー登録画面を開けませんでした', 'error');
+          }
+        });
+      }
       const button = $('cloud-pwa-notify');
       if (button && !button.dataset.pwaBound) {
         button.dataset.pwaBound = '1';

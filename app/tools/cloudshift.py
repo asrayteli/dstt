@@ -63,7 +63,6 @@ try:
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         entry_second_option,
-        generate_entry_id,
         normalize_entries_for_month,
         normalize_entry,
         parse_csv_text,
@@ -81,7 +80,6 @@ except ImportError:
         SHIFT_OPTION_MAPPINGS,
         entry_display_text,
         entry_second_option,
-        generate_entry_id,
         normalize_entries_for_month,
         normalize_entry,
         parse_csv_text,
@@ -822,7 +820,8 @@ def _resync_siteplus_dedicated_projects_for_site_row(
     if not normalized_site_row_id:
         return
     rows = _siteplus_dedicated_rows_for_site_row_id(normalized_site_row_id)
-    for target_summary in _iter_stored_projects():
+    # 走査に必要なのは mode・site_row_id・id だけ。実処理は _load_project で完全ロードする。
+    for target_summary in _iter_stored_projects_light():
         if not target_summary or target_summary.get("mode") != "scene":
             continue
         if _coerce_site_row_id(target_summary.get("site_row_id")) != normalized_site_row_id:
@@ -1019,22 +1018,14 @@ def _master_scope_from_payload(data: Any, *, existing: dict[str, Any] | None = N
     getter = data.get if hasattr(data, "get") else lambda key, default=None: default
     raw_people = getter("master_people", _master_people_text(existing or {}))
     raw_sites = getter("master_sites", _master_sites_text(existing or {}))
-    raw_target_type = getter("master_target_type", "")
-    if str(raw_target_type or "").strip():
-        target_type = _sanitize_master_target_type(raw_target_type)
-    elif existing:
-        target_type = _master_target_type_for_project(existing)
-    elif _master_payload_items(raw_people):
-        target_type = "person"
-    elif _master_payload_items(raw_sites):
-        target_type = "scene"
-    else:
-        target_type = "scene"
+    # 対象種別の妥当性は people/sites の解析より先に検証する
+    # （不正な種別＋不正な現場参照のとき、種別エラーを先に返す従来挙動を保つ）。
+    raw_target_type = str(getter("master_target_type", "") or "").strip().lower()
+    explicit_target_type = _sanitize_master_target_type(raw_target_type) if raw_target_type else ""
     people = _master_people_from_payload(raw_people)
     sites = _master_sites_from_payload(raw_sites)
-    raw_target_type = str(getter("master_target_type", "") or "").strip().lower()
-    if raw_target_type:
-        target_type = _sanitize_master_target_type(raw_target_type)
+    if explicit_target_type:
+        target_type = explicit_target_type
     elif people and not sites:
         target_type = "person"
     elif sites and not people:
@@ -2489,11 +2480,15 @@ def _owner_display_label(owner_user_id: Any) -> str:
 def _find_projects_with_link_key(
     link_key: tuple[str, str] | None, *, exclude_id: str | None = None
 ) -> list[dict[str, Any]]:
-    """同一紐づけキーを持つ既存シフト帳を返す。"""
+    """同一紐づけキーを持つ既存シフト帳を返す。
+
+    紐づけ判定・オーナー表示に必要なのはメタデータのみなので軽量ロードで走査する
+    （返却される dict は _PARTIAL_MONTHS_KEY 付きのため保存には使えない）。
+    """
     if not link_key:
         return []
     matches: list[dict[str, Any]] = []
-    for project in _iter_stored_projects():
+    for project in _iter_stored_projects_light():
         if exclude_id and str(project.get("id") or "") == str(exclude_id):
             continue
         if _project_link_key(project) == link_key:
@@ -2796,16 +2791,35 @@ def _ensure_substitute_project_for_office_month(office_id: int, year: int, month
     if month_key not in (project.get("months") or {}):
         project.setdefault("months", {})[month_key] = _build_month_payload(year, month, False, 0, {})
         changed = True
-    project["account_shares"] = {
-        "office": {
-            "enabled": True,
-            "office_ids": [office_id],
-        },
-        "employees": [],
-        "updated_at": _jst_now_iso(),
-        "updated_by": "system",
-    }
-    if changed or project.get("account_shares"):
+    # account_shares はシステム管理（営業所共有のみ）。既に期待どおりなら
+    # 書き換えない。ここで毎回上書き保存すると、一覧表示（GET）のたびに全営業所の
+    # 要代務帳へ DB 書き込みと updated_at 更新が走ってしまう。
+    current_shares = project.get("account_shares") if isinstance(project.get("account_shares"), dict) else {}
+    current_office = current_shares.get("office") if isinstance(current_shares.get("office"), dict) else {}
+
+    def _office_id_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    shares_in_sync = (
+        bool(current_office.get("enabled"))
+        and [_office_id_int(value) for value in (current_office.get("office_ids") or [])] == [office_id]
+        and not (current_shares.get("employees") or [])
+    )
+    if not shares_in_sync:
+        project["account_shares"] = {
+            "office": {
+                "enabled": True,
+                "office_ids": [office_id],
+            },
+            "employees": [],
+            "updated_at": _jst_now_iso(),
+            "updated_by": "system",
+        }
+        changed = True
+    if changed:
         _save_project(project)
         db.session.expire_all()
         return _load_project(project_id)
@@ -2819,12 +2833,9 @@ def _ensure_substitute_projects_for_current_user() -> None:
     if not office_ids:
         return
     today = datetime.now(JST).date()
-    changed = False
     for office_id in office_ids:
+        # 変更があった場合の expire は _ensure_substitute_project_for_office_month 側で行う。
         _ensure_substitute_project_for_office_month(int(office_id), today.year, today.month)
-        changed = True
-    if changed:
-        db.session.expire_all()
 
 
 def _find_project_by_token(token: str, token_type: str) -> dict[str, Any]:
@@ -6431,7 +6442,9 @@ def _sync_role_option_person_sites(
             info = current[key]
             by_number.setdefault(str(info["employee_number"]).strip(), []).append(info)
 
-    for summary in _iter_stored_projects():
+    # 走査に必要なのは mode・id・employee_number・assist（軽量ロードに含まれる）のみ。
+    # 実処理は _load_project で完全ロードする。
+    for summary in _iter_stored_projects_light():
         if not summary or summary.get("mode") != "person":
             continue
         person_project_id = str(summary.get("id") or "")
@@ -6792,7 +6805,8 @@ def _sync_person_experience_to_scene_projects(
         return
     if not (_coerce_site_row_id(site.get("site_row_id")) or str(site.get("site_id") or "").strip() or _normalized_site_title(site.get("site_name"))):
         return
-    for target_summary in _iter_stored_projects():
+    # 走査に必要なのは mode と id だけ。実処理は _load_project で完全ロードする。
+    for target_summary in _iter_stored_projects_light():
         if not target_summary or target_summary.get("mode") != "scene":
             continue
         target_project_id = str(target_summary.get("id") or "")
@@ -6835,7 +6849,8 @@ def _delete_person_experience_from_scene_projects(
     *,
     actor_name: str,
 ) -> None:
-    for target_summary in _iter_stored_projects():
+    # 走査に必要なのは mode と id だけ。実処理は _load_project で完全ロードする。
+    for target_summary in _iter_stored_projects_light():
         if not target_summary or target_summary.get("mode") != "scene":
             continue
         target_project_id = str(target_summary.get("id") or "")
@@ -6878,7 +6893,8 @@ def _backfill_scene_project_from_person_experience(
     assist = _ensure_assist(scene_project)
     changes: list[str] = []
     matched_keys: set[tuple[str, str]] = set()
-    for source_project in _iter_stored_projects():
+    # 参照するのは person 帳の assist とメタデータのみ（月データ不要）なので軽量ロード。
+    for source_project in _iter_stored_projects_light():
         if not source_project or source_project.get("mode") != "person":
             continue
         source_assist = _ensure_person_assist(source_project)
@@ -6962,7 +6978,8 @@ def _assist_scene_conflict_entries(project: dict[str, Any], target_date: date) -
     day_key = str(target_date.day)
     entries: list[dict[str, str]] = []
     seen: set[tuple[str, str, str, str]] = set()
-    for other_project in _iter_stored_projects():
+    # 参照するのは対象月の scene 帳のみ。全プロジェクト・全月のフルロードを避ける。
+    for other_project in _iter_project_summaries_for_month(month_key, mode="scene"):
         if not other_project:
             continue
         if str(other_project.get("id") or "").strip() == project_id:
@@ -7975,6 +7992,153 @@ def public_pwa_manifest(token: str):
     }
     response = jsonify(manifest)
     response.headers["Content-Type"] = "application/manifest+json"
+    return response
+
+
+def _ics_escape_text(value: Any) -> str:
+    """RFC 5545 の TEXT 値エスケープ（\\ ; , 改行）。"""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+    return text.replace("\n", "\\n")
+
+
+def _ics_fold_line(line: str) -> str:
+    """RFC 5545 の行折り（1行75オクテット以内、継続行は先頭スペース）。"""
+    if len(line.encode("utf-8")) <= 75:
+        return line
+    parts: list[str] = []
+    current_chars: list[str] = []
+    current_octets = 0
+    budget = 75
+    for char in line:
+        char_octets = len(char.encode("utf-8"))
+        if current_octets + char_octets > budget:
+            parts.append("".join(current_chars))
+            current_chars = [char]
+            current_octets = char_octets
+            budget = 74  # 継続行は先頭の空白1オクテット分を差し引く
+        else:
+            current_chars.append(char)
+            current_octets += char_octets
+    parts.append("".join(current_chars))
+    return "\r\n ".join(parts)
+
+
+def _ics_utc_timestamp(value: Any) -> str:
+    """保存済みの ISO 日時（JST）を DTSTAMP 用の UTC 表記へ変換する。"""
+    parsed = None
+    text = str(value or "").strip()
+    if text:
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            parsed = None
+    if parsed is None:
+        parsed = datetime.now(JST)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=JST)
+    return parsed.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _ics_text_for_project(project: dict[str, Any]) -> str:
+    """シフト帳の全月を iCalendar（RFC 5545）の終日イベントへ変換する。
+
+    ViewPWA の購読フィード用。表示内容は閲覧画面と同じ整形
+    （最新現場リンクの反映・解決済み代務の元 entry 非表示）を通す。
+    UID は project×月×日×entry id で安定させ、購読側の再取得で
+    重複登録ではなく置き換え（更新）になるようにする。
+    """
+    title = str(project.get("title") or "CloudShift").strip() or "CloudShift"
+    project_id = str(project.get("id") or "")
+    lines: list[str] = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//DSTT//CloudShift//JA",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{_ics_escape_text(title)}",
+        "X-WR-TIMEZONE:Asia/Tokyo",
+        # 購読クライアントへの更新間隔ヒント（対応アプリのみ参照する）
+        "REFRESH-INTERVAL;VALUE=DURATION:PT6H",
+        "X-PUBLISHED-TTL:PT6H",
+    ]
+    months = project.get("months") or {}
+    # 不正な月キー（レガシー JSON の破損など）は購読フィード全体を壊さずスキップする。
+    parseable_keys = []
+    for key in months.keys():
+        try:
+            _parse_month_key(str(key))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        parseable_keys.append(str(key))
+    for month_key in _sort_month_keys(parseable_keys):
+        month_data = months.get(month_key)
+        if not isinstance(month_data, dict):
+            continue
+        try:
+            year = int(month_data.get("year"))
+            month = int(month_data.get("month"))
+        except (TypeError, ValueError):
+            continue
+        dtstamp = _ics_utc_timestamp(month_data.get("updated_at"))
+        revision = int(month_data.get("revision", 1) or 1)
+        entries_per_day = _entries_with_latest_site_links(month_data.get("entries_per_day"), project)
+        entries_per_day = _entries_without_substitute_superseded_sources(entries_per_day, project)
+        normalized = _normalize_entries(entries_per_day, year, month)
+        seen_uids: set[str] = set()
+        for day in range(1, monthrange(year, month)[1] + 1):
+            for index, entry in enumerate(normalized.get(str(day)) or []):
+                summary = entry_display_text(entry)
+                if not summary:
+                    continue
+                entry_id = str(entry.get("id") or "").strip() or f"idx{index}"
+                # entry id は日内の一意性が保証されない（クライアント指定値を通す）ため、
+                # 衝突時は連番を付けて UID の一意性を守る（重複 UID はカレンダー側で
+                # 片方が黙って消えるため）。
+                uid_base = f"{project_id}-{month_key}-{day}-{entry_id}"
+                uid = uid_base
+                collision = 2
+                while uid in seen_uids:
+                    uid = f"{uid_base}-{collision}"
+                    collision += 1
+                seen_uids.add(uid)
+                start = date(year, month, day)
+                end = start + timedelta(days=1)
+                lines.extend(
+                    [
+                        "BEGIN:VEVENT",
+                        f"UID:{_ics_escape_text(uid)}@cloudshift.dstt",
+                        f"DTSTAMP:{dtstamp}",
+                        f"DTSTART;VALUE=DATE:{start.strftime('%Y%m%d')}",
+                        f"DTEND;VALUE=DATE:{end.strftime('%Y%m%d')}",
+                        f"SUMMARY:{_ics_escape_text(summary)}",
+                        f"SEQUENCE:{revision}",
+                    ]
+                )
+                comment = str(entry.get("comment") or "").strip()
+                if comment:
+                    lines.append(f"DESCRIPTION:{_ics_escape_text(comment)}")
+                lines.append("END:VEVENT")
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(_ics_fold_line(line) for line in lines) + "\r\n"
+
+
+@cloudshift_bp.route("/pwa/<token>/calendar.ics")
+def public_pwa_calendar(token: str):
+    """ViewPWA 共有先向けの iCalendar 購読フィード。
+
+    iPhone 標準カレンダーの「照会カレンダー」や Google カレンダーの
+    「URLで追加」に登録すると、シフト帳の更新が購読側へ自動反映される。
+    認可はリンク保持（PWA トークン）で、他の PWA API と同じモデル。
+    """
+    project = _find_project_by_token(token, "pwa")
+    response = current_app.response_class(
+        _ics_text_for_project(project), mimetype="text/calendar"
+    )
+    response.headers["Content-Type"] = "text/calendar; charset=utf-8"
+    response.headers["Content-Disposition"] = 'inline; filename="cloudshift.ics"'
+    # 購読クライアントには毎回最新を取りに来させる（フィードは十分小さい）
+    response.headers["Cache-Control"] = "no-cache"
     return response
 
 
