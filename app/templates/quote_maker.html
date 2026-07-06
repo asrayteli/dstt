@@ -166,6 +166,15 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
 .qm-tpl-head { display:flex; align-items:center; justify-content:space-between; margin:4px 2px 8px; }
 .qm-tpl-head > span:first-child { font-size:.82rem; font-weight:800; color:#334155; }
 .qm-tpl-sub { font-size:.66rem; font-weight:700; color:#94a3b8; margin-left:8px; background:#f1f5f9; padding:2px 7px; border-radius:9999px; }
+.qm-issuer-item { border:1px solid #eef1f4; border-radius:10px; padding:10px 12px; margin-bottom:8px; }
+.qm-issuer-item .top { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+.qm-issuer-item .nm { font-size:.9rem; font-weight:800; color:#1f2933; }
+.qm-issuer-item .body { font-size:.72rem; color:#64748b; line-height:1.55; white-space:pre-line; }
+.qm-issuer-item .acts { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+.qm-badge-default { font-size:.62rem; font-weight:800; color:#047857; background:#d1fae5; padding:2px 7px; border-radius:9999px; }
+.qm-issuer-form { border:1px solid #dbe3ec; border-radius:10px; padding:12px; margin-top:8px; background:#f8fafc; }
+.qm-if-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.qm-if-grid .full { grid-column:1 / -1; }
 .qm-toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:90; background:#0f172a; color:#fff;
   padding:10px 18px; border-radius:9px; font-size:.82rem; font-weight:700; box-shadow:0 8px 24px rgba(0,0,0,.28);
   opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; }
@@ -207,6 +216,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     <div class="qm-tgroup">
       <button class="qm-tb-btn" id="btnList" title="保存済みの見積書一覧">☰ 一覧</button>
       <button class="qm-tb-btn" id="btnTemplates" title="テンプレートから作成・保存">📁 テンプレート</button>
+      <button class="qm-tb-btn" id="btnIssuer" title="差出人（営業所・住所・電話番号）の基本情報">🏢 基本情報</button>
       <button class="qm-tb-btn" id="btnNew" title="新しい見積書を作成">＋ 新規</button>
     </div>
     <div class="qm-tsep"></div>
@@ -239,6 +249,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
             <button class="qm-add-btn" data-add="divider"><span class="ico">―</span>区切り線</button>
             <button class="qm-add-btn" data-add="spacer"><span class="ico">↕</span>余白</button>
             <button class="qm-add-btn" data-add="image"><span class="ico">🖼</span>画像</button>
+            <button class="qm-add-btn" id="btnAddIssuer" style="grid-column:1 / -1"><span class="ico">🏢</span>差出人（基本情報を挿入）</button>
           </div>
           <p class="qm-hint">追加したブロックはドラッグ（左の⋮⋮）で並べ替えできます。</p>
         </div>
@@ -251,7 +262,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
         <div class="qm-sec-hd" data-fold>テンプレート <span class="chev">▾</span></div>
         <div class="qm-sec-body">
           <button class="qm-tb-btn" style="width:100%;background:#2563eb;color:#fff;border-color:#2563eb;margin-bottom:6px" id="btnOpenTemplates">📁 テンプレートから作成・保存</button>
-          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnResetTemplate">白紙のお見積書に戻す</button>
+          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0;margin-bottom:6px" id="btnResetTemplate">白紙のお見積書に戻す</button>
+          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnLoadUnyou">運行費用のひな形を読み込む</button>
           <p class="qm-hint">基本テンプレート（会社共通）とマイテンプレート（この端末）を管理できます。</p>
         </div>
       </div>
@@ -325,23 +337,22 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
         </div>
         <div id="myTplBody"><div class="qm-list-empty">読み込み中…</div></div>
       </div>
-      <div class="qm-tpl-group">
-        <div class="qm-tpl-head"><span>標準（記入用ひな形）</span></div>
-        <div class="qm-quote-row">
-          <div class="meta" id="tplBlankApply">
-            <div class="qt">白紙のお見積書</div>
-            <div class="qd">宛先・差出人・金額などを空欄にした最小限のひな形</div>
-          </div>
-          <button class="qm-mini" id="tplBlankBtn">このひな形で作成</button>
-        </div>
-        <div class="qm-quote-row">
-          <div class="meta" id="tplUnyouApply">
-            <div class="qt">運行費用の見積書（記入用ひな形）</div>
-            <div class="qd">基本事項・その他料金等の項目だけを用意した空欄のひな形</div>
-          </div>
-          <button class="qm-mini" id="tplUnyouBtn">このひな形で作成</button>
-        </div>
-      </div>
+    </div>
+  </div>
+</div>
+
+<!-- issuer (basic info) modal -->
+<div class="qm-modal" id="issuerModal">
+  <div class="qm-modal-card">
+    <div class="qm-modal-hd">
+      <h2>差出人の基本情報</h2>
+      <button class="qm-tb-btn" style="background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnCloseIssuer">閉じる</button>
+    </div>
+    <div class="qm-modal-body">
+      <p class="qm-hint" style="margin-bottom:8px">営業所・住所・電話番号などをここに登録しておくと、「差出人」ブロックでワンクリック挿入できます。保存先はこのブラウザ（この端末）です。</p>
+      <div id="issuerListBody"></div>
+      <div id="issuerFormWrap"></div>
+      <button class="qm-tb-btn" style="width:100%;background:#2563eb;color:#fff;border-color:#2563eb;margin-top:8px" id="btnNewIssuer">＋ 新しい差出人を登録</button>
     </div>
   </div>
 </div>
@@ -1212,6 +1223,120 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   }
 
   /* ------------------------------------------------------------------
+     差出人の基本情報（営業所・住所・電話番号など）
+     - ブラウザ(localStorage)に複数プロファイルを保存し、既定を1つ選べる。
+     - 「差出人」ブロックや各プロファイルの「挿入」で、右寄せテキストとして
+       見積書へ差し込む（挿入後は通常のテキストとして自由編集できる）。
+     ------------------------------------------------------------------ */
+  const ISSUER_KEY='dstt_qm_issuer_v1';
+  function loadIssuer(){
+    try{ const o=JSON.parse(localStorage.getItem(ISSUER_KEY)||'{}');
+      return { profiles:Array.isArray(o.profiles)?o.profiles:[], defaultId:o.defaultId||null }; }
+    catch(_){ return { profiles:[], defaultId:null }; }
+  }
+  function saveIssuer(data){ try{ localStorage.setItem(ISSUER_KEY, JSON.stringify(data)); }catch(_){ toast('保存に失敗しました'); } }
+  function issuerDefault(data){ data=data||loadIssuer(); return data.profiles.find(p=>p.id===data.defaultId) || data.profiles[0] || null; }
+
+  function issuerHtml(p){
+    const lines=[];
+    const head=[p.company, p.office].filter(Boolean).join('　');
+    if(head) lines.push('<span style="font-size:15px;font-weight:700;">'+esc(head)+'</span>');
+    const addr=(p.zip?('〒'+esc(p.zip)+'　'):'')+esc(p.address||'');
+    if(addr.trim()) lines.push(addr);
+    if(p.tel) lines.push('TEL '+esc(p.tel));
+    if(p.fax) lines.push('FAX '+esc(p.fax));
+    if(p.rep) lines.push('営業担当　'+esc(p.rep)+(p.seal?' ㊞':''));
+    return lines.join('<br>');
+  }
+  function insertIssuerBlock(p){
+    if(!p){ toast('差出人が登録されていません'); return; }
+    const b={ id:uid(), type:'text', style:baseStyle({align:'right', fontSize:13, marginBottom:14}), content:{ html:issuerHtml(p) } };
+    const idx = selectedId ? findIndex(selectedId)+1 : state.doc.blocks.length;
+    state.doc.blocks.splice(idx,0,b);
+    commit(); selectBlock(b.id);
+    const node=$('.qm-block[data-id="'+b.id+'"]'); if(node) node.scrollIntoView({behavior:'smooth',block:'center'});
+    toast('差出人を挿入しました');
+  }
+  function addIssuerBlockFromDefault(){
+    const data=loadIssuer();
+    if(!data.profiles.length){ toast('先に「🏢 基本情報」で差出人を登録してください'); openIssuer(); return; }
+    insertIssuerBlock(issuerDefault(data));
+  }
+
+  function openIssuer(){ $('#issuerModal').classList.add('show'); $('#issuerFormWrap').innerHTML=''; renderIssuerList(); }
+  function closeIssuer(){ $('#issuerModal').classList.remove('show'); }
+
+  function renderIssuerList(){
+    const data=loadIssuer(); const body=$('#issuerListBody');
+    if(!data.profiles.length){ body.innerHTML='<div class="qm-list-empty">差出人はまだ登録されていません。<br>下の「＋ 新しい差出人を登録」から追加してください。</div>'; return; }
+    body.innerHTML='';
+    data.profiles.forEach(p=>{
+      const item=el('div','qm-issuer-item');
+      const top=el('div','top');
+      const nm=el('span','nm'); nm.textContent=p.name || (p.company||'差出人');
+      top.appendChild(nm);
+      if(p.id===data.defaultId){ const bd=el('span','qm-badge-default'); bd.textContent='既定'; top.appendChild(bd); }
+      item.appendChild(top);
+      const bd=el('div','body'); bd.textContent=issuerHtml(p).replace(/<[^>]+>/g,'').replace(/　/g,' ')||'（内容なし）'; item.appendChild(bd);
+      const acts=el('div','acts');
+      const ins=el('button','qm-mini'); ins.textContent='この差出人を挿入'; ins.addEventListener('click',()=>{ insertIssuerBlock(p); closeIssuer(); });
+      const ed=el('button','qm-mini'); ed.textContent='編集'; ed.addEventListener('click',()=> showIssuerForm(p));
+      acts.appendChild(ins); acts.appendChild(ed);
+      if(p.id!==data.defaultId){ const df=el('button','qm-mini'); df.textContent='既定にする'; df.addEventListener('click',()=>{ const d=loadIssuer(); d.defaultId=p.id; saveIssuer(d); renderIssuerList(); }); acts.appendChild(df); }
+      const del=el('button','qm-mini danger'); del.textContent='削除'; del.addEventListener('click',()=>{
+        if(!confirm('差出人「'+(p.name||p.company||'')+'」を削除しますか？')) return;
+        const d=loadIssuer(); d.profiles=d.profiles.filter(x=>x.id!==p.id); if(d.defaultId===p.id) d.defaultId=(d.profiles[0]&&d.profiles[0].id)||null; saveIssuer(d); renderIssuerList();
+      });
+      acts.appendChild(del);
+      item.appendChild(acts);
+      body.appendChild(item);
+    });
+  }
+
+  function showIssuerForm(existing){
+    const p = existing || { id:'', name:'', company:'', office:'', zip:'', address:'', tel:'', fax:'', rep:'', seal:true };
+    const wrap=$('#issuerFormWrap');
+    const f=el('div','qm-issuer-form');
+    function field(label, key, full){
+      const c=el('div', full?'full':'');
+      const l=el('label'); l.textContent=label; l.style.cssText='display:block;font-size:.7rem;font-weight:700;color:#475569;margin-bottom:3px';
+      const i=el('input','qm-inp'); i.value=p[key]||''; i.dataset.k=key;
+      c.appendChild(l); c.appendChild(i); return c;
+    }
+    const g=el('div','qm-if-grid');
+    g.appendChild(field('表示名（例：千葉営業所）','name', true));
+    g.appendChild(field('会社名','company'));
+    g.appendChild(field('営業所名','office'));
+    g.appendChild(field('郵便番号','zip'));
+    g.appendChild(field('住所','address'));
+    g.appendChild(field('TEL','tel'));
+    g.appendChild(field('FAX','fax'));
+    g.appendChild(field('営業担当','rep', true));
+    f.appendChild(g);
+    const sealWrap=el('label'); sealWrap.style.cssText='display:flex;align-items:center;gap:7px;margin:8px 0;font-size:.76rem;font-weight:700;color:#475569;cursor:pointer';
+    const sealCb=el('input'); sealCb.type='checkbox'; sealCb.checked=p.seal!==false; sealCb.id='issuerSeal';
+    const sealTx=el('span'); sealTx.textContent='営業担当名の後に ㊞ を付ける';
+    sealWrap.appendChild(sealCb); sealWrap.appendChild(sealTx); f.appendChild(sealWrap);
+    const btns=el('div'); btns.style.cssText='display:flex;gap:6px;margin-top:4px';
+    const save=el('button','qm-tb-btn accent'); save.textContent='保存'; save.style.flex='1';
+    save.addEventListener('click',()=>{
+      const data=loadIssuer();
+      const rec={ id:p.id||('i'+Date.now()+Math.random().toString(36).slice(2,6)), seal:sealCb.checked };
+      f.querySelectorAll('input[data-k]').forEach(i=> rec[i.dataset.k]=i.value.trim());
+      if(!rec.name) rec.name = rec.company || rec.office || '差出人';
+      const idx=data.profiles.findIndex(x=>x.id===rec.id);
+      if(idx>=0) data.profiles[idx]=rec; else data.profiles.push(rec);
+      if(!data.defaultId) data.defaultId=rec.id;
+      saveIssuer(data); wrap.innerHTML=''; renderIssuerList(); toast('差出人を保存しました');
+    });
+    const cancel=el('button','qm-tb-btn'); cancel.textContent='キャンセル'; cancel.style.cssText='background:#f1f5f9;color:#334155;border-color:#e2e8f0';
+    cancel.addEventListener('click',()=> wrap.innerHTML='');
+    btns.appendChild(save); btns.appendChild(cancel); f.appendChild(btns);
+    wrap.innerHTML=''; wrap.appendChild(f);
+    f.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+
+  /* ------------------------------------------------------------------
      New document / normalize
      ------------------------------------------------------------------ */
   function normalizeDoc(doc){
@@ -1245,10 +1370,13 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   $('#tplModal').addEventListener('click', (e)=>{ if(e.target.id==='tplModal') closeTemplates(); });
   $('#btnSaveBaseTpl').addEventListener('click', saveBaseTemplate);
   $('#btnSaveMyTpl').addEventListener('click', saveMyTemplate);
-  $('#tplBlankBtn').addEventListener('click', ()=> applyDocument(defaultDoc()));
-  $('#tplBlankApply').addEventListener('click', ()=> applyDocument(defaultDoc()));
-  $('#tplUnyouBtn').addEventListener('click', ()=> applyDocument(unyouSkeletonDoc()));
-  $('#tplUnyouApply').addEventListener('click', ()=> applyDocument(unyouSkeletonDoc()));
+  $('#btnLoadUnyou').addEventListener('click', ()=> applyDocument(unyouSkeletonDoc()));
+  // 差出人（基本情報）
+  $('#btnIssuer').addEventListener('click', openIssuer);
+  $('#btnCloseIssuer').addEventListener('click', closeIssuer);
+  $('#issuerModal').addEventListener('click', (e)=>{ if(e.target.id==='issuerModal') closeIssuer(); });
+  $('#btnNewIssuer').addEventListener('click', ()=> showIssuerForm(null));
+  $('#btnAddIssuer').addEventListener('click', addIssuerBlockFromDefault);
   $('#btnSave').addEventListener('click', ()=>{ dirty=true; saveNow(); });
   $('#btnUndo').addEventListener('click', doUndo);
   $('#btnRedo').addEventListener('click', doRedo);
