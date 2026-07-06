@@ -174,4 +174,11 @@ NAV_ITEMS = (
         "label": "貸切料金計算ツール",
         "description": "貸切バスの公示下限額と改善基準告示の監査をまとめて確認",
     },
+    {
+        "key": "quote_maker",
+        "href": "/tools/quote_maker",
+        "icon": "🧾",
+        "label": "見積書作成ツール",
+        "description": "あらゆる箇所を自由に編集できる見積書エディタ。テンプレートから作成しPDF出力",
+    },
 )
