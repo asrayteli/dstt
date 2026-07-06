@@ -38,8 +38,8 @@ def test_navigation_contains_color_extract_before_powerstamp():
     assert hrefs.index("/tools/color_extract") < hrefs.index("/tools/powerstamp")
 
 
-def test_bus_pricing_card_is_last_navigation_item():
-    assert NAV_ITEMS[-1]["key"] == "bus_pricing"
+def test_quote_maker_card_is_last_navigation_item():
+    assert NAV_ITEMS[-1]["key"] == "quote_maker"
 
 
 def test_bus_pricing_requires_explicit_permission():

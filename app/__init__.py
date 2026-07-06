@@ -158,6 +158,7 @@ def _seed_tool_categories():
             ("大新東ツール", [
                 "shiftersync", "monthly_generator", "subject_analysis_tool",
                 "pluslist", "siteplus", "to_bell", "leave_mgr", "bus_pricing",
+                "quote_maker",
             ]),
             ("ファイル操作", [
                 "rename", "compress", "csvtool", "pdf_power", "share",
@@ -193,6 +194,7 @@ def _seed_tool_categories():
         "bus_pricing": "大新東ツール",
         "to_bell": "大新東ツール",
         "health_check": "大新東ツール",
+        "quote_maker": "大新東ツール",
     }
 
     existing_keys = {ts.tool_key for ts in ToolSettings.query.all()}
@@ -866,6 +868,9 @@ def create_app(test_config=None):
 
     from .tools.camera_scanner import camera_scanner_bp
     app.register_blueprint(camera_scanner_bp)
+
+    from .tools.quote_maker import quote_maker_bp
+    app.register_blueprint(quote_maker_bp)
 
     # アクセス権管理（機密ツールに before_request を紐付け）
     from flask import request as _req, abort

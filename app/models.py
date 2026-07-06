@@ -388,6 +388,37 @@ class PowerVoteResponse(db.Model):
     form = db.relationship('PowerVoteForm', back_populates='responses')
 
 
+class QuoteDocument(db.Model):
+    """見積書作成ツールで作成した見積書（ユーザー所有）。
+
+    レイアウト・文字・罫線・色などあらゆる編集内容を ``document`` (JSON) に
+    一括保存する。ページ設定とブロック配列を丸ごと持たせることで、
+    スキーマを増やさずに自由なレイアウト変更へ対応する。
+    """
+
+    __tablename__ = 'quote_documents'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    owner_user_id = db.Column(db.String(80), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False, default='無題の見積書')
+    document = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    def to_summary(self) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "created_at": (self.created_at.isoformat() if self.created_at else None),
+            "updated_at": (self.updated_at.isoformat() if self.updated_at else None),
+        }
+
+    def to_detail(self) -> dict:
+        data = self.to_summary()
+        data["document"] = self.document or {}
+        return data
+
+
 class ToolCategory(db.Model):
     """ツールカテゴリ（管理者が自由に作成・編集・削除可能）"""
     __tablename__ = 'tool_categories'
