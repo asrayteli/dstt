@@ -161,7 +161,11 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
 .qm-quote-row .meta { flex:1; min-width:0; cursor:pointer; }
 .qm-quote-row .qt { font-size:.9rem; font-weight:700; color:#1f2933; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .qm-quote-row .qd { font-size:.7rem; color:#94a3b8; margin-top:2px; }
-.qm-list-empty { text-align:center; color:#94a3b8; padding:36px 10px; font-size:.85rem; }
+.qm-list-empty { text-align:center; color:#94a3b8; padding:24px 10px; font-size:.85rem; }
+.qm-tpl-group { margin-bottom:16px; }
+.qm-tpl-head { display:flex; align-items:center; justify-content:space-between; margin:4px 2px 8px; }
+.qm-tpl-head > span:first-child { font-size:.82rem; font-weight:800; color:#334155; }
+.qm-tpl-sub { font-size:.66rem; font-weight:700; color:#94a3b8; margin-left:8px; background:#f1f5f9; padding:2px 7px; border-radius:9999px; }
 .qm-toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:90; background:#0f172a; color:#fff;
   padding:10px 18px; border-radius:9px; font-size:.82rem; font-weight:700; box-shadow:0 8px 24px rgba(0,0,0,.28);
   opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; }
@@ -202,6 +206,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   <div class="qm-toolbar">
     <div class="qm-tgroup">
       <button class="qm-tb-btn" id="btnList" title="保存済みの見積書一覧">☰ 一覧</button>
+      <button class="qm-tb-btn" id="btnTemplates" title="テンプレートから作成・保存">📁 テンプレート</button>
       <button class="qm-tb-btn" id="btnNew" title="新しい見積書を作成">＋ 新規</button>
     </div>
     <div class="qm-tsep"></div>
@@ -245,8 +250,9 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       <div class="qm-sec">
         <div class="qm-sec-hd" data-fold>テンプレート <span class="chev">▾</span></div>
         <div class="qm-sec-body">
-          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnResetTemplate">運行費用の見積書テンプレートを読み込む</button>
-          <p class="qm-hint">現在の内容を破棄して、添付見本と同じ初期レイアウトに戻します。</p>
+          <button class="qm-tb-btn" style="width:100%;background:#2563eb;color:#fff;border-color:#2563eb;margin-bottom:6px" id="btnOpenTemplates">📁 テンプレートから作成・保存</button>
+          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnResetTemplate">運行費用の初期レイアウトに戻す</button>
+          <p class="qm-hint">基本テンプレート（会社共通）とマイテンプレート（この端末）を管理できます。</p>
         </div>
       </div>
     </div>
@@ -297,12 +303,50 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   </div>
 </div>
 
+<!-- template modal -->
+<div class="qm-modal" id="tplModal">
+  <div class="qm-modal-card">
+    <div class="qm-modal-hd">
+      <h2>テンプレート</h2>
+      <button class="qm-tb-btn" style="background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnCloseTpl">閉じる</button>
+    </div>
+    <div class="qm-modal-body">
+      <div class="qm-tpl-group">
+        <div class="qm-tpl-head">
+          <span>基本テンプレート<span class="qm-tpl-sub">会社共通</span></span>
+          <button class="qm-mini" id="btnSaveBaseTpl" style="display:none">＋ 現在の内容を保存</button>
+        </div>
+        <div id="baseTplBody"><div class="qm-list-empty">読み込み中…</div></div>
+      </div>
+      <div class="qm-tpl-group">
+        <div class="qm-tpl-head">
+          <span>マイテンプレート<span class="qm-tpl-sub">この端末に保存</span></span>
+          <button class="qm-mini" id="btnSaveMyTpl">＋ 現在の内容を保存</button>
+        </div>
+        <div id="myTplBody"><div class="qm-list-empty">読み込み中…</div></div>
+      </div>
+      <div class="qm-tpl-group">
+        <div class="qm-tpl-head"><span>標準</span></div>
+        <div class="qm-quote-row">
+          <div class="meta" id="tplBuiltinApply">
+            <div class="qt">運行費用の見積書（初期テンプレート）</div>
+            <div class="qd">添付見本と同じレイアウトから作成します</div>
+          </div>
+          <button class="qm-mini" id="tplBuiltinBtn">このテンプレートで作成</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="qm-toast" id="toast"></div>
 
 <script>
 (function(){
   'use strict';
   const API = '/tools/quote_maker/api/quotes';
+  const TPL_API = '/tools/quote_maker/api/templates';
+  const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
 
   // 親コンテンツ領域の余白を除去してエディタを全幅・全高で使う。
   (function neutralizeShell(){
@@ -1029,6 +1073,120 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   }
 
   /* ------------------------------------------------------------------
+     Templates: 基本テンプレート（サーバー） + マイテンプレート（IndexedDB）
+     ------------------------------------------------------------------ */
+  const IDB_NAME='dstt_quote_maker', IDB_STORE='user_templates';
+  function idbOpen(){
+    return new Promise((res,rej)=>{
+      let rq;
+      try{ rq=indexedDB.open(IDB_NAME,1); }catch(e){ rej(e); return; }
+      rq.onupgradeneeded=()=>{ const db=rq.result; if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE,{keyPath:'id'}); };
+      rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error);
+    });
+  }
+  function idbTx(mode, fn){
+    return idbOpen().then(db=>new Promise((res,rej)=>{
+      const tx=db.transaction(IDB_STORE,mode); const store=tx.objectStore(IDB_STORE);
+      const out=fn(store); tx.oncomplete=()=>res(out&&out.result!==undefined?out.result:out); tx.onerror=()=>rej(tx.error); tx.onabort=()=>rej(tx.error);
+    }));
+  }
+  const idbAll = ()=> idbTx('readonly', st=> st.getAll());
+  const idbPut = (rec)=> idbTx('readwrite', st=> st.put(rec));
+  const idbDel = (id)=> idbTx('readwrite', st=> st.delete(id));
+
+  function openTemplates(){
+    $('#tplModal').classList.add('show');
+    $('#btnSaveBaseTpl').style.display = IS_ADMIN ? 'inline-flex' : 'none';
+    renderBaseTemplates(); renderMyTemplates();
+  }
+  function closeTemplates(){ $('#tplModal').classList.remove('show'); }
+
+  function tplRow(name, sub, onApply, onDelete){
+    const row=el('div','qm-quote-row');
+    const meta=el('div','meta');
+    const nm=el('div','qt'); nm.textContent=name;
+    const dd=el('div','qd'); dd.textContent=sub;
+    meta.appendChild(nm); meta.appendChild(dd);
+    meta.addEventListener('click', onApply);
+    const use=el('button','qm-mini'); use.textContent='このテンプレートで作成'; use.addEventListener('click', onApply);
+    row.appendChild(meta); row.appendChild(use);
+    if(onDelete){ const del=el('button','qm-mini danger'); del.textContent='削除'; del.addEventListener('click', onDelete); row.appendChild(del); }
+    return row;
+  }
+
+  async function renderBaseTemplates(){
+    const body=$('#baseTplBody'); body.innerHTML='<div class="qm-list-empty">読み込み中…</div>';
+    try{
+      const res=await fetch(TPL_API); const data=await res.json();
+      const rows=data.templates||[];
+      if(!rows.length){ body.innerHTML='<div class="qm-list-empty">基本テンプレートはまだありません。'+(data.can_manage?'<br>「＋ 現在の内容を保存」で追加できます。':'')+'</div>'; return; }
+      body.innerHTML='';
+      rows.forEach(t=>{
+        const onDel = data.can_manage ? (()=>deleteBaseTemplate(t.id, t.name)) : null;
+        body.appendChild(tplRow(t.name, '更新: '+fmtDate(t.updated_at)+(t.created_by?'（'+t.created_by+'）':''), ()=>applyBaseTemplate(t.id), onDel));
+      });
+    }catch(e){ body.innerHTML='<div class="qm-list-empty">読み込みに失敗しました。</div>'; }
+  }
+  async function applyBaseTemplate(id){
+    try{ const res=await fetch(TPL_API+'/'+id); if(!res.ok) throw 0; const data=await res.json(); applyDocument(data.document); }
+    catch(e){ toast('テンプレートの読み込みに失敗しました'); }
+  }
+  async function saveBaseTemplate(){
+    const name=prompt('基本テンプレートの名前を入力してください:', state.title||'');
+    if(name===null) return;
+    try{
+      const res=await fetch(TPL_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name, document:state.doc})});
+      if(res.status===403){ toast('基本テンプレートの追加は管理者のみです'); return; }
+      if(!res.ok) throw 0;
+      toast('基本テンプレートに保存しました'); renderBaseTemplates();
+    }catch(e){ toast('保存に失敗しました'); }
+  }
+  async function deleteBaseTemplate(id,name){
+    if(!confirm('基本テンプレート「'+name+'」を削除しますか？')) return;
+    try{ const res=await fetch(TPL_API+'/'+id,{method:'DELETE'}); if(res.status===403){ toast('削除は管理者のみです'); return; } renderBaseTemplates(); toast('削除しました'); }
+    catch(e){ toast('削除に失敗しました'); }
+  }
+
+  async function renderMyTemplates(){
+    const body=$('#myTplBody'); body.innerHTML='<div class="qm-list-empty">読み込み中…</div>';
+    if(!window.indexedDB){ body.innerHTML='<div class="qm-list-empty">この環境ではマイテンプレートを保存できません。</div>'; $('#btnSaveMyTpl').disabled=true; return; }
+    try{
+      const rows=(await idbAll()||[]).sort((a,b)=> String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+      if(!rows.length){ body.innerHTML='<div class="qm-list-empty">マイテンプレートはまだありません。<br>「＋ 現在の内容を保存」で追加できます。</div>'; return; }
+      body.innerHTML='';
+      rows.forEach(t=>{
+        body.appendChild(tplRow(t.name, '保存: '+fmtDate(t.createdAt), ()=>applyDocument(t.document), ()=>deleteMyTemplate(t.id, t.name)));
+      });
+    }catch(e){ body.innerHTML='<div class="qm-list-empty">読み込みに失敗しました。</div>'; }
+  }
+  async function saveMyTemplate(){
+    if(!window.indexedDB){ toast('この環境では保存できません'); return; }
+    const name=prompt('マイテンプレートの名前を入力してください:', state.title||'');
+    if(name===null) return;
+    const rec={ id:'t'+Date.now()+Math.random().toString(36).slice(2,6), name:(name.trim()||'無題のテンプレート'),
+      document:JSON.parse(JSON.stringify(state.doc)), createdAt:new Date().toISOString() };
+    try{ await idbPut(rec); toast('マイテンプレートに保存しました'); renderMyTemplates(); }
+    catch(e){ toast('保存に失敗しました（容量が足りない可能性があります）'); }
+  }
+  async function deleteMyTemplate(id,name){
+    if(!confirm('マイテンプレート「'+name+'」を削除しますか？')) return;
+    try{ await idbDel(id); renderMyTemplates(); toast('削除しました'); }
+    catch(e){ toast('削除に失敗しました'); }
+  }
+
+  /* テンプレートの内容を「新しい未保存の見積書」として読み込む */
+  function applyDocument(doc){
+    if(dirty && !confirm('保存していない変更があります。テンプレートから新規作成しますか？')) return;
+    state.id=null; state.title=''; state.doc=normalizeDoc(JSON.parse(JSON.stringify(doc||{})));
+    $('#docTitle').value='';
+    selectedId=null; undoStack.length=0; redoStack.length=0; updateHistoryButtons();
+    render(); buildPageSettings(); buildInspector();
+    dirty=false; setSaveState('新規（未保存）'); fitZoom();
+    closeTemplates();
+    toast('テンプレートから新規作成しました');
+  }
+
+  /* ------------------------------------------------------------------
      New document / normalize
      ------------------------------------------------------------------ */
   function normalizeDoc(doc){
@@ -1056,6 +1214,14 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   $('#btnList').addEventListener('click', openList);
   $('#btnCloseList').addEventListener('click', ()=> $('#listModal').classList.remove('show'));
   $('#listModal').addEventListener('click', (e)=>{ if(e.target.id==='listModal') $('#listModal').classList.remove('show'); });
+  $('#btnTemplates').addEventListener('click', openTemplates);
+  $('#btnOpenTemplates').addEventListener('click', openTemplates);
+  $('#btnCloseTpl').addEventListener('click', closeTemplates);
+  $('#tplModal').addEventListener('click', (e)=>{ if(e.target.id==='tplModal') closeTemplates(); });
+  $('#btnSaveBaseTpl').addEventListener('click', saveBaseTemplate);
+  $('#btnSaveMyTpl').addEventListener('click', saveMyTemplate);
+  $('#tplBuiltinBtn').addEventListener('click', ()=> applyDocument(defaultDoc()));
+  $('#tplBuiltinApply').addEventListener('click', ()=> applyDocument(defaultDoc()));
   $('#btnSave').addEventListener('click', ()=>{ dirty=true; saveNow(); });
   $('#btnUndo').addEventListener('click', doUndo);
   $('#btnRedo').addEventListener('click', doRedo);

@@ -37,11 +37,11 @@ def app_ctx(tmp_path, monkeypatch):
     yield app
 
 
-def _create_user(app_ctx, username="alice", name="Alice"):
+def _create_user(app_ctx, username="alice", name="Alice", is_admin=False):
     from app.models import User, db
 
     with app_ctx.app_context():
-        user = User(username=username, password_hash="hash", name=name)
+        user = User(username=username, password_hash="hash", name=name, is_admin=is_admin)
         db.session.add(user)
         db.session.commit()
         return user.username
@@ -204,3 +204,78 @@ def test_index_page_renders(app_ctx):
     resp = client.get("/tools/quote_maker/")
     assert resp.status_code == 200
     assert "見積書" in resp.get_data(as_text=True)
+
+
+# --- 基本テンプレート（会社共通・管理者のみ管理） -------------------------------
+
+def test_admin_can_create_list_and_delete_base_template(app_ctx):
+    admin = _create_user(app_ctx, "boss", "Boss", is_admin=True)
+    client = app_ctx.test_client()
+    _login(client, admin)
+
+    resp = client.post(
+        "/tools/quote_maker/api/templates",
+        json={"name": "標準の運行見積", "document": _sample_document()},
+    )
+    assert resp.status_code == 201
+    tid = resp.get_json()["id"]
+
+    resp = client.get("/tools/quote_maker/api/templates")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["can_manage"] is True
+    assert len(body["templates"]) == 1
+    assert body["templates"][0]["name"] == "標準の運行見積"
+
+    # 全ユーザーが本文を取得できる
+    resp = client.get(f"/tools/quote_maker/api/templates/{tid}")
+    assert resp.status_code == 200
+    assert resp.get_json()["document"]["page"]["marginTop"] == 15
+
+    resp = client.delete(f"/tools/quote_maker/api/templates/{tid}")
+    assert resp.status_code == 200
+    assert client.get("/tools/quote_maker/api/templates").get_json()["templates"] == []
+
+
+def test_non_admin_can_view_but_not_manage_base_templates(app_ctx):
+    admin = _create_user(app_ctx, "boss", "Boss", is_admin=True)
+    staff = _create_user(app_ctx, "staff", "Staff", is_admin=False)
+
+    admin_client = app_ctx.test_client()
+    _login(admin_client, admin)
+    tid = admin_client.post(
+        "/tools/quote_maker/api/templates",
+        json={"name": "会社標準", "document": _sample_document()},
+    ).get_json()["id"]
+
+    staff_client = app_ctx.test_client()
+    _login(staff_client, staff)
+
+    # 閲覧・利用は可能
+    listing = staff_client.get("/tools/quote_maker/api/templates").get_json()
+    assert listing["can_manage"] is False
+    assert len(listing["templates"]) == 1
+    assert staff_client.get(f"/tools/quote_maker/api/templates/{tid}").status_code == 200
+
+    # 追加・更新・削除は 403
+    assert staff_client.post(
+        "/tools/quote_maker/api/templates",
+        json={"name": "x", "document": {"blocks": []}},
+    ).status_code == 403
+    assert staff_client.put(
+        f"/tools/quote_maker/api/templates/{tid}", json={"name": "x"}
+    ).status_code == 403
+    assert staff_client.delete(f"/tools/quote_maker/api/templates/{tid}").status_code == 403
+
+    # 管理者が作ったテンプレートは残っている
+    assert len(admin_client.get("/tools/quote_maker/api/templates").get_json()["templates"]) == 1
+
+
+def test_base_template_rejects_invalid_document(app_ctx):
+    admin = _create_user(app_ctx, "boss", "Boss", is_admin=True)
+    client = app_ctx.test_client()
+    _login(client, admin)
+    assert client.post(
+        "/tools/quote_maker/api/templates",
+        json={"name": "bad", "document": {"blocks": "notalist"}},
+    ).status_code == 400

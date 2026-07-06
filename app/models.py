@@ -419,6 +419,38 @@ class QuoteDocument(db.Model):
         return data
 
 
+class QuoteTemplate(db.Model):
+    """見積書の基本テンプレート（会社共通・管理者のみ追加/削除）。
+
+    全ユーザーが閲覧・利用できる共有テンプレート。中身は見積書と同じ
+    ``document`` (JSON)。ユーザー個人のテンプレートはブラウザ(IndexedDB)側に
+    保存するため、サーバーにはこの基本テンプレートのみを持たせる。
+    """
+
+    __tablename__ = 'quote_templates'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(200), nullable=False, default='無題のテンプレート')
+    document = db.Column(db.JSON, nullable=False, default=dict)
+    created_by = db.Column(db.String(80), nullable=False, default='')
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    def to_summary(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "created_by": self.created_by,
+            "created_at": (self.created_at.isoformat() if self.created_at else None),
+            "updated_at": (self.updated_at.isoformat() if self.updated_at else None),
+        }
+
+    def to_detail(self) -> dict:
+        data = self.to_summary()
+        data["document"] = self.document or {}
+        return data
+
+
 class ToolCategory(db.Model):
     """ツールカテゴリ（管理者が自由に作成・編集・削除可能）"""
     __tablename__ = 'tool_categories'
