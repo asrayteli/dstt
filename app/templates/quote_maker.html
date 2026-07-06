@@ -180,9 +180,20 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; }
 .qm-toast.show { opacity:1; transform:translateX(-50%) translateY(-4px); }
 
+/* 画面が狭いときだけ表示するパネル開閉ボタン／背景 */
+.qm-panel-toggle { display:none; }
+.qm-backdrop { display:none; position:fixed; inset:0; background:rgba(15,23,42,.4); z-index:44; }
 @media (max-width:900px){
-  .qm-panel { position:absolute; top:0; bottom:0; z-index:20; box-shadow:0 0 30px rgba(0,0,0,.2); }
-  .qm-panel.left { left:0; } .qm-panel.right { right:0; }
+  .qm-toolbar { overflow-x:auto; flex-wrap:nowrap; }
+  .qm-title-input { min-width:120px; }
+  /* パネルは既定で画面外に隠し、ボタンで引き出す（両方が画面を覆う問題を解消） */
+  .qm-panel { position:fixed; top:0; bottom:0; z-index:46; box-shadow:0 0 40px rgba(0,0,0,.3);
+    width:270px; max-width:86vw; transition:transform .2s ease; }
+  .qm-panel.left { left:0; transform:translateX(-104%); }
+  .qm-panel.right { right:0; transform:translateX(104%); }
+  .qm-panel.left.open, .qm-panel.right.open { transform:none; }
+  .qm-panel-toggle { display:inline-flex; }
+  .qm-backdrop.show { display:block; }
 }
 
 /* ============ Print ============ */
@@ -214,6 +225,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   <!-- ===================== Toolbar ===================== -->
   <div class="qm-toolbar">
     <div class="qm-tgroup">
+      <button class="qm-tb-btn qm-panel-toggle" id="btnTogglePartsPanel" title="パーツ・ページ設定">🧩</button>
+      <button class="qm-tb-btn qm-panel-toggle" id="btnToggleFmtPanel" title="書式（インスペクタ）">🎛️</button>
       <button class="qm-tb-btn" id="btnList" title="保存済みの見積書一覧">☰ 一覧</button>
       <button class="qm-tb-btn" id="btnTemplates" title="テンプレートから作成・保存">📁 テンプレート</button>
       <button class="qm-tb-btn" id="btnIssuer" title="差出人（営業所・住所・電話番号）の基本情報">🏢 基本情報</button>
@@ -289,6 +302,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       <h3>インスペクタ</h3>
       <div id="inspector"><div class="qm-empty-note">ブロックをクリックすると、<br>ここで文字・色・罫線・余白などを<br>細かく編集できます。</div></div>
     </div>
+    <div class="qm-backdrop" id="qmBackdrop"></div>
   </div>
 </div>
 
@@ -380,10 +394,12 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   let dirty = false;
   let saving = false;
   let saveTimer = null;
+  let docLifetime = 0;   // 新規/読込のたびに +1。保存応答を正しい文書へ紐付けるための識別子
   let zoom = 1;
   const undoStack = [];
   const redoStack = [];
   let suppressHistory = false;
+  let histBaseline = null;   // 直近にコミット済みの状態（＝これから変更が加わる「変更前」）
 
   const $ = (s,r=document)=>r.querySelector(s);
   const el = (tag,cls)=>{ const e=document.createElement(tag); if(cls)e.className=cls; return e; };
@@ -641,6 +657,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     const inner = $('#sheetInner');
     inner.innerHTML='';
     state.doc.blocks.forEach(b=> inner.appendChild(renderBlock(b)));
+    // 内容量に応じてズーム用ラッパーの高さを更新（新しい末尾までスクロールできるように）
+    if(typeof applyZoom==='function') applyZoom();
   }
 
   /* re-apply only style of one block's live element (no full re-render, keeps caret) */
@@ -659,25 +677,35 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
      History (undo/redo)
      ------------------------------------------------------------------ */
   function snapshot(){ return JSON.stringify({title:state.title, doc:state.doc}); }
+  function resetHistory(){ undoStack.length=0; redoStack.length=0; histBaseline=snapshot(); updateHistoryButtons(); }
+  // 変更後に呼ばれる。直前のベースライン（＝変更前の状態）を undo に積み、
+  // ベースラインを現在（変更後）へ更新する。実質変更が無ければ何もしない。
   function pushHistory(){
     if(suppressHistory) return;
-    undoStack.push(snapshot());
+    clearTimeout(ceHistoryTimer);   // 保留中の入力履歴を今回の履歴へまとめ、重複ステップを防ぐ
+    const snap = snapshot();
+    if(histBaseline === null){ histBaseline = snap; return; }
+    if(snap === histBaseline) return;
+    undoStack.push(histBaseline);
+    histBaseline = snap;
     if(undoStack.length>60) undoStack.shift();
     redoStack.length=0;
     updateHistoryButtons();
   }
   function restore(json){
+    const keepSel = selectedId;
     const o = JSON.parse(json);
     state.title = o.title; state.doc = o.doc;
     $('#docTitle').value = state.title;
-    render(); buildPageSettings(); selectBlock(null);
+    render(); buildPageSettings();
+    if(keepSel && state.doc.blocks.some(b=>b.id===keepSel)) selectBlock(keepSel); else selectBlock(null);
   }
   function updateHistoryButtons(){
     $('#btnUndo').disabled = undoStack.length===0;
     $('#btnRedo').disabled = redoStack.length===0;
   }
-  function doUndo(){ if(!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()); updateHistoryButtons(); markDirty(); }
-  function doRedo(){ if(!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()); updateHistoryButtons(); markDirty(); }
+  function doUndo(){ if(!undoStack.length) return; redoStack.push(histBaseline); histBaseline=undoStack.pop(); restore(histBaseline); updateHistoryButtons(); markDirty(); }
+  function doRedo(){ if(!redoStack.length) return; undoStack.push(histBaseline); histBaseline=redoStack.pop(); restore(histBaseline); updateHistoryButtons(); markDirty(); }
 
   /* commit a structural change: history + rerender + dirty */
   function commit(rerender=true){ pushHistory(); if(rerender) render(); markDirty(); }
@@ -692,22 +720,37 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   async function saveNow(){
     if(saving || !dirty) return;
     saving=true; setSaveState('保存中…');
+    // この保存が「どの文書」に対するものかを固定する。
+    const myLife = docLifetime;
+    const creating = (state.id==null);
+    const targetId = state.id;
     const body = { title: state.title||'無題の見積書', document: state.doc };
+    // 送信中に加えた編集を取りこぼさないよう、送信前に未保存フラグをクリアする。
+    // （送信中に編集されれば markDirty で再び dirty=true になり finally で再スケジュールされる）
+    dirty=false;
     try{
-      let res;
-      if(state.id==null){
-        res = await fetch(API, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-      } else {
-        res = await fetch(API+'/'+state.id, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+      const res = creating
+        ? await fetch(API, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+        : await fetch(API+'/'+targetId, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+      const stale = (myLife !== docLifetime);   // 保存中に新規/読込で別文書へ切り替わった
+      if(!res.ok){
+        // クライアントエラー（サイズ超過など）は再試行しても直らないのでループを止める。
+        if(res.status>=400 && res.status<500){
+          let msg='保存に失敗しました';
+          try{ const e=await res.json(); if(e && e.error) msg=e.error; }catch(_){}
+          if(!stale){ dirty=true; setSaveState('保存できません', 'dirty'); toast(msg); }
+          saving=false; return;
+        }
+        throw new Error('save failed '+res.status);
       }
-      if(!res.ok) throw new Error('save failed '+res.status);
       const data = await res.json();
-      if(state.id==null) state.id = data.id;
-      dirty=false;
-      const now=new Date();
-      setSaveState('保存済 '+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'), 'saved');
+      if(!stale){
+        if(creating && state.id==null) state.id = data.id;
+        const now=new Date();
+        setSaveState('保存済 '+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'), 'saved');
+      }
     }catch(e){
-      setSaveState('保存失敗', 'dirty'); toast('保存に失敗しました');
+      if(myLife === docLifetime){ dirty=true; setSaveState('保存失敗', 'dirty'); toast('保存に失敗しました'); }
     }finally{ saving=false; if(dirty) scheduleSave(); }
   }
 
@@ -726,7 +769,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   }
   function numInput(val, min, max, step, on){
     const i=el('input','qm-inp'); i.type='number'; i.value=val; if(min!=null)i.min=min; if(max!=null)i.max=max; if(step!=null)i.step=step;
-    i.addEventListener('input',()=>on(parseFloat(i.value))); return i;
+    i.addEventListener('input',()=>{ const v=parseFloat(i.value); if(!isNaN(v)) on(v); }); return i;
   }
   function segment(options, cur, on){
     const seg=el('div','qm-seg');
@@ -904,6 +947,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     const idx = selectedId? findIndex(selectedId)+1 : state.doc.blocks.length;
     state.doc.blocks.splice(idx,0,b);
     commit(); selectBlock(b.id);
+    if(isNarrow()) closePanels();
     const node=$('.qm-block[data-id="'+b.id+'"]'); if(node) node.scrollIntoView({behavior:'smooth',block:'center'});
   }
   function removeBlock(id){ const i=findIndex(id); if(i<0) return; state.doc.blocks.splice(i,1); commit(); selectBlock(null); }
@@ -943,10 +987,11 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   /* ------------------------------------------------------------------
      Drag reorder (handle-based, array-level)
      ------------------------------------------------------------------ */
-  let dragId=null, dropIndicator=null;
+  let dragId=null, dropIndicator=null, dropped=false;
   $('#sheetInner').addEventListener('dragstart',(e)=>{
     const h=e.target.closest('[data-handle]'); if(!h){ e.preventDefault(); return; }
     const wrap=h.closest('.qm-block'); dragId=wrap.getAttribute('data-id'); wrap.classList.add('dragging');
+    dropped=false;
     e.dataTransfer.effectAllowed='move'; try{e.dataTransfer.setData('text/plain','');}catch(_){}
     dropIndicator=el('div','qm-drop-indicator');
   });
@@ -958,33 +1003,30 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     if(dropIndicator.parentNode) dropIndicator.remove();
     if(before) inner.insertBefore(dropIndicator, before); else inner.appendChild(dropIndicator);
   });
-  $('#sheetInner').addEventListener('drop',(e)=>{ e.preventDefault(); });
+  // シート内で実際にドロップされたときだけ確定させる（Escでの中断や、
+  // パネル等シート外での離しでは並べ替えない）。
+  $('#sheetInner').addEventListener('drop',(e)=>{ e.preventDefault(); dropped=true; });
   $('#sheetInner').addEventListener('dragend',()=>{
     if(!dragId) return;
     const inner=$('#sheetInner');
-    // compute target index from indicator position
-    let targetIndex = state.doc.blocks.length;
-    if(dropIndicator && dropIndicator.parentNode){
+    const wrap=$('.qm-block[data-id="'+dragId+'"]'); if(wrap) wrap.classList.remove('dragging');
+    const valid = dropped && dropIndicator && dropIndicator.parentNode===inner;
+    let targetIndex = -1;
+    if(valid){
       const kids=[...inner.children].filter(n=> n.classList.contains('qm-block')||n===dropIndicator);
       targetIndex = kids.indexOf(dropIndicator);
-      // adjust for the dragging element still in list before indicator
     }
+    if(dropIndicator && dropIndicator.parentNode) dropIndicator.remove();
     const from=findIndex(dragId);
-    if(dropIndicator&&dropIndicator.parentNode) dropIndicator.remove();
-    const wrap=$('.qm-block[data-id="'+dragId+'"]'); if(wrap) wrap.classList.remove('dragging');
-    // recompute target index against DOM order excluding dragged
-    if(from>=0){
-      const orderIds=[...inner.querySelectorAll('.qm-block')].map(n=>n.getAttribute('data-id')).filter(id=>id!==dragId);
-      // find where indicator would be: use previous computed targetIndex among filtered blocks
+    if(valid && from>=0 && targetIndex>=0){
       let insertAt = targetIndex;
-      // clamp
       const moved = state.doc.blocks.splice(from,1)[0];
       if(insertAt>from) insertAt = Math.max(0, insertAt-1);
       insertAt = Math.min(Math.max(insertAt,0), state.doc.blocks.length);
       state.doc.blocks.splice(insertAt,0,moved);
       const kept=dragId; commit(); selectBlock(kept);
     }
-    dragId=null; dropIndicator=null;
+    dragId=null; dropIndicator=null; dropped=false;
   });
 
   /* ------------------------------------------------------------------
@@ -1058,6 +1100,11 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   $('#zoomFit').addEventListener('click', fitZoom);
   window.addEventListener('resize', ()=>{ applyZoom(); });
 
+  /* 狭い画面（<=900px）でのパネル開閉。広い画面では常時表示のまま。 */
+  function isNarrow(){ return window.matchMedia('(max-width:900px)').matches; }
+  function closePanels(){ $('#panelLeft').classList.remove('open'); $('#panelRight').classList.remove('open'); $('#qmBackdrop').classList.remove('show'); }
+  function openPanel(which){ closePanels(); (which==='left'?$('#panelLeft'):$('#panelRight')).classList.add('open'); $('#qmBackdrop').classList.add('show'); }
+
   /* ------------------------------------------------------------------
      List modal
      ------------------------------------------------------------------ */
@@ -1089,14 +1136,16 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   async function loadQuote(id){
     try{
       const res=await fetch(API+'/'+id); if(!res.ok) throw 0; const data=await res.json();
+      docLifetime++;
       state.id=data.id; state.title=data.title||''; state.doc=normalizeDoc(data.document);
       $('#docTitle').value=state.title; selectedId=null;
-      undoStack.length=0; redoStack.length=0; updateHistoryButtons();
+      resetHistory();
       render(); buildPageSettings(); buildInspector();
       dirty=false; setSaveState('保存済', 'saved');
       $('#listModal').classList.remove('show'); fitZoom();
       toast('「'+(state.title||'無題')+'」を開きました');
-    }catch(e){ toast('読み込みに失敗しました'); }
+      return true;
+    }catch(e){ toast('読み込みに失敗しました'); return false; }
   }
   async function dupQuote(id){
     try{ const res=await fetch(API+'/'+id+'/duplicate',{method:'POST'}); const data=await res.json(); toast('複製しました'); openList(); }
@@ -1213,9 +1262,10 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   /* テンプレートの内容を「新しい未保存の見積書」として読み込む */
   function applyDocument(doc){
     if(dirty && !confirm('保存していない変更があります。テンプレートから新規作成しますか？')) return;
+    docLifetime++;
     state.id=null; state.title=''; state.doc=normalizeDoc(JSON.parse(JSON.stringify(doc||{})));
     $('#docTitle').value='';
-    selectedId=null; undoStack.length=0; redoStack.length=0; updateHistoryButtons();
+    selectedId=null; resetHistory();
     render(); buildPageSettings(); buildInspector();
     dirty=false; setSaveState('新規（未保存）'); fitZoom();
     closeTemplates();
@@ -1345,10 +1395,11 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     doc.blocks.forEach(b=>{ if(!b.id) b.id=uid(); b.style=Object.assign(baseStyle(), b.style||{}); b.content=b.content||{}; });
     return doc;
   }
-  function newDocument(useTemplate){
+  function newDocument(){
+    docLifetime++;
     state.id=null; state.doc=defaultDoc(); state.title='';
     $('#docTitle').value='';
-    selectedId=null; undoStack.length=0; redoStack.length=0; updateHistoryButtons();
+    selectedId=null; resetHistory();
     render(); buildPageSettings(); buildInspector();
     dirty=false; setSaveState('新規（未保存）');
     fitZoom();
@@ -1371,6 +1422,10 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   $('#btnSaveBaseTpl').addEventListener('click', saveBaseTemplate);
   $('#btnSaveMyTpl').addEventListener('click', saveMyTemplate);
   $('#btnLoadUnyou').addEventListener('click', ()=> applyDocument(unyouSkeletonDoc()));
+  // 狭い画面用のパネル開閉
+  $('#btnTogglePartsPanel').addEventListener('click', ()=>{ $('#panelLeft').classList.contains('open') ? closePanels() : openPanel('left'); });
+  $('#btnToggleFmtPanel').addEventListener('click', ()=>{ $('#panelRight').classList.contains('open') ? closePanels() : openPanel('right'); });
+  $('#qmBackdrop').addEventListener('click', closePanels);
   // 差出人（基本情報）
   $('#btnIssuer').addEventListener('click', openIssuer);
   $('#btnCloseIssuer').addEventListener('click', closeIssuer);
@@ -1380,9 +1435,9 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   $('#btnSave').addEventListener('click', ()=>{ dirty=true; saveNow(); });
   $('#btnUndo').addEventListener('click', doUndo);
   $('#btnRedo').addEventListener('click', doRedo);
-  $('#btnResetTemplate').addEventListener('click', ()=>{ if(!confirm('現在の内容を破棄して白紙のお見積書に戻しますか？')) return; pushHistory(); state.doc=defaultDoc(); render(); buildPageSettings(); selectBlock(null); markDirty(); toast('白紙のお見積書を読み込みました'); });
+  $('#btnResetTemplate').addEventListener('click', ()=>{ if(!confirm('現在の内容を破棄して白紙のお見積書に戻しますか？')) return; state.doc=defaultDoc(); commit(); buildPageSettings(); selectBlock(null); toast('白紙のお見積書を読み込みました'); });
   $('#btnPreview').addEventListener('click', ()=>{ const app=$('#qmApp'); app.classList.toggle('previewing'); $('#btnPreview').classList.toggle('primary', app.classList.contains('previewing')); if(app.classList.contains('previewing')) selectBlock(null); });
-  $('#btnPrint').addEventListener('click', ()=>{ hideInlineBar(); if(dirty) saveNow(); setTimeout(()=>window.print(), 60); });
+  $('#btnPrint').addEventListener('click', async ()=>{ hideInlineBar(); closePanels(); if(dirty){ try{ await saveNow(); }catch(_){} } setTimeout(()=>window.print(), 80); });
 
   document.addEventListener('keydown',(e)=>{
     if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z' && !e.shiftKey){ e.preventDefault(); doUndo(); }
@@ -1390,7 +1445,6 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); dirty=true; saveNow(); }
     else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='p'){ /* allow native print */ }
   });
-  document.addEventListener('click',(e)=>{ if(!e.target.closest('#sheetInner') && !e.target.closest('.qm-panel') && !e.target.closest('.qm-inlinebar') && !e.target.closest('.qm-toolbar')){ /* click outside: keep selection */ } });
   window.addEventListener('beforeunload',(e)=>{ if(dirty){ e.preventDefault(); e.returnValue=''; } });
 
   /* ------------------------------------------------------------------
@@ -1400,7 +1454,10 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     // load most recent quote if any, else start new template
     try{
       const res=await fetch(API); const data=await res.json();
-      if(data.quotes && data.quotes.length){ await loadQuote(data.quotes[0].id); return; }
+      if(data.quotes && data.quotes.length){
+        const ok = await loadQuote(data.quotes[0].id);
+        if(ok) return;   // 読み込み失敗時は白紙で起動（空エディタで固まらないように）
+      }
     }catch(_){}
     newDocument();
   }
