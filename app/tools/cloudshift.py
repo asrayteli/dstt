@@ -3489,6 +3489,482 @@ def _summary_month_payload(project: dict[str, Any], year: int, month: int, paylo
     return _month_summary_from_payload(project, month_data)
 
 
+def _spot_parse_date(value: Any) -> date:
+    text_value = str(value or "").strip()
+    if not text_value:
+        return datetime.now(JST).date()
+    try:
+        target = date.fromisoformat(text_value)
+    except ValueError as exc:
+        raise CloudShiftError("日付は YYYY-MM-DD 形式で指定してください", 400) from exc
+    _validate_year_month(target.year, target.month)
+    return target
+
+
+def _spot_text_key(value: Any) -> str:
+    return " ".join(str(value or "").replace("\u3000", " ").split()).casefold()
+
+
+def _spot_query(value: Any) -> str:
+    return _spot_text_key(value)[:120]
+
+
+def _spot_person_key(employee_number: Any, employee_name: Any) -> str:
+    number = str(employee_number or "").strip()
+    if number:
+        return f"num:{number}"
+    name = _spot_text_key(employee_name)
+    return f"name:{name}" if name else ""
+
+
+def _spot_site_key(site_row_id: Any, site_id: Any, site_name: Any) -> str:
+    row_id = str(_coerce_site_row_id(site_row_id) or "").strip()
+    if row_id:
+        return f"row:{row_id}"
+    natural_id = str(site_id or "").strip()
+    if natural_id:
+        return f"sid:{natural_id}"
+    name = _spot_text_key(site_name)
+    return f"name:{name}" if name else ""
+
+
+def _spot_shift_label(option_key: Any) -> str:
+    key = str(option_key or "").strip().upper()
+    return OPTION_LABELS.get(key, key) if key else "オプションなし"
+
+
+def _spot_entry_option_and_name(entry: dict[str, Any]) -> tuple[str, str]:
+    option_key, raw_name = _entry_option_and_name(entry)
+    if option_key or not isinstance(entry, dict):
+        return option_key, raw_name
+    text = str(entry.get("value") or "").strip()
+    if text.startswith("!") and text.endswith("!") and text.count("!") == 2:
+        candidate = text[1:-1].strip().upper()
+        if candidate in SHIFT_OPTION_MAPPINGS or candidate in LEAVE_OPTION_MAPPINGS:
+            return candidate, ""
+    return option_key, raw_name
+
+
+def _spot_project_visible_to_current_user(project: dict[str, Any]) -> bool:
+    if not current_user.is_authenticated:
+        return False
+    if str(project.get("owner_user_id") or "") == _user_id():
+        return True
+    return _project_is_shared_with_current_user(project)
+
+
+def _spot_access_role(project: dict[str, Any]) -> str:
+    share = _share_status_for_current_user(project)
+    return str((share or {}).get("role") or "owner")
+
+
+def _spot_person_from_project(project: dict[str, Any]) -> dict[str, Any] | None:
+    title = str(project.get("title") or "").strip()
+    employee_number = str(project.get("employee_number") or "").strip()
+    if not employee_number and (not title or title == PERSON_UNASSIGNED_TITLE):
+        return None
+    employee_name = title or employee_number
+    person_key = _spot_person_key(employee_number, employee_name)
+    if not person_key:
+        return None
+    return {
+        "person_key": person_key,
+        "employee_name": employee_name,
+        "employee_number": employee_number,
+        "project_id": str(project.get("id") or ""),
+        "project_title": title,
+        "access_role": _spot_access_role(project),
+    }
+
+
+def _spot_site_from_project(project: dict[str, Any]) -> dict[str, Any] | None:
+    site = _project_site_payload(project)
+    site_name = str(site.get("site_name") or project.get("site_name") or project.get("title") or "").strip()
+    site_id = str(site.get("site_id") or project.get("site_id") or "").strip()
+    site_row_id = str(site.get("site_row_id") or project.get("site_row_id") or "").strip()
+    if not (site_name or site_id or site_row_id):
+        return None
+    site_key = _spot_site_key(site_row_id, site_id, site_name)
+    if not site_key:
+        return None
+    return {
+        "site_key": site_key,
+        "site_name": site_name,
+        "site_id": site_id,
+        "site_row_id": site_row_id,
+        "project_id": str(project.get("id") or ""),
+        "project_title": str(project.get("title") or ""),
+        "access_role": _spot_access_role(project),
+    }
+
+
+def _spot_entry_site(entry: dict[str, Any], fallback_name: Any = "") -> dict[str, str]:
+    site_link = _entry_site_link_fields(entry)
+    site_name = str(site_link.get("site_name") or fallback_name or "").strip()
+    site_id = str(site_link.get("site_id") or "").strip()
+    site_row_id = str(site_link.get("site_row_id") or "").strip()
+    return {
+        "site_key": _spot_site_key(site_row_id, site_id, site_name),
+        "site_name": site_name,
+        "site_id": site_id,
+        "site_row_id": site_row_id,
+    }
+
+
+def _spot_matches_person(item: dict[str, Any], query: str) -> bool:
+    if not query:
+        return True
+    haystack = " ".join(
+        _spot_text_key(item.get(key))
+        for key in ("employee_name", "employee_number", "project_title")
+    )
+    return query in haystack
+
+
+def _spot_matches_site(item: dict[str, Any], query: str) -> bool:
+    if not query:
+        return True
+    haystack = " ".join(
+        _spot_text_key(item.get(key))
+        for key in ("site_name", "site_id", "project_title")
+    )
+    return query in haystack
+
+
+def _spot_source(project: dict[str, Any], mode: str) -> dict[str, str]:
+    return {
+        "project_id": str(project.get("id") or ""),
+        "project_title": str(project.get("title") or ""),
+        "mode": mode,
+        "mode_label": {"scene": "現場", "person": "個人", "substitute": "要代務"}.get(mode, mode),
+    }
+
+
+def _spot_assignment_priority(mode: str) -> int:
+    if mode == "scene":
+        return 0
+    if mode == "substitute":
+        return 1
+    if mode == "person":
+        return 2
+    return 9
+
+
+def _spot_assignment_payload(
+    *,
+    project: dict[str, Any],
+    mode: str,
+    entry: dict[str, Any],
+    employee_name: Any,
+    employee_number: Any,
+    site: dict[str, Any],
+    shift_key: Any,
+) -> dict[str, Any] | None:
+    person_key = _spot_person_key(employee_number, employee_name)
+    site_key = str(site.get("site_key") or "").strip()
+    if not person_key:
+        return None
+    if not site_key:
+        site_key = f"unknown:{str(project.get('id') or '')}:{str(entry.get('id') or '')}"
+    normalized_shift = str(shift_key or "").strip().upper()
+    second_option = entry_second_option(entry)
+    return {
+        "key": "|".join([person_key, site_key, normalized_shift]),
+        "person_key": person_key,
+        "site_key": site_key,
+        "employee_name": str(employee_name or employee_number or "").strip(),
+        "employee_number": str(employee_number or "").strip(),
+        "site_name": str(site.get("site_name") or "現場未設定").strip(),
+        "site_id": str(site.get("site_id") or "").strip(),
+        "site_row_id": str(site.get("site_row_id") or "").strip(),
+        "shift_key": normalized_shift,
+        "shift_label": _spot_shift_label(normalized_shift),
+        "second_option": second_option,
+        "second_option_label": OPTION_LABELS.get(second_option, second_option) if second_option else "",
+        "comment": str(entry.get("comment") or "").strip(),
+        "source_mode": mode,
+        "source_mode_label": {"scene": "現場", "person": "個人", "substitute": "要代務"}.get(mode, mode),
+        "project_id": str(project.get("id") or ""),
+        "project_title": str(project.get("title") or ""),
+        "sources": [_spot_source(project, mode)],
+        "_priority": _spot_assignment_priority(mode),
+    }
+
+
+def _spot_leave_payload(
+    *,
+    project: dict[str, Any],
+    entry: dict[str, Any],
+    employee_name: Any,
+    employee_number: Any,
+    shift_key: Any,
+) -> dict[str, Any] | None:
+    person_key = _spot_person_key(employee_number, employee_name)
+    if not person_key:
+        return None
+    normalized_shift = str(shift_key or "").strip().upper()
+    return {
+        "person_key": person_key,
+        "employee_name": str(employee_name or employee_number or "").strip(),
+        "employee_number": str(employee_number or "").strip(),
+        "shift_key": normalized_shift,
+        "shift_label": _spot_shift_label(normalized_shift),
+        "comment": str(entry.get("comment") or "").strip(),
+        "project_id": str(project.get("id") or ""),
+        "project_title": str(project.get("title") or ""),
+    }
+
+
+def _spot_merge_assignment(assignments: dict[str, dict[str, Any]], candidate: dict[str, Any] | None) -> None:
+    if not candidate:
+        return
+    key = str(candidate.get("key") or "")
+    if not key:
+        return
+    current = assignments.get(key)
+    if current is None:
+        assignments[key] = candidate
+        return
+    current_sources = {
+        (source.get("project_id"), source.get("mode"))
+        for source in current.get("sources", [])
+        if isinstance(source, dict)
+    }
+    for source in candidate.get("sources", []):
+        source_key = (source.get("project_id"), source.get("mode"))
+        if source_key not in current_sources:
+            current.setdefault("sources", []).append(source)
+            current_sources.add(source_key)
+    if int(candidate.get("_priority", 9)) < int(current.get("_priority", 9)):
+        candidate["sources"] = current.get("sources", [])
+        assignments[key] = candidate
+
+
+def _spot_add_leave(leave_by_person: dict[str, dict[str, Any]], leave: dict[str, Any] | None) -> None:
+    if not leave:
+        return
+    person_key = str(leave.get("person_key") or "")
+    if not person_key:
+        return
+    row = leave_by_person.setdefault(
+        person_key,
+        {
+            "person_key": person_key,
+            "employee_name": leave.get("employee_name") or "",
+            "employee_number": leave.get("employee_number") or "",
+            "entries": [],
+        },
+    )
+    if not row.get("employee_number") and leave.get("employee_number"):
+        row["employee_number"] = leave.get("employee_number")
+    if not row.get("employee_name") and leave.get("employee_name"):
+        row["employee_name"] = leave.get("employee_name")
+    row["entries"].append(
+        {
+            "shift_key": leave.get("shift_key") or "",
+            "shift_label": leave.get("shift_label") or "",
+            "comment": leave.get("comment") or "",
+            "project_id": leave.get("project_id") or "",
+            "project_title": leave.get("project_title") or "",
+        }
+    )
+
+
+def _spot_month_payload(target: date, person_query: str = "", site_query: str = "") -> dict[str, Any]:
+    month_key = _month_key(target.year, target.month)
+    day_key = str(target.day)
+    stored = _iter_project_summaries_for_month(month_key)
+
+    people_by_key: dict[str, dict[str, Any]] = {}
+    sites_by_key: dict[str, dict[str, Any]] = {}
+    assignments_by_key: dict[str, dict[str, Any]] = {}
+    leave_by_person: dict[str, dict[str, Any]] = {}
+    visible_project_count = 0
+
+    for project in stored:
+        if not isinstance(project, dict) or not _spot_project_visible_to_current_user(project):
+            continue
+        month_data = (project.get("months") or {}).get(month_key)
+        if not isinstance(month_data, dict):
+            continue
+        mode = str(project.get("mode") or "").strip()
+        if mode not in {"scene", "person", SUBSTITUTE_MODE}:
+            continue
+        visible_project_count += 1
+        if mode == "person":
+            person = _spot_person_from_project(project)
+            if person:
+                people_by_key.setdefault(person["person_key"], person)
+        elif mode == "scene":
+            site = _spot_site_from_project(project)
+            if site:
+                sites_by_key.setdefault(site["site_key"], site)
+
+        entries = _normalize_entries(month_data.get("entries_per_day"), target.year, target.month).get(day_key, [])
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if mode == SUBSTITUTE_MODE:
+                assignment = _substitute_assignment(entry)
+                if not assignment or assignment.get("unassigned_helper"):
+                    continue
+                site = {
+                    "site_key": _spot_site_key(
+                        assignment.get("site_row_id"),
+                        assignment.get("site_id"),
+                        assignment.get("site_name"),
+                    ),
+                    "site_name": assignment.get("site_name") or "",
+                    "site_id": assignment.get("site_id") or "",
+                    "site_row_id": assignment.get("site_row_id") or "",
+                }
+                _spot_merge_assignment(
+                    assignments_by_key,
+                    _spot_assignment_payload(
+                        project=project,
+                        mode="substitute",
+                        entry=entry,
+                        employee_name=assignment.get("employee_name"),
+                        employee_number=assignment.get("employee_number"),
+                        site=site,
+                        shift_key=assignment.get("option_key"),
+                    ),
+                )
+                continue
+
+            shift_key, raw_name = _spot_entry_option_and_name(entry)
+            if mode == "scene":
+                project_site = _spot_site_from_project(project) or {
+                    "site_key": _spot_site_key(project.get("site_row_id"), project.get("site_id"), project.get("title")),
+                    "site_name": str(project.get("site_name") or project.get("title") or ""),
+                    "site_id": str(project.get("site_id") or ""),
+                    "site_row_id": str(project.get("site_row_id") or ""),
+                }
+                employee_name = _entry_employee_name(entry)
+                employee_number = str(entry.get("employee_number") or "").strip()
+                if shift_key in LEAVE_OPTION_MAPPINGS:
+                    _spot_add_leave(
+                        leave_by_person,
+                        _spot_leave_payload(
+                            project=project,
+                            entry=entry,
+                            employee_name=employee_name,
+                            employee_number=employee_number,
+                            shift_key=shift_key,
+                        ),
+                    )
+                    continue
+                _spot_merge_assignment(
+                    assignments_by_key,
+                    _spot_assignment_payload(
+                        project=project,
+                        mode="scene",
+                        entry=entry,
+                        employee_name=employee_name,
+                        employee_number=employee_number,
+                        site=project_site,
+                        shift_key=shift_key,
+                    ),
+                )
+                continue
+
+            if mode == "person":
+                person = _spot_person_from_project(project)
+                employee_name = (person or {}).get("employee_name") or _entry_employee_name(entry) or raw_name
+                employee_number = (person or {}).get("employee_number") or str(entry.get("employee_number") or "").strip()
+                if shift_key in LEAVE_OPTION_MAPPINGS:
+                    _spot_add_leave(
+                        leave_by_person,
+                        _spot_leave_payload(
+                            project=project,
+                            entry=entry,
+                            employee_name=employee_name,
+                            employee_number=employee_number,
+                            shift_key=shift_key,
+                        ),
+                    )
+                    continue
+                site = _spot_entry_site(entry, raw_name)
+                _spot_merge_assignment(
+                    assignments_by_key,
+                    _spot_assignment_payload(
+                        project=project,
+                        mode="person",
+                        entry=entry,
+                        employee_name=employee_name,
+                        employee_number=employee_number,
+                        site=site,
+                        shift_key=shift_key,
+                    ),
+                )
+
+    assignments = sorted(
+        (
+            {key: value for key, value in item.items() if key != "_priority"}
+            for item in assignments_by_key.values()
+        ),
+        key=lambda item: (
+            _spot_text_key(item.get("site_name")),
+            _spot_text_key(item.get("employee_name")),
+            str(item.get("shift_key") or ""),
+        ),
+    )
+    busy_people = {str(item.get("person_key") or "") for item in assignments if item.get("person_key")}
+    occupied_sites = {str(item.get("site_key") or "") for item in assignments if item.get("site_key")}
+    people_on_leave = sorted(
+        leave_by_person.values(),
+        key=lambda item: (_spot_text_key(item.get("employee_name")), str(item.get("employee_number") or "")),
+    )
+    leave_people = {str(item.get("person_key") or "") for item in people_on_leave if item.get("person_key")}
+    people_available = sorted(
+        (
+            person
+            for key, person in people_by_key.items()
+            if key not in busy_people and key not in leave_people
+        ),
+        key=lambda item: (_spot_text_key(item.get("employee_name")), str(item.get("employee_number") or "")),
+    )
+    sites_available = sorted(
+        (site for key, site in sites_by_key.items() if key not in occupied_sites),
+        key=lambda item: (_spot_text_key(item.get("site_name")), str(item.get("site_id") or "")),
+    )
+
+    filtered_assignments = [
+        item for item in assignments
+        if _spot_matches_person(item, person_query) and _spot_matches_site(item, site_query)
+    ]
+    filtered_people_available = [
+        item for item in people_available if _spot_matches_person(item, person_query)
+    ]
+    filtered_people_on_leave = [
+        item for item in people_on_leave if _spot_matches_person(item, person_query)
+    ]
+    filtered_sites_available = [
+        item for item in sites_available if _spot_matches_site(item, site_query)
+    ]
+
+    return {
+        "success": True,
+        "query": {
+            "date": target.isoformat(),
+            "month_key": month_key,
+            "person_query": person_query,
+            "site_query": site_query,
+        },
+        "summary": {
+            "visible_project_count": visible_project_count,
+            "assignment_count": len(filtered_assignments),
+            "available_people_count": len(filtered_people_available),
+            "leave_people_count": len(filtered_people_on_leave),
+            "available_site_count": len(filtered_sites_available),
+        },
+        "assignments": filtered_assignments,
+        "people_available": filtered_people_available,
+        "people_on_leave": filtered_people_on_leave,
+        "sites_available": filtered_sites_available,
+    }
+
+
 def _base_month_signature(month_data: dict[str, Any], year: int, month: int) -> dict[str, Any]:
     return {
         "year": year,
@@ -8308,6 +8784,15 @@ def api_conflict_check():
     except ValueError as exc:
         raise CloudShiftError(str(exc), 400) from exc
     return jsonify({"success": True, **result})
+
+
+@cloudshift_bp.route("/api/spot", methods=["GET"])
+@login_required
+def api_spot():
+    target = _spot_parse_date(request.args.get("date"))
+    person_query = _spot_query(request.args.get("person_query"))
+    site_query = _spot_query(request.args.get("site_query"))
+    return jsonify(_spot_month_payload(target, person_query=person_query, site_query=site_query))
 
 
 @cloudshift_bp.route("/api/create", methods=["POST"])
