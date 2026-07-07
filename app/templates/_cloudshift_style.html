@@ -1230,6 +1230,114 @@
     text-align: center;
   }
 
+  .cloud-spot-results {
+    display: grid;
+    gap: 16px;
+    margin-top: 18px;
+  }
+
+  .cloud-spot-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .cloud-spot-section {
+    display: grid;
+    gap: 12px;
+  }
+
+  .cloud-spot-section-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+
+  .cloud-spot-section-head h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 900;
+  }
+
+  .cloud-spot-section-head p {
+    margin: 0;
+    color: var(--cloud-muted);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .cloud-spot-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+    gap: 12px;
+  }
+
+  .cloud-spot-card {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    border: 1px solid var(--cloud-line);
+    border-radius: var(--cloud-radius-md);
+    background: #fff;
+    padding: 14px;
+    box-shadow: 0 10px 22px rgba(15, 60, 100, 0.07);
+  }
+
+  .cloud-spot-card.is-available {
+    background: #f3fbf5;
+  }
+
+  .cloud-spot-card.is-leave {
+    background: #fff7ed;
+  }
+
+  .cloud-spot-card.is-site-open {
+    background: #f8fbff;
+  }
+
+  .cloud-spot-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .cloud-spot-card-head h3 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 900;
+    line-height: 1.35;
+  }
+
+  .cloud-spot-card-head p {
+    margin: 0;
+    color: var(--cloud-muted);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .cloud-spot-leave-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .cloud-spot-leave-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    color: var(--cloud-muted);
+    font-size: 13px;
+  }
+
+  .cloud-spot-leave-line small {
+    flex-basis: 100%;
+    color: var(--cloud-muted);
+    line-height: 1.5;
+  }
+
   body.cloud-modal-open {
     overflow: hidden;
   }

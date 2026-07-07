@@ -2466,6 +2466,74 @@ def test_owner_can_compare_own_cloudshift_projects_for_conflicts(tmp_path):
     assert payload["matrix"]["1"][1][0]["display"] == "Alice 早番"
 
 
+def test_spot_search_separates_leave_options_from_available_people_and_dedupes_synced_entries(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+
+    _create_person_project(client, title="Alice", employee_number="1001")
+    bob = _create_person_project(client, title="Bob", employee_number="1002").get_json()["project"]
+    _create_person_project(client, title="Carol", employee_number="1003")
+    alpha = _create_scene_project(client, title="Alpha Site", year="2026", month="4", capacity="0").get_json()["project"]
+    _create_scene_project(client, title="Beta Site", year="2026", month="4", capacity="0")
+
+    alpha_entries = dict(alpha["month"]["entries_per_day"])
+    alpha_entries["1"] = [
+        {
+            "id": "alpha-1",
+            "value": "!A!Alice",
+            "comment": "front gate",
+            "employee_name": "Alice",
+            "employee_number": "1001",
+        }
+    ]
+    alpha_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{alpha['project']['id']}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": alpha_entries, "base_month": alpha["month"]},
+    )
+    assert alpha_save.status_code == 200
+
+    bob_entries = dict(bob["month"]["entries_per_day"])
+    bob_entries["1"] = [{"id": "bob-leave-1", "value": "!PAID!", "comment": "confirm with Bob"}]
+    bob_save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{bob['project']['id']}/month/2026/4",
+        json={"required_capacity": 0, "entries_per_day": bob_entries, "base_month": bob["month"]},
+    )
+    assert bob_save.status_code == 200
+
+    response = client.get("/tools/shiftersync/cloudshift/api/spot", query_string={"date": "2026-04-01"})
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["summary"]["assignment_count"] == 1
+    assert payload["summary"]["available_people_count"] == 1
+    assert payload["summary"]["leave_people_count"] == 1
+    assert payload["summary"]["available_site_count"] == 1
+
+    assignment = payload["assignments"][0]
+    assert assignment["employee_name"] == "Alice"
+    assert assignment["employee_number"] == "1001"
+    assert assignment["site_name"] == "Alpha Site"
+    assert assignment["shift_key"] == "A"
+    assert {source["mode"] for source in assignment["sources"]} == {"scene", "person"}
+
+    assert {item["employee_number"] for item in payload["people_available"]} == {"1003"}
+    leave_by_number = {item["employee_number"]: item for item in payload["people_on_leave"]}
+    assert set(leave_by_number) == {"1002"}
+    assert leave_by_number["1002"]["entries"][0]["shift_key"] == "PAID"
+    assert leave_by_number["1002"]["entries"][0]["comment"] == "confirm with Bob"
+    assert {item["site_name"] for item in payload["sites_available"]} == {"Beta Site"}
+
+    bob_response = client.get(
+        "/tools/shiftersync/cloudshift/api/spot",
+        query_string={"date": "2026-04-01", "person_query": "Bob"},
+    )
+    assert bob_response.status_code == 200
+    bob_payload = bob_response.get_json()
+    assert bob_payload["assignments"] == []
+    assert [item["employee_number"] for item in bob_payload["people_on_leave"]] == ["1002"]
+    assert bob_payload["people_available"] == []
+
+
 def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     script = (ROOT / "app" / "templates" / "_cloudshift_script.html").read_text(encoding="utf-8")
     style = (ROOT / "app" / "templates" / "_cloudshift_style.html").read_text(encoding="utf-8")
@@ -2474,6 +2542,9 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     ss_common_css = (ROOT / "app" / "static" / "shiftersync" / "css" / "ss_common.css").read_text(encoding="utf-8")
 
     assert 'data-cloud-tab="conflict-check"' in html
+    assert 'data-cloud-tab="spot"' in html
+    assert 'id="cloud-panel-spot"' in html
+    assert 'id="cloud-spot-run"' in html
     assert 'id="cloud-check-mode"' in html
     assert 'id="cloud-check-month"' in html
     assert 'id="cloud-check-run"' in html
@@ -2548,11 +2619,17 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "臨時便" in script
     assert "function resetCreateForm()" in script
     assert "if (tabName === 'create')" in script
+    assert "if (tabName === 'spot')" in script
     assert "if (tabName === 'conflict-check')" in script
+    assert "function runSpotSearch()" in script
+    assert "/tools/shiftersync/cloudshift/api/spot" in script
+    assert "people_on_leave" in script
+    assert "休暇・本人確認" in script
     assert "function runConflictCheck()" in script
     assert "/tools/shiftersync/cloudshift/api/conflict-check" in script
     assert "cloud-check-entry" in script
     assert "resetCreateForm();" in script
+    assert ".cloud-spot-card.is-leave" in style
     assert ".cloud-check-project-list" in style
     assert ".cloud-check-scroll" in style
     assert ".cloud-check-header-row" in style

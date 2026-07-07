@@ -32,6 +32,7 @@
       <button type="button" class="cloud-tab" data-cloud-tab="create">新規作成</button>
       <button type="button" class="cloud-tab" data-cloud-tab="import">CSV取込</button>
       <button type="button" class="cloud-tab" data-cloud-tab="editor">編集</button>
+      <button type="button" class="cloud-tab" data-cloud-tab="spot">スポット</button>
       <button type="button" class="cloud-tab" data-cloud-tab="conflict-check">重複チェック</button>
     </nav>
 
@@ -338,6 +339,38 @@
           <div id="cloud-editor-panel" class="cloud-editor-host"></div>
         </section>
       </div>
+    </section>
+
+    <section id="cloud-panel-spot" class="cloud-panel">
+      <div class="cloud-panel-head">
+        <div>
+          <h2>スポット</h2>
+          <p>指定日に誰がどこで働いているか、予定が空いている個人・現場、休暇登録中の個人をまとめて確認します。</p>
+        </div>
+      </div>
+
+      <div class="cloud-form">
+        <div class="cloud-form-grid">
+          <label class="cloud-field">
+            <span>日付</span>
+            <input id="cloud-spot-date" class="cloud-input" type="date" required>
+          </label>
+          <label class="cloud-field">
+            <span>個人</span>
+            <input id="cloud-spot-person-query" class="cloud-input" type="text" placeholder="氏名または社員番号">
+          </label>
+          <label class="cloud-field">
+            <span>現場</span>
+            <input id="cloud-spot-site-query" class="cloud-input" type="text" placeholder="現場名または契約番号">
+          </label>
+        </div>
+        <div class="cloud-actions compact">
+          <button id="cloud-spot-run" type="button" class="cloud-btn primary">検索</button>
+          <button id="cloud-spot-clear" type="button" class="cloud-btn ghost">条件クリア</button>
+        </div>
+      </div>
+
+      <div id="cloud-spot-results" class="cloud-spot-results"></div>
     </section>
 
     <section id="cloud-panel-conflict-check" class="cloud-panel">
