@@ -75,6 +75,12 @@
         date: '',
         personQuery: '',
         siteQuery: '',
+        include: {
+          assignments: true,
+          people_available: true,
+          people_on_leave: true,
+          sites_available: true
+        },
         result: null
       },
       masterTargets: {
@@ -90,6 +96,15 @@
         }
       }
     };
+
+    const SPOT_INCLUDE_STORAGE_KEY = 'cloudshift:spot:include';
+    const SPOT_RESULT_SECTIONS = [
+      { key: 'assignments', label: '勤務あり', summaryKey: 'assignment_count' },
+      { key: 'people_available', label: '空き個人', summaryKey: 'available_people_count' },
+      { key: 'people_on_leave', label: '休暇', summaryKey: 'leave_people_count' },
+      { key: 'sites_available', label: '空き現場', summaryKey: 'available_site_count' }
+    ];
+
     const employeeSearchCache = new Map();
     const siteSearchCache = new Map();
     const siteBranchCache = new Map();
@@ -5627,6 +5642,32 @@
       `).join('');
     }
 
+    function loadSpotIncludeOptions() {
+      try {
+        const raw = window.localStorage ? window.localStorage.getItem(SPOT_INCLUDE_STORAGE_KEY) : '';
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (!parsed || typeof parsed !== 'object') return;
+        SPOT_RESULT_SECTIONS.forEach((section) => {
+          if (Object.prototype.hasOwnProperty.call(parsed, section.key)) {
+            state.spot.include[section.key] = parsed[section.key] !== false;
+          }
+        });
+      } catch (_) {}
+    }
+
+    function saveSpotIncludeOptions() {
+      try {
+        if (window.localStorage) window.localStorage.setItem(SPOT_INCLUDE_STORAGE_KEY, JSON.stringify(state.spot.include));
+      } catch (_) {}
+    }
+
+    function syncSpotIncludeFromInputs() {
+      SPOT_RESULT_SECTIONS.forEach((section) => {
+        const input = document.querySelector(`[data-spot-include="${section.key}"]`);
+        if (input) state.spot.include[section.key] = !!input.checked;
+      });
+    }
+
     function syncSpotFormState() {
       const dateInput = $('cloud-spot-date');
       const personInput = $('cloud-spot-person-query');
@@ -5637,6 +5678,10 @@
       if (dateInput && !dateInput.value) dateInput.value = state.spot.date;
       if (personInput && personInput.value !== state.spot.personQuery) personInput.value = state.spot.personQuery;
       if (siteInput && siteInput.value !== state.spot.siteQuery) siteInput.value = state.spot.siteQuery;
+      SPOT_RESULT_SECTIONS.forEach((section) => {
+        const input = document.querySelector(`[data-spot-include="${section.key}"]`);
+        if (input) input.checked = state.spot.include[section.key] !== false;
+      });
     }
 
     function spotPersonLabel(item) {
@@ -5669,6 +5714,11 @@
       return `<div class="cloud-spot-card-grid">${items.map(renderer).join('')}</div>`;
     }
 
+    function spotProjectButton(projectId, label) {
+      if (!projectId || PAGE.type !== 'owner') return '';
+      return `<button type="button" class="cloud-link-button" data-spot-open-project="${escapeHtml(projectId)}">${escapeHtml(label || 'シフト帳を開く')}</button>`;
+    }
+
     function renderSpotAssignment(item) {
       const second = item.second_option_label ? `<span class="cloud-note-chip">${escapeHtml(item.second_option_label)}</span>` : '';
       const comment = item.comment ? `<p class="cloud-panel-note">${escapeHtml(item.comment)}</p>` : '';
@@ -5676,7 +5726,7 @@
         <article class="cloud-spot-card">
           <div class="cloud-spot-card-head">
             <div>
-              <h3>${escapeHtml(spotPersonLabel(item))}</h3>
+              <h3>${spotProjectButton(item.person_project_id || (item.source_mode === 'person' ? item.project_id : ''), spotPersonLabel(item)) || escapeHtml(spotPersonLabel(item))}</h3>
               <p>${escapeHtml(spotSiteLabel(item))}</p>
             </div>
             <span class="cloud-badge">${escapeHtml(item.shift_label || 'オプションなし')}</span>
@@ -5696,7 +5746,7 @@
         <article class="cloud-spot-card is-available">
           <div class="cloud-spot-card-head">
             <div>
-              <h3>${escapeHtml(spotPersonLabel(item))}</h3>
+              <h3>${spotProjectButton(item.project_id, spotPersonLabel(item)) || escapeHtml(spotPersonLabel(item))}</h3>
               <p>${escapeHtml(item.project_title || '個人シフト')}</p>
             </div>
             <span class="cloud-badge">空き</span>
@@ -5721,7 +5771,7 @@
         <article class="cloud-spot-card is-leave">
           <div class="cloud-spot-card-head">
             <div>
-              <h3>${escapeHtml(spotPersonLabel(item))}</h3>
+              <h3>${spotProjectButton(item.person_project_id || item.project_id, spotPersonLabel(item)) || escapeHtml(spotPersonLabel(item))}</h3>
               ${employeeNumber}
             </div>
           </div>
@@ -5754,43 +5804,51 @@
       }
       const summary = result.summary || {};
       const query = result.query || {};
-      container.innerHTML = `
-        <div class="cloud-spot-summary">
-          <span class="cloud-badge">日付 ${escapeHtml(query.date || '')}</span>
-          <span class="cloud-badge">勤務 ${escapeHtml(String(summary.assignment_count || 0))}件</span>
-          <span class="cloud-badge">空き個人 ${escapeHtml(String(summary.available_people_count || 0))}人</span>
-          <span class="cloud-badge duplicate-owner">休暇 ${escapeHtml(String(summary.leave_people_count || 0))}人</span>
-          <span class="cloud-badge">空き現場 ${escapeHtml(String(summary.available_site_count || 0))}件</span>
-          <span class="cloud-badge shared-owner">対象シフト帳 ${escapeHtml(String(summary.visible_project_count || 0))}件</span>
-        </div>
+      const include = state.spot.include || {};
+      const summaryBadges = SPOT_RESULT_SECTIONS
+        .filter((section) => include[section.key] !== false)
+        .map((section) => `<span class="cloud-badge${section.key === 'people_on_leave' ? ' duplicate-owner' : ''}">${escapeHtml(section.label)} ${escapeHtml(String(summary[section.summaryKey] || 0))}</span>`)
+        .join('');
+      const sections = [];
+      if (include.assignments !== false) sections.push(`
         <section class="cloud-spot-section">
           <div class="cloud-spot-section-head">
             <h3>勤務あり</h3>
             <p>指定日に誰がどこで働いているかを表示します。</p>
           </div>
           ${renderSpotCardList(result.assignments || [], '勤務登録は見つかりませんでした。', renderSpotAssignment)}
-        </section>
+        </section>`);
+      if (include.people_available !== false) sections.push(`
         <section class="cloud-spot-section">
           <div class="cloud-spot-section-head">
             <h3>空き個人</h3>
             <p>勤務登録も休暇登録もない個人シフト帳です。</p>
           </div>
           ${renderSpotCardList(result.people_available || [], '空き個人は見つかりませんでした。', renderSpotAvailablePerson)}
-        </section>
+        </section>`);
+      if (include.people_on_leave !== false) sections.push(`
         <section class="cloud-spot-section">
           <div class="cloud-spot-section-head">
             <h3>休暇</h3>
             <p>休暇オプションが入っているため、空きとは別枠で表示します。</p>
           </div>
           ${renderSpotCardList(result.people_on_leave || [], '休暇オプションの登録はありません。', renderSpotLeavePerson)}
-        </section>
+        </section>`);
+      if (include.sites_available !== false) sections.push(`
         <section class="cloud-spot-section">
           <div class="cloud-spot-section-head">
             <h3>空き現場</h3>
             <p>指定日に勤務登録がない現場シフト帳です。</p>
           </div>
           ${renderSpotCardList(result.sites_available || [], '空き現場は見つかりませんでした。', renderSpotAvailableSite)}
-        </section>
+        </section>`);
+      container.innerHTML = `
+        <div class="cloud-spot-summary">
+          <span class="cloud-badge">日付 ${escapeHtml(query.date || '')}</span>
+          ${summaryBadges}
+          <span class="cloud-badge shared-owner">対象シフト帳 ${escapeHtml(String(summary.visible_project_count || 0))}件</span>
+        </div>
+        ${sections.join('')}
       `;
     }
 
@@ -5806,10 +5864,20 @@
       state.spot.date = dateInput && dateInput.value ? dateInput.value : currentJstDateText();
       state.spot.personQuery = personInput ? personInput.value.trim() : '';
       state.spot.siteQuery = siteInput ? siteInput.value.trim() : '';
+      syncSpotIncludeFromInputs();
+      saveSpotIncludeOptions();
       const params = new URLSearchParams();
       params.set('date', state.spot.date);
       if (state.spot.personQuery) params.set('person_query', state.spot.personQuery);
       if (state.spot.siteQuery) params.set('site_query', state.spot.siteQuery);
+      let selectedSpotSectionCount = 0;
+      SPOT_RESULT_SECTIONS.forEach((section) => {
+        if (state.spot.include[section.key] !== false) {
+          params.append('include', section.key);
+          selectedSpotSectionCount += 1;
+        }
+      });
+      if (selectedSpotSectionCount === 0) params.append('include', '__none__');
       const result = await requestJson(`/tools/shiftersync/cloudshift/api/spot?${params.toString()}`);
       state.spot.result = result;
       renderSpotPanel();
@@ -9375,6 +9443,8 @@
         checkRun.addEventListener('click', () => runConflictCheck().catch((error) => showFlash(error.message, 'error')));
       }
 
+      loadSpotIncludeOptions();
+
       const spotRun = $('cloud-spot-run');
       if (spotRun) {
         spotRun.addEventListener('click', () => runSpotSearch().catch((error) => showFlash(error.message, 'error')));
@@ -9386,6 +9456,8 @@
           state.spot.date = currentJstDateText();
           state.spot.personQuery = '';
           state.spot.siteQuery = '';
+          state.spot.include = { assignments: true, people_available: true, people_on_leave: true, sites_available: true };
+          saveSpotIncludeOptions();
           state.spot.result = null;
           ['cloud-spot-date', 'cloud-spot-person-query', 'cloud-spot-site-query'].forEach((id) => {
             const input = $(id);
@@ -9406,6 +9478,25 @@
           }
         });
       });
+      document.querySelectorAll('[data-spot-include]').forEach((input) => {
+        input.addEventListener('change', () => {
+          syncSpotIncludeFromInputs();
+          saveSpotIncludeOptions();
+          renderSpotPanel();
+        });
+      });
+
+      const spotResults = $('cloud-spot-results');
+      if (spotResults) {
+        spotResults.addEventListener('click', (event) => {
+          const button = event.target.closest('[data-spot-open-project]');
+          if (!button) return;
+          const projectId = button.getAttribute('data-spot-open-project');
+          if (!projectId) return;
+          selectProject(projectId, state.spot.date ? state.spot.date.slice(0, 7) : '', { skipUnsavedGuard: false })
+            .catch((error) => showFlash(error.message, 'error'));
+        });
+      }
 
       document.addEventListener('click', (event) => {
         const candidate = event.target.closest('.cloud-employee-candidate');
