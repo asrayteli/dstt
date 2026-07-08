@@ -2565,6 +2565,48 @@ def test_spot_search_separates_leave_options_from_available_people_and_dedupes_s
     assert none_payload["summary"]["available_site_count"] == 0
 
 
+def test_spot_search_uses_searcher_office_creation_scope_instead_of_visible_share(tmp_path):
+    module, client = _build_client(tmp_path)
+
+    with client.application.app_context():
+        branch = AccessBranch(name="Tokyo", code="TK")
+        db.session.add(branch)
+        db.session.flush()
+        office_a = AccessOffice(branch_id=branch.id, name="Shinjuku", code="S01")
+        office_b = AccessOffice(branch_id=branch.id, name="Shibuya", code="S02")
+        db.session.add_all([office_a, office_b])
+        db.session.flush()
+        office_a_id = office_a.id
+        office_b_id = office_b.id
+        db.session.add_all(
+            [
+                User(username="owner-a", password_hash="x", name="Owner A", office_id=office_a_id),
+                User(username="owner-b", password_hash="x", name="Owner B", office_id=office_b_id),
+            ]
+        )
+        db.session.commit()
+
+    module.current_user = _employee_user("owner-a", office_id=office_a_id, name="Owner A")
+    alpha_person = _create_person_project(client, title="Alice", employee_number="9101")
+    alpha_scene = _create_scene_project(client, title="Alpha Office Site", year="2026", month="4", capacity="0")
+    assert alpha_person.status_code == 200
+    assert alpha_scene.status_code == 200
+
+    module.current_user = _employee_user("owner-b", office_id=office_b_id, name="Owner B")
+    beta_person = _create_person_project(client, title="Bob", employee_number="9201")
+    beta_scene = _create_scene_project(client, title="Beta Office Site", year="2026", month="4", capacity="0")
+    assert beta_person.status_code == 200
+    assert beta_scene.status_code == 200
+
+    module.current_user = _employee_user("searcher-a", office_id=office_a_id, name="Searcher A")
+    response = client.get("/tools/shiftersync/cloudshift/api/spot", query_string={"date": "2026-04-01"})
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert {item["employee_number"] for item in payload["people_available"]} == {"9101"}
+    assert {item["site_name"] for item in payload["sites_available"]} == {"Alpha Office Site"}
+
+
 def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     script = (ROOT / "app" / "templates" / "_cloudshift_script.html").read_text(encoding="utf-8")
     style = (ROOT / "app" / "templates" / "_cloudshift_style.html").read_text(encoding="utf-8")
