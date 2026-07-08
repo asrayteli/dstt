@@ -1230,6 +1230,29 @@
     text-align: center;
   }
 
+  .cloud-spot-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px 14px;
+    align-items: center;
+    margin-top: 12px;
+  }
+
+  .cloud-spot-filter-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: var(--cloud-text);
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .cloud-spot-filter-option input {
+    flex: 0 0 auto;
+  }
+
   .cloud-spot-results {
     display: grid;
     gap: 16px;
@@ -2604,7 +2627,8 @@
   }
 
   @media (max-width: 960px) {
-    .cloud-form-grid {
+    .cloud-form-grid,
+    .cloud-spot-filter-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -2636,6 +2660,7 @@
     }
 
     .cloud-form-grid,
+    .cloud-spot-filter-grid,
     .cloud-master-picker,
     .cloud-tool-dock {
       grid-template-columns: 1fr;

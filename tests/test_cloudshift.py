@@ -2578,6 +2578,7 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert 'id="cloud-spot-run"' in html
     assert 'data-spot-include="assignments"' in html
     assert 'data-spot-include="people_available"' in html
+    assert 'cloud-spot-filter-grid' in html
     assert 'id="cloud-check-mode"' in html
     assert 'id="cloud-check-month"' in html
     assert 'id="cloud-check-run"' in html
@@ -2668,6 +2669,8 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "/tools/shiftersync/cloudshift/api/conflict-check" in script
     assert "cloud-check-entry" in script
     assert "resetCreateForm();" in script
+    assert ".cloud-spot-filter-grid" in style
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in style
     assert ".cloud-spot-card.is-leave" in style
     assert ".cloud-check-project-list" in style
     assert ".cloud-check-scroll" in style
