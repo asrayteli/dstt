@@ -3553,6 +3553,39 @@ def _spot_project_visible_to_current_user(project: dict[str, Any]) -> bool:
     return _project_is_shared_with_current_user(project)
 
 
+def _project_created_office_ids(project: dict[str, Any]) -> set[int]:
+    """Return the office ids that identify where the shift book was created."""
+    if _is_substitute_project(project):
+        office_id = _substitute_office_id(project)
+        return {office_id} if office_id else set()
+
+    ids: set[int] = set()
+    for value in project.get("created_office_ids") or []:
+        try:
+            office_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if office_id > 0:
+            ids.add(office_id)
+    if ids:
+        return ids
+
+    owner_user_id = str(project.get("owner_user_id") or "").strip()
+    if not owner_user_id:
+        return set()
+    owner = User.query.filter_by(username=owner_user_id).first()
+    return {int(office_id) for office_id in user_office_ids(owner) if office_id is not None} if owner else set()
+
+
+def _spot_project_in_current_office_scope(project: dict[str, Any]) -> bool:
+    if not current_user.is_authenticated:
+        return False
+    current_office_ids = _current_share_office_ids()
+    if not current_office_ids:
+        return _spot_project_visible_to_current_user(project)
+    return bool(_project_created_office_ids(project) & current_office_ids)
+
+
 def _spot_access_role(project: dict[str, Any]) -> str:
     share = _share_status_for_current_user(project)
     return str((share or {}).get("role") or "owner")
@@ -3787,7 +3820,7 @@ def _spot_month_payload(
     visible_project_count = 0
 
     for project in stored:
-        if not isinstance(project, dict) or not _spot_project_visible_to_current_user(project):
+        if not isinstance(project, dict) or not _spot_project_in_current_office_scope(project):
             continue
         month_data = (project.get("months") or {}).get(month_key)
         if not isinstance(month_data, dict):
@@ -8887,6 +8920,7 @@ def api_create():
         "view_token": _share_token(),
         "edit_token": _share_token(),
         "pwa_token": _share_token(),
+        "created_office_ids": sorted(_current_share_office_ids()),
         "created_at": _jst_now_iso(),
         "updated_at": _jst_now_iso(),
         "months": {
