@@ -5707,6 +5707,7 @@
 
     function renderSpotLeavePerson(item) {
       const entries = Array.isArray(item.entries) ? item.entries : [];
+      const employeeNumber = item.employee_number ? `<p>社員番号 ${escapeHtml(item.employee_number)}</p>` : '';
       const entryHtml = entries.length
         ? entries.map((entry) => `
             <div class="cloud-spot-leave-line">
@@ -5721,9 +5722,8 @@
           <div class="cloud-spot-card-head">
             <div>
               <h3>${escapeHtml(spotPersonLabel(item))}</h3>
-              <p>休暇オプションあり。本人確認が必要です。</p>
+              ${employeeNumber}
             </div>
-            <span class="cloud-badge duplicate-owner">本人次第</span>
           </div>
           <div class="cloud-spot-leave-list">${entryHtml}</div>
         </article>
@@ -5759,7 +5759,7 @@
           <span class="cloud-badge">日付 ${escapeHtml(query.date || '')}</span>
           <span class="cloud-badge">勤務 ${escapeHtml(String(summary.assignment_count || 0))}件</span>
           <span class="cloud-badge">空き個人 ${escapeHtml(String(summary.available_people_count || 0))}人</span>
-          <span class="cloud-badge duplicate-owner">休暇・本人確認 ${escapeHtml(String(summary.leave_people_count || 0))}人</span>
+          <span class="cloud-badge duplicate-owner">休暇 ${escapeHtml(String(summary.leave_people_count || 0))}人</span>
           <span class="cloud-badge">空き現場 ${escapeHtml(String(summary.available_site_count || 0))}件</span>
           <span class="cloud-badge shared-owner">対象シフト帳 ${escapeHtml(String(summary.visible_project_count || 0))}件</span>
         </div>
@@ -5779,7 +5779,7 @@
         </section>
         <section class="cloud-spot-section">
           <div class="cloud-spot-section-head">
-            <h3>休暇・本人確認</h3>
+            <h3>休暇</h3>
             <p>休暇オプションが入っているため、空きとは別枠で表示します。</p>
           </div>
           ${renderSpotCardList(result.people_on_leave || [], '休暇オプションの登録はありません。', renderSpotLeavePerson)}

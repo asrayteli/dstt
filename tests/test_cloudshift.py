@@ -2624,7 +2624,10 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "function runSpotSearch()" in script
     assert "/tools/shiftersync/cloudshift/api/spot" in script
     assert "people_on_leave" in script
-    assert "休暇・本人確認" in script
+    assert "<h3>休暇</h3>" in script
+    assert "休暇・本人確認" not in script
+    assert "本人次第" not in script
+    assert "休暇オプションあり。本人確認が必要です。" not in script
     assert "function runConflictCheck()" in script
     assert "/tools/shiftersync/cloudshift/api/conflict-check" in script
     assert "cloud-check-entry" in script
