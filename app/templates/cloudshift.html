@@ -364,6 +364,12 @@
             <input id="cloud-spot-site-query" class="cloud-input" type="text" placeholder="現場名または契約番号">
           </label>
         </div>
+        <div class="cloud-spot-filter-grid" aria-label="スポット検索対象">
+          <label class="cloud-spot-filter-option"><input id="cloud-spot-include-assignments" type="checkbox" data-spot-include="assignments" checked> 勤務あり</label>
+          <label class="cloud-spot-filter-option"><input id="cloud-spot-include-people-available" type="checkbox" data-spot-include="people_available" checked> 空き個人</label>
+          <label class="cloud-spot-filter-option"><input id="cloud-spot-include-people-on-leave" type="checkbox" data-spot-include="people_on_leave" checked> 休暇</label>
+          <label class="cloud-spot-filter-option"><input id="cloud-spot-include-sites-available" type="checkbox" data-spot-include="sites_available" checked> 空き現場</label>
+        </div>
         <div class="cloud-actions compact">
           <button id="cloud-spot-run" type="button" class="cloud-btn primary">検索</button>
           <button id="cloud-spot-clear" type="button" class="cloud-btn ghost">条件クリア</button>

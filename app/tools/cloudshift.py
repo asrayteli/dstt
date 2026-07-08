@@ -3770,7 +3770,12 @@ def _spot_add_leave(leave_by_person: dict[str, dict[str, Any]], leave: dict[str,
     )
 
 
-def _spot_month_payload(target: date, person_query: str = "", site_query: str = "") -> dict[str, Any]:
+def _spot_month_payload(
+    target: date,
+    person_query: str = "",
+    site_query: str = "",
+    include: set[str] | None = None,
+) -> dict[str, Any]:
     month_key = _month_key(target.year, target.month)
     day_key = str(target.day)
     stored = _iter_project_summaries_for_month(month_key)
@@ -3898,6 +3903,18 @@ def _spot_month_payload(target: date, person_query: str = "", site_query: str = 
                     ),
                 )
 
+    for assignment in assignments_by_key.values():
+        person = people_by_key.get(str(assignment.get("person_key") or ""))
+        if person:
+            assignment["person_project_id"] = str(person.get("project_id") or "")
+            assignment["person_project_title"] = str(person.get("project_title") or "")
+
+    for leave in leave_by_person.values():
+        person = people_by_key.get(str(leave.get("person_key") or ""))
+        if person:
+            leave["person_project_id"] = str(person.get("project_id") or "")
+            leave["person_project_title"] = str(person.get("project_title") or "")
+
     assignments = sorted(
         (
             {key: value for key, value in item.items() if key != "_priority"}
@@ -3942,6 +3959,16 @@ def _spot_month_payload(target: date, person_query: str = "", site_query: str = 
     filtered_sites_available = [
         item for item in sites_available if _spot_matches_site(item, site_query)
     ]
+
+    include_keys = include if include is not None else {"assignments", "people_available", "people_on_leave", "sites_available"}
+    if "assignments" not in include_keys:
+        filtered_assignments = []
+    if "people_available" not in include_keys:
+        filtered_people_available = []
+    if "people_on_leave" not in include_keys:
+        filtered_people_on_leave = []
+    if "sites_available" not in include_keys:
+        filtered_sites_available = []
 
     return {
         "success": True,
@@ -5574,6 +5601,7 @@ def _assist_bootstrap_payload(project: dict[str, Any], *, can_edit_records: bool
     )
     experienced_sites.sort(key=lambda item: (item["date"], item["site_name"]), reverse=True)
     training_sites.sort(key=lambda item: (item["date"], item["site_name"]), reverse=True)
+
     return {
         "success": True,
         "assist": {
@@ -6098,6 +6126,7 @@ def _person_assist_bootstrap_payload(project: dict[str, Any], *, can_edit_sites:
     ]
     experienced.sort(key=lambda item: (item["date"], item["site_name"], item["shift_key"]), reverse=True)
     training.sort(key=lambda item: (item["date"], item["site_name"], item["shift_key"]), reverse=True)
+
     return {
         "success": True,
         "assist_mode": "person",
@@ -7921,6 +7950,7 @@ def _assist_search(project: dict[str, Any], payload: dict[str, Any]) -> dict[str
             item["employee_number"],
         )
     )
+
     return {
         "success": True,
         "query": {
@@ -8792,7 +8822,14 @@ def api_spot():
     target = _spot_parse_date(request.args.get("date"))
     person_query = _spot_query(request.args.get("person_query"))
     site_query = _spot_query(request.args.get("site_query"))
-    return jsonify(_spot_month_payload(target, person_query=person_query, site_query=site_query))
+    allowed_include = {"assignments", "people_available", "people_on_leave", "sites_available"}
+    include_args = {
+        str(value or "").strip()
+        for value in request.args.getlist("include")
+        if str(value or "").strip()
+    }
+    include = include_args & allowed_include if include_args else allowed_include
+    return jsonify(_spot_month_payload(target, person_query=person_query, site_query=site_query, include=include))
 
 
 @cloudshift_bp.route("/api/create", methods=["POST"])
@@ -11057,6 +11094,7 @@ def _shift_engine_apply_draft(project: dict[str, Any], payload: dict[str, Any], 
             },
         },
     )
+
 
     return {
         "success": True,

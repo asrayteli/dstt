@@ -2514,11 +2514,14 @@ def test_spot_search_separates_leave_options_from_available_people_and_dedupes_s
     assert assignment["employee_number"] == "1001"
     assert assignment["site_name"] == "Alpha Site"
     assert assignment["shift_key"] == "A"
+    assert assignment["person_project_id"]
+    assert assignment["person_project_title"] == "Alice"
     assert {source["mode"] for source in assignment["sources"]} == {"scene", "person"}
 
     assert {item["employee_number"] for item in payload["people_available"]} == {"1003"}
     leave_by_number = {item["employee_number"]: item for item in payload["people_on_leave"]}
     assert set(leave_by_number) == {"1002"}
+    assert leave_by_number["1002"]["person_project_id"] == bob["project"]["id"]
     assert leave_by_number["1002"]["entries"][0]["shift_key"] == "PAID"
     assert leave_by_number["1002"]["entries"][0]["comment"] == "confirm with Bob"
     assert {item["site_name"] for item in payload["sites_available"]} == {"Beta Site"}
@@ -2533,6 +2536,34 @@ def test_spot_search_separates_leave_options_from_available_people_and_dedupes_s
     assert [item["employee_number"] for item in bob_payload["people_on_leave"]] == ["1002"]
     assert bob_payload["people_available"] == []
 
+    leave_only_response = client.get(
+        "/tools/shiftersync/cloudshift/api/spot",
+        query_string={"date": "2026-04-01", "include": "people_on_leave"},
+    )
+    assert leave_only_response.status_code == 200
+    leave_only_payload = leave_only_response.get_json()
+    assert leave_only_payload["assignments"] == []
+    assert leave_only_payload["people_available"] == []
+    assert [item["employee_number"] for item in leave_only_payload["people_on_leave"]] == ["1002"]
+    assert leave_only_payload["sites_available"] == []
+    assert leave_only_payload["summary"]["assignment_count"] == 0
+    assert leave_only_payload["summary"]["available_site_count"] == 0
+
+    none_response = client.get(
+        "/tools/shiftersync/cloudshift/api/spot",
+        query_string={"date": "2026-04-01", "include": "__none__"},
+    )
+    assert none_response.status_code == 200
+    none_payload = none_response.get_json()
+    assert none_payload["assignments"] == []
+    assert none_payload["people_available"] == []
+    assert none_payload["people_on_leave"] == []
+    assert none_payload["sites_available"] == []
+    assert none_payload["summary"]["assignment_count"] == 0
+    assert none_payload["summary"]["available_people_count"] == 0
+    assert none_payload["summary"]["leave_people_count"] == 0
+    assert none_payload["summary"]["available_site_count"] == 0
+
 
 def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     script = (ROOT / "app" / "templates" / "_cloudshift_script.html").read_text(encoding="utf-8")
@@ -2545,6 +2576,9 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert 'data-cloud-tab="spot"' in html
     assert 'id="cloud-panel-spot"' in html
     assert 'id="cloud-spot-run"' in html
+    assert 'data-spot-include="assignments"' in html
+    assert 'data-spot-include="people_available"' in html
+    assert 'cloud-spot-filter-grid' in html
     assert 'id="cloud-check-mode"' in html
     assert 'id="cloud-check-month"' in html
     assert 'id="cloud-check-run"' in html
@@ -2622,6 +2656,9 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "if (tabName === 'spot')" in script
     assert "if (tabName === 'conflict-check')" in script
     assert "function runSpotSearch()" in script
+    assert "SPOT_INCLUDE_STORAGE_KEY" in script
+    assert "selectedSpotSectionCount === 0" in script
+    assert "data-spot-open-project" in script
     assert "/tools/shiftersync/cloudshift/api/spot" in script
     assert "people_on_leave" in script
     assert "<h3>休暇</h3>" in script
@@ -2632,6 +2669,8 @@ def test_cloudshift_template_exposes_bulk_direct_date_selection_ui():
     assert "/tools/shiftersync/cloudshift/api/conflict-check" in script
     assert "cloud-check-entry" in script
     assert "resetCreateForm();" in script
+    assert ".cloud-spot-filter-grid" in style
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in style
     assert ".cloud-spot-card.is-leave" in style
     assert ".cloud-check-project-list" in style
     assert ".cloud-check-scroll" in style
