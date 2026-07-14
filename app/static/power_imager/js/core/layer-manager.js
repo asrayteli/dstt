@@ -122,6 +122,8 @@ window.PILayerManager = (function () {
     if (td.bold) fontStr += 'bold ';
     fontStr += td.size + 'px "' + td.fontFamily + '", sans-serif';
     tempCtx.font = fontStr;
+    const letterSpacing = (td.letterSpacing || 0) + 'px';
+    if ('letterSpacing' in tempCtx) tempCtx.letterSpacing = letterSpacing;
 
     const lines = td.text.split('\n');
     const lineH = td.size * (td.lineHeight || 1.3);
@@ -139,6 +141,7 @@ window.PILayerManager = (function () {
     PICanvasEngine.configureContext(ctx);
 
     ctx.font = fontStr;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = letterSpacing;
     ctx.textBaseline = 'top';
     ctx.textAlign = td.align || 'left';
 
@@ -164,12 +167,14 @@ window.PILayerManager = (function () {
       ctx.fillStyle = td.color || '#000';
       ctx.fillText(line, alignX, yy);
 
-      if (td.underline) {
+      if (td.underline || td.strikethrough) {
         const m = ctx.measureText(line);
         let lx = alignX;
         if (td.align === 'center') lx -= m.width / 2;
         else if (td.align === 'right') lx -= m.width;
-        ctx.fillRect(lx, yy + td.size + 2, m.width, Math.max(1, td.size / 16));
+        const lh2 = Math.max(1, td.size / 16);
+        if (td.underline) ctx.fillRect(lx, yy + td.size + 2, m.width, lh2);
+        if (td.strikethrough) ctx.fillRect(lx, yy + td.size * 0.55, m.width, lh2);
       }
     });
 

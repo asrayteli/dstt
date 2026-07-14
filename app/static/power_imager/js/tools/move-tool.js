@@ -1,4 +1,7 @@
-/* PowerImager — MoveTool: レイヤー移動（キャンバスへのスナップ＋整列付き） */
+/* PowerImager — MoveTool: レイヤー移動（キャンバスへのスナップ＋整列付き）
+ * 自動選択（既定ON）: クリック位置の最前面レイヤーを選んでから移動する。
+ * 背景（最下層）は誤操作を防ぐため、既にアクティブな場合のみ対象にする。
+ */
 window.PIMoveTool = new (class extends PIToolBase {
   constructor() {
     super('move', 'move');
@@ -7,8 +10,28 @@ window.PIMoveTool = new (class extends PIToolBase {
     this.layerStartX = 0; this.layerStartY = 0;
   }
   deactivate() { super.deactivate(); PICanvasEngine.clearOverlay(); }
+  autoSelect() { return localStorage.getItem('pi-move-autoselect') !== '0'; }
+  pickLayerAt(px, py) {
+    const layers = PILayerManager.getAll();
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const l = layers[i];
+      if (l.visible && !l.locked && l.type !== 'adjustment' && PILayerTransform.hitTest(l, px, py)) return l;
+    }
+    return null;
+  }
   onMouseDown(e) {
-    const layer = PILayerManager.getActive();
+    let layer = PILayerManager.getActive();
+    if (this.autoSelect()) {
+      const hit = this.pickLayerAt(e.canvasX, e.canvasY);
+      // 最下層（通常は背景）は、明示的に選択している場合を除いて自動選択しない
+      if (hit && hit !== layer && PILayerManager.getAll().indexOf(hit) > 0) {
+        PILayerManager.setActiveIndex(PILayerManager.getAll().indexOf(hit));
+        layer = hit;
+      } else if (hit !== layer) {
+        // クリック位置に対象が無い（または背景）のに別レイヤーが動くのは誤操作のもと
+        return;
+      }
+    }
     if (!layer) return;
     if (layer.locked) { this.warnLocked(); return; }
     this.dragging = true;
@@ -17,7 +40,15 @@ window.PIMoveTool = new (class extends PIToolBase {
     this.contentRect = PILayerTransform.contentLocalRect(layer);
   }
   onMouseMove(e) {
-    if (!this.dragging) return;
+    if (!this.dragging) {
+      // ホバーで移動可能なレイヤーを示す
+      const vp = PICanvasEngine.getViewport();
+      if (vp && this.autoSelect()) {
+        const hit = this.pickLayerAt(e.canvasX, e.canvasY);
+        vp.style.cursor = hit ? 'move' : 'default';
+      }
+      return;
+    }
     const layer = PILayerManager.getActive();
     if (!layer) return;
     layer.x = this.layerStartX + (e.canvasX - this.startX);
@@ -29,6 +60,7 @@ window.PIMoveTool = new (class extends PIToolBase {
       const gy = window.PIGuides ? PIGuides.getSnapY() : [];
       guide = PILayerTransform.snapToCanvas(layer, 6 / PICanvasEngine.getZoom(), this.contentRect, gx, gy);
     }
+    if (layer.textData) layer.textData = { ...layer.textData, x: layer.x, y: layer.y };
     PILayerManager.requestRender();
     this.drawGuides(guide);
   }
@@ -36,9 +68,13 @@ window.PIMoveTool = new (class extends PIToolBase {
     if (this.dragging) {
       this.dragging = false;
       const layer = PILayerManager.getActive();
-      if (layer) { layer.x = Math.round(layer.x); layer.y = Math.round(layer.y); }
+      if (layer) {
+        layer.x = Math.round(layer.x); layer.y = Math.round(layer.y);
+        if (layer.textData) layer.textData = { ...layer.textData, x: layer.x, y: layer.y };
+      }
       PICanvasEngine.clearOverlay();
       PIHistoryManager.push('移動');
+      PIEventBus.emit('tool:properties-changed');
     }
   }
   drawGuides(g) {
@@ -53,12 +89,18 @@ window.PIMoveTool = new (class extends PIToolBase {
     ctx.restore();
   }
   getProperties() {
+    const self = this;
     const layer = PILayerManager.getActive();
     if (!layer) return null;
     const align = (m) => { PILayerTransform.alignInCanvas(layer, m); PILayerManager.requestRender(); PIHistoryManager.push('整列'); PIEventBus.emit('tool:properties-changed'); };
     return {
       title: '移動',
       fields: [
+        {
+          type: 'checkbox', label: '自動選択（クリックしたレイヤーを選ぶ）', key: 'autoselect',
+          value: self.autoSelect(),
+          onChange: (v) => localStorage.setItem('pi-move-autoselect', v ? '1' : '0')
+        },
         { type: 'number', label: 'X', key: 'x', value: Math.round(layer.x), onChange: (v) => { const n = parseInt(v, 10); if (Number.isFinite(n)) { layer.x = n; PILayerManager.requestRender(); } } },
         { type: 'number', label: 'Y', key: 'y', value: Math.round(layer.y), onChange: (v) => { const n = parseInt(v, 10); if (Number.isFinite(n)) { layer.y = n; PILayerManager.requestRender(); } } },
         { type: 'button-group', label: '横整列', key: 'ha', buttons: [

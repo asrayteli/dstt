@@ -1,4 +1,10 @@
-/* PowerImager — TextTool: テキスト配置・編集 */
+/* PowerImager — TextTool: テキスト配置・編集
+ * 操作モデル:
+ *  - 空き領域クリック: 新規テキストの入力ボックスを開く
+ *  - 既存テキストをクリック: 選択（ハンドル表示）・そのままドラッグで移動
+ *  - ダブルクリック: 内容の編集（移動/変形/図形ツールからでも可）
+ *  - コーナーハンドル: ドラッグで文字サイズ変更 / 上の丸ハンドル: 回転
+ */
 window.PITextTool = new (class extends PIToolBase {
   constructor() {
     super('text', 'text');
@@ -11,9 +17,10 @@ window.PITextTool = new (class extends PIToolBase {
     this.layerStartX = 0;
     this.layerStartY = 0;
     this.dragThreshold = 4;
-    // 回転ハンドル
+    // 回転・サイズ変更ハンドル
     this.rotating = false;
     this.rotStart = null;
+    this.resizing = null;
     this._cr = null;          // コンテンツ矩形キャッシュ
     this._boundRedraw = false;
     this.textData = {
@@ -22,7 +29,8 @@ window.PITextTool = new (class extends PIToolBase {
       underline: false, strikethrough: false,
       align: 'left', lineHeight: 1.3, letterSpacing: 0,
       strokeColor: '#ffffff', strokeWidth: 0,
-      shadowColor: '#000000', shadowOffsetX: 2, shadowOffsetY: 2, shadowBlur: 4,
+      // 影は既定でオフ（にじんで見えるため）。プリセットやPROモードで有効化する。
+      shadowColor: '#000000', shadowOffsetX: 0, shadowOffsetY: 0, shadowBlur: 0,
       rotation: 0, x: 0, y: 0
     };
     this.presets = [
@@ -49,6 +57,7 @@ window.PITextTool = new (class extends PIToolBase {
     this.draggingLayer = false;
     this.rotating = false;
     this.rotStart = null;
+    this.resizing = null;
     // ツール切替で入力中テキストが消えると入力が無駄になるため、内容があれば確定する
     this.commitIfEditing();
     PICanvasEngine.clearOverlay();
@@ -61,6 +70,16 @@ window.PITextTool = new (class extends PIToolBase {
     else this.cancelEdit();
   }
 
+  // 指定レイヤーの内容編集を開始（ダブルクリック/編集ボタンから）
+  beginEditLayer(layer) {
+    if (!layer || layer.type !== 'text' || layer.locked) return;
+    const idx = PILayerManager.getAll().indexOf(layer);
+    if (idx >= 0) PILayerManager.setActiveIndex(idx);
+    this.editingLayer = layer;
+    this.textData = { ...layer.textData, x: layer.x, y: layer.y };
+    this.showEditBox();
+  }
+
   onMouseDown(e) {
     if (this.isEditing) {
       // 編集ボックスの外側クリック＝確定（ボックス内は stopPropagation 済み）
@@ -68,17 +87,34 @@ window.PITextTool = new (class extends PIToolBase {
       return;
     }
 
-    // 回転ハンドルのドラッグ開始
     const active = this.targetLayer();
-    if (active && !active.locked && active.visible && this.hitRotHandle(active, e.canvasX, e.canvasY)) {
-      const g = this._handleGeom(active);
-      this.rotating = true;
-      this.rotStart = {
-        layer: active, cx: g.c.x, cy: g.c.y,
-        startAngle: Math.atan2(e.canvasY - g.c.y, e.canvasX - g.c.x),
-        startRotation: active.rotation || 0
-      };
-      return;
+    if (active && !active.locked && active.visible) {
+      // コーナーハンドル＝文字サイズ変更
+      const rh = this.hitResizeHandle(active, e.canvasX, e.canvasY);
+      if (rh) {
+        const g = this._handleGeom(active);
+        const d0 = Math.hypot(e.canvasX - g.c.x, e.canvasY - g.c.y);
+        if (d0 > 0.001) {
+          const td = active.textData;
+          this.resizing = {
+            layer: active, d0, cx: g.c.x, cy: g.c.y,
+            size0: td.size, stroke0: td.strokeWidth || 0, blur0: td.shadowBlur || 0,
+            shx0: td.shadowOffsetX || 0, shy0: td.shadowOffsetY || 0
+          };
+          return;
+        }
+      }
+      // 回転ハンドル
+      if (this.hitRotHandle(active, e.canvasX, e.canvasY)) {
+        const g = this._handleGeom(active);
+        this.rotating = true;
+        this.rotStart = {
+          layer: active, cx: g.c.x, cy: g.c.y,
+          startAngle: Math.atan2(e.canvasY - g.c.y, e.canvasX - g.c.x),
+          startRotation: active.rotation || 0
+        };
+        return;
+      }
     }
 
     const existingTextLayer = this.findTextLayerAt(e.canvasX, e.canvasY);
@@ -103,6 +139,33 @@ window.PITextTool = new (class extends PIToolBase {
 
   onMouseMove(e) {
     if (this.isEditing) return;
+
+    if (this.resizing) {
+      const r = this.resizing;
+      const f = Math.hypot(e.canvasX - r.cx, e.canvasY - r.cy) / r.d0;
+      const size = Math.max(4, Math.min(500, Math.round(r.size0 * f)));
+      const layer = r.layer;
+      const td = layer.textData;
+      if (size !== td.size) {
+        const sf = size / r.size0;
+        td.size = size;
+        td.strokeWidth = Math.round(r.stroke0 * sf * 10) / 10;
+        td.shadowBlur = Math.round(r.blur0 * sf * 10) / 10;
+        td.shadowOffsetX = Math.round(r.shx0 * sf * 10) / 10;
+        td.shadowOffsetY = Math.round(r.shy0 * sf * 10) / 10;
+        // 中心固定で再レンダリング
+        const ccx = layer.x + layer.canvas.width / 2;
+        const ccy = layer.y + layer.canvas.height / 2;
+        PILayerManager.renderTextLayer(layer);
+        layer.x = Math.round(ccx - layer.canvas.width / 2);
+        layer.y = Math.round(ccy - layer.canvas.height / 2);
+        layer.textData = { ...layer.textData, x: layer.x, y: layer.y };
+        this._cr = null;
+        PILayerManager.requestRender();
+        this.redrawHandles();
+      }
+      return;
+    }
 
     if (this.rotating) {
       const s = this.rotStart;
@@ -131,12 +194,25 @@ window.PITextTool = new (class extends PIToolBase {
     const vp = PICanvasEngine.getViewport();
     if (vp) {
       const act = this.targetLayer();
-      if (act && !act.locked && act.visible && this.hitRotHandle(act, e.canvasX, e.canvasY)) vp.style.cursor = 'grab';
-      else vp.style.cursor = this.findTextLayerAt(e.canvasX, e.canvasY) ? 'move' : this.cursor;
+      let cursor = null;
+      if (act && !act.locked && act.visible) {
+        const rh = this.hitResizeHandle(act, e.canvasX, e.canvasY);
+        if (rh) cursor = (rh === 'nw' || rh === 'se') ? 'nwse-resize' : 'nesw-resize';
+        else if (this.hitRotHandle(act, e.canvasX, e.canvasY)) cursor = 'grab';
+      }
+      if (!cursor) cursor = this.findTextLayerAt(e.canvasX, e.canvasY) ? 'move' : this.cursor;
+      vp.style.cursor = cursor;
     }
   }
 
   onMouseUp(e) {
+    if (this.resizing) {
+      this.resizing = null;
+      PIHistoryManager.push('テキストサイズ変更');
+      PIEventBus.emit('tool:properties-changed');
+      this.redrawHandles();
+      return;
+    }
     if (this.rotating) {
       this.rotating = false;
       this.rotStart = null;
@@ -159,9 +235,9 @@ window.PITextTool = new (class extends PIToolBase {
       return;
     }
 
-    this.editingLayer = layer;
-    this.textData = { ...layer.textData, x: layer.x, y: layer.y };
-    this.showEditBox();
+    // クリック＝選択のみ（編集はダブルクリック / プロパティの編集ボタン）
+    PIEventBus.emit('tool:properties-changed');
+    this.redrawHandles();
   }
 
   moveTextLayer(layer, x, y, final) {
@@ -192,7 +268,7 @@ window.PITextTool = new (class extends PIToolBase {
     return null;
   }
 
-  // ===== 回転ハンドル（アクティブなテキストレイヤーに表示） =====
+  // ===== ハンドル（アクティブなテキストレイヤーに表示） =====
 
   contentRect(layer) {
     const key = layer.id + ':' + layer.canvas.width + 'x' + layer.canvas.height;
@@ -212,6 +288,25 @@ window.PITextTool = new (class extends PIToolBase {
       eh: cr.h * (layer.scaleY || 1),
       cos: Math.cos(rot), sin: Math.sin(rot)
     };
+  }
+
+  _cornerPositions(layer) {
+    const g = this._handleGeom(layer);
+    const pt = (lx, ly) => ({ x: g.c.x + lx * g.cos - ly * g.sin, y: g.c.y + lx * g.sin + ly * g.cos });
+    return {
+      nw: pt(-g.ew / 2, -g.eh / 2), ne: pt(g.ew / 2, -g.eh / 2),
+      se: pt(g.ew / 2, g.eh / 2), sw: pt(-g.ew / 2, g.eh / 2)
+    };
+  }
+
+  hitResizeHandle(layer, x, y) {
+    const z = PICanvasEngine.getZoom() || 1;
+    const r = 9 / z;
+    const corners = this._cornerPositions(layer);
+    for (const k of ['nw', 'ne', 'se', 'sw']) {
+      if (Math.hypot(x - corners[k].x, y - corners[k].y) <= r) return k;
+    }
+    return null;
   }
 
   rotHandlePos(layer) {
@@ -250,6 +345,7 @@ window.PITextTool = new (class extends PIToolBase {
     ctx.closePath();
     ctx.stroke();
     ctx.setLineDash([]);
+    if (layer.locked) { ctx.restore(); return; }
     // 回転ハンドルへの脚と丸ハンドル
     const top = pt(0, -g.eh / 2);
     const h = this.rotHandlePos(layer);
@@ -257,6 +353,16 @@ window.PITextTool = new (class extends PIToolBase {
     ctx.beginPath(); ctx.arc(h.x, h.y, 6 / z, 0, Math.PI * 2);
     ctx.fillStyle = '#7c6ff7'; ctx.fill();
     ctx.lineWidth = 1.5 / z; ctx.strokeStyle = '#fff'; ctx.stroke();
+    // コーナーの拡縮ハンドル（ドラッグで文字サイズ変更）
+    const hs = 5 / z;
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#7c6ff7';
+    ctx.lineWidth = 1.5 / z;
+    corners.forEach(p => {
+      ctx.beginPath();
+      ctx.rect(p.x - hs, p.y - hs, hs * 2, hs * 2);
+      ctx.fill(); ctx.stroke();
+    });
     // 回転中は角度を表示
     if (this.rotating) {
       const deg = Math.round(((layer.rotation || 0) * 180 / Math.PI) % 360);
@@ -295,6 +401,7 @@ window.PITextTool = new (class extends PIToolBase {
     wrapper.addEventListener('mousedown', (ev) => ev.stopPropagation());
     wrapper.addEventListener('mouseup', (ev) => ev.stopPropagation());
     wrapper.addEventListener('click', (ev) => ev.stopPropagation());
+    wrapper.addEventListener('dblclick', (ev) => ev.stopPropagation());
     wrapper.addEventListener('wheel', (ev) => ev.stopPropagation());
 
     const ta = document.createElement('textarea');
@@ -455,7 +562,14 @@ window.PITextTool = new (class extends PIToolBase {
   applyPreset(preset) {
     const layer = this.targetLayer();
     const target = layer ? layer.textData : this.textData;
-    Object.assign(target, preset);
+    // 前のプリセットの縁取り/影が残らないよう、基本状態へ戻してから適用する
+    const base = {
+      bold: false, italic: false, underline: false, strikethrough: false,
+      strokeWidth: 0, shadowBlur: 0, shadowOffsetX: 0, shadowOffsetY: 0
+    };
+    const style = { ...preset };
+    delete style.name;
+    Object.assign(target, base, style);
     this.applyEdit('テキスト書式');
     PIEventBus.emit('tool:properties-changed');
   }
@@ -480,7 +594,8 @@ window.PITextTool = new (class extends PIToolBase {
           toggles: [
             { key: 'bold', label: 'B', active: td.bold, onChange: (v) => set(() => { td.bold = v; }, '太字') },
             { key: 'italic', label: 'I', active: td.italic, onChange: (v) => set(() => { td.italic = v; }, '斜体') },
-            { key: 'underline', label: 'U', active: td.underline, onChange: (v) => set(() => { td.underline = v; }, '下線') }
+            { key: 'underline', label: 'U', active: td.underline, onChange: (v) => set(() => { td.underline = v; }, '下線') },
+            { key: 'strikethrough', label: 'S', active: td.strikethrough, onChange: (v) => set(() => { td.strikethrough = v; }, '取り消し線') }
           ]
         },
         {
@@ -495,16 +610,20 @@ window.PITextTool = new (class extends PIToolBase {
         { type: 'color', label: '縁取り色', key: 'strokeColor', value: td.strokeColor, onChange: (v) => set(() => { td.strokeColor = v; }, '縁取り色'), advancedOnly: true },
         { type: 'slider', label: '縁取り太さ', key: 'strokeWidth', value: td.strokeWidth, min: 0, max: 20, onChange: (v) => set(() => { td.strokeWidth = parseInt(v); }, '縁取り'), advancedOnly: true },
         { type: 'color', label: '影の色', key: 'shadowColor', value: td.shadowColor, onChange: (v) => set(() => { td.shadowColor = v; }, '影色'), advancedOnly: true },
-        { type: 'slider', label: '影ぼかし', key: 'shadowBlur', value: td.shadowBlur, min: 0, max: 30, onChange: (v) => set(() => { td.shadowBlur = parseInt(v); }, '影'), advancedOnly: true },
+        { type: 'slider', label: '影ぼかし', key: 'shadowBlur', value: td.shadowBlur, min: 0, max: 30, onChange: (v) => set(() => { td.shadowBlur = parseInt(v); if (td.shadowBlur > 0 && !td.shadowOffsetX && !td.shadowOffsetY) { td.shadowOffsetX = 2; td.shadowOffsetY = 2; } }, '影'), advancedOnly: true },
         {
           type: 'preset-list', label: 'プリセット', key: 'presets',
           presets: self.presets.map(p => ({ label: p.name, onClick: () => self.applyPreset(p) }))
         }
       ];
-    // 既存レイヤー編集時のみ回転（キャンバス上の丸ハンドルでも操作可能）
     if (layer) {
+      // 内容の編集はダブルクリックでも開ける（発見性のためボタンも用意）
+      fields.unshift({
+        type: 'button', label: '✎ テキストを編集（ダブルクリック）', key: 'edit',
+        onClick: () => self.beginEditLayer(layer)
+      });
       const rotDeg = ((Math.round((layer.rotation || 0) * 180 / Math.PI) % 360) + 360) % 360;
-      fields.splice(5, 0, {
+      fields.splice(6, 0, {
         type: 'slider', label: '回転', key: 'rotation', value: rotDeg, min: 0, max: 360, unit: '°',
         onChange: (v) => {
           layer.rotation = parseInt(v) * Math.PI / 180;
@@ -514,6 +633,6 @@ window.PITextTool = new (class extends PIToolBase {
         }
       });
     }
-    return { title: layer ? 'テキスト（編集中）' : 'テキスト（新規）', fields };
+    return { title: layer ? 'テキスト（選択中）' : 'テキスト（新規）', fields };
   }
 })();

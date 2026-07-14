@@ -133,6 +133,18 @@
 .prop-field .slider-row .slider-value {
   min-width: 32px; text-align: right; font-size: 11px; color: var(--pi-text-dim);
 }
+.prop-field .slider-row input.slider-value-input {
+  width: 48px; flex: none; padding: 2px 4px; font-size: 11px; text-align: right;
+  background: var(--pi-bg); color: var(--pi-text);
+  border: 1px solid var(--pi-border); border-radius: 3px; outline: none;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.prop-field .slider-row input.slider-value-input::-webkit-outer-spin-button,
+.prop-field .slider-row input.slider-value-input::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+.prop-field .slider-row input.slider-value-input:focus { border-color: var(--pi-accent); }
+.prop-field .slider-row .slider-unit { font-size: 11px; color: var(--pi-text-dim); }
 
 .prop-field .toggle-group {
   display: flex; gap: 4px;

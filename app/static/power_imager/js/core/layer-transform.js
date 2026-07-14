@@ -54,11 +54,14 @@ window.PILayerTransform = (function () {
   }
 
   // キャンバス座標がレイヤーの不透明画素に当たるか（透明な余白は当たり判定外）
+  // テキストレイヤーはcanvasが文字にフィットしているため、境界ボックスで判定する。
+  // （画素判定だと文字と文字の隙間・図形の穴をクリックしたときに選択できない）
   function hitTest(layer, px, py) {
     const w = layer.canvas.width, h = layer.canvas.height;
     const lp = canvasToLocal(layer, px, py);
     const lx = Math.floor(lp.x), ly = Math.floor(lp.y);
     if (lx < 0 || ly < 0 || lx >= w || ly >= h) return false;
+    if (layer.type === 'text') return true;
     try {
       const a = layer.ctx.getImageData(lx, ly, 1, 1).data[3];
       return a > 8;
