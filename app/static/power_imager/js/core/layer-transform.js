@@ -124,5 +124,23 @@ window.PILayerTransform = (function () {
     return { guideX, guideY };
   }
 
-  return { center, localToCanvas, canvasToLocal, corners, bbox, hitTest, alignInCanvas, snapToCanvas, contentLocalRect, contentBBox };
+  // 他レイヤーの端・中心のスナップターゲット（スマートガイド用）。
+  // ラスターはcanvas境界（画素走査は重い）、図形は解析的な矩形、テキストはcanvasが内容にフィットしている。
+  function snapTargetsFromLayers(exclude) {
+    const xs = [], ys = [];
+    PILayerManager.getAll().forEach(l => {
+      if (l === exclude || !l.visible || l.type === 'adjustment') return;
+      let r;
+      if (l.type === 'shape' && l.shapeData && window.PIShapeTool) {
+        r = rectToCanvasBBox(l, PIShapeTool.contentRect(l));
+      } else {
+        r = bbox(l);
+      }
+      xs.push(Math.round(r.x), Math.round(r.x + r.w / 2), Math.round(r.x + r.w));
+      ys.push(Math.round(r.y), Math.round(r.y + r.h / 2), Math.round(r.y + r.h));
+    });
+    return { xs, ys };
+  }
+
+  return { center, localToCanvas, canvasToLocal, corners, bbox, hitTest, alignInCanvas, snapToCanvas, contentLocalRect, contentBBox, snapTargetsFromLayers };
 })();

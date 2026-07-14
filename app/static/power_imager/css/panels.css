@@ -159,11 +159,12 @@
 }
 
 .prop-field .button-group {
-  display: flex; gap: 4px;
+  display: flex; gap: 4px; flex-wrap: wrap;
 }
 .prop-field .button-group button {
-  flex: 1; padding: 4px 8px; border: 1px solid var(--pi-border); border-radius: 4px;
+  flex: 1 1 30%; padding: 4px 8px; border: 1px solid var(--pi-border); border-radius: 4px;
   background: transparent; color: var(--pi-text-dim); cursor: pointer; font-size: 12px;
+  white-space: nowrap;
 }
 .prop-field .button-group button.active {
   background: var(--pi-accent); color: #fff; border-color: var(--pi-accent);

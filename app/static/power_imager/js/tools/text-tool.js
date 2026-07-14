@@ -28,11 +28,16 @@ window.PITextTool = new (class extends PIToolBase {
       color: '#000000', bold: false, italic: false,
       underline: false, strikethrough: false,
       align: 'left', lineHeight: 1.3, letterSpacing: 0,
+      vertical: false, bgEnabled: false, bgColor: '#ffffff',
       strokeColor: '#ffffff', strokeWidth: 0,
       // 影は既定でオフ（にじんで見えるため）。プリセットやPROモードで有効化する。
       shadowColor: '#000000', shadowOffsetX: 0, shadowOffsetY: 0, shadowBlur: 0,
       rotation: 0, x: 0, y: 0
     };
+    this.altDup = false;
+    this.dupDone = false;
+    this.snapTargets = null;
+    this.moveSnapRect = null;
     this.presets = [
       { name: '赤い警告テキスト', color: '#ff0000', bold: true, size: 40, strokeColor: '#ffffff', strokeWidth: 3 },
       { name: '白縁取り見出し', color: '#ffffff', bold: true, size: 48, strokeColor: '#000000', strokeWidth: 4 },
@@ -123,10 +128,14 @@ window.PITextTool = new (class extends PIToolBase {
       if (idx >= 0) PILayerManager.setActiveIndex(idx);
       this.pendingDragLayer = existingTextLayer;
       this.draggingLayer = false;
+      this.altDup = !!e.altKey;
+      this.dupDone = false;
       this.dragStartX = e.canvasX;
       this.dragStartY = e.canvasY;
       this.layerStartX = existingTextLayer.x;
       this.layerStartY = existingTextLayer.y;
+      this.moveSnapRect = PILayerTransform.contentLocalRect(existingTextLayer);
+      this.snapTargets = PILayerTransform.snapTargetsFromLayers(existingTextLayer);
       return;
     }
 
@@ -182,11 +191,33 @@ window.PITextTool = new (class extends PIToolBase {
       const dy = e.canvasY - this.dragStartY;
       if (!this.draggingLayer && Math.hypot(dx, dy) >= this.dragThreshold) {
         this.draggingLayer = true;
+        if (this.altDup && !this.dupDone) {
+          // Alt+ドラッグ: 複製を作ってそちらを動かす
+          this.dupDone = true;
+          const idx = PILayerManager.getAll().indexOf(this.pendingDragLayer);
+          PILayerManager.duplicateLayer(idx);
+          this.pendingDragLayer = PILayerManager.getActive();
+          this.snapTargets = PILayerTransform.snapTargetsFromLayers(this.pendingDragLayer);
+        }
         const vp = PICanvasEngine.getViewport();
         if (vp) vp.style.cursor = 'move';
       }
       if (this.draggingLayer) {
-        this.moveTextLayer(this.pendingDragLayer, this.layerStartX + dx, this.layerStartY + dy);
+        const layer = this.pendingDragLayer;
+        let dx2 = dx, dy2 = dy;
+        if (e.shiftKey) { if (Math.abs(dx2) > Math.abs(dy2)) dy2 = 0; else dx2 = 0; } // 軸固定
+        layer.x = this.layerStartX + dx2;
+        layer.y = this.layerStartY + dy2;
+        let guide = { guideX: null, guideY: null };
+        if (!e.ctrlKey) {
+          const gx = (window.PIGuides ? PIGuides.getSnapX() : []).concat(this.snapTargets ? this.snapTargets.xs : []);
+          const gy = (window.PIGuides ? PIGuides.getSnapY() : []).concat(this.snapTargets ? this.snapTargets.ys : []);
+          guide = PILayerTransform.snapToCanvas(layer, 6 / PICanvasEngine.getZoom(), this.moveSnapRect, gx, gy);
+        }
+        if (layer.textData) layer.textData = { ...layer.textData, x: layer.x, y: layer.y };
+        PILayerManager.requestRender();
+        this.redrawHandles();
+        this.drawGuideLines(guide);
       }
       return;
     }
@@ -228,7 +259,8 @@ window.PITextTool = new (class extends PIToolBase {
     if (this.draggingLayer) {
       this.draggingLayer = false;
       this.moveTextLayer(layer, layer.x, layer.y, true);
-      PIHistoryManager.push('テキスト移動');
+      PIHistoryManager.push(this.dupDone ? 'テキストを複製' : 'テキスト移動');
+      this.altDup = false; this.dupDone = false;
       PIEventBus.emit('tool:properties-changed');
       const vp = PICanvasEngine.getViewport();
       if (vp) vp.style.cursor = this.findTextLayerAt(e.canvasX, e.canvasY) ? 'move' : this.cursor;
@@ -238,6 +270,18 @@ window.PITextTool = new (class extends PIToolBase {
     // クリック＝選択のみ（編集はダブルクリック / プロパティの編集ボタン）
     PIEventBus.emit('tool:properties-changed');
     this.redrawHandles();
+  }
+
+  // スナップで吸着した位置をガイド線で示す（オーバーレイに追記する）
+  drawGuideLines(g) {
+    if (!g || (g.guideX == null && g.guideY == null)) return;
+    const ctx = PICanvasEngine.getOverlayCtx();
+    const s = PICanvasEngine.getCanvasSize();
+    ctx.save();
+    ctx.strokeStyle = '#ff3db4'; ctx.lineWidth = 1 / PICanvasEngine.getZoom();
+    if (g.guideX != null) { ctx.beginPath(); ctx.moveTo(g.guideX, 0); ctx.lineTo(g.guideX, s.height); ctx.stroke(); }
+    if (g.guideY != null) { ctx.beginPath(); ctx.moveTo(0, g.guideY); ctx.lineTo(s.width, g.guideY); ctx.stroke(); }
+    ctx.restore();
   }
 
   moveTextLayer(layer, x, y, final) {
@@ -606,6 +650,15 @@ window.PITextTool = new (class extends PIToolBase {
             { label: '右', active: td.align === 'right', onClick: () => set(() => { td.align = 'right'; }, '配置') }
           ]
         },
+        {
+          type: 'button-group', label: '文字方向', key: 'vertical',
+          buttons: [
+            { label: '横書き', active: !td.vertical, onClick: () => set(() => { td.vertical = false; }, '文字方向') },
+            { label: '縦書き', active: !!td.vertical, onClick: () => set(() => { td.vertical = true; }, '文字方向') }
+          ]
+        },
+        { type: 'checkbox', label: '背景プレート', key: 'bgEnabled', value: !!td.bgEnabled, onChange: (v) => set(() => { td.bgEnabled = v; }, 'テキスト背景') },
+        { type: 'color', label: '背景色', key: 'bgColor', value: td.bgColor || '#ffffff', onChange: (v) => set(() => { td.bgColor = v; td.bgEnabled = true; }, 'テキスト背景色') },
         { type: 'slider', label: '行間', key: 'lineHeight', value: td.lineHeight * 100, min: 80, max: 300, unit: '%', onChange: (v) => set(() => { td.lineHeight = parseInt(v) / 100; }, '行間'), advancedOnly: true },
         { type: 'color', label: '縁取り色', key: 'strokeColor', value: td.strokeColor, onChange: (v) => set(() => { td.strokeColor = v; }, '縁取り色'), advancedOnly: true },
         { type: 'slider', label: '縁取り太さ', key: 'strokeWidth', value: td.strokeWidth, min: 0, max: 20, onChange: (v) => set(() => { td.strokeWidth = parseInt(v); }, '縁取り'), advancedOnly: true },

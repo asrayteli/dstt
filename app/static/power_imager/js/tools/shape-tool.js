@@ -16,12 +16,17 @@ window.PIShapeTool = new (class extends PIToolBase {
     this.strokeEnabled = true;
     this.cornerRadius = 0;
     this.strokeWidth = 3;
+    this.strokeStyle = 'solid';
     // 既存図形の移動用
     this.pendingLayer = null;
     this.movingLayer = false;
     this.dragStartX = 0; this.dragStartY = 0;
     this.layerStartX = 0; this.layerStartY = 0;
     this.dragThreshold = 3;
+    this.altDup = false;
+    this.dupDone = false;
+    this.snapTargets = null;
+    this.moveSnapRect = null;
     // ハンドル操作
     this.resizing = null;      // { layer, handle, w0, h0, snap }
     this.rotating = null;      // { layer, cx, cy, startAngle, startRotation }
@@ -224,13 +229,17 @@ window.PIShapeTool = new (class extends PIToolBase {
 
     const existing = this.findShapeLayerAt(e.canvasX, e.canvasY);
     if (existing) {
-      // 既存図形をクリック → 選択して移動待機
+      // 既存図形をクリック → 選択して移動待機（Alt+ドラッグで複製）
       const idx = PILayerManager.getAll().indexOf(existing);
       if (idx >= 0) PILayerManager.setActiveIndex(idx);
       this.pendingLayer = existing;
       this.movingLayer = false;
+      this.altDup = !!e.altKey;
+      this.dupDone = false;
       this.dragStartX = e.canvasX; this.dragStartY = e.canvasY;
       this.layerStartX = existing.x; this.layerStartY = existing.y;
+      this.moveSnapRect = this.contentRect(existing);
+      this.snapTargets = PILayerTransform.snapTargetsFromLayers(existing);
       PIEventBus.emit('tool:properties-changed');
       return;
     }
@@ -238,6 +247,33 @@ window.PIShapeTool = new (class extends PIToolBase {
     this.drawing = true;
     PICanvasEngine.clearOverlay();
     this.startX = e.canvasX; this.startY = e.canvasY;
+  }
+
+  // スナップで吸着した位置をガイド線で示す（オーバーレイに追記する）
+  drawGuideLines(g) {
+    if (!g || (g.guideX == null && g.guideY == null)) return;
+    const ctx = PICanvasEngine.getOverlayCtx();
+    const s = PICanvasEngine.getCanvasSize();
+    ctx.save();
+    ctx.strokeStyle = '#ff3db4'; ctx.lineWidth = 1 / PICanvasEngine.getZoom();
+    if (g.guideX != null) { ctx.beginPath(); ctx.moveTo(g.guideX, 0); ctx.lineTo(g.guideX, s.height); ctx.stroke(); }
+    if (g.guideY != null) { ctx.beginPath(); ctx.moveTo(0, g.guideY); ctx.lineTo(s.width, g.guideY); ctx.stroke(); }
+    ctx.restore();
+  }
+
+  drawSizeBadge(ctx, x, y, text) {
+    const z = PICanvasEngine.getZoom() || 1;
+    const fontPx = 12 / z;
+    ctx.save();
+    ctx.font = fontPx + 'px sans-serif';
+    const tw = ctx.measureText(text).width;
+    const pad = 4 / z;
+    ctx.fillStyle = 'rgba(20,20,32,0.85)';
+    ctx.fillRect(x + 10 / z, y + 10 / z, tw + pad * 2, fontPx + pad * 2);
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'top';
+    ctx.fillText(text, x + 10 / z + pad, y + 10 / z + pad);
+    ctx.restore();
   }
 
   onMouseMove(e) {
@@ -258,13 +294,30 @@ window.PIShapeTool = new (class extends PIToolBase {
       const dy = e.canvasY - this.dragStartY;
       if (!this.movingLayer && Math.hypot(dx, dy) >= this.dragThreshold) {
         this.movingLayer = true;
+        if (this.altDup && !this.dupDone) {
+          // Alt+ドラッグ: 複製を作ってそちらを動かす
+          this.dupDone = true;
+          const idx = PILayerManager.getAll().indexOf(this.pendingLayer);
+          PILayerManager.duplicateLayer(idx);
+          this.pendingLayer = PILayerManager.getActive();
+          this.snapTargets = PILayerTransform.snapTargetsFromLayers(this.pendingLayer);
+        }
         const vp = PICanvasEngine.getViewport(); if (vp) vp.style.cursor = 'move';
       }
       if (this.movingLayer) {
-        this.pendingLayer.x = this.layerStartX + dx;
-        this.pendingLayer.y = this.layerStartY + dy;
+        let dx2 = dx, dy2 = dy;
+        if (e.shiftKey) { if (Math.abs(dx2) > Math.abs(dy2)) dy2 = 0; else dx2 = 0; } // 軸固定
+        this.pendingLayer.x = this.layerStartX + dx2;
+        this.pendingLayer.y = this.layerStartY + dy2;
+        let guide = { guideX: null, guideY: null };
+        if (!e.ctrlKey) {
+          const gx = (window.PIGuides ? PIGuides.getSnapX() : []).concat(this.snapTargets ? this.snapTargets.xs : []);
+          const gy = (window.PIGuides ? PIGuides.getSnapY() : []).concat(this.snapTargets ? this.snapTargets.ys : []);
+          guide = PILayerTransform.snapToCanvas(this.pendingLayer, 6 / PICanvasEngine.getZoom(), this.moveSnapRect, gx, gy);
+        }
         PILayerManager.requestRender();
         this.redrawHandles();
+        this.drawGuideLines(guide);
       }
       return;
     }
@@ -289,7 +342,7 @@ window.PIShapeTool = new (class extends PIToolBase {
     const ctx = PICanvasEngine.getOverlayCtx();
     PICanvasEngine.configureContext(ctx);
     PICanvasEngine.clearOverlay();
-    this.drawPreview(ctx, this.startX, this.startY, e.canvasX, e.canvasY, e.shiftKey);
+    this.drawPreview(ctx, this.startX, this.startY, e.canvasX, e.canvasY, e.shiftKey, e.altKey);
   }
 
   onMouseUp(e) {
@@ -335,8 +388,9 @@ window.PIShapeTool = new (class extends PIToolBase {
         this.movingLayer = false;
         layer.x = Math.round(layer.x); layer.y = Math.round(layer.y);
         PILayerManager.requestRender();
-        PIHistoryManager.push('図形を移動');
+        PIHistoryManager.push(this.dupDone ? '図形を複製' : '図形を移動');
       }
+      this.altDup = false; this.dupDone = false;
       const vp = PICanvasEngine.getViewport();
       if (vp) vp.style.cursor = this.findShapeLayerAt(e.canvasX, e.canvasY) ? 'move' : this.cursor;
       this.redrawHandles();
@@ -347,17 +401,22 @@ window.PIShapeTool = new (class extends PIToolBase {
     PICanvasEngine.clearOverlay();
 
     let x1 = this.startX, y1 = this.startY, x2 = e.canvasX, y2 = e.canvasY;
-    if (e.shiftKey && (this.shapeType === 'rect' || this.shapeType === 'ellipse')) {
+    const isLine = this.shapeType === 'line' || this.shapeType === 'arrow';
+    if (e.shiftKey && !isLine) {
       const s = Math.min(Math.abs(x2 - x1), Math.abs(y2 - y1));
       x2 = x1 + Math.sign(x2 - x1 || 1) * s;
       y2 = y1 + Math.sign(y2 - y1 || 1) * s;
     }
-    const w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
+    let w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
+    let bx = Math.min(x1, x2), by = Math.min(y1, y2);
+    if (e.altKey && !isLine) {
+      // Alt: 始点を中心として描く
+      bx = x1 - w; by = y1 - h; w *= 2; h *= 2;
+    }
     if (Math.max(w, h) < 2) { this.redrawHandles(); return; } // 小さすぎる操作は無視
 
     const fg = document.getElementById('fg-color-input').value;
     const bg = document.getElementById('bg-color-input').value;
-    const isLine = this.shapeType === 'line' || this.shapeType === 'arrow';
     const shapeData = {
       shapeType: this.shapeType,
       fillEnabled: this.fillEnabled && !isLine,
@@ -365,10 +424,11 @@ window.PIShapeTool = new (class extends PIToolBase {
       strokeEnabled: this.strokeEnabled || isLine,
       strokeColor: fg,
       strokeWidth: this.strokeWidth,
+      strokeStyle: this.strokeStyle,
       cornerRadius: this.cornerRadius,
       w: w, h: h,
       x1: x1, y1: y1, x2: x2, y2: y2,
-      bx: Math.min(x1, x2), by: Math.min(y1, y2)
+      bx: bx, by: by
     };
     PILayerManager.addShapeLayer(shapeData);
     PIHistoryManager.push('図形');
@@ -441,6 +501,7 @@ window.PIShapeTool = new (class extends PIToolBase {
     layer.y = anchorCanvas.y - (dx * sin + dy * cos) - ch / 2;
     PILayerManager.requestRender();
     this.redrawHandles();
+    this.drawSizeBadge(PICanvasEngine.getOverlayCtx(), e.canvasX, e.canvasY, Math.round(w) + ' × ' + Math.round(h));
   }
 
   // ===== 線/矢印の端点編集 =====
@@ -470,26 +531,32 @@ window.PIShapeTool = new (class extends PIToolBase {
     this.redrawHandles();
   }
 
-  drawPreview(ctx, x1, y1, x2, y2, shiftKey) {
+  drawPreview(ctx, x1, y1, x2, y2, shiftKey, altKey) {
     ctx.save();
     PICanvasEngine.configureContext(ctx);
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     const fg = document.getElementById('fg-color-input').value;
     const bg = document.getElementById('bg-color-input').value;
+    const isLine = this.shapeType === 'line' || this.shapeType === 'arrow';
     let x = Math.min(x1, x2), y = Math.min(y1, y2);
     let w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
-    if (shiftKey && (this.shapeType === 'rect' || this.shapeType === 'ellipse')) { const s = Math.min(w, h); w = s; h = s; }
-    if (this.shapeType === 'rect') {
-      this.roundRect(ctx, x, y, w, h, this.cornerRadius);
+    if (shiftKey && !isLine) { const s = Math.min(w, h); w = s; h = s; }
+    if (altKey && !isLine) { x = x1 - w; y = y1 - h; w *= 2; h *= 2; } // 中心から描く
+    if (!isLine) {
+      PILayerManager.traceShapePath(ctx, this.shapeType, x, y, w, h, this.cornerRadius);
       if (this.fillEnabled) { ctx.fillStyle = bg; ctx.fill(); }
-      if (this.strokeEnabled) { ctx.strokeStyle = fg; ctx.lineWidth = this.strokeWidth; ctx.stroke(); }
-    } else if (this.shapeType === 'ellipse') {
-      ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-      if (this.fillEnabled) { ctx.fillStyle = bg; ctx.fill(); }
-      if (this.strokeEnabled) { ctx.strokeStyle = fg; ctx.lineWidth = this.strokeWidth; ctx.stroke(); }
+      if (this.strokeEnabled) {
+        ctx.strokeStyle = fg; ctx.lineWidth = this.strokeWidth;
+        ctx.setLineDash(PILayerManager.strokeDashFor(this.strokeStyle, this.strokeWidth));
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
     } else {
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-      ctx.strokeStyle = fg; ctx.lineWidth = this.strokeWidth; ctx.stroke();
+      ctx.strokeStyle = fg; ctx.lineWidth = this.strokeWidth;
+      ctx.setLineDash(PILayerManager.strokeDashFor(this.strokeStyle, this.strokeWidth));
+      ctx.stroke();
+      ctx.setLineDash([]);
       if (this.shapeType === 'arrow') {
         const angle = Math.atan2(y2 - y1, x2 - x1);
         const headLen = 12 + this.strokeWidth * 2;
@@ -500,17 +567,11 @@ window.PIShapeTool = new (class extends PIToolBase {
       }
     }
     ctx.restore();
-  }
-
-  roundRect(ctx, x, y, w, h, r) {
-    const rr = Math.max(0, Math.min(r || 0, Math.min(w, h) / 2));
-    ctx.beginPath();
-    ctx.moveTo(x + rr, y);
-    ctx.arcTo(x + w, y, x + w, y + h, rr);
-    ctx.arcTo(x + w, y + h, x, y + h, rr);
-    ctx.arcTo(x, y + h, x, y, rr);
-    ctx.arcTo(x, y, x + w, y, rr);
-    ctx.closePath();
+    // 描画中のサイズをカーソル脇に表示
+    const label = isLine
+      ? Math.round(Math.hypot(x2 - x1, y2 - y1)) + ' px'
+      : Math.round(w) + ' × ' + Math.round(h);
+    this.drawSizeBadge(ctx, x2, y2, label);
   }
 
   // --- 既存図形の再編集 ---
@@ -542,6 +603,9 @@ window.PIShapeTool = new (class extends PIToolBase {
 
   getProperties() {
     const self = this;
+    const TYPE_LABELS = { rect: '矩形', ellipse: '楕円', triangle: '三角', star: '星', line: '線', arrow: '矢印' };
+    const TYPES = ['rect', 'ellipse', 'triangle', 'star', 'line', 'arrow'];
+    const STYLES = [['solid', '実線'], ['dash', '破線'], ['dot', '点線']];
     const active = PILayerManager.getActive();
     if (active && active.type === 'shape') {
       const sd = active.shapeData;
@@ -549,8 +613,8 @@ window.PIShapeTool = new (class extends PIToolBase {
       const fields = [
         {
           type: 'button-group', label: '形状', key: 'stype',
-          buttons: ['rect', 'ellipse', 'line', 'arrow'].map(t => ({
-            label: { rect: '矩形', ellipse: '楕円', line: '線', arrow: '矢印' }[t],
+          buttons: TYPES.map(t => ({
+            label: TYPE_LABELS[t],
             active: sd.shapeType === t,
             onClick: () => self.editActiveShape(d => self.setShapeTypeFor(active, t), '図形の形状変更')
           }))
@@ -563,6 +627,13 @@ window.PIShapeTool = new (class extends PIToolBase {
       fields.push({ type: 'checkbox', label: '枠線', key: 'strokeEnabled', value: sd.strokeEnabled, onChange: (v) => self.editActiveShape(d => d.strokeEnabled = v, '図形の枠線') });
       fields.push({ type: 'color', label: '枠色', key: 'strokeColor', value: sd.strokeColor, onChange: (v) => self.editActiveShape(d => { d.strokeColor = v; d.strokeEnabled = true; }, '図形の枠色') });
       fields.push({ type: 'slider', label: '線幅', key: 'strokeWidth', value: sd.strokeWidth, min: 1, max: 40, onChange: (v) => self.editActiveShape(d => d.strokeWidth = parseInt(v), '図形の線幅') });
+      fields.push({
+        type: 'button-group', label: '線種', key: 'strokeStyle',
+        buttons: STYLES.map(([v, lab]) => ({
+          label: lab, active: (sd.strokeStyle || 'solid') === v,
+          onClick: () => self.editActiveShape(d => { d.strokeStyle = v; d.strokeEnabled = true; }, '図形の線種')
+        }))
+      });
       if (sd.shapeType === 'rect') {
         fields.push({ type: 'slider', label: '角丸', key: 'cornerRadius', value: sd.cornerRadius || 0, min: 0, max: 200, onChange: (v) => self.editActiveShape(d => d.cornerRadius = parseInt(v), '図形の角丸') });
       }
@@ -572,19 +643,24 @@ window.PIShapeTool = new (class extends PIToolBase {
     // 新規作成のデフォルト設定
     const fgInput = document.getElementById('fg-color-input');
     const bgInput = document.getElementById('bg-color-input');
+    const isLineType = self.shapeType === 'line' || self.shapeType === 'arrow';
     const fields = [
       {
         type: 'button-group', label: '形状', key: 'shapeType',
-        buttons: [
-          { label: '矩形', active: self.shapeType === 'rect', onClick: () => { self.shapeType = 'rect'; PIEventBus.emit('tool:properties-changed'); } },
-          { label: '楕円', active: self.shapeType === 'ellipse', onClick: () => { self.shapeType = 'ellipse'; PIEventBus.emit('tool:properties-changed'); } },
-          { label: '線', active: self.shapeType === 'line', onClick: () => { self.shapeType = 'line'; PIEventBus.emit('tool:properties-changed'); } },
-          { label: '矢印', active: self.shapeType === 'arrow', onClick: () => { self.shapeType = 'arrow'; PIEventBus.emit('tool:properties-changed'); } }
-        ]
+        buttons: TYPES.map(t => ({
+          label: TYPE_LABELS[t], active: self.shapeType === t,
+          onClick: () => { self.shapeType = t; PIEventBus.emit('tool:properties-changed'); }
+        }))
       },
-      { type: 'slider', label: '線幅', key: 'strokeWidth', value: self.strokeWidth, min: 1, max: 40, onChange: (v) => { self.strokeWidth = parseInt(v); } }
+      { type: 'slider', label: '線幅', key: 'strokeWidth', value: self.strokeWidth, min: 1, max: 40, onChange: (v) => { self.strokeWidth = parseInt(v); } },
+      {
+        type: 'button-group', label: '線種', key: 'strokeStyle',
+        buttons: STYLES.map(([v, lab]) => ({
+          label: lab, active: (self.strokeStyle || 'solid') === v,
+          onClick: () => { self.strokeStyle = v; PIEventBus.emit('tool:properties-changed'); }
+        }))
+      }
     ];
-    const isLineType = self.shapeType === 'line' || self.shapeType === 'arrow';
     if (self.shapeType === 'rect') {
       fields.push({ type: 'slider', label: '角丸', key: 'cornerRadius', value: self.cornerRadius, min: 0, max: 200, onChange: (v) => { self.cornerRadius = parseInt(v); } });
     }
