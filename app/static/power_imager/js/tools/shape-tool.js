@@ -622,7 +622,20 @@ window.PIShapeTool = new (class extends PIToolBase {
       ];
       if (!isLine) {
         fields.push({ type: 'checkbox', label: '塗り', key: 'fillEnabled', value: sd.fillEnabled, onChange: (v) => self.editActiveShape(d => d.fillEnabled = v, '図形の塗り') });
-        fields.push({ type: 'color', label: '塗り色', key: 'fillColor', value: sd.fillColor, onChange: (v) => self.editActiveShape(d => { d.fillColor = v; d.fillEnabled = true; }, '図形の塗り色') });
+        fields.push({
+          type: 'button-group', label: '塗りタイプ', key: 'fillType',
+          buttons: [['solid', '単色'], ['linear', '線形グラデ'], ['radial', '円形グラデ']].map(([v, lab]) => ({
+            label: lab, active: (sd.fillType || 'solid') === v,
+            onClick: () => self.editActiveShape(d => { d.fillType = v; d.fillEnabled = true; if (v !== 'solid' && !d.fillColor2) d.fillColor2 = '#8ec5ff'; }, '図形の塗りタイプ')
+          }))
+        });
+        fields.push({ type: 'color', label: (sd.fillType === 'linear' || sd.fillType === 'radial') ? '塗り色（開始）' : '塗り色', key: 'fillColor', value: sd.fillColor, onChange: (v) => self.editActiveShape(d => { d.fillColor = v; d.fillEnabled = true; }, '図形の塗り色') });
+        if (sd.fillType === 'linear' || sd.fillType === 'radial') {
+          fields.push({ type: 'color', label: '塗り色（終了）', key: 'fillColor2', value: sd.fillColor2 || '#8ec5ff', onChange: (v) => self.editActiveShape(d => { d.fillColor2 = v; }, '図形の塗り色') });
+          if (sd.fillType === 'linear') {
+            fields.push({ type: 'slider', label: 'グラデ角度', key: 'gradientAngle', value: sd.gradientAngle || 0, min: 0, max: 360, unit: '°', onChange: (v) => self.editActiveShape(d => { d.gradientAngle = parseInt(v); }, 'グラデ角度') });
+          }
+        }
       }
       fields.push({ type: 'checkbox', label: '枠線', key: 'strokeEnabled', value: sd.strokeEnabled, onChange: (v) => self.editActiveShape(d => d.strokeEnabled = v, '図形の枠線') });
       fields.push({ type: 'color', label: '枠色', key: 'strokeColor', value: sd.strokeColor, onChange: (v) => self.editActiveShape(d => { d.strokeColor = v; d.strokeEnabled = true; }, '図形の枠色') });
@@ -636,6 +649,25 @@ window.PIShapeTool = new (class extends PIToolBase {
       });
       if (sd.shapeType === 'rect') {
         fields.push({ type: 'slider', label: '角丸', key: 'cornerRadius', value: sd.cornerRadius || 0, min: 0, max: 200, onChange: (v) => self.editActiveShape(d => d.cornerRadius = parseInt(v), '図形の角丸') });
+      }
+      // ドロップシャドウ
+      fields.push({
+        type: 'checkbox', label: '影', key: 'shadowEnabled', value: !!sd.shadowEnabled,
+        onChange: (v) => self.editActiveShape(d => {
+          d.shadowEnabled = v;
+          if (v) {
+            if (d.shadowColor == null) d.shadowColor = '#000000';
+            if (d.shadowOpacity == null) d.shadowOpacity = 50;
+            if (d.shadowBlur == null) d.shadowBlur = 8;
+            if (d.shadowDistance == null) d.shadowDistance = 4;
+          }
+        }, '図形の影')
+      });
+      if (sd.shadowEnabled) {
+        fields.push({ type: 'color', label: '影色', key: 'shadowColor', value: sd.shadowColor || '#000000', onChange: (v) => self.editActiveShape(d => { d.shadowColor = v; }, '影色') });
+        fields.push({ type: 'slider', label: '影の濃さ', key: 'shadowOpacity', value: sd.shadowOpacity == null ? 50 : sd.shadowOpacity, min: 0, max: 100, unit: '%', onChange: (v) => self.editActiveShape(d => { d.shadowOpacity = parseInt(v); }, '影の濃さ') });
+        fields.push({ type: 'slider', label: '影ぼかし', key: 'shadowBlur', value: sd.shadowBlur == null ? 8 : sd.shadowBlur, min: 0, max: 30, onChange: (v) => self.editActiveShape(d => { d.shadowBlur = parseInt(v); }, '影ぼかし') });
+        fields.push({ type: 'slider', label: '影の距離', key: 'shadowDistance', value: sd.shadowDistance == null ? 4 : sd.shadowDistance, min: 0, max: 15, onChange: (v) => self.editActiveShape(d => { d.shadowDistance = parseInt(v); }, '影の距離') });
       }
       return { title: '図形（選択中）', fields };
     }

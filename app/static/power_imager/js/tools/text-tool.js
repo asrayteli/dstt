@@ -424,24 +424,33 @@ window.PITextTool = new (class extends PIToolBase {
     ctx.restore();
   }
 
+  // 編集ボックスはキャンバス座標系にそのまま置く（＝ズームと一緒に拡縮）。
+  // フォント・縁取り・影・背景プレート・縦書きをCSSで再現し、
+  // 確定前から実際の見た目（WYSIWYG）で入力できる。
   showEditBox() {
     this.isEditing = true;
     PICanvasEngine.clearOverlay(); // 編集中はハンドル類を消す
     PIEventBus.emit('text:overlay-active', true);
 
+    // 既存レイヤーの編集中は、二重表示を避けるためレイヤーを一時的に隠す
+    if (this.editingLayer && this.editingLayer.visible) {
+      this._hiddenLayer = this.editingLayer;
+      this.editingLayer.visible = false;
+      PILayerManager.requestRender();
+    }
+
     const overlay = document.getElementById('text-edit-overlay');
     overlay.classList.remove('hidden');
     overlay.innerHTML = '';
-
-    // オーバーレイは .canvas-wrapper 内にあり、ズーム/パンのCSS変形を一緒に受ける。
-    // そのためキャンバス座標でそのまま配置し（クリック位置に一致）、
-    // 逆スケールをかけてUIの見た目サイズはズームに関係なく一定に保つ。
     overlay.style.left = this.textData.x + 'px';
     overlay.style.top = this.textData.y + 'px';
-    this.applyOverlayScale(overlay);
+    // 回転したテキストは概ね同じ見た目になるよう箱ごと回す
+    const rot = (this.editingLayer && this.editingLayer.rotation) || 0;
+    overlay.style.transformOrigin = '50% 50%';
+    overlay.style.transform = rot ? 'rotate(' + rot + 'rad)' : '';
 
     const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+    wrapper.style.cssText = 'display:flex;flex-direction:column;gap:4px;align-items:flex-start;';
     wrapper.addEventListener('mousedown', (ev) => ev.stopPropagation());
     wrapper.addEventListener('mouseup', (ev) => ev.stopPropagation());
     wrapper.addEventListener('click', (ev) => ev.stopPropagation());
@@ -452,15 +461,13 @@ window.PITextTool = new (class extends PIToolBase {
     ta.className = 'text-edit-input';
     ta.value = this.textData.text;
     ta.placeholder = 'テキストを入力...';
-    ta.style.cssText = 'min-width:220px;min-height:60px;max-width:500px;max-height:300px;' +
-      'background:rgba(255,255,255,0.97);border:2px solid #7c6ff7;border-radius:6px;' +
-      'padding:8px;font-family:"' + this.textData.fontFamily + '",sans-serif;' +
-      'color:' + this.textData.color + ';resize:both;outline:none;' +
-      'user-select:text;-webkit-user-select:text;cursor:text;line-height:1.4;';
+    ta.wrap = 'off';
+    ta.rows = 1;
+    ta.style.cssText = 'display:block;min-width:24px;min-height:1.2em;max-width:none;max-height:none;' +
+      'border:none;outline:1.5px dashed #7c6ff7;outline-offset:2px;resize:none;overflow:hidden;' +
+      'user-select:text;-webkit-user-select:text;cursor:text;caret-color:#7c6ff7;field-sizing:content;';
     this._activeTextarea = ta;
-    this.applyEditFontSize(ta);
-    if (this.textData.bold) ta.style.fontWeight = 'bold';
-    if (this.textData.italic) ta.style.fontStyle = 'italic';
+    this.styleEditBox(ta);
 
     ta.addEventListener('keydown', (ev) => {
       ev.stopPropagation();
@@ -469,13 +476,16 @@ window.PITextTool = new (class extends PIToolBase {
     });
     ta.addEventListener('keyup', (ev) => ev.stopPropagation());
     ta.addEventListener('keypress', (ev) => ev.stopPropagation());
+    ta.addEventListener('input', () => this.autosizeEditBox(ta));
 
     const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;gap:6px;';
+    this._btnRow = btnRow;
+    btnRow.style.cssText = 'display:flex;gap:6px;margin-top:6px;';
+    this.applyBtnRowScale();
 
     const confirmBtn = document.createElement('button');
     confirmBtn.textContent = '確定 (Ctrl+Enter)';
-    confirmBtn.style.cssText = 'padding:5px 14px;background:#7c6ff7;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;';
+    confirmBtn.style.cssText = 'padding:5px 14px;background:#7c6ff7;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;';
     confirmBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       this.confirmEdit(ta.value);
@@ -483,7 +493,7 @@ window.PITextTool = new (class extends PIToolBase {
 
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = 'キャンセル';
-    cancelBtn.style.cssText = 'padding:5px 14px;background:#555;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;';
+    cancelBtn.style.cssText = 'padding:5px 14px;background:#555;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap;';
     cancelBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       this.cancelEdit();
@@ -496,56 +506,84 @@ window.PITextTool = new (class extends PIToolBase {
     wrapper.appendChild(btnRow);
     overlay.appendChild(wrapper);
 
-    // ズーム/パン中も見た目サイズと文字サイズを追従させる
+    // ズーム変更時も操作ボタンは常に画面上で同じ大きさに保つ
     if (!this._zoomFollow) {
       this._zoomFollow = () => {
         if (!this.isEditing) return;
-        const ov = document.getElementById('text-edit-overlay');
-        if (ov) this.applyOverlayScale(ov);
-        if (this._activeTextarea) this.applyEditFontSize(this._activeTextarea);
+        this.applyBtnRowScale();
       };
       PIEventBus.on('canvas:zoom-changed', this._zoomFollow);
     }
 
     requestAnimationFrame(() => {
-      this.keepEditBoxOnScreen(overlay);
+      this.autosizeEditBox(ta);
       ta.focus();
       ta.setSelectionRange(ta.value.length, ta.value.length);
     });
+    PIEventBus.emit('tool:properties-changed'); // パネルを「入力中」表示へ
   }
 
-  // 逆スケール（wrapper の scale(zoom) を打ち消し、UIを常に等倍表示にする）
-  applyOverlayScale(overlay) {
-    const zoom = PICanvasEngine.getZoom() || 1;
-    overlay.style.transformOrigin = '0 0';
-    overlay.style.transform = 'scale(' + (1 / zoom) + ')';
+  // 入力中のスタイル（textData）をCSSへ反映する＝WYSIWYGの中核。
+  // レンダラー(renderTextLayer)の余白計算と揃えて位置ずれを抑える。
+  styleEditBox(ta) {
+    const td = this.textData;
+    const platePad = td.bgEnabled ? Math.max(6, Math.round(td.size * 0.3)) : 0;
+    const padX = (td.strokeWidth || 0) * 2 + 4 + platePad;
+    const padY = (td.strokeWidth || 0) * 2 + 4 + platePad;
+    ta.style.fontFamily = '"' + td.fontFamily + '", sans-serif';
+    ta.style.fontSize = td.size + 'px';
+    ta.style.fontWeight = td.bold ? 'bold' : 'normal';
+    ta.style.fontStyle = td.italic ? 'italic' : 'normal';
+    ta.style.color = td.color || '#000';
+    ta.style.lineHeight = String(td.lineHeight || 1.3);
+    ta.style.letterSpacing = (td.letterSpacing || 0) + 'px';
+    ta.style.textAlign = td.align || 'left';
+    ta.style.writingMode = td.vertical ? 'vertical-rl' : 'horizontal-tb';
+    const deco = [];
+    if (td.underline) deco.push('underline');
+    if (td.strikethrough) deco.push('line-through');
+    ta.style.textDecoration = deco.length ? deco.join(' ') : 'none';
+    // Canvasの縁取りは「文字の背面に lineWidth=太さ×2」で描かれる。
+    // paint-order対応ブラウザなら同じ見た目（背面ストローク）を再現できる。
+    if (this._paintOrder === undefined) {
+      this._paintOrder = !!(window.CSS && CSS.supports && CSS.supports('paint-order', 'stroke'));
+    }
+    if (td.strokeWidth > 0) {
+      const cssSw = this._paintOrder ? td.strokeWidth * 2 : td.strokeWidth;
+      ta.style.webkitTextStroke = cssSw + 'px ' + (td.strokeColor || '#fff');
+      ta.style.paintOrder = this._paintOrder ? 'stroke fill' : '';
+    } else {
+      ta.style.webkitTextStroke = '';
+      ta.style.paintOrder = '';
+    }
+    const hasShadow = (td.shadowBlur > 0 || td.shadowOffsetX || td.shadowOffsetY);
+    ta.style.textShadow = hasShadow
+      ? (td.shadowOffsetX || 0) + 'px ' + (td.shadowOffsetY || 0) + 'px ' + (td.shadowBlur || 0) + 'px ' + (td.shadowColor || '#000')
+      : 'none';
+    ta.style.background = td.bgEnabled ? (td.bgColor || '#ffffff') : 'transparent';
+    ta.style.borderRadius = (td.bgEnabled ? Math.min(16, Math.round(td.size * 0.25)) : 4) + 'px';
+    ta.style.padding = padY + 'px ' + padX + 'px';
+    this.autosizeEditBox(ta);
   }
 
-  // 入力文字は実際の描画サイズ（キャンバス上の見た目）に合わせる＝WYSIWYG。
-  // 極端なズームでも編集不能にならないよう画面上のサイズだけ最小/最大を設ける。
-  applyEditFontSize(ta) {
-    const zoom = PICanvasEngine.getZoom() || 1;
-    const px = Math.max(11, Math.min(this.textData.size * zoom, 96));
-    ta.style.fontSize = px + 'px';
+  // field-sizing: content 非対応ブラウザ用のフォールバック
+  autosizeEditBox(ta) {
+    if (this._fieldSizing === undefined) {
+      this._fieldSizing = !!(window.CSS && CSS.supports && CSS.supports('field-sizing', 'content'));
+    }
+    if (this._fieldSizing) return;
+    ta.style.width = 'auto';
+    ta.style.height = 'auto';
+    ta.style.width = Math.max(24, ta.scrollWidth) + 'px';
+    ta.style.height = Math.max(24, ta.scrollHeight) + 'px';
   }
 
-  // クリック位置が画面端でも、編集ボックスがビューポート外へ出ないよう寄せる
-  keepEditBoxOnScreen(overlay) {
-    const vp = PICanvasEngine.getViewport();
-    if (!vp) return;
-    const vpRect = vp.getBoundingClientRect();
-    const rect = overlay.getBoundingClientRect();
+  // 確定/キャンセルボタンはズームに関係なく常に読める大きさで表示する
+  applyBtnRowScale() {
+    if (!this._btnRow) return;
     const zoom = PICanvasEngine.getZoom() || 1;
-    const margin = 8;
-    let dxScreen = 0, dyScreen = 0;
-    if (rect.right > vpRect.right - margin) dxScreen = (vpRect.right - margin) - rect.right;
-    if (rect.bottom > vpRect.bottom - margin) dyScreen = (vpRect.bottom - margin) - rect.bottom;
-    if (rect.left + dxScreen < vpRect.left + margin) dxScreen = (vpRect.left + margin) - rect.left;
-    if (rect.top + dyScreen < vpRect.top + margin) dyScreen = (vpRect.top + margin) - rect.top;
-    if (dxScreen === 0 && dyScreen === 0) return;
-    // overlay の left/top はキャンバス座標（wrapper 内）。画面pxはzoom倍されるので割り戻す。
-    overlay.style.left = (parseFloat(overlay.style.left) + dxScreen / zoom) + 'px';
-    overlay.style.top = (parseFloat(overlay.style.top) + dyScreen / zoom) + 'px';
+    this._btnRow.style.transformOrigin = '0 0';
+    this._btnRow.style.transform = 'scale(' + (1 / zoom) + ')';
   }
 
   confirmEdit(text) {
@@ -570,12 +608,20 @@ window.PITextTool = new (class extends PIToolBase {
 
   cancelEdit() {
     this.hideEditBox();
+    PIEventBus.emit('tool:properties-changed');
     this.redrawHandles();
   }
 
   hideEditBox() {
     this.isEditing = false;
     this._activeTextarea = null;
+    this._btnRow = null;
+    // 編集のために隠していたレイヤーを戻す
+    if (this._hiddenLayer) {
+      this._hiddenLayer.visible = true;
+      this._hiddenLayer = null;
+      PILayerManager.requestRender();
+    }
     PIEventBus.emit('text:overlay-active', false);
     const overlay = document.getElementById('text-edit-overlay');
     if (overlay) {
@@ -592,6 +638,11 @@ window.PITextTool = new (class extends PIToolBase {
   }
 
   applyEdit(label) {
+    if (this.isEditing) {
+      // 入力中はスタイルを編集ボックスへライブ反映し、レイヤーへは確定時にまとめて書き込む
+      if (this._activeTextarea) this.styleEditBox(this._activeTextarea);
+      return;
+    }
     const layer = this.targetLayer();
     if (layer) {
       layer.name = (layer.textData.text || '').substring(0, 10);
@@ -605,7 +656,7 @@ window.PITextTool = new (class extends PIToolBase {
 
   applyPreset(preset) {
     const layer = this.targetLayer();
-    const target = layer ? layer.textData : this.textData;
+    const target = this.isEditing ? this.textData : (layer ? layer.textData : this.textData);
     // 前のプリセットの縁取り/影が残らないよう、基本状態へ戻してから適用する
     const base = {
       bold: false, italic: false, underline: false, strikethrough: false,
@@ -623,7 +674,8 @@ window.PITextTool = new (class extends PIToolBase {
     const fonts = PIFontLoader.getAvailableFonts();
     const allFonts = [...fonts.system, ...fonts.google];
     const layer = self.targetLayer();
-    const td = layer ? layer.textData : self.textData;
+    // 入力中はプロパティ変更を編集ボックスへライブ反映する（確定時にレイヤーへ書き込み）
+    const td = self.isEditing ? self.textData : (layer ? layer.textData : self.textData);
     const set = (mut, label) => { mut(); self.applyEdit(label); };
     const fields = [
         {
@@ -669,7 +721,7 @@ window.PITextTool = new (class extends PIToolBase {
           presets: self.presets.map(p => ({ label: p.name, onClick: () => self.applyPreset(p) }))
         }
       ];
-    if (layer) {
+    if (layer && !self.isEditing) {
       // 内容の編集はダブルクリックでも開ける（発見性のためボタンも用意）
       fields.unshift({
         type: 'button', label: '✎ テキストを編集（ダブルクリック）', key: 'edit',
@@ -686,6 +738,7 @@ window.PITextTool = new (class extends PIToolBase {
         }
       });
     }
-    return { title: layer ? 'テキスト（選択中）' : 'テキスト（新規）', fields };
+    const title = self.isEditing ? 'テキスト（入力中・ライブ反映）' : (layer ? 'テキスト（選択中）' : 'テキスト（新規）');
+    return { title, fields };
   }
 })();

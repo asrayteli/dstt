@@ -299,6 +299,8 @@ window.PITransformTool = new (class extends PIToolBase {
     if (sd.x1 !== undefined) { sd.x1 *= sx; sd.y1 *= sy; sd.x2 *= sx; sd.y2 *= sy; }
     sd.strokeWidth = Math.max(1, sd.strokeWidth * avg);
     if (sd.cornerRadius) sd.cornerRadius *= avg;
+    if (sd.shadowBlur) sd.shadowBlur = Math.min(30, sd.shadowBlur * avg);
+    if (sd.shadowDistance) sd.shadowDistance = Math.min(15, sd.shadowDistance * avg);
     this.keepCenterReRender(layer, () => PILayerManager.renderShapeLayer(layer));
   }
 

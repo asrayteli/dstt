@@ -347,6 +347,57 @@ window.PILayerManager = (function () {
     return [];
   }
 
+  function hexToRgba(hex, alpha) {
+    try {
+      const rgb = PIColorUtils.hexToRgb(hex || '#000000');
+      return 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',' + alpha + ')';
+    } catch (e) {
+      return 'rgba(0,0,0,' + alpha + ')';
+    }
+  }
+
+  // 塗りスタイル（単色 / 線形グラデーション / 円形グラデーション）
+  function shapeFillStyle(ctx, sd, x, y, w, h) {
+    if (sd.fillType === 'linear') {
+      const ang = (sd.gradientAngle || 0) * Math.PI / 180;
+      const cx = x + w / 2, cy = y + h / 2;
+      const cos = Math.cos(ang), sin = Math.sin(ang);
+      const len = (Math.abs(cos) * w + Math.abs(sin) * h) / 2;
+      const g = ctx.createLinearGradient(cx - cos * len, cy - sin * len, cx + cos * len, cy + sin * len);
+      g.addColorStop(0, sd.fillColor || '#ffffff');
+      g.addColorStop(1, sd.fillColor2 || '#8ec5ff');
+      return g;
+    }
+    if (sd.fillType === 'radial') {
+      const cx = x + w / 2, cy = y + h / 2;
+      const r = Math.max(1, Math.hypot(w, h) / 2);
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, sd.fillColor || '#ffffff');
+      g.addColorStop(1, sd.fillColor2 || '#8ec5ff');
+      return g;
+    }
+    return sd.fillColor;
+  }
+
+  // ドロップシャドウ。SHAPE_PAD(48px)に収まるよう ぼかし≤30 / 距離≤15 に制限する。
+  function applyShapeShadow(ctx, sd) {
+    if (!sd.shadowEnabled) return false;
+    const op = (sd.shadowOpacity == null ? 50 : sd.shadowOpacity) / 100;
+    ctx.shadowColor = hexToRgba(sd.shadowColor || '#000000', Math.max(0, Math.min(1, op)));
+    ctx.shadowBlur = Math.max(0, Math.min(30, sd.shadowBlur == null ? 8 : sd.shadowBlur));
+    const d = Math.max(-15, Math.min(15, sd.shadowDistance == null ? 4 : sd.shadowDistance));
+    ctx.shadowOffsetX = d;
+    ctx.shadowOffsetY = d;
+    return true;
+  }
+
+  function clearShapeShadow(ctx) {
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+  }
+
   function renderShapeLayer(layer) {
     const sd = layer.shapeData;
     if (!sd) return;
@@ -367,17 +418,26 @@ window.PILayerManager = (function () {
 
     if (!isLine) {
       traceShapePath(ctx, sd.shapeType, ox, oy, bw, bh, sd.cornerRadius);
-      if (sd.fillEnabled) { ctx.fillStyle = sd.fillColor; ctx.fill(); }
+      // 影は最初の描画（塗り、無ければ枠線）にだけ乗せる
+      let shadowPending = applyShapeShadow(ctx, sd);
+      if (sd.fillEnabled) {
+        ctx.fillStyle = shapeFillStyle(ctx, sd, ox, oy, bw, bh);
+        ctx.fill();
+        if (shadowPending) { clearShapeShadow(ctx); shadowPending = false; }
+      }
       if (sd.strokeEnabled && sw > 0) {
         ctx.strokeStyle = sd.strokeColor; ctx.lineWidth = sw;
         ctx.setLineDash(strokeDashFor(sd.strokeStyle, sw));
         ctx.stroke();
         ctx.setLineDash([]);
+        if (shadowPending) { clearShapeShadow(ctx); shadowPending = false; }
       }
+      if (shadowPending) clearShapeShadow(ctx);
     } else {
       const minX = Math.min(sd.x1, sd.x2), minY = Math.min(sd.y1, sd.y2);
       const lx1 = ox + (sd.x1 - minX), ly1 = oy + (sd.y1 - minY);
       const lx2 = ox + (sd.x2 - minX), ly2 = oy + (sd.y2 - minY);
+      const hadShadow = applyShapeShadow(ctx, sd);
       ctx.strokeStyle = sd.strokeColor; ctx.lineWidth = Math.max(1, sw);
       ctx.setLineDash(strokeDashFor(sd.strokeStyle, Math.max(1, sw)));
       ctx.beginPath(); ctx.moveTo(lx1, ly1); ctx.lineTo(lx2, ly2); ctx.stroke();
@@ -392,6 +452,7 @@ window.PILayerManager = (function () {
         ctx.lineTo(lx2 - headLen * Math.cos(angle + Math.PI / 6), ly2 - headLen * Math.sin(angle + Math.PI / 6));
         ctx.stroke();
       }
+      if (hadShadow) clearShapeShadow(ctx);
     }
     resyncMask(layer);
   }
