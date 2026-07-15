@@ -18,6 +18,7 @@
     PIBrushCursor.init();
     PIColorPanel.init();
     PIGuides.init();
+    PIContextMenu.init();
 
     setupFileInput();
     setupDragDrop();
@@ -285,6 +286,7 @@
       else if (ctrl && e.key.toLowerCase() === 'a') { e.preventDefault(); PIEventBus.emit('tool:switch', 'select'); if (window.PISelectTool) PISelectTool.selectAll(); }
       else if (ctrl && e.key.toLowerCase() === 'd') { e.preventDefault(); if (window.PISelectTool) PISelectTool.clearSelection(); }
       else if (ctrl && e.key.toLowerCase() === 'j') { e.preventDefault(); const idx = PILayerManager.getActiveIndex(); if (idx >= 0) { PILayerManager.duplicateLayer(idx); PIHistoryManager.push('レイヤー複製'); } }
+      else if (ctrl && e.key.toLowerCase() === 'x') { e.preventDefault(); if (window.PIContextMenu) PIContextMenu.cutActiveLayer(); }
       else if (ctrl && e.key.toLowerCase() === 't') { e.preventDefault(); PIEventBus.emit('tool:switch', 'transform'); }
       else if (ctrl && (e.key === '0')) { e.preventDefault(); PICanvasEngine.fitToViewport(); }
       else if (ctrl && (e.key === '1')) { e.preventDefault(); PICanvasEngine.setZoom(1); }

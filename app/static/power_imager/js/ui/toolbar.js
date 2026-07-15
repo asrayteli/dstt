@@ -61,6 +61,7 @@ window.PIToolbar = (function () {
 
   function onViewportMouse(e) {
     if (!currentTool) return;
+    if (e.button === 2) return; // 右クリックはコンテキストメニュー専用
     if (PIModal.isOpen()) return;
     const target = e.target;
     if (target.closest('#text-edit-overlay')) return;
@@ -93,6 +94,7 @@ window.PIToolbar = (function () {
 
   function onViewportMouseUp(e) {
     if (!currentTool) return;
+    if (e.button === 2) return; // 右クリックはコンテキストメニュー専用
     if (PIModal.isOpen()) return;
     const pos = PICanvasEngine.viewportToCanvas(e.clientX, e.clientY);
     const data = {
