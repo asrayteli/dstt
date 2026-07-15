@@ -135,6 +135,31 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
 .qm-hr { border:none; border-top:1px solid #333; }
 .qm-img { display:block; max-width:100%; }
 
+/* 明細表（数量×単価の自動計算つき） */
+.qm-items-banner { display:flex; align-items:baseline; gap:12px; padding:2px 2px 8px; border-bottom:3px double #333; margin-bottom:12px; }
+.qm-items-banner .lbl { font-size:18px; font-weight:800; letter-spacing:.08em; }
+.qm-items-banner .amt { font-size:24px; font-weight:800; letter-spacing:.04em; }
+.qm-items-banner .sfx { font-size:13px; }
+.qm-items-table { width:100%; border-collapse:collapse; table-layout:fixed; }
+.qm-items-table th, .qm-items-table td { border:1px solid #333; padding:6px 8px; font-size:13px; line-height:1.55;
+  vertical-align:top; word-break:break-word; }
+.qm-items-table th { font-weight:700; text-align:center; }
+.qm-items-table td.num { text-align:right; }
+.qm-items-table td.ctr { text-align:center; }
+.qm-items-table tfoot td { font-weight:700; }
+.qm-items-table tfoot td.flabel { text-align:right; }
+.qm-items-addrow { display:none; margin-top:6px; }
+.qm-app:not(.previewing) .qm-block.selected .qm-items-addrow { display:flex; }
+.qm-items-addrow button { flex:1; height:26px; border:1px dashed #93c5fd; border-radius:6px; background:#eff6ff;
+  color:#2563eb; font-size:.72rem; font-weight:700; cursor:pointer; }
+.qm-items-addrow button:hover { background:#dbeafe; }
+
+/* 改ページ位置のめやすガイド（編集時のみ表示・印刷には出さない） */
+.qm-page-guide { position:absolute; left:0; right:0; border-top:2px dashed #60a5fa; pointer-events:none; z-index:6; }
+.qm-page-guide span { position:absolute; right:8px; top:3px; background:#3b82f6; color:#fff; font-size:10px; font-weight:700;
+  padding:2px 8px; border-radius:9999px; opacity:.9; white-space:nowrap; }
+.qm-app.previewing .qm-page-guide { display:none; }
+
 /* columns editing helper outline */
 .qm-app:not(.previewing) .qm-col { outline:1px dotted #e2e8f0; outline-offset:2px; }
 
@@ -199,7 +224,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
 /* ============ Print ============ */
 @media print {
   @page { size:A4; margin:0; }
-  html, body { background:#fff !important; margin:0 !important; padding:0 !important; }
+  html, body { background:#fff !important; margin:0 !important; padding:0 !important; overflow:visible !important; }
   #app-sidebar, #sidebar-toggle, nav, header, footer,
   .qm-toolbar, .qm-panel, .qm-zoombar, .qm-inlinebar, .qm-modal, .qm-toast,
   .qm-block-tools, .qm-block-handle { display:none !important; }
@@ -207,7 +232,9 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   .flex.min-h-screen { display:block !important; }
   .qm-app { margin:0 !important; height:auto !important; background:#fff !important; display:block !important; }
   .qm-workspace { display:block !important; }
-  .qm-canvas { padding:0 !important; overflow:visible !important; display:block !important; }
+  /* シートの外側（キャンバスのグレー背景）が紙面に印字されないよう白にする */
+  .qm-canvas { padding:0 !important; overflow:visible !important; display:block !important; background:#fff !important; }
+  .qm-page-guide, .qm-items-addrow { display:none !important; }
   .qm-zoombar { display:none !important; }
   .qm-sheet-wrap { transform:none !important; }
   /* 画面編集時は 297mm の紙面に見せるが、印刷では内容の高さに合わせて
@@ -258,13 +285,14 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
             <button class="qm-add-btn" data-add="heading"><span class="ico">🅷</span>大見出し</button>
             <button class="qm-add-btn" data-add="columns"><span class="ico">▥</span>2段組</button>
             <button class="qm-add-btn" data-add="table"><span class="ico">▦</span>項目表</button>
+            <button class="qm-add-btn" data-add="items"><span class="ico">🧮</span>明細表（自動計算）</button>
             <button class="qm-add-btn" data-add="box"><span class="ico">▢</span>記入枠</button>
             <button class="qm-add-btn" data-add="divider"><span class="ico">―</span>区切り線</button>
             <button class="qm-add-btn" data-add="spacer"><span class="ico">↕</span>余白</button>
             <button class="qm-add-btn" data-add="image"><span class="ico">🖼</span>画像</button>
             <button class="qm-add-btn" id="btnAddIssuer" style="grid-column:1 / -1"><span class="ico">🏢</span>差出人（基本情報を挿入）</button>
           </div>
-          <p class="qm-hint">追加したブロックはドラッグ（左の⋮⋮）で並べ替えできます。</p>
+          <p class="qm-hint">追加したブロックはドラッグ（左の⋮⋮）で並べ替えできます。選択中は Delete で削除、Ctrl+D で複製、Alt+↑↓ で移動、Ctrl+ホイールで拡大縮小できます。</p>
         </div>
       </div>
       <div class="qm-sec">
@@ -276,7 +304,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
         <div class="qm-sec-body">
           <button class="qm-tb-btn" style="width:100%;background:#2563eb;color:#fff;border-color:#2563eb;margin-bottom:6px" id="btnOpenTemplates">📁 テンプレートから作成・保存</button>
           <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0;margin-bottom:6px" id="btnResetTemplate">白紙のお見積書に戻す</button>
-          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnLoadUnyou">運行費用のひな形を読み込む</button>
+          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0;margin-bottom:6px" id="btnLoadUnyou">運行費用のひな形を読み込む</button>
+          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnLoadItemized">明細表つきのひな形を読み込む</button>
           <p class="qm-hint">基本テンプレート（会社共通）とマイテンプレート（この端末）を管理できます。</p>
         </div>
       </div>
@@ -383,7 +412,34 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   // 親コンテンツ領域の余白を除去してエディタを全幅・全高で使う。
   (function neutralizeShell(){
     const m=document.getElementById('app-main-content');
-    if(m){ m.style.padding='0'; m.style.maxWidth='100%'; }
+    // min-width:0 が無いとフレックス子の最小幅にシートの実寸(210mm)が効いて
+    // 全体が右へはみ出し、インスペクタや「PDF出力」ボタンが画面外に切れる。
+    if(m){ m.style.padding='0'; m.style.maxWidth='100%'; m.style.minWidth='0'; }
+    // エディタは内部スクロールで完結するため、ページ全体のスクロールバーを消す
+    // （二重スクロールと、スクロールバー分の横はみ出しを防ぐ）。
+    document.documentElement.style.overflow='hidden';
+    document.body.style.overflow='hidden';
+    // 全体サイドバーのツール一覧は画面より縦に長く、そのままだとページ全体が
+    // スクロール可能になり scrollIntoView 等でツールバーごと画面外へ流れる。
+    // サイドバー内部だけをスクロールさせて、ページの高さを画面に固定する。
+    const sb=document.getElementById('app-sidebar');
+    if(sb){ sb.style.height='100vh'; sb.style.overflowY='auto'; }
+  })();
+
+  // 全体サイドバーの切替ボタン（画面左上に固定表示）がツールバーの
+  // 「一覧」ボタンに重ならないよう、サイドバー非表示時は左に余白を空ける。
+  function updateShellOffset(){
+    const sb=document.getElementById('app-sidebar');
+    const tb=document.querySelector('.qm-toolbar');
+    if(!tb) return;
+    const hidden=!sb || getComputedStyle(sb).display==='none';
+    tb.style.paddingLeft = hidden ? '64px' : '12px';
+  }
+  updateShellOffset();
+  (function(){
+    const tgl=document.getElementById('sidebar-toggle');
+    if(tgl) tgl.addEventListener('click', ()=> setTimeout(updateShellOffset, 50));
+    window.addEventListener('resize', updateShellOffset);
   })();
 
   /* ------------------------------------------------------------------
@@ -407,6 +463,41 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   const esc = (s)=> String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
   function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1900); }
+
+  /* ------------------------------------------------------------------
+     数値ユーティリティ（明細表の自動計算用）
+     ------------------------------------------------------------------ */
+  // 「1,200」「１２００」「¥1200」などの表記ゆれを数値にする。数値にできなければ null。
+  function parseNum(raw){
+    let s=String(raw==null?'':raw).replace(/<[^>]*>/g,'').replace(/&nbsp;/g,' ');
+    s=s.replace(/[０-９]/g, d=>String.fromCharCode(d.charCodeAt(0)-0xFEE0))
+       .replace(/．/g,'.').replace(/[－ー−]/g,'-')
+       .replace(/[,，、￥¥\s円]/g,'');
+    if(!s) return null;
+    const v=Number(s);
+    return isFinite(v)?v:null;
+  }
+  function fmtMoney(n){
+    if(n==null) return '';
+    return n.toLocaleString('ja-JP',{maximumFractionDigits:2});
+  }
+  const ROUNDERS={ floor:Math.floor, round:Math.round, ceil:Math.ceil };
+
+  // 明細表の金額・小計・消費税・合計を計算する。
+  // 数量が空欄や「一式」など数値でない場合は、単価をそのまま金額として扱う。
+  function calcItems(c){
+    const amounts=(c.rows||[]).map(r=>{
+      const qty=parseNum(r.qty), price=parseNum(r.price);
+      if(price==null) return null;
+      if(qty==null) return price;
+      return Math.round(qty*price*100)/100;
+    });
+    const subtotal=amounts.reduce((a,v)=>a+(v||0),0);
+    const rate=(c.taxMode==='none')?0:(parseFloat(c.taxRate)||0);
+    const rounder=ROUNDERS[c.rounding]||Math.floor;
+    const tax=(c.taxMode==='none')?0:rounder(subtotal*rate/100);
+    return { amounts, subtotal, tax, total:subtotal+tax, rate };
+  }
 
   /* ------------------------------------------------------------------
      Default template (添付見本の忠実再現)
@@ -483,6 +574,40 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
             rows: emptyRows(['1.超過料金','2.早朝・深夜割増料金','3.超過走行','4.有料道路代','5.駐車場代','6.宿泊雑費']) } },
         { id:uid(), type:'box', style:baseStyle({marginBottom:6}),
           content:{ title:'【特記】', html:'', minHeight:120, borderColor:'#333333', borderWidth:1 } }
+      ]
+    };
+  }
+
+  // 明細表（自動計算）を中心にした記入用ひな形。値・宛先・差出人は空欄で、
+  // 個人情報や実データは一切含めない。
+  function itemizedSkeletonDoc(){
+    const emptyItem=()=>({name:'', qty:'', unit:'', price:'', note:''});
+    return {
+      version:1,
+      page:basePage(),
+      blocks:[
+        { id:uid(), type:'text', style:baseStyle({align:'right', fontSize:14, marginBottom:6}),
+          content:{ html: esc(reiwaToday()) } },
+        { id:uid(), type:'text', style:baseStyle({align:'center', fontSize:30, bold:true, letterSpacing:0.32, marginTop:4, marginBottom:18}),
+          content:{ html:'お見積書' } },
+        { id:uid(), type:'columns', style:baseStyle({marginBottom:16}),
+          content:{ gap:16, cols:[
+            { width:52, align:'left', fontSize:14,
+              html:'<span style="border-bottom:1px solid #1a1a1a;display:inline-block;min-width:170px;">&nbsp;</span>　御中<br><span style="font-size:13px;">次のとおりお見積り申し上げます。</span>' },
+            { width:48, align:'right', fontSize:13, ph:'差出人（会社名・住所・TEL・担当者）を入力', html:'' }
+          ]} },
+        { id:uid(), type:'items', style:baseStyle({marginBottom:14, fontSize:13}),
+          content:{ title:null, banner:true, bannerLabel:'御見積金額',
+            heads:{name:'品名・仕様', qty:'数量', unit:'単位', price:'単価', amount:'金額', note:'備考'},
+            rows:[emptyItem(), emptyItem(), emptyItem(), emptyItem(), emptyItem()],
+            showUnit:true, showNote:false, headShade:true,
+            taxRate:10, taxMode:'excluded', rounding:'floor',
+            borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:8 } },
+        { id:uid(), type:'table', style:baseStyle({marginBottom:14, fontSize:13}),
+          content:{ title:'【お取引条件】', labelWidth:24, labelShade:false, borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9,
+            rows:[{label:'見積有効期限', value:''},{label:'お支払条件', value:''},{label:'納期・実施日', value:''}] } },
+        { id:uid(), type:'box', style:baseStyle({marginBottom:6}),
+          content:{ title:'【特記】', html:'', minHeight:90, borderColor:'#333333', borderWidth:1 } }
       ]
     };
   }
@@ -591,6 +716,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       });
       table.appendChild(tb);
       inner.appendChild(table);
+    } else if(b.type==='items'){
+      renderItemsInner(inner, b);
     } else if(b.type==='box'){
       if(c.title!=null){
         const h = el('div','qm-box-title');
@@ -634,6 +761,119 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     return inner;
   }
 
+  /* 明細表（自動計算）の描画。金額・小計・消費税・合計は編集不可の自動計算値。 */
+  const ITEM_HEADS_DEFAULT={name:'品名・仕様', qty:'数量', unit:'単位', price:'単価', amount:'金額', note:'備考'};
+  function renderItemsInner(inner, b){
+    const s=b.style||{}, c=b.content||{};
+    const heads=Object.assign({}, ITEM_HEADS_DEFAULT, c.heads||{});
+    const bc=c.borderColor||'#333', bw=(c.borderWidth==null?1:c.borderWidth);
+    const pad=(c.cellPadY==null?6:c.cellPadY)+'px '+(c.cellPadX==null?8:c.cellPadX)+'px';
+    const fs=(s.fontSize||13)+'px';
+    const calc=calcItems(c);
+
+    if(c.title!=null){
+      const h=el('div','qm-kv-title');
+      h.setAttribute('data-ce','title'); h.setAttribute('contenteditable','true');
+      if(!c.title) h.setAttribute('data-ph','見出し');
+      h.innerHTML=c.title;
+      inner.appendChild(h);
+    }
+    if(c.banner){
+      const bn=el('div','qm-items-banner');
+      bn.style.borderBottomColor=bc;
+      const lbl=el('span','lbl');
+      lbl.setAttribute('data-ce','bannerLabel'); lbl.setAttribute('contenteditable','true');
+      if(!c.bannerLabel) lbl.setAttribute('data-ph','御見積金額');
+      lbl.innerHTML=c.bannerLabel||'';
+      const amt=el('span','amt'); amt.setAttribute('data-banner-amt','1');
+      amt.textContent='￥ '+fmtMoney(calc.total)+' -';
+      const sfx=el('span','sfx'); sfx.setAttribute('data-banner-sfx','1');
+      sfx.textContent=(c.taxMode==='none')?'':'（税込）';
+      bn.appendChild(lbl); bn.appendChild(amt); bn.appendChild(sfx);
+      inner.appendChild(bn);
+    }
+
+    const cols=[
+      {key:'name',  width:null, cls:''},
+      {key:'qty',   width:10,  cls:'num'},
+      ...(c.showUnit?[{key:'unit', width:9, cls:'ctr'}]:[]),
+      {key:'price', width:15,  cls:'num'},
+      {key:'amount',width:17,  cls:'num'},
+      ...(c.showNote?[{key:'note', width:18, cls:''}]:[]),
+    ];
+    const cellCss=(td)=>{ td.style.border=bw+'px solid '+bc; td.style.padding=pad; td.style.fontSize=fs; };
+
+    const table=el('table','qm-items-table');
+    const thead=el('thead'); const hr=el('tr');
+    cols.forEach(col=>{
+      const th=el('th');
+      cellCss(th);
+      if(col.width) th.style.width=col.width+'%';
+      if(c.headShade) th.style.background='#f5f6f8';
+      th.setAttribute('data-ce','head:'+col.key); th.setAttribute('contenteditable','true');
+      th.innerHTML=heads[col.key]||'';
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr); table.appendChild(thead);
+
+    const tbody=el('tbody');
+    (c.rows||[]).forEach((row,i)=>{
+      const tr=el('tr');
+      cols.forEach(col=>{
+        const td=el('td', col.cls);
+        cellCss(td);
+        if(col.key==='amount'){
+          td.setAttribute('data-amt', String(i));
+          td.textContent=fmtMoney(calc.amounts[i]);
+        }else{
+          td.setAttribute('data-ce','item:'+col.key+':'+i);
+          td.setAttribute('contenteditable','true');
+          td.innerHTML=row[col.key]||'';
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+
+    const tfoot=el('tfoot');
+    const foot=[['subtotal','小計', calc.subtotal]];
+    if(c.taxMode!=='none') foot.push(['tax','消費税（'+calc.rate+'%）', calc.tax]);
+    foot.push(['total', (c.taxMode==='none')?'合計':'合計（税込）', calc.total]);
+    foot.forEach(([key,label,val])=>{
+      const tr=el('tr');
+      const lt=el('td','flabel'); cellCss(lt); lt.colSpan=cols.length-1; lt.textContent=label;
+      lt.setAttribute('data-sum-label', key);
+      const vt=el('td','num'); cellCss(vt); vt.setAttribute('data-sum', key); vt.textContent=fmtMoney(val);
+      tr.appendChild(lt); tr.appendChild(vt);
+      tfoot.appendChild(tr);
+    });
+    table.appendChild(tfoot);
+    inner.appendChild(table);
+
+    // 選択中だけ表示される「＋ 行を追加」（印刷・プレビューには出ない）
+    const addWrap=el('div','qm-items-addrow');
+    const addBtn=el('button'); addBtn.type='button'; addBtn.textContent='＋ 行を追加';
+    addBtn.setAttribute('data-act','items-addrow');
+    addWrap.appendChild(addBtn);
+    inner.appendChild(addWrap);
+  }
+
+  /* 明細表の計算結果セルだけを書き換える（再描画せずカーソルを保つ） */
+  function updateItemsComputed(id){
+    const b=findBlock(id); if(!b || b.type!=='items') return;
+    const wrap=$('.qm-block[data-id="'+id+'"]'); if(!wrap) return;
+    const calc=calcItems(b.content);
+    wrap.querySelectorAll('[data-amt]').forEach(td=>{
+      td.textContent=fmtMoney(calc.amounts[+td.getAttribute('data-amt')]);
+    });
+    const set=(sel,v)=>{ const n=wrap.querySelector(sel); if(n) n.textContent=v; };
+    set('[data-sum="subtotal"]', fmtMoney(calc.subtotal));
+    set('[data-sum="tax"]', fmtMoney(calc.tax));
+    set('[data-sum="total"]', fmtMoney(calc.total));
+    set('[data-banner-amt]', '￥ '+fmtMoney(calc.total)+' -');
+  }
+
   function renderBlock(b){
     const wrap = el('div','qm-block');
     wrap.setAttribute('data-id', b.id);
@@ -644,8 +884,9 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     wrap.appendChild(handle);
     // tools
     const tools = el('div','qm-block-tools');
-    const del = el('div','qm-bt del'); del.innerHTML='×'; del.title='削除'; del.setAttribute('data-act','del');
-    tools.appendChild(del);
+    const dup = el('div','qm-bt mv'); dup.innerHTML='⧉'; dup.title='複製 (Ctrl+D)'; dup.setAttribute('data-act','dup');
+    const del = el('div','qm-bt del'); del.innerHTML='×'; del.title='削除 (Delete)'; del.setAttribute('data-act','del');
+    tools.appendChild(dup); tools.appendChild(del);
     wrap.appendChild(tools);
     // inner
     wrap.appendChild(renderBlockInner(b));
@@ -878,6 +1119,47 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       add.addEventListener('click',()=>{ c.rows.push({label:'', value:''}); commit(); selectBlock(b.id); });
       rl.appendChild(add);
       frag.appendChild(rl);
+    } else if(b.type==='items'){
+      frag.appendChild(checkRow('御見積金額を上に大きく表示', !!c.banner, v=>{ c.banner=v; commit(); selectBlock(b.id); }));
+      const rt=el('div','qm-row2');
+      rt.appendChild(ctrlField('税率(%)', numInput(c.taxRate==null?10:c.taxRate,0,30,1, v=>{ c.taxRate=v; refreshBlockElement(b.id); commit(false);})));
+      const taxSeg=ctrlField('税の扱い', segment([['excluded','外税'],['none','税なし']], c.taxMode||'excluded', v=>{ c.taxMode=v; commit(); selectBlock(b.id);}));
+      rt.appendChild(taxSeg);
+      frag.appendChild(rt);
+      frag.appendChild(ctrlField('税の端数処理', segment([['floor','切捨て'],['round','四捨五入'],['ceil','切上げ']], c.rounding||'floor', v=>{ c.rounding=v; refreshBlockElement(b.id); commit(false);})));
+      frag.appendChild(checkRow('単位の列を表示', !!c.showUnit, v=>{ c.showUnit=v; commit(); selectBlock(b.id); }));
+      frag.appendChild(checkRow('備考の列を表示', !!c.showNote, v=>{ c.showNote=v; commit(); selectBlock(b.id); }));
+      frag.appendChild(checkRow('見出し行に背景色', c.headShade!==false, v=>{ c.headShade=v; refreshBlockElement(b.id); commit(false);}));
+      frag.appendChild(checkRow('タイトル見出しを表示', c.title!=null, v=>{ c.title=v?(c.title||'【御見積明細】'):null; commit(); selectBlock(b.id); }));
+      const rb=el('div','qm-row2');
+      rb.appendChild(ctrlField('罫線太さ', numInput(c.borderWidth==null?1:c.borderWidth,0,6,1, v=>{ c.borderWidth=v; refreshBlockElement(b.id); commit(false);})));
+      rb.appendChild(ctrlField('罫線色', colorCtrl(c.borderColor||'#333', v=>{ c.borderColor=v; refreshBlockElement(b.id); commit(false);})));
+      frag.appendChild(rb);
+      const r2=el('div','qm-row2');
+      r2.appendChild(ctrlField('文字px', numInput(b.style.fontSize||13,8,40,1, v=>{ b.style.fontSize=v; refreshBlockElement(b.id); commit(false);})));
+      r2.appendChild(ctrlField('セル余白', numInput(c.cellPadY==null?6:c.cellPadY,0,24,1, v=>{ c.cellPadY=v; refreshBlockElement(b.id); commit(false);})));
+      frag.appendChild(r2);
+      // 行の編集（品名で並べ替え・削除）
+      const rl=el('div','qm-field'); const ll=el('label'); ll.textContent='行の編集'; rl.appendChild(ll);
+      const list=el('div','qm-rowlist');
+      (c.rows||[]).forEach((row,i)=>{
+        const it=el('div','qm-rowitem');
+        const lab=el('input','lbl'); lab.value=(row.name||'').replace(/<[^>]+>/g,''); lab.placeholder='品名';
+        lab.addEventListener('input',()=>{ row.name=esc(lab.value); const cell=$('.qm-block[data-id="'+b.id+'"] [data-ce="item:name:'+i+'"]'); if(cell&&document.activeElement!==cell) cell.innerHTML=row.name; markDirty(); });
+        it.appendChild(lab);
+        const up=el('button','qm-mini'); up.textContent='↑'; up.title='上へ'; up.addEventListener('click',()=>{ if(i>0){ const t=c.rows[i-1]; c.rows[i-1]=c.rows[i]; c.rows[i]=t; commit(); selectBlock(b.id);} });
+        const dn=el('button','qm-mini'); dn.textContent='↓'; dn.title='下へ'; dn.addEventListener('click',()=>{ if(i<c.rows.length-1){ const t=c.rows[i+1]; c.rows[i+1]=c.rows[i]; c.rows[i]=t; commit(); selectBlock(b.id);} });
+        const rm=el('button','qm-mini danger'); rm.textContent='×'; rm.title='行を削除'; rm.addEventListener('click',()=>{ c.rows.splice(i,1); commit(); selectBlock(b.id); });
+        it.appendChild(up); it.appendChild(dn); it.appendChild(rm);
+        list.appendChild(it);
+      });
+      rl.appendChild(list);
+      const add=el('button','qm-mini'); add.textContent='＋ 行を追加'; add.style.marginTop='6px'; add.style.width='100%';
+      add.addEventListener('click',()=>{ c.rows.push({name:'', qty:'', unit:'', price:'', note:''}); commit(); selectBlock(b.id); });
+      rl.appendChild(add);
+      frag.appendChild(rl);
+      const hint=el('p','qm-hint'); hint.textContent='金額＝数量×単価を自動計算します。数量が空欄や「一式」のときは単価をそのまま金額にします。';
+      frag.appendChild(hint);
     } else if(b.type==='box'){
       frag.appendChild(ctrlField('枠の高さ(px)', numInput(c.minHeight||220,40,700,10, v=>{ c.minHeight=v; refreshBlockElement(b.id); commit(false);})));
       const r=el('div','qm-row2');
@@ -909,7 +1191,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     const box = $('#inspector'); box.innerHTML='';
     if(!selectedId){ box.innerHTML='<div class="qm-empty-note">ブロックをクリックすると、<br>ここで文字・色・罫線・余白などを<br>細かく編集できます。</div>'; return; }
     const b = findBlock(selectedId); if(!b){ box.innerHTML=''; return; }
-    const names={text:'テキスト',heading:'大見出し',columns:'2段組',table:'項目表',box:'記入枠',divider:'区切り線',spacer:'余白',image:'画像'};
+    const names={text:'テキスト',heading:'大見出し',columns:'2段組',table:'項目表',items:'明細表（自動計算）',box:'記入枠',divider:'区切り線',spacer:'余白',image:'画像'};
     const hd=el('div'); hd.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 14px 4px';
     const tt=el('div'); tt.textContent=names[b.type]||b.type; tt.style.cssText='font-size:.9rem;font-weight:800;color:#1f2933';
     const idx=findIndex(b.id);
@@ -936,6 +1218,16 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     else if(type==='heading'){ base.content={html:'見出し'}; base.style=baseStyle({fontSize:20,bold:true,marginBottom:8}); }
     else if(type==='columns'){ base.content={gap:16, cols:[{width:50,align:'left',fontSize:13,html:''},{width:50,align:'right',fontSize:13,html:''}]}; }
     else if(type==='table'){ base.content={title:'見出し', labelWidth:26, labelShade:false, borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:9, rows:[{label:'項目',value:'内容'},{label:'項目',value:'内容'}]}; base.style=baseStyle({fontSize:13}); }
+    else if(type==='items'){
+      const emptyItem=()=>({name:'', qty:'', unit:'', price:'', note:''});
+      base.content={ title:null, banner:false, bannerLabel:'御見積金額',
+        heads:Object.assign({}, ITEM_HEADS_DEFAULT),
+        rows:[emptyItem(), emptyItem(), emptyItem()],
+        showUnit:true, showNote:false, headShade:true,
+        taxRate:10, taxMode:'excluded', rounding:'floor',
+        borderColor:'#333333', borderWidth:1, cellPadY:6, cellPadX:8 };
+      base.style=baseStyle({fontSize:13});
+    }
     else if(type==='box'){ base.content={title:'見出し', html:'', minHeight:160, borderColor:'#333333', borderWidth:1}; }
     else if(type==='divider'){ base.content={thickness:1, color:'#333333', lineStyle:'solid'}; base.style=baseStyle({marginTop:8,marginBottom:8}); }
     else if(type==='spacer'){ base.content={height:24}; base.style=baseStyle({marginBottom:0}); }
@@ -965,14 +1257,49 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     if(role==='text'){ b.content.html=html; }
     else if(role==='title'){ b.content.title=html; }
     else if(role==='box'){ b.content.html=html; }
+    else if(role==='bannerLabel'){ b.content.bannerLabel=html; }
     else if(role && role.startsWith('col:')){ const i=+role.split(':')[1]; if(b.content.cols[i]) b.content.cols[i].html=html; }
     else if(role && role.startsWith('cell:')){ const [,which,i]=role.split(':'); const row=b.content.rows[+i]; if(row){ row[which]=html; } }
+    else if(role && role.startsWith('head:')){ const k=role.split(':')[1]; b.content.heads=b.content.heads||{}; b.content.heads[k]=html; }
+    else if(role && role.startsWith('item:')){
+      const [,field,i]=role.split(':'); const row=b.content.rows[+i];
+      // 数量・単価・単位は計算とレイアウト保護のためプレーンテキストで保持する
+      if(row){ row[field]=(field==='name'||field==='note')?html:node.textContent; }
+    }
   }
   let ceHistoryTimer=null;
   $('#sheetInner').addEventListener('input', (e)=>{
     const node = e.target.closest('[data-ce]'); if(!node) return;
     syncCE(node); markDirty();
+    // 明細表の数量・単価が変わったら金額・小計・消費税・合計を即座に再計算
+    const role=node.getAttribute('data-ce')||'';
+    if(role.startsWith('item:')){
+      const wrap=node.closest('.qm-block');
+      if(wrap) updateItemsComputed(wrap.getAttribute('data-id'));
+    }
     clearTimeout(ceHistoryTimer); ceHistoryTimer=setTimeout(()=>pushHistory(), 700);
+  });
+
+  // 明細表のセル内で Enter: 下の行の同じ列へ移動（最終行なら行を追加）。
+  // 表のセルに改行が入って崩れるのを防ぎつつ、連続入力を素早くする。
+  $('#sheetInner').addEventListener('keydown',(e)=>{
+    if(e.key!=='Enter' || e.shiftKey) return;
+    const node=e.target.closest('[data-ce]'); if(!node) return;
+    const role=node.getAttribute('data-ce')||'';
+    if(!role.startsWith('item:')) return;
+    e.preventDefault();
+    const [,field,iStr]=role.split(':');
+    const wrap=node.closest('.qm-block'); if(!wrap) return;
+    const id=wrap.getAttribute('data-id');
+    const b=findBlock(id); if(!b) return;
+    const next=+iStr+1;
+    b.content.rows=b.content.rows||[];
+    if(next>=b.content.rows.length){
+      b.content.rows.push({name:'', qty:'', unit:'', price:'', note:''});
+      commit(); selectBlock(id);
+    }
+    const target=$('.qm-block[data-id="'+id+'"] [data-ce="item:'+field+':'+next+'"]');
+    if(target){ target.focus(); }
   });
 
   /* ------------------------------------------------------------------
@@ -980,7 +1307,24 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
      ------------------------------------------------------------------ */
   $('#sheetInner').addEventListener('click',(e)=>{
     const act=e.target.closest('[data-act]');
-    if(act){ const wrap=act.closest('.qm-block'); if(act.getAttribute('data-act')==='del'){ removeBlock(wrap.getAttribute('data-id')); } return; }
+    if(act){
+      const wrap=act.closest('.qm-block'); if(!wrap) return;
+      const id=wrap.getAttribute('data-id');
+      const kind=act.getAttribute('data-act');
+      if(kind==='del'){ removeBlock(id); }
+      else if(kind==='dup'){ duplicateBlock(id); }
+      else if(kind==='items-addrow'){
+        const b=findBlock(id);
+        if(b && b.type==='items'){
+          b.content.rows=b.content.rows||[];
+          b.content.rows.push({name:'', qty:'', unit:'', price:'', note:''});
+          commit(); selectBlock(id);
+          const cell=$('.qm-block[data-id="'+id+'"] [data-ce="item:name:'+(b.content.rows.length-1)+'"]');
+          if(cell) cell.focus();
+        }
+      }
+      return;
+    }
     const wrap=e.target.closest('.qm-block'); if(wrap){ selectBlock(wrap.getAttribute('data-id')); }
   });
 
@@ -1093,12 +1437,47 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
      ------------------------------------------------------------------ */
   function applyZoom(){ $('#sheetWrap').style.transform='scale('+zoom+')'; $('#zoomLabel').textContent=Math.round(zoom*100)+'%';
     const wrap=$('#sheetWrap'), sheet=$('#sheet');
-    wrap.style.height = (sheet.offsetHeight*zoom)+'px'; }
+    wrap.style.height = (sheet.offsetHeight*zoom)+'px';
+    updatePageGuides(); }
   function fitZoom(){ const cw=$('#canvas').clientWidth-40; const sw=$('#sheet').offsetWidth; zoom=Math.min(1, Math.max(0.3, cw/sw)); applyZoom(); }
   $('#zoomIn').addEventListener('click',()=>{ zoom=Math.min(2, zoom+0.1); applyZoom(); });
   $('#zoomOut').addEventListener('click',()=>{ zoom=Math.max(0.3, zoom-0.1); applyZoom(); });
   $('#zoomFit').addEventListener('click', fitZoom);
   window.addEventListener('resize', ()=>{ applyZoom(); });
+  // Ctrl+ホイールで拡大縮小（ブラウザ全体のズームではなくシートのズームにする）
+  $('#canvas').addEventListener('wheel',(e)=>{
+    if(!(e.ctrlKey||e.metaKey)) return;
+    e.preventDefault();
+    zoom=Math.min(2, Math.max(0.3, zoom+(e.deltaY<0?0.1:-0.1)));
+    applyZoom();
+  }, {passive:false});
+
+  // 入力で内容が伸び縮みしてもズームラッパーの高さとページガイドを追従させる
+  if(window.ResizeObserver){
+    new ResizeObserver(()=>applyZoom()).observe($('#sheet'));
+  }
+
+  /* 2ページ目以降の改ページ位置のめやすを表示する（印刷には出ない）。
+     ブロックの途中で切れる場合、印刷では break-inside:avoid によって
+     ブロックごと次ページへ送られるため、あくまで「めやす」の線。 */
+  function updatePageGuides(){
+    const sheet=$('#sheet');
+    sheet.querySelectorAll('.qm-page-guide').forEach(n=>n.remove());
+    const probe=el('div');
+    probe.style.cssText='position:absolute;left:0;top:0;height:297mm;width:1px;visibility:hidden;pointer-events:none';
+    sheet.appendChild(probe);
+    const pageH=probe.offsetHeight;
+    probe.remove();
+    if(!pageH) return;
+    const total=sheet.offsetHeight;
+    for(let i=1; i*pageH < total-4; i++){
+      const g=el('div','qm-page-guide');
+      g.style.top=(i*pageH)+'px';
+      const lb=el('span'); lb.textContent=(i+1)+'ページ目はここから（めやす）';
+      g.appendChild(lb);
+      sheet.appendChild(g);
+    }
+  }
 
   /* 狭い画面（<=900px）でのパネル開閉。広い画面では常時表示のまま。 */
   function isNarrow(){ return window.matchMedia('(max-width:900px)').matches; }
@@ -1269,6 +1648,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     render(); buildPageSettings(); buildInspector();
     dirty=false; setSaveState('新規（未保存）'); fitZoom();
     closeTemplates();
+    if(isNarrow()) closePanels();
     toast('テンプレートから新規作成しました');
   }
 
@@ -1422,6 +1802,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   $('#btnSaveBaseTpl').addEventListener('click', saveBaseTemplate);
   $('#btnSaveMyTpl').addEventListener('click', saveMyTemplate);
   $('#btnLoadUnyou').addEventListener('click', ()=> applyDocument(unyouSkeletonDoc()));
+  $('#btnLoadItemized').addEventListener('click', ()=> applyDocument(itemizedSkeletonDoc()));
   // 狭い画面用のパネル開閉
   $('#btnTogglePartsPanel').addEventListener('click', ()=>{ $('#panelLeft').classList.contains('open') ? closePanels() : openPanel('left'); });
   $('#btnToggleFmtPanel').addEventListener('click', ()=>{ $('#panelRight').classList.contains('open') ? closePanels() : openPanel('right'); });
@@ -1440,10 +1821,24 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   $('#btnPrint').addEventListener('click', async ()=>{ hideInlineBar(); closePanels(); if(dirty){ try{ await saveNow(); }catch(_){} } setTimeout(()=>window.print(), 80); });
 
   document.addEventListener('keydown',(e)=>{
-    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z' && !e.shiftKey){ e.preventDefault(); doUndo(); }
-    else if((e.ctrlKey||e.metaKey) && (e.key.toLowerCase()==='y' || (e.shiftKey&&e.key.toLowerCase()==='z'))){ e.preventDefault(); doRedo(); }
-    else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); dirty=true; saveNow(); }
-    else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='p'){ /* allow native print */ }
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z' && !e.shiftKey){ e.preventDefault(); doUndo(); return; }
+    if((e.ctrlKey||e.metaKey) && (e.key.toLowerCase()==='y' || (e.shiftKey&&e.key.toLowerCase()==='z'))){ e.preventDefault(); doRedo(); return; }
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); dirty=true; saveNow(); return; }
+    if(e.key==='Escape'){
+      // 開いているモーダル→パネル→選択解除の順で閉じる
+      const modal=document.querySelector('.qm-modal.show');
+      if(modal){ modal.classList.remove('show'); return; }
+      if($('#panelLeft').classList.contains('open')||$('#panelRight').classList.contains('open')){ closePanels(); return; }
+      hideInlineBar(); selectBlock(null); return;
+    }
+    // 文字入力中はブロック操作のショートカットを無効にする
+    const t=e.target;
+    if(t && t.closest && t.closest('[contenteditable="true"], input, textarea, select')) return;
+    if(!selectedId) return;
+    if(e.key==='Delete' || e.key==='Backspace'){ e.preventDefault(); removeBlock(selectedId); }
+    else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='d'){ e.preventDefault(); duplicateBlock(selectedId); }
+    else if(e.altKey && e.key==='ArrowUp'){ e.preventDefault(); moveBlock(selectedId,-1); }
+    else if(e.altKey && e.key==='ArrowDown'){ e.preventDefault(); moveBlock(selectedId,1); }
   });
   window.addEventListener('beforeunload',(e)=>{ if(dirty){ e.preventDefault(); e.returnValue=''; } });
 
