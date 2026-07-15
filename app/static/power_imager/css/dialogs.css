@@ -196,3 +196,6 @@ body.advanced-mode .topbar-dropdown-sep.advanced-only { display: block !importan
   margin-right: 8px;
 }
 .back-to-dstt:hover { background: var(--pi-surface2); color: var(--pi-text); }
+
+/* --- テキスト編集ボックス（WYSIWYG） --- */
+.text-edit-input::placeholder { color: #7c6ff7; opacity: 0.55; }

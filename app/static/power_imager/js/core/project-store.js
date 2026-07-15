@@ -69,7 +69,10 @@ window.PIProjectStore = (function () {
     const layerData = PILayerManager.getAll().map(l => ({
       name: l.name, x: l.x, y: l.y, visible: l.visible,
       opacity: l.opacity, blendMode: l.blendMode,
-      type: l.type, textData: l.textData,
+      type: l.type, textData: l.textData, shapeData: l.shapeData,
+      rotation: l.rotation || 0, scaleX: l.scaleX || 1, scaleY: l.scaleY || 1,
+      locked: !!l.locked, clip: !!l.clip,
+      adjustType: l.adjustType || null, adjustParams: l.adjustParams || null,
       dataURL: l.canvas.toDataURL('image/png')
     }));
 
@@ -104,7 +107,12 @@ window.PIProjectStore = (function () {
       layer.x = ld.x; layer.y = ld.y;
       layer.visible = ld.visible; layer.opacity = ld.opacity;
       layer.blendMode = ld.blendMode; layer.type = ld.type;
+      layer.rotation = ld.rotation || 0;
+      layer.scaleX = ld.scaleX || 1; layer.scaleY = ld.scaleY || 1;
+      layer.locked = !!ld.locked; layer.clip = !!ld.clip;
       if (ld.textData) layer.textData = ld.textData;
+      if (ld.shapeData) layer.shapeData = ld.shapeData;
+      if (ld.adjustType) { layer.adjustType = ld.adjustType; layer.adjustParams = ld.adjustParams || {}; }
     }
 
     PICanvasEngine.fitToViewport();

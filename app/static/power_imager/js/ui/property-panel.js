@@ -39,15 +39,37 @@ window.PIPropertyPanel = (function () {
         slider.type = 'range';
         slider.min = field.min; slider.max = field.max;
         slider.value = field.value;
-        const valSpan = document.createElement('span');
-        valSpan.className = 'slider-value';
-        valSpan.textContent = field.value + (field.unit || '');
+        // 数値は直接入力もできるようにする（スライダーだけだと正確な値を出しにくい）
+        const num = document.createElement('input');
+        num.type = 'number';
+        num.className = 'slider-value-input';
+        num.min = field.min; num.max = field.max;
+        num.value = Math.round(field.value);
         slider.addEventListener('input', () => {
-          valSpan.textContent = slider.value + (field.unit || '');
+          num.value = slider.value;
           if (field.onChange) field.onChange(slider.value);
         });
+        const commitNum = () => {
+          let v = parseFloat(num.value);
+          if (!Number.isFinite(v)) { num.value = slider.value; return; }
+          v = Math.min(field.max, Math.max(field.min, v));
+          num.value = v;
+          slider.value = v;
+          if (field.onChange) field.onChange(String(v));
+        };
+        num.addEventListener('change', commitNum);
+        num.addEventListener('keydown', (ev) => {
+          ev.stopPropagation();
+          if (ev.key === 'Enter') { ev.preventDefault(); commitNum(); }
+        });
         row.appendChild(slider);
-        row.appendChild(valSpan);
+        row.appendChild(num);
+        if (field.unit) {
+          const unitSpan = document.createElement('span');
+          unitSpan.className = 'slider-unit';
+          unitSpan.textContent = field.unit;
+          row.appendChild(unitSpan);
+        }
         div.appendChild(row);
       } else if (field.type === 'select') {
         div.appendChild(label);

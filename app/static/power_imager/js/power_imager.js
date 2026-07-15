@@ -18,11 +18,13 @@
     PIBrushCursor.init();
     PIColorPanel.init();
     PIGuides.init();
+    PIContextMenu.init();
 
     setupFileInput();
     setupDragDrop();
     setupClipboardPaste();
     setupKeyboardShortcuts();
+    setupDoubleClickTextEdit();
     setupPanelCollapse();
     setupPanelResize();
     setupZoomControls();
@@ -198,11 +200,58 @@
       ctx.drawImage(ll, 0, 0);
       ctx.restore();
       PIHistoryManager.push('選択範囲を削除');
+    } else if (layer.type === 'text' || layer.type === 'shape' || layer.type === 'adjustment') {
+      // オブジェクトレイヤーは画素だけ消すと空のレイヤーが残るため、レイヤーごと削除する
+      const layers = PILayerManager.getAll();
+      if (layers.length <= 1) return;
+      PILayerManager.removeLayer(layers.indexOf(layer));
+      PIHistoryManager.push('レイヤー削除');
+      PIEventBus.emit('tool:properties-changed');
     } else {
       layer.ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
       PIHistoryManager.push('削除');
     }
     PILayerManager.requestRender();
+  }
+
+  // 矢印キーでアクティブレイヤーを1px（Shiftで10px）移動する
+  function nudgeActiveLayer(key, shiftKey) {
+    const toolName = PIToolbar.getCurrentToolName();
+    if (!['move', 'transform', 'text', 'shape'].includes(toolName)) return false;
+    const layer = PILayerManager.getActive();
+    if (!layer || layer.locked) return false;
+    const step = shiftKey ? 10 : 1;
+    if (key === 'ArrowLeft') layer.x -= step;
+    else if (key === 'ArrowRight') layer.x += step;
+    else if (key === 'ArrowUp') layer.y -= step;
+    else if (key === 'ArrowDown') layer.y += step;
+    else return false;
+    if (layer.textData) layer.textData = { ...layer.textData, x: layer.x, y: layer.y };
+    PILayerManager.requestRender();
+    PIHistoryManager.pushDebounced('移動');
+    const tool = PIToolbar.getCurrentTool();
+    if (tool && typeof tool.redrawHandles === 'function') tool.redrawHandles();
+    else if (tool && typeof tool.redraw === 'function') tool.redraw();
+    return true;
+  }
+
+  // どのオブジェクト系ツールからでも、テキストのダブルクリックで内容編集に入れる
+  function setupDoubleClickTextEdit() {
+    const vp = PICanvasEngine.getViewport();
+    if (!vp) return;
+    vp.addEventListener('dblclick', (e) => {
+      if (PIModal.isOpen()) return;
+      if (e.target.closest && e.target.closest('#text-edit-overlay')) return;
+      if (window.PITextTool && PITextTool.isEditing) return;
+      const toolName = PIToolbar.getCurrentToolName();
+      if (!['text', 'move', 'transform', 'shape'].includes(toolName)) return;
+      const pos = PICanvasEngine.viewportToCanvas(e.clientX, e.clientY);
+      const layer = PITextTool.findTextLayerAt(pos.x, pos.y);
+      if (!layer) return;
+      e.preventDefault();
+      if (toolName !== 'text') PIEventBus.emit('tool:switch', 'text');
+      PITextTool.beginEditLayer(layer);
+    });
   }
 
   function swapColors() {
@@ -236,6 +285,8 @@
       else if (ctrl && e.key.toLowerCase() === 'c') { e.preventDefault(); PIImageIO.copyToClipboard(); PIEventBus.emit('toast', 'コピーしました'); }
       else if (ctrl && e.key.toLowerCase() === 'a') { e.preventDefault(); PIEventBus.emit('tool:switch', 'select'); if (window.PISelectTool) PISelectTool.selectAll(); }
       else if (ctrl && e.key.toLowerCase() === 'd') { e.preventDefault(); if (window.PISelectTool) PISelectTool.clearSelection(); }
+      else if (ctrl && e.key.toLowerCase() === 'j') { e.preventDefault(); const idx = PILayerManager.getActiveIndex(); if (idx >= 0) { PILayerManager.duplicateLayer(idx); PIHistoryManager.push('レイヤー複製'); } }
+      else if (ctrl && e.key.toLowerCase() === 'x') { e.preventDefault(); if (window.PIContextMenu) PIContextMenu.cutActiveLayer(); }
       else if (ctrl && e.key.toLowerCase() === 't') { e.preventDefault(); PIEventBus.emit('tool:switch', 'transform'); }
       else if (ctrl && (e.key === '0')) { e.preventDefault(); PICanvasEngine.fitToViewport(); }
       else if (ctrl && (e.key === '1')) { e.preventDefault(); PICanvasEngine.setZoom(1); }
@@ -253,6 +304,7 @@
       else if (!ctrl && e.key === 'i') PIEventBus.emit('tool:switch', 'eyedropper');
       else if (!ctrl && e.key === 'x') swapColors();
       else if (!ctrl && e.key === 'd') defaultColors();
+      else if (!ctrl && e.key.startsWith('Arrow')) { if (nudgeActiveLayer(e.key, e.shiftKey)) e.preventDefault(); }
       else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelectionOrLayer(); }
     });
   }

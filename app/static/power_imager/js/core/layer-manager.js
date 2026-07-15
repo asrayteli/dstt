@@ -113,6 +113,7 @@ window.PILayerManager = (function () {
   function renderTextLayer(layer) {
     if (!layer.textData) return;
     const td = layer.textData;
+    if (td.vertical) { renderVerticalTextLayer(layer); return; }
     const tempCanvas = document.createElement('canvas');
     const tempCtx = tempCanvas.getContext('2d');
     PICanvasEngine.configureContext(tempCtx);
@@ -122,14 +123,18 @@ window.PILayerManager = (function () {
     if (td.bold) fontStr += 'bold ';
     fontStr += td.size + 'px "' + td.fontFamily + '", sans-serif';
     tempCtx.font = fontStr;
+    const letterSpacing = (td.letterSpacing || 0) + 'px';
+    if ('letterSpacing' in tempCtx) tempCtx.letterSpacing = letterSpacing;
 
     const lines = td.text.split('\n');
     const lineH = td.size * (td.lineHeight || 1.3);
     let maxW = 0;
     lines.forEach(line => { maxW = Math.max(maxW, tempCtx.measureText(line).width); });
 
-    const padX = (td.strokeWidth || 0) * 2 + 4;
-    const padY = (td.strokeWidth || 0) * 2 + 4;
+    // 背景プレートありの場合は文字サイズに応じた余白を足す
+    const platePad = td.bgEnabled ? Math.max(6, Math.round(td.size * 0.3)) : 0;
+    const padX = (td.strokeWidth || 0) * 2 + 4 + platePad;
+    const padY = (td.strokeWidth || 0) * 2 + 4 + platePad;
     const totalW = Math.ceil(maxW + padX * 2 + (td.shadowOffsetX || 0) + (td.shadowBlur || 0) * 2);
     const totalH = Math.ceil(lineH * lines.length + padY * 2 + (td.shadowOffsetY || 0) + (td.shadowBlur || 0) * 2);
 
@@ -139,8 +144,17 @@ window.PILayerManager = (function () {
     PICanvasEngine.configureContext(ctx);
 
     ctx.font = fontStr;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = letterSpacing;
     ctx.textBaseline = 'top';
     ctx.textAlign = td.align || 'left';
+
+    if (td.bgEnabled) {
+      const pw = Math.ceil(maxW + padX * 2);
+      const ph = Math.ceil(lineH * lines.length + padY * 2);
+      roundedRectPath(ctx, 0, 0, pw, ph, Math.min(16, Math.round(td.size * 0.25)));
+      ctx.fillStyle = td.bgColor || '#ffffff';
+      ctx.fill();
+    }
 
     let alignX = padX;
     if (td.align === 'center') alignX = totalW / 2;
@@ -164,18 +178,109 @@ window.PILayerManager = (function () {
       ctx.fillStyle = td.color || '#000';
       ctx.fillText(line, alignX, yy);
 
-      if (td.underline) {
+      if (td.underline || td.strikethrough) {
         const m = ctx.measureText(line);
         let lx = alignX;
         if (td.align === 'center') lx -= m.width / 2;
         else if (td.align === 'right') lx -= m.width;
-        ctx.fillRect(lx, yy + td.size + 2, m.width, Math.max(1, td.size / 16));
+        const lh2 = Math.max(1, td.size / 16);
+        if (td.underline) ctx.fillRect(lx, yy + td.size + 2, m.width, lh2);
+        if (td.strikethrough) ctx.fillRect(lx, yy + td.size * 0.55, m.width, lh2);
       }
     });
 
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
     // 位置はレイヤープロパティ(layer.x/y)で管理する。ここでは上書きしない。
+    resyncMask(layer);
+  }
+
+  // ===== 縦書きテキスト =====
+  // 行(\n)は列になり、右から左へ並ぶ。長音・括弧類は90°回転、句読点は右上に寄せる。
+  const V_ROTATE = new Set(['ー', '－', '―', '‐', '〜', '～', '…', '‥', '=', '＝',
+    '(', ')', '（', '）', '「', '」', '『', '』', '[', ']', '［', '］', '{', '}', '｛', '｝', '<', '>', '＜', '＞']);
+  const V_UPPER_RIGHT = new Set(['、', '。', '，', '．']);
+  const V_SMALL = new Set(['ゃ', 'ゅ', 'ょ', 'っ', 'ぁ', 'ぃ', 'ぅ', 'ぇ', 'ぉ', 'ゎ',
+    'ャ', 'ュ', 'ョ', 'ッ', 'ァ', 'ィ', 'ゥ', 'ェ', 'ォ', 'ヮ']);
+
+  function renderVerticalTextLayer(layer) {
+    const td = layer.textData;
+    const size = td.size;
+    const cols = td.text.split('\n');
+    const cellH = size + (td.letterSpacing || 0);
+    const colW = size * (td.lineHeight || 1.3);
+    const maxChars = Math.max(1, ...cols.map(c => Array.from(c).length));
+    const platePad = td.bgEnabled ? Math.max(6, Math.round(size * 0.3)) : 0;
+    const pad = (td.strokeWidth || 0) * 2 + 4 + platePad;
+    const contentW = colW * cols.length;
+    const contentH = cellH * maxChars;
+    layer.canvas.width = Math.ceil(contentW + pad * 2 + (td.shadowOffsetX || 0) + (td.shadowBlur || 0) * 2);
+    layer.canvas.height = Math.ceil(contentH + pad * 2 + (td.shadowOffsetY || 0) + (td.shadowBlur || 0) * 2);
+    const ctx = layer.ctx;
+    PICanvasEngine.configureContext(ctx);
+
+    let fontStr = '';
+    if (td.italic) fontStr += 'italic ';
+    if (td.bold) fontStr += 'bold ';
+    fontStr += size + 'px "' + td.fontFamily + '", sans-serif';
+    ctx.font = fontStr;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    if (td.bgEnabled) {
+      roundedRectPath(ctx, 0, 0, Math.ceil(contentW + pad * 2), Math.ceil(contentH + pad * 2), Math.min(16, Math.round(size * 0.25)));
+      ctx.fillStyle = td.bgColor || '#ffffff';
+      ctx.fill();
+    }
+
+    if (td.shadowBlur > 0 || td.shadowOffsetX || td.shadowOffsetY) {
+      ctx.shadowColor = td.shadowColor || '#000';
+      ctx.shadowOffsetX = td.shadowOffsetX || 0;
+      ctx.shadowOffsetY = td.shadowOffsetY || 0;
+      ctx.shadowBlur = td.shadowBlur || 0;
+    }
+
+    cols.forEach((col, ci) => {
+      const chars = Array.from(col);
+      const cx = pad + (cols.length - 1 - ci) * colW + colW / 2;
+      // 配置: 左=上寄せ / 中=中央 / 右=下寄せ（短い列の縦位置）
+      let offset = 0;
+      if (td.align === 'center') offset = (maxChars - chars.length) * cellH / 2;
+      else if (td.align === 'right') offset = (maxChars - chars.length) * cellH;
+      chars.forEach((ch, ri) => {
+        let x = cx, y = pad + offset + ri * cellH + cellH / 2;
+        ctx.save();
+        if (V_ROTATE.has(ch)) {
+          ctx.translate(x, y);
+          ctx.rotate(Math.PI / 2);
+          x = 0; y = 0;
+        } else if (V_UPPER_RIGHT.has(ch)) {
+          x += size * 0.3; y -= size * 0.3;
+        } else if (V_SMALL.has(ch)) {
+          x += size * 0.12; y -= size * 0.1;
+        }
+        if (td.strokeWidth > 0) {
+          ctx.strokeStyle = td.strokeColor || '#fff';
+          ctx.lineWidth = td.strokeWidth * 2;
+          ctx.lineJoin = 'round';
+          ctx.strokeText(ch, x, y);
+        }
+        ctx.fillStyle = td.color || '#000';
+        ctx.fillText(ch, x, y);
+        ctx.restore();
+      });
+      // 下線＝列の右側の縦線 / 取り消し線＝列中央の縦線
+      if ((td.underline || td.strikethrough) && chars.length) {
+        const lh2 = Math.max(1, size / 16);
+        const y0 = pad + offset, y1v = y0 + chars.length * cellH;
+        ctx.fillStyle = td.color || '#000';
+        if (td.underline) ctx.fillRect(cx + size / 2 + 2, y0, lh2, y1v - y0);
+        if (td.strikethrough) ctx.fillRect(cx - lh2 / 2, y0, lh2, y1v - y0);
+      }
+    });
+
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
     resyncMask(layer);
   }
 
@@ -208,6 +313,91 @@ window.PILayerManager = (function () {
     ctx.closePath();
   }
 
+  // 矩形/楕円/三角/星のパスを作る（レンダリングとツールのプレビューで共用）
+  function traceShapePath(ctx, shapeType, x, y, w, h, cornerRadius) {
+    if (shapeType === 'ellipse') {
+      ctx.beginPath();
+      ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    } else if (shapeType === 'triangle') {
+      ctx.beginPath();
+      ctx.moveTo(x + w / 2, y);
+      ctx.lineTo(x + w, y + h);
+      ctx.lineTo(x, y + h);
+      ctx.closePath();
+    } else if (shapeType === 'star') {
+      const cx = x + w / 2, cy = y + h / 2;
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const ang = -Math.PI / 2 + i * Math.PI / 5;
+        const f = (i % 2 === 0) ? 1 : 0.45;
+        const px = cx + Math.cos(ang) * (w / 2) * f;
+        const py = cy + Math.sin(ang) * (h / 2) * f;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    } else {
+      roundedRectPath(ctx, x, y, w, h, cornerRadius || 0);
+    }
+  }
+
+  // 線種（実線/破線/点線）。lineCap: round 前提で点線は丸ドットになる。
+  function strokeDashFor(style, sw) {
+    if (style === 'dash') return [sw * 3, sw * 2];
+    if (style === 'dot') return [0.1, sw * 2];
+    return [];
+  }
+
+  function hexToRgba(hex, alpha) {
+    try {
+      const rgb = PIColorUtils.hexToRgb(hex || '#000000');
+      return 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',' + alpha + ')';
+    } catch (e) {
+      return 'rgba(0,0,0,' + alpha + ')';
+    }
+  }
+
+  // 塗りスタイル（単色 / 線形グラデーション / 円形グラデーション）
+  function shapeFillStyle(ctx, sd, x, y, w, h) {
+    if (sd.fillType === 'linear') {
+      const ang = (sd.gradientAngle || 0) * Math.PI / 180;
+      const cx = x + w / 2, cy = y + h / 2;
+      const cos = Math.cos(ang), sin = Math.sin(ang);
+      const len = (Math.abs(cos) * w + Math.abs(sin) * h) / 2;
+      const g = ctx.createLinearGradient(cx - cos * len, cy - sin * len, cx + cos * len, cy + sin * len);
+      g.addColorStop(0, sd.fillColor || '#ffffff');
+      g.addColorStop(1, sd.fillColor2 || '#8ec5ff');
+      return g;
+    }
+    if (sd.fillType === 'radial') {
+      const cx = x + w / 2, cy = y + h / 2;
+      const r = Math.max(1, Math.hypot(w, h) / 2);
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, sd.fillColor || '#ffffff');
+      g.addColorStop(1, sd.fillColor2 || '#8ec5ff');
+      return g;
+    }
+    return sd.fillColor;
+  }
+
+  // ドロップシャドウ。SHAPE_PAD(48px)に収まるよう ぼかし≤30 / 距離≤15 に制限する。
+  function applyShapeShadow(ctx, sd) {
+    if (!sd.shadowEnabled) return false;
+    const op = (sd.shadowOpacity == null ? 50 : sd.shadowOpacity) / 100;
+    ctx.shadowColor = hexToRgba(sd.shadowColor || '#000000', Math.max(0, Math.min(1, op)));
+    ctx.shadowBlur = Math.max(0, Math.min(30, sd.shadowBlur == null ? 8 : sd.shadowBlur));
+    const d = Math.max(-15, Math.min(15, sd.shadowDistance == null ? 4 : sd.shadowDistance));
+    ctx.shadowOffsetX = d;
+    ctx.shadowOffsetY = d;
+    return true;
+  }
+
+  function clearShapeShadow(ctx) {
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+  }
+
   function renderShapeLayer(layer) {
     const sd = layer.shapeData;
     if (!sd) return;
@@ -226,21 +416,32 @@ window.PILayerManager = (function () {
     const ox = SHAPE_PAD, oy = SHAPE_PAD;
     const sw = sd.strokeWidth || 0;
 
-    if (sd.shapeType === 'rect') {
-      roundedRectPath(ctx, ox, oy, bw, bh, sd.cornerRadius || 0);
-      if (sd.fillEnabled) { ctx.fillStyle = sd.fillColor; ctx.fill(); }
-      if (sd.strokeEnabled && sw > 0) { ctx.strokeStyle = sd.strokeColor; ctx.lineWidth = sw; ctx.stroke(); }
-    } else if (sd.shapeType === 'ellipse') {
-      ctx.beginPath();
-      ctx.ellipse(ox + bw / 2, oy + bh / 2, bw / 2, bh / 2, 0, 0, Math.PI * 2);
-      if (sd.fillEnabled) { ctx.fillStyle = sd.fillColor; ctx.fill(); }
-      if (sd.strokeEnabled && sw > 0) { ctx.strokeStyle = sd.strokeColor; ctx.lineWidth = sw; ctx.stroke(); }
-    } else if (isLine) {
+    if (!isLine) {
+      traceShapePath(ctx, sd.shapeType, ox, oy, bw, bh, sd.cornerRadius);
+      // 影は最初の描画（塗り、無ければ枠線）にだけ乗せる
+      let shadowPending = applyShapeShadow(ctx, sd);
+      if (sd.fillEnabled) {
+        ctx.fillStyle = shapeFillStyle(ctx, sd, ox, oy, bw, bh);
+        ctx.fill();
+        if (shadowPending) { clearShapeShadow(ctx); shadowPending = false; }
+      }
+      if (sd.strokeEnabled && sw > 0) {
+        ctx.strokeStyle = sd.strokeColor; ctx.lineWidth = sw;
+        ctx.setLineDash(strokeDashFor(sd.strokeStyle, sw));
+        ctx.stroke();
+        ctx.setLineDash([]);
+        if (shadowPending) { clearShapeShadow(ctx); shadowPending = false; }
+      }
+      if (shadowPending) clearShapeShadow(ctx);
+    } else {
       const minX = Math.min(sd.x1, sd.x2), minY = Math.min(sd.y1, sd.y2);
       const lx1 = ox + (sd.x1 - minX), ly1 = oy + (sd.y1 - minY);
       const lx2 = ox + (sd.x2 - minX), ly2 = oy + (sd.y2 - minY);
+      const hadShadow = applyShapeShadow(ctx, sd);
       ctx.strokeStyle = sd.strokeColor; ctx.lineWidth = Math.max(1, sw);
+      ctx.setLineDash(strokeDashFor(sd.strokeStyle, Math.max(1, sw)));
       ctx.beginPath(); ctx.moveTo(lx1, ly1); ctx.lineTo(lx2, ly2); ctx.stroke();
+      ctx.setLineDash([]);
       if (sd.shapeType === 'arrow') {
         const angle = Math.atan2(ly2 - ly1, lx2 - lx1);
         const headLen = 12 + sw * 2;
@@ -251,6 +452,7 @@ window.PILayerManager = (function () {
         ctx.lineTo(lx2 - headLen * Math.cos(angle + Math.PI / 6), ly2 - headLen * Math.sin(angle + Math.PI / 6));
         ctx.stroke();
       }
+      if (hadShadow) clearShapeShadow(ctx);
     }
     resyncMask(layer);
   }
@@ -547,7 +749,8 @@ window.PILayerManager = (function () {
 
   return {
     init, addLayer, addImageLayer, addTextLayer, renderTextLayer,
-    addShapeLayer, renderShapeLayer, addAdjustmentLayer, bakeLayerToRaster, ensurePaintable, SHAPE_PAD,
+    addShapeLayer, renderShapeLayer, traceShapePath, strokeDashFor,
+    addAdjustmentLayer, bakeLayerToRaster, ensurePaintable, SHAPE_PAD,
     addMask, removeMask, setMaskEditing, isMaskEditing, getMaskEditing, toggleClip,
     getGroups, getGroup, groupMembers, createGroupFromActive, addActiveToGroup,
     removeActiveFromGroup, ungroup, toggleGroupCollapse, renameGroup, setGroupVisible,

@@ -1,4 +1,10 @@
-/* PowerImager — TextTool: テキスト配置・編集 */
+/* PowerImager — TextTool: テキスト配置・編集
+ * 操作モデル:
+ *  - 空き領域クリック: 新規テキストの入力ボックスを開く
+ *  - 既存テキストをクリック: 選択（ハンドル表示）・そのままドラッグで移動
+ *  - ダブルクリック: 内容の編集（移動/変形/図形ツールからでも可）
+ *  - コーナーハンドル: ドラッグで文字サイズ変更 / 上の丸ハンドル: 回転
+ */
 window.PITextTool = new (class extends PIToolBase {
   constructor() {
     super('text', 'text');
@@ -11,9 +17,10 @@ window.PITextTool = new (class extends PIToolBase {
     this.layerStartX = 0;
     this.layerStartY = 0;
     this.dragThreshold = 4;
-    // 回転ハンドル
+    // 回転・サイズ変更ハンドル
     this.rotating = false;
     this.rotStart = null;
+    this.resizing = null;
     this._cr = null;          // コンテンツ矩形キャッシュ
     this._boundRedraw = false;
     this.textData = {
@@ -21,10 +28,16 @@ window.PITextTool = new (class extends PIToolBase {
       color: '#000000', bold: false, italic: false,
       underline: false, strikethrough: false,
       align: 'left', lineHeight: 1.3, letterSpacing: 0,
+      vertical: false, bgEnabled: false, bgColor: '#ffffff',
       strokeColor: '#ffffff', strokeWidth: 0,
-      shadowColor: '#000000', shadowOffsetX: 2, shadowOffsetY: 2, shadowBlur: 4,
+      // 影は既定でオフ（にじんで見えるため）。プリセットやPROモードで有効化する。
+      shadowColor: '#000000', shadowOffsetX: 0, shadowOffsetY: 0, shadowBlur: 0,
       rotation: 0, x: 0, y: 0
     };
+    this.altDup = false;
+    this.dupDone = false;
+    this.snapTargets = null;
+    this.moveSnapRect = null;
     this.presets = [
       { name: '赤い警告テキスト', color: '#ff0000', bold: true, size: 40, strokeColor: '#ffffff', strokeWidth: 3 },
       { name: '白縁取り見出し', color: '#ffffff', bold: true, size: 48, strokeColor: '#000000', strokeWidth: 4 },
@@ -49,6 +62,7 @@ window.PITextTool = new (class extends PIToolBase {
     this.draggingLayer = false;
     this.rotating = false;
     this.rotStart = null;
+    this.resizing = null;
     // ツール切替で入力中テキストが消えると入力が無駄になるため、内容があれば確定する
     this.commitIfEditing();
     PICanvasEngine.clearOverlay();
@@ -61,6 +75,16 @@ window.PITextTool = new (class extends PIToolBase {
     else this.cancelEdit();
   }
 
+  // 指定レイヤーの内容編集を開始（ダブルクリック/編集ボタンから）
+  beginEditLayer(layer) {
+    if (!layer || layer.type !== 'text' || layer.locked) return;
+    const idx = PILayerManager.getAll().indexOf(layer);
+    if (idx >= 0) PILayerManager.setActiveIndex(idx);
+    this.editingLayer = layer;
+    this.textData = { ...layer.textData, x: layer.x, y: layer.y };
+    this.showEditBox();
+  }
+
   onMouseDown(e) {
     if (this.isEditing) {
       // 編集ボックスの外側クリック＝確定（ボックス内は stopPropagation 済み）
@@ -68,17 +92,34 @@ window.PITextTool = new (class extends PIToolBase {
       return;
     }
 
-    // 回転ハンドルのドラッグ開始
     const active = this.targetLayer();
-    if (active && !active.locked && active.visible && this.hitRotHandle(active, e.canvasX, e.canvasY)) {
-      const g = this._handleGeom(active);
-      this.rotating = true;
-      this.rotStart = {
-        layer: active, cx: g.c.x, cy: g.c.y,
-        startAngle: Math.atan2(e.canvasY - g.c.y, e.canvasX - g.c.x),
-        startRotation: active.rotation || 0
-      };
-      return;
+    if (active && !active.locked && active.visible) {
+      // コーナーハンドル＝文字サイズ変更
+      const rh = this.hitResizeHandle(active, e.canvasX, e.canvasY);
+      if (rh) {
+        const g = this._handleGeom(active);
+        const d0 = Math.hypot(e.canvasX - g.c.x, e.canvasY - g.c.y);
+        if (d0 > 0.001) {
+          const td = active.textData;
+          this.resizing = {
+            layer: active, d0, cx: g.c.x, cy: g.c.y,
+            size0: td.size, stroke0: td.strokeWidth || 0, blur0: td.shadowBlur || 0,
+            shx0: td.shadowOffsetX || 0, shy0: td.shadowOffsetY || 0
+          };
+          return;
+        }
+      }
+      // 回転ハンドル
+      if (this.hitRotHandle(active, e.canvasX, e.canvasY)) {
+        const g = this._handleGeom(active);
+        this.rotating = true;
+        this.rotStart = {
+          layer: active, cx: g.c.x, cy: g.c.y,
+          startAngle: Math.atan2(e.canvasY - g.c.y, e.canvasX - g.c.x),
+          startRotation: active.rotation || 0
+        };
+        return;
+      }
     }
 
     const existingTextLayer = this.findTextLayerAt(e.canvasX, e.canvasY);
@@ -87,10 +128,14 @@ window.PITextTool = new (class extends PIToolBase {
       if (idx >= 0) PILayerManager.setActiveIndex(idx);
       this.pendingDragLayer = existingTextLayer;
       this.draggingLayer = false;
+      this.altDup = !!e.altKey;
+      this.dupDone = false;
       this.dragStartX = e.canvasX;
       this.dragStartY = e.canvasY;
       this.layerStartX = existingTextLayer.x;
       this.layerStartY = existingTextLayer.y;
+      this.moveSnapRect = PILayerTransform.contentLocalRect(existingTextLayer);
+      this.snapTargets = PILayerTransform.snapTargetsFromLayers(existingTextLayer);
       return;
     }
 
@@ -103,6 +148,33 @@ window.PITextTool = new (class extends PIToolBase {
 
   onMouseMove(e) {
     if (this.isEditing) return;
+
+    if (this.resizing) {
+      const r = this.resizing;
+      const f = Math.hypot(e.canvasX - r.cx, e.canvasY - r.cy) / r.d0;
+      const size = Math.max(4, Math.min(500, Math.round(r.size0 * f)));
+      const layer = r.layer;
+      const td = layer.textData;
+      if (size !== td.size) {
+        const sf = size / r.size0;
+        td.size = size;
+        td.strokeWidth = Math.round(r.stroke0 * sf * 10) / 10;
+        td.shadowBlur = Math.round(r.blur0 * sf * 10) / 10;
+        td.shadowOffsetX = Math.round(r.shx0 * sf * 10) / 10;
+        td.shadowOffsetY = Math.round(r.shy0 * sf * 10) / 10;
+        // 中心固定で再レンダリング
+        const ccx = layer.x + layer.canvas.width / 2;
+        const ccy = layer.y + layer.canvas.height / 2;
+        PILayerManager.renderTextLayer(layer);
+        layer.x = Math.round(ccx - layer.canvas.width / 2);
+        layer.y = Math.round(ccy - layer.canvas.height / 2);
+        layer.textData = { ...layer.textData, x: layer.x, y: layer.y };
+        this._cr = null;
+        PILayerManager.requestRender();
+        this.redrawHandles();
+      }
+      return;
+    }
 
     if (this.rotating) {
       const s = this.rotStart;
@@ -119,11 +191,33 @@ window.PITextTool = new (class extends PIToolBase {
       const dy = e.canvasY - this.dragStartY;
       if (!this.draggingLayer && Math.hypot(dx, dy) >= this.dragThreshold) {
         this.draggingLayer = true;
+        if (this.altDup && !this.dupDone) {
+          // Alt+ドラッグ: 複製を作ってそちらを動かす
+          this.dupDone = true;
+          const idx = PILayerManager.getAll().indexOf(this.pendingDragLayer);
+          PILayerManager.duplicateLayer(idx);
+          this.pendingDragLayer = PILayerManager.getActive();
+          this.snapTargets = PILayerTransform.snapTargetsFromLayers(this.pendingDragLayer);
+        }
         const vp = PICanvasEngine.getViewport();
         if (vp) vp.style.cursor = 'move';
       }
       if (this.draggingLayer) {
-        this.moveTextLayer(this.pendingDragLayer, this.layerStartX + dx, this.layerStartY + dy);
+        const layer = this.pendingDragLayer;
+        let dx2 = dx, dy2 = dy;
+        if (e.shiftKey) { if (Math.abs(dx2) > Math.abs(dy2)) dy2 = 0; else dx2 = 0; } // 軸固定
+        layer.x = this.layerStartX + dx2;
+        layer.y = this.layerStartY + dy2;
+        let guide = { guideX: null, guideY: null };
+        if (!e.ctrlKey) {
+          const gx = (window.PIGuides ? PIGuides.getSnapX() : []).concat(this.snapTargets ? this.snapTargets.xs : []);
+          const gy = (window.PIGuides ? PIGuides.getSnapY() : []).concat(this.snapTargets ? this.snapTargets.ys : []);
+          guide = PILayerTransform.snapToCanvas(layer, 6 / PICanvasEngine.getZoom(), this.moveSnapRect, gx, gy);
+        }
+        if (layer.textData) layer.textData = { ...layer.textData, x: layer.x, y: layer.y };
+        PILayerManager.requestRender();
+        this.redrawHandles();
+        this.drawGuideLines(guide);
       }
       return;
     }
@@ -131,12 +225,25 @@ window.PITextTool = new (class extends PIToolBase {
     const vp = PICanvasEngine.getViewport();
     if (vp) {
       const act = this.targetLayer();
-      if (act && !act.locked && act.visible && this.hitRotHandle(act, e.canvasX, e.canvasY)) vp.style.cursor = 'grab';
-      else vp.style.cursor = this.findTextLayerAt(e.canvasX, e.canvasY) ? 'move' : this.cursor;
+      let cursor = null;
+      if (act && !act.locked && act.visible) {
+        const rh = this.hitResizeHandle(act, e.canvasX, e.canvasY);
+        if (rh) cursor = (rh === 'nw' || rh === 'se') ? 'nwse-resize' : 'nesw-resize';
+        else if (this.hitRotHandle(act, e.canvasX, e.canvasY)) cursor = 'grab';
+      }
+      if (!cursor) cursor = this.findTextLayerAt(e.canvasX, e.canvasY) ? 'move' : this.cursor;
+      vp.style.cursor = cursor;
     }
   }
 
   onMouseUp(e) {
+    if (this.resizing) {
+      this.resizing = null;
+      PIHistoryManager.push('テキストサイズ変更');
+      PIEventBus.emit('tool:properties-changed');
+      this.redrawHandles();
+      return;
+    }
     if (this.rotating) {
       this.rotating = false;
       this.rotStart = null;
@@ -152,16 +259,29 @@ window.PITextTool = new (class extends PIToolBase {
     if (this.draggingLayer) {
       this.draggingLayer = false;
       this.moveTextLayer(layer, layer.x, layer.y, true);
-      PIHistoryManager.push('テキスト移動');
+      PIHistoryManager.push(this.dupDone ? 'テキストを複製' : 'テキスト移動');
+      this.altDup = false; this.dupDone = false;
       PIEventBus.emit('tool:properties-changed');
       const vp = PICanvasEngine.getViewport();
       if (vp) vp.style.cursor = this.findTextLayerAt(e.canvasX, e.canvasY) ? 'move' : this.cursor;
       return;
     }
 
-    this.editingLayer = layer;
-    this.textData = { ...layer.textData, x: layer.x, y: layer.y };
-    this.showEditBox();
+    // クリック＝選択のみ（編集はダブルクリック / プロパティの編集ボタン）
+    PIEventBus.emit('tool:properties-changed');
+    this.redrawHandles();
+  }
+
+  // スナップで吸着した位置をガイド線で示す（オーバーレイに追記する）
+  drawGuideLines(g) {
+    if (!g || (g.guideX == null && g.guideY == null)) return;
+    const ctx = PICanvasEngine.getOverlayCtx();
+    const s = PICanvasEngine.getCanvasSize();
+    ctx.save();
+    ctx.strokeStyle = '#ff3db4'; ctx.lineWidth = 1 / PICanvasEngine.getZoom();
+    if (g.guideX != null) { ctx.beginPath(); ctx.moveTo(g.guideX, 0); ctx.lineTo(g.guideX, s.height); ctx.stroke(); }
+    if (g.guideY != null) { ctx.beginPath(); ctx.moveTo(0, g.guideY); ctx.lineTo(s.width, g.guideY); ctx.stroke(); }
+    ctx.restore();
   }
 
   moveTextLayer(layer, x, y, final) {
@@ -192,7 +312,7 @@ window.PITextTool = new (class extends PIToolBase {
     return null;
   }
 
-  // ===== 回転ハンドル（アクティブなテキストレイヤーに表示） =====
+  // ===== ハンドル（アクティブなテキストレイヤーに表示） =====
 
   contentRect(layer) {
     const key = layer.id + ':' + layer.canvas.width + 'x' + layer.canvas.height;
@@ -212,6 +332,25 @@ window.PITextTool = new (class extends PIToolBase {
       eh: cr.h * (layer.scaleY || 1),
       cos: Math.cos(rot), sin: Math.sin(rot)
     };
+  }
+
+  _cornerPositions(layer) {
+    const g = this._handleGeom(layer);
+    const pt = (lx, ly) => ({ x: g.c.x + lx * g.cos - ly * g.sin, y: g.c.y + lx * g.sin + ly * g.cos });
+    return {
+      nw: pt(-g.ew / 2, -g.eh / 2), ne: pt(g.ew / 2, -g.eh / 2),
+      se: pt(g.ew / 2, g.eh / 2), sw: pt(-g.ew / 2, g.eh / 2)
+    };
+  }
+
+  hitResizeHandle(layer, x, y) {
+    const z = PICanvasEngine.getZoom() || 1;
+    const r = 9 / z;
+    const corners = this._cornerPositions(layer);
+    for (const k of ['nw', 'ne', 'se', 'sw']) {
+      if (Math.hypot(x - corners[k].x, y - corners[k].y) <= r) return k;
+    }
+    return null;
   }
 
   rotHandlePos(layer) {
@@ -250,6 +389,7 @@ window.PITextTool = new (class extends PIToolBase {
     ctx.closePath();
     ctx.stroke();
     ctx.setLineDash([]);
+    if (layer.locked) { ctx.restore(); return; }
     // 回転ハンドルへの脚と丸ハンドル
     const top = pt(0, -g.eh / 2);
     const h = this.rotHandlePos(layer);
@@ -257,6 +397,16 @@ window.PITextTool = new (class extends PIToolBase {
     ctx.beginPath(); ctx.arc(h.x, h.y, 6 / z, 0, Math.PI * 2);
     ctx.fillStyle = '#7c6ff7'; ctx.fill();
     ctx.lineWidth = 1.5 / z; ctx.strokeStyle = '#fff'; ctx.stroke();
+    // コーナーの拡縮ハンドル（ドラッグで文字サイズ変更）
+    const hs = 5 / z;
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#7c6ff7';
+    ctx.lineWidth = 1.5 / z;
+    corners.forEach(p => {
+      ctx.beginPath();
+      ctx.rect(p.x - hs, p.y - hs, hs * 2, hs * 2);
+      ctx.fill(); ctx.stroke();
+    });
     // 回転中は角度を表示
     if (this.rotating) {
       const deg = Math.round(((layer.rotation || 0) * 180 / Math.PI) % 360);
@@ -274,42 +424,50 @@ window.PITextTool = new (class extends PIToolBase {
     ctx.restore();
   }
 
+  // 編集ボックスはキャンバス座標系にそのまま置く（＝ズームと一緒に拡縮）。
+  // フォント・縁取り・影・背景プレート・縦書きをCSSで再現し、
+  // 確定前から実際の見た目（WYSIWYG）で入力できる。
   showEditBox() {
     this.isEditing = true;
     PICanvasEngine.clearOverlay(); // 編集中はハンドル類を消す
     PIEventBus.emit('text:overlay-active', true);
 
+    // 既存レイヤーの編集中は、二重表示を避けるためレイヤーを一時的に隠す
+    if (this.editingLayer && this.editingLayer.visible) {
+      this._hiddenLayer = this.editingLayer;
+      this.editingLayer.visible = false;
+      PILayerManager.requestRender();
+    }
+
     const overlay = document.getElementById('text-edit-overlay');
     overlay.classList.remove('hidden');
     overlay.innerHTML = '';
-
-    // オーバーレイは .canvas-wrapper 内にあり、ズーム/パンのCSS変形を一緒に受ける。
-    // そのためキャンバス座標でそのまま配置し（クリック位置に一致）、
-    // 逆スケールをかけてUIの見た目サイズはズームに関係なく一定に保つ。
     overlay.style.left = this.textData.x + 'px';
     overlay.style.top = this.textData.y + 'px';
-    this.applyOverlayScale(overlay);
+    // 回転したテキストは概ね同じ見た目になるよう箱ごと回す
+    const rot = (this.editingLayer && this.editingLayer.rotation) || 0;
+    overlay.style.transformOrigin = '50% 50%';
+    overlay.style.transform = rot ? 'rotate(' + rot + 'rad)' : '';
 
     const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+    wrapper.style.cssText = 'display:flex;flex-direction:column;gap:4px;align-items:flex-start;';
     wrapper.addEventListener('mousedown', (ev) => ev.stopPropagation());
     wrapper.addEventListener('mouseup', (ev) => ev.stopPropagation());
     wrapper.addEventListener('click', (ev) => ev.stopPropagation());
+    wrapper.addEventListener('dblclick', (ev) => ev.stopPropagation());
     wrapper.addEventListener('wheel', (ev) => ev.stopPropagation());
 
     const ta = document.createElement('textarea');
     ta.className = 'text-edit-input';
     ta.value = this.textData.text;
     ta.placeholder = 'テキストを入力...';
-    ta.style.cssText = 'min-width:220px;min-height:60px;max-width:500px;max-height:300px;' +
-      'background:rgba(255,255,255,0.97);border:2px solid #7c6ff7;border-radius:6px;' +
-      'padding:8px;font-family:"' + this.textData.fontFamily + '",sans-serif;' +
-      'color:' + this.textData.color + ';resize:both;outline:none;' +
-      'user-select:text;-webkit-user-select:text;cursor:text;line-height:1.4;';
+    ta.wrap = 'off';
+    ta.rows = 1;
+    ta.style.cssText = 'display:block;min-width:24px;min-height:1.2em;max-width:none;max-height:none;' +
+      'border:none;outline:1.5px dashed #7c6ff7;outline-offset:2px;resize:none;overflow:hidden;' +
+      'user-select:text;-webkit-user-select:text;cursor:text;caret-color:#7c6ff7;field-sizing:content;';
     this._activeTextarea = ta;
-    this.applyEditFontSize(ta);
-    if (this.textData.bold) ta.style.fontWeight = 'bold';
-    if (this.textData.italic) ta.style.fontStyle = 'italic';
+    this.styleEditBox(ta);
 
     ta.addEventListener('keydown', (ev) => {
       ev.stopPropagation();
@@ -318,13 +476,16 @@ window.PITextTool = new (class extends PIToolBase {
     });
     ta.addEventListener('keyup', (ev) => ev.stopPropagation());
     ta.addEventListener('keypress', (ev) => ev.stopPropagation());
+    ta.addEventListener('input', () => this.autosizeEditBox(ta));
 
     const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;gap:6px;';
+    this._btnRow = btnRow;
+    btnRow.style.cssText = 'display:flex;gap:6px;margin-top:6px;';
+    this.applyBtnRowScale();
 
     const confirmBtn = document.createElement('button');
     confirmBtn.textContent = '確定 (Ctrl+Enter)';
-    confirmBtn.style.cssText = 'padding:5px 14px;background:#7c6ff7;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;';
+    confirmBtn.style.cssText = 'padding:5px 14px;background:#7c6ff7;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;';
     confirmBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       this.confirmEdit(ta.value);
@@ -332,7 +493,7 @@ window.PITextTool = new (class extends PIToolBase {
 
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = 'キャンセル';
-    cancelBtn.style.cssText = 'padding:5px 14px;background:#555;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;';
+    cancelBtn.style.cssText = 'padding:5px 14px;background:#555;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap;';
     cancelBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       this.cancelEdit();
@@ -345,56 +506,84 @@ window.PITextTool = new (class extends PIToolBase {
     wrapper.appendChild(btnRow);
     overlay.appendChild(wrapper);
 
-    // ズーム/パン中も見た目サイズと文字サイズを追従させる
+    // ズーム変更時も操作ボタンは常に画面上で同じ大きさに保つ
     if (!this._zoomFollow) {
       this._zoomFollow = () => {
         if (!this.isEditing) return;
-        const ov = document.getElementById('text-edit-overlay');
-        if (ov) this.applyOverlayScale(ov);
-        if (this._activeTextarea) this.applyEditFontSize(this._activeTextarea);
+        this.applyBtnRowScale();
       };
       PIEventBus.on('canvas:zoom-changed', this._zoomFollow);
     }
 
     requestAnimationFrame(() => {
-      this.keepEditBoxOnScreen(overlay);
+      this.autosizeEditBox(ta);
       ta.focus();
       ta.setSelectionRange(ta.value.length, ta.value.length);
     });
+    PIEventBus.emit('tool:properties-changed'); // パネルを「入力中」表示へ
   }
 
-  // 逆スケール（wrapper の scale(zoom) を打ち消し、UIを常に等倍表示にする）
-  applyOverlayScale(overlay) {
-    const zoom = PICanvasEngine.getZoom() || 1;
-    overlay.style.transformOrigin = '0 0';
-    overlay.style.transform = 'scale(' + (1 / zoom) + ')';
+  // 入力中のスタイル（textData）をCSSへ反映する＝WYSIWYGの中核。
+  // レンダラー(renderTextLayer)の余白計算と揃えて位置ずれを抑える。
+  styleEditBox(ta) {
+    const td = this.textData;
+    const platePad = td.bgEnabled ? Math.max(6, Math.round(td.size * 0.3)) : 0;
+    const padX = (td.strokeWidth || 0) * 2 + 4 + platePad;
+    const padY = (td.strokeWidth || 0) * 2 + 4 + platePad;
+    ta.style.fontFamily = '"' + td.fontFamily + '", sans-serif';
+    ta.style.fontSize = td.size + 'px';
+    ta.style.fontWeight = td.bold ? 'bold' : 'normal';
+    ta.style.fontStyle = td.italic ? 'italic' : 'normal';
+    ta.style.color = td.color || '#000';
+    ta.style.lineHeight = String(td.lineHeight || 1.3);
+    ta.style.letterSpacing = (td.letterSpacing || 0) + 'px';
+    ta.style.textAlign = td.align || 'left';
+    ta.style.writingMode = td.vertical ? 'vertical-rl' : 'horizontal-tb';
+    const deco = [];
+    if (td.underline) deco.push('underline');
+    if (td.strikethrough) deco.push('line-through');
+    ta.style.textDecoration = deco.length ? deco.join(' ') : 'none';
+    // Canvasの縁取りは「文字の背面に lineWidth=太さ×2」で描かれる。
+    // paint-order対応ブラウザなら同じ見た目（背面ストローク）を再現できる。
+    if (this._paintOrder === undefined) {
+      this._paintOrder = !!(window.CSS && CSS.supports && CSS.supports('paint-order', 'stroke'));
+    }
+    if (td.strokeWidth > 0) {
+      const cssSw = this._paintOrder ? td.strokeWidth * 2 : td.strokeWidth;
+      ta.style.webkitTextStroke = cssSw + 'px ' + (td.strokeColor || '#fff');
+      ta.style.paintOrder = this._paintOrder ? 'stroke fill' : '';
+    } else {
+      ta.style.webkitTextStroke = '';
+      ta.style.paintOrder = '';
+    }
+    const hasShadow = (td.shadowBlur > 0 || td.shadowOffsetX || td.shadowOffsetY);
+    ta.style.textShadow = hasShadow
+      ? (td.shadowOffsetX || 0) + 'px ' + (td.shadowOffsetY || 0) + 'px ' + (td.shadowBlur || 0) + 'px ' + (td.shadowColor || '#000')
+      : 'none';
+    ta.style.background = td.bgEnabled ? (td.bgColor || '#ffffff') : 'transparent';
+    ta.style.borderRadius = (td.bgEnabled ? Math.min(16, Math.round(td.size * 0.25)) : 4) + 'px';
+    ta.style.padding = padY + 'px ' + padX + 'px';
+    this.autosizeEditBox(ta);
   }
 
-  // 入力文字は実際の描画サイズ（キャンバス上の見た目）に合わせる＝WYSIWYG。
-  // 極端なズームでも編集不能にならないよう画面上のサイズだけ最小/最大を設ける。
-  applyEditFontSize(ta) {
-    const zoom = PICanvasEngine.getZoom() || 1;
-    const px = Math.max(11, Math.min(this.textData.size * zoom, 96));
-    ta.style.fontSize = px + 'px';
+  // field-sizing: content 非対応ブラウザ用のフォールバック
+  autosizeEditBox(ta) {
+    if (this._fieldSizing === undefined) {
+      this._fieldSizing = !!(window.CSS && CSS.supports && CSS.supports('field-sizing', 'content'));
+    }
+    if (this._fieldSizing) return;
+    ta.style.width = 'auto';
+    ta.style.height = 'auto';
+    ta.style.width = Math.max(24, ta.scrollWidth) + 'px';
+    ta.style.height = Math.max(24, ta.scrollHeight) + 'px';
   }
 
-  // クリック位置が画面端でも、編集ボックスがビューポート外へ出ないよう寄せる
-  keepEditBoxOnScreen(overlay) {
-    const vp = PICanvasEngine.getViewport();
-    if (!vp) return;
-    const vpRect = vp.getBoundingClientRect();
-    const rect = overlay.getBoundingClientRect();
+  // 確定/キャンセルボタンはズームに関係なく常に読める大きさで表示する
+  applyBtnRowScale() {
+    if (!this._btnRow) return;
     const zoom = PICanvasEngine.getZoom() || 1;
-    const margin = 8;
-    let dxScreen = 0, dyScreen = 0;
-    if (rect.right > vpRect.right - margin) dxScreen = (vpRect.right - margin) - rect.right;
-    if (rect.bottom > vpRect.bottom - margin) dyScreen = (vpRect.bottom - margin) - rect.bottom;
-    if (rect.left + dxScreen < vpRect.left + margin) dxScreen = (vpRect.left + margin) - rect.left;
-    if (rect.top + dyScreen < vpRect.top + margin) dyScreen = (vpRect.top + margin) - rect.top;
-    if (dxScreen === 0 && dyScreen === 0) return;
-    // overlay の left/top はキャンバス座標（wrapper 内）。画面pxはzoom倍されるので割り戻す。
-    overlay.style.left = (parseFloat(overlay.style.left) + dxScreen / zoom) + 'px';
-    overlay.style.top = (parseFloat(overlay.style.top) + dyScreen / zoom) + 'px';
+    this._btnRow.style.transformOrigin = '0 0';
+    this._btnRow.style.transform = 'scale(' + (1 / zoom) + ')';
   }
 
   confirmEdit(text) {
@@ -419,12 +608,20 @@ window.PITextTool = new (class extends PIToolBase {
 
   cancelEdit() {
     this.hideEditBox();
+    PIEventBus.emit('tool:properties-changed');
     this.redrawHandles();
   }
 
   hideEditBox() {
     this.isEditing = false;
     this._activeTextarea = null;
+    this._btnRow = null;
+    // 編集のために隠していたレイヤーを戻す
+    if (this._hiddenLayer) {
+      this._hiddenLayer.visible = true;
+      this._hiddenLayer = null;
+      PILayerManager.requestRender();
+    }
     PIEventBus.emit('text:overlay-active', false);
     const overlay = document.getElementById('text-edit-overlay');
     if (overlay) {
@@ -441,6 +638,11 @@ window.PITextTool = new (class extends PIToolBase {
   }
 
   applyEdit(label) {
+    if (this.isEditing) {
+      // 入力中はスタイルを編集ボックスへライブ反映し、レイヤーへは確定時にまとめて書き込む
+      if (this._activeTextarea) this.styleEditBox(this._activeTextarea);
+      return;
+    }
     const layer = this.targetLayer();
     if (layer) {
       layer.name = (layer.textData.text || '').substring(0, 10);
@@ -454,8 +656,15 @@ window.PITextTool = new (class extends PIToolBase {
 
   applyPreset(preset) {
     const layer = this.targetLayer();
-    const target = layer ? layer.textData : this.textData;
-    Object.assign(target, preset);
+    const target = this.isEditing ? this.textData : (layer ? layer.textData : this.textData);
+    // 前のプリセットの縁取り/影が残らないよう、基本状態へ戻してから適用する
+    const base = {
+      bold: false, italic: false, underline: false, strikethrough: false,
+      strokeWidth: 0, shadowBlur: 0, shadowOffsetX: 0, shadowOffsetY: 0
+    };
+    const style = { ...preset };
+    delete style.name;
+    Object.assign(target, base, style);
     this.applyEdit('テキスト書式');
     PIEventBus.emit('tool:properties-changed');
   }
@@ -465,7 +674,8 @@ window.PITextTool = new (class extends PIToolBase {
     const fonts = PIFontLoader.getAvailableFonts();
     const allFonts = [...fonts.system, ...fonts.google];
     const layer = self.targetLayer();
-    const td = layer ? layer.textData : self.textData;
+    // 入力中はプロパティ変更を編集ボックスへライブ反映する（確定時にレイヤーへ書き込み）
+    const td = self.isEditing ? self.textData : (layer ? layer.textData : self.textData);
     const set = (mut, label) => { mut(); self.applyEdit(label); };
     const fields = [
         {
@@ -480,7 +690,8 @@ window.PITextTool = new (class extends PIToolBase {
           toggles: [
             { key: 'bold', label: 'B', active: td.bold, onChange: (v) => set(() => { td.bold = v; }, '太字') },
             { key: 'italic', label: 'I', active: td.italic, onChange: (v) => set(() => { td.italic = v; }, '斜体') },
-            { key: 'underline', label: 'U', active: td.underline, onChange: (v) => set(() => { td.underline = v; }, '下線') }
+            { key: 'underline', label: 'U', active: td.underline, onChange: (v) => set(() => { td.underline = v; }, '下線') },
+            { key: 'strikethrough', label: 'S', active: td.strikethrough, onChange: (v) => set(() => { td.strikethrough = v; }, '取り消し線') }
           ]
         },
         {
@@ -491,20 +702,33 @@ window.PITextTool = new (class extends PIToolBase {
             { label: '右', active: td.align === 'right', onClick: () => set(() => { td.align = 'right'; }, '配置') }
           ]
         },
+        {
+          type: 'button-group', label: '文字方向', key: 'vertical',
+          buttons: [
+            { label: '横書き', active: !td.vertical, onClick: () => set(() => { td.vertical = false; }, '文字方向') },
+            { label: '縦書き', active: !!td.vertical, onClick: () => set(() => { td.vertical = true; }, '文字方向') }
+          ]
+        },
+        { type: 'checkbox', label: '背景プレート', key: 'bgEnabled', value: !!td.bgEnabled, onChange: (v) => set(() => { td.bgEnabled = v; }, 'テキスト背景') },
+        { type: 'color', label: '背景色', key: 'bgColor', value: td.bgColor || '#ffffff', onChange: (v) => set(() => { td.bgColor = v; td.bgEnabled = true; }, 'テキスト背景色') },
         { type: 'slider', label: '行間', key: 'lineHeight', value: td.lineHeight * 100, min: 80, max: 300, unit: '%', onChange: (v) => set(() => { td.lineHeight = parseInt(v) / 100; }, '行間'), advancedOnly: true },
         { type: 'color', label: '縁取り色', key: 'strokeColor', value: td.strokeColor, onChange: (v) => set(() => { td.strokeColor = v; }, '縁取り色'), advancedOnly: true },
         { type: 'slider', label: '縁取り太さ', key: 'strokeWidth', value: td.strokeWidth, min: 0, max: 20, onChange: (v) => set(() => { td.strokeWidth = parseInt(v); }, '縁取り'), advancedOnly: true },
         { type: 'color', label: '影の色', key: 'shadowColor', value: td.shadowColor, onChange: (v) => set(() => { td.shadowColor = v; }, '影色'), advancedOnly: true },
-        { type: 'slider', label: '影ぼかし', key: 'shadowBlur', value: td.shadowBlur, min: 0, max: 30, onChange: (v) => set(() => { td.shadowBlur = parseInt(v); }, '影'), advancedOnly: true },
+        { type: 'slider', label: '影ぼかし', key: 'shadowBlur', value: td.shadowBlur, min: 0, max: 30, onChange: (v) => set(() => { td.shadowBlur = parseInt(v); if (td.shadowBlur > 0 && !td.shadowOffsetX && !td.shadowOffsetY) { td.shadowOffsetX = 2; td.shadowOffsetY = 2; } }, '影'), advancedOnly: true },
         {
           type: 'preset-list', label: 'プリセット', key: 'presets',
           presets: self.presets.map(p => ({ label: p.name, onClick: () => self.applyPreset(p) }))
         }
       ];
-    // 既存レイヤー編集時のみ回転（キャンバス上の丸ハンドルでも操作可能）
-    if (layer) {
+    if (layer && !self.isEditing) {
+      // 内容の編集はダブルクリックでも開ける（発見性のためボタンも用意）
+      fields.unshift({
+        type: 'button', label: '✎ テキストを編集（ダブルクリック）', key: 'edit',
+        onClick: () => self.beginEditLayer(layer)
+      });
       const rotDeg = ((Math.round((layer.rotation || 0) * 180 / Math.PI) % 360) + 360) % 360;
-      fields.splice(5, 0, {
+      fields.splice(6, 0, {
         type: 'slider', label: '回転', key: 'rotation', value: rotDeg, min: 0, max: 360, unit: '°',
         onChange: (v) => {
           layer.rotation = parseInt(v) * Math.PI / 180;
@@ -514,6 +738,7 @@ window.PITextTool = new (class extends PIToolBase {
         }
       });
     }
-    return { title: layer ? 'テキスト（編集中）' : 'テキスト（新規）', fields };
+    const title = self.isEditing ? 'テキスト（入力中・ライブ反映）' : (layer ? 'テキスト（選択中）' : 'テキスト（新規）');
+    return { title, fields };
   }
 })();
