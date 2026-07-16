@@ -309,6 +309,14 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
           <p class="qm-hint">基本テンプレート（会社共通）とマイテンプレート（この端末）を管理できます。</p>
         </div>
       </div>
+      <div class="qm-sec">
+        <div class="qm-sec-hd" data-fold>バックアップ・受け渡し <span class="chev">▾</span></div>
+        <div class="qm-sec-body">
+          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0;margin-bottom:6px" id="btnExportJson">📤 この見積書を書き出す（.json）</button>
+          <button class="qm-tb-btn" style="width:100%;background:#f1f5f9;color:#334155;border-color:#e2e8f0" id="btnImportJson">📥 ファイルから読み込む（.json）</button>
+          <p class="qm-hint">書き出したファイルは、別のパソコンや他の人がここから読み込んで、続きを編集できます（読み込むと新しい未保存の見積書になります）。</p>
+        </div>
+      </div>
     </div>
 
     <!-- Center: canvas -->
@@ -1565,7 +1573,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   }
   function closeTemplates(){ $('#tplModal').classList.remove('show'); }
 
-  function tplRow(name, sub, onApply, onDelete){
+  function tplRow(name, sub, onApply, onDelete, onExport){
     const row=el('div','qm-quote-row');
     const meta=el('div','meta');
     const nm=el('div','qt'); nm.textContent=name;
@@ -1574,6 +1582,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     meta.addEventListener('click', onApply);
     const use=el('button','qm-mini'); use.textContent='このテンプレートで作成'; use.addEventListener('click', onApply);
     row.appendChild(meta); row.appendChild(use);
+    if(onExport){ const ex=el('button','qm-mini'); ex.textContent='書き出し'; ex.title='JSONファイルとして書き出す（別の端末で読み込めます）'; ex.addEventListener('click', onExport); row.appendChild(ex); }
     if(onDelete){ const del=el('button','qm-mini danger'); del.textContent='削除'; del.addEventListener('click', onDelete); row.appendChild(del); }
     return row;
   }
@@ -1587,13 +1596,20 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       body.innerHTML='';
       rows.forEach(t=>{
         const onDel = data.can_manage ? (()=>deleteBaseTemplate(t.id, t.name)) : null;
-        body.appendChild(tplRow(t.name, '更新: '+fmtDate(t.updated_at)+(t.created_by?'（'+t.created_by+'）':''), ()=>applyBaseTemplate(t.id), onDel));
+        body.appendChild(tplRow(t.name, '更新: '+fmtDate(t.updated_at)+(t.created_by?'（'+t.created_by+'）':''), ()=>applyBaseTemplate(t.id), onDel, ()=>exportBaseTemplate(t.id, t.name)));
       });
     }catch(e){ body.innerHTML='<div class="qm-list-empty">読み込みに失敗しました。</div>'; }
   }
   async function applyBaseTemplate(id){
     try{ const res=await fetch(TPL_API+'/'+id); if(!res.ok) throw 0; const data=await res.json(); applyDocument(data.document); }
     catch(e){ toast('テンプレートの読み込みに失敗しました'); }
+  }
+  async function exportBaseTemplate(id, name){
+    try{
+      const res=await fetch(TPL_API+'/'+id); if(!res.ok) throw 0; const data=await res.json();
+      downloadJson(sanitizeFileName(name||'テンプレート')+'.json', exportEnvelope('template', name, data.document||{}));
+      toast('テンプレートをファイルに書き出しました');
+    }catch(e){ toast('書き出しに失敗しました'); }
   }
   async function saveBaseTemplate(){
     const name=prompt('基本テンプレートの名前を入力してください:', state.title||'');
@@ -1619,7 +1635,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       if(!rows.length){ body.innerHTML='<div class="qm-list-empty">マイテンプレートはまだありません。<br>「＋ 現在の内容を保存」で追加できます。</div>'; return; }
       body.innerHTML='';
       rows.forEach(t=>{
-        body.appendChild(tplRow(t.name, '保存: '+fmtDate(t.createdAt), ()=>applyDocument(t.document), ()=>deleteMyTemplate(t.id, t.name)));
+        body.appendChild(tplRow(t.name, '保存: '+fmtDate(t.createdAt), ()=>applyDocument(t.document), ()=>deleteMyTemplate(t.id, t.name),
+          ()=>{ downloadJson(sanitizeFileName(t.name||'テンプレート')+'.json', exportEnvelope('template', t.name, t.document||{})); toast('テンプレートをファイルに書き出しました'); }));
       });
     }catch(e){ body.innerHTML='<div class="qm-list-empty">読み込みに失敗しました。</div>'; }
   }
@@ -1638,18 +1655,115 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     catch(e){ toast('削除に失敗しました'); }
   }
 
-  /* テンプレートの内容を「新しい未保存の見積書」として読み込む */
-  function applyDocument(doc){
-    if(dirty && !confirm('保存していない変更があります。テンプレートから新規作成しますか？')) return;
+  /* テンプレートやファイルの内容を「新しい未保存の見積書」として読み込む */
+  function applyDocument(doc, opts){
+    opts=opts||{};
+    if(dirty && !confirm(opts.confirmMsg||'保存していない変更があります。テンプレートから新規作成しますか？')) return;
     docLifetime++;
-    state.id=null; state.title=''; state.doc=normalizeDoc(JSON.parse(JSON.stringify(doc||{})));
-    $('#docTitle').value='';
+    state.id=null; state.title=opts.title||''; state.doc=normalizeDoc(JSON.parse(JSON.stringify(doc||{})));
+    $('#docTitle').value=state.title;
     selectedId=null; resetHistory();
     render(); buildPageSettings(); buildInspector();
     dirty=false; setSaveState('新規（未保存）'); fitZoom();
     closeTemplates();
     if(isNarrow()) closePanels();
-    toast('テンプレートから新規作成しました');
+    toast(opts.msg||'テンプレートから新規作成しました');
+  }
+
+  /* ------------------------------------------------------------------
+     JSONファイルへの書き出し・読み込み（バックアップ・受け渡し用）
+     - 見積書やテンプレートを .json として端末に保存し、別のPCや他の人が
+       読み込んで編集を続けられる。読み込んだ内容は新しい未保存の見積書になる。
+     ------------------------------------------------------------------ */
+  function exportEnvelope(kind, title, doc){
+    return { app:'dstt_quote_maker', kind:kind, version:1,
+             exported_at:new Date().toISOString(),
+             title:String(title||''), document:doc };
+  }
+  function sanitizeFileName(s){
+    const cleaned=String(s||'').replace(/[\\\/:*?"<>|\r\n]+/g,'_').trim();
+    return (cleaned||'見積書').slice(0,80);
+  }
+  function downloadJson(filename, obj){
+    const blob=new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  }
+
+  /* 読み込んだファイル由来のHTMLから script・onXXX 属性・危険なURLを除去する。
+     他人が作成したファイルを読み込んでも安全なようにするための処理。
+     <template> の中身は inert（スクリプト実行や画像読込が起きない）なので
+     解析にはこれを使う。 */
+  function sanitizeHtml(html){
+    const tpl=document.createElement('template');
+    tpl.innerHTML=String(html==null?'':html);
+    tpl.content.querySelectorAll('script,style,iframe,object,embed,link,meta,form,base').forEach(n=>n.remove());
+    tpl.content.querySelectorAll('*').forEach(n=>{
+      [...n.attributes].forEach(a=>{
+        const nm=a.name.toLowerCase(), v=String(a.value||'');
+        if(nm.startsWith('on')){ n.removeAttribute(a.name); return; }
+        if((nm==='href'||nm==='src') && /^\s*(javascript:|vbscript:|data:)/i.test(v)){
+          if(!(nm==='src' && /^\s*data:image\//i.test(v))) n.removeAttribute(a.name);
+        }
+      });
+    });
+    return tpl.innerHTML;
+  }
+  function sanitizeImportedDoc(doc){
+    (doc.blocks||[]).forEach(b=>{
+      const c=b.content=b.content||{};
+      if(typeof c.html==='string') c.html=sanitizeHtml(c.html);
+      if(typeof c.title==='string') c.title=sanitizeHtml(c.title);
+      if(typeof c.bannerLabel==='string') c.bannerLabel=sanitizeHtml(c.bannerLabel);
+      if(c.heads && typeof c.heads==='object'){
+        for(const k in c.heads){ if(typeof c.heads[k]==='string') c.heads[k]=sanitizeHtml(c.heads[k]); }
+      }
+      (Array.isArray(c.cols)?c.cols:[]).forEach(col=>{ if(col && typeof col.html==='string') col.html=sanitizeHtml(col.html); });
+      (Array.isArray(c.rows)?c.rows:[]).forEach(r=>{
+        if(!r) return;
+        ['label','value','name','note','qty','unit','price'].forEach(k=>{ if(typeof r[k]==='string') r[k]=sanitizeHtml(r[k]); });
+      });
+      if(b.type==='image' && typeof c.src==='string' && c.src && !/^(data:image\/|https?:\/\/|\/)/i.test(c.src)) c.src='';
+    });
+    return doc;
+  }
+
+  function exportCurrentQuote(){
+    if(!state.doc){ toast('書き出せる内容がありません'); return; }
+    downloadJson(sanitizeFileName(state.title||'見積書')+'.json',
+      exportEnvelope('quote', state.title, state.doc));
+    toast('見積書をファイルに書き出しました');
+  }
+  function importQuoteFile(){
+    const inp=document.createElement('input');
+    inp.type='file'; inp.accept='.json,application/json';
+    inp.addEventListener('change', ()=>{
+      const f=inp.files && inp.files[0]; if(!f) return;
+      if(f.size>8*1024*1024){ toast('ファイルが大きすぎます（8MBまで）'); return; }
+      const rd=new FileReader();
+      rd.onload=()=>{
+        let doc=null, title='';
+        try{
+          const o=JSON.parse(String(rd.result||''));
+          if(o && typeof o==='object' && Array.isArray(o.blocks)){ doc=o; }
+          else if(o && typeof o==='object' && o.app==='dstt_quote_maker' && o.document && Array.isArray(o.document.blocks)){
+            doc=o.document; title=String(o.title||'');
+          }
+        }catch(_){ /* 下の !doc でまとめて弾く */ }
+        if(!doc){ toast('見積書のファイルとして読み込めませんでした'); return; }
+        applyDocument(sanitizeImportedDoc(doc), {
+          title:title,
+          confirmMsg:'保存していない変更があります。ファイルの内容で新規作成しますか？',
+          msg:'ファイルから読み込みました（未保存）'
+        });
+      };
+      rd.onerror=()=>toast('ファイルの読み込みに失敗しました');
+      rd.readAsText(f);
+    });
+    inp.click();
   }
 
   /* ------------------------------------------------------------------
@@ -1819,6 +1933,14 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   $('#btnResetTemplate').addEventListener('click', ()=>{ if(!confirm('現在の内容を破棄して白紙のお見積書に戻しますか？')) return; state.doc=defaultDoc(); commit(); buildPageSettings(); selectBlock(null); toast('白紙のお見積書を読み込みました'); });
   $('#btnPreview').addEventListener('click', ()=>{ const app=$('#qmApp'); app.classList.toggle('previewing'); $('#btnPreview').classList.toggle('primary', app.classList.contains('previewing')); if(app.classList.contains('previewing')) selectBlock(null); });
   $('#btnPrint').addEventListener('click', async ()=>{ hideInlineBar(); closePanels(); if(dirty){ try{ await saveNow(); }catch(_){} } setTimeout(()=>window.print(), 80); });
+  $('#btnExportJson').addEventListener('click', exportCurrentQuote);
+  $('#btnImportJson').addEventListener('click', importQuoteFile);
+
+  // PDF保存時のファイル名はページの <title> から取られるため、印刷の間だけ
+  // 見積書のタイトルに差し替える（Ctrl+P などブラウザ標準の印刷でも効く）。
+  const shellTitle=document.title;
+  window.addEventListener('beforeprint', ()=>{ document.title=String(state.title||'').trim()||'見積書'; });
+  window.addEventListener('afterprint', ()=>{ document.title=shellTitle; });
 
   document.addEventListener('keydown',(e)=>{
     if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z' && !e.shiftKey){ e.preventDefault(); doUndo(); return; }
