@@ -172,6 +172,22 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
 .qm-ib:hover { background:rgba(255,255,255,.15); }
 .qm-ib input[type=color] { width:18px; height:18px; border:none; padding:0; background:none; vertical-align:middle; }
 
+/* ============ Paste options bar ============ */
+.qm-pastebar { position:fixed; z-index:70; display:none; align-items:center; gap:5px; padding:5px 8px;
+  background:#0f172a; border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.28); color:#94a3b8; font-size:.72rem; font-weight:700; }
+.qm-pastebar.show { display:flex; }
+.qm-pastebar button { height:24px; padding:0 9px; border:1px solid rgba(255,255,255,.25); border-radius:5px;
+  background:transparent; color:#e2e8f0; font-size:.72rem; font-weight:700; cursor:pointer; white-space:nowrap; }
+.qm-pastebar button:hover { background:rgba(255,255,255,.15); }
+.qm-pastebar button.on { background:#2563eb; border-color:#2563eb; }
+
+/* 狭い画面ではブロック選択ツールからインスペクタを開けるようにする */
+.qm-bt.insp { background:#475569; display:none; }
+.qm-bt.insp:hover { background:#334155; }
+@media (max-width:900px){
+  .qm-app:not(.previewing) .qm-block.selected .qm-bt.insp { display:flex; }
+}
+
 /* ============ List modal ============ */
 .qm-modal { position:fixed; inset:0; z-index:80; display:none; align-items:flex-start; justify-content:center;
   background:rgba(15,23,42,.5); padding:6vh 16px; }
@@ -227,7 +243,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   html, body { background:#fff !important; margin:0 !important; padding:0 !important; overflow:visible !important; }
   #app-sidebar, #sidebar-toggle, nav, header, footer,
   .qm-toolbar, .qm-panel, .qm-zoombar, .qm-inlinebar, .qm-modal, .qm-toast,
-  .qm-block-tools, .qm-block-handle { display:none !important; }
+  .qm-pastebar, .qm-block-tools, .qm-block-handle { display:none !important; }
   #app-main-content, main { padding:0 !important; margin:0 !important; }
   .flex.min-h-screen { display:block !important; }
   .qm-app { margin:0 !important; height:auto !important; background:#fff !important; display:block !important; }
@@ -353,6 +369,14 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   <button class="qm-ib" data-size="18" title="大">大</button>
   <button class="qm-ib" data-size="24" title="特大">特</button>
   <label class="qm-ib" title="文字色">🎨<input type="color" id="inlineColor"></label>
+  <button class="qm-ib" data-cmd="removeFormat" title="選択範囲の書式をクリア">A×</button>
+</div>
+
+<!-- 貼り付け方式の選択バー（Word/Excelのように貼り付け直後に選べる） -->
+<div class="qm-pastebar" id="pasteBar">
+  <span>貼り付け:</span>
+  <button data-pmode="keep">書式を保持</button>
+  <button data-pmode="text">テキストのみ</button>
 </div>
 
 <!-- list modal -->
@@ -766,6 +790,10 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
       }
     }
     setCss(inner, styleToBlockCss(s));
+    // プレビュー中に再描画されたブロックも編集ロックを維持する
+    if($('#qmApp').classList.contains('previewing')){
+      inner.querySelectorAll('[data-ce]').forEach(n=>n.setAttribute('contenteditable','false'));
+    }
     return inner;
   }
 
@@ -892,9 +920,10 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     wrap.appendChild(handle);
     // tools
     const tools = el('div','qm-block-tools');
+    const insp = el('div','qm-bt insp'); insp.innerHTML='⚙'; insp.title='書式を編集（インスペクタを開く）'; insp.setAttribute('data-act','inspect');
     const dup = el('div','qm-bt mv'); dup.innerHTML='⧉'; dup.title='複製 (Ctrl+D)'; dup.setAttribute('data-act','dup');
     const del = el('div','qm-bt del'); del.innerHTML='×'; del.title='削除 (Delete)'; del.setAttribute('data-act','del');
-    tools.appendChild(dup); tools.appendChild(del);
+    tools.appendChild(insp); tools.appendChild(dup); tools.appendChild(del);
     wrap.appendChild(tools);
     // inner
     wrap.appendChild(renderBlockInner(b));
@@ -953,8 +982,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     $('#btnUndo').disabled = undoStack.length===0;
     $('#btnRedo').disabled = redoStack.length===0;
   }
-  function doUndo(){ if(!undoStack.length) return; redoStack.push(histBaseline); histBaseline=undoStack.pop(); restore(histBaseline); updateHistoryButtons(); markDirty(); }
-  function doRedo(){ if(!redoStack.length) return; undoStack.push(histBaseline); histBaseline=redoStack.pop(); restore(histBaseline); updateHistoryButtons(); markDirty(); }
+  function doUndo(){ finishPaste(); if(!undoStack.length) return; redoStack.push(histBaseline); histBaseline=undoStack.pop(); restore(histBaseline); updateHistoryButtons(); markDirty(); }
+  function doRedo(){ finishPaste(); if(!redoStack.length) return; undoStack.push(histBaseline); histBaseline=redoStack.pop(); restore(histBaseline); updateHistoryButtons(); markDirty(); }
 
   /* commit a structural change: history + rerender + dirty */
   function commit(rerender=true){ pushHistory(); if(rerender) render(); markDirty(); }
@@ -1016,9 +1045,29 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     const f = el('div','qm-field');
     const l = el('label'); l.textContent=label; f.appendChild(l); f.appendChild(node); return f;
   }
+  // 連続的に動く入力（数値・色）は、1打鍵ごとに履歴が積まれないよう
+  // 変更をまとめて1つのUndoステップにする。
+  function applyContinuous(fn){
+    suppressHistory=true;
+    try{ fn(); } finally { suppressHistory=false; }
+    clearTimeout(ceHistoryTimer);
+    ceHistoryTimer=setTimeout(()=>pushHistory(), 600);
+  }
   function numInput(val, min, max, step, on){
     const i=el('input','qm-inp'); i.type='number'; i.value=val; if(min!=null)i.min=min; if(max!=null)i.max=max; if(step!=null)i.step=step;
-    i.addEventListener('input',()=>{ const v=parseFloat(i.value); if(!isNaN(v)) on(v); }); return i;
+    // min/max はスピナー操作にしか効かないため、直接入力もここでクランプする
+    i.addEventListener('input',()=>{
+      let v=parseFloat(i.value); if(isNaN(v)) return;
+      if(min!=null) v=Math.max(min, v);
+      if(max!=null) v=Math.min(max, v);
+      applyContinuous(()=>on(v));
+    });
+    i.addEventListener('change',()=>{
+      const v=parseFloat(i.value); if(isNaN(v)) return;
+      const c=Math.min(max==null?Infinity:max, Math.max(min==null?-Infinity:min, v));
+      if(c!==v) i.value=String(c);
+    });
+    return i;
   }
   function segment(options, cur, on){
     const seg=el('div','qm-seg');
@@ -1030,8 +1079,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     const w=el('div','qm-color');
     const c=el('input'); c.type='color'; c.value= (val&&val!=='transparent')?val:'#000000';
     const hex=el('input','qm-inp hex'); hex.value=val||''; hex.placeholder='なし';
-    c.addEventListener('input',()=>{ hex.value=c.value; on(c.value); });
-    hex.addEventListener('input',()=>{ on(hex.value.trim()); if(/^#/.test(hex.value)) c.value=hex.value.trim(); });
+    c.addEventListener('input',()=>{ hex.value=c.value; applyContinuous(()=>on(c.value)); });
+    hex.addEventListener('input',()=>{ applyContinuous(()=>on(hex.value.trim())); if(/^#/.test(hex.value)) c.value=hex.value.trim(); });
     w.appendChild(c); w.appendChild(hex); return w;
   }
   function checkRow(label, checked, on){
@@ -1243,6 +1292,8 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     return base;
   }
   function addBlock(type){
+    // プレビュー中に追加したら、編集を続けられるようプレビューを解除する
+    if(isPreviewing()) setPreview(false);
     const b = newBlock(type);
     const idx = selectedId? findIndex(selectedId)+1 : state.doc.blocks.length;
     state.doc.blocks.splice(idx,0,b);
@@ -1257,11 +1308,21 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   /* ------------------------------------------------------------------
      Contenteditable sync
      ------------------------------------------------------------------ */
+  /* 貼り付け用の一時マーカー<span>を除いたHTMLを取り出す（保存データに残さない） */
+  function ceHtml(node){
+    if(!node.querySelector || !node.querySelector('[data-paste-marker]')) return node.innerHTML;
+    const c=node.cloneNode(true);
+    c.querySelectorAll('[data-paste-marker]').forEach(m=>{
+      while(m.firstChild) m.parentNode.insertBefore(m.firstChild, m);
+      m.remove();
+    });
+    return c.innerHTML;
+  }
   function syncCE(node){
     const wrap = node.closest('.qm-block'); if(!wrap) return;
     const b = findBlock(wrap.getAttribute('data-id')); if(!b) return;
     const role = node.getAttribute('data-ce');
-    const html = node.innerHTML;
+    const html = ceHtml(node);
     if(role==='text'){ b.content.html=html; }
     else if(role==='title'){ b.content.title=html; }
     else if(role==='box'){ b.content.html=html; }
@@ -1278,6 +1339,7 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   let ceHistoryTimer=null;
   $('#sheetInner').addEventListener('input', (e)=>{
     const node = e.target.closest('[data-ce]'); if(!node) return;
+    if(pasteCtx) finishPaste();   // 貼り付け直後に入力が始まったら貼り付けを確定
     syncCE(node); markDirty();
     // 明細表の数量・単価が変わったら金額・小計・消費税・合計を即座に再計算
     const role=node.getAttribute('data-ce')||'';
@@ -1314,11 +1376,13 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
      Sheet click: selection / delete
      ------------------------------------------------------------------ */
   $('#sheetInner').addEventListener('click',(e)=>{
+    if($('#qmApp').classList.contains('previewing')) return;   // プレビュー中は選択・操作しない
     const act=e.target.closest('[data-act]');
     if(act){
       const wrap=act.closest('.qm-block'); if(!wrap) return;
       const id=wrap.getAttribute('data-id');
       const kind=act.getAttribute('data-act');
+      if(kind==='inspect'){ selectBlock(id); openPanel('right'); return; }
       if(kind==='del'){ removeBlock(id); }
       else if(kind==='dup'){ duplicateBlock(id); }
       else if(kind==='items-addrow'){
@@ -1380,6 +1444,110 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     }
     dragId=null; dropIndicator=null; dropped=false;
   });
+
+  /* ------------------------------------------------------------------
+     貼り付け（Word/Excelのように「書式を保持／テキストのみ」を選べる）
+     - 貼り付け直後に選択バーを表示し、あとから方式を切り替えられる。
+     - 選んだ方式は次回以降の既定として記憶する。
+     - 挿入内容は一時的にマーカー<span>で包み、確定時に外す。
+     ------------------------------------------------------------------ */
+  const PASTE_MODE_KEY='dstt_qm_paste_mode_v1';
+  let pasteCtx=null;   // {marker, html, text, ce}
+
+  function htmlToPlainText(html){
+    const t=document.createElement('template');
+    t.innerHTML=String(html||'').replace(/<br\s*\/?>(?=.)/gi,'\n').replace(/<\/(p|div|tr|li|h[1-6])>/gi,'\n');
+    return (t.content.textContent||'').replace(/\n{3,}/g,'\n\n');
+  }
+  function fillMarker(mode){
+    if(!pasteCtx) return;
+    const m=pasteCtx.marker;
+    if(mode==='keep'){ m.innerHTML=pasteCtx.html; }
+    else{
+      m.textContent='';
+      String(pasteCtx.text||'').split(/\r?\n/).forEach((ln,i)=>{
+        if(i) m.appendChild(document.createElement('br'));
+        m.appendChild(document.createTextNode(ln));
+      });
+    }
+    // カーソルを挿入内容の末尾へ
+    const sel=window.getSelection(); const r=document.createRange();
+    r.selectNodeContents(m); r.collapse(false);
+    sel.removeAllRanges(); sel.addRange(r);
+  }
+  function hidePasteBar(){ $('#pasteBar').classList.remove('show'); }
+  function showPasteBar(mode){
+    const bar=$('#pasteBar');
+    bar.classList.add('show');
+    bar.querySelectorAll('[data-pmode]').forEach(b=>b.classList.toggle('on', b.dataset.pmode===mode));
+    const r=pasteCtx.marker.getBoundingClientRect();
+    let top=r.bottom+8; if(top>window.innerHeight-44) top=Math.max(6, r.top-40);
+    let left=Math.max(6, Math.min(r.left, window.innerWidth-bar.offsetWidth-6));
+    bar.style.top=top+'px'; bar.style.left=left+'px';
+  }
+  /* 貼り付けを確定する（マーカーを外して同期・履歴追加） */
+  function finishPaste(){
+    if(!pasteCtx) return;
+    const {marker, ce}=pasteCtx;
+    pasteCtx=null;
+    hidePasteBar();
+    if(marker && marker.parentNode){
+      while(marker.firstChild) marker.parentNode.insertBefore(marker.firstChild, marker);
+      marker.remove();
+    }
+    if(ce && ce.isConnected){
+      syncCE(ce); markDirty();
+      const role=ce.getAttribute('data-ce')||'';
+      if(role.startsWith('item:')){
+        const wrap=ce.closest('.qm-block');
+        if(wrap) updateItemsComputed(wrap.getAttribute('data-id'));
+      }
+    }
+    pushHistory();
+  }
+
+  $('#sheetInner').addEventListener('paste',(e)=>{
+    const ce=e.target.closest && e.target.closest('[data-ce]');
+    if(!ce || ce.getAttribute('contenteditable')!=='true') return;
+    const cd=e.clipboardData; if(!cd) return;
+    const html=cd.getData('text/html');
+    const text=cd.getData('text/plain');
+    if(!html && !text) return;
+    e.preventDefault();
+    finishPaste();   // 直前の貼り付けが未確定なら先に確定
+    const sel=window.getSelection(); if(!sel || !sel.rangeCount) return;
+    const range=sel.getRangeAt(0);
+    range.deleteContents();
+    const marker=el('span'); marker.setAttribute('data-paste-marker','1');
+    range.insertNode(marker);
+    const role=ce.getAttribute('data-ce')||'';
+    // 明細の数量・単位・単価は計算用セルなので常にテキストのみ
+    const plainOnly=/^item:(qty|unit|price):/.test(role);
+    pasteCtx={ marker, ce,
+      html: html ? sanitizeHtml(html) : esc(text).replace(/\r?\n/g,'<br>'),
+      text: text || htmlToPlainText(html) };
+    let mode='text';
+    if(html && !plainOnly){
+      mode=(localStorage.getItem(PASTE_MODE_KEY)==='text')?'text':'keep';
+    }
+    fillMarker(mode);
+    syncCE(ce); markDirty();
+    if(html && !plainOnly){ showPasteBar(mode); }
+    else{ finishPaste(); }
+  });
+  $('#pasteBar').addEventListener('mousedown',(e)=>e.preventDefault());
+  $('#pasteBar').addEventListener('click',(e)=>{
+    const b=e.target.closest('[data-pmode]'); if(!b || !pasteCtx) return;
+    const mode=b.dataset.pmode;
+    fillMarker(mode);
+    try{ localStorage.setItem(PASTE_MODE_KEY, mode); }catch(_){}
+    $('#pasteBar').querySelectorAll('[data-pmode]').forEach(x=>x.classList.toggle('on', x===b));
+    syncCE(pasteCtx.ce); markDirty();
+  });
+  document.addEventListener('mousedown',(e)=>{
+    if(pasteCtx && !(e.target.closest && e.target.closest('#pasteBar'))) finishPaste();
+  });
+  $('#canvas').addEventListener('scroll',()=>{ if(pasteCtx) finishPaste(); }, {passive:true});
 
   /* ------------------------------------------------------------------
      Inline format bar
@@ -1452,12 +1620,20 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   $('#zoomOut').addEventListener('click',()=>{ zoom=Math.max(0.3, zoom-0.1); applyZoom(); });
   $('#zoomFit').addEventListener('click', fitZoom);
   window.addEventListener('resize', ()=>{ applyZoom(); });
-  // Ctrl+ホイールで拡大縮小（ブラウザ全体のズームではなくシートのズームにする）
+  // Ctrl+ホイールで拡大縮小（ブラウザ全体のズームではなくシートのズームにする）。
+  // カーソル直下の内容が同じ画面位置に留まるようスクロールを補正する。
   $('#canvas').addEventListener('wheel',(e)=>{
     if(!(e.ctrlKey||e.metaKey)) return;
     e.preventDefault();
-    zoom=Math.min(2, Math.max(0.3, zoom+(e.deltaY<0?0.1:-0.1)));
-    applyZoom();
+    const old=zoom;
+    const nz=Math.min(2, Math.max(0.3, zoom+(e.deltaY<0?0.1:-0.1)));
+    if(nz===old) return;
+    const canvas=$('#canvas'), wrap=$('#sheetWrap');
+    const r=wrap.getBoundingClientRect();
+    const py=(e.clientY-r.top)/old;   // カーソル下のシート座標(Y)
+    zoom=nz; applyZoom();
+    const r2=wrap.getBoundingClientRect();
+    canvas.scrollTop += (r2.top + py*nz) - e.clientY;
   }, {passive:false});
 
   // 入力で内容が伸び縮みしてもズームラッパーの高さとページガイドを追従させる
@@ -1520,7 +1696,21 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   }
   function fmtDate(iso){ if(!iso) return '-'; const d=new Date(iso); if(isNaN(d)) return iso; return d.getFullYear()+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 
+  /* 保留中の自動保存を送り切る。保存が完了できたら true。 */
+  async function flushPendingSave(){
+    clearTimeout(saveTimer);
+    for(let i=0; i<50 && saving; i++) await new Promise(r=>setTimeout(r,100));
+    if(dirty){ try{ await saveNow(); }catch(_){} }
+    for(let i=0; i<50 && saving; i++) await new Promise(r=>setTimeout(r,100));
+    return !dirty;
+  }
+
   async function loadQuote(id){
+    // 直前の編集が自動保存（1.4秒待ち）に乗る前に開くと消えるため、先に送り切る
+    if(dirty || saving){
+      const ok=await flushPendingSave();
+      if(!ok && !confirm('直前の変更を保存できませんでした。保存せずに別の見積書を開きますか？')) return false;
+    }
     try{
       const res=await fetch(API+'/'+id); if(!res.ok) throw 0; const data=await res.json();
       docLifetime++;
@@ -1903,8 +2093,24 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
      Wire up toolbar / panels
      ------------------------------------------------------------------ */
   document.querySelectorAll('[data-add]').forEach(btn=> btn.addEventListener('click', ()=> addBlock(btn.getAttribute('data-add'))));
-  document.querySelectorAll('[data-fold]').forEach(hd=> hd.addEventListener('click', ()=> hd.parentElement.classList.toggle('folded')));
-  $('#docTitle').addEventListener('input', ()=>{ state.title=$('#docTitle').value; markDirty(); });
+  // セクションの折りたたみ状態を記憶して、次回開いたときも維持する
+  (function(){
+    const FOLD_KEY='dstt_qm_folds_v1';
+    let folds={}; try{ folds=JSON.parse(localStorage.getItem(FOLD_KEY)||'{}')||{}; }catch(_){ folds={}; }
+    document.querySelectorAll('[data-fold]').forEach(hd=>{
+      const key=(hd.textContent||'').replace(/[▾\s]/g,'').slice(0,20);
+      if(folds[key]) hd.parentElement.classList.add('folded');
+      hd.addEventListener('click', ()=>{
+        folds[key]=hd.parentElement.classList.toggle('folded');
+        try{ localStorage.setItem(FOLD_KEY, JSON.stringify(folds)); }catch(_){}
+      });
+    });
+  })();
+  // タイトルの変更もUndo履歴に乗せる（本文と同じくまとめて1ステップ）
+  $('#docTitle').addEventListener('input', ()=>{
+    state.title=$('#docTitle').value; markDirty();
+    clearTimeout(ceHistoryTimer); ceHistoryTimer=setTimeout(()=>pushHistory(), 700);
+  });
   $('#btnNew').addEventListener('click', ()=>{ if(dirty && !confirm('保存していない変更があります。新規作成しますか？')) return; newDocument(); toast('新しい見積書を作成しました'); });
   $('#btnList').addEventListener('click', openList);
   $('#btnCloseList').addEventListener('click', ()=> $('#listModal').classList.remove('show'));
@@ -1931,7 +2137,16 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
   $('#btnUndo').addEventListener('click', doUndo);
   $('#btnRedo').addEventListener('click', doRedo);
   $('#btnResetTemplate').addEventListener('click', ()=>{ if(!confirm('現在の内容を破棄して白紙のお見積書に戻しますか？')) return; state.doc=defaultDoc(); commit(); buildPageSettings(); selectBlock(null); toast('白紙のお見積書を読み込みました'); });
-  $('#btnPreview').addEventListener('click', ()=>{ const app=$('#qmApp'); app.classList.toggle('previewing'); $('#btnPreview').classList.toggle('primary', app.classList.contains('previewing')); if(app.classList.contains('previewing')) selectBlock(null); });
+  /* プレビューの切替。プレビュー中は誤操作防止のため編集をロックする。 */
+  function isPreviewing(){ return $('#qmApp').classList.contains('previewing'); }
+  function setPreview(onFlag){
+    const app=$('#qmApp');
+    app.classList.toggle('previewing', !!onFlag);
+    $('#btnPreview').classList.toggle('primary', !!onFlag);
+    if(onFlag){ finishPaste(); hideInlineBar(); selectBlock(null); }
+    document.querySelectorAll('#sheetInner [data-ce]').forEach(n=>n.setAttribute('contenteditable', onFlag?'false':'true'));
+  }
+  $('#btnPreview').addEventListener('click', ()=> setPreview(!isPreviewing()));
   $('#btnPrint').addEventListener('click', async ()=>{ hideInlineBar(); closePanels(); if(dirty){ try{ await saveNow(); }catch(_){} } setTimeout(()=>window.print(), 80); });
   $('#btnExportJson').addEventListener('click', exportCurrentQuote);
   $('#btnImportJson').addEventListener('click', importQuoteFile);
@@ -1947,16 +2162,18 @@ textarea.qm-inp { height:auto; padding:6px 8px; resize:vertical; }
     if((e.ctrlKey||e.metaKey) && (e.key.toLowerCase()==='y' || (e.shiftKey&&e.key.toLowerCase()==='z'))){ e.preventDefault(); doRedo(); return; }
     if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); dirty=true; saveNow(); return; }
     if(e.key==='Escape'){
-      // 開いているモーダル→パネル→選択解除の順で閉じる
+      // 貼り付けバー→モーダル→プレビュー→パネル→選択解除の順で閉じる
+      if(pasteCtx){ finishPaste(); return; }
       const modal=document.querySelector('.qm-modal.show');
       if(modal){ modal.classList.remove('show'); return; }
+      if(isPreviewing()){ setPreview(false); return; }
       if($('#panelLeft').classList.contains('open')||$('#panelRight').classList.contains('open')){ closePanels(); return; }
       hideInlineBar(); selectBlock(null); return;
     }
-    // 文字入力中はブロック操作のショートカットを無効にする
+    // 文字入力中とプレビュー中はブロック操作のショートカットを無効にする
     const t=e.target;
     if(t && t.closest && t.closest('[contenteditable="true"], input, textarea, select')) return;
-    if(!selectedId) return;
+    if(isPreviewing() || !selectedId) return;
     if(e.key==='Delete' || e.key==='Backspace'){ e.preventDefault(); removeBlock(selectedId); }
     else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='d'){ e.preventDefault(); duplicateBlock(selectedId); }
     else if(e.altKey && e.key==='ArrowUp'){ e.preventDefault(); moveBlock(selectedId,-1); }
