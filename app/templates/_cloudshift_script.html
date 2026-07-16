@@ -3979,7 +3979,9 @@
     }
 
     function templateBasisLabel(basis) {
-      return basis === 'weekday' ? '曜日基準' : '日付基準';
+      if (basis === 'weekday') return '曜日基準';
+      if (basis === 'week') return '週基準';
+      return '日付基準';
     }
 
     async function ensureTemplatesLoaded(modal, force) {
@@ -4015,17 +4017,21 @@
       const basis = apply.basis || template.basis || 'date';
       const options = template.options || {};
       const applyMode = apply.apply_mode || options.apply_mode || 'overwrite';
-      const holidayMode = apply.holiday_mode || options.holiday_mode || 'as_weekday';
+      const holidayMode = apply.holiday_mode || options.holiday_mode || 'as_template';
       const targetFilter = apply.target_filter || options.target_filter || 'all';
+      const weekDate = apply.week_date || `${apply.year}-${String(apply.month).padStart(2, '0')}-01`;
+      const isWeek = basis === 'week';
       return `
         <form class="cloud-template-apply" data-template-apply-form="${escapeHtml(template.id)}">
           <div class="cloud-form-grid">
-            <label class="cloud-field"><span>反映する年</span><input class="cloud-input" type="number" min="2000" max="2100" value="${apply.year}" data-template-apply-year></label>
-            <label class="cloud-field"><span>反映する月</span><input class="cloud-input" type="number" min="1" max="12" value="${apply.month}" data-template-apply-month></label>
+            <label class="cloud-field" data-template-apply-ym-field style="${isWeek ? 'display:none;' : ''}"><span>反映する年</span><input class="cloud-input" type="number" min="2000" max="2100" value="${apply.year}" data-template-apply-year></label>
+            <label class="cloud-field" data-template-apply-ym-field style="${isWeek ? 'display:none;' : ''}"><span>反映する月</span><input class="cloud-input" type="number" min="1" max="12" value="${apply.month}" data-template-apply-month></label>
+            <label class="cloud-field" data-template-apply-week-field style="${isWeek ? '' : 'display:none;'}"><span>反映先の日付（この日を含む週）</span><input class="cloud-input" type="date" value="${escapeHtml(weekDate)}" data-template-apply-week-date></label>
             <label class="cloud-field"><span>基準</span>
               <select class="cloud-input" data-template-apply-basis>
                 <option value="date"${basis === 'date' ? ' selected' : ''}>日付基準</option>
                 <option value="weekday"${basis === 'weekday' ? ' selected' : ''}>曜日基準</option>
+                <option value="week"${basis === 'week' ? ' selected' : ''}>週基準</option>
               </select>
             </label>
             <label class="cloud-field"><span>上書き方法</span>
@@ -4044,8 +4050,9 @@
                 <option value="non_holiday"${targetFilter === 'non_holiday' ? ' selected' : ''}>祝日以外</option>
               </select>
             </label>
-            <label class="cloud-field cloud-template-holiday-field" data-template-holiday-field style="${basis === 'weekday' ? '' : 'display:none;'}"><span>祝日の扱い</span>
+            <label class="cloud-field cloud-template-holiday-field" data-template-holiday-field style="${basis === 'weekday' || basis === 'week' ? '' : 'display:none;'}"><span>祝日の扱い</span>
               <select class="cloud-input" data-template-apply-holiday>
+                <option value="as_template"${holidayMode === 'as_template' ? ' selected' : ''}>テンプレートの祝日枠</option>
                 <option value="as_weekday"${holidayMode === 'as_weekday' ? ' selected' : ''}>その曜日として</option>
                 <option value="as_sunday"${holidayMode === 'as_sunday' ? ' selected' : ''}>日曜パターン</option>
                 <option value="skip"${holidayMode === 'skip' ? ' selected' : ''}>触らない</option>
@@ -4057,7 +4064,7 @@
             <button type="submit" class="cloud-btn primary">この内容で反映</button>
             <button type="button" class="cloud-btn ghost" data-template-apply-cancel>キャンセル</button>
           </div>
-          <p class="cloud-panel-note">「上書き」は対象日の手入力予定を置き換えます（他帳から同期された予定は保持されます）。反映前に未保存の編集は保存してください。</p>
+          <p class="cloud-panel-note">「上書き」は対象日の手入力予定を置き換えます（他帳から同期された予定は保持されます）。週基準は指定日を含む「月曜始まりの1週間」だけに反映されます（対象月の外にはみ出す日は反映されません）。反映前に未保存の編集は保存してください。</p>
         </form>
       `;
     }
@@ -4077,8 +4084,8 @@
                   <h4 class="cloud-section-title">${escapeHtml(template.name)}</h4>
                   <div class="cloud-meta cloud-template-meta">
                     <span class="cloud-badge">${templateBasisLabel(template.basis)}</span>
-                    <span class="cloud-badge">${Number(template.filled_day_count || 0)}日 / ${Number(template.entry_count || 0)}件</span>
-                    ${template.representative_month_key ? `<span class="cloud-badge">代表 ${escapeHtml(template.representative_month_key)}</span>` : ''}
+                    <span class="cloud-badge">${Number(template.filled_day_count || 0)}${template.slot_format === 'weekday' ? '枠' : '日'} / ${Number(template.entry_count || 0)}件</span>
+                    ${template.slot_format !== 'weekday' && template.representative_month_key ? `<span class="cloud-badge">代表 ${escapeHtml(template.representative_month_key)}</span>` : ''}
                   </div>
                 </div>
                 <div class="cloud-inline-actions">
@@ -4095,7 +4102,7 @@
           <div class="cloud-panel-head">
             <div>
               <h3>テンプレート</h3>
-              <p>その${currentAssistMode() === 'scene' ? '現場' : '人'}の 1 か月分をテンプレートにして、任意の月へ「日付基準」「曜日基準」で反映できます。作成は別ウィンドウのカレンダーで行います。</p>
+              <p>その${currentAssistMode() === 'scene' ? '現場' : '人'}のパターンをテンプレートにして、「日付基準」（1か月分を同じ日付へ）「曜日基準」（曜日パターンを月全体へ）「週基準」（7日分を指定した週へ）で反映できます。作成は別ウィンドウのカレンダーで行います。</p>
             </div>
             <div class="cloud-inline-actions">
               <button type="button" class="cloud-btn primary" data-template-new>新規テンプレート作成</button>
@@ -4131,9 +4138,10 @@
         templateId,
         year: target.year,
         month: target.month,
+        week_date: `${target.year}-${String(target.month).padStart(2, '0')}-01`,
         basis: template.basis || 'date',
         apply_mode: options.apply_mode || 'overwrite',
-        holiday_mode: options.holiday_mode || 'as_weekday',
+        holiday_mode: options.holiday_mode || 'as_template',
         target_filter: options.target_filter || 'all'
       };
       const modal = currentAssistModal();
@@ -4148,8 +4156,25 @@
       if (!confirmDiscardUnsavedChanges('未保存の変更があります。テンプレートの反映は保存済みデータに対して行われ、未保存の変更は失われます。続行しますか？')) {
         return;
       }
-      const year = parseInt(formEl.querySelector('[data-template-apply-year]').value, 10);
-      const month = parseInt(formEl.querySelector('[data-template-apply-month]').value, 10);
+      const basis = formEl.querySelector('[data-template-apply-basis]').value;
+      let year;
+      let month;
+      let targetDay = null;
+      if (basis === 'week') {
+        // 週基準は日付指定：その日を含む「月曜始まりの1週間」へ反映する。
+        const weekDateValue = String(formEl.querySelector('[data-template-apply-week-date]').value || '');
+        const matched = weekDateValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!matched) {
+          showFlash('反映先の日付を選択してください', 'error');
+          return;
+        }
+        year = parseInt(matched[1], 10);
+        month = parseInt(matched[2], 10);
+        targetDay = parseInt(matched[3], 10);
+      } else {
+        year = parseInt(formEl.querySelector('[data-template-apply-year]').value, 10);
+        month = parseInt(formEl.querySelector('[data-template-apply-month]').value, 10);
+      }
       if (!year || year < 2000 || year > 2100 || !month || month < 1 || month > 12) {
         showFlash('反映する年月を正しく入力してください', 'error');
         return;
@@ -4157,11 +4182,14 @@
       const body = {
         year,
         month,
-        basis: formEl.querySelector('[data-template-apply-basis]').value,
+        basis,
         apply_mode: formEl.querySelector('[data-template-apply-mode]').value,
         holiday_mode: formEl.querySelector('[data-template-apply-holiday]').value,
         target_filter: formEl.querySelector('[data-template-apply-target]').value
       };
+      if (targetDay !== null) {
+        body.target_day = targetDay;
+      }
       const result = await requestJson(`${templateApiBase()}/${templateId}/apply`, { method: 'POST', body });
       state.assist.templateApply = null;
       closeCloudModal('cloud-assist-modal');
@@ -4211,9 +4239,18 @@
       modal.querySelectorAll('[data-template-apply-basis]').forEach((select) => {
         select.addEventListener('change', () => {
           const form = select.closest('[data-template-apply-form]');
-          const holidayField = form ? form.querySelector('[data-template-holiday-field]') : null;
+          if (!form) return;
+          const isWeek = select.value === 'week';
+          const holidayField = form.querySelector('[data-template-holiday-field]');
           if (holidayField) {
-            holidayField.style.display = select.value === 'weekday' ? '' : 'none';
+            holidayField.style.display = select.value === 'weekday' || isWeek ? '' : 'none';
+          }
+          form.querySelectorAll('[data-template-apply-ym-field]').forEach((field) => {
+            field.style.display = isWeek ? 'none' : '';
+          });
+          const weekField = form.querySelector('[data-template-apply-week-field]');
+          if (weekField) {
+            weekField.style.display = isWeek ? '' : 'none';
           }
         });
       });

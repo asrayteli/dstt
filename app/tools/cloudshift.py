@@ -11142,16 +11142,25 @@ def _shift_engine_apply_draft(project: dict[str, Any], payload: dict[str, Any], 
 # ==========================================================================
 # テンプレート（アシスト → テンプレート）
 #
-# 現場シフト / 個人シフトの「1 か月分」を再利用できるテンプレートとして保存し、
-# 任意の対象月へ「日付基準（date）」または「曜日基準（weekday）」で反映する。
+# 現場シフト / 個人シフトのパターンを再利用できるテンプレートとして保存し、
+# 任意の対象月へ反映する。基準は 3 種類:
+#   - date（日付基準）  : 代表月の 1 か月分を同じ日付へ。
+#   - weekday（曜日基準）: 月〜日 7 枠＋祝日 7 枠のパターンを対象月の全曜日へ。
+#   - week（週基準）    : 曜日基準と同じ 14 枠を、指定日を含む「月曜始まりの
+#                         1 週間」だけへ反映する。
 # 作成は別ウィンドウのカレンダー（/project/<id>/template-editor）で行う。
 # ==========================================================================
 
-TEMPLATE_BASES = {"date", "weekday"}
+TEMPLATE_BASES = {"date", "weekday", "week"}
 TEMPLATE_APPLY_MODES = {"overwrite", "append", "fill_empty"}
-TEMPLATE_HOLIDAY_MODES = {"as_weekday", "as_sunday", "skip", "clear"}
+TEMPLATE_HOLIDAY_MODES = {"as_template", "as_weekday", "as_sunday", "skip", "clear"}
 TEMPLATE_TARGET_FILTERS = {"all", "weekday", "weekend", "holiday", "non_holiday"}
 TEMPLATE_MODES = {"scene", "person"}
+
+# 曜日基準 / 週基準のスロットキー。w0..w6 = 月..日、h0..h6 = 同曜日が祝日の場合。
+# （旧形式の曜日基準テンプレートは代表月の日付キーのままで、反映時に導出する。）
+TEMPLATE_WEEKDAY_SLOT_KEYS = tuple(f"w{i}" for i in range(7)) + tuple(f"h{i}" for i in range(7))
+TEMPLATE_WEEKDAY_PATTERN_BASES = {"weekday", "week"}
 
 # テンプレートのスロットへ保存するのは、authoring（手入力）フィールドのみ。
 # id・同期メタデータは保存せず、反映時に新しい id を採番する。
@@ -11190,7 +11199,7 @@ def _sanitize_template_apply_mode(value: Any, *, default: str = "overwrite") -> 
     return text if text in TEMPLATE_APPLY_MODES else default
 
 
-def _sanitize_template_holiday_mode(value: Any, *, default: str = "as_weekday") -> str:
+def _sanitize_template_holiday_mode(value: Any, *, default: str = "as_template") -> str:
     text = str(value or "").strip().lower()
     return text if text in TEMPLATE_HOLIDAY_MODES else default
 
@@ -11201,7 +11210,7 @@ def _sanitize_template_target_filter(value: Any, *, default: str = "all") -> str
 
 
 def _default_template_options() -> dict[str, str]:
-    return {"apply_mode": "overwrite", "holiday_mode": "as_weekday", "target_filter": "all"}
+    return {"apply_mode": "overwrite", "holiday_mode": "as_template", "target_filter": "all"}
 
 
 def _sanitize_template_options(raw: Any) -> dict[str, str]:
@@ -11246,6 +11255,30 @@ def _template_slots_from_entries(entries_per_day: Any, year: int, month: int) ->
     return slots
 
 
+def _template_slots_are_weekday_format(slots: dict[str, Any]) -> bool:
+    """スロットが新形式（曜日キー w0..w6 / h0..h6）かどうか。旧形式は日付キー。"""
+    return any(key in slots for key in TEMPLATE_WEEKDAY_SLOT_KEYS)
+
+
+def _template_weekday_slots_from_payload(raw: Any) -> dict[str, list[dict[str, Any]]]:
+    """曜日キーのスロット（w0..w6 = 月..日 / h0..h6 = 祝日の同曜日）を正規化する。"""
+    data = raw if isinstance(raw, dict) else {}
+    slots: dict[str, list[dict[str, Any]]] = {}
+    for key in TEMPLATE_WEEKDAY_SLOT_KEYS:
+        entries = data.get(key)
+        slim_entries: list[dict[str, Any]] = []
+        for entry in entries if isinstance(entries, list) else []:
+            normalized = normalize_entry(entry)
+            if not normalized or _entry_is_shift_synced(normalized):
+                continue
+            slim = _slim_template_entry(normalized)
+            if slim:
+                slim_entries.append(slim)
+        if slim_entries:
+            slots[key] = slim_entries
+    return slots
+
+
 def _template_apply_entry(slim: Any) -> dict[str, Any]:
     """スロットのスリムエントリを、反映用の入力エントリ（id なし）に整える。"""
     entry: dict[str, Any] = {}
@@ -11261,16 +11294,20 @@ def _template_apply_entry(slim: Any) -> dict[str, Any]:
 
 def _template_row_to_dict(row: CloudShiftTemplate, *, include_slots: bool = True) -> dict[str, Any]:
     slots = _json_dict(row.slots)
+    weekday_format = _template_slots_are_weekday_format(slots)
     filled_days = sum(1 for value in slots.values() if isinstance(value, list) and value)
     entry_count = sum(len(value) for value in slots.values() if isinstance(value, list))
     rep_year = int(row.representative_year or 0)
     rep_month = int(row.representative_month or 0)
+    basis = _sanitize_template_basis(row.basis)
     payload: dict[str, Any] = {
         "id": row.id,
         "project_id": row.project_id,
         "name": row.name or "",
         "mode": row.mode or "",
-        "basis": _sanitize_template_basis(row.basis),
+        "basis": basis,
+        # 新形式（曜日 14 枠）か旧形式（代表月の日付キー）か。UI の表示分岐に使う。
+        "slot_format": "weekday" if weekday_format else "days",
         "representative_year": rep_year,
         "representative_month": rep_month,
         "representative_month_key": _month_key(rep_year, rep_month) if rep_year and rep_month else "",
@@ -11282,6 +11319,14 @@ def _template_row_to_dict(row: CloudShiftTemplate, *, include_slots: bool = True
     }
     if include_slots:
         payload["slots"] = slots
+        if basis in TEMPLATE_WEEKDAY_PATTERN_BASES or weekday_format:
+            # エディタ用の曜日 14 枠ビュー。旧形式は代表月から導出して返す
+            # （編集して保存した時点で新形式に置き換わる）。
+            weekday_pattern, holiday_pattern = _template_patterns(row)
+            payload["weekday_slots"] = {
+                **{f"w{i}": weekday_pattern.get(i, []) for i in range(7)},
+                **{f"h{i}": holiday_pattern.get(i, []) for i in range(7)},
+            }
     return payload
 
 
@@ -11347,6 +11392,45 @@ def _template_weekday_pattern(
     return pattern
 
 
+def _template_patterns(
+    template_row: CloudShiftTemplate,
+) -> tuple[dict[int, list[dict[str, Any]]], dict[int, list[dict[str, Any]]]]:
+    """テンプレートから曜日パターンと祝日パターン（0=月..6=日）を取り出す。
+
+    新形式（w0..w6 / h0..h6）はそのまま使い、旧形式（代表月の日付キー）は
+    各曜日の初出日から従来どおり導出する（祝日パターンは空＝曜日枠へフォールバック）。"""
+    slots = _json_dict(template_row.slots)
+    if _template_slots_are_weekday_format(slots):
+        weekday_pattern: dict[int, list[dict[str, Any]]] = {}
+        holiday_pattern: dict[int, list[dict[str, Any]]] = {}
+        for i in range(7):
+            weekday_entries = slots.get(f"w{i}")
+            holiday_entries = slots.get(f"h{i}")
+            weekday_pattern[i] = list(weekday_entries) if isinstance(weekday_entries, list) else []
+            holiday_pattern[i] = list(holiday_entries) if isinstance(holiday_entries, list) else []
+        return weekday_pattern, holiday_pattern
+    return (
+        _template_weekday_pattern(
+            slots,
+            int(template_row.representative_year or 0),
+            int(template_row.representative_month or 0),
+        ),
+        {},
+    )
+
+
+def _template_week_day_set(year: int, month: int, target_day: int) -> set[int]:
+    """指定日を含む「月曜始まりの 1 週間」のうち、対象月内に収まる日の集合。"""
+    anchor = date(year, month, target_day)
+    week_start = anchor - timedelta(days=anchor.weekday())
+    days: set[int] = set()
+    for offset in range(7):
+        current = week_start + timedelta(days=offset)
+        if current.year == year and current.month == month:
+            days.add(current.day)
+    return days
+
+
 def _apply_template_to_month_entries(
     template_row: CloudShiftTemplate,
     basis: str,
@@ -11354,11 +11438,13 @@ def _apply_template_to_month_entries(
     year: int,
     month: int,
     current_entries_per_day: Any,
+    target_day: int | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], int]:
     """テンプレートを対象月へ反映した entries_per_day を組み立てる。
 
     サーバー同期エントリは常に温存し、ローカル（手入力）エントリのみを基準・
-    上書き方法・対象日フィルタに従って差し替える。"""
+    上書き方法・対象日フィルタに従って差し替える。週基準（week）では
+    target_day を含む「月曜始まりの 1 週間」だけが反映対象になる。"""
     days_in_month = monthrange(year, month)[1]
     apply_mode = options["apply_mode"]
     holiday_mode = options["holiday_mode"]
@@ -11368,12 +11454,19 @@ def _apply_template_to_month_entries(
     current = _normalize_entries(current_entries_per_day, year, month)
 
     weekday_pattern: dict[int, list[dict[str, Any]]] = {}
-    if basis == "weekday":
-        weekday_pattern = _template_weekday_pattern(
-            slots,
-            int(template_row.representative_year or 0),
-            int(template_row.representative_month or 0),
-        )
+    holiday_pattern: dict[int, list[dict[str, Any]]] = {}
+    if basis in TEMPLATE_WEEKDAY_PATTERN_BASES:
+        weekday_pattern, holiday_pattern = _template_patterns(template_row)
+
+    week_days: set[int] | None = None
+    if basis == "week":
+        try:
+            anchor_day = int(target_day)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            anchor_day = 0
+        if not 1 <= anchor_day <= days_in_month:
+            raise CloudShiftError("週基準では、反映先の日付（対象月内の日）を指定してください", 400)
+        week_days = _template_week_day_set(year, month, anchor_day)
 
     result: dict[str, list[dict[str, Any]]] = {}
     applied_days = 0
@@ -11386,7 +11479,9 @@ def _apply_template_to_month_entries(
         is_holiday = day in holidays
 
         in_target = _template_day_in_filter(target_filter, weekday, is_holiday)
-        if basis == "weekday" and holiday_mode == "skip" and is_holiday:
+        if week_days is not None and day not in week_days:
+            in_target = False
+        if basis in TEMPLATE_WEEKDAY_PATTERN_BASES and holiday_mode == "skip" and is_holiday:
             in_target = False
         if not in_target:
             result[key] = local + synced
@@ -11397,9 +11492,13 @@ def _apply_template_to_month_entries(
             pattern_source = pattern_source if isinstance(pattern_source, list) else []
         elif is_holiday and holiday_mode == "clear":
             pattern_source = []
-        else:
-            source_weekday = 6 if (is_holiday and holiday_mode == "as_sunday") else weekday
-            pattern_source = weekday_pattern.get(source_weekday, [])
+        elif is_holiday and holiday_mode == "as_sunday":
+            pattern_source = weekday_pattern.get(6, [])
+        elif is_holiday and holiday_mode == "as_template":
+            # 祝日枠に入力があればそれを、空なら同じ曜日の通常枠を使う。
+            pattern_source = holiday_pattern.get(weekday) or weekday_pattern.get(weekday, [])
+        else:  # 平日、または as_weekday（祝日も実曜日として扱う）
+            pattern_source = weekday_pattern.get(weekday, [])
 
         pattern_entries = [_template_apply_entry(entry) for entry in pattern_source]
 
@@ -11443,7 +11542,10 @@ def api_templates_create(project_id: str):
         rep_year, rep_month = _validate_year_month(
             payload.get("representative_year"), payload.get("representative_month")
         )
-        slots = _template_slots_from_entries(payload.get("entries_per_day"), rep_year, rep_month)
+        if basis in TEMPLATE_WEEKDAY_PATTERN_BASES and isinstance(payload.get("weekday_slots"), dict):
+            slots = _template_weekday_slots_from_payload(payload.get("weekday_slots"))
+        else:
+            slots = _template_slots_from_entries(payload.get("entries_per_day"), rep_year, rep_month)
         options = _sanitize_template_options(payload.get("options"))
         timestamp = _jst_now_iso()
         row = CloudShiftTemplate(
@@ -11487,7 +11589,19 @@ def api_templates_update(project_id: str, template_id: str):
             row.basis = _sanitize_template_basis(payload.get("basis"), default=row.basis or "date")
         if "options" in payload:
             row.options = _sanitize_template_options(payload.get("options"))
-        if "entries_per_day" in payload:
+        if (
+            _sanitize_template_basis(row.basis) in TEMPLATE_WEEKDAY_PATTERN_BASES
+            and isinstance(payload.get("weekday_slots"), dict)
+        ):
+            row.slots = _template_weekday_slots_from_payload(payload.get("weekday_slots"))
+            if "representative_year" in payload or "representative_month" in payload:
+                rep_year, rep_month = _validate_year_month(
+                    payload.get("representative_year", row.representative_year),
+                    payload.get("representative_month", row.representative_month),
+                )
+                row.representative_year = rep_year
+                row.representative_month = rep_month
+        elif "entries_per_day" in payload:
             rep_year, rep_month = _validate_year_month(
                 payload.get("representative_year", row.representative_year),
                 payload.get("representative_month", row.representative_month),
@@ -11541,8 +11655,9 @@ def api_templates_apply(project_id: str, template_id: str):
             "holiday_mode": _sanitize_template_holiday_mode(payload.get("holiday_mode"), default=defaults["holiday_mode"]),
             "target_filter": _sanitize_template_target_filter(payload.get("target_filter"), default=defaults["target_filter"]),
         }
+        target_day = payload.get("target_day")
         new_entries, applied_days = _apply_template_to_month_entries(
-            row, basis, options, year, month, current_month.get("entries_per_day")
+            row, basis, options, year, month, current_month.get("entries_per_day"), target_day=target_day
         )
         before_entries = _confirmed_entries_snapshot(project, year, month)
         save_payload = {
@@ -11570,6 +11685,7 @@ def api_templates_apply(project_id: str, template_id: str):
             "success": True,
             "applied_days": applied_days,
             "basis": basis,
+            "target_day": int(target_day) if basis == "week" and target_day is not None else None,
             "options": options,
             "template": _template_row_to_dict(row, include_slots=False),
             "month": _client_month_payload(month_payload, include_draft=True, project=project),

@@ -400,7 +400,7 @@
       <div class="csm-feat-card">
         <div class="csm-feat-emoji">🧩</div>
         <div class="csm-feat-name">テンプレート</div>
-        <div class="csm-feat-desc">1か月分を保存して別の月へ反映</div>
+        <div class="csm-feat-desc">1か月・曜日・週のパターンを保存して反映</div>
       </div>
       <div class="csm-feat-card">
         <div class="csm-feat-emoji">🔍</div>
@@ -841,7 +841,7 @@
           <tr><td>現場経験者<span class="csm-tag csm-tag-sky" style="margin-left:4px">現場のみ</span></td><td>その現場の経験者一覧。代務・研修や実績から自動で集計されます。</td></tr>
           <tr><td>サーチ<span class="csm-tag csm-tag-sky" style="margin-left:4px">現場のみ</span></td><td>指定日の曜日とオプションから、候補者を点数付きで提案します（下の画像）。</td></tr>
           <tr><td>詳細</td><td>専従・経験・研修・ルールなどの登録状況のまとめを確認できます。</td></tr>
-          <tr><td>テンプレート</td><td>1 か月分のテンプレートの作成・反映（現場・個人シフトの所有者のみ）。</td></tr>
+          <tr><td>テンプレート</td><td>シフトパターン（1か月・曜日・週）のテンプレートの作成・反映（現場・個人シフトの所有者のみ）。</td></tr>
           <tr><td>自動作成</td><td>1 か月分の下書きを生成（現場シフトの所有者のみ）。前述の自動作成パネルが開きます。</td></tr>
         </tbody>
       </table>
@@ -931,9 +931,11 @@
         <span>🧩 テンプレート（1か月を型にして使い回す）</span>
         <button class="csm-popup-btn" onclick="openModal('modalTemplate')">反映オプションを見る ▼</button>
       </div>
-      <p style="font-size:14px;color:#475569;margin:0 0 8px">現場・個人シフトの 1 か月分を「テンプレート」として保存し、別の月へ反映できます。アシストモーダルの「テンプレート」タブから使います（所有者のみ）。作成・編集は専用の別ウィンドウで行います。</p>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">現場・個人シフトのパターンを「テンプレート」として保存し、別の月へ反映できます。アシストモーダルの「テンプレート」タブから使います（所有者のみ）。作成・編集は専用の別ウィンドウで行います。</p>
       <ul class="csm-ul">
-        <li><strong>基準</strong>：日付基準（同じ日付へ）か、曜日基準（同じ曜日へ繰り返し）。</li>
+        <li><strong>基準</strong>：日付基準（1か月分を同じ日付へ）／曜日基準（曜日パターンを月全体へ繰り返し）／週基準（7日分を指定した週だけへ）。</li>
+        <li><strong>作成画面</strong>：日付基準は代表月のカレンダーで 1 か月分を、曜日・週基準は「月〜日の 7 枠＋祝日だった場合の 7 枠（計 14 枠）」でパターンを作ります。祝日枠が空の祝日には通常の曜日枠が入ります。</li>
+        <li><strong>週基準の反映先</strong>：反映時に日付を指定すると、その日を含む「月曜始まりの 1 週間」だけに反映されます（対象月の外にはみ出す日は反映されません）。</li>
         <li><strong>上書き方法</strong>：置換／追加／空き日のみ。</li>
         <li><strong>対象日</strong>：全日／平日のみ／土日祝／祝日／祝日以外。</li>
       </ul>
@@ -1306,10 +1308,11 @@
     <table class="csm-opt-table">
       <thead><tr><th style="width:130px">オプション</th><th>選択肢と意味</th></tr></thead>
       <tbody>
-        <tr><td>基準</td><td><strong>日付基準</strong>：対象月の同じ日付へ入れます。<br><strong>曜日基準</strong>：代表月の各曜日のパターンを、対象月の同じ曜日へ繰り返し入れます。</td></tr>
+        <tr><td>基準</td><td><strong>日付基準</strong>：対象月の同じ日付へ入れます。<br><strong>曜日基準</strong>：月〜日の曜日パターンを、対象月の同じ曜日へ繰り返し入れます。<br><strong>週基準</strong>：指定した日付を含む「月曜始まりの 1 週間」だけに 7 日分を入れます。</td></tr>
+        <tr><td>反映先の日付<br>（週基準時）</td><td>反映したい週に含まれる日付を選びます。その日を含む月曜〜日曜が反映先になります（対象月の外にはみ出す日はスキップ）。</td></tr>
         <tr><td>上書き方法</td><td><strong>置換</strong>（手入力を入れ替え）／<strong>追加</strong>（足す）／<strong>空き日のみ</strong>（空いている日だけ）。</td></tr>
         <tr><td>対象日</td><td>全日／平日のみ（祝日除く）／土日祝／祝日／祝日以外。</td></tr>
-        <tr><td>祝日の扱い<br>（曜日基準時）</td><td>実曜日として扱う／日曜パターンにする／触らない／空にする。</td></tr>
+        <tr><td>祝日の扱い<br>（曜日・週基準時）</td><td><strong>テンプレートの祝日枠</strong>（祝日枠が空なら通常枠。既定）／実曜日として扱う／日曜パターンにする／触らない／空にする。</td></tr>
       </tbody>
     </table>
     <div class="csm-note" style="margin-top:12px">他のシフト帳から同期された入力は常に温存され、手入力分だけが差し替わります。作成・編集は専用の別ウィンドウで行い、保存すると一覧が自動更新されます。</div>

@@ -91,6 +91,11 @@ const ShifterSync = (function() {
     name: null,
     targetEmployeeNumber: '',
     holidays: new Set(Array.isArray(window.SHIFTERSYNC_HOLIDAYS) ? window.SHIFTERSYNC_HOLIDAYS : []),
+    // テンプレート編集の「曜日枠グリッド」等で、日番号の代わりに任意ラベル
+    // （月・火…）を出したり、特定セルへ追加トーン（祝日行など）を当てるための
+    // 上書き。null なら従来どおり「N日」表示・実日付由来のトーンのみ。
+    dayLabels: null,
+    dayToneClasses: null,
     entriesPerDay: {},
     capacityEnabled: false,
     requiredCapacity: 0,
@@ -692,6 +697,13 @@ const ShifterSync = (function() {
 
   function calendarDateKey(year, month, day) {
     return `${String(year).padStart(4, '0')}-${pad2(month)}-${pad2(day)}`;
+  }
+
+  function dayDisplayLabel(day) {
+    if (state.dayLabels && state.dayLabels[day]) {
+      return String(state.dayLabels[day]);
+    }
+    return `${day}日`;
   }
 
   function getDayToneClass(year, month, day) {
@@ -1727,11 +1739,15 @@ const ShifterSync = (function() {
     if (toneClass) {
       dayBox.addClass(toneClass);
     }
+    const extraToneClass = state.dayToneClasses && state.dayToneClasses[day];
+    if (extraToneClass) {
+      dayBox.addClass(String(extraToneClass));
+    }
     const header = $('<button>')
       .attr('type', 'button')
       .addClass('date-label day-detail-trigger')
       .attr('data-day', day)
-      .text(`${day}\u65e5`);
+      .text(dayDisplayLabel(day));
     dayBox.append(header);
     dayBox.append(
       $('<div>')
@@ -2820,7 +2836,11 @@ const ShifterSync = (function() {
     ensureModalScaffold();
     const modal = $('#ss-day-detail-modal');
     const entries = getDayEntries(day);
-    $('#ss-day-detail-title').text(`${state.year}\u5e74${state.month}\u6708${day}\u65e5\u306e\u8a73\u7d30`);
+    $('#ss-day-detail-title').text(
+      state.dayLabels
+        ? `${dayDisplayLabel(day)}\u306e\u8a73\u7d30`
+        : `${state.year}\u5e74${state.month}\u6708${day}\u65e5\u306e\u8a73\u7d30`
+    );
     $('#ss-day-detail-subtitle').text(`${state.mode === 'scene' ? '\u73fe\u5834' : '\u500b\u4eba'}: ${state.name || ''}`);
 
     const body = $('#ss-day-detail-body');
@@ -2893,7 +2913,7 @@ const ShifterSync = (function() {
     }
 
     const parsed = parseEntryValue(entry.value);
-    $('#ss-entry-modal-title').text(`${day}\u65e5\u306e\u30a8\u30f3\u30c8\u30ea\u8a73\u7d30`);
+    $('#ss-entry-modal-title').text(`${dayDisplayLabel(day)}\u306e\u30a8\u30f3\u30c8\u30ea\u8a73\u7d30`);
     $('#ss-entry-modal-subtitle').text(state.editable ? '\u5185\u5bb9\u3092\u78ba\u8a8d\u3057\u3001\u5909\u66f4\u3057\u3066\u304f\u3060\u3055\u3044' : '\u5185\u5bb9\u3092\u78ba\u8a8d\u3067\u304d\u307e\u3059');
 
     const body = $('#ss-entry-modal-body');
@@ -3426,6 +3446,8 @@ const ShifterSync = (function() {
           ? window.SHIFTERSYNC_HOLIDAYS.map((value) => String(value))
           : []
     );
+    state.dayLabels = options.dayLabels && typeof options.dayLabels === 'object' ? options.dayLabels : null;
+    state.dayToneClasses = options.dayToneClasses && typeof options.dayToneClasses === 'object' ? options.dayToneClasses : null;
     state.entriesPerDay = {};
     state.selectedOptions = {};
     state.selectedSecondOptions = {};
@@ -3436,7 +3458,11 @@ const ShifterSync = (function() {
     const grid = $('#shiftGrid');
     grid.empty();
 
-    const daysInMonth = new Date(year, month, 0).getDate();
+    const monthDays = new Date(year, month, 0).getDate();
+    // dayCount: 月の日数より少ないセル数で打ち切る（曜日枠グリッド等の固定レイアウト用）。
+    const daysInMonth = Number.isInteger(options.dayCount) && options.dayCount > 0
+      ? Math.min(options.dayCount, monthDays)
+      : monthDays;
     const rawDow = new Date(year, month - 1, 1).getDay();
     const firstDow = (rawDow + 6) % 7;
 

@@ -618,3 +618,257 @@ def test_apply_requires_existing_target_month(tmp_path):
         json={"year": 2026, "month": 12, "basis": "date"},
     )
     assert response.status_code == 404
+
+
+def test_create_weekday_template_new_format(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id = _create_project(client)
+
+    template = _create_template(
+        client,
+        project_id,
+        {
+            "name": "曜日14枠",
+            "basis": "weekday",
+            "representative_year": 2026,
+            "representative_month": 4,
+            "weekday_slots": {
+                "w0": [{"value": "MON"}],
+                "w5": [{"value": "SAT1"}, {"value": "SAT2"}],
+                "h0": [{"value": "HMON"}],
+                "h9": [{"value": "IGNORED"}],  # 不正キーは捨てられる
+            },
+        },
+    )
+    assert template["slot_format"] == "weekday"
+    assert template["filled_day_count"] == 3  # w0 / w5 / h0
+    assert template["entry_count"] == 4
+
+    detail = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/templates/{template['id']}"
+    )
+    assert detail.status_code == 200
+    data = detail.get_json()["template"]
+    assert _values(data["slots"]["w0"]) == ["MON"]
+    assert "h9" not in data["slots"]
+    # エディタ用ビューは w0..w6 / h0..h6 が常に揃う
+    weekday_slots = data["weekday_slots"]
+    assert _values(weekday_slots["w0"]) == ["MON"]
+    assert _values(weekday_slots["w5"]) == ["SAT1", "SAT2"]
+    assert _values(weekday_slots["h0"]) == ["HMON"]
+    assert weekday_slots["w1"] == [] and weekday_slots["h6"] == []
+
+
+def test_old_weekday_template_exposes_derived_weekday_slots(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id = _create_project(client)
+
+    # 旧形式（代表月の日付キー）で保存された曜日基準テンプレート。
+    first_monday = next(day for day in range(1, 31) if date(2026, 4, day).weekday() == 0)
+    template = _create_template(
+        client,
+        project_id,
+        {
+            "name": "旧形式",
+            "basis": "weekday",
+            "representative_year": 2026,
+            "representative_month": 4,
+            "entries_per_day": {str(first_monday): [{"value": "MON"}]},
+        },
+    )
+    assert template["slot_format"] == "days"
+
+    detail = client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/templates/{template['id']}"
+    )
+    weekday_slots = detail.get_json()["template"]["weekday_slots"]
+    assert _values(weekday_slots["w0"]) == ["MON"]
+    assert weekday_slots["h0"] == []  # 旧形式に祝日枠は無い
+
+
+def test_apply_weekday_as_template_holiday_slots(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id = _create_project(client, year=2026, month=4)
+    _create_month(client, project_id, 2026, 5)
+
+    template = _create_template(
+        client,
+        project_id,
+        {
+            "name": "祝日枠つき",
+            "basis": "weekday",
+            "representative_year": 2026,
+            "representative_month": 4,
+            "weekday_slots": {
+                **{f"w{i}": [{"value": f"WD{i}"}] for i in range(7)},
+                "h0": [{"value": "HMON"}],  # 月曜が祝日のときだけ別パターン
+            },
+        },
+    )
+
+    apply_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/templates/{template['id']}/apply",
+        json={"year": 2026, "month": 5, "basis": "weekday", "holiday_mode": "as_template"},
+    )
+    assert apply_response.status_code == 200, apply_response.get_data(as_text=True)
+
+    entries = _get_month_entries(client, project_id, "2026-05")
+    # 2026-05-04(月・祝) は祝日枠 h0 を使う
+    assert _values(entries["4"]) == ["HMON"]
+    # 2026-05-05(火・祝) は h1 が空 → 通常の火曜枠へフォールバック
+    assert _values(entries["5"]) == ["WD1"]
+    # 2026-05-03(日・祝) も h6 が空 → 通常の日曜枠
+    assert _values(entries["3"]) == ["WD6"]
+    # 祝日でない月曜（5/11）は通常枠
+    assert _values(entries["11"]) == ["WD0"]
+
+
+def test_apply_week_basis_targets_single_week(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id = _create_project(client, year=2026, month=4)
+    _create_month(client, project_id, 2026, 5)
+
+    # 反映対象外の日に既存予定を置いて、温存されることも確認する。
+    save = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/month/2026/5",
+        json={
+            "base_month": {"year": 2026, "month": 5, "required_capacity": 0, "entries_per_day": {}},
+            "required_capacity": 0,
+            "entries_per_day": {"20": [{"value": "KEEP"}]},
+        },
+    )
+    assert save.status_code == 200, save.get_data(as_text=True)
+
+    template = _create_template(
+        client,
+        project_id,
+        {
+            "name": "1週間分",
+            "basis": "week",
+            "representative_year": 2026,
+            "representative_month": 4,
+            "weekday_slots": {f"w{i}": [{"value": f"WK{i}"}] for i in range(7)},
+        },
+    )
+    assert template["basis"] == "week"
+    assert template["slot_format"] == "weekday"
+
+    # 2026-05-13(水)を指定 → その週は 5/11(月)〜5/17(日)
+    apply_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/templates/{template['id']}/apply",
+        json={"year": 2026, "month": 5, "basis": "week", "target_day": 13},
+    )
+    assert apply_response.status_code == 200, apply_response.get_data(as_text=True)
+    payload = apply_response.get_json()
+    assert payload["applied_days"] == 7
+    assert payload["target_day"] == 13
+
+    entries = _get_month_entries(client, project_id, "2026-05")
+    for offset, day in enumerate(range(11, 18)):
+        assert _values(entries[str(day)]) == [f"WK{offset}"], f"day {day}"
+    # 週の外は触らない
+    assert _values(entries["10"]) == []
+    assert _values(entries["18"]) == []
+    assert _values(entries["20"]) == ["KEEP"]
+
+
+def test_apply_week_basis_clips_to_target_month(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id = _create_project(client, year=2026, month=4)
+    _create_month(client, project_id, 2026, 5)
+
+    template = _create_template(
+        client,
+        project_id,
+        {
+            "name": "月またぎ週",
+            "basis": "week",
+            "representative_year": 2026,
+            "representative_month": 4,
+            "weekday_slots": {f"w{i}": [{"value": f"WK{i}"}] for i in range(7)},
+        },
+    )
+
+    # 2026-05-01(金)を指定 → 週は 4/27(月)〜5/3(日)。5月内は 1〜3 日だけ反映される。
+    apply_response = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/templates/{template['id']}/apply",
+        json={"year": 2026, "month": 5, "basis": "week", "target_day": 1},
+    )
+    assert apply_response.status_code == 200, apply_response.get_data(as_text=True)
+    assert apply_response.get_json()["applied_days"] == 3
+
+    entries = _get_month_entries(client, project_id, "2026-05")
+    assert _values(entries["1"]) == ["WK4"]  # 金
+    assert _values(entries["2"]) == ["WK5"]  # 土
+    assert _values(entries["3"]) == ["WK6"]  # 日（祝。h6 は空なので通常枠にフォールバック）
+    assert _values(entries["4"]) == []  # 週の外（翌週の月曜・祝）
+
+
+def test_apply_week_basis_requires_target_day(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id = _create_project(client, year=2026, month=4)
+    _create_month(client, project_id, 2026, 5)
+
+    template = _create_template(
+        client,
+        project_id,
+        {
+            "name": "日付必須",
+            "basis": "week",
+            "representative_year": 2026,
+            "representative_month": 4,
+            "weekday_slots": {"w0": [{"value": "MON"}]},
+        },
+    )
+
+    missing = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/templates/{template['id']}/apply",
+        json={"year": 2026, "month": 5, "basis": "week"},
+    )
+    assert missing.status_code == 400
+
+    out_of_range = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/templates/{template['id']}/apply",
+        json={"year": 2026, "month": 5, "basis": "week", "target_day": 32},
+    )
+    assert out_of_range.status_code == 400
+
+
+def test_update_template_with_weekday_slots(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id = _create_project(client)
+    template = _create_template(
+        client,
+        project_id,
+        {
+            "name": "更新前",
+            "basis": "weekday",
+            "representative_year": 2026,
+            "representative_month": 4,
+            "weekday_slots": {"w0": [{"value": "OLD"}]},
+        },
+    )
+
+    update = client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/templates/{template['id']}",
+        json={
+            "name": "更新後",
+            "basis": "week",
+            "weekday_slots": {"w1": [{"value": "NEW"}], "h1": [{"value": "NEWH"}]},
+        },
+    )
+    assert update.status_code == 200, update.get_data(as_text=True)
+    updated = update.get_json()["template"]
+    assert updated["name"] == "更新後"
+    assert updated["basis"] == "week"
+    assert updated["slot_format"] == "weekday"
+    assert updated["filled_day_count"] == 2
+    assert _values(updated["slots"]["w1"]) == ["NEW"]
+    assert "w0" not in updated["slots"]
