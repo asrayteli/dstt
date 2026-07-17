@@ -5,10 +5,28 @@
   const PROJECT_ID = CONFIG.projectId || '';
   const MODE = CONFIG.mode === 'person' ? 'person' : 'scene';
 
+  // 曜日基準 / 週基準の「14枠グリッド」用の固定カレンダー。
+  // 2026年6月は月曜始まりなので、1〜7日が上段（通常の月〜日）、
+  // 8〜14日が下段（祝日だった場合の月〜日）のちょうど2行になる。
+  const WEEKDAY_GRID_YEAR = 2026;
+  const WEEKDAY_GRID_MONTH = 6;
+  const WEEKDAY_LABELS = ['月', '火', '水', '木', '金', '土', '日'];
+  const SLOT_DAY_LABELS = {};
+  const SLOT_DAY_TONES = {};
+  for (let i = 0; i < 7; i += 1) {
+    SLOT_DAY_LABELS[i + 1] = WEEKDAY_LABELS[i];
+    SLOT_DAY_LABELS[i + 8] = `${WEEKDAY_LABELS[i]}（祝）`;
+    SLOT_DAY_TONES[i + 8] = 'is-holiday';
+  }
+
   const state = {
     templateId: '',
     year: parseInt(CONFIG.defaultYear, 10) || new Date().getFullYear(),
     month: parseInt(CONFIG.defaultMonth, 10) || (new Date().getMonth() + 1),
+    // 基準ごとの入力バッファ。基準を切り替えても入力内容は失われない。
+    dateEntries: {},        // 日付基準: 日(1..N)キー
+    weekdaySlots: {},       // 曜日/週基準: w0..w6 / h0..h6 キー
+    activeLayout: 'date',   // 'date' | 'weekday'
     saving: false,
     savedFingerprint: ''
   };
@@ -63,7 +81,12 @@
   }
 
   function readBasis() {
-    return $('tpl-basis').value === 'weekday' ? 'weekday' : 'date';
+    const value = $('tpl-basis').value;
+    return value === 'weekday' || value === 'week' ? value : 'date';
+  }
+
+  function layoutForBasis(basis) {
+    return basis === 'date' ? 'date' : 'weekday';
   }
 
   function readOptions() {
@@ -74,18 +97,58 @@
     };
   }
 
+  // 14枠グリッド（日1..7=通常、8..14=祝日）と保存形式（w0..w6 / h0..h6）の相互変換。
+  function slotsToGridData(slots) {
+    const data = {};
+    for (let i = 0; i < 7; i += 1) {
+      data[String(i + 1)] = (slots && Array.isArray(slots[`w${i}`])) ? slots[`w${i}`] : [];
+      data[String(i + 8)] = (slots && Array.isArray(slots[`h${i}`])) ? slots[`h${i}`] : [];
+    }
+    return data;
+  }
+
+  function gridDataToSlots(entries) {
+    const slots = {};
+    for (let i = 0; i < 7; i += 1) {
+      const weekdayEntries = (entries && entries[String(i + 1)]) || [];
+      const holidayEntries = (entries && entries[String(i + 8)]) || [];
+      if (weekdayEntries.length) {
+        slots[`w${i}`] = weekdayEntries;
+      }
+      if (holidayEntries.length) {
+        slots[`h${i}`] = holidayEntries;
+      }
+    }
+    return slots;
+  }
+
+  // 現在のカレンダー入力を、表示中レイアウトのバッファへ取り込む。
+  function captureActiveLayout() {
+    const entries = ShifterSync.getEntriesPerDay ? ShifterSync.getEntriesPerDay() : {};
+    if (state.activeLayout === 'weekday') {
+      state.weekdaySlots = gridDataToSlots(entries);
+    } else {
+      state.dateEntries = entries;
+    }
+  }
+
   function updateBasisNote() {
     const basis = readBasis();
     const holidayField = $('tpl-holiday-field');
     if (holidayField) {
-      holidayField.style.display = basis === 'weekday' ? '' : 'none';
+      holidayField.style.display = basis === 'date' ? 'none' : '';
     }
+    document.querySelectorAll('.tpl-date-only').forEach((el) => {
+      el.style.display = basis === 'date' ? '' : 'none';
+    });
     const note = $('tpl-basis-note');
     if (!note) {
       return;
     }
     if (basis === 'weekday') {
-      note.textContent = '曜日基準：代表月の「各曜日の最初に現れる日」がその曜日のパターンになります。反映先の月では、同じ曜日の日へ繰り返し適用されます。';
+      note.textContent = '曜日基準：月〜日の7枠＋祝日だった場合の7枠でパターンを作ります。反映先の月では、同じ曜日の日へ繰り返し適用されます（祝日枠が空の祝日は通常枠で埋まります）。';
+    } else if (basis === 'week') {
+      note.textContent = '週基準：月〜日の7枠＋祝日だった場合の7枠で1週間分を作ります。反映時に日付を指定すると、その日を含む「月曜始まりの1週間」だけに反映されます。';
     } else {
       note.textContent = '日付基準：代表月の「1日・2日…」の内容が、反映先の月の同じ日付へそのまま入ります（存在しない日付はスキップ）。';
     }
@@ -113,24 +176,36 @@
     }
   }
 
-  function buildCalendar(initialData) {
+  function buildCalendar() {
     ShifterSync.setState('mode', MODE);
     ShifterSync.setState('name', $('tpl-name').value || '');
     ShifterSync.setState('capacityEnabled', false);
     ShifterSync.setState('requiredCapacity', 0);
-    ShifterSync.buildCalendar(state.year, state.month, MODE, initialData || {}, { editable: true });
+    if (state.activeLayout === 'weekday') {
+      ShifterSync.buildCalendar(WEEKDAY_GRID_YEAR, WEEKDAY_GRID_MONTH, MODE, slotsToGridData(state.weekdaySlots), {
+        editable: true,
+        dayCount: 14,
+        dayLabels: SLOT_DAY_LABELS,
+        dayToneClasses: SLOT_DAY_TONES,
+        holidays: []
+      });
+    } else {
+      ShifterSync.buildCalendar(state.year, state.month, MODE, state.dateEntries || {}, { editable: true });
+    }
   }
 
   // 入力内容の指紋。保存時点と比較して未保存変更の有無を判定する（閲覧だけでは変化しない）。
   function currentFingerprint() {
     try {
+      captureActiveLayout();
       return JSON.stringify({
         name: String($('tpl-name').value || '').trim(),
         basis: readBasis(),
         options: readOptions(),
         year: state.year,
         month: state.month,
-        entries: ShifterSync.getEntriesPerDay ? ShifterSync.getEntriesPerDay() : {}
+        dateEntries: state.dateEntries,
+        weekdaySlots: state.weekdaySlots
       });
     } catch (error) {
       return '';
@@ -150,7 +225,23 @@
     $('tpl-month').value = state.month;
   }
 
+  function switchBasisLayout() {
+    const nextLayout = layoutForBasis(readBasis());
+    if (nextLayout === state.activeLayout) {
+      updateBasisNote();
+      return;
+    }
+    // 切り替え前の入力を退避してからレイアウトを差し替える（内容は捨てない）。
+    captureActiveLayout();
+    state.activeLayout = nextLayout;
+    updateBasisNote();
+    buildCalendar();
+  }
+
   function reloadRepresentativeMonth() {
+    if (state.activeLayout !== 'date') {
+      return;
+    }
     const year = parseInt($('tpl-year').value, 10);
     const month = parseInt($('tpl-month').value, 10);
     if (!year || year < 2000 || year > 2100 || !month || month < 1 || month > 12) {
@@ -158,10 +249,10 @@
       return;
     }
     // 既存の入力内容は日付キーのまま引き継ぐ（新しい月に無い日付は自動的に落ちる）。
-    const current = ShifterSync.getEntriesPerDay ? ShifterSync.getEntriesPerDay() : {};
+    captureActiveLayout();
     state.year = year;
     state.month = month;
-    buildCalendar(current);
+    buildCalendar();
     showFlash(`${year}年${month}月で編集中`, 'info');
   }
 
@@ -170,14 +261,29 @@
     if (!name) {
       throw new Error('テンプレート名を入力してください');
     }
-    return {
+    captureActiveLayout();
+    const basis = readBasis();
+    const payload = {
       name,
-      basis: readBasis(),
+      basis,
       representative_year: state.year,
       representative_month: state.month,
-      entries_per_day: ShifterSync.getEntriesPerDay ? ShifterSync.getEntriesPerDay() : {},
       options: readOptions()
     };
+    if (layoutForBasis(basis) === 'weekday') {
+      payload.weekday_slots = state.weekdaySlots;
+    } else {
+      payload.entries_per_day = state.dateEntries;
+    }
+    return payload;
+  }
+
+  function savedCountText(template) {
+    if (!template) {
+      return '保存しました';
+    }
+    const unit = template.slot_format === 'weekday' ? '枠' : '日分';
+    return `保存しました（${Number(template.filled_day_count || 0)} ${unit}）`;
   }
 
   function notifyOpener(template) {
@@ -236,7 +342,7 @@
         }
       }
       markSavedBaseline();
-      setStatus(`保存しました（${template ? template.filled_day_count : 0} 日分）`);
+      setStatus(savedCountText(template));
       showFlash('テンプレートを保存しました', 'success');
       notifyOpener(template);
     } catch (error) {
@@ -256,7 +362,8 @@
     }
     state.templateId = template.id || '';
     $('tpl-name').value = template.name || '';
-    $('tpl-basis').value = template.basis === 'weekday' ? 'weekday' : 'date';
+    const basis = template.basis === 'weekday' || template.basis === 'week' ? template.basis : 'date';
+    $('tpl-basis').value = basis;
     const options = template.options || {};
     if (options.apply_mode) {
       $('tpl-apply-mode').value = options.apply_mode;
@@ -271,6 +378,14 @@
       state.year = template.representative_year;
       state.month = template.representative_month;
     }
+    state.activeLayout = layoutForBasis(basis);
+    if (state.activeLayout === 'weekday') {
+      // 旧形式（代表月の日付キー）の曜日基準テンプレートもサーバー側で
+      // weekday_slots に変換して返されるため、常にこちらを使えばよい。
+      state.weekdaySlots = template.weekday_slots || {};
+    } else {
+      state.dateEntries = template.slots || {};
+    }
   }
 
   async function loadExistingTemplate(templateId) {
@@ -279,7 +394,7 @@
     );
     const template = result && result.template ? result.template : null;
     applyTemplateToForm(template);
-    return template ? (template.slots || {}) : {};
+    return template;
   }
 
   function bindEvents() {
@@ -288,7 +403,7 @@
       saveTemplate();
     });
     $('tpl-reload-month').addEventListener('click', reloadRepresentativeMonth);
-    $('tpl-basis').addEventListener('change', updateBasisNote);
+    $('tpl-basis').addEventListener('change', switchBasisLayout);
     $('tpl-close').addEventListener('click', () => {
       window.close();
     });
@@ -309,25 +424,27 @@
       return;
     }
     syncYearMonthInputs();
-    updateBasisNote();
     bindEvents();
     await loadSiteBranchesIfNeeded();
 
-    let initialData = {};
     const templateId = templateIdFromUrl();
     if (templateId) {
       try {
-        initialData = await loadExistingTemplate(templateId);
+        await loadExistingTemplate(templateId);
         syncYearMonthInputs();
-        updateBasisNote();
         document.title = `DSTT - テンプレート編集 - ${$('tpl-name').value || ''}`;
       } catch (error) {
         showFlash('テンプレートの読み込みに失敗しました。新規作成として開始します。', 'error');
         state.templateId = '';
-        initialData = {};
+        state.dateEntries = {};
+        state.weekdaySlots = {};
+        state.activeLayout = layoutForBasis(readBasis());
       }
+    } else {
+      state.activeLayout = layoutForBasis(readBasis());
     }
-    buildCalendar(initialData);
+    updateBasisNote();
+    buildCalendar();
     // 読み込み直後（=保存済み状態）を基準にして、以降の編集だけを未保存として扱う。
     markSavedBaseline();
   }

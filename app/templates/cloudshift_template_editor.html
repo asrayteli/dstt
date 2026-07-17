@@ -14,7 +14,8 @@
         <div class="cloud-page-kicker">CloudShift / テンプレート</div>
         <h1 class="cloud-page-title">{{ project_title }}</h1>
         <p class="cloud-page-note">
-          その{{ '現場' if mode == 'scene' else '人' }}の 1 か月分をカレンダーで作り、テンプレートとして保存します。
+          その{{ '現場' if mode == 'scene' else '人' }}のパターンをカレンダーで作り、テンプレートとして保存します。
+          日付基準は代表月の 1 か月分を、曜日・週基準は「月〜日＋祝日の 14 枠」で作ります。
           ここで保存しても既存のシフト帳は変わりません。反映は「アシスト → テンプレート」から行います。
         </p>
       </div>
@@ -32,16 +33,17 @@
             <select id="tpl-basis" class="cloud-input">
               <option value="date">日付基準（1日→1日…）</option>
               <option value="weekday">曜日基準（毎週の曜日パターン）</option>
+              <option value="week">週基準（7日分を指定した週へ）</option>
             </select>
           </label>
-          <label class="cloud-field">
+          <label class="cloud-field tpl-date-only">
             <span>編集する代表月（年）</span>
-            <input id="tpl-year" class="cloud-input" type="number" min="2000" max="2100" required>
+            <input id="tpl-year" class="cloud-input" type="number" min="2000" max="2100">
           </label>
-          <label class="cloud-field">
+          <label class="cloud-field tpl-date-only">
             <span>編集する代表月（月）</span>
             <div class="cloud-field-stack-inline">
-              <input id="tpl-month" class="cloud-input" type="number" min="1" max="12" required>
+              <input id="tpl-month" class="cloud-input" type="number" min="1" max="12">
               <button id="tpl-reload-month" type="button" class="cloud-btn secondary">この月で編集</button>
             </div>
           </label>
@@ -70,8 +72,9 @@
                 </select>
               </label>
               <label id="tpl-holiday-field" class="cloud-field">
-                <span>祝日の扱い（曜日基準）</span>
+                <span>祝日の扱い（曜日・週基準）</span>
                 <select id="tpl-holiday-mode" class="cloud-input">
+                  <option value="as_template">テンプレートの祝日枠（空なら通常枠）</option>
                   <option value="as_weekday">その曜日として扱う</option>
                   <option value="as_sunday">日曜パターンを使う</option>
                   <option value="skip">触らない（スキップ）</option>
