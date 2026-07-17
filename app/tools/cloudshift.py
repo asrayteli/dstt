@@ -35,7 +35,7 @@ from flask import (
 from flask_login import current_user, login_required
 from openpyxl import Workbook
 from sqlalchemy import inspect, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import selectinload, undefer
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
@@ -2756,12 +2756,26 @@ def _set_project_user_visibility(user_id: str, project_id: str, hidden: bool) ->
                     updated_at=now,
                 )
             )
+            try:
+                db.session.commit()
+            except IntegrityError:
+                # 別リクエストが同時に同じ行を作成した場合（ユニーク制約違反）は、
+                # ロールバックして既存行を非表示に更新し直す。
+                db.session.rollback()
+                row = CloudShiftProjectVisibility.query.filter_by(
+                    user_id=user_id, project_id=project_id
+                ).first()
+                if row is not None:
+                    row.hidden = True
+                    row.updated_at = _jst_now_iso()
+                    db.session.commit()
         else:
             row.hidden = True
             row.updated_at = now
+            db.session.commit()
     elif row is not None:
         db.session.delete(row)
-    db.session.commit()
+        db.session.commit()
 
 
 def _share_status_for_current_user(project: dict[str, Any]) -> dict[str, Any] | None:

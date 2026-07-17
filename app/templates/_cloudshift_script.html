@@ -5770,26 +5770,31 @@
       const hidden = !toggle.checked;
       const row = toggle.closest('[data-visibility-row]');
       toggle.disabled = true;
+      // 表示状態の保存だけは確実に成否判定する。ここが失敗したときのみチェックを戻す。
       try {
         await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}/visibility`, {
           method: 'POST',
           body: { hidden }
         });
-        if (row) {
-          row.classList.toggle('is-hidden', hidden);
-          const stateNode = row.querySelector('.cloud-visibility-state');
-          if (stateNode) stateNode.textContent = hidden ? '非表示' : '表示';
-        }
-        // 一覧本体を更新（非表示にしたものは消え、再表示したものは戻る）。
-        await loadProjects();
-        showFlash(hidden ? 'シフト帳を一覧から非表示にしました' : 'シフト帳を一覧に表示しました', 'success');
       } catch (error) {
-        // 失敗時はチェック状態を元に戻す。
         toggle.checked = !toggle.checked;
-        throw error;
-      } finally {
         toggle.disabled = false;
+        throw error;
       }
+      if (row) {
+        row.classList.toggle('is-hidden', hidden);
+        const stateNode = row.querySelector('.cloud-visibility-state');
+        if (stateNode) stateNode.textContent = hidden ? '非表示' : '表示';
+      }
+      toggle.disabled = false;
+      // 一覧本体の更新（非表示は消え、再表示は戻る）。保存は済んでいるので、
+      // ここでの失敗はチェック状態に反映せず、握りつぶして整合を保つ。
+      try {
+        await loadProjects();
+      } catch (_) {
+        /* noop */
+      }
+      showFlash(hidden ? 'シフト帳を一覧から非表示にしました' : 'シフト帳を一覧に表示しました', 'success');
     }
 
     function loadSpotIncludeOptions() {

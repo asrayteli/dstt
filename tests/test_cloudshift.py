@@ -4767,13 +4767,17 @@ def test_visibility_toggle_hides_and_shows_own_project(tmp_path):
     assert created.status_code == 200
     project_id = created.get_json()["project"]["project"]["id"]
 
-    # 非表示にすると通常一覧から消える。
+    # 非表示にすると通常一覧から消える。二重に非表示にしても冪等（エラーにならない）。
     hide = client.post(
         f"/tools/shiftersync/cloudshift/api/project/{project_id}/visibility",
         json={"hidden": True},
     )
     assert hide.status_code == 200
     assert hide.get_json()["hidden"] is True
+    assert client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/visibility",
+        json={"hidden": True},
+    ).status_code == 200
 
     listing = client.get("/tools/shiftersync/cloudshift/api/list").get_json()["projects"]
     assert all(item["id"] != project_id for item in listing)
