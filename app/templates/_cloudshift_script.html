@@ -5617,6 +5617,29 @@
       });
     }
 
+    // 自分のシフト帳一覧と「一覧（表示・非表示）」モーダルの両方で使う共通グルーピング。
+    // - 共有されたシフトは「個人 / 現場 / マスター / その他」に分割する
+    //   （個人と現場が混在してごちゃつくのを防ぐ）。
+    // - alwaysShow=true のグループは該当0件でも一覧に表示する（従来の挙動を維持）。
+    //   分割した共有グループは該当がある場合のみ表示する。
+    function projectGroupsFor(projects) {
+      const list = Array.isArray(projects) ? projects : [];
+      const owned = list.filter((project) => project.access_role !== 'viewer');
+      const shared = list.filter((project) => project.access_role === 'viewer');
+      const masterOwned = owned.filter((project) => project.mode === 'master');
+      const sharedOther = shared.filter((project) => !['person', 'scene', 'master'].includes(project.mode));
+      return [
+        { key: 'substitute', title: '要代務シフト', alwaysShow: true, projects: owned.filter((project) => project.mode === 'substitute') },
+        ...(masterOwned.length ? [{ key: 'master', title: 'マスターシフト', alwaysShow: true, projects: masterOwned }] : []),
+        { key: 'person', title: '個人シフト', alwaysShow: true, projects: owned.filter((project) => project.mode === 'person') },
+        { key: 'scene', title: '現場シフト', alwaysShow: true, projects: owned.filter((project) => project.mode === 'scene') },
+        { key: 'shared-person', title: '共有された個人シフト', alwaysShow: false, projects: shared.filter((project) => project.mode === 'person') },
+        { key: 'shared-scene', title: '共有された現場シフト', alwaysShow: false, projects: shared.filter((project) => project.mode === 'scene') },
+        { key: 'shared-master', title: '共有されたマスターシフト', alwaysShow: false, projects: shared.filter((project) => project.mode === 'master') },
+        { key: 'shared-other', title: '共有されたその他のシフト', alwaysShow: false, projects: sharedOther }
+      ];
+    }
+
     function renderProjectList() {
       const list = $('cloud-project-list');
       if (!list) return;
@@ -5626,18 +5649,7 @@
         return;
       }
 
-      const masterProjects = state.projects.filter((project) => project.access_role !== 'viewer' && project.mode === 'master');
-      const groups = [
-        { key: 'substitute', title: '要代務シフト', projects: state.projects.filter((project) => project.access_role !== 'viewer' && project.mode === 'substitute') },
-        ...(
-          masterProjects.length
-            ? [{ key: 'master', title: 'マスターシフト', projects: masterProjects }]
-            : []
-        ),
-        { key: 'person', title: '個人シフト', projects: state.projects.filter((project) => project.access_role !== 'viewer' && project.mode === 'person') },
-        { key: 'scene', title: '現場シフト', projects: state.projects.filter((project) => project.access_role !== 'viewer' && project.mode === 'scene') },
-        { key: 'shared', title: '共有されたシフト', projects: state.projects.filter((project) => project.access_role === 'viewer') }
-      ];
+      const groups = projectGroupsFor(state.projects).filter((group) => group.alwaysShow || group.projects.length);
 
       function projectCard(project) {
         const shareText = shareBadgeText(project);
@@ -5677,6 +5689,107 @@
             : '<div class="cloud-empty-state compact"><p>該当するシフト帳はありません。</p></div>'}
         </section>
       `).join('');
+    }
+
+    // 「一覧」ボタンから開く、シフト帳ごとの表示 / 非表示の管理モーダル。
+    // ここでの切替は「自分の一覧の見え方」だけに影響し、他ユーザーや共有相手には影響しない。
+    // 共有されたシフト帳（別オーナー所有）にも対応する。
+    async function openVisibilityManager() {
+      const modal = openCloudModal('cloud-visibility-modal', 'シフト帳の表示・非表示');
+      if (!modal.dataset.visibilityBound) {
+        modal.dataset.visibilityBound = '1';
+        modal.addEventListener('change', (event) => {
+          const toggle = event.target.closest('[data-visibility-toggle]');
+          if (!toggle) return;
+          handleVisibilityToggle(toggle).catch((error) => notifyActionError(error));
+        });
+      }
+      const body = modalBody(modal);
+      const footer = modalFooter(modal);
+      body.innerHTML = '<div class="cloud-empty-state"><p>一覧を読み込み中です...</p></div>';
+      footer.innerHTML = '<button type="button" class="cloud-btn secondary" data-cloud-visibility-close>閉じる</button>';
+      const closeBtn = footer.querySelector('[data-cloud-visibility-close]');
+      if (closeBtn) closeBtn.addEventListener('click', () => closeCloudModal('cloud-visibility-modal'));
+      try {
+        const data = await requestJson('/tools/shiftersync/cloudshift/api/list?include_hidden=1');
+        renderVisibilityManager(modal, data.projects || []);
+      } catch (error) {
+        body.innerHTML = `<div class="cloud-empty-state"><p>${escapeHtml((error && error.message) || '読み込みに失敗しました')}</p></div>`;
+      }
+    }
+
+    function renderVisibilityManager(modal, projects) {
+      const body = modalBody(modal);
+      if (!projects.length) {
+        body.innerHTML = '<div class="cloud-empty-state"><p>表示・非表示を切り替えられるシフト帳がありません。</p></div>';
+        return;
+      }
+      const groups = projectGroupsFor(projects).filter((group) => group.projects.length);
+
+      function visibilityRow(project) {
+        const hidden = !!project.hidden;
+        const metaParts = [modeLongLabel(project.mode), `${project.month_count}か月`];
+        if (project.mode === 'scene') {
+          metaParts.push(project.site && project.site.site_id ? project.site.site_id : '現場未設定');
+        }
+        return `
+          <label class="cloud-visibility-row${hidden ? ' is-hidden' : ''}" data-visibility-row="${escapeHtml(project.id)}">
+            <span class="cloud-visibility-info">
+              <span class="cloud-visibility-title">${escapeHtml(project.title)}</span>
+              <span class="cloud-visibility-meta">${escapeHtml(metaParts.join(' / '))}</span>
+            </span>
+            <span class="cloud-visibility-switch">
+              <span class="cloud-visibility-state">${hidden ? '非表示' : '表示'}</span>
+              <input type="checkbox" data-visibility-toggle="${escapeHtml(project.id)}" ${hidden ? '' : 'checked'} aria-label="このシフト帳を表示">
+            </span>
+          </label>
+        `;
+      }
+
+      body.innerHTML = `
+        <p class="cloud-panel-note">チェックを外すと、そのシフト帳は<strong>自分の一覧からのみ</strong>非表示になります。データは削除されず、他のユーザーや共有相手には影響しません。共有されたシフト帳も非表示にできます。</p>
+        <div class="cloud-visibility-groups">
+          ${groups.map((group) => `
+            <section class="cloud-visibility-group">
+              <div class="cloud-visibility-group-head">
+                <h4>${group.title}</h4>
+                <span>${group.projects.length}件</span>
+              </div>
+              <div class="cloud-visibility-list">
+                ${group.projects.map(visibilityRow).join('')}
+              </div>
+            </section>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    async function handleVisibilityToggle(toggle) {
+      const projectId = toggle.getAttribute('data-visibility-toggle');
+      if (!projectId) return;
+      const hidden = !toggle.checked;
+      const row = toggle.closest('[data-visibility-row]');
+      toggle.disabled = true;
+      try {
+        await requestJson(`/tools/shiftersync/cloudshift/api/project/${projectId}/visibility`, {
+          method: 'POST',
+          body: { hidden }
+        });
+        if (row) {
+          row.classList.toggle('is-hidden', hidden);
+          const stateNode = row.querySelector('.cloud-visibility-state');
+          if (stateNode) stateNode.textContent = hidden ? '非表示' : '表示';
+        }
+        // 一覧本体を更新（非表示にしたものは消え、再表示したものは戻る）。
+        await loadProjects();
+        showFlash(hidden ? 'シフト帳を一覧から非表示にしました' : 'シフト帳を一覧に表示しました', 'success');
+      } catch (error) {
+        // 失敗時はチェック状態を元に戻す。
+        toggle.checked = !toggle.checked;
+        throw error;
+      } finally {
+        toggle.disabled = false;
+      }
     }
 
     function loadSpotIncludeOptions() {
@@ -9204,6 +9317,13 @@
         refreshProjects.addEventListener('click', async () => {
           await loadProjects();
           showFlash('一覧を更新しました', 'info');
+        });
+      }
+
+      const manageVisibility = $('cloud-manage-visibility');
+      if (manageVisibility) {
+        manageVisibility.addEventListener('click', () => {
+          openVisibilityManager().catch((error) => notifyActionError(error));
         });
       }
 
