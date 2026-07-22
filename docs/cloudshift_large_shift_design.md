@@ -59,7 +59,7 @@ CloudShift のシフト帳モードに、1つのシフト帳で多人数（目�
 |---|---|
 | ダイヤ種別（day_type） | その日にどの時間セットを使うか: `weekday`（平日）/ `saturday`（土曜）/ `holiday`（日祝） |
 | 休日区分（holiday_kind） | 人×日のセルに付ける休日マーク: なし / `scheduled`（所定休日）/ `legal`（法定休日） |
-| 勤務コード（work code） | 始業終業を持つコード。休日区分マークのある日に入れば休日出勤として計算される |
+| 勤務コード（work code） | 勤務を表すコード。原則ダイヤ別の始業終業を持つ（時間可変コードは時間を持たずセルで都度入力）。休日区分マークのある日に入れば休日出勤として計算される |
 | 休みコード（leave code） | 勤務しないことを表すコード。時間は常に0。休み種別（leave_kind）と希望フラグ（requested）を持つ |
 | 拘束時間 | 終業 − 始業（休憩を含む拘束の長さ）。日次計算の基礎 |
 | 労働時間 | 拘束時間 − 休憩 |
@@ -163,7 +163,7 @@ CloudShift のシフト帳モードに、1つのシフト帳で多人数（目�
 
 - 勤務コードの初期セットは投入しない（現場ごとに登録する。R-09）。
 - **時間可変の勤務コード**を登録できる: `times` の3セットすべて null のコードは「時間はセルで都度入力する」運用を表す（雑務・応援など日によって時間が違う業務向け）。セルの `time_override` が無い日は時間0+警告 `TIME_UNDEFINED` になる。
-- バリデーション: members ≤ 60（UI推奨は30まで、31以上で注意表示）、codes ≤ 200、key は空・重複不可、times の start < end（日跨ぎ禁止・R-10）。
+- バリデーション: members ≤ 60（UI推奨は30まで、31以上で注意表示）、codes ≤ 200、key は空・重複不可、times の start < end（日跨ぎ禁止・R-10）、`break_minutes` は 0 以上（0=休憩なし）。`settings.checks` は未知キーを無視し、欠落キーは既定値で補完する。
 - メンバー・コードの削除は原則 `active=false` の無効化。エントリが参照している要素の物理削除は拒否し、無効化を促す。
 
 ### 月データ（セル）
@@ -188,9 +188,9 @@ CloudShift のシフト帳モードに、1つのシフト帳で多人数（目�
 
 - **1メンバー×1日 = 最大1エントリ**（補足事項はコメントで表現）。保存時に重複 member_id を検出したら後勝ちで統合し警告。
 - `value` 空文字 + holiday_kind もコメントも空のエントリは保存時に破棄（空セル）。
-- `value` が空でも `holiday_kind` が付いていれば保存する（「休日マークだけの日」を許す。計算上は休み扱い）。
+- `value` が空でも `holiday_kind` が付いていれば保存する（「休日マークだけの日」を許す。計算上は `category="empty"` の休み扱いで、`leave_counts["empty"]` に数える）。
 - 「振替出勤」のような扱いは専用コードを設けない。**休日マークを付けない通常勤務 + コメント**（または任意の勤務コード）で表現し、振替の休み側は休みコード（振休等）で表現する。
-- 正規化は新設の `normalize_large_entry`（`app/tools/shiftersync_format.py` に追加）で行う。既存 `normalize_entry` の `!OPT!` 形式・代務系フィールドは適用しない。月保存API（PUT month / 公開編集PUT）で `project.mode == "large"` のとき分岐する。
+- 正規化は新設の `normalize_large_entry`（`app/tools/shiftersync_format.py` に追加）で行う。既存 `normalize_entry` の `!OPT!` 形式・代務系フィールドは適用しない。エントリを受け取る全保存API（PUT month / **下書きPUT（draft）** / 公開編集PUT）で `project.mode == "large"` のとき分岐する。
 - 下書き（draft_entries_per_day）・リビジョン（revision / revision_snapshots）・履歴（CloudShiftHistory）は既存機構をそのまま使う。
 
 ### 月メタデータと基準版（スキーマ追加）
@@ -283,6 +283,11 @@ class WorktimeSettings:
     scheduled_bind_minutes: int = 570
     checks: CheckSettings = CheckSettings()
 
+# 補足: large_config / API の JSON では checks はネスト形式
+# （{"kaizen_daily_bind": {"enabled":…, "warn_minutes":…}, …}）で持ち、
+# CheckSettings（フラット形式）との相互変換は API・保存層で行う。
+# 未知キーは無視し、欠落キーは既定値で補完する。
+
 @dataclass(frozen=True)
 class WorktimeRequest:
     version: int          # 1
@@ -358,7 +363,7 @@ class WorktimeResult:
 
 セル（DayInput）ごとに次の順で確定する。
 
-1. **コード解決**: `code_key` 空 → `empty`。マスタに無いキー → `empty` 扱い + 警告 `CODE_UNDEFINED`（保存は許すが時間0）。`category="leave"` → `leave`（時間すべて0、leave_kind/requested を結果へ）。
+1. **コード解決**: `code_key` 空 → `empty`。マスタに無いキー → `empty` 扱い + 警告 `CODE_UNDEFINED`（保存は許すが時間0）。`category="leave"` → `leave`（時間すべて0、leave_kind/requested を結果へ）。`empty`（空セル・休日マークのみ・未登録コード）は `leave_counts["empty"]` に数える。
 2. **時間解決**（category=work）: 優先順位は `time_override` → `times[day_type]` → `times["weekday"]`（フォールバック時は警告 `TIME_SET_FALLBACK`）。どれも無ければ時間0 + 警告 `TIME_UNDEFINED`。
 3. **拘束時間** `bind = end − start`。
 4. **休憩** `break = code.break_minutes ?? settings.break_minutes`、ただし `bind == 0` なら 0、`break > bind` なら `bind` に丸める（労働時間を負にしない）。
@@ -456,13 +461,13 @@ POST /tools/worktime/api/calculate
 | `POST /api/project/<id>/month/<y>/<m>/baseline` | 基準版の設定（現在の確定 entries をスナップショット）/ `{"clear": true}` で解除。編集権限必須。履歴記録 |
 | 公開系 `GET /api/public/<view|edit|pwa>/<token>` | 既存。mode=large の月ペイロード＋large_config（閲覧に必要な members/codes/settings）+ baseline を返す |
 | 公開編集 `PUT /api/public/edit/<token>/month/<y>/<m>` | 既存拡張（mode分岐は月保存と共通実装） |
-| 公開系 `GET /api/public/<type>/<token>/worktime/<y>/<m>` | 閲覧/編集/PWAリンクからの計算結果取得（集計・警告表示のため） |
+| 公開系 `GET /api/public/<token_type>/<token>/month/<y>/<m>/worktime` | 閲覧/編集/PWAリンクからの計算結果取得（集計・警告表示のため。既存の公開 summary ルートと同じパス規約に合わせる） |
 | `GET /api/project/<id>/export/<format>` ほか公開export | mode=large のとき専用レンダラへ分岐（後述） |
 
 - worktime 計算をセル編集のたびにサーバへ投げない。編集中はJSミラーで即時計算し、`/worktime` は表示確定・集計タブ・共有側で使う。
 - 社員名簿PLUS連携（R-04）: メンバー追加UIは既存の社員検索APIを利用して選択し、`employee_number`/`employee_name` を large_config に複写する。社員名簿側の変更は自動追従しない（表示名は display_name が正）。
 
-## UI設計
+## UI設計（R-01）
 
 ### 作成フロー
 
@@ -495,7 +500,7 @@ mode=large のとき、既存のカレンダーUIの代わりに専用グリッ�
 
 - **日付列（固定）**: 日付・曜日・ダイヤ種別バッジ（平/土/日祝。上書きされた日は強調）・日メモアイコン。日ヘッダのメニューから「この日のダイヤ種別を変更」（R-03の長期休暇期運用）と「日メモ編集」（R-14）。
 - **セル**: コード表示（マスタの色・休みコードは灰系）。休日区分マークは枠線/角マーカーで表現（所定と法定は別色。色はCSS変数で定義し固定しない）。コメント有りは右上ドット。時間上書き有りは時計アイコン。
-- **セル編集**: クリックでパレットポップオーバー（勤務コード群 / 休みコード群 / 休日区分トグル(なし/所定/法定) / 時間上書き / コメント / クリア）。**キーボード操作を第一級で対応**: 矢印移動、コードkey直接タイプ+補完確定、Delete=クリア、Ctrl+C/V でセル複製（同列/同行への連続貼り付け）。多人数分の大量入力を高速化する。
+- **セル編集**: クリックでパレットポップオーバー（勤務コード群 / 休みコード群 / 休日区分トグル(なし/所定/法定) / 時間上書き / 所定拘束時間の上書き(R-07のセル単位入力) / コメント / クリア。時間系と所定拘束の上書きは「詳細」折りたたみに置き、通常入力の邪魔をしない）。**キーボード操作を第一級で対応**: 矢印移動、コードkey直接タイプ+補完確定、Delete=クリア、Ctrl+C/V でセル複製（同列/同行への連続貼り付け）。多人数分の大量入力を高速化する。
 - **リアルタイム集計**: 編集のたびにJSミラーで再計算し、フッタと警告バッジを即時更新（転記→別台帳で確認→戻る、の往復解消が本機能の核）。
 - **個人明細ドロワー**: メンバー列ヘッダをクリック→その人の日別計算表（日付/コード/始業終業/休憩/拘束/労働/超過/区分）+ 月次合計 + その人の警告一覧。
 - **集計タブ**: 全員×指標のテーブル（拘束時間計・労働時間計・長時間労働計(労基/安衛)・給与残業計・給与所定休出計・給与法定休出計・超過計・勤務日数・休み日数内訳）と警告一覧（クリックで該当セルへジャンプ）。値はサーバの `/worktime` を正とする。
@@ -505,7 +510,7 @@ mode=large のとき、既存のカレンダーUIの代わりに専用グリッ�
 ### 変更ハイライト（基準版・R-17）
 
 - ツールバー「基準版」メニュー: **「現在の内容を基準版として確定」**（初回公開時にも確定を促すトースト）/「基準版を解除」/「基準版時点を表示」。
-- 基準版が存在する月は、基準と現在で内容が異なるセルを強調表示（枠色+マーカー）。比較対象: `value` / `holiday_kind` / `time_override`（コメントの差は含めない。設定で切替可）。
+- 基準版が存在する月は、基準と現在で内容が異なるセルを強調表示（枠色+マーカー）。比較対象: `value` / `holiday_kind` / `time_override` / `bind_override_minutes`（計算に影響する4項目。コメントの差は含めない。設定で切替可）。
 - セルホバー/タップで「基準: A → 現在: 休」のツールチップ。変更一覧パネル（人・日・変更前後）も集計タブに併設。
 - 閲覧リンク・PWA でもハイライトを表示する（「初回シフトからここが変わった」をメンバーに伝える用途）。
 - 基準版の再確定は編集権限のみ。確定・解除は履歴（CloudShiftHistory）に記録する。
@@ -517,7 +522,7 @@ mode=large のとき、既存のカレンダーUIの代わりに専用グリッ�
 
 ## 出力（専用レンダリング・R-13）
 
-既存の `/export/<format>` ルートを流用し、mode=large では**大規模モード専用レンダラ**（新規 `app/tools/cloudshift_large_export.py`）へ分岐する。既存モードの csv / calendar_png は大規模モードでは提供しない（400）。
+既存の `/export/<format>` ルートを流用し、mode=large では**大規模モード専用レンダラ**（新規 `app/tools/cloudshift_large_export.py`）へ分岐する。既存モードの csv / calendar_png は大規模モードでは提供しない（400）。`pdf` は**大規模モード専用の新規フォーマット**であり、既存モードには追加しない（既存モードで `pdf` を指定した場合は従来どおり未対応エラー）。
 
 | format | 内容 |
 |---|---|
@@ -587,6 +592,7 @@ mode=large のとき、既存のカレンダーUIの代わりに専用グリッ�
   - 勤務コード: `A` `B` `C` `D` `F` `G`（F と G は時間可変コードを想定）
   - 休みコード: `振休`（substitute_rest）、`有休`（paid）
 - `prev_day_end_minutes` は None（月初の休息期間判定なし）
+- `day_type` は暦（2026年7月・祝日は7/20）から自動導出した値を与える。ただし本フィクスチャは全日 `time_override` を使うため、day_type は計算結果に影響しない（day_type の解決自体は補助フィクスチャで検証する）
 
 ### 日別入力と期待値
 
@@ -628,7 +634,7 @@ mode=large のとき、既存のカレンダーUIの代わりに専用グリッ�
 
 | 指標 | 期待値 |
 |---|---|
-| 歴日数 | 31 |
+| 暦日数 | 31 |
 | 勤務日数 | 24（通常出勤23 + 法定休出1） |
 | 拘束時間計 | **260:40**（15640分） |
 | 休憩計 | 24:00（1440分） |
@@ -640,14 +646,14 @@ mode=large のとき、既存のカレンダーUIの代わりに専用グリッ�
 | 安衛基準（31日） | 177:00（10620分） |
 | 長時間労働計(安衛) | **59:40**（3580分）= 236:40 − 177:00 |
 | 休み内訳 | substitute_rest=1、paid=3、empty（空セル）=3 |
-| 連続勤務日数（最大） | 5（7日〜11日） |
+| 連続勤務日数（最大） | **6**（26日〜31日。ほかに1日〜5日と7日〜11日が各5連続） |
 
 ### 期待される警告（既定設定時）
 
 - `KAIZEN_DAILY_BIND`（1日拘束 > 13:00）: **7日・16日・28日・31日**の4件（いずれも 14:35）。15:00 以下のため `KAIZEN_DAILY_BIND_MAX` は0件。
 - `KAIZEN_REST_PERIOD`: **0件**（最短は 28日21:40終業 → 29日07:30始業 の 9:50 で、9:00 以上）。
 - `KAIZEN_MONTHLY_BIND`: 0件（260:40 ≤ 281:00）。
-- OFF既定のチェック（`OVERTIME_MONTHLY` 等）: 0件であること（37:40 > 45:00 ではない点にも注意。仮に `overtime_monthly` をONにしても発火しない）。
+- OFF既定のチェック（`OVERTIME_MONTHLY` 等）: 0件であること。なお給与残業計 37:40 は 45:00 未満のため、仮に `overtime_monthly` をONにしても発火しない（ON化しただけで誤発火しないことの確認に使える）。
 
 ### 補助フィクスチャ（コード時間解決）
 
