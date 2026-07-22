@@ -1469,6 +1469,29 @@ class CloudShiftTemplate(db.Model):
     updated_at = db.Column(db.String(32), nullable=False, index=True)
 
 
+class CloudShiftProjectVisibility(db.Model):
+    """CloudShift のシフト帳ごとの「表示 / 非表示」をユーザー単位で保持する。
+
+    表示状態は操作したユーザー本人の一覧の見え方だけに影響し、他ユーザーや
+    共有相手には一切影響しない。共有されたシフト帳（別オーナー所有）にも対応
+    するため、プロジェクト側のフラグではなくユーザー×プロジェクトで管理する。
+
+    行が存在し hidden=True のときだけ「そのユーザーの一覧では非表示」を意味する。
+    再表示にした場合は行を削除する（既定＝表示のため、行の不存在＝表示）。"""
+
+    __tablename__ = 'cloudshift_project_visibility'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'project_id', name='uq_cloudshift_visibility_user_project'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(80), nullable=False, index=True)
+    project_id = db.Column(db.String(24), nullable=False, index=True)
+    hidden = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.String(32), nullable=False)
+    updated_at = db.Column(db.String(32), nullable=False)
+
+
 class ToBellTask(db.Model):
     """To Bell task. Phase 1 keeps visibility to task participants."""
 

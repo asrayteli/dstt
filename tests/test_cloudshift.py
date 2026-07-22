@@ -4760,6 +4760,98 @@ def test_relinking_hidden_project_to_new_target_unhides_it(tmp_path):
     assert any(item["id"] == my_project_id for item in listing_after)
 
 
+def test_visibility_toggle_hides_and_shows_own_project(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    created = _create_person_project(client, title="Alice", employee_number="1001")
+    assert created.status_code == 200
+    project_id = created.get_json()["project"]["project"]["id"]
+
+    # 非表示にすると通常一覧から消える。二重に非表示にしても冪等（エラーにならない）。
+    hide = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/visibility",
+        json={"hidden": True},
+    )
+    assert hide.status_code == 200
+    assert hide.get_json()["hidden"] is True
+    assert client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/visibility",
+        json={"hidden": True},
+    ).status_code == 200
+
+    listing = client.get("/tools/shiftersync/cloudshift/api/list").get_json()["projects"]
+    assert all(item["id"] != project_id for item in listing)
+
+    # include_hidden=1 では hidden=True 付きで返る（「一覧」モーダル用）。
+    with_hidden = client.get(
+        "/tools/shiftersync/cloudshift/api/list?include_hidden=1"
+    ).get_json()["projects"]
+    hidden_summary = next(item for item in with_hidden if item["id"] == project_id)
+    assert hidden_summary["hidden"] is True
+
+    # サーバー上のデータは残っており直接アクセスできる。
+    assert client.get(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}"
+    ).status_code == 200
+
+    # 再表示すると通常一覧に戻り hidden=False。
+    show = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/visibility",
+        json={"hidden": False},
+    )
+    assert show.status_code == 200
+    listing_after = client.get("/tools/shiftersync/cloudshift/api/list").get_json()["projects"]
+    shown = next(item for item in listing_after if item["id"] == project_id)
+    assert shown["hidden"] is False
+
+
+def test_visibility_is_per_user_and_supports_shared_project(tmp_path):
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        db.session.add(User(username="2001", password_hash="x", name="Shared Employee"))
+        db.session.commit()
+
+    # オーナーが個人シフトを作成し、社員2001へ共有する。
+    module.current_user = _owner()
+    created = client.post(
+        "/tools/shiftersync/cloudshift/api/create",
+        data={"title": "Shared Person", "mode": "person", "employee_number": "1001", "year": "2026", "month": "4"},
+    )
+    project_id = created.get_json()["project"]["project"]["id"]
+    assert client.put(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/account-shares",
+        json={"share_office": False, "employee_numbers": ["2001"]},
+    ).status_code == 200
+
+    # 共有先ユーザーが自分の一覧から非表示にできる（共有されたシフト帳に対応）。
+    module.current_user = _employee_user("2001")
+    hide = client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/visibility",
+        json={"hidden": True},
+    )
+    assert hide.status_code == 200
+    viewer_listing = client.get("/tools/shiftersync/cloudshift/api/list").get_json()["projects"]
+    assert all(item["id"] != project_id for item in viewer_listing)
+
+    # オーナー側の一覧には影響しない（本人の見え方のみに作用する）。
+    module.current_user = _owner()
+    owner_listing = client.get("/tools/shiftersync/cloudshift/api/list").get_json()["projects"]
+    assert any(item["id"] == project_id for item in owner_listing)
+
+    # 共有先ユーザーは include_hidden で確認・再表示できる。
+    module.current_user = _employee_user("2001")
+    with_hidden = client.get(
+        "/tools/shiftersync/cloudshift/api/list?include_hidden=1"
+    ).get_json()["projects"]
+    assert next(item for item in with_hidden if item["id"] == project_id)["hidden"] is True
+    assert client.post(
+        f"/tools/shiftersync/cloudshift/api/project/{project_id}/visibility",
+        json={"hidden": False},
+    ).status_code == 200
+    restored = client.get("/tools/shiftersync/cloudshift/api/list").get_json()["projects"]
+    assert any(item["id"] == project_id for item in restored)
+
+
 def _create_scene_project(client, *, title="PWA Team", year="2026", month="4", capacity="2"):
     return client.post(
         "/tools/shiftersync/cloudshift/api/create",

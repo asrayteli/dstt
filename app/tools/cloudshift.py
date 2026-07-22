@@ -35,7 +35,7 @@ from flask import (
 from flask_login import current_user, login_required
 from openpyxl import Workbook
 from sqlalchemy import inspect, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import selectinload, undefer
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
@@ -46,6 +46,7 @@ from app.models import (
     CloudShiftHistory,
     CloudShiftMonth,
     CloudShiftProject,
+    CloudShiftProjectVisibility,
     CloudShiftPwaSubscription,
     CloudShiftTemplate,
     Employee,
@@ -2718,6 +2719,63 @@ def _editable_project_or_404(project_id: str) -> tuple[dict[str, Any], str]:
     if access_role not in {"owner", "editor"}:
         abort(404)
     return project, access_role
+
+
+def _hidden_project_ids_for_user(user_id: str) -> set[str]:
+    """指定ユーザーが自分の一覧で非表示にしたシフト帳IDの集合を返す。
+
+    行が存在するのは非表示（hidden=True）のときだけなので、そのIDだけを返す。"""
+    user_id = str(user_id or "").strip()
+    if not user_id:
+        return set()
+    rows = CloudShiftProjectVisibility.query.filter_by(user_id=user_id, hidden=True).all()
+    return {str(row.project_id) for row in rows}
+
+
+def _set_project_user_visibility(user_id: str, project_id: str, hidden: bool) -> None:
+    """ユーザー×プロジェクト単位で一覧の表示 / 非表示を保存する。
+
+    非表示のときだけ行を残し、再表示のときは行を削除する（既定＝表示のため、
+    行が無い状態＝表示を意味する）。他ユーザーや共有相手には影響しない。"""
+    user_id = str(user_id or "").strip()
+    project_id = str(project_id or "").strip()
+    if not user_id or not project_id:
+        return
+    row = CloudShiftProjectVisibility.query.filter_by(
+        user_id=user_id, project_id=project_id
+    ).first()
+    if hidden:
+        now = _jst_now_iso()
+        if row is None:
+            db.session.add(
+                CloudShiftProjectVisibility(
+                    user_id=user_id,
+                    project_id=project_id,
+                    hidden=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            try:
+                db.session.commit()
+            except IntegrityError:
+                # 別リクエストが同時に同じ行を作成した場合（ユニーク制約違反）は、
+                # ロールバックして既存行を非表示に更新し直す。
+                db.session.rollback()
+                row = CloudShiftProjectVisibility.query.filter_by(
+                    user_id=user_id, project_id=project_id
+                ).first()
+                if row is not None:
+                    row.hidden = True
+                    row.updated_at = _jst_now_iso()
+                    db.session.commit()
+        else:
+            row.hidden = True
+            row.updated_at = now
+            db.session.commit()
+    elif row is not None:
+        db.session.delete(row)
+        db.session.commit()
 
 
 def _share_status_for_current_user(project: dict[str, Any]) -> dict[str, Any] | None:
@@ -8764,6 +8822,11 @@ def api_project_pwa_subscription(project_id: str, subscription_id: int):
 def api_list():
     _ensure_substitute_projects_for_current_user()
     owner_id = _user_id()
+    # include_hidden=1 のときは、本人が非表示にしたシフト帳も hidden フラグ付きで
+    # 返す（「一覧」からの表示 / 非表示切替 UI で使用する）。
+    include_hidden = str(request.args.get("include_hidden", "")).lower() in ("1", "true", "yes")
+    # 本人が自分の一覧で非表示にしたシフト帳（オーナー・共有先の双方に対応）。
+    user_hidden_ids = _hidden_project_ids_for_user(owner_id)
     # 一覧表示に月の中身は不要（月キーのみ使用）なので軽量ロードで済ませる。
     all_projects = _iter_stored_projects_light()
     # 同一紐づけを所持するオーナー集合を作る（複数オーナー所持の検知に使用）。
@@ -8775,12 +8838,19 @@ def api_list():
     projects = []
     for project in all_projects:
         is_owner = project.get("owner_user_id") == owner_id
-        # オーナー自身が一覧から非表示にしたシフト帳は除外する。
-        if is_owner and project.get("hidden"):
-            continue
         if not is_owner and not _project_is_shared_with_current_user(project):
             continue
+        # 本人の一覧から隠す対象:
+        #  - レガシーの重複解消フラグ（プロジェクト側 hidden。オーナー時のみ有効）
+        #  - 本人が「一覧」から非表示にしたシフト帳（ユーザー単位、共有帳も対象）
+        is_hidden = (
+            str(project.get("id") or "") in user_hidden_ids
+            or bool(is_owner and project.get("hidden"))
+        )
+        if is_hidden and not include_hidden:
+            continue
         summary = _project_summary(project)
+        summary["hidden"] = is_hidden
         # 自分が所持し、かつ同一紐づけを他オーナーも所持している場合のみ非表示操作を許可する。
         can_hide = False
         if is_owner:
@@ -9972,6 +10042,8 @@ def api_delete_project(project_id: str):
         CloudShiftPwaSubscription.query.filter_by(project_id=project_id).delete(synchronize_session=False)
         # テンプレートも同様に FK を持つがリレーション未設定のため明示的に削除する。
         CloudShiftTemplate.query.filter_by(project_id=project_id).delete(synchronize_session=False)
+        # 各ユーザーの表示 / 非表示設定も孤立行として残さないよう削除する。
+        CloudShiftProjectVisibility.query.filter_by(project_id=project_id).delete(synchronize_session=False)
         project_row = db.session.get(CloudShiftProject, project_id)
         if project_row is not None:
             db.session.delete(project_row)
@@ -10028,6 +10100,34 @@ def api_hide_project(project_id: str):
             },
         )
     return jsonify({"success": True, "hidden": True})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/visibility", methods=["POST"])
+@login_required
+def api_set_project_visibility(project_id: str):
+    """「一覧」からシフト帳の表示 / 非表示を切り替える（本人の見え方のみに影響）。
+
+    - オーナーのシフト帳・共有されたシフト帳の双方に対応する。
+    - 非表示にしてもサーバー上のデータは削除しない（誤削除によるデータ消失を防ぐ）。
+    - 共有されたシフト帳を非表示にしても、共有元や他ユーザーには一切影響しない。
+    """
+    payload = request.get_json(silent=True) or {}
+    hidden = bool(payload.get("hidden"))
+    user_id = _user_id()
+    project = _load_project(project_id)
+    is_owner = str(project.get("owner_user_id") or "") == user_id
+    if not is_owner and not _project_is_shared_with_current_user(project):
+        abort(404)
+    _set_project_user_visibility(user_id, project_id, hidden)
+    # 「表示」に戻すとき、自分のシフト帳にレガシーの重複解消フラグ（プロジェクト側
+    # hidden）が残っていると再表示されないため、そのフラグも合わせて解除する。
+    if not hidden and is_owner and project.get("hidden"):
+        with _project_lock(project_id):
+            fresh = _owner_project_or_404(project_id)
+            if fresh.get("hidden"):
+                fresh["hidden"] = False
+                _save_project(fresh)
+    return jsonify({"success": True, "hidden": hidden})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/history")
