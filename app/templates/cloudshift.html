@@ -74,11 +74,13 @@
             <span>種別</span>
             <select id="cloud-create-mode" name="mode" class="cloud-input">
               <option value="scene">現場シフト</option>
+              <option value="large">大規模シフト</option>
               <option value="person">個人シフト</option>
               <option value="master">マスターシフト</option>
             </select>
+            <small id="cloud-create-large-note" class="cloud-field-note cloud-hidden">大規模シフトは、1現場を10〜60人で管理する専用の表形式モードです。</small>
           </label>
-          <label class="cloud-field">
+          <label id="cloud-create-capacity-field" class="cloud-field">
             <span>年</span>
             <input id="cloud-create-year" name="year" class="cloud-input" type="number" min="2000" max="2100" required>
           </label>
@@ -161,7 +163,7 @@
       <div id="cloud-workspace" class="cloud-workspace cloud-hidden">
         <div id="cloud-site-warning" class="cloud-empty-state warning cloud-hidden">
           <h2>現場が未設定です</h2>
-          <p>この現場シフトはまだ現場マスタと紐付いていません。名称一致のままだと他ユーザーとズレる可能性があります。</p>
+          <p>このシフト帳はまだ現場マスタと紐付いていません。正確なシフト同期のため、現場を設定してください。</p>
           <div class="cloud-actions">
             <button id="cloud-open-site-picker" type="button" class="cloud-btn secondary">現場を設定する</button>
           </div>
@@ -283,7 +285,7 @@
                   <span>表示中の月</span>
                   <select id="cloud-month-select" class="cloud-input"></select>
                 </label>
-                <label class="cloud-field">
+                <label id="cloud-capacity-field" class="cloud-field">
                   <span>必要人数</span>
                   <input id="cloud-required-capacity" class="cloud-input" type="number" min="0" max="99" value="0">
                 </label>
@@ -307,6 +309,7 @@
                   <button id="cloud-export-calendar" type="button" class="cloud-btn secondary">カレンダー出力</button>
                   <button id="cloud-export-csv" type="button" class="cloud-btn secondary">CSV出力</button>
                   <button id="cloud-export-xlsx" type="button" class="cloud-btn secondary">xlsx出力</button>
+                  <button id="cloud-export-pdf" type="button" class="cloud-btn secondary cloud-hidden">PDF出力</button>
                 </div>
               </div>
             </div>

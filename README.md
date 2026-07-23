@@ -115,3 +115,5 @@ python -m pytest
 アップデート案は [docs/dstt_update_proposals.md](docs/dstt_update_proposals.md) にまとめています。
 
 To Bell の設計図は [docs/tobell_design.md](docs/tobell_design.md) にまとめています。
+
+CloudShift 大規模シフトモードの設計書は [docs/cloudshift_large_shift_design.md](docs/cloudshift_large_shift_design.md) にまとめています。

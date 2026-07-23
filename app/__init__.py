@@ -341,6 +341,9 @@ def _ensure_access_control_schema(app):
             if "draft_entries_per_day" not in month_cols:
                 alters.append("ALTER TABLE cloudshift_months ADD COLUMN draft_entries_per_day JSON")
                 post_updates.append("UPDATE cloudshift_months SET draft_entries_per_day = '{}' WHERE draft_entries_per_day IS NULL")
+            if "meta_data" not in month_cols:
+                alters.append("ALTER TABLE cloudshift_months ADD COLUMN meta_data JSON")
+                post_updates.append("UPDATE cloudshift_months SET meta_data = '{}' WHERE meta_data IS NULL")
             if "revision" not in month_cols:
                 alters.append("ALTER TABLE cloudshift_months ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
             if "revision_snapshots" not in month_cols:
@@ -826,6 +829,10 @@ def create_app(test_config=None):
 
     from .tools.cloudshift import cloudshift_bp
     app.register_blueprint(cloudshift_bp)
+
+    # 画面を持たないDSTT内向け勤務時間計算API。
+    from .tools.worktime import worktime_bp
+    app.register_blueprint(worktime_bp)
 
     from .tools.leave_mgr import leave_mgr_bp
     app.register_blueprint(leave_mgr_bp)
