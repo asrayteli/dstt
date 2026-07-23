@@ -41,6 +41,12 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
 from app.access_control import user_office_ids
+from app.services.cloudshift_large import (
+    calculate_large_month,
+    default_large_config,
+    normalize_large_config,
+    normalize_large_meta,
+)
 from app.models import (
     AccessOffice,
     CloudShiftHistory,
@@ -65,6 +71,7 @@ try:
         entry_display_text,
         entry_second_option,
         normalize_entries_for_month,
+        normalize_large_entries_for_month,
         normalize_entry,
         parse_csv_text,
         parse_entry_value,
@@ -82,6 +89,7 @@ except ImportError:
         entry_display_text,
         entry_second_option,
         normalize_entries_for_month,
+        normalize_large_entries_for_month,
         normalize_entry,
         parse_csv_text,
         parse_entry_value,
@@ -160,14 +168,17 @@ SHIFT_SYNC_PERSON_SOURCE = "person_shift"
 SHIFT_SYNC_MASTER_SOURCE = "master_shift"
 SHIFT_SYNC_SUBSTITUTE_SOURCE = "substitute_shift"
 SHIFT_SYNC_SUBSTITUTE_REQUEST_SOURCE = "substitute_request"
+SHIFT_SYNC_LARGE_SOURCE = "large_shift"
 SHIFT_SYNC_SOURCE_TYPES = {
     SHIFT_SYNC_SCENE_SOURCE,
     SHIFT_SYNC_PERSON_SOURCE,
     SHIFT_SYNC_MASTER_SOURCE,
     SHIFT_SYNC_SUBSTITUTE_SOURCE,
     SHIFT_SYNC_SUBSTITUTE_REQUEST_SOURCE,
+    SHIFT_SYNC_LARGE_SOURCE,
 }
 SUBSTITUTE_MODE = "substitute"
+LARGE_MODE = "large"
 SUBSTITUTE_TITLE = "要代務シフト帳"
 PERSON_UNASSIGNED_TITLE = "未割り当て"
 JST = timezone(timedelta(hours=9))
@@ -243,6 +254,9 @@ def _ensure_cloudshift_runtime_schema() -> None:
         if "draft_entries_per_day" not in month_cols:
             alters.append("ALTER TABLE cloudshift_months ADD COLUMN draft_entries_per_day JSON")
             post_updates.append("UPDATE cloudshift_months SET draft_entries_per_day = '{}' WHERE draft_entries_per_day IS NULL")
+        if "meta_data" not in month_cols:
+            alters.append("ALTER TABLE cloudshift_months ADD COLUMN meta_data JSON")
+            post_updates.append("UPDATE cloudshift_months SET meta_data = '{}' WHERE meta_data IS NULL")
         if "revision" not in month_cols:
             alters.append("ALTER TABLE cloudshift_months ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
         if "revision_snapshots" not in month_cols:
@@ -432,8 +446,8 @@ def _sanitize_title(value: str) -> str:
 
 def _sanitize_mode(value: str) -> str:
     mode = (value or "").strip().lower()
-    if mode not in {"scene", "person", "master", SUBSTITUTE_MODE}:
-        raise CloudShiftError("mode は scene、person、master、substitute のみ対応です", 400)
+    if mode not in {"scene", "person", "master", SUBSTITUTE_MODE, LARGE_MODE}:
+        raise CloudShiftError("mode は scene、person、master、substitute、large のみ対応です", 400)
     return mode
 
 
@@ -1540,6 +1554,54 @@ def _normalize_entries(entries: Any, year: int, month: int) -> dict[str, list[di
     return normalize_entries_for_month(entries, year, month)
 
 
+def _normalize_project_entries(
+    project: dict[str, Any] | None,
+    entries: Any,
+    year: int,
+    month: int,
+) -> dict[str, list[dict[str, Any]]]:
+    if not project or project.get("mode") != LARGE_MODE:
+        return _normalize_entries(entries, year, month)
+    normalized = normalize_large_entries_for_month(entries, year, month)
+    config = normalize_large_config(project.get("large_config") or default_large_config())
+    members = {str(member["id"]): member for member in config["members"]}
+    for day_entries in normalized.values():
+        for entry in day_entries:
+            member = members.get(str(entry.get("member_id") or ""))
+            if member is None:
+                raise CloudShiftError(f"未登録のメンバーIDです: {entry.get('member_id')}", 400)
+            if str(member.get("column_type") or "regular") == "substitute":
+                entry["employee_number"] = str(entry.get("employee_number") or "").strip()
+                entry["employee_name"] = str(entry.get("employee_name") or "").strip()
+            else:
+                entry["employee_number"] = str(member.get("employee_number") or "")
+                entry["employee_name"] = str(member.get("employee_name") or member.get("display_name") or "")
+    return normalized
+
+
+def _validate_large_substitute_assignees(
+    project: dict[str, Any],
+    entries: dict[str, list[dict[str, Any]]],
+) -> None:
+    members = {
+        str(member["id"]): member
+        for member in _large_members(project)
+        if str(member.get("column_type") or "regular") == "substitute"
+    }
+    for day_entries in entries.values():
+        for entry in day_entries:
+            member = members.get(str(entry.get("member_id") or ""))
+            if (
+                member
+                and entry.get("assignments")
+                and not str(entry.get("employee_name") or "").strip()
+            ):
+                raise CloudShiftError(
+                    f"{member.get('display_name') or '代務'}の担当者を選択してください",
+                    400,
+                )
+
+
 def _build_month_payload(
     year: int,
     month: int,
@@ -1548,6 +1610,8 @@ def _build_month_payload(
     entries: Any,
     *,
     revision: int = 1,
+    project: dict[str, Any] | None = None,
+    meta_data: Any = None,
 ) -> dict[str, Any]:
     year, month = _validate_year_month(year, month)
     timestamp = _jst_now_iso()
@@ -1556,8 +1620,9 @@ def _build_month_payload(
         "month": month,
         "capacity_enabled": bool(capacity_enabled and required_capacity > 0),
         "required_capacity": required_capacity if capacity_enabled and required_capacity > 0 else 0,
-        "entries_per_day": _normalize_entries(entries, year, month),
-        "draft_entries_per_day": _normalize_entries(entries, year, month),
+        "entries_per_day": _normalize_project_entries(project, entries, year, month),
+        "draft_entries_per_day": _normalize_project_entries(project, entries, year, month),
+        "meta_data": normalize_large_meta(meta_data, year, month) if project and project.get("mode") == LARGE_MODE else {},
         "revision": revision,
         "created_at": timestamp,
         "updated_at": timestamp,
@@ -1611,6 +1676,8 @@ def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
             "office_id": office_id,
             "office_label": office_label,
         }
+    if project.get("mode") == LARGE_MODE:
+        summary["large_config"] = normalize_large_config(project.get("large_config") or default_large_config())
     share_status = _share_status_for_current_user(project)
     if share_status:
         summary["share"] = share_status
@@ -1785,6 +1852,21 @@ def _client_month_payload(
         return None
     payload = dict(month_data)
     payload.pop("revision_snapshots", None)
+    if project and project.get("mode") == LARGE_MODE:
+        payload["entries_per_day"] = _normalize_project_entries(
+            project, payload.get("entries_per_day"), int(payload["year"]), int(payload["month"])
+        )
+        payload["meta_data"] = normalize_large_meta(
+            payload.get("meta_data"), int(payload["year"]), int(payload["month"])
+        )
+        if not include_draft:
+            payload.pop("draft_entries_per_day", None)
+        else:
+            payload["draft_entries_per_day"] = _normalize_project_entries(
+                project, payload.get("draft_entries_per_day"), int(payload["year"]), int(payload["month"])
+            )
+        payload["pending_substitute_entries_per_day"] = {}
+        return payload
     payload["entries_per_day"] = _entries_with_latest_site_links(payload.get("entries_per_day"), project)
     payload["entries_per_day"] = _entries_without_substitute_superseded_sources(payload.get("entries_per_day"), project)
     payload["pending_substitute_entries_per_day"] = _entries_with_latest_site_links(
@@ -1875,6 +1957,7 @@ def _db_month_row_to_dict(month_row: CloudShiftMonth, *, include_revision_snapsh
         "required_capacity": int(month_row.required_capacity or 0),
         "entries_per_day": entries_raw,
         "draft_entries_per_day": draft_raw,
+        "meta_data": _json_dict(month_row.meta_data),
         "revision": int(month_row.revision or 1),
         "created_at": month_row.created_at,
         "updated_at": month_row.updated_at,
@@ -1942,18 +2025,20 @@ def _upsert_project_to_db(project: dict[str, Any]) -> None:
             month = int(month_data.get("month"))
         except (TypeError, ValueError):
             year, month = _parse_month_key(month_key)
-        normalized_entries = _normalize_entries(month_data.get("entries_per_day"), year, month)
+        normalized_entries = _normalize_project_entries(project, month_data.get("entries_per_day"), year, month)
         draft_source = (
             month_data.get("draft_entries_per_day")
             if "draft_entries_per_day" in month_data
             else normalized_entries
         )
-        normalized_draft_entries = _normalize_entries(draft_source, year, month)
+        normalized_draft_entries = _normalize_project_entries(project, draft_source, year, month)
         desired_months[(year, month)] = {
             "capacity_enabled": bool(month_data.get("capacity_enabled")),
             "required_capacity": int(month_data.get("required_capacity", 0) or 0),
             "entries_per_day": normalized_entries,
             "draft_entries_per_day": normalized_draft_entries,
+            "meta_data": normalize_large_meta(month_data.get("meta_data"), year, month)
+            if project.get("mode") == LARGE_MODE else {},
             "revision": int(month_data.get("revision", 1) or 1),
             "revision_snapshots": _json_dict(month_data.get("revision_snapshots")),
             "created_at": str(month_data.get("created_at") or _jst_now_iso()),
@@ -2459,6 +2544,12 @@ def _project_link_key(project: dict[str, Any]) -> tuple[str, str] | None:
             return ("scene", f"sid:{site_id}")
         site_row_id = _coerce_site_row_id(project.get("site_row_id"))
         return ("scene", f"row:{site_row_id}") if site_row_id else None
+    if mode == LARGE_MODE:
+        site_id = str(project.get("site_id") or "").strip()
+        if site_id:
+            return (LARGE_MODE, f"sid:{site_id}")
+        site_row_id = _coerce_site_row_id(project.get("site_row_id"))
+        return (LARGE_MODE, f"row:{site_row_id}") if site_row_id else None
     return None
 
 
@@ -3284,6 +3375,37 @@ def _restore_month_revision_in_project(
     if not snapshot:
         raise CloudShiftError("指定したリビジョンが見つかりません", 404)
 
+    if project.get("mode") == LARGE_MODE:
+        restored = _large_month_snapshot(snapshot)
+        restored["year"], restored["month"] = year, month
+        restored["entries_per_day"] = _normalize_project_entries(
+            project, restored.get("entries_per_day"), year, month
+        )
+        live = _normalize_project_entries(project, current_month.get("entries_per_day"), year, month)
+        draft = _normalize_project_entries(project, current_month.get("draft_entries_per_day"), year, month)
+        restored["draft_entries_per_day"] = draft if draft != live else restored["entries_per_day"]
+        restored_meta = normalize_large_meta(restored.get("meta_data"), year, month)
+        current_meta = normalize_large_meta(current_month.get("meta_data"), year, month)
+        if current_meta.get("baseline"):
+            restored_meta["baseline"] = current_meta["baseline"]
+        else:
+            restored_meta.pop("baseline", None)
+        restored["meta_data"] = restored_meta
+        restored["revision"] = current_revision + 1
+        restored["created_at"] = current_month.get("created_at", _jst_now_iso())
+        restored["updated_at"] = _jst_now_iso()
+        snapshots = dict(current_month.get("revision_snapshots") or {})
+        snapshots[str(current_revision)] = _large_month_snapshot(current_month)
+        restored["revision_snapshots"] = _trim_revision_snapshots(snapshots)
+        project["months"][month_key] = restored
+        _save_project(project)
+        _append_history(project["id"], {
+            "timestamp": _jst_now_iso(), "editor_name": actor_name, "editor_type": actor_type,
+            "action": "month_restored", "month_key": month_key,
+            "changes": [f"{month_key} をリビジョン {revision} の内容で復元"],
+        })
+        return restored
+
     restored = _snapshot_month_payload(snapshot)
     restored["year"] = year
     restored["month"] = month
@@ -3727,7 +3849,7 @@ def _spot_source(project: dict[str, Any], mode: str) -> dict[str, str]:
         "project_id": str(project.get("id") or ""),
         "project_title": str(project.get("title") or ""),
         "mode": mode,
-        "mode_label": {"scene": "現場", "person": "個人", "substitute": "要代務"}.get(mode, mode),
+        "mode_label": {"scene": "現場", "person": "個人", "substitute": "要代務", "large": "大規模"}.get(mode, mode),
     }
 
 
@@ -3774,7 +3896,7 @@ def _spot_assignment_payload(
         "second_option_label": OPTION_LABELS.get(second_option, second_option) if second_option else "",
         "comment": str(entry.get("comment") or "").strip(),
         "source_mode": mode,
-        "source_mode_label": {"scene": "現場", "person": "個人", "substitute": "要代務"}.get(mode, mode),
+        "source_mode_label": {"scene": "現場", "person": "個人", "substitute": "要代務", "large": "大規模"}.get(mode, mode),
         "project_id": str(project.get("id") or ""),
         "project_title": str(project.get("title") or ""),
         "sources": [_spot_source(project, mode)],
@@ -4887,6 +5009,257 @@ def _master_entry_is_in_scope(source_project: dict[str, Any], entry: dict[str, A
     )
 
 
+def _large_members(project: dict[str, Any]) -> list[dict[str, Any]]:
+    config = normalize_large_config(project.get("large_config") or default_large_config())
+    return [item for item in config["members"] if item.get("active", True)]
+
+
+def _large_member_matches_employee(member: dict[str, Any], employee_number: Any, employee_name: Any) -> bool:
+    number = str(employee_number or "").strip()
+    member_number = str(member.get("employee_number") or "").strip()
+    if number and member_number:
+        return number == member_number
+    name = _normalized_person_title(employee_name)
+    return bool(name and name == _normalized_person_title(member.get("employee_name") or member.get("display_name")))
+
+
+def _large_target_member_id(
+    project: dict[str, Any],
+    day_key: str,
+    employee_number: Any,
+    employee_name: Any,
+    month_key: str = "",
+    *,
+    allow_empty_substitute: bool = False,
+    entries_override: dict[str, list[dict[str, Any]]] | None = None,
+) -> str:
+    members = _large_members(project)
+    regular_matches = [
+        item for item in members
+        if str(item.get("column_type") or "regular") == "regular"
+        and _large_member_matches_employee(item, employee_number, employee_name)
+    ]
+    if len(regular_matches) == 1:
+        return str(regular_matches[0]["id"])
+
+    if entries_override is not None:
+        day_entries = entries_override.get(str(day_key), [])
+    else:
+        month_data = (
+            (project.get("months") or {}).get(month_key)
+            if month_key
+            else next(iter((project.get("months") or {}).values()), {})
+        ) or {}
+        day_entries = (month_data.get("entries_per_day") or {}).get(str(day_key), [])
+    substitute_ids = {
+        str(item["id"]) for item in members
+        if str(item.get("column_type") or "regular") == "substitute"
+    }
+    matches = [
+        entry for entry in day_entries
+        if isinstance(entry, dict)
+        and str(entry.get("member_id") or "") in substitute_ids
+        and (
+            str(entry.get("employee_number") or "").strip() == str(employee_number or "").strip()
+            if str(employee_number or "").strip()
+            else _normalized_person_title(entry.get("employee_name")) == _normalized_person_title(employee_name)
+        )
+    ]
+    if len(matches) == 1:
+        return str(matches[0].get("member_id") or "")
+    if not allow_empty_substitute:
+        return ""
+
+    occupied_ids = {
+        str(entry.get("member_id") or "")
+        for entry in day_entries
+        if isinstance(entry, dict)
+    }
+    return next(
+        (
+            str(member["id"])
+            for member in members
+            if str(member.get("column_type") or "regular") == "substitute"
+            and str(member["id"]) not in occupied_ids
+        ),
+        "",
+    )
+
+
+def _matching_large_project_ids_for_scene_entry(
+    source_project: dict[str, Any],
+    entry: dict[str, Any],
+    day_key: str,
+    *,
+    summaries: list[dict[str, Any]],
+) -> dict[str, bool]:
+    result: dict[str, bool] = {}
+    for project in summaries:
+        if project.get("mode") != LARGE_MODE:
+            continue
+        same_site = _person_experience_matches_scene_project(
+            _project_site_payload(source_project),
+            project,
+        )
+        if _large_target_member_id(
+            project,
+            day_key,
+            entry.get("employee_number"),
+            _entry_employee_name(entry),
+            allow_empty_substitute=same_site,
+        ):
+            project_id = str(project.get("id") or "")
+            if project_id:
+                result[project_id] = same_site
+    return result
+
+
+def _matching_large_project_ids_for_person_entry(
+    source_project: dict[str, Any],
+    entry: dict[str, Any],
+    day_key: str,
+    *,
+    summaries: list[dict[str, Any]],
+) -> dict[str, bool]:
+    site_link = _entry_site_link_fields(entry)
+    result: dict[str, bool] = {}
+    for project in summaries:
+        if project.get("mode") != LARGE_MODE:
+            continue
+        same_site = _person_experience_matches_scene_project(site_link, project)
+        if _large_target_member_id(
+            project,
+            day_key,
+            source_project.get("employee_number"),
+            source_project.get("title"),
+            allow_empty_substitute=same_site,
+        ):
+            project_id = str(project.get("id") or "")
+            if project_id:
+                result[project_id] = same_site
+    return result
+
+
+def _large_sync_descriptor(
+    source_project: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    month_key: str,
+    day_key: str,
+) -> dict[str, Any]:
+    option_key, raw_name = _entry_option_and_name(entry)
+    second_option = entry_second_option(entry)
+    source_site_name = str(
+        source_project.get("site_name") or entry.get("site_name") or ""
+    )
+    display_detail = OPTION_LABELS.get(option_key, option_key) if option_key else raw_name
+    if (
+        not option_key
+        and _normalized_site_title(display_detail)
+        == _normalized_site_title(source_site_name)
+    ):
+        display_detail = ""
+    if second_option:
+        second_label = OPTION_LABELS.get(second_option, second_option)
+        display_detail = "・".join(
+            label for label in (display_detail, second_label) if label
+        )
+    if source_project.get("mode") == "person":
+        employee_number = str(source_project.get("employee_number") or "")
+        employee_name = str(source_project.get("title") or "")
+    else:
+        employee_number = str(entry.get("employee_number") or "")
+        employee_name = _entry_employee_name(entry)
+    return {
+        "_large_sync": True,
+        "employee_number": employee_number,
+        "employee_name": employee_name,
+        "code_key": option_key or raw_name,
+        "option_key": option_key,
+        "second_option": second_option,
+        "custom_label": display_detail,
+        "source_project_id": str(source_project.get("id") or ""),
+        "source_project_title": str(source_project.get("title") or ""),
+        "source_site_row_id": str(source_project.get("site_row_id") or entry.get("site_row_id") or ""),
+        "source_site_id": str(source_project.get("site_id") or entry.get("site_id") or ""),
+        "source_site_name": source_site_name,
+        "sync_source_type": str(entry.get("sync_source_type") or (
+            SHIFT_SYNC_PERSON_SOURCE if source_project.get("mode") == "person" else SHIFT_SYNC_SCENE_SOURCE
+        )),
+        "sync_source_project_id": str(source_project.get("id") or ""),
+        "sync_source_month_key": month_key,
+        "sync_source_day": day_key,
+        "sync_source_entry_id": str(entry.get("id") or ""),
+    }
+
+
+def _build_person_synced_entry_from_large(
+    source_project: dict[str, Any],
+    entry: dict[str, Any],
+    assignment: dict[str, Any],
+    code: dict[str, Any],
+    *,
+    month_key: str,
+    day_key: str,
+) -> dict[str, Any]:
+    source_entry_id = f"{entry.get('id') or ''}:{assignment.get('id') or assignment.get('code_key') or ''}"
+    site_name = str(source_project.get("site_name") or source_project.get("title") or "")
+    code_key = str(code.get("key") or assignment.get("code_key") or "")
+    return {
+        "id": _sync_entry_id(SHIFT_SYNC_LARGE_SOURCE, source_project.get("id"), "person", month_key, day_key, source_entry_id),
+        "value": _format_entry_value(code_key, site_name),
+        "second_option": "",
+        "comment": str(entry.get("comment") or ""),
+        "employee_number": "",
+        "site_row_id": str(_coerce_site_row_id(source_project.get("site_row_id")) or ""),
+        "site_id": str(source_project.get("site_id") or ""),
+        "site_name": site_name,
+        "site_branch_row_id": "",
+        "site_branch": "",
+        "sync_source_type": SHIFT_SYNC_LARGE_SOURCE,
+        "sync_source_project_id": str(source_project.get("id") or ""),
+        "sync_source_project_title": str(source_project.get("title") or ""),
+        "sync_source_month_key": month_key,
+        "sync_source_day": day_key,
+        "sync_source_entry_id": source_entry_id,
+    }
+
+
+def _build_scene_synced_entry_from_large(
+    source_project: dict[str, Any],
+    target_project: dict[str, Any],
+    entry: dict[str, Any],
+    assignment: dict[str, Any],
+    code: dict[str, Any],
+    *,
+    month_key: str,
+    day_key: str,
+) -> dict[str, Any]:
+    source_entry_id = f"{entry.get('id') or ''}:{assignment.get('id') or assignment.get('code_key') or ''}"
+    code_key = str(code.get("key") or assignment.get("code_key") or "")
+    employee_name = str(entry.get("employee_name") or "")
+    synced = {
+        "id": _sync_entry_id(SHIFT_SYNC_LARGE_SOURCE, source_project.get("id"), "scene", month_key, day_key, source_entry_id),
+        "value": _format_entry_value(code_key, employee_name),
+        "second_option": "",
+        "comment": str(entry.get("comment") or ""),
+        "employee_name": employee_name,
+        "employee_number": str(entry.get("employee_number") or ""),
+        "site_row_id": "",
+        "site_id": "",
+        "site_name": "",
+        "site_branch_row_id": "",
+        "site_branch": "",
+        "sync_source_type": SHIFT_SYNC_LARGE_SOURCE,
+        "sync_source_project_id": str(source_project.get("id") or ""),
+        "sync_source_project_title": str(source_project.get("title") or ""),
+        "sync_source_month_key": month_key,
+        "sync_source_day": day_key,
+        "sync_source_entry_id": source_entry_id,
+    }
+    return _scene_entry_with_siteplus_defaults(target_project, synced)
+
+
 def _desired_shift_sync_entries_by_target(
     source_project: dict[str, Any],
     month_key: str,
@@ -4909,6 +5282,56 @@ def _desired_shift_sync_entries_by_target(
             loaded_targets[project_id] = _load_project(project_id)
         return loaded_targets[project_id]
 
+    if mode == LARGE_MODE:
+        entries_per_day = _normalize_project_entries(
+            source_project, month_data.get("entries_per_day"), month_data["year"], month_data["month"]
+        )
+        config = normalize_large_config(source_project.get("large_config") or default_large_config())
+        codes = {str(item["key"]).casefold(): item for item in config["codes"]}
+        for day_key, entries in entries_per_day.items():
+            for entry in entries:
+                if not str(entry.get("employee_number") or entry.get("employee_name") or "").strip():
+                    continue
+                person_targets = _matching_person_project_ids_for_scene_entry(
+                    source_project, entry, summaries=summaries
+                )
+                scene_targets = [
+                    str(project.get("id") or "") for project in summaries
+                    if project.get("mode") == "scene"
+                    and _person_experience_matches_scene_project(_project_site_payload(source_project), project)
+                ]
+                for assignment in entry.get("assignments") or []:
+                    if not isinstance(assignment, dict) or str(assignment.get("source_type") or "local") != "local":
+                        continue
+                    code = codes.get(str(assignment.get("code_key") or "").casefold())
+                    if not code:
+                        continue
+                    output_code = dict(code)
+                    if code.get("category") == "leave":
+                        output_code["key"] = {
+                            "paid": "PAID",
+                            "substitute_rest": "COMP",
+                            "legal_rest": "PUBLIC",
+                            "scheduled_rest": "PUBLIC",
+                        }.get(str(code.get("leave_kind") or ""), "OTHER")
+                    for target_project_id in person_targets:
+                        desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                            _build_person_synced_entry_from_large(
+                                source_project, entry, assignment, output_code,
+                                month_key=month_key, day_key=day_key,
+                            )
+                        )
+                    if code.get("category") == "work":
+                        for target_project_id in scene_targets:
+                            target_project = _target_project(target_project_id)
+                            desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                                _build_scene_synced_entry_from_large(
+                                    source_project, target_project, entry, assignment, output_code,
+                                    month_key=month_key, day_key=day_key,
+                                )
+                            )
+        return desired
+
     entries_per_day = _normalize_entries(month_data.get("entries_per_day"), month_data["year"], month_data["month"])
     for day_key, entries in entries_per_day.items():
         for entry in entries:
@@ -4922,6 +5345,16 @@ def _desired_shift_sync_entries_by_target(
                     for target_project_id in _matching_person_project_ids_for_scene_entry(source_project, entry, summaries=summaries):
                         desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
                             _build_person_synced_entry_from_scene(source_project, entry, month_key=month_key, day_key=day_key)
+                        )
+                    for target_project_id, allow_empty_substitute in _matching_large_project_ids_for_scene_entry(
+                        source_project, entry, day_key, summaries=summaries
+                    ).items():
+                        descriptor = _large_sync_descriptor(
+                            source_project, entry, month_key=month_key, day_key=day_key
+                        )
+                        descriptor["allow_empty_substitute"] = allow_empty_substitute
+                        desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                            descriptor
                         )
                 if not is_from_master:
                     for target_project_id in _matching_master_project_ids_for_scene_project(source_project, summaries=summaries):
@@ -4937,6 +5370,16 @@ def _desired_shift_sync_entries_by_target(
                 if not is_synced:
                     for target_project_id in _matching_scene_project_ids_for_person_entry(source_project, entry, summaries=summaries):
                         desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(entry)
+                    for target_project_id, allow_empty_substitute in _matching_large_project_ids_for_person_entry(
+                        source_project, entry, day_key, summaries=summaries
+                    ).items():
+                        descriptor = _large_sync_descriptor(
+                            source_project, entry, month_key=month_key, day_key=day_key
+                        )
+                        descriptor["allow_empty_substitute"] = allow_empty_substitute
+                        desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
+                            descriptor
+                        )
                 if not is_from_master:
                     for target_project_id in _matching_master_project_ids_for_person_project(source_project, summaries=summaries):
                         desired.setdefault(target_project_id, {}).setdefault(day_key, []).append(
@@ -5023,6 +5466,154 @@ def _sync_entry_matches_source(entry: dict[str, Any], source_project_id: str, mo
     )
 
 
+def _large_assignment_matches_source(
+    assignment: dict[str, Any], source_project_id: str, month_key: str
+) -> bool:
+    return (
+        str(assignment.get("source_type") or "") == "sync"
+        and str(assignment.get("sync_source_project_id") or "") == str(source_project_id or "")
+        and str(assignment.get("sync_source_month_key") or "") == str(month_key or "")
+    )
+
+
+def _replace_shift_synced_assignments_in_large_project(
+    target_project: dict[str, Any],
+    source_project: dict[str, Any],
+    month_key: str,
+    desired_entries_by_day: dict[str, list[dict[str, Any]]],
+    *,
+    actor_name: str,
+) -> bool:
+    year, month = _parse_month_key(month_key)
+    current_month = (target_project.get("months") or {}).get(month_key)
+    if not current_month:
+        return False
+    current_entries = _normalize_project_entries(
+        target_project, current_month.get("entries_per_day"), year, month
+    )
+    next_entries = json.loads(json.dumps(current_entries, ensure_ascii=False))
+    source_id = str(source_project.get("id") or "")
+
+    for day_key, entries in next_entries.items():
+        kept_entries: list[dict[str, Any]] = []
+        for entry in entries:
+            next_entry = dict(entry)
+            next_entry["assignments"] = [
+                item for item in (entry.get("assignments") or [])
+                if not _large_assignment_matches_source(item, source_id, month_key)
+            ]
+            next_entry["value"] = (
+                str(next_entry["assignments"][0].get("code_key") or "")
+                if next_entry["assignments"] else ""
+            )
+            if next_entry["assignments"] or next_entry.get("comment"):
+                kept_entries.append(next_entry)
+        next_entries[day_key] = kept_entries
+
+    for day_key, descriptors in desired_entries_by_day.items():
+        for descriptor in descriptors:
+            if not isinstance(descriptor, dict) or not descriptor.get("_large_sync"):
+                continue
+            member_id = _large_target_member_id(
+                target_project,
+                day_key,
+                descriptor.get("employee_number"),
+                descriptor.get("employee_name"),
+                month_key,
+                allow_empty_substitute=bool(descriptor.get("allow_empty_substitute")),
+                entries_override=next_entries,
+            )
+            if not member_id:
+                continue
+            day_entries = next_entries.setdefault(str(day_key), [])
+            entry = next(
+                (item for item in day_entries if str(item.get("member_id") or "") == member_id),
+                None,
+            )
+            if entry is None:
+                entry = {
+                    "id": f"ce_{year:04d}{month:02d}{int(day_key):02d}_{member_id}",
+                    "member_id": member_id,
+                    "value": "",
+                    "assignments": [],
+                    "holiday_kind": "",
+                    "time_override": None,
+                    "bind_override_minutes": None,
+                    "comment": "",
+                    "employee_number": str(descriptor.get("employee_number") or ""),
+                    "employee_name": str(descriptor.get("employee_name") or ""),
+                }
+                day_entries.append(entry)
+            assignment_id = _sync_entry_id(
+                "large-target",
+                source_id,
+                month_key,
+                day_key,
+                descriptor.get("sync_source_entry_id"),
+            )
+            entry.setdefault("assignments", []).append({
+                "id": assignment_id,
+                "code_key": str(descriptor.get("code_key") or ""),
+                "source_type": "sync",
+                "source_project_id": source_id,
+                "source_project_title": str(descriptor.get("source_project_title") or ""),
+                "source_site_row_id": str(descriptor.get("source_site_row_id") or ""),
+                "source_site_id": str(descriptor.get("source_site_id") or ""),
+                "source_site_name": str(descriptor.get("source_site_name") or ""),
+                "option_key": str(descriptor.get("option_key") or ""),
+                "second_option": str(descriptor.get("second_option") or ""),
+                "custom_label": str(descriptor.get("custom_label") or ""),
+                "sync_source_type": str(descriptor.get("sync_source_type") or ""),
+                "sync_source_project_id": source_id,
+                "sync_source_month_key": month_key,
+                "sync_source_day": str(day_key),
+                "sync_source_entry_id": str(descriptor.get("sync_source_entry_id") or ""),
+            })
+            entry["value"] = str(entry["assignments"][0].get("code_key") or "")
+            target_member = next(
+                (item for item in _large_members(target_project) if str(item.get("id") or "") == member_id),
+                {},
+            )
+            if str(target_member.get("column_type") or "regular") == "substitute":
+                entry["employee_number"] = str(descriptor.get("employee_number") or "")
+                entry["employee_name"] = str(descriptor.get("employee_name") or "")
+
+    normalized_next = _normalize_project_entries(target_project, next_entries, year, month)
+    if normalized_next == current_entries:
+        return False
+    merged = {
+        **current_month,
+        "entries_per_day": normalized_next,
+        "revision": int(current_month.get("revision", 1) or 1) + 1,
+        "updated_at": _jst_now_iso(),
+    }
+    current_draft = _normalize_project_entries(
+        target_project,
+        current_month.get("draft_entries_per_day", current_entries),
+        year,
+        month,
+    )
+    merged["draft_entries_per_day"] = (
+        current_month.get("draft_entries_per_day")
+        if current_draft != current_entries
+        else normalized_next
+    )
+    snapshots = dict(current_month.get("revision_snapshots") or {})
+    snapshots[str(int(current_month.get("revision", 1) or 1))] = _large_month_snapshot(current_month)
+    merged["revision_snapshots"] = _trim_revision_snapshots(snapshots)
+    target_project.setdefault("months", {})[month_key] = merged
+    _save_project(target_project)
+    _append_history(target_project["id"], {
+        "timestamp": _jst_now_iso(),
+        "editor_name": actor_name,
+        "editor_type": "auto",
+        "action": "shift_sync",
+        "month_key": month_key,
+        "changes": [f"{source_project.get('title')} から大規模シフトへ自動反映"],
+    })
+    return True
+
+
 def _replace_shift_synced_entries_in_target_project(
     target_project: dict[str, Any],
     source_project: dict[str, Any],
@@ -5031,6 +5622,14 @@ def _replace_shift_synced_entries_in_target_project(
     *,
     actor_name: str,
 ) -> bool:
+    if target_project.get("mode") == LARGE_MODE:
+        return _replace_shift_synced_assignments_in_large_project(
+            target_project,
+            source_project,
+            month_key,
+            desired_entries_by_day,
+            actor_name=actor_name,
+        )
     year, month = _parse_month_key(month_key)
     current_month = (target_project.get("months") or {}).get(month_key)
     current_entries_per_day = _normalize_entries(
@@ -5307,12 +5906,32 @@ def _resync_shift_month(source_project: dict[str, Any], month_key: str, *, actor
         if not project_id:
             continue
         target_month = (project.get("months") or {}).get(month_key)
-        target_entries = _normalize_entries((target_month or {}).get("entries_per_day"), month_data["year"], month_data["month"])
-        has_existing_sync = any(
-            _sync_entry_matches_source(entry, str(source_project.get("id") or ""), month_key)
-            for entries in target_entries.values()
-            for entry in entries
-        )
+        if project_mode == LARGE_MODE:
+            target_entries = _normalize_project_entries(
+                project,
+                (target_month or {}).get("entries_per_day"),
+                month_data["year"],
+                month_data["month"],
+            )
+            has_existing_sync = any(
+                _large_assignment_matches_source(
+                    assignment, str(source_project.get("id") or ""), month_key
+                )
+                for entries in target_entries.values()
+                for entry in entries
+                for assignment in (entry.get("assignments") or [])
+            )
+        else:
+            target_entries = _normalize_entries(
+                (target_month or {}).get("entries_per_day"),
+                month_data["year"],
+                month_data["month"],
+            )
+            has_existing_sync = any(
+                _sync_entry_matches_source(entry, str(source_project.get("id") or ""), month_key)
+                for entries in target_entries.values()
+                for entry in entries
+            )
         if has_existing_sync:
             relevant_target_ids.add(project_id)
     for target_project_id in sorted(relevant_target_ids):
@@ -5436,12 +6055,23 @@ def _remove_shift_sync_for_month(source_project: dict[str, Any], month_key: str,
         target_month = (project.get("months") or {}).get(month_key)
         if not target_month:
             continue
-        target_entries = _normalize_entries(target_month.get("entries_per_day"), year, month)
-        has_sync_from_source = any(
-            _sync_entry_matches_source(entry, source_id, month_key)
-            for entries in target_entries.values()
-            for entry in entries
-        )
+        if project_mode == LARGE_MODE:
+            target_entries = _normalize_project_entries(
+                project, target_month.get("entries_per_day"), year, month
+            )
+            has_sync_from_source = any(
+                _large_assignment_matches_source(assignment, source_id, month_key)
+                for entries in target_entries.values()
+                for entry in entries
+                for assignment in (entry.get("assignments") or [])
+            )
+        else:
+            target_entries = _normalize_entries(target_month.get("entries_per_day"), year, month)
+            has_sync_from_source = any(
+                _sync_entry_matches_source(entry, source_id, month_key)
+                for entries in target_entries.values()
+                for entry in entries
+            )
         if not has_sync_from_source:
             continue
         with _project_lock(project_id):
@@ -7548,6 +8178,8 @@ def _assist_bootstrap_for_project(
     can_edit_rules: bool,
     can_edit_sites: bool,
 ) -> dict[str, Any]:
+    if project.get("mode") == LARGE_MODE:
+        raise CloudShiftError("大規模シフト帳ではアシストを利用できません", 400)
     if project.get("mode") == "person":
         return _person_assist_bootstrap_payload(project, can_edit_sites=can_edit_sites)
     return _assist_bootstrap_payload(project, can_edit_records=can_edit_records, can_edit_rules=can_edit_rules)
@@ -8729,6 +9361,8 @@ def public_pwa_calendar(token: str):
     認可はリンク保持（PWA トークン）で、他の PWA API と同じモデル。
     """
     project = _find_project_by_token(token, "pwa")
+    if project.get("mode") == LARGE_MODE:
+        raise CloudShiftError("大規模シフト帳はカレンダー購読に対応していません", 400)
     response = current_app.response_class(
         _ics_text_for_project(project), mimetype="text/calendar"
     )
@@ -8893,8 +9527,13 @@ def api_conflict_check():
     compare_payloads: list[dict[str, Any]] = []
     for project_id in project_ids:
         project = _owner_project_or_404(project_id)
-        if project.get("mode") == "master":
-            raise CloudShiftError("マスターシフトは重複チェックの対象外です", 400)
+        if project.get("mode") in {"master", LARGE_MODE}:
+            raise CloudShiftError(
+                "大規模シフトは重複チェックの対象外です"
+                if project.get("mode") == LARGE_MODE
+                else "マスターシフトは重複チェックの対象外です",
+                400,
+            )
         month_data = (project.get("months") or {}).get(month_key)
         if not month_data:
             raise CloudShiftError(f"{project['title']} に {month_key} の月データがありません", 400)
@@ -8967,7 +9606,7 @@ def api_create():
         capacity_enabled, required_capacity = _sanitize_capacity(request.form.get("required_capacity"))
         entries = {}
     site_ref = None
-    if mode == "scene":
+    if mode in {"scene", LARGE_MODE}:
         site_ref = _load_site_reference(_sanitize_site_row_id(request.form.get("site_row_id")), require_active=True)
     master_target_type = ""
     master_people: list[dict[str, str]] = []
@@ -8983,7 +9622,7 @@ def api_create():
         "title": title,
         "mode": mode,
         "employee_number": employee_number if mode == "person" else "",
-        **_site_storage_fields(site_ref if mode == "scene" else None),
+        **_site_storage_fields(site_ref if mode in {"scene", LARGE_MODE} else None),
         "master_target_type": master_target_type,
         "master_people": master_people,
         "master_sites": master_sites,
@@ -8993,10 +9632,19 @@ def api_create():
         "created_office_ids": sorted(_current_share_office_ids()),
         "created_at": _jst_now_iso(),
         "updated_at": _jst_now_iso(),
-        "months": {
-            month_key: _build_month_payload(year, month, capacity_enabled, required_capacity, entries),
-        },
+        "months": {},
     }
+    if mode == LARGE_MODE:
+        project["large_config"] = default_large_config()
+        capacity_enabled, required_capacity = False, 0
+    project["months"][month_key] = _build_month_payload(
+        year,
+        month,
+        capacity_enabled,
+        required_capacity,
+        entries,
+        project=project,
+    )
     _assert_link_key_unique(_project_link_key(project))
     _save_project(project)
     # ここまでで「シフト帳本体」と最初の月の保存は完了している。
@@ -9088,7 +9736,7 @@ def api_create():
                         "changes": role_backfill[:100],
                     },
                 )
-        if project["mode"] != "master":
+        if project["mode"] in {"scene", "person", SUBSTITUTE_MODE, LARGE_MODE}:
             _resync_shift_month(project, month_key, actor_name=_user_label())
         # 新規作成は「いま作った帳面へ既存データを取り込む」だけで十分。全プロジェクトを
         # 相互再同期する _refresh_shift_sync_for_target_month は (プロジェクト数)^2 の
@@ -9114,6 +9762,7 @@ def api_create():
 @login_required
 def api_project_detail(project_id: str):
     project, access_role = _project_for_current_user_or_404(project_id)
+    selected_month_key = request.args.get("month_key")
     if project.get("mode") == "master" and access_role == "owner":
         try:
             _refresh_shift_sync_for_target_project(project, actor_name=_user_label())
@@ -9124,13 +9773,42 @@ def api_project_detail(project_id: str):
                 "CloudShift master shift auto-resync failed for project %s", project_id
             )
         project, access_role = _project_for_current_user_or_404(project_id)
+    if project.get("mode") == LARGE_MODE and access_role == "owner":
+        # 旧バージョンのサーバーで保存され、同期されないまま残った月も、
+        # 編集画面を開いた時点で一度だけ差分同期する。対象は表示月（未指定なら
+        # 最新月）に限定し、大規模帳からの押し出しと他帳からの取り込みを両方行う。
+        month_keys = _sort_month_keys(list((project.get("months") or {}).keys()))
+        catch_up_month_key = (
+            selected_month_key
+            if selected_month_key in (project.get("months") or {})
+            else (month_keys[-1] if month_keys else "")
+        )
+        if catch_up_month_key:
+            try:
+                _resync_shift_month(project, catch_up_month_key, actor_name=_user_label())
+                with _project_lock(project_id):
+                    project = _load_project(project_id)
+                    _refresh_shift_sync_into_target_month(
+                        project,
+                        catch_up_month_key,
+                        actor_name=_user_label(),
+                    )
+                project, access_role = _project_for_current_user_or_404(project_id)
+            except CloudShiftError:
+                raise
+            except Exception:
+                db.session.rollback()
+                current_app.logger.exception(
+                    "CloudShift large shift catch-up sync failed for project %s month %s",
+                    project_id,
+                    catch_up_month_key,
+                )
     # オーナーが詳細を開いた時点で ViewPWA 用トークンを発行しておく（既存帳簿の遡及対応）。
     if access_role == "owner" and not str(project.get("pwa_token") or "").strip():
         with _project_lock(project_id):
             project = _owner_project_or_404(project_id)
             if _ensure_pwa_token(project):
                 _save_project(project)
-    selected_month_key = request.args.get("month_key")
     payload = _project_detail_payload(project, selected_month_key, include_draft=access_role in {"owner", "editor"})
     payload["access_role"] = access_role
     payload["project"]["access_role"] = access_role
@@ -9161,7 +9839,7 @@ def api_project_meta(project_id: str):
         if project.get("mode") != "person":
             new_employee_number = ""
         new_site_ref = None
-        if project.get("mode") == "scene":
+        if project.get("mode") in {"scene", LARGE_MODE}:
             incoming_site_row_id = data.get("site_row_id", project.get("site_row_id"))
             new_site_ref = _load_site_reference(_sanitize_site_row_id(incoming_site_row_id), require_active=True)
         new_master_target_type = old_master_target_type
@@ -9173,14 +9851,14 @@ def api_project_meta(project_id: str):
         prospective_link_key: tuple[str, str] | None = None
         if project.get("mode") == "person":
             prospective_link_key = ("person", new_employee_number) if new_employee_number else None
-        elif project.get("mode") == "scene":
+        elif project.get("mode") in {"scene", LARGE_MODE}:
             new_site_id = str(new_site_ref.get("site_id") or "").strip() if new_site_ref else ""
             if new_site_id:
-                prospective_link_key = ("scene", f"sid:{new_site_id}")
+                prospective_link_key = (str(project.get("mode") or ""), f"sid:{new_site_id}")
             else:
                 new_site_row_id = _coerce_site_row_id(new_site_ref.get("site_row_id")) if new_site_ref else None
                 if new_site_row_id:
-                    prospective_link_key = ("scene", f"row:{new_site_row_id}")
+                    prospective_link_key = (str(project.get("mode") or ""), f"row:{new_site_row_id}")
         if prospective_link_key and prospective_link_key != _project_link_key(project):
             _assert_link_key_unique(prospective_link_key, exclude_id=project_id)
             # 別対象へ紐づけし直す＝再び使う意思があるため、非表示状態は解除する。
@@ -9193,7 +9871,7 @@ def api_project_meta(project_id: str):
         if new_employee_number != str(project.get("employee_number") or ""):
             project["employee_number"] = new_employee_number
             metadata_changed = True
-        next_site_fields = _site_storage_fields(new_site_ref if project.get("mode") == "scene" else None)
+        next_site_fields = _site_storage_fields(new_site_ref if project.get("mode") in {"scene", LARGE_MODE} else None)
         if (
             next_site_fields["site_row_id"] != project.get("site_row_id")
             or next_site_fields["site_id"] != str(project.get("site_id") or "")
@@ -9482,6 +10160,96 @@ def api_project_settings(project_id: str):
     )
 
 
+def _large_references(project: dict[str, Any]) -> tuple[set[str], set[str]]:
+    member_ids: set[str] = set()
+    code_keys: set[str] = set()
+    for month_data in (project.get("months") or {}).values():
+        if not isinstance(month_data, dict):
+            continue
+        sources = [month_data.get("entries_per_day"), month_data.get("draft_entries_per_day")]
+        baseline = _json_dict(month_data.get("meta_data")).get("baseline")
+        if isinstance(baseline, dict):
+            sources.append(baseline.get("entries_per_day"))
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            for entries in source.values():
+                for entry in entries if isinstance(entries, list) else []:
+                    if not isinstance(entry, dict):
+                        continue
+                    member_id = str(entry.get("member_id") or "").strip()
+                    if member_id:
+                        member_ids.add(member_id)
+                    assignments = entry.get("assignments") if isinstance(entry.get("assignments"), list) else []
+                    raw_keys = [
+                        item.get("code_key") for item in assignments
+                        if isinstance(item, dict) and str(item.get("source_type") or "local") == "local"
+                    ]
+                    if not assignments:
+                        raw_keys = [entry.get("value")]
+                    for raw_key in raw_keys:
+                        code_key = str(raw_key or "").strip().casefold()
+                        if code_key:
+                            code_keys.add(code_key)
+    return member_ids, code_keys
+
+
+@cloudshift_bp.route("/api/project/<project_id>/large-config", methods=["GET", "PUT"])
+@login_required
+def api_large_config(project_id: str):
+    if request.method == "GET":
+        project, access_role = _project_for_current_user_or_404(project_id)
+        if project.get("mode") != LARGE_MODE:
+            raise CloudShiftError("大規模シフト帳ではありません", 400)
+        return jsonify({
+            "success": True,
+            "large_config": normalize_large_config(project.get("large_config") or default_large_config()),
+            "access_role": access_role,
+        })
+    payload = request.get_json(silent=True) or {}
+    try:
+        next_config = normalize_large_config(payload.get("large_config", payload))
+    except ValueError as exc:
+        raise CloudShiftError(str(exc), 400) from exc
+    with _project_lock(project_id):
+        project, access_role = _editable_project_or_404(project_id)
+        if project.get("mode") != LARGE_MODE:
+            raise CloudShiftError("大規模シフト帳ではありません", 400)
+        previous = normalize_large_config(project.get("large_config") or default_large_config())
+        referenced_members, referenced_codes = _large_references(project)
+        next_member_ids = {str(item["id"]) for item in next_config["members"]}
+        removed_members = {
+            str(item["id"]) for item in previous["members"]
+            if str(item["id"]) not in next_member_ids and str(item["id"]) in referenced_members
+        }
+        next_code_keys = {str(item["key"]).casefold() for item in next_config["codes"]}
+        removed_codes = {
+            str(item["key"]) for item in previous["codes"]
+            if str(item["key"]).casefold() not in next_code_keys
+            and str(item["key"]).casefold() in referenced_codes
+        }
+        if removed_members or removed_codes:
+            labels = []
+            if removed_members:
+                labels.append("使用中メンバー: " + ", ".join(sorted(removed_members)))
+            if removed_codes:
+                labels.append("使用中コード: " + ", ".join(sorted(removed_codes)))
+            raise CloudShiftError("参照中の項目は削除できません。無効化してください（" + " / ".join(labels) + "）", 409)
+        project["large_config"] = next_config
+        _save_project(project)
+        _append_history(project_id, {
+            "timestamp": _jst_now_iso(),
+            "editor_name": _user_label(),
+            "editor_type": access_role,
+            "action": "large_config_update",
+            "month_key": None,
+            "changes": [f"メンバー {len(next_config['members'])}人・コード {len(next_config['codes'])}件の大規模シフト設定を更新"],
+        })
+    _resync_shift_project(project, actor_name=_user_label())
+    _refresh_shift_sync_for_target_project(project, actor_name=_user_label())
+    return jsonify({"success": True, "large_config": next_config})
+
+
 @cloudshift_bp.route("/api/project/<project_id>/leave-change-requests/<request_id>/reject", methods=["POST"])
 @login_required
 def api_reject_leave_change_request(project_id: str, request_id: str):
@@ -9529,12 +10297,16 @@ def _create_month_in_project(project: dict[str, Any], payload: dict[str, Any], a
 
     init_mode = (payload.get("init_mode") or "blank").strip().lower()
     capacity_enabled, required_capacity = _sanitize_capacity(payload.get("required_capacity"))
+    if project.get("mode") == LARGE_MODE:
+        capacity_enabled, required_capacity = False, 0
     if init_mode == "copy":
         source_key = payload.get("source_month_key")
         source_month = (project.get("months") or {}).get(source_key)
         if not source_month:
             raise CloudShiftError("コピー元の月が見つかりません", 400)
-        source_entries = _normalize_entries(source_month.get("entries_per_day"), source_month["year"], source_month["month"])
+        source_entries = _normalize_project_entries(
+            project, source_month.get("entries_per_day"), source_month["year"], source_month["month"]
+        )
         copied_entries = {
             day_key: [dict(entry) for entry in entries if not _entry_is_shift_synced(entry)]
             for day_key, entries in source_entries.items()
@@ -9545,9 +10317,12 @@ def _create_month_in_project(project: dict[str, Any], payload: dict[str, Any], a
             capacity_enabled or source_month.get("capacity_enabled", False),
             required_capacity if capacity_enabled else source_month.get("required_capacity", 0),
             copied_entries,
+            project=project,
         )
     else:
-        month_payload = _build_month_payload(year, month, capacity_enabled, required_capacity, {})
+        month_payload = _build_month_payload(
+            year, month, capacity_enabled, required_capacity, {}, project=project
+        )
 
     project.setdefault("months", {})[month_key] = month_payload
     _save_project(project)
@@ -9583,6 +10358,151 @@ def api_create_month(project_id: str):
     return jsonify({"success": True, "project": _project_detail_payload(project, month_key, include_draft=True)})
 
 
+def _large_month_snapshot(month_data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "year": int(month_data["year"]),
+        "month": int(month_data["month"]),
+        "capacity_enabled": False,
+        "required_capacity": 0,
+        "entries_per_day": json.loads(json.dumps(month_data.get("entries_per_day") or {}, ensure_ascii=False)),
+        "meta_data": json.loads(json.dumps(month_data.get("meta_data") or {}, ensure_ascii=False)),
+        "revision": int(month_data.get("revision", 1) or 1),
+        "created_at": month_data.get("created_at"),
+        "updated_at": month_data.get("updated_at"),
+    }
+
+
+def _large_base_revision(current_month: dict[str, Any], payload: dict[str, Any]) -> int:
+    try:
+        revision = int((payload.get("base_month") or {}).get("revision"))
+    except (TypeError, ValueError) as exc:
+        raise CloudShiftError("編集対象が古い可能性があります。再読み込みしてから保存してください", 409) from exc
+    if revision != int(current_month.get("revision", 1) or 1):
+        raise CloudShiftError("他のユーザーが更新しました。再読み込みしてから保存してください", 409)
+    return revision
+
+
+def _prepared_large_entries_for_month(
+    project: dict[str, Any],
+    current_month: dict[str, Any],
+    incoming_entries: Any,
+    *,
+    year: int,
+    month: int,
+) -> dict[str, list[dict[str, Any]]]:
+    incoming = _normalize_project_entries(project, incoming_entries, year, month)
+    _validate_large_substitute_assignees(project, incoming)
+    current = _normalize_project_entries(
+        project, current_month.get("entries_per_day"), year, month
+    )
+    result: dict[str, list[dict[str, Any]]] = {}
+    for day_key in _empty_entries_for_month(year, month):
+        current_by_member = {
+            str(entry.get("member_id") or ""): entry for entry in current.get(day_key, [])
+        }
+        next_day: list[dict[str, Any]] = []
+        seen_members: set[str] = set()
+        for incoming_entry in incoming.get(day_key, []):
+            member_id = str(incoming_entry.get("member_id") or "")
+            seen_members.add(member_id)
+            current_entry = current_by_member.get(member_id, {})
+            server_sync = [
+                dict(item) for item in (current_entry.get("assignments") or [])
+                if str(item.get("source_type") or "") == "sync"
+            ]
+            local = [
+                dict(item) for item in (incoming_entry.get("assignments") or [])
+                if str(item.get("source_type") or "") != "sync"
+            ]
+            next_entry = dict(incoming_entry)
+            next_entry["assignments"] = local + server_sync
+            next_entry["value"] = (
+                str(next_entry["assignments"][0].get("code_key") or "")
+                if next_entry["assignments"] else ""
+            )
+            if server_sync:
+                next_entry["employee_number"] = str(current_entry.get("employee_number") or "")
+                next_entry["employee_name"] = str(current_entry.get("employee_name") or "")
+            if next_entry["assignments"] or next_entry.get("comment"):
+                next_day.append(next_entry)
+        for member_id, current_entry in current_by_member.items():
+            if member_id in seen_members:
+                continue
+            server_sync = [
+                dict(item) for item in (current_entry.get("assignments") or [])
+                if str(item.get("source_type") or "") == "sync"
+            ]
+            if not server_sync:
+                continue
+            next_entry = dict(current_entry)
+            next_entry["assignments"] = server_sync
+            next_entry["value"] = str(server_sync[0].get("code_key") or "")
+            next_day.append(next_entry)
+        result[day_key] = next_day
+    return _normalize_project_entries(project, result, year, month)
+
+
+def _save_large_month_in_project(
+    project: dict[str, Any],
+    year: int,
+    month: int,
+    payload: dict[str, Any],
+    actor_name: str,
+    actor_type: str,
+) -> dict[str, Any]:
+    month_key = _month_key(year, month)
+    current_month = (project.get("months") or {}).get(month_key)
+    if not current_month:
+        raise CloudShiftError("対象の月が存在しません", 404)
+    _large_base_revision(current_month, payload)
+    prepared_entries = _prepared_large_entries_for_month(
+        project,
+        current_month,
+        payload.get("entries_per_day"),
+        year=year,
+        month=month,
+    )
+    current_meta = normalize_large_meta(current_month.get("meta_data"), year, month)
+    if "meta_data" in payload or "meta" in payload:
+        incoming_meta = normalize_large_meta(payload.get("meta_data", payload.get("meta")), year, month, allow_baseline=False)
+    else:
+        incoming_meta = {"day_types": dict(current_meta.get("day_types") or {}), "day_notes": dict(current_meta.get("day_notes") or {})}
+    if current_meta.get("baseline"):
+        incoming_meta["baseline"] = current_meta["baseline"]
+    current_entries = _normalize_project_entries(project, current_month.get("entries_per_day"), year, month)
+    if current_entries == prepared_entries and current_meta == incoming_meta:
+        return current_month
+    merged = {
+        **current_month,
+        "capacity_enabled": False,
+        "required_capacity": 0,
+        "entries_per_day": prepared_entries,
+        "draft_entries_per_day": prepared_entries,
+        "meta_data": incoming_meta,
+        "revision": int(current_month.get("revision", 1) or 1) + 1,
+        "updated_at": _jst_now_iso(),
+    }
+    snapshots = dict(current_month.get("revision_snapshots") or {})
+    snapshots[str(int(current_month.get("revision", 1) or 1))] = _large_month_snapshot(current_month)
+    merged["revision_snapshots"] = _trim_revision_snapshots(snapshots)
+    project["months"][month_key] = merged
+    _save_project(project)
+    changes = _describe_month_changes({**current_month, "entries_per_day": current_entries}, merged)
+    if current_meta.get("day_types") != incoming_meta.get("day_types"):
+        changes.append("日別ダイヤ種別を更新")
+    if current_meta.get("day_notes") != incoming_meta.get("day_notes"):
+        changes.append("日メモを更新")
+    _append_history(project["id"], {
+        "timestamp": _jst_now_iso(),
+        "editor_name": actor_name,
+        "editor_type": actor_type,
+        "action": "month_updated",
+        "month_key": month_key,
+        "changes": (changes or [f"{month_key} の大規模シフトを更新"])[:100],
+    })
+    return merged
+
+
 def _save_month_in_project(
     project: dict[str, Any],
     year: int,
@@ -9594,6 +10514,8 @@ def _save_month_in_project(
     approved_leave_change_request_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     year, month = _validate_year_month(year, month)
+    if project.get("mode") == LARGE_MODE:
+        return _save_large_month_in_project(project, year, month, payload, actor_name, actor_type)
     month_key = _month_key(year, month)
     current_month = (project.get("months") or {}).get(month_key)
     if not current_month:
@@ -9689,6 +10611,29 @@ def _month_draft_has_changes(month_data: dict[str, Any], year: int, month: int) 
     )
 
 
+def _save_large_draft_month_in_project(
+    project: dict[str, Any], year: int, month: int, payload: dict[str, Any], actor_name: str, actor_type: str
+) -> dict[str, Any]:
+    month_key = _month_key(year, month)
+    current = (project.get("months") or {}).get(month_key)
+    if not current:
+        raise CloudShiftError("対象の月が存在しません", 404)
+    previous_count = _draft_entry_count(current)
+    next_draft_entries = _normalize_project_entries(
+        project, payload.get("entries_per_day"), year, month
+    )
+    _validate_large_substitute_assignees(project, next_draft_entries)
+    current["draft_entries_per_day"] = next_draft_entries
+    current["updated_at"] = _jst_now_iso()
+    _save_project(project)
+    _append_history(project["id"], {
+        "timestamp": _jst_now_iso(), "editor_name": actor_name, "editor_type": actor_type,
+        "action": "month_draft_saved", "month_key": month_key,
+        "changes": [f"{month_key} の仮保存を {previous_count}件 から {_draft_entry_count(current)}件 に更新"],
+    })
+    return current
+
+
 def _save_draft_month_in_project(
     project: dict[str, Any],
     year: int,
@@ -9699,6 +10644,8 @@ def _save_draft_month_in_project(
     actor_user_id: str = "",
 ) -> dict[str, Any]:
     year, month = _validate_year_month(year, month)
+    if project.get("mode") == LARGE_MODE:
+        return _save_large_draft_month_in_project(project, year, month, payload, actor_name, actor_type)
     month_key = _month_key(year, month)
     current_month = (project.get("months") or {}).get(month_key)
     if not current_month:
@@ -9744,6 +10691,23 @@ def _clear_draft_month_in_project(
     actor_type: str,
 ) -> dict[str, Any]:
     year, month = _validate_year_month(year, month)
+    if project.get("mode") == LARGE_MODE:
+        month_key = _month_key(year, month)
+        current = (project.get("months") or {}).get(month_key)
+        if not current:
+            raise CloudShiftError("対象の月が存在しません", 404)
+        previous_count = _draft_entry_count(current)
+        current["draft_entries_per_day"] = _normalize_project_entries(
+            project, current.get("entries_per_day"), year, month
+        )
+        current["updated_at"] = _jst_now_iso()
+        _save_project(project)
+        _append_history(project["id"], {
+            "timestamp": _jst_now_iso(), "editor_name": actor_name, "editor_type": actor_type,
+            "action": "month_draft_cleared", "month_key": month_key,
+            "changes": [f"{month_key} の仮保存を正式シフトへ戻しました ({previous_count}件)"],
+        })
+        return current
     month_key = _month_key(year, month)
     current_month = (project.get("months") or {}).get(month_key)
     if not current_month:
@@ -9774,6 +10738,33 @@ def _publish_draft_month_in_project(
     actor_type: str,
 ) -> dict[str, Any]:
     year, month = _validate_year_month(year, month)
+    if project.get("mode") == LARGE_MODE:
+        month_key = _month_key(year, month)
+        current = (project.get("months") or {}).get(month_key)
+        if not current:
+            raise CloudShiftError("対象の月が存在しません", 404)
+        live = _normalize_project_entries(project, current.get("entries_per_day"), year, month)
+        draft = _normalize_project_entries(project, current.get("draft_entries_per_day"), year, month)
+        if live == draft:
+            return current
+        published = {
+            **current,
+            "entries_per_day": draft,
+            "draft_entries_per_day": draft,
+            "revision": int(current.get("revision", 1) or 1) + 1,
+            "updated_at": _jst_now_iso(),
+        }
+        snapshots = dict(current.get("revision_snapshots") or {})
+        snapshots[str(int(current.get("revision", 1) or 1))] = _large_month_snapshot(current)
+        published["revision_snapshots"] = _trim_revision_snapshots(snapshots)
+        project["months"][month_key] = published
+        _save_project(project)
+        _append_history(project["id"], {
+            "timestamp": _jst_now_iso(), "editor_name": actor_name, "editor_type": actor_type,
+            "action": "month_draft_published", "month_key": month_key,
+            "changes": [f"{month_key} の大規模シフト仮保存を正式シフトへ反映"],
+        })
+        return published
     month_key = _month_key(year, month)
     current_month = (project.get("months") or {}).get(month_key)
     if not current_month:
@@ -9827,7 +10818,7 @@ def _confirmed_entries_snapshot(project: dict[str, Any], year: int, month: int) 
     month_data = (project.get("months") or {}).get(_month_key(year, month))
     if not month_data:
         return None
-    return _normalize_entries(month_data.get("entries_per_day"), year, month)
+    return _normalize_project_entries(project, month_data.get("entries_per_day"), year, month)
 
 
 def _maybe_notify_pwa_month_change(
@@ -9848,8 +10839,8 @@ def _maybe_notify_pwa_month_change(
         month_data = after_month if after_month is not None else (project.get("months") or {}).get(_month_key(year, month))
         if not month_data:
             return
-        after_entries = _normalize_entries(month_data.get("entries_per_day"), year, month)
-        before_norm = _normalize_entries(before_entries, year, month) if before_entries is not None else None
+        after_entries = _normalize_project_entries(project, month_data.get("entries_per_day"), year, month)
+        before_norm = _normalize_project_entries(project, before_entries, year, month) if before_entries is not None else None
         if before_norm == after_entries:
             return
         changes = _collect_pwa_change_descriptions(before_norm, after_entries, year, month)
@@ -9951,6 +10942,70 @@ def api_save_month(project_id: str, year: int, month: int):
     _resync_shift_month(project, month_key, actor_name=_user_label())
     _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
+
+
+def _large_worktime_payload(project: dict[str, Any], year: int, month: int) -> dict[str, Any]:
+    if project.get("mode") != LARGE_MODE:
+        raise CloudShiftError("大規模シフト帳ではありません", 400)
+    month_data = (project.get("months") or {}).get(_month_key(year, month))
+    if not month_data:
+        raise CloudShiftError("対象の月が存在しません", 404)
+    try:
+        return calculate_large_month(
+            project.get("large_config") or default_large_config(),
+            month_data,
+            JAPAN_HOLIDAYS,
+        )
+    except ValueError as exc:
+        raise CloudShiftError(str(exc), 400) from exc
+
+
+@cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/worktime")
+@login_required
+def api_large_worktime(project_id: str, year: int, month: int):
+    project, _ = _project_for_current_user_or_404(project_id)
+    return jsonify({"success": True, "result": _large_worktime_payload(project, year, month)})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/baseline", methods=["POST"])
+@login_required
+def api_large_baseline(project_id: str, year: int, month: int):
+    data = request.get_json(silent=True) or {}
+    month_key = _month_key(year, month)
+    with _project_lock(project_id):
+        project, access_role = _editable_project_or_404(project_id)
+        if project.get("mode") != LARGE_MODE:
+            raise CloudShiftError("大規模シフト帳ではありません", 400)
+        month_data = (project.get("months") or {}).get(month_key)
+        if not month_data:
+            raise CloudShiftError("対象の月が存在しません", 404)
+        meta = normalize_large_meta(month_data.get("meta_data"), year, month)
+        if bool(data.get("clear")):
+            meta.pop("baseline", None)
+            action = "large_baseline_clear"
+            changes = [f"{month_key} の基準版を解除"]
+        else:
+            meta["baseline"] = {
+                "entries_per_day": _normalize_project_entries(
+                    project, month_data.get("entries_per_day"), year, month
+                ),
+                "set_at": _jst_now_iso(),
+                "set_by": _user_label(),
+                "revision": int(month_data.get("revision", 1) or 1),
+            }
+            action = "large_baseline_set"
+            changes = [f"{month_key} の現在内容を基準版として確定"]
+        month_data["meta_data"] = meta
+        _save_project(project)
+        _append_history(project_id, {
+            "timestamp": _jst_now_iso(), "editor_name": _user_label(), "editor_type": access_role,
+            "action": action, "month_key": month_key, "changes": changes,
+        })
+    return jsonify({
+        "success": True,
+        "month": _client_month_payload(month_data, include_draft=True, project=project),
+        "project": _project_detail_payload(project, month_key, include_draft=True),
+    })
 
 
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/draft", methods=["PUT"])
@@ -11871,6 +12926,30 @@ def _send_month_export(project: dict[str, Any], month_key: str, export_format: s
     month_data = (project.get("months") or {}).get(month_key)
     if not month_data:
         abort(404)
+    if project.get("mode") == LARGE_MODE:
+        if export_format not in {"xlsx", "pdf"}:
+            raise CloudShiftError("大規模シフト帳は xlsx / pdf 出力のみ対応しています", 400)
+        from app.tools.cloudshift_large_export import large_pdf_bytes, large_xlsx_bytes
+
+        config = normalize_large_config(project.get("large_config") or default_large_config())
+        worktime = _large_worktime_payload(project, int(month_data["year"]), int(month_data["month"]))
+        highlight = str(request.args.get("highlight") or "").lower() in {"1", "true", "yes", "on"}
+        filename_base = _safe_download_stem(
+            f"large,{month_data['year']},{month_data['month']},{project['title']}"
+        )
+        if export_format == "xlsx":
+            return send_file(
+                large_xlsx_bytes(project["title"], config, month_data, worktime, highlight=highlight),
+                as_attachment=True,
+                download_name=f"{filename_base}.xlsx",
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        return send_file(
+            large_pdf_bytes(project["title"], config, month_data, worktime, highlight=highlight),
+            as_attachment=True,
+            download_name=f"{filename_base}.pdf",
+            mimetype="application/pdf",
+        )
     export_month_data = {
         **month_data,
         "entries_per_day": _entries_with_latest_site_links(month_data.get("entries_per_day"), project),
@@ -11958,6 +13037,14 @@ def api_public_detail(token_type: str, token: str):
         else [],
     }
     return jsonify(payload)
+
+
+@cloudshift_bp.route("/api/public/<token_type>/<token>/month/<int:year>/<int:month>/worktime")
+def api_public_large_worktime(token_type: str, token: str, year: int, month: int):
+    if token_type not in {"view", "edit", "pwa"}:
+        abort(404)
+    project = _find_project_by_token(token, token_type)
+    return jsonify({"success": True, "result": _large_worktime_payload(project, year, month)})
 
 
 @cloudshift_bp.route("/api/public/view/<token>/leave-change-requests", methods=["POST"])

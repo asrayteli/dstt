@@ -125,6 +125,146 @@ def generate_entry_id() -> str:
     return secrets.token_hex(8)
 
 
+def _normalize_large_minutes(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("所定拘束時間は分単位の整数で指定してください") from exc
+    if result < 0 or result > 1440:
+        raise ValueError("所定拘束時間は0〜1440分で指定してください")
+    return result
+
+
+def _normalize_large_time(value: Any) -> dict[str, str] | None:
+    if value in (None, "", False):
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("時間上書きの形式が不正です")
+    start = str(value.get("start") or "").strip()
+    end = str(value.get("end") or "").strip()
+
+    def clock_minutes(text: str, *, allow_24: bool = False) -> int:
+        matched = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+        if not matched:
+            raise ValueError("時刻はHH:MM形式で指定してください")
+        hour, minute = int(matched.group(1)), int(matched.group(2))
+        if minute > 59 or hour > (24 if allow_24 else 23) or (hour == 24 and minute != 0):
+            raise ValueError("時刻が範囲外です")
+        return hour * 60 + minute
+
+    if clock_minutes(start) >= clock_minutes(end, allow_24=True):
+        raise ValueError("始業時刻は終業時刻より前にしてください（日跨ぎ勤務は非対応です）")
+    return {"start": start.zfill(5), "end": end.zfill(5)}
+
+
+def _normalize_large_assignments(raw: Any, *, entry_id: str, fallback_value: str) -> list[dict[str, Any]]:
+    source = raw if isinstance(raw, list) else []
+    if not source and fallback_value:
+        source = [{"code_key": fallback_value, "source_type": "local"}]
+    if len(source) > 12:
+        raise ValueError("1つのセルに登録できる勤務は12件までです")
+    result: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for index, item in enumerate(source):
+        row = {"code_key": item} if isinstance(item, str) else item
+        if not isinstance(row, dict):
+            continue
+        code_key = str(row.get("code_key", row.get("code", "")) or "").replace("\r", " ").replace("\n", " ").strip()[:80]
+        if not code_key:
+            continue
+        source_type = str(row.get("source_type", row.get("sourceType", "local")) or "local").strip().lower()
+        if source_type not in {"local", "scene", "sync"}:
+            source_type = "local"
+        is_external = source_type in {"scene", "sync"}
+        assignment_id = str(row.get("id") or f"ca_{entry_id}_{index + 1}").strip()[:120]
+        if not assignment_id or assignment_id in seen_ids:
+            assignment_id = f"ca_{entry_id}_{index + 1}"
+        seen_ids.add(assignment_id)
+        result.append({
+            "id": assignment_id,
+            "code_key": code_key,
+            "source_type": source_type,
+            "source_project_id": str(row.get("source_project_id", row.get("sourceProjectId", "")) or "").strip()[:120] if is_external else "",
+            "source_project_title": str(row.get("source_project_title", row.get("sourceProjectTitle", "")) or "").replace("\r", " ").replace("\n", " ").strip()[:200] if is_external else "",
+            "source_site_row_id": str(row.get("source_site_row_id", row.get("sourceSiteRowId", "")) or "").strip()[:80] if is_external else "",
+            "source_site_id": str(row.get("source_site_id", row.get("sourceSiteId", "")) or "").strip()[:80] if is_external else "",
+            "source_site_name": str(row.get("source_site_name", row.get("sourceSiteName", "")) or "").replace("\r", " ").replace("\n", " ").strip()[:200] if is_external else "",
+            "option_key": str(row.get("option_key", row.get("optionKey", "")) or "").strip().upper()[:40] if is_external else "",
+            "second_option": str(row.get("second_option", row.get("secondOption", "")) or "").strip().upper()[:40] if is_external else "",
+            "custom_label": str(row.get("custom_label", row.get("customLabel", "")) or "").replace("\r", " ").replace("\n", " ").strip()[:120] if is_external else "",
+            "sync_source_type": str(row.get("sync_source_type", row.get("syncSourceType", "")) or "").strip()[:40] if source_type == "sync" else "",
+            "sync_source_project_id": str(row.get("sync_source_project_id", row.get("syncSourceProjectId", "")) or "").strip()[:120] if source_type == "sync" else "",
+            "sync_source_month_key": str(row.get("sync_source_month_key", row.get("syncSourceMonthKey", "")) or "").strip()[:20] if source_type == "sync" else "",
+            "sync_source_day": str(row.get("sync_source_day", row.get("syncSourceDay", "")) or "").strip()[:10] if source_type == "sync" else "",
+            "sync_source_entry_id": str(row.get("sync_source_entry_id", row.get("syncSourceEntryId", "")) or "").strip()[:120] if source_type == "sync" else "",
+        })
+    return result
+
+
+def normalize_large_entry(raw: Any, *, entry_id: str | None = None) -> dict[str, Any]:
+    """大規模シフトの1セルを既存entry形式から独立して正規化する。"""
+    if not isinstance(raw, dict):
+        return {}
+    member_id = str(raw.get("member_id", raw.get("memberId", "")) or "").strip()[:80]
+    if not member_id:
+        return {}
+    value = str(raw.get("value") or "").replace("\r", " ").replace("\n", " ").strip()[:80]
+    comment = str(raw.get("comment") or "").strip()[:1000]
+    raw_id = str(raw.get("id") or entry_id or f"ce_{secrets.token_hex(8)}").strip()
+    if not raw_id:
+        raw_id = f"ce_{secrets.token_hex(8)}"
+    raw_id = raw_id[:120]
+    assignments = _normalize_large_assignments(raw.get("assignments"), entry_id=raw_id, fallback_value=value)
+    value = assignments[0]["code_key"] if assignments else value
+    holiday_kind = str(raw.get("holiday_kind", raw.get("holidayKind", "")) or "").strip().lower()
+    if holiday_kind not in {"", "scheduled", "legal"}:
+        raise ValueError("休日区分は scheduled / legal のいずれかで指定してください")
+    if not assignments and not value and not holiday_kind and not comment:
+        return {}
+    return {
+        "id": raw_id,
+        "member_id": member_id,
+        "value": value,
+        "assignments": assignments,
+        "holiday_kind": holiday_kind,
+        "time_override": _normalize_large_time(raw.get("time_override", raw.get("timeOverride"))),
+        "bind_override_minutes": _normalize_large_minutes(
+            raw.get("bind_override_minutes", raw.get("bindOverrideMinutes"))
+        ),
+        "comment": comment,
+        "employee_number": str(raw.get("employee_number", raw.get("employeeNumber", "")) or "").strip()[:40],
+        "employee_name": str(raw.get("employee_name", raw.get("employeeName", "")) or "").strip()[:120],
+    }
+
+
+def normalize_large_entries_for_month(entries: Any, year: int, month: int) -> dict[str, list[dict[str, Any]]]:
+    """1人×1日を論理キーにし、重複は後勝ちで統合する。"""
+    year, month = validate_year_month(year, month)
+    days = monthrange(year, month)[1]
+    source = entries if isinstance(entries, dict) else {}
+    result: dict[str, list[dict[str, Any]]] = {}
+    for day in range(1, days + 1):
+        day_key = str(day)
+        raw_entries = source.get(day_key, source.get(day, []))
+        raw_entries = raw_entries if isinstance(raw_entries, list) else []
+        by_member: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        for raw in raw_entries:
+            member_probe = str((raw or {}).get("member_id", (raw or {}).get("memberId", "")) or "").strip() if isinstance(raw, dict) else ""
+            deterministic_id = f"ce_{year:04d}{month:02d}{day:02d}_{re.sub(r'[^A-Za-z0-9_-]', '_', member_probe)[:64]}"
+            normalized = normalize_large_entry(raw, entry_id=deterministic_id)
+            if not normalized:
+                continue
+            member_id = normalized["member_id"]
+            if member_id not in order:
+                order.append(member_id)
+            by_member[member_id] = normalized
+        result[day_key] = [by_member[member_id] for member_id in order if member_id in by_member]
+    return result
+
+
 def parse_entry_value(value: str) -> tuple[str | None, str]:
     text = str(value or "").strip()
     match = ENTRY_VALUE_PATTERN.match(text)

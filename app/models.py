@@ -1380,6 +1380,7 @@ class CloudShiftMonth(db.Model):
     required_capacity = db.Column(db.Integer, nullable=False, default=0)
     entries_per_day = db.Column(db.JSON, nullable=False, default=dict)
     draft_entries_per_day = db.Column(db.JSON, nullable=False, default=dict)
+    meta_data = db.Column(db.JSON, nullable=False, default=dict)
     revision = db.Column(db.Integer, nullable=False, default=1)
     # スナップショットは月データの十数倍になり得るため、必要な経路
     # （フルロード・リビジョン操作）だけが undefer で読み込む。
