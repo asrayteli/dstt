@@ -5009,6 +5009,21 @@ def _master_entry_is_in_scope(source_project: dict[str, Any], entry: dict[str, A
     )
 
 
+def _large_entry_has_content(entry: dict[str, Any]) -> bool:
+    """大規模シフトの正規化済みエントリを保持すべきか判定する。
+
+    割当・コメントに加え、holiday_kind（法定/所定休日出勤マーク）も保持対象に含める。
+    従来は ``assignments or comment`` のみで判定していたため、割当を持たない休日出勤
+    マークだけのセルが保存・逆同期のたびに失われていた。time_override /
+    bind_override_minutes のみのエントリは normalize_large_entry の時点で除去される
+    ため、ここで個別に考慮する必要はない。"""
+    return bool(
+        entry.get("assignments")
+        or str(entry.get("comment") or "").strip()
+        or str(entry.get("holiday_kind") or "").strip()
+    )
+
+
 def _large_members(project: dict[str, Any]) -> list[dict[str, Any]]:
     config = normalize_large_config(project.get("large_config") or default_large_config())
     return [item for item in config["members"] if item.get("active", True)]
@@ -5506,7 +5521,7 @@ def _replace_shift_synced_assignments_in_large_project(
                 str(next_entry["assignments"][0].get("code_key") or "")
                 if next_entry["assignments"] else ""
             )
-            if next_entry["assignments"] or next_entry.get("comment"):
+            if _large_entry_has_content(next_entry):
                 kept_entries.append(next_entry)
         next_entries[day_key] = kept_entries
 
@@ -10194,6 +10209,27 @@ def _large_references(project: dict[str, Any]) -> tuple[set[str], set[str]]:
     return member_ids, code_keys
 
 
+def _ensure_unique_regular_employee_numbers(config: dict[str, Any]) -> None:
+    """レギュラー列の社員番号重複を禁止する。
+
+    同一社員番号のレギュラー列が複数あると _large_target_member_id の一意一致
+    ガード(regular_matches==1)を満たせず、個人/現場からの同期がどの列にも入らず
+    警告なく欠落する。設定保存時点で明示エラーにして取りこぼしを防ぐ。"""
+    numbers = [
+        str(member.get("employee_number") or "").strip()
+        for member in config.get("members", [])
+        if str(member.get("column_type") or "regular") == "regular"
+        and str(member.get("employee_number") or "").strip()
+    ]
+    duplicates = sorted({number for number in numbers if numbers.count(number) > 1})
+    if duplicates:
+        raise CloudShiftError(
+            "同じ社員番号のレギュラー列が複数あります（同期先が定まらないため保存できません）: "
+            + ", ".join(duplicates),
+            400,
+        )
+
+
 @cloudshift_bp.route("/api/project/<project_id>/large-config", methods=["GET", "PUT"])
 @login_required
 def api_large_config(project_id: str):
@@ -10211,6 +10247,7 @@ def api_large_config(project_id: str):
         next_config = normalize_large_config(payload.get("large_config", payload))
     except ValueError as exc:
         raise CloudShiftError(str(exc), 400) from exc
+    _ensure_unique_regular_employee_numbers(next_config)
     with _project_lock(project_id):
         project, access_role = _editable_project_or_404(project_id)
         if project.get("mode") != LARGE_MODE:
@@ -10378,7 +10415,7 @@ def _large_base_revision(current_month: dict[str, Any], payload: dict[str, Any])
     except (TypeError, ValueError) as exc:
         raise CloudShiftError("編集対象が古い可能性があります。再読み込みしてから保存してください", 409) from exc
     if revision != int(current_month.get("revision", 1) or 1):
-        raise CloudShiftError("他のユーザーが更新しました。再読み込みしてから保存してください", 409)
+        raise CloudShiftError("他の編集または個人・現場シフトからの同期反映により内容が更新されました。再読み込みしてから保存してください", 409)
     return revision
 
 
@@ -10423,7 +10460,7 @@ def _prepared_large_entries_for_month(
             if server_sync:
                 next_entry["employee_number"] = str(current_entry.get("employee_number") or "")
                 next_entry["employee_name"] = str(current_entry.get("employee_name") or "")
-            if next_entry["assignments"] or next_entry.get("comment"):
+            if _large_entry_has_content(next_entry):
                 next_day.append(next_entry)
         for member_id, current_entry in current_by_member.items():
             if member_id in seen_members:
@@ -10619,10 +10656,12 @@ def _save_large_draft_month_in_project(
     if not current:
         raise CloudShiftError("対象の月が存在しません", 404)
     previous_count = _draft_entry_count(current)
-    next_draft_entries = _normalize_project_entries(
-        project, payload.get("entries_per_day"), year, month
+    # 下書きにもサーバー権威の同期割当(source_type=='sync')保護を適用し、本保存と同じ
+    # 不変条件（クライアントはサーバー正の同期割当を削除・改変できない）を保つ。これに
+    # より、下書き→公開経路で保護が抜ける問題を塞ぐ。代務担当者検証も内部で実施される。
+    next_draft_entries = _prepared_large_entries_for_month(
+        project, current, payload.get("entries_per_day"), year=year, month=month
     )
-    _validate_large_substitute_assignees(project, next_draft_entries)
     current["draft_entries_per_day"] = next_draft_entries
     current["updated_at"] = _jst_now_iso()
     _save_project(project)
@@ -10744,13 +10783,18 @@ def _publish_draft_month_in_project(
         if not current:
             raise CloudShiftError("対象の月が存在しません", 404)
         live = _normalize_project_entries(project, current.get("entries_per_day"), year, month)
-        draft = _normalize_project_entries(project, current.get("draft_entries_per_day"), year, month)
-        if live == draft:
+        # 公開直前にサーバー権威の同期割当(source_type=='sync')を現在liveから取り直す。
+        # 下書き保存後にソース(個人/現場)側で変化・削除された同期割当を、下書きに固着した
+        # 古い値ではなく現在値で確定する（削除済み同期の復活を防ぐ／非largeの公開と同じ保護）。
+        published_entries = _prepared_large_entries_for_month(
+            project, current, current.get("draft_entries_per_day"), year=year, month=month
+        )
+        if live == published_entries:
             return current
         published = {
             **current,
-            "entries_per_day": draft,
-            "draft_entries_per_day": draft,
+            "entries_per_day": published_entries,
+            "draft_entries_per_day": published_entries,
             "revision": int(current.get("revision", 1) or 1) + 1,
             "updated_at": _jst_now_iso(),
         }
