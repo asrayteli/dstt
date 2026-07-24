@@ -88,8 +88,10 @@ def is_duplicate_by_rules(
 def compare_shift_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
     if not payloads:
         raise ValueError("比較するシフトデータを選択してください")
-    if len(payloads) > 50:
-        raise ValueError("比較するシフトデータは50件までにしてください")
+    # 大規模シフトは1帳が人数分の擬似現場列へ展開されるため、上限に余裕を持たせる
+    # （最大60人規模＋他現場でも収まるよう120件まで許容）。
+    if len(payloads) > 120:
+        raise ValueError("比較するシフトデータは120件までにしてください")
 
     mode = None
     year = None

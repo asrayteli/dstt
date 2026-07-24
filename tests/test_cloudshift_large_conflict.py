@@ -160,3 +160,47 @@ def test_large_conflict_check_rejects_non_large(tmp_path):
     ).get_json()["project"]["project"]
     resp = client.post(f"{BASE}/api/project/{scene['id']}/large-conflict-check", json={"month_key": "2026-07"})
     assert resp.status_code == 400
+
+
+# --- 既存の重複チェックタブ(/api/conflict-check)へ大規模を擬似現場として載せる ---
+
+def test_conflict_check_tab_expands_large_into_pseudo_scenes(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    large_id = _make_large_with_work(client)  # 職員A(emp 1001) が 1日 に勤務
+    # 同じ 職員A が別の現場シフトにも 1日 に配置されている
+    scene = client.post(
+        f"{BASE}/api/create",
+        data={"title": "別現場", "mode": "scene", "year": "2026", "month": "7"},
+    ).get_json()["project"]["project"]
+    assert client.put(
+        f"{BASE}/api/project/{scene['id']}/month/2026/7",
+        json={"base_month": {"revision": 1}, "entries_per_day": {"1": [{"value": "職員A"}]}},
+    ).status_code == 200
+
+    resp = client.post(
+        f"{BASE}/api/conflict-check",
+        json={"month_key": "2026-07", "project_ids": [large_id, scene["id"]]},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    # 大規模は列(人)ごとの擬似現場ソースへ展開される
+    labels = [str(source.get("label") or "") for source in data.get("sources", [])]
+    assert any("職員A" in label for label in labels), labels
+    # 職員A の 1日 の二重配置（大規模×別現場）が検出される
+    assert len(data.get("conflicts", [])) >= 1
+
+
+def test_conflict_check_tab_large_only_runs_without_error(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    large_id = _make_large_with_work(client)
+    resp = client.post(
+        f"{BASE}/api/conflict-check",
+        json={"month_key": "2026-07", "project_ids": [large_id]},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    # 大規模単体でも擬似現場列が並び、（別人なので）衝突は無い
+    assert any("職員A" in str(source.get("label") or "") for source in data.get("sources", []))
+    assert data.get("conflicts") == []

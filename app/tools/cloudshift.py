@@ -9513,6 +9513,72 @@ def api_list():
     return jsonify({"projects": projects})
 
 
+def _large_pseudo_scene_payloads(
+    project: dict[str, Any], year: int, month: int, month_key: str
+) -> list[dict[str, Any]]:
+    """大規模シフトを、既存の「現場モード」重複チェックに載せるための擬似現場ペイロードへ展開する。
+
+    大規模の各列(レギュラー/代務=1人)を1つの擬似現場として扱い、その列の担当者がその日
+    ローカル勤務していれば現場エントリ(担当者氏名)を1件出す。休み・他現場(scene)・同期(sync)
+    割当は実配置ではない/鏡像なので除外する。氏名で人物同定する現行比較関数に合わせ、
+    value=担当者氏名とする（同一人物が他現場にも配置されていれば横断で衝突検出される）。
+    """
+    config = normalize_large_config(project.get("large_config") or default_large_config())
+    members = [item for item in config["members"] if item.get("active", True)]
+    codes = {str(item["key"]).casefold(): item for item in config["codes"]}
+    month_data = (project.get("months") or {}).get(month_key) or {}
+    entries = normalize_large_entries_for_month(month_data.get("entries_per_day"), year, month)
+    title = str(project.get("title") or project.get("id") or "大規模")
+    project_id = str(project.get("id") or "")
+    payloads: list[dict[str, Any]] = []
+    for member in members:
+        member_id = str(member.get("id") or "")
+        is_substitute = str(member.get("column_type") or "regular") == "substitute"
+        entries_per_day: dict[str, list[dict[str, Any]]] = {}
+        for day_key, day_entries in entries.items():
+            entry = next(
+                (item for item in day_entries if str(item.get("member_id") or "") == member_id),
+                None,
+            )
+            if not entry:
+                continue
+            has_local_work = any(
+                isinstance(item, dict)
+                and str(item.get("source_type") or "local") == "local"
+                and item.get("code_key")
+                and (codes.get(str(item.get("code_key") or "").casefold()) or {}).get("category") == "work"
+                for item in (entry.get("assignments") or [])
+            )
+            if not has_local_work:
+                continue
+            if is_substitute:
+                number = str(entry.get("employee_number") or "").strip()
+                name = str(entry.get("employee_name") or "").strip()
+            else:
+                number = str(member.get("employee_number") or "").strip()
+                name = str(member.get("employee_name") or member.get("display_name") or "").strip()
+            if not name:
+                continue
+            entries_per_day[day_key] = [{
+                "id": f"lce_{member_id}_{day_key}",
+                "value": name,
+                "employee_number": number,
+                "employee_name": name,
+            }]
+        payloads.append({
+            "project_id": f"{project_id}#{member_id}",
+            "month_key": month_key,
+            "label": f"{title}／{member.get('display_name') or member_id}",
+            "title": title,
+            "mode": "scene",
+            "year": year,
+            "month": month,
+            "required_capacity": 0,
+            "entries_per_day": entries_per_day,
+        })
+    return payloads
+
+
 @cloudshift_bp.route("/api/conflict-check", methods=["POST"])
 @login_required
 def api_conflict_check():
@@ -9543,16 +9609,15 @@ def api_conflict_check():
     compare_payloads: list[dict[str, Any]] = []
     for project_id in project_ids:
         project = _owner_project_or_404(project_id)
-        if project.get("mode") in {"master", LARGE_MODE}:
-            raise CloudShiftError(
-                "大規模シフトは重複チェックの対象外です"
-                if project.get("mode") == LARGE_MODE
-                else "マスターシフトは重複チェックの対象外です",
-                400,
-            )
+        if project.get("mode") == "master":
+            raise CloudShiftError("マスターシフトは重複チェックの対象外です", 400)
         month_data = (project.get("months") or {}).get(month_key)
         if not month_data:
             raise CloudShiftError(f"{project['title']} に {month_key} の月データがありません", 400)
+        if project.get("mode") == LARGE_MODE:
+            # 大規模は各列(人)を擬似現場として展開し、現場モードの比較に載せる。
+            compare_payloads.extend(_large_pseudo_scene_payloads(project, year, month, month_key))
+            continue
         compare_payloads.append(
             {
                 "project_id": project["id"],
