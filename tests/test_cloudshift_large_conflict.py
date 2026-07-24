@@ -5,9 +5,10 @@
 - /api/project/<id>/large-conflict-check の統合（大規模×個人の二重配置検出）
 """
 
+from app.models import AccessBranch, AccessOffice, db
 from app.services.cloudshift_large import default_large_config
 from app.tools.shiftersync_check import cross_mode_conflicts
-from tests.test_cloudshift import _build_client, _owner
+from tests.test_cloudshift import _build_client, _employee_user, _owner
 
 
 BASE = "/tools/shiftersync/cloudshift"
@@ -204,3 +205,54 @@ def test_conflict_check_tab_large_only_runs_without_error(tmp_path):
     # 大規模単体でも擬似現場列が並び、（別人なので）衝突は無い
     assert any("職員A" in str(source.get("label") or "") for source in data.get("sources", []))
     assert data.get("conflicts") == []
+
+
+def test_conflict_check_allows_shared_books(tmp_path):
+    """共有された(非所有)シフト帳も明示選択すれば重複チェックに使える。"""
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        branch = AccessBranch(name="Tokyo", code="CKT")
+        db.session.add(branch)
+        db.session.flush()
+        office = AccessOffice(branch_id=branch.id, name="Shinjuku", code="CKO")
+        db.session.add(office)
+        db.session.commit()
+        office_id = office.id
+
+    # オーナーAが現場帳を作成し、職員Xを1日に配置して営業所へ共有する
+    owner_a = _owner()
+    owner_a.office_id = office_id
+    owner_a.id = 100
+    module.current_user = owner_a
+    shared = client.post(
+        f"{BASE}/api/create",
+        data={"title": "A現場", "mode": "scene", "year": "2026", "month": "7"},
+    ).get_json()["project"]["project"]
+    assert client.put(
+        f"{BASE}/api/project/{shared['id']}/month/2026/7",
+        json={"base_month": {"revision": 1}, "entries_per_day": {"1": [{"value": "職員X"}]}},
+    ).status_code == 200
+    assert client.put(
+        f"{BASE}/api/project/{shared['id']}/account-shares",
+        json={"share_office": True, "employee_numbers": []},
+    ).status_code == 200
+
+    # 同じ営業所の利用者Bが自分の現場帳を作り、職員Xを同日に配置
+    module.current_user = _employee_user("3001", office_id=office_id)
+    own = client.post(
+        f"{BASE}/api/create",
+        data={"title": "B現場", "mode": "scene", "year": "2026", "month": "7"},
+    ).get_json()["project"]["project"]
+    assert client.put(
+        f"{BASE}/api/project/{own['id']}/month/2026/7",
+        json={"base_month": {"revision": 1}, "entries_per_day": {"1": [{"value": "職員X"}]}},
+    ).status_code == 200
+
+    # Bが自分の帳＋共有帳を選んで比較 → 404にならず、二重配置を検出する
+    resp = client.post(
+        f"{BASE}/api/conflict-check",
+        json={"month_key": "2026-07", "project_ids": [own["id"], shared["id"]]},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert len(data.get("conflicts", [])) >= 1

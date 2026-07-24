@@ -9608,7 +9608,9 @@ def api_conflict_check():
 
     compare_payloads: list[dict[str, Any]] = []
     for project_id in project_ids:
-        project = _owner_project_or_404(project_id)
+        # 自分が所有する帳に加え、共有された(閲覧/編集)帳も比較対象に含める。
+        # 既定選択は自分の帳のみ(UI側)だが、共有帳を明示選択したら比較できるようにする。
+        project, _access_role = _project_for_current_user_or_404(project_id)
         if project.get("mode") == "master":
             raise CloudShiftError("マスターシフトは重複チェックの対象外です", 400)
         month_data = (project.get("months") or {}).get(month_key)
