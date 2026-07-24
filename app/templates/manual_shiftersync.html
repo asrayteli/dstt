@@ -208,6 +208,7 @@
   .csm-mode-cell.csm-mode-scene { border-color: #38bdf8; background: #f0f9ff; }
   .csm-mode-cell.csm-mode-person { border-color: #a78bfa; background: #faf5ff; }
   .csm-mode-cell.csm-mode-master { border-color: #fbbf24; background: #fffbeb; }
+  .csm-mode-cell.csm-mode-large { border-color: #10b981; background: #ecfdf5; }
   .csm-mode-name { font-size: 15px; font-weight: 800; color: #0f172a; margin: 0 0 6px; }
   .csm-mode-desc { font-size: 13px; color: #475569; line-height: 1.6; margin: 0; }
 
@@ -358,6 +359,7 @@
     <a href="#auto"      class="csm-nav-link" data-section="auto">🤖 自動作成・アシスト</a>
     <a href="#output"    class="csm-nav-link" data-section="output">✅ 出力・履歴・チェック</a>
     <a href="#link"      class="csm-nav-link" data-section="link">🔄 連携・代務</a>
+    <a href="#large"     class="csm-nav-link" data-section="large">🏢 大規模シフト</a>
     <a href="#classic"   class="csm-nav-link" data-section="classic">📄 CSV版ツール</a>
     <a href="#faq"       class="csm-nav-link" data-section="faq">❓ よくある質問</a>
   </div>
@@ -466,6 +468,10 @@
         <div class="csm-mode-cell csm-mode-master">
           <p class="csm-mode-name">🗂️ マスターシフト</p>
           <p class="csm-mode-desc">複数の個人または現場をまとめて見る一覧型。対象を選んで横断的に確認するのに使います。</p>
+        </div>
+        <div class="csm-mode-cell csm-mode-large">
+          <p class="csm-mode-name">🏢 大規模シフト</p>
+          <p class="csm-mode-desc">1 つの現場を <strong>10〜60 人</strong>で回す専用の表形式モード。1 人＝1 列で日ごとの勤務を入れ、勤務時間の自動集計・警告、代務列、基準版、個人／現場との同期、専用の重複チェックが使えます。→ <a href="#large" style="color:#047857;font-weight:700">大規模シフトの章</a></p>
         </div>
       </div>
     </div>
@@ -1103,6 +1109,141 @@
   </section>
 
 
+  <!-- ========== 大規模シフト ========== -->
+  <section id="large" class="csm-section">
+    <div class="csm-section-header">
+      <div class="csm-section-icon" style="background:#ecfdf5">🏢</div>
+      <div>
+        <h2 class="csm-section-title">大規模シフト（10〜60 人を 1 現場で回す）</h2>
+        <p class="csm-section-desc">1 つの現場を大人数で回すための表形式モードです。<strong>1 人＝1 列</strong>で日ごとの勤務を入れ、勤務時間の自動集計・警告、代務列、基準版、個人／現場シフトとの双方向同期、専用の重複チェックまでを 1 か所で扱えます。現場シフトに近い操作感ですが、専用の編集画面と設定を持ちます。</p>
+      </div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">🧭 どんなときに使う？</div>
+      <ul class="csm-ul">
+        <li>1 つの現場（例：大型施設・イベント）に <strong>10〜60 人</strong>が入り、1 人ずつ日別の勤務を管理したいとき。</li>
+        <li>拘束・労働・残業・休日出勤や、休息期間・連続勤務などの<strong>労務チェック</strong>を自動で見たいとき。</li>
+        <li>レギュラー（固定担当）と<strong>代務（日替わりの応援）</strong>を列として分けて管理したいとき。</li>
+      </ul>
+      <div class="csm-note" style="margin-top:10px">📌 少人数（〜十数人）で、自動作成・テンプレート・代務要請・カレンダー画像出力を使いたい場合は <strong>現場シフト</strong> が向いています。大規模シフトはこれらの一部に非対応です（→ この章の最後「できないこと」）。</div>
+    </div>
+
+    <!-- 作成 -->
+    <div class="csm-step">
+      <div class="csm-step-badge">1</div>
+      <div class="csm-step-body">
+        <div class="csm-step-title">作成する <span class="csm-tag csm-tag-sky">新規作成タブ</span></div>
+        <p class="csm-step-text">「新規作成」タブで種別に <strong>大規模シフト</strong> を選び、タイトル・年・月を入れます。<strong>「現場を選ぶ」で現場リストPLUSの現場と紐付け</strong>ておくと、個人・現場シフトとの同期や重複チェックが社員番号基準で正確になります。「作成して編集へ進む」で専用の編集画面が開きます。</p>
+      </div>
+    </div>
+
+    <!-- 設定 -->
+    <div class="csm-step">
+      <div class="csm-step-badge">2</div>
+      <div class="csm-step-body">
+        <div class="csm-step-title">メンバーと勤務コードを設定する <span class="csm-tag csm-tag-emerald">メンバー・コード設定</span></div>
+        <p class="csm-step-text">編集画面右上の <strong>「メンバー・コード設定」</strong> を開きます。設定は 3 つのタブに分かれています。</p>
+        <table class="csm-opt-table" style="margin-top:10px">
+          <thead><tr><th style="width:150px">タブ</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td>メンバー・代務列</td><td><strong>レギュラー</strong>（固定担当＝1 列 1 人）と <strong>代務列</strong>（日替わりで担当者を入れる列）を追加します。各列に <strong>シフト表での表示名・社員番号・1 日の所定拘束（任意）</strong>を設定します。ドラッグで並べ替え、「表に表示」で列の表示／非表示を切り替えられます。</td></tr>
+            <tr><td>シフトの選択肢</td><td>勤務コードを <strong>「ダイヤ」と「休日」</strong>のタブに分けて登録します。各コードに <strong>ユーザーに見せる名前・入力用の略号・表示色</strong>を設定し、勤務（ダイヤ）は <strong>平日／土曜／日祝それぞれの時間帯</strong>と、必要ならそのコードだけの休憩時間を入れます。色は設定画面のプレビューへ即時反映されます。</td></tr>
+            <tr><td>集計と警告</td><td>共通の休憩・所定拘束時間と、<strong>月間拘束・日次拘束・休息期間・給与残業・長時間労働・連続勤務日数</strong>の各チェックのオン／オフと目安値を設定します。</td></tr>
+          </tbody>
+        </table>
+        <div class="csm-tip" style="margin-top:10px">💡 <strong>社員番号</strong>を入れておくと、同姓同名でも正確に同期・重複チェックできます。同じ社員番号を複数のレギュラー列に入れると保存できません（同期先が定まらないため）。</div>
+        <div class="csm-note" style="margin-top:10px">📌 休日の初期値は「法定休／所定休／振休／有休／希望休／希望有休／希望振休」の 7 種です。使用中のメンバー・コードは削除できません（無効化してください）。</div>
+      </div>
+    </div>
+
+    <!-- 編集 -->
+    <div class="csm-step">
+      <div class="csm-step-badge">3</div>
+      <div class="csm-step-body">
+        <div class="csm-step-title">シフト表を入力する <span class="csm-tag csm-tag-sky">シフト表タブ</span></div>
+        <p class="csm-step-text">縦に日付、横にメンバー列が並ぶ表です。現場シフトに近い操作で入力できます。</p>
+        <ul class="csm-ul">
+          <li><strong>シフトをクリック</strong>：その勤務を編集。<strong>セルの余白をクリック</strong>：セルを選択。</li>
+          <li><strong>ダブルクリック</strong>：編集モーダルが開き、コード（ダイヤ／休日）を選んで入れます。</li>
+          <li><strong>キーボード</strong>：矢印で移動、そのまま略号を入力、<span class="csm-key">Delete</span> でセルを空に、<span class="csm-key">Ctrl+C</span>／<span class="csm-key">Ctrl+V</span> でコピー・貼り付け。</li>
+          <li><strong>複数勤務</strong>：1 セルに複数の勤務を入れられます。縦に積まれ、その日の行の高さが自動で伸びます。</li>
+          <li><strong>ドラッグ</strong>：勤務は <strong>1 件ずつ</strong>動かせます。移動先に既存の勤務があれば入れ替えず追加します。</li>
+          <li><strong>代務列</strong>：勤務と一緒に <strong>担当者</strong>をセル単位で指定します（担当者未選択のままは保存できません）。</li>
+          <li><strong>他現場</strong>：「他現場」から別ポップアップで現場を検索して追加できます。表示は「現場名＋入力文字」になります。</li>
+          <li>コメント・変更マーカー・コメントマーカーが表示され、色はコードの設定色が反映されます。</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 集計・警告 -->
+    <div class="csm-card" style="margin-top:18px">
+      <div class="csm-card-title">📊 勤務時間の集計と警告（集計・警告タブ ／ 個人ビュー）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">入力するとその場で勤務時間が計算されます。各セルの時間はコードの<strong>ダイヤ別時間</strong>（未設定なら平日時間で代用）から求め、1 セル内の複数勤務は<strong>時間帯の和集合</strong>で集計します（重なった時間は 1 回だけ算入し「重複」を知らせます）。列の下に <strong>拘束計・労働計・残業計・休出計</strong>が出ます。</p>
+      <table class="csm-opt-table">
+        <thead><tr><th style="width:180px">見る場所</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>集計・警告タブ</td><td>全員の拘束・労働・給与残業・所定休出・法定休出・超過計・勤務日数・休み内訳・最大連勤・警告件数を一覧。警告一覧から該当セルへジャンプできます。</td></tr>
+          <tr><td>個人ビュー</td><td>1 人を選び、日ごとの始終・休憩・拘束・労働・超過・区分・警告を縦に確認します。人数が多い月に便利です。</td></tr>
+        </tbody>
+      </table>
+      <div class="csm-note" style="margin-top:10px">📌 個人・現場シフトから同期された勤務（「同期」バッジ付き）は、二重集計を防ぐため大規模側の勤務時間には加算しません。<strong>夜勤（日をまたぐ勤務）は非対応</strong>で、終業は 24:00 までです。</div>
+    </div>
+
+    <!-- 基準版 -->
+    <div class="csm-card" style="margin-top:18px">
+      <div class="csm-card-title">📌 基準版（変更点のハイライト）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">ツールバーの <strong>「現在を基準版に確定」</strong> で、その時点の内容を基準として保存します。以後、基準版から変わったセルに「変更あり」マーカーが付き、「基準版時点を表示」で当時の内容と見比べられます。配布後の変更点を伝えるときに使います。「基準版を再確定／解除」も同じ場所から行います。</p>
+    </div>
+
+    <!-- 同期 -->
+    <div class="csm-card" style="margin-top:18px">
+      <div class="csm-card-title">🔄 個人・現場シフトとの同期</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">大規模シフトのメンバーは、<strong>社員番号を基準</strong>に個人シフト・現場シフトと双方向で反映されます。</p>
+      <ul class="csm-ul">
+        <li>大規模 → 個人：「現場名＋ダイヤ」として個人シフトに入ります。大規模 → 現場：担当者とダイヤが現場シフトに入ります。</li>
+        <li>個人・現場 → 大規模：一致するレギュラー列へ取り込みます。レギュラーに一致しない担当者は、空いている<strong>代務列</strong>へ担当者名付きで取り込みます。</li>
+        <li>同期された勤務は「同期」バッジが付き、大規模画面からは削除できません（サーバー側を正として保護）。同期元で予定が削除されると大規模側からも消えます。</li>
+        <li>オプションは内部コードを保ちつつ、画面では表示名を使います（例：内部値 <span class="csm-key">O</span> は「大型」、追加があれば「大型・代務」）。</li>
+      </ul>
+      <div class="csm-tip" style="margin-top:10px">💡 保存後に画面へ戻ると、未同期だった過去月も開いたときに自動で取り込みます（キャッチアップ）。編集中に裏で同期が走ると、保存時に「内容が更新されました」と出ることがあります。再読み込みしてから保存してください。</div>
+    </div>
+
+    <!-- 重複チェック -->
+    <div class="csm-card" style="margin-top:18px">
+      <div class="csm-card-title">🔍 重複チェック（二重配置の確認）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">大規模シフトは 2 通りの方法で二重配置を確認できます。</p>
+      <table class="csm-opt-table">
+        <thead><tr><th style="width:200px">方法</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td>編集画面の「重複チェック」ボタン</td><td>この大規模シフトの人を、<strong>同じ年月の自分の全シフト帳（大規模／現場／個人）</strong>と横断照合します。社員番号を基準に、同一人物が同じ日に別の帳へも入っていないかを確認し、<strong>休みと勤務が同じ日</strong>にある場合も知らせます。同期でコピーされた鏡像は二重には数えません。</td></tr>
+          <tr><td>「重複チェック」タブ（現場モード）</td><td>タブの種別で <strong>現場シフト</strong> を選ぶと、大規模シフトも一覧に出て選べます。選ぶと <strong>各列（人）が擬似的な現場（例：ZOZO／山田）として展開</strong>され、実在の現場シフトと並べて比較できます。</td></tr>
+        </tbody>
+      </table>
+      <div class="csm-note" style="margin-top:10px">📌 「重複チェック」タブでは、<strong>共有された（自分以外が所有する）シフト帳</strong>も明示的に選べば比較対象にできます。最初からチェックが入っているのは<strong>自分のシフト帳だけ</strong>です。</div>
+    </div>
+
+    <!-- 出力 -->
+    <div class="csm-card" style="margin-top:18px">
+      <div class="csm-card-title">🖨️ 出力（PDF ／ Excel）</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">アクションの <strong>「PDF出力」「xlsx出力」</strong>から出せます。PDF はセルのコメントも印字します。XLSX は <strong>「シフト表」「集計」「個人明細」</strong>の 3 シートを出力します。</p>
+      <div class="csm-note" style="margin-top:6px">📌 大規模シフトでは <strong>CSV 出力・カレンダー画像・PWA の ICS 出力は非対応</strong>です。</div>
+    </div>
+
+    <!-- できないこと -->
+    <div class="csm-card" style="margin-top:18px">
+      <div class="csm-card-title">⚠️ 現時点でできないこと・注意</div>
+      <ul class="csm-ul">
+        <li><strong>夜勤（日またぎ）は非対応</strong>。始業は終業より前、終業は 24:00 まで。</li>
+        <li>自動作成・アシスト・テンプレート・代務要請ワークフロー・有休マネージャーの申請連携は大規模モードでは未対応です（代務「列」とは別機能）。</li>
+        <li>CSV・カレンダー画像・ICS 出力は非対応。</li>
+        <li>同期・重複チェックを正確にするため、各メンバーに<strong>社員番号</strong>を入れてください。社員番号なしの同姓同名は誤同期・誤検出の原因になります。</li>
+        <li>メンバーは 1 帳あたり最大 60 人、1 セルの勤務は最大 12 件までです。</li>
+      </ul>
+    </div>
+  </section>
+
+
   <!-- ========== FAQ ========== -->
   <section id="faq" class="csm-section">
     <div class="csm-section-header">
@@ -1159,6 +1300,30 @@
         <span class="csm-acc-arrow">▼</span>
       </button>
       <div class="csm-acc-body">多くの場合、その日の「必要人数」が 0 になっているためです。必要人数を設定していない現場では前月の実績から必要人数を推定するため、前月に実績の無い曜日は 0 になります。自動作成パネルで対象日の必要人数を直接指定すると、その場で埋められます。日別の結果に「需要 0」の表示が出ていないか確認してください。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">大規模シフトはどんなときに使いますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">1 つの現場を 10〜60 人で回し、1 人＝1 列で日別の勤務を管理したいときに使います。勤務時間の自動集計・警告、レギュラー／代務列、基準版、個人・現場シフトとの双方向同期、専用の重複チェックが使えます。作り方・設定・操作は「🏢 大規模シフト」の章を参照してください。少人数で自動作成やテンプレート、カレンダー画像出力を使いたいときは現場シフトが向いています。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">大規模シフトの人が他の現場と二重に入っていないか確認できますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">はい。2 通りあります。①大規模シフトの編集画面の「重複チェック」ボタンで、同じ年月の自分の全シフト帳（大規模・現場・個人）と社員番号を基準に横断照合します。②「重複チェック」タブで種別に現場シフトを選ぶと大規模シフトも選べ、各人が擬似的な現場列（例：ZOZO／山田）として展開され、実在の現場シフトと並べて比較できます。同期でコピーされた鏡像は二重には数えません。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">共有されたシフト帳も重複チェックに使えますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">使えます。「重複チェック」タブで共有されたシフト帳も一覧に出て、チェックを入れれば比較対象にできます。最初からチェックが入っているのは自分のシフト帳だけなので、必要な共有帳を自分で選んでから「比較する」を押してください。</div>
     </div>
 
     <div class="csm-acc-item">
@@ -1242,6 +1407,7 @@
         <tr><td>現場シフト</td><td>1 つの現場に、日ごと複数人を配置する月間シフト。現場リストPLUSと紐付けます。自動作成・テンプレート・代務要請に対応し、いちばん機能が充実しています。</td></tr>
         <tr><td>個人シフト</td><td>1 人分の月間予定。社員名簿と紐付け、休暇を有休共有ツールへ反映できます。代務要請にも対応します。</td></tr>
         <tr><td>マスターシフト</td><td>複数の個人または現場をまとめて見る一覧型。対象種別（個人／現場）を選び、対象を追加して横断的に確認します。</td></tr>
+        <tr><td>大規模シフト</td><td>1 つの現場を 10〜60 人で回す表形式モード。1 人＝1 列で入力し、勤務時間の自動集計・警告、代務列、基準版、個人／現場との双方向同期、専用の重複チェックに対応します。CSV・カレンダー画像・ICS 出力は対象外です。</td></tr>
       </tbody>
     </table>
     <div class="csm-note" style="margin-top:12px">このほか、代務要請を集約する「要代務シフト帳」が営業所ごとに自動で用意されます。</div>
