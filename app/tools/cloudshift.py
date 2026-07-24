@@ -43,6 +43,7 @@ from werkzeug.utils import secure_filename
 from app.access_control import user_office_ids
 from app.services.cloudshift_large import (
     calculate_large_month,
+    day_type_for_date,
     default_large_config,
     normalize_large_config,
     normalize_large_meta,
@@ -77,7 +78,7 @@ try:
         parse_entry_value,
         serialize_entry_rows,
     )
-    from .shiftersync_check import compare_shift_payloads, is_duplicate_by_rules
+    from .shiftersync_check import compare_shift_payloads, cross_mode_conflicts, is_duplicate_by_rules
     from .shiftersync_format import ROLE_OPTION_MAPPINGS
     from .japan_holidays import JAPAN_HOLIDAYS
 except ImportError:
@@ -95,7 +96,7 @@ except ImportError:
         parse_entry_value,
         serialize_entry_rows,
     )
-    from app.tools.shiftersync_check import compare_shift_payloads, is_duplicate_by_rules  # type: ignore
+    from app.tools.shiftersync_check import compare_shift_payloads, cross_mode_conflicts, is_duplicate_by_rules  # type: ignore
     from app.tools.japan_holidays import JAPAN_HOLIDAYS  # type: ignore
 
 
@@ -9571,6 +9572,189 @@ def api_conflict_check():
     except ValueError as exc:
         raise CloudShiftError(str(exc), 400) from exc
     return jsonify({"success": True, **result})
+
+
+def _hhmm_to_minutes(value: Any) -> int | None:
+    text = str(value or "").strip()
+    if ":" not in text:
+        return None
+    hour, _, minute = text.partition(":")
+    if not (hour.isdigit() and minute.isdigit()):
+        return None
+    total = int(hour) * 60 + int(minute)
+    return total if 0 <= total <= 1440 else None
+
+
+def _large_time_range(time_value: Any) -> tuple[int, int] | None:
+    if not isinstance(time_value, dict):
+        return None
+    start = _hhmm_to_minutes(time_value.get("start"))
+    end = _hhmm_to_minutes(time_value.get("end"))
+    if start is None or end is None or start >= end:
+        return None
+    return (start, end)
+
+
+def _conflict_records_for_project(project: dict[str, Any], year: int, month: int) -> list[dict[str, Any]]:
+    """1シフト帳の対象月を、横断重複チェック用の「実配置レコード」へ正規化する。
+
+    - 大規模: レギュラー/代務のローカル割当(source_type=='local')のみを対象にし、
+      勤務は実時間帯、休みは is_leave=True を持たせる。他現場(scene)・同期(sync)割当は
+      当該人物の実配置ではない/鏡像なので除外する。
+    - 現場/個人: 同期鏡像(sync_source_type 付き)を除外し、社員番号優先で人物同定する。
+    """
+    mode = str(project.get("mode") or "")
+    month_key = _month_key(year, month)
+    month_data = (project.get("months") or {}).get(month_key) or {}
+    book_id = str(project.get("id") or "")
+    book_label = str(project.get("title") or book_id)
+    records: list[dict[str, Any]] = []
+
+    if mode == LARGE_MODE:
+        config = normalize_large_config(project.get("large_config") or default_large_config())
+        members = {str(item["id"]): item for item in config["members"] if item.get("active", True)}
+        codes = {str(item["key"]).casefold(): item for item in config["codes"]}
+        meta = normalize_large_meta(month_data.get("meta_data"), year, month)
+        day_types = meta.get("day_types") or {}
+        entries = normalize_large_entries_for_month(month_data.get("entries_per_day"), year, month)
+        for day_key, day_entries in entries.items():
+            day = int(day_key)
+            day_type = day_type_for_date(year, month, day, day_types, JAPAN_HOLIDAYS)
+            for entry in day_entries:
+                member = members.get(str(entry.get("member_id") or ""))
+                if not member:
+                    continue
+                if str(member.get("column_type") or "regular") == "substitute":
+                    number = str(entry.get("employee_number") or "").strip()
+                    name = str(entry.get("employee_name") or member.get("display_name") or "").strip()
+                else:
+                    number = str(member.get("employee_number") or "").strip()
+                    name = str(member.get("employee_name") or member.get("display_name") or "").strip()
+                normalized_name = _normalized_person_title(name)
+                person_key = number or (f"name:{normalized_name}" if normalized_name else "")
+                if not person_key:
+                    continue
+                local = [
+                    item for item in (entry.get("assignments") or [])
+                    if isinstance(item, dict)
+                    and str(item.get("source_type") or "local") == "local"
+                    and item.get("code_key")
+                ]
+                work_count = sum(
+                    1 for item in local
+                    if (codes.get(str(item.get("code_key") or "").casefold()) or {}).get("category") == "work"
+                )
+                for assignment in local:
+                    code = codes.get(str(assignment.get("code_key") or "").casefold())
+                    is_leave = bool(code and code.get("category") == "leave")
+                    time_range = None
+                    if code and code.get("category") == "work":
+                        times = code.get("times") or {}
+                        if work_count == 1 and entry.get("time_override"):
+                            source = entry.get("time_override")
+                        else:
+                            source = times.get(day_type) or (times.get("weekday") if day_type != "weekday" else None)
+                        time_range = _large_time_range(source)
+                    label = (code.get("label") if code else "") or str(assignment.get("code_key") or "")
+                    records.append({
+                        "book_id": book_id, "book_label": book_label, "book_mode": mode,
+                        "person_key": person_key,
+                        "person_label": name or member.get("display_name") or number,
+                        "day": day, "option": None, "is_leave": is_leave, "time_range": time_range,
+                        "display": f"{book_label}・{label}",
+                    })
+        return records
+
+    if mode not in {"scene", "person"}:
+        return records
+    entries = _normalize_entries(month_data.get("entries_per_day"), year, month)
+    for day_key, day_entries in entries.items():
+        day = int(day_key)
+        for entry in day_entries:
+            # 他モードからの同期鏡像は実配置の複製なので除外（元帳側で1回だけ数える）。
+            if str(entry.get("sync_source_type") or "").strip():
+                continue
+            option_key, name = _entry_option_and_name(entry)
+            if mode == "person":
+                number = str(project.get("employee_number") or "").strip()
+                normalized_name = _normalized_person_title(book_label)
+                person_label = book_label
+                detail = name or entry_display_text(entry)
+            else:
+                number = str(entry.get("employee_number") or "").strip()
+                normalized_name = _normalized_person_title(name)
+                person_label = name
+                detail = entry_display_text(entry)
+            person_key = number or (f"name:{normalized_name}" if normalized_name else "")
+            if not person_key:
+                continue
+            is_leave = bool(option_key) and option_key in LEAVE_OPTION_MAPPINGS
+            records.append({
+                "book_id": book_id, "book_label": book_label, "book_mode": mode,
+                "person_key": person_key, "person_label": person_label or name or number,
+                "day": day, "option": option_key or None, "is_leave": is_leave, "time_range": None,
+                "display": f"{book_label}・{detail}" if detail else book_label,
+            })
+    return records
+
+
+@cloudshift_bp.route("/api/project/<project_id>/large-conflict-check", methods=["POST"])
+@login_required
+def api_large_conflict_check(project_id: str):
+    """大規模シフト帳の人物を、同じ年月の自分の全シフト帳(大規模/現場/個人)と横断照合し、
+    同一人物の同日二重配置（および休み/勤務同日）を検出する。同期鏡像は除外する。"""
+    project = _owner_project_or_404(project_id)
+    if project.get("mode") != LARGE_MODE:
+        raise CloudShiftError("大規模シフト帳ではありません", 400)
+    payload = request.get_json(silent=True) or {}
+    month_key = str(payload.get("month_key") or "").strip()
+    if not month_key:
+        raise CloudShiftError("確認する年月を選択してください", 400)
+    try:
+        year, month = _parse_month_key(month_key)
+    except (TypeError, ValueError) as exc:
+        raise CloudShiftError("年月の形式が不正です", 400) from exc
+    if month_key not in (project.get("months") or {}):
+        raise CloudShiftError("対象の月が存在しません", 404)
+
+    user_id = _user_id()
+    records: list[dict[str, Any]] = []
+    books: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for summary in _iter_project_summaries_for_month(month_key):
+        if str(summary.get("owner_user_id") or "") != user_id:
+            continue
+        if str(summary.get("mode") or "") not in {LARGE_MODE, "scene", "person"}:
+            continue
+        summary_id = str(summary.get("id") or "")
+        if not summary_id or summary_id in seen_ids:
+            continue
+        if month_key not in (summary.get("months") or {}):
+            continue
+        seen_ids.add(summary_id)
+        full = _load_project(summary_id)
+        records.extend(_conflict_records_for_project(full, year, month))
+        books.append({
+            "project_id": summary_id,
+            "title": str(full.get("title") or summary_id),
+            "mode": str(full.get("mode") or ""),
+        })
+
+    conflicts = cross_mode_conflicts(records)
+    related = [
+        conflict for conflict in conflicts
+        if str(conflict["left"]["book_id"]) == project_id
+        or str(conflict["right"]["book_id"]) == project_id
+    ]
+    return jsonify({
+        "success": True,
+        "month_key": month_key,
+        "project_id": project_id,
+        "compared_book_count": len(books),
+        "books": books,
+        "conflicts": related,
+        "conflict_count": len(related),
+    })
 
 
 @cloudshift_bp.route("/api/spot", methods=["GET"])
