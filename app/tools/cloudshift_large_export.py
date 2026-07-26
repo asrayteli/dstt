@@ -55,8 +55,29 @@ def _entry_label(entry: Mapping[str, Any]) -> str:
     return " / ".join(labels)
 
 
+def _primary_local_code_key(entry: Mapping[str, Any]) -> str:
+    """塗り色/主コード判定に使う先頭ローカル割当のコードキー。
+
+    value は先頭割当（他現場/同期を含む）の写像のため、勤務時間計算・個人明細が採用する
+    『先頭ローカル割当』とシフト表の塗り色がずれ得る。ローカル割当を優先し、無ければ value
+    にフォールバックしてシートの色と勤務内容を一致させる。"""
+    assignments = entry.get("assignments") if isinstance(entry.get("assignments"), list) else []
+    for item in assignments:
+        if (
+            isinstance(item, Mapping)
+            and str(item.get("source_type") or "local") == "local"
+            and item.get("code_key")
+        ):
+            return str(item.get("code_key"))
+    return str(entry.get("value") or "")
+
+
 def _baseline_changed(day: str, member_id: str, entry: Mapping[str, Any], month_data: Mapping[str, Any]) -> bool:
-    baseline = ((month_data.get("meta_data") or {}).get("baseline") or {}).get("entries_per_day") or {}
+    baseline_meta = (month_data.get("meta_data") or {}).get("baseline")
+    baseline = baseline_meta.get("entries_per_day") if isinstance(baseline_meta, Mapping) else None
+    # 基準版が未設定なら比較対象が無いため「変更あり」とはしない（全セル誤マークの防止）。
+    if not isinstance(baseline, Mapping):
+        return False
     previous = next((item for item in baseline.get(day, []) if str(item.get("member_id") or "") == member_id), {})
     def comparable(row: Mapping[str, Any], key: str) -> Any:
         if key in {"value", "holiday_kind"}:
@@ -141,7 +162,7 @@ def large_xlsx_bytes(
         excel_row = shift.max_row
         for offset, member in enumerate(members, start=4):
             entry = entries.get(str(day), {}).get(str(member.get("id")), {})
-            code = codes.get(str(entry.get("value") or "").casefold(), {})
+            code = codes.get(_primary_local_code_key(entry).casefold(), {})
             color = str(code.get("color") or "#FFFFFF").lstrip("#")
             if len(color) == 6:
                 shift.cell(excel_row, offset).fill = PatternFill("solid", fgColor=color)
@@ -219,12 +240,24 @@ _PDF_FONT = "CloudShiftNotoJPSemiBold"
 
 
 def _ensure_pdf_font() -> str:
-    if _PDF_FONT not in pdfmetrics.getRegisteredFontNames():
-        path = Path(__file__).resolve().parents[1] / "static" / "fonts" / "NotoSansJP-SemiBold.ttf"
-        if not path.exists():
-            raise RuntimeError("日本語PDFフォントが見つかりません")
+    registered = pdfmetrics.getRegisteredFontNames()
+    if _PDF_FONT in registered:
+        return _PDF_FONT
+    path = Path(__file__).resolve().parents[1] / "static" / "fonts" / "NotoSansJP-SemiBold.ttf"
+    if path.exists():
         pdfmetrics.registerFont(TTFont(_PDF_FONT, str(path)))
-    return _PDF_FONT
+        return _PDF_FONT
+    # フォント未同梱でもPDF出力が500で全面停止しないよう、reportlab同梱の日本語CIDフォント
+    # へフォールバックする（見た目差はあっても出力を継続する）。それも失敗すれば欧文フォント。
+    fallback = "HeiseiKakuGo-W5"
+    try:
+        if fallback not in registered:
+            from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+
+            pdfmetrics.registerFont(UnicodeCIDFont(fallback))
+        return fallback
+    except Exception:
+        return "Helvetica"
 
 
 def _pdf_markup(value: Any) -> str:

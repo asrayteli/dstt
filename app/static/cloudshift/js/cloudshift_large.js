@@ -121,6 +121,7 @@
         ${state.meta.baseline ? `<button class="cloud-btn ghost" data-large-baseline-view>${state.showBaseline ? '現在版に戻る' : '基準版時点を表示'}</button>` : ''}
         ${baseline ? `<button class="cloud-btn ghost" data-large-baseline>${state.meta.baseline ? '基準版を再確定' : '現在を基準版に確定'}</button>` : ''}
         ${baseline && state.meta.baseline ? '<button class="cloud-btn ghost" data-large-baseline-clear>基準版を解除</button>' : ''}
+        ${state.context.page && state.context.page.type === 'owner' ? '<button class="cloud-btn ghost" data-large-conflict>重複チェック</button>' : ''}
         ${activeMembers().length > 30 ? `<span class="cloud-large-member-warning">${activeMembers().length}人：横幅が大きいため個人ビューも併用してください</span>` : ''}
       </div>
     </div>`;
@@ -572,8 +573,34 @@
     });
   }
 
+  function conflictKindLabel(kind) {
+    return { time_overlap: '勤務時間の重複', double_booking: '二重配置', leave_work: '休みと勤務が同日' }[kind] || kind;
+  }
+
+  async function openConflictCheck() {
+    if (!state.context.requestJson) return;
+    const project = state.context.project; const month = state.context.month;
+    const monthKey = `${month.year}-${String(month.month).padStart(2, '0')}`;
+    const dialog = modal('重複チェック', '<p class="cloud-large-loading">同じ年月の自分のシフト帳と照合しています…</p>', '<button class="cloud-btn secondary" data-large-close>閉じる</button>');
+    const bodyNode = dialog.querySelector('.cloud-large-modal-body');
+    try {
+      const data = await state.context.requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/large-conflict-check`, { method: 'POST', body: { month_key: monthKey } });
+      const conflicts = (data && data.conflicts) || [];
+      const compared = (data && data.compared_book_count) || 0;
+      if (!conflicts.length) {
+        bodyNode.innerHTML = `<p class="cloud-large-ok">同じ年月の自分のシフト帳（${compared}件）と照合しました。同一人物の同日二重配置は見つかりませんでした。</p>`;
+        return;
+      }
+      const rows = conflicts.map((item) => `<div class="cloud-large-warning-row is-${item.kind === 'leave_work' ? 'warning' : 'violation'}"><strong>${esc(item.person_label)} / ${item.day}日</strong><span>${esc(item.left.display)} ／ ${esc(item.right.display)}</span><code>${esc(conflictKindLabel(item.kind))}</code></div>`).join('');
+      bodyNode.innerHTML = `<p class="cloud-panel-note">同じ年月の自分のシフト帳（${compared}件）を横断し、社員番号を基準に同一人物の同日二重配置を確認しました（個人・現場へ同期反映されたコピーは除外しています）。<strong>${conflicts.length}件</strong>の要確認があります。</p><div class="cloud-large-warning-list">${rows}</div>`;
+    } catch (error) {
+      bodyNode.innerHTML = `<p class="cloud-large-ok" style="color:#b91c1c;font-weight:600;">重複チェックに失敗しました: ${esc(error.message)}</p>`;
+    }
+  }
+
   function bind() {
     state.host.querySelectorAll('[data-large-tab]').forEach((button) => button.addEventListener('click', () => { state.tab = button.dataset.largeTab; render(); if (state.tab === 'summary') refreshServerResult(); }));
+    const conflictButton = state.host.querySelector('[data-large-conflict]'); if (conflictButton) conflictButton.addEventListener('click', openConflictCheck);
     state.host.querySelectorAll('[data-large-settings]').forEach((button) => button.addEventListener('click', openSettings));
     state.host.querySelectorAll('[data-large-person]').forEach((button) => button.addEventListener('click', () => openPerson(button.dataset.largePerson)));
     state.host.querySelectorAll('[data-large-day-settings]').forEach((button) => button.addEventListener('click', () => openDay(Number(button.dataset.largeDaySettings))));

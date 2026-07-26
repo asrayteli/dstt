@@ -43,6 +43,7 @@ from werkzeug.utils import secure_filename
 from app.access_control import user_office_ids
 from app.services.cloudshift_large import (
     calculate_large_month,
+    day_type_for_date,
     default_large_config,
     normalize_large_config,
     normalize_large_meta,
@@ -77,7 +78,7 @@ try:
         parse_entry_value,
         serialize_entry_rows,
     )
-    from .shiftersync_check import compare_shift_payloads, is_duplicate_by_rules
+    from .shiftersync_check import compare_shift_payloads, cross_mode_conflicts, is_duplicate_by_rules
     from .shiftersync_format import ROLE_OPTION_MAPPINGS
     from .japan_holidays import JAPAN_HOLIDAYS
 except ImportError:
@@ -95,7 +96,7 @@ except ImportError:
         parse_entry_value,
         serialize_entry_rows,
     )
-    from app.tools.shiftersync_check import compare_shift_payloads, is_duplicate_by_rules  # type: ignore
+    from app.tools.shiftersync_check import compare_shift_payloads, cross_mode_conflicts, is_duplicate_by_rules  # type: ignore
     from app.tools.japan_holidays import JAPAN_HOLIDAYS  # type: ignore
 
 
@@ -5009,6 +5010,21 @@ def _master_entry_is_in_scope(source_project: dict[str, Any], entry: dict[str, A
     )
 
 
+def _large_entry_has_content(entry: dict[str, Any]) -> bool:
+    """大規模シフトの正規化済みエントリを保持すべきか判定する。
+
+    割当・コメントに加え、holiday_kind（法定/所定休日出勤マーク）も保持対象に含める。
+    従来は ``assignments or comment`` のみで判定していたため、割当を持たない休日出勤
+    マークだけのセルが保存・逆同期のたびに失われていた。time_override /
+    bind_override_minutes のみのエントリは normalize_large_entry の時点で除去される
+    ため、ここで個別に考慮する必要はない。"""
+    return bool(
+        entry.get("assignments")
+        or str(entry.get("comment") or "").strip()
+        or str(entry.get("holiday_kind") or "").strip()
+    )
+
+
 def _large_members(project: dict[str, Any]) -> list[dict[str, Any]]:
     config = normalize_large_config(project.get("large_config") or default_large_config())
     return [item for item in config["members"] if item.get("active", True)]
@@ -5506,7 +5522,7 @@ def _replace_shift_synced_assignments_in_large_project(
                 str(next_entry["assignments"][0].get("code_key") or "")
                 if next_entry["assignments"] else ""
             )
-            if next_entry["assignments"] or next_entry.get("comment"):
+            if _large_entry_has_content(next_entry):
                 kept_entries.append(next_entry)
         next_entries[day_key] = kept_entries
 
@@ -9497,6 +9513,72 @@ def api_list():
     return jsonify({"projects": projects})
 
 
+def _large_pseudo_scene_payloads(
+    project: dict[str, Any], year: int, month: int, month_key: str
+) -> list[dict[str, Any]]:
+    """大規模シフトを、既存の「現場モード」重複チェックに載せるための擬似現場ペイロードへ展開する。
+
+    大規模の各列(レギュラー/代務=1人)を1つの擬似現場として扱い、その列の担当者がその日
+    ローカル勤務していれば現場エントリ(担当者氏名)を1件出す。休み・他現場(scene)・同期(sync)
+    割当は実配置ではない/鏡像なので除外する。氏名で人物同定する現行比較関数に合わせ、
+    value=担当者氏名とする（同一人物が他現場にも配置されていれば横断で衝突検出される）。
+    """
+    config = normalize_large_config(project.get("large_config") or default_large_config())
+    members = [item for item in config["members"] if item.get("active", True)]
+    codes = {str(item["key"]).casefold(): item for item in config["codes"]}
+    month_data = (project.get("months") or {}).get(month_key) or {}
+    entries = normalize_large_entries_for_month(month_data.get("entries_per_day"), year, month)
+    title = str(project.get("title") or project.get("id") or "大規模")
+    project_id = str(project.get("id") or "")
+    payloads: list[dict[str, Any]] = []
+    for member in members:
+        member_id = str(member.get("id") or "")
+        is_substitute = str(member.get("column_type") or "regular") == "substitute"
+        entries_per_day: dict[str, list[dict[str, Any]]] = {}
+        for day_key, day_entries in entries.items():
+            entry = next(
+                (item for item in day_entries if str(item.get("member_id") or "") == member_id),
+                None,
+            )
+            if not entry:
+                continue
+            has_local_work = any(
+                isinstance(item, dict)
+                and str(item.get("source_type") or "local") == "local"
+                and item.get("code_key")
+                and (codes.get(str(item.get("code_key") or "").casefold()) or {}).get("category") == "work"
+                for item in (entry.get("assignments") or [])
+            )
+            if not has_local_work:
+                continue
+            if is_substitute:
+                number = str(entry.get("employee_number") or "").strip()
+                name = str(entry.get("employee_name") or "").strip()
+            else:
+                number = str(member.get("employee_number") or "").strip()
+                name = str(member.get("employee_name") or member.get("display_name") or "").strip()
+            if not name:
+                continue
+            entries_per_day[day_key] = [{
+                "id": f"lce_{member_id}_{day_key}",
+                "value": name,
+                "employee_number": number,
+                "employee_name": name,
+            }]
+        payloads.append({
+            "project_id": f"{project_id}#{member_id}",
+            "month_key": month_key,
+            "label": f"{title}／{member.get('display_name') or member_id}",
+            "title": title,
+            "mode": "scene",
+            "year": year,
+            "month": month,
+            "required_capacity": 0,
+            "entries_per_day": entries_per_day,
+        })
+    return payloads
+
+
 @cloudshift_bp.route("/api/conflict-check", methods=["POST"])
 @login_required
 def api_conflict_check():
@@ -9526,17 +9608,18 @@ def api_conflict_check():
 
     compare_payloads: list[dict[str, Any]] = []
     for project_id in project_ids:
-        project = _owner_project_or_404(project_id)
-        if project.get("mode") in {"master", LARGE_MODE}:
-            raise CloudShiftError(
-                "大規模シフトは重複チェックの対象外です"
-                if project.get("mode") == LARGE_MODE
-                else "マスターシフトは重複チェックの対象外です",
-                400,
-            )
+        # 自分が所有する帳に加え、共有された(閲覧/編集)帳も比較対象に含める。
+        # 既定選択は自分の帳のみ(UI側)だが、共有帳を明示選択したら比較できるようにする。
+        project, _access_role = _project_for_current_user_or_404(project_id)
+        if project.get("mode") == "master":
+            raise CloudShiftError("マスターシフトは重複チェックの対象外です", 400)
         month_data = (project.get("months") or {}).get(month_key)
         if not month_data:
             raise CloudShiftError(f"{project['title']} に {month_key} の月データがありません", 400)
+        if project.get("mode") == LARGE_MODE:
+            # 大規模は各列(人)を擬似現場として展開し、現場モードの比較に載せる。
+            compare_payloads.extend(_large_pseudo_scene_payloads(project, year, month, month_key))
+            continue
         compare_payloads.append(
             {
                 "project_id": project["id"],
@@ -9556,6 +9639,189 @@ def api_conflict_check():
     except ValueError as exc:
         raise CloudShiftError(str(exc), 400) from exc
     return jsonify({"success": True, **result})
+
+
+def _hhmm_to_minutes(value: Any) -> int | None:
+    text = str(value or "").strip()
+    if ":" not in text:
+        return None
+    hour, _, minute = text.partition(":")
+    if not (hour.isdigit() and minute.isdigit()):
+        return None
+    total = int(hour) * 60 + int(minute)
+    return total if 0 <= total <= 1440 else None
+
+
+def _large_time_range(time_value: Any) -> tuple[int, int] | None:
+    if not isinstance(time_value, dict):
+        return None
+    start = _hhmm_to_minutes(time_value.get("start"))
+    end = _hhmm_to_minutes(time_value.get("end"))
+    if start is None or end is None or start >= end:
+        return None
+    return (start, end)
+
+
+def _conflict_records_for_project(project: dict[str, Any], year: int, month: int) -> list[dict[str, Any]]:
+    """1シフト帳の対象月を、横断重複チェック用の「実配置レコード」へ正規化する。
+
+    - 大規模: レギュラー/代務のローカル割当(source_type=='local')のみを対象にし、
+      勤務は実時間帯、休みは is_leave=True を持たせる。他現場(scene)・同期(sync)割当は
+      当該人物の実配置ではない/鏡像なので除外する。
+    - 現場/個人: 同期鏡像(sync_source_type 付き)を除外し、社員番号優先で人物同定する。
+    """
+    mode = str(project.get("mode") or "")
+    month_key = _month_key(year, month)
+    month_data = (project.get("months") or {}).get(month_key) or {}
+    book_id = str(project.get("id") or "")
+    book_label = str(project.get("title") or book_id)
+    records: list[dict[str, Any]] = []
+
+    if mode == LARGE_MODE:
+        config = normalize_large_config(project.get("large_config") or default_large_config())
+        members = {str(item["id"]): item for item in config["members"] if item.get("active", True)}
+        codes = {str(item["key"]).casefold(): item for item in config["codes"]}
+        meta = normalize_large_meta(month_data.get("meta_data"), year, month)
+        day_types = meta.get("day_types") or {}
+        entries = normalize_large_entries_for_month(month_data.get("entries_per_day"), year, month)
+        for day_key, day_entries in entries.items():
+            day = int(day_key)
+            day_type = day_type_for_date(year, month, day, day_types, JAPAN_HOLIDAYS)
+            for entry in day_entries:
+                member = members.get(str(entry.get("member_id") or ""))
+                if not member:
+                    continue
+                if str(member.get("column_type") or "regular") == "substitute":
+                    number = str(entry.get("employee_number") or "").strip()
+                    name = str(entry.get("employee_name") or member.get("display_name") or "").strip()
+                else:
+                    number = str(member.get("employee_number") or "").strip()
+                    name = str(member.get("employee_name") or member.get("display_name") or "").strip()
+                normalized_name = _normalized_person_title(name)
+                person_key = number or (f"name:{normalized_name}" if normalized_name else "")
+                if not person_key:
+                    continue
+                local = [
+                    item for item in (entry.get("assignments") or [])
+                    if isinstance(item, dict)
+                    and str(item.get("source_type") or "local") == "local"
+                    and item.get("code_key")
+                ]
+                work_count = sum(
+                    1 for item in local
+                    if (codes.get(str(item.get("code_key") or "").casefold()) or {}).get("category") == "work"
+                )
+                for assignment in local:
+                    code = codes.get(str(assignment.get("code_key") or "").casefold())
+                    is_leave = bool(code and code.get("category") == "leave")
+                    time_range = None
+                    if code and code.get("category") == "work":
+                        times = code.get("times") or {}
+                        if work_count == 1 and entry.get("time_override"):
+                            source = entry.get("time_override")
+                        else:
+                            source = times.get(day_type) or (times.get("weekday") if day_type != "weekday" else None)
+                        time_range = _large_time_range(source)
+                    label = (code.get("label") if code else "") or str(assignment.get("code_key") or "")
+                    records.append({
+                        "book_id": book_id, "book_label": book_label, "book_mode": mode,
+                        "person_key": person_key,
+                        "person_label": name or member.get("display_name") or number,
+                        "day": day, "option": None, "is_leave": is_leave, "time_range": time_range,
+                        "display": f"{book_label}・{label}",
+                    })
+        return records
+
+    if mode not in {"scene", "person"}:
+        return records
+    entries = _normalize_entries(month_data.get("entries_per_day"), year, month)
+    for day_key, day_entries in entries.items():
+        day = int(day_key)
+        for entry in day_entries:
+            # 他モードからの同期鏡像は実配置の複製なので除外（元帳側で1回だけ数える）。
+            if str(entry.get("sync_source_type") or "").strip():
+                continue
+            option_key, name = _entry_option_and_name(entry)
+            if mode == "person":
+                number = str(project.get("employee_number") or "").strip()
+                normalized_name = _normalized_person_title(book_label)
+                person_label = book_label
+                detail = name or entry_display_text(entry)
+            else:
+                number = str(entry.get("employee_number") or "").strip()
+                normalized_name = _normalized_person_title(name)
+                person_label = name
+                detail = entry_display_text(entry)
+            person_key = number or (f"name:{normalized_name}" if normalized_name else "")
+            if not person_key:
+                continue
+            is_leave = bool(option_key) and option_key in LEAVE_OPTION_MAPPINGS
+            records.append({
+                "book_id": book_id, "book_label": book_label, "book_mode": mode,
+                "person_key": person_key, "person_label": person_label or name or number,
+                "day": day, "option": option_key or None, "is_leave": is_leave, "time_range": None,
+                "display": f"{book_label}・{detail}" if detail else book_label,
+            })
+    return records
+
+
+@cloudshift_bp.route("/api/project/<project_id>/large-conflict-check", methods=["POST"])
+@login_required
+def api_large_conflict_check(project_id: str):
+    """大規模シフト帳の人物を、同じ年月の自分の全シフト帳(大規模/現場/個人)と横断照合し、
+    同一人物の同日二重配置（および休み/勤務同日）を検出する。同期鏡像は除外する。"""
+    project = _owner_project_or_404(project_id)
+    if project.get("mode") != LARGE_MODE:
+        raise CloudShiftError("大規模シフト帳ではありません", 400)
+    payload = request.get_json(silent=True) or {}
+    month_key = str(payload.get("month_key") or "").strip()
+    if not month_key:
+        raise CloudShiftError("確認する年月を選択してください", 400)
+    try:
+        year, month = _parse_month_key(month_key)
+    except (TypeError, ValueError) as exc:
+        raise CloudShiftError("年月の形式が不正です", 400) from exc
+    if month_key not in (project.get("months") or {}):
+        raise CloudShiftError("対象の月が存在しません", 404)
+
+    user_id = _user_id()
+    records: list[dict[str, Any]] = []
+    books: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for summary in _iter_project_summaries_for_month(month_key):
+        if str(summary.get("owner_user_id") or "") != user_id:
+            continue
+        if str(summary.get("mode") or "") not in {LARGE_MODE, "scene", "person"}:
+            continue
+        summary_id = str(summary.get("id") or "")
+        if not summary_id or summary_id in seen_ids:
+            continue
+        if month_key not in (summary.get("months") or {}):
+            continue
+        seen_ids.add(summary_id)
+        full = _load_project(summary_id)
+        records.extend(_conflict_records_for_project(full, year, month))
+        books.append({
+            "project_id": summary_id,
+            "title": str(full.get("title") or summary_id),
+            "mode": str(full.get("mode") or ""),
+        })
+
+    conflicts = cross_mode_conflicts(records)
+    related = [
+        conflict for conflict in conflicts
+        if str(conflict["left"]["book_id"]) == project_id
+        or str(conflict["right"]["book_id"]) == project_id
+    ]
+    return jsonify({
+        "success": True,
+        "month_key": month_key,
+        "project_id": project_id,
+        "compared_book_count": len(books),
+        "books": books,
+        "conflicts": related,
+        "conflict_count": len(related),
+    })
 
 
 @cloudshift_bp.route("/api/spot", methods=["GET"])
@@ -10194,6 +10460,27 @@ def _large_references(project: dict[str, Any]) -> tuple[set[str], set[str]]:
     return member_ids, code_keys
 
 
+def _ensure_unique_regular_employee_numbers(config: dict[str, Any]) -> None:
+    """レギュラー列の社員番号重複を禁止する。
+
+    同一社員番号のレギュラー列が複数あると _large_target_member_id の一意一致
+    ガード(regular_matches==1)を満たせず、個人/現場からの同期がどの列にも入らず
+    警告なく欠落する。設定保存時点で明示エラーにして取りこぼしを防ぐ。"""
+    numbers = [
+        str(member.get("employee_number") or "").strip()
+        for member in config.get("members", [])
+        if str(member.get("column_type") or "regular") == "regular"
+        and str(member.get("employee_number") or "").strip()
+    ]
+    duplicates = sorted({number for number in numbers if numbers.count(number) > 1})
+    if duplicates:
+        raise CloudShiftError(
+            "同じ社員番号のレギュラー列が複数あります（同期先が定まらないため保存できません）: "
+            + ", ".join(duplicates),
+            400,
+        )
+
+
 @cloudshift_bp.route("/api/project/<project_id>/large-config", methods=["GET", "PUT"])
 @login_required
 def api_large_config(project_id: str):
@@ -10211,6 +10498,7 @@ def api_large_config(project_id: str):
         next_config = normalize_large_config(payload.get("large_config", payload))
     except ValueError as exc:
         raise CloudShiftError(str(exc), 400) from exc
+    _ensure_unique_regular_employee_numbers(next_config)
     with _project_lock(project_id):
         project, access_role = _editable_project_or_404(project_id)
         if project.get("mode") != LARGE_MODE:
@@ -10378,7 +10666,7 @@ def _large_base_revision(current_month: dict[str, Any], payload: dict[str, Any])
     except (TypeError, ValueError) as exc:
         raise CloudShiftError("編集対象が古い可能性があります。再読み込みしてから保存してください", 409) from exc
     if revision != int(current_month.get("revision", 1) or 1):
-        raise CloudShiftError("他のユーザーが更新しました。再読み込みしてから保存してください", 409)
+        raise CloudShiftError("他の編集または個人・現場シフトからの同期反映により内容が更新されました。再読み込みしてから保存してください", 409)
     return revision
 
 
@@ -10423,7 +10711,7 @@ def _prepared_large_entries_for_month(
             if server_sync:
                 next_entry["employee_number"] = str(current_entry.get("employee_number") or "")
                 next_entry["employee_name"] = str(current_entry.get("employee_name") or "")
-            if next_entry["assignments"] or next_entry.get("comment"):
+            if _large_entry_has_content(next_entry):
                 next_day.append(next_entry)
         for member_id, current_entry in current_by_member.items():
             if member_id in seen_members:
@@ -10619,10 +10907,12 @@ def _save_large_draft_month_in_project(
     if not current:
         raise CloudShiftError("対象の月が存在しません", 404)
     previous_count = _draft_entry_count(current)
-    next_draft_entries = _normalize_project_entries(
-        project, payload.get("entries_per_day"), year, month
+    # 下書きにもサーバー権威の同期割当(source_type=='sync')保護を適用し、本保存と同じ
+    # 不変条件（クライアントはサーバー正の同期割当を削除・改変できない）を保つ。これに
+    # より、下書き→公開経路で保護が抜ける問題を塞ぐ。代務担当者検証も内部で実施される。
+    next_draft_entries = _prepared_large_entries_for_month(
+        project, current, payload.get("entries_per_day"), year=year, month=month
     )
-    _validate_large_substitute_assignees(project, next_draft_entries)
     current["draft_entries_per_day"] = next_draft_entries
     current["updated_at"] = _jst_now_iso()
     _save_project(project)
@@ -10744,13 +11034,18 @@ def _publish_draft_month_in_project(
         if not current:
             raise CloudShiftError("対象の月が存在しません", 404)
         live = _normalize_project_entries(project, current.get("entries_per_day"), year, month)
-        draft = _normalize_project_entries(project, current.get("draft_entries_per_day"), year, month)
-        if live == draft:
+        # 公開直前にサーバー権威の同期割当(source_type=='sync')を現在liveから取り直す。
+        # 下書き保存後にソース(個人/現場)側で変化・削除された同期割当を、下書きに固着した
+        # 古い値ではなく現在値で確定する（削除済み同期の復活を防ぐ／非largeの公開と同じ保護）。
+        published_entries = _prepared_large_entries_for_month(
+            project, current, current.get("draft_entries_per_day"), year=year, month=month
+        )
+        if live == published_entries:
             return current
         published = {
             **current,
-            "entries_per_day": draft,
-            "draft_entries_per_day": draft,
+            "entries_per_day": published_entries,
+            "draft_entries_per_day": published_entries,
             "revision": int(current.get("revision", 1) or 1) + 1,
             "updated_at": _jst_now_iso(),
         }

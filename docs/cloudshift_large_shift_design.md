@@ -2,7 +2,16 @@
 
 作成日: 2026-07-22
 改訂日: 2026-07-22（外部資料に依存しない自己完結版へ全面改訂）
-ステータス: 要件定義完了・実装前設計
+ステータス: 実装完了（本書は初期設計であり一部は実装で更新済み）
+
+> **注意（2026-07-24 追記）:** 本書は初期設計であり、実装が本書より進んでいる箇所がある。
+> 現行の正仕様は [`cloudshift_large_shift_handoff.md`](cloudshift_large_shift_handoff.md) を参照すること。
+> 本書と実装の主な差分:
+> - 他モード同期（個人/現場との双方向反映）は本書では「初期は対象外/Phase 3」だが**実装済み**。
+> - セルは本書の「1人1日=単一value」ではなく `assignments` 配列（最大12件・source_type=local/scene/sync）を保持し、value は先頭割当の写像。
+> - メンバーに列種別 `column_type`（regular/substitute=代務列）を追加。
+> - 既定休みコード7種・`leave_kind` 許容集合（legal_rest/scheduled_rest を追加）が本書の記述と異なる。
+> - 勤務時間エンジンの警告に `TIME_OVERLAP`/`LEAVE_WITH_WORK`/`MULTIPLE_LEAVE_CODES`、DayResult 区分に `external` を追加。
 
 **本書は単体で実装可能な自己完結の設計書である。** 実装に必要な仕様・計算規則・初期値・検証用の正解データはすべて本書に含まれており、外部ファイル（参考にしたスプレッドシート等）を参照する必要はない。
 

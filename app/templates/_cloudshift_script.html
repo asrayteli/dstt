@@ -6062,10 +6062,17 @@
       showFlash('スポット検索を更新しました', 'success');
     }
 
+    function conflictModeMatches(project, mode) {
+      if (!project) return false;
+      // 現場モードでは大規模シフト（人数分の擬似現場に展開して比較）も対象に含める。
+      if (mode === 'scene') return project.mode === 'scene' || project.mode === 'large';
+      return project.mode === mode;
+    }
+
     function conflictCheckMonthKeys(mode) {
       const keys = new Set();
       state.projects
-        .filter((project) => project.mode === mode)
+        .filter((project) => conflictModeMatches(project, mode))
         .forEach((project) => {
           (project.month_keys || []).forEach((key) => keys.add(key));
         });
@@ -6073,7 +6080,7 @@
     }
 
     function defaultConflictCheckMonthKey(mode, availableKeys) {
-      if (currentProject() && currentProject().mode === mode && currentMonthKey() && availableKeys.includes(currentMonthKey())) {
+      if (currentProject() && conflictModeMatches(currentProject(), mode) && currentMonthKey() && availableKeys.includes(currentMonthKey())) {
         return currentMonthKey();
       }
       return availableKeys.length ? availableKeys[availableKeys.length - 1] : '';
@@ -6097,10 +6104,10 @@
       }
 
       const availableIds = state.projects
-        .filter((project) => project.mode === nextMode && (project.month_keys || []).includes(state.conflictCheck.monthKey))
+        .filter((project) => conflictModeMatches(project, nextMode) && (project.month_keys || []).includes(state.conflictCheck.monthKey))
         .map((project) => project.id);
       const defaultAvailableIds = state.projects
-        .filter((project) => project.access_role !== 'viewer' && project.mode === nextMode && (project.month_keys || []).includes(state.conflictCheck.monthKey))
+        .filter((project) => project.access_role !== 'viewer' && conflictModeMatches(project, nextMode) && (project.month_keys || []).includes(state.conflictCheck.monthKey))
         .map((project) => project.id);
       const currentIds = Array.isArray(state.conflictCheck.selectedProjectIds) ? state.conflictCheck.selectedProjectIds : null;
       const filteredIds = currentIds ? currentIds.filter((projectId) => availableIds.includes(projectId)) : [];
@@ -6113,7 +6120,7 @@
     function selectedConflictCheckProjects() {
       syncConflictCheckState();
       const selectedIds = new Set(state.conflictCheck.selectedProjectIds);
-      return state.projects.filter((project) => selectedIds.has(project.id) && project.mode === state.conflictCheck.mode && (project.month_keys || []).includes(state.conflictCheck.monthKey));
+      return state.projects.filter((project) => selectedIds.has(project.id) && conflictModeMatches(project, state.conflictCheck.mode) && (project.month_keys || []).includes(state.conflictCheck.monthKey));
     }
 
     function renderConflictCheckProjectList() {
@@ -6122,7 +6129,7 @@
 
       syncConflictCheckState();
       const monthKey = state.conflictCheck.monthKey;
-      const projects = state.projects.filter((project) => project.mode === state.conflictCheck.mode && (project.month_keys || []).includes(monthKey));
+      const projects = state.projects.filter((project) => conflictModeMatches(project, state.conflictCheck.mode) && (project.month_keys || []).includes(monthKey));
       if (!projects.length) {
         container.innerHTML = '<div class="cloud-empty-state"><p>選択中の条件に一致するシフト帳がありません。</p></div>';
         return;
@@ -9652,7 +9659,7 @@
         checkSelectAll.addEventListener('click', () => {
           syncConflictCheckState();
           state.conflictCheck.selectedProjectIds = state.projects
-            .filter((project) => project.mode === state.conflictCheck.mode && (project.month_keys || []).includes(state.conflictCheck.monthKey))
+            .filter((project) => conflictModeMatches(project, state.conflictCheck.mode) && (project.month_keys || []).includes(state.conflictCheck.monthKey))
             .map((project) => project.id);
           state.conflictCheck.result = null;
           renderConflictCheckPanel();
