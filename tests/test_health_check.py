@@ -71,6 +71,45 @@ def _build(tmp_path, *, admin=True):
     return module, app
 
 
+def _grant_office(app, username: str, code: str = "100", name: str = "本社営業所"):
+    """通知の宛先になれるよう、DSTTのアクセス権（営業所）をユーザーに付与する。
+
+    健診PLUSの通知先は「その営業所にアクセスできる人」に限られる。
+    以前は操作者がDSTT管理者なら宛先の営業所を検証していなかったため、
+    アクセス権の無いユーザーでも宛先にできてしまっていた。
+    """
+    with app.app_context():
+        office = _get_or_create_access_office(code, name)
+        user = User.query.filter_by(username=username).first()
+        if user is not None and user.office_id is None:
+            user.office_id = office.id
+        db.session.commit()
+
+
+def _get_or_create_access_office(code: str, name: str) -> AccessOffice:
+    """アクセス権営業所を取得または作成する（app_context 内で呼ぶこと）。
+
+    AccessBranch.name / .code と AccessOffice.code はいずれも UNIQUE のため、
+    テストごとに作り直すと衝突する。必ずこの関数を通して使い回す。
+    """
+    office = AccessOffice.query.filter_by(code=code).first()
+    if office is not None:
+        return office
+    branch = AccessBranch.query.filter_by(code="B1").first()
+    if branch is None:
+        branch = AccessBranch.query.first()
+    if branch is None:
+        branch = AccessBranch(code="B1", name="本社支店")
+        db.session.add(branch)
+        db.session.flush()
+    office = AccessOffice.query.filter_by(branch_id=branch.id, name=name).first()
+    if office is None:
+        office = AccessOffice(code=code, name=name, branch_id=branch.id)
+        db.session.add(office)
+        db.session.flush()
+    return office
+
+
 def _seed_basic(app):
     with app.app_context():
         db.session.add(Office(office_code="100", office_name="本社営業所", created_by="seed"))
@@ -86,6 +125,7 @@ def _seed_basic(app):
             manager_name="管理花子",
         ))
         db.session.commit()
+    _grant_office(app, "m001")
 
 
 def test_bulk_create_and_dashboard(tmp_path):
@@ -284,6 +324,7 @@ def test_manual_manager_override(tmp_path):
     with app.app_context():
         db.session.add(User(username="m999", password_hash="x", name="別担当"))
         db.session.commit()
+    _grant_office(app, "m999")
 
     res = client.post("/tools/health_check/api/record", json={
         "target_year": 2026, "record_type": "internal", "employee_name": "内勤四郎", "office_code": "100"})
@@ -553,12 +594,8 @@ def test_area_managers_endpoint_filters_by_office_and_department(tmp_path):
     _seed_basic(app)
     with app.app_context():
         db.session.add(Office(office_code="200", office_name="別営業所", created_by="seed"))
-        branch = AccessBranch(name="本社支店", code="B1")
-        db.session.add(branch)
-        db.session.flush()
-        off100 = AccessOffice(branch_id=branch.id, name="本社営業所", code="100")
-        off200 = AccessOffice(branch_id=branch.id, name="別営業所", code="200")
-        db.session.add_all([off100, off200])
+        off100 = _get_or_create_access_office("100", "本社営業所")
+        off200 = _get_or_create_access_office("200", "別営業所")
         db.session.flush()
         am100 = AccessDepartment(office_id=off100.id, name="エリアマネージャー")
         other = AccessDepartment(office_id=off100.id, name="一般")
@@ -826,6 +863,7 @@ def test_health_officer_is_default_notify_recipient(tmp_path):
         db.session.add(ToBellUserSettings(username="m001", integrations={"health_check.linkage": True}, preferences={}))
         db.session.add(ToBellUserSettings(username="hofficer", integrations={"health_check.linkage": True}, preferences={}))
         db.session.commit()
+    _grant_office(app, "hofficer")
 
     # 営業所100の健康診断担当として hofficer を設定
     res = client.post("/tools/health_check/api/admin/health_officers",
@@ -854,6 +892,7 @@ def test_extra_notify_user_receives_reminder(tmp_path):
         db.session.add(ToBellUserSettings(username="m001", integrations={"health_check.linkage": True}, preferences={}))
         db.session.add(ToBellUserSettings(username="extra01", integrations={"health_check.linkage": True}, preferences={}))
         db.session.commit()
+    _grant_office(app, "extra01")
 
     rid = client.post("/tools/health_check/api/record", json={
         "target_year": 2026, "record_type": "linked", "employee_number": "E001"}).get_json()["record"]["id"]

@@ -469,6 +469,12 @@ def _ensure_access_control_schema(app):
                 alters.append("ALTER TABLE health_check_records ADD COLUMN is_kintone BOOLEAN NOT NULL DEFAULT 0")
             if "extra_notify_users" not in hc_cols:
                 alters.append("ALTER TABLE health_check_records ADD COLUMN extra_notify_users TEXT")
+            # 本人あてメール通知（社員はDSTTアカウントを持たないため、名簿のメール
+            # アドレスへ直接送る）
+            if "employee_email" not in hc_cols:
+                alters.append("ALTER TABLE health_check_records ADD COLUMN employee_email VARCHAR(255)")
+            if "email_opt_out" not in hc_cols:
+                alters.append("ALTER TABLE health_check_records ADD COLUMN email_opt_out BOOLEAN NOT NULL DEFAULT 0")
 
         if "health_check_attachments" in inspector.get_table_names():
             hca_cols = {c["name"] for c in inspector.get_columns("health_check_attachments")}
@@ -1008,12 +1014,10 @@ def create_app(test_config=None):
                 return None
             from .services.to_bell_service import cleanup_expired_records
             cleanup_expired_records()
-            # 健診PLUSのリマインドを当日通知へ繰り上げる（due_at のローリング）
-            try:
-                from .services.to_bell_hooks import sweep_health_check_reminders
-                sweep_health_check_reminders()
-            except Exception:
-                db.session.rollback()
+            # 健診PLUSのリマインド同期（sweep_health_check_reminders）は、対象者数に
+            # 比例して重い（800名で初回13秒／定常2.7秒）ため、ここでは実行しない。
+            # リクエストを止めないよう、バックグラウンドスケジューラ側の日次ジョブ
+            # （to_bell_push.init_to_bell_push_scheduler）へ移した。
             try:
                 _sweep_activity_logs()
             except Exception:

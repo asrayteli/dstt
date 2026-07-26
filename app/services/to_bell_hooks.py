@@ -337,6 +337,17 @@ def _hc_night_basis(record) -> "Any":
     return None
 
 
+def _hc_notifications_suppressed(record) -> bool:
+    """このレコードは通知の対象外か。
+
+    退職者（`is_retired`）と受診非対象者（`is_exempt`）は、一覧・ダッシュボード・
+    エクスポートのいずれでも集計対象外として扱われる（設計書 §10.3 / §10.4）。
+    リマインドだけが飛び続けると、担当者に「もう追いかけようのない対象者」の
+    通知が届き続けるため、同じ基準で通知も止める。
+    """
+    return bool(getattr(record, "is_retired", False)) or bool(getattr(record, "is_exempt", False))
+
+
 def _hc_recipients(record) -> list[str]:
     """このレコードの通知宛先（username）を重複排除して返す。
 
@@ -366,6 +377,65 @@ def _hc_recipients(record) -> list[str]:
     except Exception:  # noqa: BLE001
         logger.exception("追加通知先の取得に失敗")
     return recipients
+
+
+def _hc_employee_mail_contact(record) -> tuple[str, str]:
+    """本人あてメールに載せる問い合わせ先（営業所名・担当者名）を解決する。
+
+    社員はDSTTを見られないため、困ったときの連絡先を本文に書く必要がある。
+    """
+    office_name = ""
+    try:
+        from app.tools.health_check import get_office_display_name
+        office_name = get_office_display_name(getattr(record, "office_code", None))
+    except Exception:  # noqa: BLE001
+        logger.exception("営業所名の解決に失敗")
+    contact = (getattr(record, "manager_name", "") or "").strip()
+    return office_name, contact
+
+
+def _hc_queue_employee_mail(record, *, now: datetime, suppressed: bool) -> None:
+    """対象日に達した通知について、社員本人あてメールをキューに積む。
+
+    例外は握りつぶす。メールが積めないことで健診レコードの保存や
+    ToBell リマインドを止めてはならない。
+    """
+    if suppressed:
+        return
+    try:
+        from app.tools.health_check import office_mail_enabled
+        from app.services.health_check_mail import queue_notification, can_send_to
+
+        ok, _reason = can_send_to(record)
+        if not ok:
+            return
+
+        office_code = getattr(record, "office_code", None)
+        plans = (
+            ("reservation", record.reservation_date,
+             record.reservation_date is not None and record.exam_date is None),
+            ("night_second", _hc_night_basis(record),
+             bool(record.is_night_worker) and record.exam_date_2 is None),
+            ("secondary_exam", record.secondary_recommended_date,
+             bool(record.needs_recheck)
+             and record.secondary_recommended_date is not None
+             and record.secondary_exam_date is None),
+        )
+        office_name, contact = _hc_employee_mail_contact(record)
+        for kind, basis, condition in plans:
+            if not condition or basis is None:
+                continue
+            if not _hc_should_materialize(basis, now):
+                continue
+            if not office_mail_enabled(office_code, kind):
+                continue
+            queue_notification(
+                record, kind, basis,
+                office_name=office_name, contact_name=contact,
+                created_by="health_check", commit=False,
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("健診PLUS 本人あてメールのキュー投入に失敗")
 
 
 def _ensure_reminder_task(
@@ -479,14 +549,20 @@ def ensure_health_check_reminders(
     （`global_lead_days` は後方互換のため残すが、本リマインドでは使用しない。）
     """
     now = now or local_now()
-    recipients = _hc_recipients(record)
+    suppressed = _hc_notifications_suppressed(record)
+    recipients = [] if suppressed else _hc_recipients(record)
+    # 本人あてメールは ToBell と同じ発火条件（対象日の前日に確定）で積む。
+    # 担当者のオプトインとは独立で、営業所ごとの送信設定だけで決まる
+    # （社員はDSTTアカウントを持たないためオプトインの仕組みが無い）。
+    _hc_queue_employee_mail(record, now=now, suppressed=suppressed)
 
     def _sync(ref_type: str, basis, condition: bool, priority: str) -> "ToBellTask | None":
         """対象日 basis の前日以降になったら、オプトイン済みの各宛先にタスク化する。
         条件を満たさない・まだ前日に達していない宛先のタスクはクローズする。
         戻り値は代表タスク（*_task_id 後方互換のため）。"""
         materialize = (
-            condition
+            not suppressed
+            and condition
             and basis is not None
             and _hc_should_materialize(basis, now)
         )
@@ -519,37 +595,44 @@ def ensure_health_check_reminders(
         return first_task
 
     try:
-        # --- 健康診断予約日 ---
-        _sync(
-            "reservation",
-            record.reservation_date,
-            record.reservation_date is not None and record.exam_date is None,
-            "normal",
-        )
-        # --- 深夜従事者 年2回目（受診日②） ---
-        night_task = _sync(
-            "night_second",
-            _hc_night_basis(record),
-            bool(record.is_night_worker) and record.exam_date_2 is None,
-            "normal",
-        )
-        record.night2_task_id = night_task.id if night_task is not None else None
-        # --- 二次検査 受診推奨日 ---
-        secondary_task = _sync(
-            "secondary_exam",
-            record.secondary_recommended_date,
-            bool(record.needs_recheck)
-            and record.secondary_recommended_date is not None
-            and record.secondary_exam_date is None,
-            "high",
-        )
-        record.secondary_task_id = secondary_task.id if secondary_task is not None else None
+        # リマインド同期はセーブポイント内で行う。ここで失敗しても巻き戻るのは
+        # リマインド分だけで、呼び出し元（健診レコードの保存）の未コミット変更は
+        # そのまま残す。以前は except で db.session.rollback() していたため、
+        # 同期の失敗が利用者の入力ごと破棄していた（保存APIは success を返すため
+        # 利用者は気づけなかった）。
+        with db.session.begin_nested():
+            # --- 健康診断予約日 ---
+            _sync(
+                "reservation",
+                record.reservation_date,
+                record.reservation_date is not None and record.exam_date is None,
+                "normal",
+            )
+            # --- 深夜従事者 年2回目（受診日②） ---
+            night_task = _sync(
+                "night_second",
+                _hc_night_basis(record),
+                bool(record.is_night_worker) and record.exam_date_2 is None,
+                "normal",
+            )
+            record.night2_task_id = night_task.id if night_task is not None else None
+            # --- 二次検査 受診推奨日 ---
+            secondary_task = _sync(
+                "secondary_exam",
+                record.secondary_recommended_date,
+                bool(record.needs_recheck)
+                and record.secondary_recommended_date is not None
+                and record.secondary_exam_date is None,
+                "high",
+            )
+            record.secondary_task_id = secondary_task.id if secondary_task is not None else None
 
         if commit:
             _commit_safely()
     except Exception:  # noqa: BLE001
+        # セーブポイントは with を抜ける時点で巻き戻り済み。ここで
+        # db.session.rollback() を呼んではならない（呼び出し元の保存が消える）。
         logger.exception("health_check リマインダーの同期で失敗")
-        db.session.rollback()
 
 
 def close_health_check_reminders(record_id: int, *, commit: bool = True) -> None:
@@ -570,7 +653,9 @@ def sweep_health_check_reminders(*, now: datetime | None = None) -> dict[str, in
     processed = 0
     try:
         from app.models import HealthCheckRecord
-        from app.tools.health_check import get_global_lead_days
+        from app.tools.health_check import (
+            get_global_lead_days, _sync_linked_record, _prefetch_employees,
+        )
 
         global_lead = get_global_lead_days()
         records = HealthCheckRecord.query.filter(
@@ -592,7 +677,17 @@ def sweep_health_check_reminders(*, now: datetime | None = None) -> dict[str, in
                 ),
             )
         ).all()
+        # 名簿を一括で読み込む（戻り値は identity map の弱参照対策で保持する）
+        _keep_alive = _prefetch_employees(records)  # noqa: F841
         for record in records:
+            # 名簿（Employee）から先に再同期する。これをしないと、社員が転属・退職
+            # しても DB に残った古い office_code / manager_user のまま宛先が解決され、
+            # 旧営業所の健康診断担当に通知が飛び続ける。従来は画面を開いたときの
+            # _check_record_access 経由でしか同期されなかった。
+            try:
+                _sync_linked_record(record)
+            except Exception:  # noqa: BLE001
+                logger.exception("health_check 名簿同期に失敗 (record_id=%s)", record.id)
             ensure_health_check_reminders(
                 record, global_lead_days=global_lead, now=now, commit=False
             )

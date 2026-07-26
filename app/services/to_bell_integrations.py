@@ -68,6 +68,7 @@ def _ensure_settings(username: str) -> ToBellUserSettings:
         row = ToBellUserSettings(username=username, integrations={}, preferences={})
         db.session.add(row)
         db.session.flush()
+        invalidate_settings_cache(username)
     return row
 
 
@@ -96,14 +97,54 @@ def update_integrations(username: str, payload: dict[str, Any]) -> dict[str, Any
             current[key] = bool(value)
     row.integrations = current
     db.session.commit()
+    invalidate_settings_cache(username)
     return get_settings(username)
+
+
+def _settings_row_cached(username: str):
+    """username → ToBellUserSettings をリクエスト内でメモ化して返す。
+
+    健診PLUSの日次スイープは、レコード×宛先ごとに連携フラグと通知種別を
+    引くため、素直にクエリすると数千本のSELECTになる。
+    リクエスト境界を越えないので設定変更の反映は遅れない。
+    """
+    try:
+        from flask import g, has_app_context
+        if not has_app_context():
+            return ToBellUserSettings.query.filter_by(username=username).first()
+        cache = getattr(g, "_tb_settings_cache", None)
+        if cache is None:
+            cache = {}
+            g._tb_settings_cache = cache
+    except Exception:
+        return ToBellUserSettings.query.filter_by(username=username).first()
+    if username not in cache:
+        cache[username] = ToBellUserSettings.query.filter_by(username=username).first()
+    return cache[username]
+
+
+def invalidate_settings_cache(username: str | None = None) -> None:
+    """設定を書き換えた直後にメモ化を捨てる。"""
+    try:
+        from flask import g, has_app_context
+        if not has_app_context():
+            return
+        cache = getattr(g, "_tb_settings_cache", None)
+        if not cache:
+            return
+        if username is None:
+            cache.clear()
+        else:
+            cache.pop(username, None)
+    except Exception:
+        pass
 
 
 def is_enabled(username: str, integration_key: str) -> bool:
     """ユーザー個人の連携許可フラグ。未設定は常にFalse。"""
     if integration_key not in INTEGRATION_KEYS:
         return False
-    row = ToBellUserSettings.query.filter_by(username=username).first()
+    row = _settings_row_cached(username)
     if row is None or not isinstance(row.integrations, dict):
         return False
     return bool(row.integrations.get(integration_key, False))
@@ -129,7 +170,7 @@ HEALTH_CHECK_NOTIFY_KINDS = ("reservation", "night_second", "secondary_exam")
 
 def get_health_check_notify(username: str) -> dict[str, bool]:
     """健診通知の種別別ON/OFF。未設定の種別は True（通知する）。"""
-    row = ToBellUserSettings.query.filter_by(username=username).first()
+    row = _settings_row_cached(username)
     prefs = (row.preferences if row and isinstance(row.preferences, dict) else {}) or {}
     notify = prefs.get("health_check_notify")
     if not isinstance(notify, dict):
@@ -149,6 +190,7 @@ def set_health_check_notify(username: str, kinds: Any) -> dict[str, bool]:
     prefs["health_check_notify"] = current
     row.preferences = prefs
     db.session.commit()
+    invalidate_settings_cache(username)
     return {kind: bool(current.get(kind, True)) for kind in HEALTH_CHECK_NOTIFY_KINDS}
 
 

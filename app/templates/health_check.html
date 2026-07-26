@@ -256,6 +256,7 @@
     <div class="flex flex-wrap gap-1 px-5 pt-3 border-b border-gray-100">
       <button type="button" class="hc-tab is-active" data-stab="integration" onclick="HC.switchSettingsTab('integration')">🔔 ToBell連携</button>
       <button type="button" class="hc-tab hc-admin-only" data-stab="officers" onclick="HC.switchSettingsTab('officers')">🩺 健康診断担当</button>
+      <button type="button" class="hc-tab hc-admin-only" data-stab="mail" onclick="HC.switchSettingsTab('mail')">✉️ 本人あてメール</button>
       <button type="button" class="hc-tab hc-dstt-admin-only" data-stab="permissions" onclick="HC.switchSettingsTab('permissions')">👥 健診PLUS管理者</button>
     </div>
     <div class="hc-modal-body">
@@ -281,6 +282,53 @@
         <p class="text-sm text-gray-600">営業所ごとに「健康診断担当」を設定します。ここで設定した担当者は、その営業所のレコードの<strong>通知の既定の宛先</strong>（管理担当者に加えて）になります。変更は即時に保存されます。</p>
         <div id="officers-list" class="space-y-3"></div>
       </div>
+      <!-- パネル: 本人あてメール通知（管理者） -->
+      <div data-spanel="mail" class="space-y-4 hidden">
+        <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 leading-relaxed">
+          <strong>社員本人</strong>の携帯・PCメール（社員名簿PLUSに登録されたアドレス）へ直接お知らせを送ります。
+          社員はDSTTのアカウントを持たないため、メールは<strong>それだけで完結する内容</strong>（種別・日付・問い合わせ先）にしており、
+          システム名やログインの案内は入れていません。検査項目や所見は本文に載せません。<br>
+          <strong>既定はすべて「送らない」</strong>です。営業所ごとに有効化してください。
+        </div>
+
+        <!-- 一括操作 -->
+        <div class="p-3 border border-gray-200 rounded-lg space-y-2">
+          <p class="text-xs font-semibold text-gray-600">一括設定（管理できる営業所すべてに適用）</p>
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input type="checkbox" id="mail-bulk-enabled" class="rounded text-teal-600 focus:ring-teal-500">
+              メール通知を有効にする</label>
+            <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input type="checkbox" data-bulk-kind="reservation" class="rounded text-teal-600 focus:ring-teal-500"> 予約日</label>
+            <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input type="checkbox" data-bulk-kind="night_second" class="rounded text-teal-600 focus:ring-teal-500"> 深夜2回目</label>
+            <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input type="checkbox" data-bulk-kind="secondary_exam" class="rounded text-teal-600 focus:ring-teal-500"> 二次検査</label>
+            <button type="button" class="hc-btn-secondary text-xs" onclick="HC.applyMailBulk()">全営業所に適用</button>
+          </div>
+        </div>
+
+        <!-- 営業所別 -->
+        <div id="mail-office-list" class="space-y-2"></div>
+
+        <!-- プレビューと手動送信 -->
+        <div class="p-3 border border-gray-200 rounded-lg space-y-2">
+          <p class="text-xs font-semibold text-gray-600">送信前の確認・手動での一斉送信</p>
+          <p class="text-xs text-gray-500">自動送信は対象日当日の1回だけです。未受診の方を追いかけたいときは、ここから同じ内容をもう一度送れます（同じ日に二重には送られません）。</p>
+          <div class="flex flex-wrap items-center gap-2">
+            <select id="mail-preview-kind" class="hc-input w-auto">
+              <option value="secondary_exam">二次検査の受診推奨日</option>
+              <option value="reservation">健康診断の予約日</option>
+              <option value="night_second">深夜従事者の2回目受診日</option>
+            </select>
+            <button type="button" class="hc-btn-secondary text-xs" onclick="HC.previewMail()">対象を確認</button>
+            <button type="button" class="hc-btn-primary text-xs" id="mail-send-btn" onclick="HC.sendMailBatch()" disabled>この内容で送信</button>
+          </div>
+          <div id="mail-preview-result" class="text-xs text-gray-600"></div>
+          <pre id="mail-preview-body" class="hidden text-xs bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap overflow-x-auto"></pre>
+        </div>
+      </div>
+
       <!-- パネル: 健診PLUS管理者（DSTT管理者のみ） -->
       <div data-spanel="permissions" class="space-y-5 hidden">
         <p class="text-xs text-gray-500">
@@ -507,7 +555,7 @@ const HC = (function(){
 
   // ---- 状態 ----
   let state = { year: CURRENT_YEAR, office:'', type:'', status:'', night:false, recheck:false, unassigned:false,
-                retired:false, search:'', sort_by:'employee_number', sort_order:'asc' };
+                retired:false, search:'', sort_by:'employee_number', sort_order:'asc', page:1 };
 
   function buildQuery(){
     const p = new URLSearchParams();
@@ -619,13 +667,13 @@ const HC = (function(){
   function bindEvents(){
     document.getElementById('year-select').addEventListener('change', e=>{ state.year=parseInt(e.target.value,10); refresh(); });
     document.getElementById('filter-office').addEventListener('change', e=>{ state.office=e.target.value; updateHeroOffice(); refresh(); });
-    document.getElementById('filter-type').addEventListener('change', e=>{ state.type=e.target.value; loadRecords(); });
-    document.getElementById('filter-status').addEventListener('change', e=>{ state.status=e.target.value; loadRecords(); });
-    document.getElementById('filter-night').addEventListener('change', e=>{ state.night=e.target.checked; loadRecords(); });
-    document.getElementById('filter-recheck').addEventListener('change', e=>{ state.recheck=e.target.checked; loadRecords(); });
-    document.getElementById('filter-unassigned').addEventListener('change', e=>{ state.unassigned=e.target.checked; loadRecords(); });
-    document.getElementById('filter-retired').addEventListener('change', e=>{ state.retired=e.target.checked; loadRecords(); });
-    let t; document.getElementById('search-input').addEventListener('input', e=>{ clearTimeout(t); t=setTimeout(()=>{ state.search=e.target.value.trim(); loadRecords(); }, 300); });
+    document.getElementById('filter-type').addEventListener('change', e=>{ state.type=e.target.value; reloadFirstPage(); });
+    document.getElementById('filter-status').addEventListener('change', e=>{ state.status=e.target.value; reloadFirstPage(); });
+    document.getElementById('filter-night').addEventListener('change', e=>{ state.night=e.target.checked; reloadFirstPage(); });
+    document.getElementById('filter-recheck').addEventListener('change', e=>{ state.recheck=e.target.checked; reloadFirstPage(); });
+    document.getElementById('filter-unassigned').addEventListener('change', e=>{ state.unassigned=e.target.checked; reloadFirstPage(); });
+    document.getElementById('filter-retired').addEventListener('change', e=>{ state.retired=e.target.checked; reloadFirstPage(); });
+    let t; document.getElementById('search-input').addEventListener('input', e=>{ clearTimeout(t); t=setTimeout(()=>{ state.search=e.target.value.trim(); reloadFirstPage(); }, 300); });
     // 列ヘッダのソートはイベント委譲（ヘッダは動的生成）
     document.getElementById('records-head').addEventListener('click', e=>{
       const th = e.target.closest('th[data-sort]');
@@ -633,7 +681,7 @@ const HC = (function(){
       const key = th.dataset.sort;
       if(state.sort_by===key){ state.sort_order = state.sort_order==='asc'?'desc':'asc'; }
       else { state.sort_by=key; state.sort_order='asc'; }
-      loadRecords();
+      reloadFirstPage();
     });
     document.getElementById('integration-toggle').addEventListener('change', syncNotifyKindsEnabled);
     // プレビューは Esc で閉じる
@@ -642,7 +690,8 @@ const HC = (function(){
     });
   }
 
-  function refresh(){ loadRecords(); loadDashboard(); }
+  function reloadFirstPage(){ state.page = 1; loadRecords(); }
+  function refresh(){ state.page = 1; loadRecords(); loadDashboard(); }
 
   // ---- ダッシュボード ----
   async function loadDashboard(){
@@ -683,11 +732,11 @@ const HC = (function(){
   async function loadRecords(){
     renderHead();
     let data;
-    try { data = await api('/tools/health_check/api/records?'+buildQuery()); }
+    try { data = await api('/tools/health_check/api/records?'+buildQuery()+'&page='+state.page); }
     catch(e){ toast(e.message,'error'); return; }
     const body = document.getElementById('records-body');
     const empty = document.getElementById('records-empty');
-    document.getElementById('records-footer').textContent = `${data.count} 件を表示中`;
+    renderPager(data);
     if(!data.records.length){ body.innerHTML=''; empty.classList.remove('hidden'); return; }
     empty.classList.add('hidden');
     const cols = activeColumns();
@@ -701,6 +750,30 @@ const HC = (function(){
         </td>
       </tr>`;
     }).join('');
+  }
+
+  // ---- ページ送り ----
+  function renderPager(data){
+    const foot = document.getElementById('records-footer');
+    const total = (data.total !== undefined) ? data.total : data.count;
+    const perPage = data.per_page || total || 1;
+    const pages = data.pages || 1;
+    const page = data.page || 1;
+    if(!total){ foot.textContent = '0 件'; return; }
+    const from = (page - 1) * perPage + 1;
+    const to = Math.min(total, from + data.records.length - 1);
+    const nav = pages > 1 ? `
+      <span class="inline-flex items-center gap-1 ml-3">
+        <button class="hc-btn-ghost !py-0.5 !px-2" ${page<=1?'disabled':''} onclick="HC.gotoPage(${page-1})">‹ 前</button>
+        <span class="text-xs text-gray-500">${page} / ${pages} ページ</span>
+        <button class="hc-btn-ghost !py-0.5 !px-2" ${page>=pages?'disabled':''} onclick="HC.gotoPage(${page+1})">次 ›</button>
+      </span>` : '';
+    foot.innerHTML = `全 ${total} 件中 ${from}〜${to} 件を表示${nav}`;
+  }
+  function gotoPage(p){
+    state.page = Math.max(1, p);
+    loadRecords();
+    document.getElementById('records-body')?.scrollIntoView({block:'start', behavior:'smooth'});
   }
 
   // ---- 表示項目の選択 ----
@@ -905,6 +978,27 @@ const HC = (function(){
             <select id="extra-notify-add" class="hc-input"><option value="">＋ 通知先を追加…</option></select>
           </div>
           <p class="text-xs text-gray-400">通知は宛先それぞれがToBell連携をオプトインしている場合に届きます。</p>
+        </div>
+        <div class="hc-section-title mt-4">本人あてメール</div>
+        <div class="space-y-3">
+          <div>
+            <label class="hc-field-label">本人のメールアドレス</label>
+            ${linked
+              ? `<input type="text" value="${esc(d.employee_email||'')}" class="hc-input hc-readonly" readonly
+                   placeholder="社員名簿PLUSに未登録">
+                 <p class="text-xs text-gray-400 mt-1">社員名簿PLUSから同期します。変更は名簿側で行ってください。</p>`
+              : `<input type="text" data-field="employee_email" value="${esc(d.employee_email||'')}"
+                   class="hc-input" placeholder="例：taro@example.co.jp" autocomplete="off">`}
+          </div>
+          <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input type="checkbox" data-field="email_opt_out" ${d.email_opt_out?'checked':''}
+                   class="rounded text-teal-600 focus:ring-teal-500">
+            この方にはメールを送らない（本人の申し出など）</label>
+          <p class="text-xs text-gray-400">
+            送るかどうかは営業所ごとの設定（設定 → 本人あてメール）で決まります。
+            メールには種別・日付・問い合わせ先のみを記載し、検査項目や所見は含めません。</p>
+        </div>
+        <div class="mt-4">
           ${fieldText('備考','remarks', d.remarks)}
         </div>
       </div>`;
@@ -1616,14 +1710,110 @@ const HC = (function(){
     document.querySelectorAll('#notify-kinds [data-kind]').forEach(cb=>{ cb.disabled = !on; });
   }
   function switchSettingsTab(tab){
-    // 健康診断担当タブは健診PLUS管理者、健診PLUS管理者タブはDSTT管理者のみ
-    if(tab==='officers' && !IS_ADMIN) tab = 'integration';
+    // 健康診断担当・本人あてメールタブは健診PLUS管理者、健診PLUS管理者タブはDSTT管理者のみ
+    if((tab==='officers' || tab==='mail') && !IS_ADMIN) tab = 'integration';
     if(tab==='permissions' && !IS_DSTT_ADMIN) tab = 'integration';
     activeSettingsTab = tab;
     document.querySelectorAll('#settings-modal [data-stab]').forEach(b=>b.classList.toggle('is-active', b.dataset.stab===tab));
     document.querySelectorAll('#settings-modal [data-spanel]').forEach(p=>p.classList.toggle('hidden', p.dataset.spanel!==tab));
-    // アクセス権・健康診断担当タブは即時反映のため、フッターの保存ボタンを隠す
-    document.getElementById('settings-save-btn').style.display = (tab==='permissions' || tab==='officers') ? 'none' : '';
+    // アクセス権・健康診断担当・メールタブは即時反映のため、フッターの保存ボタンを隠す
+    document.getElementById('settings-save-btn').style.display =
+      (tab==='permissions' || tab==='officers' || tab==='mail') ? 'none' : '';
+    if(tab==='mail') loadMailNotify();
+  }
+
+  // ---- 本人あてメール通知のコントロールパネル（管理者） ----
+  const MAIL_KIND_ORDER = ['reservation','night_second','secondary_exam'];
+  const MAIL_KIND_SHORT = {reservation:'予約日', night_second:'深夜2回目', secondary_exam:'二次検査'};
+
+  async function loadMailNotify(){
+    const box = document.getElementById('mail-office-list');
+    box.innerHTML = '<p class="text-xs text-gray-400">読み込み中…</p>';
+    let data;
+    try { data = await api('/tools/health_check/api/admin/mail_notify'); }
+    catch(e){ box.innerHTML = `<p class="text-xs text-red-600">設定を読み込めませんでした：${esc(e.message)}</p>`; return; }
+    const offices = data.offices || [];
+    if(!offices.length){ box.innerHTML = '<p class="text-xs text-gray-400">管理できる営業所がありません。</p>'; return; }
+    box.innerHTML = offices.map(o=>{
+      const kinds = MAIL_KIND_ORDER.map(k=>`
+        <label class="flex items-center gap-1 text-xs text-gray-700 cursor-pointer">
+          <input type="checkbox" class="rounded text-teal-600 focus:ring-teal-500 mail-kind"
+                 data-office="${esc(o.code)}" data-kind="${k}" ${o.kinds && o.kinds[k] ? 'checked':''}
+                 ${o.enabled ? '' : 'disabled'}> ${MAIL_KIND_SHORT[k]}</label>`).join('');
+      return `<div class="flex flex-wrap items-center gap-3 p-2.5 border border-gray-200 rounded-lg" data-mail-office="${esc(o.code)}">
+        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer min-w-[13rem]">
+          <input type="checkbox" class="rounded text-teal-600 focus:ring-teal-500 mail-enabled"
+                 data-office="${esc(o.code)}" ${o.enabled?'checked':''}>
+          ${esc(o.name)} <span class="text-xs text-gray-400 font-mono">${esc(o.code)}</span></label>
+        <div class="flex flex-wrap items-center gap-3">${kinds}</div>
+      </div>`;
+    }).join('');
+    box.querySelectorAll('.mail-enabled, .mail-kind').forEach(cb=>{
+      cb.addEventListener('change', ()=>saveMailOffice(cb.dataset.office));
+    });
+  }
+
+  async function saveMailOffice(code){
+    const row = document.querySelector(`[data-mail-office="${CSS.escape(code)}"]`);
+    if(!row) return;
+    const enabled = row.querySelector('.mail-enabled').checked;
+    const kinds = {};
+    row.querySelectorAll('.mail-kind').forEach(cb=>{ kinds[cb.dataset.kind] = cb.checked; cb.disabled = !enabled; });
+    try {
+      await api('/tools/health_check/api/admin/mail_notify',
+                {method:'POST', body:JSON.stringify({office_code:code, enabled, kinds})});
+      toast('メール通知の設定を保存しました');
+    } catch(e){ toast(e.message,'error'); loadMailNotify(); }
+  }
+
+  async function applyMailBulk(){
+    const enabled = document.getElementById('mail-bulk-enabled').checked;
+    const kinds = {};
+    document.querySelectorAll('#settings-modal [data-bulk-kind]').forEach(cb=>{ kinds[cb.dataset.bulkKind] = cb.checked; });
+    const on = MAIL_KIND_ORDER.filter(k=>kinds[k]).map(k=>MAIL_KIND_SHORT[k]).join('・') || 'なし';
+    if(!confirm(`管理できる全営業所に適用します。\n\nメール通知: ${enabled?'有効':'無効'}\n送る種別: ${on}\n\nよろしいですか？`)) return;
+    try {
+      const r = await api('/tools/health_check/api/admin/mail_notify/bulk',
+                          {method:'POST', body:JSON.stringify({enabled, kinds})});
+      toast(`${(r.applied||[]).length} 営業所に適用しました`);
+      loadMailNotify();
+    } catch(e){ toast(e.message,'error'); }
+  }
+
+  let mailPreviewKind = null;
+  async function previewMail(){
+    const kind = document.getElementById('mail-preview-kind').value;
+    const out = document.getElementById('mail-preview-result');
+    const pre = document.getElementById('mail-preview-body');
+    const btn = document.getElementById('mail-send-btn');
+    out.textContent = '確認中…'; pre.classList.add('hidden'); btn.disabled = true;
+    let r;
+    try { r = await api('/tools/health_check/api/mail_preview?kind='+encodeURIComponent(kind)+'&'+buildQuery()); }
+    catch(e){ out.innerHTML = `<span class="text-red-600">${esc(e.message)}</span>`; return; }
+    const blocked = (r.blocked||[]).map(b=>`${esc(b.reason)} ${b.count}名`).join(' / ');
+    out.innerHTML = `<strong>${r.sendable} 名</strong>に送信されます`
+      + (blocked ? `<br><span class="text-gray-500">送信されない方：${blocked}</span>` : '');
+    if(r.sample){
+      pre.textContent = `件名: ${r.sample.subject}\n宛先: ${r.sample.to_name} <${r.sample.to}>\n\n${r.sample.body}`;
+      pre.classList.remove('hidden');
+    }
+    mailPreviewKind = r.sendable > 0 ? kind : null;
+    btn.disabled = r.sendable === 0;
+  }
+
+  async function sendMailBatch(){
+    if(!mailPreviewKind){ toast('先に「対象を確認」を押してください','error'); return; }
+    if(!confirm('確認した対象者にメールを送信します。よろしいですか？')) return;
+    const btn = document.getElementById('mail-send-btn');
+    btn.disabled = true;
+    try {
+      const r = await api('/tools/health_check/api/mail_send',
+                          {method:'POST', body:JSON.stringify({kind: mailPreviewKind})});
+      toast(`${r.sent} 件を送信キューに入れました`);
+      mailPreviewKind = null;
+      document.getElementById('mail-preview-result').textContent = '';
+      document.getElementById('mail-preview-body').classList.add('hidden');
+    } catch(e){ toast(e.message,'error'); btn.disabled = false; }
   }
   async function saveCurrentSettings(){
     if(activeSettingsTab==='integration'){
@@ -1683,6 +1873,7 @@ const HC = (function(){
     resolveManagers, exportCsv,
     openColumnsModal, closeColumnsModal, selectAllColumns, resetColumns, applyColumns,
     openSettingsModal, closeSettingsModal, switchSettingsTab, saveCurrentSettings,
+    applyMailBulk, previewMail, sendMailBatch, gotoPage,
     grantPermission, revoke,
     addOfficer, removeOfficer,
   };

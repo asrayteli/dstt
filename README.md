@@ -33,6 +33,19 @@ python run.py
 - `DSTT_MAX_CONTENT_LENGTH_MB`: リクエストボディ上限（MB）。既定は FILE POST の1リクエスト最大に合わせた `10304`（≒10GiB+余裕）。`0` で無制限
 - `DSTT_ACTIVITY_LOG_RETENTION_DAYS`: ツール利用ログ（user_activity_logs）の保持日数。設定すると日次で期限切れ行を削除。未設定/`0` は無制限保持
 - `DSTT_ENABLE_HSTS`: HTTPS応答への Strict-Transport-Security 付与（既定有効。`0` で無効）
+- `DSTT_GUNICORN_WORKERS`: gunicorn のワーカー数。未設定なら `min(CPU数 + 1, 9)`（最低2）
+
+### ワーカー数とメモリ
+
+DSTT のワーカーは pandas / PyMuPDF などを読み込むため、**1プロセスあたり実測で約 230MB** を使います。小型サーバーではワーカー数がそのままメモリ消費に効くので、目安は次のとおりです。
+
+| CPU | 既定ワーカー数 | 概算メモリ |
+| --- | --- | --- |
+| 2コア | 3 | 約 0.7GB |
+| 4コア（例: N150） | 5 | 約 1.1GB |
+| 8コア以上 | 9（上限） | 約 2.0GB |
+
+メモリが厳しい場合は `DSTT_GUNICORN_WORKERS` で明示的に下げてください。ただし FILE POST の大容量アップロードは sync ワーカーを転送中ずっと専有する（`timeout = 600`）ため、**2 未満にはしないでください**。
 
 ### SQLite 運用メモ
 

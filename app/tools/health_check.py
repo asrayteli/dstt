@@ -52,8 +52,17 @@ from app.services.to_bell_hooks import (
 health_check_bp = Blueprint("health_check", __name__, url_prefix="/tools/health_check")
 
 ALLOWED_ATTACHMENT_EXT = {"pdf", "jpg", "jpeg", "png"}
+# 配信時に使う Content-Type は拡張子から必ずサーバ側で決める。
+# アップロード時のクライアント申告値をそのまま返すと、text/html を宣言した
+# 「.pdf」を保存して ?inline=1 で開かせる保存型XSSが成立する（CSPは未導入）。
+ATTACHMENT_MIME_BY_EXT = {
+    "pdf": "application/pdf",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+}
 MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10MB
-MAX_EDIT_HISTORY = 200
+MAX_EDIT_HISTORY_PER_RECORD = 200
 
 # 手動モード（入社前・内勤者）でレコード追加時に選べる社員区分の候補
 EMPLOYEE_TYPE_OPTIONS = [
@@ -79,7 +88,8 @@ DATE_FIELDS = {
     "nasva_reservation_date",
     "nasva_exam_date",
 }
-BOOL_FIELDS = {"is_night_worker", "needs_recheck", "is_exempt", "is_kintone", "is_retired"}
+BOOL_FIELDS = {"is_night_worker", "needs_recheck", "is_exempt", "is_kintone", "is_retired",
+               "email_opt_out"}
 TEXT_FIELDS = {
     "employee_number",
     "employee_name",
@@ -90,6 +100,7 @@ TEXT_FIELDS = {
     "medical_institution",
     "secondary_result",
     "remarks",
+    "employee_email",
 }
 # 名簿連携レコードでは Employee から同期するため、手入力では上書きしない項目
 SYNCED_FIELDS = {
@@ -102,10 +113,17 @@ SYNCED_FIELDS = {
     "is_retired",
     "hire_date",
     "birth_date",
+    # メールアドレスは名簿PLUSが正。健診PLUS側での上書きは許さず、
+    # 誤りは名簿側を直してもらう（二重管理を避ける）。
+    "employee_email",
 }
 
 ATTACHMENT_CATEGORIES = {"health", "nasva"}
 ATTACHMENT_TITLE_MAX = 120
+
+# 一覧のページング。1営業所あたり数百名になるため既定で区切る。
+DEFAULT_PAGE_SIZE = 100
+MAX_PAGE_SIZE = 500
 
 # 一覧で並び替え可能な列。任意の属性名で order_by すると 500 になるため固定する。
 SORTABLE_FIELDS = {
@@ -172,11 +190,75 @@ def _serialize_extra_notify_users(raw, office_code: str | None = None) -> str | 
     usernames = usernames[:MAX_EXTRA_NOTIFY_USERS]
     users = User.query.filter(User.username.in_(usernames)).all()
     code = (office_code or "").strip()
-    if code and not _is_dstt_admin():
+    if code:
+        # 「その宛先がこの営業所の健康情報を受け取ってよいか」は宛先本人の
+        # アクセス権だけで決まる。操作者が DSTT 管理者かどうかで緩めてはならない
+        # （管理者が営業所外のユーザーを宛先に指定でき、氏名＋二次検査対象という
+        # 健康情報が権限外へ配信されていた）。
         users = [u for u in users if code in _dstt_user_office_codes(u)]
     valid = {u.username for u in users}
     filtered = [u for u in usernames if u in valid]
     return json.dumps(filtered, ensure_ascii=False) if filtered else None
+
+
+MAIL_KINDS = ("reservation", "night_second", "secondary_exam")
+MAIL_KIND_LABELS = {
+    "reservation": "健康診断の予約日",
+    "night_second": "深夜従事者の2回目受診日",
+    "secondary_exam": "二次検査の受診推奨日",
+}
+# 本人あてメールの既定は「送らない」。管理者がコントロールパネルで
+# 営業所ごとに明示的に有効化したときだけ送る。
+MAIL_NOTIFY_DEFAULT = {"enabled": False, "kinds": {k: False for k in MAIL_KINDS}}
+
+
+def normalize_mail_notify(raw) -> dict:
+    """営業所1件分のメール送信設定を正規化する。"""
+    enabled = bool((raw or {}).get("enabled")) if isinstance(raw, dict) else False
+    kinds_raw = (raw or {}).get("kinds") if isinstance(raw, dict) else None
+    kinds_raw = kinds_raw if isinstance(kinds_raw, dict) else {}
+    return {"enabled": enabled, "kinds": {k: bool(kinds_raw.get(k, False)) for k in MAIL_KINDS}}
+
+
+def get_office_mail_notify(office_code: str | None) -> dict:
+    """営業所の本人あてメール送信設定。未設定なら既定（全て送らない）。
+
+    ToBellフックからも参照されるためモジュール関数として提供する。
+    """
+    code = (office_code or "").strip()
+    if not code:
+        return dict(MAIL_NOTIFY_DEFAULT)
+    table = load_settings().get("mail_notify")
+    if not isinstance(table, dict):
+        return dict(MAIL_NOTIFY_DEFAULT)
+    return normalize_mail_notify(table.get(code))
+
+
+def office_mail_enabled(office_code: str | None, kind: str) -> bool:
+    """その営業所・その種別で本人あてメールを送る設定になっているか。"""
+    setting = get_office_mail_notify(office_code)
+    return bool(setting["enabled"]) and bool(setting["kinds"].get(kind))
+
+
+def get_office_display_name(office_code: str | None) -> str:
+    """メール本文の問い合わせ先に出す営業所名。
+
+    日次スイープや一括送信はレコードごとに呼ぶため、リクエスト内でメモ化する
+    （素直に引くと1レコードあたり access_offices と offices を各1本引く）。
+    """
+    code = (office_code or "").strip()
+    if not code:
+        return ""
+    cache = _request_cache().setdefault("office_names", {})
+    if code in cache:
+        return cache[code]
+    name = code
+    for o in _office_options([code]):
+        if o["code"] == code:
+            name = o["name"]
+            break
+    cache[code] = name
+    return name
 
 
 def get_office_health_officers(office_code: str | None) -> list[str]:
@@ -185,11 +267,7 @@ def get_office_health_officers(office_code: str | None) -> list[str]:
     code = (office_code or "").strip()
     if not code:
         return []
-    try:
-        with open(os.path.join(get_data_path(), "settings.json"), "r", encoding="utf-8") as f:
-            officers = json.load(f).get("health_officers")
-    except Exception:
-        return []
+    officers = load_settings().get("health_officers")
     if not isinstance(officers, dict):
         return []
     value = officers.get(code)
@@ -225,47 +303,81 @@ def ensure_data_directories() -> None:
         write_json_atomic(settings_file, {"global_lead_days": HEALTH_CHECK_DEFAULT_LEAD_DAYS})
 
 
+_permissions_cache: dict[str, tuple[tuple, dict]] = {}
+
+
 def load_permissions() -> dict:
     """健診PLUSの管理者(admins)のみを保持する。
     旧バージョンの user_offices（独自営業所付与）は廃止（DSTTのアクセス権に同期）。"""
+    path = os.path.join(get_data_path(), "permissions.json")
     try:
-        with open(os.path.join(get_data_path(), "permissions.json"), "r", encoding="utf-8") as f:
+        st = os.stat(path)
+        stamp = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        _permissions_cache.pop(path, None)
+        return {"admins": []}
+    cached = _permissions_cache.get(path)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    try:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if isinstance(data, dict):
-                return {"admins": list(data.get("admins", []) or [])}
+        if isinstance(data, dict):
+            result = {"admins": list(data.get("admins", []) or [])}
+            _permissions_cache[path] = (stamp, result)
+            return result
     except Exception:
         pass
     return {"admins": []}
 
 
 def save_permissions(permissions: dict) -> None:
-    write_json_atomic(os.path.join(get_data_path(), "permissions.json"), permissions)
+    path = os.path.join(get_data_path(), "permissions.json")
+    write_json_atomic(path, permissions)
+    _permissions_cache.pop(path, None)
+
+
+# settings.json の読み込みキャッシュ。キーは (パス, mtime, サイズ)。
+# 日次スイープや一括操作はレコードごとに通知設定を参照するため、素直に
+# 毎回 open すると 800 名で数千回のファイル I/O になる。mtime が変われば
+# 自動的に読み直すので、保存直後の反映が遅れることはない。
+_settings_cache: dict[str, tuple[tuple, dict]] = {}
 
 
 def load_settings() -> dict:
+    path = os.path.join(get_data_path(), "settings.json")
     try:
-        with open(os.path.join(get_data_path(), "settings.json"), "r", encoding="utf-8") as f:
+        st = os.stat(path)
+        stamp = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        _settings_cache.pop(path, None)
+        return {"global_lead_days": HEALTH_CHECK_DEFAULT_LEAD_DAYS}
+
+    cached = _settings_cache.get(path)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    try:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if isinstance(data, dict):
-                return data
+        if isinstance(data, dict):
+            _settings_cache[path] = (stamp, data)
+            return data
     except Exception:
         pass
     return {"global_lead_days": HEALTH_CHECK_DEFAULT_LEAD_DAYS}
 
 
 def save_settings(settings: dict) -> None:
-    write_json_atomic(os.path.join(get_data_path(), "settings.json"), settings)
+    path = os.path.join(get_data_path(), "settings.json")
+    write_json_atomic(path, settings)
+    _settings_cache.pop(path, None)
 
 
 def get_global_lead_days() -> int:
     """全体既定の事前通知リードタイム（日数）。ToBellフックからも参照される。"""
-    try:
-        with open(os.path.join(current_app.root_path, "static", "health_check", "settings.json"), "r", encoding="utf-8") as f:
-            value = json.load(f).get("global_lead_days")
-            if isinstance(value, int) and value >= 0:
-                return value
-    except Exception:
-        pass
+    value = load_settings().get("global_lead_days")
+    if isinstance(value, int) and value >= 0:
+        return value
     return HEALTH_CHECK_DEFAULT_LEAD_DAYS
 
 
@@ -414,7 +526,13 @@ def resolve_manager_user(manager_name: str | None, index: dict[str, list[str]] |
     if not key:
         return None
     if index is None:
-        index = _build_user_name_index()
+        # 全ユーザーを走査するのでリクエスト内で使い回す。レコードごとに
+        # 作り直すと一覧表示のたびに件数分の全件SELECTが走る。
+        cache = _request_cache()
+        index = cache.get("name_index")
+        if index is None:
+            index = _build_user_name_index()
+            cache["name_index"] = index
     matches = index.get(key, [])
     return matches[0] if len(matches) == 1 else None
 
@@ -431,6 +549,8 @@ def sync_from_employee(record: HealthCheckRecord, employee: Employee, *, resolve
     record.retirement_date = employee.retirement_date
     record.is_retired = bool(employee.is_retired)
     record.birth_date = employee.birth_date
+    # 本人あてメールの宛先。名簿（ファイルC）のメールアドレスに追従する。
+    record.employee_email = (employee.email or "").strip() or None
     # 担当者は未解決のときのみ自動解決（手動上書きを尊重）
     if resolve_manager and not record.manager_user and employee.manager_name:
         manager_user = resolve_manager_user(employee.manager_name)
@@ -467,6 +587,7 @@ def _sync_linked_record(record: HealthCheckRecord) -> bool:
         record.birth_date,
         record.manager_user,
         record.extra_notify_users,
+        record.employee_email,
     )
     sync_from_employee(record, employee)
     if not _manager_user_allowed(record.manager_user, record.office_code):
@@ -490,24 +611,60 @@ def _sync_linked_record(record: HealthCheckRecord) -> bool:
         record.birth_date,
         record.manager_user,
         record.extra_notify_users,
+        record.employee_email,
     )
     return before != after
+
+
+def _request_cache() -> dict:
+    """リクエスト内だけ有効なメモ化領域。
+
+    一覧表示は数百レコードを同期するため、レコードごとに User と
+    アクセス権営業所を引き直すと N+1 になる（800名で約1,600本のSQL）。
+    リクエスト境界を越えないので、権限変更の反映が遅れることはない。
+    """
+    try:
+        from flask import g
+        cache = getattr(g, "_hc_cache", None)
+        if cache is None:
+            cache = {}
+            g._hc_cache = cache
+        return cache
+    except Exception:
+        # リクエスト文脈の外（バッチ等）ではキャッシュせず素通しする
+        return {}
+
+
+def _user_office_codes_cached(username: str) -> set[str] | None:
+    """username → アクセス可能な営業所コード集合。ユーザーが居なければ None。"""
+    cache = _request_cache().setdefault("user_offices", {})
+    if username in cache:
+        return cache[username]
+    user = User.query.filter_by(username=username).first()
+    if user is None:
+        result = None
+    else:
+        try:
+            result = set(_dstt_user_office_codes(user))
+        except Exception:
+            result = {user.user_office.code} if user.user_office and user.user_office.code else set()
+    cache[username] = result
+    return result
 
 
 def _manager_user_allowed(username: str, office_code: str | None) -> bool:
     username = (username or "").strip()
     if not username:
         return True
-    user = User.query.filter_by(username=username).first()
-    if not user:
+    codes = _user_office_codes_cached(username)
+    if codes is None:
         return False
     code = (office_code or "").strip()
-    if not code or _is_dstt_admin():
+    if not code:
         return True
-    try:
-        return code in _dstt_user_office_codes(user)
-    except Exception:
-        return bool(user.user_office and user.user_office.code == code)
+    # 判定材料は「宛先本人がその営業所にアクセスできるか」のみ。操作者の
+    # 管理者権限で緩めない（_serialize_extra_notify_users と同じ理由）。
+    return code in codes
 
 
 def _check_record_access(user_id: str, record: HealthCheckRecord | None, *, sync: bool = True) -> bool:
@@ -520,7 +677,30 @@ def _check_record_access(user_id: str, record: HealthCheckRecord | None, *, sync
     return True
 
 
+def _prefetch_employees(records: list[HealthCheckRecord]) -> list[Employee]:
+    """名簿連携レコードの Employee をまとめて読み込み、identity map に載せる。
+
+    以降の db.session.get(Employee, id) は identity map に当たるため
+    追加のSQLを発行しない（レコードごとの1本ずつを1本にまとめる）。
+
+    **戻り値は呼び出し側で保持すること。** SQLAlchemy の identity map は
+    弱参照なので、読み込んだ Employee をどこからも参照しないと GC され、
+    結局レコードごとに SELECT が飛ぶ。
+    """
+    ids = {r.employee_id for r in records if r.record_type == "linked" and r.employee_id}
+    if not ids:
+        return []
+    id_list = list(ids)
+    loaded: list[Employee] = []
+    # SQLite のバインド変数上限（既定999）に掛からないよう分割する
+    for i in range(0, len(id_list), 500):
+        loaded.extend(Employee.query.filter(Employee.id.in_(id_list[i:i + 500])).all())
+    return loaded
+
+
 def _sync_record_list(records: list[HealthCheckRecord]) -> None:
+    # _keep_alive は使わないが、GC を防ぐために同期が終わるまで保持する
+    _keep_alive = _prefetch_employees(records)  # noqa: F841
     changed = False
     for record in records:
         if _sync_linked_record(record):
@@ -543,17 +723,49 @@ def record_history(record: HealthCheckRecord | None, user_id: str, action: str,
         new_value=None if new_value is None else str(new_value),
     )
     db.session.add(history)
-    count = HealthCheckEditHistory.query.count()
-    if count > MAX_EDIT_HISTORY:
+    # 剪定は「そのレコードの履歴」単位で行う。以前はテーブル全体で200件に
+    # 制限していたため、数十人分の編集を挟んだだけで最初の対象者の監査証跡が
+    # 消えていた（要配慮個人情報の追跡として機能していなかった）。
+    # レコードに紐付かない一括操作の履歴（record_id=None）は剪定しない。
+    if record is None or record.id is None:
+        return
+    count = HealthCheckEditHistory.query.filter_by(record_id=record.id).count()
+    if count > MAX_EDIT_HISTORY_PER_RECORD:
         old = (HealthCheckEditHistory.query
+               .filter_by(record_id=record.id)
                .order_by(HealthCheckEditHistory.edited_at.asc())
-               .limit(count - MAX_EDIT_HISTORY).all())
+               .limit(count - MAX_EDIT_HISTORY_PER_RECORD).all())
         for h in old:
             db.session.delete(h)
 
 
 def _allowed_attachment(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_ATTACHMENT_EXT
+
+
+def _safe_original_name(filename: str, ext: str) -> str:
+    """表示・ダウンロード用の元ファイル名を作る。
+
+    `secure_filename()` は非ASCIIを全て捨てるため、日本語名のスキャン
+    （例「健康診断結果.pdf」）が `pdf` という拡張子なしの名前になっていた。
+    実体は uuid 名で保存するので、ここではパス区切り・制御文字だけを落として
+    日本語をそのまま残す。
+    """
+    name = os.path.basename(str(filename or "").replace("\\", "/")).strip()
+    name = "".join(ch for ch in name if ch.isprintable() and ch not in '/\\:*?"<>|')
+    name = name.strip(". ") or f"file.{ext}"
+    if not name.lower().endswith(f".{ext}"):
+        name = f"{name}.{ext}"
+    return name[:255]
+
+
+def _attachment_download_name(attachment, ext: str) -> str:
+    """ダウンロード時のファイル名。拡張子が失われた既存データも救済する。"""
+    name = (attachment.original_name or "").strip()
+    if not name or name.lower() == ext or "." not in name:
+        base = (attachment.title or "").strip() or "健診資料"
+        return _safe_original_name(base, ext or "dat")
+    return name
 
 
 # ============================================================
@@ -690,7 +902,38 @@ def api_records():
     if status_filter:
         items = [r for r in items if r["status"] == status_filter]
 
-    return jsonify({"records": items, "count": len(items)})
+    # ページネーション。ステータスが算出値のため、絞り込み後の配列を切り出す。
+    # per_page=0 は「全件」（CSV突合など、意図して全部見たいとき用）。
+    total = len(items)
+    try:
+        per_page = int(request.args.get("per_page", DEFAULT_PAGE_SIZE))
+    except (TypeError, ValueError):
+        per_page = DEFAULT_PAGE_SIZE
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+
+    if per_page <= 0:
+        return jsonify({"records": items, "count": total, "total": total,
+                        "page": 1, "per_page": 0, "pages": 1})
+
+    per_page = min(per_page, MAX_PAGE_SIZE)
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = min(page, pages)
+    start = (page - 1) * per_page
+    window = items[start:start + per_page]
+
+    return jsonify({
+        # count は後方互換のため「このページの件数」ではなく従来どおり返す値を維持しない。
+        # 画面は total を使って「n 件中 x〜y 件」を表示する。
+        "records": window,
+        "count": len(window),
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": pages,
+    })
 
 
 @health_check_bp.route("/api/record/<int:record_id>")
@@ -859,7 +1102,16 @@ def api_delete_record(record_id):
             os.remove(os.path.join(get_uploads_path(), attachment.stored_path))
         except OSError:
             pass
-    record_history(record, user_id, "delete", "all", record.employee_name, None)
+
+    # このレコードの項目別履歴（健診項目の旧値・新値＝要配慮個人情報）を消す。
+    # record_id は FK ではないため放置すると孤児として残り、さらに SQLite が
+    # レコードIDを再利用すると、次に同じIDで作られた別営業所のレコードの
+    # 履歴として閲覧できてしまう。
+    HealthCheckEditHistory.query.filter_by(record_id=record.id).delete(synchronize_session=False)
+    # 削除の事実だけは監査用に残す。ID再利用で他人の履歴として見えないよう
+    # record_id は持たせない（年度・氏名・実行者で追跡できる）。
+    record_history(None, user_id, "delete", "all", record.employee_name, None,
+                   year=record.target_year, name=record.employee_name)
     db.session.delete(record)
     db.session.commit()
     return jsonify({"success": True})
@@ -1125,8 +1377,9 @@ def api_upload_attachment(record_id):
         category=category,
         title=title,
         stored_path=rel_path,
-        original_name=secure_filename(file.filename) or f"file.{ext}",
-        content_type=file.mimetype,
+        original_name=_safe_original_name(file.filename, ext),
+        # 申告値は記録として残すだけ。配信時の Content-Type は拡張子から決める。
+        content_type=ATTACHMENT_MIME_BY_EXT.get(ext, "application/octet-stream"),
         file_size=size,
         uploaded_by=user_id,
     )
@@ -1150,12 +1403,20 @@ def api_download_attachment(record_id, attachment_id):
         return jsonify({"error": "ファイルが見つかりません"}), 404
     # inline=1 のときはプレビュー用にブラウザ内表示（画像/PDF）。既定はダウンロード。
     inline = request.args.get("inline") == "1"
-    return send_file(
+    # Content-Type は保存済みの拡張子から決める（クライアント申告値は信用しない）。
+    ext = attachment.stored_path.rsplit(".", 1)[-1].lower() if "." in attachment.stored_path else ""
+    mimetype = ATTACHMENT_MIME_BY_EXT.get(ext)
+    if mimetype is None:
+        # 想定外の拡張子はブラウザで開かせず、必ずダウンロードさせる。
+        mimetype, inline = "application/octet-stream", False
+    response = send_file(
         abs_path,
         as_attachment=not inline,
-        download_name=attachment.original_name,
-        mimetype=attachment.content_type or None,
+        download_name=_attachment_download_name(attachment, ext),
+        mimetype=mimetype,
     )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @health_check_bp.route("/api/record/<int:record_id>/attachment/<int:attachment_id>", methods=["PATCH"])
@@ -1289,8 +1550,16 @@ def api_area_managers():
 @login_required
 def api_sites():
     """専従先名の検索候補（現場リストPLUS＝Site）。手動入力も可能なので候補提示のみ。"""
+    user_id = str(current_user.username)
     search = request.args.get("search", "").strip()
     query = Site.query.filter(Site.is_active.is_(True))
+    # 現場（専従先）候補も自分の営業所スコープに限る。以前は全営業所の現場を
+    # 誰でも列挙できた。
+    if not is_dstt_admin():
+        user_offices = get_user_offices(user_id)
+        if not user_offices:
+            return jsonify({"sites": []})
+        query = query.filter(Site.office_code.in_(user_offices))
     if search:
         query = query.filter(Site.site_name.like(f"%{search}%"))
     sites = query.order_by(Site.site_name).limit(50).all()
@@ -1431,6 +1700,21 @@ _EXPORT_BOOL_KEYS = {"is_night_worker", "needs_recheck", "is_retired", "is_exemp
 _RECORD_TYPE_LABEL = {"linked": "名簿連携", "pre_hire": "入社前", "internal": "内勤者"}
 
 
+def _csv_safe(value) -> str:
+    """Excel の数式インジェクション対策。
+
+    備考・二次検査結果などの自由入力が `=`/`+`/`-`/`@`/TAB/CR で始まると、
+    Excel が数式として解釈・実行する。先頭に `'` を付けて無害化する
+    （CloudShift のエクスポートと同じ方針）。
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    if text[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + text
+    return text
+
+
 @health_check_bp.route("/api/export")
 @login_required
 def api_export():
@@ -1457,9 +1741,9 @@ def api_export():
             elif key in _EXPORT_BOOL_KEYS:
                 row.append("○" if data.get(key) else "")
             elif key == "recheck_items":
-                row.append(record.recheck_items_text())
+                row.append(_csv_safe(record.recheck_items_text()))
             else:
-                row.append(data.get(key) if data.get(key) is not None else "")
+                row.append(_csv_safe(data.get(key)))
         writer.writerow(row)
 
     output = BytesIO(buffer.getvalue().encode("utf-8-sig"))
@@ -1489,6 +1773,13 @@ def api_settings():
                 return jsonify({"error": "リードタイムが不正です"}), 400
         save_settings(settings)
         return jsonify({"success": True, "settings": settings})
+
+    # GET も DSTT管理者のみ。settings.json には health_officers
+    # （営業所コード → 健康診断担当の username 配列）が入っており、
+    # 以前は @login_required だけで全営業所分を誰にでも返していた。
+    # 自営業所の担当者一覧が必要な場合は /api/office_officers を使う。
+    if not is_dstt_admin():
+        return jsonify({"error": "管理者権限が必要です"}), 403
     return jsonify({"settings": load_settings()})
 
 
@@ -1598,6 +1889,215 @@ def api_office_officers():
     ]})
 
 
+# ============================================================
+# 本人あてメール通知のコントロールパネル
+# ============================================================
+
+def _mail_notify_table(settings: dict) -> dict:
+    table = settings.get("mail_notify")
+    return table if isinstance(table, dict) else {}
+
+
+def _save_mail_notify(office_codes: list[str], enabled: bool, kinds: dict) -> list[str]:
+    """指定営業所のメール送信設定を保存し、実際に適用した営業所コードを返す。"""
+    settings = load_settings()
+    table = _mail_notify_table(settings)
+    applied = []
+    for code in office_codes:
+        table[code] = normalize_mail_notify({"enabled": enabled, "kinds": kinds})
+        applied.append(code)
+    settings["mail_notify"] = table
+    save_settings(settings)
+    return applied
+
+
+@health_check_bp.route("/api/admin/mail_notify", methods=["GET", "POST"])
+@login_required
+def api_admin_mail_notify():
+    """営業所ごとの本人あてメール送信設定の取得・変更（個別）。
+
+    社員はDSTTアカウントを持たないため本人のオプトインが存在しない。
+    送信可否はここでの管理者設定だけで決まるので、既定は必ず「送らない」。
+    """
+    user_id = str(current_user.username)
+    if not is_health_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+
+    if request.method == "POST":
+        payload = request.json or {}
+        office_code = (payload.get("office_code") or "").strip()
+        if not office_code:
+            return jsonify({"error": "営業所コードが必要です"}), 400
+        if not can_admin_office(user_id, office_code):
+            return jsonify({"error": "この営業所を管理する権限がありません"}), 403
+        applied = _save_mail_notify(
+            [office_code], bool(payload.get("enabled")), payload.get("kinds") or {})
+        record_history(None, user_id, "mail_notify", office_code, None,
+                       json.dumps(get_office_mail_notify(office_code), ensure_ascii=False))
+        db.session.commit()
+        return jsonify({"success": True, "office_code": applied[0],
+                        "setting": get_office_mail_notify(office_code)})
+
+    result = []
+    for o in _office_options():
+        if not can_admin_office(user_id, o["code"]):
+            continue
+        setting = get_office_mail_notify(o["code"])
+        result.append({"code": o["code"], "name": o["name"], **setting})
+    return jsonify({"offices": result, "kind_labels": MAIL_KIND_LABELS})
+
+
+@health_check_bp.route("/api/admin/mail_notify/bulk", methods=["POST"])
+@login_required
+def api_admin_mail_notify_bulk():
+    """管理できる営業所すべて（または指定分）へまとめて適用する。"""
+    user_id = str(current_user.username)
+    if not is_health_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    payload = request.json or {}
+    requested = payload.get("offices")
+    candidates = [o["code"] for o in _office_options() if can_admin_office(user_id, o["code"])]
+    if isinstance(requested, list) and requested:
+        targets = [c for c in candidates if c in {str(x).strip() for x in requested}]
+    else:
+        targets = candidates
+    if not targets:
+        return jsonify({"error": "対象営業所がありません"}), 403
+
+    applied = _save_mail_notify(targets, bool(payload.get("enabled")), payload.get("kinds") or {})
+    record_history(None, user_id, "mail_notify_bulk", ",".join(applied), None,
+                   json.dumps({"enabled": bool(payload.get("enabled")),
+                               "kinds": payload.get("kinds") or {}}, ensure_ascii=False))
+    db.session.commit()
+    return jsonify({"success": True, "applied": applied})
+
+
+def _mail_basis_for(record, kind: str):
+    """種別ごとの対象日と、通知条件を満たしているかを返す。"""
+    if kind == "reservation":
+        return record.reservation_date, (record.reservation_date is not None
+                                         and record.exam_date is None)
+    if kind == "night_second":
+        basis = record.exam_date_2_target
+        if basis is None and record.exam_date is not None:
+            basis = record.exam_date + relativedelta(months=6)
+        return basis, (bool(record.is_night_worker) and record.exam_date_2 is None)
+    if kind == "secondary_exam":
+        return record.secondary_recommended_date, (
+            bool(record.needs_recheck)
+            and record.secondary_recommended_date is not None
+            and record.secondary_exam_date is None)
+    return None, False
+
+
+@health_check_bp.route("/api/mail_preview")
+@login_required
+def api_mail_preview():
+    """送信対象のプレビュー。誰に送られ、誰に送られないか（理由つき）を返す。
+
+    一括送信の前に必ずここで件数と内訳を確認できるようにする。
+    """
+    from app.services.health_check_mail import can_send_to, build_message
+
+    user_id = str(current_user.username)
+    kind = (request.args.get("kind") or "secondary_exam").strip()
+    if kind not in MAIL_KINDS:
+        return jsonify({"error": "通知種別が不正です"}), 400
+    query, error = _scoped_query(user_id)
+    if error:
+        return error
+
+    records = query.all()
+    _sync_record_list(records)
+
+    sendable, blocked, sample = 0, {}, None
+    for record in records:
+        basis, condition = _mail_basis_for(record, kind)
+        if not condition or basis is None:
+            continue
+        ok, reason = can_send_to(record)
+        if not ok:
+            blocked[reason] = blocked.get(reason, 0) + 1
+            continue
+        sendable += 1
+        if sample is None:
+            subject, body = build_message(
+                record, kind, basis,
+                office_name=get_office_display_name(record.office_code),
+                contact_name=record.manager_name or "")
+            sample = {"subject": subject, "body": body,
+                      "to_name": record.employee_name, "to": record.employee_email}
+
+    return jsonify({
+        "kind": kind,
+        "kind_label": MAIL_KIND_LABELS.get(kind, kind),
+        "sendable": sendable,
+        "blocked": [{"reason": r, "count": c} for r, c in sorted(blocked.items())],
+        "sample": sample,
+    })
+
+
+@health_check_bp.route("/api/mail_send", methods=["POST"])
+@login_required
+def api_mail_send():
+    """未受診者への督促などを手動で一括送信する。
+
+    自動送信は対象日当日の1回のみ。受診勧奨を追いかけるには足りないため、
+    管理者が任意のタイミングでまとめて送れる導線を用意する。
+    dedupe_key に送信日を含めるので、同日の二重送信だけを防ぐ。
+    """
+    from app.services.health_check_mail import can_send_to, build_message, MAIL_KINDS as _K
+    from app.services.mail_service import queue_mail
+
+    user_id = str(current_user.username)
+    if not is_health_admin(user_id):
+        return jsonify({"error": "管理者権限が必要です"}), 403
+    payload = request.json or {}
+    kind = (payload.get("kind") or "").strip()
+    if kind not in _K:
+        return jsonify({"error": "通知種別が不正です"}), 400
+
+    query, error = _scoped_query(user_id)
+    if error:
+        return error
+    records = query.all()
+    _sync_record_list(records)
+
+    today = date.today()
+    only_ids = payload.get("record_ids")
+    only = {int(x) for x in only_ids} if isinstance(only_ids, list) and only_ids else None
+
+    sent, skipped = 0, 0
+    for record in records:
+        if only is not None and record.id not in only:
+            continue
+        if not can_admin_office(user_id, _record_access_office(record)):
+            continue
+        basis, condition = _mail_basis_for(record, kind)
+        if not condition or basis is None:
+            continue
+        ok, _reason = can_send_to(record)
+        if not ok:
+            skipped += 1
+            continue
+        subject, body = build_message(
+            record, kind, basis,
+            office_name=get_office_display_name(record.office_code),
+            contact_name=record.manager_name or "")
+        queue_mail(
+            record.employee_email, subject, body,
+            to_name=record.employee_name, category="health_check",
+            dedupe_key=f"health_check:manual:{record.id}:{kind}:{today.isoformat()}",
+            related_type="health_check_record", related_key=str(record.id),
+            created_by=user_id, commit=False,
+        )
+        sent += 1
+
+    record_history(None, user_id, "mail_send", kind, None, f"{sent}件送信")
+    db.session.commit()
+    return jsonify({"success": True, "sent": sent, "skipped": skipped})
+
+
 @health_check_bp.route("/api/admin/health_officers", methods=["GET", "POST"])
 @login_required
 def api_admin_health_officers():
@@ -1628,7 +2128,13 @@ def api_admin_health_officers():
             u = str(entry).strip()
             if u and u not in usernames:
                 usernames.append(u)
-        valid = {u.username for u in User.query.filter(User.username.in_(usernames)).all()} if usernames else set()
+        # 実在するだけでなく「その営業所にアクセスできる」ユーザーだけを担当に据える。
+        # 健康診断担当はその営業所の全レコードの既定通知先になるため、営業所外の
+        # ユーザーを指定できると、健診PLUSを閲覧できない相手に氏名＋二次検査対象
+        # という健康情報が ToBell 経由で配信されてしまう。
+        candidates = User.query.filter(User.username.in_(usernames)).all() if usernames else []
+        valid = {u.username for u in candidates if _manager_user_allowed(u.username, office_code)}
+        rejected = [u for u in usernames if u not in valid]
         filtered = [u for u in usernames if u in valid]
         if filtered:
             officers_map[office_code] = filtered
@@ -1662,7 +2168,12 @@ def api_admin_health_officers():
         except Exception:
             db.session.rollback()
         return jsonify({"success": True, "office_code": office_code,
-                        "officers": [{"username": u, "name": _officer_user_label(u)} for u in filtered]})
+                        "officers": [{"username": u, "name": _officer_user_label(u)} for u in filtered],
+                        "rejected": rejected,
+                        "warning": (
+                            f"この営業所へのアクセス権が無いため除外しました: {', '.join(rejected)}"
+                            if rejected else None
+                        )})
 
     # 自分が管理できる営業所のみ返す（DSTT管理者は全営業所）
     result = []
