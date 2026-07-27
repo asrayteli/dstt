@@ -1190,3 +1190,104 @@ def test_active_filters_exclude_done_and_archived(app_ctx):
     assert done_task["id"] in done_ids
     assert active_today["id"] not in done_ids
     assert archived_task["id"] not in done_ids
+
+
+# ============================================================
+# 恒久的に失敗する push 購読の自動無効化
+# ============================================================
+
+def _push_env(app_ctx, monkeypatch, tmp_path, *, status_code, message="boom"):
+    """指定のHTTPステータスで必ず失敗する push 環境を組み立てる。"""
+    from app.services import to_bell_push
+
+    pem = tmp_path / "vapid.pem"
+    pem.write_text("dummy-key")
+    monkeypatch.setattr(to_bell_push, "_vapid_private_key_path", lambda: pem)
+
+    class FakeResponse:
+        def __init__(self, code):
+            self.status_code = code
+            self.text = message
+
+    class FakeWebPushException(Exception):
+        def __init__(self, msg, response=None):
+            super().__init__(msg)
+            self.response = response
+
+    def fake_webpush(**kwargs):
+        raise FakeWebPushException(message, response=FakeResponse(status_code))
+
+    monkeypatch.setattr(to_bell_push, "webpush", fake_webpush)
+    monkeypatch.setattr(to_bell_push, "WebPushException", FakeWebPushException)
+    return to_bell_push
+
+
+def _run_push(app_ctx, to_bell_push, user="alice"):
+    from app.models import ToBellPushSubscription, db
+
+    with app_ctx.app_context():
+        db.session.add(ToBellPushSubscription(
+            user_id=user, endpoint="https://fcm.googleapis.com/fcm/send/x",
+            p256dh="k", auth="a",
+        ))
+        db.session.commit()
+        result = to_bell_push.send_push_to_user(user, title="t", body="b", url="/u")
+        row = ToBellPushSubscription.query.filter_by(user_id=user).first()
+        return result, row.is_active
+
+
+def test_push_subscription_with_vapid_mismatch_403_is_deactivated(app_ctx, monkeypatch, tmp_path):
+    """403（VAPID鍵の不一致）は、鍵を入れ替えない限り永久に成功しない。
+
+    無効化しないと毎分リトライし続け、1配信あたり数百msの無駄な
+    HTTP往復が積み上がる（実測で毎分12秒を浪費していた）。
+    """
+    _create_user(app_ctx, "alice", "Alice")
+    tbp = _push_env(app_ctx, monkeypatch, tmp_path, status_code=403,
+                    message="the VAPID credentials in the authorization header "
+                            "do not correspond to the credentials used to create the subscriptions.")
+    result, is_active = _run_push(app_ctx, tbp)
+    assert result == {"sent": 0, "failed": 1}
+    assert is_active is False, "403の購読が有効なまま残り、毎分リトライされ続ける"
+
+
+def test_push_subscription_with_vapid_mismatch_400_is_deactivated(app_ctx, monkeypatch, tmp_path):
+    """400 + VapidPkHashMismatch も同じく恒久的な失敗。"""
+    _create_user(app_ctx, "alice", "Alice")
+    tbp = _push_env(app_ctx, monkeypatch, tmp_path, status_code=400,
+                    message='{"reason":"VapidPkHashMismatch"}')
+    result, is_active = _run_push(app_ctx, tbp)
+    assert result == {"sent": 0, "failed": 1}
+    assert is_active is False, "VapidPkHashMismatch の購読が有効なまま残る"
+
+
+def test_push_subscription_with_generic_400_is_kept(app_ctx, monkeypatch, tmp_path):
+    """一方、原因の分からない 400 では購読を消してはならない。
+
+    こちら側のペイロード不備などで一時的に400になった場合に購読を消すと、
+    利用者は理由も分からないまま通知が止まり、再登録するまで復旧しない。
+    """
+    _create_user(app_ctx, "alice", "Alice")
+    tbp = _push_env(app_ctx, monkeypatch, tmp_path, status_code=400,
+                    message='{"reason":"PayloadTooLarge"}')
+    result, is_active = _run_push(app_ctx, tbp)
+    assert result == {"sent": 0, "failed": 1}
+    assert is_active is True, "原因不明の400で購読を消してはいけない"
+
+
+def test_push_subscription_with_transient_500_is_kept(app_ctx, monkeypatch, tmp_path):
+    """push サービス側の一時障害（5xx）でも購読は維持する。"""
+    _create_user(app_ctx, "alice", "Alice")
+    tbp = _push_env(app_ctx, monkeypatch, tmp_path, status_code=503)
+    result, is_active = _run_push(app_ctx, tbp)
+    assert result == {"sent": 0, "failed": 1}
+    assert is_active is True, "一時的な5xxで購読を消してはいけない"
+
+
+def test_push_subscription_gone_410_is_still_deactivated(app_ctx, monkeypatch, tmp_path):
+    """既存挙動の回帰防止：410（購読失効）は従来どおり無効化する。"""
+    _create_user(app_ctx, "alice", "Alice")
+    tbp = _push_env(app_ctx, monkeypatch, tmp_path, status_code=410)
+    result, is_active = _run_push(app_ctx, tbp)
+    assert result == {"sent": 0, "failed": 1}
+    assert is_active is False

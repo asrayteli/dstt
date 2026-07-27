@@ -2061,6 +2061,14 @@ class HealthCheckRecord(db.Model):
     # リマインド設定（個別上書き。Noneのときは全体既定を使う）
     reminder_lead_days = db.Column(db.Integer, nullable=True)
 
+    # 本人あてメール通知。社員はDSTTアカウントを持たないため、名簿PLUS
+    # （Employee.email）のアドレスへ直接送る。名簿連携レコードは同期、
+    # 手動モード（入社前・内勤者）は手入力。
+    employee_email = db.Column(db.String(255), nullable=True)
+    # このレコードだけメール送信を止める（本人の申し出等）。営業所単位の
+    # 送信設定より優先する。
+    email_opt_out = db.Column(db.Boolean, nullable=False, default=False)
+
     # システム
     secondary_task_id = db.Column(db.Integer, nullable=True)   # 二次検査ToBellタスクID
     night2_task_id = db.Column(db.Integer, nullable=True)      # 深夜2回目ToBellタスクID
@@ -2214,6 +2222,8 @@ class HealthCheckRecord(db.Model):
             'is_kintone': bool(self.is_kintone),
             'extra_notify_users': self.extra_notify_users_list(),
             'reminder_lead_days': self.reminder_lead_days,
+            'employee_email': self.employee_email or '',
+            'email_opt_out': bool(self.email_opt_out),
             'status': self.compute_status(),
             'night_second_status': self.night_second_status(),
             'age_at_fiscal_start': self.age_at_fiscal_start(),

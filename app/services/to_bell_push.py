@@ -234,6 +234,48 @@ def send_due_task_pushes(*, now: datetime | None = None) -> dict[str, int]:
     return {"sent": sent, "skipped": skipped, "failed": failed}
 
 
+# push サービスが「この購読はもう成功しない」と示すサイン。
+# 404/410 : 購読そのものが失効している（購読解除・ブラウザ再インストール等）
+# 403     : VAPID 署名がこの購読を認可しない。サーバ側の鍵を入れ替えない限り
+#           永久に失敗するため、リトライしても無駄（毎分の再送で時間を浪費する）
+_PUSH_GONE_STATUSES = {404, 410}
+_PUSH_VAPID_STATUSES = {403}
+# 400 は原因が幅広い（こちらのペイロード不備など一時的なものも含む）ため、
+# VAPID 鍵の不一致だと明示されている場合だけ恒久失敗とみなす。
+_PUSH_VAPID_HINTS = (
+    "vapidpkhashmismatch",
+    "vapid credentials in the authorization header do not correspond",
+)
+
+
+def _is_permanent_push_failure(exc, status_code) -> bool:
+    """この購読を無効化すべき（リトライしても成功しない）失敗かを判定する。
+
+    一時障害（5xx やネットワーク断）や原因不明の 400 で購読を消すと、
+    利用者は理由が分からないまま通知が止まり、再登録するまで復旧しない。
+    そのため「恒久的だと確信できる場合」だけ True を返す。
+
+    既知のトレードオフ: サーバ側の VAPID 鍵ファイル（instance/ 配下）を
+    失って再生成した場合、既存の購読は一斉に 403/400 になり、まとめて
+    is_active=False になる。その状態では実際どの購読にも配信できないため
+    判定としては正しいが、鍵をバックアップから戻した場合は無効化された
+    購読も戻す必要がある:
+        UPDATE to_bell_push_subscriptions SET is_active = 1;
+    無効化は削除ではなくフラグなので、この 1 文で復旧できる。
+    """
+    if status_code in _PUSH_GONE_STATUSES:
+        return True
+    if status_code in _PUSH_VAPID_STATUSES:
+        return True
+    if status_code == 400:
+        detail = " ".join(filter(None, (
+            str(exc or ""),
+            str(getattr(getattr(exc, "response", None), "text", "") or ""),
+        ))).lower()
+        return any(hint in detail for hint in _PUSH_VAPID_HINTS)
+    return False
+
+
 def send_push_to_user(user_id: str, *, title: str, body: str, url: str) -> dict[str, int]:
     if webpush is None:
         raise ToBellPushUnavailable("pywebpush がインストールされていません。")
@@ -274,10 +316,18 @@ def send_push_to_user(user_id: str, *, title: str, body: str, url: str) -> dict[
         except WebPushException as exc:
             failed += 1
             status_code = getattr(getattr(exc, "response", None), "status_code", None)
-            if status_code in {404, 410}:
+            if _is_permanent_push_failure(exc, status_code):
+                # commit で属性が expire されるため、ログ用の値は先に控える
+                endpoint = (subscription.endpoint or "")[:80]
                 subscription.is_active = False
                 db.session.commit()
-            logger.warning("To Bell push failed for %s: %s", user_id, exc)
+                logger.info(
+                    "To Bell push: 恒久的な失敗のため購読を無効化しました "
+                    "(user=%s, status=%s, endpoint=%s)",
+                    user_id, status_code, endpoint,
+                )
+            else:
+                logger.warning("To Bell push failed for %s: %s", user_id, exc)
         except Exception as exc:  # noqa: BLE001 - 1件の配信失敗で全体を止めない
             failed += 1
             logger.warning("To Bell push error for %s: %s", user_id, exc)
@@ -318,7 +368,54 @@ def init_to_bell_push_scheduler(app) -> None:
             coalesce=True,
             replace_existing=True,
         )
+        # 健診PLUSのリマインド同期。対象者数に比例して重い（800名で初回13秒）ため、
+        # リクエスト経路（before_request）ではなくここで回す。30分ごとに起床し、
+        # その日まだ実行していなければ1回だけ実行する。
+        _scheduler.add_job(
+            func=lambda: _run_health_check_sweep_job(app),
+            trigger="interval",
+            minutes=30,
+            id="health_check_daily_sweep",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
         _scheduler.start()
+
+
+def _run_health_check_sweep_job(app) -> None:
+    """健診PLUSのリマインドを1日1回だけ同期する。
+
+    実行済みかどうかは instance 配下のマーカーファイルの日付で判定する
+    （gunicorn の複数ワーカー対策は _run_singleton の flock と併用）。
+    """
+    def _job():
+        from datetime import date as _date
+        marker = os.path.join(app.instance_path, "health_check_sweep_last_run")
+        today = _date.today().isoformat()
+        try:
+            with open(marker, "r", encoding="utf-8") as f:
+                if f.read().strip() == today:
+                    return
+        except OSError:
+            pass
+        with app.app_context():
+            try:
+                from app.services.to_bell_hooks import sweep_health_check_reminders
+                result = sweep_health_check_reminders()
+                logger.info("health_check daily sweep: %s", result)
+            except Exception as exc:  # noqa: BLE001
+                db.session.rollback()
+                logger.warning("health_check daily sweep failed: %s", exc)
+                return
+        try:
+            os.makedirs(app.instance_path, exist_ok=True)
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write(today)
+        except OSError:
+            logger.warning("health_check sweep marker を書けませんでした: %s", marker)
+
+    _run_singleton(app, "health_check_daily_sweep.lock", _job)
 
 
 def _run_due_push_job(app) -> None:
