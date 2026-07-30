@@ -51,7 +51,27 @@
     const codeKeys = [];
     rawAssignments.forEach((item) => { if (item && String(item.source_type || 'local') !== 'local') return; const key = String((item && (item.code_key || item.code)) || '').trim(); if (key && !codeKeys.some((saved) => saved.toLocaleLowerCase() === key.toLocaleLowerCase())) codeKeys.push(key); });
     const base = { day, category: codeKeys.length ? 'empty' : (hasExternalAssignment ? 'external' : 'empty'), code_key: codeKeys.join(' + '), leave_kind: '', requested: false, start_minutes: null, end_minutes: null, bind_minutes: 0, break_minutes: 0, work_minutes: 0, overtime_minutes: 0, warnings: [] };
-    if (!codeKeys.length) return base;
+    if (!codeKeys.length) {
+      // 他帳から同期された勤務だけのセルは、時刻上書きがあるときのみ勤務として集計する
+      // （サーバー側 worktime_engine と同じ規則）。
+      const override = hasExternalAssignment && entry ? entry.time_override : null;
+      if (override) {
+        const start = minutes(override.start, false); const end = minutes(override.end, true);
+        if (start !== null && end !== null && start < end) {
+          base.category = entry.holiday_kind ? `${entry.holiday_kind}_holiday_work` : 'work';
+          base.start_minutes = start; base.end_minutes = end;
+          base.bind_minutes = end - start;
+          const breakValue = Number(settings.break_minutes == null ? 60 : settings.break_minutes);
+          base.break_minutes = Math.min(base.bind_minutes, Math.max(0, breakValue || 0));
+          base.work_minutes = base.bind_minutes - base.break_minutes;
+          const scheduled = entry.bind_override_minutes != null ? Number(entry.bind_override_minutes)
+            : member.scheduled_bind_minutes != null ? Number(member.scheduled_bind_minutes)
+            : Number(settings.scheduled_bind_minutes == null ? 570 : settings.scheduled_bind_minutes);
+          base.overtime_minutes = base.category === 'work' ? Math.max(0, base.bind_minutes - scheduled) : 0;
+        }
+      }
+      return base;
+    }
     const resolved = codeKeys.map((key) => codeMap[key.toLocaleLowerCase()]).filter((code) => { if (!code) base.warnings.push('CODE_UNDEFINED'); return !!code; });
     if (!resolved.length) return base;
     const leaveCodes = resolved.filter((code) => code.category === 'leave');
@@ -161,7 +181,7 @@
       const person = { person_id: member.id, label: member.display_name, days: personDays, totals, violations };
       people.push(person); allViolations.push(...violations);
     });
-    return { engine_version: '1.0.0-js', year, month, people, violations: allViolations };
+    return { engine_version: '1.1.0-js', year, month, people, violations: allViolations };
   }
 
   return { calculate, hhmm, minutes, dayType };
