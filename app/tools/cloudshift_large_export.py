@@ -217,7 +217,12 @@ def large_xlsx_bytes(
         details.append([_safe_cell(member.get("display_name"))])
         details.append(["日", "コード", "区分", "始業", "終業", "休憩", "拘束", "労働", "超過", "警告"])
         for day_result in person.get("days", []):
-            if not day_result.get("code_key") and not day_result.get("warnings"):
+            if (
+                not day_result.get("code_key")
+                and not day_result.get("warnings")
+                # 他帳同期＋時刻上書きの日はコード無しでも時間を持つため明細に含める
+                and not day_result.get("bind_minutes")
+            ):
                 continue
             details.append([
                 day_result.get("day"), _safe_cell(day_result.get("code_key")), day_result.get("category"),

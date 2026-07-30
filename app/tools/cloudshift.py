@@ -1560,6 +1560,8 @@ def _normalize_project_entries(
     entries: Any,
     year: int,
     month: int,
+    *,
+    strict_members: bool = True,
 ) -> dict[str, list[dict[str, Any]]]:
     if not project or project.get("mode") != LARGE_MODE:
         return _normalize_entries(entries, year, month)
@@ -1570,7 +1572,12 @@ def _normalize_project_entries(
         for entry in day_entries:
             member = members.get(str(entry.get("member_id") or ""))
             if member is None:
-                raise CloudShiftError(f"未登録のメンバーIDです: {entry.get('member_id')}", 400)
+                if strict_members:
+                    raise CloudShiftError(f"未登録のメンバーIDです: {entry.get('member_id')}", 400)
+                # 同期経路では未登録メンバーの行を素通しする（社員フィールドを補完しない
+                # ためマッチングからは自然に外れる）。過去データの1行のせいで帳全体の
+                # 同期が止まるのを防ぐ。保存経路（strict）では従来どおり明示エラー。
+                continue
             if str(member.get("column_type") or "regular") == "substitute":
                 entry["employee_number"] = str(entry.get("employee_number") or "").strip()
                 entry["employee_name"] = str(entry.get("employee_name") or "").strip()
@@ -1578,6 +1585,16 @@ def _normalize_project_entries(
                 entry["employee_number"] = str(member.get("employee_number") or "")
                 entry["employee_name"] = str(member.get("employee_name") or member.get("display_name") or "")
     return normalized
+
+
+def _normalize_project_entries_for_sync(
+    project: dict[str, Any] | None,
+    entries: Any,
+    year: int,
+    month: int,
+) -> dict[str, list[dict[str, Any]]]:
+    """シフト間同期用の寛容な正規化（未登録メンバー行があっても失敗しない）。"""
+    return _normalize_project_entries(project, entries, year, month, strict_members=False)
 
 
 def _validate_large_substitute_assignees(
@@ -1621,8 +1638,8 @@ def _build_month_payload(
         "month": month,
         "capacity_enabled": bool(capacity_enabled and required_capacity > 0),
         "required_capacity": required_capacity if capacity_enabled and required_capacity > 0 else 0,
-        "entries_per_day": _normalize_project_entries(project, entries, year, month),
-        "draft_entries_per_day": _normalize_project_entries(project, entries, year, month),
+        "entries_per_day": _normalize_project_entries_for_sync(project, entries, year, month),
+        "draft_entries_per_day": _normalize_project_entries_for_sync(project, entries, year, month),
         "meta_data": normalize_large_meta(meta_data, year, month) if project and project.get("mode") == LARGE_MODE else {},
         "revision": revision,
         "created_at": timestamp,
@@ -1854,7 +1871,7 @@ def _client_month_payload(
     payload = dict(month_data)
     payload.pop("revision_snapshots", None)
     if project and project.get("mode") == LARGE_MODE:
-        payload["entries_per_day"] = _normalize_project_entries(
+        payload["entries_per_day"] = _normalize_project_entries_for_sync(
             project, payload.get("entries_per_day"), int(payload["year"]), int(payload["month"])
         )
         payload["meta_data"] = normalize_large_meta(
@@ -1863,7 +1880,7 @@ def _client_month_payload(
         if not include_draft:
             payload.pop("draft_entries_per_day", None)
         else:
-            payload["draft_entries_per_day"] = _normalize_project_entries(
+            payload["draft_entries_per_day"] = _normalize_project_entries_for_sync(
                 project, payload.get("draft_entries_per_day"), int(payload["year"]), int(payload["month"])
             )
         payload["pending_substitute_entries_per_day"] = {}
@@ -2026,13 +2043,13 @@ def _upsert_project_to_db(project: dict[str, Any]) -> None:
             month = int(month_data.get("month"))
         except (TypeError, ValueError):
             year, month = _parse_month_key(month_key)
-        normalized_entries = _normalize_project_entries(project, month_data.get("entries_per_day"), year, month)
+        normalized_entries = _normalize_project_entries_for_sync(project, month_data.get("entries_per_day"), year, month)
         draft_source = (
             month_data.get("draft_entries_per_day")
             if "draft_entries_per_day" in month_data
             else normalized_entries
         )
-        normalized_draft_entries = _normalize_project_entries(project, draft_source, year, month)
+        normalized_draft_entries = _normalize_project_entries_for_sync(project, draft_source, year, month)
         desired_months[(year, month)] = {
             "capacity_enabled": bool(month_data.get("capacity_enabled")),
             "required_capacity": int(month_data.get("required_capacity", 0) or 0),
@@ -3379,11 +3396,11 @@ def _restore_month_revision_in_project(
     if project.get("mode") == LARGE_MODE:
         restored = _large_month_snapshot(snapshot)
         restored["year"], restored["month"] = year, month
-        restored["entries_per_day"] = _normalize_project_entries(
+        restored["entries_per_day"] = _normalize_project_entries_for_sync(
             project, restored.get("entries_per_day"), year, month
         )
-        live = _normalize_project_entries(project, current_month.get("entries_per_day"), year, month)
-        draft = _normalize_project_entries(project, current_month.get("draft_entries_per_day"), year, month)
+        live = _normalize_project_entries_for_sync(project, current_month.get("entries_per_day"), year, month)
+        draft = _normalize_project_entries_for_sync(project, current_month.get("draft_entries_per_day"), year, month)
         restored["draft_entries_per_day"] = draft if draft != live else restored["entries_per_day"]
         restored_meta = normalize_large_meta(restored.get("meta_data"), year, month)
         current_meta = normalize_large_meta(current_month.get("meta_data"), year, month)
@@ -5089,7 +5106,9 @@ def _large_target_member_id(
     occupied_ids = {
         str(entry.get("member_id") or "")
         for entry in day_entries
-        if isinstance(entry, dict)
+        # 同期の張り替え中は割当を剥がされた空エントリが一時的に残るため、
+        # 中身のあるエントリだけを「使用中の代務列」とみなす。
+        if isinstance(entry, dict) and _large_entry_has_content(entry)
     }
     return next(
         (
@@ -5299,7 +5318,7 @@ def _desired_shift_sync_entries_by_target(
         return loaded_targets[project_id]
 
     if mode == LARGE_MODE:
-        entries_per_day = _normalize_project_entries(
+        entries_per_day = _normalize_project_entries_for_sync(
             source_project, month_data.get("entries_per_day"), month_data["year"], month_data["month"]
         )
         config = normalize_large_config(source_project.get("large_config") or default_large_config())
@@ -5504,7 +5523,7 @@ def _replace_shift_synced_assignments_in_large_project(
     current_month = (target_project.get("months") or {}).get(month_key)
     if not current_month:
         return False
-    current_entries = _normalize_project_entries(
+    current_entries = _normalize_project_entries_for_sync(
         target_project, current_month.get("entries_per_day"), year, month
     )
     next_entries = json.loads(json.dumps(current_entries, ensure_ascii=False))
@@ -5522,8 +5541,10 @@ def _replace_shift_synced_assignments_in_large_project(
                 str(next_entry["assignments"][0].get("code_key") or "")
                 if next_entry["assignments"] else ""
             )
-            if _large_entry_has_content(next_entry):
-                kept_entries.append(next_entry)
+            # 割当が空になってもこの時点では残す。直後の再追加で同じセルへ同期し直す
+            # 場合に、時刻上書き・所定拘束上書き等のセル単位の設定を引き継ぐため。
+            # 中身が空のまま残ったエントリは最後の正規化で除去される。
+            kept_entries.append(next_entry)
         next_entries[day_key] = kept_entries
 
     for day_key, descriptors in desired_entries_by_day.items():
@@ -5594,7 +5615,7 @@ def _replace_shift_synced_assignments_in_large_project(
                 entry["employee_number"] = str(descriptor.get("employee_number") or "")
                 entry["employee_name"] = str(descriptor.get("employee_name") or "")
 
-    normalized_next = _normalize_project_entries(target_project, next_entries, year, month)
+    normalized_next = _normalize_project_entries_for_sync(target_project, next_entries, year, month)
     if normalized_next == current_entries:
         return False
     merged = {
@@ -5603,7 +5624,7 @@ def _replace_shift_synced_assignments_in_large_project(
         "revision": int(current_month.get("revision", 1) or 1) + 1,
         "updated_at": _jst_now_iso(),
     }
-    current_draft = _normalize_project_entries(
+    current_draft = _normalize_project_entries_for_sync(
         target_project,
         current_month.get("draft_entries_per_day", current_entries),
         year,
@@ -5901,6 +5922,125 @@ def _refresh_master_shift_from_sources(
     return True
 
 
+def _sync_source_ids_in_month(
+    target_project: dict[str, Any],
+    target_month: dict[str, Any] | None,
+    month_key: str,
+) -> set[str]:
+    """対象帳の指定月に残っている同期エントリ／同期割当のソース帳IDを集める。"""
+    if not target_month:
+        return set()
+    year, month = _parse_month_key(month_key)
+    source_ids: set[str] = set()
+    if str(target_project.get("mode") or "") == LARGE_MODE:
+        target_entries = _normalize_project_entries_for_sync(
+            target_project, target_month.get("entries_per_day"), year, month
+        )
+        for entries in target_entries.values():
+            for entry in entries:
+                for assignment in entry.get("assignments") or []:
+                    if (
+                        str(assignment.get("source_type") or "") == "sync"
+                        and str(assignment.get("sync_source_month_key") or "") == month_key
+                    ):
+                        source_ids.add(str(assignment.get("sync_source_project_id") or ""))
+    else:
+        target_entries = _normalize_entries(target_month.get("entries_per_day"), year, month)
+        for entries in target_entries.values():
+            for entry in entries:
+                if (
+                    _entry_is_shift_synced(entry)
+                    and str(entry.get("sync_source_month_key") or "") == month_key
+                ):
+                    source_ids.add(str(entry.get("sync_source_project_id") or ""))
+    source_ids.discard("")
+    return source_ids
+
+
+def _month_has_sync_from_source(
+    target_project: dict[str, Any],
+    target_month: dict[str, Any] | None,
+    source_project_id: str,
+    month_key: str,
+) -> bool:
+    """対象帳の指定月に、指定ソース由来の同期エントリ／同期割当があるかを判定する。"""
+    return source_project_id in _sync_source_ids_in_month(target_project, target_month, month_key)
+
+
+def _prune_orphan_large_sync_assignments(
+    target_project: dict[str, Any],
+    month_key: str,
+    known_source_ids: set[str],
+    *,
+    actor_name: str,
+) -> bool:
+    """大規模帳の指定月から、維持元が存在しない同期割当を取り除く。
+
+    対象: (1) 同期元シフト帳が削除済みで summaries に存在しない割当、
+    (2) sync_source_month_key が自身の月と一致しない割当（過去の月コピー等で
+    複製された不整合データ）。どちらも通常の差し替え同期では二度と更新・除去
+    されないため、開いたときの取り込みで掃除する。"""
+    if str(target_project.get("mode") or "") != LARGE_MODE:
+        return False
+    current_month = (target_project.get("months") or {}).get(month_key)
+    if not current_month:
+        return False
+    year, month = _parse_month_key(month_key)
+    current_entries = _normalize_project_entries_for_sync(
+        target_project, current_month.get("entries_per_day"), year, month
+    )
+    next_entries = json.loads(json.dumps(current_entries, ensure_ascii=False))
+    removed = 0
+    for day_entries in next_entries.values():
+        for entry in day_entries:
+            kept_assignments = []
+            for assignment in entry.get("assignments") or []:
+                if str(assignment.get("source_type") or "") == "sync" and (
+                    str(assignment.get("sync_source_project_id") or "") not in known_source_ids
+                    or str(assignment.get("sync_source_month_key") or "") != month_key
+                ):
+                    removed += 1
+                    continue
+                kept_assignments.append(assignment)
+            entry["assignments"] = kept_assignments
+            entry["value"] = (
+                str(kept_assignments[0].get("code_key") or "") if kept_assignments else ""
+            )
+    if not removed:
+        return False
+    normalized_next = _normalize_project_entries_for_sync(target_project, next_entries, year, month)
+    if normalized_next == current_entries:
+        return False
+    merged = {
+        **current_month,
+        "entries_per_day": normalized_next,
+        "revision": int(current_month.get("revision", 1) or 1) + 1,
+        "updated_at": _jst_now_iso(),
+    }
+    current_draft = _normalize_project_entries_for_sync(
+        target_project, current_month.get("draft_entries_per_day", current_entries), year, month
+    )
+    merged["draft_entries_per_day"] = (
+        current_month.get("draft_entries_per_day")
+        if current_draft != current_entries
+        else normalized_next
+    )
+    snapshots = dict(current_month.get("revision_snapshots") or {})
+    snapshots[str(int(current_month.get("revision", 1) or 1))] = _large_month_snapshot(current_month)
+    merged["revision_snapshots"] = _trim_revision_snapshots(snapshots)
+    target_project.setdefault("months", {})[month_key] = merged
+    _save_project(target_project)
+    _append_history(target_project["id"], {
+        "timestamp": _jst_now_iso(),
+        "editor_name": actor_name,
+        "editor_type": "auto",
+        "action": "shift_sync",
+        "month_key": month_key,
+        "changes": [f"維持元が存在しない同期割当 {removed}件 を削除"],
+    })
+    return True
+
+
 def _resync_shift_month(source_project: dict[str, Any], month_key: str, *, actor_name: str) -> None:
     month_data = (source_project.get("months") or {}).get(month_key)
     if not month_data:
@@ -5912,45 +6052,34 @@ def _resync_shift_month(source_project: dict[str, Any], month_key: str, *, actor
     )
     source_mode = str(source_project.get("mode") or "")
     relevant_target_ids = set(desired_by_target.keys())
+    target_modes: dict[str, str] = {}
     for project in summaries:
         project_mode = str(project.get("mode") or "")
+        project_id = str(project.get("id") or "").strip()
+        if project_id:
+            target_modes[project_id] = project_mode
         if project_mode == "master" and source_mode == "master":
             continue
         if project_mode != "master" and project_mode == source_mode:
             continue
-        project_id = str(project.get("id") or "").strip()
+        # 大規模帳への取り込みは「大規模帳を開いたタイミング」の同期
+        # （_catch_up_large_shift_sync → _refresh_shift_sync_into_target_month）に
+        # 一本化する。他帳の保存時に大規模帳を書き換えると、編集中の大規模帳が
+        # 予測できないタイミングでリビジョン更新され 409 になるため、ここでは触らない。
+        if project_mode == LARGE_MODE:
+            continue
         if not project_id:
             continue
-        target_month = (project.get("months") or {}).get(month_key)
-        if project_mode == LARGE_MODE:
-            target_entries = _normalize_project_entries(
-                project,
-                (target_month or {}).get("entries_per_day"),
-                month_data["year"],
-                month_data["month"],
-            )
-            has_existing_sync = any(
-                _large_assignment_matches_source(
-                    assignment, str(source_project.get("id") or ""), month_key
-                )
-                for entries in target_entries.values()
-                for entry in entries
-                for assignment in (entry.get("assignments") or [])
-            )
-        else:
-            target_entries = _normalize_entries(
-                (target_month or {}).get("entries_per_day"),
-                month_data["year"],
-                month_data["month"],
-            )
-            has_existing_sync = any(
-                _sync_entry_matches_source(entry, str(source_project.get("id") or ""), month_key)
-                for entries in target_entries.values()
-                for entry in entries
-            )
-        if has_existing_sync:
+        if _month_has_sync_from_source(
+            project,
+            (project.get("months") or {}).get(month_key),
+            str(source_project.get("id") or ""),
+            month_key,
+        ):
             relevant_target_ids.add(project_id)
     for target_project_id in sorted(relevant_target_ids):
+        if target_modes.get(target_project_id) == LARGE_MODE:
+            continue
         try:
             with _project_lock(target_project_id):
                 target_project = _load_project(target_project_id)
@@ -5982,6 +6111,17 @@ def _refresh_shift_sync_for_target_month(target_project: dict[str, Any], month_k
     target_mode = str(target_project.get("mode") or "")
     if target_mode == "master":
         _refresh_master_shift_from_sources(target_project, month_key, actor_name=actor_name)
+        return
+    if target_mode == LARGE_MODE:
+        # 大規模帳への取り込みは対象帳だけを書き換えるスコープ限定版で行う
+        # （_resync_shift_month は大規模帳へ書き込まない設計のため）。
+        # 呼び出し元はロック外のため、ここでロックを取得して最新を読み直す。
+        target_id = str(target_project.get("id") or "")
+        if not target_id:
+            return
+        with _project_lock(target_id):
+            fresh_target = _load_project(target_id)
+            _refresh_shift_sync_into_target_month(fresh_target, month_key, actor_name=actor_name)
         return
     for source_project in _iter_project_summaries_for_month(month_key):
         if str(source_project.get("mode") or "") == target_mode:
@@ -6019,27 +6159,62 @@ def _refresh_shift_sync_into_target_month(
     # ソース候補とマッチング先候補は同じ一覧でよいので、1回ロードして使い回す
     # （マッチングはプロジェクトのメタデータしか参照しないため途中の書き込みの影響を受けない）。
     summaries = _iter_project_summaries_for_month(month_key)
+    # 既存同期の残っているソース帳ID（ソース側で消えたエントリを剥がす判定に使う）。
+    existing_sync_source_ids = _sync_source_ids_in_month(
+        target_project, (target_project.get("months") or {}).get(month_key), month_key
+    )
+    if target_mode == LARGE_MODE:
+        try:
+            _prune_orphan_large_sync_assignments(
+                target_project,
+                month_key,
+                {str(item.get("id") or "") for item in summaries},
+                actor_name=actor_name,
+            )
+        except Exception:
+            db.session.rollback()
+            logger.exception(
+                "orphan sync prune failed (target=%s, month=%s)", target_id, month_key
+            )
     for source_project in summaries:
         if str(source_project.get("mode") or "") == target_mode:
             continue
-        if str(source_project.get("id") or "") == target_id:
+        source_id = str(source_project.get("id") or "")
+        if source_id == target_id:
             continue
-        source_month = (source_project.get("months") or {}).get(month_key)
-        if not source_month:
-            continue
-        desired_by_target = _desired_shift_sync_entries_by_target(
-            source_project, month_key, source_month, summaries=summaries
-        )
-        desired_for_target = desired_by_target.get(target_id)
-        if not desired_for_target:
-            continue
-        _replace_shift_synced_entries_in_target_project(
-            target_project,
-            source_project,
-            month_key,
-            desired_for_target,
-            actor_name=actor_name,
-        )
+        try:
+            source_month = (source_project.get("months") or {}).get(month_key)
+            if source_month:
+                desired_by_target = _desired_shift_sync_entries_by_target(
+                    source_project, month_key, source_month, summaries=summaries
+                )
+                desired_for_target = desired_by_target.get(target_id) or {}
+            else:
+                # ソース側の月が消えている場合も、残留した同期エントリの除去は行う。
+                desired_for_target = {}
+            if not desired_for_target and source_id not in existing_sync_source_ids:
+                # 取り込むものも剥がすものも無いソースはスキップ。
+                # （desired が空でも既存同期が残っていれば、ソース側で削除された
+                # エントリを剥がすために空の置き換えを実行する。）
+                continue
+            _replace_shift_synced_entries_in_target_project(
+                target_project,
+                source_project,
+                month_key,
+                desired_for_target,
+                actor_name=actor_name,
+            )
+        except Exception:
+            # 1ソースの不整合（過去データ等）で、他ソースからの取り込みまで
+            # 止めない。対象帳は load→編集→保存 で原子的に更新されるため、
+            # 失敗したソースの分は変更されず、次回の取り込みで再試行される。
+            db.session.rollback()
+            logger.exception(
+                "shift sync into target failed (target=%s, source=%s, month=%s)",
+                target_id,
+                source_id,
+                month_key,
+            )
 
 
 def _resync_shift_project(source_project: dict[str, Any], *, actor_name: str) -> None:
@@ -6052,10 +6227,28 @@ def _refresh_shift_sync_for_target_project(target_project: dict[str, Any], *, ac
         _refresh_shift_sync_for_target_month(target_project, month_key, actor_name=actor_name)
 
 
+def _best_effort_shift_sync(action, *, operation: str, project_id: Any, month_key: str | None = None) -> None:
+    """保存確定後のベストエフォート同期。失敗しても保存済みの応答を壊さない。
+
+    呼び出し時点で保存本体はコミット済みのため、ここで例外を伝播させると
+    「保存は成功しているのにクライアントにはエラーが返る」状態になり、再保存や
+    リロードで 409 を誘発する。失敗はログに残して続行し、次の保存または
+    大規模帳を開いたタイミングの同期で自然に再試行させる。"""
+    try:
+        action()
+    except Exception:
+        db.session.rollback()
+        logger.exception(
+            "best-effort shift sync failed (%s, project=%s, month=%s)",
+            operation,
+            project_id,
+            month_key,
+        )
+
+
 def _remove_shift_sync_for_month(source_project: dict[str, Any], month_key: str, *, actor_name: str) -> None:
     source_mode = str(source_project.get("mode") or "")
     source_id = str(source_project.get("id") or "")
-    year, month = _parse_month_key(month_key)
     for project in _iter_project_summaries_for_month(month_key):
         project_mode = str(project.get("mode") or "")
         if project_mode == "master" and source_mode == "master":
@@ -6068,27 +6261,9 @@ def _remove_shift_sync_for_month(source_project: dict[str, Any], month_key: str,
         # このソース由来の同期エントリを持たない帳面は除去対象が無く、
         # _replace_shift_synced_entries_in_target_project も変更なしで終わるため、
         # ロック取得と完全ロードを省く。
-        target_month = (project.get("months") or {}).get(month_key)
-        if not target_month:
-            continue
-        if project_mode == LARGE_MODE:
-            target_entries = _normalize_project_entries(
-                project, target_month.get("entries_per_day"), year, month
-            )
-            has_sync_from_source = any(
-                _large_assignment_matches_source(assignment, source_id, month_key)
-                for entries in target_entries.values()
-                for entry in entries
-                for assignment in (entry.get("assignments") or [])
-            )
-        else:
-            target_entries = _normalize_entries(target_month.get("entries_per_day"), year, month)
-            has_sync_from_source = any(
-                _sync_entry_matches_source(entry, source_id, month_key)
-                for entries in target_entries.values()
-                for entry in entries
-            )
-        if not has_sync_from_source:
+        if not _month_has_sync_from_source(
+            project, (project.get("months") or {}).get(month_key), source_id, month_key
+        ):
             continue
         with _project_lock(project_id):
             target_project = _load_project(project_id)
@@ -10024,6 +10199,52 @@ def api_create():
     return jsonify({"success": True, "project": _project_detail_payload(project, include_draft=True)})
 
 
+def _display_month_key(project: dict[str, Any], selected_month_key: str | None) -> str:
+    """_project_detail_payload が表示に選ぶ月キーと同じ規則で対象月を決める。
+
+    指定月があればその月、無ければ実カレンダーの当月、それも無ければ最新月。
+    開いたときの同期対象を「実際に画面へ表示される月」と一致させるために使う
+    （以前は最新月だけを同期したため、当月を表示した画面に同期が反映されなかった）。
+    """
+    month_keys = _sort_month_keys(list((project.get("months") or {}).keys()))
+    if not month_keys:
+        return ""
+    if selected_month_key and selected_month_key in (project.get("months") or {}):
+        return str(selected_month_key)
+    current_month_key = _current_month_key()
+    return current_month_key if current_month_key in month_keys else month_keys[-1]
+
+
+def _catch_up_large_shift_sync(project_id: str, month_key: str, *, actor_name: str) -> bool:
+    """大規模シフト帳を開いたタイミングの双方向同期（ベストエフォート）。
+
+    表示月について (1) 大規模帳から他帳への押し出し、(2) 他帳から大規模帳への
+    取り込みを行う。大規模帳への取り込みはこの経路に一本化されている
+    （他帳の保存時には大規模帳へ書き込まない）ため、開けば常に最新へ揃う。
+    同期の失敗で画面表示を止めず、ログにのみ残す。書き込みがあったかに関わらず、
+    同期を試みたら True を返す（呼び出し元は最新を読み直す）。
+    """
+    if not month_key:
+        return False
+    try:
+        project = _load_project(project_id)
+        if project.get("mode") != LARGE_MODE or month_key not in (project.get("months") or {}):
+            return False
+        _resync_shift_month(project, month_key, actor_name=actor_name)
+        with _project_lock(project_id):
+            project = _load_project(project_id)
+            _refresh_shift_sync_into_target_month(project, month_key, actor_name=actor_name)
+        return True
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "CloudShift large shift open-time sync failed for project %s month %s",
+            project_id,
+            month_key,
+        )
+        return True
+
+
 @cloudshift_bp.route("/api/project/<project_id>")
 @login_required
 def api_project_detail(project_id: str):
@@ -10039,36 +10260,16 @@ def api_project_detail(project_id: str):
                 "CloudShift master shift auto-resync failed for project %s", project_id
             )
         project, access_role = _project_for_current_user_or_404(project_id)
-    if project.get("mode") == LARGE_MODE and access_role == "owner":
-        # 旧バージョンのサーバーで保存され、同期されないまま残った月も、
-        # 編集画面を開いた時点で一度だけ差分同期する。対象は表示月（未指定なら
-        # 最新月）に限定し、大規模帳からの押し出しと他帳からの取り込みを両方行う。
-        month_keys = _sort_month_keys(list((project.get("months") or {}).keys()))
-        catch_up_month_key = (
-            selected_month_key
-            if selected_month_key in (project.get("months") or {})
-            else (month_keys[-1] if month_keys else "")
-        )
-        if catch_up_month_key:
-            try:
-                _resync_shift_month(project, catch_up_month_key, actor_name=_user_label())
-                with _project_lock(project_id):
-                    project = _load_project(project_id)
-                    _refresh_shift_sync_into_target_month(
-                        project,
-                        catch_up_month_key,
-                        actor_name=_user_label(),
-                    )
-                project, access_role = _project_for_current_user_or_404(project_id)
-            except CloudShiftError:
-                raise
-            except Exception:
-                db.session.rollback()
-                current_app.logger.exception(
-                    "CloudShift large shift catch-up sync failed for project %s month %s",
-                    project_id,
-                    catch_up_month_key,
-                )
+    if project.get("mode") == LARGE_MODE:
+        # 大規模シフト帳は「開いたタイミング」で他帳との同期を取る設計。
+        # 共有された閲覧者が開いた場合も含めて、表示される月を対象に
+        # 押し出し・取り込みの両方向を実行する。
+        if _catch_up_large_shift_sync(
+            project_id,
+            _display_month_key(project, selected_month_key),
+            actor_name=_user_label(),
+        ):
+            project, access_role = _project_for_current_user_or_404(project_id)
     # オーナーが詳細を開いた時点で ViewPWA 用トークンを発行しておく（既存帳簿の遡及対応）。
     if access_role == "owner" and not str(project.get("pwa_token") or "").strip():
         with _project_lock(project_id):
@@ -10206,8 +10407,14 @@ def api_project_meta(project_id: str):
     if should_resync_person_experience:
         _resync_person_experience_project(project, actor_name=_user_label())
     if metadata_changed:
-        _resync_shift_project(project, actor_name=_user_label())
-        _refresh_shift_sync_for_target_project(project, actor_name=_user_label())
+        _best_effort_shift_sync(
+            lambda: _resync_shift_project(project, actor_name=_user_label()),
+            operation="meta_update_push", project_id=project_id,
+        )
+        _best_effort_shift_sync(
+            lambda: _refresh_shift_sync_for_target_project(project, actor_name=_user_label()),
+            operation="meta_update_pull", project_id=project_id,
+        )
         project = _load_project(project_id)
     return jsonify({"success": True, "project": _project_detail_payload(project, include_draft=True)})
 
@@ -10533,8 +10740,14 @@ def api_large_config(project_id: str):
             "month_key": None,
             "changes": [f"メンバー {len(next_config['members'])}人・コード {len(next_config['codes'])}件の大規模シフト設定を更新"],
         })
-    _resync_shift_project(project, actor_name=_user_label())
-    _refresh_shift_sync_for_target_project(project, actor_name=_user_label())
+    _best_effort_shift_sync(
+        lambda: _resync_shift_project(project, actor_name=_user_label()),
+        operation="large_config_push", project_id=project_id,
+    )
+    _best_effort_shift_sync(
+        lambda: _refresh_shift_sync_for_target_project(project, actor_name=_user_label()),
+        operation="large_config_pull", project_id=project_id,
+    )
     return jsonify({"success": True, "large_config": next_config})
 
 
@@ -10592,13 +10805,35 @@ def _create_month_in_project(project: dict[str, Any], payload: dict[str, Any], a
         source_month = (project.get("months") or {}).get(source_key)
         if not source_month:
             raise CloudShiftError("コピー元の月が見つかりません", 400)
-        source_entries = _normalize_project_entries(
+        source_entries = _normalize_project_entries_for_sync(
             project, source_month.get("entries_per_day"), source_month["year"], source_month["month"]
         )
-        copied_entries = {
-            day_key: [dict(entry) for entry in entries if not _entry_is_shift_synced(entry)]
-            for day_key, entries in source_entries.items()
-        }
+        if project.get("mode") == LARGE_MODE:
+            # 大規模帳の同期はエントリではなく割当（assignments）に付くため、
+            # コピー時は同期割当（source_type=='sync'）だけを除いて引き継ぐ。
+            # 同期割当まで複製すると、コピー先の月キーと合わない「剥がせない同期」が
+            # 残ってしまう。手入力の「他現場」割当（'scene'）はユーザー入力なので残す。
+            copied_entries = {}
+            for day_key, entries in source_entries.items():
+                copied_day = []
+                for entry in entries:
+                    copied = dict(entry)
+                    copied["assignments"] = [
+                        dict(item) for item in (entry.get("assignments") or [])
+                        if str(item.get("source_type") or "local") != "sync"
+                    ]
+                    copied["value"] = (
+                        str(copied["assignments"][0].get("code_key") or "")
+                        if copied["assignments"] else ""
+                    )
+                    if _large_entry_has_content(copied):
+                        copied_day.append(copied)
+                copied_entries[day_key] = copied_day
+        else:
+            copied_entries = {
+                day_key: [dict(entry) for entry in entries if not _entry_is_shift_synced(entry)]
+                for day_key, entries in source_entries.items()
+            }
         month_payload = _build_month_payload(
             year,
             month,
@@ -10641,7 +10876,10 @@ def api_create_month(project_id: str):
         # ロックを取得しない（対象帳のみ書き込む）ため、デッドロックの懸念はない。
         _refresh_shift_sync_into_target_month(project, month_key, actor_name=_user_label())
     # 他帳への押し出しは各対象を自前のロックで更新するためロック外で行う。
-    _resync_shift_month(project, month_key, actor_name=_user_label())
+    _best_effort_shift_sync(
+        lambda: _resync_shift_month(project, month_key, actor_name=_user_label()),
+        operation="add_month_push", project_id=project_id, month_key=month_key,
+    )
     project = _load_project(project_id)
     return jsonify({"success": True, "project": _project_detail_payload(project, month_key, include_draft=True)})
 
@@ -10677,10 +10915,16 @@ def _prepared_large_entries_for_month(
     *,
     year: int,
     month: int,
+    strict_incoming: bool = True,
 ) -> dict[str, list[dict[str, Any]]]:
-    incoming = _normalize_project_entries(project, incoming_entries, year, month)
+    # クライアント入力（strict_incoming=True）は未登録メンバーを明示エラーにする。
+    # サーバー保存済みデータを入力にする経路（下書きの公開など）は寛容に扱い、
+    # 過去データの1行で操作全体が失敗しないようにする。
+    incoming = _normalize_project_entries(
+        project, incoming_entries, year, month, strict_members=strict_incoming
+    )
     _validate_large_substitute_assignees(project, incoming)
-    current = _normalize_project_entries(
+    current = _normalize_project_entries_for_sync(
         project, current_month.get("entries_per_day"), year, month
     )
     result: dict[str, list[dict[str, Any]]] = {}
@@ -10727,7 +10971,7 @@ def _prepared_large_entries_for_month(
             next_entry["value"] = str(server_sync[0].get("code_key") or "")
             next_day.append(next_entry)
         result[day_key] = next_day
-    return _normalize_project_entries(project, result, year, month)
+    return _normalize_project_entries_for_sync(project, result, year, month)
 
 
 def _save_large_month_in_project(
@@ -10757,7 +11001,7 @@ def _save_large_month_in_project(
         incoming_meta = {"day_types": dict(current_meta.get("day_types") or {}), "day_notes": dict(current_meta.get("day_notes") or {})}
     if current_meta.get("baseline"):
         incoming_meta["baseline"] = current_meta["baseline"]
-    current_entries = _normalize_project_entries(project, current_month.get("entries_per_day"), year, month)
+    current_entries = _normalize_project_entries_for_sync(project, current_month.get("entries_per_day"), year, month)
     if current_entries == prepared_entries and current_meta == incoming_meta:
         return current_month
     merged = {
@@ -10987,7 +11231,7 @@ def _clear_draft_month_in_project(
         if not current:
             raise CloudShiftError("対象の月が存在しません", 404)
         previous_count = _draft_entry_count(current)
-        current["draft_entries_per_day"] = _normalize_project_entries(
+        current["draft_entries_per_day"] = _normalize_project_entries_for_sync(
             project, current.get("entries_per_day"), year, month
         )
         current["updated_at"] = _jst_now_iso()
@@ -11033,12 +11277,13 @@ def _publish_draft_month_in_project(
         current = (project.get("months") or {}).get(month_key)
         if not current:
             raise CloudShiftError("対象の月が存在しません", 404)
-        live = _normalize_project_entries(project, current.get("entries_per_day"), year, month)
+        live = _normalize_project_entries_for_sync(project, current.get("entries_per_day"), year, month)
         # 公開直前にサーバー権威の同期割当(source_type=='sync')を現在liveから取り直す。
         # 下書き保存後にソース(個人/現場)側で変化・削除された同期割当を、下書きに固着した
         # 古い値ではなく現在値で確定する（削除済み同期の復活を防ぐ／非largeの公開と同じ保護）。
         published_entries = _prepared_large_entries_for_month(
-            project, current, current.get("draft_entries_per_day"), year=year, month=month
+            project, current, current.get("draft_entries_per_day"), year=year, month=month,
+            strict_incoming=False,
         )
         if live == published_entries:
             return current
@@ -11113,7 +11358,7 @@ def _confirmed_entries_snapshot(project: dict[str, Any], year: int, month: int) 
     month_data = (project.get("months") or {}).get(_month_key(year, month))
     if not month_data:
         return None
-    return _normalize_project_entries(project, month_data.get("entries_per_day"), year, month)
+    return _normalize_project_entries_for_sync(project, month_data.get("entries_per_day"), year, month)
 
 
 def _maybe_notify_pwa_month_change(
@@ -11134,8 +11379,8 @@ def _maybe_notify_pwa_month_change(
         month_data = after_month if after_month is not None else (project.get("months") or {}).get(_month_key(year, month))
         if not month_data:
             return
-        after_entries = _normalize_project_entries(project, month_data.get("entries_per_day"), year, month)
-        before_norm = _normalize_project_entries(project, before_entries, year, month) if before_entries is not None else None
+        after_entries = _normalize_project_entries_for_sync(project, month_data.get("entries_per_day"), year, month)
+        before_norm = _normalize_project_entries_for_sync(project, before_entries, year, month) if before_entries is not None else None
         if before_norm == after_entries:
             return
         changes = _collect_pwa_change_descriptions(before_norm, after_entries, year, month)
@@ -11234,7 +11479,10 @@ def api_save_month(project_id: str, year: int, month: int):
         _sync_role_option_person_sites(project, year, month, actor_name=_user_label())
     except Exception:  # pragma: no cover - person 連携の失敗で保存自体は止めない
         logger.exception("role option person sync failed (project=%s)", project.get("id"))
-    _resync_shift_month(project, month_key, actor_name=_user_label())
+    _best_effort_shift_sync(
+        lambda: _resync_shift_month(project, month_key, actor_name=_user_label()),
+        operation="save_month_push", project_id=project_id, month_key=month_key,
+    )
     _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
@@ -11281,7 +11529,7 @@ def api_large_baseline(project_id: str, year: int, month: int):
             changes = [f"{month_key} の基準版を解除"]
         else:
             meta["baseline"] = {
-                "entries_per_day": _normalize_project_entries(
+                "entries_per_day": _normalize_project_entries_for_sync(
                     project, month_data.get("entries_per_day"), year, month
                 ),
                 "set_at": _jst_now_iso(),
@@ -11336,7 +11584,10 @@ def api_publish_month_draft(project_id: str, year: int, month: int):
         _sync_role_option_person_sites(project, year, month, actor_name=_user_label())
     except Exception:  # pragma: no cover - person 連携の失敗で公開自体は止めない
         logger.exception("role option person sync failed (project=%s)", project.get("id"))
-    _resync_shift_month(project, month_key, actor_name=_user_label())
+    _best_effort_shift_sync(
+        lambda: _resync_shift_month(project, month_key, actor_name=_user_label()),
+        operation="publish_draft_push", project_id=project_id, month_key=month_key,
+    )
     _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
@@ -11520,7 +11771,10 @@ def api_restore_month_revision(project_id: str, year: int, month: int):
         month_payload = _restore_month_revision_in_project(project, year, month, revision, _user_label(), access_role)
     month_key = _month_key(year, month)
     # 復元も正式シフトの変更なので、保存時と同様にリンク先シフト帳へ再同期する。
-    _resync_shift_month(project, month_key, actor_name=_user_label())
+    _best_effort_shift_sync(
+        lambda: _resync_shift_month(project, month_key, actor_name=_user_label()),
+        operation="restore_push", project_id=project_id, month_key=month_key,
+    )
     _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, include_draft=True, project=project), "project": _project_detail_payload(project, month_key, include_draft=True)})
 
@@ -11809,7 +12063,12 @@ def api_create_substitute_request(project_id: str):
         )
 
     substitute_project = _load_project(substitute_project["id"])
-    _resync_shift_month(substitute_project, month_key, actor_name=_user_label())
+    _best_effort_shift_sync(
+        lambda: _resync_shift_month(substitute_project, month_key, actor_name=_user_label()),
+        operation="substitute_request_push",
+        project_id=substitute_project.get("id"),
+        month_key=month_key,
+    )
     substitute_project = _load_project(substitute_project["id"])
     substitute_month = (substitute_project.get("months") or {}).get(month_key)
     saved_entry = next(
@@ -13127,7 +13386,10 @@ def api_templates_apply(project_id: str, template_id: str):
         _sync_role_option_person_sites(project, year, month, actor_name=_user_label())
     except Exception:  # pragma: no cover - person 連携の失敗で反映自体は止めない
         logger.exception("role option person sync failed (project=%s)", project.get("id"))
-    _resync_shift_month(project, month_key, actor_name=_user_label())
+    _best_effort_shift_sync(
+        lambda: _resync_shift_month(project, month_key, actor_name=_user_label()),
+        operation="template_apply_push", project_id=project_id, month_key=month_key,
+    )
     _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     project = _load_project(project_id)
     return jsonify(
@@ -13303,6 +13565,15 @@ def api_public_detail(token_type: str, token: str):
         abort(404)
     project = _find_project_by_token(token, token_type)
     month_key = request.args.get("month_key")
+    if project.get("mode") == LARGE_MODE:
+        # 共有URL（閲覧・編集・ViewPWA）から開いた場合も、大規模シフト帳は
+        # 開いたタイミングで他帳との同期を取ってから表示する。
+        if _catch_up_large_shift_sync(
+            str(project.get("id") or ""),
+            _display_month_key(project, month_key),
+            actor_name=_user_label(),
+        ):
+            project = _find_project_by_token(token, token_type)
     payload = _project_detail_payload(project, month_key)
     # PWA は閲覧専用。共有先に公開してよい URL（自身の PWA URL）だけ残す。
     if token_type in {"view", "pwa"}:
@@ -13382,8 +13653,14 @@ def api_public_create_month(token: str):
         project = _find_project_by_token(token, "edit")
         month_payload = _create_month_in_project(project, payload, actor_name, actor_type)
     month_key = _month_key(month_payload["year"], month_payload["month"])
-    _resync_shift_month(project, month_key, actor_name=actor_name)
-    _refresh_shift_sync_for_target_month(project, month_key, actor_name=actor_name)
+    _best_effort_shift_sync(
+        lambda: _resync_shift_month(project, month_key, actor_name=actor_name),
+        operation="public_add_month_push", project_id=project.get("id"), month_key=month_key,
+    )
+    _best_effort_shift_sync(
+        lambda: _refresh_shift_sync_for_target_month(project, month_key, actor_name=actor_name),
+        operation="public_add_month_pull", project_id=project.get("id"), month_key=month_key,
+    )
     project = _find_project_by_token(token, "edit")
     return jsonify({"success": True, "project": _project_detail_payload(project, month_key)})
 
@@ -13402,7 +13679,10 @@ def api_public_save_month(token: str, year: int, month: int):
         _sync_role_option_person_sites(project, year, month, actor_name=actor_name)
     except Exception:  # pragma: no cover - person 連携の失敗で保存自体は止めない
         logger.exception("role option person sync failed (project=%s)", project.get("id"))
-    _resync_shift_month(project, month_key, actor_name=actor_name)
+    _best_effort_shift_sync(
+        lambda: _resync_shift_month(project, month_key, actor_name=actor_name),
+        operation="public_save_month_push", project_id=project.get("id"), month_key=month_key,
+    )
     _maybe_notify_pwa_month_change(project, year, month, before_entries, month_payload)
     return jsonify({"success": True, "month": _client_month_payload(month_payload, project=project), "project": _project_detail_payload(project, month_key)})
 

@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
 
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "1.1.0"
 DAY_TYPES = ("weekday", "saturday", "holiday")
 HOLIDAY_KINDS = ("", "scheduled", "legal")
 
@@ -366,10 +366,31 @@ def _violation(code: str, severity: str, person: PersonInput, day: int | None, v
     return WorktimeViolation(code, severity, person.person_id, day, message, value, threshold)
 
 
+def _scheduled_bind_minutes(day: DayInput, person: PersonInput, settings: WorktimeSettings) -> int:
+    if day.bind_override_minutes is not None:
+        return day.bind_override_minutes
+    if person.scheduled_bind_minutes is not None:
+        return person.scheduled_bind_minutes
+    return settings.scheduled_bind_minutes
+
+
 def _day_result(day: DayInput, person: PersonInput, code_map: Mapping[str, WorkCode], settings: WorktimeSettings) -> DayResult:
     warnings: list[str] = []
     code_keys = list(day.code_keys) or ([day.code_key] if day.code_key else [])
     if not code_keys:
+        if day.has_external_assignment and day.time_override is not None:
+            # 他帳から同期された勤務だけのセル: コードの時間定義が無いため、
+            # 時刻上書きが設定されている場合のみ、その時間で勤務として集計する。
+            bind = day.time_override.end_minutes - day.time_override.start_minutes
+            break_minutes = min(max(0, settings.break_minutes), bind)
+            category = "work" if not day.holiday_kind else f"{day.holiday_kind}_holiday_work"
+            scheduled = _scheduled_bind_minutes(day, person, settings)
+            overtime = max(0, bind - scheduled) if category == "work" else 0
+            return DayResult(
+                day.day, category, "", "", False,
+                day.time_override.start_minutes, day.time_override.end_minutes,
+                bind, break_minutes, bind - break_minutes, overtime, (),
+            )
         return DayResult(day.day, "external" if day.has_external_assignment else "empty", "", "", False, None, None, 0, 0, 0, 0, ())
     resolved_codes: list[WorkCode] = []
     for key in code_keys:
@@ -419,11 +440,7 @@ def _day_result(day: DayInput, person: PersonInput, code_map: Mapping[str, WorkC
     break_minutes = sum(explicit_breaks) if explicit_breaks else settings.break_minutes
     break_minutes = min(max(0, break_minutes), bind)
     work = bind - break_minutes
-    scheduled = day.bind_override_minutes
-    if scheduled is None:
-        scheduled = person.scheduled_bind_minutes
-    if scheduled is None:
-        scheduled = settings.scheduled_bind_minutes
+    scheduled = _scheduled_bind_minutes(day, person, settings)
     overtime = max(0, bind - scheduled) if category == "work" else 0
     return DayResult(
         day.day, category, " + ".join(code.key for code in work_codes), "", False,
