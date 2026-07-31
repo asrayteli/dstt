@@ -574,7 +574,7 @@
 
     <figure class="csm-shot">
       <img src="{{ url_for('static', filename='cloudshift/manual/02_editor_calendar.png') }}" alt="CloudShift の編集画面" loading="lazy">
-      <figcaption>編集画面。上部にタイトル・現場、右側に「この月を保存」と通常／仮保存の切替、中央の「アクション」に月の切替・シフト帳の設定・月間集計・アシスト・範囲一括編集・各出力ボタンが並びます。下にカレンダーが続きます。</figcaption>
+      <figcaption>編集画面。上部にタイトル・現場、右側に「この月を保存」と通常／仮保存の切替、中央の「アクション」に月の切替・シフト帳の設定・オーナー変更・月間集計・アシスト・範囲一括編集・各出力ボタンが並びます。下にカレンダーが続きます。</figcaption>
     </figure>
 
     <!-- Step 1 -->
@@ -752,6 +752,18 @@
       </ul>
       <div class="csm-note" style="margin-top:8px">🔐 アカウント共有は閲覧（DSTT 利用者向け）、共有URL は閲覧／編集／通知（DSTT アカウントが無い人にも渡せる）、と使い分けると便利です。</div>
       <div class="csm-note" style="margin-top:8px">🗂️ 同じ社員・現場のシフト帳を複数の人がそれぞれ所有してしまった場合は、一覧に「他オーナーと重複」と表示され、「この帳簿を非表示」で自分の一覧からだけ隠せます（データは消えません）。</div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title">👤 オーナー（所有者）を変える</div>
+      <p style="font-size:14px;color:#475569;margin:0 0 8px">担当の異動などでシフト帳の持ち主が変わるときは、<strong>編集画面のアクション →「オーナー変更」</strong>から所有権をそのまま引き継げます。削除して作り直す必要はありません。<strong>今のオーナーだけ</strong>が操作できます。</p>
+      <ul class="csm-ul">
+        <li>新しいオーナーは<strong>氏名または社員番号</strong>で検索して選びます（DSTT アカウントが必要です）。</li>
+        <li>確認画面で「<strong>変更後も自分（元オーナー）に共有する</strong>」を選べます。チェックを付けると、あなたは特定社員への共有先として残り、引き続き<strong>閲覧</strong>できます。外すと、あなたの「自分のシフト帳」一覧からは消えます。</li>
+        <li>月データ・編集履歴・共有URL・通知先・テンプレートは<strong>そのまま引き継がれます</strong>。同じ営業所内への共有も変更前の設定のままです。</li>
+        <li>変更は編集履歴に残ります。要代務シフト帳（営業所ごとに自動作成）は対象外です。</li>
+      </ul>
+      <div class="csm-warn" style="margin-top:8px">⚠️ 移す相手が同じ社員・同じ現場のシフト帳をすでに持っている場合は変更できません（同じ紐づけのシフト帳は 1 人につき 1 つのため）。先にどちらかを整理してください。</div>
     </div>
 
     <div class="csm-card">
@@ -1268,6 +1280,22 @@
         <span class="csm-acc-arrow">▼</span>
       </button>
       <div class="csm-acc-body">いいえ。閲覧URL・編集URL・通知付き閲覧URL を渡せば、DSTT アカウントが無い人でもブラウザから閲覧・入力できます。DSTT を使う同僚には、URL のほかに「同じ営業所内」「特定社員」へのアカウント共有もできます。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">担当が変わりました。シフト帳の持ち主（オーナー）を変えられますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">はい。今のオーナーが、編集画面のアクション →「オーナー変更」から新しいオーナー（DSTT アカウント）を選んで引き継げます。削除して作り直す必要はなく、月データ・編集履歴・共有URL・テンプレートはそのまま残ります。変更時に「変更後も自分（元オーナー）に共有する」を選べるので、引き継いだあとも閲覧を続けられます。なお、同じ社員・同じ現場のシフト帳をすでに持っている人へは移せません。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">作ろうとしたら「すでに作成済みです」と出ます。</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">同じ社員・同じ現場のシフト帳は、全体で 1 つだけです。すでに他の人が作っている場合はメッセージに社員番号と氏名が出るので、その人に共有してもらってください。あなたが引き継いで管理する場合は、その人に「オーナー変更」で所有権を移してもらいます（削除して作り直す必要はありません）。</div>
     </div>
 
     <div class="csm-acc-item">
