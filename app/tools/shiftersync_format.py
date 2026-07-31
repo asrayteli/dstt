@@ -7,6 +7,8 @@ import secrets
 from calendar import monthrange
 from typing import Any
 
+from app.services.cloudshift_large import HOLIDAY_KIND_OVERRIDES
+
 
 COMMENT_ROW_PREFIX = "#comment"
 EMPLOYEE_NAME_ROW_PREFIX = "#employee_name"
@@ -125,15 +127,15 @@ def generate_entry_id() -> str:
     return secrets.token_hex(8)
 
 
-def _normalize_large_minutes(value: Any) -> int | None:
+def _normalize_large_minutes(value: Any, label: str = "所定拘束時間") -> int | None:
     if value in (None, ""):
         return None
     try:
         result = int(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("所定拘束時間は分単位の整数で指定してください") from exc
+        raise ValueError(f"{label}は分単位の整数で指定してください") from exc
     if result < 0 or result > 1440:
-        raise ValueError("所定拘束時間は0〜1440分で指定してください")
+        raise ValueError(f"{label}は0〜1440分で指定してください")
     return result
 
 
@@ -219,8 +221,9 @@ def normalize_large_entry(raw: Any, *, entry_id: str | None = None) -> dict[str,
     assignments = _normalize_large_assignments(raw.get("assignments"), entry_id=raw_id, fallback_value=value)
     value = assignments[0]["code_key"] if assignments else value
     holiday_kind = str(raw.get("holiday_kind", raw.get("holidayKind", "")) or "").strip().lower()
-    if holiday_kind not in {"", "scheduled", "legal"}:
-        raise ValueError("休日区分は scheduled / legal のいずれかで指定してください")
+    # "" はメンバーの休日ルールに従う、"none" はその日だけ所定労働日として扱う上書き。
+    if holiday_kind not in HOLIDAY_KIND_OVERRIDES:
+        raise ValueError("休日区分は none / scheduled / legal のいずれかで指定してください")
     if not assignments and not value and not holiday_kind and not comment:
         return {}
     return {
@@ -232,6 +235,9 @@ def normalize_large_entry(raw: Any, *, entry_id: str | None = None) -> dict[str,
         "time_override": _normalize_large_time(raw.get("time_override", raw.get("timeOverride"))),
         "bind_override_minutes": _normalize_large_minutes(
             raw.get("bind_override_minutes", raw.get("bindOverrideMinutes"))
+        ),
+        "break_override_minutes": _normalize_large_minutes(
+            raw.get("break_override_minutes", raw.get("breakOverrideMinutes")), "休憩時間"
         ),
         "comment": comment,
         "employee_number": str(raw.get("employee_number", raw.get("employeeNumber", "")) or "").strip()[:40],

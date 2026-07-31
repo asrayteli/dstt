@@ -42,9 +42,12 @@ from werkzeug.utils import secure_filename
 
 from app.access_control import user_office_ids
 from app.services.cloudshift_large import (
+    calculate_large_fiscal_year,
     calculate_large_month,
     day_type_for_date,
     default_large_config,
+    fiscal_year_months,
+    fiscal_year_of,
     normalize_large_config,
     normalize_large_meta,
 )
@@ -5263,11 +5266,11 @@ def _master_entry_is_in_scope(source_project: dict[str, Any], entry: dict[str, A
 def _large_entry_has_content(entry: dict[str, Any]) -> bool:
     """大規模シフトの正規化済みエントリを保持すべきか判定する。
 
-    割当・コメントに加え、holiday_kind（法定/所定休日出勤マーク）も保持対象に含める。
-    従来は ``assignments or comment`` のみで判定していたため、割当を持たない休日出勤
-    マークだけのセルが保存・逆同期のたびに失われていた。time_override /
-    bind_override_minutes のみのエントリは normalize_large_entry の時点で除去される
-    ため、ここで個別に考慮する必要はない。"""
+    割当・コメントに加え、holiday_kind（休日区分のセル上書き。none/scheduled/legal）も
+    保持対象に含める。従来は ``assignments or comment`` のみで判定していたため、割当を
+    持たない休日区分だけのセルが保存・逆同期のたびに失われていた。time_override /
+    bind_override_minutes / break_override_minutes のみのエントリは normalize_large_entry
+    の時点で除去されるため、ここで個別に考慮する必要はない。"""
     return bool(
         entry.get("assignments")
         or str(entry.get("comment") or "").strip()
@@ -5809,6 +5812,7 @@ def _replace_shift_synced_assignments_in_large_project(
                     "holiday_kind": "",
                     "time_override": None,
                     "bind_override_minutes": None,
+                    "break_override_minutes": None,
                     "comment": "",
                     "employee_number": str(descriptor.get("employee_number") or ""),
                     "employee_name": str(descriptor.get("employee_name") or ""),
@@ -11835,14 +11839,26 @@ def _large_worktime_payload(project: dict[str, Any], year: int, month: int) -> d
     month_data = (project.get("months") or {}).get(_month_key(year, month))
     if not month_data:
         raise CloudShiftError("対象の月が存在しません", 404)
+    config = project.get("large_config") or default_large_config()
     try:
-        return calculate_large_month(
-            project.get("large_config") or default_large_config(),
-            month_data,
-            JAPAN_HOLIDAYS,
-        )
+        result = calculate_large_month(config, month_data, JAPAN_HOLIDAYS)
     except ValueError as exc:
         raise CloudShiftError(str(exc), 400) from exc
+    # 960時間対象は年度（4月〜翌3月）累計で見るため、同じ帳の年度内の月をまとめて集計する。
+    fiscal_year = fiscal_year_of(year, month)
+    months = project.get("months") or {}
+    try:
+        result["fiscal_year_totals"] = calculate_large_fiscal_year(
+            config,
+            [months[_month_key(item_year, item_month)] for item_year, item_month in fiscal_year_months(fiscal_year)
+             if _month_key(item_year, item_month) in months],
+            JAPAN_HOLIDAYS,
+            fiscal_year,
+        )
+    except Exception:  # pragma: no cover - 年度累計の失敗で当月集計まで落とさない
+        logger.exception("large fiscal year totals failed (project=%s)", project.get("id"))
+        result["fiscal_year_totals"] = {"fiscal_year": fiscal_year, "months": [], "people": []}
+    return result
 
 
 @cloudshift_bp.route("/api/project/<project_id>/month/<int:year>/<int:month>/worktime")

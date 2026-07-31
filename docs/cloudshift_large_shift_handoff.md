@@ -1,8 +1,8 @@
 # CloudShift 大規模シフトモード 引き継ぎ資料
 
-更新日: 2026-07-30
-作業ブランチ: `claude/large-shift-mode-analysis-js37zr`（同期タイミング再設計・同期勤務の時刻設定）
-前回ブランチ: `claude/large-shift-mode-requirements-7j2p2k`
+更新日: 2026-07-31
+作業ブランチ: `claude/large-shift-mode-holidays-iazf4e`（休日ルール・36協定/960集計・休憩上書き）
+前回ブランチ: `claude/large-shift-mode-analysis-js37zr`（同期タイミング再設計・同期勤務の時刻設定）
 
 ## 1. 現在の到達点
 
@@ -97,6 +97,48 @@
   よう、サーバー保存済みデータの正規化は寛容モード（`_normalize_project_entries_for_sync`）で行う。
   クライアント入力の検証は従来どおり厳格（未登録メンバーは 400）。
 
+### 休日ルールと36協定・特別条項・960時間の集計（2026-07-31 追加）
+
+- **これ以前は「休日出勤」を判定する仕組みが実質的に無かった**。セルの `holiday_kind` は
+  データ構造としては存在したが、セル編集画面が保存のたびに空文字へ戻していたため、
+  画面からは設定できなかった。暦から求める `day_type`（平日/土曜/日祝）はダイヤの時間
+  セットを選ぶためだけのもので、休日出勤の判定には使っていない。
+- メンバーごとに **法定休日 / 所定休日** を設定できるようにした。指定方法は 2 種類。
+  - **曜日**（0=日 … 6=土。複数選択可）
+  - **指定日**（`YYYY-MM-DD` の配列。曜日より優先）
+  - 共通ルール `settings.holiday_rule` と、メンバー個別 `member.holiday_rule`
+    （`mode: "default" | "custom"`）の 2 段構え。既定は日曜=法定休日 / 土曜=所定休日。
+  - 同じ日が法定・所定の両方に当たる場合は法定休日が勝つ。
+- セル側の `holiday_kind` は「休日区分のその日だけの上書き」に意味を変えた。
+  `""`=ルールに従う / `"none"`=その日だけ所定労働日 / `"scheduled"` / `"legal"`。
+  振替出勤は `"none"` で表現する。
+- 集計軸を 3 本に分けた。① `payroll_overtime_minutes`（所定労働日の残業）
+  ② `scheduled_holiday_work_minutes` ③ `legal_holiday_work_minutes`。
+  そのうえで次を返す（`worktime_engine` 1.2.0 / `cloudshift_large_calc.js` 1.2.0-js）。
+  - `agreement36_minutes` = ①+②+③（36協定対象）
+  - `special_clause_minutes` = ①+②（特別条項対象）
+  - `annual960_minutes` = ①+②（960対象・当月分）
+- **960対象の年度累計**（4月〜翌年3月）はサーバー計算。`/worktime` のレスポンスに
+  `fiscal_year_totals` を追加し、同じ帳の年度内で保存済みの月を合計する
+  （`cloudshift_large.calculate_large_fiscal_year`）。月単位の計算失敗はその月を除いて継続し、
+  実際に合計した月キーを `months` で返す。ブラウザ側は当月しか持てないため、
+  画面を開いた直後に先読みし、年度累計だけを取り込む（当月集計はローカル計算を維持）。
+- **有休・希望有休の所定時間換算**。`leave_kind == "paid"` の日を所定労働時間として数え、
+  `paid_leave_credit_minutes` / `paid_leave_days` / `work_with_paid_total_minutes` を返す。
+  実労働時間（`work_total_minutes`）には足さず、表下部で「労働計 X:XX ＋Y:YY」と分けて出す。
+  1日あたりは `settings.paid_leave_work_minutes`、未設定ならその日の所定拘束 − 共通休憩。
+- PDF/XLSX の休日マーク（所/法）も休日ルール由来に変更し、集計シートへ ①②③・36協定・
+  特別条項・960（当月/年度累計）・有休換算の列を追加した。
+
+### セル単位の休憩時間上書き（2026-07-31 追加）
+
+- 従来はセルで上書きできるのが始業・終業（＝拘束時間）と所定拘束だけだった。
+  `break_override_minutes` を追加し、その日の休憩時間も上書きできるようにした。
+- 優先順位は **セルの上書き → ダイヤ個別の休憩 → 共通設定の休憩**。
+  `0` も有効値として扱う（その日は休憩なし）。
+- 同期勤務のみのセル（時刻上書きで集計する日）にも適用される。
+- 基準版比較・PDF/XLSX の変更判定にも `break_override_minutes` を含めた。
+
 ### 同期勤務の勤務時間設定（2026-07-30 追加）
 
 - 他帳から同期された勤務だけのセルは従来 `external`（時間未連携）として集計 0 だった。
@@ -104,6 +146,18 @@
   （`worktime_engine` 1.1.0 / `cloudshift_large_calc.js` 1.1.0-js の両方に実装、パリティテストあり）。
 - 休日出勤マーク（法定/所定）との組み合わせは休日勤務として集計する。
 - 時刻上書き未設定の同期セルは従来どおり `external` のまま集計しない。
+
+## 2-1. 移行時の注意（2026-07-31）
+
+- 既存の帳は `settings.holiday_rule` を持たないため、読み込み時に既定値
+  （日曜=法定休日 / 土曜=所定休日）が入る。**これまで 0 だった休日出勤の集計が、
+  土日に勤務がある帳では数字を持ち始める**。土日休みでない現場は設定の
+  「休日ルール」タブを実際の休みに合わせること。
+- 曜日番号は JavaScript の `Date#getDay` に合わせて **0=日曜**。Python 側は
+  `(date.weekday() + 1) % 7` で変換している。両実装で同じ番号体系を使うこと。
+- 休日区分の判定は必ず `cloudshift_large.effective_holiday_kind` /
+  `cloudshift_large_calc.js` の `effectiveHolidayKind` を通す。
+  `entry["holiday_kind"]` を直接読むと、ルール由来の休日を取りこぼす。
 
 ## 3. このセッションで修正した主な不具合
 
@@ -185,14 +239,18 @@
 PR作成前の最終確認として、次を実行した。
 
 ```powershell
-pytest -q tests/test_worktime_engine.py tests/test_worktime_api.py tests/test_cloudshift_large_core.py tests/test_cloudshift_large_integration.py tests/test_cloudshift.py
+pytest -q tests/test_worktime_engine.py tests/test_worktime_api.py tests/test_cloudshift_large_core.py tests/test_cloudshift_large_hardening.py tests/test_cloudshift_large_integration.py tests/test_cloudshift_large_conflict.py tests/test_cloudshift_large_sync_timing.py tests/test_cloudshift.py
 ```
 
-結果: **125 passed（288.33秒）**
+結果: **169 passed（165.98秒）**
 
 重点的に確認する内容:
 
-- サーバー計算とJavaScript計算の一致。
+- サーバー計算とJavaScript計算の一致（休日ルール・休憩上書き・有休換算を含む）。
+- 曜日ルールと指定日ルールで、同じ勤務が残業／所定休日労働／法定休日労働に分かれること。
+- セルの `holiday_kind="none"` でその日だけ所定労働日に戻せること。
+- 休憩上書きが「セル → ダイヤ個別 → 共通設定」の順で効き、`0` も有効なこと。
+- 960対象の年度累計が4月〜翌3月で積み上がり、年度をまたぐとリセットされること。
 - 複数勤務の時間帯結合と重複警告。
 - 大規模シフトの作成、設定、保存、下書き、共有編集、基準版、履歴、復元。
 - PDF/XLSXを実際に読み戻せることと、PDFからコメント文字列を抽出できること。

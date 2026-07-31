@@ -7,9 +7,10 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
 
-ENGINE_VERSION = "1.1.0"
+ENGINE_VERSION = "1.2.0"
 DAY_TYPES = ("weekday", "saturday", "holiday")
 HOLIDAY_KINDS = ("", "scheduled", "legal")
+PAID_LEAVE_KIND = "paid"
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,7 @@ class DayInput:
     holiday_kind: str = ""
     time_override: TimeRange | None = None
     bind_override_minutes: int | None = None
+    break_override_minutes: int | None = None
     has_external_assignment: bool = False
 
 
@@ -78,6 +80,7 @@ class CheckSettings:
 class WorktimeSettings:
     break_minutes: int = 60
     scheduled_bind_minutes: int = 570
+    paid_leave_work_minutes: int | None = None
     checks: CheckSettings = field(default_factory=CheckSettings)
 
 
@@ -105,6 +108,7 @@ class DayResult:
     work_minutes: int
     overtime_minutes: int
     warnings: tuple[str, ...]
+    paid_credit_minutes: int = 0
 
 
 @dataclass(frozen=True)
@@ -122,6 +126,14 @@ class PersonMonthTotals:
     anei_excess_minutes: int
     leave_counts: Mapping[str, int]
     max_consecutive_work_days: int
+    # 改善基準・36協定の集計軸。1=所定内残業 / 2=所定休日労働 / 3=法定休日労働。
+    agreement36_minutes: int = 0
+    special_clause_minutes: int = 0
+    annual960_minutes: int = 0
+    # 有休・希望有休を所定労働時間として換算した「＋○○」の値。
+    paid_leave_credit_minutes: int = 0
+    paid_leave_days: int = 0
+    work_with_paid_total_minutes: int = 0
 
 
 @dataclass(frozen=True)
@@ -290,6 +302,7 @@ def request_from_json(raw: Any) -> WorktimeRequest:
     settings = WorktimeSettings(
         break_minutes=_non_negative_int(raw_settings.get("break_minutes"), 60, "休憩"),
         scheduled_bind_minutes=_non_negative_int(raw_settings.get("scheduled_bind_minutes"), 570, "所定拘束時間"),
+        paid_leave_work_minutes=_optional_non_negative_int(raw_settings.get("paid_leave_work_minutes"), "有休1日の所定労働時間"),
         checks=_checks_from_json(raw_settings.get("checks")),
     )
     people: list[PersonInput] = []
@@ -344,6 +357,7 @@ def request_from_json(raw: Any) -> WorktimeRequest:
                 holiday_kind=holiday_kind,
                 time_override=time_range_from_json(day_item.get("time_override")),
                 bind_override_minutes=_optional_non_negative_int(day_item.get("bind_override_minutes"), f"{day}日の所定拘束時間"),
+                break_override_minutes=_optional_non_negative_int(day_item.get("break_override_minutes"), f"{day}日の休憩時間"),
                 has_external_assignment=_json_bool(day_item.get("has_external_assignment")),
             ))
         prev_end = item.get("prev_day_end_minutes")
@@ -374,6 +388,29 @@ def _scheduled_bind_minutes(day: DayInput, person: PersonInput, settings: Workti
     return settings.scheduled_bind_minutes
 
 
+def _break_minutes(day: DayInput, code_breaks: list[int], bind: int, settings: WorktimeSettings) -> int:
+    """休憩時間を「セル上書き → ダイヤ個別 → 共通設定」の優先順で決める。"""
+    if day.break_override_minutes is not None:
+        value = day.break_override_minutes
+    elif code_breaks:
+        value = sum(code_breaks)
+    else:
+        value = settings.break_minutes
+    return min(max(0, value), bind)
+
+
+def _paid_leave_credit_minutes(code: WorkCode, day: DayInput, person: PersonInput, settings: WorktimeSettings) -> int:
+    """有休・希望有休の1日を所定労働時間へ換算する（表下部の「＋○○」用）。
+
+    実際の労働時間には足さず、別枠で保持する。明示設定が無い場合は
+    その人・その日の所定拘束から共通休憩を引いた時間を所定労働時間とみなす。"""
+    if code.leave_kind != PAID_LEAVE_KIND:
+        return 0
+    if settings.paid_leave_work_minutes is not None:
+        return settings.paid_leave_work_minutes
+    return max(0, _scheduled_bind_minutes(day, person, settings) - settings.break_minutes)
+
+
 def _day_result(day: DayInput, person: PersonInput, code_map: Mapping[str, WorkCode], settings: WorktimeSettings) -> DayResult:
     warnings: list[str] = []
     code_keys = list(day.code_keys) or ([day.code_key] if day.code_key else [])
@@ -382,7 +419,7 @@ def _day_result(day: DayInput, person: PersonInput, code_map: Mapping[str, WorkC
             # 他帳から同期された勤務だけのセル: コードの時間定義が無いため、
             # 時刻上書きが設定されている場合のみ、その時間で勤務として集計する。
             bind = day.time_override.end_minutes - day.time_override.start_minutes
-            break_minutes = min(max(0, settings.break_minutes), bind)
+            break_minutes = _break_minutes(day, [], bind, settings)
             category = "work" if not day.holiday_kind else f"{day.holiday_kind}_holiday_work"
             scheduled = _scheduled_bind_minutes(day, person, settings)
             overtime = max(0, bind - scheduled) if category == "work" else 0
@@ -409,7 +446,10 @@ def _day_result(day: DayInput, person: PersonInput, code_map: Mapping[str, WorkC
         if len(leave_codes) > 1:
             warnings.append("MULTIPLE_LEAVE_CODES")
         code = leave_codes[0]
-        return DayResult(day.day, "leave", code.key, code.leave_kind, code.requested, None, None, 0, 0, 0, 0, tuple(dict.fromkeys(warnings)))
+        return DayResult(
+            day.day, "leave", code.key, code.leave_kind, code.requested, None, None, 0, 0, 0, 0,
+            tuple(dict.fromkeys(warnings)), _paid_leave_credit_minutes(code, day, person, settings),
+        )
 
     selected_ranges: list[tuple[TimeRange, WorkCode]] = []
     for code in work_codes:
@@ -437,8 +477,7 @@ def _day_result(day: DayInput, person: PersonInput, code_map: Mapping[str, WorkC
             merged[-1][1] = max(merged[-1][1], end)
     bind = sum(end - start for start, end in merged)
     explicit_breaks = [code.break_minutes for _, code in selected_ranges if code.break_minutes is not None]
-    break_minutes = sum(explicit_breaks) if explicit_breaks else settings.break_minutes
-    break_minutes = min(max(0, break_minutes), bind)
+    break_minutes = _break_minutes(day, explicit_breaks, bind, settings)
     work = bind - break_minutes
     scheduled = _scheduled_bind_minutes(day, person, settings)
     overtime = max(0, bind - scheduled) if category == "work" else 0
@@ -528,7 +567,29 @@ def calculate(request: WorktimeRequest) -> WorktimeResult:
             violations.append(_violation("ANEI_LONG_WORK", "warning", person, None, anei_excess, checks.anei_long_work_warn_minutes, f"長時間労働 {minutes_to_hhmm(anei_excess)} が目安を超えています"))
         if checks.consecutive_days_enabled and maximum > checks.consecutive_days_warn_days:
             violations.append(_violation("CONSECUTIVE_DAYS", "warning", person, None, maximum * 1440, checks.consecutive_days_warn_days * 1440, f"連続勤務 {maximum}日 が目安 {checks.consecutive_days_warn_days}日を超えています"))
-        totals = PersonMonthTotals(days_in_month, sum(1 for day in results if day.category in work_categories and day.bind_minutes > 0), bind_total, break_total, work_total, payroll_ot, scheduled_work, legal_work, payroll_ot + scheduled_work + legal_work, anei_base, anei_excess, leave_counts, maximum)
+        paid_credit = sum(day.paid_credit_minutes for day in results)
+        paid_days = sum(1 for day in results if day.category == "leave" and day.leave_kind == PAID_LEAVE_KIND)
+        totals = PersonMonthTotals(
+            calendar_days=days_in_month,
+            work_days=sum(1 for day in results if day.category in work_categories and day.bind_minutes > 0),
+            bind_total_minutes=bind_total,
+            break_total_minutes=break_total,
+            work_total_minutes=work_total,
+            payroll_overtime_minutes=payroll_ot,
+            scheduled_holiday_work_minutes=scheduled_work,
+            legal_holiday_work_minutes=legal_work,
+            payroll_excess_total_minutes=payroll_ot + scheduled_work + legal_work,
+            anei_base_minutes=anei_base,
+            anei_excess_minutes=anei_excess,
+            leave_counts=leave_counts,
+            max_consecutive_work_days=maximum,
+            agreement36_minutes=payroll_ot + scheduled_work + legal_work,
+            special_clause_minutes=payroll_ot + scheduled_work,
+            annual960_minutes=payroll_ot + scheduled_work,
+            paid_leave_credit_minutes=paid_credit,
+            paid_leave_days=paid_days,
+            work_with_paid_total_minutes=work_total + paid_credit,
+        )
         person_result = PersonMonthResult(person.person_id, person.label, results, totals, tuple(violations))
         all_people.append(person_result)
         all_violations.extend(violations)
@@ -543,6 +604,8 @@ def result_to_dict(result: WorktimeResult) -> dict[str, Any]:
         "payroll_overtime_minutes", "scheduled_holiday_work_minutes",
         "legal_holiday_work_minutes", "payroll_excess_total_minutes",
         "anei_base_minutes", "anei_excess_minutes", "value_minutes", "threshold_minutes",
+        "agreement36_minutes", "special_clause_minutes", "annual960_minutes",
+        "paid_leave_credit_minutes", "work_with_paid_total_minutes", "paid_credit_minutes",
     }
 
     def decorate(value: Any) -> Any:
