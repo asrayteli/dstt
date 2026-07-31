@@ -512,3 +512,154 @@ def test_large_project_links_site_and_syncs_regular_and_substitute_people_both_w
         f"{BASE}/api/project/{large['project']['id']}?month_key=2026-07"
     ).get_json()["month"]
     assert large_after_removal["entries_per_day"]["2"] == []
+
+
+def _holiday_rule_project(client, *, year=2026, month=7):
+    """勤務コード1つ・メンバー2人の大規模シフト帳を作り、(project_id, config) を返す。"""
+    created = client.post(
+        f"{BASE}/api/create",
+        data={"title": "休日ルール検証", "mode": "large", "year": str(year), "month": str(month)},
+    )
+    assert created.status_code == 200
+    project_id = created.get_json()["project"]["project"]["id"]
+    config = default_large_config()
+    config["members"] = [
+        {"id": "m1", "display_name": "共通ルール", "employee_number": "2001", "employee_name": "共通ルール", "order": 10, "active": True},
+        {"id": "m2", "display_name": "個別ルール", "employee_number": "2002", "employee_name": "個別ルール", "order": 20, "active": True},
+    ]
+    config["codes"].append({
+        "key": "A", "label": "通常", "category": "work", "order": 10, "active": True,
+        "times": {day_type: {"start": "08:00", "end": "18:00"} for day_type in ("weekday", "saturday", "holiday")},
+        "color": "#dbeafe",
+    })
+    return project_id, config
+
+
+def test_member_holiday_rule_drives_holiday_work_and_overtime(tmp_path):
+    """曜日ルールと指定日ルールで、同じ勤務が残業／所定休日労働／法定休日労働に分かれる。"""
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id, config = _holiday_rule_project(client)
+    # 共通ルールは既定どおり日=法定 / 土=所定。個別ルールの人は水曜が法定休日、7/2 が所定休日。
+    config["members"][1]["holiday_rule"] = {
+        "mode": "custom",
+        "legal_weekdays": [3],
+        "scheduled_weekdays": [],
+        "legal_dates": [],
+        "scheduled_dates": ["2026-07-02"],
+    }
+    assert client.put(f"{BASE}/api/project/{project_id}/large-config", json={"large_config": config}).status_code == 200
+
+    # 2026-07-01(水) / 02(木) / 04(土) / 05(日) に同じ勤務を入れる。
+    entries = {
+        str(day): [{"member_id": member_id, "value": "A", "assignments": [{"code_key": "A", "source_type": "local"}]}
+                   for member_id in ("m1", "m2")]
+        for day in (1, 2, 4, 5)
+    }
+    saved = client.put(
+        f"{BASE}/api/project/{project_id}/month/2026/7",
+        json={"base_month": {"revision": 1}, "entries_per_day": entries},
+    )
+    assert saved.status_code == 200
+
+    result = client.get(f"{BASE}/api/project/{project_id}/month/2026/7/worktime").get_json()["result"]
+    by_person = {person["person_id"]: person for person in result["people"]}
+    shared_days = {day["day"]: day["category"] for day in by_person["m1"]["days"] if day["category"] != "empty"}
+    custom_days = {day["day"]: day["category"] for day in by_person["m2"]["days"] if day["category"] != "empty"}
+    assert shared_days == {1: "work", 2: "work", 4: "scheduled_holiday_work", 5: "legal_holiday_work"}
+    assert custom_days == {1: "legal_holiday_work", 2: "scheduled_holiday_work", 4: "work", 5: "work"}
+
+    # 拘束600分 - 所定570分 = 30分の残業が、所定労働日の日数だけ積み上がる。
+    shared_totals = by_person["m1"]["totals"]
+    custom_totals = by_person["m2"]["totals"]
+    assert shared_totals["payroll_overtime_minutes"] == 60
+    assert shared_totals["scheduled_holiday_work_minutes"] == 540
+    assert shared_totals["legal_holiday_work_minutes"] == 540
+    assert shared_totals["agreement36_minutes"] == 1140
+    assert shared_totals["special_clause_minutes"] == 600
+    assert shared_totals["annual960_minutes"] == 600
+    assert custom_totals["payroll_overtime_minutes"] == 60
+    assert custom_totals["scheduled_holiday_work_minutes"] == 540
+    assert custom_totals["legal_holiday_work_minutes"] == 540
+
+
+def test_break_override_and_paid_leave_credit_round_trip(tmp_path):
+    """休憩上書きが保存・集計され、有休は労働時間と別枠の「＋○○」として返る。"""
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id, config = _holiday_rule_project(client)
+    assert client.put(f"{BASE}/api/project/{project_id}/large-config", json={"large_config": config}).status_code == 200
+
+    entries = {
+        # 1日(水): 休憩上書き30分 / 2日(木): 上書きなし（共通休憩60分） / 3日(金): 有休
+        "1": [{"member_id": "m1", "value": "A", "assignments": [{"code_key": "A", "source_type": "local"}], "break_override_minutes": 30}],
+        "2": [{"member_id": "m1", "value": "A", "assignments": [{"code_key": "A", "source_type": "local"}]}],
+        "3": [{"member_id": "m1", "value": "有休", "assignments": [{"code_key": "有休", "source_type": "local"}]}],
+    }
+    saved = client.put(
+        f"{BASE}/api/project/{project_id}/month/2026/7",
+        json={"base_month": {"revision": 1}, "entries_per_day": entries},
+    )
+    assert saved.status_code == 200
+    assert saved.get_json()["month"]["entries_per_day"]["1"][0]["break_override_minutes"] == 30
+    assert saved.get_json()["month"]["entries_per_day"]["2"][0]["break_override_minutes"] is None
+
+    result = client.get(f"{BASE}/api/project/{project_id}/month/2026/7/worktime").get_json()["result"]
+    person = next(item for item in result["people"] if item["person_id"] == "m1")
+    assert [(day["break_minutes"], day["work_minutes"]) for day in person["days"][:2]] == [(30, 570), (60, 540)]
+    # 有休は労働時間へ足さず、所定拘束570分-休憩60分=510分を換算値として持つ。
+    assert person["totals"]["work_total_minutes"] == 1110
+    assert person["totals"]["paid_leave_credit_minutes"] == 510
+    assert person["totals"]["work_with_paid_total_minutes"] == 1620
+    assert person["totals"]["paid_leave_days"] == 1
+
+
+def test_960_target_accumulates_across_the_fiscal_year(tmp_path):
+    """960対象は4月〜翌3月で累計し、年度が変わるとリセットされる。"""
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id, config = _holiday_rule_project(client, year=2026, month=4)
+    assert client.put(f"{BASE}/api/project/{project_id}/large-config", json={"large_config": config}).status_code == 200
+
+    def _fill(year, month, days):
+        month_key = f"{year}-{month:02d}"
+
+        def _detail():
+            return client.get(f"{BASE}/api/project/{project_id}?month_key={month_key}").get_json()
+
+        existing = _detail()
+        # 対象月が無い場合、詳細APIは別の月にフォールバックするため年月で確認する。
+        current = existing.get("month") or {}
+        if (int(current.get("year") or 0), int(current.get("month") or 0)) != (year, month):
+            assert client.post(
+                f"{BASE}/api/project/{project_id}/month",
+                json={"year": year, "month": month, "init_mode": "blank"},
+            ).status_code == 200
+            existing = _detail()
+        entries = {
+            str(day): [{"member_id": "m1", "value": "A", "assignments": [{"code_key": "A", "source_type": "local"}],
+                        "holiday_kind": "none"}]
+            for day in days
+        }
+        assert client.put(
+            f"{BASE}/api/project/{project_id}/month/{year}/{month}",
+            json={"base_month": {"revision": existing["month"]["revision"]}, "entries_per_day": entries},
+        ).status_code == 200
+
+    # 拘束600分 - 所定570分 = 1日30分の残業。4月2日・5月2日・翌1月2日ぶん。
+    _fill(2026, 4, [1, 2])
+    _fill(2026, 5, [1, 2])
+    _fill(2027, 1, [4, 5])
+    _fill(2027, 4, [1])
+
+    april = client.get(f"{BASE}/api/project/{project_id}/month/2026/4/worktime").get_json()["result"]
+    annual = april["fiscal_year_totals"]
+    assert annual["fiscal_year"] == 2026
+    assert annual["months"] == ["2026-04", "2026-05", "2027-01"]
+    assert next(item for item in annual["people"] if item["person_id"] == "m1")["annual960_minutes"] == 180
+
+    # 2027年4月は次の年度なので、その月ぶんだけになる。
+    next_year = client.get(f"{BASE}/api/project/{project_id}/month/2027/4/worktime").get_json()["result"]
+    assert next_year["fiscal_year_totals"]["fiscal_year"] == 2027
+    assert next_year["fiscal_year_totals"]["months"] == ["2027-04"]
+    assert next(item for item in next_year["fiscal_year_totals"]["people"] if item["person_id"] == "m1")["annual960_minutes"] == 30

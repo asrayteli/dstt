@@ -1,7 +1,19 @@
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
 from openpyxl import load_workbook
 from pypdf import PdfReader
 
-from app.services.cloudshift_large import calculate_large_month, default_large_config, normalize_large_config
+from app.services.cloudshift_large import (
+    calculate_large_month,
+    default_large_config,
+    effective_holiday_kind,
+    effective_holiday_rule,
+    holiday_class_for_day,
+    normalize_large_config,
+)
 from app.tools.cloudshift_large_export import _baseline_changed, large_pdf_bytes, large_xlsx_bytes
 from app.tools.shiftersync_format import normalize_large_entries_for_month
 
@@ -115,3 +127,115 @@ def test_large_exports_are_readable_and_contain_expected_sheets():
     assert len(reader.pages) >= 1
     assert len(pdf.getvalue()) > 1000
     assert "引継ぎあり" in "".join(page.extract_text() or "" for page in reader.pages)
+
+
+def test_holiday_rule_normalizes_weekdays_dates_and_member_override():
+    config = default_large_config()
+    config["settings"]["holiday_rule"] = {
+        "legal_weekdays": [0, 7, "1", 0],
+        "scheduled_weekdays": [6],
+        "legal_dates": ["2026-08-11", "2026-08-11"],
+        "scheduled_dates": ["2026-12-31"],
+    }
+    config["members"] = [
+        {"id": "m1", "display_name": "共通"},
+        {"id": "m2", "display_name": "個別", "holiday_rule": {"mode": "custom", "legal_weekdays": [3]}},
+    ]
+    normalized = normalize_large_config(config)
+    rule = normalized["settings"]["holiday_rule"]
+    # 0〜6 以外は捨て、重複は畳んで昇順に並べる。
+    assert rule["legal_weekdays"] == [0, 1]
+    assert rule["legal_dates"] == ["2026-08-11"]
+    assert normalized["members"][0]["holiday_rule"]["mode"] == "default"
+    assert normalized["members"][1]["holiday_rule"]["mode"] == "custom"
+
+    settings = normalized["settings"]
+    shared = effective_holiday_rule(normalized["members"][0], settings)
+    custom = effective_holiday_rule(normalized["members"][1], settings)
+    # 2026-08-11(火) は共通ルールでは指定日の法定休日、個別ルールでは所定労働日。
+    assert holiday_class_for_day(shared, 2026, 8, 11) == "legal"
+    assert holiday_class_for_day(custom, 2026, 8, 11) == ""
+    # 2026-08-12(水) は個別ルールの曜日指定で法定休日。
+    assert holiday_class_for_day(custom, 2026, 8, 12) == "legal"
+    # セル側の上書きは曜日・指定日より強い。
+    assert effective_holiday_kind(shared, 2026, 8, 11, {"holiday_kind": "none"}) == ""
+    assert effective_holiday_kind(custom, 2026, 8, 11, {"holiday_kind": "scheduled"}) == "scheduled"
+
+
+def test_invalid_holiday_rule_date_is_rejected():
+    config = default_large_config()
+    config["settings"]["holiday_rule"] = {"legal_dates": ["2026/08/11"]}
+    with pytest.raises(ValueError):
+        normalize_large_config(config)
+
+
+def test_server_and_browser_agree_on_rule_based_holiday_totals():
+    """休日ルール・休憩上書き・有休換算をサーバー計算とブラウザ計算で突き合わせる。"""
+    config = default_large_config()
+    config["settings"]["holiday_rule"] = {
+        "legal_weekdays": [0], "scheduled_weekdays": [6],
+        "legal_dates": [], "scheduled_dates": ["2026-07-02"],
+    }
+    config["members"] = [
+        {"id": "m1", "display_name": "共通", "active": True, "order": 10},
+        {"id": "m2", "display_name": "個別", "active": True, "order": 20,
+         "holiday_rule": {"mode": "custom", "legal_weekdays": [3], "scheduled_weekdays": [4],
+                          "legal_dates": [], "scheduled_dates": []}},
+    ]
+    config["codes"].append({
+        "key": "A", "label": "A", "category": "work", "active": True, "order": 1,
+        "times": {key: {"start": "08:00", "end": "18:00"} for key in ("weekday", "saturday", "holiday")},
+        "color": "#dbeafe",
+    })
+    config = normalize_large_config(config)
+    entries = {}
+    for day in (1, 2, 3, 4, 5):
+        entries[str(day)] = [
+            {"member_id": member_id, "value": "A", "assignments": [{"code_key": "A", "source_type": "local"}],
+             **({"break_override_minutes": 30} if day == 1 else {})}
+            for member_id in ("m1", "m2")
+        ]
+    entries["6"] = [{"member_id": member_id, "value": "有休",
+                     "assignments": [{"code_key": "有休", "source_type": "local"}]}
+                    for member_id in ("m1", "m2")]
+    month = {"year": 2026, "month": 7, "entries_per_day": entries, "meta_data": {"day_types": {}, "day_notes": {}}}
+
+    server = calculate_large_month(config, month, [])
+    script = (
+        "const c=require('./app/static/cloudshift/js/cloudshift_large_calc.js');"
+        " process.stdout.write(JSON.stringify(c.calculate(JSON.parse(process.argv[1]))));"
+    )
+    completed = subprocess.run(
+        ["node", "-e", script, json.dumps(
+            {"year": 2026, "month": 7, "config": config, "entries_per_day": entries, "holidays": []},
+            ensure_ascii=False,
+        )],
+        cwd=Path(__file__).resolve().parents[1], text=True, encoding="utf-8", capture_output=True, check=True,
+    )
+    browser = json.loads(completed.stdout)
+
+    compared = (
+        "payroll_overtime_minutes", "scheduled_holiday_work_minutes", "legal_holiday_work_minutes",
+        "agreement36_minutes", "special_clause_minutes", "annual960_minutes",
+        "work_total_minutes", "break_total_minutes", "paid_leave_credit_minutes",
+        "work_with_paid_total_minutes",
+    )
+    for index in range(2):
+        server_totals = server["people"][index]["totals"]
+        browser_totals = browser["people"][index]["totals"]
+        assert {key: server_totals[key] for key in compared} == {key: browser_totals[key] for key in compared}
+        assert [day["category"] for day in server["people"][index]["days"]] == \
+            [day["category"] for day in browser["people"][index]["days"]]
+
+    # 共通ルール: 7/2(木)=指定日の所定休 / 7/4(土)=所定休 / 7/5(日)=法定休。
+    shared_days = {day["day"]: day["category"] for day in server["people"][0]["days"] if day["category"] != "empty"}
+    assert shared_days == {
+        1: "work", 2: "scheduled_holiday_work", 3: "work",
+        4: "scheduled_holiday_work", 5: "legal_holiday_work", 6: "leave",
+    }
+    # 個別ルール: 水=法定休 / 木=所定休。土日は所定労働日。
+    custom_days = {day["day"]: day["category"] for day in server["people"][1]["days"] if day["category"] != "empty"}
+    assert custom_days == {
+        1: "legal_holiday_work", 2: "scheduled_holiday_work", 3: "work",
+        4: "work", 5: "work", 6: "leave",
+    }

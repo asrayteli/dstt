@@ -119,6 +119,13 @@ CloudShift のシフト帳モードに、1つのシフト帳で多人数（目�
       "employee_number": "1234",        // 社員名簿PLUS連携時のみ（自由入力メンバーは空）
       "employee_name": "（正式氏名）",   // 連携時に社員名簿から複写
       "scheduled_bind_minutes": null,   // 所定拘束時間の個人上書き（nullなら settings 値）
+      "holiday_rule": {                 // 法定休日・所定休日の個人設定（v1.2）
+        "mode": "default",              // "default"=settings.holiday_rule を使う / "custom"=この定義を使う
+        "legal_weekdays": [],           // 0=日 … 6=土（JavaScript の Date#getDay と同じ並び）
+        "scheduled_weekdays": [],
+        "legal_dates": [],              // ["2026-08-11", …] 指定日は曜日より優先
+        "scheduled_dates": []
+      },
       "order": 10,                      // 列順
       "active": true,                   // 退職・離任は false（列非表示、データは保持）
       "note": ""
@@ -146,6 +153,13 @@ CloudShift のシフト帳モードに、1つのシフト帳で多人数（目�
   "settings": {
     "break_minutes": 60,                    // 休憩（既定1時間・R-08）
     "scheduled_bind_minutes": 570,          // 所定拘束時間 9:30（R-07の既定値）
+    "paid_leave_work_minutes": null,        // 有休1日の所定労働時間（null=所定拘束−共通休憩・v1.2）
+    "holiday_rule": {                       // 共通の休日ルール（v1.2）。個人設定が無いメンバーが使う
+      "legal_weekdays": [0],                // 既定: 日曜=法定休日
+      "scheduled_weekdays": [6],            // 既定: 土曜=所定休日
+      "legal_dates": [],
+      "scheduled_dates": []
+    },
     "checks": {
       "kaizen_monthly_bind": {"enabled": true,  "warn_minutes": 16860},                 // 月間拘束 281h
       "kaizen_daily_bind":   {"enabled": true,  "warn_minutes": 780, "max_minutes": 900}, // 1日拘束 13h/15h
@@ -184,9 +198,11 @@ CloudShift のシフト帳モードに、1つのシフト帳で多人数（目�
   "id": "ce_xxxxxxxx",
   "member_id": "mem_xxxxxxxx",          // large_config.members の id（必須）
   "value": "A",                          // コードkey。マスタ未登録の文字列も保存は許可（警告扱い）
-  "holiday_kind": "",                    // "" | "scheduled"(所定休日) | "legal"(法定休日)
-  "time_override": null,                 // {"start":"08:30","end":"17:30"} 例外日・時間可変コード用
+  "holiday_kind": "",                    // 休日区分のセル上書き。"" = メンバーの休日ルールに従う /
+                                         // "none" = その日だけ所定労働日 / "scheduled" / "legal"
+  "time_override": null,                 // {"start":"08:30","end":"17:30"} 例外日・時間可変コード用（拘束の上書き）
   "bind_override_minutes": null,         // 所定拘束時間のセル上書き（R-07）
+  "break_override_minutes": null,        // 休憩時間のセル上書き（v1.2。0=その日は休憩なし）
   "comment": "",                         // セルコメント（R-14。補足事項）
   "employee_number": "",                 // メンバーから複写（将来同期用・R-16）
   "employee_name": ""
@@ -196,9 +212,10 @@ CloudShift のシフト帳モードに、1つのシフト帳で多人数（目�
 ルール:
 
 - **1メンバー×1日 = 最大1エントリ**（補足事項はコメントで表現）。保存時に重複 member_id を検出したら後勝ちで統合し警告。
-- `value` 空文字 + holiday_kind もコメントも空のエントリは保存時に破棄（空セル）。
-- `value` が空でも `holiday_kind` が付いていれば保存する（「休日マークだけの日」を許す。計算上は `category="empty"` の休み扱いで、`leave_counts["empty"]` に数える）。
-- 「振替出勤」のような扱いは専用コードを設けない。**休日マークを付けない通常勤務 + コメント**（または任意の勤務コード）で表現し、振替の休み側は休みコード（振休等）で表現する。
+- `value` 空文字 + holiday_kind もコメントも空のエントリは保存時に破棄（空セル）。`time_override` /
+  `bind_override_minutes` / `break_override_minutes` だけのエントリも同様に破棄される。
+- `value` が空でも `holiday_kind` が付いていれば保存する（「休日区分の上書きだけの日」を許す。計算上は `category="empty"` の休み扱いで、`leave_counts["empty"]` に数える）。
+- 「振替出勤」は専用コードを設けない。セルの `holiday_kind="none"`（その日だけ所定労働日）＋コメントで表現し、振替の休み側は休みコード（振休等）で表現する。
 - 正規化は新設の `normalize_large_entry`（`app/tools/shiftersync_format.py` に追加）で行う。既存 `normalize_entry` の `!OPT!` 形式・代務系フィールドは適用しない。エントリを受け取る全保存API（PUT month / **下書きPUT（draft）** / 公開編集PUT）で `project.mode == "large"` のとき分岐する。
 - 下書き（draft_entries_per_day）・リビジョン（revision / revision_snapshots）・履歴（CloudShiftHistory）は既存機構をそのまま使う。
 
@@ -375,9 +392,12 @@ class WorktimeResult:
 1. **コード解決**: `code_key` 空 → `empty`。マスタに無いキー → `empty` 扱い + 警告 `CODE_UNDEFINED`（保存は許すが時間0）。`category="leave"` → `leave`（時間すべて0、leave_kind/requested を結果へ）。`empty`（空セル・休日マークのみ・未登録コード）は `leave_counts["empty"]` に数える。
 2. **時間解決**（category=work）: 優先順位は `time_override` → `times[day_type]` → `times["weekday"]`（フォールバック時は警告 `TIME_SET_FALLBACK`）。どれも無ければ時間0 + 警告 `TIME_UNDEFINED`。
 3. **拘束時間** `bind = end − start`。
-4. **休憩** `break = code.break_minutes ?? settings.break_minutes`、ただし `bind == 0` なら 0、`break > bind` なら `bind` に丸める（労働時間を負にしない）。
+4. **休憩** `break = entry.break_override_minutes ?? code.break_minutes ?? settings.break_minutes`、ただし `bind == 0` なら 0、`break > bind` なら `bind` に丸める（労働時間を負にしない）。セル上書きは 0 も有効値（その日は休憩なし）。
 5. **労働時間** `work = bind − break`。
-6. **区分**: `holiday_kind == ""` → `work`（通常出勤）。`"scheduled"` → `scheduled_holiday_work`、`"legal"` → `legal_holiday_work`。休みコード＋holiday_kind 付きは `leave`（その日が休日でもある、のマークとして許容）。**曜日は区分に影響しない**（日曜でもマーク無しなら通常出勤。休日出勤か否かは holiday_kind のみで決まる。R-02）。
+6. **区分**: その日・その人の**休日区分**で決まる。休日区分は「セルの `holiday_kind` 上書き（`none`/`scheduled`/`legal`） → メンバーの休日ルール（指定日 → 曜日）」の順に解決する（v1.2。`cloudshift_large.effective_holiday_kind`）。所定労働日 → `work`（通常出勤）、所定休日 → `scheduled_holiday_work`、法定休日 → `legal_holiday_work`。休みコードの日は休日区分にかかわらず `leave`。
+   - 休日ルールは `member.holiday_rule.mode == "custom"` ならその定義、そうでなければ `settings.holiday_rule` を使う。
+   - 指定日は曜日より優先し、法定休日は所定休日より優先する。
+   - **`day_type`（平日/土曜/日祝）とは別軸**である。`day_type` はダイヤの時間セットを選ぶためだけに使い、休日出勤の判定には使わない。
 7. **日次超過**（category=work のみ）: `scheduled_bind = bind_override ?? person.scheduled_bind_minutes ?? settings.scheduled_bind_minutes`、`overtime = max(0, bind − scheduled_bind)`。休出（scheduled/legal）は超過を計上しない（労働時間全体を休出計へ）。
 
 ### 月次集計仕様
@@ -386,6 +406,19 @@ class WorktimeResult:
 - `payroll_overtime`（給与残業計）= 通常出勤日の `overtime` 合計。**長時間労働計(労基) はこれと同値として扱う**。
 - `scheduled_holiday_work` / `legal_holiday_work` = 各休出日の `work`（労働時間）合計。
 - `payroll_excess_total`（超過計）= 給与残業計 + 所定休出計 + 法定休出計。
+- **36協定・特別条項・960時間の集計軸**（v1.2）。①=`payroll_overtime`（所定労働日の残業）、②=`scheduled_holiday_work`、③=`legal_holiday_work` とし、次を返す。
+
+| キー | 式 | 表示名 |
+|---|---|---|
+| `agreement36_minutes` | ①+②+③ | 36協定対象 |
+| `special_clause_minutes` | ①+② | 特別条項対象 |
+| `annual960_minutes` | ①+② | 960対象（当月分） |
+
+  - 960時間は**年度（4月〜翌年3月）累計**で見るため、月次結果に加えて `fiscal_year_totals` を返す（後述のAPI）。
+- **有休の所定時間換算**（v1.2）。`leave_kind == "paid"` の日（有休・希望有休の両方）を所定労働時間として換算し、実労働時間とは別枠で保持する。
+  - 1日あたり = `settings.paid_leave_work_minutes`。未設定なら `その日の所定拘束 − settings.break_minutes`。
+  - `paid_leave_credit_minutes`（合計）、`paid_leave_days`（日数）、`work_with_paid_total_minutes`（= 労働計 + 換算）を返す。
+  - UIは表下部に「労働計 X:XX ＋Y:YY」の形で出す。**労働時間そのものには足さない**（`work_total_minutes` は従来どおり）。
 - `anei_base_minutes`（安衛法の長時間労働算定に使う月間基準時間）: 暦日数から自動決定。
 
 | 暦日数 | 基準時間 |
@@ -466,7 +499,7 @@ POST /tools/worktime/api/calculate
 | `GET/PUT /api/project/<id>/large-config` | マスタ（members/codes/settings）の取得・全置換保存。PUT はバリデーション + 履歴記録（action=`large_config_update`）。編集権限（owner/editor）必須 |
 | `PUT /api/project/<id>/month/<y>/<m>` | 既存の月保存を拡張。mode=large のとき `entries_per_day` を `normalize_large_entry` で正規化し、`meta`（`day_types`/`day_notes`）を `meta_data` へ保存。revision/履歴は既存どおり |
 | project 取得系（既存） | mode=large では月ペイロードに `meta_data`（day_types/day_notes/baseline有無・set_at）を含める |
-| `GET /api/project/<id>/month/<y>/<m>/worktime` | その月の計算結果（WorktimeResult 相当）。サーバが large_config + entries + meta から WorktimeRequest を組み立てて engine を呼ぶ。集計タブ・個人明細・保存後の確定表示に使う |
+| `GET /api/project/<id>/month/<y>/<m>/worktime` | その月の計算結果（WorktimeResult 相当）。サーバが large_config + entries + meta から WorktimeRequest を組み立てて engine を呼ぶ。集計タブ・個人明細・保存後の確定表示に使う。加えて **`fiscal_year_totals`**（v1.2）を返す: 対象月が属する年度（4月〜翌3月）のうち、同じ帳に保存済みの月を合計した人別の 960対象・36協定対象・特別条項対象・労働時間・有休換算。月単位の計算失敗はその月を除いて継続する（`months` に実際に合計した月キーを返す） |
 | `POST /api/project/<id>/month/<y>/<m>/baseline` | 基準版の設定（現在の確定 entries をスナップショット）/ `{"clear": true}` で解除。編集権限必須。履歴記録 |
 | 公開系 `GET /api/public/<view|edit|pwa>/<token>` | 既存。mode=large の月ペイロード＋large_config（閲覧に必要な members/codes/settings）+ baseline を返す |
 | 公開編集 `PUT /api/public/edit/<token>/month/<y>/<m>` | 既存拡張（mode分岐は月保存と共通実装） |
@@ -485,11 +518,12 @@ POST /tools/worktime/api/calculate
 
 ### 設定画面（マスタ管理）
 
-編集画面から開くモーダルまたは専用パネルで3タブ:
+編集画面から開くモーダルまたは専用パネルで4タブ:
 
-1. **メンバー**: 追加（社員名簿PLUS検索 / 自由入力の2ボタン・R-04）、表示名・並び順・所定拘束時間の個人上書き・無効化。ドラッグで列順変更。
+1. **メンバー**: 追加（社員名簿PLUS検索 / 自由入力の2ボタン・R-04）、表示名・並び順・所定拘束時間の個人上書き・無効化。ドラッグで列順変更。各カードに**休日ルールの個人設定**（共通ルールを使う／この人だけ曜日・指定日で決める）を折りたたみで持つ（v1.2）。
 2. **シフトコード**: 勤務コード（key・表示名・色・平日/土曜/日祝の時間セット・休憩上書き・「時間はセルで都度入力」= times全null）と休みコード（leave_kind・requested）の一覧編集。
-3. **計算設定**: 休憩時間、所定拘束時間の既定、チェックのON/OFFとしきい値（R-05・R-07・R-08）。改善基準の既定値には注記を付ける。
+3. **休日ルール**（v1.2）: 共通の法定休日・所定休日を **①曜日**（複数選択）と **②指定日**（日付の追加・削除）で決める。土日休みでない現場に合わせるための設定で、休日出勤・残業の集計はここが基準になる。既定は日曜=法定休日／土曜=所定休日。
+4. **計算設定**: 休憩時間、所定拘束時間の既定、**有休1日の所定労働時間**（v1.2）、チェックのON/OFFとしきい値（R-05・R-07・R-08）。改善基準の既定値には注記を付ける。
 
 ### 編集画面（グリッド）
 
@@ -503,13 +537,15 @@ mode=large のとき、既存のカレンダーUIの代わりに専用グリッ�
 │ 7/2(木) │  B   │  A   │ 有休 │                                        │
 │ …      │      │      │      │                                        │
 ├──────┴─────────────────────────────────────────────┤
-│ 集計フッタ（人ごと・固定）: 拘束計 / 労働計 / 残業計 / 休出計 / 警告バッジ         │
+│ 集計フッタ（人ごと・固定）: 拘束計 / 労働計＋有休換算 / ①所定内残業 / ②所定休日 / ③法定休日 │
 └─────────────────────────────────────────────────────┘
+  ↓ グリッド直下のパネル
+  36協定対象(①+②+③) / 特別条項対象(①+②) / 960対象(①+②・当月) / 960対象(年度累計 4月〜翌3月)
 ```
 
 - **日付列（固定）**: 日付・曜日・ダイヤ種別バッジ（平/土/日祝。上書きされた日は強調）・日メモアイコン。日ヘッダのメニューから「この日のダイヤ種別を変更」（R-03の長期休暇期運用）と「日メモ編集」（R-14）。
-- **セル**: コード表示（マスタの色・休みコードは灰系）。休日区分マークは枠線/角マーカーで表現（所定と法定は別色。色はCSS変数で定義し固定しない）。コメント有りは右上ドット。時間上書き有りは時計アイコン。
-- **セル編集**: クリックでパレットポップオーバー（勤務コード群 / 休みコード群 / 休日区分トグル(なし/所定/法定) / 時間上書き / 所定拘束時間の上書き(R-07のセル単位入力) / コメント / クリア。時間系と所定拘束の上書きは「詳細」折りたたみに置き、通常入力の邪魔をしない）。**キーボード操作を第一級で対応**: 矢印移動、コードkey直接タイプ+補完確定、Delete=クリア、Ctrl+C/V でセル複製（同列/同行への連続貼り付け）。多人数分の大量入力を高速化する。
+- **セル**: コード表示（マスタの色・休みコードは灰系）。休日区分マークは枠線/角マーカーで表現（所定と法定は別色。色はCSS変数で定義し固定しない）。マークは**その人の休日ルール**から自動で付き、セル上書きがあればそれが勝つ。コメント有りは右上ドット。時間・休憩の上書き有りは時計アイコン。
+- **セル編集**: クリックでパレットポップオーバー（勤務コード群 / 休みコード群 / **この日の休日区分**（ルールに従う / 所定労働日 / 所定休日 / 法定休日） / 始業・終業の上書き / **休憩の上書き** / 所定拘束時間の上書き(R-07のセル単位入力) / コメント / クリア。時間系と所定拘束の上書きは「詳細」折りたたみに置き、通常入力の邪魔をしない）。**キーボード操作を第一級で対応**: 矢印移動、コードkey直接タイプ+補完確定、Delete=クリア、Ctrl+C/V でセル複製（同列/同行への連続貼り付け）。多人数分の大量入力を高速化する。
 - **リアルタイム集計**: 編集のたびにJSミラーで再計算し、フッタと警告バッジを即時更新（転記→別台帳で確認→戻る、の往復解消が本機能の核）。
 - **個人明細ドロワー**: メンバー列ヘッダをクリック→その人の日別計算表（日付/コード/始業終業/休憩/拘束/労働/超過/区分）+ 月次合計 + その人の警告一覧。
 - **集計タブ**: 全員×指標のテーブル（拘束時間計・労働時間計・長時間労働計(労基/安衛)・給与残業計・給与所定休出計・給与法定休出計・超過計・勤務日数・休み日数内訳）と警告一覧（クリックで該当セルへジャンプ）。値はサーバの `/worktime` を正とする。
@@ -519,7 +555,7 @@ mode=large のとき、既存のカレンダーUIの代わりに専用グリッ�
 ### 変更ハイライト（基準版・R-17）
 
 - ツールバー「基準版」メニュー: **「現在の内容を基準版として確定」**（初回公開時にも確定を促すトースト）/「基準版を解除」/「基準版時点を表示」。
-- 基準版が存在する月は、基準と現在で内容が異なるセルを強調表示（枠色+マーカー）。比較対象: `value` / `holiday_kind` / `time_override` / `bind_override_minutes`（計算に影響する4項目。コメントの差は含めない。設定で切替可）。
+- 基準版が存在する月は、基準と現在で内容が異なるセルを強調表示（枠色+マーカー）。比較対象: `value` / `assignments` / `holiday_kind` / `time_override` / `bind_override_minutes` / `break_override_minutes`（計算に影響する項目。コメントの差は含めない。設定で切替可）。
 - セルホバー/タップで「基準: A → 現在: 休」のツールチップ。変更一覧パネル（人・日・変更前後）も集計タブに併設。
 - 閲覧リンク・PWA でもハイライトを表示する（「初回シフトからここが変わった」をメンバーに伝える用途）。
 - 基準版の再確定は編集権限のみ。確定・解除は履歴（CloudShiftHistory）に記録する。

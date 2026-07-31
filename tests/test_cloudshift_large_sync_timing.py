@@ -393,7 +393,8 @@ def test_time_override_makes_synced_only_cell_count_in_worktime(tmp_path):
     assert res.status_code == 200, res.get_data(as_text=True)
     after = client.get(f"{BASE}/api/project/{large['id']}/month/2026/8/worktime").get_json()["result"]
     day2 = after["people"][0]["days"][1]
-    assert (day2["category"], day2["bind_minutes"], day2["work_minutes"]) == ("work", 570, 510)
+    # 2026-08-02 は日曜。既定の休日ルール（日=法定休日）により法定休日労働として集計される。
+    assert (day2["category"], day2["bind_minutes"], day2["work_minutes"]) == ("legal_holiday_work", 570, 510)
     assert (day2["start"], day2["end"]) == ("8:00", "17:30")
 
     # 上書きは保存後も同期割当と共存して保持される。
@@ -401,3 +402,14 @@ def test_time_override_makes_synced_only_cell_count_in_worktime(tmp_path):
     entry = saved["entries_per_day"]["2"][0]
     assert entry["time_override"] == {"start": "08:00", "end": "17:30"}
     assert entry["assignments"][0]["source_type"] == "sync"
+
+    # セル側で「この日だけ所定労働日」に戻すと、通常勤務＋残業として集計される。
+    entries = deepcopy(saved["entries_per_day"])
+    entries["2"][0]["holiday_kind"] = "none"
+    res = client.put(
+        f"{BASE}/api/project/{large['id']}/month/2026/8",
+        json={"base_month": {"revision": saved["revision"]}, "entries_per_day": entries},
+    )
+    assert res.status_code == 200, res.get_data(as_text=True)
+    workday = client.get(f"{BASE}/api/project/{large['id']}/month/2026/8/worktime").get_json()["result"]["people"][0]["days"][1]
+    assert (workday["category"], workday["bind_minutes"], workday["overtime_minutes"]) == ("work", 570, 0)

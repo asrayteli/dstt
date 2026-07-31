@@ -147,6 +147,8 @@
 .cloud-large-grid tfoot tr:nth-last-child(3) td { bottom: 62px; }
 .cloud-large-grid tfoot tr:nth-last-child(4) th,
 .cloud-large-grid tfoot tr:nth-last-child(4) td { bottom: 93px; }
+.cloud-large-grid tfoot tr:nth-last-child(5) th,
+.cloud-large-grid tfoot tr:nth-last-child(5) td { bottom: 124px; }
 .cloud-large-grid tfoot th { z-index: 15; }
 
 .cloud-large-member-head,
@@ -477,6 +479,35 @@
 .cloud-large-calc-basics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; border: 1px solid #bcd9f5; border-radius: var(--cloud-radius-md); background: #f8fbff; padding: 12px; }
 .cloud-large-calc-card { display: grid; grid-template-columns: minmax(220px,1fr) minmax(150px,.35fr) minmax(150px,.35fr); gap: 12px; align-items: end; border: 1px solid var(--cloud-line); border-radius: var(--cloud-radius-md); background: #fff; padding: 12px; }
 .cloud-large-calc-card p { margin: 4px 0 0; color: var(--cloud-muted); font-size: 11px; line-height: 1.55; }
+
+/* 36協定・特別条項・960時間の対象時間パネル */
+.cloud-large-agreement { display: grid; gap: 8px; margin-top: 12px; border: 1px solid #bcd9f5; border-radius: var(--cloud-radius-md); background: #f8fbff; padding: 12px; }
+.cloud-large-agreement-head h3 { margin: 0; font-size: 13px; }
+.cloud-large-agreement-head p { margin: 4px 0 0; color: var(--cloud-muted); font-size: 11px; line-height: 1.6; }
+.cloud-large-agreement-scroll { overflow: auto; border: 1px solid var(--cloud-line); border-radius: var(--cloud-radius-sm); background: #fff; }
+.cloud-large-agreement table { width: 100%; border-collapse: collapse; }
+.cloud-large-agreement th,
+.cloud-large-agreement td { border-bottom: 1px solid var(--cloud-line); padding: 7px 10px; text-align: center; white-space: nowrap; font-size: 12px; }
+.cloud-large-agreement thead th { background: #edf6ff; color: var(--cloud-muted); font-size: 11px; }
+.cloud-large-agreement tbody th { display: table-cell; text-align: left; font-weight: 900; color: #214f79; }
+.cloud-large-agreement tbody th small { display: block; color: var(--cloud-muted); font-size: 10px; font-weight: 700; }
+.cloud-large-plus { color: #166534; font-weight: 900; }
+
+/* 休日ルール（法定休日・所定休日）の設定 */
+.cloud-large-holiday-rule { display: grid; gap: 10px; }
+.cloud-large-holiday-section { border: 1px solid var(--cloud-line); border-radius: var(--cloud-radius-md); background: #fff; padding: 10px 12px; }
+.cloud-large-holiday-section.is-legal { border-left: 4px solid var(--large-legal, #dc2626); }
+.cloud-large-holiday-section.is-scheduled { border-left: 4px solid var(--large-scheduled, #2563eb); }
+.cloud-large-holiday-section h5 { margin: 0 0 8px; font-size: 12px; }
+.cloud-large-weekday-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.cloud-large-weekday { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--cloud-line); border-radius: var(--cloud-radius-pill); padding: 4px 10px; background: #f8fbff; font-size: 12px; font-weight: 800; cursor: pointer; }
+.cloud-large-weekday:has(input:checked) { border-color: var(--cloud-primary); background: var(--cloud-primary-soft); color: var(--cloud-primary-strong); }
+.cloud-large-holiday-dates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.cloud-large-holiday-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.cloud-large-holiday-add .cloud-input { max-width: 200px; }
+.cloud-large-member-holiday .cloud-fold-summary { font-size: 12px; }
+.cloud-large-holiday-cell { border: 1px solid #bcd9f5; border-radius: var(--cloud-radius-md); background: #f8fbff; padding: 10px 12px; }
+.cloud-large-holiday-cell .cloud-panel-note { margin: 6px 0 0; }
 
 @media (max-width: 720px) {
   .cloud-large-toolbar { position: static; align-items: stretch; }

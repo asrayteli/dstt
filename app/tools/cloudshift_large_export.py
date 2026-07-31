@@ -17,6 +17,8 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from xml.sax.saxutils import escape
 
+from app.services.cloudshift_large import effective_holiday_kind, effective_holiday_rule
+
 
 def _safe_cell(value: Any) -> Any:
     text = str(value or "")
@@ -109,12 +111,32 @@ def _baseline_changed(day: str, member_id: str, entry: Mapping[str, Any], month_
         value = row.get(key)
         return None if value in (None, "") else int(value)
 
-    keys = ("value", "assignments", "holiday_kind", "time_override", "bind_override_minutes")
+    keys = ("value", "assignments", "holiday_kind", "time_override", "bind_override_minutes", "break_override_minutes")
     return any(comparable(previous, key) != comparable(entry, key) for key in keys)
+
+
+def _holiday_rules(config: Mapping[str, Any], members: list[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """メンバーごとに適用される休日ルール（共通ルール or 個人設定）を先に解決しておく。"""
+    settings = config.get("settings") or {}
+    return {str(member.get("id")): effective_holiday_rule(member, settings) for member in members}
+
+
+def _holiday_marker(
+    rules: Mapping[str, Mapping[str, Any]],
+    member_id: str,
+    year: int,
+    month: int,
+    day: int,
+    entry: Mapping[str, Any],
+) -> str:
+    kind = effective_holiday_kind(rules.get(member_id) or {}, year, month, day, entry)
+    return {"scheduled": "所", "legal": "法"}.get(kind, "")
 
 
 def _leave_counts_text(counts: Mapping[str, Any]) -> str:
     labels = {
+        "legal_rest": "法定休", "legal_rest_requested": "希望法定休",
+        "scheduled_rest": "所定休", "scheduled_rest_requested": "希望休",
         "rest": "休み", "rest_requested": "希望休",
         "substitute_rest": "振休", "substitute_rest_requested": "希望振休",
         "paid": "有休", "paid_requested": "希望有休",
@@ -140,6 +162,8 @@ def large_xlsx_bytes(
     members = [member for member in config.get("members", []) if member.get("active", True)]
     entries = _entry_maps(month_data)
     codes = _code_map(config)
+    rules = _holiday_rules(config, members)
+    year, month = int(month_data["year"]), int(month_data["month"])
     meta = month_data.get("meta_data") or {}
     notes = meta.get("day_notes") or {}
     shift.append([_safe_cell(title), f"{month_data['year']}年{month_data['month']}月"])
@@ -155,7 +179,7 @@ def large_xlsx_bytes(
         row = [day, weekday, _safe_cell(notes.get(str(day), ""))]
         for member in members:
             entry = entries.get(str(day), {}).get(str(member.get("id")), {})
-            prefix = {"scheduled": "所", "legal": "法"}.get(str(entry.get("holiday_kind") or ""), "")
+            prefix = _holiday_marker(rules, str(member.get("id")), year, month, day, entry)
             changed = highlight and _baseline_changed(str(day), str(member.get("id")), entry, month_data)
             row.append(_safe_cell(("*" if changed else "") + prefix + _entry_label(entry)))
         shift.append(row)
@@ -168,8 +192,8 @@ def large_xlsx_bytes(
                 shift.cell(excel_row, offset).fill = PatternFill("solid", fgColor=color)
             if highlight and _baseline_changed(str(day), str(member.get("id")), entry, month_data):
                 shift.cell(excel_row, offset).fill = changed_fill
-            kind = str(entry.get("holiday_kind") or "")
-            side = scheduled_side if kind == "scheduled" else legal_side if kind == "legal" else thin
+            marker = _holiday_marker(rules, str(member.get("id")), year, month, day, entry)
+            side = scheduled_side if marker == "所" else legal_side if marker == "法" else thin
             shift.cell(excel_row, offset).border = Border(left=side, right=side, top=side, bottom=side)
             if entry.get("comment"):
                 from openpyxl.comments import Comment
@@ -191,17 +215,31 @@ def large_xlsx_bytes(
         cell.font = Font(bold=True)
 
     summary = workbook.create_sheet("集計")
-    summary.append(["メンバー", "拘束", "労働", "給与残業", "所定休出", "法定休出", "超過計", "安衛長時間", "勤務日数", "休み内訳", "最大連勤", "警告"])
+    summary.append([
+        "メンバー", "拘束", "労働", "有休換算(＋)", "労働＋有休換算",
+        "①所定内残業", "②所定休日労働", "③法定休日労働",
+        "36協定対象(①+②+③)", "特別条項対象(①+②)", "960対象(①+②)", "960対象 年度累計",
+        "安衛長時間", "勤務日数", "休み内訳", "最大連勤", "警告",
+    ])
     result_by_id = {str(person.get("person_id")): person for person in worktime.get("people", [])}
+    annual_by_id = {
+        str(person.get("person_id")): person
+        for person in ((worktime.get("fiscal_year_totals") or {}).get("people") or [])
+    }
     for member in members:
         person = result_by_id.get(str(member.get("id")), {})
         totals = person.get("totals") or {}
+        annual = annual_by_id.get(str(member.get("id"))) or {}
         leave_counts = _leave_counts_text(totals.get("leave_counts") or {})
         summary.append([
             _safe_cell(member.get("display_name")), totals.get("bind_total_hhmm", "0:00"),
-            totals.get("work_total_hhmm", "0:00"), totals.get("payroll_overtime_hhmm", "0:00"),
+            totals.get("work_total_hhmm", "0:00"), totals.get("paid_leave_credit_hhmm", "0:00"),
+            totals.get("work_with_paid_total_hhmm", "0:00"),
+            totals.get("payroll_overtime_hhmm", "0:00"),
             totals.get("scheduled_holiday_work_hhmm", "0:00"), totals.get("legal_holiday_work_hhmm", "0:00"),
-            totals.get("payroll_excess_total_hhmm", "0:00"), totals.get("anei_excess_hhmm", "0:00"),
+            totals.get("agreement36_hhmm", "0:00"), totals.get("special_clause_hhmm", "0:00"),
+            totals.get("annual960_hhmm", "0:00"), annual.get("annual960_hhmm", ""),
+            totals.get("anei_excess_hhmm", "0:00"),
             totals.get("work_days", 0), leave_counts, totals.get("max_consecutive_work_days", 0), len(person.get("violations") or []),
         ])
     summary.freeze_panes = "A2"
@@ -215,7 +253,7 @@ def large_xlsx_bytes(
     for member in members:
         person = result_by_id.get(str(member.get("id")), {})
         details.append([_safe_cell(member.get("display_name"))])
-        details.append(["日", "コード", "区分", "始業", "終業", "休憩", "拘束", "労働", "超過", "警告"])
+        details.append(["日", "コード", "区分", "始業", "終業", "休憩", "拘束", "労働", "超過", "有休換算", "警告"])
         for day_result in person.get("days", []):
             if (
                 not day_result.get("code_key")
@@ -228,11 +266,12 @@ def large_xlsx_bytes(
                 day_result.get("day"), _safe_cell(day_result.get("code_key")), day_result.get("category"),
                 day_result.get("start") or "", day_result.get("end") or "", day_result.get("break_hhmm", "0:00"),
                 day_result.get("bind_hhmm", "0:00"), day_result.get("work_hhmm", "0:00"),
-                day_result.get("overtime_hhmm", "0:00"), ", ".join(day_result.get("warnings") or []),
+                day_result.get("overtime_hhmm", "0:00"), day_result.get("paid_credit_hhmm", "0:00"),
+                ", ".join(day_result.get("warnings") or []),
             ])
         details.append([])
     details.freeze_panes = "A1"
-    for column, width in enumerate((8, 16, 24, 10, 10, 10, 10, 10, 10, 28), start=1):
+    for column, width in enumerate((8, 16, 24, 10, 10, 10, 10, 10, 10, 10, 28), start=1):
         details.column_dimensions[get_column_letter(column)].width = width
 
     output = io.BytesIO()
@@ -288,6 +327,8 @@ def large_pdf_bytes(
     font = _ensure_pdf_font()
     members = [member for member in config.get("members", []) if member.get("active", True)]
     entries = _entry_maps(month_data)
+    rules = _holiday_rules(config, members)
+    year, month = int(month_data["year"]), int(month_data["month"])
     use_a3 = len(members) > 6
     page_size = landscape(A3 if use_a3 else A4)
     output = io.BytesIO()
@@ -335,7 +376,7 @@ def large_pdf_bytes(
             row = [Paragraph(str(day), header_style), Paragraph(_pdf_markup(notes.get(str(day), "")) or "　", note_style)]
             for member in group:
                 entry = entries.get(str(day), {}).get(str(member.get("id")), {})
-                marker = {"scheduled": "所", "legal": "法"}.get(str(entry.get("holiday_kind") or ""), "")
+                marker = _holiday_marker(rules, str(member.get("id")), year, month, day, entry)
                 changed = highlight and _baseline_changed(str(day), str(member.get("id")), entry, month_data)
                 label = ("*" if changed else "") + marker + _entry_label(entry)
                 row.append(_pdf_shift_cell(entry, label, cell_style))
@@ -358,17 +399,33 @@ def large_pdf_bytes(
         if group_index + group_size < len(members):
             story.append(PageBreak())
     story.extend([PageBreak(), Paragraph("月次集計", styles["Heading1"])])
-    summary = [["メンバー", "拘束", "労働", "残業", "所定休出", "法定休出", "超過", "安衛長時間", "勤務日", "休み内訳", "警告"]]
+    annual_totals = worktime.get("fiscal_year_totals") or {}
+    if annual_totals.get("fiscal_year") is not None:
+        story.append(Paragraph(
+            f"①所定内残業（所定労働日の残業） ②所定休日労働 ③法定休日労働。"
+            f"960対象の年度累計は {annual_totals['fiscal_year']}年4月〜{int(annual_totals['fiscal_year']) + 1}年3月のうち、"
+            f"このシフト帳に保存済みの{len(annual_totals.get('months') or [])}か月分です。",
+            note_style,
+        ))
+    summary = [[
+        "メンバー", "拘束", "労働", "有休換算", "①所定内残業", "②所定休日", "③法定休日",
+        "36協定", "特別条項", "960当月", "960年度累計", "安衛長時間", "勤務日", "休み内訳", "警告",
+    ]]
     results = {str(person.get("person_id")): person for person in worktime.get("people", [])}
+    annual_results = {str(person.get("person_id")): person for person in (annual_totals.get("people") or [])}
     for member in members:
         person = results.get(str(member.get("id")), {})
         totals = person.get("totals") or {}
+        annual = annual_results.get(str(member.get("id"))) or {}
         leave_counts = _leave_counts_text(totals.get("leave_counts") or {})
         summary.append([
             str(member.get("display_name") or ""), totals.get("bind_total_hhmm", "0:00"),
-            totals.get("work_total_hhmm", "0:00"), totals.get("payroll_overtime_hhmm", "0:00"),
+            totals.get("work_total_hhmm", "0:00"), totals.get("paid_leave_credit_hhmm", "0:00"),
+            totals.get("payroll_overtime_hhmm", "0:00"),
             totals.get("scheduled_holiday_work_hhmm", "0:00"), totals.get("legal_holiday_work_hhmm", "0:00"),
-            totals.get("payroll_excess_total_hhmm", "0:00"), totals.get("anei_excess_hhmm", "0:00"),
+            totals.get("agreement36_hhmm", "0:00"), totals.get("special_clause_hhmm", "0:00"),
+            totals.get("annual960_hhmm", "0:00"), annual.get("annual960_hhmm", "—"),
+            totals.get("anei_excess_hhmm", "0:00"),
             str(totals.get("work_days", 0)), leave_counts, str(len(person.get("violations") or [])),
         ])
     summary_table = Table(summary, repeatRows=1)
