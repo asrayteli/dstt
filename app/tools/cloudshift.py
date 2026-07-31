@@ -34,7 +34,7 @@ from flask import (
 )
 from flask_login import current_user, login_required
 from openpyxl import Workbook
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, or_, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import selectinload, undefer
 from werkzeug.exceptions import HTTPException
@@ -2584,7 +2584,7 @@ def _owner_display_label(owner_user_id: Any) -> str:
         employee = Employee.query.filter_by(employee_number=owner_id).first()
         if employee and employee.employee_name:
             name = str(employee.employee_name)
-    return f"{owner_id}（{name}）" if name else owner_id
+    return _account_display_label(owner_id, name)
 
 
 def _find_projects_with_link_key(
@@ -2629,7 +2629,7 @@ def _assert_link_key_unique(
         owner_label = _owner_display_label(others[0].get("owner_user_id"))
         raise CloudShiftError(
             f"{owner_label}さんが既に作成済みです。閲覧したい場合は共有してもらってください。"
-            "担当を引き継ぐ場合は、そのシフト帳の編集画面のアクション「オーナー変更」から"
+            "担当を引き継ぐ場合は、そのシフト帳の「シフト帳の設定 → オーナー変更」から"
             "所有権を移してもらってください。",
             409,
         )
@@ -2900,6 +2900,72 @@ def _owner_transfer_block_reason(project: dict[str, Any]) -> str:
     if not str(project.get("owner_user_id") or "").strip():
         return "このシフト帳にはオーナーが設定されていないため、オーナーを変更できません。"
     return ""
+
+
+OWNER_CANDIDATE_SEARCH_LIMIT = 20
+
+
+def _account_display_label(username: str, name: str) -> str:
+    """『社員ID（表示名）』の共通フォーマット。表示名が無ければ社員IDのみ。"""
+    username = str(username or "").strip()
+    name = str(name or "").strip()
+    if name and name != "unknown":
+        return f"{username}（{name}）"
+    return username
+
+
+def _search_dstt_users(query: Any, *, limit: int = OWNER_CANDIDATE_SEARCH_LIMIT) -> list[dict[str, str]]:
+    """DSTTアカウント（users）を社員番号・氏名で検索する。
+
+    社員名簿の検索APIは検索者自身の営業所の社員しか返さないため、異動先の担当者を
+    探せない。オーナー変更はアカウント単位の権限移動なので、DSTTアカウントそのものを
+    検索対象にする。users.name が未設定（unknown）のアカウントは氏名で引けないため、
+    社員名簿の氏名・カナからも社員番号を辿って補完する。
+    """
+    keyword = str(query or "").strip()
+    if not keyword:
+        return []
+    like = f"%{keyword}%"
+    rows: dict[str, User] = {
+        str(row.username): row
+        for row in User.query.filter(or_(User.username.like(like), User.name.like(like)))
+        .order_by(User.username)
+        .limit(limit * 2)
+        .all()
+    }
+    employee_numbers = [
+        str(row.employee_number or "").strip()
+        for row in Employee.query.filter(
+            Employee.is_deleted.is_(False),
+            or_(Employee.employee_name.like(like), Employee.employee_kana.like(like)),
+        )
+        .limit(limit * 2)
+        .all()
+    ]
+    missing = [number for number in employee_numbers if number and number not in rows]
+    if missing:
+        for row in User.query.filter(User.username.in_(missing)).all():
+            rows[str(row.username)] = row
+
+    usernames = sorted(rows)[:limit]
+    if not usernames:
+        return []
+    employee_names = {
+        str(row.employee_number): str(row.employee_name or "")
+        for row in Employee.query.filter(Employee.employee_number.in_(usernames)).all()
+    }
+    candidates: list[dict[str, str]] = []
+    for username in usernames:
+        user_name = str(rows[username].name or "")
+        name = user_name if user_name and user_name != "unknown" else employee_names.get(username, "")
+        candidates.append(
+            {
+                "employee_number": username,
+                "name": name,
+                "label": _account_display_label(username, name),
+            }
+        )
+    return candidates
 
 
 def _owner_transfer_duplicate_project(
@@ -10827,6 +10893,32 @@ def api_project_owner(project_id: str):
             "shares": _normalized_account_shares(project),
         }
     )
+
+
+@cloudshift_bp.route("/api/project/<project_id>/owner/candidates", methods=["GET"])
+@login_required
+def api_project_owner_candidates(project_id: str):
+    """オーナー変更の移譲先候補（DSTTアカウント）を検索する。
+
+    社員名簿の検索は検索者自身の営業所内に限られ、異動先の担当者を出せないため、
+    ここではDSTTアカウントを直接検索する。移譲できない候補（現オーナー・同一紐づけの
+    シフト帳を既に所持）も理由付きで返し、選ぶ前に判別できるようにする。
+    """
+    project = _owner_project_or_404(project_id)
+    candidates = _search_dstt_users(request.args.get("q"))
+    current_owner = str(project.get("owner_user_id") or "").strip()
+    shared_numbers = {item["employee_number"] for item in _normalized_account_shares(project)["employees"]}
+    # 同一紐づけの所持者は候補ごとに探すと走査が候補数だけ増えるため、1回でまとめる。
+    duplicate_owners = {
+        str(other.get("owner_user_id") or "").strip()
+        for other in _find_projects_with_link_key(_project_link_key(project), exclude_id=project_id)
+    }
+    for item in candidates:
+        number = item["employee_number"]
+        item["is_current_owner"] = number == current_owner
+        item["already_shared"] = number in shared_numbers
+        item["has_duplicate"] = number in duplicate_owners
+    return jsonify({"success": True, "candidates": candidates})
 
 
 @cloudshift_bp.route("/api/project/<project_id>/settings", methods=["GET", "PUT"])
