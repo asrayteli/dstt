@@ -2628,7 +2628,9 @@ def _assert_link_key_unique(
     if others:
         owner_label = _owner_display_label(others[0].get("owner_user_id"))
         raise CloudShiftError(
-            f"{owner_label}さんが既に作成済みです。閲覧したい場合は共有してもらってください。",
+            f"{owner_label}さんが既に作成済みです。閲覧したい場合は共有してもらってください。"
+            "担当を引き継ぐ場合は、そのシフト帳の編集画面のアクション「オーナー変更」から"
+            "所有権を移してもらってください。",
             409,
         )
     existing = matches[0]
@@ -2885,6 +2887,171 @@ def _set_project_user_visibility(user_id: str, project_id: str, hidden: bool) ->
     elif row is not None:
         db.session.delete(row)
         db.session.commit()
+
+
+def _owner_transfer_block_reason(project: dict[str, Any]) -> str:
+    """オーナー変更（所有権の移譲）ができない場合の理由を返す。可能なら空文字。
+
+    要代務シフト帳は営業所ごとにシステムが自動生成する共有帳で、特定の所有者を
+    持たない（owner_user_id は空）ため移譲の対象外とする。
+    """
+    if project.get("mode") == SUBSTITUTE_MODE:
+        return "要代務シフト帳は営業所ごとに自動作成されるため、オーナーを変更できません。"
+    if not str(project.get("owner_user_id") or "").strip():
+        return "このシフト帳にはオーナーが設定されていないため、オーナーを変更できません。"
+    return ""
+
+
+def _owner_transfer_duplicate_project(
+    project: dict[str, Any], new_owner_user_id: str
+) -> dict[str, Any] | None:
+    """移譲先が既に同じ紐づけ（同じ個人・同じ現場）のシフト帳を持っているなら、それを返す。
+
+    同じ紐づけのシフト帳は 1 オーナーにつき 1 つだけという作成時のルールを、
+    移譲でもすり抜けさせないための事前チェック。
+    """
+    link_key = _project_link_key(project)
+    if not link_key:
+        return None
+    new_owner_user_id = str(new_owner_user_id or "").strip()
+    for candidate in _find_projects_with_link_key(link_key, exclude_id=str(project.get("id") or "")):
+        if str(candidate.get("owner_user_id") or "").strip() == new_owner_user_id:
+            return candidate
+    return None
+
+
+def _owner_transfer_candidate_payload(project: dict[str, Any], employee_number: Any) -> dict[str, Any]:
+    """移譲先候補の社員番号を検証し、確認画面に出す情報をまとめて返す。
+
+    ``error`` が空でない場合はその社員番号へは移譲できない。
+    """
+    number = _sanitize_employee_number(employee_number)
+    payload: dict[str, Any] = {
+        "employee_number": number,
+        "name": "",
+        "label": "",
+        "has_account": False,
+        "is_current_owner": False,
+        "already_shared": False,
+        "duplicate_project": None,
+        "error": "",
+    }
+    if not number:
+        payload["error"] = "新しいオーナーの社員番号を指定してください"
+        return payload
+
+    payload["label"] = _owner_display_label(number)
+    user = User.query.filter_by(username=number).first()
+    payload["has_account"] = user is not None
+    if user and user.name and user.name != "unknown":
+        payload["name"] = str(user.name)
+    if not payload["name"]:
+        employee = Employee.query.filter_by(employee_number=number).first()
+        if employee and employee.employee_name:
+            payload["name"] = str(employee.employee_name)
+
+    if number == str(project.get("owner_user_id") or "").strip():
+        payload["is_current_owner"] = True
+        payload["error"] = "その社員番号は現在のオーナーです"
+        return payload
+    if not user:
+        payload["error"] = f"社員番号 {number} のDSTTアカウントが見つかりません"
+        return payload
+
+    shares = _normalized_account_shares(project)
+    payload["already_shared"] = any(item["employee_number"] == number for item in shares["employees"])
+
+    duplicate = _owner_transfer_duplicate_project(project, number)
+    if duplicate is not None:
+        payload["duplicate_project"] = {
+            "id": str(duplicate.get("id") or ""),
+            "title": str(duplicate.get("title") or ""),
+        }
+        payload["error"] = (
+            f"{payload['label']}さんは同じ対象のシフト帳「{duplicate.get('title')}」を既に所持しています。"
+            "同じ紐づけのシフト帳は1人につき1つだけのため、移譲できません。"
+        )
+    return payload
+
+
+def _apply_owner_transfer(
+    project: dict[str, Any], *, new_owner_user_id: str, share_with_previous_owner: bool
+) -> list[str]:
+    """シフト帳の所有権を移譲し、履歴に残す変更内容の一覧を返す。
+
+    - 元オーナーは（希望した場合のみ）アカウント共有の「特定社員」として残す。
+    - 新オーナーが共有先に入っていた場合は、所有者と共有先の二重管理を避けて外す。
+    - 営業所共有はそのまま維持する（移譲を機に既存の共有先が突然見えなくなる／
+      新オーナーの営業所へ勝手に広がる、のどちらも避けるため）。
+    """
+    previous_owner = str(project.get("owner_user_id") or "").strip()
+    new_owner_user_id = str(new_owner_user_id or "").strip()
+    project_id = str(project.get("id") or "")
+    changes: list[str] = [
+        f"オーナーを {_owner_display_label(previous_owner)} から {_owner_display_label(new_owner_user_id)} へ変更"
+    ]
+
+    # 作成元営業所は「どこで作られた帳簿か」を表す情報で、未保持のレガシー帳簿では
+    # オーナーの所属営業所から推定される。移譲でこの推定先が変わってしまわないよう、
+    # 元オーナー基準の値をここで確定させる。
+    if not (project.get("created_office_ids") or []):
+        created_office_ids = sorted(_project_created_office_ids(project))
+        if created_office_ids:
+            project["created_office_ids"] = created_office_ids
+
+    shares = _normalized_account_shares(project)
+    employees = [item for item in shares["employees"] if item["employee_number"] != new_owner_user_id]
+    if len(employees) != len(shares["employees"]):
+        changes.append(f"新オーナー {new_owner_user_id} を共有先から解除（オーナーのため）")
+    employees = [item for item in employees if item["employee_number"] != previous_owner]
+    if share_with_previous_owner and previous_owner:
+        employees.append(
+            {
+                "employee_number": previous_owner,
+                "name": _employee_label_for_number(previous_owner),
+            }
+        )
+        changes.append(f"元オーナー {previous_owner} へ自動共有（閲覧）")
+    else:
+        changes.append("元オーナーへの自動共有はなし")
+    if shares["office"].get("enabled"):
+        # 営業所共有は移譲前の営業所のまま引き継ぐため、どの営業所が残ったかを残す。
+        changes.append(
+            "同じ営業所内への共有を維持: "
+            + ", ".join(str(item.get("label") or item.get("id")) for item in shares["office"].get("offices") or [])
+        )
+
+    project["owner_user_id"] = new_owner_user_id
+    project["account_shares"] = {
+        "office": {
+            "enabled": bool(shares["office"].get("enabled")),
+            "office_ids": list(shares["office"].get("office_ids") or []),
+        },
+        "employees": employees,
+        "updated_at": _jst_now_iso(),
+        "updated_by": previous_owner,
+    }
+    # 重複解消用のレガシー非表示フラグは元オーナーの一覧事情によるものなので、
+    # 新オーナーの一覧で最初から見えるように解除する。
+    if project.get("hidden"):
+        project["hidden"] = False
+    _save_project(project)
+
+    # テンプレートの所有者表記も新オーナーへ揃える（権限判定はプロジェクト側で
+    # 行っているため挙動は変わらないが、表示・追跡用の値を実態に合わせる）。
+    updated_templates = CloudShiftTemplate.query.filter_by(project_id=project_id).update(
+        {"owner_user_id": new_owner_user_id}, synchronize_session=False
+    )
+    if updated_templates:
+        db.session.commit()
+        changes.append(f"テンプレート {updated_templates}件 の所有者を移行")
+
+    # 新オーナー（および共有を受け直す元オーナー）が過去にこの帳簿を一覧から
+    # 非表示にしていた場合、移譲後に見えないままになるため表示へ戻す。
+    _set_project_user_visibility(new_owner_user_id, project_id, False)
+    if share_with_previous_owner and previous_owner:
+        _set_project_user_visibility(previous_owner, project_id, False)
+    return changes
 
 
 def _share_status_for_current_user(project: dict[str, Any]) -> dict[str, Any] | None:
@@ -10577,6 +10744,89 @@ def api_project_account_shares(project_id: str):
             },
         )
     return jsonify({"success": True, "shares": _normalized_account_shares(project)})
+
+
+@cloudshift_bp.route("/api/project/<project_id>/owner", methods=["GET", "PUT"])
+@login_required
+def api_project_owner(project_id: str):
+    """シフト帳のオーナー（所有者）を確認・変更する。
+
+    GET  … 現在のオーナーと移譲可否を返す。``employee_number`` を付けると、その
+            社員番号へ移譲できるかの事前チェック結果（``candidate``）も返す。
+    PUT  … 所有権を移譲する。``share_with_previous_owner`` で、元オーナーに
+            そのまま共有（閲覧）を残すかどうかを指定する。
+    """
+    if request.method == "GET":
+        project = _owner_project_or_404(project_id)
+        block_reason = _owner_transfer_block_reason(project)
+        payload = {
+            "success": True,
+            "owner": {
+                "user_id": str(project.get("owner_user_id") or ""),
+                "label": _owner_display_label(project.get("owner_user_id")),
+            },
+            "can_transfer": not block_reason,
+            "blocked_reason": block_reason,
+            "shares": _normalized_account_shares(project),
+            "candidate": None,
+        }
+        employee_number = request.args.get("employee_number")
+        if employee_number is not None:
+            payload["candidate"] = _owner_transfer_candidate_payload(project, employee_number)
+        return jsonify(payload)
+
+    data = request.get_json(silent=True) or {}
+    new_owner_user_id = _sanitize_employee_number(data.get("new_owner_user_id"))
+    share_with_previous_owner = bool(data.get("share_with_previous_owner"))
+    with _project_lock(project_id):
+        project = _owner_project_or_404(project_id)
+        block_reason = _owner_transfer_block_reason(project)
+        if block_reason:
+            raise CloudShiftError(block_reason, 400)
+        candidate = _owner_transfer_candidate_payload(project, new_owner_user_id)
+        if candidate["error"]:
+            # 「アカウントが無い」は 404、「重複して持てない」は 409、それ以外（未指定・
+            # 現在のオーナー指定）は 400。
+            if candidate["duplicate_project"]:
+                status = 409
+            elif candidate["employee_number"] and not candidate["has_account"] and not candidate["is_current_owner"]:
+                status = 404
+            else:
+                status = 400
+            raise CloudShiftError(candidate["error"], status)
+
+        previous_owner_label = _owner_display_label(project.get("owner_user_id"))
+        changes = _apply_owner_transfer(
+            project,
+            new_owner_user_id=new_owner_user_id,
+            share_with_previous_owner=share_with_previous_owner,
+        )
+        _append_history(
+            project_id,
+            {
+                "timestamp": _jst_now_iso(),
+                "editor_name": _user_label(),
+                "editor_type": "owner",
+                "action": "project_owner_transferred",
+                "month_key": None,
+                "changes": changes,
+            },
+        )
+    return jsonify(
+        {
+            "success": True,
+            "previous_owner": {
+                "user_id": _user_id(),
+                "label": previous_owner_label,
+            },
+            "owner": {
+                "user_id": new_owner_user_id,
+                "label": candidate["label"],
+            },
+            "shared_with_previous_owner": share_with_previous_owner,
+            "shares": _normalized_account_shares(project),
+        }
+    )
 
 
 @cloudshift_bp.route("/api/project/<project_id>/settings", methods=["GET", "PUT"])

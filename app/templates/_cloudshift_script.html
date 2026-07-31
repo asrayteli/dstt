@@ -67,6 +67,14 @@
         revisions: [],
         pushSubscriptions: null
       },
+      ownerTransfer: {
+        info: null,
+        query: '',
+        selected: null,
+        candidate: null,
+        shareWithPreviousOwner: true,
+        checking: false
+      },
       conflictCheck: {
         mode: 'scene',
         monthKey: '',
@@ -7666,6 +7674,11 @@
         $('cloud-open-shift-book-settings').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute' || project.mode === 'large');
         setNotificationBadge($('cloud-open-shift-book-settings'), unviewedLeaveChangeRequestCount(project));
       }
+      if ($('cloud-transfer-owner')) {
+        // 所有権の移譲はオーナー本人だけの操作。要代務シフト帳は営業所ごとの
+        // 自動生成でオーナーを持たないため対象外。
+        $('cloud-transfer-owner').classList.toggle('cloud-hidden', !canManageProject || project.mode === 'substitute');
+      }
       if ($('cloud-open-summary')) $('cloud-open-summary').classList.toggle('cloud-hidden', !month || project.mode === 'large');
       if ($('cloud-open-assist')) $('cloud-open-assist').classList.toggle('cloud-hidden', project.mode === 'large' || !isOwnerEditable || !isAssistAvailable());
       if ($('cloud-open-bulk-edit')) $('cloud-open-bulk-edit').classList.toggle('cloud-hidden', project.mode === 'large' || !month || !isOwnerEditable || (PAGE.type === 'public' && PAGE.accessMode !== 'edit'));
@@ -8445,6 +8458,297 @@
       renderShiftBookSettingsModalBody(modal);
       renderWorkspace(canEditCurrentProject());
       showFlash('シフト帳共有を保存しました', 'success');
+    }
+
+    // ===== オーナー変更（所有権の移譲） =====
+    // 担当の異動などでシフト帳の持ち主が変わるとき、削除して作り直さずに
+    // 所有権だけを別の DSTT アカウントへ移すためのモーダル。
+    const OWNER_TRANSFER_MODAL_ID = 'cloud-owner-transfer-modal';
+
+    function ownerTransferSelectedNumber() {
+      const selected = state.ownerTransfer.selected;
+      return selected ? String(selected.employee_number || '').trim() : '';
+    }
+
+    function ownerTransferIsReady() {
+      const candidate = state.ownerTransfer.candidate;
+      return !!(candidate && !candidate.error && candidate.employee_number && candidate.employee_number === ownerTransferSelectedNumber());
+    }
+
+    function renderOwnerTransferStatus(modal) {
+      const host = modal.querySelector('[data-owner-transfer-status]');
+      if (!host) return;
+      const transfer = state.ownerTransfer;
+      const candidate = transfer.candidate;
+      if (transfer.checking) {
+        host.innerHTML = '<div class="cloud-note-chip">確認中です...</div>';
+      } else if (!candidate) {
+        host.innerHTML = '<div class="cloud-note-chip">新しいオーナーを選んでください。</div>';
+      } else if (candidate.error) {
+        host.innerHTML = `<div class="cloud-note-chip danger">${escapeHtml(candidate.error)}</div>`;
+      } else {
+        host.innerHTML = `
+          <div class="cloud-note-chip">新しいオーナー: ${escapeHtml(candidate.label || candidate.employee_number)}</div>
+          ${candidate.already_shared ? '<p class="cloud-panel-note">この人は現在このシフト帳の共有先です。オーナーになると共有先からは外れます。</p>' : ''}
+        `;
+      }
+      const submit = modalFooter(modal).querySelector('[data-owner-transfer-submit]');
+      if (submit) submit.disabled = !ownerTransferIsReady();
+    }
+
+    function renderOwnerTransferCandidates(modal, candidates) {
+      const panel = modal.querySelector('[data-owner-transfer-candidates]');
+      if (!panel) return;
+      const normalized = (Array.isArray(candidates) ? candidates : [])
+        .map((item) => ({
+          employee_number: String(item.employee_number || '').trim(),
+          employee_name: String(item.employee_name || '').trim()
+        }))
+        .filter((item) => item.employee_number);
+      if (!normalized.length) {
+        panel.innerHTML = '<div style="color: var(--cloud-muted); font-size: 12px; padding: 4px 2px;">候補が見つかりません。候補検索は自分の営業所の社員のみが対象です。他営業所の人へ移すときは、社員番号を直接入力して「この社員番号で確認」を押してください。</div>';
+        panel.classList.remove('cloud-hidden');
+        return;
+      }
+      panel.innerHTML = normalized.slice(0, 8).map((item) => `
+        <button
+          type="button"
+          class="cloud-employee-candidate"
+          data-owner-transfer-pick="${escapeHtml(item.employee_number)}"
+          data-owner-transfer-name="${escapeHtml(item.employee_name)}"
+          style="display:block; width:100%; text-align:left; border:1px solid var(--cloud-line); border-radius:10px; background:#fff; color:var(--cloud-text); padding:8px 10px; cursor:pointer; margin:0 0 6px;"
+        >${escapeHtml([item.employee_name, item.employee_number].filter(Boolean).join(' / '))}</button>
+      `).join('');
+      panel.classList.remove('cloud-hidden');
+      panel.querySelectorAll('[data-owner-transfer-pick]').forEach((node) => {
+        node.addEventListener('click', () => {
+          selectOwnerTransferCandidate(modal, {
+            employee_number: node.getAttribute('data-owner-transfer-pick') || '',
+            employee_name: node.getAttribute('data-owner-transfer-name') || ''
+          }).catch((error) => showFlash(error.message, 'error'));
+        });
+      });
+    }
+
+    async function selectOwnerTransferCandidate(modal, selected) {
+      const project = currentProject();
+      const number = String((selected || {}).employee_number || '').trim();
+      if (!project || !number) return;
+      state.ownerTransfer.selected = { employee_number: number, employee_name: String((selected || {}).employee_name || '') };
+      state.ownerTransfer.candidate = null;
+      state.ownerTransfer.checking = true;
+      const panel = modal.querySelector('[data-owner-transfer-candidates]');
+      if (panel) {
+        panel.innerHTML = '';
+        panel.classList.add('cloud-hidden');
+      }
+      const queryInput = modal.querySelector('[data-owner-transfer-query]');
+      if (queryInput) {
+        // 入力中に仕込まれた検索タイマーが後から候補一覧を出し直さないよう止める。
+        window.clearTimeout(queryInput._ownerTransferTimer);
+        queryInput.value = number;
+      }
+      state.ownerTransfer.query = number;
+      renderOwnerTransferStatus(modal);
+      try {
+        const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/owner?employee_number=${encodeURIComponent(number)}`);
+        // 確認中に別の候補へ切り替わっていたら、古い応答は捨てる。
+        if (ownerTransferSelectedNumber() !== number) return;
+        state.ownerTransfer.candidate = data.candidate || null;
+      } finally {
+        // 後発の確認が走っている場合は、そちらの結果を待つ（「確認中」のまま維持）。
+        if (ownerTransferSelectedNumber() === number) {
+          state.ownerTransfer.checking = false;
+          renderOwnerTransferStatus(modal);
+        }
+      }
+    }
+
+    function bindOwnerTransferModalEvents(modal) {
+      const queryInput = modal.querySelector('[data-owner-transfer-query]');
+      if (queryInput) {
+        queryInput.addEventListener('input', () => {
+          state.ownerTransfer.query = queryInput.value.trim();
+          state.ownerTransfer.selected = null;
+          state.ownerTransfer.candidate = null;
+          renderOwnerTransferStatus(modal);
+          window.clearTimeout(queryInput._ownerTransferTimer);
+          queryInput._ownerTransferTimer = window.setTimeout(async () => {
+            const latest = queryInput.value.trim();
+            const panel = modal.querySelector('[data-owner-transfer-candidates]');
+            if (!latest) {
+              if (panel) {
+                panel.innerHTML = '';
+                panel.classList.add('cloud-hidden');
+              }
+              return;
+            }
+            try {
+              const candidates = await fetchEmployeeCandidates(latest);
+              if (queryInput.value.trim() !== latest) return;
+              renderOwnerTransferCandidates(modal, candidates);
+            } catch (_) {
+              if (panel) {
+                panel.innerHTML = '';
+                panel.classList.add('cloud-hidden');
+              }
+            }
+          }, 220);
+        });
+      }
+      const checkButton = modal.querySelector('[data-owner-transfer-check]');
+      if (checkButton) {
+        checkButton.addEventListener('click', () => {
+          const value = queryInput ? queryInput.value.trim() : '';
+          if (!value) {
+            showFlash('社員番号を入力してください', 'error');
+            return;
+          }
+          selectOwnerTransferCandidate(modal, { employee_number: value, employee_name: '' })
+            .catch((error) => showFlash(error.message, 'error'));
+        });
+      }
+      const shareBack = modal.querySelector('[data-owner-transfer-share-back]');
+      if (shareBack) {
+        shareBack.addEventListener('change', () => {
+          state.ownerTransfer.shareWithPreviousOwner = !!shareBack.checked;
+        });
+      }
+      const closeButton = modalFooter(modal).querySelector('[data-owner-transfer-close]');
+      if (closeButton) closeButton.addEventListener('click', () => closeCloudModal(OWNER_TRANSFER_MODAL_ID));
+      const submit = modalFooter(modal).querySelector('[data-owner-transfer-submit]');
+      if (submit) {
+        submit.addEventListener('click', () => transferProjectOwner(modal).catch((error) => showFlash(error.message, 'error')));
+      }
+    }
+
+    function renderOwnerTransferModalBody(modal) {
+      const project = currentProject();
+      const info = state.ownerTransfer.info || {};
+      const owner = info.owner || {};
+      if (!info.can_transfer) {
+        modalBody(modal).innerHTML = `<div class="cloud-empty-state"><p>${escapeHtml(info.blocked_reason || 'このシフト帳のオーナーは変更できません。')}</p></div>`;
+        modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-owner-transfer-close>閉じる</button>';
+        const closeOnly = modalFooter(modal).querySelector('[data-owner-transfer-close]');
+        if (closeOnly) closeOnly.addEventListener('click', () => closeCloudModal(OWNER_TRANSFER_MODAL_ID));
+        return;
+      }
+      modalBody(modal).innerHTML = `
+        <div class="cloud-settings-panel">
+          <section class="cloud-settings-card">
+            <p class="cloud-panel-note">シフト帳の所有権を、別の DSTT アカウントへ引き継ぎます。担当が変わったときに、削除して作り直さずにそのまま移せます。月データ・編集履歴・共有URL・テンプレートはすべてそのまま残ります。</p>
+            <label class="cloud-field">
+              <span>現在のオーナー</span>
+              <input class="cloud-input" type="text" value="${escapeHtml(owner.label || owner.user_id || '')}" readonly>
+            </label>
+            <label class="cloud-field">
+              <span>新しいオーナー（氏名または社員番号）</span>
+              <input class="cloud-input" type="text" data-owner-transfer-query placeholder="例: 3243012 / 山田" autocomplete="off" value="${escapeHtml(state.ownerTransfer.query || '')}">
+              <small class="cloud-field-note">氏名の候補検索は<strong>自分の営業所の社員のみ</strong>が対象です。他営業所の人へ移すときは、<strong>社員番号を直接入力して「この社員番号で確認」</strong>を押してください。</small>
+            </label>
+            <div class="cloud-actions compact">
+              <button type="button" class="cloud-btn secondary" data-owner-transfer-check>この社員番号で確認</button>
+            </div>
+            <div class="cloud-input-panel wide cloud-hidden" data-owner-transfer-candidates></div>
+            <div data-owner-transfer-status></div>
+          </section>
+          <section class="cloud-settings-card">
+            <label class="cloud-share-option">
+              <input type="checkbox" data-owner-transfer-share-back ${state.ownerTransfer.shareWithPreviousOwner ? 'checked' : ''}>
+              <span>
+                <strong>変更後も自分（元オーナー）に共有する</strong>
+                <small>チェックすると、あなたは「特定社員への共有」先として残り、引き続き閲覧できます。外すと、あなたの「自分のシフト帳」一覧からこのシフト帳は消えます。</small>
+              </span>
+            </label>
+            <p class="cloud-panel-note">同じ営業所内への共有と共有URLは、変更前の設定のまま引き継がれます。新オーナーが「シフト帳の設定 → シフト帳共有」から変更できます。</p>
+          </section>
+        </div>
+      `;
+      modalFooter(modal).innerHTML = `
+        <button type="button" class="cloud-btn secondary" data-owner-transfer-close>閉じる</button>
+        <button type="button" class="cloud-btn primary" data-owner-transfer-submit disabled>オーナーを変更する</button>
+      `;
+      bindOwnerTransferModalEvents(modal);
+      renderOwnerTransferStatus(modal);
+      if (project && project.mode === 'large') {
+        // 大規模シフトも移譲できるが、同期先の帳簿はオーナー単位で見えるため注意を出す。
+        const status = modal.querySelector('[data-owner-transfer-status]');
+        if (status) status.insertAdjacentHTML('beforebegin', '<p class="cloud-panel-note">大規模シフトは同期先のシフト帳もオーナー単位で扱われます。関連する現場・個人シフトの引き継ぎも忘れずに確認してください。</p>');
+      }
+    }
+
+    async function openOwnerTransferModal() {
+      const project = currentProject();
+      if (!project || projectAccessRole(project) !== 'owner') return;
+      state.ownerTransfer = {
+        info: null,
+        query: '',
+        selected: null,
+        candidate: null,
+        shareWithPreviousOwner: true,
+        checking: false
+      };
+      const modal = openCloudModal(OWNER_TRANSFER_MODAL_ID, `オーナー変更 / ${project.title}`);
+      modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>オーナー情報を読み込み中です...</p></div>';
+      modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-owner-transfer-close>閉じる</button>';
+      modalFooter(modal).querySelector('[data-owner-transfer-close]').addEventListener('click', () => closeCloudModal(OWNER_TRANSFER_MODAL_ID));
+      try {
+        state.ownerTransfer.info = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/owner`);
+      } catch (error) {
+        // 読み込みに失敗したまま「読み込み中」を出し続けないよう、理由を表示する。
+        modalBody(modal).innerHTML = `<div class="cloud-empty-state"><p>${escapeHtml(error.message || 'オーナー情報を読み込めませんでした。')}</p></div>`;
+        throw error;
+      }
+      renderOwnerTransferModalBody(modal);
+      const queryInput = modal.querySelector('[data-owner-transfer-query]');
+      if (queryInput) {
+        try { queryInput.focus(); } catch (_) { /* noop */ }
+      }
+    }
+
+    async function transferProjectOwner(modal) {
+      const project = currentProject();
+      const candidate = state.ownerTransfer.candidate;
+      if (!project || !ownerTransferIsReady()) return;
+      if (!confirmDiscardUnsavedChanges('未保存の変更があります。保存せずにオーナーを変更すると、このセッションでの編集内容は失われます。続行しますか？')) return;
+      const shareBack = !!state.ownerTransfer.shareWithPreviousOwner;
+      const confirmed = await cloudConfirm({
+        title: 'オーナーを変更',
+        message: `シフト帳「${project.title}」のオーナーを ${candidate.label || candidate.employee_number} さんに変更します。\n`
+          + (shareBack
+            ? '変更後、あなたには閲覧のみの共有が残ります。\n'
+            : '変更後、このシフト帳はあなたの一覧から消えます（新オーナーに共有してもらうまで開けません）。\n')
+          + 'よろしいですか？',
+        confirmLabel: 'オーナーを変更する'
+      });
+      if (!confirmed) return;
+
+      const data = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/owner`, {
+        method: 'PUT',
+        body: {
+          new_owner_user_id: candidate.employee_number,
+          share_with_previous_owner: shareBack
+        }
+      });
+      closeCloudModal(OWNER_TRANSFER_MODAL_ID);
+      // 自分はもうオーナーではないため、編集中の状態を持ち越さず一覧から開き直す。
+      state.projectPayload = null;
+      state.baseMonth = null;
+      resetAssistState();
+      state.leaveSync.calendars = [];
+      state.leaveSync.selectedCalendarId = '';
+      await loadProjects();
+      renderHistory([]);
+      renderWorkspace(true);
+      updateCurrentProjectLabel();
+      switchTab('list');
+      const ownerLabel = (data.owner && (data.owner.label || data.owner.user_id)) || candidate.employee_number;
+      showFlash(
+        data.shared_with_previous_owner
+          ? `オーナーを ${ownerLabel} さんに変更しました（あなたには閲覧共有が残ります）`
+          : `オーナーを ${ownerLabel} さんに変更しました`,
+        'success'
+      );
     }
 
     function leaveRequestStatusLabel(status) {
@@ -9772,6 +10076,9 @@
 
       const shiftBookSettings = $('cloud-open-shift-book-settings');
       if (shiftBookSettings) shiftBookSettings.addEventListener('click', () => openShiftBookSettingsModal().catch((error) => showFlash(error.message, 'error')));
+
+      const transferOwner = $('cloud-transfer-owner');
+      if (transferOwner) transferOwner.addEventListener('click', () => openOwnerTransferModal().catch((error) => showFlash(error.message, 'error')));
 
       const createFirstMonth = $('cloud-create-first-month');
       if (createFirstMonth) {
