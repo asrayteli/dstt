@@ -20,7 +20,16 @@ SITE_PACKAGES = ROOT / "Lib" / "site-packages"
 if SITE_PACKAGES.exists() and str(SITE_PACKAGES) not in sys.path:
     sys.path.append(str(SITE_PACKAGES))
 
-from app.models import CloudShiftProject, CloudShiftTemplate, User, db
+from app.models import (
+    AccessBranch,
+    AccessOffice,
+    CloudShiftProject,
+    CloudShiftProjectVisibility,
+    CloudShiftTemplate,
+    Site,
+    User,
+    db,
+)
 
 
 API = "/tools/shiftersync/cloudshift/api"
@@ -275,6 +284,195 @@ def test_owner_transfer_rejected_when_new_owner_already_owns_same_target(tmp_pat
 
     with client.application.app_context():
         assert db.session.get(CloudShiftProject, project_id).owner_user_id == "owner01"
+
+
+def test_owner_transfer_unhides_project_for_the_new_owner(tmp_path):
+    """新オーナーが共有時に一覧から非表示にしていても、移譲後は一覧に出る。"""
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id = _create_person_project(client)
+    assert client.put(
+        f"{API}/project/{project_id}/account-shares",
+        json={"share_office": False, "employee_numbers": ["2001"]},
+    ).status_code == 200
+
+    module.current_user = _new_owner()
+    assert client.post(
+        f"{API}/project/{project_id}/visibility", json={"hidden": True}
+    ).status_code == 200
+    assert client.get(f"{API}/list").get_json()["projects"] == []
+
+    module.current_user = _owner()
+    assert client.put(
+        f"{API}/project/{project_id}/owner",
+        json={"new_owner_user_id": "2001", "share_with_previous_owner": False},
+    ).status_code == 200
+
+    module.current_user = _new_owner()
+    assert [item["id"] for item in client.get(f"{API}/list").get_json()["projects"]] == [project_id]
+    with client.application.app_context():
+        assert CloudShiftProjectVisibility.query.filter_by(
+            user_id="2001", project_id=project_id
+        ).first() is None
+
+
+def test_owner_transfer_keeps_office_share_of_the_previous_owner(tmp_path):
+    """営業所共有は移譲前の営業所のまま維持する（共有先が突然見えなくならない）。"""
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        branch = AccessBranch(name="Tokyo", code="TK")
+        db.session.add(branch)
+        db.session.flush()
+        old_office = AccessOffice(branch_id=branch.id, name="Shinjuku", code="S01")
+        new_office = AccessOffice(branch_id=branch.id, name="Shibuya", code="S02")
+        db.session.add_all([old_office, new_office])
+        db.session.commit()
+        old_office_id, new_office_id = old_office.id, new_office.id
+
+    owner = _owner()
+    owner.office_id = old_office_id
+    module.current_user = owner
+    project_id = _create_person_project(client)
+    assert client.put(
+        f"{API}/project/{project_id}/account-shares",
+        json={"share_office": True, "employee_numbers": []},
+    ).status_code == 200
+
+    new_owner = _new_owner()
+    new_owner.office_id = new_office_id
+    module.current_user = owner
+    transferred = client.put(
+        f"{API}/project/{project_id}/owner",
+        json={"new_owner_user_id": "2001", "share_with_previous_owner": False},
+    )
+    assert transferred.status_code == 200
+    office_share = transferred.get_json()["shares"]["office"]
+    assert office_share["enabled"] is True
+    assert office_share["office_ids"] == [old_office_id]
+
+    # 元の営業所のメンバーは引き続き閲覧できる。
+    module.current_user = SimpleNamespace(
+        is_authenticated=True, username="3001", name="Same Office", office_id=old_office_id, id=4
+    )
+    # 一覧には営業所ごとの要代務シフト帳も並ぶため、対象の帳簿だけを取り出して確認する。
+    shared = client.get(f"{API}/list").get_json()["projects"]
+    target = next(item for item in shared if item["id"] == project_id)
+    assert target["access_role"] == "viewer"
+
+
+def test_owner_transfer_freezes_created_office_of_the_previous_owner(tmp_path):
+    """作成元営業所を持たないレガシー帳簿は、移譲時に元オーナー基準で確定させる。
+
+    確定しないと、スポット検索の営業所スコープが移譲先の営業所へ移ってしまう。
+    """
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        branch = AccessBranch(name="Tokyo", code="TK")
+        db.session.add(branch)
+        db.session.flush()
+        old_office = AccessOffice(branch_id=branch.id, name="Shinjuku", code="S01")
+        new_office = AccessOffice(branch_id=branch.id, name="Shibuya", code="S02")
+        db.session.add_all([old_office, new_office])
+        db.session.flush()
+        old_office_id, new_office_id = old_office.id, new_office.id
+        User.query.filter_by(username="owner01").first().office_id = old_office_id
+        User.query.filter_by(username="2001").first().office_id = new_office_id
+        db.session.commit()
+
+    owner = _owner()
+    owner.office_id = old_office_id
+    module.current_user = owner
+    project_id = _create_person_project(client)
+
+    # 作成元営業所を持たないレガシー状態を再現する。
+    with client.application.app_context():
+        row = db.session.get(CloudShiftProject, project_id)
+        extra = dict(row.extra_data or {})
+        extra.pop("created_office_ids", None)
+        row.extra_data = extra
+        db.session.commit()
+
+    assert client.put(
+        f"{API}/project/{project_id}/owner",
+        json={"new_owner_user_id": "2001", "share_with_previous_owner": False},
+    ).status_code == 200
+
+    with client.application.app_context():
+        row = db.session.get(CloudShiftProject, project_id)
+        assert row.owner_user_id == "2001"
+        assert row.extra_data["created_office_ids"] == [old_office_id]
+
+
+def test_scene_shift_owner_transfer_keeps_site_link_and_blocks_duplicate_owner(tmp_path):
+    """現場シフトは現場（site_id）で紐づけを判定する。移譲後も現場設定は保たれる。"""
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        site = Site(
+            site_id="S010",
+            site_name="Shinjuku Site",
+            site_manager_last="Owner",
+            site_manager_first="Manager",
+            site_manager_id="9010",
+            site_register="owner01",
+            site_updater="owner01",
+            is_active=True,
+        )
+        db.session.add(site)
+        db.session.commit()
+        site_row_id = site.id
+
+    module.current_user = _owner()
+    project_id = client.post(
+        f"{API}/create",
+        data={
+            "title": "Shinjuku Scene",
+            "mode": "scene",
+            "year": "2026",
+            "month": "4",
+            "site_row_id": str(site_row_id),
+        },
+    ).get_json()["project"]["project"]["id"]
+
+    # 同じ現場のシフト帳を移譲先が既に持っていれば拒否される。
+    with client.application.app_context():
+        db.session.add(
+            CloudShiftProject(
+                id="dup000000000000000002",
+                owner_user_id="2001",
+                title="Shinjuku Scene (dup)",
+                mode="scene",
+                employee_number="",
+                site_row_id=site_row_id,
+                site_id="S010",
+                site_name="Shinjuku Site",
+                view_token="dup-scene-view",
+                edit_token="dup-scene-edit",
+                account_shares={},
+                assist={},
+                extra_data={},
+                created_at="2026-04-01T00:00:00+09:00",
+                updated_at="2026-04-01T00:00:00+09:00",
+            )
+        )
+        db.session.commit()
+    assert client.put(
+        f"{API}/project/{project_id}/owner",
+        json={"new_owner_user_id": "2001", "share_with_previous_owner": True},
+    ).status_code == 409
+
+    # 重複を解消すれば移譲でき、現場の紐づけはそのまま残る。
+    with client.application.app_context():
+        db.session.delete(db.session.get(CloudShiftProject, "dup000000000000000002"))
+        db.session.commit()
+    assert client.put(
+        f"{API}/project/{project_id}/owner",
+        json={"new_owner_user_id": "2001", "share_with_previous_owner": True},
+    ).status_code == 200
+
+    module.current_user = _new_owner()
+    site_payload = client.get(f"{API}/project/{project_id}").get_json()["project"]["site"]
+    assert site_payload["site_id"] == "S010"
+    assert site_payload["site_name"] == "Shinjuku Site"
 
 
 def test_owner_transfer_is_owner_only(tmp_path):

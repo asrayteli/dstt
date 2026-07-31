@@ -3014,6 +3014,12 @@ def _apply_owner_transfer(
         changes.append(f"元オーナー {previous_owner} へ自動共有（閲覧）")
     else:
         changes.append("元オーナーへの自動共有はなし")
+    if shares["office"].get("enabled"):
+        # 営業所共有は移譲前の営業所のまま引き継ぐため、どの営業所が残ったかを残す。
+        changes.append(
+            "同じ営業所内への共有を維持: "
+            + ", ".join(str(item.get("label") or item.get("id")) for item in shares["office"].get("offices") or [])
+        )
 
     project["owner_user_id"] = new_owner_user_id
     project["account_shares"] = {

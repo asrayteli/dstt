@@ -8506,7 +8506,7 @@
         }))
         .filter((item) => item.employee_number);
       if (!normalized.length) {
-        panel.innerHTML = '<div style="color: var(--cloud-muted); font-size: 12px; padding: 4px 2px;">候補が見つかりません。社員番号を直接入力して「この社員番号で確認」を押すこともできます。</div>';
+        panel.innerHTML = '<div style="color: var(--cloud-muted); font-size: 12px; padding: 4px 2px;">候補が見つかりません。候補検索は自分の営業所の社員のみが対象です。他営業所の人へ移すときは、社員番号を直接入力して「この社員番号で確認」を押してください。</div>';
         panel.classList.remove('cloud-hidden');
         return;
       }
@@ -8543,7 +8543,11 @@
         panel.classList.add('cloud-hidden');
       }
       const queryInput = modal.querySelector('[data-owner-transfer-query]');
-      if (queryInput) queryInput.value = number;
+      if (queryInput) {
+        // 入力中に仕込まれた検索タイマーが後から候補一覧を出し直さないよう止める。
+        window.clearTimeout(queryInput._ownerTransferTimer);
+        queryInput.value = number;
+      }
       state.ownerTransfer.query = number;
       renderOwnerTransferStatus(modal);
       try {
@@ -8552,8 +8556,11 @@
         if (ownerTransferSelectedNumber() !== number) return;
         state.ownerTransfer.candidate = data.candidate || null;
       } finally {
-        state.ownerTransfer.checking = false;
-        renderOwnerTransferStatus(modal);
+        // 後発の確認が走っている場合は、そちらの結果を待つ（「確認中」のまま維持）。
+        if (ownerTransferSelectedNumber() === number) {
+          state.ownerTransfer.checking = false;
+          renderOwnerTransferStatus(modal);
+        }
       }
     }
 
@@ -8635,8 +8642,9 @@
               <input class="cloud-input" type="text" value="${escapeHtml(owner.label || owner.user_id || '')}" readonly>
             </label>
             <label class="cloud-field">
-              <span>新しいオーナー（氏名または社員番号で検索）</span>
+              <span>新しいオーナー（氏名または社員番号）</span>
               <input class="cloud-input" type="text" data-owner-transfer-query placeholder="例: 3243012 / 山田" autocomplete="off" value="${escapeHtml(state.ownerTransfer.query || '')}">
+              <small class="cloud-field-note">氏名の候補検索は<strong>自分の営業所の社員のみ</strong>が対象です。他営業所の人へ移すときは、<strong>社員番号を直接入力して「この社員番号で確認」</strong>を押してください。</small>
             </label>
             <div class="cloud-actions compact">
               <button type="button" class="cloud-btn secondary" data-owner-transfer-check>この社員番号で確認</button>
@@ -8684,7 +8692,13 @@
       modalBody(modal).innerHTML = '<div class="cloud-empty-state"><p>オーナー情報を読み込み中です...</p></div>';
       modalFooter(modal).innerHTML = '<button type="button" class="cloud-btn secondary" data-owner-transfer-close>閉じる</button>';
       modalFooter(modal).querySelector('[data-owner-transfer-close]').addEventListener('click', () => closeCloudModal(OWNER_TRANSFER_MODAL_ID));
-      state.ownerTransfer.info = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/owner`);
+      try {
+        state.ownerTransfer.info = await requestJson(`/tools/shiftersync/cloudshift/api/project/${project.id}/owner`);
+      } catch (error) {
+        // 読み込みに失敗したまま「読み込み中」を出し続けないよう、理由を表示する。
+        modalBody(modal).innerHTML = `<div class="cloud-empty-state"><p>${escapeHtml(error.message || 'オーナー情報を読み込めませんでした。')}</p></div>`;
+        throw error;
+      }
       renderOwnerTransferModalBody(modal);
       const queryInput = modal.querySelector('[data-owner-transfer-query]');
       if (queryInput) {
