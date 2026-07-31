@@ -26,6 +26,8 @@ from app.models import (
     CloudShiftProject,
     CloudShiftProjectVisibility,
     CloudShiftTemplate,
+    Employee,
+    Office,
     Site,
     User,
     db,
@@ -473,6 +475,122 @@ def test_scene_shift_owner_transfer_keeps_site_link_and_blocks_duplicate_owner(t
     site_payload = client.get(f"{API}/project/{project_id}").get_json()["project"]["site"]
     assert site_payload["site_id"] == "S010"
     assert site_payload["site_name"] == "Shinjuku Site"
+
+
+def test_owner_transfer_ui_lives_in_the_shift_book_settings_modal():
+    """入口は「シフト帳の設定 → オーナー変更」タブ。
+
+    大規模シフトは設定モーダル自体が対象外なので、アクションの単独ボタンを残す。
+    """
+    script = (ROOT / "app" / "templates" / "_cloudshift_script.html").read_text(encoding="utf-8")
+    html = (ROOT / "app" / "templates" / "cloudshift.html").read_text(encoding="utf-8")
+
+    assert 'data-shift-settings-tab="owner"' in script
+    assert "${activeTab === 'owner' ? `" in script
+    assert "ownerTransferFormHtml()" in script
+    # 単独ボタンは大規模シフトのときだけ出す。
+    assert 'id="cloud-transfer-owner"' in html
+    assert "$('cloud-transfer-owner').classList.toggle('cloud-hidden', !canManageProject || project.mode !== 'large')" in script
+    # 候補検索はDSTTアカウント（社員名簿検索ではない）。
+    assert "/owner/candidates?q=" in script
+    assert "fetchOwnerTransferCandidates" in script
+    assert "fetchEmployeeCandidates(latest);\n              if (queryInput.value.trim() !== latest) return;\n              renderOwnerTransferCandidates" not in script
+
+
+def _add_employee(office_code, employee_number, employee_name, *, kana="", is_deleted=False):
+    if not db.session.get(Office, office_code):
+        db.session.add(Office(office_code=office_code, office_name="Office", created_by="tester"))
+        db.session.flush()
+    db.session.add(
+        Employee(
+            employee_number=employee_number,
+            office_code=office_code,
+            employee_name=employee_name,
+            employee_kana=kana,
+            is_deleted=is_deleted,
+        )
+    )
+
+
+def test_owner_candidates_search_targets_dstt_accounts_across_offices(tmp_path):
+    """移譲先候補はDSTTアカウントが対象（社員名簿検索と違い営業所で絞られない）。"""
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        db.session.add(User(username="4001", password_hash="x", name="山田 太郎"))
+        # users.name が未設定のアカウントは、社員名簿の氏名からも引けるようにする。
+        db.session.add(User(username="4002", password_hash="x", name="unknown"))
+        _add_employee("900", "4002", "鈴木 次郎", kana="スズキ ジロウ")
+        # DSTTアカウントの無い社員は候補に出さない。
+        _add_employee("901", "4003", "山田 花子")
+        db.session.commit()
+
+    module.current_user = _owner()
+    project_id = _create_person_project(client)
+
+    by_name = client.get(f"{API}/project/{project_id}/owner/candidates?q=山田").get_json()["candidates"]
+    assert [item["employee_number"] for item in by_name] == ["4001"]
+    assert by_name[0]["label"] == "4001（山田 太郎）"
+
+    by_number = client.get(f"{API}/project/{project_id}/owner/candidates?q=400").get_json()["candidates"]
+    assert [item["employee_number"] for item in by_number] == ["4001", "4002"]
+
+    # 社員名簿の氏名しか持たないアカウントも氏名で引ける。
+    by_master_name = client.get(f"{API}/project/{project_id}/owner/candidates?q=鈴木").get_json()["candidates"]
+    assert [item["employee_number"] for item in by_master_name] == ["4002"]
+    assert by_master_name[0]["label"] == "4002（鈴木 次郎）"
+
+    assert client.get(f"{API}/project/{project_id}/owner/candidates?q=").get_json()["candidates"] == []
+
+
+def test_owner_candidates_flag_untransferable_accounts(tmp_path):
+    """現オーナー・同一紐づけ所持は選ぶ前に判別できるよう印を付けて返す。"""
+    module, client = _build_client(tmp_path)
+    with client.application.app_context():
+        db.session.add(User(username="owner01x", password_hash="x", name="Decoy"))
+        db.session.commit()
+
+    module.current_user = _owner()
+    project_id = _create_person_project(client)
+    assert client.put(
+        f"{API}/project/{project_id}/account-shares",
+        json={"share_office": False, "employee_numbers": ["2001"]},
+    ).status_code == 200
+    with client.application.app_context():
+        db.session.add(
+            CloudShiftProject(
+                id="dup000000000000000003",
+                owner_user_id="2001",
+                title="Person A (dup)",
+                mode="person",
+                employee_number="1001",
+                view_token="dup-cand-view",
+                edit_token="dup-cand-edit",
+                account_shares={},
+                assist={},
+                extra_data={},
+                created_at="2026-04-01T00:00:00+09:00",
+                updated_at="2026-04-01T00:00:00+09:00",
+            )
+        )
+        db.session.commit()
+
+    shared = client.get(f"{API}/project/{project_id}/owner/candidates?q=2001").get_json()["candidates"][0]
+    assert shared["already_shared"] is True
+    assert shared["has_duplicate"] is True
+    assert shared["is_current_owner"] is False
+
+    current = client.get(f"{API}/project/{project_id}/owner/candidates?q=owner01").get_json()["candidates"]
+    me = next(item for item in current if item["employee_number"] == "owner01")
+    assert me["is_current_owner"] is True
+
+
+def test_owner_candidates_require_project_ownership(tmp_path):
+    module, client = _build_client(tmp_path)
+    module.current_user = _owner()
+    project_id = _create_person_project(client)
+
+    module.current_user = _outsider()
+    assert client.get(f"{API}/project/{project_id}/owner/candidates?q=2001").status_code == 404
 
 
 def test_owner_transfer_is_owner_only(tmp_path):
