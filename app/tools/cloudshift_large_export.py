@@ -407,10 +407,12 @@ def large_pdf_bytes(
             f"このシフト帳に保存済みの{len(annual_totals.get('months') or [])}か月分です。",
             note_style,
         ))
-    summary = [[
+    summary_headers = (
         "メンバー", "拘束", "労働", "有休換算", "①所定内残業", "②所定休日", "③法定休日",
         "36協定", "特別条項", "960当月", "960年度累計", "安衛長時間", "勤務日", "休み内訳", "警告",
-    ]]
+    )
+    # 列幅を固定するため、折り返しが要る文字列セルは Paragraph にする。
+    summary = [[Paragraph(_pdf_markup(label), header_style) for label in summary_headers]]
     results = {str(person.get("person_id")): person for person in worktime.get("people", [])}
     annual_results = {str(person.get("person_id")): person for person in (annual_totals.get("people") or [])}
     for member in members:
@@ -419,18 +421,26 @@ def large_pdf_bytes(
         annual = annual_results.get(str(member.get("id"))) or {}
         leave_counts = _leave_counts_text(totals.get("leave_counts") or {})
         summary.append([
-            str(member.get("display_name") or ""), totals.get("bind_total_hhmm", "0:00"),
+            Paragraph(_pdf_markup(member.get("display_name")), cell_style), totals.get("bind_total_hhmm", "0:00"),
             totals.get("work_total_hhmm", "0:00"), totals.get("paid_leave_credit_hhmm", "0:00"),
             totals.get("payroll_overtime_hhmm", "0:00"),
             totals.get("scheduled_holiday_work_hhmm", "0:00"), totals.get("legal_holiday_work_hhmm", "0:00"),
             totals.get("agreement36_hhmm", "0:00"), totals.get("special_clause_hhmm", "0:00"),
             totals.get("annual960_hhmm", "0:00"), annual.get("annual960_hhmm", "—"),
             totals.get("anei_excess_hhmm", "0:00"),
-            str(totals.get("work_days", 0)), leave_counts, str(len(person.get("violations") or [])),
+            str(totals.get("work_days", 0)), Paragraph(_pdf_markup(leave_counts) or "　", note_style),
+            str(len(person.get("violations") or [])),
         ])
-    summary_table = Table(summary, repeatRows=1)
+    # 列が15本あるため自動幅では紙面をはみ出す。相対比率を document.width へ収める。
+    summary_weights = (2.4, 1.0, 1.0, 1.0, 1.2, 1.2, 1.2, 1.0, 1.0, 1.0, 1.2, 1.2, 0.8, 2.6, 0.8)
+    summary_total = sum(summary_weights)
+    summary_table = Table(
+        summary,
+        colWidths=[document.width * weight / summary_total for weight in summary_weights],
+        repeatRows=1,
+    )
     summary_table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), font), ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("FONTNAME", (0, 0), (-1, -1), font), ("FONTSIZE", (0, 0), (-1, -1), 7.5),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEEFF")),
         ("GRID", (0, 0), (-1, -1), 0.65, colors.HexColor("#8EABC7")),
         ("ALIGN", (1, 0), (-1, -1), "CENTER"),

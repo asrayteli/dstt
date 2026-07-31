@@ -6,7 +6,7 @@
   const HOLIDAY_CLASS_LABELS = { legal: '法定休日', scheduled: '所定休日', '': '所定労働日' };
   const HOLIDAY_OVERRIDE_LABELS = { legal: '法定休日にする', scheduled: '所定休日にする', none: '所定労働日にする' };
   const state = {
-    host: null, context: null, entries: {}, meta: {}, config: {}, result: null, annual: null,
+    host: null, context: null, entries: {}, meta: {}, config: {}, result: null, annual: null, holidayRules: null,
     tab: 'grid', personalMemberId: '', clipboard: null, focus: { day: 1, member: 0 }, typeBuffer: '', typeTimer: null, showBaseline: false,
     dragAssignment: null, mouseDrag: null, suppressCellClick: false
   };
@@ -109,13 +109,19 @@
   }
   function dayType(day) { return Calc.dayType(Number(state.context.month.year), Number(state.context.month.month), Number(day), (state.meta || {}).day_types || {}, root.SHIFTERSYNC_HOLIDAYS || []); }
   function weekdayLabel(day) { return WEEKDAY_LABELS[new Date(Number(state.context.month.year), Number(state.context.month.month) - 1, day).getDay()]; }
-  function holidayRuleFor(memberId) { return Calc.holidayRule(memberFor(memberId) || {}, state.config.settings || {}); }
+  // 60人×31日ぶん引かれるため、1回の描画中はメンバーごとの解決結果を使い回す。
+  function holidayRuleFor(memberId) {
+    const key = String(memberId);
+    if (!state.holidayRules) state.holidayRules = {};
+    if (!state.holidayRules[key]) state.holidayRules[key] = Calc.holidayRule(memberFor(memberId) || {}, state.config.settings || {});
+    return state.holidayRules[key];
+  }
   // シフト表・PDF・集計で共通に使う「その日・その人の休日区分」。
   function holidayKindFor(day, memberId, entry) {
     return Calc.effectiveHolidayKind(holidayRuleFor(memberId), Number(state.context.month.year), Number(state.context.month.month), Number(day), entry === undefined ? entryFor(day, memberId) : entry);
   }
   function holidayRuleSummary(rule) {
-    const weekdays = (list) => (list || []).map((index) => WEEKDAY_LABELS[index]).join('・');
+    const weekdays = (list) => (list || []).map((index) => WEEKDAY_LABELS[index]).filter(Boolean).join('・');
     const parts = [];
     const legal = weekdays(rule.legal_weekdays); const scheduled = weekdays(rule.scheduled_weekdays);
     parts.push(`法定休日: ${legal || '曜日指定なし'}${(rule.legal_dates || []).length ? ` +指定日${rule.legal_dates.length}件` : ''}`);
@@ -235,6 +241,8 @@
 
   function render(recompute) {
     if (!state.host) return;
+    // 設定保存で休日ルールが変わり得るため、描画のたびにキャッシュを作り直す。
+    state.holidayRules = null;
     if (recompute !== false) recalculate();
     const body = state.tab === 'summary' ? summaryHtml() : state.tab === 'personal' ? personalHtml() : gridHtml();
     state.host.innerHTML = `<section class="cloud-large" data-large-root>${toolbarHtml()}${body}<div data-large-modal-root></div></section>`;

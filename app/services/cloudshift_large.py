@@ -20,9 +20,9 @@ DAY_TYPES = {"weekday", "saturday", "holiday"}
 LEAVE_KINDS = {"legal_rest", "scheduled_rest", "rest", "substitute_rest", "paid", "special", "other"}
 HOLIDAY_CLASSES = {"legal", "scheduled"}
 # セル側の休日区分。"" はメンバーの休日ルールに従う、"none" はその日だけ所定労働日に戻す。
+# エントリ正規化（shiftersync_format.normalize_large_entry）の検証もこの集合を使う。
 HOLIDAY_KIND_OVERRIDES = {"", "none", "scheduled", "legal"}
 # 曜日は JavaScript の Date#getDay と同じ 0=日曜 ... 6=土曜 で保持する。
-WEEKDAY_LABELS = ("日", "月", "火", "水", "木", "金", "土")
 # 既定は「日曜=法定休日 / 土曜=所定休日」。土日休みでない現場は設定から変更する。
 DEFAULT_LEGAL_WEEKDAYS = (0,)
 DEFAULT_SCHEDULED_WEEKDAYS = (6,)
@@ -141,11 +141,16 @@ def normalize_member_holiday_rule(raw: Any) -> dict[str, Any]:
 
 
 def effective_holiday_rule(member: Mapping[str, Any], settings: Mapping[str, Any]) -> dict[str, Any]:
-    """メンバーに適用される休日ルール（個人設定が無ければ共通設定）を返す。"""
+    """メンバーに適用される休日ルール（個人設定が無ければ共通設定）を返す。
+
+    共通設定に holiday_rule が無い場合は既定（日=法定 / 土=所定）を使う。
+    正規化前の large_config を渡されても normalize_large_config・ブラウザ側計算と
+    同じ結果になるようにするため（休日ルールを明示的に空にした帳は空のまま）。"""
     member_rule = member.get("holiday_rule") if isinstance(member.get("holiday_rule"), Mapping) else {}
     if str(member_rule.get("mode") or "default") == "custom":
         return normalize_holiday_rule(member_rule)
-    return normalize_holiday_rule((settings or {}).get("holiday_rule"))
+    shared = (settings or {}).get("holiday_rule")
+    return normalize_holiday_rule(default_holiday_rule() if shared is None else shared)
 
 
 def holiday_class_for_day(rule: Mapping[str, Any], year: int, month: int, day: int) -> str:
@@ -332,10 +337,10 @@ def normalize_large_config(raw: Any) -> dict[str, Any]:
             "break_minutes": _required_minutes(raw_settings.get("break_minutes"), 60, "休憩", maximum=1440),
             "scheduled_bind_minutes": _required_minutes(raw_settings.get("scheduled_bind_minutes"), 570, "所定拘束時間", maximum=1440),
             "paid_leave_work_minutes": _optional_minutes(raw_settings.get("paid_leave_work_minutes"), "有休1日の所定労働時間", maximum=1440),
+            # 休日ルール未設定の既存帳は既定（日=法定 / 土=所定）を入れる。
+            # 明示的に空にした帳（全曜日のチェックを外した）はそのまま空を保つ。
             "holiday_rule": normalize_holiday_rule(
-                raw_settings.get("holiday_rule", default_holiday_rule())
-                if raw_settings.get("holiday_rule") is not None
-                else default_holiday_rule()
+                default_holiday_rule() if raw_settings.get("holiday_rule") is None else raw_settings["holiday_rule"]
             ),
             "checks": checks,
         },

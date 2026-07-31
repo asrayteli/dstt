@@ -7,6 +7,8 @@ import secrets
 from calendar import monthrange
 from typing import Any
 
+from app.services.cloudshift_large import HOLIDAY_KIND_OVERRIDES
+
 
 COMMENT_ROW_PREFIX = "#comment"
 EMPLOYEE_NAME_ROW_PREFIX = "#employee_name"
@@ -220,7 +222,7 @@ def normalize_large_entry(raw: Any, *, entry_id: str | None = None) -> dict[str,
     value = assignments[0]["code_key"] if assignments else value
     holiday_kind = str(raw.get("holiday_kind", raw.get("holidayKind", "")) or "").strip().lower()
     # "" はメンバーの休日ルールに従う、"none" はその日だけ所定労働日として扱う上書き。
-    if holiday_kind not in {"", "none", "scheduled", "legal"}:
+    if holiday_kind not in HOLIDAY_KIND_OVERRIDES:
         raise ValueError("休日区分は none / scheduled / legal のいずれかで指定してください")
     if not assignments and not value and not holiday_kind and not comment:
         return {}
