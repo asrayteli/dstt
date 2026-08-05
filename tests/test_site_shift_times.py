@@ -1142,3 +1142,43 @@ def test_entry_linked_by_site_id_only_still_resolves_times(tmp_path):
     assert saved.status_code == 200
     entry = saved.get_json()["month"]["entries_per_day"]["1"][0]
     assert entry_shift_time_label(entry) == "勤怠：10:00~19:00、出勤：9:40"
+
+
+def test_shift_times_survive_both_soft_and_hard_site_deletion(tmp_path):
+    """マニュアルの記載どおり、現場を消してもシフトの表示が空にならないこと。
+
+    論理削除は現場行が残るのでマスタの値を読み続け、完全削除はエントリ側の
+    スナップショットへフォールバックする。
+    """
+    module, app = _build_cloudshift_app(tmp_path)
+    site_row_id = _create_site(
+        app,
+        site_id="99999",
+        site_name="Doomed Site",
+        attendance_times=[{"start": "10:00", "end": "19:00"}],
+        report_time="09:40",
+    )
+    client, project_id, _month = _create_person_project_with_entry(
+        module,
+        app,
+        site_row_id=site_row_id,
+        entry_extra={"show_attendance_time": True, "show_report_time": True},
+    )
+
+    def current_label():
+        detail = client.get(
+            f"/tools/shiftersync/cloudshift/api/project/{project_id}?month_key=2026-04"
+        ).get_json()
+        return entry_shift_time_label(detail["month"]["entries_per_day"]["1"][0])
+
+    # 論理削除（is_active=False）でも表示は変わらない。
+    with app.app_context():
+        db.session.get(Site, site_row_id).is_active = False
+        db.session.commit()
+    assert current_label() == "勤怠：10:00~19:00、出勤：9:40"
+
+    # 完全削除でもスナップショットが残る。
+    with app.app_context():
+        db.session.delete(db.session.get(Site, site_row_id))
+        db.session.commit()
+    assert current_label() == "勤怠：10:00~19:00、出勤：9:40"
