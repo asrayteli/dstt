@@ -310,6 +310,18 @@ def _ensure_access_control_schema(app):
             site_cols = {c["name"] for c in inspector.get_columns("sites")}
             if "office_code" not in site_cols:
                 alters.append("ALTER TABLE sites ADD COLUMN office_code VARCHAR(20)")
+            # 勤怠時間/出勤時間は NULL 許容で追加する（既存行は「未設定」のまま壊さない）。
+            if "attendance_times" not in site_cols:
+                alters.append("ALTER TABLE sites ADD COLUMN attendance_times JSON")
+            if "report_time" not in site_cols:
+                alters.append("ALTER TABLE sites ADD COLUMN report_time VARCHAR(5)")
+
+        if "site_branches" in inspector.get_table_names():
+            site_branch_cols = {c["name"] for c in inspector.get_columns("site_branches")}
+            if "attendance_times" not in site_branch_cols:
+                alters.append("ALTER TABLE site_branches ADD COLUMN attendance_times JSON")
+            if "report_time" not in site_branch_cols:
+                alters.append("ALTER TABLE site_branches ADD COLUMN report_time VARCHAR(5)")
 
         if "site_contract_master" in inspector.get_table_names():
             contract_cols = {c["name"] for c in inspector.get_columns("site_contract_master")}

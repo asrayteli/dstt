@@ -36,6 +36,7 @@ try:
         entry_display_text,
         entry_name_for_comparison,
         entry_option_and_name,
+        entry_shift_time_label,
         parse_csv_text,
     )
     from .japan_holidays import JAPAN_HOLIDAYS
@@ -46,6 +47,7 @@ except ImportError:
         entry_display_text,
         entry_name_for_comparison,
         entry_option_and_name,
+        entry_shift_time_label,
         parse_csv_text,
     )
     from app.tools.japan_holidays import JAPAN_HOLIDAYS  # type: ignore
@@ -322,6 +324,7 @@ def calendar_view():
             int(day): [
                 {
                     "title": entry_display_text(entry),
+                    "shift_time": entry_shift_time_label(entry),
                     "comment": entry.get("comment", ""),
                 }
                 for entry in entries
@@ -405,6 +408,11 @@ def _calendar_weekdays() -> list[str]:
 
 def _comment_badge(comment: str) -> str:
     return ""
+
+
+def _entry_shift_time_text(entry: dict[str, Any]) -> str:
+    """カレンダー1エントリの「勤怠：…、出勤：…」行（未設定/非表示なら空文字）。"""
+    return str(entry.get("shift_time") or "").strip()
 
 
 def _calendar_day_kind(year: int, month: int, day: int) -> str:
@@ -556,6 +564,14 @@ def _layout_png_entry_block(
         title_width,
         None,
     )
+    # 勤怠/出勤はコメントの一行上に置く。
+    shift_time_lines = _fit_calendar_lines(
+        draw,
+        _entry_shift_time_text(entry),
+        comment_font,
+        comment_width,
+        None,
+    )
     comment_lines = _fit_calendar_lines(
         draw,
         entry["comment"],
@@ -567,11 +583,14 @@ def _layout_png_entry_block(
     block_height = 14
     if title_lines:
         block_height += len(title_lines) * 18
+    if shift_time_lines:
+        block_height += 4 + len(shift_time_lines) * 15
     if comment_lines:
         block_height += 4 + len(comment_lines) * 15
 
     return {
         "title_lines": title_lines,
+        "shift_time_lines": shift_time_lines,
         "comment_lines": comment_lines,
         "block_height": block_height,
     }
@@ -625,12 +644,19 @@ def _layout_pdf_entry_block(
         title_font_size,
         title_width,
     )
+    # 勤怠/出勤はコメントの一行上に置く。
+    shift_time_lines = _fit_pdf_lines(
+        _entry_shift_time_text(entry), font_name, comment_font_size, comment_width
+    )
     comment_lines = _fit_pdf_lines(entry["comment"], font_name, comment_font_size, comment_width)
     block_height = max(12, len(title_lines) * 10)
+    if shift_time_lines:
+        block_height += 2 + len(shift_time_lines) * 8
     if comment_lines:
         block_height += 2 + len(comment_lines) * 8
     return {
         "title_lines": title_lines,
+        "shift_time_lines": shift_time_lines,
         "comment_lines": comment_lines,
         "block_height": block_height,
     }
@@ -754,6 +780,13 @@ def generate_pdf_calendar(path, year, month, mode, title, day_map, capacity=None
                 for title_line in layout["title_lines"]:
                     pdf.drawString(x + 6, cursor_y, title_line)
                     cursor_y -= 10
+                if layout["shift_time_lines"]:
+                    cursor_y -= 1
+                    pdf.setFont(font_name, 7.5)
+                    pdf.setFillColor(HexColor("#1d4ed8"))
+                    for shift_time_line in layout["shift_time_lines"]:
+                        pdf.drawString(x + 10, cursor_y, shift_time_line)
+                        cursor_y -= 8
                 if layout["comment_lines"]:
                     cursor_y -= 1
                     pdf.setFont(font_name, 7.5)
@@ -779,6 +812,8 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
     border_color = "#7898bd"
     title_text_color = "#000000"
     comment_text_color = "#1a1a1a"
+    # 勤怠/出勤はコメントと区別が付くよう別色にする。
+    shift_time_text_color = "#1d4ed8"
     entry_card_background = "#f5f9fe"
     entry_card_border = "#a8c0dc"
     footer_text_color = "#1a1a1a"
@@ -951,6 +986,17 @@ def generate_png_calendar(path, year, month, mode, title, day_map, capacity=None
                         font=text_font,
                     )
                     line_top += 18
+                if layout["shift_time_lines"]:
+                    line_top += 2
+                    for line in layout["shift_time_lines"]:
+                        _draw_bold_calendar_text(
+                            draw,
+                            (content_left + 14, line_top),
+                            line,
+                            fill=shift_time_text_color,
+                            font=comment_font,
+                        )
+                        line_top += 15
                 if layout["comment_lines"]:
                     line_top += 2
                     for line in layout["comment_lines"]:

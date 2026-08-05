@@ -8,6 +8,11 @@ from calendar import monthrange
 from typing import Any
 
 from app.services.cloudshift_large import HOLIDAY_KIND_OVERRIDES
+from app.site_shift_times import (
+    format_shift_time_label,
+    normalize_attendance_times,
+    normalize_time_text,
+)
 
 
 COMMENT_ROW_PREFIX = "#comment"
@@ -41,6 +46,13 @@ SUBSTITUTE_SOURCE_DAY_ROW_PREFIX = "#substitute_source_day"
 SUBSTITUTE_SOURCE_ENTRY_ID_ROW_PREFIX = "#substitute_source_entry_id"
 # \u7b2c\u4e8c\u30aa\u30d7\u30b7\u30e7\u30f3\uff08\u4ee3\u52d9\uff0f\u7814\u4fee\uff09\u306f entry \u306e\u5024\u3068\u306f\u5225\u30d5\u30a3\u30fc\u30eb\u30c9\u3068\u3057\u3066\u4fdd\u6301\u3059\u308b\u3002
 SECOND_OPTION_ROW_PREFIX = "#second_option"
+# \u73fe\u5834\u30ea\u30b9\u30c8PLUS \u7531\u6765\u306e\u52e4\u6020\u6642\u9593/\u51fa\u52e4\u6642\u9593\u3002\u8868\u793aON/OFF\u3068\u3001\u30ea\u30f3\u30af\u5207\u308c\u6642\u306b\u5099\u3048\u305f\u30b9\u30ca\u30c3\u30d7\u30b7\u30e7\u30c3\u30c8\u3002
+SHOW_ATTENDANCE_TIME_ROW_PREFIX = "#show_attendance_time"
+SHOW_REPORT_TIME_ROW_PREFIX = "#show_report_time"
+ATTENDANCE_TIMES_ROW_PREFIX = "#attendance_times"
+REPORT_TIME_ROW_PREFIX = "#report_time"
+# 同期ミラーが元エントリの枝番号を時刻解決にだけ使うための控え（表示には使わない）。
+SHIFT_TIME_BRANCH_ROW_ID_ROW_PREFIX = "#shift_time_branch_row_id"
 
 SHIFT_OPTION_MAPPINGS = {
     "A": "\u5348\u524d",
@@ -343,6 +355,19 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
             "site_name": site_name,
             "site_branch_row_id": site_branch_row_id,
             "site_branch": site_branch,
+            "show_attendance_time": _normalize_bool(
+                raw.get("show_attendance_time", raw.get("showAttendanceTime", False))
+            ),
+            "show_report_time": _normalize_bool(
+                raw.get("show_report_time", raw.get("showReportTime", False))
+            ),
+            "attendance_times": normalize_attendance_times(
+                raw.get("attendance_times", raw.get("attendanceTimes"))
+            ),
+            "report_time": normalize_time_text(raw.get("report_time", raw.get("reportTime"))),
+            "shift_time_branch_row_id": _normalize_site_branch_row_id(
+                raw.get("shift_time_branch_row_id", raw.get("shiftTimeBranchRowId", ""))
+            ),
             "sync_source_type": _normalize_sync_text(raw.get("sync_source_type", raw.get("syncSourceType", "")), limit=40),
             "sync_source_project_id": _normalize_sync_text(raw.get("sync_source_project_id", raw.get("syncSourceProjectId", "")), limit=80),
             "sync_source_project_title": _normalize_sync_text(raw.get("sync_source_project_title", raw.get("syncSourceProjectTitle", "")), limit=120),
@@ -401,6 +426,11 @@ def normalize_entry(raw: Any) -> dict[str, Any]:
         "site_name": "",
         "site_branch_row_id": "",
         "site_branch": "",
+        "show_attendance_time": False,
+        "show_report_time": False,
+        "attendance_times": [],
+        "report_time": "",
+        "shift_time_branch_row_id": "",
         "sync_source_type": "",
         "sync_source_project_id": "",
         "sync_source_project_title": "",
@@ -458,6 +488,15 @@ def normalize_entries_for_month(entries: Any, year: int, month: int) -> dict[str
     return normalized
 
 
+def _serialize_attendance_times_cell(value: Any) -> str:
+    """勤怠時間を CSV の1セルに収める（``10:00~13:00 / 14:00~19:00``）。"""
+    return " / ".join(
+        f"{item['start']}~{item['end']}"
+        for item in normalize_attendance_times(value)
+        if item.get("start") and item.get("end")
+    )
+
+
 def serialize_entry_rows(
     mode: str,
     year: int,
@@ -486,6 +525,7 @@ def serialize_entry_rows(
     site_name_rows: list[list[Any]] = []
     site_branch_row_id_rows: list[list[Any]] = []
     site_branch_rows: list[list[Any]] = []
+    shift_time_rows: list[list[Any]] = []
     substitute_rows: list[list[Any]] = []
     for day in range(1, monthrange(year, month)[1] + 1):
         key = str(day)
@@ -530,6 +570,30 @@ def serialize_entry_rows(
                 )
             if entry.get("site_branch"):
                 site_branch_rows.append([SITE_BRANCH_ROW_PREFIX, day, index, entry["site_branch"]])
+            if entry.get("show_attendance_time"):
+                shift_time_rows.append([SHOW_ATTENDANCE_TIME_ROW_PREFIX, day, index, "1"])
+            if entry.get("show_report_time"):
+                shift_time_rows.append([SHOW_REPORT_TIME_ROW_PREFIX, day, index, "1"])
+            if entry.get("attendance_times"):
+                shift_time_rows.append(
+                    [
+                        ATTENDANCE_TIMES_ROW_PREFIX,
+                        day,
+                        index,
+                        _serialize_attendance_times_cell(entry["attendance_times"]),
+                    ]
+                )
+            if entry.get("report_time"):
+                shift_time_rows.append([REPORT_TIME_ROW_PREFIX, day, index, entry["report_time"]])
+            if entry.get("shift_time_branch_row_id"):
+                shift_time_rows.append(
+                    [
+                        SHIFT_TIME_BRANCH_ROW_ID_ROW_PREFIX,
+                        day,
+                        index,
+                        entry["shift_time_branch_row_id"],
+                    ]
+                )
             if entry.get("substitute_request_type"):
                 substitute_rows.append([SUBSTITUTE_REQUEST_TYPE_ROW_PREFIX, day, index, entry["substitute_request_type"]])
             if entry.get("substitute_helper_employee_name"):
@@ -588,6 +652,7 @@ def serialize_entry_rows(
         + site_name_rows
         + site_branch_row_id_rows
         + site_branch_rows
+        + shift_time_rows
         + substitute_rows
         + metadata_rows
     )
@@ -650,8 +715,16 @@ def parse_csv_text(text: str) -> dict[str, Any]:
     site_name_rows: list[list[str]] = []
     site_branch_row_id_rows: list[list[str]] = []
     site_branch_rows: list[list[str]] = []
+    shift_time_rows: list[list[str]] = []
     substitute_rows: list[list[str]] = []
     project_employee_number = ""
+    shift_time_row_prefixes = {
+        SHOW_ATTENDANCE_TIME_ROW_PREFIX,
+        SHOW_REPORT_TIME_ROW_PREFIX,
+        ATTENDANCE_TIMES_ROW_PREFIX,
+        REPORT_TIME_ROW_PREFIX,
+        SHIFT_TIME_BRANCH_ROW_ID_ROW_PREFIX,
+    }
     substitute_row_prefixes = {
         SUBSTITUTE_REQUEST_TYPE_ROW_PREFIX,
         SUBSTITUTE_HELPER_EMPLOYEE_NAME_ROW_PREFIX,
@@ -723,6 +796,9 @@ def parse_csv_text(text: str) -> dict[str, Any]:
             continue
         if head == SITE_BRANCH_ROW_PREFIX:
             site_branch_rows.append(row)
+            continue
+        if head in shift_time_row_prefixes:
+            shift_time_rows.append(row)
             continue
         if head in substitute_row_prefixes:
             substitute_rows.append(row)
@@ -838,6 +914,32 @@ def parse_csv_text(text: str) -> dict[str, Any]:
             continue
         entries_per_day[day_key][index]["site_branch"] = str(row[3] or "").strip()
 
+    shift_time_field_map = {
+        SHOW_ATTENDANCE_TIME_ROW_PREFIX: ("show_attendance_time", _normalize_bool),
+        SHOW_REPORT_TIME_ROW_PREFIX: ("show_report_time", _normalize_bool),
+        ATTENDANCE_TIMES_ROW_PREFIX: ("attendance_times", normalize_attendance_times),
+        REPORT_TIME_ROW_PREFIX: ("report_time", normalize_time_text),
+        SHIFT_TIME_BRANCH_ROW_ID_ROW_PREFIX: (
+            "shift_time_branch_row_id",
+            _normalize_site_branch_row_id,
+        ),
+    }
+    for row in shift_time_rows:
+        if len(row) < 4:
+            continue
+        try:
+            day_key = str(int(row[1]))
+            index = int(row[2])
+        except (TypeError, ValueError):
+            continue
+        if day_key not in entries_per_day or index < 0 or index >= len(entries_per_day[day_key]):
+            continue
+        field = shift_time_field_map.get(str(row[0]).strip())
+        if not field:
+            continue
+        key, normalizer = field
+        entries_per_day[day_key][index][key] = normalizer(str(row[3] or "").strip())
+
     substitute_field_map = {
         SUBSTITUTE_REQUEST_TYPE_ROW_PREFIX: ("substitute_request_type", lambda value: value if value in {"scene", "person"} else ""),
         SUBSTITUTE_HELPER_EMPLOYEE_NAME_ROW_PREFIX: ("substitute_helper_employee_name", lambda value: _normalize_sync_text(value, limit=120)),
@@ -906,6 +1008,22 @@ def entry_display_text(entry: Any, *, include_comment: bool = False, comment_lim
     if comment_limit is not None and len(comment) > comment_limit:
         comment = f"{comment[:comment_limit]}..."
     return f"{head} - {comment}"
+
+
+def entry_shift_time_label(entry: Any) -> str:
+    """「勤怠：10:00~19:00、出勤：9:40」の1行を返す。表示OFFや値なしなら空文字。"""
+    if isinstance(entry, dict):
+        source = entry
+    else:
+        source = normalize_entry(entry)
+    if not source:
+        return ""
+    return format_shift_time_label(
+        source.get("attendance_times"),
+        source.get("report_time"),
+        show_attendance=bool(source.get("show_attendance_time")),
+        show_report=bool(source.get("show_report_time")),
+    )
 
 
 def entry_name_for_comparison(entry: Any) -> str:

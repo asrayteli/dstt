@@ -9,6 +9,11 @@ $(document).ready(function() {
   const siteNameRowPrefix = '#site_name';
   const siteBranchRowIdRowPrefix = '#site_branch_row_id';
   const siteBranchRowPrefix = '#site_branch';
+  const showAttendanceTimeRowPrefix = '#show_attendance_time';
+  const showReportTimeRowPrefix = '#show_report_time';
+  const attendanceTimesRowPrefix = '#attendance_times';
+  const reportTimeRowPrefix = '#report_time';
+  const shiftTimeBranchRowIdRowPrefix = '#shift_time_branch_row_id';
   const metadataFieldByPrefix = {
     [secondOptionRowPrefix]: 'second_option',
     [employeeNameRowPrefix]: 'employee_name',
@@ -18,6 +23,11 @@ $(document).ready(function() {
     [siteNameRowPrefix]: 'site_name',
     [siteBranchRowIdRowPrefix]: 'site_branch_row_id',
     [siteBranchRowPrefix]: 'site_branch',
+    [showAttendanceTimeRowPrefix]: 'show_attendance_time',
+    [showReportTimeRowPrefix]: 'show_report_time',
+    [attendanceTimesRowPrefix]: 'attendance_times',
+    [reportTimeRowPrefix]: 'report_time',
+    [shiftTimeBranchRowIdRowPrefix]: 'shift_time_branch_row_id',
     '#substitute_request_type': 'substitute_request_type',
     '#substitute_helper_employee_name': 'substitute_helper_employee_name',
     '#substitute_helper_employee_number': 'substitute_helper_employee_number',
@@ -39,7 +49,25 @@ $(document).ready(function() {
     '#substitute_source_day': 'substitute_source_day',
     '#substitute_source_entry_id': 'substitute_source_entry_id'
   };
-  const booleanMetadataFields = new Set(['substitute_resolved', 'substitute_unassigned_helper']);
+  const booleanMetadataFields = new Set([
+    'substitute_resolved',
+    'substitute_unassigned_helper',
+    'show_attendance_time',
+    'show_report_time'
+  ]);
+  // 勤怠時間は "10:00~13:00 / 14:00~19:00" の1セル表現から区間配列へ戻す。
+  const listMetadataFields = new Set(['attendance_times']);
+  function parseAttendanceTimesCell(value) {
+    return String(value || '')
+      .split(/[,\n、/]/)
+      .map((chunk) => chunk.trim())
+      .filter(Boolean)
+      .map((chunk) => {
+        const [start, end] = chunk.split('~');
+        return { start: String(start || '').trim(), end: String(end || '').trim() };
+      })
+      .filter((range) => range.start || range.end);
+  }
   const supportedModes = ['scene', 'person', 'master', 'substitute'];
   const modeLabels = {
     scene: '現場シフト',
@@ -136,7 +164,12 @@ $(document).ready(function() {
       site_id: '',
       site_name: '',
       site_branch_row_id: '',
-      site_branch: ''
+      site_branch: '',
+      show_attendance_time: false,
+      show_report_time: false,
+      attendance_times: [],
+      report_time: '',
+      shift_time_branch_row_id: ''
     };
   }
 
@@ -203,9 +236,13 @@ $(document).ready(function() {
       if (!field) {
         return;
       }
-      entriesPerDay[day][index][field] = booleanMetadataFields.has(field)
-        ? ['1', 'true', 'TRUE'].includes(String(row[3] || '').trim())
-        : (row[3] || '');
+      if (booleanMetadataFields.has(field)) {
+        entriesPerDay[day][index][field] = ['1', 'true', 'TRUE'].includes(String(row[3] || '').trim());
+      } else if (listMetadataFields.has(field)) {
+        entriesPerDay[day][index][field] = parseAttendanceTimesCell(row[3]);
+      } else {
+        entriesPerDay[day][index][field] = row[3] || '';
+      }
     });
 
     return {

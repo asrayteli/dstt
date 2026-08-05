@@ -582,7 +582,7 @@
       <div class="csm-step-badge">1</div>
       <div class="csm-step-body">
         <div class="csm-step-title">日付に予定を追加する</div>
-        <p class="csm-step-text">各日のセルで名前を入力（社員名簿と紐付くと候補が出ます）し、必要に応じてオプションを選び、コメントを添えて「追加」します。1 日に何人でも追加できます。間違えた行はその場で削除・編集できます。</p>
+        <p class="csm-step-text">各日のセルで名前を入力（社員名簿と紐付くと候補が出ます）し、必要に応じてオプションを選び、コメントを添えて「追加」します。1 日に何人でも追加できます。間違えた行はその場で削除・編集できます。個人シフト・現場シフトでは、コメント欄の上にある「勤怠時間を表示」「出勤時間を表示」で、現場リストPLUS の時間を対象者に見せられます（<a href="#edit" style="color:#0284c7">下の「勤怠時間・出勤時間」</a>を参照）。</p>
       </div>
     </div>
 
@@ -651,15 +651,68 @@
         <div class="csm-card-title">🗓️ 月を切り替える・増やす</div>
         <ul class="csm-ul">
           <li>「表示中の月」で、作成済みの月を切り替えます。</li>
-          <li>所有者は「前の月へ」「次の月へ」で移動します。まだ無い前月・翌月へ進むと、その月を新しく作成します（現在の月からコピーするか、空で作るかを選べます）。</li>
-          <li>公開編集URLでは「前月を追加」「翌月を追加」で前後の月を増やせます。</li>
+          <li>所有者は「前の月へ」「次の月へ」で移動します。まだ無い前月・翌月へ進むと「◯年◯月 を追加します。よろしいですか？」と確認が出て、<strong>空の月</strong>を作成します。</li>
+          <li>公開編集URLでは「前月を追加」「翌月を追加」で前後の月を増やせます（同じ確認が出ます）。</li>
           <li>月が 1 つも無いときは「月を作成」から最初の月を作ります。</li>
+          <li>新しい月は常に空です。前月の内容を引き継ぎたいときは「範囲一括編集」の<strong>コピー</strong>、または現場シフト・個人シフトなら<strong>テンプレート</strong>を使ってください。</li>
         </ul>
       </div>
       <div class="csm-card">
         <div class="csm-card-title">👥 必要人数</div>
         <p style="font-size:13.5px;color:#475569;margin:0">その月に 1 日あたり必要な人数です。設定すると、人数が足りない日が分かりやすくなり、自動作成でも使われます。0 のときは人数のチェックを行いません。</p>
       </div>
+    </div>
+
+    <div class="csm-card">
+      <div class="csm-card-title" style="justify-content:space-between">
+        <span>🕘 勤怠時間・出勤時間をシフト対象者に見せる</span>
+        <span class="csm-tag csm-tag-teal">現場リストPLUS 連携</span>
+      </div>
+      <p style="font-size:14px;color:#475569;margin:0 0 10px">現場リストPLUS に登録した<strong>勤怠時間</strong>（○○時～○○時）と<strong>出勤時間</strong>（現場に入る時刻）を、シフトに添えて表示できます。日ごとに書き写す必要はなく、現場リストPLUS 側を直せば表示も自動で最新になります。</p>
+      <table class="csm-opt-table">
+        <thead><tr><th style="width:150px">シフト種別</th><th>どの現場の時間が出るか</th></tr></thead>
+        <tbody>
+          <tr><td>個人シフト</td><td>その日に選んだ<strong>現場</strong>の時間。日ごとに現場が違っても、それぞれの時間が出ます。</td></tr>
+          <tr><td>現場シフト</td><td>そのシフト帳に<strong>紐付けた現場</strong>の時間。枝番号（車両区分）ごとに時間を変えている場合は、その枝番号の時間が出ます。</td></tr>
+        </tbody>
+      </table>
+      <hr class="csm-divider">
+      <div class="csm-flow">
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 1</div>
+          <div class="csm-flow-label">現場リストPLUS で登録</div>
+          <div class="csm-flow-note">親現場の編集画面で勤怠時間・出勤時間を入れます</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 2</div>
+          <div class="csm-flow-label">シフトでチェック</div>
+          <div class="csm-flow-note">「勤怠時間を表示」「出勤時間を表示」をON</div>
+        </div>
+        <div class="csm-flow-step">
+          <div class="csm-flow-num">STEP 3</div>
+          <div class="csm-flow-label">この月を保存</div>
+          <div class="csm-flow-note">保存すると対象者の画面・出力に出ます</div>
+        </div>
+      </div>
+      <hr class="csm-divider">
+      <p style="font-size:14px;color:#475569;margin:0 0 8px"><strong>チェックボックスの場所</strong>（3 か所のどこで入れても同じです）</p>
+      <ul class="csm-ul">
+        <li><span><strong>日付セルの追加欄</strong>：コメント欄の上にあります。追加する前にONにしておきます。</span></li>
+        <li><span><strong>エントリ詳細</strong>：入力済みの行をクリックして開くポップアップ。あとから切り替えるときはここです。現場リストPLUS にどんな時間が入っているかも一緒に表示されます。</span></li>
+        <li><span><strong>範囲一括編集</strong>：まとめて追加するときに、同じ設定を全日へ反映できます。</span></li>
+      </ul>
+      <hr class="csm-divider">
+      <p style="font-size:14px;color:#475569;margin:0 0 8px"><strong>どこに出るか</strong>：カレンダー画面のエントリ・日別詳細・閲覧用URL・通知付き閲覧（ViewPWA）、そして<strong>カレンダー出力（PNG／PDF）</strong>です。カレンダー出力では<strong>コメントの一行上</strong>に、青字で次のように入ります。</p>
+      <table class="csm-opt-table">
+        <thead><tr><th style="width:180px">登録内容</th><th>表示</th></tr></thead>
+        <tbody>
+          <tr><td>通常の勤務</td><td>勤怠：10:00~19:00、出勤：9:40</td></tr>
+          <tr><td>中抜け休憩あり</td><td>勤怠：9:00~13:00 / 14:00~19:00、出勤：8:40</td></tr>
+          <tr><td>出勤時間だけON</td><td>出勤：9:40</td></tr>
+        </tbody>
+      </table>
+      <div class="csm-tip" style="margin-top:10px">💡 現場シフトでONにすると、その人の<strong>個人シフト帳にも自動で反映</strong>されます（自動同期でコピーされる行に引き継がれます）。逆に個人シフトでONにした分も、同じ現場の現場シフト帳側に出ます。</div>
+      <div class="csm-tip" style="margin-top:10px">💡 チェックを入れても何も出ないときは、その現場に勤怠時間・出勤時間が登録されていません。エントリ詳細のポップアップに「登録されていません」と出るので、現場リストPLUS 側で登録してください。個人シフトで現場名を手入力しただけ（候補から選んでいない）の行も、現場と紐付いていないため出ません。</div>
     </div>
 
     <div class="csm-card">
@@ -671,7 +724,7 @@
       </ul>
       <figure class="csm-shot">
         <img src="{{ url_for('static', filename='cloudshift/manual/05_bulk_edit.png') }}" alt="範囲一括編集の画面" loading="lazy">
-        <figcaption>範囲一括編集。対象範囲と操作を選び、入力名・オプション・第二オプション（代務／研修）・枝番号・コメントを設定して「適用」すると、対象の全日にまとめて反映されます。</figcaption>
+        <figcaption>範囲一括編集。対象範囲と操作を選び、入力名・オプション・第二オプション（代務／研修）・枝番号・勤怠／出勤の表示・コメントを設定して「適用」すると、対象の全日にまとめて反映されます。</figcaption>
       </figure>
     </div>
 
@@ -1290,6 +1343,30 @@
         <span class="csm-acc-arrow">▼</span>
       </button>
       <div class="csm-acc-body">ShifterSync はシフト業務全体の入口（ハブ）で、CSV でやりとりする「作成・編集・重複チェック・カレンダー出力」と、クラウド版の CloudShift をまとめています。CloudShift はその中核機能で、シフト帳をクラウドに保存し、共有URL での本人入力・自動作成・出力・有休連携などを 1 か所で行えます。継続的に共有・運用するなら CloudShift、その場で 1 枚作って終わりなら CSV 版が手軽です。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">勤怠時間・出勤時間はどこで設定しますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">時間そのものは<strong>現場リストPLUS</strong>で現場ごとに登録します（親現場の編集画面。枝番号ごとに上書きもできます）。シフト側では「見せるかどうか」を決めるだけで、日付セルの追加欄・エントリ詳細・範囲一括編集にある「勤怠時間を表示」「出勤時間を表示」をONにします。現場リストPLUS で時間を直せば、既に入れてあるシフトの表示も自動で最新になります。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">中抜け休憩がある現場はどう表示されますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">現場リストPLUS で時間帯を 2 つ以上登録しておくと、「勤怠：9:00~13:00 / 14:00~19:00」のように区間を「 / 」でつないで表示します（最大 6 区間）。「勤怠：…、出勤：…」の区切りが読点なので、区間どうしは読点以外で区切っています。</div>
+    </div>
+
+    <div class="csm-acc-item">
+      <button class="csm-acc-trigger" onclick="toggleAcc(this)">
+        <span class="csm-acc-q">新しい月を追加すると、前月の内容はコピーされますか？</span>
+        <span class="csm-acc-arrow">▼</span>
+      </button>
+      <div class="csm-acc-body">いいえ。「◯年◯月 を追加します。よろしいですか？」の確認だけで、<strong>空の月</strong>ができます（個人・現場・大規模・要代務のすべて）。前月の内容を引き継ぎたいときは「範囲一括編集」の<strong>コピー</strong>で前月の日を指定するか、現場シフト・個人シフトなら<strong>テンプレート</strong>を反映してください。</div>
     </div>
 
     <div class="csm-acc-item">
